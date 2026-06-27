@@ -833,6 +833,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
     - 実績がある場合 → 実績 + 仕損（全て）を使用
     - 実績がない場合 → 計画数を使用
     - どちらもない場合 → 0
+    - 親参照自体がない場合 → None
 
     Args:
         backlog: LineBacklogインスタンス
@@ -848,13 +849,17 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
     ).select_related('bom__parent_product')
 
     if not parent_bom_items.exists():
-        return Decimal('0')
+        return None
 
     from django.db.models import Sum
 
     fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
-    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
+    effective_parent_items = list(_filter_parent_bom_items_by_routing(backlog, parent_bom_items))
+    if not effective_parent_items:
+        return None
+
+    for bom_item in effective_parent_items:
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -1600,11 +1605,8 @@ def recalculate_planned_stock_qty(
             if forced_parent_shipment_mode == 'PARENT_PLAN':
                 planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
             elif plan_date < business_today:
-                # ライン最終品でも過去日は実績優先で整合を取る。
-                # 親参照がない（BOM未設定）場合のみ需要(order_qty)にフォールバック。
+                # ライン最終品でも過去日は親の実績優先で整合を取る。
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
-                if not planned_shipment:
-                    planned_shipment = Decimal(str(order_total))
             else:
                 planned_shipment = Decimal(str(order_total))
         else:

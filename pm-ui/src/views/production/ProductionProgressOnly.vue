@@ -54,7 +54,7 @@
         </button>
         <button
           @click="openDeepRecalcDialog"
-          :disabled="loading || recalculating || !hasFilter || !groups.length"
+          :disabled="loading || recalculating || !hasFilter || !groups.length || !canEditProgress"
           class="btn-deep-recalc"
         >
           過去から再計算
@@ -102,6 +102,11 @@
               <span class="info-label">品番</span>
               <span class="info-value">{{ g.product_code || "-" }}</span>
               <button @click="openWhereUsed(g)" class="expand-btn where-used-btn">▶ 逆展開</button>
+              <button
+                @click="deleteProgressGroup(g)"
+                class="expand-btn delete-group-btn"
+                :disabled="loading || recalculating || !canDeleteGroup"
+              >削除</button>
             </div>
             <div class="info-row">
               <span class="info-label">ライン</span>
@@ -223,6 +228,7 @@
 import { computed, ref, onMounted, onBeforeUnmount, onUpdated, nextTick } from "vue";
 import api from "@/api/client";
 import { authState } from "@/auth";
+import { hasPermission } from "@/router";
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import {
@@ -249,6 +255,17 @@ const props = defineProps({
     default: "production",
   },
 });
+
+const canEditProgress = computed(() => {
+  const user = authState.user;
+  if (!user) return false;
+  if (props.mode === "purchase") {
+    return hasPermission(user, "purchase.progress", "edit");
+  }
+  return hasPermission(user, "production.progress", "edit");
+});
+
+const canDeleteGroup = computed(() => canEditProgress.value);
 
 const lineFilter = ref("");
 const processFilter = ref("");
@@ -630,6 +647,42 @@ const load = async () => {
   }
 };
 
+const deleteProgressGroup = async (group) => {
+  if (!canDeleteGroup.value) return;
+  if (!group?.line_id || !group?.process_id || !group?.product_id) {
+    alert("削除対象のキーが不足しています。");
+    return;
+  }
+  const start = columns.value[0];
+  const end = columns.value[columns.value.length - 1];
+  const lineLabel = formatLine(group);
+  const processLabel = group.process_display || `${group.process_code || "-"}${group.process_name ? ` / ${group.process_name}` : ""}`;
+  if (!window.confirm(
+    `表示期間の進度基礎データを削除します。\n` +
+    `ライン: ${lineLabel}\n` +
+    `工程: ${processLabel}\n` +
+    `品番: ${group.product_code || "-"}\n` +
+    `期間: ${start} ～ ${end}\n\n` +
+    `対象は LineBacklog(sequence_no=0) のみです。実行しますか？`
+  )) {
+    return;
+  }
+  try {
+    const res = await api.lineBacklogs.deleteProgressGroup({
+      line_id: group.line_id,
+      process_id: group.process_id,
+      product_id: group.product_id,
+      start_date: start,
+      end_date: end,
+    });
+    alert(`削除しました。${Number(res.data?.deleted || 0)}件`);
+    await load();
+  } catch (e) {
+    console.error("進度基礎データ削除エラー:", e);
+    alert(`削除に失敗しました: ${e.response?.data?.detail || e.message}`);
+  }
+};
+
 const getDisplayedLineIds = () => {
   const ids = new Set();
   groups.value.forEach((g) => {
@@ -741,10 +794,12 @@ const recalculateVisibleProducts = async () => {
 const showDeepRecalcDialog = ref(false);
 
 const openDeepRecalcDialog = () => {
+  if (!canEditProgress.value) return;
   showDeepRecalcDialog.value = true;
 };
 
 const confirmDeepRecalc = async () => {
+  if (!canEditProgress.value) return;
   showDeepRecalcDialog.value = false;
   recalculating.value = true;
   error.value = "";
@@ -1285,14 +1340,24 @@ const getCellClass = (group, date, rowKey) => {
   border-radius: 4px;
   cursor: pointer;
 }
-.expand-btn:hover {
+.expand-btn:hover:not(:disabled) {
   background: #2563eb;
+}
+.expand-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .where-used-btn {
   background: #17a2b8;
 }
-.where-used-btn:hover {
+.where-used-btn:hover:not(:disabled) {
   background: #138496;
+}
+.delete-group-btn {
+  background: #dc2626;
+}
+.delete-group-btn:hover:not(:disabled) {
+  background: #b91c1c;
 }
 .matrix-block {
   --fixed-left: 260px;

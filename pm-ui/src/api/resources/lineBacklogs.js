@@ -45,6 +45,9 @@ export const createLineBacklogsAPI = (client) => ({
   recalculateInventoryDeep(payload) {
     return client.post('/line-backlogs/recalculate_inventory_deep/', payload)
   },
+  deleteProgressGroup(payload) {
+    return client.post('/line-backlogs/delete-progress-group/', payload)
+  },
   recalculateInventoryForProducts(payload) {
     return client.post('/line-backlogs/recalculate_inventory_for_products/', payload)
   },

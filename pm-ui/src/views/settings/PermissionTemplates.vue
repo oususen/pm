@@ -14,33 +14,94 @@
         この画面を開く権限がありません。
       </div>
       <template v-else>
-      <div class="template-card">
-        <div class="template-header">
-          <h3 class="section-title">部署・役職 権限テンプレート</h3>
-        </div>
+      <div class="template-tabs" role="tablist" aria-label="権限テンプレート種別">
+        <button
+          type="button"
+          class="template-tab"
+          :class="{ active: activeTab === 'departmentPosition' }"
+          @click="activeTab = 'departmentPosition'"
+        >
+          部署・役職
+        </button>
+        <button
+          type="button"
+          class="template-tab"
+          :class="{ active: activeTab === 'department' }"
+          @click="activeTab = 'department'"
+        >
+          部署
+        </button>
+        <button
+          type="button"
+          class="template-tab"
+          :class="{ active: activeTab === 'position' }"
+          @click="activeTab = 'position'"
+        >
+          役職
+        </button>
+        <button
+          type="button"
+          class="template-tab"
+          :class="{ active: activeTab === 'userOverrides' }"
+          @click="openUserOverridesTab"
+        >
+          個別権限ユーザー一覧
+        </button>
+        <button
+          type="button"
+          class="template-tab"
+          :class="{ active: activeTab === 'configuredTemplates' }"
+          @click="openConfiguredTemplatesTab"
+        >
+          設定済みテンプレ一覧
+        </button>
+      </div>
 
-        <div class="template-controls">
-          <div class="template-select">
-            <label>部署選択</label>
-            <select v-model="selectedDepartmentId" @change="onDepartmentChange">
-              <option :value="null">選択してください</option>
-              <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
-                {{ dept.label }}
-              </option>
-            </select>
+      <div v-show="activeTab === 'departmentPosition'" class="template-card">
+        <div class="template-sticky-header">
+          <div class="template-header">
+            <h3 class="section-title">部署・役職 権限テンプレート</h3>
+            <div class="template-header-actions">
+              <div v-if="templateSuccess" class="save-message success">
+                {{ templateSuccess }}
+              </div>
+              <button
+                type="button"
+                class="btn"
+                @click="clearTemplatePermissions"
+                :disabled="templateSaving || !selectedPositionName || !canEditPage"
+              >
+                一括外す
+              </button>
+              <button type="button" class="btn primary" @click="saveTemplate" :disabled="templateSaving || !canEditPage">
+                {{ templateSaving ? '保存中...' : '保存' }}
+              </button>
+            </div>
           </div>
-          <div class="template-select">
-            <label>役割選択</label>
-            <select
-              v-model="selectedPositionName"
-              :disabled="!selectedDepartmentId"
-              @change="loadTemplate"
-            >
-              <option value="">選択してください</option>
-              <option v-for="r in ROLE_CHOICES" :key="r.value" :value="r.value">
-                {{ r.label }}
-              </option>
-            </select>
+
+          <div class="template-controls">
+            <div class="template-select">
+              <label>部署選択</label>
+              <select v-model="selectedDepartmentId" @change="onDepartmentChange">
+                <option :value="null">選択してください</option>
+                <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
+                  {{ dept.label }}
+                </option>
+              </select>
+            </div>
+            <div class="template-select">
+              <label>役割選択</label>
+              <select
+                v-model="selectedPositionName"
+                :disabled="!selectedDepartmentId"
+                @change="loadTemplate"
+              >
+                <option value="">選択してください</option>
+                <option v-for="r in ROLE_CHOICES" :key="r.value" :value="r.value">
+                  {{ r.label }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -50,69 +111,73 @@
 
         <div v-if="templateLoading" class="helper-text">読み込み中...</div>
 
-        <table v-else class="permission-table">
-          <thead>
-            <tr>
-              <th>機能</th>
-              <th>閲覧</th>
-              <th>編集</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="perm in templatePermissions" :key="perm.resource">
-              <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
-              <td>
-                <input
-                  type="checkbox"
-                  v-model="perm.can_view"
-                  @change="onPermissionChange(perm, 'can_view')"
-                  :disabled="!selectedPositionName || !canEditPage"
-                />
-              </td>
-              <td>
-                <input
-                  type="checkbox"
-                  v-model="perm.can_edit"
-                  @change="onPermissionChange(perm, 'can_edit')"
-                  :disabled="!selectedPositionName || !canEditPage"
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="form-actions">
-          <div v-if="templateSuccess" class="save-message success">
-            {{ templateSuccess }}
-          </div>
-          <button
-            type="button"
-            class="btn"
-            @click="clearTemplatePermissions"
-            :disabled="templateSaving || !selectedPositionName || !canEditPage"
-          >
-            一括外す
-          </button>
-          <button type="button" class="btn primary" @click="saveTemplate" :disabled="templateSaving || !canEditPage">
-            {{ templateSaving ? '保存中...' : '保存' }}
-          </button>
+        <div v-else class="permission-table-wrap">
+          <table class="permission-table">
+            <thead>
+              <tr>
+                <th>機能</th>
+                <th>閲覧</th>
+                <th>編集</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="perm in templatePermissions" :key="perm.resource">
+                <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    v-model="perm.can_view"
+                    @change="onPermissionChange(perm, 'can_view')"
+                    :disabled="!selectedPositionName || !canEditPage"
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    v-model="perm.can_edit"
+                    @change="onPermissionChange(perm, 'can_edit')"
+                    :disabled="!selectedPositionName || !canEditPage"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
       </div>
 
-      <div class="template-card">
-        <div class="template-header">
-          <h3 class="section-title">部署 権限テンプレート</h3>
-        </div>
+      <div v-show="activeTab === 'department'" class="template-card">
+        <div class="template-sticky-header">
+          <div class="template-header">
+            <h3 class="section-title">部署 権限テンプレート</h3>
+            <div class="template-header-actions">
+              <div v-if="departmentTemplateSuccess" class="save-message success">
+                {{ departmentTemplateSuccess }}
+              </div>
+              <button
+                type="button"
+                class="btn"
+                @click="clearDepartmentTemplatePermissions"
+                :disabled="departmentTemplateSaving || !selectedDepartmentOnlyId || !canEditPage"
+              >
+                一括外す
+              </button>
+              <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving || !canEditPage">
+                {{ departmentTemplateSaving ? '保存中...' : '保存' }}
+              </button>
+            </div>
+          </div>
 
-        <div class="template-controls">
-          <div class="template-select">
-            <label>部署選択</label>
-            <select v-model="selectedDepartmentOnlyId" @change="loadDepartmentTemplate">
-              <option :value="null">選択してください</option>
-              <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
-                {{ dept.label }}
-              </option>
-            </select>
+          <div class="template-controls">
+            <div class="template-select">
+              <label>部署選択</label>
+              <select v-model="selectedDepartmentOnlyId" @change="loadDepartmentTemplate">
+                <option :value="null">選択してください</option>
+                <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
+                  {{ dept.label }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -122,69 +187,73 @@
 
         <div v-if="departmentTemplateLoading" class="helper-text">読み込み中...</div>
 
-        <table v-else class="permission-table">
-          <thead>
-            <tr>
-              <th>機能</th>
-              <th>閲覧</th>
-              <th>編集</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="perm in departmentTemplatePermissions" :key="perm.resource">
-              <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
-              <td>
-                <input
-                  type="checkbox"
-                  v-model="perm.can_view"
-                  @change="onDepartmentPermissionChange(perm, 'can_view')"
-                  :disabled="!selectedDepartmentOnlyId || !canEditPage"
-                />
-              </td>
-              <td>
-                <input
-                  type="checkbox"
-                  v-model="perm.can_edit"
-                  @change="onDepartmentPermissionChange(perm, 'can_edit')"
-                  :disabled="!selectedDepartmentOnlyId || !canEditPage"
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="form-actions">
-          <div v-if="departmentTemplateSuccess" class="save-message success">
-            {{ departmentTemplateSuccess }}
-          </div>
-          <button
-            type="button"
-            class="btn"
-            @click="clearDepartmentTemplatePermissions"
-            :disabled="departmentTemplateSaving || !selectedDepartmentOnlyId || !canEditPage"
-          >
-            一括外す
-          </button>
-          <button type="button" class="btn primary" @click="saveDepartmentTemplate" :disabled="departmentTemplateSaving || !canEditPage">
-            {{ departmentTemplateSaving ? '保存中...' : '保存' }}
-          </button>
+        <div v-else class="permission-table-wrap">
+          <table class="permission-table">
+            <thead>
+              <tr>
+                <th>機能</th>
+                <th>閲覧</th>
+                <th>編集</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="perm in departmentTemplatePermissions" :key="perm.resource">
+                <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    v-model="perm.can_view"
+                    @change="onDepartmentPermissionChange(perm, 'can_view')"
+                    :disabled="!selectedDepartmentOnlyId || !canEditPage"
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    v-model="perm.can_edit"
+                    @change="onDepartmentPermissionChange(perm, 'can_edit')"
+                    :disabled="!selectedDepartmentOnlyId || !canEditPage"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
       </div>
 
-      <div class="template-card">
-        <div class="template-header">
-          <h3 class="section-title">役職 権限テンプレート</h3>
-        </div>
+      <div v-show="activeTab === 'position'" class="template-card">
+        <div class="template-sticky-header">
+          <div class="template-header">
+            <h3 class="section-title">役職 権限テンプレート</h3>
+            <div class="template-header-actions">
+              <div v-if="positionTemplateSuccess" class="save-message success">
+                {{ positionTemplateSuccess }}
+              </div>
+              <button
+                type="button"
+                class="btn"
+                @click="clearPositionTemplatePermissions"
+                :disabled="positionTemplateSaving || !selectedPositionOnlyName || !canEditPage"
+              >
+                一括外す
+              </button>
+              <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving || !canEditPage">
+                {{ positionTemplateSaving ? '保存中...' : '保存' }}
+              </button>
+            </div>
+          </div>
 
-        <div class="template-controls">
-          <div class="template-select">
-            <label>役割選択</label>
-            <select v-model="selectedPositionOnlyName" @change="loadPositionTemplate">
-              <option value="">選択してください</option>
-              <option v-for="r in ROLE_CHOICES" :key="r.value" :value="r.value">
-                {{ r.label }}
-              </option>
-            </select>
+          <div class="template-controls">
+            <div class="template-select">
+              <label>役割選択</label>
+              <select v-model="selectedPositionOnlyName" @change="loadPositionTemplate">
+                <option value="">選択してください</option>
+                <option v-for="r in ROLE_CHOICES" :key="r.value" :value="r.value">
+                  {{ r.label }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -194,52 +263,150 @@
 
         <div v-if="positionTemplateLoading" class="helper-text">読み込み中...</div>
 
-        <table v-else class="permission-table">
-          <thead>
-            <tr>
-              <th>機能</th>
-              <th>閲覧</th>
-              <th>編集</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="perm in positionTemplatePermissions" :key="perm.resource">
-              <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
-              <td>
-                <input
-                  type="checkbox"
-                  v-model="perm.can_view"
-                  @change="onPositionPermissionChange(perm, 'can_view')"
-                  :disabled="!selectedPositionOnlyName || !canEditPage"
-                />
-              </td>
-              <td>
-                <input
-                  type="checkbox"
-                  v-model="perm.can_edit"
-                  @change="onPositionPermissionChange(perm, 'can_edit')"
-                  :disabled="!selectedPositionOnlyName || !canEditPage"
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="permission-table-wrap">
+          <table class="permission-table">
+            <thead>
+              <tr>
+                <th>機能</th>
+                <th>閲覧</th>
+                <th>編集</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="perm in positionTemplatePermissions" :key="perm.resource">
+                <td :class="getPermissionCellClass(perm)">{{ getPermissionLabel(perm.resource) }}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    v-model="perm.can_view"
+                    @change="onPositionPermissionChange(perm, 'can_view')"
+                    :disabled="!selectedPositionOnlyName || !canEditPage"
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    v-model="perm.can_edit"
+                    @change="onPositionPermissionChange(perm, 'can_edit')"
+                    :disabled="!selectedPositionOnlyName || !canEditPage"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-        <div class="form-actions">
-          <div v-if="positionTemplateSuccess" class="save-message success">
-            {{ positionTemplateSuccess }}
+      </div>
+
+      <div v-show="activeTab === 'userOverrides'" class="template-card">
+        <div class="template-sticky-header">
+          <div class="template-header">
+            <h3 class="section-title">個別権限ユーザー一覧</h3>
+            <div class="template-header-actions">
+              <button
+                type="button"
+                class="btn"
+                @click="loadUserOverrides"
+                :disabled="userOverrideLoading || !canViewPage"
+              >
+                更新
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            class="btn"
-            @click="clearPositionTemplatePermissions"
-            :disabled="positionTemplateSaving || !selectedPositionOnlyName || !canEditPage"
-          >
-            一括外す
-          </button>
-          <button type="button" class="btn primary" @click="savePositionTemplate" :disabled="positionTemplateSaving || !canEditPage">
-            {{ positionTemplateSaving ? '保存中...' : '保存' }}
-          </button>
+          <div class="helper-text">
+            テンプレートではなく、ユーザー個別権限を1件以上持つユーザーのみ表示します。
+          </div>
+        </div>
+
+        <div v-if="userOverrideError" class="alert alert-danger">
+          {{ userOverrideError }}
+        </div>
+
+        <div v-if="userOverrideLoading" class="helper-text">読み込み中...</div>
+
+        <div v-else-if="!userOverrideUsers.length" class="helper-text">
+          個別権限ユーザーはいません。
+        </div>
+
+        <div v-else class="permission-table-wrap">
+          <table class="permission-table">
+            <thead>
+              <tr>
+                <th>ユーザー名</th>
+                <th>氏名</th>
+                <th>事業部</th>
+                <th>役割</th>
+                <th>個別権限数</th>
+                <th>個別権限</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in userOverrideUsers" :key="user.id">
+                <td>{{ user.username || '-' }}</td>
+                <td>{{ getUserDisplayName(user) }}</td>
+                <td>{{ user.profile?.division_name || user.profile?.department_name || '-' }}</td>
+                <td>{{ getRoleLabel(user.profile?.role) }}</td>
+                <td>{{ user.permissions.length }}</td>
+                <td class="override-resources-cell">
+                  {{ formatUserPermissions(user.permissions) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div v-show="activeTab === 'configuredTemplates'" class="template-card">
+        <div class="template-sticky-header">
+          <div class="template-header">
+            <h3 class="section-title">設定済みテンプレ一覧</h3>
+            <div class="template-header-actions">
+              <button
+                type="button"
+                class="btn"
+                @click="loadConfiguredTemplates"
+                :disabled="configuredTemplateLoading || !canViewPage"
+              >
+                更新
+              </button>
+            </div>
+          </div>
+          <div class="helper-text">
+            権限が1件以上設定されている 部署・役職 / 部署 / 役職 のみ表示します。
+          </div>
+        </div>
+
+        <div v-if="configuredTemplateError" class="alert alert-danger">
+          {{ configuredTemplateError }}
+        </div>
+
+        <div v-if="configuredTemplateLoading" class="helper-text">読み込み中...</div>
+
+        <div v-else-if="!configuredTemplateRows.length" class="helper-text">
+          設定済みテンプレートはありません。
+        </div>
+
+        <div v-else class="permission-table-wrap">
+          <table class="permission-table">
+            <thead>
+              <tr>
+                <th>種別</th>
+                <th>部署</th>
+                <th>役割</th>
+                <th>設定件数</th>
+                <th>設定権限</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in configuredTemplateRows" :key="row.key">
+                <td>{{ row.typeLabel }}</td>
+                <td>{{ row.departmentName }}</td>
+                <td>{{ row.positionName }}</td>
+                <td>{{ row.permissionCount }}</td>
+                <td class="override-resources-cell">{{ row.permissionLabels }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
       </template>
@@ -263,6 +430,7 @@ const ROLE_CHOICES = [
 ]
 
 const loading = ref(false)
+const activeTab = ref('departmentPosition')
 const templateLoading = ref(false)
 const templateSaving = ref(false)
 const templateError = ref('')
@@ -279,6 +447,12 @@ const positionTemplateError = ref('')
 const positionTemplateSuccess = ref('')
 const selectedPositionOnlyName = ref('')
 const positionTemplatePermissions = ref([])
+const userOverrideLoading = ref(false)
+const userOverrideError = ref('')
+const userOverrideUsers = ref([])
+const configuredTemplateLoading = ref(false)
+const configuredTemplateError = ref('')
+const configuredTemplateRows = ref([])
 
 const departmentTemplateLoading = ref(false)
 const departmentTemplateSaving = ref(false)
@@ -396,6 +570,10 @@ const levelIndent = {
   unit: '　　　',
 }
 
+const roleLabelMap = Object.fromEntries(
+  ROLE_CHOICES.map((item) => [item.value, item.label])
+)
+
 const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
   if (!user || !resource) return false
@@ -448,6 +626,42 @@ const departmentOptions = computed(() => buildDepartmentTree(departments.value))
 const getPermissionLabel = (resource) => {
   const found = permissionResources.find((item) => item.value === resource)
   return found ? found.label : resource
+}
+
+const getRoleLabel = (role) => {
+  if (!role) return '-'
+  return roleLabelMap[role] || role
+}
+
+const getUserDisplayName = (user) => {
+  const fullName = `${user?.last_name || ''} ${user?.first_name || ''}`.trim()
+  return fullName || user?.username || '-'
+}
+
+const formatUserPermissions = (permissions) => {
+  if (!Array.isArray(permissions) || !permissions.length) return '-'
+  return permissions
+    .map((perm) => getPermissionLabel(perm.resource))
+    .join(' / ')
+}
+
+const normalizeList = (payload) => {
+  return Array.isArray(payload) ? payload : payload?.results || []
+}
+
+const getDepartmentNameById = (departmentId) => {
+  if (!departmentId) return '-'
+  const dept = departments.value.find((item) => String(item.id) === String(departmentId))
+  if (!dept) return String(departmentId)
+  return `${dept.name} (${levelLabels[dept.level] || dept.level})`
+}
+
+const formatPermissionLabels = (permissions) => {
+  if (!Array.isArray(permissions) || !permissions.length) return '-'
+  return permissions
+    .map((perm) => getPermissionLabel(perm.resource))
+    .sort((a, b) => a.localeCompare(b, 'ja'))
+    .join(' / ')
 }
 
 const getPermissionCellClass = (perm) => {
@@ -531,6 +745,118 @@ const loadDepartments = async () => {
   const response = await api.accounts.getDepartments({ page_size: 20000 })
   const data = response.data
   departments.value = Array.isArray(data) ? data : data.results || []
+}
+
+const loadUserOverrides = async () => {
+  if (!canViewPage.value) return
+  userOverrideLoading.value = true
+  userOverrideError.value = ''
+  try {
+    const response = await api.accounts.getUsers({ page_size: 500 })
+    const users = normalizeList(response.data || [])
+    userOverrideUsers.value = users
+      .filter((user) => Array.isArray(user.permissions) && user.permissions.length > 0)
+      .sort((a, b) => {
+        const aName = getUserDisplayName(a)
+        const bName = getUserDisplayName(b)
+        return aName.localeCompare(bName, 'ja')
+      })
+  } catch (error) {
+    userOverrideError.value =
+      error?.response?.data?.detail || '個別権限ユーザー一覧の取得に失敗しました。'
+  } finally {
+    userOverrideLoading.value = false
+  }
+}
+
+const loadConfiguredTemplates = async () => {
+  if (!canViewPage.value) return
+  configuredTemplateLoading.value = true
+  configuredTemplateError.value = ''
+  try {
+    const [departmentResponse, positionResponse, departmentPositionResponse] = await Promise.all([
+      api.accounts.getDepartmentPermissions({ page_size: 5000 }),
+      api.accounts.getPositionPermissions({ page_size: 5000 }),
+      api.accounts.getDepartmentPositionPermissions({ page_size: 5000 }),
+    ])
+
+    const departmentRows = normalizeList(departmentResponse.data || [])
+    const positionRows = normalizeList(positionResponse.data || [])
+    const departmentPositionRows = normalizeList(departmentPositionResponse.data || [])
+
+    const grouped = []
+
+    const departmentMap = new Map()
+    departmentRows.forEach((perm) => {
+      const key = `department:${perm.department}`
+      if (!departmentMap.has(key)) {
+        departmentMap.set(key, [])
+      }
+      departmentMap.get(key).push(perm)
+    })
+    departmentMap.forEach((permissions, key) => {
+      grouped.push({
+        key,
+        typeLabel: '部署',
+        departmentName: getDepartmentNameById(permissions[0]?.department),
+        positionName: '-',
+        permissionCount: permissions.length,
+        permissionLabels: formatPermissionLabels(permissions),
+      })
+    })
+
+    const positionMap = new Map()
+    positionRows.forEach((perm) => {
+      const key = `position:${perm.position_name}`
+      if (!positionMap.has(key)) {
+        positionMap.set(key, [])
+      }
+      positionMap.get(key).push(perm)
+    })
+    positionMap.forEach((permissions, key) => {
+      grouped.push({
+        key,
+        typeLabel: '役職',
+        departmentName: '-',
+        positionName: getRoleLabel(permissions[0]?.position_name),
+        permissionCount: permissions.length,
+        permissionLabels: formatPermissionLabels(permissions),
+      })
+    })
+
+    const departmentPositionMap = new Map()
+    departmentPositionRows.forEach((perm) => {
+      const key = `departmentPosition:${perm.department}:${perm.position_name}`
+      if (!departmentPositionMap.has(key)) {
+        departmentPositionMap.set(key, [])
+      }
+      departmentPositionMap.get(key).push(perm)
+    })
+    departmentPositionMap.forEach((permissions, key) => {
+      grouped.push({
+        key,
+        typeLabel: '部署・役職',
+        departmentName: getDepartmentNameById(permissions[0]?.department),
+        positionName: getRoleLabel(permissions[0]?.position_name),
+        permissionCount: permissions.length,
+        permissionLabels: formatPermissionLabels(permissions),
+      })
+    })
+
+    configuredTemplateRows.value = grouped.sort((a, b) => {
+      const typeOrder = ['部署・役職', '部署', '役職']
+      const typeDiff = typeOrder.indexOf(a.typeLabel) - typeOrder.indexOf(b.typeLabel)
+      if (typeDiff !== 0) return typeDiff
+      const deptDiff = (a.departmentName || '').localeCompare(b.departmentName || '', 'ja')
+      if (deptDiff !== 0) return deptDiff
+      return (a.positionName || '').localeCompare(b.positionName || '', 'ja')
+    })
+  } catch (error) {
+    configuredTemplateError.value =
+      error?.response?.data?.detail || '設定済みテンプレ一覧の取得に失敗しました。'
+  } finally {
+    configuredTemplateLoading.value = false
+  }
 }
 
 const loadDepartmentTemplate = async () => {
@@ -736,8 +1062,28 @@ const refreshAll = async () => {
     await loadDepartments()
     await loadTemplate()
     await loadPositionTemplate()
+    if (activeTab.value === 'userOverrides') {
+      await loadUserOverrides()
+    }
+    if (activeTab.value === 'configuredTemplates') {
+      await loadConfiguredTemplates()
+    }
   } finally {
     loading.value = false
+  }
+}
+
+const openUserOverridesTab = async () => {
+  activeTab.value = 'userOverrides'
+  if (!userOverrideUsers.value.length && !userOverrideLoading.value) {
+    await loadUserOverrides()
+  }
+}
+
+const openConfiguredTemplatesTab = async () => {
+  activeTab.value = 'configuredTemplates'
+  if (!configuredTemplateRows.value.length && !configuredTemplateLoading.value) {
+    await loadConfiguredTemplates()
   }
 }
 
@@ -775,6 +1121,34 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+:deep(.page-content) {
+  overflow: visible;
+}
+
+.template-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.template-tab {
+  border: 1px solid #9fb4da;
+  background: #eef3ff;
+  color: #27406f;
+  padding: 6px 14px;
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.template-tab.active {
+  background: #2f6fed;
+  border-color: #2f6fed;
+  color: #fff;
+}
+
 .template-card {
   border: 1px solid #e0e0e0;
   border-radius: 6px;
@@ -782,11 +1156,34 @@ onMounted(async () => {
   background: #fff;
 }
 
+.template-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: -12px -12px 12px;
+  padding: 12px 12px 10px;
+  background: #fff;
+  border-bottom: 1px solid #dfe5ef;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+.permission-table-wrap {
+  overflow-x: auto;
+}
+
 .template-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.template-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -857,18 +1254,11 @@ onMounted(async () => {
   font-weight: 600;
 }
 
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
 .save-message {
   font-size: 12px;
   padding: 4px 8px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
 .save-message.success {

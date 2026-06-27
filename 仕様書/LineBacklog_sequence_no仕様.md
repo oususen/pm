@@ -69,6 +69,10 @@
   - 常に `get_or_create` または `update_or_create` で既存レコードを更新または新規作成
 
 - **削除タイミング**: **削除禁止** - データ整合性維持のため常に保持
+- **例外**:
+  - 誤ったルーティング作成や誤展開により不要な基礎データ行が作成された場合に限り、保守用API `POST /api/line-backlogs/delete-progress-group/` で削除を許可する。
+  - 対象は `line_id + process_id + product_id + 表示期間` で一致する `sequence_no=0` 行のみ。
+  - 想定用途は「進度のみ」画面での誤展開データ除去であり、通常運用の計画削除・需要再計算では使用しない。
 
 #### 2. sequence_no = 1（購買計画レコード）
 
@@ -295,6 +299,7 @@ WHERE line_id = 11
 | 2026-02-08 | 1.2 | sequence_no を NOT NULL/デフォルト0とする運用を明記。0は基礎行専用・削除禁止、計画は1以上を使用 | ChatGPT |
 | 2026-02-21 | 1.3 | 生産計画と購買計画での `sequence_no=0` 運用差を明記。`pickup_purchase` が `plan_qty` を更新しないことを追記 | Codex |
 | 2026-03-08 | 1.4 | 購買計画を seq=1 固定に変更。seq=0 の plan_qty 運用を廃止。生産計画の sequence_no は人間採番であることを明記 | Claude Sonnet 4.6 |
+| 2026-06-27 | 1.5 | 誤展開した基礎データ行を進度のみ画面から保守削除できる例外運用（`delete-progress-group`）を追記 | Codex |
 
 ## 関連ドキュメント
 
