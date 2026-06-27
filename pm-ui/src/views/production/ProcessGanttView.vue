@@ -236,6 +236,8 @@ const props = defineProps({
   presetBaseDate: { type: String, default: '' },
   presetStartDate: { type: String, default: '' },
   presetEndDate: { type: String, default: '' },
+  filterProcessId: { type: [String, Number], default: '' },
+  autoGenerateIfEmpty: { type: Boolean, default: true },
   showAddAnchors: { type: Boolean, default: true },
   hideEmptyRows: { type: Boolean, default: false },
 })
@@ -569,18 +571,23 @@ const hasBarInSelectedDisplayRange = (bar) => {
 }
 
 const renderedProcessGantt = computed(() =>
-  processGanttData.value.map((proc) => ({
-    ...proc,
-    items: proc.items
-      .map((item) => ({
-        ...item,
-        displayBars: mergeConsecutive.value ? mergeBars(item.bars) : item.bars,
-      }))
-      .filter((item) =>
-        !props.hideEmptyRows ||
-        (Array.isArray(item.displayBars) && item.displayBars.some((bar) => hasBarInSelectedDisplayRange(bar)))
-      ),
-  }))
+  processGanttData.value
+    .filter((proc) => {
+      if (!props.filterProcessId) return true
+      return String(proc.process_id) === String(props.filterProcessId)
+    })
+    .map((proc) => ({
+      ...proc,
+      items: proc.items
+        .map((item) => ({
+          ...item,
+          displayBars: mergeConsecutive.value ? mergeBars(item.bars) : item.bars,
+        }))
+        .filter((item) =>
+          !props.hideEmptyRows ||
+          (Array.isArray(item.displayBars) && item.displayBars.some((bar) => hasBarInSelectedDisplayRange(bar)))
+        ),
+    }))
 )
 
 const applyDailySeqMarkers = (procEntry) => {
@@ -1054,7 +1061,7 @@ const loadData = async () => {
     })
     const rawPlans = ganttRes.data?.results || ganttRes.data || []
     logDebug('loadData response', { count: rawPlans.length, sample: rawPlans[0] })
-    if (!rawPlans.length && props.embedded) {
+    if (!rawPlans.length && props.embedded && props.autoGenerateIfEmpty) {
       logDebug('loadData no data, auto-generate')
       await generateSchedule(false)
       return

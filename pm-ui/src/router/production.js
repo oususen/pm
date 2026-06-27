@@ -261,6 +261,12 @@ const production = [
     meta: { pageTitle: "工程ガント", manualPath: "README.md" },
   },
   {
+    path: "/production/sub-process-plan",
+    name: "SubProcessPlanInput",
+    component: () => import("@/views/production/SubProcessPlanInput.vue"),
+    meta: { pageTitle: "サブ工程計画", manualPath: "README.md", resource: "production.plan_input", permission: "edit" },
+  },
+  {
     path: "/production/scrap-history",
     name: "ScrapHistory",
     component: () => import("@/views/production/ScrapHistory.vue"),

@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 COPRODUCT_CHILD_DISPLAY_EXCEPTION_PRODUCT_CODES = {'YD40002683'}
 COPRODUCT_CHILD_DISPLAY_EXCEPTION_PROCESS_CODES = {'4001'}
 
-TANK_LINE_CODE = 'L2200'
-TANK_COMP_PROCESS_CODE = '4053'
-TANK_HAKOGUMI_PROCESS_CODE = '4019'
+GANTT_EXCLUDED_PROCESS_RULES_KEY = 'production.gantt_excluded_process_rules'
 PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
 PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
 
@@ -75,6 +73,26 @@ def _load_gantt_start_time_by_line_process() -> Dict[Tuple[str, str], time]:
             continue
         result[(line_code, process_code)] = t
     return result
+
+def _load_gantt_excluded_process_codes_by_line() -> Dict[str, set]:
+    row = SystemSetting.objects.filter(key=GANTT_EXCLUDED_PROCESS_RULES_KEY).first()
+    if not row or not row.value:
+        return {}
+    try:
+        raw = json.loads(row.value)
+    except Exception:
+        return {}
+    if not isinstance(raw, list):
+        return {}
+    result: Dict[str, set] = {}
+    for item in raw:
+        line_code = str((item or {}).get('lineCode') or '').strip().upper()
+        process_code = str((item or {}).get('processCode') or '').strip().upper()
+        if not line_code or not process_code:
+            continue
+        result.setdefault(line_code, set()).add(process_code)
+    return result
+
 
 @dataclass
 class ProcessSpec:
@@ -895,9 +913,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         raise ValueError('line_id not found')
     is_l2201_line = str(getattr(line, 'line_code', '') or '').strip().upper() == 'L2201'
     line_code_upper = str(getattr(line, 'line_code', '') or '').strip().upper()
-    is_tank_line = line_code_upper == TANK_LINE_CODE
     prev_day_shift_qty_by_line_process = _load_prev_day_shift_qty_by_line_process()
     gantt_start_time_by_line_process = _load_gantt_start_time_by_line_process()
+    gantt_excluded_codes = _load_gantt_excluded_process_codes_by_line().get(line_code_upper, set())
 
     # 日別設定を読み込み
     from ..models_line_daily_schedule_setting import LineDailyScheduleSetting
@@ -1213,6 +1231,9 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             process_specs = _build_process_specs(steps, obj.plan_qty, obj.plan_date, product.id)
         process_specs.sort(key=lambda s: (s.process_number or 0, s.parallel_group or 1))
 
+        if gantt_excluded_codes:
+            process_specs = [s for s in process_specs if s.process_code not in gantt_excluded_codes]
+
         qty_label = str(obj.plan_qty).rstrip('0').rstrip('.')
         if '.' in qty_label:
             qty_label = qty_label.replace('.', 'p')
@@ -1410,32 +1431,26 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 current_cycle_time = entry['cycle_time_minutes']
 
                 process_key = (obj.plan_date, spec.process_id)
-                is_tank_special_proc = is_tank_line and spec.process_code in (TANK_COMP_PROCESS_CODE, TANK_HAKOGUMI_PROCESS_CODE)
                 configured_start_time = gantt_start_time_by_line_process.get(
                     (line_code_upper, str(spec.process_code or '').strip().upper())
                 )
                 prev_day_shift_qty = prev_day_shift_qty_by_line_process.get((line_code_upper, str(spec.process_code or '').strip().upper()), Decimal('0'))
                 prev_day_shift_first = prev_day_shift_qty > 0 and process_key not in previous_process_end_by_date
                 bw_effective_shift = prev_day_shift_qty if prev_day_shift_first else remaining_shift_by_process_date.get(process_key, Decimal('0'))
+                is_chain_schedule = prev_day_shift_qty > 0
 
-                if is_tank_special_proc:
-                    # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
-                    tank_bw_effective = effective_minutes
-                    configured_start_time = gantt_start_time_by_line_process.get(
-                        (line_code_upper, str(spec.process_code or '').strip().upper()),
-                        time(8, 0),
-                    )
+                if is_chain_schedule:
+                    chain_bw_effective = effective_minutes
                     if bw_effective_shift > 0:
                         bw_qty = max(entry['process_qty'] - bw_effective_shift, Decimal('0'))
                         bw_total = _calculate_total_minutes(spec, bw_qty)
-                        tank_bw_effective = bw_total / max(spec.parallel_count, 1)
+                        chain_bw_effective = bw_total / max(spec.parallel_count, 1)
                     if process_key in previous_process_end_by_date:
-                        # SEQ2+: チェーン開始
                         start_time = previous_process_end_by_date[process_key]
                     else:
-                        # SEQ1: ライン×工程の設定開始時刻（未設定時は8:00）
-                        start_time = datetime.combine(obj.plan_date, configured_start_time)
-                    end_time = calendar.add_working_minutes(start_time, tank_bw_effective)
+                        chain_start = configured_start_time or line_earliest_start.time()
+                        start_time = datetime.combine(obj.plan_date, chain_start)
+                    end_time = calendar.add_working_minutes(start_time, chain_bw_effective)
                 elif i == len(scheduled_specs) - 1:
                     # 最終工程: アンカー時刻に固定
                     start_time = anchor_dt
@@ -1458,8 +1473,8 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     )
                     end_time = calendar.add_working_minutes(start_time, effective_minutes)
 
-                # 前のsequenceの終了時刻があれば、それ以降から開始（タンク特例は上で処理済み）
-                if not is_tank_special_proc and process_key in previous_process_end_by_date:
+                # 前のsequenceの終了時刻があれば、それ以降から開始（チェーン方式は上で処理済み）
+                if not is_chain_schedule and process_key in previous_process_end_by_date:
                     prev_process_end = previous_process_end_by_date[process_key]
                     if start_time < prev_process_end:
                         start_time = prev_process_end
@@ -1468,7 +1483,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                             'gantt_plans: plan_id=%s i=%s adjusted by prev_process_end=%s new_start=%s',
                             plan_id, i, prev_process_end, start_time
                         )
-                elif not is_tank_special_proc and configured_start_time:
+                elif not is_chain_schedule and configured_start_time:
                     # 強制開始: ライン×工程の当日先頭SEQは設定開始時刻に固定
                     start_time = datetime.combine(obj.plan_date, configured_start_time)
                     end_time = calendar.add_working_minutes(start_time, effective_minutes)
@@ -1582,7 +1597,6 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 )
 
                 process_key = (obj.plan_date, spec.process_id)
-                is_tank_special_proc = is_tank_line and spec.process_code in (TANK_COMP_PROCESS_CODE, TANK_HAKOGUMI_PROCESS_CODE)
                 configured_start_time = gantt_start_time_by_line_process.get(
                     (line_code_upper, str(spec.process_code or '').strip().upper())
                 )
@@ -1597,31 +1611,15 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     effective_minutes = total_minutes / max(spec.parallel_count, 1)
                     remaining_shift_by_process_date[process_key] = effective_shift - tank_prev_qty
 
-                if is_tank_special_proc:
-                    # タンクライン特例: コンプ/箱組は8:00開始チェーン方式
-                    configured_start_time = gantt_start_time_by_line_process.get(
-                        (line_code_upper, str(spec.process_code or '').strip().upper()),
-                        time(8, 0),
+                if process_key in previous_process_end_by_date:
+                    prev_process_end = previous_process_end_by_date[process_key]
+                    current_start_time = max(current_start_time, prev_process_end)
+                    logger.info(
+                        'gantt_plans: plan_id=%s adjusted by prev_process_end=%s new_current_start_time=%s',
+                        plan_id, prev_process_end, current_start_time
                     )
-                    if process_key in previous_process_end_by_date:
-                        # SEQ2+: チェーン＋上流工程の順序も考慮
-                        tank_start = previous_process_end_by_date[process_key]
-                        current_start_time = max(current_start_time, tank_start)
-                    else:
-                        # SEQ1: ライン×工程の設定開始時刻（未設定時は8:00）
-                        current_start_time = datetime.combine(obj.plan_date, configured_start_time)
-                else:
-                    # 通常: 前のsequenceの同じ工程の終了時刻があれば、それ以降から開始
-                    if process_key in previous_process_end_by_date:
-                        prev_process_end = previous_process_end_by_date[process_key]
-                        current_start_time = max(current_start_time, prev_process_end)
-                        logger.info(
-                            'gantt_plans: plan_id=%s adjusted by prev_process_end=%s new_current_start_time=%s',
-                            plan_id, prev_process_end, current_start_time
-                        )
-                    elif configured_start_time:
-                        # 強制開始: ライン×工程の当日先頭SEQは設定開始時刻に固定
-                        current_start_time = datetime.combine(obj.plan_date, configured_start_time)
+                elif configured_start_time:
+                    current_start_time = datetime.combine(obj.plan_date, configured_start_time)
 
                 lanes = _ensure_resource_lanes(resource_schedules, spec.process_id, spec.parallel_count)
                 start_time, end_time, lane_idx = _reserve_process_slot_forward(

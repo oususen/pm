@@ -198,6 +198,15 @@ const tiles = computed(() => {
       resource: "production.plan_input",
     },
     {
+      to: "/production/sub-process-plan",
+      label: "単独計画",
+      icon: "🔧",
+      iconLabel: "単独",
+      category: "plan",
+      required: "edit",
+      resource: "production.plan_input",
+    },
+    {
       to: "/production/plan-change-history",
       label: t("productionMenu.tiles.planChangeHistory"),
       icon: "🧾",

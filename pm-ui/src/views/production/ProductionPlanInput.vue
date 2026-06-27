@@ -1003,6 +1003,38 @@
       </div>
 
       <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.ganttExcluded = !settingsCollapsed.ganttExcluded">
+          <span class="settings-section-arrow">{{ settingsCollapsed.ganttExcluded ? '▶' : '▼' }}</span>
+          ガント展開除外（ライン×工程）
+          <span class="settings-section-count">{{ ganttExcludedProcessRules.length }}件</span>
+        </div>
+        <div v-show="!settingsCollapsed.ganttExcluded" class="settings-section-body">
+          <div class="settings-rule-editor">
+            <select v-model="ganttExcludedProcessDraft.lineCode" @change="ganttExcludedProcessDraft.processCode = ''">
+              <option value="">ライン選択</option>
+              <option v-for="line in lines" :key="`gex-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <select v-model="ganttExcludedProcessDraft.processCode">
+              <option value="">工程選択</option>
+              <option v-for="proc in ganttExcludedProcessOptions" :key="`gex-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+            <button class="btn" type="button" @click="addGanttExcludedProcessRule">追加</button>
+          </div>
+          <div class="settings-list settings-rules">
+            <div v-for="(rule, idx) in ganttExcludedProcessRules" :key="`gex-rule-${rule.lineCode}-${rule.processCode}`" class="settings-rule-row">
+              <span>{{ rule.lineCode }} / {{ rule.processCode }} / ガント展開除外</span>
+              <button class="btn" type="button" @click="removeGanttExcludedProcessRule(idx)">削除</button>
+            </div>
+            <div v-if="!ganttExcludedProcessRules.length" class="settings-note">設定なし</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <div class="settings-section-header" @click="settingsCollapsed.calcSpecial = !settingsCollapsed.calcSpecial">
           <span class="settings-section-arrow">{{ settingsCollapsed.calcSpecial ? '▶' : '▼' }}</span>
           計算特例（ライン×工程×計算対象×設定）
@@ -1397,7 +1429,7 @@ const productOrderActiveCode = ref('')
 const productOrderCache = ref(new Map())
 const productColorCache = ref(new Map())
 const lineSettingsMessage = ref('')
-const settingsCollapsed = ref({ tabMgmt: true, lines: false, prevDayShift: true, ganttStartTime: true, calcSpecial: true })
+const settingsCollapsed = ref({ tabMgmt: true, lines: false, prevDayShift: true, ganttStartTime: true, ganttExcluded: true, calcSpecial: true })
 const prevDayShiftRules = ref([])
 const prevDayShiftDraft = ref({
   lineCode: '',
@@ -1410,6 +1442,11 @@ const ganttStartTimeDraft = ref({
   processCode: '',
   startTime: '08:00',
 })
+const ganttExcludedProcessRules = ref([])
+const ganttExcludedProcessDraft = ref({
+  lineCode: '',
+  processCode: '',
+})
 const plannedStockCalcRules = ref([])
 const plannedStockCalcDraft = ref({
   lineCode: '',
@@ -1418,6 +1455,13 @@ const plannedStockCalcDraft = ref({
   setting: 'PARENT_PLAN',
 })
 const processOptions = ref([])
+const ganttExcludedProcessOptions = computed(() => {
+  const selectedLineCode = ganttExcludedProcessDraft.value.lineCode
+  if (!selectedLineCode) return processOptions.value
+  const lineObj = lines.value.find((l) => normalizeLineCode(l.line_code) === selectedLineCode)
+  if (!lineObj) return processOptions.value
+  return processOptions.value.filter((proc) => proc.line_id != null && String(proc.line_id) === String(lineObj.id))
+})
 
 const lines = ref([])
 const products = ref([])
@@ -1576,6 +1620,21 @@ const normalizeGanttStartTimeRules = (rows) => {
   })
   return normalized
 }
+const normalizeGanttExcludedProcessRules = (rows) => {
+  const source = Array.isArray(rows) ? rows : []
+  const seen = new Set()
+  const normalized = []
+  source.forEach((row) => {
+    const lineCode = normalizeLineCode(row?.lineCode)
+    const processCode = normalizeProcessCode(row?.processCode)
+    if (!lineCode || !processCode) return
+    const key = `${lineCode}|${processCode}`
+    if (seen.has(key)) return
+    seen.add(key)
+    normalized.push({ lineCode, processCode })
+  })
+  return normalized
+}
 const normalizePlannedStockCalcRules = (rows) => {
   const source = Array.isArray(rows) ? rows : []
   const seen = new Set()
@@ -1719,6 +1778,7 @@ const loadLineCodesByTab = async () => {
     lineCodesByTab.value = merged
     prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
     ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
+    ganttExcludedProcessRules.value = normalizeGanttExcludedProcessRules(dbSpecialRules?.gantt_excluded_process_rules)
     plannedStockCalcRules.value = normalizePlannedStockCalcRules(dbSpecialRules?.planned_stock_calc_rules)
     saveLineCodesByTab()
   } catch (e) {
@@ -1734,6 +1794,7 @@ const syncLineCodesByTabToServer = async () => {
     special_rules: {
       prev_day_shift_rules: normalizePrevDayShiftRules(prevDayShiftRules.value),
       gantt_start_time_rules: normalizeGanttStartTimeRules(ganttStartTimeRules.value),
+      gantt_excluded_process_rules: normalizeGanttExcludedProcessRules(ganttExcludedProcessRules.value),
       planned_stock_calc_rules: normalizePlannedStockCalcRules(plannedStockCalcRules.value),
     },
   }
@@ -1829,6 +1890,43 @@ const removeGanttStartTimeRule = async (index) => {
   lineSettingsMessage.value = dbSyncFailed
     ? 'ガント開始時刻設定を削除しました。（DB同期は失敗しました）'
     : 'ガント開始時刻設定を削除しました。'
+}
+const addGanttExcludedProcessRule = async () => {
+  const rule = {
+    lineCode: normalizeLineCode(ganttExcludedProcessDraft.value.lineCode),
+    processCode: normalizeProcessCode(ganttExcludedProcessDraft.value.processCode),
+  }
+  const normalized = normalizeGanttExcludedProcessRules([rule])
+  if (!normalized.length) {
+    alert('ライン・工程を正しく入力してください。')
+    return
+  }
+  ganttExcludedProcessRules.value = normalizeGanttExcludedProcessRules([...ganttExcludedProcessRules.value, ...normalized])
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('ガント展開除外設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? 'ガント展開除外設定を追加しました。（DB同期は失敗しました）'
+    : 'ガント展開除外設定を追加しました。'
+}
+const removeGanttExcludedProcessRule = async (index) => {
+  ganttExcludedProcessRules.value = ganttExcludedProcessRules.value.filter((_, i) => i !== index)
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('ガント展開除外設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? 'ガント展開除外設定を削除しました。（DB同期は失敗しました）'
+    : 'ガント展開除外設定を削除しました。'
 }
 const addPlannedStockCalcRule = async () => {
   const rule = {
@@ -3447,6 +3545,7 @@ const fetchProcessOptions = async () => {
       id: proc.id,
       process_code: String(proc.process_code || '').trim(),
       process_name: String(proc.process_name || '').trim(),
+      line_id: proc.line ?? null,
     }))
     .filter((proc) => proc.process_code)
     .sort((a, b) => a.process_code.localeCompare(b.process_code))

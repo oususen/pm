@@ -901,6 +901,57 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(items, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['post'], url_path='delete-progress-group')
+    def delete_progress_group(self, request):
+        """
+        進度のみ画面から、表示期間内の基礎データ行(sequence_no=0)を
+        ライン・工程・品番単位で削除する。
+        """
+        line_id = request.data.get('line_id')
+        process_id = request.data.get('process_id')
+        product_id = request.data.get('product_id')
+        start_date_raw = request.data.get('start_date')
+        end_date_raw = request.data.get('end_date')
+
+        if not line_id or not process_id or not product_id:
+            return Response({'detail': 'line_id, process_id, product_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date_raw or not end_date_raw:
+            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            line_id = int(line_id)
+            process_id = int(process_id)
+            product_id = int(product_id)
+            start_date = datetime.strptime(str(start_date_raw), '%Y-%m-%d').date()
+            end_date = datetime.strptime(str(end_date_raw), '%Y-%m-%d').date()
+        except Exception:
+            return Response({'detail': 'invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if start_date > end_date:
+            return Response({'detail': 'start_date must be <= end_date'}, status=status.HTTP_400_BAD_REQUEST)
+
+        target_qs = LineBacklog.objects.filter(
+            line_id=line_id,
+            process_id=process_id,
+            product_id=product_id,
+            plan_date__gte=start_date,
+            plan_date__lte=end_date,
+            sequence_no=0,
+        )
+        preview_rows = list(target_qs.values('id', 'plan_date', 'line_id', 'process_id', 'product_id'))
+        deleted_result = target_qs.delete()
+        deleted_count = deleted_result[0] if deleted_result else 0
+
+        return Response({
+            'deleted': deleted_count,
+            'line_id': line_id,
+            'process_id': process_id,
+            'product_id': product_id,
+            'start_date': str(start_date),
+            'end_date': str(end_date),
+            'sample_rows': preview_rows[:20],
+        })
+
     @action(detail=False, methods=['post'], url_path='seed_progress_backlogs_from_demand')
     def seed_progress_backlogs_from_demand(self, request):
         """
@@ -1351,7 +1402,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         gantt_usage_cache = {}
         downstream_backlog_cache = {}
-        final_target_candidate_cache = {}
 
         def build_line_start_map(line_id, product_ids):
             key = (
@@ -1439,59 +1489,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id', 'sequence_no'))
             downstream_backlog_cache[cache_key] = rows
             return rows
-
-        def resolve_routing_final_target_ids(routing_final_product):
-            """
-            後ラインのルーティング最終品を基点に、当該期間で有効なBOMを辿って
-            ライン最終品（例: 6842K）を需要参照候補として取得する。
-            """
-            if not routing_final_product:
-                return []
-            cache_key = routing_final_product.id
-            cached = final_target_candidate_cache.get(cache_key)
-            if cached is not None:
-                return cached
-
-            reference_date = end_dt or start_dt or datetime.today().date()
-            candidates = [routing_final_product.id]
-            visited = {routing_final_product.id}
-            frontier = [routing_final_product.id]
-
-            while frontier:
-                parent_ids = list(frontier)
-                frontier = []
-                bom_qs = (
-                    BOM.objects.filter(
-                        parent_product_id__in=parent_ids,
-                        is_active=True,
-                        is_coproduct=False,
-                        valid_from__lte=reference_date,
-                    )
-                    .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=reference_date))
-                    .prefetch_related('items__child_product')
-                )
-                for bom in bom_qs:
-                    for item in bom.items.all():
-                        child_id = item.child_product_id
-                        if not child_id or child_id in visited:
-                            continue
-                        visited.add(child_id)
-                        child_product = getattr(item, 'child_product', None)
-                        if child_product and child_product.is_line_final_product:
-                            # ライン最終品まで到達したら、それ以上は辿らない
-                            candidates.append(child_id)
-                            continue
-                        frontier.append(child_id)
-
-            deduped = []
-            seen = set()
-            for candidate_id in candidates:
-                if candidate_id in seen:
-                    continue
-                seen.add(candidate_id)
-                deduped.append(candidate_id)
-            final_target_candidate_cache[cache_key] = deduped
-            return deduped
 
         def sort_sequence_value(value):
             try:
@@ -1697,20 +1694,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 # ステップ3: 親製品を出力するライン（後工程）をRoutingStepから特定（キャッシュから）
                 downstream_steps = downstream_steps_by_product.get(parent_product.id, [])
-                line_final_ids_by_line = defaultdict(set)
-                for candidate_step in downstream_steps:
-                    downstream_line_id = candidate_step.line_id
-                    if not downstream_line_id:
-                        continue
-                    routing_product = getattr(getattr(candidate_step, 'routing', None), 'product', None)
-                    if not routing_product or not routing_product.is_line_final_product:
-                        continue
-                    if routing_product.id == parent_product.id:
-                        continue
-                    for candidate_id in resolve_routing_final_target_ids(routing_product):
-                        if candidate_id != parent_product.id:
-                            line_final_ids_by_line[downstream_line_id].add(candidate_id)
-
                 # 同一(line, process, output_product, routing)が完全に重複している場合だけスキップ
                 seen_steps = set()
                 processed_line_keys = set()
@@ -1731,50 +1714,26 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     # リードタイム（日）を考慮：現ラインのRoutingStep > Line > BOM明細 の順で優先
                     lt_days = resolve_lead_time_days(current_output_product, bom_item)
 
-                    target_ids = [parent_product.id]
-                    target_ids.extend(sorted(line_final_ids_by_line.get(downstream_line_id, set())))
-
-                    # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品/ライン最終品の計画を使用
+                    # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品の計画を使用
                     parent_start_map, parent_plan_ids = build_line_start_map(downstream_line_id, [parent_product.id])
-                    final_target_ids = [pid for pid in target_ids if pid != parent_product.id]
-                    final_start_map = {}
-                    final_plan_ids = set()
-                    if final_target_ids:
-                        final_start_map, final_plan_ids = build_line_start_map(downstream_line_id, final_target_ids)
-                    line_start_map = {}
-                    for plan_date in set(parent_start_map) | set(final_start_map):
-                        qty = parent_start_map.get(plan_date)
-                        if qty is None or qty <= 0:
-                            qty = final_start_map.get(plan_date, Decimal('0'))
-                        if qty:
-                            line_start_map[plan_date] = qty
-                    gantt_plan_ids = set(parent_plan_ids) | set(final_plan_ids)
-                    backlog_rows = get_downstream_backlog_rows(downstream_line_id, target_ids)
+                    line_start_map = {
+                        plan_date: qty
+                        for plan_date, qty in parent_start_map.items()
+                        if qty
+                    }
+                    gantt_plan_ids = set(parent_plan_ids)
+                    backlog_rows = get_downstream_backlog_rows(downstream_line_id, [parent_product.id])
 
                     # ステップ5: 後工程の計画数 × BOM個数 = 現在ラインの必要数
                     total_qty_per = qty_per
 
                     if _is_floor_shipping_delivery_line(getattr(d_step, 'line', None)):
                         selected_rows_by_date = {}
-                        if len(target_ids) > 1:
-                            parent_rows = {}
-                            final_rows = {}
-                            for backlog_product_id, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
-                                qty = Decimal(str(plan_qty or 0))
-                                if qty == 0:
-                                    continue
-                                target_map = parent_rows if backlog_product_id == parent_product.id else final_rows
-                                target_map.setdefault(plan_date, []).append((qty, sequence_no))
-                            for plan_date in set(parent_rows) | set(final_rows):
-                                preferred_rows = parent_rows.get(plan_date) or final_rows.get(plan_date, [])
-                                if preferred_rows:
-                                    selected_rows_by_date[plan_date] = list(preferred_rows)
-                        else:
-                            for _, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
-                                qty = Decimal(str(plan_qty or 0))
-                                if qty == 0:
-                                    continue
-                                selected_rows_by_date.setdefault(plan_date, []).append((qty, sequence_no))
+                        for _, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
+                            qty = Decimal(str(plan_qty or 0))
+                            if qty == 0:
+                                continue
+                            selected_rows_by_date.setdefault(plan_date, []).append((qty, sequence_no))
 
                         for plan_date, lots in selected_rows_by_date.items():
                             ordered_lots = sorted(lots, key=lambda item: sort_sequence_value(item[1]))
@@ -1846,25 +1805,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             return truck_offset_cache[truck_id]
 
                         kubota_rows_by_date = defaultdict(list)
-                        if len(target_ids) > 1:
-                            parent_rows = {}
-                            final_rows = {}
-                            for backlog_product_id, plan_date, plan_qty, backlog_plan_id, _seq in backlog_rows:
-                                qty = Decimal(str(plan_qty or 0))
-                                if qty == 0:
-                                    continue
-                                target_map = parent_rows if backlog_product_id == parent_product.id else final_rows
-                                target_map.setdefault(plan_date, []).append((qty, backlog_plan_id))
-                            for plan_date in set(parent_rows) | set(final_rows):
-                                preferred = parent_rows.get(plan_date) or final_rows.get(plan_date, [])
-                                if preferred:
-                                    kubota_rows_by_date[plan_date] = list(preferred)
-                        else:
-                            for _, plan_date, plan_qty, backlog_plan_id, _seq in backlog_rows:
-                                qty = Decimal(str(plan_qty or 0))
-                                if qty == 0:
-                                    continue
-                                kubota_rows_by_date[plan_date].append((qty, backlog_plan_id))
+                        for _, plan_date, plan_qty, backlog_plan_id, _seq in backlog_rows:
+                            qty = Decimal(str(plan_qty or 0))
+                            if qty == 0:
+                                continue
+                            kubota_rows_by_date[plan_date].append((qty, backlog_plan_id))
 
                         for plan_date, lots in kubota_rows_by_date.items():
                             for qty, backlog_plan_id in lots:
@@ -1885,33 +1830,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         continue
 
                     fallback_map = {}
-                    if len(target_ids) > 1:
-                        parent_map = {}
-                        final_map = {}
-                        for backlog_product_id, plan_date, plan_qty, backlog_plan_id, _sequence_no in backlog_rows:
-                            qty = Decimal(str(plan_qty or 0))
-                            if qty == 0:
-                                continue
-                            if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
-                                continue
-                            if backlog_product_id == parent_product.id:
-                                parent_map[plan_date] = parent_map.get(plan_date, Decimal('0')) + qty
-                            else:
-                                final_map[plan_date] = final_map.get(plan_date, Decimal('0')) + qty
-                        for plan_date in set(parent_map) | set(final_map):
-                            qty = parent_map.get(plan_date)
-                            if qty is None or qty <= 0:
-                                qty = final_map.get(plan_date, Decimal('0'))
-                            if qty:
-                                fallback_map[plan_date] = qty
-                    else:
-                        for _, plan_date, plan_qty, backlog_plan_id, _sequence_no in backlog_rows:
-                            qty = Decimal(str(plan_qty or 0))
-                            if qty == 0:
-                                continue
-                            if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
-                                continue
-                            fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
+                    for _, plan_date, plan_qty, backlog_plan_id, _sequence_no in backlog_rows:
+                        qty = Decimal(str(plan_qty or 0))
+                        if qty == 0:
+                            continue
+                        if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
+                            continue
+                        fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
 
                     for plan_date in set(line_start_map) | set(fallback_map):
                         qty = line_start_map.get(plan_date)
@@ -5151,6 +5076,54 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             'created_items': serializer.data,
         })
 
+    @action(detail=False, methods=['post'], url_path='sub-process-save')
+    def sub_process_save(self, request):
+        """
+        サブ工程計画の保存。ロジックは services/sub_process_plan.py に委譲。
+        期待payload: {
+            line_id, process_id,
+            entries: [{ product_id, plan_date, plan_qty, sequence_no }, ...],
+            target_dates?: ['2026-06-27', ...],
+            change_reason?: str
+        }
+        """
+        from .services.sub_process_plan import save_sub_process_plan
+
+        line_id = request.data.get('line_id')
+        process_id = request.data.get('process_id')
+        entries = request.data.get('entries', [])
+        target_dates = request.data.get('target_dates', [])
+        raw_reason = request.data.get('change_reason', 'サブ工程計画入力')
+        change_reason = str(raw_reason).strip() if raw_reason else 'サブ工程計画入力'
+
+        if not line_id or not process_id:
+            return Response({'detail': 'line_id, process_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            line_id = int(line_id)
+            process_id = int(process_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'line_id, process_id は数値で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line = Line.objects.filter(id=line_id).first()
+        process = Process.objects.filter(id=process_id).first()
+        if not line or not process:
+            return Response({'detail': 'ライン/工程が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        try:
+            result = save_sub_process_plan(
+                line=line, process=process, entries=entries, target_dates=target_dates,
+                change_reason=change_reason, change_user=change_user,
+            )
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error('sub_process_save error: %s', e, exc_info=True)
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(result)
+
     @action(detail=False, methods=['put'], url_path='bulk-update')
     def bulk_update(self, request):
         """
@@ -6643,6 +6616,7 @@ class ProductionRecordInquirySettingView(APIView):
     PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
     PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
     PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
+    GANTT_EXCLUDED_PROCESS_RULES_KEY = 'production.gantt_excluded_process_rules'
     PRODUCT_MAPPINGS_KEY = 'production.product_mappings'
 
     def _normalize(self, value):
@@ -6779,6 +6753,22 @@ class ProductionRecordInquirySettingView(APIView):
             })
         return normalized
 
+    def _normalize_gantt_excluded_process_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            if not line_code or not process_code:
+                continue
+            key = f'{line_code}|{process_code}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({'lineCode': line_code, 'processCode': process_code})
+        return normalized
+
     def _build_response_payload(self):
         rows = ProductionRecordInquirySetting.objects.all()
         tabs = [{'key': r.tab_key, 'label': r.tab_name or r.tab_key, 'sort_order': r.sort_order} for r in rows]
@@ -6801,7 +6791,7 @@ class ProductionRecordInquirySettingView(APIView):
                         seen.add(key)
                         product_mappings.append(m)
 
-        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
+        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': [], 'gantt_excluded_process_rules': []}
         rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
         if rules_row:
             try:
@@ -6823,6 +6813,13 @@ class ProductionRecordInquirySettingView(APIView):
             except Exception:
                 parsed = []
             special_rules['planned_stock_calc_rules'] = self._normalize_planned_stock_calc_rules(parsed)
+        gantt_excluded_row = SystemSetting.objects.filter(key=self.GANTT_EXCLUDED_PROCESS_RULES_KEY).first()
+        if gantt_excluded_row:
+            try:
+                parsed = json.loads(gantt_excluded_row.value or '[]')
+            except Exception:
+                parsed = []
+            special_rules['gantt_excluded_process_rules'] = self._normalize_gantt_excluded_process_rules(parsed)
 
         return {
             'tabs': tabs,
@@ -6927,6 +6924,16 @@ class ProductionRecordInquirySettingView(APIView):
                 defaults={
                     'value': json.dumps(rules, ensure_ascii=False),
                     'description': 'ライン工程別の計画在庫計算特例設定',
+                    'updated_by': user,
+                },
+            )
+        if 'gantt_excluded_process_rules' in raw_special_rules:
+            rules = self._normalize_gantt_excluded_process_rules(raw_special_rules.get('gantt_excluded_process_rules'))
+            SystemSetting.objects.update_or_create(
+                key=self.GANTT_EXCLUDED_PROCESS_RULES_KEY,
+                defaults={
+                    'value': json.dumps(rules, ensure_ascii=False),
+                    'description': 'ライン工程別のガント展開除外設定',
                     'updated_by': user,
                 },
             )
@@ -8391,6 +8398,8 @@ class ProductionPlanLineSettingView(APIView):
     PROCESS_PREV_DAY_SHIFT_RULES_KEY = 'production.process_prev_day_shift_rules'
     PROCESS_GANTT_START_TIME_RULES_KEY = 'production.process_gantt_start_time_rules'
     PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
+    GANTT_EXCLUDED_PROCESS_RULES_KEY = 'production.gantt_excluded_process_rules'
+    SUB_PROCESS_CANDIDATE_RULES_KEY = 'production.sub_process_candidate_product_rules'
     def _normalize(self, value):
         return str(value or '').strip().upper()
 
@@ -8477,8 +8486,53 @@ class ProductionPlanLineSettingView(APIView):
             normalized.append({'lineCode': line_code, 'processCode': process_code, 'calcTarget': calc_target, 'setting': setting})
         return normalized
 
+    def _normalize_gantt_excluded_process_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            process_code = self._normalize((row or {}).get('processCode'))
+            if not line_code or not process_code:
+                continue
+            key = f'{line_code}|{process_code}'
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({'lineCode': line_code, 'processCode': process_code})
+        return normalized
+
+    def _normalize_sub_process_candidate_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            process_code = self._normalize((row or {}).get('processCode'))
+            product_codes_source = (row or {}).get('productCodes')
+            if not process_code or not isinstance(product_codes_source, list):
+                continue
+            product_codes = []
+            product_seen = set()
+            for product_code in product_codes_source:
+                normalized_code = self._normalize(product_code)
+                if not normalized_code or normalized_code in product_seen:
+                    continue
+                product_seen.add(normalized_code)
+                product_codes.append(normalized_code)
+            if not product_codes or process_code in seen:
+                continue
+            seen.add(process_code)
+            normalized.append({'processCode': process_code, 'productCodes': product_codes})
+        return normalized
+
     def _load_special_rules(self):
-        special_rules = {'prev_day_shift_rules': [], 'gantt_start_time_rules': [], 'planned_stock_calc_rules': []}
+        special_rules = {
+            'prev_day_shift_rules': [],
+            'gantt_start_time_rules': [],
+            'planned_stock_calc_rules': [],
+            'gantt_excluded_process_rules': [],
+            'sub_process_candidate_rules': [],
+        }
         rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
         if rules_row:
             try:
@@ -8495,6 +8549,18 @@ class ProductionPlanLineSettingView(APIView):
         if planned_stock_row:
             try:
                 special_rules['planned_stock_calc_rules'] = self._normalize_planned_stock_calc_rules(json.loads(planned_stock_row.value or '[]'))
+            except Exception:
+                pass
+        gantt_excluded_row = SystemSetting.objects.filter(key=self.GANTT_EXCLUDED_PROCESS_RULES_KEY).first()
+        if gantt_excluded_row:
+            try:
+                special_rules['gantt_excluded_process_rules'] = self._normalize_gantt_excluded_process_rules(json.loads(gantt_excluded_row.value or '[]'))
+            except Exception:
+                pass
+        sub_process_candidate_row = SystemSetting.objects.filter(key=self.SUB_PROCESS_CANDIDATE_RULES_KEY).first()
+        if sub_process_candidate_row:
+            try:
+                special_rules['sub_process_candidate_rules'] = self._normalize_sub_process_candidate_rules(json.loads(sub_process_candidate_row.value or '[]'))
             except Exception:
                 pass
         return special_rules
@@ -8581,6 +8647,18 @@ class ProductionPlanLineSettingView(APIView):
             SystemSetting.objects.update_or_create(
                 key=self.PLANNED_STOCK_RULES_KEY,
                 defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'ライン工程別の計画在庫計算特例設定', 'updated_by': user},
+            )
+        if 'gantt_excluded_process_rules' in raw_special_rules:
+            rules = self._normalize_gantt_excluded_process_rules(raw_special_rules['gantt_excluded_process_rules'])
+            SystemSetting.objects.update_or_create(
+                key=self.GANTT_EXCLUDED_PROCESS_RULES_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'ライン工程別のガント展開除外設定', 'updated_by': user},
+            )
+        if 'sub_process_candidate_rules' in raw_special_rules:
+            rules = self._normalize_sub_process_candidate_rules(raw_special_rules['sub_process_candidate_rules'])
+            SystemSetting.objects.update_or_create(
+                key=self.SUB_PROCESS_CANDIDATE_RULES_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'サブ工程計画の工程別候補製品設定', 'updated_by': user},
             )
 
         return Response(self._build_response())

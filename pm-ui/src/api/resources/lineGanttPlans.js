@@ -27,4 +27,7 @@ export const createLineGanttPlansAPI = (client) => ({
   calcEndTime(payload) {
     return client.post('/line-gantt-plans/calc-end-time/', payload)
   },
+  subProcessSave(payload) {
+    return client.post('/line-gantt-plans/sub-process-save/', payload)
+  },
 })
