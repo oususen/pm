@@ -105,6 +105,20 @@ const tiles = computed(() => {
       required: "edit",
       resource: "production.mobile_input",
     },
+    {
+      to: "/production/tablet-process-input",
+      label: "工程作業入力（タブレット）",
+      icon: "💻",
+      required: "edit",
+      resource: "production.process_input",
+    },
+    {
+      to: "/production/simultaneous-process-input",
+      label: t("productionMenu.tiles.simultaneousInput"),
+      icon: "🔄",
+      required: "edit",
+      resource: "production.process_input",
+    },
   ];
 
   return list.map((tile) => ({

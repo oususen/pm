@@ -100,14 +100,7 @@ const tiles = computed(() => {
       required: "edit",
       resource: "production.process_input",
     },
-    {
-      to: "/production/tablet-process-input",
-      label: "工程作業入力（タブレット）",
-      icon: "💻",
-      category: "input",
-      required: "edit",
-      resource: "production.process_input",
-    },
+    // 未使用: 工程作業入力（タブレット） /production/tablet-process-input
     {
       to: "/production/dual-process-input",
       label: "１人２工程入力",
@@ -116,14 +109,7 @@ const tiles = computed(() => {
       required: "edit",
       resource: "production.process_input",
     },
-    {
-      to: "/production/simultaneous-process-input",
-      label: t("productionMenu.tiles.simultaneousInput"),
-      icon: "🔄",
-      category: "input",
-      required: "edit",
-      resource: "production.process_input",
-    },
+    // 未使用: 同時加工入力 /production/simultaneous-process-input
     {
       to: "/production/two-person-one-equipment-input",
       label: "2人１設備",
