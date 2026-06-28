@@ -49,7 +49,7 @@
         <button @click="exportToExcel" :disabled="!groups.length">Excel出力</button>
         <button
           @click="openDeepRecalcDialog"
-          :disabled="loading || recalculating || !groups.length"
+          :disabled="loading || recalculating || !groups.length || !canDeepRecalc"
           class="btn-deep-recalc"
         >
           過去から再計算
@@ -243,6 +243,14 @@ import {
   compareBySpecialOrderThenProductCode,
   resolveSpecialDisplayOrder,
 } from "@/utils/groupSort";
+import { authState } from "@/auth";
+import { hasPermission } from "@/router";
+
+const canDeepRecalc = computed(() => {
+  const user = authState.user;
+  if (!user) return false;
+  return hasPermission(user, "production.progress", "edit");
+});
 
 const lineFilter = ref("");
 const processFilter = ref("");
