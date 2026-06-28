@@ -516,12 +516,12 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 line_id=line_id,
                 plan_date__gte=start_date,
                 plan_date__lte=end_date,
-            ).delete()
+            ).exclude(plan_id__startswith='SINGLEPROC_').delete()
             deleted_backlog_result = LineBacklog.objects.filter(
                 line_id=line_id,
                 plan_date__gte=start_date,
                 plan_date__lte=end_date,
-            ).exclude(sequence_no=0).delete()
+            ).exclude(sequence_no=0).exclude(plan_id__startswith='SINGLEPROC_').delete()
 
         deleted_plan = deleted_plan_result[0] if deleted_plan_result else 0
         deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
@@ -695,15 +695,15 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                 ).delete()
                 deleted_plan = deleted_plan_result[0] if deleted_plan_result else 0
 
-                # 3. 該当ライン・日付・製品のLineGanttPlanを削除
+                # 3. 該当ライン・日付・製品のLineGanttPlanを削除（単独計画行は保護）
                 deleted_gantt_result = LineGanttPlan.objects.filter(
                     line_id=line_id,
                     plan_date__in=affected_dates,
                     product_id__in=affected_products
-                ).delete()
+                ).exclude(plan_id__startswith='SINGLEPROC_').delete()
                 deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
 
-                # 4. 該当ライン・日付・製品のLineBacklogを削除（計画レコードのみ）
+                # 4. 該当ライン・日付・製品のLineBacklogを削除（計画レコードのみ、単独計画行は保護）
                 # ルール: sequence_no > 0 のレコードは計画レコードとして削除（自動計画・手動計画問わず）
                 #        sequence_no = 0 は在庫・需要・仕損などの基礎データとして保持
                 #        sequence_no = NULL は実績レコードとして保持
@@ -712,7 +712,7 @@ class LinePlanViewSet(viewsets.ModelViewSet):
                     plan_date__in=affected_dates,
                     product_id__in=affected_products,
                     sequence_no__gt=0,
-                ).delete()
+                ).exclude(plan_id__startswith='SINGLEPROC_').delete()
                 deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
 
             # 4. 新規作成
@@ -3156,7 +3156,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         line_id=line_id,
                         sequence_no=seq_key,
                     )
-                LineBacklog.objects.filter(q_filter).delete()
+                LineBacklog.objects.filter(q_filter).exclude(plan_id__startswith='SINGLEPROC_').delete()
 
         # 旧plan_id由来のstale行削除（items有無に関係なく実行）
         # 親計画のsequence_noが変更された際、旧sequence_noの子品展開行が残るのを防ぐ
@@ -3195,6 +3195,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 ).exclude(plan_id__isnull=True).exclude(plan_id='').only('id', 'plan_id', 'plan_date')
                 for row in candidate_rows:
                     pid_text = str(row.plan_id or '')
+                    if pid_text.startswith('SINGLEPROC_'):
+                        continue
                     if pid_text in protected_plan_ids:
                         continue
                     prefixes = prefixes_by_date.get(row.plan_date) or set()
@@ -3211,6 +3213,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 debug_stale_deleted_count,
                 debug_stale_deleted_plan_ids_sample,
             )
+
+        # 単独計画（SINGLEPROC_）で管理されている工程×日は工程展開しない
+        subproc_protected_process_dates = set()
+        if not read_only:
+            plan_dates_all = sorted({p.get('plan_date') for p in base_plans if p.get('plan_date')})
+            if plan_dates_all:
+                subproc_pairs = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=plan_dates_all,
+                    sequence_no__gt=0,
+                    plan_id__startswith='SINGLEPROC_',
+                ).values_list('process_id', 'plan_date').distinct()
+                for proc_id, pdate in subproc_pairs:
+                    subproc_protected_process_dates.add((proc_id, pdate))
 
         # 集計結果を保持（共用部品の加算に対応）
         aggregated = {}
@@ -3524,6 +3540,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     add_aggregate(child_target_product_id, child_plan_qty, 0, order_qty_step, demand_qty_step)
 
         for (target_id, process_id, target_date, seq_key), entry in aggregated.items():
+            if (process_id, target_date) in subproc_protected_process_dates:
+                continue
             plan_qty_value = int(entry['plan_qty'])
             order_qty_value = int(entry['order_qty'])
             demand_qty_value = int(entry['demand_qty_plan'])
@@ -4795,7 +4813,7 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             plan_ids = [p['plan_id'] for p in plans]
             if plan_ids:
                 qs = qs.exclude(plan_id__in=plan_ids)
-            qs = qs.exclude(plan_id__startswith='MANUAL_')
+            qs = qs.exclude(plan_id__startswith='MANUAL_').exclude(plan_id__startswith='SINGLEPROC_')
             deleted_count, _ = qs.delete()
             logger.info('line_gantt_plans.generate: cleared=%s', deleted_count)
 
@@ -5079,7 +5097,7 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['post'], url_path='sub-process-save')
     def sub_process_save(self, request):
         """
-        サブ工程計画の保存。ロジックは services/sub_process_plan.py に委譲。
+        単独計画の保存。ロジックは services/single_process_plan.py に委譲。
         期待payload: {
             line_id, process_id,
             entries: [{ product_id, plan_date, plan_qty, sequence_no }, ...],
@@ -5087,7 +5105,7 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             change_reason?: str
         }
         """
-        from .services.sub_process_plan import save_sub_process_plan
+        from .services.single_process_plan import save_sub_process_plan
 
         line_id = request.data.get('line_id')
         process_id = request.data.get('process_id')

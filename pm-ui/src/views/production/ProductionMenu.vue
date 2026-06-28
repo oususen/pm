@@ -198,7 +198,7 @@ const tiles = computed(() => {
       resource: "production.plan_input",
     },
     {
-      to: "/production/sub-process-plan",
+      to: "/production/single-process-plan",
       label: "単独計画",
       icon: "🔧",
       iconLabel: "単独",

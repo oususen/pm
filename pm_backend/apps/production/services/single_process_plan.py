@@ -329,7 +329,7 @@ def save_sub_process_plan(*, line, process, entries, target_dates=None, change_r
     """
     サブ工程計画を保存する。
 
-    LinePlanは触らない。この工程のLineBacklog(seq>0)とLineGanttPlan(SUBPROC_)のみ操作。
+    LinePlanは触らない。この工程のLineBacklog(seq>0)とLineGanttPlan(SINGLEPROC_)のみ操作。
     """
     line_id = line.id
     process_id = process.id
@@ -387,7 +387,7 @@ def save_sub_process_plan(*, line, process, entries, target_dates=None, change_r
             deleted_backlog = deleted[0] if deleted else 0
 
             deleted = LineGanttPlan.objects.filter(
-                plan_id__startswith=f'SUBPROC_{line_id}_{process_id}_',
+                plan_id__startswith=f'SINGLEPROC_{line_id}_{process_id}_',
                 plan_date__in=affected_dates,
             ).delete()
             deleted_gantt = deleted[0] if deleted else 0
@@ -395,12 +395,12 @@ def save_sub_process_plan(*, line, process, entries, target_dates=None, change_r
         backlog_creates = []
         saved_backlog_entries = []
         for item in parsed:
-            item['plan_id'] = f"SUBPROC_{line_id}_{process_id}_{item['product_id']}_{item['plan_date'].strftime('%Y%m%d')}_{item['seq']}"
+            item['plan_id'] = f"SINGLEPROC_{line_id}_{process_id}_{item['product_id']}_{item['plan_date'].strftime('%Y%m%d')}_{item['seq']}"
         for item in backlog_entries:
             product = backlog_product_cache.get(item['product_id'])
             if not product:
                 continue
-            plan_id = f"SUBPROC_{line_id}_{process_id}_{item['product_id']}_{item['plan_date'].strftime('%Y%m%d')}_{item['seq']}"
+            plan_id = f"SINGLEPROC_{line_id}_{process_id}_{item['product_id']}_{item['plan_date'].strftime('%Y%m%d')}_{item['seq']}"
             saved_backlog_entries.append({
                 'product_id': item['product_id'],
                 'plan_date': item['plan_date'],

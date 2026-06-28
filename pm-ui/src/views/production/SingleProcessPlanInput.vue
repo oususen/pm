@@ -1,5 +1,5 @@
 <template>
-  <div class="sub-process-plan">
+  <div class="single-process-plan">
     <div class="header-bar">
       <label>参照ライン</label>
       <select v-model="selectedLineId" @change="onLineChange">
@@ -39,8 +39,7 @@
       <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" class="fav-name-input" />
       <button class="btn favorite-star-btn" title="お気に入り登録" :disabled="!canSaveFavorite" @click="saveFavorite">★</button>
       <button class="btn btn-danger btn-sm" title="お気に入り削除" :disabled="!selectedFavoriteId" @click="deleteFavorite">✕</button>
-      <div v-if="saveMsg" class="save-msg-inline" :class="{ 'save-error': saveError }">{{ saveMsg }}</div>
-      <DataSourceDialog title="サブ工程計画" :sources="dsSources" />
+      <DataSourceDialog title="単独計画" :sources="dsSources" />
     </div>
 
     <div v-if="selectedSubProcessId" class="candidate-card">
@@ -252,7 +251,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 const dsSources = [
   { op: '取得', table: 't_line_gantt_plan', desc: '参照工程ガントプラン読込・サブ工程計画読込' },
   { op: '保存', table: 't_line_backlog', desc: 'サブ工程計画保存（seq>0の行を削除→再作成）' },
-  { op: '保存', table: 't_line_gantt_plan', desc: 'サブ工程計画保存（SUBPROC_プレフィクス行を削除→再作成）' },
+  { op: '保存', table: 't_line_gantt_plan', desc: 'サブ工程計画保存（SINGLEPROC_プレフィクス行を削除→再作成）' },
   { op: '取得', table: 't_line / t_process', desc: 'ライン・工程マスタ' },
   { op: '取得', table: 't_product / t_routing_step / t_bom_item', desc: '関連製品候補の解決' },
   { op: '取得/保存', table: 'production_plan_line_setting', desc: '候補製品の個別設定（special_rules）' },
@@ -517,8 +516,6 @@ const getSubDateTotal = (dateStr) => {
 }
 
 const saving = ref(false)
-const saveMsg = ref('')
-const saveError = ref(false)
 const GANTT_HIDE_WEEKENDS_KEY = 'processGanttView.hideWeekends'
 const ganttHideWeekends = ref(localStorage.getItem(GANTT_HIDE_WEEKENDS_KEY) === '1')
 const hideEmptyGanttRows = ref(false)
@@ -643,8 +640,6 @@ const resetCandidateRule = async () => {
 const saveSubProcessPlan = async () => {
   if (!selectedSubProcessId.value || !selectedLineId.value) return
   saving.value = true
-  saveMsg.value = ''
-  saveError.value = false
 
   const entries = []
   Object.keys(subGrid.value).forEach((key) => {
@@ -676,13 +671,12 @@ const saveSubProcessPlan = async () => {
       target_dates: allDates,
     })
     const data = res?.data || {}
-    saveMsg.value = `保存完了（Backlog: 削除${data.deleted_backlog || 0} → 作成${data.created_backlog || 0}件、ガント: 削除${data.deleted_gantt || 0} → 作成${data.created_gantt || 0}件）`
     await loadData()
     ganttReloadKey.value += 1
+    alert(`保存完了（Backlog: 削除${data.deleted_backlog || 0} → 作成${data.created_backlog || 0}件、ガント: 削除${data.deleted_gantt || 0} → 作成${data.created_gantt || 0}件）`)
   } catch (e) {
     console.error('保存エラー', e)
-    saveError.value = true
-    saveMsg.value = e?.response?.data?.detail || '保存に失敗しました'
+    alert(e?.response?.data?.detail || '保存に失敗しました')
   } finally {
     saving.value = false
   }
@@ -859,7 +853,7 @@ const loadData = async () => {
 
     const refProcessId = Number(selectedRefProcessId.value || 0)
     const subProcessId = Number(selectedSubProcessId.value || 0)
-    const subProcessPrefix = `SUBPROC_${selectedLineId.value}_${selectedSubProcessId.value}_`
+    const subProcessPrefix = `SINGLEPROC_${selectedLineId.value}_${selectedSubProcessId.value}_`
 
     const refEntriesByDate = {}
     const subEntries = {}
@@ -990,7 +984,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.sub-process-plan { padding: 8px; }
+.single-process-plan { padding: 8px; }
 .header-bar { background: #f5f5f5; padding: 6px 8px; border-radius: 4px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .header-bar label { font-weight: bold; font-size: 12px; white-space: nowrap; }
 .header-bar select, .header-bar input { font-size: 12px; padding: 2px 3px; }
@@ -1050,10 +1044,6 @@ onMounted(async () => {
 .save-bar { padding: 8px 0; display: flex; align-items: center; gap: 10px; }
 .btn-save { background: #2e7d32; color: #fff; border-color: #2e7d32; font-size: 11px; padding: 2px 6px; font-weight: bold; }
 .btn-save:hover { background: #1b5e20; }
-.save-msg { font-size: 12px; color: #2e7d32; }
-.save-msg.save-error { color: #d32f2f; }
-.save-msg-inline { font-size: 12px; color: #2e7d32; margin-left: auto; }
-.save-msg-inline.save-error { color: #d32f2f; }
 .loading-msg { padding: 12px; color: #666; }
 .error-msg { padding: 6px; color: #d32f2f; background: #ffebee; border-radius: 3px; margin-bottom: 8px; }
 .gantt-section { margin-top: 8px; padding: 8px; border: 1px solid #d7dfeb; border-radius: 6px; background: #fff; }
