@@ -1073,6 +1073,40 @@
           </div>
         </div>
       </div>
+      <div class="settings-section">
+        <div class="settings-section-header" @click="settingsCollapsed.autoPlanTarget = !settingsCollapsed.autoPlanTarget">
+          <span class="settings-section-arrow">{{ settingsCollapsed.autoPlanTarget ? '▶' : '▼' }}</span>
+          自動計画適用設定（ライン×製品）
+          <span class="settings-section-count">{{ autoPlanTargetRules.reduce((n, r) => n + r.productCodes.length, 0) }}件</span>
+        </div>
+        <div v-show="!settingsCollapsed.autoPlanTarget" class="settings-section-body">
+          <p class="settings-note">自動計画ボタンを表示するラインと対象製品を設定します。</p>
+          <div class="settings-rule-editor">
+            <select v-model="autoPlanTargetDraft.lineCode" @change="autoPlanTargetDraft.productCode = ''; loadAutoPlanTargetProducts(autoPlanTargetDraft.lineCode)">
+              <option value="">ライン選択</option>
+              <option v-for="line in lines" :key="`apt-line-${line.id}`" :value="normalizeLineCode(line.line_code)">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <select v-model="autoPlanTargetDraft.productCode">
+              <option value="">製品選択</option>
+              <option v-for="p in autoPlanTargetProductOptions" :key="`apt-prod-${p.id}`" :value="String(p.product_code || '').trim().toUpperCase()">
+                {{ p.product_code }} - {{ p.product_name }}
+              </option>
+            </select>
+            <button class="btn" type="button" @click="addAutoPlanTargetRule">追加</button>
+          </div>
+          <div class="settings-list settings-rules">
+            <template v-for="rule in autoPlanTargetRules" :key="`apt-rule-${rule.lineCode}`">
+              <div v-for="pc in rule.productCodes" :key="`apt-${rule.lineCode}-${pc}`" class="settings-rule-row">
+                <span>{{ rule.lineCode }} / {{ getProductNameByCode(pc) }}</span>
+                <button class="btn" type="button" @click="removeAutoPlanTargetProduct(rule.lineCode, pc)">削除</button>
+              </div>
+            </template>
+            <div v-if="!autoPlanTargetRules.length" class="settings-note">設定なし</div>
+          </div>
+        </div>
+      </div>
       <div class="settings-actions">
         <button class="btn" type="button" @click="saveLineSettings">保存</button>
       </div>
@@ -1429,7 +1463,7 @@ const productOrderActiveCode = ref('')
 const productOrderCache = ref(new Map())
 const productColorCache = ref(new Map())
 const lineSettingsMessage = ref('')
-const settingsCollapsed = ref({ tabMgmt: true, lines: false, prevDayShift: true, ganttStartTime: true, ganttExcluded: true, calcSpecial: true })
+const settingsCollapsed = ref({ tabMgmt: true, lines: false, prevDayShift: true, ganttStartTime: true, ganttExcluded: true, calcSpecial: true, autoPlanTarget: true })
 const prevDayShiftRules = ref([])
 const prevDayShiftDraft = ref({
   lineCode: '',
@@ -1454,6 +1488,8 @@ const plannedStockCalcDraft = ref({
   calcTarget: 'PLANNED_STOCK',
   setting: 'PARENT_PLAN',
 })
+const autoPlanTargetRules = ref([])
+const autoPlanTargetDraft = ref({ lineCode: '', productCode: '' })
 const processOptions = ref([])
 const ganttExcludedProcessOptions = computed(() => {
   const selectedLineCode = ganttExcludedProcessDraft.value.lineCode
@@ -1539,9 +1575,13 @@ const isFloorShippingAutoPlanLine = computed(() => {
   const lineName = String(line.line_name || '').trim()
   return activePlanTab.value === 'floor-shipping' && (lineCode === 'L2102' || lineName.includes('フロア配送'))
 })
-const canShowFloorSpotAutoPlanButton = computed(() => (
-  (activePlanTab.value === 'floor' && isFloorSpotLine.value) || isFloorShippingAutoPlanLine.value
-))
+const canShowFloorSpotAutoPlanButton = computed(() => {
+  if (isFloorShippingAutoPlanLine.value) return true
+  const line = selectedLineObj.value
+  if (!line) return false
+  const lineCode = normalizeLineCode(line.line_code)
+  return autoPlanTargetLineSet.value.has(lineCode)
+})
 // フロア配送: 8時着/15時着台車数（台車1台=2個、異なる製品は混載しない）
 const floorShippingCartCounts = computed(() => {
   if (!isFloorShippingDeliveryLine.value) return {}
@@ -1666,6 +1706,55 @@ const normalizePlannedStockCalcRules = (rows) => {
   })
   return normalized
 }
+const normalizeAutoPlanTargetRules = (rows) => {
+  const source = Array.isArray(rows) ? rows : []
+  const normalized = []
+  const seen = new Set()
+  source.forEach((row) => {
+    const lineCode = normalizeLineCode(row?.lineCode)
+    if (!lineCode || seen.has(lineCode)) return
+    const productCodes = (Array.isArray(row?.productCodes) ? row.productCodes : [])
+      .map((c) => String(c || '').trim().toUpperCase())
+      .filter(Boolean)
+    if (!productCodes.length) return
+    const uniqueCodes = [...new Set(productCodes)]
+    seen.add(lineCode)
+    normalized.push({ lineCode, productCodes: uniqueCodes })
+  })
+  return normalized
+}
+const autoPlanTargetProductIds = ref(new Set())
+const loadAutoPlanTargetProducts = async (lineCode) => {
+  autoPlanTargetProductIds.value = new Set()
+  if (!lineCode) return
+  const lineObj = lines.value.find((l) => normalizeLineCode(l.line_code) === lineCode)
+  if (!lineObj) return
+  try {
+    const res = await api.routings.getRoutingSteps({ line: lineObj.id, page_size: 5000 })
+    const steps = res?.data?.results || res?.data || []
+    const ids = new Set()
+    steps.forEach((s) => { if (s.output_product) ids.add(Number(s.output_product)) })
+    autoPlanTargetProductIds.value = ids
+  } catch {
+    autoPlanTargetProductIds.value = new Set()
+  }
+}
+const autoPlanTargetProductOptions = computed(() => {
+  if (!autoPlanTargetProductIds.value.size) return []
+  return products.value.filter((p) => autoPlanTargetProductIds.value.has(Number(p.id)) && p.is_line_final_product === true)
+})
+const autoPlanTargetLineSet = computed(() => {
+  const set = new Set()
+  autoPlanTargetRules.value.forEach((rule) => set.add(rule.lineCode))
+  return set
+})
+const autoPlanTargetProductSet = computed(() => {
+  const lineCode = selectedLineObj.value ? normalizeLineCode(selectedLineObj.value.line_code) : ''
+  if (!lineCode) return new Set()
+  const rule = autoPlanTargetRules.value.find((r) => r.lineCode === lineCode)
+  if (!rule) return new Set()
+  return new Set(rule.productCodes)
+})
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
   return Array.isArray(unitLines) ? unitLines : []
@@ -1780,6 +1869,7 @@ const loadLineCodesByTab = async () => {
     ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
     ganttExcludedProcessRules.value = normalizeGanttExcludedProcessRules(dbSpecialRules?.gantt_excluded_process_rules)
     plannedStockCalcRules.value = normalizePlannedStockCalcRules(dbSpecialRules?.planned_stock_calc_rules)
+    autoPlanTargetRules.value = normalizeAutoPlanTargetRules(dbSpecialRules?.auto_plan_target_rules)
     saveLineCodesByTab()
   } catch (e) {
     console.warn('ライン編集設定DB取得失敗', e)
@@ -1796,6 +1886,7 @@ const syncLineCodesByTabToServer = async () => {
       gantt_start_time_rules: normalizeGanttStartTimeRules(ganttStartTimeRules.value),
       gantt_excluded_process_rules: normalizeGanttExcludedProcessRules(ganttExcludedProcessRules.value),
       planned_stock_calc_rules: normalizePlannedStockCalcRules(plannedStockCalcRules.value),
+      auto_plan_target_rules: normalizeAutoPlanTargetRules(autoPlanTargetRules.value),
     },
   }
   const res = await api.productionPlanLineSettings.saveSettings(payload)
@@ -1812,6 +1903,7 @@ const syncLineCodesByTabToServer = async () => {
   prevDayShiftRules.value = normalizePrevDayShiftRules(dbSpecialRules?.prev_day_shift_rules)
   ganttStartTimeRules.value = normalizeGanttStartTimeRules(dbSpecialRules?.gantt_start_time_rules)
   plannedStockCalcRules.value = normalizePlannedStockCalcRules(dbSpecialRules?.planned_stock_calc_rules)
+  autoPlanTargetRules.value = normalizeAutoPlanTargetRules(dbSpecialRules?.auto_plan_target_rules)
   saveLineCodesByTab()
 }
 const addPrevDayShiftRule = async () => {
@@ -1966,6 +2058,62 @@ const removePlannedStockCalcRule = async (index) => {
   lineSettingsMessage.value = dbSyncFailed
     ? '計算特例設定を削除しました。（DB同期は失敗しました）'
     : '計算特例設定を削除しました。'
+}
+const addAutoPlanTargetRule = async () => {
+  const lineCode = normalizeLineCode(autoPlanTargetDraft.value.lineCode)
+  const productCode = String(autoPlanTargetDraft.value.productCode || '').trim().toUpperCase()
+  if (!lineCode || !productCode) {
+    alert('ラインと製品を選択してください。')
+    return
+  }
+  const existing = autoPlanTargetRules.value.find((r) => r.lineCode === lineCode)
+  let updated
+  if (existing) {
+    if (existing.productCodes.includes(productCode)) {
+      alert('この製品は既に追加されています。')
+      return
+    }
+    updated = autoPlanTargetRules.value.map((r) =>
+      r.lineCode === lineCode ? { ...r, productCodes: [...r.productCodes, productCode] } : r
+    )
+  } else {
+    updated = [...autoPlanTargetRules.value, { lineCode, productCodes: [productCode] }]
+  }
+  autoPlanTargetRules.value = normalizeAutoPlanTargetRules(updated)
+  autoPlanTargetDraft.value.productCode = ''
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('自動計画適用設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '自動計画適用設定を追加しました。（DB同期は失敗しました）'
+    : '自動計画適用設定を追加しました。'
+}
+const removeAutoPlanTargetProduct = async (lineCode, productCode) => {
+  const updated = autoPlanTargetRules.value.map((r) => {
+    if (r.lineCode !== lineCode) return r
+    return { ...r, productCodes: r.productCodes.filter((c) => c !== productCode) }
+  }).filter((r) => r.productCodes.length > 0)
+  autoPlanTargetRules.value = normalizeAutoPlanTargetRules(updated)
+  lineSettingsMessage.value = ''
+  let dbSyncFailed = false
+  try {
+    await syncLineCodesByTabToServer()
+  } catch (e) {
+    dbSyncFailed = true
+    console.warn('自動計画適用設定DB保存失敗', e)
+  }
+  lineSettingsMessage.value = dbSyncFailed
+    ? '自動計画適用設定を削除しました。（DB同期は失敗しました）'
+    : '自動計画適用設定を削除しました。'
+}
+const getProductNameByCode = (code) => {
+  const p = products.value.find((pr) => String(pr.product_code || '').trim().toUpperCase() === code)
+  return p ? `${p.product_code} - ${p.product_name}` : code
 }
 const isLineSelectedForTargetTab = (lineCode) => {
   const code = normalizeLineCode(lineCode)
@@ -5106,14 +5254,16 @@ const applyDemandToPlanForVisiblePeriod = (fromDate = null) => {
     return total
   }
 
+  const targetProducts = autoPlanTargetProductSet.value
   let autoPlanCount = 0
   rows.value.forEach((row) => {
+    const productCode = String(row?.product_code || '').trim().toUpperCase()
+    if (targetProducts.size > 0 && !targetProducts.has(productCode)) return
     dateColumns.value.forEach((c) => {
       if (fromDate && c.key < fromDate) return
       const daily = ensureDailyCell(row, c.key)
       let demandQty = 0
-      const productCode = String(row?.product_code || '').trim()
-      const aggregateSetting = autoPlanAggregateSettingsMap.value[productCode]
+      const aggregateSetting = autoPlanAggregateSettingsMap.value[productCode] || autoPlanAggregateSettingsMap.value[String(row?.product_code || '').trim()]
       if (aggregateSetting) {
         const targetWeekday = Number.isFinite(aggregateSetting.aggregate_weekday) ? aggregateSetting.aggregate_weekday : 2
         const days = Number.isFinite(aggregateSetting.aggregate_days) && aggregateSetting.aggregate_days > 0

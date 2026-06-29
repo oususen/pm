@@ -8480,6 +8480,7 @@ class ProductionPlanLineSettingView(APIView):
     GANTT_EXCLUDED_PROCESS_RULES_KEY = 'production.gantt_excluded_process_rules'
     SUB_PROCESS_CANDIDATE_RULES_KEY = 'production.sub_process_candidate_product_rules'
     CHECKSHEET_PRODUCT_MAPPING_KEY = 'production.checksheet_product_mapping'
+    AUTO_PLAN_TARGET_RULES_KEY = 'production.auto_plan_target_rules'
 
     def _normalize(self, value):
         return str(value or '').strip().upper()
@@ -8641,6 +8642,30 @@ class ProductionPlanLineSettingView(APIView):
                 normalized.append({'processCode': process_code, 'mappings': mappings})
         return normalized
 
+    def _normalize_auto_plan_target_rules(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            line_code = self._normalize((row or {}).get('lineCode'))
+            if not line_code or line_code in seen:
+                continue
+            product_codes_source = (row or {}).get('productCodes')
+            if not isinstance(product_codes_source, list):
+                continue
+            product_codes = []
+            product_seen = set()
+            for pc in product_codes_source:
+                normalized_code = self._normalize(pc)
+                if not normalized_code or normalized_code in product_seen:
+                    continue
+                product_seen.add(normalized_code)
+                product_codes.append(normalized_code)
+            if product_codes:
+                seen.add(line_code)
+                normalized.append({'lineCode': line_code, 'productCodes': product_codes})
+        return normalized
+
     def _load_special_rules(self):
         special_rules = {
             'prev_day_shift_rules': [],
@@ -8649,6 +8674,7 @@ class ProductionPlanLineSettingView(APIView):
             'gantt_excluded_process_rules': [],
             'sub_process_candidate_rules': [],
             'checksheet_product_mapping': [],
+            'auto_plan_target_rules': [],
         }
         rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
         if rules_row:
@@ -8684,6 +8710,12 @@ class ProductionPlanLineSettingView(APIView):
         if checksheet_mapping_row:
             try:
                 special_rules['checksheet_product_mapping'] = self._normalize_checksheet_product_mapping(json.loads(checksheet_mapping_row.value or '[]'))
+            except Exception:
+                pass
+        auto_plan_row = SystemSetting.objects.filter(key=self.AUTO_PLAN_TARGET_RULES_KEY).first()
+        if auto_plan_row:
+            try:
+                special_rules['auto_plan_target_rules'] = self._normalize_auto_plan_target_rules(json.loads(auto_plan_row.value or '[]'))
             except Exception:
                 pass
         return special_rules
@@ -8788,6 +8820,12 @@ class ProductionPlanLineSettingView(APIView):
             SystemSetting.objects.update_or_create(
                 key=self.CHECKSHEET_PRODUCT_MAPPING_KEY,
                 defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'サブ工程→完成品のチェックシート用製品マッピング', 'updated_by': user},
+            )
+        if 'auto_plan_target_rules' in raw_special_rules:
+            rules = self._normalize_auto_plan_target_rules(raw_special_rules['auto_plan_target_rules'])
+            SystemSetting.objects.update_or_create(
+                key=self.AUTO_PLAN_TARGET_RULES_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': '自動計画適用ライン×製品設定', 'updated_by': user},
             )
 
         return Response(self._build_response())
