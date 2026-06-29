@@ -10,6 +10,7 @@ from rest_framework.test import APIRequestFactory
 
 from masters.models import Line, Process, Product
 from production.models_line_backlog import LineBacklog
+from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.models_process_work_session import ProcessWorkSession
 from production.views_process_realtime import (
     ProcessRealtimeRecordViewSet,
@@ -82,6 +83,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
                 'started_at': '2026-03-05T09:00:00',
                 'ended_at': '2026-03-05T10:00:00',
                 'production_qty': 5,
+                'change_reason': '登録漏れ補完',
             },
             format='json',
         )
@@ -98,8 +100,52 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             sequence_no=0,
         )
         self.assertEqual(backlog.actual_qty, 5)
+        history = ProcessWorkSessionChangeHistory.objects.get(session_record_id=session.id)
+        self.assertEqual(history.operation_type, 'ADD')
+        self.assertEqual(history.reason, '登録漏れ補完')
         mock_recalculate.assert_called_once()
         self.assertEqual(mock_recalculate.call_args[0][0].id, session.id)
+
+    @patch('production.views_process_realtime._recalculate_inventory_after_session_change')
+    def test_session_detail_update_creates_history(self, mock_recalculate):
+        started_at = self.make_dt(2026, 3, 5, 9)
+        ended_at = self.make_dt(2026, 3, 5, 10)
+        session = ProcessWorkSession.objects.create(
+            process=self.process,
+            product=self.product,
+            product_code=self.product.product_code,
+            product_name=self.product.product_name,
+            plan_date=date(2026, 3, 5),
+            session_no=1,
+            session_type='WORK',
+            start_action='MANUAL',
+            end_action='END',
+            started_at=started_at,
+            ended_at=ended_at,
+            status='CLOSED',
+            duration_seconds=3600,
+            production_qty=5,
+        )
+
+        view = ProcessRealtimeRecordViewSet.as_view({'patch': 'session_detail'})
+        request = self.factory.patch(
+            f'/api/process-realtime/sessions/{session.id}/',
+            {
+                'production_qty': 7,
+                'change_reason': '数量訂正',
+            },
+            format='json',
+        )
+        response = view(request, session_id=session.id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        history = ProcessWorkSessionChangeHistory.objects.get(session_record_id=session.id)
+        self.assertEqual(history.operation_type, 'UPDATE')
+        self.assertEqual(history.reason, '数量訂正')
+        self.assertIn('実績数量', history.change_summary)
+        self.assertEqual(int(history.before_data['production_qty']), 5)
+        self.assertEqual(int(history.after_data['production_qty']), 7)
+        mock_recalculate.assert_called_once()
 
     @patch('production.views_process_realtime._recalculate_inventory_after_session_change')
     def test_session_detail_delete_triggers_recalculation(self, mock_recalculate):
@@ -131,11 +177,23 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         )
 
         view = ProcessRealtimeRecordViewSet.as_view({'delete': 'session_detail'})
-        request = self.factory.delete(f'/api/process-realtime/sessions/{session.id}/')
+        request = self.factory.delete(
+            f'/api/process-realtime/sessions/{session.id}/',
+            {
+                'change_reason': '誤登録のため削除',
+            },
+            format='json',
+        )
         response = view(request, session_id=session.id)
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         backlog.refresh_from_db()
         self.assertEqual(backlog.actual_qty, 0)
         self.assertFalse(ProcessWorkSession.objects.filter(id=session.id).exists())
+        history = ProcessWorkSessionChangeHistory.objects.get(session_record_id=session.id)
+        self.assertEqual(history.operation_type, 'DELETE')
+        self.assertEqual(history.reason, '誤登録のため削除')
+        self.assertIn('削除:', history.change_summary)
+        self.assertEqual(int(history.before_data['production_qty']), 5)
+        self.assertEqual(history.after_data, {})
         mock_recalculate.assert_called_once()

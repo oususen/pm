@@ -14,11 +14,13 @@ from datetime import datetime, time, timedelta
 
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_process_work_session import ProcessWorkSession
+from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from .models_line_backlog import LineBacklog
 from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
     ProcessWorkSessionSerializer,
+    ProcessWorkSessionChangeHistorySerializer,
     build_scrap_multiplier_details,
     _resolve_product_process_line,
     resolve_workday_date_for_process,
@@ -34,6 +36,115 @@ from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
 
 def _is_countable_session_for_actual(session_type, end_action):
     return str(session_type or '').upper() == 'WORK' and str(end_action or '').upper() in ('END', 'PAUSE')
+
+def _format_history_datetime(dt):
+    if not dt:
+        return ''
+    local_dt = _to_local_naive(dt)
+    return local_dt.strftime('%Y/%m/%d %H:%M') if local_dt else ''
+
+
+def _serialize_session_snapshot(session_obj):
+    if not session_obj:
+        return {}
+    return {
+        'product_code': session_obj.product_code or '',
+        'product_name': session_obj.product_name or '',
+        'started_at': _format_history_datetime(session_obj.started_at),
+        'ended_at': _format_history_datetime(session_obj.ended_at),
+        'production_qty': int(session_obj.production_qty or 0),
+        'defect_qty': int(session_obj.defect_qty or 0),
+        'operator_name': session_obj.operator_name or '',
+        'plan_date': str(session_obj.plan_date) if session_obj.plan_date else '',
+    }
+
+
+def _history_display_value(value):
+    text = str(value or '').strip()
+    return text or '—'
+
+
+def _build_history_summary(operation_type, before_data, after_data):
+    normalized_type = str(operation_type or '').upper()
+
+    if normalized_type == 'ADD':
+        parts = []
+        if after_data.get('product_code'):
+            parts.append(f"品番: {after_data['product_code']}")
+        if after_data.get('product_name'):
+            parts.append(f"品名: {after_data['product_name']}")
+        if after_data.get('plan_date'):
+            parts.append(f"作業日: {after_data['plan_date']}")
+        if after_data.get('operator_name'):
+            parts.append(f"作業者: {after_data['operator_name']}")
+        if after_data.get('started_at'):
+            parts.append(f"開始時刻: {after_data['started_at']}")
+        if after_data.get('ended_at'):
+            parts.append(f"終了時刻: {after_data['ended_at']}")
+        parts.append(f"実績数量: {after_data.get('production_qty', 0)}")
+        if int(after_data.get('defect_qty', 0) or 0):
+            parts.append(f"仕損: {after_data.get('defect_qty', 0)}")
+        return ' / '.join(parts)
+
+    if normalized_type == 'DELETE':
+        parts = []
+        if before_data.get('product_code'):
+            parts.append(f"品番: {before_data['product_code']}")
+        if before_data.get('product_name'):
+            parts.append(f"品名: {before_data['product_name']}")
+        if before_data.get('plan_date'):
+            parts.append(f"作業日: {before_data['plan_date']}")
+        if before_data.get('operator_name'):
+            parts.append(f"作業者: {before_data['operator_name']}")
+        if before_data.get('started_at'):
+            parts.append(f"開始時刻: {before_data['started_at']}")
+        if before_data.get('ended_at'):
+            parts.append(f"終了時刻: {before_data['ended_at']}")
+        parts.append(f"実績数量: {before_data.get('production_qty', 0)}")
+        if int(before_data.get('defect_qty', 0) or 0):
+            parts.append(f"仕損: {before_data.get('defect_qty', 0)}")
+        return '削除: ' + ' / '.join(parts)
+
+    labels = {
+        'product_code': '品番',
+        'product_name': '品名',
+        'plan_date': '作業日',
+        'started_at': '開始時刻',
+        'ended_at': '終了時刻',
+        'production_qty': '実績数量',
+        'defect_qty': '仕損',
+        'operator_name': '作業者',
+    }
+    parts = []
+    for key, label in labels.items():
+        before_value = before_data.get(key)
+        after_value = after_data.get(key)
+        if str(before_value or '') == str(after_value or ''):
+            continue
+        parts.append(f'{label}: {_history_display_value(before_value)} → {_history_display_value(after_value)}')
+    return ' / '.join(parts) or '変更なし'
+
+
+def _create_session_change_history(*, session_obj, operation_type, reason, changed_by, before_data=None, after_data=None):
+    if not session_obj:
+        return None
+    before_payload = before_data or {}
+    after_payload = after_data or {}
+    return ProcessWorkSessionChangeHistory.objects.create(
+        session=session_obj,
+        session_record_id=session_obj.id,
+        operation_type=str(operation_type or '').upper(),
+        process=session_obj.process,
+        product=session_obj.product,
+        product_code=session_obj.product_code or '',
+        product_name=session_obj.product_name or '',
+        plan_date=session_obj.plan_date,
+        reason=str(reason or '').strip(),
+        change_summary=_build_history_summary(operation_type, before_payload, after_payload),
+        before_data=before_payload,
+        after_data=after_payload,
+        changed_by=changed_by,
+    )
 
 
 def _build_business_boundary_datetime(target_date, day_offset=0):
@@ -760,6 +871,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
         process_id = payload.get('process_id')
         product_code = str(payload.get('product_code') or '').strip()
+        change_reason = str(payload.get('change_reason') or '').strip()
         started_at_raw = payload.get('started_at')
         ended_at_raw = payload.get('ended_at')
         production_qty_raw = payload.get('production_qty')
@@ -769,6 +881,8 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'process_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if not product_code:
             return Response({'detail': 'product_code は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not change_reason:
+            return Response({'detail': 'change_reason は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if not started_at_raw:
             return Response({'detail': 'started_at は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if not ended_at_raw:
@@ -828,6 +942,15 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 production_qty=production_qty,
                 operator_name=operator_name,
             )
+            changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            _create_session_change_history(
+                session_obj=session,
+                operation_type='ADD',
+                reason=change_reason,
+                changed_by=changed_by,
+                before_data={},
+                after_data=_serialize_session_snapshot(session),
+            )
             if production_qty:
                 _adjust_backlog_actual_for_session(session, int(production_qty))
                 _adjust_coproduct_children_backlog(session, int(production_qty))
@@ -843,7 +966,22 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'セッションが見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
 
         if request.method.lower() == 'delete':
+            payload = request.data or {}
+            change_reason = str(payload.get('change_reason') or '').strip()
+            if not change_reason:
+                return Response({'detail': 'change_reason は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+            before_snapshot = _serialize_session_snapshot(session)
+            changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
             with transaction.atomic():
+                _create_session_change_history(
+                    session_obj=session,
+                    operation_type='DELETE',
+                    reason=change_reason,
+                    changed_by=changed_by,
+                    before_data=before_snapshot,
+                    after_data={},
+                )
                 old_qty = int(session.production_qty or 0) if _is_countable_session_for_actual(
                     session.session_type, session.end_action
                 ) else 0
@@ -860,12 +998,17 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         payload = request.data or {}
+        change_reason = str(payload.get('change_reason') or '').strip()
         started_at = session.started_at
         ended_at = session.ended_at
         production_qty = session.production_qty
         defect_qty = session.defect_qty
         new_product = None
         product_changed = False
+        before_snapshot = _serialize_session_snapshot(session)
+
+        if not change_reason:
+            return Response({'detail': 'change_reason は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
 
         if 'product_code' in payload:
             new_code = str(payload.get('product_code') or '').strip()
@@ -962,8 +1105,58 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
             if defect_delta:
                 _adjust_backlog_scrap_for_session(session, defect_delta)
+            after_snapshot = _serialize_session_snapshot(session)
+            if before_snapshot != after_snapshot:
+                changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+                _create_session_change_history(
+                    session_obj=session,
+                    operation_type='UPDATE',
+                    reason=change_reason,
+                    changed_by=changed_by,
+                    before_data=before_snapshot,
+                    after_data=after_snapshot,
+                )
 
         serializer = ProcessWorkSessionSerializer(session)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='session-history')
+    def session_history(self, request):
+        queryset = ProcessWorkSessionChangeHistory.objects.select_related(
+            'session', 'process', 'product', 'changed_by',
+        )
+
+        session_id = request.query_params.get('session_id')
+        if session_id:
+            queryset = queryset.filter(session_record_id=session_id)
+
+        operation_type = str(request.query_params.get('operation_type') or '').strip().upper()
+        if operation_type:
+            queryset = queryset.filter(operation_type=operation_type)
+
+        start_date = request.query_params.get('start_date')
+        if start_date:
+            d = parse_date(start_date)
+            if d:
+                queryset = queryset.filter(changed_at__gte=_build_business_boundary_datetime(d))
+
+        end_date = request.query_params.get('end_date')
+        if end_date:
+            d = parse_date(end_date)
+            if d:
+                queryset = queryset.filter(changed_at__lt=_build_business_boundary_datetime(d, day_offset=1))
+
+        limit = request.query_params.get('limit')
+        try:
+            limit_value = int(limit) if limit is not None else 300
+        except ValueError:
+            limit_value = 300
+        limit_value = max(1, min(limit_value, 1000))
+
+        serializer = ProcessWorkSessionChangeHistorySerializer(
+            queryset.order_by('-changed_at', '-id')[:limit_value],
+            many=True,
+        )
         return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='status')

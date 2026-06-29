@@ -83,6 +83,10 @@
             <option v-for="u in users" :key="u.id" :value="u.label">{{ u.label }}</option>
           </select>
         </div>
+        <div class="add-form-row">
+          <label>追加理由 <span class="required">*</span></label>
+          <input v-model.trim="newChangeReason" type="text" placeholder="例: 登録し忘れ補完" />
+        </div>
         <div class="add-form-actions">
           <button class="btn" :disabled="adding" @click="addSession">
             {{ adding ? '登録中...' : '追加登録' }}
@@ -143,6 +147,7 @@
         <thead>
           <tr>
             <th>レコードID</th>
+            <th>操作調査</th>
             <th>工程</th>
             <th>品番</th>
             <th>開始時刻</th>
@@ -155,6 +160,22 @@
         <tbody>
           <tr v-for="row in sessions" :key="row.row_key">
             <td>{{ row.id }}</td>
+            <td>
+              <div v-if="getOperationLabels(row).length" class="operation-tags">
+                <span
+                  v-for="label in getOperationLabels(row)"
+                  :key="`${row.row_key}-${label}`"
+                  class="operation-tag"
+                  :class="{
+                    'operation-tag-added': label === '追加',
+                    'operation-tag-changed': label === '変更',
+                  }"
+                >
+                  {{ label }}
+                </span>
+              </div>
+              <span v-else>—</span>
+            </td>
             <td>{{ row.process_code }} / {{ row.process_name }}</td>
             <td>
               <input
@@ -200,10 +221,87 @@
             </td>
           </tr>
           <tr v-if="!sessions.length">
-            <td colspan="8" class="no-data">データがありません</td>
+            <td colspan="9" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="canView" class="history-panel">
+      <div class="history-header">
+        <div>
+          <h3 class="history-title">追加・変更・削除調査一覧</h3>
+          <p class="history-note">実績変更画面から追加・保存・削除した履歴を表示します。変更内容、変更者、変更時刻、変更理由を確認できます。</p>
+        </div>
+        <div class="history-summary">
+          <span class="history-chip">対象 {{ historyRows.length }} 件</span>
+          <span class="history-chip">追加 {{ addedHistoryCount }} 件</span>
+          <span class="history-chip">変更 {{ changedHistoryCount }} 件</span>
+          <span class="history-chip">削除 {{ deletedHistoryCount }} 件</span>
+        </div>
+      </div>
+      <div class="history-filters">
+        <div class="filter-row">
+          <label>区分</label>
+          <select v-model="historyOperationFilter">
+            <option value="">-- すべて --</option>
+            <option value="added">追加のみ</option>
+            <option value="changed">変更のみ</option>
+            <option value="deleted">削除のみ</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button class="btn btn-secondary" :disabled="historyLoading" @click="loadHistoryRows">再読込</button>
+        </div>
+      </div>
+      <div v-if="historyLoading" class="loading">調査一覧を読込中...</div>
+      <div v-else-if="historyError" class="error">{{ historyError }}</div>
+      <div class="table-wrap history-table-wrap">
+        <table class="list-table history-table">
+          <thead>
+            <tr>
+              <th>レコードID</th>
+              <th>区分</th>
+              <th>工程</th>
+              <th>品番</th>
+              <th>変更内容</th>
+              <th>変更者</th>
+              <th>変更時刻</th>
+              <th>変更理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in historyRows" :key="`history-${row.row_key}`">
+              <td>{{ row.session_record_id }}</td>
+              <td>
+                <div class="operation-tags">
+                  <span
+                    v-for="label in getOperationLabels(row)"
+                    :key="`history-${row.row_key}-${label}`"
+                    class="operation-tag"
+                    :class="{
+                      'operation-tag-added': label === '追加',
+                      'operation-tag-changed': label === '変更',
+                      'operation-tag-deleted': label === '削除',
+                    }"
+                  >
+                    {{ label }}
+                  </span>
+                </div>
+              </td>
+              <td>{{ row.process_code }} / {{ row.process_name }}</td>
+              <td>{{ row.product_code || '—' }}</td>
+              <td>{{ row.change_summary || '—' }}</td>
+              <td>{{ row.changed_by_name || '—' }}</td>
+              <td>{{ formatDateTimeLabel(row.changed_at) }}</td>
+              <td>{{ row.reason || '—' }}</td>
+            </tr>
+            <tr v-if="!historyRows.length">
+              <td colspan="8" class="no-data">追加・変更・削除対象はありません</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -253,6 +351,9 @@ const savingId = ref(null)
 const sessions = ref([])
 const edits = ref({})
 const searched = ref(false)
+const historyLoading = ref(false)
+const historyError = ref('')
+const historyBaseRows = ref([])
 const laserDeleteModal = ref({ visible: false, recordId: null, affectedRows: [], onConfirm: null })
 
 const lines = ref([])
@@ -270,6 +371,7 @@ const newStartedAt = ref('')
 const newEndedAt = ref('')
 const newProductionQty = ref(0)
 const newOperatorName = ref('')
+const newChangeReason = ref('')
 
 // 品番オートコンプリート（工程のラインで絞り込み）
 const lineProducts = ref([])          // 選択工程のライン製品プール
@@ -344,6 +446,7 @@ const endDate = ref(toISODate(new Date(today.getTime() + 24 * 60 * 60 * 1000)))
 const lineId = ref('')
 const processId = ref('')
 const qtyFilter = ref('')  // '' = すべて / '0' = 0のみ / 'nonzero' = 1以上
+const historyOperationFilter = ref('')
 
 const canAccessRecordEdit = (level = 'view') => {
   const user = authState.user
@@ -375,6 +478,59 @@ const toLocalDateTimeInput = (value) => {
   const pad = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+const parseTimestamp = (value) => {
+  if (!value) return null
+  const dt = new Date(value)
+  return Number.isNaN(dt.getTime()) ? null : dt
+}
+
+const formatDateTimeLabel = (value) => {
+  const dt = parseTimestamp(value)
+  if (!dt) return '—'
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}/${pad(dt.getMonth() + 1)}/${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+}
+
+const historyOperationLabelMap = {
+  ADD: '追加',
+  UPDATE: '変更',
+  DELETE: '削除',
+}
+
+const historyLabelsBySessionId = computed(() => {
+  const map = {}
+  historyBaseRows.value.forEach((row) => {
+    const sessionKey = String(row.session_record_id || row.id || '')
+    const label = historyOperationLabelMap[String(row.operation_type || '').toUpperCase()]
+    if (!sessionKey || !label) return
+    if (!map[sessionKey]) map[sessionKey] = []
+    if (!map[sessionKey].includes(label)) map[sessionKey].push(label)
+  })
+  return map
+})
+
+const getOperationLabels = (row) => {
+  const operationType = String(row?.operation_type || '').toUpperCase()
+  if (operationType) {
+    const label = historyOperationLabelMap[operationType]
+    return label ? [label] : []
+  }
+  if (String(row?.record_source || '').toUpperCase() !== 'PROCESS') return []
+  return historyLabelsBySessionId.value[String(row?.id || '')] || []
+}
+
+const historyRows = computed(() => historyBaseRows.value.filter((row) => {
+  const operationType = String(row?.operation_type || '').toUpperCase()
+  if (historyOperationFilter.value === 'added') return operationType === 'ADD'
+  if (historyOperationFilter.value === 'changed') return operationType === 'UPDATE'
+  if (historyOperationFilter.value === 'deleted') return operationType === 'DELETE'
+  return operationType === 'ADD' || operationType === 'UPDATE' || operationType === 'DELETE'
+}))
+
+const addedHistoryCount = computed(() => historyRows.value.filter((row) => String(row?.operation_type || '').toUpperCase() === 'ADD').length)
+const changedHistoryCount = computed(() => historyRows.value.filter((row) => String(row?.operation_type || '').toUpperCase() === 'UPDATE').length)
+const deletedHistoryCount = computed(() => historyRows.value.filter((row) => String(row?.operation_type || '').toUpperCase() === 'DELETE').length)
 
 
 const loadMasters = async () => {
@@ -408,6 +564,31 @@ const buildEditMap = (rows) => {
     }
   })
   edits.value = map
+}
+
+const loadHistoryRows = async () => {
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    const res = await api.processRealtime.getSessionHistory({ limit: 300 })
+    const rows = (Array.isArray(res.data) ? res.data : [])
+      .map((row) => ({
+        ...row,
+        row_key: `PROCESS-HISTORY-${row.id}`,
+      }))
+      .sort((a, b) => {
+        const ta = a.changed_at || ''
+        const tb = b.changed_at || ''
+        return ta < tb ? 1 : ta > tb ? -1 : 0
+      })
+    historyBaseRows.value = rows
+  } catch (e) {
+    console.error('調査一覧読込失敗:', e)
+    historyError.value = '追加・変更調査一覧の取得に失敗しました。'
+    historyBaseRows.value = []
+  } finally {
+    historyLoading.value = false
+  }
 }
 
 const loadSessions = async () => {
@@ -537,6 +718,12 @@ const saveRow = async (row) => {
   const id = row.id
   const edit = edits.value[row.row_key]
   if (!edit) return
+  const changeReason = window.prompt('変更理由を入力してください。', '実績変更')
+  if (changeReason === null) return
+  if (!String(changeReason).trim()) {
+    alert('変更理由を入力してください。')
+    return
+  }
   if (!window.confirm(`レコードID ${id} を更新します。よろしいですか？`)) return
 
   savingId.value = row.row_key
@@ -545,6 +732,7 @@ const saveRow = async (row) => {
       started_at: edit.started_at || null,
       ended_at: edit.ended_at || null,
       production_qty: Number(edit.production_qty || 0),
+      change_reason: String(changeReason).trim(),
     }
     if (String(row?.record_source || '').toUpperCase() === 'PROCESS') {
       payload.defect_qty = Number(edit.defect_qty || 0)
@@ -574,6 +762,7 @@ const saveRow = async (row) => {
       await api.processRealtime.updateSession(id, payload)
     }
     await loadSessions()
+    await loadHistoryRows()
     alert('更新しました。LineBacklog.actual_qty も差分反映済みです。')
   } catch (e) {
     console.error('更新失敗:', e)
@@ -621,9 +810,20 @@ const _execDelete = async (row) => {
         end_record_id: row?.end_record_id ?? null,
       })
     } else {
-      await api.processRealtime.deleteSession(row.id)
+      const changeReason = window.prompt('削除理由を入力してください。', '実績削除')
+      if (changeReason === null) return
+      if (!String(changeReason).trim()) {
+        alert('削除理由を入力してください。')
+        return
+      }
+      await api.processRealtime.deleteSession(row.id, {
+        data: {
+          change_reason: String(changeReason).trim(),
+        },
+      })
     }
     await loadSessions()
+    await loadHistoryRows()
     alert('削除しました。LineBacklog.actual_qty も減算反映済みです。')
   } catch (e) {
     console.error('削除失敗:', e)
@@ -640,6 +840,7 @@ const addSession = async () => {
   if (!newProductCode.value.trim()) { addError.value = '品番を入力してください。'; return }
   if (!newStartedAt.value) { addError.value = '開始日時を入力してください。'; return }
   if (!newEndedAt.value) { addError.value = '終了日時を入力してください。'; return }
+  if (!newChangeReason.value.trim()) { addError.value = '追加理由を入力してください。'; return }
   if (newProductionQty.value < 0) { addError.value = '実績数量は0以上で入力してください。'; return }
   if (!window.confirm('後入力セッションを登録し、LineBacklog.actual_qty に加算します。よろしいですか？')) return
 
@@ -652,6 +853,7 @@ const addSession = async () => {
       ended_at: newEndedAt.value,
       production_qty: newProductionQty.value,
       operator_name: newOperatorName.value,
+      change_reason: newChangeReason.value.trim(),
     })
     // フォームリセット
     newProcessId.value = ''
@@ -660,9 +862,11 @@ const addSession = async () => {
     newEndedAt.value = ''
     newProductionQty.value = 0
     newOperatorName.value = ''
+    newChangeReason.value = ''
     lineProducts.value = []
     showAddForm.value = false
     await loadSessions()
+    await loadHistoryRows()
     alert('追加登録しました。LineBacklog.actual_qty に加算反映済みです。')
   } catch (e) {
     const msg = e.response?.data?.detail || '登録に失敗しました。入力内容を確認してください。'
@@ -676,6 +880,7 @@ const addSession = async () => {
 onMounted(async () => {
   if (!canView.value) return
   await loadMasters()
+  await loadHistoryRows()
 })
 </script>
 
@@ -828,7 +1033,7 @@ onMounted(async () => {
 .list-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 1080px;
 }
 .list-table th,
 .list-table td {
@@ -861,6 +1066,28 @@ onMounted(async () => {
 .action-cell {
   display: flex;
   gap: 8px;
+}
+.operation-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.operation-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.operation-tag-added {
+  background: #dcfce7;
+  color: #166534;
+}
+.operation-tag-changed {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 .no-data {
   text-align: center !important;
@@ -983,7 +1210,64 @@ onMounted(async () => {
   left: 0;
   right: 0;
 }
+.history-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.history-filters {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.history-title {
+  margin: 0;
+  font-size: 16px;
+}
+.history-note {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 12px;
+}
+.history-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.history-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.history-table-wrap {
+  background: #fff;
+}
+.history-table {
+  min-width: 980px;
+}
+@media (max-width: 900px) {
+  .history-header {
+    flex-direction: column;
+  }
+  .history-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 </style>
-
-
-

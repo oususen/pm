@@ -13,6 +13,7 @@ from masters.services.routing_service import build_effective_routing_q, resolve_
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_process_work_session import ProcessWorkSession
+from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
@@ -1176,6 +1177,44 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
             'end_record',
             'created_at',
             'updated_at',
+        ]
+
+
+class ProcessWorkSessionChangeHistorySerializer(serializers.ModelSerializer):
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    changed_by_name = serializers.SerializerMethodField()
+
+    def get_changed_by_name(self, obj):
+        user = getattr(obj, 'changed_by', None)
+        if not user:
+            return ''
+        full_name = (getattr(user, 'get_full_name', lambda: '')() or '').strip()
+        if full_name:
+            return full_name
+        return getattr(user, 'username', '') or ''
+
+    class Meta:
+        model = ProcessWorkSessionChangeHistory
+        fields = [
+            'id',
+            'session',
+            'session_record_id',
+            'operation_type',
+            'process',
+            'process_code',
+            'process_name',
+            'product',
+            'product_code',
+            'product_name',
+            'plan_date',
+            'reason',
+            'change_summary',
+            'before_data',
+            'after_data',
+            'changed_by',
+            'changed_by_name',
+            'changed_at',
         ]
 
 

@@ -18,11 +18,14 @@ export function createProcessRealtimeAPI(client) {
     createSession(data) {
       return client.post('/process-realtime-records/sessions/', data)
     },
+    getSessionHistory(params = {}) {
+      return client.get('/process-realtime-records/session-history/', { params })
+    },
     updateSession(sessionId, data) {
       return client.patch(`/process-realtime-records/sessions/${sessionId}/`, data)
     },
-    deleteSession(sessionId) {
-      return client.delete(`/process-realtime-records/sessions/${sessionId}/`)
+    deleteSession(sessionId, config = {}) {
+      return client.delete(`/process-realtime-records/sessions/${sessionId}/`, config)
     },
     getScrapBreakdown(id) {
       return client.get(`/process-realtime-records/${id}/scrap-breakdown/`)
@@ -41,4 +44,3 @@ export function createProcessRealtimeAPI(client) {
     },
   }
 }
-

@@ -10,6 +10,7 @@ from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_plan_line_setting import ProductionPlanLineSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_process_work_session import ProcessWorkSession
+from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from .models_process_work_session_equipment import ProcessWorkSessionEquipment
 from .models_schedule_config import ScheduleConfig
 from .models_purchase_actual_reconcile import (
@@ -31,6 +32,7 @@ from .models_line_product_display_order import LineProductDisplayOrder
 from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_plan_deviation_config import PlanDeviationLineConfig
 from .models_stocktake_record import StocktakeRecord
+from .models_singleproc_finished_entry import SingleProcFinishedEntry
 
 
 class LineDemand(models.Model):
