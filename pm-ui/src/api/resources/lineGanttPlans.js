@@ -30,4 +30,14 @@ export const createLineGanttPlansAPI = (client) => ({
   subProcessSave(payload) {
     return client.post('/line-gantt-plans/sub-process-save/', payload)
   },
+  getSingleprocFinishedEntries(params = {}) {
+    const queryParams = new URLSearchParams()
+    Object.keys(params).forEach((key) => {
+      if (params[key] !== null && params[key] !== undefined && params[key] !== '') {
+        queryParams.append(key, params[key])
+      }
+    })
+    const query = queryParams.toString()
+    return client.get(`/line-gantt-plans/singleproc-finished-entries/${query ? '?' + query : ''}`)
+  },
 })

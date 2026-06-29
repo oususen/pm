@@ -5094,6 +5094,36 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
             'created_items': serializer.data,
         })
 
+    @action(detail=False, methods=['get'], url_path='singleproc-finished-entries')
+    def singleproc_finished_entries(self, request):
+        """単独計画の完成品エントリ取得"""
+        from .models_singleproc_finished_entry import SingleProcFinishedEntry
+        line_id = request.query_params.get('line')
+        process_id = request.query_params.get('process')
+        date_gte = request.query_params.get('plan_date__gte')
+        date_lte = request.query_params.get('plan_date__lte')
+        if not line_id or not process_id:
+            return Response([])
+        qs = SingleProcFinishedEntry.objects.filter(
+            line_id=line_id, process_id=process_id,
+        ).select_related('product')
+        if date_gte:
+            qs = qs.filter(plan_date__gte=date_gte)
+        if date_lte:
+            qs = qs.filter(plan_date__lte=date_lte)
+        data = [
+            {
+                'plan_date': str(e.plan_date),
+                'sequence_no': e.sequence_no,
+                'product_id': e.product_id,
+                'product_code': e.product.product_code if e.product else '',
+                'product_name': e.product.product_name if e.product else '',
+                'quantity': e.quantity,
+            }
+            for e in qs.order_by('plan_date', 'sequence_no')
+        ]
+        return Response(data)
+
     @action(detail=False, methods=['post'], url_path='sub-process-save')
     def sub_process_save(self, request):
         """
@@ -5101,15 +5131,18 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
         期待payload: {
             line_id, process_id,
             entries: [{ product_id, plan_date, plan_qty, sequence_no }, ...],
+            finished_entries?: [{ product_id, plan_date, quantity, sequence_no }, ...],
             target_dates?: ['2026-06-27', ...],
             change_reason?: str
         }
         """
         from .services.single_process_plan import save_sub_process_plan
+        from .models_singleproc_finished_entry import SingleProcFinishedEntry
 
         line_id = request.data.get('line_id')
         process_id = request.data.get('process_id')
         entries = request.data.get('entries', [])
+        finished_entries = request.data.get('finished_entries', [])
         target_dates = request.data.get('target_dates', [])
         raw_reason = request.data.get('change_reason', 'サブ工程計画入力')
         change_reason = str(raw_reason).strip() if raw_reason else 'サブ工程計画入力'
@@ -5139,6 +5172,34 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             logger.error('sub_process_save error: %s', e, exc_info=True)
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if finished_entries:
+            try:
+                delete_dates = set(target_dates)
+                for fe in finished_entries:
+                    d = str(fe.get('plan_date', '')).strip()
+                    if d:
+                        delete_dates.add(d)
+                if delete_dates:
+                    SingleProcFinishedEntry.objects.filter(
+                        line_id=line_id, process_id=process_id, plan_date__in=list(delete_dates),
+                    ).delete()
+                objs = []
+                for fe in finished_entries:
+                    pid = fe.get('product_id')
+                    qty = int(fe.get('quantity', 0))
+                    seq = int(fe.get('sequence_no', 0))
+                    plan_date = str(fe.get('plan_date', '')).strip()
+                    if pid and qty > 0 and seq > 0 and plan_date:
+                        objs.append(SingleProcFinishedEntry(
+                            line_id=line_id, process_id=process_id,
+                            plan_date=plan_date, sequence_no=seq,
+                            product_id=int(pid), quantity=qty,
+                        ))
+                if objs:
+                    SingleProcFinishedEntry.objects.bulk_create(objs)
+            except Exception as e:
+                logger.warning('finished_entries save error: %s', e)
 
         return Response(result)
 
@@ -8418,6 +8479,8 @@ class ProductionPlanLineSettingView(APIView):
     PLANNED_STOCK_RULES_KEY = 'production.planned_stock_calc_rules'
     GANTT_EXCLUDED_PROCESS_RULES_KEY = 'production.gantt_excluded_process_rules'
     SUB_PROCESS_CANDIDATE_RULES_KEY = 'production.sub_process_candidate_product_rules'
+    CHECKSHEET_PRODUCT_MAPPING_KEY = 'production.checksheet_product_mapping'
+
     def _normalize(self, value):
         return str(value or '').strip().upper()
 
@@ -8543,6 +8606,41 @@ class ProductionPlanLineSettingView(APIView):
             normalized.append({'processCode': process_code, 'productCodes': product_codes})
         return normalized
 
+    def _normalize_checksheet_product_mapping(self, rows):
+        source = rows if isinstance(rows, list) else []
+        normalized = []
+        seen = set()
+        for row in source:
+            process_code = self._normalize((row or {}).get('processCode'))
+            if not process_code or process_code in seen:
+                continue
+            mappings_source = (row or {}).get('mappings')
+            if not isinstance(mappings_source, list):
+                continue
+            mappings = []
+            sub_seen = set()
+            for m in mappings_source:
+                sub_code = self._normalize((m or {}).get('sub'))
+                finished_codes_source = (m or {}).get('finished')
+                if not sub_code or not isinstance(finished_codes_source, list) or sub_code in sub_seen:
+                    continue
+                finished_codes = []
+                fin_seen = set()
+                for fc in finished_codes_source:
+                    nfc = self._normalize(fc)
+                    if not nfc or nfc in fin_seen:
+                        continue
+                    fin_seen.add(nfc)
+                    finished_codes.append(nfc)
+                if not finished_codes:
+                    continue
+                sub_seen.add(sub_code)
+                mappings.append({'sub': sub_code, 'finished': finished_codes})
+            if mappings:
+                seen.add(process_code)
+                normalized.append({'processCode': process_code, 'mappings': mappings})
+        return normalized
+
     def _load_special_rules(self):
         special_rules = {
             'prev_day_shift_rules': [],
@@ -8550,6 +8648,7 @@ class ProductionPlanLineSettingView(APIView):
             'planned_stock_calc_rules': [],
             'gantt_excluded_process_rules': [],
             'sub_process_candidate_rules': [],
+            'checksheet_product_mapping': [],
         }
         rules_row = SystemSetting.objects.filter(key=self.PROCESS_PREV_DAY_SHIFT_RULES_KEY).first()
         if rules_row:
@@ -8579,6 +8678,12 @@ class ProductionPlanLineSettingView(APIView):
         if sub_process_candidate_row:
             try:
                 special_rules['sub_process_candidate_rules'] = self._normalize_sub_process_candidate_rules(json.loads(sub_process_candidate_row.value or '[]'))
+            except Exception:
+                pass
+        checksheet_mapping_row = SystemSetting.objects.filter(key=self.CHECKSHEET_PRODUCT_MAPPING_KEY).first()
+        if checksheet_mapping_row:
+            try:
+                special_rules['checksheet_product_mapping'] = self._normalize_checksheet_product_mapping(json.loads(checksheet_mapping_row.value or '[]'))
             except Exception:
                 pass
         return special_rules
@@ -8677,6 +8782,12 @@ class ProductionPlanLineSettingView(APIView):
             SystemSetting.objects.update_or_create(
                 key=self.SUB_PROCESS_CANDIDATE_RULES_KEY,
                 defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'サブ工程計画の工程別候補製品設定', 'updated_by': user},
+            )
+        if 'checksheet_product_mapping' in raw_special_rules:
+            rules = self._normalize_checksheet_product_mapping(raw_special_rules['checksheet_product_mapping'])
+            SystemSetting.objects.update_or_create(
+                key=self.CHECKSHEET_PRODUCT_MAPPING_KEY,
+                defaults={'value': json.dumps(rules, ensure_ascii=False), 'description': 'サブ工程→完成品のチェックシート用製品マッピング', 'updated_by': user},
             )
 
         return Response(self._build_response())

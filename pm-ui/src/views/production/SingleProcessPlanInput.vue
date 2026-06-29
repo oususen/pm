@@ -80,6 +80,59 @@
       </div>
     </div>
 
+    <div v-if="selectedSubProcessId && selectedRefProcessId" class="candidate-card mapping-card">
+      <div class="candidate-header" @click="mappingEditorOpen = !mappingEditorOpen">
+        <span class="candidate-arrow">{{ mappingEditorOpen ? '▼' : '▶' }}</span>
+        チェックシート用製品マッピング
+        <span class="candidate-meta">
+          サブ品→完成品
+          <template v-if="selectedChecksheetMapping"> / {{ selectedChecksheetMapping.mappings.length }}件設定中</template>
+        </span>
+      </div>
+      <div v-show="mappingEditorOpen" class="candidate-body">
+        <div class="candidate-help">
+          サブ工程の品番と参照工程（完成品）の品番の対応を設定します。チェックシート発行時に完成品の品番が使われます。
+        </div>
+        <div v-if="mappingSaveMsg" class="candidate-save-msg" :class="{ error: mappingSaveError }">
+          {{ mappingSaveMsg }}
+        </div>
+        <div v-if="subProcessProducts.length" class="mapping-table">
+          <div v-for="subProd in subProcessProducts" :key="`map-${subProd.id}`" class="mapping-row">
+            <div class="mapping-sub-label">{{ subProd.product_code }}</div>
+            <div class="mapping-arrow">→</div>
+            <div class="mapping-finished-list">
+              <span
+                v-for="fin in (getMappingDraftForSub(subProd.product_code)?.finished || [])"
+                :key="`fin-${fin}`"
+                class="mapping-tag"
+              >
+                {{ fin }}
+                <button type="button" class="mapping-tag-remove" @click="removeFinishedFromMapping(subProd.product_code, fin)">✕</button>
+              </span>
+              <select
+                class="mapping-add-select"
+                @change="addFinishedToMapping(subProd.product_code, $event.target.value); $event.target.value = ''"
+              >
+                <option value="">＋完成品追加</option>
+                <option
+                  v-for="refProd in refProcessProducts.filter((rp) => !(getMappingDraftForSub(subProd.product_code)?.finished || []).includes(normalizeProductCode(rp.product_code)))"
+                  :key="refProd.id"
+                  :value="refProd.product_code"
+                >{{ refProd.product_code }} {{ refProd.product_name || '' }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div v-else class="candidate-help">サブ工程の候補製品がありません。</div>
+        <div class="candidate-actions" style="margin-top: 8px;">
+          <button class="btn" type="button" @click="resetChecksheetMapping" :disabled="mappingSaving">マッピング解除</button>
+          <button class="btn btn-primary" type="button" @click="saveChecksheetMapping" :disabled="mappingSaving || !selectedSubProcessCode">
+            {{ mappingSaving ? '保存中...' : 'マッピング保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading-msg">読み込み中...</div>
     <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
 
@@ -135,6 +188,14 @@
             <th class="sticky-col seq-header" rowspan="2">順</th>
             <th v-for="d in dateColumns" :key="`h2-${d.dateStr}`" colspan="2" :class="dateHeaderClass(d)">
               {{ d.label }}<span class="dow">{{ d.dow }}</span>
+              <button
+                v-if="selectedChecksheetMapping"
+                type="button"
+                class="btn-day-plus"
+                :disabled="saving"
+                @click="createChecksheetForDay(d.dateStr)"
+                title="この日の計画から工程一体チェックシートを作成"
+              >＋</button>
             </th>
           </tr>
           <tr>
@@ -155,7 +216,7 @@
                   class="prod-select"
                 >
                   <option value=""></option>
-                  <option v-for="prod in subProcessProducts" :key="prod.id" :value="prod.id">
+                  <option v-for="prod in subGridDropdownProducts" :key="prod.id" :value="prod.id">
                     {{ prod.product_code }}
                   </option>
                 </select>
@@ -288,6 +349,32 @@ const normalizeSubProcessCandidateRules = (rows) => {
   return normalized
 }
 
+const normalizeChecksheetProductMapping = (rows) => {
+  const source = Array.isArray(rows) ? rows : []
+  const normalized = []
+  const seen = new Set()
+  source.forEach((row) => {
+    const processCode = normalizeProcessCode(row?.processCode)
+    if (!processCode || seen.has(processCode)) return
+    const mappings = Array.isArray(row?.mappings) ? row.mappings : []
+    const normalizedMappings = []
+    const subSeen = new Set()
+    mappings.forEach((m) => {
+      const sub = normalizeProductCode(m?.sub)
+      const finished = Array.isArray(m?.finished)
+        ? Array.from(new Set(m.finished.map((c) => normalizeProductCode(c)).filter(Boolean)))
+        : []
+      if (!sub || !finished.length || subSeen.has(sub)) return
+      subSeen.add(sub)
+      normalizedMappings.push({ sub, finished })
+    })
+    if (!normalizedMappings.length) return
+    seen.add(processCode)
+    normalized.push({ processCode, mappings: normalizedMappings })
+  })
+  return normalized
+}
+
 const relationTypeLabel = (relationType) => {
   switch (relationType) {
     case 'coproduct_parent':
@@ -350,6 +437,14 @@ const candidateSaving = ref(false)
 const candidateSaveMsg = ref('')
 const candidateSaveError = ref(false)
 
+const checksheetProductMapping = ref([])
+const mappingEditorOpen = ref(false)
+const mappingDraft = ref([])
+const mappingSaving = ref(false)
+const mappingSaveMsg = ref('')
+const mappingSaveError = ref(false)
+const refProcessProducts = ref([])
+
 const favorites = ref([])
 const selectedFavoriteId = ref('')
 const favoriteName = ref('')
@@ -359,6 +454,22 @@ const selectedSubProcessCode = computed(() => normalizeProcessCode(selectedSubPr
 const selectedSubProcessCandidateRule = computed(() => (
   subProcessCandidateRules.value.find((rule) => rule.processCode === selectedSubProcessCode.value) || null
 ))
+
+const selectedChecksheetMapping = computed(() => (
+  checksheetProductMapping.value.find((rule) => rule.processCode === selectedSubProcessCode.value) || null
+))
+
+const finishedToSubMap = computed(() => {
+  const map = new Map()
+  const rule = selectedChecksheetMapping.value
+  if (!rule) return map
+  rule.mappings.forEach((m) => {
+    m.finished.forEach((finCode) => {
+      map.set(finCode, m.sub)
+    })
+  })
+  return map
+})
 
 const mergedSubProcessProducts = computed(() => {
   const map = new Map()
@@ -395,6 +506,23 @@ const subProcessProducts = computed(() => {
   const allowedCodes = new Set(rule.productCodes)
   const filtered = allCandidates.filter((product) => allowedCodes.has(normalizeProductCode(product.product_code)))
   return filtered.length ? filtered : allCandidates
+})
+
+const subGridDropdownProducts = computed(() => {
+  const mapping = selectedChecksheetMapping.value
+  if (!mapping) return subProcessProducts.value
+  const mappedSubCodes = new Set(mapping.mappings.map((m) => m.sub))
+  const result = subProcessProducts.value.filter((p) => !mappedSubCodes.has(normalizeProductCode(p.product_code)))
+  const refMap = new Map(refProcessProducts.value.map((p) => [normalizeProductCode(p.product_code), p]))
+  mapping.mappings.forEach((m) => {
+    const subInCandidates = subProcessProducts.value.some((p) => normalizeProductCode(p.product_code) === m.sub)
+    if (!subInCandidates) return
+    m.finished.forEach((finCode) => {
+      const refProd = refMap.get(finCode)
+      if (refProd) result.push(refProd)
+    })
+  })
+  return result.sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
 })
 
 const refProcessLabel = computed(() => {
@@ -460,7 +588,9 @@ const subInputRowCount = computed(() => {
 const getSubCell = (dateStr, seq) => subGrid.value[`${dateStr}|${seq}`] || null
 
 const getProductInfo = (productId) => {
-  const product = mergedSubProcessProducts.value.find((item) => String(item.id) === String(productId))
+  const pid = String(productId)
+  const product = mergedSubProcessProducts.value.find((item) => String(item.id) === pid)
+    || refProcessProducts.value.find((item) => String(item.id) === pid)
   return {
     productCode: product?.product_code || '',
     productName: product?.product_name || '',
@@ -637,6 +767,174 @@ const resetCandidateRule = async () => {
   }
 }
 
+const loadRefProcessProducts = async () => {
+  if (!selectedRefProcessId.value) {
+    refProcessProducts.value = []
+    return
+  }
+  try {
+    const res = await api.processes.getRelatedProducts(selectedRefProcessId.value)
+    const products = Array.isArray(res?.data) ? res.data : []
+    refProcessProducts.value = products
+      .filter((p) => ['output_product', 'coproduct_child', 'coproduct_parent', 'bom_process_item'].includes(p.relation_type))
+      .map((p) => ({ id: p.id, product_code: p.product_code, product_name: p.product_name }))
+      .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
+  } catch (e) {
+    console.warn('参照工程製品取得失敗', e)
+    refProcessProducts.value = []
+  }
+}
+
+const buildMappingDraft = () => {
+  const rule = selectedChecksheetMapping.value
+  if (rule) {
+    mappingDraft.value = rule.mappings.map((m) => ({ sub: m.sub, finished: [...m.finished] }))
+  } else {
+    mappingDraft.value = []
+  }
+}
+
+const getMappingDraftForSub = (subCode) => {
+  const norm = normalizeProductCode(subCode)
+  return mappingDraft.value.find((m) => m.sub === norm) || null
+}
+
+const addFinishedToMapping = (subCode, finishedCode) => {
+  const normSub = normalizeProductCode(subCode)
+  const normFin = normalizeProductCode(finishedCode)
+  if (!normSub || !normFin) return
+  let entry = mappingDraft.value.find((m) => m.sub === normSub)
+  if (!entry) {
+    entry = { sub: normSub, finished: [] }
+    mappingDraft.value.push(entry)
+  }
+  if (!entry.finished.includes(normFin)) {
+    entry.finished.push(normFin)
+  }
+}
+
+const removeFinishedFromMapping = (subCode, finishedCode) => {
+  const normSub = normalizeProductCode(subCode)
+  const normFin = normalizeProductCode(finishedCode)
+  const entry = mappingDraft.value.find((m) => m.sub === normSub)
+  if (!entry) return
+  entry.finished = entry.finished.filter((f) => f !== normFin)
+  if (!entry.finished.length) {
+    mappingDraft.value = mappingDraft.value.filter((m) => m.sub !== normSub)
+  }
+}
+
+const saveChecksheetMapping = async () => {
+  if (!selectedSubProcessCode.value) return
+  mappingSaving.value = true
+  mappingSaveMsg.value = ''
+  mappingSaveError.value = false
+  try {
+    const nextRules = checksheetProductMapping.value.filter((r) => r.processCode !== selectedSubProcessCode.value)
+    const validMappings = mappingDraft.value.filter((m) => m.sub && m.finished.length)
+    if (validMappings.length) {
+      nextRules.push({ processCode: selectedSubProcessCode.value, mappings: validMappings })
+    }
+    const payload = { special_rules: { checksheet_product_mapping: nextRules } }
+    const res = await api.productionPlanLineSettings.saveSettings(payload)
+    checksheetProductMapping.value = normalizeChecksheetProductMapping(res?.data?.special_rules?.checksheet_product_mapping)
+    buildMappingDraft()
+    mappingSaveMsg.value = 'マッピングを保存しました。'
+  } catch (e) {
+    console.warn('マッピング保存失敗', e)
+    mappingSaveError.value = true
+    mappingSaveMsg.value = e?.response?.data?.detail || 'マッピングの保存に失敗しました。'
+  } finally {
+    mappingSaving.value = false
+  }
+}
+
+const resetChecksheetMapping = async () => {
+  if (!selectedSubProcessCode.value) return
+  mappingSaving.value = true
+  mappingSaveMsg.value = ''
+  mappingSaveError.value = false
+  try {
+    const nextRules = checksheetProductMapping.value.filter((r) => r.processCode !== selectedSubProcessCode.value)
+    const payload = { special_rules: { checksheet_product_mapping: nextRules } }
+    const res = await api.productionPlanLineSettings.saveSettings(payload)
+    checksheetProductMapping.value = normalizeChecksheetProductMapping(res?.data?.special_rules?.checksheet_product_mapping)
+    buildMappingDraft()
+    mappingSaveMsg.value = 'マッピングを解除しました。'
+  } catch (e) {
+    console.warn('マッピング解除失敗', e)
+    mappingSaveError.value = true
+    mappingSaveMsg.value = e?.response?.data?.detail || 'マッピングの解除に失敗しました。'
+  } finally {
+    mappingSaving.value = false
+  }
+}
+
+const resolveSubProductId = (productId) => {
+  const info = getProductInfo(productId)
+  const normCode = normalizeProductCode(info.productCode)
+  const subCode = finishedToSubMap.value.get(normCode)
+  if (!subCode) return productId
+  const subProd = mergedSubProcessProducts.value.find((p) => normalizeProductCode(p.product_code) === subCode)
+  return subProd ? String(subProd.id) : productId
+}
+
+const createChecksheetForDay = async (dateStr) => {
+  if (!selectedSubProcessId.value || !selectedLineId.value) {
+    alert('ラインとサブ工程を選択してください。')
+    return
+  }
+  if (!dateStr) return
+  const mapping = selectedChecksheetMapping.value
+  if (!mapping) {
+    alert('チェックシート用マッピングが設定されていません。')
+    return
+  }
+  const ok = window.confirm('チェックシート作成しますか？')
+  if (!ok) return
+
+  const targets = []
+  Object.keys(subGrid.value).forEach((key) => {
+    if (!key.startsWith(`${dateStr}|`)) return
+    const cell = subGrid.value[key]
+    if (!cell.productId || !cell.qty || cell.qty <= 0) return
+    targets.push({ productId: cell.productId, productCode: normalizeProductCode(cell.productCode), qty: cell.qty })
+  })
+
+  if (!targets.length) {
+    alert('この日の計画数量がありません。')
+    return
+  }
+
+  saving.value = true
+  try {
+    let created = 0
+    const errors = []
+    for (const target of targets) {
+      try {
+        await api.integratedChecksheets.prepareBatch({
+          product: target.productId,
+          line: selectedLineId.value,
+          quantity: target.qty,
+          plan_date: dateStr,
+          lot_no: '',
+        })
+        created += 1
+      } catch (e) {
+        const msg = e?.response?.data?.detail || e?.message || '作成失敗'
+        errors.push(`${target.productCode}: ${msg}`)
+      }
+    }
+    if (errors.length) {
+      alert(`チェックシート作成: ${created}件成功 / ${errors.length}件失敗\n${errors.join('\n')}`)
+    } else {
+      alert(`チェックシートを ${created} 件作成しました。`)
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
 const saveSubProcessPlan = async () => {
   if (!selectedSubProcessId.value || !selectedLineId.value) return
   saving.value = true
@@ -647,7 +945,7 @@ const saveSubProcessPlan = async () => {
     if (!cell.productId || !cell.qty || cell.qty <= 0) return
     const [planDate, seqStr] = key.split('|')
     entries.push({
-      product_id: cell.productId,
+      product_id: resolveSubProductId(cell.productId),
       plan_date: planDate,
       plan_qty: cell.qty,
       sequence_no: parseInt(seqStr, 10),
@@ -663,13 +961,32 @@ const saveSubProcessPlan = async () => {
     }
   }
 
+  const finishedEntries = []
+  if (selectedChecksheetMapping.value) {
+    Object.keys(subGrid.value).forEach((key) => {
+      const cell = subGrid.value[key]
+      if (!cell.productId || !cell.qty || cell.qty <= 0) return
+      const [planDate, seqStr] = key.split('|')
+      finishedEntries.push({
+        product_id: cell.productId,
+        plan_date: planDate,
+        quantity: cell.qty,
+        sequence_no: parseInt(seqStr, 10),
+      })
+    })
+  }
+
   try {
-    const res = await api.lineGanttPlans.subProcessSave({
+    const payload = {
       line_id: selectedLineId.value,
       process_id: selectedSubProcessId.value,
       entries,
       target_dates: allDates,
-    })
+    }
+    if (finishedEntries.length) {
+      payload.finished_entries = finishedEntries
+    }
+    const res = await api.lineGanttPlans.subProcessSave(payload)
     const data = res?.data || {}
     await loadData()
     ganttReloadKey.value += 1
@@ -821,11 +1138,14 @@ const loadPlanSettings = async () => {
   try {
     const res = await api.productionPlanLineSettings.getSettings()
     subProcessCandidateRules.value = normalizeSubProcessCandidateRules(res?.data?.special_rules?.sub_process_candidate_rules)
+    checksheetProductMapping.value = normalizeChecksheetProductMapping(res?.data?.special_rules?.checksheet_product_mapping)
   } catch (e) {
     console.warn('サブ工程候補製品設定取得失敗', e)
     subProcessCandidateRules.value = []
+    checksheetProductMapping.value = []
   } finally {
     buildCandidateDraftFromRule()
+    buildMappingDraft()
   }
 }
 
@@ -914,13 +1234,46 @@ const loadData = async () => {
       })
     })
     refGrid.value = nextRefGrid
-    subGrid.value = subEntries
-    loadedGridProducts.value = Array.from(loadedProductsMap.values()).sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
-    lastLoadedSubEntryCount.value = Object.keys(subEntries).length
 
     if (selectedSubProcessId.value) {
       await loadSubProcessProducts()
     }
+
+    let finalSubEntries = subEntries
+    if (selectedChecksheetMapping.value && selectedSubProcessId.value) {
+      try {
+        const feRes = await api.lineGanttPlans.getSingleprocFinishedEntries({
+          line: selectedLineId.value,
+          process: selectedSubProcessId.value,
+          plan_date__gte: startDate.value,
+          plan_date__lte: endDate.value,
+        })
+        const feData = Array.isArray(feRes?.data) ? feRes.data : []
+        if (feData.length) {
+          finalSubEntries = {}
+          feData.forEach((fe) => {
+            const key = `${fe.plan_date}|${fe.sequence_no}`
+            finalSubEntries[key] = {
+              productId: String(fe.product_id),
+              productCode: fe.product_code || '',
+              productName: fe.product_name || '',
+              qty: fe.quantity > 0 ? fe.quantity : 0,
+            }
+            loadedProductsMap.set(String(fe.product_id), {
+              id: fe.product_id,
+              product_code: fe.product_code || '',
+              product_name: fe.product_name || '',
+            })
+          })
+        }
+      } catch (e) {
+        console.warn('完成品エントリ取得失敗、ガントデータで代替', e)
+      }
+    }
+
+    subGrid.value = finalSubEntries
+    loadedGridProducts.value = Array.from(loadedProductsMap.values()).sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
+    lastLoadedSubEntryCount.value = Object.keys(finalSubEntries).length
   } catch (e) {
     console.error('読込エラー', e)
     errorMsg.value = 'データ読み込みに失敗しました'
@@ -932,6 +1285,8 @@ const loadData = async () => {
 watch(selectedSubProcessId, async () => {
   candidateSaveMsg.value = ''
   candidateSaveError.value = false
+  mappingSaveMsg.value = ''
+  mappingSaveError.value = false
   loadedGridProducts.value = []
   if (selectedSubProcessId.value) {
     await loadSubProcessProducts()
@@ -939,6 +1294,11 @@ watch(selectedSubProcessId, async () => {
     subProcessAutoProducts.value = []
     candidateDraftProductCodes.value = []
   }
+  buildMappingDraft()
+})
+
+watch(selectedRefProcessId, () => {
+  loadRefProcessProducts()
 })
 
 watch(hideWeekends, (v) => {
@@ -1054,4 +1414,16 @@ onMounted(async () => {
 .gantt-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #111827; }
 .gantt-save-btn { font-weight: bold; }
 .gantt-save-btn.gantt-save-dirty { background: #dc2626; color: #fff; border-color: #b91c1c; }
+.mapping-card { border-color: #c8d6e5; background: #f8faff; }
+.mapping-table { display: flex; flex-direction: column; gap: 6px; }
+.mapping-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid #edf1f6; border-radius: 4px; background: #fff; }
+.mapping-sub-label { font-size: 12px; font-weight: bold; min-width: 120px; white-space: nowrap; }
+.mapping-arrow { font-size: 14px; color: #888; }
+.mapping-finished-list { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.mapping-tag { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 3px; padding: 2px 6px; }
+.mapping-tag-remove { background: none; border: none; color: #d32f2f; font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1; }
+.mapping-add-select { font-size: 11px; padding: 2px 4px; border: 1px solid #ddd; border-radius: 3px; max-width: 200px; }
+.btn-day-plus { display: inline-block; margin-left: 2px; padding: 0 3px; font-size: 10px; line-height: 14px; border: 1px solid #4caf50; border-radius: 2px; background: #e8f5e9; color: #2e7d32; cursor: pointer; vertical-align: middle; }
+.btn-day-plus:hover { background: #c8e6c9; }
+.btn-day-plus:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
