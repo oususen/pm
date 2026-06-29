@@ -8,8 +8,9 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
-from masters.models import Line, Process, Product
+from masters.models import Line, Process, Product, BOM, BOMItem
 from production.models_line_backlog import LineBacklog
+from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.models_process_work_session import ProcessWorkSession
 from production.views_process_realtime import (
@@ -107,6 +108,71 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertEqual(mock_recalculate.call_args[0][0].id, session.id)
 
     @patch('production.views_process_realtime._recalculate_inventory_after_session_change')
+    @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
+    def test_create_manual_session_creates_coproduct_child_records(self, _mock_plan_date, mock_recalculate):
+        parent = Product.objects.create(
+            product_code='STYD-SET',
+            product_name='連産親',
+            is_virtual_set=True,
+        )
+        child = Product.objects.create(
+            product_code='CHILD-01',
+            product_name='連産子',
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+            is_coproduct=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=child,
+            quantity=Decimal('2'),
+            process=self.process,
+            line=self.line,
+        )
+
+        view = ProcessRealtimeRecordViewSet.as_view({'post': 'sessions'})
+        request = self.factory.post(
+            '/api/process-realtime/sessions/',
+            {
+                'process_id': self.process.id,
+                'product_code': parent.product_code,
+                'started_at': '2026-03-05T09:00:00',
+                'ended_at': '2026-03-05T10:00:00',
+                'production_qty': 5,
+                'change_reason': '連産補完',
+            },
+            format='json',
+        )
+
+        response = view(request)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        session = ProcessWorkSession.objects.get(product=parent)
+        records = ProcessRealtimeRecord.objects.filter(
+            record_type='PRODUCTION',
+            event_data__work_session_id=session.id,
+        ).order_by('product_code')
+        self.assertEqual(records.count(), 2)
+        parent_record = records.get(product=parent)
+        child_record = records.get(product=child)
+        self.assertEqual(parent_record.qty, Decimal('5'))
+        self.assertEqual(child_record.qty, Decimal('10'))
+        self.assertEqual(child_record.event_data.get('coproduct_parent_record_id'), parent_record.id)
+        child_backlog = LineBacklog.objects.get(
+            line=self.line,
+            process=self.process,
+            product=child,
+            plan_date=date(2026, 3, 5),
+            sequence_no=0,
+        )
+        self.assertEqual(child_backlog.actual_qty, 10)
+        mock_recalculate.assert_called_once()
+
+    @patch('production.views_process_realtime._recalculate_inventory_after_session_change')
     def test_session_detail_update_creates_history(self, mock_recalculate):
         started_at = self.make_dt(2026, 3, 5, 9)
         ended_at = self.make_dt(2026, 3, 5, 10)
@@ -145,6 +211,87 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertIn('実績数量', history.change_summary)
         self.assertEqual(int(history.before_data['production_qty']), 5)
         self.assertEqual(int(history.after_data['production_qty']), 7)
+        mock_recalculate.assert_called_once()
+
+    @patch('production.views_process_realtime._recalculate_inventory_after_session_change')
+    def test_session_detail_update_syncs_coproduct_child_record_qty(self, mock_recalculate):
+        parent = Product.objects.create(
+            product_code='STYD-UPD',
+            product_name='連産親更新',
+            is_virtual_set=True,
+        )
+        child = Product.objects.create(
+            product_code='CHILD-UPD',
+            product_name='連産子更新',
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+            is_coproduct=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=child,
+            quantity=Decimal('3'),
+            process=self.process,
+            line=self.line,
+        )
+        session = ProcessWorkSession.objects.create(
+            process=self.process,
+            product=parent,
+            product_code=parent.product_code,
+            product_name=parent.product_name,
+            plan_date=date(2026, 3, 5),
+            session_no=1,
+            session_type='WORK',
+            start_action='MANUAL',
+            end_action='END',
+            started_at=self.make_dt(2026, 3, 5, 9),
+            ended_at=self.make_dt(2026, 3, 5, 10),
+            status='CLOSED',
+            duration_seconds=3600,
+            production_qty=2,
+        )
+        ProcessRealtimeRecord.objects.create(
+            process=self.process,
+            product=parent,
+            product_code=parent.product_code,
+            product_name=parent.product_name,
+            record_type='PRODUCTION',
+            qty=Decimal('2'),
+            event_data={'work_session_id': session.id},
+        )
+        ProcessRealtimeRecord.objects.create(
+            process=self.process,
+            product=child,
+            product_code=child.product_code,
+            product_name=child.product_name,
+            record_type='PRODUCTION',
+            qty=Decimal('6'),
+            event_data={'work_session_id': session.id, 'coproduct_parent_record_id': 99999},
+        )
+
+        view = ProcessRealtimeRecordViewSet.as_view({'patch': 'session_detail'})
+        request = self.factory.patch(
+            f'/api/process-realtime/sessions/{session.id}/',
+            {
+                'production_qty': 4,
+                'change_reason': '連産数量訂正',
+            },
+            format='json',
+        )
+        response = view(request, session_id=session.id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        records = ProcessRealtimeRecord.objects.filter(
+            record_type='PRODUCTION',
+            event_data__work_session_id=session.id,
+        )
+        self.assertEqual(records.count(), 2)
+        self.assertEqual(records.get(product=parent).qty, Decimal('4'))
+        self.assertEqual(records.get(product=child).qty, Decimal('12'))
         mock_recalculate.assert_called_once()
 
     @patch('production.views_process_realtime._recalculate_inventory_after_session_change')

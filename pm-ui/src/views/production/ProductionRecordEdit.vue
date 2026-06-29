@@ -393,9 +393,26 @@ watch(() => newProcessId.value, async (processId) => {
 
   productSearching.value = true
   try {
-    const res = await api.products.getLineFinalCandidates(lineId, processId)
-    const group = (res.data || []).find((g) => String(g.line_id) === String(lineId))
-    lineProducts.value = group?.products || []
+    const [candidateRes, relatedRes] = await Promise.all([
+      api.products.getLineFinalCandidates(lineId, processId),
+      api.processes.getRelatedProducts(processId),
+    ])
+    const group = (candidateRes.data || []).find((g) => String(g.line_id) === String(lineId))
+    const baseProducts = Array.isArray(group?.products) ? group.products : []
+    const relatedProducts = Array.isArray(relatedRes?.data) ? relatedRes.data : []
+    const merged = [...baseProducts]
+    const seenKeys = new Set(
+      merged.map((p) => String(p?.id || p?.product || p?.product_code || '').trim()).filter(Boolean)
+    )
+    relatedProducts
+      .filter((p) => String(p?.relation_type || '').toLowerCase() === 'coproduct_parent')
+      .forEach((p) => {
+        const key = String(p?.id || p?.product_code || '').trim()
+        if (!key || seenKeys.has(key)) return
+        merged.push(p)
+        seenKeys.add(key)
+      })
+    lineProducts.value = merged
   } catch {
     lineProducts.value = []
   } finally {
@@ -629,7 +646,7 @@ const loadSessions = async () => {
     const processRows = (Array.isArray(processRes.data) ? processRes.data : []).map((row) => ({
       ...row,
       record_source: 'PROCESS',
-      row_key: `PROCESS-${row.id}`,
+      row_key: `PROCESS-${row.id}-${row.coproduct_source_record_id || row.product || row.product_code || 'base'}`,
     }))
     const brakeRows = (Array.isArray(brakeRes.data) ? brakeRes.data : []).map((row) => ({
       ...row,

@@ -21,7 +21,9 @@ from .serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     ProcessWorkSessionSerializer,
     ProcessWorkSessionChangeHistorySerializer,
+    _build_session_meta,
     build_scrap_multiplier_details,
+    expand_coproduct_children_production,
     _resolve_product_process_line,
     resolve_workday_date_for_process,
     _next_session_no,
@@ -266,6 +268,52 @@ def _update_coproduct_children_records(session_obj, new_parent_qty):
         if ratio is not None:
             record.qty = Decimal(str(new_parent_qty)) * ratio
             record.save(update_fields=['qty'])
+
+
+def _rebuild_session_production_records(session_obj):
+    """手入力セッションに紐づく親・連産子の生産実績レコードを再構築する。"""
+    if not session_obj or not session_obj.process_id or not session_obj.product_id:
+        return
+
+    ProcessRealtimeRecord.objects.filter(
+        record_type='PRODUCTION',
+        event_data__work_session_id=session_obj.id,
+    ).delete()
+
+    qty_decimal = Decimal(str(session_obj.production_qty or 0))
+    event_data = {
+        'source': 'MANUAL_RECORD_EDIT',
+        'operator_action': 'MANUAL',
+        'work_session_id': session_obj.id,
+        'is_manual_record_edit': True,
+    }
+    session_meta = _build_session_meta(session_obj)
+    if session_meta:
+        event_data['session'] = session_meta
+
+    parent_record = ProcessRealtimeRecord.objects.create(
+        process=session_obj.process,
+        product=session_obj.product,
+        product_code=session_obj.product_code,
+        product_name=session_obj.product_name,
+        record_type='PRODUCTION',
+        qty=qty_decimal,
+        equipment_state=None,
+        event_data=event_data,
+        operator_name=session_obj.operator_name or '',
+    )
+
+    expand_coproduct_children_production(
+        process=session_obj.process,
+        product=session_obj.product,
+        parent_qty=qty_decimal,
+        plan_date=session_obj.plan_date,
+        operator_name=session_obj.operator_name or '',
+        parent_record_id=parent_record.id,
+        base_event_data=event_data,
+        session=session_obj,
+        session_issues=session_obj.issue_flags or [],
+    )
 
 
 def _adjust_backlog_scrap_for_session(session_obj, delta_qty):
@@ -838,6 +886,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                         expanded['product_code'] = child.get('product_code')
                         expanded['product_name'] = child.get('product_name')
                         expanded['production_qty'] = child.get('production_qty') or 0
+                        expanded['coproduct_source_record_id'] = child.get('source_record_id')
                         expanded['is_coproduct_child'] = True
                         expanded['coproduct_parent_product_code'] = child.get('coproduct_parent_product_code')
                         enrich_row_metrics(expanded)
@@ -845,6 +894,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 continue
 
             expanded = dict(row)
+            expanded['coproduct_source_record_id'] = None
             expanded['is_coproduct_child'] = False
             expanded['coproduct_parent_product_code'] = None
             enrich_row_metrics(expanded)
@@ -951,6 +1001,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 before_data={},
                 after_data=_serialize_session_snapshot(session),
             )
+            _rebuild_session_production_records(session)
             if production_qty:
                 _adjust_backlog_actual_for_session(session, int(production_qty))
                 _adjust_coproduct_children_backlog(session, int(production_qty))
@@ -1088,6 +1139,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 update_fields += ['product_id', 'product_code', 'product_name']
 
             session.save(update_fields=update_fields)
+            _rebuild_session_production_records(session)
 
             if product_changed:
                 if new_qty:
