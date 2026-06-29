@@ -339,10 +339,13 @@ import { hasPermission } from '@/router'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
-  { op: '取得/更新/削除', table: 't_process_realtime_record', desc: '工程リアルタイム記録（開始時刻・終了時刻・実績数量の修正/削除）' },
+  { op: '参照', table: 'm_line / m_process / m_product / auth_user', desc: 'マスタ（ライン・工程・製品・ユーザー）' },
+  { op: '参照', table: 'm_bom', desc: '連産品・BOM構成品の親子関係確認' },
+  { op: '取得/更新/削除', table: 't_process_work_session / t_process_realtime_record', desc: '工程作業セッション＋連産品の実績レコード再構築' },
   { op: '取得/更新/削除', table: 't_laser_actual / t_laser_actual_detail', desc: 'レーザー実績・明細（数量修正、パターン単位の一括削除）' },
   { op: '取得/更新/削除', table: 'brake_line_record', desc: 'ブレーキライン実績（数量・時刻の修正/削除）' },
-  { op: '新規登録', table: 't_process_realtime_record', desc: '新規セッション追加（登録し忘れ補完）' },
+  { op: '更新', table: 't_line_backlog', desc: '実績数量・仕損数量・在庫・進度・計画在庫の反映（BOM子製品の在庫消費含む）' },
+  { op: '取得/登録', table: 't_process_work_session_change_history', desc: '追加・変更・削除の調査履歴' },
 ]
 
 const loading = ref(false)

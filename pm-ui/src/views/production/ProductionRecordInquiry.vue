@@ -423,12 +423,17 @@ import {
 } from '@/utils/productionRecordExport'
 
 const dsSources = [
-  { op: '取得', table: 't_process_realtime_record', desc: '工程リアルタイム記録（生産完成・設備状態・作業者アクション）' },
+  { op: '参照', table: 'm_line / m_process / m_product / auth_user', desc: 'マスタ（ライン・工程・製品・ユーザー）' },
+  { op: '参照', table: 'm_bom', desc: '連産品の親子関係確認（副産物展開に使用）' },
+  { op: '参照', table: 'm_routing_step', desc: '品番マッピング自動生成・ブレーキ工程の製品特定' },
+  { op: '参照', table: 'm_calendar_day / m_work_pattern / m_break_time', desc: '稼働カレンダー（作業時間・出来高計算に使用）' },
+  { op: '取得', table: 't_process_work_session / t_process_realtime_record', desc: '工程作業セッション＋副産物展開（連産品の品番・数量はリアルタイム記録から取得）' },
   { op: '取得', table: 't_laser_actual / t_laser_actual_detail', desc: 'レーザー実績・明細' },
   { op: '取得', table: 'brake_line_record', desc: 'ブレーキライン実績' },
+  { op: '取得', table: 't_line_backlog', desc: 'ブレーキ画面のレーザー実績数量・計画行・実績行の取得' },
   { op: '取得', table: 't_production_record_confirmation', desc: '確認済みフラグ' },
   { op: '取得/保存', table: 'production_record_inquiry_setting', desc: 'タブ別の対象ライン・品番マッピング設定' },
-  { op: '取得/保存', table: 'system_setting', desc: '特殊ルール（前日シフト・ガント開始時刻・計算特例）' },
+  { op: '取得/保存', table: 'system_setting', desc: '特殊ルール（前日シフト・ガント開始時刻・計算特例・品番マッピング）' },
   { op: '取得/保存', table: 'user_favorite', desc: 'お気に入りフィルタ条件' },
 ]
 
