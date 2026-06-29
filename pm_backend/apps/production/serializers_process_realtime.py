@@ -564,6 +564,7 @@ def expand_coproduct_children_production(
     base_event_data=None,
     session=None,
     session_issues=None,
+    skip_backlog=False,
 ):
     """
     連産品（仮想セット品番）の親実績から子製品実績を展開する。
@@ -605,7 +606,8 @@ def expand_coproduct_children_production(
         if session:
             _sync_record_session_meta(child_record, session, session_issues)
 
-        update_line_backlog_production(process, child_product, child_qty, plan_date)
+        if not skip_backlog:
+            update_line_backlog_production(process, child_product, child_qty, plan_date)
 
 
 def resolve_workday_date_for_process(process, dt):

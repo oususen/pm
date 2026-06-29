@@ -313,6 +313,7 @@ def _rebuild_session_production_records(session_obj):
         base_event_data=event_data,
         session=session_obj,
         session_issues=session_obj.issue_flags or [],
+        skip_backlog=True,
     )
 
 
