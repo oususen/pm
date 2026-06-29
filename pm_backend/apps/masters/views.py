@@ -1206,17 +1206,25 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if pid not in bom_detail_map:
                     bom_detail_map[pid] = bi
 
+        # 連産品BOMの子品番IDセットを事前構築（出力品/連産子の判定用）
+        coproduct_child_ids = set(
+            BOMItem.objects.filter(
+                bom__is_coproduct=True, bom__is_active=True,
+            ).values_list('child_product_id', flat=True)
+        )
+
         for step in routing_steps:
             routing = step.routing
             if not routing or not routing.product:
                 continue
 
-            # 1-0. この工程の出力品目（中間品）を追加
+            # 1-0. この工程の出力品目を追加（親に連産品があれば連産子、なければ出力品）
             output_product = step.output_product
             if output_product and output_product.id not in products_map:
+                rel = 'coproduct_child' if output_product.id in coproduct_child_ids else 'output_product'
                 products_map[output_product.id] = {
                     'product': output_product,
-                    'relation_type': 'output_product',
+                    'relation_type': rel,
                     'process_id': process.id,
                     'sourcing_type': 'MAKE',
                 }

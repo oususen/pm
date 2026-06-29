@@ -57,7 +57,7 @@
         </div>
         <div class="candidate-actions">
           <button class="btn" type="button" @click="selectAllEditableProducts" :disabled="candidateSaving || !candidateEditableProducts.length">全選択</button>
-          <button class="btn" type="button" @click="resetCandidateRule" :disabled="candidateSaving">個別設定解除</button>
+          <button class="btn" type="button" @click="deselectAllEditableProducts" :disabled="candidateSaving">個別設定解除</button>
           <button class="btn btn-primary" type="button" @click="saveCandidateRule" :disabled="candidateSaving || !selectedSubProcessCode">
             {{ candidateSaving ? '保存中...' : '候補保存' }}
           </button>
@@ -73,7 +73,7 @@
               @change="toggleCandidateCode(prod.product_code, $event.target.checked)"
             />
             <span>{{ prod.product_code }} - {{ prod.product_name || '' }}</span>
-            <small>{{ relationTypeLabel(prod.relation_type) }}</small>
+            <small :class="{ 'coproduct-child-label': prod.relation_type === 'coproduct_child' }">{{ relationTypeLabel(prod.relation_type) }}</small>
           </label>
         </div>
         <div v-else class="candidate-help">この工程の加工品候補がありません。</div>
@@ -712,6 +712,10 @@ const selectAllEditableProducts = () => {
   candidateDraftProductCodes.value = candidateEditableProducts.value.map((product) => normalizeProductCode(product.product_code))
 }
 
+const deselectAllEditableProducts = () => {
+  candidateDraftProductCodes.value = []
+}
+
 const saveSubProcessCandidateRulesPayload = async (rules) => {
   const payload = {
     special_rules: {
@@ -1259,11 +1263,6 @@ const loadData = async () => {
               productName: fe.product_name || '',
               qty: fe.quantity > 0 ? fe.quantity : 0,
             }
-            loadedProductsMap.set(String(fe.product_id), {
-              id: fe.product_id,
-              product_code: fe.product_code || '',
-              product_name: fe.product_name || '',
-            })
           })
         }
       } catch (e) {
@@ -1375,6 +1374,7 @@ onMounted(async () => {
 .candidate-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 10px; }
 .candidate-item { display: flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid #edf1f6; border-radius: 4px; padding: 4px 6px; background: #fff; }
 .candidate-item small { margin-left: auto; color: #666; }
+.candidate-item small.coproduct-child-label { color: #d32f2f; font-weight: bold; }
 .grid-scroll { overflow-x: auto; margin-bottom: 8px; }
 .grid-table { border-collapse: collapse; font-size: 11px; white-space: nowrap; table-layout: fixed; }
 .col-seq { width: 28px; }
