@@ -10,8 +10,6 @@
         <input type="date" v-model="dateTo" class="filter-input" />
       </div>
       <button class="btn btn-primary" @click="load">表示</button>
-    </div>
-    <div v-if="rows.length" class="sub-filters">
       <select v-model="filterTeam" class="filter-select">
         <option value="">全班</option>
         <option v-for="t in teamOptions" :key="t" :value="t">{{ t }}</option>
@@ -35,11 +33,12 @@
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'detail' }" @click="activeTab = 'detail'">詳細</button>
       <button class="tab-btn" :class="{ active: activeTab === 'summary' }" @click="activeTab = 'summary'">集計</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'monthly' }" @click="activeTab = 'monthly'">月別</button>
     </div>
 
-    <div v-if="loading" class="loading">読み込み中...</div>
-    <div v-else-if="!rows.length" class="empty">データがありません</div>
-    <template v-else>
+    <div v-if="hasSearched && loading" class="loading">読み込み中...</div>
+    <div v-else-if="hasSearched && !rows.length" class="empty">データがありません</div>
+    <template v-else-if="hasSearched">
 
       <!-- 詳細タブ -->
       <template v-if="activeTab === 'detail'">
@@ -154,6 +153,63 @@
         </div>
       </template>
 
+      <!-- 月別タブ -->
+      <template v-if="activeTab === 'monthly'">
+        <div class="summary-bar">
+          <span>{{ summaryNames.length }}名</span>
+          <span class="summary-total">
+            労働時間合計: {{ totals.workH }}H　残業合計: {{ totals.overtimeH }}H　有給合計: {{ totals.paidLeaveCount }}回
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="stats-table summary-table monthly-table">
+            <thead>
+              <tr>
+                <th class="name-header" rowspan="2">氏名</th>
+                <th v-for="month in monthlyColumns" :key="month" class="date-header" colspan="3">{{ formatMonthLabel(month) }}</th>
+                <th class="total-header" colspan="3">合計</th>
+              </tr>
+              <tr>
+                <template v-for="month in monthlyColumns" :key="`${month}-metrics`">
+                  <th class="metric-header">残業(H)</th>
+                  <th class="metric-header">労働(H)</th>
+                  <th class="metric-header">有給(回)</th>
+                </template>
+                <th class="metric-header total-header">残業(H)</th>
+                <th class="metric-header total-header">労働(H)</th>
+                <th class="metric-header total-header">有給(回)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="name in summaryNames" :key="name">
+                <td class="name-cell">{{ name }}</td>
+                <template v-for="month in monthlyColumns" :key="`${name}-${month}`">
+                  <td class="num-cell">{{ monthlyGrid[name]?.[month]?.overtimeH || '—' }}</td>
+                  <td class="num-cell work">{{ monthlyGrid[name]?.[month]?.workH || '—' }}</td>
+                  <td class="num-cell leave">{{ monthlyGrid[name]?.[month]?.paidLeaveCount || '—' }}</td>
+                </template>
+                <td class="num-cell total-col">{{ monthlyRowTotal(name, 'overtimeH') }}</td>
+                <td class="num-cell total-col">{{ monthlyRowTotal(name, 'workH') }}</td>
+                <td class="num-cell total-col">{{ monthlyRowTotal(name, 'paidLeaveCount') }}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td class="total-label">合計</td>
+                <template v-for="month in monthlyColumns" :key="`total-${month}`">
+                  <td class="num-cell highlight">{{ monthlyColTotal(month, 'overtimeH') || '—' }}</td>
+                  <td class="num-cell work">{{ monthlyColTotal(month, 'workH') || '—' }}</td>
+                  <td class="num-cell leave">{{ monthlyColTotal(month, 'paidLeaveCount') || '—' }}</td>
+                </template>
+                <td class="num-cell total-col">{{ totals.overtimeH || '—' }}</td>
+                <td class="num-cell total-col">{{ totals.workH }}</td>
+                <td class="num-cell total-col">{{ totals.paidLeaveCount || '—' }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </template>
+
       <!-- 編集モーダル -->
       <div v-if="editModal.visible" class="modal-overlay" @click.self="editModal.visible = false">
         <div class="modal-box">
@@ -208,6 +264,7 @@ const dateFrom = ref(`${y}-${pad(m)}-01`)
 const dateTo = ref(`${y}-${pad(m)}-${pad(lastDay)}`)
 
 const loading = ref(false)
+const hasSearched = ref(false)
 const rows = ref([])
 const allUsers = ref([])  // 全作業者リスト（申請なしの人も含む）
 const activeTab = ref('detail')
@@ -220,17 +277,15 @@ const filterGroup = ref('')
 const filterName = ref('')
 const filterPaidLeave = ref('')
 
-const teamOptions = computed(() => {
-  const fromRows = rows.value.map(r => r.team)
-  const fromUsers = allUsers.value.map(u => u.team)
-  return [...new Set([...fromRows, ...fromUsers].filter(Boolean))].sort()
-})
-const groupOptions = computed(() => {
-  const fromRows = rows.value.map(r => r.group)
-  const fromUsers = allUsers.value.flatMap(u => [u.group, ...u.leaderUnitNames])
-  return [...new Set([...fromRows, ...fromUsers].filter(Boolean))].sort()
-})
-const nameOptions = computed(() => [...new Set(rows.value.map(r => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja')))
+const teamOptions = computed(() =>
+  [...new Set(allUsers.value.map(u => u.team).filter(Boolean))].sort()
+)
+const groupOptions = computed(() =>
+  [...new Set(allUsers.value.flatMap(u => [u.group, ...u.leaderUnitNames]).filter(Boolean))].sort()
+)
+const nameOptions = computed(() =>
+  [...new Set(allUsers.value.map(u => u.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'))
+)
 
 const filteredRows = computed(() =>
   rows.value.filter(r =>
@@ -593,6 +648,20 @@ const summaryDates = computed(() =>
   [...new Set(filteredRows.value.map(r => r.date).filter(Boolean))].sort()
 )
 
+const monthlyColumns = computed(() => {
+  const start = dateFrom.value ? new Date(dateFrom.value) : null
+  const end = dateTo.value ? new Date(dateTo.value) : null
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return []
+  const months = []
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
+  const last = new Date(end.getFullYear(), end.getMonth(), 1)
+  while (cursor <= last) {
+    months.push(`${cursor.getFullYear()}-${pad(cursor.getMonth() + 1)}`)
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return months
+})
+
 // summaryGrid[name][date] = { workH: number, label: string }
 const summaryGrid = computed(() => {
   const grid = {}
@@ -607,6 +676,21 @@ const summaryGrid = computed(() => {
       else if (row.halfDayPm || row.halfDayAm) cell.label = '半休'
     }
     grid[row.name][row.date] = cell
+  }
+  return grid
+})
+
+const monthlyGrid = computed(() => {
+  const grid = {}
+  for (const row of filteredRows.value) {
+    const month = String(row.date || '').slice(0, 7)
+    if (!month) continue
+    if (!grid[row.name]) grid[row.name] = {}
+    const cell = grid[row.name][month] || { workH: 0, overtimeH: 0, paidLeaveCount: 0 }
+    cell.workH = Math.round((cell.workH + Number(row.workH || 0)) * 10) / 10
+    cell.overtimeH = Math.round((cell.overtimeH + Number(row.overtimeH || 0) + Number(row.holidayH || 0)) * 10) / 10
+    cell.paidLeaveCount = Math.round((cell.paidLeaveCount + Number(row.paidLeaveCount || 0)) * 10) / 10
+    grid[row.name][month] = cell
   }
   return grid
 })
@@ -632,11 +716,31 @@ function summaryColTotal(date) {
   return total ? Math.round(total * 10) / 10 : 0
 }
 
+function monthlyRowTotal(name, key) {
+  const byMonth = monthlyGrid.value[name] || {}
+  const total = Object.values(byMonth).reduce((sum, cell) => sum + Number(cell[key] || 0), 0)
+  return total ? Math.round(total * 10) / 10 : '—'
+}
+
+function monthlyColTotal(month, key) {
+  let total = 0
+  for (const name of summaryNames.value) {
+    total += Number(monthlyGrid.value[name]?.[month]?.[key] || 0)
+  }
+  return total ? Math.round(total * 10) / 10 : 0
+}
+
 // 日付を短縮表示（MM/DD）
 function formatDateShort(dateStr) {
   if (!dateStr) return ''
   const parts = dateStr.split('-')
   return `${parts[1]}/${parts[2]}`
+}
+
+function formatMonthLabel(monthStr) {
+  if (!monthStr) return ''
+  const parts = monthStr.split('-')
+  return `${parts[0]}/${parts[1]}`
 }
 
 function formatMetric(value) {
@@ -697,6 +801,22 @@ const normalizeList = (payload) => {
   if (Array.isArray(payload)) return payload
   if (Array.isArray(payload?.results)) return payload.results
   return []
+}
+
+const loadUsers = async () => {
+  try {
+    const usersRes = await api.accounts.getUsers({ page_size: 1000, is_active: true })
+    const userList = usersRes.data?.results ?? usersRes.data ?? []
+    allUsers.value = userList.map(u => ({
+      id: u.id,
+      name: `${u.last_name} ${u.first_name}`.trim() || u.username,
+      team: u.profile?.team_name || '',
+      group: u.profile?.unit_name || '',
+      leaderUnitNames: u.profile?.leader_unit_names || [],
+    }))
+  } catch (e) {
+    console.warn('ユーザー一覧取得失敗:', e)
+  }
 }
 
 const loadProductionMetrics = async () => {
@@ -821,25 +941,11 @@ const loadProductionMetrics = async () => {
 }
 
 async function load() {
+  hasSearched.value = true
   loading.value = true
   rows.value = []
   try {
-    // 全作業者リスト取得（申請なしの人も集計に含めるため）
-    try {
-      const usersRes = await api.accounts.getUsers({ page_size: 1000, is_active: true })
-      const userList = usersRes.data?.results ?? usersRes.data ?? []
-      allUsers.value = userList.map(u => ({
-        id: u.id,
-        name: `${u.last_name} ${u.first_name}`.trim() || u.username,
-        team: u.profile?.team_name || '',
-        // 申請データの group_name は profile.unit_name（ユニット名）と一致させる
-        group: u.profile?.unit_name || '',
-        // リーダーは担当ユニット名も持つ（unit_nameが空でも leader_unit_names で判定）
-        leaderUnitNames: u.profile?.leader_unit_names || [],
-      }))
-    } catch (e) {
-      console.warn('ユーザー一覧取得失敗:', e)
-    }
+    if (!allUsers.value.length) await loadUsers()
 
     // daisoカレンダーの非稼働日セット
     const nonWorkingDates = new Set()
@@ -983,7 +1089,8 @@ function exportExcel() {
   XLSX.writeFile(wb, filename)
 }
 
-onMounted(load)
+onMounted(loadUsers)
+
 </script>
 
 <style scoped>
@@ -1003,7 +1110,8 @@ onMounted(load)
   align-items: center;
   gap: 12px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 .filter-item {
   display: flex;
@@ -1012,18 +1120,12 @@ onMounted(load)
   font-size: 14px;
   color: #374151;
 }
-.sub-filters {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
 .filter-select {
   border: 1px solid #d1d5db;
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
+  flex: 0 0 auto;
 }
 .name-filter { width: 160px; }
 .filter-input {
@@ -1180,6 +1282,8 @@ onMounted(load)
 .summary-table .name-header { text-align: left; min-width: 120px; }
 .summary-table .date-header { min-width: 52px; }
 .summary-table .total-header { min-width: 60px; background: #e8f5e9; }
+.monthly-table .date-header { min-width: 210px; }
+.monthly-table .metric-header { min-width: 70px; }
 .cell-empty {
   cursor: pointer;
   color: #d1d5db;
@@ -1257,4 +1361,3 @@ onMounted(load)
 }
 .btn-cancel:hover { background: #e5e7eb; }
 </style>
-

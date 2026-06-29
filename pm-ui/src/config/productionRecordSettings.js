@@ -63,6 +63,13 @@ export const normalizeTargetLineCodesByTab = (lineCodesByTab) => {
   TAB_KEYS.forEach((tabKey) => {
     base[tabKey] = normalizeLineCodes(lineCodesByTab?.[tabKey] ?? base[tabKey])
   })
+  if (lineCodesByTab && typeof lineCodesByTab === 'object' && !Array.isArray(lineCodesByTab)) {
+    Object.keys(lineCodesByTab).forEach((tabKey) => {
+      if (!(tabKey in base)) {
+        base[tabKey] = normalizeLineCodes(lineCodesByTab[tabKey])
+      }
+    })
+  }
   return base
 }
 
@@ -74,11 +81,7 @@ export const loadTargetLineCodesByTab = () => {
   const parsed = parseJson(raw, null)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return defaults
 
-  const next = createDefaultTargetLineCodesByTab()
-  TAB_KEYS.forEach((tabKey) => {
-    next[tabKey] = normalizeLineCodes(parsed?.[tabKey] ?? next[tabKey])
-  })
-  return next
+  return normalizeTargetLineCodesByTab(parsed)
 }
 
 export const saveTargetLineCodesByTab = (lineCodesByTab) => {
