@@ -280,9 +280,12 @@ const filterPaidLeave = ref('')
 const teamOptions = computed(() =>
   [...new Set(allUsers.value.map(u => u.team).filter(Boolean))].sort()
 )
-const groupOptions = computed(() =>
-  [...new Set(allUsers.value.flatMap(u => [u.group, ...u.leaderUnitNames]).filter(Boolean))].sort()
-)
+const groupOptions = computed(() => {
+  const targetUsers = filterTeam.value
+    ? allUsers.value.filter((u) => u.team === filterTeam.value)
+    : allUsers.value
+  return [...new Set(targetUsers.flatMap(u => [u.group, ...u.leaderUnitNames]).filter(Boolean))].sort()
+})
 const nameOptions = computed(() =>
   [...new Set(allUsers.value.map(u => u.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'))
 )
