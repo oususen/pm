@@ -364,14 +364,24 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     deleted_count += 1
 
             # 今回の取込結果に存在しない期間内レコードの整理。
-            # 納入場差異による内示の見え方を維持するため、FORECAST は自動削除しない。
-            # 取込対象外になった FIRM のみ、未入力(納入数=0)の行を削除する。
+            # FORECAST は行を残し、需要数のみ0にする（delivery_qty は保持）。
+            # FIRM は未入力(納入数=0)の行のみ削除する。
             for ekey, existing_row in list(existing_map.items()):
                 if ekey in processed_keys:
                     continue
-                if existing_row.order_type != 'FIRM':
+                if existing_row.order_type == 'FORECAST':
+                    changed = False
+                    if existing_row.demand_qty != Decimal('0'):
+                        existing_row.demand_qty = Decimal('0')
+                        changed = True
+                    if existing_row.order_line_id is not None:
+                        existing_row.order_line_id = None
+                        changed = True
+                    if changed:
+                        existing_row.save(update_fields=['demand_qty', 'order_line'])
+                        updated_count += 1
                     continue
-                if existing_row.delivery_qty != Decimal('0'):
+                if existing_row.order_type == 'FIRM' and existing_row.delivery_qty != Decimal('0'):
                     continue
                 existing_row.delete()
                 deleted_count += 1
@@ -380,6 +390,10 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             affected_groups = set()
             for key in processed_keys:
                 affected_groups.add((key[0], key[1]))  # (product_code, ship_to_code)
+            for ekey, existing_row in existing_map.items():
+                if ekey in processed_keys:
+                    continue
+                affected_groups.add((ekey[0], ekey[1]))
             _recalculate_remaining_for_groups(affected_groups)
 
         return Response({
