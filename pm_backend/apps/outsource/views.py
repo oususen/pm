@@ -34,7 +34,7 @@ from .serializers import (
     ProductStockTransactionSerializer,
     SplitImportLogSerializer,
 )
-from .services.csv_import import import_fb_csv
+from .services.csv_import import import_fb_order_file
 from .services.excel_export import generate_split_plan_excel
 from .services.excel_import import import_split_plan_excel
 from .services.bom_explosion import explode_materials_for_order, explode_materials_for_orders
@@ -148,7 +148,7 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='import-csv', parser_classes=[MultiPartParser])
     def import_csv(self, request):
-        """FB受注CSV取込"""
+        """FB受注ファイル取込（CSV/XLSX）"""
         file = request.FILES.get('file')
         if not file:
             return Response({'error': 'ファイルが指定されていません'}, status=status.HTTP_400_BAD_REQUEST)
@@ -156,10 +156,10 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
         encoding = request.data.get('encoding', 'shift_jis')
         content = file.read()
         try:
-            results = import_fb_csv(content, encoding=encoding)
+            results = import_fb_order_file(content, filename=getattr(file, 'name', ''), encoding=encoding)
         except Exception as e:
             return Response(
-                {'error': f'CSV取込でエラーが発生しました: {type(e).__name__}: {e}'},
+                {'error': f'受注取込でエラーが発生しました: {type(e).__name__}: {e}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

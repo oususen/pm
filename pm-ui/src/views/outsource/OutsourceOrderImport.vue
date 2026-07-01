@@ -5,10 +5,10 @@
     <div class="import-section">
       <div class="file-input-row">
         <label class="file-label">
-          CSVファイル選択
-          <input type="file" accept=".csv" @change="onFileSelect" ref="fileInput" />
+          CSV/XLSXファイル選択
+          <input type="file" accept=".csv,.xlsx,.xls" @change="onFileSelect" ref="fileInput" />
         </label>
-        <select v-model="encoding" class="encoding-select">
+        <select v-if="isCsvFile" v-model="encoding" class="encoding-select">
           <option value="utf-8">UTF-8</option>
           <option value="shift_jis">Shift_JIS</option>
         </select>
@@ -71,12 +71,13 @@
 
 <script setup>
 import { ref } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
-  { op: '読み書き', table: 't_outsource_order / t_outsource_order_line', desc: 'CSV取込による受注データ作成' },
+  { op: '読み書き', table: 't_outsource_order / t_outsource_order_line', desc: 'CSV/XLSX取込による受注データ作成' },
 ]
 
 const file = ref(null)
@@ -85,16 +86,26 @@ const importing = ref(false)
 const preview = ref([])
 const result = ref(null)
 const fileInput = ref(null)
+const isCsvFile = ref(true)
 
 function onFileSelect(e) {
   const f = e.target.files[0]
   if (!f) return
   file.value = f
+  isCsvFile.value = !/\.(xlsx|xls)$/i.test(f.name || '')
   result.value = null
   parsePreview(f)
 }
 
 function parsePreview(f) {
+  if (/\.(xlsx|xls)$/i.test(f.name || '')) {
+    parseExcelPreview(f)
+    return
+  }
+  parseCsvPreview(f)
+}
+
+function parseCsvPreview(f) {
   const parseCsvLine = (line) => {
     const cols = []
     let cur = ''
@@ -141,6 +152,47 @@ function parsePreview(f) {
     })
   }
   reader.readAsText(f, encoding.value === 'shift_jis' ? 'Shift_JIS' : 'UTF-8')
+}
+
+function parseExcelPreview(f) {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const workbook = XLSX.read(e.target.result, { type: 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false })
+    let lastDenpyoKubun = ''
+    let lastDenpyoType = ''
+
+    preview.value = rows.slice(1).filter(cols => cols?.length).map((cols) => {
+      const denpyoKubun = String(cols[0] || '').trim() || lastDenpyoKubun
+      const denpyoType = String(cols[1] || '').trim() || lastDenpyoType
+      if (denpyoKubun) lastDenpyoKubun = denpyoKubun
+      if (denpyoType) lastDenpyoType = denpyoType
+
+      const item_code = String(cols[2] || '').trim()
+      const painting_date = normalizeExcelDate(cols[5])
+      const datePart = painting_date.replace(/\D/g, '')
+      const painting_name = [denpyoType, denpyoKubun].filter(Boolean).join(' / ')
+
+      return {
+        item_code,
+        item_name: String(cols[3] || '').trim(),
+        painting_name,
+        painting_date,
+        qty: String(cols[4] || '').trim(),
+        case_no: item_code && datePart ? `${datePart}-${item_code}` : '',
+      }
+    }).filter(row => row.item_code || row.item_name || row.qty)
+  }
+  reader.readAsArrayBuffer(f)
+}
+
+function normalizeExcelDate(value) {
+  const text = String(value || '').trim()
+  if (/^\d{8}$/.test(text)) {
+    return `${text.slice(0, 4)}/${Number(text.slice(4, 6))}/${Number(text.slice(6, 8))}`
+  }
+  return text
 }
 
 async function doImport() {

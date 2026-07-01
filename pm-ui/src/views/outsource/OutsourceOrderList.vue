@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <h2 class="page-title">FB受注一覧 <DataSourceDialog title="FB受注一覧" :sources="dsSources" /></h2>
-      <RouterLink to="/outsource/orders/import" class="btn-primary">CSV取込</RouterLink>
+      <RouterLink to="/outsource/orders/import" class="btn-primary">受注取込</RouterLink>
     </div>
 
     <div class="filter-row">

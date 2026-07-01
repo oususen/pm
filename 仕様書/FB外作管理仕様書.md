@@ -19,7 +19,7 @@
 ## 2. 全体フロー
 
 ```
-① FB受注取込（CSV）
+① FB受注取込（CSV / Excel）
    └→ 案件自動生成（1品目×1数量×1塗装日 = 1案件）
         │
         ▼
@@ -161,7 +161,7 @@ CSVの1行 = 1案件として管理。案件番号 = 塗装日＋品目コード
 | earliest_start | DateField | 最早着手日（自動計算） |
 | latest_finish | DateField | 最遅完了日（自動計算） |
 | status | CharField | ステータス（後述） |
-| imported_at | DateTimeField | CSV取込日時 |
+| imported_at | DateTimeField | 受注取込日時 |
 | notes | TextField | 備考 |
 
 **ステータス遷移:**
@@ -312,14 +312,14 @@ OutsourceSplit
 **機能:**
 
 - 受注案件一覧表示（ステータス/塗装日/品目コード・名称で検索）
-- CSV取込画面への導線
+- 受注取込画面への導線
 - 塗装日期間フィルタ（当月初期値＋前月/次月ボタン）
 
-### 6.1.1 CSV取込画面
+### 6.1.1 受注取込画面
 
 **機能:**
 
-- CSVファイル選択・アップロード
+- CSV / Excelファイル選択・アップロード
 - プレビュー表示（取込前確認）
 - 案件自動生成（品目マスタ未登録の場合は警告）
 
@@ -328,6 +328,15 @@ OutsourceSplit
 品目コード,品目名称,塗装名,塗装日,数量
 B850070311091,FBR-ﾒｲﾝﾌﾚｰﾑRﾌﾞｸﾐ,FBR GY,2026/6/9,150
 ```
+
+**Excelフォーマット:**
+```
+伝票区分,伝票タイプ,品目コード,品目名称,発注数,納入期日
+302490-260707,ZNB3,B852950411090,MFB930-SW ﾊｲﾛｰﾘﾝｸH ﾌﾞｸﾐ,100,20260707
+```
+
+- Excel取込時は `伝票タイプ / 伝票区分` を塗装名として保持する
+- `納入期日` を塗装日として案件番号 `YYYYMMDD-品目コード` を採番する
 
 ### 6.2 外作先展開Excel出力画面
 
@@ -418,7 +427,7 @@ B850070311091,FBR-ﾒｲﾝﾌﾚｰﾑRﾌﾞｸﾐ,FBR GY,2026/6/9,150
 
 | メソッド | エンドポイント | 機能 |
 |---------|--------------|------|
-| POST | /api/outsource/orders/import-csv/ | CSV取込 |
+| POST | /api/outsource/orders/import-csv/ | 受注取込（CSV / Excel） |
 | GET | /api/outsource/orders/ | 案件一覧（塗装日期間フィルタ対応） |
 | GET | /api/outsource/orders/{id}/ | 案件詳細 |
 | POST | /api/outsource/orders/{id}/calculate-constraints/ | 制約条件再計算 |
@@ -471,7 +480,7 @@ pm-ui/src/router/outsource.js    # 新規ルーター
 
 /outsource/menu                   # FBメニュー（トップ）
 /outsource/orders                 # 受注一覧
-/outsource/orders/import          # CSV取込
+/outsource/orders/import          # 受注取込
 /outsource/orders/:id             # 案件詳細
 /outsource/excel-export           # 外作先展開Excel出力
 /outsource/splits/import          # 分割計画取込
@@ -489,7 +498,7 @@ pm-ui/src/router/outsource.js    # 新規ルーター
 pm-ui/src/views/outsource/
 ├── OutsourceMenu.vue             # FBメニュートップ
 ├── OutsourceOrderList.vue        # 受注一覧
-├── OutsourceOrderImport.vue      # CSV取込
+├── OutsourceOrderImport.vue      # 受注取込
 ├── OutsourceOrderDetail.vue      # 案件詳細
 ├── OutsourceExcelExport.vue      # 外作先展開Excel出力
 ├── OutsourceSplitImport.vue      # 分割計画取込
@@ -506,12 +515,12 @@ pm-ui/src/views/outsource/
 
 ## 9. 実装計画
 
-### Phase 1: 基盤（マスタ + CSV取込）
+### Phase 1: 基盤（マスタ + 受注取込）
 
 1. Django app `outsource` 新設
 2. モデル作成・マイグレーション
 3. 外作先マスタ・品目マスタ・BOM登録画面
-4. CSV取込機能（案件自動生成）
+4. 受注取込機能（案件自動生成）
 
 ### Phase 2: 外作先展開
 
@@ -551,4 +560,4 @@ pm-ui/src/views/outsource/
 | 略称 | FB |
 | 全称 | フランスベッド株式会社 |
 | 発注パターン | 大ロット・不定期 |
-| CSV提供項目 | 品目コード、品目名称、塗装名、塗装日、数量 |
+| 受注提供項目 | CSV: 品目コード、品目名称、塗装名、塗装日、数量 / Excel: 伝票区分、伝票タイプ、品目コード、品目名称、発注数、納入期日 |
