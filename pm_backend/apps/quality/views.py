@@ -310,7 +310,8 @@ def _build_default_record_payload(template, operation_date, section_type, user, 
             many=True,
             context={"request": request},
         )
-        required = item.is_required and _is_frequency_required(item.frequency, operation_date, calendar)
+        is_frequency_applicable = _is_frequency_required(item.frequency, operation_date, calendar)
+        required = item.is_required and is_frequency_applicable
         results.append(
             {
                 "id": None,
@@ -326,6 +327,7 @@ def _build_default_record_payload(template, operation_date, section_type, user, 
                 "unit": item.unit,
                 "criteria": item.criteria,
                 "is_required": required,
+                "is_frequency_applicable": is_frequency_applicable,
                 "numeric_value": None,
                 "text_value": "",
                 "judgement": "",

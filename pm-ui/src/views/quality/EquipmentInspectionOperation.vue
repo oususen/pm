@@ -204,7 +204,8 @@
                     type="button"
                     class="judge-button"
                     :class="{ active: result.judgement === 'NG', ng: result.judgement === 'NG' }"
-                    :disabled="!canEditRecord"
+                    :disabled="!canEditRecord || !canSelectJudgement(result)"
+                    :title="judgementButtonTitle(result)"
                     @click="setJudgement(result, 'NG')"
                   >
                     NG
@@ -382,9 +383,21 @@ const isCompleted = computed(() => String(form.value.status || "").toUpperCase()
 const canEditRecord = computed(() => isTestMode.value || (canEdit.value && !isLocked.value && !isCompleted.value))
 const canEditComment = computed(() => isTestMode.value || (canEdit.value && !isLocked.value))
 const isQuarterlySection = computed(() => String(sectionType.value || "").toUpperCase() === "QUARTERLY")
+const processInputReturnPathMap = {
+  mobile_process_input: "/production/mobile-process-input",
+  desktop_process_input: "/production/desktop-process-input",
+  tablet_process_input: "/production/tablet-process-input",
+  simultaneous_process_input: "/production/simultaneous-process-input",
+  dual_process_input: "/production/dual-process-input",
+  two_person_one_equipment_input: "/production/two-person-one-equipment-input",
+  laser_process_input: "/production/laser-process-input",
+  brake_line_input: "/production/brake-line-input",
+  spot_line_input: "/production/spot-line-input",
+  mobile_line_input: "/production/mobile-input",
+}
 const showBackToProcessInput = computed(() => {
   const source = String(route.query?.source || "").trim()
-  if (source === "mobile_process_input") return true
+  if (processInputReturnPathMap[source]) return true
   return Boolean(String(selectedLineId.value || "").trim() || String(selectedProcessId.value || "").trim())
 })
 const isLineLockedFromRoute = computed(() =>
@@ -565,7 +578,13 @@ const numericValueWithinRule = (result) => {
 
 const isNumericOutOfSpec = (result) => numericValueWithinRule(result) === false
 
+const canSelectJudgement = (result) => {
+  if (!result) return true
+  return result.is_frequency_applicable !== false
+}
+
 const canSelectOk = (result) => {
+  if (!canSelectJudgement(result)) return false
   if (!result) return true
   if (isPhotoOnlyRecordType(result.record_type)) return Boolean(String(result.photo_url || "").trim())
   if (!isNumericRecordType(result.record_type)) return true
@@ -574,7 +593,16 @@ const canSelectOk = (result) => {
   return numericValueWithinRule(result) !== false
 }
 
+const judgementButtonTitle = (result) => {
+  if (!canSelectJudgement(result)) {
+    return "この項目はラインカレンダ上の対象日ではないため判定できません。"
+  }
+  return ""
+}
+
 const okButtonTitle = (result) => {
+  const baseTitle = judgementButtonTitle(result)
+  if (baseTitle) return baseTitle
   if (!result) return ""
   if (isPhotoOnlyRecordType(result.record_type) && !String(result.photo_url || "").trim()) {
     return "写真をアップロードしてください。"
@@ -624,6 +652,7 @@ const normalizeRecord = (raw) => ({
         unit: result.unit || "",
         criteria: result.criteria || "",
         is_required: Boolean(result.is_required),
+        is_frequency_applicable: result.is_frequency_applicable !== false,
         numeric_value: result.numeric_value ?? "",
         photo_url: result.photo_url || "",
         photo_preview_visible: false,
@@ -708,13 +737,21 @@ const loadTestRecord = async () => {
 }
 
 const backToProcessInput = () => {
+  const source = String(route.query?.source || "").trim()
+  const path = processInputReturnPathMap[source] || "/production/mobile-process-input"
   const lineId = selectedLineId.value || ""
   const processId = selectedProcessId.value || ""
+  const returnPanel = route.query?.return_panel ? String(route.query.return_panel) : ""
+  const returnOperatorName = route.query?.return_operator_name ? String(route.query.return_operator_name) : ""
+  const returnOperatorUserId = route.query?.return_operator_user_id ? String(route.query.return_operator_user_id) : ""
   router.push({
-    path: "/production/mobile-process-input",
+    path,
     query: {
       ...(lineId ? { line_id: String(lineId) } : {}),
       ...(processId ? { process_id: String(processId) } : {}),
+      ...(returnPanel ? { return_panel: returnPanel } : {}),
+      ...(returnOperatorName ? { return_operator_name: returnOperatorName } : {}),
+      ...(returnOperatorUserId ? { return_operator_user_id: returnOperatorUserId } : {}),
     },
   })
 }
@@ -976,6 +1013,7 @@ const reloadRecord = async () => {
 
 const setJudgement = (result, value) => {
   if (!canEditRecord.value || !result) return
+  if (!canSelectJudgement(result)) return
   if (String(value || "").trim().toUpperCase() === "OK" && !canSelectOk(result)) return
   result.judgement = String(value || "").trim().toUpperCase()
 }

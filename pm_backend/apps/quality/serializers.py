@@ -462,6 +462,7 @@ class EquipmentInspectionTemplateSerializer(serializers.ModelSerializer):
 
 class EquipmentInspectionResultSerializer(serializers.ModelSerializer):
     reference_attachments = serializers.SerializerMethodField()
+    is_frequency_applicable = serializers.SerializerMethodField()
 
     class Meta:
         model = EquipmentInspectionResult
@@ -479,6 +480,7 @@ class EquipmentInspectionResultSerializer(serializers.ModelSerializer):
             "unit",
             "criteria",
             "is_required",
+            "is_frequency_applicable",
             "numeric_value",
             "photo_url",
             "text_value",
@@ -487,7 +489,7 @@ class EquipmentInspectionResultSerializer(serializers.ModelSerializer):
             "measured_at",
             "reference_attachments",
         ]
-        read_only_fields = ["id", "reference_attachments"]
+        read_only_fields = ["id", "reference_attachments", "is_frequency_applicable"]
 
     def get_reference_attachments(self, obj):
         item = getattr(obj, "item", None)
@@ -499,6 +501,15 @@ class EquipmentInspectionResultSerializer(serializers.ModelSerializer):
             context=self.context,
         )
         return serializer.data
+
+    def get_is_frequency_applicable(self, obj):
+        from .views import _get_calendar_for_equipment, _is_frequency_required
+
+        record = getattr(obj, "record", None)
+        if not record or not getattr(record, "operation_date", None):
+            return True
+        calendar = _get_calendar_for_equipment(getattr(record, "sheet_code", ""))
+        return _is_frequency_required(obj.frequency, record.operation_date, calendar)
 
 
 class EquipmentInspectionRecordSerializer(serializers.ModelSerializer):
