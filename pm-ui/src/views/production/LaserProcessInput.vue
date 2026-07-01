@@ -627,7 +627,7 @@ const router = useRouter()
 const localeCode = computed(() => getLocaleCode())
 
 function openEquipmentInspection() {
-  router.push({ path: '/quality/equipment-inspection/operation' })
+  router.push({ path: '/quality/equipment-inspection/operation', query: { source: 'laser_process_input' } })
 }
 
 const resolveLaserLineId = async () => {
@@ -2479,4 +2479,3 @@ th.num {
 .ds-table td:first-child { white-space: nowrap; font-weight: 500; color: #2563eb; }
 .ds-table td:nth-child(2) { font-family: monospace; font-size: 12px; color: #0f172a; }
 </style>
-

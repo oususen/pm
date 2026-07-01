@@ -1478,6 +1478,7 @@ function openEquipmentInspection() {
   router.push({
     path: '/quality/equipment-inspection/operation',
     query: {
+      source: 'brake_line_input',
       ...(processId ? { process_id: String(processId) } : {}),
       ...(lineId ? { line_id: String(lineId) } : {}),
     },

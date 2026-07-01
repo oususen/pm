@@ -3977,11 +3977,19 @@ const applyInitialLineSelection = () => {
 function openEquipmentInspection() {
   const processId = selectedProcessId.value || undefined
   const lineId = selectedLineId.value || undefined
+  const source = String(route.query?.parent_source || 'mobile_process_input')
+  const returnPanel = route.query?.parent_panel ? String(route.query.parent_panel) : ''
+  const returnOperatorName = route.query?.operator_name ? String(route.query.operator_name) : ''
+  const returnOperatorUserId = route.query?.operator_user_id ? String(route.query.operator_user_id) : ''
   router.push({
     path: '/quality/equipment-inspection/operation',
     query: {
+      source,
       ...(processId ? { process_id: String(processId) } : {}),
       ...(lineId ? { line_id: String(lineId) } : {}),
+      ...(returnPanel ? { return_panel: returnPanel } : {}),
+      ...(returnOperatorName ? { return_operator_name: returnOperatorName } : {}),
+      ...(returnOperatorUserId ? { return_operator_user_id: returnOperatorUserId } : {}),
     },
   })
 }

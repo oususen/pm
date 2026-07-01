@@ -404,7 +404,10 @@ function openEquipmentInspection() {
   const lineId = selectedLineId.value || undefined
   router.push({
     path: '/quality/equipment-inspection/operation',
-    query: lineId ? { line_id: String(lineId) } : {},
+    query: {
+      source: 'mobile_line_input',
+      ...(lineId ? { line_id: String(lineId) } : {}),
+    },
   })
 }
 
