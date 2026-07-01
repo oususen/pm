@@ -98,9 +98,12 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
+
+const route = useRoute()
 
 const lines = ref([])
 const processes = ref([])
@@ -238,7 +241,7 @@ const secondarySupportModeParam = computed(() => (isSecondarySupportMode.value ?
 const primaryFrameSrc = computed(() => {
   if (!primaryProcessId.value) return ''
   const primaryUserId = authState.user?.id ? String(authState.user.id) : ''
-  return `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${primarySupportModeParam.value}&two_person_same_equipment=1&operator_name=${encodeURIComponent(primaryWorkerName.value || '')}&operator_user_id=${encodeURIComponent(primaryUserId)}`
+  return `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${primarySupportModeParam.value}&two_person_same_equipment=1&operator_name=${encodeURIComponent(primaryWorkerName.value || '')}&operator_user_id=${encodeURIComponent(primaryUserId)}&parent_source=two_person_one_equipment_input&parent_panel=primary`
 })
 
 const secondaryIframeKey = computed(() =>
@@ -247,7 +250,7 @@ const secondaryIframeKey = computed(() =>
 
 const secondaryFrameSrc = computed(() => {
   if (!secondaryProcessId.value || !secondaryWorkerResolved.value) return ''
-  return `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${secondarySupportModeParam.value}&two_person_same_equipment=1&operator_name=${encodeURIComponent(secondaryWorkerResolved.value)}&operator_user_id=${encodeURIComponent(secondaryWorkerResolvedId.value || '')}`
+  return `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${secondarySupportModeParam.value}&two_person_same_equipment=1&operator_name=${encodeURIComponent(secondaryWorkerResolved.value)}&operator_user_id=${encodeURIComponent(secondaryWorkerResolvedId.value || '')}&parent_source=two_person_one_equipment_input&parent_panel=secondary`
 })
 
 watch(selectedLineId, () => {
@@ -313,6 +316,28 @@ const applyInitialLineSelection = () => {
   selectedLineId.value = String(candidateList[0].id)
 }
 
+const applyInitialSelectionFromRoute = () => {
+  const lineId = route.query?.line_id ? String(route.query.line_id) : ''
+  if (lineId && availableLines.value.some((line) => String(line.id) === lineId)) {
+    selectedLineId.value = lineId
+  } else {
+    applyInitialLineSelection()
+  }
+  const processId = route.query?.process_id ? String(route.query.process_id) : ''
+  const returnPanel = route.query?.return_panel ? String(route.query.return_panel) : 'primary'
+  if (processId) {
+    if (returnPanel === 'secondary') secondaryProcessId.value = processId
+    else primaryProcessId.value = processId
+  }
+  const operatorName = route.query?.return_operator_name ? String(route.query.return_operator_name) : ''
+  const operatorUserId = route.query?.return_operator_user_id ? String(route.query.return_operator_user_id) : ''
+  if (returnPanel === 'secondary' && operatorName) {
+    secondaryWorkerInput.value = operatorName
+    secondaryWorkerResolved.value = operatorName
+    secondaryWorkerResolvedId.value = operatorUserId
+  }
+}
+
 const toggleSupportMode = () => {
   isSupportMode.value = !isSupportMode.value
   if (isSupportMode.value) return
@@ -333,7 +358,7 @@ const toggleSecondarySupportMode = () => {
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses(), loadUsers()])
-  applyInitialLineSelection()
+  applyInitialSelectionFromRoute()
 })
 
 onBeforeUnmount(() => {

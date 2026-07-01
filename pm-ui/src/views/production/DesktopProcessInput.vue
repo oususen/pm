@@ -3203,17 +3203,32 @@ const applyInitialLineSelection = () => {
 }
 
 function openEquipmentInspection() {
+  const source = String(route.query?.parent_source || 'desktop_process_input')
+  const returnPanel = route.query?.parent_panel ? String(route.query.parent_panel) : ''
+  const returnOperatorName = route.query?.operator_name ? String(route.query.operator_name) : ''
+  const returnOperatorUserId = route.query?.operator_user_id ? String(route.query.operator_user_id) : ''
   router.push({ path: '/quality/equipment-inspection/operation', query: {
+    source,
     ...(selectedProcessId.value ? { process_id: String(selectedProcessId.value) } : {}),
     ...(selectedLineId.value ? { line_id: String(selectedLineId.value) } : {}),
+    ...(returnPanel ? { return_panel: returnPanel } : {}),
+    ...(returnOperatorName ? { return_operator_name: returnOperatorName } : {}),
+    ...(returnOperatorUserId ? { return_operator_user_id: returnOperatorUserId } : {}),
   }})
 }
 
 function openIntegratedChecksheetOperation() {
+  const source = String(route.query?.parent_source || 'desktop_process_input')
+  const returnPanel = route.query?.parent_panel ? String(route.query.parent_panel) : ''
+  const returnOperatorName = route.query?.operator_name ? String(route.query.operator_name) : ''
+  const returnOperatorUserId = route.query?.operator_user_id ? String(route.query.operator_user_id) : ''
   router.push({ path: '/quality/product-checksheet/integrated/operation', query: {
-    source: 'desktop_process_input',
+    source,
     ...(selectedLineId.value ? { line_id: String(selectedLineId.value) } : {}),
     ...(selectedProcessId.value ? { process_id: String(selectedProcessId.value) } : {}),
+    ...(returnPanel ? { return_panel: returnPanel } : {}),
+    ...(returnOperatorName ? { return_operator_name: returnOperatorName } : {}),
+    ...(returnOperatorUserId ? { return_operator_user_id: returnOperatorUserId } : {}),
   }})
 }
 

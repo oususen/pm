@@ -74,10 +74,13 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import { t } from '@/i18n'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const route = useRoute()
 
 const dsSources = [
   { op: '読み取り', table: 'm_line', desc: 'ライン選択肢' },
@@ -160,12 +163,12 @@ const frameBasePath = '/production/desktop-process-input'
 const supportModeParam = computed(() => (isSupportMode.value ? 'on' : 'off'))
 const primaryFrameSrc = computed(() =>
   primaryProcessId.value
-    ? `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}`
+    ? `${frameBasePath}?process_id=${encodeURIComponent(primaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}&parent_source=dual_process_input&parent_panel=primary`
     : '',
 )
 const secondaryFrameSrc = computed(() =>
   secondaryProcessId.value
-    ? `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}`
+    ? `${frameBasePath}?process_id=${encodeURIComponent(secondaryProcessId.value)}&embed=tablet&support_mode=${supportModeParam.value}&parent_source=dual_process_input&parent_panel=secondary`
     : '',
 )
 
@@ -216,6 +219,20 @@ const applyInitialLineSelection = () => {
   selectedLineId.value = String(candidateList[0].id)
 }
 
+const applyInitialSelectionFromRoute = () => {
+  const lineId = route.query?.line_id ? String(route.query.line_id) : ''
+  if (lineId && availableLines.value.some((line) => String(line.id) === lineId)) {
+    selectedLineId.value = lineId
+  } else {
+    applyInitialLineSelection()
+  }
+  const processId = route.query?.process_id ? String(route.query.process_id) : ''
+  const returnPanel = route.query?.return_panel ? String(route.query.return_panel) : 'primary'
+  if (!processId) return
+  if (returnPanel === 'secondary') secondaryProcessId.value = processId
+  else primaryProcessId.value = processId
+}
+
 const toggleSupportMode = () => {
   isSupportMode.value = !isSupportMode.value
   if (isSupportMode.value) return
@@ -232,7 +249,7 @@ const toggleSupportMode = () => {
 onMounted(async () => {
   await ensureAuth()
   await Promise.all([loadLines(), loadProcesses()])
-  applyInitialLineSelection()
+  applyInitialSelectionFromRoute()
 })
 
 onBeforeUnmount(() => {
