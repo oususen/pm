@@ -543,8 +543,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
         ext = os.path.splitext(file_obj.name)[1] or ""
         filename = f"integrated_checksheet_attachments/{uuid.uuid4().hex}{ext}"
         saved_path = default_storage.save(filename, file_obj)
-        base_url = request.build_absolute_uri("/")[:-1]
-        image_url = f"{base_url}{default_storage.url(saved_path)}"
+        image_url = default_storage.url(saved_path)
         return Response({"image_url": image_url}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])

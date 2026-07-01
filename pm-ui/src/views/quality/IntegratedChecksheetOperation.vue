@@ -293,7 +293,7 @@
                 :key="'h-'+u.id"
                 class="th-unit"
                 :class="{ clickable: true }"
-                  @click="canEdit ? openUnitModal(u) : null"
+                  @click="canView ? openUnitModal(u) : null"
               >
                 <div class="unit-header">
                   <span>{{ u.sequence_no }}</span>
@@ -322,7 +322,7 @@
                 :key="'bh-'+block.id+'-'+u.id"
                 class="block-checker-cell"
                 :class="{ 'cell-disabled-by-process': isBlockedByPreferredProcess(block), 'block-held': isBlockHeld(u, block.id) }"
-                @click="canEdit && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
+                @click="canView && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
               >
                 <span v-if="isBlockHeld(u, block.id)" class="block-hold-mark" :title="getBlockHoldReason(u, block.id)">保留</span>
                 {{ getBlockCheckerName(u, block.id) || '-' }}
@@ -346,7 +346,7 @@
                   :key="'c-'+item.id+'-'+u.id"
                   class="td-cell"
                   :class="cellClass(u, block, item)"
-                  @click="canEdit && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
+                  @click="canView && !isBlockedByPreferredProcess(block) ? openUnitModal(u, block.id) : null"
                 >
                   <template v-if="isBlockLocked(u, block)">
                     <span class="lock-icon">&#128274;</span>
@@ -492,7 +492,7 @@
                         <input type="file" accept="image/*" capture="environment" :disabled="!canEdit" @change="uploadCheckPhoto($event, item.id)" style="display:none" />
                       </label>
                       <div v-if="modalResponses[item.id]?.photo_url" class="photo-preview-mini">
-                        <img :src="modalResponses[item.id].photo_url" alt="撮影写真" @click="previewPhoto(modalResponses[item.id].photo_url)" />
+                        <img :src="resolvePhotoUrl(modalResponses[item.id].photo_url)" alt="撮影写真" @click="previewPhoto(modalResponses[item.id].photo_url)" />
                       </div>
                       <span v-if="modalResponses[item.id]?.photo_url" class="photo-ok-badge">撮影済</span>
                     </div>
@@ -630,6 +630,11 @@
           </div>
         </div>
       </div>
+      <!-- 写真プレビューオーバーレイ -->
+      <div v-if="photoPreviewUrl" class="photo-overlay" @click="photoPreviewUrl = ''">
+        <img :src="photoPreviewUrl" class="photo-overlay-img" @click.stop />
+        <button class="photo-overlay-close" @click="photoPreviewUrl = ''">&times;</button>
+      </div>
     </div>
 
     <!-- バッチ編集ダイアログ -->
@@ -684,6 +689,7 @@
     <h2 class="page-title">{{ pageTitleText }}</h2>
     <p class="no-data">品質の閲覧権限がありません。</p>
   </div>
+
 </template>
 
 <script setup>
@@ -1743,8 +1749,21 @@ const uploadCheckPhoto = async (event, itemId) => {
   }
 }
 
+const resolvePhotoUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('/')) return url
+  try {
+    const parsed = new URL(url)
+    return parsed.pathname
+  } catch {
+    return url
+  }
+}
+
+const photoPreviewUrl = ref('')
+
 const previewPhoto = (url) => {
-  window.open(url, '_blank')
+  photoPreviewUrl.value = resolvePhotoUrl(url)
 }
 
 const hasMissingRequiredItems = (block) => {
@@ -2815,6 +2834,14 @@ onMounted(async () => {
 
 /* ビューモード（完了済み工程） */
 .items-list.view-only { pointer-events: none; opacity: 0.75; }
+.items-list.view-only .photo-preview-mini,
+.items-list.view-only .photo-preview-mini img,
+.items-list.view-only .btn-attachment-ref {
+  pointer-events: auto;
+}
+.items-list.view-only .photo-preview-mini img {
+  height: 64px;
+}
 .view-only-header { background: #064e3b; }
 
 /* 刻印番号 履歴照会 */
@@ -2832,5 +2859,22 @@ onMounted(async () => {
 .history-ok { color: #16a34a; font-weight: 600; }
 .history-ng { color: #dc2626; font-weight: 600; }
 .history-rework { color: #d97706; font-weight: 600; }
+
+.photo-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center;
+}
+.photo-overlay-img {
+  max-width: 90vw; max-height: 90vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.5);
+}
+.photo-overlay-close {
+  position: absolute; top: 12px; right: 18px;
+  font-size: 32px; color: #fff; background: none; border: none; cursor: pointer;
+  line-height: 1;
+}
 
 </style>
