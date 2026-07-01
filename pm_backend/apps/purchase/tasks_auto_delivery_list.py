@@ -114,9 +114,30 @@ def run_auto_delivery_list_send(config_id):
         except Exception as e:
             logger.warning(f'進度表PDF生成エラー（送信は続行）: {e}')
 
+        daily_items = []
+        for item in items:
+            daily = item.get('daily', {})
+            if daily:
+                for d_iso in sorted(daily.keys()):
+                    d_qty = daily[d_iso]
+                    if d_qty > 0:
+                        daily_items.append({
+                            'product_code': item['product_code'],
+                            'product_name': item['product_name'],
+                            'expected_qty': d_qty,
+                            'delivery_date': date.fromisoformat(d_iso),
+                        })
+            else:
+                daily_items.append({
+                    'product_code': item['product_code'],
+                    'product_name': item['product_name'],
+                    'expected_qty': int(item['expected_qty']),
+                    'delivery_date': delivery_date,
+                })
+
         delivery_note_pdf = None
         try:
-            delivery_note_pdf = _generate_delivery_note_pdf(items, delivery_date, supplier)
+            delivery_note_pdf = _generate_delivery_note_pdf(daily_items, delivery_date, supplier)
         except Exception as e:
             logger.warning(f'外作納品書PDF生成エラー（送信は続行）: {e}')
 
@@ -313,13 +334,25 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
         ['', '2. 納入しない製品がある場合 → 「数量」列を 0 に変更'],
         ['', '3. 数量が空白の行は取込時に除外されます（取消にはなりません）'],
         [''],
+        ['■ 再返送時のご注意（重要）'],
+        ['', '一度返送された後に数量変更・取消が必要な場合は、修正後のこのファイルを再返送してください。'],
+        ['', '・数量変更 → 「数量」列を新しい値に書き換えて再返送'],
+        ['', '・取消 → 「数量」列を 0 にして再返送'],
+        ['', '・行を削除したり空白にしても、前回返送した数量がそのまま残ります（取消になりません）。'],
+        [''],
         ['■ 品番の追加'],
-        ['', '・新しい品番を追加する場合は「製品リスト」シートから品番をコピーしてください。'],
+        ['', '・新しい品番を追加する場合は「製品リスト」シートから品番をコピーして納品リストの末行の下に追加してください。'],
         ['', '・品番を手入力すると不一致エラーの原因になります。'],
+        [''],
+        ['■ 納品リスト印刷用シートについて'],
+        ['', '・「納品リスト印刷用」シートは納品書として印刷してご使用いただけます。'],
+        ['', '・数量を変更した場合は「納品リスト印刷用」シートの数量も同様に修正してください。'],
+        ['', '・貴社の自社様式の納品書をご使用いただいても構いません。'],
         [''],
         ['■ 注意事項'],
         ['', '・品番・品名・仕入先コードは変更しないでください。'],
         ['', '・このファイルをそのまま返送してください（ファイル形式を変えないこと）。'],
+        ['', '・返送先はメール本文に記載のアドレスへお送りください（送信元は送信専用です）。'],
     ]
     for row in instructions:
         ws2.append(row)
@@ -329,7 +362,7 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
     title_font = Font(bold=True, size=12)
     section_font = Font(bold=True, size=11)
     ws2.cell(row=1, column=1).font = title_font
-    for r in [3, 8, 13, 17]:
+    for r in [3, 8, 13, 19, 23, 28]:
         ws2.cell(row=r, column=1).font = section_font
 
     # --- シート3: 製品リスト ---
@@ -375,7 +408,7 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
     ws4.page_setup.fitToHeight = 0
     ws4.page_margins.left = 0.3
     ws4.page_margins.right = 0.3
-    ws4.page_margins.top = 0.3
+    ws4.page_margins.top = 0.8
     ws4.page_margins.bottom = 0.3
 
     s_code = supplier.supplier_code or ''
@@ -392,13 +425,10 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
         top=Side(style='thin'), bottom=Side(style='thin'),
     )
 
-    title_border = Border(bottom=Side(style='thin'))
     ws4.merge_cells('A1:G1')
     c_title = ws4.cell(row=1, column=1, value='納 品 書')
     c_title.font = title_font_p
     c_title.alignment = Alignment(horizontal='center')
-    for ci in range(1, 8):
-        ws4.cell(row=1, column=ci).border = title_border
 
     ws4.merge_cells('A3:C3')
     ws4.cell(row=3, column=1, value='ダイソウ工業株式会社　御中').font = info_font_bold
@@ -411,7 +441,9 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
     ws4.cell(row=4, column=6, value=f'納品日　{d_str}').font = info_font
     ws4.cell(row=4, column=6).alignment = Alignment(horizontal='right')
 
-    ROWS_PER_PAGE = 50
+    ROWS_PER_PAGE = 46
+    SIGN_ROW = 57
+    PAGE_BLOCK = 54
     tbl_start = 6
     p4_headers = ['No.', '品番', '品名', '数量', '単価', '金額', '備考']
     p4_widths = [5, 22, 32, 10, 10, 12, 14]
@@ -426,52 +458,61 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
     for ci, w in enumerate(p4_widths, 1):
         ws4.column_dimensions[get_column_letter(ci)].width = w
 
-    total_qty = 0
-    for idx, item in enumerate(items):
-        r = tbl_start + 1 + idx
-        ws4.cell(row=r, column=1, value=idx + 1).border = tbl_border
-        ws4.cell(row=r, column=1).alignment = Alignment(horizontal='center')
-        ws4.cell(row=r, column=2, value=item['product_code']).border = tbl_border
-        ws4.cell(row=r, column=3, value=item['product_name']).border = tbl_border
-        qty = item['expected_qty']
-        total_qty += qty
-        c_qty = ws4.cell(row=r, column=4, value=qty)
-        c_qty.border = tbl_border
-        c_qty.alignment = Alignment(horizontal='right')
-        ws4.cell(row=r, column=5, value='').border = tbl_border
-        ws4.cell(row=r, column=5).alignment = Alignment(horizontal='right')
-        ws4.cell(row=r, column=6, value='').border = tbl_border
-        ws4.cell(row=r, column=6).alignment = Alignment(horizontal='right')
-        ws4.cell(row=r, column=7, value='').border = tbl_border
-
-    r_total = tbl_start + 1 + len(items)
-    ws4.cell(row=r_total, column=3, value='合計').font = info_font_bold
-    ws4.cell(row=r_total, column=3).border = tbl_border
-    ws4.cell(row=r_total, column=3).alignment = Alignment(horizontal='right')
-    c_total = ws4.cell(row=r_total, column=4, value=total_qty)
-    c_total.font = info_font_bold
-    c_total.border = tbl_border
-    c_total.alignment = Alignment(horizontal='right')
-    ws4.cell(row=r_total, column=6).border = tbl_border
-
-    sign_font = Font(size=9)
-    sign_border_bottom = Border(bottom=Side(style='thin'))
-    r_sign = r_total + 3
-    ws4.cell(row=r_sign, column=1, value='受領').font = sign_font
-    ws4.merge_cells(start_row=r_sign, start_column=2, end_row=r_sign, end_column=3)
-    ws4.cell(row=r_sign, column=2).border = sign_border_bottom
-    ws4.cell(row=r_sign, column=3).border = sign_border_bottom
-
-    ws4.cell(row=r_sign, column=5, value='納入先').font = sign_font
-    ws4.merge_cells(start_row=r_sign, start_column=6, end_row=r_sign, end_column=7)
-    ws4.cell(row=r_sign, column=6).border = sign_border_bottom
-    ws4.cell(row=r_sign, column=7).border = sign_border_bottom
+    ws4.oddFooter.center.text = '&P/&Nページ'
+    ws4.oddFooter.center.size = 10
 
     from openpyxl.worksheet.pagebreak import Break
     ws4.print_title_rows = f'{tbl_start}:{tbl_start}'
-    if len(items) > ROWS_PER_PAGE:
-        for pg in range(1, (len(items) // ROWS_PER_PAGE) + 1):
-            break_row = tbl_start + pg * ROWS_PER_PAGE
+
+    sign_font = Font(size=9)
+    sign_border_bottom = Border(bottom=Side(style='thin'))
+    total_pages = max(1, -(-len(items) // ROWS_PER_PAGE))
+
+    for page_idx in range(total_pages):
+        if page_idx == 0:
+            data_start = tbl_start + 1
+            r_sign = SIGN_ROW
+            break_row = SIGN_ROW + 1
+        else:
+            data_start = SIGN_ROW + 4 + (page_idx - 1) * PAGE_BLOCK
+            r_sign = data_start + ROWS_PER_PAGE + 4
+            break_row = r_sign + 1
+
+        page_start = page_idx * ROWS_PER_PAGE
+        page_end = min(page_start + ROWS_PER_PAGE, len(items))
+        page_items = items[page_start:page_end]
+
+        for idx, item in enumerate(page_items):
+            r = data_start + idx
+            ws4.cell(row=r, column=1, value=page_start + idx + 1).border = tbl_border
+            ws4.cell(row=r, column=1).alignment = Alignment(horizontal='center')
+            ws4.cell(row=r, column=2, value=item['product_code']).border = tbl_border
+            ws4.cell(row=r, column=3, value=item['product_name']).border = tbl_border
+            qty = item['expected_qty']
+            c_qty = ws4.cell(row=r, column=4, value=qty)
+            c_qty.border = tbl_border
+            c_qty.alignment = Alignment(horizontal='right')
+            ws4.cell(row=r, column=5, value='').border = tbl_border
+            ws4.cell(row=r, column=5).alignment = Alignment(horizontal='right')
+            ws4.cell(row=r, column=6, value='').border = tbl_border
+            ws4.cell(row=r, column=6).alignment = Alignment(horizontal='right')
+            ws4.cell(row=r, column=7, value='').border = tbl_border
+
+        ws4.cell(row=r_sign, column=1, value='受領').font = sign_font
+        ws4.cell(row=r_sign, column=2).border = sign_border_bottom
+        ws4.cell(row=r_sign, column=5, value='納入先').font = sign_font
+        ws4.cell(row=r_sign, column=5).alignment = Alignment(horizontal='right')
+        ws4.merge_cells(start_row=r_sign, start_column=6, end_row=r_sign, end_column=7)
+        ws4.cell(row=r_sign, column=6).border = sign_border_bottom
+        ws4.cell(row=r_sign, column=7).border = sign_border_bottom
+        r_date = r_sign + 2
+        ws4.cell(row=r_date, column=5, value='日付').font = sign_font
+        ws4.cell(row=r_date, column=5).alignment = Alignment(horizontal='right')
+        ws4.merge_cells(start_row=r_date, start_column=6, end_row=r_date, end_column=7)
+        ws4.cell(row=r_date, column=6).border = sign_border_bottom
+        ws4.cell(row=r_date, column=7).border = sign_border_bottom
+
+        if page_idx < total_pages - 1:
             ws4.row_breaks.append(Break(id=break_row))
 
     output = BytesIO()
@@ -982,9 +1023,10 @@ def _generate_delivery_note_pdf(items, delivery_date, supplier):
             pc = item['product_code']
             pn = item['product_name']
             qty = int(item['expected_qty'])
-            d_ymd = delivery_date.strftime('%Y/%m/%d')
-            d_mmdd = f'{delivery_date.month:02d}/{delivery_date.day:02d}'
-            qr_data = f'{pc},{delivery_date.isoformat()},{qty}'
+            item_date = item.get('delivery_date', delivery_date)
+            d_ymd = item_date.strftime('%Y/%m/%d')
+            d_mmdd = f'{item_date.month:02d}/{item_date.day:02d}'
+            qr_data = f'{pc},{item_date.isoformat()},{qty}'
 
             _dn_nohin(c, ML, yt, NOHIN_W, ITEM_H,
                       pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT)
