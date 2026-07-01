@@ -364,14 +364,28 @@
 
     <!-- 台目入力モーダル -->
     <div v-if="modalUnit" class="modal-overlay" @click.self="closeModal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>{{ t('integratedOperation.checkInput') }}</h3>
-          <div class="modal-header-actions">
-            <button class="btn-secondary btn-sm" @click="closeModal">{{ t('common.close') }}</button>
-            <button class="btn-close" @click="closeModal">&times;</button>
+        <div class="modal-content">
+          <div class="modal-header">
+            <div class="modal-unit-nav" v-if="units.length">
+              <button
+                v-for="unit in units"
+                :key="'modal-unit-nav-' + unit.id"
+                type="button"
+                class="modal-unit-nav-btn"
+                :class="{
+                  active: modalUnit && Number(modalUnit.id) === Number(unit.id),
+                  completed: isUnitCompletedForNav(unit),
+                }"
+                @click="openUnitModal(unit, modalSelectedBlockId)"
+              >
+                {{ unit.sequence_no }}
+              </button>
+            </div>
+            <div class="modal-header-actions">
+              <span v-if="modalUnit?.sei_ban" class="sei-ban-label">刻印番号: {{ modalUnit.sei_ban }}</span>
+              <button class="btn-close" @click="closeModal">&times;</button>
+            </div>
           </div>
-        </div>
         <div class="modal-body">
           <div
             v-for="block in modalVisibleBlocks"
@@ -599,7 +613,7 @@
                 :class="{ active: modalPenModeOn }"
                 @click="toggleModalPenMode"
               >{{ modalPenModeOn ? '✏️ 描画ON' : '✏️ 描画OFF' }}</button>
-              <span class="modal-unit-label">台目 #{{ modalUnit.sequence_no }} {{ isReviewMode ? '確認' : '入力' }}{{ modalUnit.sei_ban ? ' | 刻印番号: ' + modalUnit.sei_ban : '' }}</span>
+              <span class="modal-unit-label">台目 #{{ modalUnit.sequence_no }} {{ isReviewMode ? '確認' : '入力' }}</span>
               <button
                 class="btn-secondary btn-sm"
                 @click="moveModalUnit(-1)"
@@ -1457,18 +1471,37 @@ const openNewBatchSection = () => {
   newBatchSectionRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+const processInputReturnPathMap = {
+  mobile_process_input: '/production/mobile-process-input',
+  desktop_process_input: '/production/desktop-process-input',
+  tablet_process_input: '/production/tablet-process-input',
+  simultaneous_process_input: '/production/simultaneous-process-input',
+  dual_process_input: '/production/dual-process-input',
+  two_person_one_equipment_input: '/production/two-person-one-equipment-input',
+  laser_process_input: '/production/laser-process-input',
+}
+
 const showBackToProcessInput = computed(() =>
-  String(route.query?.source || '') === 'mobile_process_input'
+  Boolean(processInputReturnPathMap[String(route.query?.source || '')])
 )
 
 const backToProcessInput = () => {
+  const source = String(route.query?.source || '')
+  const path = processInputReturnPathMap[source]
+  if (!path) return
   const lineId = selectedLine.value || ''
   const processId = preferredProcessId.value || ''
+  const returnPanel = route.query?.return_panel ? String(route.query.return_panel) : ''
+  const returnOperatorName = route.query?.return_operator_name ? String(route.query.return_operator_name) : ''
+  const returnOperatorUserId = route.query?.return_operator_user_id ? String(route.query.return_operator_user_id) : ''
   router.push({
-    path: '/production/mobile-process-input',
+    path,
     query: {
       ...(lineId ? { line_id: String(lineId) } : {}),
       ...(processId ? { process_id: String(processId) } : {}),
+      ...(returnPanel ? { return_panel: returnPanel } : {}),
+      ...(returnOperatorName ? { return_operator_name: returnOperatorName } : {}),
+      ...(returnOperatorUserId ? { return_operator_user_id: returnOperatorUserId } : {}),
     },
   })
 }
@@ -1586,6 +1619,11 @@ const canMoveNextUnit = computed(() => {
   const idx = currentModalUnitIndex.value
   return idx >= 0 && idx < units.value.length - 1
 })
+const isUnitCompletedForNav = (unit) => {
+  const block = modalCurrentBlock.value
+  if (block) return isBlockCompleted(unit, block)
+  return ['COMPLETED', 'LEADER_CONFIRMED', 'SUPERVISOR_CONFIRMED'].includes(unit?.status)
+}
 
 const openUnitModal = (unit, blockId = null) => {
   if (!canView.value) return
@@ -2544,18 +2582,52 @@ onMounted(async () => {
 .modal-header {
   position: relative;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid #e5e7eb;
 }
-.modal-header h3 {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
-  font-size: 16px;
-  white-space: nowrap;
+.modal-unit-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.modal-unit-nav-btn {
+  flex: 0 0 auto;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.modal-unit-nav-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.modal-unit-nav-btn.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+.modal-unit-nav-btn.completed {
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #166534;
+}
+.modal-unit-nav-btn.completed.active {
+  background: #16a34a;
+  border-color: #15803d;
+  color: #ffffff;
 }
 .modal-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .modal-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
