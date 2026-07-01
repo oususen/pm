@@ -234,6 +234,8 @@ def _is_checked(check):
         return True
     if check.text_value:
         return True
+    if check.photo_url:
+        return True
     return False
 
 
