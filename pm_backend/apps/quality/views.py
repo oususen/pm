@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from masters.models import Calendar, CalendarDay, Equipment
 from notifications.models import Notification
+from orders.utils.calendar_utils import WorkingDayCalculator
 
 from .models import (
     EquipmentInspectionConfirmation,
@@ -230,7 +231,7 @@ def _equipment_context(sheet_code):
 
 def _is_frequency_required(frequency, operation_date, calendar):
     """頻度に応じて、operation_dateが該当日かを判定する"""
-    if not frequency or not calendar:
+    if not frequency:
         return True
 
     freq = frequency.strip()
@@ -250,23 +251,20 @@ def _is_frequency_required(frequency, operation_date, calendar):
     if freq not in PRESET_FREQUENCIES:
         return True
 
+    calculator = WorkingDayCalculator(calendar)
+
     if freq == "始業時":
-        return CalendarDay.objects.filter(
-            calendar=calendar, target_date=operation_date, is_working_day=True
-        ).exists()
+        return calculator.is_working_day(operation_date)
 
     if freq in ("週初め", "週末"):
-        iso_cal = operation_date.isocalendar()
         week_start = operation_date - timedelta(days=operation_date.weekday())
         week_end = week_start + timedelta(days=6)
-        week_working_days = list(
-            CalendarDay.objects.filter(
-                calendar=calendar,
-                target_date__gte=week_start,
-                target_date__lte=week_end,
-                is_working_day=True,
-            ).order_by("target_date").values_list("target_date", flat=True)
-        )
+        week_working_days = []
+        cursor = week_start
+        while cursor <= week_end:
+            if calculator.is_working_day(cursor):
+                week_working_days.append(cursor)
+            cursor += timedelta(days=1)
         if not week_working_days:
             return False
         if freq == "週初め":
@@ -278,14 +276,12 @@ def _is_frequency_required(frequency, operation_date, calendar):
         month_start = operation_date.replace(day=1)
         next_month = (month_start + timedelta(days=32)).replace(day=1)
         month_end = next_month - timedelta(days=1)
-        month_working_days = list(
-            CalendarDay.objects.filter(
-                calendar=calendar,
-                target_date__gte=month_start,
-                target_date__lte=month_end,
-                is_working_day=True,
-            ).order_by("target_date").values_list("target_date", flat=True)
-        )
+        month_working_days = []
+        cursor = month_start
+        while cursor <= month_end:
+            if calculator.is_working_day(cursor):
+                month_working_days.append(cursor)
+            cursor += timedelta(days=1)
         if not month_working_days:
             return False
         if freq == "月初め":
