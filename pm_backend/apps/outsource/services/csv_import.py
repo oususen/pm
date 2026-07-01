@@ -1,10 +1,14 @@
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from openpyxl import load_workbook
 
 from outsource.models import OutsourceOrder, OutsourceItem
+
+
+FIRST_ARTICLE_CONTACT_TYPES = ['FB初物検査', '初物検査']
+FIRST_ARTICLE_LOOKBACK_DAYS = 90
 
 
 def _decode_csv_text(file_content, encoding):
@@ -39,7 +43,58 @@ def _build_painting_name(*parts):
     return ' / '.join(values)
 
 
-def _create_order(row_num, item_code, item_name, painting_name, painting_date_value, qty_value, results, raw_data):
+def _derive_product_number(item_code):
+    code = str(item_code or '').strip().lstrip('B')
+    if len(code) >= 10:
+        return f'{code[:6]}-{code[6:10]}'
+    return str(item_code or '').strip()
+
+
+def _has_recent_order(item_code, painting_date, import_started_at):
+    window_start = painting_date - timedelta(days=FIRST_ARTICLE_LOOKBACK_DAYS)
+    return OutsourceOrder.objects.filter(
+        item_code=item_code,
+        painting_date__gte=window_start,
+        painting_date__lt=painting_date,
+        imported_at__lt=import_started_at,
+    ).exists()
+
+
+def _collect_first_article_candidate(item_code, item_name, painting_date, order_qty, case_no, import_started_at):
+    if _has_recent_order(item_code, painting_date, import_started_at):
+        return None
+    return {
+        'item_code': item_code,
+        'product_number': _derive_product_number(item_code),
+        'item_name': item_name,
+        'painting_date': painting_date.isoformat(),
+        'order_qty': order_qty,
+        'case_no': case_no,
+        'lookback_days': FIRST_ARTICLE_LOOKBACK_DAYS,
+    }
+
+
+def build_first_article_email_body(candidates):
+    lines = [
+        'フランスベッド受注取込で、90日以上受注のなかった品番が検出されました。',
+        '初物検査の要否を確認してください。',
+        '',
+        f'判定条件: 塗装日から{FIRST_ARTICLE_LOOKBACK_DAYS}日遡った期間に同一品番の受注がないこと',
+        '',
+        '対象一覧:',
+    ]
+    for item in candidates:
+        lines.append(
+            (
+                f"- 品番: {item['product_number']} / 品名: {item['item_name']} / 塗装日: {item['painting_date']} / "
+                f"数量: {item['order_qty']} / 案件番号: {item['case_no']}"
+            )
+        )
+    lines.extend(['', '以上'])
+    return '\n'.join(lines)
+
+
+def _create_order(row_num, item_code, item_name, painting_name, painting_date_value, qty_value, results, raw_data, import_started_at):
     item_code = str(item_code or '').strip()
     item_name = str(item_name or '').strip()
     painting_name = str(painting_name or '').strip()
@@ -84,16 +139,27 @@ def _create_order(row_num, item_code, item_name, painting_name, painting_date_va
         'item_name': item_name,
         'qty': order_qty,
     })
+    candidate = _collect_first_article_candidate(
+        item_code=item_code,
+        item_name=item_name,
+        painting_date=painting_date,
+        order_qty=order_qty,
+        case_no=case_no,
+        import_started_at=import_started_at,
+    )
+    if candidate:
+        results.setdefault('first_article_candidates', []).append(candidate)
 
 
-def import_fb_csv(file_content, encoding='utf-8-sig'):
+def import_fb_csv(file_content, encoding='utf-8-sig', user_id=None):
     """
     FB受注CSVを取り込み、案件（OutsourceOrder）を生成する。
 
     CSVフォーマット:
         品目コード,品目名称,塗装名,塗装日,数量
     """
-    results = {'created': [], 'skipped': [], 'errors': []}
+    results = {'created': [], 'skipped': [], 'errors': [], 'first_article_candidates': []}
+    import_started_at = datetime.now()
     text = _decode_csv_text(file_content, encoding)
     reader = csv.DictReader(io.StringIO(text))
 
@@ -108,6 +174,7 @@ def import_fb_csv(file_content, encoding='utf-8-sig'):
                 qty_value=row.get('数量', ''),
                 results=results,
                 raw_data=row,
+                import_started_at=import_started_at,
             )
         except Exception as e:
             results['errors'].append({
@@ -119,14 +186,15 @@ def import_fb_csv(file_content, encoding='utf-8-sig'):
     return results
 
 
-def import_fb_excel(file_content):
+def import_fb_excel(file_content, user_id=None):
     """
     FB受注Excelを取り込み、案件（OutsourceOrder）を生成する。
 
     Excelフォーマット:
         伝票区分,伝票タイプ,品目コード,品目名称,発注数,納入期日
     """
-    results = {'created': [], 'skipped': [], 'errors': []}
+    results = {'created': [], 'skipped': [], 'errors': [], 'first_article_candidates': []}
+    import_started_at = datetime.now()
     wb = load_workbook(io.BytesIO(file_content), data_only=True)
     ws = wb[wb.sheetnames[0]]
 
@@ -168,6 +236,7 @@ def import_fb_excel(file_content):
                 qty_value=order_qty,
                 results=results,
                 raw_data=raw_data,
+                import_started_at=import_started_at,
             )
         except Exception as e:
             results['errors'].append({
@@ -179,8 +248,8 @@ def import_fb_excel(file_content):
     return results
 
 
-def import_fb_order_file(file_content, filename='', encoding='utf-8-sig'):
+def import_fb_order_file(file_content, filename='', encoding='utf-8-sig', user_id=None):
     lower_name = str(filename or '').lower()
     if lower_name.endswith(('.xlsx', '.xlsm', '.xls')):
-        return import_fb_excel(file_content)
-    return import_fb_csv(file_content, encoding=encoding)
+        return import_fb_excel(file_content, user_id=user_id)
+    return import_fb_csv(file_content, encoding=encoding, user_id=user_id)

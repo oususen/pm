@@ -68,6 +68,12 @@ export const createOutsourceAPI = (client) => ({
   importCSV(formData) {
     return client.post('/outsource/orders/import-csv/', formData)
   },
+  getFirstArticleContacts(params = {}) {
+    return client.get('/outsource/orders/first-article-contacts/', { params })
+  },
+  sendFirstArticleNotice(data) {
+    return client.post('/outsource/orders/send-first-article-notice/', data)
+  },
   calculateConstraints(id, data = {}) {
     return client.post(`/outsource/orders/${id}/calculate-constraints/`, data)
   },

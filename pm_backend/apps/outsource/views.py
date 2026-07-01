@@ -10,8 +10,9 @@ from rest_framework.parsers import MultiPartParser, JSONParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from masters.models import Calendar
+from masters.models import Calendar, Contact
 from orders.utils.calendar_utils import subtract_working_days
+from shipping.services.email_service import EmailService
 
 from .models import (
     Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
@@ -34,7 +35,11 @@ from .serializers import (
     ProductStockTransactionSerializer,
     SplitImportLogSerializer,
 )
-from .services.csv_import import import_fb_order_file
+from .services.csv_import import (
+    FIRST_ARTICLE_CONTACT_TYPES,
+    build_first_article_email_body,
+    import_fb_order_file,
+)
 from .services.excel_export import generate_split_plan_excel
 from .services.excel_import import import_split_plan_excel
 from .services.bom_explosion import explode_materials_for_order, explode_materials_for_orders
@@ -90,6 +95,38 @@ def _calc_material_due_date(supply_date, supplier=None):
     supplier_calendar = getattr(supplier, 'calendar', None)
     calc_calendar = supplier_calendar or daiso_calendar
     return subtract_working_days(supply_date, 1, calc_calendar)
+
+
+def _serialize_contact(contact):
+    display_name = ' '.join(
+        value for value in [contact.company_name, contact.department, contact.contact_person] if str(value or '').strip()
+    ).strip()
+    return {
+        'id': contact.id,
+        'email': contact.email,
+        'contact_type': contact.contact_type,
+        'display_name': display_name or contact.email,
+    }
+
+
+def _get_first_article_contacts():
+    contacts = (
+        Contact.objects.filter(contact_type__in=FIRST_ARTICLE_CONTACT_TYPES, is_active=True)
+        .exclude(email='')
+        .order_by('display_order', 'id')
+    )
+    unique_contacts = []
+    seen = set()
+    for contact in contacts:
+        email = str(contact.email or '').strip()
+        if not email:
+            continue
+        lowered = email.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        unique_contacts.append(contact)
+    return unique_contacts
 
 
 class SubcontractorViewSet(viewsets.ModelViewSet):
@@ -156,7 +193,13 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
         encoding = request.data.get('encoding', 'shift_jis')
         content = file.read()
         try:
-            results = import_fb_order_file(content, filename=getattr(file, 'name', ''), encoding=encoding)
+            user_id = request.user.id if request.user and request.user.is_authenticated else None
+            results = import_fb_order_file(
+                content,
+                filename=getattr(file, 'name', ''),
+                encoding=encoding,
+                user_id=user_id,
+            )
         except Exception as e:
             return Response(
                 {'error': f'受注取込でエラーが発生しました: {type(e).__name__}: {e}'},
@@ -168,6 +211,59 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
             'skipped_count': len(results['skipped']),
             'error_count': len(results['errors']),
             **results,
+        })
+
+    @action(detail=False, methods=['get'], url_path='first-article-contacts')
+    def first_article_contacts(self, request):
+        contacts = [_serialize_contact(contact) for contact in _get_first_article_contacts()]
+        return Response(contacts)
+
+    @action(detail=False, methods=['post'], url_path='send-first-article-notice', parser_classes=[JSONParser])
+    def send_first_article_notice(self, request):
+        to_emails = request.data.get('to_emails') or []
+        subject = str(request.data.get('subject') or '').strip()
+        body = str(request.data.get('body') or '').strip()
+        items = request.data.get('items') or []
+
+        normalized_to = []
+        seen = set()
+        for email in to_emails:
+            value = str(email or '').strip()
+            if not value:
+                continue
+            lowered = value.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized_to.append(value)
+
+        if not normalized_to:
+            return Response({'detail': '送信先を1件以上指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not subject:
+            return Response({'detail': '件名を入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(items, list) or not items:
+            return Response({'detail': '久しぶり製品データがありません。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not body:
+            body = build_first_article_email_body(items)
+
+        service = EmailService()
+        user_id = request.user.id if request.user and request.user.is_authenticated else None
+        send_result = service.send_plain_email(
+            to_emails=normalized_to,
+            subject=subject,
+            body=body,
+            user_id=user_id,
+        )
+        if not send_result.get('success'):
+            return Response(
+                {'detail': send_result.get('message') or 'メール送信に失敗しました。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'success': True,
+            'message': send_result.get('message') or 'メールを送信しました。',
+            'to_emails': normalized_to,
         })
 
     @action(detail=True, methods=['post'], url_path='calculate-constraints')

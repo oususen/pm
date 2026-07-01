@@ -245,3 +245,69 @@ class EmailService:
                 'success': False,
                 'message': f'予期しないエラー: {str(exc)}',
             }
+
+    def send_plain_email(
+        self,
+        to_emails: List[str],
+        subject: str,
+        body: str,
+        cc_emails: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+        reply_to: Optional[str] = None,
+    ) -> Dict:
+        """添付なしメールを送信"""
+        smtp_config = self.get_smtp_config(user_id)
+        if not smtp_config:
+            return {
+                'success': False,
+                'message': 'SMTP設定が見つかりません。管理者に連絡してください。',
+            }
+
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = smtp_config['user']
+            msg['To'] = ', '.join(to_emails)
+            msg['Subject'] = subject
+            if cc_emails:
+                msg['Cc'] = ', '.join(cc_emails)
+            if reply_to:
+                msg['Reply-To'] = reply_to
+
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+            recipients = list(to_emails)
+            if cc_emails:
+                recipients.extend(cc_emails)
+
+            with smtplib.SMTP(smtp_config['host'], smtp_config['port']) as server:
+                server.starttls()
+                server.login(smtp_config['user'], smtp_config['password'])
+                refused_recipients = server.send_message(msg, to_addrs=recipients)
+
+            if refused_recipients:
+                refused_list = ', '.join(refused_recipients.keys())
+                return {
+                    'success': False,
+                    'message': f'一部の宛先で送信に失敗しました: {refused_list}',
+                }
+
+            return {
+                'success': True,
+                'message': f'メールを送信しました（宛先: {len(to_emails)}件）',
+            }
+
+        except smtplib.SMTPAuthenticationError:
+            return {
+                'success': False,
+                'message': 'SMTP認証エラー: ユーザー名またはパスワードが正しくありません',
+            }
+        except smtplib.SMTPException as exc:
+            return {
+                'success': False,
+                'message': f'メール送信エラー: {str(exc)}',
+            }
+        except Exception as exc:
+            return {
+                'success': False,
+                'message': f'予期しないエラー: {str(exc)}',
+            }
