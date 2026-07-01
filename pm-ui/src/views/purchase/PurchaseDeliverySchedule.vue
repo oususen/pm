@@ -95,6 +95,24 @@
         </ol>
       </section>
     </div>
+
+    <!-- 数量差異確認ダイアログ -->
+    <div v-if="diffDialog.show" class="diff-overlay" @click.self="diffDialog.resolve(false)">
+      <div class="diff-modal">
+        <div class="diff-header">【数量差異】Excel ≠ カバー期間需要</div>
+        <div class="diff-body">
+          <div v-for="(item, idx) in diffDialog.items" :key="idx" class="diff-item">
+            <div class="diff-product">{{ item.code }}<span v-if="item.dest" class="diff-dest">[{{ item.dest }}]</span>: Excel合計={{ item.excelQty }}, 需要合計={{ item.demandQty }}</div>
+            <div v-for="(dd, di) in item.dayDiffs" :key="di" class="diff-day">{{ dd }}</div>
+          </div>
+        </div>
+        <div class="diff-footer">
+          <span class="diff-question">このまま取り込みますか？</span>
+          <button class="btn-yes" @click="diffDialog.resolve(true)">はい</button>
+          <button class="btn-no" @click="diffDialog.resolve(false)">いいえ</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -102,6 +120,17 @@
 import { onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
+
+const diffDialog = ref({ show: false, items: [], resolve: () => {} })
+const showDiffDialog = (items) => {
+  return new Promise((resolve) => {
+    diffDialog.value = {
+      show: true,
+      items,
+      resolve: (result) => { diffDialog.value.show = false; resolve(result) },
+    }
+  })
+}
 
 const suppliers = ref([])
 const selectedSupplier = ref('')
@@ -265,6 +294,7 @@ const downloadDeliveryNotePdf = async () => {
 const normalizeHeader = (v) => String(v || '').trim().replace(/\s/g, '')
 const readCell = (row, map, name) => row[map[name] ?? -1]
 const DATE_PATTERN = /^(\d{4})([-/])(\d{1,2})\2(\d{1,2})$/
+const DATE_COL_PATTERN = /^(\d{1,2})\/(\d{1,2})/
 
 const formatNormalizedDate = (year, month, day) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 
@@ -335,6 +365,22 @@ const onFileChange = async (event) => {
       return
     }
 
+    // 日別列を検出: 納品日と仕入先コードの間にある M/D(...) 形式のヘッダー
+    const targetYear = parseInt(targetDate.value.slice(0, 4), 10)
+    const dateColMap = []
+    const deliveryDateIdx = idx['納品日']
+    const supplierCodeIdx = idx['仕入先コード']
+    for (let ci = deliveryDateIdx + 1; ci < supplierCodeIdx; ci++) {
+      const h = headers[ci]
+      const m = h.match(DATE_COL_PATTERN)
+      if (m) {
+        const month = String(parseInt(m[1], 10)).padStart(2, '0')
+        const day = String(parseInt(m[2], 10)).padStart(2, '0')
+        dateColMap.push({ colIdx: ci, isoDate: `${targetYear}-${month}-${day}` })
+      }
+    }
+    const hasDateCols = dateColMap.length > 0
+
     const grouped = new Map()
     const rowErrors = []
     const deliveryDateErrors = []
@@ -365,7 +411,6 @@ const onFileChange = async (event) => {
         continue
       }
       if (qtyInfo.blank) {
-        // 数量空白行は除外して処理
         continue
       }
       if (qtyInfo.invalid || qtyInfo.qty < 0) {
@@ -388,11 +433,22 @@ const onFileChange = async (event) => {
           supplier_code: supplierCode,
           slip_no: slipNo,
           note: '',
+          daily: {},
         })
       }
       const current = grouped.get(key)
       current.received_qty += qtyInfo.qty
       if (!current.slip_no && slipNo) current.slip_no = slipNo
+
+      if (hasDateCols) {
+        for (const dc of dateColMap) {
+          const cellVal = row[dc.colIdx]
+          const dq = parseQty(cellVal)
+          if (!dq.blank && !dq.invalid && dq.qty > 0) {
+            current.daily[dc.isoDate] = (current.daily[dc.isoDate] || 0) + dq.qty
+          }
+        }
+      }
     }
 
     if (deliveryDateErrors.length) {
@@ -416,6 +472,50 @@ const onFileChange = async (event) => {
 
     rows.value = [...grouped.values()].sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
     errors.value = rowErrors
+
+    // LineDemand照合: Excel日別・合計 vs カバー期間LineDemand
+    if (rows.value.length) {
+      try {
+        const demandRes = await api.client.get('/purchase-receiving/', {
+          params: { supplier_id: selectedSupplier.value, target_date: targetDate.value, basis: 'progress' },
+        })
+        const demandItems = demandRes.data.items || []
+        const demandMap = new Map(demandItems.map((d) => [d.product_id, d]))
+        const coverageDates = demandRes.data.coverage_dates || []
+        const diffItems = []
+        for (const r of rows.value) {
+          const demand = demandMap.get(r.product_id)
+          const demandDaily = demand ? (demand.daily || {}) : {}
+          const demandTotal = demand ? demand.expected_qty : 0
+
+          const dayDiffs = []
+          if (hasDateCols) {
+            for (const dc of dateColMap) {
+              const excelVal = r.daily[dc.isoDate] || 0
+              const demandVal = demandDaily[dc.isoDate] || 0
+              if (excelVal !== demandVal) {
+                const dp = dc.isoDate.slice(5).replace('-', '/')
+                dayDiffs.push(`${dp}: Excel=${excelVal} / 需要=${demandVal}`)
+              }
+            }
+          }
+
+          if (r.received_qty !== demandTotal || dayDiffs.length) {
+            const dest = (demand && demand.transfer_destination_label)
+              || (productMap.get(r.product_code.toUpperCase()) || {}).transfer_destination_label
+              || ''
+            diffItems.push({ code: r.product_code, dest, excelQty: r.received_qty, demandQty: demandTotal, dayDiffs })
+          }
+        }
+        if (diffItems.length) {
+          const ok = await showDiffDialog(diffItems)
+          if (!ok) {
+            rows.value = []
+            return
+          }
+        }
+      } catch { /* 照合API失敗は無視して続行 */ }
+    }
   } catch (e) {
     alert('納品リスト取込に失敗しました。')
   } finally {
@@ -541,4 +641,18 @@ onMounted(fetchSuppliers)
   font-size: 16px;
   font-weight: 700;
 }
+.diff-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.diff-modal { background: #fff; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.25); width: 700px; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column; }
+.diff-header { padding: 14px 20px; font-size: 15px; font-weight: 700; color: #b91c1c; background: #fff1f2; border-bottom: 1px solid #fecdd3; border-radius: 8px 8px 0 0; }
+.diff-body { padding: 12px 20px; overflow-y: auto; flex: 1; }
+.diff-item { margin-bottom: 8px; }
+.diff-product { font-size: 14px; font-weight: 600; color: #1e293b; }
+.diff-dest { font-size: 12px; font-weight: 500; color: #6366f1; margin-left: 4px; }
+.diff-day { font-size: 13px; color: #64748b; padding-left: 16px; }
+.diff-footer { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid #e5e7eb; justify-content: flex-end; }
+.diff-question { margin-right: auto; font-size: 14px; font-weight: 600; color: #334155; }
+.btn-yes { padding: 6px 24px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.btn-yes:hover { background: #1d4ed8; }
+.btn-no { padding: 6px 24px; background: #e5e7eb; color: #334155; border: none; border-radius: 4px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.btn-no:hover { background: #d1d5db; }
 </style>

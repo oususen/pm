@@ -12,6 +12,7 @@
         <input type="date" v-model="targetDate" @change="onTargetDateChange" />
         <button class="btn-primary" @click="loadCurrentTabData" :disabled="!selectedSupplier">検収データ取得</button>
         <button v-if="rows.length" class="btn-excel" @click="exportExcel">Excel出力</button>
+        <button v-if="rows.length" class="btn-receipt" @click="downloadReceiptPdf">受領書発行</button>
         <button v-if="selectedSupplier" class="btn-history" @click="toggleHistory">検収履歴</button>
       </div>
     </div>
@@ -103,12 +104,13 @@
             <td class="col-code">
               {{ row.product_code }}
               <button class="btn-hold" :class="{ active: row.held }" @click="toggleHold(row)">数変更</button>
+              <button v-if="row.held" class="btn-non-delivery" :class="{ active: row.non_delivery }" @click="toggleNonDelivery(row)">未納</button>
             </td>
             <td class="col-name">{{ row.product_name }}</td>
             <td class="col-dest">{{ row.transfer_destination_label || '' }}</td>
             <td class="num col-total bold">{{ row.expected_qty }}</td>
             <td class="col-confirm">
-              <button v-if="!row.actual_qty || row.actual_qty < row.expected_qty" class="btn-confirmed" :class="{ active: row.confirmed }" @click="row.confirmed = !row.confirmed">確認済</button>
+              <button v-if="!row.actual_qty || row.actual_qty < row.expected_qty" class="btn-confirmed" :class="{ active: row.confirmed }" :disabled="row.held && filterHeld !== 'yes'" @click="row.confirmed = !row.confirmed">確認済</button>
               <span v-else class="badge-received">検収済</span>
             </td>
             <td class="num col-actual">{{ row.actual_qty || '' }}</td>
@@ -173,6 +175,12 @@
           <label>品番:
             <input v-model="filterProductCodeDelivery" class="filter-input" placeholder="部分一致" />
           </label>
+          <label>移動先:
+            <select v-model="filterDestDelivery">
+              <option value="">すべて</option>
+              <option v-for="o in destOptionsDelivery" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+          </label>
           <div class="btn-group">
             <span class="filter-label">G:</span>
             <button :class="['btn-filter', { active: filterGDelivery === '' }]" @click="filterGDelivery = ''">全</button>
@@ -203,9 +211,13 @@
             <tr>
               <th>品番</th>
               <th>品名</th>
+              <th class="col-dest">移動先</th>
               <th class="num">納入予定</th>
-              <th class="col-confirm"></th>
               <th class="num">実績</th>
+              <th v-for="d in deliveryCoverageDates" :key="d" class="num col-date">
+                <div>{{ formatDateParts(d).date }}</div>
+                <div class="dow">{{ formatDateParts(d).dow }}</div>
+              </th>
               <th class="num">実数</th>
               <th>備考</th>
             </tr>
@@ -215,14 +227,22 @@
               <td>
                 {{ r.product_code }}
                 <button class="btn-hold" :class="{ active: r.held }" @click="toggleHoldDelivery(r)">数変更</button>
+                <button v-if="r.held" class="btn-non-delivery" :class="{ active: r.non_delivery }" @click="toggleNonDelivery(r)">未納</button>
               </td>
               <td>{{ r.product_name }}</td>
-              <td class="num">{{ r.expected_qty }}</td>
-              <td class="col-confirm">
-                <button v-if="!r.actual_qty || r.actual_qty < r.expected_qty" class="btn-confirmed" :class="{ active: r.confirmed }" @click="r.confirmed = !r.confirmed">確認済</button>
+              <td class="col-dest">{{ r.transfer_destination_label || '' }}</td>
+              <td class="col-expected">
+                <span class="expected-qty">{{ r.expected_qty }}</span>
+                <button v-if="!r.actual_qty || r.actual_qty < r.expected_qty" class="btn-confirmed" :class="{ active: r.confirmed }" :disabled="r.held && filterHeldDelivery !== 'yes'" @click="r.confirmed = !r.confirmed">確認済</button>
                 <span v-else class="badge-received">検収済</span>
               </td>
               <td class="num">{{ r.actual_qty || '' }}</td>
+              <td v-for="d in deliveryCoverageDates" :key="d" class="col-date-cell">
+                <template v-if="r.daily && r.daily[d]">
+                  <span class="date-qty">{{ r.daily[d] }}</span>
+                  <button v-if="!r.actual_qty || r.actual_qty < r.expected_qty" class="btn-day-confirm" :class="{ active: r.daily_confirmed && r.daily_confirmed[d] }" :disabled="r.held && filterHeldDelivery !== 'yes'" @click="toggleDayConfirm(r, d)">✓</button>
+                </template>
+              </td>
               <td class="num">
                 <input v-if="!r.actual_qty || r.actual_qty < r.expected_qty" type="number" v-model.number="r.received_qty" min="0" class="input-qty" />
                 <span v-else class="text-muted">-</span>
@@ -410,11 +430,18 @@ const filterDiffDelivery = ref('')
 const filterActualDelivery = ref('')
 const filterProductCodeDelivery = ref('')
 const filterGDelivery = ref('yes')
+const filterDestDelivery = ref('')
+const deliveryCoverageDates = ref([])
 
 const destOptions = computed(() => {
   const set = new Set()
   for (const r of rows.value) if (r.transfer_destination) set.add(r.transfer_destination)
   return [...set].sort().map((k) => ({ value: k, label: rows.value.find((r) => r.transfer_destination === k)?.transfer_destination_label || k }))
+})
+const destOptionsDelivery = computed(() => {
+  const set = new Set()
+  for (const r of deliveryListRows.value) if (r.transfer_destination) set.add(r.transfer_destination)
+  return [...set].sort().map((k) => ({ value: k, label: deliveryListRows.value.find((r) => r.transfer_destination === k)?.transfer_destination_label || k }))
 })
 const nextProcessOptions = computed(() => {
   const set = new Set()
@@ -440,6 +467,7 @@ const filteredRows = computed(() => {
 })
 const filteredDeliveryListRows = computed(() => {
   return deliveryListRows.value.filter((r) => {
+    if (filterDestDelivery.value && r.transfer_destination !== filterDestDelivery.value) return false
     if (filterProductCodeDelivery.value && !String(r.product_code || '').toUpperCase().includes(filterProductCodeDelivery.value.toUpperCase())) return false
     if (filterHeldDelivery.value === 'yes' && !r.held) return false
     if (filterHeldDelivery.value === 'no' && r.held) return false
@@ -507,7 +535,9 @@ const onSupplierChange = () => {
   filterActualDelivery.value = ''
   filterProductCodeDelivery.value = ''
   filterGDelivery.value = gDefault
+  filterDestDelivery.value = ''
   deliveryListRows.value = []
+  deliveryCoverageDates.value = []
   showAddModal.value = false
   if (selectedSupplier.value) {
     fetchSupplierProducts()
@@ -609,10 +639,18 @@ const loadHeldState = () => {
 const hasHeldRows = computed(() => rows.value.some((r) => r.held))
 const allTargetsConfirmed = computed(() => filteredRows.value.filter((r) => !r.held && !isReceived(r)).every((r) => r.confirmed))
 const allHeldConfirmed = computed(() => filteredRows.value.filter((r) => r.held && !isReceived(r)).every((r) => r.confirmed))
-const allDeliveryTargetsConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => !r.held && !isReceived(r)).every((r) => r.confirmed))
-const allDeliveryHeldConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r)).every((r) => r.confirmed))
+const isDeliveryRowFullyConfirmed = (r) => {
+  if (!r.confirmed) return false
+  if (!deliveryCoverageDates.value.length) return true
+  for (const d of deliveryCoverageDates.value) {
+    if (r.daily && r.daily[d] && !(r.daily_confirmed && r.daily_confirmed[d])) return false
+  }
+  return true
+}
+const allDeliveryTargetsConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => !r.held && !isReceived(r)).every(isDeliveryRowFullyConfirmed))
+const allDeliveryHeldConfirmed = computed(() => filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r)).every(isDeliveryRowFullyConfirmed))
 const hasConfirmableProgressRows = computed(() => filteredRows.value.some((r) => !isReceived(r) && !r.confirmed))
-const hasConfirmableDeliveryRows = computed(() => filteredDeliveryListRows.value.some((r) => !isReceived(r) && !r.confirmed))
+const hasConfirmableDeliveryRows = computed(() => filteredDeliveryListRows.value.some((r) => !isReceived(r) && !isDeliveryRowFullyConfirmed(r)))
 
 const confirmAllProgressRows = () => {
   for (const row of filteredRows.value) {
@@ -622,12 +660,20 @@ const confirmAllProgressRows = () => {
 
 const confirmAllDeliveryRows = () => {
   for (const row of filteredDeliveryListRows.value) {
-    if (!isReceived(row)) row.confirmed = true
+    if (!isReceived(row)) {
+      row.confirmed = true
+      for (const d of deliveryCoverageDates.value) {
+        if (row.daily && row.daily[d]) {
+          if (!row.daily_confirmed) row.daily_confirmed = {}
+          row.daily_confirmed[d] = true
+        }
+      }
+    }
   }
 }
 
 const saveHeldReceiving = async () => {
-  const heldItems = filteredRows.value.filter((r) => r.held && !isReceived(r))
+  const heldItems = filteredRows.value.filter((r) => r.held && !isReceived(r) && (Number(r.received_qty) > 0 || r.non_delivery))
   saving.value = true
   try {
     await api.client.post('/purchase-receiving/', {
@@ -638,6 +684,7 @@ const saveHeldReceiving = async () => {
         expected_qty: r.expected_qty,
         received_qty: r.received_qty,
         note: r.note || '',
+        non_delivery: !!r.non_delivery,
       })),
     })
     for (const r of heldItems) r.held = false
@@ -675,9 +722,32 @@ const toggleHistory = async () => {
 
 const toggleHold = (row) => {
   row.held = !row.held
-  if (row.held) row.received_qty = 0
-  else row.received_qty = row.expected_qty
+  if (row.held) {
+    row.received_qty = 0
+    row.confirmed = false
+  } else {
+    row.received_qty = row.expected_qty
+    row.non_delivery = false
+  }
   saveHeldState()
+}
+
+const downloadReceiptPdf = async () => {
+  try {
+    const res = await api.client.get('/purchase-receiving/receipt-pdf/', {
+      params: { supplier_id: selectedSupplier.value, target_date: targetDate.value, g_filter: filterG.value },
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `受領書_${targetDate.value}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error('受領書PDF出力エラー', e)
+    alert('受領書PDFの出力に失敗しました。')
+  }
 }
 
 const exportExcel = () => {
@@ -703,16 +773,19 @@ const loadDeliveryListData = async () => {
   if (!selectedSupplier.value) return
   deliveryListLoading.value = true
   deliveryListRows.value = []
+  deliveryCoverageDates.value = []
   try {
     const res = await api.client.get('/purchase-delivery-schedules/', {
       params: { supplier_id: selectedSupplier.value, target_date: targetDate.value },
     })
     const items = res.data.items || []
+    deliveryCoverageDates.value = res.data.coverage_dates || []
     deliveryListRows.value = items.map((r) => ({
       ...r,
       received_qty: r.expected_qty,
       held: false,
       confirmed: false,
+      daily_confirmed: {},
       note: r.product_code || '',
     }))
   } catch (e) {
@@ -751,7 +824,7 @@ const saveDeliveryListReceiving = async () => {
 }
 
 const saveDeliveryListHeldReceiving = async () => {
-  const targets = filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r) && Number(r.received_qty) > 0)
+  const targets = filteredDeliveryListRows.value.filter((r) => r.held && !isReceived(r) && (Number(r.received_qty) > 0 || r.non_delivery))
   if (!targets.length) {
     alert('数変更の検収対象がありません。')
     return
@@ -766,6 +839,7 @@ const saveDeliveryListHeldReceiving = async () => {
         expected_qty: r.expected_qty,
         received_qty: r.received_qty,
         note: r.note || '',
+        non_delivery: !!r.non_delivery,
       })),
     })
     alert('数変更検収を確定しました。')
@@ -778,10 +852,33 @@ const saveDeliveryListHeldReceiving = async () => {
   }
 }
 
+const toggleDayConfirm = (row, d) => {
+  if (!row.daily_confirmed) row.daily_confirmed = {}
+  row.daily_confirmed[d] = !row.daily_confirmed[d]
+  const allDaysConfirmed = deliveryCoverageDates.value.every((dd) => !row.daily || !row.daily[dd] || row.daily_confirmed[dd])
+  row.confirmed = allDaysConfirmed
+}
+
+const toggleNonDelivery = (row) => {
+  row.non_delivery = !row.non_delivery
+  if (row.non_delivery) {
+    row.received_qty = 0
+    row.note = '未納'
+  } else {
+    row.note = ''
+  }
+}
+
 const toggleHoldDelivery = (row) => {
   row.held = !row.held
-  if (row.held) row.received_qty = 0
-  else row.received_qty = row.expected_qty
+  if (row.held) {
+    row.received_qty = 0
+    row.confirmed = false
+    row.daily_confirmed = {}
+  } else {
+    row.received_qty = row.expected_qty
+    row.non_delivery = false
+  }
 }
 
 onMounted(fetchSuppliers)
@@ -871,6 +968,22 @@ onMounted(fetchSuppliers)
   color: #92400e;
   font-weight: 600;
 }
+.btn-non-delivery {
+  margin-left: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+}
+.btn-non-delivery.active {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+  font-weight: 600;
+}
 .btn-confirmed {
   margin-left: 4px;
   padding: 1px 6px;
@@ -882,10 +995,14 @@ onMounted(fetchSuppliers)
   cursor: pointer;
 }
 .btn-confirmed.active {
-  background: #dcfce7;
-  border-color: #22c55e;
-  color: #166534;
+  background: #166534;
+  border-color: #166534;
+  color: #fff;
   font-weight: 600;
+}
+.btn-confirmed:disabled, .btn-day-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .badge-received {
   display: inline-block;
@@ -935,6 +1052,9 @@ onMounted(fetchSuppliers)
 .row-confirmed { background: #f0fdf4; }
 .row-held { background: #fffbeb; }
 .row-held td { color: #94a3b8; }
+.col-expected { display: flex; align-items: center; justify-content: space-between; min-width: 110px; }
+.expected-qty { font-weight: 700; }
+.col-dest { min-width: 70px; white-space: nowrap; }
 .col-name { min-width: 120px; }
 .col-total { min-width: 70px; font-weight: 700; }
 .col-actual { min-width: 60px; color: #2563eb; font-weight: 600; }
@@ -945,6 +1065,10 @@ onMounted(fetchSuppliers)
 .row-done td { color: #94a3b8; }
 .col-date { min-width: 44px; color: #64748b; font-size: 12px; text-align: center; white-space: nowrap; }
 .col-date .dow { font-size: 11px; color: #94a3b8; }
+.col-date-cell { min-width: 60px; white-space: nowrap; }
+.col-date-cell .date-qty { font-size: 12px; color: #64748b; }
+.btn-day-confirm { margin-left: 3px; padding: 2px 6px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 3px; background: #fff; color: #94a3b8; cursor: pointer; line-height: 1.4; }
+.btn-day-confirm.active { background: #166534; border-color: #166534; color: #fff; }
 .col-recv { min-width: 80px; }
 .col-note { min-width: 100px; }
 .bold { font-weight: 700; }
@@ -1004,7 +1128,7 @@ onMounted(fetchSuppliers)
   border-radius: 6px;
 }
 .history-title { margin: 0 0 8px; font-size: 14px; color: #334155; }
-.btn-excel {
+.btn-excel, .btn-receipt {
   padding: 6px 16px;
   background: #059669;
   color: #fff;
@@ -1013,6 +1137,7 @@ onMounted(fetchSuppliers)
   font-weight: 600;
   cursor: pointer;
 }
+.btn-receipt { background: #2563eb; }
 .ds-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
 .ds-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; }
 .ds-header h3 { margin: 0; font-size: 15px; }

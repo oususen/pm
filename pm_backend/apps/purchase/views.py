@@ -1796,10 +1796,11 @@ class PurchaseReceivingView(APIView):
         for item in items:
             product_id = item.get('product_id')
             received_qty = item.get('received_qty')
-            if received_qty is None or int(received_qty) <= 0:
+            is_non_delivery = item.get('non_delivery', False)
+            if not is_non_delivery and (received_qty is None or int(received_qty) <= 0):
                 continue
 
-            qty = Decimal(str(received_qty))
+            qty = Decimal(str(received_qty or 0))
             product = Product.objects.filter(id=product_id).first()
             if not product:
                 continue
@@ -1816,6 +1817,7 @@ class PurchaseReceivingView(APIView):
                     'arrival_date': target.isoformat(),
                     'supplier_id': supplier_id,
                     'line_id': line_id,
+                    **(({'non_delivery': True}) if is_non_delivery else {}),
                 },
             }
 
@@ -1832,22 +1834,23 @@ class PurchaseReceivingView(APIView):
                 reference_dt=record.timestamp,
             )
 
-            if not serializer_line_id:
-                _update_purchase_actual_backlog(
-                    line_id=target_line_id, process_id=purchase_process.id,
-                    product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
-                )
-            elif target_line_id and (
-                int(serializer_line_id) != int(target_line_id) or target_date_resolved != serializer_plan_date
-            ):
-                _update_purchase_actual_backlog(
-                    line_id=serializer_line_id, process_id=purchase_process.id,
-                    product_id=product.id, plan_date=serializer_plan_date, delta_qty=-int(qty),
-                )
-                _update_purchase_actual_backlog(
-                    line_id=target_line_id, process_id=purchase_process.id,
-                    product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
-                )
+            if not is_non_delivery:
+                if not serializer_line_id:
+                    _update_purchase_actual_backlog(
+                        line_id=target_line_id, process_id=purchase_process.id,
+                        product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
+                    )
+                elif target_line_id and (
+                    int(serializer_line_id) != int(target_line_id) or target_date_resolved != serializer_plan_date
+                ):
+                    _update_purchase_actual_backlog(
+                        line_id=serializer_line_id, process_id=purchase_process.id,
+                        product_id=product.id, plan_date=serializer_plan_date, delta_qty=-int(qty),
+                    )
+                    _update_purchase_actual_backlog(
+                        line_id=target_line_id, process_id=purchase_process.id,
+                        product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
+                    )
 
             update_fields = []
             event_data = dict(record.event_data or {})
@@ -1903,11 +1906,13 @@ class PurchaseReceivingDeliveryListTemplateView(APIView):
             ).values_list('child_product_id', flat=True).distinct()
         )
         products = Product.objects.filter(id__in=child_product_ids).order_by('product_code')
+        td_choices = dict(Product.TRANSFER_DESTINATION_CHOICES)
         items = [
             {
                 'product_id': p.id,
                 'product_code': p.product_code or '',
                 'product_name': p.product_name or '',
+                'transfer_destination_label': td_choices.get(p.transfer_destination, '') if p.transfer_destination else '',
             }
             for p in products
         ]
@@ -2214,13 +2219,217 @@ class PurchaseDeliveryNotePdfDownloadView(APIView):
         if not items:
             return Response({'detail': '対象品目がありません'}, status=status.HTTP_400_BAD_REQUEST)
 
-        pdf_data = _generate_delivery_note_pdf(items, delivery_date, supplier)
+        daily_items = []
+        for item in items:
+            daily = item.get('daily', {})
+            if daily:
+                for d_iso in sorted(daily.keys()):
+                    d_qty = daily[d_iso]
+                    if d_qty > 0:
+                        daily_items.append({
+                            'product_code': item['product_code'],
+                            'product_name': item['product_name'],
+                            'expected_qty': d_qty,
+                            'delivery_date': date.fromisoformat(d_iso),
+                        })
+            else:
+                daily_items.append({
+                    'product_code': item['product_code'],
+                    'product_name': item['product_name'],
+                    'expected_qty': int(item['expected_qty']),
+                    'delivery_date': delivery_date,
+                })
+
+        pdf_data = _generate_delivery_note_pdf(daily_items, delivery_date, supplier)
 
         filename = f'外作納品書_{supplier.supplier_code}_{delivery_date}.pdf'
         response = HttpResponse(
             pdf_data.getvalue(),
             content_type='application/pdf',
         )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+class PurchaseReceiptPdfDownloadView(APIView):
+    """受領書PDFダウンロード"""
+
+    def get(self, request):
+        from io import BytesIO
+        from django.http import HttpResponse
+        from .models import SupplierOrderSchedule
+        from .order_proposal_views import _generate_raw_pattern_dates
+        from orders.utils.calendar_utils import WorkingDayCalculator
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from shipping.services.shipping_pdf_generator import register_japanese_fonts
+
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        except (ValueError, TypeError):
+            return Response({'detail': 'supplier_id が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            delivery_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
+        except (ValueError, TypeError):
+            return Response({'detail': 'target_date が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+        calc = WorkingDayCalculator(daiso_cal)
+        schedule = SupplierOrderSchedule.objects.filter(
+            supplier_id=supplier.id, is_enabled=True,
+        ).select_related('pattern').first()
+
+        coverage_dates = [delivery_date]
+        if schedule and schedule.pattern:
+            window_start = delivery_date - timedelta(days=7)
+            window_end = delivery_date + timedelta(days=90)
+            pattern_dates = sorted(set(_generate_raw_pattern_dates(schedule, window_start, window_end, calc)))
+            future = [d for d in pattern_dates if d > delivery_date]
+            if future:
+                next_dd = future[0]
+                coverage_dates = []
+                d = delivery_date
+                while d < next_dd:
+                    coverage_dates.append(d)
+                    d += timedelta(days=1)
+
+        g_filter = request.query_params.get('g_filter', '')
+        line = _resolve_purchase_line(supplier)
+        if not line:
+            return Response({'detail': '対応するラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        actuals = LineBacklog.objects.filter(
+            line=line,
+            sequence_no=0,
+            plan_date__in=coverage_dates,
+            actual_qty__gt=0,
+        ).select_related('product')
+
+        items = []
+        for b in actuals:
+            prod = b.product
+            if not prod:
+                continue
+            pc = prod.product_code or ''
+            if g_filter == 'yes' and not pc.endswith('G'):
+                continue
+            if g_filter == 'no' and pc.endswith('G'):
+                continue
+            items.append({
+                'product_code': pc,
+                'product_name': prod.product_name or '',
+                'received_qty': int(b.actual_qty),
+            })
+        items.sort(key=lambda x: x['product_code'])
+
+        if not items:
+            return Response({'detail': '検収済みデータがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        register_japanese_fonts()
+        F = 'MSGothic'
+        page_w, page_h = A4
+        ML, MR, MT, MB = 15 * mm, 15 * mm, 20 * mm, 15 * mm
+
+        ROWS_PER_PAGE = 30
+        total_pages = max(1, -(-len(items) // ROWS_PER_PAGE))
+
+        s_name = supplier.supplier_name or ''
+        d_str = delivery_date.strftime('%Y/%m/%d')
+
+        col_widths = [10 * mm, 42 * mm, 90 * mm, 25 * mm]
+        table_w = sum(col_widths)
+        headers = ['No.', '品番', '品名', '受領数']
+
+        buf = BytesIO()
+        c = pdf_canvas.Canvas(buf, pagesize=A4)
+
+        for pi in range(total_pages):
+            page_items = items[pi * ROWS_PER_PAGE:(pi + 1) * ROWS_PER_PAGE]
+            y = page_h - MT
+
+            c.setFont(F, 16)
+            c.drawCentredString(page_w / 2, y, '受 領 書')
+            y -= 12 * mm
+
+            c.setFont(F, 10)
+            c.drawString(ML, y, f'{s_name} 様')
+            c.drawRightString(page_w - MR, y, 'ダイソウ工業株式会社')
+            y -= 6 * mm
+            c.drawRightString(page_w - MR, y, f'受領日　{d_str}')
+            y -= 10 * mm
+
+            row_h = 7 * mm
+            c.setFillColorRGB(0.267, 0.447, 0.769)
+            c.rect(ML, y - row_h, table_w, row_h, fill=1)
+            c.setFillColorRGB(1, 1, 1)
+            c.setFont(F, 9)
+            x = ML
+            for i, h in enumerate(headers):
+                c.drawCentredString(x + col_widths[i] / 2, y - 5 * mm, h)
+                x += col_widths[i]
+            y -= row_h
+
+            c.setFillColorRGB(0, 0, 0)
+            row_h = 5.5 * mm
+            for idx, item in enumerate(page_items):
+                x = ML
+                c.setStrokeColorRGB(0.7, 0.7, 0.7)
+                for w in col_widths:
+                    c.rect(x, y - row_h, w, row_h)
+                    x += w
+                c.setStrokeColorRGB(0, 0, 0)
+
+                no = pi * ROWS_PER_PAGE + idx + 1
+                c.setFont(F, 8)
+                c.drawCentredString(ML + col_widths[0] / 2, y - 4 * mm, str(no))
+
+                pc = item['product_code']
+                pc_sz = 8
+                if c.stringWidth(pc, F, 8) > col_widths[1] - 2 * mm:
+                    pc_sz = 6
+                c.setFont(F, pc_sz)
+                c.drawString(ML + col_widths[0] + 1 * mm, y - 4 * mm, pc)
+
+                pn = item['product_name']
+                pn_x = ML + col_widths[0] + col_widths[1] + 1 * mm
+                pn_sz = 8
+                if c.stringWidth(pn, F, 8) > col_widths[2] - 2 * mm:
+                    pn_sz = 6
+                c.setFont(F, pn_sz)
+                c.drawString(pn_x, y - 4 * mm, pn)
+
+                qty_x = ML + table_w - 2 * mm
+                c.setFont(F, 8)
+                c.drawRightString(qty_x, y - 4 * mm, str(int(item['received_qty'])))
+                y -= row_h
+
+            sign_y = MB + 25 * mm
+            c.setFont(F, 9)
+            c.drawString(ML, sign_y, '受領')
+            c.line(ML + 12 * mm, sign_y - 0.5 * mm, ML + 45 * mm, sign_y - 0.5 * mm)
+
+            c.drawString(ML + 55 * mm, sign_y, '日付')
+            c.line(ML + 67 * mm, sign_y - 0.5 * mm, ML + 100 * mm, sign_y - 0.5 * mm)
+
+            c.setFont(F, 8)
+            c.drawCentredString(page_w / 2, MB, f'{pi + 1}/{total_pages}ページ')
+
+            c.showPage()
+
+        c.save()
+        buf.seek(0)
+
+        filename = f'受領書_{supplier.supplier_code}_{delivery_date}.pdf'
+        response = HttpResponse(buf.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
@@ -2261,6 +2470,10 @@ class PurchaseDeliveryScheduleView(APIView):
     """納入予定（事務員入力）"""
 
     def get(self, request):
+        from .models import SupplierOrderSchedule
+        from .order_proposal_views import _generate_raw_pattern_dates
+        from orders.utils.calendar_utils import WorkingDayCalculator
+
         supplier_id = request.query_params.get('supplier_id')
         target_date_str = request.query_params.get('target_date')
         if not supplier_id:
@@ -2274,14 +2487,44 @@ class PurchaseDeliveryScheduleView(APIView):
         if not line or not purchase_process:
             return Response({'items': []})
 
+        # カバー期間を算出
+        coverage_dates = [target]
+        schedule = SupplierOrderSchedule.objects.filter(
+            supplier_id=int(supplier_id), is_enabled=True
+        ).select_related('pattern').first()
+        if schedule and schedule.pattern:
+            daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+            calc = WorkingDayCalculator(daiso_cal)
+            window_start = target - timedelta(days=7)
+            window_end = target + timedelta(days=60)
+            delivery_dates = sorted(set(_generate_raw_pattern_dates(schedule, window_start, window_end, calc)))
+            future = [d for d in delivery_dates if d > target]
+            if future:
+                next_dd = future[0]
+                coverage_dates = []
+                d = target
+                while d < next_dd:
+                    coverage_dates.append(d)
+                    d += timedelta(days=1)
+
+        from production.models import LineDemand
+
+        # 合計数: LineBacklog seq=1, plan_date=target のみ（Excel取込で保存した納入予定数）
         plan_qs = LineBacklog.objects.filter(
             line_id=line.id,
             process_id=purchase_process.id,
             plan_date=target,
             sequence_no=1,
             plan_qty__gt=0,
-        ).select_related('product').order_by('product__product_code')
+        ).select_related('product')
+        plan_by_product = {}
+        for b in plan_qs:
+            plan_by_product[b.product_id] = {
+                'plan_qty': int(b.plan_qty or 0),
+                'product': b.product,
+            }
 
+        # 実績: LineBacklog seq=0
         actual_qs = LineBacklog.objects.filter(
             line_id=line.id,
             process_id=purchase_process.id,
@@ -2293,16 +2536,40 @@ class PurchaseDeliveryScheduleView(APIView):
         for b in actual_qs:
             actual_by_product[b.product_id] = max(actual_by_product[b.product_id], int(b.actual_qty or 0))
 
-        items = []
-        for b in plan_qs:
-            items.append({
-                'product_id': b.product_id,
-                'product_code': b.product.product_code if b.product else '',
-                'product_name': b.product.product_name if b.product else '',
-                'expected_qty': int(b.plan_qty or 0),
-                'actual_qty': int(actual_by_product.get(b.product_id, 0)),
-            })
-        return Response({'items': items})
+        # 日別数: LineDemand からカバー期間全日の需要を取得
+        demand_qs = LineDemand.objects.filter(
+            line=line,
+            plan_date__in=coverage_dates,
+            product_id__in=plan_by_product.keys(),
+        ).filter(Q(firm_qty__gt=0) | Q(forecast_qty__gt=0))
+
+        daily_by_product = defaultdict(dict)
+        for d in demand_qs:
+            qty = int(d.firm_qty or 0) + int(d.forecast_qty or 0)
+            key = d.plan_date.isoformat()
+            daily_by_product[d.product_id][key] = daily_by_product[d.product_id].get(key, 0) + qty
+
+        product_map = {}
+        for pid, info in plan_by_product.items():
+            prod = info['product']
+            td = prod.transfer_destination if prod else None
+            td_label = dict(Product.TRANSFER_DESTINATION_CHOICES).get(td, '') if td else ''
+            product_map[pid] = {
+                'product_id': pid,
+                'product_code': prod.product_code if prod else '',
+                'product_name': prod.product_name if prod else '',
+                'transfer_destination': td or '',
+                'transfer_destination_label': td_label,
+                'expected_qty': info['plan_qty'],
+                'actual_qty': int(actual_by_product.get(pid, 0)),
+                'daily': daily_by_product.get(pid, {}),
+            }
+
+        items = sorted(product_map.values(), key=lambda x: x['product_code'])
+        return Response({
+            'coverage_dates': [d.isoformat() for d in coverage_dates],
+            'items': items,
+        })
 
     @transaction.atomic
     def post(self, request):
