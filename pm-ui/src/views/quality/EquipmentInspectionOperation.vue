@@ -1014,8 +1014,13 @@ const reloadRecord = async () => {
 const setJudgement = (result, value) => {
   if (!canEditRecord.value || !result) return
   if (!canSelectJudgement(result)) return
-  if (String(value || "").trim().toUpperCase() === "OK" && !canSelectOk(result)) return
-  result.judgement = String(value || "").trim().toUpperCase()
+  const nextValue = String(value || "").trim().toUpperCase()
+  if (nextValue === "OK" && !canSelectOk(result)) return
+  if (String(result.judgement || "").trim().toUpperCase() === nextValue) {
+    result.judgement = ""
+    return
+  }
+  result.judgement = nextValue
 }
 
 const handleNumericInput = (result) => {
