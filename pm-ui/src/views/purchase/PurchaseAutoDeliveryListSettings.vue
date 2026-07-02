@@ -91,6 +91,16 @@
         </div>
 
         <div class="form-group">
+          <label>送信ファイル選択</label>
+          <div class="file-toggle-grid">
+            <label class="checkbox-label"><input type="checkbox" v-model="form.send_delivery_list_excel" /> 納品リスト Excel</label>
+            <label class="checkbox-label"><input type="checkbox" v-model="form.send_progress_excel" /> 進度表 Excel</label>
+            <label class="checkbox-label"><input type="checkbox" v-model="form.send_progress_pdf" /> 進度表 PDF</label>
+            <label class="checkbox-label"><input type="checkbox" v-model="form.send_delivery_note_pdf" /> 外作納品書 PDF</label>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label>返信先メールアドレス（Reply-To） <span class="required">*</span></label>
           <input type="email" v-model="form.reply_to_email" class="input-full" placeholder="reply@example.com" required />
         </div>
@@ -142,6 +152,10 @@ const form = reactive({
   lead_time_days: 2,
   progress_days_back: 7,
   progress_days_forward: 30,
+  send_delivery_list_excel: true,
+  send_progress_excel: true,
+  send_progress_pdf: true,
+  send_delivery_note_pdf: true,
   reply_to_email: '',
   cc_emails: '',
   notify_on_failure_user_ids: [],
@@ -186,6 +200,10 @@ const resetForm = () => {
   form.lead_time_days = 2
   form.progress_days_back = 7
   form.progress_days_forward = 30
+  form.send_delivery_list_excel = true
+  form.send_progress_excel = true
+  form.send_progress_pdf = true
+  form.send_delivery_note_pdf = true
   form.reply_to_email = ''
   form.cc_emails = ''
   form.notify_on_failure_user_ids = []
@@ -209,6 +227,10 @@ const openEdit = (c) => {
   form.lead_time_days = c.lead_time_days ?? 2
   form.progress_days_back = c.progress_days_back ?? 7
   form.progress_days_forward = c.progress_days_forward ?? 30
+  form.send_delivery_list_excel = c.send_delivery_list_excel ?? true
+  form.send_progress_excel = c.send_progress_excel ?? true
+  form.send_progress_pdf = c.send_progress_pdf ?? true
+  form.send_delivery_note_pdf = c.send_delivery_note_pdf ?? true
   form.reply_to_email = c.reply_to_email || ''
   form.cc_emails = c.cc_emails || ''
   form.notify_on_failure_user_ids = [...(c.notify_on_failure_user_ids || [])]
@@ -259,6 +281,10 @@ const save = async () => {
       lead_time_days: form.lead_time_days,
       progress_days_back: form.progress_days_back,
       progress_days_forward: form.progress_days_forward,
+      send_delivery_list_excel: form.send_delivery_list_excel,
+      send_progress_excel: form.send_progress_excel,
+      send_progress_pdf: form.send_progress_pdf,
+      send_delivery_note_pdf: form.send_delivery_note_pdf,
       reply_to_email: form.reply_to_email,
       cc_emails: form.cc_emails,
       notify_on_failure_user_ids: form.notify_on_failure_user_ids,
@@ -351,6 +377,7 @@ onMounted(async () => {
 .time-input { width: 60px; text-align: center; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
 .suffix { font-size: 13px; color: #475569; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.file-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
 .required { color: #dc2626; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn-primary { padding: 6px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }

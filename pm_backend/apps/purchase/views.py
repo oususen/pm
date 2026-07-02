@@ -2650,6 +2650,14 @@ class PurchaseReceivingHistoryView(APIView):
         return Response({'records': records})
 
 
+def _parse_bool(val, default=True):
+    if val is None:
+        return default
+    if isinstance(val, str):
+        return val.lower() not in ('false', '0', '')
+    return bool(val)
+
+
 def _validate_email_fields(data):
     """reply_to_email と cc_emails のメールアドレス形式をチェック"""
     import re
@@ -2683,6 +2691,10 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
                 'lead_time_days': c.lead_time_days,
                 'progress_days_back': c.progress_days_back,
                 'progress_days_forward': c.progress_days_forward,
+                'send_delivery_list_excel': c.send_delivery_list_excel,
+                'send_progress_excel': c.send_progress_excel,
+                'send_progress_pdf': c.send_progress_pdf,
+                'send_delivery_note_pdf': c.send_delivery_note_pdf,
                 'reply_to_email': c.reply_to_email,
                 'cc_emails': c.cc_emails,
                 'notify_on_failure_user_ids': list(c.notify_on_failure.values_list('id', flat=True)),
@@ -2712,6 +2724,10 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
             lead_time_days=int(request.data.get('lead_time_days', 2)),
             progress_days_back=int(request.data.get('progress_days_back', 7)),
             progress_days_forward=int(request.data.get('progress_days_forward', 30)),
+            send_delivery_list_excel=_parse_bool(request.data.get('send_delivery_list_excel')),
+            send_progress_excel=_parse_bool(request.data.get('send_progress_excel')),
+            send_progress_pdf=_parse_bool(request.data.get('send_progress_pdf')),
+            send_delivery_note_pdf=_parse_bool(request.data.get('send_delivery_note_pdf')),
             reply_to_email=request.data.get('reply_to_email', ''),
             cc_emails=request.data.get('cc_emails', ''),
         )
@@ -2753,6 +2769,9 @@ class PurchaseAutoDeliveryListConfigDetailView(APIView):
             config.progress_days_back = int(request.data['progress_days_back'])
         if 'progress_days_forward' in request.data:
             config.progress_days_forward = int(request.data['progress_days_forward'])
+        for fld in ('send_delivery_list_excel', 'send_progress_excel', 'send_progress_pdf', 'send_delivery_note_pdf'):
+            if fld in request.data:
+                setattr(config, fld, _parse_bool(request.data[fld]))
         if 'reply_to_email' in request.data:
             config.reply_to_email = request.data['reply_to_email']
         if 'cc_emails' in request.data:

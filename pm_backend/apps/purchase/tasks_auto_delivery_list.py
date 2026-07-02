@@ -99,20 +99,24 @@ def run_auto_delivery_list_send(config_id):
             _finish(config, start_time, 'SUCCESS', f'{delivery_date} の納入予定品目なし（0件）')
             return
 
-        excel_data = _generate_excel(items, delivery_date, coverage_dates, supplier)
+        excel_data = None
+        if config.send_delivery_list_excel:
+            excel_data = _generate_excel(items, delivery_date, coverage_dates, supplier)
 
         progress_excel = None
         progress_pdf = None
         days_back = config.progress_days_back or 7
         days_forward = config.progress_days_forward or 30
-        try:
-            progress_excel = _generate_progress_excel(supplier, line, days_back, days_forward)
-        except Exception as e:
-            logger.warning(f'進度表Excel生成エラー（送信は続行）: {e}')
-        try:
-            progress_pdf = _generate_progress_pdf(supplier, line, days_back, days_forward)
-        except Exception as e:
-            logger.warning(f'進度表PDF生成エラー（送信は続行）: {e}')
+        if config.send_progress_excel:
+            try:
+                progress_excel = _generate_progress_excel(supplier, line, days_back, days_forward)
+            except Exception as e:
+                logger.warning(f'進度表Excel生成エラー（送信は続行）: {e}')
+        if config.send_progress_pdf:
+            try:
+                progress_pdf = _generate_progress_pdf(supplier, line, days_back, days_forward)
+            except Exception as e:
+                logger.warning(f'進度表PDF生成エラー（送信は続行）: {e}')
 
         daily_items = []
         for item in items:
@@ -136,10 +140,11 @@ def run_auto_delivery_list_send(config_id):
                 })
 
         delivery_note_pdf = None
-        try:
-            delivery_note_pdf = _generate_delivery_note_pdf(daily_items, delivery_date, supplier)
-        except Exception as e:
-            logger.warning(f'外作納品書PDF生成エラー（送信は続行）: {e}')
+        if config.send_delivery_note_pdf:
+            try:
+                delivery_note_pdf = _generate_delivery_note_pdf(daily_items, delivery_date, supplier)
+            except Exception as e:
+                logger.warning(f'外作納品書PDF生成エラー（送信は続行）: {e}')
 
         to_email = (supplier.order_email or '').strip()
         if not to_email:
@@ -150,47 +155,76 @@ def run_auto_delivery_list_send(config_id):
         cc_list = [e.strip() for e in (config.cc_emails or '').splitlines() if e.strip()]
 
         email_service = EmailService()
-        filename = f'納品リスト_{supplier.supplier_code}_{delivery_date}.xlsx'
-        extra = []
+        all_attachments = []
+        if excel_data:
+            all_attachments.append({
+                'data': excel_data,
+                'filename': f'納品リスト_{supplier.supplier_code}_{delivery_date}.xlsx',
+            })
         if progress_excel:
-            extra.append({
+            all_attachments.append({
                 'data': progress_excel,
                 'filename': f'進度表_{supplier.supplier_code}_{date.today()}.xlsx',
             })
         if progress_pdf:
-            extra.append({
+            all_attachments.append({
                 'data': progress_pdf,
                 'filename': f'進度表_{supplier.supplier_code}_{date.today()}.pdf',
             })
         if delivery_note_pdf:
-            extra.append({
+            all_attachments.append({
                 'data': delivery_note_pdf,
                 'filename': f'外作納品書_{supplier.supplier_code}_{delivery_date}.pdf',
             })
 
+        if not all_attachments:
+            _finish(config, start_time, 'SKIPPED', f'{delivery_date} 送信ファイルがすべてOFFです')
+            return
+
+        main_attach = all_attachments[0]
+        extra = all_attachments[1:] if len(all_attachments) > 1 else None
+
         reply_to = (config.reply_to_email or '').strip()
         reply_line = f'\n※ 返送先: {reply_to}\n（このメールは送信専用です。返信は上記アドレスへお願いいたします。）\n' if reply_to else ''
 
+        # 件名: 送信内容に応じて変更
+        subject_parts = []
+        if excel_data:
+            subject_parts.append('納品リスト')
+        if progress_excel or progress_pdf:
+            subject_parts.append('進度表')
+        if delivery_note_pdf:
+            subject_parts.append('外作納品書')
+        subject_label = '・'.join(subject_parts)
+        subject = f'【{subject_label}】{supplier.supplier_name} {delivery_date}'
+
+        # 本文: 送信内容に応じて構成
+        body_lines = [f'{supplier.supplier_name} 御中\n', 'お世話になっております。\n']
+        if excel_data:
+            body_lines.append(f'納品リスト（納入日: {delivery_date}）を送付いたします。\n')
+            body_lines.append(f'対象品目: {len(items)}件')
+            body_lines.append(f'カバー期間: {coverage_dates[0]} ～ {coverage_dates[-1]}\n')
+            body_lines.append('添付のExcelの「確認・修正方法」シートを参照のうえ、数量確認・修正後にご返送ください。')
+        else:
+            body_lines.append('進度照会資料を送付いたします。')
+        if progress_excel or progress_pdf:
+            body_lines.append('進度表を添付しておりますのでご参照ください。')
+        if delivery_note_pdf:
+            body_lines.append('外作納品書を添付しておりますのでご利用ください。')
+        if reply_line:
+            body_lines.append(reply_line)
+        body_lines.append('\n------------------------------')
+        body_lines.append('ダイソウ工業株式会社\n')
+        body = '\n'.join(body_lines)
+
         result = email_service.send_email_with_attachment(
             to_emails=[to_email],
-            subject=f'【納品リスト】{supplier.supplier_name} {delivery_date}',
-            body=(
-                f'{supplier.supplier_name} 御中\n\n'
-                'お世話になっております。\n'
-                f'納品リスト（納入日: {delivery_date}）を送付いたします。\n\n'
-                f'対象品目: {len(items)}件\n'
-                f'カバー期間: {coverage_dates[0]} ～ {coverage_dates[-1]}\n\n'
-                '添付のExcelの「確認・修正方法」シートを参照のうえ、数量確認・修正後にご返送ください。\n'
-                + ('進度表も添付しておりますのでご参照ください。\n' if progress_excel else '')
-                + ('外作納品書も添付しておりますのでご利用ください。\n' if delivery_note_pdf else '')
-                + reply_line
-                + '\n------------------------------\n'
-                'ダイソウ工業株式会社\n'
-            ),
-            attachment_data=excel_data,
-            attachment_filename=filename,
+            subject=subject,
+            body=body,
+            attachment_data=main_attach['data'],
+            attachment_filename=main_attach['filename'],
             cc_emails=cc_list if cc_list else None,
-            extra_attachments=extra if extra else None,
+            extra_attachments=extra,
             reply_to=reply_to or None,
         )
 
