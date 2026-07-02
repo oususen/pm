@@ -214,7 +214,8 @@ class OrderExpansionService:
             self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
         )
 
-        existing_map = self._load_existing_demands()
+        needed_keys = set(forecast_aggregated.keys()) | set(firm_aggregated.keys())
+        existing_map = self._load_existing_demands_for_incremental(needed_keys)
 
         with transaction.atomic():
             forecast_result = self._sync_forecast_demands(forecast_aggregated, existing_map)
@@ -246,12 +247,14 @@ class OrderExpansionService:
             self._get_open_order_lines_queryset(order_type='FIRM')
         )
         aggregated = self._merge_aggregated_demands(forecast_aggregated, firm_aggregated)
-        existing_map = self._load_existing_demands()
+
+        # actual_qty のみ取得（全件ORM objectロードを回避）
+        actual_qty_map = self._load_actual_qty_map()
 
         objects_to_create: List[LineDemand] = []
         for key, entry in aggregated.items():
-            existing = existing_map.get(key)
-            objects_to_create.append(self._build_line_demand(entry, existing=existing))
+            actual_qty = actual_qty_map.get(key, Decimal('0'))
+            objects_to_create.append(self._build_line_demand(entry, actual_qty=actual_qty))
 
         routed_open_firm_qs = self._get_open_order_lines_queryset(order_type='FIRM').values_list('id', flat=True)
 
@@ -387,6 +390,39 @@ class OrderExpansionService:
         return {
             (demand.line_id, demand.product_code, demand.plan_date): demand
             for demand in LineDemand.objects.all()
+        }
+
+    def _load_existing_demands_for_incremental(self, needed_keys: set) -> dict:
+        """増分展開用: forecast/firm がゼロでないレコードのみ読み込む（全件ロード回避）"""
+        from django.db.models import Q
+        # forecast_qty>0: 削除/クリア候補として必要
+        # firm_qty>0: incremental firm update で上書きが必要
+        existing = {
+            (d.line_id, d.product_code, d.plan_date): d
+            for d in LineDemand.objects.filter(Q(forecast_qty__gt=0) | Q(firm_qty__gt=0))
+        }
+        # needed_keys のうちまだ読み込んでいないもの（actual_qty のみのレコード等）を追加ロード
+        unloaded = {k for k in needed_keys if k not in existing}
+        if unloaded:
+            line_ids = list({k[0] for k in unloaded})
+            product_codes = list({k[1] for k in unloaded})
+            plan_dates = list({k[2] for k in unloaded})
+            qs = LineDemand.objects.filter(
+                line_id__in=line_ids,
+                product_code__in=product_codes,
+                plan_date__in=plan_dates,
+            ).exclude(Q(forecast_qty__gt=0) | Q(firm_qty__gt=0))
+            for d in qs:
+                key = (d.line_id, d.product_code, d.plan_date)
+                if key in unloaded:
+                    existing[key] = d
+        return existing
+
+    def _load_actual_qty_map(self) -> Dict[Tuple, Decimal]:
+        """full rebuild 用: actual_qty のみ軽量取得（ORM object 不要）"""
+        return {
+            (d['line_id'], d['product_code'], d['plan_date']): Decimal(str(d['actual_qty'] or 0))
+            for d in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'actual_qty')
         }
 
     def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map):
@@ -660,8 +696,9 @@ class OrderExpansionService:
                 existing['forecast_order_numbers'].update(entry['forecast_order_numbers'])
         return merged
 
-    def _build_line_demand(self, entry, existing: LineDemand | None = None):
-        actual_qty = existing.actual_qty if existing is not None else Decimal('0')
+    def _build_line_demand(self, entry, existing: LineDemand | None = None, actual_qty: Decimal | None = None):
+        if actual_qty is None:
+            actual_qty = existing.actual_qty if existing is not None else Decimal('0')
         demand = LineDemand(
             line_id=entry['line_id'],
             routing_step_id=entry['routing_step_id'],

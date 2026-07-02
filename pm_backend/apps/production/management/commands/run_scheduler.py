@@ -155,6 +155,7 @@ class Command(BaseCommand):
                 id='order_expansion',
                 replace_existing=True,
                 misfire_grace_time=3600,
+                max_instances=1,
             )
             logger.info(f'ジョブ登録: order_expansion - {order_cfg.scheduled_hour:02d}:{order_cfg.scheduled_minute:02d}')
         else:
