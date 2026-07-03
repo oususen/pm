@@ -339,6 +339,7 @@ const recalcThenReload = async () => {
       line_id: form.lineId,
       start_date: displayStartDate.value || today,
       end_date: formatISODate(endDateObj),
+      product_ids: form.productId ? [form.productId] : undefined,
     });
     await reload();
   } catch (e) {
@@ -380,6 +381,7 @@ const applyAndRecalc = async () => {
       line_id: form.lineId,
       start_date: displayStartDate.value || today,
       end_date: formatISODate(endDateObj),
+      product_ids: form.productId ? [form.productId] : undefined,
     });
     actualStockToday.value = null;
     await reload();
