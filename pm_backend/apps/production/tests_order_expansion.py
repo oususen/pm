@@ -158,7 +158,7 @@ class OrderExpansionServiceTest(TestCase):
         self.assertTrue(line1.is_expanded)
         self.assertTrue(line2.is_expanded)
 
-    def test_transfer_destination_products_use_customer_calendar_for_required_date(self):
+    def test_customer_and_line_calendar_both_must_be_working_for_required_date(self):
         customer_calendar = Calendar.objects.create(
             calendar_code='tiera',
             calendar_name='ティエラ',
@@ -170,8 +170,11 @@ class OrderExpansionServiceTest(TestCase):
             target_date='2026-07-20',
             is_working_day=False,
         )
-        self.product.transfer_destination = 'CWL'
-        self.product.save(update_fields=['transfer_destination'])
+        CalendarDay.objects.create(
+            calendar=self.calendar,
+            target_date='2026-07-18',
+            is_working_day=False,
+        )
 
         self._create_order_line('FIRM-CAL', 'FIRM', '1', '2026-07-20', is_expanded=False)
 
@@ -180,7 +183,7 @@ class OrderExpansionServiceTest(TestCase):
         demand = LineDemand.objects.get(
             line=self.line,
             product_code=self.product.product_code,
-            plan_date='2026-07-17',
+            plan_date='2026-07-16',
         )
 
         self.assertFalse(result['forced_full_rebuild'])

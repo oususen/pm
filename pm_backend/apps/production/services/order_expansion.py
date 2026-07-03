@@ -59,8 +59,6 @@ class OrderExpansionService:
         'firm_order_numbers',
         'forecast_order_numbers',
     ]
-    CUSTOMER_CALENDAR_TRANSFER_DESTINATIONS = {'INPAINT', 'KOWA', 'CWL'}
-
     def __init__(self) -> None:
         self.errors: List[str] = []
         self.warnings: List[str] = []
@@ -554,14 +552,13 @@ class OrderExpansionService:
         final_step = next((step for step in steps if step.hierarchy_path == 'final'), None)
         if final_step:
             final_step_product = final_step.output_product if final_step.output_product_id else product
-            final_calendar_id = self._resolve_demand_calendar_id(
+            final_calendar_ids = self._resolve_demand_calendar_ids(
                 final_step.line_id,
-                final_step_product,
                 customer_id,
             )
             lead_days = resolve_lead_days_for_step(final_step)
             final_required_date = self._shift_business_days(
-                final_calendar_id,
+                final_calendar_ids,
                 required_date,
                 lead_days,
             )
@@ -573,14 +570,13 @@ class OrderExpansionService:
             if not step:
                 return
             step_product = step.output_product if step.output_product_id else product
-            calendar_id = self._resolve_demand_calendar_id(
+            calendar_ids = self._resolve_demand_calendar_ids(
                 step.line_id,
-                step_product,
                 customer_id,
             )
             lead_days = resolve_lead_days_for_step(step)
             required_for_step = self._shift_business_days(
-                calendar_id,
+                calendar_ids,
                 parent_date,
                 lead_days,
             )
@@ -604,9 +600,8 @@ class OrderExpansionService:
                 if supplier_line_id:
                     effective_line_id = supplier_line_id
 
-            calendar_id = self._resolve_demand_calendar_id(
+            calendar_ids = self._resolve_demand_calendar_ids(
                 effective_line_id,
-                step_product,
                 customer_id,
             )
             lead_days = resolve_lead_days_for_step(step)
@@ -617,7 +612,7 @@ class OrderExpansionService:
             elif step.id in _orphan_vpath_map and _orphan_vpath_map[step.id] in required_by_path:
                 target_date = required_by_path[_orphan_vpath_map[step.id]]
             else:
-                target_date = self._shift_business_days(calendar_id, required_date, lead_days)
+                target_date = self._shift_business_days(calendar_ids, required_date, lead_days)
 
             is_shifted = bool(target_date != order_line.due_date)
             product_code = step_product.product_code if step_product else order_line.product_code
@@ -801,18 +796,20 @@ class OrderExpansionService:
         cal_id = self._line_calendar_cache.get(line_id)
         return cal_id or self._default_calendar_id
 
-    def _resolve_demand_calendar_id(self, line_id, step_product, customer_id):
-        transfer_destination = getattr(step_product, 'transfer_destination', None)
-        if (
-            customer_id
-            and transfer_destination in self.CUSTOMER_CALENDAR_TRANSFER_DESTINATIONS
-        ):
+    def _resolve_demand_calendar_ids(self, line_id, customer_id):
+        calendar_ids: List[int | None] = [self._resolve_calendar_id(line_id)]
+        if customer_id:
             customer_calendar_id = self._customer_calendar_cache.get(customer_id)
-            if customer_calendar_id:
-                return customer_calendar_id
-        return self._resolve_calendar_id(line_id)
+            if customer_calendar_id and customer_calendar_id not in calendar_ids:
+                calendar_ids.append(customer_calendar_id)
+        return tuple(calendar_ids)
 
-    def _is_working_day(self, calendar_id, target_date):
+    def _is_working_day(self, calendar_ids, target_date):
+        if not calendar_ids:
+            return target_date.weekday() < 5
+        return all(self._is_single_calendar_working_day(calendar_id, target_date) for calendar_id in calendar_ids)
+
+    def _is_single_calendar_working_day(self, calendar_id, target_date):
         if not calendar_id:
             return target_date.weekday() < 5
         key = (calendar_id, target_date)
@@ -820,16 +817,16 @@ class OrderExpansionService:
             return self._calendar_day_cache[key]
         return target_date.weekday() < 5
 
-    def _shift_business_days(self, calendar_id, target_date, days):
+    def _shift_business_days(self, calendar_ids, target_date, days):
         if not days:
-            if not calendar_id:
+            if not calendar_ids:
                 return target_date
-            if self._is_working_day(calendar_id, target_date):
+            if self._is_working_day(calendar_ids, target_date):
                 return target_date
             current = target_date
             while True:
                 current = current - timedelta(days=1)
-                if self._is_working_day(calendar_id, current):
+                if self._is_working_day(calendar_ids, current):
                     return current
 
         step = -1 if days > 0 else 1
@@ -837,7 +834,7 @@ class OrderExpansionService:
         current = target_date
         while remaining > 0:
             current = current + timedelta(days=step)
-            if self._is_working_day(calendar_id, current):
+            if self._is_working_day(calendar_ids, current):
                 remaining -= 1
         return current
 
