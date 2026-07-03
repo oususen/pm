@@ -303,7 +303,7 @@ class OrderExpansionService:
     def _sync_forecast_demands(self, aggregated, existing_map):
         existing_forecast_keys = {
             key for key, demand in existing_map.items()
-            if (demand.forecast_qty or Decimal('0')) > 0
+            if Decimal(str((demand.get('forecast_qty') if isinstance(demand, dict) else demand.forecast_qty) or 0)) > 0
         }
         target_keys = set(aggregated.keys()) | existing_forecast_keys
 
@@ -496,8 +496,8 @@ class OrderExpansionService:
         if customer_id and ship_to_code:
             additional_days = self._ship_to_additional_days.get((customer_id, ship_to_code))
             if additional_days:
-                cal_id = self._customer_calendar_cache.get(customer_id) or self._default_calendar_id
-                required_date = self._shift_business_days(cal_id, required_date, additional_days)
+                calendar_ids = self._resolve_demand_calendar_ids(None, customer_id)
+                required_date = self._shift_business_days(calendar_ids, required_date, additional_days)
         final_required_date = required_date
 
         path_step_map = {
@@ -793,6 +793,8 @@ class OrderExpansionService:
         return self._normalize_order_numbers(merged_values)
 
     def _resolve_calendar_id(self, line_id):
+        if not line_id:
+            return self._default_calendar_id
         cal_id = self._line_calendar_cache.get(line_id)
         return cal_id or self._default_calendar_id
 
