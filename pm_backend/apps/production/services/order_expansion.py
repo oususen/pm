@@ -38,6 +38,7 @@ class OrderExpansionService:
         'firm_order_numbers',
         'forecast_order_numbers',
     ]
+    CUSTOMER_CALENDAR_TRANSFER_DESTINATIONS = {'INPAINT', 'KOWA', 'CWL'}
 
     def __init__(self) -> None:
         self.errors: List[str] = []
@@ -522,7 +523,12 @@ class OrderExpansionService:
 
         final_step = next((step for step in steps if step.hierarchy_path == 'final'), None)
         if final_step:
-            final_calendar_id = self._resolve_calendar_id(final_step.line_id)
+            final_step_product = final_step.output_product if final_step.output_product_id else product
+            final_calendar_id = self._resolve_demand_calendar_id(
+                final_step.line_id,
+                final_step_product,
+                customer_id,
+            )
             lead_days = resolve_lead_days_for_step(final_step)
             final_required_date = self._shift_business_days(
                 final_calendar_id,
@@ -536,7 +542,12 @@ class OrderExpansionService:
             step = path_step_map.get(path)
             if not step:
                 return
-            calendar_id = self._resolve_calendar_id(step.line_id)
+            step_product = step.output_product if step.output_product_id else product
+            calendar_id = self._resolve_demand_calendar_id(
+                step.line_id,
+                step_product,
+                customer_id,
+            )
             lead_days = resolve_lead_days_for_step(step)
             required_for_step = self._shift_business_days(
                 calendar_id,
@@ -563,7 +574,11 @@ class OrderExpansionService:
                 if supplier_line_id:
                     effective_line_id = supplier_line_id
 
-            calendar_id = self._resolve_calendar_id(effective_line_id)
+            calendar_id = self._resolve_demand_calendar_id(
+                effective_line_id,
+                step_product,
+                customer_id,
+            )
             lead_days = resolve_lead_days_for_step(step)
             if step.hierarchy_path == 'final':
                 target_date = final_required_date
@@ -725,6 +740,17 @@ class OrderExpansionService:
     def _resolve_calendar_id(self, line_id):
         cal_id = self._line_calendar_cache.get(line_id)
         return cal_id or self._default_calendar_id
+
+    def _resolve_demand_calendar_id(self, line_id, step_product, customer_id):
+        transfer_destination = getattr(step_product, 'transfer_destination', None)
+        if (
+            customer_id
+            and transfer_destination in self.CUSTOMER_CALENDAR_TRANSFER_DESTINATIONS
+        ):
+            customer_calendar_id = self._customer_calendar_cache.get(customer_id)
+            if customer_calendar_id:
+                return customer_calendar_id
+        return self._resolve_calendar_id(line_id)
 
     def _is_working_day(self, calendar_id, target_date):
         if not calendar_id:

@@ -57,7 +57,7 @@
           </div>
           <div class="form-group">
             <label>カレンダ</label>
-            <select v-model="formData.calendar_id" :disabled="!canEdit">
+            <select v-model="formData.calendar" :disabled="!canEdit">
               <option :value="null">選択なし</option>
               <option v-for="cal in calendars" :key="cal.id" :value="cal.id">
                 {{ cal.calendar_name }}
@@ -100,7 +100,7 @@ const formData = ref({
   customer_code: '',
   customer_name: '',
   short_name: '',
-  calendar_id: null,
+  calendar: null,
   is_active: true
 })
 const canEdit = computed(() => canAccessMasterResource('masters.customer', 'edit'))
@@ -132,7 +132,7 @@ const showNewDialog = () => {
     customer_code: '',
     customer_name: '',
     short_name: '',
-    calendar_id: null,
+    calendar: null,
     is_active: true
   }
   showDialog.value = true
@@ -156,7 +156,7 @@ const saveCustomer = async () => {
     const dataToSend = {
       ...formData.value,
       short_name: formData.value.short_name || null,
-      calendar_id: formData.value.calendar_id || null
+      calendar: formData.value.calendar || null
     }
 
     if (isEdit.value) {
@@ -274,4 +274,3 @@ onMounted(() => {
   background-color: #f5f5f5;
 }
 </style>
-

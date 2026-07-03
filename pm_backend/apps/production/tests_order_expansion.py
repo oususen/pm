@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from masters.models import Calendar, Customer, Line, Process, Product, Routing, RoutingStep
+from masters.models import Calendar, CalendarDay, Customer, Line, Process, Product, Routing, RoutingStep
 from orders.core.models import Order, OrderLine
 from production.models import LineDemand
 from production.services.order_expansion import OrderExpansionService
@@ -157,3 +157,31 @@ class OrderExpansionServiceTest(TestCase):
         self.assertEqual(demand.firm_order_numbers, 'FIRM-A,FIRM-B')
         self.assertTrue(line1.is_expanded)
         self.assertTrue(line2.is_expanded)
+
+    def test_transfer_destination_products_use_customer_calendar_for_required_date(self):
+        customer_calendar = Calendar.objects.create(
+            calendar_code='tiera',
+            calendar_name='ティエラ',
+        )
+        self.customer.calendar = customer_calendar
+        self.customer.save(update_fields=['calendar'])
+        CalendarDay.objects.create(
+            calendar=customer_calendar,
+            target_date='2026-07-20',
+            is_working_day=False,
+        )
+        self.product.transfer_destination = 'CWL'
+        self.product.save(update_fields=['transfer_destination'])
+
+        self._create_order_line('FIRM-CAL', 'FIRM', '1', '2026-07-20', is_expanded=False)
+
+        result = OrderExpansionService().expand_open_orders(clear_existing=False)
+
+        demand = LineDemand.objects.get(
+            line=self.line,
+            product_code=self.product.product_code,
+            plan_date='2026-07-17',
+        )
+
+        self.assertFalse(result['forced_full_rebuild'])
+        self.assertEqual(demand.firm_qty, Decimal('1'))
