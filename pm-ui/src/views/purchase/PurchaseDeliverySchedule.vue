@@ -16,16 +16,19 @@
           <button :class="['btn-filter', { active: filterG === 'yes' }]" @click="filterG = 'yes'">有</button>
           <button :class="['btn-filter', { active: filterG === 'no' }]" @click="filterG = 'no'">無</button>
         </div>
-        <button class="btn-excel" :disabled="loadingTemplate" @click="downloadTemplate">
-          {{ loadingTemplate ? 'テンプレ作成中...' : '納品リストテンプレ出力' }}
+        <button class="btn-excel" :disabled="loadingTemplate || !selectedSupplier || !progressRecalculated" @click="downloadTemplate">
+          {{ loadingTemplate ? '納品リスト作成中...' : '納品リスト出力' }}
         </button>
-        <button class="btn-progress" :disabled="loadingProgressExcel || !selectedSupplier" @click="downloadProgressExcel">
+        <button class="btn-recalc" :disabled="loadingRecalculate || !selectedSupplier" @click="recalculateProgress">
+          {{ loadingRecalculate ? '再計算中...' : '進度再計算' }}
+        </button>
+        <button class="btn-progress" :disabled="loadingProgressExcel || !selectedSupplier || !progressRecalculated" @click="downloadProgressExcel">
           {{ loadingProgressExcel ? '作成中...' : '進度表Excel' }}
         </button>
-        <button class="btn-progress" :disabled="loadingProgressPdf || !selectedSupplier" @click="downloadProgressPdf">
+        <button class="btn-progress" :disabled="loadingProgressPdf || !selectedSupplier || !progressRecalculated" @click="downloadProgressPdf">
           {{ loadingProgressPdf ? '作成中...' : '進度表PDF' }}
         </button>
-        <button class="btn-delivery-note" :disabled="loadingDeliveryNote || !selectedSupplier" @click="downloadDeliveryNotePdf">
+        <button class="btn-delivery-note" :disabled="loadingDeliveryNote || !selectedSupplier || !progressRecalculated" @click="downloadDeliveryNotePdf">
           {{ loadingDeliveryNote ? '作成中...' : '納品書PDF' }}
         </button>
         <label class="btn-upload">
@@ -36,6 +39,11 @@
     </div>
 
     <div class="page-content">
+      <div class="notice-box">
+        <div>出力前に「進度再計算」を実行してください。</div>
+        <div>「納品リスト出力 / 進度表Excel / 進度表PDF / 納品書PDF」は再計算完了後に押せます。</div>
+      </div>
+
       <div v-if="errors.length" class="error-box">
         <div v-for="(msg, idx) in errors" :key="`err-${idx}`">{{ msg }}</div>
       </div>
@@ -64,7 +72,7 @@
           </tr>
         </tbody>
       </table>
-      <div v-else class="no-data">テンプレ出力または納品リストExcelを取り込んでください。</div>
+      <div v-else class="no-data">納品リスト出力または納品リストExcelを取り込んでください。</div>
 
       <div v-if="rows.length" class="form-actions">
         <button class="btn-success" :disabled="saving" @click="saveSchedule">納入予定保存</button>
@@ -73,7 +81,7 @@
       <section class="rule-box">
         <h2 class="rule-title">導入ルール</h2>
         <ul class="rule-list">
-          <li>テンプレ出力前に「仕入先」を選択してください。テンプレには対象品番・品名が入ります。</li>
+          <li>納品リスト出力前に「仕入先」を選択してください。納品リストには対象品番・品名が入ります。</li>
           <li>取込ヘッダーは「品番 / 品名 / 数量 / 納品日 / 仕入先コード / 伝票番号」を使用してください。</li>
           <li class="rule-important">納品日は `YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY/M/D` 形式のみ取込可能です（例: 2026-06-08, 2026/06/08, 2026/6/8）。</li>
           <li class="rule-important">返送Excel内の納品日は全行同一、かつ画面の対象日と一致している必要があります。</li>
@@ -136,9 +144,11 @@ const suppliers = ref([])
 const selectedSupplier = ref('')
 const targetDate = ref(new Date().toISOString().slice(0, 10))
 const loadingTemplate = ref(false)
+const loadingRecalculate = ref(false)
 const loadingProgressExcel = ref(false)
 const loadingProgressPdf = ref(false)
 const loadingDeliveryNote = ref(false)
+const progressRecalculated = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const errors = ref([])
@@ -222,7 +232,7 @@ const downloadTemplate = async () => {
     URL.revokeObjectURL(url)
   } catch (e) {
     const detail = e?.response?.data?.detail
-    alert(`納品リストテンプレ出力に失敗しました。${detail ? `\n${detail}` : ''}`)
+    alert(`納品リスト出力に失敗しました。${detail ? `\n${detail}` : ''}`)
   } finally {
     loadingTemplate.value = false
   }
@@ -235,6 +245,24 @@ const _downloadBlob = (blob, filename) => {
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+const recalculateProgress = async () => {
+  if (!selectedSupplier.value) return
+  loadingRecalculate.value = true
+  try {
+    const res = await api.client.post('/purchase-receiving/recalculate-progress/', {
+      supplier_id: selectedSupplier.value,
+    })
+    progressRecalculated.value = true
+    alert(res?.data?.detail || '進度再計算が完了しました。')
+  } catch (e) {
+    progressRecalculated.value = false
+    const detail = e?.response?.data?.detail
+    alert(`進度再計算に失敗しました。${detail ? `\n${detail}` : ''}`)
+  } finally {
+    loadingRecalculate.value = false
+  }
 }
 
 const downloadProgressExcel = async () => {
@@ -547,6 +575,10 @@ const saveSchedule = async () => {
 }
 
 onMounted(fetchSuppliers)
+
+watch([selectedSupplier, targetDate, filterG], () => {
+  progressRecalculated.value = false
+})
 </script>
 
 <style scoped>
@@ -573,6 +605,17 @@ onMounted(fetchSuppliers)
   font-size: 13px;
 }
 .btn-progress:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-recalc {
+  padding: 6px 12px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-recalc:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-delivery-note {
   padding: 6px 12px;
   background: #10b981;
@@ -595,6 +638,17 @@ onMounted(fetchSuppliers)
   font-size: 13px;
 }
 .page-content { display: grid; gap: 10px; }
+.notice-box {
+  background: #eff6ff;
+  color: #1e3a8a;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  justify-self: end;
+  text-align: right;
+}
 .error-box {
   background: #fff1f2;
   color: #be123c;

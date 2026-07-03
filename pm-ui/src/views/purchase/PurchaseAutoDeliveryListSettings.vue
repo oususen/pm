@@ -82,7 +82,7 @@
             <input type="number" min="1" max="90" v-model.number="form.progress_days_back" class="time-input" required />
             <span class="suffix">営業日前 ～</span>
             <input type="number" min="1" max="120" v-model.number="form.progress_days_forward" class="time-input" required />
-            <span class="suffix">日後</span>
+            <span class="suffix">日後（発行日基準）</span>
           </div>
         </div>
 
@@ -249,7 +249,7 @@ const save = async () => {
   if (form.scheduled_minute === null || form.scheduled_minute === '') errors.push('実行時刻（分）')
   if (!form.lead_time_days) errors.push('納入日（営業日後）')
   if (!form.progress_days_back) errors.push('進度表（営業日前）')
-  if (!form.progress_days_forward) errors.push('進度表（日後）')
+  if (!form.progress_days_forward) errors.push('進度表（日後・発行日基準）')
   if (!form.reply_to_email?.trim()) errors.push('返信先メールアドレス')
   if (!form.cc_emails?.trim()) errors.push('業務員CC送信先メール')
   if (!form.notify_on_failure_user_ids.length) errors.push('失敗時の通知先')

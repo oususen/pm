@@ -9,6 +9,61 @@ from openpyxl import Workbook
 logger = logging.getLogger('purchase')
 
 
+def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, days_forward=30):
+    """自動納入リスト送信前に、対象仕入先ラインの進度だけを最新化する。"""
+    from masters.models import BOMItem, Calendar, RoutingStep
+    from orders.utils.calendar_utils import WorkingDayCalculator
+    from production.inventory.inventory_calculator import recalculate_inventory_for_line
+    from production.scheduler.tasks import _resolve_effective_start_date
+
+    today = date.today()
+    daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+    calc = WorkingDayCalculator(daiso_cal)
+    start_date = calc.subtract_working_days(today, days_back)
+    end_date = today + timedelta(days=days_forward)
+
+    bom_product_ids = set(
+        BOMItem.objects.filter(
+            supplier_id=supplier.id,
+            child_product_id__isnull=False,
+        ).values_list('child_product_id', flat=True).distinct()
+    )
+    routing_product_ids = set(
+        RoutingStep.objects.filter(
+            supplier_id=supplier.id,
+            output_product_id__isnull=False,
+        ).values_list('output_product_id', flat=True).distinct()
+    )
+    product_ids = sorted(bom_product_ids | routing_product_ids)
+    if not product_ids:
+        return {
+            'product_count': 0,
+            'start_date': start_date,
+            'end_date': end_date,
+        }
+
+    effective_start_date = _resolve_effective_start_date(
+        line,
+        start_date,
+        end_date,
+        today,
+        include_stock_anchor=False,
+        include_lt_anchor=True,
+    )
+    recalc_result = recalculate_inventory_for_line(
+        line_id=line.id,
+        start_date=start_date,
+        end_date=end_date,
+        include_progress=True,
+        product_ids=product_ids,
+        progress_only=True,
+        progress_calc_start_date=effective_start_date,
+    )
+    recalc_result['start_date'] = start_date
+    recalc_result['end_date'] = end_date
+    return recalc_result
+
+
 def run_auto_delivery_list_send(config_id):
     from notifications.models import Notification
     from masters.models import Calendar
@@ -17,7 +72,7 @@ def run_auto_delivery_list_send(config_id):
 
     from .models import PurchaseAutoDeliveryListConfig, SupplierOrderSchedule
     from .order_proposal_views import _generate_raw_pattern_dates
-    from .views import _calc_progress_quantities, _resolve_purchase_line
+    from .views import _calc_progress_quantities, _resolve_purchase_line, _sort_delivery_list_items
 
     start_time = time.time()
     config = PurchaseAutoDeliveryListConfig.objects.select_related('supplier').filter(id=config_id).first()
@@ -86,8 +141,38 @@ def run_auto_delivery_list_send(config_id):
             _notify_users(config.notify_on_failure, f'自動納入リスト失敗: {supplier.supplier_name} に対応するラインが見つかりません')
             return
 
+        days_back = config.progress_days_back or 7
+        days_forward = config.progress_days_forward or 30
+        try:
+            progress_recalc_result = _recalculate_supplier_progress_for_auto_delivery(
+                supplier,
+                line,
+                days_back,
+                days_forward,
+            )
+            logger.info(
+                '自動納入リスト送信前の進度再計算完了: supplier=%s line=%s products=%s period=%s~%s',
+                supplier.supplier_code,
+                line.line_code,
+                progress_recalc_result.get('progress_product_count', progress_recalc_result.get('product_count', 0)),
+                progress_recalc_result.get('start_date'),
+                progress_recalc_result.get('end_date'),
+            )
+        except Exception as e:
+            logger.exception(
+                '自動納入リスト送信前の進度再計算エラー: supplier=%s line=%s',
+                supplier.supplier_code,
+                line.line_code,
+            )
+            _finish(config, start_time, 'FAILED', f'進度再計算エラー: {str(e)[:300]}')
+            _notify_users(
+                config.notify_on_failure,
+                f'自動納入リスト失敗: {supplier.supplier_name} の進度再計算に失敗しました\n{str(e)[:300]}',
+            )
+            return
+
         product_map = _calc_progress_quantities(line, coverage_dates)
-        items = sorted(product_map.values(), key=lambda x: x['product_code'])
+        items = _sort_delivery_list_items(product_map.values())
 
         supplier_type = getattr(supplier, 'supplier_type', 'both') or 'both'
         if supplier_type == 'outsource':
@@ -105,8 +190,6 @@ def run_auto_delivery_list_send(config_id):
 
         progress_excel = None
         progress_pdf = None
-        days_back = config.progress_days_back or 7
-        days_forward = config.progress_days_forward or 30
         if config.send_progress_excel:
             try:
                 progress_excel = _generate_progress_excel(supplier, line, days_back, days_forward)
@@ -290,7 +373,7 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
         dow = DAY_NAMES[d.weekday()]
         date_headers.append(f'{d.month}/{d.day}({dow})')
 
-    left_headers = ['品番', '品名', '数量', '納品日']
+    left_headers = ['品番', '品名', '移動先', '数量', '納品日']
     right_headers = ['仕入先コード', '伝票番号']
     headers = left_headers + date_headers + right_headers
     ws.append(headers)
@@ -329,6 +412,7 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
         row_data = [
             item['product_code'],
             item['product_name'],
+            item.get('transfer_destination_label', ''),
             item['expected_qty'],
             delivery_date.isoformat(),
         ]
@@ -343,7 +427,7 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
             if col_idx == 3 or (date_start <= col_idx <= date_end):
                 cell.alignment = Alignment(horizontal='right')
 
-    left_widths = [20, 30, 10, 14]
+    left_widths = [20, 30, 16, 10, 14]
     for i, w in enumerate(left_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     for i in range(date_start, date_end + 1):
@@ -559,6 +643,7 @@ DAY_NAMES = ['月', '火', '水', '木', '金', '土', '日']
 ROW_DEFS = [
     ('forecast', '内示'),
     ('firm', '確定'),
+    ('plan', '計画'),
     ('actual', '実績'),
     ('progress', '進度'),
     ('planned_progress', '計進'),
@@ -577,7 +662,17 @@ def _collect_progress_data(line, days_back, days_forward=30):
     daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
     calc = WorkingDayCalculator(daiso_cal)
     start_date = calc.subtract_working_days(today, days_back)
-    end_date = start_date + timedelta(days=days_forward)
+    end_date = today + timedelta(days=days_forward)
+    current_month_start = date(today.year, today.month, 1)
+    if today.month == 12:
+        next_month_start = date(today.year + 1, 1, 1)
+        month_total_end = date(today.year + 1, 2, 1) - timedelta(days=1)
+    else:
+        next_month_start = date(today.year, today.month + 1, 1)
+        if today.month + 1 == 12:
+            month_total_end = date(today.year, 12, 31)
+        else:
+            month_total_end = date(today.year, today.month + 2, 1) - timedelta(days=1)
 
     date_list = []
     d = start_date
@@ -585,11 +680,25 @@ def _collect_progress_data(line, days_back, days_forward=30):
         date_list.append(d)
         d += timedelta(days=1)
 
+    month_total_keys = [
+        (today.year, today.month),
+        (next_month_start.year, next_month_start.month),
+    ]
+
     demand_qs = LineDemand.objects.filter(
         line=line, plan_date__gte=start_date, plan_date__lte=end_date,
     ).select_related('product')
+    demand_month_total_qs = LineDemand.objects.filter(
+        line=line,
+        plan_date__gte=current_month_start,
+        plan_date__lte=month_total_end,
+    )
 
     demand_by_product_date = defaultdict(lambda: defaultdict(lambda: {'forecast': 0, 'firm': 0}))
+    month_totals_by_product = defaultdict(lambda: {
+        month_total_keys[0]: {'forecast': 0, 'firm': 0, 'plan': 0, 'actual': 0},
+        month_total_keys[1]: {'forecast': 0, 'firm': 0, 'plan': 0, 'actual': 0},
+    })
     product_info = {}
     for dm in demand_qs:
         pid = dm.product_id
@@ -601,13 +710,25 @@ def _collect_progress_data(line, days_back, days_forward=30):
         dd = demand_by_product_date[pid][dm.plan_date]
         dd['forecast'] += int(dm.forecast_qty or 0)
         dd['firm'] += int(dm.firm_qty or 0)
+    for dm in demand_month_total_qs:
+        month_key = (dm.plan_date.year, dm.plan_date.month)
+        if month_key not in month_total_keys:
+            continue
+        pid = dm.product_id
+        month_totals_by_product[pid][month_key]['forecast'] += int(dm.forecast_qty or 0)
+        month_totals_by_product[pid][month_key]['firm'] += int(dm.firm_qty or 0)
 
     backlog_qs = LineBacklog.objects.filter(
         line=line, plan_date__gte=start_date, plan_date__lte=end_date,
     ).select_related('product')
+    backlog_month_total_qs = LineBacklog.objects.filter(
+        line=line,
+        plan_date__gte=current_month_start,
+        plan_date__lte=month_total_end,
+    )
 
     backlog_by_product_date = defaultdict(lambda: defaultdict(lambda: {
-        'actual': 0, 'progress': 0, 'planned_progress': 0,
+        'plan': 0, 'actual': 0, 'progress': 0, 'planned_progress': 0,
     }))
     for bl in backlog_qs:
         pid = bl.product_id
@@ -617,9 +738,17 @@ def _collect_progress_data(line, days_back, days_forward=30):
                 'product_name': bl.product.product_name,
             }
         bd = backlog_by_product_date[pid][bl.plan_date]
+        bd['plan'] += int(bl.plan_qty or 0)
         bd['actual'] += int(bl.actual_qty or 0)
         bd['progress'] += int(bl.progress_qty or 0)
         bd['planned_progress'] += int(getattr(bl, 'planned_progress_qty', 0) or 0)
+    for bl in backlog_month_total_qs:
+        month_key = (bl.plan_date.year, bl.plan_date.month)
+        if month_key not in month_total_keys:
+            continue
+        pid = bl.product_id
+        month_totals_by_product[pid][month_key]['plan'] += int(bl.plan_qty or 0)
+        month_totals_by_product[pid][month_key]['actual'] += int(bl.actual_qty or 0)
 
     if not product_info:
         return None
@@ -648,6 +777,8 @@ def _collect_progress_data(line, days_back, days_forward=30):
         'demand_by_product_date': demand_by_product_date,
         'backlog_by_product_date': backlog_by_product_date,
         'carryover_by_pid': carryover_by_pid,
+        'month_total_keys': month_total_keys,
+        'month_totals_by_product': month_totals_by_product,
     }
 
 def _generate_progress_excel(supplier, line, days_back, days_forward=30):
@@ -668,6 +799,8 @@ def _generate_progress_excel(supplier, line, days_back, days_forward=30):
     demand_by_product_date = data['demand_by_product_date']
     backlog_by_product_date = data['backlog_by_product_date']
     carryover_by_pid = data['carryover_by_pid']
+    month_keys = data['month_total_keys']
+    month_totals_by_product = data['month_totals_by_product']
 
     wb = Workbook()
     ws = wb.active
@@ -702,7 +835,21 @@ def _generate_progress_excel(supplier, line, days_back, days_forward=30):
     ws.cell(row=current_row, column=2, value='■ 休日')
     ws.cell(row=current_row, column=2).font = Font(size=8, color='CC6666')
     ws.cell(row=current_row, column=2).fill = PatternFill(start_color='FFD9D9', end_color='FFD9D9', fill_type='solid')
-    current_row += 2
+    current_row += 1
+
+    row_explanations = [
+        '内示: 顧客からの予定需要です。まだ確定していない見込み数量です。',
+        '確定: 顧客から正式確定された需要です。出荷・生産として確実に必要な数量です。',
+        '計画: その日納入予定の数量です。',
+        '実績: その日納入された数量です。',
+        '進度: 納入が需要に対してどれだけ先行/遅れしているかを表す差分です。',
+        '計進: 納入計画ベースでの進度です。納入計画数量まで含めた進み具合を見るための数です。（注: 発行日の納入実績は計算されません）',
+    ]
+    for text in row_explanations:
+        ws.cell(row=current_row, column=1, value=text).font = Font(size=8, color='666666')
+        current_row += 1
+
+    current_row += 1
 
     for pid in sorted_pids:
         info = product_info[pid]
@@ -716,21 +863,48 @@ def _generate_progress_excel(supplier, line, days_back, days_forward=30):
         ws.cell(row=current_row, column=1).font = Font(size=9, color='555555')
 
         date_header_row = current_row
-        carry_col = 3
+        sub_header_row = current_row + 1
+        month_col_start = 3
+        for offset, (_, month) in enumerate(month_keys):
+            header_cell = ws.cell(row=date_header_row, column=month_col_start + offset, value=f'{month}月')
+            header_cell.font = header_font
+            header_cell.fill = header_fill
+            header_cell.alignment = Alignment(horizontal='center')
+            header_cell.border = thin_border
+
+            sub_cell = ws.cell(row=sub_header_row, column=month_col_start + offset, value='合計数')
+            sub_cell.font = header_font
+            sub_cell.fill = header_fill
+            sub_cell.alignment = Alignment(horizontal='center')
+            sub_cell.border = thin_border
+
+        carry_col = month_col_start + len(month_keys)
         carry_cell = ws.cell(row=date_header_row, column=carry_col, value='繰越')
         carry_cell.font = header_font
         carry_cell.fill = header_fill
         carry_cell.alignment = Alignment(horizontal='center')
         carry_cell.border = thin_border
-        DATE_COL_START = 4
+        ws.merge_cells(
+            start_row=date_header_row,
+            start_column=carry_col,
+            end_row=sub_header_row,
+            end_column=carry_col,
+        )
+        DATE_COL_START = carry_col + 1
         for col_idx, dt in enumerate(date_list, DATE_COL_START):
             dow = DAY_NAMES[dt.weekday()]
-            cell = ws.cell(row=date_header_row, column=col_idx, value=f'{dt.month}/{dt.day}\n{dow}')
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', wrap_text=True)
-            cell.border = thin_border
-        current_row += 1
+            header_cell = ws.cell(row=date_header_row, column=col_idx, value=f'{dt.month}/{dt.day}')
+            header_cell.font = header_font
+            header_cell.fill = header_fill
+            header_cell.alignment = Alignment(horizontal='center')
+            header_cell.border = thin_border
+
+            sub_cell = ws.cell(row=sub_header_row, column=col_idx, value=dow)
+            sub_cell.font = header_font
+            sub_cell.fill = header_fill
+            sub_cell.alignment = Alignment(horizontal='center')
+            sub_cell.border = thin_border
+        current_row += 2
 
         carryover = carryover_by_pid.get(pid, {})
         for row_key, row_label in ROW_DEFS:
@@ -739,6 +913,20 @@ def _generate_progress_excel(supplier, line, days_back, days_forward=30):
             label_cell.fill = label_fill
             label_cell.font = label_font
             label_cell.border = thin_border
+
+            for offset, month_key in enumerate(month_keys):
+                month_total = None
+                if row_key not in ('progress', 'planned_progress'):
+                    month_total = month_totals_by_product.get(pid, {}).get(month_key, {}).get(row_key, 0)
+
+                month_cell = ws.cell(
+                    row=current_row,
+                    column=month_col_start + offset,
+                    value=month_total if month_total not in (None, 0) else '',
+                )
+                month_cell.border = thin_border
+                month_cell.alignment = Alignment(horizontal='right')
+                month_cell.font = base_font
 
             # 繰越列
             cv = carryover.get(row_key, 0) if row_key in ('progress', 'planned_progress') else ''
@@ -780,10 +968,13 @@ def _generate_progress_excel(supplier, line, days_back, days_forward=30):
 
     ws.column_dimensions['A'].width = 18
     ws.column_dimensions['B'].width = 10
+    for col_idx in range(month_col_start, carry_col):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 8
     ws.column_dimensions['C'].width = 8
     for col_idx in range(DATE_COL_START, len(date_list) + DATE_COL_START):
         ws.column_dimensions[get_column_letter(col_idx)].width = 7
-    ws.freeze_panes = 'D5'
+    ws.column_dimensions[get_column_letter(carry_col)].width = 8
+    ws.freeze_panes = f'{get_column_letter(DATE_COL_START)}11'
 
     output = BytesIO()
     wb.save(output)
@@ -814,6 +1005,8 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
     demand_by_product_date = data['demand_by_product_date']
     backlog_by_product_date = data['backlog_by_product_date']
     carryover_by_pid = data['carryover_by_pid']
+    month_keys = data['month_total_keys']
+    month_totals_by_product = data['month_totals_by_product']
 
     page_w, page_h = landscape(A4)
     margin_left = 5 * mm
@@ -822,10 +1015,9 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
     margin_bottom = 6 * mm
 
     CARRY_W = 9 * mm
+    MONTH_W = 8 * mm
     LABEL_W = 8 * mm
-    CODE_W = 16 * mm
-    NAME_W = 10 * mm
-    LEFT_W = CODE_W + NAME_W + LABEL_W + CARRY_W
+    LEFT_W = (MONTH_W * len(month_keys)) + LABEL_W + CARRY_W
     DATE_W = 7.5 * mm
     ROW_H = 3.2 * mm
     HEADER_H = 4.5 * mm
@@ -901,8 +1093,19 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
                 WEEKEND_BG = colors.Color(1, 0.85, 0.85)
                 TODAY_BG = colors.Color(0.84, 0.92, 1.0)
 
+                month_x = margin_left
+                label_x = month_x + (MONTH_W * len(month_keys))
+
                 # 繰越ヘッダー
-                carry_x = margin_left + CODE_W + NAME_W + LABEL_W
+                for idx, (_, month) in enumerate(month_keys):
+                    col_x = month_x + (MONTH_W * idx)
+                    c.setStrokeColor(GRID_COLOR)
+                    c.rect(col_x, y - HEADER_H, MONTH_W, HEADER_H, fill=0, stroke=1)
+                    c.setFillColor(colors.black)
+                    c.setFont(FONT_NAME, HEADER_FONT_SIZE)
+                    c.drawCentredString(col_x + MONTH_W / 2, y - 3 * mm, f'{month}月')
+
+                carry_x = label_x + LABEL_W
                 c.setStrokeColor(GRID_COLOR)
                 c.rect(carry_x, y - HEADER_H, CARRY_W, HEADER_H, fill=0, stroke=1)
                 c.setFillColor(colors.black)
@@ -945,7 +1148,7 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
                 carryover = carryover_by_pid.get(pid, {})
                 for row_key, row_label in ROW_DEFS:
                     # ラベル
-                    lx = margin_left + CODE_W + NAME_W
+                    lx = label_x
                     c.setFillColor(colors.Color(0.9, 0.9, 0.9))
                     c.rect(lx, y - ROW_H, LABEL_W, ROW_H, fill=1, stroke=0)
                     c.setStrokeColor(GRID_COLOR)
@@ -953,6 +1156,18 @@ def _generate_progress_pdf(supplier, line, days_back, days_forward=30):
                     c.setFillColor(colors.black)
                     c.setFont(FONT_NAME, FONT_SIZE)
                     c.drawString(lx + 0.5 * mm, y - ROW_H * 0.78, row_label)
+
+                    # 当月/翌月合計セル
+                    for idx, month_key in enumerate(month_keys):
+                        col_x = month_x + (MONTH_W * idx)
+                        c.setStrokeColor(GRID_COLOR)
+                        c.rect(col_x, y - ROW_H, MONTH_W, ROW_H, fill=0, stroke=1)
+                        if row_key not in ('progress', 'planned_progress'):
+                            month_total = month_totals_by_product.get(pid, {}).get(month_key, {}).get(row_key, 0)
+                            if month_total:
+                                c.setFillColor(colors.black)
+                                c.setFont(FONT_NAME, FONT_SIZE)
+                                c.drawRightString(col_x + MONTH_W - 0.5 * mm, y - ROW_H * 0.78, str(month_total))
 
                     # 繰越セル
                     c.setStrokeColor(GRID_COLOR)

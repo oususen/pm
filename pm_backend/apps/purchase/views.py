@@ -53,10 +53,14 @@ def _calc_progress_quantities(line, coverage_dates):
         pid = d.product_id
         if pid not in product_map:
             prod = d.product
+            td = prod.transfer_destination if prod else None
+            td_label = prod.get_transfer_destination_display() if prod and getattr(prod, 'transfer_destination', None) else ''
             product_map[pid] = {
                 'product_id': pid,
                 'product_code': prod.product_code if prod else d.product_code,
                 'product_name': prod.product_name if prod else '',
+                'transfer_destination': td or '',
+                'transfer_destination_label': td_label,
                 'expected_qty': 0,
                 'daily': {},
             }
@@ -65,6 +69,24 @@ def _calc_progress_quantities(line, coverage_dates):
         key = d.plan_date.isoformat()
         product_map[pid]['daily'][key] = product_map[pid]['daily'].get(key, 0) + qty
     return product_map
+
+
+def _sort_delivery_list_items(items):
+    transfer_order = {
+        'INPAINT': 0,
+        'CWL': 1,
+        'KOWA': 2,
+        'DIRECT': 3,
+        'INLINE': 4,
+        'OTHER': 5,
+    }
+    return sorted(
+        items,
+        key=lambda x: (
+            transfer_order.get(x.get('transfer_destination'), 99),
+            x.get('product_code', ''),
+        ),
+    )
 
 
 def _normalize_product_code(text: str) -> str:
@@ -1164,7 +1186,7 @@ class PurchaseActualBulkItemsView(APIView):
             existing = product_map[pid]['actuals_by_date'].get(date_str, 0)
             product_map[pid]['actuals_by_date'][date_str] = existing + int(ab.actual_qty or 0)
 
-        items = sorted(product_map.values(), key=lambda x: x['product_code'])
+        items = _sort_delivery_list_items(product_map.values())
 
         return Response({
             'line_id': line.id,
@@ -1758,7 +1780,7 @@ class PurchaseReceivingView(APIView):
                             if s.process and s.process.process_code == 'PURCHASE':
                                 found_purchase = True
 
-            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+            items = _sort_delivery_list_items(product_map.values())
 
         return Response({
             'pattern': pattern_data,
@@ -1995,7 +2017,7 @@ class PurchaseDeliveryListAutoTemplateView(APIView):
         items = []
         if line and coverage_dates:
             product_map = _calc_progress_quantities(line, coverage_dates)
-            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+            items = _sort_delivery_list_items(product_map.values())
 
         return Response({
             'is_delivery_day': True,
@@ -2061,7 +2083,7 @@ class PurchaseDeliveryListExcelDownloadView(APIView):
         items = []
         if line and coverage_dates:
             product_map = _calc_progress_quantities(line, coverage_dates)
-            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+            items = _sort_delivery_list_items(product_map.values())
 
         if g_filter == 'yes':
             items = [i for i in items if i['product_code'].endswith('G')]
@@ -2115,6 +2137,46 @@ class PurchaseProgressExcelDownloadView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+
+class PurchaseProgressRecalculateView(APIView):
+    """仕入先向け進度表の手動再計算"""
+
+    def post(self, request):
+        from .tasks_auto_delivery_list import _recalculate_supplier_progress_for_auto_delivery
+
+        supplier_id = request.data.get('supplier_id') or request.query_params.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = Supplier.objects.filter(id=int(supplier_id)).first()
+        if not supplier:
+            return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line = _resolve_purchase_line(supplier)
+        if not line:
+            return Response({'detail': 'ラインが見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        auto_cfg = PurchaseAutoDeliveryListConfig.objects.filter(supplier=supplier).first()
+        default_back = auto_cfg.progress_days_back if auto_cfg else 7
+        default_fwd = auto_cfg.progress_days_forward if auto_cfg else 30
+        days_back = int(request.data.get('days_back') or request.query_params.get('days_back') or default_back)
+        days_forward = int(request.data.get('days_forward') or request.query_params.get('days_forward') or default_fwd)
+
+        result = _recalculate_supplier_progress_for_auto_delivery(
+            supplier,
+            line,
+            days_back,
+            days_forward,
+        )
+        return Response({
+            'detail': '進度再計算が完了しました',
+            'line_id': line.id,
+            'line_code': line.line_code,
+            'start_date': result.get('start_date'),
+            'end_date': result.get('end_date'),
+            'product_count': result.get('progress_product_count', result.get('product_count', 0)),
+        })
 
 
 class PurchaseProgressPdfDownloadView(APIView):
@@ -2209,7 +2271,7 @@ class PurchaseDeliveryNotePdfDownloadView(APIView):
         items = []
         if line and coverage_dates:
             product_map = _calc_progress_quantities(line, coverage_dates)
-            items = sorted(product_map.values(), key=lambda x: x['product_code'])
+            items = _sort_delivery_list_items(product_map.values())
 
         if g_filter == 'yes':
             items = [i for i in items if i['product_code'].endswith('G')]
@@ -2565,7 +2627,7 @@ class PurchaseDeliveryScheduleView(APIView):
                 'daily': daily_by_product.get(pid, {}),
             }
 
-        items = sorted(product_map.values(), key=lambda x: x['product_code'])
+        items = _sort_delivery_list_items(product_map.values())
         return Response({
             'coverage_dates': [d.isoformat() for d in coverage_dates],
             'items': items,
