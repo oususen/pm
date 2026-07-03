@@ -424,7 +424,7 @@ def _generate_excel(items, delivery_date, coverage_dates, supplier):
         for col_idx in range(1, len(row_data) + 1):
             cell = ws.cell(row=row_idx, column=col_idx)
             cell.border = thin_border
-            if col_idx == 3 or (date_start <= col_idx <= date_end):
+            if col_idx == 4 or (date_start <= col_idx <= date_end):
                 cell.alignment = Alignment(horizontal='right')
 
     left_widths = [20, 30, 16, 10, 14]
