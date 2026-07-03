@@ -38,6 +38,27 @@ class OrderExpansionService:
         'firm_order_numbers',
         'forecast_order_numbers',
     ]
+    EXISTING_DEMAND_VALUE_FIELDS = [
+        'id',
+        'line_id',
+        'product_code',
+        'plan_date',
+        'routing_step_id',
+        'product_id',
+        'lead_time_days',
+        'is_shifted',
+        'firm_is_shifted',
+        'forecast_is_shifted',
+        'forecast_qty',
+        'firm_qty',
+        'plan_qty',
+        'actual_qty',
+        'plan_progress',
+        'actual_progress',
+        'order_numbers',
+        'firm_order_numbers',
+        'forecast_order_numbers',
+    ]
     CUSTOMER_CALENDAR_TRANSFER_DESTINATIONS = {'INPAINT', 'KOWA', 'CWL'}
 
     def __init__(self) -> None:
@@ -215,7 +236,7 @@ class OrderExpansionService:
             self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
         )
 
-        existing_map = self._load_existing_demands()
+        existing_map = self._load_existing_demand_rows()
 
         with transaction.atomic():
             forecast_result = self._sync_forecast_demands(forecast_aggregated, existing_map)
@@ -247,12 +268,12 @@ class OrderExpansionService:
             self._get_open_order_lines_queryset(order_type='FIRM')
         )
         aggregated = self._merge_aggregated_demands(forecast_aggregated, firm_aggregated)
-        existing_map = self._load_existing_demands()
+        actual_qty_map = self._load_existing_actual_qty_map()
 
         objects_to_create: List[LineDemand] = []
         for key, entry in aggregated.items():
-            existing = existing_map.get(key)
-            objects_to_create.append(self._build_line_demand(entry, existing=existing))
+            actual_qty = actual_qty_map.get(key, Decimal('0'))
+            objects_to_create.append(self._build_line_demand(entry, actual_qty=actual_qty))
 
         routed_open_firm_qs = self._get_open_order_lines_queryset(order_type='FIRM').values_list('id', flat=True)
 
@@ -303,6 +324,7 @@ class OrderExpansionService:
                     to_create.append(existing)
                     continue
 
+                existing = self._build_demand_instance_from_row(existing)
                 self._apply_shared_entry_metadata(existing, entry)
                 existing.forecast_qty = entry['forecast_qty']
                 existing.forecast_is_shifted = bool(entry['forecast_is_shifted'])
@@ -316,6 +338,7 @@ class OrderExpansionService:
             if existing is None:
                 continue
 
+            existing = self._build_demand_instance_from_row(existing)
             existing.forecast_qty = Decimal('0')
             existing.forecast_is_shifted = False
             existing.forecast_order_numbers = ''
@@ -358,6 +381,7 @@ class OrderExpansionService:
                 to_create.append(existing)
                 continue
 
+            existing = self._build_demand_instance_from_row(existing)
             existing.firm_qty = (existing.firm_qty or Decimal('0')) + entry['firm_qty']
             existing.firm_is_shifted = bool(existing.firm_is_shifted or entry['firm_is_shifted'])
             existing.firm_order_numbers = self._merge_order_number_strings(
@@ -384,10 +408,16 @@ class OrderExpansionService:
             'updated': len(to_update),
         }
 
-    def _load_existing_demands(self):
+    def _load_existing_demand_rows(self):
         return {
-            (demand.line_id, demand.product_code, demand.plan_date): demand
-            for demand in LineDemand.objects.all()
+            (row['line_id'], row['product_code'], row['plan_date']): row
+            for row in LineDemand.objects.values(*self.EXISTING_DEMAND_VALUE_FIELDS)
+        }
+
+    def _load_existing_actual_qty_map(self):
+        return {
+            (row['line_id'], row['product_code'], row['plan_date']): Decimal(str(row['actual_qty'] or 0))
+            for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'actual_qty')
         }
 
     def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map):
@@ -402,9 +432,9 @@ class OrderExpansionService:
             line_id__in=line_ids,
             product_code__in=product_codes,
             plan_date__in=plan_dates,
-        )
-        for demand in refreshed:
-            existing_map[(demand.line_id, demand.product_code, demand.plan_date)] = demand
+        ).values(*self.EXISTING_DEMAND_VALUE_FIELDS)
+        for row in refreshed:
+            existing_map[(row['line_id'], row['product_code'], row['plan_date'])] = row
 
     def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
         aggregated: Dict[Tuple[int, str, object], Dict[str, object]] = {}
@@ -675,8 +705,38 @@ class OrderExpansionService:
                 existing['forecast_order_numbers'].update(entry['forecast_order_numbers'])
         return merged
 
-    def _build_line_demand(self, entry, existing: LineDemand | None = None):
-        actual_qty = existing.actual_qty if existing is not None else Decimal('0')
+    def _build_demand_instance_from_row(self, row):
+        return LineDemand(
+            id=row['id'],
+            line_id=row['line_id'],
+            routing_step_id=row['routing_step_id'],
+            product_id=row['product_id'],
+            product_code=row['product_code'],
+            plan_date=row['plan_date'],
+            lead_time_days=row['lead_time_days'],
+            is_shifted=bool(row['is_shifted']),
+            firm_is_shifted=bool(row['firm_is_shifted']),
+            forecast_is_shifted=bool(row['forecast_is_shifted']),
+            forecast_qty=Decimal(str(row['forecast_qty'] or 0)),
+            firm_qty=Decimal(str(row['firm_qty'] or 0)),
+            plan_qty=Decimal(str(row['plan_qty'] or 0)),
+            actual_qty=Decimal(str(row['actual_qty'] or 0)),
+            plan_progress=Decimal(str(row['plan_progress'] or 0)),
+            actual_progress=Decimal(str(row['actual_progress'] or 0)),
+            order_numbers=row['order_numbers'] or '',
+            firm_order_numbers=row['firm_order_numbers'] or '',
+            forecast_order_numbers=row['forecast_order_numbers'] or '',
+        )
+
+    def _build_line_demand(self, entry, existing=None, actual_qty: Decimal | None = None):
+        if actual_qty is None:
+            if existing is not None:
+                if isinstance(existing, dict):
+                    actual_qty = Decimal(str(existing.get('actual_qty') or 0))
+                else:
+                    actual_qty = existing.actual_qty
+            else:
+                actual_qty = Decimal('0')
         demand = LineDemand(
             line_id=entry['line_id'],
             routing_step_id=entry['routing_step_id'],
