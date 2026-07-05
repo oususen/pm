@@ -1,14 +1,19 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">{{ isEdit ? '朝礼編集' : '朝礼作成' }} <DataSourceDialog title="朝礼作成/編集" :sources="dsSources" /></h1>
+      <h1 class="page-title">{{ pageTitle }} <DataSourceDialog title="朝礼作成/編集" :sources="dsSources" /></h1>
     </div>
 
     <div class="page-content form-card">
+      <div v-if="sourceMeetingSummary" class="source-banner">
+        <strong>複製元:</strong> {{ sourceMeetingSummary }}
+      </div>
+
       <div class="form-grid">
         <div class="form-field">
           <label>朝礼日</label>
           <input v-model="form.meeting_date" type="date" />
+          <div v-if="form.is_template" class="selection-meta">テンプレート作成時は未入力でも保存できます</div>
         </div>
         <div class="form-field">
           <label>状態</label>
@@ -20,6 +25,13 @@
         <div class="form-field wide">
           <label>タイトル</label>
           <input v-model.trim="form.title" type="text" maxlength="200" />
+        </div>
+        <div class="form-field wide template-toggle">
+          <label class="checkbox-line">
+            <input v-model="form.is_template" type="checkbox" />
+            <span>テンプレートとして保存する</span>
+          </label>
+          <div class="selection-meta">テンプレートは一覧の「表示区分」で切り替えて利用します</div>
         </div>
 
         <div class="form-field wide selection-field">
@@ -115,8 +127,11 @@
           <div class="attachment-subtitle">既存資料</div>
           <div class="attachment-list">
             <div v-for="attachment in activeExistingAttachments" :key="attachment.id" class="attachment-item">
-              <a :href="attachment.file_url" target="_blank" rel="noopener noreferrer">{{ attachment.original_name }}</a>
+              <button class="btn-text attachment-name" type="button" @click="openAttachmentPreview(attachment)">
+                {{ attachment.original_name }}
+              </button>
               <span class="attachment-type">{{ attachment.file_type_label }}</span>
+              <button class="btn-text" type="button" @click="openAttachmentPreview(attachment)">プレビュー</button>
               <button class="btn-text danger-text" type="button" @click="markAttachmentForDelete(attachment.id)">削除</button>
             </div>
           </div>
@@ -161,12 +176,31 @@
         <RouterLink class="btn-secondary" to="/production/morning-meetings">一覧へ戻る</RouterLink>
       </div>
     </div>
+
+    <div v-if="previewDialog.visible" class="modal-overlay" @click.self="closeAttachmentPreview">
+      <div class="preview-dialog">
+        <div class="preview-dialog-header">
+          <strong>{{ previewDialog.name }}</strong>
+          <button class="btn-secondary" type="button" @click="closeAttachmentPreview">閉じる</button>
+        </div>
+        <div v-if="previewDialog.type === 'IMAGE'" class="preview-body image-preview">
+          <img :src="previewDialog.url" :alt="previewDialog.name" />
+        </div>
+        <div v-else-if="previewDialog.type === 'PDF'" class="preview-body">
+          <iframe :src="previewDialog.url" title="PDFプレビュー"></iframe>
+        </div>
+        <div v-else class="preview-body preview-note">
+          <p>Excel は画面内プレビュー非対応です。</p>
+          <a :href="previewDialog.url" target="_blank" rel="noopener noreferrer">ファイルを開く</a>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -183,8 +217,18 @@ const dsSources = [
   { op: '読み取り', table: 'accounts_department / auth_user / t_line', desc: '部署・参加者・ライン候補の取得' },
 ]
 
+const route = useRoute()
 const router = useRouter()
 const isEdit = computed(() => Boolean(props.id))
+const isTemplateMode = computed(() => route.query.template === '1')
+const sourceMeetingId = computed(() => {
+  const raw = route.query.source_id
+  return raw ? Number(raw) : null
+})
+const pageTitle = computed(() => {
+  if (isEdit.value) return '朝礼編集'
+  return form.value.is_template || isTemplateMode.value ? '朝礼テンプレート作成' : '朝礼作成'
+})
 const saving = ref(false)
 const errorMessage = ref('')
 const departments = ref([])
@@ -193,9 +237,17 @@ const unitLineMappings = ref([])
 const users = ref([])
 const existingAttachments = ref([])
 const newAttachmentFiles = ref([])
+const sourceMeetingSummary = ref('')
+const previewDialog = ref({
+  visible: false,
+  type: '',
+  name: '',
+  url: '',
+})
 const form = ref({
   meeting_date: getBusinessISODate(),
   title: '',
+  is_template: false,
   department_ids: [],
   line_ids: [],
   facilitator: String(authState.user?.id || ''),
@@ -341,6 +393,7 @@ const loadMeeting = async () => {
   form.value = {
     meeting_date: row.meeting_date || getBusinessISODate(),
     title: row.title || '',
+    is_template: Boolean(row.is_template),
     department_ids: Array.isArray(row.target_departments) ? row.target_departments.map((item) => Number(item.id)) : [],
     line_ids: Array.isArray(row.target_lines) ? row.target_lines.map((item) => Number(item.id)) : [],
     facilitator: row.facilitator ? String(row.facilitator) : '',
@@ -352,6 +405,32 @@ const loadMeeting = async () => {
     deleted_attachment_ids: [],
   }
   existingAttachments.value = Array.isArray(row.attachments) ? row.attachments : []
+  sourceMeetingSummary.value = ''
+}
+
+const applyMeetingToForm = (row) => {
+  form.value = {
+    meeting_date: row.meeting_date || getBusinessISODate(),
+    title: row.title || '',
+    is_template: isTemplateMode.value,
+    department_ids: Array.isArray(row.target_departments) ? row.target_departments.map((item) => Number(item.id)) : [],
+    line_ids: Array.isArray(row.target_lines) ? row.target_lines.map((item) => Number(item.id)) : [],
+    facilitator: row.facilitator ? String(row.facilitator) : String(authState.user?.id || ''),
+    agenda: row.agenda || '',
+    notices: row.notices || '',
+    cautions: row.cautions || '',
+    status: 'DRAFT',
+    participant_user_ids: Array.isArray(row.participants) ? row.participants.map((item) => Number(item.user)) : [],
+    deleted_attachment_ids: [],
+  }
+  existingAttachments.value = Array.isArray(row.attachments) ? row.attachments : []
+  sourceMeetingSummary.value = `${row.meeting_date} ${row.title}`
+}
+
+const loadSourceMeeting = async () => {
+  if (isEdit.value || !sourceMeetingId.value) return
+  const res = await api.morningMeetings.get(sourceMeetingId.value)
+  applyMeetingToForm(res.data)
 }
 
 const toggleSelection = (fieldName, value, checked) => {
@@ -403,6 +482,24 @@ const restoreAttachment = (attachmentId) => {
   form.value.deleted_attachment_ids = form.value.deleted_attachment_ids.filter((id) => Number(id) !== Number(attachmentId))
 }
 
+const openAttachmentPreview = (attachment) => {
+  previewDialog.value = {
+    visible: true,
+    type: attachment.attachment_type || '',
+    name: attachment.original_name || '添付資料',
+    url: attachment.file_url || '',
+  }
+}
+
+const closeAttachmentPreview = () => {
+  previewDialog.value = {
+    visible: false,
+    type: '',
+    name: '',
+    url: '',
+  }
+}
+
 const formatApiError = (payload) => {
   if (!payload) return '朝礼の保存に失敗しました。'
   if (typeof payload === 'string') return payload
@@ -429,8 +526,11 @@ watch(
 
 const buildPayload = () => {
   const formData = new FormData()
-  formData.append('meeting_date', form.value.meeting_date)
+  if (form.value.meeting_date) {
+    formData.append('meeting_date', form.value.meeting_date)
+  }
   formData.append('title', form.value.title)
+  formData.append('is_template', form.value.is_template ? 'true' : 'false')
   formData.append('department_ids', JSON.stringify(form.value.department_ids))
   formData.append('line_ids', JSON.stringify(form.value.line_ids))
   if (form.value.facilitator) {
@@ -449,8 +549,12 @@ const buildPayload = () => {
 }
 
 const save = async () => {
-  if (!form.value.meeting_date || !form.value.title.trim()) {
-    errorMessage.value = '朝礼日とタイトルを入力してください。'
+  if (!form.value.title.trim()) {
+    errorMessage.value = 'タイトルを入力してください。'
+    return
+  }
+  if (!form.value.is_template && !form.value.meeting_date) {
+    errorMessage.value = '通常朝礼では朝礼日を入力してください。'
     return
   }
   saving.value = true
@@ -474,7 +578,12 @@ const save = async () => {
 onMounted(async () => {
   try {
     await loadMasterData()
-    await loadMeeting()
+    if (isEdit.value) {
+      await loadMeeting()
+    } else {
+      form.value.is_template = isTemplateMode.value
+      await loadSourceMeeting()
+    }
   } catch (error) {
     console.error('初期データの取得に失敗しました:', error)
     errorMessage.value = '初期データの取得に失敗しました。'
@@ -488,6 +597,15 @@ onMounted(async () => {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 16px;
+}
+
+.source-banner {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  border-radius: 10px;
+  color: #312e81;
 }
 
 .form-grid {
@@ -578,6 +696,17 @@ onMounted(async () => {
   color: #64748b;
 }
 
+.template-toggle {
+  gap: 4px;
+}
+
+.checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
 .attachments-card,
 .participants-card {
   margin-top: 16px;
@@ -644,6 +773,12 @@ onMounted(async () => {
   cursor: pointer;
 }
 
+.attachment-name {
+  padding: 0;
+  text-align: left;
+  flex: 1;
+}
+
 .danger-text {
   color: #dc2626;
 }
@@ -657,6 +792,68 @@ onMounted(async () => {
   margin-top: 16px;
   display: flex;
   gap: 8px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.preview-dialog {
+  width: min(1000px, 100%);
+  max-height: 90vh;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preview-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.preview-body {
+  padding: 12px;
+  min-height: 320px;
+}
+
+.preview-body iframe {
+  width: 100%;
+  height: 70vh;
+  border: none;
+}
+
+.image-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0f172a;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+}
+
+.preview-note {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  justify-items: start;
 }
 
 @media (max-width: 900px) {

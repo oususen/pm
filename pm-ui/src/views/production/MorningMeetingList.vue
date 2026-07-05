@@ -3,6 +3,8 @@
     <div class="page-header">
       <h1 class="page-title">朝礼一覧 <DataSourceDialog title="朝礼一覧" :sources="dsSources" /></h1>
       <div class="page-actions">
+        <button v-if="canEditMeeting" class="btn-secondary" type="button" @click="openTemplateSelector">テンプレートから作成</button>
+        <RouterLink v-if="canEditMeeting" class="btn-secondary" to="/production/morning-meetings/new?template=1">テンプレート新規</RouterLink>
         <RouterLink v-if="canEditMeeting" class="btn-primary" to="/production/morning-meetings/new">新規作成</RouterLink>
       </div>
     </div>
@@ -36,6 +38,14 @@
           </select>
         </div>
         <div class="filter-field">
+          <label>表示区分</label>
+          <select v-model="filters.template_mode">
+            <option value="normal">通常</option>
+            <option value="template">テンプレート</option>
+            <option value="all">すべて</option>
+          </select>
+        </div>
+        <div class="filter-field">
           <label>キーワード</label>
           <input v-model.trim="filters.search" type="text" placeholder="タイトル・議題" />
         </div>
@@ -64,8 +74,11 @@
         </thead>
         <tbody>
           <tr v-for="row in meetings" :key="row.id">
-            <td>{{ row.meeting_date }}</td>
-            <td>{{ row.title }}</td>
+            <td>{{ row.meeting_date || '-' }}</td>
+            <td>
+              <span v-if="row.is_template" class="template-badge">テンプレート</span>
+              {{ row.title }}
+            </td>
             <td>{{ joinNames(row.target_department_names) }}</td>
             <td>{{ joinNames(row.target_line_names) }}</td>
             <td>{{ row.facilitator_name || '-' }}</td>
@@ -74,12 +87,28 @@
             <td>{{ row.checked_count }}</td>
             <td>{{ row.attachment_count || 0 }}</td>
             <td class="actions-cell">
-              <template v-if="row.status === 'COMPLETED'">
+              <template v-if="row.is_template">
+                <button v-if="canEditMeeting" class="btn-sm" type="button" @click="createFromTemplate(row)">複製</button>
+                <RouterLink v-if="canEditMeeting" class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/edit`">編集</RouterLink>
+                <button
+                  v-if="canEditMeeting"
+                  class="btn-sm danger"
+                  type="button"
+                  @click="handleDelete(row)"
+                  :disabled="loading"
+                >
+                  削除
+                </button>
+              </template>
+              <template v-else-if="row.status === 'COMPLETED'">
                 <RouterLink class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/run`">詳細</RouterLink>
               </template>
               <template v-else>
                 <RouterLink class="btn-sm" :to="`/production/morning-meetings/${row.id}/run`">実行</RouterLink>
                 <RouterLink v-if="canEditMeeting" class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/edit`">編集</RouterLink>
+                <button v-if="canEditMeeting" class="btn-sm secondary" type="button" @click="handleDuplicate(row)">
+                  複製
+                </button>
                 <button
                   v-if="canEditMeeting"
                   class="btn-sm danger"
@@ -98,12 +127,42 @@
         </tbody>
       </table>
     </div>
+
+    <div v-if="templateDialog.visible" class="modal-overlay" @click.self="closeTemplateSelector">
+      <div class="template-dialog">
+        <div class="template-dialog-header">
+          <h2>テンプレートから作成</h2>
+          <button class="btn-secondary" type="button" @click="closeTemplateSelector">閉じる</button>
+        </div>
+        <div class="template-dialog-body">
+          <div class="filter-field">
+            <label>キーワード</label>
+            <input v-model.trim="templateDialog.search" type="text" placeholder="タイトル・議題" />
+          </div>
+          <div class="template-list">
+            <button
+              v-for="row in filteredTemplates"
+              :key="row.id"
+              class="template-row"
+              type="button"
+              @click="createFromTemplate(row)"
+              :disabled="templateDialog.loading"
+            >
+              <strong>{{ row.title }}</strong>
+              <span>{{ joinNames(row.target_department_names) }}</span>
+              <span>{{ row.facilitator_name || '司会者未設定' }}</span>
+            </button>
+            <div v-if="!filteredTemplates.length" class="empty-row">テンプレートがありません</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -116,6 +175,7 @@ const dsSources = [
   { op: '読み取り', table: 'accounts_department / auth_user', desc: '対象部署・司会者・参加者の取得' },
 ]
 
+const router = useRouter()
 const statusOptions = [
   { value: 'DRAFT', label: '下書き' },
   { value: 'READY', label: '準備完了' },
@@ -126,11 +186,18 @@ const statusOptions = [
 const loading = ref(false)
 const meetings = ref([])
 const departments = ref([])
+const templates = ref([])
+const templateDialog = ref({
+  visible: false,
+  loading: false,
+  search: '',
+})
 const filters = ref({
   meeting_date_from: getBusinessISODate(addDays(new Date(), -7)),
-  meeting_date_to: getBusinessISODate(),
+  meeting_date_to: getBusinessISODate(addDays(new Date(), 7)),
   status: '',
   department: '',
+  template_mode: 'normal',
   search: '',
 })
 const morningMeetingResource = 'production.morning_meeting'
@@ -154,6 +221,18 @@ const hasMorningMeetingPermission = (level) => {
 }
 
 const canEditMeeting = computed(() => hasMorningMeetingPermission('edit'))
+const filteredTemplates = computed(() => {
+  const keyword = templateDialog.value.search.trim().toLowerCase()
+  if (!keyword) return templates.value
+  return templates.value.filter((row) => {
+    const target = [
+      row.title,
+      row.agenda,
+      ...(Array.isArray(row.target_department_names) ? row.target_department_names : []),
+    ].join(' ').toLowerCase()
+    return target.includes(keyword)
+  })
+})
 
 const buildParams = () => {
   const params = {}
@@ -183,6 +262,16 @@ const loadMeetings = async () => {
   }
 }
 
+const loadTemplates = async () => {
+  try {
+    const res = await api.morningMeetings.list({ template_mode: 'template' })
+    templates.value = Array.isArray(res.data) ? res.data : []
+  } catch (error) {
+    console.error('朝礼テンプレート一覧の取得に失敗しました:', error)
+    templates.value = []
+  }
+}
+
 const loadDepartments = async () => {
   try {
     const res = await api.accounts.getDepartments({ ordering: 'display_id,name', page_size: 20000 })
@@ -197,12 +286,58 @@ const loadDepartments = async () => {
 const resetFilters = async () => {
   filters.value = {
     meeting_date_from: getBusinessISODate(addDays(new Date(), -7)),
-    meeting_date_to: getBusinessISODate(),
+    meeting_date_to: getBusinessISODate(addDays(new Date(), 7)),
     status: '',
     department: '',
+    template_mode: 'normal',
     search: '',
   }
   await loadMeetings()
+}
+
+const handleDuplicate = async (row) => {
+  if (!window.confirm(`朝礼「${row.title}」を複製して新規作成します。よろしいですか？`)) return
+  try {
+    const res = await api.morningMeetings.duplicate(row.id, {
+      meeting_date: getBusinessISODate(),
+      title: row.title,
+      is_template: false,
+    })
+    router.push(`/production/morning-meetings/${res.data.id}/edit`)
+  } catch (error) {
+    console.error('朝礼の複製に失敗しました:', error)
+    window.alert('朝礼の複製に失敗しました。')
+  }
+}
+
+const openTemplateSelector = async () => {
+  templateDialog.value.visible = true
+  templateDialog.value.loading = true
+  try {
+    await loadTemplates()
+  } finally {
+    templateDialog.value.loading = false
+  }
+}
+
+const closeTemplateSelector = () => {
+  templateDialog.value.visible = false
+  templateDialog.value.search = ''
+}
+
+const createFromTemplate = async (row) => {
+  try {
+    const res = await api.morningMeetings.duplicate(row.id, {
+      meeting_date: getBusinessISODate(),
+      title: row.title,
+      is_template: false,
+    })
+    closeTemplateSelector()
+    router.push(`/production/morning-meetings/${res.data.id}/edit`)
+  } catch (error) {
+    console.error('テンプレートからの作成に失敗しました:', error)
+    window.alert('テンプレートからの作成に失敗しました。')
+  }
 }
 
 const handleDelete = async (row) => {
@@ -252,6 +387,18 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.template-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0f172a;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .btn-sm.secondary {
   background: #e2e8f0;
   color: #1e293b;
@@ -266,5 +413,62 @@ onMounted(async () => {
   text-align: center;
   color: #64748b;
   padding: 16px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.template-dialog {
+  width: min(720px, 100%);
+  max-height: 85vh;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  overflow: hidden;
+}
+
+.template-dialog-header,
+.template-dialog-body {
+  padding: 14px;
+}
+
+.template-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.template-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.template-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.template-row {
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
 }
 </style>

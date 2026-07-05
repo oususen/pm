@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from .models_morning_meeting import MorningMeeting, MorningMeetingAttachment, MorningMeetingParticipant
 from .serializers_morning_meeting import (
+    MorningMeetingDuplicateSerializer,
     MorningMeetingExecutionSerializer,
     MorningMeetingSerializer,
 )
@@ -65,6 +66,15 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
         if participant_user:
             queryset = queryset.filter(participants__user_id=participant_user).distinct()
 
+        if getattr(self, 'action', None) == 'list':
+            template_mode = (params.get('template_mode') or '').strip().lower()
+            if template_mode == 'template':
+                queryset = queryset.filter(is_template=True)
+            elif template_mode == 'all':
+                pass
+            else:
+                queryset = queryset.filter(is_template=False)
+
         search = (params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(
@@ -87,6 +97,8 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def start(self, request, pk=None):
         meeting = self.get_object()
+        if meeting.is_template:
+            return Response({'detail': 'テンプレートは開始できません。'}, status=status.HTTP_400_BAD_REQUEST)
         if meeting.status == MorningMeeting.STATUS_COMPLETED:
             return Response({'detail': '完了済みの朝礼は開始できません。'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -100,6 +112,8 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def save_execution(self, request, pk=None):
         meeting = self.get_object()
+        if meeting.is_template:
+            return Response({'detail': 'テンプレートは実行保存できません。'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = MorningMeetingExecutionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
@@ -129,6 +143,8 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         meeting = self.get_object()
+        if meeting.is_template:
+            return Response({'detail': 'テンプレートは完了できません。'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = MorningMeetingExecutionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
@@ -159,3 +175,13 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
 
         meeting.refresh_from_db()
         return Response(self.get_serializer(meeting).data)
+
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        source_meeting = self.get_object()
+        serializer = MorningMeetingDuplicateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.user if request.user.is_authenticated else None
+        duplicated = serializer.duplicate(source_meeting, user=user)
+        duplicated.refresh_from_db()
+        return Response(self.get_serializer(duplicated).data, status=status.HTTP_201_CREATED)

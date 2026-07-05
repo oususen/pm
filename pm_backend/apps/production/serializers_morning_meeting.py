@@ -2,6 +2,8 @@ import json
 import os
 
 from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db.models import Q
 from rest_framework import serializers
 
@@ -192,6 +194,7 @@ class MorningMeetingSerializer(serializers.ModelSerializer):
     present_count = serializers.SerializerMethodField()
     absent_count = serializers.SerializerMethodField()
     attachment_count = serializers.SerializerMethodField()
+    meeting_date = serializers.DateField(required=False, allow_null=True)
 
     class Meta:
         model = MorningMeeting
@@ -199,6 +202,7 @@ class MorningMeetingSerializer(serializers.ModelSerializer):
             'id',
             'meeting_date',
             'title',
+            'is_template',
             'target_departments',
             'target_department_names',
             'target_lines',
@@ -346,6 +350,10 @@ class MorningMeetingSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        is_template = attrs.get('is_template', getattr(self.instance, 'is_template', False))
+        meeting_date = attrs.get('meeting_date', getattr(self.instance, 'meeting_date', None))
+        if not is_template and not meeting_date:
+            raise serializers.ValidationError({'meeting_date': '通常朝礼では朝礼日を入力してください。'})
         status_value = attrs.get('status', getattr(self.instance, 'status', MorningMeeting.STATUS_DRAFT))
         if status_value == MorningMeeting.STATUS_COMPLETED and getattr(self.instance, 'status', None) != MorningMeeting.STATUS_COMPLETED:
             raise serializers.ValidationError({'status': '完了は実行画面から更新してください。'})
@@ -530,3 +538,61 @@ class MorningMeetingParticipantUpdateSerializer(serializers.Serializer):
 class MorningMeetingExecutionSerializer(serializers.Serializer):
     execution_note = serializers.CharField(required=False, allow_blank=True)
     participants = MorningMeetingParticipantUpdateSerializer(many=True, required=False)
+
+
+class MorningMeetingDuplicateSerializer(serializers.Serializer):
+    meeting_date = serializers.DateField(required=False)
+    title = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    is_template = serializers.BooleanField(required=False)
+
+    def duplicate(self, source_meeting, user=None):
+        meeting_date = self.validated_data.get('meeting_date') or source_meeting.meeting_date
+        title = (self.validated_data.get('title') or '').strip() or source_meeting.title
+        is_template = self.validated_data.get('is_template', False)
+        duplicated = MorningMeeting.objects.create(
+            meeting_date=meeting_date,
+            title=title,
+            is_template=is_template,
+            facilitator=source_meeting.facilitator,
+            agenda=source_meeting.agenda,
+            notices=source_meeting.notices,
+            cautions=source_meeting.cautions,
+            execution_note='',
+            status=MorningMeeting.STATUS_DRAFT,
+            created_by=user,
+            updated_by=user,
+        )
+        duplicated.target_departments.set(source_meeting.target_departments.all())
+        duplicated.target_lines.set(source_meeting.target_lines.all())
+
+        for index, participant in enumerate(source_meeting.participants.all()):
+            MorningMeetingParticipant.objects.create(
+                meeting=duplicated,
+                user=participant.user,
+                attendance_status=MorningMeetingParticipant.STATUS_PENDING,
+                remark='',
+                display_order=index,
+            )
+
+        for index, attachment in enumerate(source_meeting.attachments.all(), start=1):
+            if not attachment.file:
+                continue
+            src_name = attachment.file.name
+            if not src_name or not default_storage.exists(src_name):
+                continue
+            with default_storage.open(src_name, 'rb') as src_file:
+                content = ContentFile(src_file.read())
+                _, ext = os.path.splitext(attachment.original_name or src_name)
+                file_name = f'copy_{index}{ext.lower()}'
+                cloned = MorningMeetingAttachment(
+                    meeting=duplicated,
+                    original_name=attachment.original_name,
+                    content_type=attachment.content_type,
+                    file_size=attachment.file_size,
+                    attachment_type=attachment.attachment_type,
+                    display_order=attachment.display_order,
+                )
+                cloned.file.save(file_name, content, save=False)
+                cloned.save()
+
+        return duplicated

@@ -1,9 +1,10 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">{{ isCompleted ? '朝礼詳細' : '朝礼実行' }} <DataSourceDialog title="朝礼実行" :sources="dsSources" /></h1>
+      <h1 class="page-title">{{ pageTitle }} <DataSourceDialog title="朝礼実行" :sources="dsSources" /></h1>
       <div class="page-actions">
-        <RouterLink v-if="canEditMeetingActions" class="btn-secondary" :to="`/production/morning-meetings/${id}/edit`">編集</RouterLink>
+        <RouterLink v-if="isTemplate || canEditMeetingActions" class="btn-secondary" :to="`/production/morning-meetings/${id}/edit`">編集</RouterLink>
+        <button v-if="isTemplate && canEditMeeting" class="btn-secondary" type="button" @click="duplicateTemplate">複製</button>
         <RouterLink class="btn-secondary" to="/production/morning-meetings">一覧</RouterLink>
       </div>
     </div>
@@ -11,7 +12,7 @@
     <div v-if="meeting" class="page-content run-layout">
       <section class="summary-card">
         <div class="summary-grid">
-          <div><strong>朝礼日:</strong> {{ meeting.meeting_date }}</div>
+          <div><strong>朝礼日:</strong> {{ meeting.meeting_date || '-' }}</div>
           <div><strong>状態:</strong> {{ meeting.status_display }}</div>
           <div><strong>対象部署:</strong> {{ joinNames(meeting.target_department_names) }}</div>
           <div><strong>対象ライン:</strong> {{ joinNames(meeting.target_line_names) }}</div>
@@ -25,19 +26,21 @@
         <div class="summary-block">
           <strong>資料</strong>
           <div v-if="meeting.attachments?.length" class="attachment-list">
-            <a
+            <button
               v-for="attachment in meeting.attachments"
               :key="attachment.id"
               class="attachment-link"
-              :href="attachment.file_url"
-              target="_blank"
-              rel="noopener noreferrer"
+              type="button"
+              @click="openAttachmentPreview(attachment)"
             >
               <span>{{ attachment.original_name }}</span>
               <span class="attachment-type">{{ attachment.file_type_label }}</span>
-            </a>
+            </button>
           </div>
           <p v-else>未添付</p>
+        </div>
+        <div v-if="isTemplate" class="template-notice">
+          テンプレートは実行できません。内容確認、編集、複製のみ可能です。
         </div>
         <div class="summary-block">
           <strong>実行メモ</strong>
@@ -55,7 +58,7 @@
           <button class="btn-secondary" type="button" @click="saveExecution" :disabled="saving || !canSaveParticipantChanges">
             参加者保存
           </button>
-          <button class="btn-primary complete-btn" type="button" @click="completeMeeting" :disabled="saving || !canEditMeeting">
+          <button class="btn-primary complete-btn" type="button" @click="completeMeeting" :disabled="saving || !canEditMeetingActions">
             完了
           </button>
         </div>
@@ -67,6 +70,11 @@
           <div class="participant-stats">
             出席 {{ presentCount }} / 欠席・遅刻 {{ absentCount }} / 未確認 {{ pendingCount }}
           </div>
+        </div>
+        <div v-if="canBulkEditParticipants" class="participants-actions">
+          <button class="btn-secondary" type="button" @click="markAllPresent">全員出席</button>
+          <button class="btn-secondary" type="button" @click="markPendingAbsent">未確認を欠席</button>
+          <button class="btn-secondary" type="button" @click="clearAllRemarks">備考一括クリア</button>
         </div>
         <table class="data-table">
           <thead>
@@ -102,6 +110,25 @@
 
       <div v-if="errorMessage" class="error-box">{{ errorMessage }}</div>
     </div>
+
+    <div v-if="previewDialog.visible" class="modal-overlay" @click.self="closeAttachmentPreview">
+      <div class="preview-dialog">
+        <div class="preview-dialog-header">
+          <strong>{{ previewDialog.name }}</strong>
+          <button class="btn-secondary" type="button" @click="closeAttachmentPreview">閉じる</button>
+        </div>
+        <div v-if="previewDialog.type === 'IMAGE'" class="preview-body image-preview">
+          <img :src="previewDialog.url" :alt="previewDialog.name" />
+        </div>
+        <div v-else-if="previewDialog.type === 'PDF'" class="preview-body">
+          <iframe :src="previewDialog.url" title="PDFプレビュー"></iframe>
+        </div>
+        <div v-else class="preview-body preview-note">
+          <p>Excel は画面内プレビュー非対応です。</p>
+          <a :href="previewDialog.url" target="_blank" rel="noopener noreferrer">ファイルを開く</a>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -112,6 +139,7 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import { hasPermission } from '@/router'
+import { getBusinessISODate } from '@/utils/dateUtil'
 
 const props = defineProps({
   id: { type: [String, Number], required: true },
@@ -128,10 +156,21 @@ const participants = ref([])
 const executionNote = ref('')
 const saving = ref(false)
 const errorMessage = ref('')
+const previewDialog = ref({
+  visible: false,
+  type: '',
+  name: '',
+  url: '',
+})
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const isFacilitator = computed(() => Number(meeting.value?.facilitator || 0) === currentUserId.value)
 const morningMeetingResource = 'production.morning_meeting'
 const isCompleted = computed(() => meeting.value?.status === 'COMPLETED')
+const isTemplate = computed(() => Boolean(meeting.value?.is_template))
+const pageTitle = computed(() => {
+  if (isTemplate.value) return '朝礼テンプレート詳細'
+  return isCompleted.value ? '朝礼詳細' : '朝礼実行'
+})
 
 const pendingCount = computed(() => participants.value.filter((row) => row.attendance_status === 'PENDING').length)
 const presentCount = computed(() => participants.value.filter((row) => row.attendance_status === 'PRESENT').length)
@@ -156,10 +195,12 @@ const hasMorningMeetingPermission = (level) => {
 const canEditMeeting = computed(() => hasMorningMeetingPermission('edit'))
 const canEditMeetingActions = computed(() => canEditMeeting.value && !isCompleted.value)
 const canSaveParticipantChanges = computed(() => {
+  if (isTemplate.value) return false
   if (isCompleted.value) return false
   if (isFacilitator.value) return true
   return participants.value.some((row) => Number(row.user) === currentUserId.value)
 })
+const canBulkEditParticipants = computed(() => canEditMeetingActions.value && isFacilitator.value)
 
 const departmentPath = (row) => {
   return [row.division_name, row.group_name, row.team_name, row.unit_name].filter(Boolean).join(' / ') || row.department_name || '-'
@@ -171,9 +212,66 @@ const joinNames = (values) => {
 }
 
 const canEditParticipant = (row) => {
+  if (isTemplate.value) return false
   if (isCompleted.value) return false
   if (isFacilitator.value) return true
   return Number(row.user) === currentUserId.value
+}
+
+const openAttachmentPreview = (attachment) => {
+  previewDialog.value = {
+    visible: true,
+    type: attachment.attachment_type || '',
+    name: attachment.original_name || '添付資料',
+    url: attachment.file_url || '',
+  }
+}
+
+const closeAttachmentPreview = () => {
+  previewDialog.value = {
+    visible: false,
+    type: '',
+    name: '',
+    url: '',
+  }
+}
+
+const markAllPresent = () => {
+  if (!canBulkEditParticipants.value) return
+  participants.value.forEach((row) => {
+    row.attendance_status = 'PRESENT'
+  })
+}
+
+const markPendingAbsent = () => {
+  if (!canBulkEditParticipants.value) return
+  participants.value.forEach((row) => {
+    if (row.attendance_status === 'PENDING') {
+      row.attendance_status = 'ABSENT'
+    }
+  })
+}
+
+const clearAllRemarks = () => {
+  if (!canBulkEditParticipants.value) return
+  participants.value.forEach((row) => {
+    row.remark = ''
+  })
+}
+
+const duplicateTemplate = async () => {
+  if (!meeting.value || !canEditMeeting.value) return
+  try {
+    const res = await api.morningMeetings.duplicate(meeting.value.id, {
+      meeting_date: meeting.value.meeting_date || getBusinessISODate(),
+      title: meeting.value.title,
+      is_template: false,
+    })
+    router.push(`/production/morning-meetings/${res.data.id}/edit`)
+  } catch (error) {
+    console.error('テンプレートの複製に失敗しました:', error)
+    errorMessage.value = error.response?.data?.detail || 'テンプレートの複製に失敗しました。'
+  }
 }
 
 const payload = () => ({
@@ -292,16 +390,18 @@ onMounted(async () => {
 }
 
 .attachment-link {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
   border: 1px solid #dbeafe;
   background: #f8fbff;
   border-radius: 8px;
   padding: 8px 10px;
   color: #1d4ed8;
   text-decoration: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  cursor: pointer;
 }
 
 .attachment-type {
@@ -341,6 +441,13 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 
+.participants-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
 .participants-head h2 {
   margin: 0;
 }
@@ -359,12 +466,84 @@ onMounted(async () => {
   color: #b91c1c;
 }
 
+.template-notice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  border-radius: 10px;
+  color: #312e81;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.preview-dialog {
+  width: min(1000px, 100%);
+  max-height: 90vh;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preview-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.preview-body {
+  padding: 12px;
+  min-height: 320px;
+}
+
+.preview-body iframe {
+  width: 100%;
+  height: 70vh;
+  border: none;
+}
+
+.image-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0f172a;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+}
+
+.preview-note {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  justify-items: start;
+}
+
 @media (max-width: 900px) {
   .summary-grid {
     grid-template-columns: 1fr;
   }
 
   .participants-head,
+  .participants-actions,
   .run-actions {
     flex-direction: column;
     align-items: flex-start;

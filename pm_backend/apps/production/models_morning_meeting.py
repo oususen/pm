@@ -22,8 +22,9 @@ class MorningMeeting(models.Model):
         (STATUS_COMPLETED, '完了'),
     ]
 
-    meeting_date = models.DateField(verbose_name='朝礼日')
+    meeting_date = models.DateField(null=True, blank=True, verbose_name='朝礼日')
     title = models.CharField(max_length=200, verbose_name='タイトル')
+    is_template = models.BooleanField(default=False, verbose_name='テンプレート')
     target_departments = models.ManyToManyField(
         'accounts.Department',
         blank=True,
@@ -85,7 +86,7 @@ class MorningMeeting(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.meeting_date} {self.title}'
+        return f'{self.meeting_date or "-"} {self.title}'
 
 
 class MorningMeetingParticipant(models.Model):

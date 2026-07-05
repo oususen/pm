@@ -18,6 +18,9 @@ export const createMorningMeetingsAPI = (client) => ({
   delete(id) {
     return client.delete(`/morning-meetings/${id}/`)
   },
+  duplicate(id, data = {}) {
+    return client.post(`/morning-meetings/${id}/duplicate/`, data)
+  },
   start(id) {
     return client.post(`/morning-meetings/${id}/start/`)
   },
