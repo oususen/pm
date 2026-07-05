@@ -68,6 +68,7 @@ import { createAutoPlanAggregateSettingsAPI } from './resources/autoPlanAggregat
 import { createPurchaseAutoDeliveryListAPI } from './resources/purchaseAutoDeliveryList'
 import { createStocktakeRecordsAPI } from './resources/stocktakeRecords'
 import { createPurchaseActualKikanMappingAPI } from './resources/purchaseActualKikanMapping'
+import { createMorningMeetingsAPI } from './resources/morningMeetings'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -211,5 +212,6 @@ export default {
   purchaseAutoDeliveryList: createPurchaseAutoDeliveryListAPI(client),
   stocktakeRecords: createStocktakeRecordsAPI(client),
   purchaseActualKikanMapping: createPurchaseActualKikanMappingAPI(client),
+  morningMeetings: createMorningMeetingsAPI(client),
   client,
 }

@@ -6,6 +6,32 @@ const production = [
     meta: { pageTitle: "生産管理メニュー", manualPath: "README.md", resource: "production", allowChildResources: true },
   },
   {
+    path: "/production/morning-meetings",
+    name: "MorningMeetingList",
+    component: () => import("@/views/production/MorningMeetingList.vue"),
+    meta: { pageTitle: "朝礼一覧", manualPath: "生産/朝礼.md", resource: "production.morning_meeting" },
+  },
+  {
+    path: "/production/morning-meetings/new",
+    name: "MorningMeetingCreate",
+    component: () => import("@/views/production/MorningMeetingForm.vue"),
+    meta: { pageTitle: "朝礼作成", manualPath: "生産/朝礼.md", resource: "production.morning_meeting", permission: "edit" },
+  },
+  {
+    path: "/production/morning-meetings/:id/edit",
+    name: "MorningMeetingEdit",
+    component: () => import("@/views/production/MorningMeetingForm.vue"),
+    props: true,
+    meta: { pageTitle: "朝礼編集", manualPath: "生産/朝礼.md", resource: "production.morning_meeting", permission: "edit" },
+  },
+  {
+    path: "/production/morning-meetings/:id/run",
+    name: "MorningMeetingRun",
+    component: () => import("@/views/production/MorningMeetingRun.vue"),
+    props: true,
+    meta: { pageTitle: "朝礼実行", manualPath: "生産/朝礼.md", resource: "production.morning_meeting" },
+  },
+  {
     path: "/production/unused",
     name: "ProductionUnusedMenu",
     component: () => import("@/views/production/ProductionUnusedMenu.vue"),

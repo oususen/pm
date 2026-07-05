@@ -33,6 +33,7 @@ from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_plan_deviation_config import PlanDeviationLineConfig
 from .models_stocktake_record import StocktakeRecord
 from .models_singleproc_finished_entry import SingleProcFinishedEntry
+from .models_morning_meeting import MorningMeeting, MorningMeetingParticipant, MorningMeetingAttachment
 
 
 class LineDemand(models.Model):

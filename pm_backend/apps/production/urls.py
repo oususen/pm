@@ -49,6 +49,7 @@ from production.views_line_product_display_order import LineProductDisplayOrderV
 from production.views_plan_deviation_report import PlanDeviationReportView, PlanDeviationLineConfigView
 from production.views_record_confirmation import ProductionRecordConfirmationView
 from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeLayoutConfigView, StocktakeAreaView
+from production.views_morning_meeting import MorningMeetingViewSet
 from production.views_camera_actual import (
     CameraAutoDetectView,
     CameraEventCreateView,
@@ -73,6 +74,7 @@ router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')
 router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, basename='ganttdisplayproductmap')
 router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')
+router.register(r'morning-meetings', MorningMeetingViewSet, basename='morningmeeting')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

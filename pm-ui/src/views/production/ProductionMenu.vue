@@ -281,6 +281,15 @@ const tiles = computed(() => {
       resource: "production.inventory",
     },
     {
+      to: "/production/morning-meetings",
+      label: "朝礼",
+      icon: "☀️",
+      category: "other",
+      required: "view",
+      accent: true,
+      resource: "production.morning_meeting",
+    },
+    {
       to: "/production/line-monitor",
       label: t("productionMenu.tiles.lineMonitor"),
       icon: "📺",
