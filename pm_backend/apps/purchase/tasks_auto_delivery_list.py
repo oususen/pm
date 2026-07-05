@@ -279,12 +279,14 @@ def run_auto_delivery_list_send(config_id):
         if delivery_note_pdf:
             subject_parts.append('外作納品書')
         subject_label = '・'.join(subject_parts)
-        subject = f'【{subject_label}】{supplier.supplier_name} {delivery_date}'
+        subject = f'【デモ配信】【{subject_label}】納入日{delivery_date}'
 
         # 本文: 送信内容に応じて構成
         body_lines = [f'{supplier.supplier_name} 御中\n', 'お世話になっております。\n']
         if excel_data:
             body_lines.append(f'納品リスト（納入日: {delivery_date}）を送付いたします。\n')
+            body_lines.append('2026-07-06（月）より試運用として、自動送信を開始しております。\n')
+            body_lines.append('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。\n')
             body_lines.append(f'対象品目: {len(items)}件')
             body_lines.append(f'カバー期間: {coverage_dates[0]} ～ {coverage_dates[-1]}\n')
             body_lines.append('添付のExcelの「確認・修正方法」シートを参照のうえ、数量確認・修正後にご返送ください。')
