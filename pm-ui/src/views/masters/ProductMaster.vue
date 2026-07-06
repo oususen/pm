@@ -391,20 +391,20 @@
               <h3 class="process-section-title">工程情報</h3>
               <div class="process-section-grid">
                 <div class="form-group">
-                  <label>ライン情報</label>
-                  <select v-model="formData.line">
-                    <option :value="null">未設定</option>
-                    <option v-for="line in lines" :key="line.id" :value="line.id">
-                      {{ line.line_code }} - {{ line.line_name }}
-                    </option>
-                  </select>
-                </div>
-                <div class="form-group">
                   <label>工程情報</label>
                   <select v-model="formData.process">
                     <option :value="null">未設定</option>
                     <option v-for="proc in processes" :key="proc.id" :value="proc.id">
                       {{ proc.process_code }} - {{ proc.process_name }}
+                    </option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>ライン情報</label>
+                  <select v-model="formData.line">
+                    <option :value="null">未設定</option>
+                    <option v-for="line in lines" :key="line.id" :value="line.id">
+                      {{ line.line_code }} - {{ line.line_name }}
                     </option>
                   </select>
                 </div>
@@ -1548,6 +1548,17 @@ onMounted(() => {
   fetchContainers()
   fetchCustomers()
 })
+
+watch(
+  () => formData.value.process,
+  (processId) => {
+    const selectedProcess = processes.value.find((proc) => `${proc.id}` === `${processId}`)
+    if (!selectedProcess) return
+    if (selectedProcess.line != null && selectedProcess.line !== '') {
+      formData.value.line = selectedProcess.line
+    }
+  }
+)
 
 watch(
   () => filters.value.is_final_product,
