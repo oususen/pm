@@ -210,6 +210,7 @@ class UserPermission(models.Model):
         ('production.progress', '生産: 進度のみ'),
         ('production.scrap_history', '生産: 仕損履歴'),
         ('production.line_calendars', '生産: ライン勤務カレンダ'),
+        ('production.morning_meeting', '生産: 朝礼'),
         ('production.line_monitor', '生産: ライン稼働監視'),
         ('purchase', '仕入'),
         ('purchase.plan_input', '仕入: 仕入れ計画'),

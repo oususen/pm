@@ -478,6 +478,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'production.progress', label: '生産: 進度のみ' },
   { value: 'production.scrap_history', label: '生産: 仕損履歴' },
   { value: 'production.line_calendars', label: '生産: ライン勤務カレンダ' },
+  { value: 'production.morning_meeting', label: '生産: 朝礼' },
   { value: 'production.line_monitor', label: '生産: ライン稼働監視' },
   { value: 'purchase', label: '仕入' },
   { value: 'purchase.plan_input', label: '仕入: 仕入れ計画' },
