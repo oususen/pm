@@ -16,6 +16,20 @@
           <option value="PROD">社内</option>
           <option value="PURCHASE">購入先</option>
         </select>
+        <label for="lineNameFilter">ライン名</label>
+        <input
+          id="lineNameFilter"
+          v-model.trim="lineNameFilter"
+          type="text"
+          placeholder="部分一致で検索"
+        />
+        <label for="unitFilter">所属グループ</label>
+        <select id="unitFilter" v-model="unitFilter">
+          <option value="">すべて</option>
+          <option v-for="unit in units" :key="unit.id" :value="String(unit.id)">
+            {{ unit.name }}
+          </option>
+        </select>
       </div>
 
       <table class="data-table">
@@ -32,7 +46,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="line in lines" :key="line.id">
+          <tr v-for="line in filteredLines" :key="line.id">
             <td>{{ line.line_code }}</td>
             <td>{{ line.line_name }}</td>
             <td>{{ line.is_active ? '有効' : '無効' }}</td>
@@ -48,7 +62,7 @@
         </tbody>
       </table>
 
-      <div v-if="lines.length === 0" class="no-data">
+      <div v-if="filteredLines.length === 0" class="no-data">
         データがありません
       </div>
     </div>
@@ -144,8 +158,11 @@ const dsSources = [
 const lines = ref([])
 const lineStepsMap = ref({})
 const units = ref([])
+const lineUnitMap = ref({})
 const selectedUnitIds = ref([])
 const lineTypeFilter = ref('PROD')
+const lineNameFilter = ref('')
+const unitFilter = ref('')
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -154,6 +171,25 @@ const formData = ref({
   is_active: true
 })
 const canEdit = computed(() => canAccessMasterResource('masters.line', 'edit'))
+const filteredLines = computed(() => {
+  const normalizedLineName = lineNameFilter.value.trim().toLowerCase()
+  const selectedUnitId = unitFilter.value
+  return lines.value.filter((line) => {
+    if (normalizedLineName) {
+      const target = String(line.line_name || '').toLowerCase()
+      if (!target.includes(normalizedLineName)) {
+        return false
+      }
+    }
+    if (selectedUnitId) {
+      const unitIds = lineUnitMap.value[line.id]?.unitIds || []
+      if (!unitIds.includes(selectedUnitId)) {
+        return false
+      }
+    }
+    return true
+  })
+})
 
 const fetchLines = async () => {
   try {
@@ -202,6 +238,29 @@ const fetchUnits = async () => {
   } catch (error) {
     console.error('グループ取得エラー:', error)
     units.value = []
+  }
+}
+
+const fetchAllLineUnitMappings = async () => {
+  try {
+    const res = await api.accounts.getUnitLineMappings({ page_size: 20000 })
+    const mappings = Array.isArray(res.data) ? res.data : (res.data.results || [])
+    const map = {}
+    mappings.forEach((mapping) => {
+      const lineId = mapping.line
+      if (!lineId) return
+      if (!map[lineId]) {
+        map[lineId] = { unitIds: [] }
+      }
+      const unitId = String(mapping.unit)
+      if (!map[lineId].unitIds.includes(unitId)) {
+        map[lineId].unitIds.push(unitId)
+      }
+    })
+    lineUnitMap.value = map
+  } catch (error) {
+    console.error('ライングループ紐付一覧取得エラー:', error)
+    lineUnitMap.value = {}
   }
 }
 
@@ -266,6 +325,7 @@ const saveLine = async () => {
     }
     await fetchLines()
     await fetchLineSteps()
+    await fetchAllLineUnitMappings()
     closeDialog()
   } catch (error) {
     console.error('保存エラー:', error)
@@ -281,6 +341,7 @@ const deleteLine = async (id) => {
     await api.lines.deleteLine(id)
     await fetchLines()
     await fetchLineSteps()
+    await fetchAllLineUnitMappings()
     alert('削除しました')
   } catch (error) {
     console.error('削除エラー:', error)
@@ -292,6 +353,7 @@ onMounted(() => {
   fetchLines()
   fetchLineSteps()
   fetchUnits()
+  fetchAllLineUnitMappings()
 })
 
 const formatDateTime = (value) => {
@@ -459,6 +521,7 @@ const getStepStats = (lineId) => {
 .filter-bar {
   margin-bottom: 12px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -468,7 +531,8 @@ const getStepStats = (lineId) => {
   color: #333;
 }
 
-.filter-bar select {
+.filter-bar select,
+.filter-bar input {
   min-width: 160px;
   padding: 6px 10px;
   border: 1px solid #d0d7de;
@@ -497,4 +561,3 @@ const getStepStats = (lineId) => {
   margin-bottom: 0;
 }
 </style>
-

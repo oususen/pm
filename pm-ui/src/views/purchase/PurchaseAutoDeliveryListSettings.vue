@@ -102,12 +102,23 @@
 
         <div class="form-group">
           <label>返信先メールアドレス（Reply-To） <span class="required">*</span></label>
-          <input type="email" v-model="form.reply_to_email" class="input-full" placeholder="reply@example.com" required />
+          <ContactEmailSelect
+            v-model="form.reply_to_email"
+            :contacts="contactList"
+            :supplier-keywords="selectedSupplierKeywords"
+            placeholder="連絡先マスタから返信先を検索して追加"
+          />
         </div>
 
         <div class="form-group">
-          <label>業務員CC送信先メール（改行区切り、後追加可能） <span class="required">*</span></label>
-          <textarea v-model="form.cc_emails" rows="3" class="input-full" placeholder="user1@example.com&#10;user2@example.com" required></textarea>
+          <label>業務員CC送信先メール <span class="required">*</span></label>
+          <ContactEmailSelect
+            v-model="ccEmailList"
+            :contacts="contactList"
+            :supplier-keywords="selectedSupplierKeywords"
+            multiple
+            placeholder="連絡先マスタからCC送信先を検索して追加"
+          />
         </div>
 
         <div class="form-group">
@@ -133,12 +144,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import api from '@/api/client'
 import UserChipSelect from './UserChipSelect.vue'
+import ContactEmailSelect from './ContactEmailSelect.vue'
 
 const loading = ref(true)
 const saving = ref(false)
 const configs = ref([])
 const suppliers = ref([])
 const userList = ref([])
+const contactList = ref([])
 const showModal = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
@@ -168,6 +181,32 @@ const formatCcEmails = (text) => {
   return list.length ? list.join(', ') : '-'
 }
 
+const splitEmailLines = (text) => {
+  return String(text || '')
+    .split('\n')
+    .map((email) => email.trim())
+    .filter(Boolean)
+}
+
+const ccEmailList = computed({
+  get: () => splitEmailLines(form.cc_emails),
+  set: (emails) => {
+    form.cc_emails = (emails || []).join('\n')
+  },
+})
+
+const selectedSupplier = computed(() => {
+  return suppliers.value.find((supplier) => String(supplier.id) === String(form.supplier_id)) || null
+})
+
+const selectedSupplierKeywords = computed(() => {
+  if (!selectedSupplier.value) return []
+  return [
+    selectedSupplier.value.supplier_code,
+    selectedSupplier.value.supplier_name,
+  ]
+})
+
 const loadConfigs = async () => {
   loading.value = true
   try {
@@ -190,6 +229,11 @@ const loadSuppliers = async () => {
 const loadUsers = async () => {
   const res = await api.accounts.getUsers({ is_active: true, page_size: 9999 })
   userList.value = res.data?.results || res.data || []
+}
+
+const loadContacts = async () => {
+  const res = await api.contacts.getContacts({ is_active: true, page_size: 9999 })
+  contactList.value = (res.data?.results || res.data || []).filter((contact) => contact.email)
 }
 
 const resetForm = () => {
@@ -343,7 +387,7 @@ const runNow = async (c) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadConfigs(), loadSuppliers(), loadUsers()])
+  await Promise.all([loadConfigs(), loadSuppliers(), loadUsers(), loadContacts()])
 })
 </script>
 
