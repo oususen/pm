@@ -11,7 +11,35 @@ from .serializers_morning_meeting import (
     MorningMeetingDuplicateSerializer,
     MorningMeetingExecutionSerializer,
     MorningMeetingSerializer,
+    _user_display_name,
 )
+
+
+def _build_completion_summary(meeting):
+    participants = list(meeting.participants.select_related('user').all())
+    total = len(participants)
+    present = [p for p in participants if p.attendance_status == MorningMeetingParticipant.STATUS_PRESENT]
+    absent = [p for p in participants if p.attendance_status == MorningMeetingParticipant.STATUS_ABSENT]
+    late = [p for p in participants if p.attendance_status == MorningMeetingParticipant.STATUS_LATE]
+
+    lines = ['--- 実行サマリー ---']
+
+    if meeting.started_at and meeting.ended_at:
+        delta = meeting.ended_at - meeting.started_at
+        minutes = int(delta.total_seconds() // 60)
+        lines.append(f'所要時間: {minutes}分')
+
+    rate = round(len(present) / total * 100) if total else 0
+    lines.append(f'出席: {len(present)}/{total}名 ({rate}%)')
+
+    if absent:
+        names = ', '.join(_user_display_name(p.user) for p in absent)
+        lines.append(f'欠席: {names}')
+    if late:
+        names = ', '.join(_user_display_name(p.user) for p in late)
+        lines.append(f'遅刻: {names}')
+
+    return '\n'.join(lines)
 
 
 class MorningMeetingViewSet(viewsets.ModelViewSet):
@@ -169,6 +197,11 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
             if not meeting.started_at:
                 meeting.started_at = datetime.now()
             meeting.ended_at = datetime.now()
+
+            summary = _build_completion_summary(meeting)
+            note = (meeting.execution_note or '').rstrip()
+            meeting.execution_note = f'{note}\n\n{summary}' if note else summary
+
             meeting.status = MorningMeeting.STATUS_COMPLETED
             meeting.updated_by = request.user if request.user.is_authenticated else None
             meeting.save(update_fields=['execution_note', 'started_at', 'ended_at', 'status', 'updated_by', 'updated_at'])

@@ -253,9 +253,12 @@ const typeOptions = computed(() =>
 const teamOptions = computed(() =>
   [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
 )
-const groupOptions = computed(() =>
-  [...new Set(applications.value.map(a => a.group_name).filter(Boolean))].sort()
-)
+const groupOptions = computed(() => {
+  const targetApps = filterTeam.value
+    ? applications.value.filter(a => a.team_name === filterTeam.value)
+    : applications.value
+  return [...new Set(targetApps.map(a => a.group_name).filter(Boolean))].sort()
+})
 const nameOptions = computed(() =>
   [...new Set(applications.value.map(a => a.applicant_name).filter(Boolean))].sort()
 )
@@ -304,6 +307,12 @@ const filters = ref({
 watch([filterTeam, filterGroup, filterTypes, filterName, filterDate, excludeRejected, filters], () => {
   currentPage.value = 1
 }, { deep: true })
+
+watch(groupOptions, (options) => {
+  if (filterGroup.value && !options.includes(filterGroup.value)) {
+    filterGroup.value = ''
+  }
+})
 
 function formatDateTime(val) {
   if (!val) return '-'

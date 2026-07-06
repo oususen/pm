@@ -119,9 +119,8 @@ class MorningMeetingAttachmentSerializer(serializers.ModelSerializer):
     def get_file_url(self, obj):
         if not obj.file:
             return ''
-        request = self.context.get('request')
         url = _build_media_url(obj.file.url)
-        return request.build_absolute_uri(url) if request else url
+        return url
 
 
 class MorningMeetingParticipantSerializer(serializers.ModelSerializer):

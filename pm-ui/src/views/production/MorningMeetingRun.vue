@@ -121,7 +121,14 @@
           <img :src="previewDialog.url" :alt="previewDialog.name" />
         </div>
         <div v-else-if="previewDialog.type === 'PDF'" class="preview-body">
-          <iframe :src="previewDialog.url" title="PDFプレビュー"></iframe>
+          <div v-if="previewDialog.loading" class="preview-note">
+            <p>PDFを読み込み中です...</p>
+          </div>
+          <div v-else-if="previewDialog.error" class="preview-note">
+            <p>{{ previewDialog.error }}</p>
+            <a v-if="previewDialog.url" :href="previewDialog.url" target="_blank" rel="noopener noreferrer">新しいタブで開く</a>
+          </div>
+          <iframe v-else :src="previewDialog.url" title="PDFプレビュー"></iframe>
         </div>
         <div v-else class="preview-body preview-note">
           <p>Excel は画面内プレビュー非対応です。</p>
@@ -161,6 +168,8 @@ const previewDialog = ref({
   type: '',
   name: '',
   url: '',
+  loading: false,
+  error: '',
 })
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const isFacilitator = computed(() => Number(meeting.value?.facilitator || 0) === currentUserId.value)
@@ -218,21 +227,51 @@ const canEditParticipant = (row) => {
   return Number(row.user) === currentUserId.value
 }
 
-const openAttachmentPreview = (attachment) => {
+const revokePreviewUrl = () => {
+  if (previewDialog.value.url?.startsWith('blob:')) {
+    URL.revokeObjectURL(previewDialog.value.url)
+  }
+}
+
+const openAttachmentPreview = async (attachment) => {
+  revokePreviewUrl()
   previewDialog.value = {
     visible: true,
     type: attachment.attachment_type || '',
     name: attachment.original_name || '添付資料',
-    url: attachment.file_url || '',
+    url: '',
+    loading: attachment.attachment_type === 'PDF',
+    error: '',
+  }
+
+  if (attachment.attachment_type !== 'PDF') {
+    previewDialog.value.url = attachment.file_url || ''
+    return
+  }
+
+  try {
+    const res = await api.client.get(attachment.file_url || '', {
+      responseType: 'blob',
+    })
+    previewDialog.value.url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+  } catch (error) {
+    console.error('PDFプレビューの取得に失敗しました:', error)
+    previewDialog.value.url = attachment.file_url || ''
+    previewDialog.value.error = 'PDFプレビューの取得に失敗しました。'
+  } finally {
+    previewDialog.value.loading = false
   }
 }
 
 const closeAttachmentPreview = () => {
+  revokePreviewUrl()
   previewDialog.value = {
     visible: false,
     type: '',
     name: '',
     url: '',
+    loading: false,
+    error: '',
   }
 }
 
