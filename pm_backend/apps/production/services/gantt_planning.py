@@ -389,6 +389,25 @@ def _build_line_final_backlog_fallback_specs(
     return specs
 
 
+def _build_line_final_output_step_no_by_process(
+    product_id: int,
+    steps_by_product: Dict[int, List[RoutingStep]],
+) -> Dict[int, int]:
+    """
+    ライン最終品を output_product とするステップの step_no を工程別に返す。
+    同一工程に複数候補がある場合は、もっとも後工程側（最大step_no）を優先する。
+    """
+    result: Dict[int, int] = {}
+    for step in steps_by_product.get(product_id, []):
+        if step.output_product_id != product_id or not step.process_id:
+            continue
+        step_no = step.step_no or 0
+        current = result.get(step.process_id)
+        if current is None or step_no > current:
+            result[step.process_id] = step_no
+    return result
+
+
 def _build_line_final_line_process_fallback_specs(
     line_id: int,
     product: Product,
@@ -1066,6 +1085,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     plans = []
     for obj in base_plans:
         product = obj.product
+        line_final_output_step_no_by_process = _build_line_final_output_step_no_by_process(product.id, steps_by_product)
         display_product_map = display_product_map_by_final.get(int(product.id), {})
         display_product_all_ids = display_product_all_ids_by_final.get(int(product.id), {})
         backlog_key = (obj.product_id, obj.plan_date, obj.sequence_no or 0)
@@ -1095,12 +1115,14 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         )
 
         if use_line_final_line_process_fallback:
+            fallback_step_no_by_process = dict(step_no_by_process)
+            fallback_step_no_by_process.update(line_final_output_step_no_by_process)
             # 表示品マップがある最終品は、マップ登録工程のみをフォールバック対象にする
             fallback_target_process_ids = list(display_product_map.keys()) if display_product_map else None
             process_specs = _build_line_final_line_process_fallback_specs(
                 line_id,
                 product,
-                step_no_by_process,
+                fallback_step_no_by_process,
                 target_process_ids=fallback_target_process_ids,
             )
             # 工程別連産品マッピング: driver子品番をspecにセットし、後段で親(ST)表示へ置換させる
@@ -1195,7 +1217,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                 process_specs = _build_line_final_backlog_fallback_specs(
                     plan_backlog_rows,
                     product,
-                    step_no_by_process,
+                    fallback_step_no_by_process,
                 )
         if not steps and l2201_synthetic_plan:
             # L2201専用: 自分を親に持つルーティングが無いライン最終品は計画行の工程で1本扱いにする
