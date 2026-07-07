@@ -1,0 +1,811 @@
+<title>PM PostgreSQL 移行プラン</title>
+<style>
+  @font-face {
+    font-family: 'Plan Display';
+    src: local('Segoe UI Semibold'), local('Yu Gothic Medium'), local('Meiryo');
+    font-weight: 600;
+  }
+  @font-face {
+    font-family: 'Plan Body';
+    src: local('Segoe UI'), local('Yu Gothic'), local('Meiryo');
+    font-weight: 400;
+  }
+
+  :root {
+    --bg: #f7f6f3;
+    --bg-card: #ffffff;
+    --bg-phase: #eef1f5;
+    --text: #1e2330;
+    --text-muted: #5c6478;
+    --accent: #2d5a9e;
+    --accent-light: #e8eef7;
+    --border: #d4d8e0;
+    --risk-high: #c0392b;
+    --risk-med: #d4880f;
+    --risk-low: #2a7d4f;
+    --tag-critical: #c0392b;
+    --tag-critical-bg: #fdeaea;
+    --tag-high: #d4880f;
+    --tag-high-bg: #fef6e6;
+    --tag-medium: #2d5a9e;
+    --tag-medium-bg: #e8eef7;
+    --tag-low: #5c6478;
+    --tag-low-bg: #eef1f5;
+    --check-done: #2a7d4f;
+    --stripe: #f0f2f6;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161e;
+      --bg-card: #1c1f2b;
+      --bg-phase: #1f2231;
+      --text: #d8dbe6;
+      --text-muted: #8890a4;
+      --accent: #6a9fe8;
+      --accent-light: #1e2a40;
+      --border: #2e3348;
+      --tag-critical: #e86b60;
+      --tag-critical-bg: #2d1a1a;
+      --tag-high: #e8b44a;
+      --tag-high-bg: #2d2515;
+      --tag-medium: #6a9fe8;
+      --tag-medium-bg: #1e2a40;
+      --tag-low: #8890a4;
+      --tag-low-bg: #1f2231;
+      --stripe: #1a1d28;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161e;
+    --bg-card: #1c1f2b;
+    --bg-phase: #1f2231;
+    --text: #d8dbe6;
+    --text-muted: #8890a4;
+    --accent: #6a9fe8;
+    --accent-light: #1e2a40;
+    --border: #2e3348;
+    --tag-critical: #e86b60;
+    --tag-critical-bg: #2d1a1a;
+    --tag-high: #e8b44a;
+    --tag-high-bg: #2d2515;
+    --tag-medium: #6a9fe8;
+    --tag-medium-bg: #1e2a40;
+    --tag-low: #8890a4;
+    --tag-low-bg: #1f2231;
+    --stripe: #1a1d28;
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f6f3;
+    --bg-card: #ffffff;
+    --bg-phase: #eef1f5;
+    --text: #1e2330;
+    --text-muted: #5c6478;
+    --accent: #2d5a9e;
+    --accent-light: #e8eef7;
+    --border: #d4d8e0;
+    --tag-critical: #c0392b;
+    --tag-critical-bg: #fdeaea;
+    --tag-high: #d4880f;
+    --tag-high-bg: #fef6e6;
+    --tag-medium: #2d5a9e;
+    --tag-medium-bg: #e8eef7;
+    --tag-low: #5c6478;
+    --tag-low-bg: #eef1f5;
+    --stripe: #f0f2f6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Plan Body', 'Segoe UI', 'Yu Gothic', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 3rem 2rem 4rem;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 2px solid var(--accent);
+  }
+  .header-eyebrow {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.35rem;
+  }
+  .header h1 {
+    font-family: 'Plan Display', 'Segoe UI Semibold', sans-serif;
+    font-size: 1.65rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-wrap: balance;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+  }
+  .header-meta {
+    display: flex;
+    gap: 1.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .header-meta span { white-space: nowrap; }
+
+  /* ---- Scope summary ---- */
+  .scope {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+  .scope h2 {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+  .scope-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem 1.5rem;
+  }
+  .scope-item { display: flex; flex-direction: column; }
+  .scope-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.15rem;
+  }
+  .scope-value {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- Phase sections ---- */
+  .phase {
+    margin-bottom: 2rem;
+  }
+  .phase-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .phase-num {
+    font-family: 'Plan Display', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: var(--accent-light);
+    padding: 0.15em 0.55em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .phase-title {
+    font-family: 'Plan Display', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .phase-desc {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    max-width: 65ch;
+  }
+
+  /* ---- Task table ---- */
+  .task-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  .task-table thead th {
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1.5px solid var(--border);
+    white-space: nowrap;
+  }
+  .task-table tbody tr {
+    border-bottom: 1px solid var(--border);
+  }
+  .task-table tbody tr:nth-child(even) {
+    background: var(--stripe);
+  }
+  .task-table td {
+    padding: 0.5rem 0.6rem;
+    vertical-align: top;
+  }
+  .task-table td:first-child {
+    font-weight: 500;
+    color: var(--text);
+  }
+  .task-file {
+    font-family: 'Consolas', 'SFMono-Regular', monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    word-break: break-all;
+  }
+  .task-detail {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  /* ---- Tags ---- */
+  .tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .tag-critical { color: var(--tag-critical); background: var(--tag-critical-bg); }
+  .tag-high { color: var(--tag-high); background: var(--tag-high-bg); }
+  .tag-medium { color: var(--tag-medium); background: var(--tag-medium-bg); }
+  .tag-low { color: var(--tag-low); background: var(--tag-low-bg); }
+
+  /* ---- Checklist sections ---- */
+  .checklist {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .checklist li {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+  .checklist li::before {
+    content: '☐';
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  /* ---- Notes / callout ---- */
+  .callout {
+    background: var(--accent-light);
+    border-left: 3px solid var(--accent);
+    padding: 0.85rem 1.1rem;
+    border-radius: 0 4px 4px 0;
+    margin: 1rem 0;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+  .callout strong { font-weight: 600; }
+
+  .risk-callout {
+    background: var(--tag-critical-bg);
+    border-left: 3px solid var(--tag-critical);
+    padding: 0.85rem 1.1rem;
+    border-radius: 0 4px 4px 0;
+    margin: 1rem 0;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+
+  /* ---- Data migration diagram ---- */
+  .flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 1.2rem 0;
+    flex-wrap: wrap;
+  }
+  .flow-box {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 5px;
+    padding: 0.5rem 1rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .flow-box.pg { border-color: var(--accent); color: var(--accent); }
+  .flow-arrow {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  /* ---- Timeline ---- */
+  .timeline {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 0 1rem;
+    margin: 0.5rem 0;
+  }
+  .tl-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-align: right;
+    padding-top: 0.2rem;
+    white-space: nowrap;
+  }
+  .tl-content {
+    border-left: 2px solid var(--border);
+    padding: 0.2rem 0 1rem 1rem;
+    font-size: 0.84rem;
+  }
+  .tl-content:last-child { padding-bottom: 0; }
+  .tl-content strong { font-weight: 600; }
+
+  /* ---- Responsive overflow ---- */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+  }
+
+  @media (max-width: 600px) {
+    .page { padding: 1.5rem 1rem 2rem; }
+    .header h1 { font-size: 1.35rem; }
+    .scope-grid { grid-template-columns: 1fr 1fr; }
+    .header-meta { flex-direction: column; gap: 0.25rem; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="header">
+    <div class="header-eyebrow">Migration Plan v2</div>
+    <h1>PM PostgreSQL 移行プラン — 併存方式</h1>
+    <div class="header-meta">
+      <span>作成日: 2026-07-07</span>
+      <span>方式: 開発PC上で MySQL + PostgreSQL 併存</span>
+      <span>影響ファイル: 約20件</span>
+    </div>
+  </div>
+
+  <!-- Scope -->
+  <div class="scope">
+    <h2>移行方針</h2>
+    <div class="scope-grid">
+      <div class="scope-item">
+        <span class="scope-label">開発PC</span>
+        <span class="scope-value">MySQL + PG 併存</span>
+      </div>
+      <div class="scope-item">
+        <span class="scope-label">本番（現行）</span>
+        <span class="scope-value">MySQL（変更なし）</span>
+      </div>
+      <div class="scope-item">
+        <span class="scope-label">本番（新PC）</span>
+        <span class="scope-value">PostgreSQL 16</span>
+      </div>
+      <div class="scope-item">
+        <span class="scope-label">リスク</span>
+        <span class="scope-value">低（現行に影響なし）</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Architecture diagram -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">構成図</span>
+      <span class="phase-title">開発PCの併存構成</span>
+    </div>
+
+    <div class="flow" style="flex-direction: column; gap: 1rem;">
+      <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: center;">
+        <div class="flow-box" style="min-width: 140px;">
+          <div style="font-size: 0.68rem; color: var(--text-muted); letter-spacing: 0.06em;">現行アプリ</div>
+          <div>pm/ (MySQL)</div>
+        </div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-box" style="min-width: 140px;">
+          <div style="font-size: 0.68rem; color: var(--text-muted); letter-spacing: 0.06em;">DB</div>
+          <div>MySQL :3306</div>
+        </div>
+        <span style="font-size: 0.72rem; color: var(--text-muted); padding: 0 0.3rem;">そのまま稼働</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: center;">
+        <div class="flow-box pg" style="min-width: 140px;">
+          <div style="font-size: 0.68rem; letter-spacing: 0.06em;">新アプリ</div>
+          <div>wanoco/ (PG)</div>
+        </div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-box pg" style="min-width: 140px;">
+          <div style="font-size: 0.68rem; letter-spacing: 0.06em;">DB</div>
+          <div>PostgreSQL :5432</div>
+        </div>
+        <span style="font-size: 0.72rem; color: var(--accent); padding: 0 0.3rem;">検証用（新規）</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>ポイント:</strong> 現行の pm/ は一切変更しない。pm/ をまるごと複製した wanoco/ で PostgreSQL 対応を進め、問題なく動いたら本番を切り替える。
+    </div>
+  </div>
+
+  <!-- Phase 1 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 1</span>
+      <span class="phase-title">開発PCに PostgreSQL インストール</span>
+    </div>
+    <p class="phase-desc">MySQLはそのまま残し、PostgreSQL を追加インストールする。</p>
+
+    <ul class="checklist">
+      <li>PostgreSQL 16 を Windows にインストール（ポート 5432）</li>
+      <li>データベース <code>pm_db</code> を作成</li>
+      <li>ユーザー作成・権限付与</li>
+      <li><code>psql</code> で接続確認</li>
+    </ul>
+
+    <div class="callout">
+      <strong>MySQL はそのまま:</strong> 既存の MySQL :3306 には触れない。現行の pm/ アプリは引き続き MySQL で動作する。
+    </div>
+  </div>
+
+  <!-- Phase 2 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 2</span>
+      <span class="phase-title">アプリ複製 + PostgreSQL 対応</span>
+    </div>
+    <p class="phase-desc">pm/ を複製して wanoco/ を作り、PostgreSQL 接続に変更する。</p>
+
+    <div class="table-wrap">
+      <table class="task-table">
+        <thead><tr><th>タスク</th><th>対象ファイル (wanoco/)</th><th>変更内容</th><th>重要度</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>DB設定変更</td>
+            <td><span class="task-file">pm_backend/project/settings.py</span></td>
+            <td class="task-detail">
+              ENGINE → <code>postgresql</code><br>
+              PORT → <code>5432</code><br>
+              OPTIONS: charset/init_command 削除、<code>options: '-c timezone=Asia/Tokyo'</code> に変更
+            </td>
+            <td><span class="tag tag-critical">CRITICAL</span></td>
+          </tr>
+          <tr>
+            <td>Pythonパッケージ</td>
+            <td><span class="task-file">pm_backend/requirements.txt</span></td>
+            <td class="task-detail"><code>mysqlclient</code> → <code>psycopg2-binary</code></td>
+            <td><span class="tag tag-critical">CRITICAL</span></td>
+          </tr>
+          <tr>
+            <td>Dockerビルド</td>
+            <td><span class="task-file">pm_backend/Dockerfile</span></td>
+            <td class="task-detail"><code>default-libmysqlclient-dev</code> → <code>libpq-dev</code></td>
+            <td><span class="tag tag-critical">CRITICAL</span></td>
+          </tr>
+          <tr>
+            <td>Docker構成</td>
+            <td><span class="task-file">docker-compose.yml</span></td>
+            <td class="task-detail">
+              PostgreSQLコンテナ追加<br>
+              DB_HOST → <code>postgres</code>、DB_PORT → <code>5432</code>
+            </td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>環境変数</td>
+            <td><span class="task-file">pm_backend/.env</span></td>
+            <td class="task-detail">ポート <code>5432</code>、PostgreSQL ユーザー/パスワードに変更</td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Phase 3 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 3</span>
+      <span class="phase-title">MySQL固有SQL修正 (wanoco/ のみ)</span>
+    </div>
+    <p class="phase-desc">複製した wanoco/ 内のマイグレーション・管理コマンドを PostgreSQL 互換に書き換える。</p>
+
+    <div class="table-wrap">
+      <table class="task-table">
+        <thead><tr><th>タスク</th><th>対象ファイル</th><th>変更内容</th><th>重要度</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>TINYINT → BOOLEAN</td>
+            <td>
+              <span class="task-file">quality/migrations/0002_*.py</span><br>
+              <span class="task-file">quality/migrations/0003_*.py</span>
+            </td>
+            <td class="task-detail"><code>TINYINT(1)</code> → <code>BOOLEAN DEFAULT FALSE</code></td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>DROP FOREIGN KEY</td>
+            <td><span class="task-file">quality/migrations/0004_*.py</span></td>
+            <td class="task-detail"><code>DROP FOREIGN KEY</code> → <code>DROP CONSTRAINT</code></td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>CHANGE COLUMN / RENAME TABLE</td>
+            <td>
+              <span class="task-file">accounts/migrations/0025_*.py</span><br>
+              <span class="task-file">accounts/migrations/0026_*.py</span>
+            </td>
+            <td class="task-detail">
+              <code>CHANGE COLUMN</code> → <code>ALTER COLUMN ... RENAME TO</code><br>
+              <code>RENAME TABLE</code> → <code>ALTER TABLE ... RENAME TO</code>
+            </td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>ENUM / AFTER句</td>
+            <td><span class="task-file">apply_schema_changes.py</span></td>
+            <td class="task-detail">
+              <code>ENUM()</code> → <code>VARCHAR + CHECK</code><br>
+              <code>AFTER column</code> 削除
+            </td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>バッククォート / datetime</td>
+            <td><span class="task-file">accounts/.../create_userprofile_table.py</span></td>
+            <td class="task-detail">
+              バッククォート → ダブルクォート<br>
+              <code>datetime(6)</code> → <code>timestamp</code>
+            </td>
+            <td><span class="tag tag-medium">MEDIUM</span></td>
+          </tr>
+          <tr>
+            <td>SQL Exportコマンド</td>
+            <td><span class="task-file">masters/.../export_*_sql.py (4ファイル)</span></td>
+            <td class="task-detail">
+              <code>SET NAMES utf8mb4</code> 削除<br>
+              <code>FROM DUAL</code> 削除
+            </td>
+            <td><span class="tag tag-medium">MEDIUM</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>現行 pm/ は変更しない:</strong> これらの修正はすべて wanoco/ 内で行う。現行の MySQL 版には一切影響しない。
+    </div>
+  </div>
+
+  <!-- Phase 4 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 4</span>
+      <span class="phase-title">wanoco/ の検証</span>
+    </div>
+    <p class="phase-desc">PostgreSQL版アプリが正常に動作するか、開発PCで徹底検証する。</p>
+
+    <ul class="checklist">
+      <li><code>python manage.py migrate</code> — 全マイグレーション正常完了</li>
+      <li><code>python manage.py runserver 8082</code> — 別ポートで起動</li>
+      <li>MySQL版からテストデータを pgloader で移行して動作確認</li>
+      <li>主要画面の動作確認（受注一覧・ガントチャート・在庫・進度）</li>
+      <li>受注展開の安定性テスト（落ちるケースの再現確認）</li>
+      <li>在庫計算の速度比較（MySQL版 vs PostgreSQL版）</li>
+      <li>APScheduler定時タスクの動作確認</li>
+      <li>JSONFieldの読み書き確認</li>
+    </ul>
+
+    <div class="callout">
+      <strong>並行運用:</strong> 現行 pm/ (:8081/MySQL) と wanoco/ (:8082/PG) を同時に起動して比較可能。問題があればいつでも pm/ に戻れる。
+    </div>
+  </div>
+
+  <!-- Phase 5 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 5</span>
+      <span class="phase-title">在庫計算の DB関数化（オプション）</span>
+    </div>
+    <p class="phase-desc">PostgreSQL版で検証OKの後、重い計算処理をDB関数に移行して高速化を狙う。</p>
+
+    <div class="table-wrap">
+      <table class="task-table">
+        <thead><tr><th>対象</th><th>現状（Python）</th><th>改善案（PL/pgSQL）</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>在庫計算</td>
+            <td class="task-detail">製品×日付のネストループで毎回DB往復</td>
+            <td class="task-detail">ウィンドウ関数で累積計算を1クエリ実行</td>
+          </tr>
+          <tr>
+            <td>計画在庫計算</td>
+            <td class="task-detail">同上 + 親工程のLTシフト計算</td>
+            <td class="task-detail">CTE + ウィンドウ関数で一括処理</td>
+          </tr>
+          <tr>
+            <td>仕損集計</td>
+            <td class="task-detail">Python側でフィルタ・集計・書き戻し</td>
+            <td class="task-detail">UPDATE ... FROM で直接集計更新</td>
+          </tr>
+          <tr>
+            <td>受注展開</td>
+            <td class="task-detail">大量の個別INSERT/UPDATE</td>
+            <td class="task-detail">ストアドプロシージャでトランザクション一括</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>段階的に:</strong> まず PHASE 4 でそのまま動くことを確認してから、ボトルネック順にDB関数化を進める。一気にやらない。
+    </div>
+  </div>
+
+  <!-- Phase 6 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 6</span>
+      <span class="phase-title">本番移行（新PC）</span>
+    </div>
+    <p class="phase-desc">wanoco/ の検証が完了し、問題なしと判断したら、新本番PCにPostgreSQL版をデプロイする。</p>
+
+    <div class="flow">
+      <div class="flow-box">MySQL (旧PC)</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box">pgloader</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box pg">PostgreSQL (新PC)</div>
+    </div>
+
+    <div class="timeline">
+      <span class="tl-label">手順 1</span>
+      <div class="tl-content">
+        <strong>旧本番を読取専用に</strong><br>
+        ユーザーに利用停止を通知。旧MySQLのデータが確定した状態にする。
+      </div>
+
+      <span class="tl-label">手順 2</span>
+      <div class="tl-content">
+        <strong>pgloader で自動変換</strong><br>
+        <code>pgloader mysql://root:pass@old-host/pm_db postgresql://pm_user:pass@new-host/pm_db</code><br>
+        スキーマ・データ・インデックスを一括変換。
+      </div>
+
+      <span class="tl-label">手順 3</span>
+      <div class="tl-content">
+        <strong>Django マイグレーション状態の同期</strong><br>
+        <code>python manage.py migrate --fake</code> でマイグレーション履歴を登録。
+      </div>
+
+      <span class="tl-label">手順 4</span>
+      <div class="tl-content">
+        <strong>シーケンス値の修正</strong><br>
+        <code>SELECT setval('table_id_seq', (SELECT MAX(id) FROM table));</code>
+      </div>
+
+      <span class="tl-label">手順 5</span>
+      <div class="tl-content">
+        <strong>WSL2 + Docker Engine で起動</strong><br>
+        wanoco/ の docker-compose.yml で全コンテナ起動。SSL証明書配置・HTTPS確認。
+      </div>
+
+      <span class="tl-label">手順 6</span>
+      <div class="tl-content">
+        <strong>データ整合性チェック + IP切り替え</strong><br>
+        主要テーブルのレコード数確認後、旧PCからのIP切り替え。
+      </div>
+    </div>
+
+    <div class="risk-callout">
+      <strong>リスク軽減:</strong> 開発環境での並行運用（PHASE 4）で十分検証済みのため、本番移行時のリスクは大幅に低減。問題があれば旧PC（MySQL）にすぐ戻せる。
+    </div>
+  </div>
+
+  <!-- Phase 7 -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 7</span>
+      <span class="phase-title">ドキュメント更新 + pm/ 統合</span>
+    </div>
+    <p class="phase-desc">本番移行完了後、wanoco/ を正式な pm/ として統合し、ドキュメントを更新する。</p>
+
+    <div class="table-wrap">
+      <table class="task-table">
+        <thead><tr><th>タスク</th><th>内容</th><th>重要度</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>リポジトリ統合</td>
+            <td class="task-detail">wanoco/ の変更を pm/ に反映（またはwanoco/ を正として運用）</td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>CLAUDE.md 更新</td>
+            <td class="task-detail">技術スタック: MySQL → PostgreSQL</td>
+            <td><span class="tag tag-low">LOW</span></td>
+          </tr>
+          <tr>
+            <td>本番移行マニュアル</td>
+            <td class="task-detail">mysqldump → pg_dump、接続コマンド更新</td>
+            <td><span class="tag tag-low">LOW</span></td>
+          </tr>
+          <tr>
+            <td>旧MySQL環境の撤去</td>
+            <td class="task-detail">開発PCのMySQLをアンインストール（任意）</td>
+            <td><span class="tag tag-low">LOW</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Benefits -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">参考</span>
+      <span class="phase-title">併存方式のメリット</span>
+    </div>
+    <div class="table-wrap">
+      <table class="task-table">
+        <thead><tr><th>項目</th><th>一括移行（旧プラン）</th><th>併存方式（本プラン）</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>現行への影響</td>
+            <td class="task-detail">コード直接変更 — 戻すのが大変</td>
+            <td class="task-detail">変更なし — いつでも現行に戻れる</td>
+          </tr>
+          <tr>
+            <td>検証の深さ</td>
+            <td class="task-detail">移行後に問題発覚 → ロールバックが困難</td>
+            <td class="task-detail">並行運用で比較検証 → 確信を持って移行</td>
+          </tr>
+          <tr>
+            <td>DB関数化の試行</td>
+            <td class="task-detail">移行完了後に別タスクで着手</td>
+            <td class="task-detail">PHASE 5で検証と同時に試行可能</td>
+          </tr>
+          <tr>
+            <td>速度比較</td>
+            <td class="task-detail">移行前後の比較が難しい</td>
+            <td class="task-detail">同じPCで両方動かしてベンチマーク可能</td>
+          </tr>
+          <tr>
+            <td>本番リスク</td>
+            <td class="task-detail">ダウンタイム中に全変更を適用</td>
+            <td class="task-detail">事前に検証済みの構成をそのままデプロイ</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
