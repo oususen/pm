@@ -891,12 +891,17 @@ const filteredTemplates = computed(() => {
 // 差分表示: 前版との比較 / 差し戻し後修正の比較
 const DIFF_FIELDS = ["item_name", "standard", "frequency", "method", "record_type", "unit", "criteria", "is_required", "is_active"]
 const PENDING_STATUSES = ["SUPERVISOR_PENDING", "CHIEF_PENDING", "MANAGER_PENDING"]
+const hasRejectedWorkflow = computed(() =>
+  Array.isArray(form.value.workflow_logs)
+  && form.value.workflow_logs.some((log) => String(log?.action || "").trim().toUpperCase() === "REJECTED")
+)
 
 // スナップショット比較（差し戻し後再提出時）: 上長確認画面で前回提出時との差分を表示
 const isSnapshotDiff = computed(() => {
   const snapshot = form.value.submitted_items_snapshot
   if (!snapshot || !snapshot.length) return false
-  return PENDING_STATUSES.includes(normalizedFormStatus.value)
+  if (!PENDING_STATUSES.includes(normalizedFormStatus.value)) return false
+  return hasRejectedWorkflow.value
 })
 
 // 差分比較のベースとなるアイテム一覧（スナップショット優先、なければ前版）
@@ -908,27 +913,89 @@ const showDiff = computed(() => diffBaseItems.value.length > 0)
 // 差分の種別ラベル（改訂 vs 修正）
 const diffLabel = computed(() => isSnapshotDiff.value ? "修正" : "改訂")
 
+const applyPrevVersionDiffMapping = () => {
+  const prevItems = Array.isArray(prevVersionItems.value) ? prevVersionItems.value : []
+  const currentItems = Array.isArray(form.value.items) ? form.value.items : []
+
+  currentItems.forEach((item) => {
+    item.diff_prev_id = null
+  })
+  if (!prevItems.length || !currentItems.length) return
+
+  const prevBySection = new Map()
+  prevItems.forEach((item) => {
+    const section = String(item?.section_type || "")
+    if (!prevBySection.has(section)) prevBySection.set(section, [])
+    prevBySection.get(section).push(item)
+  })
+
+  const currentBySection = new Map()
+  currentItems.forEach((item) => {
+    const section = String(item?.section_type || "")
+    if (!currentBySection.has(section)) currentBySection.set(section, [])
+    currentBySection.get(section).push(item)
+  })
+
+  currentBySection.forEach((items, section) => {
+    const prevSectionItems = prevBySection.get(section) || []
+    items.forEach((item, index) => {
+      const prevItem = prevSectionItems[index]
+      const prevId = Number(prevItem?.id || 0)
+      item.diff_prev_id = prevId > 0 ? prevId : null
+    })
+  })
+}
+
+const serializeAttachmentsForDiff = (attachments) => {
+  if (!Array.isArray(attachments)) return "[]"
+  return JSON.stringify(
+    attachments.map((attachment, index) => ({
+      display_order: Number(attachment?.display_order || index + 1),
+      title: String(attachment?.title || ""),
+      description: String(attachment?.description || ""),
+      check_point: String(attachment?.check_point || ""),
+      ok_example: String(attachment?.ok_example || ""),
+      ng_example: String(attachment?.ng_example || ""),
+      image_url: String(attachment?.image_url || ""),
+    }))
+  )
+}
+
 const isSameItem = (a, b) => {
   const sectionA = String(a?.section_type || "")
   const sectionB = String(b?.section_type || "")
   if (sectionA !== sectionB) return false
 
+  const diffPrevIdA = Number(a?.diff_prev_id || 0)
+  const diffPrevIdB = Number(b?.diff_prev_id || 0)
   const idA = Number(a?.id || 0)
   const idB = Number(b?.id || 0)
-  if (idA > 0 && idB > 0) return idA === idB
+  if (diffPrevIdA > 0 && idB > 0) return diffPrevIdA === idB
+  if (diffPrevIdB > 0 && idA > 0) return diffPrevIdB === idA
+  if (idA > 0 && idB > 0 && idA === idB) return true
 
   const noA = Number(a?.inspection_no || 0)
   const noB = Number(b?.inspection_no || 0)
   if (noA > 0 && noB > 0) return noA === noB
 
+  const orderA = Number(a?.display_order || 0)
+  const orderB = Number(b?.display_order || 0)
   const nameA = String(a?.item_name || "").trim()
   const nameB = String(b?.item_name || "").trim()
+  if (orderA > 0 && orderB > 0 && nameA && nameB) {
+    return orderA === orderB && nameA === nameB
+  }
   if (nameA && nameB) return nameA === nameB
 
   return false
 }
 
 const findPrevItem = (item) => {
+  const diffPrevId = Number(item?.diff_prev_id || 0)
+  if (diffPrevId > 0) {
+    const mapped = diffBaseItems.value.find((p) => Number(p?.id || 0) === diffPrevId)
+    if (mapped) return mapped
+  }
   return diffBaseItems.value.find((p) => isSameItem(p, item)) || null
 }
 const itemDiffStatus = (item) => {
@@ -938,6 +1005,10 @@ const itemDiffStatus = (item) => {
   for (const field of DIFF_FIELDS) {
     if (String(item[field] ?? "") !== String(prev[field] ?? "")) return "changed"
   }
+  if (String(item.confirmation_method ?? "") !== String(prev.confirmation_method ?? "")) return "changed"
+  if (String(item.inspection_no ?? "") !== String(prev.inspection_no ?? "")) return "changed"
+  if (String(item.display_order ?? "") !== String(prev.display_order ?? "")) return "changed"
+  if (serializeAttachmentsForDiff(item.attachments) !== serializeAttachmentsForDiff(prev.attachments)) return "changed"
   return null
 }
 const deletedItems = computed(() => {
@@ -2090,6 +2161,7 @@ const toFormModel = (raw) => {
     items: Array.isArray(raw.items)
       ? raw.items.map((item) => ({
           local_key: createLocalKey(),
+          diff_prev_id: null,
           id: item.id || null,
           section_type: item.section_type || "DAILY",
           display_order: Number(item.display_order || 1),
@@ -2238,7 +2310,13 @@ const loadPrevVersion = async (sheetCode, version) => {
     })
     const results = response.data?.results || response.data || []
     if (results.length > 0) {
-      prevVersionItems.value = results[0].items || []
+      const prevId = Number(results[0]?.id || 0)
+      if (prevId > 0) {
+        const detailResponse = await api.qualityEquipmentInspections.get(prevId)
+        prevVersionItems.value = toFormModel(detailResponse.data).items || []
+      } else {
+        prevVersionItems.value = toFormModel(results[0]).items || []
+      }
     }
   } catch (error) {
     console.error("前版テンプレート取得に失敗:", error)
@@ -2254,6 +2332,7 @@ const loadTemplateDetail = async (id) => {
     selectedTemplateId.value = id
     await resizeAllTextareas()
     await loadPrevVersion(form.value.sheet_code, form.value.version)
+    applyPrevVersionDiffMapping()
     markSavedSnapshot()
   } catch (error) {
     console.error("設備点検テンプレート詳細取得に失敗:", error)

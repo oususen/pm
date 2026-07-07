@@ -501,15 +501,95 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
             .values_list("version", flat=True)
             .first() or 0
         ) + 1
-        template.pk = None
-        template.version = new_version
-        template.status = IntegratedChecksheetTemplate.STATUS_DRAFT
-        template.is_active = False
-        template.rejection_comment = ""
-        template.created_by = request.user
-        template.save()
+
+        with transaction.atomic():
+            new_template = IntegratedChecksheetTemplate.objects.create(
+                product=template.product,
+                line=template.line,
+                name=template.name,
+                version=new_version,
+                status=IntegratedChecksheetTemplate.STATUS_DRAFT,
+                is_active=False,
+                document_title=template.document_title,
+                sheet_name=template.sheet_name,
+                revision_notes="",
+                revision_date=None,
+                effective_from=None,
+                reviewer_user=template.reviewer_user,
+                chief_user=template.chief_user,
+                approver_user=template.approver_user,
+                reviewed_at=None,
+                chief_reviewed_at=None,
+                approved_at=None,
+                rejection_comment="",
+                submitted_items_snapshot=None,
+                created_by=request.user,
+            )
+
+            blocks = (
+                template.process_blocks
+                .select_related("process")
+                .prefetch_related("items__attachments", "sketch_fields")
+                .order_by("sort_order", "id")
+            )
+            for block in blocks:
+                new_block = IntegratedChecksheetProcessBlock.objects.create(
+                    template=new_template,
+                    process=block.process,
+                    sort_order=block.sort_order,
+                    source_pdf=block.source_pdf.name if block.source_pdf else "",
+                    sketch_image=block.sketch_image.name if block.sketch_image else "",
+                )
+
+                for item in block.items.all().order_by("sort_order", "id"):
+                    new_item = IntegratedChecksheetItem.objects.create(
+                        process_block=new_block,
+                        sort_order=item.sort_order,
+                        item_name=item.item_name,
+                        standard=item.standard,
+                        frequency=item.frequency,
+                        method=item.method,
+                        record_type=item.record_type,
+                        unit=item.unit,
+                        criteria=item.criteria,
+                        remarks=item.remarks,
+                        is_required=item.is_required,
+                    )
+                    for attachment in item.attachments.all().order_by("display_order", "id"):
+                        IntegratedChecksheetItemAttachment.objects.create(
+                            item=new_item,
+                            display_order=attachment.display_order,
+                            title=attachment.title,
+                            description=attachment.description,
+                            check_point=attachment.check_point,
+                            ok_example=attachment.ok_example,
+                            ng_example=attachment.ng_example,
+                            image_url=attachment.image_url,
+                        )
+
+                for sketch_field in block.sketch_fields.all().order_by("sort_order", "id"):
+                    IntegratedChecksheetSketchField.objects.create(
+                        process_block=new_block,
+                        key=sketch_field.key,
+                        label=sketch_field.label,
+                        field_type=sketch_field.field_type,
+                        x=sketch_field.x,
+                        y=sketch_field.y,
+                        width=sketch_field.width,
+                        height=sketch_field.height,
+                        required=sketch_field.required,
+                        sort_order=sketch_field.sort_order,
+                    )
+
+            _log_ics_workflow(
+                new_template,
+                IntegratedChecksheetWorkflowLog.ACTION_CREATED,
+                request.user,
+                to_status=new_template.status,
+                comment=f"v{template.version} からの改訂",
+            )
         return Response(IntegratedChecksheetTemplateSerializer(
-            self.get_queryset().get(pk=template.pk)
+            self.get_queryset().get(pk=new_template.pk)
         ).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
