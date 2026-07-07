@@ -58,10 +58,11 @@
           <button class="btn-secondary" type="button" @click="saveExecution" :disabled="saving || !canSaveParticipantChanges">
             参加者保存
           </button>
-          <button class="btn-primary complete-btn" type="button" @click="completeMeeting" :disabled="saving || !canEditMeetingActions">
+          <button class="btn-primary complete-btn" type="button" @click="completeMeeting" :disabled="saving || !canCompleteMeeting">
             完了
           </button>
         </div>
+        <p v-if="!isTemplate && !isCompleted && !hasStarted" class="run-note">所要時間を記録するため、完了前に開始してください。</p>
       </section>
 
       <section class="participants-card">
@@ -203,6 +204,7 @@ const hasMorningMeetingPermission = (level) => {
 }
 const canEditMeeting = computed(() => hasMorningMeetingPermission('edit'))
 const canEditMeetingActions = computed(() => canEditMeeting.value && !isCompleted.value)
+const hasStarted = computed(() => Boolean(meeting.value?.started_at))
 const canSaveParticipantChanges = computed(() => {
   if (isTemplate.value) return false
   if (isCompleted.value) return false
@@ -210,6 +212,7 @@ const canSaveParticipantChanges = computed(() => {
   return participants.value.some((row) => Number(row.user) === currentUserId.value)
 })
 const canBulkEditParticipants = computed(() => canEditMeetingActions.value && isFacilitator.value)
+const canCompleteMeeting = computed(() => canEditMeetingActions.value && hasStarted.value)
 
 const departmentPath = (row) => {
   return [row.division_name, row.group_name, row.team_name, row.unit_name].filter(Boolean).join(' / ') || row.department_name || '-'
@@ -361,7 +364,7 @@ const saveExecution = async () => {
 }
 
 const completeMeeting = async () => {
-  if (!canEditMeetingActions.value) return
+  if (!canCompleteMeeting.value) return
   if (!window.confirm('この朝礼を完了にします。よろしいですか？')) return
   saving.value = true
   errorMessage.value = ''
@@ -512,6 +515,11 @@ onMounted(async () => {
   background: #eef2ff;
   border-radius: 10px;
   color: #312e81;
+}
+
+.run-note {
+  margin-top: 10px;
+  color: #92400e;
 }
 
 .modal-overlay {

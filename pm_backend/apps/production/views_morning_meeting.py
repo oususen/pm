@@ -173,6 +173,8 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
         meeting = self.get_object()
         if meeting.is_template:
             return Response({'detail': 'テンプレートは完了できません。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not meeting.started_at:
+            return Response({'detail': '朝礼を開始してから完了してください。'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = MorningMeetingExecutionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
@@ -194,8 +196,6 @@ class MorningMeetingViewSet(viewsets.ModelViewSet):
 
             if 'execution_note' in payload:
                 meeting.execution_note = payload.get('execution_note', '')
-            if not meeting.started_at:
-                meeting.started_at = datetime.now()
             meeting.ended_at = datetime.now()
 
             summary = _build_completion_summary(meeting)
