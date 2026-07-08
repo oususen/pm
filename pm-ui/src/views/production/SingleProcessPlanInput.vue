@@ -214,6 +214,7 @@
                   :value="getSubCell(d.dateStr, seq)?.productId || ''"
                   @change="setSubProduct(d.dateStr, seq, $event.target.value)"
                   class="prod-select"
+                  :class="{ 'plan-batch-missing': isSubProductBatchMissing(d.dateStr, seq) }"
                 >
                   <option value=""></option>
                   <option v-for="prod in subGridDropdownProducts" :key="prod.id" :value="prod.id">
@@ -230,6 +231,7 @@
                   @change="setSubQty(d.dateStr, seq, $event.target.value)"
                   @keydown="onQtyKeydown"
                   class="qty-input"
+                  :class="{ 'plan-batch-qty-mismatch': isSubQtyBatchMismatch(d.dateStr, seq) }"
                 />
               </td>
             </template>
@@ -425,6 +427,7 @@ const errorMsg = ref('')
 
 const refGrid = ref({})
 const subGrid = ref({})
+const checksheetBatchTotals = ref({})
 const loadedGridProducts = ref([])
 const lastLoadedSubEntryCount = ref(0)
 const lastLoadedPlanCount = ref(0)
@@ -557,6 +560,7 @@ const dateColumns = computed(() => {
 
 const dateHeaderClass = (d) => ({ 'col-today': d.isToday, 'col-tomorrow': d.isTomorrow })
 const dateCellClass = (d) => ({ 'col-today': d.isToday, 'col-tomorrow': d.isTomorrow })
+const createPlanBatchCompareKey = (dateStr, productId) => `${String(dateStr || '')}|${String(productId || '')}`
 
 const maxRefSeq = computed(() => {
   let max = 0
@@ -586,6 +590,44 @@ const subInputRowCount = computed(() => {
 })
 
 const getSubCell = (dateStr, seq) => subGrid.value[`${dateStr}|${seq}`] || null
+
+const planGridTotals = computed(() => {
+  const totals = {}
+  Object.entries(subGrid.value || {}).forEach(([key, cell]) => {
+    const [dateStr] = key.split('|')
+    const productId = String(cell?.productId || '')
+    const qty = Number(cell?.qty || 0)
+    if (!dateStr || !productId || qty <= 0) return
+    const compareKey = createPlanBatchCompareKey(dateStr, productId)
+    totals[compareKey] = (totals[compareKey] || 0) + qty
+  })
+  return totals
+})
+
+const planBatchComparisonMap = computed(() => {
+  if (!selectedChecksheetMapping.value) return {}
+  const result = {}
+  Object.entries(planGridTotals.value).forEach(([key, planQty]) => {
+    const hasBatch = Object.prototype.hasOwnProperty.call(checksheetBatchTotals.value, key)
+    const batchQty = Number(checksheetBatchTotals.value[key] || 0)
+    result[key] = {
+      missing: !hasBatch,
+      qtyMismatch: hasBatch && batchQty !== Number(planQty || 0),
+    }
+  })
+  return result
+})
+
+const getSubCellBatchComparison = (dateStr, seq) => {
+  const cell = getSubCell(dateStr, seq)
+  const productId = String(cell?.productId || '')
+  const qty = Number(cell?.qty || 0)
+  if (!selectedChecksheetMapping.value || !productId || qty <= 0) return null
+  return planBatchComparisonMap.value[createPlanBatchCompareKey(dateStr, productId)] || null
+}
+
+const isSubProductBatchMissing = (dateStr, seq) => !!getSubCellBatchComparison(dateStr, seq)?.missing
+const isSubQtyBatchMismatch = (dateStr, seq) => !!getSubCellBatchComparison(dateStr, seq)?.qtyMismatch
 
 const getProductInfo = (productId) => {
   const pid = String(productId)
@@ -934,8 +976,38 @@ const createChecksheetForDay = async (dateStr) => {
     } else {
       alert(`チェックシートを ${created} 件作成しました。`)
     }
+    await loadChecksheetBatchTotals()
   } finally {
     saving.value = false
+  }
+}
+
+const loadChecksheetBatchTotals = async () => {
+  if (!selectedLineId.value || !startDate.value || !endDate.value || !selectedChecksheetMapping.value) {
+    checksheetBatchTotals.value = {}
+    return
+  }
+  try {
+    const res = await api.integratedChecksheets.listBatches({
+      line: selectedLineId.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+      page_size: 1000,
+    })
+    const rows = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.data?.results) ? res.data.results : [])
+    const totals = {}
+    rows.forEach((row) => {
+      const dateStr = String(row?.plan_date || '')
+      const productId = String(row?.product || '')
+      const qty = Number(row?.quantity || 0)
+      if (!dateStr || !productId || qty <= 0) return
+      const key = createPlanBatchCompareKey(dateStr, productId)
+      totals[key] = (totals[key] || 0) + qty
+    })
+    checksheetBatchTotals.value = totals
+  } catch (e) {
+    console.warn('チェックシートバッチ集計取得失敗', e)
+    checksheetBatchTotals.value = {}
   }
 }
 
@@ -1162,6 +1234,7 @@ const loadData = async () => {
   errorMsg.value = ''
   refGrid.value = {}
   subGrid.value = {}
+  checksheetBatchTotals.value = {}
   loadedGridProducts.value = []
   lastLoadedSubEntryCount.value = 0
   lastLoadedPlanCount.value = 0
@@ -1271,6 +1344,7 @@ const loadData = async () => {
     }
 
     subGrid.value = finalSubEntries
+    await loadChecksheetBatchTotals()
     loadedGridProducts.value = Array.from(loadedProductsMap.values()).sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''))
     lastLoadedSubEntryCount.value = Object.keys(finalSubEntries).length
   } catch (e) {
@@ -1399,6 +1473,8 @@ onMounted(async () => {
 .prod-select:focus { outline: 2px solid #4a90d9; }
 .qty-input { width: 38px; border: 1px solid #ddd; text-align: right; font-size: 11px; padding: 1px 2px; background: transparent; }
 .qty-input:focus { outline: 2px solid #4a90d9; background: #fff; }
+.prod-select.plan-batch-missing { color: #c62828; border-color: #ef9a9a; background: #fff5f5; font-weight: bold; }
+.qty-input.plan-batch-qty-mismatch { color: #c62828; border-color: #ef9a9a; background: #fff5f5; font-weight: bold; }
 .qty-input::-webkit-inner-spin-button, .qty-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .qty-input { -moz-appearance: textfield; }
 .save-bar { padding: 8px 0; display: flex; align-items: center; gap: 10px; }

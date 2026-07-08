@@ -873,12 +873,21 @@ class IntegratedChecksheetBatchViewSet(
         product_id = self.request.query_params.get("product")
         line_id = self.request.query_params.get("line")
         status_val = self.request.query_params.get("status")
+        plan_date = self.request.query_params.get("plan_date")
+        plan_date_gte = self.request.query_params.get("plan_date__gte")
+        plan_date_lte = self.request.query_params.get("plan_date__lte")
         if product_id:
             qs = qs.filter(product_id=product_id)
         if line_id:
             qs = qs.filter(line_id=line_id)
         if status_val:
             qs = qs.filter(status=status_val)
+        if plan_date:
+            qs = qs.filter(plan_date=plan_date)
+        if plan_date_gte:
+            qs = qs.filter(plan_date__gte=plan_date_gte)
+        if plan_date_lte:
+            qs = qs.filter(plan_date__lte=plan_date_lte)
         sei_ban = self.request.query_params.get("sei_ban")
         if sei_ban:
             qs = qs.filter(units__sei_ban__icontains=sei_ban).distinct()
