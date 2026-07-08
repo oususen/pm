@@ -89,7 +89,10 @@ pm_backend/firebase-service-account-*.json
 # excel files
 *.xls
 *.xlsx
-*.csv   
+*.csv
+
+# PDF files
+*.pdf
 
 *-cwd*
 .gitignore
