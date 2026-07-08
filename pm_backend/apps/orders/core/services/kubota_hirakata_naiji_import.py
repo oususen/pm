@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
+from orders.core.services.ship_to_utils import ensure_ship_to_records
 
 
 class KubotaHirakataNaijiImportService:
@@ -404,6 +405,8 @@ class KubotaHirakataNaijiImportService:
             # Save daily records
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
+
+            ensure_ship_to_records(list(raw_records_with_ids), customer)
 
             if skipped_firm > 0:
                 self.warnings.append(f'確定優先: {skipped_firm}件の内示を除外（同一品番・納期でFIRM存在）')

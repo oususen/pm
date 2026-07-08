@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
+from orders.core.services.ship_to_utils import ensure_ship_to_records
 
 
 class KubotaHirakataKakuteiImportService:
@@ -41,6 +42,7 @@ class KubotaHirakataKakuteiImportService:
     COL_ORDER_NO = 3
     COL_SHIP_TO_45 = 13
     COL_SHIP_TO_47 = 12
+    COL_SHIP_TO_NAME_47 = 13
     COL_PRODUCT_CODE_45 = 5
     COL_PRODUCT_NAME_45 = 8
     COL_DELIVERY_DATE_45 = 18
@@ -227,6 +229,8 @@ class KubotaHirakataKakuteiImportService:
                         inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                         ship_to = row[self.COL_SHIP_TO_45].strip() if len(row) > self.COL_SHIP_TO_45 else ''
 
+                        ship_to_name = ''
+
                         due_date = self.parse_date_from_yymmdd(delivery_date_str)
                         fmt = '45'
 
@@ -252,6 +256,7 @@ class KubotaHirakataKakuteiImportService:
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE_47].strip() if len(row) > self.COL_INSPECTION_TYPE_47 else ''
                         ship_to = row[self.COL_SHIP_TO_47].strip() if len(row) > self.COL_SHIP_TO_47 else ''
+                        ship_to_name = row[self.COL_SHIP_TO_NAME_47].strip() if len(row) > self.COL_SHIP_TO_NAME_47 else ''
 
                         due_date = (
                             self.parse_date_from_mmdd(delivery_date_str)
@@ -289,6 +294,8 @@ class KubotaHirakataKakuteiImportService:
                         raw_payload['issue_date'] = issue_date_str
                     if ship_to:
                         raw_payload['ship_to'] = ship_to
+                    if ship_to_name:
+                        raw_payload['ship_to_name'] = ship_to_name
 
                     raw_record = StgOrderRawKubota(
                         customer_code=customer_code,
@@ -429,5 +436,7 @@ class KubotaHirakataKakuteiImportService:
             # Save daily records
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
+
+            ensure_ship_to_records(list(raw_records_with_ids), customer)
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id

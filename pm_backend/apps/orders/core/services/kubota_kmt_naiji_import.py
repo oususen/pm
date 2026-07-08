@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
+from orders.core.services.ship_to_utils import ensure_ship_to_records
 
 
 class KubotaKmtNaijiImportService:
@@ -259,5 +260,7 @@ class KubotaKmtNaijiImportService:
 
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
+
+            ensure_ship_to_records(list(raw_records_with_ids), customer)
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id

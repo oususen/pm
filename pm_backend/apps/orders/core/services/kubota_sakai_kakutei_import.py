@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Max
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
+from orders.core.services.ship_to_utils import ensure_ship_to_records
 from masters.models import Customer, Product
 
 
@@ -32,6 +33,7 @@ class KubotaSakaiKakuteiImportService:
     COL_PRODUCT_CODE = 5
     COL_PRODUCT_NAME = 10  # 品名 (Excel列11)
     COL_SHIP_TO = 12  # 納場所 (Excel列13)
+    COL_SHIP_TO_NAME = 13  # 納場名 (Excel列14)
     COL_INSPECTION_TYPE = 14  # 検区 (Excel列15)
     COL_DELIVERY_DATE = 23  # 納期 (Excel列24) - MMDD format
     COL_QUANTITY = 24  # 指示数/数量 (Excel列25)
@@ -220,6 +222,7 @@ class KubotaSakaiKakuteiImportService:
                     product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
                     plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
                     ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
+                    ship_to_name = row[self.COL_SHIP_TO_NAME].strip() if len(row) > self.COL_SHIP_TO_NAME else ''
                     inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                     delivery_date_str = row[self.COL_DELIVERY_DATE].strip() if len(row) > self.COL_DELIVERY_DATE else ''
                     quantity_str = row[self.COL_QUANTITY].strip() if len(row) > self.COL_QUANTITY else ''
@@ -262,6 +265,7 @@ class KubotaSakaiKakuteiImportService:
                             'issue_date': issue_date_str,  # 発行日（Order識別用）
                             'order_no': order_no,  # 発注番号（製品毎）
                             'ship_to': ship_to,  # 納場所
+                            'ship_to_name': ship_to_name,  # 納場名
                         },
                         parse_status='PENDING'
                     )
@@ -406,6 +410,8 @@ class KubotaSakaiKakuteiImportService:
             # Save daily records
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
+
+            ensure_ship_to_records(list(raw_records_with_ids), customer)
 
             # 確定ファイルの製品・日付について、内示データと比較
             forecast_diffs = []

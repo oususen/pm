@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
+from orders.core.services.ship_to_utils import ensure_ship_to_records
 
 
 class KubotaKmtKakuteiImportService:
@@ -19,6 +20,7 @@ class KubotaKmtKakuteiImportService:
     COL_PRODUCT_CODE = 5
     COL_PRODUCT_NAME = 10
     COL_SHIP_TO = 12
+    COL_SHIP_TO_NAME = 13
     COL_INSPECTION_TYPE = 14
     COL_DELIVERY_DATE = 21  # 納期(YYYYMMDD)
     COL_QUANTITY = 22  # 指示数
@@ -121,6 +123,7 @@ class KubotaKmtKakuteiImportService:
                 if data_no == '49' and plant_code not in self.KMT_PLANT_CODES:
                     continue
                 ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
+                ship_to_name = row[self.COL_SHIP_TO_NAME].strip() if len(row) > self.COL_SHIP_TO_NAME else ''
                 inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                 if data_no == '49':
                     due_date_str = row[self.COL49_DELIVERY_DATE].strip() if len(row) > self.COL49_DELIVERY_DATE else ''
@@ -163,6 +166,7 @@ class KubotaKmtKakuteiImportService:
                             'plant_code': plant_code,
                             'factory': self.FACTORY,
                             'ship_to': ship_to,
+                            'ship_to_name': ship_to_name,
                             'issue_date': issue_date,
                             'kubota_order_no': chuban,  # 注番（Excel列4）
                         },
@@ -260,5 +264,7 @@ class KubotaKmtKakuteiImportService:
 
             if daily_records:
                 StgOrderDaily.objects.bulk_create(daily_records)
+
+            ensure_ship_to_records(list(raw_records_with_ids), customer)
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id
