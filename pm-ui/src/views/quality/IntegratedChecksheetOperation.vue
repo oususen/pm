@@ -269,7 +269,7 @@
       <div class="matrix-header">
         <h3 class="panel-title">
           {{ activeBatch.product_code }} {{ activeBatch.product_name }}
-          <span class="batch-meta">| {{ activeBatch.template_name || '-' }} | ロット: {{ activeBatch.lot_no || '-' }} | 最終工程計画日: {{ activeBatch.plan_date || '-' }}</span>
+          <span class="batch-meta">| {{ activeBatch.template_name || '-' }} | ロット: {{ activeBatch.lot_no || '-' }} | 計画日: {{ activeBatch.plan_date || '-' }}</span>
           <span v-if="isReviewMode && reviewRoleLabel" class="batch-meta">| 確認: {{ reviewRoleLabel }}</span>
         </h3>
         <div class="matrix-header-actions">
