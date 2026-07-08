@@ -1,95 +1,95 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">朝礼一覧 <DataSourceDialog title="朝礼一覧" :sources="dsSources" /></h1>
+      <h1 class="page-title">{{ t('morningMeetingList.pageTitle') }} <DataSourceDialog :title="t('morningMeetingList.pageTitle')" :sources="dsSources" /></h1>
       <div class="page-actions">
-        <button v-if="canEditMeeting" class="btn-secondary" type="button" @click="openTemplateSelector">テンプレートから作成</button>
-        <RouterLink v-if="canEditMeeting" class="btn-secondary" to="/production/morning-meetings/new?template=1">テンプレート新規</RouterLink>
-        <RouterLink v-if="canEditMeeting" class="btn-primary" to="/production/morning-meetings/new">新規作成</RouterLink>
+        <button v-if="canEditMeeting" class="btn-secondary" type="button" @click="openTemplateSelector">{{ t('morningMeetingList.createFromTemplate') }}</button>
+        <RouterLink v-if="canEditMeeting" class="btn-secondary" to="/production/morning-meetings/new?template=1">{{ t('morningMeetingList.newTemplate') }}</RouterLink>
+        <RouterLink v-if="canEditMeeting" class="btn-primary" to="/production/morning-meetings/new">{{ t('morningMeetingList.newMeeting') }}</RouterLink>
       </div>
     </div>
 
     <div class="page-content">
       <div class="filter-bar">
         <div class="filter-field">
-          <label>開始日</label>
+          <label>{{ t('morningMeetingList.filter.fromDate') }}</label>
           <input v-model="filters.meeting_date_from" type="date" />
         </div>
         <div class="filter-field">
-          <label>終了日</label>
+          <label>{{ t('morningMeetingList.filter.toDate') }}</label>
           <input v-model="filters.meeting_date_to" type="date" />
         </div>
         <div class="filter-field">
-          <label>状態</label>
+          <label>{{ t('morningMeetingList.filter.status') }}</label>
           <select v-model="filters.status">
-            <option value="">すべて</option>
+            <option value="">{{ t('morningMeetingList.all') }}</option>
             <option v-for="option in statusOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
           </select>
         </div>
         <div class="filter-field">
-          <label>対象部署</label>
+          <label>{{ t('morningMeetingList.filter.department') }}</label>
           <select v-model="filters.department">
-            <option value="">すべて</option>
+            <option value="">{{ t('morningMeetingList.all') }}</option>
             <option v-for="dept in departments" :key="dept.id" :value="String(dept.id)">
               {{ dept.name }}
             </option>
           </select>
         </div>
         <div class="filter-field">
-          <label>表示区分</label>
+          <label>{{ t('morningMeetingList.filter.displayMode') }}</label>
           <select v-model="filters.template_mode">
-            <option value="normal">通常</option>
-            <option value="template">テンプレート</option>
-            <option value="all">すべて</option>
+            <option value="normal">{{ t('morningMeetingList.mode.normal') }}</option>
+            <option value="template">{{ t('morningMeetingList.mode.template') }}</option>
+            <option value="all">{{ t('morningMeetingList.all') }}</option>
           </select>
         </div>
         <div class="filter-field">
-          <label>キーワード</label>
-          <input v-model.trim="filters.search" type="text" placeholder="タイトル・議題" />
+          <label>{{ t('morningMeetingList.filter.keyword') }}</label>
+          <input v-model.trim="filters.search" type="text" :placeholder="t('morningMeetingList.filter.keywordPlaceholder')" />
         </div>
         <div class="filter-actions">
           <button class="btn-primary" type="button" @click="loadMeetings" :disabled="loading">
-            {{ loading ? '読込中...' : '検索' }}
+            {{ loading ? t('morningMeetingList.loading') : t('morningMeetingList.search') }}
           </button>
-          <button class="btn-secondary" type="button" @click="resetFilters">リセット</button>
+          <button class="btn-secondary" type="button" @click="resetFilters">{{ t('morningMeetingList.reset') }}</button>
         </div>
       </div>
 
       <table class="data-table">
         <thead>
           <tr>
-            <th>日付</th>
-            <th>タイトル</th>
-            <th>対象部署</th>
-            <th>ライン</th>
-            <th>司会者</th>
-            <th>状態</th>
-            <th>参加者</th>
-            <th>確認済</th>
-            <th>資料</th>
-            <th>操作</th>
+            <th>{{ t('morningMeetingList.col.date') }}</th>
+            <th>{{ t('morningMeetingList.col.title') }}</th>
+            <th>{{ t('morningMeetingList.col.department') }}</th>
+            <th>{{ t('morningMeetingList.col.line') }}</th>
+            <th>{{ t('morningMeetingList.col.facilitator') }}</th>
+            <th>{{ t('morningMeetingList.col.status') }}</th>
+            <th>{{ t('morningMeetingList.col.participants') }}</th>
+            <th>{{ t('morningMeetingList.col.checked') }}</th>
+            <th>{{ t('morningMeetingList.col.attachments') }}</th>
+            <th>{{ t('morningMeetingList.col.actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="row in meetings" :key="row.id">
             <td>{{ row.meeting_date || '-' }}</td>
             <td>
-              <span v-if="row.is_template" class="template-badge">テンプレート</span>
+              <span v-if="row.is_template" class="template-badge">{{ t('morningMeetingList.templateBadge') }}</span>
               {{ row.title }}
             </td>
             <td>{{ joinNames(row.target_department_names) }}</td>
             <td>{{ joinNames(row.target_line_names) }}</td>
             <td>{{ row.facilitator_name || '-' }}</td>
-            <td>{{ row.status_display }}</td>
+            <td>{{ statusLabel(row.status) }}</td>
             <td>{{ row.participant_count }}</td>
             <td>{{ row.checked_count }}</td>
             <td>{{ row.attachment_count || 0 }}</td>
             <td class="actions-cell">
               <template v-if="row.is_template">
-                <button v-if="canEditMeeting" class="btn-sm" type="button" @click="createFromTemplate(row)">複製</button>
-                <RouterLink v-if="canEditMeeting" class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/edit`">編集</RouterLink>
+                <button v-if="canEditMeeting" class="btn-sm" type="button" @click="createFromTemplate(row)">{{ t('morningMeetingList.action.duplicate') }}</button>
+                <RouterLink v-if="canEditMeeting" class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/edit`">{{ t('morningMeetingList.action.edit') }}</RouterLink>
                 <button
                   v-if="canEditMeeting"
                   class="btn-sm danger"
@@ -97,17 +97,17 @@
                   @click="handleDelete(row)"
                   :disabled="loading"
                 >
-                  削除
+                  {{ t('morningMeetingList.action.delete') }}
                 </button>
               </template>
               <template v-else-if="row.status === 'COMPLETED'">
-                <RouterLink class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/run`">詳細</RouterLink>
+                <RouterLink class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/run`">{{ t('morningMeetingList.action.detail') }}</RouterLink>
               </template>
               <template v-else>
-                <RouterLink class="btn-sm" :to="`/production/morning-meetings/${row.id}/run`">実行</RouterLink>
-                <RouterLink v-if="canEditMeeting" class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/edit`">編集</RouterLink>
+                <RouterLink class="btn-sm" :to="`/production/morning-meetings/${row.id}/run`">{{ t('morningMeetingList.action.run') }}</RouterLink>
+                <RouterLink v-if="canEditMeeting" class="btn-sm secondary" :to="`/production/morning-meetings/${row.id}/edit`">{{ t('morningMeetingList.action.edit') }}</RouterLink>
                 <button v-if="canEditMeeting" class="btn-sm secondary" type="button" @click="handleDuplicate(row)">
-                  複製
+                  {{ t('morningMeetingList.action.duplicate') }}
                 </button>
                 <button
                   v-if="canEditMeeting"
@@ -116,13 +116,13 @@
                   @click="handleDelete(row)"
                   :disabled="loading"
                 >
-                  削除
+                  {{ t('morningMeetingList.action.delete') }}
                 </button>
               </template>
             </td>
           </tr>
           <tr v-if="!meetings.length && !loading">
-            <td colspan="10" class="empty-row">朝礼はありません</td>
+            <td colspan="10" class="empty-row">{{ t('morningMeetingList.empty') }}</td>
           </tr>
         </tbody>
       </table>
@@ -131,13 +131,13 @@
     <div v-if="templateDialog.visible" class="modal-overlay" @click.self="closeTemplateSelector">
       <div class="template-dialog">
         <div class="template-dialog-header">
-          <h2>テンプレートから作成</h2>
-          <button class="btn-secondary" type="button" @click="closeTemplateSelector">閉じる</button>
+          <h2>{{ t('morningMeetingList.templateDialog.title') }}</h2>
+          <button class="btn-secondary" type="button" @click="closeTemplateSelector">{{ t('common.close') }}</button>
         </div>
         <div class="template-dialog-body">
           <div class="filter-field">
-            <label>キーワード</label>
-            <input v-model.trim="templateDialog.search" type="text" placeholder="タイトル・議題" />
+            <label>{{ t('morningMeetingList.filter.keyword') }}</label>
+            <input v-model.trim="templateDialog.search" type="text" :placeholder="t('morningMeetingList.filter.keywordPlaceholder')" />
           </div>
           <div class="template-list">
             <button
@@ -150,9 +150,9 @@
             >
               <strong>{{ row.title }}</strong>
               <span>{{ joinNames(row.target_department_names) }}</span>
-              <span>{{ row.facilitator_name || '司会者未設定' }}</span>
+              <span>{{ row.facilitator_name || t('morningMeetingList.noFacilitator') }}</span>
             </button>
-            <div v-if="!filteredTemplates.length" class="empty-row">テンプレートがありません</div>
+            <div v-if="!filteredTemplates.length" class="empty-row">{{ t('morningMeetingList.templateDialog.empty') }}</div>
           </div>
         </div>
       </div>
@@ -167,6 +167,7 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import { hasPermission } from '@/router'
+import { t } from '@/i18n'
 import { addDays, getBusinessISODate } from '@/utils/dateUtil'
 
 const dsSources = [
@@ -177,10 +178,10 @@ const dsSources = [
 
 const router = useRouter()
 const statusOptions = [
-  { value: 'DRAFT', label: '下書き' },
-  { value: 'READY', label: '準備完了' },
-  { value: 'IN_PROGRESS', label: '実行中' },
-  { value: 'COMPLETED', label: '完了' },
+  { value: 'DRAFT', label: t('morningMeetingList.status.draft') },
+  { value: 'READY', label: t('morningMeetingList.status.ready') },
+  { value: 'IN_PROGRESS', label: t('morningMeetingList.status.inProgress') },
+  { value: 'COMPLETED', label: t('morningMeetingList.status.completed') },
 ]
 
 const loading = ref(false)
@@ -249,6 +250,16 @@ const joinNames = (values) => {
   return values.join(' / ')
 }
 
+const statusLabel = (status) => {
+  const keyMap = {
+    DRAFT: 'morningMeetingList.status.draft',
+    READY: 'morningMeetingList.status.ready',
+    IN_PROGRESS: 'morningMeetingList.status.inProgress',
+    COMPLETED: 'morningMeetingList.status.completed',
+  }
+  return t(keyMap[status] || 'morningMeetingList.status.unknown')
+}
+
 const loadMeetings = async () => {
   loading.value = true
   try {
@@ -296,7 +307,7 @@ const resetFilters = async () => {
 }
 
 const handleDuplicate = async (row) => {
-  if (!window.confirm(`朝礼「${row.title}」を複製して新規作成します。よろしいですか？`)) return
+  if (!window.confirm(t('morningMeetingList.confirmDuplicate', { title: row.title }))) return
   try {
     const res = await api.morningMeetings.duplicate(row.id, {
       meeting_date: getBusinessISODate(),
@@ -306,7 +317,7 @@ const handleDuplicate = async (row) => {
     router.push(`/production/morning-meetings/${res.data.id}/edit`)
   } catch (error) {
     console.error('朝礼の複製に失敗しました:', error)
-    window.alert('朝礼の複製に失敗しました。')
+    window.alert(t('morningMeetingList.error.duplicate'))
   }
 }
 
@@ -336,18 +347,18 @@ const createFromTemplate = async (row) => {
     router.push(`/production/morning-meetings/${res.data.id}/edit`)
   } catch (error) {
     console.error('テンプレートからの作成に失敗しました:', error)
-    window.alert('テンプレートからの作成に失敗しました。')
+    window.alert(t('morningMeetingList.error.createFromTemplate'))
   }
 }
 
 const handleDelete = async (row) => {
-  if (!window.confirm(`朝礼「${row.title}」を削除します。よろしいですか？`)) return
+  if (!window.confirm(t('morningMeetingList.confirmDelete', { title: row.title }))) return
   try {
     await api.morningMeetings.delete(row.id)
     await loadMeetings()
   } catch (error) {
     console.error('朝礼の削除に失敗しました:', error)
-    window.alert('朝礼の削除に失敗しました。')
+    window.alert(t('morningMeetingList.error.delete'))
   }
 }
 
