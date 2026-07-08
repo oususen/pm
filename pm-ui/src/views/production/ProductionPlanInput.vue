@@ -835,7 +835,15 @@
         <span v-if="spotExcelFileName">ファイル: {{ spotExcelFileName }}</span>
         <span v-if="spotExcelMessage">{{ spotExcelMessage }}</span>
       </div>
-      <div v-if="spotExcelMissingProducts.length || spotExcelMissingProcesses.length" class="spot-excel-errors">
+      <div v-if="spotExcelMissingProducts.length || spotExcelMissingProcesses.length || spotExcelLineMismatches.length" class="spot-excel-errors">
+        <div v-if="spotExcelLineMismatches.length" class="spot-excel-error-card">
+          <div class="spot-excel-error-title">ライン不一致（{{ spotExcelLineMismatches.length }}件）取込は中止されました</div>
+          <ul>
+            <li v-for="item in spotExcelLineMismatches" :key="`line-mismatch-${item.row_no}-${item.product_code}`">
+              行{{ item.row_no }}: {{ item.product_code }}（登録ライン: {{ item.registered_line }}）
+            </li>
+          </ul>
+        </div>
         <div v-if="spotExcelMissingProducts.length" class="spot-excel-error-card">
           <div class="spot-excel-error-title">未登録品番（{{ spotExcelMissingProducts.length }}件）</div>
           <ul>
@@ -1370,6 +1378,7 @@ const spotExcelLoading = ref(false)
 const spotExcelProcess4013Id = ref(null)
 const spotExcelMissingProducts = ref([])
 const spotExcelMissingProcesses = ref([])
+const spotExcelLineMismatches = ref([])
 const settingsTargetTab = ref('tank')
 const FALLBACK_PLAN_TABS = [
   { key: 'tank', label: 'タンク' },
@@ -2422,6 +2431,7 @@ const onSpotExcelFileChange = async (event) => {
   spotExcelMessage.value = ''
   spotExcelMissingProducts.value = []
   spotExcelMissingProcesses.value = []
+  spotExcelLineMismatches.value = []
   if (!file) return
   spotExcelLoading.value = true
   try {
@@ -2481,14 +2491,30 @@ const saveSpotExcelPlan = async () => {
     return
   }
 
+  const lineCodeById = new Map(
+    (Array.isArray(lines.value) ? lines.value : []).map((l) => [String(l.id), `${l.line_code || ''}${l.line_name ? ' ' + l.line_name : ''}`]),
+  )
+  const selectedLineLabel = lineCodeById.get(String(selectedLine.value)) || String(selectedLine.value)
+
   const items = []
   const missingProducts = []
   const missingProcesses = []
+  const lineMismatches = []
 
   spotExcelRows.value.forEach((row) => {
     const prod = productByCode.get(row.product_code)
     if (!prod) {
       missingProducts.push({ row_no: row.row_no, product_code: row.product_code })
+      return
+    }
+    // 品番マスタの登録ラインと選択中ラインが異なる場合は取込対象から除外する
+    // (スポットExcel取込のライン選択ミスによる誤登録を防止するため)
+    if (prod.line && String(prod.line) !== String(selectedLine.value)) {
+      lineMismatches.push({
+        row_no: row.row_no,
+        product_code: row.product_code,
+        registered_line: lineCodeById.get(String(prod.line)) || String(prod.line),
+      })
       return
     }
     items.push({
@@ -2499,6 +2525,12 @@ const saveSpotExcelPlan = async () => {
       sequence_no: 1,
     })
   })
+
+  spotExcelLineMismatches.value = lineMismatches
+  if (lineMismatches.length > 0) {
+    spotExcelMessage.value = `ライン不一致のため中止しました（選択中ライン: ${selectedLineLabel}）。品番マスタの登録ラインと一致しない${lineMismatches.length}件を除外してから再実行するか、ライン選択を確認してください。`
+    return
+  }
 
   if (!items.length) {
     alert('保存対象がありません。品番マスタまたは工程設定を確認してください。')
