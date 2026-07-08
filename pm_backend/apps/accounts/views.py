@@ -1,9 +1,11 @@
-from django.contrib.auth import authenticate, login, logout
+import logging
+
+from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import (
@@ -15,6 +17,10 @@ from .models import (
     PositionPermission,
     DepartmentPositionPermission,
 )
+
+User = get_user_model()
+IMPERSONATION_ORIGIN_SESSION_KEY = 'auth_impersonation_origin_user_id'
+logger = logging.getLogger(__name__)
 
 def _safe_get_profile(user):
     try:
@@ -196,7 +202,7 @@ def _build_effective_permissions(user):
     return result
 
 
-def _user_payload(user):
+def _user_payload(user, request=None):
     return {
         'id': user.id,
         'username': user.get_username(),
@@ -207,7 +213,73 @@ def _user_payload(user):
         'is_superuser': user.is_superuser,
         'profile': _profile_payload(user),
         'effective_permissions': _build_effective_permissions(user),
+        'impersonation': _impersonation_payload(user, request),
     }
+
+
+def _simple_user_payload(user):
+    full_name = f'{user.last_name or ""} {user.first_name or ""}'.strip()
+    return {
+        'id': user.id,
+        'username': user.get_username(),
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'display_name': full_name or user.get_username(),
+    }
+
+
+def _is_switch_admin_user(user):
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    username = str(user.get_username() or '').strip().lower()
+    return username == 'admin'
+
+
+def _get_origin_user_from_request(request):
+    origin_id = request.session.get(IMPERSONATION_ORIGIN_SESSION_KEY)
+    if not origin_id:
+        return None
+    return User.objects.filter(id=origin_id, is_active=True).first()
+
+
+def _can_use_impersonation(request):
+    return _is_switch_admin_user(request.user) or bool(_get_origin_user_from_request(request))
+
+
+def _impersonation_payload(user, request=None):
+    origin_user = _get_origin_user_from_request(request) if request is not None else None
+    return {
+        'can_switch': bool(_is_switch_admin_user(user) or origin_user),
+        'active': bool(origin_user and origin_user.id != user.id),
+        'origin_user': _simple_user_payload(origin_user) if origin_user else None,
+    }
+
+
+def _auth_response(request, user):
+    token = get_token(request)
+    return Response({'user': _user_payload(user, request), 'csrfToken': token})
+
+
+def _request_ip(request):
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', '')
+
+
+def _log_impersonation_event(request, action, actor_user, target_user=None, origin_user=None):
+    logger.info(
+        'impersonation action=%s actor=%s actor_id=%s target=%s target_id=%s origin=%s origin_id=%s ip=%s ua=%s',
+        action,
+        actor_user.get_username() if actor_user else '',
+        actor_user.id if actor_user else '',
+        target_user.get_username() if target_user else '',
+        target_user.id if target_user else '',
+        origin_user.get_username() if origin_user else '',
+        origin_user.id if origin_user else '',
+        _request_ip(request),
+        request.META.get('HTTP_USER_AGENT', ''),
+    )
 
 
 @ensure_csrf_cookie
@@ -243,15 +315,16 @@ def login_view(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    request.session.pop(IMPERSONATION_ORIGIN_SESSION_KEY, None)
     login(request, user)
-    token = get_token(request)
-    return Response({'user': _user_payload(user), 'csrfToken': token})
+    return _auth_response(request, user)
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
     logout(request)
+    request.session.pop(IMPERSONATION_ORIGIN_SESSION_KEY, None)
     token = get_token(request)
     return Response({'ok': True, 'csrfToken': token})
 
@@ -265,9 +338,85 @@ def me(request):
         return Response(
             {
                 'authenticated': True,
-                'user': _user_payload(request.user),
+                'user': _user_payload(request.user, request),
                 'csrfToken': token,
             }
         )
 
     return Response({'authenticated': False, 'user': None, 'csrfToken': token})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def switchable_users_view(request):
+    if not _can_use_impersonation(request):
+        return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
+
+    current_user = request.user
+    users = (
+        User.objects.filter(is_active=True)
+        .exclude(username__iexact='admin')
+        .order_by('username')
+    )
+    return Response(
+        {
+            'current_user': _simple_user_payload(current_user),
+            'impersonation': _impersonation_payload(current_user, request),
+            'users': [_simple_user_payload(user) for user in users],
+        }
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def switch_user_view(request):
+    if not _can_use_impersonation(request):
+        return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        user_id = int(request.data.get('user_id') or 0)
+    except (TypeError, ValueError):
+        return Response({'detail': 'user_id が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+    target_user = (
+        User.objects.filter(id=user_id, is_active=True)
+        .exclude(username__iexact='admin')
+        .first()
+    )
+    if not target_user:
+        return Response({'detail': '対象ユーザーが見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
+
+    origin_user = _get_origin_user_from_request(request)
+    origin_user_id = origin_user.id if origin_user else request.user.id
+    actor_user = origin_user if origin_user else request.user
+
+    login(request, target_user)
+    request.session[IMPERSONATION_ORIGIN_SESSION_KEY] = origin_user_id
+    _log_impersonation_event(
+        request,
+        action='switch',
+        actor_user=actor_user,
+        target_user=target_user,
+        origin_user=actor_user,
+    )
+    return _auth_response(request, target_user)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def switch_back_view(request):
+    origin_user = _get_origin_user_from_request(request)
+    if not origin_user:
+        return Response({'detail': '切替元ユーザーが見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+    actor_user = request.user
+    login(request, origin_user)
+    request.session.pop(IMPERSONATION_ORIGIN_SESSION_KEY, None)
+    _log_impersonation_event(
+        request,
+        action='switch_back',
+        actor_user=origin_user,
+        target_user=actor_user,
+        origin_user=origin_user,
+    )
+    return _auth_response(request, origin_user)

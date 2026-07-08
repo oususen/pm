@@ -48,6 +48,22 @@ export const login = async (username, password) => {
   return user
 }
 
+export const switchUser = async (userId) => {
+  await api.auth.csrf()
+  const res = await api.auth.switchUser({ user_id: userId })
+  const user = res.data?.user || null
+  setUser(user)
+  return user
+}
+
+export const switchBack = async () => {
+  await api.auth.csrf()
+  const res = await api.auth.switchBack()
+  const user = res.data?.user || null
+  setUser(user)
+  return user
+}
+
 export const logout = async () => {
   try {
     await api.auth.logout()

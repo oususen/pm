@@ -45,6 +45,53 @@
             <span>👤</span>
             {{ t('nav.profile') }}
           </RouterLink>
+          <div v-if="canUseUserSwitch" class="user-switch-section">
+            <div class="user-menu-divider"></div>
+            <div class="user-switch-header">
+              <span>🔁</span>
+              <div class="user-switch-texts">
+                <div class="user-switch-title">ユーザー切替</div>
+                <div v-if="isImpersonating && impersonationOriginName" class="user-switch-subtitle">
+                  元ユーザー: {{ impersonationOriginName }}
+                </div>
+              </div>
+            </div>
+            <div class="user-switch-body">
+              <select
+                v-model="selectedSwitchUserId"
+                class="user-switch-select"
+                :disabled="switchLoading || switchOptionsLoading"
+                @click.stop
+              >
+                <option value="">ユーザーを選択</option>
+                <option v-for="user in switchableUsers" :key="user.id" :value="String(user.id)">
+                  {{ user.display_name }}（{{ user.username }}）
+                </option>
+              </select>
+              <div class="user-switch-actions">
+                <button
+                  class="user-switch-btn"
+                  type="button"
+                  :disabled="switchLoading || switchOptionsLoading || !selectedSwitchUserId"
+                  @click.stop="handleUserSwitch"
+                >
+                  切替
+                </button>
+                <button
+                  v-if="isImpersonating"
+                  class="user-switch-btn secondary"
+                  type="button"
+                  :disabled="switchLoading"
+                  @click.stop="handleSwitchBack"
+                >
+                  adminに戻る
+                </button>
+              </div>
+              <div v-if="switchStatusMessage" class="user-switch-status">
+                {{ switchStatusMessage }}
+              </div>
+            </div>
+          </div>
           <div class="user-menu-item language-item">
             <span>🌐</span>
             <div class="language-select">
@@ -159,7 +206,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { authState, logout } from '../auth'
+import { authState, logout, switchBack, switchUser } from '../auth'
 import { hasPermission } from '../router'
 import api from '@/api/client'
 import { locale, t, setLocale, getLocaleOptions } from '@/i18n'
@@ -281,8 +328,17 @@ const userAccountName = computed(() => {
   return user.username || user.email || ''
 })
 
+const canUseUserSwitch = computed(() => Boolean(authState.user?.impersonation?.can_switch))
+const isImpersonating = computed(() => Boolean(authState.user?.impersonation?.active))
+const impersonationOriginName = computed(() => authState.user?.impersonation?.origin_user?.display_name || '')
+
 const showUserMenu = ref(false)
 const showNotificationMenu = ref(false)
+const switchableUsers = ref([])
+const selectedSwitchUserId = ref('')
+const switchLoading = ref(false)
+const switchOptionsLoading = ref(false)
+const switchStatusMessage = ref('')
 const notifications = ref([])
 const pendingTaskCount = ref(0)
 const previousNotificationIds = ref(new Set())
@@ -510,10 +566,84 @@ const handleNotificationClick = async (item) => {
   router.push('/notifications')
 }
 
+const loadSwitchableUsers = async () => {
+  if (!canUseUserSwitch.value) {
+    switchableUsers.value = []
+    selectedSwitchUserId.value = ''
+    return
+  }
+  switchOptionsLoading.value = true
+  switchStatusMessage.value = ''
+  try {
+    const res = await api.auth.getSwitchableUsers()
+    const rows = Array.isArray(res.data?.users) ? res.data.users : []
+    switchableUsers.value = rows
+    const currentId = String(authState.user?.id || '')
+    if (selectedSwitchUserId.value && rows.some((user) => String(user.id) === selectedSwitchUserId.value)) {
+      return
+    }
+    const firstCandidate = rows.find((user) => String(user.id) !== currentId)
+    selectedSwitchUserId.value = firstCandidate ? String(firstCandidate.id) : ''
+  } catch (error) {
+    console.error('切替候補の取得に失敗しました:', error)
+    switchableUsers.value = []
+    selectedSwitchUserId.value = ''
+    switchStatusMessage.value = '切替候補の取得に失敗しました。'
+  } finally {
+    switchOptionsLoading.value = false
+  }
+}
+
+const moveAfterUserSwitch = async (nextUser) => {
+  const resource = typeof route.meta?.resource === 'string' ? route.meta.resource : ''
+  if (resource && !hasPermission(nextUser, resource, 'view')) {
+    await router.replace('/')
+    return
+  }
+  await router.replace({ path: route.fullPath })
+}
+
+const handleUserSwitch = async () => {
+  if (!selectedSwitchUserId.value || switchLoading.value) return
+  switchLoading.value = true
+  switchStatusMessage.value = ''
+  try {
+    const nextUser = await switchUser(Number(selectedSwitchUserId.value))
+    switchStatusMessage.value = `${nextUser?.username || ''} に切り替えました。`
+    closeUserMenu()
+    await moveAfterUserSwitch(nextUser)
+  } catch (error) {
+    console.error('ユーザー切替に失敗しました:', error)
+    switchStatusMessage.value = error?.response?.data?.detail || 'ユーザー切替に失敗しました。'
+  } finally {
+    switchLoading.value = false
+  }
+}
+
+const handleSwitchBack = async () => {
+  if (switchLoading.value) return
+  switchLoading.value = true
+  switchStatusMessage.value = ''
+  try {
+    const nextUser = await switchBack()
+    switchStatusMessage.value = `${nextUser?.username || ''} に戻しました。`
+    closeUserMenu()
+    await moveAfterUserSwitch(nextUser)
+  } catch (error) {
+    console.error('元ユーザーへの復帰に失敗しました:', error)
+    switchStatusMessage.value = error?.response?.data?.detail || '元ユーザーへの復帰に失敗しました。'
+  } finally {
+    switchLoading.value = false
+  }
+}
+
 const toggleUserMenu = () => {
   showUserMenu.value = !showUserMenu.value
   if (showUserMenu.value) {
     showNotificationMenu.value = false
+    if (canUseUserSwitch.value) {
+      loadSwitchableUsers()
+    }
   }
 }
 
@@ -959,12 +1089,19 @@ watch(
 
 watch(
   () => authState.user,
-  (newUser) => {
+  async (newUser) => {
     if (newUser) {
       audioUnlocked.value = false
       attachAudioUnlockListeners()
+      stopPolling()
       startPolling()
       syncNativePushRegistration(newUser)
+      if (canUseUserSwitch.value && showUserMenu.value) {
+        await loadSwitchableUsers()
+      } else {
+        switchableUsers.value = []
+        selectedSwitchUserId.value = ''
+      }
     } else {
       stopPolling()
       detachAudioUnlockListeners()
@@ -975,6 +1112,9 @@ watch(
       pendingTaskCount.value = 0
       previousNotificationIds.value = new Set()
       mutedIncomingCallIds.value = new Set()
+      switchableUsers.value = []
+      selectedSwitchUserId.value = ''
+      switchStatusMessage.value = ''
     }
   }
 )
@@ -1194,6 +1334,80 @@ const handleLogout = async () => {
   height: 1px;
   background: #e5e7eb;
   margin: 6px 0;
+}
+
+.user-switch-section {
+  padding: 0 12px 10px;
+}
+
+.user-switch-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #333;
+  padding: 2px 0 8px;
+}
+
+.user-switch-texts {
+  min-width: 0;
+}
+
+.user-switch-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2a44;
+}
+
+.user-switch-subtitle {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.user-switch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-switch-select {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.user-switch-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.user-switch-btn {
+  flex: 1;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: #2563eb;
+  cursor: pointer;
+}
+
+.user-switch-btn.secondary {
+  background: #64748b;
+}
+
+.user-switch-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.user-switch-status {
+  font-size: 11px;
+  color: #64748b;
 }
 
 .user-menu-item {
