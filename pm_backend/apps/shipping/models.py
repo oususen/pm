@@ -1,5 +1,5 @@
 from django.db import models
-from masters.models import Customer, Product
+from masters.models import Calendar, Customer, Product
 
 
 class ShipmentActual(models.Model):
@@ -77,6 +77,10 @@ class ShipToLeadTime(models.Model):
     ship_to_code = models.CharField(max_length=40, verbose_name='納入先コード')
     ship_to_name = models.CharField(max_length=100, blank=True, default='', verbose_name='納入地名')
     additional_days = models.PositiveIntegerField(default=0, verbose_name='出荷加算日数')
+    calendar = models.ForeignKey(
+        Calendar, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name='カレンダ',
+    )
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

@@ -79,6 +79,7 @@ class OrderExpansionService:
         self._default_calendar_id: int | None = None
         self._routed_product_ids: set[int] = set()
         self._ship_to_additional_days: Dict[Tuple[int, str], int] = {}
+        self._ship_to_calendar_cache: Dict[Tuple[int, str], int | None] = {}
         self._customer_calendar_cache: Dict[int, int | None] = {}
 
     def _prefetch_all(self):
@@ -138,6 +139,8 @@ class OrderExpansionService:
         for stlt in ShipToLeadTime.objects.filter(is_active=True).select_related('customer'):
             key = (stlt.customer_id, (stlt.ship_to_code or '').strip())
             self._ship_to_additional_days[key] = stlt.additional_days
+            if stlt.calendar_id:
+                self._ship_to_calendar_cache[key] = stlt.calendar_id
         for customer in Customer.objects.filter(calendar__isnull=False).select_related('calendar'):
             self._customer_calendar_cache[customer.id] = customer.calendar_id
 
@@ -496,7 +499,7 @@ class OrderExpansionService:
         if customer_id and ship_to_code:
             additional_days = self._ship_to_additional_days.get((customer_id, ship_to_code))
             if additional_days:
-                calendar_ids = self._resolve_demand_calendar_ids(None, customer_id)
+                calendar_ids = self._resolve_demand_calendar_ids(None, customer_id, ship_to_code)
                 required_date = self._shift_business_days(calendar_ids, required_date, additional_days)
         final_required_date = required_date
 
@@ -555,6 +558,7 @@ class OrderExpansionService:
             final_calendar_ids = self._resolve_demand_calendar_ids(
                 final_step.line_id,
                 customer_id,
+                ship_to_code,
             )
             lead_days = resolve_lead_days_for_step(final_step)
             final_required_date = self._shift_business_days(
@@ -573,6 +577,7 @@ class OrderExpansionService:
             calendar_ids = self._resolve_demand_calendar_ids(
                 step.line_id,
                 customer_id,
+                ship_to_code,
             )
             lead_days = resolve_lead_days_for_step(step)
             required_for_step = self._shift_business_days(
@@ -603,6 +608,7 @@ class OrderExpansionService:
             calendar_ids = self._resolve_demand_calendar_ids(
                 effective_line_id,
                 customer_id,
+                ship_to_code,
             )
             lead_days = resolve_lead_days_for_step(step)
             if step.hierarchy_path == 'final':
@@ -798,8 +804,13 @@ class OrderExpansionService:
         cal_id = self._line_calendar_cache.get(line_id)
         return cal_id or self._default_calendar_id
 
-    def _resolve_demand_calendar_ids(self, line_id, customer_id):
+    def _resolve_demand_calendar_ids(self, line_id, customer_id, ship_to_code=None):
         calendar_ids: List[int | None] = [self._resolve_calendar_id(line_id)]
+        if customer_id and ship_to_code:
+            ship_to_cal = self._ship_to_calendar_cache.get((customer_id, ship_to_code))
+            if ship_to_cal and ship_to_cal not in calendar_ids:
+                calendar_ids.append(ship_to_cal)
+                return tuple(calendar_ids)
         if customer_id:
             customer_calendar_id = self._customer_calendar_cache.get(customer_id)
             if customer_calendar_id and customer_calendar_id not in calendar_ids:

@@ -82,15 +82,17 @@ class ShipmentActualHistorySerializer(serializers.ModelSerializer):
 class ShipToLeadTimeSerializer(serializers.ModelSerializer):
     customer_code = serializers.CharField(source='customer.customer_code', read_only=True)
     customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    calendar_name = serializers.CharField(source='calendar.calendar_name', read_only=True, default=None)
 
     class Meta:
         model = ShipToLeadTime
         fields = [
             'id', 'customer', 'customer_code', 'customer_name',
             'ship_to_code', 'ship_to_name', 'additional_days',
+            'calendar', 'calendar_name',
             'is_active', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'customer_code', 'customer_name', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'customer_code', 'customer_name', 'calendar_name', 'created_at', 'updated_at']
 
 
 class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):

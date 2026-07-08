@@ -69,7 +69,7 @@ class ShipmentActualViewSet(viewsets.ModelViewSet):
 
 class ShipToLeadTimeViewSet(viewsets.ModelViewSet):
     """納入地別出荷加算日数ViewSet"""
-    queryset = ShipToLeadTime.objects.select_related('customer').all()
+    queryset = ShipToLeadTime.objects.select_related('customer', 'calendar').all()
     serializer_class = ShipToLeadTimeSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['customer', 'is_active']

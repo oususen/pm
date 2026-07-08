@@ -70,6 +70,38 @@
               有効
             </label>
           </div>
+
+          <!-- 納入地別カレンダ（編集時のみ表示） -->
+          <div v-if="isEdit" class="ship-to-section">
+            <h3>納入地別カレンダ</h3>
+            <table v-if="shipToRows.length" class="ship-to-table">
+              <thead>
+                <tr>
+                  <th>納入先コード</th>
+                  <th>納入地名</th>
+                  <th class="num">加算日数</th>
+                  <th>カレンダ</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in shipToRows" :key="row.id || row.ship_to_code" :class="{ 'new-row': row._isNew }">
+                  <td>{{ row.ship_to_code }}</td>
+                  <td><input v-if="row._isNew" v-model="row.ship_to_name" class="inline-input" placeholder="納入地名" /><template v-else>{{ row.ship_to_name }}</template></td>
+                  <td class="num"><input v-if="row._isNew" type="number" v-model.number="row.additional_days" min="0" class="inline-input num" style="width:60px" /><template v-else>{{ row.additional_days }}</template></td>
+                  <td>
+                    <select v-model="row.calendar" :disabled="!canEdit" class="cal-select">
+                      <option :value="null">(顧客と同じ)</option>
+                      <option v-for="cal in calendars" :key="cal.id" :value="cal.id">
+                        {{ cal.calendar_name }}
+                      </option>
+                    </select>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="no-ship-to">納入地の登録なし（出荷 → 納入地別出荷加算日数で追加）</div>
+          </div>
+
           <div class="form-actions">
             <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
             <button type="button" @click="closeDialog" class="btn-secondary">キャンセル</button>
@@ -94,6 +126,7 @@ const dsSources = [
 
 const customers = ref([])
 const calendars = ref([])
+const shipToRows = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
 const formData = ref({
@@ -135,14 +168,44 @@ const showNewDialog = () => {
     calendar: null,
     is_active: true
   }
+  shipToRows.value = []
   showDialog.value = true
 }
 
-const editCustomer = (customer) => {
+const fetchShipToRows = async (customerId) => {
+  try {
+    const [existingRes, codesRes] = await Promise.all([
+      api.shipToLeadTimes.getAll({ customer: customerId }),
+      api.shipToLeadTimes.getShipToCodes(customerId),
+    ])
+    const existing = (existingRes.data.results || existingRes.data || []).map(r => ({ ...r, _isNew: false }))
+    const existingCodes = new Set(existing.map(r => r.ship_to_code))
+    const orderCodes = codesRes.data || []
+    const newRows = orderCodes
+      .filter(code => !existingCodes.has(code))
+      .map(code => ({
+        _isNew: true,
+        customer: customerId,
+        ship_to_code: code,
+        ship_to_name: '',
+        additional_days: 0,
+        calendar: null,
+        is_active: true,
+      }))
+    shipToRows.value = [...existing, ...newRows]
+  } catch (e) {
+    console.error('納入地取得エラー:', e)
+    shipToRows.value = []
+  }
+}
+
+const editCustomer = async (customer) => {
   if (!canEdit.value) return
   isEdit.value = true
   formData.value = { ...customer }
+  shipToRows.value = []
   showDialog.value = true
+  await fetchShipToRows(customer.id)
 }
 
 const closeDialog = () => {
@@ -161,6 +224,23 @@ const saveCustomer = async () => {
 
     if (isEdit.value) {
       await api.customers.updateCustomer(dataToSend.id, dataToSend)
+      for (const row of shipToRows.value) {
+        const payload = {
+          customer: row.customer,
+          ship_to_code: row.ship_to_code,
+          ship_to_name: row.ship_to_name,
+          additional_days: row.additional_days,
+          calendar: row.calendar || null,
+          is_active: row.is_active,
+        }
+        if (row._isNew) {
+          if (row.calendar) {
+            await api.shipToLeadTimes.create(payload)
+          }
+        } else {
+          await api.shipToLeadTimes.update(row.id, payload)
+        }
+      }
       alert('更新しました')
     } else {
       await api.customers.createCustomer(dataToSend)
@@ -272,5 +352,70 @@ onMounted(() => {
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.ship-to-section {
+  margin-top: 1.2rem;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 1rem;
+}
+
+.ship-to-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.ship-to-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ship-to-table th,
+.ship-to-table td {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  text-align: left;
+}
+
+.ship-to-table th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #475569;
+}
+
+.ship-to-table .num {
+  text-align: right;
+}
+
+.cal-select {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+.no-ship-to {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  padding: 4px 0;
+}
+
+.new-row {
+  background: #fffbeb;
+}
+
+.inline-input {
+  padding: 2px 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+.inline-input.num {
+  text-align: right;
 }
 </style>
