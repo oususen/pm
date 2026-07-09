@@ -12,6 +12,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 from io import BytesIO
+import logging
 
 from django.db import transaction
 from django.db.models import Count, Max, Q
@@ -52,6 +53,8 @@ KUBOTA_TRIP_PLAN_ID_PREFIX = 'KBT_T'
 KUBOTA_COMMON_BUSINESS_TYPE = 'KUBOTA_SAKAI'
 KUBOTA_COMMON_SOURCE_TYPE = 'KUBOTA_SAKAI_DUE'
 KUBOTA_CUSTOMER_CODE = '000196'
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -941,6 +944,7 @@ class KubotaSakaiTripLoadPreviewView(APIView):
         }
 
         per_truck_load_items = defaultdict(list)
+        per_truck_errors = defaultdict(list)
         for due_adjustment in due_adjustments:
             product = products.get(due_adjustment.product_code)
             allocations = posted_alloc_map.get(due_adjustment.id, existing_map.get(due_adjustment.id, []))
@@ -948,17 +952,34 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                 truck = truck_map.get(allocation['truck_id'])
                 if not truck or not product:
                     continue
-                per_truck_load_items[truck.id].append(_build_load_item(product, allocation['qty']))
+                try:
+                    per_truck_load_items[truck.id].append(_build_load_item(product, allocation['qty']))
+                except Exception:
+                    logger.exception(
+                        '便占有率プレビュー用積載データ生成に失敗しました: due_adjustment_id=%s truck_id=%s',
+                        due_adjustment.id,
+                        getattr(truck, 'id', None),
+                    )
+                    per_truck_errors[truck.id].append(f'{due_adjustment.product_code}: 積載データ生成失敗')
 
         summaries = []
         for truck in trucks:
-            load = calculate_truck_load(per_truck_load_items.get(truck.id, []), truck)
+            try:
+                load = calculate_truck_load(per_truck_load_items.get(truck.id, []), truck)
+            except Exception:
+                logger.exception('便占有率プレビュー計算に失敗しました: truck_id=%s', truck.id)
+                load = {
+                    'occupancy_percent': Decimal('0'),
+                    'total_weight': Decimal('0'),
+                    'errors': ['積載計算に失敗しました。'],
+                }
+            load_errors = list(per_truck_errors.get(truck.id, [])) + list(load.get('errors') or [])
             summaries.append({
                 'truck_id': truck.id,
                 'truck_name': truck.alias_name or truck.name,
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
-                'errors': load['errors'],
+                'errors': load_errors,
             })
 
         return Response({

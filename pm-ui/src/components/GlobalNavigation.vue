@@ -508,14 +508,21 @@ const loadPendingTaskCount = async () => {
   }
   try {
     const params = { assigned_to_me: true, status: 'PENDING' }
-    const [purchaseResponse, qualityResponse, icsResponse] = await Promise.all([
+    const [purchaseResponse, qualityResponse, icsResponse] = await Promise.allSettled([
       api.purchaseOrderProposals.listTasks(params),
       api.qualityEquipmentInspections.listTasks(params),
       api.integratedChecksheets.listTasks(params),
     ])
-    const purchaseRows = Array.isArray(purchaseResponse.data) ? purchaseResponse.data : []
-    const qualityRows = Array.isArray(qualityResponse.data) ? qualityResponse.data : []
-    const icsRows = Array.isArray(icsResponse.data) ? icsResponse.data : []
+    const pickRows = (result, label) => {
+      if (result.status === 'fulfilled') {
+        return Array.isArray(result.value?.data) ? result.value.data : []
+      }
+      console.error(`${label}タスク件数の取得に失敗しました:`, result.reason)
+      return []
+    }
+    const purchaseRows = pickRows(purchaseResponse, '購買')
+    const qualityRows = pickRows(qualityResponse, '設備点検')
+    const icsRows = pickRows(icsResponse, '統合チェックシート')
     pendingTaskCount.value = purchaseRows.length + qualityRows.length + icsRows.length
   } catch (error) {
     console.error('タスク件数の取得に失敗しました:', error)

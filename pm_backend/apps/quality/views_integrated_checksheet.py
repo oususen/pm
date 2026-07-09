@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 
 from django.contrib.auth import get_user_model
@@ -32,6 +33,8 @@ from .serializers_integrated_checksheet import (
     IntegratedChecksheetTemplateSerializer,
     IntegratedChecksheetUnitSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 def _generate_sei_ban(batch):
     """バッチ内の全ユニットの刻印番号を生成する。
@@ -1308,19 +1311,24 @@ class IntegratedChecksheetTaskListView(APIView):
             qs = qs.filter(status=status_val)
 
         data = []
-        for t in qs[:200]:
-            data.append({
-                "id": t.id,
-                "template_id": t.template_id,
-                "template_name": t.template.name if t.template else "",
-                "product_code": t.template.product.product_code if t.template and t.template.product else "",
-                "task_type": t.task_type,
-                "task_type_display": t.get_task_type_display(),
-                "assigned_to": t.assigned_to_id,
-                "assigned_to_name": _display_name(t.assigned_to),
-                "status": t.status,
-                "due_date": str(t.due_date) if t.due_date else None,
-                "created_at": t.created_at.isoformat() if t.created_at else None,
-                "done_at": t.done_at.isoformat() if t.done_at else None,
-            })
+        for task in qs[:200]:
+            try:
+                template = getattr(task, "template", None)
+                product = getattr(template, "product", None) if template else None
+                data.append({
+                    "id": task.id,
+                    "template_id": task.template_id,
+                    "template_name": getattr(template, "name", "") or "",
+                    "product_code": getattr(product, "product_code", "") or "",
+                    "task_type": task.task_type,
+                    "task_type_display": task.get_task_type_display(),
+                    "assigned_to": task.assigned_to_id,
+                    "assigned_to_name": _display_name(task.assigned_to),
+                    "status": task.status,
+                    "due_date": task.due_date.isoformat() if task.due_date else None,
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "done_at": task.done_at.isoformat() if task.done_at else None,
+                })
+            except Exception:
+                logger.exception("統合チェックシートタスク整形に失敗しました: task_id=%s", getattr(task, "id", None))
         return Response(data)
