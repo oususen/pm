@@ -86,7 +86,7 @@
               <tbody>
                 <tr v-for="row in shipToRows" :key="row.id || row.ship_to_code" :class="{ 'new-row': row._isNew }">
                   <td>{{ row.ship_to_code }}</td>
-                  <td><input v-if="row._isNew" v-model="row.ship_to_name" class="inline-input" placeholder="納入地名" /><template v-else>{{ row.ship_to_name }}</template></td>
+                  <td><input v-model="row.ship_to_name" class="inline-input" placeholder="納入地名" /></td>
                   <td class="num"><input v-if="row._isNew" type="number" v-model.number="row.additional_days" min="0" class="inline-input num" style="width:60px" /><template v-else>{{ row.additional_days }}</template></td>
                   <td>
                     <select v-model="row.calendar" :disabled="!canEdit" class="cal-select">
