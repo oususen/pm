@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging
 from datetime import date, datetime, timedelta
 
 from django.contrib.auth import get_user_model
@@ -41,6 +42,8 @@ ROLE_RANK = {
     "chief": 4,
     "manager": 5,
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _role_rank(role_value):
@@ -1092,8 +1095,34 @@ class EquipmentInspectionTaskListView(APIView):
         if status_code:
             queryset = queryset.filter(status=status_code)
 
-        serializer = EquipmentInspectionTaskSerializer(queryset, many=True)
-        return Response(serializer.data)
+        data = []
+        for task in queryset[:200]:
+            try:
+                template = getattr(task, "template", None)
+                data.append({
+                    "id": task.id,
+                    "template": task.template_id,
+                    "sheet_code": getattr(template, "sheet_code", "") or "",
+                    "sheet_name": getattr(template, "sheet_name", "") or "",
+                    "template_title": getattr(template, "title", "") or "",
+                    "template_version": getattr(template, "version", None),
+                    "template_status": getattr(template, "status", "") or "",
+                    "task_type": task.task_type,
+                    "assigned_to": task.assigned_to_id,
+                    "assigned_to_username": getattr(task.assigned_to, "username", "") or "",
+                    "assigned_to_name": _display_name(task.assigned_to),
+                    "status": task.status,
+                    "due_date": task.due_date.isoformat() if task.due_date else None,
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "done_at": task.done_at.isoformat() if task.done_at else None,
+                    "module_code": "QUALITY",
+                    "module_label": "品質",
+                    "task_category": "EQUIPMENT_INSPECTION",
+                    "task_category_label": "設備点検表",
+                })
+            except Exception:
+                logger.exception("設備点検タスク整形に失敗しました: task_id=%s", getattr(task, "id", None))
+        return Response(data)
 
 
 class EquipmentInspectionRecordViewSet(viewsets.ModelViewSet):
