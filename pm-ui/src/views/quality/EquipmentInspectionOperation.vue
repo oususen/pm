@@ -52,7 +52,7 @@
       </label>
       <label>
         設備
-        <select v-model="selectedSheetCode" :disabled="loadingOptions || loadingRecord || isFilterLockedForWorker">
+        <select v-model="selectedSheetCode" :disabled="loadingOptions || loadingRecord || !canSelectEquipment">
           <option value="">選択してください</option>
           <option v-for="option in templateOptions" :key="option.sheet_code" :value="option.sheet_code">
             {{ option.sheet_code }} - {{ option.sheet_name }} (v{{ option.version }})
@@ -426,11 +426,14 @@ const processInputReturnPathMap = {
   spot_line_input: "/production/spot-line-input",
   mobile_line_input: "/production/mobile-input",
 }
-const showBackToProcessInput = computed(() => {
+const hasProcessInputSource = computed(() => {
   const source = String(route.query?.source || "").trim()
-  if (processInputReturnPathMap[source]) return true
-  return Boolean(String(selectedLineId.value || "").trim() || String(selectedProcessId.value || "").trim())
+  return Boolean(processInputReturnPathMap[source])
 })
+const showBackToProcessInput = computed(() => {
+  return hasProcessInputSource.value
+})
+const canSelectEquipment = computed(() => hasProcessInputSource.value)
 const isFilterLockedForWorker = computed(() => !isLeaderOrAbove.value)
 const isLineLockedFromRoute = computed(() =>
   Boolean(String(route.query?.line_id || "").trim()) || isFilterLockedForWorker.value
@@ -1005,7 +1008,12 @@ const loadTemplates = async () => {
     templateOptions.value = [...rows].sort((a, b) => {
       return String(a.sheet_code || "").localeCompare(String(b.sheet_code || ""), "ja")
     })
-    if (!selectedSheetCode.value && templateOptions.value.length && (selectedLineId.value || selectedProcessId.value)) {
+    if (
+      !selectedSheetCode.value &&
+      templateOptions.value.length &&
+      hasProcessInputSource.value &&
+      (selectedLineId.value || selectedProcessId.value)
+    ) {
       selectedSheetCode.value = templateOptions.value[0].sheet_code
     }
   } catch (error) {
