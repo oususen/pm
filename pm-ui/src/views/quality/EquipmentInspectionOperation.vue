@@ -43,7 +43,7 @@
       </label>
       <label>
         工程
-        <select v-model="selectedProcessId" :disabled="loadingOptions || loadingRecord">
+        <select v-model="selectedProcessId" :disabled="loadingOptions || loadingRecord || isFilterLockedForWorker">
           <option value="">すべて</option>
           <option v-for="process in filteredProcessOptions" :key="process.id" :value="String(process.id)">
             {{ formatProcessOptionLabel(process) }}
@@ -52,7 +52,7 @@
       </label>
       <label>
         設備
-        <select v-model="selectedSheetCode" :disabled="loadingOptions || loadingRecord">
+        <select v-model="selectedSheetCode" :disabled="loadingOptions || loadingRecord || isFilterLockedForWorker">
           <option value="">選択してください</option>
           <option v-for="option in templateOptions" :key="option.sheet_code" :value="option.sheet_code">
             {{ option.sheet_code }} - {{ option.sheet_name }} (v{{ option.version }})
@@ -70,6 +70,16 @@
           <option value="QUARTERLY">定期実測</option>
         </select>
       </label>
+      <div class="favorite-controls">
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">お気に入り選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+        <input type="text" v-model.trim="favoriteName" placeholder="お気に入り名" class="favorite-name-input" />
+        <button class="btn-favorite" title="お気に入り登録" @click="saveFavorite" :disabled="loadingRecord">★</button>
+      </div>
       <div class="header-status">
         <div>状態: <strong>{{ statusLabel(form.status) }}</strong></div>
         <div>実施者: <strong>{{ form.operator_name || "-" }}</strong></div>
@@ -322,7 +332,28 @@ const selectedDate = ref(String(route.query.date || formatISODate(new Date())))
 const sectionType = ref(String(route.query.section_type || "DAILY").toUpperCase())
 // 工程/ラインからの絞り込み用（実績入力画面から渡される）
 const selectedProcessId = ref(route.query.process_id ? String(route.query.process_id) : "")
-const selectedLineId = ref(route.query.line_id ? String(route.query.line_id) : "")
+
+const FAVORITE_SCREEN_KEY = 'quality.equipment_inspection_operation'
+const favorites = ref([])
+const selectedFavoriteId = ref('')
+const favoriteName = ref('')
+const isLeaderOrAbove = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const role = user.profile?.role || ''
+  return ['leader', 'supervisor', 'chief', 'manager'].includes(role)
+})
+const resolveInitialLineId = () => {
+  if (route.query.line_id) return String(route.query.line_id)
+  if (isLeaderOrAbove.value) return ""
+  const unitLines = authState.user?.profile?.unit_lines
+  if (!Array.isArray(unitLines) || !unitLines.length) return ""
+  const defaultMapping = unitLines.find((item) => item?.is_default)
+  const target = defaultMapping || unitLines[0]
+  return target?.line_id ? String(target.line_id) : ""
+}
+const selectedLineId = ref(resolveInitialLineId())
 
 const createAttachment = (raw = {}) => ({
   local_key: raw.local_key || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -400,8 +431,9 @@ const showBackToProcessInput = computed(() => {
   if (processInputReturnPathMap[source]) return true
   return Boolean(String(selectedLineId.value || "").trim() || String(selectedProcessId.value || "").trim())
 })
+const isFilterLockedForWorker = computed(() => !isLeaderOrAbove.value)
 const isLineLockedFromRoute = computed(() =>
-  Boolean(String(route.query?.line_id || "").trim())
+  Boolean(String(route.query?.line_id || "").trim()) || isFilterLockedForWorker.value
 )
 const filteredProcessOptions = computed(() => {
   if (!selectedLineId.value) return processOptions.value
@@ -759,8 +791,8 @@ const backToProcessInput = () => {
 const loadFilterOptions = async () => {
   try {
     const [linesRes, processesRes] = await Promise.all([
-      api.lines.list({}),
-      api.processes.list({}),
+      api.lines.getProductionLines(),
+      api.processes.getProcesses(),
     ])
     lineOptions.value = Array.isArray(linesRes.data) ? linesRes.data : linesRes.data?.results || []
     processOptions.value = Array.isArray(processesRes.data) ? processesRes.data : processesRes.data?.results || []
@@ -774,7 +806,7 @@ const loadFilterOptions = async () => {
     const exists = lineOptions.value.some((line) => String(line.id) === String(selectedLineId.value))
     if (!exists) {
       try {
-        const res = await api.lines.get(selectedLineId.value)
+        const res = await api.lines.getLine(selectedLineId.value)
         if (res?.data?.id !== undefined && res?.data?.id !== null) {
           lineOptions.value = [...lineOptions.value, res.data]
         }
@@ -792,7 +824,7 @@ const loadFilterOptions = async () => {
     const exists = processOptions.value.some((process) => String(process.id) === String(selectedProcessId.value))
     if (!exists) {
       try {
-        const res = await api.processes.get(selectedProcessId.value)
+        const res = await api.processes.getProcess(selectedProcessId.value)
         if (res?.data?.id !== undefined && res?.data?.id !== null) {
           processOptions.value = [...processOptions.value, res.data]
         }
@@ -973,7 +1005,7 @@ const loadTemplates = async () => {
     templateOptions.value = [...rows].sort((a, b) => {
       return String(a.sheet_code || "").localeCompare(String(b.sheet_code || ""), "ja")
     })
-    if (!selectedSheetCode.value && templateOptions.value.length) {
+    if (!selectedSheetCode.value && templateOptions.value.length && (selectedLineId.value || selectedProcessId.value)) {
       selectedSheetCode.value = templateOptions.value[0].sheet_code
     }
   } catch (error) {
@@ -1009,6 +1041,57 @@ const loadPreparedRecord = async () => {
 
 const reloadRecord = async () => {
   await loadPreparedRecord()
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error('お気に入り取得エラー:', e)
+  }
+}
+
+const toFavoritePayload = () => ({
+  lineId: String(selectedLineId.value || ''),
+  processId: String(selectedProcessId.value || ''),
+  sheetCode: String(selectedSheetCode.value || ''),
+})
+
+const applyFavorite = async () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ''
+  const payload = target.payload || {}
+  selectedLineId.value = String(payload.lineId || '')
+  await loadTemplates()
+  selectedProcessId.value = String(payload.processId || '')
+  selectedSheetCode.value = String(payload.sheetCode || '')
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || '').trim()
+  if (!name) {
+    alert('お気に入り名を入力してください。')
+    return
+  }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    const data = { screen_key: FAVORITE_SCREEN_KEY, name, payload: toFavoritePayload() }
+    if (id) {
+      await api.accounts.updateFavorite(id, data)
+    } else {
+      await api.accounts.createFavorite(data)
+    }
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ''
+    alert('お気に入りを保存しました。')
+  } catch (e) {
+    alert(`お気に入り保存エラー: ${e?.response?.data?.detail || e?.message || '保存に失敗しました。'}`)
+  }
 }
 
 const setJudgement = (result, value) => {
@@ -1134,6 +1217,7 @@ onMounted(async () => {
     return
   }
   await loadFilterOptions()
+  loadFavorites()
   await loadTemplates()
   if (selectedSheetCode.value && selectedDate.value) {
     await loadPreparedRecord()
@@ -1180,6 +1264,37 @@ onMounted(async () => {
   gap: 4px;
   font-size: 13px;
   color: #334155;
+}
+.favorite-controls {
+  display: flex;
+  gap: 6px;
+  align-items: end;
+}
+.favorite-controls select {
+  flex: 1;
+  min-width: 100px;
+}
+.favorite-name-input {
+  width: 100px !important;
+}
+.btn-favorite {
+  padding: 5px 10px;
+  background: #facc15;
+  color: #78350f;
+  border: 1px solid #eab308;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 34px;
+  white-space: nowrap;
+}
+.btn-favorite:hover {
+  background: #eab308;
+}
+.btn-favorite:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .header-status {
   display: flex;
