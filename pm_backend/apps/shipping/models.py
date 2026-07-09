@@ -120,3 +120,34 @@ class DeliveryProgress(models.Model):
     def __str__(self):
         product_code = self.product.product_code if self.product else '?'
         return f"{product_code} {self.order_date.date()} {self.order_quantity}個"
+
+
+class KubotaSakaiDeliveryProgress(models.Model):
+    """クボタ堺配送進捗（品番×納入地×日付）
+
+    進捗 = 前日進捗 - 需要 + 便振分 + 調整
+    需要: KubotaSakaiDueAdjustment.delivery_qty を品番×納入地×日付で合算
+    便振分: KubotaSakaiTripAssignment.qty を品番×納入地×日付で合算
+    """
+    id = models.BigAutoField(primary_key=True)
+    plan_date = models.DateField(verbose_name='日付')
+    product_code = models.CharField(max_length=50, verbose_name='製品コード')
+    ship_to_code = models.CharField(max_length=40, verbose_name='納入地コード')
+    demand_qty = models.IntegerField(default=0, verbose_name='需要数')
+    assigned_qty = models.IntegerField(default=0, verbose_name='便振分数')
+    adjust_qty = models.IntegerField(default=0, verbose_name='調整数')
+    progress_qty = models.IntegerField(default=0, verbose_name='進捗')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_kubota_sakai_delivery_progress'
+        verbose_name = 'クボタ堺配送進捗'
+        verbose_name_plural = 'クボタ堺配送進捗'
+        unique_together = [('plan_date', 'product_code', 'ship_to_code')]
+        indexes = [
+            models.Index(fields=['product_code', 'ship_to_code', 'plan_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.product_code} {self.ship_to_code} {self.plan_date} 進捗:{self.progress_qty}"

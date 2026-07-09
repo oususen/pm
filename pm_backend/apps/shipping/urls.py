@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from shipping.views import ShipmentActualViewSet, ShipToLeadTimeViewSet
 from shipping.views_kubota_sakai_due_adjustment import KubotaSakaiDueAdjustmentViewSet
 from shipping.views_kubota_sakai_trip_assignment import (
+    KubotaSakaiDeliveryProgressAdjustView,
     KubotaSakaiPickupDetailPdfView,
     KubotaSakaiPseudoTruckProductView,
     KubotaSakaiTripLoadDetailView,
@@ -48,6 +49,7 @@ urlpatterns = [
     path('kubota-sakai-trip-assignments/load-detail/', KubotaSakaiTripLoadDetailView.as_view(), name='kubota-sakai-trip-load-detail'),
     path('kubota-sakai-trip-assignments/pickup-detail-pdf/', KubotaSakaiPickupDetailPdfView.as_view(), name='kubota-sakai-pickup-detail-pdf'),
     path('kubota-sakai-trip-assignments/pseudo-truck-products/', KubotaSakaiPseudoTruckProductView.as_view(), name='kubota-sakai-pseudo-truck-products'),
+    path('kubota-sakai-trip-assignments/delivery-progress-adjust/', KubotaSakaiDeliveryProgressAdjustView.as_view(), name='kubota-sakai-delivery-progress-adjust'),
     path('shipping-trips/execution/', ShippingTripExecutionView.as_view(), name='shipping-trip-execution'),
     path('shipping-trips/progress/', ShippingTripProgressView.as_view(), name='shipping-trip-progress'),
     # Shipping order APIs

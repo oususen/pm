@@ -54,6 +54,16 @@
       <button class="btn auto-assign-btn" :disabled="loading || saving || autoAssigning" @click="openAutoAssignDialog">
         自動便振分
       </button>
+      <label class="toolbar-checkbox">
+        <input type="checkbox" v-model="hideWeekends" />
+        土日非表示
+      </label>
+      <button class="btn" :class="{ 'active-toggle': showProgressAdjust }" @click="showProgressAdjust = !showProgressAdjust">
+        進捗調整
+      </button>
+      <button v-if="showProgressAdjust" class="btn save-btn" :disabled="savingProgressAdjust" @click="saveProgressAdjust">
+        {{ savingProgressAdjust ? '保存中...' : '調整保存' }}
+      </button>
       <span v-if="lastAdjustedAt" class="adj-badge">最新納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
     </div>
 
@@ -338,6 +348,17 @@
                   {{ formatNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) }}
                 </div>
               </td>
+              <td class="cell-right cell-stacked col-progress" :class="{ 'progress-negative': parseNumber(progressAt(row, dateKey)) < 0 }">
+                <div class="sub-cell">{{ formatNumber(progressAt(row, dateKey)) }}</div>
+                <div v-if="showProgressAdjust" class="sub-cell progress-adjust-cell">
+                  <input
+                    :value="progressAdjustAt(row, dateKey)"
+                    type="number"
+                    class="progress-adjust-input"
+                    @input="setProgressAdjust(row, dateKey, $event.target.value)"
+                  />
+                </div>
+              </td>
             </template>
           </tr>
           <tr v-if="!mergedRows.length">
@@ -392,6 +413,7 @@ const dsSources = [
   { op: '擬似便製品 読み書き', table: 'm_kubota_sakai_pseudo_truck_product', desc: '擬似便自動振分の製品マスタ' },
   { op: 'お気に入り 読み書き', table: 'user_favorite', desc: '画面フィルタのお気に入り保存' },
   { op: 'カレンダー 読み取り', table: 'm_calendar / m_calendar_day', desc: '営業日判定' },
+  { op: '進捗 読み書き', table: 't_kubota_sakai_delivery_progress', desc: '製品×納入地別の日別進捗(需要・振分・調整)' },
 ]
 const theadRef = ref(null)
 const tableWrapRef = ref(null)
@@ -413,8 +435,8 @@ const setStickyTopValues = () => {
   rowspanCells.forEach((th) => { th.style.top = '0px' })
 }
 
-const SLOT_COUNT = 5
-const slotLabels = ['注番', '需要', '振分', '便選択', '残']
+const SLOT_COUNT = 6
+const slotLabels = ['注番', '需要', '振分', '便選択', '残', '進捗']
 
 const formatLocalDate = (date) => {
   const yyyy = String(date.getFullYear())
@@ -514,12 +536,26 @@ const showPickupPdfDialog = ref(false)
 const pickupPdfStartDate = ref('')
 const pickupPdfEndDate = ref('')
 const holidayByDate = ref({})
+const progressByDate = ref({})
+const showProgressAdjust = ref(false)
+const savingProgressAdjust = ref(false)
+const progressAdjustEdits = ref({})
 const cursorProductCode = ref('')
 const cursorProductBubbleStyle = ref({})
+const HIDE_WEEKENDS_KEY = 'kubotaSakaiTripPlanning.hideWeekends'
+const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 
-const dateKeys = computed(() => {
+const allDateKeys = computed(() => {
   const span = Math.max(1, Number(horizonDays.value) || 1)
   return Array.from({ length: span }).map((_, idx) => addDays(targetDate.value, idx))
+})
+
+const dateKeys = computed(() => {
+  if (!hideWeekends.value) return allDateKeys.value
+  return allDateKeys.value.filter((dk) => {
+    const dow = new Date(`${dk}T00:00:00`).getDay()
+    return dow !== 0 && dow !== 6
+  })
 })
 
 const detailTrucks = computed(() => {
@@ -560,7 +596,8 @@ const slotWidthClass = (slotIdx) => {
   if (slotIdx === 1) return 'col-demand'
   if (slotIdx === 2) return 'col-assigned'
   if (slotIdx === 3) return 'col-select'
-  return 'col-remain'
+  if (slotIdx === 4) return 'col-remain'
+  return 'col-progress'
 }
 
 const sourceOrderLabel = (entry) => {
@@ -609,6 +646,20 @@ const removeAllocation = (entry, idx) => {
 
 const entriesAt = (row, dateKey) => row.byDate?.[dateKey] || []
 const slotEntryAt = (row, dateKey, slotIdx) => entriesAt(row, dateKey)[slotIdx] || null
+const progressAt = (row, dateKey) => {
+  const key = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}`
+  return progressByDate.value[key] ?? ''
+}
+const progressAdjustAt = (row, dateKey) => {
+  const key = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}`
+  if (key in progressAdjustEdits.value) return progressAdjustEdits.value[key]
+  const pKey = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}||adjust`
+  return progressByDate.value[pKey] ?? 0
+}
+const setProgressAdjust = (row, dateKey, value) => {
+  const key = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}`
+  progressAdjustEdits.value[key] = parseIntegerQty(value)
+}
 
 const truckAt = (dateKey, slotIdx) => {
   const trucks = displayTrucksForDate(dateKey)
@@ -795,7 +846,7 @@ const loadGrid = async () => {
   loading.value = true
   try {
     const responses = await Promise.all(
-      dateKeys.value.map((dateKey) => api.kubotaSakaiTripAssignments.grid({
+      allDateKeys.value.map((dateKey) => api.kubotaSakaiTripAssignments.grid({
         target_date: dateKey,
         keyword: keyword.value,
       })),
@@ -803,11 +854,12 @@ const loadGrid = async () => {
     const nextTrucksByDate = {}
     const nextSummaryByDate = {}
     const nextHolidayByDate = {}
+    const nextProgressByDate = {}
     const map = new Map()
     let maxDeadline = 3
 
     responses.forEach((res, idx) => {
-      const dateKey = dateKeys.value[idx]
+      const dateKey = allDateKeys.value[idx]
       const trucks = Array.isArray(res.data?.trucks) ? res.data.trucks : []
       const summaries = Array.isArray(res.data?.truck_summaries) ? res.data.truck_summaries : []
       const payloadRows = Array.isArray(res.data?.rows) ? res.data.rows : []
@@ -820,6 +872,11 @@ const loadGrid = async () => {
       payloadRows.forEach((raw) => {
         if (raw.product_code && raw.product_name) {
           productNameMap.value.set(raw.product_code, raw.product_name)
+        }
+        const progressKey = `${raw.product_code}||${raw.ship_to_code || ''}||${dateKey}`
+        if (!(progressKey in nextProgressByDate)) {
+          nextProgressByDate[progressKey] = raw.progress_qty ?? 0
+          nextProgressByDate[`${progressKey}||adjust`] = raw.progress_adjust_qty ?? 0
         }
         const key = `${raw.product_code}||${raw.ship_to_code || ''}`
         if (!map.has(key)) {
@@ -856,7 +913,7 @@ const loadGrid = async () => {
     const rows = [...map.values()]
     rows.forEach((row) => {
       let maxSlots = 1
-      dateKeys.value.forEach((dateKey) => {
+      allDateKeys.value.forEach((dateKey) => {
         row.byDate[dateKey] = sortEntries(row.byDate[dateKey] || [])
         maxSlots = Math.max(maxSlots, row.byDate[dateKey].length || 0)
       })
@@ -866,6 +923,8 @@ const loadGrid = async () => {
     trucksByDate.value = nextTrucksByDate
     summaryByDate.value = nextSummaryByDate
     holidayByDate.value = nextHolidayByDate
+    progressByDate.value = nextProgressByDate
+    progressAdjustEdits.value = {}
     previewSummaryByDate.value = {}
     assignmentDeadlineDays.value = maxDeadline
     mergedRows.value = rows.sort((a, b) => {
@@ -876,6 +935,7 @@ const loadGrid = async () => {
     await refreshAllPreview()
     nextTick(setStickyTopValues)
   } catch (error) {
+    console.error('loadGrid error:', error)
     const message = error?.response?.data?.detail || 'データ取得に失敗しました。'
     alert(message)
   } finally {
@@ -1014,7 +1074,7 @@ const save = async () => {
   }
   saving.value = true
   try {
-    for (const dateKey of dateKeys.value) {
+    for (const dateKey of allDateKeys.value) {
       const payloadRows = mergedRows.value
         .flatMap((row) => entriesAt(row, dateKey))
         .map((entry) => ({
@@ -1048,13 +1108,39 @@ const save = async () => {
   }
 }
 
+const saveProgressAdjust = async () => {
+  savingProgressAdjust.value = true
+  try {
+    const rows = []
+    for (const [key, adjustQty] of Object.entries(progressAdjustEdits.value)) {
+      const [productCode, shipToCode, planDate] = key.split('||')
+      rows.push({
+        plan_date: planDate,
+        product_code: productCode,
+        ship_to_code: shipToCode || '',
+        adjust_qty: adjustQty,
+      })
+    }
+    if (rows.length) {
+      await api.kubotaSakaiTripAssignments.saveDeliveryProgressAdjust(rows)
+    }
+    await loadGrid()
+    showProgressAdjust.value = false
+    alert('進捗調整を保存しました。')
+  } catch (error) {
+    alert(error?.response?.data?.detail || '進捗調整の保存に失敗しました。')
+  } finally {
+    savingProgressAdjust.value = false
+  }
+}
+
 const validateBeforeSave = () => {
   let missingTruckCount = 0
   let unassignedQtyCount = 0
   const overloaded = []
   const overloadedSet = new Set()
 
-  for (const dateKey of dateKeys.value) {
+  for (const dateKey of allDateKeys.value) {
     const previewList = previewSummaryByDate.value[dateKey] || summaryByDate.value[dateKey] || []
     for (const row of mergedRows.value) {
       for (const entry of entriesAt(row, dateKey)) {
@@ -1207,6 +1293,10 @@ const loadCalendarDays = async () => {
   days.forEach((d) => { map[d.target_date] = Boolean(d.is_working_day) })
   calendarDayMap.value = map
 }
+
+watch(hideWeekends, (v) => {
+  localStorage.setItem(HIDE_WEEKENDS_KEY, v ? '1' : '0')
+})
 
 watch(autoAssignCalendarId, async (newVal) => {
   if (newVal && showAutoAssignDialog.value) {
@@ -1741,10 +1831,41 @@ onUnmounted(() => {
 }
 .col-demand,
 .col-assigned,
-.col-remain {
+.col-remain,
+.col-progress {
   width: 50px;
   min-width: 50px !important;
   max-width: 50px;
+}
+.progress-negative {
+  color: #dc2626;
+  font-weight: 600;
+}
+.progress-adjust-cell {
+  padding: 0 !important;
+}
+.progress-adjust-input {
+  width: 100%;
+  height: 20px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  text-align: right;
+  font-size: 11px;
+  padding: 0 3px;
+  box-sizing: border-box;
+}
+.toolbar-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toolbar-checkbox input { margin: 0; }
+.active-toggle {
+  background: #3b82f6 !important;
+  color: #fff !important;
 }
 .col-select {
   width: 110px;

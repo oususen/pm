@@ -16,6 +16,7 @@ from system_settings.models import SystemSetting
 from .models import ShipToLeadTime
 from .serializers import KubotaSakaiDueAdjustmentSerializer
 from .services.email_service import EmailService
+from .services.kubota_sakai_delivery_progress import recalculate_delivery_progress
 
 
 KUBOTA_CUSTOMER_CODE = '000196'
@@ -775,6 +776,17 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 
             # 残量再計算
             _recalculate_remaining_for_groups(affected_groups)
+
+        # 配送進捗再計算
+        affected_dates = [d for _, _, _, d in input_delivery_map.keys()]
+        if affected_dates:
+            progress_start = min(affected_dates)
+            progress_end = KubotaSakaiDueAdjustment.objects.aggregate(
+                max_date=Max('due_date')
+            )['max_date'] or max(affected_dates)
+            if progress_end < max(affected_dates):
+                progress_end = max(affected_dates)
+            recalculate_delivery_progress(progress_start, progress_end)
 
         return Response({
             'updated': updated_count,

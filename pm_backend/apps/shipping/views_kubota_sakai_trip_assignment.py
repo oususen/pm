@@ -26,7 +26,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
-from shipping.models import ShipToLeadTime
+from shipping.models import KubotaSakaiDeliveryProgress, ShipToLeadTime
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
     KubotaSakaiPseudoTruckProduct,
@@ -38,6 +38,7 @@ from orders.core.models import (
 from production.models_line_backlog import LineBacklog
 from system_settings.models import SystemSetting
 
+from .services.kubota_sakai_delivery_progress import recalculate_delivery_progress
 from .services.truck_load_calculator import calculate_truck_load
 
 # クボタ配送ライン定数
@@ -589,6 +590,14 @@ class KubotaSakaiTripPlanView(APIView):
             )
         }
 
+        # 配送進捗を取得
+        progress_map = {}
+        for p in KubotaSakaiDeliveryProgress.objects.filter(plan_date=target_date):
+            progress_map[(p.product_code, p.ship_to_code or '')] = {
+                'progress_qty': p.progress_qty,
+                'adjust_qty': p.adjust_qty,
+            }
+
         rows = []
         for adj in adjustments:
             product = products.get(adj.product_code)
@@ -599,6 +608,7 @@ class KubotaSakaiTripPlanView(APIView):
             unassigned_qty = delivery_qty - assigned_qty
             deadline_date = _subtract_business_days(target_date, deadline_days, calendar_map)
             overdue = unassigned_qty > 0 and today > deadline_date
+            progress_info = progress_map.get((adj.product_code, adj.ship_to_code or ''), {})
 
             rows.append({
                 'due_adjustment_id': adj.id,
@@ -614,6 +624,8 @@ class KubotaSakaiTripPlanView(APIView):
                 'unassigned_qty': str(unassigned_qty),
                 'container_name': getattr(container, 'name', '') if container else '',
                 'capacity': getattr(product, 'capacity', None) if product else None,
+                'progress_qty': progress_info.get('progress_qty', 0),
+                'progress_adjust_qty': progress_info.get('adjust_qty', 0),
                 'overdue': overdue,
                 'deadline_date': deadline_date.isoformat(),
                 'allocations': [
@@ -840,6 +852,14 @@ class KubotaSakaiTripPlanView(APIView):
 
             # LineBacklog 同期（LinePlan不使用、LineBacklog直接保存）
             _sync_kubota_delivery_backlog_for_date(target_date)
+
+        # 配送進捗再計算（target_date 以降）
+        max_due_date = (
+            KubotaSakaiDueAdjustment.objects.aggregate(
+                max_date=Max('due_date')
+            )['max_date'] or target_date
+        )
+        recalculate_delivery_progress(target_date, max(target_date, max_due_date))
 
         return Response({
             'saved_rows': len(normalized),
@@ -1331,3 +1351,47 @@ class KubotaSakaiPseudoTruckProductView(APIView):
                 KubotaSakaiPseudoTruckProduct.objects.bulk_create(create_items)
 
         return Response({'saved': len(create_items)})
+
+
+class KubotaSakaiDeliveryProgressAdjustView(APIView):
+    """配送進捗の調整値を保存し、再計算する。"""
+
+    def post(self, request):
+        rows = request.data.get('rows')
+        if not isinstance(rows, list):
+            return Response(
+                {'detail': 'rows は配列で指定してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        affected_dates = set()
+        with transaction.atomic():
+            for row in rows:
+                plan_date = _parse_date(row.get('plan_date'))
+                product_code = str(row.get('product_code') or '').strip()
+                ship_to_code = str(row.get('ship_to_code') or '').strip()
+                adjust_qty = int(row.get('adjust_qty') or 0)
+                if not plan_date or not product_code:
+                    continue
+
+                obj, _ = KubotaSakaiDeliveryProgress.objects.get_or_create(
+                    plan_date=plan_date,
+                    product_code=product_code,
+                    ship_to_code=ship_to_code,
+                )
+                if obj.adjust_qty != adjust_qty:
+                    obj.adjust_qty = adjust_qty
+                    obj.save(update_fields=['adjust_qty', 'updated_at'])
+                    affected_dates.add(plan_date)
+
+        if affected_dates:
+            start = min(affected_dates)
+            max_due_date = (
+                KubotaSakaiDueAdjustment.objects.aggregate(
+                    max_date=Max('due_date')
+                )['max_date'] or start
+            )
+            end = max(max_due_date, max(affected_dates))
+            recalculate_delivery_progress(start, end)
+
+        return Response({'updated': len(affected_dates)})
