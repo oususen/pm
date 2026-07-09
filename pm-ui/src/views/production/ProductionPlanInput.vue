@@ -1413,7 +1413,7 @@ const toDateInput = (dateObj) => {
 const defaultStart = new Date()
 defaultStart.setDate(defaultStart.getDate() - 1)
 const startDate = ref(toDateInput(defaultStart))
-const horizonDays = ref(14)
+const horizonDays = ref(30)
 const keyword = ref('')
 const TANK_LINE_CODE = 'L2200'
 const FLOOR_LINE_CODE = 'L2100'
