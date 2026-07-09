@@ -13,6 +13,7 @@ from orders.core.models import KubotaSakaiDueAdjustment, OrderLine
 from production.models_plan_change_log import ProductionPlanChangeLog
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from system_settings.models import SystemSetting
+from .models import ShipToLeadTime
 from .serializers import KubotaSakaiDueAdjustmentSerializer
 from .services.email_service import EmailService
 
@@ -362,6 +363,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                         firm_row.save(update_fields=['delivery_qty'])
                     existing_row.delete()
                     deleted_count += 1
+                    processed_keys.add(ekey)
 
             # 今回の取込結果に存在しない期間内レコードの整理。
             # FORECAST は行を残し、需要数のみ0にする（delivery_qty は保持）。
@@ -489,6 +491,17 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             })
 
         rows.sort(key=lambda r: (r['product_code'] or '', r['ship_to_code'] or ''))
+
+        ship_to_name_map = {}
+        ship_to_codes = {r['ship_to_code'] for r in rows if r.get('ship_to_code')}
+        if ship_to_codes:
+            for lt in ShipToLeadTime.objects.filter(
+                customer__customer_code=KUBOTA_CUSTOMER_CODE,
+                ship_to_code__in=ship_to_codes,
+            ).values('ship_to_code', 'ship_to_name'):
+                ship_to_name_map[lt['ship_to_code']] = lt['ship_to_name']
+        for r in rows:
+            r['ship_to_name'] = ship_to_name_map.get(r.get('ship_to_code') or '', '')
 
         lock_date = _get_lock_date()
         due_plan_lock_date = _get_due_plan_lock_date()

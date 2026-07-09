@@ -26,6 +26,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
+from shipping.models import ShipToLeadTime
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
     KubotaSakaiPseudoTruckProduct,
@@ -581,6 +582,13 @@ class KubotaSakaiTripPlanView(APIView):
         today = date.today()
         is_holiday = not _is_working_day(target_date, calendar_map)
 
+        ship_to_name_map = {
+            s.ship_to_code: s.ship_to_name
+            for s in ShipToLeadTime.objects.filter(
+                customer__customer_code=KUBOTA_CUSTOMER_CODE
+            )
+        }
+
         rows = []
         for adj in adjustments:
             product = products.get(adj.product_code)
@@ -598,6 +606,7 @@ class KubotaSakaiTripPlanView(APIView):
                 'product_code': adj.product_code,
                 'product_name': product.product_name if product else '',
                 'ship_to_code': adj.ship_to_code or '',
+                'ship_to_name': ship_to_name_map.get(adj.ship_to_code or '', ''),
                 'source_order_no': adj.source_order_no or '',
                 'order_type': adj.order_type,
                 'delivery_qty': str(delivery_qty),

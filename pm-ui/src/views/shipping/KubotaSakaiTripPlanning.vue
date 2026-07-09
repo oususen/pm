@@ -252,7 +252,10 @@
         <tbody>
           <tr v-for="row in mergedRows" :key="row.rowKey">
             <td class="code-col">{{ row.product_code }}</td>
-            <td class="shipto-col">{{ row.ship_to_code || '-' }}</td>
+            <td class="shipto-col">
+              <div>{{ row.ship_to_code || '-' }}</div>
+              <div v-if="row.ship_to_name" class="shipto-name">{{ row.ship_to_name }}</div>
+            </td>
             <template v-for="dateKey in dateKeys" :key="`${row.rowKey}-${dateKey}`">
               <td class="cell-center cell-stacked col-order" :class="{ 'day-split-left': isDaySplitStart(dateKey) }">
                 <div
@@ -824,6 +827,7 @@ const loadGrid = async () => {
             rowKey: key,
             product_code: raw.product_code,
             ship_to_code: raw.ship_to_code || '',
+            ship_to_name: raw.ship_to_name || '',
             byDate: {},
             maxSlots: 1,
           })
@@ -1774,6 +1778,11 @@ onUnmounted(() => {
   position: sticky;
   left: 136px;
   z-index: 1;
+}
+.shipto-name {
+  font-size: 10px;
+  color: #6b7280;
+  line-height: 1.2;
 }
 .grid tbody td.code-col,
 .grid tbody td.shipto-col {
