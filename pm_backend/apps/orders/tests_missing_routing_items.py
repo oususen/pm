@@ -91,3 +91,60 @@ class MissingRoutingItemsAPITest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertGreaterEqual(response.data['count'], 501)
         self.assertTrue(any(item['product_code'] == 'P500' for item in response.data['results']))
+
+    def test_missing_routing_items_prefers_nearest_future_due_date_per_product(self):
+        future_product = Product.objects.create(product_code='P010', product_name='未来優先品')
+
+        far_order = Order.objects.create(
+            customer=self.customer,
+            order_no='ORD-FAR',
+            order_type='FIRM',
+            status='OPEN',
+            order_date=date.today(),
+        )
+        near_order = Order.objects.create(
+            customer=self.customer,
+            order_no='ORD-NEAR',
+            order_type='FIRM',
+            status='OPEN',
+            order_date=date.today(),
+        )
+        past_order = Order.objects.create(
+            customer=self.customer,
+            order_no='ORD-PAST',
+            order_type='FIRM',
+            status='OPEN',
+            order_date=date.today(),
+        )
+
+        OrderLine.objects.create(
+            order=far_order,
+            line_no=1,
+            product=future_product,
+            product_code='P010',
+            quantity=1,
+            due_date=date.today() + timedelta(days=10),
+        )
+        OrderLine.objects.create(
+            order=near_order,
+            line_no=1,
+            product=future_product,
+            product_code='P010',
+            quantity=1,
+            due_date=date.today() + timedelta(days=3),
+        )
+        OrderLine.objects.create(
+            order=past_order,
+            line_no=1,
+            product=future_product,
+            product_code='P010',
+            quantity=1,
+            due_date=date.today() - timedelta(days=2),
+        )
+
+        response = self.client.get('/api/order-lines/missing-routing-items/')
+
+        self.assertEqual(response.status_code, 200)
+        target = next(item for item in response.data['results'] if item['product_code'] == 'P010')
+        self.assertEqual(target['order_no'], 'ORD-NEAR')
+        self.assertEqual(target['due_date'], (date.today() + timedelta(days=3)).isoformat())

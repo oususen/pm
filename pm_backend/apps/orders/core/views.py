@@ -9,6 +9,7 @@ import django_filters
 from django.db.models import Exists, OuterRef, Q
 import csv
 from datetime import date
+from orders.utils.calendar_utils import get_business_today
 
 from masters.models import Routing
 
@@ -167,24 +168,31 @@ class OrderLineViewSet(viewsets.ModelViewSet):
             qs = qs.filter(due_date__gte=due_date_gte)
 
         records = list(qs)
-        deduped = {}
+        grouped = {}
+        business_today = get_business_today()
+
+        def sort_by_due_date(record, reverse=False):
+            due = record.due_date or (date.min if reverse else date.max)
+            order_time = record.order.updated_at or record.order.created_at or record.updated_at or record.created_at
+            timestamp = order_time.timestamp() if order_time else 0
+            customer_code = record.order.customer.customer_code if record.order and record.order.customer else ''
+            if reverse:
+                return (due, timestamp, record.order_id or 0, customer_code)
+            return (due, -timestamp, -(record.order_id or 0), customer_code)
+
         for record in records:
             key = (record.product_code or '').strip().lower()
             if not key:
                 continue
+            grouped.setdefault(key, []).append(record)
 
-            current = deduped.get(key)
-            if current is None:
-                deduped[key] = record
-                continue
-
-            current_order_time = current.order.updated_at or current.order.created_at or current.updated_at or current.created_at
-            record_order_time = record.order.updated_at or record.order.created_at or record.updated_at or record.created_at
-            if record_order_time and current_order_time and record_order_time > current_order_time:
-                deduped[key] = record
-                continue
-            if record_order_time and current_order_time and record_order_time == current_order_time and (record.order_id or 0) > (current.order_id or 0):
-                deduped[key] = record
+        deduped = {}
+        for key, product_records in grouped.items():
+            future_records = [record for record in product_records if record.due_date and record.due_date >= business_today]
+            if future_records:
+                deduped[key] = min(future_records, key=sort_by_due_date)
+            else:
+                deduped[key] = max(product_records, key=lambda record: sort_by_due_date(record, reverse=True))
 
         deduped_list = sorted(
             deduped.values(),
