@@ -437,6 +437,8 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             'applicant', 'created_by', 'team'
         ).prefetch_related('approval_logs__approver')
 
+        own_q = Q(applicant=user) | Q(created_by=user)
+
         if role in ('manager', 'chief', 'supervisor'):
             filtered_qs = qs
         else:
@@ -454,11 +456,11 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
                 if team_ids or unit_ids:
                     team_q = Q(applicant__profile__team_id__in=team_ids) if team_ids else Q()
                     unit_q = Q(applicant__profile__unit_id__in=unit_ids) if unit_ids else Q()
-                    filtered_qs = qs.filter(team_q | unit_q)
+                    filtered_qs = qs.filter(own_q | team_q | unit_q)
                 else:
-                    filtered_qs = qs.filter(applicant=user)
+                    filtered_qs = qs.filter(own_q)
             else:
-                filtered_qs = qs.filter(applicant=user)
+                filtered_qs = qs.filter(own_q)
 
         # 一覧は申請者のユーザーID（社員コード）昇順を基本とする。
         return filtered_qs.annotate(
