@@ -240,10 +240,14 @@ class BOMListSerializer(serializers.ModelSerializer):
     parent_product_code = serializers.CharField(source='parent_product.product_code', read_only=True)
     parent_is_final = serializers.BooleanField(source='parent_product.is_final_product', read_only=True, default=False)
     parent_is_line_final = serializers.BooleanField(source='parent_product.is_line_final_product', read_only=True, default=False)
+    is_coproduct = serializers.SerializerMethodField()
 
     class Meta:
         model = BOM
         fields = '__all__'
+
+    def get_is_coproduct(self, obj: BOM):
+        return bool(getattr(obj, 'is_coproduct', False) or getattr(obj.parent_product, 'is_virtual_set', False))
 
 
 class BOMSerializer(serializers.ModelSerializer):
@@ -252,6 +256,7 @@ class BOMSerializer(serializers.ModelSerializer):
     parent_product_code = serializers.CharField(source='parent_product.product_code', read_only=True)
     parent_is_final = serializers.SerializerMethodField()
     parent_is_line_final = serializers.SerializerMethodField()
+    is_coproduct = serializers.SerializerMethodField()
 
     class Meta:
         model = BOM
@@ -260,6 +265,8 @@ class BOMSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         parent_product = attrs.get('parent_product', getattr(self.instance, 'parent_product', None))
         version = attrs.get('version', getattr(self.instance, 'version', None))
+        if parent_product and getattr(parent_product, 'is_virtual_set', False):
+            attrs['is_coproduct'] = True
         if parent_product and version:
             qs = BOM.objects.filter(parent_product=parent_product, version=version)
             if self.instance:
@@ -283,6 +290,9 @@ class BOMSerializer(serializers.ModelSerializer):
             except Product.DoesNotExist:
                 return False
         return False
+
+    def get_is_coproduct(self, obj: BOM):
+        return bool(getattr(obj, 'is_coproduct', False) or getattr(obj.parent_product, 'is_virtual_set', False))
 
 
 class RoutingStepSerializer(serializers.ModelSerializer):

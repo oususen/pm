@@ -462,7 +462,7 @@ class BOMService:
         if bom:
             result['bom_id'] = bom.id
             result['bom_version'] = bom.version
-            result['is_coproduct'] = bom.is_coproduct
+            result['is_coproduct'] = bool(bom.is_coproduct or getattr(bom.parent_product, 'is_virtual_set', False))
 
             for item in bom.items.select_related(
                 'child_product',

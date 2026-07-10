@@ -428,7 +428,7 @@
                 class="tall-number-input narrow-field"
               />
             </div>
-            <div class="form-group" v-if="selectedBOM.is_coproduct">
+            <div class="form-group" v-if="selectedBomIsCoproduct">
               <label>連産品代表品</label>
               <input
                 type="checkbox"
@@ -464,7 +464,7 @@
               <th>ライン</th>
               <th>LT</th>
               <th>時間</th>
-              <th v-if="selectedBOM.is_coproduct">代表</th>
+              <th v-if="selectedBomIsCoproduct">代表</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -482,7 +482,7 @@
                 <span v-if="item.time_unit === 'MINUTE'">分 {{ item.duration_min || '-' }}</span>
                 <span v-else>日</span>
               </td>
-              <td v-if="selectedBOM.is_coproduct">{{ item.is_coproduct_driver ? '✓' : '' }}</td>
+              <td v-if="selectedBomIsCoproduct">{{ item.is_coproduct_driver ? '✓' : '' }}</td>
               <td>
                 <button v-if="canEdit" type="button" class="btn-sm" @click="startEditItem(item)">編集</button>
                 <button v-if="canEdit" type="button" class="btn-sm btn-danger" @click="deleteBOMItem(item.id)">削除</button>
@@ -1463,6 +1463,16 @@ const isPhantom = (productId) => {
   return Boolean(product?.is_phantom)
 }
 
+const isCoproductBom = (bom) => {
+  if (!bom) return false
+  if (bom.is_coproduct) return true
+  const parentProductId = typeof bom.parent_product === 'object'
+    ? bom.parent_product?.id
+    : bom.parent_product
+  const parentProduct = products.value.find((p) => `${p.id}` === `${parentProductId}`)
+  return Boolean(parentProduct?.is_virtual_set)
+}
+
 const filteredChildProducts = computed(() => {
   const keyword = childProductFilter.value.trim().toLowerCase()
   if (!keyword) return products.value
@@ -1549,7 +1559,7 @@ const filteredCopyProducts = computed(() => {
   const keyword = copyProductFilter.value.trim().toLowerCase()
   let pool = products.value
   // 連産品BOMの場合は仮想セット品番のみ
-  if (selectedBOM.value.is_coproduct) {
+  if (isCoproductBom(selectedBOM.value)) {
     pool = pool.filter(p => p.is_virtual_set)
   }
   if (!keyword) return pool
@@ -1557,6 +1567,8 @@ const filteredCopyProducts = computed(() => {
     `${p.product_code} ${p.product_name}`.toLowerCase().includes(keyword)
   )
 })
+
+const selectedBomIsCoproduct = computed(() => isCoproductBom(selectedBOM.value))
 
 const categoryMap = {
   'ASSEMBLY': '組立品',
@@ -1707,13 +1719,15 @@ const closeDialog = () => {
 const saveBOM = async () => {
   if (!canEdit.value) return
   try {
+    const selectedParentProduct = products.value.find((p) => `${p.id}` === `${formData.value.parent_product}`)
+    const isVirtualSetParent = Boolean(selectedParentProduct?.is_virtual_set)
     const dataToSend = {
       parent_product: formData.value.parent_product,
       version: formData.value.version,
       valid_from: formData.value.valid_from,
       valid_to: formData.value.valid_to || null,
       is_active: formData.value.is_active,
-      is_coproduct: formData.value.is_coproduct,
+      is_coproduct: formData.value.is_coproduct || isVirtualSetParent,
     }
 
     if (isEdit.value) {
@@ -1810,7 +1824,10 @@ const openDetailsInNewTab = (bom) => {
 }
 
 const viewDetails = async (bom, { openDialog = true } = {}) => {
-  selectedBOM.value = bom
+  selectedBOM.value = {
+    ...bom,
+    is_coproduct: isCoproductBom(bom),
+  }
   resetItemForm()
   resetRoutingGenForm()
   childProductFilter.value = ''
@@ -2248,7 +2265,7 @@ const saveBOMItem = async () => {
     duration_min: requiresRoutingDetails(itemForm.value.sourcing_type) && itemForm.value.time_unit === 'MINUTE'
       ? itemForm.value.duration_min
       : null,
-    is_coproduct_driver: selectedBOM.value.is_coproduct ? itemForm.value.is_coproduct_driver : false,
+    is_coproduct_driver: selectedBomIsCoproduct.value ? itemForm.value.is_coproduct_driver : false,
     remark: itemForm.value.remark || ''
   }
 

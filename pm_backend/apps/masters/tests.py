@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from masters.models import BOM, BOMItem, Line, Process, Product, Routing, Supplier
-from masters.serializers import BOMItemSerializer
+from masters.serializers import BOMItemSerializer, BOMSerializer
 from masters.services.routing_service import (
     build_effective_routing_range_q,
     normalize_routing_reference_datetime,
@@ -235,6 +235,28 @@ class BOMItemValidationTest(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn('child_product', serializer.errors)
+
+
+class BOMSerializerCoproductTest(TestCase):
+    def test_virtual_set_parent_forces_coproduct_true(self):
+        parent = Product.objects.create(
+            product_code='TEST-VSET-PARENT',
+            product_name='仮想セット親製品',
+            is_virtual_set=True,
+        )
+        serializer = BOMSerializer(data={
+            'parent_product': parent.id,
+            'version': 'v1',
+            'valid_from': '2026-07-10',
+            'is_active': True,
+            'is_coproduct': False,
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        bom = serializer.save()
+
+        self.assertTrue(bom.is_coproduct)
+        self.assertTrue(serializer.data['is_coproduct'])
 
 
 class SupplierAutoLineTest(TestCase):

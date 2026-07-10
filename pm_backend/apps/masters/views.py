@@ -1516,7 +1516,10 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         is_coproduct = self.request.query_params.get('is_coproduct', None)
         if is_coproduct is not None and is_coproduct != '':
             is_coproduct_bool = is_coproduct.lower() == 'true'
-            queryset = queryset.filter(is_coproduct=is_coproduct_bool)
+            if is_coproduct_bool:
+                queryset = queryset.filter(Q(is_coproduct=True) | Q(parent_product__is_virtual_set=True))
+            else:
+                queryset = queryset.filter(is_coproduct=False, parent_product__is_virtual_set=False)
 
         version = self.request.query_params.get('version', None)
         if version:
@@ -2939,6 +2942,13 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         return line_obj, process_obj
 
+    def _normalize_parent_bom_coproduct_flag(self, bom_item: BOMItem):
+        bom = getattr(bom_item, 'bom', None)
+        parent_product = getattr(bom, 'parent_product', None) if bom else None
+        if bom and parent_product and getattr(parent_product, 'is_virtual_set', False) and not bom.is_coproduct:
+            bom.is_coproduct = True
+            bom.save(update_fields=['is_coproduct', 'updated_at'])
+
     def _select_sync_target_steps(self, bom_item: BOMItem):
         fk_qs = RoutingStep.objects.filter(source_bom_item_id=bom_item.id)
         if fk_qs.exists():
@@ -3049,8 +3059,13 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             ) if key in serializer.validated_data
         ]
         item = serializer.save()
+        self._normalize_parent_bom_coproduct_flag(item)
         if sync_fields:
             self._sync_item_fields_to_routing(item, sync_fields)
+
+    def perform_create(self, serializer):
+        item = serializer.save()
+        self._normalize_parent_bom_coproduct_flag(item)
 
 
 class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
