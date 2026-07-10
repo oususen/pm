@@ -12,6 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.role_utils import can_act_as_chief, can_act_as_manager, can_act_as_supervisor
 from accounts.views import _build_effective_permissions
 from masters.models import Line, Process, Product
 from production.models import ProductionOrder
@@ -135,6 +136,7 @@ def _auto_assign_workflow_users(creator):
 
     profile = getattr(creator, "profile", None)
     department_id = getattr(profile, "department_id", None) if profile else None
+    creator_division_id = getattr(profile, "division_id", None) if profile else None
     if not department_id:
         return None, None, None
 
@@ -158,14 +160,14 @@ def _auto_assign_workflow_users(creator):
 
     supervisor_candidates = [
         user for user in candidates
-        if getattr(getattr(user, "profile", None), "role", "") == "supervisor"
+        if can_act_as_supervisor(getattr(user, "profile", None), creator_team_id)
         and _role_rank(getattr(getattr(user, "profile", None), "role", "")) > creator_rank
     ]
     same_team_supervisors = [
         user for user in supervisor_candidates
         if creator_team_id
         and getattr(user, "profile", None)
-        and any(team.id == creator_team_id for team in user.profile.supervisor_teams.all())
+        and can_act_as_supervisor(user.profile, creator_team_id)
     ]
     same_team_supervisors.sort(key=_reviewer_sort_key)
     supervisor_candidates.sort(key=_reviewer_sort_key)
@@ -176,12 +178,12 @@ def _auto_assign_workflow_users(creator):
 
     chief_candidates = [
         user for user in candidates
-        if getattr(getattr(user, "profile", None), "role", "") == "chief"
+        if can_act_as_chief(getattr(user, "profile", None), creator_group_id)
         and _role_rank(getattr(getattr(user, "profile", None), "role", "")) > creator_rank
     ]
     same_group_chiefs = [
         user for user in chief_candidates
-        if creator_group_id and getattr(getattr(user, "profile", None), "group_id", None) == creator_group_id
+        if creator_group_id and can_act_as_chief(getattr(user, "profile", None), creator_group_id)
     ]
     same_group_chiefs.sort(key=_reviewer_sort_key)
     chief_candidates.sort(key=_reviewer_sort_key)
@@ -189,7 +191,7 @@ def _auto_assign_workflow_users(creator):
 
     manager_candidates = [
         user for user in candidates
-        if getattr(getattr(user, "profile", None), "role", "") == "manager"
+        if can_act_as_manager(getattr(user, "profile", None), creator_division_id)
         and _role_rank(getattr(getattr(user, "profile", None), "role", "")) > creator_rank
     ]
     manager_candidates.sort(key=_reviewer_sort_key)
@@ -245,7 +247,7 @@ def _next_stage(template, current_status=None):
     return None
 
 
-def _ensure_workflow_users(template, persist=False):
+def _ensure_workflow_users(template, persist=False, force=False):
     if not template or not template.created_by_id:
         return template
     if template.status == ProductChecksheetTemplate.STATUS_DRAFT:
@@ -253,13 +255,22 @@ def _ensure_workflow_users(template, persist=False):
 
     reviewer_user, chief_user, approver_user = _auto_assign_workflow_users(template.created_by)
     update_fields = []
-    if not template.reviewer_user_id and reviewer_user:
+    if force and template.reviewer_user_id != getattr(reviewer_user, "id", None):
         template.reviewer_user = reviewer_user
         update_fields.append("reviewer_user")
-    if not template.chief_user_id and chief_user:
+    elif not template.reviewer_user_id and reviewer_user:
+        template.reviewer_user = reviewer_user
+        update_fields.append("reviewer_user")
+    if force and template.chief_user_id != getattr(chief_user, "id", None):
         template.chief_user = chief_user
         update_fields.append("chief_user")
-    if not template.approver_user_id and approver_user:
+    elif not template.chief_user_id and chief_user:
+        template.chief_user = chief_user
+        update_fields.append("chief_user")
+    if force and template.approver_user_id != getattr(approver_user, "id", None):
+        template.approver_user = approver_user
+        update_fields.append("approver_user")
+    elif not template.approver_user_id and approver_user:
         template.approver_user = approver_user
         update_fields.append("approver_user")
 
@@ -753,6 +764,7 @@ class ProductChecksheetTemplateViewSet(viewsets.ModelViewSet):
         ) + 1
 
         with transaction.atomic():
+            reviewer_user, chief_user, approver_user = _auto_assign_workflow_users(request.user)
             new_template = ProductChecksheetTemplate.objects.create(
                 name=template.name,
                 line=template.line,
@@ -774,9 +786,9 @@ class ProductChecksheetTemplateViewSet(viewsets.ModelViewSet):
                 background_height=template.background_height,
                 editor_notes=template.editor_notes,
                 created_by=request.user,
-                reviewer_user=template.reviewer_user,
-                chief_user=template.chief_user,
-                approver_user=template.approver_user,
+                reviewer_user=reviewer_user,
+                chief_user=chief_user,
+                approver_user=approver_user,
             )
 
             for field in template.fields.all():

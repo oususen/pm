@@ -197,21 +197,9 @@
                 </option>
               </select>
             </div>
-            <div class="form-row full">
-              <label>{{ assignmentLabel }}</label>
+            <div v-if="canAssignSupervisorTeams" class="form-row full">
+              <label>担当班（複数）</label>
               <select
-                v-if="isLeaderRole"
-                v-model="form.profile.leader_units"
-                class="multi-select"
-                multiple
-                :disabled="!form.profile.team"
-              >
-                <option v-for="ut in unitOptions" :key="ut.value" :value="ut.value">
-                  {{ ut.label }}
-                </option>
-              </select>
-              <select
-                v-else
                 v-model="form.profile.supervisor_teams"
                 class="multi-select"
                 multiple
@@ -221,7 +209,21 @@
                   {{ tm.label }}
                 </option>
               </select>
-              <div class="helper-text">{{ assignmentHint }}</div>
+              <div class="helper-text">班長・係長・部長の兼任班を設定できます。</div>
+            </div>
+            <div v-if="canAssignLeaderUnits" class="form-row full">
+              <label>担当グループ（複数）</label>
+              <select
+                v-model="form.profile.leader_units"
+                class="multi-select"
+                multiple
+                :disabled="!form.profile.team"
+              >
+                <option v-for="ut in unitOptions" :key="ut.value" :value="ut.value">
+                  {{ ut.label }}
+                </option>
+              </select>
+              <div class="helper-text">リーダー・係長・部長の兼任グループを設定できます。</div>
             </div>
             <div class="form-row">
               <label>グループ</label>
@@ -347,13 +349,8 @@ const form = reactive({
   profile: emptyProfile(),
 })
 
-const isLeaderRole = computed(() => form.profile.role === 'leader')
-const assignmentLabel = computed(() => (isLeaderRole.value ? '担当グループ（複数）' : '担当班（複数）'))
-const assignmentHint = computed(() => (
-  isLeaderRole.value
-    ? 'リーダーの場合は担当グループを設定できます。'
-    : '役割に関係なく担当班を設定できます。'
-))
+const canAssignSupervisorTeams = computed(() => form.profile.role !== 'leader')
+const canAssignLeaderUnits = computed(() => ['leader', 'chief', 'manager'].includes(form.profile.role))
 
 const canAccessByResource = (resource, level = 'view') => {
   const user = authState.user
@@ -748,8 +745,8 @@ const buildPayload = () => {
     department: form.profile.division || null,
     group: form.profile.group || null,
     team: form.profile.team || null,
-    supervisor_teams: form.profile.role === 'leader' ? [] : supervisorTeams,
-    leader_units: form.profile.role === 'leader' ? leaderUnits : [],
+    supervisor_teams: canAssignSupervisorTeams.value ? supervisorTeams : [],
+    leader_units: canAssignLeaderUnits.value ? leaderUnits : [],
     unit: form.profile.unit || null,
     joined_on: form.profile.joined_on || null,
   }

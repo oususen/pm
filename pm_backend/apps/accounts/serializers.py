@@ -1,8 +1,8 @@
 from collections import defaultdict
 from django.contrib.auth.models import User
-from django.db import models as db_models
 from rest_framework import serializers
 
+from .role_utils import build_chief_role_q, build_leader_role_q, build_supervisor_role_q
 from .models import (
     Department,
     UnitLineMapping,
@@ -33,23 +33,16 @@ class DepartmentSerializer(serializers.ModelSerializer):
                 role='manager', division=obj
             ).select_related('user')
         elif level == 'group':
-            # 係長: role='chief' かつ group=対象部署
             profiles = UserProfile.objects.filter(
-                role='chief', group=obj
-            ).select_related('user')
+                build_chief_role_q(obj.id, prefix='')
+            ).distinct().select_related('user')
         elif level == 'team':
-            # 班長: role='supervisor' かつ (team=対象班 または supervisor_teams に含まれる)
             profiles = UserProfile.objects.filter(
-                role='supervisor'
-            ).filter(
-                db_models.Q(team=obj) | db_models.Q(supervisor_teams=obj)
+                build_supervisor_role_q(obj.id, prefix='')
             ).distinct().select_related('user')
         elif level == 'unit':
-            # リーダー: role='leader' かつ (unit=対象グループ または leader_units に含まれる)
             profiles = UserProfile.objects.filter(
-                role='leader'
-            ).filter(
-                db_models.Q(unit=obj) | db_models.Q(leader_units=obj)
+                build_leader_role_q(obj.id, prefix='')
             ).distinct().select_related('user')
         else:
             return []

@@ -15,6 +15,13 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
+from accounts.role_utils import (
+    build_chief_role_q,
+    build_leader_role_q,
+    build_supervisor_role_q,
+    get_profile,
+    get_profile_role,
+)
 from .access import can_manage_application
 from .models import OvertimeApplication, OvertimeApprovalLog
 from production.models_process_work_session import ProcessWorkSession
@@ -274,34 +281,22 @@ def _has_open_brake_or_spot_action(user):
 
 def find_approvers_for_role(applicant, role):
     """申請者の組織情報から指定ロールの承認者を検索する"""
-    try:
-        profile = applicant.profile
-    except Exception:
+    profile = get_profile(applicant)
+    if not profile:
         return User.objects.none()
 
     if role == 'leader':
         if not profile.unit:
             return User.objects.none()
-        # leader_units に申請者のグループが含まれるリーダーを検索
-        return User.objects.filter(
-            profile__role='leader',
-            profile__leader_units=profile.unit,
-        ).distinct()
+        return User.objects.filter(build_leader_role_q(profile.unit_id)).distinct()
     elif role == 'supervisor':
         if not profile.team:
             return User.objects.none()
-        # supervisor_teams に設定されている班長 OR 同じ班に所属する班長（どちらか）
-        return User.objects.filter(
-            Q(profile__role='supervisor', profile__supervisor_teams=profile.team) |
-            Q(profile__role='supervisor', profile__team=profile.team)
-        ).distinct()
+        return User.objects.filter(build_supervisor_role_q(profile.team_id)).distinct()
     elif role == 'chief':
         if not profile.group:
             return User.objects.none()
-        return User.objects.filter(
-            profile__role='chief',
-            profile__group=profile.group,
-        )
+        return User.objects.filter(build_chief_role_q(profile.group_id)).distinct()
     elif role == 'manager':
         if not profile.division:
             return User.objects.none()
@@ -434,10 +429,8 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        try:
-            role = user.profile.role
-        except Exception:
-            role = 'staff'
+        profile = get_profile(user)
+        role = get_profile_role(profile) or 'staff'
 
         # 管理職は全申請を閲覧可能、それ以外は自分の申請のみ
         qs = OvertimeApplication.objects.select_related(
@@ -446,15 +439,26 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
 
         if role in ('manager', 'chief', 'supervisor'):
             filtered_qs = qs
-        elif role == 'leader':
-            # 担当グループ（leader_units）のメンバーの申請のみ閲覧可能
-            leader_units = user.profile.leader_units.all()
-            if leader_units.exists():
-                filtered_qs = qs.filter(applicant__profile__unit__in=leader_units)
+        else:
+            if profile:
+                team_ids = set()
+                unit_ids = set()
+                if role in ('supervisor', 'chief', 'manager'):
+                    if getattr(profile, 'team_id', None):
+                        team_ids.add(profile.team_id)
+                    team_ids.update(profile.supervisor_teams.values_list('id', flat=True))
+                if role in ('leader', 'supervisor', 'chief', 'manager'):
+                    if getattr(profile, 'unit_id', None):
+                        unit_ids.add(profile.unit_id)
+                    unit_ids.update(profile.leader_units.values_list('id', flat=True))
+                if team_ids or unit_ids:
+                    team_q = Q(applicant__profile__team_id__in=team_ids) if team_ids else Q()
+                    unit_q = Q(applicant__profile__unit_id__in=unit_ids) if unit_ids else Q()
+                    filtered_qs = qs.filter(team_q | unit_q)
+                else:
+                    filtered_qs = qs.filter(applicant=user)
             else:
                 filtered_qs = qs.filter(applicant=user)
-        else:
-            filtered_qs = qs.filter(applicant=user)
 
         # 一覧は申請者のユーザーID（社員コード）昇順を基本とする。
         return filtered_qs.annotate(

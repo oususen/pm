@@ -26,6 +26,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.role_utils import build_supervisor_role_q
 from masters.models import BOMItem, Calendar, Contact, Line, Process, Product, Supplier
 from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
@@ -147,17 +148,17 @@ def _resolve_level2_approvers_for_submit(proposal: PurchaseOrderProposal, config
     def _same_org_supervisors(user_ids=None):
         user_qs = get_user_model().objects.filter(
             is_active=True,
-            profile__role='supervisor',
+            profile__role__in=['supervisor', 'chief', 'manager'],
         ).exclude(id=creator_id)
 
         if user_ids is not None:
             user_qs = user_qs.filter(id__in=user_ids)
 
         if supervisor_team_ids:
-            user_qs = user_qs.filter(
-                Q(profile__team_id__in=supervisor_team_ids)
-                | Q(profile__supervisor_teams__id__in=supervisor_team_ids)
-            )
+            team_filter = Q()
+            for supervisor_team_id in supervisor_team_ids:
+                team_filter |= build_supervisor_role_q(supervisor_team_id)
+            user_qs = user_qs.filter(team_filter)
         elif group_id:
             user_qs = user_qs.filter(profile__group_id=group_id)
         else:

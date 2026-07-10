@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
 
+from accounts.role_utils import can_act_as_leader, can_act_as_supervisor, get_profile, get_profile_role
+
 
 User = get_user_model()
 
@@ -7,38 +9,38 @@ SELF_ONLY_APPLICATION_TYPES = {'overtime', 'holiday'}
 
 
 def get_user_role(user):
-    try:
-        return user.profile.role
-    except Exception:
-        return 'staff'
+    profile = get_profile(user)
+    return get_profile_role(profile) or 'staff'
 
 
 def get_proxy_applicant_queryset(user):
     qs = User.objects.filter(is_active=True).select_related('profile')
     role = get_user_role(user)
 
-    try:
-        profile = user.profile
-    except Exception:
+    profile = get_profile(user)
+    if not profile:
         return qs.filter(id=user.id)
 
-    if role == 'supervisor':
-        team_ids = set()
-        if profile.team_id:
+    team_ids = set()
+    unit_ids = set()
+
+    if role in ('supervisor', 'chief', 'manager'):
+        if getattr(profile, 'team_id', None):
             team_ids.add(profile.team_id)
         team_ids.update(profile.supervisor_teams.values_list('id', flat=True))
-        if not team_ids:
-            return qs.filter(id=user.id)
-        return qs.filter(profile__team_id__in=team_ids).distinct()
 
-    if role == 'leader':
-        unit_ids = set()
-        if profile.unit_id:
+    if role in ('leader', 'supervisor', 'chief', 'manager'):
+        if getattr(profile, 'unit_id', None):
             unit_ids.add(profile.unit_id)
         unit_ids.update(profile.leader_units.values_list('id', flat=True))
-        if not unit_ids:
-            return qs.filter(id=user.id)
-        return qs.filter(profile__unit_id__in=unit_ids).distinct()
+
+    if team_ids or unit_ids:
+        result = qs.none()
+        if team_ids:
+            result = result | qs.filter(profile__team_id__in=team_ids)
+        if unit_ids:
+            result = result | qs.filter(profile__unit_id__in=unit_ids)
+        return result.distinct()
 
     return qs.filter(id=user.id)
 
@@ -52,8 +54,13 @@ def can_apply_for(user, applicant, application_type):
         return True
     if application_type in SELF_ONLY_APPLICATION_TYPES:
         return False
-    if get_user_role(user) not in ('leader', 'supervisor'):
-        return False
+    profile = get_profile(user)
+    applicant_profile = get_profile(applicant)
+    if applicant_profile:
+        if can_act_as_supervisor(profile, getattr(applicant_profile, 'team_id', None)):
+            return True
+        if can_act_as_leader(profile, getattr(applicant_profile, 'unit_id', None)):
+            return True
     return get_proxy_applicant_queryset(user).filter(id=applicant.id).exists()
 
 
