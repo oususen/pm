@@ -608,9 +608,9 @@ class KubotaSakaiTripPlanView(APIView):
             current_assignments = assignment_map.get(adj.id, [])
             assigned_qty = sum((_to_decimal(a.qty) for a in current_assignments), Decimal('0'))
             delivery_qty = _to_decimal(adj.delivery_qty)
-            unassigned_qty = delivery_qty - assigned_qty
+            unassigned_qty = assigned_qty - delivery_qty
             deadline_date = _subtract_business_days(target_date, deadline_days, calendar_map)
-            overdue = unassigned_qty > 0 and today > deadline_date
+            overdue = unassigned_qty < 0 and today > deadline_date
             progress_info = progress_map.get((adj.product_code, adj.ship_to_code or ''), {})
 
             rows.append({
@@ -771,12 +771,6 @@ class KubotaSakaiTripPlanView(APIView):
             if not adj:
                 # 上流で弾いているが防御的にチェック
                 errors.append({'due_adjustment_id': item['adj_id'], 'detail': '対象外の納期調整データです。'})
-                continue
-            if item['total'] > _to_decimal(adj.delivery_qty):
-                errors.append({
-                    'due_adjustment_id': item['adj_id'],
-                    'detail': f'割付数量超過: delivery={adj.delivery_qty} assigned={item["total"]}',
-                })
                 continue
             normalized.append({'adj_id': item['adj_id'], 'allocations': item['allocations']})
 

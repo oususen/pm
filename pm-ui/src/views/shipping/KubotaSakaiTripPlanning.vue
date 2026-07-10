@@ -343,7 +343,7 @@
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-remain-${slotIdx}`"
                   class="sub-cell"
-                  :class="{ 'remain-negative': parseNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) > 0 }"
+                  :class="{ 'remain-negative': parseNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) < 0 }"
                 >
                   {{ formatNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) }}
                 </div>
@@ -613,7 +613,7 @@ const assignedQty = (entry) => {
 const recalcEntry = (entry) => {
   if (!entry) return
   const assigned = assignedQty(entry)
-  entry.unassigned_qty_preview = Number((parseNumber(entry.delivery_qty) - assigned).toFixed(3))
+  entry.unassigned_qty_preview = Number((assigned - parseNumber(entry.delivery_qty)).toFixed(3))
 }
 
 const handleAllocationChange = (entry) => {
@@ -1137,6 +1137,7 @@ const saveProgressAdjust = async () => {
 const validateBeforeSave = () => {
   let missingTruckCount = 0
   let unassignedQtyCount = 0
+  const overAssigned = []
   const overloaded = []
   const overloadedSet = new Set()
 
@@ -1152,7 +1153,8 @@ const validateBeforeSave = () => {
         if (!validAllocations.length) missingTruckCount += 1
 
         const unassigned = parseNumber(entry?.unassigned_qty_preview)
-        if (unassigned > 0) unassignedQtyCount += 1
+        if (unassigned < 0) unassignedQtyCount += 1
+        if (unassigned > 0) overAssigned.push(`${dateKey} ${row.product_code} (需要${deliveryQty} 割付${deliveryQty + unassigned})`)
       }
     }
 
@@ -1167,13 +1169,14 @@ const validateBeforeSave = () => {
     }
   }
 
-  if (!missingTruckCount && !unassignedQtyCount && !overloaded.length) {
+  if (!missingTruckCount && !unassignedQtyCount && !overAssigned.length && !overloaded.length) {
     return { ok: true, message: '' }
   }
 
   const lines = ['保存前チェックで注意点があります。']
   if (missingTruckCount) lines.push(`・便未選択: ${missingTruckCount}件`)
   if (unassignedQtyCount) lines.push(`・未割付残あり: ${unassignedQtyCount}件`)
+  if (overAssigned.length) overAssigned.forEach((s) => lines.push(`・割付数量超過: ${s}`))
   if (overloaded.length) lines.push(`・便占有率95%超: ${overloaded.join(' / ')}`)
   return { ok: false, message: lines.join('\n') }
 }
