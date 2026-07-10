@@ -34,7 +34,7 @@
 
     <div class="master-layout" :class="{ 'create-mode': isListHidden }">
       <section v-if="!isListHidden" class="panel list-panel">
-        <h3 class="panel-title">テンプレート一覧</h3>
+        <h3 class="panel-title">設備点検表一覧</h3>
         <div class="list-filter-bar">
           <input
             v-model="listFilter.keyword"
@@ -258,6 +258,9 @@
           </button>
           <button class="btn-revise" @click="reviseTemplate" :disabled="!canRevise || actionLoading">
             改訂
+          </button>
+          <button v-if="form.id" class="btn-danger" @click="deleteTemplate" :disabled="!canDeleteTemplate || actionLoading || saving">
+            削除
           </button>
         </div>
 
@@ -790,6 +793,7 @@ const canAccessQuality = (resource, level = "view") => {
 
 const canView = computed(() => canAccessQuality("quality.equipment_inspection_master", "view"))
 const canEdit = computed(() => canAccessQuality("quality.equipment_inspection_master", "edit"))
+const isAdminOrSuperuser = computed(() => Boolean(authState.user?.is_staff || authState.user?.is_superuser))
 const currentUserId = computed(() => Number(authState.user?.id || 0))
 const normalizeStatus = (status) => String(status || "").trim().toUpperCase()
 const normalizedFormStatus = computed(() => normalizeStatus(form.value.status) || "DRAFT")
@@ -826,6 +830,11 @@ const canApprove = computed(() => {
 
 const canReject = computed(() => canReview.value || canApprove.value)
 const canRevise = computed(() => canEdit.value && normalizedFormStatus.value === "APPROVED")
+const canDeleteTemplate = computed(() => {
+  if (!form.value.id) return false
+  if (!isAdminOrSuperuser.value) return false
+  return normalizedFormStatus.value !== "APPROVED"
+})
 
 const selectedProcessTags = computed(() =>
   processOptions.value.filter((p) => (form.value.processes || []).map(Number).includes(Number(p.id)))
@@ -2613,6 +2622,40 @@ const reviseTemplate = async () => {
   } catch (error) {
     console.error("改訂に失敗:", error)
     alert(error.response?.data?.detail || "改訂に失敗しました。")
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const deleteTemplate = async () => {
+  if (!form.value.id || !canDeleteTemplate.value) return
+  const targetName = [form.value.sheet_code, form.value.sheet_name].filter(Boolean).join(" ")
+  const ok = window.confirm(`${targetName || "この点検表"}を削除します。よろしいですか？`)
+  if (!ok) return
+
+  actionLoading.value = true
+  try {
+    const deletingId = Number(form.value.id)
+    await api.qualityEquipmentInspections.delete(deletingId)
+    if (route.query.id) {
+      await router.replace({ path: route.path, query: {} })
+    }
+    await loadTemplateList()
+    const nextTemplate = templates.value.find((item) => Number(item.id) !== deletingId) || templates.value[0]
+    if (nextTemplate?.id) {
+      await loadTemplateDetail(nextTemplate.id)
+    } else {
+      selectedTemplateId.value = null
+      form.value = createEmptyForm()
+      prevVersionItems.value = []
+      await nextTick()
+      resizeAllTextareas()
+      markSavedSnapshot()
+    }
+    alert("削除しました。")
+  } catch (error) {
+    console.error("設備点検テンプレート削除に失敗:", error)
+    alert("削除に失敗しました。")
   } finally {
     actionLoading.value = false
   }

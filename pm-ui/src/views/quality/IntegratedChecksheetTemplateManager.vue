@@ -12,7 +12,7 @@
     <div class="main-layout" :class="{ 'list-collapsed': listCollapsed }">
       <!-- 左: 一覧パネル -->
       <section v-show="!listCollapsed" class="panel list-panel">
-        <h3 class="panel-title">テンプレート一覧</h3>
+        <h3 class="panel-title">製品チェックシート一覧</h3>
         <div class="list-filter-bar">
           <input v-model="listFilter.keyword" class="list-filter-input" placeholder="製品名・テンプレ名" />
           <select v-model="listFilter.status" class="list-filter-select">
