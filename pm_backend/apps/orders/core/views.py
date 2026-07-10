@@ -8,6 +8,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Exists, OuterRef, Q
 import csv
+import re
 from datetime import date
 from orders.utils.calendar_utils import get_business_today
 
@@ -545,7 +546,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             )
 
     @staticmethod
-    def _compute_naiji_summary(product_code, start_date, end_date):
+    def _compute_naiji_summary(product_code, start_date, end_date, ship_to=''):
         """製品1件の内示分析サマリーを計算して返す。
 
         Returns: dict (period_summary と同じキー構成) + 'snapshot_count', 'product_name'
@@ -586,6 +587,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         for raw in qs:
             if not raw.date_headers or not raw.quantities:
                 continue
+            if ship_to:
+                raw_ship_to = ((raw.raw_payload or {}).get('ship_to', '') or '').strip()
+                if raw_ship_to != ship_to:
+                    continue
             sf = raw.source_file
             if sf not in snapshots_map:
                 snapshots_map[sf] = {}
@@ -622,7 +627,9 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
 
         firm_qs = OrderLine.objects.filter(
             order__order_type='FIRM', order__status='OPEN', product_code=product_code,
-        )
+        ).exclude(ship_to_code='971')
+        if ship_to:
+            firm_qs = firm_qs.filter(ship_to_code=ship_to)
         if start_date:
             firm_qs = firm_qs.filter(due_date__gte=start_date)
         if end_date:
@@ -631,7 +638,6 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         for row in firm_qs.values('due_date').annotate(total_qty=_Sum('quantity')):
             firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
 
-        # StgOrderRawKubotaのFIRMレコードから発行日（raw_payload['issue_date']）を取得
         def _parse_yymmdd(s):
             s = str(s).strip()
             if len(s) == 6 and s.isdigit():
@@ -641,23 +647,21 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     pass
             return None
 
+        def _extract_kubota_firm_issue_date(order_no):
+            parts = re.split(r'[-_]', str(order_no or ''))
+            for part in parts[2:]:
+                parsed = _parse_yymmdd(part)
+                if parsed is not None:
+                    return parsed
+            return None
+
         firm_dates = {}
-        firm_stg_qs = StgOrderRawKubota.objects.filter(
-            product_code=product_code, order_type='FIRM', parse_status='PARSED'
-        ).exclude(delivery_date=None)
-        if start_date:
-            firm_stg_qs = firm_stg_qs.filter(delivery_date__gte=start_date)
-        if end_date:
-            firm_stg_qs = firm_stg_qs.filter(delivery_date__lte=end_date)
-        for stg in firm_stg_qs.values('delivery_date', 'raw_payload'):
-            ds = stg['delivery_date'].isoformat()
-            issue_date_str = (stg['raw_payload'] or {}).get('issue_date', '')
-            if not issue_date_str:
-                continue
-            issue_date_obj = _parse_yymmdd(issue_date_str)
+        for line in firm_qs.select_related('order').only('due_date', 'order__order_no'):
+            issue_date_obj = _extract_kubota_firm_issue_date(line.order.order_no)
             if issue_date_obj is None:
                 continue
-            if ds not in firm_dates or issue_date_obj < firm_dates[ds]:
+            ds = line.due_date.isoformat()
+            if ds not in firm_dates or issue_date_obj > firm_dates[ds]:
                 firm_dates[ds] = issue_date_obj
 
         all_errors = []
@@ -713,48 +717,73 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
 
         stable_days_list = []
         firm_stable_days_list = []
+        pre_converge_shortage_count = 0
+        n_converge_total = 0
+        firm_delay_count = 0
+        firm_delay_total = 0
         for ds in all_due_dates:
             firm_qty = firm_quantities.get(ds)
             if firm_qty is None:
                 continue
             due_date_obj = date.fromisoformat(ds)
             current_streak_start = None
-            _seen_positive = False
+            prev_qty = None
             for sf in ordered_files:
                 if ds not in snapshots_map[sf]:
                     continue
                 qty = snapshots_map[sf][ds]
-                # 内示未着荷（数量=0）のスナップショットは収束判定から除外
-                if not _seen_positive:
-                    if qty <= 0:
-                        continue
-                    _seen_positive = True
+                if qty <= 0:
+                    continue
                 snap_date = snapshot_dates[sf].date()
                 if abs(qty - firm_qty) < 0.5:
                     if current_streak_start is None:
                         current_streak_start = snap_date
                 else:
                     current_streak_start = None
+                    prev_qty = qty
             if current_streak_start is not None:
-                days = (due_date_obj - current_streak_start).days
+                n_converge_total += 1
+                if prev_qty is not None and prev_qty < firm_qty - 0.5:
+                    pre_converge_shortage_count += 1
+                days = _count_working_days(current_streak_start, due_date_obj)
                 if days >= 0:
                     stable_days_list.append((days, ds))
-                firm_date_obj = firm_dates.get(ds)
-                if firm_date_obj is not None:
-                    fdays = _count_working_days(current_streak_start, firm_date_obj)
-                    firm_stable_days_list.append((fdays, ds))
+                    firm_date_obj = firm_dates.get(ds)
+                    if firm_date_obj is not None:
+                        fdays = _count_working_days(current_streak_start, firm_date_obj)
+                        firm_stable_days_list.append((fdays, ds))
+                        firm_delay_total += 1
+                        if firm_date_obj >= due_date_obj:
+                            firm_delay_count += 1
 
         if stable_days_list:
-            days_vals = [d for d, _ in stable_days_list]
+            days_vals = sorted([d for d, _ in stable_days_list])
             stable_days_mean = round(sum(days_vals) / len(days_vals), 1)
+            stable_days_median = days_vals[len(days_vals) // 2] if len(days_vals) % 2 == 1 else round((days_vals[len(days_vals) // 2 - 1] + days_vals[len(days_vals) // 2]) / 2, 1)
+            stable_days_std = round(statistics.stdev(days_vals), 1) if len(days_vals) >= 2 else 0.0
             _min_e = min(stable_days_list, key=lambda x: x[0])
             _max_e = max(stable_days_list, key=lambda x: x[0])
             stable_days_min, stable_days_min_date = _min_e
             stable_days_max, stable_days_max_date = _max_e
             stable_days_count = len(stable_days_list)
+            _n = len(days_vals)
+            within_7_dates = sorted([ds for d, ds in stable_days_list if d <= 7])
+            stable_days_dist = {
+                'within_7': sum(1 for d in days_vals if d <= 7),
+                'within_7_pct': round(sum(1 for d in days_vals if d <= 7) / _n * 100, 1),
+                'within_7_dates': within_7_dates,
+                'within_8_14': sum(1 for d in days_vals if 8 <= d <= 14),
+                'within_8_14_pct': round(sum(1 for d in days_vals if 8 <= d <= 14) / _n * 100, 1),
+                'within_15_21': sum(1 for d in days_vals if 15 <= d <= 21),
+                'within_15_21_pct': round(sum(1 for d in days_vals if 15 <= d <= 21) / _n * 100, 1),
+                'over_21': sum(1 for d in days_vals if d > 21),
+                'over_21_pct': round(sum(1 for d in days_vals if d > 21) / _n * 100, 1),
+            }
         else:
             stable_days_mean = stable_days_min = stable_days_min_date = None
             stable_days_max = stable_days_max_date = stable_days_count = None
+            stable_days_median = stable_days_std = None
+            stable_days_dist = None
 
         if firm_stable_days_list:
             fdays_vals = [d for d, _ in firm_stable_days_list]
@@ -764,12 +793,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             firm_stable_days_min, firm_stable_days_min_date = _fmin_e
             firm_stable_days_max, firm_stable_days_max_date = _fmax_e
             firm_stable_days_count = len(firm_stable_days_list)
-            _neg_count = sum(1 for d in fdays_vals if d < 0)
-            firm_stable_days_negative_rate = round(_neg_count / firm_stable_days_count * 100, 1)
         else:
             firm_stable_days_mean = firm_stable_days_min = firm_stable_days_min_date = None
             firm_stable_days_max = firm_stable_days_max_date = firm_stable_days_count = None
-            firm_stable_days_negative_rate = None
+        firm_stable_days_negative_rate = round(firm_delay_count / firm_delay_total * 100, 1) if firm_delay_total > 0 else None
 
         n = len(all_errors)
         total_dates = len(all_due_dates)
@@ -829,6 +856,9 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'safety_stock_95': ss_95,
             'safety_stock_99': ss_99,
             'stable_days_mean': stable_days_mean,
+            'stable_days_median': stable_days_median,
+            'stable_days_std': stable_days_std,
+            'stable_days_dist': stable_days_dist,
             'stable_days_min': stable_days_min,
             'stable_days_min_date': stable_days_min_date,
             'stable_days_max': stable_days_max,
@@ -841,11 +871,14 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'firm_stable_days_max_date': firm_stable_days_max_date,
             'firm_stable_days_count': firm_stable_days_count,
             'firm_stable_days_negative_rate': firm_stable_days_negative_rate,
+            'pre_converge_shortage_rate': round(pre_converge_shortage_count / n_converge_total * 100, 1) if n_converge_total > 0 else None,
+            'pre_converge_shortage_count': pre_converge_shortage_count,
+            'pre_converge_total': n_converge_total,
         }
 
     @action(detail=False, methods=['get'])
     def kubota_naiji_products(self, request):
-        """クボタ内示（36番）の製品一覧を返す"""
+        """クボタ内示（36番）の製品一覧を返す（納入地情報付き）"""
         from django.db.models import Count, Max
 
         qs = (
@@ -858,12 +891,22 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             )
             .order_by('product_code')
         )
+
+        # 製品ごとの納入地一覧を取得
+        from collections import defaultdict
+        ship_to_map = defaultdict(set)
+        for raw in StgOrderRawKubota.objects.filter(data_no='36', parse_status='PARSED').only('product_code', 'raw_payload'):
+            st = ((raw.raw_payload or {}).get('ship_to', '') or '').strip()
+            if st:
+                ship_to_map[raw.product_code].add(st)
+
         results = [
             {
                 'product_code': r['product_code'],
                 'product_name': r['product_name'] or '',
                 'snapshot_count': r['snapshot_count'],
                 'latest_file_date': r['latest_file_date'].date().isoformat() if r['latest_file_date'] else None,
+                'ship_to_list': sorted(ship_to_map.get(r['product_code'], [])),
             }
             for r in qs
         ]
@@ -877,6 +920,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             product_code: 品番（必須）
             start_date: 納期開始 (YYYY-MM-DD)
             end_date: 納期終了 (YYYY-MM-DD)
+            ship_to: 納入地コード（任意、指定時はその納入地のみ）
         """
         from datetime import datetime, date
         import statistics
@@ -884,6 +928,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         product_code = request.query_params.get('product_code')
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
+        ship_to = request.query_params.get('ship_to', '').strip()
 
         if not product_code:
             return Response({'error': 'product_code は必須です'}, status=status.HTTP_400_BAD_REQUEST)
@@ -924,14 +969,27 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         # 同じsource_fileは同一スナップショット
         snapshots_map = {}  # source_file -> {due_date_str -> qty}
         snapshot_dates = {}  # source_file -> created_at
+        snapshot_calc_dates = {}  # source_file -> calc_date (YYMMDD)
 
         for raw in qs:
             if not raw.date_headers or not raw.quantities:
                 continue
+            # 納入地フィルタ
+            if ship_to:
+                raw_ship_to = ((raw.raw_payload or {}).get('ship_to', '') or '').strip()
+                if raw_ship_to != ship_to:
+                    continue
             sf = raw.source_file
             if sf not in snapshots_map:
                 snapshots_map[sf] = {}
                 snapshot_dates[sf] = raw.created_at
+                calc_date_str = (raw.raw_payload or {}).get('calc_date', '')
+                if calc_date_str and len(str(calc_date_str)) == 6:
+                    try:
+                        s = str(calc_date_str)
+                        snapshot_calc_dates[sf] = date(2000 + int(s[:2]), int(s[2:4]), int(s[4:6])).isoformat()
+                    except (ValueError, IndexError):
+                        pass
 
             for dh, qty_str in zip(raw.date_headers, raw.quantities):
                 due_date = _parse_date_str(dh)
@@ -974,11 +1032,13 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             snapshots.append({
                 'source_file': sf,
                 'snapshot_date': snapshot_dates[sf].date().isoformat(),
+                'calc_date': snapshot_calc_dates.get(sf),
                 'quantities': snapshots_map[sf],
             })
 
         # 確定数量（FIRM）を OrderLine（OPEN受注）から取得
         # StgOrderDailyは過去の取込履歴が混在するため、現在有効な確定受注を使用する
+        # KMT納入先(ship_to_code='971')は内示がないため除外
         from django.db.models import Sum as _Sum
         firm_qs = (
             OrderLine.objects
@@ -987,7 +1047,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 order__status='OPEN',
                 product_code=product_code,
             )
+            .exclude(ship_to_code='971')
         )
+        if ship_to:
+            firm_qs = firm_qs.filter(ship_to_code=ship_to)
         if start_date:
             firm_qs = firm_qs.filter(due_date__gte=start_date)
         if end_date:
@@ -997,7 +1060,6 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         for row in firm_qs.values('due_date').annotate(total_qty=_Sum('quantity')):
             firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
 
-        # StgOrderRawKubotaのFIRMレコードから発行日（raw_payload['issue_date']）を取得
         def _parse_yymmdd_str(s):
             s = str(s).strip()
             if len(s) == 6 and s.isdigit():
@@ -1007,23 +1069,21 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     pass
             return None
 
+        def _extract_kubota_firm_issue_date_str(order_no):
+            parts = re.split(r'[-_]', str(order_no or ''))
+            for part in parts[2:]:
+                parsed = _parse_yymmdd_str(part)
+                if parsed is not None:
+                    return parsed
+            return None
+
         firm_dates = {}
-        firm_stg_qs2 = StgOrderRawKubota.objects.filter(
-            product_code=product_code, order_type='FIRM', parse_status='PARSED'
-        ).exclude(delivery_date=None)
-        if start_date:
-            firm_stg_qs2 = firm_stg_qs2.filter(delivery_date__gte=start_date)
-        if end_date:
-            firm_stg_qs2 = firm_stg_qs2.filter(delivery_date__lte=end_date)
-        for stg in firm_stg_qs2.values('delivery_date', 'raw_payload'):
-            ds = stg['delivery_date'].isoformat()
-            issue_date_str = (stg['raw_payload'] or {}).get('issue_date', '')
-            if not issue_date_str:
-                continue
-            issue_date_obj = _parse_yymmdd_str(issue_date_str)
+        for line in firm_qs.select_related('order').only('due_date', 'order__order_no'):
+            issue_date_obj = _extract_kubota_firm_issue_date_str(line.order.order_no)
             if issue_date_obj is None:
                 continue
-            if ds not in firm_dates or issue_date_obj < date.fromisoformat(firm_dates[ds]):
+            ds = line.due_date.isoformat()
+            if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
                 firm_dates[ds] = issue_date_obj.isoformat()
 
         # 統計計算（納期ごと）
@@ -1079,9 +1139,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 continue
             n_dates_with_firm += 1
             _raw = [s['quantities'][ds] for s in snapshots if ds in s['quantities']]
-            # 内示未着荷（数量=0）のスナップショットを先頭から除外
-            _first_pos = next((i for i, q in enumerate(_raw) if q > 0), None)
-            qty_series = _raw[_first_pos:] if _first_pos is not None else []
+            qty_series = [q for q in _raw if q > 0]
             if not qty_series:
                 continue
             has_shortage = False
@@ -1106,38 +1164,77 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 n_dates_shortage += 1
 
         # ---- 収束安定期間（内示が確定値と一致してから納期まで何日間） ----
-        # 各納期について、最後に連続して確定値と一致し始めた日から納期までの日数
+        from datetime import timedelta as _timedelta
+        def _count_working_days(d_from, d_to):
+            if d_from == d_to:
+                return 0
+            step = 1 if d_to > d_from else -1
+            count = 0
+            cur = d_from + _timedelta(days=step)
+            while cur != d_to + _timedelta(days=step):
+                if _wdc.is_working_day(cur):
+                    count += step
+                cur += _timedelta(days=step)
+            return count
+
         stable_days_list = []  # (days, due_date_str)
+        converge_dates = {}  # 納期別の収束日
+        pre_converge_shortage_count = 0
+        pre_converge_shortage_dates = []
+        n_converge_total = 0
+        firm_due_lt5_count = 0  # 納期まで5営業日未満で確定した件数
+        firm_due_lt5_total = 0  # 確定発行日がある件数
+        firm_converge_on_or_after_firm_count = 0  # 確定一致日が確定日以後の件数
+        firm_converge_on_or_after_firm_total = 0  # 確定一致日と確定日が比較できる件数
+        firm_converge_on_or_after_firm_dates = []  # 条件に該当した納期日
         for ds in all_due_dates:
             firm_qty = firm_quantities.get(ds)
             if firm_qty is None:
                 continue
             due_date_obj = date.fromisoformat(ds)
             current_streak_start = None
-            _seen_positive = False
+            prev_qty = None  # 収束直前のスナップショット数量
             for sf in ordered_files:
                 if ds not in snapshots_map[sf]:
                     continue
                 qty = snapshots_map[sf][ds]
-                # 内示未着荷（数量=0）のスナップショットは収束判定から除外
-                if not _seen_positive:
-                    if qty <= 0:
-                        continue
-                    _seen_positive = True
+                if qty <= 0:
+                    continue
                 snap_date = snapshot_dates[sf].date()
-                if abs(qty - firm_qty) < 0.5:  # 一致（小数誤差考慮）
+                if abs(qty - firm_qty) < 0.5:
                     if current_streak_start is None:
                         current_streak_start = snap_date
                 else:
-                    current_streak_start = None  # 不一致でリセット
+                    current_streak_start = None
+                    prev_qty = qty
             if current_streak_start is not None:
-                days = (due_date_obj - current_streak_start).days
+                converge_dates[ds] = current_streak_start.isoformat()
+                n_converge_total += 1
+                if prev_qty is not None and prev_qty < firm_qty - 0.5:
+                    pre_converge_shortage_count += 1
+                    pre_converge_shortage_dates.append((round(firm_qty - prev_qty, 1), ds))
+                days = _count_working_days(current_streak_start, due_date_obj)
                 if days >= 0:
                     stable_days_list.append((days, ds))
+                    firm_date_str = firm_dates.get(ds)
+                    if firm_date_str:
+                        firm_date_obj = date.fromisoformat(firm_date_str)
+                        firm_due_lt5_total += 1
+                        if _count_working_days(firm_date_obj, due_date_obj) < 5:
+                            firm_due_lt5_count += 1
+                        firm_converge_on_or_after_firm_total += 1
+                        if current_streak_start >= firm_date_obj:
+                            firm_converge_on_or_after_firm_count += 1
+                            firm_converge_on_or_after_firm_dates.append(ds)
+
+        firm_due_lt5_rate = round(firm_due_lt5_count / firm_due_lt5_total * 100, 1) if firm_due_lt5_total > 0 else None
+        firm_converge_on_or_after_firm_rate = round(firm_converge_on_or_after_firm_count / firm_converge_on_or_after_firm_total * 100, 1) if firm_converge_on_or_after_firm_total > 0 else None
 
         if stable_days_list:
-            days_vals = [d for d, _ in stable_days_list]
+            days_vals = sorted([d for d, _ in stable_days_list])
             stable_days_mean = round(sum(days_vals) / len(days_vals), 1)
+            stable_days_median = days_vals[len(days_vals) // 2] if len(days_vals) % 2 == 1 else round((days_vals[len(days_vals) // 2 - 1] + days_vals[len(days_vals) // 2]) / 2, 1)
+            stable_days_std = round(statistics.stdev(days_vals), 1) if len(days_vals) >= 2 else 0.0
             _min_entry = min(stable_days_list, key=lambda x: x[0])
             _max_entry = max(stable_days_list, key=lambda x: x[0])
             stable_days_min = _min_entry[0]
@@ -1145,9 +1242,24 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             stable_days_max = _max_entry[0]
             stable_days_max_date = _max_entry[1]
             stable_days_count = len(stable_days_list)
+            _n = len(days_vals)
+            within_7_dates = sorted([ds for d, ds in stable_days_list if d <= 7])
+            stable_days_dist = {
+                'within_7': sum(1 for d in days_vals if d <= 7),
+                'within_7_pct': round(sum(1 for d in days_vals if d <= 7) / _n * 100, 1),
+                'within_7_dates': within_7_dates,
+                'within_8_14': sum(1 for d in days_vals if 8 <= d <= 14),
+                'within_8_14_pct': round(sum(1 for d in days_vals if 8 <= d <= 14) / _n * 100, 1),
+                'within_15_21': sum(1 for d in days_vals if 15 <= d <= 21),
+                'within_15_21_pct': round(sum(1 for d in days_vals if 15 <= d <= 21) / _n * 100, 1),
+                'over_21': sum(1 for d in days_vals if d > 21),
+                'over_21_pct': round(sum(1 for d in days_vals if d > 21) / _n * 100, 1),
+            }
         else:
             stable_days_mean = stable_days_min = stable_days_min_date = None
             stable_days_max = stable_days_max_date = stable_days_count = None
+            stable_days_median = stable_days_std = None
+            stable_days_dist = None
 
         from collections import Counter as _Counter
         n = len(all_errors)
@@ -1216,11 +1328,25 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'safety_stock_95': ss_95,
             'safety_stock_99': ss_99,
             'stable_days_mean': stable_days_mean,       # 収束安定期間 平均日数
+            'stable_days_median': stable_days_median,   # 収束安定期間 中央値
+            'stable_days_std': stable_days_std,         # 収束安定期間 標準偏差
+            'stable_days_dist': stable_days_dist,       # 収束日数 分布
             'stable_days_min': stable_days_min,         # 収束安定期間 最短日数
             'stable_days_min_date': stable_days_min_date, # 最短が発生した納期
             'stable_days_max': stable_days_max,         # 収束安定期間 最長日数
             'stable_days_max_date': stable_days_max_date, # 最長が発生した納期
             'stable_days_count': stable_days_count,     # 収束確認できた納期数
+            'pre_converge_shortage_rate': round(pre_converge_shortage_count / n_converge_total * 100, 1) if n_converge_total > 0 else None,
+            'pre_converge_shortage_count': pre_converge_shortage_count,
+            'pre_converge_total': n_converge_total,
+            'pre_converge_shortage_dates': sorted(pre_converge_shortage_dates, key=lambda x: -x[0]),
+            'firm_due_lt5_count': firm_due_lt5_count,
+            'firm_due_lt5_total': firm_due_lt5_total,
+            'firm_due_lt5_rate': firm_due_lt5_rate,
+            'firm_converge_on_or_after_firm_count': firm_converge_on_or_after_firm_count,
+            'firm_converge_on_or_after_firm_total': firm_converge_on_or_after_firm_total,
+            'firm_converge_on_or_after_firm_rate': firm_converge_on_or_after_firm_rate,
+            'firm_converge_on_or_after_firm_dates': sorted(firm_converge_on_or_after_firm_dates),
         }
 
         return Response({
@@ -1229,6 +1355,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             'snapshots': snapshots,
             'firm_quantities': firm_quantities,
             'firm_dates': firm_dates,
+            'converge_dates': converge_dates,
             'statistics': stat_results,
             'period_summary': period_summary,
         })
@@ -1238,7 +1365,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         """複数製品のクボタ内示分析サマリーをExcelで返す
 
         Query params:
-            product_codes: カンマ区切りの品番リスト（必須）
+            product_codes: カンマ区切りの品番リスト（品番:納入地 形式対応）
             start_date: 納期開始 (YYYY-MM-DD)
             end_date: 納期終了 (YYYY-MM-DD)
         """
@@ -1252,8 +1379,8 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
 
-        product_codes = [c.strip() for c in codes_str.split(',') if c.strip()]
-        if not product_codes:
+        entries = [c.strip() for c in codes_str.split(',') if c.strip()]
+        if not entries:
             return Response({'error': 'product_codes は必須です'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -1317,7 +1444,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             '最大差', '最大差日', '最小差', '最小差日', 'MAE', '平均差', 'σ',
             '内示過小率(%)', 'ワースト1\n過小量', 'ワースト1\n出現率(%)', 'ワースト2\n過小量', 'ワースト2\n出現率(%)',
             '安全在庫\n90%', '安全在庫\n95%', '安全在庫\n99%',
-            '収束\n平均日', '収束\n最短日', '収束最短日', '収束\n最長日', '収束最長日', '収束\n対象件数', '分析\n納期数',
+            '収束\n平均日', '収束\n中央値', '収束\n標準偏差', '収束\n≤7日', '収束\n8-14日', '収束\n15-21日', '収束\n≥22日', '収束\n最短日', '収束最短日', '収束\n最長日', '収束最長日', '収束\n対象件数', '分析\n納期数',
             '安定\n平均日', '安定\n最短日', '安定最短日', '安定\n最長日', '安定\n対象件数', '安定\nマイナス率%',
         ]
         ws.append(headers)
@@ -1327,7 +1454,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             ['2E75B6'] * 7 +
             ['C00000'] * 5 +
             ['375623'] * 3 +
-            ['7030A0'] * 7 +
+            ['7030A0'] * 13 +
             ['BF8F00'] * 6
         )
         for col_idx, (hdr, fill_color) in enumerate(zip(headers, header_col_fills), start=1):
@@ -1343,10 +1470,12 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         def _v(val):
             return val if val is not None else ''
 
-        for row_idx, product_code in enumerate(product_codes, start=4):
-            summary = StgOrderRawViewSet._compute_naiji_summary(product_code, start_date, end_date)
+        for row_idx, entry in enumerate(entries, start=4):
+            pc, st = self._parse_product_code_ship_to(entry)
+            summary = StgOrderRawViewSet._compute_naiji_summary(pc, start_date, end_date, ship_to=st)
+            display_code = f"{summary['product_code']} ({st})" if st else summary['product_code']
             row_data = [
-                summary['product_code'],
+                display_code,
                 summary['product_name'],
                 _v(summary['snapshot_count']),
                 _v(summary['max_diff']),
@@ -1365,6 +1494,12 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 _v(summary['safety_stock_95']),
                 _v(summary['safety_stock_99']),
                 _v(summary['stable_days_mean']),
+                _v(summary.get('stable_days_median')),
+                _v(summary.get('stable_days_std')),
+                _v(summary.get('stable_days_dist', {}).get('within_7') if summary.get('stable_days_dist') else None),
+                _v(summary.get('stable_days_dist', {}).get('within_8_14') if summary.get('stable_days_dist') else None),
+                _v(summary.get('stable_days_dist', {}).get('within_15_21') if summary.get('stable_days_dist') else None),
+                _v(summary.get('stable_days_dist', {}).get('over_21') if summary.get('stable_days_dist') else None),
                 _v(summary['stable_days_min']),
                 _v(summary['stable_days_min_date']),
                 _v(summary['stable_days_max']),
@@ -1381,7 +1516,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             ws.append(row_data)
             # 行スタイル
             row_fill = 'EBF3FB' if row_idx % 2 == 0 else 'FFFFFF'
-            for col_idx in range(1, 32):
+            for col_idx in range(1, 38):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1390,7 +1525,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 cell.fill = PatternFill(start_color=row_fill, end_color=row_fill, fill_type='solid')
 
         # 列幅設定
-        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 10, 9, 9, 9, 9, 8, 8, 12, 8, 12, 8, 8, 8, 8, 12, 8, 8, 10]
+        col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 10, 9, 9, 9, 9, 8, 8, 8, 8, 8, 8, 8, 8, 12, 8, 12, 8, 8, 8, 8, 12, 8, 8, 10]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
@@ -1411,6 +1546,15 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         return response
 
     @action(detail=False, methods=['get'])
+    @staticmethod
+    def _parse_product_code_ship_to(code_str):
+        """'品番:納入地' or '品番' を (product_code, ship_to) に分解"""
+        if ':' in code_str:
+            pc, st = code_str.split(':', 1)
+            return pc.strip(), st.strip()
+        return code_str.strip(), ''
+
+    @action(detail=False, methods=['get'])
     def kubota_naiji_batch_preview(self, request):
         """複数製品の内示分析サマリーをJSONで返す（画面プレビュー用）"""
         from datetime import datetime
@@ -1419,8 +1563,8 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
 
-        product_codes = [c.strip() for c in codes_str.split(',') if c.strip()]
-        if not product_codes:
+        entries = [c.strip() for c in codes_str.split(',') if c.strip()]
+        if not entries:
             return Response({'error': 'product_codes は必須です'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -1429,10 +1573,13 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         except ValueError:
             return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
 
-        results = [
-            StgOrderRawViewSet._compute_naiji_summary(pc, start_date, end_date)
-            for pc in product_codes
-        ]
+        results = []
+        for entry in entries:
+            pc, st = self._parse_product_code_ship_to(entry)
+            summary = StgOrderRawViewSet._compute_naiji_summary(pc, start_date, end_date, ship_to=st)
+            if st:
+                summary['ship_to'] = st
+            results.append(summary)
         return Response(results)
 
     @action(detail=False, methods=['get'])

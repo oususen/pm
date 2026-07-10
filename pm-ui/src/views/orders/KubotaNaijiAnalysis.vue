@@ -27,6 +27,12 @@
             </option>
           </select>
 
+          <label class="search-label">納入地</label>
+          <select v-model="selectedShipTo" class="form-select form-select-ship-to">
+            <option value="">全て</option>
+            <option v-for="st in currentShipToList" :key="st" :value="st">{{ st }}</option>
+          </select>
+
           <label class="search-label">納期</label>
           <input type="date" v-model="startDate" class="form-input" />
           <span class="range-sep">〜</span>
@@ -97,13 +103,13 @@
 
             <!-- 欠品リスクブロック -->
             <div class="summary-block">
-              <div class="block-title">欠品リスク（内示 ＜ 確定）</div>
+              <div class="block-title">欠品リスク（収束直前の内示 ＜ 確定）</div>
               <div class="block-rows">
                 <div class="block-row">
-                  <span class="block-label">内示過小率</span>
-                  <span class="block-val" :class="analysisData.period_summary.shortage_rate > 50 ? 'val-danger' : ''">
-                    {{ fmt(analysisData.period_summary.shortage_rate) }} %
-                    （{{ analysisData.period_summary.shortage_dates }} / {{ analysisData.period_summary.dates_with_firm }} 納期）
+                  <span class="block-label">収束直前過小率</span>
+                  <span class="block-val" :class="analysisData.period_summary.pre_converge_shortage_rate > 30 ? 'val-danger' : ''">
+                    {{ fmt(analysisData.period_summary.pre_converge_shortage_rate) }} %
+                    （{{ analysisData.period_summary.pre_converge_shortage_count }} / {{ analysisData.period_summary.pre_converge_total }} 納期）
                   </span>
                 </div>
                 <div class="block-row">
@@ -158,12 +164,24 @@
               <div class="block-title">収束安定期間（内示＝確定が続いた日数）</div>
               <div class="block-rows">
                 <div class="block-note" style="margin-bottom:6px;">
-                  ※ 各納期について、内示が確定値と一致してから納期まで連続して変わらなかった日数
+                  ※ 各納期について、内示が確定値と一致してから納期まで連続して変わらなかった営業日数
                 </div>
                 <div class="block-row highlight-row">
                   <span class="block-label">平均</span>
                   <span class="block-val">
                     {{ analysisData.period_summary.stable_days_mean != null ? analysisData.period_summary.stable_days_mean + ' 日' : '—' }}
+                  </span>
+                </div>
+                <div class="block-row highlight-row">
+                  <span class="block-label">中央値</span>
+                  <span class="block-val">
+                    {{ analysisData.period_summary.stable_days_median != null ? analysisData.period_summary.stable_days_median + ' 日' : '—' }}
+                  </span>
+                </div>
+                <div class="block-row">
+                  <span class="block-label">標準偏差</span>
+                  <span class="block-val">
+                    {{ analysisData.period_summary.stable_days_std != null ? analysisData.period_summary.stable_days_std + ' 日' : '—' }}
                   </span>
                 </div>
                 <div class="block-row">
@@ -189,6 +207,86 @@
                   <span class="block-val">
                     {{ analysisData.period_summary.stable_days_count != null ? analysisData.period_summary.stable_days_count + ' 件' : '—' }}
                   </span>
+                </div>
+                <template v-if="analysisData.period_summary.stable_days_dist">
+                  <div class="block-subtitle" style="margin-top:8px; font-weight:600; font-size:12px; color:#666;">分布</div>
+                  <div class="block-row" :class="{ 'dist-danger': analysisData.period_summary.stable_days_dist.within_7 > 0 }">
+                    <span class="block-label">7日以内</span>
+                    <span class="block-val">
+                      {{ analysisData.period_summary.stable_days_dist.within_7 }}件（{{ analysisData.period_summary.stable_days_dist.within_7_pct }}%）
+                      <small class="dist-note">材料調達に間に合わない</small>
+                    </span>
+                  </div>
+                  <div
+                    v-if="analysisData.period_summary.stable_days_dist.within_7_dates?.length"
+                    class="dist-dates-row"
+                  >
+                    <span class="dist-dates-label">納期日：</span>
+                    <span
+                      v-for="d in analysisData.period_summary.stable_days_dist.within_7_dates"
+                      :key="d"
+                      class="dist-date-chip"
+                    >{{ d }}</span>
+                  </div>
+                  <div class="block-row" :class="{ 'dist-warning': analysisData.period_summary.stable_days_dist.within_8_14 > 0 }">
+                    <span class="block-label">8〜14日</span>
+                    <span class="block-val">
+                      {{ analysisData.period_summary.stable_days_dist.within_8_14 }}件（{{ analysisData.period_summary.stable_days_dist.within_8_14_pct }}%）
+                      <small class="dist-note">ギリギリ</small>
+                    </span>
+                  </div>
+                  <div class="block-row">
+                    <span class="block-label">15〜21日</span>
+                    <span class="block-val">
+                      {{ analysisData.period_summary.stable_days_dist.within_15_21 }}件（{{ analysisData.period_summary.stable_days_dist.within_15_21_pct }}%）
+                    </span>
+                  </div>
+                  <div class="block-row dist-ok">
+                    <span class="block-label">22日以上</span>
+                    <span class="block-val">
+                      {{ analysisData.period_summary.stable_days_dist.over_21 }}件（{{ analysisData.period_summary.stable_days_dist.over_21_pct }}%）
+                      <small class="dist-note">問題なし</small>
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- 遅延率ブロック -->
+            <div class="summary-block">
+              <div class="block-title">遅延率</div>
+              <div class="block-rows">
+                <div class="block-note" style="margin-bottom:6px;">
+                  ※ 確定日の遅れ傾向を2指標で表示
+                </div>
+                <div class="block-row highlight-row">
+                  <span class="block-label">確定日＜5日</span>
+                  <span class="block-val" :style="{ color: (analysisData.period_summary.firm_due_lt5_rate || 0) > 30 ? '#d32f2f' : '' }">
+                    {{ analysisData.period_summary.firm_due_lt5_rate != null ? analysisData.period_summary.firm_due_lt5_rate + ' %' : '—' }}
+                    <small v-if="analysisData.period_summary.firm_due_lt5_total != null" class="diff-date">
+                      （{{ analysisData.period_summary.firm_due_lt5_count }} / {{ analysisData.period_summary.firm_due_lt5_total }} 納期）
+                    </small>
+                  </span>
+                </div>
+                <div class="block-row">
+                  <span class="block-label">確定一致日≥確定日</span>
+                  <span class="block-val" :style="{ color: (analysisData.period_summary.firm_converge_on_or_after_firm_rate || 0) > 30 ? '#d32f2f' : '' }">
+                    {{ analysisData.period_summary.firm_converge_on_or_after_firm_rate != null ? analysisData.period_summary.firm_converge_on_or_after_firm_rate + ' %' : '—' }}
+                    <small v-if="analysisData.period_summary.firm_converge_on_or_after_firm_total != null" class="diff-date">
+                      （{{ analysisData.period_summary.firm_converge_on_or_after_firm_count }} / {{ analysisData.period_summary.firm_converge_on_or_after_firm_total }} 納期）
+                    </small>
+                  </span>
+                </div>
+                <div
+                  v-if="analysisData.period_summary.firm_converge_on_or_after_firm_dates?.length"
+                  class="dist-dates-row"
+                >
+                  <span class="dist-dates-label">納期日：</span>
+                  <span
+                    v-for="d in analysisData.period_summary.firm_converge_on_or_after_firm_dates"
+                    :key="d"
+                    class="dist-date-chip"
+                  >{{ d }}</span>
                 </div>
               </div>
             </div>
@@ -360,7 +458,8 @@
               <thead>
                 <tr>
                   <th class="sticky-col">取込日</th>
-                  <th class="sticky-col2">ソースファイル</th>
+                  <th class="sticky-col2">作成日</th>
+                  <th class="sticky-col3">ソースファイル</th>
                   <th
                     v-for="dd in analysisData.due_dates"
                     :key="dd"
@@ -373,6 +472,7 @@
                 <tr class="firm-row">
                   <th class="sticky-col">確定</th>
                   <th class="sticky-col2">—</th>
+                  <th class="sticky-col3">—</th>
                   <td
                     v-for="dd in analysisData.due_dates"
                     :key="'firm-' + dd"
@@ -384,6 +484,7 @@
                 <tr class="converge-row">
                   <th class="sticky-col converge-header">確定一致日</th>
                   <th class="sticky-col2">—</th>
+                  <th class="sticky-col3">—</th>
                   <td
                     v-for="dd in analysisData.due_dates"
                     :key="'converge-' + dd"
@@ -391,11 +492,24 @@
                     class="converge-cell"
                   >{{ firmConvergeDates[dd] ? firmConvergeDates[dd].slice(5).replace('-', '/') : '—' }}</td>
                 </tr>
+                <!-- 確定日行 -->
+                <tr class="converge-row">
+                  <th class="sticky-col converge-header">確定日</th>
+                  <th class="sticky-col2">—</th>
+                  <th class="sticky-col3">—</th>
+                  <td
+                    v-for="dd in analysisData.due_dates"
+                    :key="'firmdate-' + dd"
+                    :class="{ 'active-col': dd === selectedDueDate }"
+                    class="converge-cell"
+                  >{{ firmIssueDates[dd] ? firmIssueDates[dd].slice(5).replace('-', '/') : '—' }}</td>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="snap in analysisData.snapshots" :key="snap.source_file">
                   <td class="sticky-col date-cell">{{ snap.snapshot_date }}</td>
-                  <td class="sticky-col2 file-cell" :title="snap.source_file">{{ shortFileName(snap.source_file) }}</td>
+                  <td class="sticky-col2 date-cell">{{ snap.calc_date ? snap.calc_date.slice(5).replace('-', '/') : '—' }}</td>
+                  <td class="sticky-col3 file-cell" :title="snap.source_file">{{ shortFileName(snap.source_file) }}</td>
                   <td
                     v-for="dd in analysisData.due_dates"
                     :key="dd"
@@ -429,16 +543,17 @@
               <button class="btn-sm" @click="clearAll">全解除</button>
               <span class="selected-count">{{ selectedCodes.length }} 件選択中</span>
             </div>
-            <div class="product-list" v-if="products.length">
+            <div class="product-list" v-if="batchProductItems.length">
               <label
-                v-for="p in products"
-                :key="p.product_code"
+                v-for="item in batchProductItems"
+                :key="item.key"
                 class="product-item"
-                :class="{ selected: selectedCodes.includes(p.product_code) }"
+                :class="{ selected: selectedCodes.includes(item.key) }"
               >
-                <input type="checkbox" :value="p.product_code" v-model="selectedCodes" />
-                <span class="prod-code">{{ p.product_code }}</span>
-                <span class="prod-name">{{ p.product_name }}</span>
+                <input type="checkbox" :value="item.key" v-model="selectedCodes" />
+                <span class="prod-code">{{ item.product_code }}</span>
+                <span v-if="item.ship_to" class="prod-ship-to">({{ item.ship_to }})</span>
+                <span class="prod-name">{{ item.product_name }}</span>
               </label>
             </div>
             <div v-else class="no-products">読み込み中...</div>
@@ -507,8 +622,8 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in previewRows" :key="r.product_code">
-                <td class="code-cell">{{ r.product_code }}</td>
+              <tr v-for="(r, idx) in previewRows" :key="r.product_code + (r.ship_to || '') + idx">
+                <td class="code-cell">{{ r.product_code }}<small v-if="r.ship_to" style="color:#888;margin-left:4px">({{ r.ship_to }})</small></td>
                 <td class="name-cell">{{ r.product_name }}</td>
                 <td>{{ fmt(r.max_diff) }}</td>
                 <td>{{ fmt(r.min_diff) }}</td>
@@ -517,7 +632,7 @@
                 <td>{{ fmt(r.sigma) }}</td>
                 <td>{{ r.snapshot_count }}</td>
                 <td>{{ r.analyzed_dates }}</td>
-                <td>{{ fmt(r.shortage_rate) }}</td>
+                <td>{{ fmt(r.pre_converge_shortage_rate) }}</td>
                 <td>{{ fmt(r.max_shortage) }}</td>
                 <td>{{ fmt(r.worst1_rate) }}</td>
                 <td>{{ r.worst2_qty != null ? fmt(r.worst2_qty) : '—' }}</td>
@@ -652,6 +767,7 @@ fetchProducts()
 
 // ---- タブ1: 変化推移分析 ----
 const selectedProduct = ref('')
+const selectedShipTo = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const loading = ref(false)
@@ -666,9 +782,15 @@ const padR = 50
 const padT = 20
 const padB = 70
 
+const currentShipToList = computed(() => {
+  const p = products.value.find(p => p.product_code === selectedProduct.value)
+  return p?.ship_to_list || []
+})
+
 const onProductChange = () => {
   analysisData.value = null
   selectedDueDate.value = ''
+  selectedShipTo.value = ''
   error.value = ''
 }
 
@@ -681,6 +803,7 @@ const fetchAnalysis = async () => {
 
   try {
     const params = { product_code: selectedProduct.value }
+    if (selectedShipTo.value) params.ship_to = selectedShipTo.value
     if (startDate.value) params.start_date = startDate.value
     if (endDate.value) params.end_date = endDate.value
 
@@ -781,8 +904,9 @@ const shortFileName = (name) => {
 const sign = (v) => { if (v === null || v === undefined) return '—'; return v > 0 ? `+${v}` : `${v}` }
 const changeClass = (v) => { if (!v) return ''; return v > 0 ? 'up' : v < 0 ? 'down' : '' }
 
-// 各納期列ごとの確定登録日（APIから取得）
-const firmConvergeDates = computed(() => analysisData.value?.firm_dates || {})
+// 各納期列ごとの収束日（内示が確定値と一致し続けた最初の日）
+const firmConvergeDates = computed(() => analysisData.value?.converge_dates || {})
+const firmIssueDates = computed(() => analysisData.value?.firm_dates || {})
 
 const deltaCellClass = (snap, dd) => {
   if (!analysisData.value || snap.quantities[dd] === undefined) return ''
@@ -805,7 +929,32 @@ const exporting = ref(false)
 const rErrorMsg = ref('')
 const previewRows = ref([])
 
-const selectAll = () => { selectedCodes.value = products.value.map(p => p.product_code) }
+const batchProductItems = computed(() => {
+  const items = []
+  for (const p of products.value) {
+    const shipToList = p.ship_to_list || []
+    if (shipToList.length <= 1) {
+      items.push({
+        key: shipToList.length === 1 ? `${p.product_code}:${shipToList[0]}` : p.product_code,
+        product_code: p.product_code,
+        product_name: p.product_name,
+        ship_to: shipToList.length === 1 ? shipToList[0] : '',
+      })
+    } else {
+      for (const st of shipToList) {
+        items.push({
+          key: `${p.product_code}:${st}`,
+          product_code: p.product_code,
+          product_name: p.product_name,
+          ship_to: st,
+        })
+      }
+    }
+  }
+  return items
+})
+
+const selectAll = () => { selectedCodes.value = batchProductItems.value.map(i => i.key) }
 const clearAll  = () => { selectedCodes.value = [] }
 
 const exportSnapshotExcel = () => {
@@ -852,7 +1001,8 @@ const exportExcel = async () => {
     const previewRes = await api.staging.getKubotaNaijiBatchPreview(params)
     previewRows.value = previewRes.data
 
-    const res = await api.staging.downloadKubotaNaijiBatchReport(params)
+    const excelParams = { ...params }
+    const res = await api.staging.downloadKubotaNaijiBatchReport(excelParams)
     const blob = new Blob([res.data], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     })
@@ -896,7 +1046,7 @@ const credibilityScores = computed(() => {
   return rows.map(r => {
     const accuracy      = Math.round(Math.max(0, (1 - (r.mae || 0) / maxMAE) * 100))
     const bias          = Math.round(Math.max(0, (1 - Math.abs(r.mean_error || 0) / maxMeanErr) * 100))
-    const risk          = Math.round(Math.max(0, 100 - (r.shortage_rate || 0)))
+    const risk          = Math.round(Math.max(0, 100 - (r.pre_converge_shortage_rate || 0)))
     const convergence   = Math.round(Math.max(0, ((r.stable_days_mean || 0) / maxStable) * 100))
     const predictability = Math.round(Math.max(0, 100 - (r.firm_stable_days_negative_rate || 0)))
     const composite     = Math.round((accuracy + bias + risk + convergence + predictability) / 5)
@@ -1150,6 +1300,9 @@ onUnmounted(() => {
   border-radius: 4px;
   min-width: 220px;
 }
+.form-select-ship-to {
+  min-width: 100px;
+}
 .form-input {
   padding: 6px 8px;
   border: 1px solid #bbb;
@@ -1219,6 +1372,7 @@ onUnmounted(() => {
 .product-item.selected { background: #ddeeff; border-color: #6699cc; }
 .prod-code { font-weight: bold; color: #1a3a7a; min-width: 120px; }
 .prod-name { color: #444; }
+.prod-ship-to { color: #1976d2; font-size: 11px; font-weight: 600; }
 .no-products { padding: 10px; color: #888; font-size: 13px; }
 
 .btn-export {
@@ -1298,6 +1452,16 @@ onUnmounted(() => {
 .worst-dates-label { font-size: 11px; color: #888; white-space: nowrap; }
 .worst-date-chip { font-size: 11px; background: #fce8e8; color: #a00; border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
 .block-note { font-size: 10px; color: #999; margin-top: 4px; }
+.block-subtitle { margin-top: 6px; }
+.dist-danger { background: #fff0f0; }
+.dist-danger .block-val { color: #d32f2f; font-weight: 600; }
+.dist-warning { background: #fff8e1; }
+.dist-warning .block-val { color: #f57f17; font-weight: 600; }
+.dist-ok .block-val { color: #2e7d32; }
+.dist-note { font-size: 10px; color: #999; margin-left: 4px; }
+.dist-dates-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 8px 6px 8px; }
+.dist-dates-label { font-size: 11px; color: #888; white-space: nowrap; }
+.dist-date-chip { font-size: 11px; background: #fce8e8; color: #a00; border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
 
 /* 納期タブ */
 .due-date-tabs {
@@ -1360,10 +1524,18 @@ onUnmounted(() => {
 .table-scroll { overflow-x: auto; max-height: 400px; overflow-y: auto; }
 .detail-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
 .detail-table th, .detail-table td { border: 1px solid #e0e0e0; padding: 4px 8px; text-align: right; }
-.detail-table thead th { background: #f0f4fa; position: sticky; top: 0; z-index: 2; cursor: default; }
+.detail-table thead th, .detail-table thead td { background: #f0f4fa; position: sticky; z-index: 2; cursor: default; }
+.detail-table thead tr:nth-child(1) th, .detail-table thead tr:nth-child(1) td { top: 0; }
+.detail-table thead tr:nth-child(2) th, .detail-table thead tr:nth-child(2) td { top: 25px; }
+.detail-table thead tr:nth-child(3) th, .detail-table thead tr:nth-child(3) td { top: 50px; }
+.detail-table thead tr:nth-child(4) th, .detail-table thead tr:nth-child(4) td { top: 75px; }
 .detail-table thead th:first-child, .detail-table thead th:nth-child(2) { text-align: left; }
 .sticky-col { position: sticky; left: 0; background: #f7f9fc; z-index: 1; text-align: left !important; min-width: 90px; }
-.sticky-col2 { position: sticky; left: 90px; background: #f7f9fc; z-index: 1; text-align: left !important; min-width: 160px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.sticky-col2 { position: sticky; left: 90px; background: #f7f9fc; z-index: 1; text-align: center !important; min-width: 70px; }
+.sticky-col3 { position: sticky; left: 160px; background: #f7f9fc; z-index: 1; text-align: left !important; min-width: 160px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.detail-table thead .sticky-col,
+.detail-table thead .sticky-col2,
+.detail-table thead .sticky-col3 { z-index: 3; }
 .date-cell { color: #555; }
 .file-cell { color: #555; font-size: 11px; }
 .qty-cell { color: #222; }
