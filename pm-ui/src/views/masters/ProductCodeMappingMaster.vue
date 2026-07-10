@@ -10,11 +10,45 @@
     <div class="card">
       <div class="form-row">
         <label>変換元品番</label>
-        <input v-model.trim="form.source_product_code" type="text" placeholder="例: YD40006696" />
+        <div class="select-field">
+          <input
+            v-model.trim="sourceProductFilter"
+            type="text"
+            placeholder="品番/品名で絞り込み"
+            :disabled="productsLoading"
+          />
+          <select v-model="form.source_product_code" :disabled="productsLoading">
+            <option value="">{{ productsLoading ? '読込中...' : '選択してください' }}</option>
+            <option
+              v-for="product in filteredSourceProducts"
+              :key="product.id"
+              :value="product.product_code"
+            >
+              {{ product.product_code }} - {{ product.product_name }}
+            </option>
+          </select>
+        </div>
       </div>
       <div class="form-row">
         <label>変換先品番</label>
-        <input v-model.trim="form.target_product_code" type="text" placeholder="例: YD40006696_TATA" />
+        <div class="select-field">
+          <input
+            v-model.trim="targetProductFilter"
+            type="text"
+            placeholder="品番/品名で絞り込み"
+            :disabled="productsLoading"
+          />
+          <select v-model="form.target_product_code" :disabled="productsLoading">
+            <option value="">{{ productsLoading ? '読込中...' : '選択してください' }}</option>
+            <option
+              v-for="product in filteredTargetProducts"
+              :key="product.id"
+              :value="product.product_code"
+            >
+              {{ product.product_code }} - {{ product.product_name }}
+            </option>
+          </select>
+        </div>
       </div>
       <div class="form-row">
         <label>備考</label>
@@ -65,7 +99,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -77,6 +111,10 @@ const dsSources = [
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
+const products = ref([])
+const productsLoading = ref(false)
+const sourceProductFilter = ref('')
+const targetProductFilter = ref('')
 const editingId = ref(null)
 const message = ref('')
 const error = ref('')
@@ -99,6 +137,33 @@ const resetForm = () => {
 }
 
 const normalizeRows = (data) => (Array.isArray(data) ? data : (data?.results || []))
+
+const filteredSourceProducts = computed(() => {
+  const keyword = sourceProductFilter.value.trim().toLowerCase()
+  if (!keyword) return products.value
+  return products.value.filter((product) =>
+    `${product.product_code} ${product.product_name}`.toLowerCase().includes(keyword)
+  )
+})
+
+const filteredTargetProducts = computed(() => {
+  const keyword = targetProductFilter.value.trim().toLowerCase()
+  if (!keyword) return products.value
+  return products.value.filter((product) =>
+    `${product.product_code} ${product.product_name}`.toLowerCase().includes(keyword)
+  )
+})
+
+const loadProducts = async () => {
+  productsLoading.value = true
+  try {
+    products.value = await api.products.getAllProducts({ is_active: true })
+  } catch (e) {
+    error.value = e?.response?.data?.detail || '製品一覧の取得に失敗しました。'
+  } finally {
+    productsLoading.value = false
+  }
+}
 
 const loadMappings = async () => {
   loading.value = true
@@ -178,7 +243,12 @@ const removeRow = async (row) => {
   }
 }
 
-onMounted(loadMappings)
+onMounted(async () => {
+  await Promise.all([
+    loadMappings(),
+    loadProducts(),
+  ])
+})
 </script>
 
 <style scoped>
@@ -204,6 +274,17 @@ onMounted(loadMappings)
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 0 8px;
+}
+.select-field {
+  display: grid;
+  gap: 6px;
+}
+.form-row select {
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #fff;
 }
 .form-actions {
   display: flex;
@@ -260,4 +341,3 @@ onMounted(loadMappings)
   color: #64748b;
 }
 </style>
-
