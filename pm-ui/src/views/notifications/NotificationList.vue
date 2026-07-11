@@ -51,6 +51,7 @@
             <th>有効終了日</th>
             <th>対象者</th>
             <th>入力者</th>
+            <th>作成日</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -65,6 +66,7 @@
               <td>{{ item.valid_to || '-' }}</td>
               <td>{{ getTargetLabel(item) }}</td>
               <td>{{ item.operator_name || '-' }}</td>
+              <td>{{ formatDateTime(item.created_at) }}</td>
               <td class="action-cell">
                 <button
                   v-if="!item.is_read"

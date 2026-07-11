@@ -96,7 +96,7 @@ def run_auto_delivery_list_send(config_id):
             return
         calc = WorkingDayCalculator(daiso_cal)
         if not calc.is_working_day(today):
-            holiday_message = '本日は休日のため、自動納入リストは実行しません'
+            holiday_message = f'自動納入リスト: 本日は休日のため、{supplier.supplier_name} 向け送信は実行しません'
             _finish(config, start_time, 'SKIPPED', holiday_message)
             _notify_users(config.notify_on_non_delivery, holiday_message)
             return
