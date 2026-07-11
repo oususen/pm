@@ -2,12 +2,20 @@ from rest_framework import serializers
 
 from masters.models import Customer, Product
 from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment
-from .models import ShipmentActual, ShipmentActualHistory, ShipToLeadTime
+from .models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShipToLeadTime
+
+
+class ShipmentActualSplitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShipmentActualSplit
+        fields = ['id', 'line_no', 'production_date', 'quantity', 'source_order_no']
+        read_only_fields = ['id']
 
 
 class ShipmentActualSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     customer_name = serializers.SerializerMethodField()
+    production_splits = ShipmentActualSplitSerializer(source='splits', many=True, read_only=True)
 
     class Meta:
         model = ShipmentActual
@@ -15,7 +23,7 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
             'id', 'shipment_date',
             'product', 'product_code', 'product_name',
             'customer', 'customer_code', 'customer_name',
-            'ship_to_code', 'quantity', 'remark',
+            'ship_to_code', 'quantity', 'remark', 'production_splits',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'product_name', 'customer_name']

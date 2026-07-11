@@ -94,6 +94,13 @@
                   :disabled="!canEditProductionDate(trip)"
                   @input="setSplitQty(trip.id, row.allocation_id, splitIdx, $event.target.value, row)"
                 />
+                <input
+                  type="text"
+                  :value="split.source_order_no || ''"
+                  :placeholder="t('shippingTripExecution.orderNo')"
+                  :disabled="!canEditProductionDate(trip)"
+                  @input="setSplitOrderNo(trip.id, row.allocation_id, splitIdx, $event.target.value)"
+                />
                 <button
                   type="button"
                   class="btn split-btn"
@@ -311,9 +318,14 @@ const initActualInputState = (tripList) => {
         byAllocSplit[row.allocation_id] = row.production_splits.map((item) => ({
           production_date: item.production_date || '',
           quantity: String(parseQty(item.quantity || 0)),
+          source_order_no: item.source_order_no || row.source_order_no || '',
         }))
       } else {
-        byAllocSplit[row.allocation_id] = [{ production_date: prevBusinessDay.value, quantity: String(parseQty(row.qty)) }]
+        byAllocSplit[row.allocation_id] = [{
+          production_date: prevBusinessDay.value,
+          quantity: String(parseQty(row.qty)),
+          source_order_no: row.source_order_no || '',
+        }]
       }
       byAlloc[row.allocation_id] = String(sumSplitQuantities(byAllocSplit[row.allocation_id], row.qty))
     })
@@ -338,7 +350,7 @@ const setActualDate = (tripId, value) => {
 const splitRows = (tripId, allocationId, row) => {
   const rows = productionSplitMap.value[tripId]?.[allocationId]
   if (Array.isArray(rows) && rows.length) return rows
-  return [{ production_date: '', quantity: String(parseQty(row?.qty || 0)) }]
+  return [{ production_date: '', quantity: String(parseQty(row?.qty || 0)), source_order_no: row?.source_order_no || '' }]
 }
 
 const setSplitDate = (tripId, allocationId, splitIdx, value) => {
@@ -362,9 +374,19 @@ const setSplitQty = (tripId, allocationId, splitIdx, value, row) => {
   syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
 }
 
+const setSplitOrderNo = (tripId, allocationId, splitIdx, value) => {
+  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
+  if (!next[splitIdx]) return
+  next[splitIdx] = { ...next[splitIdx], source_order_no: String(value ?? '') }
+  productionSplitMap.value = {
+    ...productionSplitMap.value,
+    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
+  }
+}
+
 const addSplitRow = (tripId, allocationId, row) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
-  next.push({ production_date: prevBusinessDay.value, quantity: '' })
+  next.push({ production_date: prevBusinessDay.value, quantity: '', source_order_no: row?.source_order_no || '' })
   productionSplitMap.value = {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
@@ -376,7 +398,11 @@ const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
   next.splice(splitIdx, 1)
   if (!next.length) {
-    next.push({ production_date: '', quantity: String(parseQty(row?.qty || 0)) })
+    next.push({
+      production_date: '',
+      quantity: String(parseQty(row?.qty || 0)),
+      source_order_no: row?.source_order_no || '',
+    })
   }
   productionSplitMap.value = {
     ...productionSplitMap.value,
@@ -418,6 +444,7 @@ const buildActualPayload = (trip) =>
       .map((item) => ({
         production_date: item.production_date || '',
         quantity: parseQty(item.quantity),
+        source_order_no: String(item.source_order_no || row.source_order_no || ''),
       }))
       .filter((item) => item.production_date && item.quantity > 0),
   }))
@@ -672,7 +699,7 @@ onMounted(loadTrips)
 }
 .split-row {
   display: grid;
-  grid-template-columns: 1fr 100px 80px;
+  grid-template-columns: 1fr 100px 120px 80px;
   gap: 3px;
 }
 .split-row input {
@@ -873,7 +900,7 @@ onMounted(loadTrips)
     padding: 3px 8px;
   }
   .split-row {
-    grid-template-columns: 1fr 80px 52px;
+    grid-template-columns: 1fr 70px 90px 52px;
   }
 }
 </style>

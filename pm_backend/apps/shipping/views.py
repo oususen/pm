@@ -25,7 +25,7 @@ class ShipmentActualFilter(django_filters.FilterSet):
 
 class ShipmentActualViewSet(viewsets.ModelViewSet):
     """出荷実績ViewSet"""
-    queryset = ShipmentActual.objects.all().select_related('product', 'customer')
+    queryset = ShipmentActual.objects.all().select_related('product', 'customer').prefetch_related('splits')
     serializer_class = ShipmentActualSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ShipmentActualFilter

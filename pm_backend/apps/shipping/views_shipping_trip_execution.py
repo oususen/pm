@@ -7,9 +7,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from masters.models import Calendar, KubotaSakaiTruck, Product
-from orders.core.models import ShippingTrip, ShippingTripAllocation
+from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation
 from orders.utils.calendar_utils import WorkingDayCalculator
-from shipping.models import ShipmentActual, ShipmentActualHistory
+from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit
 
 SPLIT_TOKEN = '|PD='
 REMARK_MAX_LEN = 200
@@ -69,6 +69,23 @@ def _decode_remark_splits(remark):
     return results
 
 
+def _normalize_split_rows(rows, default_order_no=''):
+    normalized = []
+    for idx, item in enumerate(rows or []):
+        production_date = _parse_date(item.get('production_date'))
+        qty = _to_decimal(item.get('quantity'))
+        source_order_no = str(item.get('source_order_no') or default_order_no or '').strip()
+        if not production_date or qty <= 0:
+            continue
+        normalized.append({
+            'line_no': idx + 1,
+            'production_date': production_date.isoformat(),
+            'quantity': _format_qty(qty),
+            'source_order_no': source_order_no,
+        })
+    return normalized
+
+
 def _encode_remark(marker, splits):
     normalized = []
     for item in (splits or []):
@@ -80,6 +97,55 @@ def _encode_remark(marker, splits):
     if not normalized:
         return marker
     return f"{marker}{SPLIT_TOKEN}{','.join(normalized)}"
+
+
+def _actual_split_rows(actual, default_order_no=''):
+    if actual:
+        split_rows = list(actual.splits.all()) if hasattr(actual, 'splits') else list(
+            ShipmentActualSplit.objects.filter(shipment_actual=actual).order_by('line_no', 'id')
+        )
+        if split_rows:
+            return [
+                {
+                    'line_no': int(item.line_no or 0),
+                    'production_date': item.production_date.isoformat(),
+                    'quantity': _format_qty(item.quantity),
+                    'source_order_no': str(item.source_order_no or default_order_no or '').strip(),
+                }
+                for item in split_rows
+            ]
+    return _normalize_split_rows(_decode_remark_splits(getattr(actual, 'remark', None) if actual else None), default_order_no)
+
+
+def _save_actual_split_rows(actual, split_rows):
+    ShipmentActualSplit.objects.filter(shipment_actual=actual).delete()
+    normalized = _normalize_split_rows(split_rows)
+    if not normalized:
+        return
+    ShipmentActualSplit.objects.bulk_create([
+        ShipmentActualSplit(
+            shipment_actual=actual,
+            line_no=item['line_no'],
+            production_date=_parse_date(item['production_date']),
+            quantity=_to_decimal(item['quantity']),
+            source_order_no=item['source_order_no'] or '',
+        )
+        for item in normalized
+    ])
+
+
+def _allocation_source_order_no_map(allocations):
+    due_ids = [
+        item.source_id
+        for item in allocations
+        if str(item.source_type or '').strip() == 'KUBOTA_SAKAI_DUE' and item.source_id
+    ]
+    if not due_ids:
+        return {}
+    return {
+        row['id']: str(row['source_order_no'] or '').strip()
+        for row in KubotaSakaiDueAdjustment.objects.filter(id__in=due_ids).values('id', 'source_order_no')
+    }
 
 
 def _save_production_splits_for_trip(trip, raw_actuals):
@@ -108,17 +174,21 @@ def _save_production_splits_for_trip(trip, raw_actuals):
             continue
         split_map[allocation_id] = item.get('production_splits') or []
 
+    source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     updated_count = 0
     for allocation in allocations:
         marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
         split_rows = split_map.get(allocation.id) or []
+        default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
+        normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
         final_remark = _encode_remark(marker, split_rows)
         if len(final_remark) > REMARK_MAX_LEN:
             return {'detail': f'生産日内訳が長すぎます。品番 {allocation.product_code} の内訳を短くしてください。'}, status.HTTP_400_BAD_REQUEST
 
-        existing = ShipmentActual.objects.filter(remark__startswith=marker).order_by('-id').first()
+        existing = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
         if existing:
-            if str(existing.remark or '') != final_remark:
+            existing_split_rows = _actual_split_rows(existing, default_order_no)
+            if str(existing.remark or '') != final_remark or existing_split_rows != normalized_split_rows:
                 ShipmentActualHistory.objects.create(
                     shipment_actual=existing,
                     action='UPDATE',
@@ -131,10 +201,11 @@ def _save_production_splits_for_trip(trip, raw_actuals):
                 )
                 existing.remark = final_remark
                 existing.save(update_fields=['remark'])
+                _save_actual_split_rows(existing, normalized_split_rows)
                 updated_count += 1
             continue
 
-        ShipmentActual.objects.create(
+        created = ShipmentActual.objects.create(
             shipment_date=actual_departure_date,
             product_code=allocation.product_code,
             customer_code=trip.customer_code,
@@ -142,6 +213,7 @@ def _save_production_splits_for_trip(trip, raw_actuals):
             quantity=_to_decimal(allocation.qty),
             remark=final_remark,
         )
+        _save_actual_split_rows(created, normalized_split_rows)
         updated_count += 1
 
     return {'updated': updated_count}, None
@@ -151,8 +223,8 @@ def _trip_actual_matches_plan(trip):
     allocations = list(ShippingTripAllocation.objects.filter(trip_id=trip.id).order_by('id'))
     for allocation in allocations:
         marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
-        actual = ShipmentActual.objects.filter(remark__startswith=marker).order_by('-id').first()
-        splits = _decode_remark_splits(getattr(actual, 'remark', None))
+        actual = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
+        splits = _actual_split_rows(actual)
         actual_qty = sum((_to_decimal(item.get('quantity')) for item in splits), Decimal('0'))
         if actual_qty != _to_decimal(allocation.qty):
             return False
@@ -197,6 +269,7 @@ def _trip_actual_departure_date(trip, calc, truck_offset_map):
 
 
 def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_map, actual_by_allocation=None):
+    source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     details = []
     total_qty = Decimal('0')
     for item in allocations:
@@ -205,15 +278,17 @@ def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_
         marker = f'[TRIP_ACTUAL]{trip.id}:{item.id}'
         actual = (actual_by_allocation or {}).get(item.id)
         if not actual:
-            actual = ShipmentActual.objects.filter(remark__startswith=marker).order_by('-id').first()
+            actual = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
+        default_order_no = source_order_no_by_allocation.get(item.source_id, '')
         details.append({
             'allocation_id': item.id,
             'product_code': item.product_code,
             'product_name': product_name_map.get(item.product_code, ''),
             'ship_to_code': item.ship_to_code or '',
+            'source_order_no': default_order_no,
             'due_date': item.due_date.isoformat() if item.due_date else None,
             'qty': _format_qty(qty),
-            'production_splits': _decode_remark_splits(getattr(actual, 'remark', None)),
+            'production_splits': _actual_split_rows(actual, default_order_no),
         })
 
     details.sort(key=lambda x: (x['product_code'], x['ship_to_code'], x['due_date'] or ''))
@@ -362,7 +437,7 @@ class ShippingTripExecutionView(APIView):
             q_obj = Q()
             for marker in markers:
                 q_obj |= Q(remark__startswith=marker)
-            actual_rows = ShipmentActual.objects.filter(q_obj).order_by('id')
+            actual_rows = ShipmentActual.objects.filter(q_obj).prefetch_related('splits').order_by('id')
         actual_by_allocation = {}
         for actual in actual_rows:
             remark = str(actual.remark or '')
@@ -531,6 +606,7 @@ class ShippingTripExecutionView(APIView):
                 ShippingTripAllocation.objects.select_related('trip').filter(trip_id__in=trip_ids).order_by('id')
             )
             allocation_map = {a.id: a for a in allocations}
+            source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
 
             normalized = {}
             split_map = {}
@@ -551,8 +627,10 @@ class ShippingTripExecutionView(APIView):
             for allocation in allocations:
                 qty = normalized.get(allocation.id, Decimal('0'))
                 marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
-                existing = ShipmentActual.objects.filter(remark__startswith=marker).order_by('-id').first()
+                existing = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
                 split_rows = split_map.get(allocation.id) or []
+                default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
+                normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
                 final_remark = _encode_remark(marker, split_rows)
                 if len(final_remark) > REMARK_MAX_LEN:
                     return Response(
@@ -593,6 +671,7 @@ class ShippingTripExecutionView(APIView):
                     existing.quantity = qty
                     existing.remark = final_remark
                     existing.save()
+                    _save_actual_split_rows(existing, normalized_split_rows)
                     updated_count += 1
                 else:
                     created = ShipmentActual.objects.create(
@@ -603,6 +682,7 @@ class ShippingTripExecutionView(APIView):
                         quantity=qty,
                         remark=final_remark,
                     )
+                    _save_actual_split_rows(created, normalized_split_rows)
                     ShipmentActualHistory.objects.create(
                         shipment_actual=created,
                         action='CREATE',

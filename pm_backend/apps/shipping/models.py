@@ -35,6 +35,34 @@ class ShipmentActual(models.Model):
         return f"{self.product_code} {self.shipment_date} {self.quantity}"
 
 
+class ShipmentActualSplit(models.Model):
+    """出荷実績の生産日・注番内訳"""
+    id = models.BigAutoField(primary_key=True)
+    shipment_actual = models.ForeignKey(
+        ShipmentActual, on_delete=models.CASCADE, related_name='splits', verbose_name='出荷実績'
+    )
+    line_no = models.PositiveIntegerField(default=1, verbose_name='行番号')
+    production_date = models.DateField(verbose_name='生産日')
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='数量')
+    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_shipment_actual_split'
+        verbose_name = '出荷実績内訳'
+        verbose_name_plural = '出荷実績内訳'
+        ordering = ['shipment_actual_id', 'line_no', 'id']
+        indexes = [
+            models.Index(fields=['shipment_actual', 'line_no']),
+            models.Index(fields=['production_date']),
+            models.Index(fields=['source_order_no']),
+        ]
+
+    def __str__(self):
+        return f"{self.shipment_actual_id} {self.production_date} {self.quantity} {self.source_order_no or ''}".strip()
+
+
 class ShipmentActualHistory(models.Model):
     """出荷実績の修正履歴"""
     ACTION_CHOICES = [
