@@ -440,18 +440,37 @@
             <td :colspan="2 + dateKeys.length * SLOT_COUNT" class="empty">データがありません</td>
           </tr>
           <tr v-else class="daily-load-row">
-            <td class="code-col daily-load-label">積み荷明細</td>
-            <td class="shipto-col daily-load-label"></td>
+              <td class="code-col daily-load-label">積み荷明細</td>
+              <td class="shipto-col daily-load-label daily-load-note">宵積みの便は前日列へ表示</td>
             <template v-for="dateKey in dateKeys" :key="`daily-load-${dateKey}`">
               <td class="daily-load-cell" :colspan="SLOT_COUNT" :class="{ 'day-split-left': isDaySplitStart(dateKey) }">
                 <div v-if="(loadBlocksByDate[dateKey] || []).length" class="daily-load-blocks">
                   <table class="daily-load-table">
                     <tbody>
                       <template v-for="(block, blockIdx) in loadBlocksByDate[dateKey]" :key="`${dateKey}-block-${blockIdx}`">
-                        <tr v-for="(line, lineIdx) in block.lines" :key="`${dateKey}-line-${blockIdx}-${lineIdx}`">
-                          <td v-if="lineIdx === 0" class="daily-load-truck" :rowspan="block.lines.length">{{ block.truckLabel }}</td>
-                          <td class="daily-load-product">{{ line[0] ? `${line[0].productCode}×${formatNumber(line[0].qty)}` : '' }}</td>
-                          <td class="daily-load-product">{{ line[1] ? `${line[1].productCode}×${formatNumber(line[1].qty)}` : '' }}</td>
+                        <tr
+                          v-for="(line, lineIdx) in block.lines"
+                          :key="`${dateKey}-line-${blockIdx}-${lineIdx}`"
+                          :class="{ 'daily-load-block-start': blockIdx > 0 && lineIdx === 0 }"
+                        >
+                          <td v-if="lineIdx === 0" class="daily-load-truck" :rowspan="block.lines.length">
+                            <div class="daily-load-truck-line">
+                              <span>{{ block.truckLabel }}</span>
+                              <span class="daily-load-truck-occ">{{ truckOccupancyLabelById(block.occupancyDateKey, block.truckId) }}</span>
+                            </div>
+                          </td>
+                          <td class="daily-load-product">
+                            <div v-if="line[0]" class="daily-load-product-line">
+                              <span>{{ loadDetailProductBaseLabel(line[0]) }}</span>
+                              <span class="daily-load-shipto">{{ formatLoadDetailShipTo(line[0]) }}</span>
+                            </div>
+                          </td>
+                          <td class="daily-load-product">
+                            <div v-if="line[1]" class="daily-load-product-line">
+                              <span>{{ loadDetailProductBaseLabel(line[1]) }}</span>
+                              <span class="daily-load-shipto">{{ formatLoadDetailShipTo(line[1]) }}</span>
+                            </div>
+                          </td>
                         </tr>
                       </template>
                     </tbody>
@@ -551,6 +570,14 @@ const formatNumber = (value) => {
   return Number.isInteger(num) ? String(num) : num.toFixed(3).replace(/\.?0+$/, '')
 }
 
+const formatLoadDetailShipTo = (item) => {
+  if (item?.shipToCode) return String(item.shipToCode)
+  if (item?.shipToName) return String(item.shipToName)
+  return ''
+}
+
+const loadDetailProductBaseLabel = (item) => `${item.productCode}×${formatNumber(item.qty)}`
+
 const parseIntegerQty = (value) => {
   if (value === null || value === undefined || value === '') return 0
   const normalized = String(value).replace(/[，,]/g, '').replace(/[．]/g, '.')
@@ -598,7 +625,9 @@ const sortEntries = (items = []) => {
   })
 }
 
-const targetDate = ref(formatLocalDate(new Date()))
+const todayDate = formatLocalDate(new Date())
+const defaultTargetDate = ref(todayDate)
+const targetDate = ref(todayDate)
 const horizonDays = ref(5)
 const keyword = ref('')
 const favorites = ref([])
@@ -837,6 +866,15 @@ const truckOccupancyPercent = (dateKey, slotIdx) => {
 }
 
 const truckOccupancyLabel = (dateKey, slotIdx) => `${truckOccupancyPercent(dateKey, slotIdx)}%`
+const truckOccupancyPercentById = (dateKey, truckId) => {
+  const normalizedTruckId = Number(truckId)
+  if (!dateKey || !normalizedTruckId) return 0
+  const previewSummary = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
+  if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
+  const savedSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
+  return parseNumber(savedSummary?.occupancy_percent)
+}
+const truckOccupancyLabelById = (dateKey, truckId) => `${truckOccupancyPercentById(dateKey, truckId)}`
 const pseudoTruckOccupancyPercent = (dateKey, type) => {
   const pseudoTruck = (trucksByDate.value[dateKey] || []).find((truck) => isPseudoTruckType(truck, type))
   if (!pseudoTruck) return 0
@@ -846,11 +884,38 @@ const pseudoTruckOccupancyPercent = (dateKey, type) => {
   return parseNumber(savedSummary?.occupancy_percent)
 }
 
+const getLoadDetailDateKey = (dateKey, truck) => {
+  const offset = Math.max(0, Number(truck?.arrival_day_offset || 0))
+  if (offset <= 0) return dateKey
+  const visibleDates = dateKeys.value
+  const currentIdx = visibleDates.indexOf(dateKey)
+  if (currentIdx < 0) return dateKey
+  const targetIdx = currentIdx - offset
+  if (targetIdx < 0) return null
+  return visibleDates[targetIdx]
+}
+
 const loadBlocksByDate = computed(() => {
-  const result = {}
+  const result = Object.fromEntries(dateKeys.value.map((dateKey) => [dateKey, []]))
+  const bucketMap = new Map()
+  const getBucket = (displayDateKey, truck) => {
+    const truckId = Number(truck?.id || 0)
+    if (!displayDateKey || !truckId) return null
+    const key = `${displayDateKey}||${truckId}`
+    if (!bucketMap.has(key)) {
+      bucketMap.set(key, {
+        dateKey: displayDateKey,
+        occupancyDateKey: null,
+        truckId,
+        truckLabel: loadDetailTruckLabel(truck),
+        products: new Map(),
+      })
+    }
+    return bucketMap.get(key)
+  }
+
   dateKeys.value.forEach((dateKey) => {
     const truckMap = new Map((trucksByDate.value[dateKey] || []).map((truck) => [Number(truck.id), truck]))
-    const qtyMap = new Map()
     mergedRows.value.forEach((row) => {
       const entries = entriesAt(row, dateKey)
       entries.forEach((entry) => {
@@ -858,54 +923,71 @@ const loadBlocksByDate = computed(() => {
           const truckId = Number(allocation.truck_id)
           const qty = parseIntegerQty(allocation.qty)
           if (!truckId || qty <= 0) return
-          const key = `${truckId}||${row.product_code}`
-          qtyMap.set(key, (qtyMap.get(key) || 0) + qty)
+          const truck = truckMap.get(truckId)
+          if (!truck) return
+          const displayDateKey = getLoadDetailDateKey(dateKey, truck)
+          const bucket = getBucket(displayDateKey, truck)
+          if (!bucket) return
+          if (!bucket.occupancyDateKey) bucket.occupancyDateKey = dateKey
+          const productKey = `${row.product_code}||${row.ship_to_code || ''}`
+          const existing = bucket.products.get(productKey)
+          if (existing) {
+            existing.qty += qty
+            return
+          }
+          bucket.products.set(productKey, {
+            productCode: row.product_code,
+            shipToCode: row.ship_to_code || '',
+            shipToName: row.ship_to_name || '',
+            qty,
+          })
         })
       })
     })
-    const items = [...qtyMap.entries()]
-      .map(([key, qty]) => {
-        const [truckIdText, productCode] = key.split('||')
-        const truckId = Number(truckIdText)
-        const truck = truckMap.get(truckId)
-        return {
-          truckId,
-          truckLabel: loadDetailTruckLabel(truck),
-          productCode,
-          qty,
-        }
-      })
-      .sort((a, b) => {
-        if (a.truckId !== b.truckId) return a.truckId - b.truckId
-        return String(a.productCode).localeCompare(String(b.productCode))
-      })
-    const blocks = []
-    let currentTruckId = null
-    items.forEach((item) => {
-      if (item.truckId !== currentTruckId) {
-        currentTruckId = item.truckId
-        blocks.push({
-          truckId: item.truckId,
-          truckLabel: item.truckLabel,
-          products: [],
-        })
-      }
-      blocks[blocks.length - 1].products.push({
+  })
+
+  bucketMap.forEach((bucket) => {
+    const items = [...bucket.products.values()]
+      .map((item) => ({
+        truckId: bucket.truckId,
+        truckLabel: bucket.truckLabel,
         productCode: item.productCode,
+        shipToCode: item.shipToCode,
+        shipToName: item.shipToName,
         qty: item.qty,
+      }))
+      .sort((a, b) => {
+        const codeCompare = String(a.productCode).localeCompare(String(b.productCode))
+        if (codeCompare !== 0) return codeCompare
+        return String(a.shipToCode || '').localeCompare(String(b.shipToCode || ''))
       })
-    })
-    result[dateKey] = blocks.map((block) => {
+    const blocks = items.length ? [{
+      truckId: bucket.truckId,
+      truckLabel: bucket.truckLabel,
+      products: items.map((item) => ({
+        productCode: item.productCode,
+        shipToCode: item.shipToCode,
+        shipToName: item.shipToName,
+        qty: item.qty,
+      })),
+    }] : []
+    const normalizedBlocks = blocks.map((block) => {
       const lines = []
       for (let idx = 0; idx < block.products.length; idx += 2) {
         lines.push(block.products.slice(idx, idx + 2))
       }
       return {
+        dateKey: bucket.dateKey,
+        occupancyDateKey: bucket.occupancyDateKey || bucket.dateKey,
         truckId: block.truckId,
         truckLabel: block.truckLabel,
         lines: lines.length ? lines : [[]],
       }
     })
+    result[bucket.dateKey].push(...normalizedBlocks)
+  })
+  Object.keys(result).forEach((dateKey) => {
+    result[dateKey].sort((a, b) => a.truckId - b.truckId)
   })
   return result
 })
@@ -1470,30 +1552,52 @@ const isWorkingDayByCalendar = (dateKey) => {
 
 const addBusinessDaysByCalendar = (baseDateStr, days) => {
   let current = new Date(`${baseDateStr}T00:00:00`)
-  let remaining = days
+  let remaining = Math.abs(days)
+  const direction = days >= 0 ? 1 : -1
   while (remaining > 0) {
-    current.setDate(current.getDate() + 1)
+    current.setDate(current.getDate() + direction)
     if (isWorkingDayByCalendar(formatLocalDate(current))) remaining--
   }
   return formatLocalDate(current)
 }
 
+const loadDefaultCalendar = async () => {
+  if (!calendarList.value.length) {
+    const res = await api.calendars.getCalendars()
+    calendarList.value = (res.data?.results || res.data || []).sort((a, b) =>
+      String(a.calendar_name).localeCompare(String(b.calendar_name)),
+    )
+  }
+  if (!autoAssignCalendarId.value && calendarList.value.length) {
+    const kubota = calendarList.value.find(
+      (c) => /kubota|kobota|クボタ/.test(`${c.calendar_code}${c.calendar_name}`),
+    )
+    autoAssignCalendarId.value = kubota ? kubota.id : calendarList.value[0].id
+  }
+  await loadCalendarDays()
+}
+
+const initializeDefaultTargetDate = async () => {
+  try {
+    await loadDefaultCalendar()
+    const previousBusinessDate = addBusinessDaysByCalendar(todayDate, -1)
+    defaultTargetDate.value = previousBusinessDate
+    if (!targetDate.value || targetDate.value === todayDate) {
+      targetDate.value = previousBusinessDate
+    }
+  } catch (error) {
+    const fallbackDate = addBusinessDaysByCalendar(todayDate, -1)
+    defaultTargetDate.value = fallbackDate
+    if (!targetDate.value || targetDate.value === todayDate) {
+      targetDate.value = fallbackDate
+    }
+  }
+}
+
 const openAutoAssignDialog = async () => {
   try {
-    if (!calendarList.value.length) {
-      const res = await api.calendars.getCalendars()
-      calendarList.value = (res.data?.results || res.data || []).sort((a, b) =>
-        String(a.calendar_name).localeCompare(String(b.calendar_name)),
-      )
-    }
-    if (!autoAssignCalendarId.value && calendarList.value.length) {
-      const kubota = calendarList.value.find(
-        (c) => /kubota|kobota|クボタ/.test(`${c.calendar_code}${c.calendar_name}`),
-      )
-      autoAssignCalendarId.value = kubota ? kubota.id : calendarList.value[0].id
-    }
-    await loadCalendarDays()
-    autoAssignStartDate.value = addBusinessDaysByCalendar(formatLocalDate(new Date()), 4)
+    await loadDefaultCalendar()
+    autoAssignStartDate.value = addBusinessDaysByCalendar(todayDate, 4)
     showAutoAssignDialog.value = true
   } catch (error) {
     alert('カレンダー情報の取得に失敗しました。')
@@ -1521,7 +1625,7 @@ watch(hideWeekends, (v) => {
 watch(autoAssignCalendarId, async (newVal) => {
   if (newVal && showAutoAssignDialog.value) {
     await loadCalendarDays()
-    autoAssignStartDate.value = addBusinessDaysByCalendar(formatLocalDate(new Date()), 4)
+    autoAssignStartDate.value = addBusinessDaysByCalendar(todayDate, 4)
   }
 })
 
@@ -1664,7 +1768,7 @@ const toFavoritePayload = () => ({
 })
 
 const applyFavoritePayload = (payload) => {
-  targetDate.value = String(payload?.targetDate || formatLocalDate(new Date()))
+  targetDate.value = String(payload?.targetDate || defaultTargetDate.value || todayDate)
   const nextHorizon = Number(payload?.horizonDays || 5)
   horizonDays.value = [5, 14, 31, 60, 90].includes(nextHorizon) ? nextHorizon : 5
   keyword.value = String(payload?.keyword || '')
@@ -1718,6 +1822,7 @@ const saveFavorite = async () => {
 
 onMounted(async () => {
   await loadFavorites()
+  await initializeDefaultTargetDate()
   await loadGrid()
   await nextTick()
   setStickyTopValues()
@@ -2321,6 +2426,12 @@ onUnmounted(() => {
   text-align: center;
   background: #eef2f7 !important;
 }
+
+.daily-load-note {
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: normal;
+}
 .daily-load-cell {
   padding: 0 !important;
   background: #fdfefe !important;
@@ -2334,12 +2445,19 @@ onUnmounted(() => {
   table-layout: fixed;
 }
 .daily-load-table td {
-  border-right: 1px solid #cbd5e1;
+  border-right: 2px solid #94a3b8;
   border-bottom: 1px solid #cbd5e1;
   padding: 2px 4px;
   font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
+}
+.daily-load-table td:nth-child(1),
+.daily-load-table td:nth-child(2) {
+  border-right-width: 3px;
+}
+.daily-load-block-start td {
+  border-top: 3px solid #000 !important;
 }
 .daily-load-table tr:last-child td {
   border-bottom: none;
@@ -2354,10 +2472,30 @@ onUnmounted(() => {
   background: #fafafa;
   font-weight: 500;
 }
+.daily-load-truck-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.daily-load-truck-occ {
+  margin-left: auto;
+  text-align: right;
+}
 .daily-load-product {
   text-align: left;
   vertical-align: middle;
   color: #111827;
+}
+.daily-load-product-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.daily-load-shipto {
+  margin-left: auto;
+  text-align: right;
 }
 .daily-load-empty {
   min-height: 28px;
