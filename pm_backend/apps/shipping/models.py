@@ -6,6 +6,14 @@ class ShipmentActual(models.Model):
     """出荷実績（受注と独立）"""
     id = models.BigAutoField(primary_key=True)
     shipment_date = models.DateField(verbose_name='出荷日')
+    shipping_trip_allocation = models.ForeignKey(
+        'orders.ShippingTripAllocation',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipment_actuals',
+        verbose_name='出荷便割付',
+    )
     product = models.ForeignKey(
         Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='製品'
     )
@@ -26,6 +34,7 @@ class ShipmentActual(models.Model):
         verbose_name_plural = '出荷実績'
         indexes = [
             models.Index(fields=['shipment_date']),
+            models.Index(fields=['shipping_trip_allocation']),
             models.Index(fields=['product_code']),
             models.Index(fields=['customer_code']),
             models.Index(fields=['ship_to_code']),

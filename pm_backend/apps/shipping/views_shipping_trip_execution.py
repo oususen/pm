@@ -134,6 +134,34 @@ def _save_actual_split_rows(actual, split_rows):
     ])
 
 
+def _legacy_trip_actual_marker(trip_id, allocation_id):
+    return f'[TRIP_ACTUAL]{trip_id}:{allocation_id}'
+
+
+def _find_actual_for_allocation(allocation, trip_id=None, actual_by_allocation=None):
+    if actual_by_allocation and allocation.id in actual_by_allocation:
+        return actual_by_allocation.get(allocation.id)
+
+    actual = (
+        ShipmentActual.objects
+        .filter(shipping_trip_allocation_id=allocation.id)
+        .prefetch_related('splits')
+        .order_by('-id')
+        .first()
+    )
+    if actual:
+        return actual
+
+    marker = _legacy_trip_actual_marker(trip_id or allocation.trip_id, allocation.id)
+    return (
+        ShipmentActual.objects
+        .filter(remark__startswith=marker)
+        .prefetch_related('splits')
+        .order_by('-id')
+        .first()
+    )
+
+
 def _allocation_source_order_no_map(allocations):
     due_ids = [
         item.source_id
@@ -177,7 +205,7 @@ def _save_production_splits_for_trip(trip, raw_actuals):
     source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     updated_count = 0
     for allocation in allocations:
-        marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
+        marker = _legacy_trip_actual_marker(trip.id, allocation.id)
         split_rows = split_map.get(allocation.id) or []
         default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
         normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
@@ -185,7 +213,7 @@ def _save_production_splits_for_trip(trip, raw_actuals):
         if len(final_remark) > REMARK_MAX_LEN:
             return {'detail': f'生産日内訳が長すぎます。品番 {allocation.product_code} の内訳を短くしてください。'}, status.HTTP_400_BAD_REQUEST
 
-        existing = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
+        existing = _find_actual_for_allocation(allocation, trip.id)
         if existing:
             existing_split_rows = _actual_split_rows(existing, default_order_no)
             if str(existing.remark or '') != final_remark or existing_split_rows != normalized_split_rows:
@@ -200,13 +228,15 @@ def _save_production_splits_for_trip(trip, raw_actuals):
                     remark=existing.remark,
                 )
                 existing.remark = final_remark
-                existing.save(update_fields=['remark'])
+                existing.shipping_trip_allocation = allocation
+                existing.save(update_fields=['remark', 'shipping_trip_allocation'])
                 _save_actual_split_rows(existing, normalized_split_rows)
                 updated_count += 1
             continue
 
         created = ShipmentActual.objects.create(
             shipment_date=actual_departure_date,
+            shipping_trip_allocation=allocation,
             product_code=allocation.product_code,
             customer_code=trip.customer_code,
             ship_to_code=allocation.ship_to_code or trip.ship_to_code,
@@ -222,8 +252,7 @@ def _save_production_splits_for_trip(trip, raw_actuals):
 def _trip_actual_matches_plan(trip):
     allocations = list(ShippingTripAllocation.objects.filter(trip_id=trip.id).order_by('id'))
     for allocation in allocations:
-        marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
-        actual = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
+        actual = _find_actual_for_allocation(allocation, trip.id)
         splits = _actual_split_rows(actual)
         actual_qty = sum((_to_decimal(item.get('quantity')) for item in splits), Decimal('0'))
         if actual_qty != _to_decimal(allocation.qty):
@@ -275,10 +304,9 @@ def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_
     for item in allocations:
         qty = _to_decimal(item.qty)
         total_qty += qty
-        marker = f'[TRIP_ACTUAL]{trip.id}:{item.id}'
         actual = (actual_by_allocation or {}).get(item.id)
         if not actual:
-            actual = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
+            actual = _find_actual_for_allocation(item, trip.id)
         default_order_no = source_order_no_by_allocation.get(item.source_id, '')
         details.append({
             'allocation_id': item.id,
@@ -430,23 +458,19 @@ class ShippingTripExecutionView(APIView):
         for item in allocations:
             allocations_by_trip[item.trip_id].append(item)
 
-        markers = [f'[TRIP_ACTUAL]{trip.id}:' for trip in trips]
+        allocation_ids = [item.id for item in allocations]
         actual_rows = ShipmentActual.objects.none()
-        if markers:
-            from django.db.models import Q
-            q_obj = Q()
-            for marker in markers:
-                q_obj |= Q(remark__startswith=marker)
-            actual_rows = ShipmentActual.objects.filter(q_obj).prefetch_related('splits').order_by('id')
+        if allocation_ids:
+            actual_rows = (
+                ShipmentActual.objects
+                .filter(shipping_trip_allocation_id__in=allocation_ids)
+                .prefetch_related('splits')
+                .order_by('id')
+            )
         actual_by_allocation = {}
         for actual in actual_rows:
-            remark = str(actual.remark or '')
-            marker_core = remark.split(SPLIT_TOKEN, 1)[0]
-            try:
-                allocation_id = int(marker_core.rsplit(':', 1)[-1])
-            except Exception:
-                continue
-            actual_by_allocation[allocation_id] = actual
+            if actual.shipping_trip_allocation_id:
+                actual_by_allocation[actual.shipping_trip_allocation_id] = actual
 
         raw_trips_payload = [
             _build_trip_payload(trip, allocations_by_trip.get(trip.id, []), product_name_map, calc, truck_offset_map, actual_by_allocation)
@@ -550,10 +574,20 @@ class ShippingTripExecutionView(APIView):
                 item.save()
         elif action == 'reopen':
             existing_actuals = []
+            allocation_ids = list(
+                ShippingTripAllocation.objects.filter(trip_id__in=trip_ids).values_list('id', flat=True)
+            )
+            if allocation_ids:
+                existing_actuals.extend(list(
+                    ShipmentActual.objects.filter(shipping_trip_allocation_id__in=allocation_ids).order_by('id')
+                ))
             for item in trips:
                 marker_prefix = f'[TRIP_ACTUAL]{item.id}:'
                 existing_actuals.extend(list(
-                    ShipmentActual.objects.filter(remark__startswith=marker_prefix).order_by('id')
+                    ShipmentActual.objects.filter(
+                        shipping_trip_allocation__isnull=True,
+                        remark__startswith=marker_prefix,
+                    ).order_by('id')
                 ))
             for actual in existing_actuals:
                 ShipmentActualHistory.objects.create(
@@ -626,8 +660,8 @@ class ShippingTripExecutionView(APIView):
             deleted_count = 0
             for allocation in allocations:
                 qty = normalized.get(allocation.id, Decimal('0'))
-                marker = f'[TRIP_ACTUAL]{trip.id}:{allocation.id}'
-                existing = ShipmentActual.objects.filter(remark__startswith=marker).prefetch_related('splits').order_by('-id').first()
+                marker = _legacy_trip_actual_marker(allocation.trip_id, allocation.id)
+                existing = _find_actual_for_allocation(allocation, allocation.trip_id)
                 split_rows = split_map.get(allocation.id) or []
                 default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
                 normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
@@ -665,6 +699,7 @@ class ShippingTripExecutionView(APIView):
                         remark=existing.remark,
                     )
                     existing.shipment_date = shipment_date
+                    existing.shipping_trip_allocation = allocation
                     existing.product_code = allocation.product_code
                     existing.customer_code = trip.customer_code
                     existing.ship_to_code = allocation.ship_to_code or trip.ship_to_code
@@ -676,6 +711,7 @@ class ShippingTripExecutionView(APIView):
                 else:
                     created = ShipmentActual.objects.create(
                         shipment_date=shipment_date,
+                        shipping_trip_allocation=allocation,
                         product_code=allocation.product_code,
                         customer_code=allocation.trip.customer_code,
                         ship_to_code=allocation.ship_to_code or allocation.trip.ship_to_code,

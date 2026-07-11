@@ -2,6 +2,7 @@ import axios from 'axios'
 import { createProductsAPI } from './resources/products'
 import { createCustomersAPI } from './resources/customers'
 import { createShipmentActualsAPI } from './resources/shipmentActuals'
+import { createShippingTraceAPI } from './resources/shippingTrace'
 import { createProcessesAPI } from './resources/processes'
 import { createLinesAPI } from './resources/lines'
 import { createSuppliersAPI } from './resources/suppliers'
@@ -160,6 +161,7 @@ export default {
   linePlans: createLinePlansAPI(client),
   lineBacklogs: createLineBacklogsAPI(client),
   shipmentActuals: createShipmentActualsAPI(client),
+  shippingTrace: createShippingTraceAPI(client),
   lineGanttPlans: createLineGanttPlansAPI(client),
   lineDailyScheduleSettings: createLineDailyScheduleSettingsAPI(client),
   lineDefaultScheduleSettings: createLineDefaultScheduleSettingsAPI(client),

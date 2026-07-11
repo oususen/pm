@@ -91,6 +91,14 @@ const tiles = computed(() => [
     resource: "shipping.actual",
   },
   {
+    to: "/shipping/actual-trace",
+    label: "出荷実績追跡",
+    icon: "🔎",
+    category: "shipping_ops",
+    required: "view",
+    resource: "shipping.actual",
+  },
+  {
     to: "/shipping/progress",
     label: "出荷進度照会",
     icon: "📊",
@@ -278,4 +286,3 @@ const onTileClick = (event, tile) => {
   }
 }
 </style>
-

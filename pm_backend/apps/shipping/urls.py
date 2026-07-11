@@ -16,6 +16,7 @@ from shipping.views_shipping_trip_execution import (
     ShippingTripExecutionView,
     ShippingTripProgressView,
 )
+from shipping.views_shipping_trace import ShippingActualTraceView
 from shipping.views_shipping_order import (
     generate_shipping_order_pdf_api,
     get_available_dates,
@@ -54,6 +55,7 @@ urlpatterns = [
     path('kubota-sakai-trip-assignments/delivery-progress-adjust/', KubotaSakaiDeliveryProgressAdjustView.as_view(), name='kubota-sakai-delivery-progress-adjust'),
     path('shipping-trips/execution/', ShippingTripExecutionView.as_view(), name='shipping-trip-execution'),
     path('shipping-trips/progress/', ShippingTripProgressView.as_view(), name='shipping-trip-progress'),
+    path('shipping-trace/', ShippingActualTraceView.as_view(), name='shipping-actual-trace'),
     # Shipping order APIs
     path('shipping/available-dates/', get_available_dates, name='shipping-available-dates'),
     path('shipping/order-data/<str:target_date_str>/', get_shipping_order_data, name='shipping-order-data'),

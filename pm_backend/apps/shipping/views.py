@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from django.db.models import Q
 
 from .models import ShipmentActual, ShipmentActualHistory, ShipToLeadTime
 from .serializers import ShipmentActualHistorySerializer, ShipmentActualSerializer, ShipToLeadTimeSerializer
@@ -25,13 +26,46 @@ class ShipmentActualFilter(django_filters.FilterSet):
 
 class ShipmentActualViewSet(viewsets.ModelViewSet):
     """出荷実績ViewSet"""
-    queryset = ShipmentActual.objects.all().select_related('product', 'customer').prefetch_related('splits')
+    queryset = (
+        ShipmentActual.objects.all()
+        .select_related('product', 'customer', 'shipping_trip_allocation__trip')
+        .prefetch_related('splits')
+    )
     serializer_class = ShipmentActualSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ShipmentActualFilter
     search_fields = ['product_code', 'customer_code', 'ship_to_code']
     ordering_fields = ['shipment_date', 'product_code', 'customer_code', 'created_at']
     ordering = ['-shipment_date', 'product_code']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        departure_date_gte = params.get('departure_date__gte')
+        if departure_date_gte:
+            qs = qs.filter(shipping_trip_allocation__trip__departure_date__gte=departure_date_gte)
+
+        departure_date_lte = params.get('departure_date__lte')
+        if departure_date_lte:
+            qs = qs.filter(shipping_trip_allocation__trip__departure_date__lte=departure_date_lte)
+
+        source_order_no = str(params.get('source_order_no') or '').strip()
+        if source_order_no:
+            qs = qs.filter(splits__source_order_no__icontains=source_order_no)
+
+        trip_keyword = str(params.get('trip_keyword') or '').strip()
+        if trip_keyword:
+            qs = qs.filter(
+                Q(shipping_trip_allocation__trip__trip_code__icontains=trip_keyword) |
+                Q(shipping_trip_allocation__trip__trip_ref__icontains=trip_keyword)
+            )
+
+        business_type = str(params.get('business_type') or '').strip()
+        if business_type:
+            qs = qs.filter(shipping_trip_allocation__trip__business_type=business_type)
+
+        return qs.distinct()
 
     def _create_history(self, instance, action):
         ShipmentActualHistory.objects.create(

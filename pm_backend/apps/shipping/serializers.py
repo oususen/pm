@@ -16,14 +16,26 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     customer_name = serializers.SerializerMethodField()
     production_splits = ShipmentActualSplitSerializer(source='splits', many=True, read_only=True)
+    trip_id = serializers.SerializerMethodField()
+    trip_code = serializers.SerializerMethodField()
+    trip_ref = serializers.SerializerMethodField()
+    business_type = serializers.SerializerMethodField()
+    departure_date = serializers.SerializerMethodField()
+    departure_time_plan = serializers.SerializerMethodField()
+    departure_time_actual = serializers.SerializerMethodField()
+    source_order_nos = serializers.SerializerMethodField()
 
     class Meta:
         model = ShipmentActual
         fields = [
             'id', 'shipment_date',
+            'shipping_trip_allocation',
             'product', 'product_code', 'product_name',
             'customer', 'customer_code', 'customer_name',
             'ship_to_code', 'quantity', 'remark', 'production_splits',
+            'trip_id', 'trip_code', 'trip_ref', 'business_type',
+            'departure_date', 'departure_time_plan', 'departure_time_actual',
+            'source_order_nos',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'product_name', 'customer_name']
@@ -43,6 +55,56 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
         if obj.customer_id and obj.customer:
             return obj.customer.customer_name
         return None
+
+    def _trip(self, obj):
+        allocation = getattr(obj, 'shipping_trip_allocation', None)
+        return getattr(allocation, 'trip', None) if allocation else None
+
+    def get_trip_id(self, obj):
+        trip = self._trip(obj)
+        return trip.id if trip else None
+
+    def get_trip_code(self, obj):
+        trip = self._trip(obj)
+        if not trip:
+            return None
+        return (trip.trip_code or '').strip() or (trip.trip_ref or '').strip() or None
+
+    def get_trip_ref(self, obj):
+        trip = self._trip(obj)
+        return getattr(trip, 'trip_ref', None) if trip else None
+
+    def get_business_type(self, obj):
+        trip = self._trip(obj)
+        return getattr(trip, 'business_type', None) if trip else None
+
+    def get_departure_date(self, obj):
+        trip = self._trip(obj)
+        if not trip or not trip.departure_date:
+            return None
+        return trip.departure_date.isoformat()
+
+    def get_departure_time_plan(self, obj):
+        trip = self._trip(obj)
+        if not trip or not trip.departure_time_plan:
+            return None
+        return trip.departure_time_plan.strftime('%H:%M')
+
+    def get_departure_time_actual(self, obj):
+        trip = self._trip(obj)
+        if not trip or not trip.departure_time_actual:
+            return None
+        return trip.departure_time_actual.strftime('%Y-%m-%d %H:%M')
+
+    def get_source_order_nos(self, obj):
+        values = []
+        seen = set()
+        for split in getattr(obj, 'splits', []).all() if hasattr(getattr(obj, 'splits', None), 'all') else []:
+            order_no = str(split.source_order_no or '').strip()
+            if order_no and order_no not in seen:
+                seen.add(order_no)
+                values.append(order_no)
+        return values
 
     def validate(self, attrs):
         # 製品コード/得意先コードからマスタを補完
