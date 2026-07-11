@@ -12,8 +12,70 @@
     <div v-else-if="error" class="status error">{{ error }}</div>
     <div v-else-if="!blocks.length" class="status">データがありません</div>
     <div v-else class="block-list-wrap">
-      <div ref="mainScrollRef" class="block-list" @scroll="syncFromMain">
-        <div v-for="b in pagedBlocks" :key="b.key" class="block-card">
+      <div
+        v-if="rootBlock"
+        class="sticky-root-wrap"
+      >
+        <div ref="mainScrollRef" class="block-list sticky-root-list" @scroll="syncFromMain">
+          <div :key="rootBlock.key" class="block-card sticky-root-card">
+            <div class="block-body">
+              <div class="meta-panel">
+                <template v-if="rootBlock.is_shipping_summary">
+                  <div class="meta-row"><span class="meta-label">完成品</span><span class="meta-value">{{ rootBlock.product_code }}</span></div>
+                  <div class="meta-row"><span class="meta-label">品名</span><span class="meta-value">{{ rootBlock.product_name || "-" }}</span></div>
+                  <div class="meta-row"><span class="meta-label">納入場</span><span class="meta-value">{{ rootBlock.ship_to_display || "-" }}</span></div>
+                  <div class="meta-row"><span class="meta-label">顧客</span><span class="meta-value">{{ rootBlock.customer_display || "-" }}</span></div>
+                </template>
+                <template v-else>
+                  <div class="meta-row"><span class="meta-label">品番</span><span class="meta-value">{{ rootBlock.product_code }}</span></div>
+                  <div class="meta-row"><span class="meta-label">品名</span><span class="meta-value">{{ rootBlock.product_name || "-" }}</span></div>
+                  <div class="meta-row"><span class="meta-label">ライン</span><span class="meta-value">{{ rootBlock.line_display || "-" }}</span></div>
+                  <div class="meta-row"><span class="meta-label">工程</span><span class="meta-value">{{ rootBlock.process_display || "-" }}</span></div>
+                </template>
+              </div>
+              <table class="matrix-table">
+                <thead>
+                  <tr>
+                    <th class="label-col">項目</th>
+                    <th
+                      v-for="d in columns"
+                      :key="`${rootBlock.key}-${d}`"
+                      class="day-col"
+                      :class="{ holiday: isHoliday(d) }"
+                    >
+                      {{ formatDateHeader(d) }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th class="label-col">内示</th>
+                    <td v-for="d in columns" :key="`${rootBlock.key}-f-${d}`" class="day-col" :class="{ holiday: isHoliday(d) }">{{ fmt(rootBlock.forecast?.[d] || 0) }}</td>
+                  </tr>
+                  <tr>
+                    <th class="label-col">確定</th>
+                    <td v-for="d in columns" :key="`${rootBlock.key}-fi-${d}`" class="day-col" :class="{ holiday: isHoliday(d) }">{{ fmt(rootBlock.firm?.[d] || 0) }}</td>
+                  </tr>
+                  <tr>
+                    <th class="label-col">実績</th>
+                    <td v-for="d in columns" :key="`${rootBlock.key}-pp-${d}`" class="day-col" :class="{ holiday: isHoliday(d) }">{{ fmt(rootBlock.planned_progress?.[d] || 0) }}</td>
+                  </tr>
+                  <tr>
+                    <th class="label-col">調整</th>
+                    <td v-for="d in columns" :key="`${rootBlock.key}-ad-${d}`" class="day-col" :class="{ holiday: isHoliday(d) }">{{ fmt(rootBlock.adjust?.[d] || 0) }}</td>
+                  </tr>
+                  <tr>
+                    <th class="label-col">進度</th>
+                    <td v-for="d in columns" :key="`${rootBlock.key}-p-${d}`" class="day-col" :class="{ holiday: isHoliday(d) }">{{ fmt(rootBlock.progress?.[d] || 0) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div ref="childScrollRef" class="block-list" @scroll="syncFromChild">
+        <div v-for="b in childBlocks" :key="b.key" class="block-card">
           <div class="block-body">
             <div class="meta-panel">
               <template v-if="b.is_shipping_summary">
@@ -69,12 +131,7 @@
           </div>
         </div>
       </div>
-      <div class="pager" v-if="totalPages > 1">
-        <button type="button" @click="changePage(currentPage - 1)" :disabled="currentPage === 1">前へ</button>
-        <span>{{ currentPage }} / {{ totalPages }}</span>
-        <button type="button" @click="changePage(currentPage + 1)" :disabled="currentPage >= totalPages">次へ</button>
-      </div>
-      <div class="pager-info">{{ pageStart }}-{{ pageEnd }} / {{ blocks.length }}件</div>
+      <div class="pager-info">{{ blocks.length }}件</div>
     </div>
     <div
       v-if="blocks.length"
@@ -98,12 +155,11 @@ const router = useRouter();
 const loading = ref(false);
 const error = ref("");
 const blocks = ref([]);
-const currentPage = ref(1);
-const pageSize = 5;
 const holidays = ref(new Set());
 const daisoCalendarId = ref(null);
 const topScrollRef = ref(null);
 const mainScrollRef = ref(null);
+const childScrollRef = ref(null);
 const scrollContentWidth = ref(0);
 let syncingScroll = false;
 
@@ -183,21 +239,11 @@ const fmt = (n) => {
   return num.toLocaleString();
 };
 
-const totalPages = computed(() => Math.max(1, Math.ceil(blocks.value.length / pageSize)));
-const pagedBlocks = computed(() => {
-  const start = (currentPage.value - 1) * pageSize;
-  return blocks.value.slice(start, start + pageSize);
-});
-const pageStart = computed(() => (blocks.value.length ? (currentPage.value - 1) * pageSize + 1 : 0));
-const pageEnd = computed(() => Math.min(currentPage.value * pageSize, blocks.value.length));
-const changePage = (p) => {
-  if (p < 1 || p > totalPages.value) return;
-  currentPage.value = p;
-  nextTick(updateScrollWidth);
-};
+const rootBlock = computed(() => blocks.value[0] || null);
+const childBlocks = computed(() => blocks.value.slice(1));
 
 const updateScrollWidth = () => {
-  const el = mainScrollRef.value;
+  const el = childScrollRef.value || mainScrollRef.value;
   scrollContentWidth.value = el ? el.scrollWidth : 0;
 };
 
@@ -205,9 +251,11 @@ const syncFromTop = () => {
   if (syncingScroll) return;
   const top = topScrollRef.value;
   const main = mainScrollRef.value;
-  if (!top || !main) return;
+  const child = childScrollRef.value;
+  if (!top) return;
   syncingScroll = true;
-  main.scrollLeft = top.scrollLeft;
+  if (main) main.scrollLeft = top.scrollLeft;
+  if (child) child.scrollLeft = top.scrollLeft;
   syncingScroll = false;
 };
 
@@ -215,9 +263,23 @@ const syncFromMain = () => {
   if (syncingScroll) return;
   const top = topScrollRef.value;
   const main = mainScrollRef.value;
+  const child = childScrollRef.value;
   if (!top || !main) return;
   syncingScroll = true;
   top.scrollLeft = main.scrollLeft;
+  if (child) child.scrollLeft = main.scrollLeft;
+  syncingScroll = false;
+};
+
+const syncFromChild = () => {
+  if (syncingScroll) return;
+  const top = topScrollRef.value;
+  const main = mainScrollRef.value;
+  const child = childScrollRef.value;
+  if (!top || !child) return;
+  syncingScroll = true;
+  top.scrollLeft = child.scrollLeft;
+  if (main) main.scrollLeft = child.scrollLeft;
   syncingScroll = false;
 };
 
@@ -567,7 +629,6 @@ const load = async () => {
     } else {
       blocks.value = mappedBlocks;
     }
-    currentPage.value = 1;
     await nextTick();
     updateScrollWidth();
   } catch (e) {
@@ -600,8 +661,19 @@ load();
 .status { padding: 20px; text-align: center; color: #475569; }
 .status.error { color: #b91c1c; }
 .block-list-wrap { display: flex; flex-direction: column; gap: 8px; }
+.sticky-root-wrap {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  background: #f8fafc;
+  padding-bottom: 4px;
+}
 .block-list { display: flex; flex-direction: column; gap: 12px; overflow-x: auto; }
+.sticky-root-list { gap: 0; }
 .block-card { border: 1px solid #dbe4f0; border-radius: 8px; overflow: hidden; background: #fff; min-width: max-content; }
+.sticky-root-card {
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
 .block-body { display: flex; align-items: stretch; }
 .meta-panel { width: 260px; min-width: 260px; border-right: 1px solid #e5e7eb; background: #f8fafc; }
 .meta-row { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
@@ -620,7 +692,6 @@ load();
   background: #f8fafc;
 }
 .day-col { width: 40px; min-width: 40px; max-width: 40px; }
-.pager { display: flex; gap: 12px; align-items: center; justify-content: center; }
 .pager-info { text-align: center; color: #475569; font-size: 12px; }
 .floating-x-scroll {
   position: fixed;
