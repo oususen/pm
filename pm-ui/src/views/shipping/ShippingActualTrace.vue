@@ -32,6 +32,7 @@
           <table class="data-table">
             <thead>
               <tr>
+                <th>元納期</th>
                 <th>到着日</th>
                 <th>出発日</th>
                 <th>便</th>
@@ -47,6 +48,7 @@
             </thead>
             <tbody>
               <tr v-for="item in rows" :key="item.id">
+                <td>{{ item.original_due_date || "-" }}</td>
                 <td>{{ item.shipment_date || "-" }}</td>
                 <td>{{ displayDepartureDate(item) }}</td>
                 <td>{{ item.trip_code || "-" }}</td>
@@ -67,7 +69,7 @@
                 </td>
               </tr>
               <tr v-if="!rows.length">
-                <td colspan="11" class="no-data">データがありません</td>
+                <td colspan="12" class="no-data">データがありません</td>
               </tr>
             </tbody>
           </table>

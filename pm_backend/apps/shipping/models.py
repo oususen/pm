@@ -72,6 +72,37 @@ class ShipmentActualSplit(models.Model):
         return f"{self.shipment_actual_id} {self.production_date} {self.quantity} {self.source_order_no or ''}".strip()
 
 
+class ShippingTripAllocationSplit(models.Model):
+    """便割付の生産日・注番内訳（出発前の準備情報）"""
+    id = models.BigAutoField(primary_key=True)
+    shipping_trip_allocation = models.ForeignKey(
+        'orders.ShippingTripAllocation',
+        on_delete=models.CASCADE,
+        related_name='production_splits',
+        verbose_name='出荷便割付',
+    )
+    line_no = models.PositiveIntegerField(default=1, verbose_name='行番号')
+    production_date = models.DateField(verbose_name='生産日')
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='数量')
+    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_shipping_trip_allocation_split'
+        verbose_name = '便割付内訳'
+        verbose_name_plural = '便割付内訳'
+        ordering = ['shipping_trip_allocation_id', 'line_no', 'id']
+        indexes = [
+            models.Index(fields=['shipping_trip_allocation', 'line_no']),
+            models.Index(fields=['production_date']),
+            models.Index(fields=['source_order_no']),
+        ]
+
+    def __str__(self):
+        return f"{self.shipping_trip_allocation_id} {self.production_date} {self.quantity} {self.source_order_no or ''}".strip()
+
+
 class ShipmentActualHistory(models.Model):
     """出荷実績の修正履歴"""
     ACTION_CHOICES = [

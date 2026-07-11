@@ -57,7 +57,7 @@ class ShippingActualTraceView(APIView):
         due_map = {
             row['id']: row
             for row in KubotaSakaiDueAdjustment.objects.filter(id__in=due_ids).values(
-                'id', 'source_order_no', 'ship_to_code'
+                'id', 'source_order_no', 'ship_to_code', 'due_date', 'order_line__due_date'
             )
         }
 
@@ -100,6 +100,8 @@ class ShippingActualTraceView(APIView):
             serialized_actual = serialized_actual_map.get(allocation.id)
             due = due_map.get(allocation.source_id) if str(allocation.source_type or '').strip() == 'KUBOTA_SAKAI_DUE' else None
             source_no = str((due or {}).get('source_order_no') or '').strip()
+            original_due_date = (due or {}).get('order_line__due_date') or (due or {}).get('due_date') or allocation.due_date
+            original_due_date_str = original_due_date.isoformat() if original_due_date else None
             if actual and not serialized_actual:
                 continue
 
@@ -110,6 +112,7 @@ class ShippingActualTraceView(APIView):
                 row = dict(serialized_actual)
                 row['source_order_nos'] = row.get('source_order_nos') or ([source_no] if source_no else [])
                 row['departure_date'] = actual_departure_date_str
+                row['original_due_date'] = original_due_date_str
             else:
                 trip = allocation.trip
                 trip_code = (trip.trip_code or '').strip() or (trip.trip_ref or '').strip()
@@ -132,6 +135,7 @@ class ShippingActualTraceView(APIView):
                     'trip_ref': trip.trip_ref,
                     'business_type': trip.business_type,
                     'departure_date': actual_departure_date_str,
+                    'original_due_date': original_due_date_str,
                     'departure_time_plan': trip.departure_time_plan.strftime('%H:%M') if trip.departure_time_plan else None,
                     'departure_time_actual': trip.departure_time_actual.strftime('%Y-%m-%d %H:%M') if trip.departure_time_actual else None,
                     'source_order_nos': [source_no] if source_no else [],

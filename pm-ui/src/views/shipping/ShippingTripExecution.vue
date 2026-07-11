@@ -75,6 +75,12 @@
               </div>
             </div>
             <div v-if="isExecutionMode || isActualInputMode" class="split-wrap">
+              <div class="split-head">
+                <span>{{ t('shippingTripExecution.productionDate') }}</span>
+                <span>{{ t('shippingTripExecution.quantity') }}</span>
+                <span>{{ t('shippingTripExecution.orderNo') }}</span>
+                <span></span>
+              </div>
               <div
                 v-for="(split, splitIdx) in splitRows(trip.id, row.allocation_id, row)"
                 :key="`${row.allocation_id}-${splitIdx}`"
@@ -94,13 +100,9 @@
                   :disabled="!canEditProductionDate(trip)"
                   @input="setSplitQty(trip.id, row.allocation_id, splitIdx, $event.target.value, row)"
                 />
-                <input
-                  type="text"
-                  :value="split.source_order_no || ''"
-                  :placeholder="t('shippingTripExecution.orderNo')"
-                  :disabled="!canEditProductionDate(trip)"
-                  @input="setSplitOrderNo(trip.id, row.allocation_id, splitIdx, $event.target.value)"
-                />
+                <div class="split-order-no" :title="split.source_order_no || ''">
+                  {{ split.source_order_no || '-' }}
+                </div>
                 <button
                   type="button"
                   class="btn split-btn"
@@ -137,7 +139,7 @@
           <label class="field inline-field">
             <span>{{ t('shippingTripExecution.actualDate') }}</span>
             <input
-              :value="actualDateValue(trip.id, trip.actual_departure_date || trip.departure_date)"
+              :value="actualDateValue(trip.id, trip.departure_date)"
               type="date"
               :disabled="!canRegisterActual(trip)"
               @input="setActualDate(trip.id, $event.target.value)"
@@ -307,7 +309,7 @@ const initActualInputState = (tripList) => {
   const nextDateMap = {}
   const nextSplitMap = {}
   ;(tripList || []).forEach((trip) => {
-    nextDateMap[trip.id] = actualDateMap.value[trip.id] || trip.actual_departure_date || trip.departure_date
+    nextDateMap[trip.id] = actualDateMap.value[trip.id] || trip.departure_date
     const byAlloc = {}
     const byAllocSplit = {}
     ;(trip.details || []).forEach((row) => {
@@ -372,16 +374,6 @@ const setSplitQty = (tripId, allocationId, splitIdx, value, row) => {
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
   syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
-}
-
-const setSplitOrderNo = (tripId, allocationId, splitIdx, value) => {
-  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
-  if (!next[splitIdx]) return
-  next[splitIdx] = { ...next[splitIdx], source_order_no: String(value ?? '') }
-  productionSplitMap.value = {
-    ...productionSplitMap.value,
-    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
-  }
 }
 
 const addSplitRow = (tripId, allocationId, row) => {
@@ -478,7 +470,7 @@ const registerActual = async (trip) => {
     alert(t('shippingTripExecution.error.registerActualDenied'))
     return
   }
-  const shipmentDate = actualDateValue(trip.id, trip.actual_departure_date || trip.departure_date)
+  const shipmentDate = actualDateValue(trip.id, trip.departure_date)
   if (!shipmentDate) {
     alert(t('shippingTripExecution.error.actualDateRequired'))
     return
@@ -523,7 +515,7 @@ const updateTripStatus = async (trip, action) => {
       trip_id: trip.id,
       trip_ids: trip.trip_ids || [trip.id],
       action,
-      actuals: action === 'mark_loading' ? buildActualPayload(trip) : undefined,
+      actuals: ['mark_loading', 'mark_departed'].includes(action) ? buildActualPayload(trip) : undefined,
     })
     const updated = res.data?.trip
     if (updated) {
@@ -697,10 +689,21 @@ onMounted(loadTrips)
   display: grid;
   gap: 2px;
 }
+.split-head,
 .split-row {
   display: grid;
   grid-template-columns: 1fr 100px 120px 80px;
   gap: 3px;
+}
+.split-head {
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
+  padding: 2px 0 0;
+}
+.split-head span:nth-child(2),
+.split-head span:nth-child(3) {
+  text-align: center;
 }
 .split-row input {
   height: 38px;
@@ -708,6 +711,19 @@ onMounted(loadTrips)
   border-radius: 4px;
   padding: 0 6px;
   font-size: 18px;
+}
+.split-order-no {
+  height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 18px;
+  line-height: 38px;
+  color: #334155;
+  background: #f8fafc;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .split-btn,
 .split-add,
@@ -899,6 +915,7 @@ onMounted(loadTrips)
     font-size: 16px;
     padding: 3px 8px;
   }
+  .split-head,
   .split-row {
     grid-template-columns: 1fr 70px 90px 52px;
   }

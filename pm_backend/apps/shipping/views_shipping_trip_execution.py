@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from masters.models import Calendar, KubotaSakaiTruck, Product
 from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation
 from orders.utils.calendar_utils import WorkingDayCalculator
-from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit
+from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit
 
 SPLIT_TOKEN = '|PD='
 REMARK_MAX_LEN = 200
@@ -134,6 +134,38 @@ def _save_actual_split_rows(actual, split_rows):
     ])
 
 
+def _allocation_split_rows(allocation, default_order_no=''):
+    split_rows = list(getattr(allocation, 'production_splits', []).all()) if hasattr(getattr(allocation, 'production_splits', None), 'all') else list(
+        ShippingTripAllocationSplit.objects.filter(shipping_trip_allocation=allocation).order_by('line_no', 'id')
+    )
+    return [
+        {
+            'line_no': int(item.line_no or 0),
+            'production_date': item.production_date.isoformat(),
+            'quantity': _format_qty(item.quantity),
+            'source_order_no': str(item.source_order_no or default_order_no or '').strip(),
+        }
+        for item in split_rows
+    ]
+
+
+def _save_allocation_split_rows(allocation, split_rows):
+    ShippingTripAllocationSplit.objects.filter(shipping_trip_allocation=allocation).delete()
+    normalized = _normalize_split_rows(split_rows)
+    if not normalized:
+        return
+    ShippingTripAllocationSplit.objects.bulk_create([
+        ShippingTripAllocationSplit(
+            shipping_trip_allocation=allocation,
+            line_no=item['line_no'],
+            production_date=_parse_date(item['production_date']),
+            quantity=_to_decimal(item['quantity']),
+            source_order_no=item['source_order_no'] or '',
+        )
+        for item in normalized
+    ])
+
+
 def _legacy_trip_actual_marker(trip_id, allocation_id):
     return f'[TRIP_ACTUAL]{trip_id}:{allocation_id}'
 
@@ -162,6 +194,25 @@ def _find_actual_for_allocation(allocation, trip_id=None, actual_by_allocation=N
     )
 
 
+def _legacy_actuals_for_allocation(allocation, trip_id=None):
+    results = list(
+        ShipmentActual.objects
+        .filter(shipping_trip_allocation_id=allocation.id)
+        .order_by('id')
+    )
+    marker = _legacy_trip_actual_marker(trip_id or allocation.trip_id, allocation.id)
+    legacy_rows = list(
+        ShipmentActual.objects
+        .filter(shipping_trip_allocation__isnull=True, remark__startswith=marker)
+        .order_by('id')
+    )
+    existing_ids = {item.id for item in results}
+    for item in legacy_rows:
+        if item.id not in existing_ids:
+            results.append(item)
+    return results
+
+
 def _allocation_source_order_no_map(allocations):
     due_ids = [
         item.source_id
@@ -181,16 +232,6 @@ def _save_production_splits_for_trip(trip, raw_actuals):
         return {'detail': 'actuals は配列で指定してください。'}, status.HTTP_400_BAD_REQUEST
 
     allocations = list(ShippingTripAllocation.objects.filter(trip_id=trip.id).order_by('id'))
-    calendar = Calendar.objects.first()
-    calc = WorkingDayCalculator(calendar)
-    truck_id = _trip_truck_id(trip)
-    offset = 0
-    if truck_id:
-        offset = max(
-            int(KubotaSakaiTruck.objects.filter(id=truck_id).values_list('arrival_day_offset', flat=True).first() or 0),
-            0,
-        )
-    actual_departure_date = calc.subtract_working_days(trip.departure_date, offset) if offset > 0 else trip.departure_date
     allocation_map = {a.id: a for a in allocations}
     split_map = {}
     for item in raw_actuals:
@@ -205,21 +246,95 @@ def _save_production_splits_for_trip(trip, raw_actuals):
     source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     updated_count = 0
     for allocation in allocations:
-        marker = _legacy_trip_actual_marker(trip.id, allocation.id)
-        split_rows = split_map.get(allocation.id) or []
         default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
+        split_rows = split_map.get(allocation.id) or []
+        normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
+        existing_split_rows = _allocation_split_rows(allocation, default_order_no)
+        if existing_split_rows != normalized_split_rows:
+            _save_allocation_split_rows(allocation, normalized_split_rows)
+            updated_count += 1
+        if trip.status in ('PLANNED', 'LOADING'):
+            legacy_actuals = _legacy_actuals_for_allocation(allocation, trip.id)
+            for actual in legacy_actuals:
+                ShipmentActualHistory.objects.create(
+                    shipment_actual=actual,
+                    action='DELETE',
+                    shipment_date=actual.shipment_date,
+                    product_code=actual.product_code,
+                    customer_code=actual.customer_code,
+                    ship_to_code=actual.ship_to_code,
+                    quantity=actual.quantity,
+                    remark=actual.remark,
+                )
+            if legacy_actuals:
+                ShipmentActual.objects.filter(id__in=[item.id for item in legacy_actuals]).delete()
+
+    return {'updated': updated_count}, None
+
+
+def _trip_input_matches_plan(trip, raw_actuals):
+    allocations = list(ShippingTripAllocation.objects.filter(trip_id=trip.id).order_by('id'))
+    normalized = {}
+    if isinstance(raw_actuals, list):
+        for item in raw_actuals:
+            try:
+                allocation_id = int(item.get('allocation_id') or 0)
+            except Exception:
+                allocation_id = 0
+            if allocation_id > 0:
+                normalized[allocation_id] = _to_decimal(item.get('quantity'))
+    for allocation in allocations:
+        if normalized.get(allocation.id, Decimal('0')) != _to_decimal(allocation.qty):
+            return False
+    return True
+
+
+def _register_actuals_for_trips(trips, shipment_date, raw_actuals, close_trip=False):
+    trip = trips[0]
+    if not isinstance(raw_actuals, list):
+        return {'detail': 'actuals は配列で指定してください。'}, status.HTTP_400_BAD_REQUEST
+
+    trip_ids = [item.id for item in trips]
+    allocations = list(
+        ShippingTripAllocation.objects.select_related('trip').filter(trip_id__in=trip_ids).order_by('id')
+    )
+    allocation_map = {a.id: a for a in allocations}
+    source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
+
+    normalized = {}
+    split_map = {}
+    for item in raw_actuals:
+        try:
+            allocation_id = int(item.get('allocation_id') or 0)
+        except Exception:
+            allocation_id = 0
+        qty = _to_decimal(item.get('quantity'))
+        if allocation_id <= 0 or allocation_id not in allocation_map:
+            continue
+        normalized[allocation_id] = qty
+        split_map[allocation_id] = item.get('production_splits') or []
+
+    created_count = 0
+    updated_count = 0
+    deleted_count = 0
+    for allocation in allocations:
+        qty = normalized.get(allocation.id, Decimal('0'))
+        marker = _legacy_trip_actual_marker(allocation.trip_id, allocation.id)
+        existing = _find_actual_for_allocation(allocation, allocation.trip_id)
+        default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
+        split_rows = split_map[allocation.id] if allocation.id in split_map else _allocation_split_rows(allocation, default_order_no)
         normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
         final_remark = _encode_remark(marker, split_rows)
         if len(final_remark) > REMARK_MAX_LEN:
-            return {'detail': f'生産日内訳が長すぎます。品番 {allocation.product_code} の内訳を短くしてください。'}, status.HTTP_400_BAD_REQUEST
+            return {
+                'detail': f'生産日内訳が長すぎます。品番 {allocation.product_code} の内訳を短くしてください。'
+            }, status.HTTP_400_BAD_REQUEST
 
-        existing = _find_actual_for_allocation(allocation, trip.id)
-        if existing:
-            existing_split_rows = _actual_split_rows(existing, default_order_no)
-            if str(existing.remark or '') != final_remark or existing_split_rows != normalized_split_rows:
+        if qty <= 0:
+            if existing:
                 ShipmentActualHistory.objects.create(
                     shipment_actual=existing,
-                    action='UPDATE',
+                    action='DELETE',
                     shipment_date=existing.shipment_date,
                     product_code=existing.product_code,
                     customer_code=existing.customer_code,
@@ -227,37 +342,66 @@ def _save_production_splits_for_trip(trip, raw_actuals):
                     quantity=existing.quantity,
                     remark=existing.remark,
                 )
-                existing.remark = final_remark
-                existing.shipping_trip_allocation = allocation
-                existing.save(update_fields=['remark', 'shipping_trip_allocation'])
-                _save_actual_split_rows(existing, normalized_split_rows)
-                updated_count += 1
+                existing.delete()
+                deleted_count += 1
             continue
 
-        created = ShipmentActual.objects.create(
-            shipment_date=actual_departure_date,
-            shipping_trip_allocation=allocation,
-            product_code=allocation.product_code,
-            customer_code=trip.customer_code,
-            ship_to_code=allocation.ship_to_code or trip.ship_to_code,
-            quantity=_to_decimal(allocation.qty),
-            remark=final_remark,
-        )
-        _save_actual_split_rows(created, normalized_split_rows)
-        updated_count += 1
+        if existing:
+            ShipmentActualHistory.objects.create(
+                shipment_actual=existing,
+                action='UPDATE',
+                shipment_date=existing.shipment_date,
+                product_code=existing.product_code,
+                customer_code=existing.customer_code,
+                ship_to_code=existing.ship_to_code,
+                quantity=existing.quantity,
+                remark=existing.remark,
+            )
+            existing.shipment_date = shipment_date
+            existing.shipping_trip_allocation = allocation
+            existing.product_code = allocation.product_code
+            existing.customer_code = trip.customer_code
+            existing.ship_to_code = allocation.ship_to_code or trip.ship_to_code
+            existing.quantity = qty
+            existing.remark = final_remark
+            existing.save()
+            _save_actual_split_rows(existing, normalized_split_rows)
+            updated_count += 1
+        else:
+            created = ShipmentActual.objects.create(
+                shipment_date=shipment_date,
+                shipping_trip_allocation=allocation,
+                product_code=allocation.product_code,
+                customer_code=allocation.trip.customer_code,
+                ship_to_code=allocation.ship_to_code or allocation.trip.ship_to_code,
+                quantity=qty,
+                remark=final_remark,
+            )
+            _save_actual_split_rows(created, normalized_split_rows)
+            ShipmentActualHistory.objects.create(
+                shipment_actual=created,
+                action='CREATE',
+                shipment_date=created.shipment_date,
+                product_code=created.product_code,
+                customer_code=created.customer_code,
+                ship_to_code=created.ship_to_code,
+                quantity=created.quantity,
+                remark=created.remark,
+            )
+            created_count += 1
 
-    return {'updated': updated_count}, None
+    if close_trip:
+        for item in trips:
+            if item.status != 'CLOSED':
+                item.status = 'CLOSED'
+                item.save(update_fields=['status'])
 
-
-def _trip_actual_matches_plan(trip):
-    allocations = list(ShippingTripAllocation.objects.filter(trip_id=trip.id).order_by('id'))
-    for allocation in allocations:
-        actual = _find_actual_for_allocation(allocation, trip.id)
-        splits = _actual_split_rows(actual)
-        actual_qty = sum((_to_decimal(item.get('quantity')) for item in splits), Decimal('0'))
-        if actual_qty != _to_decimal(allocation.qty):
-            return False
-    return True
+    return {
+        'detail': '出荷実績を登録しました。',
+        'created': created_count,
+        'updated': updated_count,
+        'deleted': deleted_count,
+    }, None
 
 
 def _display_user_name(user):
@@ -304,8 +448,8 @@ def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_
     for item in allocations:
         qty = _to_decimal(item.qty)
         total_qty += qty
-        actual = (actual_by_allocation or {}).get(item.id)
-        if not actual:
+        actual = (actual_by_allocation or {}).get(item.id) if trip.status in ('DEPARTED', 'CLOSED') else None
+        if not actual and trip.status in ('DEPARTED', 'CLOSED'):
             actual = _find_actual_for_allocation(item, trip.id)
         default_order_no = source_order_no_by_allocation.get(item.source_id, '')
         details.append({
@@ -316,7 +460,7 @@ def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_
             'source_order_no': default_order_no,
             'due_date': item.due_date.isoformat() if item.due_date else None,
             'qty': _format_qty(qty),
-            'production_splits': _actual_split_rows(actual, default_order_no),
+            'production_splits': _actual_split_rows(actual, default_order_no) if actual else _allocation_split_rows(item, default_order_no),
         })
 
     details.sort(key=lambda x: (x['product_code'], x['ship_to_code'], x['due_date'] or ''))
@@ -549,7 +693,7 @@ class ShippingTripExecutionView(APIView):
                 result, error_status = _save_production_splits_for_trip(item, request.data.get('actuals') or [])
                 if error_status:
                     return Response(result, status=error_status)
-            if any(not _trip_actual_matches_plan(item) for item in trips):
+            if any(not _trip_input_matches_plan(item, request.data.get('actuals') or []) for item in trips):
                 return Response(
                     {'detail': '実績合計が計画数と一致しないため、積込完了できません。'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -562,6 +706,14 @@ class ShippingTripExecutionView(APIView):
         elif action == 'mark_departed':
             if any(item.status == 'CLOSED' for item in trips):
                 return Response({'detail': '完了便は出発更新できません。'}, status=status.HTTP_400_BAD_REQUEST)
+            result, error_status = _register_actuals_for_trips(
+                trips,
+                trip.departure_date,
+                request.data.get('actuals') or [],
+                close_trip=False,
+            )
+            if error_status:
+                return Response(result, status=error_status)
             departure_now = datetime.now()
             for item in trips:
                 item.status = 'DEPARTED'
@@ -626,123 +778,16 @@ class ShippingTripExecutionView(APIView):
                     {'detail': '出発済の便のみ実績登録できます。'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            truck_offset_map = _collect_truck_offset_map()
-            shipment_date = _parse_date(request.data.get('shipment_date')) or _trip_actual_departure_date(
-                trip,
-                WorkingDayCalculator(Calendar.objects.first()),
-                truck_offset_map,
+            shipment_date = _parse_date(request.data.get('shipment_date')) or trip.departure_date
+            result, error_status = _register_actuals_for_trips(
+                trips,
+                shipment_date,
+                request.data.get('actuals') or [],
+                close_trip=True,
             )
-            raw_actuals = request.data.get('actuals') or []
-            if not isinstance(raw_actuals, list):
-                return Response({'detail': 'actuals は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
-
-            allocations = list(
-                ShippingTripAllocation.objects.select_related('trip').filter(trip_id__in=trip_ids).order_by('id')
-            )
-            allocation_map = {a.id: a for a in allocations}
-            source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
-
-            normalized = {}
-            split_map = {}
-            for item in raw_actuals:
-                try:
-                    allocation_id = int(item.get('allocation_id') or 0)
-                except Exception:
-                    allocation_id = 0
-                qty = _to_decimal(item.get('quantity'))
-                if allocation_id <= 0 or allocation_id not in allocation_map:
-                    continue
-                normalized[allocation_id] = qty
-                split_map[allocation_id] = item.get('production_splits') or []
-
-            created_count = 0
-            updated_count = 0
-            deleted_count = 0
-            for allocation in allocations:
-                qty = normalized.get(allocation.id, Decimal('0'))
-                marker = _legacy_trip_actual_marker(allocation.trip_id, allocation.id)
-                existing = _find_actual_for_allocation(allocation, allocation.trip_id)
-                split_rows = split_map.get(allocation.id) or []
-                default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
-                normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
-                final_remark = _encode_remark(marker, split_rows)
-                if len(final_remark) > REMARK_MAX_LEN:
-                    return Response(
-                        {'detail': f'生産日内訳が長すぎます。品番 {allocation.product_code} の内訳を短くしてください。'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                if qty <= 0:
-                    if existing:
-                        ShipmentActualHistory.objects.create(
-                            shipment_actual=existing,
-                            action='DELETE',
-                            shipment_date=existing.shipment_date,
-                            product_code=existing.product_code,
-                            customer_code=existing.customer_code,
-                            ship_to_code=existing.ship_to_code,
-                            quantity=existing.quantity,
-                            remark=existing.remark,
-                        )
-                        existing.delete()
-                        deleted_count += 1
-                    continue
-
-                if existing:
-                    ShipmentActualHistory.objects.create(
-                        shipment_actual=existing,
-                        action='UPDATE',
-                        shipment_date=existing.shipment_date,
-                        product_code=existing.product_code,
-                        customer_code=existing.customer_code,
-                        ship_to_code=existing.ship_to_code,
-                        quantity=existing.quantity,
-                        remark=existing.remark,
-                    )
-                    existing.shipment_date = shipment_date
-                    existing.shipping_trip_allocation = allocation
-                    existing.product_code = allocation.product_code
-                    existing.customer_code = trip.customer_code
-                    existing.ship_to_code = allocation.ship_to_code or trip.ship_to_code
-                    existing.quantity = qty
-                    existing.remark = final_remark
-                    existing.save()
-                    _save_actual_split_rows(existing, normalized_split_rows)
-                    updated_count += 1
-                else:
-                    created = ShipmentActual.objects.create(
-                        shipment_date=shipment_date,
-                        shipping_trip_allocation=allocation,
-                        product_code=allocation.product_code,
-                        customer_code=allocation.trip.customer_code,
-                        ship_to_code=allocation.ship_to_code or allocation.trip.ship_to_code,
-                        quantity=qty,
-                        remark=final_remark,
-                    )
-                    _save_actual_split_rows(created, normalized_split_rows)
-                    ShipmentActualHistory.objects.create(
-                        shipment_actual=created,
-                        action='CREATE',
-                        shipment_date=created.shipment_date,
-                        product_code=created.product_code,
-                        customer_code=created.customer_code,
-                        ship_to_code=created.ship_to_code,
-                        quantity=created.quantity,
-                        remark=created.remark,
-                    )
-                    created_count += 1
-
-            # 実績登録完了と同時に便を完了状態へ進める。
-            for item in trips:
-                if item.status != 'CLOSED':
-                    item.status = 'CLOSED'
-                    item.save(update_fields=['status'])
-
-            return Response({
-                'detail': '出荷実績を登録しました。',
-                'created': created_count,
-                'updated': updated_count,
-                'deleted': deleted_count,
-            })
+            if error_status:
+                return Response(result, status=error_status)
+            return Response(result)
 
         allocations = list(
             ShippingTripAllocation.objects
