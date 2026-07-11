@@ -466,6 +466,17 @@ const fetchCalendarDaysByRange = async (startDate, endDate) => {
   return res.data.results || res.data || []
 }
 
+const fetchDaisoCalendarDaysByRange = async (startDate, endDate) => {
+  await ensureDaisoCalendarId()
+  if (!daisoCalendarId.value) return []
+  const res = await api.calendars.getCalendarDays(daisoCalendarId.value, {
+    page_size: 500,
+    target_date__gte: startDate,
+    target_date__lte: endDate,
+  })
+  return res.data.results || res.data || []
+}
+
 const ensureDaisoCalendarId = async () => {
   if (daisoCalendarId.value) return daisoCalendarId.value
   const res = await api.calendars.getCalendars({ search: 'daiso', page_size: 200 })
@@ -477,17 +488,13 @@ const ensureDaisoCalendarId = async () => {
 
 const loadDaisoCalendarDays = async () => {
   const { start, end } = monthRange.value
-  await ensureDaisoCalendarId()
-  if (!daisoCalendarId.value) {
-    daisoCalendarDays.value = []
-    return
+  daisoCalendarDays.value = await fetchDaisoCalendarDaysByRange(ymd(start), ymd(end))
+}
+
+const runSequentially = async (tasks) => {
+  for (const task of tasks) {
+    await task()
   }
-  const res = await api.calendars.getCalendarDays(daisoCalendarId.value, {
-    page_size: 500,
-    target_date__gte: ymd(start),
-    target_date__lte: ymd(end),
-  })
-  daisoCalendarDays.value = res.data.results || res.data || []
 }
 
 const moveMonth = async (delta) => {
@@ -602,52 +609,44 @@ const applyRange = async () => {
     const existingMap = new Map()
     existingRows.forEach((r) => existingMap.set(r.target_date, r))
 
-    let workingRows = existingRows.filter((row) => !!row.is_working_day)
-
-    if (!workingRows.length) {
-      // DBにレコードがない場合、表示と同じフォールバックで出勤日を判定して作成
-      await loadDaisoCalendarDays()
-      const createOps = []
-      const start = new Date(range.value.start + 'T00:00:00')
-      const end = new Date(range.value.end + 'T00:00:00')
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = ymd(d)
-        if (existingMap.has(dateStr)) continue
-        const daiso = daisoDayMap.value.get(dateStr)
-        const isWorking = daiso ? !!daiso.is_working_day : d.getDay() !== 0 && d.getDay() !== 6
-        if (!isWorking) continue
-        createOps.push(api.calendars.createCalendarDay({
+    const ops = []
+    let appliedCount = 0
+    const missingDates = []
+    const start = new Date(range.value.start + 'T00:00:00')
+    const end = new Date(range.value.end + 'T00:00:00')
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = ymd(d)
+      const existing = existingMap.get(dateStr)
+      if (existing) {
+        if (!existing.is_working_day) continue
+        appliedCount += 1
+        ops.push(() => api.calendars.updateCalendarDay(existing.id, {
           calendar: selectedCalendar.value,
-          target_date: dateStr,
+          target_date: existing.target_date,
           is_working_day: true,
           work_minutes: range.value.workMinutes,
           work_pattern: range.value.workPattern || null,
         }))
+        continue
       }
-      if (!createOps.length) {
-        alert('対象期間に出勤日がありません。先に出勤日を設定してください。')
-        return
-      }
-      await Promise.all(createOps)
-      await loadCalendarDays()
-      alert(`出勤日 ${createOps.length} 件を作成し勤務パターンを適用しました。`)
+      missingDates.push(dateStr)
+    }
+
+    if (missingDates.length) {
+      const preview = missingDates.slice(0, 5).join(', ')
+      const suffix = missingDates.length > 5 ? ` ほか${missingDates.length - 5}日` : ''
+      alert(`対象期間に未登録日があります。先にカレンダ日を作成してください。\n${preview}${suffix}`)
       return
     }
 
-    const ops = []
-    for (const row of workingRows) {
-      ops.push(api.calendars.updateCalendarDay(row.id, {
-        calendar: selectedCalendar.value,
-        target_date: row.target_date,
-        is_working_day: true,
-        work_minutes: range.value.workMinutes,
-        work_pattern: range.value.workPattern || null,
-      }))
+    if (!ops.length) {
+      alert('対象期間に出勤日がありません。先に出勤日を設定してください。')
+      return
     }
 
-    await Promise.all(ops)
+    await runSequentially(ops)
     await loadCalendarDays()
-    alert(`出勤日 ${workingRows.length} 件に勤務パターンを適用しました。`)
+    alert(`出勤日 ${appliedCount} 件に勤務パターンを適用しました。`)
   } catch (e) {
     console.error('勤務時間登録エラー', e)
     alert('登録に失敗しました。')
@@ -1051,4 +1050,3 @@ td.out {
   color: #94a3b8;
 }
 </style>
-
