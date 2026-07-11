@@ -47,14 +47,17 @@
 
         <div class="detail-list">
           <div class="detail-head">
-            <span>{{ t('shippingTripExecution.product') }}</span>
-            <span>{{ t('shippingTripExecution.plan') }}</span>
-            <span>{{ isActualInputMode ? t('shippingTripExecution.actual') : t('shippingTripExecution.actualInput') }}</span>
+            <span class="detail-head-main">{{ t('shippingTripExecution.product') }}</span>
+            <span class="detail-head-plan">{{ t('shippingTripExecution.plan') }}</span>
+            <span class="detail-head-actual">{{ isActualInputMode ? t('shippingTripExecution.actual') : t('shippingTripExecution.actualInput') }}</span>
           </div>
           <div v-for="(row, rowIdx) in trip.details" :key="row.allocation_id" class="detail-row" :class="{ 'detail-row-alt': rowIdx % 2 === 1 }">
             <div class="detail-main">
-              <span class="product-code">{{ row.product_code }}</span>
-              <span class="product-name">{{ row.product_name }}</span>
+              <div class="detail-main-left">
+                <span class="product-code">{{ row.product_code }}</span>
+                <span class="product-name">{{ row.product_name }}</span>
+                <span class="detail-shipto">{{ row.ship_to_code || '-' }}</span>
+              </div>
             </div>
             <div class="detail-qty">{{ row.qty }}</div>
             <div class="actual-input-wrap">
@@ -64,8 +67,8 @@
                 type="number"
                 step="1"
                 min="0"
-                :disabled="!canRegisterActual(trip)"
-                @input="setActualQty(trip.id, row.allocation_id, $event.target.value)"
+                :disabled="true"
+                readonly
               />
               <div v-else class="actual-readonly">
                 {{ actualQtyValue(trip.id, row.allocation_id, row.qty) }}
@@ -89,7 +92,7 @@
                   step="1"
                   :value="split.quantity"
                   :disabled="!canEditProductionDate(trip)"
-                  @input="setSplitQty(trip.id, row.allocation_id, splitIdx, $event.target.value)"
+                  @input="setSplitQty(trip.id, row.allocation_id, splitIdx, $event.target.value, row)"
                 />
                 <button
                   type="button"
@@ -105,7 +108,7 @@
                   type="button"
                   class="btn split-add"
                   :disabled="!canEditProductionDate(trip)"
-                  @click="addSplitRow(trip.id, row.allocation_id)"
+                  @click="addSplitRow(trip.id, row.allocation_id, row)"
                 >
                   {{ t('shippingTripExecution.addProductionDate') }}
                 </button>
@@ -127,7 +130,7 @@
           <label class="field inline-field">
             <span>{{ t('shippingTripExecution.actualDate') }}</span>
             <input
-              :value="actualDateValue(trip.id, trip.departure_date)"
+              :value="actualDateValue(trip.id, trip.actual_departure_date || trip.departure_date)"
               type="date"
               :disabled="!canRegisterActual(trip)"
               @input="setActualDate(trip.id, $event.target.value)"
@@ -262,7 +265,6 @@ const businessTypeLabel = (value) => {
   return map[value] || value
 }
 
-const canMarkLoading = (trip) => canStatusEdit.value && trip?.status === 'PLANNED'
 const canMarkDeparted = (trip) => canStatusEdit.value && ['PLANNED', 'LOADING'].includes(trip?.status)
 const canReopen = (trip) => canStatusEdit.value && ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
 const canRegisterActual = (trip) => {
@@ -277,16 +279,31 @@ const parseQty = (value) => {
   return Math.floor(num)
 }
 
+const sumSplitQuantities = (rows, fallbackQty = 0) => {
+  if (!Array.isArray(rows) || !rows.length) return parseQty(fallbackQty)
+  return rows.reduce((sum, item) => sum + parseQty(item?.quantity), 0)
+}
+
+const actualMatchesPlan = (trip) =>
+  (trip?.details || []).every((row) => parseQty(actualQtyValue(trip.id, row.allocation_id, row.qty)) === parseQty(row.qty))
+
+const canMarkLoading = (trip) => canStatusEdit.value && trip?.status === 'PLANNED'
+
+const syncActualQtyWithSplits = (tripId, allocationId, rows, fallbackQty = 0) => {
+  const nextTrip = { ...(actualQtyMap.value[tripId] || {}) }
+  nextTrip[allocationId] = String(sumSplitQuantities(rows, fallbackQty))
+  actualQtyMap.value = { ...actualQtyMap.value, [tripId]: nextTrip }
+}
+
 const initActualInputState = (tripList) => {
   const nextQtyMap = {}
   const nextDateMap = {}
   const nextSplitMap = {}
   ;(tripList || []).forEach((trip) => {
-    nextDateMap[trip.id] = actualDateMap.value[trip.id] || trip.departure_date
+    nextDateMap[trip.id] = actualDateMap.value[trip.id] || trip.actual_departure_date || trip.departure_date
     const byAlloc = {}
     const byAllocSplit = {}
     ;(trip.details || []).forEach((row) => {
-      byAlloc[row.allocation_id] = actualQtyMap.value[trip.id]?.[row.allocation_id] ?? String(parseQty(row.qty))
       const existing = productionSplitMap.value[trip.id]?.[row.allocation_id]
       if (Array.isArray(existing) && existing.length) {
         byAllocSplit[row.allocation_id] = existing
@@ -298,6 +315,7 @@ const initActualInputState = (tripList) => {
       } else {
         byAllocSplit[row.allocation_id] = [{ production_date: prevBusinessDay.value, quantity: String(parseQty(row.qty)) }]
       }
+      byAlloc[row.allocation_id] = String(sumSplitQuantities(byAllocSplit[row.allocation_id], row.qty))
     })
     nextQtyMap[trip.id] = byAlloc
     nextSplitMap[trip.id] = byAllocSplit
@@ -309,12 +327,6 @@ const initActualInputState = (tripList) => {
 
 const actualQtyValue = (tripId, allocationId, fallbackQty) =>
   actualQtyMap.value[tripId]?.[allocationId] ?? String(parseQty(fallbackQty))
-
-const setActualQty = (tripId, allocationId, value) => {
-  const nextTrip = { ...(actualQtyMap.value[tripId] || {}) }
-  nextTrip[allocationId] = String(value ?? '')
-  actualQtyMap.value = { ...actualQtyMap.value, [tripId]: nextTrip }
-}
 
 const actualDateValue = (tripId, fallbackDate) =>
   actualDateMap.value[tripId] || fallbackDate
@@ -339,7 +351,7 @@ const setSplitDate = (tripId, allocationId, splitIdx, value) => {
   }
 }
 
-const setSplitQty = (tripId, allocationId, splitIdx, value) => {
+const setSplitQty = (tripId, allocationId, splitIdx, value, row) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
   if (!next[splitIdx]) return
   next[splitIdx] = { ...next[splitIdx], quantity: String(value ?? '') }
@@ -347,15 +359,17 @@ const setSplitQty = (tripId, allocationId, splitIdx, value) => {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
+  syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
 }
 
-const addSplitRow = (tripId, allocationId) => {
+const addSplitRow = (tripId, allocationId, row) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
   next.push({ production_date: prevBusinessDay.value, quantity: '' })
   productionSplitMap.value = {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
+  syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
 }
 
 const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
@@ -368,6 +382,7 @@ const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
+  syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
 }
 
 const loadTrips = async () => {
@@ -384,7 +399,7 @@ const loadTrips = async () => {
     trips.value = Array.isArray(data.trips) ? data.trips : []
     initActualInputState(trips.value)
   } catch (error) {
-    const msg = error?.response?.data?.detail || '便データの取得に失敗しました。'
+    const msg = error?.response?.data?.detail || t('shippingTripExecution.error.loadTrips')
     alert(msg)
   } finally {
     loading.value = false
@@ -409,21 +424,22 @@ const buildActualPayload = (trip) =>
 
 const saveProductionDates = async (trip) => {
   if (!canEditProductionDate(trip)) {
-    alert('生産日内訳の編集権限がありません。')
+    alert(t('shippingTripExecution.error.editProductionDatesDenied'))
     return
   }
   updatingTripId.value = trip.id
   try {
     const res = await api.shippingTrips.updateExecutionStatus({
       trip_id: trip.id,
+      trip_ids: trip.trip_ids || [trip.id],
       action: 'save_production_dates',
       actuals: buildActualPayload(trip),
     })
     const d = res.data || {}
-    alert(`生産日保存: ${d.updated || 0}件`)
+    alert(t('shippingTripExecution.success.saveProductionDates', { updated: d.updated || 0 }))
     await loadTrips()
   } catch (error) {
-    const msg = error?.response?.data?.detail || '生産日内訳の保存に失敗しました。'
+    const msg = error?.response?.data?.detail || t('shippingTripExecution.error.saveProductionDates')
     alert(msg)
   } finally {
     updatingTripId.value = null
@@ -432,12 +448,12 @@ const saveProductionDates = async (trip) => {
 
 const registerActual = async (trip) => {
   if (!canRegisterActual(trip)) {
-    alert('実績登録の編集権限がありません。')
+    alert(t('shippingTripExecution.error.registerActualDenied'))
     return
   }
-  const shipmentDate = actualDateValue(trip.id, trip.departure_date)
+  const shipmentDate = actualDateValue(trip.id, trip.actual_departure_date || trip.departure_date)
   if (!shipmentDate) {
-    alert('実績日を入力してください。')
+    alert(t('shippingTripExecution.error.actualDateRequired'))
     return
   }
   const actuals = buildActualPayload(trip)
@@ -445,15 +461,20 @@ const registerActual = async (trip) => {
   try {
     const res = await api.shippingTrips.updateExecutionStatus({
       trip_id: trip.id,
+      trip_ids: trip.trip_ids || [trip.id],
       action: 'register_actual',
       shipment_date: shipmentDate,
       actuals,
     })
     const d = res.data || {}
-    alert(`実績登録: 新規${d.created || 0}件 / 更新${d.updated || 0}件 / 削除${d.deleted || 0}件`)
+    alert(t('shippingTripExecution.success.registerActual', {
+      created: d.created || 0,
+      updated: d.updated || 0,
+      deleted: d.deleted || 0,
+    }))
     await loadTrips()
   } catch (error) {
-    const msg = error?.response?.data?.detail || '実績登録に失敗しました。'
+    const msg = error?.response?.data?.detail || t('shippingTripExecution.error.registerActual')
     alert(msg)
   } finally {
     updatingTripId.value = null
@@ -462,14 +483,20 @@ const registerActual = async (trip) => {
 
 const updateTripStatus = async (trip, action) => {
   if (!canStatusEdit.value) {
-    alert('ステータス更新の編集権限がありません。')
+    alert(t('shippingTripExecution.error.updateStatusDenied'))
+    return
+  }
+  if (action === 'mark_loading' && !actualMatchesPlan(trip)) {
+    alert(t('shippingTripExecution.error.planActualMismatch'))
     return
   }
   updatingTripId.value = trip.id
   try {
     const res = await api.shippingTrips.updateExecutionStatus({
       trip_id: trip.id,
+      trip_ids: trip.trip_ids || [trip.id],
       action,
+      actuals: action === 'mark_loading' ? buildActualPayload(trip) : undefined,
     })
     const updated = res.data?.trip
     if (updated) {
@@ -478,7 +505,7 @@ const updateTripStatus = async (trip, action) => {
     }
     await loadTrips()
   } catch (error) {
-    const msg = error?.response?.data?.detail || 'ステータス更新に失敗しました。'
+    const msg = error?.response?.data?.detail || t('shippingTripExecution.error.updateStatus')
     alert(msg)
   } finally {
     updatingTripId.value = null
@@ -615,6 +642,21 @@ onMounted(loadTrips)
   font-weight: 700;
   padding: 2px 6px;
 }
+.detail-head-main {
+  text-align: left;
+}
+.detail-head-plan,
+.detail-head-actual {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: right;
+}
+.detail-head-plan {
+  padding-right: 6px;
+}
+.detail-head-actual {
+  padding-right: 7px;
+}
 .detail-row {
   border-top: 2px solid #cbd5e1;
   background: #bfdbfe;
@@ -653,9 +695,14 @@ onMounted(loadTrips)
 }
 .detail-main {
   min-width: 0;
+}
+.detail-main-left {
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: baseline;
 }
 .product-code {
   font-size: 21px;
@@ -665,6 +712,12 @@ onMounted(loadTrips)
   margin-left: 6px;
   font-size: 18px;
   color: #475569;
+}
+.detail-shipto {
+  margin-left: 10px;
+  flex-shrink: 0;
+  font-size: 17px;
+  color: #1e3a8a;
 }
 .detail-qty {
   text-align: right;
@@ -824,4 +877,3 @@ onMounted(loadTrips)
   }
 }
 </style>
-
