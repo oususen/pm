@@ -44,6 +44,7 @@
         />
         <button type="button" class="favorite-star-btn" title="お気に入り登録" @click="saveFavorite" :disabled="loading">★</button>
         <button @click="load" :disabled="loading">更新</button>
+        <button @click="recalculate" :disabled="loading || recalculating" class="recalc-btn">{{ recalculating ? '再計算中...' : '進度再計算' }}</button>
       </div>
     </div>
 
@@ -53,6 +54,7 @@
         <div v-else-if="error" class="no-data">エラー: {{ error }}</div>
         <div v-else-if="!searched"></div>
         <div v-else>
+          <div v-if="progressWarning" class="progress-warning">{{ progressWarning }}</div>
           <div v-if="groups.length" class="group-list">
             <div v-for="g in pagedGroups" :key="g.key" class="group-card">
               <div class="info-block">
@@ -230,9 +232,9 @@ import {
 import { addDays, formatISODate, parseISODate } from "@/utils/dateUtil";
 
 const dsSources = [
+  { op: '読み取り', table: 't_shipping_progress', desc: '出荷進度（再計算済み）' },
   { op: '読み取り', table: 'order / order_line', desc: '受注データ' },
   { op: '読み取り', table: 't_shipment_actual', desc: '出荷実績' },
-  { op: '読み取り', table: 'line_backlog', desc: '生産計画・実績' },
   { op: '読み取り', table: 't_ship_to_lead_time', desc: '納入先リードタイム' },
   { op: '読み取り', table: 'm_product', desc: '製品マスタ' },
 ]
@@ -250,10 +252,13 @@ const searched = ref(false);
 const orderLines = ref([]);
 const shipmentActuals = ref([]);
 const shipToLeadTimeMap = ref(new Map());
+const savedProgressMap = ref(new Map());
+const progressWarning = ref("");
 const holidays = ref(new Set());
 const daisoCalendarId = ref(null);
 const currentPage = ref(1);
 const pageSize = ref(20);
+const recalculating = ref(false);
 const splitByShipTo = ref(true);
 const router = useRouter();
 const routingExpandStates = ref({});
@@ -614,17 +619,16 @@ const groups = computed(() => {
       totalAdjust += cell.adjust;
     }
 
-    // サマリーの累積進度計算
-    // 累積進度 = 0 - 合計需要 + 合計実績 + 合計調整
-    const totalDemand = totalFirm > 0 ? totalFirm : totalForecast;
-    const cumulativeProgress = 0 - totalDemand + totalActual + totalAdjust;
+    // サマリーの累積進度: 最終日の進度をgetProgressRateから取得
+    const lastDate = columns.value[columns.value.length - 1];
+    const lastProgressStr = lastDate ? getProgressRate(g, lastDate) : "0";
 
     g.summary = {
       forecast: totalForecast,
       firm: totalFirm,
       actual: totalActual,
       adjust: totalAdjust,
-      progressRate: cumulativeProgress.toLocaleString(),
+      progressRate: lastProgressStr,
     };
     const shipToList = Array.from(g.ship_to_codes || new Set()).filter((v) => v);
     if (splitByShipTo.value) {
@@ -706,33 +710,12 @@ const toggleShipToMode = () => {
 };
 
 const getProgressRate = (group, date) => {
-  // 累積進度を計算
-  // 累積進度(本日) = 累積進度(前日) - 確定(ないときは内示) + 実績 + 調整
-
-  let cumulativeProgress = 0;
-
-  // 日付順にソートして累積計算
-  const sortedDates = columns.value;
-  const currentIndex = sortedDates.indexOf(date);
-
-  if (currentIndex === -1) return "-";
-
-  // 初日から本日まで累積計算
-  for (let i = 0; i <= currentIndex; i++) {
-    const d = sortedDates[i];
-    const firm = getValue(group, d, "firm");
-    const forecast = getValue(group, d, "forecast");
-    const actual = getValue(group, d, "actual");
-    const adjust = getValue(group, d, "adjust");
-
-    // 需要（確定優先、なければ内示）
-    const demand = firm > 0 ? firm : forecast;
-
-    // 累積進度 = 前日累積進度 - 需要 + 実績 + 調整
-    cumulativeProgress = cumulativeProgress - demand + actual + adjust;
+  const savedKey = `${group.product_code}__${group.customer_code || ''}__${splitByShipTo.value ? (group.ship_to_code || '') : ''}__${date}`;
+  const savedVal = savedProgressMap.value.get(savedKey);
+  if (savedVal !== undefined) {
+    return savedVal.toLocaleString();
   }
-
-  return cumulativeProgress.toLocaleString();
+  return "-";
 };
 
 const openOrderExpansionPage = (group) => {
@@ -991,6 +974,7 @@ const toggleRoutingExpand = async (group) => {
 const load = async () => {
   loading.value = true;
   error.value = "";
+  progressWarning.value = "";
   searched.value = true;
   routingExpandStates.value = {};
   try {
@@ -1018,9 +1002,31 @@ const load = async () => {
       page_size: 10000,
     });
     shipmentActuals.value = normalizeList(shipmentActualsRes.data || []);
-    // 開始日は初期値（今日の日付）のまま
-    // 理由：過去のデータがある場合でも、現在から未来を表示したい
-    // ユーザーは手動で開始日を変更して過去のデータも確認できる
+
+    // 保存済み進度を取得
+    try {
+      const progressRes = await api.shippingProgress.get({
+        start_date: startDate.value,
+        end_date: endDate.value,
+        product_code: productFilter.value,
+        customer_code: customerFilter.value,
+        ship_to_code: shipToFilter.value,
+      });
+      const progressRows = (progressRes.data?.results) || [];
+      const pMap = new Map();
+      for (const row of progressRows) {
+        const key = `${row.product_code}__${row.customer_code || ''}__${(row.ship_to_code || '').trim()}__${row.plan_date}`;
+        pMap.set(key, row.progress_qty);
+      }
+      savedProgressMap.value = pMap;
+      if (!pMap.size) {
+        progressWarning.value = "進度データが未再計算です。『進度再計算』を実行してください。";
+      }
+    } catch (e) {
+      console.error("保存済み進度の取得に失敗:", e);
+      savedProgressMap.value = new Map();
+      progressWarning.value = "進度データの取得に失敗しました。『進度再計算』後に再読込してください。";
+    }
 
     console.log("[ShippingProgress] データロード完了");
     console.log("[ShippingProgress] 受注明細件数:", orderLines.value.length);
@@ -1034,6 +1040,22 @@ const load = async () => {
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
     loading.value = false;
+  }
+};
+
+const recalculate = async () => {
+  recalculating.value = true;
+  try {
+    await api.shippingProgress.recalculate({
+      start_date: startDate.value,
+      end_date: endDate.value,
+    });
+    await load();
+  } catch (e) {
+    const msg = e?.response?.data?.detail || e?.message || '再計算に失敗しました';
+    window.alert(`進度再計算エラー: ${msg}`);
+  } finally {
+    recalculating.value = false;
   }
 };
 
@@ -1183,6 +1205,15 @@ loadFavorites();
   background: #9ca3af;
   cursor: not-allowed;
 }
+.recalc-btn {
+  background: #f59e0b !important;
+  border-color: #d97706 !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+.recalc-btn:hover:not(:disabled) {
+  background: #d97706 !important;
+}
 .favorite-star-btn {
   background: #facc15 !important;
   border-color: #eab308 !important;
@@ -1267,6 +1298,16 @@ loadFavorites();
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.progress-warning {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
 }
 .group-card {
   display: grid;
@@ -1436,4 +1477,3 @@ loadFavorites();
   font-size: 14px;
 }
 </style>
-

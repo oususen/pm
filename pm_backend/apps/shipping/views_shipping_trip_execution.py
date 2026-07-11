@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from rest_framework import status
@@ -10,6 +10,7 @@ from masters.models import Calendar, KubotaSakaiTruck, Product
 from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation
 from orders.utils.calendar_utils import WorkingDayCalculator
 from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit
+from shipping.services.shipping_progress import get_progress_horizon_days
 
 SPLIT_TOKEN = '|PD='
 REMARK_MAX_LEN = 200
@@ -724,6 +725,14 @@ class ShippingTripExecutionView(APIView):
                     if not item.loading_by:
                         item.loading_by = request.user
                 item.save()
+            # 出荷進度を再計算
+            try:
+                from shipping.services.shipping_progress import recalculate_shipping_progress
+                calc_start = trip.departure_date - timedelta(days=1)
+                calc_end = trip.departure_date + timedelta(days=get_progress_horizon_days())
+                recalculate_shipping_progress(calc_start, calc_end)
+            except Exception:
+                pass
         elif action == 'reopen':
             existing_actuals = []
             allocation_ids = list(
@@ -761,6 +770,14 @@ class ShippingTripExecutionView(APIView):
                 item.loading_by = None
                 item.departed_by = None
                 item.save()
+            # 出荷進度を再計算（実績削除後）
+            try:
+                from shipping.services.shipping_progress import recalculate_shipping_progress
+                calc_start = trip.departure_date - timedelta(days=1)
+                calc_end = trip.departure_date + timedelta(days=get_progress_horizon_days())
+                recalculate_shipping_progress(calc_start, calc_end)
+            except Exception:
+                pass
         elif action == 'save_production_dates':
             total_updated = 0
             for item in trips:
@@ -787,6 +804,14 @@ class ShippingTripExecutionView(APIView):
             )
             if error_status:
                 return Response(result, status=error_status)
+            # 出荷進度を再計算
+            try:
+                from shipping.services.shipping_progress import recalculate_shipping_progress
+                calc_start = shipment_date - timedelta(days=1)
+                calc_end = shipment_date + timedelta(days=get_progress_horizon_days())
+                recalculate_shipping_progress(calc_start, calc_end)
+            except Exception:
+                pass
             return Response(result)
 
         allocations = list(

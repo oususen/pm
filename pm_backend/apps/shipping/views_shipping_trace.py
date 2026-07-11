@@ -21,6 +21,7 @@ class ShippingActualTraceView(APIView):
         ship_to_code = str(params.get('ship_to_code') or '').strip()
         source_order_no = str(params.get('source_order_no') or '').strip()
         trip_keyword = str(params.get('trip_keyword') or '').strip()
+        original_due_date = params.get('original_due_date')
         departure_date_gte = params.get('departure_date__gte')
         departure_date_lte = params.get('departure_date__lte')
         shipment_date_gte = params.get('shipment_date__gte')
@@ -65,6 +66,19 @@ class ShippingActualTraceView(APIView):
             allocation_rows = [
                 row for row in allocation_rows
                 if source_order_no.lower() in str((due_map.get(row.source_id) or {}).get('source_order_no') or '').lower()
+            ]
+        if original_due_date:
+            allocation_rows = [
+                row for row in allocation_rows
+                if (
+                    ((due_map.get(row.source_id) or {}).get('order_line__due_date') or
+                     (due_map.get(row.source_id) or {}).get('due_date') or
+                     row.due_date)
+                    and
+                    (((due_map.get(row.source_id) or {}).get('order_line__due_date') or
+                      (due_map.get(row.source_id) or {}).get('due_date') or
+                      row.due_date).isoformat() == str(original_due_date))
+                )
             ]
 
         allocation_ids = [row.id for row in allocation_rows]

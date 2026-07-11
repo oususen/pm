@@ -21,13 +21,19 @@ const shipping = [
     path: "/shipping/actual-trace",
     name: "ShippingActualTrace",
     component: () => import("@/views/shipping/ShippingActualTrace.vue"),
-    meta: { pageTitle: "出荷実績追跡", manualPath: "出荷/出荷実績追跡.md", resource: "shipping.actual" },
+    meta: { pageTitle: "出荷情報追跡", manualPath: "出荷/出荷実績追跡.md", resource: "shipping.actual" },
   },
   {
     path: "/shipping/progress",
     name: "ShippingProgress",
     component: () => import("@/views/shipping/ShippingProgress.vue"),
     meta: { pageTitle: "出荷進度照会", manualPath: "出荷/出荷進度照会.md", resource: "shipping.progress" },
+  },
+  {
+    path: "/shipping/progress-edit",
+    name: "ShippingProgressEdit",
+    component: () => import("@/views/shipping/ShippingProgressEdit.vue"),
+    meta: { pageTitle: "出荷進度管理", resource: "shipping.progress_edit" },
   },
   {
     path: "/shipping/order-expansion",
@@ -89,7 +95,7 @@ const shipping = [
     path: "/shipping/ship-to-lead-time",
     name: "ShipToLeadTimeSetting",
     component: () => import("@/views/shipping/ShipToLeadTimeSetting.vue"),
-    meta: { pageTitle: "納入地別出荷加算日数", resource: "shipping.ship_to_lead_time" },
+    meta: { pageTitle: "納入地別出荷加算日数", manualPath: "出荷/納入地別出荷加算日数.md", resource: "shipping.ship_to_lead_time" },
   },
 ];
 

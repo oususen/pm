@@ -39,7 +39,7 @@ import { hasPermission } from "@/router";
 const SECTION_ORDER = ["user", "lock", "task", "kubota", "system"];
 const SECTION_LABELS = {
   user: "ユーザー・権限",
-  lock: "計画ロック",
+  lock: "日数設定",
   task: "タスク・自動化",
   kubota: "クボタ堺",
   system: "システム",
@@ -86,6 +86,7 @@ const tiles = computed(() => {
     { to: "/settings/purchase-plan-lock", label: "仕入計画ロック設定", icon: "🔒", category: "lock", resource: "settings.purchase_plan_lock" },
     { to: "/settings/production-plan-lock", label: "生産計画ロック設定", icon: "🔒", category: "lock", resource: "settings.production_plan_lock" },
     { to: "/settings/kubota-sakai-due-plan-lock", label: "クボタ堺納期調整ロック設定", icon: "🔒", category: "lock", resource: "settings.production_plan_lock" },
+    { to: "/settings/shipping-progress-horizon", label: "出荷進度再計算日数", icon: "📊", category: "lock", resource: "settings.shipping_progress_horizon" },
     { to: "/settings/task-settings", label: "タスク設定", icon: "⏰", category: "task", resource: "settings.scheduled_tasks" },
     { to: "/settings/stocktake-init", label: "棚卸初期化", icon: "📦", category: "task", resource: "settings.stocktake_init" },
     { to: "/settings/kubota-import", label: "クボタ堺取り込み通知", icon: "🔔", category: "kubota", resource: "settings" },

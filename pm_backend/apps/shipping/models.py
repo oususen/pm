@@ -221,6 +221,39 @@ class KubotaSakaiDeliveryProgress(models.Model):
         return f"{self.product_code} {self.ship_to_code} {self.plan_date} 進捗:{self.progress_qty}"
 
 
+class ShippingProgress(models.Model):
+    """出荷進度（品番×得意先×納入先×日付）
+
+    進度 = 前日進度 - 需要(確定優先、なければ内示) + 実績 + 調整
+    需要: OrderLine の quantity（確定/内示）
+    実績: ShipmentActual の quantity
+    """
+    id = models.BigAutoField(primary_key=True)
+    plan_date = models.DateField(verbose_name='日付')
+    product_code = models.CharField(max_length=50, verbose_name='製品コード')
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    ship_to_code = models.CharField(max_length=40, default='', verbose_name='納入先コード')
+    forecast_qty = models.IntegerField(default=0, verbose_name='内示数')
+    firm_qty = models.IntegerField(default=0, verbose_name='確定数')
+    actual_qty = models.IntegerField(default=0, verbose_name='実績数')
+    adjust_qty = models.IntegerField(default=0, verbose_name='調整数')
+    progress_qty = models.IntegerField(default=0, verbose_name='累積進度')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_shipping_progress'
+        verbose_name = '出荷進度'
+        verbose_name_plural = '出荷進度'
+        unique_together = [('plan_date', 'product_code', 'customer_code', 'ship_to_code')]
+        indexes = [
+            models.Index(fields=['product_code', 'customer_code', 'ship_to_code', 'plan_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.product_code} {self.customer_code} {self.ship_to_code} {self.plan_date} 進度:{self.progress_qty}"
+
+
 class KubotaSakaiTripDisplaySetting(models.Model):
     """クボタ堺便計画の表示順・色設定（品番×納入地）。"""
 

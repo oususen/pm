@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h2 class="page-title">出荷実績追跡 <DataSourceDialog title="出荷実績追跡" :sources="dsSources" /></h2>
+        <h2 class="page-title">出荷情報追跡 <DataSourceDialog title="出荷情報追跡" :sources="dsSources" /></h2>
         <p class="subtitle">注番・納入地・製品・出発日・到着日を便明細単位で追跡します。</p>
       </div>
       <div class="page-actions">
@@ -10,10 +10,26 @@
         <input v-model.trim="filters.shipToCode" type="text" placeholder="納入先" />
         <input v-model.trim="filters.sourceOrderNo" type="text" placeholder="注番" />
         <input v-model.trim="filters.tripKeyword" type="text" placeholder="便名" />
-        <input v-model="filters.departureDateFrom" type="date" title="出発日From" />
-        <input v-model="filters.departureDateTo" type="date" title="出発日To" />
-        <input v-model="filters.arrivalDateFrom" type="date" title="到着日From" />
-        <input v-model="filters.arrivalDateTo" type="date" title="到着日To" />
+        <label class="date-range">
+          <span>納期</span>
+          <input v-model="filters.originalDueDate" type="date" title="納期" />
+        </label>
+        <label class="date-range">
+          <span>出発日</span>
+          <input v-model="filters.departureDateFrom" type="date" title="出発日From" />
+        </label>
+        <label class="date-range date-range-to">
+          <span>～</span>
+          <input v-model="filters.departureDateTo" type="date" title="出発日To" />
+        </label>
+        <label class="date-range">
+          <span>到着日</span>
+          <input v-model="filters.arrivalDateFrom" type="date" title="到着日From" />
+        </label>
+        <label class="date-range date-range-to">
+          <span>～</span>
+          <input v-model="filters.arrivalDateTo" type="date" title="到着日To" />
+        </label>
         <button @click="load" :disabled="loading">検索</button>
         <button class="btn-secondary" @click="resetFilters" :disabled="loading">クリア</button>
       </div>
@@ -32,7 +48,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>元納期</th>
+                <th>納期</th>
                 <th>到着日</th>
                 <th>出発日</th>
                 <th>便</th>
@@ -103,6 +119,7 @@ const filters = reactive({
   shipToCode: "",
   sourceOrderNo: "",
   tripKeyword: "",
+  originalDueDate: "",
   departureDateFrom: "",
   departureDateTo: "",
   arrivalDateFrom: "",
@@ -153,6 +170,7 @@ function resetFilters() {
   filters.shipToCode = "";
   filters.sourceOrderNo = "";
   filters.tripKeyword = "";
+  filters.originalDueDate = "";
   filters.departureDateFrom = "";
   filters.departureDateTo = "";
   filters.arrivalDateFrom = "";
@@ -169,6 +187,7 @@ async function load() {
       ship_to_code: filters.shipToCode,
       source_order_no: filters.sourceOrderNo,
       trip_keyword: filters.tripKeyword,
+      original_due_date: filters.originalDueDate,
       departure_date__gte: filters.departureDateFrom,
       departure_date__lte: filters.departureDateTo,
       shipment_date__gte: filters.arrivalDateFrom,
@@ -179,7 +198,7 @@ async function load() {
     const res = await api.shippingTrace.getShippingTrace(params);
     rows.value = Array.isArray(res.data) ? res.data : res.data.results || [];
   } catch (e) {
-    console.error("出荷実績追跡取得エラー:", e);
+    console.error("出荷情報追跡取得エラー:", e);
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
     loading.value = false;
@@ -218,6 +237,19 @@ onMounted(load);
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+}
+.date-range span {
+  white-space: nowrap;
+}
+.date-range-to {
+  gap: 4px;
 }
 .page-actions input,
 .page-actions button {

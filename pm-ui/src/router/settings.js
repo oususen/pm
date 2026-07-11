@@ -54,6 +54,12 @@ const settings = [
     meta: { pageTitle: "クボタ堺納期調整ロック設定", resource: "settings.production_plan_lock" },
   },
   {
+    path: "/settings/shipping-progress-horizon",
+    name: "ShippingProgressHorizonSetting",
+    component: () => import("@/views/settings/ShippingProgressHorizonSetting.vue"),
+    meta: { pageTitle: "出荷進度再計算日数設定", resource: "settings.shipping_progress_horizon" },
+  },
+  {
     path: "/settings/scheduled-tasks",
     name: "ScheduledTasks",
     component: () => import("@/views/settings/ScheduledTasks.vue"),

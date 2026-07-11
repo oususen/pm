@@ -62,6 +62,8 @@ import { createKubotaSakaiTrucksAPI } from './resources/kubotaSakaiTrucks'
 import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAdjustments'
 import { createKubotaSakaiTripAssignmentsAPI } from './resources/kubotaSakaiTripAssignments'
 import { createShippingTripsAPI } from './resources/shippingTrips'
+import { createShippingProgressAPI } from './resources/shippingProgress'
+import { createShippingProgressHorizonSettingAPI } from './resources/shippingProgressHorizonSetting'
 import { createShipToLeadTimesAPI } from './resources/shipToLeadTimes'
 import { createCameraActualsAPI } from './resources/cameraActuals'
 import { createOutsourceAPI } from './resources/outsource'
@@ -207,6 +209,8 @@ export default {
   kubotaSakaiDueAdjustments: createKubotaSakaiDueAdjustmentsAPI(client),
   kubotaSakaiTripAssignments: createKubotaSakaiTripAssignmentsAPI(client),
   shippingTrips: createShippingTripsAPI(client),
+  shippingProgress: createShippingProgressAPI(client),
+  shippingProgressHorizonSetting: createShippingProgressHorizonSettingAPI(client),
   shipToLeadTimes: createShipToLeadTimesAPI(client),
   cameraActuals: createCameraActualsAPI(client),
   outsource: createOutsourceAPI(client),

@@ -237,6 +237,8 @@ class UserPermission(models.Model):
         ('shipping.trip_execution', '出荷: 便確認（実行）'),
         ('shipping.trip_progress', '出荷: 便確認（業務員）'),
         ('shipping.trip_progress_summary', '出荷: 便進捗確認（一覧）'),
+        ('shipping.progress_edit', '出荷: 出荷進度管理'),
+        ('shipping.ship_to_lead_time', '出荷: 納入地別出荷加算日数'),
         ('inventory', '在庫'),
         ('stocktake', '在庫: 棚卸入力'),
         ('stocktake.delete', '在庫: 棚卸履歴削除'),
@@ -285,6 +287,7 @@ class UserPermission(models.Model):
         ('settings.stocktake_init', '設定: 棚卸初期化'),
         ('settings.lock_date', '設定: 締め日管理'),
         ('settings.kubota_sakai_config', '設定: クボタ堺便計画設定'),
+        ('settings.shipping_progress_horizon', '設定: 出荷進度再計算日数'),
         ('users', 'ユーザー管理'),
         ('manual', 'マニュアル'),
     ]

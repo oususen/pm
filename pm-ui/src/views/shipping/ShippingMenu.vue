@@ -92,7 +92,7 @@ const tiles = computed(() => [
   },
   {
     to: "/shipping/actual-trace",
-    label: "出荷実績追跡",
+    label: "出荷情報追跡",
     icon: "🔎",
     category: "shipping_ops",
     required: "view",
@@ -105,6 +105,14 @@ const tiles = computed(() => [
     category: "shipping_ops",
     required: "view",
     resource: "shipping.progress",
+  },
+  {
+    to: "/shipping/progress-edit",
+    label: "実績変更・進度調整",
+    icon: "✏️",
+    category: "shipping_ops",
+    required: "edit",
+    resource: "shipping.progress_edit",
   },
   {
     to: "/shipping/order-document",
