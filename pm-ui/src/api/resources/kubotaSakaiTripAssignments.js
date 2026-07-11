@@ -26,6 +26,12 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   savePseudoTruckProducts(rows) {
     return client.post('/kubota-sakai-trip-assignments/pseudo-truck-products/', { rows })
   },
+  getDisplaySettings() {
+    return client.get('/kubota-sakai-trip-assignments/display-settings/')
+  },
+  saveDisplaySettings(rows) {
+    return client.post('/kubota-sakai-trip-assignments/display-settings/', { rows })
+  },
   saveDeliveryProgressAdjust(rows) {
     return client.post('/kubota-sakai-trip-assignments/delivery-progress-adjust/', { rows })
   },

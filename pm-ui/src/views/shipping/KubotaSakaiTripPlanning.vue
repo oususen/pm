@@ -38,6 +38,7 @@
       </button>
       <button class="btn save-btn" :disabled="loading || saving" @click="save">保存</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
+      <button class="btn" :disabled="loading || !mergedRows.length" @click="openDisplaySettingDialog">表示順</button>
       <button class="btn" :disabled="loading || exportingCsv" @click="exportLoadDetailCsv">
         {{ exportingCsv ? '出力中...' : '占有CSV' }}
       </button>
@@ -108,6 +109,80 @@
           <button class="btn" :disabled="exportingPickupPdf" @click="closePickupPdfDialog">閉じる</button>
           <button class="btn pickup-btn" :disabled="exportingPickupPdf" @click="exportPickupDetailPdf">
             {{ exportingPickupPdf ? '出力中...' : 'PDF出力' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showDisplaySettingDialog" class="modal-overlay" @click.self="showDisplaySettingDialog = false">
+      <div class="display-setting-modal">
+        <h3 class="modal-title">便計画表示順設定</h3>
+        <div class="display-setting-body">
+          <div class="display-setting-table-wrap">
+            <table class="display-setting-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>品番</th>
+                  <th>品名</th>
+                  <th>納入地</th>
+                  <th>行色(RGB)</th>
+                  <th>+色(RGB)</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(item, idx) in displaySettingItems"
+                  :key="item.key"
+                  :style="{ background: displaySettingActiveKey === item.key ? '#dbeafe' : idx % 2 ? '#fafafa' : '#fff' }"
+                >
+                  <td>{{ idx + 1 }}</td>
+                  <td>{{ item.product_code }}</td>
+                  <td>{{ item.product_name || '' }}</td>
+                  <td>{{ item.ship_to_code || '-' }}</td>
+                  <td>
+                    <div class="rgb-editor">
+                      <input type="text" inputmode="numeric" :value="hexToR(item.bg_color)" @input="item.bg_color = setRgbChannel(item.bg_color, 'r', $event.target.value)" />
+                      <input type="text" inputmode="numeric" :value="hexToG(item.bg_color)" @input="item.bg_color = setRgbChannel(item.bg_color, 'g', $event.target.value)" />
+                      <input type="text" inputmode="numeric" :value="hexToB(item.bg_color)" @input="item.bg_color = setRgbChannel(item.bg_color, 'b', $event.target.value)" />
+                    </div>
+                  </td>
+                  <td>
+                    <div class="rgb-editor">
+                      <input type="text" inputmode="numeric" :value="hexToR(item.plus_bg_color)" @input="item.plus_bg_color = setRgbChannel(item.plus_bg_color, 'r', $event.target.value)" />
+                      <input type="text" inputmode="numeric" :value="hexToG(item.plus_bg_color)" @input="item.plus_bg_color = setRgbChannel(item.plus_bg_color, 'g', $event.target.value)" />
+                      <input type="text" inputmode="numeric" :value="hexToB(item.plus_bg_color)" @input="item.plus_bg_color = setRgbChannel(item.plus_bg_color, 'b', $event.target.value)" />
+                    </div>
+                  </td>
+                  <td class="display-setting-actions">
+                    <button class="mini" @click="moveDisplaySettingItem(idx, -1)" :disabled="idx === 0">&uarr;</button>
+                    <button class="mini" @click="moveDisplaySettingItem(idx, 1)" :disabled="idx === displaySettingItems.length - 1">&darr;</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="display-setting-samples">
+            <div class="display-setting-sample-title">色サンプル</div>
+            <div class="display-setting-sample-group">
+              <div class="display-setting-sample-label">行背景色</div>
+              <div class="display-setting-sample-item"><span class="sample-chip" style="background:#bfdbfe;"></span><span>191 219 254</span></div>
+              <div class="display-setting-sample-item"><span class="sample-chip" style="background:#bbf7d0;"></span><span>187 247 208</span></div>
+            </div>
+            <div class="display-setting-sample-group">
+              <div class="display-setting-sample-label">+ボタン色</div>
+              <div class="display-setting-sample-item"><span class="sample-chip" style="background:#d4a574;"></span><span>212 165 116</span></div>
+              <div class="display-setting-sample-item"><span class="sample-chip" style="background:#bbbbbb;"></span><span>187 187 187</span></div>
+              <div class="display-setting-sample-item"><span class="sample-chip" style="background:#444444;"></span><span>68 68 68</span></div>
+              <div class="display-setting-sample-item"><span class="sample-chip" style="background:#fbbf24;"></span><span>251 191 36</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="showDisplaySettingDialog = false">キャンセル</button>
+          <button class="btn save-btn" :disabled="savingDisplaySettings" @click="saveDisplaySettings">
+            {{ savingDisplaySettings ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
@@ -260,7 +335,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in mergedRows" :key="row.rowKey">
+          <tr v-for="row in mergedRows" :key="row.rowKey" :class="{ 'trip-colored-row': hasRowCustomColor(row) }" :style="getRowColorStyle(row)">
             <td class="code-col">{{ row.product_code }}</td>
             <td class="shipto-col">
               <div>{{ row.ship_to_code || '-' }}</div>
@@ -326,7 +401,7 @@
                         @blur="handleQtyInputBlur"
                         @mouseleave="handleQtyInputMouseLeave($event)"
                       />
-                      <button class="mini" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1))">+</button>
+                      <button class="mini" :style="getPlusButtonStyle(row)" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1))">+</button>
                       <button
                         class="mini danger"
                         :disabled="slotEntryAt(row, dateKey, slotIdx - 1).allocations.length <= 1"
@@ -410,6 +485,7 @@ const dsSources = [
   { op: '便割付 読み書き', table: 't_kubota_sakai_trip_assignment', desc: '納期調整→便への割付データ' },
   { op: '納期調整 読み取り', table: 't_kubota_sakai_due_adjustment', desc: '出荷数(delivery_qty)の参照元' },
   { op: '便マスタ 読み取り', table: 'm_kubota_sakai_truck', desc: '便名・積載量' },
+  { op: '表示順/色設定 読み書き', table: 't_kubota_sakai_trip_display_setting', desc: '便計画の品番+納入地別の表示順・色設定' },
   { op: '擬似便製品 読み書き', table: 'm_kubota_sakai_pseudo_truck_product', desc: '擬似便自動振分の製品マスタ' },
   { op: 'お気に入り 読み書き', table: 'user_favorite', desc: '画面フィルタのお気に入り保存' },
   { op: 'カレンダー 読み取り', table: 'm_calendar / m_calendar_day', desc: '営業日判定' },
@@ -492,6 +568,27 @@ const normalizeAllocation = (item = null) => ({
   qty: normalizeQtyText(item?.qty ?? ''),
 })
 
+const hexToRgb = (hex) => {
+  if (!hex || hex.length < 7) return [255, 255, 255]
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+const hexToR = (hex) => hexToRgb(hex)[0]
+const hexToG = (hex) => hexToRgb(hex)[1]
+const hexToB = (hex) => hexToRgb(hex)[2]
+
+const setRgbChannel = (hex, ch, val) => {
+  const [r, g, b] = hexToRgb(hex || '#ffffff')
+  const v = Math.max(0, Math.min(255, Number(val) || 0))
+  const nr = ch === 'r' ? v : r
+  const ng = ch === 'g' ? v : g
+  const nb = ch === 'b' ? v : b
+  return `#${((1 << 24) | (nr << 16) | (ng << 8) | nb).toString(16).slice(1)}`
+}
+
+const getTripRowKey = (row) => `${row?.product_code || ''}||${row?.ship_to_code || ''}`
+
 const sortEntries = (items = []) => {
   return [...items].sort((a, b) => {
     const aFc = a.order_type === 'FORECAST' ? 1 : 0
@@ -542,6 +639,11 @@ const savingProgressAdjust = ref(false)
 const progressAdjustEdits = ref({})
 const cursorProductCode = ref('')
 const cursorProductBubbleStyle = ref({})
+const showDisplaySettingDialog = ref(false)
+const displaySettingItems = ref([])
+const savingDisplaySettings = ref(false)
+const displaySettingActiveKey = ref('')
+const displaySettingMap = ref(new Map())
 const HIDE_WEEKENDS_KEY = 'kubotaSakaiTripPlanning.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 
@@ -598,6 +700,49 @@ const slotWidthClass = (slotIdx) => {
   if (slotIdx === 3) return 'col-select'
   if (slotIdx === 4) return 'col-remain'
   return 'col-progress'
+}
+
+const compareTripPlanningRows = (a, b) => {
+  const keyA = getTripRowKey(a)
+  const keyB = getTripRowKey(b)
+  const orderA = displaySettingMap.value.get(keyA)?.display_order
+  const orderB = displaySettingMap.value.get(keyB)?.display_order
+  const hasA = Number.isFinite(orderA)
+  const hasB = Number.isFinite(orderB)
+  if (hasA || hasB) {
+    const normalizedA = hasA ? orderA : 99999
+    const normalizedB = hasB ? orderB : 99999
+    if (normalizedA !== normalizedB) return normalizedA - normalizedB
+  }
+  const codeCmp = String(a?.product_code || '').localeCompare(String(b?.product_code || ''))
+  if (codeCmp !== 0) return codeCmp
+  return String(a?.ship_to_code || '').localeCompare(String(b?.ship_to_code || ''))
+}
+
+const sortTripPlanningRows = (rows = []) => [...rows].sort(compareTripPlanningRows)
+
+const hasRowCustomColor = (row) => {
+  const setting = displaySettingMap.value.get(getTripRowKey(row))
+  return Boolean(setting?.bg_color)
+}
+
+const getRowColorStyle = (row) => {
+  const setting = displaySettingMap.value.get(getTripRowKey(row))
+  if (!setting?.bg_color) return {}
+  return {
+    '--trip-row-bg': setting.bg_color,
+    '--trip-row-text': setting.text_color || '#000000',
+  }
+}
+
+const getPlusButtonStyle = (row) => {
+  const setting = displaySettingMap.value.get(getTripRowKey(row))
+  if (!setting?.plus_bg_color) return {}
+  return {
+    background: setting.plus_bg_color,
+    color: setting.plus_text_color || '#000000',
+    borderColor: setting.plus_bg_color,
+  }
 }
 
 const sourceOrderLabel = (entry) => {
@@ -842,9 +987,85 @@ const refreshAllPreview = async () => {
   await Promise.all(dateKeys.value.map((dateKey) => previewLoadForDate(dateKey)))
 }
 
+const loadDisplaySettings = async () => {
+  try {
+    const res = await api.kubotaSakaiTripAssignments.getDisplaySettings()
+    const rows = Array.isArray(res.data?.rows) ? res.data.rows : []
+    const map = new Map()
+    rows.forEach((row, idx) => {
+      map.set(`${row.product_code || ''}||${row.ship_to_code || ''}`, {
+        display_order: Number(row.display_order ?? idx),
+        bg_color: row.bg_color || '',
+        text_color: row.text_color || '',
+        plus_bg_color: row.plus_bg_color || '',
+        plus_text_color: row.plus_text_color || '',
+      })
+    })
+    displaySettingMap.value = map
+  } catch (error) {
+    console.warn('便計画表示設定の取得失敗', error)
+    displaySettingMap.value = new Map()
+  }
+}
+
+const openDisplaySettingDialog = async () => {
+  await loadDisplaySettings()
+  displaySettingItems.value = sortTripPlanningRows(mergedRows.value).map((row) => {
+    const setting = displaySettingMap.value.get(getTripRowKey(row))
+    return {
+      key: getTripRowKey(row),
+      product_code: row.product_code,
+      product_name: productNameMap.value.get(row.product_code) || '',
+      ship_to_code: row.ship_to_code || '',
+      bg_color: setting?.bg_color || '#ffffff',
+      text_color: setting?.text_color || '#000000',
+      plus_bg_color: setting?.plus_bg_color || '#ffffff',
+      plus_text_color: setting?.plus_text_color || '#000000',
+    }
+  })
+  displaySettingActiveKey.value = ''
+  showDisplaySettingDialog.value = true
+}
+
+const moveDisplaySettingItem = (idx, direction) => {
+  const nextIdx = idx + direction
+  if (nextIdx < 0 || nextIdx >= displaySettingItems.value.length) return
+  const arr = [...displaySettingItems.value]
+  displaySettingActiveKey.value = arr[idx].key
+  ;[arr[idx], arr[nextIdx]] = [arr[nextIdx], arr[idx]]
+  displaySettingItems.value = arr
+}
+
+const saveDisplaySettings = async () => {
+  savingDisplaySettings.value = true
+  try {
+    const rows = displaySettingItems.value.map((item, idx) => ({
+      product_code: item.product_code,
+      ship_to_code: item.ship_to_code || '',
+      display_order: idx,
+      bg_color: item.bg_color && item.bg_color !== '#ffffff' ? item.bg_color : '',
+      text_color: item.text_color && item.text_color !== '#000000' ? item.text_color : '',
+      plus_bg_color: item.plus_bg_color && item.plus_bg_color !== '#ffffff' ? item.plus_bg_color : '',
+      plus_text_color: item.plus_text_color && item.plus_text_color !== '#000000' ? item.plus_text_color : '',
+    }))
+    await api.kubotaSakaiTripAssignments.saveDisplaySettings(rows)
+    await loadDisplaySettings()
+    mergedRows.value = sortTripPlanningRows(mergedRows.value)
+    if (pseudoProductRows.value.length) {
+      pseudoProductRows.value = sortTripPlanningRows(pseudoProductRows.value)
+    }
+    showDisplaySettingDialog.value = false
+  } catch (error) {
+    alert('表示順設定の保存に失敗しました。')
+  } finally {
+    savingDisplaySettings.value = false
+  }
+}
+
 const loadGrid = async () => {
   loading.value = true
   try {
+    await loadDisplaySettings()
     const responses = await Promise.all(
       allDateKeys.value.map((dateKey) => api.kubotaSakaiTripAssignments.grid({
         target_date: dateKey,
@@ -927,11 +1148,7 @@ const loadGrid = async () => {
     progressAdjustEdits.value = {}
     previewSummaryByDate.value = {}
     assignmentDeadlineDays.value = maxDeadline
-    mergedRows.value = rows.sort((a, b) => {
-      const codeCmp = String(a.product_code).localeCompare(String(b.product_code))
-      if (codeCmp !== 0) return codeCmp
-      return String(a.ship_to_code).localeCompare(String(b.ship_to_code))
-    })
+    mergedRows.value = sortTripPlanningRows(rows)
     await refreshAllPreview()
     nextTick(setStickyTopValues)
   } catch (error) {
@@ -1204,7 +1421,7 @@ const loadPseudoProducts = async () => {
     mergedRows.value.forEach((row) => {
       gridKeys.add(`${row.product_code}||${row.ship_to_code || ''}`)
     })
-    pseudoProductRows.value = [...gridKeys].sort().map((key) => {
+    pseudoProductRows.value = sortTripPlanningRows([...gridKeys].map((key) => {
       const [productCode, shipToCode] = key.split('||', 2)
       return {
         key,
@@ -1212,7 +1429,7 @@ const loadPseudoProducts = async () => {
         ship_to_code: shipToCode,
         truckIds: mappingMap.get(key) || new Set(),
       }
-    })
+    }))
   } catch (error) {
     alert('擬似便対象製品の取得に失敗しました。')
   }
@@ -1621,11 +1838,98 @@ onUnmounted(() => {
   padding: 14px;
   box-shadow: 0 8px 24px rgba(2, 6, 23, 0.18);
 }
+.display-setting-modal {
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.18);
+}
 .modal-title {
   margin: 0 0 10px;
   font-size: 15px;
   font-weight: 700;
   color: #111827;
+}
+.display-setting-body {
+  display: flex;
+  gap: 12px;
+}
+.display-setting-table-wrap {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #d7dfe8;
+}
+.display-setting-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.display-setting-table th,
+.display-setting-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 4px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+.display-setting-table th {
+  position: sticky;
+  top: 0;
+  background: #eef2f7;
+  z-index: 1;
+}
+.display-setting-actions {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+.display-setting-samples {
+  width: 180px;
+  flex-shrink: 0;
+  border-left: 1px solid #d7dfe8;
+  padding-left: 12px;
+  font-size: 11px;
+}
+.display-setting-sample-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.display-setting-sample-group {
+  margin-bottom: 10px;
+}
+.display-setting-sample-label {
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 4px;
+}
+.display-setting-sample-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.sample-chip {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #aaa;
+  border-radius: 2px;
+}
+.rgb-editor {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+}
+.rgb-editor input {
+  width: 30px;
+  font-size: 10px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 2px;
+  text-align: center;
 }
 .modal-fields {
   display: flex;
@@ -1777,6 +2081,10 @@ onUnmounted(() => {
 }
 .grid tbody td {
   padding: 0;
+}
+.grid tbody tr.trip-colored-row td {
+  background: var(--trip-row-bg) !important;
+  color: var(--trip-row-text) !important;
 }
 .left-head {
   background: #e5e7eb !important;
@@ -2058,4 +2366,3 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 </style>
-

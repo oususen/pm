@@ -151,3 +151,32 @@ class KubotaSakaiDeliveryProgress(models.Model):
 
     def __str__(self):
         return f"{self.product_code} {self.ship_to_code} {self.plan_date} 進捗:{self.progress_qty}"
+
+
+class KubotaSakaiTripDisplaySetting(models.Model):
+    """クボタ堺便計画の表示順・色設定（品番×納入地）。"""
+
+    id = models.BigAutoField(primary_key=True)
+    product_code = models.CharField(max_length=50, verbose_name='製品コード')
+    ship_to_code = models.CharField(max_length=40, blank=True, default='', verbose_name='納入地コード')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    bg_color = models.CharField(max_length=10, blank=True, default='', verbose_name='行背景色')
+    text_color = models.CharField(max_length=10, blank=True, default='', verbose_name='行文字色')
+    plus_bg_color = models.CharField(max_length=10, blank=True, default='', verbose_name='追加ボタン背景色')
+    plus_text_color = models.CharField(max_length=10, blank=True, default='', verbose_name='追加ボタン文字色')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_kubota_sakai_trip_display_setting'
+        verbose_name = 'クボタ堺便計画表示設定'
+        verbose_name_plural = 'クボタ堺便計画表示設定'
+        unique_together = [('product_code', 'ship_to_code')]
+        ordering = ['display_order', 'product_code', 'ship_to_code']
+        indexes = [
+            models.Index(fields=['display_order', 'product_code']),
+            models.Index(fields=['product_code', 'ship_to_code']),
+        ]
+
+    def __str__(self):
+        return f"{self.product_code} {self.ship_to_code} ({self.display_order})"

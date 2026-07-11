@@ -27,7 +27,11 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
-from shipping.models import KubotaSakaiDeliveryProgress, ShipToLeadTime
+from shipping.models import (
+    KubotaSakaiDeliveryProgress,
+    KubotaSakaiTripDisplaySetting,
+    ShipToLeadTime,
+)
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
     KubotaSakaiPseudoTruckProduct,
@@ -534,6 +538,66 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
 # ---------------------------------------------------------------------------
 # API View
 # ---------------------------------------------------------------------------
+
+class KubotaSakaiTripDisplaySettingView(APIView):
+    """クボタ堺便計画の表示順・色設定を取得/保存する。"""
+
+    def get(self, request):
+        rows = list(
+            KubotaSakaiTripDisplaySetting.objects.all().order_by(
+                'display_order', 'product_code', 'ship_to_code', 'id'
+            )
+        )
+        return Response({
+            'rows': [
+                {
+                    'id': row.id,
+                    'product_code': row.product_code,
+                    'ship_to_code': row.ship_to_code or '',
+                    'display_order': row.display_order,
+                    'bg_color': row.bg_color or '',
+                    'text_color': row.text_color or '',
+                    'plus_bg_color': row.plus_bg_color or '',
+                    'plus_text_color': row.plus_text_color or '',
+                }
+                for row in rows
+            ],
+        })
+
+    def post(self, request):
+        rows = request.data.get('rows')
+        if not isinstance(rows, list):
+            return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        create_items = []
+        seen = set()
+        for idx, row in enumerate(rows):
+            product_code = str(row.get('product_code') or '').strip()
+            ship_to_code = str(row.get('ship_to_code') or '').strip()
+            if not product_code:
+                continue
+            key = (product_code, ship_to_code)
+            if key in seen:
+                continue
+            seen.add(key)
+            create_items.append(
+                KubotaSakaiTripDisplaySetting(
+                    product_code=product_code,
+                    ship_to_code=ship_to_code,
+                    display_order=int(row.get('display_order') or idx),
+                    bg_color=str(row.get('bg_color') or '').strip(),
+                    text_color=str(row.get('text_color') or '').strip(),
+                    plus_bg_color=str(row.get('plus_bg_color') or '').strip(),
+                    plus_text_color=str(row.get('plus_text_color') or '').strip(),
+                )
+            )
+
+        with transaction.atomic():
+            KubotaSakaiTripDisplaySetting.objects.all().delete()
+            if create_items:
+                KubotaSakaiTripDisplaySetting.objects.bulk_create(create_items)
+
+        return Response({'detail': 'ok', 'count': len(create_items)})
 
 class KubotaSakaiTripPlanView(APIView):
     """クボタ堺便計画
