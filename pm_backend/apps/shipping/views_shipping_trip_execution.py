@@ -242,14 +242,11 @@ def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_
     }
 
 
-def _trip_group_key(trip):
-    departure_time = trip.departure_time_plan.strftime('%H:%M') if trip.departure_time_plan else ''
-    trip_code = (trip.trip_code or '').strip() or (trip.trip_ref or '')
+def _trip_group_key(payload):
     return (
-        trip.departure_date.isoformat(),
-        trip.business_type,
-        trip_code,
-        departure_time,
+        str(payload.get('actual_departure_date') or payload.get('departure_date') or ''),
+        str(payload.get('business_type') or ''),
+        str(payload.get('trip_ref') or '').strip(),
     )
 
 
@@ -369,10 +366,10 @@ class ShippingTripExecutionView(APIView):
             for trip in trips
         ]
         grouped_payloads = defaultdict(list)
-        for trip, payload in zip(trips, raw_trips_payload):
+        for payload in raw_trips_payload:
             if payload.get('actual_departure_date') != departure_date.isoformat():
                 continue
-            grouped_payloads[_trip_group_key(trip)].append(payload)
+            grouped_payloads[_trip_group_key(payload)].append(payload)
         trips_payload = [_merge_trip_payloads(items) for _, items in sorted(grouped_payloads.items(), key=lambda x: x[0])]
 
         business_types = list(
