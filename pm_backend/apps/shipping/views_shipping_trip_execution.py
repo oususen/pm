@@ -291,6 +291,21 @@ def _merge_trip_payloads(payloads):
     return base
 
 
+def _collect_truck_offset_map():
+    return {
+        row['id']: max(int(row['arrival_day_offset'] or 0), 0)
+        for row in KubotaSakaiTruck.objects.filter(is_active=True).values('id', 'arrival_day_offset')
+    }
+
+
+def _expanded_trip_queryset(date_from, date_to, business_type, calc, max_offset):
+    expanded_to = calc.add_working_days(date_to, max_offset) if max_offset > 0 else date_to
+    qs = ShippingTrip.objects.filter(departure_date__gte=date_from, departure_date__lte=expanded_to)
+    if business_type:
+        qs = qs.filter(business_type=business_type)
+    return qs
+
+
 class ShippingTripExecutionView(APIView):
     """便確認（実行）向けAPI。"""
 
@@ -302,10 +317,7 @@ class ShippingTripExecutionView(APIView):
         business_type = (request.query_params.get('business_type') or '').strip()
         calendar = Calendar.objects.first()
         calc = WorkingDayCalculator(calendar)
-        truck_offset_map = {
-            row['id']: max(int(row['arrival_day_offset'] or 0), 0)
-            for row in KubotaSakaiTruck.objects.filter(is_active=True).values('id', 'arrival_day_offset')
-        }
+        truck_offset_map = _collect_truck_offset_map()
         max_offset = max(truck_offset_map.values(), default=0)
         candidate_dates = [departure_date]
         for offset in range(1, max_offset + 1):
@@ -505,10 +517,7 @@ class ShippingTripExecutionView(APIView):
                     {'detail': '出発済の便のみ実績登録できます。'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            truck_offset_map = {
-                row['id']: max(int(row['arrival_day_offset'] or 0), 0)
-                for row in KubotaSakaiTruck.objects.filter(is_active=True).values('id', 'arrival_day_offset')
-            }
+            truck_offset_map = _collect_truck_offset_map()
             shipment_date = _parse_date(request.data.get('shipment_date')) or _trip_actual_departure_date(
                 trip,
                 WorkingDayCalculator(Calendar.objects.first()),
@@ -635,10 +644,7 @@ class ShippingTripExecutionView(APIView):
                 [allocation for allocation in allocations if allocation.trip_id == item.id],
                 product_name_map,
                 WorkingDayCalculator(Calendar.objects.first()),
-                {
-                    row['id']: max(int(row['arrival_day_offset'] or 0), 0)
-                    for row in KubotaSakaiTruck.objects.filter(is_active=True).values('id', 'arrival_day_offset')
-                },
+                _collect_truck_offset_map(),
             )
             for item in trips
         ])
@@ -660,10 +666,12 @@ class ShippingTripProgressView(APIView):
 
         business_type = (request.query_params.get('business_type') or '').strip()
         status_filter = (request.query_params.get('status') or '').strip().upper()
+        calendar = Calendar.objects.first()
+        calc = WorkingDayCalculator(calendar)
+        truck_offset_map = _collect_truck_offset_map()
+        max_offset = max(truck_offset_map.values(), default=0)
 
-        qs = ShippingTrip.objects.filter(departure_date__gte=date_from, departure_date__lte=date_to)
-        if business_type:
-            qs = qs.filter(business_type=business_type)
+        qs = _expanded_trip_queryset(date_from, date_to, business_type, calc, max_offset)
         if status_filter in ('PLANNED', 'LOADING', 'DEPARTED', 'CLOSED'):
             qs = qs.filter(status=status_filter)
         trips = list(
@@ -671,53 +679,69 @@ class ShippingTripProgressView(APIView):
             .order_by('departure_date', 'business_type', 'departure_time_plan', 'trip_code', 'trip_ref', 'id')
         )
 
-        daily = defaultdict(lambda: {'total': 0, 'planned': 0, 'loading': 0, 'departed': 0, 'closed': 0})
+        grouped_trips = defaultdict(list)
         for trip in trips:
-            key = trip.departure_date.isoformat()
-            daily[key]['total'] += 1
-            if trip.status == 'PLANNED':
-                daily[key]['planned'] += 1
-            elif trip.status == 'LOADING':
-                daily[key]['loading'] += 1
-            elif trip.status == 'DEPARTED':
-                daily[key]['departed'] += 1
-            elif trip.status == 'CLOSED':
-                daily[key]['closed'] += 1
-
-        business_types = list(
-            ShippingTrip.objects
-            .filter(departure_date__gte=date_from, departure_date__lte=date_to)
-            .values_list('business_type', flat=True)
-            .distinct()
-            .order_by('business_type')
-        )
-
-        trip_rows = []
-        for trip in trips:
-            loading_user = getattr(trip, 'loading_by', None)
-            departed_user = getattr(trip, 'departed_by', None)
-            created_user = getattr(getattr(trip, 'run', None), 'created_by', None)
-            if trip.status == 'PLANNED':
-                shipping_staff = ''
-            elif trip.status == 'LOADING' and loading_user:
-                shipping_staff = _display_user_name(loading_user)
-            elif trip.status == 'DEPARTED' and departed_user:
-                shipping_staff = _display_user_name(departed_user)
-            elif created_user:
-                shipping_staff = _display_user_name(created_user)
-            else:
-                shipping_staff = ''
-            trip_rows.append({
+            actual_departure_date = _trip_actual_departure_date(trip, calc, truck_offset_map)
+            if actual_departure_date < date_from or actual_departure_date > date_to:
+                continue
+            payload = {
                 'id': trip.id,
                 'departure_date': trip.departure_date.isoformat(),
+                'actual_departure_date': actual_departure_date.isoformat(),
                 'business_type': trip.business_type,
+                'trip_ref': trip.trip_ref,
                 'trip_code': (trip.trip_code or '').strip() or (trip.trip_ref or ''),
                 'ship_to_code': trip.ship_to_code or '',
                 'status': trip.status,
                 'departure_time_plan': trip.departure_time_plan.strftime('%H:%M') if trip.departure_time_plan else None,
                 'departure_time_actual': _format_dt(trip.departure_time_actual),
+                'loading_by': _display_user_name(getattr(trip, 'loading_by', None)),
+                'departed_by': _display_user_name(getattr(trip, 'departed_by', None)),
+                'created_by': _display_user_name(getattr(getattr(trip, 'run', None), 'created_by', None)),
+            }
+            grouped_trips[_trip_group_key(payload)].append(payload)
+
+        daily = defaultdict(lambda: {'total': 0, 'planned': 0, 'loading': 0, 'departed': 0, 'closed': 0})
+        trip_rows = []
+        for _, payloads in sorted(grouped_trips.items(), key=lambda x: x[0]):
+            merged = _merge_trip_payloads(payloads)
+            key = merged.get('actual_departure_date') or merged.get('departure_date')
+            daily[key]['total'] += 1
+            if merged.get('status') == 'PLANNED':
+                daily[key]['planned'] += 1
+            elif merged.get('status') == 'LOADING':
+                daily[key]['loading'] += 1
+            elif merged.get('status') == 'DEPARTED':
+                daily[key]['departed'] += 1
+            elif merged.get('status') == 'CLOSED':
+                daily[key]['closed'] += 1
+
+            created_by = next((item.get('created_by') for item in payloads if item.get('created_by')), '')
+            loading_by = next((item.get('loading_by') for item in payloads if item.get('loading_by')), '')
+            departed_by = next((item.get('departed_by') for item in payloads if item.get('departed_by')), '')
+            if merged.get('status') == 'PLANNED':
+                shipping_staff = ''
+            elif merged.get('status') == 'LOADING' and loading_by:
+                shipping_staff = loading_by
+            elif merged.get('status') in ('DEPARTED', 'CLOSED') and departed_by:
+                shipping_staff = departed_by
+            elif created_by:
+                shipping_staff = created_by
+            else:
+                shipping_staff = ''
+            trip_rows.append({
+                'id': merged.get('id'),
+                'departure_date': key,
+                'business_type': merged.get('business_type'),
+                'trip_code': merged.get('trip_code'),
+                'ship_to_code': merged.get('ship_to_code'),
+                'status': merged.get('status'),
+                'departure_time_plan': merged.get('departure_time_plan'),
+                'departure_time_actual': merged.get('departure_time_actual'),
                 'shipping_staff': shipping_staff,
             })
+
+        business_types = sorted({row.get('business_type') for row in trip_rows if row.get('business_type')})
 
         return Response({
             'date_from': date_from.isoformat(),
