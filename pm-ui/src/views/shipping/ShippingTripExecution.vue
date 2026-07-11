@@ -424,6 +424,19 @@ const loadTrips = async () => {
   }
 }
 
+const applyRouteQuery = () => {
+  const query = route.query || {}
+  if (typeof query.departure_date === 'string' && query.departure_date) {
+    departureDate.value = query.departure_date
+  }
+  if (typeof query.business_type === 'string') {
+    businessType.value = query.business_type
+  }
+  if (typeof query.trip_code === 'string') {
+    tripFilter.value = query.trip_code
+  }
+}
+
 const setStatusFilter = (status) => {
   statusFilter.value = status
 }
@@ -531,7 +544,10 @@ const updateTripStatus = async (trip, action) => {
   }
 }
 
-onMounted(loadTrips)
+onMounted(async () => {
+  applyRouteQuery()
+  await loadTrips()
+})
 </script>
 
 <style scoped>

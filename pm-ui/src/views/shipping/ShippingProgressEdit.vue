@@ -31,6 +31,8 @@
           <thead>
             <tr>
               <th>出荷日</th>
+              <th>便</th>
+              <th>便状態</th>
               <th>品番</th>
               <th>得意先</th>
               <th>納入先</th>
@@ -42,6 +44,15 @@
           <tbody>
             <tr v-for="row in actualRows" :key="row.id" :class="{ changed: row._edited, locked: row.is_locked }">
               <td>{{ row.shipment_date }}</td>
+              <td>
+                <div class="trip-cell">
+                  <span>{{ row.trip_code || '-' }}</span>
+                  <RouterLink v-if="tripLinkTo(row)" :to="tripLinkTo(row)" class="trip-button">
+                    便確認
+                  </RouterLink>
+                </div>
+              </td>
+              <td>{{ row.trip_status || '-' }}</td>
               <td>{{ row.product_code }}</td>
               <td>{{ row.customer_code }}</td>
               <td>{{ row.ship_to_code || '-' }}</td>
@@ -121,6 +132,7 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import api from '@/api/client'
 
 const formatDate = (d) => {
@@ -156,6 +168,18 @@ const formatQty = (val) => {
 
 const actualChangedCount = computed(() => actualRows.value.filter((r) => r._edited).length)
 const adjustChangedCount = computed(() => adjustRows.value.filter((r) => r._edited).length)
+
+const tripLinkTo = (row) => {
+  if (!row.trip_code) return null
+  return {
+    path: '/shipping/trip-execution',
+    query: {
+      departure_date: row.shipment_date,
+      business_type: row.business_type || undefined,
+      trip_code: row.trip_code,
+    },
+  }
+}
 
 const onActualQtyChange = (row, value) => {
   if (row.is_locked) return
@@ -387,6 +411,25 @@ tr.changed {
 .helper-text {
   color: #64748b;
   font-size: 12px;
+}
+.trip-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.trip-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
 }
 tr.locked {
   background: #f8fafc;

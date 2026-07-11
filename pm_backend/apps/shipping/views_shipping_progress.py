@@ -18,6 +18,16 @@ def _parse_date(value):
         return None
 
 
+def _trip_status_label(status_value):
+    mapping = {
+        'PLANNED': '計画',
+        'LOADING': '積込中',
+        'DEPARTED': '出発済',
+        'CLOSED': '完了',
+    }
+    return mapping.get(str(status_value or '').strip().upper(), str(status_value or ''))
+
+
 class ShippingProgressHorizonSettingView(APIView):
     """出荷進度再計算日数の設定API。"""
 
@@ -178,6 +188,11 @@ class ShippingActualEditView(APIView):
         for row in rows:
             trip = getattr(getattr(row, 'shipping_trip_allocation', None), 'trip', None)
             is_locked = bool(trip and trip.status in ('DEPARTED', 'CLOSED'))
+            trip_code = ''
+            trip_status = ''
+            if trip:
+                trip_code = (trip.trip_code or '').strip() or (trip.trip_ref or '')
+                trip_status = _trip_status_label(trip.status)
             data.append({
                 'id': row.id,
                 'shipment_date': row.shipment_date.isoformat(),
@@ -185,6 +200,9 @@ class ShippingActualEditView(APIView):
                 'customer_code': row.customer_code or '',
                 'ship_to_code': (row.ship_to_code or '').strip(),
                 'quantity': int(row.quantity),
+                'trip_code': trip_code,
+                'trip_status': trip_status,
+                'business_type': getattr(trip, 'business_type', '') if trip else '',
                 'is_locked': is_locked,
                 'lock_reason': '出発済/完了の便実績はここでは変更できません。' if is_locked else '',
             })
