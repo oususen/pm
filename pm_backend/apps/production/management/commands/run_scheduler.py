@@ -5,6 +5,7 @@ APSchedulerを使用して、DBに保存された設定に基づいてタスク�
 使い方:
   python manage.py run_scheduler
 """
+import functools
 import logging
 import signal
 import time
@@ -12,6 +13,20 @@ import time
 from django.core.management.base import BaseCommand
 
 logger = logging.getLogger('production')
+
+
+def _with_fresh_connection(func):
+    """
+    常駐プロセスのためDjangoのリクエスト起点の自動再接続（close_old_connections）が効かず、
+    MySQL側のwait_timeoutで切断されると 'Server has gone away' で全ジョブが失敗し続けるため、
+    各ジョブ実行前に明示的に古い接続を破棄して再接続させる。
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        from django.db import close_old_connections
+        close_old_connections()
+        return func(*args, **kwargs)
+    return wrapper
 
 
 class Command(BaseCommand):
@@ -101,7 +116,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_inventory_recalculation,
+                _with_fresh_connection(run_inventory_recalculation),
                 trigger,
                 id=job_id,
                 replace_existing=True,
@@ -122,7 +137,7 @@ class Command(BaseCommand):
             )
             job_id = f'auto_plan_{cfg.id}'
             scheduler.add_job(
-                run_auto_plan,
+                _with_fresh_connection(run_auto_plan),
                 trigger,
                 id=job_id,
                 replace_existing=True,
@@ -150,7 +165,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_order_expansion,
+                _with_fresh_connection(run_order_expansion),
                 trigger,
                 id='order_expansion',
                 replace_existing=True,
@@ -189,7 +204,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_auto_safety_stock,
+                _with_fresh_connection(run_auto_safety_stock),
                 trigger,
                 id=job_id,
                 replace_existing=True,
@@ -217,7 +232,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_auto_purchase_order_check,
+                _with_fresh_connection(run_auto_purchase_order_check),
                 trigger,
                 id='auto_purchase_order_check',
                 replace_existing=True,
@@ -246,7 +261,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_purchase_actual_reconcile_check,
+                _with_fresh_connection(run_purchase_actual_reconcile_check),
                 trigger,
                 id='purchase_actual_reconcile_check',
                 replace_existing=True,
@@ -276,7 +291,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_production_actual_reconcile_check,
+                _with_fresh_connection(run_production_actual_reconcile_check),
                 trigger,
                 id='production_actual_reconcile_check',
                 replace_existing=True,
@@ -307,7 +322,7 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                run_plan_to_actual_copy,
+                _with_fresh_connection(run_plan_to_actual_copy),
                 trigger,
                 id=f'plan_to_actual_{cfg.id}',
                 replace_existing=True,
@@ -332,7 +347,7 @@ class Command(BaseCommand):
             )
             job_id = f'auto_delivery_list_{cfg.id}'
             scheduler.add_job(
-                run_auto_delivery_list_send,
+                _with_fresh_connection(run_auto_delivery_list_send),
                 trigger,
                 id=job_id,
                 replace_existing=True,
@@ -347,6 +362,8 @@ class Command(BaseCommand):
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""
         try:
+            from django.db import close_old_connections
+            close_old_connections()
             self._register_jobs(scheduler)
         except Exception as e:
             logger.error(f'設定チェックエラー: {e}', exc_info=True)
