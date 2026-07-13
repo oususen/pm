@@ -1158,12 +1158,24 @@ class KubotaSakaiPickupDetailPdfView(APIView):
         )
 
         product_codes = {a.due_adjustment.product_code for a in assignments}
+        ship_to_codes = {
+            (a.due_adjustment.ship_to_code or '').strip()
+            for a in assignments
+            if (a.due_adjustment.ship_to_code or '').strip()
+        }
         products = {
             p.product_code: p
             for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
         }
+        ship_to_name_map = {
+            row.ship_to_code: row.ship_to_name
+            for row in ShipToLeadTime.objects.filter(
+                customer__customer_code=KUBOTA_CUSTOMER_CODE,
+                ship_to_code__in=ship_to_codes,
+            )
+        }
 
-        # departure_date -> truck_id -> product_code で集計
+        # departure_date -> truck_id -> (product_code, ship_to_code, source_order_no) で集計
         grouped = defaultdict(lambda: defaultdict(lambda: defaultdict(Decimal)))
         truck_meta = {}
         for item in assignments:
@@ -1175,8 +1187,12 @@ class KubotaSakaiPickupDetailPdfView(APIView):
             departure_date = _subtract_business_days(due_date, offset_days, calendar_map)
             if departure_date < start_date or departure_date > end_date:
                 continue
-            product_code = item.due_adjustment.product_code
-            grouped[departure_date][truck.id][product_code] += _to_decimal(item.qty)
+            detail_key = (
+                item.due_adjustment.product_code,
+                (item.due_adjustment.ship_to_code or '').strip(),
+                (item.due_adjustment.source_order_no or '').strip(),
+            )
+            grouped[departure_date][truck.id][detail_key] += _to_decimal(item.qty)
             if truck.id not in truck_meta:
                 truck_meta[truck.id] = {
                     'name': truck.name,
@@ -1185,19 +1201,27 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                     'departure_time': _format_hhmm(truck.departure_time),
                 }
 
-        pdf_bytes = self._render_pdf(start_date, end_date, grouped, truck_meta, products)
+        pdf_bytes = self._render_pdf(
+            start_date,
+            end_date,
+            grouped,
+            truck_meta,
+            products,
+            ship_to_name_map,
+        )
         filename = f"クボタ堺_集荷明細表_{start_date:%Y%m%d}_{end_date:%Y%m%d}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
-    def _render_pdf(self, start_date, end_date, grouped, truck_meta, products):
+    def _render_pdf(self, start_date, end_date, grouped, truck_meta, products, ship_to_name_map):
         try:
             pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
         except Exception:
             pass
 
         font_name = 'HeiseiKakuGo-W5'
+        font_size = 9
         buf = BytesIO()
         c = canvas.Canvas(buf, pagesize=A4)
         width, height = A4
@@ -1211,7 +1235,7 @@ class KubotaSakaiPickupDetailPdfView(APIView):
         def draw_header(page_no):
             c.setFont(font_name, 14)
             c.drawString(left, top, 'クボタ堺 集荷明細表（出発日別）')
-            c.setFont(font_name, 9)
+            c.setFont(font_name, font_size)
             c.drawString(left, top - 6.5 * mm, f'対象期間: {start_date:%Y-%m-%d} ～ {end_date:%Y-%m-%d}')
             c.drawRightString(right, top - 6.5 * mm, f'Page {page_no}')
 
@@ -1242,11 +1266,27 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                 c.drawString(left + 34 * mm, y, f'出発時刻：{dep_time}')
 
         def draw_columns():
-            c.setFont(font_name, 9)
+            c.setFont(font_name, font_size)
             c.drawString(left + 8 * mm, y, '品番')
-            c.drawString(left + 58 * mm, y, '品名')
+            c.drawString(left + 39 * mm, y, '品名')
+            c.drawString(left + 83 * mm, y, '納入地')
+            c.drawString(left + 128 * mm, y, '注番')
             c.drawRightString(left + 162 * mm, y, '容器数')
             c.drawRightString(left + 180 * mm, y, '数量')
+
+        def clip_text_to_width(text, max_width_mm):
+            text = str(text or '')
+            max_width = max_width_mm * mm
+            if pdfmetrics.stringWidth(text, font_name, font_size) <= max_width:
+                return text
+
+            clipped = ''
+            for ch in text:
+                candidate = clipped + ch
+                if pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+                    break
+                clipped = candidate
+            return clipped
 
         # ヘッダ（対象期間）と最初の出発日の間を2行ぶん空ける
         y = top - 14 * mm - (line_h * 2)
@@ -1306,8 +1346,11 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                 draw_columns()
                 y -= line_h
 
-                product_codes = sorted(grouped[dep][truck_id].keys())
-                for prod_idx, code in enumerate(product_codes):
+                detail_keys = sorted(
+                    grouped[dep][truck_id].keys(),
+                    key=lambda key: (key[0], key[1], key[2]),
+                )
+                for detail_idx, detail_key in enumerate(detail_keys):
                     if y < 16 * mm:
                         c.showPage()
                         page_no += 1
@@ -1319,8 +1362,9 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                         y -= line_h
                         draw_columns()
                         y -= line_h
-                    qty = grouped[dep][truck_id][code]
-                    product = products.get(code)
+                    product_code, ship_to_code, source_order_no = detail_key
+                    qty = grouped[dep][truck_id][detail_key]
+                    product = products.get(product_code)
                     name = (product.product_name if product else '') or ''
                     capacity_val = _to_decimal(getattr(product, 'capacity', None) if product else None, default='0')
                     if capacity_val <= 0:
@@ -1331,12 +1375,19 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                     container_count = (qty / capacity_val).to_integral_value(rounding=ROUND_CEILING)
                     qty_text = str(qty.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
                     container_text = str(container_count)
-                    c.setFont(font_name, 9)
-                    c.drawString(left + 8 * mm, y, str(code))
-                    c.drawString(left + 58 * mm, y, name[:28])
+                    ship_to_name = (ship_to_name_map.get(ship_to_code) or '').strip()
+                    ship_to_text = ship_to_code
+                    if ship_to_name:
+                        ship_to_text = f'{ship_to_code} {ship_to_name}'
+                    order_text = source_order_no or '内示'
+                    c.setFont(font_name, font_size)
+                    c.drawString(left + 8 * mm, y, str(product_code))
+                    c.drawString(left + 39 * mm, y, clip_text_to_width(name, 42))
+                    c.drawString(left + 83 * mm, y, clip_text_to_width(ship_to_text, 44))
+                    c.drawString(left + 128 * mm, y, clip_text_to_width(order_text, 27))
                     c.drawRightString(left + 162 * mm, y, container_text)
                     c.drawRightString(left + 180 * mm, y, qty_text)
-                    if prod_idx < len(product_codes) - 1:
+                    if detail_idx < len(detail_keys) - 1:
                         draw_line(y - 1.4 * mm, width=0.6, dashed=True)
                     y -= line_h
                 y -= 1.5 * mm
