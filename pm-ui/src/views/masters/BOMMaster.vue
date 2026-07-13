@@ -2276,6 +2276,10 @@ const saveBOMItem = async () => {
     ...((!editingItemId.value && itemForm.value.add_to_routing) ? { add_to_routing: true } : {}),
   }
 
+  if (payload.add_to_routing) {
+    if (!window.confirm('この親製品をoutput_productとする全アクティブルーティングにステップが追加されます。続行しますか？')) return
+  }
+
   try {
     if (editingItemId.value) {
       const sourcingTypeChanged = !!originalSourcingType.value && originalSourcingType.value !== itemForm.value.sourcing_type

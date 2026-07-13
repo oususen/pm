@@ -3159,12 +3159,14 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         self._created_item = item
 
     def create(self, request, *args, **kwargs):
-        self._created_item = None
-        response = super().create(request, *args, **kwargs)
+        from django.db import transaction
         add_to_routing = request.data.get('add_to_routing', False)
-        if add_to_routing and self._created_item:
-            count = self._add_bom_item_to_routings(self._created_item)
-            response.data['routing_steps_created'] = count
+        with transaction.atomic():
+            self._created_item = None
+            response = super().create(request, *args, **kwargs)
+            if add_to_routing and self._created_item:
+                count = self._add_bom_item_to_routings(self._created_item)
+                response.data['routing_steps_created'] = count
         return response
 
 
