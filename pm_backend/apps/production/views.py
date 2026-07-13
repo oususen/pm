@@ -7451,6 +7451,7 @@ class ScheduleRunNowView(APIView):
             'PURCHASE_ACTUAL_RECONCILE_CHECK': '納入実績整合チェック',
             'PRODUCTION_ACTUAL_RECONCILE_CHECK': '生産実績整合チェック',
             'PLAN_TO_ACTUAL_COPY': '計画実績自動セット',
+            'ORDER_EXPANSION': '自動受注展開',
         }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -7470,9 +7471,6 @@ class ScheduleRunNowView(APIView):
                 else:
                     result = run_auto_plan(force=True)
                 return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
-            elif task == 'ORDER_EXPANSION':
-                result = run_order_expansion()
-                return Response({'detail': '自動受注展開を実行しました', **(result or {})})
             elif task in task_labels:
                 # 二重実行防止: RUNNING中は常に拒否（自動タイムアウト解除はしない）
                 running_cfg = ScheduleConfig.objects.filter(
@@ -7504,6 +7502,8 @@ class ScheduleRunNowView(APIView):
                             if not config_id:
                                 raise ValueError('PLAN_TO_ACTUAL_COPY は config_id が必要です')
                             run_plan_to_actual_copy(config_id=int(config_id))
+                        elif task == 'ORDER_EXPANSION':
+                            run_order_expansion()
                         else:
                             run_inventory_recalculation(task_name=task)
                     except Exception:
