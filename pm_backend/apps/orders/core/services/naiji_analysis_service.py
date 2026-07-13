@@ -1,0 +1,755 @@
+"""汎用内示分析サービス
+
+StgOrderDaily (order_type='FORECAST') を共通データソースとし、
+顧客を問わず内示の変化推移・安全在庫分析を行う。
+"""
+import re
+import statistics
+from collections import Counter, defaultdict
+from datetime import date, timedelta
+
+from django.db.models import Sum
+
+from masters.models import Calendar, Customer
+from orders.core.models import Order, OrderLine, StgOrderDaily
+from orders.utils.calendar_utils import WorkingDayCalculator
+
+
+def _get_customer_calendar(customer):
+    """顧客に紐づくカレンダーを取得（なければ daiso フォールバック）"""
+    if customer and customer.calendar:
+        return customer.calendar
+    try:
+        return Calendar.objects.get(calendar_code='daiso')
+    except Calendar.DoesNotExist:
+        return None
+
+
+def _extract_firm_issue_date(order_no, customer_code):
+    """注文番号から確定発行日を抽出（顧客別ロジック）
+
+    Kubota (000196): FIRM-000196-{FACTORY}-{YYMMDD} → 6桁YYMMDD
+    Rieden: FIRM-{code}-{YYYYMMDD} → 8桁YYYYMMDD
+    Tiera/その他: FIRM-{code}-{delivery_no or timestamp} → 14桁timestamp
+    """
+    parts = re.split(r'[-_]', str(order_no or ''))
+    if len(parts) < 3:
+        return None
+
+    if customer_code == '000196':
+        for part in parts[2:]:
+            s = part.strip()
+            if len(s) == 6 and s.isdigit():
+                try:
+                    return date(2000 + int(s[:2]), int(s[2:4]), int(s[4:6]))
+                except ValueError:
+                    pass
+
+    for part in parts[2:]:
+        s = part.strip()
+        if len(s) == 8 and s.isdigit():
+            try:
+                return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+            except ValueError:
+                pass
+
+    for part in parts[2:]:
+        s = part.strip()
+        if len(s) == 14 and s.isdigit():
+            try:
+                return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+            except ValueError:
+                pass
+
+    return None
+
+
+def _count_working_days(wdc, d_from, d_to):
+    if d_from == d_to:
+        return 0
+    step = 1 if d_to > d_from else -1
+    count = 0
+    cur = d_from + timedelta(days=step)
+    while cur != d_to + timedelta(days=step):
+        if wdc.is_working_day(cur):
+            count += step
+        cur += timedelta(days=step)
+    return count
+
+
+# ---------------------------------------------------------------------------
+# 顧客一覧
+# ---------------------------------------------------------------------------
+def get_naiji_customers():
+    """内示データがある顧客一覧を返す"""
+    customer_ids = (
+        StgOrderDaily.objects
+        .filter(order_type='FORECAST')
+        .values_list('customer_id', flat=True)
+        .distinct()
+    )
+    customers = Customer.objects.filter(id__in=customer_ids, is_active=True).order_by('customer_code')
+    return [
+        {
+            'id': c.id,
+            'customer_code': c.customer_code,
+            'customer_name': c.customer_name or '',
+            'short_name': c.short_name or '',
+        }
+        for c in customers
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 製品一覧
+# ---------------------------------------------------------------------------
+def get_naiji_products(customer_id):
+    """指定顧客の内示製品一覧（Order→OrderLineで高速取得）"""
+    order_ids = list(
+        Order.objects
+        .filter(customer_id=customer_id, order_type='FORECAST')
+        .values_list('id', flat=True)
+    )
+    if not order_ids:
+        return []
+
+    product_codes = set()
+    ship_to_map = defaultdict(set)
+    for row in (
+        OrderLine.objects
+        .filter(order_id__in=order_ids)
+        .values('product_code', 'ship_to_code')
+        .distinct()
+    ):
+        product_codes.add(row['product_code'])
+        if row['ship_to_code']:
+            ship_to_map[row['product_code']].add(row['ship_to_code'])
+
+    product_names = {}
+    from masters.models import Product
+    for p in Product.objects.filter(
+        product_code__in=list(product_codes)
+    ).values('product_code', 'product_name'):
+        product_names[p['product_code']] = p['product_name'] or ''
+
+    return sorted([
+        {
+            'product_code': pc,
+            'product_name': product_names.get(pc, ''),
+            'snapshot_count': None,
+            'latest_date': None,
+            'ship_to_list': sorted(ship_to_map.get(pc, [])),
+        }
+        for pc in product_codes
+    ], key=lambda x: x['product_code'])
+
+
+# ---------------------------------------------------------------------------
+# メイン分析
+# ---------------------------------------------------------------------------
+def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=None, ship_to=''):
+    """内示変化推移分析データを計算して返す（汎用版）"""
+    customer = Customer.objects.select_related('calendar').filter(id=customer_id).first()
+    cal = _get_customer_calendar(customer)
+    wdc = WorkingDayCalculator(cal)
+    customer_code = customer.customer_code if customer else ''
+
+    # --- スナップショット構築 ---
+    qs = (
+        StgOrderDaily.objects
+        .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
+        .order_by('created_at', 'id')
+    )
+    if ship_to:
+        qs = qs.filter(ship_to_code=ship_to)
+
+    snapshots_map = {}      # source_file -> {due_date_iso -> qty}
+    snapshot_dates = {}     # source_file -> created_at
+    for row in qs:
+        sf = row.source_file
+        if not sf:
+            continue
+        ds = row.due_date.isoformat()
+        if start_date and row.due_date < start_date:
+            continue
+        if end_date and row.due_date > end_date:
+            continue
+        if sf not in snapshots_map:
+            snapshots_map[sf] = {}
+            snapshot_dates[sf] = row.created_at
+        qty = float(row.quantity or 0)
+        snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
+
+    # 休日除外した納期一覧
+    all_due_dates = sorted({
+        ds
+        for qtys in snapshots_map.values()
+        for ds in qtys.keys()
+        if wdc.is_working_day(date.fromisoformat(ds))
+    })
+
+    ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
+    snapshots = [
+        {
+            'source_file': sf,
+            'snapshot_date': snapshot_dates[sf].date().isoformat(),
+            'quantities': snapshots_map[sf],
+        }
+        for sf in ordered_files
+    ]
+
+    # --- 確定数量 (OrderLine FIRM/OPEN) ---
+    firm_qs = OrderLine.objects.filter(
+        order__order_type='FIRM',
+        order__status='OPEN',
+        order__customer_id=customer_id,
+        product_code=product_code,
+    )
+    if ship_to:
+        firm_qs = firm_qs.filter(ship_to_code=ship_to)
+    if start_date:
+        firm_qs = firm_qs.filter(due_date__gte=start_date)
+    if end_date:
+        firm_qs = firm_qs.filter(due_date__lte=end_date)
+
+    firm_quantities = {}
+    for row in firm_qs.values('due_date').annotate(total_qty=Sum('quantity')):
+        firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
+
+    # --- 確定日抽出（汎用：注文番号→order_dateフォールバック） ---
+    firm_dates = {}
+    for line in firm_qs.select_related('order').only('due_date', 'order__order_no', 'order__order_date'):
+        issue_date_obj = _extract_firm_issue_date(line.order.order_no, customer_code)
+        if issue_date_obj is None:
+            issue_date_obj = line.order.order_date
+        if issue_date_obj is None:
+            continue
+        ds = line.due_date.isoformat()
+        if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
+            firm_dates[ds] = issue_date_obj.isoformat()
+
+    # --- 統計計算（納期ごと）---
+    stat_results = {}
+    for ds in all_due_dates:
+        _raw = [snapshots_map[sf][ds] for sf in ordered_files if ds in snapshots_map[sf]]
+        _first_pos = next((i for i, q in enumerate(_raw) if q > 0), None)
+        qty_series = _raw[_first_pos:] if _first_pos is not None else []
+        if not qty_series:
+            continue
+
+        mean_val = sum(qty_series) / len(qty_series)
+        std_val = statistics.stdev(qty_series) if len(qty_series) >= 2 else 0.0
+        min_val = min(qty_series)
+        max_val = max(qty_series)
+        first_qty = qty_series[0]
+        last_qty = qty_series[-1]
+        firm_qty = firm_quantities.get(ds)
+
+        stat_results[ds] = {
+            'count': len(qty_series),
+            'mean': round(mean_val, 2),
+            'std_dev': round(std_val, 2),
+            'min': min_val,
+            'max': max_val,
+            'range': round(max_val - min_val, 2),
+            'cv': round(std_val / mean_val * 100, 2) if mean_val else 0.0,
+            'first_qty': first_qty,
+            'last_qty': last_qty,
+            'first_to_last_change': round(last_qty - first_qty, 2),
+            'first_to_last_pct': round((last_qty - first_qty) / first_qty * 100, 1) if first_qty else None,
+            'firm_qty': firm_qty,
+            'last_vs_firm': round(last_qty - firm_qty, 2) if firm_qty is not None else None,
+            'last_vs_firm_pct': round((last_qty - firm_qty) / firm_qty * 100, 1) if firm_qty else None,
+        }
+
+    # --- 期間サマリー ---
+    period_summary = _compute_period_summary(
+        all_due_dates, snapshots_map, ordered_files, snapshot_dates,
+        firm_quantities, firm_dates, wdc,
+    )
+
+    return {
+        'product_code': product_code,
+        'due_dates': all_due_dates,
+        'snapshots': snapshots,
+        'firm_quantities': firm_quantities,
+        'firm_dates': firm_dates,
+        'converge_dates': period_summary.pop('converge_dates', {}),
+        'statistics': stat_results,
+        'period_summary': period_summary,
+    }
+
+
+def _compute_period_summary(all_due_dates, snapshots_map, ordered_files, snapshot_dates,
+                            firm_quantities, firm_dates, wdc):
+    """期間全体サマリー（安全在庫分析）を計算"""
+    all_errors = []
+    date_max_shortages = []
+    n_dates_with_firm = 0
+    n_dates_shortage = 0
+    _max_diff_val = _max_diff_date = _min_diff_val = _min_diff_date = None
+
+    for ds in all_due_dates:
+        firm_qty = firm_quantities.get(ds)
+        if firm_qty is None:
+            continue
+        n_dates_with_firm += 1
+        _raw = [snapshots_map[sf][ds] for sf in ordered_files if ds in snapshots_map[sf]]
+        qty_series = [q for q in _raw if q > 0]
+        if not qty_series:
+            continue
+        has_shortage = False
+        _date_worst = 0.0
+        for q in qty_series:
+            err = q - firm_qty
+            all_errors.append(err)
+            if _max_diff_val is None or err > _max_diff_val:
+                _max_diff_val = err
+                _max_diff_date = ds
+            if _min_diff_val is None or err < _min_diff_val:
+                _min_diff_val = err
+                _min_diff_date = ds
+            if q < firm_qty:
+                has_shortage = True
+                s = firm_qty - q
+                if s > _date_worst:
+                    _date_worst = s
+        if _date_worst > 0:
+            date_max_shortages.append((round(_date_worst, 1), ds))
+        if has_shortage:
+            n_dates_shortage += 1
+
+    # --- 収束安定期間 ---
+    stable_days_list = []
+    converge_dates = {}
+    pre_converge_shortage_count = 0
+    pre_converge_shortage_dates = []
+    n_converge_total = 0
+    firm_due_lt5_count = 0
+    firm_due_lt5_total = 0
+    firm_converge_on_or_after_firm_count = 0
+    firm_converge_on_or_after_firm_total = 0
+    firm_converge_on_or_after_firm_dates_list = []
+
+    firm_stable_days_list = []
+    firm_delay_count = 0
+    firm_delay_total = 0
+
+    for ds in all_due_dates:
+        firm_qty = firm_quantities.get(ds)
+        if firm_qty is None:
+            continue
+        due_date_obj = date.fromisoformat(ds)
+        current_streak_start = None
+        prev_qty = None
+        for sf in ordered_files:
+            if ds not in snapshots_map[sf]:
+                continue
+            qty = snapshots_map[sf][ds]
+            if qty <= 0:
+                continue
+            snap_date = snapshot_dates[sf].date()
+            if abs(qty - firm_qty) < 0.5:
+                if current_streak_start is None:
+                    current_streak_start = snap_date
+            else:
+                current_streak_start = None
+                prev_qty = qty
+        if current_streak_start is not None:
+            converge_dates[ds] = current_streak_start.isoformat()
+            n_converge_total += 1
+            if prev_qty is not None and prev_qty < firm_qty - 0.5:
+                pre_converge_shortage_count += 1
+                pre_converge_shortage_dates.append((round(firm_qty - prev_qty, 1), ds))
+            days = _count_working_days(wdc, current_streak_start, due_date_obj)
+            if days >= 0:
+                stable_days_list.append((days, ds))
+                firm_date_str = firm_dates.get(ds)
+                if firm_date_str:
+                    firm_date_obj = date.fromisoformat(firm_date_str)
+                    firm_due_lt5_total += 1
+                    if _count_working_days(wdc, firm_date_obj, due_date_obj) < 5:
+                        firm_due_lt5_count += 1
+                    firm_converge_on_or_after_firm_total += 1
+                    if current_streak_start >= firm_date_obj:
+                        firm_converge_on_or_after_firm_count += 1
+                        firm_converge_on_or_after_firm_dates_list.append(ds)
+                    fdays = _count_working_days(wdc, current_streak_start, firm_date_obj)
+                    firm_stable_days_list.append((fdays, ds))
+                    firm_delay_total += 1
+                    if firm_date_obj >= due_date_obj:
+                        firm_delay_count += 1
+
+    # 収束日数統計
+    if stable_days_list:
+        days_vals = sorted([d for d, _ in stable_days_list])
+        _n = len(days_vals)
+        stable_days_mean = round(sum(days_vals) / _n, 1)
+        stable_days_median = days_vals[_n // 2] if _n % 2 == 1 else round((days_vals[_n // 2 - 1] + days_vals[_n // 2]) / 2, 1)
+        stable_days_std = round(statistics.stdev(days_vals), 1) if _n >= 2 else 0.0
+        _min_e = min(stable_days_list, key=lambda x: x[0])
+        _max_e = max(stable_days_list, key=lambda x: x[0])
+        within_7_dates = sorted([ds for d, ds in stable_days_list if d <= 7])
+        stable_days_dist = {
+            'within_7': sum(1 for d in days_vals if d <= 7),
+            'within_7_pct': round(sum(1 for d in days_vals if d <= 7) / _n * 100, 1),
+            'within_7_dates': within_7_dates,
+            'within_8_14': sum(1 for d in days_vals if 8 <= d <= 14),
+            'within_8_14_pct': round(sum(1 for d in days_vals if 8 <= d <= 14) / _n * 100, 1),
+            'within_15_21': sum(1 for d in days_vals if 15 <= d <= 21),
+            'within_15_21_pct': round(sum(1 for d in days_vals if 15 <= d <= 21) / _n * 100, 1),
+            'over_21': sum(1 for d in days_vals if d > 21),
+            'over_21_pct': round(sum(1 for d in days_vals if d > 21) / _n * 100, 1),
+        }
+    else:
+        stable_days_mean = stable_days_median = stable_days_std = None
+        _min_e = _max_e = (None, None)
+        stable_days_dist = None
+
+    # 確定安定日数統計
+    if firm_stable_days_list:
+        fdays_vals = [d for d, _ in firm_stable_days_list]
+        firm_stable_days_mean = round(sum(fdays_vals) / len(fdays_vals), 1)
+        _fmin_e = min(firm_stable_days_list, key=lambda x: x[0])
+        _fmax_e = max(firm_stable_days_list, key=lambda x: x[0])
+    else:
+        firm_stable_days_mean = None
+        _fmin_e = _fmax_e = (None, None)
+    firm_stable_days_negative_rate = round(firm_delay_count / firm_delay_total * 100, 1) if firm_delay_total > 0 else None
+
+    # 誤差集計
+    n = len(all_errors)
+    if n > 0:
+        abs_errors = [abs(e) for e in all_errors]
+        mae = round(sum(abs_errors) / n, 2)
+        max_diff = round(_max_diff_val, 2)
+        min_diff = round(_min_diff_val, 2)
+        mean_err = round(sum(all_errors) / n, 2)
+        sigma = round(statistics.stdev(all_errors), 2) if n >= 2 else 0.0
+        shortage_rate = round(n_dates_shortage / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else 0.0
+
+        if date_max_shortages:
+            _qty_list = [qty for qty, _ in date_max_shortages]
+            _counter = Counter(_qty_list)
+            _sorted = sorted(_counter.items(), key=lambda x: x[0], reverse=True)
+            max_shortage = _sorted[0][0]
+            worst1_rate = round(_sorted[0][1] / n_dates_with_firm * 100, 1) if n_dates_with_firm > 0 else None
+            worst1_dates = sorted([ds for qty, ds in date_max_shortages if qty == max_shortage])
+            worst2_qty = _sorted[1][0] if len(_sorted) > 1 else None
+            worst2_rate = round(_sorted[1][1] / n_dates_with_firm * 100, 1) if len(_sorted) > 1 and n_dates_with_firm > 0 else None
+            worst2_dates = sorted([ds for qty, ds in date_max_shortages if qty == worst2_qty]) if worst2_qty is not None else []
+        else:
+            max_shortage = 0.0
+            worst1_rate = worst2_qty = worst2_rate = None
+            worst1_dates = worst2_dates = []
+
+        bias = -mean_err if mean_err < 0 else 0.0
+        ss_90 = round(1.28 * sigma + bias, 1)
+        ss_95 = round(1.65 * sigma + bias, 1)
+        ss_99 = round(2.33 * sigma + bias, 1)
+    else:
+        mae = max_diff = min_diff = mean_err = sigma = None
+        _max_diff_date = _min_diff_date = None
+        shortage_rate = max_shortage = worst1_rate = worst2_qty = worst2_rate = None
+        worst1_dates = worst2_dates = []
+        ss_90 = ss_95 = ss_99 = None
+        n_dates_with_firm = 0
+
+    firm_due_lt5_rate = round(firm_due_lt5_count / firm_due_lt5_total * 100, 1) if firm_due_lt5_total > 0 else None
+    firm_converge_on_or_after_firm_rate = round(
+        firm_converge_on_or_after_firm_count / firm_converge_on_or_after_firm_total * 100, 1
+    ) if firm_converge_on_or_after_firm_total > 0 else None
+
+    return {
+        'analyzed_dates': len(all_due_dates),
+        'dates_with_firm': n_dates_with_firm,
+        'mae': mae,
+        'max_diff': max_diff,
+        'max_diff_date': _max_diff_date,
+        'min_diff': min_diff,
+        'min_diff_date': _min_diff_date,
+        'mean_error': mean_err,
+        'sigma': sigma,
+        'shortage_rate': shortage_rate,
+        'shortage_dates': n_dates_shortage,
+        'max_shortage': max_shortage,
+        'worst1_rate': worst1_rate,
+        'worst1_dates': worst1_dates,
+        'worst2_qty': worst2_qty,
+        'worst2_rate': worst2_rate,
+        'worst2_dates': worst2_dates,
+        'safety_stock_90': ss_90,
+        'safety_stock_95': ss_95,
+        'safety_stock_99': ss_99,
+        'stable_days_mean': stable_days_mean,
+        'stable_days_median': stable_days_median,
+        'stable_days_std': stable_days_std,
+        'stable_days_dist': stable_days_dist,
+        'stable_days_min': _min_e[0],
+        'stable_days_min_date': _min_e[1],
+        'stable_days_max': _max_e[0],
+        'stable_days_max_date': _max_e[1],
+        'stable_days_count': len(stable_days_list) if stable_days_list else None,
+        'pre_converge_shortage_rate': round(pre_converge_shortage_count / n_converge_total * 100, 1) if n_converge_total > 0 else None,
+        'pre_converge_shortage_count': pre_converge_shortage_count,
+        'pre_converge_total': n_converge_total,
+        'pre_converge_shortage_dates': sorted(pre_converge_shortage_dates, key=lambda x: -x[0]),
+        'firm_due_lt5_count': firm_due_lt5_count,
+        'firm_due_lt5_total': firm_due_lt5_total,
+        'firm_due_lt5_rate': firm_due_lt5_rate,
+        'firm_converge_on_or_after_firm_count': firm_converge_on_or_after_firm_count,
+        'firm_converge_on_or_after_firm_total': firm_converge_on_or_after_firm_total,
+        'firm_converge_on_or_after_firm_rate': firm_converge_on_or_after_firm_rate,
+        'firm_converge_on_or_after_firm_dates': sorted(firm_converge_on_or_after_firm_dates_list),
+        'converge_dates': converge_dates,
+        'firm_stable_days_mean': firm_stable_days_mean,
+        'firm_stable_days_min': _fmin_e[0],
+        'firm_stable_days_min_date': _fmin_e[1],
+        'firm_stable_days_max': _fmax_e[0],
+        'firm_stable_days_max_date': _fmax_e[1],
+        'firm_stable_days_count': len(firm_stable_days_list) if firm_stable_days_list else None,
+        'firm_stable_days_negative_rate': firm_stable_days_negative_rate,
+    }
+
+
+# ---------------------------------------------------------------------------
+# バッチサマリー（一括分析レポート用）
+# ---------------------------------------------------------------------------
+def compute_naiji_summary(customer_id, product_code, start_date=None, end_date=None, ship_to=''):
+    """一括レポート用のサマリーデータを計算"""
+    customer = Customer.objects.select_related('calendar').filter(id=customer_id).first()
+    cal = _get_customer_calendar(customer)
+    wdc = WorkingDayCalculator(cal)
+    customer_code = customer.customer_code if customer else ''
+
+    product_name = ''
+    first = (
+        StgOrderDaily.objects
+        .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
+        .values('product_name')
+        .first()
+    )
+    if first:
+        product_name = first['product_name'] or ''
+
+    qs = (
+        StgOrderDaily.objects
+        .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
+        .order_by('created_at', 'id')
+    )
+    if ship_to:
+        qs = qs.filter(ship_to_code=ship_to)
+
+    snapshots_map = {}
+    snapshot_dates = {}
+    for row in qs:
+        sf = row.source_file
+        if not sf:
+            continue
+        ds = row.due_date.isoformat()
+        if start_date and row.due_date < start_date:
+            continue
+        if end_date and row.due_date > end_date:
+            continue
+        if sf not in snapshots_map:
+            snapshots_map[sf] = {}
+            snapshot_dates[sf] = row.created_at
+        qty = float(row.quantity or 0)
+        snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
+
+    all_due_dates = sorted({
+        ds
+        for qtys in snapshots_map.values()
+        for ds in qtys.keys()
+        if wdc.is_working_day(date.fromisoformat(ds))
+    })
+    ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
+
+    firm_qs = OrderLine.objects.filter(
+        order__order_type='FIRM', order__status='OPEN',
+        order__customer_id=customer_id, product_code=product_code,
+    )
+    if ship_to:
+        firm_qs = firm_qs.filter(ship_to_code=ship_to)
+    if start_date:
+        firm_qs = firm_qs.filter(due_date__gte=start_date)
+    if end_date:
+        firm_qs = firm_qs.filter(due_date__lte=end_date)
+
+    firm_quantities = {}
+    for row in firm_qs.values('due_date').annotate(total_qty=Sum('quantity')):
+        firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
+
+    firm_dates = {}
+    for line in firm_qs.select_related('order').only('due_date', 'order__order_no', 'order__order_date'):
+        issue_date_obj = _extract_firm_issue_date(line.order.order_no, customer_code)
+        if issue_date_obj is None:
+            issue_date_obj = line.order.order_date
+        if issue_date_obj is None:
+            continue
+        ds = line.due_date.isoformat()
+        if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
+            firm_dates[ds] = issue_date_obj.isoformat()
+
+    summary = _compute_period_summary(
+        all_due_dates, snapshots_map, ordered_files, snapshot_dates,
+        firm_quantities, firm_dates, wdc,
+    )
+    summary['product_code'] = product_code
+    summary['product_name'] = product_name
+    summary['snapshot_count'] = len(ordered_files)
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Excelレポート生成
+# ---------------------------------------------------------------------------
+def generate_batch_report_excel(customer_id, entries, start_date=None, end_date=None):
+    """複数製品の内示分析サマリーをExcelワークブックで返す"""
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    customer = Customer.objects.filter(id=customer_id).first()
+    customer_name = customer.customer_name if customer else ''
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '内示分析'
+
+    header_fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+    header_font = Font(color='FFFFFF', bold=True, size=10)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin = Side(style='thin', color='CCCCCC')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    period_str = ''
+    if start_date:
+        period_str += f'納期: {start_date.isoformat()}'
+    if end_date:
+        period_str += f' ～ {end_date.isoformat()}'
+    ws.append([f'{customer_name} 内示変化推移分析 一括レポート　{period_str}'])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=25)
+    title_cell = ws.cell(row=1, column=1)
+    title_cell.font = Font(bold=True, size=12, color='1F4E79')
+    title_cell.alignment = Alignment(horizontal='left', vertical='center')
+    ws.row_dimensions[1].height = 22
+
+    ws.append(['', '', '', '予測誤差（全スナップショット − 確定）', '', '', '', '', '', '', '欠品リスク', '', '', '', '', '推奨安全在庫量', '', '', '収束安定期間（日数）', '', '', '', '', '', '', '安定日数（確定登録まで）', '', '', '', ''])
+    cat_row = 2
+    cat_ranges = [(4, 10), (11, 15), (16, 18), (19, 25), (26, 31)]
+    cat_labels = ['予測誤差（全スナップショット − 確定）', '欠品リスク（内示＜確定）', '推奨安全在庫量（Z×σ）', '収束安定期間（内示＝確定が続いた日数）', '安定日数（収束開始→確定登録日）']
+    cat_fills = ['2E75B6', 'C00000', '375623', '7030A0', 'BF8F00']
+    for (start_col, end_col), label, fill_color in zip(cat_ranges, cat_labels, cat_fills):
+        ws.merge_cells(start_row=cat_row, start_column=start_col, end_row=cat_row, end_column=end_col)
+        cell = ws.cell(row=cat_row, column=start_col)
+        cell.value = label
+        cell.font = Font(color='FFFFFF', bold=True, size=9)
+        cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
+        cell.alignment = center
+        cell.border = border
+    for col in range(1, 4):
+        cell = ws.cell(row=cat_row, column=col)
+        cell.fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+        cell.border = border
+
+    headers = [
+        '品番', '品名', 'スナップ\nショット数',
+        '最大差', '最大差日', '最小差', '最小差日', 'MAE', '平均差', 'σ',
+        '内示過小率(%)', 'ワースト1\n過小量', 'ワースト1\n出現率(%)', 'ワースト2\n過小量', 'ワースト2\n出現率(%)',
+        '安全在庫\n90%', '安全在庫\n95%', '安全在庫\n99%',
+        '収束\n平均日', '収束\n中央値', '収束\n標準偏差', '収束\n≤7日', '収束\n8-14日', '収束\n15-21日', '収束\n≥22日', '収束\n最短日', '収束最短日', '収束\n最長日', '収束最長日', '収束\n対象件数', '分析\n納期数',
+        '安定\n平均日', '安定\n最短日', '安定最短日', '安定\n最長日', '安定\n対象件数', '安定\nマイナス率%',
+    ]
+    ws.append(headers)
+    header_row = 3
+    header_col_fills = (
+        ['1F4E79'] * 3 +
+        ['2E75B6'] * 7 +
+        ['C00000'] * 5 +
+        ['375623'] * 3 +
+        ['7030A0'] * 13 +
+        ['BF8F00'] * 6
+    )
+    for col_idx, (hdr, fill_color) in enumerate(zip(headers, header_col_fills), start=1):
+        cell = ws.cell(row=header_row, column=col_idx)
+        cell.value = hdr
+        cell.font = Font(color='FFFFFF', bold=True, size=9)
+        cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
+        cell.alignment = center
+        cell.border = border
+    ws.row_dimensions[header_row].height = 30
+
+    def _v(val):
+        return val if val is not None else ''
+
+    def _parse_entry(entry_str):
+        if ':' in entry_str:
+            pc, st = entry_str.split(':', 1)
+            return pc.strip(), st.strip()
+        return entry_str.strip(), ''
+
+    for row_idx, entry in enumerate(entries, start=4):
+        pc, st = _parse_entry(entry)
+        summary = compute_naiji_summary(customer_id, pc, start_date, end_date, ship_to=st)
+        display_code = f"{summary['product_code']} ({st})" if st else summary['product_code']
+        row_data = [
+            display_code,
+            summary['product_name'],
+            _v(summary['snapshot_count']),
+            _v(summary['max_diff']),
+            _v(summary['max_diff_date']),
+            _v(summary['min_diff']),
+            _v(summary['min_diff_date']),
+            _v(summary['mae']),
+            _v(summary['mean_error']),
+            _v(summary['sigma']),
+            _v(summary['shortage_rate']),
+            _v(summary['max_shortage']),
+            _v(summary['worst1_rate']),
+            _v(summary['worst2_qty']),
+            _v(summary['worst2_rate']),
+            _v(summary['safety_stock_90']),
+            _v(summary['safety_stock_95']),
+            _v(summary['safety_stock_99']),
+            _v(summary['stable_days_mean']),
+            _v(summary.get('stable_days_median')),
+            _v(summary.get('stable_days_std')),
+            _v(summary.get('stable_days_dist', {}).get('within_7') if summary.get('stable_days_dist') else None),
+            _v(summary.get('stable_days_dist', {}).get('within_8_14') if summary.get('stable_days_dist') else None),
+            _v(summary.get('stable_days_dist', {}).get('within_15_21') if summary.get('stable_days_dist') else None),
+            _v(summary.get('stable_days_dist', {}).get('over_21') if summary.get('stable_days_dist') else None),
+            _v(summary['stable_days_min']),
+            _v(summary['stable_days_min_date']),
+            _v(summary['stable_days_max']),
+            _v(summary['stable_days_max_date']),
+            _v(summary['stable_days_count']),
+            _v(summary['analyzed_dates']),
+            _v(summary['firm_stable_days_mean']),
+            _v(summary['firm_stable_days_min']),
+            _v(summary['firm_stable_days_min_date']),
+            _v(summary['firm_stable_days_max']),
+            _v(summary['firm_stable_days_count']),
+            _v(summary['firm_stable_days_negative_rate']),
+        ]
+        ws.append(row_data)
+        row_fill = 'EBF3FB' if row_idx % 2 == 0 else 'FFFFFF'
+        for col_idx in range(1, 38):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            if col_idx in (1, 2):
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.fill = PatternFill(start_color=row_fill, end_color=row_fill, fill_type='solid')
+
+    col_widths = [18, 20, 8, 7, 12, 7, 12, 7, 7, 7, 10, 10, 9, 10, 9, 9, 9, 9, 8, 8, 8, 8, 8, 8, 8, 8, 12, 8, 12, 8, 8, 8, 8, 12, 8, 8, 10]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    ws.freeze_panes = 'A4'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf, customer_name

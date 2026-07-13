@@ -12,6 +12,12 @@ const orders = [
     meta: { pageTitle: "クボタ内示変化推移分析", manualPath: "受注/クボタ内示変化推移分析.md", resource: "orders.kubota_analysis" },
   },
   {
+    path: "/orders/naiji-analysis",
+    name: "NaijiAnalysis",
+    component: () => import("@/views/orders/NaijiAnalysis.vue"),
+    meta: { pageTitle: "内示分析", resource: "orders.naiji_analysis" },
+  },
+  {
     path: "/orders/missing-routing-items",
     name: "MissingRoutingOrderItems",
     component: () => import("@/views/orders/MissingRoutingOrderItems.vue"),

@@ -108,6 +108,14 @@ const tiles = computed(() => [
     resource: "orders.kubota_analysis",
   },
   {
+    key: "naiji_analysis",
+    to: "/orders/naiji-analysis",
+    label: "内示分析",
+    icon: "📈",
+    required: "view",
+    resource: "orders.naiji_analysis",
+  },
+  {
     key: "line_expand",
     to: null,
     label: "ライン展開",

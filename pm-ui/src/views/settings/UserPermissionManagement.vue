@@ -372,6 +372,7 @@ const permissionResources = [
   { value: 'orders.list', label: '受注: 受注一覧' },
   { value: 'orders.csv_import', label: '受注: 受注取込' },
   { value: 'orders.kubota_analysis', label: '受注: クボタ内示変化推移分析' },
+  { value: 'orders.naiji_analysis', label: '受注: 内示分析' },
   { value: 'orders.line_expand', label: '受注: ライン展開' },
   { value: 'production', label: '生産' },
   { value: 'production.process_input', label: '生産: 工程作業入力' },

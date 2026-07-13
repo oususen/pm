@@ -1611,6 +1611,114 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
     ordering_fields = ['due_date', 'created_at']
     ordering = ['due_date']
 
+    # ---- 汎用内示分析 API ----
+
+    @action(detail=False, methods=['get'])
+    def naiji_customers(self, request):
+        """内示データがある顧客一覧"""
+        from orders.core.services.naiji_analysis_service import get_naiji_customers
+        return Response(get_naiji_customers())
+
+    @action(detail=False, methods=['get'])
+    def naiji_products(self, request):
+        """指定顧客の内示製品一覧"""
+        from orders.core.services.naiji_analysis_service import get_naiji_products
+        customer_id = request.query_params.get('customer_id')
+        if not customer_id:
+            return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(get_naiji_products(int(customer_id)))
+
+    @action(detail=False, methods=['get'])
+    def naiji_analysis(self, request):
+        """内示変化推移分析（汎用版）"""
+        from datetime import datetime
+        from orders.core.services.naiji_analysis_service import compute_naiji_analysis
+
+        customer_id = request.query_params.get('customer_id')
+        product_code = request.query_params.get('product_code')
+        if not customer_id or not product_code:
+            return Response({'error': 'customer_id と product_code は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        ship_to = request.query_params.get('ship_to', '').strip()
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+        except ValueError:
+            return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        result = compute_naiji_analysis(int(customer_id), product_code, start_date, end_date, ship_to)
+        return Response(result)
+
+    @action(detail=False, methods=['get'])
+    def naiji_batch_preview(self, request):
+        """複数製品の内示分析サマリーをJSONで返す"""
+        from datetime import datetime
+        from orders.core.services.naiji_analysis_service import compute_naiji_summary
+
+        customer_id = request.query_params.get('customer_id')
+        codes_str = request.query_params.get('product_codes', '')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        if not customer_id:
+            return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        entries = [c.strip() for c in codes_str.split(',') if c.strip()]
+        if not entries:
+            return Response({'error': 'product_codes は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+        except ValueError:
+            return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = []
+        for entry in entries:
+            pc, st = (entry.split(':', 1) + [''])[:2]
+            pc, st = pc.strip(), st.strip()
+            summary = compute_naiji_summary(int(customer_id), pc, start_date, end_date, ship_to=st)
+            if st:
+                summary['ship_to'] = st
+            results.append(summary)
+        return Response(results)
+
+    @action(detail=False, methods=['get'])
+    def naiji_batch_report(self, request):
+        """複数製品の内示分析サマリーをExcelで返す"""
+        from datetime import datetime
+        from django.http import HttpResponse
+        from urllib.parse import quote
+        from orders.core.services.naiji_analysis_service import generate_batch_report_excel
+
+        customer_id = request.query_params.get('customer_id')
+        codes_str = request.query_params.get('product_codes', '')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        if not customer_id:
+            return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        entries = [c.strip() for c in codes_str.split(',') if c.strip()]
+        if not entries:
+            return Response({'error': 'product_codes は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+        except ValueError:
+            return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        buf, customer_name = generate_batch_report_excel(int(customer_id), entries, start_date, end_date)
+        period_label = f'{start_date_str or ""}_{end_date_str or ""}'
+        filename = f'{customer_name}_内示分析_{period_label}.xlsx'
+        response = HttpResponse(
+            buf.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
+
 
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import get_user_model

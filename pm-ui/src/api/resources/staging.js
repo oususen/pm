@@ -31,4 +31,24 @@ export const createStagingAPI = (client) => ({
       responseType: 'arraybuffer',
     })
   },
+
+  // 汎用内示分析
+  getNaijiCustomers() {
+    return client.get('/stg-order-daily/naiji_customers/')
+  },
+  getNaijiProducts(params) {
+    return client.get('/stg-order-daily/naiji_products/', { params })
+  },
+  getNaijiAnalysis(params) {
+    return client.get('/stg-order-daily/naiji_analysis/', { params })
+  },
+  getNaijiBatchPreview(params) {
+    return client.get('/stg-order-daily/naiji_batch_preview/', { params })
+  },
+  downloadNaijiBatchReport(params) {
+    return client.get('/stg-order-daily/naiji_batch_report/', {
+      params,
+      responseType: 'arraybuffer',
+    })
+  },
 })
