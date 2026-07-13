@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, Max, OuterRef, Q
 from django.core.files.storage import default_storage
 import django_filters
 import os
@@ -3063,9 +3063,109 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if sync_fields:
             self._sync_item_fields_to_routing(item, sync_fields)
 
+    def _add_bom_item_to_routings(self, bom_item: BOMItem):
+        """BOMItem追加時に、親製品をoutput_productとする全アクティブルーティングにステップを追加"""
+        parent_product = bom_item.bom.parent_product
+
+        parent_steps = RoutingStep.objects.filter(
+            output_product=parent_product,
+            routing__is_active=True,
+        ).select_related('routing')
+
+        if not parent_steps.exists():
+            return 0
+
+        process = bom_item.process
+        line = bom_item.line
+        supplier = bom_item.supplier
+        time_unit = bom_item.time_unit or 'DAY'
+        lead_time_days = int(bom_item.lead_time_days or 0)
+        duration_min = bom_item.duration_min
+
+        if bom_item.sourcing_type == 'BUY' and supplier:
+            line, process = self._get_or_create_purchase_line_and_process(supplier)
+            time_unit = 'DAY'
+            lead_time_days = lead_time_days or 1
+            duration_min = None
+        elif bom_item.sourcing_type == 'SUBCON' and supplier:
+            line, process = self._get_supplier_gaisaku_line_and_process(supplier)
+            time_unit = 'DAY'
+            lead_time_days = lead_time_days or 1
+            duration_min = None
+
+        created_count = 0
+        for parent_step in parent_steps:
+            routing = parent_step.routing
+
+            new_step_no = int(parent_step.step_no * 0.9)
+
+            max_pg = RoutingStep.objects.filter(routing=routing).aggregate(
+                v=Max('parallel_group')
+            )['v'] or 0
+            new_parallel_group = max_pg + 1
+
+            parent_path = parent_step.hierarchy_path or ''
+            if parent_path and parent_path != 'final':
+                prefix = parent_path + '.'
+                child_paths = RoutingStep.objects.filter(
+                    routing=routing,
+                    hierarchy_path__startswith=prefix,
+                ).values_list('hierarchy_path', flat=True)
+                max_child_idx = 0
+                prefix_len = len(prefix)
+                for cp in child_paths:
+                    segment = cp[prefix_len:].split('.')[0]
+                    try:
+                        max_child_idx = max(max_child_idx, int(segment))
+                    except (ValueError, IndexError):
+                        pass
+                new_path = f"{parent_path}.{max_child_idx + 1}"
+            else:
+                new_path = ''
+
+            RoutingStep.objects.create(
+                routing=routing,
+                step_no=new_step_no,
+                parallel_group=new_parallel_group,
+                process=process,
+                line=line,
+                supplier=supplier,
+                output_product=bom_item.child_product,
+                source_bom_item=bom_item,
+                hierarchy_depth=parent_step.hierarchy_depth + 1,
+                hierarchy_path=new_path,
+                time_unit=time_unit,
+                lead_time_days=lead_time_days,
+                duration_min=duration_min,
+                remark=parent_product.product_code,
+            )
+
+            RoutingStepMaterial.objects.get_or_create(
+                routing_step=parent_step,
+                component=bom_item.child_product,
+                defaults={
+                    'quantity': bom_item.quantity,
+                    'consume_timing': 'START',
+                }
+            )
+
+            created_count += 1
+
+        return created_count
+
     def perform_create(self, serializer):
         item = serializer.save()
         self._normalize_parent_bom_coproduct_flag(item)
+        self._created_item = item
+
+    def create(self, request, *args, **kwargs):
+        self._created_item = None
+        response = super().create(request, *args, **kwargs)
+        add_to_routing = request.data.get('add_to_routing', False)
+        if add_to_routing and self._created_item:
+            count = self._add_bom_item_to_routings(self._created_item)
+            response.data['routing_steps_created'] = count
+        return response
 
 
 class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

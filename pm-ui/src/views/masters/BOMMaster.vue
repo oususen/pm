@@ -444,6 +444,10 @@
             </div>
           </div>
           <div class="form-actions">
+            <label v-if="!editingItemId" class="checkbox-label" style="margin-right:12px;">
+              <input type="checkbox" v-model="itemForm.add_to_routing" class="checkbox-input" />
+              ルーティングにもステップ追加
+            </label>
             <button type="button" class="btn-primary" @click="saveBOMItem" :disabled="!canEdit">
               {{ editingItemId ? '明細を更新' : '明細を追加' }}
             </button>
@@ -960,7 +964,8 @@ const itemForm = ref({
   lead_time_days: 0,
   duration_min: 60,
   is_coproduct_driver: false,
-  remark: ''
+  remark: '',
+  add_to_routing: false,
 })
 const editingItemId = ref(null)
 const originalSourcingType = ref('')
@@ -1309,7 +1314,8 @@ const resetItemForm = () => {
     lead_time_days: 0,
     duration_min: 60,
     is_coproduct_driver: false,
-    remark: ''
+    remark: '',
+    add_to_routing: false,
   }
   editingItemId.value = null
   originalSourcingType.value = ''
@@ -2266,7 +2272,8 @@ const saveBOMItem = async () => {
       ? itemForm.value.duration_min
       : null,
     is_coproduct_driver: selectedBomIsCoproduct.value ? itemForm.value.is_coproduct_driver : false,
-    remark: itemForm.value.remark || ''
+    remark: itemForm.value.remark || '',
+    ...((!editingItemId.value && itemForm.value.add_to_routing) ? { add_to_routing: true } : {}),
   }
 
   try {
@@ -2282,8 +2289,15 @@ const saveBOMItem = async () => {
         alert('ルーティングを手動で直してください')
       }
     } else {
-      await api.boms.createBOMItem(payload)
-      alert('明細を追加しました')
+      const res = await api.boms.createBOMItem(payload)
+      const stepsCreated = res.data?.routing_steps_created
+      if (stepsCreated != null && stepsCreated > 0) {
+        alert(`明細を追加しました（${stepsCreated}件のルーティングにステップ追加）`)
+      } else if (payload.add_to_routing) {
+        alert('明細を追加しました（対象ルーティングなし）')
+      } else {
+        alert('明細を追加しました')
+      }
     }
     await fetchBOMItems(selectedBOM.value.id)
     await fetchBOMTree(selectedBOM.value.id)
