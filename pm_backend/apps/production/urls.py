@@ -1,6 +1,10 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from production.views_orphan_backlog import (
+    OrphanLineBacklogReportView,
+    OrphanLineBacklogFixView,
+)
 from production.views import (
     LineBacklogViewSet,
     LineDemandViewSet,
@@ -103,6 +107,8 @@ urlpatterns = [
     path('schedule-config/purchase-actual-reconcile/fix/', PurchaseActualReconcileFixView.as_view(), name='schedule-purchase-actual-reconcile-fix'),
     path('schedule-config/production-actual-reconcile/reports/', ProductionActualReconcileReportView.as_view(), name='schedule-production-actual-reconcile-reports'),
     path('schedule-config/production-actual-reconcile/fix/', ProductionActualReconcileFixView.as_view(), name='schedule-production-actual-reconcile-fix'),
+    path('orphan-backlog/report/', OrphanLineBacklogReportView.as_view(), name='orphan-backlog-report'),
+    path('orphan-backlog/fix/', OrphanLineBacklogFixView.as_view(), name='orphan-backlog-fix'),
     path('schedule-config/cancel/', ScheduleCancelView.as_view(), name='schedule-cancel'),
     path('line-backlog-adjustments/', LineBacklogAdjustmentView.as_view(), name='line-backlog-adjustments'),
     path('stock-migration/detect/', StockMigrationDetectView.as_view(), name='stock-migration-detect'),

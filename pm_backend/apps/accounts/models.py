@@ -285,6 +285,7 @@ class UserPermission(models.Model):
         ('settings.scheduled_tasks', '設定: 定時タスク設定'),
         ('settings.purchase_order_approval', '設定: 発注承認者設定'),
         ('settings.stocktake_init', '設定: 棚卸初期化'),
+        ('settings.orphan_backlog_maintenance', '設定: 孤立ライン実績メンテナンス'),
         ('settings.lock_date', '設定: 締め日管理'),
         ('settings.kubota_sakai_config', '設定: クボタ堺便計画設定'),
         ('settings.shipping_progress_horizon', '設定: 出荷進度再計算日数'),

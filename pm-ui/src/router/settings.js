@@ -102,6 +102,12 @@ const settings = [
     meta: { pageTitle: "棚卸初期化", resource: "settings.stocktake_init" },
   },
   {
+    path: "/settings/orphan-backlog-maintenance",
+    name: "OrphanBacklogMaintenance",
+    component: () => import("@/views/settings/OrphanBacklogMaintenance.vue"),
+    meta: { pageTitle: "孤立ライン実績メンテナンス", resource: "settings.orphan_backlog_maintenance" },
+  },
+  {
     path: "/settings/supplier-order-pattern",
     name: "SupplierOrderPatternSettings",
     redirect: "/purchase/supplier-order-pattern",
