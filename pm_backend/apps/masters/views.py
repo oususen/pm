@@ -3053,6 +3053,19 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step.save(update_fields=changed_fields + ['updated_at'])
 
     def perform_update(self, serializer):
+        if 'child_product' in serializer.validated_data:
+            child_product = serializer.validated_data['child_product']
+            bom_obj = serializer.instance.bom
+            parent_product_id = bom_obj.parent_product_id
+            child_product_id = child_product.id if hasattr(child_product, 'id') else child_product
+            if self._check_circular_bom(parent_product_id, child_product_id):
+                child_code = getattr(child_product, 'product_code', child_product_id)
+                parent_code = bom_obj.parent_product.product_code
+                raise serializers.ValidationError(
+                    {'detail': f'{child_code} のBOMツリーに {parent_code} が含まれているため、'
+                               f'変更すると循環参照になります。'}
+                )
+
         sync_fields = [
             key for key in (
                 'lead_time_days', 'duration_min', 'supplier', 'sourcing_type', 'process', 'line', 'time_unit',
@@ -3063,18 +3076,18 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if sync_fields:
             self._sync_item_fields_to_routing(item, sync_fields)
 
-    def _add_bom_item_to_routings(self, bom_item: BOMItem):
-        """BOMItem追加時に、親製品をoutput_productとする全アクティブルーティングにステップを追加"""
-        parent_product = bom_item.bom.parent_product
+    def _find_active_bom(self, product):
+        today = date.today()
+        bom = BOM.objects.filter(
+            parent_product=product, is_active=True, valid_from__lte=today,
+        ).order_by('-valid_from', '-id').first()
+        if bom:
+            return bom
+        return BOM.objects.filter(
+            parent_product=product, is_active=True,
+        ).order_by('-valid_from', '-id').first()
 
-        parent_steps = RoutingStep.objects.filter(
-            output_product=parent_product,
-            routing__is_active=True,
-        ).select_related('routing')
-
-        if not parent_steps.exists():
-            return 0
-
+    def _resolve_step_fields(self, bom_item):
         process = bom_item.process
         line = bom_item.line
         supplier = bom_item.supplier
@@ -3093,67 +3106,154 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             lead_time_days = lead_time_days or 1
             duration_min = None
 
+        return process, line, supplier, time_unit, lead_time_days, duration_min
+
+    def _calc_next_hierarchy_path(self, routing, parent_path):
+        if not parent_path or parent_path == 'final':
+            return ''
+        prefix = parent_path + '.'
+        child_paths = RoutingStep.objects.filter(
+            routing=routing, hierarchy_path__startswith=prefix,
+        ).values_list('hierarchy_path', flat=True)
+        max_idx = 0
+        prefix_len = len(prefix)
+        for cp in child_paths:
+            segment = cp[prefix_len:].split('.')[0]
+            try:
+                max_idx = max(max_idx, int(segment))
+            except (ValueError, IndexError):
+                pass
+        return f"{parent_path}.{max_idx + 1}"
+
+    def _create_steps_recursive(self, bom_item, parent_step, routing,
+                                parent_product_code, visited_bom_ids, collector):
+        new_step_no = int(parent_step.step_no * 0.9)
+        if new_step_no <= 0:
+            raise ValueError(
+                f'ルーティング「{routing.routing_code}」(ID:{routing.id}) の'
+                f'ステップ「{parent_step.output_product.product_code}」(step_no={parent_step.step_no}) '
+                f'の子として追加するとstep_no={new_step_no}になるため追加できません。'
+                f'先にこのステップのstep_noを1以上に変更してください。'
+            )
+
+        process, line, supplier, time_unit, lt_days, dur_min = self._resolve_step_fields(bom_item)
+
+        max_pg = RoutingStep.objects.filter(routing=routing).aggregate(
+            v=Max('parallel_group'))['v'] or 0
+        new_pg = max_pg + 1
+        new_path = self._calc_next_hierarchy_path(routing, parent_step.hierarchy_path or '')
+
+        new_step = RoutingStep.objects.create(
+            routing=routing,
+            step_no=new_step_no,
+            parallel_group=new_pg,
+            process=process,
+            line=line,
+            supplier=supplier,
+            output_product=bom_item.child_product,
+            source_bom_item=bom_item,
+            hierarchy_depth=parent_step.hierarchy_depth + 1,
+            hierarchy_path=new_path,
+            time_unit=time_unit,
+            lead_time_days=lt_days,
+            duration_min=dur_min,
+            remark=parent_product_code,
+        )
+        collector.append((bom_item, new_step))
+
+        child_bom = self._find_active_bom(bom_item.child_product)
+        if child_bom and child_bom.id not in visited_bom_ids:
+            next_visited = visited_bom_ids | {child_bom.id}
+            child_items = BOMItem.objects.filter(bom=child_bom).select_related(
+                'child_product', 'process', 'line', 'supplier',
+            ).order_by('id')
+            child_product_code = bom_item.child_product.product_code
+            for ci in child_items:
+                self._create_steps_recursive(
+                    ci, new_step, routing, child_product_code, next_visited, collector,
+                )
+
+    def _add_bom_item_to_routings(self, bom_item: BOMItem):
+        """BOMItem追加時に、親製品をoutput_productとする全アクティブルーティングにステップを再帰追加"""
+        parent_product = bom_item.bom.parent_product
+
+        parent_steps = RoutingStep.objects.filter(
+            output_product=parent_product,
+            routing__is_active=True,
+        ).select_related('routing')
+
+        if not parent_steps.exists():
+            return 0
+
         created_count = 0
         for parent_step in parent_steps:
             routing = parent_step.routing
+            collector = []
 
-            new_step_no = int(parent_step.step_no * 0.9)
-
-            max_pg = RoutingStep.objects.filter(routing=routing).aggregate(
-                v=Max('parallel_group')
-            )['v'] or 0
-            new_parallel_group = max_pg + 1
-
-            parent_path = parent_step.hierarchy_path or ''
-            if parent_path and parent_path != 'final':
-                prefix = parent_path + '.'
-                child_paths = RoutingStep.objects.filter(
-                    routing=routing,
-                    hierarchy_path__startswith=prefix,
-                ).values_list('hierarchy_path', flat=True)
-                max_child_idx = 0
-                prefix_len = len(prefix)
-                for cp in child_paths:
-                    segment = cp[prefix_len:].split('.')[0]
-                    try:
-                        max_child_idx = max(max_child_idx, int(segment))
-                    except (ValueError, IndexError):
-                        pass
-                new_path = f"{parent_path}.{max_child_idx + 1}"
-            else:
-                new_path = ''
-
-            RoutingStep.objects.create(
-                routing=routing,
-                step_no=new_step_no,
-                parallel_group=new_parallel_group,
-                process=process,
-                line=line,
-                supplier=supplier,
-                output_product=bom_item.child_product,
-                source_bom_item=bom_item,
-                hierarchy_depth=parent_step.hierarchy_depth + 1,
-                hierarchy_path=new_path,
-                time_unit=time_unit,
-                lead_time_days=lead_time_days,
-                duration_min=duration_min,
-                remark=parent_product.product_code,
+            self._create_steps_recursive(
+                bom_item, parent_step, routing,
+                parent_product.product_code, set(), collector,
             )
 
-            RoutingStepMaterial.objects.get_or_create(
-                routing_step=parent_step,
-                component=bom_item.child_product,
-                defaults={
-                    'quantity': bom_item.quantity,
-                    'consume_timing': 'START',
-                }
-            )
+            if collector:
+                RoutingStepMaterial.objects.get_or_create(
+                    routing_step=parent_step,
+                    component=bom_item.child_product,
+                    defaults={'quantity': bom_item.quantity, 'consume_timing': 'START'},
+                )
 
-            created_count += 1
+                for ci, step in collector:
+                    child_bom = self._find_active_bom(ci.child_product)
+                    if not child_bom:
+                        continue
+                    for sub in BOMItem.objects.filter(bom=child_bom).select_related('child_product'):
+                        RoutingStepMaterial.objects.get_or_create(
+                            routing_step=step,
+                            component=sub.child_product,
+                            defaults={'quantity': sub.quantity, 'consume_timing': 'START'},
+                        )
+
+            created_count += len(collector)
 
         return created_count
 
+    def _check_circular_bom(self, parent_product_id, child_product_id):
+        """子製品のBOMツリー（子孫方向）に親製品が含まれていないか検証"""
+        if parent_product_id == child_product_id:
+            return True
+        visited = set()
+        queue = [child_product_id]
+        while queue:
+            pid = queue.pop()
+            if pid in visited:
+                continue
+            visited.add(pid)
+            descendant_ids = list(
+                BOMItem.objects.filter(
+                    bom__parent_product_id=pid, bom__is_active=True,
+                ).values_list('child_product_id', flat=True)
+            )
+            for did in descendant_ids:
+                if did == parent_product_id:
+                    return True
+                queue.append(did)
+        return False
+
     def perform_create(self, serializer):
+        bom_id = serializer.validated_data.get('bom')
+        child_product = serializer.validated_data.get('child_product')
+        bom_obj = bom_id if isinstance(bom_id, BOM) else BOM.objects.select_related('parent_product').get(id=bom_id)
+        parent_product_id = bom_obj.parent_product_id
+        child_product_id = child_product.id if hasattr(child_product, 'id') else child_product
+
+        if self._check_circular_bom(parent_product_id, child_product_id):
+            child_code = getattr(child_product, 'product_code', child_product_id)
+            parent_code = bom_obj.parent_product.product_code
+            raise serializers.ValidationError(
+                {'detail': f'{child_code} のBOMツリーに {parent_code} が含まれているため、'
+                           f'追加すると循環参照になります。'}
+            )
+
         item = serializer.save()
         self._normalize_parent_bom_coproduct_flag(item)
         self._created_item = item
@@ -3161,12 +3261,15 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         from django.db import transaction
         add_to_routing = request.data.get('add_to_routing', False)
-        with transaction.atomic():
-            self._created_item = None
-            response = super().create(request, *args, **kwargs)
-            if add_to_routing and self._created_item:
-                count = self._add_bom_item_to_routings(self._created_item)
-                response.data['routing_steps_created'] = count
+        try:
+            with transaction.atomic():
+                self._created_item = None
+                response = super().create(request, *args, **kwargs)
+                if add_to_routing and self._created_item:
+                    count = self._add_bom_item_to_routings(self._created_item)
+                    response.data['routing_steps_created'] = count
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return response
 
 

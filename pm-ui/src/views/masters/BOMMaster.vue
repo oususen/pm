@@ -2296,7 +2296,7 @@ const saveBOMItem = async () => {
       const res = await api.boms.createBOMItem(payload)
       const stepsCreated = res.data?.routing_steps_created
       if (stepsCreated != null && stepsCreated > 0) {
-        alert(`明細を追加しました（${stepsCreated}件のルーティングにステップ追加）`)
+        alert(`明細を追加しました（${stepsCreated}件のステップ追加）`)
       } else if (payload.add_to_routing) {
         alert('明細を追加しました（対象ルーティングなし）')
       } else {
