@@ -25,7 +25,21 @@
       <div v-for="section in sections" :key="section.key" class="card" :class="{ 'warn-card': section.warn }">
         <div class="table-title">
           {{ section.title }}
-          <span class="count-badge">{{ section.rows.length }}件</span>
+          <span class="count-badge">{{ filteredRows(section).length }} / {{ section.rows.length }}件</span>
+        </div>
+        <div v-if="section.rows.length" class="filter-row">
+          <label>ライン</label>
+          <select v-model="filters[section.key].line" class="filter-select">
+            <option value="">全て</option>
+            <option v-for="l in lineOptions(section)" :key="l" :value="l">{{ l }}</option>
+          </select>
+          <template v-if="section.kind === 'backlog'">
+            <label>工程</label>
+            <select v-model="filters[section.key].process" class="filter-select">
+              <option value="">全て</option>
+              <option v-for="p in processOptions(section)" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </template>
         </div>
         <p v-if="!section.rows.length" class="helper">該当なし</p>
         <table v-else class="group-table">
@@ -44,7 +58,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="g in section.rows" :key="rowKey(section.kind, g)">
+            <tr v-for="g in filteredRows(section)" :key="rowKey(section.kind, g)">
               <td v-if="canEdit">
                 <input
                   type="checkbox"
@@ -128,6 +142,31 @@ const selected = reactive({
   demandResidual: new Set(),
 });
 
+const filters = reactive({
+  backlogGhost: { line: '', process: '' },
+  backlogResidual: { line: '', process: '' },
+  demandGhost: { line: '' },
+  demandResidual: { line: '' },
+});
+
+const lineOptions = (section) => {
+  const set = new Set(section.rows.map((g) => `${g.line_name}(${g.line_code})`));
+  return [...set].sort();
+};
+
+const processOptions = (section) => {
+  const set = new Set(section.rows.map((g) => g.process_code).filter(Boolean));
+  return [...set].sort();
+};
+
+const filteredRows = (section) => {
+  let rows = section.rows;
+  const f = filters[section.key];
+  if (f.line) rows = rows.filter((g) => `${g.line_name}(${g.line_code})` === f.line);
+  if (f.process) rows = rows.filter((g) => g.process_code === f.process);
+  return rows;
+};
+
 const rowKey = (kind, g) => (kind === "backlog" ? `${g.product_id}|${g.line_id}|${g.process_id}` : `${g.product_id}|${g.line_id}`);
 
 const sections = computed(() => {
@@ -178,10 +217,13 @@ const selectedCount = computed(() =>
 );
 const hasAnySelected = computed(() => selectedCount.value > 0);
 
-const isAllChecked = (section) => section.rows.length > 0 && section.rows.every((g) => section.selected.has(rowKey(section.kind, g)));
+const isAllChecked = (section) => {
+  const rows = filteredRows(section);
+  return rows.length > 0 && rows.every((g) => section.selected.has(rowKey(section.kind, g)));
+};
 
 const toggleAll = (section, checked) => {
-  section.rows.forEach((g) => {
+  filteredRows(section).forEach((g) => {
     const key = rowKey(section.kind, g);
     if (checked) section.selected.add(key);
     else section.selected.delete(key);
@@ -356,6 +398,25 @@ const runFix = async () => {
   background: #eef2f6;
   border-radius: 10px;
   padding: 1px 8px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.filter-row label {
+  color: #555;
+}
+
+.filter-select {
+  padding: 3px 6px;
+  border: 1px solid #cfd6e1;
+  border-radius: 3px;
+  font-size: 12px;
 }
 
 .group-table {

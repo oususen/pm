@@ -46,30 +46,44 @@ def _to_jsonable(value):
 
 
 def build_valid_line_process_maps():
-    """製品ID -> 現行有効な{(line_id, process_id)}集合、および{line_id}集合を返す"""
+    """製品ID -> 現行有効な{(line_id, process_id)}集合、および{line_id}集合を返す
+
+    外作品のルーティングstepはprocess_id=Noneの場合がある。
+    その場合もline_idは有効として扱う。
+    """
     valid_line_process = defaultdict(set)
+    valid_line_only = defaultdict(set)
+    valid_line_any_process = defaultdict(set)
+
     steps = RoutingStep.objects.filter(
         routing__is_active=True,
         line_id__isnull=False,
-        process_id__isnull=False,
     ).values('routing__product_id', 'output_product_id', 'line_id', 'process_id')
     for s in steps:
-        key = (s['line_id'], s['process_id'])
-        valid_line_process[s['routing__product_id']].add(key)
+        product_id = s['routing__product_id']
+        line_id = s['line_id']
+        process_id = s['process_id']
+
+        if process_id is not None:
+            valid_line_process[product_id].add((line_id, process_id))
+        else:
+            valid_line_any_process[product_id].add(line_id)
+        valid_line_only[product_id].add(line_id)
+
         if s['output_product_id']:
-            valid_line_process[s['output_product_id']].add(key)
+            out_id = s['output_product_id']
+            if process_id is not None:
+                valid_line_process[out_id].add((line_id, process_id))
+            else:
+                valid_line_any_process[out_id].add(line_id)
+            valid_line_only[out_id].add(line_id)
 
-    valid_line_only = defaultdict(set)
-    for product_id, pairs in valid_line_process.items():
-        for line_id, _process_id in pairs:
-            valid_line_only[product_id].add(line_id)
-
-    return valid_line_process, valid_line_only
+    return valid_line_process, valid_line_only, valid_line_any_process
 
 
 def find_backlog_groups(product_code=None):
     """LineBacklogの孤立グループ(ghosts, residuals)を検出する"""
-    valid_line_process, _ = build_valid_line_process_maps()
+    valid_line_process, _, valid_line_any_process = build_valid_line_process_maps()
 
     qs = LineBacklog.objects.all()
     if product_code:
@@ -87,7 +101,11 @@ def find_backlog_groups(product_code=None):
 
     ghosts, residuals = [], []
     for g in groups:
-        if (g['line_id'], g['process_id']) in valid_line_process.get(g['product_id'], set()):
+        pid = g['product_id']
+        lid = g['line_id']
+        if (lid, g['process_id']) in valid_line_process.get(pid, set()):
+            continue
+        if lid in valid_line_any_process.get(pid, set()):
             continue
         is_all_zero = all((g[f'sum_{f}'] or 0) == 0 for f in BACKLOG_QTY_FIELDS)
         entry = {
@@ -111,7 +129,7 @@ def find_backlog_groups(product_code=None):
 
 def find_demand_groups(product_code=None):
     """LineDemandの孤立グループ(ghosts, residuals)を検出する"""
-    _, valid_line_only = build_valid_line_process_maps()
+    _, valid_line_only, _ = build_valid_line_process_maps()
 
     qs = LineDemand.objects.exclude(product_id__isnull=True)
     if product_code:
@@ -171,7 +189,7 @@ def apply_fix(backlog_targets=None, demand_targets=None):
     """
     backlog_targets = backlog_targets or []
     demand_targets = demand_targets or []
-    valid_line_process, valid_line_only = build_valid_line_process_maps()
+    valid_line_process, valid_line_only, valid_line_any_process = build_valid_line_process_maps()
 
     skipped = []
     deleted_backlog = 0
@@ -181,7 +199,7 @@ def apply_fix(backlog_targets=None, demand_targets=None):
         for t in backlog_targets:
             product_id, line_id, process_id = t['product_id'], t['line_id'], t['process_id']
             force = bool(t.get('force'))
-            if (line_id, process_id) in valid_line_process.get(product_id, set()):
+            if (line_id, process_id) in valid_line_process.get(product_id, set()) or line_id in valid_line_any_process.get(product_id, set()):
                 skipped.append(f'LineBacklog product_id={product_id} line_id={line_id} process_id={process_id}: 現行ルーティングに合致するためスキップ')
                 continue
             if not force:
