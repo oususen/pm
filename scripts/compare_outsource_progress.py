@@ -4,7 +4,6 @@ import argparse
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
 from pathlib import Path
 
 import fitz
@@ -12,11 +11,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 
-BASE_DATE = date(2026, 5, 29)
-DATE_LIST = [BASE_DATE + timedelta(days=i) for i in range(31)]
-
 NUM_RE = re.compile(r"^[+-]?\d+$")
 DATE_RE = re.compile(r"^(?:\d{1,2}/\d{1,2}|\d{1,2}日)$")
+MONTH_LABEL_RE = re.compile(r"^\d{1,2}月$")
 CODE_RE_ORDER = re.compile(r"^[0-9A-Za-z][0-9A-Za-z\-]{5,}$")
 CODE_RE_PROGRESS = re.compile(r"^[0-9A-Za-z][0-9A-Za-z\-]*[GＧ]$")
 
@@ -26,7 +23,7 @@ class ExtractedItem:
     code: str
     name: str
     page: int
-    rows: dict[str, dict[int, int]]
+    rows: dict[str, dict[str, int]]
 
 
 def _normalize_code(code: str) -> str:
@@ -36,6 +33,22 @@ def _normalize_code(code: str) -> str:
 
 def _norm_name(text: str) -> str:
     return re.sub(r"\s+", "", str(text or "").replace("　", "").strip())
+
+
+def _date_sort_key(label: str):
+    text = str(label or "").strip()
+    if not text:
+        return (999, 999)
+    if "/" in text:
+        month, day = text.split("/", 1)
+        try:
+            return (int(month), int(day))
+        except ValueError:
+            return (999, 999)
+    try:
+        return (999, int(text.replace("日", "")))
+    except ValueError:
+        return (999, 999)
 
 
 def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:
@@ -108,15 +121,16 @@ def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:
                 and str(w[4]).strip() != code
                 and not NUM_RE.fullmatch(str(w[4]).strip())
                 and not DATE_RE.fullmatch(str(w[4]).strip())
+                and not MONTH_LABEL_RE.fullmatch(str(w[4]).strip())
                 and str(w[4]).strip() not in {
-                    "繰越", "予定", "確定", "内示", "実績", "進度", "計進", "納入", "増減"
+                    "繰越", "予定", "確定", "内示", "計画", "実績", "進度", "計進", "納入", "増減", "合計数"
                 }
             ]
             name = " ".join(name_words).strip()
             if not name:
                 continue
 
-            rows: dict[str, dict[int, int]] = {}
+            rows: dict[str, dict[str, int]] = {}
             for label in row_labels:
                 label_word = next(
                     (
@@ -135,20 +149,17 @@ def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:
                     and float(w[0]) > min_date_x - 5
                     and NUM_RE.fullmatch(str(w[4]).strip())
                 ]
-                row: dict[int, int] = defaultdict(int)
+                row: dict[str, int] = defaultdict(int)
                 for cell_word in cell_words:
                     cell_x = (float(cell_word[0]) + float(cell_word[2])) / 2.0
                     nearest_index = min(
-                        range(len(DATE_LIST)),
-                        key=lambda i: abs(date_centers[i][0] - cell_x)
-                        if i < len(date_centers) else 10**9,
+                        range(len(date_centers)),
+                        key=lambda i: abs(date_centers[i][0] - cell_x),
                     )
-                    if nearest_index >= len(date_centers):
-                        continue
                     # セル位置が大きくずれている誤検出は除外
                     if abs(date_centers[nearest_index][0] - cell_x) > 12:
                         continue
-                    row[nearest_index] += int(str(cell_word[4]).strip())
+                    row[date_centers[nearest_index][1]] += int(str(cell_word[4]).strip())
                 rows[label] = dict(row)
 
             normalized_code = _normalize_code(code)
@@ -256,14 +267,15 @@ def _build_workbook(order_items: dict[str, ExtractedItem], progress_items: dict[
         for order_label, progress_label in row_map:
             order_row = order_item.rows.get(order_label, {})
             progress_row = progress_item.rows.get(progress_label, {})
-            for idx, target_date in enumerate(DATE_LIST):
-                order_qty = int(order_row.get(idx, 0) or 0)
-                progress_qty = int(progress_row.get(idx, 0) or 0)
+            all_dates = sorted(set(order_row.keys()) | set(progress_row.keys()), key=_date_sort_key)
+            for target_date in all_dates:
+                order_qty = int(order_row.get(target_date, 0) or 0)
+                progress_qty = int(progress_row.get(target_date, 0) or 0)
                 diff = order_qty - progress_qty
                 if diff == 0:
                     continue
                 ws2.append([
-                    target_date.isoformat(),
+                    target_date,
                     progress_item.code,
                     _normalize_code(progress_item.code),
                     order_item.name,
