@@ -8,6 +8,7 @@ from pathlib import Path
 
 import fitz
 from openpyxl import Workbook
+from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 
@@ -49,6 +50,70 @@ def _date_sort_key(label: str):
         return (999, int(text.replace("日", "")))
     except ValueError:
         return (999, 999)
+
+
+def _to_int(value) -> int:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        return int(float(text))
+    except ValueError:
+        return 0
+
+
+def _extract_progress_excel_items(excel_path: str) -> dict[str, ExtractedItem]:
+    wb = load_workbook(excel_path, data_only=True)
+    ws = wb["進度表"] if "進度表" in wb.sheetnames else wb[wb.sheetnames[0]]
+    items: dict[str, ExtractedItem] = {}
+
+    row_idx = 1
+    while row_idx <= ws.max_row:
+        code = str(ws.cell(row_idx, 1).value or "").strip()
+        if not CODE_RE_PROGRESS.fullmatch(code):
+            row_idx += 1
+            continue
+
+        name = str(ws.cell(row_idx + 1, 1).value or "").strip()
+        header_row = row_idx + 1
+        sub_header_row = row_idx + 2
+
+        date_cols: list[tuple[int, str]] = []
+        for col_idx in range(3, ws.max_column + 1):
+            header_text = str(ws.cell(header_row, col_idx).value or "").strip()
+            sub_text = str(ws.cell(sub_header_row, col_idx).value or "").strip()
+            if DATE_RE.fullmatch(header_text) and sub_text:
+                date_cols.append((col_idx, header_text))
+
+        rows: dict[str, dict[str, int]] = {}
+        data_start_row = sub_header_row + 1
+        for offset in range(6):
+            label = str(ws.cell(data_start_row + offset, 2).value or "").strip()
+            if label not in {"内示", "確定"}:
+                continue
+            row: dict[str, int] = defaultdict(int)
+            for col_idx, date_label in date_cols:
+                value = _to_int(ws.cell(data_start_row + offset, col_idx).value)
+                if value:
+                    row[date_label] += value
+            rows[label] = dict(row)
+
+        normalized_code = _normalize_code(code)
+        items[normalized_code] = ExtractedItem(
+            code=code,
+            name=name,
+            page=1,
+            rows=rows,
+        )
+        row_idx = data_start_row + 7
+
+    return items
 
 
 def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:

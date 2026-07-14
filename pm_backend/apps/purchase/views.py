@@ -2497,7 +2497,7 @@ class PurchaseReceiptPdfDownloadView(APIView):
 
 
 class PurchaseOutsourceProgressCompareView(APIView):
-    """外作注文書PDFと進度表PDFの比較Excelダウンロード"""
+    """外作注文書PDFと進度表PDF/Excelの比較Excelダウンロード"""
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
@@ -2506,11 +2506,12 @@ class PurchaseOutsourceProgressCompareView(APIView):
 
         order_pdf = request.FILES.get('order_pdf')
         progress_pdf = request.FILES.get('progress_pdf')
-        if not order_pdf or not progress_pdf:
-            return Response({'detail': 'order_pdf and progress_pdf are required'}, status=status.HTTP_400_BAD_REQUEST)
+        progress_excel = request.FILES.get('progress_excel')
+        if not order_pdf or (not progress_pdf and not progress_excel):
+            return Response({'detail': 'order_pdf and progress_pdf or progress_excel are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            wb = generate_compare_excel(order_pdf, progress_pdf)
+            wb = generate_compare_excel(order_pdf, progress_pdf_file=progress_pdf, progress_excel_file=progress_excel)
         except Exception as exc:
             return Response({'detail': f'比較表の作成に失敗しました: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
 

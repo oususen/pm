@@ -1,4 +1,4 @@
-"""外作注文書PDFと進度表PDFの比較Excel生成サービス。"""
+"""外作注文書PDFと進度表PDF/Excelの比較Excel生成サービス。"""
 from __future__ import annotations
 
 import importlib.util
@@ -19,18 +19,25 @@ def _load_compare_script():
     return module
 
 
-def generate_compare_excel(order_pdf_file, progress_pdf_file):
-    """アップロードPDF2件を比較し、openpyxl Workbookを返す。"""
+def generate_compare_excel(order_pdf_file, progress_pdf_file=None, progress_excel_file=None):
+    """外作注文書PDFと進度表PDFまたはExcelを比較し、openpyxl Workbookを返す。"""
     compare = _load_compare_script()
+
+    if progress_pdf_file is None and progress_excel_file is None:
+        raise RuntimeError("progress_pdf または progress_excel が必要です。")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         order_path = tmp_path / "order.pdf"
-        progress_path = tmp_path / "progress.pdf"
-
         order_path.write_bytes(order_pdf_file.read())
-        progress_path.write_bytes(progress_pdf_file.read())
 
         order_items = compare._extract_items(str(order_path), "order")
-        progress_items = compare._extract_items(str(progress_path), "progress")
+        if progress_excel_file is not None:
+            progress_path = tmp_path / "progress.xlsx"
+            progress_path.write_bytes(progress_excel_file.read())
+            progress_items = compare._extract_progress_excel_items(str(progress_path))
+        else:
+            progress_path = tmp_path / "progress.pdf"
+            progress_path.write_bytes(progress_pdf_file.read())
+            progress_items = compare._extract_items(str(progress_path), "progress")
         return compare._build_workbook(order_items, progress_items)

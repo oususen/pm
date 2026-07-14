@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">外作注文書・進度表比較</h1>
-        <p class="page-subtitle">外作注文書PDFと進度表PDFを突合せ、比較表Excelを出力します。</p>
+        <p class="page-subtitle">外作注文書PDFと進度表PDFまたはExcelを突合せ、比較表Excelを出力します。</p>
       </div>
       <button class="btn-primary" :disabled="!canCompare || comparing" @click="compareFiles">
         {{ comparing ? "比較中..." : "比較表Excel出力" }}
@@ -26,12 +26,16 @@
       <section class="upload-panel">
         <div class="panel-heading">
           <span class="step">2</span>
-          <h2>進度表PDF</h2>
+          <h2>進度表</h2>
+        </div>
+        <div class="file-type-switch">
+          <label><input v-model="progressSourceType" type="radio" value="pdf" /> PDF</label>
+          <label><input v-model="progressSourceType" type="radio" value="excel" /> Excel</label>
         </div>
         <label class="drop-zone" :class="{ filled: progressFile }">
-          <input type="file" accept="application/pdf,.pdf" @change="onFileChange($event, 'progress')" />
-          <span class="file-label">{{ progressFile ? progressFile.name : "PDFを選択" }}</span>
-          <span class="file-meta">{{ progressFile ? formatSize(progressFile.size) : "進度表を指定" }}</span>
+          <input :key="progressSourceType" type="file" :accept="progressAccept" @change="onFileChange($event, 'progress')" />
+          <span class="file-label">{{ progressFile ? progressFile.name : progressPlaceholder }}</span>
+          <span class="file-meta">{{ progressFile ? formatSize(progressFile.size) : progressMeta }}</span>
         </label>
       </section>
     </div>
@@ -59,16 +63,24 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import api from "@/api/client";
 
 const orderFile = ref(null);
 const progressFile = ref(null);
+const progressSourceType = ref("pdf");
 const comparing = ref(false);
 const message = ref("");
 const messageType = ref("info");
 
 const canCompare = computed(() => orderFile.value && progressFile.value);
+const progressAccept = computed(() =>
+  progressSourceType.value === "pdf"
+    ? "application/pdf,.pdf"
+    : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx,.xlsm"
+);
+const progressPlaceholder = computed(() => (progressSourceType.value === "pdf" ? "PDFを選択" : "Excelを選択"));
+const progressMeta = computed(() => (progressSourceType.value === "pdf" ? "進度表PDFを指定" : "進度表Excelを指定"));
 
 const onFileChange = (event, type) => {
   const file = event.target?.files?.[0] || null;
@@ -99,7 +111,11 @@ const compareFiles = async () => {
   try {
     const form = new FormData();
     form.append("order_pdf", orderFile.value);
-    form.append("progress_pdf", progressFile.value);
+    if (progressSourceType.value === "pdf") {
+      form.append("progress_pdf", progressFile.value);
+    } else {
+      form.append("progress_excel", progressFile.value);
+    }
     const res = await api.client.post("/purchase-receiving/outsource-progress-compare/", form, {
       responseType: "blob",
     });
@@ -109,11 +125,16 @@ const compareFiles = async () => {
     message.value = "比較表Excelを出力しました。";
   } catch (error) {
     messageType.value = "error";
-    message.value = "比較表Excelの作成に失敗しました。PDFの種類を確認してください。";
+    message.value = `比較表Excelの作成に失敗しました。${progressSourceType.value === "pdf" ? "PDF" : "Excel"}の種類を確認してください。`;
   } finally {
     comparing.value = false;
   }
 };
+
+watch(progressSourceType, () => {
+  progressFile.value = null;
+  message.value = "";
+});
 </script>
 
 <style scoped>
@@ -195,6 +216,17 @@ const compareFiles = async () => {
   padding: 12px;
   cursor: pointer;
   background: #f8fafc;
+}
+.file-type-switch {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.file-type-switch label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .drop-zone.filled {
   border-color: #0f766e;
