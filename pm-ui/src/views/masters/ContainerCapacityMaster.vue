@@ -75,8 +75,8 @@
             <td>{{ container.stackable ? '可' : '不可' }}</td>
             <td class="products-cell">
               <template v-if="container.products && container.products.length">
-                <span v-for="(p, i) in container.products" :key="p.id" class="product-tag">
-                  {{ p.product_code }}
+                <span v-for="p in container.products" :key="p.id" class="product-tag">
+                  {{ p.product_code }} ({{ p.capacity }})
                 </span>
               </template>
               <span v-else>-</span>

@@ -4,7 +4,7 @@ from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
-    ContainerCapacityImage, Equipment, Contact,
+    ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation,
 )
@@ -75,16 +75,19 @@ class ContainerCapacityImageSerializer(serializers.ModelSerializer):
         fields = ['id', 'image_url', 'sort_order']
 
 
-class ContainerCapacityProductSerializer(serializers.ModelSerializer):
+class ProductContainerSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+
     class Meta:
-        model = Product
-        fields = ['id', 'product_code', 'product_name']
+        model = ProductContainer
+        fields = ['id', 'product_id', 'product_code', 'product_name', 'capacity']
 
 
 class ContainerCapacitySerializer(serializers.ModelSerializer):
     images = ContainerCapacityImageSerializer(many=True, read_only=True)
-    products = ContainerCapacityProductSerializer(
-        source='product_set', many=True, read_only=True,
+    products = ProductContainerSerializer(
+        source='product_containers', many=True, read_only=True,
     )
 
     def to_representation(self, instance):

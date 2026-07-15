@@ -1252,12 +1252,12 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering = ['name']
 
     def get_queryset(self):
-        qs = super().get_queryset().prefetch_related('product_set')
+        qs = super().get_queryset().prefetch_related('product_containers__product')
         product = self.request.query_params.get('product')
         if product:
             qs = qs.filter(
-                Q(product__product_code__icontains=product)
-                | Q(product__product_name__icontains=product)
+                Q(product_containers__product__product_code__icontains=product)
+                | Q(product_containers__product__product_name__icontains=product)
             ).distinct()
         return qs
 

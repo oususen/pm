@@ -694,6 +694,22 @@ class ContainerCapacityImage(models.Model):
         return f"{self.container.name} 写真#{self.id}"
 
 
+class ProductContainer(models.Model):
+    """製品×容器の入数マッピング"""
+    product = models.ForeignKey('Product', on_delete=models.CASCADE, related_name='product_containers')
+    container = models.ForeignKey(ContainerCapacity, on_delete=models.CASCADE, related_name='product_containers')
+    capacity = models.IntegerField(verbose_name='入数')
+
+    class Meta:
+        db_table = 'm_product_container'
+        unique_together = [['product', 'container']]
+        verbose_name = '製品別容器入数'
+        verbose_name_plural = '製品別容器入数'
+
+    def __str__(self):
+        return f"{self.product.product_code} × {self.container.name} (入数: {self.capacity})"
+
+
 class Equipment(models.Model):
     """設備マスタ"""
     id = models.BigAutoField(primary_key=True)
