@@ -27,7 +27,7 @@ const orders = [
     path: "/orders/first-article-setting",
     name: "OrderFirstArticleSetting",
     component: () => import("@/views/orders/OrderFirstArticleSetting.vue"),
-    meta: { pageTitle: "受注お久しぶり製品通知設定", resource: "orders", permission: "edit" },
+    meta: { pageTitle: "受注お久しぶり製品通知設定", resource: "orders.first_article", permission: "edit" },
   },
   {
     path: "/orders",

@@ -1,6 +1,6 @@
 <template>
   <div class="master-menu">
-    <h2 class="page-title">受注管理メニュー</h2>
+    <h2 class="page-title">受注管理メニュー <DataSourceDialog title="受注管理メニュー" :sources="dsSources" /></h2>
 
     <div class="master-grid">
       <RouterLink
@@ -43,6 +43,19 @@ import { RouterLink } from "vue-router";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 import api from "@/api/client";
+import DataSourceDialog from "@/components/DataSourceDialog.vue";
+
+const dsSources = [
+  { op: "読み書き", table: "t_order", desc: "受注ヘッダ" },
+  { op: "読み書き", table: "t_order_line", desc: "受注明細" },
+  { op: "読み書き", table: "t_stg_order_raw", desc: "CSV生データ" },
+  { op: "読み書き", table: "t_stg_order_daily", desc: "日次受注ステージング" },
+  { op: "読み取り", table: "m_customer", desc: "得意先マスタ" },
+  { op: "読み取り", table: "m_product", desc: "製品マスタ" },
+  { op: "読み書き", table: "t_line_demand", desc: "ライン別需要（展開先）" },
+  { op: "読み書き", table: "t_first_article_notice_log", desc: "お久しぶり製品通知履歴" },
+  { op: "読み取り", table: "system_settings", desc: "お久しぶり通知設定" },
+];
 
 const PERMISSION_MODE = "hide";
 
@@ -97,7 +110,7 @@ const tiles = computed(() => [
     label: "お久しぶり製品<br>通知設定",
     icon: "🔔",
     required: "edit",
-    resource: "orders",
+    resource: "orders.first_article",
   },
   {
     key: "missing_routing_items",

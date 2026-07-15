@@ -374,6 +374,7 @@ const permissionResources = [
   { value: 'orders.kubota_analysis', label: '受注: クボタ内示変化推移分析' },
   { value: 'orders.naiji_analysis', label: '受注: 内示分析' },
   { value: 'orders.line_expand', label: '受注: ライン展開' },
+  { value: 'orders.first_article', label: '受注: お久しぶり製品通知設定' },
   { value: 'production', label: '生産' },
   { value: 'production.process_input', label: '生産: 工程作業入力' },
   { value: 'production.record_inquiry', label: '生産: 生産実績照会' },

@@ -200,6 +200,7 @@ class UserPermission(models.Model):
         ('orders.csv_import', '受注: 受注取込'),
         ('orders.kubota_analysis', '受注: クボタ内示変化推移分析'),
         ('orders.line_expand', '受注: ライン展開'),
+        ('orders.first_article', '受注: お久しぶり製品通知設定'),
         ('production', '生産'),
         ('production.process_input', '生産: 工程作業入力'),
         ('production.record_inquiry', '生産: 生産実績照会'),

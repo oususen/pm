@@ -46,6 +46,7 @@ const canAccessOrders = (level = 'view') => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
+  if (hasPermission(user, 'orders.first_article', level)) return true
   return hasPermission(user, 'orders', level)
 }
 
