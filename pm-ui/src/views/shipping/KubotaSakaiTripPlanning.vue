@@ -391,6 +391,21 @@
                           {{ truckDisplayName(truck) }}
                         </option>
                       </select>
+                      <select
+                        v-if="containersForProduct(row.product_code).length > 0"
+                        v-model.number="al.container_id"
+                        class="container-select"
+                        @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))"
+                      >
+                        <option :value="null">容器</option>
+                        <option
+                          v-for="c in containersForProduct(row.product_code)"
+                          :key="c.container_id"
+                          :value="c.container_id"
+                        >
+                          {{ c.container_name }}
+                        </option>
+                      </select>
                       <input
                         v-model="al.qty"
                         type="text"
@@ -401,7 +416,7 @@
                         @blur="handleQtyInputBlur"
                         @mouseleave="handleQtyInputMouseLeave($event)"
                       />
-                      <button class="mini" :style="getPlusButtonStyle(row)" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1))">+</button>
+                      <button class="mini" :style="getPlusButtonStyle(row)" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1), row.used_container_id)">+</button>
                       <button
                         class="mini danger"
                         :disabled="slotEntryAt(row, dateKey, slotIdx - 1).allocations.length <= 1"
@@ -590,8 +605,9 @@ const normalizeQtyText = (value) => {
   return qty > 0 ? String(qty) : ''
 }
 
-const normalizeAllocation = (item = null) => ({
+const normalizeAllocation = (item = null, defaultContainerId = null) => ({
   truck_id: item?.truck_id ?? null,
+  container_id: item?.container_id ?? defaultContainerId,
   qty: normalizeQtyText(item?.qty ?? ''),
 })
 
@@ -645,6 +661,7 @@ const trucksByDate = ref({})
 const summaryByDate = ref({})
 const previewSummaryByDate = ref({})
 const mergedRows = ref([])
+const productContainersMap = ref({})
 const previewTimers = new Map()
 const showTruckDetail = ref(false)
 const showPseudoProductPanel = ref(false)
@@ -805,9 +822,9 @@ const handleAllocationQtyInput = (entry) => {
   if (entry?.due_date) schedulePreview(entry.due_date)
 }
 
-const addAllocation = (entry) => {
+const addAllocation = (entry, defaultContainerId = null) => {
   if (!entry) return
-  entry.allocations.push(normalizeAllocation())
+  entry.allocations.push(normalizeAllocation(null, defaultContainerId))
   if (entry.due_date) schedulePreview(entry.due_date)
 }
 
@@ -839,6 +856,8 @@ const truckAt = (dateKey, slotIdx) => {
   const trucks = displayTrucksForDate(dateKey)
   return trucks[slotIdx] || null
 }
+
+const containersForProduct = (productCode) => productContainersMap.value[productCode] || []
 
 const truckDisplayName = (truck) => {
   if (!truck) return ''
@@ -1000,6 +1019,7 @@ const buildPayloadRowsForDate = (dateKey) => {
       allocations: entry.allocations
         .map((item) => ({
           truck_id: item.truck_id,
+          container_id: item.container_id || null,
           qty: parseIntegerQty(item.qty),
         }))
         .filter((item) => item.truck_id && item.qty > 0),
@@ -1158,6 +1178,7 @@ const loadGrid = async () => {
     const nextSummaryByDate = {}
     const nextHolidayByDate = {}
     const nextProgressByDate = {}
+    const nextProductContainers = {}
     const map = new Map()
     let maxDeadline = 3
 
@@ -1171,6 +1192,12 @@ const loadGrid = async () => {
       nextHolidayByDate[dateKey] = Boolean(res.data?.is_holiday)
       maxDeadline = Math.max(maxDeadline, Number(res.data?.assignment_deadline_days || 3))
       if (res.data?.last_adjusted_at) lastAdjustedAt.value = res.data.last_adjusted_at
+      const pcMap = res.data?.product_containers
+      if (pcMap && typeof pcMap === 'object') {
+        Object.entries(pcMap).forEach(([code, containers]) => {
+          if (!nextProductContainers[code]) nextProductContainers[code] = containers
+        })
+      }
 
       payloadRows.forEach((raw) => {
         if (raw.product_code && raw.product_name) {
@@ -1188,13 +1215,15 @@ const loadGrid = async () => {
             product_code: raw.product_code,
             ship_to_code: raw.ship_to_code || '',
             ship_to_name: raw.ship_to_name || '',
+            used_container_id: raw.used_container_id || null,
             byDate: {},
             maxSlots: 1,
           })
         }
+        const defaultContainerId = raw.used_container_id || null
         const allocations = Array.isArray(raw.allocations) && raw.allocations.length
-          ? raw.allocations.map((a) => normalizeAllocation(a))
-          : [normalizeAllocation()]
+          ? raw.allocations.map((a) => normalizeAllocation(a, defaultContainerId))
+          : [normalizeAllocation(null, defaultContainerId)]
         const entry = {
           due_adjustment_id: raw.due_adjustment_id,
           source_order_no: raw.source_order_no || '',
@@ -1225,6 +1254,7 @@ const loadGrid = async () => {
 
     trucksByDate.value = nextTrucksByDate
     summaryByDate.value = nextSummaryByDate
+    productContainersMap.value = nextProductContainers
     holidayByDate.value = nextHolidayByDate
     progressByDate.value = nextProgressByDate
     progressAdjustEdits.value = {}
@@ -2284,9 +2314,9 @@ onUnmounted(() => {
   color: #fff !important;
 }
 .col-select {
-  width: 110px;
-  min-width: 110px !important;
-  max-width: 110px;
+  width: 160px;
+  min-width: 160px !important;
+  max-width: 160px;
 }
 .truck-head {
   background: #f1f5f9 !important;
@@ -2334,7 +2364,7 @@ onUnmounted(() => {
   background: #fff;
 }
 .cell-select {
-  min-width: 180px;
+  min-width: 230px;
   background: #fff;
 }
 .cell-stacked .sub-cell {
@@ -2372,6 +2402,9 @@ onUnmounted(() => {
 }
 .allocation-row select {
   width: 35px;
+}
+.allocation-row select.container-select {
+  width: 45px;
 }
 .allocation-row input {
   width: 30px;

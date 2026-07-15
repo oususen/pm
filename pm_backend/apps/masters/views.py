@@ -1104,6 +1104,82 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             'count': len(results),
         })
 
+    @action(detail=True, methods=['get'], url_path='containers')
+    def list_containers(self, request, pk=None):
+        product = self.get_object()
+        pcs = ProductContainer.objects.select_related('container').filter(
+            product=product,
+        ).order_by('container__name')
+        return Response([
+            {
+                'id': pc.id,
+                'container_id': pc.container_id,
+                'container_code': pc.container.container_code or '',
+                'container_name': pc.container.name,
+                'capacity': pc.capacity,
+            }
+            for pc in pcs
+        ])
+
+    @action(detail=True, methods=['post'], url_path='containers/add')
+    def add_container(self, request, pk=None):
+        product = self.get_object()
+        container_id = request.data.get('container_id')
+        capacity = request.data.get('capacity')
+        if not container_id:
+            return Response({'detail': '容器を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            container = ContainerCapacity.objects.get(id=container_id)
+        except ContainerCapacity.DoesNotExist:
+            return Response({'detail': '容器が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            capacity = int(capacity)
+        except (TypeError, ValueError):
+            return Response({'detail': '入数を整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        pc, created = ProductContainer.objects.update_or_create(
+            product=product, container=container,
+            defaults={'capacity': capacity},
+        )
+        return Response({
+            'id': pc.id,
+            'container_id': container.id,
+            'container_code': container.container_code or '',
+            'container_name': container.name,
+            'capacity': pc.capacity,
+            'created': created,
+        })
+
+    @action(detail=True, methods=['patch'], url_path=r'containers/(?P<pc_id>\d+)')
+    def update_container(self, request, pk=None, pc_id=None):
+        product = self.get_object()
+        try:
+            pc = product.product_containers.select_related('container').get(id=pc_id)
+        except ProductContainer.DoesNotExist:
+            return Response({'detail': '紐付けが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        capacity = request.data.get('capacity')
+        try:
+            pc.capacity = int(capacity)
+        except (TypeError, ValueError):
+            return Response({'detail': '入数を整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        pc.save(update_fields=['capacity'])
+        return Response({
+            'id': pc.id,
+            'container_id': pc.container_id,
+            'container_code': pc.container.container_code or '',
+            'container_name': pc.container.name,
+            'capacity': pc.capacity,
+        })
+
+    @action(detail=True, methods=['delete'], url_path=r'containers/(?P<pc_id>\d+)/delete')
+    def remove_container(self, request, pk=None, pc_id=None):
+        product = self.get_object()
+        try:
+            pc = product.product_containers.get(id=pc_id)
+        except ProductContainer.DoesNotExist:
+            return Response({'detail': '紐付けが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        pc.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ProductGroupViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = ProductGroup.objects.all()

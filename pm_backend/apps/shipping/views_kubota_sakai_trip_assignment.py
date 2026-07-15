@@ -26,7 +26,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
-from masters.models import Calendar, CalendarDay, KubotaSakaiTruck, Line, Process, Product
+from masters.models import Calendar, CalendarDay, ContainerCapacity, KubotaSakaiTruck, Line, Process, Product, ProductContainer
 from shipping.models import (
     KubotaSakaiDeliveryProgress,
     KubotaSakaiTripDisplaySetting,
@@ -172,9 +172,9 @@ def _get_deadline_days():
         return 3
 
 
-def _build_load_item(product, qty):
+def _build_load_item(product, qty, container_override=None, capacity_override=None):
     """Product オブジェクトから積載計算用アイテムを構築"""
-    container = getattr(product, 'used_container', None) if product else None
+    container = container_override or (getattr(product, 'used_container', None) if product else None)
     unit_weight = Decimal('0')
     if product and all(
         getattr(product, f, None) is not None
@@ -188,9 +188,12 @@ def _build_load_item(product, qty):
             / Decimal('1000000')
         )
 
-    capacity = getattr(product, 'capacity', None) if product else None
-    if not capacity and container:
-        capacity = container.capacity
+    if capacity_override:
+        capacity = capacity_override
+    else:
+        capacity = getattr(product, 'capacity', None) if product else None
+        if not capacity and container:
+            capacity = container.capacity
 
     return {
         'product_code': product.product_code if product else '',
@@ -657,6 +660,18 @@ class KubotaSakaiTripPlanView(APIView):
             )
         }
 
+        # 製品別容器マッピング
+        pc_qs = ProductContainer.objects.select_related('product', 'container').filter(
+            product__product_code__in=product_codes,
+        ).order_by('product__product_code', 'container__name')
+        product_containers_map = defaultdict(list)
+        for pc in pc_qs:
+            product_containers_map[pc.product.product_code].append({
+                'container_id': pc.container_id,
+                'container_name': pc.container.name,
+                'capacity': pc.capacity,
+            })
+
         # 配送進捗を取得
         progress_map = {}
         for p in KubotaSakaiDeliveryProgress.objects.filter(plan_date=target_date):
@@ -689,6 +704,7 @@ class KubotaSakaiTripPlanView(APIView):
                 'delivery_qty': str(delivery_qty),
                 'assigned_qty': str(assigned_qty),
                 'unassigned_qty': str(unassigned_qty),
+                'used_container_id': container.id if container else None,
                 'container_name': getattr(container, 'name', '') if container else '',
                 'capacity': getattr(product, 'capacity', None) if product else None,
                 'progress_qty': progress_info.get('progress_qty', 0),
@@ -700,6 +716,7 @@ class KubotaSakaiTripPlanView(APIView):
                         'id': a.id,
                         'truck_id': a.truck_id,
                         'truck_name': a.truck.name if a.truck_id else '',
+                        'container_id': a.container_id,
                         'qty': str(a.qty),
                     }
                     for a in current_assignments
@@ -738,6 +755,7 @@ class KubotaSakaiTripPlanView(APIView):
             'assignment_deadline_days': deadline_days,
             'last_adjusted_at': last_adjusted_at,
             'rows': rows,
+            'product_containers': dict(product_containers_map),
             'trucks': [
                 {
                     'id': t.id,
@@ -821,7 +839,12 @@ class KubotaSakaiTripPlanView(APIView):
                 if not truck:
                     errors.append({'due_adjustment_id': adj_id, 'detail': f'便が不正です: {truck_id}'})
                     continue
-                normalized_allocations.append({'truck_id': truck_id, 'qty': qty})
+                container_id = None
+                try:
+                    container_id = int(al.get('container_id') or 0) or None
+                except (TypeError, ValueError):
+                    pass
+                normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
                 row_total += qty
 
             if adj_id not in normalized_map:
@@ -862,6 +885,7 @@ class KubotaSakaiTripPlanView(APIView):
                         KubotaSakaiTripAssignment(
                             due_adjustment_id=row['adj_id'],
                             truck_id=al['truck_id'],
+                            container_id=al.get('container_id'),
                             departure_date=target_date,
                             qty=al['qty'],
                             created_by=user,
@@ -872,12 +896,22 @@ class KubotaSakaiTripPlanView(APIView):
 
             # 積載チェック（全便対象）
             all_today = list(
-                KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
+                KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck', 'container')
                 .filter(departure_date=target_date)
             )
             per_truck = defaultdict(list)
             for item in all_today:
                 per_truck[item.truck_id].append(item)
+
+            # 保存済み container_id → ProductContainer 入数マップ
+            saved_container_ids = {item.container_id for item in all_today if item.container_id}
+            saved_pc_map = {}
+            if saved_container_ids:
+                for pc in ProductContainer.objects.select_related('product').filter(
+                    product__product_code__in=product_codes,
+                    container_id__in=saved_container_ids,
+                ):
+                    saved_pc_map[(pc.product.product_code, pc.container_id)] = pc.capacity
 
             save_errors = []
             for truck_id, items in per_truck.items():
@@ -886,7 +920,13 @@ class KubotaSakaiTripPlanView(APIView):
                 for item in items:
                     product = products.get(item.due_adjustment.product_code)
                     if product:
-                        load_items.append(_build_load_item(product, item.qty))
+                        c_override = item.container if item.container_id else None
+                        cap_override = None
+                        if c_override:
+                            cap_override = saved_pc_map.get((item.due_adjustment.product_code, item.container_id))
+                            if not cap_override:
+                                cap_override = getattr(c_override, 'capacity', None)
+                        load_items.append(_build_load_item(product, item.qty, c_override, cap_override))
                 load = calculate_truck_load(load_items, truck)
                 if load['errors']:
                     save_errors.append({
@@ -975,7 +1015,12 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                 qty = _to_decimal(item.get('qty'))
                 if truck_id <= 0 or qty <= 0:
                     continue
-                normalized_allocations.append({'truck_id': truck_id, 'qty': qty})
+                container_id = None
+                try:
+                    container_id = int(item.get('container_id') or 0) or None
+                except (TypeError, ValueError):
+                    pass
+                normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
                 truck_ids.add(truck_id)
             posted_alloc_map[due_adjustment_id] = normalized_allocations
 
@@ -1001,6 +1046,22 @@ class KubotaSakaiTripLoadPreviewView(APIView):
             for product in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
         }
 
+        all_container_ids = set()
+        for allocs in posted_alloc_map.values():
+            for al in allocs:
+                if al.get('container_id'):
+                    all_container_ids.add(al['container_id'])
+        container_map = {}
+        if all_container_ids:
+            container_map = {c.id: c for c in ContainerCapacity.objects.filter(id__in=all_container_ids)}
+        pc_capacity_map = {}
+        if all_container_ids:
+            for pc in ProductContainer.objects.select_related('product').filter(
+                product__product_code__in=product_codes,
+                container_id__in=all_container_ids,
+            ):
+                pc_capacity_map[(pc.product.product_code, pc.container_id)] = pc.capacity
+
         per_truck_load_items = defaultdict(list)
         per_truck_errors = defaultdict(list)
         for due_adjustment in due_adjustments:
@@ -1010,8 +1071,18 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                 truck = truck_map.get(allocation['truck_id'])
                 if not truck or not product:
                     continue
+                container_override = None
+                capacity_override = None
+                cid = allocation.get('container_id')
+                if cid and cid in container_map:
+                    container_override = container_map[cid]
+                    capacity_override = pc_capacity_map.get((due_adjustment.product_code, cid))
+                    if not capacity_override:
+                        capacity_override = container_override.capacity
                 try:
-                    per_truck_load_items[truck.id].append(_build_load_item(product, allocation['qty']))
+                    per_truck_load_items[truck.id].append(
+                        _build_load_item(product, allocation['qty'], container_override, capacity_override)
+                    )
                 except Exception:
                     logger.exception(
                         '便占有率プレビュー用積載データ生成に失敗しました: due_adjustment_id=%s truck_id=%s',
@@ -1055,7 +1126,7 @@ class KubotaSakaiTripLoadDetailView(APIView):
             return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
 
         assignments = list(
-            KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck')
+            KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck', 'container')
             .filter(departure_date=target_date)
             .order_by('truck__display_order', 'truck__name', 'id')
         )
@@ -1068,6 +1139,16 @@ class KubotaSakaiTripLoadDetailView(APIView):
             for p in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
         }
 
+        # 割付に保存された container_id → ProductContainer 入数
+        saved_cids = {a.container_id for a in assignments if a.container_id}
+        ld_pc_map = {}
+        if saved_cids:
+            for pc in ProductContainer.objects.select_related('product').filter(
+                product__product_code__in=product_codes,
+                container_id__in=saved_cids,
+            ):
+                ld_pc_map[(pc.product.product_code, pc.container_id)] = pc.capacity
+
         grouped = {}
         for assignment in assignments:
             key = (assignment.truck_id, assignment.due_adjustment.product_code)
@@ -1076,8 +1157,11 @@ class KubotaSakaiTripLoadDetailView(APIView):
                     'truck': assignment.truck,
                     'product_code': assignment.due_adjustment.product_code,
                     'qty': Decimal('0'),
+                    'container_override': None,
                 }
             grouped[key]['qty'] += _to_decimal(assignment.qty)
+            if assignment.container_id:
+                grouped[key]['container_override'] = assignment.container
 
         rows = []
         for item in grouped.values():
@@ -1085,16 +1169,21 @@ class KubotaSakaiTripLoadDetailView(APIView):
             product_code = item['product_code']
             qty = item['qty']
             product = products.get(product_code)
-            container = getattr(product, 'used_container', None) if product else None
+            c_override = item.get('container_override')
+            container = c_override or (getattr(product, 'used_container', None) if product else None)
 
-            capacity = getattr(product, 'capacity', None) if product else None
-            if not capacity and container:
-                capacity = container.capacity
+            if c_override:
+                capacity = ld_pc_map.get((product_code, c_override.id)) or getattr(c_override, 'capacity', None)
+            else:
+                capacity = getattr(product, 'capacity', None) if product else None
+                if not capacity and container:
+                    capacity = container.capacity
             if not capacity:
                 capacity = 1
             capacity = max(int(_to_decimal(capacity)), 1)
 
-            load_item = _build_load_item(product, qty)
+            cap_override = ld_pc_map.get((product_code, c_override.id)) if c_override else None
+            load_item = _build_load_item(product, qty, c_override, cap_override)
             used_area = _calculate_assignment_area(load_item, truck)
             truck_area = _to_decimal(truck.width) * _to_decimal(truck.depth)
             occupancy_percent = Decimal('0')
@@ -1175,8 +1264,28 @@ class KubotaSakaiPickupDetailPdfView(APIView):
             )
         }
 
+        # 割付ごとの容器IDマップ（container_id が設定されている場合のみ）
+        assignment_container_map = {}
+        for item in assignments:
+            if item.container_id:
+                assignment_container_map[item.id] = item.container_id
+
+        # ProductContainer 入数マップ
+        all_container_ids = set(assignment_container_map.values())
+        container_objs = {}
+        pc_capacity_map = {}
+        if all_container_ids:
+            container_objs = {c.id: c for c in ContainerCapacity.objects.filter(id__in=all_container_ids)}
+            for pc in ProductContainer.objects.select_related('product').filter(
+                product__product_code__in=product_codes,
+                container_id__in=all_container_ids,
+            ):
+                pc_capacity_map[(pc.product.product_code, pc.container_id)] = pc.capacity
+
         # departure_date -> truck_id -> (product_code, ship_to_code, source_order_no) で集計
         grouped = defaultdict(lambda: defaultdict(lambda: defaultdict(Decimal)))
+        # 容器別入数を保持: detail_key -> container_id
+        detail_container_map = {}
         truck_meta = {}
         for item in assignments:
             truck = item.truck
@@ -1193,6 +1302,8 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                 (item.due_adjustment.source_order_no or '').strip(),
             )
             grouped[departure_date][truck.id][detail_key] += _to_decimal(item.qty)
+            if item.container_id:
+                detail_container_map[(departure_date, truck.id, detail_key)] = item.container_id
             if truck.id not in truck_meta:
                 truck_meta[truck.id] = {
                     'name': truck.name,
@@ -1208,13 +1319,17 @@ class KubotaSakaiPickupDetailPdfView(APIView):
             truck_meta,
             products,
             ship_to_name_map,
+            detail_container_map=detail_container_map,
+            pc_capacity_map=pc_capacity_map,
+            container_objs=container_objs,
         )
         filename = f"クボタ堺_集荷明細表_{start_date:%Y%m%d}_{end_date:%Y%m%d}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
-    def _render_pdf(self, start_date, end_date, grouped, truck_meta, products, ship_to_name_map):
+    def _render_pdf(self, start_date, end_date, grouped, truck_meta, products, ship_to_name_map,
+                    detail_container_map=None, pc_capacity_map=None, container_objs=None):
         try:
             pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
         except Exception:
@@ -1366,7 +1481,17 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                     qty = grouped[dep][truck_id][detail_key]
                     product = products.get(product_code)
                     name = (product.product_name if product else '') or ''
-                    capacity_val = _to_decimal(getattr(product, 'capacity', None) if product else None, default='0')
+                    # 割付に保存された容器の入数を優先
+                    capacity_val = Decimal('0')
+                    saved_cid = (detail_container_map or {}).get((dep, truck_id, detail_key))
+                    if saved_cid:
+                        capacity_val = _to_decimal(
+                            (pc_capacity_map or {}).get((product_code, saved_cid))
+                            or getattr((container_objs or {}).get(saved_cid), 'capacity', None),
+                            default='0',
+                        )
+                    if capacity_val <= 0:
+                        capacity_val = _to_decimal(getattr(product, 'capacity', None) if product else None, default='0')
                     if capacity_val <= 0:
                         container = getattr(product, 'used_container', None) if product else None
                         capacity_val = _to_decimal(getattr(container, 'capacity', None) if container else None, default='0')

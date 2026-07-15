@@ -87,4 +87,16 @@ export const createProductsAPI = (client) => ({
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  listContainers(productId) {
+    return client.get(`/products/${productId}/containers/`)
+  },
+  addContainer(productId, data) {
+    return client.post(`/products/${productId}/containers/add/`, data)
+  },
+  updateContainer(productId, pcId, data) {
+    return client.patch(`/products/${productId}/containers/${pcId}/`, data)
+  },
+  removeContainer(productId, pcId) {
+    return client.delete(`/products/${productId}/containers/${pcId}/delete/`)
+  },
 })

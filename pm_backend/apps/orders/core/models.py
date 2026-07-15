@@ -161,6 +161,14 @@ class KubotaSakaiTripAssignment(models.Model):
         related_name='kubota_sakai_trip_assignments',
         verbose_name='便',
     )
+    container = models.ForeignKey(
+        'masters.ContainerCapacity',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kubota_sakai_trip_assignments',
+        verbose_name='容器',
+    )
     departure_date = models.DateField(verbose_name='出発日')
     qty = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='割付数量')
     created_by = models.ForeignKey(

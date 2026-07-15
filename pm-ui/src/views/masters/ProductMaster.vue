@@ -354,6 +354,34 @@
                   <label>容器入り数</label>
                   <input v-model.number="formData.capacity" type="number" min="0" />
                 </div>
+                <div v-if="processMode !== 'create'" class="form-group">
+                  <label>容器別入数</label>
+                  <div class="stock-locations-edit">
+                    <div v-for="pc in productContainers" :key="pc.id" class="stock-loc-row">
+                      <span class="pc-container-label">{{ pc.container_name }}</span>
+                      <input
+                        v-if="!isViewMode"
+                        v-model.number="pc.capacity"
+                        type="number"
+                        min="1"
+                        class="pc-capacity-input"
+                        @change="updateProductContainerCapacity(pc)"
+                      />
+                      <span v-else>{{ pc.capacity }}</span>
+                      <button v-if="!isViewMode" type="button" class="btn-sm btn-danger" @click="removeProductContainer(pc)">×</button>
+                    </div>
+                    <div v-if="!isViewMode" class="stock-loc-row">
+                      <select v-model="newContainerId" class="pc-add-select">
+                        <option :value="null">容器を選択</option>
+                        <option v-for="c in availableContainersForAdd" :key="c.id" :value="c.id">
+                          {{ c.name }}
+                        </option>
+                      </select>
+                      <input v-model.number="newContainerCapacity" type="number" min="1" placeholder="入数" class="pc-capacity-input" />
+                      <button type="button" class="btn-sm btn-primary" @click="addProductContainer">+ 追加</button>
+                    </div>
+                  </div>
+                </div>
                 <div class="form-group">
                   <label>移動先</label>
                   <select v-model="formData.transfer_destination">
@@ -789,6 +817,7 @@ const processes = ref([])
 const productGroups = ref([])
 const containers = ref([])
 const customers = ref([])
+const productContainers = ref([])
 const activeTab = ref('list')
 const processMode = ref('create')
 const processTargetId = ref(null)
@@ -1174,6 +1203,54 @@ const formatContainerOption = (container) => {
   return container.name
 }
 
+const newContainerId = ref(null)
+const newContainerCapacity = ref(1)
+
+const addProductContainer = async () => {
+  if (!newContainerId.value || !processTargetId.value) return
+  try {
+    const res = await api.products.addContainer(processTargetId.value, {
+      container_id: newContainerId.value,
+      capacity: newContainerCapacity.value || 1,
+    })
+    const existing = productContainers.value.find((pc) => pc.container_id === res.data.container_id)
+    if (existing) {
+      Object.assign(existing, res.data)
+    } else {
+      productContainers.value.push(res.data)
+    }
+    newContainerId.value = null
+    newContainerCapacity.value = 1
+  } catch (error) {
+    alert(error?.response?.data?.detail || '容器追加に失敗しました')
+  }
+}
+
+const updateProductContainerCapacity = async (pc) => {
+  if (!processTargetId.value) return
+  try {
+    await api.products.updateContainer(processTargetId.value, pc.id, { capacity: pc.capacity })
+  } catch (error) {
+    alert(error?.response?.data?.detail || '入数更新に失敗しました')
+  }
+}
+
+const removeProductContainer = async (pc) => {
+  if (!processTargetId.value) return
+  if (!confirm(`${pc.container_name} を削除しますか？`)) return
+  try {
+    await api.products.removeContainer(processTargetId.value, pc.id)
+    productContainers.value = productContainers.value.filter((p) => p.id !== pc.id)
+  } catch (error) {
+    alert(error?.response?.data?.detail || '容器削除に失敗しました')
+  }
+}
+
+const availableContainersForAdd = computed(() => {
+  const usedIds = new Set(productContainers.value.map((pc) => pc.container_id))
+  return containers.value.filter((c) => !usedIds.has(c.id))
+})
+
 // クエリパラメータを組み立て
 const buildQueryParams = () => {
   const params = {}
@@ -1304,6 +1381,12 @@ const openProcessTab = (mode = 'create', product = null) => {
   copySourceProduct.value = null
   processTargetId.value = product?.id ?? null
   formData.value = product ? mapProductToFormData(product) : createEmptyFormData()
+  productContainers.value = []
+  if (product?.id) {
+    api.products.listContainers(product.id).then((res) => {
+      productContainers.value = Array.isArray(res.data) ? res.data : []
+    }).catch(() => {})
+  }
 }
 
 const changeProcessMode = (mode) => {
@@ -1313,6 +1396,7 @@ const changeProcessMode = (mode) => {
   if (mode === 'create') {
     processTargetId.value = null
     formData.value = createEmptyFormData()
+    productContainers.value = []
     return
   }
   if (!processTargetId.value) {
@@ -1327,9 +1411,13 @@ const loadProcessTarget = async () => {
     return
   }
   try {
-    const response = await api.products.getProduct(targetId)
+    const [response, pcRes] = await Promise.all([
+      api.products.getProduct(targetId),
+      api.products.listContainers(targetId),
+    ])
     processTargetId.value = targetId
     formData.value = mapProductToFormData(response.data)
+    productContainers.value = Array.isArray(pcRes.data) ? pcRes.data : []
   } catch (error) {
     console.error('製品詳細取得エラー:', error)
     alert('製品データの取得に失敗しました')
@@ -1851,6 +1939,9 @@ watch(
 .stock-locations-edit { display: flex; flex-direction: column; gap: 4px; }
 .stock-loc-row { display: flex; gap: 4px; align-items: center; }
 .stock-loc-row input { flex: 1; }
+.pc-container-label { min-width: 60px; font-size: 12px; }
+.pc-capacity-input { width: 50px; text-align: right; }
+.pc-add-select { max-width: 140px; }
 </style>
 
 <style scoped>

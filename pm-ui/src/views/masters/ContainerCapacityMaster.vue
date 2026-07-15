@@ -127,24 +127,19 @@
             <input v-model.number="formData.capacity" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div v-if="isEdit" class="form-group">
-            <label>製品別入数</label>
+            <label>使用製品</label>
             <table class="pc-table" v-if="formData.product_containers && formData.product_containers.length">
-              <thead><tr><th>品番</th><th>品名</th><th>入数</th><th></th></tr></thead>
+              <thead><tr><th>品番</th><th>品名</th><th>入数</th></tr></thead>
               <tbody>
                 <tr v-for="pc in formData.product_containers" :key="pc.id">
                   <td>{{ pc.product_code }}</td>
                   <td>{{ pc.product_name }}</td>
-                  <td><input v-model.number="pc.capacity" type="number" min="1" class="pc-capacity-input" :disabled="!canEdit" @change="updateProductCapacity(pc)" /></td>
-                  <td><button v-if="canEdit" type="button" class="btn-sm btn-danger" @click="removeProductContainer(pc)">削除</button></td>
+                  <td>{{ pc.capacity }}</td>
                 </tr>
               </tbody>
             </table>
             <p v-else class="helper-text">紐づく製品はありません</p>
-            <div v-if="canEdit" class="pc-add-row">
-              <input v-model="newProductCode" placeholder="品番を入力" class="pc-add-input" @keydown.enter.prevent="addProductContainer" />
-              <input v-model.number="newProductCapacity" type="number" min="1" placeholder="入数" class="pc-capacity-input" />
-              <button type="button" class="btn-sm btn-primary" @click="addProductContainer">追加</button>
-            </div>
+            <p class="helper-text">※ 編集は製品マスタから行ってください</p>
           </div>
           <div class="form-group">
             <label>幅</label>
