@@ -18,6 +18,7 @@ from shipping.services.email_service import EmailService
 from system_settings.models import SystemSetting
 
 from .models import (
+    FirstArticleNoticeLog,
     Order,
     OrderLine,
     StgOrderDaily,
@@ -115,7 +116,7 @@ def _collect_order_first_article_candidates(created_line_ids, days):
         .order_by('due_date', 'id')
     )
 
-    # (customer_id, product_code) ごとに代表行と最古の納期を収集
+    # (customer_id, product_code, due_date, quantity) ごとに代表行を収集
     key_map = {}
     for line in line_qs:
         product_code = str(line.product_code or '').strip()
@@ -123,15 +124,9 @@ def _collect_order_first_article_candidates(created_line_ids, days):
         if not product_code or not due_date:
             continue
         customer_id = line.order.customer_id if line.order else None
-        key = (customer_id, product_code)
-        existing = key_map.get(key)
-        if existing is None or due_date < existing['due_date']:
-            key_map[key] = {
-                'line': line,
-                'due_date': due_date,
-                'customer_id': customer_id,
-                'product_code': product_code,
-            }
+        key = (customer_id, product_code, due_date, line.quantity)
+        if key not in key_map:
+            key_map[key] = line
 
     if not key_map:
         return []
@@ -139,14 +134,18 @@ def _collect_order_first_article_candidates(created_line_ids, days):
     # まとめクエリ: 各 (customer_id, product_code) の window 内に過去受注があるか一括判定
     recent_keys = set()
     or_conditions = Q()
-    entries = list(key_map.items())
-    for key, entry in entries:
-        window_start = entry['due_date'] - timedelta(days=days)
+    checked_pairs = set()
+    for (customer_id, product_code, due_date, _qty) in key_map:
+        pair = (customer_id, product_code)
+        if pair in checked_pairs:
+            continue
+        checked_pairs.add(pair)
+        window_start = due_date - timedelta(days=days)
         or_conditions |= Q(
-            order__customer_id=entry['customer_id'],
-            product_code=entry['product_code'],
+            order__customer_id=customer_id,
+            product_code=product_code,
             due_date__gte=window_start,
-            due_date__lt=entry['due_date'],
+            due_date__lt=due_date,
         )
     if or_conditions:
         recent_qs = (
@@ -158,18 +157,38 @@ def _collect_order_first_article_candidates(created_line_ids, days):
         for cid, pc in recent_qs:
             recent_keys.add((cid, pc))
 
-    candidates = []
-    for key, entry in entries:
-        if key in recent_keys:
+    # 通知済みログで同一内容を除外
+    notified_keys = set()
+    log_conditions = Q()
+    for (customer_id, product_code, due_date, qty) in key_map:
+        if (customer_id, product_code) in recent_keys:
             continue
-        line = entry['line']
+        log_conditions |= Q(
+            customer_id=customer_id,
+            product_code=product_code,
+            due_date=due_date,
+            quantity=qty,
+        )
+    if log_conditions:
+        for row in FirstArticleNoticeLog.objects.filter(log_conditions).values_list(
+            'customer_id', 'product_code', 'due_date', 'quantity'
+        ):
+            notified_keys.add(row)
+
+    candidates = []
+    for (customer_id, product_code, due_date, qty), line in key_map.items():
+        if (customer_id, product_code) in recent_keys:
+            continue
+        if (customer_id, product_code, due_date, qty) in notified_keys:
+            continue
         candidates.append({
             'order_line_id': line.id,
+            'customer_id': customer_id,
             'customer_code': line.order.customer.customer_code if line.order and line.order.customer else '',
             'order_no': line.order.order_no if line.order else '',
-            'product_code': entry['product_code'],
-            'due_date': entry['due_date'].isoformat(),
-            'quantity': str(line.quantity),
+            'product_code': product_code,
+            'due_date': due_date.isoformat(),
+            'quantity': str(qty),
         })
 
     return candidates
@@ -212,6 +231,20 @@ def _send_order_first_article_notice(*, created_line_ids, user=None):
     )
     result['sent'] = bool(send_result.get('success'))
     result['message'] = send_result.get('message') or ('メールを送信しました。' if result['sent'] else 'メール送信に失敗しました。')
+
+    if result['sent']:
+        from decimal import Decimal
+        logs = []
+        for c in candidates:
+            logs.append(FirstArticleNoticeLog(
+                customer_id=c['customer_id'],
+                product_code=c['product_code'],
+                due_date=c['due_date'],
+                quantity=Decimal(c['quantity']),
+            ))
+        if logs:
+            FirstArticleNoticeLog.objects.bulk_create(logs, ignore_conflicts=True)
+
     return result
 
 

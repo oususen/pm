@@ -609,3 +609,24 @@ class KubotaSakaiImportConfig(models.Model):
     def get_solo(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+class FirstArticleNoticeLog(models.Model):
+    """お久しぶり製品通知の送信済み記録。同一内容の重複通知を防止する。"""
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, verbose_name='得意先')
+    product_code = models.CharField(max_length=50, verbose_name='製品コード')
+    due_date = models.DateField(verbose_name='納期')
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='数量')
+    notified_at = models.DateTimeField(auto_now_add=True, verbose_name='通知日時')
+
+    class Meta:
+        db_table = 't_first_article_notice_log'
+        verbose_name = 'お久しぶり製品通知履歴'
+        verbose_name_plural = 'お久しぶり製品通知履歴'
+        unique_together = [['customer', 'product_code', 'due_date', 'quantity']]
+        indexes = [
+            models.Index(fields=['product_code', 'due_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.customer_id} / {self.product_code} / {self.due_date} / {self.quantity}"
