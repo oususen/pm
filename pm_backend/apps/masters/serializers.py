@@ -3,7 +3,8 @@ from rest_framework import serializers
 from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
+    ContainerCapacityImage, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation,
 )
@@ -60,7 +61,31 @@ class ProductCodeMappingSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class ContainerCapacityImageSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        raw_url = data.get('image_url')
+        request = self.context.get('request')
+        if raw_url and request:
+            data['image_url'] = build_media_absolute_url(request, raw_url)
+        return data
+
+    class Meta:
+        model = ContainerCapacityImage
+        fields = ['id', 'image_url', 'sort_order']
+
+
 class ContainerCapacitySerializer(serializers.ModelSerializer):
+    images = ContainerCapacityImageSerializer(many=True, read_only=True)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        raw_url = data.get('image_url')
+        request = self.context.get('request')
+        if raw_url and request:
+            data['image_url'] = build_media_absolute_url(request, raw_url)
+        return data
+
     class Meta:
         model = ContainerCapacity
         fields = '__all__'

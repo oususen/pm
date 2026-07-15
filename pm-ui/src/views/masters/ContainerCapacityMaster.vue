@@ -5,13 +5,29 @@
       <div class="page-actions">
         <button @click="fetchContainers" class="btn-primary">更新</button>
         <button v-if="canEdit" @click="showNewDialog" class="btn-success">新規</button>
+        <button v-if="canEdit" @click="triggerImport" class="btn-secondary">荷姿設定Excel取込</button>
+        <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none" @change="handleImport" />
       </div>
+    </div>
+
+    <div v-if="importResult" class="import-result">
+      <div class="import-result-header">
+        <strong>反映結果</strong>
+        <button class="btn-sm" @click="importResult = null">閉じる</button>
+      </div>
+      <p>
+        反映件数: {{ importResult.updated_count }}件
+        （新規作成した容器: {{ importResult.created_containers.length }}件 /
+        既存容器を更新: {{ importResult.updated_containers.length }}件 /
+        反映した写真: {{ importResult.image_applied_count }}枚）
+      </p>
     </div>
 
     <div class="page-content">
       <table class="data-table">
         <thead>
           <tr>
+            <th>写真</th>
             <th>容器名</th>
             <th>容器コード</th>
             <th>入り数</th>
@@ -24,6 +40,10 @@
         </thead>
         <tbody>
           <tr v-for="container in containers" :key="container.id">
+            <td>
+              <img v-if="container.image_url" :src="container.image_url" alt="容器写真" class="thumb" />
+              <span v-else>-</span>
+            </td>
             <td>{{ container.name }}</td>
             <td>{{ container.container_code || '-' }}</td>
             <td>{{ container.capacity ?? '-' }}</td>
@@ -51,6 +71,22 @@
           <div class="form-group">
             <label>容器名 *</label>
             <input v-model="formData.name" required :disabled="!canEdit" />
+          </div>
+          <div class="form-group">
+            <label>写真（複数登録可）</label>
+            <div class="image-upload-row">
+              <input type="file" ref="imageFileInput" @change="onImageFileSelected" accept="image/*" multiple style="display:none" />
+              <button type="button" class="btn-secondary" @click="triggerImageFileInput" :disabled="!canEdit || !isEdit">
+                画像を選択（複数可）
+              </button>
+              <span v-if="!isEdit" class="import-result-warn">先に保存してからアップロードしてください</span>
+            </div>
+            <div class="image-gallery" v-if="formData.images && formData.images.length">
+              <div class="image-gallery-item" v-for="img in formData.images" :key="img.id">
+                <img :src="img.image_url" alt="容器写真" />
+                <button type="button" class="btn-sm btn-danger" @click="removeImage(img.id)" :disabled="!canEdit">削除</button>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>容器コード</label>
@@ -99,11 +135,93 @@
         </form>
       </div>
     </div>
+
+    <div v-if="importPreview" class="modal-overlay">
+      <div class="modal-content import-review-content">
+        <h2>荷姿設定Excel取込 - 内容確認</h2>
+        <p class="import-review-hint">
+          各行の「容器コード」は手入力、「紐付け先」で新規作成か既存容器の更新かを選び、採用する写真にチェックを入れてから「反映する」を押してください。
+        </p>
+
+        <table class="data-table import-review-table">
+          <thead>
+            <tr>
+              <th>品番/品名</th>
+              <th>荷姿名称</th>
+              <th>入数</th>
+              <th>容器コード</th>
+              <th>紐付け先</th>
+              <th>写真</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="card in importPreview.cards" :key="card.card_key">
+              <td>{{ card.product_code }}<br /><span class="sub-text">{{ card.product_name }}</span></td>
+              <td>
+                <input
+                  v-model="importDecisions[card.card_key].container_name"
+                  :disabled="!!importDecisions[card.card_key].existing_container_id"
+                />
+              </td>
+              <td>{{ card.qty }}</td>
+              <td>
+                <input v-model="importDecisions[card.card_key].container_code" placeholder="任意" />
+              </td>
+              <td>
+                <select v-model="importDecisions[card.card_key].existing_container_id" @change="onExistingContainerChange(card.card_key)">
+                  <option :value="null">新規作成</option>
+                  <option v-for="c in containers" :key="c.id" :value="c.id">
+                    {{ c.name }}（{{ c.container_code || '-' }}）
+                  </option>
+                </select>
+              </td>
+              <td>
+                <div class="import-review-images">
+                  <label v-for="(img, idx) in card.images" :key="idx" class="import-review-image-item">
+                    <input
+                      type="checkbox"
+                      :value="idx"
+                      v-model="importDecisions[card.card_key].keep_image_indices"
+                    />
+                    <img :src="img" alt="候補写真" />
+                  </label>
+                  <span v-if="!card.images.length" class="sub-text">写真なし</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div v-if="importPreview.not_found.length" class="import-result-block">
+          <p class="import-result-warn">品番がマスタに未登録のためスキップ（{{ importPreview.not_found.length }}件）:</p>
+          <ul>
+            <li v-for="item in importPreview.not_found" :key="item.product_code">
+              {{ item.product_code }}（{{ item.product_name }}）
+            </li>
+          </ul>
+        </div>
+        <div v-if="importPreview.skipped_undetermined.length" class="import-result-block">
+          <p class="import-result-warn">荷姿・入数が未定のためスキップ（{{ importPreview.skipped_undetermined.length }}件）:</p>
+          <ul>
+            <li v-for="item in importPreview.skipped_undetermined" :key="item.product_code">
+              {{ item.product_code }}（{{ item.product_name }}）
+            </li>
+          </ul>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn-primary" @click="commitImport" :disabled="importCommitting">
+            {{ importCommitting ? '反映中...' : '反映する' }}
+          </button>
+          <button type="button" class="btn-secondary" @click="cancelImportPreview" :disabled="importCommitting">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
@@ -116,9 +234,16 @@ const dsSources = [
 const containers = ref([])
 const showDialog = ref(false)
 const isEdit = ref(false)
+const fileInput = ref(null)
+const imageFileInput = ref(null)
+const importResult = ref(null)
+const importPreview = ref(null)
+const importDecisions = reactive({})
+const importCommitting = ref(false)
 const formData = ref({
   name: '',
   container_code: '',
+  image_url: '',
   width: null,
   depth: null,
   height: null,
@@ -146,6 +271,7 @@ const showNewDialog = () => {
   formData.value = {
     name: '',
     container_code: '',
+    image_url: '',
     width: null,
     depth: null,
     height: null,
@@ -219,6 +345,117 @@ const deleteContainer = async (id) => {
   } catch (error) {
     console.error('削除エラー:', error)
     alert('削除に失敗しました')
+  }
+}
+
+const triggerImport = () => {
+  if (!canEdit.value) return
+  fileInput.value?.click()
+}
+
+const triggerImageFileInput = () => {
+  if (!canEdit.value || !isEdit.value) return
+  imageFileInput.value?.click()
+}
+
+const onImageFileSelected = async (e) => {
+  if (!canEdit.value || !isEdit.value) return
+  const files = e.target.files
+  if (!files || !files.length) return
+  try {
+    const fd = new FormData()
+    for (const file of files) fd.append('files', file)
+    const res = await api.containerCapacities.uploadImages(formData.value.id, fd)
+    formData.value.image_url = res.data.image_url || ''
+    formData.value.images = res.data.images || []
+    alert('画像をアップロードしました')
+  } catch (error) {
+    console.error('画像アップロードエラー:', error)
+    alert('画像のアップロードに失敗しました')
+  } finally {
+    if (imageFileInput.value) imageFileInput.value.value = ''
+  }
+}
+
+const removeImage = async (imageId) => {
+  if (!canEdit.value) return
+  if (!confirm('この写真を削除しますか？')) return
+  try {
+    const res = await api.containerCapacities.deleteImage(formData.value.id, imageId)
+    formData.value.image_url = res.data.image_url || ''
+    formData.value.images = res.data.images || []
+  } catch (error) {
+    console.error('画像削除エラー:', error)
+    alert('画像の削除に失敗しました')
+  }
+}
+
+const handleImport = async (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+  const fd = new FormData()
+  fd.append('file', file)
+  try {
+    const res = await api.containerCapacities.importExcelPreview(fd)
+    importPreview.value = res.data
+    Object.keys(importDecisions).forEach((key) => delete importDecisions[key])
+    for (const card of res.data.cards) {
+      const exactMatch = containers.value.find((c) => c.name === card.suggested_container_name)
+      importDecisions[card.card_key] = {
+        container_name: card.suggested_container_name,
+        container_code: exactMatch ? (exactMatch.container_code || '') : '',
+        existing_container_id: exactMatch ? exactMatch.id : null,
+        keep_image_indices: card.images.map((_, idx) => idx),
+      }
+    }
+  } catch (error) {
+    console.error('インポートプレビューエラー:', error)
+    alert('インポートに失敗しました')
+  }
+  e.target.value = ''
+}
+
+const onExistingContainerChange = (cardKey) => {
+  const decision = importDecisions[cardKey]
+  const existing = containers.value.find((c) => c.id === decision.existing_container_id)
+  if (existing) {
+    decision.container_name = existing.name
+    decision.container_code = existing.container_code || ''
+  }
+}
+
+const cancelImportPreview = () => {
+  importPreview.value = null
+  Object.keys(importDecisions).forEach((key) => delete importDecisions[key])
+}
+
+const commitImport = async () => {
+  if (!importPreview.value) return
+  importCommitting.value = true
+  try {
+    const decisions = importPreview.value.cards.map((card) => {
+      const d = importDecisions[card.card_key]
+      return {
+        card_key: card.card_key,
+        mode: d.existing_container_id ? 'update' : 'create',
+        existing_container_id: d.existing_container_id,
+        container_name: d.container_name,
+        container_code: d.container_code,
+        keep_image_indices: d.keep_image_indices,
+      }
+    })
+    const res = await api.containerCapacities.importExcelCommit({
+      import_token: importPreview.value.import_token,
+      decisions,
+    })
+    importResult.value = res.data
+    cancelImportPreview()
+    await fetchContainers()
+  } catch (error) {
+    console.error('インポート反映エラー:', error)
+    alert('反映に失敗しました')
+  } finally {
+    importCommitting.value = false
   }
 }
 
@@ -306,6 +543,136 @@ onMounted(() => {
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.import-result {
+  margin: 0 1rem 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background-color: #f9f9f9;
+}
+
+.import-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.import-result-block {
+  margin-top: 0.5rem;
+}
+
+.import-result-warn {
+  color: #b45309;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.import-result ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.image-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.image-preview {
+  margin-top: 0.5rem;
+}
+
+.image-preview img {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.image-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.image-gallery-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.image-gallery-item img {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.import-review-content {
+  min-width: 900px;
+  max-width: 95vw;
+}
+
+.import-review-hint {
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.import-review-table th,
+.import-review-table td {
+  vertical-align: top;
+  padding: 0.5rem;
+}
+
+.import-review-table input,
+.import-review-table select {
+  width: 100%;
+  padding: 0.4rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.import-review-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: 260px;
+}
+
+.import-review-image-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  cursor: pointer;
+}
+
+.import-review-image-item img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.sub-text {
+  color: #888;
+  font-size: 0.85em;
 }
 </style>
 

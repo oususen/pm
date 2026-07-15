@@ -6,18 +6,23 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Exists, Max, OuterRef, Q
 from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
 import django_filters
 import os
 import uuid
 import csv
-from io import StringIO
+import zipfile
+import base64
+import xml.etree.ElementTree as ET
+from io import BytesIO, StringIO
 from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, timedelta
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity, Equipment, Contact,
+    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
+    ContainerCapacityImage, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation,
 )
@@ -1120,6 +1125,124 @@ class ProductCodeMappingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering = ['source_product_code']
 
 
+def _container_excel_cell(row, idx):
+    return row[idx] if row is not None and idx < len(row) else None
+
+
+def _extract_container_excel_data(file_bytes):
+    """荷姿設定Excelのバイト列から、シート全行の値と埋め込み画像の位置(行・列→media相対パス)を取り出す。
+    画像が無い/drawing構成が読めないファイルの場合はimage_map・zfとも空/Noneのまま返す。
+    """
+    wb = load_workbook(BytesIO(file_bytes), data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+
+    image_map = {}
+    zf = None
+    try:
+        zf = zipfile.ZipFile(BytesIO(file_bytes))
+        ns = {
+            'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing',
+            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+        }
+        rembed = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed'
+        rels_root = ET.fromstring(zf.read('xl/drawings/_rels/drawing1.xml.rels'))
+        rid_to_target = {rel.get('Id'): rel.get('Target') for rel in rels_root}
+        drawing_root = ET.fromstring(zf.read('xl/drawings/drawing1.xml'))
+        anchors = drawing_root.findall('xdr:twoCellAnchor', ns) + drawing_root.findall('xdr:oneCellAnchor', ns)
+        for anchor in anchors:
+            frm = anchor.find('xdr:from', ns)
+            pic = anchor.find('xdr:pic', ns)
+            if frm is None or pic is None:
+                continue
+            blip_fill = pic.find('xdr:blipFill', ns)
+            blip = blip_fill.find('a:blip', ns) if blip_fill is not None else None
+            if blip is None:
+                continue
+            rid = blip.get(rembed)
+            target = rid_to_target.get(rid)
+            if not target:
+                continue
+            row = int(frm.find('xdr:row', ns).text)
+            col = int(frm.find('xdr:col', ns).text)
+            image_map.setdefault(row, []).append((col, target))
+    except KeyError:
+        image_map = {}
+
+    return rows, image_map, zf
+
+
+def _build_container_import_cards(rows, image_map):
+    """行データから荷姿設定カード（品番・荷姿名称・入数が確定しているもの）を抽出する。
+    容器名・容器コードの決定や既存容器への紐付けは呼び出し側（人間の確認）に委ねるため、ここでは提案値のみ返す。
+    """
+    cell = _container_excel_cell
+    block_rows = sorted(
+        i for i in range(len(rows))
+        if cell(rows[i], 0) == '品番' or cell(rows[i], 7) == '品番'
+    )
+
+    cards = []
+    not_found = []
+    skipped_undetermined = []
+
+    for i in range(len(rows) - 1):
+        row_a = rows[i]
+        row_b = rows[i + 1]
+        for offset in (0, 7):
+            if cell(row_a, offset) != '品番' or cell(row_b, offset) != '品名':
+                continue
+
+            product_code = cell(row_a, offset + 1)
+            container_name_raw = cell(row_a, offset + 4)
+            product_name = cell(row_b, offset + 1)
+            qty = cell(row_b, offset + 4)
+
+            if not product_code:
+                continue
+            product_code = str(product_code).strip()
+
+            if not container_name_raw or container_name_raw == '未定' or qty == '未定' or qty is None:
+                skipped_undetermined.append({'product_code': product_code, 'product_name': product_name})
+                continue
+
+            container_name_raw = str(container_name_raw).strip()
+            if container_name_raw.startswith('専用'):
+                suggested_name = f"{container_name_raw}({product_code})"
+            else:
+                suggested_name = container_name_raw
+
+            if not Product.objects.filter(product_code=product_code).exists():
+                not_found.append({'product_code': product_code, 'product_name': product_name})
+                continue
+
+            qty_int = int(qty) if isinstance(qty, (int, float)) else None
+
+            later_blocks = [b for b in block_rows if b > i]
+            window_end = later_blocks[0] - 1 if later_blocks else len(rows) - 1
+            image_targets = sorted({
+                target
+                for r in range(i, window_end + 1)
+                for col, target in image_map.get(r, [])
+                if offset <= col <= offset + 6
+            })
+
+            cards.append({
+                'card_key': f"{i}_{offset}",
+                'product_code': product_code,
+                'product_name': product_name,
+                'container_name_raw': container_name_raw,
+                'suggested_container_name': suggested_name,
+                'qty': qty_int,
+                'image_targets': image_targets,
+            })
+
+    return cards, not_found, skipped_undetermined
+
+
+CONTAINER_IMPORT_TMP_DIR = 'tmp/container_import'
+
+
 class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = ContainerCapacity.objects.all()
     serializer_class = ContainerCapacitySerializer
@@ -1127,6 +1250,186 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['name', 'container_code']
     ordering_fields = ['name', 'capacity']
     ordering = ['name']
+
+    @action(detail=False, methods=['post'], url_path='import_excel_preview', parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def import_excel_preview(self, request):
+        """客先別「荷姿設定」帳票をアップロードし、内容を解析してプレビューを返す（DBへは未反映）。
+        容器コードの入力・既存容器への紐付け・写真の採用選択は import_excel_commit で人間の判断により確定する。
+        """
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'detail': 'ファイルが必要です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        file_bytes = file.read()
+        rows, image_map, zf = _extract_container_excel_data(file_bytes)
+        cards, not_found, skipped_undetermined = _build_container_import_cards(rows, image_map)
+
+        import_token = uuid.uuid4().hex
+        default_storage.save(f"{CONTAINER_IMPORT_TMP_DIR}/{import_token}.xlsx", ContentFile(file_bytes))
+
+        for card in cards:
+            previews = []
+            if zf is not None:
+                for target in card['image_targets']:
+                    media_path = 'xl/' + target.replace('../', '')
+                    try:
+                        image_bytes = zf.read(media_path)
+                    except KeyError:
+                        continue
+                    ext = os.path.splitext(media_path)[1].lstrip('.').lower() or 'png'
+                    mime = 'jpeg' if ext == 'jpg' else ext
+                    b64 = base64.b64encode(image_bytes).decode('ascii')
+                    previews.append(f"data:image/{mime};base64,{b64}")
+            card['images'] = previews
+            del card['image_targets']
+
+        return Response({
+            'import_token': import_token,
+            'cards': cards,
+            'not_found': not_found,
+            'skipped_undetermined': skipped_undetermined,
+        })
+
+    @action(detail=False, methods=['post'], url_path='import_excel_commit')
+    def import_excel_commit(self, request):
+        """import_excel_preview で確認したカードのうち、人間が決定した内容（容器コード・新規/既存紐付け・
+        採用する写真）をもとに Product.used_container / capacity とContainerCapacityへ反映する。
+        """
+        import_token = request.data.get('import_token')
+        decisions = request.data.get('decisions') or []
+        if not import_token:
+            return Response({'detail': 'import_tokenが必要です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        tmp_path = f"{CONTAINER_IMPORT_TMP_DIR}/{import_token}.xlsx"
+        if not default_storage.exists(tmp_path):
+            return Response(
+                {'detail': '取込対象が見つかりません。プレビューの有効期限が切れた可能性があるため、再度アップロードしてください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with default_storage.open(tmp_path, 'rb') as f:
+            file_bytes = f.read()
+
+        rows, image_map, zf = _extract_container_excel_data(file_bytes)
+        cards, _not_found, _skipped = _build_container_import_cards(rows, image_map)
+        cards_by_key = {c['card_key']: c for c in cards}
+
+        updated_products = []
+        created_containers = []
+        updated_containers = []
+        image_applied_count = 0
+
+        for decision in decisions:
+            card = cards_by_key.get(decision.get('card_key'))
+            if not card:
+                continue
+
+            container_code = (decision.get('container_code') or '').strip() or None
+            mode = decision.get('mode') or 'create'
+            existing_container_id = decision.get('existing_container_id')
+            container_name = (decision.get('container_name') or card['suggested_container_name']).strip()
+            keep_indices = decision.get('keep_image_indices') or []
+
+            try:
+                product = Product.objects.get(product_code=card['product_code'])
+            except Product.DoesNotExist:
+                continue
+
+            if mode == 'update' and existing_container_id:
+                try:
+                    container = ContainerCapacity.objects.get(id=existing_container_id)
+                except ContainerCapacity.DoesNotExist:
+                    continue
+                if container_code:
+                    container.container_code = container_code
+                container.capacity = card['qty']
+                container.save(update_fields=['container_code', 'capacity'])
+                updated_containers.append(container.name)
+            else:
+                container = ContainerCapacity.objects.create(
+                    name=container_name,
+                    container_code=container_code,
+                    capacity=card['qty'],
+                )
+                created_containers.append(container.name)
+
+            product.used_container = container
+            product.capacity = card['qty']
+            product.save(update_fields=['used_container', 'capacity'])
+            updated_products.append(card['product_code'])
+
+            if zf is not None and keep_indices:
+                existing_count = container.images.count()
+                for order, idx in enumerate(keep_indices):
+                    if not isinstance(idx, int) or idx < 0 or idx >= len(card['image_targets']):
+                        continue
+                    media_path = 'xl/' + card['image_targets'][idx].replace('../', '')
+                    try:
+                        image_bytes = zf.read(media_path)
+                    except KeyError:
+                        continue
+                    ext = os.path.splitext(media_path)[1] or '.png'
+                    filename = f"containers/{card['product_code']}_{uuid.uuid4().hex}{ext}"
+                    saved_path = default_storage.save(filename, ContentFile(image_bytes))
+                    url = default_storage.url(saved_path)
+                    ContainerCapacityImage.objects.create(
+                        container=container, image_url=url, sort_order=existing_count + order,
+                    )
+                    if not container.image_url:
+                        container.image_url = url
+                        container.save(update_fields=['image_url'])
+                    image_applied_count += 1
+
+        default_storage.delete(tmp_path)
+
+        return Response({
+            'updated_count': len(updated_products),
+            'updated_products': updated_products,
+            'created_containers': created_containers,
+            'updated_containers': updated_containers,
+            'image_applied_count': image_applied_count,
+        })
+
+    @action(detail=True, methods=['post'], url_path='upload_images', parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def upload_images(self, request, pk=None):
+        container = self.get_object()
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({'detail': 'ファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_count = container.images.count()
+        for order, file_obj in enumerate(files):
+            ext = os.path.splitext(file_obj.name)[1] or ''
+            filename = f"containers/{container.id}_{uuid.uuid4().hex}{ext}"
+            saved_path = default_storage.save(filename, file_obj)
+            url = default_storage.url(saved_path)
+            ContainerCapacityImage.objects.create(
+                container=container, image_url=url, sort_order=existing_count + order,
+            )
+            if not container.image_url:
+                container.image_url = url
+
+        container.save(update_fields=['image_url'])
+        serializer = self.get_serializer(container)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['delete'], url_path=r'images/(?P<image_id>\d+)')
+    def delete_image(self, request, pk=None, image_id=None):
+        container = self.get_object()
+        try:
+            image = container.images.get(id=image_id)
+        except ContainerCapacityImage.DoesNotExist:
+            return Response({'detail': '画像が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        was_thumbnail = container.image_url == image.image_url
+        image.delete()
+        if was_thumbnail:
+            next_image = container.images.order_by('sort_order', 'id').first()
+            container.image_url = next_image.image_url if next_image else None
+            container.save(update_fields=['image_url'])
+
+        serializer = self.get_serializer(container)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class EquipmentViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

@@ -662,6 +662,7 @@ class ContainerCapacity(models.Model):
     stackable = models.BooleanField(null=True, blank=True, default=True, verbose_name='積み重ね可能')
     max_stack = models.IntegerField(null=True, blank=True, default=1, verbose_name='最大積み重ね段数')
     capacity = models.IntegerField(null=True, blank=True, verbose_name='入り数', help_text='容器に入る製品の個数')
+    image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
 
     class Meta:
         db_table = 'm_container_capacity'
@@ -673,6 +674,24 @@ class ContainerCapacity(models.Model):
         if self.capacity:
             return f"{self.name} (入り数: {self.capacity})"
         return f"{self.name}"
+
+
+class ContainerCapacityImage(models.Model):
+    """容器仕様写真（1容器に複数登録可）"""
+    id = models.BigAutoField(primary_key=True)
+    container = models.ForeignKey(ContainerCapacity, on_delete=models.CASCADE, related_name='images', verbose_name='容器')
+    image_url = models.CharField(max_length=255, verbose_name='画像URL')
+    sort_order = models.IntegerField(default=0, verbose_name='表示順')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='登録日時')
+
+    class Meta:
+        db_table = 'm_container_capacity_image'
+        verbose_name = '容器写真'
+        verbose_name_plural = '容器写真'
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return f"{self.container.name} 写真#{self.id}"
 
 
 class Equipment(models.Model):
