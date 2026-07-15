@@ -123,8 +123,28 @@
             <input v-model="formData.container_code" :disabled="!canEdit" />
           </div>
           <div class="form-group">
-            <label>入り数</label>
+            <label>入り数（容器デフォルト）</label>
             <input v-model.number="formData.capacity" type="number" min="0" :disabled="!canEdit" />
+          </div>
+          <div v-if="isEdit" class="form-group">
+            <label>製品別入数</label>
+            <table class="pc-table" v-if="formData.product_containers && formData.product_containers.length">
+              <thead><tr><th>品番</th><th>品名</th><th>入数</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="pc in formData.product_containers" :key="pc.id">
+                  <td>{{ pc.product_code }}</td>
+                  <td>{{ pc.product_name }}</td>
+                  <td><input v-model.number="pc.capacity" type="number" min="1" class="pc-capacity-input" :disabled="!canEdit" @change="updateProductCapacity(pc)" /></td>
+                  <td><button v-if="canEdit" type="button" class="btn-sm btn-danger" @click="removeProductContainer(pc)">削除</button></td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="helper-text">紐づく製品はありません</p>
+            <div v-if="canEdit" class="pc-add-row">
+              <input v-model="newProductCode" placeholder="品番を入力" class="pc-add-input" @keydown.enter.prevent="addProductContainer" />
+              <input v-model.number="newProductCapacity" type="number" min="1" placeholder="入数" class="pc-capacity-input" />
+              <button type="button" class="btn-sm btn-primary" @click="addProductContainer">追加</button>
+            </div>
           </div>
           <div class="form-group">
             <label>幅</label>
@@ -286,6 +306,8 @@ const formData = ref({
   capacity: null,
 })
 const canEdit = computed(() => canAccessMasterResource('masters.container_capacity', 'edit'))
+const newProductCode = ref('')
+const newProductCapacity = ref(1)
 
 const fetchContainers = async () => {
   try {
@@ -328,7 +350,10 @@ const editContainer = (container) => {
     can_mix: container.can_mix ?? true,
     stackable: container.stackable ?? true,
     max_stack: container.max_stack ?? 1,
+    product_containers: (container.products || []).map((p) => ({ ...p })),
   }
+  newProductCode.value = ''
+  newProductCapacity.value = 1
   showDialog.value = true
 }
 
@@ -491,6 +516,50 @@ const commitImport = async () => {
     alert('反映に失敗しました')
   } finally {
     importCommitting.value = false
+  }
+}
+
+const addProductContainer = async () => {
+  if (!canEdit.value || !formData.value.id) return
+  const code = newProductCode.value.trim()
+  if (!code) return
+  try {
+    const res = await api.containerCapacities.addProduct(formData.value.id, {
+      product_code: code, capacity: newProductCapacity.value || 1,
+    })
+    const existing = formData.value.product_containers.find((p) => p.product_id === res.data.product_id)
+    if (existing) {
+      Object.assign(existing, res.data)
+    } else {
+      formData.value.product_containers.push(res.data)
+    }
+    newProductCode.value = ''
+    newProductCapacity.value = 1
+    await fetchContainers()
+  } catch (e) {
+    alert(e?.response?.data?.detail || '追加に失敗しました')
+  }
+}
+
+const updateProductCapacity = async (pc) => {
+  if (!canEdit.value || !formData.value.id) return
+  try {
+    await api.containerCapacities.updateProduct(formData.value.id, pc.id, { capacity: pc.capacity })
+    await fetchContainers()
+  } catch (e) {
+    alert(e?.response?.data?.detail || '更新に失敗しました')
+  }
+}
+
+const removeProductContainer = async (pc) => {
+  if (!canEdit.value || !formData.value.id) return
+  if (!confirm(`${pc.product_code} の紐付けを削除しますか？`)) return
+  try {
+    await api.containerCapacities.removeProduct(formData.value.id, pc.id)
+    formData.value.product_containers = formData.value.product_containers.filter((p) => p.id !== pc.id)
+    await fetchContainers()
+  } catch (e) {
+    alert(e?.response?.data?.detail || '削除に失敗しました')
   }
 }
 
@@ -744,6 +813,60 @@ onMounted(() => {
   margin: 1px 2px;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.pc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.pc-table th, .pc-table td {
+  padding: 4px 6px;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+
+.pc-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+}
+
+.pc-capacity-input {
+  width: 70px;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.pc-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.pc-add-input {
+  width: 160px;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.btn-primary {
+  background: #4a7ae5;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.helper-text {
+  color: #888;
+  font-size: 12px;
+  margin: 4px 0;
 }
 </style>
 

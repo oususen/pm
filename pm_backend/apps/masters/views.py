@@ -22,7 +22,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
-    ContainerCapacityImage, Equipment, Contact,
+    ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation,
 )
@@ -1260,6 +1260,60 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 | Q(product_containers__product__product_name__icontains=product)
             ).distinct()
         return qs
+
+    @action(detail=True, methods=['post'], url_path='products')
+    def add_product(self, request, pk=None):
+        container = self.get_object()
+        product_code = (request.data.get('product_code') or '').strip()
+        capacity = request.data.get('capacity')
+        if not product_code:
+            return Response({'detail': '品番を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            product = Product.objects.get(product_code=product_code)
+        except Product.DoesNotExist:
+            return Response({'detail': f'品番 {product_code} が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            capacity = int(capacity)
+        except (TypeError, ValueError):
+            return Response({'detail': '入数を整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        pc, created = ProductContainer.objects.update_or_create(
+            product=product, container=container,
+            defaults={'capacity': capacity},
+        )
+        return Response({
+            'id': pc.id, 'product_id': product.id,
+            'product_code': product.product_code, 'product_name': product.product_name,
+            'capacity': pc.capacity, 'created': created,
+        })
+
+    @action(detail=True, methods=['patch'], url_path=r'products/(?P<pc_id>\d+)')
+    def update_product(self, request, pk=None, pc_id=None):
+        container = self.get_object()
+        try:
+            pc = container.product_containers.get(id=pc_id)
+        except ProductContainer.DoesNotExist:
+            return Response({'detail': '紐付けが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        capacity = request.data.get('capacity')
+        try:
+            pc.capacity = int(capacity)
+        except (TypeError, ValueError):
+            return Response({'detail': '入数を整数で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        pc.save(update_fields=['capacity'])
+        return Response({
+            'id': pc.id, 'product_id': pc.product_id,
+            'product_code': pc.product.product_code, 'product_name': pc.product.product_name,
+            'capacity': pc.capacity,
+        })
+
+    @action(detail=True, methods=['delete'], url_path=r'products/(?P<pc_id>\d+)/delete')
+    def remove_product(self, request, pk=None, pc_id=None):
+        container = self.get_object()
+        try:
+            pc = container.product_containers.get(id=pc_id)
+        except ProductContainer.DoesNotExist:
+            return Response({'detail': '紐付けが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        pc.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['post'], url_path='import_excel_preview', parser_classes=[parsers.MultiPartParser, parsers.FormParser])
     def import_excel_preview(self, request):

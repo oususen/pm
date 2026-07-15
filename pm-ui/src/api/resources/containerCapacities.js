@@ -26,4 +26,13 @@ export const createContainerCapacitiesAPI = (client) => ({
   deleteImage(id, imageId) {
     return client.delete(`/container-capacities/${id}/images/${imageId}/`)
   },
+  addProduct(containerId, data) {
+    return client.post(`/container-capacities/${containerId}/products/`, data)
+  },
+  updateProduct(containerId, pcId, data) {
+    return client.patch(`/container-capacities/${containerId}/products/${pcId}/`, data)
+  },
+  removeProduct(containerId, pcId) {
+    return client.delete(`/container-capacities/${containerId}/products/${pcId}/delete/`)
+  },
 })
