@@ -75,8 +75,17 @@ class ContainerCapacityImageSerializer(serializers.ModelSerializer):
         fields = ['id', 'image_url', 'sort_order']
 
 
+class ContainerCapacityProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['id', 'product_code', 'product_name']
+
+
 class ContainerCapacitySerializer(serializers.ModelSerializer):
     images = ContainerCapacityImageSerializer(many=True, read_only=True)
+    products = ContainerCapacityProductSerializer(
+        source='product_set', many=True, read_only=True,
+    )
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

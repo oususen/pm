@@ -23,6 +23,27 @@
       </p>
     </div>
 
+    <div class="filter-bar">
+      <label>容器名:</label>
+      <input
+        v-model="nameFilter"
+        type="text"
+        placeholder="容器名で検索"
+        @keydown.enter="fetchContainers"
+        class="filter-input"
+      />
+      <label>製品:</label>
+      <input
+        v-model="productFilter"
+        type="text"
+        placeholder="品番・品名で検索"
+        @keydown.enter="fetchContainers"
+        class="filter-input"
+      />
+      <button @click="fetchContainers" class="btn-sm">検索</button>
+      <button v-if="productFilter || nameFilter" @click="productFilter = ''; nameFilter = ''; fetchContainers()" class="btn-sm btn-secondary">クリア</button>
+    </div>
+
     <div class="page-content">
       <table class="data-table">
         <thead>
@@ -35,6 +56,7 @@
             <th>最大重量</th>
             <th>混載</th>
             <th>積み重ね</th>
+            <th>使用製品</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -51,6 +73,14 @@
             <td>{{ container.max_weight ?? '-' }}</td>
             <td>{{ container.can_mix ? '可' : '不可' }}</td>
             <td>{{ container.stackable ? '可' : '不可' }}</td>
+            <td class="products-cell">
+              <template v-if="container.products && container.products.length">
+                <span v-for="(p, i) in container.products" :key="p.id" class="product-tag">
+                  {{ p.product_code }}
+                </span>
+              </template>
+              <span v-else>-</span>
+            </td>
             <td>
               <button v-if="canEdit" @click="editContainer(container)" class="btn-sm">編集</button>
               <button v-if="canEdit" @click="deleteContainer(container.id)" class="btn-sm btn-danger">削除</button>
@@ -232,6 +262,8 @@ const dsSources = [
 ]
 
 const containers = ref([])
+const nameFilter = ref('')
+const productFilter = ref('')
 const showDialog = ref(false)
 const isEdit = ref(false)
 const fileInput = ref(null)
@@ -257,7 +289,10 @@ const canEdit = computed(() => canAccessMasterResource('masters.container_capaci
 
 const fetchContainers = async () => {
   try {
-    const response = await api.containerCapacities.getContainerCapacities()
+    const params = {}
+    if (nameFilter.value) params.search = nameFilter.value
+    if (productFilter.value) params.product = productFilter.value
+    const response = await api.containerCapacities.getContainerCapacities(params)
     containers.value = response.data.results || response.data
   } catch (error) {
     console.error('容器取得エラー:', error)
@@ -673,6 +708,42 @@ onMounted(() => {
 .sub-text {
   color: #888;
   font-size: 0.85em;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 1rem 8px;
+}
+
+.filter-bar label {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.filter-input {
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  width: 220px;
+  font-size: 13px;
+}
+
+.products-cell {
+  max-width: 200px;
+}
+
+.product-tag {
+  display: inline-block;
+  background: #e8f0fe;
+  color: #1a56db;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin: 1px 2px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 </style>
 

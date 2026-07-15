@@ -1251,6 +1251,16 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['name', 'capacity']
     ordering = ['name']
 
+    def get_queryset(self):
+        qs = super().get_queryset().prefetch_related('product_set')
+        product = self.request.query_params.get('product')
+        if product:
+            qs = qs.filter(
+                Q(product__product_code__icontains=product)
+                | Q(product__product_name__icontains=product)
+            ).distinct()
+        return qs
+
     @action(detail=False, methods=['post'], url_path='import_excel_preview', parser_classes=[parsers.MultiPartParser, parsers.FormParser])
     def import_excel_preview(self, request):
         """客先別「荷姿設定」帳票をアップロードし、内容を解析してプレビューを返す（DBへは未反映）。
