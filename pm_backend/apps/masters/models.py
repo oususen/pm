@@ -653,7 +653,7 @@ class ContainerCapacity(models.Model):
     """容器仕様マスタ"""
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=50, verbose_name='容器名')
-    container_code = models.CharField(max_length=20, null=True, blank=True, verbose_name='容器コード')
+    container_code = models.CharField(max_length=20, unique=True, null=True, blank=True, verbose_name='容器コード')
     width = models.IntegerField(null=True, blank=True, verbose_name='幅')
     depth = models.IntegerField(null=True, blank=True, verbose_name='奥行')
     height = models.IntegerField(null=True, blank=True, verbose_name='高さ')

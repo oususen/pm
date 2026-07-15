@@ -1486,16 +1486,43 @@ class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 container.save(update_fields=['container_code', 'capacity'])
                 updated_containers.append(container.name)
             else:
-                container = ContainerCapacity.objects.create(
-                    name=container_name,
-                    container_code=container_code,
-                    capacity=card['qty'],
-                )
-                created_containers.append(container.name)
+                created = False
+                if container_code:
+                    container, created = ContainerCapacity.objects.get_or_create(
+                        container_code=container_code,
+                        defaults={
+                            'name': container_name,
+                            'capacity': card['qty'],
+                        },
+                    )
+                    changed = False
+                    if container.name != container_name:
+                        container.name = container_name
+                        changed = True
+                    if container.capacity != card['qty']:
+                        container.capacity = card['qty']
+                        changed = True
+                    if changed:
+                        container.save(update_fields=['name', 'capacity'])
+                else:
+                    container = ContainerCapacity.objects.create(
+                        name=container_name,
+                        container_code=None,
+                        capacity=card['qty'],
+                    )
+                    created = True
+                if created:
+                    created_containers.append(container.name)
 
             product.used_container = container
             product.capacity = card['qty']
             product.save(update_fields=['used_container', 'capacity'])
+
+            ProductContainer.objects.update_or_create(
+                product=product,
+                container=container,
+                defaults={'capacity': card['qty']},
+            )
             updated_products.append(card['product_code'])
 
             if zf is not None and keep_indices:

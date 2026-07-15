@@ -199,6 +199,169 @@ def _source_order_no(order_line):
     return value or None
 
 
+def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
+    """クボタ堺の OPEN 受注明細から納期調整テーブルを差分同期する。"""
+    # 対象 OrderLine: クボタ堺 + OPEN + 納期が期間内
+    line_qs = OrderLine.objects.select_related('order', 'order__customer', 'product').filter(
+        order__status='OPEN',
+        order__customer__customer_code=KUBOTA_CUSTOMER_CODE,
+        due_date__range=(start_date, end_date),
+    ).order_by('product_code', 'due_date', 'ship_to_code', 'id')
+    line_list = list(line_qs)
+
+    # FIRM/FORECAST 重複排除: 同日・同品番・同納入場所で FIRM があれば FORECAST を除外
+    firm_key_set = set()
+    for line in line_list:
+        order_type = getattr(line.order, 'order_type', None)
+        if order_type == 'FIRM':
+            firm_key_set.add((line.product_code, line.due_date, line.ship_to_code or ''))
+
+    surviving_lines = []
+    for line in line_list:
+        order_type = getattr(line.order, 'order_type', None)
+        key = (line.product_code, line.due_date, line.ship_to_code or '')
+        if order_type == 'FORECAST' and key in firm_key_set:
+            continue
+        surviving_lines.append(line)
+
+    # グルーピング: 品番 + 納入場所 + 注番 + 日付 → demand_qty 合算
+    demand_map = {}  # key: (product_code, ship_to_code, source_order_no, due_date) → dict
+    for line in surviving_lines:
+        order_type = getattr(line.order, 'order_type', None) or 'FORECAST'
+        src_order_no = _source_order_no(line)
+        ship_to = line.ship_to_code or ''
+        key = (line.product_code, ship_to, src_order_no or '', line.due_date)
+
+        if key not in demand_map:
+            demand_map[key] = {
+                'product_code': line.product_code,
+                'ship_to_code': ship_to or None,
+                'source_order_no': src_order_no,
+                'order_type': order_type,
+                'due_date': line.due_date,
+                'demand_qty': Decimal('0'),
+                'order_line_id': line.id,
+            }
+        demand_map[key]['demand_qty'] += (line.quantity or Decimal('0'))
+        if order_type == 'FIRM':
+            demand_map[key]['order_type'] = 'FIRM'
+
+    created_count = 0
+    updated_count = 0
+    deleted_count = 0
+
+    with transaction.atomic():
+        existing_qs = KubotaSakaiDueAdjustment.objects.filter(
+            due_date__range=(start_date, end_date),
+        )
+        existing_map = {}
+        for row in existing_qs:
+            ekey = (row.product_code, row.ship_to_code or '', row.source_order_no or '', row.due_date)
+            existing_map[ekey] = row
+
+        processed_keys = set()
+
+        for key, data in demand_map.items():
+            processed_keys.add(key)
+            existing = existing_map.get(key)
+
+            if existing:
+                changed = False
+                if existing.demand_qty != data['demand_qty']:
+                    existing.demand_qty = data['demand_qty']
+                    changed = True
+                if existing.order_type != data['order_type']:
+                    existing.order_type = data['order_type']
+                    changed = True
+                if existing.order_line_id != data['order_line_id']:
+                    existing.order_line_id = data['order_line_id']
+                    changed = True
+                if changed:
+                    existing.save(update_fields=['demand_qty', 'order_type', 'order_line_id'])
+                    updated_count += 1
+            else:
+                KubotaSakaiDueAdjustment.objects.create(
+                    product_code=data['product_code'],
+                    ship_to_code=data['ship_to_code'],
+                    source_order_no=data['source_order_no'],
+                    order_type=data['order_type'],
+                    due_date=data['due_date'],
+                    demand_qty=data['demand_qty'],
+                    delivery_qty=Decimal('0'),
+                    remaining_qty=Decimal('0'),
+                    order_line_id=data['order_line_id'],
+                )
+                created_count += 1
+
+        # 同日・同品番・同納入先に FIRM が来たら、旧 FORECAST 行の需要有無に関わらず
+        # 入力済み納入数を FIRM 行へ引き継いで削除する。
+        firm_keys_by_date_product = {}
+        for key, data in demand_map.items():
+            product_code, ship_to, _src_order_no, due_date_val = key
+            dp_key = (product_code, ship_to, due_date_val)
+            if data['order_type'] == 'FIRM':
+                firm_keys_by_date_product[dp_key] = key
+
+        for ekey, existing_row in list(existing_map.items()):
+            if ekey in processed_keys:
+                continue
+            product_code, ship_to, _src_order_no, due_date_val = ekey
+            dp_key = (product_code, ship_to, due_date_val)
+            if existing_row.order_type == 'FORECAST' and dp_key in firm_keys_by_date_product:
+                firm_key = firm_keys_by_date_product[dp_key]
+                firm_row = existing_map.get(firm_key) or KubotaSakaiDueAdjustment.objects.filter(
+                    product_code=firm_key[0],
+                    ship_to_code=firm_key[1] or None,
+                    source_order_no=firm_key[2] or None,
+                    due_date=firm_key[3],
+                ).first()
+                if firm_row and existing_row.delivery_qty > 0:
+                    firm_row.delivery_qty += existing_row.delivery_qty
+                    firm_row.save(update_fields=['delivery_qty'])
+                existing_row.delete()
+                deleted_count += 1
+                processed_keys.add(ekey)
+
+        # 今回の同期結果に存在しない期間内レコードの整理。
+        # FORECAST は行を残し、需要数のみ0にする（delivery_qty は保持）。
+        # FIRM は未入力(納入数=0)の行のみ削除する。
+        for ekey, existing_row in list(existing_map.items()):
+            if ekey in processed_keys:
+                continue
+            if existing_row.order_type == 'FORECAST':
+                changed = False
+                if existing_row.demand_qty != Decimal('0'):
+                    existing_row.demand_qty = Decimal('0')
+                    changed = True
+                if existing_row.order_line_id is not None:
+                    existing_row.order_line_id = None
+                    changed = True
+                if changed:
+                    existing_row.save(update_fields=['demand_qty', 'order_line'])
+                    updated_count += 1
+                continue
+            if existing_row.order_type == 'FIRM' and existing_row.delivery_qty != Decimal('0'):
+                continue
+            existing_row.delete()
+            deleted_count += 1
+
+        affected_groups = set()
+        for key in processed_keys:
+            affected_groups.add((key[0], key[1]))
+        for ekey, existing_row in existing_map.items():
+            if ekey in processed_keys:
+                continue
+            affected_groups.add((ekey[0], ekey[1]))
+        _recalculate_remaining_for_groups(affected_groups)
+
+    return {
+        'created': created_count,
+        'updated': updated_count,
+        'deleted_forecast': deleted_count,
+        'total_demand_rows': len(demand_map),
+    }
+
+
 class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
     queryset = KubotaSakaiDueAdjustment.objects.all()
     serializer_class = KubotaSakaiDueAdjustmentSerializer
@@ -230,177 +393,13 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'detail': f'{lock_date} まで締め済みのため取込対象がありません。',
                 })
 
-        # 対象 OrderLine: クボタ堺 + OPEN + 納期が期間内
-        line_qs = OrderLine.objects.select_related('order', 'order__customer', 'product').filter(
-            order__status='OPEN',
-            order__customer__customer_code=KUBOTA_CUSTOMER_CODE,
-            due_date__range=(start_date, end_date),
-        ).order_by('product_code', 'due_date', 'ship_to_code', 'id')
-        line_list = list(line_qs)
-
-        # FIRM/FORECAST 重複排除: 同日・同品番・同納入場所で FIRM があれば FORECAST を除外
-        firm_key_set = set()
-        for line in line_list:
-            order_type = getattr(line.order, 'order_type', None)
-            if order_type == 'FIRM':
-                firm_key_set.add((line.product_code, line.due_date, line.ship_to_code or ''))
-
-        surviving_lines = []
-        for line in line_list:
-            order_type = getattr(line.order, 'order_type', None)
-            key = (line.product_code, line.due_date, line.ship_to_code or '')
-            if order_type == 'FORECAST' and key in firm_key_set:
-                continue
-            surviving_lines.append(line)
-
-        # グルーピング: 品番 + 納入場所 + 注番 + 日付 → demand_qty 合算
-        demand_map = {}  # key: (product_code, ship_to_code, source_order_no, due_date) → dict
-        for line in surviving_lines:
-            order_type = getattr(line.order, 'order_type', None) or 'FORECAST'
-            src_order_no = _source_order_no(line)
-            ship_to = line.ship_to_code or ''
-            key = (line.product_code, ship_to, src_order_no or '', line.due_date)
-
-            if key not in demand_map:
-                demand_map[key] = {
-                    'product_code': line.product_code,
-                    'ship_to_code': ship_to or None,
-                    'source_order_no': src_order_no,
-                    'order_type': order_type,
-                    'due_date': line.due_date,
-                    'demand_qty': Decimal('0'),
-                    'order_line_id': line.id,
-                }
-            demand_map[key]['demand_qty'] += (line.quantity or Decimal('0'))
-            # FIRM が1つでもあれば FIRM
-            if order_type == 'FIRM':
-                demand_map[key]['order_type'] = 'FIRM'
-
-        # 差分更新
-        created_count = 0
-        updated_count = 0
-        deleted_count = 0
-
-        with transaction.atomic():
-            # 既存レコード取得（期間内）
-            existing_qs = KubotaSakaiDueAdjustment.objects.filter(
-                due_date__range=(start_date, end_date),
-            )
-            existing_map = {}
-            for row in existing_qs:
-                ekey = (row.product_code, row.ship_to_code or '', row.source_order_no or '', row.due_date)
-                existing_map[ekey] = row
-
-            processed_keys = set()
-
-            for key, data in demand_map.items():
-                processed_keys.add(key)
-                existing = existing_map.get(key)
-
-                if existing:
-                    # 既存行 → demand_qty と order_type を更新（delivery_qty は保持）
-                    changed = False
-                    if existing.demand_qty != data['demand_qty']:
-                        existing.demand_qty = data['demand_qty']
-                        changed = True
-                    if existing.order_type != data['order_type']:
-                        existing.order_type = data['order_type']
-                        changed = True
-                    if existing.order_line_id != data['order_line_id']:
-                        existing.order_line_id = data['order_line_id']
-                        changed = True
-                    if changed:
-                        existing.save(update_fields=['demand_qty', 'order_type', 'order_line_id'])
-                        updated_count += 1
-                else:
-                    # 新規行
-                    KubotaSakaiDueAdjustment.objects.create(
-                        product_code=data['product_code'],
-                        ship_to_code=data['ship_to_code'],
-                        source_order_no=data['source_order_no'],
-                        order_type=data['order_type'],
-                        due_date=data['due_date'],
-                        demand_qty=data['demand_qty'],
-                        delivery_qty=Decimal('0'),
-                        remaining_qty=Decimal('0'),
-                        order_line_id=data['order_line_id'],
-                    )
-                    created_count += 1
-
-            # 内示→確定の遷移処理:
-            # 同日・同品番・同納入先に FIRM が来たら、旧 FORECAST 行の需要有無に関わらず
-            # 入力済み納入数を FIRM 行へ引き継いで削除する。
-            # これにより「前回の内示行に計画だけ残り、確定後も内示表示が残る」状態を防ぐ。
-            firm_keys_by_date_product = {}  # (product_code, ship_to_code, due_date) → FIRM key
-            for key, data in demand_map.items():
-                product_code, ship_to, src_order_no, due_date_val = key
-                dp_key = (product_code, ship_to, due_date_val)
-                if data['order_type'] == 'FIRM':
-                    firm_keys_by_date_product[dp_key] = key
-
-            # 既存テーブルの FORECAST 行で、同日に FIRM が来たもの
-            for ekey, existing_row in list(existing_map.items()):
-                if ekey in processed_keys:
-                    continue  # 既に更新済み
-                product_code, ship_to, src_order_no, due_date_val = ekey
-                dp_key = (product_code, ship_to, due_date_val)
-                if (
-                    existing_row.order_type == 'FORECAST'
-                    and dp_key in firm_keys_by_date_product
-                ):
-                    # FIRM 行に delivery_qty を引き継ぎ
-                    firm_key = firm_keys_by_date_product[dp_key]
-                    firm_row = existing_map.get(firm_key) or KubotaSakaiDueAdjustment.objects.filter(
-                        product_code=firm_key[0],
-                        ship_to_code=firm_key[1] or None,
-                        source_order_no=firm_key[2] or None,
-                        due_date=firm_key[3],
-                    ).first()
-                    if firm_row and existing_row.delivery_qty > 0:
-                        firm_row.delivery_qty += existing_row.delivery_qty
-                        firm_row.save(update_fields=['delivery_qty'])
-                    existing_row.delete()
-                    deleted_count += 1
-                    processed_keys.add(ekey)
-
-            # 今回の取込結果に存在しない期間内レコードの整理。
-            # FORECAST は行を残し、需要数のみ0にする（delivery_qty は保持）。
-            # FIRM は未入力(納入数=0)の行のみ削除する。
-            for ekey, existing_row in list(existing_map.items()):
-                if ekey in processed_keys:
-                    continue
-                if existing_row.order_type == 'FORECAST':
-                    changed = False
-                    if existing_row.demand_qty != Decimal('0'):
-                        existing_row.demand_qty = Decimal('0')
-                        changed = True
-                    if existing_row.order_line_id is not None:
-                        existing_row.order_line_id = None
-                        changed = True
-                    if changed:
-                        existing_row.save(update_fields=['demand_qty', 'order_line'])
-                        updated_count += 1
-                    continue
-                if existing_row.order_type == 'FIRM' and existing_row.delivery_qty != Decimal('0'):
-                    continue
-                existing_row.delete()
-                deleted_count += 1
-
-            # 残量再計算（取り込み後）
-            affected_groups = set()
-            for key in processed_keys:
-                affected_groups.add((key[0], key[1]))  # (product_code, ship_to_code)
-            for ekey, existing_row in existing_map.items():
-                if ekey in processed_keys:
-                    continue
-                affected_groups.add((ekey[0], ekey[1]))
-            _recalculate_remaining_for_groups(affected_groups)
+        sync_result = sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date)
 
         return Response({
-            'created': created_count,
-            'updated': updated_count,
-            'deleted_forecast': deleted_count,
-            'total_demand_rows': len(demand_map),
+            'created': sync_result['created'],
+            'updated': sync_result['updated'],
+            'deleted_forecast': sync_result['deleted_forecast'],
+            'total_demand_rows': sync_result['total_demand_rows'],
         })
 
     # ========== grid ==========

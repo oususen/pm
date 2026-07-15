@@ -6,7 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, Max, Min, OuterRef, Q
 import csv
 import json
 import re
@@ -717,22 +717,46 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 # Always use CSVImportService for order creation (common logic)
                 try:
                     order_service = CSVImportService()
-                    # Use raw ID range to filter only records from this import
                     raw_id_range = (result.get('min_raw_id'), result.get('max_raw_id'))
                     order_result = order_service.create_orders_from_staging(
                         source_file=file.name,
                         raw_id_range=raw_id_range
                     )
-                    # Merge results
                     result['orders_created'] = order_result.get('orders', 0)
                     result['lines_created'] = order_result.get('lines', 0)
                     result['superseded_forecast_orders'] = order_result.get('deleted_forecast_orders', 0)
                     result['additional_order_notices'] = order_result.get('additional_order_notices', [])
                 except Exception as e:
-                    # If order creation fails, still return the staging import success
-                    # but include the error
                     result['order_creation_error'] = str(e)
                     result['message'] = f"CSV imported to staging successfully, but order creation failed: {str(e)}"
+
+                if 'order_creation_error' not in result and customer_code == '000196' and order_type == 'FIRM':
+                    try:
+                        created_line_ids = order_result.get('created_line_ids') or []
+                        if created_line_ids:
+                            due_range = OrderLine.objects.filter(id__in=created_line_ids).aggregate(
+                                min_due_date=Min('due_date'),
+                                max_due_date=Max('due_date'),
+                            )
+                            sync_start = due_range.get('min_due_date')
+                            sync_end = due_range.get('max_due_date')
+                            if sync_start and sync_end:
+                                from shipping.views_kubota_sakai_due_adjustment import sync_kubota_sakai_due_adjustments_from_orders
+                                lock_date = SystemSetting.get_lock_date('kubota_sakai_due')
+                                if lock_date and sync_start <= lock_date:
+                                    sync_start = lock_date + timedelta(days=1)
+                                if sync_start <= sync_end:
+                                    result['kubota_sakai_due_adjustment_sync'] = sync_kubota_sakai_due_adjustments_from_orders(
+                                        sync_start,
+                                        sync_end,
+                                    )
+                                else:
+                                    result['kubota_sakai_due_adjustment_sync'] = {
+                                        'skipped': True,
+                                        'detail': f'{lock_date} まで締め済みのため同期対象なし',
+                                    }
+                    except Exception as e:
+                        result['due_adjustment_sync_error'] = str(e)
 
                 # 通知は受注作成とは独立して実行（通知失敗で取込結果を汚さない）
                 if 'order_creation_error' not in result:
