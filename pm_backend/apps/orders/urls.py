@@ -6,7 +6,10 @@ from .views import (
     StgOrderRawViewSet,
     StgOrderDailyViewSet,
 )
-from .core.views import kubota_sakai_import_config_view
+from .core.views import (
+    kubota_sakai_import_config_view,
+    order_first_article_setting_view,
+)
 
 router = DefaultRouter()
 router.register(r'orders', OrderViewSet, basename='order')
@@ -17,4 +20,5 @@ router.register(r'stg-order-daily', StgOrderDailyViewSet, basename='stgorderdail
 urlpatterns = [
     path('', include(router.urls)),
     path('kubota-sakai-import-config/', kubota_sakai_import_config_view, name='kubota-sakai-import-config'),
+    path('order-first-article-setting/', order_first_article_setting_view, name='order-first-article-setting'),
 ]

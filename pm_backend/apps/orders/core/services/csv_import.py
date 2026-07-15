@@ -322,6 +322,7 @@ class CSVImportService:
         created_orders = 0
         updated_orders = 0
         created_lines = 0
+        created_line_ids = []
         superseded_orders = 0
         additional_order_notices = []
 
@@ -466,7 +467,7 @@ class CSVImportService:
                         if hasattr(daily, 'raw_kubota') and daily.raw_kubota:
                             rp = daily.raw_kubota.raw_payload or {}
                             kubota_no = rp.get('kubota_order_no') or daily.raw_kubota.order_no
-                        OrderLine.objects.create(
+                        line = OrderLine.objects.create(
                             order=order,
                             line_no=line_no,
                             product=product,
@@ -478,6 +479,7 @@ class CSVImportService:
                             plant_code=daily.plant_code,
                             ship_to_code=daily.ship_to_code
                         )
+                        created_line_ids.append(line.id)
                         line_no += 1
                         created_lines += 1
                     continue  # skip generic line creation below
@@ -567,7 +569,7 @@ class CSVImportService:
                                 product = Product.objects.get(product_code=daily.product_code)
                             except Product.DoesNotExist:
                                 product = None
-                            OrderLine.objects.create(
+                            line = OrderLine.objects.create(
                                 order=reg_order,
                                 line_no=line_no,
                                 product=product,
@@ -579,6 +581,7 @@ class CSVImportService:
                                 plant_code=daily.plant_code,
                                 ship_to_code=daily.ship_to_code
                             )
+                            created_line_ids.append(line.id)
                             line_no += 1
                             created_lines += 1
                         created_orders += 1
@@ -603,7 +606,7 @@ class CSVImportService:
                                 product = Product.objects.get(product_code=daily.product_code)
                             except Product.DoesNotExist:
                                 product = None
-                            OrderLine.objects.create(
+                            line = OrderLine.objects.create(
                                 order=tuika_order,
                                 line_no=line_no,
                                 product=product,
@@ -615,6 +618,7 @@ class CSVImportService:
                                 plant_code=daily.plant_code,
                                 ship_to_code=daily.ship_to_code
                             )
+                            created_line_ids.append(line.id)
                             line_no += 1
                             created_lines += 1
                         created_orders += 1
@@ -653,7 +657,7 @@ class CSVImportService:
                                 product = Product.objects.get(product_code=daily.product_code)
                             except Product.DoesNotExist:
                                 product = None
-                            OrderLine.objects.create(
+                            line = OrderLine.objects.create(
                                 order=tuika2_order,
                                 line_no=line_no,
                                 product=product,
@@ -665,6 +669,7 @@ class CSVImportService:
                                 plant_code=daily.plant_code,
                                 ship_to_code=daily.ship_to_code
                             )
+                            created_line_ids.append(line.id)
                             line_no += 1
                             created_lines += 1
                         created_orders += 1
@@ -753,7 +758,7 @@ class CSVImportService:
                         except Product.DoesNotExist:
                             product = None
 
-                        OrderLine.objects.create(
+                        line = OrderLine.objects.create(
                             order=order,
                             line_no=line_no,
                             product=product,
@@ -764,6 +769,7 @@ class CSVImportService:
                             plant_code=daily.plant_code,
                             ship_to_code=daily.ship_to_code
                         )
+                        created_line_ids.append(line.id)
                         created_lines += 1
                         line_no += 1
 
@@ -788,7 +794,7 @@ class CSVImportService:
                         elif hasattr(daily, 'raw_tiera') and daily.raw_tiera:
                             customer_order_no = daily.raw_tiera.order_document_no
 
-                        OrderLine.objects.create(
+                        line = OrderLine.objects.create(
                             order=order,
                             line_no=line_no,
                             product=product,
@@ -800,6 +806,7 @@ class CSVImportService:
                             plant_code=daily.plant_code,
                             ship_to_code=daily.ship_to_code
                         )
+                        created_line_ids.append(line.id)
                         line_no += 1
                         created_lines += 1
 
@@ -817,6 +824,7 @@ class CSVImportService:
             'orders': created_orders,
             'updated_orders': updated_orders,
             'lines': created_lines,
+            'created_line_ids': created_line_ids,
             'deleted_forecast_orders': superseded_orders,
             'additional_order_notices': additional_order_notices,
         }

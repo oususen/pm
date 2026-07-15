@@ -144,6 +144,26 @@
             </div>
           </div>
 
+          <div
+            v-if="result.first_article_notice && result.first_article_notice.candidate_count > 0"
+            class="first-article-notice"
+          >
+            <h4>お久しぶり製品通知:</h4>
+            <p>{{ result.first_article_notice.message }}</p>
+            <p>
+              判定日数: {{ result.first_article_notice.days }}日 /
+              対象件数: {{ result.first_article_notice.candidate_count }}件
+            </p>
+            <ul>
+              <li
+                v-for="(item, index) in result.first_article_notice.candidates"
+                :key="`${item.order_line_id || item.product_code}-${index}`"
+              >
+                得意先 {{ item.customer_code || '—' }} / 品番 {{ item.product_code || '—' }} / 納期 {{ item.due_date || '—' }} / 数量 {{ formatNumber(item.quantity) }}
+              </li>
+            </ul>
+          </div>
+
           <div v-if="result.order_creation_error" class="warnings">
             <h4>注意:</h4>
             <p>CSVはステージングに取り込まれましたが、受注作成時にエラーが発生しました。</p>
@@ -313,6 +333,12 @@ const selectOrderType = (type) => {
 
 const selectFactory = (factory) => {
   formData.value.factory = factory
+}
+
+const formatNumber = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return value ?? '-'
+  return num.toLocaleString()
 }
 
 const uploadCSV = async () => {
@@ -525,6 +551,15 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.first-article-notice {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #eefbf3;
+  border: 1px solid #b7e4c7;
+  border-radius: 4px;
+  color: #166534;
+}
+
 .group-header {
   display: flex;
   justify-content: space-between;
@@ -697,4 +732,3 @@ onMounted(() => {
   background: #f5f8ff;
 }
 </style>
-

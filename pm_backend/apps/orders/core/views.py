@@ -8,11 +8,14 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Exists, OuterRef, Q
 import csv
+import json
 import re
-from datetime import date
+from datetime import date, datetime, timedelta
 from orders.utils.calendar_utils import get_business_today
 
 from masters.models import Routing
+from shipping.services.email_service import EmailService
+from system_settings.models import SystemSetting
 
 from .models import (
     Order,
@@ -30,6 +33,186 @@ from .serializers import (
     StgOrderRawSerializer,
 )
 from .services.csv_import import CSVImportService
+
+
+ORDER_FIRST_ARTICLE_DAYS_KEY = 'orders.first_article.days'
+ORDER_FIRST_ARTICLE_RECIPIENT_IDS_KEY = 'orders.first_article.recipient_user_ids'
+DEFAULT_ORDER_FIRST_ARTICLE_DAYS = 90
+
+
+def _parse_order_first_article_user_ids(raw_value):
+    if raw_value is None:
+        return []
+    text = str(raw_value).strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return sorted(set(int(v) for v in parsed if v is not None))
+    except Exception:
+        pass
+    return []
+
+
+def _get_order_first_article_settings():
+    days_setting = SystemSetting.objects.filter(key=ORDER_FIRST_ARTICLE_DAYS_KEY).first()
+    ids_setting = SystemSetting.objects.filter(key=ORDER_FIRST_ARTICLE_RECIPIENT_IDS_KEY).first()
+
+    try:
+        days = int(str(days_setting.value).strip()) if days_setting and str(days_setting.value).strip() else DEFAULT_ORDER_FIRST_ARTICLE_DAYS
+    except (TypeError, ValueError):
+        days = DEFAULT_ORDER_FIRST_ARTICLE_DAYS
+    if days < 1:
+        days = 1
+
+    recipient_user_ids = _parse_order_first_article_user_ids(ids_setting.value if ids_setting else '')
+    return {
+        'days': days,
+        'recipient_user_ids': recipient_user_ids,
+    }
+
+
+def _resolve_user_emails(user_ids):
+    if not user_ids:
+        return []
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    users = User.objects.filter(id__in=user_ids, is_active=True).exclude(email='')
+    return list(users.values_list('email', flat=True))
+
+
+def _build_order_first_article_body(candidates, days, user=None):
+    lines = [
+        '受注取込で、お久しぶり製品が検出されました。',
+        '内容を確認してください。',
+        '',
+        f'判定条件: 納期から{days}日遡った期間に同一品番の受注明細がないこと',
+        '',
+        '対象一覧:',
+    ]
+    for item in candidates:
+        lines.append(
+            f"- 得意先: {item.get('customer_code') or '-'} / 品番: {item.get('product_code') or '-'} / 納期: {item.get('due_date') or '-'} / 数量: {item.get('quantity') or '-'} / 受注番号: {item.get('order_no') or '-'}"
+        )
+
+    if user and getattr(user, 'is_authenticated', False):
+        name = f"{getattr(user, 'last_name', '')} {getattr(user, 'first_name', '')}".strip() or getattr(user, 'username', '')
+        if name:
+            lines.extend(['', f'取込者: {name}'])
+
+    lines.extend(['', '以上'])
+    return '\n'.join(lines)
+
+
+def _collect_order_first_article_candidates(created_line_ids, days):
+    if not created_line_ids:
+        return []
+
+    line_qs = (
+        OrderLine.objects.filter(id__in=created_line_ids)
+        .select_related('order', 'order__customer')
+        .order_by('due_date', 'id')
+    )
+
+    # (customer_id, product_code) ごとに代表行と最古の納期を収集
+    key_map = {}
+    for line in line_qs:
+        product_code = str(line.product_code or '').strip()
+        due_date = line.due_date
+        if not product_code or not due_date:
+            continue
+        customer_id = line.order.customer_id if line.order else None
+        key = (customer_id, product_code)
+        existing = key_map.get(key)
+        if existing is None or due_date < existing['due_date']:
+            key_map[key] = {
+                'line': line,
+                'due_date': due_date,
+                'customer_id': customer_id,
+                'product_code': product_code,
+            }
+
+    if not key_map:
+        return []
+
+    # まとめクエリ: 各 (customer_id, product_code) の window 内に過去受注があるか一括判定
+    recent_keys = set()
+    or_conditions = Q()
+    entries = list(key_map.items())
+    for key, entry in entries:
+        window_start = entry['due_date'] - timedelta(days=days)
+        or_conditions |= Q(
+            order__customer_id=entry['customer_id'],
+            product_code=entry['product_code'],
+            due_date__gte=window_start,
+            due_date__lt=entry['due_date'],
+        )
+    if or_conditions:
+        recent_qs = (
+            OrderLine.objects.filter(or_conditions)
+            .exclude(id__in=created_line_ids)
+            .values_list('order__customer_id', 'product_code')
+            .distinct()
+        )
+        for cid, pc in recent_qs:
+            recent_keys.add((cid, pc))
+
+    candidates = []
+    for key, entry in entries:
+        if key in recent_keys:
+            continue
+        line = entry['line']
+        candidates.append({
+            'order_line_id': line.id,
+            'customer_code': line.order.customer.customer_code if line.order and line.order.customer else '',
+            'order_no': line.order.order_no if line.order else '',
+            'product_code': entry['product_code'],
+            'due_date': entry['due_date'].isoformat(),
+            'quantity': str(line.quantity),
+        })
+
+    return candidates
+
+
+def _send_order_first_article_notice(*, created_line_ids, user=None):
+    settings_data = _get_order_first_article_settings()
+    days = settings_data['days']
+    recipient_user_ids = settings_data['recipient_user_ids']
+    recipients = _resolve_user_emails(recipient_user_ids)
+    candidates = _collect_order_first_article_candidates(created_line_ids, days)
+
+    result = {
+        'enabled': bool(recipient_user_ids),
+        'days': days,
+        'recipient_user_ids': recipient_user_ids,
+        'candidate_count': len(candidates),
+        'candidates': candidates,
+        'sent': False,
+        'message': '',
+    }
+
+    if not candidates:
+        result['message'] = 'お久しぶり製品はありませんでした。'
+        return result
+
+    if not recipients:
+        result['message'] = 'お久しぶり製品はありましたが、送信先が未設定のためメール送信していません。'
+        return result
+
+    today_label = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+    subject = f'【受注】お久しぶり製品通知 {today_label}'
+    body = _build_order_first_article_body(candidates, days, user=user)
+    user_id = user.id if user and getattr(user, 'is_authenticated', False) else None
+    send_result = EmailService().send_plain_email(
+        to_emails=recipients,
+        subject=subject,
+        body=body,
+        user_id=user_id,
+    )
+    result['sent'] = bool(send_result.get('success'))
+    result['message'] = send_result.get('message') or ('メールを送信しました。' if result['sent'] else 'メール送信に失敗しました。')
+    return result
 
 
 class OrderFilter(django_filters.FilterSet):
@@ -517,6 +700,22 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     # but include the error
                     result['order_creation_error'] = str(e)
                     result['message'] = f"CSV imported to staging successfully, but order creation failed: {str(e)}"
+
+                # 通知は受注作成とは独立して実行（通知失敗で取込結果を汚さない）
+                if 'order_creation_error' not in result:
+                    try:
+                        result['first_article_notice'] = _send_order_first_article_notice(
+                            created_line_ids=order_result.get('created_line_ids') or [],
+                            user=request.user,
+                        )
+                    except Exception as e:
+                        result['first_article_notice'] = {
+                            'enabled': False,
+                            'candidate_count': 0,
+                            'candidates': [],
+                            'sent': False,
+                            'message': f'通知処理でエラーが発生しました: {str(e)}',
+                        }
 
                 return Response(result, status=status.HTTP_201_CREATED)
             else:
@@ -1722,6 +1921,56 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
 
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import get_user_model
+
+@api_view(['GET', 'PATCH'])
+def order_first_article_setting_view(request):
+    """受注お久しぶり製品通知設定 GET/PATCH"""
+    User = get_user_model()
+
+    def _user_list():
+        return [
+            {'id': u.id, 'employee_code': getattr(u, 'employee_code', '') or '', 'username': u.username,
+             'last_name': u.last_name, 'first_name': u.first_name}
+            for u in User.objects.filter(is_active=True).order_by('last_name', 'first_name')
+        ]
+
+    if request.method == 'GET':
+        settings_data = _get_order_first_article_settings()
+        settings_data['all_users'] = _user_list()
+        return Response(settings_data)
+
+    days = request.data.get('days', DEFAULT_ORDER_FIRST_ARTICLE_DAYS)
+    recipient_user_ids = request.data.get('recipient_user_ids', [])
+
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        return Response({'detail': '判定日数は整数で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+    if days < 1:
+        return Response({'detail': '判定日数は1以上で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+    cleaned_ids = sorted(set(int(v) for v in recipient_user_ids if v is not None))
+    SystemSetting.objects.update_or_create(
+        key=ORDER_FIRST_ARTICLE_DAYS_KEY,
+        defaults={
+            'value': str(days),
+            'description': '受注お久しぶり製品通知の判定日数',
+            'updated_by': request.user if getattr(request.user, 'is_authenticated', False) else None,
+        },
+    )
+    SystemSetting.objects.update_or_create(
+        key=ORDER_FIRST_ARTICLE_RECIPIENT_IDS_KEY,
+        defaults={
+            'value': json.dumps(cleaned_ids),
+            'description': '受注お久しぶり製品通知の送信先ユーザーID',
+            'updated_by': request.user if getattr(request.user, 'is_authenticated', False) else None,
+        },
+    )
+    return Response({
+        'days': days,
+        'recipient_user_ids': cleaned_ids,
+    })
+
 
 @api_view(['GET', 'PATCH'])
 @permission_classes([AllowAny])

@@ -92,6 +92,14 @@ const tiles = computed(() => [
     resource: "orders.csv_import",
   },
   {
+    key: "first_article_setting",
+    to: "/orders/first-article-setting",
+    label: "お久しぶり製品<br>通知設定",
+    icon: "🔔",
+    required: "edit",
+    resource: "orders",
+  },
+  {
     key: "missing_routing_items",
     to: "/orders/missing-routing-items",
     label: "ルーティング未設定の注文品",
@@ -221,4 +229,3 @@ const runExpand = async () => {
   color: #64748b;
 }
 </style>
-

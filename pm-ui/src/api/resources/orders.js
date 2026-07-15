@@ -96,4 +96,10 @@ export const createOrdersAPI = (client) => ({
   deleteOrderLine(id) {
     return client.delete(`/order-lines/${id}/`)
   },
+  getFirstArticleSetting() {
+    return client.get('/order-first-article-setting/')
+  },
+  saveFirstArticleSetting(data) {
+    return client.patch('/order-first-article-setting/', data)
+  },
 })

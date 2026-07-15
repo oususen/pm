@@ -24,6 +24,12 @@ const orders = [
     meta: { pageTitle: "ルーティング未設定の注文品", manualPath: "受注/受注一覧.md", resource: "orders.list" },
   },
   {
+    path: "/orders/first-article-setting",
+    name: "OrderFirstArticleSetting",
+    component: () => import("@/views/orders/OrderFirstArticleSetting.vue"),
+    meta: { pageTitle: "受注お久しぶり製品通知設定", resource: "orders", permission: "edit" },
+  },
+  {
     path: "/orders",
     name: "OrderList",
     component: () => import("@/views/orders/OrderList.vue"),
