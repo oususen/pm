@@ -1079,8 +1079,6 @@ const FAVORITE_TAB_KEYS = computed(() => operationalTabKeys.value)
 
 const toFavoritePayload = () => ({
   activeTab: String(activeTab.value || 'tank'),
-  startDate: String(startDate.value || ''),
-  endDate: String(endDate.value || ''),
   dateSearchMode: String(dateSearchMode.value || 'plan'),
   lineId: String(lineId.value || ''),
   processId: String(processId.value || ''),
@@ -1097,8 +1095,6 @@ const toFavoritePayload = () => ({
 const applyFavoritePayload = (payload) => {
   const nextTab = String(payload?.activeTab || 'tank')
   activeTab.value = FAVORITE_TAB_KEYS.value.includes(nextTab) ? nextTab : 'tank'
-  startDate.value = String(payload?.startDate || defaultDateRange.start)
-  endDate.value = String(payload?.endDate || defaultDateRange.end)
   const mode = String(payload?.dateSearchMode || 'plan')
   dateSearchMode.value = mode === 'actual' ? 'actual' : 'plan'
   lineId.value = String(payload?.lineId || '')

@@ -203,8 +203,6 @@ const toFavoritePayload = () => ({
   selectedItem: String(selectedItem.value || ""),
   selectedPerson: String(selectedPerson.value || ""),
   selectedUnit: String(selectedUnit.value || ""),
-  startDate: String(startDate.value || ""),
-  endDate: String(endDate.value || ""),
 })
 
 const applyFavoritePayload = (payload) => {
@@ -214,8 +212,6 @@ const applyFavoritePayload = (payload) => {
   selectedItem.value = String(payload?.selectedItem || "")
   selectedPerson.value = String(payload?.selectedPerson || "")
   selectedUnit.value = String(payload?.selectedUnit || "")
-  startDate.value = String(payload?.startDate || "")
-  endDate.value = String(payload?.endDate || "")
 }
 
 const loadFavorites = async () => {

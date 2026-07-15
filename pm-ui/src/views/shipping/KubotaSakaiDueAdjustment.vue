@@ -45,6 +45,7 @@
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>
       <button class="btn" :disabled="importing || loading || saving" @click="openChangeReasonDialog">計画変更</button>
       <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
+      <button class="btn" :disabled="loading || !matrixColumns.length" @click="exportExcel">EXCEL出力</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
       <DataSourceDialog title="" :sources="dsSources" />
     </div>
@@ -247,6 +248,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import ExcelJS from 'exceljs'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -583,6 +585,7 @@ const buildGroupFromGridItem = (item) => {
     groupKey: item.group_key,
     productCode: item.product_code,
     shipToCode: item.ship_to_code || '-',
+    shipToName: item.ship_to_name || '',
     carryRemaining: parseNumber(item.carry_remaining),
     lines: (item.lines || []).map(buildLine),
   }
@@ -669,20 +672,16 @@ watch([startDate, horizonDays], () => {
 })
 
 const toFavoritePayload = () => ({
-  startDate: String(startDate.value || ''),
   horizonDays: Number(horizonDays.value || 30),
   keyword: String(keyword.value || ''),
   keyword2: String(keyword2.value || ''),
-  bulkStartDate: String(bulkStartDate.value || ''),
 })
 
 const applyFavoritePayload = (payload) => {
-  startDate.value = String(payload?.startDate || formatLocalDate(new Date()))
   const nextHorizon = Number(payload?.horizonDays || 30)
   horizonDays.value = [7, 14, 30, 60].includes(nextHorizon) ? nextHorizon : 30
   keyword.value = String(payload?.keyword || '')
   keyword2.value = String(payload?.keyword2 || '')
-  bulkStartDate.value = String(payload?.bulkStartDate || startDate.value)
   normalizeBulkStartDate()
 }
 
@@ -848,6 +847,212 @@ const buildEmailBody = (summary) => {
     body += `\n調整者: ${name}\n`
   }
   return body
+}
+
+const formatDateCompact = (value) => String(value || '').replace(/-/g, '')
+
+const buildMultilineCell = (values = []) => {
+  const lines = values.map((value) => String(value ?? '')).filter((value) => value !== '')
+  return lines.join('\n')
+}
+
+const buildExcelCellValue = (values = []) => {
+  const normalized = values
+    .map((value) => {
+      const num = parseNumber(value)
+      return Math.abs(num) < 0.000001 ? '' : num
+    })
+    .filter((value) => value !== '')
+  if (!normalized.length) return ''
+  if (normalized.length === 1) return normalized[0]
+  return buildMultilineCell(normalized)
+}
+
+const toExcelArgb = (hex) => `FF${String(hex || '#ffffff').replace('#', '').toUpperCase()}`
+
+const makeExcelBorder = (thick = false, color = '#7f8c9a') => ({
+  style: thick ? 'medium' : 'thin',
+  color: { argb: toExcelArgb(color) },
+})
+
+const applyExcelCellStyle = (cell, {
+  align = 'center',
+  bold = false,
+  bg = '#ffffff',
+  thickLeft = false,
+  thickRight = false,
+  thickTop = false,
+  thickBottom = false,
+  wrapText = false,
+} = {}) => {
+  cell.font = { bold, name: 'Meiryo', size: 11 }
+  cell.alignment = {
+    horizontal: align,
+    vertical: 'middle',
+    wrapText,
+  }
+  cell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: toExcelArgb(bg) },
+  }
+  cell.border = {
+    top: makeExcelBorder(thickTop, thickTop ? '#44556f' : '#7f8c9a'),
+    left: makeExcelBorder(thickLeft, thickLeft ? '#44556f' : '#7f8c9a'),
+    bottom: makeExcelBorder(thickBottom, thickBottom ? '#44556f' : '#7f8c9a'),
+    right: makeExcelBorder(thickRight, thickRight ? '#44556f' : '#7f8c9a'),
+  }
+}
+
+const exportExcel = async () => {
+  if (!matrixColumns.value.length) {
+    alert('出力対象のデータがありません。')
+    return
+  }
+
+  const filterText = [keyword.value, keyword2.value].filter(Boolean).join(' OR ') || '（なし）'
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('納期調整')
+  const totalColumns = 1 + matrixColumns.value.length * 3
+  const columnWidths = [{ width: 12 }]
+  matrixColumns.value.forEach(() => {
+    columnWidths.push({ width: 12 }, { width: 10 }, { width: 10 })
+  })
+  sheet.columns = columnWidths
+
+  sheet.addRow(['開始日', startDate.value, '期間', `${horizonDays.value}日`, '品番OR検索', filterText])
+  for (let col = 1; col <= totalColumns; col++) {
+    const cell = sheet.getRow(1).getCell(col)
+    const isLabel = [1, 3, 5].includes(col)
+    applyExcelCellStyle(cell, {
+      align: isLabel ? 'center' : 'left',
+      bold: isLabel,
+      bg: isLabel ? '#eef3f8' : '#ffffff',
+    })
+  }
+
+  sheet.addRow([])
+
+  const headerRow1 = sheet.addRow([])
+  const headerRow2 = sheet.addRow([])
+  sheet.mergeCells(3, 1, 4, 1)
+  headerRow1.getCell(1).value = '日付'
+  applyExcelCellStyle(headerRow1.getCell(1), { bold: true, bg: '#cfd8ec', thickRight: true })
+  applyExcelCellStyle(headerRow2.getCell(1), { bold: true, bg: '#cfd8ec', thickRight: true })
+
+  matrixColumns.value.forEach((col, index) => {
+    const startCol = 2 + index * 3
+    const endCol = startCol + 2
+    sheet.mergeCells(3, startCol, 3, endCol)
+    const mergedCell = headerRow1.getCell(startCol)
+    mergedCell.value = `${col.productCode} ${col.shipToCode}`
+    applyExcelCellStyle(mergedCell, {
+      bold: true,
+      bg: '#cfd8ec',
+      thickLeft: index > 0,
+      thickRight: true,
+    })
+
+    const labels = ['受注', '計画', '注残']
+    labels.forEach((label, offset) => {
+      const cell = headerRow2.getCell(startCol + offset)
+      cell.value = label
+      applyExcelCellStyle(cell, {
+        bold: true,
+        bg: '#e7edf7',
+        thickLeft: offset === 0 && index > 0,
+        thickRight: offset === 2,
+      })
+    })
+  })
+
+  displayRows.value.forEach((row) => {
+    const rowBg = row.isCarry
+      ? '#f0f4ff'
+      : row.dayClass === 'holiday'
+        ? '#ffe3e3'
+        : '#ffffff'
+    const excelRow = sheet.addRow([])
+    excelRow.getCell(1).value = row.label
+    applyExcelCellStyle(excelRow.getCell(1), {
+      align: 'right',
+      bg: rowBg,
+      bold: row.isCarry,
+      thickRight: true,
+      thickBottom: !row.isCarry,
+    })
+
+    matrixColumns.value.forEach((col, index) => {
+      const startCol = 2 + index * 3
+      const lines = row.isCarry ? [] : (row.cells[col.colKey] || [])
+      const totalPlan = lines.reduce((sum, line) => sum + parseNumber(line.deliveryByDate[row.dateKey]), 0)
+      const values = row.isCarry
+        ? ['', '', parseNumber(row.cells[col.colKey])]
+        : [
+            buildExcelCellValue(lines.map((line) => line.demandByDate[row.dateKey])),
+            Math.abs(totalPlan) < 0.000001 ? '' : totalPlan,
+            buildExcelCellValue(lines.map((line) => line.remainingByDate[row.dateKey])),
+          ]
+
+      values.forEach((value, offset) => {
+        const cell = excelRow.getCell(startCol + offset)
+        cell.value = value
+        applyExcelCellStyle(cell, {
+          align: offset === 1 || offset === 2 || offset === 0 ? 'right' : 'center',
+          bg: rowBg,
+          bold: row.isCarry,
+          thickLeft: offset === 0 && index > 0,
+          thickRight: offset === 2,
+          thickBottom: !row.isCarry,
+          wrapText: !row.isCarry && (offset === 0 || offset === 2),
+        })
+      })
+    })
+  })
+
+  const totalRow = sheet.addRow([])
+  totalRow.getCell(1).value = '総残'
+  applyExcelCellStyle(totalRow.getCell(1), {
+    bold: true,
+    bg: '#dbe6f7',
+    thickTop: true,
+    thickRight: true,
+  })
+  matrixColumns.value.forEach((col, index) => {
+    const startCol = 2 + index * 3
+    totalRow.getCell(startCol).value = ''
+    totalRow.getCell(startCol + 1).value = ''
+    totalRow.getCell(startCol + 2).value = groupTotalRemaining(col.group) || ''
+    applyExcelCellStyle(totalRow.getCell(startCol), {
+      bg: '#dbe6f7',
+      thickTop: true,
+      thickLeft: index > 0,
+    })
+    applyExcelCellStyle(totalRow.getCell(startCol + 1), {
+      bg: '#dbe6f7',
+      thickTop: true,
+    })
+    applyExcelCellStyle(totalRow.getCell(startCol + 2), {
+      align: 'right',
+      bold: true,
+      bg: '#dbe6f7',
+      thickTop: true,
+      thickRight: true,
+    })
+  })
+
+  const suffix = [keyword.value, keyword2.value].filter(Boolean).join('_') || 'all'
+  const filename = `クボタ堺納期調整_${formatDateCompact(startDate.value)}_${horizonDays.value}日_${suffix}.xlsx`
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
 }
 
 const saveDeliveries = async () => {
@@ -1374,4 +1579,3 @@ onMounted(async () => {
   cursor: not-allowed;
 }
 </style>
-

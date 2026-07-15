@@ -300,7 +300,6 @@ async function loadProcesses(lineId) {
 }
 
 const toFavoritePayload = () => ({
-  targetDate: String(targetDate.value || ''),
   lineTypeFilter: String(lineTypeFilter.value || ''),
   selectedLineId: String(selectedLineId.value || ''),
   selectedProcessId: String(selectedProcessId.value || ''),
@@ -314,7 +313,6 @@ async function applyFavorite() {
   if (!target) return
   favoriteName.value = target.name || ''
   const payload = target.payload || {}
-  targetDate.value = String(payload.targetDate || targetDate.value || '')
   lineTypeFilter.value = String(payload.lineTypeFilter || 'PROD')
   selectedLineId.value = String(payload.selectedLineId || '')
   await loadProcesses(selectedLineId.value)

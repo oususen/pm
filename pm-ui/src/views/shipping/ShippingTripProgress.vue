@@ -161,8 +161,6 @@ const businessTypeLabel = (value) => {
 }
 
 const toFavoritePayload = () => ({
-  dateFrom: String(dateFrom.value || ''),
-  dateTo: String(dateTo.value || ''),
   businessType: String(businessType.value || ''),
   statusFilter: String(statusFilter.value || ''),
 })
@@ -174,8 +172,6 @@ const applyFavorite = () => {
   if (!target) return
   favoriteName.value = target.name || ''
   const payload = target.payload || {}
-  dateFrom.value = String(payload.dateFrom || dateFrom.value || '')
-  dateTo.value = String(payload.dateTo || dateTo.value || '')
   businessType.value = String(payload.businessType || '')
   statusFilter.value = String(payload.statusFilter || '')
   loadProgress()
@@ -323,4 +319,3 @@ onMounted(async () => {
   color: #64748b;
 }
 </style>
-

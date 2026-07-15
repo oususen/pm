@@ -1066,7 +1066,6 @@ const toFavoritePayload = () => ({
   customerFilter: customerFilter.value || "",
   shipToFilter: shipToFilter.value || "",
   splitByShipTo: Boolean(splitByShipTo.value),
-  startDate: startDate.value || "",
   horizon: Number(horizon.value || 30),
 });
 
@@ -1075,7 +1074,6 @@ const applyFavoritePayload = (payload) => {
   customerFilter.value = String(payload?.customerFilter || "");
   shipToFilter.value = String(payload?.shipToFilter || "");
   splitByShipTo.value = Boolean(payload?.splitByShipTo ?? true);
-  startDate.value = String(payload?.startDate || startDate.value);
   const nextHorizon = Number(payload?.horizon || 30);
   horizon.value = [30, 60, 90].includes(nextHorizon) ? nextHorizon : 30;
 };

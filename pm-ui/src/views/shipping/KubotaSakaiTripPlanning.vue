@@ -1792,13 +1792,11 @@ const autoAssignTrips = async () => {
 }
 
 const toFavoritePayload = () => ({
-  targetDate: String(targetDate.value || ''),
   horizonDays: Number(horizonDays.value || 5),
   keyword: String(keyword.value || ''),
 })
 
 const applyFavoritePayload = (payload) => {
-  targetDate.value = String(payload?.targetDate || defaultTargetDate.value || todayDate)
   const nextHorizon = Number(payload?.horizonDays || 5)
   horizonDays.value = [5, 14, 31, 60, 90].includes(nextHorizon) ? nextHorizon : 5
   keyword.value = String(payload?.keyword || '')
