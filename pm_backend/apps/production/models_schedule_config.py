@@ -22,6 +22,7 @@ class ScheduleConfig(models.Model):
         ('PURCHASE_ACTUAL_RECONCILE_CHECK', '納入実績整合チェック'),
         ('PRODUCTION_ACTUAL_RECONCILE_CHECK', '生産実績整合チェック'),
         ('PLAN_TO_ACTUAL_COPY', '計画実績自動セット'),
+        ('CONTAINER_IMPORT_TMP_CLEANUP', '荷姿設定Excel取込 一時ファイル削除'),
     ]
     STATUS_CHOICES = [
         ('SUCCESS', '成功'),

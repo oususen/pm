@@ -7129,6 +7129,7 @@ class ScheduleConfigView(APIView):
             ('AUTO_PURCHASE_ORDER_CHECK', 6, 30, False),
             ('PURCHASE_ACTUAL_RECONCILE_CHECK', 2, 0, False),
             ('PRODUCTION_ACTUAL_RECONCILE_CHECK', 2, 30, False),
+            ('CONTAINER_IMPORT_TMP_CLEANUP', 3, 0, False),
         ]
         for task_name, hour, minute, is_enabled in inventory_defaults:
             ScheduleConfig.objects.get_or_create(
@@ -7439,6 +7440,7 @@ class ScheduleRunNowView(APIView):
         from .scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
         from .scheduler.tasks_plan_to_actual import run_plan_to_actual_copy
         from purchase.order_proposal_views import run_auto_purchase_order_check
+        from masters.scheduler.tasks_container_import_cleanup import run_container_import_tmp_cleanup
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
         task_labels = {
             'INVENTORY_RECALC': '取り込み＋在庫再計算',
@@ -7452,6 +7454,7 @@ class ScheduleRunNowView(APIView):
             'PRODUCTION_ACTUAL_RECONCILE_CHECK': '生産実績整合チェック',
             'PLAN_TO_ACTUAL_COPY': '計画実績自動セット',
             'ORDER_EXPANSION': '自動受注展開',
+            'CONTAINER_IMPORT_TMP_CLEANUP': '荷姿設定Excel取込 一時ファイル削除',
         }
         config_id = request.data.get('config_id') or request.data.get('id')
         line_id = request.data.get('line')
@@ -7504,6 +7507,8 @@ class ScheduleRunNowView(APIView):
                             run_plan_to_actual_copy(config_id=int(config_id))
                         elif task == 'ORDER_EXPANSION':
                             run_order_expansion()
+                        elif task == 'CONTAINER_IMPORT_TMP_CLEANUP':
+                            run_container_import_tmp_cleanup()
                         else:
                             run_inventory_recalculation(task_name=task)
                     except Exception:

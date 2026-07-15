@@ -1027,6 +1027,86 @@
         </table>
       </div>
     </div>
+
+    <div class="card" v-if="containerImportCleanupConfig">
+      <div class="field">
+        <label>荷姿設定Excel取込 - 一時ファイル削除 実行時刻</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="0"
+            max="23"
+            v-model.number="containerImportCleanupConfig.scheduled_hour"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">時</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            v-model.number="containerImportCleanupConfig.scheduled_minute"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">分</span>
+        </div>
+        <p class="helper">容器マスタの荷姿設定Excel取込でプレビュー後にキャンセルされた一時ファイル（24時間以上経過分）を毎日削除します。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="containerImportCleanupConfig.is_enabled" :disabled="!canEdit" />
+          有効
+        </label>
+      </div>
+
+      <div class="actions">
+        <button
+          class="btn primary"
+          @click="saveConfig(containerImportCleanupConfig)"
+          :disabled="saving.has(configKey(containerImportCleanupConfig)) || !canEdit"
+        >
+          {{ saving.has(configKey(containerImportCleanupConfig)) ? '保存中...' : '保存' }}
+        </button>
+        <button
+          class="btn"
+          @click="runNow(containerImportCleanupConfig)"
+          :disabled="isRunNowDisabled(containerImportCleanupConfig)"
+          style="margin-left: 8px"
+        >
+          {{ runNowLabel(containerImportCleanupConfig) }}
+        </button>
+      </div>
+
+      <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
+
+      <div v-if="containerImportCleanupConfig.last_run_at" class="last-run">
+        <h3 class="section-title">最終実行情報</h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>実行日時</th>
+              <td>{{ formatDateTime(containerImportCleanupConfig.last_run_at) }}</td>
+            </tr>
+            <tr>
+              <th>結果</th>
+              <td>
+                <span :class="statusClass(containerImportCleanupConfig)">{{ containerImportCleanupConfig.last_run_status_display || '-' }}</span>
+              </td>
+            </tr>
+            <tr>
+              <th>実行時間</th>
+              <td>{{ containerImportCleanupConfig.last_run_duration_seconds != null ? containerImportCleanupConfig.last_run_duration_seconds + '秒' : '-' }}</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ containerImportCleanupConfig.last_run_message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1136,6 +1216,7 @@ const safetyStockConfigs = computed(() =>
     .sort((a, b) => safetyStockTaskOrder.indexOf(a.task_name) - safetyStockTaskOrder.indexOf(b.task_name))
 )
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
+const containerImportCleanupConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'CONTAINER_IMPORT_TMP_CLEANUP'))
 const planToActualConfigs = computed(() => {
   const persisted = configs.value.filter((cfg) => cfg.task_name === 'PLAN_TO_ACTUAL_COPY')
   const merged = [...persisted, ...planToActualDrafts.value]
@@ -1186,6 +1267,7 @@ const inventoryTaskLabel = (taskName) => {
   if (taskName === 'INVENTORY_ONLY') return '在庫計算のみ'
   if (taskName === 'PROGRESS_ONLY') return '進度計算のみ'
   if (taskName === 'PLAN_TO_ACTUAL_COPY') return '計画実績自動セット'
+  if (taskName === 'CONTAINER_IMPORT_TMP_CLEANUP') return '荷姿設定Excel取込 一時ファイル削除'
   return '取り込み＋在庫再計算'
 }
 

@@ -85,6 +85,7 @@ class Command(BaseCommand):
         from production.scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
         from production.scheduler.tasks_plan_to_actual import run_plan_to_actual_copy
         from purchase.order_proposal_views import run_auto_purchase_order_check
+        from masters.scheduler.tasks_container_import_cleanup import run_container_import_tmp_cleanup
 
         # 既存ジョブ（設定チェックを除く）をクリア
         for job in scheduler.get_jobs():
@@ -304,6 +305,35 @@ class Command(BaseCommand):
             )
         else:
             logger.info('ジョブ無効: production_actual_reconcile_check')
+
+        container_cleanup_cfg, _ = ScheduleConfig.objects.get_or_create(
+            task_name='CONTAINER_IMPORT_TMP_CLEANUP',
+            line=None,
+            defaults={
+                'scheduled_hour': 3,
+                'scheduled_minute': 0,
+                'is_enabled': False,
+            },
+        )
+        if container_cleanup_cfg.is_enabled:
+            trigger = CronTrigger(
+                hour=container_cleanup_cfg.scheduled_hour,
+                minute=container_cleanup_cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                _with_fresh_connection(run_container_import_tmp_cleanup),
+                trigger,
+                id='container_import_tmp_cleanup',
+                replace_existing=True,
+                misfire_grace_time=3600,
+            )
+            logger.info(
+                f'ジョブ登録: container_import_tmp_cleanup - '
+                f'{container_cleanup_cfg.scheduled_hour:02d}:{container_cleanup_cfg.scheduled_minute:02d}'
+            )
+        else:
+            logger.info('ジョブ無効: container_import_tmp_cleanup')
 
         plan_to_actual_configs = (
             ScheduleConfig.objects.select_related('line', 'process')
