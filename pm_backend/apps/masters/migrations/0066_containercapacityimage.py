@@ -11,6 +11,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.AlterField(
+            model_name='containercapacity',
+            name='id',
+            field=models.BigAutoField(primary_key=True, serialize=False),
+        ),
         migrations.CreateModel(
             name='ContainerCapacityImage',
             fields=[
