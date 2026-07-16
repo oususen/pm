@@ -66,7 +66,7 @@ const purchase = [
     path: "/purchase/actual-input",
     name: "PurchaseActualInput",
     component: () => import("@/views/purchase/PurchaseActualInput.vue"),
-    meta: { pageTitle: "仕入れ実績入力", resource: "purchase.actual_input" },
+    meta: { pageTitle: "仕入れ実績入力", manualPath: "仕入れ/仕入れ実績入力.md", resource: "purchase.actual_input" },
   },
   {
     path: "/purchase/actual-inquiry",

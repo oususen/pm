@@ -9,7 +9,7 @@ from openpyxl import Workbook
 logger = logging.getLogger('purchase')
 
 
-def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, days_forward=30):
+def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, days_forward=30, product_ids=None):
     """自動納入リスト送信前に、対象仕入先ラインの進度だけを最新化する。"""
     from masters.models import BOMItem, Calendar, RoutingStep
     from orders.utils.calendar_utils import WorkingDayCalculator
@@ -22,19 +22,22 @@ def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, 
     start_date = calc.subtract_working_days(today, days_back)
     end_date = today + timedelta(days=days_forward)
 
-    bom_product_ids = set(
-        BOMItem.objects.filter(
-            supplier_id=supplier.id,
-            child_product_id__isnull=False,
-        ).values_list('child_product_id', flat=True).distinct()
-    )
-    routing_product_ids = set(
-        RoutingStep.objects.filter(
-            supplier_id=supplier.id,
-            output_product_id__isnull=False,
-        ).values_list('output_product_id', flat=True).distinct()
-    )
-    product_ids = sorted(bom_product_ids | routing_product_ids)
+    if product_ids is None:
+        bom_product_ids = set(
+            BOMItem.objects.filter(
+                supplier_id=supplier.id,
+                child_product_id__isnull=False,
+            ).values_list('child_product_id', flat=True).distinct()
+        )
+        routing_product_ids = set(
+            RoutingStep.objects.filter(
+                supplier_id=supplier.id,
+                output_product_id__isnull=False,
+            ).values_list('output_product_id', flat=True).distinct()
+        )
+        product_ids = sorted(bom_product_ids | routing_product_ids)
+    else:
+        product_ids = sorted({int(pid) for pid in product_ids if pid})
     if not product_ids:
         return {
             'product_count': 0,
