@@ -170,6 +170,7 @@
             <option value="UTF-8">UTF-8</option>
           </select>
           <span class="bulk-import-note">CSVの仕入先・納入日・品番・数量を一括行へ反映</span>
+          <span class="bulk-import-warning">注意: CSV取込時は、仕入先・納入日を画面で事前選択しなくても構いません。CSV内の仕入先・入荷日を読み取って反映します。</span>
           <input
             ref="bulkCsvInputRef"
             type="file"
@@ -1155,6 +1156,7 @@ onMounted(async () => {
 .bulk-date-active { background: #c9e8ff; }
 .bulk-operator-input { border: 1px solid #9ca3af; background: #e6e6e6; padding: 4px 6px; font-size: 13px; width: 120px; }
 .bulk-import-note { font-size: 12px; color: #475569; }
+.bulk-import-warning { font-size: 12px; color: #b91c1c; font-weight: 700; }
 .bulk-table { width: 100%; border-collapse: collapse; background: #efefef; }
 .bulk-table th { background: #4f6f82; color: #fff; padding: 4px 6px; font-size: 12px; text-align: center; white-space: nowrap; }
 .bulk-table td { border: 1px solid #8a8f92; padding: 3px 4px; font-size: 12px; }

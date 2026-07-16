@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import logging
 import math
 import re
 
@@ -36,6 +37,8 @@ from .models import (
 )
 from .models_kikan_mapping import PurchaseActualKikanMapping
 from .serializers import PurchasePlanLockSettingSerializer
+
+logger = logging.getLogger(__name__)
 
 
 def _calc_progress_quantities(line, coverage_dates):
@@ -481,8 +484,37 @@ def _recalculate_purchase_child_stock(parent_product_id, target_dates):
                     child_product_ids=child_product_ids,
                 )
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("子部品の在庫再計算に失敗: %s", e)
+        logger.warning("子部品の在庫再計算に失敗: %s", e)
+
+
+def _recalculate_purchase_supplier_progress(supplier_obj, product_ids=None):
+    if not supplier_obj:
+        return
+
+    line = _resolve_purchase_line(supplier_obj)
+    if not line:
+        return
+
+    auto_cfg = PurchaseAutoDeliveryListConfig.objects.filter(supplier=supplier_obj).first()
+    days_back = auto_cfg.progress_days_back if auto_cfg else 7
+    days_forward = auto_cfg.progress_days_forward if auto_cfg else 30
+
+    try:
+        from .tasks_auto_delivery_list import _recalculate_supplier_progress_for_auto_delivery
+
+        _recalculate_supplier_progress_for_auto_delivery(
+            supplier_obj,
+            line,
+            days_back,
+            days_forward,
+            product_ids=product_ids,
+        )
+    except Exception as e:
+        logger.warning(
+            "仕入実績登録後の進度再計算に失敗: supplier=%s error=%s",
+            getattr(supplier_obj, 'supplier_code', ''),
+            e,
+        )
 
 
 def _resolve_purchase_line_id_from_supplier(supplier_id):
@@ -751,6 +783,7 @@ class PurchaseActualRegisterView(APIView):
 
         # 子部品の在庫・出庫を再計算（生産実績変更と同様）
         _recalculate_purchase_child_stock(product.id, [target_date])
+        _recalculate_purchase_supplier_progress(supplier_obj, product_ids=[product.id])
 
         return Response({'id': record.id, 'detail': 'created'}, status=status.HTTP_201_CREATED)
 
