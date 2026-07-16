@@ -798,10 +798,9 @@ const startIncomingRingtone = () => {
 }
 
 const stopIncomingRingtone = () => {
-  if (ringtoneInterval.value) {
-    clearInterval(ringtoneInterval.value)
-    ringtoneInterval.value = null
-  }
+  if (!ringtoneInterval.value) return
+  clearInterval(ringtoneInterval.value)
+  ringtoneInterval.value = null
   cancelIncomingVibration()
 }
 
