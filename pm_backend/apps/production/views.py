@@ -1779,45 +1779,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     # --- クボタ配送ライン: plan_id から truck の arrival_day_offset で LT 決定 ---
                     if _is_kubota_delivery_line(getattr(d_step, 'line', None)):
                         from shipping.views_kubota_sakai_trip_assignment import parse_truck_id_from_plan_id
-                        # クボタ配送ラインのカレンダーでシフトする
                         kubota_line = getattr(d_step, 'line', None)
-                        kubota_cal_id = getattr(kubota_line, 'calendar_id', None) if kubota_line else None
-                        if not hasattr(self, '_kubota_cal_day_cache'):
-                            self._kubota_cal_day_cache = {}
-                        kubota_cal_cache = self._kubota_cal_day_cache
-                        if kubota_cal_id and not kubota_cal_cache:
-                            cache_start = (start_dt - timedelta(days=60)) if start_dt else None
-                            cache_end = (source_end_dt or end_dt)
-                            if cache_end:
-                                cache_end = cache_end + timedelta(days=60)
-                            kcal_qs = CalendarDay.objects.filter(calendar_id=kubota_cal_id)
-                            if cache_start:
-                                kcal_qs = kcal_qs.filter(target_date__gte=cache_start)
-                            if cache_end:
-                                kcal_qs = kcal_qs.filter(target_date__lte=cache_end)
-                            for kc in kcal_qs:
-                                kubota_cal_cache[kc.target_date] = kc.is_working_day
-
-                        def _kubota_shift_business_days(target_date, days):
-                            def _kwd(d):
-                                if not kubota_cal_id:
-                                    return d.weekday() < 5
-                                if d in kubota_cal_cache:
-                                    return kubota_cal_cache[d]
-                                cal = CalendarDay.objects.filter(calendar_id=kubota_cal_id, target_date=d).first()
-                                is_work = cal.is_working_day if cal is not None else d.weekday() < 5
-                                kubota_cal_cache[d] = is_work
-                                return is_work
-                            if not days:
-                                return target_date
-                            step_dir = -1 if days > 0 else 1
-                            remaining = abs(int(days))
-                            current = target_date
-                            while remaining > 0:
-                                current = current + timedelta(days=step_dir)
-                                if _kwd(current):
-                                    remaining -= 1
-                            return current
+                        kubota_calendar_id = getattr(kubota_line, 'calendar_id', None) or default_calendar_id
 
                         # truck の arrival_day_offset キャッシュ
                         if not hasattr(self, '_kubota_truck_offset_cache'):
@@ -1847,7 +1810,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                     effective_lt_days = 1 + offset
                                 else:
                                     effective_lt_days = lt_days or 2
-                                shifted_date = _kubota_shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
+                                shifted_date = (
+                                    shift_business_days_by_calendar(
+                                        kubota_calendar_id,
+                                        plan_date,
+                                        effective_lt_days,
+                                    )
+                                    if effective_lt_days else plan_date
+                                )
                                 # クボタ便側カレンダで算出した需要日が自ライン休日に当たる場合は、
                                 # 自ライン前営業日に寄せて在庫計算側との休日判定差異を吸収する。
                                 shifted_date = shift_business_days(shifted_date, 0)
