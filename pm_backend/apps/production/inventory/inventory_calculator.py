@@ -41,12 +41,14 @@ def _load_planned_stock_calc_rule_map():
         old_mode = str((item or {}).get('mode') or '').strip().upper()
         if old_item == 'PARENT_SHIPMENT_SOURCE' and old_mode == 'PLAN':
             calc_target = calc_target or 'PLANNED_STOCK'
-            setting = 'PARENT_PLAN'
+            setting = 'ORDER_QTY'
+        if setting == 'PARENT_PLAN':
+            setting = 'ORDER_QTY'
         if not line_code or not process_code:
             continue
         if calc_target not in {'STOCK', 'PLANNED_STOCK'}:
             continue
-        if setting not in {'PARENT_PLAN', 'ACTUAL_OR_PLAN'}:
+        if setting not in {'ORDER_QTY', 'ACTUAL_OR_PLAN'}:
             continue
         result[(line_code, process_code, calc_target)] = setting
     return result
@@ -1273,6 +1275,7 @@ def recalculate_stock_qty(
             continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
+        order_total = sum(r.order_qty or 0 for r in rows)
         scrap_adjust_total = sum(r.scrap_adjust_qty or 0 for r in rows)
         # adjust_qty は在庫計算に使わない（既存仕様）
 
@@ -1283,14 +1286,9 @@ def recalculate_stock_qty(
                 line_code = _resolve_line_code(getattr(sample, 'line_id', None))
                 process_code = _resolve_process_code(getattr(sample, 'process_id', None))
                 setting = calc_rule_map.get((line_code, process_code, 'STOCK'), '')
-                if setting == 'PARENT_PLAN':
-                    # 特例: 在庫計算でも後工程計画値を出庫として使用
-                    # 非営業日はスキップ: LTシフトで複数日が同じ親計画を参照し
-                    # 二重カウントする問題を防ぐ（計画在庫と同じ考え方）
-                    if is_working_day(plan_date):
-                        actual_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, {})
-                    else:
-                        actual_shipment = Decimal('0')
+                if setting == 'ORDER_QTY':
+                    # 特例: pickup 済みの前工程需要(order_qty)をそのまま出庫として使用
+                    actual_shipment = Decimal(str(order_total))
                 else:
                     # 標準: 親の actual_qty + scrap_qty を出庫として計算（休日実績も反映）
                     actual_shipment = _calculate_parent_actual_shipment(sample)
@@ -1602,16 +1600,16 @@ def recalculate_planned_stock_qty(
         if is_final:
             planned_shipment = demand_map.get((sample.product_id, plan_date), Decimal('0'))
         elif is_line_final:
-            if forced_parent_shipment_mode == 'PARENT_PLAN':
-                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
+            if forced_parent_shipment_mode == 'ORDER_QTY':
+                planned_shipment = Decimal(str(order_total))
             elif plan_date < business_today:
                 # ライン最終品でも過去日は親の実績優先で整合を取る。
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
-            if forced_parent_shipment_mode == 'PARENT_PLAN':
-                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
+            if forced_parent_shipment_mode == 'ORDER_QTY':
+                planned_shipment = Decimal(str(order_total))
             elif plan_date < business_today:
                 planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
             else:

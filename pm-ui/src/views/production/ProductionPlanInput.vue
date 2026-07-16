@@ -1068,7 +1068,7 @@
               <option value="DEMAND">需要</option>
             </select>
             <select v-model="plannedStockCalcDraft.setting">
-              <option value="PARENT_PLAN">後工程計画使用</option>
+              <option value="ORDER_QTY">ORDER_QTY使用</option>
             </select>
             <button class="btn" type="button" @click="addPlannedStockCalcRule">追加</button>
           </div>
@@ -1495,7 +1495,7 @@ const plannedStockCalcDraft = ref({
   lineCode: '',
   processCode: '',
   calcTarget: 'PLANNED_STOCK',
-  setting: 'PARENT_PLAN',
+  setting: 'ORDER_QTY',
 })
 const autoPlanTargetRules = ref([])
 const autoPlanTargetDraft = ref({ lineCode: '', productCode: '' })
@@ -1697,10 +1697,11 @@ const normalizePlannedStockCalcRules = (rows) => {
     const oldItem = String(row?.item || '').trim().toUpperCase()
     const oldMode = String(row?.mode || '').trim().toUpperCase()
     if (!calcTarget && oldItem === 'PARENT_SHIPMENT_SOURCE') calcTarget = 'PLANNED_STOCK'
-    if (!setting && oldMode === 'PLAN') setting = 'PARENT_PLAN'
+    if (!setting && oldMode === 'PLAN') setting = 'ORDER_QTY'
+    if (setting === 'PARENT_PLAN') setting = 'ORDER_QTY'
     if (!lineCode || !processCode) return
     if (calcTarget !== 'PLANNED_STOCK' && calcTarget !== 'STOCK' && calcTarget !== 'DEMAND') return
-    if (setting !== 'PARENT_PLAN' && setting !== 'ACTUAL_OR_PLAN') return
+    if (setting !== 'ORDER_QTY' && setting !== 'ACTUAL_OR_PLAN') return
     const key = `${lineCode}|${processCode}|${calcTarget}`
     if (seen.has(key)) return
     seen.add(key)
@@ -1710,7 +1711,7 @@ const normalizePlannedStockCalcRules = (rows) => {
       calcTarget,
       setting,
       calcTargetLabel: calcTarget === 'STOCK' ? '在庫' : (calcTarget === 'DEMAND' ? '需要' : '計画在庫'),
-      settingLabel: setting === 'PARENT_PLAN' ? '後工程計画使用' : '標準（実績優先）',
+      settingLabel: setting === 'ORDER_QTY' ? 'ORDER_QTY使用' : '標準（実績優先）',
     })
   })
   return normalized
@@ -4946,8 +4947,7 @@ const fetchAndApplyData = async () => {
       if (isDemandRow) {
         const processCode = processCodeById.get(String(d.process)) || normalizeProcessCode(d.process_code)
         const demandRuleKey = `${selectedLineCode}|${processCode}|DEMAND`
-        const useParentPlanDemand = plannedStockRuleMap.get(demandRuleKey) === 'PARENT_PLAN'
-        const current = Number(useParentPlanDemand ? (d.demand_qty_plan || 0) : (d.order_qty || 0))
+        const current = Number(d.order_qty || 0)
         const prev = demandMap.get(dateKey)
         demandMap.set(dateKey, prev == null ? current : Math.max(prev, current))
       }
