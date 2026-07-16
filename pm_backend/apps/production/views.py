@@ -1349,32 +1349,46 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         line_obj = Line.objects.filter(id=line_id).first()
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
 
-        # CalendarDayを一括取得してキャッシュ化（N+1問題を解消）
-        calendar_day_cache = {}
-        if calendar_id:
-            # 期間を広めに取得（リードタイム分を考慮して前後60日）
-            cache_start = (start_dt - timedelta(days=60)) if start_dt else None
-            cache_end = (end_dt + timedelta(days=60)) if end_dt else None
-            cal_qs = CalendarDay.objects.filter(calendar_id=calendar_id)
-            if cache_start:
-                cal_qs = cal_qs.filter(target_date__gte=cache_start)
-            if cache_end:
-                cal_qs = cal_qs.filter(target_date__lte=cache_end)
-            for cal in cal_qs:
-                calendar_day_cache[cal.target_date] = cal.is_working_day
+        default_calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
 
-        def is_line_working_day(check_date):
+        # CalendarDayを一括取得してキャッシュ化（N+1問題を解消）
+        calendar_day_cache_by_id = {}
+
+        def get_calendar_day_cache(target_calendar_id):
+            cache = calendar_day_cache_by_id.get(target_calendar_id)
+            if cache is not None:
+                return cache
+            cache = {}
+            if target_calendar_id:
+                # 期間を広めに取得（リードタイム分を考慮して前後60日）
+                cache_start = (start_dt - timedelta(days=60)) if start_dt else None
+                cache_end = (end_dt + timedelta(days=60)) if end_dt else None
+                cal_qs = CalendarDay.objects.filter(calendar_id=target_calendar_id)
+                if cache_start:
+                    cal_qs = cal_qs.filter(target_date__gte=cache_start)
+                if cache_end:
+                    cal_qs = cal_qs.filter(target_date__lte=cache_end)
+                for cal in cal_qs:
+                    cache[cal.target_date] = cal.is_working_day
+            calendar_day_cache_by_id[target_calendar_id] = cache
+            return cache
+
+        def is_working_day_by_calendar(target_calendar_id, check_date):
             # カレンダ未設定 → 週末判定（月〜金を稼働日）
-            if not calendar_id:
+            if not target_calendar_id:
                 return check_date.weekday() < 5
-            if check_date in calendar_day_cache:
-                return calendar_day_cache[check_date]
-            cal = CalendarDay.objects.filter(calendar_id=calendar_id, target_date=check_date).first()
+            cache = get_calendar_day_cache(target_calendar_id)
+            if check_date in cache:
+                return cache[check_date]
+            cal = CalendarDay.objects.filter(calendar_id=target_calendar_id, target_date=check_date).first()
             is_work = cal.is_working_day if cal is not None else check_date.weekday() < 5
-            calendar_day_cache[check_date] = is_work
+            cache[check_date] = is_work
             return is_work
 
-        def shift_business_days(target_date, days):
+        def is_line_working_day(check_date):
+            return is_working_day_by_calendar(calendar_id, check_date)
+
+        def shift_business_days_by_calendar(target_calendar_id, target_date, days):
             """
             稼働日で日付をシフトする。
             days > 0 なら過去方向へ、days < 0 なら未来方向へ。
@@ -1382,23 +1396,26 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             """
 
             if not days:
-                if not calendar_id:
+                if not target_calendar_id:
                     return target_date
-                if is_line_working_day(target_date):
+                if is_working_day_by_calendar(target_calendar_id, target_date):
                     return target_date
                 current = target_date
                 while True:
                     current = current - timedelta(days=1)
-                    if is_line_working_day(current):
+                    if is_working_day_by_calendar(target_calendar_id, current):
                         return current
             step = -1 if days > 0 else 1  # 正:過去へ、負:未来へ
             remaining = abs(int(days))
             current = target_date
             while remaining > 0:
                 current = current + timedelta(days=step)
-                if is_line_working_day(current):
+                if is_working_day_by_calendar(target_calendar_id, current):
                     remaining -= 1
             return current
+
+        def shift_business_days(target_date, days):
+            return shift_business_days_by_calendar(calendar_id, target_date, days)
 
         gantt_usage_cache = {}
         downstream_backlog_cache = {}
@@ -1728,6 +1745,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     total_qty_per = qty_per
 
                     if _is_floor_shipping_delivery_line(getattr(d_step, 'line', None)):
+                        delivery_line = getattr(d_step, 'line', None)
+                        delivery_calendar_id = getattr(delivery_line, 'calendar_id', None) or default_calendar_id
                         selected_rows_by_date = {}
                         for _, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
                             qty = Decimal(str(plan_qty or 0))
@@ -1744,7 +1763,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                     seq_value > FLOOR_SHIPPING_PM_SEQUENCE_THRESHOLD
                                 )
                                 effective_lt_days = 1 if force_pm_by_sequence else (2 if lot_index == 0 else 1)
-                                shifted_date = shift_business_days(plan_date, effective_lt_days) if effective_lt_days else plan_date
+                                shifted_date = (
+                                    shift_business_days_by_calendar(
+                                        delivery_calendar_id,
+                                        plan_date,
+                                        effective_lt_days,
+                                    )
+                                    if effective_lt_days else plan_date
+                                )
                                 shifted_date = shift_business_days(shifted_date, 0)
                                 add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
                                 downstream_found = True
@@ -6801,7 +6827,7 @@ class ProductionRecordInquirySettingView(APIView):
         normalized = []
         seen = set()
         allowed_targets = {'STOCK', 'PLANNED_STOCK', 'DEMAND'}
-        allowed_settings = {'PARENT_PLAN', 'ACTUAL_OR_PLAN'}
+        allowed_settings = {'ORDER_QTY', 'ACTUAL_OR_PLAN'}
         for row in source:
             line_code = self._normalize((row or {}).get('lineCode'))
             process_code = self._normalize((row or {}).get('processCode'))
@@ -6811,7 +6837,9 @@ class ProductionRecordInquirySettingView(APIView):
             old_item = self._normalize((row or {}).get('item'))
             old_mode = self._normalize((row or {}).get('mode'))
             if old_item == 'PARENT_SHIPMENT_SOURCE' and old_mode == 'PLAN':
-                setting = 'PARENT_PLAN'
+                setting = 'ORDER_QTY'
+            if setting == 'PARENT_PLAN':
+                setting = 'ORDER_QTY'
             if old_item == 'PARENT_SHIPMENT_SOURCE' and calc_target not in allowed_targets:
                 calc_target = 'PLANNED_STOCK'
             if not line_code or not process_code:
@@ -8550,7 +8578,7 @@ class ProductionPlanLineSettingView(APIView):
         normalized = []
         seen = set()
         allowed_targets = {'STOCK', 'PLANNED_STOCK', 'DEMAND'}
-        allowed_settings = {'PARENT_PLAN', 'ACTUAL_OR_PLAN'}
+        allowed_settings = {'ORDER_QTY', 'ACTUAL_OR_PLAN'}
         for row in source:
             line_code = self._normalize((row or {}).get('lineCode'))
             process_code = self._normalize((row or {}).get('processCode'))
@@ -8559,7 +8587,9 @@ class ProductionPlanLineSettingView(APIView):
             old_item = self._normalize((row or {}).get('item'))
             old_mode = self._normalize((row or {}).get('mode'))
             if old_item == 'PARENT_SHIPMENT_SOURCE' and old_mode == 'PLAN':
-                setting = 'PARENT_PLAN'
+                setting = 'ORDER_QTY'
+            if setting == 'PARENT_PLAN':
+                setting = 'ORDER_QTY'
             if old_item == 'PARENT_SHIPMENT_SOURCE' and calc_target not in allowed_targets:
                 calc_target = 'PLANNED_STOCK'
             if not line_code or not process_code:
