@@ -6,6 +6,15 @@
         <span>実行日</span>
         <input v-model="adjustDate" type="date" />
       </label>
+      <label v-if="activeTab === 'single'" class="toolbar-field">
+        <span>調整対象日</span>
+        <input
+          v-model="adjustmentDate"
+          type="date"
+          :title="form.productId ? '調整したい日を選択してください。表示開始日は品番LTから自動計算されます' : '調整したい日を選択してください'"
+          @change="handleSingleAdjustmentDateChange"
+        />
+      </label>
     </div>
 
     <div class="tabs">
@@ -84,15 +93,6 @@
               @change="reload"
             />
           </div>
-          <div class="row">
-            <label>調整対象日</label>
-            <input
-              v-model="adjustmentDate"
-              type="date"
-              readonly
-              :title="form.productId ? '品番から自動計算されます（today − (max LT + 1) 営業日）' : '調整可能な日付（グリッド上のこの日だけ入力できます）'"
-            />
-          </div>
           <!-- 補正ガイド（STOCK / PROGRESS タイプ）-->
           <div v-if="isGuideType && form.productId && form.lineId" class="stock-helper">
             <div class="sh-title">{{ guideTitle }}</div>
@@ -132,7 +132,7 @@
           </div>
 
           <div class="adjust-note">
-            <p>※ 調整対象日は品番のリードタイムから自動計算されます（今日 − (最大LT + 1) 営業日）。</p>
+            <p>※ 調整対象日は手入力で選択します。表示開始日は調整対象日と品番のリードタイムから自動計算されます。</p>
             <template v-if="props.adjustType === 'STOCK'">
               <p>※ 在庫は日々累積で繰り越されるため、調整対象日に値を入れることで以降の全日に反映されます。</p>
               <p>※ 在庫補正の正しい手順：<strong>在庫再計算 → 実在庫入力 → 調整保存 → 再計算</strong>（上記ガイドを使用）。</p>
@@ -468,6 +468,21 @@ const applyProcessToForm = (item) => {
   form.lineName = item.lineName || "";
 };
 
+const syncSingleDisplayStartDate = async (productId) => {
+  if (!productId) return;
+  try {
+    const calcRes = await api.lineBacklogs.getCalcStartDate({
+      product_id: productId,
+      base_date: adjustmentDate.value,
+    });
+    if (calcRes.data?.calc_start_date) {
+      displayStartDate.value = calcRes.data.calc_start_date;
+    }
+  } catch (_) {
+    // 表示開始日は取得失敗時に現状維持
+  }
+};
+
 const selectProcessCandidate = async (item) => {
   applyProcessToForm(item);
   await reload();
@@ -622,19 +637,8 @@ const resolveByProductCode = async () => {
     processCandidates.value = [];
     selectedProcessKey.value = "";
 
-    // calc_start_date を自動取得して調整日にセット（開始日は調整日以前のままを維持）
-    try {
-      const calcRes = await api.lineBacklogs.getCalcStartDate({ product_id: product.id });
-      if (calcRes.data?.calc_start_date) {
-        adjustmentDate.value = calcRes.data.calc_start_date;
-        // 開始日が調整日より後になっていたら調整日に揃える
-        if (displayStartDate.value > adjustmentDate.value) {
-          displayStartDate.value = adjustmentDate.value;
-        }
-      }
-    } catch (_) {
-      // 取得失敗時は今日のまま
-    }
+    // 表示開始日は「調整対象日 + 品番LT」を基準に再計算する。調整対象日は上書きしない。
+    await syncSingleDisplayStartDate(product.id);
 
     // 購入品/外作部品はBOMの調達区分を優先して候補化する
     const allBomItemRes = await api.bomItems.getBOMItems({
@@ -830,6 +834,13 @@ const resolveByProductCode = async () => {
   }
 };
 
+const handleSingleAdjustmentDateChange = async () => {
+  if (form.productId) {
+    await syncSingleDisplayStartDate(form.productId);
+  }
+  await reload();
+};
+
 const getMetricValueForType = (item) => {
   if (props.adjustType === "STOCK") return Number(item.stock_qty || 0);
   if (props.adjustType === "PLANNED_STOCK") return Number(item.planned_stock_qty || 0);
@@ -876,8 +887,14 @@ const _guideWord =
 const guideTitle = `${_guideWord}補正ガイド`;
 const guideStep1Label = `① ${_guideWord}を最新化`;
 const guideStep1Btn = `${_guideWord}再計算して確認`;
-const guideSystemLabel = `システム${_guideWord}（今日）`;
-const guideActualLabel = props.adjustType === "STOCK" ? "実在庫（今日）" : props.adjustType === "PLANNED_STOCK" ? "実計画在庫（今日）" : "実進度（今日）";
+const guideSystemLabel = computed(() => `システム${_guideWord}（${adjustmentDate.value}）`);
+const guideActualLabel = computed(() => (
+  props.adjustType === "STOCK"
+    ? `実在庫（${adjustmentDate.value}）`
+    : props.adjustType === "PLANNED_STOCK"
+    ? `実計画在庫（${adjustmentDate.value}）`
+    : `実進度（${adjustmentDate.value}）`
+));
 const batchGuideSystemLabel = computed(() => `システム${_guideWord}（${batchTargetDate.value}）`);
 const batchGuideActualLabel = computed(() => (
   props.adjustType === "STOCK"
@@ -971,18 +988,19 @@ const reload = async () => {
       });
       metricsByDate.value = metricMap;
 
-      // 今日のシステム値を取得（STOCK: stock_qty, PROGRESS: progress_qty）
+      // 調整対象日のシステム値を取得（STOCK: stock_qty, PROGRESS: progress_qty）
       if (isGuideType) {
-        if (metricMap[today]?.progress !== undefined) {
-          systemStockToday.value = metricMap[today].progress;
+        const targetDate = adjustmentDate.value || today;
+        if (metricMap[targetDate]?.progress !== undefined) {
+          systemStockToday.value = metricMap[targetDate].progress;
         } else {
-          // 今日がグリッド範囲外 → 単独で取得
+          // 調整対象日がグリッド範囲外 → 単独で取得
           try {
             const todayRes = await api.lineBacklogs.getLineBacklogs({
               line: form.lineId,
               product: form.productId,
-              plan_date__gte: today,
-              plan_date__lte: today,
+              plan_date__gte: targetDate,
+              plan_date__lte: targetDate,
             });
             const todayItems = Array.isArray(todayRes.data) ? todayRes.data : [];
             const todayVal = todayItems.reduce((sum, item) => sum + getMetricValueForType(item), 0);
@@ -1453,4 +1471,3 @@ onMounted(() => {
   }
 }
 </style>
-

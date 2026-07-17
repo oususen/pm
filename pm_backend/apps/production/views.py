@@ -4514,11 +4514,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         製品の calc_start_date（= today − (max親BOM LT + 1) 営業日）を返すAPI。
         在庫調整画面の表示開始日の自動設定に使用する。
 
-        クエリパラメータ: product_id (required)
+        クエリパラメータ:
+            product_id (required)
+            base_date (optional, YYYY-MM-DD) - 表示開始日計算の基準日。未指定時は業務日付
         """
         from .inventory.inventory_calculator import _get_direct_parent_bom_lead_time
 
         product_id = request.query_params.get('product_id')
+        base_date_raw = (request.query_params.get('base_date') or '').strip()
         if not product_id:
             return Response({'detail': 'product_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -4526,7 +4529,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError:
             return Response({'detail': 'product_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
 
-        today = get_business_today()
+        if base_date_raw:
+            try:
+                today = datetime.strptime(base_date_raw, '%Y-%m-%d').date()
+            except ValueError as e:
+                return Response({'detail': f'base_date形式が不正です: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            today = get_business_today()
         max_lt = _get_direct_parent_bom_lead_time(product_id)
 
         # daiso カレンダーで営業日シフト
