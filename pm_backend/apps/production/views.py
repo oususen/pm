@@ -4359,6 +4359,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         process_code = (request.query_params.get('process_code') or '').strip()
         line_code = (request.query_params.get('line_code') or '').strip()
         adjust_type = (request.query_params.get('adjust_type') or '').strip().upper()
+        target_date_raw = (request.query_params.get('target_date') or '').strip()
 
         if not process_code and not line_code:
             return Response({'detail': 'process_code or line_code is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -4400,6 +4401,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         processes_map = {p.id: p for p in Process.objects.filter(id__in=process_ids)} if process_ids else {}
 
         today = get_business_today()
+        selected_target_date = None
+        if target_date_raw:
+            try:
+                selected_target_date = datetime.strptime(target_date_raw, '%Y-%m-%d').date()
+            except ValueError as e:
+                return Response({'detail': f'target_date形式が不正です: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         calendar_id = Calendar.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
         workday_cache = {}
 
@@ -4433,7 +4440,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for a in LineBacklogAdjustment.objects.filter(**adj_filter)
         }
 
-        # adjust_type に応じた今日の値フィールドを決定
+        # adjust_type に応じた指定日の値フィールドを決定
         value_field_map = {
             'STOCK': 'stock_qty',
             'PLANNED_STOCK': 'planned_stock_qty',
@@ -4441,19 +4448,20 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             'PLANNED_PROGRESS': 'planned_progress_qty',
         }
         value_field = value_field_map.get(adjust_type, 'stock_qty')
+        target_value_date = selected_target_date or today
 
-        today_filter = {
+        target_value_filter = {
             'product_id__in': product_ids,
-            'plan_date': today,
+            'plan_date': target_value_date,
             'sequence_no': 0,
         }
         if process:
-            today_filter['process'] = process
+            target_value_filter['process'] = process
         if line:
-            today_filter['line'] = line
+            target_value_filter['line'] = line
         today_values = {
             (lb.product_id, lb.line_id): getattr(lb, value_field)
-            for lb in LineBacklog.objects.filter(**today_filter)
+            for lb in LineBacklog.objects.filter(**target_value_filter)
         }
 
         results = []
@@ -4472,7 +4480,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             proc_id = row.get('process_id')
             proc_obj = processes_map.get(proc_id) if proc_id else None
             max_lt = _get_direct_parent_bom_lead_time(pid) if use_direct_lt else _get_max_parent_bom_lead_time(pid)
-            target_date = calc_start(max_lt)
+            calc_start_date = calc_start(max_lt)
+            target_date = selected_target_date or calc_start_date
             results.append({
                 'product_id': pid,
                 'product_code': product.product_code,
@@ -4481,7 +4490,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 'line_code': line_obj.line_code,
                 'line_name': line_obj.line_name,
                 'process_code': proc_obj.process_code if proc_obj else '',
-                'calc_start_date': target_date.isoformat(),
+                'calc_start_date': calc_start_date.isoformat(),
+                'target_date': target_date.isoformat(),
                 'adjust_qty': existing.get((pid, lid, target_date.isoformat()), 0),
                 'value_today': today_values.get((pid, lid)),
             })

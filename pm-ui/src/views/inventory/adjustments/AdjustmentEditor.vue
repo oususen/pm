@@ -209,6 +209,14 @@
           <label><input type="radio" v-model="batchSearchMode" value="process" /> 工程CD</label>
           <label><input type="radio" v-model="batchSearchMode" value="line" /> ラインCD</label>
         </div>
+        <div class="row" style="max-width:260px">
+          <label>調整対象日</label>
+          <input
+            v-model="batchTargetDate"
+            type="date"
+            @change="handleBatchTargetDateChange"
+          />
+        </div>
         <div class="row" style="max-width:400px">
           <label>{{ batchSearchMode === 'process' ? '工程CD' : 'ラインCD' }}</label>
           <input
@@ -230,7 +238,7 @@
       <div v-else-if="batchError" class="center" style="color:#c00">{{ batchError }}</div>
       <div v-else-if="batchLineInfo">
         <p class="batch-line-name">{{ batchInfoLabel }}</p>
-        <p class="batch-guide">{{ guideActualLabel }}を入力すると差分が自動計算されます。② ボタンで一括保存・再計算されます。</p>
+        <p class="batch-guide">調整対象日: {{ batchTargetDate }}。{{ batchGuideActualLabel }}を入力すると差分が自動計算されます。② ボタンで一括保存・再計算されます。</p>
         <table class="grid">
           <thead>
             <tr>
@@ -240,8 +248,8 @@
               <th v-if="batchSearchMode === 'line'">工程CD</th>
               <th>調整対象日</th>
               <th>現在調整値</th>
-              <th>{{ guideSystemLabel }}</th>
-              <th>{{ guideActualLabel }}</th>
+              <th>{{ batchGuideSystemLabel }}</th>
+              <th>{{ batchGuideActualLabel }}</th>
               <th>差分（調整値）</th>
             </tr>
           </thead>
@@ -254,7 +262,7 @@
               <td>{{ row.product_name }}</td>
               <td>{{ row.line_code }}</td>
               <td v-if="batchSearchMode === 'line'">{{ row.process_code || '-' }}</td>
-              <td>{{ row.calc_start_date }}</td>
+              <td>{{ row.target_date || row.calc_start_date }}</td>
               <td>{{ row.adjust_qty }}</td>
               <td>{{ row.value_today !== null && row.value_today !== undefined ? row.value_today : '—' }}</td>
               <td>
@@ -395,6 +403,7 @@ const applyAndRecalc = async () => {
 // 一括タブ用
 const batchSearchMode = ref("process");
 const batchSearchCode = ref("");
+const batchTargetDate = ref(today);
 const batchProcessCode = computed(() => batchSearchMode.value === 'process' ? batchSearchCode.value : '');
 const batchLineCode = computed(() => batchSearchMode.value === 'line' ? batchSearchCode.value : '');
 const batchLineInfo = ref(null);
@@ -869,6 +878,14 @@ const guideStep1Label = `① ${_guideWord}を最新化`;
 const guideStep1Btn = `${_guideWord}再計算して確認`;
 const guideSystemLabel = `システム${_guideWord}（今日）`;
 const guideActualLabel = props.adjustType === "STOCK" ? "実在庫（今日）" : props.adjustType === "PLANNED_STOCK" ? "実計画在庫（今日）" : "実進度（今日）";
+const batchGuideSystemLabel = computed(() => `システム${_guideWord}（${batchTargetDate.value}）`);
+const batchGuideActualLabel = computed(() => (
+  props.adjustType === "STOCK"
+    ? `実在庫（${batchTargetDate.value}）`
+    : props.adjustType === "PLANNED_STOCK"
+    ? `実計画在庫（${batchTargetDate.value}）`
+    : `実進度（${batchTargetDate.value}）`
+));
 const guideActualPlaceholder = props.adjustType === "PROGRESS" ? "実績値を入力" : "実測値を入力";
 const guideStep2Label = props.adjustType === "STOCK" ? "② 実在庫を入力して差分を確認" : props.adjustType === "PLANNED_STOCK" ? "② 実計画在庫を入力して差分を確認" : "② 実進度を入力して差分を確認";
 const guideStep3Label = "③ 差分を調整対象日に適用して再計算";
@@ -1047,6 +1064,7 @@ const loadBatchProducts = async () => {
     } else {
       params.process_code = batchSearchCode.value;
     }
+    params.target_date = batchTargetDate.value;
     const res = await api.lineBacklogs.getBatchAdjustInfo(params);
     batchLineInfo.value = res.data;
     batchProducts.value = res.data.products || [];
@@ -1057,13 +1075,33 @@ const loadBatchProducts = async () => {
   }
 };
 
+const handleBatchTargetDateChange = async () => {
+  batchActualInputs.value = {};
+  if (batchSearchCode.value) {
+    await loadBatchProducts();
+  }
+};
+
+const getBatchRecalcRange = () => {
+  const startDate = batchTargetDate.value || today;
+  const startDateObj = new Date(startDate);
+  const todayPlus30Obj = new Date(today);
+  todayPlus30Obj.setDate(todayPlus30Obj.getDate() + 30);
+  const endDateObj = startDateObj > todayPlus30Obj ? new Date(startDateObj) : todayPlus30Obj;
+  if (startDateObj > todayPlus30Obj) {
+    endDateObj.setDate(endDateObj.getDate() + 30);
+  }
+  return {
+    startDate,
+    endDate: formatISODate(endDateObj),
+  };
+};
+
 // 一括再計算の共通ロジック
 // - PROGRESS/PLANNED_PROGRESS: 工程の製品をline_idでグループ化して進度のみ再計算
 // - STOCK/PLANNED_STOCK: 全関連ラインを対象に在庫のみ再計算（進度スキップ）
 const executeBatchRecalc = async () => {
-  const endDateObj = new Date(today);
-  endDateObj.setDate(endDateObj.getDate() + 30);
-  const endDate = formatISODate(endDateObj);
+  const { startDate, endDate } = getBatchRecalcRange();
 
   const isProgressType = props.adjustType === "PROGRESS" || props.adjustType === "PLANNED_PROGRESS";
 
@@ -1078,7 +1116,7 @@ const executeBatchRecalc = async () => {
       Object.entries(productsByLine).map(([lid, pids]) =>
         api.lineBacklogs.recalculateInventory({
           line_id: Number(lid),
-          start_date: today,
+          start_date: startDate,
           end_date: endDate,
           product_ids: pids,
           progress_only: true,
@@ -1096,7 +1134,7 @@ const executeBatchRecalc = async () => {
       Object.entries(productsByLine).map(([lid, pids]) =>
         api.lineBacklogs.recalculateInventory({
           line_id: Number(lid),
-          start_date: today,
+          start_date: startDate,
           end_date: endDate,
           product_ids: pids,
           include_progress: false,
@@ -1135,7 +1173,7 @@ const batchApplyAndRecalc = async () => {
           line_code: row.line_code,
           product_code: row.product_code,
           process_code: row.process_code || batchProcessCode.value,
-          plan_date: row.calc_start_date,
+          plan_date: row.target_date || batchTargetDate.value,
           adjust_type: props.adjustType,
           adjust_qty: totalAdjust,
           reason: `${props.adjustType} 一括${guideReasonPrefix}（${guideActualWord}${batchActualInputs.value[idx]} − システム${row.value_today}、累計${totalAdjust}）`,
@@ -1415,7 +1453,4 @@ onMounted(() => {
   }
 }
 </style>
-
-
-
 
