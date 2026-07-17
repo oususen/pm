@@ -37,6 +37,7 @@
             <td class="td-actions">
               <button class="btn-sm" @click="openEdit(c)">編集</button>
               <button class="btn-sm btn-run" :disabled="running.has(c.id)" @click="runNow(c)">{{ running.has(c.id) ? '実行中...' : '今すぐ実行' }}</button>
+              <button class="btn-sm btn-holiday" :disabled="running.has(c.id)" @click="runHolidayTrial(c)">休日トライ</button>
               <button class="btn-sm btn-danger" @click="remove(c)">削除</button>
             </td>
           </tr>
@@ -361,9 +362,18 @@ const remove = async (c) => {
 
 const runNow = async (c) => {
   if (!confirm(`${c.supplier_code} ${c.supplier_name} の自動送信を今すぐ実行しますか？`)) return
+  await triggerRun(c, () => api.purchaseAutoDeliveryList.runNow(c.id))
+}
+
+const runHolidayTrial = async (c) => {
+  if (!confirm(`${c.supplier_code} ${c.supplier_name} の休日トライを実行しますか？`)) return
+  await triggerRun(c, () => api.purchaseAutoDeliveryList.runHolidayTrial(c.id))
+}
+
+const triggerRun = async (c, runner) => {
   running.add(c.id)
   try {
-    await api.purchaseAutoDeliveryList.runNow(c.id)
+    await runner()
     const pollStart = Date.now()
     const timer = setInterval(async () => {
       if (Date.now() - pollStart > 5 * 60 * 1000) {
@@ -408,6 +418,8 @@ onMounted(async () => {
 .btn-sm { padding: 3px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
 .btn-sm:hover { background: #f1f5f9; }
 .btn-run { border-color: #3b82f6; color: #2563eb; }
+.btn-holiday { border-color: #f59e0b; color: #b45309; }
+.btn-holiday:hover { background: #fffbeb; }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger { border-color: #fca5a5; color: #dc2626; }
 .btn-danger:hover { background: #fef2f2; }

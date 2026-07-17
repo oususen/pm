@@ -67,7 +67,7 @@ def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, 
     return recalc_result
 
 
-def run_auto_delivery_list_send(config_id):
+def run_auto_delivery_list_send(config_id, ignore_holiday=False):
     from notifications.models import Notification
     from masters.models import Calendar
     from orders.utils.calendar_utils import WorkingDayCalculator
@@ -98,7 +98,7 @@ def run_auto_delivery_list_send(config_id):
             _notify_users(config.notify_on_failure, calendar_missing_message)
             return
         calc = WorkingDayCalculator(daiso_cal)
-        if not calc.is_working_day(today):
+        if not ignore_holiday and not calc.is_working_day(today):
             holiday_message = f'自動納入リスト: 本日は休日のため、{supplier.supplier_name} 向け送信は実行しません'
             _finish(config, start_time, 'SKIPPED', holiday_message)
             _notify_users(config.notify_on_non_delivery, holiday_message)
@@ -272,6 +272,13 @@ def run_auto_delivery_list_send(config_id):
 
         reply_to = (config.reply_to_email or '').strip()
         reply_line = f'\n※ 返送先: {reply_to}\n（このメールは送信専用です。返信は上記アドレスへお願いいたします。）\n' if reply_to else ''
+        send_timing_delivery_line = (
+            f'送信タイミング: 納入日の{config.lead_time_days or 2}営業日前 '
+            f'{int(config.scheduled_hour):02d}:{int(config.scheduled_minute):02d} に自動送信\n'
+        )
+        progress_period_line = (
+            f'進度表期間: 発行日の{days_back}営業日前 ～ {days_forward}日後\n'
+        )
 
         # 件名: 送信内容に応じて変更
         subject_parts = []
@@ -282,7 +289,10 @@ def run_auto_delivery_list_send(config_id):
         if delivery_note_pdf:
             subject_parts.append('外作納品書')
         subject_label = '・'.join(subject_parts)
-        subject = f'【デモ配信】【{subject_label}】納入日{delivery_date}'
+        if excel_data:
+            subject = f'【デモ配信】【{subject_label}】納入日{delivery_date}'
+        else:
+            subject = f'【デモ配信】【{subject_label}】発行日{today}'
 
         # 本文: 送信内容に応じて構成
         body_lines = [f'{supplier.supplier_name} 御中\n', 'お世話になっております。\n']
@@ -290,11 +300,17 @@ def run_auto_delivery_list_send(config_id):
             body_lines.append(f'納品リスト（納入日: {delivery_date}）を送付いたします。\n')
             body_lines.append('2026-07-06（月）より試運用として、自動送信を開始しております。\n')
             body_lines.append('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。\n')
+            body_lines.append(send_timing_delivery_line)
             body_lines.append(f'対象品目: {len(items)}件')
             body_lines.append(f'カバー期間: {coverage_dates[0]} ～ {coverage_dates[-1]}\n')
+            body_lines.append(progress_period_line)
             body_lines.append('添付のExcelの「確認・修正方法」シートを参照のうえ、数量確認・修正後にご返送ください。')
         else:
-            body_lines.append('進度照会資料を送付いたします。')
+            body_lines.append('進度照会資料を送付いたします。\n')
+            body_lines.append('2026-01-22（木）より試運用として、自動送信を開始しております。\n')
+            body_lines.append('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。\n')
+            body_lines.append(send_timing_delivery_line)
+            body_lines.append(progress_period_line)
         if progress_excel or progress_pdf:
             body_lines.append('進度表を添付しておりますのでご参照ください。')
         if delivery_note_pdf:

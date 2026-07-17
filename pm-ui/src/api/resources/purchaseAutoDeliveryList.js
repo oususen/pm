@@ -14,4 +14,7 @@ export const createPurchaseAutoDeliveryListAPI = (client) => ({
   runNow(id) {
     return client.post(`/purchase-auto-delivery-list-configs/${id}/run-now/`)
   },
+  runHolidayTrial(id) {
+    return client.post(`/purchase-auto-delivery-list-configs/${id}/holiday-trial/`)
+  },
 })

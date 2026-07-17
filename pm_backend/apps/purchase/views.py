@@ -2910,6 +2910,30 @@ class PurchaseAutoDeliveryListRunNowView(APIView):
         return Response({'detail': '手動実行を開始しました', 'config_id': config.id})
 
 
+class PurchaseAutoDeliveryListHolidayTrialView(APIView):
+    """自動納入リスト送信 休日トライ実行"""
+
+    def post(self, request, pk):
+        config = PurchaseAutoDeliveryListConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .tasks_auto_delivery_list import run_auto_delivery_list_send
+        import threading
+        config.last_run_status = 'RUNNING'
+        config.last_run_message = '休日トライ実行中...'
+        config.last_run_at = datetime.now()
+        config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_at'])
+
+        thread = threading.Thread(
+            target=run_auto_delivery_list_send,
+            kwargs={'config_id': config.id, 'ignore_holiday': True},
+        )
+        thread.start()
+
+        return Response({'detail': '休日トライを開始しました', 'config_id': config.id})
+
+
 class PurchaseActualKikanMappingCandidatesView(APIView):
     """仕入先に紐づく品番候補一覧（BOMItem + RoutingStep の両方から取得）"""
 
