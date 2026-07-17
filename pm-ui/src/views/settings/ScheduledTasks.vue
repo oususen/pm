@@ -1535,13 +1535,13 @@ const runNow = async (cfg) => {
       }
       stopPolling()
       const pollStart = Date.now()
-      const POLL_TIMEOUT = 10 * 60 * 1000 // 10分
+      const POLL_TIMEOUT = 30 * 60 * 1000 // 30分
       pollTimer.value = setInterval(async () => {
-        // タイムアウト: 10分でポーリング停止
+        // タイムアウト: 30分でポーリング停止
         if (Date.now() - pollStart > POLL_TIMEOUT) {
           stopPolling()
           running.delete(key)
-          alert('10分経過しても完了しませんでした。\n継続実行中の可能性があります。必要なら「キャンセル要求」を実行してください。')
+          alert('30分経過しても完了しませんでした。\n継続実行中の可能性があります。必要なら「キャンセル要求」を実行してください。')
           return
         }
         await loadConfig()
