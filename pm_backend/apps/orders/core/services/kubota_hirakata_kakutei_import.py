@@ -75,6 +75,36 @@ class KubotaHirakataKakuteiImportService:
 
         return None, None
 
+    def _is_2027_format(self, rows):
+        """2027年以降の新形式を判定する"""
+        if not rows:
+            return False
+
+        # 現行枚方確定は 34列・注番ベース。
+        # これと異なる時点で新形式扱いに寄せる。
+        if len(rows[0]) != 34:
+            return True
+
+        header = [
+            str(col or '').strip().replace(' ', '').replace('　', '')
+            for col in rows[0]
+        ]
+        if '注番' not in header:
+            return True
+        if '発注番号' in header:
+            return True
+
+        for row in rows[1:6]:
+            data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
+            legacy_order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
+            new_order_no = row[33].strip() if len(row) > 33 else ''
+            if data_no not in (self.DATA_NO_45, self.DATA_NO_47):
+                return True
+            if data_no == self.DATA_NO_47 and not legacy_order_no and new_order_no:
+                return True
+
+        return False
+
     def parse_date_from_yymmdd(self, date_str):
         """Parse date from YYMMDD format to date object
 
@@ -183,7 +213,16 @@ class KubotaHirakataKakuteiImportService:
 
             # Parse CSV
             lines = decoded_file.splitlines()
-            csv_reader = csv.reader(lines)
+            rows = list(csv.reader(lines))
+            if self._is_2027_format(rows):
+                return {
+                    'success': False,
+                    'message': 'このCSVは枚方2027年以降の新形式です。',
+                    'errors': ['旧「枚方工場」では取り込めません。'],
+                    'warnings': ['「枚方工場（27年以降）」を選択して取り込んでください。']
+                }
+
+            csv_reader = iter(rows)
 
             raw_records = []
             row_no = 0

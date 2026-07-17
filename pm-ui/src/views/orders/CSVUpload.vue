@@ -248,6 +248,7 @@ const orderTypes = [
 const factories = [
   { value: 'SAKAI', label: '堺工場', desc: 'Sakai', badge: '堺' },
   { value: 'HIRAKATA', label: '枚方工場', desc: 'Hirakata', badge: '枚' },
+  { value: 'HIRAKATA_2027', label: '枚方工場（27年以降）', desc: 'Hirakata 2027+', badge: '27' },
   { value: 'KMT', label: 'KMT工場', desc: 'KMT', badge: 'K' },
 ]
 

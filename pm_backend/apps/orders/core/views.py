@@ -540,6 +540,15 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     # クボタ_枚方_確定
                     from .services.kubota_hirakata_kakutei_import import KubotaHirakataKakuteiImportService
                     return KubotaHirakataKakuteiImportService()
+            elif detected_factory == 'HIRAKATA_2027':
+                if order_type == 'FORECAST':
+                    # クボタ_枚方_内示（2027年以降）
+                    from .services.kubota_hirakata_2027_naiji_import import KubotaHirakata2027NaijiImportService
+                    return KubotaHirakata2027NaijiImportService()
+                elif order_type == 'FIRM':
+                    # クボタ_枚方_確定（2027年以降）
+                    from .services.kubota_hirakata_2027_kakutei_import import KubotaHirakata2027KakuteiImportService
+                    return KubotaHirakata2027KakuteiImportService()
             elif detected_factory == 'KMT':
                 if order_type == 'FORECAST':
                     # クボタ_KMT_内示
@@ -618,6 +627,100 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
         finally:
             file.seek(0)
 
+    def _is_kubota_hirakata_2027_format(self, file, order_type):
+        """Detect Hirakata 2027+ format that should not be accepted by legacy HIRAKATA."""
+        try:
+            file.seek(0)
+            raw_data = file.read()
+            decoded = None
+            for enc in ('cp932', 'shift-jis', 'utf-8-sig', 'utf-8'):
+                try:
+                    decoded = raw_data.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if decoded is None:
+                return False
+
+            rows = list(csv.reader(decoded.splitlines()))
+            if not rows:
+                return False
+
+            header = rows[0]
+            normalized_header = [
+                str(col or '').strip().replace(' ', '').replace('　', '')
+                for col in header
+            ]
+
+            if order_type == 'FIRM':
+                # 現行枚方確定: 34列 / 注番あり / 発注番号なし
+                if len(header) != 34:
+                    return True
+                if '注番' not in normalized_header:
+                    return True
+                if '発注番号' in normalized_header:
+                    return True
+
+            elif order_type == 'FORECAST':
+                # 現行枚方内示: 123列 / 日程ライン圧縮あり / 初月度(指示日/指示数)系ではない
+                if len(header) != 123:
+                    return True
+                if '日程ライン圧縮' not in normalized_header:
+                    return True
+                if any('初月度(' in col for col in normalized_header):
+                    return True
+
+            return False
+        except Exception:
+            return False
+        finally:
+            file.seek(0)
+
+    def _is_kubota_hirakata_legacy_format(self, file, order_type):
+        """Detect current Hirakata format that should not be accepted by HIRAKATA_2027."""
+        try:
+            file.seek(0)
+            raw_data = file.read()
+            decoded = None
+            for enc in ('cp932', 'shift-jis', 'utf-8-sig', 'utf-8'):
+                try:
+                    decoded = raw_data.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if decoded is None:
+                return False
+
+            rows = list(csv.reader(decoded.splitlines()))
+            if not rows:
+                return False
+
+            header = rows[0]
+            normalized_header = [
+                str(col or '').strip().replace(' ', '').replace('　', '')
+                for col in header
+            ]
+
+            if order_type == 'FIRM':
+                return (
+                    len(header) == 34
+                    and '注番' in normalized_header
+                    and '発注番号' not in normalized_header
+                )
+
+            if order_type == 'FORECAST':
+                return (
+                    len(header) == 123
+                    and '日程ライン圧縮' in normalized_header
+                    and not any('初月度(' in col for col in normalized_header)
+                )
+
+            return False
+        except Exception:
+            return False
+        finally:
+            file.seek(0)
+
     @action(
         detail=False,
         methods=['post'],
@@ -650,32 +753,62 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
             # Kubotaは No + 工場 で自動判定可能だが、UIで工場選択がある場合は不一致をエラーにする
             if customer_code == '000196':
                 inferred_factory = self._infer_kubota_factory_from_file(file, order_type)
-                # 工場未指定時のみ CSV から推定して補完
-                if not factory:
-                    if inferred_factory:
-                        factory = inferred_factory
-                # 工場指定済みで不一致なら、誤取込防止のためエラー
-                elif inferred_factory and factory != inferred_factory:
-                    factory_name_map = {
-                        'SAKAI': '堺',
-                        'HIRAKATA': '枚方',
-                        'KMT': 'KMT',
-                    }
-                    selected_name = factory_name_map.get(factory, factory)
-                    inferred_name = factory_name_map.get(inferred_factory, inferred_factory)
+                is_hirakata_2027_format = self._is_kubota_hirakata_2027_format(file, order_type)
+                is_hirakata_legacy_format = self._is_kubota_hirakata_legacy_format(file, order_type)
+
+                if factory == 'HIRAKATA' and is_hirakata_2027_format:
                     return Response(
                         {
                             'success': False,
-                            'error': (
-                                f'選択工場（{selected_name}）とCSV実データ工場（{inferred_name}）が一致しません。'
-                            ),
-                            'message': (
-                                f'このファイルは {inferred_name} 向けデータです。'
-                                f'{inferred_name} を選択して再アップロードしてください。'
-                            ),
+                            'error': 'このCSVは枚方2027年以降の新形式です。',
+                            'message': '旧「枚方工場」では取り込めません。「枚方工場（27年以降）」を選択して再アップロードしてください。',
                         },
                         status=status.HTTP_400_BAD_REQUEST
                     )
+                if factory == 'HIRAKATA_2027' and is_hirakata_legacy_format:
+                    return Response(
+                        {
+                            'success': False,
+                            'error': 'このCSVは2026年までの枚方形式です。',
+                            'message': '「枚方工場（27年以降）」では取り込めません。旧「枚方工場」を選択して再アップロードしてください。',
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                # 工場未指定時のみ CSV から推定して補完
+                if not factory:
+                    if inferred_factory == 'HIRAKATA' and is_hirakata_2027_format:
+                        factory = 'HIRAKATA_2027'
+                    elif inferred_factory:
+                        factory = inferred_factory
+                # 工場指定済みで不一致なら、誤取込防止のためエラー
+                elif inferred_factory and factory != inferred_factory:
+                    is_hirakata_compatible = (
+                        inferred_factory == 'HIRAKATA' and factory == 'HIRAKATA_2027'
+                    )
+                    if is_hirakata_compatible:
+                        pass
+                    else:
+                        factory_name_map = {
+                            'SAKAI': '堺',
+                            'HIRAKATA': '枚方',
+                            'HIRAKATA_2027': '枚方（2027年以降）',
+                            'KMT': 'KMT',
+                        }
+                        selected_name = factory_name_map.get(factory, factory)
+                        inferred_name = factory_name_map.get(inferred_factory, inferred_factory)
+                        return Response(
+                            {
+                                'success': False,
+                                'error': (
+                                    f'選択工場（{selected_name}）とCSV実データ工場（{inferred_name}）が一致しません。'
+                                ),
+                                'message': (
+                                    f'このファイルは {inferred_name} 向けデータです。'
+                                    f'{inferred_name} を選択して再アップロードしてください。'
+                                ),
+                            },
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
 
             # リーデンは現行運用で「確定（FIRM）のみ」受付
             if customer_code == '000018' and order_type != 'FIRM':
