@@ -308,13 +308,22 @@ const production = [
     path: "/production/process-knowledge-manager",
     name: "ProcessKnowledgeManager",
     component: () => import("@/views/production/ProcessKnowledgeManager.vue"),
-    meta: { pageTitle: "工程別コツ・注意事項管理", resource: "production.process_input", permission: "edit" },
+    meta: {
+      pageTitle: "工程別コツ・注意事項管理",
+      resource: "production.process_knowledge",
+      permission: "edit",
+      fallbackToParent: false,
+    },
   },
   {
     path: "/production/process-knowledge-viewer",
     name: "ProcessKnowledgeViewer",
     component: () => import("@/views/production/ProcessKnowledgeViewer.vue"),
-    meta: { pageTitle: "工程別コツ・注意事項閲覧", resource: "production.process_input" },
+    meta: {
+      pageTitle: "工程別コツ・注意事項",
+      resource: "production.process_knowledge",
+      fallbackToParent: false,
+    },
   },
   {
     path: "/production/spot-line-input",

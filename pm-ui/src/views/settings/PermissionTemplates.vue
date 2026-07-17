@@ -472,6 +472,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'orders.first_article', label: '受注: お久しぶり製品通知設定' },
   { value: 'production', label: '生産' },
   { value: 'production.process_input', label: '生産: 工程作業入力' },
+  { value: 'production.process_knowledge', label: '生産: 工程別コツ・注意事項' },
   { value: 'production.record_inquiry', label: '生産: 生産実績照会' },
   { value: 'production.record_edit', label: '生産: 実績変更' },
   { value: 'production.scrap_record', label: '生産: 仕損品記録' },

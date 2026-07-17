@@ -15,8 +15,8 @@
       <button
         class="knowledge-icon-btn"
         type="button"
-        title="工程別コツ・注意事項閲覧を開く"
-        aria-label="工程別コツ・注意事項閲覧を開く"
+        title="工程別コツ・注意事項を開く"
+        aria-label="工程別コツ・注意事項を開く"
         @click="openViewer"
       >
         📘
@@ -30,8 +30,9 @@
       </div>
 
       <div class="knowledge-actions">
-        <button class="subtle-btn icon-only-btn" type="button" title="工程別コツ・注意事項閲覧" aria-label="工程別コツ・注意事項閲覧" @click="openViewer">🔗</button>
+        <button class="subtle-btn icon-only-btn" type="button" title="工程別コツ・注意事項" aria-label="工程別コツ・注意事項" @click="openViewer">🔗</button>
         <button
+          v-if="canEditKnowledge"
           class="subtle-btn icon-only-btn"
           type="button"
           title="管理画面"
@@ -77,6 +78,8 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { canAccessRouteResource } from '@/router'
 import {
   PROCESS_KNOWLEDGE_TABS,
   buildProcessKnowledgeDefaultContent,
@@ -110,6 +113,9 @@ const activeTab = ref('common')
 const docLoading = ref(false)
 const docError = ref('')
 const docText = ref('')
+const canEditKnowledge = computed(() =>
+  canAccessRouteResource(authState.user, 'production.process_knowledge', 'edit', null, false)
+)
 
 const processLabel = computed(() => {
   const code = props.selectedItem?.process_code || ''

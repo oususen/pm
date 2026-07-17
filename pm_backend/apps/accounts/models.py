@@ -203,6 +203,7 @@ class UserPermission(models.Model):
         ('orders.first_article', '受注: お久しぶり製品通知設定'),
         ('production', '生産'),
         ('production.process_input', '生産: 工程作業入力'),
+        ('production.process_knowledge', '生産: 工程別コツ・注意事項'),
         ('production.record_inquiry', '生産: 生産実績照会'),
         ('production.record_edit', '生産: 実績変更'),
         ('production.scrap_record', '生産: 仕損品記録'),

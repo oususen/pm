@@ -2,12 +2,12 @@
   <div class="knowledge-viewer">
     <div class="page-header">
       <div>
-        <h2 class="page-title">工程別コツ・注意事項閲覧</h2>
-        <p class="page-note">入力画面とは分けて、工程ごとのコツ・注意点・不良事例・新人確認事項を閲覧します。</p>
+        <h2 class="page-title">工程別コツ・注意事項</h2>
+        <p class="page-note">入力画面とは分けて、工程ごとのコツ・注意点・不良事例・新人確認事項を確認します。</p>
       </div>
       <div class="header-actions">
         <button class="subtle-btn" type="button" @click="reloadDoc" :disabled="loadingDoc || !selectedProcessId">再読込</button>
-        <button class="primary-btn" type="button" @click="openManager" :disabled="!selectedProcessId">編集する</button>
+        <button v-if="canEditKnowledge" class="primary-btn" type="button" @click="openManager" :disabled="!selectedProcessId">編集する</button>
       </div>
     </div>
 
@@ -68,6 +68,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { canAccessRouteResource } from '@/router'
 import {
   PROCESS_KNOWLEDGE_TABS,
   buildProcessKnowledgeDefaultContent,
@@ -107,6 +109,9 @@ const selectedEquipment = computed(() =>
 )
 
 const selectedEquipmentLabel = computed(() => buildEquipmentLabel(selectedEquipment.value))
+const canEditKnowledge = computed(() =>
+  canAccessRouteResource(authState.user, 'production.process_knowledge', 'edit', null, false)
+)
 const currentDocPath = computed(() =>
   buildProcessKnowledgePath({
     processId: selectedProcessId.value,

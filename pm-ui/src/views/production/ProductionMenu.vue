@@ -59,7 +59,7 @@ const findPermission = (user, resource) => {
   return permissions.find((item) => item.resource === resource) || null;
 };
 
-const hasMenuPermission = (resource, level) => {
+const hasMenuPermission = (resource, level, fallbackToParent = true) => {
   const user = authState.user;
   if (!user) return false;
   if (user.is_superuser) return true;
@@ -71,6 +71,7 @@ const hasMenuPermission = (resource, level) => {
       : Boolean(entry.can_view || entry.can_edit);
   }
 
+  if (!fallbackToParent) return false;
   return hasPermission(user, "production", level);
 };
 
@@ -317,19 +318,12 @@ const tiles = computed(() => {
     },
     {
       to: "/production/process-knowledge-viewer",
-      label: "工程別コツ・注意事項閲覧",
+      label: "工程別コツ・注意事項",
       icon: "💡",
       category: "other",
       required: "view",
-      resource: "production.process_input",
-    },
-    {
-      to: "/production/process-knowledge-manager",
-      label: "工程別コツ・注意事項管理",
-      icon: "✏️",
-      category: "other",
-      required: "edit",
-      resource: "production.process_input",
+      resource: "production.process_knowledge",
+      fallbackToParent: false,
     },
     {
       to: "/masters/mobile-device",
@@ -343,7 +337,7 @@ const tiles = computed(() => {
 
   return list.map((tile) => ({
     ...tile,
-    disabled: !hasMenuPermission(tile.resource, tile.required),
+    disabled: !hasMenuPermission(tile.resource, tile.required, tile.fallbackToParent !== false),
   }));
 });
 
