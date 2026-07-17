@@ -20,6 +20,7 @@ db.sqlite3-journal
 /media
 /staticfiles
 pm_backend/media/
+pm_backend/logs/
 .env
 .env.local
 *.db

@@ -27,6 +27,7 @@ services:
       - ./pm_backend/media:/app/media
       - pm_static_volume:/app/staticfiles
       - ./output:/app/output
+      - ./pm_backend/logs:/app/logs
       - ./pm_backend/vapid_private.pem:/app/vapid_private.pem:ro
       - ./pm_backend/firebase-service-account.json:/app/firebase-service-account.json:ro
     command: >
@@ -52,6 +53,8 @@ services:
       - DB_NAME=${DB_NAME:-pm_db}
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - ./pm_backend/logs:/app/logs
     command: python manage.py run_scheduler
     extra_hosts:
       - "host.docker.internal:host-gateway"
