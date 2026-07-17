@@ -9,6 +9,10 @@
     </div>
 
     <div class="page-content">
+      <div class="sync-note">
+        同一車両キーを持つ便は、荷台幅・荷台奥行・荷台高さ・最大積載重量を同一値として扱います。
+        いずれか1便を更新すると、同じキーの他便にも同じ値が同期されます。
+      </div>
       <table class="data-table">
         <thead>
           <tr>
@@ -273,6 +277,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.sync-note {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 6px;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;

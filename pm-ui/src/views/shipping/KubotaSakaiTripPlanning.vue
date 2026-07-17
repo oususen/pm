@@ -57,7 +57,7 @@
       </button>
       <label class="toolbar-checkbox">
         <input type="checkbox" v-model="hideWeekends" />
-        土日非表示
+        休日非表示
       </label>
       <button class="btn" :class="{ 'active-toggle': showProgressAdjust }" @click="showProgressAdjust = !showProgressAdjust">
         進捗調整
@@ -702,10 +702,7 @@ const allDateKeys = computed(() => {
 
 const dateKeys = computed(() => {
   if (!hideWeekends.value) return allDateKeys.value
-  return allDateKeys.value.filter((dk) => {
-    const dow = new Date(`${dk}T00:00:00`).getDay()
-    return dow !== 0 && dow !== 6
-  })
+  return allDateKeys.value.filter((dk) => isWorkingDayByCalendar(dk))
 })
 
 const detailTrucks = computed(() => {
@@ -928,12 +925,8 @@ const pseudoTruckOccupancyPercent = (dateKey, type) => {
 const getLoadDetailDateKey = (dateKey, truck) => {
   const offset = Math.max(0, Number(truck?.arrival_day_offset || 0))
   if (offset <= 0) return dateKey
-  const visibleDates = dateKeys.value
-  const currentIdx = visibleDates.indexOf(dateKey)
-  if (currentIdx < 0) return dateKey
-  const targetIdx = currentIdx - offset
-  if (targetIdx < 0) return null
-  return visibleDates[targetIdx]
+  const departureDateKey = addBusinessDaysByCalendar(dateKey, -offset)
+  return allDateKeys.value.includes(departureDateKey) ? departureDateKey : null
 }
 
 const loadBlocksByDate = computed(() => {
