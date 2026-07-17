@@ -1712,9 +1712,12 @@ def recalculate_inventory_for_line(
     else:
         demand_map = {}
 
+    adj_start = start_date
+    if progress_calc_start_date and progress_calc_start_date < start_date:
+        adj_start = progress_calc_start_date
     adjustment_maps = _build_adjustment_maps(
         line_id,
-        start_date,
+        adj_start,
         end_date,
         product_ids=target_product_ids or None,
     )

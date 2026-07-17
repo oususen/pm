@@ -155,6 +155,19 @@ docker exec -it pm-backend python manage.py migrate
 そのため、進度計算の需要（内示/確定）は必ず **LineDemand** を使用すること。
 LineBacklog の `order_qty` や `demand_qty_plan` をフォールバックとして使ってはならない。
 
+### 進度計算の取得範囲と計算範囲の同期
+
+`inventory_calculator` / `progress_calculator` 系で開始日を動かすときは、
+DB取得範囲と実計算範囲を必ず同期させること。
+
+- `LineBacklog` の取得範囲
+- `_build_adjustment_maps()` の取得範囲
+- `_build_demand_map()` の取得範囲
+- 実際の進度計算ループ開始日
+
+`progress_calc_start_date` のように計算開始日だけ早めると、
+早めた期間の `PROGRESS` 調整値が欠落し、以降の進度が一律でずれることがある。
+
 ### 棚卸初期化と通常計算の分離
 
 棚卸初期化のために、通常の在庫・計画在庫・進度の計算ファイルを変更してはならない。
