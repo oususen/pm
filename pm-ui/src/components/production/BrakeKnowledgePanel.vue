@@ -15,9 +15,9 @@
       <button
         class="knowledge-icon-btn"
         type="button"
-        title="関連マニュアルを開く"
-        aria-label="関連マニュアルを開く"
-        @click="openManual(topManualPath)"
+        title="工程別コツ・注意事項閲覧を開く"
+        aria-label="工程別コツ・注意事項閲覧を開く"
+        @click="openViewer"
       >
         📘
       </button>
@@ -30,7 +30,7 @@
       </div>
 
       <div class="knowledge-actions">
-        <button class="subtle-btn icon-only-btn" type="button" title="関連マニュアル" aria-label="関連マニュアル" @click="openManual(currentManualPath)">🔗</button>
+        <button class="subtle-btn icon-only-btn" type="button" title="工程別コツ・注意事項閲覧" aria-label="工程別コツ・注意事項閲覧" @click="openViewer">🔗</button>
         <button
           class="subtle-btn icon-only-btn"
           type="button"
@@ -104,26 +104,13 @@ const props = defineProps({
 
 const router = useRouter()
 
-const topManualPath = '生産/ブレーキベンダー技術伝承トップ.md'
-const tabs = PROCESS_KNOWLEDGE_TABS.map((tab) => ({
-  ...tab,
-  manualPath:
-    tab.key === 'common'
-      ? '生産/ブレーキベンダー技術伝承_共通手順.md'
-      : tab.key === 'defects'
-        ? '生産/ブレーキベンダー技術伝承_不良事例.md'
-        : tab.key === 'equipment'
-          ? '生産/ブレーキベンダー技術伝承_設備別注意.md'
-          : '生産/ブレーキベンダー技術伝承_新人チェックリスト.md',
-}))
+const tabs = PROCESS_KNOWLEDGE_TABS
 
 const activeTab = ref('common')
 const docLoading = ref(false)
 const docError = ref('')
 const docText = ref('')
 
-const currentTab = computed(() => tabs.find((tab) => tab.key === activeTab.value) || tabs[0])
-const currentManualPath = computed(() => currentTab.value.manualPath)
 const processLabel = computed(() => {
   const code = props.selectedItem?.process_code || ''
   const name = props.selectedItem?.process_name || ''
@@ -192,6 +179,17 @@ function openManual(path) {
 function openManager() {
   router.push({
     name: 'ProcessKnowledgeManager',
+    query: {
+      process_id: props.selectedProcessId || '',
+      equipment_id: props.selectedEquipmentId || '',
+      tab: activeTab.value,
+    },
+  })
+}
+
+function openViewer() {
+  router.push({
+    name: 'ProcessKnowledgeViewer',
     query: {
       process_id: props.selectedProcessId || '',
       equipment_id: props.selectedEquipmentId || '',

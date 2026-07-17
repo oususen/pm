@@ -308,7 +308,13 @@ const production = [
     path: "/production/process-knowledge-manager",
     name: "ProcessKnowledgeManager",
     component: () => import("@/views/production/ProcessKnowledgeManager.vue"),
-    meta: { pageTitle: "工程別コツ・注意事項管理", manualPath: "生産/ブレーキベンダー技術伝承トップ.md", resource: "production.process_input", permission: "edit" },
+    meta: { pageTitle: "工程別コツ・注意事項管理", resource: "production.process_input", permission: "edit" },
+  },
+  {
+    path: "/production/process-knowledge-viewer",
+    name: "ProcessKnowledgeViewer",
+    component: () => import("@/views/production/ProcessKnowledgeViewer.vue"),
+    meta: { pageTitle: "工程別コツ・注意事項閲覧", resource: "production.process_input" },
   },
   {
     path: "/production/spot-line-input",

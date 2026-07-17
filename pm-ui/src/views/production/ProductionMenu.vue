@@ -316,9 +316,17 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
+      to: "/production/process-knowledge-viewer",
+      label: "工程別コツ・注意事項閲覧",
+      icon: "💡",
+      category: "other",
+      required: "view",
+      resource: "production.process_input",
+    },
+    {
       to: "/production/process-knowledge-manager",
       label: "工程別コツ・注意事項管理",
-      icon: "💡",
+      icon: "✏️",
       category: "other",
       required: "edit",
       resource: "production.process_input",

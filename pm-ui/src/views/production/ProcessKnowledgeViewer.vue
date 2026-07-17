@@ -1,16 +1,13 @@
 <template>
-  <div class="knowledge-manager">
+  <div class="knowledge-viewer">
     <div class="page-header">
       <div>
-        <h2 class="page-title">工程別コツ・注意事項管理</h2>
-        <p class="page-note">入力画面とは分けて、工程ごとのコツ・注意点・不良事例・新人確認事項を管理します。</p>
+        <h2 class="page-title">工程別コツ・注意事項閲覧</h2>
+        <p class="page-note">入力画面とは分けて、工程ごとのコツ・注意点・不良事例・新人確認事項を閲覧します。</p>
       </div>
       <div class="header-actions">
-        <button class="subtle-btn" type="button" @click="openViewer">閲覧画面を開く</button>
         <button class="subtle-btn" type="button" @click="reloadDoc" :disabled="loadingDoc || !selectedProcessId">再読込</button>
-        <button class="primary-btn" type="button" @click="saveDoc" :disabled="savingDoc || !selectedProcessId">
-          {{ savingDoc ? '保存中...' : '保存' }}
-        </button>
+        <button class="primary-btn" type="button" @click="openManager" :disabled="!selectedProcessId">編集する</button>
       </div>
     </div>
 
@@ -39,7 +36,6 @@
     <div class="context-bar">
       <span class="context-chip">工程: {{ selectedProcessLabel || '未選択' }}</span>
       <span class="context-chip">設備: {{ selectedEquipmentLabel || '共通メモ' }}</span>
-      <span class="context-chip">保存先: {{ currentDocPath || '-' }}</span>
     </div>
 
     <div class="category-tabs">
@@ -59,22 +55,10 @@
     <div v-if="errorMessage" class="status-message error">{{ errorMessage }}</div>
     <div v-else-if="infoMessage" class="status-message">{{ infoMessage }}</div>
 
-    <div class="editor-layout">
-      <section class="editor-card">
-        <div class="card-title">編集</div>
-        <textarea
-          v-model="docText"
-          class="editor-textarea"
-          :disabled="!selectedProcessId || loadingDoc"
-          placeholder="工程を選択すると編集できます"
-        ></textarea>
-      </section>
-
-      <section class="preview-card">
-        <div class="card-title">プレビュー</div>
-        <div class="preview-body" v-html="renderedDoc"></div>
-      </section>
-    </div>
+    <section class="preview-card">
+      <div v-if="loadingDoc" class="knowledge-state">読込中...</div>
+      <div v-else class="preview-body" v-html="renderedDoc"></div>
+    </section>
   </div>
 </template>
 
@@ -100,7 +84,6 @@ const selectedEquipmentId = ref('')
 const activeTab = ref('common')
 const docText = ref('')
 const loadingDoc = ref(false)
-const savingDoc = ref(false)
 const errorMessage = ref('')
 const infoMessage = ref('工程を選択すると内容を表示します。')
 
@@ -145,7 +128,7 @@ function buildEquipmentLabel(equipment) {
 }
 
 function buildFallbackDoc() {
-  if (!selectedProcessId.value) return '## 工程を選択すると編集できます'
+  if (!selectedProcessId.value) return '## 工程を選択すると内容を表示します'
   return buildProcessKnowledgeDefaultContent({
     category: activeTab.value,
     processLabel: selectedProcessLabel.value || '未選択工程',
@@ -172,11 +155,10 @@ async function loadDoc() {
   }
 
   loadingDoc.value = true
-  infoMessage.value = '読み込み中です。'
+  infoMessage.value = ''
   try {
     const response = await api.manualDocuments.read(currentDocPath.value)
     docText.value = String(response?.data?.content || '').trim() || buildFallbackDoc()
-    infoMessage.value = '内容を読み込みました。'
   } catch (error) {
     docText.value = buildFallbackDoc()
     if (error?.response?.status === 404) {
@@ -189,29 +171,13 @@ async function loadDoc() {
   }
 }
 
-async function saveDoc() {
-  if (!selectedProcessId.value) return
-
-  savingDoc.value = true
-  errorMessage.value = ''
-  infoMessage.value = ''
-  try {
-    await api.manualDocuments.write(currentDocPath.value, docText.value)
-    infoMessage.value = '保存しました。'
-  } catch (error) {
-    errorMessage.value = error?.message || '保存に失敗しました'
-  } finally {
-    savingDoc.value = false
-  }
-}
-
 function reloadDoc() {
   loadDoc()
 }
 
-function openViewer() {
+function openManager() {
   router.push({
-    name: 'ProcessKnowledgeViewer',
+    name: 'ProcessKnowledgeManager',
     query: {
       process_id: selectedProcessId.value || '',
       equipment_id: selectedEquipmentId.value || '',
@@ -252,11 +218,15 @@ onMounted(async () => {
   if (!selectedProcessId.value && processes.value.length === 1) {
     selectedProcessId.value = String(processes.value[0].id)
   }
+
+  if (selectedProcessId.value) {
+    loadDoc()
+  }
 })
 </script>
 
 <style scoped>
-.knowledge-manager {
+.knowledge-viewer {
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -299,26 +269,19 @@ onMounted(async () => {
   min-width: 260px;
 }
 
-.filter-label,
-.card-title {
+.filter-label {
   font-size: 12px;
   font-weight: 700;
   color: #475569;
 }
 
-.filter-select,
-.editor-textarea,
-.subtle-btn,
-.primary-btn {
-  border-radius: 8px;
-  font-size: 13px;
-}
-
 .filter-select {
   height: 36px;
   border: 1px solid #cbd5e1;
+  border-radius: 8px;
   background: #fff;
   padding: 0 10px;
+  font-size: 13px;
 }
 
 .context-chip {
@@ -367,41 +330,24 @@ onMounted(async () => {
   color: #b91c1c;
 }
 
-.editor-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 12px;
-  min-height: 620px;
-}
-
-.editor-card,
 .preview-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  padding: 12px;
+  min-height: 480px;
+  padding: 16px;
   border: 1px solid #dbe2ea;
   border-radius: 12px;
   background: #fff;
 }
 
-.editor-textarea {
-  flex: 1;
-  min-height: 560px;
-  border: 1px solid #cbd5e1;
-  padding: 12px;
-  line-height: 1.7;
-  resize: vertical;
+.knowledge-state {
+  padding: 16px 0;
+  color: #64748b;
+  font-size: 13px;
 }
 
 .preview-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 4px 2px;
   color: #1f2937;
-  line-height: 1.7;
+  line-height: 1.8;
+  font-size: 14px;
 }
 
 .preview-body :deep(h1),
@@ -426,7 +372,9 @@ onMounted(async () => {
 .primary-btn {
   height: 36px;
   padding: 0 14px;
+  border-radius: 8px;
   cursor: pointer;
+  font-size: 13px;
 }
 
 .subtle-btn {
@@ -442,20 +390,8 @@ onMounted(async () => {
 }
 
 .subtle-btn:disabled,
-.primary-btn:disabled,
-.filter-select:disabled,
-.editor-textarea:disabled {
+.primary-btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-@media (max-width: 1100px) {
-  .editor-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .editor-textarea {
-    min-height: 360px;
-  }
 }
 </style>
