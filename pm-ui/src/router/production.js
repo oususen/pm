@@ -305,6 +305,12 @@ const production = [
     meta: { pageTitle: "ブレーキライン実績入力", manualPath: "生産/ブレーキライン実績入力.md", resource: "production.process_input", permission: "edit" },
   },
   {
+    path: "/production/process-knowledge-manager",
+    name: "ProcessKnowledgeManager",
+    component: () => import("@/views/production/ProcessKnowledgeManager.vue"),
+    meta: { pageTitle: "工程別コツ・注意事項管理", manualPath: "生産/ブレーキベンダー技術伝承トップ.md", resource: "production.process_input", permission: "edit" },
+  },
+  {
     path: "/production/spot-line-input",
     name: "SpotLineInput",
     component: () => import("@/views/production/SpotLineInput.vue"),

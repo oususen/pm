@@ -293,38 +293,65 @@
         </template>
       </div>
 
-      <!-- 列④: 製品写真（将来用） -->
+      <!-- 列④: コツ・写真 -->
       <div class="col-photo">
-        <div class="section-title">製品写真</div>
-        <div class="photo-placeholder">
-          <template v-if="selectedItem">
-            <div class="photo-product-code">{{ selectedItem.product_code }}</div>
-            <img
-              v-if="photoPreviewUrl"
-              :src="photoPreviewUrl"
-              class="photo-preview"
-              alt="製品写真"
-            />
-            <div v-else class="photo-icon">📷</div>
-            <div class="photo-actions">
-              <button class="btn-save photo-save-btn" :disabled="!canCapturePhoto" @click="openCamera">
-                {{ photoUploading ? '保存中...' : '撮影して保存' }}
-              </button>
-              <input
-                ref="photoInputRef"
-                type="file"
-                accept="image/*"
-                capture="environment"
-                class="photo-file-input"
-                @change="onPhotoSelected"
-              />
+        <div class="section-title section-title-icons">
+          <button
+            class="section-tab-btn"
+            :class="{ active: rightPanelTab === 'tips' }"
+            type="button"
+            title="作業のコツ・注意事項"
+            @click="rightPanelTab = 'tips'"
+          >💡 コツ</button>
+          <button
+            class="section-tab-btn"
+            :class="{ active: rightPanelTab === 'photo' }"
+            type="button"
+            title="製品写真"
+            @click="rightPanelTab = 'photo'"
+          >📷 写真</button>
+        </div>
+        <div class="col-photo-body">
+          <BrakeKnowledgePanel
+            v-if="rightPanelTab === 'tips'"
+            :selected-item="selectedItem"
+            :selected-process-id="selectedProcessId"
+            :selected-equipment-id="selectedEquipmentId"
+            :selected-equipment-label="selectedEquipmentLabel"
+          />
+          <div v-else class="photo-panel">
+            <div class="photo-panel-title">📷 製品写真</div>
+            <div class="photo-placeholder">
+              <template v-if="selectedItem">
+                <div class="photo-product-code">{{ selectedItem.product_code }}</div>
+                <img
+                  v-if="photoPreviewUrl"
+                  :src="photoPreviewUrl"
+                  class="photo-preview"
+                  alt="製品写真"
+                />
+                <div v-else class="photo-icon">📷</div>
+                <div class="photo-actions">
+                  <button class="btn-save photo-save-btn" :disabled="!canCapturePhoto" @click="openCamera">
+                    {{ photoUploading ? '保存中...' : '撮影して保存' }}
+                  </button>
+                  <input
+                    ref="photoInputRef"
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    class="photo-file-input"
+                    @change="onPhotoSelected"
+                  />
+                </div>
+                <div class="photo-label">{{ photoPreviewUrl ? '保存済み写真' : '未登録です。撮影して保存できます' }}</div>
+              </template>
+              <template v-else>
+                <div class="photo-icon muted">📷</div>
+                <div class="photo-label muted">品番を選択すると<br>写真が表示されます</div>
+              </template>
             </div>
-            <div class="photo-label">{{ photoPreviewUrl ? '保存済み写真' : '未登録です。撮影して保存できます' }}</div>
-          </template>
-          <template v-else>
-            <div class="photo-icon muted">📷</div>
-            <div class="photo-label muted">品番を選択すると<br>写真が表示されます</div>
-          </template>
+          </div>
         </div>
       </div>
 
@@ -421,6 +448,7 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 import { t } from '@/i18n'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import BrakeKnowledgePanel from '@/components/production/BrakeKnowledgePanel.vue'
 import { buildLuckJingleLabelDataUrl, createLuckJingleFileName, openLuckJinglePreview, shareLuckJingleLabel } from '@/utils/luckJingleLabel'
 
 const dsSources = [
@@ -484,6 +512,7 @@ const loading = ref(false)
 const operator = ref('')
 const printAutoEnabled = ref(false)
 const savedLabel = ref(null)
+const rightPanelTab = ref('tips')
 
 // フィルター
 const showDone = ref(false)
@@ -557,6 +586,8 @@ const buildEquipmentLabel = (equipmentId, equipmentCode = '', equipmentName = ''
   const eq = equipments.value.find((row) => String(row.id) === id)
   return String(eq?.equipment_name || eq?.equipment_code || '').trim()
 }
+
+const selectedEquipmentLabel = computed(() => buildEquipmentLabel(selectedEquipmentId.value))
 
 const workStateKey = (item, equipmentId) => {
   if (!item) return ''
@@ -2156,9 +2187,60 @@ function showToast(message, type = 'success') {
 .btn-change:not(:disabled):hover { background: #e8f0fe; }
 
 /* ═══════════════════════════════
-   列④: 製品写真（将来用）
+   列④: コツ・写真
 ═══════════════════════════════ */
 .col-photo { background: #fafafa; }
+
+.section-title-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.col-photo-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.section-tab-btn.active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.photo-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.photo-panel-title {
+  padding: 10px 12px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
 
 .photo-placeholder {
   flex: 1;
@@ -2172,6 +2254,8 @@ function showToast(message, type = 'success') {
   margin: 8px;
   border-radius: 8px;
   background: #fff;
+  min-height: 0;
+  overflow: auto;
 }
 .photo-product-code { font-size: 12px; font-weight: 600; color: #555; text-align: center; }
 .photo-icon { font-size: 40px; line-height: 1; }
@@ -2384,6 +2468,7 @@ function showToast(message, type = 'success') {
   }
 
   .action-bar { z-index: 20; }
+
 }
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }

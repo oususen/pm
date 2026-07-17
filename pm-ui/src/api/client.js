@@ -54,6 +54,7 @@ import { createIntegratedChecksheetsAPI } from './resources/integratedChecksheet
 import { createOvertimeAPI } from './resources/overtime'
 import { createBrakeLineActualsAPI } from './resources/brakeLineActuals'
 import { createSpotLineActualsAPI } from './resources/spotLineActuals'
+import { createManualDocumentsAPI } from './resources/manualDocuments'
 import { createSystemSettingsAPI } from './resources/systemSettings'
 import { createGanttDisplayProductMapsAPI } from './resources/ganttDisplayProductMaps'
 import { createLineProductDisplayOrdersAPI } from './resources/lineProductDisplayOrders'
@@ -200,6 +201,7 @@ export default {
   overtime: createOvertimeAPI(client),
   brakeLineActuals: createBrakeLineActualsAPI(client),
   spotLineActuals: createSpotLineActualsAPI(client),
+  manualDocuments: createManualDocumentsAPI(client),
   systemSettings: createSystemSettingsAPI(client),
   ganttDisplayProductMaps: createGanttDisplayProductMapsAPI(client),
   lineProductDisplayOrders: createLineProductDisplayOrdersAPI(client),
