@@ -298,13 +298,17 @@ const props = defineProps({
 });
 
 const dsSources = computed(() => {
-  const isStock = ['STOCK', 'PLANNED_STOCK'].includes(props.adjustType)
-  const table = isStock ? 't_stock_adjustment' : 't_progress_adjustment'
-  const desc = isStock ? '在庫調整値' : '進度調整値'
+  const descMap = {
+    STOCK: '在庫調整値',
+    PLANNED_STOCK: '計画在庫調整値',
+    PROGRESS: '進度調整値',
+    PLANNED_PROGRESS: '計画進度調整値',
+  }
+  const desc = descMap[props.adjustType] || '調整値'
   return [
-    { op: '読み書き', table, desc },
-    { op: '読み取り', table: 'line_backlog', desc: '在庫・計画データ参照' },
-    { op: '読み取り', table: 'line_demand', desc: '需要データ参照' },
+    { op: '読み書き', table: 'production_line_backlog_adjustment', desc },
+    { op: '読み取り', table: 'line_backlog', desc: '在庫・進度・計画データ参照' },
+    { op: '読み取り', table: 't_line_demand', desc: '需要データ参照' },
   ]
 })
 
@@ -492,9 +496,27 @@ const setProcessCandidates = (items = []) => {
   processCandidates.value = items;
   if (!items.length) {
     selectedProcessKey.value = "";
+    form.processOrder = 10;
+    form.processId = null;
+    form.processCode = "";
+    form.processName = "";
+    form.lineId = null;
+    form.lineCode = "";
+    form.lineName = "";
     return;
   }
-  applyProcessToForm(items[0]);
+  if (items.length === 1) {
+    applyProcessToForm(items[0]);
+    return;
+  }
+  selectedProcessKey.value = "";
+  form.processOrder = 10;
+  form.processId = null;
+  form.processCode = "";
+  form.processName = "";
+  form.lineId = null;
+  form.lineCode = "";
+  form.lineName = "";
 };
 
 const resolveLineIdByCode = async (lineCode) => {
@@ -696,6 +718,13 @@ const resolveByProductCode = async () => {
       });
       if (unique.length) {
         setProcessCandidates(unique);
+        if (unique.length > 1) {
+          metricsByDate.value = {};
+          rowsByDate.value = {};
+          buildRows();
+          alert("この品番は複数工程があります。左側一覧から調整したい工程を選択してください。");
+          return;
+        }
         await reload();
         return;
       }
@@ -825,6 +854,13 @@ const resolveByProductCode = async () => {
       if (!uniq.has(x.key)) uniq.set(x.key, x);
     });
     setProcessCandidates(Array.from(uniq.values()).sort((a, b) => a.stepNo - b.stepNo));
+    if (processCandidates.value.length > 1) {
+      metricsByDate.value = {};
+      rowsByDate.value = {};
+      buildRows();
+      alert("この品番は複数工程があります。左側一覧から調整したい工程を選択してください。");
+      return;
+    }
 
     await reload();
   } catch (e) {
@@ -913,6 +949,11 @@ const guideActualWord = props.adjustType === "STOCK" ? "実在庫" : props.adjus
 const reload = async () => {
   loading.value = true;
   try {
+    if (form.productId && processCandidates.value.length > 1 && !form.processId) {
+      metricsByDate.value = {};
+      systemStockToday.value = null;
+      return;
+    }
     if (!form.lineId && form.lineCode) {
       form.lineId = await resolveLineIdByCode(form.lineCode);
     }
