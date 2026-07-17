@@ -14,6 +14,7 @@
           <tr>
             <th>便名</th>
             <th>俗称</th>
+            <th>同一車両キー</th>
             <th>荷台幅(mm)</th>
             <th>荷台奥行(mm)</th>
             <th>荷台高さ(mm)</th>
@@ -31,6 +32,7 @@
           <tr v-for="truck in trucks" :key="truck.id">
             <td>{{ truck.name }}</td>
             <td>{{ truck.alias_name || '' }}</td>
+            <td>{{ truck.physical_truck_code || '' }}</td>
             <td>{{ truck.width }}</td>
             <td>{{ truck.depth }}</td>
             <td>{{ truck.height }}</td>
@@ -65,6 +67,10 @@
           <div class="form-group">
             <label>俗称</label>
             <input v-model.trim="formData.alias_name" :disabled="!canEdit" />
+          </div>
+          <div class="form-group">
+            <label>同一車両キー</label>
+            <input v-model.trim="formData.physical_truck_code" :disabled="!canEdit" placeholder="例: TRUCK_13" />
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -153,6 +159,7 @@ const createEmptyForm = () => ({
   id: null,
   name: '',
   alias_name: '',
+  physical_truck_code: '',
   width: 2400,
   depth: 9000,
   height: 2400,
@@ -207,6 +214,7 @@ const editTruck = (truck) => {
     departure_time: formatTime(truck.departure_time),
     arrival_time: formatTime(truck.arrival_time),
     notes: truck.notes || '',
+    physical_truck_code: truck.physical_truck_code || '',
   }
   showDialog.value = true
 }
@@ -227,6 +235,7 @@ const saveTruck = async () => {
     display_order: Number(formData.value.display_order || 0),
     notes: formData.value.notes || null,
     alias_name: formData.value.alias_name || null,
+    physical_truck_code: formData.value.physical_truck_code || null,
   }
 
   try {
@@ -334,4 +343,3 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 </style>
-

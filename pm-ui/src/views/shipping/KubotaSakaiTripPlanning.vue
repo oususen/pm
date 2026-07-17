@@ -471,7 +471,7 @@
                           <td v-if="lineIdx === 0" class="daily-load-truck" :rowspan="block.lines.length">
                             <div class="daily-load-truck-line">
                               <span>{{ block.truckLabel }}</span>
-                              <span class="daily-load-truck-occ">{{ truckOccupancyLabelById(block.occupancyDateKey, block.truckId) }}</span>
+                              <span class="daily-load-truck-occ">{{ truckDepartureOccupancyLabelById(block.occupancyDateKey, block.truckId) }}</span>
                             </div>
                           </td>
                           <td class="daily-load-product">
@@ -659,7 +659,9 @@ const exportingPickupPdf = ref(false)
 const assignmentDeadlineDays = ref(3)
 const trucksByDate = ref({})
 const summaryByDate = ref({})
+const departureSummaryByDate = ref({})
 const previewSummaryByDate = ref({})
+const previewDepartureSummaryByDate = ref({})
 const mergedRows = ref([])
 const productContainersMap = ref({})
 const previewTimers = new Map()
@@ -875,12 +877,20 @@ const truckNameAt = (dateKey, slotIdx) => {
   return truckDisplayName(truck) || `便${slotIdx + 1}`
 }
 
+const topOccupancySummaryDateKey = (dateKey, truck) => {
+  if (!dateKey || !truck) return dateKey
+  const offset = Math.max(0, Number(truck.arrival_day_offset || 0))
+  if (offset <= 0) return dateKey
+  return addBusinessDaysByCalendar(dateKey, -offset)
+}
+
 const truckOccupancyPercent = (dateKey, slotIdx) => {
   const truck = truckAt(dateKey, slotIdx)
   if (!truck) return 0
-  const previewSummary = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truck.id))
+  const summaryDateKey = topOccupancySummaryDateKey(dateKey, truck)
+  const previewSummary = (previewDepartureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(truck.id))
   if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
-  const savedSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truck.id))
+  const savedSummary = (departureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(truck.id))
   return parseNumber(savedSummary?.occupancy_percent)
 }
 
@@ -888,18 +898,30 @@ const truckOccupancyLabel = (dateKey, slotIdx) => `${truckOccupancyPercent(dateK
 const truckOccupancyPercentById = (dateKey, truckId) => {
   const normalizedTruckId = Number(truckId)
   if (!dateKey || !normalizedTruckId) return 0
-  const previewSummary = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
+  const truck = (trucksByDate.value[dateKey] || []).find((item) => Number(item.id) === normalizedTruckId)
+  const summaryDateKey = topOccupancySummaryDateKey(dateKey, truck)
+  const previewSummary = (previewDepartureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
   if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
-  const savedSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
+  const savedSummary = (departureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
   return parseNumber(savedSummary?.occupancy_percent)
 }
 const truckOccupancyLabelById = (dateKey, truckId) => `${truckOccupancyPercentById(dateKey, truckId)}`
+const truckDepartureOccupancyPercentById = (dateKey, truckId) => {
+  const normalizedTruckId = Number(truckId)
+  if (!dateKey || !normalizedTruckId) return 0
+  const previewSummary = (previewDepartureSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
+  if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
+  const savedSummary = (departureSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === normalizedTruckId)
+  return parseNumber(savedSummary?.occupancy_percent)
+}
+const truckDepartureOccupancyLabelById = (dateKey, truckId) => `${truckDepartureOccupancyPercentById(dateKey, truckId)}`
 const pseudoTruckOccupancyPercent = (dateKey, type) => {
   const pseudoTruck = (trucksByDate.value[dateKey] || []).find((truck) => isPseudoTruckType(truck, type))
   if (!pseudoTruck) return 0
-  const previewSummary = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
+  const summaryDateKey = topOccupancySummaryDateKey(dateKey, pseudoTruck)
+  const previewSummary = (previewDepartureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
   if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
-  const savedSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
+  const savedSummary = (departureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
   return parseNumber(savedSummary?.occupancy_percent)
 }
 
@@ -947,7 +969,7 @@ const loadBlocksByDate = computed(() => {
           const displayDateKey = getLoadDetailDateKey(dateKey, truck)
           const bucket = getBucket(displayDateKey, truck)
           if (!bucket) return
-          if (!bucket.occupancyDateKey) bucket.occupancyDateKey = dateKey
+          if (!bucket.occupancyDateKey) bucket.occupancyDateKey = displayDateKey
           const productKey = `${row.product_code}||${row.ship_to_code || ''}`
           const existing = bucket.products.get(productKey)
           if (existing) {
@@ -1031,9 +1053,14 @@ const previewLoadForDate = async (dateKey) => {
   try {
     const res = await api.kubotaSakaiTripAssignments.previewLoad(dateKey, payloadRows)
     const summaries = Array.isArray(res.data?.truck_summaries) ? res.data.truck_summaries : []
+    const departureSummariesByDate = res.data?.departure_truck_summaries_by_date || {}
     previewSummaryByDate.value = {
       ...previewSummaryByDate.value,
       [dateKey]: summaries,
+    }
+    previewDepartureSummaryByDate.value = {
+      ...previewDepartureSummaryByDate.value,
+      ...departureSummariesByDate,
     }
   } catch (error) {
     console.warn('便占有率プレビュー取得失敗', error)
@@ -1176,6 +1203,7 @@ const loadGrid = async () => {
     )
     const nextTrucksByDate = {}
     const nextSummaryByDate = {}
+    const nextDepartureSummaryByDate = {}
     const nextHolidayByDate = {}
     const nextProgressByDate = {}
     const nextProductContainers = {}
@@ -1186,9 +1214,11 @@ const loadGrid = async () => {
       const dateKey = allDateKeys.value[idx]
       const trucks = Array.isArray(res.data?.trucks) ? res.data.trucks : []
       const summaries = Array.isArray(res.data?.truck_summaries) ? res.data.truck_summaries : []
+      const departureSummaries = Array.isArray(res.data?.departure_truck_summaries) ? res.data.departure_truck_summaries : []
       const payloadRows = Array.isArray(res.data?.rows) ? res.data.rows : []
       nextTrucksByDate[dateKey] = trucks
       nextSummaryByDate[dateKey] = summaries
+      nextDepartureSummaryByDate[dateKey] = departureSummaries
       nextHolidayByDate[dateKey] = Boolean(res.data?.is_holiday)
       maxDeadline = Math.max(maxDeadline, Number(res.data?.assignment_deadline_days || 3))
       if (res.data?.last_adjusted_at) lastAdjustedAt.value = res.data.last_adjusted_at
@@ -1254,11 +1284,13 @@ const loadGrid = async () => {
 
     trucksByDate.value = nextTrucksByDate
     summaryByDate.value = nextSummaryByDate
+    departureSummaryByDate.value = nextDepartureSummaryByDate
     productContainersMap.value = nextProductContainers
     holidayByDate.value = nextHolidayByDate
     progressByDate.value = nextProgressByDate
     progressAdjustEdits.value = {}
     previewSummaryByDate.value = {}
+    previewDepartureSummaryByDate.value = {}
     assignmentDeadlineDays.value = maxDeadline
     mergedRows.value = sortTripPlanningRows(rows)
     await refreshAllPreview()
@@ -1471,7 +1503,7 @@ const validateBeforeSave = () => {
   const overloadedSet = new Set()
 
   for (const dateKey of allDateKeys.value) {
-    const previewList = previewSummaryByDate.value[dateKey] || summaryByDate.value[dateKey] || []
+    const previewList = previewDepartureSummaryByDate.value[dateKey] || departureSummaryByDate.value[dateKey] || []
     for (const row of mergedRows.value) {
       for (const entry of entriesAt(row, dateKey)) {
         const deliveryQty = parseIntegerQty(entry?.delivery_qty)
@@ -1702,9 +1734,9 @@ const autoAssignTrips = async () => {
     }
 
     const getOccupancy = (dateKey, truckId) => {
-      const preview = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
+      const preview = (previewDepartureSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
       if (preview) return parseNumber(preview.occupancy_percent)
-      const saved = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
+      const saved = (departureSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
       return parseNumber(saved?.occupancy_percent)
     }
 
