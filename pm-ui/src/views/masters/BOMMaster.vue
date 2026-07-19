@@ -318,6 +318,53 @@
         </div>
 
         <h3>構成品目</h3>
+        <div v-if="showDeleteImpactDialog" class="details-section delete-impact-panel">
+          <h4>BOM明細削除の確認</h4>
+          <p class="warning-text">{{ deleteImpactPreview.warning_message }}</p>
+          <p>
+            対象:
+            <strong>{{ deleteImpactPreview.child_product_code }}</strong>
+            <span v-if="deleteImpactPreview.child_product_name"> - {{ deleteImpactPreview.child_product_name }}</span>
+          </p>
+          <p>影響ステップ数: {{ deleteImpactPreview.affected_steps_count || 0 }}</p>
+
+          <div v-if="deleteImpactPreview.affected_steps?.length" class="tree-grid-container">
+            <table class="tree-grid delete-impact-table">
+              <thead>
+                <tr>
+                  <th>ルーティング</th>
+                  <th>親製品</th>
+                  <th>Step</th>
+                  <th>工程</th>
+                  <th>ライン</th>
+                  <th>外作先</th>
+                  <th>判定</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="step in deleteImpactPreview.affected_steps" :key="step.id">
+                  <td>{{ step.routing_code }}</td>
+                  <td>{{ step.routing_product_code }}</td>
+                  <td>{{ step.step_no }} / PG{{ step.parallel_group }}</td>
+                  <td>{{ step.process_code }}<span v-if="step.process_name"> - {{ step.process_name }}</span></td>
+                  <td>{{ step.line_code }}<span v-if="step.line_name"> - {{ step.line_name }}</span></td>
+                  <td>{{ step.supplier_name || '-' }}</td>
+                  <td>{{ formatDeleteImpactMatchType(step.match_type) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="hint-text">関連ルーティング工程は検出されませんでした。</p>
+
+          <div class="form-actions">
+            <button type="button" class="btn-danger" @click="confirmDeleteBOMItem" :disabled="deleteImpactDeleting">
+              {{ deleteImpactDeleting ? '削除中...' : '理解して削除する' }}
+            </button>
+            <button type="button" class="btn-secondary" @click="closeDeleteImpactDialog" :disabled="deleteImpactDeleting">
+              キャンセル
+            </button>
+          </div>
+        </div>
         <div class="item-form">
           <div class="form-row">
             <div class="form-group">
@@ -848,6 +895,10 @@ const bomImporting = ref(false)
 const bomChecking = ref(false)
 const bomImportUseExistingDuplicates = ref(false)
 const bomImportFile = ref(null)
+const showDeleteImpactDialog = ref(false)
+const deleteImpactPreview = ref({ affected_steps: [] })
+const deleteImpactTargetId = ref(null)
+const deleteImpactDeleting = ref(false)
 const bomImportForm = ref({
   version: 'v1',
   completed_product_code: '',
@@ -1013,6 +1064,12 @@ const sourcingTypeOptions = [
   { value: 'BUY', label: '購買' },
   { value: 'SUBCON', label: '外作品' }
 ]
+
+const formatDeleteImpactMatchType = (matchType) => {
+  if (matchType === 'source_bom_item') return 'BOM紐付'
+  if (matchType === 'fallback') return '推定一致'
+  return '-'
+}
 
 const resetFilters = () => {
   filters.value = {
@@ -2320,13 +2377,38 @@ const saveBOMItem = async () => {
 
 const deleteBOMItem = async (id) => {
   if (!canEdit.value) return
-  if (!confirm('この明細を削除しますか？')) return
   try {
-    await api.boms.deleteBOMItem(id)
+    const res = await api.boms.getBOMItemDeletePreview(id)
+    deleteImpactPreview.value = res.data || { affected_steps: [] }
+    deleteImpactTargetId.value = id
+    showDeleteImpactDialog.value = true
+  } catch (error) {
+    console.error('明細削除プレビュー取得エラー:', error)
+    alert('削除影響の取得に失敗しました')
+  }
+}
+
+const closeDeleteImpactDialog = () => {
+  if (deleteImpactDeleting.value) return
+  showDeleteImpactDialog.value = false
+  deleteImpactTargetId.value = null
+  deleteImpactPreview.value = { affected_steps: [] }
+}
+
+const confirmDeleteBOMItem = async () => {
+  if (!deleteImpactTargetId.value) return
+  deleteImpactDeleting.value = true
+  try {
+    await api.boms.deleteBOMItem(deleteImpactTargetId.value)
+    deleteImpactDeleting.value = false
+    closeDeleteImpactDialog()
     await fetchBOMItems(selectedBOM.value.id)
+    await fetchBOMTree(selectedBOM.value.id)
   } catch (error) {
     console.error('明細削除エラー:', error)
     alert('明細の削除に失敗しました')
+  } finally {
+    deleteImpactDeleting.value = false
   }
 }
 
@@ -2561,6 +2643,22 @@ const TreeBranch = defineComponent({
   margin: 0.5rem 0;
 }
 
+.warning-text {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.delete-impact-panel {
+  border: 1px solid #f3b7b7;
+  background: #fff6f6;
+}
+
+.delete-impact-panel h4 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: #7a271a;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2632,6 +2730,11 @@ const TreeBranch = defineComponent({
 .tree-grid th {
   background: #eef5ff;
   text-align: left;
+}
+
+.delete-impact-table th,
+.delete-impact-table td {
+  white-space: nowrap;
 }
 
 .level-col {

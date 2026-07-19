@@ -1296,9 +1296,23 @@ const showInventoryRangeSetting = (taskName) =>
 const configKey = (cfg) => `${cfg.task_name}-${cfg.line || 'none'}-${cfg.process || 'none'}-${cfg.id || cfg.temp_key || 'new'}`
 const isRunningStatus = (cfg) => cfg?.last_run_status === 'RUNNING'
 const isCancelRequested = (cfg) => (cfg?.last_run_message || '').includes('[CANCEL_REQUESTED]')
+const isStaleCancelRequestedRun = (cfg) => {
+  if (!isRunningStatus(cfg) || !isCancelRequested(cfg) || !cfg?.last_run_at) return false
+  const lastRun = new Date(cfg.last_run_at)
+  const now = new Date()
+  return (
+    lastRun.getFullYear() !== now.getFullYear()
+    || lastRun.getMonth() !== now.getMonth()
+    || lastRun.getDate() !== now.getDate()
+  )
+}
 const canCancelTask = (cfg) => inventoryTaskOrder.includes(cfg?.task_name)
-const isRunNowDisabled = (cfg) => !cfg || !cfg.id || !canEdit.value || running.has(configKey(cfg)) || isRunningStatus(cfg)
-const runNowLabel = (cfg) => (running.has(configKey(cfg)) || isRunningStatus(cfg) ? '実行中...' : '今すぐ実行')
+const isRunNowDisabled = (cfg) => !cfg || !cfg.id || !canEdit.value || running.has(configKey(cfg)) || (isRunningStatus(cfg) && !isStaleCancelRequestedRun(cfg))
+const runNowLabel = (cfg) => {
+  if (running.has(configKey(cfg))) return '実行中...'
+  if (isRunningStatus(cfg) && !isStaleCancelRequestedRun(cfg)) return '実行中...'
+  return '今すぐ実行'
+}
 const openManual = () => {
   window.open(`/manual?path=${encodeURIComponent('設定/定時タスク設定.md')}`, '_blank')
 }
@@ -1495,7 +1509,7 @@ const stopPolling = () => {
 
 const runNow = async (cfg) => {
   if (!canEdit.value) return
-  if (isRunningStatus(cfg)) {
+  if (isRunningStatus(cfg) && !isStaleCancelRequestedRun(cfg)) {
     alert('既に実行中です。必要なら「キャンセル要求」を実行してください。')
     return
   }

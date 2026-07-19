@@ -3522,6 +3522,52 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if changed_fields:
                 step.save(update_fields=changed_fields + ['updated_at'])
 
+    def _build_delete_preview(self, bom_item: BOMItem):
+        steps = self._select_sync_target_steps(bom_item).select_related(
+            'routing__product', 'process', 'line', 'supplier', 'source_bom_item'
+        ).order_by('routing_id', 'step_no', 'parallel_group', 'id')
+
+        affected_steps = []
+        for step in steps:
+            match_type = 'source_bom_item' if step.source_bom_item_id == bom_item.id else 'fallback'
+            affected_steps.append({
+                'id': step.id,
+                'routing_id': step.routing_id,
+                'routing_code': getattr(step.routing, 'routing_code', '') if step.routing_id else '',
+                'routing_product_code': (
+                    getattr(getattr(step.routing, 'product', None), 'product_code', '')
+                    if step.routing_id else ''
+                ),
+                'step_no': step.step_no,
+                'parallel_group': step.parallel_group,
+                'process_code': getattr(step.process, 'process_code', '') if step.process_id else '',
+                'process_name': getattr(step.process, 'process_name', '') if step.process_id else '',
+                'line_code': getattr(step.line, 'line_code', '') if step.line_id else '',
+                'line_name': getattr(step.line, 'line_name', '') if step.line_id else '',
+                'supplier_name': getattr(step.supplier, 'supplier_name', '') if step.supplier_id else '',
+                'output_product_code': getattr(step.output_product, 'product_code', '') if step.output_product_id else '',
+                'match_type': match_type,
+            })
+
+        return {
+            'bom_item_id': bom_item.id,
+            'child_product_code': getattr(getattr(bom_item, 'child_product', None), 'product_code', ''),
+            'child_product_name': getattr(getattr(bom_item, 'child_product', None), 'product_name', ''),
+            'affected_steps_count': len(affected_steps),
+            'affected_steps': affected_steps,
+            'warning_message': (
+                'このBOM明細を削除しても、関連ルーティング工程は自動削除されません。'
+                ' 下記のルーティングを手動で確認・修正してください。'
+                if affected_steps else
+                'このBOM明細に紐づくルーティング工程は検出されませんでした。'
+            ),
+        }
+
+    @action(detail=True, methods=['get'], url_path='delete_preview')
+    def delete_preview(self, request, pk=None):
+        bom_item = self.get_object()
+        return Response(self._build_delete_preview(bom_item))
+
     def perform_update(self, serializer):
         if 'child_product' in serializer.validated_data:
             child_product = serializer.validated_data['child_product']

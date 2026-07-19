@@ -90,6 +90,16 @@ INVALID_SEQUENCE_SORT_VALUE = 10 ** 9
 KUBOTA_DELIVERY_LABELS = ('L3102', 'KUBOTA_DELIVERY', 'クボタ配送')
 
 
+def _is_stale_cancel_requested_run(config):
+    if not config or getattr(config, 'last_run_status', None) != 'RUNNING':
+        return False
+    message = str(getattr(config, 'last_run_message', '') or '')
+    last_run_at = getattr(config, 'last_run_at', None)
+    if '[CANCEL_REQUESTED]' not in message or not last_run_at:
+        return False
+    return last_run_at.date() < datetime.now().date()
+
+
 def _parse_optional_date(value):
     if value is None:
         return None
@@ -7492,18 +7502,26 @@ class ScheduleRunNowView(APIView):
                     result = run_auto_plan(force=True)
                 return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
             elif task in task_labels:
-                # 二重実行防止: RUNNING中は常に拒否（自動タイムアウト解除はしない）
+                # 二重実行防止。
+                # ただし、前日以前に開始されキャンセル要求済みの RUNNING は残留状態とみなし解放する。
                 running_cfg = ScheduleConfig.objects.filter(
                     task_name=task,
                     last_run_status='RUNNING',
                 ).first()
                 if running_cfg:
-                    running_msg = running_cfg.last_run_message or ''
-                    if '[CANCEL_REQUESTED]' in running_msg:
-                        detail = '既にキャンセル要求済みの実行が停止待ちです。完了までお待ちください。'
+                    if _is_stale_cancel_requested_run(running_cfg):
+                        stale_message = (running_cfg.last_run_message or '').strip()
+                        stale_message = (stale_message + '\n' if stale_message else '') + '前日以前のキャンセル要求済み実行を残留扱いで解放しました。'
+                        running_cfg.last_run_status = 'FAILED'
+                        running_cfg.last_run_message = stale_message
+                        running_cfg.save(update_fields=['last_run_status', 'last_run_message'])
                     else:
-                        detail = '既に実行中です。完了までお待ちください。必要なら「キャンセル要求」を実行してください。'
-                    return Response({'detail': detail}, status=status.HTTP_409_CONFLICT)
+                        running_msg = running_cfg.last_run_message or ''
+                        if '[CANCEL_REQUESTED]' in running_msg:
+                            detail = '既にキャンセル要求済みの実行が停止待ちです。完了までお待ちください。'
+                        else:
+                            detail = '既に実行中です。完了までお待ちください。必要なら「キャンセル要求」を実行してください。'
+                        return Response({'detail': detail}, status=status.HTTP_409_CONFLICT)
 
                 # バックグラウンドスレッドで実行
                 def _run():
