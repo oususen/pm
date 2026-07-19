@@ -52,6 +52,8 @@ def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, 
         today,
         include_stock_anchor=False,
         include_lt_anchor=True,
+        product_ids=product_ids,
+        use_cumulative_lt=True,
     )
     recalc_result = recalculate_inventory_for_line(
         line_id=line.id,

@@ -1695,41 +1695,43 @@ def recalculate_inventory_for_line(
         len(target_product_ids) if target_product_ids else "ALL",
     )
 
-    if not progress_only:
-        # まず仕損数を集計
-        scrap_start = time.perf_counter()
-        aggregate_scrap_to_backlog(
-            line_id,
-            start_date,
-            end_date,
-            product_ids=target_product_ids or None,
-        )
-        logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
-
-        demand_start = time.perf_counter()
-        demand_map = _build_demand_map(line_id, start_date, end_date)
-        logger.info("需要マップ作成時間: %.3fs", time.perf_counter() - demand_start)
-    else:
-        demand_map = {}
-
-    adj_start = start_date
-    if progress_calc_start_date and progress_calc_start_date < start_date:
-        adj_start = progress_calc_start_date
-    adjustment_maps = _build_adjustment_maps(
-        line_id,
-        adj_start,
-        end_date,
-        product_ids=target_product_ids or None,
-    )
     shared_calendar_id = _resolve_line_calendar_id(line_id) if line_id else None
     shared_workday_cache = {}
-    max_parent_lt_cache = {}
-    recalculate_progress_qty = None
-    if include_progress:
-        from .progress_calculator import recalculate_progress_qty as _recalculate_progress_qty
-        recalculate_progress_qty = _recalculate_progress_qty
 
-    # 製品ごとに在庫計算
+    def is_working_day(target_date):
+        if not shared_calendar_id:
+            return target_date.weekday() < 5
+        if target_date in shared_workday_cache:
+            return shared_workday_cache[target_date]
+        from masters.models import CalendarDay
+        cal = CalendarDay.objects.filter(
+            calendar_id=shared_calendar_id,
+            target_date=target_date,
+        ).first()
+        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
+        shared_workday_cache[target_date] = is_work
+        return is_work
+
+    def get_prev_working_day(target_date):
+        prev_date = target_date - timedelta(days=1)
+        while not is_working_day(prev_date):
+            prev_date = prev_date - timedelta(days=1)
+        return prev_date
+
+    def shift_working_days(target_date, days):
+        if not days:
+            return target_date
+        if not shared_calendar_id:
+            return target_date + timedelta(days=days)
+        step = 1 if days > 0 else -1
+        remaining = abs(int(days))
+        current = target_date
+        while remaining > 0:
+            current = current + timedelta(days=step)
+            if is_working_day(current):
+                remaining -= 1
+        return current
+
     product_qs = LineBacklog.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date]
@@ -1742,14 +1744,71 @@ def recalculate_inventory_for_line(
 
     logger.info(f"対象製品数: {len(product_ids)}")
 
+    direct_lt_cache = {}
+    max_parent_lt_cache = {}
+    inventory_calc_start_date = start_date
+    if not progress_only and product_ids:
+        calc_today = get_business_today()
+        if not is_working_day(calc_today):
+            calc_today = get_prev_working_day(calc_today)
+        for product_id in product_ids:
+            direct_lt = _get_direct_parent_bom_lead_time(product_id)
+            direct_lt_cache[product_id] = direct_lt
+        max_direct_lt = max((int(direct_lt_cache.get(pid) or 0) for pid in product_ids), default=0)
+        inventory_calc_start_date = min(
+            start_date,
+            shift_working_days(calc_today, -(max_direct_lt + 1)),
+        )
+
+    progress_anchor_start_date = progress_calc_start_date or start_date
+    if include_progress and not progress_calc_start_date and product_ids:
+        calc_today = get_business_today()
+        if not is_working_day(calc_today):
+            calc_today = get_prev_working_day(calc_today)
+        for product_id in product_ids:
+            max_parent_lt = _get_max_parent_bom_lead_time(product_id)
+            max_parent_lt_cache[product_id] = max_parent_lt
+        max_cumulative_lt = max((int(max_parent_lt_cache.get(pid) or 0) for pid in product_ids), default=0)
+        progress_anchor_start_date = min(
+            start_date,
+            shift_working_days(calc_today, -(max_cumulative_lt + 1)),
+        )
+
+    if not progress_only:
+        # まず仕損数を集計
+        scrap_start = time.perf_counter()
+        aggregate_scrap_to_backlog(
+            line_id,
+            start_date,
+            end_date,
+            product_ids=target_product_ids or None,
+        )
+        logger.info("仕損集計時間: %.3fs", time.perf_counter() - scrap_start)
+
+        demand_start = time.perf_counter()
+        demand_map = _build_demand_map(line_id, inventory_calc_start_date, end_date)
+        logger.info("需要マップ作成時間: %.3fs", time.perf_counter() - demand_start)
+    else:
+        demand_map = {}
+
+    adj_start = min(start_date, inventory_calc_start_date, progress_anchor_start_date)
+    adjustment_maps = _build_adjustment_maps(
+        line_id,
+        adj_start,
+        end_date,
+        product_ids=target_product_ids or None,
+    )
+    recalculate_progress_qty = None
+    if include_progress:
+        from .progress_calculator import recalculate_progress_qty as _recalculate_progress_qty
+        recalculate_progress_qty = _recalculate_progress_qty
+
     stock_total = 0.0
     planned_total = 0.0
     progress_total = 0.0
     stock_max = (0.0, None)
     planned_max = (0.0, None)
     progress_max = (0.0, None)
-
-    direct_lt_cache = {}
 
     for product_id in product_ids:
         logger.info(f"製品ID {product_id} の在庫計算中...")
