@@ -6,6 +6,7 @@
         <p class="helper-text">顧客需要 × ラインサイクルタイムからライン別の負荷率を表示</p>
       </div>
       <div class="page-actions">
+        <button v-if="result" class="btn-secondary" @click="exportExcel">Excel出力</button>
         <router-link to="/production/line-cycle-time" class="btn-secondary">サイクルタイム入力</router-link>
       </div>
     </div>
@@ -131,6 +132,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 
 const loading = ref(false)
@@ -271,6 +273,72 @@ const showTooltip = (ev, label, d) => {
 }
 
 const hideTooltip = () => { tooltip.visible = false }
+
+const exportExcel = () => {
+  if (!result.value) return
+  const wb = XLSX.utils.book_new()
+
+  // グループ集計シート
+  for (const gc of groupCharts.value) {
+    const rows = [['日付', '稼働(分)', '負荷(分)', '負荷率(%)']]
+    for (const d of gc.data) {
+      rows.push([d.month_label || d.week_label || d.date, d.available_min, d.line_load_min, d.utilization])
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }]
+    XLSX.utils.book_append_sheet(wb, ws, gc.groupName.slice(0, 31))
+  }
+
+  // ライン別シート（全ラインまとめ）
+  const dates = []
+  const dateSet = new Set()
+  for (const line of result.value.lines) {
+    for (const d of line.data) {
+      if (d.is_working_day && !dateSet.has(d.date)) {
+        dateSet.add(d.date)
+        dates.push(d)
+      }
+    }
+  }
+  dates.sort((a, b) => a.date.localeCompare(b.date))
+  const dateLabels = dates.map(d => d.month_label || d.week_label || d.date)
+
+  // 負荷率シート
+  const header = ['ライン', ...dateLabels]
+  const utilRows = [header]
+  for (const line of result.value.lines) {
+    const dateMap = {}
+    for (const d of line.data) { if (d.is_working_day) dateMap[d.date] = d }
+    const row = [`${line.line_code} ${line.line_name}`]
+    for (const d of dates) {
+      const val = dateMap[d.date]
+      row.push(val ? val.utilization : '')
+    }
+    utilRows.push(row)
+  }
+  const wsUtil = XLSX.utils.aoa_to_sheet(utilRows)
+  wsUtil['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
+  XLSX.utils.book_append_sheet(wb, wsUtil, '負荷率(%)')
+
+  // 負荷時間シート
+  const loadRows = [header]
+  for (const line of result.value.lines) {
+    const dateMap = {}
+    for (const d of line.data) { if (d.is_working_day) dateMap[d.date] = d }
+    const row = [`${line.line_code} ${line.line_name}`]
+    for (const d of dates) {
+      const val = dateMap[d.date]
+      row.push(val ? val.line_load_min : '')
+    }
+    loadRows.push(row)
+  }
+  const wsLoad = XLSX.utils.aoa_to_sheet(loadRows)
+  wsLoad['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
+  XLSX.utils.book_append_sheet(wb, wsLoad, '負荷(分)')
+
+  const agg = filters.aggregate === 'monthly' ? '月別' : filters.aggregate === 'weekly' ? '週別' : '日別'
+  XLSX.writeFile(wb, `長期負荷_${agg}_${filters.startDate}_${filters.endDate}.xlsx`)
+}
 </script>
 
 <style scoped>
