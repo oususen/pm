@@ -296,12 +296,24 @@ LOGGING = {
             'backupCount': 10,
             'formatter': 'verbose',
         },
+        'trace_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': str(LOG_DIR / 'production_trace.log'),
+            'maxBytes': 10 * 1024 * 1024,  # 10MB
+            'backupCount': 10,
+            'formatter': 'verbose',
+        },
     },
     'loggers': {
         'production': {
             'handlers': ['console', 'file'],
             'level': 'INFO',
             'propagate': True,
+        },
+        'production.trace': {
+            'handlers': ['console', 'trace_file'],
+            'level': 'INFO',
+            'propagate': False,
         },
     },
 }

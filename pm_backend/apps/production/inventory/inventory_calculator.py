@@ -12,7 +12,7 @@ from ..models_line_backlog import LineBacklog
 from ..models_line_backlog_adjustment import LineBacklogAdjustment
 from ..serializers_process_realtime import _resolve_product_process_line
 from .lead_time_utils import resolve_lead_days_for_step
-from .trace_debug import trace_log
+from .trace_debug import is_traced, trace_line_log, trace_log
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
 PLANNED_STOCK_CALC_RULES_KEY = 'production.planned_stock_calc_rules'
@@ -258,6 +258,15 @@ def _build_demand_map(line_id, start_date, end_date):
             demand_map[key] = firm + forecast
         else:
             demand_map[key] = firm if firm > 0 else forecast
+
+    traced_keys = [(product_id, plan_date) for (product_id, plan_date) in demand_map.keys() if is_traced(line_id, product_id)]
+    if traced_keys:
+        traced_qty = sum(Decimal(str(demand_map[key] or 0)) for key in traced_keys)
+        trace_line_log(
+            line_id,
+            start_date,
+            f'LineDemand取得: start={start_date}, end={end_date}, traced_keys={len(traced_keys)}, traced_qty={traced_qty}'
+        )
 
     return demand_map
 
@@ -1325,8 +1334,8 @@ def recalculate_stock_qty(
 
         trace_log(
             line_id, product_id, plan_date,
-            f'stock_qty計算: 前日在庫={prev_stock} + 実績={actual_total} - 出庫={actual_shipment} '
-            f'+ scrap調整={scrap_adjust_total} + 手動調整={stock_adjust} => stock_qty={stock_qty}'
+            f'在庫計算: 前日={prev_stock}, 当日実績={actual_total}, 当日出庫={actual_shipment}, '
+            f'scrap調整={scrap_adjust_total}, 手動調整={stock_adjust}, 結果={stock_qty}'
         )
 
         # 更新対象に追加
@@ -1537,8 +1546,8 @@ def recalculate_planned_stock_qty(
 
     trace_log(
         line_id, product_id, calc_start_date,
-        f'planned_stock_qty計算開始: calc_start_date={calc_start_date}, max_lt={max_lt}, '
-        f'初期planned={last_planned}, planned_anchor={"あり" if planned_anchor else "なし"}'
+        f'計画在庫計算開始: calc_start_date={calc_start_date}, max_lt={max_lt}, '
+        f'初期値={last_planned}, planned_anchor={"あり" if planned_anchor else "なし"}'
     )
 
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
@@ -1672,14 +1681,14 @@ def recalculate_planned_stock_qty(
         if plan_date < business_today:
             trace_log(
                 line_id, product_id, plan_date,
-                f'planned_stock_qty計算(過去日/実績ベース): 前日計画在庫={prev_planned} + 実績={actual_total} '
-                f'- 出庫={planned_shipment} + 手動調整={planned_stock_adjust} => planned_stock_qty={planned_stock}'
+                f'計画在庫計算(過去日/実績ベース): 前日={prev_planned}, 当日実績={actual_total}, '
+                f'当日出庫={planned_shipment}, 手動調整={planned_stock_adjust}, 結果={planned_stock}'
             )
         else:
             trace_log(
                 line_id, product_id, plan_date,
-                f'planned_stock_qty計算(当日以降/計画ベース): 前日計画在庫={prev_planned} + 計画={plan_total} '
-                f'- 出庫={planned_shipment} + 手動調整={planned_stock_adjust} => planned_stock_qty={planned_stock}'
+                f'計画在庫計算(当日以降/計画ベース): 前日={prev_planned}, 当日計画={plan_total}, '
+                f'当日出庫={planned_shipment}, 手動調整={planned_stock_adjust}, 結果={planned_stock}'
             )
 
     if backlogs_to_update:
@@ -1779,6 +1788,13 @@ def recalculate_inventory_for_line(
     if line_final_only:
         product_qs = product_qs.filter(product__is_line_final_product=True)
     product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
+    traced_product_ids = [product_id for product_id in product_ids if is_traced(line_id, product_id)]
+    if traced_product_ids:
+        trace_line_log(
+            line_id,
+            start_date,
+            f'{recalc_label}対象確認: start={start_date}, end={end_date}, 対象製品数={len(product_ids)}, traced_products={traced_product_ids}'
+        )
 
     logger.info(f"対象製品数: {len(product_ids)}")
 
@@ -1797,6 +1813,12 @@ def recalculate_inventory_for_line(
             start_date,
             shift_working_days(calc_today, -(max_direct_lt + 1)),
         )
+        if traced_product_ids:
+            trace_line_log(
+                line_id,
+                inventory_calc_start_date,
+                f'在庫計算開始日補正: 要求開始={start_date}, 実効開始={inventory_calc_start_date}, max_direct_lt={max_direct_lt}'
+            )
 
     progress_anchor_start_date = progress_calc_start_date or start_date
     if include_progress and not progress_calc_start_date and product_ids:
@@ -1811,6 +1833,12 @@ def recalculate_inventory_for_line(
             start_date,
             shift_working_days(calc_today, -(max_cumulative_lt + 1)),
         )
+        if traced_product_ids:
+            trace_line_log(
+                line_id,
+                progress_anchor_start_date,
+                f'進度計算開始日補正: 要求開始={start_date}, 実効開始={progress_anchor_start_date}, max_cumulative_lt={max_cumulative_lt}'
+            )
 
     if not progress_only:
         # まず仕損数を集計

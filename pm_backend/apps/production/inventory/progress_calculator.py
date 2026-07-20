@@ -218,6 +218,7 @@ def recalculate_progress_qty(
 
     demand_by_step = {}
     demand_by_product = {}
+    demand_row_count = 0
     if start_date and end_date:
         demand_qs = LineDemand.objects.filter(
             line_id=line_id,
@@ -229,6 +230,7 @@ def recalculate_progress_qty(
         else:
             demand_qs = demand_qs.filter(product_id=product_id)
 
+        demand_row_count = demand_qs.count()
         for demand in demand_qs:
             firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
             forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
@@ -242,8 +244,9 @@ def recalculate_progress_qty(
 
     trace_log(
         line_id, product_id, calc_start_date,
-        f'progress_qty計算開始: calc_start_date={calc_start_date}, 初期progress={last_progress}, '
-        f'初期planned_progress={last_planned_progress}'
+        f'進度計算開始: calc_start_date={calc_start_date}, effective_start={effective_start}, '
+        f'LineBacklog日数={len(by_date)}, LineDemand件数={demand_row_count}, 初期進度={last_progress}, '
+        f'初期計画進度={last_planned_progress}'
     )
 
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
@@ -353,12 +356,12 @@ def recalculate_progress_qty(
 
         trace_log(
             line_id, product_id, plan_date,
-            f'progress_qty計算: 前日進度={prev_progress} + 実績={actual_total} - 需要={progress_shipment} '
-            f'+ 手動調整={adjust_total} + scrap調整={scrap_adjust_total} + PROGRESS調整={progress_adjust} '
-            f'=> progress_qty={progress_qty} / '
-            f'planned_progress_qty: 前日計画進度={prev_planned_progress} + 計画生産={planned_production} '
-            f'- 需要={progress_shipment} + 調整合計={adjust_total + scrap_adjust_total + progress_adjust} '
-            f'=> planned_progress_qty={planned_progress_qty}'
+            f'進度計算: 前日進度={prev_progress}, 当日実績={actual_total}, 当日需要={progress_shipment}, '
+            f'手動調整={adjust_total}, scrap調整={scrap_adjust_total}, PROGRESS調整={progress_adjust}, '
+            f'結果進度={progress_qty} / '
+            f'計画進度計算: 前日計画進度={prev_planned_progress}, 当日計画生産={planned_production}, '
+            f'当日需要={progress_shipment}, 調整合計={adjust_total + scrap_adjust_total + progress_adjust}, '
+            f'結果計画進度={planned_progress_qty}'
         )
 
     if backlogs_to_update:

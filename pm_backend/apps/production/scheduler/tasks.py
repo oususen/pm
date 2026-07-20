@@ -11,6 +11,7 @@ from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
 
 from notifications.models import Notification
+from production.inventory.trace_debug import trace_line_code_log, trace_line_log
 
 logger = logging.getLogger('production')
 CANCEL_REQUEST_MARKER = '[CANCEL_REQUESTED]'
@@ -257,6 +258,11 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
         end_date = today + timedelta(days=45)
     start_date_str = str(start_date)
     end_date_str = str(end_date)
+    trace_line_code_log(
+        'L2200',
+        start_date,
+        f'{task_name}開始: today={today}, 開始日={start_date}, 終了日={end_date}, range_base={getattr(config, "range_base_day", None)}'
+    )
 
     errors = []
     pickup_count = 0
@@ -292,6 +298,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 if should_cancel(f'pickup前 line={line.line_code}'):
                     break
                 try:
+                    trace_line_log(line.id, start_date, f'pickup開始: line_code={line.line_code}, start={start_date}, end={end_date}')
                     logger.info(
                         f'[スケジューラ] pickup: ライン {line.line_code} ({line.line_name})'
                     )
@@ -320,6 +327,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                 if should_cancel(f'pickup_purchase前 line={line.line_code}'):
                     break
                 try:
+                    trace_line_log(line.id, start_date, f'pickup_purchase開始: line_code={line.line_code}, start={start_date}, end={end_date}')
                     logger.info(
                         f'[スケジューラ] pickup_purchase: line={line.line_code} ({line.line_name})'
                     )
@@ -358,6 +366,11 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     logger.info(
                         f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name}) '
                         f'要求開始={start_date} 実効開始={effective_start_date}'
+                    )
+                    trace_line_log(
+                        line.id,
+                        effective_start_date,
+                        f'在庫再計算開始: 要求開始={start_date}, 実効開始={effective_start_date}, 終了日={end_date}'
                     )
                     recalc_result = recalculate_inventory_for_line(
                         line_id=line.id,
@@ -399,6 +412,11 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     logger.info(
                         f'[スケジューラ] 進度再計算: ライン {line.line_code} ({line.line_name}) '
                         f'要求開始={start_date} 実効開始={line_effective_start_date}'
+                    )
+                    trace_line_log(
+                        line.id,
+                        line_effective_start_date,
+                        f'進度再計算開始: 要求開始={start_date}, 実効開始={line_effective_start_date}, 終了日={end_date}'
                     )
                     adjustment_maps = _build_adjustment_maps(line.id, line_effective_start_date, end_date)
                     products = (
@@ -493,6 +511,12 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
             f'[スケジューラ] 完了({task_name}): pickup={pickup_count}, purchase={purchase_count}, '
             f'recalc={recalc_count}, progress={progress_count}, canceled={canceled}, '
             f'{round(duration, 1)}秒, エラー={len(errors)}件'
+        )
+        trace_line_code_log(
+            'L2200',
+            start_date,
+            f'{task_name}終了: pickup={pickup_count}, purchase={purchase_count}, recalc={recalc_count}, '
+            f'progress={progress_count}, canceled={canceled}, errors={len(errors)}, duration={round(duration, 1)}秒'
         )
 
         if config and not success and config.notify_users.exists():
