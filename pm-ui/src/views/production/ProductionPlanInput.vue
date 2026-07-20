@@ -547,7 +547,7 @@
     <div class="load-section" v-if="showProcessLoad">
       <div class="process-header">
         <div class="process-title">工程別 日別負荷 分（H）</div>
-        <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} ? {{ endDate }}</div>
+        <div class="process-meta">ライン {{ selectedLine || '' }} ／ 期間 {{ startDate }} ? {{ endDate }} ／ ※工程ガントから集計</div>
       </div>
       <div class="load-body">
         <div v-if="processLoadLoading" class="load-message">読込中...</div>
