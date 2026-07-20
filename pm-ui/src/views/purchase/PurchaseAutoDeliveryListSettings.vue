@@ -151,7 +151,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
 import UserChipSelect from './UserChipSelect.vue'
 import ContactEmailSelect from './ContactEmailSelect.vue'
@@ -166,6 +166,7 @@ const showModal = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
 const running = reactive(new Set())
+const lastGeneratedEmailBody = ref('')
 
 const form = reactive({
   supplier_id: '',
@@ -199,7 +200,7 @@ const splitEmailLines = (text) => {
     .filter(Boolean)
 }
 
-const insertDefaultBody = () => {
+const buildDefaultBody = () => {
   const h = String(form.scheduled_hour).padStart(2, '0')
   const m = String(form.scheduled_minute).padStart(2, '0')
   const lt = form.lead_time_days || 2
@@ -215,6 +216,12 @@ const insertDefaultBody = () => {
     lines.push('')
     lines.push('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。')
     lines.push('')
+    if (form.send_progress_excel || form.send_progress_pdf) {
+      lines.push('進度表を添付しておりますのでご参照ください。')
+      lines.push('添付の進度表には確定情報および内示情報を記載しております。日々の生産活動のご参考としてご活用いただければ幸いです。')
+      lines.push('なお、進度情報につきましては目安としてご参照ください。')
+      lines.push('')
+    }
     lines.push(timing)
     lines.push(period)
     lines.push('')
@@ -222,25 +229,40 @@ const insertDefaultBody = () => {
   } else {
     lines.push('進度照会資料を送付いたします。')
     lines.push('')
-    lines.push('2026-07-22（木）より試運用として、自動送信を開始しております。')
+    lines.push('2026-07-21（火）より試運用として、自動送信を開始しております。')
     lines.push('')
     lines.push('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。')
     lines.push('')
+    if (form.send_progress_excel || form.send_progress_pdf) {
+      lines.push('進度表を添付しておりますのでご参照ください。')
+      lines.push('添付の進度表には確定情報および内示情報を記載しております。日々の生産活動のご参考としてご活用いただければ幸いです。')
+      lines.push('なお、進度情報につきましては目安としてご参照ください。')
+      lines.push('')
+    }
     lines.push(timing)
     lines.push(period)
-    lines.push('')
-    lines.push('添付の進度表には確定情報および内示情報を記載しております。日々の生産活動のご参考としてご活用いただければ幸いです。')
-    lines.push('なお、進度情報につきましては目安としてご参照ください。')
-  }
-  if (form.send_progress_excel || form.send_progress_pdf) {
-    lines.push('')
-    lines.push('進度表を添付しておりますのでご参照ください。')
   }
   if (form.send_delivery_note_pdf) {
     lines.push('')
     lines.push('外作納品書を添付しておりますのでご利用ください。')
   }
-  form.email_body_custom = lines.join('\n')
+  return lines.join('\n')
+}
+
+const applyDefaultBody = () => {
+  const body = buildDefaultBody()
+  form.email_body_custom = body
+  lastGeneratedEmailBody.value = body
+}
+
+const syncDefaultBodyIfAuto = () => {
+  if (!form.email_body_custom || form.email_body_custom === lastGeneratedEmailBody.value) {
+    applyDefaultBody()
+  }
+}
+
+const insertDefaultBody = () => {
+  applyDefaultBody()
 }
 
 const ccEmailList = computed({
@@ -308,6 +330,7 @@ const resetForm = () => {
   form.cc_emails = ''
   form.notify_on_failure_user_ids = []
   form.notify_on_non_delivery_user_ids = []
+  applyDefaultBody()
 }
 
 const openNew = () => {
@@ -336,8 +359,30 @@ const openEdit = (c) => {
   form.cc_emails = c.cc_emails || ''
   form.notify_on_failure_user_ids = [...(c.notify_on_failure_user_ids || [])]
   form.notify_on_non_delivery_user_ids = [...(c.notify_on_non_delivery_user_ids || [])]
+  if (form.email_body_custom) {
+    lastGeneratedEmailBody.value = ''
+  } else {
+    applyDefaultBody()
+  }
   showModal.value = true
 }
+
+watch(
+  () => [
+    form.send_delivery_list_excel,
+    form.send_progress_excel,
+    form.send_progress_pdf,
+    form.send_delivery_note_pdf,
+    form.scheduled_hour,
+    form.scheduled_minute,
+    form.lead_time_days,
+    form.progress_days_back,
+    form.progress_days_forward,
+  ],
+  () => {
+    syncDefaultBodyIfAuto()
+  }
+)
 
 const closeModal = () => {
   showModal.value = false
