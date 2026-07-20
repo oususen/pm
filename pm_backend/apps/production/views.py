@@ -91,6 +91,16 @@ INVALID_SEQUENCE_SORT_VALUE = 10 ** 9
 KUBOTA_DELIVERY_LABELS = ('L3102', 'KUBOTA_DELIVERY', 'クボタ配送')
 
 
+def _is_stale_cancel_requested_run(config):
+    if not config or getattr(config, 'last_run_status', None) != 'RUNNING':
+        return False
+    message = str(getattr(config, 'last_run_message', '') or '')
+    last_run_at = getattr(config, 'last_run_at', None)
+    if '[CANCEL_REQUESTED]' not in message or not last_run_at:
+        return False
+    return last_run_at.date() < datetime.now().date()
+
+
 def _parse_optional_date(value):
     if value is None:
         return None
@@ -2202,7 +2212,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             routing_source_q
         ).filter(
             Q(supplier_id=supplier_id) | Q(line_id=line_id)
-        ).select_related('routing', 'process')
+        ).select_related('routing', 'routing__product', 'output_product', 'process')
         if requested_product_ids:
             routing_steps = routing_steps.filter(output_product_id__in=requested_product_ids)
 
@@ -2218,6 +2228,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 source_parent_id = step.output_product_id
             child_id = step.output_product_id
             if not source_parent_id or not child_id:
+                continue
+
+            # 非最終品に対して最終品LineDemandを直接需要源にしない。
+            # ルーティング由来の直結で source_parent が最終品、child が非最終品の場合は
+            # parent_to_children に載せず、通常の親計画/BOM経由の需要だけを採用する。
+            source_parent = getattr(step.routing, 'product', None) if step.routing_id else None
+            child_product = getattr(step, 'output_product', None)
+            if (
+                source_parent
+                and child_product
+                and source_parent.is_final_product
+                and not child_product.is_final_product
+            ):
                 continue
 
             # SUBCON判定（G工程または外作フラグ）
@@ -7505,18 +7528,26 @@ class ScheduleRunNowView(APIView):
                     result = run_auto_plan(force=True)
                 return Response({'detail': '生産計画自動生成を実行しました', **(result or {})})
             elif task in task_labels:
-                # 二重実行防止: RUNNING中は常に拒否（自動タイムアウト解除はしない）
+                # 二重実行防止。
+                # ただし、前日以前に開始されキャンセル要求済みの RUNNING は残留状態とみなし解放する。
                 running_cfg = ScheduleConfig.objects.filter(
                     task_name=task,
                     last_run_status='RUNNING',
                 ).first()
                 if running_cfg:
-                    running_msg = running_cfg.last_run_message or ''
-                    if '[CANCEL_REQUESTED]' in running_msg:
-                        detail = '既にキャンセル要求済みの実行が停止待ちです。完了までお待ちください。'
+                    if _is_stale_cancel_requested_run(running_cfg):
+                        stale_message = (running_cfg.last_run_message or '').strip()
+                        stale_message = (stale_message + '\n' if stale_message else '') + '前日以前のキャンセル要求済み実行を残留扱いで解放しました。'
+                        running_cfg.last_run_status = 'FAILED'
+                        running_cfg.last_run_message = stale_message
+                        running_cfg.save(update_fields=['last_run_status', 'last_run_message'])
                     else:
-                        detail = '既に実行中です。完了までお待ちください。必要なら「キャンセル要求」を実行してください。'
-                    return Response({'detail': detail}, status=status.HTTP_409_CONFLICT)
+                        running_msg = running_cfg.last_run_message or ''
+                        if '[CANCEL_REQUESTED]' in running_msg:
+                            detail = '既にキャンセル要求済みの実行が停止待ちです。完了までお待ちください。'
+                        else:
+                            detail = '既に実行中です。完了までお待ちください。必要なら「キャンセル要求」を実行してください。'
+                        return Response({'detail': detail}, status=status.HTTP_409_CONFLICT)
 
                 # バックグラウンドスレッドで実行
                 def _run():

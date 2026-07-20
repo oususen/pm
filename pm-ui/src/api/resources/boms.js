@@ -90,6 +90,9 @@ export const createBomsAPI = (client) => ({
   updateBOMItem(id, data) {
     return client.put(`/bom-items/${id}/`, data)
   },
+  getBOMItemDeletePreview(id) {
+    return client.get(`/bom-items/${id}/delete_preview/`)
+  },
   deleteBOMItem(id) {
     return client.delete(`/bom-items/${id}/`)
   },

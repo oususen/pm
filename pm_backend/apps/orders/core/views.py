@@ -2127,6 +2127,19 @@ def order_first_article_setting_view(request):
     if request.method == 'GET':
         settings_data = _get_order_first_article_settings()
         settings_data['all_users'] = _user_list()
+        settings_data['notice_logs'] = [
+            {
+                'id': row.id,
+                'customer_code': row.customer.customer_code if row.customer else '',
+                'customer_name': row.customer.customer_name if row.customer else '',
+                'product_code': row.product_code,
+                'due_date': row.due_date.isoformat() if row.due_date else '',
+                'quantity': str(row.quantity),
+                'notified_at': row.notified_at.strftime('%Y-%m-%d %H:%M:%S') if row.notified_at else '',
+            }
+            for row in FirstArticleNoticeLog.objects.select_related('customer')
+            .order_by('-notified_at', '-id')[:100]
+        ]
         return Response(settings_data)
 
     days = request.data.get('days', DEFAULT_ORDER_FIRST_ARTICLE_DAYS)

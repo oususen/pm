@@ -37,6 +37,7 @@
             <td class="td-actions">
               <button class="btn-sm" @click="openEdit(c)">編集</button>
               <button class="btn-sm btn-run" :disabled="running.has(c.id)" @click="runNow(c)">{{ running.has(c.id) ? '実行中...' : '今すぐ実行' }}</button>
+              <button class="btn-sm btn-holiday" :disabled="running.has(c.id)" @click="runHolidayTrial(c)">休日トライ</button>
               <button class="btn-sm btn-danger" @click="remove(c)">削除</button>
             </td>
           </tr>
@@ -98,6 +99,15 @@
             <label class="checkbox-label"><input type="checkbox" v-model="form.send_progress_pdf" /> 進度表 PDF</label>
             <label class="checkbox-label"><input type="checkbox" v-model="form.send_delivery_note_pdf" /> 外作納品書 PDF</label>
           </div>
+        </div>
+
+        <div class="form-group">
+          <div class="label-row">
+            <label>メール本文（空欄の場合は自動生成）</label>
+            <button type="button" class="btn-sm btn-default-body" @click="insertDefaultBody">デフォルト本文を挿入</button>
+          </div>
+          <textarea v-model="form.email_body_custom" rows="8" class="input-full" placeholder="空欄の場合、送信ファイルに応じた本文が自動生成されます"></textarea>
+          <div class="hint">※ 宛名（○○ 御中）と署名（ダイソウ工業）は自動で付きます</div>
         </div>
 
         <div class="form-group">
@@ -169,6 +179,7 @@ const form = reactive({
   send_progress_excel: true,
   send_progress_pdf: true,
   send_delivery_note_pdf: true,
+  email_body_custom: '',
   reply_to_email: '',
   cc_emails: '',
   notify_on_failure_user_ids: [],
@@ -186,6 +197,50 @@ const splitEmailLines = (text) => {
     .split('\n')
     .map((email) => email.trim())
     .filter(Boolean)
+}
+
+const insertDefaultBody = () => {
+  const h = String(form.scheduled_hour).padStart(2, '0')
+  const m = String(form.scheduled_minute).padStart(2, '0')
+  const lt = form.lead_time_days || 2
+  const back = form.progress_days_back || 7
+  const fwd = form.progress_days_forward || 30
+  const timing = `送信タイミング: 納入日の${lt}営業日前 ${h}:${m} に自動送信`
+  const period = `進度表期間: 発行日の${back}営業日前 ～ ${fwd}日後`
+  const lines = []
+  if (form.send_delivery_list_excel) {
+    lines.push('納品リスト（納入日: YYYY-MM-DD）を送付いたします。')
+    lines.push('')
+    lines.push('2026-07-06（月）より試運用として、自動送信を開始しております。')
+    lines.push('')
+    lines.push('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。')
+    lines.push('')
+    lines.push(timing)
+    lines.push(period)
+    lines.push('')
+    lines.push('添付のExcelの「確認・修正方法」シートを参照のうえ、数量確認・修正後にご返送ください。')
+  } else {
+    lines.push('進度照会資料を送付いたします。')
+    lines.push('')
+    lines.push('2026-07-22（木）より試運用として、自動送信を開始しております。')
+    lines.push('')
+    lines.push('正式運用への移行時期・運用方法は後日あらためてご相談のうえ決定いたします。それまでは、現行の発注・納入・検収方法にて運用をお願いいたします。')
+    lines.push('')
+    lines.push(timing)
+    lines.push(period)
+    lines.push('')
+    lines.push('添付の進度表には確定情報および内示情報を記載しております。日々の生産活動のご参考としてご活用いただければ幸いです。')
+    lines.push('なお、進度情報につきましては目安としてご参照ください。')
+  }
+  if (form.send_progress_excel || form.send_progress_pdf) {
+    lines.push('')
+    lines.push('進度表を添付しておりますのでご参照ください。')
+  }
+  if (form.send_delivery_note_pdf) {
+    lines.push('')
+    lines.push('外作納品書を添付しておりますのでご利用ください。')
+  }
+  form.email_body_custom = lines.join('\n')
 }
 
 const ccEmailList = computed({
@@ -248,6 +303,7 @@ const resetForm = () => {
   form.send_progress_excel = true
   form.send_progress_pdf = true
   form.send_delivery_note_pdf = true
+  form.email_body_custom = ''
   form.reply_to_email = ''
   form.cc_emails = ''
   form.notify_on_failure_user_ids = []
@@ -275,6 +331,7 @@ const openEdit = (c) => {
   form.send_progress_excel = c.send_progress_excel ?? true
   form.send_progress_pdf = c.send_progress_pdf ?? true
   form.send_delivery_note_pdf = c.send_delivery_note_pdf ?? true
+  form.email_body_custom = c.email_body_custom || ''
   form.reply_to_email = c.reply_to_email || ''
   form.cc_emails = c.cc_emails || ''
   form.notify_on_failure_user_ids = [...(c.notify_on_failure_user_ids || [])]
@@ -329,6 +386,7 @@ const save = async () => {
       send_progress_excel: form.send_progress_excel,
       send_progress_pdf: form.send_progress_pdf,
       send_delivery_note_pdf: form.send_delivery_note_pdf,
+      email_body_custom: form.email_body_custom,
       reply_to_email: form.reply_to_email,
       cc_emails: form.cc_emails,
       notify_on_failure_user_ids: form.notify_on_failure_user_ids,
@@ -361,9 +419,18 @@ const remove = async (c) => {
 
 const runNow = async (c) => {
   if (!confirm(`${c.supplier_code} ${c.supplier_name} の自動送信を今すぐ実行しますか？`)) return
+  await triggerRun(c, () => api.purchaseAutoDeliveryList.runNow(c.id))
+}
+
+const runHolidayTrial = async (c) => {
+  if (!confirm(`${c.supplier_code} ${c.supplier_name} の休日トライを実行しますか？`)) return
+  await triggerRun(c, () => api.purchaseAutoDeliveryList.runHolidayTrial(c.id))
+}
+
+const triggerRun = async (c, runner) => {
   running.add(c.id)
   try {
-    await api.purchaseAutoDeliveryList.runNow(c.id)
+    await runner()
     const pollStart = Date.now()
     const timer = setInterval(async () => {
       if (Date.now() - pollStart > 5 * 60 * 1000) {
@@ -408,6 +475,8 @@ onMounted(async () => {
 .btn-sm { padding: 3px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
 .btn-sm:hover { background: #f1f5f9; }
 .btn-run { border-color: #3b82f6; color: #2563eb; }
+.btn-holiday { border-color: #f59e0b; color: #b45309; }
+.btn-holiday:hover { background: #fffbeb; }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger { border-color: #fca5a5; color: #dc2626; }
 .btn-danger:hover { background: #fef2f2; }
@@ -422,6 +491,11 @@ onMounted(async () => {
 .suffix { font-size: 13px; color: #475569; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .file-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+.label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.label-row > label { margin-bottom: 0; }
+.btn-default-body { border-color: #3b82f6; color: #2563eb; font-size: 11px; padding: 2px 8px; }
+.btn-default-body:hover { background: #eff6ff; }
+.hint { font-size: 11px; color: #64748b; margin-top: 4px; }
 .required { color: #dc2626; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn-primary { padding: 6px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }

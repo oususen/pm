@@ -2791,6 +2791,7 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
                 'send_progress_excel': c.send_progress_excel,
                 'send_progress_pdf': c.send_progress_pdf,
                 'send_delivery_note_pdf': c.send_delivery_note_pdf,
+                'email_body_custom': c.email_body_custom,
                 'reply_to_email': c.reply_to_email,
                 'cc_emails': c.cc_emails,
                 'notify_on_failure_user_ids': list(c.notify_on_failure.values_list('id', flat=True)),
@@ -2824,6 +2825,7 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
             send_progress_excel=_parse_bool(request.data.get('send_progress_excel')),
             send_progress_pdf=_parse_bool(request.data.get('send_progress_pdf')),
             send_delivery_note_pdf=_parse_bool(request.data.get('send_delivery_note_pdf')),
+            email_body_custom=request.data.get('email_body_custom', ''),
             reply_to_email=request.data.get('reply_to_email', ''),
             cc_emails=request.data.get('cc_emails', ''),
         )
@@ -2868,6 +2870,8 @@ class PurchaseAutoDeliveryListConfigDetailView(APIView):
         for fld in ('send_delivery_list_excel', 'send_progress_excel', 'send_progress_pdf', 'send_delivery_note_pdf'):
             if fld in request.data:
                 setattr(config, fld, _parse_bool(request.data[fld]))
+        if 'email_body_custom' in request.data:
+            config.email_body_custom = request.data['email_body_custom']
         if 'reply_to_email' in request.data:
             config.reply_to_email = request.data['reply_to_email']
         if 'cc_emails' in request.data:
@@ -2908,6 +2912,30 @@ class PurchaseAutoDeliveryListRunNowView(APIView):
         thread.start()
 
         return Response({'detail': '手動実行を開始しました', 'config_id': config.id})
+
+
+class PurchaseAutoDeliveryListHolidayTrialView(APIView):
+    """自動納入リスト送信 休日トライ実行"""
+
+    def post(self, request, pk):
+        config = PurchaseAutoDeliveryListConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .tasks_auto_delivery_list import run_auto_delivery_list_send
+        import threading
+        config.last_run_status = 'RUNNING'
+        config.last_run_message = '休日トライ実行中...'
+        config.last_run_at = datetime.now()
+        config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_at'])
+
+        thread = threading.Thread(
+            target=run_auto_delivery_list_send,
+            kwargs={'config_id': config.id, 'ignore_holiday': True},
+        )
+        thread.start()
+
+        return Response({'detail': '休日トライを開始しました', 'config_id': config.id})
 
 
 class PurchaseActualKikanMappingCandidatesView(APIView):

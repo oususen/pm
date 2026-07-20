@@ -113,13 +113,17 @@ def _resolve_effective_start_date(
     include_stock_anchor,
     include_lt_anchor,
     product_id=None,
+    product_ids=None,
+    use_cumulative_lt=False,
+    lt_cache=None,
 ):
     """API と同じ開始日補正を、定時タスク側でも適用する。"""
-    from django.db.models import Max
-
-    from masters.models import BOMItem, Calendar, CalendarDay
+    from masters.models import Calendar, CalendarDay
     from production.models_line_backlog import LineBacklog
-    from production.inventory.inventory_calculator import _get_direct_parent_bom_lead_time
+    from production.inventory.inventory_calculator import (
+        _get_direct_parent_bom_lead_time,
+        _get_max_parent_bom_lead_time,
+    )
 
     calendar_id = getattr(line, 'calendar_id', None) or Calendar.objects.filter(
         calendar_code='daiso'
@@ -166,21 +170,31 @@ def _resolve_effective_start_date(
         effective_start_date = min(effective_start_date, stock_start_dt)
 
     if include_lt_anchor:
+        lt_func = _get_max_parent_bom_lead_time if use_cumulative_lt else _get_direct_parent_bom_lead_time
+        shared_lt_cache = lt_cache if lt_cache is not None else {}
+
+        def resolve_lt(target_product_id):
+            cached = shared_lt_cache.get(target_product_id)
+            if cached is not None:
+                return cached
+            value = int(lt_func(target_product_id) or 0)
+            shared_lt_cache[target_product_id] = value
+            return value
+
         max_lt = 0
         if product_id is not None:
-            max_lt = _get_direct_parent_bom_lead_time(product_id)
+            max_lt = resolve_lt(product_id)
         else:
-            product_ids = list(
-                LineBacklog.objects.filter(
-                    line_id=line.id,
-                    plan_date__lte=end_date,
-                ).values_list('product_id', flat=True).distinct()
-            )
-            if product_ids:
-                max_lt = BOMItem.objects.filter(
-                    bom__is_active=True,
-                    child_product_id__in=product_ids,
-                ).aggregate(v=Max('lead_time_days'))['v'] or 0
+            target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
+            if not target_product_ids:
+                target_product_ids = list(
+                    LineBacklog.objects.filter(
+                        line_id=line.id,
+                        plan_date__lte=end_date,
+                    ).values_list('product_id', flat=True).distinct()
+                )
+            if target_product_ids:
+                max_lt = max(resolve_lt(pid) for pid in target_product_ids)
         lt_start_dt = shift_working_days(today, -(int(max_lt) + 1))
         effective_start_date = min(effective_start_date, lt_start_dt)
 
@@ -251,6 +265,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     progress_count = 0
     canceled = False
     cancel_message = ''
+    direct_lt_cache = {}
+    cumulative_lt_cache = {}
     result = {}
 
     def should_cancel(checkpoint):
@@ -340,6 +356,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                         today,
                         include_stock_anchor=True,
                         include_lt_anchor=True,
+                        use_cumulative_lt=task_spec['include_progress_in_inventory'],
+                        lt_cache=cumulative_lt_cache if task_spec['include_progress_in_inventory'] else direct_lt_cache,
                     )
                     logger.info(
                         f'[スケジューラ] 在庫再計算: ライン {line.line_code} ({line.line_name}) '
@@ -379,6 +397,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                         today,
                         include_stock_anchor=False,
                         include_lt_anchor=True,
+                        use_cumulative_lt=True,
+                        lt_cache=cumulative_lt_cache,
                     )
                     logger.info(
                         f'[スケジューラ] 進度再計算: ライン {line.line_code} ({line.line_name}) '
@@ -405,6 +425,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                             include_stock_anchor=False,
                             include_lt_anchor=True,
                             product_id=row['product_id'],
+                            use_cumulative_lt=True,
+                            lt_cache=cumulative_lt_cache,
                         )
                         recalculate_progress_qty(
                             line_id=line.id,

@@ -2935,7 +2935,13 @@ const sortRowsForLine = (inputRows) => {
       return codeA.localeCompare(codeB)
     })
   }
-  if (!line || line.line_code !== TANK_LINE_CODE) return inputRows
+  if (!line || line.line_code !== TANK_LINE_CODE) {
+    return [...inputRows].sort((a, b) => {
+      const codeA = getRowProductCode(a)
+      const codeB = getRowProductCode(b)
+      return codeA.localeCompare(codeB, 'ja', { numeric: true, sensitivity: 'base' })
+    })
+  }
   const orderMap = new Map(TANK_PRODUCT_ORDER.map((code, idx) => [code, idx]))
   const fallback = TANK_PRODUCT_ORDER.length + 1
   return [...inputRows].sort((a, b) => {

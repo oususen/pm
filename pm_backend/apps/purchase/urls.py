@@ -31,6 +31,7 @@ from .views import (
     PurchaseActualRegisterView,
     PurchaseAutoDeliveryListConfigDetailView,
     PurchaseAutoDeliveryListConfigListCreateView,
+    PurchaseAutoDeliveryListHolidayTrialView,
     PurchaseAutoDeliveryListRunNowView,
     PurchaseDeliveryListAutoTemplateView,
     PurchaseDeliveryListExcelDownloadView,
@@ -88,6 +89,7 @@ urlpatterns = [
     path('purchase-auto-delivery-list-configs/', PurchaseAutoDeliveryListConfigListCreateView.as_view(), name='purchase-auto-delivery-list-configs'),
     path('purchase-auto-delivery-list-configs/<int:pk>/', PurchaseAutoDeliveryListConfigDetailView.as_view(), name='purchase-auto-delivery-list-config-detail'),
     path('purchase-auto-delivery-list-configs/<int:pk>/run-now/', PurchaseAutoDeliveryListRunNowView.as_view(), name='purchase-auto-delivery-list-run-now'),
+    path('purchase-auto-delivery-list-configs/<int:pk>/holiday-trial/', PurchaseAutoDeliveryListHolidayTrialView.as_view(), name='purchase-auto-delivery-list-holiday-trial'),
     path('purchase-actual-kikan-mapping/', PurchaseActualKikanMappingView.as_view(), name='purchase-actual-kikan-mapping'),
     path('purchase-actual-kikan-mapping/candidates/', PurchaseActualKikanMappingCandidatesView.as_view(), name='purchase-actual-kikan-mapping-candidates'),
 ]

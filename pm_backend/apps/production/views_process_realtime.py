@@ -1112,6 +1112,11 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         old_defect = int(session.defect_qty or 0)
         defect_delta = defect_qty - old_defect
 
+        if 'operator_name' in payload:
+            operator_name = str(payload.get('operator_name') or '').strip()
+        else:
+            operator_name = None
+
         update_fields = [
             'started_at', 'ended_at', 'production_qty', 'defect_qty',
             'status', 'duration_seconds', 'updated_at',
@@ -1127,6 +1132,14 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             session.ended_at = ended_at
             session.production_qty = production_qty
             session.defect_qty = defect_qty
+
+            if operator_name is not None:
+                session.operator_name = operator_name
+                update_fields.append('operator_name')
+                if session.start_record_id:
+                    ProcessRealtimeRecord.objects.filter(id=session.start_record_id).update(operator_name=operator_name)
+                if session.end_record_id:
+                    ProcessRealtimeRecord.objects.filter(id=session.end_record_id).update(operator_name=operator_name)
             session.status = 'CLOSED' if ended_at else 'OPEN'
             if started_at and ended_at and ended_at >= started_at:
                 session.duration_seconds = int((ended_at - started_at).total_seconds())

@@ -32,11 +32,13 @@ const emit = defineEmits(['update:modelValue'])
 
 const searchText = ref('')
 
-const codeLabel = (u) => u.employee_code || u.username || ''
+const normalizeUserId = (value) => Number(value)
+
+const codeLabel = (u) => u?.profile?.employee_code || u?.username || u?.email || ''
 const nameLabel = (u) => {
-  const last = u.last_name || ''
-  const first = u.first_name || ''
-  return (last + first).trim() || u.username || ''
+  const last = u?.last_name || ''
+  const first = u?.first_name || ''
+  return `${last}${first}`.trim() || u?.username || u?.email || ''
 }
 
 const candidates = computed(() => {
@@ -44,18 +46,21 @@ const candidates = computed(() => {
   if (!kw) return []
   return props.userList
     .filter((u) => {
-      if (props.modelValue.includes(u.id)) return false
+      const userId = normalizeUserId(u.id)
+      if (props.modelValue.some((id) => normalizeUserId(id) === userId)) return false
       const code = codeLabel(u).toLowerCase()
       const name = nameLabel(u).toLowerCase()
-      const uname = (u.username || '').toLowerCase()
-      return code.includes(kw) || name.includes(kw) || uname.includes(kw)
+      const uname = (u?.username || '').toLowerCase()
+      const email = (u?.email || '').toLowerCase()
+      return code.includes(kw) || name.includes(kw) || uname.includes(kw) || email.includes(kw)
     })
     .slice(0, 8)
 })
 
 const addUser = (u) => {
-  if (!props.modelValue.includes(u.id)) {
-    emit('update:modelValue', [...props.modelValue, u.id])
+  const userId = normalizeUserId(u.id)
+  if (!props.modelValue.some((id) => normalizeUserId(id) === userId)) {
+    emit('update:modelValue', [...props.modelValue, userId])
   }
   searchText.value = ''
 }
@@ -65,11 +70,13 @@ const addFirstCandidate = () => {
 }
 
 const removeUser = (uid) => {
-  emit('update:modelValue', props.modelValue.filter((id) => id !== uid))
+  const targetId = normalizeUserId(uid)
+  emit('update:modelValue', props.modelValue.filter((id) => normalizeUserId(id) !== targetId))
 }
 
 const userLabel = (uid) => {
-  const u = props.userList.find((x) => x.id === uid)
+  const targetId = normalizeUserId(uid)
+  const u = props.userList.find((x) => normalizeUserId(x.id) === targetId)
   if (!u) return `ID:${uid}`
   return `${codeLabel(u)} ${nameLabel(u)}`.trim()
 }
