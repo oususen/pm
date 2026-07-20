@@ -22,6 +22,7 @@ from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
 from production.services.brake_spot_session_sync import find_equipment_active_product_conflict
+from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.serializers_process_realtime import check_plan_overrun
 
 logger = logging.getLogger(__name__)
@@ -1174,6 +1175,14 @@ class BrakeLineSessionDetailView(APIView):
             return Response({'detail': '対象セッションが存在しません。'}, status=404)
 
         old_qty = int(end_record.qty or 0) if end_record and end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
+        ref_rec = end_record or start_record or record
+        before_snapshot = {
+            'product_code': ref_rec.product_code or '',
+            'started_at': (start_record.recorded_at.strftime('%Y/%m/%d %H:%M') if start_record and start_record.recorded_at else ''),
+            'ended_at': (end_record.recorded_at.strftime('%Y/%m/%d %H:%M') if end_record and end_record.recorded_at else ''),
+            'production_qty': old_qty,
+            'operator_name': ref_rec.operator or '',
+        }
 
         new_started_at = self._parse_dt(request.data.get('started_at'))
         new_ended_at = self._parse_dt(request.data.get('ended_at'))
@@ -1202,6 +1211,13 @@ class BrakeLineSessionDetailView(APIView):
                 rec.product_code = new_product.product_code
                 rec.save(update_fields=['product_id', 'product_code'])
 
+        new_operator_name = request.data.get('operator_name')
+        if new_operator_name is not None:
+            new_operator_name = str(new_operator_name).strip()
+            for rec in [r for r in (start_record, end_record) if r]:
+                rec.operator = new_operator_name
+                rec.save(update_fields=['operator'])
+
         if new_started_at and start_record:
             start_record.recorded_at = new_started_at
             start_record.save(update_fields=['recorded_at'])
@@ -1224,6 +1240,40 @@ class BrakeLineSessionDetailView(APIView):
                 self._apply_backlog_delta(end_record, new_qty - old_qty)
         elif product_changed and old_qty:
             self._apply_backlog_delta(end_record, old_qty)
+
+        ref_rec_after = end_record or start_record or record
+        final_qty = int(end_record.qty or 0) if end_record and end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
+        after_snapshot = {
+            'product_code': ref_rec_after.product_code or '',
+            'started_at': (start_record.recorded_at.strftime('%Y/%m/%d %H:%M') if start_record and start_record.recorded_at else ''),
+            'ended_at': (end_record.recorded_at.strftime('%Y/%m/%d %H:%M') if end_record and end_record.recorded_at else ''),
+            'production_qty': final_qty,
+            'operator_name': ref_rec_after.operator or '',
+        }
+        if before_snapshot != after_snapshot:
+            change_reason = str(request.data.get('change_reason') or '実績変更').strip()
+            changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            diff_parts = []
+            labels = {'product_code': '品番', 'started_at': '開始時刻', 'ended_at': '終了時刻', 'production_qty': '実績数量', 'operator_name': '作業者'}
+            for key, label in labels.items():
+                bv, av = str(before_snapshot.get(key) or ''), str(after_snapshot.get(key) or '')
+                if bv != av:
+                    diff_parts.append(f"{label}: {bv or '—'} → {av or '—'}")
+            ProcessWorkSessionChangeHistory.objects.create(
+                session=None,
+                session_record_id=record.id,
+                operation_type='UPDATE',
+                process_id=ref_rec_after.process_id,
+                product_id=ref_rec_after.product_id,
+                product_code=ref_rec_after.product_code or '',
+                product_name='',
+                plan_date=ref_rec_after.plan_date,
+                reason=change_reason,
+                change_summary=' / '.join(diff_parts) or '変更なし',
+                before_data=before_snapshot,
+                after_data=after_snapshot,
+                changed_by=changed_by,
+            )
 
         return Response({'detail': '更新しました。'})
 

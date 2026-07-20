@@ -154,6 +154,7 @@
             <th>終了時刻</th>
             <th class="num">実績数量</th>
             <th class="num">仕損</th>
+            <th>作業者</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -215,13 +216,25 @@
               />
               <span v-else>—</span>
             </td>
+            <td>
+              <select
+                v-if="row.record_source === 'PROCESS' || row.record_source === 'BRAKE'"
+                v-model="edits[row.row_key].operator_name"
+                class="operator-select"
+                :disabled="!canEdit"
+              >
+                <option value="">-- 未選択 --</option>
+                <option v-for="u in users" :key="u.id" :value="u.label">{{ u.label }}</option>
+              </select>
+              <span v-else>{{ row.operator_name || '—' }}</span>
+            </td>
             <td class="action-cell">
               <button class="btn btn-secondary" :disabled="savingId === row.row_key || !canEdit" @click="saveRow(row)">保存</button>
               <button class="btn btn-danger" :disabled="savingId === row.row_key || !canEdit" @click="deleteRow(row)">削除</button>
             </td>
           </tr>
           <tr v-if="!sessions.length">
-            <td colspan="9" class="no-data">データがありません</td>
+            <td colspan="10" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -581,6 +594,7 @@ const buildEditMap = (rows) => {
       production_qty: Number(row.production_qty || 0),
       defect_qty: Number(row.defect_qty || 0),
       product_code: row.product_code || '',
+      operator_name: row.operator_name || '',
     }
   })
   edits.value = map
@@ -759,6 +773,9 @@ const saveRow = async (row) => {
       if (edit.product_code && edit.product_code !== (row.product_code || '')) {
         payload.product_code = edit.product_code.trim()
       }
+      if (edit.operator_name !== (row.operator_name || '')) {
+        payload.operator_name = edit.operator_name
+      }
     }
     if (String(row?.record_source || '').toUpperCase() === 'LASER') {
       if (!row.detail_id) {
@@ -776,6 +793,9 @@ const saveRow = async (row) => {
       }
       if (edit.product_code && edit.product_code !== (row.product_code || '')) {
         brakePayload.product_code = edit.product_code.trim()
+      }
+      if (edit.operator_name !== (row.operator_name || '')) {
+        brakePayload.operator_name = edit.operator_name
       }
       await api.brakeLineActuals.updateSession(id, brakePayload)
     } else {
@@ -1075,6 +1095,13 @@ onMounted(async () => {
 .qty-input {
   width: 100px;
   text-align: right;
+}
+.operator-select {
+  width: 120px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
 }
 .product-code-input {
   width: 180px;
