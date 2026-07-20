@@ -2791,6 +2791,7 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
                 'send_progress_excel': c.send_progress_excel,
                 'send_progress_pdf': c.send_progress_pdf,
                 'send_delivery_note_pdf': c.send_delivery_note_pdf,
+                'email_body_custom': c.email_body_custom,
                 'reply_to_email': c.reply_to_email,
                 'cc_emails': c.cc_emails,
                 'notify_on_failure_user_ids': list(c.notify_on_failure.values_list('id', flat=True)),
@@ -2824,6 +2825,7 @@ class PurchaseAutoDeliveryListConfigListCreateView(APIView):
             send_progress_excel=_parse_bool(request.data.get('send_progress_excel')),
             send_progress_pdf=_parse_bool(request.data.get('send_progress_pdf')),
             send_delivery_note_pdf=_parse_bool(request.data.get('send_delivery_note_pdf')),
+            email_body_custom=request.data.get('email_body_custom', ''),
             reply_to_email=request.data.get('reply_to_email', ''),
             cc_emails=request.data.get('cc_emails', ''),
         )
@@ -2868,6 +2870,8 @@ class PurchaseAutoDeliveryListConfigDetailView(APIView):
         for fld in ('send_delivery_list_excel', 'send_progress_excel', 'send_progress_pdf', 'send_delivery_note_pdf'):
             if fld in request.data:
                 setattr(config, fld, _parse_bool(request.data[fld]))
+        if 'email_body_custom' in request.data:
+            config.email_body_custom = request.data['email_body_custom']
         if 'reply_to_email' in request.data:
             config.reply_to_email = request.data['reply_to_email']
         if 'cc_emails' in request.data:

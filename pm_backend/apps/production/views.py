@@ -2211,7 +2211,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             routing_source_q
         ).filter(
             Q(supplier_id=supplier_id) | Q(line_id=line_id)
-        ).select_related('routing', 'process')
+        ).select_related('routing', 'routing__product', 'output_product', 'process')
         if requested_product_ids:
             routing_steps = routing_steps.filter(output_product_id__in=requested_product_ids)
 
@@ -2227,6 +2227,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 source_parent_id = step.output_product_id
             child_id = step.output_product_id
             if not source_parent_id or not child_id:
+                continue
+
+            # 非最終品に対して最終品LineDemandを直接需要源にしない。
+            # ルーティング由来の直結で source_parent が最終品、child が非最終品の場合は
+            # parent_to_children に載せず、通常の親計画/BOM経由の需要だけを採用する。
+            source_parent = getattr(step.routing, 'product', None) if step.routing_id else None
+            child_product = getattr(step, 'output_product', None)
+            if (
+                source_parent
+                and child_product
+                and source_parent.is_final_product
+                and not child_product.is_final_product
+            ):
                 continue
 
             # SUBCON判定（G工程または外作フラグ）
