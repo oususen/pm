@@ -7,7 +7,7 @@ from .models import (
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
-    ProductStockLocation,
+    ProductStockLocation, LineCycleTime,
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -683,3 +683,16 @@ class ManualDocumentSerializer(serializers.ModelSerializer):
         if obj.updated_by:
             return obj.updated_by.get_full_name() or obj.updated_by.username
         return ''
+
+
+class LineCycleTimeSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+
+    class Meta:
+        model = LineCycleTime
+        fields = '__all__'

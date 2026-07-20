@@ -74,6 +74,8 @@ import { createStocktakeRecordsAPI } from './resources/stocktakeRecords'
 import { createPurchaseActualKikanMappingAPI } from './resources/purchaseActualKikanMapping'
 import { createMorningMeetingsAPI } from './resources/morningMeetings'
 import { createOrphanBacklogAPI } from './resources/orphanBacklog'
+import { createLineCycleTimesAPI } from './resources/lineCycleTimes'
+import { createLineLoadAPI } from './resources/lineLoad'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -223,5 +225,7 @@ export default {
   purchaseActualKikanMapping: createPurchaseActualKikanMappingAPI(client),
   morningMeetings: createMorningMeetingsAPI(client),
   orphanBacklog: createOrphanBacklogAPI(client),
+  lineCycleTimes: createLineCycleTimesAPI(client),
+  lineLoad: createLineLoadAPI(client),
   client,
 }

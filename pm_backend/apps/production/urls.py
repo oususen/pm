@@ -46,7 +46,7 @@ from production.views import (
 )
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
-from production.views_services import BOMServiceViewSet, CRPViewSet
+from production.views_services import BOMServiceViewSet, CRPViewSet, LineLoadViewSet
 from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
@@ -88,6 +88,7 @@ router.register(r'process-actuals', ProcessActualViewSet, basename='processactua
 
 # Service endpoints
 router.register(r'crp', CRPViewSet, basename='crp')
+router.register(r'line-load', LineLoadViewSet, basename='line-load')
 router.register(r'bom-service', BOMServiceViewSet, basename='bom-service')
 
 # Line realtime records

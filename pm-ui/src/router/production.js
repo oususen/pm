@@ -361,6 +361,18 @@ const production = [
     component: () => import("@/views/production/PlanDeviationReport.vue"),
     meta: { pageTitle: "計画乖離レポート", resource: "production.record_inquiry" },
   },
+  {
+    path: "/production/line-cycle-time",
+    name: "LineCycleTimeInput",
+    component: () => import("@/views/production/LineCycleTimeInput.vue"),
+    meta: { pageTitle: "ラインサイクルタイム入力", resource: "production.plan_input", permission: "edit" },
+  },
+  {
+    path: "/production/line-load-chart",
+    name: "LineLoadChart",
+    component: () => import("@/views/production/LineLoadChart.vue"),
+    meta: { pageTitle: "長期負荷チャート", resource: "production" },
+  },
 ];
 
 export default production;

@@ -24,14 +24,15 @@ from .models import (
     BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
-    ProductStockLocation,
+    ProductStockLocation, LineCycleTime,
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMListSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
-    KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer
+    KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
+    LineCycleTimeSerializer,
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
 from accounts.permissions import HasResourcePermissionOrReadOnly
@@ -4619,3 +4620,79 @@ class MobileDeviceInventoryViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = MobileDeviceInventoryFilter
     ordering = ['-inventory_date', 'device__management_no']
+
+
+class LineCycleTimeViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
+    queryset = LineCycleTime.objects.select_related('product', 'line', 'process').all()
+    serializer_class = LineCycleTimeSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['line', 'product', 'process', 'is_active']
+    search_fields = ['product__product_code', 'product__product_name']
+    ordering = ['line__line_code', 'process__process_code', 'product__product_code']
+
+    @action(detail=False, methods=['get'])
+    def matrix(self, request):
+        """ルーティングからライン関連の完成品×工程マトリクスを返す"""
+        line_id = request.query_params.get('line')
+        if not line_id:
+            return Response({'detail': 'line is required'}, status=400)
+
+        steps = RoutingStep.objects.filter(
+            line_id=line_id,
+            routing__is_active=True,
+            routing__product__is_final_product=True,
+            routing__product__is_active=True,
+        ).select_related('routing__product', 'process').values_list(
+            'routing__product__id',
+            'routing__product__product_code',
+            'routing__product__product_name',
+            'process__id',
+            'process__process_code',
+            'process__process_name',
+        ).distinct()
+
+        products = {}
+        processes = {}
+        product_processes = set()
+        for pid, pcode, pname, proc_id, proc_code, proc_name in steps:
+            products[pid] = {'id': pid, 'product_code': pcode, 'product_name': pname}
+            processes[proc_id] = {'id': proc_id, 'process_code': proc_code, 'process_name': proc_name}
+            product_processes.add((pid, proc_id))
+
+        existing = {}
+        for ct in LineCycleTime.objects.filter(line_id=line_id, is_active=True):
+            existing[f'{ct.product_id}_{ct.process_id}'] = str(ct.cycle_time_sec)
+
+        return Response({
+            'products': sorted(products.values(), key=lambda x: x['product_code']),
+            'processes': sorted(processes.values(), key=lambda x: x['process_code']),
+            'product_processes': [{'product': pp[0], 'process': pp[1]} for pp in product_processes],
+            'existing': existing,
+        })
+
+    @action(detail=False, methods=['post'])
+    def bulk_upsert(self, request):
+        """一括登録・更新"""
+        items = request.data.get('items', [])
+        created, updated = 0, 0
+        for item in items:
+            product_id = item.get('product')
+            line_id = item.get('line')
+            process_id = item.get('process')
+            cycle_time_sec = item.get('cycle_time_sec')
+            if not all([product_id, line_id, process_id, cycle_time_sec is not None]):
+                continue
+            obj, was_created = LineCycleTime.objects.update_or_create(
+                product_id=product_id,
+                line_id=line_id,
+                process_id=process_id,
+                defaults={
+                    'cycle_time_sec': cycle_time_sec,
+                    'is_active': item.get('is_active', True),
+                },
+            )
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+        return Response({'created': created, 'updated': updated})

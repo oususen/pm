@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 
 from .services.crp_service import CRPService
+from .services.line_load_service import LineLoadService
 from masters.services.bom_service import BOMService
 
 
@@ -241,6 +242,60 @@ class CRPViewSet(viewsets.ViewSet):
             return Response({
                 'detail': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LineLoadViewSet(viewsets.ViewSet):
+    """長期負荷計算API"""
+    permission_classes = [AllowAny]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.service = LineLoadService()
+
+    @action(detail=False, methods=['post'], url_path='calculate')
+    def calculate(self, request):
+        """
+        POST /api/production/line-load/calculate/
+        payload: {
+            "line_ids": [1, 2, 3],
+            "start_date": "2026-07-21",
+            "end_date": "2026-08-31",
+            "aggregate": "daily" | "weekly"
+        }
+        """
+        line_ids = request.data.get('line_ids', [])
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        aggregate = request.data.get('aggregate', 'daily')
+
+        if not line_ids or not start_date or not end_date:
+            return Response(
+                {'detail': 'line_ids, start_date, end_date are required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = self.service.calculate(line_ids, start_date, end_date, aggregate)
+            return Response(result)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='coverage')
+    def coverage(self, request):
+        """
+        POST /api/production/line-load/coverage/
+        payload: { "line_ids": [1, 2, 3] }
+        """
+        line_ids = request.data.get('line_ids', [])
+        if not line_ids:
+            return Response(
+                {'detail': 'line_ids is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = self.service.get_coverage_summary(line_ids)
+            return Response(result)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class BOMServiceViewSet(viewsets.ViewSet):

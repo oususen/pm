@@ -630,6 +630,50 @@ class ProcessCycleTime(models.Model):
         return f"{self.product.product_code} @ {self.process.process_code} ({self.cycle_time_min}分)"
 
 
+class LineCycleTime(models.Model):
+    """製品×ライン×工程別サイクルタイム（長期負荷計算用）"""
+    id = models.BigAutoField(primary_key=True)
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        verbose_name='製品',
+        related_name='line_cycle_times',
+    )
+    line = models.ForeignKey(
+        Line,
+        on_delete=models.CASCADE,
+        verbose_name='ライン',
+        related_name='line_cycle_times',
+    )
+    process = models.ForeignKey(
+        Process,
+        on_delete=models.CASCADE,
+        verbose_name='工程',
+        related_name='line_cycle_times',
+    )
+    cycle_time_sec = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='サイクルタイム(秒/個)',
+        help_text='1個あたりの通過時間（秒）',
+    )
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_line_cycle_time'
+        verbose_name = 'ライン別サイクルタイム'
+        verbose_name_plural = 'ライン別サイクルタイム'
+        unique_together = [['product', 'line', 'process']]
+        indexes = [
+            models.Index(fields=['line', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.product_code} @ {self.line.line_code}/{self.process.process_code} ({self.cycle_time_sec}秒)"
+
+
 class ProductGroup(models.Model):
     """製品グループマスタ"""
     id = models.BigAutoField(primary_key=True)
