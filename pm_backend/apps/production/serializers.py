@@ -1190,21 +1190,6 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
         mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
         return mapping.get(obj.last_run_status, '')
 
-
-class ScheduleRunLogSerializer(serializers.ModelSerializer):
-    status_display = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ScheduleRunLog
-        fields = [
-            'id', 'task_name', 'started_at', 'finished_at',
-            'status', 'status_display', 'message', 'duration_seconds',
-        ]
-
-    def get_status_display(self, obj):
-        mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
-        return mapping.get(obj.status, '')
-
     def get_notify_user_names(self, obj):
         if not obj.pk:
             return []
@@ -1224,14 +1209,30 @@ class ScheduleRunLogSerializer(serializers.ModelSerializer):
             return []
         codes = []
         for user in obj.notify_users.select_related('profile'):
-            code = getattr(getattr(user, 'profile', None), 'employee_code', None)
-            if code:
-                codes.append(code)
+            profile = getattr(user, 'profile', None)
+            user_code = getattr(profile, 'user_code', '') if profile else ''
+            if user_code:
+                codes.append(user_code)
             elif user.username:
                 codes.append(user.username)
             elif user.email:
                 codes.append(user.email)
         return codes
+
+
+class ScheduleRunLogSerializer(serializers.ModelSerializer):
+    status_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduleRunLog
+        fields = [
+            'id', 'task_name', 'started_at', 'finished_at',
+            'status', 'status_display', 'message', 'duration_seconds',
+        ]
+
+    def get_status_display(self, obj):
+        mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
+        return mapping.get(obj.status, '')
 
 
 class PurchaseActualReconcileReportDetailSerializer(serializers.ModelSerializer):
