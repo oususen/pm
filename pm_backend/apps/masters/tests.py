@@ -11,7 +11,7 @@ from masters.services.routing_service import (
     normalize_routing_reference_datetime,
     resolve_effective_routing,
 )
-from masters.views import BOMViewSet, SupplierViewSet
+from masters.views import BOMViewSet, LineViewSet, SupplierViewSet
 
 
 class RoutingEffectiveDatetimeTest(TestCase):
@@ -314,3 +314,124 @@ class SupplierAutoLineTest(TestCase):
         line = Line.objects.get(line_code='000095')
         self.assertEqual(supplier.supplier_code, '000095')
         self.assertEqual(line.line_code, '000095')
+
+    def test_supplier_create_rejects_when_same_code_purchase_line_exists(self):
+        user = get_user_model().objects.create_user(
+            username='supplier_duplicate_line_tester',
+            password='testpass123',
+        )
+        Line.objects.create(
+            line_code='000722',
+            line_name='既存購買ライン',
+            line_type='PURCHASE',
+        )
+        factory = APIRequestFactory()
+        request = factory.post(
+            '/api/suppliers/',
+            {
+                'supplier_code': '000722',
+                'supplier_name': '株式会社ハツメック',
+                'supplier_type': 'both',
+                'order_email': '',
+                'calendar': None,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = SupplierViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supplier_code', response.data)
+
+    def test_supplier_update_syncs_purchase_line_code_and_name(self):
+        user = get_user_model().objects.create_user(
+            username='supplier_update_sync_tester',
+            password='testpass123',
+        )
+        supplier = Supplier.objects.create(
+            supplier_code='000722',
+            supplier_name='旧仕入先名',
+            supplier_type='both',
+            order_email='',
+        )
+        Line.objects.create(
+            line_code='000722',
+            line_name='旧仕入先名',
+            line_type='PURCHASE',
+        )
+        factory = APIRequestFactory()
+        request = factory.put(
+            f'/api/suppliers/{supplier.id}/',
+            {
+                'supplier_code': '000723',
+                'supplier_name': '新仕入先名',
+                'supplier_type': 'both',
+                'order_email': '',
+                'calendar': None,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = SupplierViewSet.as_view({'put': 'update'})(request, pk=supplier.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Line.objects.filter(line_code='000722').exists())
+        line = Line.objects.get(line_code='000723')
+        self.assertEqual(line.line_name, '新仕入先名')
+        self.assertEqual(line.line_type, 'PURCHASE')
+
+    def test_purchase_line_code_cannot_be_updated_directly_when_linked_to_supplier(self):
+        user = get_user_model().objects.create_user(
+            username='purchase_line_lock_tester',
+            password='testpass123',
+        )
+        Supplier.objects.create(
+            supplier_code='000722',
+            supplier_name='株式会社ハツメック',
+            supplier_type='both',
+            order_email='',
+        )
+        line = Line.objects.create(
+            line_code='000722',
+            line_name='株式会社ハツメック',
+            line_type='PURCHASE',
+        )
+        factory = APIRequestFactory()
+        request = factory.patch(
+            f'/api/lines/{line.id}/',
+            {'line_code': '000999'},
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = LineViewSet.as_view({'patch': 'partial_update'})(request, pk=line.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('line_code', response.data)
+
+    def test_purchase_line_delete_is_blocked_when_linked_to_supplier(self):
+        user = get_user_model().objects.create_user(
+            username='purchase_line_delete_tester',
+            password='testpass123',
+        )
+        Supplier.objects.create(
+            supplier_code='000722',
+            supplier_name='株式会社ハツメック',
+            supplier_type='both',
+            order_email='',
+        )
+        line = Line.objects.create(
+            line_code='000722',
+            line_name='株式会社ハツメック',
+            line_type='PURCHASE',
+        )
+        factory = APIRequestFactory()
+        request = factory.delete(f'/api/lines/{line.id}/')
+        force_authenticate(request, user=user)
+
+        response = LineViewSet.as_view({'delete': 'destroy'})(request, pk=line.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(Line.objects.filter(id=line.id).exists())

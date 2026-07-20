@@ -213,7 +213,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     Returns:
         dict: 実行結果
     """
-    from masters.models import Line, BOMItem
+    from masters.models import Line
     from orders.utils.calendar_utils import get_business_today
     from production.inventory.inventory_calculator import recalculate_inventory_for_line, _build_adjustment_maps
     from production.inventory.progress_calculator import recalculate_progress_qty
@@ -285,10 +285,10 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
 
     try:
         if task_spec['pickup_prod'] and not should_cancel('取り込み開始前'):
-            prod_lines = Line.objects.filter(is_active=True, line_type='PROD')
-            logger.info(f'[スケジューラ] Step 1: pickup開始 ({prod_lines.count()}ライン)')
+            pickup_lines = Line.objects.filter(is_active=True).exclude(line_type='PURCHASE')
+            logger.info(f'[スケジューラ] Step 1: pickup開始 ({pickup_lines.count()}ライン)')
 
-            for line in prod_lines:
+            for line in pickup_lines:
                 if should_cancel(f'pickup前 line={line.line_code}'):
                     break
                 try:
@@ -309,26 +309,22 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     errors.append(error_msg)
 
         if task_spec['pickup_purchase'] and not should_cancel('購買取り込み開始前'):
-            supplier_ids = list(
-                BOMItem.objects.filter(
-                    sourcing_type__in=['BUY', 'SUBCON'],
-                    bom__is_active=True,
-                    supplier_id__isnull=False,
-                ).values_list('supplier_id', flat=True).distinct()
+            purchase_lines = list(
+                Line.objects.filter(is_active=True, line_type='PURCHASE').order_by('line_code', 'id')
             )
             logger.info(
-                f'[スケジューラ] Step 2: pickup_purchase開始 ({len(supplier_ids)}仕入先)'
+                f'[スケジューラ] Step 2: pickup_purchase開始 ({len(purchase_lines)}ライン)'
             )
 
-            for supplier_id in supplier_ids:
-                if should_cancel(f'pickup_purchase前 supplier_id={supplier_id}'):
+            for line in purchase_lines:
+                if should_cancel(f'pickup_purchase前 line={line.line_code}'):
                     break
                 try:
                     logger.info(
-                        f'[スケジューラ] pickup_purchase: supplier_id={supplier_id}'
+                        f'[スケジューラ] pickup_purchase: line={line.line_code} ({line.line_name})'
                     )
                     request = _create_drf_request({
-                        'supplier_id': supplier_id,
+                        'line_id': line.id,
                         'start_date': start_date_str,
                         'end_date': end_date_str,
                     })
@@ -336,7 +332,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     viewset.pickup_purchase(request)
                     purchase_count += 1
                 except Exception as e:
-                    error_msg = f'pickup_purchase supplier_id={supplier_id}: {str(e)}'
+                    error_msg = f'pickup_purchase {line.line_code}: {str(e)}'
                     logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
                     errors.append(error_msg)
 

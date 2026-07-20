@@ -1677,7 +1677,8 @@ def recalculate_inventory_for_line(
     """
     import logging
     import time
-    logger = logging.getLogger(__name__)
+    logger_name = 'progress_calculator' if progress_only else __name__
+    logger = logging.getLogger(logger_name)
     target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
 
     # progress_only=True のとき進度は必ず計算する
@@ -1685,8 +1686,11 @@ def recalculate_inventory_for_line(
         include_progress = True
 
     overall_start = time.perf_counter()
+    recalc_label = '進度再計算' if progress_only else '在庫再計算'
+    product_calc_label = '進度計算' if progress_only else '在庫計算'
     logger.info(
-        "在庫再計算開始: line_id=%s, %s ~ %s, line_final_only=%s, progress_only=%s, product_count=%s",
+        "%s開始: line_id=%s, %s ~ %s, line_final_only=%s, progress_only=%s, product_count=%s",
+        recalc_label,
         line_id,
         start_date,
         end_date,
@@ -1811,7 +1815,7 @@ def recalculate_inventory_for_line(
     progress_max = (0.0, None)
 
     for product_id in product_ids:
-        logger.info(f"製品ID {product_id} の在庫計算中...")
+        logger.info(f"製品ID {product_id} の{product_calc_label}中...")
         # 在庫・計画在庫は直親LT、進度は累積LTを使用
         direct_lt = direct_lt_cache.get(product_id)
         if direct_lt is None:
@@ -1883,7 +1887,8 @@ def recalculate_inventory_for_line(
 
     product_count = max(len(product_ids), 1)
     logger.info(
-        "在庫再計算合計: stock=%.3fs (avg=%.3fs, max=%.3fs id=%s) planned=%.3fs (avg=%.3fs, max=%.3fs id=%s) progress=%.3fs (avg=%.3fs, max=%.3fs id=%s)",
+        "%s合計: stock=%.3fs (avg=%.3fs, max=%.3fs id=%s) planned=%.3fs (avg=%.3fs, max=%.3fs id=%s) progress=%.3fs (avg=%.3fs, max=%.3fs id=%s)",
+        recalc_label,
         stock_total,
         stock_total / product_count,
         stock_max[0],
@@ -1897,7 +1902,7 @@ def recalculate_inventory_for_line(
         progress_max[0],
         progress_max[1],
     )
-    logger.info("在庫再計算完了: total_time=%.3fs", time.perf_counter() - overall_start)
+    logger.info("%s完了: total_time=%.3fs", recalc_label, time.perf_counter() - overall_start)
 
     return {
         'line_id': line_id,

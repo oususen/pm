@@ -2120,19 +2120,41 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         from collections import defaultdict
         _t0 = _time.perf_counter()
 
-        supplier_id = request.data.get('supplier_id') or request.data.get('line_id')
-        if not supplier_id:
-            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            supplier_id = int(supplier_id)
-        except (TypeError, ValueError):
-            return Response({'detail': 'supplier_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+        raw_supplier_id = request.data.get('supplier_id')
+        raw_line_id = request.data.get('line_id')
+        if not raw_supplier_id and not raw_line_id:
+            return Response({'detail': 'supplier_id or line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             requested_product_ids = set(_parse_product_ids(request.data.get('product_ids')))
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        supplier = Supplier.objects.filter(id=supplier_id).first()
+        supplier = None
+        supplier_id = None
+        if raw_supplier_id:
+            try:
+                supplier_id = int(raw_supplier_id)
+            except (TypeError, ValueError):
+                return Response({'detail': 'supplier_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+            supplier = Supplier.objects.filter(id=supplier_id).first()
+        elif raw_line_id:
+            try:
+                lookup_line_id = int(raw_line_id)
+            except (TypeError, ValueError):
+                return Response({'detail': 'line_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
+            line_for_supplier = Line.objects.filter(id=lookup_line_id).only('line_code').first()
+            if line_for_supplier:
+                supplier = Supplier.objects.filter(supplier_code=line_for_supplier.line_code).first()
+                supplier_id = getattr(supplier, 'id', None)
+            if not supplier:
+                return Response({
+                    'detail': f'supplier not found for line_id={lookup_line_id}',
+                    'created': 0,
+                    'updated': 0,
+                    'items': 0,
+                    'line_id': lookup_line_id,
+                    'skipped': True,
+                })
         if not supplier:
             return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
 

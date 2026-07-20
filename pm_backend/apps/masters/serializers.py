@@ -169,6 +169,30 @@ class ProcessSerializer(serializers.ModelSerializer):
 
 
 class LineSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        if not self.instance:
+            return attrs
+
+        current_code = str(getattr(self.instance, 'line_code', '') or '').strip()
+        next_code = str(attrs.get('line_code', current_code) or '').strip()
+        current_type = str(getattr(self.instance, 'line_type', '') or '').strip().upper()
+        next_type = str(attrs.get('line_type', current_type) or '').strip().upper()
+        linked_supplier = Supplier.objects.filter(supplier_code=current_code).first()
+
+        if current_type == 'PURCHASE' and linked_supplier:
+            if next_code != current_code:
+                raise serializers.ValidationError({
+                    'line_code': '仕入先と紐づく購買ラインのコードは、ライン側で単独変更できません。仕入先コードを更新してください。'
+                })
+            if next_type != 'PURCHASE':
+                raise serializers.ValidationError({
+                    'line_type': '仕入先と紐づく購買ラインの区分は変更できません。'
+                })
+
+        return attrs
+
     class Meta:
         model = Line
         fields = '__all__'
@@ -186,6 +210,42 @@ class SupplierSerializer(serializers.ModelSerializer):
 
     def validate_supplier_code(self, value):
         return self._normalize_supplier_code(value)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        normalized_code = self._normalize_supplier_code(
+            attrs.get('supplier_code', getattr(self.instance, 'supplier_code', ''))
+        )
+        attrs['supplier_code'] = normalized_code
+
+        line_qs = Line.objects.filter(line_code=normalized_code)
+        if self.instance is None:
+            if line_qs.filter(line_type='PURCHASE').exists():
+                raise serializers.ValidationError({
+                    'supplier_code': '同じコードの購買ラインが既に存在するため、この仕入先コードは登録できません。'
+                })
+            if line_qs.exists():
+                raise serializers.ValidationError({
+                    'supplier_code': '同じコードのラインが既に存在するため、この仕入先コードは登録できません。'
+                })
+            return attrs
+
+        old_code = self._normalize_supplier_code(getattr(self.instance, 'supplier_code', ''))
+        if normalized_code == old_code:
+            return attrs
+
+        conflict_qs = line_qs.exclude(line_code=old_code)
+        if conflict_qs.filter(line_type='PURCHASE').exists():
+            raise serializers.ValidationError({
+                'supplier_code': '変更先コードの購買ラインが既に存在するため、仕入先コードを変更できません。'
+            })
+        if conflict_qs.exists():
+            raise serializers.ValidationError({
+                'supplier_code': '変更先コードのラインが既に存在するため、仕入先コードを変更できません。'
+            })
+
+        return attrs
 
     class Meta:
         model = Supplier

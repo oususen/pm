@@ -74,22 +74,35 @@ def get_overlapping_default_routings(routing):
     return qs
 
 
-def ensure_supplier_purchase_line(supplier):
+def ensure_supplier_purchase_line(supplier, previous_supplier_code=None):
     """仕入先に対応する購買ラインを作成または更新する。"""
     if not supplier:
         return None
 
-    line_obj, _ = Line.objects.get_or_create(
-        line_code=supplier.supplier_code,
-        defaults={
-            'line_name': supplier.supplier_name[:50],
-            'line_type': 'PURCHASE',
-            'is_active': True,
-        }
-    )
+    previous_code = str(previous_supplier_code or '').strip()
+    expected_code = str(supplier.supplier_code or '').strip()
+    expected_name = supplier.supplier_name[:50]
+
+    line_obj = None
+    if previous_code and previous_code != expected_code:
+        line_obj = Line.objects.filter(line_code=previous_code, line_type='PURCHASE').first()
+
+    if line_obj is None:
+        line_obj = Line.objects.filter(line_code=expected_code).first()
+
+    if line_obj is None:
+        line_obj = Line.objects.create(
+            line_code=expected_code,
+            line_name=expected_name,
+            line_type='PURCHASE',
+            is_active=True,
+        )
+        return line_obj
 
     update_fields = []
-    expected_name = supplier.supplier_name[:50]
+    if line_obj.line_code != expected_code:
+        line_obj.line_code = expected_code
+        update_fields.append('line_code')
     if line_obj.line_name != expected_name:
         line_obj.line_name = expected_name
         update_fields.append('line_name')
@@ -1808,6 +1821,15 @@ class LineViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['line_code', 'created_at']
     ordering = ['line_code']
 
+    def destroy(self, request, *args, **kwargs):
+        line = self.get_object()
+        if line.line_type == 'PURCHASE' and Supplier.objects.filter(supplier_code=line.line_code).exists():
+            return Response(
+                {'detail': '仕入先と紐づく購買ラインは手動削除できません。先に仕入先側を整理してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
 
 class ProductionLineViewSet(viewsets.ReadOnlyModelViewSet):
     """生産ライン一覧（読み取り専用）。生産計画など他機能からも参照されるため認証のみで許可"""
@@ -1834,8 +1856,9 @@ class SupplierViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ensure_supplier_purchase_line(supplier)
 
     def perform_update(self, serializer):
+        previous_supplier_code = str(serializer.instance.supplier_code or '').strip()
         supplier = serializer.save()
-        ensure_supplier_purchase_line(supplier)
+        ensure_supplier_purchase_line(supplier, previous_supplier_code=previous_supplier_code)
 
 
 class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
