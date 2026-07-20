@@ -583,14 +583,25 @@ const exportExcel = () => {
       'Ｐ№', '材料コード', '材料名', '設備コード', '設備名',
       '完成品コード', '完成品名', '採用区分',
       '完成品1個あたり材料', '確定数', '内示数', '採用数',
-      '完成品必要材料数', '必要材料数', '総重量(t)', '必要梱包数', '加工時間(時間)',
+      '完成品必要材料数', '総重量(t)', '必要梱包数', '加工時間(時間)',
     ],
   ]
   let sumDetMatQty = 0, sumDetWeightT = 0, sumDetPkg = 0, sumDetTimeH = 0
-  // パターン別明細は1パターン1行で集計（完成品複数でも重複加算しないよう pattern単位で集計）
-  const seenPatterns = new Set()
+  // パターン別明細は完成品＋パターン単位で計算（パターン合計をそのまま繰り返すと、
+  // 確定・内示がない完成品の行にも他の完成品分の重量・梱包数・加工時間が乗って見えるため）
   patternRows.value.forEach((row) => {
+    const unitWeightKg = row.unit_weight_kg != null ? Number(row.unit_weight_kg) : null
+    const packQty = row.pack_qty != null ? Number(row.pack_qty) : null
+    const processTimeMin = Number(row.process_time_min || 0)
     ;(row.finished_items || []).forEach((item) => {
+      const itemQty = Number(item.required_material_qty || 0)
+      const itemWeightT = unitWeightKg != null ? (itemQty * unitWeightKg) / 1000 : null
+      const itemTimeH = (itemQty * processTimeMin) / 60
+      const itemPkg = packQty ? Math.ceil(itemQty / packQty) : null
+      sumDetMatQty += itemQty
+      sumDetWeightT += itemWeightT != null ? itemWeightT : 0
+      sumDetPkg += itemPkg != null ? itemPkg : 0
+      sumDetTimeH += itemTimeH
       detailRows.push([
         row.pattern_no || '',
         row.material_code || '',
@@ -604,22 +615,14 @@ const exportExcel = () => {
         r2(item.firm_qty),
         r2(item.forecast_qty),
         r2(item.selected_qty),
-        r2(item.required_material_qty),
-        r2(row.required_material_qty),
-        row.total_weight_kg != null ? r2(Number(row.total_weight_kg) / 1000) : '',
-        row.required_packages != null ? Number(row.required_packages) : '',
-        r2((row.total_process_time_min || 0) / 60),
+        r2(itemQty),
+        itemWeightT != null ? r2(itemWeightT) : '',
+        itemPkg != null ? itemPkg : '',
+        r2(itemTimeH),
       ])
     })
-    if (!seenPatterns.has(row.pattern_id)) {
-      seenPatterns.add(row.pattern_id)
-      sumDetMatQty += Number(row.required_material_qty || 0)
-      sumDetWeightT += row.total_weight_kg != null ? Number(row.total_weight_kg) / 1000 : 0
-      sumDetPkg += row.required_packages != null ? Number(row.required_packages) : 0
-      sumDetTimeH += (row.total_process_time_min || 0) / 60
-    }
   })
-  detailRows.push(['合計', '', '', '', '', '', '', '', '', '', '', '', '', r2(sumDetMatQty), r2(sumDetWeightT), r2(sumDetPkg), r2(sumDetTimeH)])
+  detailRows.push(['合計', '', '', '', '', '', '', '', '', '', '', '', r2(sumDetMatQty), r2(sumDetWeightT), r2(sumDetPkg), r2(sumDetTimeH)])
 
   // ── 実績: 材料別集計 ──
   const actualMaterialRows = [
