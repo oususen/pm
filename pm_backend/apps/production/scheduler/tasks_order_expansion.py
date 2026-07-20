@@ -57,6 +57,14 @@ def run_order_expansion():
             'last_run_duration_seconds',
         ])
 
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
+
     return {
         'success': success,
         'expanded_count': expanded_count,

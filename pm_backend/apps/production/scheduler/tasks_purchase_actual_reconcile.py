@@ -50,6 +50,13 @@ def run_purchase_actual_reconcile_check(*, apply_fix=False, created_by=None):
             'last_run_duration_seconds',
             'last_run_message',
         ])
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
         return result
     except Exception as exc:
         duration = round(time.perf_counter() - started, 2)
@@ -62,4 +69,11 @@ def run_purchase_actual_reconcile_check(*, apply_fix=False, created_by=None):
             'last_run_duration_seconds',
             'last_run_message',
         ])
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
         raise

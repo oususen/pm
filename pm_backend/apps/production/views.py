@@ -35,7 +35,7 @@ from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_plan_line_setting import ProductionPlanLineSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
-from .models_schedule_config import ScheduleConfig
+from .models_schedule_config import ScheduleConfig, ScheduleRunLog
 from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,
@@ -58,6 +58,7 @@ from .serializers import (
     AutoPlanAggregateSettingSerializer,
     ProductionPlanLockSettingSerializer,
     ScheduleConfigSerializer,
+    ScheduleRunLogSerializer,
     PurchaseActualReconcileReportSerializer,
     PurchaseActualReconcileReportDetailSerializer,
     ProductionActualReconcileReportSerializer,
@@ -7441,6 +7442,18 @@ class ScheduleConfigView(APIView):
             config.notify_users.set(users)
 
         serializer = ScheduleConfigSerializer(config)
+        return Response(serializer.data)
+
+
+class ScheduleRunLogView(APIView):
+    """定時タスク実行履歴（直近分）"""
+
+    def get(self, request):
+        config_id = request.query_params.get('config_id')
+        if not config_id:
+            return Response({'detail': 'config_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        logs = ScheduleRunLog.objects.filter(config_id=config_id).order_by('-started_at')[:30]
+        serializer = ScheduleRunLogSerializer(logs, many=True)
         return Response(serializer.data)
 
 

@@ -95,6 +95,13 @@ def run_plan_to_actual_copy(config_id):
             f'既存実績ありスキップ: {skipped_existing_actual}件 ({duration}秒)'
         )
         config.save(update_fields=['last_run_status', 'last_run_duration_seconds', 'last_run_message'])
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
         return {
             'target_date': str(target_date),
             'line_id': config.line_id,
@@ -116,4 +123,11 @@ def run_plan_to_actual_copy(config_id):
             f'(line={config.line_id}, process={config.process_id}) / {str(e)}'
         )
         config.save(update_fields=['last_run_status', 'last_run_duration_seconds', 'last_run_message'])
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
         raise

@@ -8,6 +8,9 @@ export const createScheduleConfigAPI = (client) => ({
   runNow(payload = {}) {
     return client.post('/schedule-config/run-now/', payload)
   },
+  getRunLogs(configId) {
+    return client.get('/schedule-config/run-logs/', { params: { config_id: configId } })
+  },
   getPurchaseActualReconcileReports(params = {}) {
     return client.get('/schedule-config/purchase-actual-reconcile/reports/', { params })
   },

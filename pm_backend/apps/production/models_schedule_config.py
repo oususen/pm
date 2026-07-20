@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from django.conf import settings
 from django.db import models
 
@@ -163,3 +165,86 @@ class ScheduleConfig(models.Model):
         line_label = f' ({self.line.line_code})' if self.line_id else ''
         process_label = f' / {self.process.process_code}' if self.process_id else ''
         return f'{self.get_task_name_display()}{line_label}{process_label} - {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'
+
+
+RUN_LOG_RETENTION_DAYS = 30
+
+
+class ScheduleRunLog(models.Model):
+    """定時タスク実行履歴（1回の実行につき1レコード）"""
+
+    config = models.ForeignKey(
+        ScheduleConfig,
+        on_delete=models.CASCADE,
+        related_name='run_logs',
+        verbose_name='タスク設定',
+    )
+    task_name = models.CharField(
+        max_length=50,
+        choices=ScheduleConfig.TASK_CHOICES,
+        verbose_name='タスク名'
+    )
+    line = models.ForeignKey(
+        'masters.Line',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        verbose_name='対象ライン'
+    )
+    process = models.ForeignKey(
+        'masters.Process',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        verbose_name='対象工程'
+    )
+    started_at = models.DateTimeField(verbose_name='実行開始日時')
+    finished_at = models.DateTimeField(verbose_name='実行終了日時')
+    status = models.CharField(
+        max_length=20,
+        choices=ScheduleConfig.STATUS_CHOICES,
+        verbose_name='結果'
+    )
+    message = models.TextField(blank=True, default='', verbose_name='実行メッセージ')
+    duration_seconds = models.FloatField(null=True, blank=True, verbose_name='実行時間（秒）')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'production_schedule_run_log'
+        verbose_name = 'タスク実行履歴'
+        verbose_name_plural = 'タスク実行履歴'
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['config', '-started_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.task_name} {self.started_at:%Y-%m-%d %H:%M} - {self.status}'
+
+
+def record_schedule_run_log(config, *, status, message='', duration_seconds=None, started_at=None):
+    """
+    定時タスクの実行結果を履歴として1件記録し、
+    直近RUN_LOG_RETENTION_DAYS日を超えた古い履歴は自動的に削除する。
+
+    last_run_* は最新1回分しか保持しないため、過去の実行結果を追えるように
+    このテーブルへ完了時（成功/失敗）ごとに1行ずつ積み上げる。
+    """
+    if config is None:
+        return None
+
+    now = datetime.now()
+    log = ScheduleRunLog.objects.create(
+        config=config,
+        task_name=config.task_name,
+        line=config.line,
+        process=config.process,
+        started_at=started_at or config.last_run_at or now,
+        finished_at=now,
+        status=status,
+        message=message or '',
+        duration_seconds=duration_seconds,
+    )
+    cutoff = now - timedelta(days=RUN_LOG_RETENTION_DAYS)
+    ScheduleRunLog.objects.filter(config=config, started_at__lt=cutoff).delete()
+    return log

@@ -173,6 +173,14 @@ def run_auto_safety_stock(task_name='AUTO_SAFETY_STOCK_INTERNAL'):
         'last_run_duration_seconds',
     ])
 
+    from production.models_schedule_config import record_schedule_run_log
+    record_schedule_run_log(
+        config,
+        status=config.last_run_status,
+        message=config.last_run_message,
+        duration_seconds=config.last_run_duration_seconds,
+    )
+
     return {
         'success': success,
         'task_name': task_name,

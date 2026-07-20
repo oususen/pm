@@ -152,6 +152,13 @@
                 >
                   {{ runNowLabel(cfg) }}
                 </button>
+                <button
+                  class="btn"
+                  type="button"
+                  @click="openHistory(cfg, `生産計画自動生成（${cfg.line_code || cfg.line_name || ''}）`)"
+                >
+                  履歴
+                </button>
               </td>
               <td class="last-cell">
                 <div class="last-row">
@@ -314,7 +321,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="cfg.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報</h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(cfg, inventoryTaskLabel(cfg.task_name))">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>
@@ -407,6 +414,9 @@
                 </button>
                 <button class="btn" @click="runNow(cfg)" :disabled="isRunNowDisabled(cfg)">
                   {{ runNowLabel(cfg) }}
+                </button>
+                <button class="btn" type="button" @click="openHistory(cfg, `計画実績自動セット（${cfg.line_code || '-'}/${cfg.process_code || '-'}）`)">
+                  履歴
                 </button>
               </td>
               <td class="last-cell">
@@ -532,7 +542,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="purchaseActualReconcileConfig.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報</h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(purchaseActualReconcileConfig, '納入実績整合チェック')">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>
@@ -731,7 +741,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="productionActualReconcileConfig.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報</h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(productionActualReconcileConfig, '生産実績整合チェック')">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>
@@ -921,7 +931,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="cfg.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報</h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(cfg, safetyStockTaskLabel(cfg.task_name))">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>
@@ -1002,7 +1012,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="orderExpansionConfig.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報</h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(orderExpansionConfig, '自動受注展開')">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>
@@ -1082,7 +1092,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="containerImportCleanupConfig.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報</h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(containerImportCleanupConfig, '荷姿設定Excel取込 一時ファイル削除')">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>
@@ -1105,6 +1115,38 @@
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <div v-if="showHistoryModal" class="modal-overlay" @click.self="closeHistory">
+      <div class="modal-content history-modal">
+        <h2>実行履歴 - {{ historyModalLabel }}</h2>
+        <p class="helper">直近30日分・最大30件を表示します。</p>
+        <div v-if="historyLoading" class="helper">読み込み中...</div>
+        <div v-else-if="!historyLogs.length" class="helper">実行履歴がありません。</div>
+        <div v-else class="table-wrapper">
+          <table class="info-table history-table">
+            <thead>
+              <tr>
+                <th>実行開始</th>
+                <th>結果</th>
+                <th>実行時間</th>
+                <th>詳細</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="log in historyLogs" :key="log.id">
+                <td>{{ formatDateTime(log.started_at) }}</td>
+                <td><span :class="historyStatusClass(log)">{{ log.status_display || '-' }}</span></td>
+                <td>{{ log.duration_seconds != null ? log.duration_seconds + '秒' : '-' }}</td>
+                <td class="message-cell">{{ log.message || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="actions" style="margin-top: 16px">
+          <button class="btn" type="button" @click="closeHistory">閉じる</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1653,6 +1695,36 @@ const formatDateTime = (dt) => {
   return d.toLocaleString('ja-JP')
 }
 
+const historyModalLabel = ref('')
+const historyLogs = ref([])
+const historyLoading = ref(false)
+const showHistoryModal = ref(false)
+
+const historyStatusClass = (log) => ({
+  'status-success': log.status === 'SUCCESS',
+  'status-failed': log.status === 'FAILED',
+  'status-running': log.status === 'RUNNING',
+})
+
+const openHistory = async (cfg, label) => {
+  historyModalLabel.value = label
+  historyLogs.value = []
+  historyLoading.value = true
+  showHistoryModal.value = true
+  try {
+    const res = await api.scheduleConfig.getRunLogs(cfg.id)
+    historyLogs.value = res.data || []
+  } catch (e) {
+    console.error('実行履歴の取得に失敗しました', e)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const closeHistory = () => {
+  showHistoryModal.value = false
+}
+
 const codeLabel = (u) => u?.profile?.employee_code || u.username || u.email || `ID:${u.id}`
 
 const nameLabel = (u) => {
@@ -2073,5 +2145,53 @@ onUnmounted(() => {
 .status-running {
   color: #2563eb;
   font-weight: 600;
+}
+.history-link {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 8px;
+}
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  min-width: 500px;
+  max-width: 900px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+.modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 16px;
+}
+.history-table th {
+  background: #f5f7fa;
+  padding: 6px 8px;
+  white-space: nowrap;
+  width: auto;
+}
+.history-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+  vertical-align: top;
 }
 </style>

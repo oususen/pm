@@ -463,6 +463,14 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     exc_info=True,
                 )
 
+            from production.models_schedule_config import record_schedule_run_log
+            record_schedule_run_log(
+                config,
+                status=config.last_run_status,
+                message=config.last_run_message,
+                duration_seconds=config.last_run_duration_seconds,
+            )
+
         logger.info(
             f'[スケジューラ] 完了({task_name}): pickup={pickup_count}, purchase={purchase_count}, '
             f'recalc={recalc_count}, progress={progress_count}, canceled={canceled}, '

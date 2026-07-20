@@ -94,6 +94,14 @@ def _run_single_config(config, today, force=False):
         'last_run_status', 'last_run_message', 'last_run_duration_seconds'
     ])
 
+    from production.models_schedule_config import record_schedule_run_log
+    record_schedule_run_log(
+        config,
+        status=config.last_run_status,
+        message=config.last_run_message,
+        duration_seconds=config.last_run_duration_seconds,
+    )
+
     # 通知条件: 失敗時 または 対象ライン需要無しのとき
     if config.notify_users.exists() and (not success or not line_stats):
         today = datetime.now().date()

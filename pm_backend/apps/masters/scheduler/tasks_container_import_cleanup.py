@@ -52,6 +52,13 @@ def run_container_import_tmp_cleanup(*, created_by=None):
         config.last_run_duration_seconds = duration
         config.last_run_message = f'{deleted}件の一時ファイルを削除しました'
         config.save(update_fields=['last_run_status', 'last_run_duration_seconds', 'last_run_message'])
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
         return {'status': 'SUCCESS', 'deleted': deleted}
     except Exception as exc:
         duration = round(time.perf_counter() - started, 2)
@@ -60,4 +67,11 @@ def run_container_import_tmp_cleanup(*, created_by=None):
         config.last_run_duration_seconds = duration
         config.last_run_message = f'実行中にエラーが発生しました: {exc}'
         config.save(update_fields=['last_run_status', 'last_run_duration_seconds', 'last_run_message'])
+        from production.models_schedule_config import record_schedule_run_log
+        record_schedule_run_log(
+            config,
+            status=config.last_run_status,
+            message=config.last_run_message,
+            duration_seconds=config.last_run_duration_seconds,
+        )
         raise

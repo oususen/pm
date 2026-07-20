@@ -18,7 +18,7 @@ from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
-from .models_schedule_config import ScheduleConfig
+from .models_schedule_config import ScheduleConfig, ScheduleRunLog
 from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,
@@ -1189,6 +1189,21 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
     def get_last_run_status_display(self, obj):
         mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
         return mapping.get(obj.last_run_status, '')
+
+
+class ScheduleRunLogSerializer(serializers.ModelSerializer):
+    status_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduleRunLog
+        fields = [
+            'id', 'task_name', 'started_at', 'finished_at',
+            'status', 'status_display', 'message', 'duration_seconds',
+        ]
+
+    def get_status_display(self, obj):
+        mapping = {'SUCCESS': '成功', 'FAILED': '失敗', 'RUNNING': '実行中'}
+        return mapping.get(obj.status, '')
 
     def get_notify_user_names(self, obj):
         if not obj.pk:
