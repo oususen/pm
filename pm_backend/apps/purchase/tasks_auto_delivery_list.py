@@ -299,7 +299,9 @@ def run_auto_delivery_list_send(config_id, ignore_holiday=False):
         # 本文: カスタム本文が設定されていればそれを使用、なければ自動生成
         body_lines = [f'{supplier.supplier_name} 御中\n', 'お世話になっております。\n']
         if config.email_body_custom.strip():
-            body_lines.append(config.email_body_custom.strip())
+            custom_body = config.email_body_custom.strip()
+            body_date = delivery_date if excel_data else today
+            body_lines.append(custom_body.replace('YYYY-MM-DD', str(body_date)))
         else:
             if excel_data:
                 body_lines.append(f'納品リスト（納入日: {delivery_date}）を送付いたします。\n')
