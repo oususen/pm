@@ -22,6 +22,7 @@ from system_settings.models import SystemSetting
 
 from .models import LineDemand
 from .inventory.lead_time_utils import resolve_lead_days_for_step
+from .inventory.trace_debug import trace_log
 from orders.models import OrderLine
 from .models_line_backlog import LineBacklog
 from .models_line_backlog_adjustment import LineBacklogAdjustment
@@ -1602,6 +1603,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if not process_id:
                     continue
                 demand_map[(product_id, plan_date, process_id, parent_product_id)] += qty
+                trace_log(
+                    line_id, product_id, plan_date,
+                    f'pickup需要加算: process_id={process_id}, parent_product_id={parent_product_id}, '
+                    f'qty={qty} (累計={demand_map[(product_id, plan_date, process_id, parent_product_id)]})'
+                )
 
         # 既存バックログを先に取得し、ゼロ需要でもレコードを返せるよう初期化
         backlog_qs = self.get_queryset().filter(line_id=line_id, product_id__in=target_products).select_related('product', 'process')
@@ -1949,6 +1955,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     continue
                 key = (product_id, plan_date, process_id)
                 target_key_qty_map[key] += order_qty
+                trace_log(
+                    line_id, product_id, plan_date,
+                    f'pickup最終集計: process_id={process_id}, order_qty合計={target_key_qty_map[key]}'
+                )
 
             target_keys = [
                 (product_id, plan_date, process_id, order_qty)

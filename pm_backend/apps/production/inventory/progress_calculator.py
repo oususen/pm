@@ -13,6 +13,7 @@ from system_settings.models import SystemSetting
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
 from .inventory_calculator import _get_max_parent_bom_lead_time
+from .trace_debug import trace_log
 
 
 def recalculate_progress_qty(
@@ -239,6 +240,12 @@ def recalculate_progress_qty(
                 key = (demand.plan_date, demand.product_id)
                 demand_by_product[key] = demand_by_product.get(key, Decimal('0')) + qty
 
+    trace_log(
+        line_id, product_id, calc_start_date,
+        f'progress_qty計算開始: calc_start_date={calc_start_date}, 初期progress={last_progress}, '
+        f'初期planned_progress={last_planned_progress}'
+    )
+
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
     backlogs_to_update = []
 
@@ -251,6 +258,7 @@ def recalculate_progress_qty(
             progress_by_date[plan_date] = last_progress
             last_planned_progress = sample.planned_progress_qty or 0
             planned_progress_by_date[plan_date] = last_planned_progress
+            trace_log(line_id, product_id, plan_date, f'棚卸確定フラグにより既存値採用: progress_qty={last_progress}')
             continue
 
         # 締め日以前は既存値を維持し再計算しない
@@ -266,6 +274,7 @@ def recalculate_progress_qty(
             planned_progress_by_date[plan_date] = existing_planned_progress
             last_progress = existing_progress
             last_planned_progress = existing_planned_progress
+            trace_log(line_id, product_id, plan_date, f'締め日({progress_lock_date})以前のため既存値維持: progress_qty={existing_progress}')
             continue
 
         # 計算開始日以前は既存の進度値を使用し、更新しない
@@ -281,6 +290,7 @@ def recalculate_progress_qty(
             planned_progress_by_date[plan_date] = existing_planned_progress
             last_progress = existing_progress
             last_planned_progress = existing_planned_progress
+            trace_log(line_id, product_id, plan_date, f'計算開始日({calc_start_date})より前のため既存値維持: progress_qty={existing_progress}')
             continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
@@ -340,6 +350,16 @@ def recalculate_progress_qty(
         last_progress = progress_qty
         last_planned_progress = planned_progress_qty
         backlogs_to_update.extend(rows)
+
+        trace_log(
+            line_id, product_id, plan_date,
+            f'progress_qty計算: 前日進度={prev_progress} + 実績={actual_total} - 需要={progress_shipment} '
+            f'+ 手動調整={adjust_total} + scrap調整={scrap_adjust_total} + PROGRESS調整={progress_adjust} '
+            f'=> progress_qty={progress_qty} / '
+            f'planned_progress_qty: 前日計画進度={prev_planned_progress} + 計画生産={planned_production} '
+            f'- 需要={progress_shipment} + 調整合計={adjust_total + scrap_adjust_total + progress_adjust} '
+            f'=> planned_progress_qty={planned_progress_qty}'
+        )
 
     if backlogs_to_update:
         LineBacklog.objects.bulk_update(backlogs_to_update, ['progress_qty', 'planned_progress_qty'])

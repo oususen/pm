@@ -12,6 +12,7 @@ from ..models_line_backlog import LineBacklog
 from ..models_line_backlog_adjustment import LineBacklogAdjustment
 from ..serializers_process_realtime import _resolve_product_process_line
 from .lead_time_utils import resolve_lead_days_for_step
+from .trace_debug import trace_log
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
 
 PLANNED_STOCK_CALC_RULES_KEY = 'production.planned_stock_calc_rules'
@@ -1250,6 +1251,7 @@ def recalculate_stock_qty(
             stock_qty = sample.stock_qty or 0
             stock_by_date[plan_date] = stock_qty
             last_stock = stock_qty
+            trace_log(line_id, product_id, plan_date, f'棚卸確定フラグにより既存値採用: stock_qty={stock_qty}')
             continue
 
         # 締め日以前は既存値を維持し再計算しない
@@ -1261,6 +1263,7 @@ def recalculate_stock_qty(
                     break
             stock_by_date[plan_date] = existing_stock
             last_stock = existing_stock
+            trace_log(line_id, product_id, plan_date, f'締め日({inventory_lock_date})以前のため既存値維持: stock_qty={existing_stock}')
             continue
 
         # effective_start より前は既存の在庫値を使用し、更新しない（安全ガード）
@@ -1272,6 +1275,7 @@ def recalculate_stock_qty(
                     break
             stock_by_date[plan_date] = existing_stock
             last_stock = existing_stock
+            trace_log(line_id, product_id, plan_date, f'effective_start({effective_start})より前のため既存値維持: stock_qty={existing_stock}')
             continue
 
         actual_total = sum(r.actual_qty or 0 for r in rows)
@@ -1318,6 +1322,12 @@ def recalculate_stock_qty(
         rep.stock_qty = stock_qty
         stock_by_date[plan_date] = stock_qty
         last_stock = stock_qty
+
+        trace_log(
+            line_id, product_id, plan_date,
+            f'stock_qty計算: 前日在庫={prev_stock} + 実績={actual_total} - 出庫={actual_shipment} '
+            f'+ scrap調整={scrap_adjust_total} + 手動調整={stock_adjust} => stock_qty={stock_qty}'
+        )
 
         # 更新対象に追加
         backlogs_to_update.extend(rows)
@@ -1525,6 +1535,12 @@ def recalculate_planned_stock_qty(
         fallback = backlogs[0] if backlogs else None
         last_planned = (fallback.stock_qty or 0) if fallback else 0
 
+    trace_log(
+        line_id, product_id, calc_start_date,
+        f'planned_stock_qty計算開始: calc_start_date={calc_start_date}, max_lt={max_lt}, '
+        f'初期planned={last_planned}, planned_anchor={"あり" if planned_anchor else "なし"}'
+    )
+
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
     backlogs_to_update = []
 
@@ -1537,6 +1553,7 @@ def recalculate_planned_stock_qty(
             planned_stock = sample.planned_stock_qty or 0
             planned_by_date[plan_date] = planned_stock
             last_planned = planned_stock
+            trace_log(line_id, product_id, plan_date, f'棚卸確定フラグにより既存値採用: planned_stock_qty={planned_stock}')
             continue
 
         # 締め日以前は既存値を維持し再計算しない
@@ -1548,6 +1565,7 @@ def recalculate_planned_stock_qty(
                     break
             planned_by_date[plan_date] = existing_planned
             last_planned = existing_planned
+            trace_log(line_id, product_id, plan_date, f'締め日({inventory_lock_date})以前のため既存値維持: planned_stock_qty={existing_planned}')
             continue
 
         # 計算開始日以前は通常計算をスキップ。
@@ -1556,6 +1574,7 @@ def recalculate_planned_stock_qty(
         # 社内品: calc_start_date から通常計算を開始する（従来どおり）。
         if plan_date < calc_start_date:
             planned_by_date[plan_date] = last_planned
+            trace_log(line_id, product_id, plan_date, f'calc_start_date({calc_start_date})より前のため既存値維持: planned_stock_qty={last_planned}')
             continue
         if use_delivery_lt_initialization and not planned_anchor and plan_date == calc_start_date:
             planned_by_date[plan_date] = last_planned
@@ -1564,6 +1583,7 @@ def recalculate_planned_stock_qty(
                 row.planned_stock_qty = 0
             rep.planned_stock_qty = last_planned
             backlogs_to_update.extend(rows)
+            trace_log(line_id, product_id, plan_date, f'calc_start_date当日(最終品LT初期化)のため初期値採用: planned_stock_qty={last_planned}')
             continue
 
         plan_total = sum(r.plan_qty or 0 for r in rows)
@@ -1587,6 +1607,7 @@ def recalculate_planned_stock_qty(
             planned_by_date[plan_date] = planned_stock
             last_planned = planned_stock
             backlogs_to_update.extend(rows)
+            trace_log(line_id, product_id, plan_date, f'非稼働日のため前日値を繰越: planned_stock_qty={planned_stock}')
             continue
 
         is_final = bool(getattr(sample.product, 'is_final_product', False))
@@ -1647,6 +1668,19 @@ def recalculate_planned_stock_qty(
 
         # 更新対象に追加
         backlogs_to_update.extend(rows)
+
+        if plan_date < business_today:
+            trace_log(
+                line_id, product_id, plan_date,
+                f'planned_stock_qty計算(過去日/実績ベース): 前日計画在庫={prev_planned} + 実績={actual_total} '
+                f'- 出庫={planned_shipment} + 手動調整={planned_stock_adjust} => planned_stock_qty={planned_stock}'
+            )
+        else:
+            trace_log(
+                line_id, product_id, plan_date,
+                f'planned_stock_qty計算(当日以降/計画ベース): 前日計画在庫={prev_planned} + 計画={plan_total} '
+                f'- 出庫={planned_shipment} + 手動調整={planned_stock_adjust} => planned_stock_qty={planned_stock}'
+            )
 
     if backlogs_to_update:
         LineBacklog.objects.bulk_update(backlogs_to_update, ['planned_stock_qty'])
