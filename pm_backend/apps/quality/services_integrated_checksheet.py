@@ -3,7 +3,10 @@ import io
 
 from PIL import Image, ImageDraw
 
-from .models_integrated_checksheet import IntegratedChecksheetTemplate
+from .models_integrated_checksheet import (
+    IntegratedChecksheetBatch,
+    IntegratedChecksheetTemplate,
+)
 from .services_checksheet import _font
 
 
@@ -399,3 +402,218 @@ def generate_integrated_template_pdf(template):
         first.save(output, format="PDF", resolution=DPI)
     output.seek(0)
     return output
+
+
+def _user_display(u):
+    if not u:
+        return ""
+    last = (u.last_name or "").strip()
+    first = (u.first_name or "").strip()
+    return f"{last} {first}".strip() or str(u)
+
+
+def _pages_to_pdf(pages):
+    if not pages:
+        return None
+    output = io.BytesIO()
+    first = pages[0]
+    if len(pages) > 1:
+        first.save(output, format="PDF", resolution=DPI, save_all=True, append_images=pages[1:])
+    else:
+        first.save(output, format="PDF", resolution=DPI)
+    output.seek(0)
+    return output
+
+
+def generate_integrated_batch_pdf(batch: IntegratedChecksheetBatch):
+    """バッチの実績入りPDFを生成。工程ブロックごとに台目×項目のマトリクス表を出力。"""
+    template = batch.template
+    blocks = list(
+        template.process_blocks
+        .select_related("process")
+        .prefetch_related("items")
+        .order_by("sort_order")
+    )
+    units = list(batch.units.prefetch_related("checks__item").order_by("sequence_no"))
+    if not blocks or not units:
+        return None
+
+    check_map = {}
+    for unit in units:
+        for check in unit.checks.all():
+            check_map[(unit.id, check.item_id)] = check
+
+    pages = []
+
+    pages.append(_draw_batch_header_page(batch, template, units, blocks))
+
+    for block_idx, block in enumerate(blocks):
+        block_pages = _draw_batch_process_pages(batch, template, block, block_idx, len(blocks), units, check_map)
+        pages.extend(block_pages)
+
+    return _pages_to_pdf(pages)
+
+
+def _draw_batch_header_page(batch, template, units, blocks):
+    img, draw = _new_page()
+    y = MARGIN
+
+    title = template.document_title or template.name or "工程一体チェックシート"
+    font_title = _font(44, bold=True)
+    bbox = draw.textbbox((0, 0), title, font=font_title)
+    tw = bbox[2] - bbox[0]
+    draw.text(((PAGE_W - tw) / 2, y), title, fill="black", font=font_title)
+    y += 72
+
+    draw.line((MARGIN, y, PAGE_W - MARGIN, y), fill="#333333", width=3)
+    y += 24
+
+    font_label = _font(22, bold=True)
+    font_val = _font(22)
+    label_x = MARGIN + 20
+    val_x = MARGIN + 240
+
+    product_code = template.product.product_code if template.product else ""
+    product_name = template.product.product_name if template.product else ""
+    line_name = batch.line.line_name if batch.line else ""
+
+    rows = [
+        ("製品コード", product_code),
+        ("製品名", product_name),
+        ("ライン", line_name),
+        ("計画日", str(batch.plan_date) if batch.plan_date else ""),
+        ("ロットNo", batch.lot_no or ""),
+        ("台数", str(batch.quantity)),
+        ("版", f"v{template.version}"),
+    ]
+
+    if batch.leader_confirmed_by:
+        rows.append(("リーダ確認", f"{_user_display(batch.leader_confirmed_by)}  {batch.leader_confirmed_at.strftime('%Y-%m-%d %H:%M') if batch.leader_confirmed_at else ''}"))
+    if batch.supervisor_confirmed_by:
+        rows.append(("班長確認", f"{_user_display(batch.supervisor_confirmed_by)}  {batch.supervisor_confirmed_at.strftime('%Y-%m-%d %H:%M') if batch.supervisor_confirmed_at else ''}"))
+
+    for label, value in rows:
+        if not value:
+            continue
+        draw.text((label_x, y), label, fill="#333333", font=font_label)
+        draw.text((val_x, y), str(value), fill="black", font=font_val)
+        y += 36
+
+    y += 24
+    draw.text((label_x, y), "工程一覧", fill="black", font=_font(26, bold=True))
+    y += 44
+
+    font_proc = _font(20, bold=True)
+    for idx, block in enumerate(blocks):
+        colors = _color_for_block(idx)
+        cx = label_x + 20
+        draw.ellipse((cx, y + 4, cx + 20, y + 24), fill=colors["banner"])
+        item_count = block.items.count()
+        draw.text((cx + 28, y), f"{idx + 1}. {block.process.process_name}（{item_count}項目）", fill=colors["accent"], font=font_proc)
+        y += 32
+        if y > PAGE_H - MARGIN - 40:
+            break
+
+    return img
+
+
+def _draw_batch_process_pages(batch, template, block, block_index, total_blocks, units, check_map):
+    """工程ブロックごとに台目×項目の実績マトリクスを描画。"""
+    colors = _color_for_block(block_index)
+    items = list(block.items.order_by("sort_order", "id"))
+    if not items:
+        return []
+
+    product_code = template.product.product_code if template.product else ""
+    process_name = block.process.process_name
+
+    max_units_per_page = 20
+    all_pages = []
+    unit_offset = 0
+
+    while unit_offset < len(units):
+        page_units = units[unit_offset:unit_offset + max_units_per_page]
+        item_offset = 0
+
+        page_num = 0
+        while item_offset < len(items):
+            img, draw = _new_page()
+
+            banner_h = 52
+            draw.rectangle((0, 0, PAGE_W, banner_h), fill=colors["banner"])
+            unit_range = f"台目 {unit_offset + 1}-{unit_offset + len(page_units)}"
+            title_text = f"工程 {block_index + 1}/{total_blocks}: {process_name}  [{product_code}]  {unit_range}"
+            if page_num > 0:
+                title_text += f"  (続き {page_num + 1})"
+            font_title = _font(26, bold=True)
+            bbox = draw.textbbox((0, 0), title_text, font=font_title)
+            ty = (banner_h - (bbox[3] - bbox[1])) // 2
+            draw.text((MARGIN, ty), title_text, fill=colors["banner_text"], font=font_title)
+
+            y = banner_h + 12
+
+            item_col_w = 260
+            unit_col_w = max(50, min(90, (PAGE_W - MARGIN * 2 - item_col_w) // len(page_units)))
+            table_w = item_col_w + unit_col_w * len(page_units)
+            row_h = 28
+            font_th = _font(14, bold=True)
+            font_td = _font(13)
+
+            hdr_x = MARGIN
+            draw.rectangle((hdr_x, y, hdr_x + item_col_w, y + row_h), fill=colors["table_head"], outline="#999999")
+            draw.text((hdr_x + 4, y + 5), "点検項目", fill=colors["accent"], font=font_th)
+            hdr_x += item_col_w
+            for u in page_units:
+                draw.rectangle((hdr_x, y, hdr_x + unit_col_w, y + row_h), fill=colors["table_head"], outline="#999999")
+                label = f"#{u.sequence_no}"
+                draw.text((hdr_x + 4, y + 5), label, fill=colors["accent"], font=font_th)
+                hdr_x += unit_col_w
+            y += row_h
+
+            bottom = PAGE_H - MARGIN
+            drawn = 0
+            for item in items[item_offset:]:
+                if y + row_h > bottom:
+                    break
+                bg = "#f8f8f8" if drawn % 2 == 0 else "white"
+                cx = MARGIN
+                draw.rectangle((cx, y, cx + item_col_w, y + row_h), fill=bg, outline="#cccccc")
+                name = item.item_name or ""
+                if len(name) > 20:
+                    name = name[:19] + "…"
+                draw.text((cx + 4, y + 5), name, fill="black", font=font_td)
+                cx += item_col_w
+
+                for u in page_units:
+                    draw.rectangle((cx, y, cx + unit_col_w, y + row_h), fill=bg, outline="#cccccc")
+                    chk = check_map.get((u.id, item.id))
+                    if chk:
+                        val = ""
+                        if chk.judgement:
+                            val = chk.judgement
+                        elif chk.numeric_value is not None:
+                            val = str(chk.numeric_value).rstrip("0").rstrip(".")
+                        elif chk.text_value:
+                            val = chk.text_value[:6]
+                        elif chk.photo_url:
+                            val = "📷"
+                        color = "black"
+                        if chk.judgement == "OK":
+                            color = "#1a7a3a"
+                        elif chk.judgement == "NG":
+                            color = "#cc2222"
+                        draw.text((cx + 4, y + 5), val, fill=color, font=font_td)
+                    cx += unit_col_w
+
+                y += row_h
+                drawn += 1
+
+            all_pages.append(img)
+            item_offset += drawn
+            page_num += 1
+            if drawn == 0:
+                break
+
+        unit_offset += max_units_per_page
+
+    return all_pages

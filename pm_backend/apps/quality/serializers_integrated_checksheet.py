@@ -250,6 +250,7 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
 
     leader_confirmed_by_name = serializers.SerializerMethodField()
     supervisor_confirmed_by_name = serializers.SerializerMethodField()
+    line_team_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = IntegratedChecksheetBatch
@@ -259,6 +260,7 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
             "status", "unit_count", "completed_count", "process_progress",
             "leader_confirmed_by", "leader_confirmed_by_name", "leader_confirmed_at",
             "supervisor_confirmed_by", "supervisor_confirmed_by_name", "supervisor_confirmed_at",
+            "line_team_ids",
             "created_at", "updated_at",
         ]
 
@@ -267,6 +269,14 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
 
     def get_supervisor_confirmed_by_name(self, obj):
         return _format_user_name(obj.supervisor_confirmed_by) if obj.supervisor_confirmed_by_id else ""
+
+    def get_line_team_ids(self, obj):
+        from accounts.models import UnitLineMapping
+        return list(
+            UnitLineMapping.objects.filter(line_id=obj.line_id)
+            .values_list("unit__parent_id", flat=True)
+            .distinct()
+        )
 
     def get_process_progress(self, obj):
         blocks = list(

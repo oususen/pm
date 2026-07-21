@@ -1036,6 +1036,18 @@ class IntegratedChecksheetBatchViewSet(
                 {"detail": "リーダ確認済みのバッチのみ班長確認できます。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not request.user.is_superuser:
+            from accounts.models import UnitLineMapping
+            profile = getattr(request.user, 'profile', None)
+            team_ids = set(
+                UnitLineMapping.objects.filter(line=batch.line)
+                .values_list("unit__parent_id", flat=True)
+            )
+            if not any(can_act_as_supervisor(profile, tid) for tid in team_ids):
+                return Response(
+                    {"detail": "このラインの班長のみ班長確認できます。"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         batch.status = IntegratedChecksheetBatch.STATUS_SUPERVISOR_CONFIRMED
         batch.supervisor_confirmed_by = request.user
         batch.supervisor_confirmed_at = datetime.now()

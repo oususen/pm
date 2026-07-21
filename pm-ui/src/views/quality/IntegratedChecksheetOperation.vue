@@ -153,6 +153,8 @@
               <th>{{ t('integratedOperation.col.progress') }}</th>
               <th>{{ t('integratedOperation.col.processProgress') }}</th>
               <th>{{ t('integratedOperation.col.status') }}</th>
+              <th>リーダ確認</th>
+              <th>班長確認</th>
               <th>{{ t('integratedOperation.col.createdAt') }}</th>
               <th>{{ t('integratedOperation.col.actions') }}</th>
             </tr>
@@ -182,6 +184,8 @@
               <td>
                 <span class="status-chip" :class="statusClass(b.status)">{{ statusLabel(b.status) }}</span>
               </td>
+              <td>{{ b.leader_confirmed_by_name ? `${b.leader_confirmed_by_name} ${formatDateTime(b.leader_confirmed_at)}` : '-' }}</td>
+              <td>{{ b.supervisor_confirmed_by_name ? `${b.supervisor_confirmed_by_name} ${formatDateTime(b.supervisor_confirmed_at)}` : '-' }}</td>
               <td>{{ formatDateTime(b.created_at) }}</td>
               <td class="action-cell">
                 <button class="btn-primary btn-sm" @click="openBatchDetail(b)">{{ t('integratedOperation.detail') }}</button>
@@ -206,7 +210,7 @@
                 <button
                   v-if="isReviewMode && canShowSupervisorConfirm(b)"
                   class="btn-secondary btn-sm"
-                  :disabled="actionLoading || !isSupervisorUser"
+                  :disabled="actionLoading || !isSupervisorForBatch(b)"
                   @click="supervisorConfirm(b)"
                 >{{ t('integratedOperation.btn.supervisorConfirm') }}</button>
                 <span v-if="b.status === 'SUPERVISOR_CONFIRMED'" class="status-chip ok">{{ t('integratedOperation.btn.confirmed') }}</span>
@@ -741,12 +745,14 @@ const isLeaderOrAbove = computed(() => {
   const role = user.profile?.role || ''
   return ['leader', 'supervisor', 'chief', 'manager'].includes(role)
 })
-const isSupervisorUser = computed(() => {
+const isSupervisorForBatch = (batch) => {
   const user = authState.user
   if (!user) return false
   if (user.is_superuser) return true
-  return (user.profile?.role || '') === 'supervisor'
-})
+  const myTeams = user.profile?.supervisor_teams || []
+  const lineTeams = batch.line_team_ids || []
+  return lineTeams.some(tid => myTeams.includes(tid))
+}
 const canView = computed(() =>
   canAccessQuality(
     isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
@@ -1426,7 +1432,7 @@ const leaderConfirm = async (batch) => {
 }
 
 const supervisorConfirm = async (batch) => {
-  if (!isSupervisorUser.value) {
+  if (!isSupervisorForBatch(batch)) {
     alert(t('integratedOperation.alert.supervisorOnly'))
     return
   }
