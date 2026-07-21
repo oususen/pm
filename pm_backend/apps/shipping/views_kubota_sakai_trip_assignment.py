@@ -195,6 +195,12 @@ def _build_departure_truck_summaries(records, target_dates, products, truck_map)
     per_group_errors = defaultdict(list)
     per_group_truck_ids = defaultdict(set)
     per_group_truck = {}
+    truck_ids_by_physical_code = defaultdict(set)
+
+    for truck in truck_map.values():
+        physical_truck_code = str(getattr(truck, 'physical_truck_code', '') or '').strip()
+        if physical_truck_code:
+            truck_ids_by_physical_code[physical_truck_code].add(truck.id)
 
     for record in records:
         actual_departure_date = record.get('actual_departure_date')
@@ -241,7 +247,14 @@ def _build_departure_truck_summaries(records, target_dates, products, truck_map)
             }
 
         load_errors = list(per_group_errors.get(group_key, [])) + list(load.get('errors') or [])
-        for truck_id in sorted(per_group_truck_ids[group_key]):
+        representative_physical_code = str(
+            getattr(representative_truck, 'physical_truck_code', '') or ''
+        ).strip()
+        summary_truck_ids = per_group_truck_ids[group_key]
+        if representative_physical_code:
+            summary_truck_ids = truck_ids_by_physical_code[representative_physical_code]
+
+        for truck_id in sorted(summary_truck_ids):
             truck = truck_map.get(truck_id) or representative_truck
             summaries_by_date[actual_departure_date.isoformat()].append({
                 'truck_id': truck.id,
@@ -1218,65 +1231,94 @@ class KubotaSakaiTripLoadPreviewView(APIView):
         if not isinstance(rows, list):
             return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        due_adjustments = list(
+        preview_rows_by_date = {target_date: rows}
+        raw_preview_rows_by_date = request.data.get('preview_rows_by_date')
+        if raw_preview_rows_by_date is not None:
+            if not isinstance(raw_preview_rows_by_date, dict):
+                return Response({'detail': 'preview_rows_by_date は日付をキーとするオブジェクトで指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            preview_rows_by_date = {}
+            for raw_date, preview_rows in raw_preview_rows_by_date.items():
+                preview_date = _parse_date(raw_date)
+                if not preview_date or not isinstance(preview_rows, list):
+                    return Response({'detail': 'preview_rows_by_date の日付またはrowsが不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+                preview_rows_by_date[preview_date] = preview_rows
+            # target_date の入力値は常に rows を正として扱う。
+            preview_rows_by_date[target_date] = rows
+
+        preview_due_adjustments = list(
             KubotaSakaiDueAdjustment.objects.filter(
-                due_date=target_date,
+                due_date__in=preview_rows_by_date.keys(),
                 delivery_qty__gt=0,
             ).order_by('id')
         )
-        due_adjustment_map = {item.id: item for item in due_adjustments}
+        due_adjustments = [item for item in preview_due_adjustments if item.due_date == target_date]
+        preview_due_adjustments_by_date = defaultdict(dict)
+        preview_due_adjustment_map = {}
+        for item in preview_due_adjustments:
+            preview_due_adjustments_by_date[item.due_date][item.id] = item
+            preview_due_adjustment_map[item.id] = item
 
-        posted_alloc_map = {}
-        truck_ids = set()
+        posted_preview_alloc_maps = {}
         errors = []
-        for row in rows:
-            try:
-                due_adjustment_id = int(row.get('due_adjustment_id') or 0)
-            except (TypeError, ValueError):
-                due_adjustment_id = 0
-            if due_adjustment_id <= 0:
-                continue
-            if due_adjustment_id not in due_adjustment_map:
-                errors.append({'due_adjustment_id': due_adjustment_id, 'detail': '対象外の納期調整データです。'})
-                continue
-
-            allocations = row.get('allocations') or []
-            if not isinstance(allocations, list):
-                errors.append({'due_adjustment_id': due_adjustment_id, 'detail': 'allocations は配列で指定してください。'})
-                continue
-
-            normalized_allocations = []
-            for item in allocations:
+        for preview_date, preview_rows in preview_rows_by_date.items():
+            posted_alloc_map_for_date = {}
+            preview_due_adjustment_map_for_date = preview_due_adjustments_by_date[preview_date]
+            for row in preview_rows:
                 try:
-                    truck_id = int(item.get('truck_id') or 0)
+                    due_adjustment_id = int(row.get('due_adjustment_id') or 0)
                 except (TypeError, ValueError):
-                    truck_id = 0
-                qty = _to_decimal(item.get('qty'))
-                if truck_id <= 0 or qty <= 0:
+                    due_adjustment_id = 0
+                if due_adjustment_id <= 0:
                     continue
-                container_id = None
-                try:
-                    container_id = int(item.get('container_id') or 0) or None
-                except (TypeError, ValueError):
-                    pass
-                normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
-                truck_ids.add(truck_id)
-            posted_alloc_map[due_adjustment_id] = normalized_allocations
+                if due_adjustment_id not in preview_due_adjustment_map_for_date:
+                    errors.append({'due_adjustment_id': due_adjustment_id, 'detail': '対象外の納期調整データです。'})
+                    continue
+
+                allocations = row.get('allocations') or []
+                if not isinstance(allocations, list):
+                    errors.append({'due_adjustment_id': due_adjustment_id, 'detail': 'allocations は配列で指定してください。'})
+                    continue
+
+                normalized_allocations = []
+                for item in allocations:
+                    try:
+                        truck_id = int(item.get('truck_id') or 0)
+                    except (TypeError, ValueError):
+                        truck_id = 0
+                    qty = _to_decimal(item.get('qty'))
+                    if truck_id <= 0 or qty <= 0:
+                        continue
+                    container_id = None
+                    try:
+                        container_id = int(item.get('container_id') or 0) or None
+                    except (TypeError, ValueError):
+                        pass
+                    normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
+                posted_alloc_map_for_date[due_adjustment_id] = normalized_allocations
+            posted_preview_alloc_maps[preview_date] = posted_alloc_map_for_date
 
         if errors:
             return Response({'detail': '入力エラーがあります。', 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
 
+        posted_alloc_map = posted_preview_alloc_maps.get(target_date, {})
+        preview_due_adjustment_ids = {
+            due_adjustment_id
+            for posted_alloc_map_for_date in posted_preview_alloc_maps.values()
+            for due_adjustment_id in posted_alloc_map_for_date
+        }
+
+        preview_existing_assignments = list(
+            KubotaSakaiTripAssignment.objects.select_related('due_adjustment', 'truck', 'container')
+            .filter(due_adjustment_id__in=preview_due_adjustment_ids)
+            .order_by('id')
+        )
         existing_map = defaultdict(list)
-        for item in KubotaSakaiTripAssignment.objects.filter(
-            due_adjustment_id__in=[d.id for d in due_adjustments],
-            departure_date=target_date,
-        ).order_by('id'):
+        for item in preview_existing_assignments:
+            if item.due_adjustment.due_date != target_date or item.departure_date != target_date:
+                continue
             existing_map[item.due_adjustment_id].append({'truck_id': item.truck_id, 'qty': _to_decimal(item.qty)})
-            truck_ids.add(item.truck_id)
 
         trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
-        if truck_ids:
-            truck_ids.update([truck.id for truck in trucks])
         truck_map = {truck.id: truck for truck in trucks}
         calendar = _resolve_kubota_calendar()
         calendar_map = _build_calendar_day_map(calendar)
@@ -1355,18 +1397,18 @@ class KubotaSakaiTripLoadPreviewView(APIView):
             })
 
         affected_departure_dates = set()
-        for allocations in posted_alloc_map.values():
-            for allocation in allocations:
-                truck = truck_map.get(allocation['truck_id'])
-                if truck:
-                    affected_departure_dates.add(_truck_actual_departure_date(target_date, truck, calendar_map))
-        for due_adjustment_id, allocations in existing_map.items():
-            if due_adjustment_id in posted_alloc_map:
-                continue
-            for allocation in allocations:
-                truck = truck_map.get(allocation['truck_id'])
-                if truck:
-                    affected_departure_dates.add(_truck_actual_departure_date(target_date, truck, calendar_map))
+        for preview_date, posted_alloc_map_for_date in posted_preview_alloc_maps.items():
+            for allocations in posted_alloc_map_for_date.values():
+                for allocation in allocations:
+                    truck = truck_map.get(allocation['truck_id'])
+                    if truck:
+                        affected_departure_dates.add(_truck_actual_departure_date(preview_date, truck, calendar_map))
+        for item in preview_existing_assignments:
+            truck = truck_map.get(item.truck_id)
+            if truck:
+                affected_departure_dates.add(
+                    _truck_actual_departure_date(item.due_adjustment.due_date, truck, calendar_map)
+                )
 
         departure_summaries_by_date = {}
         if affected_departure_dates:
@@ -1377,10 +1419,14 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                     due_adjustment__due_date__gte=min(affected_departure_dates),
                     due_adjustment__due_date__lte=departure_query_end,
                 )
-                .exclude(due_adjustment_id__in=[d.id for d in due_adjustments])
+                .exclude(due_adjustment_id__in=preview_due_adjustment_ids)
             )
 
-            departure_product_codes = set(product_codes)
+            departure_product_codes = {
+                due_adjustment.product_code
+                for due_adjustment_id, due_adjustment in preview_due_adjustment_map.items()
+                if due_adjustment_id in preview_due_adjustment_ids
+            }
             departure_product_codes.update(item.due_adjustment.product_code for item in surrounding_assignments)
             departure_products = {
                 p.product_code: p
@@ -1388,10 +1434,11 @@ class KubotaSakaiTripLoadPreviewView(APIView):
             }
 
             departure_container_ids = {item.container_id for item in surrounding_assignments if item.container_id}
-            for allocations in posted_alloc_map.values():
-                for allocation in allocations:
-                    if allocation.get('container_id'):
-                        departure_container_ids.add(allocation['container_id'])
+            for posted_alloc_map_for_date in posted_preview_alloc_maps.values():
+                for allocations in posted_alloc_map_for_date.values():
+                    for allocation in allocations:
+                        if allocation.get('container_id'):
+                            departure_container_ids.add(allocation['container_id'])
             departure_container_map = {}
             if departure_container_ids:
                 departure_container_map = {
@@ -1426,29 +1473,34 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                     'capacity_override': capacity_override,
                 })
 
-            for due_adjustment in due_adjustments:
-                allocations = posted_alloc_map.get(due_adjustment.id, existing_map.get(due_adjustment.id, []))
-                for allocation in allocations:
-                    truck = truck_map.get(allocation['truck_id'])
-                    if not truck:
-                        continue
-                    container_override = None
-                    capacity_override = None
-                    cid = allocation.get('container_id')
-                    if cid and cid in departure_container_map:
-                        container_override = departure_container_map[cid]
-                        capacity_override = departure_pc_map.get((due_adjustment.product_code, cid))
-                        if not capacity_override:
-                            capacity_override = container_override.capacity
-                    departure_records.append({
-                        'actual_departure_date': _truck_actual_departure_date(target_date, truck, calendar_map),
-                        'due_date': target_date,
-                        'truck': truck,
-                        'product_code': due_adjustment.product_code,
-                        'qty': allocation['qty'],
-                        'container_override': container_override,
-                        'capacity_override': capacity_override,
-                    })
+            for posted_alloc_map_for_date in posted_preview_alloc_maps.values():
+                for due_adjustment_id, allocations in posted_alloc_map_for_date.items():
+                    due_adjustment = preview_due_adjustment_map[due_adjustment_id]
+                    for allocation in allocations:
+                        truck = truck_map.get(allocation['truck_id'])
+                        if not truck:
+                            continue
+                        container_override = None
+                        capacity_override = None
+                        cid = allocation.get('container_id')
+                        if cid and cid in departure_container_map:
+                            container_override = departure_container_map[cid]
+                            capacity_override = departure_pc_map.get((due_adjustment.product_code, cid))
+                            if not capacity_override:
+                                capacity_override = container_override.capacity
+                        departure_records.append({
+                            'actual_departure_date': _truck_actual_departure_date(
+                                due_adjustment.due_date,
+                                truck,
+                                calendar_map,
+                            ),
+                            'due_date': due_adjustment.due_date,
+                            'truck': truck,
+                            'product_code': due_adjustment.product_code,
+                            'qty': allocation['qty'],
+                            'container_override': container_override,
+                            'capacity_override': capacity_override,
+                        })
 
             departure_summaries_by_date = _build_departure_truck_summaries(
                 departure_records,

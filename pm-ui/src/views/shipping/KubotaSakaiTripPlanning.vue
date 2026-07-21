@@ -665,6 +665,7 @@ const previewDepartureSummaryByDate = ref({})
 const mergedRows = ref([])
 const productContainersMap = ref({})
 const previewTimers = new Map()
+let latestDeparturePreviewRequestId = 0
 const showTruckDetail = ref(false)
 const showPseudoProductPanel = ref(false)
 const pseudoTrucks = ref([])
@@ -1041,16 +1042,23 @@ const buildPayloadRowsForDate = (dateKey) => {
     }))
 }
 
+const buildPreviewRowsByDate = () => Object.fromEntries(
+  allDateKeys.value.map((dateKey) => [dateKey, buildPayloadRowsForDate(dateKey)]),
+)
+
 const previewLoadForDate = async (dateKey) => {
   const payloadRows = buildPayloadRowsForDate(dateKey)
+  const previewRowsByDate = buildPreviewRowsByDate()
+  const requestId = ++latestDeparturePreviewRequestId
   try {
-    const res = await api.kubotaSakaiTripAssignments.previewLoad(dateKey, payloadRows)
+    const res = await api.kubotaSakaiTripAssignments.previewLoad(dateKey, payloadRows, previewRowsByDate)
     const summaries = Array.isArray(res.data?.truck_summaries) ? res.data.truck_summaries : []
     const departureSummariesByDate = res.data?.departure_truck_summaries_by_date || {}
     previewSummaryByDate.value = {
       ...previewSummaryByDate.value,
       [dateKey]: summaries,
     }
+    if (requestId !== latestDeparturePreviewRequestId) return
     previewDepartureSummaryByDate.value = {
       ...previewDepartureSummaryByDate.value,
       ...departureSummariesByDate,

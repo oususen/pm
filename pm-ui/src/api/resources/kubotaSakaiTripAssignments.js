@@ -8,8 +8,12 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   bulkSave(targetDate, rows = []) {
     return client.post('/kubota-sakai-trip-assignments/bulk_save/', { target_date: targetDate, rows })
   },
-  previewLoad(targetDate, rows = []) {
-    return client.post('/kubota-sakai-trip-assignments/preview-load/', { target_date: targetDate, rows })
+  previewLoad(targetDate, rows = [], previewRowsByDate = {}) {
+    return client.post('/kubota-sakai-trip-assignments/preview-load/', {
+      target_date: targetDate,
+      rows,
+      preview_rows_by_date: previewRowsByDate,
+    })
   },
   loadDetail(targetDate) {
     return client.get('/kubota-sakai-trip-assignments/load-detail/', { params: { target_date: targetDate } })
