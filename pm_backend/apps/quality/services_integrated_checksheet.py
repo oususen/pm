@@ -539,25 +539,26 @@ def _draw_batch_process_pages(batch, template, block, block_index, total_blocks,
         while item_offset < len(items):
             img, draw = _new_page()
 
-            banner_h = 52
+            banner_h = 72
             draw.rectangle((0, 0, PAGE_W, banner_h), fill=colors["banner"])
             unit_range = f"台目 {unit_offset + 1}-{unit_offset + len(page_units)}"
             title_text = f"工程 {block_index + 1}/{total_blocks}: {process_name}  [{product_code}]  {unit_range}"
             if page_num > 0:
                 title_text += f"  (続き {page_num + 1})"
-            font_title = _font(26, bold=True)
+            font_title = _font(36, bold=True)
             bbox = draw.textbbox((0, 0), title_text, font=font_title)
             ty = (banner_h - (bbox[3] - bbox[1])) // 2
             draw.text((MARGIN, ty), title_text, fill=colors["banner_text"], font=font_title)
 
             y = banner_h + 12
 
-            item_col_w = 260
-            unit_col_w = max(50, min(90, (PAGE_W - MARGIN * 2 - item_col_w) // len(page_units)))
-            table_w = item_col_w + unit_col_w * len(page_units)
-            row_h = 28
-            font_th = _font(14, bold=True)
-            font_td = _font(13)
+            available_w = PAGE_W - MARGIN * 2
+            unit_col_w = 90
+            item_col_w = available_w - unit_col_w * len(page_units)
+            row_h = 44
+            font_th = _font(28, bold=True)
+            font_td = _font(26)
+            line_h = 34
 
             hdr_x = MARGIN
             draw.rectangle((hdr_x, y, hdr_x + item_col_w, y + row_h), fill=colors["table_head"], outline="#999999")
@@ -573,19 +574,22 @@ def _draw_batch_process_pages(batch, template, block, block_index, total_blocks,
             bottom = PAGE_H - MARGIN
             drawn = 0
             for item in items[item_offset:]:
-                if y + row_h > bottom:
+                name = item.item_name or ""
+                wrapped = _wrap_text(draw, name, font_td, item_col_w - 8)
+                actual_h = max(row_h, 8 + line_h * len(wrapped))
+                if y + actual_h > bottom:
                     break
                 bg = "#f8f8f8" if drawn % 2 == 0 else "white"
                 cx = MARGIN
-                draw.rectangle((cx, y, cx + item_col_w, y + row_h), fill=bg, outline="#cccccc")
-                name = item.item_name or ""
-                if len(name) > 20:
-                    name = name[:19] + "…"
-                draw.text((cx + 4, y + 5), name, fill="black", font=font_td)
+                draw.rectangle((cx, y, cx + item_col_w, y + actual_h), fill=bg, outline="#cccccc")
+                ty = y + 5
+                for wl in wrapped:
+                    draw.text((cx + 4, ty), wl, fill="black", font=font_td)
+                    ty += line_h
                 cx += item_col_w
 
                 for u in page_units:
-                    draw.rectangle((cx, y, cx + unit_col_w, y + row_h), fill=bg, outline="#cccccc")
+                    draw.rectangle((cx, y, cx + unit_col_w, y + actual_h), fill=bg, outline="#cccccc")
                     chk = check_map.get((u.id, item.id))
                     if chk:
                         val = ""
@@ -596,7 +600,7 @@ def _draw_batch_process_pages(batch, template, block, block_index, total_blocks,
                         elif chk.text_value:
                             val = chk.text_value[:6]
                         elif chk.photo_url:
-                            val = "📷"
+                            val = "[写真]"
                         color = "black"
                         if chk.judgement == "OK":
                             color = "#1a7a3a"
@@ -605,7 +609,7 @@ def _draw_batch_process_pages(batch, template, block, block_index, total_blocks,
                         draw.text((cx + 4, y + 5), val, fill=color, font=font_td)
                     cx += unit_col_w
 
-                y += row_h
+                y += actual_h
                 drawn += 1
 
             all_pages.append(img)

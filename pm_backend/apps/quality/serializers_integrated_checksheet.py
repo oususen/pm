@@ -297,11 +297,21 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
             ]
 
         unit_checked_items = []
+        block_item_ids = {}
+        for block in blocks:
+            block_item_ids[block.id] = {item.id for item in block.items.all()}
+
+        block_judgements = {block.id: set() for block in blocks}
         for unit in units:
             checked_item_ids = set()
             for check in unit.checks.all():
                 if _is_checked(check):
                     checked_item_ids.add(check.item_id)
+                if check.judgement and check.item_id:
+                    for bid, iids in block_item_ids.items():
+                        if check.item_id in iids:
+                            block_judgements[bid].add(check.judgement)
+                            break
             unit_checked_items.append(checked_item_ids)
 
         result = []
@@ -311,11 +321,14 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
                 done_units = total_units
             else:
                 done_units = sum(1 for checked_ids in unit_checked_items if required_item_ids.issubset(checked_ids))
+            judgements = block_judgements[block.id]
             result.append({
                 "process_block_id": block.id,
                 "process_code": block.process.process_code if block.process_id else "",
                 "process_name": block.process.process_name if block.process_id else "",
                 "done_units": done_units,
                 "total_units": total_units,
+                "has_ng": "NG" in judgements,
+                "has_rework": "修正流動" in judgements,
             })
         return result

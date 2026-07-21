@@ -175,7 +175,7 @@
                     v-for="chip in processProgressChips(b.process_progress)"
                     :key="chip.key"
                     class="process-progress-chip"
-                    :class="{ done: chip.done }"
+                    :class="chip.colorClass"
                   >
                     {{ chip.label }}
                   </span>
@@ -214,6 +214,12 @@
                   @click="supervisorConfirm(b)"
                 >{{ t('integratedOperation.btn.supervisorConfirm') }}</button>
                 <span v-if="b.status === 'SUPERVISOR_CONFIRMED'" class="status-chip ok">{{ t('integratedOperation.btn.confirmed') }}</span>
+                <button
+                  v-if="b.status === 'SUPERVISOR_CONFIRMED'"
+                  class="btn-secondary btn-sm"
+                  :disabled="actionLoading"
+                  @click="exportBatchPdf(b)"
+                >PDF出力</button>
               </td>
             </tr>
           </tbody>
@@ -936,14 +942,21 @@ const reviewRoleLabel = computed(() => {
 })
 
 const processProgressChips = (progressList) => {
-  if (!Array.isArray(progressList) || !progressList.length) return [{ key: 'none', label: '-', done: false }]
+  if (!Array.isArray(progressList) || !progressList.length) return [{ key: 'none', label: '-', colorClass: '' }]
   return progressList.map((p, idx) => {
     const doneUnits = Number(p.done_units ?? 0)
     const totalUnits = Number(p.total_units ?? 0)
+    const done = totalUnits > 0 && doneUnits >= totalUnits
+    let colorClass = ''
+    if (done) {
+      if (p.has_ng) colorClass = 'chip-ng'
+      else if (p.has_rework) colorClass = 'chip-rework'
+      else colorClass = 'done'
+    }
     return {
       key: `${p.process_block_id || idx}`,
       label: `${p.process_code || p.process_name || '-'}:${doneUnits}/${totalUnits}`,
-      done: totalUnits > 0 && doneUnits >= totalUnits,
+      colorClass,
     }
   })
 }
@@ -1444,6 +1457,23 @@ const supervisorConfirm = async (batch) => {
     alert(t('integratedOperation.alert.supervisorConfirmed'))
   } catch (e) {
     alert(`${t('integratedOperation.alert.supervisorConfirmFailed')}: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+const exportBatchPdf = async (batch) => {
+  actionLoading.value = true
+  try {
+    const res = await api.integratedChecksheets.exportBatchPdf(batch.id)
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${batch.product_code}_${batch.plan_date || ''}_${batch.id}.pdf`
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    alert(`PDF出力に失敗しました: ${e.response?.data?.detail || e.message}`)
   } finally {
     actionLoading.value = false
   }
@@ -2373,6 +2403,16 @@ onMounted(async () => {
 .process-progress-chip.done {
   background: #16a34a;
   border-color: #15803d;
+  color: #ffffff;
+}
+.process-progress-chip.chip-rework {
+  background: #eab308;
+  border-color: #ca8a04;
+  color: #ffffff;
+}
+.process-progress-chip.chip-ng {
+  background: #dc2626;
+  border-color: #b91c1c;
   color: #ffffff;
 }
 .required-mark { color: #dc2626; font-size: 12px; margin-left: 2px; }

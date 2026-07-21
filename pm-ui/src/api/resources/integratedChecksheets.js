@@ -77,6 +77,9 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   previewPdf(templateId) {
     return client.get(`/integrated-checksheet-templates/${templateId}/preview_pdf/`, { responseType: 'blob' })
   },
+  exportBatchPdf(batchId) {
+    return client.get(`/integrated-checksheet-batches/${batchId}/export_pdf/`, { responseType: 'blob' })
+  },
   listTasks(params = {}) {
     return client.get('/integrated-checksheet-tasks/', { params })
   },

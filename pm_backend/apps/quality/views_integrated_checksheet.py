@@ -1055,6 +1055,22 @@ class IntegratedChecksheetBatchViewSet(
         batch = self.get_queryset().get(pk=batch.pk)
         return Response(IntegratedChecksheetBatchSerializer(batch).data)
 
+    @action(detail=True, methods=["get"])
+    def export_pdf(self, request, pk=None):
+        from .services_integrated_checksheet import generate_integrated_batch_pdf
+
+        batch = self.get_object()
+        pdf_buffer = generate_integrated_batch_pdf(batch)
+        if not pdf_buffer:
+            return Response(
+                {"detail": "PDFを生成できませんでした。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        product_code = batch.product.product_code if batch.product else "batch"
+        plan_date = batch.plan_date.isoformat() if batch.plan_date else ""
+        filename = f"{product_code}_{plan_date}_{batch.id}.pdf"
+        return FileResponse(pdf_buffer, as_attachment=True, filename=filename, content_type="application/pdf")
+
 
 class IntegratedChecksheetUnitViewSet(viewsets.GenericViewSet):
     queryset = IntegratedChecksheetUnit.objects.all()
