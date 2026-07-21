@@ -34,6 +34,7 @@ from production.models_line_backlog import LineBacklog
 from production.models_production import StockAllocation
 from shipping.services.email_service import EmailService
 
+from .process_resolver import resolve_purchase_line, resolve_supplier_process
 from .models import (
     PurchaseOrderApprovalConfig,
     PurchaseOrderProposal,
@@ -419,6 +420,8 @@ def _write_plan_qty_on_final_approval(proposal: PurchaseOrderProposal):
     delivery_date = proposal.desired_delivery_date
     if not delivery_date:
         return
+    supplier = getattr(proposal, 'supplier', None)
+    canonical_line = resolve_purchase_line(supplier) if supplier else None
     for prop_line in proposal.lines.all():
         order_qty = int(prop_line.order_qty or 0)
         if order_qty <= 0:
@@ -427,9 +430,12 @@ def _write_plan_qty_on_final_approval(proposal: PurchaseOrderProposal):
         product_id = prop_line.product_id
         if not line_id or not product_id:
             continue
-        process = (
-            Process.objects.filter(line_id=line_id, process_code='PURCHASE').first()
-            or Process.objects.filter(line_id=line_id).order_by('id').first()
+        target_line = prop_line.line or canonical_line
+        process = resolve_supplier_process(
+            supplier=supplier,
+            line=target_line,
+            product=prop_line.product,
+            create_purchase_process=True,
         )
         process_id = process.id if process else None
 

@@ -78,6 +78,11 @@ from .services.gantt_planning import generate_line_gantt_plans
 from masters.models import Routing, RoutingStep, ProcessCycleTime, Line, Supplier, Process, Calendar, CalendarDay, BOM, BOMItem, Product, KubotaSakaiTruck
 from masters.services.routing_service import build_effective_routing_q, build_effective_routing_range_q, normalize_routing_reference_datetime, resolve_effective_routing
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, add_working_days
+from purchase.process_resolver import (
+    is_outsource_process,
+    resolve_purchase_line as resolve_supplier_purchase_line,
+    resolve_supplier_process,
+)
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
@@ -1026,14 +1031,25 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             for row in demand_rows
             if row.get('line__line_type') == 'PURCHASE' and row.get('line_id')
         }
-        purchase_processes_by_line = {}
+        fallback_processes_by_line = {}
         if purchase_line_ids:
-            purchase_process_rows = Process.objects.filter(
-                process_code='PURCHASE',
-                line_id__in=purchase_line_ids,
-            ).order_by('line_id', 'id').values_list('line_id', 'id')
-            for line_id, process_id in purchase_process_rows:
-                purchase_processes_by_line.setdefault(line_id, process_id)
+            purchase_lines = {
+                line.id: line
+                for line in Line.objects.filter(id__in=purchase_line_ids).only('id', 'line_code')
+            }
+            suppliers_by_code = {
+                supplier.supplier_code: supplier
+                for supplier in Supplier.objects.filter(
+                    supplier_code__in=[line.line_code for line in purchase_lines.values() if line.line_code]
+                )
+            }
+            for purchase_line_id, purchase_line in purchase_lines.items():
+                process = resolve_supplier_process(
+                    supplier=suppliers_by_code.get(purchase_line.line_code),
+                    line=purchase_line,
+                )
+                if process:
+                    fallback_processes_by_line[purchase_line_id] = process.id
 
         # 同じ(line, product, date)に実process_idがある組み合わせを収集
         # → PURCHASEフォールバックの過剰適用防止（外作品が購買と外作で2ブロック表示になるのを防ぐ）
@@ -1054,7 +1070,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             if not process_id and row.get('line__line_type') == 'PURCHASE':
                 # 同じ(line, product, date)に既に実processがある場合はフォールバックしない
                 if (line_id, product_id, plan_date) not in triplets_with_real_process:
-                    process_id = purchase_processes_by_line.get(line_id)
+                    process_id = fallback_processes_by_line.get(line_id)
 
             if not line_id or not product_id or not plan_date or not process_id:
                 skipped_no_process += 1
@@ -2168,34 +2184,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not supplier:
             return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-        line_code = supplier.supplier_code
-        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-        if len(line_name) > 50:
-            line_name = line_name[:50]
-        line_obj, created = Line.objects.get_or_create(
-            line_code=line_code,
-            defaults={
-                'line_name': line_name,
-                'line_type': 'PURCHASE',
-                'is_active': True,
-            }
-        )
-        if not created and line_obj.line_type != 'PURCHASE':
-            line_obj.line_type = 'PURCHASE'
-            line_obj.save(update_fields=['line_type'])
+        line_obj = resolve_supplier_purchase_line(supplier)
+        if not line_obj:
+            return Response({'detail': 'purchase line not found'}, status=status.HTTP_400_BAD_REQUEST)
         line_id = line_obj.id
-        process_code = 'PURCHASE'
-        process_name = '購買'
-        process_obj, _ = Process.objects.get_or_create(
-            process_code=process_code,
-            defaults={
-                'process_name': process_name,
-                'line': line_obj,
-                'management_unit': 'DAY',
-                'is_active': False,
-            }
-        )
-        process_id = process_obj.id
 
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
@@ -2210,7 +2202,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             sourcing_type__in=['BUY', 'SUBCON'],
             supplier_id=supplier_id,
             bom__is_active=True,
-        ).select_related('bom', 'bom__parent_product'))
+        ).select_related('bom', 'bom__parent_product', 'child_product', 'process', 'line'))
         if requested_product_ids:
             bom_items = [item for item in bom_items if item.child_product_id in requested_product_ids]
 
@@ -2218,6 +2210,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         parent_ids = set()
         child_ids = set()
         bom_child_ids = set()
+        child_process_map = {}
+        has_buy_items = False
         relation_keys = set()
         for item in bom_items:
             parent_id = item.bom.parent_product_id if item.bom_id else None
@@ -2230,11 +2224,31 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_ids.add(parent_id)
             child_ids.add(item.child_product_id)
             bom_child_ids.add(item.child_product_id)
+            sourcing_type = str(item.sourcing_type or '').upper()
+            if sourcing_type == 'BUY':
+                has_buy_items = True
+            resolved_process = resolve_supplier_process(
+                supplier=supplier,
+                line=line_obj,
+                product=getattr(item, 'child_product', None),
+                preferred_process_id=item.process_id,
+                sourcing_type=sourcing_type,
+                create_purchase_process=(sourcing_type == 'BUY'),
+            )
+            if resolved_process:
+                child_process_map.setdefault(item.child_product_id, resolved_process.id)
             key = (parent_id, item.child_product_id, qty, int(lead_time_days or 0))
             if key in relation_keys:
                 continue
             relation_keys.add(key)
             parent_to_children[parent_id].append((item.child_product_id, qty, lead_time_days))
+
+        default_process = resolve_supplier_process(
+            supplier=supplier,
+            line=line_obj,
+            create_purchase_process=has_buy_items or str(getattr(supplier, 'supplier_type', '') or '').lower() != 'outsource',
+        )
+        process_id = default_process.id if default_process else None
 
         # ルーティング工程（外作先）基準の紐付けを追加
         # BOMが無い丸ごと外作でも、RoutingStep.supplier から需要計算対象を決定する。
@@ -2251,7 +2265,6 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         # ルーティングステップのG工程 or 外作区分でBUY/SUBCONを判定
         # pickup_purchase文脈ではrouting_stepsは仕入先ライン限定のため、
         # process_code='G' または process.is_outsource=True の工程のみSUBCONとみなす
-        subcon_product_process_map = {}
         for step in routing_steps:
             source_parent_id = None
             if step.routing_id and getattr(step.routing, 'product_id', None):
@@ -2277,8 +2290,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
             # SUBCON判定（G工程または外作フラグ）
             process = getattr(step, 'process', None)
-            if process and step.process_id and (process.process_code == 'G' or process.is_outsource):
-                subcon_product_process_map.setdefault(child_id, step.process_id)
+            if process and step.process_id and is_outsource_process(process):
+                child_process_map.setdefault(child_id, step.process_id)
 
             qty = Decimal('1')
             lead_time_days = int(step.lead_time_days or 0)
@@ -2291,7 +2304,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
 
         _t2 = _time.perf_counter()
-        logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d, subcon=%d)', _t2 - _t1, len(parent_ids), len(child_ids), len(subcon_product_process_map))
+        logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d, subcon=%d)', _t2 - _t1, len(parent_ids), len(child_ids), len([pid for pid in child_process_map.values() if pid]))
 
         calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
             calendar_code='daiso'
@@ -2527,11 +2540,29 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if requested_product_ids:
             target_product_ids = set(requested_product_ids)
 
+        product_map = {
+            product.id: product
+            for product in Product.objects.filter(id__in=target_product_ids)
+        }
+        for product_id in target_product_ids:
+            if product_id in child_process_map:
+                continue
+            resolved_process = resolve_supplier_process(
+                supplier=supplier,
+                line=line_obj,
+                product=product_map.get(product_id),
+                create_purchase_process=has_buy_items or str(getattr(supplier, 'supplier_type', '') or '').lower() != 'outsource',
+            )
+            if resolved_process:
+                child_process_map[product_id] = resolved_process.id
+
         _t4 = _time.perf_counter()
         logger.info('[pickup_purchase] demand calc: %.3fs (demand_map=%d, target_products=%d)', _t4 - _t3, len(demand_map), len(target_product_ids))
 
         # SUBCON品はG工程（または外作区分）、BUY品はPURCHASEプロセスで既存レコードを検索
-        all_process_ids = {process_id} | set(subcon_product_process_map.values())
+        all_process_ids = set(child_process_map.values())
+        if process_id:
+            all_process_ids.add(process_id)
         existing_qs = LineBacklog.objects.filter(
             line_id=line_id,
             process_id__in=all_process_ids,
@@ -2552,11 +2583,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         updated = 0
         to_create = []
         to_update = []
+        touch_update = []
+        touch_timestamp = timezone.now()
 
         for (child_id, plan_date), demand in demand_map.items():
             qty_val = int(demand)
             # SUBCON品はG工程（または外作区分）、BUY品はPURCHASEプロセス
-            child_process_id = subcon_product_process_map.get(child_id, process_id)
+            child_process_id = child_process_map.get(child_id, process_id)
+            if not child_process_id:
+                continue
             existing_obj = existing_map.pop((child_id, plan_date, child_process_id), None)
             if existing_obj:
                 if (existing_obj.order_qty or 0) != qty_val or (existing_obj.demand_qty_plan or 0) != qty_val:
@@ -2564,6 +2599,9 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     existing_obj.demand_qty_plan = qty_val
                     to_update.append(existing_obj)
                     updated += 1
+                else:
+                    existing_obj.updated_at = touch_timestamp
+                    touch_update.append(existing_obj)
             else:
                 to_create.append(LineBacklog(
                     plan_date=plan_date,
@@ -2587,12 +2625,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if to_create:
             LineBacklog.objects.bulk_create(to_create, batch_size=500, ignore_conflicts=True)
         if to_update:
-            LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan'], batch_size=500)
+            LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan', 'updated_at'], batch_size=500)
+        if touch_update:
+            LineBacklog.objects.bulk_update(touch_update, ['updated_at'], batch_size=500)
         if zero_update:
-            LineBacklog.objects.bulk_update(zero_update, ['order_qty', 'demand_qty_plan'], batch_size=500)
+            LineBacklog.objects.bulk_update(zero_update, ['order_qty', 'demand_qty_plan', 'updated_at'], batch_size=500)
 
         _t6 = _time.perf_counter()
-        logger.info('[pickup_purchase] DB write: %.3fs (created=%d, updated=%d, zeroed=%d)', _t6 - _t5, len(to_create), len(to_update), len(zero_update))
+        logger.info('[pickup_purchase] DB write: %.3fs (created=%d, updated=%d, touched=%d, zeroed=%d)', _t6 - _t5, len(to_create), len(to_update), len(touch_update), len(zero_update))
         logger.info('[pickup_purchase] TOTAL: %.3fs', _t6 - _t0)
 
         return Response({'created': created, 'updated': updated, 'items': len(demand_map), 'line_id': line_id, 'process_id': process_id})

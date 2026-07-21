@@ -36,6 +36,7 @@ from .models import (
     PurchasePlanLockSetting,
 )
 from .models_kikan_mapping import PurchaseActualKikanMapping
+from .process_resolver import resolve_purchase_line, resolve_supplier_process
 from .serializers import PurchasePlanLockSettingSerializer
 
 logger = logging.getLogger(__name__)
@@ -126,63 +127,25 @@ def _resolve_product_by_code(code: str):
 
 
 def _resolve_purchase_line(supplier: Supplier | None):
-    if not supplier:
-        return None
-    line_code = supplier.supplier_code
-    line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-    if len(line_name) > 50:
-        line_name = line_name[:50]
-    line_obj, created = Line.objects.get_or_create(
-        line_code=line_code,
-        defaults={
-            'line_name': line_name,
-            'line_type': 'PURCHASE',
-            'is_active': True,
-        }
-    )
-    if not created and line_obj.line_type != 'PURCHASE':
-        line_obj.line_type = 'PURCHASE'
-        line_obj.save(update_fields=['line_type'])
-    return line_obj
+    return resolve_purchase_line(supplier)
 
 
 def _resolve_supplier_purchase_process(
     supplier: Supplier | None,
     line: Line | None = None,
     preferred_process_id=None,
+    product: Product | None = None,
+    sourcing_type=None,
+    create_purchase_process: bool = False,
 ):
-    if not supplier:
-        return None
-
-    supplier_type = str(getattr(supplier, 'supplier_type', 'both') or 'both').strip().lower()
-    target_line = line or _resolve_purchase_line(supplier)
-
-    def find_process_by_code(process_code: str):
-        if target_line:
-            process = Process.objects.filter(
-                line_id=target_line.id,
-                process_code=process_code,
-            ).first()
-            if process:
-                return process
-        return Process.objects.filter(process_code=process_code).first()
-
-    if supplier_type == 'outsource':
-        return find_process_by_code('G')
-
-    if supplier_type == 'purchase':
-        return find_process_by_code('PURCHASE')
-
-    preferred_process = Process.objects.filter(id=preferred_process_id).first() if preferred_process_id else None
-    if preferred_process:
-        return preferred_process
-
-    if target_line:
-        process = Process.objects.filter(line_id=target_line.id).order_by('id').first()
-        if process:
-            return process
-
-    return find_process_by_code('PURCHASE') or find_process_by_code('G')
+    return resolve_supplier_process(
+        supplier=supplier,
+        line=line,
+        product=product,
+        preferred_process_id=preferred_process_id,
+        sourcing_type=sourcing_type,
+        create_purchase_process=create_purchase_process,
+    )
 
 
 def _resolve_inventory_effective_start_date(
@@ -643,6 +606,7 @@ class PurchaseActualCandidatesView(APIView):
             process = _resolve_supplier_purchase_process(
                 supplier=supplier,
                 line=line,
+                product=product,
                 preferred_process_id=getattr(item.process, 'id', None),
             )
 
@@ -656,7 +620,7 @@ class PurchaseActualCandidatesView(APIView):
                 'line_code': line.line_code if line else supplier.supplier_code,
                 'line_name': line.line_name if line else supplier.supplier_name,
                 'process_id': process.id if process else None,
-                'process_code': process.process_code if process else 'PURCHASE',
+                'process_code': process.process_code if process else '',
             })
 
         # 重複候補を圧縮
@@ -699,20 +663,20 @@ class PurchaseActualRegisterView(APIView):
         canonical_line = _resolve_purchase_line(supplier_obj) if supplier_obj else None
         effective_line_id = canonical_line.id if canonical_line else line_id
 
-        process_obj = _resolve_supplier_purchase_process(
-            supplier=supplier_obj,
-            line=canonical_line,
-            preferred_process_id=process_id,
-        )
-        if not process_obj and effective_line_id:
-            process_obj = Process.objects.filter(line_id=effective_line_id).order_by('id').first()
-
-        if not process_obj:
-            return Response({'detail': 'purchase process not found'}, status=status.HTTP_400_BAD_REQUEST)
-
         product = _resolve_product_by_code(product_code)
         if not product:
             return Response({'detail': f'product not found: {product_code}'}, status=status.HTTP_404_NOT_FOUND)
+
+        process_obj = _resolve_supplier_purchase_process(
+            supplier=supplier_obj,
+            line=canonical_line,
+            product=product,
+            preferred_process_id=process_id,
+            create_purchase_process=True,
+        )
+
+        if not process_obj:
+            return Response({'detail': 'supplier process not found'}, status=status.HTTP_400_BAD_REQUEST)
 
         payload = {
             'process_id': process_obj.id,
@@ -1165,7 +1129,11 @@ class PurchaseActualBulkItemsView(APIView):
             except ValueError:
                 pass
 
-        process = _resolve_supplier_purchase_process(supplier=supplier, line=line)
+        default_process = _resolve_supplier_purchase_process(
+            supplier=supplier,
+            line=line,
+            create_purchase_process=True,
+        )
 
         # 仕入計画は LineBacklog.plan_qty (sequence_no=1) に格納されている
         backlogs = (
@@ -1189,7 +1157,7 @@ class PurchaseActualBulkItemsView(APIView):
                     'product_id': pid,
                     'product_code': b.product.product_code,
                     'product_name': b.product.product_name,
-                    'process_id': process.id if process else None,
+                    'process_id': b.process_id or (default_process.id if default_process else None),
                     'line_id': line.id,
                     'plan_qty': 0,
                     'actuals_by_date': {},
@@ -1225,7 +1193,7 @@ class PurchaseActualBulkItemsView(APIView):
             'line_id': line.id,
             'line_code': line.line_code,
             'line_name': line.line_name,
-            'process_id': process.id if process else None,
+            'process_id': default_process.id if default_process else None,
             'items': items,
         })
 
@@ -1708,8 +1676,7 @@ class PurchaseReceivingView(APIView):
             elif is_delivery_day:
                 coverage_dates = [target]
 
-        line = Line.objects.filter(line_code=supplier.supplier_code).first()
-        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
+        line = _resolve_purchase_line(supplier)
         items = []
         if line and coverage_dates:
             from production.models import LineDemand
@@ -1722,8 +1689,6 @@ class PurchaseReceivingView(APIView):
                     sequence_no=1,
                     plan_qty__gt=0,
                 ).select_related('product')
-                if purchase_process:
-                    qs = qs.filter(process=purchase_process)
                 for b in qs:
                     pid = b.product_id
                     if pid not in product_map:
@@ -1733,6 +1698,7 @@ class PurchaseReceivingView(APIView):
                             'product_id': pid,
                             'product_code': b.product.product_code if b.product else '',
                             'product_name': b.product.product_name if b.product else '',
+                            'product': b.product,
                             'transfer_destination': td or '',
                             'transfer_destination_label': td_label,
                             'next_process_name': '',
@@ -1759,6 +1725,7 @@ class PurchaseReceivingView(APIView):
                             'product_id': pid,
                             'product_code': prod.product_code if prod else d.product_code,
                             'product_name': prod.product_name if prod else '',
+                            'product': prod,
                             'transfer_destination': td or '',
                             'transfer_destination_label': td_label,
                             'next_process_name': '',
@@ -1805,15 +1772,22 @@ class PurchaseReceivingView(APIView):
                         routing_steps.setdefault(s.routing_id, []).append(s)
                     for pid, rid in routing_map.items():
                         step_list = routing_steps.get(rid, [])
-                        found_purchase = False
+                        target_process = _resolve_supplier_purchase_process(
+                            supplier=supplier,
+                            line=line,
+                            product=product_map[pid].get('product') if pid in product_map else None,
+                        )
+                        found_target_process = False
                         for s in step_list:
-                            if found_purchase:
+                            if found_target_process:
                                 product_map[pid]['next_process_name'] = s.process.process_name if s.process else ''
                                 break
-                            if s.process and s.process.process_code == 'PURCHASE':
-                                found_purchase = True
+                            if target_process and s.process_id == target_process.id:
+                                found_target_process = True
 
             items = _sort_delivery_list_items(product_map.values())
+            for item in items:
+                item.pop('product', None)
 
         return Response({
             'pattern': pattern_data,
@@ -1840,14 +1814,8 @@ class PurchaseReceivingView(APIView):
         canonical_line = _resolve_purchase_line(supplier)
         line_id = canonical_line.id if canonical_line else None
 
-        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
-        if not purchase_process:
-            purchase_process = Process.objects.filter(line_id=line_id).order_by('id').first() if line_id else None
-        if not purchase_process:
-            return Response({'detail': 'purchase process not found'}, status=status.HTTP_400_BAD_REQUEST)
-
-        created_ids = []
-        affected_product_ids = []
+        prepared_items = []
+        unresolved_items = []
         for item in items:
             product_id = item.get('product_id')
             received_qty = item.get('received_qty')
@@ -1855,13 +1823,49 @@ class PurchaseReceivingView(APIView):
             if not is_non_delivery and (received_qty is None or int(received_qty) <= 0):
                 continue
 
-            qty = Decimal(str(received_qty or 0))
             product = Product.objects.filter(id=product_id).first()
             if not product:
                 continue
 
+            process_obj = _resolve_supplier_purchase_process(
+                supplier=supplier,
+                line=canonical_line,
+                product=product,
+                create_purchase_process=True,
+            )
+            if not process_obj:
+                unresolved_items.append({
+                    'product_id': product.id,
+                    'product_code': product.product_code,
+                    'product_name': product.product_name,
+                })
+                continue
+
+            prepared_items.append({
+                'item': item,
+                'product': product,
+                'process_obj': process_obj,
+            })
+
+        if unresolved_items:
+            return Response({
+                'detail': 'supplier process not found for some items',
+                'unresolved_items': unresolved_items,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        created_ids = []
+        affected_product_ids = []
+        for prepared in prepared_items:
+            item = prepared['item']
+            product = prepared['product']
+            process_obj = prepared['process_obj']
+            received_qty = item.get('received_qty')
+            is_non_delivery = item.get('non_delivery', False)
+
+            qty = Decimal(str(received_qty or 0))
+
             payload = {
-                'process_id': purchase_process.id,
+                'process_id': process_obj.id,
                 'product_id': product.id,
                 'record_type': 'PRODUCTION',
                 'qty': qty,
@@ -1880,9 +1884,9 @@ class PurchaseReceivingView(APIView):
             serializer.is_valid(raise_exception=True)
             record = serializer.save()
 
-            serializer_line_id = getattr(purchase_process, 'line_id', None)
+            serializer_line_id = getattr(process_obj, 'line_id', None)
             target_line_id, target_date_resolved, serializer_plan_date = _resolve_purchase_actual_target_context(
-                process_obj=purchase_process,
+                process_obj=process_obj,
                 supplier_id=supplier_id,
                 line_id=line_id,
                 arrival_date_text=target.isoformat(),
@@ -1892,18 +1896,18 @@ class PurchaseReceivingView(APIView):
             if not is_non_delivery:
                 if not serializer_line_id:
                     _update_purchase_actual_backlog(
-                        line_id=target_line_id, process_id=purchase_process.id,
+                        line_id=target_line_id, process_id=process_obj.id,
                         product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
                     )
                 elif target_line_id and (
                     int(serializer_line_id) != int(target_line_id) or target_date_resolved != serializer_plan_date
                 ):
                     _update_purchase_actual_backlog(
-                        line_id=serializer_line_id, process_id=purchase_process.id,
+                        line_id=serializer_line_id, process_id=process_obj.id,
                         product_id=product.id, plan_date=serializer_plan_date, delta_qty=-int(qty),
                     )
                     _update_purchase_actual_backlog(
-                        line_id=target_line_id, process_id=purchase_process.id,
+                        line_id=target_line_id, process_id=process_obj.id,
                         product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
                     )
 
@@ -1920,7 +1924,7 @@ class PurchaseReceivingView(APIView):
 
             for lid in {serializer_line_id, target_line_id}:
                 _reconcile_purchase_actual_backlog_for_key(
-                    process_id=purchase_process.id,
+                    process_id=process_obj.id,
                     product_id=product.id,
                     line_id=lid,
                 )
@@ -2579,8 +2583,7 @@ class PurchaseDeliveryScheduleView(APIView):
             return Response({'items': []})
         target = date.fromisoformat(target_date_str) if target_date_str else date.today()
         line = _resolve_purchase_line(supplier)
-        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
-        if not line or not purchase_process:
+        if not line:
             return Response({'items': []})
 
         # カバー期間を算出
@@ -2608,7 +2611,6 @@ class PurchaseDeliveryScheduleView(APIView):
         # 合計数: LineBacklog seq=1, plan_date=target のみ（Excel取込で保存した納入予定数）
         plan_qs = LineBacklog.objects.filter(
             line_id=line.id,
-            process_id=purchase_process.id,
             plan_date=target,
             sequence_no=1,
             plan_qty__gt=0,
@@ -2623,7 +2625,6 @@ class PurchaseDeliveryScheduleView(APIView):
         # 実績: LineBacklog seq=0
         actual_qs = LineBacklog.objects.filter(
             line_id=line.id,
-            process_id=purchase_process.id,
             plan_date=target,
             sequence_no=0,
             actual_qty__gt=0,
@@ -2679,9 +2680,8 @@ class PurchaseDeliveryScheduleView(APIView):
             return Response({'detail': 'supplier not found'}, status=status.HTTP_400_BAD_REQUEST)
         target = date.fromisoformat(target_date_str) if target_date_str else date.today()
         line = _resolve_purchase_line(supplier)
-        purchase_process = Process.objects.filter(process_code='PURCHASE').first()
-        if not line or not purchase_process:
-            return Response({'detail': 'purchase line/process not found'}, status=status.HTTP_400_BAD_REQUEST)
+        if not line:
+            return Response({'detail': 'purchase line not found'}, status=status.HTTP_400_BAD_REQUEST)
 
         # 同日・同製品のみ上書き（他製品の既存計画は保持）
         saved_count = 0
@@ -2690,9 +2690,20 @@ class PurchaseDeliveryScheduleView(APIView):
             qty = int(item.get('qty') or 0)
             if not product_id or qty < 0:
                 continue
+            product = Product.objects.filter(id=product_id).first()
+            if not product:
+                continue
+            process = _resolve_supplier_purchase_process(
+                supplier=supplier,
+                line=line,
+                product=product,
+                create_purchase_process=True,
+            )
+            if not process:
+                continue
             LineBacklog.objects.update_or_create(
                 line_id=line.id,
-                process_id=purchase_process.id,
+                process_id=process.id,
                 product_id=product_id,
                 plan_date=target,
                 sequence_no=1,

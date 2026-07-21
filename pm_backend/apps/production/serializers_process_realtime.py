@@ -8,9 +8,10 @@ from rest_framework import serializers
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
-from masters.models import Process, Product, BOM, Line, Supplier, Routing, RoutingStep
+from masters.models import Process, Product, BOM, Supplier, Routing, RoutingStep
 from masters.services.routing_service import build_effective_routing_q, resolve_effective_routing
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
+from purchase.process_resolver import resolve_purchase_line, resolve_supplier_process
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_process_work_session import ProcessWorkSession
 from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
@@ -89,31 +90,16 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
 
     stack = [(root_product_id, Decimal(root_qty), None, None, None, None)]
     detail_map = {}
-    purchase_process = Process.objects.filter(process_code='PURCHASE').first()
-    purchase_line_id = purchase_process.line_id if purchase_process else None
+    supplier_cache = {}
+    product_cache = {}
 
     def resolve_purchase_line_id(supplier_id):
-        if not supplier_id:
-            return purchase_line_id
-        supplier = Supplier.objects.filter(id=supplier_id).first()
-        if not supplier:
-            return purchase_line_id
-        line_code = supplier.supplier_code
-        line_name = f"仕入:{supplier.supplier_code} {supplier.supplier_name}"
-        if len(line_name) > 50:
-            line_name = line_name[:50]
-        line_obj, created = Line.objects.get_or_create(
-            line_code=line_code,
-            defaults={
-                'line_name': line_name,
-                'line_type': 'PURCHASE',
-                'is_active': True,
-            }
-        )
-        if not created and line_obj.line_type != 'PURCHASE':
-            line_obj.line_type = 'PURCHASE'
-            line_obj.save(update_fields=['line_type'])
-        return line_obj.id
+        supplier = supplier_cache.get(supplier_id)
+        if supplier_id and supplier is None:
+            supplier = Supplier.objects.filter(id=supplier_id).first()
+            supplier_cache[supplier_id] = supplier
+        line_obj = resolve_purchase_line(supplier) if supplier else None
+        return line_obj.id if line_obj else None
 
     while stack:
         pid, qty, proc_id, line_id, supplier_id, sourcing_type = stack.pop()
@@ -121,9 +107,26 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
             continue
 
         st = (sourcing_type or '').upper()
-        if st in ('BUY', 'SUBCON') and purchase_process:
-            proc_id = purchase_process.id
-            line_id = resolve_purchase_line_id(supplier_id)
+        if st in ('BUY', 'SUBCON'):
+            supplier = supplier_cache.get(supplier_id)
+            if supplier_id and supplier is None:
+                supplier = Supplier.objects.filter(id=supplier_id).first()
+                supplier_cache[supplier_id] = supplier
+            product = product_cache.get(pid)
+            if pid and product is None:
+                product = Product.objects.filter(id=pid).first()
+                product_cache[pid] = product
+            resolved_process = resolve_supplier_process(
+                supplier=supplier,
+                line=resolve_purchase_line(supplier) if supplier else None,
+                product=product,
+                preferred_process_id=proc_id,
+                sourcing_type=st,
+                create_purchase_process=(st == 'BUY'),
+            )
+            if resolved_process:
+                proc_id = resolved_process.id
+                line_id = resolve_purchase_line_id(supplier_id) or getattr(resolved_process, 'line_id', None)
 
         # 同じ製品でも工程/サプライヤが異なれば別明細とする
         key = (pid, proc_id, supplier_id)

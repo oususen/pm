@@ -48,6 +48,9 @@
   2. **購買需要展開時** (`pickup_purchase` アクション)
      - 購買・外注部品の需要を展開
      - 親製品の `plan_qty` × BOM個数 で需要を計算
+     - `BUY` は `PURCHASE`、`SUBCON` は `G` / 外作工程で `process_id` を決定
+     - 需要は「仕入先ラインからの出庫需要」を意味し、同一仕入先ライン・同一製品・同一日付の需要行は1つに保つ
+     - 別工程行が同日に共存していても、業務上の別需要とはみなさず誤展開として補正対象にする
      - `LineBacklog.objects.update_or_create(..., sequence_no=0, defaults={'order_qty': ...})`
 
   3. **中間品需要展開時** (`pickup` アクション内)
@@ -119,6 +122,8 @@ unique_together = [('plan_date', 'process', 'product', 'line', 'sequence_no')]
 ```
 
 この制約により、同じ日付・工程・製品・ラインで、異なる `sequence_no` を持つ複数レコードが共存できます。
+ただし、`pickup_purchase` の業務仕様では **同一仕入先ライン・同一製品・同一日付の基礎需要行を複数工程に分けて共存させてはならない**。
+`process_id` は購買需要行の所属工程属性であり、同一需要を二重化する理由にはならない。
 
 ## 実装上の注意事項
 
@@ -300,6 +305,7 @@ WHERE line_id = 11
 | 2026-02-21 | 1.3 | 生産計画と購買計画での `sequence_no=0` 運用差を明記。`pickup_purchase` が `plan_qty` を更新しないことを追記 | Codex |
 | 2026-03-08 | 1.4 | 購買計画を seq=1 固定に変更。seq=0 の plan_qty 運用を廃止。生産計画の sequence_no は人間採番であることを明記 | Claude Sonnet 4.6 |
 | 2026-06-27 | 1.5 | 誤展開した基礎データ行を進度のみ画面から保守削除できる例外運用（`delete-progress-group`）を追記 | Codex |
+| 2026-07-21 | 1.6 | `pickup_purchase` の基礎需要行は同一仕入先ライン・同一製品・同一日付で一意とし、別工程共存を誤展開として補正対象にする運用を追記 | Codex |
 
 ## 関連ドキュメント
 
