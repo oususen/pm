@@ -1609,8 +1609,23 @@ const toggleCreateStepRow = () => {
   }
 }
 
+const sourcingTypeLabel = (type) => ({ MAKE: '自社製造', BUY: '購買', SUBCON: '外作' }[type] || type)
+
 const createStep = async () => {
   if (isCreateStepDisabled.value || !selectedRoutingId.value) return
+
+  // 同一仕入先で調達区分が異なる工程が既に存在するかチェック
+  const currentSupplier = newStepDraft.value.sourcing_type === 'MAKE' ? null : (newStepDraft.value.supplier ? Number(newStepDraft.value.supplier) : null)
+  if (currentSupplier) {
+    const conflict = steps.value.find(s => s.supplier === currentSupplier && s.sourcing_type !== newStepDraft.value.sourcing_type)
+    if (conflict) {
+      const sup = suppliers.value.find(s => s.id === currentSupplier)
+      const supName = sup ? `${sup.supplier_code} - ${sup.supplier_name}` : String(currentSupplier)
+      alert(`仕入先「${supName}」は既に調達区分「${sourcingTypeLabel(conflict.sourcing_type)}」で登録されています。\n同じ仕入先で異なる調達区分「${sourcingTypeLabel(newStepDraft.value.sourcing_type)}」は登録できません。`)
+      return
+    }
+  }
+
   creatingStep.value = true
   errorMessage.value = ''
   try {

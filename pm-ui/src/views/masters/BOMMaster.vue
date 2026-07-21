@@ -2314,6 +2314,22 @@ const saveBOMItem = async () => {
     }
   }
 
+  // 同一仕入先で調達区分が異なるBOMアイテムが既に存在するかチェック
+  const currentSupplier = itemForm.value.sourcing_type === 'MAKE' ? null : (itemForm.value.supplier || null)
+  if (currentSupplier) {
+    const conflict = bomItems.value.find(item => {
+      if (editingItemId.value && item.id === editingItemId.value) return false
+      return item.supplier === currentSupplier && item.sourcing_type !== itemForm.value.sourcing_type
+    })
+    if (conflict) {
+      const supplierName = getSupplierName(currentSupplier)
+      const existingLabel = getSourcingTypeLabel(conflict.sourcing_type)
+      const newLabel = getSourcingTypeLabel(itemForm.value.sourcing_type)
+      alert(`仕入先「${supplierName}」は既に調達区分「${existingLabel}」で登録されています。\n同じ仕入先で異なる調達区分「${newLabel}」は登録できません。`)
+      return
+    }
+  }
+
   const payload = {
     bom: selectedBOM.value.id,
     child_product: itemForm.value.child_product,
