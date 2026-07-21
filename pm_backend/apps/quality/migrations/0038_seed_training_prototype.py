@@ -17,8 +17,13 @@ TRACKS = [
 
 
 def load_app_data():
-    root = Path(__file__).resolve().parents[4]
-    prototype_path = root / "pm-ui" / "public" / "prototypes" / "education-test-certification" / "index.html"
+    """シードデータはDockerビルドコンテキストに含まれる pm_backend 配下から読む
+    （pm-ui はバックエンドイメージにコピーされないため参照不可）。
+    ファイルが無い環境では None を返し、呼び出し側でスキップする。"""
+    quality_app_dir = Path(__file__).resolve().parent.parent
+    prototype_path = quality_app_dir / "seed_data" / "education-test-certification" / "index.html"
+    if not prototype_path.exists():
+        return None
     text = prototype_path.read_text(encoding="utf-8")
     match = re.search(r"const APP_DATA = (.*?);\s*const STORAGE", text, re.S)
     if not match:
@@ -34,6 +39,8 @@ def seed_training_data(apps, schema_editor):
     TrainingTrack = apps.get_model("quality", "TrainingTrack")
 
     app_data = load_app_data()
+    if app_data is None:
+        return
     books_by_code = {}
 
     for book_order, book in enumerate(app_data.get("books", []), start=1):
