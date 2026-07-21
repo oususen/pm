@@ -75,28 +75,6 @@
                   <span class="info-label">納入先</span>
                   <span class="info-value">{{ g.ship_to_display || "-" }}</span>
                 </div>
-                <div class="info-row">
-                  <span class="info-label">合計内示</span>
-                  <span class="info-value">{{ g.summary.forecast }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">合計確定</span>
-                  <span class="info-value">{{ g.summary.firm }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">合計実績</span>
-                  <span class="info-value">{{ g.summary.actual }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">合計調整</span>
-                  <span class="info-value" :class="{ negative: g.summary.adjust < 0 }">
-                    {{ g.summary.adjust }}
-                  </span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">進度</span>
-                  <span class="info-value">{{ g.summary.progressRate }}</span>
-                </div>
               </div>
 
               <div class="matrix-block">
