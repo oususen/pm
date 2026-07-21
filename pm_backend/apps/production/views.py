@@ -6132,9 +6132,11 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 due_date__gte=order_start,
                 due_date__lte=order_end,
             )
-            .values('product_code', 'due_date', 'order__order_type')
+            .values('product_code', 'due_date', 'order__order_type',
+                    'order__customer__customer_code', 'ship_to_code')
             .annotate(total_qty=Sum('quantity'))
-            .order_by('product_code', 'due_date', 'order__order_type')
+            .order_by('product_code', 'due_date', 'order__order_type',
+                      'order__customer__customer_code', 'ship_to_code')
         )
 
         daily_order_map = {}
@@ -6143,7 +6145,9 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
             due_date = row.get('due_date')
             if not product_code or not due_date:
                 continue
-            key = (product_code, due_date)
+            customer_code = str(row.get('order__customer__customer_code') or '').strip()
+            ship_to_code = str(row.get('ship_to_code') or '').strip()
+            key = (product_code, customer_code, ship_to_code, due_date)
             bucket = daily_order_map.setdefault(key, {
                 'firm_qty': Decimal('0'),
                 'forecast_qty': Decimal('0'),
@@ -6156,7 +6160,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
                 bucket['forecast_qty'] += qty
 
         monthly_order_map = {}
-        for (product_code, _due_date), qty_map in daily_order_map.items():
+        for (product_code, _cust, _ship, _due_date), qty_map in daily_order_map.items():
             item = monthly_order_map.setdefault(product_code, {
                 'firm_qty': Decimal('0'),
                 'forecast_qty': Decimal('0'),

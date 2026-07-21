@@ -221,6 +221,7 @@
                   </div>
                   <div class="finished-meta">
                     完成品1個あたり材料={{ formatSheetQty(item.material_per_unit) }}
+                    / 1個あたり加工時間={{ formatNumber(Number(item.material_per_unit || 0) * Number(row.process_time_min || 0), 2) }}分
                     / 確定={{ formatNumber(item.firm_qty, 1) }}
                     / 内示={{ formatNumber(item.forecast_qty, 1) }}
                     / 採用={{ formatNumber(item.selected_qty, 1) }} ({{ basisLabel(item.selected_basis) }})
@@ -582,7 +583,8 @@ const exportExcel = () => {
     [
       'Ｐ№', '材料コード', '材料名', '設備コード', '設備名',
       '完成品コード', '完成品名', '採用区分',
-      '完成品1個あたり材料', '確定数', '内示数', '採用数',
+      '完成品1個あたり材料', '完成品1個あたり加工時間(分)',
+      '確定数', '内示数', '採用数',
       '完成品必要材料数', '総重量(t)', '必要梱包数', '加工時間(時間)',
     ],
   ]
@@ -612,6 +614,7 @@ const exportExcel = () => {
         item.finished_product_name || '',
         basisLabel(item.selected_basis),
         r2(item.material_per_unit),
+        r2(Number(item.material_per_unit || 0) * processTimeMin),
         r2(item.firm_qty),
         r2(item.forecast_qty),
         r2(item.selected_qty),
@@ -622,7 +625,7 @@ const exportExcel = () => {
       ])
     })
   })
-  detailRows.push(['合計', '', '', '', '', '', '', '', '', '', '', '', r2(sumDetMatQty), r2(sumDetWeightT), r2(sumDetPkg), r2(sumDetTimeH)])
+  detailRows.push(['合計', '', '', '', '', '', '', '', '', '', '', '', '', r2(sumDetMatQty), r2(sumDetWeightT), r2(sumDetPkg), r2(sumDetTimeH)])
 
   // ── 実績: 材料別集計 ──
   const actualMaterialRows = [
