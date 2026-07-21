@@ -26,9 +26,9 @@
         </button>
         <input type="date" v-model="startDate" />
         <select v-model.number="horizon">
-          <option :value="30">30日</option>
-          <option :value="60">60日</option>
-          <option :value="90">90日</option>
+          <option :value="31">31日</option>
+          <option :value="62">62日</option>
+          <option :value="92">92日</option>
         </select>
         <select v-model="selectedFavoriteId" @change="applyFavorite">
           <option value="">お気に入り選択</option>
@@ -105,6 +105,13 @@
                     <tr>
                       <th class="label-col">項目</th>
                       <th
+                        v-for="month in monthSummaryColumns"
+                        :key="`month-${month.key}`"
+                        class="month-col"
+                      >
+                        {{ month.label }}
+                      </th>
+                      <th
                         v-for="d in columns"
                         :key="d"
                         class="day-col"
@@ -118,6 +125,13 @@
                     <tr>
                       <th class="label-col">内示</th>
                       <td
+                        v-for="month in monthSummaryColumns"
+                        :key="`forecast-month-${month.key}`"
+                        class="cell month-cell"
+                      >
+                        {{ getMonthSummaryValue(g, month.key, "forecast") }}
+                      </td>
+                      <td
                         v-for="d in columns"
                         :key="`forecast-${d}`"
                         class="cell"
@@ -128,6 +142,13 @@
                     </tr>
                     <tr>
                       <th class="label-col">確定</th>
+                      <td
+                        v-for="month in monthSummaryColumns"
+                        :key="`firm-month-${month.key}`"
+                        class="cell month-cell"
+                      >
+                        {{ getMonthSummaryValue(g, month.key, "firm") }}
+                      </td>
                       <td
                         v-for="d in columns"
                         :key="`firm-${d}`"
@@ -140,6 +161,13 @@
                     <tr>
                       <th class="label-col">実績</th>
                       <td
+                        v-for="month in monthSummaryColumns"
+                        :key="`actual-month-${month.key}`"
+                        class="cell month-cell"
+                      >
+                        {{ getMonthSummaryValue(g, month.key, "actual") }}
+                      </td>
+                      <td
                         v-for="d in columns"
                         :key="`actual-${d}`"
                         class="cell"
@@ -151,6 +179,13 @@
                     <tr>
                       <th class="label-col">調整</th>
                       <td
+                        v-for="month in monthSummaryColumns"
+                        :key="`adjust-month-${month.key}`"
+                        class="cell month-cell"
+                      >
+                        {{ getMonthSummaryValue(g, month.key, "adjust") }}
+                      </td>
+                      <td
                         v-for="d in columns"
                         :key="`adjust-${d}`"
                         class="cell"
@@ -161,6 +196,11 @@
                     </tr>
                     <tr>
                       <th class="label-col">進度</th>
+                      <td
+                        v-for="month in monthSummaryColumns"
+                        :key="`progress-month-${month.key}`"
+                        class="cell month-cell"
+                      ></td>
                       <td
                         v-for="d in columns"
                         :key="`progress-${d}`"
@@ -245,7 +285,7 @@ const shipToFilter = ref("");
 const defaultStart = new Date();
 defaultStart.setDate(defaultStart.getDate() - 1);
 const startDate = ref(formatISODate(defaultStart));
-const horizon = ref(30);
+const horizon = ref(31);
 const loading = ref(false);
 const error = ref("");
 const searched = ref(false);
@@ -370,6 +410,20 @@ function isWeekend(dateStr) {
   return day === 0 || day === 6;
 }
 
+const getMonthKey = (dateStr) => {
+  const d = parseISODate(dateStr);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+};
+
+const formatMonthLabel = (monthKey) => {
+  const [year, month] = String(monthKey || "").split("-");
+  if (!year || !month) return "";
+  return `${Number(month)}月`;
+};
+
 const columns = computed(() => {
   const start = parseISODate(startDate.value);
   if (!start || Number.isNaN(start.getTime())) return [];
@@ -380,7 +434,31 @@ const columns = computed(() => {
   return cols;
 });
 
-const matrixMinWidth = computed(() => 80 + columns.value.length * 60);
+const monthSummaryColumns = computed(() => {
+  const result = [];
+  const seen = new Set();
+  for (const date of columns.value) {
+    const key = getMonthKey(date);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push({ key, label: formatMonthLabel(key) });
+  }
+  return result;
+});
+
+const monthSummaryStartDate = computed(() => {
+  const first = parseISODate(columns.value[0]);
+  if (!first || Number.isNaN(first.getTime())) return startDate.value;
+  return formatISODate(new Date(first.getFullYear(), first.getMonth(), 1));
+});
+
+const monthSummaryEndDate = computed(() => {
+  const last = parseISODate(columns.value[columns.value.length - 1]);
+  if (!last || Number.isNaN(last.getTime())) return endDate.value;
+  return formatISODate(new Date(last.getFullYear(), last.getMonth() + 1, 0));
+});
+
+const matrixMinWidth = computed(() => 80 + monthSummaryColumns.value.length * 60 + columns.value.length * 60);
 
 const endDate = computed(() => {
   if (!columns.value.length) return startDate.value;
@@ -622,6 +700,23 @@ const groups = computed(() => {
     // サマリーの累積進度: 最終日の進度をgetProgressRateから取得
     const lastDate = columns.value[columns.value.length - 1];
     const lastProgressStr = lastDate ? getProgressRate(g, lastDate) : "0";
+    const monthSummaryMap = {};
+    for (const month of monthSummaryColumns.value) {
+      monthSummaryMap[month.key] = {
+        forecast: 0,
+        firm: 0,
+        actual: 0,
+        adjust: 0,
+      };
+    }
+    for (const [date, cell] of Object.entries(g.cells)) {
+      const monthKey = getMonthKey(date);
+      if (!monthSummaryMap[monthKey]) continue;
+      monthSummaryMap[monthKey].forecast += normalizeQty(cell.forecast);
+      monthSummaryMap[monthKey].firm += normalizeQty(cell.firm);
+      monthSummaryMap[monthKey].actual += normalizeQty(cell.actual);
+      monthSummaryMap[monthKey].adjust += normalizeQty(cell.adjust);
+    }
 
     g.summary = {
       forecast: totalForecast,
@@ -630,6 +725,7 @@ const groups = computed(() => {
       adjust: totalAdjust,
       progressRate: lastProgressStr,
     };
+    g.monthSummaryMap = monthSummaryMap;
     const shipToList = Array.from(g.ship_to_codes || new Set()).filter((v) => v);
     if (splitByShipTo.value) {
       g.ship_to_display = g.ship_to_code || "-";
@@ -704,6 +800,11 @@ const formatCustomer = (group) => {
   return group.customer_code || "-";
 };
 
+const getMonthSummaryValue = (group, monthKey, rowKey) => {
+  const value = group.monthSummaryMap?.[monthKey]?.[rowKey] ?? 0;
+  return formatValue(value);
+};
+
 const toggleShipToMode = () => {
   splitByShipTo.value = !splitByShipTo.value;
   currentPage.value = 1;
@@ -726,7 +827,7 @@ const openOrderExpansionPage = (group) => {
       customer_code: group.customer_code || "",
       ship_to_code: group.ship_to_code || "",
       start_date: startDate.value || "",
-      horizon: String(horizon.value || 30),
+      horizon: String(horizon.value || 31),
     },
   });
   window.open(resolved.href, "_blank", "noopener");
@@ -994,8 +1095,8 @@ const load = async () => {
     await loadHolidayColumns();
     orderLines.value = await fetchAllOpenOrderLines();
     const shipmentActualsRes = await api.shipmentActuals.getShipmentActuals({
-      shipment_date__gte: startDate.value,
-      shipment_date__lte: endDate.value,
+      shipment_date__gte: monthSummaryStartDate.value,
+      shipment_date__lte: monthSummaryEndDate.value,
       product_code: productFilter.value,
       customer_code: customerFilter.value,
       ship_to_code: shipToFilter.value,
@@ -1066,7 +1167,7 @@ const toFavoritePayload = () => ({
   customerFilter: customerFilter.value || "",
   shipToFilter: shipToFilter.value || "",
   splitByShipTo: Boolean(splitByShipTo.value),
-  horizon: Number(horizon.value || 30),
+  horizon: Number(horizon.value || 31),
 });
 
 const applyFavoritePayload = (payload) => {
@@ -1074,8 +1175,8 @@ const applyFavoritePayload = (payload) => {
   customerFilter.value = String(payload?.customerFilter || "");
   shipToFilter.value = String(payload?.shipToFilter || "");
   splitByShipTo.value = Boolean(payload?.splitByShipTo ?? true);
-  const nextHorizon = Number(payload?.horizon || 30);
-  horizon.value = [30, 60, 90].includes(nextHorizon) ? nextHorizon : 30;
+  const nextHorizon = Number(payload?.horizon || 31);
+  horizon.value = [31, 62, 92].includes(nextHorizon) ? nextHorizon : 31;
 };
 
 const loadFavorites = async () => {
@@ -1453,8 +1554,15 @@ loadFavorites();
   font-weight: 600;
   min-width: 80px;
 }
+.month-col {
+  min-width: 60px;
+  background: #eef2ff !important;
+}
 .day-col {
   min-width: 60px;
+}
+.month-cell {
+  background: #f8faff;
 }
 .cell {
   background: #fff;
