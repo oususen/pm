@@ -26,6 +26,10 @@
             <label>品番/品名検索</label>
             <input v-model="searchText" placeholder="品番・品名で絞込" />
           </div>
+          <label class="filter-check">
+            <input v-model="showMissingOnly" type="checkbox" />
+            未入力のみ
+          </label>
           <div class="filter-actions">
             <button class="btn-primary" :disabled="!dirty || saving" @click="saveAll">
               {{ saving ? '保存中...' : `一括保存 (${changedCount}件)` }}
@@ -45,8 +49,8 @@
         <table class="data-table compact">
           <thead>
             <tr>
-              <th class="sticky-col col-code">品番</th>
-              <th class="col-name">品名</th>
+              <th class="sticky-col col-name">品名</th>
+              <th class="col-code col-code-right">品番</th>
               <th
                 v-for="proc in matrixProcesses"
                 :key="proc.id"
@@ -61,8 +65,8 @@
               :key="product.id"
               :class="{ 'row-editing': activeRow === rowIdx }"
             >
-              <td class="sticky-col col-code">{{ product.product_code }}</td>
-              <td class="col-name" :title="product.product_name">{{ product.product_name }}</td>
+              <td class="sticky-col col-name" :title="product.product_name">{{ product.product_name }}</td>
+              <td class="col-code col-code-right">{{ product.product_code }}</td>
               <td v-for="(proc, colIdx) in matrixProcesses" :key="proc.id" class="col-ct">
                 <input
                   v-if="hasRelation(product.id, proc.id)"
@@ -105,6 +109,7 @@ const matrixProcesses = ref([])
 const productProcessSet = ref(new Set())
 const selectedLineId = ref(null)
 const searchText = ref('')
+const showMissingOnly = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const activeRow = ref(-1)
@@ -150,12 +155,15 @@ const onLineChange = async () => {
 }
 
 const filteredProducts = computed(() => {
-  if (!searchText.value) return matrixProducts.value
   const q = searchText.value.toLowerCase()
-  return matrixProducts.value.filter(p =>
-    p.product_code.toLowerCase().includes(q) ||
-    (p.product_name || '').toLowerCase().includes(q)
-  )
+  return matrixProducts.value.filter((p) => {
+    const matchesSearch = !q ||
+      p.product_code.toLowerCase().includes(q) ||
+      (p.product_name || '').toLowerCase().includes(q)
+    if (!matchesSearch) return false
+    if (!showMissingOnly.value) return true
+    return hasMissingCycleTime(p.id)
+  })
 })
 
 const registeredCount = computed(() => {
@@ -177,6 +185,14 @@ const dirty = computed(() => changedCount.value > 0)
 
 const hasRelation = (productId, processId) => {
   return productProcessSet.value.has(`${productId}_${processId}`)
+}
+
+const hasMissingCycleTime = (productId) => {
+  return matrixProcesses.value.some((proc) => {
+    if (!hasRelation(productId, proc.id)) return false
+    const val = editedValues[`${productId}_${proc.id}`]
+    return val === undefined || val === null || val === ''
+  })
 }
 
 const getCellValue = (productId, processId) => {
@@ -279,6 +295,7 @@ const saveAll = async () => {
 .filter-field.wide { flex: 1; }
 .filter-field label { font-size: 11px; font-weight: 600; color: #666; }
 .filter-field input, .filter-field select { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+.filter-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #333; padding-bottom: 4px; }
 .filter-actions { display: flex; gap: 6px; }
 
 .summary-bar { font-size: 12px; color: #666; display: flex; gap: 16px; padding: 4px 0; }
@@ -294,11 +311,12 @@ const saveAll = async () => {
 .sticky-col { position: sticky; left: 0; z-index: 1; background: #fff; }
 .data-table thead .sticky-col { z-index: 3; background: #f0f2f5; }
 .col-code { min-width: 100px; max-width: 140px; }
+.col-code-right { text-align: right; }
 .col-name { min-width: 120px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-.col-ct { width: 80px; text-align: center; padding: 1px !important; }
+.col-ct { width: 80px; text-align: left; padding: 1px !important; }
 
 .ct-input {
-  width: 100%; border: 1px solid #ddd; background: #fff; text-align: right;
+  width: 100%; border: 1px solid #ddd; background: #fff; text-align: left;
   font-size: 12px; padding: 2px 4px; outline: none; box-sizing: border-box;
   border-radius: 2px;
 }
