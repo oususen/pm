@@ -16,6 +16,14 @@ from .models import (
     ProductChecksheetTask,
     ProductChecksheetTemplate,
     ProductChecksheetWorkflowLog,
+    TrainingBook,
+    TrainingExamAttempt,
+    TrainingExamDefinition,
+    TrainingExamQuestion,
+    TrainingExamSession,
+    TrainingQuestion,
+    TrainingStepRecord,
+    TrainingTrack,
 )
 
 
@@ -124,6 +132,62 @@ class ProductChecksheetWorkflowLogAdmin(admin.ModelAdmin):
 
 
 admin.site.register(ProductChecksheetPhoto)
+
+
+class TrainingQuestionInline(admin.TabularInline):
+    model = TrainingQuestion
+    extra = 0
+    fields = ("display_order", "question_code", "category", "question_type", "level", "is_active")
+    readonly_fields = ("question_code",)
+
+
+class TrainingExamQuestionInline(admin.TabularInline):
+    model = TrainingExamQuestion
+    extra = 0
+
+
+@admin.register(TrainingBook)
+class TrainingBookAdmin(admin.ModelAdmin):
+    list_display = ("book_code", "title", "question_count", "display_order", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("book_code", "title", "source_file")
+    inlines = [TrainingQuestionInline]
+
+
+@admin.register(TrainingExamDefinition)
+class TrainingExamDefinitionAdmin(admin.ModelAdmin):
+    list_display = ("book", "name", "is_random", "bank_all", "random_question_count", "display_order", "is_active")
+    list_filter = ("is_random", "bank_all", "is_active")
+    search_fields = ("name", "book__title", "book__book_code")
+    inlines = [TrainingExamQuestionInline]
+
+
+@admin.register(TrainingTrack)
+class TrainingTrackAdmin(admin.ModelAdmin):
+    list_display = ("track_no", "title", "book", "has_test", "is_active")
+    list_filter = ("has_test", "is_active")
+    search_fields = ("title", "track_code")
+
+
+@admin.register(TrainingExamSession)
+class TrainingExamSessionAdmin(admin.ModelAdmin):
+    list_display = ("id", "book", "exam", "trainee", "supervisor", "performed_at", "formal_exam", "is_completed")
+    list_filter = ("formal_exam", "is_completed")
+    search_fields = ("book__title", "trainee__username", "trainee__first_name", "trainee__last_name")
+
+
+@admin.register(TrainingExamAttempt)
+class TrainingExamAttemptAdmin(admin.ModelAdmin):
+    list_display = ("id", "book_title", "exam_name", "trainee", "supervisor", "score", "total", "result", "performed_at")
+    list_filter = ("result", "formal_exam")
+    search_fields = ("book_title", "exam_name", "trainee__username", "trainee__first_name", "trainee__last_name")
+
+
+@admin.register(TrainingStepRecord)
+class TrainingStepRecordAdmin(admin.ModelAdmin):
+    list_display = ("id", "track", "step_type", "trainee", "supervisor", "performed_at", "location")
+    list_filter = ("step_type",)
+    search_fields = ("track__title", "trainee__username", "trainee__first_name", "trainee__last_name")
 
 
 from .models_integrated_checksheet import (

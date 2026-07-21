@@ -11,6 +11,16 @@ from .models_checksheet import (
     ProductChecksheetTemplate,
     ProductChecksheetWorkflowLog,
 )
+from .models_training import (
+    TrainingBook,
+    TrainingExamAttempt,
+    TrainingExamDefinition,
+    TrainingExamQuestion,
+    TrainingExamSession,
+    TrainingQuestion,
+    TrainingStepRecord,
+    TrainingTrack,
+)
 
 
 class EquipmentInspectionTemplate(models.Model):
@@ -557,4 +567,12 @@ __all__ = [
     "ProductChecksheetPhoto",
     "ProductChecksheetTask",
     "ProductChecksheetWorkflowLog",
+    "TrainingBook",
+    "TrainingQuestion",
+    "TrainingExamDefinition",
+    "TrainingExamQuestion",
+    "TrainingTrack",
+    "TrainingExamSession",
+    "TrainingExamAttempt",
+    "TrainingStepRecord",
 ]

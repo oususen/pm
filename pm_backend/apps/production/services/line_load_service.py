@@ -9,13 +9,69 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Any, Optional
 
-from django.db.models import Q, Sum, F
+from django.db.models import F
 
-from masters.models import Line, CalendarDay, LineCycleTime, Process
+from masters.models import Line, CalendarDay, LineCycleTime, Process, RoutingStep
 from ..models import LineDemand
 
 
 class LineLoadService:
+    def _build_final_product_demand_map(
+        self,
+        product_codes: set[str],
+        start_date,
+        end_date,
+    ) -> Dict[tuple[str, Any], float]:
+        if not product_codes:
+            return {}
+
+        final_step_rows = RoutingStep.objects.filter(
+            routing__is_active=True,
+            routing__product__is_final_product=True,
+            routing__product__product_code__in=product_codes,
+            output_product_id=F('routing__product_id'),
+            line_id__isnull=False,
+        ).order_by(
+            'routing__product__product_code',
+            'step_no',
+            'id',
+        ).values_list(
+            'routing__product__product_code',
+            'line_id',
+        )
+
+        final_line_by_product_code = {}
+        for product_code, line_id in final_step_rows:
+            final_line_by_product_code[product_code] = line_id
+
+        if not final_line_by_product_code:
+            return {}
+
+        final_line_ids = set(final_line_by_product_code.values())
+        demand_qs = LineDemand.objects.filter(
+            line_id__in=final_line_ids,
+            product__is_final_product=True,
+            product_code__in=final_line_by_product_code.keys(),
+            plan_date__gte=start_date,
+            plan_date__lte=end_date,
+        ).values(
+            'line_id',
+            'product_code',
+            'plan_date',
+            'forecast_qty',
+            'firm_qty',
+        )
+
+        demand_map = defaultdict(float)
+        for row in demand_qs:
+            if final_line_by_product_code.get(row['product_code']) != row['line_id']:
+                continue
+            qty = float(row['forecast_qty'] or 0) + float(row['firm_qty'] or 0)
+            if qty <= 0:
+                continue
+            demand_map[(row['product_code'], row['plan_date'])] += qty
+
+        return demand_map
 
     def calculate(
         self,
@@ -39,31 +95,30 @@ class LineLoadService:
 
         # {(line_id, product_code): {process_id: cycle_time_sec}}
         ct_map = defaultdict(dict)
+        target_lines_by_product_code = defaultdict(set)
         process_ids = set()
         for ct in cycle_times:
             ct_map[(ct.line_id, ct.product.product_code)][ct.process_id] = float(ct.cycle_time_sec)
+            target_lines_by_product_code[ct.product.product_code].add(ct.line_id)
             process_ids.add(ct.process_id)
 
         process_map = {p.id: p for p in Process.objects.filter(id__in=process_ids)}
 
-        demands = LineDemand.objects.filter(
-            line_id__in=line_ids,
-            plan_date__gte=start_date,
-            plan_date__lte=end_date,
-        ).values('line_id', 'product_code', 'plan_date', 'forecast_qty', 'firm_qty')
+        final_demand_map = self._build_final_product_demand_map(
+            set(target_lines_by_product_code.keys()),
+            start_date,
+            end_date,
+        )
 
         # {(line_id, plan_date): {process_id: load_seconds}}
         load_map = defaultdict(lambda: defaultdict(float))
-        for d in demands:
-            key = (d['line_id'], d['product_code'])
-            ct_by_process = ct_map.get(key)
-            if not ct_by_process:
-                continue
-            demand_qty = float(d['forecast_qty'] or 0) + float(d['firm_qty'] or 0)
-            if demand_qty <= 0:
-                continue
-            for proc_id, ct_sec in ct_by_process.items():
-                load_map[(d['line_id'], d['plan_date'])][proc_id] += demand_qty * ct_sec
+        for (product_code, plan_date), demand_qty in final_demand_map.items():
+            for target_line_id in target_lines_by_product_code.get(product_code, set()):
+                ct_by_process = ct_map.get((target_line_id, product_code))
+                if not ct_by_process:
+                    continue
+                for proc_id, ct_sec in ct_by_process.items():
+                    load_map[(target_line_id, plan_date)][proc_id] += demand_qty * ct_sec
 
         calendar_days = CalendarDay.objects.filter(
             calendar__line__in=lines,

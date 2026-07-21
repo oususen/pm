@@ -36,6 +36,12 @@ const quality = [
     meta: { pageTitle: "品質チェックシート" },
   },
   {
+    path: "/quality/training-certification",
+    name: "TrainingCertificationApp",
+    component: () => import("@/views/quality/TrainingCertificationApp.vue"),
+    meta: { pageTitle: "教育・テスト・認定", resource: "quality" },
+  },
+  {
     path: "/quality/product-checksheet/templates",
     name: "ProductChecksheetTemplateList",
     component: () => import("@/views/quality/ProductChecksheetTemplateList.vue"),

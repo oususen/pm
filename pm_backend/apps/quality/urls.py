@@ -19,6 +19,14 @@ from .views_integrated_checksheet import (
     IntegratedChecksheetTemplateViewSet,
     IntegratedChecksheetUnitViewSet,
 )
+from .views_training import (
+    TrainingAttemptViewSet,
+    TrainingBookViewSet,
+    TrainingExamSessionStartView,
+    TrainingProgressSummaryView,
+    TrainingStepRecordViewSet,
+    TrainingTrackViewSet,
+)
 
 router = DefaultRouter()
 router.register(
@@ -66,10 +74,32 @@ router.register(
     IntegratedChecksheetUnitViewSet,
     basename="integratedchecksheet-unit",
 )
+router.register(
+    r"training-books",
+    TrainingBookViewSet,
+    basename="training-book",
+)
+router.register(
+    r"training-tracks",
+    TrainingTrackViewSet,
+    basename="training-track",
+)
+router.register(
+    r"training-attempts",
+    TrainingAttemptViewSet,
+    basename="training-attempt",
+)
+router.register(
+    r"training-step-records",
+    TrainingStepRecordViewSet,
+    basename="training-step-record",
+)
 
 urlpatterns = [
     path("equipment-inspection-tasks/", EquipmentInspectionTaskListView.as_view(), name="equipmentinspectiontask-list"),
     path("product-checksheet-tasks/", ProductChecksheetTaskListView.as_view(), name="productchecksheet-task-list"),
     path("integrated-checksheet-tasks/", IntegratedChecksheetTaskListView.as_view(), name="integratedchecksheet-task-list"),
+    path("training-exam-sessions/start/", TrainingExamSessionStartView.as_view(), name="training-exam-session-start"),
+    path("training-progress/summary/", TrainingProgressSummaryView.as_view(), name="training-progress-summary"),
     path("", include(router.urls)),
 ]

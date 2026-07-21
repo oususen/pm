@@ -122,9 +122,10 @@
     <div v-if="tooltip.visible" class="chart-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
       <div class="tooltip-title">{{ tooltip.line }} / {{ tooltip.date }}</div>
       <div class="tooltip-row">稼働: {{ tooltip.availMin }}分</div>
+      <div class="tooltip-row">負荷: {{ formatHours(tooltip.loadMin) }}h</div>
       <div class="tooltip-row"><b>負荷率: {{ tooltip.utilization }}%</b></div>
       <div v-for="p in tooltip.processes" :key="p.process_code" class="tooltip-row">
-        {{ p.process_code }} {{ p.process_name }}: {{ p.load_min }}分 ({{ p.utilization }}%)
+        {{ p.process_code }} {{ p.process_name }}: {{ formatHours(p.load_min) }}h ({{ p.utilization }}%)
       </div>
     </div>
   </div>
@@ -152,7 +153,7 @@ const filters = reactive({
 
 const tooltip = reactive({
   visible: false, x: 0, y: 0,
-  line: '', date: '', availMin: 0, utilization: 0, processes: [],
+  line: '', date: '', availMin: 0, loadMin: 0, utilization: 0, processes: [],
 })
 
 onMounted(async () => {
@@ -261,6 +262,11 @@ const formatDateLabel = (d) => {
   return d.date.slice(5)
 }
 
+const formatHours = (minutes) => {
+  const hours = (Number(minutes) || 0) / 60
+  return Math.round(hours * 10) / 10
+}
+
 const showTooltip = (ev, label, d) => {
   tooltip.visible = true
   tooltip.x = ev.clientX + 12
@@ -268,6 +274,7 @@ const showTooltip = (ev, label, d) => {
   tooltip.line = label
   tooltip.date = d.month_label || d.week_label || d.date
   tooltip.availMin = d.available_min
+  tooltip.loadMin = d.line_load_min || 0
   tooltip.utilization = d.utilization
   tooltip.processes = d.processes || []
 }
@@ -280,9 +287,9 @@ const exportExcel = () => {
 
   // グループ集計シート
   for (const gc of groupCharts.value) {
-    const rows = [['日付', '稼働(分)', '負荷(分)', '負荷率(%)']]
+    const rows = [['日付', '稼働(分)', '負荷(h)', '負荷率(%)']]
     for (const d of gc.data) {
-      rows.push([d.month_label || d.week_label || d.date, d.available_min, d.line_load_min, d.utilization])
+      rows.push([d.month_label || d.week_label || d.date, d.available_min, formatHours(d.line_load_min), d.utilization])
     }
     const ws = XLSX.utils.aoa_to_sheet(rows)
     ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }]
@@ -328,13 +335,13 @@ const exportExcel = () => {
     const row = [`${line.line_code} ${line.line_name}`]
     for (const d of dates) {
       const val = dateMap[d.date]
-      row.push(val ? val.line_load_min : '')
+      row.push(val ? formatHours(val.line_load_min) : '')
     }
     loadRows.push(row)
   }
   const wsLoad = XLSX.utils.aoa_to_sheet(loadRows)
   wsLoad['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
-  XLSX.utils.book_append_sheet(wb, wsLoad, '負荷(分)')
+  XLSX.utils.book_append_sheet(wb, wsLoad, '負荷(h)')
 
   const agg = filters.aggregate === 'monthly' ? '月別' : filters.aggregate === 'weekly' ? '週別' : '日別'
   XLSX.writeFile(wb, `長期負荷_${agg}_${filters.startDate}_${filters.endDate}.xlsx`)
