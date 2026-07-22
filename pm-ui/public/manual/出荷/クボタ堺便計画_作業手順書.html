@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>クボタ堺 便計画 作業手順書</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #1565c0;
+    --radius: 10px;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #5ca0e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #5ca0e8;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--accent);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: .02em; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; position: relative; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+
+  /* ---- mockup toolbar ---- */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .mock-toolbar .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 70px; }
+  .mock-toolbar .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; font-size: 12px; color: var(--ink); }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.import-btn { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
+  .mock-btn.save-btn { background: #bbdefb; border-color: #64b5f6; color: #0d47a1; }
+  .mock-btn.pdf-btn { background: #fff3e0; border-color: #ffb74d; color: #e65100; }
+  .mock-btn.pseudo-btn { background: #f1f8e9; border-color: #aed581; color: #33691e; }
+  :root[data-theme="dark"] .mock-btn.import-btn,
+  :root[data-theme="dark"] .mock-btn.save-btn,
+  :root[data-theme="dark"] .mock-btn.pdf-btn,
+  :root[data-theme="dark"] .mock-btn.pseudo-btn { background: var(--accent-light); border-color: var(--border); color: var(--accent); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .mock-btn.import-btn,
+    :root:not([data-theme="light"]) .mock-btn.save-btn,
+    :root:not([data-theme="light"]) .mock-btn.pdf-btn,
+    :root:not([data-theme="light"]) .mock-btn.pseudo-btn { background: var(--accent-light); border-color: var(--border); color: var(--accent); }
+  }
+
+  /* ---- mockup grid ---- */
+  .mock-grid-wrap { overflow-x: auto; margin-top: 10px; }
+  .mock-grid { border-collapse: collapse; font-size: 12px; width: 100%; font-variant-numeric: tabular-nums; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 7px; text-align: center; white-space: nowrap; }
+  .mock-grid thead th { background: var(--grid-head); font-weight: 600; color: var(--ink); font-size: 11px; }
+  .mock-grid .col-head { font-size: 13px; font-weight: 700; }
+  .mock-grid tbody td { background: var(--card); color: var(--ink); }
+  .mock-grid .left-col { font-weight: 600; background: var(--grid-head); text-align: left; min-width: 64px; }
+  .mock-grid .editable { background: #fffff0; color: var(--ink); }
+  :root[data-theme="dark"] .mock-grid .editable { background: #2a2a1e; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid .editable { background: #2a2a1e; } }
+  .mock-grid .forecast-label { color: #888; font-size: 11px; }
+  .mock-grid .remain-neg { color: var(--danger); font-weight:600; }
+  .mock-grid .remain-pos { color: var(--success); font-weight:600; }
+
+  /* product row colors */
+  .row-green { background: #c8f7c8 !important; }
+  .row-yellow { background: #fff9c4 !important; }
+  .row-pink { background: #ffcdd2 !important; }
+  :root[data-theme="dark"] .row-green { background: #1a3a1a !important; }
+  :root[data-theme="dark"] .row-yellow { background: #3a3a1a !important; }
+  :root[data-theme="dark"] .row-pink { background: #3a1a1a !important; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .row-green { background: #1a3a1a !important; }
+    :root:not([data-theme="light"]) .row-yellow { background: #3a3a1a !important; }
+    :root:not([data-theme="light"]) .row-pink { background: #3a1a1a !important; }
+  }
+
+  /* ---- trip select cell ---- */
+  .trip-cell { text-align: left !important; padding: 3px 5px !important; }
+  .trip-tag { display: inline-block; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 3px; padding: 1px 5px; font-size: 11px; font-weight: 600; color: #1565c0; margin-right: 2px; }
+  .cont-tag { display: inline-block; background: #f3e5f5; border: 1px solid #ce93d8; border-radius: 3px; padding: 1px 5px; font-size: 11px; font-weight: 600; color: #7b1fa2; margin-right: 2px; }
+  .qty-val { font-weight: 700; font-size: 12px; margin-left: 2px; }
+  .split-plus { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; background: #a5d6a7; color: #1b5e20; font-size: 13px; font-weight: 800; line-height: 1; margin-left: 4px; cursor: default; }
+  .split-minus { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; background: #ef9a9a; color: #b71c1c; font-size: 13px; font-weight: 800; line-height: 1; margin-left: 2px; cursor: default; }
+  :root[data-theme="dark"] .trip-tag { background: #1c3050; border-color: #2a4060; color: #5ca0e8; }
+  :root[data-theme="dark"] .cont-tag { background: #2a1a30; border-color: #3a2a40; color: #ce93d8; }
+  :root[data-theme="dark"] .split-plus { background: #1a3020; color: #66bb6a; }
+  :root[data-theme="dark"] .split-minus { background: #3a1a1a; color: #ef5350; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .trip-tag { background: #1c3050; border-color: #2a4060; color: #5ca0e8; }
+    :root:not([data-theme="light"]) .cont-tag { background: #2a1a30; border-color: #3a2a40; color: #ce93d8; }
+    :root:not([data-theme="light"]) .split-plus { background: #1a3020; color: #66bb6a; }
+    :root:not([data-theme="light"]) .split-minus { background: #3a1a1a; color: #ef5350; }
+  }
+
+  /* ---- occupancy bar ---- */
+  .occ-bar { display: flex; gap: 2px; margin-top: 6px; }
+  .occ-item { flex: 1; text-align: center; border-radius: 4px; padding: 3px 4px; font-size: 10px; font-weight: 700; }
+  .occ-item { background: var(--grid-head); color: var(--ink); }
+
+  /* ---- loading detail ---- */
+  .loading-detail { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 11px; }
+  .loading-detail .ld-title { font-weight: 700; font-size: 12px; margin-bottom: 8px; color: var(--ink); }
+  .loading-detail .ld-trip { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+  .loading-detail .ld-num { font-weight: 800; color: var(--accent); min-width: 32px; }
+  .loading-detail .ld-pct { font-weight: 700; min-width: 40px; }
+  .loading-detail .ld-items { color: var(--ink2); }
+
+  /* ---- highlight ring ---- */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+  .hl-orange::after { border-color: var(--warn); }
+
+  /* ---- callout ---- */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- dialog mockup ---- */
+  .mock-dialog { background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.15); padding: 20px 24px; max-width: 380px; margin: 14px auto 0; }
+  .mock-dialog h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+  .mock-dialog .dlg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  .mock-dialog .dlg-label { font-weight: 600; }
+  .mock-dialog .dlg-msg { font-size: 12px; color: var(--ink2); margin-bottom: 12px; }
+  .mock-dialog .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .dlg-btn { padding: 5px 16px; border-radius: 4px; border: 1px solid var(--border); font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; }
+  .dlg-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dlg-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+  /* ---- toc ---- */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* ---- note ---- */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; letter-spacing: .04em; }
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .overview-mock .om-nav .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 56px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>クボタ堺 便計画 作業手順書</h1>
+    <div class="subtitle">納期調整で決めた計画数を、便ごとに割り付ける操作手順</div>
+    <div class="path">
+      出荷管理 <span class="arrow">&#9656;</span> クボタ堺便計画
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>手順の流れ</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>データを取り込む</li>
+      <li><span class="tn">3</span>条件を指定して表示する</li>
+      <li><span class="tn">4</span>便・容器・数量を入力する</li>
+      <li><span class="tn">5</span>分割行の追加・削除</li>
+      <li><span class="tn">6</span>保存する</li>
+      <li><span class="tn">7</span>表示順・行色の設定</li>
+      <li><span class="tn">8</span>占有CSV・集荷明細PDF</li>
+      <li><span class="tn">9</span>補助機能</li>
+      <li><span class="tn">10</span>注意事項</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面説明 ===== -->
+  <div class="screen-overview">
+    <h2>画面説明 <span class="badge">まずここを読む</span></h2>
+
+    <!-- 画面全体モック -->
+    <div class="overview-mock" style="position:relative;">
+      <!-- ナビゲーション -->
+      <div class="om-nav" style="position:relative;">
+        <span>DAISO</span>
+        <span>受注</span>
+        <span>生産</span>
+        <span>仕入</span>
+        <span class="om-active">出荷</span>
+        <span>在庫</span>
+        <span>品質</span>
+        <span>マスタ</span>
+        <span>設定</span>
+        <span class="om-anno" style="top:-6px;right:auto;left:72px;">1</span>
+      </div>
+      <!-- ツールバー -->
+      <div style="background:var(--grid-head);padding:8px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:11px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <div class="f-group"><label>出荷開始日</label><span class="f-input" style="font-size:10px;min-width:74px;padding:2px 4px;">2026/07/21</span></div>
+        <div class="f-group"><label>期間</label><span class="f-select" style="font-size:10px;padding:2px 4px;">5日</span></div>
+        <div class="f-group"><label>検索</label><span class="f-input" style="font-size:10px;min-width:36px;padding:2px 4px;">品番</span></div>
+        <span style="flex:1"></span>
+        <span class="mock-btn import-btn" style="font-size:10px;padding:2px 6px;">取込</span>
+        <span class="mock-btn save-btn" style="font-size:10px;padding:2px 6px;">保存</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">表示</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">表示順</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">占有CSV</span>
+        <span class="mock-btn pdf-btn" style="font-size:10px;padding:2px 6px;">集荷明細PDF</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">便詳細</span>
+        <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">2</span>
+      </div>
+      <!-- グリッド -->
+      <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;font-size:11px;width:100%;">
+          <thead>
+            <tr>
+              <th rowspan="3" style="background:var(--grid-head);border:1px solid var(--grid-line);padding:4px 6px;min-width:80px;position:relative;">品番<span class="om-anno" style="top:-6px;left:-6px;">4</span></th>
+              <th rowspan="3" style="background:var(--grid-head);border:1px solid var(--grid-line);padding:4px 6px;min-width:50px;">納入場</th>
+              <th colspan="6" style="background:var(--grid-head);border:1px solid var(--grid-line);padding:4px 6px;font-size:13px;font-weight:700;position:relative;">7/22(水) <span style="font-size:10px;font-weight:400;margin-left:10px;">A:0%&nbsp; P:0%</span><span class="om-anno" style="top:-8px;right:-6px;">3</span></th>
+            </tr>
+            <tr>
+              <th colspan="6" style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;position:relative;">
+                <div class="occ-bar" style="margin:0;">
+                  <span class="occ-item">2: 93.7%</span>
+                  <span class="occ-item">3: 85.3%</span>
+                  <span class="occ-item">4: 99.9%</span>
+                  <span class="occ-item">5: 27.9%</span>
+                  <span class="occ-item">6: 0%</span>
+                </div>
+                <span class="om-anno" style="top:-10px;right:-6px;">5</span>
+              </th>
+            </tr>
+            <tr style="font-size:10px;">
+              <th style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;position:relative;">注番<span class="om-anno" style="top:-10px;left:50%;transform:translateX(-50%);">6</span></th>
+              <th style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;">需要</th>
+              <th style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;">振分</th>
+              <th style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;min-width:130px;position:relative;">便選択<span class="om-anno" style="top:-10px;right:-6px;">7</span></th>
+              <th style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;">残</th>
+              <th style="background:var(--grid-head);border:1px solid var(--grid-line);padding:2px 4px;">進捗</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- V053103705 / ZGHC (green) -->
+            <tr>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;text-align:left;font-weight:600;background:#c8f7c8;">V053103705</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;text-align:left;background:#c8f7c8;font-size:10px;">ZGHC</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;font-size:10px;background:#c8f7c8;">4510512187</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#c8f7c8;">6</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#c8f7c8;">6</td>
+              <td class="trip-cell" style="border:1px solid var(--grid-line);background:#c8f7c8;">
+                <span class="trip-tag">3</span><span class="cont-tag">f_k</span><span class="qty-val">6</span><span class="split-plus">+</span>
+              </td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#c8f7c8;"></td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#c8f7c8;">0</td>
+            </tr>
+            <!-- V053504641 / ZGHC (green, split) -->
+            <tr>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;text-align:left;font-weight:600;background:#b9f6ca;">V053504641</td>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;text-align:left;background:#b9f6ca;font-size:10px;">ZGHC</td>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;font-size:10px;background:#b9f6ca;">4510511896</td>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;background:#b9f6ca;">72</td>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;background:#b9f6ca;">72</td>
+              <td class="trip-cell" style="border:1px solid var(--grid-line);background:#b9f6ca;">
+                <span class="trip-tag">4</span><span class="cont-tag">a_k</span><span class="qty-val">64</span><span class="split-plus">+</span>
+              </td>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;background:#b9f6ca;"></td>
+              <td rowspan="2" style="border:1px solid var(--grid-line);padding:3px 5px;background:#b9f6ca;">0</td>
+            </tr>
+            <tr>
+              <td class="trip-cell" style="border:1px solid var(--grid-line);background:#b9f6ca;">
+                <span class="trip-tag">3</span><span class="cont-tag">a_k</span><span class="qty-val">8</span><span class="split-minus">-</span>
+              </td>
+            </tr>
+            <!-- V053143521 / 833 (pink) -->
+            <tr>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;text-align:left;font-weight:600;background:#ffcdd2;">V053143521</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;text-align:left;background:#ffcdd2;font-size:10px;">833</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;font-size:10px;background:#ffcdd2;">1369380</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#ffcdd2;">8</td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#ffcdd2;"></td>
+              <td class="trip-cell" style="border:1px solid var(--grid-line);background:#ffcdd2;">
+                <span class="trip-tag">4</span><span class="cont-tag">f_b</span><span class="qty-val">16</span><span class="split-plus">+</span>
+              </td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#ffcdd2;"></td>
+              <td style="border:1px solid var(--grid-line);padding:3px 5px;background:#ffcdd2;">0</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- 積み荷明細 -->
+      <div style="background:var(--grid-head);padding:8px 12px;font-size:10px;border-top:2px solid var(--grid-line);position:relative;">
+        <div style="font-weight:700;font-size:11px;margin-bottom:4px;">積み荷明細 <span style="font-weight:400;color:var(--ink2);">宵積みの便は前日別へ表示</span></div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <span><strong style="color:var(--accent);">便3</strong> 85.3% V053103705&#215;6 ZGHC, V053504641&#215;8 ZGHC ...</span>
+          <span><strong style="color:var(--accent);">便4</strong> 99.9% V053143521&#215;72 5476, V053504641&#215;64 ZGHC ...</span>
+        </div>
+        <span class="om-anno" style="top:-8px;right:10px;">8</span>
+      </div>
+    </div>
+
+    <!-- 番号付き説明 -->
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>ナビゲーションバー</strong> — 「出荷」から画面に入ります。</span></li>
+      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — 出荷開始日・期間の設定、取込・保存・表示・各種出力ボタンがあります。</span></li>
+      <li><span class="anno-num">3</span><span><strong>日付ヘッダ</strong> — 日付と A便/P便 の占有率が表示されます。</span></li>
+      <li><span class="anno-num">4</span><span><strong>品番・納入場</strong> — 左端に固定。行色は表示順設定で変更できます。</span></li>
+      <li><span class="anno-num">5</span><span><strong>便別占有率バー</strong> — 各便のトラック占有率がパーセンテージで表示されます。</span></li>
+      <li><span class="anno-num">6</span><span><strong>サブ列（6列1組）</strong> — 日付ごとに注番・需要・振分・便選択・残・進捗があります。</span></li>
+      <li><span class="anno-num">7</span><span><strong>便選択セル</strong> — ここで便番号・容器・数量を入力します。最も重要な操作エリアです。</span></li>
+      <li><span class="anno-num">8</span><span><strong>積み荷明細</strong> — 画面下部に、便ごとの積載内容と占有率が表示されます。</span></li>
+    </ul>
+
+    <!-- 便選択セル拡大 -->
+    <div class="overview-section">
+      <h3>便選択セルの入力方法</h3>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:12px;">便選択セルは3つの要素で構成されます。製品ごとに使える容器が決まっています。</p>
+      <div style="background:var(--grid-head);border:2px solid var(--grid-line);border-radius:8px;padding:20px 24px;display:flex;flex-direction:column;gap:16px;">
+        <!-- 拡大セル -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:16px;">
+          <span style="position:relative;"><span class="trip-tag" style="font-size:15px;padding:3px 10px;">3 &#9660;</span><span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">A</span></span>
+          <span style="position:relative;"><span class="cont-tag" style="font-size:15px;padding:3px 10px;">f_k &#9660;</span><span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">B</span></span>
+          <span style="position:relative;"><span class="qty-val" style="font-size:18px;">6</span><span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">C</span></span>
+          <span style="position:relative;display:inline-flex;gap:4px;margin-left:8px;">
+            <span class="split-plus" style="width:24px;height:24px;font-size:18px;">+</span>
+            <span class="split-minus" style="width:24px;height:24px;font-size:18px;">-</span>
+            <span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">D</span>
+          </span>
+        </div>
+      </div>
+      <ul class="anno-list" style="margin-top:16px;">
+        <li><span class="anno-num">A</span><span><strong>便番号</strong> — ドロップダウンで便を選びます（2, 3, 4, 5, 6 など）。便ごとの出発時刻・着時刻は「便詳細」で確認できます。</span></li>
+        <li><span class="anno-num">B</span><span><strong>容器</strong> — ドロップダウンで容器を選びます。製品ごとに設定された容器が表示されます（例: f_k, a_k, r_b, f_b）。</span></li>
+        <li><span class="anno-num">C</span><span><strong>数量</strong> — 納入数量を入力します。</span></li>
+        <li><span class="anno-num">D</span><span><strong>分割ボタン</strong> — <strong>+</strong> で行を追加（複数便に分割）、<strong>-</strong> で分割行を削除します。</span></li>
+      </ul>
+    </div>
+
+    <!-- 容器の種類 -->
+    <div class="overview-section">
+      <h3>容器の種類（実例）</h3>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:12px;">製品ごとに使用する容器が決まっています。以下はスクリーンショットから読み取れる対応例です。</p>
+      <div class="mock-grid-wrap">
+        <table class="mock-grid" style="max-width:520px;">
+          <thead>
+            <tr><th>容器</th><th>使用製品の例</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="cont-tag">f_k</span></td><td style="text-align:left;font-size:12px;">V053103705, V053904703, V065104703, V053904603</td></tr>
+            <tr><td><span class="cont-tag">a_k</span></td><td style="text-align:left;font-size:12px;">V065104643, V053504641</td></tr>
+            <tr><td><span class="cont-tag">r_b</span></td><td style="text-align:left;font-size:12px;">V053143615</td></tr>
+            <tr><td><span class="cont-tag">f_b</span></td><td style="text-align:left;font-size:12px;">V053143521</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ツールバー各項目 -->
+    <div class="overview-section">
+      <h3>ツールバーの各項目</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">出荷開始日</span><span class="li-desc">表示する期間の開始日です。</span></div>
+        <div class="legend-item"><span class="li-label">期間</span><span class="li-desc">開始日からの表示日数（5/7/14/30日）。</span></div>
+        <div class="legend-item"><span class="li-label">検索</span><span class="li-desc">品番でフィルタします。</span></div>
+        <div class="legend-item"><span class="li-label">お気に入り</span><span class="li-desc">条件を保存・呼び出しできます。★で保存。</span></div>
+        <div class="legend-item"><span class="li-label" style="color:var(--success);">取込</span><span class="li-desc">納期調整データから最新の需要を取り込みます。</span></div>
+        <div class="legend-item"><span class="li-label" style="color:var(--accent);">保存</span><span class="li-desc">入力した便割付をDBに保存します。</span></div>
+        <div class="legend-item"><span class="li-label">表示</span><span class="li-desc">条件に合うデータを画面に表示します。</span></div>
+        <div class="legend-item"><span class="li-label">表示順</span><span class="li-desc">品番の並び順と行色を設定します。</span></div>
+        <div class="legend-item"><span class="li-label">占有CSV</span><span class="li-desc">出荷開始日の便占有明細をCSV出力します。</span></div>
+        <div class="legend-item"><span class="li-label" style="color:var(--warn);">集荷明細PDF</span><span class="li-desc">期間を指定して集荷明細表をPDF出力します。</span></div>
+        <div class="legend-item"><span class="li-label">便詳細</span><span class="li-desc">便名・出発時刻・着時刻・日ずれを確認します。</span></div>
+        <div class="legend-item"><span class="li-label">休日非表示</span><span class="li-desc">チェックで休日列を隠します。設定は保持されます。</span></div>
+        <div class="legend-item"><span class="li-label">進捗調整</span><span class="li-desc">進捗欄に調整入力欄を表示し、調整保存します。</span></div>
+        <div class="legend-item"><span class="li-label" style="color:#33691e;">擬似便対象製品</span><span class="li-desc">A便・P便の対象製品を設定します。</span></div>
+        <div class="legend-item"><span class="li-label" style="color:#33691e;">自動便振分</span><span class="li-desc">設定済みルールで自動的に便を振り分けます。</span></div>
+        <div class="legend-item"><span class="li-label">最新納期調整日</span><span class="li-desc">最後に納期調整が保存された日付です。</span></div>
+      </div>
+    </div>
+
+    <!-- サブ列の意味 -->
+    <div class="overview-section">
+      <h3>サブ列（6列）の意味</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">注番</span><span class="li-desc">確定注番または「内示」。納期調整画面の注番と同じです。</span></div>
+        <div class="legend-item"><span class="li-label">需要</span><span class="li-desc">納期調整で決めた計画数です。</span></div>
+        <div class="legend-item"><span class="li-label">振分</span><span class="li-desc">便に振り分けた数量の合計です。</span></div>
+        <div class="legend-item"><span class="li-label" style="background:#e3f2fd;padding:1px 6px;border:1px solid #90caf9;border-radius:3px;">便選択</span><span class="li-desc">便番号・容器・数量を入力するセルです。</span></div>
+        <div class="legend-item"><span class="li-label">残</span><span class="li-desc">需要 − 振分。0になれば割付完了です。</span></div>
+        <div class="legend-item"><span class="li-label">進捗</span><span class="li-desc">累積の進捗差異。マイナス＝遅れ、プラス＝先行。</span></div>
+      </div>
+    </div>
+
+    <!-- 色の意味 -->
+    <div class="overview-section">
+      <h3>色・表示の意味</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label" style="background:#c8f7c8;padding:1px 8px;border-radius:3px;font-size:12px;">緑行</span><span class="li-desc">表示順で設定した行色。製品ごとに異なります。</span></div>
+        <div class="legend-item"><span class="li-label" style="background:#fff9c4;padding:1px 8px;border-radius:3px;font-size:12px;">黄行</span><span class="li-desc">同上。行色は「表示順」で自由に変更できます。</span></div>
+        <div class="legend-item"><span class="li-label" style="background:#ffcdd2;padding:1px 8px;border-radius:3px;font-size:12px;">赤/ピンク行</span><span class="li-desc">同上。行色のRGBは製品+納入地単位で設定。</span></div>
+        <div class="legend-item"><span class="li-label" style="color:#888;font-style:italic;">内示</span><span class="li-desc">まだ確定していない注文（予測値）です。</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部のナビゲーションバーから<strong>「出荷」</strong>をクリックし、メニューから<strong>「クボタ堺便計画」</strong>を選択します。
+    </div>
+    <div class="mock-toolbar" style="justify-content:center; gap:20px; padding:14px 20px; font-size:14px; font-weight:600;">
+      <span>受注</span>
+      <span>生産</span>
+      <span>仕入</span>
+      <span style="position:relative;" class="hl hl-blue">出荷</span>
+      <span>在庫</span>
+      <span>品質</span>
+      <span>マスタ</span>
+      <span>設定</span>
+    </div>
+    <div class="callout info" style="margin-top:12px;">
+      <span class="icon">&#x1F4CC;</span>
+      <span>「出荷」→ 出荷管理メニュー →<strong>「クボタ堺便計画」</strong>を選びます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">データを取り込む</div>
+    </div>
+    <div class="step-desc">
+      <strong>「取込」ボタン</strong>を押して、納期調整画面で入力した計画データを読み込みます。<br>
+      納期調整が更新されたら、ここで最新データを取り直します。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group"><label>出荷開始日</label><span class="f-input">2026/07/21</span></div>
+      <div class="f-group"><label>期間</label><span class="f-select">5日</span></div>
+      <span style="flex:1"></span>
+      <span class="mock-btn import-btn hl hl-green" style="position:relative;">取込</span>
+      <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn">表示</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#x2705;</span>
+      <span>取込完了メッセージが出れば成功です。その後「表示」を押してデータを確認します。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">条件を指定して表示する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「出荷開始日」</strong>と<strong>「期間」</strong>を指定し、必要なら<strong>「検索」</strong>で品番を絞ってから<strong>「表示」</strong>を押します。<br>
+      休日列を隠したい場合は<strong>「休日非表示」</strong>にチェックを入れます。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group"><label>出荷開始日</label><span class="f-input">2026/07/21</span></div>
+      <div class="f-group"><label>期間</label><span class="f-select">5日</span></div>
+      <div class="f-group"><label>検索</label><span class="f-input">V053</span></div>
+      <div class="f-group"><label>お気に入り</label><span class="f-select">選択</span></div>
+      <span style="flex:1"></span>
+      <span class="mock-btn">取込</span>
+      <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn primary hl hl-blue" style="position:relative;">表示</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">便・容器・数量を入力する</div>
+    </div>
+    <div class="step-desc">
+      各明細の<strong>便選択セル</strong>で、便番号・容器・数量を入力します。<br>
+      <strong>残が 0</strong> になれば割付完了。需要と振分を見ながら調整してください。
+    </div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead>
+          <tr>
+            <th rowspan="2">品番</th>
+            <th rowspan="2">納入場</th>
+            <th colspan="6" class="col-head">7/22(水)</th>
+          </tr>
+          <tr><th>注番</th><th>需要</th><th>振分</th><th style="min-width:160px;">便選択</th><th>残</th><th>進捗</th></tr>
+        </thead>
+        <tbody>
+          <tr class="row-green">
+            <td class="left-col" style="background:inherit;">V053103705</td>
+            <td class="left-col" style="background:inherit;font-size:10px;">ZGHC</td>
+            <td style="font-size:10px;">4510512187</td>
+            <td>6</td>
+            <td>6</td>
+            <td class="trip-cell" style="position:relative;">
+              <span class="trip-tag hl hl-blue" style="position:relative;">3 &#9660;</span>
+              <span class="cont-tag">f_k &#9660;</span>
+              <span class="qty-val">6</span>
+              <span class="split-plus">+</span>
+            </td>
+            <td></td>
+            <td>0</td>
+          </tr>
+          <tr class="row-yellow">
+            <td class="left-col" style="background:inherit;">V065104643</td>
+            <td class="left-col" style="background:inherit;font-size:10px;">ZGHC</td>
+            <td style="font-size:10px;">4510511324</td>
+            <td>40</td>
+            <td>40</td>
+            <td class="trip-cell">
+              <span class="trip-tag">3 &#9660;</span>
+              <span class="cont-tag">a_k &#9660;</span>
+              <span class="qty-val">40</span>
+              <span class="split-plus">+</span>
+            </td>
+            <td></td>
+            <td>0</td>
+          </tr>
+          <tr class="row-green">
+            <td class="left-col" style="background:inherit;">V053143615</td>
+            <td class="left-col" style="background:inherit;font-size:10px;">5476</td>
+            <td style="font-size:10px;">4510520932</td>
+            <td>84</td>
+            <td>84</td>
+            <td class="trip-cell">
+              <span class="trip-tag">4 &#9660;</span>
+              <span class="cont-tag">r_b &#9660;</span>
+              <span class="qty-val">84</span>
+              <span class="split-plus">+</span>
+            </td>
+            <td></td>
+            <td>0</td>
+          </tr>
+          <tr class="row-pink">
+            <td class="left-col" style="background:inherit;">V053143521</td>
+            <td class="left-col" style="background:inherit;font-size:10px;">833</td>
+            <td style="font-size:10px;">1369380</td>
+            <td>8</td>
+            <td></td>
+            <td class="trip-cell">
+              <span class="trip-tag">4 &#9660;</span>
+              <span class="cont-tag">f_b &#9660;</span>
+              <span class="qty-val">16</span>
+              <span class="split-plus">+</span>
+            </td>
+            <td></td>
+            <td>0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F4A1;</span>
+      <span>容器を変えると、容器数と占有率が自動で再計算されます。<strong>宵積み便は着日の列</strong>で入力する運用です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">分割行の追加・削除</div>
+    </div>
+    <div class="step-desc">
+      1つの明細を複数の便に分けるときは、便選択セルの<strong>「+」</strong>を押して入力行を増やします。<br>
+      不要な分割行は<strong>「-」</strong>で削除します。
+    </div>
+    <div style="font-size:13px; color:var(--ink2); margin-bottom:6px; font-weight:600;">分割前（1便に全量）:</div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead><tr><th>品番</th><th>納入場</th><th>需要</th><th>振分</th><th style="min-width:180px;">便選択</th><th>残</th></tr></thead>
+        <tbody>
+          <tr class="row-green">
+            <td class="left-col" style="background:inherit;">V053504641</td>
+            <td class="left-col" style="background:inherit;font-size:10px;">ZGHC</td>
+            <td>72</td>
+            <td>72</td>
+            <td class="trip-cell">
+              <span class="trip-tag">4 &#9660;</span>
+              <span class="cont-tag">a_k &#9660;</span>
+              <span class="qty-val">72</span>
+              <span class="split-plus hl hl-blue" style="position:relative;">+</span>
+            </td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; margin:10px 0;">
+      <span style="font-size:20px; color:var(--accent); font-weight:700;">+ を押す &#9660;</span>
+    </div>
+    <div style="font-size:13px; color:var(--ink2); margin-bottom:6px; font-weight:600;">分割後（2便に分割）:</div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead><tr><th>品番</th><th>納入場</th><th>需要</th><th>振分</th><th style="min-width:180px;">便選択</th><th>残</th></tr></thead>
+        <tbody>
+          <tr class="row-green">
+            <td rowspan="2" class="left-col" style="background:inherit;">V053504641</td>
+            <td rowspan="2" class="left-col" style="background:inherit;font-size:10px;">ZGHC</td>
+            <td rowspan="2">72</td>
+            <td rowspan="2">72</td>
+            <td class="trip-cell">
+              <span class="trip-tag" style="color:var(--accent);">4 &#9660;</span>
+              <span class="cont-tag">a_k &#9660;</span>
+              <span class="qty-val">64</span>
+              <span class="split-plus">+</span>
+            </td>
+            <td rowspan="2"></td>
+          </tr>
+          <tr class="row-green">
+            <td class="trip-cell">
+              <span class="trip-tag" style="color:var(--accent);">3 &#9660;</span>
+              <span class="cont-tag">a_k &#9660;</span>
+              <span class="qty-val">8</span>
+              <span class="split-minus hl" style="position:relative;">-</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#x26A0;&#xFE0F;</span>
+      <span>分割後の数量合計が需要を超えないようにしてください。<strong>残がマイナス</strong>になっていたら割付超過です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">保存する</div>
+    </div>
+    <div class="step-desc">
+      入力が終わったら<strong>「保存」ボタン</strong>を押します。占有率超過や未割付などの注意がある場合は確認ダイアログが出ます。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group"><label>出荷開始日</label><span class="f-input">2026/07/21</span></div>
+      <div class="f-group"><label>期間</label><span class="f-select">5日</span></div>
+      <span style="flex:1"></span>
+      <span class="mock-btn">取込</span>
+      <span class="mock-btn save-btn hl hl-blue" style="position:relative;">保存</span>
+      <span class="mock-btn">表示</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#x2705;</span>
+      <span>「保存しました。」と表示されたら完了です。保存後は一覧が再読込されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">表示順・行色の設定</div>
+    </div>
+    <div class="step-desc">
+      <strong>「表示順」</strong>を押すと、品番+納入地ごとの並び順と色設定ダイアログが開きます。<br>
+      上下ボタンで順番を変え、行色（RGB）と＋ボタン色（RGB）を入力して保存します。
+    </div>
+    <div class="mock-toolbar">
+      <span style="flex:1"></span>
+      <span class="mock-btn">表示</span>
+      <span class="mock-btn hl hl-blue" style="position:relative;">表示順</span>
+      <span class="mock-btn">占有CSV</span>
+      <span class="mock-btn pdf-btn">集荷明細PDF</span>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; margin:12px 0 4px;">
+      <span style="font-size:24px; color:var(--ink2);">&#9660;</span>
+    </div>
+    <div class="mock-dialog" style="max-width:560px;">
+      <h3>便計画表示順設定</h3>
+      <div class="mock-grid-wrap" style="margin-top:10px;">
+        <table class="mock-grid">
+          <thead>
+            <tr><th>#</th><th>品番</th><th>納入地</th><th>行色(RGB)</th><th>+色(RGB)</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td style="text-align:left;font-size:11px;">V053103705</td>
+              <td>ZGHC</td>
+              <td style="font-size:11px;"><span style="display:inline-block;width:14px;height:14px;background:rgb(200,247,200);border:1px solid #aaa;border-radius:2px;vertical-align:middle;margin-right:3px;"></span>200 247 200</td>
+              <td style="font-size:11px;">212 165 116</td>
+              <td>&#8593; &#8595;</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td style="text-align:left;font-size:11px;">V065104643</td>
+              <td>ZGHC</td>
+              <td style="font-size:11px;"><span style="display:inline-block;width:14px;height:14px;background:rgb(255,249,196);border:1px solid #aaa;border-radius:2px;vertical-align:middle;margin-right:3px;"></span>255 249 196</td>
+              <td style="font-size:11px;">187 187 187</td>
+              <td>&#8593; &#8595;</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td style="text-align:left;font-size:11px;">V053143521</td>
+              <td>833</td>
+              <td style="font-size:11px;"><span style="display:inline-block;width:14px;height:14px;background:rgb(255,205,210);border:1px solid #aaa;border-radius:2px;vertical-align:middle;margin-right:3px;"></span>255 205 210</td>
+              <td style="font-size:11px;">255 100 100</td>
+              <td>&#8593; &#8595;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dlg-actions" style="margin-top:12px;">
+        <span class="dlg-btn">キャンセル</span>
+        <span class="dlg-btn primary">保存</span>
+      </div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F3A8;</span>
+      <span>行色のRGB値を変えると、グリッド上の背景色が変わります。同じ品番でも納入地が違えば別の色を設定できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">占有CSV・集荷明細PDFを出力する</div>
+    </div>
+    <div class="step-desc">帳票出力は2種類あります。</div>
+
+    <!-- 占有CSV -->
+    <div style="display:flex;align-items:flex-start;gap:14px;background:var(--accent-light);border-radius:8px;padding:14px 16px;margin-bottom:14px;">
+      <span class="mock-btn" style="flex-shrink:0;font-size:13px;">占有CSV</span>
+      <div>
+        <div style="font-weight:700;font-size:14px;color:var(--accent);margin-bottom:4px;">占有CSV</div>
+        <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+          <strong>出荷開始日</strong>の便割付明細をCSVで出力します。<br>
+          ファイル名: <code style="background:var(--grid-head);padding:1px 6px;border-radius:3px;font-size:12px;">便占有明細_2026-07-21.csv</code>
+        </div>
+      </div>
+    </div>
+    <!-- 集荷明細PDF -->
+    <div style="display:flex;align-items:flex-start;gap:14px;background:var(--warn-light);border-radius:8px;padding:14px 16px;">
+      <span class="mock-btn pdf-btn" style="flex-shrink:0;font-size:13px;">集荷明細PDF</span>
+      <div>
+        <div style="font-weight:700;font-size:14px;color:var(--warn);margin-bottom:4px;">集荷明細PDF</div>
+        <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+          押すとダイアログで<strong>開始日・終了日</strong>を指定し、PDF出力します。<br>
+          ファイル名: <code style="background:var(--grid-head);padding:1px 6px;border-radius:3px;font-size:12px;">クボタ堺_集荷明細表_2026-07-21_2026-07-25.pdf</code>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; margin:12px 0 4px;">
+      <span style="font-size:24px; color:var(--ink2);">&#9660;</span>
+    </div>
+    <div class="mock-dialog">
+      <h3>集荷明細表（PDF）</h3>
+      <div class="dlg-row"><span class="dlg-label">開始日</span><span class="f-input" style="min-width:110px;">2026-07-21</span></div>
+      <div class="dlg-row"><span class="dlg-label">終了日</span><span class="f-input" style="min-width:110px;">2026-07-25</span></div>
+      <div class="dlg-msg">開始日は終了日以前を指定してください。通常は表示期間に合わせて初期値が入ります。</div>
+      <div class="dlg-actions">
+        <span class="dlg-btn">閉じる</span>
+        <span class="dlg-btn primary">PDF出力</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 9 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
+      <div class="step-title">補助機能</div>
+    </div>
+    <div class="step-desc">日常運用でよく使うのは<strong>便詳細</strong>と<strong>休日非表示</strong>です。<strong>擬似便対象製品</strong>と<strong>自動便振分</strong>は事前設定が必要な機能です。</div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <!-- 便詳細 -->
+      <div style="display:flex;align-items:flex-start;gap:14px;background:var(--accent-light);border-radius:8px;padding:14px 16px;">
+        <span class="mock-btn" style="flex-shrink:0;font-size:13px;">便詳細</span>
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--accent);margin-bottom:4px;">便詳細</div>
+          <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+            便名、俗称、出発時刻、着時刻、<strong>日ずれ</strong>を確認できます。<br>
+            日ずれありの便は宵積み便（前日出荷、翌日着）です。
+          </div>
+        </div>
+      </div>
+      <!-- 休日非表示 -->
+      <div style="display:flex;align-items:flex-start;gap:14px;background:var(--success-light);border-radius:8px;padding:14px 16px;">
+        <span style="font-size:14px;font-weight:600;flex-shrink:0;">&#9745; 休日非表示</span>
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--success);margin-bottom:4px;">休日非表示</div>
+          <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+            チェックを入れると休日列を隠して見やすくなります。設定は次回も保持されます。
+          </div>
+        </div>
+      </div>
+      <!-- 進捗調整 -->
+      <div style="display:flex;align-items:flex-start;gap:14px;background:var(--accent-light);border-radius:8px;padding:14px 16px;">
+        <span class="mock-btn" style="flex-shrink:0;font-size:13px;">進捗調整</span>
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--accent);margin-bottom:4px;">進捗調整</div>
+          <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+            進捗欄に調整入力欄を表示し、<strong>「調整保存」</strong>で反映します。進捗の手動補正に使います。
+          </div>
+        </div>
+      </div>
+      <!-- 擬似便対象製品 -->
+      <div style="display:flex;align-items:flex-start;gap:14px;background:var(--success-light);border-radius:8px;padding:14px 16px;">
+        <span class="mock-btn pseudo-btn" style="flex-shrink:0;font-size:13px;">擬似便対象製品</span>
+        <div>
+          <div style="font-weight:700;font-size:14px;color:#33691e;margin-bottom:4px;">擬似便対象製品</div>
+          <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+            A便・P便（擬似便）の対象製品を設定します。自動便振分の事前設定として必要です。
+          </div>
+        </div>
+      </div>
+      <!-- 自動便振分 -->
+      <div style="display:flex;align-items:flex-start;gap:14px;background:var(--success-light);border-radius:8px;padding:14px 16px;">
+        <span class="mock-btn pseudo-btn" style="flex-shrink:0;font-size:13px;">自動便振分</span>
+        <div>
+          <div style="font-weight:700;font-size:14px;color:#33691e;margin-bottom:4px;">自動便振分</div>
+          <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+            カレンダと開始日を指定して、設定済みルールで自動的に便を振り分けます。<br>
+            事前に<strong>擬似便対象製品</strong>とA便/P便の便マスタ設定が必要です。
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#x26A0;&#xFE0F;</span>
+      <span>自動便振分を使う場合は、擬似便対象製品とA便/P便の便マスタ設定が先に必要です。設定なしで実行するとエラーになります。</span>
+    </div>
+  </div>
+
+  <!-- ===== 積み荷明細の見方 ===== -->
+  <div class="step" style="border-left:4px solid var(--accent);">
+    <div class="step-header" style="margin-bottom:12px;">
+      <div class="step-title">積み荷明細の見方</div>
+    </div>
+    <div class="step-desc">画面下部に表示される積み荷明細は、便ごとの積載内容と占有率を一覧で確認できます。</div>
+    <div class="loading-detail">
+      <div class="ld-title">積み荷明細 <span style="font-weight:400;color:var(--ink2);font-size:11px;">宵積みの便は前日別へ表示</span></div>
+      <div class="ld-trip">
+        <span class="ld-num">便 2</span>
+        <span class="ld-pct" style="padding:1px 4px;border-radius:3px;">93.7%</span>
+        <span class="ld-items">V053904703&#215;60 ZGHC</span>
+      </div>
+      <div class="ld-trip">
+        <span class="ld-num">便 3</span>
+        <span class="ld-pct" style="padding:1px 4px;border-radius:3px;">85.3%</span>
+        <span class="ld-items">V053103705&#215;6 ZGHC, V053504641&#215;8 ZGHC, V065104643&#215;40 ZGHC ...</span>
+      </div>
+      <div class="ld-trip">
+        <span class="ld-num">便 4</span>
+        <span class="ld-pct" style="padding:1px 4px;border-radius:3px;">99.9%</span>
+        <span class="ld-items">V053143521&#215;72 5476, V053143615&#215;84 5476, V053504641&#215;64 ZGHC</span>
+      </div>
+      <div class="ld-trip">
+        <span class="ld-num">便 5</span>
+        <span class="ld-pct" style="padding:1px 4px;border-radius:3px;">27.9%</span>
+        <span class="ld-items">V053143615&#215;6 971, V053504641&#215;32 971, V053904603&#215;12 971</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>注意事項</h2>
+    <ul>
+      <li>便計画の需要数は<strong>納期調整画面の計画数</strong>を元にしています。数量や納期が違う場合は、先に納期調整を直してください。</li>
+      <li>保存前の割付変更は、画面再読込で消えます。<strong>必ず「保存」を押してください。</strong></li>
+      <li>既に割付済みの便は、必要なときだけ変更してください。保存時に上書きされます。</li>
+      <li>トラック手配や納入可否に変更があった場合は、便計画だけで終わらせず、<strong>納期調整担当へ連絡</strong>してください。</li>
+      <li>宵積み便は当日列ではなく、<strong>着日の列</strong>で割付する運用です。</li>
+      <li>便選択で<strong>容器は製品ごとに設定済み</strong>です。実際の容器と合っているか確認してください。</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>
