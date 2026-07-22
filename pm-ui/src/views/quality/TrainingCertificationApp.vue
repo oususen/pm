@@ -5,207 +5,393 @@
       <DataSourceDialog title="教育・テスト・認定" :sources="dsSources" :note="dsNote" />
     </h2>
 
-    <div class="control-card">
-      <div class="field">
-        <label>受講者</label>
-        <select v-model="form.traineeUser">
-          <option value="">受講者を選択</option>
-          <option v-for="user in userOptions" :key="user.id" :value="String(user.id)">
-            {{ user.label }}
-          </option>
-        </select>
-      </div>
-      <div class="field">
-        <label>試験官</label>
-        <select v-model="form.supervisorUser">
-          <option value="">試験官を選択</option>
-          <option v-for="user in userOptions" :key="`sup-${user.id}`" :value="String(user.id)">
-            {{ user.label }}
-          </option>
-        </select>
-      </div>
-      <div class="field">
-        <label>実施日時</label>
-        <input v-model="form.performedAt" type="datetime-local" />
-      </div>
-      <div class="field">
-        <label>実施場所</label>
-        <input v-model="form.location" type="text" placeholder="会議室 / 現場 など" />
-      </div>
-      <label class="check-field">
-        <input v-model="form.formalExam" type="checkbox" />
-        <span>推進判定対象として記録</span>
-      </label>
-    </div>
-
     <div v-if="message.text" class="message" :class="message.type">{{ message.text }}</div>
     <div v-if="loading" class="info-box">読み込み中...</div>
     <div v-else-if="loadError" class="message error">{{ loadError }}</div>
-
-    <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'books' }" @click="activeTab = 'books'">教材・試験</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'history' }" @click="activeTab = 'history'">受験履歴</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'progress' }" @click="activeTab = 'progress'">個人進捗</button>
-    </div>
-
-    <section v-if="activeTab === 'books'" class="tab-panel">
-      <div class="book-grid">
-        <article v-for="book in books" :key="book.id" class="book-card">
-          <div class="book-head">
-            <div>
-              <div class="book-title">{{ book.title }}</div>
-              <div class="book-meta">
-                <span>{{ book.question_count }}問</span>
-                <span v-if="passedBookMap[book.id]" class="good">合格済み</span>
-                <span v-else>未合格</span>
-              </div>
-            </div>
-          </div>
-          <div class="book-submeta">
-            <span v-if="book.source_file">元: {{ book.source_file }}</span>
-            <span v-if="book.material_url">
-              <a :href="book.material_url" target="_blank" rel="noopener noreferrer">教材を開く</a>
-            </span>
-          </div>
-          <div class="exam-list">
-            <button
-              v-for="exam in book.exams"
-              :key="exam.id"
-              class="exam-btn"
-              :disabled="startingSession || submittingAttempt"
-              @click="startExam(book, exam)"
-            >
-              {{ exam.name }}
-            </button>
-          </div>
-        </article>
+    <template v-else>
+      <div class="mode-grid">
+        <button
+          class="mode-tile"
+          :class="{ active: activeMode === 'edit', disabled: !canViewBookEditor }"
+          :disabled="!canViewBookEditor"
+          @click="selectMode('edit')"
+        >
+          <div class="mode-head"><span class="mode-icon">編</span><span class="mode-title">問題集編集</span></div>
+          <div class="mode-desc">教材・問題数・試験定義・進捗項目を管理者向けに確認します。</div>
+          <div class="mode-foot">{{ canViewBookEditor ? '権限あり' : '権限が必要です' }}</div>
+        </button>
+        <button
+          class="mode-tile"
+          :class="{ active: activeMode === 'practice' }"
+          @click="selectMode('practice')"
+        >
+          <div class="mode-head"><span class="mode-icon">練</span><span class="mode-title">練習</span></div>
+          <div class="mode-desc">誰でも受講できる練習モードです。推進判定には使いません。</div>
+          <div class="mode-foot">全ユーザー利用可</div>
+        </button>
+        <button
+          class="mode-tile"
+          :class="{ active: activeMode === 'test', disabled: !canViewTest }"
+          :disabled="!canViewTest"
+          @click="selectMode('test')"
+        >
+          <div class="mode-head"><span class="mode-icon">試</span><span class="mode-title">テスト</span></div>
+          <div class="mode-desc">正式テスト、受験履歴、個人進捗を権限者向けに扱います。結果は推進判定対象として記録し、進捗へ反映します。</div>
+          <div class="mode-foot">{{ canViewTest ? '権限あり' : '権限が必要です' }}</div>
+        </button>
       </div>
 
-      <div v-if="activeSession" class="exam-card">
-        <div class="exam-header">
-          <div>
-            <h3>{{ activeSession.book.title }} / {{ activeSession.exam.name }}</h3>
-            <p>
-              受講者: {{ activeSession.trainee.name }} |
-              試験官: {{ activeSession.supervisor?.name || '未設定' }} |
-              合格基準: 100%
-            </p>
-          </div>
-          <button class="btn-secondary" @click="closeSession" :disabled="submittingAttempt">閉じる</button>
+
+      <section v-if="activeMode === 'edit'" class="tab-panel">
+        <div class="summary-grid">
+          <article class="summary-card">
+            <div class="summary-label">教材数</div>
+            <div class="summary-value">{{ trainingSummary.books }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">問題数</div>
+            <div class="summary-value">{{ trainingSummary.questions }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">試験定義</div>
+            <div class="summary-value">{{ trainingSummary.exams }}</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">進捗項目</div>
+            <div class="summary-value">{{ trainingSummary.tracks }}</div>
+          </article>
         </div>
 
-        <div class="question-progress">
-          回答 {{ answeredCount }} / {{ activeSession.questions.length }}
+        <div class="info-box">
+          現時点の画面は問題集マスタの確認用です。問題文・選択肢・試験定義の更新は Django 管理画面または別途更新手順で運用します。
         </div>
 
-        <div class="question-list">
-          <article v-for="(question, index) in activeSession.questions" :key="question.id" class="question-card">
-            <div class="question-no">Q{{ index + 1 }} {{ question.question_code }}</div>
-            <div class="question-text">{{ question.question }}</div>
-            <div class="choice-list">
-              <label v-for="choice in question.choices" :key="`${question.id}-${choice.value}`" class="choice-item">
-                <input v-model="answers[question.id]" type="radio" :name="`q-${question.id}`" :value="choice.value" />
-                <span>{{ choice.value }}. {{ choice.text }}</span>
-              </label>
+        <div class="book-grid">
+          <article v-for="book in books" :key="book.id" class="book-card">
+            <div class="book-head">
+              <div>
+                <div class="book-title">{{ book.title }}</div>
+                <div class="book-meta">
+                  <span>教材コード: {{ book.book_code }}</span>
+                  <span>{{ book.question_count }}問</span>
+                </div>
+              </div>
+            </div>
+            <div class="book-submeta">
+              <span v-if="book.source_file">元ファイル: {{ book.source_file }}</span>
+              <span v-if="book.source_sheet">元シート: {{ book.source_sheet }}</span>
+            </div>
+            <div class="badge-row">
+              <span v-for="exam in book.exams || []" :key="exam.id" class="badge">
+                {{ exam.name }}
+              </span>
             </div>
           </article>
         </div>
 
-        <div class="submit-row">
-          <button class="btn-primary" :disabled="submittingAttempt || !canSubmitAttempt" @click="submitAttempt">
-            {{ submittingAttempt ? '採点中...' : '採点して保存' }}
-          </button>
-        </div>
-
-        <div v-if="lastAttempt" class="result-box" :class="{ good: lastAttempt.result === 'PASS', bad: lastAttempt.result !== 'PASS' }">
-          <div class="result-title">{{ lastAttempt.result_label }}</div>
-          <div>{{ lastAttempt.score }} / {{ lastAttempt.total }}（{{ lastAttempt.rate }}%）</div>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="activeTab === 'history'" class="tab-panel">
-      <div class="section-head">
-        <h3>受験履歴</h3>
-        <button class="btn-secondary" @click="loadAttempts" :disabled="historyLoading">再読込</button>
-      </div>
-      <div v-if="historyLoading" class="info-box">受験履歴を読み込み中...</div>
-      <div v-else-if="!attempts.length" class="info-box">受験履歴はありません。</div>
-      <div v-else class="history-list">
-        <article v-for="attempt in attempts" :key="attempt.id" class="history-card">
-          <div class="history-title">{{ attempt.book_title }} / {{ attempt.exam_name }}</div>
-          <div class="history-meta">
-            {{ attempt.trainee_name }} / {{ formatDateTime(attempt.performed_at) }} / {{ attempt.location || '場所未設定' }}
-          </div>
-          <div class="history-meta">
-            試験官: {{ attempt.supervisor_name || '未設定' }} / 組織:
-            {{ formatOrg(attempt.trainee_division, attempt.trainee_team, attempt.trainee_unit) }}
-          </div>
-          <div class="badge-row">
-            <span class="badge" :class="attempt.result === 'PASS' ? 'good' : 'bad'">{{ attempt.result_label }}</span>
-            <span class="badge">{{ attempt.score }}/{{ attempt.total }}</span>
-            <span class="badge">{{ attempt.rate }}%</span>
-            <span class="badge">{{ attempt.formal_exam ? '推進判定対象' : '練習' }}</span>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section v-if="activeTab === 'progress'" class="tab-panel">
-      <div class="section-head">
-        <h3>個人進捗</h3>
-        <button class="btn-secondary" @click="loadProgress" :disabled="progressLoading || !form.traineeUser">再読込</button>
-      </div>
-      <div v-if="progressLoading" class="info-box">個人進捗を読み込み中...</div>
-      <div v-else-if="!progressSummary" class="info-box">受講者を選択してください。</div>
-      <template v-else>
-        <div class="summary-banner">
-          <span>受講者: {{ progressSummary.trainee.name }}</span>
-          <span>組織: {{ formatOrgName(progressSummary.trainee) }}</span>
-        </div>
         <div class="table-wrap">
           <table class="progress-table">
             <thead>
               <tr>
                 <th>No.</th>
-                <th>教育項目</th>
-                <th>教育</th>
-                <th>テスト</th>
-                <th>認定</th>
+                <th>進捗項目</th>
+                <th>教材</th>
+                <th>テスト有無</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in progressSummary.rows" :key="row.track_id">
-                <td>{{ row.no }}</td>
-                <td>{{ row.title }}</td>
-                <td>
-                  <div v-if="row.education">
-                    <div>〇 {{ formatDateTime(row.education.performed_at) }}</div>
-                    <div class="cell-sub">{{ row.education.supervisor_name || '試験官未設定' }}</div>
-                  </div>
-                  <button v-else class="mini-btn" :disabled="stepSaving" @click="recordStep(row, 'EDUCATION')">教育完了</button>
-                </td>
-                <td>
-                  <div v-if="row.has_test && row.test">
-                    <div>〇 {{ row.test.exam_name }}</div>
-                    <div class="cell-sub">{{ row.test.score }}/{{ row.test.total }} | {{ formatDateTime(row.test.performed_at) }}</div>
-                  </div>
-                  <button v-else-if="row.has_test" class="mini-btn" :disabled="!row.book_id" @click="openTrackBook(row)">テストへ</button>
-                  <div v-else class="cell-sub">対象外</div>
-                </td>
-                <td>
-                  <div v-if="row.certification">
-                    <div>〇 {{ formatDateTime(row.certification.performed_at) }}</div>
-                    <div class="cell-sub">{{ row.certification.supervisor_name || '試験官未設定' }}</div>
-                  </div>
-                  <button v-else class="mini-btn" :disabled="stepSaving || !row.can_certify" @click="recordStep(row, 'CERTIFICATION')">認定完了</button>
-                </td>
+              <tr v-for="track in tracks" :key="track.id">
+                <td>{{ track.track_no }}</td>
+                <td>{{ track.title }}</td>
+                <td>{{ track.book_title || '-' }}</td>
+                <td>{{ track.has_test ? 'あり' : 'なし' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+      </section>
+
+      <template v-else-if="activeMode === 'practice'">
+        <div class="info-box">
+          練習モードでは受講者・試験官・実施日時・実施場所の入力は不要です。採点結果は画面上だけで確認し、DBには保存しません。
+        </div>
+
+        <section class="tab-panel">
+          <div class="section-head">
+            <h3>練習問題</h3>
+          </div>
+          <div class="book-grid">
+            <article v-for="book in practiceBooks" :key="book.id" class="book-card">
+              <div class="book-head">
+                <div>
+                  <div class="book-title">{{ book.title }}</div>
+                  <div class="book-meta">
+                    <span>{{ book.question_count }}問</span>
+                    <span>練習用</span>
+                  </div>
+                </div>
+              </div>
+              <div class="book-submeta">
+                <span v-if="book.source_file">元: {{ book.source_file }}</span>
+                <span v-if="book.material_url">
+                  <a :href="book.material_url" target="_blank" rel="noopener noreferrer">教材を開く</a>
+                </span>
+              </div>
+              <div class="exam-list">
+                <button
+                  v-for="exam in getPracticeExams(book)"
+                  :key="exam.id"
+                  class="exam-btn"
+                  :disabled="startingSession || submittingAttempt"
+                  @click="startExam(book, exam, 'practice')"
+                >
+                  {{ exam.name }}
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <div v-if="!practiceBooks.length" class="info-box">練習用の試験が登録されていません。</div>
+          <div v-if="activeSession && activeSessionMode === 'practice'" class="exam-card">
+            <div class="exam-header">
+              <div>
+                <h3>{{ activeSession.book.title }} / {{ activeSession.exam.name }}</h3>
+                <p>練習モード | 採点結果は保存しません</p>
+              </div>
+              <button class="btn-secondary" @click="closeSession" :disabled="submittingAttempt">閉じる</button>
+            </div>
+
+            <div class="question-progress">回答 {{ answeredCount }} / {{ activeSession.questions.length }}</div>
+
+            <div class="question-list">
+              <article v-for="(question, index) in activeSession.questions" :key="question.id" class="question-card">
+                <div class="question-no">Q{{ index + 1 }} {{ question.question_code }}</div>
+                <div class="question-text">{{ question.question }}</div>
+                <div class="choice-list">
+                  <label v-for="choice in question.choices" :key="`${question.id}-${choice.value}`" class="choice-item">
+                    <input v-model="answers[question.id]" type="radio" :name="`q-${question.id}`" :value="choice.value" />
+                    <span>{{ choice.value }}. {{ choice.text }}</span>
+                  </label>
+                </div>
+              </article>
+            </div>
+
+            <div class="submit-row">
+              <button class="btn-primary" :disabled="submittingAttempt || !canSubmitAttempt" @click="submitAttempt">
+                {{ submittingAttempt ? '採点中...' : '採点する' }}
+              </button>
+            </div>
+
+            <div v-if="lastAttempt" class="result-box" :class="{ good: lastAttempt.result === 'PASS', bad: lastAttempt.result !== 'PASS' }">
+              <div class="result-title">{{ lastAttempt.result_label }}</div>
+              <div>{{ lastAttempt.score }} / {{ lastAttempt.total }}（{{ lastAttempt.rate }}%）</div>
+            </div>
+          </div>
+        </section>
       </template>
-    </section>
+
+      <template v-else>
+        <div class="control-card">
+          <div class="field">
+            <label>試験官</label>
+            <select v-model="form.supervisorUser">
+              <option value="">試験官を選択</option>
+              <option v-for="user in userOptions" :key="`sup-${user.id}`" :value="String(user.id)">
+                {{ user.label }}
+              </option>
+            </select>
+          </div>
+          <div class="field">
+            <label>受講者</label>
+            <select v-if="orgFilterOptions.length > 1" v-model="orgFilter" class="org-filter-select">
+              <option value="">全組織</option>
+              <option v-for="org in orgFilterOptions" :key="org.value" :value="org.value">{{ org.label }}</option>
+            </select>
+            <select v-model="form.traineeUser">
+              <option value="">受講者を選択</option>
+              <option v-for="user in filteredTraineeOptions" :key="user.id" :value="String(user.id)">
+                {{ user.label }}
+              </option>
+            </select>
+          </div>
+          <div class="field">
+            <label>実施日時</label>
+            <input v-model="form.performedAt" type="datetime-local" />
+          </div>
+          <div class="field">
+            <label>実施場所</label>
+            <input v-model="form.location" type="text" placeholder="会議室 / 現場 など" />
+          </div>
+        </div>
+
+        <section v-if="activeMode === 'test'" class="tab-panel">
+          <div class="tab-bar">
+            <button class="tab-btn" :class="{ active: testTab === 'exam' }" @click="testTab = 'exam'">テスト</button>
+            <button class="tab-btn" :class="{ active: testTab === 'history' }" @click="testTab = 'history'">受験履歴</button>
+            <button class="tab-btn" :class="{ active: testTab === 'progress' }" @click="testTab = 'progress'">個人進捗</button>
+          </div>
+
+          <section v-if="testTab === 'exam'" class="tab-panel">
+            <div class="book-grid">
+              <article v-for="book in testBooks" :key="book.id" class="book-card">
+                <div class="book-head">
+                  <div>
+                    <div class="book-title">{{ book.title }}</div>
+                    <div class="book-meta">
+                      <span>{{ book.question_count }}問</span>
+                      <span v-if="passedBookMap[book.id]" class="good">合格済み</span>
+                      <span v-else>未合格</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="book-submeta">
+                  <span v-if="book.source_file">元: {{ book.source_file }}</span>
+                  <span v-if="book.material_url">
+                    <a :href="book.material_url" target="_blank" rel="noopener noreferrer">教材を開く</a>
+                  </span>
+                </div>
+                <div class="exam-list">
+                  <button
+                    v-for="exam in getTestExams(book)"
+                    :key="exam.id"
+                    class="exam-btn"
+                    :disabled="startingSession || submittingAttempt"
+                    @click="startExam(book, exam, 'test')"
+                  >
+                    {{ exam.name }}
+                  </button>
+                </div>
+              </article>
+            </div>
+
+            <div v-if="!testBooks.length" class="info-box">テスト用の試験が登録されていません。</div>
+            <div v-if="activeSession && activeSessionMode === 'test'" class="exam-card">
+              <div class="exam-header">
+                <div>
+                  <h3>{{ activeSession.book.title }} / {{ activeSession.exam.name }}</h3>
+                  <p>
+                    テスト |
+                    受講者: {{ activeSession.trainee.name }} |
+                    試験官: {{ activeSession.supervisor?.name || '未設定' }} |
+                    合格基準: 100%
+                  </p>
+                </div>
+                <button class="btn-secondary" @click="closeSession" :disabled="submittingAttempt">閉じる</button>
+              </div>
+
+              <div class="question-progress">回答 {{ answeredCount }} / {{ activeSession.questions.length }}</div>
+
+              <div class="question-list">
+                <article v-for="(question, index) in activeSession.questions" :key="question.id" class="question-card">
+                  <div class="question-no">Q{{ index + 1 }} {{ question.question_code }}</div>
+                  <div class="question-text">{{ question.question }}</div>
+                  <div class="choice-list">
+                    <label v-for="choice in question.choices" :key="`${question.id}-${choice.value}`" class="choice-item">
+                      <input v-model="answers[question.id]" type="radio" :name="`q-${question.id}`" :value="choice.value" />
+                      <span>{{ choice.value }}. {{ choice.text }}</span>
+                    </label>
+                  </div>
+                </article>
+              </div>
+
+              <div class="submit-row">
+                <button class="btn-primary" :disabled="submittingAttempt || !canSubmitAttempt" @click="submitAttempt">
+                  {{ submittingAttempt ? '採点中...' : '採点して保存' }}
+                </button>
+              </div>
+
+              <div v-if="lastAttempt" class="result-box" :class="{ good: lastAttempt.result === 'PASS', bad: lastAttempt.result !== 'PASS' }">
+                <div class="result-title">{{ lastAttempt.result_label }}</div>
+                <div>{{ lastAttempt.score }} / {{ lastAttempt.total }}（{{ lastAttempt.rate }}%）</div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="testTab === 'history'" class="tab-panel">
+            <div class="section-head">
+              <h3>受験履歴</h3>
+              <button class="btn-secondary" @click="loadAttempts" :disabled="historyLoading">再読込</button>
+            </div>
+            <div v-if="historyLoading" class="info-box">受験履歴を読み込み中...</div>
+            <div v-else-if="!formalAttempts.length" class="info-box">正式テストの受験履歴はありません。</div>
+            <div v-else class="history-list">
+              <article v-for="attempt in formalAttempts" :key="attempt.id" class="history-card">
+                <div class="history-title">{{ attempt.book_title }} / {{ attempt.exam_name }}</div>
+                <div class="history-meta">
+                  {{ attempt.trainee_name }} / {{ formatDateTime(attempt.performed_at) }} / {{ attempt.location || '場所未設定' }}
+                </div>
+                <div class="history-meta">
+                  試験官: {{ attempt.supervisor_name || '未設定' }} / 組織:
+                  {{ formatOrg(attempt.trainee_division, attempt.trainee_group, attempt.trainee_team, attempt.trainee_unit) }}
+                </div>
+                <div class="badge-row">
+                  <span class="badge" :class="attempt.result === 'PASS' ? 'good' : 'bad'">{{ attempt.result_label }}</span>
+                  <span class="badge">{{ attempt.score }}/{{ attempt.total }}</span>
+                  <span class="badge">{{ attempt.rate }}%</span>
+                  <span class="badge">推進判定対象</span>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section v-if="testTab === 'progress'" class="tab-panel">
+            <div class="section-head">
+              <h3>個人進捗</h3>
+              <button class="btn-secondary" @click="loadProgress" :disabled="progressLoading || !form.traineeUser">再読込</button>
+            </div>
+            <div v-if="progressLoading" class="info-box">個人進捗を読み込み中...</div>
+            <div v-else-if="!progressSummary" class="info-box">受講者を選択してください。</div>
+            <template v-else>
+              <div class="summary-banner">
+                <span>受講者: {{ progressSummary.trainee.name }}</span>
+                <span>組織: {{ formatOrgName(progressSummary.trainee) }}</span>
+              </div>
+              <div class="table-wrap">
+                <table class="progress-table">
+                  <thead>
+                    <tr>
+                      <th>No.</th>
+                      <th>教育項目</th>
+                      <th>教育</th>
+                      <th>テスト</th>
+                      <th>認定</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in progressSummary.rows" :key="row.track_id">
+                      <td>{{ row.no }}</td>
+                      <td>{{ row.title }}</td>
+                      <td>
+                        <div v-if="row.education">
+                          <div>〇 {{ formatDateTime(row.education.performed_at) }}</div>
+                          <div class="cell-sub">{{ row.education.supervisor_name || '試験官未設定' }}</div>
+                        </div>
+                        <button v-else class="mini-btn" :disabled="stepSaving" @click="recordStep(row, 'EDUCATION')">教育完了</button>
+                      </td>
+                      <td>
+                        <div v-if="row.has_test && row.test">
+                          <div>〇 {{ row.test.exam_name }}</div>
+                          <div class="cell-sub">{{ row.test.score }}/{{ row.test.total }} | {{ formatDateTime(row.test.performed_at) }}</div>
+                        </div>
+                        <button v-else-if="row.has_test" class="mini-btn" :disabled="!row.book_id" @click="openTrackBook(row)">テストへ</button>
+                        <div v-else class="cell-sub">対象外</div>
+                      </td>
+                      <td>
+                        <div v-if="row.certification">
+                          <div>〇 {{ formatDateTime(row.certification.performed_at) }}</div>
+                          <div class="cell-sub">{{ row.certification.supervisor_name || '試験官未設定' }}</div>
+                        </div>
+                        <button v-else class="mini-btn" :disabled="stepSaving || !row.can_certify" @click="recordStep(row, 'CERTIFICATION')">認定完了</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </section>
+        </section>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -214,6 +400,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import { hasPermission } from '@/router'
 
 const dsSources = [
   { section: '教育・試験マスタ' },
@@ -247,8 +434,10 @@ const users = ref([])
 const attempts = ref([])
 const progressSummary = ref(null)
 const activeSession = ref(null)
+const activeSessionMode = ref('')
 const lastAttempt = ref(null)
-const activeTab = ref('books')
+const activeMode = ref('practice')
+const testTab = ref('exam')
 const message = reactive({ text: '', type: 'info' })
 const answers = reactive({})
 
@@ -266,8 +455,8 @@ const form = reactive({
   supervisorUser: '',
   performedAt: nowLocalValue(),
   location: '',
-  formalExam: true,
 })
+const orgFilter = ref('')
 
 const normalizeList = (payload) => {
   if (Array.isArray(payload)) return payload
@@ -285,9 +474,107 @@ function clearMessage() {
   message.type = 'info'
 }
 
+const canAccessTraining = (resource, level = 'view', aliases = [], fallbackToQuality = true) => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  const candidates = [resource, ...aliases]
+  const hasSpecific = permissions.some((item) => candidates.includes(item.resource))
+  if (hasSpecific) {
+    return candidates.some((candidate) => hasPermission(user, candidate, level))
+  }
+  return fallbackToQuality ? hasPermission(user, 'quality', level) : false
+}
+
+const canViewBookEditor = computed(() => canAccessTraining('quality.training_certification_editor', 'view'))
+const canViewTest = computed(() => canAccessTraining('quality.training_certification_test', 'view'))
+
+const ROLE_RANK = { staff: 0, office_staff: 0, leader: 1, supervisor: 2, chief: 3, manager: 4 }
+
 const userOptions = computed(() =>
   [...users.value].sort((a, b) => a.label.localeCompare(b.label, 'ja'))
 )
+
+const traineeOptions = computed(() => {
+  if (!form.supervisorUser) return []
+  const sup = users.value.find((u) => String(u.id) === form.supervisorUser)
+  if (!sup) return []
+  if (sup.is_superuser) return userOptions.value.filter((u) => String(u.id) !== form.supervisorUser)
+
+  const sp = sup.profile || {}
+  const supRole = sp.role || 'staff'
+  const supRank = ROLE_RANK[supRole] ?? 0
+
+  return users.value
+    .filter((u) => {
+      if (String(u.id) === form.supervisorUser) return false
+      const p = u.profile || {}
+      const rank = ROLE_RANK[p.role] ?? 0
+      if (rank >= supRank) return false
+
+      if (supRole === 'manager') {
+        return sp.division && p.division === sp.division
+      } else if (supRole === 'chief') {
+        return sp.group && p.group === sp.group
+      } else if (supRole === 'supervisor') {
+        const teamIds = new Set()
+        if (sp.team) teamIds.add(sp.team)
+        for (const t of sp.supervisor_teams || []) teamIds.add(t)
+        return teamIds.size > 0 && teamIds.has(p.team)
+      } else if (supRole === 'leader') {
+        const unitIds = new Set()
+        if (sp.unit) unitIds.add(sp.unit)
+        for (const uid of sp.leader_units || []) unitIds.add(uid)
+        return unitIds.size > 0 && unitIds.has(p.unit)
+      }
+      return false
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
+})
+
+const orgFilterLevel = computed(() => {
+  const sup = users.value.find((u) => String(u.id) === form.supervisorUser)
+  const role = sup?.profile?.role || 'staff'
+  if (role === 'manager') return 'team'
+  if (role === 'chief') return 'team'
+  if (role === 'supervisor') return 'unit'
+  if (sup?.is_superuser) return 'team'
+  return ''
+})
+
+const orgFilterOptions = computed(() => {
+  const level = orgFilterLevel.value
+  if (!level) return []
+  const map = new Map()
+  for (const u of traineeOptions.value) {
+    const p = u.profile || {}
+    const key = p[level] || 0
+    const label = p[`${level}_name`] || '未設定'
+    if (key && !map.has(key)) map.set(key, label)
+  }
+  return [...map.entries()]
+    .map(([value, label]) => ({ value: String(value), label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
+})
+
+const filteredTraineeOptions = computed(() => {
+  if (!orgFilter.value) return traineeOptions.value
+  const level = orgFilterLevel.value
+  const filterKey = Number(orgFilter.value)
+  return traineeOptions.value.filter((u) => (u.profile || {})[level] === filterKey)
+})
+
+const practiceBooks = computed(() => books.value.filter((book) => getPracticeExams(book).length > 0))
+const testBooks = computed(() => books.value.filter((book) => getTestExams(book).length > 0))
+const formalAttempts = computed(() => attempts.value.filter((attempt) => attempt.formal_exam))
+
+const trainingSummary = computed(() => ({
+  books: books.value.length,
+  questions: books.value.reduce((sum, book) => sum + Number(book.question_count || 0), 0),
+  exams: books.value.reduce((sum, book) => sum + Number(book.exams?.length || 0), 0),
+  tracks: tracks.value.length,
+}))
 
 const answeredCount = computed(() => {
   if (!activeSession.value) return 0
@@ -301,13 +588,35 @@ const canSubmitAttempt = computed(() => {
 
 const passedBookMap = computed(() => {
   const map = {}
-  for (const attempt of attempts.value) {
-    if (attempt.formal_exam && attempt.result === 'PASS' && !map[attempt.book]) {
+  for (const attempt of formalAttempts.value) {
+    if (attempt.result === 'PASS' && !map[attempt.book]) {
       map[attempt.book] = attempt
     }
   }
   return map
 })
+
+function getPracticeExams(book) {
+  const exams = Array.isArray(book?.exams) ? book.exams : []
+  return exams.filter((exam) => exam.bank_all || exam.is_random)
+}
+
+function getTestExams(book) {
+  const exams = Array.isArray(book?.exams) ? book.exams : []
+  return exams.filter((exam) => !exam.bank_all)
+}
+
+function selectMode(mode) {
+  if (mode === 'edit' && !canViewBookEditor.value) return
+  if (mode === 'test' && !canViewTest.value) return
+  if (activeSession.value && activeSessionMode.value !== mode) {
+    closeSession()
+  }
+  activeMode.value = mode
+  if (mode === 'test') {
+    testTab.value = 'exam'
+  }
+}
 
 async function loadUsers() {
   const response = await api.accounts.getUsers({ page_size: 1000, is_active: true })
@@ -317,6 +626,7 @@ async function loadUsers() {
     first_name: user.first_name,
     last_name: user.last_name,
     username: user.username,
+    is_superuser: user.is_superuser || false,
     profile: user.profile || {},
   }))
 }
@@ -369,31 +679,48 @@ async function refreshTraineeData() {
   await Promise.all([loadAttempts(), loadProgress()])
 }
 
-function validateExecutionForm() {
-  if (!form.traineeUser || !form.supervisorUser || !form.performedAt || !form.location) {
-    setMessage('受講者・試験官・実施日時・実施場所を入力してください。', 'error')
+function validateExecutionForm(mode = 'practice') {
+  if (mode === 'practice') {
+    return true
+  }
+  if (!form.traineeUser || !form.performedAt || !form.location) {
+    setMessage('受講者・実施日時・実施場所を入力してください。', 'error')
+    return false
+  }
+  if (!form.supervisorUser) {
+    setMessage('テストでは試験官を入力してください。', 'error')
     return false
   }
   return true
 }
 
-async function startExam(book, exam) {
+async function startExam(book, exam, mode) {
   clearMessage()
-  if (!validateExecutionForm()) return
+  if (!validateExecutionForm(mode)) return
   startingSession.value = true
   try {
-    const response = await api.trainingCertification.startSession({
-      exam_id: exam.id,
-      trainee_user: Number(form.traineeUser),
-      supervisor_user: Number(form.supervisorUser),
-      performed_at: form.performedAt,
-      location: form.location,
-      formal_exam: form.formalExam,
-    })
+    const response = mode === 'practice'
+      ? await api.trainingCertification.startPractice({
+          exam_id: exam.id,
+        })
+      : await api.trainingCertification.startSession({
+          exam_id: exam.id,
+          trainee_user: Number(form.traineeUser),
+          supervisor_user: form.supervisorUser ? Number(form.supervisorUser) : null,
+          performed_at: form.performedAt,
+          location: form.location,
+          formal_exam: true,
+        })
     activeSession.value = response.data
+    activeSessionMode.value = mode
     lastAttempt.value = null
     Object.keys(answers).forEach((key) => delete answers[key])
-    activeTab.value = 'books'
+    if (mode === 'practice') {
+      activeMode.value = 'practice'
+    } else {
+      activeMode.value = 'test'
+      testTab.value = 'exam'
+    }
   } catch (error) {
     setMessage(error.response?.data?.detail || '試験開始に失敗しました。', 'error')
   } finally {
@@ -406,13 +733,29 @@ async function submitAttempt() {
   clearMessage()
   submittingAttempt.value = true
   try {
-    const response = await api.trainingCertification.submitAttempt({
-      session_id: activeSession.value.session_id,
-      answers,
-    })
+    const response = activeSessionMode.value === 'practice'
+      ? await api.trainingCertification.gradePractice({
+          exam_id: activeSession.value.exam.id,
+          question_ids: activeSession.value.questions.map((question) => question.id),
+          answers,
+        })
+      : await api.trainingCertification.submitAttempt({
+          session_id: activeSession.value.session_id,
+          answers,
+        })
     lastAttempt.value = response.data
-    setMessage(`採点結果を保存しました: ${response.data.result_label}`, response.data.result === 'PASS' ? 'success' : 'warn')
-    await refreshTraineeData()
+    if (activeSessionMode.value === 'practice') {
+      setMessage(
+        `練習を採点しました: ${response.data.result_label}`,
+        response.data.result === 'PASS' ? 'success' : 'warn'
+      )
+    } else {
+      setMessage(
+        `採点結果を保存しました: ${response.data.result_label}`,
+        response.data.result === 'PASS' ? 'success' : 'warn'
+      )
+      await refreshTraineeData()
+    }
   } catch (error) {
     setMessage(error.response?.data?.detail || '採点保存に失敗しました。', 'error')
   } finally {
@@ -422,13 +765,14 @@ async function submitAttempt() {
 
 function closeSession() {
   activeSession.value = null
+  activeSessionMode.value = ''
   lastAttempt.value = null
   Object.keys(answers).forEach((key) => delete answers[key])
 }
 
 async function recordStep(row, stepType) {
   clearMessage()
-  if (!validateExecutionForm()) return
+  if (!validateExecutionForm('test')) return
   stepSaving.value = true
   try {
     await api.trainingCertification.createStepRecord({
@@ -454,12 +798,12 @@ function openTrackBook(row) {
     setMessage('紐付く教材が見つかりません。', 'error')
     return
   }
-  const exam = book.exams?.find((item) => !item.bank_all) || book.exams?.[0]
+  const exam = getTestExams(book)[0]
   if (!exam) {
     setMessage('開始できる試験がありません。', 'error')
     return
   }
-  startExam(book, exam)
+  startExam(book, exam, 'test')
 }
 
 function formatDateTime(value) {
@@ -469,15 +813,17 @@ function formatDateTime(value) {
   return `${date.getFullYear()}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
-function formatOrg(divisionId, teamId, unitId) {
-  const parts = [lookupDepartmentName(divisionId), lookupDepartmentName(teamId), lookupDepartmentName(unitId)].filter(Boolean)
+function formatOrg(...departmentIds) {
+  const parts = departmentIds.map((departmentId) => lookupDepartmentName(departmentId)).filter(Boolean)
   return parts.join(' / ') || '未設定'
 }
 
 function lookupDepartmentName(departmentId) {
   if (!departmentId) return ''
-  const user = users.value.find((item) => Number(item.profile?.division) === Number(departmentId))
-  if (user?.profile?.division_name) return user.profile.division_name
+  const divisionUser = users.value.find((item) => Number(item.profile?.division) === Number(departmentId))
+  if (divisionUser?.profile?.division_name) return divisionUser.profile.division_name
+  const groupUser = users.value.find((item) => Number(item.profile?.group) === Number(departmentId))
+  if (groupUser?.profile?.group_name) return groupUser.profile.group_name
   const teamUser = users.value.find((item) => Number(item.profile?.team) === Number(departmentId))
   if (teamUser?.profile?.team_name) return teamUser.profile.team_name
   const unitUser = users.value.find((item) => Number(item.profile?.unit) === Number(departmentId))
@@ -488,6 +834,14 @@ function lookupDepartmentName(departmentId) {
 function formatOrgName(trainee) {
   return [trainee.division_name, trainee.team_name, trainee.unit_name].filter(Boolean).join(' / ') || '未設定'
 }
+
+watch(
+  () => form.supervisorUser,
+  () => {
+    form.traineeUser = ''
+    orgFilter.value = ''
+  }
+)
 
 watch(
   () => form.traineeUser,
@@ -502,13 +856,25 @@ watch(
   }
 )
 
+watch(
+  [canViewBookEditor, canViewTest],
+  ([canEditBooks, canTest]) => {
+    if (activeMode.value === 'edit' && !canEditBooks) {
+      activeMode.value = 'practice'
+    }
+    if (activeMode.value === 'test' && !canTest) {
+      activeMode.value = canEditBooks ? 'edit' : 'practice'
+    }
+  },
+  { immediate: true }
+)
+
 onMounted(async () => {
   loading.value = true
   loadError.value = ''
   try {
     await Promise.all([loadUsers(), loadMasterData()])
     if (authState.user?.id) {
-      form.traineeUser = String(authState.user.id)
       form.supervisorUser = String(authState.user.id)
     }
     await refreshTraineeData()
@@ -527,6 +893,103 @@ onMounted(async () => {
   gap: 14px;
 }
 
+.mode-grid,
+.summary-grid,
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.mode-tile,
+.summary-card,
+.book-card,
+.exam-card,
+.history-card {
+  background: #fff;
+  border: 1px solid #d8e0e8;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.mode-tile {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mode-tile:not(:disabled):hover {
+  transform: translateY(-1px);
+  border-color: #7bb7aa;
+  box-shadow: 0 8px 18px rgba(26, 61, 76, 0.08);
+}
+
+.mode-tile.active {
+  border-color: #1f7a66;
+  background: #eef7f4;
+}
+
+.mode-tile.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.mode-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-icon {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: #e7f3ef;
+  color: #1f7a66;
+  font-weight: 700;
+}
+
+.mode-title,
+.book-title,
+.history-title,
+.summary-value {
+  font-weight: 700;
+  color: #1f3045;
+}
+
+.mode-desc,
+.mode-foot,
+.book-meta,
+.book-submeta,
+.history-meta,
+.cell-sub,
+.summary-label,
+.mode-hint,
+.mode-summary-text {
+  font-size: 12px;
+  color: #5e7084;
+}
+
+.mode-foot {
+  font-weight: 600;
+}
+
+.summary-card {
+  display: grid;
+  gap: 6px;
+}
+
+.summary-value {
+  font-size: 24px;
+}
+
 .control-card {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -540,6 +1003,7 @@ onMounted(async () => {
 .field {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .field label,
@@ -550,21 +1014,39 @@ onMounted(async () => {
 
 .field input,
 .field select {
+  width: 100%;
+  box-sizing: border-box;
   min-height: 38px;
   padding: 6px 10px;
   border: 1px solid #c8d2dc;
   border-radius: 8px;
 }
 
-.check-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.org-filter-select {
+  font-size: 12px;
+  min-height: 30px;
+  padding: 2px 8px;
+  border: 1px solid #c8d2dc;
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.mode-summary {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f3f7fa;
+}
+
+.mode-summary-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f3045;
 }
 
 .message,
 .info-box,
-.summary-banner {
+.summary-banner,
+.mode-hint {
   padding: 10px 12px;
   border-radius: 10px;
   font-size: 13px;
@@ -591,6 +1073,11 @@ onMounted(async () => {
   color: #a22a2a;
 }
 
+.mode-hint {
+  background: #f7f7eb;
+  border: 1px solid #e6dfbd;
+}
+
 .tab-bar {
   display: flex;
   gap: 8px;
@@ -614,36 +1101,6 @@ onMounted(async () => {
 .tab-panel {
   display: grid;
   gap: 12px;
-}
-
-.book-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.book-card,
-.exam-card,
-.history-card {
-  background: #fff;
-  border: 1px solid #d8e0e8;
-  border-radius: 14px;
-  padding: 12px;
-}
-
-.book-title,
-.history-title {
-  font-weight: 700;
-  color: #1f3045;
-}
-
-.book-meta,
-.book-submeta,
-.history-meta,
-.cell-sub {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #5e7084;
 }
 
 .exam-list,
@@ -790,10 +1247,11 @@ onMounted(async () => {
   background: #f3f7fa;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
   .control-card {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
 }
 
 @media (max-width: 640px) {
@@ -808,6 +1266,7 @@ onMounted(async () => {
   .exam-header,
   .section-head,
   .submit-row {
+    grid-column: auto;
     flex-direction: column;
     align-items: stretch;
   }
