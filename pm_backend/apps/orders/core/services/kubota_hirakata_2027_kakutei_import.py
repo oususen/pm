@@ -2,7 +2,7 @@ import csv
 from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Sum
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from orders.core.services.ship_to_utils import ensure_ship_to_records
 from masters.models import Customer, Product
@@ -335,13 +335,29 @@ class KubotaHirakata2027KakuteiImportService:
 
             forecast_diffs = []
             if daily_records:
-                firm_dict = {}
+                import_keys = set()
                 for daily in daily_records:
-                    key = (daily.product_code, daily.due_date)
-                    firm_dict[key] = firm_dict.get(key, Decimal('0')) + daily.quantity
+                    import_keys.add((daily.product_code, daily.due_date, daily.ship_to_code or ''))
 
-                product_codes = list({k[0] for k in firm_dict.keys()})
-                due_dates = list({k[1] for k in firm_dict.keys()})
+                product_codes = list({k[0] for k in import_keys})
+                due_dates = list({k[1] for k in import_keys})
+
+                # 既存＋今回分を含む全確定データの合計
+                firm_totals = (
+                    StgOrderDaily.objects
+                    .filter(
+                        customer=customer,
+                        order_type='FIRM',
+                        product_code__in=product_codes,
+                        due_date__in=due_dates,
+                    )
+                    .values('product_code', 'due_date', 'ship_to_code')
+                    .annotate(total_qty=Sum('quantity'))
+                )
+                firm_dict = {
+                    (row['product_code'], row['due_date'], row['ship_to_code'] or ''): row['total_qty']
+                    for row in firm_totals
+                }
 
                 max_id_qs = (
                     StgOrderDaily.objects
@@ -351,25 +367,26 @@ class KubotaHirakata2027KakuteiImportService:
                         product_code__in=product_codes,
                         due_date__in=due_dates,
                     )
-                    .values('product_code', 'due_date')
+                    .values('product_code', 'due_date', 'ship_to_code')
                     .annotate(max_id=Max('id'))
                 )
                 latest_ids = [row['max_id'] for row in max_id_qs]
                 forecast_dict = {
-                    (rec.product_code, rec.due_date): rec.quantity
+                    (rec.product_code, rec.due_date, rec.ship_to_code or ''): rec.quantity
                     for rec in StgOrderDaily.objects
                     .filter(id__in=latest_ids)
-                    .only('product_code', 'due_date', 'quantity')
+                    .only('product_code', 'due_date', 'ship_to_code', 'quantity')
                 }
 
-                for (product_code, due_date) in sorted(firm_dict.keys()):
-                    if (product_code, due_date) not in forecast_dict:
+                for (product_code, due_date, ship_to_code) in sorted(firm_dict.keys()):
+                    if (product_code, due_date, ship_to_code) not in forecast_dict:
                         continue
-                    firm_qty = int(firm_dict[(product_code, due_date)])
-                    forecast_qty = int(forecast_dict[(product_code, due_date)])
+                    firm_qty = int(firm_dict[(product_code, due_date, ship_to_code)])
+                    forecast_qty = int(forecast_dict[(product_code, due_date, ship_to_code)])
                     forecast_diffs.append({
                         'product_code': product_code,
                         'due_date': str(due_date),
+                        'ship_to_code': ship_to_code,
                         'firm_qty': firm_qty,
                         'forecast_qty': forecast_qty,
                         'diff': firm_qty - forecast_qty,

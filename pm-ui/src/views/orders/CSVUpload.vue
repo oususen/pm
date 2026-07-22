@@ -178,7 +178,8 @@
                 <tr>
                   <th>製品コード</th>
                   <th>納期</th>
-                  <th>確定数</th>
+                  <th>納入地</th>
+                  <th>確定数(累計)</th>
                   <th>内示数</th>
                   <th>差分</th>
                 </tr>
@@ -191,6 +192,7 @@
                 >
                   <td>{{ d.product_code }}</td>
                   <td>{{ d.due_date }}</td>
+                  <td>{{ d.ship_to_code || '' }}</td>
                   <td class="num">{{ d.firm_qty.toLocaleString() }}</td>
                   <td class="num">{{ d.forecast_qty.toLocaleString() }}</td>
                   <td class="num diff-cell">{{ d.diff > 0 ? '+' : '' }}{{ d.diff.toLocaleString() }}</td>

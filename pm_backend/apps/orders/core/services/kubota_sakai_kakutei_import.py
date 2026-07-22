@@ -2,7 +2,7 @@ import csv
 from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Sum
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from orders.core.services.ship_to_utils import ensure_ship_to_records
 from masters.models import Customer, Product
@@ -413,19 +413,35 @@ class KubotaSakaiKakuteiImportService:
 
             ensure_ship_to_records(list(raw_records_with_ids), customer)
 
-            # 確定ファイルの製品・日付について、内示データと比較
+            # 確定ファイルの製品・日付・納入地について、内示データと比較
             forecast_diffs = []
             if daily_records:
-                # 今回確定の (product_code, due_date) → 合計数量
-                firm_dict = {}
+                # 今回取込の (product_code, due_date, ship_to_code) キーを収集
+                import_keys = set()
                 for daily in daily_records:
-                    key = (daily.product_code, daily.due_date)
-                    firm_dict[key] = firm_dict.get(key, Decimal('0')) + daily.quantity
+                    import_keys.add((daily.product_code, daily.due_date, daily.ship_to_code or ''))
 
-                product_codes = list({k[0] for k in firm_dict.keys()})
-                due_dates = list({k[1] for k in firm_dict.keys()})
+                product_codes = list({k[0] for k in import_keys})
+                due_dates = list({k[1] for k in import_keys})
 
-                # 同製品・同日の内示データのうち、最新（最大ID）のレコードを取得
+                # 既存＋今回分を含む全確定データの合計（bulk_create済みなのでDB上に全データあり）
+                firm_totals = (
+                    StgOrderDaily.objects
+                    .filter(
+                        customer=customer,
+                        order_type='FIRM',
+                        product_code__in=product_codes,
+                        due_date__in=due_dates,
+                    )
+                    .values('product_code', 'due_date', 'ship_to_code')
+                    .annotate(total_qty=Sum('quantity'))
+                )
+                firm_dict = {
+                    (row['product_code'], row['due_date'], row['ship_to_code'] or ''): row['total_qty']
+                    for row in firm_totals
+                }
+
+                # 同製品・同日・同納入地の内示データのうち、最新（最大ID）のレコードを取得
                 max_id_qs = (
                     StgOrderDaily.objects
                     .filter(
@@ -434,26 +450,27 @@ class KubotaSakaiKakuteiImportService:
                         product_code__in=product_codes,
                         due_date__in=due_dates,
                     )
-                    .values('product_code', 'due_date')
+                    .values('product_code', 'due_date', 'ship_to_code')
                     .annotate(max_id=Max('id'))
                 )
                 latest_ids = [row['max_id'] for row in max_id_qs]
                 forecast_dict = {
-                    (rec.product_code, rec.due_date): rec.quantity
+                    (rec.product_code, rec.due_date, rec.ship_to_code or ''): rec.quantity
                     for rec in StgOrderDaily.objects
                     .filter(id__in=latest_ids)
-                    .only('product_code', 'due_date', 'quantity')
+                    .only('product_code', 'due_date', 'ship_to_code', 'quantity')
                 }
 
-                # 内示が存在する製品・日付を一覧化（数量一致でも含める）
-                for (product_code, due_date) in sorted(firm_dict.keys()):
-                    if (product_code, due_date) not in forecast_dict:
+                # 内示が存在する製品・日付・納入地を一覧化（数量一致でも含める）
+                for (product_code, due_date, ship_to_code) in sorted(firm_dict.keys()):
+                    if (product_code, due_date, ship_to_code) not in forecast_dict:
                         continue
-                    firm_qty = int(firm_dict[(product_code, due_date)])
-                    forecast_qty = int(forecast_dict[(product_code, due_date)])
+                    firm_qty = int(firm_dict[(product_code, due_date, ship_to_code)])
+                    forecast_qty = int(forecast_dict[(product_code, due_date, ship_to_code)])
                     forecast_diffs.append({
                         'product_code': product_code,
                         'due_date': str(due_date),
+                        'ship_to_code': ship_to_code,
                         'firm_qty': firm_qty,
                         'forecast_qty': forecast_qty,
                         'diff': firm_qty - forecast_qty,
@@ -485,6 +502,7 @@ class KubotaSakaiKakuteiImportService:
                     f"<tr>"
                     f"<td {td}>{d['product_code']}</td>"
                     f"<td {td}>{d['due_date']}</td>"
+                    f"<td {td}>{d.get('ship_to_code', '')}</td>"
                     f"<td {td_r}>{d['forecast_qty']:,}</td>"
                     f"<td {td_r}>{d['firm_qty']:,}</td>"
                     f"<td {td_diff}>{sign}{d['diff']:,}</td>"
@@ -495,8 +513,9 @@ class KubotaSakaiKakuteiImportService:
                 f"<thead><tr style='background:#dde6ff'>"
                 f"<th {th}>品番</th>"
                 f"<th {th}>日付</th>"
+                f"<th {th}>納入地</th>"
                 f"<th {th}>内示数</th>"
-                f"<th {th}>確定数</th>"
+                f"<th {th}>確定数(累計)</th>"
                 f"<th {th}>差分</th>"
                 "</tr></thead>"
                 "<tbody>" + "".join(rows) + "</tbody>"
