@@ -707,6 +707,8 @@ class ShippingTripExecutionView(APIView):
         elif action == 'mark_departed':
             if any(item.status == 'CLOSED' for item in trips):
                 return Response({'detail': '完了便は出発更新できません。'}, status=status.HTTP_400_BAD_REQUEST)
+            if any(item.status != 'LOADING' for item in trips):
+                return Response({'detail': '積込完了の便のみ出発更新できます。'}, status=status.HTTP_400_BAD_REQUEST)
             result, error_status = _register_actuals_for_trips(
                 trips,
                 trip.departure_date,

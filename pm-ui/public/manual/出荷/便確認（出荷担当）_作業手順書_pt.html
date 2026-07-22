@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirmação de Viagem (Expedição) — Manual de Procedimentos</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Segoe UI'), local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #1565c0;
+    --radius: 10px;
+    --trip-border: #ef9a3e;
+    --trip-bg: #fffdf5;
+    --prod-alt: #e8f4f8;
+    --split-bg: #fefce8;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #5ca0e8;
+    --trip-border: #c47a28;
+    --trip-bg: #24221a;
+    --prod-alt: #1a2830;
+    --split-bg: #2a2a1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #5ca0e8;
+      --trip-border: #c47a28;
+      --trip-bg: #24221a;
+      --prod-alt: #1a2830;
+      --split-bg: #2a2a1a;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Segoe UI', 'Yu Gothic Medium', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--trip-border);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: .02em; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; position: relative; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+
+  /* ---- mockup toolbar ---- */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 70px; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; font-size: 12px; color: var(--ink); }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.complete-btn { background: #fff; border: 2px solid var(--success); color: var(--success); }
+  .mock-btn.depart-btn { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.reopen-btn { background: #fff; border: 1px solid var(--danger); color: var(--danger); opacity: .5; }
+  .mock-btn.reopen-active { opacity: 1; }
+  .mock-btn.save-btn { background: #e3f2fd; border-color: #90caf9; color: #1565c0; }
+  .mock-btn.add-btn { background: #fff; border: 1px solid var(--border); color: var(--ink2); }
+  .mock-btn.del-btn { background: #fff; border: 1px solid var(--danger); color: var(--danger); font-size: 11px; }
+  .mock-btn.disabled { opacity: .35; }
+
+  /* ---- trip card mockup ---- */
+  .mock-trip { border: 1px solid var(--grid-line); border-left: 5px solid var(--trip-border); border-radius: 8px; overflow: hidden; margin-top: 10px; background: var(--trip-bg); }
+  .mock-trip-head { padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; background: var(--trip-bg); border-bottom: 1px solid var(--grid-line); }
+  .mock-trip-head h4 { font-size: 18px; font-weight: 800; color: var(--ink); margin: 0; }
+  .mock-trip-head .meta { color: var(--ink2); font-size: 12px; }
+  .status-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .status-planned { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .status-loading { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .status-departed { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .status-closed { background: #f3e5f5; color: #7b1fa2; border: 1px solid #ce93d8; }
+  :root[data-theme="dark"] .status-planned { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .status-loading { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .status-departed { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .status-closed { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .status-planned { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .status-loading { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .status-departed { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .status-closed { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  }
+
+  /* product row */
+  .mock-prod-head { display: flex; align-items: center; padding: 6px 14px; font-size: 11px; font-weight: 700; color: var(--ink2); background: var(--grid-head); border-bottom: 1px solid var(--grid-line); }
+  .mock-prod-head .ph-main { flex: 1; }
+  .mock-prod-head .ph-plan { width: 60px; text-align: center; }
+  .mock-prod-head .ph-actual { width: 52px; text-align: center; }
+  .mock-prod-row { display: flex; align-items: flex-start; padding: 8px 14px; border-bottom: 1px solid var(--grid-line); }
+  .mock-prod-main { flex: 1; }
+  .mock-prod-code { font-weight: 700; font-size: 14px; color: var(--ink); }
+  .mock-prod-name { font-size: 11px; color: var(--ink2); margin-left: 8px; }
+  .mock-prod-shipto { font-size: 11px; color: var(--ink2); margin-left: 6px; }
+  .mock-prod-plan { width: 60px; text-align: center; font-size: 16px; font-weight: 800; color: var(--ink); }
+  .mock-prod-actual { width: 52px; text-align: center; font-size: 16px; font-weight: 700; color: var(--ink); background: var(--grid-head); border-radius: 4px; padding: 2px 0; }
+
+  /* split rows */
+  .mock-split-area { background: var(--split-bg); padding: 6px 14px 10px; border-bottom: 1px solid var(--grid-line); }
+  .mock-split-head { display: flex; gap: 6px; font-size: 10px; font-weight: 600; color: var(--ink2); margin-bottom: 4px; padding-left: 10px; }
+  .mock-split-head span:nth-child(1) { min-width: 120px; }
+  .mock-split-head span:nth-child(2) { min-width: 50px; }
+  .mock-split-head span:nth-child(3) { min-width: 90px; }
+  .mock-split-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; padding-left: 10px; }
+  .mock-split-row .qty-input { min-width: 44px; max-width: 50px; text-align: right; }
+  .mock-split-row .order-no { font-size: 11px; color: var(--ink2); min-width: 80px; }
+  .mock-split-actions { display: flex; gap: 6px; margin-top: 6px; padding-left: 10px; }
+  .mock-trip-actions { display: flex; gap: 8px; padding: 10px 14px; background: var(--trip-bg); }
+
+  /* ---- callout ---- */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- highlight ring ---- */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* ---- toc ---- */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* ---- note ---- */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; letter-spacing: .04em; }
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .overview-mock .om-nav .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  .status-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 16px 0; }
+  .status-flow .sf-step { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .status-flow .sf-arrow { font-size: 20px; color: var(--ink2); font-weight: 700; }
+  .status-flow .sf-label { font-size: 11px; color: var(--ink2); }
+
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 90px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  .mock-summary { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .mock-chip { display: inline-flex; align-items: center; padding: 4px 12px; border: 1px solid var(--success); border-radius: 16px; font-size: 12px; font-weight: 600; color: var(--success); background: var(--success-light); cursor: default; }
+  .mock-chip.active { background: var(--success); color: #fff; }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+    .status-flow { flex-direction: column; gap: 2px; }
+    .status-flow .sf-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>Confirmação de Viagem (Expedição)</h1>
+    <div class="subtitle">Procedimento para registrar data de produção, concluir carga e registrar partida por viagem</div>
+    <div class="path">
+      Expedição <span class="arrow">&#9656;</span> Confirmação de Viagem (Expedição)
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>Fluxo de procedimentos</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>Abrir a tela</li>
+      <li><span class="tn">2</span>Filtrar e exibir</li>
+      <li><span class="tn">3</span>Inserir data de produção</li>
+      <li><span class="tn">4</span>Salvar data de produção</li>
+      <li><span class="tn">5</span>Marcar como Carga concluída</li>
+      <li><span class="tn">6</span>Marcar como Partido</li>
+      <li><span class="tn">7</span>Cancelar (reverter status)</li>
+      <li><span class="tn">8</span>Observações importantes</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面説明 ===== -->
+  <div class="screen-overview">
+    <h2>Visão geral da tela <span class="badge">Leia primeiro</span></h2>
+
+    <div class="overview-mock" style="position:relative;">
+      <!-- nav -->
+      <div class="om-nav">
+        <span>DAISO</span>
+        <span>Pedidos</span>
+        <span>Produção</span>
+        <span>Compras</span>
+        <span class="om-active">Expedição</span>
+        <span>Estoque</span>
+        <span>Qualidade</span>
+        <span>Mestres</span>
+        <span>Config</span>
+      </div>
+      <!-- toolbar -->
+      <div style="background:var(--grid-head);padding:8px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <div class="f-group"><label>Data de partida</label><span class="f-input">2026/07/21</span></div>
+        <div class="f-group"><label>Tipo de operação</label><span class="f-select" style="min-width:60px;">Todos</span></div>
+        <div class="f-group"><label>便</label><span class="f-select" style="min-width:60px;">Todos</span></div>
+        <span class="mock-btn primary" style="font-size:11px;padding:3px 10px;">Mostrar</span>
+        <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">1</span>
+      </div>
+      <!-- summary chips -->
+      <div style="padding:6px 14px;display:flex;flex-wrap:wrap;gap:5px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <span class="mock-chip active" style="font-size:10px;padding:2px 8px;">Total: 4</span>
+        <span class="mock-chip" style="font-size:10px;padding:2px 8px;">Não iniciado: 4</span>
+        <span class="mock-chip" style="font-size:10px;padding:2px 8px;">Carga concluída: 0</span>
+        <span class="mock-chip" style="font-size:10px;padding:2px 8px;">Partido: 0</span>
+        <span class="mock-chip" style="font-size:10px;padding:2px 8px;">Confirmado: 0</span>
+        <span class="om-anno" style="top:-8px;right:10px;">2</span>
+      </div>
+      <!-- trip card -->
+      <div style="padding:10px 14px;">
+        <div class="mock-trip" style="position:relative;">
+          <div class="mock-trip-head">
+            <h4>便2</h4>
+            <span class="meta">Hora de partida: 10:00 | Local de entrega: ZGHC</span>
+            <span class="status-badge status-planned">Não iniciado</span>
+            <span class="om-anno" style="top:-10px;right:10px;">3</span>
+          </div>
+          <div class="mock-prod-head">
+            <span class="ph-main">Produto / Nome</span>
+            <span class="ph-plan">Planejado</span>
+            <span class="ph-actual">Real</span>
+          </div>
+          <div class="mock-prod-row" style="position:relative;">
+            <div class="mock-prod-main">
+              <span class="mock-prod-code">V053904703</span>
+              <span class="mock-prod-name">Frame Comp (Front) Oushuu</span>
+              <span class="mock-prod-shipto">ZGHC</span>
+            </div>
+            <div class="mock-prod-plan">27</div>
+            <div class="mock-prod-actual">27</div>
+            <span class="om-anno" style="top:-8px;right:-6px;">4</span>
+          </div>
+          <div class="mock-split-area" style="position:relative;">
+            <div class="mock-split-head">
+              <span>Data produção</span>
+              <span>Qtd</span>
+              <span>N° pedido</span>
+            </div>
+            <div class="mock-split-row">
+              <span class="f-input" style="font-size:11px;min-width:100px;">2026/07/20</span>
+              <span class="f-input qty-input" style="font-size:11px;">27</span>
+              <span class="order-no">4510478494</span>
+              <span class="mock-btn del-btn" style="font-size:10px;padding:1px 6px;">Excluir</span>
+            </div>
+            <div class="mock-split-actions">
+              <span class="mock-btn add-btn" style="font-size:10px;padding:2px 8px;">+ Adicionar data</span>
+              <span class="mock-btn save-btn" style="font-size:10px;padding:2px 8px;">Salvar produção</span>
+            </div>
+            <span class="om-anno" style="top:-8px;right:-6px;">5</span>
+          </div>
+          <div class="mock-trip-actions" style="position:relative;">
+            <span class="mock-btn complete-btn" style="font-size:11px;">Carga concluída</span>
+            <span class="mock-btn depart-btn disabled" style="font-size:11px;">Partir</span>
+            <span class="mock-btn reopen-btn" style="font-size:11px;">Cancelar</span>
+            <span class="om-anno" style="top:-8px;right:10px;">6</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>Barra de ferramentas</strong> — Selecione a data de partida, tipo de operação e 便, depois clique em "Mostrar".</span></li>
+      <li><span class="anno-num">2</span><span><strong>Resumo de status</strong> — Total de viagens por status. Clique para filtrar; clique novamente para remover o filtro.</span></li>
+      <li><span class="anno-num">3</span><span><strong>Cabeçalho do cartão</strong> — Mostra o número da viagem, hora de partida, local de entrega e status.</span></li>
+      <li><span class="anno-num">4</span><span><strong>Linha de produto</strong> — Mostra a quantidade planejada (do plano de viagem) e a quantidade real (soma das datas de produção).</span></li>
+      <li><span class="anno-num">5</span><span><strong>Área de data de produção</strong> — Insira data, quantidade e N° pedido, depois clique "Salvar produção".</span></li>
+      <li><span class="anno-num">6</span><span><strong>Botões de ação</strong> — Avance o status da viagem: Carga concluída → Partir → ou Cancelar para reverter.</span></li>
+    </ul>
+
+    <!-- status flow -->
+    <div class="overview-section">
+      <h3>Fluxo de status</h3>
+      <div class="status-flow">
+        <div class="sf-step">
+          <span class="status-badge status-planned" style="font-size:13px;">Não iniciado</span>
+          <span class="sf-label">PLANNED</span>
+        </div>
+        <span class="sf-arrow">&#8594;</span>
+        <div class="sf-step">
+          <span class="status-badge status-loading" style="font-size:13px;">Carga concluída</span>
+          <span class="sf-label">LOADING</span>
+        </div>
+        <span class="sf-arrow">&#8594;</span>
+        <div class="sf-step">
+          <span class="status-badge status-departed" style="font-size:13px;">Partido</span>
+          <span class="sf-label">DEPARTED</span>
+        </div>
+        <span class="sf-arrow">&#8594;</span>
+        <div class="sf-step">
+          <span class="status-badge status-closed" style="font-size:13px;">Confirmação concluída</span>
+          <span class="sf-label">CLOSED</span>
+        </div>
+      </div>
+      <div class="callout info" style="margin-top:8px;">
+        <span class="icon">&#x1F501;</span>
+        <span>O botão "Cancelar" reverte o status para o anterior (pode reverter mesmo a partir de "Confirmação concluída").</span>
+      </div>
+    </div>
+
+    <!-- toolbar items -->
+    <div class="overview-section">
+      <h3>Itens da barra de ferramentas</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">Data de partida</span><span class="li-desc">Data alvo para exibição.</span></div>
+        <div class="legend-item"><span class="li-label">Tipo de operação</span><span class="li-desc">Kubota Sakai, Kubota Hirakata, Tiera, etc. "Todos" exibe tudo.</span></div>
+        <div class="legend-item"><span class="li-label">便</span><span class="li-desc">Filtra por número de viagem.</span></div>
+        <div class="legend-item"><span class="li-label">Mostrar</span><span class="li-desc">Carrega os cartões de viagem.</span></div>
+      </div>
+    </div>
+
+    <!-- card legend -->
+    <div class="overview-section">
+      <h3>Como ler o cartão de viagem</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">Planejado</span><span class="li-desc">Quantidade atribuída no plano de viagem.</span></div>
+        <div class="legend-item"><span class="li-label">Real</span><span class="li-desc">Soma das quantidades das datas de produção (calculada automaticamente).</span></div>
+        <div class="legend-item"><span class="li-label">Data produção</span><span class="li-desc">Data real de produção. Pode ser dividida em várias datas.</span></div>
+        <div class="legend-item"><span class="li-label">N° pedido</span><span class="li-desc">Número do pedido correspondente (exibido automaticamente).</span></div>
+        <div class="legend-item"><span class="li-label">Local de entrega</span><span class="li-desc">Viagens com vários destinos mostram "5476+ZGHC".</span></div>
+        <div class="legend-item"><span class="li-label">Partida real</span><span class="li-desc">Hora real de partida, registrada após a partida.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">Abrir a tela</div>
+    </div>
+    <div class="step-desc">
+      Clique em <strong>"Expedição"</strong> na barra de navegação superior e selecione <strong>"Confirmação de Viagem (Expedição)"</strong> no menu.
+    </div>
+    <div class="mock-toolbar" style="justify-content:center; gap:20px; padding:14px 20px; font-size:14px; font-weight:600;">
+      <span>Pedidos</span>
+      <span>Produção</span>
+      <span>Compras</span>
+      <span style="position:relative;" class="hl hl-blue">Expedição</span>
+      <span>Estoque</span>
+      <span>Qualidade</span>
+      <span>Mestres</span>
+      <span>Config</span>
+    </div>
+    <div class="callout info" style="margin-top:12px;">
+      <span class="icon">&#x1F4CC;</span>
+      <span>"Expedição" → Menu de Expedição → <strong>"Confirmação de Viagem (Expedição)"</strong>. Ao abrir, as viagens do dia são exibidas automaticamente.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">Filtrar e exibir</div>
+    </div>
+    <div class="step-desc">
+      Selecione a <strong>"Data de partida"</strong>, opcionalmente filtre por <strong>"Tipo de operação"</strong> e <strong>"便"</strong>, depois clique em <strong>"Mostrar"</strong>.
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group"><label>Data de partida</label><span class="f-input">2026/07/21</span></div>
+      <div class="f-group"><label>Tipo de operação</label><span class="f-select">Kubota Sakai</span></div>
+      <div class="f-group"><label>便</label><span class="f-select">Todos</span></div>
+      <span class="mock-btn primary hl hl-blue" style="position:relative;">Mostrar</span>
+    </div>
+    <div class="mock-summary" style="margin-top:10px;">
+      <span class="mock-chip active">Total: 4</span>
+      <span class="mock-chip">Não iniciado: 4</span>
+      <span class="mock-chip">Carga concluída: 0</span>
+      <span class="mock-chip">Partido: 0</span>
+      <span class="mock-chip">Confirmado: 0</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F50D;</span>
+      <span>Clique nos chips de status para filtrar e exibir apenas as viagens daquele status.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">Inserir data de produção</div>
+    </div>
+    <div class="step-desc">
+      Na <strong>área de data de produção</strong> de cada produto, insira a data e a quantidade.<br>
+      Para dividir em várias datas, clique em <strong>"+ Adicionar data"</strong> para adicionar linhas.
+    </div>
+    <div class="mock-trip">
+      <div class="mock-trip-head">
+        <h4>便2</h4>
+        <span class="meta">Hora de partida: 10:00 | Local de entrega: ZGHC</span>
+        <span class="status-badge status-planned">Não iniciado</span>
+      </div>
+      <div class="mock-prod-head">
+        <span class="ph-main">Produto / Nome</span>
+        <span class="ph-plan">Planejado</span>
+        <span class="ph-actual">Real</span>
+      </div>
+      <div class="mock-prod-row">
+        <div class="mock-prod-main">
+          <span class="mock-prod-code">V053904703</span>
+          <span class="mock-prod-name">Frame Comp (Front) Oushuu</span>
+          <span class="mock-prod-shipto">ZGHC</span>
+        </div>
+        <div class="mock-prod-plan">27</div>
+        <div class="mock-prod-actual">27</div>
+      </div>
+      <div class="mock-split-area">
+        <div class="mock-split-head">
+          <span>Data produção</span>
+          <span>Qtd</span>
+          <span>N° pedido</span>
+        </div>
+        <div class="mock-split-row">
+          <span class="f-input hl hl-blue" style="font-size:11px;min-width:100px;position:relative;">2026/07/20</span>
+          <span class="f-input qty-input hl hl-blue" style="font-size:11px;position:relative;">27</span>
+          <span class="order-no">4510478494</span>
+          <span class="mock-btn del-btn" style="font-size:10px;padding:1px 6px;">Excluir</span>
+        </div>
+        <div class="mock-split-actions">
+          <span class="mock-btn add-btn" style="font-size:10px;padding:2px 8px;">+ Adicionar data</span>
+          <span class="mock-btn save-btn" style="font-size:10px;padding:2px 8px;">Salvar produção</span>
+        </div>
+      </div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F4A1;</span>
+      <span>O valor na coluna "Real" é <strong>calculado automaticamente</strong> pela soma das quantidades das datas de produção. Não é digitado manualmente.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">Salvar data de produção</div>
+    </div>
+    <div class="step-desc">
+      Após inserir os dados, clique no botão <strong>"Salvar produção"</strong> de cada produto para salvar.
+    </div>
+    <div style="background:var(--split-bg);border:1px solid var(--grid-line);border-radius:6px;padding:10px 14px;">
+      <div class="mock-split-head">
+        <span>Data produção</span>
+        <span>Qtd</span>
+        <span>N° pedido</span>
+      </div>
+      <div class="mock-split-row">
+        <span class="f-input" style="font-size:11px;min-width:100px;">2026/07/20</span>
+        <span class="f-input qty-input" style="font-size:11px;">27</span>
+        <span class="order-no">4510478494</span>
+        <span class="mock-btn del-btn" style="font-size:10px;padding:1px 6px;">Excluir</span>
+      </div>
+      <div class="mock-split-actions">
+        <span class="mock-btn add-btn" style="font-size:10px;padding:2px 8px;">+ Adicionar data</span>
+        <span class="mock-btn save-btn hl hl-green" style="font-size:10px;padding:2px 8px;position:relative;">Salvar produção</span>
+      </div>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#x2705;</span>
+      <span>Quando a mensagem de sucesso aparecer, está salvo. Cada produto precisa ser salvo <strong>individualmente</strong>.</span>
+    </div>
+    <div class="callout warn" style="margin-top:8px;">
+      <span class="icon">&#x26A0;&#xFE0F;</span>
+      <span>Se a soma das quantidades não for igual ao planejado, <strong>não será possível marcar "Carga concluída"</strong>. Confira antes de salvar.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">Marcar como Carga concluída</div>
+    </div>
+    <div class="step-desc">
+      Quando todos os produtos tiverem <strong>Planejado = Real</strong>, clique no botão <strong>"Carga concluída"</strong> para avançar o status.
+    </div>
+    <div class="mock-trip-actions" style="border:1px solid var(--grid-line);border-radius:6px;background:var(--trip-bg);">
+      <span class="mock-btn complete-btn hl hl-green" style="font-size:13px;position:relative;">Carga concluída</span>
+      <span class="mock-btn depart-btn disabled" style="font-size:13px;">Partir</span>
+      <span class="mock-btn reopen-btn" style="font-size:13px;">Cancelar</span>
+    </div>
+    <div class="callout danger" style="margin-top:12px;">
+      <span class="icon">&#x1F6AB;</span>
+      <span>Se houver <strong>qualquer produto</strong> onde Planejado &#8800; Real, um <strong>alerta será exibido</strong> e não será possível prosseguir.</span>
+    </div>
+    <div style="display:flex;gap:20px;margin-top:14px;">
+      <div style="flex:1;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--success);margin-bottom:4px;">OK: Quantidades iguais</div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <div style="font-size:14px;">Planejado <strong>27</strong></div>
+          <div style="font-size:14px;">＝</div>
+          <div style="font-size:14px;">Real <strong>27</strong></div>
+        </div>
+      </div>
+      <div style="flex:1;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--danger);margin-bottom:4px;">NG: Quantidades diferentes</div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <div style="font-size:14px;">Planejado <strong>33</strong></div>
+          <div style="font-size:14px;">&#8800;</div>
+          <div style="font-size:14px;color:var(--danger);">Real <strong>30</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">Marcar como Partido</div>
+    </div>
+    <div class="step-desc">
+      Quando a carga estiver pronta e o caminhão sair, clique no botão <strong>"Partir"</strong>.<br>
+      <strong>Viagens com status "Não iniciado" não podem partir</strong> — primeiro marque como "Carga concluída".<br>
+      Na primeira partida, a <strong>hora real de partida</strong> é registrada.
+    </div>
+    <div class="mock-trip" style="border-left-color:#1565c0;">
+      <div class="mock-trip-head">
+        <h4>便2</h4>
+        <span class="meta">Hora de partida: 10:00 | Local de entrega: ZGHC</span>
+        <span class="status-badge status-loading">Carga concluída</span>
+      </div>
+      <div class="mock-trip-actions">
+        <span class="mock-btn complete-btn disabled" style="font-size:13px;">Carga concluída</span>
+        <span class="mock-btn depart-btn hl hl-blue" style="font-size:13px;position:relative;">Partir</span>
+        <span class="mock-btn reopen-btn reopen-active" style="font-size:13px;">Cancelar</span>
+      </div>
+    </div>
+    <div class="callout info" style="margin-top:12px;">
+      <span class="icon">&#x1F69A;</span>
+      <span>Após a partida, a hora real será exibida no cabeçalho como <strong>"Partida real: 10:05"</strong>.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">Cancelar (reverter status)</div>
+    </div>
+    <div class="step-desc">
+      Se marcou como "Carga concluída" ou "Partido" por engano, clique em <strong>"Cancelar"</strong> para reverter para "Não iniciado".
+    </div>
+    <div class="mock-trip" style="border-left-color:var(--warn);">
+      <div class="mock-trip-head">
+        <h4>便2</h4>
+        <span class="meta">Hora de partida: 10:00 | Local de entrega: ZGHC</span>
+        <span class="status-badge status-departed">Partido</span>
+      </div>
+      <div class="mock-trip-actions">
+        <span class="mock-btn complete-btn disabled" style="font-size:13px;">Carga concluída</span>
+        <span class="mock-btn depart-btn disabled" style="font-size:13px;">Partir</span>
+        <span class="mock-btn reopen-btn reopen-active hl" style="font-size:13px;position:relative;">Cancelar</span>
+      </div>
+    </div>
+    <div class="callout danger" style="margin-top:12px;">
+      <span class="icon">&#x26A0;&#xFE0F;</span>
+      <span>Ao cancelar, <strong>os dados de produção salvos para esta viagem também serão excluídos</strong>. Se necessário, insira novamente.</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>Observações importantes</h2>
+    <ul>
+      <li>A coluna "Real" é <strong>calculada automaticamente pela soma das datas de produção</strong>. Não é possível inserir valores diretamente.</li>
+      <li><strong>Condição para "Carga concluída"</strong>: todos os produtos devem ter "Planejado = Real (soma das datas de produção)".</li>
+      <li>Viagens com carga noturna (宵積み) são exibidas pela <strong>data real de partida</strong>, não pela data de chegada. A data de produção pode ser diferente da data exibida na tela.</li>
+      <li>Viagens com vários destinos são <strong>agrupadas em um único cartão</strong>. O cabeçalho mostra os locais concatenados como "5476+ZGHC".</li>
+      <li>O salvamento da data de produção deve ser feito <strong>produto por produto</strong>. Não há botão para salvar todos de uma vez.</li>
+      <li>"Confirmação concluída" é registrada na tela do pessoal administrativo. Não é possível registrar nesta tela.</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

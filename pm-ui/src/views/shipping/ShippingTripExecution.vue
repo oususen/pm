@@ -274,7 +274,7 @@ const businessTypeLabel = (value) => {
   return map[value] || value
 }
 
-const canMarkDeparted = (trip) => canStatusEdit.value && ['PLANNED', 'LOADING'].includes(trip?.status)
+const canMarkDeparted = (trip) => canStatusEdit.value && trip?.status === 'LOADING'
 const canReopen = (trip) => canStatusEdit.value && ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
 const canRegisterActual = (trip) => {
   if (!canActualEdit.value) return false
