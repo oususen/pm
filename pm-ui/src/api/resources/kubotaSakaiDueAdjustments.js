@@ -25,6 +25,9 @@ export const createKubotaSakaiDueAdjustmentsAPI = (client) => ({
   remove(id) {
     return client.delete(`/kubota-sakai-due-adjustments/${id}/`)
   },
+  linkForwardPlans(data) {
+    return client.post('/kubota-sakai-due-adjustments/link_forward_plans/', data)
+  },
   getContacts() {
     return client.get('/kubota-sakai-due-adjustments/get_contacts/')
   },

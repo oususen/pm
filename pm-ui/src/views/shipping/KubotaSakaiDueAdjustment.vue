@@ -74,6 +74,18 @@
                 <span class="head-code">{{ col.productCode }}</span>
                 <span class="head-ship">{{ col.shipToCode }}</span>
                 <button
+                  class="copy-btn del-btn"
+                  :disabled="loading || saving || importing"
+                  title="計画一括削除"
+                  @click.stop="openClearPlanDialog(col)"
+                >×</button>
+                <button
+                  class="copy-btn"
+                  :disabled="loading || saving || importing || linking"
+                  title="前倒し計画をFIRM注番に紐づけ"
+                  @click.stop="linkForwardPlans(col)"
+                >⇔</button>
+                <button
                   class="copy-btn"
                   :disabled="loading || saving || importing"
                   @click.stop="applyDemandToPlan(col.group)"
@@ -173,6 +185,21 @@
           </tr>
         </tfoot>
       </table>
+    </div>
+
+    <div v-if="showClearPlanDialog" class="modal-overlay" @click.self="closeClearPlanDialog">
+      <div class="modal-content">
+        <h2>{{ clearPlanTarget?.productCode }} {{ clearPlanTarget?.shipToCode }} 計画削除</h2>
+        <div style="margin-bottom: 8px;">
+          <label style="font-weight: 600;">開始日</label>
+          <input v-model="clearPlanStartDate" type="date" style="margin-left: 8px;" />
+        </div>
+        <p style="margin: 8px 0; font-size: 13px;">この日以降の計画数を0にします。削除しますか？</p>
+        <div class="modal-actions">
+          <button class="btn" @click="closeClearPlanDialog">キャンセル</button>
+          <button class="btn save-btn" style="background: #dc2626;" @click="executeClearPlan">削除</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="showChangeReasonDialog" class="modal-overlay" @click.self="closeChangeReasonDialog">
@@ -314,6 +341,7 @@ const displayInputValue = (value) => {
 const loading = ref(false)
 const saving = ref(false)
 const importing = ref(false)
+const linking = ref(false)
 const keyword = ref('V0')
 const keyword2 = ref('6E')
 const startDate = ref(formatLocalDate(new Date()))
@@ -645,6 +673,64 @@ const groupTotalRemaining = (group) => {
     total += lastRemaining
   }
   return Number(total.toFixed(3))
+}
+
+const showClearPlanDialog = ref(false)
+const clearPlanTarget = ref(null)
+const clearPlanStartDate = ref('')
+
+const openClearPlanDialog = (col) => {
+  clearPlanTarget.value = col
+  clearPlanStartDate.value = bulkStartDate.value || startDate.value
+  showClearPlanDialog.value = true
+}
+const closeClearPlanDialog = () => {
+  showClearPlanDialog.value = false
+  clearPlanTarget.value = null
+}
+const executeClearPlan = () => {
+  const col = clearPlanTarget.value
+  if (!col?.group) return
+  const from = clearPlanStartDate.value
+  let changed = false
+  for (const line of col.group.lines) {
+    for (const dc of dateColumns.value) {
+      if (from && dc.key < from) continue
+      if (isDateLocked(dc.key)) continue
+      const current = parseNumber(line.deliveryByDate[dc.key])
+      if (current !== 0) {
+        line.deliveryByDate[dc.key] = 0
+        changed = true
+      }
+    }
+    if (changed) line._dirty = true
+  }
+  if (changed) recalcGroupRemaining(col.group)
+  closeClearPlanDialog()
+}
+
+const linkForwardPlans = async (col) => {
+  if (!col.group) return
+  if (!confirm(`${col.productCode} / ${col.shipToCode || '(なし)'}\n前倒し計画をFIRM注番に紐づけますか？`)) return
+  linking.value = true
+  try {
+    const shipTo = col.shipToCode === '-' ? '' : (col.shipToCode || '')
+    const res = await api.kubotaSakaiDueAdjustments.linkForwardPlans({
+      product_code: col.productCode,
+      ship_to_code: shipTo,
+    })
+    const d = res.data
+    if (d.linked > 0) {
+      alert(`${d.linked}件の前倒し計画を紐づけました。`)
+      await loadGrid()
+    } else {
+      alert(d.detail || '紐づけ対象がありませんでした。')
+    }
+  } catch (error) {
+    alert(error?.response?.data?.detail || '紐づけに失敗しました。')
+  } finally {
+    linking.value = false
+  }
 }
 
 const applyDemandToPlan = (group) => {
@@ -1361,6 +1447,11 @@ onMounted(async () => {
 .copy-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.del-btn {
+  color: #dc2626;
+  border-color: #f0a0a0;
+  background: #fff5f5;
 }
 .grid th.holiday,
 .grid td.holiday {

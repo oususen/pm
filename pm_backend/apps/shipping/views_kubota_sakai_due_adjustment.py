@@ -790,6 +790,82 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             'change_logs': change_log_count,
         })
 
+    # ========== link_forward_plans ==========
+    @action(detail=False, methods=['post'])
+    def link_forward_plans(self, request):
+        """前倒し計画行（FORECAST, demand_qty=0, delivery_qty>0）をFIRM注番に紐づける。"""
+        product_code = (request.data.get('product_code') or '').strip()
+        ship_to_code = (request.data.get('ship_to_code') or '').strip() or None
+
+        if not product_code:
+            return Response(
+                {'detail': '品番を指定してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        firm_rows = list(KubotaSakaiDueAdjustment.objects.filter(
+            product_code=product_code,
+            ship_to_code=ship_to_code,
+            order_type='FIRM',
+            demand_qty__gt=Decimal('0'),
+        ).order_by('due_date'))
+
+        if not firm_rows:
+            return Response({'linked': 0, 'detail': '紐づけ先のFIRM注文がありません。'})
+
+        firm_dates = [(r.due_date, r.source_order_no) for r in firm_rows if r.source_order_no]
+        if not firm_dates:
+            return Response({'linked': 0, 'detail': '注番付きのFIRM注文がありません。'})
+
+        forward_planned = list(KubotaSakaiDueAdjustment.objects.filter(
+            product_code=product_code,
+            ship_to_code=ship_to_code,
+            source_order_no__isnull=True,
+            order_type='FORECAST',
+            delivery_qty__gt=Decimal('0'),
+            demand_qty=Decimal('0'),
+        ).order_by('due_date'))
+
+        if not forward_planned:
+            return Response({'linked': 0, 'detail': '紐づけ対象の前倒し計画がありません。'})
+
+        linked_count = 0
+        with transaction.atomic():
+            for fp_row in forward_planned:
+                target_order_no = None
+                for firm_date, firm_son in firm_dates:
+                    if firm_date > fp_row.due_date:
+                        target_order_no = firm_son
+                        break
+                if not target_order_no:
+                    continue
+
+                conflict = KubotaSakaiDueAdjustment.objects.filter(
+                    product_code=product_code,
+                    ship_to_code=ship_to_code,
+                    source_order_no=target_order_no,
+                    due_date=fp_row.due_date,
+                ).exists()
+                if conflict:
+                    target = KubotaSakaiDueAdjustment.objects.filter(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                        source_order_no=target_order_no,
+                        due_date=fp_row.due_date,
+                    ).first()
+                    target.delivery_qty += fp_row.delivery_qty
+                    target.save(update_fields=['delivery_qty'])
+                    fp_row.delete()
+                else:
+                    fp_row.source_order_no = target_order_no
+                    fp_row.order_type = 'FIRM'
+                    fp_row.save(update_fields=['source_order_no', 'order_type'])
+                linked_count += 1
+
+            _recalculate_remaining_for_groups([(product_code, ship_to_code)])
+
+        return Response({'linked': linked_count})
+
     # ========== get_contacts ==========
     @action(detail=False, methods=['get'])
     def get_contacts(self, request):
