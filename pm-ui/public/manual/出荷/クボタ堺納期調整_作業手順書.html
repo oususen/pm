@@ -695,7 +695,7 @@
   <!-- ===== COVER ===== -->
   <div class="cover">
     <h1>クボタ堺 納期調整 作業手順書</h1>
-    <div class="subtitle">日々の受注取込から計画入力・保存までの操作手順</div>
+    <div class="subtitle">日々の受注取込から計画入力・保存・EXCEL出力までの操作手順</div>
     <div class="path">
       出荷管理 <span class="arrow">&#9656;</span> クボタ堺納期調整
     </div>
@@ -712,7 +712,8 @@
       <li><span class="tn">5</span>計画を削除する（×ボタン）</li>
       <li><span class="tn">6</span>前倒し計画を紐づける（⇔ボタン）</li>
       <li><span class="tn">7</span>保存する</li>
-      <li><span class="tn">8</span>計画ロック日の変更</li>
+      <li><span class="tn">8</span>EXCEL出力する</li>
+      <li><span class="tn">9</span>計画ロック日の変更</li>
     </ul>
   </div>
 
@@ -756,6 +757,7 @@
         <span class="mock-btn import-btn" style="font-size:11px;padding:2px 8px;">取込</span>
         <span class="mock-btn" style="font-size:11px;padding:2px 8px;">計画変更</span>
         <span class="mock-btn save-btn" style="font-size:11px;padding:2px 8px;">保存</span>
+        <span class="mock-btn" style="font-size:11px;padding:2px 8px;">EXCEL出力</span>
         <span class="mock-btn" style="font-size:11px;padding:2px 8px;">表示</span>
         <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">2</span>
       </div>
@@ -824,7 +826,7 @@
     <!-- 番号付き説明 -->
     <ul class="anno-list">
       <li><span class="anno-num">1</span><span><strong>ナビゲーションバー</strong> — 「出荷」から画面に入ります。</span></li>
-      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — 開始日・期間の設定、品番フィルタ、取込・保存などの操作ボタンがあります。</span></li>
+      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — 開始日・期間の設定、品番フィルタ、取込・保存・EXCEL出力などの操作ボタンがあります。</span></li>
       <li><span class="anno-num">3</span><span><strong>日付列</strong> — 左端に日付が並びます。土日・休日は色付き表示。</span></li>
       <li><span class="anno-num">4</span><span><strong>サブ列（4列1組）</strong> — 品番+納入地ごとに「注番・受注・計画・注残」の4列があります。</span></li>
       <li><span class="anno-num">5</span><span><strong>列ヘッダボタン（× ⇔ →）</strong> — 各品番+納入地ごとの操作ボタン。後のステップで詳しく説明します。</span></li>
@@ -959,6 +961,10 @@
           <span class="li-desc">入力した計画数をDBに保存します。</span>
         </div>
         <div class="legend-item">
+          <span class="li-label">EXCEL出力</span>
+          <span class="li-desc">現在表示している一覧をEXCELファイルで保存します。</span>
+        </div>
+        <div class="legend-item">
           <span class="li-label">表示</span>
           <span class="li-desc">条件に合うデータを画面に表示します。</span>
         </div>
@@ -1042,6 +1048,7 @@
       <span class="mock-btn import-btn hl hl-green" style="position:relative;">取込</span>
       <span class="mock-btn">計画変更</span>
       <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn">EXCEL出力</span>
       <span class="mock-btn">表示</span>
     </div>
     <div class="callout ok">
@@ -1078,6 +1085,7 @@
       <span class="mock-btn">取込</span>
       <span class="mock-btn">計画変更</span>
       <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn">EXCEL出力</span>
       <span class="mock-btn primary hl hl-blue" style="position:relative;">表示</span>
     </div>
   </div>
@@ -1238,6 +1246,7 @@
       <span class="mock-btn">取込</span>
       <span class="mock-btn">計画変更</span>
       <span class="mock-btn save-btn hl hl-blue" style="position:relative;">保存</span>
+      <span class="mock-btn">EXCEL出力</span>
       <span class="mock-btn">表示</span>
     </div>
     <div class="callout ok">
@@ -1250,6 +1259,43 @@
   <div class="step">
     <div class="step-header">
       <div class="step-num">8</div>
+      <div class="step-title">EXCEL出力する</div>
+    </div>
+    <div class="step-desc">
+      画面に一覧を表示したあと、<strong>「EXCEL出力」ボタン</strong>を押すと、現在表示中の内容をそのままEXCELファイルで保存できます。<br>
+      出力するデータが表示されていない場合は実行できません。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group">
+        <label>開始日</label>
+        <span class="f-input">2026/07/22</span>
+      </div>
+      <div class="f-group">
+        <label>期間</label>
+        <span class="f-select">30日</span>
+      </div>
+      <div class="f-group">
+        <label>品番 OR検索</label>
+        <span class="f-input">V0</span>
+        <span class="f-input">6E</span>
+      </div>
+      <span style="flex:1"></span>
+      <span class="mock-btn">取込</span>
+      <span class="mock-btn">計画変更</span>
+      <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn hl hl-blue" style="position:relative;">EXCEL出力</span>
+      <span class="mock-btn">表示</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F4C4;</span>
+      <span>ファイル名は <strong>クボタ堺納期調整_開始日_期間_検索条件.xlsx</strong> の形式です。検索条件がない場合は末尾が <strong>all</strong> になります。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 9 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
       <div class="step-title">計画ロック日の変更（必要な場合のみ）</div>
     </div>
     <div class="step-desc">
@@ -1260,6 +1306,7 @@
       <span class="mock-btn">取込</span>
       <span class="mock-btn hl hl-orange" style="position:relative;">計画変更</span>
       <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn">EXCEL出力</span>
       <span class="mock-btn">表示</span>
     </div>
     <div style="display:flex; align-items:center; justify-content:center; margin:12px 0 4px;">
@@ -1301,6 +1348,7 @@
     <h2>注意事項</h2>
     <ul>
       <li>計画数を変更したら<strong>必ず「保存」を押してください</strong>。保存前にリロードすると入力内容は消えます。</li>
+      <li>EXCEL出力は画面に表示中の内容をそのまま出力します。出力前に必要な条件で「表示」を押してください。</li>
       <li>締め日以前のデータは編集・取込ともにできません。</li>
       <li>納入数や納期に変更があった場合、口頭連絡だけで済ませず<strong>必ずこの画面で計画数を修正</strong>してください。計画数は便計画の需要数に直結します。</li>
       <li>⇔ボタンは即座にDBに反映されます（保存ボタン不要）。×ボタンと→ボタンは画面上の変更のみで、保存が必要です。</li>
