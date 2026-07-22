@@ -11,7 +11,7 @@
         <div class="icon-box">CS</div>
         <div class="label">品質チェックシート</div>
       </RouterLink>
-      <RouterLink v-if="canViewTrainingCertification" to="/quality/training-certification" class="master-tile">
+      <RouterLink to="/quality/training-certification" class="master-tile">
         <div class="icon-box">教認</div>
         <div class="label">教育・テスト・認定</div>
       </RouterLink>
@@ -52,6 +52,5 @@ const canViewChecksheet = computed(() =>
     "quality.product_checksheet_review",
   ])
 );
-const canViewTrainingCertification = computed(() => canAccessQuality("quality"));
 </script>
 

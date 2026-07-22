@@ -24,6 +24,8 @@ from .serializers_training import (
     TrainingExamAttemptCreateSerializer,
     TrainingExamSessionStartSerializer,
     TrainingProgressSummarySerializer,
+    TrainingPracticeGradeSerializer,
+    TrainingPracticeStartSerializer,
     TrainingQuestionPublicSerializer,
     TrainingStepRecordCreateSerializer,
     TrainingStepRecordSerializer,
@@ -84,6 +86,66 @@ def resolve_exam_questions(exam):
     return list(book.questions.filter(is_active=True).order_by("display_order", "id"))
 
 
+def resolve_exam_from_payload(data):
+    exam = None
+    if data.get("exam_id"):
+        exam = get_object_or_404(
+            TrainingExamDefinition.objects.select_related("book").prefetch_related("exam_questions__question"),
+            pk=data["exam_id"],
+            is_active=True,
+        )
+        return exam.book, exam
+
+    if data.get("book_id"):
+        book = get_object_or_404(TrainingBook, pk=data["book_id"], is_active=True)
+        exam = (
+            TrainingExamDefinition.objects.filter(book=book, bank_all=True, is_active=True)
+            .order_by("display_order", "id")
+            .first()
+        )
+        if not exam:
+            return None, None
+        exam = TrainingExamDefinition.objects.prefetch_related("exam_questions__question").get(pk=exam.pk)
+        return book, exam
+
+    return None, None
+
+
+def grade_training_answers(ordered_questions, raw_answers):
+    question_results = []
+    score = 0
+    for question in ordered_questions:
+        answer_value = raw_answers.get(str(question.id))
+        if answer_value is None:
+            answer_value = raw_answers.get(question.question_code)
+        if answer_value is None:
+            answer_value = raw_answers.get(question.id)
+        answer_value = "" if answer_value is None else str(answer_value).strip()
+        is_correct = answer_value == str(question.answer or "").strip()
+        if is_correct:
+            score += 1
+        question_results.append(
+            {
+                "question_id": question.id,
+                "question_code": question.question_code,
+                "question": question.question_text,
+                "answer": answer_value,
+                "correct_answer": question.answer,
+                "is_correct": is_correct,
+                "explanation": question.explanation,
+            }
+        )
+
+    total = len(ordered_questions)
+    rate = round(score / total * 100) if total else 0
+    result = (
+        TrainingExamAttempt.RESULT_PASS
+        if total > 0 and score == total
+        else TrainingExamAttempt.RESULT_RETRAIN
+    )
+    return question_results, score, total, rate, result
+
+
 class TrainingBookViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
         TrainingBook.objects.filter(is_active=True)
@@ -112,25 +174,8 @@ class TrainingExamSessionStartView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        exam = None
-        if data.get("exam_id"):
-            exam = get_object_or_404(
-                TrainingExamDefinition.objects.select_related("book").prefetch_related("exam_questions__question"),
-                pk=data["exam_id"],
-                is_active=True,
-            )
-            book = exam.book
-        elif data.get("book_id"):
-            book = get_object_or_404(TrainingBook, pk=data["book_id"], is_active=True)
-            exam = (
-                TrainingExamDefinition.objects.filter(book=book, bank_all=True, is_active=True)
-                .order_by("display_order", "id")
-                .first()
-            )
-            if not exam:
-                return Response({"detail": "試験定義が見つかりません。"}, status=status.HTTP_400_BAD_REQUEST)
-            exam = TrainingExamDefinition.objects.prefetch_related("exam_questions__question").get(pk=exam.pk)
-        else:
+        book, exam = resolve_exam_from_payload(data)
+        if not book or not exam:
             return Response({"detail": "exam_id または book_id が必要です。"}, status=status.HTTP_400_BAD_REQUEST)
 
         trainee = get_object_or_404(User.objects.select_related("profile"), pk=data["trainee_user"], is_active=True)
@@ -175,6 +220,79 @@ class TrainingExamSessionStartView(APIView):
                 "questions": TrainingQuestionPublicSerializer(questions, many=True).data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class TrainingPracticeStartView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = TrainingPracticeStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        book, exam = resolve_exam_from_payload(data)
+        if not book or not exam:
+            return Response({"detail": "exam_id または book_id が必要です。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        questions = resolve_exam_questions(exam)
+        if not questions:
+            return Response({"detail": "出題できる問題がありません。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "book": TrainingBookSerializer(book).data,
+                "exam": {
+                    "id": exam.id,
+                    "name": exam.name,
+                    "is_random": exam.is_random,
+                },
+                "pass_threshold_rate": 100,
+                "questions": TrainingQuestionPublicSerializer(questions, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class TrainingPracticeGradeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = TrainingPracticeGradeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        book, exam = resolve_exam_from_payload(data)
+        if not book or not exam:
+            return Response({"detail": "exam_id または book_id が必要です。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_answers = data.get("answers") or {}
+        if not isinstance(raw_answers, dict):
+            return Response({"detail": "answers はオブジェクトで送信してください。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        question_ids = data["question_ids"]
+        questions = {
+            question.id: question
+            for question in TrainingQuestion.objects.filter(id__in=question_ids, is_active=True)
+        }
+        ordered_questions = [questions[qid] for qid in question_ids if qid in questions]
+        if not ordered_questions:
+            return Response({"detail": "採点対象の問題が見つかりません。"}, status=status.HTTP_400_BAD_REQUEST)
+
+        question_results, score, total, rate, result = grade_training_answers(ordered_questions, raw_answers)
+
+        return Response(
+            {
+                "book": {"id": book.id, "title": book.title},
+                "exam": {"id": exam.id, "name": exam.name},
+                "score": score,
+                "total": total,
+                "rate": rate,
+                "result": result,
+                "result_label": dict(TrainingExamAttempt.RESULT_CHOICES).get(result, result),
+                "question_results_json": question_results,
+            },
+            status=status.HTTP_200_OK,
         )
 
 
@@ -245,37 +363,7 @@ class TrainingAttemptViewSet(viewsets.ModelViewSet):
         if not ordered_questions:
             return Response({"detail": "採点対象の問題が見つかりません。"}, status=status.HTTP_400_BAD_REQUEST)
 
-        question_results = []
-        score = 0
-        for question in ordered_questions:
-            answer_value = raw_answers.get(str(question.id))
-            if answer_value is None:
-                answer_value = raw_answers.get(question.question_code)
-            if answer_value is None:
-                answer_value = raw_answers.get(question.id)
-            answer_value = "" if answer_value is None else str(answer_value).strip()
-            is_correct = answer_value == str(question.answer or "").strip()
-            if is_correct:
-                score += 1
-            question_results.append(
-                {
-                    "question_id": question.id,
-                    "question_code": question.question_code,
-                    "question": question.question_text,
-                    "answer": answer_value,
-                    "correct_answer": question.answer,
-                    "is_correct": is_correct,
-                    "explanation": question.explanation,
-                }
-            )
-
-        total = len(ordered_questions)
-        rate = round(score / total * 100) if total else 0
-        result = (
-            TrainingExamAttempt.RESULT_PASS
-            if total > 0 and score == total
-            else TrainingExamAttempt.RESULT_RETRAIN
-        )
+        question_results, score, total, rate, result = grade_training_answers(ordered_questions, raw_answers)
 
         with transaction.atomic():
             attempt = TrainingExamAttempt(

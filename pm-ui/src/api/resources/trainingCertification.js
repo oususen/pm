@@ -5,6 +5,12 @@ export const createTrainingCertificationAPI = (client) => ({
   listTracks(params = {}) {
     return client.get('/training-tracks/', { params })
   },
+  startPractice(payload) {
+    return client.post('/training-practice/start/', payload)
+  },
+  gradePractice(payload) {
+    return client.post('/training-practice/grade/', payload)
+  },
   startSession(payload) {
     return client.post('/training-exam-sessions/start/', payload)
   },

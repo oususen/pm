@@ -39,7 +39,7 @@ const quality = [
     path: "/quality/training-certification",
     name: "TrainingCertificationApp",
     component: () => import("@/views/quality/TrainingCertificationApp.vue"),
-    meta: { pageTitle: "教育・テスト・認定", resource: "quality" },
+    meta: { pageTitle: "教育・テスト・認定" },
   },
   {
     path: "/quality/product-checksheet/templates",

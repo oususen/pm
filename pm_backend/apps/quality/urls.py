@@ -23,6 +23,8 @@ from .views_training import (
     TrainingAttemptViewSet,
     TrainingBookViewSet,
     TrainingExamSessionStartView,
+    TrainingPracticeGradeView,
+    TrainingPracticeStartView,
     TrainingProgressSummaryView,
     TrainingStepRecordViewSet,
     TrainingTrackViewSet,
@@ -100,6 +102,8 @@ urlpatterns = [
     path("product-checksheet-tasks/", ProductChecksheetTaskListView.as_view(), name="productchecksheet-task-list"),
     path("integrated-checksheet-tasks/", IntegratedChecksheetTaskListView.as_view(), name="integratedchecksheet-task-list"),
     path("training-exam-sessions/start/", TrainingExamSessionStartView.as_view(), name="training-exam-session-start"),
+    path("training-practice/start/", TrainingPracticeStartView.as_view(), name="training-practice-start"),
+    path("training-practice/grade/", TrainingPracticeGradeView.as_view(), name="training-practice-grade"),
     path("training-progress/summary/", TrainingProgressSummaryView.as_view(), name="training-progress-summary"),
     path("", include(router.urls)),
 ]

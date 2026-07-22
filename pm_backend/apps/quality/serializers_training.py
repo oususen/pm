@@ -105,6 +105,18 @@ class TrainingExamSessionStartSerializer(serializers.Serializer):
     formal_exam = serializers.BooleanField(required=False, default=False)
 
 
+class TrainingPracticeStartSerializer(serializers.Serializer):
+    exam_id = serializers.IntegerField(required=False, allow_null=True)
+    book_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class TrainingPracticeGradeSerializer(serializers.Serializer):
+    exam_id = serializers.IntegerField(required=False, allow_null=True)
+    book_id = serializers.IntegerField(required=False, allow_null=True)
+    question_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+    answers = serializers.JSONField()
+
+
 class TrainingExamAttemptCreateSerializer(serializers.Serializer):
     session_id = serializers.IntegerField()
     answers = serializers.JSONField()
