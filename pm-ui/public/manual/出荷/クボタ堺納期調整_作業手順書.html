@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>クボタ堺 納期調整 作業手順書</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #1565c0;
+    --radius: 10px;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #5ca0e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #5ca0e8;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--accent);
+  }
+  .cover h1 {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: .02em;
+    color: var(--ink);
+    margin-bottom: 6px;
+    text-wrap: balance;
+  }
+  .cover .subtitle {
+    font-size: 15px;
+    color: var(--ink2);
+    margin-bottom: 20px;
+  }
+  .cover .path {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: 6px;
+  }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 32px 36px 28px;
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .step-num {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--step-color);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+  .step-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .step-desc {
+    font-size: 14px;
+    color: var(--ink2);
+    margin-bottom: 16px;
+    line-height: 1.7;
+  }
+
+  /* ---- mockup toolbar ---- */
+  .mock-toolbar {
+    background: var(--grid-head);
+    border: 1px solid var(--grid-line);
+    border-radius: 6px;
+    padding: 10px 14px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--ink2);
+    overflow-x: auto;
+  }
+  .mock-toolbar .f-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .mock-toolbar label {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .mock-toolbar .f-input {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+    color: var(--ink);
+    min-width: 70px;
+  }
+  .mock-toolbar .f-select {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 4px;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  .mock-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--card);
+    color: var(--ink);
+    cursor: default;
+    white-space: nowrap;
+  }
+  .mock-btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .mock-btn.import-btn {
+    background: #e8f5e9;
+    border-color: #81c784;
+    color: #2e7d32;
+  }
+  .mock-btn.save-btn {
+    background: #bbdefb;
+    border-color: #64b5f6;
+    color: #0d47a1;
+  }
+  :root[data-theme="dark"] .mock-btn.import-btn,
+  :root[data-theme="dark"] .mock-btn.save-btn {
+    background: var(--accent-light);
+    border-color: var(--border);
+    color: var(--accent);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .mock-btn.import-btn,
+    :root:not([data-theme="light"]) .mock-btn.save-btn {
+      background: var(--accent-light);
+      border-color: var(--border);
+      color: var(--accent);
+    }
+  }
+
+  /* ---- mockup grid ---- */
+  .mock-grid-wrap { overflow-x: auto; margin-top: 10px; }
+  .mock-grid {
+    border-collapse: collapse;
+    font-size: 12px;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+  }
+  .mock-grid th, .mock-grid td {
+    border: 1px solid var(--grid-line);
+    padding: 4px 7px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .mock-grid thead th {
+    background: var(--grid-head);
+    font-weight: 600;
+    color: var(--ink);
+    font-size: 11px;
+  }
+  .mock-grid .col-head {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .mock-grid tbody td {
+    background: var(--card);
+    color: var(--ink);
+  }
+  .mock-grid .date-col {
+    font-weight: 600;
+    background: var(--grid-head);
+    text-align: left;
+    min-width: 64px;
+  }
+  .mock-grid .editable {
+    background: #fffff0;
+    color: var(--ink);
+  }
+  :root[data-theme="dark"] .mock-grid .editable { background: #2a2a1e; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .mock-grid .editable { background: #2a2a1e; }
+  }
+  .mock-grid .forecast-label {
+    color: #888;
+    font-size: 11px;
+  }
+  .mock-grid .remaining-neg { color: var(--danger); font-weight:600; }
+  .mock-grid .remaining-pos { color: var(--success); font-weight:600; }
+
+  /* ---- highlight ring ---- */
+  .hl {
+    position: relative;
+    z-index: 2;
+  }
+  .hl::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 3px solid var(--danger);
+    border-radius: 6px;
+    pointer-events: none;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: .4; }
+  }
+
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+  .hl-orange::after { border-color: var(--warn); }
+
+  /* head buttons row */
+  .head-btns {
+    display: inline-flex;
+    gap: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .hbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 20px;
+    border: 1px solid var(--grid-line);
+    border-radius: 3px;
+    font-size: 13px;
+    font-weight: 700;
+    background: var(--card);
+    cursor: default;
+    line-height: 1;
+  }
+  .hbtn.del { color: var(--danger); border-color: #f0a0a0; background: var(--danger-light); }
+  .hbtn.link { color: var(--accent); }
+  .hbtn.copy { color: #1a2233; }
+  :root[data-theme="dark"] .hbtn.copy { color: var(--ink); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .hbtn.copy { color: var(--ink); }
+  }
+
+  /* ---- callout / arrow ---- */
+  .callout {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .callout.info   { background: var(--accent-light); color: var(--accent); }
+  .callout.warn   { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok     { background: var(--success-light); color: var(--success); }
+  .callout .icon  { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- dialog mockup ---- */
+  .mock-dialog {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.15);
+    padding: 20px 24px;
+    max-width: 340px;
+    margin: 14px auto 0;
+  }
+  .mock-dialog h3 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .mock-dialog .dlg-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .mock-dialog .dlg-label { font-weight: 600; }
+  .mock-dialog .dlg-msg { font-size: 12px; color: var(--ink2); margin-bottom: 12px; }
+  .mock-dialog .dlg-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .dlg-btn {
+    padding: 5px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--card);
+    color: var(--ink);
+    cursor: default;
+  }
+  .dlg-btn.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
+
+  /* ---- toc ---- */
+  .toc {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px 32px;
+    margin-bottom: 28px;
+  }
+  .toc h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--ink2);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .toc-list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 20px;
+  }
+  .toc-list li {
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toc-list .tn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--step-color);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  /* ---- note ---- */
+  .note {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px 32px;
+    margin-bottom: 24px;
+    border-left: 4px solid var(--warn);
+  }
+  .note h2 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--warn);
+  }
+  .note ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+    color: var(--ink2);
+  }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 28px 32px;
+    margin-bottom: 28px;
+  }
+  .screen-overview h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .screen-overview h2 .badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 4px;
+    letter-spacing: .04em;
+  }
+  .overview-mock {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .overview-mock .om-nav {
+    background: #1a3a5c;
+    color: #fff;
+    padding: 6px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; }
+  }
+  .overview-mock .om-nav .om-active {
+    background: rgba(255,255,255,.18);
+    padding: 2px 10px;
+    border-radius: 4px;
+  }
+  .overview-mock .om-toolbar {
+    background: var(--grid-head);
+    padding: 8px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    border-bottom: 1px solid var(--grid-line);
+  }
+  .overview-mock .om-grid {
+    display: grid;
+    grid-template-columns: 58px 1fr 1fr;
+    font-size: 11px;
+    border-top: 1px solid var(--grid-line);
+  }
+  .overview-mock .om-grid > div {
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--grid-line);
+    border-right: 1px solid var(--grid-line);
+  }
+  .overview-mock .om-grid .om-date {
+    background: var(--grid-head);
+    font-weight: 600;
+    font-size: 11px;
+  }
+  .overview-mock .om-grid .om-head {
+    background: var(--grid-head);
+    font-weight: 700;
+    text-align: center;
+    font-size: 12px;
+  }
+  .overview-mock .om-grid .om-sub {
+    background: var(--grid-head);
+    text-align: center;
+    font-size: 10px;
+    color: var(--ink2);
+  }
+  .overview-mock .om-grid .om-cell {
+    text-align: center;
+    background: var(--card);
+  }
+
+  /* numbered annotation labels */
+  .anno-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--danger);
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 800;
+    flex-shrink: 0;
+    line-height: 1;
+    font-style: normal;
+  }
+  :root[data-theme="dark"] .anno-num {
+    background: var(--card);
+    border-color: #ef5350;
+    color: #ef5350;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .anno-num {
+      background: var(--card);
+      border-color: #ef5350;
+      color: #ef5350;
+    }
+  }
+  .anno-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .anno-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+
+  /* arrow annotation inside mock */
+  .om-anno {
+    position: absolute;
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--danger);
+    background: #fff;
+    border: 2px solid var(--danger);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    z-index: 5;
+    font-style: normal;
+  }
+  :root[data-theme="dark"] .om-anno {
+    background: var(--card);
+    border-color: #ef5350;
+    color: #ef5350;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .om-anno {
+      background: var(--card);
+      border-color: #ef5350;
+      color: #ef5350;
+    }
+  }
+
+  /* legend grid */
+  .legend-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 24px;
+    margin-top: 16px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .legend-item .li-label {
+    font-weight: 700;
+    white-space: nowrap;
+    min-width: 56px;
+    color: var(--ink);
+  }
+  .legend-item .li-desc {
+    color: var(--ink2);
+  }
+
+  /* sub-section within overview */
+  .overview-section {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .overview-section h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--ink);
+  }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>クボタ堺 納期調整 作業手順書</h1>
+    <div class="subtitle">日々の受注取込から計画入力・保存までの操作手順</div>
+    <div class="path">
+      出荷管理 <span class="arrow">&#9656;</span> クボタ堺納期調整
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>手順の流れ</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>受注を取り込む</li>
+      <li><span class="tn">3</span>データを表示する</li>
+      <li><span class="tn">4</span>計画を入力する</li>
+      <li><span class="tn">5</span>計画を削除する（×ボタン）</li>
+      <li><span class="tn">6</span>前倒し計画を紐づける（⇔ボタン）</li>
+      <li><span class="tn">7</span>保存する</li>
+      <li><span class="tn">8</span>計画ロック日の変更</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面説明 ===== -->
+  <div class="screen-overview">
+    <h2>画面説明 <span class="badge">まずここを読む</span></h2>
+
+    <!-- 画面全体モック -->
+    <div class="overview-mock" style="position:relative;">
+      <div class="om-nav" style="position:relative;">
+        <span>DAISO</span>
+        <span>受注</span>
+        <span>生産</span>
+        <span>仕入</span>
+        <span class="om-active">出荷</span>
+        <span>在庫</span>
+        <span>品質</span>
+        <span>マスタ</span>
+        <span>設定</span>
+        <span class="om-anno" style="top:-6px;right:auto;left:72px;">1</span>
+      </div>
+      <div class="om-toolbar" style="position:relative;">
+        <div class="f-group">
+          <label>開始日</label>
+          <span class="f-input" style="font-size:11px;min-width:78px;padding:2px 4px;">2026/07/22</span>
+        </div>
+        <div class="f-group">
+          <label>期間</label>
+          <span class="f-select" style="font-size:11px;padding:2px 4px;">30日</span>
+        </div>
+        <div class="f-group">
+          <label>品番OR検索</label>
+          <span class="f-input" style="font-size:11px;min-width:28px;padding:2px 4px;">V0</span>
+          <span class="f-input" style="font-size:11px;min-width:28px;padding:2px 4px;">6E</span>
+        </div>
+        <div class="f-group">
+          <label>一括入力開始日</label>
+          <span class="f-input" style="font-size:11px;min-width:78px;padding:2px 4px;">2026/07/22</span>
+        </div>
+        <span style="flex:1"></span>
+        <span class="mock-btn import-btn" style="font-size:11px;padding:2px 8px;">取込</span>
+        <span class="mock-btn" style="font-size:11px;padding:2px 8px;">計画変更</span>
+        <span class="mock-btn save-btn" style="font-size:11px;padding:2px 8px;">保存</span>
+        <span class="mock-btn" style="font-size:11px;padding:2px 8px;">表示</span>
+        <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">2</span>
+      </div>
+      <div class="om-grid" style="position:relative;">
+        <div class="om-head">日付</div>
+        <div class="om-head" style="position:relative;">
+          V053103705 &nbsp; ZGHC
+          <span style="font-size:10px;margin-left:4px;color:var(--danger);">×</span>
+          <span style="font-size:10px;color:var(--accent);">⇔</span>
+          <span style="font-size:10px;">→</span>
+          <span class="om-anno" style="top:-10px;right:-6px;">5</span>
+        </div>
+        <div class="om-head" style="position:relative;">
+          V053143521 &nbsp; 833
+          <span style="font-size:10px;margin-left:4px;color:var(--danger);">×</span>
+          <span style="font-size:10px;color:var(--accent);">⇔</span>
+          <span style="font-size:10px;">→</span>
+        </div>
+        <div class="om-sub"></div>
+        <div class="om-sub" style="display:flex;justify-content:space-around;position:relative;">
+          <span>注番</span><span>受注</span><span>計画</span><span>注残</span>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">4</span>
+        </div>
+        <div class="om-sub" style="display:flex;justify-content:space-around;">
+          <span>注番</span><span>受注</span><span>計画</span><span>注残</span>
+        </div>
+        <div class="om-date" style="position:relative;">
+          繰越
+          <span class="om-anno" style="top:-4px;left:-8px;">6</span>
+        </div>
+        <div class="om-cell" style="text-align:right;padding-right:12px;font-weight:600;">0</div>
+        <div class="om-cell" style="text-align:right;padding-right:12px;font-weight:600;">-64</div>
+        <div class="om-date" style="position:relative;">
+          7/22水
+          <span class="om-anno" style="top:-4px;right:-8px;">3</span>
+        </div>
+        <div class="om-cell" style="display:flex;justify-content:space-around;">
+          <span style="font-size:10px;">4510521001</span><span>72</span><span style="background:#fffff0;padding:0 6px;">72</span><span></span>
+        </div>
+        <div class="om-cell" style="display:flex;justify-content:space-around;">
+          <span style="font-size:10px;color:#888">内示</span><span></span><span style="background:#fffff0;padding:0 6px;"></span><span></span>
+        </div>
+        <div class="om-date">7/23木</div>
+        <div class="om-cell" style="display:flex;justify-content:space-around;">
+          <span style="font-size:10px;">4510556020</span><span>80</span><span style="background:#fffff0;padding:0 6px;">80</span><span></span>
+        </div>
+        <div class="om-cell" style="display:flex;justify-content:space-around;">
+          <span style="font-size:10px;color:#888">内示</span><span>8</span><span style="background:#fffff0;padding:0 6px;">8</span><span style="color:var(--success);font-weight:600;">8</span>
+        </div>
+        <div class="om-date">7/24金</div>
+        <div class="om-cell" style="display:flex;justify-content:space-around;">
+          <span style="font-size:10px;">4510587419</span><span>64</span><span style="background:#fffff0;padding:0 6px;">64</span><span></span>
+        </div>
+        <div class="om-cell" style="display:flex;justify-content:space-around;">
+          <span style="font-size:10px;color:#888">内示</span><span>16</span><span style="background:#fffff0;padding:0 6px;">16</span><span style="color:var(--success);font-weight:600;">24</span>
+        </div>
+        <div class="om-date" style="position:relative;">
+          総残
+          <span class="om-anno" style="top:-4px;left:-8px;">7</span>
+        </div>
+        <div class="om-cell" style="text-align:right;padding-right:12px;font-weight:600;">0</div>
+        <div class="om-cell" style="text-align:right;padding-right:12px;font-weight:600;color:var(--danger);">-16</div>
+      </div>
+    </div>
+
+    <!-- 番号付き説明 -->
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>ナビゲーションバー</strong> — 「出荷」から画面に入ります。</span></li>
+      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — 開始日・期間の設定、品番フィルタ、取込・保存などの操作ボタンがあります。</span></li>
+      <li><span class="anno-num">3</span><span><strong>日付列</strong> — 左端に日付が並びます。土日・休日は色付き表示。</span></li>
+      <li><span class="anno-num">4</span><span><strong>サブ列（4列1組）</strong> — 品番+納入地ごとに「注番・受注・計画・注残」の4列があります。</span></li>
+      <li><span class="anno-num">5</span><span><strong>列ヘッダボタン（× ⇔ →）</strong> — 各品番+納入地ごとの操作ボタン。後のステップで詳しく説明します。</span></li>
+      <li><span class="anno-num">6</span><span><strong>繰越行</strong> — 表示開始日より前の累積注残です。</span></li>
+      <li><span class="anno-num">7</span><span><strong>総残行</strong> — その品番・納入地の最終注残合計です。0になれば受注と計画が一致しています。</span></li>
+    </ul>
+
+    <!-- 列ヘッダ拡大図 -->
+    <div class="overview-section">
+      <h3>列ヘッダの見方</h3>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:12px;">各品番+納入地の列ヘッダには、品番・納入地・操作ボタンが表示されます。</p>
+      <div style="background:var(--grid-head);border:2px solid var(--grid-line);border-radius:8px;padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:18px;font-weight:800;color:var(--ink);position:relative;">V053143521<span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">A</span></span>
+          <span style="font-size:16px;font-weight:600;color:var(--ink2);position:relative;">833<span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">B</span></span>
+          <span style="display:inline-flex;gap:4px;margin-left:6px;position:relative;">
+            <span class="hbtn del" style="width:28px;height:26px;font-size:16px;">×</span>
+            <span class="hbtn link" style="width:28px;height:26px;font-size:16px;">⇔</span>
+            <span class="hbtn copy" style="width:28px;height:26px;font-size:16px;">→</span>
+            <span class="om-anno" style="top:-14px;left:50%;transform:translateX(-50%);">C</span>
+          </span>
+        </div>
+        <div style="display:flex;gap:2px;position:relative;">
+          <span style="background:var(--card);border:1px solid var(--grid-line);border-radius:3px;padding:3px 12px;font-size:12px;font-weight:600;text-align:center;">注番</span>
+          <span style="background:var(--card);border:1px solid var(--grid-line);border-radius:3px;padding:3px 12px;font-size:12px;font-weight:600;text-align:center;">受注</span>
+          <span style="background:var(--card);border:1px solid var(--grid-line);border-radius:3px;padding:3px 12px;font-size:12px;font-weight:600;text-align:center;">計画</span>
+          <span style="background:var(--card);border:1px solid var(--grid-line);border-radius:3px;padding:3px 12px;font-size:12px;font-weight:600;text-align:center;">注残</span>
+          <span class="om-anno" style="top:-10px;right:-10px;">D</span>
+        </div>
+      </div>
+      <ul class="anno-list" style="margin-top:16px;">
+        <li><span class="anno-num">A</span><span><strong>品番（製品番号）</strong> — この列が対象とする製品コードです（例: V053143521）。</span></li>
+        <li><span class="anno-num">B</span><span><strong>納入地</strong> — クボタの納入場所コードです（例: 833, ZGHC, 5476）。同じ品番でも納入地が違えば別の列になります。</span></li>
+        <li><span class="anno-num">C</span><span><strong>操作ボタン</strong> — この列専用の3つのボタンです。下の表で詳しく説明します。</span></li>
+        <li><span class="anno-num">D</span><span><strong>サブ列ヘッダ</strong> — 注番・受注・計画・注残の4列で構成されます。左端に日付列（7/23木 のように「月/日＋曜日」表示）があります。同じ日に複数の注番がある場合や、納入数が注番の受注数を超えて注番単位で分割される場合は、1日に複数行表示されます。土日・休日はピンク背景になります。</span></li>
+      </ul>
+    </div>
+
+    <!-- 列ヘッダボタン詳細 -->
+    <div class="overview-section">
+      <h3>列ヘッダの3つのボタン</h3>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:14px;background:var(--danger-light);border-radius:8px;padding:14px 16px;">
+          <span class="hbtn del" style="width:36px;height:32px;font-size:20px;flex-shrink:0;">×</span>
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--danger);margin-bottom:4px;">計画一括削除</div>
+            <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+              この列の計画数をまとめて <strong>0</strong> にクリアします。<br>
+              押すとダイアログが開き、<strong>開始日を変更</strong>できます（デフォルトは一括入力開始日）。<br>
+              画面上の変更のみ。<strong>保存前ならリロードで元に戻せます</strong>。
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:14px;background:var(--accent-light);border-radius:8px;padding:14px 16px;">
+          <span class="hbtn link" style="width:36px;height:32px;font-size:20px;flex-shrink:0;">⇔</span>
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--accent);margin-bottom:4px;">前倒し注番紐づけ</div>
+            <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+              内示のまま前倒し計画した行を、確定注番に紐づけます。<br>
+              例: 8/4に確定(注番1369380)が入った → 7/23〜8/3の前倒し行も1369380に紐づく。<br>
+              <strong>即座にDBに保存されます</strong>（保存ボタン不要）。画面は自動リロード。
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:14px;background:var(--success-light);border-radius:8px;padding:14px 16px;">
+          <span class="hbtn copy" style="width:36px;height:32px;font-size:20px;flex-shrink:0;">→</span>
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--success);margin-bottom:4px;">受注→計画コピー</div>
+            <div style="font-size:13px;color:var(--ink2);line-height:1.7;">
+              受注数をそのまま計画列にコピーします（一括入力開始日以降が対象）。<br>
+              手入力する手間を省けます。<br>
+              画面上の変更のみ。<strong>保存前ならリロードで元に戻せます</strong>。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- サブ列の意味 -->
+    <div class="overview-section">
+      <h3>サブ列（4列）の意味</h3>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <span class="li-label">注番</span>
+          <span class="li-desc">確定の場合は注文番号が表示されます。内示の場合は「内示」と表示されます。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label">受注</span>
+          <span class="li-desc">取り込んだ受注数量です。編集できません。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="background:#fffff0;padding:1px 6px;border:1px solid #ddd;border-radius:3px;">計画</span>
+          <span class="li-desc">納入計画数量です。<strong>ここを入力します</strong>。黄色い背景のセルが入力可能です。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label">注残</span>
+          <span class="li-desc">累積の残量（計画 − 受注の累計）。マイナス＝不足、プラス＝過剰です。</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ツールバーの各要素 -->
+    <div class="overview-section">
+      <h3>ツールバーの各項目</h3>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <span class="li-label">開始日</span>
+          <span class="li-desc">表示する期間の開始日です。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label">期間</span>
+          <span class="li-desc">開始日からの表示日数（7/14/30/60日）。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label">品番OR検索</span>
+          <span class="li-desc">2つのキーワードのどちらかに一致する品番を表示。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label">一括入力<br>開始日</span>
+          <span class="li-desc">「→」ボタンや「×」ボタンの対象開始日です。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="color:var(--success);">取込</span>
+          <span class="li-desc">受注明細から最新データを読み込みます。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="color:var(--warn);">計画変更</span>
+          <span class="li-desc">ロック日以前を編集するための変更理由入力。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="color:var(--accent);">保存</span>
+          <span class="li-desc">入力した計画数をDBに保存します。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label">表示</span>
+          <span class="li-desc">条件に合うデータを画面に表示します。</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 色の意味 -->
+    <div class="overview-section">
+      <h3>色・表示の意味</h3>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <span class="li-label" style="background:#ffe3e3;padding:1px 8px;border-radius:3px;font-size:12px;">ピンク行</span>
+          <span class="li-desc">土日・休日です。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="color:#888;font-style:italic;">内示</span>
+          <span class="li-desc">まだ確定していない注文（予測値）です。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="background:#f0f0f0;padding:1px 8px;border-radius:3px;font-size:12px;">グレー行</span>
+          <span class="li-desc">ロック日以前。変更理由なしでは編集不可。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="font-weight:700;">注番あり</span>
+          <span class="li-desc">確定した注文です（注文番号が表示）。</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部のナビゲーションバーから<strong>「出荷」</strong>をクリックし、メニューから<strong>「クボタ堺納期調整」</strong>を選択します。
+    </div>
+    <div class="mock-toolbar" style="justify-content:center; gap:20px; padding:14px 20px; font-size:14px; font-weight:600;">
+      <span>受注</span>
+      <span>生産</span>
+      <span>仕入</span>
+      <span style="position:relative;" class="hl hl-blue">出荷</span>
+      <span>在庫</span>
+      <span>品質</span>
+      <span>マスタ</span>
+      <span>設定</span>
+    </div>
+    <div class="callout info" style="margin-top:12px;">
+      <span class="icon">&#x1F4CC;</span>
+      <span>「出荷」→ 出荷管理メニュー →<strong>「クボタ堺納期調整」</strong>を選びます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">受注を取り込む</div>
+    </div>
+    <div class="step-desc">
+      画面上部の<strong>「取込」ボタン</strong>を押して、最新の受注データを読み込みます。<br>
+      開始日と期間を確認してから押してください。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group">
+        <label>開始日</label>
+        <span class="f-input">2026/07/22</span>
+      </div>
+      <div class="f-group">
+        <label>期間</label>
+        <span class="f-select">30日</span>
+      </div>
+      <div class="f-group">
+        <label>品番 OR検索</label>
+        <span class="f-input">V0</span>
+        <span class="f-input">6E</span>
+      </div>
+      <span style="flex:1"></span>
+      <span class="mock-btn import-btn hl hl-green" style="position:relative;">取込</span>
+      <span class="mock-btn">計画変更</span>
+      <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn">表示</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#x2705;</span>
+      <span>取込完了のメッセージが出れば成功です。「新規○件, 更新○件」と表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">データを表示する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「表示」ボタン</strong>を押すと、取り込んだデータが一覧表示されます。<br>
+      品番で絞り込みたい場合は、表示前に「品番 OR検索」にキーワードを入力してください。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group">
+        <label>開始日</label>
+        <span class="f-input">2026/07/22</span>
+      </div>
+      <div class="f-group">
+        <label>期間</label>
+        <span class="f-select">30日</span>
+      </div>
+      <div class="f-group">
+        <label>品番 OR検索</label>
+        <span class="f-input">V0</span>
+        <span class="f-input">6E</span>
+      </div>
+      <span style="flex:1"></span>
+      <span class="mock-btn">取込</span>
+      <span class="mock-btn">計画変更</span>
+      <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn primary hl hl-blue" style="position:relative;">表示</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">計画を入力する</div>
+    </div>
+    <div class="step-desc">
+      表の<strong>「計画」列</strong>のセルに数量を入力します。Enter を押すと下の行に移動します。<br>
+      列ヘッダの<strong>「→」ボタン</strong>を押すと、受注数を計画にまとめてコピーできます。
+    </div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead>
+          <tr>
+            <th rowspan="2" style="min-width:64px">日付</th>
+            <th colspan="4" class="col-head">V053143521 &nbsp; 833 <span class="head-btns"><span class="hbtn del">×</span><span class="hbtn link">⇔</span><span class="hbtn copy hl hl-blue" style="position:relative;">→</span></span></th>
+          </tr>
+          <tr><th>注番</th><th>受注</th><th>計画</th><th>注残</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="date-col">7/22水</td><td></td><td></td><td class="editable"></td><td></td></tr>
+          <tr><td class="date-col">7/23木</td><td class="forecast-label">内示</td><td>8</td><td class="editable"><strong>8</strong></td><td class="remaining-pos">8</td></tr>
+          <tr><td class="date-col">7/24金</td><td class="forecast-label">内示</td><td>16</td><td class="editable"><strong>16</strong></td><td class="remaining-pos">24</td></tr>
+          <tr><td class="date-col">7/25土</td><td></td><td></td><td class="editable"></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F4A1;</span>
+      <span><strong>→ ボタン</strong>: 「一括入力開始日」以降の受注数をそのまま計画にコピーします。手入力の手間が省けます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">計画を削除する（×ボタン）</div>
+    </div>
+    <div class="step-desc">
+      入力した計画をまとめてクリアしたいときは、列ヘッダの<strong>赤い「×」ボタン</strong>を押します。
+    </div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead>
+          <tr>
+            <th rowspan="2" style="min-width:64px">日付</th>
+            <th colspan="4" class="col-head">V053143521 &nbsp; 833 <span class="head-btns"><span class="hbtn del hl" style="position:relative;">×</span><span class="hbtn link">⇔</span><span class="hbtn copy">→</span></span></th>
+          </tr>
+          <tr><th>注番</th><th>受注</th><th>計画</th><th>注残</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="date-col">7/23木</td><td class="forecast-label">内示</td><td>8</td><td class="editable">8</td><td class="remaining-pos">8</td></tr>
+          <tr><td class="date-col">7/24金</td><td class="forecast-label">内示</td><td>16</td><td class="editable">16</td><td class="remaining-pos">24</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; margin:12px 0 4px;">
+      <span style="font-size:24px; color:var(--ink2);">&#9660;</span>
+    </div>
+    <div class="mock-dialog">
+      <h3>V053143521 833 計画削除</h3>
+      <div class="dlg-row">
+        <span class="dlg-label">開始日</span>
+        <span class="f-input" style="min-width:120px;">2026/07/23</span>
+      </div>
+      <div class="dlg-msg">この日以降の計画数を0にします。削除しますか？</div>
+      <div class="dlg-actions">
+        <span class="dlg-btn">キャンセル</span>
+        <span class="dlg-btn danger hl" style="position:relative;">削除</span>
+      </div>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#x26A0;&#xFE0F;</span>
+      <span>開始日はダイアログ内で変更できます（デフォルトは一括入力開始日）。<br>削除後は<strong>「保存」を押す前なら元に戻せます</strong>（画面をリロードすれば取消）。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">前倒し計画を注番に紐づける（⇔ボタン）</div>
+    </div>
+    <div class="step-desc">
+      内示で前倒し計画していた分が、後日<strong>確定（注番付き）</strong>に変わったとき、<br>
+      前倒し計画行を確定注番に紐づけるには<strong>「⇔」ボタン</strong>を押します。
+    </div>
+
+    <div style="font-size:13px; color:var(--ink2); margin-bottom:6px; font-weight:600;">紐づけ前（内示のまま）:</div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead>
+          <tr>
+            <th rowspan="2" style="min-width:64px">日付</th>
+            <th colspan="4" class="col-head">V053143521 &nbsp; 833 <span class="head-btns"><span class="hbtn del">×</span><span class="hbtn link hl hl-blue" style="position:relative;">⇔</span><span class="hbtn copy">→</span></span></th>
+          </tr>
+          <tr><th>注番</th><th>受注</th><th>計画</th><th>注残</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="date-col">7/23木</td><td class="forecast-label">内示</td><td></td><td class="editable">8</td><td class="remaining-pos">8</td></tr>
+          <tr><td class="date-col">7/24金</td><td class="forecast-label">内示</td><td></td><td class="editable">16</td><td class="remaining-pos">24</td></tr>
+          <tr style="border-top:2px solid var(--accent)"><td class="date-col">8/4火</td><td style="font-weight:600">1369380</td><td>80</td><td class="editable">8</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:flex; align-items:center; justify-content:center; margin:10px 0;">
+      <span style="font-size:20px; color:var(--accent); font-weight:700;">⇔ ボタンを押す &#9660;</span>
+    </div>
+
+    <div style="font-size:13px; color:var(--ink2); margin-bottom:6px; font-weight:600;">紐づけ後（注番が入る）:</div>
+    <div class="mock-grid-wrap">
+      <table class="mock-grid">
+        <thead>
+          <tr>
+            <th rowspan="2" style="min-width:64px">日付</th>
+            <th colspan="4" class="col-head">V053143521 &nbsp; 833</th>
+          </tr>
+          <tr><th>注番</th><th>受注</th><th>計画</th><th>注残</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="date-col">7/23木</td><td style="font-weight:600; color:var(--accent);">1369380</td><td></td><td class="editable">8</td><td class="remaining-pos">8</td></tr>
+          <tr><td class="date-col">7/24金</td><td style="font-weight:600; color:var(--accent);">1369380</td><td></td><td class="editable">16</td><td class="remaining-pos">24</td></tr>
+          <tr><td class="date-col">8/4火</td><td style="font-weight:600">1369380</td><td>80</td><td class="editable">8</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#x1F517;</span>
+      <span>前倒し行（受注数=0、計画>0、注番なし）が、<strong>最も近い後続の確定注番</strong>に自動的に紐づきます。画面は自動リロードされます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">保存する</div>
+    </div>
+    <div class="step-desc">
+      入力が終わったら<strong>「保存」ボタン</strong>を押します。変更した行だけが保存されます。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group">
+        <label>開始日</label>
+        <span class="f-input">2026/07/22</span>
+      </div>
+      <div class="f-group">
+        <label>期間</label>
+        <span class="f-select">30日</span>
+      </div>
+      <span style="flex:1"></span>
+      <span class="mock-btn">取込</span>
+      <span class="mock-btn">計画変更</span>
+      <span class="mock-btn save-btn hl hl-blue" style="position:relative;">保存</span>
+      <span class="mock-btn">表示</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#x2705;</span>
+      <span>「保存しました」と表示されたら完了です。メール送信するか聞かれます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">計画ロック日の変更（必要な場合のみ）</div>
+    </div>
+    <div class="step-desc">
+      ロック日以前の計画を修正する必要がある場合は、先に<strong>「計画変更」ボタン</strong>を押して<strong>変更理由</strong>を入力してから、計画を修正して保存します。
+    </div>
+    <div class="mock-toolbar">
+      <span style="flex:1"></span>
+      <span class="mock-btn">取込</span>
+      <span class="mock-btn hl hl-orange" style="position:relative;">計画変更</span>
+      <span class="mock-btn save-btn">保存</span>
+      <span class="mock-btn">表示</span>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:center; margin:12px 0 4px;">
+      <span style="font-size:24px; color:var(--ink2);">&#9660;</span>
+    </div>
+    <div class="mock-dialog">
+      <h3>変更理由入力</h3>
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:8px; font-size:12px; color:var(--ink2); min-height:48px;">
+        例: 顧客から7/24の納入変更依頼があったため
+      </div>
+      <div class="dlg-actions" style="margin-top:10px;">
+        <span class="dlg-btn">キャンセル</span>
+        <span class="dlg-btn" style="background:var(--accent);border-color:var(--accent);color:#fff;">確定</span>
+      </div>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#x26A0;&#xFE0F;</span>
+      <span>変更理由は履歴として記録されます。ロック解除後、通常どおり計画修正→保存してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== ボタン凡例 ===== -->
+  <div class="step" style="border-left:4px solid var(--accent);">
+    <div class="step-header" style="margin-bottom:12px;">
+      <div class="step-title">列ヘッダボタン 早見表</div>
+    </div>
+    <div style="display:grid; grid-template-columns:60px 1fr; gap:10px 16px; font-size:14px; align-items:start;">
+      <div style="text-align:center;"><span class="hbtn del" style="width:32px;height:28px;font-size:16px;">×</span></div>
+      <div><strong>計画一括削除</strong><br><span style="color:var(--ink2);font-size:13px;">指定した開始日以降の計画数をすべて0にクリア。保存前なら取消可能。</span></div>
+      <div style="text-align:center;"><span class="hbtn link" style="width:32px;height:28px;font-size:16px;">⇔</span></div>
+      <div><strong>前倒し注番紐づけ</strong><br><span style="color:var(--ink2);font-size:13px;">内示の前倒し計画行を確定注番にまとめて紐づけ。即座にDB反映。</span></div>
+      <div style="text-align:center;"><span class="hbtn copy" style="width:32px;height:28px;font-size:16px;">→</span></div>
+      <div><strong>受注→計画コピー</strong><br><span style="color:var(--ink2);font-size:13px;">受注数をそのまま計画列にコピー。保存前なら取消可能。</span></div>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>注意事項</h2>
+    <ul>
+      <li>計画数を変更したら<strong>必ず「保存」を押してください</strong>。保存前にリロードすると入力内容は消えます。</li>
+      <li>締め日以前のデータは編集・取込ともにできません。</li>
+      <li>納入数や納期に変更があった場合、口頭連絡だけで済ませず<strong>必ずこの画面で計画数を修正</strong>してください。計画数は便計画の需要数に直結します。</li>
+      <li>⇔ボタンは即座にDBに反映されます（保存ボタン不要）。×ボタンと→ボタンは画面上の変更のみで、保存が必要です。</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>
