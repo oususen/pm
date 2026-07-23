@@ -109,7 +109,7 @@
                   :disabled="!canEditProductionDate(trip)"
                   @click="removeSplitRow(trip.id, row.allocation_id, splitIdx, row)"
                 >
-                  {{ t('shippingTripExecution.delete') }}
+                  ×
                 </button>
               </div>
               <div class="split-actions">
@@ -124,7 +124,7 @@
                 <button
                   type="button"
                   class="btn split-save"
-                  :disabled="updatingTripId === trip.id || !canEditProductionDate(trip)"
+                  :disabled="updatingTripId === trip.id || !canEditProductionDate(trip) || isAllocationSplitSaved(row.allocation_id)"
                   @click="saveProductionDates(trip)"
                 >
                   {{ t('shippingTripExecution.saveProductionDates') }}
@@ -213,6 +213,8 @@ const prevBusinessDay = ref('')
 const actualQtyMap = ref({})
 const actualDateMap = ref({})
 const productionSplitMap = ref({})
+const editedAllocationIds = ref(new Set())
+const savedAllocationIds = ref(new Set())
 const tripFilter = ref('')
 const statusFilter = ref('')
 const loading = ref(false)
@@ -235,6 +237,8 @@ const canTripEdit = computed(() => {
 const canActualEdit = computed(() => canTripEdit.value && (isExecutionMode.value || isActualInputMode.value))
 const canStatusEdit = computed(() => canTripEdit.value && !isActualInputMode.value)
 const canEditProductionDate = (trip) => isExecutionMode.value && canRegisterActual(trip)
+const isAllocationSplitSaved = (allocationId) =>
+  savedAllocationIds.value.has(allocationId) && !editedAllocationIds.value.has(allocationId)
 
 const visibleTrips = computed(() => {
   let list = trips.value || []
@@ -308,6 +312,7 @@ const initActualInputState = (tripList) => {
   const nextQtyMap = {}
   const nextDateMap = {}
   const nextSplitMap = {}
+  const initialSaved = new Set()
   ;(tripList || []).forEach((trip) => {
     nextDateMap[trip.id] = actualDateMap.value[trip.id] || trip.departure_date
     const byAlloc = {}
@@ -322,6 +327,7 @@ const initActualInputState = (tripList) => {
           quantity: String(parseQty(item.quantity || 0)),
           source_order_no: item.source_order_no || row.source_order_no || '',
         }))
+        initialSaved.add(row.allocation_id)
       } else {
         byAllocSplit[row.allocation_id] = [{
           production_date: prevBusinessDay.value,
@@ -337,6 +343,8 @@ const initActualInputState = (tripList) => {
   actualQtyMap.value = nextQtyMap
   actualDateMap.value = nextDateMap
   productionSplitMap.value = nextSplitMap
+  savedAllocationIds.value = initialSaved
+  editedAllocationIds.value = new Set()
 }
 
 const actualQtyValue = (tripId, allocationId, fallbackQty) =>
@@ -355,6 +363,11 @@ const splitRows = (tripId, allocationId, row) => {
   return [{ production_date: '', quantity: String(parseQty(row?.qty || 0)), source_order_no: row?.source_order_no || '' }]
 }
 
+const markAllocationEdited = (allocationId) => {
+  editedAllocationIds.value = new Set([...editedAllocationIds.value, allocationId])
+  savedAllocationIds.value = new Set([...savedAllocationIds.value].filter((id) => id !== allocationId))
+}
+
 const setSplitDate = (tripId, allocationId, splitIdx, value) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
   if (!next[splitIdx]) return
@@ -363,6 +376,7 @@ const setSplitDate = (tripId, allocationId, splitIdx, value) => {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
+  markAllocationEdited(allocationId)
 }
 
 const setSplitQty = (tripId, allocationId, splitIdx, value, row) => {
@@ -374,6 +388,7 @@ const setSplitQty = (tripId, allocationId, splitIdx, value, row) => {
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
   syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
+  markAllocationEdited(allocationId)
 }
 
 const addSplitRow = (tripId, allocationId, row) => {
@@ -384,6 +399,7 @@ const addSplitRow = (tripId, allocationId, row) => {
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
   syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
+  markAllocationEdited(allocationId)
 }
 
 const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
@@ -401,6 +417,7 @@ const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
   }
   syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
+  markAllocationEdited(allocationId)
 }
 
 const loadTrips = async () => {
@@ -468,8 +485,10 @@ const saveProductionDates = async (trip) => {
       actuals: buildActualPayload(trip),
     })
     const d = res.data || {}
+    const allocIds = (trip.details || []).map((r) => r.allocation_id)
+    savedAllocationIds.value = new Set([...savedAllocationIds.value, ...allocIds])
+    editedAllocationIds.value = new Set([...editedAllocationIds.value].filter((id) => !allocIds.includes(id)))
     alert(t('shippingTripExecution.success.saveProductionDates', { updated: d.updated || 0 }))
-    await loadTrips()
   } catch (error) {
     const msg = error?.response?.data?.detail || t('shippingTripExecution.error.saveProductionDates')
     alert(msg)
@@ -518,9 +537,23 @@ const updateTripStatus = async (trip, action) => {
     alert(t('shippingTripExecution.error.updateStatusDenied'))
     return
   }
-  if (action === 'mark_loading' && !actualMatchesPlan(trip)) {
-    alert(t('shippingTripExecution.error.planActualMismatch'))
-    return
+  if (action === 'mark_loading') {
+    const allocIds = (trip.details || []).map((r) => r.allocation_id)
+    const hasEdited = allocIds.some((id) => editedAllocationIds.value.has(id))
+    const hasSaved = allocIds.some((id) => savedAllocationIds.value.has(id))
+    if (hasEdited) {
+      alert(t('shippingTripExecution.error.unsavedProductionDates'))
+      return
+    }
+    if (!hasSaved) {
+      if (!confirm(t('shippingTripExecution.confirm.defaultProductionDates'))) {
+        return
+      }
+    }
+    if (!actualMatchesPlan(trip)) {
+      alert(t('shippingTripExecution.error.planActualMismatch'))
+      return
+    }
   }
   updatingTripId.value = trip.id
   try {
@@ -708,7 +741,7 @@ onMounted(async () => {
 .split-head,
 .split-row {
   display: grid;
-  grid-template-columns: 1fr 100px 120px 80px;
+  grid-template-columns: 1fr 100px 120px 36px;
   gap: 3px;
 }
 .split-head {
@@ -741,7 +774,15 @@ onMounted(async () => {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.split-btn,
+.btn.split-btn {
+  min-height: 36px;
+  font-size: 18px;
+  padding: 0;
+  width: 36px;
+  color: #fff;
+  background: #ef4444;
+  border-color: #dc2626;
+}
 .split-add,
 .split-save {
   min-height: 38px;
@@ -866,13 +907,38 @@ onMounted(async () => {
     max-width: 100%;
   }
   .toolbar {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .field {
+    min-width: 0;
+    font-size: 13px;
   }
   .field input,
-  .field select,
-  .btn {
-    width: 100%;
+  .field select {
+    min-width: 0;
+    height: 36px;
+    font-size: 14px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .field input[type="date"] {
+    width: 107px;
+  }
+  .field select {
+    width: 80px;
+  }
+  .toolbar .btn {
+    min-height: 0;
+    height: 36px;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 14px;
+  }
+  .detail-list {
+    overflow-x: auto;
   }
   .trip-head {
     flex-wrap: wrap;
@@ -893,23 +959,44 @@ onMounted(async () => {
     padding: 4px 6px;
   }
   .product-code {
-    font-size: 19px;
+    font-size: 15px;
   }
   .product-name {
-    font-size: 16px;
+    font-size: 12px;
+  }
+  .detail-shipto {
+    font-size: 12px;
   }
   .detail-qty {
-    font-size: 24px;
+    font-size: 18px;
   }
   .actual-input-wrap input {
-    height: 38px;
-    font-size: 21px;
+    height: 32px;
+    font-size: 16px;
     padding: 0 4px;
   }
   .actual-readonly {
-    min-height: 38px;
-    font-size: 24px;
-    padding: 4px 4px;
+    min-height: 32px;
+    font-size: 18px;
+    padding: 2px 4px;
+  }
+  .split-head {
+    font-size: 11px;
+  }
+  .split-row input {
+    height: 32px;
+    font-size: 14px;
+  }
+  .split-order-no {
+    height: 32px;
+    font-size: 14px;
+    line-height: 32px;
+  }
+  .split-btn,
+  .split-add,
+  .split-save {
+    min-height: 32px;
+    font-size: 14px;
   }
   .actual-row {
     display: grid;
@@ -920,7 +1007,7 @@ onMounted(async () => {
     min-width: 0;
   }
   .btn {
-    min-height: 48px;
+    min-height: 36px;
     font-size: 19px;
     padding: 0 8px;
   }
@@ -933,7 +1020,12 @@ onMounted(async () => {
   }
   .split-head,
   .split-row {
-    grid-template-columns: 1fr 70px 90px 52px;
+    grid-template-columns: 1fr 70px 105px 28px;
+  }
+  .split-row input[type="date"] {
+    width: 110px;
+    padding-left: 0;
+    padding-right: 0;
   }
 }
 </style>

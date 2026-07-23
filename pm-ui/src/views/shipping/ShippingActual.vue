@@ -69,6 +69,8 @@
                 <th>得意先</th>
                 <th>納入先</th>
                 <th class="num">数量</th>
+                <th>出荷者</th>
+                <th>出発時刻</th>
                 <th>備考</th>
                 <th>操作</th>
               </tr>
@@ -82,6 +84,8 @@
                 <td>{{ displayCustomer(item) }}</td>
                 <td>{{ item.ship_to_code || '-' }}</td>
                 <td class="num">{{ formatQty(item.quantity) }}</td>
+                <td>{{ item.departed_by_name || '-' }}</td>
+                <td>{{ item.departure_time_actual || '-' }}</td>
                 <td>{{ displayRemark(item.remark) }}</td>
                 <td class="actions">
                   <button v-if="canEdit" class="btn-sm" @click="startEdit(item)">編集</button>
@@ -90,7 +94,7 @@
                 </td>
               </tr>
               <tr v-if="!shipmentActuals.length">
-                <td colspan="9" class="no-data">データがありません</td>
+                <td colspan="11" class="no-data">データがありません</td>
               </tr>
             </tbody>
           </table>
@@ -355,6 +359,8 @@ function clearHistory() {
 function actionLabel(action) {
   if (action === "CREATE") return "作成";
   if (action === "UPDATE") return "更新";
+  if (action === "UPDATE_BEFORE") return "更新前";
+  if (action === "UPDATE_AFTER") return "更新後";
   if (action === "DELETE") return "削除";
   return action;
 }

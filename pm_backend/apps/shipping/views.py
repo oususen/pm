@@ -28,7 +28,7 @@ class ShipmentActualViewSet(viewsets.ModelViewSet):
     """出荷実績ViewSet"""
     queryset = (
         ShipmentActual.objects.all()
-        .select_related('product', 'customer', 'shipping_trip_allocation__trip')
+        .select_related('product', 'customer', 'shipping_trip_allocation__trip__departed_by')
         .prefetch_related('splits')
     )
     serializer_class = ShipmentActualSerializer
@@ -85,8 +85,9 @@ class ShipmentActualViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         before = ShipmentActual.objects.get(pk=serializer.instance.pk)
+        self._create_history(before, 'UPDATE_BEFORE')
         instance = serializer.save()
-        self._create_history(before, 'UPDATE')
+        self._create_history(instance, 'UPDATE_AFTER')
 
     def perform_destroy(self, instance):
         self._create_history(instance, 'DELETE')

@@ -23,6 +23,7 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
     departure_date = serializers.SerializerMethodField()
     departure_time_plan = serializers.SerializerMethodField()
     departure_time_actual = serializers.SerializerMethodField()
+    departed_by_name = serializers.SerializerMethodField()
     source_order_nos = serializers.SerializerMethodField()
 
     class Meta:
@@ -35,6 +36,7 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
             'ship_to_code', 'quantity', 'remark', 'production_splits',
             'trip_id', 'trip_code', 'trip_ref', 'business_type',
             'departure_date', 'departure_time_plan', 'departure_time_actual',
+            'departed_by_name',
             'source_order_nos',
             'created_at', 'updated_at',
         ]
@@ -95,6 +97,17 @@ class ShipmentActualSerializer(serializers.ModelSerializer):
         if not trip or not trip.departure_time_actual:
             return None
         return trip.departure_time_actual.strftime('%Y-%m-%d %H:%M')
+
+    def get_departed_by_name(self, obj):
+        trip = self._trip(obj)
+        user = getattr(trip, 'departed_by', None) if trip else None
+        if not user:
+            return None
+        last = str(getattr(user, 'last_name', '') or '').strip()
+        first = str(getattr(user, 'first_name', '') or '').strip()
+        if last and first:
+            return f'{last} {first}'
+        return last or first or str(getattr(user, 'username', '') or '')
 
     def get_source_order_nos(self, obj):
         values = []

@@ -284,6 +284,8 @@ onMounted(load);
 }
 .table-wrap {
   overflow: auto;
+  overflow-x: scroll;
+  max-height: calc(100vh - 240px);
 }
 .data-table {
   width: 100%;
@@ -301,6 +303,9 @@ onMounted(load);
   background: #f9fafb;
   font-weight: 600;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .num {
   text-align: right;

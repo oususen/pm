@@ -108,6 +108,8 @@ class ShipmentActualHistory(models.Model):
     ACTION_CHOICES = [
         ('CREATE', '作成'),
         ('UPDATE', '更新'),
+        ('UPDATE_BEFORE', '更新前'),
+        ('UPDATE_AFTER', '更新後'),
         ('DELETE', '削除'),
     ]
 
@@ -115,7 +117,7 @@ class ShipmentActualHistory(models.Model):
     shipment_actual = models.ForeignKey(
         ShipmentActual, on_delete=models.CASCADE, related_name='histories', verbose_name='出荷実績'
     )
-    action = models.CharField(max_length=10, choices=ACTION_CHOICES, verbose_name='操作')
+    action = models.CharField(max_length=15, choices=ACTION_CHOICES, verbose_name='操作')
     shipment_date = models.DateField(verbose_name='出荷日')
     product_code = models.CharField(max_length=50, verbose_name='品番コード')
     customer_code = models.CharField(max_length=20, null=True, blank=True, verbose_name='得意先コード')
