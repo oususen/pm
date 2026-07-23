@@ -1,8 +1,9 @@
 import csv
+from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Max, Sum
+from django.db.models import Sum
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from orders.core.services.ship_to_utils import ensure_ship_to_records
 from masters.models import Customer, Product
@@ -308,7 +309,7 @@ class KubotaSakaiKakuteiImportService:
                 'daily_count': daily_count,
                 'min_raw_id': min_raw_id,
                 'max_raw_id': max_raw_id,
-                'forecast_diffs': forecast_diffs,
+                'forecast_diffs': changed_diffs,
                 'errors': self.errors,
                 'warnings': self.warnings
             }
@@ -413,70 +414,90 @@ class KubotaSakaiKakuteiImportService:
 
             ensure_ship_to_records(list(raw_records_with_ids), customer)
 
-            # 確定ファイルの製品・日付・納入地について、内示データと比較
+            # 確定ファイルの製品・日付・納入地について、最新内示スナップショットと比較
             forecast_diffs = []
             if daily_records:
-                # 今回取込の (product_code, due_date, ship_to_code) キーを収集
-                import_keys = set()
-                for daily in daily_records:
-                    import_keys.add((daily.product_code, daily.due_date, daily.ship_to_code or ''))
-
-                product_codes = list({k[0] for k in import_keys})
-                due_dates = list({k[1] for k in import_keys})
-
-                # 既存＋今回分を含む全確定データの合計（bulk_create済みなのでDB上に全データあり）
-                firm_totals = (
-                    StgOrderDaily.objects
-                    .filter(
-                        customer=customer,
-                        order_type='FIRM',
-                        product_code__in=product_codes,
-                        due_date__in=due_dates,
-                    )
-                    .values('product_code', 'due_date', 'ship_to_code')
-                    .annotate(total_qty=Sum('quantity'))
-                )
-                firm_dict = {
-                    (row['product_code'], row['due_date'], row['ship_to_code'] or ''): row['total_qty']
-                    for row in firm_totals
+                import_keys = {
+                    (daily.product_code, daily.due_date, daily.ship_to_code or '')
+                    for daily in daily_records
                 }
-
-                # 同製品・同日・同納入地の内示データのうち、最新（最大ID）のレコードを取得
-                max_id_qs = (
-                    StgOrderDaily.objects
-                    .filter(
-                        customer=customer,
-                        order_type='FORECAST',
-                        product_code__in=product_codes,
-                        due_date__in=due_dates,
-                    )
-                    .values('product_code', 'due_date', 'ship_to_code')
-                    .annotate(max_id=Max('id'))
-                )
-                latest_ids = [row['max_id'] for row in max_id_qs]
-                forecast_dict = {
-                    (rec.product_code, rec.due_date, rec.ship_to_code or ''): rec.quantity
-                    for rec in StgOrderDaily.objects
-                    .filter(id__in=latest_ids)
-                    .only('product_code', 'due_date', 'ship_to_code', 'quantity')
-                }
-
-                # 内示が存在する製品・日付・納入地を一覧化（数量一致でも含める）
-                for (product_code, due_date, ship_to_code) in sorted(firm_dict.keys()):
-                    if (product_code, due_date, ship_to_code) not in forecast_dict:
-                        continue
-                    firm_qty = int(firm_dict[(product_code, due_date, ship_to_code)])
-                    forecast_qty = int(forecast_dict[(product_code, due_date, ship_to_code)])
-                    forecast_diffs.append({
-                        'product_code': product_code,
-                        'due_date': str(due_date),
-                        'ship_to_code': ship_to_code,
-                        'firm_qty': firm_qty,
-                        'forecast_qty': forecast_qty,
-                        'diff': firm_qty - forecast_qty,
-                    })
+                forecast_diffs = self._build_forecast_diffs(customer, import_keys)
 
         return len(raw_records), len(daily_records), min_raw_id, max_raw_id, forecast_diffs
+
+    def _build_forecast_diffs(self, customer, import_keys):
+        """最新内示スナップショット合計と、現在有効な確定累計の差分を返す。"""
+        if not import_keys:
+            return []
+
+        product_codes = list({key[0] for key in import_keys})
+        due_dates = list({key[1] for key in import_keys})
+
+        firm_totals = (
+            StgOrderDaily.objects
+            .filter(
+                customer=customer,
+                order_type='FIRM',
+                product_code__in=product_codes,
+                due_date__in=due_dates,
+            )
+            .values('product_code', 'due_date', 'ship_to_code')
+            .annotate(total_qty=Sum('quantity'))
+        )
+        firm_dict = {
+            (row['product_code'], row['due_date'], row['ship_to_code'] or ''): row['total_qty']
+            for row in firm_totals
+            if (row['product_code'], row['due_date'], row['ship_to_code'] or '') in import_keys
+        }
+
+        forecast_rows = list(
+            StgOrderDaily.objects
+            .filter(
+                customer=customer,
+                order_type='FORECAST',
+                product_code__in=product_codes,
+                due_date__in=due_dates,
+            )
+            .values('id', 'product_code', 'due_date', 'ship_to_code', 'quantity', 'source_file')
+            .order_by('id')
+        )
+
+        latest_forecast_file_by_key = {}
+        for row in forecast_rows:
+            key = (row['product_code'], row['due_date'], row['ship_to_code'] or '')
+            if key not in import_keys:
+                continue
+            latest = latest_forecast_file_by_key.get(key)
+            if latest is None or row['id'] > latest['max_id']:
+                latest_forecast_file_by_key[key] = {
+                    'max_id': row['id'],
+                    'source_file': row['source_file'],
+                }
+
+        forecast_qty_by_key = defaultdict(lambda: Decimal('0'))
+        for row in forecast_rows:
+            key = (row['product_code'], row['due_date'], row['ship_to_code'] or '')
+            latest = latest_forecast_file_by_key.get(key)
+            if latest is None or row['source_file'] != latest['source_file']:
+                continue
+            forecast_qty_by_key[key] += row['quantity'] or Decimal('0')
+
+        forecast_diffs = []
+        for product_code, due_date, ship_to_code in sorted(firm_dict.keys()):
+            if (product_code, due_date, ship_to_code) not in forecast_qty_by_key:
+                continue
+            firm_qty = int(firm_dict[(product_code, due_date, ship_to_code)] or 0)
+            forecast_qty = int(forecast_qty_by_key[(product_code, due_date, ship_to_code)] or 0)
+            forecast_diffs.append({
+                'product_code': product_code,
+                'due_date': str(due_date),
+                'ship_to_code': ship_to_code,
+                'firm_qty': firm_qty,
+                'forecast_qty': forecast_qty,
+                'diff': firm_qty - forecast_qty,
+            })
+
+        return forecast_diffs
 
     def _create_diff_notification(self, changed_diffs, filename):
         """確定vs内示の差分通知を作成する"""
