@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生産計画入力 ライン編集 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .page { max-width:960px; margin:0 auto; padding:40px 24px 80px; }
+
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; color:var(--ink); margin-bottom:6px; text-wrap:balance; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; color:var(--ink); }
+
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+  .note { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:24px; border-left:4px solid var(--warn); }
+  .note h2 { font-size:16px; font-weight:700; margin-bottom:8px; color:var(--warn); }
+  .note ul { margin:0; padding-left:18px; font-size:14px; color:var(--ink2); }
+  .note li { margin-bottom:4px; }
+
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.teal { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .mock-btn.danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+  .f-input { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); min-width:60px; }
+
+  .mock-tabs { display:flex; gap:0; margin-bottom:12px; }
+  .mock-tab { padding:6px 14px; border:1px solid var(--grid-line); font-size:12px; font-weight:600; background:var(--card); color:var(--ink2); cursor:default; }
+  .mock-tab:first-child { border-radius:6px 0 0 6px; }
+  .mock-tab:last-child { border-radius:0 6px 6px 0; }
+  .mock-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  /* settings mockup */
+  .mock-section { border:1px solid var(--grid-line); border-radius:6px; overflow:hidden; margin:12px 0; }
+  .mock-section-head { background:var(--grid-head); padding:8px 14px; font-size:13px; font-weight:700; color:var(--ink); cursor:default; display:flex; align-items:center; gap:8px; }
+  .mock-section-head .arrow { font-size:10px; color:var(--ink2); }
+  .mock-section-head .count { font-size:11px; color:var(--ink2); font-weight:400; }
+  .mock-section-body { padding:12px 14px; background:var(--card); }
+  .mock-rule-editor { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--grid-line); }
+  .mock-rule-list { font-size:12px; color:var(--ink2); }
+  .mock-rule-row { display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--grid-line); }
+  .mock-rule-row:last-child { border-bottom:none; }
+
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:170px; }
+  .info-table td { background:var(--card); color:var(--ink); }
+
+  .screen-overview { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 32px; margin-bottom:28px; }
+  .screen-overview h2 { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .screen-overview h2 .badge { background:var(--step-color); color:#fff; font-size:11px; font-weight:700; padding:2px 10px; border-radius:4px; }
+
+  .anno-num { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:13px; font-weight:800; flex-shrink:0; line-height:1; font-style:normal; }
+  :root[data-theme="dark"] .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+  .anno-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .anno-list li { display:flex; align-items:flex-start; gap:10px; font-size:14px; line-height:1.6; }
+  .anno-list li strong { color:var(--ink); }
+  .anno-list li span { color:var(--ink2); }
+  .om-anno { position:absolute; font-size:11px; font-weight:800; color:var(--danger); background:#fff; border:2px solid var(--danger); border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; line-height:1; z-index:5; font-style:normal; }
+  :root[data-theme="dark"] .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+
+  @media (max-width:600px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step, .screen-overview { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- COVER -->
+  <div class="cover">
+    <h1>生産計画入力 ライン編集 作業手順書</h1>
+    <div class="subtitle">タブ構成・対象ライン・前日シフト・ガント設定・計算特例・自動計画など、ライン別の補助設定を管理する画面</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> 生産計画入力 <span class="arrow">&#9656;</span> ライン編集タブ
+    </div>
+  </div>
+
+  <!-- TOC -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>ライン編集タブを開く</li>
+      <li><span class="tn">2</span>タブ管理</li>
+      <li><span class="tn">3</span>タブ別ライン選択</li>
+      <li><span class="tn">4</span>前日シフト台数設定</li>
+      <li><span class="tn">5</span>ガント開始時刻設定</li>
+      <li><span class="tn">6</span>ガント展開除外</li>
+      <li><span class="tn">7</span>計算特例</li>
+      <li><span class="tn">8</span>自動計画適用設定</li>
+      <li><span class="tn">9</span>設定を保存する</li>
+    </ul>
+  </div>
+
+  <!-- 画面概要 -->
+  <div class="screen-overview">
+    <h2>画面の構成 <span class="badge">最初に読む</span></h2>
+    <div class="step-desc">
+      ライン編集タブでは、7つの設定セクションが<strong>アコーディオン</strong>（開閉式パネル）で表示されます。セクション見出しをクリックして開閉できます。
+    </div>
+
+    <div style="position:relative;">
+      <div class="mock-tabs" style="margin-bottom:0;">
+        <span class="mock-tab">タンク</span>
+        <span class="mock-tab">2班</span>
+        <span class="mock-tab">クボタ</span>
+        <span class="mock-tab">フロア出荷</span>
+        <span class="mock-tab">ブレード</span>
+        <span class="mock-tab">レーザ</span>
+        <span class="mock-tab active">ライン編集</span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--grid-line);border-top:none;border-radius:0 0 6px 6px;padding:12px;position:relative;">
+        <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:12px;">ライン編集</div>
+        <div class="mock-section" style="margin-top:0;">
+          <div class="mock-section-head"><span class="arrow">▼</span> タブ管理 <span class="om-anno" style="position:static;margin-left:4px;">1</span></div>
+        </div>
+        <div class="mock-section">
+          <div class="mock-section-head"><span class="arrow">▼</span> タブ別ライン選択 <span class="om-anno" style="position:static;margin-left:4px;">2</span></div>
+        </div>
+        <div class="mock-section">
+          <div class="mock-section-head"><span class="arrow">▶</span> 前日シフト台数設定（ライン×工程）<span class="count" style="margin-left:4px;">3件</span></div>
+        </div>
+        <div class="mock-section">
+          <div class="mock-section-head"><span class="arrow">▶</span> ガント開始時刻設定（ライン×工程）<span class="count" style="margin-left:4px;">2件</span></div>
+        </div>
+        <div class="mock-section">
+          <div class="mock-section-head"><span class="arrow">▶</span> ガント展開除外（ライン×工程）<span class="count" style="margin-left:4px;">1件</span></div>
+        </div>
+        <div class="mock-section">
+          <div class="mock-section-head"><span class="arrow">▶</span> 計算特例（ライン×工程×計算対象×設定）<span class="count" style="margin-left:4px;">0件</span></div>
+        </div>
+        <div class="mock-section">
+          <div class="mock-section-head"><span class="arrow">▶</span> 自動計画適用設定（ライン×製品）<span class="count" style="margin-left:4px;">4件</span></div>
+        </div>
+        <div style="margin-top:12px;">
+          <span class="mock-btn primary" style="font-size:13px;padding:5px 16px;">保存</span>
+        </div>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>タブ管理</strong> — タブの追加・名前変更・削除。タブバーの構成をカスタマイズ</span></li>
+      <li><span class="anno-num">2</span><span><strong>タブ別ライン選択</strong> — 各タブに表示するラインを選択。これが計画入力時のライン候補になる</span></li>
+    </ul>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>見出し右端の<strong>「○件」</strong>は登録済みルール数。セクションを開かなくても設定があるか確認できます。</span>
+    </div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">ライン編集タブを開く</div>
+    </div>
+    <div class="step-desc">
+      生産計画入力画面のタブバーで<strong>「ライン編集」</strong>をクリックします。確認メッセージは表示されず、直接設定画面に切り替わります。
+    </div>
+    <div class="mock-tabs">
+      <span class="mock-tab">タンク</span>
+      <span class="mock-tab">2班</span>
+      <span class="mock-tab">クボタ</span>
+      <span class="mock-tab">…</span>
+      <span class="mock-tab active">ライン編集</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>ライン編集タブは常にタブバーの最後に表示されます。他のタブはDB設定で変更可能ですが、ライン編集タブは固定です。</span>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">タブ管理</div>
+    </div>
+    <div class="step-desc">
+      タブバーに表示されるタブを追加・名前変更・削除します。
+    </div>
+
+    <h4 class="sub">&#9654; タブを追加する</h4>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> タブ管理</div>
+      <div class="mock-section-body">
+        <div class="mock-rule-editor">
+          <span class="f-input" style="min-width:120px;">タブキー（英数字）</span>
+          <span class="f-input" style="min-width:120px;">タブ名</span>
+          <span class="mock-btn">追加</span>
+        </div>
+        <div class="mock-rule-list">
+          <div class="mock-rule-row">
+            <span><strong>tank</strong> <span class="f-input" style="min-width:80px;">タンク</span></span>
+            <span class="mock-btn danger" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+          <div class="mock-rule-row">
+            <span><strong>floor</strong> <span class="f-input" style="min-width:80px;">2班</span></span>
+            <span class="mock-btn danger" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <table class="info-table">
+      <tr><th>タブキー</th><td>英数字で一意のキーを入力（例: tank, floor, kubota）。後から変更不可</td></tr>
+      <tr><th>タブ名</th><td>画面に表示される名前（日本語可）。後から変更可能</td></tr>
+    </table>
+
+    <h4 class="sub">&#9654; タブ名を変更する</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      既存タブの名前欄を直接書き換えます。変更は「保存」ボタン押下時に反映されます。
+    </div>
+
+    <h4 class="sub">&#9654; タブを削除する</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      タブ行右端の<strong>「削除」</strong>ボタンで削除します。削除は「保存」ボタン押下時に反映されます。
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>タブを削除すると、そのタブに紐づいた対象ライン設定も失われます。</span>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">タブ別ライン選択</div>
+    </div>
+    <div class="step-desc">
+      各タブで表示・操作対象とするラインを設定します。ここで選択したラインのみが、計画入力画面のライン選択ドロップダウンに表示されます。
+    </div>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> タブ別ライン選択</div>
+      <div class="mock-section-body">
+        <div class="mock-rule-editor">
+          <span style="font-size:12px;color:var(--ink2);">対象タブ</span>
+          <span class="f-select" style="min-width:120px;">2班</span>
+        </div>
+        <div class="mock-rule-list" style="display:flex;flex-direction:column;gap:4px;">
+          <div style="font-size:12px;display:flex;align-items:center;gap:6px;"><span style="font-size:14px;">☑</span> L2100 - フロアライン</div>
+          <div style="font-size:12px;display:flex;align-items:center;gap:6px;"><span style="font-size:14px;">☑</span> L2200 - フロアサブ</div>
+          <div style="font-size:12px;display:flex;align-items:center;gap:6px;"><span style="font-size:14px;">☐</span> L3000 - タンクライン</div>
+          <div style="font-size:12px;display:flex;align-items:center;gap:6px;"><span style="font-size:14px;">☐</span> L4000 - ブレード</div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>手順:</strong> 「対象タブ」ドロップダウンでタブを選択 → チェックボックスで対象ラインを選択/解除 → 「保存」
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>フロア出荷タブは通常のフロアタブとは独立した設定を持ちます。同じラインでもタブごとに別々に管理されます。</span>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">前日シフト台数設定</div>
+    </div>
+    <div class="step-desc">
+      ライン×工程ごとに、<strong>前日シフトとして扱う台数</strong>を設定します。ガントチャートの計算に使用されます。
+    </div>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> 前日シフト台数設定（ライン×工程）<span class="count">3件</span></div>
+      <div class="mock-section-body">
+        <div class="mock-rule-editor">
+          <span class="f-select">ライン選択</span>
+          <span class="f-select">工程選択</span>
+          <span class="f-input" style="width:60px;">台数</span>
+          <span class="mock-btn">追加</span>
+        </div>
+        <div class="mock-rule-list">
+          <div class="mock-rule-row">
+            <span>L2100 / 4003 / 前日シフト 2台</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+          <div class="mock-rule-row">
+            <span>L2100 / 4002 / 前日シフト 3台</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>手順:</strong> ライン → 工程 → 台数を入力 → 「追加」 → 「保存」
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">ガント開始時刻設定</div>
+    </div>
+    <div class="step-desc">
+      ライン×工程ごとに、<strong>工程ガントチャートの開始時刻</strong>を設定します。工程によって開始時刻が異なる場合に使用します。
+    </div>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> ガント開始時刻設定（ライン×工程）<span class="count">2件</span></div>
+      <div class="mock-section-body">
+        <div class="mock-rule-editor">
+          <span class="f-select">ライン選択</span>
+          <span class="f-select">工程選択</span>
+          <span class="f-input" style="width:70px;">08:00</span>
+          <span class="mock-btn">追加</span>
+        </div>
+        <div class="mock-rule-list">
+          <div class="mock-rule-row">
+            <span>L2100 / 4003 / 開始 08:00</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+          <div class="mock-rule-row">
+            <span>L2100 / 4001 / 開始 09:30</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>手順:</strong> ライン → 工程 → 時刻を入力（HH:mm形式） → 「追加」 → 「保存」
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>この設定は工程ガントのバー位置計算に使われます。日付ヘッダーの最終工程開始時刻とは別の設定です。</span>
+    </div>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">ガント展開除外</div>
+    </div>
+    <div class="step-desc">
+      ライン×工程ごとに、<strong>ガントチャートに表示しない工程</strong>を設定します。一部の工程をガントから除外したい場合に使用します。
+    </div>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> ガント展開除外（ライン×工程）<span class="count">1件</span></div>
+      <div class="mock-section-body">
+        <div class="mock-rule-editor">
+          <span class="f-select">ライン選択</span>
+          <span class="f-select">工程選択</span>
+          <span class="mock-btn">追加</span>
+        </div>
+        <div class="mock-rule-list">
+          <div class="mock-rule-row">
+            <span>L2100 / 4005 / ガント展開除外</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>手順:</strong> ライン → 工程を選択 → 「追加」 → 「保存」
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>ライン選択後、そのラインに紐づく工程のみが工程ドロップダウンに表示されます。</span>
+    </div>
+  </div>
+
+  <!-- STEP 7 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">計算特例</div>
+    </div>
+    <div class="step-desc">
+      ライン×工程×計算対象ごとに、<strong>在庫・計画在庫・需要の計算に関する特例ルール</strong>を設定します。
+    </div>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> 計算特例（ライン×工程×計算対象×設定）<span class="count">0件</span></div>
+      <div class="mock-section-body">
+        <div class="mock-rule-editor">
+          <span class="f-select">ライン選択</span>
+          <span class="f-select">工程選択</span>
+          <span class="f-select">計画在庫 ▼</span>
+          <span class="f-select">ORDER_QTY使用 ▼</span>
+          <span class="mock-btn">追加</span>
+        </div>
+        <div class="mock-rule-list">
+          <div style="font-size:12px;color:var(--ink2);padding:4px 0;">設定なし</div>
+        </div>
+      </div>
+    </div>
+    <table class="info-table">
+      <tr><th>計算対象</th><td><strong>計画在庫</strong> / <strong>在庫</strong> / <strong>需要</strong> から選択</td></tr>
+      <tr><th>設定値</th><td>現在は <strong>ORDER_QTY使用</strong> のみ選択可能</td></tr>
+    </table>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>手順:</strong> ライン → 工程 → 計算対象 → 設定値を選択 → 「追加」 → 「保存」
+    </div>
+  </div>
+
+  <!-- STEP 8 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">自動計画適用設定</div>
+    </div>
+    <div class="step-desc">
+      <strong>自動計画ボタン</strong>を表示するラインと、対象製品を設定します。ここに設定されたラインでは、計画入力画面に「自動計画」ボタンが表示されます。
+    </div>
+    <div class="mock-section">
+      <div class="mock-section-head"><span class="arrow">▼</span> 自動計画適用設定（ライン×製品）<span class="count">4件</span></div>
+      <div class="mock-section-body">
+        <div style="font-size:12px;color:var(--ink2);margin-bottom:8px;">自動計画ボタンを表示するラインと対象製品を設定します。</div>
+        <div class="mock-rule-editor">
+          <span class="f-select">ライン選択</span>
+          <span class="f-select">製品選択</span>
+          <span class="mock-btn">追加</span>
+        </div>
+        <div class="mock-rule-list">
+          <div class="mock-rule-row">
+            <span>L2100 / YD40008720K フロア検査</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+          <div class="mock-rule-row">
+            <span>L2100 / YD40008750K フロア検査B</span>
+            <span class="mock-btn" style="font-size:10px;padding:2px 6px;">削除</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>手順:</strong> ライン → 製品を選択 → 「追加」 → 「保存」。ラインを選択すると、そのラインのルーティングに紐づく製品のみが製品ドロップダウンに表示されます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>自動計画は、登録された製品の需要データをもとに計画を自動生成する機能です。まとめ生産設定がある場合、集約ルールに従って複数日分をまとめて計画します。</span>
+    </div>
+  </div>
+
+  <!-- STEP 9 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
+      <div class="step-title">設定を保存する</div>
+    </div>
+    <div class="step-desc">
+      すべての設定変更が完了したら、画面下部の<strong>「保存」</strong>ボタンをクリックします。
+    </div>
+    <div style="margin-bottom:12px;">
+      <span class="mock-btn primary" style="font-size:14px;padding:6px 20px;">保存</span>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      保存すると全セクションの設定が一括でDBに保存されます。保存完了後、メッセージが表示されます。
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>保存後は他のタブに切り替えて、設定が反映されていることを確認してください（ライン選択の候補が変わるなど）。</span>
+    </div>
+  </div>
+
+  <!-- 注意事項 -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>保存忘れ:</strong> 「追加」「削除」ボタンはルール一覧を画面上で編集するだけです。「保存」を押さないとDBに反映されません</li>
+      <li><strong>タブキーは変更不可:</strong> タブ追加時に設定したタブキー（英数字）は後から変更できません。タブ名（表示名）は変更可能です</li>
+      <li><strong>フロア出荷の独立性:</strong> フロア出荷タブは通常のフロアタブとは独立した設定を持ちます。同じラインでもタブごとに別管理です</li>
+      <li><strong>ルール重複:</strong> 同じライン×工程の組み合わせでルールを重複追加するとエラーになる場合があります</li>
+      <li><strong>ガント展開除外:</strong> 除外した工程はガントチャートに表示されなくなります。工程展開自体は行われますが、ガントのバーが生成されません</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

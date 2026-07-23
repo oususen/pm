@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生産計画入力 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac;
+    --col-bg: #1a2030; --selected-bg: #1a3028;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac;
+      --col-bg: #1a2030; --selected-bg: #1a3028;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* cover */
+  .cover { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 48px 40px 40px; margin-bottom: 36px; border-left: 5px solid var(--prod-border); }
+  .cover h1 { font-size: 28px; font-weight: 800; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* step */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+  h4.sub { font-size: 15px; font-weight: 700; margin: 18px 0 10px; color: var(--ink); }
+
+  /* toc */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* note */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* screen overview */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--step-color); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; }
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+
+  /* callout */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* mock toolbar */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 60px; }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn-btn { background: #ff9800; border-color: #ff9800; color: #fff; }
+
+  /* highlight */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 80px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* mini grid mockup */
+  .mock-grid { border: 1px solid var(--grid-line); border-radius: 6px; overflow-x: auto; margin: 12px 0; font-size: 11px; }
+  .mock-grid table { width: 100%; border-collapse: collapse; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .mock-grid th { background: var(--grid-head); font-weight: 700; color: var(--ink2); font-size: 10px; }
+  .mock-grid td { background: var(--card); color: var(--ink); }
+  .mock-grid td.editable { background: #fffff0; }
+  :root[data-theme="dark"] .mock-grid td.editable { background: #22281c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid td.editable { background: #22281c; } }
+  .mock-grid td.negative { color: var(--danger); font-weight: 700; }
+  .mock-grid td.positive { color: var(--success); font-weight: 700; }
+  .mock-grid .sticky { position: sticky; left: 0; z-index: 2; background: var(--grid-head); }
+
+  /* add-anchor btn */
+  .mock-add-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); color: var(--accent); font-size: 13px; font-weight: 800; line-height: 1; background: var(--card); flex-shrink: 0; cursor: default; }
+  .mock-gantt-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 12px 0; }
+  .mock-gantt-compare > div { position: relative; }
+  .mock-gantt-compare .compare-label { font-size: 12px; font-weight: 700; margin-bottom: 6px; text-align: center; padding: 4px 0; border-radius: 4px; }
+  .compare-label.off-label { background: var(--grid-head); color: var(--ink2); }
+  .compare-label.on-label { background: var(--accent-light); color: var(--accent); }
+  @media (max-width: 700px) { .mock-gantt-compare { grid-template-columns: 1fr; } }
+
+  /* tab mockup */
+  .mock-tabs { display: flex; gap: 0; margin-bottom: 12px; }
+  .mock-tab { padding: 6px 14px; border: 1px solid var(--grid-line); font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink2); cursor: default; }
+  .mock-tab:first-child { border-radius: 6px 0 0 6px; }
+  .mock-tab:last-child { border-radius: 0 6px 6px 0; }
+  .mock-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mock-tab.teal { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+
+  /* gantt mockup */
+  .mock-gantt { border: 1px solid var(--grid-line); border-radius: 6px; overflow: hidden; margin: 12px 0; }
+  .mock-gantt-header { background: var(--grid-head); padding: 6px 12px; font-size: 11px; font-weight: 700; color: var(--ink2); display: flex; align-items: center; gap: 12px; }
+  .mock-gantt-body { padding: 8px 12px; background: var(--card); }
+  .mock-gantt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
+  .mock-gantt-label { min-width: 120px; font-size: 10px; color: var(--ink2); }
+  .mock-gantt-bar-track { flex: 1; height: 22px; position: relative; background: var(--col-bg); border-radius: 3px; overflow: hidden; }
+  .mock-gantt-bar { position: absolute; height: 100%; border-radius: 3px; display: flex; align-items: center; padding: 0 6px; font-size: 10px; font-weight: 700; color: #fff; white-space: nowrap; }
+  .bar-green { background: #4caf50; }
+  .bar-orange { background: #ff9800; }
+  .bar-blue { background: #1976d2; }
+  .bar-pink { background: #e91e63; }
+  .bar-teal { background: #009688; }
+
+  /* fkey bar */
+  .mock-fkeys { display: flex; gap: 4px; flex-wrap: wrap; margin: 12px 0; }
+  .mock-fkey { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--card); color: var(--ink); }
+  .mock-fkey.highlight { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mock-fkey.teal { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+
+  /* table inside step */
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .info-table th, .info-table td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; }
+  .info-table th { background: var(--grid-head); font-weight: 700; color: var(--ink2); white-space: nowrap; width: 140px; }
+  .info-table td { background: var(--card); color: var(--ink); }
+
+  /* overview mock */
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>生産計画入力 作業手順書</h1>
+    <div class="subtitle">ライン別の生産計画を日付ごとに入力し、需要・在庫・ガントチャートと連動させる画面</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> 生産計画入力
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>タブを選択する</li>
+      <li><span class="tn">2</span>ライン・表示期間を設定する</li>
+      <li><span class="tn">3</span>データを読み込む</li>
+      <li><span class="tn">4</span>グリッドの見方</li>
+      <li><span class="tn">5</span>計画を入力する</li>
+      <li><span class="tn">6</span>計画を保存する</li>
+      <li><span class="tn">7</span>工程ガントチャート</li>
+      <li><span class="tn">8</span>工程負荷表示</li>
+      <li><span class="tn">9</span>その他の機能</li>
+      <li><span class="tn">10</span>注意事項</li>
+    </ul>
+  </div>
+
+  <!-- ===== 前提条件 ===== -->
+  <div class="note" style="border-left-color:var(--accent);">
+    <h2 style="color:var(--accent);">&#9881; 生産計画を作成する前提条件</h2>
+    <div style="font-size:13px;color:var(--ink2);margin-bottom:12px;">以下のマスタ・設定が登録済みであることが前提です。不足があると計画の保存・工程展開・ガント生成が正しく動作しません。</div>
+    <table class="info-table" style="margin:0 0 16px;">
+      <thead>
+        <tr><th style="width:auto;text-align:center;">#</th><th style="width:auto;">前提条件</th><th style="width:auto;">設定画面</th><th style="width:auto;">備考</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="text-align:center;">1</td><td>ラインマスタ</td><td>マスタ</td><td>ラインが存在しないと何もできない</td></tr>
+        <tr><td style="text-align:center;">2</td><td>製品マスタ</td><td>マスタ</td><td>計画対象の製品</td></tr>
+        <tr><td style="text-align:center;">3</td><td>工程マスタ</td><td>マスタ → 工程マスタ</td><td>ライン×工程の紐づけ</td></tr>
+        <tr><td style="text-align:center;">4</td><td>ルーティング・工程</td><td>マスタ → ルーティング</td><td>工程順序・サイクルタイム。保存後の工程展開に必要</td></tr>
+        <tr><td style="text-align:center;">5</td><td>BOM（構成マスタ）</td><td>マスタ → BOM</td><td>数量換算・共生産の判定に必要</td></tr>
+        <tr><td style="text-align:center;">6</td><td>カレンダマスタ</td><td>マスタ → カレンダ</td><td>ラインに紐づくカレンダ定義</td></tr>
+        <tr><td style="text-align:center;">7</td><td>勤務パターン</td><td>マスタ → 勤務パターン</td><td>開始時刻・終了時刻・休憩時間の定義</td></tr>
+        <tr><td style="text-align:center;">8</td><td>ライン勤務カレンダ</td><td>生産 → ライン勤務カレンダ</td><td>日付ごとに稼働日・勤務パターンを割当</td></tr>
+        <tr><td style="text-align:center;">9</td><td>タブ別ライン設定</td><td>生産計画入力 → ライン編集</td><td>タブにラインを割り当てないとドロップダウンに出ない</td></tr>
+      </tbody>
+    </table>
+
+    <h2 style="color:var(--accent);font-size:15px;">&#9881; ガントチャート生成の追加前提条件</h2>
+    <div style="font-size:13px;color:var(--ink2);margin-bottom:12px;">上記すべてに加えて、以下が必要です。</div>
+    <table class="info-table" style="margin:0;">
+      <thead>
+        <tr><th style="width:auto;text-align:center;">#</th><th style="width:auto;">前提条件</th><th style="width:auto;">設定画面</th><th style="width:auto;">備考</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="text-align:center;">10</td><td><a href="/manual/生産/ライン開始時刻設定_作業手順書.html" style="color:var(--accent);font-weight:600;">ライン開始時刻設定</a></td><td>生産 → ライン開始時刻設定</td><td>最終工程のデフォルト開始時刻。未設定なら08:00</td></tr>
+        <tr><td style="text-align:center;">11</td><td><a href="/manual/生産/ガント生成表示品マップ_作業手順書.html" style="color:var(--accent);font-weight:600;">ガント生成表示品マップ</a></td><td>生産 → ガント生成表示品マップ</td><td>共生産ラインでバーに表示する品番を指定</td></tr>
+        <tr><td style="text-align:center;">12</td><td><a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:var(--accent);font-weight:600;">ライン編集の各種ルール</a></td><td>生産計画入力 → ライン編集</td><td>前日シフト・ガント開始時刻・ガント展開除外（任意）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ===== 画面全体説明 ===== -->
+  <div class="screen-overview">
+    <h2>画面の全体構成 <span class="badge">最初に読む</span></h2>
+
+    <div class="overview-mock" style="position:relative;">
+      <div class="om-nav">
+        <span>DAISO</span>
+        <span>受注</span>
+        <span class="om-active">生産</span>
+        <span>仕入</span>
+        <span>出荷</span>
+        <span>在庫</span>
+        <span>品質</span>
+        <span>マスタ</span>
+        <span>設定</span>
+      </div>
+      <!-- tab bar -->
+      <div style="background:var(--card);padding:6px 12px;display:flex;gap:0;border-bottom:1px solid var(--grid-line);position:relative;">
+        <span class="mock-tab">タンク</span>
+        <span class="mock-tab active">2班</span>
+        <span class="mock-tab">クボタ</span>
+        <span class="mock-tab">フロア出荷</span>
+        <span class="mock-tab">ブレード</span>
+        <span class="mock-tab">レーザ</span>
+        <span class="mock-tab">ブレーキ</span>
+        <span class="mock-tab">スポット</span>
+        <span class="mock-tab">ライン編集</span>
+        <span class="om-anno" style="top:-4px;left:50%;transform:translateX(-50%);">1</span>
+      </div>
+      <!-- toolbar -->
+      <div style="background:var(--grid-head);padding:6px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <div class="f-group"><label>ライン</label><span class="f-select" style="min-width:140px;">L2100 - フロアライン</span></div>
+        <div class="f-group"><label>表示開始日</label><span class="f-input">2026/07/23</span></div>
+        <div class="f-group"><label>期間</label><span class="f-select">30日</span></div>
+        <div class="f-group"><span class="f-input" style="min-width:100px;">品番/品名で絞り込み</span></div>
+        <span style="font-size:10px;color:var(--ink2);">☐ 土日非表示 ☑ 休憩明け補正 ☐ 空行非表示</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">計画一括削除</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">計画変更</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">表示順</span>
+        <span class="mock-btn teal" style="font-size:10px;padding:2px 6px;">保存</span>
+        <span class="mock-btn primary" style="font-size:10px;padding:2px 6px;">ガント表示</span>
+        <span class="mock-btn primary" style="font-size:10px;padding:2px 6px;">負荷表示</span>
+        <span class="om-anno" style="top:-4px;right:30%;transform:translateX(50%);">2</span>
+      </div>
+      <!-- grid area -->
+      <div style="background:var(--card);padding:8px;position:relative;min-height:100px;">
+        <div class="mock-grid" style="margin:0;">
+          <table>
+            <thead>
+              <tr>
+                <th rowspan="2" style="width:25px;">No</th>
+                <th rowspan="2" style="width:100px;">品番</th>
+                <th rowspan="2" style="width:80px;">品名</th>
+                <th colspan="6" style="background:#e8f5e9;">7/23(木)</th>
+                <th colspan="6">7/24(金)</th>
+              </tr>
+              <tr>
+                <th style="background:#e8f5e9;">在庫</th><th style="background:#e8f5e9;">実績</th><th style="background:#e8f5e9;">需要</th><th style="background:#e8f5e9;">計画</th><th style="background:#e8f5e9;">順</th><th style="background:#e8f5e9;">計庫</th>
+                <th>在庫</th><th>実績</th><th>需要</th><th>計画</th><th>順</th><th>計庫</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td><td style="text-align:left;font-weight:700;">YD40002946K</td><td style="text-align:left;font-size:10px;">検査</td>
+                <td class="negative">-28</td><td>5</td><td></td><td class="editable">2</td><td class="editable">-22</td><td class="negative">-28</td>
+                <td></td><td></td><td></td><td class="editable"></td><td class="editable"></td><td></td>
+              </tr>
+              <tr style="background:#bfdfff22;">
+                <td>2</td><td style="text-align:left;font-weight:700;">YD40002683</td><td style="text-align:left;font-size:10px;">ブラケット</td>
+                <td class="negative">-842</td><td>23</td><td>48</td><td class="editable negative">-89</td><td class="editable"></td><td class="negative">-842</td>
+                <td class="negative">-943</td><td></td><td></td><td class="editable"></td><td class="editable"></td><td class="negative">-943</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <span class="om-anno" style="top:4px;left:50%;transform:translateX(-50%);">3</span>
+      </div>
+      <!-- gantt area -->
+      <div style="background:var(--col-bg);padding:8px;border-top:2px solid var(--grid-line);position:relative;min-height:80px;">
+        <div style="font-size:10px;font-weight:700;color:var(--ink2);margin-bottom:6px;">工程ガント（勤務時間のみ表示）</div>
+        <div class="mock-gantt-row">
+          <span class="mock-gantt-label">4003 YD40008720K</span>
+          <div class="mock-gantt-bar-track">
+            <div class="mock-gantt-bar bar-green" style="left:5%;width:25%;">26 | 23 17:03 - 24 01:30 (442)</div>
+          </div>
+        </div>
+        <div class="mock-gantt-row">
+          <span class="mock-gantt-label">4003 YD40008750K</span>
+          <div class="mock-gantt-bar-track">
+            <div class="mock-gantt-bar bar-orange" style="left:2%;width:18%;">14 | 23 09:00 (238)</div>
+          </div>
+        </div>
+        <span class="om-anno" style="top:4px;right:8px;">4</span>
+      </div>
+      <!-- footer -->
+      <div style="background:var(--grid-head);padding:4px 8px;display:flex;gap:4px;font-size:10px;position:relative;">
+        <span class="mock-fkey">F1:戻る</span>
+        <span class="mock-fkey">F2:進む</span>
+        <span class="mock-fkey">F3:クリア</span>
+        <span class="mock-fkey highlight">F4:表示のみ</span>
+        <span class="mock-fkey">F6:需要取込</span>
+        <span class="mock-fkey teal">F8:取込+在庫計算</span>
+        <span class="mock-fkey">F5:キャンセル</span>
+        <span class="mock-fkey">F10:印刷</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--ink2);">表示モード: 分解 / 連結</span>
+        <span class="om-anno" style="top:-6px;left:30%;">5</span>
+      </div>
+    </div>
+
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>タブバー</strong> — タンク/2班/クボタ/フロア出荷/ブレード/レーザ/ブレーキ/スポットなど。タブ選択でライン候補が切り替わる。「ライン編集」でタブ構成をカスタマイズ可能（<a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:inherit;text-decoration:underline;">ライン編集 手順書</a>）</span></li>
+      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — ライン選択、表示開始日、期間、検索フィルタ、各種チェックボックス、操作ボタン（保存、ガント表示、計画変更など）</span></li>
+      <li><span class="anno-num">3</span><span><strong>計画グリッド</strong> — 品番ごとに1行。1日あたり6列（在庫・実績・需要・計画・順・計庫）で構成。計画と順は入力可、他は参照値</span></li>
+      <li><span class="anno-num">4</span><span><strong>工程ガントチャート</strong> — 「ガント表示」ボタンで表示。工程×品番ごとのバーで開始時刻・所要時間・数量を可視化</span></li>
+      <li><span class="anno-num">5</span><span><strong>フッターキー</strong> — F1〜F10のショートカット。ガント表示中は表示モード切替（分解/連結）や保存ボタンも表示</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">タブを選択する</div>
+    </div>
+    <div class="step-desc">
+      上部メニュー<strong>「生産」→「生産計画入力」</strong>を開きます。画面上部のタブバーから対象のタブをクリックします。
+    </div>
+    <div class="mock-tabs">
+      <span class="mock-tab">タンク</span>
+      <span class="mock-tab active">2班</span>
+      <span class="mock-tab">クボタ</span>
+      <span class="mock-tab">フロア出荷</span>
+      <span class="mock-tab">ブレード</span>
+      <span class="mock-tab">レーザ</span>
+      <span class="mock-tab">ブレーキ</span>
+      <span class="mock-tab">スポット</span>
+      <span class="mock-tab">ライン編集</span>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      タブを選択すると確認メッセージが表示されます。「OK」で確定すると、そのタブに紐づくラインのみがライン選択ドロップダウンに表示されます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>タブの構成は「ライン編集」タブで変更できます。タブの追加・名前変更・削除、およびタブごとの対象ライン設定が可能です。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>レーザ</strong>タブには「通常計画 / パターン編集 / 月所要材料集計」、<strong>スポット</strong>タブには「通常計画 / excel」、<strong>フロア出荷</strong>タブには「在庫基準 / 進度基準」のサブタブがあります。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">ライン・表示期間を設定する</div>
+    </div>
+    <div class="step-desc">
+      ツールバーで以下を設定します。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group hl"><label>ライン</label><span class="f-select" style="min-width:150px;">L2100 - フロアライン</span></div>
+      <div class="f-group hl hl-blue"><label>表示開始日</label><span class="f-input">2026/07/23</span></div>
+      <div class="f-group hl hl-green"><label>期間</label><span class="f-select">30日</span></div>
+      <div class="f-group"><span class="f-input" style="min-width:100px;">品番/品名で絞り込み</span></div>
+    </div>
+    <table class="info-table">
+      <tr><th>ライン</th><td>対象ラインを選択（必須）。タブによって選択肢が異なります</td></tr>
+      <tr><th>表示開始日</th><td>グリッドの表示開始日。デフォルトは前日</td></tr>
+      <tr><th>期間</th><td>7日 / 14日 / 30日 / 60日 / 90日 から選択（デフォルト: 30日）</td></tr>
+      <tr><th>検索</th><td>品番・品名で行を絞り込み</td></tr>
+    </table>
+    <div class="step-desc" style="margin-top:12px;margin-bottom:0;">チェックボックスで表示を調整できます。</div>
+    <table class="info-table">
+      <tr><th>土日非表示</th><td>土曜・日曜の列を非表示にして画面を節約</td></tr>
+      <tr><th>休憩明けに補正</th><td>ガント生成時に休憩明け時刻に補正</td></tr>
+      <tr><th>空行非表示</th><td>計画・需要などの値がない行を非表示</td></tr>
+    </table>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">データを読み込む</div>
+    </div>
+    <div class="step-desc">
+      ラインを選択したら、フッターのキーでデータを読み込みます。<strong>3種類の読み込み方法</strong>があり、目的に応じて使い分けます。
+    </div>
+    <div class="mock-fkeys">
+      <span class="mock-fkey highlight">F4: 表示のみ</span>
+      <span class="mock-fkey" style="background:var(--warn);color:#fff;border-color:var(--warn);">F6: 需要取込</span>
+      <span class="mock-fkey teal">F8: 取込+在庫計算</span>
+    </div>
+    <table class="info-table">
+      <tr><th>F4: 表示のみ</th><td>再計算せずにDBの現在値をそのまま表示。<strong>通常はこれで十分</strong></td></tr>
+      <tr><th>F6: 需要取込</th><td>後工程の需要データを取り込んでから表示</td></tr>
+      <tr><th>F8: 取込+在庫計算</th><td>需要取込 + 在庫・計画在庫を再計算してから表示。<strong>最も時間がかかる</strong></td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>通常の操作</strong>: まず <strong>F4（表示のみ）</strong> でデータを確認 → 計画入力 → 保存。保存時に自動で在庫再計算されるため、F8は計画入力前に最新データが必要な場合のみ使用します。</span>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>ラインが未選択だとF4/F6/F8は使えません。</strong>先にラインを選択してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">グリッドの見方</div>
+    </div>
+    <div class="step-desc">
+      グリッドは品番（行）× 日付（列）の表です。<strong>1日あたり6列</strong>で構成されています。
+    </div>
+
+    <h4 class="sub">&#9654; 6列の意味</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr><th colspan="6">7/24(金) 08:00 ― 08:00〜翌04:20</th></tr>
+          <tr><th>在庫</th><th>実績</th><th>需要</th><th style="background:#fff8e1;">計画</th><th style="background:#fff8e1;">順</th><th>計庫</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="negative">-28</td><td>5</td><td>2</td><td class="editable">22</td><td class="editable">1</td><td class="negative">-8</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <table class="info-table">
+      <tr><th>在庫（進度）</th><td>その日の開始在庫。フロア出荷の進度基準では「進度」に切り替わる。<span style="color:var(--danger);">赤字はマイナス</span></td></tr>
+      <tr><th>実績</th><td>実績数量（参照値）。フロア出荷タブのみ編集可能</td></tr>
+      <tr><th>需要（受注）</th><td>その日の需要数量。進度基準では「受注」に切り替わる</td></tr>
+      <tr><th style="background:#fff8e1;">計画 <strong>✎</strong></th><td><strong>入力欄</strong>。生産計画数量を入力する。ロック期間は入力不可（グレー表示）</td></tr>
+      <tr><th style="background:#fff8e1;">順 <strong>✎</strong></th><td><strong>入力欄</strong>。生産順序番号。計画入力時に自動採番される</td></tr>
+      <tr><th>計庫（計進）</th><td>計画在庫 = 在庫 - 需要 + 計画。進度基準では「計進」。<span style="color:var(--danger);">赤字はマイナス</span></td></tr>
+    </table>
+
+    <h4 class="sub">&#9654; 日付ヘッダーの情報</h4>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">日付ラベル</span><span class="li-desc">7/24(金) のような表示。土曜は青、日曜は赤の背景</span></div>
+      <div class="legend-item"><span class="li-label" style="color:var(--success);">開始時刻（緑）</span><span class="li-desc">最終工程開始時刻。直接入力で日別設定可能</span></div>
+      <div class="legend-item"><span class="li-label">勤務時間</span><span class="li-desc">08:00〜翌04:20 のような勤務時間帯表示</span></div>
+      <div class="legend-item"><span class="li-label">需五 / 需十</span><span class="li-desc">需要の5日/10日移動平均</span></div>
+      <div class="legend-item"><span class="li-label">→ ボタン</span><span class="li-desc">その日の需要を計画にセット</span></div>
+      <div class="legend-item"><span class="li-label">× ボタン</span><span class="li-desc">その日の計画をすべてクリア</span></div>
+      <div class="legend-item"><span class="li-label">＋ ボタン</span><span class="li-desc">その日の計画から工程一体チェックシートを作成</span></div>
+      <div class="legend-item"><span class="li-label">計合</span><span class="li-desc">その日の全製品の計画合計</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>行の背景色は「表示順」ダイアログで製品ごとに設定できます。スクリーンショットの薄青や薄緑の行は色設定済みの製品です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">計画を入力する</div>
+    </div>
+    <div class="step-desc">
+      グリッドの<strong>「計画」列</strong>に数量を入力します。
+    </div>
+
+    <h4 class="sub">&#9654; 基本入力</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      計画セルに数量を入力すると、<strong>「順」が自動で採番</strong>されます（その日の最大順+1）。
+    </div>
+    <table class="info-table">
+      <tr><th>数量を入力</th><td>順が未設定なら自動で次の番号がセットされる</td></tr>
+      <tr><th>数量をクリア</th><td>順も自動でクリアされる</td></tr>
+      <tr><th>順を手入力</th><td>手動で任意の順序番号を設定可能</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>セル移動</strong>: 矢印キー / Enter / Tab でセル間を移動できます。</span>
+    </div>
+
+    <h4 class="sub">&#9654; 複数ロット（同日に2回以上生産）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      計画セル内の<strong>「+」ボタン</strong>を押すと、同じ日に追加のロットを入力できます。追加ロットは下に連なって表示されます。順序列の<strong>「x」ボタン</strong>で追加ロットを削除できます。
+    </div>
+    <div class="mock-grid" style="max-width:200px;">
+      <table>
+        <thead><tr><th>計画</th><th>順</th></tr></thead>
+        <tbody>
+          <tr><td class="editable">15</td><td class="editable">1</td></tr>
+          <tr><td class="editable" style="border-top:1px dashed var(--warn);">10</td><td class="editable" style="border-top:1px dashed var(--warn);">3 <span style="color:var(--danger);font-size:9px;">x</span></td></tr>
+          <tr><td colspan="2" style="font-size:9px;text-align:center;color:var(--step-color);font-weight:700;">+ 追加</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub">&#9654; 順序の振り直し</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      順序を最初から振り直したい場合: 日付ヘッダーの<strong>「×」ボタン</strong>でその日の計画をクリア → 新しい順番で数量を入力し直すと、入力順に1, 2, 3… と自動採番されます。
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>「×」でクリアすると</strong>、その日の計画（LinePlan）・ガントチャート・LineBacklogの計画行がすべて削除されます。需要・実績・在庫は維持されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">計画を保存する</div>
+    </div>
+    <div class="step-desc">
+      計画を入力したら、ツールバーの<strong>「保存」</strong>ボタンを押します。
+    </div>
+    <div style="margin-bottom:12px;">
+      <span class="mock-btn teal" style="font-size:14px;padding:6px 20px;">保存</span>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      保存すると以下の処理が<strong>自動で順番に実行</strong>されます。
+    </div>
+    <table class="info-table">
+      <tr><th>1. 計画データ保存</th><td>入力した計画数量・順序をDBに保存</td></tr>
+      <tr><th>2. 工程展開</th><td>製品の計画をルーティングに基づいて工程レベルに展開</td></tr>
+      <tr><th>3. 在庫再計算</th><td>在庫・計画在庫を再計算</td></tr>
+      <tr><th>4. ガント再生成</th><td>工程ガントチャートを再生成（ガント表示中の場合）</td></tr>
+    </table>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>保存完了後、グリッドが最新データで再表示されます。計画在庫（計庫）も更新されます。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>日付ヘッダーの<strong>最終工程開始時刻</strong>を変更した場合も、保存時に一緒に保存されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">工程ガントチャート</div>
+    </div>
+    <div class="step-desc">
+      ツールバーの<strong>「ガント表示」</strong>をクリックすると、グリッドの下に工程ガントチャートが表示されます。
+    </div>
+
+    <h4 class="sub">&#9654; ガントチャートの見方</h4>
+    <div class="mock-gantt">
+      <div class="mock-gantt-header">
+        <span>工程ガント（勤務時間のみ表示）</span>
+        <span>ライン 81</span>
+        <span>期間 2026-07-23 ～ 2026-08-21</span>
+      </div>
+      <div class="mock-gantt-body">
+        <div style="font-size:10px;font-weight:700;color:var(--ink);margin-bottom:4px;border-bottom:1px solid var(--grid-line);padding-bottom:4px;">フロア検査</div>
+        <div class="mock-gantt-row">
+          <span class="mock-gantt-label">4003 YD40008720K</span>
+          <div class="mock-gantt-bar-track">
+            <div class="mock-gantt-bar bar-green" style="left:5%;width:25%;font-size:9px;">26 | 23 17:03 - 24 01:30 (442)</div>
+            <div class="mock-gantt-bar bar-green" style="left:38%;width:20%;font-size:9px;">18 | 24 09:00 - 24 15:11 (306)</div>
+          </div>
+        </div>
+        <div class="mock-gantt-row">
+          <span class="mock-gantt-label">4003 YD40008750K</span>
+          <div class="mock-gantt-bar-track">
+            <div class="mock-gantt-bar bar-orange" style="left:2%;width:18%;font-size:9px;">14 | 23 09:00 - 23 13:53 (238)</div>
+            <div class="mock-gantt-bar bar-orange" style="left:42%;width:18%;font-size:9px;">22 | 24 16:31 - 25 00:00 (374)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      バー上の情報: <strong>数量</strong> | <strong>開始日 開始時刻</strong> - <strong>終了日 終了時刻</strong> (<strong>所要分</strong>)
+    </div>
+
+    <h4 class="sub">&#9654; 表示モード</h4>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="mock-btn" style="background:var(--accent);color:#fff;border-color:var(--accent);">分解</span>
+      <span class="mock-btn">連結</span>
+    </div>
+    <table class="info-table">
+      <tr><th>分解</th><td>各工程バーを個別に表示。<strong>バーの編集が可能</strong>（ドラッグ移動、数量変更、時刻変更）</td></tr>
+      <tr><th>連結</th><td>同一製品の連続バーを結合して表示。<strong>編集不可</strong>（参照専用）</td></tr>
+    </table>
+
+    <h4 class="sub">&#9654; バーの編集（分解モードのみ）</h4>
+    <table class="info-table">
+      <tr><th>数量クリック</th><td>バー左端の数量をクリックして数量を変更</td></tr>
+      <tr><th>開始時刻クリック</th><td>開始時刻をクリックして時刻を変更</td></tr>
+      <tr><th>ドラッグ</th><td>バーをドラッグして開始位置を調整</td></tr>
+      <tr><th>＋アンカー</th><td>「＋表示」チェック時、各行に「+」ボタンが表示される。クリックしてバーを手動追加（詳細は下記）</td></tr>
+    </table>
+
+    <h4 class="sub">&#9654; バーの手動追加（＋アンカー）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      計画保存で自動生成されるバー以外に、手動でバーを追加する機能です。
+    </div>
+
+    <div class="callout info" style="margin-bottom:12px;">
+      <span class="icon">&#9432;</span>
+      <span><strong>前提条件</strong>: 分解モードであること（連結モードでは追加不可）。データが読み込まれていること。</span>
+    </div>
+
+    <!-- ＋表示 OFF / ON comparison -->
+    <div class="mock-gantt-compare">
+      <div>
+        <div class="compare-label off-label">＋表示 OFF（通常）</div>
+        <div class="mock-gantt" style="margin:0;">
+          <div class="mock-gantt-header" style="padding:4px 8px;font-size:10px;justify-content:space-between;">
+            <span>フロア検査</span>
+            <span style="display:flex;align-items:center;gap:8px;">
+              <span style="opacity:.6;">&#9744; ＋表示</span>
+              <span class="mock-btn" style="font-size:9px;padding:2px 6px;">時間数量保存</span>
+              <span class="mock-btn" style="font-size:9px;padding:2px 6px;">追加削除保存</span>
+            </span>
+          </div>
+          <div class="mock-gantt-body" style="padding:4px 8px;">
+            <div class="mock-gantt-row" style="margin-bottom:4px;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40008720K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <div class="mock-gantt-bar bar-green" style="left:28%;width:22%;font-size:8px;">26 | 23 17:03</div>
+              </div>
+            </div>
+            <div class="mock-gantt-row" style="margin-bottom:4px;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40008750K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <div class="mock-gantt-bar bar-orange" style="left:2%;width:20%;font-size:8px;">14 | 23 09:00</div>
+              </div>
+            </div>
+            <div class="mock-gantt-row" style="margin-bottom:4px;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40008760K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;"></div>
+            </div>
+            <div class="mock-gantt-row" style="margin-bottom:0;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40002946K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <div class="mock-gantt-bar bar-teal" style="left:12%;width:18%;font-size:8px;">6 | 23 13:53</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="compare-label on-label">＋表示 ON（＋ボタン出現）</div>
+        <div class="mock-gantt" style="margin:0;">
+          <div class="mock-gantt-header" style="padding:4px 8px;font-size:10px;justify-content:space-between;">
+            <span>フロア検査</span>
+            <span style="display:flex;align-items:center;gap:8px;">
+              <span style="color:var(--accent);font-weight:700;">&#9745; ＋表示</span>
+              <span class="mock-btn" style="font-size:9px;padding:2px 6px;">時間数量保存</span>
+              <span class="mock-btn" style="font-size:9px;padding:2px 6px;">追加削除保存</span>
+            </span>
+          </div>
+          <div class="mock-gantt-body" style="padding:4px 8px;">
+            <div class="mock-gantt-row" style="margin-bottom:4px;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40008720K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <div class="mock-gantt-bar bar-green" style="left:28%;width:22%;font-size:8px;">26 | 23 17:03</div>
+                <span style="position:absolute;left:54%;top:1px;"><span class="mock-add-btn" style="width:15px;height:15px;font-size:10px;">+</span></span>
+              </div>
+            </div>
+            <div class="mock-gantt-row" style="margin-bottom:4px;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40008750K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <div class="mock-gantt-bar bar-orange" style="left:2%;width:20%;font-size:8px;">14 | 23 09:00</div>
+                <span style="position:absolute;left:26%;top:1px;"><span class="mock-add-btn" style="width:15px;height:15px;font-size:10px;">+</span></span>
+              </div>
+            </div>
+            <div class="mock-gantt-row" style="margin-bottom:4px;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40008760K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <span style="position:absolute;left:30%;top:1px;"><span class="mock-add-btn" style="width:15px;height:15px;font-size:10px;">+</span></span>
+              </div>
+            </div>
+            <div class="mock-gantt-row" style="margin-bottom:0;">
+              <span class="mock-gantt-label" style="min-width:100px;font-size:9px;">4003 YD40002946K</span>
+              <div class="mock-gantt-bar-track" style="height:18px;">
+                <div class="mock-gantt-bar bar-teal" style="left:12%;width:18%;font-size:8px;">6 | 23 13:53</div>
+                <span style="position:absolute;left:34%;top:1px;"><span class="mock-add-btn" style="width:15px;height:15px;font-size:10px;">+</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:16px;font-size:12px;">
+      左: ＋表示OFFでは通常のバーのみ表示。右: ＋表示ONにすると各行に<span class="mock-add-btn" style="width:16px;height:16px;font-size:11px;vertical-align:middle;margin:0 2px;">+</span>ボタンが出現し、クリックでバーを手動追加できます。
+    </div>
+
+    <table class="info-table" style="margin-bottom:12px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td>ツールバーまたはフッターの<strong>「＋表示」</strong>チェックボックスをONにする → 各工程×製品行に<span class="mock-add-btn" style="width:16px;height:16px;font-size:11px;vertical-align:middle;margin:0 2px;">+</span>ボタンが表示される（上の比較図を参照）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>追加したい工程×製品の行の<strong>「+」ボタン</strong>をクリック</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td>開始日時の入力ダイアログが表示される → 形式: <code>YYYY-MM-DD HH:mm</code>（例: <code>2026-07-24 17:30</code>）。初期値は17:00</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">4</th>
+        <td>終了日時の入力ダイアログが表示される → 形式: <code>YYYY-MM-DD HH:mm</code>（例: <code>2026-07-24 19:30</code>）。初期値は開始の2時間後</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">5</th>
+        <td>数量の入力ダイアログが表示される → 0より大きい数値を入力（例: <code>18</code> or <code>18.5</code>）。初期値は1</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">6</th>
+        <td>確認ダイアログに工程名・品番・時間帯・数量が表示される → <strong>「OK」</strong>で追加予定に登録</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">7</th>
+        <td>ガントチャート上に<strong>仮バー</strong>が表示される（まだ保存されていない）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">8</th>
+        <td><strong style="color:var(--danger);">「追加削除保存」</strong>をクリックして確定 → サーバーに保存される</td>
+      </tr>
+    </table>
+
+    <div class="callout danger" style="margin-bottom:12px;">
+      <span class="icon">&#9888;</span>
+      <span>「追加削除保存」を押すまでバーは仮登録状態です。画面を離れると追加内容は失われます。</span>
+    </div>
+
+    <h4 class="sub">&#9654; 保存ボタン（2種類）</h4>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="mock-btn" style="font-size:12px;">時間数量保存</span>
+      <span class="mock-btn" style="font-size:12px;">追加削除保存</span>
+    </div>
+    <table class="info-table">
+      <tr><th>時間数量保存</th><td>既存バーの時刻・数量変更を保存。未保存変更がある間は<strong style="color:var(--danger);">赤く表示</strong></td></tr>
+      <tr><th>追加削除保存</th><td>手動追加したバーと削除したバーを保存。未保存変更がある間は<strong style="color:var(--danger);">赤く表示</strong></td></tr>
+    </table>
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span><strong>保存の排他制御</strong>: 追加・削除の未保存中は時間・数量の編集を始められません。逆も同様です。一方の保存を先に完了してからもう一方を編集してください。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>ガント表示中は、フッターにも表示モード切替・チェックボックス・保存ボタンが表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">工程負荷表示</div>
+    </div>
+    <div class="step-desc">
+      ツールバーの<strong>「負荷表示」</strong>をクリックすると、工程別の日別負荷が表で表示されます。
+    </div>
+    <div class="mock-grid" style="max-width:500px;">
+      <table>
+        <thead><tr><th>工程</th><th>7/23</th><th>7/24</th><th>7/25</th></tr></thead>
+        <tbody>
+          <tr><td style="text-align:left;">4003 フロア検査</td><td>480 (8)</td><td>390 (6.5)</td><td>0</td></tr>
+          <tr><td style="text-align:left;">4002 フロアコンプ</td><td>540 (9)</td><td>420 (7)</td><td>0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      値は <strong>分 (時間)</strong> で表示されます。工程ガントチャートのバーから集計した値です。
+    </div>
+  </div>
+
+  <!-- ===== STEP 9 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
+      <div class="step-title">その他の機能</div>
+    </div>
+
+    <!-- ── 計画変更 ── -->
+    <h4 class="sub">&#9654; 計画変更（ロック期間の編集）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      過去〜近い将来の計画は<strong>ロック期間</strong>として編集できません。修正が必要な場合のみ、以下の手順でロックを解除します。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td>ツールバーの<strong>「計画変更」</strong>ボタンをクリック</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>変更理由入力ダイアログが表示される → テキストエリアに理由を入力（必須）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td><strong>「確定」</strong>をクリック → ロック期間のセルが編集可能になる</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">4</th>
+        <td>計画を修正して<strong>「保存」</strong> → 変更理由がログに記録される</td>
+      </tr>
+    </table>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span>保存が完了するとロック解除状態はリセットされます。再度修正する場合は改めて「計画変更」が必要です。</span>
+    </div>
+
+    <!-- ── 計画一括削除 ── -->
+    <h4 class="sub">&#9654; 計画一括削除</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      表示中のライン・期間の<strong>全計画を一括削除</strong>します。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td>ツールバーの<strong>「計画一括削除」</strong>ボタンをクリック</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>確認ダイアログにライン名・期間・削除対象（plan / gantt / linebacklog）が表示される</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td><strong>「OK」</strong>で実行 → 削除件数が表示される</td>
+      </tr>
+    </table>
+    <div class="callout danger" style="margin-bottom:4px;">
+      <span class="icon">&#9888;</span>
+      <span>計画・ガント・LineBacklog（計画行）がすべて削除されます。需要・実績・在庫は維持されます。</span>
+    </div>
+
+    <!-- ── 日別計画クリア ── -->
+    <h4 class="sub">&#9654; 日別計画クリア（×ボタン）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      各日付列のヘッダーにある<strong style="color:var(--danger);">×</strong>ボタンで、<strong>その日だけ</strong>の計画をクリアします。
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+      <div class="mock-grid" style="max-width:180px;margin:0;">
+        <table>
+          <thead><tr><th>7/24(木)</th></tr></thead>
+          <tbody><tr><td>
+            <span style="font-size:11px;color:var(--success);font-weight:700;">09:00</span>
+            <span style="font-size:10px;color:var(--ink2);margin-left:4px;">08:00〜翌04:20</span>
+            <span style="display:inline-block;background:var(--danger);color:#fff;font-size:9px;font-weight:700;width:16px;height:16px;text-align:center;line-height:16px;border-radius:3px;margin-left:4px;cursor:default;">×</span>
+          </td></tr></tbody>
+        </table>
+      </div>
+      <span style="font-size:13px;color:var(--ink2);">← ヘッダーの × をクリック</span>
+    </div>
+    <div class="step-desc" style="margin-bottom:4px;">
+      クリア後、その日の計画・順序・ガント・LineBacklog（計画行）がサーバーから削除されます。<br>
+      需要・実績・在庫は維持されるため、改めて計画を入力すれば順序は自動採番されます。
+    </div>
+
+    <!-- ── 順序の自動採番 ── -->
+    <h4 class="sub">&#9654; 順序の自動採番</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      計画数量を入力すると、<strong>「順」欄に自動で順番が割り振られます</strong>。手動入力も可能です。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>数量 &gt; 0 を入力（順が空）</th><td>その日の最大順 + 1 を自動セット</td></tr>
+      <tr><th>数量 &gt; 0 を入力（順が設定済み）</th><td>既存の順をそのまま維持</td></tr>
+      <tr><th>数量を 0 またはクリア</th><td>その行の順もクリア</td></tr>
+    </table>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span><strong>順番の振り直し方法:</strong> ×ボタンでその日の計画をクリア → 生産したい順に数量を入力すると 1, 2, 3… と自動セットされます。</span>
+    </div>
+
+    <!-- ── ライン開始時刻設定 ── -->
+    <h4 class="sub">&#9654; ライン開始時刻設定</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      ラインごとの<strong>最終工程のデフォルト開始時刻</strong>と休憩明け補正を設定する画面です。ガントチャート生成時に、日別設定が無い日のデフォルト値として使われます。
+    </div>
+    <div class="step-desc" style="margin-bottom:4px;">
+      詳細は<a href="/manual/生産/ライン開始時刻設定_作業手順書.html" style="color:var(--accent);font-weight:600;">ライン開始時刻設定 作業手順書</a>を参照してください。
+    </div>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span><strong>開始時刻の優先順位:</strong> (1) 日付ヘッダーの日別設定（最優先） → (2) ライン開始時刻設定 → (3) 08:00</span>
+    </div>
+
+    <!-- ── 表示順・行色設定 ── -->
+    <h4 class="sub">&#9654; 表示順・行色設定</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>「表示順」</strong>ボタンで、製品の表示順序と行の背景色を設定するダイアログが開きます。
+    </div>
+    <div class="mock-grid" style="max-width:680px;margin-bottom:8px;">
+      <table>
+        <thead>
+          <tr><th>#</th><th>品番</th><th>品名</th><th>行色 (R G B)</th><th>+色 (R G B)</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td style="text-align:left;">YD40008670K</td>
+            <td style="text-align:left;">フロア(55UR CAB)検査</td>
+            <td><span style="display:inline-block;width:12px;height:12px;background:rgb(191,219,254);border:1px solid var(--grid-line);border-radius:2px;vertical-align:middle;margin-right:4px;"></span> 191 219 254</td>
+            <td></td>
+            <td>&#9650; &#9660;</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td style="text-align:left;">YD40006245K</td>
+            <td style="text-align:left;">フロア(U-5CAB)検査</td>
+            <td></td>
+            <td><span style="display:inline-block;width:12px;height:12px;background:rgb(212,165,116);border:1px solid var(--grid-line);border-radius:2px;vertical-align:middle;margin-right:4px;"></span> 212 165 116</td>
+            <td>&#9650; &#9660;</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td style="text-align:left;">YD40007003K</td>
+            <td style="text-align:left;">フロア(U-6EN 3ton CAB)検査</td>
+            <td><span style="display:inline-block;width:12px;height:12px;background:rgb(187,247,208);border:1px solid var(--grid-line);border-radius:2px;vertical-align:middle;margin-right:4px;"></span> 187 247 208</td>
+            <td></td>
+            <td>&#9650; &#9660;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>&#9650; &#9660;</th><td>矢印ボタンで表示順を上下に移動</td></tr>
+      <tr><th>行色 (R G B)</th><td>製品行の<strong>背景色</strong>を 0〜255 のRGB値で指定</td></tr>
+      <tr><th>+色 (R G B)</th><td>ロット追加ボタン（+）の<strong>ボタン色</strong>を RGB値で指定</td></tr>
+    </table>
+    <div class="step-desc" style="margin-bottom:4px;">
+      ダイアログ右側に色サンプルが表示されます（キャブ青: 191,219,254 / キャノピー緑: 187,247,208 等）。設定はライン別にDBに保存されます。フロア出荷タブは独立した設定です。
+    </div>
+
+    <!-- ── 自動計画 ── -->
+    <h4 class="sub">&#9654; 自動計画</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      自動計画が設定されているラインでは<strong>「自動計画」</strong>ボタンが表示されます。需要データに基づいて計画を自動生成します。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td><strong>「自動計画」</strong>ボタンをクリック</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>確認ダイアログにライン名と対象期間が表示される（デフォルト: 明後日以降）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td>「はい」で即実行 / 「いいえ」で開始日を変更してから実行</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">4</th>
+        <td>需要を取り込み、各日の需要を計画欄にコピー → 保存で確定</td>
+      </tr>
+    </table>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span>まとめ設定がある製品は、指定曜日にまとめて計画されます（下記「まとめ設定」参照）。日付ヘッダーの<strong>→ボタン</strong>で1日分だけ需要→計画コピーも可能です。</span>
+    </div>
+    <div class="callout warn" style="margin-bottom:4px;">
+      <span class="icon">&#9888;</span>
+      <span>「自動計画」「まとめ設定」ボタンはライン編集の<strong>「自動計画適用設定」</strong>で有効化されたラインのみ表示されます（設定方法は<a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:inherit;font-weight:600;text-decoration:underline;">ライン編集手順書 STEP 8</a>を参照）。フロア出荷タブでは非表示です。</span>
+    </div>
+
+    <!-- ── まとめ設定 ── -->
+    <h4 class="sub">&#9654; まとめ設定</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>「まとめ設定」</strong>ボタンで、複数日分の需要をまとめて1日に生産するルールを設定します。
+    </div>
+    <div class="mock-grid" style="max-width:580px;margin-bottom:8px;">
+      <table>
+        <thead>
+          <tr><th>製品</th><th>まとめ生産日</th><th>対象期間</th><th>有効</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:left;">YD40008720K フロア…</td>
+            <td>月曜</td>
+            <td>5日分</td>
+            <td style="color:var(--success);font-weight:700;">&#10003;</td>
+            <td>編集 / 削除</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;">YD40008750K フロア…</td>
+            <td>水曜</td>
+            <td>3日分</td>
+            <td style="color:var(--success);font-weight:700;">&#10003;</td>
+            <td>編集 / 削除</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>製品</th><td>ドロップダウンから対象製品を選択</td></tr>
+      <tr><th>まとめ生産日</th><td>生産を行う曜日（日曜〜土曜）を選択</td></tr>
+      <tr><th>対象期間</th><td>何日分の需要をまとめるか（1〜31日）</td></tr>
+      <tr><th>有効</th><td>チェックで有効化。OFFにすると通常の日別計画に戻る</td></tr>
+    </table>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span>例: 「月曜・5日分」の設定では、月曜日に月〜金の需要合計が計画されます。他の曜日には計画が入りません。表示期間末尾では需要が不足する場合があるため、対象期間分の余裕をもって表示期間を設定してください。</span>
+    </div>
+
+    <!-- ── 印刷・出力 ── -->
+    <h4 class="sub">&#9654; 印刷・出力</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>F10キー</strong>またはフッターの「F10: 印刷」で出力形式選択ダイアログが表示されます。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <span class="mock-btn primary" style="font-size:12px;">Excel出力</span>
+      <span class="mock-btn primary" style="font-size:12px;">PDF出力</span>
+    </div>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr><th>Excel出力</th><td>現在の表示データをCSVファイル（UTF-8）としてダウンロード。ファイル名: <code>production_plan_{ライン}_{開始日}_{終了日}.csv</code></td></tr>
+      <tr><th>PDF出力</th><td>印刷用のHTMLを新しいウィンドウに表示（A3横向き）。自動で印刷ダイアログが開きます</td></tr>
+    </table>
+
+    <!-- ── 配送明細PDF ── -->
+    <h4 class="sub">&#9654; 配送明細PDF（フロア系タブ限定）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      フロア系タブでは追加のPDFダウンロードボタンが表示されます。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th style="white-space:normal;">配送明細<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">フロア・フロア出荷</span></th><td>フロア配送明細PDFをダウンロード</td></tr>
+      <tr><th style="white-space:normal;">納入リスト<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">フロア出荷のみ</span></th><td>北進塗装向け納入リストPDFをダウンロード</td></tr>
+      <tr><th style="white-space:normal;">納品書<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">フロア出荷のみ</span></th><td>北進塗装向け納品書PDF。確認ダイアログでAM便（15時着）・宵積み（8時着）の日付を確認してから発行</td></tr>
+    </table>
+
+    <!-- ── ライン編集 ── -->
+    <h4 class="sub">&#9654; ライン編集</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>「ライン編集」</strong>タブで、以下のライン別設定を変更できます。詳細は<a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:var(--accent);font-weight:600;">ライン編集 作業手順書</a>を参照してください。
+    </div>
+    <table class="info-table">
+      <tr><th>対象ライン</th><td>タブごとに表示するラインを設定</td></tr>
+      <tr><th>前日シフト台数</th><td>ライン×工程ごとに前日シフト扱いの台数を設定</td></tr>
+      <tr><th>ガント開始時刻</th><td>ライン×工程ごとにガントの開始時刻を設定</td></tr>
+      <tr><th>ガント展開除外</th><td>ガントチャートに表示しない工程を設定</td></tr>
+      <tr><th>計算特例</th><td>ライン×工程×計算対象ごとの特例ルールを設定</td></tr>
+      <tr><th>自動計画適用設定</th><td>自動計画ボタンを表示するライン×製品を設定</td></tr>
+    </table>
+  </div>
+
+  <!-- ===== STEP 10 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>ラインが必須:</strong> ラインを選択しないと保存・取込・表示は実行できません</li>
+      <li><strong>保存後の自動処理:</strong> 保存ボタン押下後は工程展開 → 在庫再計算 → ガント再生成が自動実行されます。処理中は「データ更新中」と表示されます</li>
+      <li><strong>ロック期間:</strong> 過去の計画はロック期間として編集不可です。「計画変更」ボタンで理由入力後に編集できます</li>
+      <li><strong>休日セル:</strong> 非稼働日のセルは読み取り専用です（入力不可）</li>
+      <li><strong>ガント連結モード:</strong> 連結表示中はバー編集と各保存ボタンは使えません。編集は「分解」モードで行ってください</li>
+      <li><strong>ガント保存の排他:</strong> 追加・削除の未保存中は時間・数量変更を始められません。逆も同様です</li>
+      <li><strong>土日の再計算:</strong> 土日・非稼働日にF6/F8を実行した場合、計算基準日は直前の営業日に調整されます</li>
+      <li><strong>日替わり時刻:</strong> 8:00が日替わり時刻です。7:59以前は前日として扱われます</li>
+      <li><strong>最終工程開始時刻の優先順位:</strong> (1) 日付ヘッダーの日別設定 → (2) デフォルト開始時刻設定 → (3) 08:00</li>
+      <li><strong>フッターショートカット:</strong> F1:戻る / F2:進む / F3:クリア / F4:表示のみ / F5:キャンセル / F6:需要取込 / F8:取込+在庫計算 / F10:印刷</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ライン開始時刻設定 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .page { max-width:960px; margin:0 auto; padding:40px 24px 80px; }
+
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; color:var(--ink); margin-bottom:6px; text-wrap:balance; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; color:var(--ink); }
+
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+  .note { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:24px; border-left:4px solid var(--warn); }
+  .note h2 { font-size:16px; font-weight:700; margin-bottom:8px; color:var(--warn); }
+  .note ul { margin:0; padding-left:18px; font-size:14px; color:var(--ink2); }
+  .note li { margin-bottom:4px; }
+
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.teal { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:170px; }
+  .info-table td { background:var(--card); color:var(--ink); }
+
+  .mock-grid { border:1px solid var(--grid-line); border-radius:6px; overflow-x:auto; margin:12px 0; font-size:11px; }
+  .mock-grid table { width:100%; border-collapse:collapse; }
+  .mock-grid th, .mock-grid td { border:1px solid var(--grid-line); padding:5px 8px; text-align:center; white-space:nowrap; }
+  .mock-grid th { background:var(--grid-head); font-weight:700; color:var(--ink2); font-size:10px; }
+  .mock-grid td { background:var(--card); color:var(--ink); }
+  .mock-grid .f-input { width:52px; text-align:center; }
+
+  .anno-num { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:13px; font-weight:800; flex-shrink:0; line-height:1; font-style:normal; }
+  :root[data-theme="dark"] .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+  .anno-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .anno-list li { display:flex; align-items:flex-start; gap:10px; font-size:14px; line-height:1.6; }
+  .anno-list li strong { color:var(--ink); }
+  .anno-list li span { color:var(--ink2); }
+  .om-anno { position:absolute; font-size:11px; font-weight:800; color:var(--danger); background:#fff; border:2px solid var(--danger); border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; line-height:1; z-index:5; font-style:normal; }
+  :root[data-theme="dark"] .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+
+  .screen-overview { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 32px; margin-bottom:28px; }
+  .screen-overview h2 { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .screen-overview h2 .badge { background:var(--step-color); color:#fff; font-size:11px; font-weight:700; padding:2px 10px; border-radius:4px; }
+
+  .mock-toolbar { background:var(--grid-head); border:1px solid var(--grid-line); border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px; color:var(--ink2); }
+
+  @media (max-width:600px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step, .screen-overview { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>ライン開始時刻設定 作業手順書</h1>
+    <div class="subtitle">ラインごとの最終工程デフォルト開始時刻と休憩明け補正を一括管理する画面。生産計画入力のガントチャート生成に反映されます。</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> ライン開始時刻設定
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>画面の見方</li>
+      <li><span class="tn">3</span>区分フィルタで絞り込む</li>
+      <li><span class="tn">4</span>開始時刻を入力する</li>
+      <li><span class="tn">5</span>休憩明けに補正を設定する</li>
+      <li><span class="tn">6</span>保存する</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面概要 ===== -->
+  <div class="screen-overview">
+    <h2>画面の構成 <span class="badge">最初に読む</span></h2>
+    <div class="step-desc">
+      全ラインの一覧表で、ラインごとに<strong>最終工程のデフォルト開始時刻</strong>と<strong>休憩明け補正</strong>の2項目を設定します。生産計画入力のガントチャート生成時に、日別設定が無い日はここで設定した時刻が最終工程の開始時刻として使われます。
+    </div>
+
+    <!-- 画面モック -->
+    <div style="position:relative;">
+      <div class="mock-toolbar" style="border-radius:6px 6px 0 0;justify-content:space-between;">
+        <span style="font-size:14px;font-weight:700;color:var(--ink);">デフォルト開始時刻設定</span>
+        <span style="font-size:11px;color:var(--ink2);">ラインごとのデフォルト開始時刻と休憩明け補正を設定します。</span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--grid-line);border-top:none;padding:12px 14px;position:relative;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span style="font-size:12px;color:var(--ink2);">対象ライン: <strong style="color:var(--ink);">12 件</strong></span>
+          <span style="display:flex;gap:6px;align-items:center;">
+            <span style="font-size:11px;color:var(--ink2);">区分:</span>
+            <span class="f-select" style="position:relative;">すべて ▾
+              <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">1</span>
+            </span>
+            <span class="mock-btn" style="font-size:11px;padding:3px 8px;">再読込</span>
+            <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">保存
+              <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">4</span>
+            </span>
+          </span>
+        </div>
+        <div class="mock-grid" style="margin:0;">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align:left;min-width:180px;">ライン
+                  <span class="om-anno" style="position:static;margin-left:2px;">2</span>
+                </th>
+                <th style="min-width:130px;">デフォルト開始時刻
+                  <span class="om-anno" style="position:static;margin-left:2px;">2</span>
+                </th>
+                <th style="min-width:100px;">休憩明けに補正
+                  <span class="om-anno" style="position:static;margin-left:2px;">3</span>
+                </th>
+                <th style="min-width:120px;">更新日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="text-align:left;"><strong>81</strong> <span style="color:var(--ink2);font-size:10px;">フロア検査</span></td>
+                <td><span class="f-input" style="color:var(--success);font-weight:700;">09:00</span></td>
+                <td><span style="color:var(--accent);font-weight:600;">&#9745; ON</span></td>
+                <td style="color:var(--ink2);">2026-07-20 14:30</td>
+              </tr>
+              <tr>
+                <td style="text-align:left;"><strong>82</strong> <span style="color:var(--ink2);font-size:10px;">フロアコンプ</span></td>
+                <td><span class="f-input" style="color:var(--success);font-weight:700;">08:30</span></td>
+                <td><span style="color:var(--accent);font-weight:600;">&#9745; ON</span></td>
+                <td style="color:var(--ink2);">2026-07-20 14:30</td>
+              </tr>
+              <tr>
+                <td style="text-align:left;"><strong>90</strong> <span style="color:var(--ink2);font-size:10px;">タンクL</span></td>
+                <td><span class="f-input" style="color:var(--ink2);">08:00</span></td>
+                <td><span style="color:var(--ink2);">&#9744; ON</span></td>
+                <td style="color:var(--ink2);">未設定</td>
+              </tr>
+              <tr>
+                <td style="text-align:left;"><strong>91</strong> <span style="color:var(--ink2);font-size:10px;">ブレード</span></td>
+                <td><span class="f-input" style="opacity:.4;font-style:italic;">08:00</span></td>
+                <td><span style="color:var(--accent);font-weight:600;">&#9745; ON</span></td>
+                <td style="color:var(--ink2);">未設定</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>区分フィルタ</strong> — 表示対象を「すべて / 社内 / 購買先」で絞り込み</span></li>
+      <li><span class="anno-num">2</span><span><strong>ライン × 開始時刻</strong> — ラインコード・名称と、デフォルト開始時刻の入力欄</span></li>
+      <li><span class="anno-num">3</span><span><strong>休憩明けに補正</strong> — ONにすると、開始時刻が休憩中に重なる場合に休憩明けへ自動シフト</span></li>
+      <li><span class="anno-num">4</span><span><strong>保存ボタン</strong> — 全ラインの設定をまとめて保存</span></li>
+    </ul>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>この画面は<strong>生産計画入力</strong>の工程ガント生成と連動しています。ここで設定した時刻は、日別設定（ヘッダー時刻入力）が無い日のデフォルト値として使われます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部ナビゲーションの<strong>「生産」</strong>メニューから<strong>「ライン開始時刻設定」</strong>をクリックします。
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      画面が開くと、全ラインの一覧と既存の設定が自動で読み込まれます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>この画面を使用するには<strong>production.plan_input</strong>の編集権限が必要です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">画面の見方</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      テーブルの各列の意味は以下の通りです。
+    </div>
+    <table class="info-table">
+      <tr><th>ライン</th><td>ラインコード（太字）とライン名。ラインコード順に並んでいます</td></tr>
+      <tr><th>デフォルト開始時刻</th><td>最終工程のデフォルト開始時刻。未入力の場合は <code>08:00</code> として扱われます</td></tr>
+      <tr><th>休憩明けに補正</th><td>ONにすると、開始時刻が休憩時間帯に重なる場合に休憩終了時刻まで自動でスライドします</td></tr>
+      <tr><th>更新日時</th><td>最後に保存された日時。未設定のラインは「未設定」と表示されます</td></tr>
+    </table>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>開始時刻の優先順位:</strong><br>
+      (1) 生産計画入力の日付ヘッダー日別設定（最優先） → (2) この画面のデフォルト開始時刻 → (3) 08:00（どちらも未設定の場合）</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">区分フィルタで絞り込む</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      右上の<strong>「区分」</strong>ドロップダウンで表示対象を絞り込めます。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="f-select">すべて ▾</span>
+    </div>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr><th>すべて</th><td>全ラインを表示</td></tr>
+      <tr><th>社内</th><td>社内ライン（line_type = PROD）のみ表示</td></tr>
+      <tr><th>購買先</th><td>購買先ライン（line_type = PURCHASE）のみ表示</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>フィルタは表示の絞り込みだけです。保存時は<strong>全ライン</strong>の設定がまとめて保存されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">開始時刻を入力する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      設定したいラインの<strong>「デフォルト開始時刻」</strong>欄に時刻を入力します。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>入力形式</th><td><code>HH:mm</code>（例: <code>09:00</code>、<code>08:30</code>）</td></tr>
+      <tr><th>簡易入力</th><td>数字のみ入力すると自動整形されます。例: <code>830</code> → <code>08:30</code>、<code>9</code> → <code>09:00</code></td></tr>
+      <tr><th>空欄</th><td>未入力のラインはデフォルト <code>08:00</code> として扱われます</td></tr>
+    </table>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>入力した時刻はフォーカスが外れると自動整形されます。コロン（:）なしで数字だけ入力しても構いません。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">休憩明けに補正を設定する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      各ラインの<strong>「休憩明けに補正」</strong>チェックボックスで、休憩時間の自動補正を設定します。
+    </div>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr>
+        <th>ON（チェックあり）</th>
+        <td>ガント生成時に、最終工程の開始時刻が休憩時間帯に重なる場合、<strong>休憩終了時刻まで自動でスライド</strong>します。<br>
+        例: 開始 12:00 で昼休憩 12:00〜12:45 の場合 → 12:45 に補正</td>
+      </tr>
+      <tr>
+        <th>OFF（チェックなし）</th>
+        <td>休憩時間を考慮せず、入力した開始時刻をそのまま使用します</td>
+      </tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>初期値はON（補正あり）です。通常はONのまま運用してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">保存する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      設定が完了したら、右上の<strong>「保存」</strong>ボタンをクリックします。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="mock-btn primary" style="font-size:13px;padding:5px 16px;">保存</span>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      全ラインの設定がまとめてサーバーに保存されます。保存後は確認メッセージが表示され、データが再読み込みされます。
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>保存後は生産計画入力の工程ガント生成に<strong>即時反映</strong>されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>保存対象:</strong> フィルタで絞り込んでいても、保存時は全ラインの設定が対象です</li>
+      <li><strong>日別設定との関係:</strong> 生産計画入力の日付ヘッダーに個別の時刻が設定されている日は、この画面の設定より日別設定が優先されます</li>
+      <li><strong>未設定ライン:</strong> 開始時刻を入力しないラインは 08:00 として扱われます</li>
+      <li><strong>権限:</strong> production.plan_input の編集権限がないユーザーは設定を変更できません</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

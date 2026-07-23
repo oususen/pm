@@ -77,20 +77,20 @@ const production = [
     path: "/production/gantt-display-product-map",
     name: "GanttDisplayProductMapList",
     component: () => import("@/views/production/GanttDisplayProductMap.vue"),
-    meta: { pageTitle: "ガントチャート生成表示品マップ", manualPath: "README.md" },
+    meta: { pageTitle: "ガントチャート生成表示品マップ", manualPath: "生産/ガント生成表示品マップ.md" },
   },
   {
     path: "/production/gantt-display-product-map/new",
     name: "GanttDisplayProductMapCreate",
     component: () => import("@/views/production/GanttDisplayProductMapForm.vue"),
-    meta: { pageTitle: "ガントチャート生成表示品マップ 新規", manualPath: "README.md" },
+    meta: { pageTitle: "ガントチャート生成表示品マップ 新規", manualPath: "生産/ガント生成表示品マップ.md" },
   },
   {
     path: "/production/gantt-display-product-map/:id/edit",
     name: "GanttDisplayProductMapEdit",
     component: () => import("@/views/production/GanttDisplayProductMapForm.vue"),
     props: true,
-    meta: { pageTitle: "ガントチャート生成表示品マップ 編集", manualPath: "README.md" },
+    meta: { pageTitle: "ガントチャート生成表示品マップ 編集", manualPath: "生産/ガント生成表示品マップ.md" },
   },
   {
     path: "/production/default-start-time",

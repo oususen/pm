@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ガント生成表示品マップ 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .page { max-width:960px; margin:0 auto; padding:40px 24px 80px; }
+
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; color:var(--ink); margin-bottom:6px; text-wrap:balance; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; color:var(--ink); }
+
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+  .note { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:24px; border-left:4px solid var(--warn); }
+  .note h2 { font-size:16px; font-weight:700; margin-bottom:8px; color:var(--warn); }
+  .note ul { margin:0; padding-left:18px; font-size:14px; color:var(--ink2); }
+  .note li { margin-bottom:4px; }
+
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.teal { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .mock-btn.danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+  .f-input { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); min-width:60px; }
+
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:170px; }
+  .info-table td { background:var(--card); color:var(--ink); }
+
+  .mock-grid { border:1px solid var(--grid-line); border-radius:6px; overflow-x:auto; margin:12px 0; font-size:11px; }
+  .mock-grid table { width:100%; border-collapse:collapse; }
+  .mock-grid th, .mock-grid td { border:1px solid var(--grid-line); padding:5px 8px; text-align:left; white-space:nowrap; }
+  .mock-grid th { background:var(--grid-head); font-weight:700; color:var(--ink2); font-size:10px; }
+  .mock-grid td { background:var(--card); color:var(--ink); }
+
+  .anno-num { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:13px; font-weight:800; flex-shrink:0; line-height:1; font-style:normal; }
+  :root[data-theme="dark"] .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+  .anno-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .anno-list li { display:flex; align-items:flex-start; gap:10px; font-size:14px; line-height:1.6; }
+  .anno-list li strong { color:var(--ink); }
+  .anno-list li span { color:var(--ink2); }
+  .om-anno { position:absolute; font-size:11px; font-weight:800; color:var(--danger); background:#fff; border:2px solid var(--danger); border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; line-height:1; z-index:5; font-style:normal; }
+  :root[data-theme="dark"] .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+
+  .screen-overview { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 32px; margin-bottom:28px; }
+  .screen-overview h2 { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .screen-overview h2 .badge { background:var(--step-color); color:#fff; font-size:11px; font-weight:700; padding:2px 10px; border-radius:4px; }
+
+  .mock-toolbar { background:var(--grid-head); border:1px solid var(--grid-line); border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px; color:var(--ink2); }
+
+  .mock-form { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:12px 0; }
+  .mock-field { display:flex; flex-direction:column; gap:4px; }
+  .mock-field label { font-size:11px; font-weight:700; color:var(--ink2); }
+  .mock-field .req { color:var(--danger); }
+
+  @media (max-width:600px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step, .screen-overview { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+    .mock-form { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>ガント生成表示品マップ 作業手順書</h1>
+    <div class="subtitle">共生産（連産品）ラインで、工程ガントチャートのバーに表示する品番を指定するマッピング画面</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> ガント生成表示品マップ
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>この画面の役割</li>
+      <li><span class="tn">2</span>一覧画面の見方</li>
+      <li><span class="tn">3</span>マッピングを新規登録する</li>
+      <li><span class="tn">4</span>工程を追加する</li>
+      <li><span class="tn">5</span>編集・削除する</li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">この画面の役割</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      通常の単品生産ラインでは、ガントチャートのバーにはルーティングの出力品がそのまま表示されます。<br>
+      しかし<strong>共生産（連産品）ライン</strong>では、1つの最終品に対して複数の子品が同時に生産されます。この場合、ルーティングの出力品名だけではどの子品が生産されているか分かりません。
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      この画面では、<strong>「ライン × 最終品 × 工程」の組み合わせに対して、ガントバーに表示する品番</strong>を指定します。
+    </div>
+
+    <h4 class="sub">&#9654; 設定の具体例</h4>
+    <div class="mock-grid" style="max-width:700px;">
+      <table>
+        <thead>
+          <tr><th>ライン</th><th>ライン最終品</th><th>工程</th><th>表示品</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>L2100 フロアライン</td>
+            <td>YD40008720K フロア(55UR)セット</td>
+            <td>4003 フロア検査</td>
+            <td>YD40008670K フロア(55UR CAB)</td>
+          </tr>
+          <tr>
+            <td>L2100 フロアライン</td>
+            <td>YD40008720K フロア(55UR)セット</td>
+            <td>4002 フロアコンプ</td>
+            <td>YD40008660K フロアコンプ(55UR)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      上記の例では、最終品「フロア(55UR)セット」のガントで、検査工程にはCAB品番、コンプ工程にはコンプ品番がバーに表示されます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>単品生産ラインでは通常この設定は不要です。共生産ラインのみ設定してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">一覧画面の見方</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      上部ナビゲーションの<strong>「生産」</strong>メニューから<strong>「ガント生成表示品マップ」</strong>をクリックすると一覧画面が開きます。
+    </div>
+
+    <!-- 一覧モック -->
+    <div style="position:relative;">
+      <div class="mock-toolbar" style="border-radius:6px 6px 0 0;justify-content:space-between;">
+        <span style="font-size:13px;font-weight:700;color:var(--ink);">ガントチャート生成表示品マップ 一覧</span>
+        <span style="display:flex;gap:6px;align-items:center;">
+          <span style="font-size:11px;color:var(--ink2);">件数: <strong style="color:var(--ink);">8 / 8</strong></span>
+        </span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--grid-line);border-top:none;padding:10px 14px;position:relative;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="display:flex;gap:8px;align-items:center;">
+            <span style="font-size:11px;color:var(--ink2);">ライン:</span>
+            <span class="f-select">すべて ▾
+              <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">1</span>
+            </span>
+            <span class="f-input" style="min-width:120px;position:relative;">キーワード検索
+              <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">2</span>
+            </span>
+          </span>
+          <span style="display:flex;gap:6px;">
+            <span class="mock-btn" style="font-size:11px;padding:3px 8px;">再読込</span>
+            <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;position:relative;">新規
+              <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">3</span>
+            </span>
+          </span>
+        </div>
+        <div class="mock-grid" style="margin:0;">
+          <table>
+            <thead>
+              <tr><th>ライン</th><th>ライン最終品</th><th>工程</th><th>表示品（主に連産品）</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr style="background:rgba(173,216,230,.15);">
+                <td>L2100 フロアライン</td>
+                <td>YD40008720K フロア(55UR)セット</td>
+                <td>4003 フロア検査</td>
+                <td>YD40008670K フロア(55UR CAB)</td>
+                <td style="white-space:nowrap;">
+                  <span class="mock-btn" style="font-size:9px;padding:2px 5px;">工程追加</span>
+                  <span class="mock-btn" style="font-size:9px;padding:2px 5px;">編集</span>
+                  <span class="mock-btn danger" style="font-size:9px;padding:2px 5px;">削除</span>
+                </td>
+              </tr>
+              <tr style="background:rgba(173,216,230,.15);">
+                <td>L2100 フロアライン</td>
+                <td>YD40008720K フロア(55UR)セット</td>
+                <td>4002 フロアコンプ</td>
+                <td>YD40008660K フロアコンプ(55UR)</td>
+                <td style="white-space:nowrap;">
+                  <span class="mock-btn" style="font-size:9px;padding:2px 5px;">工程追加</span>
+                  <span class="mock-btn" style="font-size:9px;padding:2px 5px;">編集</span>
+                  <span class="mock-btn danger" style="font-size:9px;padding:2px 5px;">削除</span>
+                </td>
+              </tr>
+              <tr style="background:rgba(255,228,181,.15);">
+                <td>L2100 フロアライン</td>
+                <td>YD40006245K フロア(U-5)セット</td>
+                <td>4003 フロア検査</td>
+                <td>YD40006240K フロア(U-5 CAB)</td>
+                <td style="white-space:nowrap;">
+                  <span class="mock-btn" style="font-size:9px;padding:2px 5px;">工程追加</span>
+                  <span class="mock-btn" style="font-size:9px;padding:2px 5px;">編集</span>
+                  <span class="mock-btn danger" style="font-size:9px;padding:2px 5px;">削除</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>ラインフィルタ</strong> — ドロップダウンでライン別に絞り込み</span></li>
+      <li><span class="anno-num">2</span><span><strong>キーワード検索</strong> — 品番・品名で一覧を絞り込み</span></li>
+      <li><span class="anno-num">3</span><span><strong>新規ボタン</strong> — 新しいマッピングを登録する画面へ遷移</span></li>
+    </ul>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>同じ最終品のマッピングは<strong>同じ背景色</strong>でグループ化されます。視覚的にどの工程が同じ最終品のセットか把握できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">マッピングを新規登録する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      一覧画面の<strong>「新規」</strong>ボタンをクリックすると、登録画面が開きます。4つの項目をすべて入力して保存します。
+    </div>
+
+    <!-- フォームモック -->
+    <div style="border:1px solid var(--grid-line);border-radius:6px;overflow:hidden;margin-bottom:12px;">
+      <div style="background:var(--grid-head);padding:8px 14px;font-size:13px;font-weight:700;display:flex;justify-content:space-between;align-items:center;">
+        <span>ガントチャート生成表示品マップ 新規</span>
+        <span style="display:flex;gap:6px;">
+          <span class="mock-btn" style="font-size:11px;padding:3px 8px;">一覧へ戻る</span>
+          <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">保存</span>
+          <span class="mock-btn teal" style="font-size:11px;padding:3px 8px;">保存して工程追加</span>
+        </span>
+      </div>
+      <div style="background:var(--card);padding:16px;">
+        <div class="mock-form">
+          <div class="mock-field">
+            <label>ライン <span class="req">*</span></label>
+            <span class="f-select" style="min-width:200px;">L2100 - フロアライン ▾</span>
+          </div>
+          <div class="mock-field">
+            <label>ライン最終品 <span class="req">*</span></label>
+            <span class="f-input" style="min-width:200px;">YD40008720K フロア(55UR)セット</span>
+          </div>
+          <div class="mock-field">
+            <label>工程 <span class="req">*</span></label>
+            <span class="f-select" style="min-width:200px;">4003 フロア検査 ▾</span>
+          </div>
+          <div class="mock-field">
+            <label>表示品（主に連産品） <span class="req">*</span></label>
+            <span class="f-input" style="min-width:200px;">YD40008670K フロア(55UR CAB)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td><strong>ライン</strong>をドロップダウンから選択（社内ラインのみ表示）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td><strong>ライン最終品</strong>を入力（テキスト入力すると候補が表示される。選択したラインの最終品のみ候補に表示）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td><strong>工程</strong>をドロップダウンから選択（選択した最終品のルーティングに含まれる工程のみ候補に表示）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">4</th>
+        <td><strong>表示品</strong>を入力（テキスト入力すると候補が表示される。ガントバーに表示したい品番を選択）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">5</th>
+        <td><strong>「保存」</strong>をクリックして登録 → 一覧へ戻る</td>
+      </tr>
+    </table>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>「保存して工程追加」</strong>を使うと、同じライン・最終品のまま次の工程の登録画面が開きます。1つの最終品に複数工程を登録する際に便利です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">工程を追加する（既存最終品へ）</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      すでに登録済みの最終品に別の工程を追加する場合、2つの方法があります。
+    </div>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr>
+        <th>一覧から追加</th>
+        <td>対象行の<strong>「工程追加」</strong>ボタンをクリック → ライン・最終品が自動入力された新規画面が開く</td>
+      </tr>
+      <tr>
+        <th>編集画面から追加</th>
+        <td>編集画面のヘッダーにある<strong>「同じ最終品で工程追加」</strong>ボタンをクリック</td>
+      </tr>
+    </table>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>どちらの方法でも、工程と表示品だけ選べばOKです。ライン・最終品は自動で引き継がれます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">編集・削除する</div>
+    </div>
+
+    <h4 class="sub">&#9654; 編集</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      一覧の<strong>「編集」</strong>ボタンをクリック → フォーム画面で4項目を修正 → <strong>「保存」</strong>で更新。
+    </div>
+
+    <h4 class="sub">&#9654; 削除</h4>
+    <div class="step-desc" style="margin-bottom:4px;">
+      一覧の<strong style="color:var(--danger);">「削除」</strong>ボタン、または編集画面のヘッダーにある<strong style="color:var(--danger);">「削除」</strong>ボタンをクリック → 確認ダイアログで「OK」→ 削除完了。
+    </div>
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span>削除すると、次回のガント生成からバーの表示品がルーティングのデフォルト出力品に戻ります。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>権限:</strong> production.plan_input の編集権限が必要です。権限がない場合は閲覧モードになります</li>
+      <li><strong>反映タイミング:</strong> 設定変更後、次回の<strong>生産計画保存</strong>（またはガント再生成）から反映されます</li>
+      <li><strong>単品生産ライン:</strong> 共生産でないラインには通常この設定は不要です</li>
+      <li><strong>4項目すべて必須:</strong> ライン・最終品・工程・表示品のいずれかが未選択の場合は保存できません</li>
+      <li><strong>候補の連動:</strong> ライン → 最終品 → 工程 の順に選択すると、それぞれの候補が自動で絞り込まれます</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>
