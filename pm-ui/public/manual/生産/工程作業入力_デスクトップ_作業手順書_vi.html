@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ghi nhận công đoạn (Desktop) Hướng dẫn thao tác</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --prod-bg: #f1faf8;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+    --processing-bg: #c8e6c9;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac;
+    --prod-border: #4db6ac;
+    --prod-bg: #162420;
+    --col-bg: #1a2030;
+    --selected-bg: #1a3028;
+    --processing-bg: #1e3620;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac;
+      --prod-border: #4db6ac;
+      --prod-bg: #162420;
+      --col-bg: #1a2030;
+      --selected-bg: #1a3028;
+      --processing-bg: #1e3620;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--prod-border);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: .02em; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; position: relative; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+
+  /* ---- mockup toolbar ---- */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .mock-toolbar .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 70px; }
+  .mock-toolbar .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; font-size: 12px; color: var(--ink); }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.disabled { opacity: .35; }
+  .mock-btn.action-start { background: #1976d2; border-color: #1976d2; color: #fff; }
+  .mock-btn.action-end { background: #d32f2f; border-color: #d32f2f; color: #fff; }
+  .mock-btn.action-pause { background: #f57c00; border-color: #f57c00; color: #fff; }
+  .mock-btn.action-tempend { background: #7b1fa2; border-color: #7b1fa2; color: #fff; }
+
+  /* ---- 4-column layout mockup ---- */
+  .mock-4col { display: grid; grid-template-columns: 130px 180px 1fr 140px; gap: 0; border: 1px solid var(--grid-line); border-top: none; min-height: 260px; }
+  .mock-col { border-right: 1px solid var(--grid-line); padding: 8px; font-size: 11px; background: var(--col-bg); }
+  .mock-col:last-child { border-right: none; }
+  .mock-col-title { font-size: 10px; font-weight: 700; color: var(--ink2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--grid-line); }
+
+  /* sidebar controls */
+  .mock-section-label { font-size: 10px; font-weight: 700; color: var(--ink2); margin: 6px 0 3px; }
+  .mock-toggle { display: flex; align-items: center; gap: 4px; margin: 2px 0; font-size: 10px; color: var(--ink); }
+  .mock-toggle-track { width: 28px; height: 14px; border-radius: 7px; background: var(--border); position: relative; flex-shrink: 0; }
+  .mock-toggle-track.on { background: var(--step-color); }
+  .mock-toggle-track::after { content: ''; position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #fff; top: 2px; left: 2px; }
+  .mock-toggle-track.on::after { left: auto; right: 2px; }
+  .mock-type-btn { display: inline-block; padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 10px; font-weight: 600; margin: 1px; background: var(--card); color: var(--ink2); }
+  .mock-type-btn.active { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+  .mock-operator-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; font-size: 10px; width: 100%; color: var(--ink); }
+
+  /* product list */
+  .mock-product-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--grid-line); font-size: 10px; }
+  .mock-product-item.selected { background: var(--selected-bg); border-left: 3px solid var(--step-color); }
+  .mock-product-item.processing { background: var(--processing-bg); }
+  .mock-product-code { font-weight: 700; font-size: 11px; color: var(--ink); }
+  .mock-product-qty { font-size: 10px; color: var(--ink2); }
+  .mock-product-qty .plan { color: var(--ink2); }
+  .mock-product-qty .actual { font-weight: 700; }
+  .mock-product-qty .done { color: var(--success); }
+  .mock-product-qty .over { color: var(--danger); }
+
+  /* form area */
+  .mock-form-label { font-size: 10px; font-weight: 700; color: var(--ink2); margin: 6px 0 2px; }
+  .mock-form-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 11px; color: var(--ink); width: 100%; }
+  .mock-stat { display: flex; gap: 8px; margin: 6px 0; font-size: 11px; }
+  .mock-stat-block { text-align: center; }
+  .mock-stat-label { font-size: 9px; color: var(--ink2); display: block; }
+  .mock-stat-value { font-size: 15px; font-weight: 800; color: var(--ink); }
+  .mock-stat-value.plan { color: var(--accent); }
+  .mock-stat-value.remain { color: var(--warn); }
+
+  /* recent records */
+  .mock-recent-item { padding: 4px 6px; border-bottom: 1px solid var(--grid-line); font-size: 10px; }
+  .mock-recent-time { font-weight: 600; color: var(--ink); }
+  .mock-recent-type { font-size: 9px; color: var(--ink2); }
+  .mock-recent-bar { height: 3px; border-radius: 2px; margin-top: 2px; }
+  .mock-recent-bar.green { background: var(--success); }
+  .mock-recent-bar.red { background: var(--danger); }
+  .mock-recent-bar.blue { background: var(--accent); }
+
+  /* ---- toc ---- */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* ---- note ---- */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--step-color); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; letter-spacing: .04em; }
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .overview-mock .om-nav .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* overview section */
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  /* ---- callout ---- */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- highlight ring ---- */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+  .hl-orange::after { border-color: var(--warn); }
+
+  /* ---- action flow ---- */
+  .action-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 16px 0; }
+  .action-flow .af-step { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .action-flow .af-arrow { font-size: 20px; color: var(--ink2); font-weight: 700; }
+  .action-flow .af-label { font-size: 11px; color: var(--ink2); }
+  .action-badge { display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+  .action-start { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .action-end { background: #fce4e4; color: #c62828; border: 1px solid #ef9a9a; }
+  .action-pause { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .action-resume { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .action-tempend { background: #f3e5f5; color: #7b1fa2; border: 1px solid #ce93d8; }
+  :root[data-theme="dark"] .action-start { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .action-end { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+  :root[data-theme="dark"] .action-pause { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .action-resume { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .action-tempend { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .action-start { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .action-end { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+    :root:not([data-theme="light"]) .action-pause { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .action-resume { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .action-tempend { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  }
+
+  /* equipment state badges */
+  .eq-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .eq-running { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .eq-idle { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .eq-setup { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .eq-maintenance { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
+  .eq-breakdown { background: #fce4e4; color: #c62828; border: 1px solid #ef9a9a; }
+  .eq-stopped { background: #f5f5f5; color: #616161; border: 1px solid #bdbdbd; }
+  :root[data-theme="dark"] .eq-running { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .eq-idle { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .eq-setup { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .eq-maintenance { background: #2a2210; color: #ffca28; border-color: #3a3220; }
+  :root[data-theme="dark"] .eq-breakdown { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+  :root[data-theme="dark"] .eq-stopped { background: #282828; color: #9e9e9e; border-color: #383838; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .eq-running { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .eq-idle { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .eq-setup { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .eq-maintenance { background: #2a2210; color: #ffca28; border-color: #3a3220; }
+    :root:not([data-theme="light"]) .eq-breakdown { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+    :root:not([data-theme="light"]) .eq-stopped { background: #282828; color: #9e9e9e; border-color: #383838; }
+  }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 70px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* processing chip */
+  .mock-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 14px; font-size: 11px; font-weight: 700; }
+  .mock-chip.processing { background: var(--success-light); color: var(--success); border: 1px solid var(--success); }
+  .mock-chip.pause { background: var(--warn-light); color: var(--warn); border: 1px solid var(--warn); }
+
+  /* quick qty */
+  .mock-quick { display: flex; gap: 4px; margin-top: 4px; }
+  .mock-quick-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; font-weight: 600; background: var(--card); color: var(--ink); }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+    .action-flow { flex-direction: column; gap: 2px; }
+    .action-flow .af-arrow { transform: rotate(90deg); }
+    .mock-4col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>Ghi nhận công đoạn (Desktop) Hướng dẫn thao tác</h1>
+    <div class="subtitle">Hướng dẫn ghi nhận kết quả sản xuất, trạng thái thiết bị và phế phẩm cho từng dây chuyền/công đoạn</div>
+    <div class="path">
+      Sản xuất <span class="arrow">&#9656;</span> Ghi nhận công đoạn (Desktop)
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>Trình tự các bước</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>Mở màn hình</li>
+      <li><span class="tn">2</span>Chọn dây chuyền và công đoạn</li>
+      <li><span class="tn">3</span>Chọn loại ghi nhận</li>
+      <li><span class="tn">4</span>Chọn sản phẩm</li>
+      <li><span class="tn">5</span>Ghi nhận kết quả sản xuất</li>
+      <li><span class="tn">6</span>Ghi nhận trạng thái thiết bị</li>
+      <li><span class="tn">7</span>Ghi nhận phế phẩm</li>
+      <li><span class="tn">8</span>Lưu ý</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面説明 ===== -->
+  <div class="screen-overview">
+    <h2>Giải thích màn hình <span class="badge">Đọc trước</span></h2>
+
+    <div class="overview-mock" style="position:relative;">
+      <div class="om-nav">
+        <span>DAISO</span>
+        <span>Đơn hàng</span>
+        <span class="om-active">Sản xuất</span>
+        <span>Mua hàng</span>
+        <span>Xuất hàng</span>
+        <span>Tồn kho</span>
+        <span>Chất lượng</span>
+        <span>Danh mục</span>
+        <span>Cài đặt</span>
+      </div>
+      <div style="background:var(--grid-head);padding:8px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <span style="font-weight:800;font-size:14px;color:var(--ink);">Ghi nhận công đoạn</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 8px;">Check sheet</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 8px;">Kiểm tra thiết bị</span>
+        <div class="f-group"><label>Dây chuyền</label><span class="f-select" style="min-width:130px;">L2100 - Line Floor</span></div>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;background:var(--card);border:1px solid var(--border);color:var(--ink2);">Hỗ trợ OFF</span>
+        <div class="f-group"><label>Công đoạn</label><span class="f-select" style="min-width:130px;">4002 - Floor Comp</span></div>
+        <span style="font-size:12px;color:var(--ink);">22/07/2026</span>
+        <span class="mock-chip processing" style="font-size:10px;padding:2px 8px;">Hiện tại: STYD40008720-4002 đang sản xuất</span>
+        <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">1</span>
+      </div>
+      <div class="mock-4col" style="position:relative;">
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Điều khiển</div>
+          <div class="mock-section-label">Loại ghi nhận</div>
+          <div>
+            <span class="mock-type-btn active">Ghi nhận SX</span>
+            <span class="mock-type-btn">Trạng thái TB</span>
+          </div>
+          <div class="mock-section-label" style="margin-top:8px;">Cài đặt hiển thị</div>
+          <div class="mock-toggle"><span>Đã ghi</span><span class="mock-toggle-track"></span></div>
+          <div class="mock-toggle"><span class="mock-toggle-track on"></span><span>Kế hoạch ngày mai</span></div>
+          <div class="mock-toggle"><span>Hiển thị hôm qua</span><span class="mock-toggle-track"></span></div>
+          <div class="mock-toggle"><span class="mock-toggle-track on"></span><span>Chỉ giờ hiện tại</span></div>
+          <div style="margin-top:4px;font-size:10px;color:var(--ink2);text-align:center;">« 08:00 - 09:50 »</div>
+          <div class="mock-section-label" style="margin-top:8px;">Người thao tác</div>
+          <input type="text" class="mock-operator-input" value="王 崇栓" readonly />
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">2</span>
+        </div>
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Danh sách mã SP</div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+            <span style="font-size:10px;color:var(--ink2);">22 SP</span>
+            <input type="text" class="mock-operator-input" placeholder="Tìm mã sản phẩm" style="flex:1;" readonly />
+          </div>
+          <div class="mock-product-item processing">
+            <div><span class="mock-product-code">STYD40008720</span></div>
+            <div class="mock-product-qty"><span class="plan">KH30</span> <span class="actual done">TT30</span></div>
+          </div>
+          <div class="mock-product-item selected">
+            <div><span class="mock-product-code">STYD40008810</span></div>
+            <div class="mock-product-qty"><span class="plan">KH25</span> <span class="actual">TT10</span></div>
+          </div>
+          <div class="mock-product-item">
+            <div><span class="mock-product-code">STYD40009100</span></div>
+            <div class="mock-product-qty"><span class="plan">KH20</span> <span class="actual">TT0</span></div>
+          </div>
+          <div class="mock-product-item">
+            <div><span class="mock-product-code">STYD40009320</span></div>
+            <div class="mock-product-qty"><span class="plan">KH15</span> <span class="actual">TT0</span></div>
+          </div>
+          <div style="text-align:center;margin-top:4px;font-size:10px;color:var(--ink2);">1-4/22 ⟩</div>
+          <div style="text-align:center;margin-top:2px;"><span style="font-size:10px;color:var(--accent);cursor:pointer;">Nhập thủ công</span></div>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">3</span>
+        </div>
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Biểu mẫu ghi nhận</div>
+          <div style="font-weight:800;font-size:14px;color:var(--ink);">STYD40008810</div>
+          <div style="font-size:10px;color:var(--ink2);">Floor Comp Type A</div>
+          <div class="mock-form-label">Thao tác</div>
+          <div style="display:flex;gap:3px;flex-wrap:wrap;">
+            <span class="mock-btn action-end" style="font-size:10px;padding:2px 6px;">Ket thuc</span>
+            <span class="mock-btn action-pause" style="font-size:10px;padding:2px 6px;">Tam dung</span>
+            <span class="mock-btn action-tempend" style="font-size:10px;padding:2px 6px;">Ket thuc tam thoi</span>
+          </div>
+          <div class="mock-stat">
+            <div class="mock-stat-block"><span class="mock-stat-label">KH</span><span class="mock-stat-value plan">25</span></div>
+            <div class="mock-stat-block"><span class="mock-stat-label">TT</span><span class="mock-stat-value">10</span></div>
+            <div class="mock-stat-block"><span class="mock-stat-label">Còn lại</span><span class="mock-stat-value remain">15</span></div>
+          </div>
+          <div class="mock-form-label">Số lượng</div>
+          <input type="text" class="mock-form-input" value="15" readonly style="max-width:80px;" />
+          <div class="mock-quick">
+            <span class="mock-quick-btn">15</span>
+            <span class="mock-quick-btn">25</span>
+          </div>
+          <div class="mock-form-label">Ghi chú</div>
+          <input type="text" class="mock-form-input" placeholder="Nhập ghi chú" readonly />
+          <div style="margin-top:8px;display:flex;gap:6px;">
+            <span class="mock-btn teal" style="font-size:11px;padding:3px 12px;">Ghi nhận</span>
+            <span class="mock-btn" style="font-size:11px;padding:3px 8px;">Hủy</span>
+          </div>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">4</span>
+        </div>
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Gần đây</div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">09:32</span> <span class="mock-recent-type">Xong 30 cái</span></div>
+            <div style="font-size:9px;color:var(--ink2);">Ghi nhận SX STYD40008720</div>
+            <div class="mock-recent-bar green"></div>
+          </div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">08:45</span> <span class="mock-recent-type">Bat dau</span></div>
+            <div style="font-size:9px;color:var(--ink2);">Ghi nhận SX STYD40008720</div>
+            <div class="mock-recent-bar blue"></div>
+          </div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">08:10</span> <span class="mock-recent-type">Đang chạy</span></div>
+            <div style="font-size:9px;color:var(--ink2);">Trạng thái TB</div>
+            <div class="mock-recent-bar green"></div>
+          </div>
+          <span class="om-anno" style="top:-8px;right:4px;">5</span>
+        </div>
+      </div>
+    </div>
+
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>Phần đầu</strong> — Hiển thị dây chuyền, công đoạn, ngày tháng và mã sản phẩm đang sản xuất. Nút đi đến "Check sheet" và "Kiểm tra thiết bị" cũng ở đây</span></li>
+      <li><span class="anno-num">2</span><span><strong>Điều khiển (cột trái)</strong> — Chuyển loại ghi nhận (Ghi nhận SX / Trạng thái TB), bật/tắt bộ lọc hiển thị, điều hướng khung giờ, và nhập tên người thao tác</span></li>
+      <li><span class="anno-num">3</span><span><strong>Danh sách mã SP (cột 2)</strong> — Hiển thị danh sách sản phẩm theo kế hoạch hôm nay. Số lượng KH và TT hiển thị bên cạnh. Sản phẩm đang sản xuất có nền xanh lá, sản phẩm được chọn có nền xanh ngọc</span></li>
+      <li><span class="anno-num">4</span><span><strong>Biểu mẫu ghi nhận (cột 3)</strong> — Nhập thông tin ghi nhận cho mã sản phẩm đã chọn. Thứ tự: Chọn thao tác → Nhập số lượng → Ghi nhận</span></li>
+      <li><span class="anno-num">5</span><span><strong>Gần đây (cột phải)</strong> — Hiển thị các bản ghi gần đây của công đoạn này theo dòng thời gian. Thanh màu thể hiện loại ghi nhận</span></li>
+    </ul>
+
+    <div class="overview-section">
+      <h3>Luồng thao tác ghi nhận sản xuất</h3>
+      <div class="action-flow">
+        <div class="af-step">
+          <span class="action-badge action-start">Bat dau</span>
+          <span class="af-label">Bắt đầu sản xuất</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-end">Ket thuc</span>
+          <span class="af-label">Nhập số lượng</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">Trường hợp tạm dừng giữa chừng</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step"><span class="action-badge action-start">Bat dau</span></div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-pause">Tam dung</span>
+          <span class="af-label">Chọn lý do+SL</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-resume">Tiep tuc</span>
+          <span class="af-label">Quay lại làm việc</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step"><span class="action-badge action-end">Ket thuc</span></div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">Trường hợp không tiếp tục trong ngày</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step"><span class="action-badge action-start">Bat dau</span></div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-tempend">Ket thuc tam thoi</span>
+          <span class="af-label">Chọn lý do</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">Trường hợp không thể tiếp tục từ trạng thái tạm dừng</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-pause">Tam dung</span>
+          <span class="af-label">Đang tạm dừng</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-tempend">Ket thuc tam thoi</span>
+          <span class="af-label">Reset cưỡng bức</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="overview-section">
+      <h3>Loại trạng thái thiết bị</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="eq-badge eq-running">Đang chạy</span><span class="li-desc">Hoạt động bình thường</span></div>
+        <div class="legend-item"><span class="eq-badge eq-idle">Chờ</span><span class="li-desc">Đang chờ phôi, v.v.</span></div>
+        <div class="legend-item"><span class="eq-badge eq-setup">Đang setup</span><span class="li-desc">Đang đổi cài đặt</span></div>
+        <div class="legend-item"><span class="eq-badge eq-maintenance">Bảo trì</span><span class="li-desc">Bảo trì định kỳ</span></div>
+        <div class="legend-item"><span class="eq-badge eq-breakdown">Hỏng</span><span class="li-desc">Sự cố thiết bị</span></div>
+        <div class="legend-item"><span class="eq-badge eq-stopped">Dừng</span><span class="li-desc">Dừng theo kế hoạch</span></div>
+      </div>
+    </div>
+
+    <div class="overview-section">
+      <h3>Bộ lọc hiển thị</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">Đã ghi</span><span class="li-desc">Khi bật, hiển thị cả mã SP có số lượng TT ≧ số lượng KH</span></div>
+        <div class="legend-item"><span class="li-label">KH ngày mai</span><span class="li-desc">Hiển thị thêm mã SP theo kế hoạch ngày mai</span></div>
+        <div class="legend-item"><span class="li-label">Hiển thị hôm qua</span><span class="li-desc">Hiển thị thêm mã SP theo kế hoạch hôm qua</span></div>
+        <div class="legend-item"><span class="li-label">Chỉ giờ hiện tại</span><span class="li-desc">Chỉ hiển thị mã SP có kế hoạch trong khung giờ hiện tại</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">Mở màn hình</div>
+    </div>
+    <div class="step-desc">
+      Nhấn<strong>"Sản xuất"</strong>trên thanh điều hướng phía trên, rồi chọn<strong>"Ghi nhận công đoạn (Desktop)"</strong>từ menu.
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group" style="position:relative;">
+        <span style="font-weight:700;">DAISO</span>
+        <span>Đơn hàng</span>
+        <span class="hl hl-green" style="padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.18);font-weight:700;">Sản xuất</span>
+        <span>Mua hàng</span>
+        <span>Xuất hàng</span>
+        <span>Tồn kho</span>
+        <span>Chất lượng</span>
+        <span>Danh mục</span>
+        <span>Cài đặt</span>
+      </div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>Chọn "Ghi nhận công đoạn (Desktop)" từ menu. Màn hình này có bố cục khác với phiên bản tablet.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">Chọn dây chuyền và công đoạn</div>
+    </div>
+    <div class="step-desc">
+      Chọn dây chuyền từ dropdown<strong>"Dây chuyền"</strong>ở phần đầu, sau đó chọn<strong>"Công đoạn"</strong>.<br>
+      Khi chọn dây chuyền, chỉ hiển thị các công đoạn thuộc dây chuyền đó. Khi chọn công đoạn, danh sách mã SP theo kế hoạch hôm nay sẽ được tải tự động.
+    </div>
+    <div class="mock-toolbar">
+      <span style="font-weight:800;font-size:13px;">Ghi nhận công đoạn</span>
+      <div class="f-group hl" style="padding:2px;"><label>Dây chuyền</label><span class="f-select" style="min-width:130px;">L2100 - Line Floor</span></div>
+      <div class="f-group hl hl-blue" style="padding:2px;"><label>Công đoạn</label><span class="f-select" style="min-width:130px;">4002 - Floor Comp</span></div>
+      <span style="font-size:12px;">22/07/2026</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Chế độ hỗ trợ:</strong> Nếu muốn làm việc ở dây chuyền khác, nhấn nút "Hỗ trợ OFF" để chuyển thành "Hỗ trợ ON", tất cả dây chuyền sẽ được hiển thị.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">Chọn loại ghi nhận</div>
+    </div>
+    <div class="step-desc">
+      Chọn loại ghi nhận từ<strong>"Loại ghi nhận"</strong>ở cột bên trái.
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="mock-type-btn active" style="font-size:13px;padding:6px 14px;">Ghi nhận SX</span>
+      <span class="mock-type-btn" style="font-size:13px;padding:6px 14px;">Trạng thái TB</span>
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">Ghi nhận SX</span><span class="li-desc">Ghi nhận bắt đầu, kết thúc, tạm dừng sản xuất và nhập số lượng</span></div>
+      <div class="legend-item"><span class="li-label">Trạng thái TB</span><span class="li-desc">Ghi nhận trạng thái hoạt động thiết bị (Đang chạy, Hỏng, Đang setup, v.v.)</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>Nếu router cho phép ghi nhận phế phẩm (SCRAP), nút "Phế phẩm" cũng sẽ được hiển thị.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">Chọn sản phẩm</div>
+    </div>
+    <div class="step-desc">
+      Nhấn chọn sản phẩm cần thao tác từ<strong>Danh sách mã SP</strong>ở cột thứ 2.
+    </div>
+    <div style="border:1px solid var(--grid-line);border-radius:6px;overflow:hidden;max-width:300px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--grid-head);font-size:11px;">
+        <span style="color:var(--ink2);">22 SP</span>
+        <input type="text" class="mock-operator-input" placeholder="Tìm mã sản phẩm" style="flex:1;" readonly />
+      </div>
+      <div class="mock-product-item processing">
+        <div><span class="mock-product-code">STYD40008720</span></div>
+        <div class="mock-product-qty"><span class="plan">KH30</span> <span class="actual done">TT30</span></div>
+      </div>
+      <div class="mock-product-item selected">
+        <div><span class="mock-product-code">STYD40008810</span></div>
+        <div class="mock-product-qty"><span class="plan">KH25</span> <span class="actual">TT10</span></div>
+      </div>
+      <div class="mock-product-item">
+        <div><span class="mock-product-code">STYD40009100</span></div>
+        <div class="mock-product-qty"><span class="plan">KH20</span> <span class="actual">TT0</span></div>
+      </div>
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">Nền xanh lá</span><span class="li-desc">Mã SP đang sản xuất</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">Nền xanh ngọc</span><span class="li-desc">Mã SP đang được chọn</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">KHXX</span><span class="li-desc">Số lượng kế hoạch</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">TTXX</span><span class="li-desc">Số lượng thực tế (xanh=hoàn thành, đỏ=vượt)</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Chế độ nhập thủ công:</strong> Nhấn "Nhập thủ công" ở cuối danh sách để nhập mã SP không có trong kế hoạch. Nhấn lần nữa để "Quay lại tìm kiếm" trở về chế độ bình thường.</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Chuyển trang:</strong> Nếu có nhiều mã SP, dùng nút ⟨⟨ ⟨ ⟩ ⟩⟩ ở cuối danh sách để chuyển trang (chỉ hiển thị khi "Chỉ giờ hiện tại" đang tắt).</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">Ghi nhận kết quả sản xuất</div>
+    </div>
+    <div class="step-desc">
+      Bước này dùng khi loại ghi nhận là<strong>"Ghi nhận SX"</strong>. Khi chọn mã SP, các nút thao tác sẽ hiển thị trong biểu mẫu ghi nhận.
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:16px 0 10px;color:var(--ink);">&#9654; Bắt đầu sản xuất</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Khi chọn mã SP chưa bắt đầu, thao tác<strong>"Bat dau"</strong>sẽ được tự động chọn. Nhấn<strong>"Ghi nhận"</strong>là xong.
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;">
+      <span class="mock-btn action-start" style="font-size:12px;padding:3px 10px;opacity:.7;">Bat dau</span>
+      <span style="font-size:12px;color:var(--ink2);">← Được chọn tự động</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>Sau khi ghi nhận bắt đầu, phần đầu sẽ hiển thị "Hiện tại: ○○○ đang sản xuất".</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; Kết thúc sản xuất</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Khi chọn mã SP đã bắt đầu, sẽ hiển thị các thao tác<strong>"Ket thuc" "Tam dung" "Ket thuc tam thoi"</strong>.<br>
+      Chọn<strong>"Ket thuc"</strong>, nhập số lượng, rồi nhấn<strong>"Ghi nhận"</strong>.
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:8px;">
+      <span class="mock-btn action-end" style="font-size:12px;padding:3px 10px;">Ket thuc</span>
+      <span class="mock-btn action-pause" style="font-size:12px;padding:3px 10px;opacity:.5;">Tam dung</span>
+      <span class="mock-btn action-tempend" style="font-size:12px;padding:3px 10px;opacity:.5;">Ket thuc tam thoi</span>
+    </div>
+    <div class="mock-stat">
+      <div class="mock-stat-block"><span class="mock-stat-label">KH</span><span class="mock-stat-value plan">25</span></div>
+      <div class="mock-stat-block"><span class="mock-stat-label">TT</span><span class="mock-stat-value">10</span></div>
+      <div class="mock-stat-block"><span class="mock-stat-label">Còn lại</span><span class="mock-stat-value remain">15</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Số lượng nhanh:</strong> Nút để nhập số lượng còn lại chỉ bằng một lần nhấn.</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; Tạm dừng (sẽ tiếp tục lại)</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Nếu muốn tạm dừng công việc, chọn<strong>"Tam dung"</strong>.<br>
+      Nhập<strong>số lượng</strong> (số lượng đã sản xuất đến thời điểm dừng) và chọn<strong>lý do tạm dừng</strong> (sự cố thiết bị, vấn đề chất lượng, thiếu linh kiện, v.v.).
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>Sau khi tạm dừng, có thể quay lại làm việc bằng<strong>"Tiep tuc"</strong>. Sau khi tiếp tục, có thể chọn "Ket thuc" hoặc "Tam dung" lần nữa.</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; Kết thúc tạm thời (không tiếp tục trong ngày)</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Nếu không tiếp tục trong ngày hôm nay, chọn<strong>"Ket thuc tam thoi"</strong>.<br>
+      Chọn<strong>lý do kết thúc tạm thời</strong> (thiết bị không sửa được hôm nay, chuyển sang sản phẩm khác, v.v.).<br>
+      Nếu chọn "Khác", cần nhập nội dung vào ô ghi chú.
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>Reset trạng thái tạm dừng:</strong> Nếu không thể tiếp tục từ trạng thái tạm dừng, cũng có thể dùng "Ket thuc tam thoi" để cưỡng bức reset trạng thái. Khi chọn mã SP đang ở trạng thái tạm dừng, ngoài "Tiep tuc" và "Huy", còn có thể dùng "Ket thuc tam thoi".</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">Ghi nhận trạng thái thiết bị</div>
+    </div>
+    <div class="step-desc">
+      Chuyển loại ghi nhận sang<strong>"Trạng thái TB"</strong>. Ghi nhận trạng thái thiết bị mà không cần chọn mã SP.
+    </div>
+    <div style="margin-bottom:12px;">
+      <div class="mock-form-label" style="font-size:13px;margin-bottom:6px;">Chọn trạng thái thiết bị</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span class="eq-badge eq-running" style="padding:4px 14px;font-size:13px;cursor:default;">Đang chạy</span>
+        <span class="eq-badge eq-idle" style="padding:4px 14px;font-size:13px;cursor:default;">Chờ</span>
+        <span class="eq-badge eq-setup" style="padding:4px 14px;font-size:13px;cursor:default;">Đang setup</span>
+        <span class="eq-badge eq-maintenance" style="padding:4px 14px;font-size:13px;cursor:default;">Bảo trì</span>
+        <span class="eq-badge eq-breakdown" style="padding:4px 14px;font-size:13px;cursor:default;">Hỏng</span>
+        <span class="eq-badge eq-stopped" style="padding:4px 14px;font-size:13px;cursor:default;">Dừng</span>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      Chọn trạng thái, nhập ghi chú nếu cần, rồi nhấn<strong>"Ghi nhận"</strong>.
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>Ghi nhận trạng thái thiết bị không liên quan đến mã SP. Nó được ghi nhận là trạng thái thiết bị của toàn bộ công đoạn.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">Ghi nhận phế phẩm</div>
+    </div>
+    <div class="step-desc">
+      Nếu nút<strong>"Phế phẩm"</strong>hiển thị trong loại ghi nhận, có thể ghi nhận sản phẩm lỗi.
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Chọn mã SP, nhập các mục sau, rồi nhấn<strong>"Ghi nhận"</strong>.
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">Số lượng</span><span class="li-desc">Nhập số lượng phế phẩm (bắt buộc)</span></div>
+      <div class="legend-item"><span class="li-label">Quyết định</span><span class="li-desc">Chọn xử lý như bỏ, sửa chữa, v.v. (bắt buộc)</span></div>
+      <div class="legend-item"><span class="li-label">Đã ghi SX</span><span class="li-desc">Chọn xem phế phẩm này đã tính vào sản lượng chưa (bắt buộc)</span></div>
+      <div class="legend-item"><span class="li-label">Lý do</span><span class="li-desc">Chọn nguyên nhân phế phẩm (bắt buộc)</span></div>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>Nếu lý do là "Khác", cần nhập chi tiết lý do.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="note">
+    <h2>&#9888; Lưu ý</h2>
+    <ul>
+      <li><strong>Ngày làm việc:</strong> Phía dưới biểu mẫu có "Ngày làm việc", thường được tự động đặt là hôm nay. Nếu muốn ghi nhận cho ngày khác (ví dụ: quên ghi), hãy đổi ngày làm việc và chọn lý do thay đổi.</li>
+      <li><strong>Sửa SL kế hoạch:</strong> Nhấn vào số lượng KH trong phần tóm tắt kế hoạch để sửa trực tiếp (bao gồm giờ bắt đầu/kết thúc). Thay đổi sẽ được lưu trong nhật ký thay đổi kế hoạch.</li>
+      <li><strong>Thông báo sản phẩm đi kèm:</strong> Nếu BOM có sản phẩm đi kèm, danh sách sản phẩm đi kèm sẽ hiển thị trong biểu mẫu. Khi ghi nhận sản phẩm chính, số lượng TT của sản phẩm đi kèm sẽ tự động được ghi nhận.</li>
+      <li><strong>Ảnh sản phẩm:</strong> Bên phải tên mã SP có biểu tượng camera, có thể chụp và lưu ảnh sản phẩm. Biểu tượng mắt để xem ảnh đã lưu.</li>
+      <li><strong>Bộ lọc chỉ giờ hiện tại:</strong> Khi bật, chỉ hiển thị mã SP có kế hoạch trong khung giờ hiện tại. Dùng nút "« »" để chuyển đến khung giờ trước/sau.</li>
+      <li><strong>Giờ đổi ngày:</strong> Giờ đổi ngày là 8:00 sáng. Trước 7:59 được tính là ngày hôm trước.</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

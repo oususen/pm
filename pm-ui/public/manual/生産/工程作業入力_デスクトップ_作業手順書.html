@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工程作業記録（デスクトップ） 作業手順書</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --prod-bg: #f1faf8;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+    --processing-bg: #c8e6c9;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac;
+    --prod-border: #4db6ac;
+    --prod-bg: #162420;
+    --col-bg: #1a2030;
+    --selected-bg: #1a3028;
+    --processing-bg: #1e3620;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac;
+      --prod-border: #4db6ac;
+      --prod-bg: #162420;
+      --col-bg: #1a2030;
+      --selected-bg: #1a3028;
+      --processing-bg: #1e3620;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--prod-border);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: .02em; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; position: relative; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+
+  /* ---- mockup toolbar ---- */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .mock-toolbar .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 70px; }
+  .mock-toolbar .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; font-size: 12px; color: var(--ink); }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.disabled { opacity: .35; }
+  .mock-btn.action-start { background: #1976d2; border-color: #1976d2; color: #fff; }
+  .mock-btn.action-end { background: #d32f2f; border-color: #d32f2f; color: #fff; }
+  .mock-btn.action-pause { background: #f57c00; border-color: #f57c00; color: #fff; }
+  .mock-btn.action-tempend { background: #7b1fa2; border-color: #7b1fa2; color: #fff; }
+
+  /* ---- 4-column layout mockup ---- */
+  .mock-4col { display: grid; grid-template-columns: 130px 180px 1fr 140px; gap: 0; border: 1px solid var(--grid-line); border-top: none; min-height: 260px; }
+  .mock-col { border-right: 1px solid var(--grid-line); padding: 8px; font-size: 11px; background: var(--col-bg); }
+  .mock-col:last-child { border-right: none; }
+  .mock-col-title { font-size: 10px; font-weight: 700; color: var(--ink2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--grid-line); }
+
+  /* sidebar controls */
+  .mock-section-label { font-size: 10px; font-weight: 700; color: var(--ink2); margin: 6px 0 3px; }
+  .mock-toggle { display: flex; align-items: center; gap: 4px; margin: 2px 0; font-size: 10px; color: var(--ink); }
+  .mock-toggle-track { width: 28px; height: 14px; border-radius: 7px; background: var(--border); position: relative; flex-shrink: 0; }
+  .mock-toggle-track.on { background: var(--step-color); }
+  .mock-toggle-track::after { content: ''; position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #fff; top: 2px; left: 2px; }
+  .mock-toggle-track.on::after { left: auto; right: 2px; }
+  .mock-type-btn { display: inline-block; padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 10px; font-weight: 600; margin: 1px; background: var(--card); color: var(--ink2); }
+  .mock-type-btn.active { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+  .mock-operator-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; font-size: 10px; width: 100%; color: var(--ink); }
+
+  /* product list */
+  .mock-product-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--grid-line); font-size: 10px; }
+  .mock-product-item.selected { background: var(--selected-bg); border-left: 3px solid var(--step-color); }
+  .mock-product-item.processing { background: var(--processing-bg); }
+  .mock-product-code { font-weight: 700; font-size: 11px; color: var(--ink); }
+  .mock-product-qty { font-size: 10px; color: var(--ink2); }
+  .mock-product-qty .plan { color: var(--ink2); }
+  .mock-product-qty .actual { font-weight: 700; }
+  .mock-product-qty .done { color: var(--success); }
+  .mock-product-qty .over { color: var(--danger); }
+
+  /* form area */
+  .mock-form-label { font-size: 10px; font-weight: 700; color: var(--ink2); margin: 6px 0 2px; }
+  .mock-form-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 11px; color: var(--ink); width: 100%; }
+  .mock-stat { display: flex; gap: 8px; margin: 6px 0; font-size: 11px; }
+  .mock-stat-block { text-align: center; }
+  .mock-stat-label { font-size: 9px; color: var(--ink2); display: block; }
+  .mock-stat-value { font-size: 15px; font-weight: 800; color: var(--ink); }
+  .mock-stat-value.plan { color: var(--accent); }
+  .mock-stat-value.remain { color: var(--warn); }
+
+  /* recent records */
+  .mock-recent-item { padding: 4px 6px; border-bottom: 1px solid var(--grid-line); font-size: 10px; }
+  .mock-recent-time { font-weight: 600; color: var(--ink); }
+  .mock-recent-type { font-size: 9px; color: var(--ink2); }
+  .mock-recent-bar { height: 3px; border-radius: 2px; margin-top: 2px; }
+  .mock-recent-bar.green { background: var(--success); }
+  .mock-recent-bar.red { background: var(--danger); }
+  .mock-recent-bar.blue { background: var(--accent); }
+
+  /* ---- toc ---- */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* ---- note ---- */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--step-color); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; letter-spacing: .04em; }
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .overview-mock .om-nav .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* overview section */
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  /* ---- callout ---- */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- highlight ring ---- */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+  .hl-orange::after { border-color: var(--warn); }
+
+  /* ---- action flow ---- */
+  .action-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 16px 0; }
+  .action-flow .af-step { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .action-flow .af-arrow { font-size: 20px; color: var(--ink2); font-weight: 700; }
+  .action-flow .af-label { font-size: 11px; color: var(--ink2); }
+  .action-badge { display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+  .action-start { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .action-end { background: #fce4e4; color: #c62828; border: 1px solid #ef9a9a; }
+  .action-pause { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .action-resume { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .action-tempend { background: #f3e5f5; color: #7b1fa2; border: 1px solid #ce93d8; }
+  :root[data-theme="dark"] .action-start { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .action-end { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+  :root[data-theme="dark"] .action-pause { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .action-resume { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .action-tempend { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .action-start { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .action-end { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+    :root:not([data-theme="light"]) .action-pause { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .action-resume { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .action-tempend { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  }
+
+  /* equipment state badges */
+  .eq-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .eq-running { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .eq-idle { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .eq-setup { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .eq-maintenance { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
+  .eq-breakdown { background: #fce4e4; color: #c62828; border: 1px solid #ef9a9a; }
+  .eq-stopped { background: #f5f5f5; color: #616161; border: 1px solid #bdbdbd; }
+  :root[data-theme="dark"] .eq-running { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .eq-idle { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .eq-setup { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .eq-maintenance { background: #2a2210; color: #ffca28; border-color: #3a3220; }
+  :root[data-theme="dark"] .eq-breakdown { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+  :root[data-theme="dark"] .eq-stopped { background: #282828; color: #9e9e9e; border-color: #383838; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .eq-running { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .eq-idle { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .eq-setup { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .eq-maintenance { background: #2a2210; color: #ffca28; border-color: #3a3220; }
+    :root:not([data-theme="light"]) .eq-breakdown { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+    :root:not([data-theme="light"]) .eq-stopped { background: #282828; color: #9e9e9e; border-color: #383838; }
+  }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 70px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* processing chip */
+  .mock-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 14px; font-size: 11px; font-weight: 700; }
+  .mock-chip.processing { background: var(--success-light); color: var(--success); border: 1px solid var(--success); }
+  .mock-chip.pause { background: var(--warn-light); color: var(--warn); border: 1px solid var(--warn); }
+
+  /* quick qty */
+  .mock-quick { display: flex; gap: 4px; margin-top: 4px; }
+  .mock-quick-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; font-weight: 600; background: var(--card); color: var(--ink); }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+    .action-flow { flex-direction: column; gap: 2px; }
+    .action-flow .af-arrow { transform: rotate(90deg); }
+    .mock-4col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>工程作業記録（デスクトップ） 作業手順書</h1>
+    <div class="subtitle">ライン・工程ごとの生産記録・設備状態・仕損を登録する操作手順</div>
+    <div class="path">
+      生産管理 <span class="arrow">&#9656;</span> 工程作業記録（デスクトップ）
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>手順の流れ</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>ラインと工程を選択する</li>
+      <li><span class="tn">3</span>記録種別を選ぶ</li>
+      <li><span class="tn">4</span>製品を選択する</li>
+      <li><span class="tn">5</span>生産記録を登録する</li>
+      <li><span class="tn">6</span>設備状態を記録する</li>
+      <li><span class="tn">7</span>仕損を記録する</li>
+      <li><span class="tn">8</span>注意事項</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面説明 ===== -->
+  <div class="screen-overview">
+    <h2>画面説明 <span class="badge">まずここを読む</span></h2>
+
+    <!-- 画面全体モック -->
+    <div class="overview-mock" style="position:relative;">
+      <!-- ナビゲーション -->
+      <div class="om-nav">
+        <span>DAISO</span>
+        <span>受注</span>
+        <span class="om-active">生産</span>
+        <span>仕入</span>
+        <span>出荷</span>
+        <span>在庫</span>
+        <span>品質</span>
+        <span>マスタ</span>
+        <span>設定</span>
+      </div>
+      <!-- ヘッダー -->
+      <div style="background:var(--grid-head);padding:8px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <span style="font-weight:800;font-size:14px;color:var(--ink);">工程作業記録</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 8px;">チェックシート</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 8px;">設備点検</span>
+        <div class="f-group"><label>ライン</label><span class="f-select" style="min-width:130px;">L2100 - フロアライン</span></div>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;background:var(--card);border:1px solid var(--border);color:var(--ink2);">応援OFF</span>
+        <div class="f-group"><label>工程</label><span class="f-select" style="min-width:130px;">4002 - フロアコンプ</span></div>
+        <span style="font-size:12px;color:var(--ink);">2026年7月22日</span>
+        <span class="mock-chip processing" style="font-size:10px;padding:2px 8px;">現在: STYD40008720-4002 加工中</span>
+        <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">1</span>
+      </div>
+      <!-- 4列レイアウト -->
+      <div class="mock-4col" style="position:relative;">
+        <!-- 列①: コントロール -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">コントロール</div>
+          <div class="mock-section-label">記録種別</div>
+          <div>
+            <span class="mock-type-btn active">生産記録</span>
+            <span class="mock-type-btn">設備状態</span>
+          </div>
+          <div class="mock-section-label" style="margin-top:8px;">表示設定</div>
+          <div class="mock-toggle"><span>加工済</span><span class="mock-toggle-track"></span></div>
+          <div class="mock-toggle"><span class="mock-toggle-track on"></span><span>明日計画</span></div>
+          <div class="mock-toggle"><span>前日表示</span><span class="mock-toggle-track"></span></div>
+          <div class="mock-toggle"><span class="mock-toggle-track on"></span><span>現在時刻のみ</span></div>
+          <div style="margin-top:4px;font-size:10px;color:var(--ink2);text-align:center;">« 08:00 - 09:50 »</div>
+          <div class="mock-section-label" style="margin-top:8px;">作業者</div>
+          <input type="text" class="mock-operator-input" value="王 崇栓" readonly />
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">2</span>
+        </div>
+        <!-- 列②: 製品リスト -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">品番リスト</div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+            <span style="font-size:10px;color:var(--ink2);">22件</span>
+            <input type="text" class="mock-operator-input" placeholder="品番検索" style="flex:1;" readonly />
+          </div>
+          <div class="mock-product-item processing">
+            <div><span class="mock-product-code">STYD40008720</span></div>
+            <div class="mock-product-qty"><span class="plan">計30</span> <span class="actual done">実30</span></div>
+          </div>
+          <div class="mock-product-item selected">
+            <div><span class="mock-product-code">STYD40008810</span></div>
+            <div class="mock-product-qty"><span class="plan">計25</span> <span class="actual">実10</span></div>
+          </div>
+          <div class="mock-product-item">
+            <div><span class="mock-product-code">STYD40009100</span></div>
+            <div class="mock-product-qty"><span class="plan">計20</span> <span class="actual">実0</span></div>
+          </div>
+          <div class="mock-product-item">
+            <div><span class="mock-product-code">STYD40009320</span></div>
+            <div class="mock-product-qty"><span class="plan">計15</span> <span class="actual">実0</span></div>
+          </div>
+          <div style="text-align:center;margin-top:4px;font-size:10px;color:var(--ink2);">1-4/22 ⟩</div>
+          <div style="text-align:center;margin-top:2px;"><span style="font-size:10px;color:var(--accent);cursor:pointer;">手入力</span></div>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">3</span>
+        </div>
+        <!-- 列③: 登録フォーム -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">登録フォーム</div>
+          <div style="font-weight:800;font-size:14px;color:var(--ink);">STYD40008810</div>
+          <div style="font-size:10px;color:var(--ink2);">フロアコンプ Aタイプ</div>
+          <div class="mock-form-label">アクション</div>
+          <div style="display:flex;gap:3px;flex-wrap:wrap;">
+            <span class="mock-btn action-end" style="font-size:10px;padding:2px 6px;">終了</span>
+            <span class="mock-btn action-pause" style="font-size:10px;padding:2px 6px;">中断</span>
+            <span class="mock-btn action-tempend" style="font-size:10px;padding:2px 6px;">一時終了</span>
+          </div>
+          <div class="mock-stat">
+            <div class="mock-stat-block"><span class="mock-stat-label">計画</span><span class="mock-stat-value plan">25</span></div>
+            <div class="mock-stat-block"><span class="mock-stat-label">実績</span><span class="mock-stat-value">10</span></div>
+            <div class="mock-stat-block"><span class="mock-stat-label">残</span><span class="mock-stat-value remain">15</span></div>
+          </div>
+          <div class="mock-form-label">数量</div>
+          <input type="text" class="mock-form-input" value="15" readonly style="max-width:80px;" />
+          <div class="mock-quick">
+            <span class="mock-quick-btn">15</span>
+            <span class="mock-quick-btn">25</span>
+          </div>
+          <div class="mock-form-label">備考</div>
+          <input type="text" class="mock-form-input" placeholder="備考を入力" readonly />
+          <div style="margin-top:8px;display:flex;gap:6px;">
+            <span class="mock-btn teal" style="font-size:11px;padding:3px 12px;">記録を登録</span>
+            <span class="mock-btn" style="font-size:11px;padding:3px 8px;">キャンセル</span>
+          </div>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">4</span>
+        </div>
+        <!-- 列④: 最近の記録 -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">最近の記録</div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">09:32</span> <span class="mock-recent-type">完了 30個</span></div>
+            <div style="font-size:9px;color:var(--ink2);">生産記録 STYD40008720</div>
+            <div class="mock-recent-bar green"></div>
+          </div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">08:45</span> <span class="mock-recent-type">開始</span></div>
+            <div style="font-size:9px;color:var(--ink2);">生産記録 STYD40008720</div>
+            <div class="mock-recent-bar blue"></div>
+          </div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">08:10</span> <span class="mock-recent-type">稼働</span></div>
+            <div style="font-size:9px;color:var(--ink2);">設備状態</div>
+            <div class="mock-recent-bar green"></div>
+          </div>
+          <span class="om-anno" style="top:-8px;right:4px;">5</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 番号付き説明 -->
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>ヘッダー</strong> — ライン・工程・日付・現在加工中の品番が表示されます。「チェックシート」「設備点検」への移動ボタンもここにあります。</span></li>
+      <li><span class="anno-num">2</span><span><strong>コントロール（左列）</strong> — 記録種別（生産記録 / 設備状態）の切替、表示フィルタの切替、時間帯ナビ、作業者名を設定します。</span></li>
+      <li><span class="anno-num">3</span><span><strong>品番リスト（左から2列目）</strong> — 今日の計画品番が一覧表示されます。計画数と実績数が並び、加工中は緑背景、選択中は青緑ハイライトで表示されます。</span></li>
+      <li><span class="anno-num">4</span><span><strong>登録フォーム（左から3列目）</strong> — 選択した品番の記録を入力します。アクション選択→数量入力→登録の流れです。</span></li>
+      <li><span class="anno-num">5</span><span><strong>最近の記録（右列）</strong> — この工程の直近の記録がタイムラインで表示されます。色付きバーで記録種別がわかります。</span></li>
+    </ul>
+
+    <!-- アクションフロー -->
+    <div class="overview-section">
+      <h3>生産記録のアクションフロー</h3>
+      <div class="action-flow">
+        <div class="af-step">
+          <span class="action-badge action-start">開始</span>
+          <span class="af-label">加工開始</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-end">終了</span>
+          <span class="af-label">数量入力</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">途中で止める場合</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-start">開始</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-pause">中断</span>
+          <span class="af-label">理由選択+数量</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-resume">再開</span>
+          <span class="af-label">作業再開</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-end">終了</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">本日中に再開しない場合</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-start">開始</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-tempend">一時終了</span>
+          <span class="af-label">理由選択</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">中断状態から再開できない場合</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-pause">中断</span>
+          <span class="af-label">中断中</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-tempend">一時終了</span>
+          <span class="af-label">状態を強制リセット</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 設備状態一覧 -->
+    <div class="overview-section">
+      <h3>設備状態の種類</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="eq-badge eq-running">稼働</span><span class="li-desc">通常運転中</span></div>
+        <div class="legend-item"><span class="eq-badge eq-idle">待機</span><span class="li-desc">品待ちなど</span></div>
+        <div class="legend-item"><span class="eq-badge eq-setup">段取</span><span class="li-desc">段取替え中</span></div>
+        <div class="legend-item"><span class="eq-badge eq-maintenance">保守</span><span class="li-desc">定期メンテナンス</span></div>
+        <div class="legend-item"><span class="eq-badge eq-breakdown">故障</span><span class="li-desc">設備トラブル発生</span></div>
+        <div class="legend-item"><span class="eq-badge eq-stopped">停止</span><span class="li-desc">計画停止</span></div>
+      </div>
+    </div>
+
+    <!-- 表示設定 -->
+    <div class="overview-section">
+      <h3>表示設定フィルタ</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">加工済</span><span class="li-desc">ONにすると実績数≧計画数の品番も表示します</span></div>
+        <div class="legend-item"><span class="li-label">明日計画</span><span class="li-desc">翌日の計画品番も追加表示します</span></div>
+        <div class="legend-item"><span class="li-label">前日表示</span><span class="li-desc">前日の計画品番も追加表示します</span></div>
+        <div class="legend-item"><span class="li-label">現在時刻のみ</span><span class="li-desc">現在の時間帯に計画されている品番だけを表示します</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部ナビゲーションの<strong>「生産」</strong>をクリックし、メニューから<strong>「工程作業記録（デスクトップ）」</strong>を選択します。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group" style="position:relative;">
+        <span style="font-weight:700;">DAISO</span>
+        <span>受注</span>
+        <span class="hl hl-green" style="padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.18);font-weight:700;">生産</span>
+        <span>仕入</span>
+        <span>出荷</span>
+        <span>在庫</span>
+        <span>品質</span>
+        <span>マスタ</span>
+        <span>設定</span>
+      </div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>メニュー内の「工程作業記録（デスクトップ）」を選んでください。タブレットとは画面レイアウトが異なります。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">ラインと工程を選択する</div>
+    </div>
+    <div class="step-desc">
+      ヘッダーの<strong>「ライン」</strong>ドロップダウンからラインを選び、次に<strong>「工程」</strong>を選択します。<br>
+      ラインを選択すると、そのラインに属する工程だけがドロップダウンに表示されます。工程を選択すると、今日の計画品番が自動的に読み込まれます。
+    </div>
+    <div class="mock-toolbar">
+      <span style="font-weight:800;font-size:13px;">工程作業記録</span>
+      <div class="f-group hl" style="padding:2px;"><label>ライン</label><span class="f-select" style="min-width:130px;">L2100 - フロアライン</span></div>
+      <div class="f-group hl hl-blue" style="padding:2px;"><label>工程</label><span class="f-select" style="min-width:130px;">4002 - フロアコンプ</span></div>
+      <span style="font-size:12px;">2026年7月22日</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>応援モード:</strong> 自分の所属ライン以外で作業する場合は「応援OFF」ボタンを押して「応援ON」に切り替えると、全ラインが表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">記録種別を選ぶ</div>
+    </div>
+    <div class="step-desc">
+      左列の<strong>「記録種別」</strong>で記録の種類を選択します。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="mock-type-btn active" style="font-size:13px;padding:6px 14px;">生産記録</span>
+      <span class="mock-type-btn" style="font-size:13px;padding:6px 14px;">設備状態</span>
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">生産記録</span><span class="li-desc">加工の開始・終了・中断を記録します。数量も入力します。</span></div>
+      <div class="legend-item"><span class="li-label">設備状態</span><span class="li-desc">設備の稼働状態（稼働・故障・段取など）を記録します。</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>ルーターで仕損（SCRAP）記録が許可されている場合は「仕損」ボタンも表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">製品を選択する</div>
+    </div>
+    <div class="step-desc">
+      左から2列目の<strong>品番リスト</strong>から、作業する製品をクリックして選択します。
+    </div>
+    <div style="border:1px solid var(--grid-line);border-radius:6px;overflow:hidden;max-width:300px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--grid-head);font-size:11px;">
+        <span style="color:var(--ink2);">22件</span>
+        <input type="text" class="mock-operator-input" placeholder="品番検索" style="flex:1;" readonly />
+      </div>
+      <div class="mock-product-item processing">
+        <div><span class="mock-product-code">STYD40008720</span></div>
+        <div class="mock-product-qty"><span class="plan">計30</span> <span class="actual done">実30</span></div>
+      </div>
+      <div class="mock-product-item selected">
+        <div><span class="mock-product-code">STYD40008810</span></div>
+        <div class="mock-product-qty"><span class="plan">計25</span> <span class="actual">実10</span></div>
+      </div>
+      <div class="mock-product-item">
+        <div><span class="mock-product-code">STYD40009100</span></div>
+        <div class="mock-product-qty"><span class="plan">計20</span> <span class="actual">実0</span></div>
+      </div>
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">緑背景</span><span class="li-desc">現在加工中の品番</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">青緑ハイライト</span><span class="li-desc">現在選択中の品番</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">計XX</span><span class="li-desc">計画数量</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">実XX</span><span class="li-desc">実績数量（緑=完了、赤=超過）</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>手入力モード:</strong> リスト下部の「手入力」をクリックすると、計画リストにない品番でも入力できます。もう一度押すと「品番一覧に戻る」で通常表示に戻ります。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>ページ送り:</strong> 品番が多い場合はリスト下部の ⟨⟨ ⟨ ⟩ ⟩⟩ ボタンでページを移動します（「現在時刻のみ」OFF時のみ表示）。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">生産記録を登録する</div>
+    </div>
+    <div class="step-desc">
+      記録種別が<strong>「生産記録」</strong>の場合の操作です。品番を選択すると、登録フォームにアクションボタンが表示されます。
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:16px 0 10px;color:var(--ink);">&#9654; 加工を開始する</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      まだ開始していない品番を選択すると、自動的に<strong>「開始」</strong>アクションが設定されます。そのまま<strong>「記録を登録」</strong>を押してください。
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;">
+      <span class="mock-btn action-start" style="font-size:12px;padding:3px 10px;opacity:.7;">開始</span>
+      <span style="font-size:12px;color:var(--ink2);">← 自動で選択されます</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>開始を記録すると、ヘッダーに「現在: ○○○ 加工中」と表示されます。</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; 加工を終了する</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      開始済みの品番を選択すると、<strong>「終了」「中断」「一時終了」</strong>のアクションが表示されます。<br>
+      <strong>「終了」</strong>を選択し、数量を入力して<strong>「記録を登録」</strong>を押してください。
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:8px;">
+      <span class="mock-btn action-end" style="font-size:12px;padding:3px 10px;">終了</span>
+      <span class="mock-btn action-pause" style="font-size:12px;padding:3px 10px;opacity:.5;">中断</span>
+      <span class="mock-btn action-tempend" style="font-size:12px;padding:3px 10px;opacity:.5;">一時終了</span>
+    </div>
+    <div class="mock-stat">
+      <div class="mock-stat-block"><span class="mock-stat-label">計画</span><span class="mock-stat-value plan">25</span></div>
+      <div class="mock-stat-block"><span class="mock-stat-label">実績</span><span class="mock-stat-value">10</span></div>
+      <div class="mock-stat-block"><span class="mock-stat-label">残</span><span class="mock-stat-value remain">15</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>クイック数量:</strong> 残数をワンタッチで入力できるボタンが表示されます。</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; 中断する（後で再開する場合）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      作業を一時的に止める場合は<strong>「中断」</strong>を選択します。<br>
+      <strong>数量</strong>（中断時点までの加工数）と<strong>中断理由</strong>（設備トラブル・品質トラブル・部品ショート等）を選択してください。
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>中断後は<strong>「再開」</strong>で作業を再開できます。再開すると再び「終了」「中断」が選べるようになります。</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; 一時終了する（本日再開しない場合）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      本日中に再開しない場合は<strong>「一時終了」</strong>を選択します。<br>
+      <strong>一時終了理由</strong>（本日設備復旧不可・他へ製品切り替え等）を選択してください。<br>
+      「その他」を選んだ場合は備考欄への入力が必須です。
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>中断状態のリセット:</strong> 中断中に再開できなくなった場合も「一時終了」で状態を強制リセットできます。中断中の品番を選択すると「再開」と「取消」のほか、この一時終了が使えます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">設備状態を記録する</div>
+    </div>
+    <div class="step-desc">
+      記録種別を<strong>「設備状態」</strong>に切り替えると、品番を選ばずに設備の状態を記録できます。
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <div class="mock-form-label" style="font-size:13px;margin-bottom:6px;">設備の状態を選択</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span class="eq-badge eq-running" style="padding:4px 14px;font-size:13px;cursor:default;">稼働</span>
+        <span class="eq-badge eq-idle" style="padding:4px 14px;font-size:13px;cursor:default;">待機</span>
+        <span class="eq-badge eq-setup" style="padding:4px 14px;font-size:13px;cursor:default;">段取</span>
+        <span class="eq-badge eq-maintenance" style="padding:4px 14px;font-size:13px;cursor:default;">保守</span>
+        <span class="eq-badge eq-breakdown" style="padding:4px 14px;font-size:13px;cursor:default;">故障</span>
+        <span class="eq-badge eq-stopped" style="padding:4px 14px;font-size:13px;cursor:default;">停止</span>
+      </div>
+    </div>
+
+    <div class="step-desc" style="margin-bottom:0;">
+      状態を選択し、必要に応じて備考を入力してから<strong>「記録を登録」</strong>を押してください。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>設備状態の記録は品番とは無関係です。工程全体の設備状態として記録されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">仕損を記録する</div>
+    </div>
+    <div class="step-desc">
+      記録種別に<strong>「仕損」</strong>が表示されている場合、不良品の記録ができます。
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      品番を選択し、以下の項目を入力してから<strong>「記録を登録」</strong>を押します。
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">数量</span><span class="li-desc">仕損数を入力します（必須）</span></div>
+      <div class="legend-item"><span class="li-label">処置</span><span class="li-desc">廃棄・手直し等の処置を選択します（必須）</span></div>
+      <div class="legend-item"><span class="li-label">生産記録済</span><span class="li-desc">この仕損品がすでに生産数に含まれているかを選択します（必須）</span></div>
+      <div class="legend-item"><span class="li-label">原因</span><span class="li-desc">仕損の原因を選択します（必須）</span></div>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>原因が「その他」の場合は、原因詳細の入力が必要です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>作業日:</strong> フォーム下部に「作業日」があります。通常は当日が自動設定されますが、入力忘れなどで別日に記録する場合は作業日を変更し、変更理由を選択してください。</li>
+      <li><strong>計画数の修正:</strong> 計画サマリの計画数をクリックすると、計画数を直接修正できます（開始・終了時刻も変更可能）。変更は計画変更ログに記録されます。</li>
+      <li><strong>連産品の通知:</strong> BOM上の連産品がある場合は、フォーム内に連産品の一覧が表示されます。親品番の登録時に連産品の実績も自動的に記録されます。</li>
+      <li><strong>製品写真:</strong> 品番名の右側にカメラアイコンがあります。製品の写真を撮影して登録できます。目のアイコンで登録済み写真を確認できます。</li>
+      <li><strong>現在時刻のみフィルタ:</strong> ONの場合、現在の計画時間帯に該当する品番だけが表示されます。「« »」ボタンで前後の時間帯に移動できます。</li>
+      <li><strong>日替わり時刻:</strong> 8:00が日替わりです。7:59までは前日扱いとなります。</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

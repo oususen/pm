@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catatan Kerja Proses (Desktop) - Panduan Prosedur</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --prod-bg: #f1faf8;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+    --processing-bg: #c8e6c9;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac;
+    --prod-border: #4db6ac;
+    --prod-bg: #162420;
+    --col-bg: #1a2030;
+    --selected-bg: #1a3028;
+    --processing-bg: #1e3620;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac;
+      --prod-border: #4db6ac;
+      --prod-bg: #162420;
+      --col-bg: #1a2030;
+      --selected-bg: #1a3028;
+      --processing-bg: #1e3620;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--prod-border);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: .02em; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; position: relative; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+
+  /* ---- mockup toolbar ---- */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .mock-toolbar .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 70px; }
+  .mock-toolbar .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; font-size: 12px; color: var(--ink); }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.disabled { opacity: .35; }
+  .mock-btn.action-start { background: #1976d2; border-color: #1976d2; color: #fff; }
+  .mock-btn.action-end { background: #d32f2f; border-color: #d32f2f; color: #fff; }
+  .mock-btn.action-pause { background: #f57c00; border-color: #f57c00; color: #fff; }
+  .mock-btn.action-tempend { background: #7b1fa2; border-color: #7b1fa2; color: #fff; }
+
+  /* ---- 4-column layout mockup ---- */
+  .mock-4col { display: grid; grid-template-columns: 130px 180px 1fr 140px; gap: 0; border: 1px solid var(--grid-line); border-top: none; min-height: 260px; }
+  .mock-col { border-right: 1px solid var(--grid-line); padding: 8px; font-size: 11px; background: var(--col-bg); }
+  .mock-col:last-child { border-right: none; }
+  .mock-col-title { font-size: 10px; font-weight: 700; color: var(--ink2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--grid-line); }
+
+  /* sidebar controls */
+  .mock-section-label { font-size: 10px; font-weight: 700; color: var(--ink2); margin: 6px 0 3px; }
+  .mock-toggle { display: flex; align-items: center; gap: 4px; margin: 2px 0; font-size: 10px; color: var(--ink); }
+  .mock-toggle-track { width: 28px; height: 14px; border-radius: 7px; background: var(--border); position: relative; flex-shrink: 0; }
+  .mock-toggle-track.on { background: var(--step-color); }
+  .mock-toggle-track::after { content: ''; position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #fff; top: 2px; left: 2px; }
+  .mock-toggle-track.on::after { left: auto; right: 2px; }
+  .mock-type-btn { display: inline-block; padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 10px; font-weight: 600; margin: 1px; background: var(--card); color: var(--ink2); }
+  .mock-type-btn.active { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+  .mock-operator-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 2px 4px; font-size: 10px; width: 100%; color: var(--ink); }
+
+  /* product list */
+  .mock-product-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--grid-line); font-size: 10px; }
+  .mock-product-item.selected { background: var(--selected-bg); border-left: 3px solid var(--step-color); }
+  .mock-product-item.processing { background: var(--processing-bg); }
+  .mock-product-code { font-weight: 700; font-size: 11px; color: var(--ink); }
+  .mock-product-qty { font-size: 10px; color: var(--ink2); }
+  .mock-product-qty .plan { color: var(--ink2); }
+  .mock-product-qty .actual { font-weight: 700; }
+  .mock-product-qty .done { color: var(--success); }
+  .mock-product-qty .over { color: var(--danger); }
+
+  /* form area */
+  .mock-form-label { font-size: 10px; font-weight: 700; color: var(--ink2); margin: 6px 0 2px; }
+  .mock-form-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 11px; color: var(--ink); width: 100%; }
+  .mock-stat { display: flex; gap: 8px; margin: 6px 0; font-size: 11px; }
+  .mock-stat-block { text-align: center; }
+  .mock-stat-label { font-size: 9px; color: var(--ink2); display: block; }
+  .mock-stat-value { font-size: 15px; font-weight: 800; color: var(--ink); }
+  .mock-stat-value.plan { color: var(--accent); }
+  .mock-stat-value.remain { color: var(--warn); }
+
+  /* recent records */
+  .mock-recent-item { padding: 4px 6px; border-bottom: 1px solid var(--grid-line); font-size: 10px; }
+  .mock-recent-time { font-weight: 600; color: var(--ink); }
+  .mock-recent-type { font-size: 9px; color: var(--ink2); }
+  .mock-recent-bar { height: 3px; border-radius: 2px; margin-top: 2px; }
+  .mock-recent-bar.green { background: var(--success); }
+  .mock-recent-bar.red { background: var(--danger); }
+  .mock-recent-bar.blue { background: var(--accent); }
+
+  /* ---- toc ---- */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* ---- note ---- */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--step-color); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; letter-spacing: .04em; }
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .overview-mock .om-nav .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* overview section */
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  /* ---- callout ---- */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- highlight ring ---- */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+  .hl-orange::after { border-color: var(--warn); }
+
+  /* ---- action flow ---- */
+  .action-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 16px 0; }
+  .action-flow .af-step { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .action-flow .af-arrow { font-size: 20px; color: var(--ink2); font-weight: 700; }
+  .action-flow .af-label { font-size: 11px; color: var(--ink2); }
+  .action-badge { display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+  .action-start { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .action-end { background: #fce4e4; color: #c62828; border: 1px solid #ef9a9a; }
+  .action-pause { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .action-resume { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .action-tempend { background: #f3e5f5; color: #7b1fa2; border: 1px solid #ce93d8; }
+  :root[data-theme="dark"] .action-start { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .action-end { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+  :root[data-theme="dark"] .action-pause { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .action-resume { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .action-tempend { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .action-start { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .action-end { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+    :root:not([data-theme="light"]) .action-pause { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .action-resume { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .action-tempend { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  }
+
+  /* equipment state badges */
+  .eq-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .eq-running { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .eq-idle { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+  .eq-setup { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .eq-maintenance { background: #fff8e1; color: #f57f17; border: 1px solid #ffe082; }
+  .eq-breakdown { background: #fce4e4; color: #c62828; border: 1px solid #ef9a9a; }
+  .eq-stopped { background: #f5f5f5; color: #616161; border: 1px solid #bdbdbd; }
+  :root[data-theme="dark"] .eq-running { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+  :root[data-theme="dark"] .eq-idle { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+  :root[data-theme="dark"] .eq-setup { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+  :root[data-theme="dark"] .eq-maintenance { background: #2a2210; color: #ffca28; border-color: #3a3220; }
+  :root[data-theme="dark"] .eq-breakdown { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+  :root[data-theme="dark"] .eq-stopped { background: #282828; color: #9e9e9e; border-color: #383838; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .eq-running { background: #1a3020; color: #66bb6a; border-color: #2e5030; }
+    :root:not([data-theme="light"]) .eq-idle { background: #1c3050; color: #5ca0e8; border-color: #2a4060; }
+    :root:not([data-theme="light"]) .eq-setup { background: #2e2010; color: #ff9800; border-color: #3e3020; }
+    :root:not([data-theme="light"]) .eq-maintenance { background: #2a2210; color: #ffca28; border-color: #3a3220; }
+    :root:not([data-theme="light"]) .eq-breakdown { background: #3a1a1a; color: #ef5350; border-color: #4a2a2a; }
+    :root:not([data-theme="light"]) .eq-stopped { background: #282828; color: #9e9e9e; border-color: #383838; }
+  }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 70px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* processing chip */
+  .mock-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 14px; font-size: 11px; font-weight: 700; }
+  .mock-chip.processing { background: var(--success-light); color: var(--success); border: 1px solid var(--success); }
+  .mock-chip.pause { background: var(--warn-light); color: var(--warn); border: 1px solid var(--warn); }
+
+  /* quick qty */
+  .mock-quick { display: flex; gap: 4px; margin-top: 4px; }
+  .mock-quick-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 8px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; font-weight: 600; background: var(--card); color: var(--ink); }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+    .action-flow { flex-direction: column; gap: 2px; }
+    .action-flow .af-arrow { transform: rotate(90deg); }
+    .mock-4col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>Catatan Kerja Proses (Desktop) - Panduan Prosedur</h1>
+    <div class="subtitle">Prosedur operasi untuk mencatat produksi, status peralatan, dan cacat produksi per lini dan proses</div>
+    <div class="path">
+      Produksi <span class="arrow">&#9656;</span> Catatan Kerja Proses (Desktop)
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>Alur Prosedur</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>Membuka layar</li>
+      <li><span class="tn">2</span>Memilih lini dan proses</li>
+      <li><span class="tn">3</span>Memilih jenis catatan</li>
+      <li><span class="tn">4</span>Memilih produk</li>
+      <li><span class="tn">5</span>Mencatat produksi</li>
+      <li><span class="tn">6</span>Mencatat status peralatan</li>
+      <li><span class="tn">7</span>Mencatat cacat produksi</li>
+      <li><span class="tn">8</span>Catatan penting</li>
+    </ul>
+  </div>
+
+  <!-- ===== Penjelasan Layar ===== -->
+  <div class="screen-overview">
+    <h2>Penjelasan Layar <span class="badge">Baca ini terlebih dahulu</span></h2>
+
+    <!-- Mockup layar keseluruhan -->
+    <div class="overview-mock" style="position:relative;">
+      <!-- Navigasi -->
+      <div class="om-nav">
+        <span>DAISO</span>
+        <span>Pesanan</span>
+        <span class="om-active">Produksi</span>
+        <span>Pembelian</span>
+        <span>Pengiriman</span>
+        <span>Persediaan</span>
+        <span>Kualitas</span>
+        <span>Master</span>
+        <span>Pengaturan</span>
+      </div>
+      <!-- Header -->
+      <div style="background:var(--grid-head);padding:8px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <span style="font-weight:800;font-size:14px;color:var(--ink);">Catatan Kerja Proses</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 8px;">Lembar Periksa</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 8px;">Inspeksi Peralatan</span>
+        <div class="f-group"><label>Lini</label><span class="f-select" style="min-width:130px;">L2100 - Floor Line</span></div>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;background:var(--card);border:1px solid var(--border);color:var(--ink2);">Bantuan OFF</span>
+        <div class="f-group"><label>Proses</label><span class="f-select" style="min-width:130px;">4002 - Floor Comp</span></div>
+        <span style="font-size:12px;color:var(--ink);">22 Juli 2026</span>
+        <span class="mock-chip processing" style="font-size:10px;padding:2px 8px;">Saat ini: STYD40008720-4002 Sedang diproses</span>
+        <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">1</span>
+      </div>
+      <!-- Layout 4 kolom -->
+      <div class="mock-4col" style="position:relative;">
+        <!-- Kolom 1: Kontrol -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Kontrol</div>
+          <div class="mock-section-label">Jenis Catatan</div>
+          <div>
+            <span class="mock-type-btn active">Catatan Produksi</span>
+            <span class="mock-type-btn">Status Peralatan</span>
+          </div>
+          <div class="mock-section-label" style="margin-top:8px;">Pengaturan Tampilan</div>
+          <div class="mock-toggle"><span>Sudah diproses</span><span class="mock-toggle-track"></span></div>
+          <div class="mock-toggle"><span class="mock-toggle-track on"></span><span>Rencana besok</span></div>
+          <div class="mock-toggle"><span>Tampilan kemarin</span><span class="mock-toggle-track"></span></div>
+          <div class="mock-toggle"><span class="mock-toggle-track on"></span><span>Waktu saat ini saja</span></div>
+          <div style="margin-top:4px;font-size:10px;color:var(--ink2);text-align:center;">« 08:00 - 09:50 »</div>
+          <div class="mock-section-label" style="margin-top:8px;">Operator</div>
+          <input type="text" class="mock-operator-input" value="Wang Chongshuan" readonly />
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">2</span>
+        </div>
+        <!-- Kolom 2: Daftar Produk -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Daftar Kode Produk</div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+            <span style="font-size:10px;color:var(--ink2);">22 item</span>
+            <input type="text" class="mock-operator-input" placeholder="Cari kode produk" style="flex:1;" readonly />
+          </div>
+          <div class="mock-product-item processing">
+            <div><span class="mock-product-code">STYD40008720</span></div>
+            <div class="mock-product-qty"><span class="plan">Ren 30</span> <span class="actual done">Akt 30</span></div>
+          </div>
+          <div class="mock-product-item selected">
+            <div><span class="mock-product-code">STYD40008810</span></div>
+            <div class="mock-product-qty"><span class="plan">Ren 25</span> <span class="actual">Akt 10</span></div>
+          </div>
+          <div class="mock-product-item">
+            <div><span class="mock-product-code">STYD40009100</span></div>
+            <div class="mock-product-qty"><span class="plan">Ren 20</span> <span class="actual">Akt 0</span></div>
+          </div>
+          <div class="mock-product-item">
+            <div><span class="mock-product-code">STYD40009320</span></div>
+            <div class="mock-product-qty"><span class="plan">Ren 15</span> <span class="actual">Akt 0</span></div>
+          </div>
+          <div style="text-align:center;margin-top:4px;font-size:10px;color:var(--ink2);">1-4/22 ⟩</div>
+          <div style="text-align:center;margin-top:2px;"><span style="font-size:10px;color:var(--accent);cursor:pointer;">Input manual</span></div>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">3</span>
+        </div>
+        <!-- Kolom 3: Formulir Pendaftaran -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Formulir Pencatatan</div>
+          <div style="font-weight:800;font-size:14px;color:var(--ink);">STYD40008810</div>
+          <div style="font-size:10px;color:var(--ink2);">Floor Comp Tipe A</div>
+          <div class="mock-form-label">Aksi</div>
+          <div style="display:flex;gap:3px;flex-wrap:wrap;">
+            <span class="mock-btn action-end" style="font-size:10px;padding:2px 6px;">Selesai</span>
+            <span class="mock-btn action-pause" style="font-size:10px;padding:2px 6px;">Jeda</span>
+            <span class="mock-btn action-tempend" style="font-size:10px;padding:2px 6px;">Selesai sementara</span>
+          </div>
+          <div class="mock-stat">
+            <div class="mock-stat-block"><span class="mock-stat-label">Jumlah rencana</span><span class="mock-stat-value plan">25</span></div>
+            <div class="mock-stat-block"><span class="mock-stat-label">Tercatat</span><span class="mock-stat-value">10</span></div>
+            <div class="mock-stat-block"><span class="mock-stat-label">Sisa</span><span class="mock-stat-value remain">15</span></div>
+          </div>
+          <div class="mock-form-label">Jumlah</div>
+          <input type="text" class="mock-form-input" value="15" readonly style="max-width:80px;" />
+          <div class="mock-quick">
+            <span class="mock-quick-btn">15</span>
+            <span class="mock-quick-btn">25</span>
+          </div>
+          <div class="mock-form-label">Catatan</div>
+          <input type="text" class="mock-form-input" placeholder="Masukkan catatan" readonly />
+          <div style="margin-top:8px;display:flex;gap:6px;">
+            <span class="mock-btn teal" style="font-size:11px;padding:3px 12px;">Catat</span>
+            <span class="mock-btn" style="font-size:11px;padding:3px 8px;">Batal</span>
+          </div>
+          <span class="om-anno" style="top:-8px;left:50%;transform:translateX(-50%);">4</span>
+        </div>
+        <!-- Kolom 4: Catatan Terbaru -->
+        <div class="mock-col" style="position:relative;">
+          <div class="mock-col-title">Catatan Terbaru</div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">09:32</span> <span class="mock-recent-type">Selesai 30 pcs</span></div>
+            <div style="font-size:9px;color:var(--ink2);">Catatan Produksi STYD40008720</div>
+            <div class="mock-recent-bar green"></div>
+          </div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">08:45</span> <span class="mock-recent-type">Mulai</span></div>
+            <div style="font-size:9px;color:var(--ink2);">Catatan Produksi STYD40008720</div>
+            <div class="mock-recent-bar blue"></div>
+          </div>
+          <div class="mock-recent-item">
+            <div><span class="mock-recent-time">08:10</span> <span class="mock-recent-type">Beroperasi</span></div>
+            <div style="font-size:9px;color:var(--ink2);">Status Peralatan</div>
+            <div class="mock-recent-bar green"></div>
+          </div>
+          <span class="om-anno" style="top:-8px;right:4px;">5</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Penjelasan bernomor -->
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>Header</strong> — Menampilkan lini, proses, tanggal, dan kode produk yang sedang diproses. Tombol navigasi ke "Lembar Periksa" dan "Inspeksi Peralatan" juga ada di sini.</span></li>
+      <li><span class="anno-num">2</span><span><strong>Kontrol (kolom kiri)</strong> — Mengatur pergantian jenis catatan (Catatan Produksi / Status Peralatan), filter tampilan, navigasi zona waktu, dan nama operator.</span></li>
+      <li><span class="anno-num">3</span><span><strong>Daftar Kode Produk (kolom ke-2 dari kiri)</strong> — Menampilkan daftar kode produk yang direncanakan hari ini. Jumlah rencana dan aktual ditampilkan berdampingan. Produk yang sedang diproses ditampilkan dengan latar hijau, dan yang dipilih dengan sorotan biru-hijau.</span></li>
+      <li><span class="anno-num">4</span><span><strong>Formulir Pencatatan (kolom ke-3 dari kiri)</strong> — Memasukkan catatan untuk kode produk yang dipilih. Alurnya: pilih aksi, masukkan jumlah, lalu catat.</span></li>
+      <li><span class="anno-num">5</span><span><strong>Catatan Terbaru (kolom kanan)</strong> — Menampilkan catatan terbaru proses ini dalam timeline. Jenis catatan ditunjukkan dengan bar berwarna.</span></li>
+    </ul>
+
+    <!-- Alur Aksi -->
+    <div class="overview-section">
+      <h3>Alur Aksi Catatan Produksi</h3>
+      <div class="action-flow">
+        <div class="af-step">
+          <span class="action-badge action-start">Mulai</span>
+          <span class="af-label">Mulai proses</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-end">Selesai</span>
+          <span class="af-label">Input jumlah</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">Jika berhenti di tengah jalan</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-start">Mulai</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-pause">Jeda</span>
+          <span class="af-label">Pilih alasan + jumlah</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-resume">Lanjutkan</span>
+          <span class="af-label">Lanjutkan kerja</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-end">Selesai</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">Jika tidak akan dilanjutkan hari ini</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-start">Mulai</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-tempend">Selesai sementara</span>
+          <span class="af-label">Pilih alasan</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:13px;color:var(--ink2);margin-bottom:10px;">Jika tidak bisa melanjutkan dari status jeda</div>
+      <div class="action-flow" style="padding-top:0;">
+        <div class="af-step">
+          <span class="action-badge action-pause">Jeda</span>
+          <span class="af-label">Sedang jeda</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="action-badge action-tempend">Selesai sementara</span>
+          <span class="af-label">Reset paksa status</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Daftar Status Peralatan -->
+    <div class="overview-section">
+      <h3>Jenis Status Peralatan</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="eq-badge eq-running">Beroperasi</span><span class="li-desc">Operasi normal</span></div>
+        <div class="legend-item"><span class="eq-badge eq-idle">Menunggu</span><span class="li-desc">Menunggu bahan, dll.</span></div>
+        <div class="legend-item"><span class="eq-badge eq-setup">Persiapan</span><span class="li-desc">Sedang pergantian setup</span></div>
+        <div class="legend-item"><span class="eq-badge eq-maintenance">Pemeliharaan</span><span class="li-desc">Pemeliharaan berkala</span></div>
+        <div class="legend-item"><span class="eq-badge eq-breakdown">Rusak</span><span class="li-desc">Terjadi masalah peralatan</span></div>
+        <div class="legend-item"><span class="eq-badge eq-stopped">Berhenti</span><span class="li-desc">Berhenti terencana</span></div>
+      </div>
+    </div>
+
+    <!-- Pengaturan Tampilan -->
+    <div class="overview-section">
+      <h3>Filter Pengaturan Tampilan</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">Sudah diproses</span><span class="li-desc">Jika ON, produk dengan aktual >= rencana juga ditampilkan</span></div>
+        <div class="legend-item"><span class="li-label">Rencana besok</span><span class="li-desc">Menampilkan juga kode produk rencana esok hari</span></div>
+        <div class="legend-item"><span class="li-label">Tampilan kemarin</span><span class="li-desc">Menampilkan juga kode produk rencana kemarin</span></div>
+        <div class="legend-item"><span class="li-label">Waktu saat ini saja</span><span class="li-desc">Hanya menampilkan kode produk yang direncanakan pada zona waktu saat ini</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">Membuka layar</div>
+    </div>
+    <div class="step-desc">
+      Klik <strong>"Produksi"</strong> di navigasi atas, lalu pilih <strong>"Catatan Kerja Proses (Desktop)"</strong> dari menu.
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group" style="position:relative;">
+        <span style="font-weight:700;">DAISO</span>
+        <span>Pesanan</span>
+        <span class="hl hl-green" style="padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.18);font-weight:700;">Produksi</span>
+        <span>Pembelian</span>
+        <span>Pengiriman</span>
+        <span>Persediaan</span>
+        <span>Kualitas</span>
+        <span>Master</span>
+        <span>Pengaturan</span>
+      </div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>Pilih "Catatan Kerja Proses (Desktop)" dari menu. Tata letak layar berbeda dengan versi tablet.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">Memilih lini dan proses</div>
+    </div>
+    <div class="step-desc">
+      Pilih lini dari dropdown <strong>"Lini"</strong> di header, lalu pilih <strong>"Proses"</strong>.<br>
+      Setelah memilih lini, hanya proses yang termasuk dalam lini tersebut yang akan ditampilkan di dropdown. Setelah memilih proses, kode produk rencana hari ini akan dimuat secara otomatis.
+    </div>
+    <div class="mock-toolbar">
+      <span style="font-weight:800;font-size:13px;">Catatan Kerja Proses</span>
+      <div class="f-group hl" style="padding:2px;"><label>Lini</label><span class="f-select" style="min-width:130px;">L2100 - Floor Line</span></div>
+      <div class="f-group hl hl-blue" style="padding:2px;"><label>Proses</label><span class="f-select" style="min-width:130px;">4002 - Floor Comp</span></div>
+      <span style="font-size:12px;">22 Juli 2026</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Mode Bantuan:</strong> Jika Anda bekerja di lini selain lini yang ditugaskan, tekan tombol "Bantuan OFF" untuk mengubah menjadi "Bantuan ON", dan semua lini akan ditampilkan.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">Memilih jenis catatan</div>
+    </div>
+    <div class="step-desc">
+      Pilih jenis catatan di <strong>"Jenis Catatan"</strong> pada kolom kiri.
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <span class="mock-type-btn active" style="font-size:13px;padding:6px 14px;">Catatan Produksi</span>
+      <span class="mock-type-btn" style="font-size:13px;padding:6px 14px;">Status Peralatan</span>
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">Catatan Produksi</span><span class="li-desc">Mencatat mulai, selesai, dan jeda proses. Jumlah juga diinput.</span></div>
+      <div class="legend-item"><span class="li-label">Status Peralatan</span><span class="li-desc">Mencatat status operasi peralatan (beroperasi, rusak, persiapan, dll.).</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>Jika pencatatan cacat (SCRAP) diizinkan di router, tombol "Cacat Produksi" juga akan ditampilkan.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">Memilih produk</div>
+    </div>
+    <div class="step-desc">
+      Klik dan pilih produk yang akan dikerjakan dari <strong>Daftar Kode Produk</strong> di kolom ke-2 dari kiri.
+    </div>
+    <div style="border:1px solid var(--grid-line);border-radius:6px;overflow:hidden;max-width:300px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--grid-head);font-size:11px;">
+        <span style="color:var(--ink2);">22 item</span>
+        <input type="text" class="mock-operator-input" placeholder="Cari kode produk" style="flex:1;" readonly />
+      </div>
+      <div class="mock-product-item processing">
+        <div><span class="mock-product-code">STYD40008720</span></div>
+        <div class="mock-product-qty"><span class="plan">Ren 30</span> <span class="actual done">Akt 30</span></div>
+      </div>
+      <div class="mock-product-item selected">
+        <div><span class="mock-product-code">STYD40008810</span></div>
+        <div class="mock-product-qty"><span class="plan">Ren 25</span> <span class="actual">Akt 10</span></div>
+      </div>
+      <div class="mock-product-item">
+        <div><span class="mock-product-code">STYD40009100</span></div>
+        <div class="mock-product-qty"><span class="plan">Ren 20</span> <span class="actual">Akt 0</span></div>
+      </div>
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">Latar hijau</span><span class="li-desc">Kode produk yang sedang diproses</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">Sorotan biru-hijau</span><span class="li-desc">Kode produk yang sedang dipilih</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">Ren XX</span><span class="li-desc">Jumlah rencana</span></div>
+      <div class="legend-item"><span class="li-label" style="min-width:80px;">Akt XX</span><span class="li-desc">Jumlah aktual (hijau=selesai, merah=melebihi)</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Mode Input Manual:</strong> Klik "Input manual" di bagian bawah daftar untuk memasukkan kode produk yang tidak ada dalam daftar rencana. Klik lagi "Kembali ke pencarian" untuk kembali ke tampilan normal.</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Navigasi halaman:</strong> Jika ada banyak kode produk, gunakan tombol halaman di bawah daftar untuk berpindah halaman (hanya ditampilkan saat "Waktu saat ini saja" OFF).</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">Mencatat produksi</div>
+    </div>
+    <div class="step-desc">
+      Ini adalah operasi untuk jenis catatan <strong>"Catatan Produksi"</strong>. Setelah memilih kode produk, tombol aksi akan ditampilkan di formulir pencatatan.
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:16px 0 10px;color:var(--ink);">&#9654; Memulai proses</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Jika Anda memilih kode produk yang belum dimulai, aksi <strong>"Mulai"</strong> akan diatur secara otomatis. Langsung tekan <strong>"Catat"</strong>.
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;">
+      <span class="mock-btn action-start" style="font-size:12px;padding:3px 10px;opacity:.7;">Mulai</span>
+      <span style="font-size:12px;color:var(--ink2);">← Dipilih secara otomatis</span>
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>Setelah mencatat mulai, header akan menampilkan "Saat ini: xxx Sedang diproses".</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; Menyelesaikan proses</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Jika Anda memilih kode produk yang sudah dimulai, aksi <strong>"Selesai", "Jeda", "Selesai sementara"</strong> akan ditampilkan.<br>
+      Pilih <strong>"Selesai"</strong>, masukkan jumlah, lalu tekan <strong>"Catat"</strong>.
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:8px;">
+      <span class="mock-btn action-end" style="font-size:12px;padding:3px 10px;">Selesai</span>
+      <span class="mock-btn action-pause" style="font-size:12px;padding:3px 10px;opacity:.5;">Jeda</span>
+      <span class="mock-btn action-tempend" style="font-size:12px;padding:3px 10px;opacity:.5;">Selesai sementara</span>
+    </div>
+    <div class="mock-stat">
+      <div class="mock-stat-block"><span class="mock-stat-label">Jumlah rencana</span><span class="mock-stat-value plan">25</span></div>
+      <div class="mock-stat-block"><span class="mock-stat-label">Tercatat</span><span class="mock-stat-value">10</span></div>
+      <div class="mock-stat-block"><span class="mock-stat-label">Sisa</span><span class="mock-stat-value remain">15</span></div>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>Jumlah cepat:</strong> Tombol untuk memasukkan jumlah sisa dengan satu sentuhan akan ditampilkan.</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; Jeda (jika akan dilanjutkan nanti)</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Jika ingin menghentikan pekerjaan sementara, pilih <strong>"Jeda"</strong>.<br>
+      Masukkan <strong>jumlah</strong> (jumlah yang diproses hingga saat jeda) dan pilih <strong>alasan jeda</strong> (masalah peralatan, masalah kualitas, kekurangan komponen, dll.).
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>Setelah jeda, Anda dapat melanjutkan pekerjaan dengan <strong>"Lanjutkan"</strong>. Setelah melanjutkan, Anda dapat memilih "Selesai" atau "Jeda" lagi.</span>
+    </div>
+
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; Selesai sementara (jika tidak akan dilanjutkan hari ini)</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Jika tidak akan dilanjutkan hari ini, pilih <strong>"Selesai sementara"</strong>.<br>
+      Pilih <strong>alasan selesai sementara</strong> (peralatan tidak bisa dipulihkan hari ini, beralih ke produk lain, dll.).<br>
+      Jika memilih "Lainnya", input di kolom catatan wajib diisi.
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>Reset status jeda:</strong> Jika tidak bisa melanjutkan dari status jeda, Anda juga bisa menggunakan "Selesai sementara" untuk reset paksa status. Saat memilih kode produk yang sedang jeda, selain "Lanjutkan" dan "Batal", opsi selesai sementara ini juga tersedia.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">Mencatat status peralatan</div>
+    </div>
+    <div class="step-desc">
+      Jika Anda mengubah jenis catatan ke <strong>"Status Peralatan"</strong>, Anda dapat mencatat status peralatan tanpa memilih kode produk.
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <div class="mock-form-label" style="font-size:13px;margin-bottom:6px;">Pilih status peralatan</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span class="eq-badge eq-running" style="padding:4px 14px;font-size:13px;cursor:default;">Beroperasi</span>
+        <span class="eq-badge eq-idle" style="padding:4px 14px;font-size:13px;cursor:default;">Menunggu</span>
+        <span class="eq-badge eq-setup" style="padding:4px 14px;font-size:13px;cursor:default;">Persiapan</span>
+        <span class="eq-badge eq-maintenance" style="padding:4px 14px;font-size:13px;cursor:default;">Pemeliharaan</span>
+        <span class="eq-badge eq-breakdown" style="padding:4px 14px;font-size:13px;cursor:default;">Rusak</span>
+        <span class="eq-badge eq-stopped" style="padding:4px 14px;font-size:13px;cursor:default;">Berhenti</span>
+      </div>
+    </div>
+
+    <div class="step-desc" style="margin-bottom:0;">
+      Pilih status, masukkan catatan jika diperlukan, lalu tekan <strong>"Catat"</strong>.
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>Pencatatan status peralatan tidak terkait dengan kode produk. Dicatat sebagai status peralatan untuk seluruh proses.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">Mencatat cacat produksi</div>
+    </div>
+    <div class="step-desc">
+      Jika <strong>"Cacat Produksi"</strong> ditampilkan di jenis catatan, Anda dapat mencatat produk cacat.
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      Pilih kode produk, masukkan item berikut, lalu tekan <strong>"Catat"</strong>.
+    </div>
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">Jumlah cacat</span><span class="li-desc">Masukkan jumlah cacat (wajib)</span></div>
+      <div class="legend-item"><span class="li-label">Keputusan</span><span class="li-desc">Pilih tindakan seperti buang, perbaiki, dll. (wajib)</span></div>
+      <div class="legend-item"><span class="li-label">Produksi tercatat</span><span class="li-desc">Pilih apakah produk cacat ini sudah termasuk dalam jumlah produksi (wajib)</span></div>
+      <div class="legend-item"><span class="li-label">Alasan</span><span class="li-desc">Pilih penyebab cacat (wajib)</span></div>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>Jika penyebab adalah "Lainnya", input detail penyebab diperlukan.</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="note">
+    <h2>&#9888; Catatan Penting</h2>
+    <ul>
+      <li><strong>Tanggal kerja:</strong> Ada "Tanggal kerja" di bagian bawah formulir. Biasanya hari ini diatur secara otomatis, tetapi jika mencatat di hari lain karena lupa input, ubah tanggal kerja dan pilih alasan perubahan.</li>
+      <li><strong>Koreksi jumlah rencana:</strong> Klik jumlah rencana di ringkasan rencana untuk mengedit langsung jumlah rencana (waktu mulai dan selesai juga bisa diubah). Perubahan dicatat dalam log perubahan rencana.</li>
+      <li><strong>Notifikasi produk sampingan:</strong> Jika ada produk sampingan dalam BOM, daftar produk sampingan akan ditampilkan di formulir. Saat mencatat produk induk, catatan aktual produk sampingan juga dicatat secara otomatis.</li>
+      <li><strong>Foto produk:</strong> Ada ikon kamera di sebelah kanan nama kode produk. Anda dapat mengambil dan mendaftarkan foto produk. Foto yang sudah terdaftar dapat dikonfirmasi dengan ikon mata.</li>
+      <li><strong>Filter waktu saat ini saja:</strong> Jika ON, hanya kode produk yang dijadwalkan pada zona waktu saat ini yang ditampilkan. Gunakan tombol "<<" dan ">>" untuk berpindah ke zona waktu sebelum dan sesudahnya.</li>
+      <li><strong>Waktu pergantian hari:</strong> Pergantian hari adalah pukul 8:00. Hingga pukul 7:59 dianggap sebagai hari sebelumnya.</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>
