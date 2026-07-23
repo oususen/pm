@@ -336,7 +336,10 @@
         </thead>
         <tbody>
           <tr v-for="row in mergedRows" :key="row.rowKey" :class="{ 'trip-colored-row': hasRowCustomColor(row) }" :style="getRowColorStyle(row)">
-            <td class="code-col">{{ row.product_code }}</td>
+            <td class="code-col">
+              <div>{{ row.product_code }}</div>
+              <div class="product-name">{{ productNameMap.get(row.product_code) || '' }}</div>
+            </td>
             <td class="shipto-col">
               <div>{{ row.ship_to_code || '-' }}</div>
               <div v-if="row.ship_to_name" class="shipto-name">{{ row.ship_to_name }}</div>
@@ -2368,6 +2371,11 @@ onUnmounted(() => {
   position: sticky;
   left: 0;
   z-index: 1;
+}
+.product-name {
+  font-size: 10px;
+  color: #6b7280;
+  line-height: 1.2;
 }
 .shipto-col {
   min-width: 72px;
