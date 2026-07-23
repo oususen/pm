@@ -318,53 +318,6 @@
         </div>
 
         <h3>構成品目</h3>
-        <div v-if="showDeleteImpactDialog" class="details-section delete-impact-panel">
-          <h4>BOM明細削除の確認</h4>
-          <p class="warning-text">{{ deleteImpactPreview.warning_message }}</p>
-          <p>
-            対象:
-            <strong>{{ deleteImpactPreview.child_product_code }}</strong>
-            <span v-if="deleteImpactPreview.child_product_name"> - {{ deleteImpactPreview.child_product_name }}</span>
-          </p>
-          <p>影響ステップ数: {{ deleteImpactPreview.affected_steps_count || 0 }}</p>
-
-          <div v-if="deleteImpactPreview.affected_steps?.length" class="tree-grid-container">
-            <table class="tree-grid delete-impact-table">
-              <thead>
-                <tr>
-                  <th>ルーティング</th>
-                  <th>親製品</th>
-                  <th>Step</th>
-                  <th>工程</th>
-                  <th>ライン</th>
-                  <th>外作先</th>
-                  <th>判定</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="step in deleteImpactPreview.affected_steps" :key="step.id">
-                  <td>{{ step.routing_code }}</td>
-                  <td>{{ step.routing_product_code }}</td>
-                  <td>{{ step.step_no }} / PG{{ step.parallel_group }}</td>
-                  <td>{{ step.process_code }}<span v-if="step.process_name"> - {{ step.process_name }}</span></td>
-                  <td>{{ step.line_code }}<span v-if="step.line_name"> - {{ step.line_name }}</span></td>
-                  <td>{{ step.supplier_name || '-' }}</td>
-                  <td>{{ formatDeleteImpactMatchType(step.match_type) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p v-else class="hint-text">関連ルーティング工程は検出されませんでした。</p>
-
-          <div class="form-actions">
-            <button type="button" class="btn-danger" @click="confirmDeleteBOMItem" :disabled="deleteImpactDeleting">
-              {{ deleteImpactDeleting ? '削除中...' : '理解して削除する' }}
-            </button>
-            <button type="button" class="btn-secondary" @click="closeDeleteImpactDialog" :disabled="deleteImpactDeleting">
-              キャンセル
-            </button>
-          </div>
-        </div>
         <div class="item-form">
           <div class="form-row">
             <div class="form-group">
@@ -488,6 +441,53 @@
             <div class="form-group full-width">
               <label>備考</label>
               <input type="text" v-model="itemForm.remark" />
+            </div>
+          </div>
+          <div v-if="showDeleteImpactDialog" class="details-section delete-impact-panel">
+            <h4>BOM明細削除の確認</h4>
+            <p class="warning-text">{{ deleteImpactPreview.warning_message }}</p>
+            <p>
+              対象:
+              <strong>{{ deleteImpactPreview.child_product_code }}</strong>
+              <span v-if="deleteImpactPreview.child_product_name"> - {{ deleteImpactPreview.child_product_name }}</span>
+            </p>
+            <p>影響ステップ数: {{ deleteImpactPreview.affected_steps_count || 0 }}</p>
+
+            <div v-if="deleteImpactPreview.affected_steps?.length" class="tree-grid-container">
+              <table class="tree-grid delete-impact-table">
+                <thead>
+                  <tr>
+                    <th>ルーティング</th>
+                    <th>親製品</th>
+                    <th>Step</th>
+                    <th>工程</th>
+                    <th>ライン</th>
+                    <th>外作先</th>
+                    <th>判定</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="step in deleteImpactPreview.affected_steps" :key="step.id">
+                    <td>{{ step.routing_code }}</td>
+                    <td>{{ step.routing_product_code }}</td>
+                    <td>{{ step.step_no }} / PG{{ step.parallel_group }}</td>
+                    <td>{{ step.process_code }}<span v-if="step.process_name"> - {{ step.process_name }}</span></td>
+                    <td>{{ step.line_code }}<span v-if="step.line_name"> - {{ step.line_name }}</span></td>
+                    <td>{{ step.supplier_name || '-' }}</td>
+                    <td>{{ formatDeleteImpactMatchType(step.match_type) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="hint-text">関連ルーティング工程は検出されませんでした。</p>
+
+            <div class="form-actions">
+              <button type="button" class="btn-danger" @click="confirmDeleteBOMItem" :disabled="deleteImpactDeleting">
+                {{ deleteImpactDeleting ? '削除中...' : '理解して削除する' }}
+              </button>
+              <button type="button" class="btn-secondary" @click="closeDeleteImpactDialog" :disabled="deleteImpactDeleting">
+                キャンセル
+              </button>
             </div>
           </div>
           <div class="form-actions">
