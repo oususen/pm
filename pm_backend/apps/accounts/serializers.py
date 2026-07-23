@@ -388,81 +388,181 @@ class UserSerializer(serializers.ModelSerializer):
                 ids |= grandchildren
         return list(ids)
 
-    def get_effective_permissions(self, instance):
-        permissions = defaultdict(lambda: {'can_view': False, 'can_edit': False})
+    @staticmethod
+    def _normalize_permission_flags(can_view, can_edit):
+        can_edit = bool(can_edit)
+        can_view = bool(can_view) or can_edit
+        return can_view, can_edit
+
+    @staticmethod
+    def _get_position_label(position_name):
+        if not position_name:
+            return ''
+        return dict(UserProfile.ROLE_CHOICES).get(position_name, position_name)
+
+    def _append_permission_source(self, bucket, source_type, source_label, can_view, can_edit):
+        can_view, can_edit = self._normalize_permission_flags(can_view, can_edit)
+        if not (can_view or can_edit):
+            return
+        key = (source_type, source_label, can_view, can_edit)
+        if key in bucket['_source_keys']:
+            return
+        bucket['_source_keys'].add(key)
+        bucket['sources'].append({
+            'source_type': source_type,
+            'source_label': source_label,
+            'can_view': can_view,
+            'can_edit': can_edit,
+        })
+
+    def _build_effective_permission_details(self, instance):
+        cache = getattr(self, '_effective_permission_details_cache', None)
+        if cache is None:
+            cache = {}
+            self._effective_permission_details_cache = cache
+        if instance.pk in cache:
+            return cache[instance.pk]
+
+        permissions = defaultdict(lambda: {
+            'template_can_view': False,
+            'template_can_edit': False,
+            'user_can_view': False,
+            'user_can_edit': False,
+            'has_user_permission': False,
+            'sources': [],
+            '_source_keys': set(),
+        })
+
+        try:
+            profile = instance.profile
+        except UserProfile.DoesNotExist:
+            profile = None
+        position_name = getattr(profile, 'role', '') if profile else ''
+        position_label = self._get_position_label(position_name)
+        dept_ids = self._collect_dept_ids(profile) if profile else []
+
+        if dept_ids:
+            dept_perms = (
+                DepartmentPermission.objects
+                .select_related('department')
+                .filter(department_id__in=dept_ids)
+            )
+            for perm in dept_perms:
+                can_view, can_edit = self._normalize_permission_flags(perm.can_view, perm.can_edit)
+                bucket = permissions[perm.resource]
+                bucket['template_can_view'] = bucket['template_can_view'] or can_view
+                bucket['template_can_edit'] = bucket['template_can_edit'] or can_edit
+                self._append_permission_source(
+                    bucket,
+                    'department',
+                    f'部署: {perm.department.name}',
+                    can_view,
+                    can_edit,
+                )
+
+        if position_name:
+            pos_perms = PositionPermission.objects.filter(position_name=position_name)
+            for perm in pos_perms:
+                can_view, can_edit = self._normalize_permission_flags(perm.can_view, perm.can_edit)
+                bucket = permissions[perm.resource]
+                bucket['template_can_view'] = bucket['template_can_view'] or can_view
+                bucket['template_can_edit'] = bucket['template_can_edit'] or can_edit
+                self._append_permission_source(
+                    bucket,
+                    'position',
+                    f'役職: {position_label}',
+                    can_view,
+                    can_edit,
+                )
+
+        if dept_ids and position_name:
+            dept_pos_perms = (
+                DepartmentPositionPermission.objects
+                .select_related('department')
+                .filter(department_id__in=dept_ids, position_name=position_name)
+            )
+            for perm in dept_pos_perms:
+                can_view, can_edit = self._normalize_permission_flags(perm.can_view, perm.can_edit)
+                bucket = permissions[perm.resource]
+                bucket['template_can_view'] = bucket['template_can_view'] or can_view
+                bucket['template_can_edit'] = bucket['template_can_edit'] or can_edit
+                self._append_permission_source(
+                    bucket,
+                    'department_position',
+                    f'部署・役職: {perm.department.name} × {position_label}',
+                    can_view,
+                    can_edit,
+                )
 
         user_perms = list(instance.permissions.all())
-
-        is_manager = False
-        try:
-            if instance.profile and instance.profile.role == 'manager':
-                is_manager = True
-        except:
-            pass
-
-        dept_ids = []
-        try:
-            if instance.profile:
-                dept_ids = self._collect_dept_ids(instance.profile)
-        except:
-            pass
-
-        if is_manager:
-            try:
-                if instance.profile and instance.profile.role:
-                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
-                    for perm in pos_perms:
-                        permissions[perm.resource]['can_view'] = perm.can_view
-                        permissions[perm.resource]['can_edit'] = perm.can_edit
-            except:
-                pass
-
-            if dept_ids:
-                dept_perms = DepartmentPermission.objects.filter(department_id__in=dept_ids)
-                for perm in dept_perms:
-                    permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
-                    permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
-        else:
-            if dept_ids:
-                dept_perms = DepartmentPermission.objects.filter(department_id__in=dept_ids)
-                for perm in dept_perms:
-                    permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
-                    permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
-
-            try:
-                if instance.profile and instance.profile.role:
-                    pos_perms = PositionPermission.objects.filter(position_name=instance.profile.role)
-                    for perm in pos_perms:
-                        permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
-                        permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
-            except:
-                pass
-
-        # DepartmentPosition permissions (highest priority among templates)
-        if dept_ids:
-            try:
-                if instance.profile and instance.profile.role:
-                    dept_pos_perms = DepartmentPositionPermission.objects.filter(
-                        department_id__in=dept_ids,
-                        position_name=instance.profile.role
-                    )
-                    for perm in dept_pos_perms:
-                        permissions[perm.resource]['can_view'] = permissions[perm.resource]['can_view'] or perm.can_view
-                        permissions[perm.resource]['can_edit'] = permissions[perm.resource]['can_edit'] or perm.can_edit
-            except:
-                pass
-
-        # User permissions override templates
         for perm in user_perms:
-            if not (perm.can_view or perm.can_edit):
+            can_view, can_edit = self._normalize_permission_flags(perm.can_view, perm.can_edit)
+            if not (can_view or can_edit):
                 continue
-            permissions[perm.resource]['can_view'] = perm.can_view
-            permissions[perm.resource]['can_edit'] = perm.can_edit
+            bucket = permissions[perm.resource]
+            bucket['has_user_permission'] = True
+            bucket['user_can_view'] = can_view
+            bucket['user_can_edit'] = can_edit
+            self._append_permission_source(
+                bucket,
+                'user',
+                '個別権限',
+                can_view,
+                can_edit,
+            )
 
+        resource_order = {
+            resource: index
+            for index, (resource, _label) in enumerate(UserPermission.RESOURCE_CHOICES)
+        }
+        results = []
+        for resource, values in permissions.items():
+            if values['has_user_permission']:
+                can_view = values['user_can_view']
+                can_edit = values['user_can_edit']
+            else:
+                can_view = values['template_can_view']
+                can_edit = values['template_can_edit']
+            can_view, can_edit = self._normalize_permission_flags(can_view, can_edit)
+            if not (can_view or can_edit):
+                continue
+            results.append({
+                'resource': resource,
+                'can_view': can_view,
+                'can_edit': can_edit,
+                'template_can_view': values['template_can_view'],
+                'template_can_edit': values['template_can_edit'],
+                'user_can_view': values['user_can_view'],
+                'user_can_edit': values['user_can_edit'],
+                'has_user_permission': values['has_user_permission'],
+                'sources': values['sources'],
+            })
+
+        results.sort(key=lambda item: (resource_order.get(item['resource'], 9999), item['resource']))
+        cache[instance.pk] = results
+        return results
+
+    def get_effective_permissions(self, instance):
         return [
-            {'resource': resource, 'can_view': vals['can_view'], 'can_edit': vals['can_edit']}
-            for resource, vals in permissions.items()
+            {
+                'resource': detail['resource'],
+                'can_view': detail['can_view'],
+                'can_edit': detail['can_edit'],
+            }
+            for detail in self._build_effective_permission_details(instance)
         ]
+
+
+class UserDetailSerializer(UserSerializer):
+    effective_permission_details = serializers.SerializerMethodField()
+
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + [
+            'effective_permission_details',
+        ]
+
+    def get_effective_permission_details(self, instance):
+        return self._build_effective_permission_details(instance)
 
 
 class UserSmtpConfigSerializer(serializers.ModelSerializer):

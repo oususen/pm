@@ -21,7 +21,11 @@ const settings = [
     path: "/settings/user-permissions",
     name: "UserPermissionManagement",
     component: () => import("@/views/settings/UserPermissionManagement.vue"),
-    meta: { pageTitle: "ユーザー権限編集", resource: "settings.user_permissions" },
+    meta: {
+      pageTitle: "ユーザー権限編集",
+      resource: "settings.user_permissions",
+      fallbackToParent: false,
+    },
   },
   {
     path: "/settings/permission-templates",

@@ -20,6 +20,7 @@ from .models import (
 from .serializers import (
     DepartmentSerializer,
     UserSerializer,
+    UserDetailSerializer,
     DepartmentPermissionSerializer,
     PositionPermissionSerializer,
     DepartmentPositionPermissionSerializer,
@@ -40,7 +41,13 @@ class DepartmentViewSet(viewsets.ModelViewSet):
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = (
-        User.objects.select_related('profile__department')
+        User.objects.select_related(
+            'profile__department',
+            'profile__division',
+            'profile__group',
+            'profile__team',
+            'profile__unit',
+        )
         .prefetch_related('permissions', 'profile__supervisor_teams', 'profile__leader_units')
     )
     serializer_class = UserSerializer
@@ -53,6 +60,11 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return self.queryset
+
+    def get_serializer_class(self):
+        if self.action in ('retrieve', 'create', 'update', 'partial_update'):
+            return UserDetailSerializer
+        return UserSerializer
 
     @action(detail=False, methods=['get', 'patch'], permission_classes=[])
     def me(self, request):

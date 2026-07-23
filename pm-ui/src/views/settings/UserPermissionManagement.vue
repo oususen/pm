@@ -256,38 +256,66 @@
 
             <div class="form-row full permission-section">
               <div class="permission-header">
-                <label>ユーザー個別 権限設定</label>
+                <div>
+                  <label>ユーザー個別 権限設定</label>
+                  <div class="permission-helper-text">
+                    状態列は最終的な有効権限、個別設定列はユーザー個別権限です。
+                  </div>
+                </div>
                 <label class="permission-toggle">
                   <input v-model="useUserPermissions" type="checkbox" :disabled="!canManagePermissions" />
                   個別権限を使う
                 </label>
               </div>
+              <div v-if="detailLoading" class="helper-text">権限明細を読み込み中...</div>
               <table class="permission-table" :class="{ disabled: !useUserPermissions || !canManagePermissions }">
                 <thead>
                   <tr>
                     <th>機能</th>
-                    <th>閲覧</th>
-                    <th>編集</th>
+                    <th>状態: 閲覧</th>
+                    <th>状態: 編集</th>
+                    <th>個別設定: 閲覧</th>
+                    <th>個別設定: 編集</th>
+                    <th>獲得元</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="perm in form.permissions" :key="perm.resource">
-                    <td>{{ getPermissionLabel(perm.resource) }}</td>
+                  <tr v-for="row in permissionRows" :key="row.resource">
+                    <td>{{ getPermissionLabel(row.resource) }}</td>
+                    <td>
+                      <input type="checkbox" :checked="row.effective_can_view" disabled />
+                    </td>
+                    <td>
+                      <input type="checkbox" :checked="row.effective_can_edit" disabled />
+                    </td>
                     <td>
                       <input
                         type="checkbox"
-                        v-model="perm.can_view"
-                        @change="onPermissionChange(perm, 'can_view')"
+                        v-model="row.permission.can_view"
+                        @change="onPermissionChange(row.permission, 'can_view')"
                         :disabled="!useUserPermissions || !canManagePermissions"
                       />
                     </td>
                     <td>
                       <input
                         type="checkbox"
-                        v-model="perm.can_edit"
-                        @change="onPermissionChange(perm, 'can_edit')"
+                        v-model="row.permission.can_edit"
+                        @change="onPermissionChange(row.permission, 'can_edit')"
                         :disabled="!useUserPermissions || !canManagePermissions"
                       />
+                    </td>
+                    <td class="permission-source-cell">
+                      <div v-if="row.sources.length" class="permission-source-list">
+                        <span
+                          v-for="(source, index) in row.sources"
+                          :key="`${row.resource}-${source.source_type}-${index}`"
+                          class="permission-source-tag"
+                          :class="{ edit: source.can_edit, view: source.can_view && !source.can_edit }"
+                        >
+                          {{ source.source_label }}: {{ describePermissionLevel(source.can_view, source.can_edit) }}
+                        </span>
+                      </div>
+                      <span v-else class="permission-source-empty">-</span>
                     </td>
                   </tr>
                 </tbody>
@@ -332,6 +360,7 @@ const allGroups = ref([])
 const allTeams = ref([])
 const allUnits = ref([])
 const loading = ref(false)
+const detailLoading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
@@ -513,41 +542,32 @@ const form = reactive({
   password: '',
   profile: emptyProfile(),
   permissions: emptyPermissions(),
+  effective_permission_details: [],
 })
 
 const passwordHint = computed(() => (isCreating.value ? '必須' : '変更時のみ入力'))
 const canAssignSupervisorTeams = computed(() => form.profile.role !== 'leader')
 const canAssignLeaderUnits = computed(() => ['leader', 'chief', 'manager'].includes(form.profile.role))
 
-const canAccessByResource = (resource, level = 'view') => {
-  const user = authState.user
-  if (!user || !resource) return false
-  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
-  if (permissions.some((item) => item.resource === resource)) {
-    return hasPermission(user, resource, level)
-  }
-  return hasPermission(user, 'settings', level)
-}
-
 const canManageBasic = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.user_permissions', 'edit')
+  return hasPermission(user, 'settings.user_permissions', 'edit')
 })
 
 const canViewUsers = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.user_permissions', 'view')
+  return hasPermission(user, 'settings.user_permissions', 'view')
 })
 
 const canManagePermissions = computed(() => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.user_permissions', 'edit')
+  return hasPermission(user, 'settings.user_permissions', 'edit')
 })
 
 const isAdminUser = computed(() => {
@@ -752,6 +772,55 @@ const unitOptions = computed(() => {
     }))
 })
 
+const effectivePermissionDetailMap = computed(() => {
+  const map = new Map()
+  const details = Array.isArray(form.effective_permission_details) ? form.effective_permission_details : []
+  details.forEach((detail) => {
+    if (detail?.resource) {
+      map.set(detail.resource, detail)
+    }
+  })
+  return map
+})
+
+const permissionRows = computed(() =>
+  form.permissions.map((permission) => {
+    const detail = effectivePermissionDetailMap.value.get(permission.resource)
+    const templateCanView = Boolean(detail?.template_can_view)
+    const templateCanEdit = Boolean(detail?.template_can_edit)
+    const hasCurrentUserPermission = Boolean(permission.can_view || permission.can_edit)
+    const currentUserCanView = Boolean(permission.can_view || permission.can_edit)
+    const currentUserCanEdit = Boolean(permission.can_edit)
+    const effectiveCanView = useUserPermissions.value
+      ? (hasCurrentUserPermission ? currentUserCanView : templateCanView)
+      : templateCanView
+    const effectiveCanEdit = useUserPermissions.value
+      ? (hasCurrentUserPermission ? currentUserCanEdit : templateCanEdit)
+      : templateCanEdit
+    const templateSources = Array.isArray(detail?.sources)
+      ? detail.sources.filter((source) => source?.source_type !== 'user')
+      : []
+    const sources = [...templateSources]
+    if (useUserPermissions.value && hasCurrentUserPermission) {
+      sources.unshift({
+        source_type: 'user',
+        source_label: '個別権限',
+        can_view: currentUserCanView,
+        can_edit: currentUserCanEdit,
+      })
+    }
+    return {
+      resource: permission.resource,
+      permission,
+      template_can_view: templateCanView,
+      template_can_edit: templateCanEdit,
+      effective_can_view: effectiveCanView,
+      effective_can_edit: effectiveCanEdit,
+      sources,
+    }
+  })
+)
+
 const getUserDisplayName = (user) => {
   const fullName = `${user.last_name || ''} ${user.first_name || ''}`.trim()
   return fullName || user.username || user.email || '-'
@@ -760,6 +829,12 @@ const getUserDisplayName = (user) => {
 const getPermissionLabel = (resource) => {
   const found = permissionResources.find((item) => item.value === resource)
   return found ? found.label : resource
+}
+
+const describePermissionLevel = (canView, canEdit) => {
+  if (canEdit) return '閲覧・編集'
+  if (canView) return '閲覧'
+  return '-'
 }
 
 const buildPermissions = (permissions) => {
@@ -772,6 +847,38 @@ const buildPermissions = (permissions) => {
       can_edit: Boolean(existing?.can_edit),
     }
   })
+}
+
+const applyUserToForm = (user) => {
+  form.id = user.id
+  form.username = user.username || ''
+  form.email = user.email || ''
+  form.first_name = user.first_name || ''
+  form.last_name = user.last_name || ''
+  form.is_active = Boolean(user.is_active)
+  form.is_staff = Boolean(user.is_staff)
+  form.is_superuser = Boolean(user.is_superuser)
+  form.password = ''
+  passwordConfirm.value = ''
+  form.profile = {
+    ...emptyProfile(),
+    ...(user.profile || {}),
+  }
+  form.profile.supervisor_teams = Array.isArray(form.profile.supervisor_teams)
+    ? form.profile.supervisor_teams
+        .map((value) => Number(value))
+        .filter((value) => !Number.isNaN(value))
+    : []
+  form.profile.leader_units = Array.isArray(form.profile.leader_units)
+    ? form.profile.leader_units
+        .map((value) => Number(value))
+        .filter((value) => !Number.isNaN(value))
+    : []
+  form.permissions = buildPermissions(user.permissions)
+  form.effective_permission_details = Array.isArray(user.effective_permission_details)
+    ? user.effective_permission_details
+    : []
+  useUserPermissions.value = Array.isArray(user.permissions) && user.permissions.length > 0
 }
 
 const onPermissionChange = (perm, field) => {
@@ -876,38 +983,24 @@ const loadUsers = async () => {
   }
 }
 
-const selectUser = (user) => {
+const selectUser = async (user) => {
+  if (!user?.id) return
   isCreating.value = false
   selectedUserId.value = user.id
-  form.id = user.id
-  form.username = user.username || ''
-  form.email = user.email || ''
-  form.first_name = user.first_name || ''
-  form.last_name = user.last_name || ''
-  form.is_active = Boolean(user.is_active)
-  form.is_staff = Boolean(user.is_staff)
-  form.is_superuser = Boolean(user.is_superuser)
-  form.password = ''
-  passwordConfirm.value = ''
-  form.profile = {
-    ...emptyProfile(),
-    ...(user.profile || {}),
+  applyUserToForm(user)
+  detailLoading.value = true
+  errorMessage.value = ''
+  try {
+    const response = await api.accounts.getUser(user.id)
+    applyUserToForm(response.data)
+  } catch (error) {
+    errorMessage.value = error?.response?.data?.detail || 'ユーザー権限明細の取得に失敗しました。'
+  } finally {
+    detailLoading.value = false
   }
-  form.profile.supervisor_teams = Array.isArray(form.profile.supervisor_teams)
-    ? form.profile.supervisor_teams
-        .map((value) => Number(value))
-        .filter((value) => !Number.isNaN(value))
-    : []
-  form.profile.leader_units = Array.isArray(form.profile.leader_units)
-    ? form.profile.leader_units
-        .map((value) => Number(value))
-        .filter((value) => !Number.isNaN(value))
-    : []
-  form.permissions = buildPermissions(user.permissions)
-  useUserPermissions.value = Array.isArray(user.permissions) && user.permissions.length > 0
 }
 
-const resetForm = () => {
+const resetForm = async () => {
   if (isCreating.value) {
     form.id = null
     form.username = ''
@@ -921,13 +1014,14 @@ const resetForm = () => {
     passwordConfirm.value = ''
     form.profile = emptyProfile()
     form.permissions = emptyPermissions()
+    form.effective_permission_details = []
     useUserPermissions.value = false
     return
   }
 
   const current = users.value.find((item) => item.id === selectedUserId.value)
   if (current) {
-    selectUser(current)
+    await selectUser(current)
   }
 }
 
@@ -1009,12 +1103,14 @@ const saveUser = async () => {
       successMessage.value = 'ユーザーを作成しました。'
       isCreating.value = false
       await loadUsers()
-      selectUser(response.data)
+      selectedUserId.value = response.data.id
+      applyUserToForm(response.data)
     } else if (form.id) {
       const response = await api.accounts.updateUser(form.id, payload)
       successMessage.value = 'ユーザー情報を更新しました。'
       await loadUsers()
-      selectUser(response.data)
+      selectedUserId.value = response.data.id
+      applyUserToForm(response.data)
     }
   } catch (error) {
     const detail = error?.response?.data
@@ -1048,6 +1144,7 @@ const deleteUser = async () => {
     passwordConfirm.value = ''
     form.profile = emptyProfile()
     form.permissions = emptyPermissions()
+    form.effective_permission_details = []
     useUserPermissions.value = false
     await loadUsers()
   } catch (error) {
@@ -1268,6 +1365,13 @@ watch(filterTeamId, () => {
   margin-top: 6px;
 }
 
+.permission-helper-text {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #666;
+}
+
 .permission-table {
   width: 100%;
   border-collapse: collapse;
@@ -1284,6 +1388,45 @@ watch(filterTeamId, () => {
 .permission-table th {
   background: #f4f6ff;
   font-weight: 600;
+}
+
+.permission-source-cell {
+  text-align: left !important;
+  min-width: 280px;
+}
+
+.permission-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.permission-source-tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d0d7de;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f6f8fa;
+  color: #444;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.permission-source-tag.view {
+  background: #eef6ff;
+  border-color: #bfd9ff;
+  color: #0b5cab;
+}
+
+.permission-source-tag.edit {
+  background: #e7f6e9;
+  border-color: #b7dfb9;
+  color: #1a7f37;
+}
+
+.permission-source-empty {
+  color: #888;
 }
 
 .form-row label {
