@@ -525,6 +525,64 @@ class RoutingStep(models.Model):
         return f"Step {self.step_no}"
 
 
+class RoutingChangeHistory(models.Model):
+    """ルーティング変更履歴"""
+    TARGET_TYPE_CHOICES = [
+        ('ROUTING', 'ヘッダ'),
+        ('STEP', '工程'),
+    ]
+    ACTION_CHOICES = [
+        ('CREATE', '作成'),
+        ('UPDATE', '更新'),
+        ('DELETE', '削除'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    routing = models.ForeignKey(
+        Routing,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='change_histories',
+        verbose_name='ルーティング',
+    )
+    routing_step = models.ForeignKey(
+        RoutingStep,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='change_histories',
+        verbose_name='ルーティング工程',
+    )
+    target_type = models.CharField(max_length=20, choices=TARGET_TYPE_CHOICES, verbose_name='対象種別')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name='操作')
+    target_label = models.CharField(max_length=200, blank=True, default='', verbose_name='対象表示名')
+    change_summary = models.TextField(blank=True, default='', verbose_name='変更概要')
+    before_data = models.JSONField(null=True, blank=True, verbose_name='変更前データ')
+    after_data = models.JSONField(null=True, blank=True, verbose_name='変更後データ')
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='変更者',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='記録日時')
+
+    class Meta:
+        db_table = 't_routing_change_history'
+        verbose_name = 'ルーティング変更履歴'
+        verbose_name_plural = 'ルーティング変更履歴'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['routing', 'created_at']),
+            models.Index(fields=['routing_step', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.target_type} {self.action} {self.target_label}".strip()
+
+
 class RoutingStepMaterial(models.Model):
     """工程別部品消費"""
     CONSUME_TIMING_CHOICES = [

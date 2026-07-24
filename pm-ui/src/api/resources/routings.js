@@ -34,6 +34,9 @@ export const createRoutingsAPI = (client) => ({
   patchRouting(id, data) {
     return client.patch(`/routings/${id}/`, data)
   },
+  getRoutingHistory(id) {
+    return client.get(`/routings/${id}/history/`)
+  },
   deleteRouting(id) {
     return client.delete(`/routings/${id}/`)
   },

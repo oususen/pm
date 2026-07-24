@@ -195,6 +195,13 @@
             </div>
             <div class="routing-header-actions">
               <button
+                class="btn-secondary"
+                @click="openRoutingHistory"
+                :disabled="!selectedRouting || historyLoading"
+              >
+                {{ historyLoading ? '履歴読込中...' : '変更履歴' }}
+              </button>
+              <button
                 class="btn-primary"
                 @click="saveRoutingHeader"
                 :disabled="!canEdit || !selectedRouting || !isRoutingHeaderDirty || savingRoutingHeader"
@@ -590,6 +597,44 @@
         </div>
       </div>
     </div>
+
+    <div v-if="historyDialogVisible" class="history-overlay" @click="historyDialogVisible = false">
+      <div class="history-dialog" @click.stop>
+        <div class="history-dialog__header">
+          <div>
+            <h3 class="history-title">ルーティング変更履歴</h3>
+            <div v-if="selectedRouting" class="history-subtitle">
+              {{ productCode(selectedRouting) }} / {{ selectedRouting.routing_code }}
+            </div>
+          </div>
+          <button class="btn-secondary btn-small" @click="historyDialogVisible = false">閉じる</button>
+        </div>
+        <div v-if="historyLoading" class="empty-state">履歴を読み込み中...</div>
+        <div v-else-if="routingHistoryRecords.length === 0" class="empty-state">履歴がありません</div>
+        <div v-else class="history-table-wrap">
+          <table class="data-table compact history-table">
+            <thead>
+              <tr>
+                <th>記録日時</th>
+                <th>操作</th>
+                <th>対象</th>
+                <th>変更者</th>
+                <th>内容</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="record in routingHistoryRecords" :key="record.id">
+                <td>{{ formatHistoryDateTime(record.created_at) }}</td>
+                <td>{{ record.action_label || record.action }}</td>
+                <td>{{ record.target_label || record.target_type_label || '-' }}</td>
+                <td>{{ record.changed_by_name || '-' }}</td>
+                <td class="history-summary-cell">{{ record.change_summary || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -604,6 +649,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 const dsSources = [
   { op: '読み書き', table: 'm_routing', desc: 'ルーティングヘッダ' },
   { op: '読み書き', table: 'm_routing_step', desc: 'ルーティングステップ' },
+  { op: '読み取り', table: 't_routing_change_history', desc: 'ルーティング変更履歴' },
   { op: '読み取り', table: 'm_product', desc: '製品（選択肢）' },
   { op: '読み取り', table: 'm_process', desc: '工程（選択肢）' },
   { op: '読み取り', table: 'm_line', desc: 'ライン（選択肢）' },
@@ -757,8 +803,16 @@ const migrationCandidates = ref([])
 const checkingMigration = ref(false)
 const executingMigration = ref(false)
 const noMigrationMessage = ref(false)
+const historyDialogVisible = ref(false)
+const historyLoading = ref(false)
+const routingHistoryRecords = ref([])
 
 const normalizeList = (payload) => payload?.results || payload || []
+const formatHistoryDateTime = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return '-'
+  return raw.replace('T', ' ').slice(0, 19)
+}
 
 const toPathNumbers = (path) => {
   if (!path) return []
@@ -1306,6 +1360,36 @@ const saveRoutingHeader = async () => {
   }
 }
 
+const loadRoutingHistory = async (routingId) => {
+  if (!routingId) {
+    routingHistoryRecords.value = []
+    return
+  }
+  historyLoading.value = true
+  try {
+    const res = await api.routings.getRoutingHistory(routingId)
+    routingHistoryRecords.value = normalizeList(res?.data)
+  } catch (error) {
+    console.error('ルーティング履歴取得エラー:', error)
+    routingHistoryRecords.value = []
+    throw error
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const openRoutingHistory = async () => {
+  const routingId = selectedRouting.value?.id
+  if (!routingId) return
+  historyDialogVisible.value = true
+  try {
+    await loadRoutingHistory(routingId)
+  } catch (error) {
+    historyDialogVisible.value = false
+    alert('ルーティング変更履歴の取得に失敗しました。')
+  }
+}
+
 const fetchRoutings = async () => {
   loadingRoutings.value = true
   try {
@@ -1702,6 +1786,8 @@ const createRouting = async () => {
 }
 
 watch(selectedRoutingId, async (routingId) => {
+  historyDialogVisible.value = false
+  routingHistoryRecords.value = []
   if (!routingId) {
     steps.value = []
     materialsByStepId.value = {}
@@ -2123,6 +2209,7 @@ onMounted(async () => {
 .routing-header-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 10px;
 }
 
@@ -2381,6 +2468,65 @@ onMounted(async () => {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.history-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2200;
+}
+
+.history-dialog {
+  width: min(1100px, 96vw);
+  max-height: 82vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+  padding: 18px 20px;
+}
+
+.history-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.history-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.history-subtitle {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.history-table-wrap {
+  overflow: auto;
+}
+
+.history-table {
+  min-width: 920px;
+}
+
+.history-table th,
+.history-table td {
+  vertical-align: top;
+}
+
+.history-summary-cell {
+  white-space: normal;
+  min-width: 360px;
 }
 
 @media (max-width: 1400px) {

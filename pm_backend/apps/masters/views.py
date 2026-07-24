@@ -21,7 +21,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
+    BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation, LineCycleTime,
@@ -30,7 +30,7 @@ from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMListSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
-    RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
+    RoutingChangeHistorySerializer, RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
     KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
     LineCycleTimeSerializer,
 )
@@ -73,6 +73,147 @@ def get_overlapping_default_routings(routing):
     if routing.valid_to_datetime:
         qs = qs.exclude(valid_from_datetime__gt=routing.valid_to_datetime)
     return qs
+
+
+ROUTING_HISTORY_FIELD_LABELS = {
+    'routing_code': 'ルーティングコード',
+    'description': '説明',
+    'is_default': '既定',
+    'is_active': '有効',
+    'valid_from_datetime': '有効開始日時',
+    'valid_to_datetime': '有効終了日時',
+}
+
+ROUTING_STEP_HISTORY_FIELD_LABELS = {
+    'step_no': '工程番号',
+    'hierarchy_path': '階層',
+    'parallel_group': '並列G',
+    'process_code': '工程',
+    'line_code': 'ライン',
+    'supplier_code': '外作先',
+    'output_product_code': '加工後品目',
+    'time_unit': '時間単位',
+    'lead_time_days': 'LT(日)',
+    'duration_min': '所要時間(分)',
+    'remark': '親製品',
+}
+
+
+def format_routing_history_value(value):
+    if value is None or value == '':
+        return '未設定'
+    if isinstance(value, bool):
+        return 'ON' if value else 'OFF'
+    return str(value)
+
+
+def format_routing_history_datetime(value):
+    if not value:
+        return ''
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M')
+    parsed = parse_datetime(str(value))
+    if parsed:
+        return parsed.strftime('%Y-%m-%d %H:%M')
+    return str(value)
+
+
+def build_routing_snapshot(routing):
+    product_code = ''
+    if getattr(routing, 'product_id', None):
+        product_code = str(getattr(getattr(routing, 'product', None), 'product_code', '') or '')
+    return {
+        'product_code': product_code,
+        'routing_code': str(getattr(routing, 'routing_code', '') or ''),
+        'description': str(getattr(routing, 'description', '') or ''),
+        'is_default': bool(getattr(routing, 'is_default', False)),
+        'is_active': bool(getattr(routing, 'is_active', False)),
+        'valid_from_datetime': format_routing_history_datetime(getattr(routing, 'valid_from_datetime', None)),
+        'valid_to_datetime': format_routing_history_datetime(getattr(routing, 'valid_to_datetime', None)),
+    }
+
+
+def build_routing_step_snapshot(step):
+    return {
+        'step_no': getattr(step, 'step_no', None),
+        'hierarchy_path': str(getattr(step, 'hierarchy_path', '') or ''),
+        'parallel_group': getattr(step, 'parallel_group', None),
+        'process_code': str(getattr(getattr(step, 'process', None), 'process_code', '') or ''),
+        'line_code': str(getattr(getattr(step, 'line', None), 'line_code', '') or ''),
+        'supplier_code': str(getattr(getattr(step, 'supplier', None), 'supplier_code', '') or ''),
+        'output_product_code': str(getattr(getattr(step, 'output_product', None), 'product_code', '') or ''),
+        'time_unit': str(getattr(step, 'time_unit', '') or ''),
+        'lead_time_days': getattr(step, 'lead_time_days', None),
+        'duration_min': getattr(step, 'duration_min', None),
+        'remark': str(getattr(step, 'remark', '') or ''),
+    }
+
+
+def build_routing_target_label(snapshot):
+    product_code = str(snapshot.get('product_code') or '').strip()
+    routing_code = str(snapshot.get('routing_code') or '').strip()
+    return ' / '.join([part for part in (product_code, routing_code) if part])
+
+
+def build_routing_step_target_label(snapshot):
+    step_no = snapshot.get('step_no')
+    hierarchy_path = str(snapshot.get('hierarchy_path') or '').strip()
+    process_code = str(snapshot.get('process_code') or '').strip()
+    output_product_code = str(snapshot.get('output_product_code') or '').strip()
+    parts = [f"工程{step_no}" if step_no is not None else '工程']
+    if hierarchy_path:
+        parts.append(hierarchy_path)
+    if process_code:
+        parts.append(process_code)
+    if output_product_code:
+        parts.append(output_product_code)
+    return ' / '.join(parts)
+
+
+def build_routing_change_summary(before_data, after_data, field_labels, fallback):
+    if not before_data or not after_data:
+        return fallback
+
+    changes = []
+    for key, label in field_labels.items():
+        before_value = before_data.get(key)
+        after_value = after_data.get(key)
+        if before_value == after_value:
+            continue
+        changes.append(
+            f'{label}: {format_routing_history_value(before_value)} → {format_routing_history_value(after_value)}'
+        )
+    return ' / '.join(changes) if changes else fallback
+
+
+def create_routing_history(
+    *,
+    routing,
+    target_type,
+    action,
+    changed_by,
+    routing_step=None,
+    before_data=None,
+    after_data=None,
+    summary='',
+):
+    snapshot = after_data or before_data or {}
+    target_label = (
+        build_routing_target_label(snapshot)
+        if target_type == 'ROUTING'
+        else build_routing_step_target_label(snapshot)
+    )
+    return RoutingChangeHistory.objects.create(
+        routing=routing,
+        routing_step=routing_step,
+        target_type=target_type,
+        action=action,
+        target_label=target_label,
+        change_summary=summary,
+        before_data=before_data,
+        after_data=after_data,
+        changed_by=changed_by,
+    )
 
 
 def ensure_supplier_purchase_line(supplier, previous_supplier_code=None):
@@ -3850,16 +3991,57 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         """有効期間が重複する他の既定ルーティングを返す"""
         return get_overlapping_default_routings(routing)
 
+    def _clear_overlapping_defaults_with_history(self, routing, reason):
+        if not routing.is_default:
+            return
+
+        changed_by = getattr(self.request, 'user', None)
+        for other in list(self._get_overlapping_defaults(routing).select_related('product')):
+            before_data = build_routing_snapshot(other)
+            if not other.is_default:
+                continue
+            other.is_default = False
+            other.save(update_fields=['is_default', 'updated_at'])
+            after_data = build_routing_snapshot(other)
+            summary = build_routing_change_summary(
+                before_data,
+                after_data,
+                ROUTING_HISTORY_FIELD_LABELS,
+                reason,
+            )
+            if reason:
+                summary = f'{summary} / {reason}' if summary != reason else reason
+            create_routing_history(
+                routing=other,
+                target_type='ROUTING',
+                action='UPDATE',
+                changed_by=changed_by,
+                before_data=before_data,
+                after_data=after_data,
+                summary=summary or reason,
+            )
+
     def perform_create(self, serializer):
         data = serializer.validated_data
         self._validate_routing_code_overlap(
             data['product'].id, data['routing_code'], data.get('valid_from_datetime'),
         )
         routing = serializer.save()
-        if routing.is_default:
-            self._get_overlapping_defaults(routing).update(is_default=False)
+        after_data = build_routing_snapshot(routing)
+        create_routing_history(
+            routing=routing,
+            target_type='ROUTING',
+            action='CREATE',
+            changed_by=getattr(self.request, 'user', None),
+            after_data=after_data,
+            summary='ルーティングヘッダを作成',
+        )
+        self._clear_overlapping_defaults_with_history(routing, '別ルーティングを既定に設定したため自動解除')
 
     def perform_update(self, serializer):
+        before_data = build_routing_snapshot(
+            Routing.objects.select_related('product').get(pk=serializer.instance.pk)
+        )
         data = serializer.validated_data
         self._validate_routing_code_overlap(
             data.get('product', serializer.instance.product).id,
@@ -3868,8 +4050,45 @@ class RoutingViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             exclude_id=serializer.instance.id,
         )
         routing = serializer.save()
-        if routing.is_default:
-            self._get_overlapping_defaults(routing).update(is_default=False)
+        after_data = build_routing_snapshot(routing)
+        create_routing_history(
+            routing=routing,
+            target_type='ROUTING',
+            action='UPDATE',
+            changed_by=getattr(self.request, 'user', None),
+            before_data=before_data,
+            after_data=after_data,
+            summary=build_routing_change_summary(
+                before_data,
+                after_data,
+                ROUTING_HISTORY_FIELD_LABELS,
+                'ルーティングヘッダを更新',
+            ),
+        )
+        self._clear_overlapping_defaults_with_history(routing, '別ルーティングを既定に設定したため自動解除')
+
+    def perform_destroy(self, instance):
+        before_data = build_routing_snapshot(instance)
+        create_routing_history(
+            routing=instance,
+            target_type='ROUTING',
+            action='DELETE',
+            changed_by=getattr(self.request, 'user', None),
+            before_data=before_data,
+            summary='ルーティングヘッダを削除',
+        )
+        instance.delete()
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        histories = (
+            RoutingChangeHistory.objects
+            .filter(routing_id=pk)
+            .select_related('changed_by', 'routing_step')
+            .order_by('-created_at', '-id')
+        )
+        serializer = RoutingChangeHistorySerializer(histories, many=True)
+        return Response(serializer.data)
 
 
 class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
@@ -4278,6 +4497,10 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step.save(update_fields=changed_fields + ['updated_at'])
 
     def perform_update(self, serializer):
+        before_step = RoutingStep.objects.select_related(
+            'routing', 'process', 'line', 'supplier', 'output_product',
+        ).get(pk=serializer.instance.pk)
+        before_data = build_routing_step_snapshot(before_step)
         usage_quantity = self._parse_usage_quantity_from_request()
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         step = serializer.save()
@@ -4288,6 +4511,26 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             self._sync_step_fields_to_bom(step, sync_fields)
         if usage_quantity is not None:
             self._sync_step_usage_quantity(step, usage_quantity)
+        step.refresh_from_db()
+        step = RoutingStep.objects.select_related(
+            'routing', 'process', 'line', 'supplier', 'output_product',
+        ).get(pk=step.pk)
+        after_data = build_routing_step_snapshot(step)
+        create_routing_history(
+            routing=step.routing,
+            routing_step=step,
+            target_type='STEP',
+            action='UPDATE',
+            changed_by=getattr(self.request, 'user', None),
+            before_data=before_data,
+            after_data=after_data,
+            summary=build_routing_change_summary(
+                before_data,
+                after_data,
+                ROUTING_STEP_HISTORY_FIELD_LABELS,
+                '工程を更新',
+            ),
+        )
 
     def perform_create(self, serializer):
         usage_quantity = self._parse_usage_quantity_from_request()
@@ -4297,12 +4540,42 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         # BOMItem自動作成/更新: 親製品(remark)と加工後品目(output_product)が指定されている場合
         if step.output_product_id and step.remark:
             self._sync_step_bom_linkage(step, usage_quantity)
-            return
+        else:
+            # BOM自動作成が不要な場合は既存のLT/所要時間同期のみ
+            sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
+            if sync_fields:
+                self._sync_step_fields_to_bom(step, sync_fields)
 
-        # BOM自動作成が不要な場合は既存のLT/所要時間同期のみ
-        sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
-        if sync_fields:
-            self._sync_step_fields_to_bom(step, sync_fields)
+        step.refresh_from_db()
+        step = RoutingStep.objects.select_related(
+            'routing', 'process', 'line', 'supplier', 'output_product',
+        ).get(pk=step.pk)
+        after_data = build_routing_step_snapshot(step)
+        create_routing_history(
+            routing=step.routing,
+            routing_step=step,
+            target_type='STEP',
+            action='CREATE',
+            changed_by=getattr(self.request, 'user', None),
+            after_data=after_data,
+            summary='工程を作成',
+        )
+
+    def perform_destroy(self, instance):
+        step = RoutingStep.objects.select_related(
+            'routing', 'process', 'line', 'supplier', 'output_product',
+        ).get(pk=instance.pk)
+        before_data = build_routing_step_snapshot(step)
+        create_routing_history(
+            routing=step.routing,
+            routing_step=step,
+            target_type='STEP',
+            action='DELETE',
+            changed_by=getattr(self.request, 'user', None),
+            before_data=before_data,
+            summary='工程を削除',
+        )
+        instance.delete()
 
 
 class RoutingStepMaterialViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

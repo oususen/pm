@@ -106,6 +106,18 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - `m_routing_step` は `supplier_id`（`m_supplier` へのFK, NULL可）を持つ。
 - 丸ごと外作運用では、親ルーティングに外注工程を1行追加し、`supplier_id` で外作先を管理する。
 
+### 変更履歴（`/masters/routing`）
+- ルーティングマスタ画面に `変更履歴` ボタンを表示し、選択中ルーティングの変更履歴をモーダルで一覧表示する。
+- 履歴一覧の列は `記録日時 / 操作 / 対象 / 変更者 / 内容` とする。
+- 対象は以下を含む。
+  - ルーティングヘッダの作成 / 更新 / 削除
+  - ルーティング工程の作成 / 更新 / 削除
+- ヘッダ更新の記録対象は `routing_code / description / is_default / is_active / valid_from_datetime / valid_to_datetime`。
+- 工程更新の記録対象は `step_no / hierarchy_path / parallel_group / process / line / supplier / output_product / time_unit / lead_time_days / duration_min / remark`。
+- 履歴はバックエンドで自動保存し、画面保存時にフロント側で個別登録処理は行わない。
+- 取得APIは `GET /api/routings/{routing_id}/history/` とする。
+- 保存先テーブルは `t_routing_change_history` とする。
+
 ### 使用個数（`usage_quantity`）算出
 - APIレスポンスで `routing-steps` の各行に `usage_quantity` を含める。
 - 算出優先順位:
@@ -178,3 +190,10 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - 入力用シートのプルダウン:
   - 調達区分（G列）: `外注 / 購買 / 自社製造`
   - 時間単位（K列）: `分 / 日`
+
+## 変更履歴
+
+### 2026-07-24: ルーティング変更履歴の保存・表示を追加
+- ルーティングヘッダ / ルーティング工程の作成・更新・削除時に、`t_routing_change_history` へ変更履歴を自動保存するようにした。
+- `/masters/routing` に `変更履歴` ボタンを追加し、選択中ルーティングの履歴をモーダルで確認できるようにした。
+- `GET /api/routings/{routing_id}/history/` を追加し、記録日時・操作・対象・変更者・変更内容を返すようにした。

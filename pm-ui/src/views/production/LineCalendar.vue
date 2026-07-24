@@ -126,11 +126,11 @@
         <div class="card-title">新規カレンダ</div>
         <div class="field">
           <label>カレンダコード</label>
-          <input v-model="newCalendar.code" placeholder="例: line_T1" :disabled="!canEdit || isReadOnlyLine" />
+          <input v-model="newCalendar.code" placeholder="例: TANK" :disabled="!canEdit || isReadOnlyLine" />
         </div>
         <div class="field">
           <label>カレンダ名</label>
-          <input v-model="newCalendar.name" placeholder="例: タンクライン勤務" :disabled="!canEdit || isReadOnlyLine" />
+          <input v-model="newCalendar.name" placeholder="例: タンクライン" :disabled="!canEdit || isReadOnlyLine" />
         </div>
         <button class="btn primary" @click="createCalendar" :disabled="creatingCalendar || !canEdit || isReadOnlyLine">作成</button>
       </div>

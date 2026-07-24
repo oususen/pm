@@ -4,7 +4,7 @@ from django.db import transaction
 from django.db.models import Sum
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
-    BOM, BOMItem, Routing, RoutingStep, RoutingStepMaterial, ProductGroup, ContainerCapacity,
+    BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation, LineCycleTime,
@@ -628,6 +628,47 @@ class RoutingListSerializer(serializers.ModelSerializer):
             'product_code',
             'product_name',
         ]
+
+
+class RoutingChangeHistorySerializer(serializers.ModelSerializer):
+    action_label = serializers.CharField(source='get_action_display', read_only=True)
+    target_type_label = serializers.CharField(source='get_target_type_display', read_only=True)
+    changed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RoutingChangeHistory
+        fields = [
+            'id',
+            'routing',
+            'routing_step',
+            'target_type',
+            'target_type_label',
+            'action',
+            'action_label',
+            'target_label',
+            'change_summary',
+            'before_data',
+            'after_data',
+            'changed_by',
+            'changed_by_name',
+            'created_at',
+        ]
+
+    def get_changed_by_name(self, obj):
+        user = getattr(obj, 'changed_by', None)
+        if not user:
+            return ''
+        full_name = ''
+        get_full_name = getattr(user, 'get_full_name', None)
+        if callable(get_full_name):
+            full_name = str(get_full_name() or '').strip()
+        if full_name:
+            return full_name
+        for attr in ('username', 'email'):
+            value = str(getattr(user, attr, '') or '').strip()
+            if value:
+                return value
+        return str(user)
 
 
 class RoutingStepMaterialSerializer(serializers.ModelSerializer):
