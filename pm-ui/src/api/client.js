@@ -77,6 +77,7 @@ import { createOrphanBacklogAPI } from './resources/orphanBacklog'
 import { createLineCycleTimesAPI } from './resources/lineCycleTimes'
 import { createLineLoadAPI } from './resources/lineLoad'
 import { createTrainingCertificationAPI } from './resources/trainingCertification'
+import { createActualCycleTimesAPI } from './resources/actualCycleTimes'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -229,5 +230,6 @@ export default {
   lineCycleTimes: createLineCycleTimesAPI(client),
   lineLoad: createLineLoadAPI(client),
   trainingCertification: createTrainingCertificationAPI(client),
+  actualCycleTimes: createActualCycleTimesAPI(client),
   client,
 }

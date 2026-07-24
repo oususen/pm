@@ -259,6 +259,100 @@ class BOMSerializerCoproductTest(TestCase):
         self.assertTrue(serializer.data['is_coproduct'])
 
 
+class BOMDuplicateVersionActionTest(TestCase):
+    def test_duplicate_version_creates_new_bom_with_same_parent_and_copied_items(self):
+        user = get_user_model().objects.create_user(
+            username='bom_duplicate_version_tester',
+            password='testpass123',
+        )
+        parent = Product.objects.create(
+            product_code='TEST-BOM-DUP-PARENT',
+            product_name='BOM版複製テスト親製品',
+        )
+        child = Product.objects.create(
+            product_code='TEST-BOM-DUP-CHILD',
+            product_name='BOM版複製テスト子製品',
+        )
+        supplier = Supplier.objects.create(
+            supplier_code='009999',
+            supplier_name='版複製テスト仕入先',
+            supplier_type='both',
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 7, 1),
+            is_active=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=child,
+            quantity=1,
+            sourcing_type='SUBCON',
+            supplier=supplier,
+            time_unit='DAY',
+            lead_time_days=3,
+        )
+
+        factory = APIRequestFactory()
+        request = factory.post(
+            f'/api/masters/boms/{bom.id}/duplicate_version/',
+            {
+                'version': 'v2',
+                'valid_from': '2026-09-01',
+                'is_active': True,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = BOMViewSet.as_view({'post': 'duplicate_version'})(request, pk=bom.id)
+
+        self.assertEqual(response.status_code, 201)
+        new_bom = BOM.objects.get(id=response.data['new_bom_id'])
+        self.assertEqual(new_bom.parent_product_id, bom.parent_product_id)
+        self.assertEqual(new_bom.version, 'v2')
+        self.assertEqual(new_bom.valid_from, date(2026, 9, 1))
+
+        new_items = list(BOMItem.objects.filter(bom=new_bom))
+        self.assertEqual(len(new_items), 1)
+        self.assertEqual(new_items[0].child_product_id, child.id)
+        self.assertEqual(new_items[0].supplier_id, supplier.id)
+        self.assertEqual(new_items[0].lead_time_days, 3)
+
+    def test_duplicate_version_rejects_same_version_name(self):
+        user = get_user_model().objects.create_user(
+            username='bom_duplicate_version_same_tester',
+            password='testpass123',
+        )
+        parent = Product.objects.create(
+            product_code='TEST-BOM-DUP-SAME-PARENT',
+            product_name='BOM版複製同版テスト親製品',
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 7, 1),
+            is_active=True,
+        )
+
+        factory = APIRequestFactory()
+        request = factory.post(
+            f'/api/masters/boms/{bom.id}/duplicate_version/',
+            {
+                'version': 'v1',
+                'valid_from': '2026-09-01',
+            },
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        response = BOMViewSet.as_view({'post': 'duplicate_version'})(request, pk=bom.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], '元BOMと異なる版を指定してください。')
+
+
 class SupplierAutoLineTest(TestCase):
     def test_supplier_create_also_creates_purchase_line_with_same_code_and_name(self):
         user = get_user_model().objects.create_user(

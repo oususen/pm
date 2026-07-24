@@ -64,6 +64,14 @@ from production.views_camera_actual import (
     CameraShapeTrainingPhotoUploadView,
     CameraShapeTrainingUploadView,
 )
+from production.views_actual_cycle_time import (
+    ActualCycleTimeCalcView,
+    ActualCycleTimeSaveView,
+    ActualCycleTimeListView,
+    FinishedProductCycleTimeConsolidatedView,
+    FinishedProductCycleTimeSaveView,
+    FinishedProductCycleTimeListView,
+)
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -151,4 +159,10 @@ urlpatterns = [
     path('camera-shape-training/upload-photos/', CameraShapeTrainingPhotoUploadView.as_view(), name='camera-shape-training-upload-photos'),
     path('camera-shape-training/start/', CameraShapeTrainingStartView.as_view(), name='camera-shape-training-start'),
     path('camera-shape-training/status/', CameraShapeTrainingStatusView.as_view(), name='camera-shape-training-status'),
+    path('actual-cycle-time/calc/', ActualCycleTimeCalcView.as_view(), name='actual-cycle-time-calc'),
+    path('actual-cycle-time/save/', ActualCycleTimeSaveView.as_view(), name='actual-cycle-time-save'),
+    path('finished-product-cycle-time/calc/', FinishedProductCycleTimeConsolidatedView.as_view(), name='finished-product-cycle-time-calc'),
+    path('finished-product-cycle-time/save/', FinishedProductCycleTimeSaveView.as_view(), name='finished-product-cycle-time-save'),
+    path('actual-cycle-time/list/', ActualCycleTimeListView.as_view(), name='actual-cycle-time-list'),
+    path('finished-product-cycle-time/list/', FinishedProductCycleTimeListView.as_view(), name='finished-product-cycle-time-list'),
 ]

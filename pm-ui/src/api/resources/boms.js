@@ -51,6 +51,9 @@ export const createBomsAPI = (client) => ({
   copyBOM(bomId, newParentProductId) {
     return client.post(`/boms/${bomId}/copy/`, { new_parent_product_id: newParentProductId })
   },
+  duplicateBOMVersion(bomId, data) {
+    return client.post(`/boms/${bomId}/duplicate_version/`, data)
+  },
   exportBOMExcel(bomId) {
     return client.get(`/boms/${bomId}/export_excel/`, { responseType: 'blob' })
   },

@@ -272,6 +272,7 @@
           <div class="summary-item">
             <button v-if="canEdit" type="button" class="btn-secondary" @click="editBOM(selectedBOM)">基本情報を編集</button>
             <button v-if="canEdit" type="button" class="btn-primary" @click="openCopyDialog">BOMをコピー</button>
+            <button v-if="canEdit" type="button" class="btn-primary" @click="openDuplicateVersionDialog">別バージョン作成</button>
           </div>
         </div>
         <p v-if="isPhantom(selectedBOM.parent_product)" class="phantom-info">
@@ -808,6 +809,43 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showDuplicateVersionDialog" class="modal-overlay" @click.self="closeDuplicateVersionDialog">
+      <div class="modal-content">
+        <h2>別バージョン作成</h2>
+        <p>対象親製品: {{ getProductName(selectedBOM.parent_product) }}</p>
+        <p>元BOM: 版 {{ selectedBOM.version }} / 有効開始日 {{ selectedBOM.valid_from }}</p>
+        <div class="form-group">
+          <label>新しい版 *</label>
+          <input v-model="duplicateVersionForm.version" type="text" />
+        </div>
+        <div class="form-group">
+          <label>有効開始日 *</label>
+          <input v-model="duplicateVersionForm.valid_from" type="date" />
+        </div>
+        <div class="form-group">
+          <label>有効終了日</label>
+          <input v-model="duplicateVersionForm.valid_to" type="date" />
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" v-model="duplicateVersionForm.is_active" />
+            有効
+          </label>
+        </div>
+        <div class="form-actions">
+          <button
+            type="button"
+            class="btn-primary"
+            @click="doDuplicateVersion"
+            :disabled="!duplicateVersionForm.version || !duplicateVersionForm.valid_from"
+          >
+            作成実行
+          </button>
+          <button type="button" class="btn-secondary" @click="closeDuplicateVersionDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -889,6 +927,13 @@ const whereUsedLoading = ref(false)
 const showCopyDialog = ref(false)
 const copyNewParentProductId = ref('')
 const copyProductFilter = ref('')
+const showDuplicateVersionDialog = ref(false)
+const duplicateVersionForm = ref({
+  version: '',
+  valid_from: '',
+  valid_to: '',
+  is_active: true,
+})
 const canEdit = computed(() => canAccessMasterResource('masters.bom', 'edit'))
 const showBomImportDialog = ref(false)
 const bomImporting = ref(false)
@@ -1631,6 +1676,24 @@ const filteredCopyProducts = computed(() => {
   )
 })
 
+const addDaysToIsoDate = (value, days) => {
+  if (!value) return ''
+  const dt = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(dt.getTime())) return ''
+  dt.setDate(dt.getDate() + days)
+  return formatISODate(dt)
+}
+
+const buildSuggestedBomVersion = (sourceVersion) => {
+  const raw = String(sourceVersion || '').trim()
+  const match = raw.match(/^v(\d+)$/i)
+  if (match) {
+    return `v${Number(match[1]) + 1}`
+  }
+  if (!raw) return 'v2'
+  return `${raw}_copy`
+}
+
 const selectedBomIsCoproduct = computed(() => isCoproductBom(selectedBOM.value))
 
 const categoryMap = {
@@ -2043,7 +2106,8 @@ const doCopyBOM = async () => {
     newBomId = response.data.new_bom_id
   } catch (error) {
     console.error('BOMコピーAPIエラー:', error)
-    alert('BOMのコピーに失敗しました')
+    const detail = error.response?.data?.detail || error.response?.data?.non_field_errors?.[0]
+    alert(`BOMのコピーに失敗しました${detail ? `\n\n${detail}` : ''}`)
     return
   }
 
@@ -2060,6 +2124,66 @@ const doCopyBOM = async () => {
     }
   } catch (error) {
     console.error('BOMコピー後の画面更新エラー:', error)
+  }
+}
+
+const openDuplicateVersionDialog = () => {
+  if (!canEdit.value || !selectedBOM.value?.id) return
+  duplicateVersionForm.value = {
+    version: buildSuggestedBomVersion(selectedBOM.value.version),
+    valid_from: selectedBOM.value.valid_to
+      ? addDaysToIsoDate(selectedBOM.value.valid_to, 1)
+      : formatISODate(new Date()),
+    valid_to: '',
+    is_active: selectedBOM.value.is_active !== false,
+  }
+  showDuplicateVersionDialog.value = true
+}
+
+const closeDuplicateVersionDialog = () => {
+  showDuplicateVersionDialog.value = false
+  duplicateVersionForm.value = {
+    version: '',
+    valid_from: '',
+    valid_to: '',
+    is_active: true,
+  }
+}
+
+const doDuplicateVersion = async () => {
+  if (!canEdit.value) return
+  if (!selectedBOM.value?.id || !duplicateVersionForm.value.version || !duplicateVersionForm.value.valid_from) return
+
+  let newBomId = null
+  try {
+    const response = await api.boms.duplicateBOMVersion(selectedBOM.value.id, {
+      version: duplicateVersionForm.value.version,
+      valid_from: duplicateVersionForm.value.valid_from,
+      valid_to: duplicateVersionForm.value.valid_to || null,
+      is_active: duplicateVersionForm.value.is_active,
+    })
+    newBomId = response.data.new_bom_id
+  } catch (error) {
+    console.error('BOM別バージョン作成APIエラー:', error)
+    const detail = error.response?.data?.detail
+      || error.response?.data?.non_field_errors?.[0]
+      || (typeof error.response?.data === 'string' ? error.response?.data : '')
+    alert(`別バージョン作成に失敗しました${detail ? `\n\n${detail}` : ''}`)
+    return
+  }
+
+  alert(`別バージョンを作成しました（新しいBOM ID: ${newBomId}）`)
+  closeDuplicateVersionDialog()
+  closeDetailsDialog()
+
+  try {
+    await fetchBOMs(currentPage.value)
+    const newBom = boms.value.find((b) => b.id === newBomId)
+    if (newBom) {
+      await viewDetails(newBom)
+    }
+  } catch (error) {
+    console.error('BOM別バージョン作成後の画面更新エラー:', error)
   }
 }
 

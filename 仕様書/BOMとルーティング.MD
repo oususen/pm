@@ -58,6 +58,48 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - BOM↔Routing同期の紐付けはFK（`source_bom_item_id`）優先に段階移行し、`remark` は表示情報として維持する（詳細: `仕様書/LT同期改善チケット.md`）。
 - BOM明細削除時、関連ルーティング工程は自動削除しない。削除前に影響候補の `RoutingStep` 一覧を表示し、利用者が手動修正対象を確認してから削除する。
 
+## BOM画面の複製系操作
+
+### 1) 別製品へのコピー
+- BOM詳細画面の `BOMをコピー` は、**同一親製品の改版用ではなく**、**別の親製品**へ構成を複製する機能とする。
+- API: `POST /api/boms/{id}/copy/`
+- リクエスト:
+  - `new_parent_product_id`
+- コピー先BOMの以下はコピー元を引き継ぐ。
+  - `version`
+  - `valid_from`
+  - `valid_to`
+  - `is_active`
+  - `is_coproduct`
+  - `BOMItem` 全件
+
+### 2) 同一親製品の別バージョン作成
+- BOM詳細画面に `別バージョン作成` ボタンを表示する。
+- この機能は、**親製品を変えずに**、`版` と `有効開始日` を変えた新BOMを作るための機能とする。
+- 用途:
+  - 設変
+  - 外作先切替
+  - 将来日切替
+  - ルーティング未来版の元データ作成
+- API: `POST /api/boms/{id}/duplicate_version/`
+- リクエスト:
+  - `version` 必須
+  - `valid_from` 必須（`YYYY-MM-DD`）
+  - `valid_to` 任意（`YYYY-MM-DD`）
+  - `is_active` 任意
+- 制約:
+  - `version` はコピー元と異なる値を必須とする
+  - `valid_to` を指定する場合は `valid_to >= valid_from`
+  - 既存の `parent_product × version × valid_from` と重複するBOMは作成不可
+- 新BOM作成時、以下をコピー元から引き継ぐ。
+  - `parent_product`
+  - `is_coproduct`
+  - `BOMItem` 全件
+- UI初期値:
+  - `version`: 元版が `vN` 形式なら `v(N+1)` を提案
+  - `valid_from`: 元BOMに `valid_to` があれば翌日、無ければ当日
+  - `is_active`: コピー元の値を引き継ぐ
+
 ## ルーティングマスタ画面（`/masters/routing`）の表示ルール
 
 ### 一覧（左ペイン）
@@ -192,6 +234,11 @@ BOMからルーティングを自動生成する際のルールをまとめる�
   - 時間単位（K列）: `分 / 日`
 
 ## 変更履歴
+
+### 2026-07-25: BOM別バージョン作成を追加
+- BOM詳細画面に `別バージョン作成` ボタンを追加し、同一親製品のまま `版` と `有効開始日` を変えた新BOMを作成できるようにした。
+- `POST /api/boms/{id}/duplicate_version/` を追加し、BOMヘッダと明細一式を複製できるようにした。
+- `BOMをコピー` は引き続き「別の親製品へのコピー」専用とし、改版用途とは分離した。
 
 ### 2026-07-24: ルーティング変更履歴の保存・表示を追加
 - ルーティングヘッダ / ルーティング工程の作成・更新・削除時に、`t_routing_change_history` へ変更履歴を自動保存するようにした。

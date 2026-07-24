@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Exists, Max, OuterRef, Q
+from django.db import transaction
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 import django_filters
@@ -3497,6 +3498,79 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         return Response({
             'message': 'BOM copied successfully',
+            'new_bom_id': new_bom.id,
+            'items_copied': items.count(),
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='duplicate_version')
+    def duplicate_version(self, request, pk=None):
+        """
+        BOMを同一親製品の別バージョンとして複製する
+        payload: { version: str, valid_from: YYYY-MM-DD, valid_to?: YYYY-MM-DD, is_active?: bool }
+        """
+        bom = self.get_object()
+        new_version = str(request.data.get('version') or '').strip()
+        valid_from_raw = str(request.data.get('valid_from') or '').strip()
+        valid_to_raw = str(request.data.get('valid_to') or '').strip()
+        is_active_raw = request.data.get('is_active', bom.is_active)
+
+        if not new_version:
+            return Response({'detail': 'version is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_version == bom.version:
+            return Response({'detail': '元BOMと異なる版を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not valid_from_raw:
+            return Response({'detail': 'valid_from is required'}, status=status.HTTP_400_BAD_REQUEST)
+        valid_from = parse_date(valid_from_raw)
+        if valid_from is None:
+            return Response({'detail': '有効開始日は YYYY-MM-DD 形式で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_to = None
+        if valid_to_raw:
+            valid_to = parse_date(valid_to_raw)
+            if valid_to is None:
+                return Response({'detail': '有効終了日は YYYY-MM-DD 形式で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            if valid_to < valid_from:
+                return Response({'detail': '有効終了日は有効開始日以降を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if isinstance(is_active_raw, str):
+            is_active = is_active_raw.lower() in ['1', 'true', 'yes', 'on']
+        else:
+            is_active = bool(is_active_raw)
+
+        serializer = self.get_serializer(data={
+            'parent_product': bom.parent_product_id,
+            'version': new_version,
+            'valid_from': valid_from,
+            'valid_to': valid_to,
+            'is_active': is_active,
+            'is_coproduct': bom.is_coproduct,
+        })
+        serializer.is_valid(raise_exception=True)
+
+        # BOMヘッダと明細は同一トランザクションで複製する
+        with transaction.atomic():
+            new_bom = serializer.save()
+            items = BOMItem.objects.filter(bom=bom)
+            for item in items:
+                BOMItem.objects.create(
+                    bom=new_bom,
+                    child_product=item.child_product,
+                    quantity=item.quantity,
+                    loss_rate=item.loss_rate,
+                    sourcing_type=item.sourcing_type,
+                    supplier=item.supplier,
+                    process=item.process,
+                    line=item.line,
+                    time_unit=item.time_unit,
+                    lead_time_days=item.lead_time_days,
+                    duration_min=item.duration_min,
+                    is_coproduct_driver=item.is_coproduct_driver,
+                    remark=item.remark,
+                )
+
+        return Response({
+            'message': 'BOM version duplicated successfully',
             'new_bom_id': new_bom.id,
             'items_copied': items.count(),
         }, status=status.HTTP_201_CREATED)

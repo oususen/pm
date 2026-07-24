@@ -362,6 +362,18 @@ const production = [
     meta: { pageTitle: "計画乖離レポート", resource: "production.record_inquiry" },
   },
   {
+    path: "/production/load-calc-menu",
+    name: "LoadCalcMenu",
+    component: () => import("@/views/production/LoadCalcMenu.vue"),
+    meta: { pageTitle: "負荷計算", resource: "production" },
+  },
+  {
+    path: "/production/actual-cycle-time",
+    name: "ActualCycleTimeSummary",
+    component: () => import("@/views/production/ActualCycleTimeSummary.vue"),
+    meta: { pageTitle: "出来高集計", resource: "production.record_inquiry" },
+  },
+  {
     path: "/production/line-cycle-time",
     name: "LineCycleTimeInput",
     component: () => import("@/views/production/LineCycleTimeInput.vue"),
