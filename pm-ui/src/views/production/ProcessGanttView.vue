@@ -68,19 +68,14 @@
         <span class="view-mode-count">{{ renderedProcessCount }}工程 / {{ renderedItemCount }}品番</span>
         <span class="view-mode-hint">連結中は編集・保存を無効化</span>
       </div>
-      <div class="gantt-scroll">
+      <div ref="ganttScrollRef" class="gantt-scroll" @scroll="onMainGanttScroll">
         <!-- 各工程のガントチャート -->
         <div
           v-for="proc in renderedProcessGantt"
           :key="proc.process_id"
           class="process-gantt-card"
+          :style="getProcessCardStyle(proc)"
         >
-          <div class="process-gantt-head">
-            <div class="process-info">
-              <div class="process-name">{{ proc.process_name }}</div>
-              <div class="process-sub">{{ proc.line_name }}</div>
-            </div>
-          </div>
           <div
             class="gantt-chart"
             :style="{
@@ -110,7 +105,10 @@
             </div>
             <!-- タイムライン ヘッダー -->
             <div class="timeline-header">
-              <div class="timeline-process-label">工程コード</div>
+              <div class="timeline-process-label">
+                <div class="timeline-process-name">{{ proc.process_name }}</div>
+                <div class="timeline-process-code-label">工程コード</div>
+              </div>
               <div class="timeline-label">品番</div>
               <div class="timeline-axis" :style="{ width: timelineWidthPx + 'px' }">
                 <div
@@ -201,6 +199,17 @@
           </div>
         </div>
       </div>
+      <div
+        v-if="frontScrollbarVisible"
+        ref="frontScrollbarRef"
+        class="gantt-scrollbar-front"
+        @scroll="onFrontScrollbarScroll"
+      >
+        <div
+          class="gantt-scrollbar-front__content"
+          :style="{ width: frontScrollbarContentWidth + 'px' }"
+        ></div>
+      </div>
     </div>
     <div v-else class="empty-message">
       ラインを選択して「読込」ボタンをクリックしてください
@@ -241,7 +250,7 @@
 
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
-import { ref, computed, onMounted, watch, defineProps, defineExpose, defineEmits } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, defineProps, defineExpose, defineEmits } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 
@@ -286,8 +295,16 @@ const sameBusinessDayMergeGapToleranceMs = 120 * 60 * 1000 // 同一稼働日内
 const businessDayBoundaryHour = 8
 const manualAddAnchorHour = 17
 const manualAddAnchorMinute = 0
+const PROCESS_CARD_PALETTE = [
+  { accent: '#2563eb', border: '#93c5fd', surface: '#eff6ff', header: '#dbeafe', row: '#e0f2fe', name: '#1d4ed8' },
+  { accent: '#059669', border: '#86efac', surface: '#ecfdf5', header: '#d1fae5', row: '#dcfce7', name: '#047857' },
+  { accent: '#d97706', border: '#fcd34d', surface: '#fffbeb', header: '#fef3c7', row: '#fde68a', name: '#b45309' },
+  { accent: '#7c3aed', border: '#c4b5fd', surface: '#f5f3ff', header: '#ede9fe', row: '#e9d5ff', name: '#6d28d9' },
+  { accent: '#db2777', border: '#f9a8d4', surface: '#fdf2f8', header: '#fce7f3', row: '#fbcfe8', name: '#be185d' },
+  { accent: '#0f766e', border: '#99f6e4', surface: '#f0fdfa', header: '#ccfbf1', row: '#99f6e4', name: '#0f766e' },
+]
 const processColWidthPx = 75
-const productColWidthPx = 120
+const productColWidthPx = 150
 const workStartFallback = { hour: 8, minute: 0 }
 const workMinutesFallback = 480
 const timelineStart = ref(null)
@@ -305,6 +322,10 @@ const daisoCalendarId = ref(undefined)
 const processOutputCandidatesMap = ref({})
 const processCoproductChildMap = ref({})
 const processCodeMap = ref({})
+const ganttScrollRef = ref(null)
+const frontScrollbarRef = ref(null)
+const frontScrollbarContentWidth = ref(0)
+const frontScrollbarVisible = ref(false)
 const barEditDialog = ref({
   visible: false,
   bar: null,
@@ -325,6 +346,56 @@ const isL2201Line = computed(
 
 const logDebug = (...args) => {
   if (debugEnabled) console.info('[ProcessGanttView]', ...args)
+}
+
+let syncingMainScroll = false
+let syncingFrontScroll = false
+let scrollbarSyncRafId = 0
+
+function requestScrollbarSync() {
+  if (scrollbarSyncRafId) cancelAnimationFrame(scrollbarSyncRafId)
+  scrollbarSyncRafId = requestAnimationFrame(() => {
+    scrollbarSyncRafId = 0
+    syncFrontScrollbar()
+  })
+}
+
+function syncFrontScrollbar() {
+  const mainEl = ganttScrollRef.value
+  const frontEl = frontScrollbarRef.value
+  if (!mainEl) {
+    frontScrollbarContentWidth.value = 0
+    frontScrollbarVisible.value = false
+    return
+  }
+  const scrollWidth = Math.ceil(mainEl.scrollWidth)
+  const clientWidth = Math.ceil(mainEl.clientWidth)
+  frontScrollbarContentWidth.value = scrollWidth
+  frontScrollbarVisible.value = scrollWidth > clientWidth + 1
+  if (!frontEl) return
+  if (Math.abs(frontEl.scrollLeft - mainEl.scrollLeft) > 1) {
+    syncingMainScroll = true
+    frontEl.scrollLeft = mainEl.scrollLeft
+    syncingMainScroll = false
+  }
+}
+
+function onMainGanttScroll(event) {
+  if (syncingFrontScroll) return
+  const frontEl = frontScrollbarRef.value
+  if (!frontEl) return
+  syncingMainScroll = true
+  frontEl.scrollLeft = event.target.scrollLeft
+  syncingMainScroll = false
+}
+
+function onFrontScrollbarScroll(event) {
+  if (syncingMainScroll) return
+  const mainEl = ganttScrollRef.value
+  if (!mainEl) return
+  syncingFrontScroll = true
+  mainEl.scrollLeft = event.target.scrollLeft
+  syncingFrontScroll = false
 }
 
 const emitDirtyState = () => {
@@ -1488,6 +1559,34 @@ function getProcessCode(proc) {
   return ''
 }
 
+function getProcessCardStyle(proc) {
+  const palette = PROCESS_CARD_PALETTE[getProcessPaletteIndex(proc)]
+  return {
+    '--process-card-accent': palette.accent,
+    '--process-card-border': palette.border,
+    '--process-card-surface': palette.surface,
+    '--process-card-header-bg': palette.header,
+    '--process-card-row-bg': palette.row,
+    '--process-card-name': palette.name,
+  }
+}
+
+function getProcessPaletteIndex(proc) {
+  const raw = proc?.process_id ?? proc?.process_code ?? proc?.process_name ?? ''
+  const seed = Number(raw)
+  if (Number.isFinite(seed) && seed > 0) return seed % PROCESS_CARD_PALETTE.length
+  return Math.abs(hashString(String(raw))) % PROCESS_CARD_PALETTE.length
+}
+
+function hashString(value) {
+  let hash = 0
+  for (const ch of String(value)) {
+    hash = ((hash << 5) - hash) + ch.charCodeAt(0)
+    hash |= 0
+  }
+  return hash
+}
+
 function formatDateTime(date) {
   return `${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
@@ -2268,7 +2367,19 @@ watch(hideWeekends, (v) => {
       ;(item.bars || []).forEach((bar) => updateBarDisplay(bar))
     })
   })
+  nextTick(() => {
+    requestScrollbarSync()
+  })
 })
+
+watch(
+  [renderedProcessCount, renderedItemCount, visibleTimelineSlots],
+  async () => {
+    await nextTick()
+    requestScrollbarSync()
+  },
+  { deep: true }
+)
 
 watch(
   () => props.presetBaseDate,
@@ -2290,6 +2401,7 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener('resize', requestScrollbarSync)
   try {
     await Promise.all([fetchLines()])
     if (props.embedded) {
@@ -2310,6 +2422,13 @@ onMounted(async () => {
   } catch (e) {
     console.error('初期データ取得エラー', e)
   }
+  await nextTick()
+  requestScrollbarSync()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', requestScrollbarSync)
+  if (scrollbarSyncRafId) cancelAnimationFrame(scrollbarSyncRafId)
 })
 </script>
 
@@ -2389,6 +2508,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  position: relative;
+  padding-bottom: 22px;
 }
 .view-mode-bar {
   display: flex;
@@ -2450,10 +2571,31 @@ onMounted(async () => {
 }
 .gantt-scroll {
   overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+}
+.gantt-scroll::-webkit-scrollbar {
+  height: 0;
+}
+.gantt-scrollbar-front {
+  position: sticky;
+  bottom: 0;
+  z-index: 12;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid #cbd5e1;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 -1px 3px rgba(15, 23, 42, 0.08);
+}
+.gantt-scrollbar-front__content {
+  height: 1px;
 }
 .process-gantt-card {
-  background: #fff;
-  border: 1px solid #d1d5db;
+  background: var(--process-card-surface, #fff);
+  border: 1px solid var(--process-card-border, #d1d5db);
+  border-left: 6px solid var(--process-card-accent, #94a3b8);
   border-radius: 8px;
   padding: 8px;
 }
@@ -2536,17 +2678,39 @@ onMounted(async () => {
 .timeline-process-label {
   width: var(--process-col-width);
   min-width: var(--process-col-width);
-  padding: 4px 8px;
-  font-size: 13px;
-  font-weight: 700;
-  background: #e8edf4;
+  padding: 0;
+  background: var(--process-card-header-bg, #e8edf4);
   border-right: 1px solid #d1d5db;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
   position: sticky;
   left: 0;
   z-index: 4;
+}
+.timeline-process-name,
+.timeline-process-code-label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 4px 6px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: left;
+}
+.timeline-process-name {
+  min-height: 22px;
+  font-size: 10px;
+  color: var(--process-card-name, #15803d);
+  border-bottom: 1px solid #cbd5e1;
+  word-break: break-all;
+}
+.timeline-process-code-label {
+  min-height: 22px;
+  font-size: 10px;
+  color: #1f2937;
+  white-space: nowrap;
 }
 .timeline-label {
   width: var(--product-col-width);
@@ -2609,7 +2773,7 @@ onMounted(async () => {
   border-right: 1px solid #d1d5db;
   display: flex;
   align-items: center;
-  background: #f1f5f9;
+  background: var(--process-card-row-bg, #f1f5f9);
 }
 .gantt-row-label {
   position: sticky;
@@ -2626,9 +2790,10 @@ onMounted(async () => {
 }
 .process-name-inline {
   width: 100%;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   color: #1f2937;
+  line-height: 1.1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
