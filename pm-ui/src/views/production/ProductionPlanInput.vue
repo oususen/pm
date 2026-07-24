@@ -503,28 +503,27 @@
           </div>
         </div>
         <div class="process-actions">
-          <div class="field checkbox-field gantt-toggle-field">
-            <label>
-              <input type="checkbox" v-model="showGanttAddAnchors" />
-              ＋表示
-            </label>
-          </div>
-          <div class="field checkbox-field gantt-toggle-field">
-            <label>
-              <input
-                type="checkbox"
-                v-model="hideEmptyGanttRows"
-                @change="localStorage.setItem(HIDE_EMPTY_GANTT_ROWS_KEY, hideEmptyGanttRows ? '1' : '0')"
-              />
-              空行非表示
-            </label>
-          </div>
-          <div class="field checkbox-field gantt-toggle-field">
-            <label>
-              <input type="checkbox" v-model="ganttHideWeekends" />
-              土日非表示
-            </label>
-          </div>
+          <button
+            type="button"
+            class="toolbar-toggle-btn"
+            :class="{ active: showGanttAddAnchors }"
+            :aria-pressed="showGanttAddAnchors"
+            @click="toggleShowGanttAddAnchors"
+          >{{ showGanttAddAnchors ? '✓＋表示' : '＋表示' }}</button>
+          <button
+            type="button"
+            class="toolbar-toggle-btn"
+            :class="{ active: hideEmptyGanttRows }"
+            :aria-pressed="hideEmptyGanttRows"
+            @click="toggleHideEmptyGanttRows"
+          >{{ hideEmptyGanttRows ? '✓空行非表示' : '空行非表示' }}</button>
+          <button
+            type="button"
+            class="toolbar-toggle-btn"
+            :class="{ active: ganttHideWeekends }"
+            :aria-pressed="ganttHideWeekends"
+            @click="toggleGanttHideWeekends"
+          >{{ ganttHideWeekends ? '✓土日非表示' : '土日非表示' }}</button>
           <button
             class="btn gantt-save-btn"
             :class="{ 'gantt-save-dirty': ganttEditDirty }"
@@ -621,22 +620,27 @@
         >
           連結
         </button>
-        <label class="footer-gantt-toggle">
-          <input type="checkbox" v-model="showGanttAddAnchors" />
-          ＋表示
-        </label>
-        <label class="footer-gantt-toggle">
-          <input
-            type="checkbox"
-            v-model="hideEmptyGanttRows"
-            @change="localStorage.setItem(HIDE_EMPTY_GANTT_ROWS_KEY, hideEmptyGanttRows ? '1' : '0')"
-          />
-          空行非表示
-        </label>
-        <label class="footer-gantt-toggle">
-          <input type="checkbox" v-model="ganttHideWeekends" />
-          土日非表示
-        </label>
+        <button
+          type="button"
+          class="btn-secondary footer-mode-btn"
+          :class="{ active: showGanttAddAnchors }"
+          :aria-pressed="showGanttAddAnchors"
+          @click="toggleShowGanttAddAnchors"
+        >{{ showGanttAddAnchors ? '✓＋表示' : '＋表示' }}</button>
+        <button
+          type="button"
+          class="btn-secondary footer-mode-btn"
+          :class="{ active: hideEmptyGanttRows }"
+          :aria-pressed="hideEmptyGanttRows"
+          @click="toggleHideEmptyGanttRows"
+        >{{ hideEmptyGanttRows ? '✓空行非表示' : '空行非表示' }}</button>
+        <button
+          type="button"
+          class="btn-secondary footer-mode-btn"
+          :class="{ active: ganttHideWeekends }"
+          :aria-pressed="ganttHideWeekends"
+          @click="toggleGanttHideWeekends"
+        >{{ ganttHideWeekends ? '✓土日非表示' : '土日非表示' }}</button>
         <button
           class="btn-secondary footer-gantt-save-btn"
           :class="{ 'gantt-save-dirty': ganttEditDirty }"
@@ -1384,6 +1388,16 @@ const toggleAdjustToBreakEnd = () => {
 const toggleHideEmptyRows = () => {
   hideEmptyRows.value = !hideEmptyRows.value
   localStorage.setItem(HIDE_EMPTY_ROWS_KEY, hideEmptyRows.value ? '1' : '0')
+}
+const toggleShowGanttAddAnchors = () => {
+  showGanttAddAnchors.value = !showGanttAddAnchors.value
+}
+const toggleHideEmptyGanttRows = () => {
+  hideEmptyGanttRows.value = !hideEmptyGanttRows.value
+  localStorage.setItem(HIDE_EMPTY_GANTT_ROWS_KEY, hideEmptyGanttRows.value ? '1' : '0')
+}
+const toggleGanttHideWeekends = () => {
+  ganttHideWeekends.value = !ganttHideWeekends.value
 }
 const selectedLineSummary = computed(() => {
   const line = (availableLines.value || []).find((l) => l.id === selectedLine.value)

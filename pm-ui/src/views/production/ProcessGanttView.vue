@@ -51,6 +51,21 @@
         >
           連結（同一製品の連続をまとめる）
         </button>
+        <div class="view-filter">
+          <input
+            v-model.trim="processKeyword"
+            type="text"
+            placeholder="工程で絞込"
+            class="view-filter-input"
+          />
+          <input
+            v-model.trim="productKeyword"
+            type="text"
+            placeholder="品番で絞込"
+            class="view-filter-input"
+          />
+        </div>
+        <span class="view-mode-count">{{ renderedProcessCount }}工程 / {{ renderedItemCount }}品番</span>
         <span class="view-mode-hint">連結中は編集・保存を無効化</span>
       </div>
       <div class="gantt-scroll">
@@ -262,6 +277,8 @@ const processGanttData = ref([])
 const mergeConsecutive = ref(false)
 const HIDE_WEEKENDS_KEY = 'processGanttView.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
+const processKeyword = ref('')
+const productKeyword = ref('')
 const slotHours = 4
 const pixelsPerSlot = 80
 const mergeGapToleranceMs = 60 * 1000 // 連続とみなす隙間（1分）
@@ -356,6 +373,9 @@ const visibleTimelineSlots = computed(() => {
   if (!hideWeekends.value) return timelineSlots.value
   return timelineSlots.value.filter(s => s.dayClass !== 'sat' && s.dayClass !== 'sun')
 })
+
+const normalizedProcessKeyword = computed(() => String(processKeyword.value || '').trim().toLowerCase())
+const normalizedProductKeyword = computed(() => String(productKeyword.value || '').trim().toLowerCase())
 
 const weekendMsRanges = computed(() => {
   if (!hideWeekends.value) return []
@@ -570,12 +590,30 @@ const hasBarInSelectedDisplayRange = (bar) => {
   return startMs < range.endMs && endMs > range.startMs
 }
 
+const matchesKeyword = (values, keyword) => {
+  if (!keyword) return true
+  return values.some((value) => String(value || '').toLowerCase().includes(keyword))
+}
+
+const processMatchesKeyword = (proc) => matchesKeyword([
+  proc?.process_name,
+  proc?.process_code,
+  getProcessCode(proc),
+], normalizedProcessKeyword.value)
+
+const itemMatchesKeyword = (item) => matchesKeyword([
+  item?.product_code,
+  item?.product_name,
+  item?.parent_product_code,
+], normalizedProductKeyword.value)
+
 const renderedProcessGantt = computed(() =>
   processGanttData.value
     .filter((proc) => {
       if (!props.filterProcessId) return true
       return String(proc.process_id) === String(props.filterProcessId)
     })
+    .filter((proc) => processMatchesKeyword(proc))
     .map((proc) => ({
       ...proc,
       items: proc.items
@@ -583,11 +621,18 @@ const renderedProcessGantt = computed(() =>
           ...item,
           displayBars: mergeConsecutive.value ? mergeBars(item.bars) : item.bars,
         }))
+        .filter((item) => itemMatchesKeyword(item))
         .filter((item) =>
           !props.hideEmptyRows ||
           (Array.isArray(item.displayBars) && item.displayBars.some((bar) => hasBarInSelectedDisplayRange(bar)))
         ),
     }))
+    .filter((proc) => proc.items.length > 0)
+)
+
+const renderedProcessCount = computed(() => renderedProcessGantt.value.length)
+const renderedItemCount = computed(() =>
+  renderedProcessGantt.value.reduce((total, proc) => total + (Array.isArray(proc.items) ? proc.items.length : 0), 0)
 )
 
 const applyDailySeqMarkers = (procEntry) => {
@@ -2352,6 +2397,7 @@ onMounted(async () => {
   margin: 0 0 8px;
   font-size: 12px;
   color: #374151;
+  flex-wrap: wrap;
 }
 .view-mode-label {
   font-weight: 700;
@@ -2377,6 +2423,30 @@ onMounted(async () => {
 }
 .view-mode-hint {
   color: #6b7280;
+}
+.view-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.view-filter-input {
+  width: 132px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+}
+.view-mode-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 3px 8px;
 }
 .gantt-scroll {
   overflow-x: auto;
