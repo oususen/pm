@@ -187,6 +187,16 @@ class Process(models.Model):
         verbose_name='管理単位',
         help_text='日単位管理（マクロ計画）または分単位管理（ミクロ実行）'
     )
+    operating_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=100,
+        verbose_name='稼働率(%)',
+        help_text='CT補正用。実績CT ÷ (稼働率/100) = 補正CT'
+    )
+    equipment_count = models.PositiveIntegerField(
+        default=1,
+        verbose_name='設備台数',
+        help_text='負荷計算用。負荷時間 ÷ 設備台数 = 実負荷'
+    )
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

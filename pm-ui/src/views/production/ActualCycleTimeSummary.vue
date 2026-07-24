@@ -18,6 +18,11 @@
         :class="{ active: activeTab === 'inquiry' }"
         @click="activeTab = 'inquiry'; loadInquiry()"
       >照会</button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'coeff' }"
+        @click="activeTab = 'coeff'; loadCoefficients()"
+      >係数設定</button>
     </div>
 
     <!-- ===== 計算タブ ===== -->
@@ -63,7 +68,7 @@
           <h2 class="section-title">実績サイクル時間（製品別）</h2>
           <div class="section-actions">
             <span class="summary-text">
-              全体平均: {{ summary.avg_cycle_time_sec }}秒/個 | 合計出来高: {{ summary.total_qty }}個 | 合計稼働: {{ formatSeconds(summary.total_seconds) }}
+              全体平均: {{ summary.avg_cycle_time_sec }}秒/個 | 合計生産数量: {{ summary.total_qty }}個 | 合計稼働: {{ formatSeconds(summary.total_seconds) }}
             </span>
             <button class="btn-save" :disabled="savingActual" @click="saveActual">
               {{ savingActual ? '保存中...' : '実績CT保存' }}
@@ -76,7 +81,7 @@
               <tr>
                 <th class="col-code">品番</th>
                 <th class="col-name">品名</th>
-                <th class="col-num">出来高</th>
+                <th class="col-num">生産数量</th>
                 <th class="col-num">有効稼働時間</th>
                 <th class="col-num col-ct-val">CT (秒/個)</th>
                 <th class="col-num">セッション数</th>
@@ -156,22 +161,40 @@
       <div class="filter-bar">
         <div class="filter-row">
           <div class="filter-field">
-            <label>工程</label>
-            <select v-model="inqProcessId" @change="loadInquiry">
-              <option :value="null">-- 全工程 --</option>
-              <option v-for="p in processes" :key="p.id" :value="p.id">
-                {{ p.process_code }} {{ p.process_name }}
-              </option>
-            </select>
-          </div>
-          <div class="filter-field">
             <label>ライン</label>
-            <select v-model="inqLineId" @change="loadInquiry">
+            <select v-model="inqLineId" @change="onInqLineChange">
               <option :value="null">-- 全ライン --</option>
               <option v-for="l in lines" :key="l.id" :value="l.id">
                 {{ l.line_code }} {{ l.line_name }}
               </option>
             </select>
+          </div>
+          <div class="filter-field">
+            <label>工程</label>
+            <select v-model="inqProcessId" @change="loadInquiry" :disabled="!inqLineId">
+              <option :value="null">-- {{ inqLineId ? '全工程' : 'ライン選択' }} --</option>
+              <option v-for="p in inqFilteredProcesses" :key="p.id" :value="p.id">
+                {{ p.process_code }} {{ p.process_name }}
+              </option>
+            </select>
+          </div>
+          <div class="filter-field">
+            <label>期間</label>
+            <select v-model="inqPeriod">
+              <option value="">-- 全期間 --</option>
+              <option v-for="p in inqPeriodOptions" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </div>
+          <div class="filter-field">
+            <label>品番/品名</label>
+            <input v-model="inqProductSearch" placeholder="絞込" />
+          </div>
+          <div class="filter-actions">
+            <button
+              class="btn-danger"
+              :disabled="!inqPeriod || deleting"
+              @click="deletePeriod"
+            >{{ deleting ? '削除中...' : '期間データ削除' }}</button>
           </div>
         </div>
       </div>
@@ -181,9 +204,9 @@
         <!-- 実績CT照会 -->
         <div class="section-header">
           <h2 class="section-title">保存済み 実績サイクル時間</h2>
-          <span class="summary-text">{{ inqActualItems.length }}件</span>
+          <span class="summary-text">{{ inqFilteredActual.length }}件</span>
         </div>
-        <div v-if="inqActualItems.length" class="table-wrapper">
+        <div v-if="inqFilteredActual.length" class="table-wrapper">
           <table class="data-table compact">
             <thead>
               <tr>
@@ -192,14 +215,14 @@
                 <th class="col-date">期間</th>
                 <th class="col-code">品番</th>
                 <th class="col-name">品名</th>
-                <th class="col-num">出来高</th>
+                <th class="col-num">生産数量</th>
                 <th class="col-num">稼働秒</th>
                 <th class="col-num col-ct-val">CT (秒/個)</th>
                 <th class="col-date">計算日時</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in inqActualItems" :key="item.id">
+              <tr v-for="item in inqFilteredActual" :key="item.id">
                 <td class="col-code">{{ item.process_code }}</td>
                 <td class="col-code">{{ item.line_code }}</td>
                 <td class="col-date">{{ item.calc_from_date }} ~ {{ item.calc_to_date }}</td>
@@ -218,9 +241,9 @@
         <!-- 完成品CT照会 -->
         <div class="section-header" style="margin-top: 16px;">
           <h2 class="section-title">保存済み 完成品サイクル時間</h2>
-          <span class="summary-text">{{ inqFinishedItems.length }}件</span>
+          <span class="summary-text">{{ inqFilteredFinished.length }}件</span>
         </div>
-        <div v-if="inqFinishedItems.length" class="table-wrapper">
+        <div v-if="inqFilteredFinished.length" class="table-wrapper">
           <table class="data-table compact">
             <thead>
               <tr>
@@ -234,7 +257,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in inqFinishedItems" :key="item.id">
+              <tr v-for="item in inqFilteredFinished" :key="item.id">
                 <td class="col-code">{{ item.process_code }}</td>
                 <td class="col-code">{{ item.line_code }}</td>
                 <td class="col-date">{{ item.calc_from_date }} ~ {{ item.calc_to_date }}</td>
@@ -248,6 +271,56 @@
         </div>
         <div v-else class="empty-state">保存済みデータなし</div>
       </template>
+    </div>
+
+    <!-- ===== 係数設定タブ ===== -->
+    <div v-if="activeTab === 'coeff'" class="page-content">
+      <div class="section-header">
+        <h2 class="section-title">工程別 係数設定</h2>
+        <div class="section-actions">
+          <span class="summary-text">稼働率: CT補正用（実績CT ÷ 稼働率）　設備台数: 負荷計算用（負荷 ÷ 台数）</span>
+          <button class="btn-save" :disabled="savingCoeff || !coeffDirty" @click="saveCoefficients">
+            {{ savingCoeff ? '保存中...' : '一括保存' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="coeffLoading" class="empty-state">読み込み中...</div>
+      <div v-else class="table-wrapper">
+        <table class="data-table compact">
+          <thead>
+            <tr>
+              <th class="col-code">工程コード</th>
+              <th class="col-name">工程名</th>
+              <th class="col-code">ライン</th>
+              <th class="col-num" style="min-width:100px">稼働率 (%)</th>
+              <th class="col-num" style="min-width:80px">設備台数</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in coeffProcesses" :key="p.id" :class="{ 'row-changed': p._dirty }">
+              <td class="col-code">{{ p.process_code }}</td>
+              <td class="col-name">{{ p.process_name }}</td>
+              <td class="col-code">{{ p.line_name || '-' }}</td>
+              <td class="col-num">
+                <input
+                  type="number" step="0.01" min="1" max="100"
+                  class="coeff-input"
+                  :value="p.operating_rate"
+                  @input="onCoeffChange(p, 'operating_rate', $event.target.value)"
+                />
+              </td>
+              <td class="col-num">
+                <input
+                  type="number" step="1" min="1"
+                  class="coeff-input"
+                  :value="p.equipment_count"
+                  @input="onCoeffChange(p, 'equipment_count', $event.target.value)"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </template>
@@ -296,9 +369,42 @@ endDate.value = today.toISOString().slice(0, 10)
 // ===== 照会タブ =====
 const inqProcessId = ref(null)
 const inqLineId = ref(null)
+const inqPeriod = ref('')
+const inqProductSearch = ref('')
 const inqLoading = ref(false)
+const deleting = ref(false)
 const inqActualItems = ref([])
 const inqFinishedItems = ref([])
+const inqFilteredProcesses = computed(() => {
+  if (!inqLineId.value) return []
+  return processes.value.filter(p => p.line === inqLineId.value)
+})
+
+const inqPeriodOptions = computed(() => {
+  const set = new Set()
+  for (const r of inqActualItems.value) set.add(`${r.calc_from_date} ~ ${r.calc_to_date}`)
+  for (const r of inqFinishedItems.value) set.add(`${r.calc_from_date} ~ ${r.calc_to_date}`)
+  return [...set].sort().reverse()
+})
+
+const inqFilteredActual = computed(() => {
+  const q = inqProductSearch.value.toLowerCase()
+  return inqActualItems.value.filter(r => {
+    if (inqPeriod.value && `${r.calc_from_date} ~ ${r.calc_to_date}` !== inqPeriod.value) return false
+    if (q && !r.product_code.toLowerCase().includes(q) && !(r.product_name || '').toLowerCase().includes(q)) return false
+    return true
+  })
+})
+
+const inqFilteredFinished = computed(() => {
+  const q = inqProductSearch.value.toLowerCase()
+  return inqFinishedItems.value.filter(r => {
+    if (inqPeriod.value && `${r.calc_from_date} ~ ${r.calc_to_date}` !== inqPeriod.value) return false
+    if (q && !r.finished_product_code.toLowerCase().includes(q) && !(r.finished_product_name || '').toLowerCase().includes(q)) return false
+    return true
+  })
+})
+
 let inqLoaded = false
 
 onMounted(async () => {
@@ -427,6 +533,101 @@ const saveFinished = async () => {
 }
 
 // ===== 照会タブ =====
+const onInqLineChange = () => {
+  inqProcessId.value = null
+  loadInquiry()
+}
+
+const deletePeriod = async () => {
+  if (!inqPeriod.value) return
+  const [fromStr, toStr] = inqPeriod.value.split(' ~ ')
+  const scope = []
+  if (inqLineId.value) scope.push(`ライン: ${lines.value.find(l => l.id === inqLineId.value)?.line_code || ''}`)
+  if (inqProcessId.value) scope.push(`工程: ${processes.value.find(p => p.id === inqProcessId.value)?.process_code || ''}`)
+  const scopeText = scope.length ? `（${scope.join(', ')}）` : '（全ライン・全工程）'
+  const msg = `期間 ${inqPeriod.value} ${scopeText} の実績CT・完成品CTを削除しますか？\n\n実績CT: ${inqFilteredActual.value.length}件\n完成品CT: ${inqFilteredFinished.value.length}件`
+  if (!confirm(msg)) return
+  deleting.value = true
+  try {
+    const params = { calc_from_date: fromStr, calc_to_date: toStr }
+    if (inqLineId.value) params.line_id = inqLineId.value
+    if (inqProcessId.value) params.process_id = inqProcessId.value
+    const res = await api.actualCycleTimes.deleteByPeriod(params)
+    alert(`削除完了: 実績CT ${res.data.deleted_actual}件, 完成品CT ${res.data.deleted_finished}件`)
+    inqPeriod.value = ''
+    await loadInquiry()
+  } catch (e) {
+    alert('削除エラー: ' + (e.response?.data?.error || e.message))
+  } finally {
+    deleting.value = false
+  }
+}
+
+// ===== 係数設定タブ =====
+const coeffProcesses = ref([])
+const coeffLoading = ref(false)
+const savingCoeff = ref(false)
+const coeffDirty = computed(() => coeffProcesses.value.some(p => p._dirty))
+
+const loadCoefficients = async () => {
+  if (coeffProcesses.value.length) return
+  coeffLoading.value = true
+  try {
+    const res = await api.processes.getProcesses({ is_active: true })
+    const data = (res.data.results || res.data)
+      .sort((a, b) => a.process_code.localeCompare(b.process_code))
+    coeffProcesses.value = data.map(p => ({
+      id: p.id,
+      process_code: p.process_code,
+      process_name: p.process_name,
+      line_name: p.line_name || '',
+      operating_rate: Number(p.operating_rate) || 100,
+      equipment_count: p.equipment_count || 1,
+      _orig_rate: Number(p.operating_rate) || 100,
+      _orig_count: p.equipment_count || 1,
+      _dirty: false,
+    }))
+  } catch (e) {
+    alert('読み込みエラー: ' + (e.response?.data?.error || e.message))
+  } finally {
+    coeffLoading.value = false
+  }
+}
+
+const onCoeffChange = (proc, field, value) => {
+  const num = Number(value)
+  if (field === 'operating_rate') {
+    proc.operating_rate = num
+  } else {
+    proc.equipment_count = Math.max(Math.round(num), 1)
+  }
+  proc._dirty = proc.operating_rate !== proc._orig_rate || proc.equipment_count !== proc._orig_count
+}
+
+const saveCoefficients = async () => {
+  const changed = coeffProcesses.value.filter(p => p._dirty)
+  if (!changed.length) return
+  savingCoeff.value = true
+  try {
+    const items = changed.map(p => ({
+      id: p.id,
+      operating_rate: p.operating_rate,
+      equipment_count: p.equipment_count,
+    }))
+    const res = await api.processes.bulkUpdateCoefficients(items)
+    alert(`保存完了: ${res.data.updated_count}件`)
+    for (const p of changed) {
+      p._orig_rate = p.operating_rate
+      p._orig_count = p.equipment_count
+      p._dirty = false
+    }
+  } catch (e) {
+    alert('保存エラー: ' + (e.response?.data?.error || e.message))
+  } finally {
+    savingCoeff.value = false
+  }
+}
+
 const loadInquiry = async () => {
   if (activeTab.value !== 'inquiry') return
   inqLoading.value = true
@@ -483,6 +684,8 @@ const loadInquiry = async () => {
 
 .btn-primary { padding: 5px 14px; background: #3498db; color: #fff; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; }
 .btn-primary:disabled { opacity: 0.6; cursor: default; }
+.btn-danger { padding: 5px 14px; background: #e74c3c; color: #fff; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; }
+.btn-danger:disabled { opacity: 0.6; cursor: default; }
 .btn-save { padding: 5px 14px; background: #27ae60; color: #fff; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; }
 .btn-save:disabled { opacity: 0.6; cursor: default; }
 
@@ -507,6 +710,13 @@ const loadInquiry = async () => {
   font-size: 11px;
   color: #2c3e50;
 }
+
+.coeff-input {
+  width: 80px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px;
+  font-size: 13px; text-align: right;
+}
+.coeff-input:focus { outline: none; border-color: #3498db; }
+.row-changed { background: #fffde7; }
 
 .info-msg { font-size: 13px; color: #856404; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 8px 12px; }
 .empty-state { text-align: center; color: #999; padding: 40px; font-size: 14px; }

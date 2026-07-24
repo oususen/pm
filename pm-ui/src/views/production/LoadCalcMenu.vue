@@ -53,9 +53,12 @@ const dsSources = [
   { op: 'BOM展開', table: 'm_bom / m_bom_item', desc: '部品構成（逆展開で完成品を特定）' },
   { section: 'ラインサイクルタイム' },
   { op: '読み書き', table: 'm_line_cycle_time', desc: '長期負荷計算用CT（秒/個）' },
-  { op: '参照', table: 'm_routing_step', desc: 'ルーティングから完成品×工程を抽出' },
+  { op: '参照', table: 'm_routing / m_routing_step', desc: '現行ルーティングから完成品×工程を抽出' },
+  { op: '参照', table: 't_finished_product_cycle_time', desc: '出来高CT取得ボタンの反映元' },
   { section: '長期負荷チャート' },
-  { op: '負荷計算', table: 'm_line_cycle_time × t_line_demand', desc: 'CT × 需要数量 = 負荷時間' },
+  { op: '負荷計算', table: 't_line_demand × m_line_cycle_time', desc: '需要数量 × CT = ライン別負荷時間' },
+  { op: '参照', table: 'm_line / m_calendar_day', desc: 'ライン勤務カレンダと稼働分' },
+  { op: '参照', table: 'accounts_unit_line_mapping', desc: 'グループ選択時のライン紐付け' },
 ]
 </script>
 

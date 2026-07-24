@@ -18,5 +18,11 @@ export function createActualCycleTimesAPI(client) {
     listFinished(params) {
       return client.get('/finished-product-cycle-time/list/', { params })
     },
+    latestForLine(lineId) {
+      return client.get('/finished-product-cycle-time/latest-for-line/', { params: { line_id: lineId } })
+    },
+    deleteByPeriod(params) {
+      return client.delete('/actual-cycle-time/delete-by-period/', { params })
+    },
   }
 }

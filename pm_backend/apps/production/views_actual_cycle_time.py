@@ -253,6 +253,43 @@ class ActualCycleTimeSaveView(APIView):
         return Response({'saved_count': saved_count})
 
 
+class ActualCycleTimeDeleteByPeriodView(APIView):
+    """指定期間の実績CT・完成品CTを一括削除"""
+
+    def delete(self, request):
+        calc_from_date = request.query_params.get('calc_from_date')
+        calc_to_date = request.query_params.get('calc_to_date')
+        line_id = request.query_params.get('line_id')
+        process_id = request.query_params.get('process_id')
+
+        if not calc_from_date or not calc_to_date:
+            return Response({'error': 'calc_from_date, calc_to_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        d_from = parse_date(calc_from_date)
+        d_to = parse_date(calc_to_date)
+        if not d_from or not d_to:
+            return Response({'error': '日付形式が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        act_qs = ActualCycleTime.objects.filter(calc_from_date=d_from, calc_to_date=d_to)
+        fin_qs = FinishedProductCycleTime.objects.filter(calc_from_date=d_from, calc_to_date=d_to)
+        if line_id:
+            act_qs = act_qs.filter(line_id=line_id)
+            fin_qs = fin_qs.filter(line_id=line_id)
+        if process_id:
+            act_qs = act_qs.filter(process_id=process_id)
+            fin_qs = fin_qs.filter(process_id=process_id)
+
+        act_count = act_qs.count()
+        fin_count = fin_qs.count()
+        act_qs.delete()
+        fin_qs.delete()
+
+        return Response({
+            'deleted_actual': act_count,
+            'deleted_finished': fin_count,
+        })
+
+
 class ActualCycleTimeListView(APIView):
     """保存済み実績サイクル時間の照会"""
 
@@ -329,6 +366,35 @@ class FinishedProductCycleTimeListView(APIView):
             })
 
         return Response(items)
+
+
+class FinishedProductCycleTimeLatestForLineView(APIView):
+    """指定ラインの最新完成品CT（製品×工程別）をマトリクス用マップで返す"""
+
+    def get(self, request):
+        line_id = request.query_params.get('line_id')
+        if not line_id:
+            return Response({'error': 'line_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = FinishedProductCycleTime.objects.filter(
+            line_id=line_id,
+        ).order_by('finished_product_id', 'process_id', '-calc_from_date')
+
+        best = {}
+        for r in qs:
+            key = f'{r.finished_product_id}_{r.process_id}'
+            if key not in best:
+                best[key] = {
+                    'cycle_time_sec': float(r.cycle_time_sec),
+                    'calc_from_date': str(r.calc_from_date),
+                    'calc_to_date': str(r.calc_to_date),
+                }
+
+        return Response({
+            'line_id': int(line_id),
+            'count': len(best),
+            'values': best,
+        })
 
 
 class FinishedProductCycleTimeConsolidatedView(APIView):
@@ -427,12 +493,12 @@ class FinishedProductCycleTimeConsolidatedView(APIView):
                     'finished_cycle_time_sec': finished_ct,
                 })
                 consolidated[parent_id]['total_cycle_time_sec'] += finished_ct
-            else:
-                further_parents = parent.get('parents', [])
-                if further_parents:
-                    self._accumulate(
-                        further_parents, component_product_id, ct_info, total_qty, consolidated, bom_service,
-                    )
+
+            further_parents = parent.get('parents', [])
+            if further_parents:
+                self._accumulate(
+                    further_parents, component_product_id, ct_info, total_qty, consolidated, bom_service,
+                )
 
 
 class FinishedProductCycleTimeSaveView(APIView):

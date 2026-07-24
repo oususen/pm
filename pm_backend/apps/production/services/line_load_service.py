@@ -202,7 +202,10 @@ class LineLoadService:
         for week_start in sorted(weeks.keys()):
             days = weeks[week_start]
             working_days = [d for d in days if d['is_working_day']]
-            if not working_days:
+            total_avail = sum(d['available_min'] for d in working_days)
+            total_load_sec = sum(d['line_load_sec'] for d in days)
+
+            if total_avail == 0 and total_load_sec == 0:
                 result.append({
                     'date': week_start.isoformat(),
                     'week_label': f"{week_start.strftime('%m/%d')}~",
@@ -214,13 +217,10 @@ class LineLoadService:
                     'processes': [],
                 })
                 continue
-
-            total_avail = sum(d['available_min'] for d in working_days)
-            total_load_sec = sum(d['line_load_sec'] for d in working_days)
             util = (total_load_sec / (total_avail * 60) * 100) if total_avail > 0 else 0
 
             proc_totals = defaultdict(lambda: {'load_sec': 0, 'code': '', 'name': ''})
-            for d in working_days:
+            for d in days:
                 for p in d['processes']:
                     proc_totals[p['process_id']]['load_sec'] += p['load_sec']
                     proc_totals[p['process_id']]['code'] = p['process_code']
@@ -245,7 +245,7 @@ class LineLoadService:
                 'line_load_sec': round(total_load_sec, 1),
                 'line_load_min': round(total_load_sec / 60, 1),
                 'utilization': round(util, 1),
-                'is_working_day': True,
+                'is_working_day': total_avail > 0 or total_load_sec > 0,
                 'processes': sorted(processes, key=lambda x: x['process_code']),
             })
 
@@ -262,7 +262,10 @@ class LineLoadService:
         for month_start in sorted(months.keys()):
             days = months[month_start]
             working_days = [d for d in days if d['is_working_day']]
-            if not working_days:
+            total_avail = sum(d['available_min'] for d in working_days)
+            total_load_sec = sum(d['line_load_sec'] for d in days)
+
+            if total_avail == 0 and total_load_sec == 0:
                 result.append({
                     'date': month_start.isoformat(),
                     'month_label': f"{month_start.strftime('%Y/%m')}",
@@ -271,13 +274,10 @@ class LineLoadService:
                     'utilization': 0, 'is_working_day': False, 'processes': [],
                 })
                 continue
-
-            total_avail = sum(d['available_min'] for d in working_days)
-            total_load_sec = sum(d['line_load_sec'] for d in working_days)
             util = (total_load_sec / (total_avail * 60) * 100) if total_avail > 0 else 0
 
             proc_totals = defaultdict(lambda: {'load_sec': 0, 'code': '', 'name': ''})
-            for d in working_days:
+            for d in days:
                 for p in d['processes']:
                     proc_totals[p['process_id']]['load_sec'] += p['load_sec']
                     proc_totals[p['process_id']]['code'] = p['process_code']
@@ -297,7 +297,7 @@ class LineLoadService:
                 'month_label': f"{month_start.strftime('%Y/%m')}",
                 'available_min': total_avail,
                 'line_load_sec': round(total_load_sec, 1), 'line_load_min': round(total_load_sec / 60, 1),
-                'utilization': round(util, 1), 'is_working_day': True,
+                'utilization': round(util, 1), 'is_working_day': total_avail > 0 or total_load_sec > 0,
                 'processes': sorted(processes, key=lambda x: x['process_code']),
             })
 

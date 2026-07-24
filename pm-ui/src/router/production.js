@@ -365,25 +365,25 @@ const production = [
     path: "/production/load-calc-menu",
     name: "LoadCalcMenu",
     component: () => import("@/views/production/LoadCalcMenu.vue"),
-    meta: { pageTitle: "負荷計算", resource: "production" },
+    meta: { pageTitle: "負荷計算", manualPath: "生産/負荷計算.md", resource: "production" },
   },
   {
     path: "/production/actual-cycle-time",
     name: "ActualCycleTimeSummary",
     component: () => import("@/views/production/ActualCycleTimeSummary.vue"),
-    meta: { pageTitle: "出来高集計", resource: "production.record_inquiry" },
+    meta: { pageTitle: "出来高集計", manualPath: "生産/負荷計算.md", resource: "production.record_inquiry" },
   },
   {
     path: "/production/line-cycle-time",
     name: "LineCycleTimeInput",
     component: () => import("@/views/production/LineCycleTimeInput.vue"),
-    meta: { pageTitle: "ラインサイクルタイム入力", resource: "production.plan_input", permission: "edit" },
+    meta: { pageTitle: "ラインサイクルタイム入力", manualPath: "生産/負荷計算.md", resource: "production.plan_input", permission: "edit" },
   },
   {
     path: "/production/line-load-chart",
     name: "LineLoadChart",
     component: () => import("@/views/production/LineLoadChart.vue"),
-    meta: { pageTitle: "長期負荷チャート", resource: "production" },
+    meta: { pageTitle: "長期負荷チャート", manualPath: "生産/負荷計算.md", resource: "production" },
   },
 ];
 

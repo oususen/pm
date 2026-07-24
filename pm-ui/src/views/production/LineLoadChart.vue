@@ -2,8 +2,8 @@
   <div class="page-container">
     <div class="page-header">
       <div class="header-left">
-        <h1 class="page-title">長期負荷チャート</h1>
-        <p class="helper-text">顧客需要 × ラインサイクルタイムからライン別の負荷率を表示</p>
+        <h1 class="page-title">長期負荷チャート <DataSourceDialog title="長期負荷チャート" :sources="dsSources" /></h1>
+        <p class="helper-text">顧客需要 × ラインサイクルタイムからライン別の負荷を表示（カレンダー設定時は稼働率%）</p>
       </div>
       <div class="page-actions">
         <button v-if="result" class="btn-secondary" @click="exportExcel">Excel出力</button>
@@ -19,6 +19,15 @@
             <input type="date" v-model="filters.startDate" />
           </div>
           <div class="filter-field">
+            <label>期間</label>
+            <select v-model="filters.period" @change="applyPeriod">
+              <option value="3m">3ヶ月</option>
+              <option value="6m">6ヶ月</option>
+              <option value="1y">1年</option>
+              <option value="custom">カスタム</option>
+            </select>
+          </div>
+          <div v-if="filters.period === 'custom'" class="filter-field">
             <label>終了日</label>
             <input type="date" v-model="filters.endDate" />
           </div>
@@ -93,19 +102,22 @@
         <!-- ライン個別 -->
         <div v-for="line in result.lines" :key="line.line_id" class="line-chart-block">
           <h3 class="line-title">{{ line.line_code }} {{ line.line_name }}</h3>
+          <div v-if="lineWarning(line)" class="calendar-warning">
+            ⚠ {{ lineWarning(line) }}
+          </div>
           <div class="bar-chart-wrapper">
             <div class="bar-chart">
               <div
-                v-for="d in line.data.filter(x => x.is_working_day)"
+                v-for="d in lineDisplayData(line)"
                 :key="d.date"
                 class="bar-col"
                 @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name}`, d)"
                 @mouseleave="hideTooltip"
               >
-                <div class="bar-label-top">{{ Math.round(d.utilization) }}%</div>
+                <div class="bar-label-top">{{ lineHasCalendar(line) ? Math.round(d.utilization) + '%' : formatLoadHours(d.line_load_sec) + 'h' }}</div>
                 <div class="bar-track">
-                  <div class="bar-fill" :style="{ height: Math.min(d.utilization, 150) / 1.5 + '%', backgroundColor: barColor(d.utilization) }"></div>
-                  <div class="bar-100-line"></div>
+                  <div class="bar-fill" :style="barStyle(line, d)"></div>
+                  <div v-if="lineHasCalendar(line)" class="bar-100-line"></div>
                 </div>
                 <div class="bar-label">{{ formatDateLabel(d) }}</div>
               </div>
@@ -121,20 +133,29 @@
 
     <div v-if="tooltip.visible" class="chart-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
       <div class="tooltip-title">{{ tooltip.line }} / {{ tooltip.date }}</div>
-      <div class="tooltip-row">稼働: {{ tooltip.availMin }}分</div>
+      <div v-if="tooltip.availMin > 0" class="tooltip-row">稼働: {{ tooltip.availMin }}分</div>
       <div class="tooltip-row">負荷: {{ formatHours(tooltip.loadMin) }}h</div>
-      <div class="tooltip-row"><b>負荷率: {{ tooltip.utilization }}%</b></div>
+      <div v-if="tooltip.availMin > 0" class="tooltip-row"><b>負荷率: {{ tooltip.utilization }}%</b></div>
       <div v-for="p in tooltip.processes" :key="p.process_code" class="tooltip-row">
-        {{ p.process_code }} {{ p.process_name }}: {{ formatHours(p.load_min) }}h ({{ p.utilization }}%)
+        {{ p.process_code }} {{ p.process_name }}: {{ formatHours(p.load_min) }}h<template v-if="tooltip.availMin > 0"> ({{ p.utilization }}%)</template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'm_line', desc: 'ライン個別選択の候補' },
+  { op: '読み取り', table: 'accounts_unit / accounts_unit_line_mapping', desc: 'グループ選択とライン紐付け' },
+  { op: '負荷計算', table: 't_line_demand', desc: '最終品の需要数量（内示 + 確定）' },
+  { op: '負荷計算', table: 'm_line_cycle_time', desc: 'ライン別サイクルタイム（秒/個）' },
+  { op: '参照', table: 'm_line / m_calendar_day', desc: 'ライン勤務カレンダと稼働分' },
+]
 
 const loading = ref(false)
 const prodLines = ref([])
@@ -145,10 +166,27 @@ const selectedGroupIds = ref([])
 const result = ref(null)
 
 const today = new Date()
+const addMonths = (date, months) => {
+  const d = new Date(date)
+  d.setMonth(d.getMonth() + months)
+  return d.toISOString().slice(0, 10)
+}
 const filters = reactive({
   startDate: today.toISOString().slice(0, 10),
-  endDate: new Date(today.getTime() + 365 * 86400000).toISOString().slice(0, 10),
+  endDate: addMonths(today, 6),
+  period: '6m',
   aggregate: 'monthly',
+})
+
+const applyPeriod = () => {
+  const base = new Date(filters.startDate)
+  if (filters.period === '3m') filters.endDate = addMonths(base, 3)
+  else if (filters.period === '6m') filters.endDate = addMonths(base, 6)
+  else if (filters.period === '1y') filters.endDate = addMonths(base, 12)
+}
+
+watch(() => filters.startDate, () => {
+  if (filters.period !== 'custom') applyPeriod()
 })
 
 const tooltip = reactive({
@@ -221,8 +259,7 @@ const groupCharts = computed(() => {
 
     const dateMap = {}
     for (const line of lines) {
-      for (const d of line.data) {
-        if (!d.is_working_day) continue
+      for (const d of lineDisplayData(line)) {
         if (!dateMap[d.date]) {
           dateMap[d.date] = { available_min: 0, load_sec: 0, month_label: d.month_label, week_label: d.week_label }
         }
@@ -249,6 +286,41 @@ const groupCharts = computed(() => {
   }
   return charts
 })
+
+const lineHasCalendar = (line) => {
+  return line.data.some(d => d.available_min > 0)
+}
+
+const lineHasLoad = (line) => {
+  return line.data.some(d => d.line_load_sec > 0)
+}
+
+const lineWarning = (line) => {
+  const hasCal = lineHasCalendar(line)
+  const hasLoad = lineHasLoad(line)
+  if (!hasCal && hasLoad) return 'カレンダー未設定のため負荷時間(h)で表示中。稼働率(%)を表示するにはカレンダーを設定してください'
+  if (!hasCal && !hasLoad) return 'カレンダー未設定・負荷データなし'
+  return ''
+}
+
+const lineDisplayData = (line) => {
+  if (lineHasCalendar(line)) return line.data.filter(x => x.is_working_day)
+  return line.data.filter(x => x.line_load_sec > 0)
+}
+
+const formatLoadHours = (sec) => {
+  return Math.round((sec || 0) / 3600 * 10) / 10
+}
+
+const barStyle = (line, d) => {
+  if (lineHasCalendar(line)) {
+    return { height: Math.min(d.utilization, 150) / 1.5 + '%', backgroundColor: barColor(d.utilization) }
+  }
+  const allLoads = line.data.map(x => x.line_load_sec).filter(x => x > 0)
+  const maxLoad = Math.max(...allLoads, 1)
+  const pct = (d.line_load_sec / maxLoad) * 100
+  return { height: pct + '%', backgroundColor: '#3498db' }
+}
 
 const barColor = (util) => {
   if (util >= 100) return '#e74c3c'
@@ -300,8 +372,8 @@ const exportExcel = () => {
   const dates = []
   const dateSet = new Set()
   for (const line of result.value.lines) {
-    for (const d of line.data) {
-      if (d.is_working_day && !dateSet.has(d.date)) {
+    for (const d of lineDisplayData(line)) {
+      if (!dateSet.has(d.date)) {
         dateSet.add(d.date)
         dates.push(d)
       }
@@ -315,23 +387,23 @@ const exportExcel = () => {
   const utilRows = [header]
   for (const line of result.value.lines) {
     const dateMap = {}
-    for (const d of line.data) { if (d.is_working_day) dateMap[d.date] = d }
-    const row = [`${line.line_code} ${line.line_name}`]
+    for (const d of lineDisplayData(line)) { dateMap[d.date] = d }
+    const row = [`${line.line_code} ${line.line_name}${lineHasCalendar(line) ? '' : ' ※カレンダー未設定'}`]
     for (const d of dates) {
       const val = dateMap[d.date]
-      row.push(val ? val.utilization : '')
+      row.push(val ? (lineHasCalendar(line) ? val.utilization : formatLoadHours(val.line_load_sec) + 'h') : '')
     }
     utilRows.push(row)
   }
   const wsUtil = XLSX.utils.aoa_to_sheet(utilRows)
-  wsUtil['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
+  wsUtil['!cols'] = [{ wch: 30 }, ...dateLabels.map(() => ({ wch: 10 }))]
   XLSX.utils.book_append_sheet(wb, wsUtil, '負荷率(%)')
 
   // 負荷時間シート
   const loadRows = [header]
   for (const line of result.value.lines) {
     const dateMap = {}
-    for (const d of line.data) { if (d.is_working_day) dateMap[d.date] = d }
+    for (const d of lineDisplayData(line)) { dateMap[d.date] = d }
     const row = [`${line.line_code} ${line.line_name}`]
     for (const d of dates) {
       const val = dateMap[d.date]
@@ -400,6 +472,11 @@ const exportExcel = () => {
 }
 .tooltip-title { font-weight: 700; margin-bottom: 4px; border-bottom: 1px solid #555; padding-bottom: 3px; }
 .tooltip-row { margin: 2px 0; }
+
+.calendar-warning {
+  background: #fff3cd; color: #856404; border: 1px solid #ffc107; border-radius: 4px;
+  padding: 4px 10px; font-size: 12px; margin-bottom: 6px;
+}
 
 .empty-state { text-align: center; color: #999; padding: 40px; font-size: 14px; }
 </style>

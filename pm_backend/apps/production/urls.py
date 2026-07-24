@@ -68,9 +68,11 @@ from production.views_actual_cycle_time import (
     ActualCycleTimeCalcView,
     ActualCycleTimeSaveView,
     ActualCycleTimeListView,
+    ActualCycleTimeDeleteByPeriodView,
     FinishedProductCycleTimeConsolidatedView,
     FinishedProductCycleTimeSaveView,
     FinishedProductCycleTimeListView,
+    FinishedProductCycleTimeLatestForLineView,
 )
 
 router = DefaultRouter()
@@ -165,4 +167,6 @@ urlpatterns = [
     path('finished-product-cycle-time/save/', FinishedProductCycleTimeSaveView.as_view(), name='finished-product-cycle-time-save'),
     path('actual-cycle-time/list/', ActualCycleTimeListView.as_view(), name='actual-cycle-time-list'),
     path('finished-product-cycle-time/list/', FinishedProductCycleTimeListView.as_view(), name='finished-product-cycle-time-list'),
+    path('finished-product-cycle-time/latest-for-line/', FinishedProductCycleTimeLatestForLineView.as_view(), name='finished-product-cycle-time-latest-for-line'),
+    path('actual-cycle-time/delete-by-period/', ActualCycleTimeDeleteByPeriodView.as_view(), name='actual-cycle-time-delete-by-period'),
 ]

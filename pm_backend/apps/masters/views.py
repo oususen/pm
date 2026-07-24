@@ -1953,6 +1953,31 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         return Response(result)
 
+    @action(detail=False, methods=['post'], url_path='bulk-update-coefficients')
+    def bulk_update_coefficients(self, request):
+        """工程係数（稼働率・設備台数）の一括更新"""
+        items = request.data.get('items', [])
+        updated = 0
+        for item in items:
+            pid = item.get('id')
+            if not pid:
+                continue
+            update_fields = []
+            proc = Process.objects.filter(id=pid).first()
+            if not proc:
+                continue
+            if 'operating_rate' in item:
+                proc.operating_rate = item['operating_rate']
+                update_fields.append('operating_rate')
+            if 'equipment_count' in item:
+                proc.equipment_count = max(int(item['equipment_count']), 1)
+                update_fields.append('equipment_count')
+            if update_fields:
+                update_fields.append('updated_at')
+                proc.save(update_fields=update_fields)
+                updated += 1
+        return Response({'updated_count': updated})
+
 
 class LineViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     queryset = Line.objects.all()

@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div class="header-left">
-        <h1 class="page-title">ラインサイクルタイム入力</h1>
+        <h1 class="page-title">ラインサイクルタイム入力 <DataSourceDialog title="ラインサイクルタイム入力" :sources="dsSources" /></h1>
         <p class="helper-text">長期負荷計算用: ルーティングから自動抽出した完成品 × 工程のサイクルタイム(秒/個)を登録</p>
       </div>
       <div class="page-actions">
@@ -31,6 +31,11 @@
             未入力のみ
           </label>
           <div class="filter-actions">
+            <button
+              class="btn-fetch"
+              :disabled="!selectedLineId || loading || fetching"
+              @click="fetchActualCT"
+            >{{ fetching ? '取得中...' : '出来高CT取得' }}</button>
             <button class="btn-primary" :disabled="!dirty || saving" @click="saveAll">
               {{ saving ? '保存中...' : `一括保存 (${changedCount}件)` }}
             </button>
@@ -102,6 +107,14 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'm_line', desc: '対象ライン選択' },
+  { op: '参照', table: 'm_routing / m_routing_step', desc: '現行ルーティングから完成品×工程マトリクスを生成' },
+  { op: '読み書き', table: 'm_line_cycle_time', desc: '長期負荷計算用のライン別CT（秒/個）' },
+  { op: '参照', table: 't_finished_product_cycle_time', desc: '出来高CT取得ボタンの反映元' },
+]
 
 const prodLines = ref([])
 const matrixProducts = ref([])
@@ -112,6 +125,7 @@ const searchText = ref('')
 const showMissingOnly = ref(false)
 const loading = ref(false)
 const saving = ref(false)
+const fetching = ref(false)
 const activeRow = ref(-1)
 
 const editedValues = reactive({})
@@ -252,6 +266,35 @@ const onCellInput = (productId, processId, event) => {
   editedValues[key] = val === '' ? undefined : val
 }
 
+const fetchActualCT = async () => {
+  if (!selectedLineId.value) return
+  fetching.value = true
+  try {
+    const res = await api.actualCycleTimes.latestForLine(selectedLineId.value)
+    const values = res.data.values || {}
+    let filled = 0
+    for (const [key, info] of Object.entries(values)) {
+      if (!productProcessSet.value.has(key)) continue
+      const newVal = String(info.cycle_time_sec)
+      const orig = originalValues[key]
+      if (orig !== undefined && orig !== null && String(orig) === newVal) continue
+      editedValues[key] = newVal
+      filled++
+    }
+    if (filled > 0) {
+      alert(`${filled}セルに出来高CTを反映しました（期間: ${Object.values(values)[0]?.calc_from_date} ~ ${Object.values(values)[0]?.calc_to_date}）\n「一括保存」で確定してください`)
+    } else if (res.data.count > 0) {
+      alert('このラインのルーティングに一致する完成品CTがありませんでした')
+    } else {
+      alert('このラインの保存済み完成品CTがありません。先に出来高集計で計算・保存してください')
+    }
+  } catch (e) {
+    alert('取得エラー: ' + (e.response?.data?.error || e.message))
+  } finally {
+    fetching.value = false
+  }
+}
+
 const saveAll = async () => {
   const items = []
   for (const key in editedValues) {
@@ -300,6 +343,8 @@ const saveAll = async () => {
 
 .summary-bar { font-size: 12px; color: #666; display: flex; gap: 16px; padding: 4px 0; }
 
+.btn-fetch { padding: 5px 14px; background: #e67e22; color: #fff; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; }
+.btn-fetch:disabled { opacity: 0.6; cursor: default; }
 .btn-primary { padding: 5px 14px; background: #3498db; color: #fff; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; }
 .btn-primary:disabled { opacity: 0.6; cursor: default; }
 .btn-secondary { padding: 5px 14px; background: #fff; color: #333; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; cursor: pointer; text-decoration: none; }

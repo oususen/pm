@@ -17,4 +17,7 @@ export const createProcessesAPI = (client) => ({
   getRelatedProducts(processId) {
     return client.get(`/processes/${processId}/related-products/`)
   },
+  bulkUpdateCoefficients(items) {
+    return client.post('/processes/bulk-update-coefficients/', { items })
+  },
 })
