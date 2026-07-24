@@ -267,6 +267,14 @@
                   maxlength="5"
                   :title="`最終工程開始時刻（未設定時はデフォルト ${finalProcessStartTime || '08:00'} を使用）`"
                 />
+                <button
+                  v-if="canClearDailySetting(c.key)"
+                  type="button"
+                  class="time-clear-btn"
+                  title="日別上書きを削除してデフォルト開始時刻に戻す"
+                  @mousedown.prevent
+                  @click.stop="clearDailySettingOverride(c.key)"
+                >×</button>
                 <span v-if="getWorkTimeLabel(c.key)" class="work-time-label">
                   {{ getWorkTimeLabel(c.key) }}
                 </span>
@@ -5621,6 +5629,47 @@ const applyDefaultToDailySettings = () => {
   })
 }
 
+const resetDailySettingToDefault = (dateKey) => {
+  const defaultTime = finalProcessStartTime.value || '08:00'
+  dailySettings.value[dateKey] = {
+    ...dailySettings.value[dateKey],
+    id: undefined,
+    final_process_start_time: defaultTime,
+  }
+}
+
+const canClearDailySetting = (dateKey) => {
+  const setting = dailySettings.value[dateKey]
+  if (!setting) return false
+  if (setting.id) return true
+  const normalized = normalizeTimeInput(setting.final_process_start_time, true)
+  const defaultTime = finalProcessStartTime.value || '08:00'
+  return Boolean(normalized && normalized !== defaultTime)
+}
+
+const clearDailySettingOverride = async (dateKey, { silent = false } = {}) => {
+  const setting = dailySettings.value[dateKey]
+  if (!setting) {
+    resetDailySettingToDefault(dateKey)
+    return
+  }
+  const settingId = setting.id
+  try {
+    if (settingId) {
+      await api.lineDailyScheduleSettings.deleteLineDailyScheduleSetting(settingId)
+      await loadDailySettings()
+      applyDefaultToDailySettings()
+    }
+    resetDailySettingToDefault(dateKey)
+  } catch (e) {
+    console.error('日別設定削除エラー', e)
+    if (!silent) {
+      alert('日別開始時刻の上書き削除に失敗しました。')
+    }
+    throw e
+  }
+}
+
 const onDailySettingTimeChange = (dateKey, timeValue) => {
   if (!dailySettings.value[dateKey]) {
     dailySettings.value[dateKey] = {}
@@ -5633,13 +5682,12 @@ const onDailySettingTimeBlur = async (dateKey) => {
   // 時刻入力欄から離れた時に自動保存
   if (!selectedLine.value) return
   const setting = dailySettings.value[dateKey]
-  if (!setting || !setting.final_process_start_time) return
+  if (!setting) return
   const normalized = normalizeTimeInput(setting.final_process_start_time, true)
-  if (!normalized) return
   // デフォルト値と同じ場合は日別設定として保存しない（不要な上書きを防止）
   const defaultTime = finalProcessStartTime.value || '08:00'
-  if (normalized === defaultTime) {
-    setting.final_process_start_time = null
+  if (!normalized || normalized === defaultTime) {
+    await clearDailySettingOverride(dateKey, { silent: true })
     return
   }
   setting.final_process_start_time = normalized
@@ -5651,6 +5699,8 @@ const onDailySettingTimeBlur = async (dateKey) => {
       final_process_start_time: normalized,
       adjust_to_break_end: adjustToBreakEnd.value,
     }])
+    await loadDailySettings()
+    applyDefaultToDailySettings()
     console.log(`日別設定を保存しました: ${dateKey} - ${setting.final_process_start_time}`)
   } catch (e) {
     console.error('日別設定の保存に失敗しました', e)
@@ -5660,17 +5710,27 @@ const onDailySettingTimeBlur = async (dateKey) => {
 const saveDailySettings = async () => {
   if (!selectedLine.value) return
   const settings = []
+  const deleteIds = []
+  const defaultTime = finalProcessStartTime.value || '08:00'
   Object.keys(dailySettings.value).forEach((dateKey) => {
     const setting = dailySettings.value[dateKey]
-    if (setting.final_process_start_time) {
-      settings.push({
-        line: selectedLine.value,
-        plan_date: dateKey,
-        final_process_start_time: setting.final_process_start_time,
-        adjust_to_break_end: adjustToBreakEnd.value,
-      })
+    const normalized = normalizeTimeInput(setting?.final_process_start_time, true)
+    if (!normalized || normalized === defaultTime) {
+      if (setting?.id) {
+        deleteIds.push(setting.id)
+      }
+      return
     }
+    settings.push({
+      line: selectedLine.value,
+      plan_date: dateKey,
+      final_process_start_time: normalized,
+      adjust_to_break_end: adjustToBreakEnd.value,
+    })
   })
+  if (deleteIds.length) {
+    await Promise.all(deleteIds.map((id) => api.lineDailyScheduleSettings.deleteLineDailyScheduleSetting(id)))
+  }
   if (settings.length === 0) return
   try {
     await api.lineDailyScheduleSettings.bulkSaveLineDailyScheduleSettings(settings)
@@ -6238,6 +6298,22 @@ thead tr.head-level2 th.sticky-col {
 .time-input-inline::placeholder {
   color: #15803d;
   opacity: 1;
+}
+.time-clear-btn {
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #f87171;
+  border-radius: 2px;
+  background: #fff;
+  color: #dc2626;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.time-clear-btn:hover {
+  background: #fee2e2;
 }
 .btn-day-apply {
   padding: 0 4px;
