@@ -91,6 +91,7 @@
                   @click.stop="applyDemandToPlan(col.group)"
                 >→</button>
               </div>
+              <div class="head-ship-name">{{ col.group.shipToName || ' ' }}</div>
             </th>
           </tr>
           <tr class="head2">
@@ -173,7 +174,7 @@
         </tbody>
         <tfoot>
           <tr class="total-row">
-            <th class="sticky-left total-label date-separator">総残</th>
+            <th class="sticky-left total-label date-separator">最終残</th>
             <template v-for="(col, colIdx) in matrixColumns" :key="`total-${col.colKey}`">
               <td class="total-blank" :class="{ 'product-start': colIdx > 0 }"></td>
               <td class="total-blank"></td>
@@ -274,7 +275,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import ExcelJS from 'exceljs'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -657,22 +658,19 @@ const slotRemaining = (row, colKey, slotIdx) => {
 }
 
 const groupTotalRemaining = (group) => {
-  // 最終日の注残合計（各注番の最終注残）
-  const lastDate = dateColumns.value.length ? dateColumns.value[dateColumns.value.length - 1].key : null
-  if (!lastDate) return 0
-  let total = 0
-  for (const line of group.lines) {
-    // 最後に注残がある日のremaining
-    let lastRemaining = 0
-    for (const col of dateColumns.value) {
-      const r = parseNumber(line.remainingByDate[col.key])
-      if (r !== 0 || parseNumber(line.demandByDate[col.key]) > 0 || parseNumber(line.deliveryByDate[col.key]) > 0) {
-        lastRemaining = r
-      }
+  const dates = dateColumns.value.map((c) => c.key)
+  if (!dates.length) return 0
+  for (let i = dates.length - 1; i >= 0; i--) {
+    const d = dates[i]
+    let total = 0
+    let found = false
+    for (const line of group.lines) {
+      const r = parseNumber(line.remainingByDate[d])
+      if (r !== 0) { total += r; found = true }
     }
-    total += lastRemaining
+    if (found) return Number(total.toFixed(3))
   }
-  return Number(total.toFixed(3))
+  return 0
 }
 
 const showClearPlanDialog = ref(false)
@@ -1021,15 +1019,18 @@ const exportExcel = async () => {
 
   const headerRow1 = sheet.addRow([])
   const headerRow2 = sheet.addRow([])
-  sheet.mergeCells(3, 1, 4, 1)
+  const headerRow3 = sheet.addRow([])
+  const hRow1 = headerRow1.number
+  sheet.mergeCells(hRow1, 1, hRow1 + 2, 1)
   headerRow1.getCell(1).value = '日付'
   applyExcelCellStyle(headerRow1.getCell(1), { bold: true, bg: '#cfd8ec', thickRight: true })
   applyExcelCellStyle(headerRow2.getCell(1), { bold: true, bg: '#cfd8ec', thickRight: true })
+  applyExcelCellStyle(headerRow3.getCell(1), { bold: true, bg: '#e7edf7', thickRight: true })
 
   matrixColumns.value.forEach((col, index) => {
     const startCol = 2 + index * 3
     const endCol = startCol + 2
-    sheet.mergeCells(3, startCol, 3, endCol)
+    sheet.mergeCells(hRow1, startCol, hRow1, endCol)
     const mergedCell = headerRow1.getCell(startCol)
     mergedCell.value = `${col.productCode} ${col.shipToCode}`
     applyExcelCellStyle(mergedCell, {
@@ -1039,9 +1040,18 @@ const exportExcel = async () => {
       thickRight: true,
     })
 
+    sheet.mergeCells(hRow1 + 1, startCol, hRow1 + 1, endCol)
+    const shipCell = headerRow2.getCell(startCol)
+    shipCell.value = col.group.shipToName || ''
+    applyExcelCellStyle(shipCell, {
+      bg: '#cfd8ec',
+      thickLeft: index > 0,
+      thickRight: true,
+    })
+
     const labels = ['受注', '計画', '注残']
     labels.forEach((label, offset) => {
-      const cell = headerRow2.getCell(startCol + offset)
+      const cell = headerRow3.getCell(startCol + offset)
       cell.value = label
       applyExcelCellStyle(cell, {
         bold: true,
@@ -1271,12 +1281,22 @@ const sendEmail = async () => {
   }
 }
 
+let theadResizeObserver = null
+
 onMounted(async () => {
   await loadFavorites()
   normalizeBulkStartDate()
   await loadGrid()
   await nextTick()
   setStickyTopValues()
+  if (theadRef.value) {
+    theadResizeObserver = new ResizeObserver(() => setStickyTopValues())
+    theadResizeObserver.observe(theadRef.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (theadResizeObserver) { theadResizeObserver.disconnect(); theadResizeObserver = null }
 })
 </script>
 
@@ -1319,8 +1339,8 @@ onMounted(async () => {
   gap: 4px;
 }
 .search-field input {
-  min-width: 40px;
-  width: 60px;
+  min-width: 80px;
+  width: 120px;
 }
 .btn {
   padding: 6px 12px;
@@ -1431,6 +1451,11 @@ onMounted(async () => {
 .head-ship {
   color: #374151;
   font-weight: 500;
+}
+.head-ship-name {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 400;
 }
 .copy-btn {
   height: 22px;
