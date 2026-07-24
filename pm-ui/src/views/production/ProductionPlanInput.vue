@@ -502,45 +502,6 @@
             <span class="process-title-inline">期間 {{ startDate }} ～ {{ endDate }}</span>
           </div>
         </div>
-        <div class="process-actions">
-          <button
-            type="button"
-            class="toolbar-toggle-btn"
-            :class="{ active: showGanttAddAnchors }"
-            :aria-pressed="showGanttAddAnchors"
-            @click="toggleShowGanttAddAnchors"
-          >{{ showGanttAddAnchors ? '✓＋表示' : '＋表示' }}</button>
-          <button
-            type="button"
-            class="toolbar-toggle-btn"
-            :class="{ active: hideEmptyGanttRows }"
-            :aria-pressed="hideEmptyGanttRows"
-            @click="toggleHideEmptyGanttRows"
-          >{{ hideEmptyGanttRows ? '✓空行非表示' : '空行非表示' }}</button>
-          <button
-            type="button"
-            class="toolbar-toggle-btn"
-            :class="{ active: ganttHideWeekends }"
-            :aria-pressed="ganttHideWeekends"
-            @click="toggleGanttHideWeekends"
-          >{{ ganttHideWeekends ? '✓土日非表示' : '土日非表示' }}</button>
-          <button
-            class="btn gantt-save-btn"
-            :class="{ 'gantt-save-dirty': ganttEditDirty }"
-            @click="saveGanttEditChanges"
-            :disabled="!selectedLine || !ganttEditDirty"
-          >
-            時間数量保存
-          </button>
-          <button
-            class="btn gantt-save-btn"
-            :class="{ 'gantt-save-dirty': ganttStructureDirty }"
-            @click="saveGanttStructureChanges"
-            :disabled="!selectedLine || !ganttStructureDirty"
-          >
-            追加削除保存
-          </button>
-        </div>
       </div>
       <ProcessGanttView
         :key="ganttReloadKey"
@@ -556,7 +517,49 @@
         @mode-change="onGanttModeChange"
         @edit-dirty-change="onGanttEditDirtyChange"
         @structure-dirty-change="onGanttStructureDirtyChange"
-      />
+      >
+        <template #top-actions>
+          <div class="process-actions">
+            <button
+              type="button"
+              class="toolbar-toggle-btn"
+              :class="{ active: showGanttAddAnchors }"
+              :aria-pressed="showGanttAddAnchors"
+              @click="toggleShowGanttAddAnchors"
+            >{{ showGanttAddAnchors ? '✓＋表示' : '＋表示' }}</button>
+            <button
+              type="button"
+              class="toolbar-toggle-btn"
+              :class="{ active: hideEmptyGanttRows }"
+              :aria-pressed="hideEmptyGanttRows"
+              @click="toggleHideEmptyGanttRows"
+            >{{ hideEmptyGanttRows ? '✓空行非表示' : '空行非表示' }}</button>
+            <button
+              type="button"
+              class="toolbar-toggle-btn"
+              :class="{ active: ganttHideWeekends }"
+              :aria-pressed="ganttHideWeekends"
+              @click="toggleGanttHideWeekends"
+            >{{ ganttHideWeekends ? '✓土日非表示' : '土日非表示' }}</button>
+            <button
+              class="btn gantt-save-btn gantt-save-btn--compact"
+              :class="{ 'gantt-save-dirty': ganttEditDirty }"
+              @click="saveGanttEditChanges"
+              :disabled="!selectedLine || !ganttEditDirty"
+            >
+              時間数量保存
+            </button>
+            <button
+              class="btn gantt-save-btn gantt-save-btn--compact"
+              :class="{ 'gantt-save-dirty': ganttStructureDirty }"
+              @click="saveGanttStructureChanges"
+              :disabled="!selectedLine || !ganttStructureDirty"
+            >
+              追加削除保存
+            </button>
+          </div>
+        </template>
+      </ProcessGanttView>
     </div>
 
 
@@ -6772,9 +6775,13 @@ thead .sticky-col {
 .footer-actions {
   display: flex;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 0;
   align-items: center;
   flex-wrap: wrap;
+}
+.footer-actions .btn-secondary {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .btn,
 .btn-secondary {
@@ -6908,8 +6915,8 @@ thead .sticky-col {
 }
 .process-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   margin-bottom: 4px;
 }
@@ -6931,10 +6938,17 @@ thead .sticky-col {
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 .gantt-save-btn {
   min-height: 64px;
   font-weight: 700;
+}
+.gantt-save-btn--compact {
+  min-height: 42px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 .gantt-save-btn.gantt-save-dirty {
   background: #dc2626;

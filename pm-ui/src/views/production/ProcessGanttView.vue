@@ -67,6 +67,9 @@
         </div>
         <span class="view-mode-count">{{ renderedProcessCount }}工程 / {{ renderedItemCount }}品番</span>
         <span class="view-mode-hint">連結中は編集・保存を無効化</span>
+        <div v-if="$slots['top-actions']" class="view-mode-actions-inline">
+          <slot name="top-actions"></slot>
+        </div>
       </div>
       <div ref="ganttScrollRef" class="gantt-scroll" @scroll="onMainGanttScroll">
         <!-- 各工程のガントチャート -->
@@ -2509,7 +2512,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 10px;
   position: relative;
-  padding-bottom: 22px;
+  padding-bottom: 0;
 }
 .view-mode-bar {
   display: flex;
@@ -2522,6 +2525,11 @@ onBeforeUnmount(() => {
 }
 .view-mode-label {
   font-weight: 700;
+}
+.view-mode-actions-inline {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
 }
 .mode-btn {
   padding: 4px 10px;
@@ -2572,7 +2580,7 @@ onBeforeUnmount(() => {
 .gantt-scroll {
   overflow-x: auto;
   scrollbar-width: none;
-  padding-bottom: 4px;
+  padding-bottom: 0;
 }
 .gantt-scroll::-webkit-scrollbar {
   height: 0;
