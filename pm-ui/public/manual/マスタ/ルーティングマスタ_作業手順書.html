@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ルーティングマスタ 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #5e35b1; --radius: 10px; --prod-border: #7e57c2;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #b39ddb; --prod-border: #b39ddb; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #b39ddb; --prod-border: #b39ddb; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .page { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; color:var(--ink); margin-bottom:6px; text-wrap:balance; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; color:var(--ink); }
+
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+  .note { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:24px; border-left:4px solid var(--warn); }
+  .note h2 { font-size:16px; font-weight:700; margin-bottom:8px; color:var(--warn); }
+  .note ul { margin:0; padding-left:18px; font-size:14px; color:var(--ink2); }
+  .note li { margin-bottom:4px; }
+
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.success { background:var(--success); border-color:var(--success); color:#fff; }
+  .mock-btn.warn { background:var(--warn); border-color:var(--warn); color:#fff; }
+  .mock-btn.purple { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+  .f-input { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); text-align:center; }
+
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:160px; }
+  .info-table td { background:var(--card); color:var(--ink); }
+
+  .mock-grid { border:1px solid var(--grid-line); border-radius:6px; overflow-x:auto; margin:12px 0; font-size:11px; }
+  .mock-grid table { width:100%; border-collapse:collapse; }
+  .mock-grid th, .mock-grid td { border:1px solid var(--grid-line); padding:5px 8px; text-align:center; white-space:nowrap; }
+  .mock-grid th { background:var(--grid-head); font-weight:700; color:var(--ink2); font-size:10px; }
+  .mock-grid td { background:var(--card); color:var(--ink); }
+
+  .anno-num { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:13px; font-weight:800; flex-shrink:0; line-height:1; font-style:normal; }
+  :root[data-theme="dark"] .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+  .anno-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .anno-list li { display:flex; align-items:flex-start; gap:10px; font-size:14px; line-height:1.6; }
+  .anno-list li strong { color:var(--ink); }
+  .anno-list li span { color:var(--ink2); }
+  .om-anno { position:absolute; font-size:11px; font-weight:800; color:var(--danger); background:#fff; border:2px solid var(--danger); border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; line-height:1; z-index:5; font-style:normal; }
+  :root[data-theme="dark"] .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+
+  .screen-overview { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 32px; margin-bottom:28px; }
+  .screen-overview h2 { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .screen-overview h2 .badge { background:var(--step-color); color:#fff; font-size:11px; font-weight:700; padding:2px 10px; border-radius:4px; }
+
+  .mock-toolbar { background:var(--grid-head); border:1px solid var(--grid-line); border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px; color:var(--ink2); }
+
+  .proc-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .proc-table th, .proc-table td { border:1px solid var(--grid-line); padding:6px 10px; }
+  .proc-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); text-align:center; white-space:nowrap; }
+  .proc-table td { background:var(--card); color:var(--ink); }
+  .proc-table .num { text-align:center; font-weight:700; width:36px; }
+
+  .highlight-row { background:var(--warn-light) !important; }
+  .representative { color:var(--step-color); font-weight:700; }
+
+  @media (max-width:700px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step, .screen-overview { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>ルーティングマスタ 作業手順書</h1>
+    <div class="subtitle">製品の製造工程順序・サイクルタイム・リードタイムを定義する画面。ガントチャートの負荷計算を正しく表示するには、ここで所要時間（サイクルタイム）の入力が必要です。</div>
+    <div class="path">
+      マスタ <span class="arrow">&#9656;</span> ルーティングマスタ
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>画面の構成</li>
+      <li><span class="tn">3</span>ルーティングを検索・選択する</li>
+      <li><span class="tn">4</span>新規ルーティングを作成する</li>
+      <li><span class="tn">5</span>ルーティングヘッダを編集する</li>
+      <li><span class="tn">6</span>工程を追加する</li>
+      <li><span class="tn">7</span>工程明細を編集する</li>
+      <li><span class="tn">8</span>所要時間と代表部品（負荷計算）</li>
+      <li><span class="tn">9</span>ルーティング変更後の在庫移行</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面概要 ===== -->
+  <div class="screen-overview">
+    <h2>画面の全体像 <span class="badge">最初に読む</span></h2>
+    <div class="step-desc">
+      画面は<strong>左パネル（ルーティング一覧）</strong>と<strong>右パネル（工程一覧）</strong>の2列構成です。左で製品のルーティングを選択し、右でその製品の工程明細を確認・編集します。
+    </div>
+
+    <!-- 画面モック -->
+    <div style="display:grid;grid-template-columns:260px 1fr;gap:12px;margin:16px 0;">
+      <!-- 左パネル -->
+      <div style="background:var(--col-bg);border:1px solid var(--grid-line);border-radius:6px;padding:10px;font-size:11px;position:relative;">
+        <div style="font-size:13px;font-weight:700;color:var(--ink);margin-bottom:8px;">ルーティング一覧
+          <span class="om-anno" style="position:relative;top:-2px;margin-left:4px;">1</span>
+        </div>
+        <div class="mock-grid" style="margin:0;">
+          <table>
+            <thead>
+              <tr><th style="text-align:left;">品番</th><th style="text-align:left;">品名</th><th>既定</th></tr>
+            </thead>
+            <tbody>
+              <tr><td style="text-align:left;font-weight:700;">YD40008387</td><td style="text-align:left;font-size:10px;">ブラケット</td><td>○</td></tr>
+              <tr style="background:var(--accent-light);"><td style="text-align:left;font-weight:700;">YD40008362</td><td style="text-align:left;font-size:10px;">ブラケット</td><td>○</td></tr>
+              <tr><td style="text-align:left;font-weight:700;">MSXO/S300M</td><td style="text-align:left;font-size:10px;">フロアーハッチ フタ ハコマチ</td><td>○</td></tr>
+              <tr><td style="text-align:left;font-weight:700;">V053904603</td><td style="text-align:left;font-size:10px;">フレームコンプ(フロント)kmt</td><td>○</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 右パネル -->
+      <div style="background:var(--col-bg);border:1px solid var(--grid-line);border-radius:6px;padding:10px;font-size:11px;position:relative;">
+        <div style="font-size:13px;font-weight:700;color:var(--ink);margin-bottom:4px;">工程一覧　<span style="font-weight:400;color:var(--ink2);">YD40008362 / YD40008362</span>
+          <span class="om-anno" style="position:relative;top:-2px;margin-left:4px;">2</span>
+        </div>
+        <!-- ヘッダ -->
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;font-size:11px;flex-wrap:wrap;">
+          <span>既定: <strong style="color:var(--success);">&#9745;</strong></span>
+          <span>有効: <strong style="color:var(--success);">&#9745;</strong></span>
+          <span>有効開始: <span class="f-input" style="font-size:10px;">2026/07/01 08:00</span></span>
+          <span class="mock-btn" style="font-size:10px;padding:2px 6px;">ヘッダ保存</span>
+          <span class="om-anno" style="position:relative;top:-2px;">3</span>
+        </div>
+        <!-- 工程グリッド -->
+        <div class="mock-grid" style="margin:0;">
+          <table>
+            <thead>
+              <tr>
+                <th>階層</th><th>工程番号</th><th>並列G</th><th>工程</th><th>ライン</th><th>外作先</th>
+                <th style="text-align:left;">加工後品目</th><th>代表部品</th><th>時間単位</th><th>LT(日)</th>
+                <th style="position:relative;">所要時間(分)<span class="om-anno" style="top:-10px;right:-10px;">4</span></th>
+                <th>使用個数</th><th>親製品</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="f-input" style="width:70px;">1.1.1.3.5.2</span></td>
+                <td>2000</td><td>27</td><td>5連3ST</td><td>5連</td><td>-</td>
+                <td style="text-align:left;">YD40008362-00SUB</td>
+                <td></td><td>分</td><td><span class="f-input" style="width:36px;">1</span></td>
+                <td class="highlight-row"><span class="f-input" style="width:50px;">60</span></td>
+                <td><span class="f-input" style="width:36px;">1</span></td>
+                <td>YD40008362-3ST</td>
+              </tr>
+              <tr>
+                <td><span class="f-input" style="width:70px;">1.1.1.3.6.4</span></td>
+                <td>2000</td><td>59</td><td>5連3ST</td><td>5連</td><td>-</td>
+                <td style="text-align:left;">YD40008362-01S</td>
+                <td></td><td>分</td><td><span class="f-input" style="width:36px;">0</span></td>
+                <td class="highlight-row"><span class="f-input" style="width:50px;">60</span></td>
+                <td><span class="f-input" style="width:36px;">1</span></td>
+                <td>YD40008362-01SUB</td>
+              </tr>
+              <tr>
+                <td><span class="f-input" style="width:70px;">1.1.1.3.5</span></td>
+                <td>3000</td><td>51</td><td>5連3ST</td><td>5連</td><td>-</td>
+                <td style="text-align:left;">YD40008362-3ST</td>
+                <td class="representative">○</td><td>分</td><td><span class="f-input" style="width:36px;">0</span></td>
+                <td class="highlight-row"><span class="f-input" style="width:50px;font-weight:700;color:var(--step-color);">10</span>
+                  <span class="mock-btn primary" style="font-size:9px;padding:1px 4px;margin-left:2px;">保存</span>
+                </td>
+                <td><span class="f-input" style="width:36px;">1</span></td>
+                <td>YD40008362-4ST-1</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:12px;">
+      <li><span class="anno-num">1</span><span><strong>ルーティング一覧</strong> — 品番をクリックして工程一覧を表示。検索・フィルタで絞り込み可能</span></li>
+      <li><span class="anno-num">2</span><span><strong>工程一覧</strong> — 選択したルーティングの工程明細。各列をインライン編集できる</span></li>
+      <li><span class="anno-num">3</span><span><strong>ルーティングヘッダ</strong> — 既定・有効フラグ、有効期間の設定</span></li>
+      <li><span class="anno-num">4</span><span><strong>所要時間(分)</strong> — サイクルタイム。ガントチャートの負荷計算に使われる最重要項目</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部ナビゲーションの<strong>「マスタ」</strong>メニューから<strong>「ルーティングマスタ」</strong>をクリックします。
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      画面が開くと、全ルーティング・ライン・製品・工程・仕入先のマスタが自動で読み込まれます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>この画面を使用するには <strong>masters.routing</strong> の編集権限が必要です。権限がない場合は「閲覧のみ」と表示され、編集操作が無効化されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">画面の構成</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      画面は上部のツールバーと、左右2つのパネルで構成されています。
+    </div>
+
+    <h4 class="sub">ツールバー</h4>
+    <div class="mock-toolbar" style="margin-bottom:12px;">
+      <span class="mock-btn success" style="font-size:11px;">新規</span>
+      <span style="font-size:11px;">ライン選択（在庫移行用）:</span>
+      <span class="f-select">ライン ▾</span>
+      <span class="mock-btn warn" style="font-size:11px;">ルーティング変更後の在庫移行</span>
+      <span class="mock-btn primary" style="font-size:11px;">更新</span>
+    </div>
+
+    <h4 class="sub">フィルタ行</h4>
+    <div class="mock-toolbar" style="margin-bottom:12px;">
+      <span class="f-input" style="width:140px;text-align:left;">品番コードで検索</span>
+      <span class="f-select">最終工程ライン: すべて ▾</span>
+      <span class="f-input" style="width:120px;text-align:left;">品名（部分一致）</span>
+      <span class="f-select">得意先: すべて ▾</span>
+      <span>&#9745; 有効のみ</span>
+      <span style="font-size:11px;color:var(--ink2);">表示件数: 525</span>
+    </div>
+
+    <table class="info-table">
+      <tr><th>左パネル</th><td><strong>ルーティング一覧</strong> — 品番・品名・既定・有効状態の一覧。クリックで右パネルに工程を表示</td></tr>
+      <tr><th>右パネル上段</th><td><strong>ルーティングヘッダ</strong> — 既定・有効フラグ、有効開始/終了日時の編集</td></tr>
+      <tr><th>右パネル下段</th><td><strong>工程一覧</strong> — 工程番号順に並んだ工程明細。各項目をインライン編集可能</td></tr>
+    </table>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">ルーティングを検索・選択する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      左パネルのルーティング一覧から対象製品を探します。フィルタを活用すると効率的です。
+    </div>
+    <table class="info-table">
+      <tr><th>品番コード検索</th><td>品番の一部を入力して絞り込み（部分一致）</td></tr>
+      <tr><th>最終工程ライン</th><td>最終工程のラインで絞り込み。特定ラインの製品だけ確認したい場合に便利</td></tr>
+      <tr><th>品名（部分一致）</th><td>品名の一部で検索</td></tr>
+      <tr><th>得意先</th><td>得意先に紐づく製品のみ表示</td></tr>
+      <tr><th>有効のみ</th><td>チェックON（既定）で無効なルーティングを非表示</td></tr>
+    </table>
+    <div class="step-desc" style="margin-bottom:0;">
+      一覧の行をクリックすると、右パネルにそのルーティングの工程一覧が表示されます。
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">新規ルーティングを作成する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      新しい製品のルーティングを登録するには、ツールバーの<strong>「新規」</strong>ボタンをクリックします。
+    </div>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td><span class="mock-btn success" style="font-size:11px;">新規</span> をクリック</td><td>入力行が表示されます</td></tr>
+        <tr><td class="num">2</td><td>「品番/品名で検索」に品番または品名を入力</td><td>候補が表示されるので、対象製品を選択します</td></tr>
+        <tr><td class="num">3</td><td>「ルーティングコード」を入力</td><td>識別用のコード（最大30文字）</td></tr>
+        <tr><td class="num">4</td><td>「説明」を入力（任意）</td><td>自由記述の説明文</td></tr>
+        <tr><td class="num">5</td><td>「既定」「有効」にチェック</td><td>既定=この製品のメインルーティング。有効=使用中</td></tr>
+        <tr><td class="num">6</td><td><span class="mock-btn success" style="font-size:11px;">作成</span> をクリック</td><td>ルーティングが作成され、一覧に追加されます</td></tr>
+      </tbody>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>作成直後は工程が空です。STEP 6で工程を追加してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">ルーティングヘッダを編集する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      右パネル上段のヘッダ情報を編集します。変更後は<strong>「ヘッダ保存」</strong>をクリックして確定します。
+    </div>
+    <table class="info-table">
+      <tr><th>既定</th><td>ONにすると、同じ製品の他のルーティングが自動で非既定になります。生産計画で優先使用されるルーティングです</td></tr>
+      <tr><th>有効</th><td>OFFにすると生産計画で使用されなくなります</td></tr>
+      <tr><th>有効開始日時</th><td>このルーティングが有効になる日時。空欄=常に有効</td></tr>
+      <tr><th>有効終了日時</th><td>このルーティングが無効になる日時。空欄=終了なし</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>有効期間の使い方:</strong> 工程変更の切替時に、旧ルーティングに終了日時を設定し、新ルーティングに開始日時を設定することで、計画的に切り替えられます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">工程を追加する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      右パネルの<strong>「工程追加」</strong>ボタンをクリックすると、工程追加フォームが表示されます。
+    </div>
+    <table class="proc-table">
+      <thead><tr><th></th><th>項目</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>工程番号</td><td>工程の順序番号（数値）。小さい順に実行されます</td></tr>
+        <tr><td class="num">2</td><td>階層（必須）</td><td>工程の階層パス。例: <code>1.1.1.3.5</code>。詳しくは<a href="/manual?path=マスタ/ルーティング工程作成ルール.md" style="color:var(--accent);font-weight:600;">ルーティング工程作成ルール</a>を参照</td></tr>
+        <tr><td class="num">3</td><td>並列G</td><td>並列グループ番号（既定: 1）。同じ工程番号で並列に走る工程がある場合に使用</td></tr>
+        <tr><td class="num">4</td><td>加工後品目</td><td>この工程で生産される品目（品番で入力）</td></tr>
+        <tr><td class="num">5</td><td>親製品</td><td>この加工品の親にあたる製品（品番で入力）</td></tr>
+        <tr><td class="num">6</td><td>調達区分</td><td><strong>自社製造 / 購買 / 外作</strong> を選択。区分に応じて入力必須項目が変わります</td></tr>
+        <tr><td class="num">7</td><td>工程・ライン</td><td>自社製造の場合に選択（必須）。購買・外作では外作先を選択</td></tr>
+        <tr><td class="num">8</td><td>時間単位</td><td><strong>日 / 分</strong> を選択。「分」の場合に所要時間(分)が入力可能になります</td></tr>
+        <tr><td class="num">9</td><td>LT(日) / 所要時間(分)</td><td>時間単位=日 → LT(日)を入力。時間単位=分 → 所要時間(分)を入力</td></tr>
+        <tr><td class="num">10</td><td>使用個数</td><td>親製品1個あたりの使用個数</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>調達区分による必須項目の変化:</strong><br>
+      ・<strong>自社製造:</strong> 工程・ラインが必須。所要時間(分)はガントチャートに必要<br>
+      ・<strong>購買:</strong> 外作先・LT(日)が必須。所要時間は不要<br>
+      ・<strong>外作:</strong> 外作先・LT(日)が必須。工程は自動で「外注加工(G)」がセットされます</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">工程明細を編集する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      工程一覧の各セルは<strong>インライン編集</strong>に対応しています。値を変更して<strong>Enter</strong>キーまたは<strong>「保存」</strong>ボタンで確定します。
+    </div>
+
+    <h4 class="sub">編集可能な列</h4>
+    <table class="info-table">
+      <tr><th>階層</th><td>工程階層パスを変更。変更後はBOM連携も更新されます</td></tr>
+      <tr><th>加工後品目</th><td>品番を入力して変更。BOM明細の自動作成・更新が行われます</td></tr>
+      <tr><th>LT(日)</th><td>リードタイム日数を変更。BOM側のLTにも同期されます</td></tr>
+      <tr><th>所要時間(分)</th><td>サイクルタイムを変更。時間単位が「分」の場合のみ編集可能</td></tr>
+      <tr><th>使用個数</th><td>親製品1個あたりの使用個数。BOM側の数量にも同期されます</td></tr>
+      <tr><th>親製品</th><td>品番を入力して変更。BOM連携の親子関係が更新されます</td></tr>
+    </table>
+
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>変更があるセルは<strong>保存ボタンが青くハイライト</strong>されます。保存前の変更は画面遷移で失われるので、編集したら都度保存してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step" style="border-left:4px solid var(--warn);">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">所要時間と代表部品（負荷計算）</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>ガントチャートの負荷計算を正しく表示するには、所要時間（サイクルタイム）の入力が必須です。</strong>所要時間が未入力だと、ガントチャートのバー長さや負荷グラフが正しく計算されません。
+    </div>
+
+    <h4 class="sub">所要時間(分) とは</h4>
+    <table class="info-table" style="margin-bottom:16px;">
+      <tr><th>意味</th><td>1個あたりの加工時間（サイクルタイム）。例: 10分 = 1個作るのに10分かかる</td></tr>
+      <tr><th>用途</th><td>ガントチャートのバー長さ計算、工程負荷計算のフォールバック値として使用</td></tr>
+      <tr><th>入力条件</th><td>時間単位が<strong>「分」</strong>の工程のみ入力可能。「日」の工程はLT(日)で管理</td></tr>
+      <tr><th>計算式</th><td>バー長さ = 数量 × 所要時間(分)</td></tr>
+    </table>
+
+    <h4 class="sub">代表部品がある場合の入力ルール</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      同じ工程で複数の加工後品目がある場合（共生産・連産品）、<strong>代表部品（○がついた行）の所要時間だけ入力すれば</strong>ガントチャートの負荷計算は正しく動作します。
+    </div>
+
+    <!-- 代表部品の例 -->
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr><th>工程番号</th><th>工程</th><th>ライン</th><th style="text-align:left;">加工後品目</th><th>代表部品</th><th style="background:var(--warn-light);">所要時間(分)</th><th>備考</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2000</td><td>5連3ST</td><td>5連</td>
+            <td style="text-align:left;">YD40008362-00SUB</td>
+            <td></td>
+            <td class="highlight-row">60</td>
+            <td style="font-size:10px;color:var(--ink2);">入力しても可</td>
+          </tr>
+          <tr>
+            <td>2000</td><td>5連3ST</td><td>5連</td>
+            <td style="text-align:left;">YD40008362-01S</td>
+            <td></td>
+            <td class="highlight-row">60</td>
+            <td style="font-size:10px;color:var(--ink2);">入力しても可</td>
+          </tr>
+          <tr style="outline:2px solid var(--step-color);outline-offset:-1px;">
+            <td>3000</td><td>5連3ST</td><td>5連</td>
+            <td style="text-align:left;font-weight:700;">YD40008362-3ST</td>
+            <td class="representative">○</td>
+            <td class="highlight-row" style="font-weight:700;color:var(--step-color);">10</td>
+            <td style="font-size:10px;color:var(--step-color);font-weight:700;">← これを編集</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn" style="margin-top:16px;">
+      <span class="icon">&#9888;</span>
+      <span><strong>代表部品の決まり方:</strong> BOMマスタで<strong>共生産フラグ</strong>がON、かつ<strong>代表品フラグ</strong>がONの子品目が代表部品になります。工程一覧の「代表部品」列に <span class="representative">○</span> が表示されます。</span>
+    </div>
+
+    <h4 class="sub">なぜ代表部品だけでよいのか</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      ガントチャートの負荷計算は、共生産ラインでは代表部品の所要時間を使って計算します。同じ工程の非代表品に個別の所要時間を入力しても構いませんが、<strong>負荷計算に使われるのは代表部品の値</strong>です。
+    </div>
+
+    <div class="callout danger" style="margin-top:14px;">
+      <span class="icon">&#9888;</span>
+      <span><strong>所要時間が未入力の場合:</strong> ガントチャートのバーが極端に短くなったり、負荷グラフが0になったりします。計画の精度に直結するので、時間単位が「分」の工程には必ず入力してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 9 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
+      <div class="step-title">ルーティング変更後の在庫移行</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      ルーティングを変更した結果、旧工程/旧ラインに残っている在庫を新工程/新ラインに移す機能です。
+    </div>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>ツールバーの「ライン選択（在庫移行用）」で対象ラインを選択</td><td>在庫移行候補を検出するラインを指定</td></tr>
+        <tr><td class="num">2</td><td><span class="mock-btn warn" style="font-size:11px;">ルーティング変更後の在庫移行</span> をクリック</td><td>移行候補が検出され、ダイアログが表示されます</td></tr>
+        <tr><td class="num">3</td><td>移行対象にチェックを入れ、移行数量を確認</td><td>旧ライン/旧工程 → 新ライン/新工程の対応が表示されます</td></tr>
+        <tr><td class="num">4</td><td>「移行基準日」を確認（既定: 今日）</td><td>在庫移行の基準日を設定</td></tr>
+        <tr><td class="num">5</td><td>「移行実行」をクリック</td><td>adjust_qtyへの加減算で移行が行われます</td></tr>
+      </tbody>
+    </table>
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span><strong>移行後は必ず</strong>在庫/残量一覧画面で<strong>「過去から再計算」</strong>を実行してください。実績（actual_qty）は旧ラインに残るため、再計算しないと数値が合いません。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>詳しくは<a href="/manual/マスタ/ルーティング変更後の在庫移行.md" style="color:var(--accent);font-weight:600;">ルーティング変更後の在庫移行マニュアル</a>を参照してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>所要時間は必須:</strong> 時間単位「分」の自社製造工程には必ず所要時間(分)を入力してください。未入力だとガントチャートの負荷計算が正しくなりません</li>
+      <li><strong>代表部品で十分:</strong> 同一工程に複数の加工品がある場合、代表部品の所要時間だけ入力すればOKです</li>
+      <li><strong>BOM自動連携:</strong> 加工後品目・親製品・使用個数・LTを変更すると、BOMマスタにも自動で同期されます</li>
+      <li><strong>セル編集の保存:</strong> インライン編集は都度保存が必要です。保存せずに画面を移動すると変更が失われます</li>
+      <li><strong>既定ルーティング:</strong> 既定フラグをONにすると、同じ製品の他のルーティングは自動で非既定になります</li>
+      <li><strong>有効期間:</strong> 有効期間が重なる同一コードのルーティングは作成できません</li>
+      <li><strong>権限:</strong> masters.routing の編集権限がないユーザーは編集できません</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>
