@@ -1081,12 +1081,97 @@
         <span class="f-input">V0</span>
         <span class="f-input">6E</span>
       </div>
+      <div class="f-group">
+        <label>お気に入り</label>
+        <span class="f-select">選択 ▾</span>
+      </div>
+      <div class="f-group">
+        <label>登録名</label>
+        <span class="f-input" style="min-width:80px;">V0+6E</span>
+      </div>
+      <span style="font-size:16px;cursor:default;color:#e6a817;font-weight:800;">★</span>
       <span style="flex:1"></span>
       <span class="mock-btn">取込</span>
       <span class="mock-btn">計画変更</span>
       <span class="mock-btn save-btn">保存</span>
       <span class="mock-btn">EXCEL出力</span>
       <span class="mock-btn primary hl hl-blue" style="position:relative;">表示</span>
+    </div>
+
+    <h4 class="sub">&#9654; 品番 OR検索（2ボックス）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>2つの入力欄</strong>で品番の部分一致検索ができます。どちらか一方に一致すれば表示されます（OR条件）。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>キーワード1だけ入力</th><td>その文字列を含む品番だけ表示<br>例: <code>V0</code> → V0を含む品番のみ</td></tr>
+      <tr><th>キーワード2だけ入力</th><td>同様に部分一致で絞り込み</td></tr>
+      <tr><th>両方入力</th><td><strong>OR検索</strong>: どちらかに一致する品番をすべて表示<br>例: <code>V0</code> + <code>6E</code> → V0系と6E系の両方が表示される</td></tr>
+      <tr><th>両方空欄</th><td>全品番を表示</td></tr>
+    </table>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span>入力後に<strong>Enterキー</strong>を押すと即座にデータ再読み込みされます。または「表示」ボタンをクリックしてください。</span>
+    </div>
+
+    <h4 class="sub">&#9654; お気に入り機能</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      よく使う検索条件（期間・キーワード1・キーワード2）を<strong>お気に入り</strong>として保存し、ワンクリックで呼び出せます。
+    </div>
+
+    <h4 class="sub" style="font-size:14px;margin-top:14px;">お気に入りを保存する</h4>
+    <table class="info-table" style="margin-bottom:12px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td>品番 OR検索の2ボックスに絞り込み条件を入力し、期間を選択する</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td><strong>「登録名」</strong>欄にお気に入り名を入力（例: <code>V0+6E</code>、<code>70（フレームコンプ）</code>、<code>全品番</code> など）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td><strong style="color:#e6a817;">★ ボタン</strong>をクリック → 「お気に入りを保存しました。」と表示される</td>
+      </tr>
+    </table>
+
+    <h4 class="sub" style="font-size:14px;">お気に入りを呼び出す</h4>
+    <table class="info-table" style="margin-bottom:12px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td><strong>「お気に入り」</strong>ドロップダウンから保存済みのお気に入り名を選択</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>期間・キーワード1・キーワード2が自動で復元される</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td><strong>「表示」</strong>をクリックしてデータを読み込む</td>
+      </tr>
+    </table>
+
+    <h4 class="sub" style="font-size:14px;">お気に入りを上書き更新する</h4>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td>ドロップダウンから更新したいお気に入りを選択（登録名が自動入力される）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>期間やキーワードを変更する</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td><strong style="color:#e6a817;">★ ボタン</strong>をクリック → 選択中のお気に入りが上書き保存される</td>
+      </tr>
+    </table>
+    <h4 class="sub" style="font-size:14px;">お気に入りを削除する</h4>
+    <div class="step-desc" style="margin-bottom:4px;">
+      <strong>設定 → プロフィール編集</strong>画面の下部に<strong>「お気に入り管理」</strong>があります。登録済みのお気に入りが一覧表示され、<strong style="color:var(--danger);">「削除」</strong>ボタンで削除できます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>お気に入りはユーザーごとに保存されます。他のユーザーのお気に入りは表示されません。</span>
     </div>
   </div>
 
