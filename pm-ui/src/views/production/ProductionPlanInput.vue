@@ -132,25 +132,34 @@
         </div>
       </div>
       <div v-show="!toolbarCollapsed" class="toolbar-right">
-        <div class="field checkbox-field">
-          <label>
-            <input type="checkbox" v-model="hideWeekends" @change="localStorage.setItem(HIDE_WEEKENDS_KEY, hideWeekends ? '1' : '0')" />
-            土日非表示
-          </label>
-        </div>
-        <div class="field checkbox-field">
-          <label>
-            <input type="checkbox" v-model="adjustToBreakEnd" />
-            休憩明けに補正
-          </label>
-        </div>
-        <div class="field checkbox-field">
-          <label>
-            <input type="checkbox" v-model="hideEmptyRows" @change="localStorage.setItem(HIDE_EMPTY_ROWS_KEY, hideEmptyRows ? '1' : '0')" />
-            空行非表示
-          </label>
-        </div>
+        <button
+          type="button"
+          class="toolbar-toggle-btn"
+          :class="{ active: hideWeekends }"
+          :aria-pressed="hideWeekends"
+          @click="toggleHideWeekends"
+        >{{ hideWeekends ? '✓土日非表示' : '土日非表示' }}</button>
+        <button
+          type="button"
+          class="toolbar-toggle-btn"
+          :class="{ active: adjustToBreakEnd }"
+          :aria-pressed="adjustToBreakEnd"
+          @click="toggleAdjustToBreakEnd"
+        >{{ adjustToBreakEnd ? '✓休憩明けに補正' : '休憩明けに補正' }}</button>
+        <button
+          type="button"
+          class="toolbar-toggle-btn"
+          :class="{ active: hideEmptyRows }"
+          :aria-pressed="hideEmptyRows"
+          @click="toggleHideEmptyRows"
+        >{{ hideEmptyRows ? '✓空行非表示' : '空行非表示' }}</button>
         <button class="btn" @click="bulkDeletePlans" :disabled="processing || !selectedLine">計画一括削除</button>
+        <button
+          class="btn"
+          @click="clearVisibleDailySettings"
+          :disabled="processing || !selectedLine || !hasVisibleDailySettingOverrides"
+          title="表示期間内の日別開始時刻上書きを全削除してデフォルト開始時刻に戻す"
+        >開始時刻全削除</button>
         <button
           v-if="activePlanTab === 'floor-shipping'"
           class="btn primary"
@@ -1364,6 +1373,17 @@ const openManual = (path) => { window.open(`/manual?path=${encodeURIComponent(pa
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
   localStorage.setItem(TOOLBAR_COLLAPSED_KEY, toolbarCollapsed.value ? '1' : '0')
+}
+const toggleHideWeekends = () => {
+  hideWeekends.value = !hideWeekends.value
+  localStorage.setItem(HIDE_WEEKENDS_KEY, hideWeekends.value ? '1' : '0')
+}
+const toggleAdjustToBreakEnd = () => {
+  adjustToBreakEnd.value = !adjustToBreakEnd.value
+}
+const toggleHideEmptyRows = () => {
+  hideEmptyRows.value = !hideEmptyRows.value
+  localStorage.setItem(HIDE_EMPTY_ROWS_KEY, hideEmptyRows.value ? '1' : '0')
 }
 const selectedLineSummary = computed(() => {
   const line = (availableLines.value || []).find((l) => l.id === selectedLine.value)
@@ -5647,6 +5667,10 @@ const canClearDailySetting = (dateKey) => {
   return Boolean(normalized && normalized !== defaultTime)
 }
 
+const hasVisibleDailySettingOverrides = computed(() =>
+  visibleDateColumns.value.some((column) => canClearDailySetting(column.key))
+)
+
 const clearDailySettingOverride = async (dateKey, { silent = false } = {}) => {
   const setting = dailySettings.value[dateKey]
   if (!setting) {
@@ -5667,6 +5691,37 @@ const clearDailySettingOverride = async (dateKey, { silent = false } = {}) => {
       alert('日別開始時刻の上書き削除に失敗しました。')
     }
     throw e
+  }
+}
+
+const clearVisibleDailySettings = async () => {
+  if (processing.value || !selectedLine.value) return
+  const targetDateKeys = visibleDateColumns.value
+    .map((column) => column.key)
+    .filter((dateKey) => canClearDailySetting(dateKey))
+  if (!targetDateKeys.length) return
+  if (!window.confirm('表示期間内の日別開始時刻上書きを全削除して、すべてデフォルト開始時刻に戻します。よろしいですか？')) {
+    return
+  }
+
+  processing.value = true
+  try {
+    const deleteIds = targetDateKeys
+      .map((dateKey) => dailySettings.value[dateKey]?.id)
+      .filter(Boolean)
+    if (deleteIds.length) {
+      await Promise.all(deleteIds.map((id) => api.lineDailyScheduleSettings.deleteLineDailyScheduleSetting(id)))
+      await loadDailySettings()
+      applyDefaultToDailySettings()
+    }
+    targetDateKeys.forEach((dateKey) => {
+      resetDailySettingToDefault(dateKey)
+    })
+  } catch (e) {
+    console.error('表示期間開始時刻一括削除エラー', e)
+    alert('表示期間の開始時刻全削除に失敗しました。')
+  } finally {
+    processing.value = false
   }
 }
 
@@ -6025,8 +6080,10 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 }
 .toolbar {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-start;
+  align-items: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
   background: #e1e8f4;
   border: 1px solid #c5cfde;
   padding: 6px;
@@ -6072,13 +6129,40 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 }
 .toolbar-left {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
+  align-items: flex-end;
 }
 .toolbar-right {
   display: flex;
-  gap: 6px;
-  align-items: flex-end;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  align-content: center;
+}
+.toolbar-toggle-btn {
+  padding: 3px 8px;
+  min-height: 26px;
+  border: 1px solid #b5c1d2;
+  border-radius: 4px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.toolbar-toggle-btn.active {
+  background: #dbeafe;
+  border-color: #60a5fa;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+.toolbar-toggle-btn:hover {
+  background: #f8fafc;
+}
+.toolbar-toggle-btn.active:hover {
+  background: #bfdbfe;
 }
 .field {
   display: flex;
@@ -6086,14 +6170,20 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
   gap: 2px;
 }
 .field.checkbox-field {
-  justify-content: flex-end;
-  padding-bottom: 4px;
+  justify-content: center;
+  padding-bottom: 0;
+  min-height: 28px;
 }
 .field.checkbox-field label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.field.checkbox-field input[type="checkbox"] {
+  margin: 0 1px 0 0;
 }
 .field label {
   font-size: 12px;
