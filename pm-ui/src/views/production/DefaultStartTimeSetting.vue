@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <h2 class="page-title">デフォルト開始時刻設定</h2>
+    <h2 class="page-title">デフォルト開始時刻設定 <DataSourceDialog title="デフォルト開始時刻設定" :sources="dsSources" /></h2>
     <p class="helper-text">ライン別に最終工程のデフォルト開始時刻と「休憩明けに補正」を設定します。</p>
 
     <div class="card">
@@ -77,6 +77,12 @@ import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み取り', table: 'm_line', desc: 'ライン一覧・区分' },
+  { op: '読み書き', table: 'line_default_schedule_setting', desc: 'ライン別デフォルト開始時刻設定' },
+]
 
 const rows = ref([])
 const lineFilter = ref('all')
