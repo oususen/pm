@@ -48,6 +48,7 @@ class FinishedProductCycleTime(models.Model):
     process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name='工程')
     line = models.ForeignKey(Line, on_delete=models.CASCADE, verbose_name='ライン')
     cycle_time_sec = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='サイクル時間(秒/個)')
+    use_adjusted = models.BooleanField(default=False, verbose_name='補正CT使用')
     calc_from_date = models.DateField(verbose_name='計算期間FROM')
     calc_to_date = models.DateField(verbose_name='計算期間TO')
     calculated_at = models.DateTimeField(auto_now=True, verbose_name='計算日時')

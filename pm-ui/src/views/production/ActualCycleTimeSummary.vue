@@ -257,6 +257,7 @@
                 <th class="col-code">完成品コード</th>
                 <th class="col-name">完成品名</th>
                 <th class="col-num col-ct-val">CT (秒/個)</th>
+                <th class="col-code">CT種別</th>
                 <th class="col-date">計算日時</th>
               </tr>
             </thead>
@@ -268,6 +269,7 @@
                 <td class="col-code">{{ item.finished_product_code }}</td>
                 <td class="col-name" :title="item.finished_product_name">{{ item.finished_product_name }}</td>
                 <td class="col-num col-ct-val">{{ item.cycle_time_sec }}</td>
+                <td class="col-code">{{ item.use_adjusted ? '補正CT' : '生CT' }}</td>
                 <td class="col-date">{{ item.calculated_at }}</td>
               </tr>
             </tbody>
@@ -379,6 +381,7 @@ const actualSaved = ref(false)
 const actualItems = ref([])
 const summary = ref({ total_qty: 0, total_seconds: 0, avg_cycle_time_sec: null })
 const finishedItems = ref([])
+const finishedUsedAdjusted = ref(false)
 const resolvedLineId = ref(null)
 
 const today = new Date()
@@ -526,6 +529,19 @@ const saveActual = async () => {
 }
 
 const calcFinished = async () => {
+  const proc = processes.value.find(p => p.id === selectedProcessId.value)
+  const rate = Number(proc?.operating_rate) || 100
+  const hasAdjusted = rate !== 100
+
+  let useAdjusted = false
+  if (hasAdjusted) {
+    useAdjusted = confirm(
+      `工程「${proc?.process_code || ''}」の稼働率: ${rate}%\n\n` +
+      `【OK】 補正CT（稼働率${rate}%適用済み）で計算\n` +
+      `【キャンセル】 生CT（実測値そのまま）で計算`
+    )
+  }
+
   calculatingFinished.value = true
   finishedCalcDone.value = false
   finishedItems.value = []
@@ -536,8 +552,10 @@ const calcFinished = async () => {
       line_id: lineId,
       start_date: startDate.value,
       end_date: endDate.value,
+      use_adjusted: useAdjusted,
     })
     finishedItems.value = res.data.items || []
+    finishedUsedAdjusted.value = !!res.data.use_adjusted
     finishedCalcDone.value = true
   } catch (e) {
     alert('計算エラー: ' + (e.response?.data?.error || e.message))
@@ -557,8 +575,10 @@ const saveFinished = async () => {
       start_date: startDate.value,
       end_date: endDate.value,
       items: finishedItems.value,
+      use_adjusted: finishedUsedAdjusted.value,
     })
-    alert(`完成品CT保存完了: ${res.data.saved_count}件`)
+    const ctType = finishedUsedAdjusted.value ? '補正CT（稼働率適用済み）' : '生CT（実測値）'
+    alert(`完成品CT保存完了: ${res.data.saved_count}件\n使用CT: ${ctType}`)
   } catch (e) {
     alert('保存エラー: ' + (e.response?.data?.error || e.message))
   } finally {

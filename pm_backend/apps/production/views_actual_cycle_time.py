@@ -374,6 +374,7 @@ class FinishedProductCycleTimeListView(APIView):
                 'calc_from_date': str(r.calc_from_date),
                 'calc_to_date': str(r.calc_to_date),
                 'cycle_time_sec': float(r.cycle_time_sec),
+                'use_adjusted': r.use_adjusted,
                 'calculated_at': r.calculated_at.strftime('%Y-%m-%d %H:%M') if r.calculated_at else '',
             })
 
@@ -418,6 +419,8 @@ class FinishedProductCycleTimeConsolidatedView(APIView):
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
 
+        use_adjusted = request.query_params.get('use_adjusted', 'false').lower() == 'true'
+
         if not process_id or not line_id or not start_date or not end_date:
             return Response(
                 {'error': 'process_id, line_id, start_date, end_date は必須です'},
@@ -444,11 +447,15 @@ class FinishedProductCycleTimeConsolidatedView(APIView):
 
         ct_by_product = {}
         for act in actual_cts:
+            if use_adjusted and act.adjusted_cycle_time_sec:
+                ct = act.adjusted_cycle_time_sec
+            else:
+                ct = act.cycle_time_sec
             ct_by_product[act.product_id] = {
                 'product_id': act.product_id,
                 'product_code': act.product.product_code,
                 'product_name': act.product.product_name,
-                'cycle_time_sec': float(act.cycle_time_sec),
+                'cycle_time_sec': float(ct),
             }
 
         bom_service = BOMService()
@@ -474,6 +481,7 @@ class FinishedProductCycleTimeConsolidatedView(APIView):
             'line_id': int(line_id),
             'start_date': start_date,
             'end_date': end_date,
+            'use_adjusted': use_adjusted,
             'items': items,
         })
 
@@ -522,6 +530,7 @@ class FinishedProductCycleTimeSaveView(APIView):
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
         items = request.data.get('items', [])
+        use_adjusted = bool(request.data.get('use_adjusted', False))
 
         if not process_id or not line_id or not start_date or not end_date or not items:
             return Response({'error': '必須パラメータが不足しています'}, status=status.HTTP_400_BAD_REQUEST)
@@ -544,6 +553,7 @@ class FinishedProductCycleTimeSaveView(APIView):
                 calc_to_date=d_end,
                 defaults={
                     'cycle_time_sec': Decimal(str(total_cycle_time_sec)),
+                    'use_adjusted': use_adjusted,
                 },
             )
             saved_count += 1
