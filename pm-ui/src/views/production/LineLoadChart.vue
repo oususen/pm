@@ -80,20 +80,32 @@
         <!-- グループ集計 -->
         <div v-for="gc in groupCharts" :key="'g-' + gc.groupId" class="line-chart-block group-block">
           <h3 class="line-title group-title">{{ gc.groupName }}（{{ gc.lines.length }}ライン合算）</h3>
-          <div class="bar-chart-wrapper">
-            <div class="bar-chart">
-              <div
-                v-for="d in gc.data"
-                :key="d.date"
-                class="bar-col"
-                @mouseenter="showTooltip($event, gc.groupName, d)"
-                @mouseleave="hideTooltip"
-              >
-                <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
-                <div class="bar-track">
-                  <div class="bar-fill" :style="barStyle(gc.data, d, '#8e44ad')"></div>
+          <div class="chart-canvas">
+            <div class="y-axis">
+              <div class="y-axis-label top">{{ formatLoadHours(globalMaxLoadSec) }}h</div>
+              <div class="y-axis-label mid">{{ formatLoadHours(globalMaxLoadSec / 2) }}h</div>
+              <div class="y-axis-label bottom">0h</div>
+            </div>
+            <div class="bar-chart-wrapper">
+              <div class="bar-chart">
+                <div class="chart-guides">
+                  <div class="chart-guide top"></div>
+                  <div class="chart-guide mid"></div>
+                  <div class="chart-guide bottom"></div>
                 </div>
-                <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                <div
+                  v-for="d in gc.data"
+                  :key="d.date"
+                  class="bar-col"
+                  @mouseenter="showTooltip($event, gc.groupName, d)"
+                  @mouseleave="hideTooltip"
+                >
+                  <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                  <div class="bar-track">
+                    <div class="bar-fill" :style="barStyle(d, '#8e44ad')"></div>
+                  </div>
+                  <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -105,20 +117,32 @@
           <div v-if="lineWarning(line)" class="calendar-warning">
             ⚠ {{ lineWarning(line) }}
           </div>
-          <div class="bar-chart-wrapper">
-            <div class="bar-chart">
-              <div
-                v-for="d in lineDisplayData(line)"
-                :key="d.date"
-                class="bar-col"
-                @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name}`, d)"
-                @mouseleave="hideTooltip"
-              >
-                <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
-                <div class="bar-track">
-                  <div class="bar-fill" :style="barStyle(lineDisplayData(line), d, '#e74c3c')"></div>
+          <div class="chart-canvas">
+            <div class="y-axis">
+              <div class="y-axis-label top">{{ formatLoadHours(globalMaxLoadSec) }}h</div>
+              <div class="y-axis-label mid">{{ formatLoadHours(globalMaxLoadSec / 2) }}h</div>
+              <div class="y-axis-label bottom">0h</div>
+            </div>
+            <div class="bar-chart-wrapper">
+              <div class="bar-chart">
+                <div class="chart-guides">
+                  <div class="chart-guide top"></div>
+                  <div class="chart-guide mid"></div>
+                  <div class="chart-guide bottom"></div>
                 </div>
-                <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                <div
+                  v-for="d in lineDisplayData(line)"
+                  :key="d.date"
+                  class="bar-col"
+                  @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name}`, d)"
+                  @mouseleave="hideTooltip"
+                >
+                  <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                  <div class="bar-track">
+                    <div class="bar-fill" :style="barStyle(d, '#e74c3c')"></div>
+                  </div>
+                  <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -132,20 +156,32 @@
                 {{ proc.process_code }} {{ proc.process_name }}
                 <span v-if="proc.equipment_count > 1" class="process-note">（{{ proc.equipment_count }}台で按分）</span>
               </h4>
-              <div class="bar-chart-wrapper">
-                <div class="bar-chart process-bar-chart">
-                  <div
-                    v-for="d in processDisplayData(line, proc)"
-                    :key="`${proc.process_id}_${d.date}`"
-                    class="bar-col"
-                    @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name} / ${proc.process_code} ${proc.process_name}`, d)"
-                    @mouseleave="hideTooltip"
-                  >
-                    <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
-                    <div class="bar-track">
-                      <div class="bar-fill" :style="barStyle(processDisplayData(line, proc), d, '#3498db')"></div>
+              <div class="chart-canvas">
+                <div class="y-axis">
+                  <div class="y-axis-label top">{{ formatLoadHours(globalMaxLoadSec) }}h</div>
+                  <div class="y-axis-label mid">{{ formatLoadHours(globalMaxLoadSec / 2) }}h</div>
+                  <div class="y-axis-label bottom">0h</div>
+                </div>
+                <div class="bar-chart-wrapper">
+                  <div class="bar-chart process-bar-chart">
+                    <div class="chart-guides">
+                      <div class="chart-guide top"></div>
+                      <div class="chart-guide mid"></div>
+                      <div class="chart-guide bottom"></div>
                     </div>
-                    <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                    <div
+                      v-for="d in processDisplayData(line, proc)"
+                      :key="`${proc.process_id}_${d.date}`"
+                      class="bar-col"
+                      @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name} / ${proc.process_code} ${proc.process_name}`, d)"
+                      @mouseleave="hideTooltip"
+                    >
+                      <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                      <div class="bar-track">
+                        <div class="bar-fill" :style="barStyle(d, '#3498db')"></div>
+                      </div>
+                      <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -319,6 +355,29 @@ const groupCharts = computed(() => {
   return charts
 })
 
+const globalMaxLoadSec = computed(() => {
+  let maxLoadSec = 0
+
+  for (const gc of groupCharts.value) {
+    for (const d of gc.data) {
+      if ((d.line_load_sec || 0) > maxLoadSec) maxLoadSec = d.line_load_sec || 0
+    }
+  }
+
+  if (result.value) {
+    for (const line of result.value.lines) {
+      for (const d of lineDisplayData(line)) {
+        if ((d.line_load_sec || 0) > maxLoadSec) maxLoadSec = d.line_load_sec || 0
+        for (const p of (d.processes || [])) {
+          if ((p.load_sec || 0) > maxLoadSec) maxLoadSec = p.load_sec || 0
+        }
+      }
+    }
+  }
+
+  return maxLoadSec > 0 ? maxLoadSec : 3600
+})
+
 const lineHasCalendar = (line) => {
   return line.data.some(d => d.available_min > 0)
 }
@@ -394,10 +453,8 @@ const processDisplayData = (line, proc) => {
   })
 }
 
-const barStyle = (source, d, color = '#e74c3c') => {
-  const allLoads = source.map(x => x.line_load_sec).filter(x => x > 0)
-  const maxLoad = Math.max(...allLoads, 1)
-  const pct = (d.line_load_sec / maxLoad) * 100
+const barStyle = (d, color = '#e74c3c') => {
+  const pct = ((d.line_load_sec || 0) / globalMaxLoadSec.value) * 100
   return { height: pct + '%', backgroundColor: color }
 }
 
@@ -534,11 +591,23 @@ const exportExcel = () => {
 .process-note { font-size: 11px; font-weight: 500; color: #6b7280; }
 .process-bar-chart { min-height: 130px; }
 
-.bar-chart-wrapper { overflow-x: auto; }
+.chart-canvas { display: flex; gap: 8px; align-items: flex-start; }
+.y-axis { width: 38px; height: 120px; margin-top: 14px; position: relative; flex-shrink: 0; }
+.y-axis-label { position: absolute; right: 0; font-size: 10px; color: #6b7280; line-height: 1; }
+.y-axis-label.top { top: 0; transform: translateY(-50%); }
+.y-axis-label.mid { top: 50%; transform: translateY(-50%); }
+.y-axis-label.bottom { bottom: 0; transform: translateY(50%); }
+
+.bar-chart-wrapper { overflow-x: auto; flex: 1; }
 .bar-chart { display: flex; gap: 2px; align-items: flex-end; min-height: 160px; padding-bottom: 20px; position: relative; }
-.bar-col { display: flex; flex-direction: column; align-items: center; min-width: 36px; flex-shrink: 0; cursor: pointer; }
+.chart-guides { position: absolute; top: 14px; left: 0; right: 0; height: 120px; pointer-events: none; z-index: 0; }
+.chart-guide { position: absolute; left: 0; right: 0; border-top: 1px solid #e5e7eb; }
+.chart-guide.top { top: 0; }
+.chart-guide.mid { top: 50%; }
+.chart-guide.bottom { bottom: 0; }
+.bar-col { display: flex; flex-direction: column; align-items: center; min-width: 36px; flex-shrink: 0; cursor: pointer; position: relative; z-index: 1; }
 .bar-label-top { font-size: 9px; color: #666; margin-bottom: 2px; white-space: nowrap; }
-.bar-track { width: 28px; height: 120px; background: #f0f0f0; border-radius: 3px 3px 0 0; position: relative; display: flex; align-items: flex-end; }
+.bar-track { width: 28px; height: 120px; background: transparent; position: relative; display: flex; align-items: flex-end; }
 .bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.3s; min-height: 1px; }
 .bar-label { font-size: 9px; color: #666; margin-top: 3px; white-space: nowrap; }
 

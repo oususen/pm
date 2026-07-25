@@ -16,6 +16,108 @@ from ..models import LineDemand
 
 
 class LineLoadService:
+    LT_LOOKBACK_DAYS = 31
+
+    @staticmethod
+    def _month_start(target_date):
+        return target_date.replace(day=1)
+
+    @classmethod
+    def _next_month_start(cls, target_date):
+        if target_date.month == 12:
+            return target_date.replace(year=target_date.year + 1, month=1, day=1)
+        return target_date.replace(month=target_date.month + 1, day=1)
+
+    @classmethod
+    def _month_end(cls, target_date):
+        return cls._next_month_start(target_date) - timedelta(days=1)
+
+    @classmethod
+    def _previous_month_start(cls, target_date):
+        return cls._month_start(cls._month_start(target_date) - timedelta(days=1))
+
+    @staticmethod
+    def _is_working_day(calendar_id, target_date, calendar_day_cache):
+        if not calendar_id:
+            return target_date.weekday() < 5
+        key = (calendar_id, target_date)
+        if key in calendar_day_cache:
+            return calendar_day_cache[key]
+        return target_date.weekday() < 5
+
+    @classmethod
+    def _shift_business_days_forward(cls, base_date, days, calendar_id, calendar_day_cache):
+        remaining = max(int(days or 0), 0)
+        current = base_date
+        while remaining > 0:
+            current = current + timedelta(days=1)
+            if cls._is_working_day(calendar_id, current, calendar_day_cache):
+                remaining -= 1
+        return current
+
+    @classmethod
+    def _list_working_days_in_month(cls, month_start, calendar_id, calendar_day_cache):
+        current = month_start
+        month_end = cls._month_end(month_start)
+        working_days = []
+        while current <= month_end:
+            if cls._is_working_day(calendar_id, current, calendar_day_cache):
+                working_days.append(current)
+            current += timedelta(days=1)
+        return working_days
+
+    def _rebalance_month_bucket_demands(
+        self,
+        demand_map,
+        final_line_by_product_code,
+        line_calendar_map,
+        calendar_day_cache,
+        start_date,
+        end_date,
+    ):
+        month_cursor = self._month_start(start_date)
+        last_month = self._month_start(end_date)
+        target_months = []
+        while month_cursor <= last_month:
+            target_months.append(month_cursor)
+            month_cursor = self._next_month_start(month_cursor)
+
+        for product_code, line_id in final_line_by_product_code.items():
+            calendar_id = line_calendar_map.get(line_id)
+            for month_start in target_months:
+                working_days = self._list_working_days_in_month(month_start, calendar_id, calendar_day_cache)
+                if len(working_days) < 3:
+                    continue
+                visible_working_days = [day for day in working_days if start_date <= day <= end_date]
+                if not visible_working_days:
+                    continue
+
+                prev_month_start = self._previous_month_start(month_start)
+                prev_working_days = self._list_working_days_in_month(prev_month_start, calendar_id, calendar_day_cache)
+                if not prev_working_days:
+                    continue
+
+                prev_total = sum(demand_map.get((product_code, day), 0) for day in prev_working_days)
+                prev_daily_avg = prev_total / len(prev_working_days)
+                if prev_daily_avg <= 0:
+                    continue
+
+                first_three_days = working_days[:3]
+                first_three_total = sum(demand_map.get((product_code, day), 0) for day in first_three_days)
+                if first_three_total < prev_daily_avg * 10:
+                    continue
+
+                month_total = sum(demand_map.get((product_code, day), 0) for day in visible_working_days)
+                if month_total <= 0:
+                    continue
+
+                for day in visible_working_days:
+                    demand_map.pop((product_code, day), None)
+
+                qty_per_day = month_total / len(visible_working_days)
+                for day in visible_working_days:
+                    demand_map[(product_code, day)] = qty_per_day
+
     def _build_final_product_demand_map(
         self,
         product_codes: set[str],
@@ -48,16 +150,32 @@ class LineLoadService:
             return {}
 
         final_line_ids = set(final_line_by_product_code.values())
+        line_calendar_map = dict(
+            Line.objects.filter(id__in=final_line_ids).values_list('id', 'calendar_id')
+        )
+        fetch_start_date = self._previous_month_start(start_date) - timedelta(days=self.LT_LOOKBACK_DAYS)
+        calendar_day_rows = CalendarDay.objects.filter(
+            calendar_id__in=[cid for cid in line_calendar_map.values() if cid],
+            target_date__gte=fetch_start_date,
+            target_date__lte=end_date + timedelta(days=self.LT_LOOKBACK_DAYS),
+        ).values('calendar_id', 'target_date', 'is_working_day')
+        calendar_day_cache = {
+            (row['calendar_id'], row['target_date']): bool(row['is_working_day'])
+            for row in calendar_day_rows
+        }
         demand_qs = LineDemand.objects.filter(
             line_id__in=final_line_ids,
             product__is_final_product=True,
             product_code__in=final_line_by_product_code.keys(),
-            plan_date__gte=start_date,
+            plan_date__gte=fetch_start_date,
             plan_date__lte=end_date,
         ).values(
             'line_id',
             'product_code',
             'plan_date',
+            'lead_time_days',
+            'firm_is_shifted',
+            'forecast_is_shifted',
             'forecast_qty',
             'firm_qty',
         )
@@ -66,12 +184,50 @@ class LineLoadService:
         for row in demand_qs:
             if final_line_by_product_code.get(row['product_code']) != row['line_id']:
                 continue
-            qty = float(row['forecast_qty'] or 0) + float(row['firm_qty'] or 0)
-            if qty <= 0:
-                continue
-            demand_map[(row['product_code'], row['plan_date'])] += qty
+            line_calendar_id = line_calendar_map.get(row['line_id'])
+            lead_time_days = int(row.get('lead_time_days') or 0)
 
-        return demand_map
+            forecast_qty = float(row['forecast_qty'] or 0)
+            if forecast_qty > 0:
+                forecast_date = row['plan_date']
+                if row.get('forecast_is_shifted') and lead_time_days > 0:
+                    forecast_date = self._shift_business_days_forward(
+                        row['plan_date'],
+                        lead_time_days,
+                        line_calendar_id,
+                        calendar_day_cache,
+                    )
+                if fetch_start_date <= forecast_date <= end_date:
+                    demand_map[(row['product_code'], forecast_date)] += forecast_qty
+
+            firm_qty = float(row['firm_qty'] or 0)
+            if firm_qty > 0:
+                firm_date = row['plan_date']
+                if row.get('firm_is_shifted') and lead_time_days > 0:
+                    firm_date = self._shift_business_days_forward(
+                        row['plan_date'],
+                        lead_time_days,
+                        line_calendar_id,
+                        calendar_day_cache,
+                    )
+                if fetch_start_date <= firm_date <= end_date:
+                    demand_map[(row['product_code'], firm_date)] += firm_qty
+
+        self._rebalance_month_bucket_demands(
+            demand_map,
+            final_line_by_product_code,
+            line_calendar_map,
+            calendar_day_cache,
+            start_date,
+            end_date,
+        )
+
+        filtered_map = defaultdict(float)
+        for (product_code, plan_date), qty in demand_map.items():
+            if start_date <= plan_date <= end_date and qty > 0:
+                filtered_map[(product_code, plan_date)] += qty
+
+        return filtered_map
 
     def calculate(
         self,
@@ -144,7 +300,7 @@ class LineLoadService:
                 avail_sec = avail_min * 60
 
                 process_detail = []
-                max_load_sec = 0
+                total_load_sec = 0
                 for proc_id, load_sec in process_loads.items():
                     proc = process_map.get(proc_id)
                     equipment_count = max(int(getattr(proc, 'equipment_count', 1) or 1), 1)
@@ -161,16 +317,15 @@ class LineLoadService:
                         'load_min': round(adjusted_load_sec / 60, 1),
                         'utilization': round(util, 1),
                     })
-                    if adjusted_load_sec > max_load_sec:
-                        max_load_sec = adjusted_load_sec
+                    total_load_sec += adjusted_load_sec
 
-                line_util = (max_load_sec / avail_sec * 100) if avail_sec > 0 else 0
+                line_util = (total_load_sec / avail_sec * 100) if avail_sec > 0 else 0
 
                 daily_data.append({
                     'date': current.isoformat(),
                     'available_min': avail_min,
-                    'line_load_sec': round(max_load_sec, 1),
-                    'line_load_min': round(max_load_sec / 60, 1),
+                    'line_load_sec': round(total_load_sec, 1),
+                    'line_load_min': round(total_load_sec / 60, 1),
                     'utilization': round(line_util, 1),
                     'is_working_day': avail_min > 0,
                     'processes': sorted(process_detail, key=lambda x: x['process_code']),
