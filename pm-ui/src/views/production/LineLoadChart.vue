@@ -329,10 +329,11 @@ const groupCharts = computed(() => {
     for (const line of lines) {
       for (const d of lineDisplayData(line)) {
         if (!dateMap[d.date]) {
-          dateMap[d.date] = { available_min: 0, load_sec: 0, month_label: d.month_label, week_label: d.week_label }
+          dateMap[d.date] = { available_min: 0, load_sec: 0, working_days: 0, month_label: d.month_label, week_label: d.week_label }
         }
         dateMap[d.date].available_min += d.available_min
         dateMap[d.date].load_sec += d.line_load_sec
+        dateMap[d.date].working_days = Math.max(dateMap[d.date].working_days, d.working_days || 0)
       }
     }
 
@@ -345,6 +346,7 @@ const groupCharts = computed(() => {
         available_min: v.available_min,
         line_load_sec: v.load_sec,
         line_load_min: Math.round(v.load_sec / 60 * 10) / 10,
+        working_days: v.working_days || 0,
         utilization: v.available_min > 0 ? Math.round(v.load_sec / (v.available_min * 60) * 1000) / 10 : 0,
         is_working_day: true,
         processes: [],
@@ -469,6 +471,42 @@ const formatHours = (minutes) => {
   return Math.round(hours * 10) / 10
 }
 
+const formatExcelHours = (minutes) => {
+  const hours = (Number(minutes) || 0) / 60
+  return Number(hours.toFixed(2))
+}
+
+const formatExcelHoursPerDay = (minutes, workingDays) => {
+  if (!workingDays) return ''
+  const hours = (Number(minutes) || 0) / 60
+  return Number((hours / workingDays).toFixed(2))
+}
+
+const applyExcelNumberFormat = (ws, startRow, startCol, format = '0.00') => {
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
+  for (let row = startRow; row <= range.e.r; row += 1) {
+    for (let col = startCol; col <= range.e.c; col += 1) {
+      const cellRef = XLSX.utils.encode_cell({ r: row, c: col })
+      if (ws[cellRef] && typeof ws[cellRef].v === 'number') {
+        ws[cellRef].z = format
+      }
+    }
+  }
+}
+
+const applyExcelColumnFormat = (ws, startRow, cols, format) => {
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
+  for (let row = startRow; row <= range.e.r; row += 1) {
+    for (const col of cols) {
+      if (col > range.e.c) continue
+      const cellRef = XLSX.utils.encode_cell({ r: row, c: col })
+      if (ws[cellRef] && typeof ws[cellRef].v === 'number') {
+        ws[cellRef].z = format
+      }
+    }
+  }
+}
+
 const showTooltip = (ev, label, d) => {
   tooltip.visible = true
   tooltip.x = ev.clientX + 12
@@ -483,18 +521,126 @@ const showTooltip = (ev, label, d) => {
 
 const hideTooltip = () => { tooltip.visible = false }
 
+const buildProductProcessLoadSheet = (dates, dateLabels) => {
+  const rows = [['ライン', '工程', '完成品コード', '完成品名', ...dateLabels]]
+
+  for (const line of result.value.lines) {
+    const displayData = lineDisplayData(line)
+    const dateMap = new Map(displayData.map(d => [d.date, d]))
+    const processMap = new Map()
+    for (const d of displayData) {
+      for (const process of (d.processes || [])) {
+        const processKey = process.process_id
+        if (!processMap.has(processKey)) {
+          processMap.set(processKey, {
+            process_id: process.process_id,
+            process_code: process.process_code,
+            process_name: process.process_name,
+            products: new Map(),
+          })
+        }
+        const processEntry = processMap.get(processKey)
+        for (const product of (process.products || [])) {
+          if (!processEntry.products.has(product.product_code)) {
+            processEntry.products.set(product.product_code, {
+              product_code: product.product_code,
+              product_name: product.product_name,
+            })
+          }
+        }
+      }
+    }
+
+    for (const processEntry of [...processMap.values()].sort((a, b) => a.process_code.localeCompare(b.process_code))) {
+      for (const productEntry of [...processEntry.products.values()].sort((a, b) => a.product_code.localeCompare(b.product_code))) {
+        const row = [
+          `${line.line_code} ${line.line_name}`,
+          `${processEntry.process_code} ${processEntry.process_name}`,
+          productEntry.product_code,
+          productEntry.product_name,
+        ]
+        for (const d of dates) {
+          const dateEntry = dateMap.get(d.date)
+          const process = dateEntry?.processes?.find(item => item.process_id === processEntry.process_id)
+          const product = process?.products?.find(item => item.product_code === productEntry.product_code)
+          row.push(product ? formatExcelHours(product.load_min) : '')
+        }
+        rows.push(row)
+      }
+    }
+  }
+
+  return rows
+}
+
+const buildMonthlyLoadSheet = (dates) => {
+  const monthHeader = ['ライン']
+  const subHeader = ['']
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }]
+  const monthColMap = new Map()
+  let colIndex = 1
+
+  for (const d of dates) {
+    const label = d.month_label || d.date
+    monthHeader.push(label, '', '')
+    subHeader.push('H/月', '稼働日', 'H/日')
+    monthColMap.set(d.date, colIndex)
+    merges.push({ s: { r: 0, c: colIndex }, e: { r: 0, c: colIndex + 2 } })
+    colIndex += 3
+  }
+
+  const rows = [monthHeader, subHeader]
+  for (const line of result.value.lines) {
+    const dateMap = new Map(lineDisplayData(line).map(d => [d.date, d]))
+    const row = [`${line.line_code} ${line.line_name}`]
+    for (const d of dates) {
+      const val = dateMap.get(d.date)
+      row.push(
+        val ? formatExcelHours(val.line_load_min) : '',
+        val?.working_days || '',
+        val ? formatExcelHoursPerDay(val.line_load_min, val.working_days || 0) : '',
+      )
+    }
+    rows.push(row)
+  }
+
+  return {
+    rows,
+    merges,
+    cols: [{ wch: 24 }, ...dates.flatMap(() => ([{ wch: 10 }, { wch: 8 }, { wch: 10 }]))],
+  }
+}
+
 const exportExcel = () => {
   if (!result.value) return
   const wb = XLSX.utils.book_new()
 
   // グループ集計シート
   for (const gc of groupCharts.value) {
-    const rows = [['日付', '稼働(分)', '負荷(h)', '負荷率(%)']]
+    const rows = filters.aggregate === 'monthly'
+      ? [['日付', '負荷(H)', '稼働日', 'H/日']]
+      : [['日付', '負荷(H)']]
     for (const d of gc.data) {
-      rows.push([d.month_label || d.week_label || d.date, d.available_min, formatHours(d.line_load_min), d.utilization])
+      if (filters.aggregate === 'monthly') {
+        rows.push([
+          d.month_label || d.week_label || d.date,
+          formatExcelHours(d.line_load_min),
+          d.working_days || '',
+          formatExcelHoursPerDay(d.line_load_min, d.working_days || 0),
+        ])
+      } else {
+        rows.push([d.month_label || d.week_label || d.date, formatExcelHours(d.line_load_min)])
+      }
     }
     const ws = XLSX.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }]
+    ws['!cols'] = filters.aggregate === 'monthly'
+      ? [{ wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 10 }]
+      : [{ wch: 14 }, { wch: 10 }]
+    applyExcelNumberFormat(ws, 1, 1, '0.00')
+    if (filters.aggregate === 'monthly') {
+      applyExcelNumberFormat(ws, 1, 2, '0')
+      applyExcelNumberFormat(ws, 1, 3, '0.00')
+    }
     XLSX.utils.book_append_sheet(wb, ws, gc.groupName.slice(0, 31))
   }
 
@@ -512,38 +658,56 @@ const exportExcel = () => {
   dates.sort((a, b) => a.date.localeCompare(b.date))
   const dateLabels = dates.map(d => d.month_label || d.week_label || d.date)
 
-  // 負荷率シート
   const header = ['ライン', ...dateLabels]
-  const utilRows = [header]
-  for (const line of result.value.lines) {
-    const dateMap = {}
-    for (const d of lineDisplayData(line)) { dateMap[d.date] = d }
-    const row = [`${line.line_code} ${line.line_name}${lineHasCalendar(line) ? '' : ' ※カレンダー未設定'}`]
-    for (const d of dates) {
-      const val = dateMap[d.date]
-      row.push(val ? (lineHasCalendar(line) ? val.utilization : formatLoadHours(val.line_load_sec) + 'h') : '')
-    }
-    utilRows.push(row)
-  }
-  const wsUtil = XLSX.utils.aoa_to_sheet(utilRows)
-  wsUtil['!cols'] = [{ wch: 30 }, ...dateLabels.map(() => ({ wch: 10 }))]
-  XLSX.utils.book_append_sheet(wb, wsUtil, '負荷率(%)')
 
   // 負荷時間シート
-  const loadRows = [header]
-  for (const line of result.value.lines) {
-    const dateMap = {}
-    for (const d of lineDisplayData(line)) { dateMap[d.date] = d }
-    const row = [`${line.line_code} ${line.line_name}`]
-    for (const d of dates) {
-      const val = dateMap[d.date]
-      row.push(val ? formatHours(val.line_load_min) : '')
+  let wsLoad
+  if (filters.aggregate === 'monthly') {
+    const monthlyLoadSheet = buildMonthlyLoadSheet(dates)
+    wsLoad = XLSX.utils.aoa_to_sheet(monthlyLoadSheet.rows)
+    wsLoad['!cols'] = monthlyLoadSheet.cols
+    wsLoad['!merges'] = monthlyLoadSheet.merges
+    const loadCols = []
+    const workingDayCols = []
+    const hoursPerDayCols = []
+    for (let i = 0; i < dates.length; i += 1) {
+      const baseCol = 1 + (i * 3)
+      loadCols.push(baseCol)
+      workingDayCols.push(baseCol + 1)
+      hoursPerDayCols.push(baseCol + 2)
     }
-    loadRows.push(row)
+    applyExcelColumnFormat(wsLoad, 2, loadCols, '0.00')
+    applyExcelColumnFormat(wsLoad, 2, workingDayCols, '0')
+    applyExcelColumnFormat(wsLoad, 2, hoursPerDayCols, '0.00')
+  } else {
+    const loadRows = [header]
+    for (const line of result.value.lines) {
+      const dateMap = {}
+      for (const d of lineDisplayData(line)) { dateMap[d.date] = d }
+      const row = [`${line.line_code} ${line.line_name}`]
+      for (const d of dates) {
+        const val = dateMap[d.date]
+        row.push(val ? formatExcelHours(val.line_load_min) : '')
+      }
+      loadRows.push(row)
+    }
+    wsLoad = XLSX.utils.aoa_to_sheet(loadRows)
+    wsLoad['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
+    applyExcelNumberFormat(wsLoad, 1, 1)
   }
-  const wsLoad = XLSX.utils.aoa_to_sheet(loadRows)
-  wsLoad['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
   XLSX.utils.book_append_sheet(wb, wsLoad, '負荷(h)')
+
+  const productProcessRows = buildProductProcessLoadSheet(dates, dateLabels)
+  const wsProductProcess = XLSX.utils.aoa_to_sheet(productProcessRows)
+  wsProductProcess['!cols'] = [
+    { wch: 24 },
+    { wch: 22 },
+    { wch: 16 },
+    { wch: 24 },
+    ...dateLabels.map(() => ({ wch: 10 })),
+  ]
+  applyExcelNumberFormat(wsProductProcess, 1, 4)
+  XLSX.utils.book_append_sheet(wb, wsProductProcess, '完成品別各工程ライン負荷')
 
   const agg = filters.aggregate === 'monthly' ? '月別' : filters.aggregate === 'weekly' ? '週別' : '日別'
   XLSX.writeFile(wb, `長期負荷_${agg}_${filters.startDate}_${filters.endDate}.xlsx`)

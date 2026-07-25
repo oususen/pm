@@ -253,10 +253,12 @@ class LineLoadService:
         ct_map = defaultdict(dict)
         target_lines_by_product_code = defaultdict(set)
         process_ids = set()
+        product_name_map = {}
         for ct in cycle_times:
             ct_map[(ct.line_id, ct.product.product_code)][ct.process_id] = float(ct.cycle_time_sec)
             target_lines_by_product_code[ct.product.product_code].add(ct.line_id)
             process_ids.add(ct.process_id)
+            product_name_map[ct.product.product_code] = ct.product.product_name
 
         process_map = {p.id: p for p in Process.objects.filter(id__in=process_ids)}
 
@@ -268,13 +270,17 @@ class LineLoadService:
 
         # {(line_id, plan_date): {process_id: load_seconds}}
         load_map = defaultdict(lambda: defaultdict(float))
+        # {(line_id, plan_date): {process_id: {product_code: load_seconds}}}
+        product_load_map = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         for (product_code, plan_date), demand_qty in final_demand_map.items():
             for target_line_id in target_lines_by_product_code.get(product_code, set()):
                 ct_by_process = ct_map.get((target_line_id, product_code))
                 if not ct_by_process:
                     continue
                 for proc_id, ct_sec in ct_by_process.items():
-                    load_map[(target_line_id, plan_date)][proc_id] += demand_qty * ct_sec
+                    load_sec = demand_qty * ct_sec
+                    load_map[(target_line_id, plan_date)][proc_id] += load_sec
+                    product_load_map[(target_line_id, plan_date)][proc_id][product_code] += load_sec
 
         calendar_days = CalendarDay.objects.filter(
             calendar__line__in=lines,
@@ -306,6 +312,18 @@ class LineLoadService:
                     equipment_count = max(int(getattr(proc, 'equipment_count', 1) or 1), 1)
                     adjusted_load_sec = load_sec / equipment_count
                     util = (adjusted_load_sec / avail_sec * 100) if avail_sec > 0 else 0
+                    product_details = []
+                    product_loads = product_load_map.get((line_id, current), {}).get(proc_id, {})
+                    for product_code, product_load_sec in sorted(product_loads.items()):
+                        adjusted_product_load_sec = product_load_sec / equipment_count
+                        product_details.append({
+                            'product_code': product_code,
+                            'product_name': product_name_map.get(product_code, ''),
+                            'raw_load_sec': round(product_load_sec, 1),
+                            'raw_load_min': round(product_load_sec / 60, 1),
+                            'load_sec': round(adjusted_product_load_sec, 1),
+                            'load_min': round(adjusted_product_load_sec / 60, 1),
+                        })
                     process_detail.append({
                         'process_id': proc_id,
                         'process_code': proc.process_code if proc else '',
@@ -316,6 +334,7 @@ class LineLoadService:
                         'load_sec': round(adjusted_load_sec, 1),
                         'load_min': round(adjusted_load_sec / 60, 1),
                         'utilization': round(util, 1),
+                        'products': product_details,
                     })
                     total_load_sec += adjusted_load_sec
 
@@ -326,6 +345,7 @@ class LineLoadService:
                     'available_min': avail_min,
                     'line_load_sec': round(total_load_sec, 1),
                     'line_load_min': round(total_load_sec / 60, 1),
+                    'working_days': 1 if avail_min > 0 else 0,
                     'utilization': round(line_util, 1),
                     'is_working_day': avail_min > 0,
                     'processes': sorted(process_detail, key=lambda x: x['process_code']),
@@ -372,6 +392,7 @@ class LineLoadService:
                     'available_min': 0,
                     'line_load_sec': 0,
                     'line_load_min': 0,
+                    'working_days': 0,
                     'utilization': 0,
                     'is_working_day': False,
                     'processes': [],
@@ -385,6 +406,11 @@ class LineLoadService:
                 'code': '',
                 'name': '',
                 'equipment_count': 1,
+                'products': defaultdict(lambda: {
+                    'product_name': '',
+                    'raw_load_sec': 0,
+                    'load_sec': 0,
+                }),
             })
             for d in days:
                 for p in d['processes']:
@@ -393,10 +419,25 @@ class LineLoadService:
                     proc_totals[p['process_id']]['code'] = p['process_code']
                     proc_totals[p['process_id']]['name'] = p['process_name']
                     proc_totals[p['process_id']]['equipment_count'] = p.get('equipment_count', 1)
+                    for product in p.get('products', []):
+                        product_total = proc_totals[p['process_id']]['products'][product['product_code']]
+                        product_total['product_name'] = product.get('product_name', '')
+                        product_total['raw_load_sec'] += product.get('raw_load_sec', product.get('load_sec', 0))
+                        product_total['load_sec'] += product.get('load_sec', 0)
 
             processes = []
             for pid, pt in proc_totals.items():
                 p_util = (pt['load_sec'] / (total_avail * 60) * 100) if total_avail > 0 else 0
+                products = []
+                for product_code, product_total in sorted(pt['products'].items()):
+                    products.append({
+                        'product_code': product_code,
+                        'product_name': product_total['product_name'],
+                        'raw_load_sec': round(product_total['raw_load_sec'], 1),
+                        'raw_load_min': round(product_total['raw_load_sec'] / 60, 1),
+                        'load_sec': round(product_total['load_sec'], 1),
+                        'load_min': round(product_total['load_sec'] / 60, 1),
+                    })
                 processes.append({
                     'process_id': pid,
                     'process_code': pt['code'],
@@ -407,6 +448,7 @@ class LineLoadService:
                     'load_sec': round(pt['load_sec'], 1),
                     'load_min': round(pt['load_sec'] / 60, 1),
                     'utilization': round(p_util, 1),
+                    'products': products,
                 })
 
             result.append({
@@ -415,6 +457,7 @@ class LineLoadService:
                 'available_min': total_avail,
                 'line_load_sec': round(total_load_sec, 1),
                 'line_load_min': round(total_load_sec / 60, 1),
+                'working_days': len(working_days),
                 'utilization': round(util, 1),
                 'is_working_day': total_avail > 0 or total_load_sec > 0,
                 'processes': sorted(processes, key=lambda x: x['process_code']),
@@ -442,6 +485,7 @@ class LineLoadService:
                     'month_label': f"{month_start.strftime('%Y/%m')}",
                     'available_min': 0,
                     'line_load_sec': 0, 'line_load_min': 0,
+                    'working_days': 0,
                     'utilization': 0, 'is_working_day': False, 'processes': [],
                 })
                 continue
@@ -453,6 +497,11 @@ class LineLoadService:
                 'code': '',
                 'name': '',
                 'equipment_count': 1,
+                'products': defaultdict(lambda: {
+                    'product_name': '',
+                    'raw_load_sec': 0,
+                    'load_sec': 0,
+                }),
             })
             for d in days:
                 for p in d['processes']:
@@ -461,10 +510,25 @@ class LineLoadService:
                     proc_totals[p['process_id']]['code'] = p['process_code']
                     proc_totals[p['process_id']]['name'] = p['process_name']
                     proc_totals[p['process_id']]['equipment_count'] = p.get('equipment_count', 1)
+                    for product in p.get('products', []):
+                        product_total = proc_totals[p['process_id']]['products'][product['product_code']]
+                        product_total['product_name'] = product.get('product_name', '')
+                        product_total['raw_load_sec'] += product.get('raw_load_sec', product.get('load_sec', 0))
+                        product_total['load_sec'] += product.get('load_sec', 0)
 
             processes = []
             for pid, pt in proc_totals.items():
                 p_util = (pt['load_sec'] / (total_avail * 60) * 100) if total_avail > 0 else 0
+                products = []
+                for product_code, product_total in sorted(pt['products'].items()):
+                    products.append({
+                        'product_code': product_code,
+                        'product_name': product_total['product_name'],
+                        'raw_load_sec': round(product_total['raw_load_sec'], 1),
+                        'raw_load_min': round(product_total['raw_load_sec'] / 60, 1),
+                        'load_sec': round(product_total['load_sec'], 1),
+                        'load_min': round(product_total['load_sec'] / 60, 1),
+                    })
                 processes.append({
                     'process_id': pid, 'process_code': pt['code'], 'process_name': pt['name'],
                     'equipment_count': pt['equipment_count'],
@@ -472,6 +536,7 @@ class LineLoadService:
                     'raw_load_min': round(pt['raw_load_sec'] / 60, 1),
                     'load_sec': round(pt['load_sec'], 1), 'load_min': round(pt['load_sec'] / 60, 1),
                     'utilization': round(p_util, 1),
+                    'products': products,
                 })
 
             result.append({
@@ -479,6 +544,7 @@ class LineLoadService:
                 'month_label': f"{month_start.strftime('%Y/%m')}",
                 'available_min': total_avail,
                 'line_load_sec': round(total_load_sec, 1), 'line_load_min': round(total_load_sec / 60, 1),
+                'working_days': len(working_days),
                 'utilization': round(util, 1), 'is_working_day': total_avail > 0 or total_load_sec > 0,
                 'processes': sorted(processes, key=lambda x: x['process_code']),
             })
