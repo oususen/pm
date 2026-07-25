@@ -147,17 +147,22 @@ class LineLoadService:
                 max_load_sec = 0
                 for proc_id, load_sec in process_loads.items():
                     proc = process_map.get(proc_id)
-                    util = (load_sec / avail_sec * 100) if avail_sec > 0 else 0
+                    equipment_count = max(int(getattr(proc, 'equipment_count', 1) or 1), 1)
+                    adjusted_load_sec = load_sec / equipment_count
+                    util = (adjusted_load_sec / avail_sec * 100) if avail_sec > 0 else 0
                     process_detail.append({
                         'process_id': proc_id,
                         'process_code': proc.process_code if proc else '',
                         'process_name': proc.process_name if proc else '',
-                        'load_sec': round(load_sec, 1),
-                        'load_min': round(load_sec / 60, 1),
+                        'equipment_count': equipment_count,
+                        'raw_load_sec': round(load_sec, 1),
+                        'raw_load_min': round(load_sec / 60, 1),
+                        'load_sec': round(adjusted_load_sec, 1),
+                        'load_min': round(adjusted_load_sec / 60, 1),
                         'utilization': round(util, 1),
                     })
-                    if load_sec > max_load_sec:
-                        max_load_sec = load_sec
+                    if adjusted_load_sec > max_load_sec:
+                        max_load_sec = adjusted_load_sec
 
                 line_util = (max_load_sec / avail_sec * 100) if avail_sec > 0 else 0
 
@@ -219,12 +224,20 @@ class LineLoadService:
                 continue
             util = (total_load_sec / (total_avail * 60) * 100) if total_avail > 0 else 0
 
-            proc_totals = defaultdict(lambda: {'load_sec': 0, 'code': '', 'name': ''})
+            proc_totals = defaultdict(lambda: {
+                'raw_load_sec': 0,
+                'load_sec': 0,
+                'code': '',
+                'name': '',
+                'equipment_count': 1,
+            })
             for d in days:
                 for p in d['processes']:
+                    proc_totals[p['process_id']]['raw_load_sec'] += p.get('raw_load_sec', p['load_sec'])
                     proc_totals[p['process_id']]['load_sec'] += p['load_sec']
                     proc_totals[p['process_id']]['code'] = p['process_code']
                     proc_totals[p['process_id']]['name'] = p['process_name']
+                    proc_totals[p['process_id']]['equipment_count'] = p.get('equipment_count', 1)
 
             processes = []
             for pid, pt in proc_totals.items():
@@ -233,6 +246,9 @@ class LineLoadService:
                     'process_id': pid,
                     'process_code': pt['code'],
                     'process_name': pt['name'],
+                    'equipment_count': pt['equipment_count'],
+                    'raw_load_sec': round(pt['raw_load_sec'], 1),
+                    'raw_load_min': round(pt['raw_load_sec'] / 60, 1),
                     'load_sec': round(pt['load_sec'], 1),
                     'load_min': round(pt['load_sec'] / 60, 1),
                     'utilization': round(p_util, 1),
@@ -276,18 +292,29 @@ class LineLoadService:
                 continue
             util = (total_load_sec / (total_avail * 60) * 100) if total_avail > 0 else 0
 
-            proc_totals = defaultdict(lambda: {'load_sec': 0, 'code': '', 'name': ''})
+            proc_totals = defaultdict(lambda: {
+                'raw_load_sec': 0,
+                'load_sec': 0,
+                'code': '',
+                'name': '',
+                'equipment_count': 1,
+            })
             for d in days:
                 for p in d['processes']:
+                    proc_totals[p['process_id']]['raw_load_sec'] += p.get('raw_load_sec', p['load_sec'])
                     proc_totals[p['process_id']]['load_sec'] += p['load_sec']
                     proc_totals[p['process_id']]['code'] = p['process_code']
                     proc_totals[p['process_id']]['name'] = p['process_name']
+                    proc_totals[p['process_id']]['equipment_count'] = p.get('equipment_count', 1)
 
             processes = []
             for pid, pt in proc_totals.items():
                 p_util = (pt['load_sec'] / (total_avail * 60) * 100) if total_avail > 0 else 0
                 processes.append({
                     'process_id': pid, 'process_code': pt['code'], 'process_name': pt['name'],
+                    'equipment_count': pt['equipment_count'],
+                    'raw_load_sec': round(pt['raw_load_sec'], 1),
+                    'raw_load_min': round(pt['raw_load_sec'] / 60, 1),
                     'load_sec': round(pt['load_sec'], 1), 'load_min': round(pt['load_sec'] / 60, 1),
                     'utilization': round(p_util, 1),
                 })

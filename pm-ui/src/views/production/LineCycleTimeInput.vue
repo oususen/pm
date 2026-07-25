@@ -6,7 +6,8 @@
         <p class="helper-text">長期負荷計算用: ルーティングから自動抽出した完成品 × 工程のサイクルタイム(秒/個)を登録</p>
       </div>
       <div class="page-actions">
-        <router-link to="/production/line-load-chart" class="btn-secondary">負荷チャートへ</router-link>
+        <router-link to="/production/actual-cycle-time" class="btn-secondary">出来高集計</router-link>
+        <router-link to="/production/line-load-chart" class="btn-secondary">負荷チャート</router-link>
       </div>
     </div>
 

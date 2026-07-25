@@ -4,6 +4,10 @@
       <div class="header-left">
         <h1 class="page-title">出来高集計 <DataSourceDialog title="出来高集計" :sources="dsSources" /></h1>
       </div>
+      <div class="page-actions">
+        <router-link to="/production/line-cycle-time" class="btn-secondary">サイクルタイム入力</router-link>
+        <router-link to="/production/line-load-chart" class="btn-secondary">負荷チャート</router-link>
+      </div>
     </div>
 
     <!-- タブ切替 -->

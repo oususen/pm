@@ -3,10 +3,11 @@
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">長期負荷チャート <DataSourceDialog title="長期負荷チャート" :sources="dsSources" /></h1>
-        <p class="helper-text">顧客需要 × ラインサイクルタイムからライン別の負荷を表示（カレンダー設定時は稼働率%）</p>
+        <p class="helper-text">顧客需要 × ラインサイクルタイムからライン別・工程別の負荷時間を表示（単位: h / 工程負荷は設備台数反映後）</p>
       </div>
       <div class="page-actions">
         <button v-if="result" class="btn-secondary" @click="exportExcel">Excel出力</button>
+        <router-link to="/production/actual-cycle-time" class="btn-secondary">出来高集計</router-link>
         <router-link to="/production/line-cycle-time" class="btn-secondary">サイクルタイム入力</router-link>
       </div>
     </div>
@@ -88,10 +89,9 @@
                 @mouseenter="showTooltip($event, gc.groupName, d)"
                 @mouseleave="hideTooltip"
               >
-                <div class="bar-label-top">{{ Math.round(d.utilization) }}%</div>
+                <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                 <div class="bar-track">
-                  <div class="bar-fill" :style="{ height: Math.min(d.utilization, 150) / 1.5 + '%', backgroundColor: barColor(d.utilization) }"></div>
-                  <div class="bar-100-line"></div>
+                  <div class="bar-fill" :style="barStyle(gc.data, d, '#8e44ad')"></div>
                 </div>
                 <div class="bar-label">{{ formatDateLabel(d) }}</div>
               </div>
@@ -114,12 +114,40 @@
                 @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name}`, d)"
                 @mouseleave="hideTooltip"
               >
-                <div class="bar-label-top">{{ lineHasCalendar(line) ? Math.round(d.utilization) + '%' : formatLoadHours(d.line_load_sec) + 'h' }}</div>
+                <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                 <div class="bar-track">
-                  <div class="bar-fill" :style="barStyle(line, d)"></div>
-                  <div v-if="lineHasCalendar(line)" class="bar-100-line"></div>
+                  <div class="bar-fill" :style="barStyle(lineDisplayData(line), d, '#e74c3c')"></div>
                 </div>
                 <div class="bar-label">{{ formatDateLabel(d) }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="lineProcesses(line).length" class="process-chart-list">
+            <div
+              v-for="proc in lineProcesses(line)"
+              :key="`${line.line_id}_${proc.process_id}`"
+              class="process-chart-block"
+            >
+              <h4 class="process-title">
+                {{ proc.process_code }} {{ proc.process_name }}
+                <span v-if="proc.equipment_count > 1" class="process-note">（{{ proc.equipment_count }}台で按分）</span>
+              </h4>
+              <div class="bar-chart-wrapper">
+                <div class="bar-chart process-bar-chart">
+                  <div
+                    v-for="d in processDisplayData(line, proc)"
+                    :key="`${proc.process_id}_${d.date}`"
+                    class="bar-col"
+                    @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name} / ${proc.process_code} ${proc.process_name}`, d)"
+                    @mouseleave="hideTooltip"
+                  >
+                    <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                    <div class="bar-track">
+                      <div class="bar-fill" :style="barStyle(processDisplayData(line, proc), d, '#3498db')"></div>
+                    </div>
+                    <div class="bar-label">{{ formatDateLabel(d) }}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -133,11 +161,15 @@
 
     <div v-if="tooltip.visible" class="chart-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
       <div class="tooltip-title">{{ tooltip.line }} / {{ tooltip.date }}</div>
-      <div v-if="tooltip.availMin > 0" class="tooltip-row">稼働: {{ tooltip.availMin }}分</div>
       <div class="tooltip-row">負荷: {{ formatHours(tooltip.loadMin) }}h</div>
-      <div v-if="tooltip.availMin > 0" class="tooltip-row"><b>負荷率: {{ tooltip.utilization }}%</b></div>
       <div v-for="p in tooltip.processes" :key="p.process_code" class="tooltip-row">
-        {{ p.process_code }} {{ p.process_name }}: {{ formatHours(p.load_min) }}h<template v-if="tooltip.availMin > 0"> ({{ p.utilization }}%)</template>
+        {{ p.process_code }} {{ p.process_name }}:
+        <template v-if="p.equipment_count > 1">
+          {{ formatHours(p.raw_load_min) }}h ÷ {{ p.equipment_count }}台 = {{ formatHours(p.load_min) }}h
+        </template>
+        <template v-else>
+          {{ formatHours(p.load_min) }}h
+        </template>
       </div>
     </div>
   </div>
@@ -298,7 +330,7 @@ const lineHasLoad = (line) => {
 const lineWarning = (line) => {
   const hasCal = lineHasCalendar(line)
   const hasLoad = lineHasLoad(line)
-  if (!hasCal && hasLoad) return 'カレンダー未設定のため負荷時間(h)で表示中。稼働率(%)を表示するにはカレンダーを設定してください'
+  if (!hasCal && hasLoad) return 'カレンダー未設定です。負荷時間(h)のみ表示しています'
   if (!hasCal && !hasLoad) return 'カレンダー未設定・負荷データなし'
   return ''
 }
@@ -312,20 +344,61 @@ const formatLoadHours = (sec) => {
   return Math.round((sec || 0) / 3600 * 10) / 10
 }
 
-const barStyle = (line, d) => {
-  if (lineHasCalendar(line)) {
-    return { height: Math.min(d.utilization, 150) / 1.5 + '%', backgroundColor: barColor(d.utilization) }
+const lineProcesses = (line) => {
+  const seen = new Map()
+  for (const d of line.data) {
+    for (const p of (d.processes || [])) {
+      if (!seen.has(p.process_id)) {
+        seen.set(p.process_id, {
+          process_id: p.process_id,
+          process_code: p.process_code,
+          process_name: p.process_name,
+          equipment_count: p.equipment_count || 1,
+        })
+      }
+    }
   }
-  const allLoads = line.data.map(x => x.line_load_sec).filter(x => x > 0)
-  const maxLoad = Math.max(...allLoads, 1)
-  const pct = (d.line_load_sec / maxLoad) * 100
-  return { height: pct + '%', backgroundColor: '#3498db' }
+  return [...seen.values()].sort((a, b) => a.process_code.localeCompare(b.process_code))
 }
 
-const barColor = (util) => {
-  if (util >= 100) return '#e74c3c'
-  if (util >= 80) return '#f39c12'
-  return '#27ae60'
+const processDisplayData = (line, proc) => {
+  const baseData = lineDisplayData(line)
+  return baseData.map((d) => {
+    const detail = (d.processes || []).find(p => p.process_id === proc.process_id)
+    const rawLoadSec = detail?.raw_load_sec ?? 0
+    const rawLoadMin = detail?.raw_load_min ?? 0
+    const loadSec = detail?.load_sec ?? 0
+    const loadMin = detail?.load_min ?? 0
+    const utilization = detail?.utilization ?? 0
+    return {
+      date: d.date,
+      month_label: d.month_label,
+      week_label: d.week_label,
+      available_min: d.available_min,
+      line_load_sec: loadSec,
+      line_load_min: loadMin,
+      utilization,
+      is_working_day: d.is_working_day,
+      processes: [{
+        process_id: proc.process_id,
+        process_code: proc.process_code,
+        process_name: proc.process_name,
+        equipment_count: proc.equipment_count || 1,
+        raw_load_sec: rawLoadSec,
+        raw_load_min: rawLoadMin,
+        load_sec: loadSec,
+        load_min: loadMin,
+        utilization,
+      }],
+    }
+  })
+}
+
+const barStyle = (source, d, color = '#e74c3c') => {
+  const allLoads = source.map(x => x.line_load_sec).filter(x => x > 0)
+  const maxLoad = Math.max(...allLoads, 1)
+  const pct = (d.line_load_sec / maxLoad) * 100
+  return { height: pct + '%', backgroundColor: color }
 }
 
 const formatDateLabel = (d) => {
@@ -455,6 +528,11 @@ const exportExcel = () => {
 .group-block { border-color: #8e44ad; border-width: 2px; }
 .line-title { font-size: 14px; font-weight: 700; margin: 0 0 8px; }
 .group-title { color: #8e44ad; }
+.process-chart-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+.process-chart-block { background: #fafbfc; border: 1px solid #edf0f2; border-radius: 6px; padding: 10px; }
+.process-title { font-size: 13px; font-weight: 700; margin: 0 0 8px; color: #374151; }
+.process-note { font-size: 11px; font-weight: 500; color: #6b7280; }
+.process-bar-chart { min-height: 130px; }
 
 .bar-chart-wrapper { overflow-x: auto; }
 .bar-chart { display: flex; gap: 2px; align-items: flex-end; min-height: 160px; padding-bottom: 20px; position: relative; }
@@ -462,7 +540,6 @@ const exportExcel = () => {
 .bar-label-top { font-size: 9px; color: #666; margin-bottom: 2px; white-space: nowrap; }
 .bar-track { width: 28px; height: 120px; background: #f0f0f0; border-radius: 3px 3px 0 0; position: relative; display: flex; align-items: flex-end; }
 .bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.3s; min-height: 1px; }
-.bar-100-line { position: absolute; bottom: 66.7%; left: -2px; right: -2px; border-top: 1.5px dashed #e74c3c; pointer-events: none; }
 .bar-label { font-size: 9px; color: #666; margin-top: 3px; white-space: nowrap; }
 
 .chart-tooltip {
