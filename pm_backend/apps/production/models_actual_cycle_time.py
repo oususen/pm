@@ -15,6 +15,15 @@ class ActualCycleTime(models.Model):
     total_qty = models.DecimalField(max_digits=12, decimal_places=3, verbose_name='出来高合計')
     total_seconds = models.IntegerField(verbose_name='有効稼働時間合計(秒)')
     cycle_time_sec = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='平均サイクル時間(秒/個)')
+    adjusted_cycle_time_sec = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        verbose_name='補正サイクル時間(秒/個)',
+        help_text='実績CT ÷ (稼働率/100)'
+    )
+    operating_rate_applied = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        verbose_name='適用稼働率(%)',
+    )
     calculated_at = models.DateTimeField(auto_now=True, verbose_name='計算日時')
 
     class Meta:

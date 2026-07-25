@@ -218,6 +218,8 @@
                 <th class="col-num">生産数量</th>
                 <th class="col-num">稼働秒</th>
                 <th class="col-num col-ct-val">CT (秒/個)</th>
+                <th class="col-num col-ct-val">補正CT</th>
+                <th class="col-num">稼働率</th>
                 <th class="col-date">計算日時</th>
               </tr>
             </thead>
@@ -231,6 +233,8 @@
                 <td class="col-num">{{ item.total_qty }}</td>
                 <td class="col-num">{{ formatSeconds(item.total_seconds) }}</td>
                 <td class="col-num col-ct-val">{{ item.cycle_time_sec }}</td>
+                <td class="col-num col-ct-val">{{ item.adjusted_cycle_time_sec || '-' }}</td>
+                <td class="col-num">{{ item.operating_rate_applied ? item.operating_rate_applied + '%' : '-' }}</td>
                 <td class="col-date">{{ item.calculated_at }}</td>
               </tr>
             </tbody>
@@ -284,8 +288,21 @@
           </button>
         </div>
       </div>
+      <div class="filter-bar">
+        <div class="filter-row">
+          <div class="filter-field">
+            <label>工程</label>
+            <select v-model="coeffProcessFilterId">
+              <option :value="null">-- 全工程 --</option>
+              <option v-for="p in coeffFilterOptions" :key="p.id" :value="p.id">
+                {{ p.process_code }} {{ p.process_name }}
+              </option>
+            </select>
+          </div>
+        </div>
+      </div>
       <div v-if="coeffLoading" class="empty-state">読み込み中...</div>
-      <div v-else class="table-wrapper">
+      <div v-else-if="coeffFilteredProcesses.length" class="table-wrapper">
         <table class="data-table compact">
           <thead>
             <tr>
@@ -297,7 +314,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in coeffProcesses" :key="p.id" :class="{ 'row-changed': p._dirty }">
+            <tr v-for="p in coeffFilteredProcesses" :key="p.id" :class="{ 'row-changed': p._dirty }">
               <td class="col-code">{{ p.process_code }}</td>
               <td class="col-name">{{ p.process_name }}</td>
               <td class="col-code">{{ p.line_name || '-' }}</td>
@@ -320,6 +337,9 @@
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="!coeffLoading && !coeffFilteredProcesses.length" class="empty-state">
+        該当する工程がありません
       </div>
     </div>
   </div>
@@ -468,6 +488,19 @@ const calcActual = async () => {
 
 const saveActual = async () => {
   if (!actualItems.value.length) return
+
+  const proc = processes.value.find(p => p.id === selectedProcessId.value)
+  const rate = Number(proc?.operating_rate) || 100
+  const rateText = rate === 100
+    ? `工程「${proc?.process_code || ''}」の稼働率は 100%（未設定）です。\n稼働率を設定しましたか？`
+    : `工程「${proc?.process_code || ''}」の稼働率は ${rate}% です。\nこの稼働率で補正して保存しますか？\n（例: 実績CT ÷ ${rate/100} = 補正CT）`
+  const confirmed = confirm(rateText + '\n\n「OK」→ 保存　「キャンセル」→ 係数設定へ')
+  if (!confirmed) {
+    activeTab.value = 'coeff'
+    loadCoefficients()
+    return
+  }
+
   savingActual.value = true
   try {
     const lineId = selectedLineId.value || resolvedLineId.value
@@ -482,7 +515,8 @@ const saveActual = async () => {
       end_date: endDate.value,
       items: actualItems.value,
     })
-    alert(`実績CT保存完了: ${res.data.saved_count}件`)
+    const appliedRate = res.data.operating_rate || 100
+    alert(`実績CT保存完了: ${res.data.saved_count}件\n適用稼働率: ${appliedRate}%`)
     actualSaved.value = true
   } catch (e) {
     alert('保存エラー: ' + (e.response?.data?.error || e.message))
@@ -567,7 +601,17 @@ const deletePeriod = async () => {
 const coeffProcesses = ref([])
 const coeffLoading = ref(false)
 const savingCoeff = ref(false)
+const coeffProcessFilterId = ref(null)
 const coeffDirty = computed(() => coeffProcesses.value.some(p => p._dirty))
+const coeffFilterOptions = computed(() => coeffProcesses.value.map(p => ({
+  id: p.id,
+  process_code: p.process_code,
+  process_name: p.process_name,
+})))
+const coeffFilteredProcesses = computed(() => {
+  if (!coeffProcessFilterId.value) return coeffProcesses.value
+  return coeffProcesses.value.filter(p => p.id === coeffProcessFilterId.value)
+})
 
 const loadCoefficients = async () => {
   if (coeffProcesses.value.length) return
@@ -621,6 +665,10 @@ const saveCoefficients = async () => {
       p._orig_count = p.equipment_count
       p._dirty = false
     }
+    // processesマスタも最新化（saveActualダイアログで稼働率を参照するため）
+    const procRes = await api.processes.getProcesses({ is_active: true })
+    processes.value = (procRes.data.results || procRes.data)
+      .sort((a, b) => a.process_code.localeCompare(b.process_code))
   } catch (e) {
     alert('保存エラー: ' + (e.response?.data?.error || e.message))
   } finally {

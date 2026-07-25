@@ -227,6 +227,10 @@ class ActualCycleTimeSaveView(APIView):
         if not d_start or not d_end:
             return Response({'error': '日付形式が不正です'}, status=status.HTTP_400_BAD_REQUEST)
 
+        from masters.models import Process
+        process = Process.objects.filter(id=process_id).first()
+        operating_rate = float(process.operating_rate) if process else 100.0
+
         saved_count = 0
         for item in items:
             product_id = item.get('product_id')
@@ -235,6 +239,10 @@ class ActualCycleTimeSaveView(APIView):
             cycle_time_sec = item.get('cycle_time_sec')
             if not product_id or not cycle_time_sec:
                 continue
+
+            ct = Decimal(str(cycle_time_sec))
+            rate = Decimal(str(operating_rate))
+            adjusted_ct = (ct / (rate / Decimal('100'))).quantize(Decimal('0.01')) if rate > 0 else ct
 
             ActualCycleTime.objects.update_or_create(
                 product_id=product_id,
@@ -245,12 +253,14 @@ class ActualCycleTimeSaveView(APIView):
                 defaults={
                     'total_qty': Decimal(str(total_qty or 0)),
                     'total_seconds': int(total_seconds or 0),
-                    'cycle_time_sec': Decimal(str(cycle_time_sec)),
+                    'cycle_time_sec': ct,
+                    'adjusted_cycle_time_sec': adjusted_ct,
+                    'operating_rate_applied': rate,
                 },
             )
             saved_count += 1
 
-        return Response({'saved_count': saved_count})
+        return Response({'saved_count': saved_count, 'operating_rate': float(operating_rate)})
 
 
 class ActualCycleTimeDeleteByPeriodView(APIView):
@@ -323,6 +333,8 @@ class ActualCycleTimeListView(APIView):
                 'total_qty': float(r.total_qty),
                 'total_seconds': r.total_seconds,
                 'cycle_time_sec': float(r.cycle_time_sec),
+                'adjusted_cycle_time_sec': float(r.adjusted_cycle_time_sec) if r.adjusted_cycle_time_sec else None,
+                'operating_rate_applied': float(r.operating_rate_applied) if r.operating_rate_applied else None,
                 'calculated_at': r.calculated_at.strftime('%Y-%m-%d %H:%M') if r.calculated_at else '',
             })
 
