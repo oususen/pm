@@ -806,10 +806,30 @@ const normalizeList = (payload) => {
   return []
 }
 
+function scopeUsersForStats(userList) {
+  const profile = authState.user?.profile || {}
+  const role = profile.role || ''
+  if (role !== 'leader') return userList
+
+  const unitIds = new Set(
+    [profile.unit_id, ...(Array.isArray(profile.leader_units) ? profile.leader_units : [])]
+      .filter(Boolean)
+      .map(Number)
+  )
+
+  if (!unitIds.size) return userList.filter((user) => Number(user.id) === Number(authState.user?.id))
+
+  return userList.filter((user) => (
+    Number(user.id) === Number(authState.user?.id) ||
+    unitIds.has(Number(user.profile?.unit))
+  ))
+}
+
 const loadUsers = async () => {
   try {
     const usersRes = await api.accounts.getUsers({ page_size: 1000, is_active: true })
-    const userList = usersRes.data?.results ?? usersRes.data ?? []
+    const rawUsers = usersRes.data?.results ?? usersRes.data ?? []
+    const userList = scopeUsersForStats(rawUsers)
     allUsers.value = userList.map(u => ({
       id: u.id,
       name: `${u.last_name} ${u.first_name}`.trim() || u.username,
@@ -1053,7 +1073,6 @@ async function load() {
     })
     rows.value = result
 
-    await loadProductionMetrics()
   } catch (e) {
     console.error(e)
   } finally {
