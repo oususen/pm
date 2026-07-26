@@ -213,8 +213,9 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import api from '@/api/client'
+import { authState, ensureAuth } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
@@ -482,29 +483,210 @@ const formatExcelHoursPerDay = (minutes, workingDays) => {
   return Number((hours / workingDays).toFixed(2))
 }
 
-const applyExcelNumberFormat = (ws, startRow, startCol, format = '0.00') => {
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
-  for (let row = startRow; row <= range.e.r; row += 1) {
-    for (let col = startCol; col <= range.e.c; col += 1) {
-      const cellRef = XLSX.utils.encode_cell({ r: row, c: col })
-      if (ws[cellRef] && typeof ws[cellRef].v === 'number') {
-        ws[cellRef].z = format
-      }
+const formatExcelDateTime = (date = new Date()) => {
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mi = String(date.getMinutes()).padStart(2, '0')
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}`
+}
+
+const getExportUserName = async () => {
+  await ensureAuth()
+  const user = authState.user
+  if (!user) return '不明'
+  return `${user.last_name || ''} ${user.first_name || ''}`.trim()
+    || user.display_name
+    || user.username
+    || user.email
+    || '不明'
+}
+
+const toExcelArgb = (hex) => `FF${String(hex || '#ffffff').replace('#', '').toUpperCase()}`
+
+const makeExcelBorder = (thick = false, color = '#b8c2cc') => ({
+  style: thick ? 'medium' : 'thin',
+  color: { argb: toExcelArgb(color) },
+})
+
+const applyExcelCellStyle = (cell, {
+  align = 'center',
+  bold = false,
+  color = '#1f2937',
+  bg = '#ffffff',
+  numFmt = null,
+  wrapText = false,
+  thickLeft = false,
+  thickRight = false,
+  thickTop = false,
+  thickBottom = false,
+} = {}) => {
+  cell.font = {
+    bold,
+    name: 'Meiryo',
+    size: 10,
+    color: { argb: toExcelArgb(color) },
+  }
+  cell.alignment = {
+    horizontal: align,
+    vertical: 'middle',
+    wrapText,
+  }
+  cell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: toExcelArgb(bg) },
+  }
+  cell.border = {
+    top: makeExcelBorder(thickTop),
+    left: makeExcelBorder(thickLeft),
+    right: makeExcelBorder(thickRight),
+    bottom: makeExcelBorder(thickBottom),
+  }
+  if (numFmt) {
+    cell.numFmt = numFmt
+  }
+}
+
+const setWorksheetColumns = (worksheet, cols) => {
+  cols.forEach((col, index) => {
+    worksheet.getColumn(index + 1).width = (col?.wch || col?.width || 10) + 1
+  })
+}
+
+const writeSheetRows = (worksheet, startRow, rows) => {
+  rows.forEach((row, rowIndex) => {
+    row.forEach((value, colIndex) => {
+      worksheet.getCell(startRow + rowIndex, colIndex + 1).value = value
+    })
+  })
+}
+
+const decorateSheetHeader = (worksheet, title, totalCols, userName) => {
+  const aggLabel = filters.aggregate === 'monthly' ? '月別' : filters.aggregate === 'weekly' ? '週別' : '日別'
+  const safeCols = Math.max(totalCols, 4)
+  worksheet.mergeCells(1, 1, 1, safeCols)
+  worksheet.getCell(1, 1).value = title
+  applyExcelCellStyle(worksheet.getCell(1, 1), {
+    align: 'left',
+    bold: true,
+    color: '#1f2937',
+    bg: '#dce6f1',
+    thickBottom: true,
+  })
+  worksheet.getRow(1).height = 24
+
+  const metaRows = [
+    ['作成日', formatExcelDateTime(), '作成者', userName],
+    ['開始日', filters.startDate, '終了日', filters.endDate],
+    ['集計', aggLabel, '画面', '長期負荷チャート'],
+  ]
+  metaRows.forEach((values, index) => {
+    const rowNo = index + 2
+    values.forEach((value, colIndex) => {
+      const isLabel = colIndex % 2 === 0
+      worksheet.getCell(rowNo, colIndex + 1).value = value
+      applyExcelCellStyle(worksheet.getCell(rowNo, colIndex + 1), {
+        align: isLabel ? 'center' : 'left',
+        bold: isLabel,
+        bg: isLabel ? '#eef3f8' : '#ffffff',
+      })
+    })
+    worksheet.getRow(rowNo).height = 19
+  })
+  worksheet.getRow(5).height = 8
+}
+
+const styleSimpleTable = (worksheet, startRow, rowCount, colCount, options = {}) => {
+  const headerBg = options.headerBg || '#5b9bd5'
+  const headerColor = options.headerColor || '#ffffff'
+  const integerCols = new Set(options.integerCols || [])
+  const decimalCols = new Set(options.decimalCols || [])
+  const leftAlignCols = new Set(options.leftAlignCols || [])
+
+  for (let col = 1; col <= colCount; col += 1) {
+    applyExcelCellStyle(worksheet.getCell(startRow, col), {
+      bold: true,
+      color: headerColor,
+      bg: headerBg,
+      thickTop: true,
+      thickBottom: true,
+    })
+  }
+
+  for (let row = startRow + 1; row < startRow + rowCount; row += 1) {
+    const zebraBg = row % 2 === 0 ? '#f8fbff' : '#ffffff'
+    for (let col = 1; col <= colCount; col += 1) {
+      const cell = worksheet.getCell(row, col)
+      const numFmt = integerCols.has(col) ? '0' : decimalCols.has(col) ? '0.00' : null
+      applyExcelCellStyle(cell, {
+        align: leftAlignCols.has(col) ? 'left' : numFmt ? 'right' : 'center',
+        bg: zebraBg,
+        numFmt,
+      })
     }
   }
 }
 
-const applyExcelColumnFormat = (ws, startRow, cols, format) => {
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
-  for (let row = startRow; row <= range.e.r; row += 1) {
-    for (const col of cols) {
-      if (col > range.e.c) continue
-      const cellRef = XLSX.utils.encode_cell({ r: row, c: col })
-      if (ws[cellRef] && typeof ws[cellRef].v === 'number') {
-        ws[cellRef].z = format
-      }
+const styleMonthlyLoadTable = (worksheet, startRow, dates, rowCount) => {
+  const colCount = 1 + (dates.length * 3)
+  for (let col = 1; col <= colCount; col += 1) {
+    const isMonthEndCol = col > 1 && ((col - 1) % 3 === 0)
+    applyExcelCellStyle(worksheet.getCell(startRow, col), {
+      bold: true,
+      color: '#ffffff',
+      bg: '#4472c4',
+      thickTop: true,
+      thickBottom: true,
+      thickRight: isMonthEndCol,
+    })
+    applyExcelCellStyle(worksheet.getCell(startRow + 1, col), {
+      bold: true,
+      color: '#1f2937',
+      bg: '#d9e2f3',
+      thickBottom: true,
+      thickRight: isMonthEndCol,
+    })
+  }
+
+  for (let row = startRow + 2; row < startRow + rowCount; row += 1) {
+    const zebraBg = row % 2 === 0 ? '#f8fbff' : '#ffffff'
+    applyExcelCellStyle(worksheet.getCell(row, 1), {
+      align: 'left',
+      bg: zebraBg,
+    })
+    for (let index = 0; index < dates.length; index += 1) {
+      const baseCol = 2 + (index * 3)
+      applyExcelCellStyle(worksheet.getCell(row, baseCol), {
+        align: 'right',
+        bg: zebraBg,
+        numFmt: '0.00',
+      })
+      applyExcelCellStyle(worksheet.getCell(row, baseCol + 1), {
+        align: 'right',
+        bg: zebraBg,
+        numFmt: '0',
+      })
+      applyExcelCellStyle(worksheet.getCell(row, baseCol + 2), {
+        align: 'right',
+        bg: zebraBg,
+        numFmt: '0.00',
+        thickRight: true,
+      })
     }
   }
+}
+
+const downloadWorkbook = async (workbook, filename) => {
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  window.URL.revokeObjectURL(url)
 }
 
 const showTooltip = (ev, label, d) => {
@@ -577,14 +759,12 @@ const buildMonthlyLoadSheet = (dates) => {
   const monthHeader = ['ライン']
   const subHeader = ['']
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }]
-  const monthColMap = new Map()
   let colIndex = 1
 
   for (const d of dates) {
     const label = d.month_label || d.date
     monthHeader.push(label, '', '')
     subHeader.push('H/月', '稼働日', 'H/日')
-    monthColMap.set(d.date, colIndex)
     merges.push({ s: { r: 0, c: colIndex }, e: { r: 0, c: colIndex + 2 } })
     colIndex += 3
   }
@@ -611,9 +791,13 @@ const buildMonthlyLoadSheet = (dates) => {
   }
 }
 
-const exportExcel = () => {
+const exportExcel = async () => {
   if (!result.value) return
-  const wb = XLSX.utils.book_new()
+  const userName = await getExportUserName()
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = userName
+  workbook.created = new Date()
+  workbook.modified = new Date()
 
   // グループ集計シート
   for (const gc of groupCharts.value) {
@@ -632,16 +816,19 @@ const exportExcel = () => {
         rows.push([d.month_label || d.week_label || d.date, formatExcelHours(d.line_load_min)])
       }
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    ws['!cols'] = filters.aggregate === 'monthly'
+    const cols = filters.aggregate === 'monthly'
       ? [{ wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 10 }]
       : [{ wch: 14 }, { wch: 10 }]
-    applyExcelNumberFormat(ws, 1, 1, '0.00')
-    if (filters.aggregate === 'monthly') {
-      applyExcelNumberFormat(ws, 1, 2, '0')
-      applyExcelNumberFormat(ws, 1, 3, '0.00')
-    }
-    XLSX.utils.book_append_sheet(wb, ws, gc.groupName.slice(0, 31))
+    const ws = workbook.addWorksheet(gc.groupName.slice(0, 31))
+    setWorksheetColumns(ws, cols)
+    decorateSheetHeader(ws, `長期負荷チャート ${gc.groupName}`, cols.length, userName)
+    writeSheetRows(ws, 6, rows)
+    styleSimpleTable(ws, 6, rows.length, cols.length, {
+      leftAlignCols: [1],
+      integerCols: filters.aggregate === 'monthly' ? [3] : [],
+      decimalCols: filters.aggregate === 'monthly' ? [2, 4] : [2],
+    })
+    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 6 }]
   }
 
   // ライン別シート（全ラインまとめ）
@@ -664,21 +851,20 @@ const exportExcel = () => {
   let wsLoad
   if (filters.aggregate === 'monthly') {
     const monthlyLoadSheet = buildMonthlyLoadSheet(dates)
-    wsLoad = XLSX.utils.aoa_to_sheet(monthlyLoadSheet.rows)
-    wsLoad['!cols'] = monthlyLoadSheet.cols
-    wsLoad['!merges'] = monthlyLoadSheet.merges
-    const loadCols = []
-    const workingDayCols = []
-    const hoursPerDayCols = []
-    for (let i = 0; i < dates.length; i += 1) {
-      const baseCol = 1 + (i * 3)
-      loadCols.push(baseCol)
-      workingDayCols.push(baseCol + 1)
-      hoursPerDayCols.push(baseCol + 2)
-    }
-    applyExcelColumnFormat(wsLoad, 2, loadCols, '0.00')
-    applyExcelColumnFormat(wsLoad, 2, workingDayCols, '0')
-    applyExcelColumnFormat(wsLoad, 2, hoursPerDayCols, '0.00')
+    wsLoad = workbook.addWorksheet('負荷(h)')
+    setWorksheetColumns(wsLoad, monthlyLoadSheet.cols)
+    decorateSheetHeader(wsLoad, '長期負荷チャート 負荷(h)', monthlyLoadSheet.cols.length, userName)
+    writeSheetRows(wsLoad, 6, monthlyLoadSheet.rows)
+    monthlyLoadSheet.merges.forEach((merge) => {
+      wsLoad.mergeCells(
+        6 + merge.s.r,
+        merge.s.c + 1,
+        6 + merge.e.r,
+        merge.e.c + 1,
+      )
+    })
+    styleMonthlyLoadTable(wsLoad, 6, dates, monthlyLoadSheet.rows.length)
+    wsLoad.views = [{ state: 'frozen', xSplit: 1, ySplit: 7 }]
   } else {
     const loadRows = [header]
     for (const line of result.value.lines) {
@@ -691,26 +877,38 @@ const exportExcel = () => {
       }
       loadRows.push(row)
     }
-    wsLoad = XLSX.utils.aoa_to_sheet(loadRows)
-    wsLoad['!cols'] = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
-    applyExcelNumberFormat(wsLoad, 1, 1)
+    wsLoad = workbook.addWorksheet('負荷(h)')
+    const cols = [{ wch: 24 }, ...dateLabels.map(() => ({ wch: 10 }))]
+    setWorksheetColumns(wsLoad, cols)
+    decorateSheetHeader(wsLoad, '長期負荷チャート 負荷(h)', cols.length, userName)
+    writeSheetRows(wsLoad, 6, loadRows)
+    styleSimpleTable(wsLoad, 6, loadRows.length, cols.length, {
+      leftAlignCols: [1],
+      decimalCols: Array.from({ length: cols.length - 1 }, (_, index) => index + 2),
+    })
+    wsLoad.views = [{ state: 'frozen', xSplit: 1, ySplit: 6 }]
   }
-  XLSX.utils.book_append_sheet(wb, wsLoad, '負荷(h)')
 
   const productProcessRows = buildProductProcessLoadSheet(dates, dateLabels)
-  const wsProductProcess = XLSX.utils.aoa_to_sheet(productProcessRows)
-  wsProductProcess['!cols'] = [
+  const wsProductProcess = workbook.addWorksheet('完成品別各工程ライン負荷')
+  const productCols = [
     { wch: 24 },
     { wch: 22 },
     { wch: 16 },
     { wch: 24 },
     ...dateLabels.map(() => ({ wch: 10 })),
   ]
-  applyExcelNumberFormat(wsProductProcess, 1, 4)
-  XLSX.utils.book_append_sheet(wb, wsProductProcess, '完成品別各工程ライン負荷')
+  setWorksheetColumns(wsProductProcess, productCols)
+  decorateSheetHeader(wsProductProcess, '長期負荷チャート 完成品別各工程ライン負荷', productCols.length, userName)
+  writeSheetRows(wsProductProcess, 6, productProcessRows)
+  styleSimpleTable(wsProductProcess, 6, productProcessRows.length, productCols.length, {
+    leftAlignCols: [1, 2, 3, 4],
+    decimalCols: Array.from({ length: productCols.length - 4 }, (_, index) => index + 5),
+  })
+  wsProductProcess.views = [{ state: 'frozen', xSplit: 4, ySplit: 6 }]
 
   const agg = filters.aggregate === 'monthly' ? '月別' : filters.aggregate === 'weekly' ? '週別' : '日別'
-  XLSX.writeFile(wb, `長期負荷_${agg}_${filters.startDate}_${filters.endDate}.xlsx`)
+  await downloadWorkbook(workbook, `長期負荷_${agg}_${filters.startDate}_${filters.endDate}.xlsx`)
 }
 </script>
 
