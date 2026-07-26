@@ -541,8 +541,8 @@
         <td>START/RESUME &#8594; END/PAUSE のペアから加工時間を算出。ペアリングにより実稼働時間のみを計上します</td>
       </tr>
       <tr>
-        <th>ブレーキライン</th>
-        <td>セッション単位で直接加工時間を取得します</td>
+        <th>ブレーキ/スポット</th>
+        <td>ブレーキプレスと板金スポットは同じ専用実績テーブルを共有し、セッション単位で加工時間を取得します</td>
       </tr>
       <tr>
         <th>工程実績(PWS)</th>
@@ -551,6 +551,9 @@
     </table>
     <div class="step-desc" style="margin-top:12px;margin-bottom:8px;">
       3つのソースからのデータは、複合キー<strong>（日付|氏名|工程|製品|アクション|数量|開始|終了）</strong>で重複排除されます。
+    </div>
+    <div class="step-desc" style="margin-top:8px;margin-bottom:8px;padding:8px 12px;background:#f0fdf4;border-left:3px solid #22c55e;font-size:13px;">
+      <strong>調査実績（2026-02-16〜07-24 / 全12,949件）:</strong> 同一日・同一作業者・同一製品がソース間で二重登録されたケースは <strong>0件</strong>。同一作業者が同日に複数ソースで記録されるケース（13件）はすべて異なる製品での作業であり、正常運用です。
     </div>
 
     <h4 class="sub">&#9654; 勤務時間</h4>
