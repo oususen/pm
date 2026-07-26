@@ -108,6 +108,8 @@ class ProcessSpec:
     output_product_code: str = ''
     output_product_name: str = ''
     transfer_time_minutes: float = 0.0
+    representative_part: bool = False
+    source_step_id: Optional[int] = None
 
 
 class LineWorkCalendar:
@@ -320,6 +322,7 @@ def _build_process_specs(steps: List[RoutingStep], plan_qty: Decimal, plan_date,
         cycle_time_min, setup_time_min = _get_cycle_setup(step, product_id, plan_date)
         parallel_count = step.parallel_count or 1
         parallel_group = getattr(step, 'parallel_group', 1) or 1
+        source_bom_item = getattr(step, 'source_bom_item', None)
         specs.append(ProcessSpec(
             process_id=step.process_id,
             process_code=step.process.process_code if step.process_id else '',
@@ -333,6 +336,8 @@ def _build_process_specs(steps: List[RoutingStep], plan_qty: Decimal, plan_date,
             output_product_code=output_product.product_code if output_product else '',
             output_product_name=output_product.product_name if output_product else '',
             transfer_time_minutes=float(getattr(step, 'transfer_time_minutes', 0.0)),
+            representative_part=bool(getattr(source_bom_item, 'is_coproduct_driver', False)),
+            source_step_id=step.id,
         ))
     return specs
 
@@ -496,8 +501,39 @@ def _sort_routing_steps(steps: List[RoutingStep]) -> List[RoutingStep]:
     return sorted(steps, key=lambda s: (s.step_no or 0, getattr(s, 'parallel_group', 1) or 1, s.id or 0))
 
 
-def _select_steps_for_gantt_product(product: Product, steps_by_product: Dict[int, List[RoutingStep]], is_l2201_line: bool) -> List[RoutingStep]:
-    steps = list(steps_by_product.get(product.id, []))
+def _is_step_effective_on_plan_date(step: RoutingStep, plan_date) -> bool:
+    routing = getattr(step, 'routing', None)
+    if not routing:
+        return True
+    if getattr(routing, 'is_active', True) is False:
+        return False
+    reference_dt = datetime.combine(plan_date, time(8, 0))
+    valid_from = getattr(routing, 'valid_from_datetime', None)
+    valid_to = getattr(routing, 'valid_to_datetime', None)
+    if valid_from and valid_from > reference_dt:
+        return False
+    if valid_to and valid_to < reference_dt:
+        return False
+    return True
+
+
+def _select_steps_for_gantt_product(
+    product: Product,
+    steps_by_product: Dict[int, List[RoutingStep]],
+    is_l2201_line: bool,
+    plan_date,
+) -> List[RoutingStep]:
+    all_steps = steps_by_product.get(product.id, [])
+    steps = [step for step in all_steps if _is_step_effective_on_plan_date(step, plan_date)]
+    if all_steps and not steps:
+        logger.warning(
+            'gantt_plans: all routing steps filtered by validity window '
+            'product_id=%s product_code=%s plan_date=%s total_steps=%s',
+            getattr(product, 'id', None),
+            getattr(product, 'product_code', ''),
+            plan_date,
+            len(all_steps),
+        )
     if not steps:
         return []
     if not is_l2201_line:
@@ -807,6 +843,81 @@ def _resolve_display_product_override(
     return mapped.id, mapped.product_code or '', mapped.product_name or ''
 
 
+def _resolve_spec_display_target(
+    spec: ProcessSpec,
+    *,
+    is_l2201_line: bool,
+    coproduct_parent_map: Dict[int, Product],
+    display_map: Dict[int, Product],
+    all_display_ids: Optional[Dict[int, set]] = None,
+) -> Tuple[Optional[int], str, str]:
+    output_product_id = spec.output_product_id
+    output_product_code = spec.output_product_code
+    output_product_name = spec.output_product_name
+    if (not is_l2201_line) and output_product_id and output_product_id in coproduct_parent_map:
+        parent = coproduct_parent_map[output_product_id]
+        output_product_id = parent.id
+        output_product_code = parent.product_code or ''
+        output_product_name = parent.product_name or ''
+    return _resolve_display_product_override(
+        process_id=spec.process_id,
+        display_map=display_map,
+        default_product_id=output_product_id,
+        default_product_code=output_product_code,
+        default_product_name=output_product_name,
+        all_display_ids=all_display_ids,
+    )
+
+
+def _select_preferred_display_spec(current: ProcessSpec, candidate: ProcessSpec) -> ProcessSpec:
+    def _rank(spec: ProcessSpec) -> Tuple[int, int, int, int, int]:
+        return (
+            0 if spec.representative_part else 1,
+            0 if spec.cycle_time_minutes > 0 else 1,
+            spec.process_number or 0,
+            spec.parallel_group or 0,
+            spec.source_step_id or 0,
+        )
+
+    return candidate if _rank(candidate) < _rank(current) else current
+
+
+def _collapse_duplicate_display_specs(
+    process_specs: List[ProcessSpec],
+    *,
+    is_l2201_line: bool,
+    coproduct_parent_map: Dict[int, Product],
+    display_map: Dict[int, Product],
+    all_display_ids: Optional[Dict[int, set]] = None,
+) -> List[ProcessSpec]:
+    """
+    同一工程・同一表示品に集約される複数候補がある場合は、代表品ステップを優先して1本に絞る。
+    表示置換前は別品目でも、最終的に同じガント行へ描画されるなら重複計上しない。
+    """
+    selected_by_key: Dict[Tuple[int, int], ProcessSpec] = {}
+    passthrough: List[ProcessSpec] = []
+
+    for spec in process_specs:
+        display_product_id, _display_code, _display_name = _resolve_spec_display_target(
+            spec,
+            is_l2201_line=is_l2201_line,
+            coproduct_parent_map=coproduct_parent_map,
+            display_map=display_map,
+            all_display_ids=all_display_ids,
+        )
+        if not display_product_id:
+            passthrough.append(spec)
+            continue
+        key = (int(spec.process_id or 0), int(display_product_id))
+        current = selected_by_key.get(key)
+        if current is None:
+            selected_by_key[key] = spec
+            continue
+        selected_by_key[key] = _select_preferred_display_spec(current, spec)
+
+    return passthrough + list(selected_by_key.values())
+
+
 def _is_coproduct_sub_process(spec: ProcessSpec, coproduct_parent_map: Dict[int, Product]) -> bool:
     """連産品BOMの子品目を出力する工程かどうかを判定（名前依存なし）"""
     return bool(spec.output_product_id and spec.output_product_id in coproduct_parent_map)
@@ -989,7 +1100,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
     product_ids = list({obj.product_id for obj in qs})
     steps_qs = RoutingStep.objects.filter(
         line_id=line_id
-    ).select_related('routing', 'process', 'output_product')
+    ).select_related('routing', 'process', 'output_product', 'source_bom_item')
 
     steps_by_product: Dict[int, List[RoutingStep]] = {}
     steps_by_process: Dict[int, List[RoutingStep]] = {}
@@ -1106,7 +1217,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
         coproduct_parent_map, coproduct_children_set, driver_cycle_time_map = _coproduct_cache[obj.plan_date]
         coproduct_parent_ids = {parent.id for parent in coproduct_parent_map.values()}
         l2201_synthetic_plan = is_l2201_line and getattr(product, 'is_line_final_product', False)
-        steps = _select_steps_for_gantt_product(product, steps_by_product, is_l2201_line)
+        steps = _select_steps_for_gantt_product(product, steps_by_product, is_l2201_line, obj.plan_date)
         owned_steps = [step for step in steps if step.routing_id and step.routing.product_id == product.id]
         use_line_final_line_process_fallback = (
             (not is_l2201_line)
@@ -1251,6 +1362,13 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
             if not steps:
                 continue
             process_specs = _build_process_specs(steps, obj.plan_qty, obj.plan_date, product.id)
+        process_specs = _collapse_duplicate_display_specs(
+            process_specs,
+            is_l2201_line=is_l2201_line,
+            coproduct_parent_map=coproduct_parent_map,
+            display_map=display_product_map,
+            all_display_ids=display_product_all_ids,
+        )
         process_specs.sort(key=lambda s: (s.process_number or 0, s.parallel_group or 1))
 
         if gantt_excluded_codes:
@@ -1882,7 +2000,13 @@ def _merge_consecutive_subprocess_entries(plans):
     for plan in plans:
         plan_date = plan.get('plan_date')
         for proc in plan['processes_plan']:
-            key = (proc['process_id'], proc.get('output_product_id'), plan_date)
+            key = (
+                proc['process_id'],
+                proc.get('output_product_id'),
+                proc.get('process_number'),
+                proc.get('parallel_group'),
+                plan_date,
+            )
             proc_groups.setdefault(key, []).append({
                 'plan': plan,
                 'proc': proc,
@@ -1892,6 +2016,7 @@ def _merge_consecutive_subprocess_entries(plans):
     for key, entries in proc_groups.items():
         if len(entries) <= 1:
             continue
+        process_id, _output_product_id, _process_number, _parallel_group, group_plan_date = key
 
         entries.sort(key=lambda e: datetime.fromisoformat(e['proc']['start_time']))
 
@@ -1907,8 +2032,8 @@ def _merge_consecutive_subprocess_entries(plans):
                 current_run.append(entries[i])
             # ギャップがあっても、その間に同一工程の他製品が無ければ連続扱い
             elif not _has_other_product_in_gap(
-                prev_proc.get('process_id'),
-                key[2],
+                process_id,
+                group_plan_date,
                 prev_proc.get('output_product_id'),
                 prev_end,
                 curr_start,

@@ -978,7 +978,7 @@ const routingGenForm = ref({
   final_line_id: '',
   final_time_unit: 'MINUTE',
   final_lead_time_days: 0,
-  final_duration_min: 60,
+  final_duration_min: 1,
 })
 
 const routeBomId = computed(() => {
@@ -1058,7 +1058,7 @@ const itemForm = ref({
   line: '',
   time_unit: 'MINUTE',
   lead_time_days: 0,
-  duration_min: 60,
+  duration_min: 1,
   is_coproduct_driver: false,
   remark: '',
   add_to_routing: false,
@@ -1414,7 +1414,7 @@ const resetItemForm = () => {
     line: '',
     time_unit: 'MINUTE',
     lead_time_days: 0,
-    duration_min: 60,
+    duration_min: 1,
     is_coproduct_driver: false,
     remark: '',
     add_to_routing: false,
@@ -1483,7 +1483,7 @@ const resetRoutingGenForm = () => {
     final_line_id: '',
     final_time_unit: 'MINUTE',
     final_lead_time_days: 0,
-    final_duration_min: 60,
+    final_duration_min: 1,
   }
 }
 
@@ -2389,7 +2389,7 @@ const startEditItem = (item) => {
     line: item.line ?? '',
     time_unit: item.time_unit || 'MINUTE',
     lead_time_days: item.lead_time_days ?? 0,
-    duration_min: item.duration_min ?? 60,
+    duration_min: item.duration_min ?? 1,
     is_coproduct_driver: item.is_coproduct_driver ?? false,
     remark: item.remark ?? ''
   }
