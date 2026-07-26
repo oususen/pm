@@ -44,6 +44,31 @@
             <button class="btn-primary" @click="loadData" :disabled="loading || !hasSelection">
               {{ loading ? '計算中...' : '計算' }}
             </button>
+            <div class="settings-anchor">
+              <button class="btn-secondary" @click="toggleDemandConfig">
+                需要設定
+              </button>
+              <div class="demand-summary-inline">{{ demandSourceSummary }}</div>
+              <div v-if="demandConfigOpen" class="settings-popover">
+                <div class="settings-popover-title">需要ソース切替</div>
+                <div class="settings-field">
+                  <label>OrderLine使用最終日</label>
+                  <input type="date" v-model="orderLineUntilDate" />
+                </div>
+                <p class="settings-helper">
+                  指定日までは受注明細 `OrderLine`、翌日以後は `LineDemand` を使います。未設定なら全期間 `LineDemand` です。
+                </p>
+                <p v-if="!canEditDemandConfig" class="settings-helper warning">
+                  この設定を保存できるのは管理者のみです。
+                </p>
+                <div class="settings-actions">
+                  <button class="btn-link" @click="clearDemandConfig" :disabled="demandConfigSaving || !canEditDemandConfig">クリア</button>
+                  <button class="btn-primary" @click="saveDemandConfig" :disabled="demandConfigSaving || !canEditDemandConfig">
+                    {{ demandConfigSaving ? '保存中...' : '保存' }}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -218,9 +243,12 @@ import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
+const LINE_LOAD_DEMAND_SOURCE_CONFIG_KEY = 'production.line_load_demand_source_config'
 const dsSources = [
   { op: '読み取り', table: 'm_line', desc: 'ライン個別選択の候補' },
   { op: '読み取り', table: 'accounts_unit / accounts_unit_line_mapping', desc: 'グループ選択とライン紐付け' },
+  { op: '設定読み書き', table: 'system_settings', desc: '長期負荷チャートの需要ソース切替設定' },
+  { op: '負荷計算', table: 't_order_line', desc: '切替日以前の最終品需要（受注明細）' },
   { op: '負荷計算', table: 't_line_demand', desc: '最終品の需要数量（内示 + 確定）' },
   { op: '負荷計算', table: 'm_line_cycle_time', desc: 'ライン別サイクルタイム（秒/個）' },
   { op: '参照', table: 'm_line / m_calendar_day', desc: 'ライン勤務カレンダと稼働分' },
@@ -233,6 +261,10 @@ const unitLineMappings = ref([])
 const selectedLineIds = ref([])
 const selectedGroupIds = ref([])
 const result = ref(null)
+const demandConfigOpen = ref(false)
+const demandConfigSaving = ref(false)
+const demandConfigExists = ref(false)
+const orderLineUntilDate = ref('')
 
 const today = new Date()
 const addMonths = (date, months) => {
@@ -272,7 +304,83 @@ onMounted(async () => {
   prodLines.value = (linesRes.data.results || linesRes.data).sort((a, b) => a.line_code.localeCompare(b.line_code))
   groups.value = Array.isArray(groupsRes.data) ? groupsRes.data : (groupsRes.data.results || [])
   unitLineMappings.value = Array.isArray(mappingsRes.data) ? mappingsRes.data : (mappingsRes.data.results || [])
+  await loadDemandConfig()
 })
+
+const canEditDemandConfig = computed(() => Boolean(authState.user?.is_staff || authState.user?.is_superuser))
+
+const parseDemandConfigValue = (rawValue) => {
+  if (!rawValue) return ''
+  try {
+    const payload = JSON.parse(rawValue)
+    if (payload && typeof payload === 'object' && payload.orderline_until_date) {
+      return String(payload.orderline_until_date)
+    }
+  } catch (_error) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(rawValue))) {
+      return String(rawValue)
+    }
+  }
+  return ''
+}
+
+const demandSourceSummary = computed(() => (
+  orderLineUntilDate.value
+    ? `orderline受注基準は ${orderLineUntilDate.value} まで、それ以降は受注展開結果line_demand基準、設定は左の「需要設定」ボタンから変更可能`
+    : '受注基準の設定なし'
+))
+
+const loadDemandConfig = async () => {
+  try {
+    const res = await api.systemSettings.getAll()
+    const row = res.data?.[LINE_LOAD_DEMAND_SOURCE_CONFIG_KEY]
+    demandConfigExists.value = Boolean(row)
+    orderLineUntilDate.value = parseDemandConfigValue(row?.value)
+  } catch (error) {
+    console.error('長期負荷チャート需要設定の取得に失敗しました', error)
+    demandConfigExists.value = false
+    orderLineUntilDate.value = ''
+  }
+}
+
+const toggleDemandConfig = () => {
+  demandConfigOpen.value = !demandConfigOpen.value
+}
+
+const saveDemandConfig = async () => {
+  if (!canEditDemandConfig.value) return
+  demandConfigSaving.value = true
+  try {
+    const value = JSON.stringify({
+      orderline_until_date: orderLineUntilDate.value || null,
+    })
+    if (demandConfigExists.value) {
+      await api.systemSettings.updateByKey({
+        [LINE_LOAD_DEMAND_SOURCE_CONFIG_KEY]: value,
+      })
+    } else {
+      await api.systemSettings.create({
+        key: LINE_LOAD_DEMAND_SOURCE_CONFIG_KEY,
+        value,
+        description: '長期負荷チャートの需要ソース切替設定',
+      })
+      demandConfigExists.value = true
+    }
+    alert('保存しました。')
+    demandConfigOpen.value = false
+    await loadDemandConfig()
+  } catch (error) {
+    console.error('長期負荷チャート需要設定の保存に失敗しました', error)
+    alert(error?.response?.data?.detail || '保存に失敗しました。')
+  } finally {
+    demandConfigSaving.value = false
+  }
+}
+
+const clearDemandConfig = async () => {
+  orderLineUntilDate.value = ''
+  await saveDemandConfig()
+}
 
 const groupLineMap = computed(() => {
   const map = {}
@@ -928,6 +1036,27 @@ const exportExcel = async () => {
 .filter-field label { font-size: 11px; font-weight: 600; color: #666; }
 .filter-field input, .filter-field select { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
 .filter-actions { display: flex; gap: 6px; }
+.settings-anchor { position: relative; display: flex; align-items: center; gap: 8px; }
+.settings-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 280px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #d6dce5;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  z-index: 20;
+}
+.settings-popover-title { font-size: 13px; font-weight: 700; color: #1f2937; margin-bottom: 8px; }
+.settings-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.settings-field label { font-size: 11px; font-weight: 600; color: #666; }
+.settings-field input { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+.settings-helper { margin: 0; font-size: 11px; color: #666; line-height: 1.5; }
+.settings-helper.warning { color: #b45309; margin-top: 4px; }
+.settings-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+.demand-summary-inline { font-size: 12px; color: #374151; white-space: nowrap; }
 
 .line-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .chip-label { cursor: pointer; }

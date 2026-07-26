@@ -4,6 +4,7 @@
 LineDemand（顧客需要）× LineCycleTime（ライン別サイクルタイム）から
 ライン・工程別の長期負荷を算出する。
 """
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -12,11 +13,14 @@ from typing import Dict, List, Any, Optional
 from django.db.models import F
 
 from masters.models import Line, CalendarDay, LineCycleTime, Process, RoutingStep
+from orders.core.models import OrderLine
+from system_settings.models import SystemSetting
 from ..models import LineDemand
 
 
 class LineLoadService:
     LT_LOOKBACK_DAYS = 31
+    DEMAND_SOURCE_CONFIG_KEY = 'production.line_load_demand_source_config'
 
     @staticmethod
     def _month_start(target_date):
@@ -35,6 +39,33 @@ class LineLoadService:
     @classmethod
     def _previous_month_start(cls, target_date):
         return cls._month_start(cls._month_start(target_date) - timedelta(days=1))
+
+    @classmethod
+    def get_demand_source_config(cls):
+        row = SystemSetting.objects.filter(key=cls.DEMAND_SOURCE_CONFIG_KEY).first()
+        raw_value = (row.value or '').strip() if row and row.value else ''
+        parsed_date = None
+
+        if raw_value:
+            try:
+                payload = json.loads(raw_value)
+            except Exception:
+                payload = {'orderline_until_date': raw_value}
+
+            candidate = ''
+            if isinstance(payload, dict):
+                candidate = str(payload.get('orderline_until_date') or '').strip()
+
+            if candidate:
+                try:
+                    parsed_date = datetime.strptime(candidate, '%Y-%m-%d').date()
+                except ValueError:
+                    parsed_date = None
+
+        return {
+            'orderline_until_date': parsed_date,
+            'orderline_until_date_text': parsed_date.isoformat() if parsed_date else None,
+        }
 
     @staticmethod
     def _is_working_day(calendar_id, target_date, calendar_day_cache):
@@ -229,6 +260,61 @@ class LineLoadService:
 
         return filtered_map
 
+    def _build_orderline_demand_map(
+        self,
+        product_codes: set[str],
+        start_date,
+        end_date,
+    ) -> Dict[tuple[str, Any], float]:
+        if not product_codes:
+            return {}
+
+        order_rows = list(
+            OrderLine.objects.filter(
+                order__status='OPEN',
+                product_code__in=product_codes,
+                due_date__gte=start_date,
+                due_date__lte=end_date,
+            ).values(
+                'product_code',
+                'due_date',
+                'quantity',
+                'ship_to_code',
+                'order__customer_id',
+                'order__order_type',
+                'order_type',
+            )
+        )
+
+        firm_source_keys = set()
+        normalized_rows = []
+        for row in order_rows:
+            product_code = str(row.get('product_code') or '').strip()
+            due_date = row.get('due_date')
+            if not product_code or due_date is None:
+                continue
+
+            order_type = str(
+                row.get('order_type') or row.get('order__order_type') or ''
+            ).strip().upper()
+            source_key = (
+                row.get('order__customer_id'),
+                product_code,
+                str(row.get('ship_to_code') or '').strip(),
+                due_date,
+            )
+            normalized_rows.append((product_code, due_date, float(row.get('quantity') or 0), order_type, source_key))
+            if order_type == 'FIRM':
+                firm_source_keys.add(source_key)
+
+        demand_map = defaultdict(float)
+        for product_code, due_date, quantity, order_type, source_key in normalized_rows:
+            if order_type == 'FORECAST' and source_key in firm_source_keys:
+                continue
+            demand_map[(product_code, due_date)] += quantity
+
+        return demand_map
+
     def calculate(
         self,
         line_ids: List[int],
@@ -262,11 +348,31 @@ class LineLoadService:
 
         process_map = {p.id: p for p in Process.objects.filter(id__in=process_ids)}
 
-        final_demand_map = self._build_final_product_demand_map(
-            set(target_lines_by_product_code.keys()),
-            start_date,
-            end_date,
-        )
+        demand_source_config = self.get_demand_source_config()
+        orderline_until_date = demand_source_config['orderline_until_date']
+        target_product_codes = set(target_lines_by_product_code.keys())
+
+        final_demand_map = defaultdict(float)
+        if orderline_until_date and start_date <= orderline_until_date:
+            orderline_end_date = min(end_date, orderline_until_date)
+            for key, qty in self._build_orderline_demand_map(
+                target_product_codes,
+                start_date,
+                orderline_end_date,
+            ).items():
+                final_demand_map[key] += qty
+
+        linedemand_start_date = start_date
+        if orderline_until_date:
+            linedemand_start_date = max(start_date, orderline_until_date + timedelta(days=1))
+
+        if linedemand_start_date <= end_date:
+            for key, qty in self._build_final_product_demand_map(
+                target_product_codes,
+                linedemand_start_date,
+                end_date,
+            ).items():
+                final_demand_map[key] += qty
 
         # {(line_id, plan_date): {process_id: load_seconds}}
         load_map = defaultdict(lambda: defaultdict(float))
@@ -368,6 +474,7 @@ class LineLoadService:
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
             'aggregate': aggregate,
+            'demand_source_config': demand_source_config,
             'lines': sorted(results, key=lambda x: x['line_code']),
         }
 
