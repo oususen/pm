@@ -899,6 +899,92 @@ const buildMonthlyLoadSheet = (dates) => {
   }
 }
 
+const renderBarChartImage = (items, opts = {}) => {
+  const { title = '', barColor = '#8e44ad' } = opts
+  const n = items.length
+  if (!n) return null
+  const w = Math.max(500, Math.min(1400, n * 50 + 120))
+  const h = 340
+  const dpr = 2
+  const canvas = document.createElement('canvas')
+  canvas.width = w * dpr
+  canvas.height = h * dpr
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, w, h)
+
+  const pad = { top: 32, right: 20, bottom: 56, left: 54 }
+  const cw = w - pad.left - pad.right
+  const ch = h - pad.top - pad.bottom
+  const maxVal = Math.max(...items.map(d => d.value), 0.01)
+  const niceMax = Math.ceil(maxVal / 10) * 10 || maxVal
+  const slotW = cw / n
+  const barW = Math.max(3, slotW * 0.65)
+
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + ch * (1 - i / 4)
+    ctx.strokeStyle = '#e5e7eb'
+    ctx.lineWidth = 0.5
+    ctx.beginPath()
+    ctx.moveTo(pad.left, y)
+    ctx.lineTo(pad.left + cw, y)
+    ctx.stroke()
+    ctx.fillStyle = '#888'
+    ctx.font = '10px Arial, sans-serif'
+    ctx.textAlign = 'right'
+    const yVal = (niceMax * i) / 4
+    ctx.fillText(yVal % 1 === 0 ? String(yVal) : yVal.toFixed(1), pad.left - 6, y + 3)
+  }
+
+  items.forEach((d, i) => {
+    const cx = pad.left + i * slotW + slotW / 2
+    const bh = Math.max(0, (d.value / niceMax) * ch)
+    const x = cx - barW / 2
+    const y = pad.top + ch - bh
+    ctx.fillStyle = barColor
+    ctx.fillRect(x, y, barW, bh)
+    if (n <= 36 && d.value > 0) {
+      ctx.fillStyle = '#333'
+      ctx.font = `${Math.min(10, Math.max(7, barW * 0.6))}px Arial, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.fillText(d.value.toFixed(1), cx, y - 3)
+    }
+    ctx.fillStyle = '#666'
+    ctx.font = '9px Arial, sans-serif'
+    ctx.save()
+    ctx.translate(cx, pad.top + ch + 6)
+    if (n > 12) { ctx.rotate(-Math.PI / 4); ctx.textAlign = 'right' }
+    else { ctx.textAlign = 'center' }
+    ctx.fillText(d.label, 0, 0)
+    ctx.restore()
+  })
+
+  if (title) {
+    ctx.fillStyle = '#333'
+    ctx.font = 'bold 13px Arial, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(title, w / 2, 16)
+  }
+  ctx.fillStyle = '#888'
+  ctx.font = '10px Arial, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.save()
+  ctx.translate(12, pad.top + ch / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.fillText('h', 0, 0)
+  ctx.restore()
+
+  return canvas.toDataURL('image/png')
+}
+
+const addChartImageToSheet = (workbook, ws, chartPng, startRow, itemCount) => {
+  if (!chartPng) return
+  const imgId = workbook.addImage({ base64: chartPng.split(',')[1], extension: 'png' })
+  const imgW = Math.max(500, Math.min(1400, itemCount * 50 + 120))
+  ws.addImage(imgId, { tl: { col: 0, row: startRow }, ext: { width: imgW, height: 340 } })
+}
+
 const exportExcel = async () => {
   if (!result.value) return
   const userName = await getExportUserName()
@@ -937,6 +1023,21 @@ const exportExcel = async () => {
       decimalCols: filters.aggregate === 'monthly' ? [2, 4] : [2],
     })
     ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 6 }]
+    const chartItems = gc.data.map(d => ({
+      label: d.month_label || d.week_label || d.date,
+      value: formatExcelHours(d.line_load_min),
+    }))
+    const chartRow = rows.length + 7
+    addChartImageToSheet(workbook, ws, renderBarChartImage(chartItems, {
+      title: `${gc.groupName} 負荷合計(h)`, barColor: '#8e44ad',
+    }), chartRow, chartItems.length)
+    const perDayItems = gc.data.map(d => ({
+      label: d.month_label || d.week_label || d.date,
+      value: formatExcelHoursPerDay(d.line_load_min, d.working_days || 0) || 0,
+    }))
+    addChartImageToSheet(workbook, ws, renderBarChartImage(perDayItems, {
+      title: `${gc.groupName} 日あたり負荷(h/日)`, barColor: '#2980b9',
+    }), chartRow + 20, perDayItems.length)
   }
 
   // ライン別シート（全ラインまとめ）
@@ -957,6 +1058,7 @@ const exportExcel = async () => {
 
   // 負荷時間シート
   let wsLoad
+  let loadDataRowCount = 0
   if (filters.aggregate === 'monthly') {
     const monthlyLoadSheet = buildMonthlyLoadSheet(dates)
     wsLoad = workbook.addWorksheet('負荷(h)')
@@ -973,6 +1075,7 @@ const exportExcel = async () => {
     })
     styleMonthlyLoadTable(wsLoad, 6, dates, monthlyLoadSheet.rows.length)
     wsLoad.views = [{ state: 'frozen', xSplit: 1, ySplit: 7 }]
+    loadDataRowCount = monthlyLoadSheet.rows.length
   } else {
     const loadRows = [header]
     for (const line of result.value.lines) {
@@ -995,7 +1098,32 @@ const exportExcel = async () => {
       decimalCols: Array.from({ length: cols.length - 1 }, (_, index) => index + 2),
     })
     wsLoad.views = [{ state: 'frozen', xSplit: 1, ySplit: 6 }]
+    loadDataRowCount = loadRows.length
   }
+  // 全ライン合計チャート
+  const totalByDate = {}
+  const totalWdByDate = {}
+  for (const line of result.value.lines) {
+    for (const d of lineDisplayData(line)) {
+      totalByDate[d.date] = (totalByDate[d.date] || 0) + (d.line_load_min || 0)
+      totalWdByDate[d.date] = Math.max(totalWdByDate[d.date] || 0, d.working_days || 0)
+    }
+  }
+  const loadChartItems = dates.map(d => ({
+    label: d.month_label || d.week_label || d.date,
+    value: formatExcelHours(totalByDate[d.date] || 0),
+  }))
+  const loadChartRow = loadDataRowCount + 8
+  addChartImageToSheet(workbook, wsLoad, renderBarChartImage(loadChartItems, {
+    title: '全ライン合計 負荷(h)', barColor: '#e74c3c',
+  }), loadChartRow, loadChartItems.length)
+  const loadPerDayItems = dates.map(d => ({
+    label: d.month_label || d.week_label || d.date,
+    value: formatExcelHoursPerDay(totalByDate[d.date] || 0, totalWdByDate[d.date] || 0) || 0,
+  }))
+  addChartImageToSheet(workbook, wsLoad, renderBarChartImage(loadPerDayItems, {
+    title: '全ライン合計 日あたり負荷(h/日)', barColor: '#2980b9',
+  }), loadChartRow + 20, loadPerDayItems.length)
 
   const productProcessRows = buildProductProcessLoadSheet(dates, dateLabels)
   const wsProductProcess = workbook.addWorksheet('完成品別各工程ライン負荷')
