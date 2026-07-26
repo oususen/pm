@@ -167,7 +167,10 @@ const renderer = computed(() => {
   custom.link = (href, title, text) => {
     const resolved = resolveRelativePath(href || '')
     const isMarkdown = resolved && resolved.endsWith('.md')
-    const target = isMarkdown ? `/manual?path=${encodeURIComponent(resolved)}` : resolved
+    const isInternal = resolved && !resolved.startsWith('/') && !resolved.startsWith('http')
+    const target = isMarkdown
+      ? `/manual?path=${encodeURIComponent(resolved)}`
+      : isInternal ? buildFetchUrl(resolved) : resolved
     const titleAttr = title ? ` title="${title}"` : ''
     return `<a href="${target}"${titleAttr}>${text}</a>`
   }

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>申請一覧 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac;
+    --col-bg: #1a2030; --selected-bg: #1a3028;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac;
+      --col-bg: #1a2030; --selected-bg: #1a3028;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* cover */
+  .cover { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 48px 40px 40px; margin-bottom: 36px; border-left: 5px solid var(--prod-border); }
+  .cover h1 { font-size: 28px; font-weight: 800; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* step */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+  h4.sub { font-size: 15px; font-weight: 700; margin: 18px 0 10px; color: var(--ink); }
+
+  /* toc */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* note */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* callout */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* mock toolbar */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 60px; }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn-btn { background: #ff9800; border-color: #ff9800; color: #fff; }
+
+  /* highlight */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 80px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* mini grid mockup */
+  .mock-grid { border: 1px solid var(--grid-line); border-radius: 6px; overflow-x: auto; margin: 12px 0; font-size: 11px; }
+  .mock-grid table { width: 100%; border-collapse: collapse; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .mock-grid th { background: var(--grid-head); font-weight: 700; color: var(--ink2); font-size: 10px; }
+  .mock-grid td { background: var(--card); color: var(--ink); }
+  .mock-grid td.editable { background: #fffff0; }
+  :root[data-theme="dark"] .mock-grid td.editable { background: #22281c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid td.editable { background: #22281c; } }
+  .mock-grid td.negative { color: var(--danger); font-weight: 700; }
+  .mock-grid td.positive { color: var(--success); font-weight: 700; }
+  .mock-grid .sticky { position: sticky; left: 0; z-index: 2; background: var(--grid-head); }
+
+  /* table inside step */
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .info-table th, .info-table td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; }
+  .info-table th { background: var(--grid-head); font-weight: 700; color: var(--ink2); white-space: nowrap; width: 140px; }
+  .info-table td { background: var(--card); color: var(--ink); }
+
+  /* checkbox mock */
+  .mock-checkbox { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink); }
+  .mock-checkbox .box { display: inline-block; width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 2px; background: var(--card); text-align: center; line-height: 14px; font-size: 10px; }
+
+  /* status badge */
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; line-height: 1.6; white-space: nowrap; }
+  .badge.draft { background: #e0e0e0; color: #616161; }
+  .badge.submitted { background: #bbdefb; color: #1565c0; }
+  .badge.approved-sv { background: #c8e6c9; color: #2e7d32; }
+  .badge.approved-chief { background: #a5d6a7; color: #1b5e20; }
+  .badge.approved-mgr { background: #66bb6a; color: #fff; font-weight: 800; }
+  .badge.rejected { background: #ef9a9a; color: #b71c1c; }
+  :root[data-theme="dark"] .badge.draft { background: #3a3a3a; color: #bdbdbd; }
+  :root[data-theme="dark"] .badge.submitted { background: #1c3050; color: #64b5f6; }
+  :root[data-theme="dark"] .badge.approved-sv { background: #1a3020; color: #81c784; }
+  :root[data-theme="dark"] .badge.approved-chief { background: #1a3820; color: #66bb6a; }
+  :root[data-theme="dark"] .badge.approved-mgr { background: #2e7d32; color: #e8f5e9; }
+  :root[data-theme="dark"] .badge.rejected { background: #3a1a1a; color: #ef5350; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .badge.draft { background: #3a3a3a; color: #bdbdbd; }
+    :root:not([data-theme="light"]) .badge.submitted { background: #1c3050; color: #64b5f6; }
+    :root:not([data-theme="light"]) .badge.approved-sv { background: #1a3020; color: #81c784; }
+    :root:not([data-theme="light"]) .badge.approved-chief { background: #1a3820; color: #66bb6a; }
+    :root:not([data-theme="light"]) .badge.approved-mgr { background: #2e7d32; color: #e8f5e9; }
+    :root:not([data-theme="light"]) .badge.rejected { background: #3a1a1a; color: #ef5350; }
+  }
+
+  /* modal mock */
+  .mock-modal { background: var(--card); border: 2px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 12px 0; box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+  .mock-modal h5 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>申請一覧 作業手順書</h1>
+    <div class="subtitle">残業申請の履歴を確認・編集・PDF出力する手順を解説します。</div>
+    <div class="path">
+      勤務 <span class="arrow">&#9656;</span> 申請一覧
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>検索条件を指定する</li>
+      <li><span class="tn">2</span>サブフィルターで絞り込む</li>
+      <li><span class="tn">3</span>一覧を確認する</li>
+      <li><span class="tn">4</span>ステータスの見方</li>
+      <li><span class="tn">5</span>操作する</li>
+      <li><span class="tn">6</span>詳細モーダルを確認する</li>
+      <li><span class="tn">7</span>PDF出力する</li>
+      <li><span class="tn">8</span>ページネーション</li>
+    </ul>
+  </div>
+
+  <!-- ===== 前提条件 ===== -->
+  <div class="note" style="border-left-color:var(--accent);">
+    <h2 style="color:var(--accent);">&#9881; 前提条件</h2>
+    <ul>
+      <li><strong>申請データが存在すること</strong> &#8212; 「新規申請」画面から残業申請を作成済みである必要があります</li>
+      <li><strong>権限</strong> &#8212; 自分の申請は全ユーザーが閲覧可能です。他者の申請は承認権限を持つユーザーのみ表示されます</li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">検索条件を指定する</div>
+    </div>
+    <div class="step-desc">
+      上部メニュー<strong>「勤務」&#8594;「申請一覧」</strong>を開きます。検索バーで期間・ステータスを指定して申請を検索します。画面右上には<strong>「新規申請」</strong>ボタンがあり、ここから新しい申請を作成できます。
+    </div>
+
+    <div class="mock-toolbar">
+      <div class="f-group hl">
+        <label>期間</label>
+        <span class="f-input" style="min-width:100px;">2026/07/01</span>
+        <span>&#12316;</span>
+        <span class="f-input" style="min-width:100px;">2026/07/31</span>
+      </div>
+      <div class="f-group hl hl-blue">
+        <label>ステータス</label>
+        <span class="f-select" style="min-width:120px;">全て</span>
+      </div>
+      <span class="mock-btn primary hl hl-green">検索</span>
+      <span class="mock-btn teal">PDF出力</span>
+      <span class="mock-checkbox"><span class="box">&#9744;</span> 却下を除外</span>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>期間（開始日 &#12316; 終了日）</strong> &#8212; 検索対象の日付範囲を指定します。勤務日がこの範囲内の申請が表示されます</span></li>
+      <li><span class="anno-num">2</span><span><strong>ステータス</strong> &#8212; 申請の状態でフィルタします。選択肢: 全て / 下書き / 提出済 / 班長承認 / 主任承認 / 課長承認 / 却下</span></li>
+      <li><span class="anno-num">3</span><span><strong>検索ボタン</strong> &#8212; 指定した条件でAPIに問い合わせ、結果を一覧に表示します</span></li>
+    </ul>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>「却下を除外」チェックボックス</strong>をONにすると、却下された申請を一覧から除外して表示できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">サブフィルターで絞り込む</div>
+    </div>
+    <div class="step-desc">
+      検索実行後、一覧の上部にサブフィルターが表示されます。これらを使って検索結果をさらに絞り込むことができます。
+    </div>
+
+    <div class="mock-toolbar">
+      <div class="f-group hl">
+        <label>班</label>
+        <span class="f-select" style="min-width:80px;">全て</span>
+      </div>
+      <div class="f-group hl">
+        <label>グループ</label>
+        <span class="f-select" style="min-width:80px;">全て</span>
+      </div>
+      <div class="f-group hl hl-blue">
+        <label>種別</label>
+        <span class="mock-checkbox"><span class="box">&#9745;</span> 時間外</span>
+        <span class="mock-checkbox"><span class="box">&#9745;</span> 休日出勤</span>
+        <span class="mock-checkbox"><span class="box">&#9745;</span> 午前半休</span>
+        <span class="mock-checkbox"><span class="box">&#9745;</span> 午後半休</span>
+        <span class="mock-checkbox"><span class="box">&#9745;</span> 有給</span>
+        <span class="mock-checkbox"><span class="box">&#9745;</span> 連続有給</span>
+      </div>
+      <div class="f-group">
+        <label>氏名</label>
+        <span class="f-select" style="min-width:80px;">全て</span>
+      </div>
+      <div class="f-group">
+        <label>日付</label>
+        <span class="f-select" style="min-width:80px;">全て</span>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>班 / グループ</strong> &#8212; 所属する班・グループで絞り込みます</span></li>
+      <li><span class="anno-num">2</span><span><strong>種別チェックボックス</strong> &#8212; 申請種別ごとにON/OFFで表示を切り替えます。複数選択可能です</span></li>
+      <li><span class="anno-num">3</span><span><strong>氏名 / 日付</strong> &#8212; ドロップダウンから特定の申請者や日付を選択して絞り込みます</span></li>
+    </ul>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>サブフィルターは検索結果に対してクライアント側で適用されます。フィルター変更のたびにAPIリクエストは発生しません。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">一覧を確認する</div>
+    </div>
+    <div class="step-desc">
+      検索結果がテーブル形式で表示されます。下書きの申請は常に先頭にソートされます。
+    </div>
+
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>勤務日</th>
+            <th>班</th>
+            <th>グループ</th>
+            <th>種別</th>
+            <th>申請者</th>
+            <th>勤務時間</th>
+            <th>残業時間</th>
+            <th>時間数</th>
+            <th>発生理由</th>
+            <th>ステータス</th>
+            <th>提出日時</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>07/25</td>
+            <td>A</td>
+            <td>G1</td>
+            <td>時間外</td>
+            <td>田中太郎</td>
+            <td>8:00-19:00</td>
+            <td>2.0h</td>
+            <td>2.0</td>
+            <td style="max-width:60px;overflow:hidden;text-overflow:ellipsis;">納期対応のた...</td>
+            <td><span class="badge draft">下書き</span></td>
+            <td>&#8212;</td>
+            <td style="font-size:10px;">編集 削除</td>
+          </tr>
+          <tr>
+            <td>07/24</td>
+            <td>A</td>
+            <td>G1</td>
+            <td>時間外</td>
+            <td>田中太郎</td>
+            <td>8:00-20:30</td>
+            <td>3.5h</td>
+            <td>3.5</td>
+            <td style="max-width:60px;overflow:hidden;text-overflow:ellipsis;">設備トラブル...</td>
+            <td><span class="badge submitted">提出済</span></td>
+            <td style="font-size:10px;">07/24 20:35</td>
+            <td style="font-size:10px;">編集 取消</td>
+          </tr>
+          <tr>
+            <td>07/23</td>
+            <td>B</td>
+            <td>G2</td>
+            <td>休日出勤</td>
+            <td>鈴木花子</td>
+            <td>8:00-17:00</td>
+            <td>8.0h</td>
+            <td>8.0</td>
+            <td style="max-width:60px;overflow:hidden;text-overflow:ellipsis;">棚卸作業...</td>
+            <td><span class="badge approved-mgr">課長承認</span></td>
+            <td style="font-size:10px;">07/22 18:00</td>
+            <td style="font-size:10px;">詳細</td>
+          </tr>
+          <tr>
+            <td>07/22</td>
+            <td>A</td>
+            <td>G1</td>
+            <td>有給</td>
+            <td>佐藤一郎</td>
+            <td>&#8212;</td>
+            <td>&#8212;</td>
+            <td>1.0<br><span style="font-size:9px;color:var(--accent);">(0時跨ぎ)</span></td>
+            <td style="max-width:60px;overflow:hidden;text-overflow:ellipsis;">私用...</td>
+            <td><span class="badge rejected">却下</span></td>
+            <td style="font-size:10px;">07/21 09:00</td>
+            <td style="font-size:10px;">詳細</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub">&#9654; 列の説明</h4>
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>申請者</strong> &#8212; 申請者名を表示します</span></li>
+      <li><span class="anno-num">2</span><span><strong>時間数</strong> &#8212; 申請の時間数を表示します。日付を跨ぐ場合は<span style="color:var(--accent);font-weight:700;">(0時跨ぎ)</span>タグが付きます</span></li>
+      <li><span class="anno-num">3</span><span><strong>発生理由</strong> &#8212; 理由の先頭部分を表示します（最大幅60pxで省略）。全文は詳細モーダルで確認できます</span></li>
+      <li><span class="anno-num">4</span><span><strong>操作</strong> &#8212; 申請のステータスに応じて、編集・削除・取消・詳細ボタンが表示されます</span></li>
+    </ul>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>テーブル下部のフッターに<strong>件数</strong>と<strong>合計時間数</strong>が表示されます。フィルター適用後の集計値です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">ステータスの見方</div>
+    </div>
+    <div class="step-desc">
+      各申請にはステータスバッジが表示されます。色とラベルで承認の進行状況がひと目でわかります。
+    </div>
+
+    <div class="legend-grid">
+      <div class="legend-item">
+        <span class="badge draft">下書き</span>
+        <span class="li-desc">まだ提出していない状態。編集・削除が可能です</span>
+      </div>
+      <div class="legend-item">
+        <span class="badge submitted">提出済</span>
+        <span class="li-desc">提出済みで承認待ち。編集・取消が可能です</span>
+      </div>
+      <div class="legend-item">
+        <span class="badge approved-sv">班長承認</span>
+        <span class="li-desc">班長が承認済み。次の承認者へ回付中です</span>
+      </div>
+      <div class="legend-item">
+        <span class="badge approved-chief">主任承認</span>
+        <span class="li-desc">主任が承認済み。課長の承認待ちです</span>
+      </div>
+      <div class="legend-item">
+        <span class="badge approved-mgr">課長承認</span>
+        <span class="li-desc">最終承認済み。太字で強調表示されます</span>
+      </div>
+      <div class="legend-item">
+        <span class="badge rejected">却下</span>
+        <span class="li-desc">承認者により却下されました</span>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>承認フローは<strong>班長 &#8594; 主任 &#8594; 課長</strong>の順に進みます。各段階で承認または却下が行われます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">操作する</div>
+    </div>
+    <div class="step-desc">
+      各行の「操作」列に、申請のステータスに応じたボタンが表示されます。
+    </div>
+
+    <h4 class="sub">&#9654; 編集</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>下書き</strong>または<strong>提出済</strong>の申請のみ編集可能です。編集ボタンを押すと申請編集画面に遷移します。
+    </div>
+    <div style="margin-bottom:14px;">
+      <span class="mock-btn primary" style="font-size:12px;">編集</span>
+    </div>
+
+    <h4 class="sub">&#9654; 削除 / 取消</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>下書き</strong>の場合は「削除」、<strong>提出済</strong>の場合は「取消」ボタンが表示されます。いずれもクリックすると確認ダイアログが表示されます。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <span class="mock-btn danger" style="font-size:12px;">削除</span>
+      <span class="mock-btn warn-btn" style="font-size:12px;">取消</span>
+    </div>
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span>削除・取消は確認ダイアログで「OK」を押すと実行されます。<strong>この操作は元に戻せません。</strong></span>
+    </div>
+
+    <h4 class="sub">&#9654; 詳細</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      承認済み・却下済みの申請には「詳細」ボタンが表示されます。クリックすると詳細モーダルが開きます。
+    </div>
+    <div style="margin-top:8px;">
+      <span class="mock-btn" style="font-size:12px;">詳細</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">詳細モーダルを確認する</div>
+    </div>
+    <div class="step-desc">
+      「詳細」ボタンを押すと、申請の全情報を表示するモーダルが開きます。
+    </div>
+
+    <div class="mock-modal">
+      <h5>申請詳細</h5>
+      <table class="info-table">
+        <tr><th>勤務日</th><td>2026/07/23</td></tr>
+        <tr><th>種別</th><td>休日出勤</td></tr>
+        <tr><th>申請者</th><td>鈴木花子</td></tr>
+        <tr><th>班 / グループ</th><td>B班 / G2</td></tr>
+        <tr><th>勤務時間</th><td>8:00 - 17:00</td></tr>
+        <tr><th>残業時間</th><td>8.0h</td></tr>
+        <tr><th>発生理由</th><td>棚卸作業のため休日出勤が必要</td></tr>
+        <tr><th>署名</th><td style="text-align:center;"><span style="display:inline-block;width:160px;height:50px;border:1px dashed var(--border);border-radius:4px;line-height:50px;font-size:11px;color:var(--ink2);">署名画像</span></td></tr>
+      </table>
+
+      <h4 class="sub">&#9654; 承認履歴</h4>
+      <div class="step-desc" style="margin-bottom:8px;">
+        承認フローの各段階における承認者・ステータス・コメント・日時が時系列で表示されます。
+      </div>
+      <div class="mock-grid">
+        <table>
+          <thead>
+            <tr>
+              <th>役職</th>
+              <th>承認者</th>
+              <th>ステータス</th>
+              <th>コメント</th>
+              <th>処理日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>班長</td>
+              <td>山田次郎</td>
+              <td><span class="badge approved-sv">承認</span></td>
+              <td style="text-align:left;">&#8212;</td>
+              <td style="font-size:10px;">07/22 18:30</td>
+            </tr>
+            <tr>
+              <td>主任</td>
+              <td>高橋三郎</td>
+              <td><span class="badge approved-chief">承認</span></td>
+              <td style="text-align:left;">問題なし</td>
+              <td style="font-size:10px;">07/23 09:10</td>
+            </tr>
+            <tr>
+              <td>課長</td>
+              <td>伊藤四郎</td>
+              <td><span class="badge approved-mgr">承認</span></td>
+              <td style="text-align:left;">&#8212;</td>
+              <td style="font-size:10px;">07/23 10:00</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>署名画像は申請者が手書き入力した署名です。画像として表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">PDF出力する</div>
+    </div>
+    <div class="step-desc">
+      検索バーの<strong>「PDF出力」</strong>ボタンを押すと、現在のフィルター条件に合致する申請一覧をPDFファイルとしてダウンロードできます。
+    </div>
+
+    <div class="mock-toolbar">
+      <div class="f-group">
+        <label>期間</label>
+        <span class="f-input" style="min-width:100px;">2026/07/01</span>
+        <span>&#12316;</span>
+        <span class="f-input" style="min-width:100px;">2026/07/31</span>
+      </div>
+      <div class="f-group">
+        <label>ステータス</label>
+        <span class="f-select" style="min-width:120px;">全て</span>
+      </div>
+      <span class="mock-btn primary">検索</span>
+      <span class="mock-btn teal hl">PDF出力</span>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>ファイル名はサーバーからの<strong>content-disposition</strong>ヘッダーに基づいて自動的に設定されます。</span>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>大量の申請がある場合、PDF生成に時間がかかることがあります。しばらくお待ちください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">ページネーション</div>
+    </div>
+    <div class="step-desc">
+      検索結果が多い場合、一覧は<strong>30件ずつ</strong>ページ分割されます。テーブル下部のナビゲーションボタンでページを切り替えます。
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px;margin:12px 0;">
+      <span class="mock-btn" style="font-size:11px;padding:3px 8px;">&#9664; 前へ</span>
+      <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">1</span>
+      <span class="mock-btn" style="font-size:11px;padding:3px 8px;">2</span>
+      <span class="mock-btn" style="font-size:11px;padding:3px 8px;">3</span>
+      <span class="mock-btn" style="font-size:11px;padding:3px 8px;">次へ &#9654;</span>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>1ページあたり<strong>30件</strong>が表示されます。サブフィルターはページ切り替え後も維持されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>新規申請:</strong> 画面右上の「新規申請」ボタンから申請作成画面に遷移できます</li>
+      <li><strong>下書きの優先表示:</strong> 下書き状態の申請は常にテーブルの先頭にソートされます</li>
+      <li><strong>発生理由の省略表示:</strong> 一覧では理由カラムが最大幅60pxで省略されます。全文は詳細モーダルで確認してください</li>
+      <li><strong>0時跨ぎ:</strong> 日付を跨ぐ勤務の場合、時間数に「(0時跨ぎ)」タグが表示されます</li>
+      <li><strong>編集制限:</strong> 承認が進んだ申請（班長承認以降）は編集・削除できません</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

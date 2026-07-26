@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月次労働時間統計 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac;
+    --col-bg: #1a2030; --selected-bg: #1a3028;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac;
+      --col-bg: #1a2030; --selected-bg: #1a3028;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* cover */
+  .cover { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 48px 40px 40px; margin-bottom: 36px; border-left: 5px solid var(--prod-border); }
+  .cover h1 { font-size: 28px; font-weight: 800; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* step */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+  h4.sub { font-size: 15px; font-weight: 700; margin: 18px 0 10px; color: var(--ink); }
+
+  /* toc */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* note */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* callout */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* mock toolbar */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 60px; }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn-btn { background: #ff9800; border-color: #ff9800; color: #fff; }
+
+  /* highlight */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 80px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* mini grid mockup */
+  .mock-grid { border: 1px solid var(--grid-line); border-radius: 6px; overflow-x: auto; margin: 12px 0; font-size: 11px; }
+  .mock-grid table { width: 100%; border-collapse: collapse; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .mock-grid th { background: var(--grid-head); font-weight: 700; color: var(--ink2); font-size: 10px; }
+  .mock-grid td { background: var(--card); color: var(--ink); }
+  .mock-grid td.editable { background: #fffff0; }
+  :root[data-theme="dark"] .mock-grid td.editable { background: #22281c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid td.editable { background: #22281c; } }
+  .mock-grid td.negative { color: var(--danger); font-weight: 700; }
+  .mock-grid td.positive { color: var(--success); font-weight: 700; }
+  .mock-grid .sticky { position: sticky; left: 0; z-index: 2; background: var(--grid-head); }
+  .mock-grid td.clickable { background: var(--col-bg); cursor: pointer; color: var(--ink2); }
+  :root[data-theme="dark"] .mock-grid td.clickable { background: var(--col-bg); }
+  .mock-grid td.holiday { background: var(--accent-light); color: var(--accent); font-weight: 600; font-size: 10px; }
+  .mock-grid td.half { background: var(--warn-light); color: var(--warn); font-weight: 600; font-size: 10px; }
+  .mock-grid td.total-cell { background: var(--grid-head); font-weight: 700; }
+
+  /* table inside step */
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .info-table th, .info-table td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; }
+  .info-table th { background: var(--grid-head); font-weight: 700; color: var(--ink2); white-space: nowrap; width: 140px; }
+  .info-table td { background: var(--card); color: var(--ink); }
+
+  /* checkbox mock */
+  .mock-checkbox { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink); }
+  .mock-checkbox .box { display: inline-block; width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 2px; background: var(--card); text-align: center; line-height: 14px; font-size: 10px; }
+
+  /* tab mock */
+  .mock-tabs { display: flex; gap: 0; margin: 12px 0 0; border-bottom: 2px solid var(--grid-line); }
+  .mock-tab { padding: 8px 20px; font-size: 13px; font-weight: 600; color: var(--ink2); background: transparent; border: none; cursor: default; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+  .mock-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* summary bar mock */
+  .mock-summary { display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 14px; background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; margin: 12px 0; font-size: 12px; color: var(--ink2); }
+  .mock-summary .s-item { display: flex; align-items: center; gap: 4px; }
+  .mock-summary .s-label { font-weight: 600; }
+  .mock-summary .s-val { font-weight: 800; color: var(--ink); }
+
+  /* modal mock */
+  .mock-modal { background: var(--card); border: 2px solid var(--accent); border-radius: var(--radius); padding: 20px 24px; margin: 12px 0; max-width: 400px; box-shadow: var(--shadow); }
+  .mock-modal h5 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+  .mock-modal .modal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  .mock-modal .modal-row label { min-width: 60px; font-weight: 600; color: var(--ink2); }
+  .mock-modal .modal-row .f-select,
+  .mock-modal .modal-row .f-input { flex: 1; }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>月次労働時間統計 作業手順書</h1>
+    <div class="subtitle">メンバーの労働時間を詳細・集計・月別で確認する手順を解説します。</div>
+    <div class="path">
+      勤務 <span class="arrow">&#9656;</span> 月次統計
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>期間を設定する</li>
+      <li><span class="tn">2</span>詳細タブを確認する</li>
+      <li><span class="tn">3</span>集計タブを確認する</li>
+      <li><span class="tn">4</span>月別タブを確認する</li>
+      <li><span class="tn">5</span>勤務を簡易登録する</li>
+      <li><span class="tn">6</span>Excelで出力する</li>
+    </ul>
+  </div>
+
+  <!-- ===== 前提条件 ===== -->
+  <div class="note" style="border-left-color:var(--accent);">
+    <h2 style="color:var(--accent);">&#9881; 前提条件</h2>
+    <ul>
+      <li><strong>権限が必要です</strong> &#8212; リーダー・主任・係長・課長のいずれかの権限が必要です</li>
+      <li><strong>承認済みの申請のみ集計対象です</strong> &#8212; リーダー承認～課長承認まですべて完了した申請が集計されます</li>
+      <li><strong>記録のみ種別は常に集計されます</strong> &#8212; 午後半休・有給・連続有給は承認不要で常にカウントされます</li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">期間を設定する</div>
+    </div>
+    <div class="step-desc">
+      上部メニュー<strong>「勤務」&#8594;「月次統計」</strong>を開きます。ツールバーで対象期間を指定し、フィルタ条件を設定して<strong>「表示」</strong>ボタンを押します。
+    </div>
+
+    <h4 class="sub">&#9654; ツールバー構成</h4>
+    <div class="mock-toolbar">
+      <div class="f-group hl">
+        <label>開始日</label>
+        <span class="f-input" style="min-width:110px;">2026/07/01</span>
+      </div>
+      <div class="f-group hl">
+        <label>終了日</label>
+        <span class="f-input" style="min-width:110px;">2026/07/31</span>
+      </div>
+      <div class="f-group">
+        <label>班</label>
+        <span class="f-select">全て</span>
+      </div>
+      <div class="f-group">
+        <label>グループ</label>
+        <span class="f-select">全て</span>
+      </div>
+      <div class="f-group">
+        <label>氏名</label>
+        <span class="f-input" style="min-width:80px;"></span>
+      </div>
+      <div class="f-group">
+        <label>有給</label>
+        <span class="f-select">全て</span>
+      </div>
+      <span class="mock-btn primary hl hl-blue">表示</span>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>開始日・終了日</strong> &#8212; デフォルトは当月1日～末日。任意の期間に変更可能です</span></li>
+      <li><span class="anno-num">2</span><span><strong>班・グループ</strong> &#8212; ドロップダウンで絞り込み。「全て」で全員表示</span></li>
+      <li><span class="anno-num">3</span><span><strong>氏名</strong> &#8212; 名前で部分一致検索します</span></li>
+      <li><span class="anno-num">4</span><span><strong>有給フィルタ</strong> &#8212; 「全て」「有給あり」「有給なし」から選択。有給取得者だけを抽出する場合に使います</span></li>
+      <li><span class="anno-num">5</span><span><strong>表示ボタン</strong> &#8212; 設定した条件でデータを取得・表示します</span></li>
+    </ul>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>画面を開いた時点で当月のデータが自動表示されます。期間を変更した場合は「表示」ボタンを押してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">詳細タブを確認する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「詳細」</strong>タブでは、メンバーごとの日別勤務明細を一覧で確認できます。各申請の種別・時間・残業・有給の内訳をすべて表示します。
+    </div>
+
+    <div class="mock-tabs">
+      <span class="mock-tab active">詳細</span>
+      <span class="mock-tab">集計</span>
+      <span class="mock-tab">月別</span>
+    </div>
+
+    <h4 class="sub">&#9654; テーブルの列構成</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>氏名</th>
+            <th>班</th>
+            <th>グループ</th>
+            <th>日付</th>
+            <th>種別</th>
+            <th>開始時間</th>
+            <th>終了時間</th>
+            <th>労働(H)</th>
+            <th>残業(H)</th>
+            <th>休日(H)</th>
+            <th>所定外(H)</th>
+            <th>午前半休</th>
+            <th>午後半休</th>
+            <th>前日有給</th>
+            <th>連続有給</th>
+            <th>有給数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:left;font-weight:600;">田中 太郎</td>
+            <td>A班</td>
+            <td>G1</td>
+            <td>07/01</td>
+            <td>定時</td>
+            <td>08:00</td>
+            <td>17:00</td>
+            <td>8.0</td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:600;">田中 太郎</td>
+            <td>A班</td>
+            <td>G1</td>
+            <td>07/02</td>
+            <td>時間外</td>
+            <td>17:00</td>
+            <td>20:00</td>
+            <td>3.0</td>
+            <td class="positive">3.0</td>
+            <td>0.0</td>
+            <td class="positive">3.0</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:600;">鈴木 花子</td>
+            <td>B班</td>
+            <td>G2</td>
+            <td>07/03</td>
+            <td>有給</td>
+            <td></td>
+            <td></td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td style="font-weight:700;">1</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:600;">佐藤 次郎</td>
+            <td>A班</td>
+            <td>G1</td>
+            <td>07/05</td>
+            <td>休日出勤</td>
+            <td>08:00</td>
+            <td>17:00</td>
+            <td>8.0</td>
+            <td>0.0</td>
+            <td class="positive">8.0</td>
+            <td class="positive">8.0</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:600;">鈴木 花子</td>
+            <td>B班</td>
+            <td>G2</td>
+            <td>07/07</td>
+            <td>午前半休</td>
+            <td>13:00</td>
+            <td>17:00</td>
+            <td>4.0</td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td>0.0</td>
+            <td style="font-weight:700;color:var(--warn);">&#9675;</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub">&#9654; 列の説明</h4>
+    <div class="legend-grid">
+      <div class="legend-item">
+        <span class="li-label">種別</span>
+        <span class="li-desc">定時 / 時間外 / 休日出勤 / 午前半休 / 午後半休 / 有給 / 連続有給</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">労働(H)</span>
+        <span class="li-desc">その日の労働時間合計</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">残業(H)</span>
+        <span class="li-desc">定時後の時間外労働</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">休日(H)</span>
+        <span class="li-desc">休日出勤の労働時間</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">所定外(H)</span>
+        <span class="li-desc">残業 + 休日出勤の合計</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">午前/午後半休</span>
+        <span class="li-desc">該当する場合「&#9675;」を表示</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">前日有給</span>
+        <span class="li-desc">前日が有給の場合「&#9675;」</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">連続有給</span>
+        <span class="li-desc">連続有給の場合「&#9675;」</span>
+      </div>
+      <div class="legend-item">
+        <span class="li-label">有給数</span>
+        <span class="li-desc">有給1回=1、半休=0.5</span>
+      </div>
+    </div>
+
+    <h4 class="sub">&#9654; サマリバー</h4>
+    <div class="mock-summary">
+      <div class="s-item"><span class="s-label">件数:</span><span class="s-val">142</span></div>
+      <div class="s-item"><span class="s-label">総労働時間:</span><span class="s-val">1,024.0 H</span></div>
+      <div class="s-item"><span class="s-label">総残業時間:</span><span class="s-val">86.5 H</span></div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>フッター行に各列の合計値が表示されます。ソート順は日付&#8594;氏名（日本語ロケール）です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">集計タブを確認する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「集計」</strong>タブでは、氏名(行) &#215; 日付(列) のマトリクス形式で月内の勤務状況を一覧できます。各セルに労働時間やステータスが表示されます。
+    </div>
+
+    <div class="mock-tabs">
+      <span class="mock-tab">詳細</span>
+      <span class="mock-tab active">集計</span>
+      <span class="mock-tab">月別</span>
+    </div>
+
+    <h4 class="sub">&#9654; マトリクスの構成</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th class="sticky" style="min-width:80px;">氏名</th>
+            <th>7/1<br><span style="font-size:9px;font-weight:400;">火</span></th>
+            <th>7/2<br><span style="font-size:9px;font-weight:400;">水</span></th>
+            <th>7/3<br><span style="font-size:9px;font-weight:400;">木</span></th>
+            <th>7/4<br><span style="font-size:9px;font-weight:400;">金</span></th>
+            <th>7/5<br><span style="font-size:9px;font-weight:400;color:var(--accent);">土</span></th>
+            <th>7/7<br><span style="font-size:9px;font-weight:400;">月</span></th>
+            <th style="min-width:40px;">合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="sticky" style="text-align:left;font-weight:600;">田中 太郎</td>
+            <td>8.0</td>
+            <td>11.0</td>
+            <td>8.0</td>
+            <td>8.0</td>
+            <td class="clickable">&#8212;</td>
+            <td>8.0</td>
+            <td class="total-cell">43.0</td>
+          </tr>
+          <tr>
+            <td class="sticky" style="text-align:left;font-weight:600;">鈴木 花子</td>
+            <td>8.0</td>
+            <td>8.0</td>
+            <td class="holiday">有給</td>
+            <td>8.0</td>
+            <td class="clickable">&#8212;</td>
+            <td class="half">半休</td>
+            <td class="total-cell">28.0</td>
+          </tr>
+          <tr>
+            <td class="sticky" style="text-align:left;font-weight:600;">佐藤 次郎</td>
+            <td>8.0</td>
+            <td>10.0</td>
+            <td>8.0</td>
+            <td>8.0</td>
+            <td>8.0</td>
+            <td>8.0</td>
+            <td class="total-cell">50.0</td>
+          </tr>
+          <tr>
+            <td class="sticky total-cell" style="text-align:left;">合計</td>
+            <td class="total-cell">24.0</td>
+            <td class="total-cell">29.0</td>
+            <td class="total-cell">16.0</td>
+            <td class="total-cell">24.0</td>
+            <td class="total-cell">8.0</td>
+            <td class="total-cell">16.0</td>
+            <td class="total-cell">121.0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>数値セル</strong> &#8212; その日の労働時間合計を表示</span></li>
+      <li><span class="anno-num">2</span><span><strong>「有給」「半休」ラベル</strong> &#8212; 有給・半休の日はラベルで表示されます</span></li>
+      <li><span class="anno-num">3</span><span><strong>「&#8212;」(空セル)</strong> &#8212; 勤務記録がないセルです。クリックすると勤務登録モーダルが開きます（Step 5参照）</span></li>
+      <li><span class="anno-num">4</span><span><strong>合計行・合計列</strong> &#8212; 行合計=メンバーの月間合計、列合計=日別の全員合計</span></li>
+      <li><span class="anno-num">5</span><span><strong>氏名列</strong> &#8212; 左端に固定（sticky）されており、横スクロールしても常に表示されます</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">月別タブを確認する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「月別」</strong>タブでは、氏名(行) &#215; 月(列) のマトリクスで長期的な残業・労働・有給の推移を確認できます。各月に3つのサブ列があります。
+    </div>
+
+    <div class="mock-tabs">
+      <span class="mock-tab">詳細</span>
+      <span class="mock-tab">集計</span>
+      <span class="mock-tab active">月別</span>
+    </div>
+
+    <h4 class="sub">&#9654; マトリクスの構成</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th class="sticky" rowspan="2" style="min-width:80px;">氏名</th>
+            <th colspan="3">2026/05</th>
+            <th colspan="3">2026/06</th>
+            <th colspan="3">2026/07</th>
+            <th colspan="3">合計</th>
+          </tr>
+          <tr>
+            <th>残業</th>
+            <th>労働</th>
+            <th>有給</th>
+            <th>残業</th>
+            <th>労働</th>
+            <th>有給</th>
+            <th>残業</th>
+            <th>労働</th>
+            <th>有給</th>
+            <th>残業</th>
+            <th>労働</th>
+            <th>有給</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="sticky" style="text-align:left;font-weight:600;">田中 太郎</td>
+            <td>12.0</td>
+            <td>180.0</td>
+            <td>1</td>
+            <td>15.5</td>
+            <td>175.5</td>
+            <td>0</td>
+            <td>8.0</td>
+            <td>168.0</td>
+            <td>2</td>
+            <td class="total-cell">35.5</td>
+            <td class="total-cell">523.5</td>
+            <td class="total-cell">3</td>
+          </tr>
+          <tr>
+            <td class="sticky" style="text-align:left;font-weight:600;">鈴木 花子</td>
+            <td>5.0</td>
+            <td>168.0</td>
+            <td>2</td>
+            <td>3.0</td>
+            <td>160.0</td>
+            <td>1</td>
+            <td>0.0</td>
+            <td>152.0</td>
+            <td>3</td>
+            <td class="total-cell">8.0</td>
+            <td class="total-cell">480.0</td>
+            <td class="total-cell">6</td>
+          </tr>
+          <tr>
+            <td class="sticky total-cell" style="text-align:left;">合計</td>
+            <td class="total-cell">17.0</td>
+            <td class="total-cell">348.0</td>
+            <td class="total-cell">3</td>
+            <td class="total-cell">18.5</td>
+            <td class="total-cell">335.5</td>
+            <td class="total-cell">1</td>
+            <td class="total-cell">8.0</td>
+            <td class="total-cell">320.0</td>
+            <td class="total-cell">5</td>
+            <td class="total-cell">43.5</td>
+            <td class="total-cell">1003.5</td>
+            <td class="total-cell">9</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>残業(H)</strong> &#8212; その月の時間外労働の合計時間</span></li>
+      <li><span class="anno-num">2</span><span><strong>労働(H)</strong> &#8212; その月の総労働時間</span></li>
+      <li><span class="anno-num">3</span><span><strong>有給(回)</strong> &#8212; その月の有給取得回数（半休は0.5回）</span></li>
+    </ul>
+
+    <h4 class="sub">&#9654; サマリバー</h4>
+    <div class="mock-summary">
+      <div class="s-item"><span class="s-label">総労働時間:</span><span class="s-val">1,003.5 H</span></div>
+      <div class="s-item"><span class="s-label">総残業時間:</span><span class="s-val">43.5 H</span></div>
+      <div class="s-item"><span class="s-label">総有給数:</span><span class="s-val">9 回</span></div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>月別タブの集計期間は、ツールバーの開始日～終了日に含まれる月が自動的に列として展開されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">勤務を簡易登録する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「集計」</strong>タブで、勤務記録がない空セル（&#8212;）をクリックすると<strong>勤務登録モーダル</strong>が表示されます。簡易的に勤務申請レコードを作成できます。
+    </div>
+
+    <h4 class="sub">&#9654; 登録モーダル</h4>
+    <div class="mock-modal">
+      <h5>勤務登録</h5>
+      <div class="modal-row">
+        <label>氏名</label>
+        <span class="f-input" style="flex:1;">田中 太郎</span>
+      </div>
+      <div class="modal-row">
+        <label>日付</label>
+        <span class="f-input" style="flex:1;">2026/07/05</span>
+      </div>
+      <div class="modal-row">
+        <label>種別</label>
+        <span class="f-select hl" style="flex:1;">定時(8H)</span>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        <span class="mock-btn primary">保存</span>
+        <span class="mock-btn">キャンセル</span>
+      </div>
+    </div>
+
+    <h4 class="sub">&#9654; 選択できる種別</h4>
+    <table class="info-table">
+      <tr><th>種別</th><th>内容</th></tr>
+      <tr><td>定時(8H)</td><td>通常の8時間勤務として記録</td></tr>
+      <tr><td>有給</td><td>有給休暇として記録（1日分）</td></tr>
+      <tr><td>午前半休</td><td>午前半休として記録（半日分）</td></tr>
+      <tr><td>午後半休</td><td>午後半休として記録（半日分）</td></tr>
+    </table>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>保存すると残業申請レコードが直接作成されます。集計タブに即時反映されます。</span>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>既に勤務記録がある日には登録できません。空セル（&#8212;）のみクリック可能です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">Excelで出力する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「詳細」</strong>タブで<strong>「Excel出力」</strong>ボタンを押すと、表示中のデータをExcelファイルとしてダウンロードできます。
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <span class="mock-btn teal hl" style="font-size:14px;padding:6px 20px;">Excel出力</span>
+    </div>
+
+    <h4 class="sub">&#9654; 出力内容</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      出力されるExcelの列は詳細タブのテーブルと同一です。
+    </div>
+    <table class="info-table">
+      <tr><th>項目</th><th>説明</th></tr>
+      <tr><td>列構成</td><td>氏名, 班, グループ, 日付, 種別, 開始時間, 終了時間, 労働時間(H), 残業(H), 休日出勤(H), 所定外(H), 午前半休, 午後半休, 前日有給, 連続有給, 有給数</td></tr>
+      <tr><td>ファイル名</td><td>労働時間統計_{開始日}_{終了日}.xlsx</td></tr>
+      <tr><td>例</td><td>労働時間統計_2026-07-01_2026-07-31.xlsx</td></tr>
+    </table>
+
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>フィルタ適用中の場合、フィルタ結果のみがExcelに出力されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>権限制限:</strong> この画面はリーダー・主任・係長・課長のみアクセスできます。一般メンバーには表示されません</li>
+      <li><strong>承認済みのみ集計:</strong> リーダー承認～課長承認まですべて完了した申請のみが集計対象です</li>
+      <li><strong>記録のみ種別:</strong> 午後半休・有給・連続有給は承認不要で、申請された時点で常にカウントされます</li>
+      <li><strong>連続有給の展開:</strong> 連続有給は日ごとに展開されます。DAISOカレンダーの非稼働日は除外されます</li>
+      <li><strong>ソート順:</strong> データは日付順、同日内は氏名（日本語ロケール）順で表示されます</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

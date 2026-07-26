@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>長期負荷チャート 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac;
+    --col-bg: #1a2030; --selected-bg: #1a3028;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac;
+      --col-bg: #1a2030; --selected-bg: #1a3028;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* cover */
+  .cover { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 48px 40px 40px; margin-bottom: 36px; border-left: 5px solid var(--prod-border); }
+  .cover h1 { font-size: 28px; font-weight: 800; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* step */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+  h4.sub { font-size: 15px; font-weight: 700; margin: 18px 0 10px; color: var(--ink); }
+
+  /* toc */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* note */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* callout */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* mock toolbar */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 60px; }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn-btn { background: #ff9800; border-color: #ff9800; color: #fff; }
+
+  /* highlight */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 80px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* mini grid mockup */
+  .mock-grid { border: 1px solid var(--grid-line); border-radius: 6px; overflow-x: auto; margin: 12px 0; font-size: 11px; }
+  .mock-grid table { width: 100%; border-collapse: collapse; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .mock-grid th { background: var(--grid-head); font-weight: 700; color: var(--ink2); font-size: 10px; }
+  .mock-grid td { background: var(--card); color: var(--ink); }
+
+  /* table inside step */
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .info-table th, .info-table td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; }
+  .info-table th { background: var(--grid-head); font-weight: 700; color: var(--ink2); white-space: nowrap; width: 140px; }
+  .info-table td { background: var(--card); color: var(--ink); }
+
+  /* mock popover */
+  .mock-popover { background: var(--card); border: 1px solid var(--grid-line); border-radius: 8px; box-shadow: var(--shadow); padding: 16px 20px; margin: 12px 0; max-width: 400px; }
+  .mock-popover h5 { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  /* chip selector */
+  .mock-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .mock-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 16px; font-size: 12px; background: var(--card); color: var(--ink2); cursor: default; }
+  .mock-chip.checked { background: var(--selected-bg); border-color: var(--step-color); color: var(--step-color); font-weight: 600; }
+  .mock-chip .check { font-size: 11px; }
+
+  /* bar chart mock */
+  .mock-chart { display: flex; align-items: flex-end; gap: 6px; padding: 16px 12px 8px; border: 1px solid var(--grid-line); border-radius: 6px; background: var(--col-bg); margin: 12px 0; min-height: 140px; }
+  .mock-chart-bar { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; }
+  .mock-chart-bar .bar { width: 100%; border-radius: 3px 3px 0 0; min-width: 16px; }
+  .mock-chart-bar .bar-label { font-size: 9px; color: var(--ink2); white-space: nowrap; }
+  .mock-chart-legend { display: flex; gap: 16px; margin: 8px 0 4px; font-size: 12px; }
+  .mock-chart-legend-item { display: flex; align-items: center; gap: 6px; }
+  .mock-chart-legend-item .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>長期負荷チャート 作業手順書</h1>
+    <div class="subtitle">顧客需要 x ラインサイクルタイムからライン別・工程別の負荷時間(h)を日別・週別・月別で表示する画面</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> 負荷計算 <span class="arrow">&#9656;</span> 長期負荷チャート
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>期間を設定する</li>
+      <li><span class="tn">2</span>需要設定を行う</li>
+      <li><span class="tn">3</span>ライン・グループを選択する</li>
+      <li><span class="tn">4</span>負荷を計算する</li>
+      <li><span class="tn">5</span>チャートの見方</li>
+      <li><span class="tn">6</span>Excel出力</li>
+      <li><span class="tn">7</span>注意事項</li>
+    </ul>
+  </div>
+
+  <!-- ===== 前提条件 ===== -->
+  <div class="note" style="border-left-color:var(--accent);">
+    <h2 style="color:var(--accent);">&#9881; 前提条件</h2>
+    <ul>
+      <li><strong>ラインサイクルタイムが登録済みであること</strong> -- 負荷計算に必要</li>
+      <li><strong>ライン勤務カレンダが設定済みであること</strong> -- 稼働分の算出に必要。未設定でも負荷時間hは表示可能</li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">期間を設定する</div>
+    </div>
+    <div class="step-desc">
+      上部メニュー<strong>「生産」→「負荷計算」→「長期負荷チャート」</strong>を開きます。ツールバーで表示期間と集計単位を設定します。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group hl"><label>開始日</label><span class="f-input">2026/07/01</span></div>
+      <div class="f-group hl hl-blue"><label>期間</label><span class="f-select">3ヶ月</span></div>
+      <div class="f-group" style="opacity:.5;"><label>終了日</label><span class="f-input" style="color:var(--ink2);">2026/09/30</span></div>
+      <div class="f-group hl hl-green"><label>集計</label><span class="f-select">月別</span></div>
+    </div>
+    <ul class="anno-list" style="margin-top:14px;">
+      <li><span class="anno-num">1</span><span><strong>開始日</strong> -- 負荷計算の開始日を指定します</span></li>
+      <li><span class="anno-num">2</span><span><strong>期間</strong> -- 3ヶ月 / 6ヶ月 / 1年 / カスタム から選択。「カスタム」を選択すると終了日を自由に設定できます</span></li>
+      <li><span class="anno-num">3</span><span><strong>終了日</strong> -- 期間を「カスタム」にした場合のみ編集可能。それ以外は自動計算</span></li>
+      <li><span class="anno-num">4</span><span><strong>集計</strong> -- 日別 / 週別 / 月別 から選択。チャートのX軸の粒度が変わります</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">需要設定を行う（任意）</div>
+    </div>
+    <div class="step-desc">
+      「需要設定」ボタンを押すとポップオーバーが開きます。負荷計算に使う需要データのソースを切り替えることができます。
+    </div>
+    <div style="margin-bottom:12px;">
+      <span class="mock-btn" style="font-size:13px;padding:5px 14px;">需要設定</span>
+    </div>
+    <div class="mock-popover">
+      <h5>需要設定</h5>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
+          <label style="min-width:160px;color:var(--ink2);font-size:12px;">OrderLine使用最終日</label>
+          <span class="f-input" style="min-width:120px;">2026/07/31</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <span class="mock-btn teal" style="font-size:11px;padding:3px 10px;">保存</span>
+          <span class="mock-btn" style="font-size:11px;padding:3px 10px;">クリア</span>
+        </div>
+      </div>
+    </div>
+    <ul class="anno-list" style="margin-top:14px;">
+      <li><span class="anno-num">1</span><span><strong>OrderLine使用最終日</strong> -- 指定日までは受注明細(OrderLine)、翌日以降はLineDemandで需要集計</span></li>
+      <li><span class="anno-num">2</span><span><strong>未設定</strong> -- 全期間LineDemandを使用</span></li>
+      <li><span class="anno-num">3</span><span><strong>保存</strong> -- 管理者のみ設定変更可能。一般ユーザーは閲覧のみ</span></li>
+    </ul>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>ルーティング未作成期間でLineDemandに展開されていない完成品でも、OrderLineベースで過去月の負荷を確認できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">ライン・グループを選択する</div>
+    </div>
+    <div class="step-desc">
+      チャートに表示するラインとグループを選択します。複数選択可能です。
+    </div>
+
+    <h4 class="sub">&#9654; グループ選択</h4>
+    <div class="mock-chips">
+      <span class="mock-chip checked"><span class="check">&#9745;</span> タンク</span>
+      <span class="mock-chip"><span class="check">&#9744;</span> フロア</span>
+      <span class="mock-chip checked"><span class="check">&#9745;</span> ブレード</span>
+      <span class="mock-chip"><span class="check">&#9744;</span> レーザ</span>
+    </div>
+
+    <h4 class="sub">&#9654; ライン個別選択</h4>
+    <div class="mock-chips">
+      <span class="mock-chip checked"><span class="check">&#9745;</span> L1100 タンクライン</span>
+      <span class="mock-chip checked"><span class="check">&#9745;</span> L1200 タンク検査</span>
+      <span class="mock-chip"><span class="check">&#9744;</span> L2100 フロアライン</span>
+      <span class="mock-chip"><span class="check">&#9744;</span> L2200 フロア検査</span>
+      <span class="mock-chip checked"><span class="check">&#9745;</span> L3100 ブレード1</span>
+    </div>
+
+    <div style="display:flex;gap:8px;margin:12px 0 4px;">
+      <span class="mock-btn" style="font-size:11px;padding:3px 10px;">全選択</span>
+      <span class="mock-btn" style="font-size:11px;padding:3px 10px;">全解除</span>
+    </div>
+
+    <ul class="anno-list" style="margin-top:14px;">
+      <li><span class="anno-num">1</span><span><strong>グループ選択</strong> -- チェックするとグループ合算チャートが表示されます</span></li>
+      <li><span class="anno-num">2</span><span><strong>ライン個別選択</strong> -- チェックするとライン別チャートが表示されます</span></li>
+      <li><span class="anno-num">3</span><span><strong>全選択/全解除</strong> -- 一括操作ボタン</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">負荷を計算する</div>
+    </div>
+    <div class="step-desc">
+      期間・需要設定・ライン選択が完了したら、「計算」ボタンを押すと負荷チャートが表示されます。
+    </div>
+    <div style="margin-bottom:12px;">
+      <span class="mock-btn primary" style="font-size:14px;padding:6px 20px;">計算</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>計算処理は選択したライン数・期間に応じて数秒かかる場合があります。処理中はローディング表示が出ます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">チャートの見方</div>
+    </div>
+    <div class="step-desc">
+      計算完了後、3種類のチャートが表示されます。チャートの色でグループ/ライン/工程を区別します。
+    </div>
+
+    <h4 class="sub">&#9654; チャート凡例</h4>
+    <div class="legend-grid" style="grid-template-columns:1fr;gap:10px;margin-top:8px;">
+      <div class="legend-item">
+        <span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:#8e44ad;flex-shrink:0;"></span>
+        <span class="li-label" style="min-width:160px;">グループチャート（紫色）</span>
+        <span class="li-desc">選択グループ配下のライン負荷合算</span>
+      </div>
+      <div class="legend-item">
+        <span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:#e74c3c;flex-shrink:0;"></span>
+        <span class="li-label" style="min-width:160px;">ラインチャート（赤色）</span>
+        <span class="li-desc">ライン全体の負荷時間</span>
+      </div>
+      <div class="legend-item">
+        <span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:#3498db;flex-shrink:0;"></span>
+        <span class="li-label" style="min-width:160px;">工程チャート（青色）</span>
+        <span class="li-desc">ライン配下の各工程の負荷時間。設備台数2台以上は按分後の値</span>
+      </div>
+    </div>
+
+    <h4 class="sub">&#9654; チャートイメージ</h4>
+
+    <!-- Group chart mock -->
+    <div style="font-size:12px;font-weight:700;color:var(--ink);margin:12px 0 4px;">タンク（グループ合算）</div>
+    <div class="mock-chart">
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:90px;background:#8e44ad;"></div>
+        <div class="bar-label">7月</div>
+      </div>
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:72px;background:#8e44ad;"></div>
+        <div class="bar-label">8月</div>
+      </div>
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:65px;background:#8e44ad;"></div>
+        <div class="bar-label">9月</div>
+      </div>
+    </div>
+
+    <!-- Line chart mock -->
+    <div style="font-size:12px;font-weight:700;color:var(--ink);margin:12px 0 4px;">L1100 タンクライン</div>
+    <div class="mock-chart">
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:70px;background:#e74c3c;"></div>
+        <div class="bar-label">7月</div>
+      </div>
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:55px;background:#e74c3c;"></div>
+        <div class="bar-label">8月</div>
+      </div>
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:48px;background:#e74c3c;"></div>
+        <div class="bar-label">9月</div>
+      </div>
+    </div>
+
+    <!-- Process chart mock -->
+    <div style="font-size:12px;font-weight:700;color:var(--ink);margin:12px 0 4px;">L1100 タンクライン -- 工程別</div>
+    <div class="mock-chart">
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:45px;background:#3498db;"></div>
+        <div class="bar" style="height:30px;background:#2980b9;margin-top:2px;"></div>
+        <div class="bar-label">7月</div>
+      </div>
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:35px;background:#3498db;"></div>
+        <div class="bar" style="height:24px;background:#2980b9;margin-top:2px;"></div>
+        <div class="bar-label">8月</div>
+      </div>
+      <div class="mock-chart-bar">
+        <div class="bar" style="height:30px;background:#3498db;"></div>
+        <div class="bar" style="height:22px;background:#2980b9;margin-top:2px;"></div>
+        <div class="bar-label">9月</div>
+      </div>
+    </div>
+
+    <div class="mock-chart-legend">
+      <div class="mock-chart-legend-item"><span class="swatch" style="background:#8e44ad;"></span> グループ合算</div>
+      <div class="mock-chart-legend-item"><span class="swatch" style="background:#e74c3c;"></span> ライン負荷</div>
+      <div class="mock-chart-legend-item"><span class="swatch" style="background:#3498db;"></span> 工程負荷</div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>すべてのグラフは共通のY軸スケール（最大負荷基準）で表示されます。グラフ間で負荷量を直接比較可能です。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>棒にマウスを乗せるとツールチップで工程別の負荷詳細が確認できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">Excel出力</div>
+    </div>
+    <div class="step-desc">
+      計算結果表示後に「Excel出力」ボタンで負荷データをExcelファイルとしてダウンロードできます。
+    </div>
+    <div style="margin-bottom:12px;">
+      <span class="mock-btn teal" style="font-size:13px;padding:5px 14px;">Excel出力</span>
+    </div>
+
+    <h4 class="sub">&#9654; 出力シート構成</h4>
+    <table class="info-table">
+      <tr><th style="width:auto;">シート</th><th style="width:auto;">内容</th></tr>
+      <tr><td style="font-weight:700;">グループ名シート</td><td>グループ合算の負荷時間</td></tr>
+      <tr><td style="font-weight:700;">負荷(h)シート</td><td>ライン別負荷時間。月別集計の場合は H/月・稼働日・H/日 の3列構成</td></tr>
+      <tr><td style="font-weight:700;">完成品別各工程ライン負荷シート</td><td>ライン x 工程 x 完成品 の負荷時間</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>各シートにタイトル・作成日・作成者が付与されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>カレンダー未設定ライン:</strong> カレンダーが未設定のラインは警告表示されます。負荷時間hのみ表示され、稼働率の算出はできません</li>
+      <li><strong>画面遷移ボタン:</strong> 画面右上のボタンから「出来高集計」「サイクルタイム入力」に遷移可能です</li>
+      <li><strong>工程負荷の按分:</strong> 工程負荷は設備台数で按分されます（負荷 / 設備台数）。設備台数は出来高集計の係数設定タブで設定します</li>
+      <li><strong>需要日付の補正:</strong> 前倒しフラグ付き需要はリードタイム分を戻した日付に再配置されます</li>
+      <li><strong>月初内示均等配分:</strong> 月初3営業日の需要合計が前月平均の10倍以上の場合、当月営業日へ均等配分されます</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

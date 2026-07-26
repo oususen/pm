@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>出来高集計 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac;
+    --col-bg: #1a2030; --selected-bg: #1a3028;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac;
+      --col-bg: #1a2030; --selected-bg: #1a3028;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* cover */
+  .cover { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 48px 40px 40px; margin-bottom: 36px; border-left: 5px solid var(--prod-border); }
+  .cover h1 { font-size: 28px; font-weight: 800; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* step */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+  h4.sub { font-size: 15px; font-weight: 700; margin: 18px 0 10px; color: var(--ink); }
+
+  /* toc */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* note */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* screen overview */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--step-color); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; }
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+
+  /* callout */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* mock toolbar */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 60px; }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn-btn { background: #ff9800; border-color: #ff9800; color: #fff; }
+
+  /* highlight */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 80px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* mini grid mockup */
+  .mock-grid { border: 1px solid var(--grid-line); border-radius: 6px; overflow-x: auto; margin: 12px 0; font-size: 11px; }
+  .mock-grid table { width: 100%; border-collapse: collapse; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .mock-grid th { background: var(--grid-head); font-weight: 700; color: var(--ink2); font-size: 10px; }
+  .mock-grid td { background: var(--card); color: var(--ink); }
+  .mock-grid td.editable { background: #fffff0; }
+  :root[data-theme="dark"] .mock-grid td.editable { background: #22281c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid td.editable { background: #22281c; } }
+  .mock-grid td.negative { color: var(--danger); font-weight: 700; }
+  .mock-grid td.positive { color: var(--success); font-weight: 700; }
+  .mock-grid .sticky { position: sticky; left: 0; z-index: 2; background: var(--grid-head); }
+
+  /* add-anchor btn */
+  .mock-add-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); color: var(--accent); font-size: 13px; font-weight: 800; line-height: 1; background: var(--card); flex-shrink: 0; cursor: default; }
+
+  /* tab mockup */
+  .mock-tabs { display: flex; gap: 0; margin-bottom: 12px; }
+  .mock-tab { padding: 6px 14px; border: 1px solid var(--grid-line); font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink2); cursor: default; }
+  .mock-tab:first-child { border-radius: 6px 0 0 6px; }
+  .mock-tab:last-child { border-radius: 0 6px 6px 0; }
+  .mock-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mock-tab.teal { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+
+  /* fkey bar */
+  .mock-fkeys { display: flex; gap: 4px; flex-wrap: wrap; margin: 12px 0; }
+  .mock-fkey { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--card); color: var(--ink); }
+  .mock-fkey.highlight { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mock-fkey.teal { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+
+  /* table inside step */
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .info-table th, .info-table td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; }
+  .info-table th { background: var(--grid-head); font-weight: 700; color: var(--ink2); white-space: nowrap; width: 140px; }
+  .info-table td { background: var(--card); color: var(--ink); }
+
+  /* overview mock */
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+
+  /* dialog mockup */
+  .mock-dialog { background: var(--card); border: 2px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 12px 0; max-width: 480px; box-shadow: var(--shadow); }
+  .mock-dialog .dialog-title { font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--ink); }
+  .mock-dialog .dialog-body { font-size: 13px; color: var(--ink2); margin-bottom: 14px; line-height: 1.7; }
+  .mock-dialog .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* changed row highlight */
+  .mock-grid tr.changed td { background: #fffff0; }
+  :root[data-theme="dark"] .mock-grid tr.changed td { background: #22281c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid tr.changed td { background: #22281c; } }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>出来高集計 作業手順書</h1>
+    <div class="subtitle">工程実績から実績サイクルタイムを計算し、BOM展開で完成品CTまで保存する画面</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> 負荷計算 <span class="arrow">&#9656;</span> 出来高集計
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>計算条件を設定する</li>
+      <li><span class="tn">2</span>実績CTを計算する</li>
+      <li><span class="tn">3</span>実績CTを保存する</li>
+      <li><span class="tn">4</span>完成品CTを計算・保存する</li>
+      <li><span class="tn">5</span>照会タブで確認する</li>
+      <li><span class="tn">6</span>係数設定タブ</li>
+    </ul>
+  </div>
+
+  <!-- ===== 前提条件 ===== -->
+  <div class="note" style="border-left-color:var(--accent);">
+    <h2 style="color:var(--accent);">&#9881; 前提条件</h2>
+    <ul>
+      <li>工程実績が入力済みであること（工程作業入力画面で入力）</li>
+      <li>ルーティングが登録済みであること（BOM展開に必要）</li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">計算条件を設定する</div>
+    </div>
+    <div class="step-desc">
+      上部メニュー<strong>「生産」→「負荷計算」→「出来高集計」</strong>を開きます。ツールバーで計算条件を設定します。
+    </div>
+    <div class="mock-toolbar">
+      <div class="f-group hl"><label>工程</label><span class="f-select" style="min-width:140px;">4003 - フロア検査</span></div>
+      <div class="f-group hl hl-blue"><label>ライン</label><span class="f-select" style="min-width:120px;">(自動判定)</span></div>
+      <div class="f-group hl hl-green"><label>開始日</label><span class="f-input">2026/07/01</span></div>
+      <div class="f-group hl hl-green"><label>終了日</label><span class="f-input">2026/07/25</span></div>
+      <span class="mock-btn primary">計算</span>
+    </div>
+    <ul class="anno-list" style="margin-top:14px;">
+      <li><span class="anno-num">1</span><span><strong>工程</strong> -- 対象の工程を選択（必須）</span></li>
+      <li><span class="anno-num">2</span><span><strong>ライン</strong> -- 省略すると自動判定。明示的に選択も可能</span></li>
+      <li><span class="anno-num">3</span><span><strong>開始日/終了日</strong> -- 計算対象の期間</span></li>
+      <li><span class="anno-num">4</span><span><strong>計算</strong> -- 押すと指定期間の工程実績から製品別CTを計算</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">実績CTを計算する</div>
+    </div>
+    <div class="step-desc">
+      計算ボタンを押すと「実績サイクル時間（製品別）」一覧が表示されます。
+    </div>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>品番</th>
+            <th>品名</th>
+            <th>生産数量</th>
+            <th>有効稼働時間</th>
+            <th>CT(秒/個)</th>
+            <th>セッション数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:left;font-weight:700;">YD40008720K</td>
+            <td style="text-align:left;">フロア(55UR CAB)検査</td>
+            <td>312</td>
+            <td>6,864秒</td>
+            <td style="font-weight:700;">22.0</td>
+            <td>18</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:700;">YD40008750K</td>
+            <td style="text-align:left;">フロア(U-6EN CAB)検査</td>
+            <td>198</td>
+            <td>5,148秒</td>
+            <td style="font-weight:700;">26.0</td>
+            <td>12</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:700;">YD40002946K</td>
+            <td style="text-align:left;">フロア(U-5 CAB)検査</td>
+            <td>156</td>
+            <td>3,588秒</td>
+            <td style="font-weight:700;">23.0</td>
+            <td>9</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>CT計算式:</strong> 有効稼働時間(秒) &#247; 生産数量(個) = サイクル時間(秒/個)</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">実績CTを保存する</div>
+    </div>
+    <div class="step-desc">
+      「実績CT保存」ボタンを押すと稼働率確認ダイアログが表示されます。稼働率の設定状況によって2パターンのダイアログが表示されます。
+    </div>
+
+    <h4 class="sub">&#9654; パターンA: 稼働率100%（未設定）</h4>
+    <div class="mock-dialog">
+      <div class="dialog-title">稼働率確認</div>
+      <div class="dialog-body">稼働率を設定しましたか？<br>現在の稼働率: <strong>100%</strong></div>
+      <div class="dialog-actions">
+        <span class="mock-btn">キャンセル（係数設定へ）</span>
+        <span class="mock-btn primary">OK（保存）</span>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>OK</strong>: 実績CTをそのまま保存。<strong>キャンセル</strong>: 係数設定タブに移動して稼働率を設定。
+    </div>
+
+    <h4 class="sub">&#9654; パターンB: 稼働率設定済み（例: 80%）</h4>
+    <div class="mock-dialog">
+      <div class="dialog-title">稼働率確認</div>
+      <div class="dialog-body">この稼働率で補正して保存しますか？<br>現在の稼働率: <strong>80%</strong></div>
+      <div class="dialog-actions">
+        <span class="mock-btn">キャンセル（係数設定へ）</span>
+        <span class="mock-btn primary">OK（補正CT保存）</span>
+      </div>
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      <strong>OK</strong>: 補正CTを計算して保存。<strong>キャンセル</strong>: 係数設定タブに移動して稼働率を変更。
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>補正CT = 実績CT &#247; (稼働率/100)</strong>。例: 22秒 &#247; 0.8 = 27.5秒</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">完成品CTを計算・保存する</div>
+    </div>
+    <div class="step-desc">
+      実績CT保存後に「完成品CT計算」ボタンが押せるようになります。
+    </div>
+
+    <h4 class="sub">&#9654; CT種別の選択</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      稼働率が100%以外の場合、補正CT/生CTの選択ダイアログが表示されます。
+    </div>
+    <div class="mock-dialog">
+      <div class="dialog-title">CT種別の選択</div>
+      <div class="dialog-body">どちらのCTで完成品CTを計算しますか？</div>
+      <div class="dialog-actions">
+        <span class="mock-btn">キャンセル（生CT = 実測値そのまま）</span>
+        <span class="mock-btn primary">OK（補正CT = 稼働率適用済み）</span>
+      </div>
+    </div>
+    <table class="info-table">
+      <tr><th>OK（補正CT）</th><td>稼働率で補正済みのCTを使って完成品CTを計算</td></tr>
+      <tr><th>キャンセル（生CT）</th><td>実測値そのままのCTを使って完成品CTを計算</td></tr>
+    </table>
+
+    <h4 class="sub">&#9654; BOM逆展開と完成品CT</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      BOM逆展開により、完成品ごとのCT合計と内訳が表示されます。
+    </div>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>完成品コード</th>
+            <th>完成品名</th>
+            <th>CT合計(秒)</th>
+            <th>内訳</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:left;font-weight:700;">FP-55UR</td>
+            <td style="text-align:left;">55UR CAB 完成品</td>
+            <td style="font-weight:700;">85.5</td>
+            <td style="text-align:left;font-size:10px;">検査:27.5 + コンプ:32.0 + 溶接:26.0</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;font-weight:700;">FP-U6EN</td>
+            <td style="text-align:left;">U-6EN CAB 完成品</td>
+            <td style="font-weight:700;">92.0</td>
+            <td style="text-align:left;font-size:10px;">検査:32.5 + コンプ:30.0 + 溶接:29.5</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub">&#9654; 完成品CT保存</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      「完成品CT保存」ボタンで保存します。保存完了ダイアログにCT種別（補正CT/生CT）が表示されます。
+    </div>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>完成品CT保存完了。CT種別: 補正CT（稼働率 80%）</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">照会タブで確認する</div>
+    </div>
+    <div class="step-desc">
+      「照会」タブを押すと保存済みデータを確認できます。工程やラインで絞り込み可能です。
+    </div>
+
+    <div class="mock-tabs" style="margin-bottom:16px;">
+      <span class="mock-tab">計算</span>
+      <span class="mock-tab active">照会</span>
+      <span class="mock-tab">係数設定</span>
+    </div>
+
+    <h4 class="sub">&#9654; 実績CT一覧</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>工程</th>
+            <th>ライン</th>
+            <th>期間</th>
+            <th>品番</th>
+            <th>CT(秒)</th>
+            <th>補正CT(秒)</th>
+            <th>稼働率(%)</th>
+            <th>計算日時</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:left;">4003 フロア検査</td>
+            <td>L2100</td>
+            <td style="font-size:10px;">07/01-07/25</td>
+            <td style="text-align:left;">YD40008720K</td>
+            <td>22.0</td>
+            <td>27.5</td>
+            <td>80</td>
+            <td style="font-size:10px;">2026/07/25 14:30</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;">4003 フロア検査</td>
+            <td>L2100</td>
+            <td style="font-size:10px;">07/01-07/25</td>
+            <td style="text-align:left;">YD40008750K</td>
+            <td>26.0</td>
+            <td>32.5</td>
+            <td>80</td>
+            <td style="font-size:10px;">2026/07/25 14:30</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub">&#9654; 完成品CT一覧</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>工程</th>
+            <th>ライン</th>
+            <th>期間</th>
+            <th>完成品コード</th>
+            <th>CT(秒)</th>
+            <th>CT種別</th>
+            <th>計算日時</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="text-align:left;">4003 フロア検査</td>
+            <td>L2100</td>
+            <td style="font-size:10px;">07/01-07/25</td>
+            <td style="text-align:left;">FP-55UR</td>
+            <td>85.5</td>
+            <td style="color:var(--accent);font-weight:600;">補正CT</td>
+            <td style="font-size:10px;">2026/07/25 14:32</td>
+          </tr>
+          <tr>
+            <td style="text-align:left;">4003 フロア検査</td>
+            <td>L2100</td>
+            <td style="font-size:10px;">07/01-07/25</td>
+            <td style="text-align:left;">FP-U6EN</td>
+            <td>92.0</td>
+            <td style="color:var(--accent);font-weight:600;">補正CT</td>
+            <td style="font-size:10px;">2026/07/25 14:32</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>工程やラインのフィルタで絞り込み、過去の計算結果を比較できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">係数設定タブ</div>
+    </div>
+    <div class="step-desc">
+      「係数設定」タブで工程ごとの稼働率と設備台数を設定します。
+    </div>
+
+    <div class="mock-tabs" style="margin-bottom:16px;">
+      <span class="mock-tab">計算</span>
+      <span class="mock-tab">照会</span>
+      <span class="mock-tab active">係数設定</span>
+    </div>
+
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>工程コード</th>
+            <th>工程名</th>
+            <th>ライン</th>
+            <th>稼働率(%)</th>
+            <th>設備台数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>4003</td>
+            <td style="text-align:left;">フロア検査</td>
+            <td>L2100</td>
+            <td class="editable">80</td>
+            <td class="editable">1</td>
+          </tr>
+          <tr>
+            <td>4002</td>
+            <td style="text-align:left;">フロアコンプ</td>
+            <td>L2100</td>
+            <td class="editable">85</td>
+            <td class="editable">2</td>
+          </tr>
+          <tr class="changed">
+            <td>4001</td>
+            <td style="text-align:left;">フロア溶接</td>
+            <td>L2100</td>
+            <td class="editable" style="font-weight:700;">90</td>
+            <td class="editable">3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ul class="anno-list" style="margin-top:14px;">
+      <li><span class="anno-num">1</span><span><strong>稼働率</strong> -- 実績CT保存時の補正に使用（補正CT = 実績CT &#247; 稼働率）。稼働率は「勤務 &gt; 加工費集計 &gt; 期間集計」の 加工時間 &#247; 勤務時間 で算出</span></li>
+      <li><span class="anno-num">2</span><span><strong>設備台数</strong> -- 長期負荷チャートで負荷を按分（負荷 &#247; 設備台数）</span></li>
+    </ul>
+
+    <div class="callout info" style="margin-top:14px;">
+      <span class="icon">&#9432;</span>
+      <span>変更行は黄色ハイライトで表示されます。「保存」ボタンで一括保存します。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>画面遷移:</strong> 画面右上のボタンから「サイクルタイム入力」「負荷チャート」に遷移可能</li>
+      <li><strong>操作順序:</strong> 実績CT保存 → 完成品CT計算 → 完成品CT保存 の順で操作する</li>
+      <li><strong>稼働率変更時:</strong> 係数設定の稼働率を変更したら、実績CTを再保存する必要がある</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -152,6 +152,18 @@ export const manualSections = [
     ],
   },
   {
+    id: "overtime",
+    title: "勤務管理",
+    items: [
+      { title: "勤務管理メニュー", path: "勤務/勤務管理.md" },
+      { title: "残業申請", path: "勤務/残業申請.md" },
+      { title: "申請一覧", path: "勤務/申請一覧.md" },
+      { title: "承認待ち一覧", path: "勤務/承認待ち一覧.md" },
+      { title: "月次労働時間統計", path: "勤務/月次労働時間統計.md" },
+      { title: "加工費集計", path: "勤務/加工費集計.md" },
+    ],
+  },
+  {
     id: "settings",
     title: "設定",
     items: [
