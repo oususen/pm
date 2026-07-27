@@ -227,6 +227,16 @@ const attendanceHoursByPersonDate = computed(() => {
   return map
 })
 
+const overtimeGapByPersonDate = computed(() => {
+  const map = new Map()
+  for (const row of rows.value) {
+    if (!row.overtimeGapMinutes) continue
+    const key = `${normalizePersonName(row.name)}|${row.date}`
+    map.set(key, (map.get(key) || 0) + row.overtimeGapMinutes)
+  }
+  return map
+})
+
 const dailyRows = computed(() => {
   const aggregate = new Map()
   for (const session of productionSessions.value) {
@@ -249,7 +259,8 @@ const dailyRows = computed(() => {
   }
 
   const out = [...aggregate.values()].map((item) => {
-    const sessionHours = item.sessionSeconds / 3600
+    const gapMinutes = overtimeGapByPersonDate.value.get(`${item.nameKey}|${item.date}`) || 0
+    const sessionHours = Math.max(item.sessionSeconds - gapMinutes * 60, 0) / 3600
     const attendanceHours = Number(attendanceHoursByPersonDate.value.get(`${item.nameKey}|${item.date}`) || 0)
     const meta = userMetaByName.value.get(item.nameKey) || {}
     return {
@@ -573,12 +584,21 @@ async function load() {
       else if (app.application_type === 'holiday') workH = h > 0 ? h : (app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8)
       else if (app.application_type === 'half_day_pm') workH = 4
 
+      let overtimeGapMinutes = 0
+      if (app.scheduled_end_time && app.start_time && app.application_type === 'overtime') {
+        const [seH, seM] = app.scheduled_end_time.split(':').map(Number)
+        const [stH, stM] = app.start_time.split(':').map(Number)
+        const gapMin = (stH * 60 + stM) - (seH * 60 + seM)
+        if (gapMin > 0 && gapMin <= 60) overtimeGapMinutes = gapMin
+      }
+
       result.push({
         name,
         team: app.team_name || '',
         group: app.group_name || '',
         date,
         workH,
+        overtimeGapMinutes,
       })
     }
 

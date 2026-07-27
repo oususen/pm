@@ -106,7 +106,7 @@
                 <button
                   type="button"
                   class="btn split-btn"
-                  :disabled="!canEditProductionDate(trip)"
+                  :disabled="!canRemoveProductionDate(trip)"
                   @click="removeSplitRow(trip.id, row.allocation_id, splitIdx, row)"
                 >
                   ×
@@ -280,6 +280,7 @@ const businessTypeLabel = (value) => {
 
 const canMarkDeparted = (trip) => canStatusEdit.value && trip?.status === 'LOADING'
 const canReopen = (trip) => canStatusEdit.value && ['LOADING', 'DEPARTED', 'CLOSED'].includes(trip?.status)
+const canRemoveProductionDate = (trip) => canEditProductionDate(trip) && trip?.status === 'PLANNED'
 const canRegisterActual = (trip) => {
   if (!canActualEdit.value) return false
   if (isActualInputMode.value) return trip?.status === 'DEPARTED'

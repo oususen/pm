@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import Calendar, Equipment, Line, Process, Product, RoutingStep
+from masters.models import BreakTime, Calendar, CalendarDay, Equipment, Line, Process, Product, RoutingStep
 from django.conf import settings
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today, WorkingDayCalculator
 from production.models_brake_line_record import BrakeLineRecord
@@ -26,6 +26,56 @@ from production.models_process_work_session_change_history import ProcessWorkSes
 from production.serializers_process_realtime import check_plan_overrun
 
 logger = logging.getLogger(__name__)
+
+
+def _get_line_break_config(line_id):
+    """ラインのカレンダーIDと休憩定義を取得してキャッシュ用に返す"""
+    try:
+        line = Line.objects.get(pk=line_id)
+    except Line.DoesNotExist:
+        return None
+    calendar_id = line.calendar_id
+    if not calendar_id:
+        from masters.models import Calendar as Cal
+        calendar_id = Cal.objects.filter(calendar_code='daiso').values_list('id', flat=True).first()
+    if not calendar_id:
+        return None
+    return {'calendar_id': calendar_id}
+
+
+def _deduct_break_seconds(break_config, start_dt, end_dt, raw_seconds):
+    """セッションの生時間から、カレンダー休憩の重複分だけを減算する"""
+    if not break_config:
+        return raw_seconds
+    calendar_id = break_config['calendar_id']
+
+    check_date = start_dt.date() - timedelta(days=1)
+    last_date = end_dt.date() + timedelta(days=1)
+    total_break = 0
+
+    while check_date <= last_date:
+        cal_day = CalendarDay.objects.filter(
+            calendar_id=calendar_id, target_date=check_date,
+        ).first()
+        if cal_day and cal_day.work_pattern_id:
+            breaks = BreakTime.objects.filter(
+                work_pattern_id=cal_day.work_pattern_id,
+            ).order_by('order')
+            for br in breaks:
+                br_start_min = br.break_start.hour * 60 + br.break_start.minute
+                br_end_min = br.break_end.hour * 60 + br.break_end.minute
+                if br_end_min <= br_start_min:
+                    br_end_min += 24 * 60
+                base = datetime.combine(check_date, time(0, 0))
+                br_start_dt = base + timedelta(minutes=br_start_min)
+                br_end_dt = base + timedelta(minutes=br_end_min)
+                overlap_start = max(start_dt, br_start_dt)
+                overlap_end = min(end_dt, br_end_dt)
+                if overlap_end > overlap_start:
+                    total_break += int((overlap_end - overlap_start).total_seconds())
+        check_date += timedelta(days=1)
+
+    return max(raw_seconds - total_break, 0)
 
 
 class BrakeLinePlanView(APIView):
@@ -1072,6 +1122,29 @@ class BrakeLineSessionView(APIView):
                     'line_id':              open_rec.line_id,
                     'plan_date':            str(open_rec.plan_date),
                 })
+
+        line_breaks_cache = {}
+        for s in sessions:
+            if s.get('session_type') != 'WORK':
+                continue
+            s_started = s.get('started_at')
+            s_ended = s.get('ended_at')
+            if not s_started or not s_ended:
+                continue
+            start_dt = datetime.fromisoformat(s_started)
+            end_dt = datetime.fromisoformat(s_ended)
+            raw_seconds = int((end_dt - start_dt).total_seconds())
+            if raw_seconds <= 0:
+                continue
+
+            lid = s.get('line_id')
+            if lid is not None and lid not in line_breaks_cache:
+                line_breaks_cache[lid] = _get_line_break_config(lid)
+            break_config = line_breaks_cache.get(lid)
+
+            s['effective_work_seconds'] = _deduct_break_seconds(
+                break_config, start_dt, end_dt, raw_seconds,
+            )
 
         sessions.sort(key=lambda s: s.get('started_at') or '', reverse=True)
         return Response(sessions)
