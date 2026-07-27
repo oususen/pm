@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">長期負荷チャート <DataSourceDialog title="長期負荷チャート" :sources="dsSources" /></h1>
-        <p class="helper-text">顧客需要 × ラインサイクルタイムからライン別・工程別の負荷時間を表示（単位: h / 工程負荷は設備台数反映後）</p>
+        <p class="helper-text">顧客需要 × ラインサイクルタイムから、H/日を棒グラフ・負荷時間(h)を折れ線で表示（工程負荷は設備台数反映後）</p>
       </div>
       <div class="page-actions">
         <button v-if="result" class="btn-secondary" @click="exportExcel">Excel出力</button>
@@ -105,19 +105,40 @@
         <!-- グループ集計 -->
         <div v-for="gc in groupCharts" :key="'g-' + gc.groupId" class="line-chart-block group-block">
           <h3 class="line-title group-title">{{ gc.groupName }}（{{ gc.lines.length }}ライン合算）</h3>
+          <div class="chart-legend-inline" style="--legend-line-color:#8e44ad;">
+            <span class="chart-legend-item"><span class="legend-bar-swatch"></span>H/日</span>
+            <span class="chart-legend-item"><span class="legend-line-swatch"></span>負荷(h)</span>
+          </div>
           <div class="chart-canvas">
-            <div class="y-axis">
-              <div class="y-axis-label top">{{ formatLoadHours(globalMaxLoadSec) }}h</div>
-              <div class="y-axis-label mid">{{ formatLoadHours(globalMaxLoadSec / 2) }}h</div>
-              <div class="y-axis-label bottom">0h</div>
+            <div class="y-axis left-axis">
+              <div class="y-axis-label top">{{ formatPerDayAxisLabel(chartAxes(gc.data).leftMaxHours) }}h/日</div>
+              <div class="y-axis-label mid">{{ formatPerDayAxisLabel(chartAxes(gc.data).leftMaxHours / 2) }}h/日</div>
+              <div class="y-axis-label bottom">0h/日</div>
             </div>
             <div class="bar-chart-wrapper">
-              <div class="bar-chart">
+              <div class="bar-chart" :style="chartWidthStyle(gc.data.length)">
                 <div class="chart-guides">
                   <div class="chart-guide top"></div>
                   <div class="chart-guide mid"></div>
                   <div class="chart-guide bottom"></div>
                 </div>
+                <svg
+                  class="line-overlay"
+                  :style="[chartOverlayStyle(gc.data.length), { color: '#8e44ad' }]"
+                  :viewBox="`0 0 ${chartPlotWidth(gc.data.length)} ${CHART_BODY_HEIGHT}`"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <path v-if="gc.data.length > 1" :d="buildLoadLinePath(gc.data, chartAxes(gc.data).rightMaxSec)" class="line-path"></path>
+                  <circle
+                    v-for="(point, index) in buildLoadLinePoints(gc.data, chartAxes(gc.data).rightMaxSec)"
+                    :key="`group-point-${gc.groupId}-${index}`"
+                    class="line-point"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="3"
+                  ></circle>
+                </svg>
                 <div
                   v-for="d in gc.data"
                   :key="d.date"
@@ -127,11 +148,16 @@
                 >
                   <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                   <div class="bar-track">
-                    <div class="bar-fill" :style="barStyle(d, '#8e44ad')"></div>
+                    <div class="bar-fill per-day-bar" :style="barStyle(d, '#60a5fa', chartAxes(gc.data).leftMaxHours)"></div>
                   </div>
                   <div class="bar-label">{{ formatDateLabel(d) }}</div>
                 </div>
               </div>
+            </div>
+            <div class="y-axis right-axis">
+              <div class="y-axis-label top">{{ formatLoadHours(chartAxes(gc.data).rightMaxSec) }}h</div>
+              <div class="y-axis-label mid">{{ formatLoadHours(chartAxes(gc.data).rightMaxSec / 2) }}h</div>
+              <div class="y-axis-label bottom">0h</div>
             </div>
           </div>
         </div>
@@ -142,19 +168,40 @@
           <div v-if="lineWarning(line)" class="calendar-warning">
             ⚠ {{ lineWarning(line) }}
           </div>
+          <div class="chart-legend-inline" style="--legend-line-color:#e74c3c;">
+            <span class="chart-legend-item"><span class="legend-bar-swatch"></span>H/日</span>
+            <span class="chart-legend-item"><span class="legend-line-swatch"></span>負荷(h)</span>
+          </div>
           <div class="chart-canvas">
-            <div class="y-axis">
-              <div class="y-axis-label top">{{ formatLoadHours(globalMaxLoadSec) }}h</div>
-              <div class="y-axis-label mid">{{ formatLoadHours(globalMaxLoadSec / 2) }}h</div>
-              <div class="y-axis-label bottom">0h</div>
+            <div class="y-axis left-axis">
+              <div class="y-axis-label top">{{ formatPerDayAxisLabel(chartAxes(lineDisplayData(line)).leftMaxHours) }}h/日</div>
+              <div class="y-axis-label mid">{{ formatPerDayAxisLabel(chartAxes(lineDisplayData(line)).leftMaxHours / 2) }}h/日</div>
+              <div class="y-axis-label bottom">0h/日</div>
             </div>
             <div class="bar-chart-wrapper">
-              <div class="bar-chart">
+              <div class="bar-chart" :style="chartWidthStyle(lineDisplayData(line).length)">
                 <div class="chart-guides">
                   <div class="chart-guide top"></div>
                   <div class="chart-guide mid"></div>
                   <div class="chart-guide bottom"></div>
                 </div>
+                <svg
+                  class="line-overlay"
+                  :style="[chartOverlayStyle(lineDisplayData(line).length), { color: '#e74c3c' }]"
+                  :viewBox="`0 0 ${chartPlotWidth(lineDisplayData(line).length)} ${CHART_BODY_HEIGHT}`"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <path v-if="lineDisplayData(line).length > 1" :d="buildLoadLinePath(lineDisplayData(line), chartAxes(lineDisplayData(line)).rightMaxSec)" class="line-path"></path>
+                  <circle
+                    v-for="(point, index) in buildLoadLinePoints(lineDisplayData(line), chartAxes(lineDisplayData(line)).rightMaxSec)"
+                    :key="`line-point-${line.line_id}-${index}`"
+                    class="line-point"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="3"
+                  ></circle>
+                </svg>
                 <div
                   v-for="d in lineDisplayData(line)"
                   :key="d.date"
@@ -164,11 +211,16 @@
                 >
                   <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                   <div class="bar-track">
-                    <div class="bar-fill" :style="barStyle(d, '#e74c3c')"></div>
+                    <div class="bar-fill per-day-bar" :style="barStyle(d, '#60a5fa', chartAxes(lineDisplayData(line)).leftMaxHours)"></div>
                   </div>
                   <div class="bar-label">{{ formatDateLabel(d) }}</div>
                 </div>
               </div>
+            </div>
+            <div class="y-axis right-axis">
+              <div class="y-axis-label top">{{ formatLoadHours(chartAxes(lineDisplayData(line)).rightMaxSec) }}h</div>
+              <div class="y-axis-label mid">{{ formatLoadHours(chartAxes(lineDisplayData(line)).rightMaxSec / 2) }}h</div>
+              <div class="y-axis-label bottom">0h</div>
             </div>
           </div>
           <div v-if="lineProcesses(line).length" class="process-chart-list">
@@ -181,19 +233,40 @@
                 {{ proc.process_code }} {{ proc.process_name }}
                 <span v-if="proc.equipment_count > 1" class="process-note">（{{ proc.equipment_count }}台で按分）</span>
               </h4>
+              <div class="chart-legend-inline" style="--legend-line-color:#2563eb;">
+                <span class="chart-legend-item"><span class="legend-bar-swatch"></span>H/日</span>
+                <span class="chart-legend-item"><span class="legend-line-swatch"></span>負荷(h)</span>
+              </div>
               <div class="chart-canvas">
-                <div class="y-axis">
-                  <div class="y-axis-label top">{{ formatLoadHours(globalMaxLoadSec) }}h</div>
-                  <div class="y-axis-label mid">{{ formatLoadHours(globalMaxLoadSec / 2) }}h</div>
-                  <div class="y-axis-label bottom">0h</div>
+                <div class="y-axis left-axis">
+                  <div class="y-axis-label top">{{ formatPerDayAxisLabel(chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).leftMaxHours) }}h/日</div>
+                  <div class="y-axis-label mid">{{ formatPerDayAxisLabel(chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).leftMaxHours / 2) }}h/日</div>
+                  <div class="y-axis-label bottom">0h/日</div>
                 </div>
                 <div class="bar-chart-wrapper">
-                  <div class="bar-chart process-bar-chart">
+                  <div class="bar-chart process-bar-chart" :style="chartWidthStyle(processDisplayData(line, proc).length)">
                     <div class="chart-guides">
                       <div class="chart-guide top"></div>
                       <div class="chart-guide mid"></div>
                       <div class="chart-guide bottom"></div>
                     </div>
+                    <svg
+                      class="line-overlay"
+                      :style="[chartOverlayStyle(processDisplayData(line, proc).length), { color: '#2563eb' }]"
+                      :viewBox="`0 0 ${chartPlotWidth(processDisplayData(line, proc).length)} ${CHART_BODY_HEIGHT}`"
+                      preserveAspectRatio="none"
+                      aria-hidden="true"
+                    >
+                      <path v-if="processDisplayData(line, proc).length > 1" :d="buildLoadLinePath(processDisplayData(line, proc), chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).rightMaxSec)" class="line-path"></path>
+                      <circle
+                        v-for="(point, index) in buildLoadLinePoints(processDisplayData(line, proc), chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).rightMaxSec)"
+                        :key="`proc-point-${line.line_id}-${proc.process_id}-${index}`"
+                        class="line-point"
+                        :cx="point.x"
+                        :cy="point.y"
+                        r="3"
+                      ></circle>
+                    </svg>
                     <div
                       v-for="d in processDisplayData(line, proc)"
                       :key="`${proc.process_id}_${d.date}`"
@@ -203,11 +276,16 @@
                     >
                       <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                       <div class="bar-track">
-                        <div class="bar-fill" :style="barStyle(d, '#3498db')"></div>
+                        <div class="bar-fill per-day-bar" :style="barStyle(d, '#93c5fd', chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).leftMaxHours)"></div>
                       </div>
                       <div class="bar-label">{{ formatDateLabel(d) }}</div>
                     </div>
                   </div>
+                </div>
+                <div class="y-axis right-axis">
+                  <div class="y-axis-label top">{{ formatLoadHours(chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).rightMaxSec) }}h</div>
+                  <div class="y-axis-label mid">{{ formatLoadHours(chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).rightMaxSec / 2) }}h</div>
+                  <div class="y-axis-label bottom">0h</div>
                 </div>
               </div>
             </div>
@@ -222,6 +300,7 @@
 
     <div v-if="tooltip.visible" class="chart-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
       <div class="tooltip-title">{{ tooltip.line }} / {{ tooltip.date }}</div>
+      <div class="tooltip-row">H/日: {{ formatTooltipPerDayHours(tooltip.perDayHours) }}</div>
       <div class="tooltip-row">負荷: {{ formatHours(tooltip.loadMin) }}h</div>
       <div v-for="p in tooltip.processes" :key="p.process_code" class="tooltip-row">
         {{ p.process_code }} {{ p.process_name }}:
@@ -292,8 +371,12 @@ watch(() => filters.startDate, () => {
 
 const tooltip = reactive({
   visible: false, x: 0, y: 0,
-  line: '', date: '', availMin: 0, loadMin: 0, utilization: 0, processes: [],
+  line: '', date: '', availMin: 0, loadMin: 0, utilization: 0, perDayHours: null, processes: [],
 })
+
+const CHART_BODY_HEIGHT = 120
+const BAR_COLUMN_WIDTH = 36
+const CHART_COLUMN_GAP = 2
 
 onMounted(async () => {
   const [linesRes, groupsRes, mappingsRes] = await Promise.all([
@@ -466,29 +549,6 @@ const groupCharts = computed(() => {
   return charts
 })
 
-const globalMaxLoadSec = computed(() => {
-  let maxLoadSec = 0
-
-  for (const gc of groupCharts.value) {
-    for (const d of gc.data) {
-      if ((d.line_load_sec || 0) > maxLoadSec) maxLoadSec = d.line_load_sec || 0
-    }
-  }
-
-  if (result.value) {
-    for (const line of result.value.lines) {
-      for (const d of lineDisplayData(line)) {
-        if ((d.line_load_sec || 0) > maxLoadSec) maxLoadSec = d.line_load_sec || 0
-        for (const p of (d.processes || [])) {
-          if ((p.load_sec || 0) > maxLoadSec) maxLoadSec = p.load_sec || 0
-        }
-      }
-    }
-  }
-
-  return maxLoadSec > 0 ? maxLoadSec : 3600
-})
-
 const lineHasCalendar = (line) => {
   return line.data.some(d => d.available_min > 0)
 }
@@ -500,7 +560,7 @@ const lineHasLoad = (line) => {
 const lineWarning = (line) => {
   const hasCal = lineHasCalendar(line)
   const hasLoad = lineHasLoad(line)
-  if (!hasCal && hasLoad) return 'カレンダー未設定です。負荷時間(h)のみ表示しています'
+  if (!hasCal && hasLoad) return 'カレンダー未設定です。折れ線の負荷時間(h)のみ表示し、H/日の棒は表示できません'
   if (!hasCal && !hasLoad) return 'カレンダー未設定・負荷データなし'
   return ''
 }
@@ -547,6 +607,7 @@ const processDisplayData = (line, proc) => {
       available_min: d.available_min,
       line_load_sec: loadSec,
       line_load_min: loadMin,
+      working_days: d.working_days || 0,
       utilization,
       is_working_day: d.is_working_day,
       processes: [{
@@ -564,9 +625,80 @@ const processDisplayData = (line, proc) => {
   })
 }
 
-const barStyle = (d, color = '#e74c3c') => {
-  const pct = ((d.line_load_sec || 0) / globalMaxLoadSec.value) * 100
-  return { height: pct + '%', backgroundColor: color }
+const barStyle = (d, color = '#e74c3c', maxPerDayHours = 1) => {
+  const perDayHours = getPerDayHours(d)
+  const pct = perDayHours === null ? 0 : (perDayHours / Math.max(Number(maxPerDayHours) || 0, 1)) * 100
+  return { height: pct + '%', minHeight: pct > 0 ? '1px' : '0', backgroundColor: color }
+}
+
+const getPerDayHours = (d) => {
+  const workingDays = Number(d?.working_days || 0)
+  if (workingDays <= 0) return null
+  const loadSec = Number(d?.line_load_sec || 0)
+  return Math.round((loadSec / 3600 / workingDays) * 10) / 10
+}
+
+const formatPerDayAxisLabel = (hours) => {
+  const safeHours = Number(hours || 0)
+  return Math.round(safeHours * 10) / 10
+}
+
+const formatTooltipPerDayHours = (hours) => {
+  if (hours === null || hours === undefined) return '-'
+  return formatPerDayAxisLabel(hours)
+}
+
+const chartAxes = (items, options = {}) => {
+  const fixedLeftMaxHours = options.fixedLeftMaxHours ?? null
+  let leftMaxHours = fixedLeftMaxHours
+  let rightMaxSec = 0
+
+  if (leftMaxHours === null) {
+    leftMaxHours = 0
+    for (const item of (items || [])) {
+      const perDayHours = getPerDayHours(item)
+      if (perDayHours !== null && perDayHours > leftMaxHours) leftMaxHours = perDayHours
+    }
+  }
+
+  for (const item of (items || [])) {
+    const loadSec = Number(item?.line_load_sec || 0)
+    if (loadSec > rightMaxSec) rightMaxSec = loadSec
+  }
+
+  return {
+    leftMaxHours: Math.max(Number(leftMaxHours) || 0, 1),
+    rightMaxSec: Math.max(rightMaxSec, 3600),
+  }
+}
+
+const chartPlotWidth = (count) => {
+  if (!count) return 0
+  return count * BAR_COLUMN_WIDTH + Math.max(count - 1, 0) * CHART_COLUMN_GAP
+}
+
+const chartWidthStyle = (count) => ({
+  width: `${chartPlotWidth(count)}px`,
+})
+
+const chartOverlayStyle = (count) => ({
+  width: `${chartPlotWidth(count)}px`,
+})
+
+const buildLoadLinePoints = (items, maxLoadSec = 3600) => {
+  if (!items?.length) return []
+  return items.map((item, index) => {
+    const x = index * (BAR_COLUMN_WIDTH + CHART_COLUMN_GAP) + (BAR_COLUMN_WIDTH / 2)
+    const ratio = Math.max(0, Math.min(1, Number(item?.line_load_sec || 0) / Math.max(Number(maxLoadSec) || 0, 3600)))
+    const y = CHART_BODY_HEIGHT - (ratio * CHART_BODY_HEIGHT)
+    return { x, y }
+  })
+}
+
+const buildLoadLinePath = (items, maxLoadSec = 3600) => {
+  const points = buildLoadLinePoints(items, maxLoadSec)
+  if (!points.length) return ''
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
 }
 
 const formatDateLabel = (d) => {
@@ -805,6 +937,7 @@ const showTooltip = (ev, label, d) => {
   tooltip.date = d.month_label || d.week_label || d.date
   tooltip.availMin = d.available_min
   tooltip.loadMin = d.line_load_min || 0
+  tooltip.perDayHours = getPerDayHours(d)
   tooltip.utilization = d.utilization
   tooltip.processes = d.processes || []
 }
@@ -1209,25 +1342,53 @@ const exportExcel = async () => {
 .process-title { font-size: 13px; font-weight: 700; margin: 0 0 8px; color: #374151; }
 .process-note { font-size: 11px; font-weight: 500; color: #6b7280; }
 .process-bar-chart { min-height: 130px; }
+.chart-legend-inline { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; font-size: 11px; color: #4b5563; }
+.chart-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-bar-swatch { width: 14px; height: 10px; border-radius: 3px 3px 0 0; background: #60a5fa; }
+.legend-line-swatch { position: relative; width: 16px; height: 10px; }
+.legend-line-swatch::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px solid var(--legend-line-color, #e74c3c);
+}
+.legend-line-swatch::after {
+  content: '';
+  position: absolute;
+  top: calc(50% - 3px);
+  left: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--legend-line-color, #e74c3c);
+}
 
-.chart-canvas { display: flex; gap: 8px; align-items: flex-start; }
-.y-axis { width: 38px; height: 120px; margin-top: 14px; position: relative; flex-shrink: 0; }
+.chart-canvas { display: inline-flex; gap: 8px; align-items: flex-start; max-width: 100%; }
+.y-axis { width: 48px; height: 120px; margin-top: 14px; position: relative; flex-shrink: 0; }
+.right-axis { width: 56px; padding-left: 4px; border-left: 1px solid #e5e7eb; }
+.right-axis .y-axis-label { left: 0; right: auto; }
 .y-axis-label { position: absolute; right: 0; font-size: 10px; color: #6b7280; line-height: 1; }
 .y-axis-label.top { top: 0; transform: translateY(-50%); }
 .y-axis-label.mid { top: 50%; transform: translateY(-50%); }
 .y-axis-label.bottom { bottom: 0; transform: translateY(50%); }
 
-.bar-chart-wrapper { overflow-x: auto; flex: 1; }
+.bar-chart-wrapper { overflow-x: auto; flex: 0 1 auto; min-width: 0; max-width: calc(100vw - 220px); }
 .bar-chart { display: flex; gap: 2px; align-items: flex-end; min-height: 160px; padding-bottom: 20px; position: relative; }
 .chart-guides { position: absolute; top: 14px; left: 0; right: 0; height: 120px; pointer-events: none; z-index: 0; }
 .chart-guide { position: absolute; left: 0; right: 0; border-top: 1px solid #e5e7eb; }
 .chart-guide.top { top: 0; }
 .chart-guide.mid { top: 50%; }
 .chart-guide.bottom { bottom: 0; }
-.bar-col { display: flex; flex-direction: column; align-items: center; min-width: 36px; flex-shrink: 0; cursor: pointer; position: relative; z-index: 1; }
+.line-overlay { position: absolute; left: 0; bottom: 20px; height: 120px; pointer-events: none; z-index: 3; overflow: visible; }
+.line-path { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.line-point { fill: currentColor; stroke: #ffffff; stroke-width: 1; }
+.bar-col { display: flex; flex-direction: column; align-items: center; width: 36px; flex-shrink: 0; cursor: pointer; position: relative; z-index: 2; }
 .bar-label-top { font-size: 9px; color: #666; margin-bottom: 2px; white-space: nowrap; }
 .bar-track { width: 28px; height: 120px; background: transparent; position: relative; display: flex; align-items: flex-end; }
 .bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.3s; min-height: 1px; }
+.per-day-bar { opacity: 0.9; }
 .bar-label { font-size: 9px; color: #666; margin-top: 3px; white-space: nowrap; }
 
 .chart-tooltip {
