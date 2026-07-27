@@ -333,23 +333,27 @@
     <div class="step-desc">
       計算完了後、3種類のチャートが表示されます。チャートの色でグループ/ライン/工程を区別します。
     </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>棒グラフは <strong>H/日</strong>、折れ線は <strong>負荷時間(h)</strong> を表します。左軸は H/日、右軸は h です。</span>
+    </div>
 
     <h4 class="sub">&#9654; チャート凡例</h4>
     <div class="legend-grid" style="grid-template-columns:1fr;gap:10px;margin-top:8px;">
       <div class="legend-item">
         <span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:#8e44ad;flex-shrink:0;"></span>
         <span class="li-label" style="min-width:160px;">グループチャート（紫色）</span>
-        <span class="li-desc">選択グループ配下のライン負荷合算</span>
+        <span class="li-desc">選択グループ配下のライン負荷合算。棒は H/日、折れ線は負荷時間(h)</span>
       </div>
       <div class="legend-item">
         <span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:#e74c3c;flex-shrink:0;"></span>
         <span class="li-label" style="min-width:160px;">ラインチャート（赤色）</span>
-        <span class="li-desc">ライン全体の負荷時間</span>
+        <span class="li-desc">ライン全体の混合グラフ。棒は H/日、折れ線は負荷時間(h)</span>
       </div>
       <div class="legend-item">
         <span style="display:inline-block;width:18px;height:18px;border-radius:3px;background:#3498db;flex-shrink:0;"></span>
         <span class="li-label" style="min-width:160px;">工程チャート（青色）</span>
-        <span class="li-desc">ライン配下の各工程の負荷時間。設備台数2台以上は按分後の値</span>
+        <span class="li-desc">ライン配下の各工程の混合グラフ。棒は H/日、折れ線は負荷時間(h)。設備台数2台以上は按分後の値</span>
       </div>
     </div>
 
@@ -417,11 +421,11 @@
 
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>すべてのグラフは共通のY軸スケール（最大負荷基準）で表示されます。グラフ間で負荷量を直接比較可能です。</span>
+      <span>工程チャートの左軸最大は <strong>24h/日</strong> 固定です。ライン・グループの左軸最大は、そのグラフに表示中の最大 H/日に合わせて自動調整されます。</span>
     </div>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>棒にマウスを乗せるとツールチップで工程別の負荷詳細が確認できます。</span>
+      <span>棒や折れ線にマウスを乗せると、ツールチップで H/日 と工程別の負荷詳細が確認できます。</span>
     </div>
   </div>
 
@@ -455,7 +459,7 @@
   <div class="note">
     <h2>&#9888; 注意事項</h2>
     <ul>
-      <li><strong>カレンダー未設定ライン:</strong> カレンダーが未設定のラインは警告表示されます。負荷時間hのみ表示され、稼働率の算出はできません</li>
+      <li><strong>カレンダー未設定ライン:</strong> カレンダーが未設定のラインは警告表示されます。H/日の棒は表示されず、折れ線の負荷時間hのみ表示されます</li>
       <li><strong>画面遷移ボタン:</strong> 画面右上のボタンから「出来高集計」「サイクルタイム入力」に遷移可能です</li>
       <li><strong>工程負荷の按分:</strong> 工程負荷は設備台数で按分されます（負荷 / 設備台数）。設備台数は出来高集計の係数設定タブで設定します</li>
       <li><strong>需要日付の補正:</strong> 前倒しフラグ付き需要はリードタイム分を戻した日付に再配置されます</li>

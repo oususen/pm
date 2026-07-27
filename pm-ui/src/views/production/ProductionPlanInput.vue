@@ -106,11 +106,19 @@
       <div v-show="!toolbarCollapsed" class="toolbar-left">
         <div class="field">
           <label>ライン</label>
-          <select v-model="selectedLine" @change="loadData">
-            <option v-for="line in availableLines" :key="line.id" :value="line.id">
-              {{ line.line_code }} - {{ line.line_name }}
-            </option>
-          </select>
+          <div class="line-select-row">
+            <select v-model="selectedLine" @change="loadData">
+              <option v-for="line in availableLines" :key="line.id" :value="line.id">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+            <button
+              v-if="userAllowedLineIdSet.size"
+              class="btn all-lines-btn"
+              :class="{ active: showAllLines }"
+              @click="showAllLines = !showAllLines"
+            >全</button>
+          </div>
         </div>
         <div class="field">
           <label>表示開始日</label>
@@ -1366,6 +1374,7 @@ import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 const router = useRouter()
 const selectedLine = ref('')
+const showAllLines = ref(false)
 const TOOLBAR_COLLAPSED_KEY = 'productionPlanInput.toolbarCollapsed'
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')
 const HIDE_WEEKENDS_KEY = 'productionPlanInput.hideWeekends'
@@ -1867,6 +1876,7 @@ const availableLines = computed(() => {
   return lines.value.filter((line) => {
     const code = normalizeLineCode(line?.line_code)
     if (!targetCodes.has(code)) return false
+    if (showAllLines.value) return true
     if (!allowedIds.size) return true
     return allowedIds.has(String(line.id))
   })
@@ -6180,6 +6190,21 @@ const onDefaultTimeInput = (value, padOnBlur = false) => {
 }
 .toolbar-toggle-btn.active:hover {
   background: #bfdbfe;
+}
+.line-select-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.all-lines-btn {
+  padding: 1px 6px;
+  font-size: 11px;
+  min-width: auto;
+}
+.all-lines-btn.active {
+  background: #1976d2;
+  color: #fff;
+  border-color: #1565c0;
 }
 .field {
   display: flex;
