@@ -382,6 +382,14 @@ function applyBreaks(wallMinutes) {
   return fullCycles * 120 + Math.min(remainder, 120)
 }
 
+const DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES = 9 * 60 + 5
+const DEFAULT_HOLIDAY_BREAK_WINDOWS = [
+  [120, 130], // 開始2時間後の10分休憩
+  [240, 285], // 開始4時間後の45分昼休憩
+  [420, 430], // 開始7時間後の10分休憩
+]
+const DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES = 10
+
 // 勤務パターンの実休憩時間を使った控除（分）
 function calcBreakMinutesFromPattern(startMin, endMin, breaks) {
   let total = 0
@@ -404,6 +412,56 @@ function calcBreakMinutesFromPattern(startMin, endMin, breaks) {
   return total
 }
 
+function splitWorkMinutes(startMin, endMin, workMin, ratioBaseMin = null) {
+  const midnightStart = 22 * 60
+  const midnightEnd = 29 * 60
+  const midnightWall = Math.max(0, Math.min(endMin, midnightEnd) - Math.max(startMin, midnightStart))
+  const wallMin = endMin - startMin
+  const baseMin = ratioBaseMin ?? wallMin
+  const ratio = baseMin > 0 ? workMin / baseMin : 1
+  const midnightMin = Math.floor((midnightWall * ratio) / 30) * 30
+  return {
+    regular: workMin - midnightMin,
+    midnight: midnightMin,
+  }
+}
+
+function calculateOvertimeMinutes(startMin, endMin) {
+  const wallMin = endMin - startMin
+  const workMin = Math.floor(applyBreaks(wallMin) / 30) * 30
+  return splitWorkMinutes(startMin, endMin, workMin, wallMin)
+}
+
+function calculateDefaultHolidayMinutes(startMin, endMin) {
+  const wallMin = endMin - startMin
+  const standardWall = Math.min(wallMin, DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES)
+  let standardBreakMin = 0
+  for (const [breakStart, breakEnd] of DEFAULT_HOLIDAY_BREAK_WINDOWS) {
+    const overlapS = Math.max(0, breakStart)
+    const overlapE = Math.min(standardWall, breakEnd)
+    if (overlapE > overlapS) standardBreakMin += overlapE - overlapS
+  }
+  const standardNetMin = Math.max(0, standardWall - standardBreakMin)
+  const standardWorkMin = Math.floor(standardNetMin / 30) * 30
+  const standardResult = splitWorkMinutes(
+    startMin,
+    startMin + standardWall,
+    standardWorkMin,
+    standardNetMin,
+  )
+
+  if (wallMin <= DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES + DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES) {
+    return standardResult
+  }
+
+  const overtimeStartMin = startMin + DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES + DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES
+  const overtimeResult = calculateOvertimeMinutes(overtimeStartMin, endMin)
+  return {
+    regular: standardResult.regular + overtimeResult.regular,
+    midnight: standardResult.midnight + overtimeResult.midnight,
+  }
+}
+
 // 時間数プレビュー（フロントエンドで計算）
 const previewHours = computed(() => {
   const startRaw = toHHMM(form.value.start_time)
@@ -415,29 +473,23 @@ const previewHours = computed(() => {
   let endMin = eh * 60 + em
   if (endMin <= startMin) endMin += 24 * 60
 
-  const wallMin = endMin - startMin
-
-  // 深夜帯: 22:00(1320)〜29:00(1740=翌05:00)
-  const midnightStart = 22 * 60
-  const midnightEnd = 29 * 60
-  const midnightWall = Math.max(0, Math.min(endMin, midnightEnd) - Math.max(startMin, midnightStart))
-
-  // 休憩控除: 休日出勤かつパターン選択あり → 実休憩時間、それ以外 → 汎用計算
-  let workMin
+  // 休憩控除: 休日出勤かつパターン選択あり → 実休憩時間、
+  // 勤務パターン未選択の休日出勤 → 通常8H勤務相当 + 超過分は残業計算、
+  // それ以外 → 汎用計算
+  let result
   if (form.value.application_type === 'holiday' && selectedPatternBreaks.value.length > 0) {
+    const wallMin = endMin - startMin
     const breakMin = calcBreakMinutesFromPattern(startMin, endMin, selectedPatternBreaks.value)
-    workMin = Math.floor((wallMin - breakMin) / 30) * 30
+    const netMin = wallMin - breakMin
+    const workMin = Math.floor(netMin / 30) * 30
+    result = splitWorkMinutes(startMin, endMin, workMin, netMin)
+  } else if (form.value.application_type === 'holiday') {
+    result = calculateDefaultHolidayMinutes(startMin, endMin)
   } else {
-    workMin = Math.floor(applyBreaks(wallMin) / 30) * 30
+    result = calculateOvertimeMinutes(startMin, endMin)
   }
-
-  // 深夜も30分単位で切り捨て、通常 = 合計 - 深夜
-  const ratio = wallMin > 0 ? workMin / wallMin : 1
-  const midnightMin = Math.floor(midnightWall * ratio / 30) * 30
-  const regularMin = workMin - midnightMin
-
-  const regularH = regularMin / 60
-  const midnightH = midnightMin / 60
+  const regularH = result.regular / 60
+  const midnightH = result.midnight / 60
   return {
     total: Math.round((regularH + midnightH) * 10) / 10,
     midnight: Math.round(midnightH * 10) / 10,

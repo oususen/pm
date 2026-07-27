@@ -1,8 +1,10 @@
 from django.contrib.auth import get_user_model
+from decimal import Decimal
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
 from accounts.models import Department, UserProfile
+from masters.models import BreakTime, WorkPattern
 from overtime.models import OvertimeApplication
 from overtime.views import OvertimeApplicationViewSet
 
@@ -56,3 +58,84 @@ class OvertimeApplicationViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         application.refresh_from_db()
         self.assertNotEqual(application.status, 'draft')
+
+    def test_holiday_without_work_pattern_keeps_first_example_at_8_hours(self):
+        application = OvertimeApplication.objects.create(
+            applicant=self.leader,
+            created_by=self.leader,
+            work_date='2026-07-11',
+            application_type='holiday',
+            start_time='19:15',
+            end_time='04:30',
+            reason='休日出勤テスト',
+            team=self.team,
+            status='draft',
+        )
+
+        self.assertEqual(application.hours, Decimal('2.0'))
+        self.assertEqual(application.midnight_hours, Decimal('6.0'))
+        self.assertEqual(application.hours + application.midnight_hours, Decimal('8.0'))
+
+    def test_holiday_without_work_pattern_keeps_second_example_at_9_5_hours(self):
+        application = OvertimeApplication.objects.create(
+            applicant=self.leader,
+            created_by=self.leader,
+            work_date='2026-07-11',
+            application_type='holiday',
+            start_time='19:15',
+            end_time='06:00',
+            reason='休日出勤テスト',
+            team=self.team,
+            status='draft',
+        )
+
+        self.assertEqual(application.hours, Decimal('3.0'))
+        self.assertEqual(application.midnight_hours, Decimal('6.5'))
+        self.assertEqual(application.hours + application.midnight_hours, Decimal('9.5'))
+
+    def test_holiday_without_work_pattern_keeps_third_example_at_10_hours(self):
+        application = OvertimeApplication.objects.create(
+            applicant=self.leader,
+            created_by=self.leader,
+            work_date='2026-07-11',
+            application_type='holiday',
+            start_time='19:15',
+            end_time='06:57',
+            reason='休日出勤テスト',
+            team=self.team,
+            status='draft',
+        )
+
+        self.assertEqual(application.hours, Decimal('4.0'))
+        self.assertEqual(application.midnight_hours, Decimal('6.0'))
+        self.assertEqual(application.hours + application.midnight_hours, Decimal('10.0'))
+
+    def test_holiday_with_work_pattern_keeps_midnight_ratio_based_on_break_adjusted_minutes(self):
+        pattern = WorkPattern.objects.create(
+            pattern_code='K-TEST',
+            pattern_name='休日テスト',
+            start_time='08:00',
+            end_time='17:05',
+        )
+        BreakTime.objects.create(
+            work_pattern=pattern,
+            break_start='20:00',
+            break_end='21:00',
+            order=1,
+        )
+
+        application = OvertimeApplication.objects.create(
+            applicant=self.leader,
+            created_by=self.leader,
+            work_date='2026-07-11',
+            application_type='holiday',
+            start_time='19:15',
+            end_time='06:00',
+            work_pattern=pattern,
+            reason='休日出勤テスト',
+            team=self.team,
+            status='draft',
+        )
+
+        self.assertEqual(application.hours, Decimal('3.0'))
+        self.assertEqual(application.midnight_hours, Decimal('6.5'))

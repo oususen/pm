@@ -1,5 +1,5 @@
-from django.db import models
 from django.conf import settings
+from django.db import models
 from accounts.models import Department
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -13,6 +13,64 @@ def apply_breaks(wall_minutes):
     return full_cycles * 120 + min(remainder, 120)
 
 
+DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES = 9 * 60 + 5
+DEFAULT_HOLIDAY_BREAK_WINDOWS = (
+    (120, 130),  # 開始2時間後の10分休憩
+    (240, 285),  # 開始4時間後の45分昼休憩
+    (420, 430),  # 開始7時間後の10分休憩
+)
+DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES = 10
+
+
+def build_time_range(start_time, end_time):
+    """開始・終了時刻から日跨ぎを含む datetime 範囲を返す。"""
+    base = datetime(2000, 1, 1)
+    start_dt = datetime.combine(base.date(), start_time)
+    end_dt = datetime.combine(base.date(), end_time)
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+    return start_dt, end_dt
+
+
+def split_work_minutes_between(start_dt, end_dt, work_minutes, ratio_base_minutes=None):
+    """勤務時間を通常・深夜に按分して返す。"""
+    wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
+    midnight_zones = [
+        (datetime(2000, 1, 1, 22, 0), datetime(2000, 1, 2, 0, 0)),
+        (datetime(2000, 1, 2, 0, 0), datetime(2000, 1, 2, 5, 0)),
+    ]
+    midnight_wall = 0
+    for zone_start, zone_end in midnight_zones:
+        ov_s = max(start_dt, zone_start)
+        ov_e = min(end_dt, zone_end)
+        if ov_e > ov_s:
+            midnight_wall += int((ov_e - ov_s).total_seconds() / 60)
+
+    ratio_base = ratio_base_minutes if ratio_base_minutes is not None else wall_minutes
+    ratio = work_minutes / ratio_base if ratio_base > 0 else 1
+    midnight_minutes = (int(midnight_wall * ratio) // 30) * 30
+    regular_minutes = work_minutes - midnight_minutes
+
+    return (
+        Decimal(str(regular_minutes / 60)),
+        Decimal(str(midnight_minutes / 60)),
+    )
+
+
+def split_work_minutes(start_time, end_time, work_minutes, ratio_base_minutes=None):
+    start_dt, end_dt = build_time_range(start_time, end_time)
+    return split_work_minutes_between(start_dt, end_dt, work_minutes, ratio_base_minutes)
+
+
+def sum_decimal_hours(*pairs):
+    regular = Decimal('0')
+    midnight = Decimal('0')
+    for reg, mid in pairs:
+        regular += reg
+        midnight += mid
+    return regular, midnight
+
+
 def calculate_hours_with_pattern_breaks(start_time, end_time, work_pattern):
     """
     勤務パターンの実際の休憩時間を使って労働時間を計算（休日出勤用）。
@@ -20,11 +78,7 @@ def calculate_hours_with_pattern_breaks(start_time, end_time, work_pattern):
     Returns: (regular_hours, midnight_hours) as Decimal
     """
     base = datetime(2000, 1, 1)
-    start_dt = datetime.combine(base.date(), start_time)
-    end_dt = datetime.combine(base.date(), end_time)
-    if end_dt <= start_dt:
-        end_dt += timedelta(days=1)
-
+    start_dt, end_dt = build_time_range(start_time, end_time)
     wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
 
     # 勤務パターンの休憩時間のうち、start〜endに含まれる分を控除
@@ -46,28 +100,54 @@ def calculate_hours_with_pattern_breaks(start_time, end_time, work_pattern):
 
     net_minutes = wall_minutes - break_minutes
 
-    # 深夜帯計算
-    midnight_zones = [
-        (datetime(2000, 1, 1, 22, 0), datetime(2000, 1, 2, 0, 0)),
-        (datetime(2000, 1, 2, 0, 0), datetime(2000, 1, 2, 5, 0)),
-    ]
-    midnight_wall = 0
-    for zone_start, zone_end in midnight_zones:
-        ov_s = max(start_dt, zone_start)
-        ov_e = min(end_dt, zone_end)
-        if ov_e > ov_s:
-            midnight_wall += int((ov_e - ov_s).total_seconds() / 60)
-
     # 30分単位で切り捨て
     work_minutes = (net_minutes // 30) * 30
-    ratio = work_minutes / net_minutes if net_minutes > 0 else 1
-    midnight_minutes = (int(midnight_wall * ratio) // 30) * 30
-    regular_minutes = work_minutes - midnight_minutes
+    return split_work_minutes_between(start_dt, end_dt, work_minutes, net_minutes)
 
-    return (
-        Decimal(str(regular_minutes / 60)),
-        Decimal(str(midnight_minutes / 60)),
+
+def calculate_default_holiday_hours(start_time, end_time):
+    """
+    勤務パターン未選択の休日出勤を計算する。
+    - 8H未満: 通常8H勤務パターン相当の休憩を適用
+    - 8H到達: 8Hで確定
+    - 8H超: 10分休憩後、通常残業計算の結果に8Hを加算
+    """
+    start_dt, end_dt = build_time_range(start_time, end_time)
+    wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
+    standard_wall = min(wall_minutes, DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES)
+    standard_break_minutes = 0
+    for break_start, break_end in DEFAULT_HOLIDAY_BREAK_WINDOWS:
+        overlap_start = max(0, break_start)
+        overlap_end = min(standard_wall, break_end)
+        if overlap_end > overlap_start:
+            standard_break_minutes += overlap_end - overlap_start
+    standard_net_minutes = max(0, standard_wall - standard_break_minutes)
+    standard_work_minutes = (standard_net_minutes // 30) * 30
+
+    standard_end_dt = start_dt + timedelta(minutes=standard_wall)
+    standard_hours = split_work_minutes_between(
+        start_dt,
+        standard_end_dt,
+        standard_work_minutes,
+        standard_net_minutes,
     )
+
+    if wall_minutes <= DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES + DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES:
+        return standard_hours
+
+    overtime_start_dt = start_dt + timedelta(
+        minutes=DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES + DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES
+    )
+    overtime_hours = calculate_overtime_hours_between(overtime_start_dt, end_dt)
+    return sum_decimal_hours(standard_hours, overtime_hours)
+
+
+def calculate_overtime_hours_between(start_dt, end_dt):
+    wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
+
+    # 休憩控除後、30分単位で切り捨て
+    work_minutes = (apply_breaks(wall_minutes) // 30) * 30
+    return split_work_minutes_between(start_dt, end_dt, work_minutes, wall_minutes)
 
 
 def calculate_overtime_hours(start_time, end_time):
@@ -76,41 +156,8 @@ def calculate_overtime_hours(start_time, end_time):
     深夜帯: 22:00〜翌05:00 / 2時間ごとに10分休憩を控除
     Returns: (regular_hours, midnight_hours) as Decimal
     """
-    base = datetime(2000, 1, 1)
-    start_dt = datetime.combine(base.date(), start_time)
-    end_dt = datetime.combine(base.date(), end_time)
-
-    # 日をまたぐ場合
-    if end_dt <= start_dt:
-        end_dt += timedelta(days=1)
-
-    midnight_zones = [
-        (datetime(2000, 1, 1, 22, 0), datetime(2000, 1, 2, 0, 0)),  # 22:00-24:00
-        (datetime(2000, 1, 2, 0, 0), datetime(2000, 1, 2, 5, 0)),   # 00:00-05:00
-    ]
-
-    wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
-    midnight_wall = 0
-
-    for zone_start, zone_end in midnight_zones:
-        overlap_start = max(start_dt, zone_start)
-        overlap_end = min(end_dt, zone_end)
-        if overlap_end > overlap_start:
-            midnight_wall += int((overlap_end - overlap_start).total_seconds() / 60)
-
-    regular_wall = wall_minutes - midnight_wall
-
-    # 休憩控除後、30分単位で切り捨て
-    work_minutes = (apply_breaks(wall_minutes) // 30) * 30
-    ratio = work_minutes / wall_minutes if wall_minutes > 0 else 1
-    # 深夜も30分単位で切り捨て、通常 = 合計 - 深夜
-    midnight_minutes = (int(midnight_wall * ratio) // 30) * 30
-    regular_minutes = work_minutes - midnight_minutes
-
-    return (
-        Decimal(str(regular_minutes / 60)),
-        Decimal(str(midnight_minutes / 60)),
-    )
+    start_dt, end_dt = build_time_range(start_time, end_time)
+    return calculate_overtime_hours_between(start_dt, end_dt)
 
 
 class OvertimeApplication(models.Model):
@@ -207,6 +254,10 @@ class OvertimeApplication(models.Model):
             if self.application_type == 'holiday' and self.work_pattern_id:
                 self.hours, self.midnight_hours = calculate_hours_with_pattern_breaks(
                     self.start_time, self.end_time, self.work_pattern
+                )
+            elif self.application_type == 'holiday':
+                self.hours, self.midnight_hours = calculate_default_holiday_hours(
+                    self.start_time, self.end_time
                 )
             else:
                 self.hours, self.midnight_hours = calculate_overtime_hours(
