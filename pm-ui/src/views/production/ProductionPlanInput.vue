@@ -187,7 +187,7 @@
           @click="showRecalcWarning = true"
           :disabled="processing || !rows.length || !selectedLine"
         >過去から再計算</button>
-        <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedLine">保存</button>
+        <button class="btn" @click="openPartialSaveDialog" :disabled="processing || !rows.length || !selectedLine">保存</button>
         <button class="btn" @click="openProductOrderDialog" :disabled="processing || !selectedLine || !rows.length">表示順</button>
         <button
           v-if="canShowFloorSpotAutoPlanButton && activePlanTab !== 'floor-shipping'"
@@ -1335,6 +1335,24 @@
           <button class="btn primary" @click="confirmAutoPlan">OK</button>
         </div>
       </template>
+    </div>
+  </div>
+
+  <div v-if="showPartialSaveDialog" class="modal-overlay" @click.self="closePartialSaveDialog">
+    <div class="modal-content" style="max-width: 420px;">
+      <h2 style="margin: 0 0 10px; font-size: 16px;">保存</h2>
+      <p style="margin: 0 0 12px;">保存対象期間を指定してください。</p>
+      <div style="display: grid; grid-template-columns: 80px 1fr; gap: 8px 10px; align-items: center;">
+        <label for="partial-save-from">from</label>
+        <input id="partial-save-from" v-model="partialSaveFromDate" type="date" :min="startDate" :max="endDate" style="font-size:14px;padding:4px 6px;">
+        <label for="partial-save-to">to</label>
+        <input id="partial-save-to" v-model="partialSaveToDate" type="date" :min="startDate" :max="endDate" style="font-size:14px;padding:4px 6px;">
+      </div>
+      <p style="margin: 12px 0 0; color: #666; font-size: 12px;">表示期間: {{ startDate }} ～ {{ endDate }}</p>
+      <div style="text-align: right; margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn" @click="closePartialSaveDialog">キャンセル</button>
+        <button class="btn primary" @click="savePartialPlan">保存</button>
+      </div>
     </div>
   </div>
 
@@ -2614,7 +2632,7 @@ const saveSpotExcelPlan = async () => {
   }
 }
 
-const savePlan = async () => {
+const savePlanByRange = async (rangeStartDate, rangeEndDate) => {
   if (!selectedLine.value) {
     alert('ラインを選択してください。')
     return
@@ -2628,13 +2646,29 @@ const savePlan = async () => {
     alert(floorShippingValidationError)
     return
   }
+  if (!rangeStartDate || !rangeEndDate) {
+    alert('保存対象期間を指定してください。')
+    return
+  }
+  if (rangeStartDate > rangeEndDate) {
+    alert('from は to 以下にしてください。')
+    return
+  }
 
-  // 日別設定を先に保存
+  const targetColumns = dateColumns.value.filter((c) => c.key >= rangeStartDate && c.key <= rangeEndDate)
+  if (!targetColumns.length) {
+    alert('保存対象期間が表示期間外です。')
+    return
+  }
+  const targetDateKeys = targetColumns.map((c) => c.key)
+  const replaceProductIds = rows.value
+    .map((row) => Number(row?.product_id))
+    .filter((productId) => Number.isFinite(productId) && productId > 0)
+
   try {
-    await saveDailySettings()
+    await saveDailySettings(targetDateKeys)
   } catch (e) {
     console.error('日別設定の保存に失敗しました', e)
-    // 日別設定の保存失敗は警告のみで続行
   }
 
   const items = []
@@ -2645,7 +2679,7 @@ const savePlan = async () => {
       console.warn('スキップ: product_idまたはprocess_idがありません', r)
       return
     }
-    dateColumns.value.forEach((c) => {
+    targetColumns.forEach((c) => {
       const daily = ensureDailyCell(r, c.key)
       const mainPlanQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
       const mainSeqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
@@ -2685,6 +2719,8 @@ const savePlan = async () => {
     const payload = {
       line_id: selectedLine.value,
       items,
+      replace_dates: targetDateKeys,
+      replace_product_ids: replaceProductIds,
     }
     if (isEditUnlocked.value && changeReason.value) {
       payload.change_reason = changeReason.value
@@ -2694,24 +2730,24 @@ const savePlan = async () => {
     try {
       await api.lineBacklogs.expandProcesses({
         line_id: selectedLine.value,
-        start_date: startDate.value,
-        end_date: endDate.value,
+        start_date: rangeStartDate,
+        end_date: rangeEndDate,
         read_only: false,
         include_coproduct_children: true,
         use_coproduct: activePlanTab.value !== 'floor',
       })
       await api.lineBacklogs.recalculateInventory({
         line_id: selectedLine.value,
-        start_date: startDate.value,
-        end_date: endDate.value,
+        start_date: rangeStartDate,
+        end_date: rangeEndDate,
         include_progress: isProgressMode.value,
         line_final_only: true,
       })
       await withTimeout(
         api.lineGanttPlans.generate({
           line_id: selectedLine.value,
-          start_date: startDate.value,
-          end_date: endDate.value,
+          start_date: rangeStartDate,
+          end_date: rangeEndDate,
           clear_existing: true,
           final_process_start_time: finalProcessStartTime.value,
           adjust_to_break_end: adjustToBreakEnd.value,
@@ -2719,7 +2755,6 @@ const savePlan = async () => {
         GANTT_GENERATE_TIMEOUT_MS,
         `工程ガント生成が ${Math.floor(GANTT_GENERATE_TIMEOUT_MS / 1000)}秒を超えたため中断しました。`,
       )
-      // 工程ガントを再読み込み
       ganttReloadKey.value += 1
       if (showProcessLoad.value) {
         await loadProcessLoad()
@@ -2728,7 +2763,6 @@ const savePlan = async () => {
       console.error('工程展開/ガント再計算エラー', expandError)
       let msg = '工程展開/ガント再計算に失敗しました。'
       if (expandError.response && expandError.response.data) {
-        // DRFのValidationErrorなどは配列やオブジェクトで返ることがあるため文字列化
         msg += '\n' + (Array.isArray(expandError.response.data) ? expandError.response.data.join('\n') : JSON.stringify(expandError.response.data, null, 2))
       } else if (expandError?.message) {
         msg += `\n${expandError.message}`
@@ -2736,7 +2770,7 @@ const savePlan = async () => {
       alert(`保存は完了しましたが、エラーが発生しました。\n${msg}`)
       return
     }
-    alert(`保存しました。\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
+    alert(`保存しました。\n対象期間: ${rangeStartDate} ～ ${rangeEndDate}\n作成: ${res.data.created}件, 更新: ${res.data.updated}件`)
     isEditUnlocked.value = false
     changeReason.value = ''
   } catch (e) {
@@ -2745,6 +2779,33 @@ const savePlan = async () => {
   } finally {
     processing.value = false
   }
+}
+
+const savePlan = async () => {
+  await savePlanByRange(startDate.value, endDate.value)
+}
+
+const openPartialSaveDialog = () => {
+  partialSaveFromDate.value = startDate.value
+  partialSaveToDate.value = endDate.value
+  showPartialSaveDialog.value = true
+}
+
+const closePartialSaveDialog = () => {
+  showPartialSaveDialog.value = false
+}
+
+const savePartialPlan = async () => {
+  if (!partialSaveFromDate.value || !partialSaveToDate.value) {
+    alert('from / to を入力してください。')
+    return
+  }
+  if (partialSaveFromDate.value > partialSaveToDate.value) {
+    alert('from は to 以下にしてください。')
+    return
+  }
+  showPartialSaveDialog.value = false
+  await savePlanByRange(partialSaveFromDate.value, partialSaveToDate.value)
 }
 
 const getDailyTotalPlanQty = (daily) => {
@@ -4070,6 +4131,42 @@ const formatWorkTimeLabel = (dateKey) => {
 
 const getWorkTimeLabel = (dateKey) => formatWorkTimeLabel(dateKey)
 
+const getFinalProcessStartTimeForDate = (dateKey) => {
+  const raw = dailySettings.value[dateKey]?.final_process_start_time || finalProcessStartTime.value || '08:00'
+  return normalizeTimeInput(raw, true)
+}
+
+const isAutoPlanSchedulableDate = (dateKey) => {
+  if (!dateKey || isHolidayDate(dateKey)) return false
+  const workStart = getWorkStartForDate(dateKey)
+  if (!workStart) return false
+  const workEnd = getWorkEndForDate(dateKey, workStart)
+  if (!workEnd) return false
+  const anchor = parseTimeParts(getFinalProcessStartTimeForDate(dateKey))
+  if (!anchor) return false
+
+  const startMinutes = workStart.hour * 60 + workStart.minute
+  const endMinutes = workEnd.hour * 60 + workEnd.minute + (workEnd.dayOffset > 0 ? 24 * 60 : 0)
+  let anchorMinutes = anchor.hour * 60 + anchor.minute
+  if (workEnd.dayOffset > 0 && anchorMinutes < startMinutes) {
+    anchorMinutes += 24 * 60
+  }
+  return anchorMinutes >= startMinutes && anchorMinutes <= endMinutes
+}
+
+const findPreviousSchedulableDate = (dateKey, minDateKey = null) => {
+  const cols = dateColumns.value
+  const startIdx = cols.findIndex((c) => c.key === dateKey)
+  if (startIdx < 0) return null
+  for (let idx = startIdx; idx >= 0; idx -= 1) {
+    const key = cols[idx]?.key
+    if (!key) continue
+    if (minDateKey && key < minDateKey) break
+    if (isAutoPlanSchedulableDate(key)) return key
+  }
+  return null
+}
+
 const resolveDaisoCalendarId = async () => {
   if (daisoCalendarId.value !== undefined) return daisoCalendarId.value || null
   const pickDaiso = (rows) => {
@@ -5355,6 +5452,13 @@ const applyDemandToPlanForVisiblePeriod = (fromDate = null) => {
     dateColumns.value.forEach((c) => {
       if (fromDate && c.key < fromDate) return
       const daily = ensureDailyCell(row, c.key)
+      daily.plan = ''
+      daily.sequence_no = ''
+      daily.extraLots = []
+    })
+    dateColumns.value.forEach((c) => {
+      if (fromDate && c.key < fromDate) return
+      const daily = ensureDailyCell(row, c.key)
       let demandQty = 0
       const aggregateSetting = autoPlanAggregateSettingsMap.value[productCode] || autoPlanAggregateSettingsMap.value[String(row?.product_code || '').trim()]
       if (aggregateSetting) {
@@ -5363,19 +5467,31 @@ const applyDemandToPlanForVisiblePeriod = (fromDate = null) => {
           ? Math.floor(aggregateSetting.aggregate_days)
           : 7
         if (getWeekday(c.key) === targetWeekday) {
+          const planDateKey = isAutoPlanSchedulableDate(c.key)
+            ? c.key
+            : findPreviousSchedulableDate(c.key, fromDate)
+          if (!planDateKey) return
           demandQty = calcAggregateDemand(row, c.key, days)
-        } else {
-          demandQty = 0
+          const planDaily = ensureDailyCell(row, planDateKey)
+          const currentQty = Number(planDaily.plan || 0)
+          const nextQty = currentQty + demandQty
+          planDaily.plan = nextQty > 0 ? nextQty : ''
+          planDaily.sequence_no = ''
+          planDaily.extraLots = []
+          if (demandQty > 0) autoPlanCount += 1
         }
       } else {
+        if (!isAutoPlanSchedulableDate(c.key)) {
+          return
+        }
         const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
         const demandQtyRaw = Number(sourceQty || 0)
         demandQty = Number.isFinite(demandQtyRaw) ? Math.max(0, demandQtyRaw) : 0
+        daily.plan = demandQty > 0 ? demandQty : ''
+        daily.sequence_no = ''
+        daily.extraLots = []
+        if (demandQty > 0) autoPlanCount += 1
       }
-      daily.plan = demandQty > 0 ? demandQty : ''
-      daily.sequence_no = ''
-      daily.extraLots = []
-      if (demandQty > 0) autoPlanCount += 1
     })
   })
   return autoPlanCount
@@ -5386,6 +5502,9 @@ const autoPlanConfirmLine = ref('')
 const autoPlanStartDate = ref('')
 const autoPlanDateEditing = ref(false)
 let autoPlanConfirmResolve = null
+const showPartialSaveDialog = ref(false)
+const partialSaveFromDate = ref('')
+const partialSaveToDate = ref('')
 
 const getAutoPlanDefaultStartDate = () => {
   const now = new Date()
@@ -5789,12 +5908,14 @@ const onDailySettingTimeBlur = async (dateKey) => {
   }
 }
 
-const saveDailySettings = async () => {
+const saveDailySettings = async (targetDateKeys = null) => {
   if (!selectedLine.value) return
   const settings = []
   const deleteIds = []
   const defaultTime = finalProcessStartTime.value || '08:00'
+  const targetDateSet = targetDateKeys ? new Set(targetDateKeys) : null
   Object.keys(dailySettings.value).forEach((dateKey) => {
+    if (targetDateSet && !targetDateSet.has(dateKey)) return
     const setting = dailySettings.value[dateKey]
     const normalized = normalizeTimeInput(setting?.final_process_start_time, true)
     if (!normalized || normalized === defaultTime) {

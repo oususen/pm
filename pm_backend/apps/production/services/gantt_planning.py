@@ -1544,7 +1544,10 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                         break
 
             if not found_valid_slot:
-                error_msg = f"指定された最終工程開始時刻 ({day_target_time_obj}) はラインの稼働時間外です。"
+                error_msg = (
+                    f"指定された最終工程開始時刻 ({day_target_time_obj}) は"
+                    f"{obj.plan_date} のライン稼働時間外です。"
+                )
                 raise ValidationError(error_msg)
 
         processes_plan = []

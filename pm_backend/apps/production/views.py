@@ -563,10 +563,18 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         """
         line_id = request.data.get('line_id')
         items = request.data.get('items', [])
+        replace_dates = request.data.get('replace_dates', [])
+        replace_product_ids = request.data.get('replace_product_ids', [])
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(items, list) or not items:
-            return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(items, list):
+            return Response({'detail': 'items must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        if replace_dates and not isinstance(replace_dates, list):
+            return Response({'detail': 'replace_dates must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        if replace_product_ids and not isinstance(replace_product_ids, list):
+            return Response({'detail': 'replace_product_ids must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        if not items and not replace_dates:
+            return Response({'detail': 'items or replace_dates is required'}, status=status.HTTP_400_BAD_REQUEST)
         line_obj = Line.objects.filter(id=line_id, is_active=True).only('id', 'line_code', 'line_name').first()
         if not line_obj:
             return Response({'detail': 'line not found'}, status=status.HTTP_400_BAD_REQUEST)
@@ -589,6 +597,18 @@ class LinePlanViewSet(viewsets.ModelViewSet):
         affected_dates = set()
         affected_products = set()
         floor_shipping_plan_counts = {}
+        for raw_date in replace_dates:
+            try:
+                affected_dates.add(parse_plan_date(raw_date))
+            except Exception:
+                continue
+        for raw_product_id in replace_product_ids:
+            try:
+                product_id = int(raw_product_id)
+            except (TypeError, ValueError):
+                continue
+            if product_id > 0:
+                affected_products.add(product_id)
         for it in items:
             plan_date = it.get('plan_date')
             product_id = it.get('product_id')
