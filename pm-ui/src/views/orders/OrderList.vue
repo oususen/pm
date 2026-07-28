@@ -154,6 +154,7 @@
               <th>納期</th>
               <th>納入地</th>
               <th>備考</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -165,6 +166,14 @@
               <td>{{ line.due_date }}</td>
               <td>{{ line.ship_to_code || '-' }}</td>
               <td>{{ line.remark || '-' }}</td>
+              <td>
+                <button
+                  v-if="canDelete"
+                  type="button"
+                  class="btn-sm btn-danger"
+                  @click="deleteOrderLine(line)"
+                >削除</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -365,6 +374,20 @@ const closeDetailsDialog = () => {
   showDetailsDialog.value = false
 }
 
+const deleteOrderLine = async (line) => {
+  const confirmed = window.confirm(
+    `明細行を削除しますか？\n品番: ${line.product_code}\n数量: ${Math.round(Number(line.quantity))}\n納期: ${line.due_date}\n納入地: ${line.ship_to_code || '-'}`
+  )
+  if (!confirmed) return
+  try {
+    await api.orders.deleteOrderLine(line.id)
+    orderLines.value = orderLines.value.filter((row) => row.id !== line.id)
+  } catch (error) {
+    console.error('Error deleting order line:', error)
+    alert('明細行の削除に失敗しました')
+  }
+}
+
 const confirmDelete = async (order) => {
   const confirmed = window.confirm(
     `受注「${order.order_no}」を削除しますか？\n明細行もすべて削除されます。`
@@ -554,4 +577,3 @@ onMounted(() => {
 }
 
 </style>
-
