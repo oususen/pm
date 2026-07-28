@@ -329,7 +329,18 @@
                   },
                 ]"
               >
-                {{ slotLabels[slotIdx - 1] }}
+                <template v-if="slotIdx - 1 === 3">
+                  <div class="select-head-grid">
+                    <span>便</span>
+                    <span>容数</span>
+                    <span>容器</span>
+                    <span>個数</span>
+                    <span>＋－</span>
+                  </div>
+                </template>
+                <template v-else>
+                  {{ slotLabels[slotIdx - 1] }}
+                </template>
               </th>
             </template>
           </tr>
@@ -394,6 +405,12 @@
                           {{ truckDisplayName(truck) }}
                         </option>
                       </select>
+                      <input
+                        v-model="al.container_count"
+                        type="text"
+                        inputmode="numeric"
+                        @input="handleContainerCountInput(slotEntryAt(row, dateKey, slotIdx - 1))"
+                      />
                       <select
                         v-if="containersForProduct(row.product_code).length > 0"
                         v-model.number="al.container_id"
@@ -419,14 +436,16 @@
                         @blur="handleQtyInputBlur"
                         @mouseleave="handleQtyInputMouseLeave($event)"
                       />
-                      <button class="mini" :style="getPlusButtonStyle(row)" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1), row.used_container_id)">+</button>
-                      <button
-                        class="mini danger"
-                        :disabled="slotEntryAt(row, dateKey, slotIdx - 1).allocations.length <= 1"
-                        @click="removeAllocation(slotEntryAt(row, dateKey, slotIdx - 1), idx)"
-                      >
-                        -
-                      </button>
+                      <div class="allocation-actions">
+                        <button class="mini" :style="getPlusButtonStyle(row)" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1), row.used_container_id)">+</button>
+                        <button
+                          class="mini danger"
+                          :disabled="slotEntryAt(row, dateKey, slotIdx - 1).allocations.length <= 1"
+                          @click="removeAllocation(slotEntryAt(row, dateKey, slotIdx - 1), idx)"
+                        >
+                          -
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -608,9 +627,51 @@ const normalizeQtyText = (value) => {
   return qty > 0 ? String(qty) : ''
 }
 
+const findContainerOption = (productCode, containerId) => {
+  if (!productCode || !containerId) return null
+  const options = productContainersMap.value[productCode] || []
+  return options.find((item) => Number(item.container_id) === Number(containerId)) || null
+}
+
+const resolveAllocationCapacity = (entry, allocation) => {
+  const capacity = findContainerOption(entry?.product_code, allocation?.container_id)?.capacity
+  const parsed = parseIntegerQty(capacity)
+  if (parsed > 0) return parsed
+  const fallback = parseIntegerQty(entry?.default_capacity)
+  return fallback > 0 ? fallback : 1
+}
+
+const normalizeContainerCountText = (value) => {
+  const count = parseIntegerQty(value)
+  return count > 0 ? String(count) : ''
+}
+
+const syncAllocationFromQty = (entry, allocation) => {
+  allocation.qty = normalizeQtyText(allocation.qty)
+  const qty = parseIntegerQty(allocation.qty)
+  if (qty <= 0) {
+    allocation.container_count = ''
+    return
+  }
+  const capacity = resolveAllocationCapacity(entry, allocation)
+  allocation.container_count = String(Math.ceil(qty / capacity))
+}
+
+const syncAllocationFromContainerCount = (entry, allocation) => {
+  allocation.container_count = normalizeContainerCountText(allocation.container_count)
+  const count = parseIntegerQty(allocation.container_count)
+  if (count <= 0) {
+    allocation.qty = ''
+    return
+  }
+  const capacity = resolveAllocationCapacity(entry, allocation)
+  allocation.qty = String(count * capacity)
+}
+
 const normalizeAllocation = (item = null, defaultContainerId = null) => ({
   truck_id: item?.truck_id ?? null,
   container_id: item?.container_id ?? defaultContainerId,
+  container_count: '',
   qty: normalizeQtyText(item?.qty ?? ''),
 })
 
@@ -811,6 +872,15 @@ const recalcEntry = (entry) => {
 }
 
 const handleAllocationChange = (entry) => {
+  if (entry?.allocations?.length) {
+    entry.allocations.forEach((al) => {
+      if (parseIntegerQty(al.container_count) > 0) {
+        syncAllocationFromContainerCount(entry, al)
+      } else {
+        syncAllocationFromQty(entry, al)
+      }
+    })
+  }
   recalcEntry(entry)
   if (entry?.due_date) schedulePreview(entry.due_date)
 }
@@ -818,7 +888,17 @@ const handleAllocationChange = (entry) => {
 const handleAllocationQtyInput = (entry) => {
   if (entry?.allocations?.length) {
     entry.allocations.forEach((al) => {
-      al.qty = normalizeQtyText(al.qty)
+      syncAllocationFromQty(entry, al)
+    })
+  }
+  recalcEntry(entry)
+  if (entry?.due_date) schedulePreview(entry.due_date)
+}
+
+const handleContainerCountInput = (entry) => {
+  if (entry?.allocations?.length) {
+    entry.allocations.forEach((al) => {
+      syncAllocationFromContainerCount(entry, al)
     })
   }
   recalcEntry(entry)
@@ -1260,14 +1340,20 @@ const loadGrid = async () => {
           : [normalizeAllocation(null, defaultContainerId)]
         const entry = {
           due_adjustment_id: raw.due_adjustment_id,
+          product_code: raw.product_code,
+          used_container_id: raw.used_container_id || null,
           source_order_no: raw.source_order_no || '',
           order_type: raw.order_type || '',
           delivery_qty: parseNumber(raw.delivery_qty),
           overdue: Boolean(raw.overdue),
+          default_capacity: raw.capacity,
           allocations,
           unassigned_qty_preview: parseNumber(raw.unassigned_qty),
           due_date: dateKey,
         }
+        entry.allocations.forEach((al) => {
+          syncAllocationFromQty(entry, al)
+        })
         recalcEntry(entry)
         if (!map.get(key).byDate[dateKey]) {
           map.get(key).byDate[dateKey] = []
@@ -1447,6 +1533,7 @@ const save = async () => {
           allocations: entry.allocations
             .map((item) => ({
               truck_id: item.truck_id,
+              container_id: item.container_id || null,
               qty: parseIntegerQty(item.qty),
             }))
             .filter((item) => item.truck_id && item.qty > 0),
@@ -1748,7 +1835,8 @@ const autoAssignTrips = async () => {
 
     const assignEntry = (entry, truck) => {
       const qty = parseIntegerQty(entry.delivery_qty)
-      entry.allocations = [{ truck_id: truck.id, qty: String(qty) }]
+      entry.allocations = [normalizeAllocation({ truck_id: truck.id, qty }, entry.used_container_id || null)]
+      entry.allocations.forEach((al) => syncAllocationFromQty(entry, al))
       recalcEntry(entry)
       assignedCount++
     }
@@ -1805,7 +1893,8 @@ const autoAssignTrips = async () => {
         await previewLoadForDate(dateKey)
         if (getOccupancy(dateKey, pseudoTruckA.id) >= 95) {
           // 超えた → この製品をPに戻す
-          entry.allocations = [{ truck_id: pseudoTruckP.id, qty: String(parseIntegerQty(entry.delivery_qty)) }]
+          entry.allocations = [normalizeAllocation({ truck_id: pseudoTruckP.id, qty: parseIntegerQty(entry.delivery_qty) }, entry.used_container_id || null)]
+          entry.allocations.forEach((al) => syncAllocationFromQty(entry, al))
           recalcEntry(entry)
           aFull = true
         }
@@ -2348,9 +2437,9 @@ onUnmounted(() => {
   color: #fff !important;
 }
 .col-select {
-  width: 160px;
-  min-width: 160px !important;
-  max-width: 160px;
+  width: 196px;
+  min-width: 196px !important;
+  max-width: 196px;
 }
 .truck-head {
   background: #f1f5f9 !important;
@@ -2364,6 +2453,23 @@ onUnmounted(() => {
   background: #eef2f7 !important;
   font-weight: 500;
   border-bottom: 1px solid #2d3748 !important;
+}
+.select-head-grid {
+  display: grid;
+  grid-template-columns: 35px 30px 45px 30px 34px;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  width: 190px;
+  margin: 0 auto;
+  font-size: 10px;
+  line-height: 1.1;
+}
+.select-head-grid span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
 }
 .code-col {
   min-width: 135px;
@@ -2427,9 +2533,13 @@ onUnmounted(() => {
   gap: 3px;
 }
 .allocation-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 35px 30px 45px 30px 34px;
   gap: 4px;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  width: 190px;
+  margin: 0 auto;
 }
 .allocation-row select,
 .allocation-row input {
@@ -2446,8 +2556,16 @@ onUnmounted(() => {
   width: 45px;
 }
 .allocation-row input {
-  width: 30px;
+  width: 100%;
   text-align: right;
+  box-sizing: border-box;
+}
+.allocation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 34px;
 }
 .mini {
   width: 15px;
