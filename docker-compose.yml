@@ -78,6 +78,7 @@ services:
       - pm_static_volume:/app/staticfiles:ro
       - ./pm_backend/media:/app/media:ro
       - ./pm-ui/public/downloads:/usr/share/nginx/html/downloads:ro
+      - ./pm-ui/public/manual:/usr/share/nginx/html/manual:ro
     depends_on:
       - pm-backend
     networks:
