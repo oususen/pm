@@ -309,12 +309,14 @@
       </div>
       <!-- toolbar -->
       <div style="background:var(--grid-head);padding:6px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;border-bottom:1px solid var(--grid-line);position:relative;">
-        <div class="f-group"><label>ライン</label><span class="f-select" style="min-width:140px;">L2100 - フロアライン</span></div>
+        <span class="mock-btn" style="font-size:9px;padding:1px 4px;">▲</span>
+        <div class="f-group"><label>ライン</label><span class="f-select" style="min-width:140px;">L2100 - フロアライン</span><span class="mock-btn" style="font-size:9px;padding:1px 4px;margin-left:2px;">全</span></div>
         <div class="f-group"><label>表示開始日</label><span class="f-input">2026/07/23</span></div>
         <div class="f-group"><label>期間</label><span class="f-select">30日</span></div>
         <div class="f-group"><span class="f-input" style="min-width:100px;">品番/品名で絞り込み</span></div>
         <span style="font-size:10px;color:var(--ink2);">☐ 土日非表示 ☑ 休憩明け補正 ☐ 空行非表示</span>
         <span class="mock-btn" style="font-size:10px;padding:2px 6px;">計画一括削除</span>
+        <span class="mock-btn" style="font-size:10px;padding:2px 6px;">開始時刻全削除</span>
         <span class="mock-btn" style="font-size:10px;padding:2px 6px;">計画変更</span>
         <span class="mock-btn" style="font-size:10px;padding:2px 6px;">表示順</span>
         <span class="mock-btn teal" style="font-size:10px;padding:2px 6px;">保存</span>
@@ -389,7 +391,7 @@
 
     <ul class="anno-list">
       <li><span class="anno-num">1</span><span><strong>タブバー</strong> — タンク/2班/クボタ/フロア出荷/ブレード/レーザ/ブレーキ/スポットなど。タブ選択でライン候補が切り替わる。「ライン編集」でタブ構成をカスタマイズ可能（<a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:inherit;text-decoration:underline;">ライン編集 手順書</a>）</span></li>
-      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — ライン選択、表示開始日、期間、検索フィルタ、各種チェックボックス、操作ボタン（保存、ガント表示、計画変更など）</span></li>
+      <li><span class="anno-num">2</span><span><strong>ツールバー</strong> — ▲/▼で折りたたみ可能。ライン選択（「全」ボタンでグループ制限解除）、表示開始日、期間、検索フィルタ、各種トグル、操作ボタン（保存、ガント表示、計画変更など）</span></li>
       <li><span class="anno-num">3</span><span><strong>計画グリッド</strong> — 品番ごとに1行。1日あたり6列（在庫・実績・需要・計画・順・計庫）で構成。計画と順は入力可、他は参照値</span></li>
       <li><span class="anno-num">4</span><span><strong>工程ガントチャート</strong> — 「ガント表示」ボタンで表示。工程×品番ごとのバーで開始時刻・所要時間・数量を可視化</span></li>
       <li><span class="anno-num">5</span><span><strong>フッターキー</strong> — F1〜F10のショートカット。ガント表示中は表示モード切替（分解/連結）や保存ボタンも表示</span></li>
@@ -425,7 +427,7 @@
     </div>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span><strong>レーザ</strong>タブには「通常計画 / パターン編集 / 月所要材料集計」、<strong>スポット</strong>タブには「通常計画 / excel」、<strong>フロア出荷</strong>タブには「在庫基準 / 進度基準」のサブタブがあります。</span>
+      <span><strong>レーザ</strong>タブには「通常計画 / パターン編集 / 月所要材料集計」、<strong>スポット</strong>タブには「通常計画 / excel」、<strong>フロア出荷</strong>タブには「在庫基準 / 進度基準 / マニュアル」のサブタブがあります。</span>
     </div>
   </div>
 
@@ -438,8 +440,12 @@
     <div class="step-desc">
       ツールバーで以下を設定します。
     </div>
+    <div class="callout info" style="margin-bottom:12px;">
+      <span class="icon">&#9432;</span>
+      <span>ツールバーは左上の<strong>▲/▼</strong>ボタンで折りたたみ可能です。折りたたみ時はライン名・期間・検索条件がサマリー表示されます。</span>
+    </div>
     <div class="mock-toolbar">
-      <div class="f-group hl"><label>ライン</label><span class="f-select" style="min-width:150px;">L2100 - フロアライン</span></div>
+      <div class="f-group hl"><label>ライン</label><span class="f-select" style="min-width:150px;">L2100 - フロアライン</span><span class="mock-btn" style="font-size:10px;padding:1px 5px;margin-left:3px;">全</span></div>
       <div class="f-group hl hl-blue"><label>表示開始日</label><span class="f-input">2026/07/23</span></div>
       <div class="f-group hl hl-green"><label>期間</label><span class="f-select">30日</span></div>
       <div class="f-group"><span class="f-input" style="min-width:100px;">品番/品名で絞り込み</span></div>
@@ -451,12 +457,28 @@
       <tr><th>期間</th><td>7日 / 14日 / 30日 / 60日 / 90日 から選択（デフォルト: 30日）</td></tr>
       <tr><th>検索</th><td>品番・品名で行を絞り込み</td></tr>
     </table>
-    <div class="step-desc" style="margin-top:12px;margin-bottom:0;">チェックボックスで表示を調整できます。</div>
+    <div class="step-desc" style="margin-top:12px;margin-bottom:0;">トグルボタンで表示を調整できます。</div>
     <table class="info-table">
       <tr><th>土日非表示</th><td>土曜・日曜の列を非表示にして画面を節約</td></tr>
       <tr><th>休憩明けに補正</th><td>ガント生成時に休憩明け時刻に補正</td></tr>
       <tr><th>空行非表示</th><td>計画・需要などの値がない行を非表示</td></tr>
     </table>
+    <div class="step-desc" style="margin-top:12px;margin-bottom:0;">ツールバー右側の操作ボタン一覧:</div>
+    <table class="info-table">
+      <tr><th>計画一括削除</th><td>ライン全期間の計画を一括削除（後述STEP 9）</td></tr>
+      <tr><th>開始時刻全削除</th><td>表示期間内の日別開始時刻の上書き設定を全削除し、デフォルト開始時刻に戻す。日別上書きが無い場合は無効</td></tr>
+      <tr><th>計画変更</th><td>ロック期間の計画を編集可能にする（後述STEP 9）</td></tr>
+      <tr><th>表示順</th><td>製品の表示順と行色を設定（後述STEP 9）</td></tr>
+      <tr><th>保存</th><td>計画を保存（後述STEP 6）</td></tr>
+      <tr><th>ガント表示/閉じ</th><td>工程ガントチャートの表示/非表示を切替（後述STEP 7）</td></tr>
+      <tr><th>負荷表示/閉</th><td>工程負荷表の表示/非表示を切替（後述STEP 8）</td></tr>
+      <tr><th>自動計画<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">条件付き表示</span></th><td>需要データに基づいて計画を自動生成（後述STEP 9）。ライン編集で有効化されたラインのみ表示</td></tr>
+      <tr><th>まとめ設定<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">条件付き表示</span></th><td>まとめ生産ルールを設定（後述STEP 9）。ライン編集で有効化されたラインのみ表示</td></tr>
+    </table>
+    <div class="callout info" style="margin-top:8px;">
+      <span class="icon">&#9432;</span>
+      <span><strong>フロア出荷タブ限定ボタン</strong>: 「一括実績入力」「実績保存」が追加表示されます。さらに進度基準サブタブでは「過去から再計算」ボタンも表示されます。配送系PDF出力ボタン（配送明細・納入リスト・納品書）についてはSTEP 9を参照。</span>
+    </div>
   </div>
 
   <!-- ===== STEP 3 ===== -->
@@ -598,7 +620,19 @@
       <span class="mock-btn teal" style="font-size:14px;padding:6px 20px;">保存</span>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
-      保存すると以下の処理が<strong>自動で順番に実行</strong>されます。
+      保存ボタンを押すと、<strong>保存対象期間を指定するダイアログ</strong>が表示されます。from（開始日）とto（終了日）を指定して「保存」をクリックします。デフォルトは表示期間全体です。
+    </div>
+    <div class="mock-grid" style="max-width:320px;margin-bottom:12px;">
+      <table>
+        <thead><tr><th colspan="2">保存対象期間</th></tr></thead>
+        <tbody>
+          <tr><td style="text-align:right;font-weight:700;width:60px;">from</td><td class="editable">2026-07-23</td></tr>
+          <tr><td style="text-align:right;font-weight:700;">to</td><td class="editable">2026-08-21</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      保存を実行すると以下の処理が<strong>自動で順番に実行</strong>されます。
     </div>
     <table class="info-table">
       <tr><th>1. 計画データ保存</th><td>入力した計画数量・順序をDBに保存</td></tr>
@@ -1110,11 +1144,12 @@
       <strong>「ライン編集」</strong>タブで、以下のライン別設定を変更できます。詳細は<a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:var(--accent);font-weight:600;">ライン編集 作業手順書</a>を参照してください。
     </div>
     <table class="info-table">
-      <tr><th>対象ライン</th><td>タブごとに表示するラインを設定</td></tr>
+      <tr><th>タブ管理</th><td>タブの追加・名前変更・削除（キーとラベルを設定）</td></tr>
+      <tr><th>タブ別ライン選択</th><td>タブごとに表示するラインをチェックボックスで設定</td></tr>
       <tr><th>前日シフト台数</th><td>ライン×工程ごとに前日シフト扱いの台数を設定</td></tr>
       <tr><th>ガント開始時刻</th><td>ライン×工程ごとにガントの開始時刻を設定</td></tr>
       <tr><th>ガント展開除外</th><td>ガントチャートに表示しない工程を設定</td></tr>
-      <tr><th>計算特例</th><td>ライン×工程×計算対象ごとの特例ルールを設定</td></tr>
+      <tr><th>計算特例</th><td>ライン×工程×計算対象（計画在庫/在庫/需要）×設定（ORDER_QTY使用）の特例ルールを設定</td></tr>
       <tr><th>自動計画適用設定</th><td>自動計画ボタンを表示するライン×製品を設定</td></tr>
     </table>
   </div>
@@ -1124,6 +1159,7 @@
     <h2>&#9888; 注意事項</h2>
     <ul>
       <li><strong>ラインが必須:</strong> ラインを選択しないと保存・取込・表示は実行できません</li>
+      <li><strong>保存の期間指定:</strong> 保存ボタンを押すと期間指定ダイアログが表示されます。from/toで保存対象期間を絞り込めます（デフォルトは表示期間全体）</li>
       <li><strong>保存後の自動処理:</strong> 保存ボタン押下後は工程展開 → 在庫再計算 → ガント再生成が自動実行されます。処理中は「データ更新中」と表示されます</li>
       <li><strong>ロック期間:</strong> 過去の計画はロック期間として編集不可です。「計画変更」ボタンで理由入力後に編集できます</li>
       <li><strong>休日セル:</strong> 非稼働日のセルは読み取り専用です（入力不可）</li>
@@ -1132,6 +1168,8 @@
       <li><strong>土日の再計算:</strong> 土日・非稼働日にF6/F8を実行した場合、計算基準日は直前の営業日に調整されます</li>
       <li><strong>日替わり時刻:</strong> 8:00が日替わり時刻です。7:59以前は前日として扱われます</li>
       <li><strong>最終工程開始時刻の優先順位:</strong> (1) 日付ヘッダーの日別設定 → (2) デフォルト開始時刻設定 → (3) 08:00</li>
+      <li><strong>ツールバー折りたたみ:</strong> ▲/▼ボタンでツールバーを折りたためます。折りたたみ時はライン名・期間・検索条件がサマリー表示されます</li>
+      <li><strong>開始時刻全削除:</strong> 表示期間内の日別開始時刻の上書き設定を一括削除してデフォルト開始時刻に戻します。日別上書きが無い場合はボタンが無効になります</li>
       <li><strong>フッターショートカット:</strong> F1:戻る / F2:進む / F3:クリア / F4:表示のみ / F5:キャンセル / F6:需要取込 / F8:取込+在庫計算 / F10:印刷</li>
     </ul>
   </div>
