@@ -386,11 +386,11 @@ const hasCustomRowColor = (row) =>
 
 const defaultDetailRowColors = [
   { bg: '#93c5fd', text: '#0f172a' },
-  { bg: '#86efac', text: '#0f172a' },
-  { bg: '#fcd34d', text: '#0f172a' },
   { bg: '#f9a8d4', text: '#0f172a' },
   { bg: '#67e8f9', text: '#0f172a' },
   { bg: '#c4b5fd', text: '#0f172a' },
+  { bg: '#bfdbfe', text: '#0f172a' },
+  { bg: '#dbeafe', text: '#0f172a' },
 ]
 
 const detailAutoColor = (trip, row) => {
