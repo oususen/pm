@@ -369,7 +369,8 @@
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-order-${slotIdx}`"
-                  class="sub-cell"
+                  class="sub-cell entry-text-subcell"
+                  :style="slotBlockStyle(slotEntryAt(row, dateKey, slotIdx - 1))"
                 >
                   {{ sourceOrderLabel(slotEntryAt(row, dateKey, slotIdx - 1)) }}
                 </div>
@@ -378,7 +379,8 @@
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-demand-${slotIdx}`"
-                  class="sub-cell"
+                  class="sub-cell entry-text-subcell"
+                  :style="slotBlockStyle(slotEntryAt(row, dateKey, slotIdx - 1))"
                 >
                   {{ formatNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.delivery_qty) }}
                 </div>
@@ -387,7 +389,8 @@
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-assigned-${slotIdx}`"
-                  class="sub-cell"
+                  class="sub-cell entry-text-subcell"
+                  :style="slotBlockStyle(slotEntryAt(row, dateKey, slotIdx - 1))"
                 >
                   {{ formatNumber(assignedQty(slotEntryAt(row, dateKey, slotIdx - 1))) }}
                 </div>
@@ -397,6 +400,7 @@
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-select-${slotIdx}`"
                   class="sub-cell select-subcell"
+                  :style="slotBlockStyle(slotEntryAt(row, dateKey, slotIdx - 1))"
                 >
                   <div v-if="slotEntryAt(row, dateKey, slotIdx - 1)" class="allocation-stack">
                     <div
@@ -463,7 +467,8 @@
                 <div
                   v-for="slotIdx in row.maxSlots"
                   :key="`${row.rowKey}-${dateKey}-remain-${slotIdx}`"
-                  class="sub-cell"
+                  class="sub-cell entry-text-subcell"
+                  :style="slotBlockStyle(slotEntryAt(row, dateKey, slotIdx - 1))"
                   :class="{ 'remain-negative': parseNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) < 0 }"
                 >
                   {{ formatNumber(slotEntryAt(row, dateKey, slotIdx - 1)?.unassigned_qty_preview) }}
@@ -929,6 +934,11 @@ const removeAllocation = (entry, idx) => {
 
 const entriesAt = (row, dateKey) => row.byDate?.[dateKey] || []
 const slotEntryAt = (row, dateKey, slotIdx) => entriesAt(row, dateKey)[slotIdx] || null
+const slotBlockHeight = (entry) => {
+  const allocationCount = Math.max(1, Array.isArray(entry?.allocations) ? entry.allocations.length : 0)
+  return Math.max(28, allocationCount * 24 + Math.max(0, allocationCount - 1) * 3 + 4)
+}
+const slotBlockStyle = (entry) => ({ minHeight: `${slotBlockHeight(entry)}px` })
 const progressAt = (row, dateKey) => {
   const key = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}`
   return progressByDate.value[key] ?? ''
@@ -2576,9 +2586,16 @@ onUnmounted(() => {
 .cell-stacked .sub-cell:last-child {
   border-bottom: none;
 }
+.entry-text-subcell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px !important;
+  line-height: 1.2 !important;
+  white-space: nowrap;
+}
 .select-subcell {
   padding: 2px 0 !important;
-  min-height: 30px !important;
   line-height: normal !important;
 }
 .allocation-stack {

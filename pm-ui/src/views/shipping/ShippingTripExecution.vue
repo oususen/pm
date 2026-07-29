@@ -850,7 +850,7 @@ onMounted(async () => {
 .split-head,
 .split-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px 56px 96px 36px;
+  grid-template-columns: minmax(0, 1fr) 42px 56px 104px 36px;
   gap: 4px;
 }
 .split-head {
@@ -881,7 +881,7 @@ onMounted(async () => {
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 0 6px;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 38px;
   color: #334155;
   background: #f8fafc;
@@ -1115,7 +1115,7 @@ onMounted(async () => {
   }
   .split-order-no {
     height: 32px;
-    font-size: 14px;
+    font-size: 12px;
     line-height: 32px;
   }
   .split-btn,
@@ -1146,7 +1146,7 @@ onMounted(async () => {
   }
   .split-head,
   .split-row {
-    grid-template-columns: minmax(92px, 1fr) 36px 44px 88px 28px;
+    grid-template-columns: minmax(92px, 1fr) 36px 44px 96px 28px;
     gap: 4px;
   }
   .split-row input[type="date"] {

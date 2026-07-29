@@ -264,160 +264,209 @@
           <fieldset class="form-fieldset process-form-fieldset" :disabled="!canEdit || isViewMode">
             <div class="process-section">
               <h3 class="process-section-title">基本情報</h3>
-              <div class="process-section-grid">
-                <div class="form-group">
-                  <label>品番コード *</label>
-                  <input v-model="formData.product_code" required :disabled="processMode !== 'create'" />
-                </div>
-                <div class="form-group">
-                  <label>品名 *</label>
-                  <input v-model="formData.product_name" required />
-                </div>
-                <div class="form-group">
-                  <label>カテゴリ *</label>
-                  <select v-model="formData.category" required>
-                    <option value="">選択してください</option>
-                    <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">
-                      {{ cat.label }}
-                    </option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>単位</label>
-                  <input v-model="formData.unit" placeholder="個" />
-                </div>
-                <div class="form-group">
-                  <label>単価</label>
-                  <input v-model.number="formData.unit_price" type="number" min="0" step="0.01" />
-                </div>
-                <div class="form-group">
-                  <label>標準LT(日)</label>
-                  <input v-model.number="formData.standard_lt_days" type="number" min="0" />
-                  <small class="field-note">
-                    ※ 枚方集荷・運送など特殊運用専用。生産計画・在庫・進度・購買などの本命LTには使用しません（本命LTは RoutingStep.lead_time_days を参照）。
-                  </small>
-                </div>
-                <div class="form-group">
-                  <label>最小発注数</label>
-                  <input v-model.number="formData.order_lot_min" type="number" min="0" />
-                </div>
-                <div class="form-group">
-                  <label>発注倍数</label>
-                  <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
-                </div>
-                <div class="form-group">
-                  <label>機種名</label>
-                  <input v-model="formData.model_name" placeholder="例: 17U" />
-                </div>
-                <div class="form-group">
-                  <label>識別記号</label>
-                  <input v-model="formData.identification_code" placeholder="例: 7a" />
-                </div>
-                <div class="form-group">
-                  <label>加工先(将来用)</label>
-                  <select v-model="formData.processing_area">
-                    <option :value="null">未設定</option>
-                    <option v-for="area in processingAreaOptions" :key="area.value" :value="area.value">
-                      {{ area.label }}
-                    </option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>保管場所</label>
-                  <div class="stock-locations-edit">
-                    <div v-for="(loc, idx) in formData.stock_locations_edit" :key="idx" class="stock-loc-row">
-                      <input v-model="formData.stock_locations_edit[idx]" placeholder="例: レーザ横A棚" />
-                      <button type="button" class="btn-sm btn-danger" @click="removeStockLocation(idx)">×</button>
+              <div class="process-form-layout">
+                <div class="process-subsection">
+                  <div class="process-subsection-title">製品基本</div>
+                  <div class="process-section-grid process-section-grid-4">
+                    <div class="form-group">
+                      <label>品番コード *</label>
+                      <input v-model="formData.product_code" required :disabled="processMode !== 'create'" />
                     </div>
-                    <button type="button" class="btn-sm" @click="addStockLocation">+ 置き場追加</button>
-                  </div>
-                </div>
-                <div class="form-group">
-                  <label>製品グループ</label>
-                  <select v-model="formData.product_group">
-                    <option :value="null">未設定</option>
-                    <option v-for="group in productGroups" :key="group.id" :value="group.id">
-                      {{ group.group_code }} - {{ group.group_name }}
-                    </option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>使用容器</label>
-                  <select v-model="formData.used_container">
-                    <option :value="null">未設定</option>
-                    <option v-for="container in containers" :key="container.id" :value="container.id">
-                      {{ formatContainerOption(container) }}
-                    </option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>容器入り数</label>
-                  <input v-model.number="formData.capacity" type="number" min="0" />
-                </div>
-                <div v-if="processMode !== 'create'" class="form-group">
-                  <label>容器別入数</label>
-                  <div class="stock-locations-edit">
-                    <div v-for="pc in productContainers" :key="pc.id" class="stock-loc-row">
-                      <span class="pc-container-label">{{ pc.container_name }}</span>
-                      <input
-                        v-if="!isViewMode"
-                        v-model.number="pc.capacity"
-                        type="number"
-                        min="1"
-                        class="pc-capacity-input"
-                        @change="updateProductContainerCapacity(pc)"
-                      />
-                      <span v-else>{{ pc.capacity }}</span>
-                      <button v-if="!isViewMode" type="button" class="btn-sm btn-danger" @click="removeProductContainer(pc)">×</button>
+                    <div class="form-group">
+                      <label>品名 *</label>
+                      <input v-model="formData.product_name" required />
                     </div>
-                    <div v-if="!isViewMode" class="stock-loc-row">
-                      <select v-model="newContainerId" class="pc-add-select">
-                        <option :value="null">容器を選択</option>
-                        <option v-for="c in availableContainersForAdd" :key="c.id" :value="c.id">
-                          {{ c.name }}
+                    <div class="form-group">
+                      <label>カテゴリ *</label>
+                      <select v-model="formData.category" required>
+                        <option value="">選択してください</option>
+                        <option v-for="cat in categoryOptions" :key="cat.value" :value="cat.value">
+                          {{ cat.label }}
                         </option>
                       </select>
-                      <input v-model.number="newContainerCapacity" type="number" min="1" placeholder="入数" class="pc-capacity-input" />
-                      <button type="button" class="btn-sm btn-primary" @click="addProductContainer">+ 追加</button>
+                    </div>
+                    <div class="form-group">
+                      <label>単位</label>
+                      <input v-model="formData.unit" placeholder="個" />
+                    </div>
+                    <div class="form-group">
+                      <label>単価</label>
+                      <input v-model.number="formData.unit_price" type="number" min="0" step="0.01" />
+                    </div>
+                    <div class="form-group">
+                      <label>機種名</label>
+                      <input v-model="formData.model_name" placeholder="例: 17U" />
+                    </div>
+                    <div class="form-group">
+                      <label>識別記号</label>
+                      <input v-model="formData.identification_code" placeholder="例: 7a" />
                     </div>
                   </div>
                 </div>
-                <div class="form-group">
-                  <label>移動先</label>
-                  <select v-model="formData.transfer_destination">
-                    <option :value="null">未設定</option>
-                    <option v-for="td in transferDestOptions" :key="td.value" :value="td.value">
-                      {{ td.label }}
-                    </option>
-                  </select>
+
+                <div class="process-subsection">
+                  <div class="process-subsection-title">調達・在庫</div>
+                  <div class="process-section-grid process-section-grid-4">
+                    <div class="form-group process-group-span-2">
+                      <label>標準LT(日)</label>
+                      <input v-model.number="formData.standard_lt_days" type="number" min="0" />
+                      <small class="field-note">
+                        ※ 枚方集荷・運送など特殊運用専用。生産計画・在庫・進度・購買などの本命LTには使用しません（本命LTは RoutingStep.lead_time_days を参照）。
+                      </small>
+                    </div>
+                    <div class="form-group">
+                      <label>最小発注数</label>
+                      <input v-model.number="formData.order_lot_min" type="number" min="0" />
+                    </div>
+                    <div class="form-group">
+                      <label>発注倍数</label>
+                      <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
+                    </div>
+                    <div class="form-group">
+                      <label>加工先(将来用)</label>
+                      <select v-model="formData.processing_area">
+                        <option :value="null">未設定</option>
+                        <option v-for="area in processingAreaOptions" :key="area.value" :value="area.value">
+                          {{ area.label }}
+                        </option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>製品グループ</label>
+                      <select v-model="formData.product_group">
+                        <option :value="null">未設定</option>
+                        <option v-for="group in productGroups" :key="group.id" :value="group.id">
+                          {{ group.group_code }} - {{ group.group_name }}
+                        </option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>移動先</label>
+                      <select v-model="formData.transfer_destination">
+                        <option :value="null">未設定</option>
+                        <option v-for="td in transferDestOptions" :key="td.value" :value="td.value">
+                          {{ td.label }}
+                        </option>
+                      </select>
+                    </div>
+                    <div class="form-group process-group-span-2">
+                      <label>保管場所</label>
+                      <div class="stock-locations-edit">
+                        <div v-for="(loc, idx) in formData.stock_locations_edit" :key="idx" class="stock-loc-row">
+                          <input v-model="formData.stock_locations_edit[idx]" placeholder="例: レーザ横A棚" />
+                          <button type="button" class="btn-sm btn-danger" @click="removeStockLocation(idx)">×</button>
+                        </div>
+                        <button type="button" class="btn-sm stock-location-add-btn" @click="addStockLocation">+ 置き場追加</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div class="form-group-section process-group-full">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
-                <div class="form-group">
-                  <label>比重 (g/cm³)</label>
-                  <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
+
+                <div class="process-subsection">
+                  <div class="process-subsection-title">容器設定</div>
+                  <div class="process-section-grid process-section-grid-2">
+                    <div class="product-container-box">
+                      <div class="product-container-box-title">標準容器</div>
+                      <div class="container-setting-guide container-setting-guide-inline">
+                        <div class="container-setting-guide-item">
+                          <strong>標準容器:</strong> 通常使う容器と標準の容器入り数を設定します。
+                        </div>
+                        <div class="container-setting-guide-item">
+                          <strong>臨時容器:</strong> 標準容器とは別に使う容器を、容器ごとの入数付きで登録します。
+                        </div>
+                      </div>
+                      <div class="process-section-grid process-section-grid-2">
+                        <div class="form-group">
+                          <label>使用容器</label>
+                          <select v-model="formData.used_container">
+                            <option :value="null">未設定</option>
+                            <option v-for="container in containers" :key="container.id" :value="container.id">
+                              {{ formatContainerOption(container) }}
+                            </option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label>容器入り数</label>
+                          <input v-model.number="formData.capacity" type="number" min="0" />
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="processMode !== 'create'" class="product-container-box">
+                      <div class="product-container-box-title">
+                        臨時容器
+                        <span class="product-container-box-note">標準容器とは別に使う臨時容器を登録します。既存の容器を選ぶと入数を更新し、新しい容器を選ぶと追加します。</span>
+                      </div>
+                      <div class="product-container-panel">
+                        <div class="product-container-box product-container-box-nested">
+                          <div class="product-container-box-title">現在の登録</div>
+                          <div v-if="productContainers.length" class="stock-locations-edit">
+                            <div v-for="pc in productContainers" :key="pc.id" class="stock-loc-row product-container-readonly-row">
+                              <span class="pc-container-label">{{ pc.container_name }}</span>
+                              <span class="product-container-readonly-value">{{ pc.capacity }}</span>
+                              <button
+                                v-if="!isViewMode"
+                                type="button"
+                                class="btn-sm btn-danger"
+                                @click="removeProductContainer(pc)"
+                              >
+                                削除
+                              </button>
+                            </div>
+                          </div>
+                          <div v-else class="product-container-empty">未設定です</div>
+                        </div>
+                        <div v-if="!isViewMode" class="product-container-box product-container-box-nested">
+                          <div class="product-container-box-title">追加・変更</div>
+                          <div class="stock-locations-edit">
+                            <div class="stock-loc-row product-container-editor-row">
+                              <select v-model="newContainerId" class="pc-add-select">
+                                <option :value="null">容器を選択</option>
+                                <option v-for="c in availableContainersForAdd" :key="c.id" :value="c.id">
+                                  {{ formatProductContainerSelectOption(c) }}
+                                </option>
+                              </select>
+                              <input v-model.number="newContainerCapacity" type="number" min="1" placeholder="入数" class="pc-capacity-input" />
+                              <button type="button" class="btn-sm btn-primary" @click="addProductContainer">{{ productContainerActionLabel }}</button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div class="form-group">
-                  <label>縦 (mm)</label>
-                  <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
-                </div>
-                <div class="form-group">
-                  <label>横 (mm)</label>
-                  <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
-                </div>
-                <div class="form-group">
-                  <label>厚さ (mm)</label>
-                  <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
-                </div>
-                <div v-if="computedUnitWeight != null" class="form-group">
-                  <label>重量/枚 (kg) ※自動計算</label>
-                  <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
+
+                <div class="process-subsection">
+                  <div class="process-subsection-title">材料情報</div>
+                  <div class="form-group-section">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
+                  <div class="process-section-grid process-section-grid-5">
+                    <div class="form-group">
+                      <label>比重 (g/cm³)</label>
+                      <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
+                    </div>
+                    <div class="form-group">
+                      <label>縦 (mm)</label>
+                      <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
+                    </div>
+                    <div class="form-group">
+                      <label>横 (mm)</label>
+                      <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
+                    </div>
+                    <div class="form-group">
+                      <label>厚さ (mm)</label>
+                      <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
+                    </div>
+                    <div v-if="computedUnitWeight != null" class="form-group">
+                      <label>重量/枚 (kg) ※自動計算</label>
+                      <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div class="process-section">
               <h3 class="process-section-title">工程情報</h3>
-              <div class="process-section-grid">
+              <div class="process-section-grid process-section-grid-4">
                 <div class="form-group">
                   <label>工程情報</label>
                   <select v-model="formData.process">
@@ -453,24 +502,28 @@
                     <option value="MINUTE">分</option>
                   </select>
                 </div>
-                <div class="process-check-grid process-group-full">
-                  <label>
-                    <input type="checkbox" v-model="formData.is_final_product" />
-                    最終品（完成品として出荷される品目）
-                  </label>
-                  <label>
-                    <input type="checkbox" v-model="formData.is_line_final_product" />
-                    ライン最終品（ラインで最後に出力される品目）
-                  </label>
-                  <label>
-                    <input type="checkbox" v-model="formData.is_virtual_set" />
-                    仮想セット品番（連産品用、在庫を持たない親品番）
-                  </label>
-                  <label>
-                    <input type="checkbox" v-model="formData.is_active" />
-                    有効
-                  </label>
-                </div>
+              </div>
+            </div>
+
+            <div class="process-section">
+              <h3 class="process-section-title">状態</h3>
+              <div class="process-check-grid">
+                <label>
+                  <input type="checkbox" v-model="formData.is_final_product" />
+                  最終品（完成品として出荷される品目）
+                </label>
+                <label>
+                  <input type="checkbox" v-model="formData.is_line_final_product" />
+                  ライン最終品（ラインで最後に出力される品目）
+                </label>
+                <label>
+                  <input type="checkbox" v-model="formData.is_virtual_set" />
+                  仮想セット品番（連産品用、在庫を持たない親品番）
+                </label>
+                <label>
+                  <input type="checkbox" v-model="formData.is_active" />
+                  有効
+                </label>
               </div>
             </div>
 
@@ -1203,8 +1256,25 @@ const formatContainerOption = (container) => {
   return container.name
 }
 
+const formatProductContainerSelectOption = (container) => {
+  if (!container) return ''
+  const existing = productContainers.value.find((pc) => pc.container_id === container.id)
+  if (existing) {
+    return `${container.name}（現在: ${existing.capacity}）`
+  }
+  return container.name
+}
+
 const newContainerId = ref(null)
 const newContainerCapacity = ref(1)
+
+const selectedProductContainer = computed(() => (
+  productContainers.value.find((pc) => pc.container_id === Number(newContainerId.value))
+))
+
+const productContainerActionLabel = computed(() => (
+  selectedProductContainer.value ? '更新' : '+ 追加'
+))
 
 const addProductContainer = async () => {
   if (!newContainerId.value || !processTargetId.value) return
@@ -1226,15 +1296,6 @@ const addProductContainer = async () => {
   }
 }
 
-const updateProductContainerCapacity = async (pc) => {
-  if (!processTargetId.value) return
-  try {
-    await api.products.updateContainer(processTargetId.value, pc.id, { capacity: pc.capacity })
-  } catch (error) {
-    alert(error?.response?.data?.detail || '入数更新に失敗しました')
-  }
-}
-
 const removeProductContainer = async (pc) => {
   if (!processTargetId.value) return
   if (!confirm(`${pc.container_name} を削除しますか？`)) return
@@ -1247,8 +1308,7 @@ const removeProductContainer = async (pc) => {
 }
 
 const availableContainersForAdd = computed(() => {
-  const usedIds = new Set(productContainers.value.map((pc) => pc.container_id))
-  return containers.value.filter((c) => !usedIds.has(c.id))
+  return containers.value
 })
 
 // クエリパラメータを組み立て
@@ -1760,11 +1820,11 @@ watch(
   background: #fff;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
 }
 
 .process-form-card h2 {
-  margin: 0 0 10px 0;
+  margin: 0 0 8px 0;
   font-size: 18px;
   color: #111827;
 }
@@ -1772,13 +1832,13 @@ watch(
 .process-form-fieldset {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .process-section {
   border: 1px solid #dbe3ec;
   border-radius: 6px;
-  padding: 8px 10px 10px;
+  padding: 8px;
   background: #fbfdff;
 }
 
@@ -1796,8 +1856,66 @@ watch(
   align-items: end;
 }
 
+.process-section-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.process-section-grid-4 {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.process-section-grid-5 {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.process-form-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.process-subsection {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.process-subsection-title {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.container-setting-guide {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.container-setting-guide-item + .container-setting-guide-item {
+  margin-top: 4px;
+}
+
+.container-setting-guide-inline {
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
 .process-group-full {
   grid-column: 1 / -1;
+}
+
+.process-group-span-2 {
+  grid-column: span 2;
 }
 
 .process-form-card .form-group {
@@ -1806,14 +1924,22 @@ watch(
 
 .process-check-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 6px 12px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px 10px;
+  align-items: start;
+  padding: 2px 0;
 }
 
 .process-check-grid label {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-size: 13px;
+  line-height: 1.5;
+  padding: 5px 7px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #ffffff;
 }
 
 .process-form-card .form-group label {
@@ -1936,12 +2062,104 @@ watch(
   font-size: 12px;
   color: #6b7280;
 }
-.stock-locations-edit { display: flex; flex-direction: column; gap: 4px; }
-.stock-loc-row { display: flex; gap: 4px; align-items: center; }
+.stock-locations-edit { display: flex; flex-direction: column; gap: 6px; }
+.stock-loc-row { display: flex; gap: 6px; align-items: center; }
 .stock-loc-row input { flex: 1; }
 .pc-container-label { min-width: 60px; font-size: 12px; }
-.pc-capacity-input { width: 50px; text-align: right; }
-.pc-add-select { max-width: 140px; }
+.pc-capacity-input { width: 72px; text-align: right; }
+.pc-add-select { flex: 1; min-width: 0; max-width: none; }
+.product-container-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.product-container-box {
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 8px;
+}
+.product-container-box-nested {
+  background: #ffffff;
+  padding: 8px;
+}
+.product-container-box-title {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.product-container-box-note {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #64748b;
+}
+.product-container-editor-row {
+  align-items: stretch;
+}
+.product-container-editor-row .btn-sm {
+  white-space: nowrap;
+}
+.product-container-readonly-row {
+  justify-content: space-between;
+  padding: 4px 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+.product-container-readonly-value {
+  min-width: 40px;
+  text-align: right;
+  font-weight: 700;
+  color: #0f172a;
+}
+.product-container-empty {
+  padding: 8px 6px;
+  color: #64748b;
+  font-size: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 4px;
+}
+
+.stock-location-add-btn {
+  align-self: flex-start;
+}
+
+@media (max-width: 1200px) {
+  .process-section-grid-4,
+  .process-section-grid-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .process-check-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .process-section-grid,
+  .process-section-grid-2,
+  .process-section-grid-4,
+  .process-section-grid-5 {
+    grid-template-columns: 1fr;
+  }
+
+  .process-group-span-2 {
+    grid-column: auto;
+  }
+
+  .product-container-editor-row {
+    flex-direction: column;
+  }
+
+  .pc-capacity-input,
+  .product-container-editor-row .btn-sm {
+    width: 100%;
+  }
+}
 </style>
 
 <style scoped>
