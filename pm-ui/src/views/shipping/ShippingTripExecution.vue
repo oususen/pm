@@ -55,7 +55,6 @@
             v-for="(row, rowIdx) in trip.details"
             :key="row.allocation_id"
             class="detail-row"
-            :class="{ 'detail-row-alt': rowIdx % 2 === 1, 'detail-row-custom': hasCustomRowColor(row) }"
             :style="detailRowStyle(row)"
           >
             <div class="detail-main">
@@ -370,21 +369,59 @@ const initActualInputState = (tripList) => {
 const actualQtyValue = (tripId, allocationId, fallbackQty) =>
   actualQtyMap.value[tripId]?.[allocationId] ?? String(parseQty(fallbackQty))
 
+const detailColorKey = (row) =>
+  `${String(row?.product_code || '').trim()}__${String(row?.ship_to_code || '').trim()}`
+
 const normalizeColor = (value) => {
   const color = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color : ''
 }
 
+const isDefaultRowColor = (bgColor, textColor) =>
+  (!bgColor || bgColor.toLowerCase() === '#ffffff') &&
+  (!textColor || textColor.toLowerCase() === '#000000')
+
 const hasCustomRowColor = (row) =>
-  Boolean(normalizeColor(row?.bg_color) || normalizeColor(row?.text_color))
+  !isDefaultRowColor(normalizeColor(row?.bg_color), normalizeColor(row?.text_color))
+
+const defaultDetailRowColors = [
+  { bg: '#93c5fd', text: '#0f172a' },
+  { bg: '#86efac', text: '#0f172a' },
+  { bg: '#fcd34d', text: '#0f172a' },
+  { bg: '#f9a8d4', text: '#0f172a' },
+  { bg: '#67e8f9', text: '#0f172a' },
+  { bg: '#c4b5fd', text: '#0f172a' },
+]
+
+const detailAutoColor = (trip, row) => {
+  const key = detailColorKey(row)
+  const keys = []
+  ;(trip?.details || []).forEach((item) => {
+    const colorKey = detailColorKey(item)
+    if (colorKey && !keys.includes(colorKey)) {
+      keys.push(colorKey)
+    }
+  })
+  const colorIdx = Math.max(keys.indexOf(key), 0) % 6
+  return defaultDetailRowColors[colorIdx]
+}
 
 const detailRowStyle = (row) => {
   const bgColor = normalizeColor(row?.bg_color)
   const textColor = normalizeColor(row?.text_color)
-  if (!bgColor && !textColor) return {}
+  if (!isDefaultRowColor(bgColor, textColor)) {
+    return {
+      background: bgColor || undefined,
+      color: textColor || undefined,
+    }
+  }
+  const trip = visibleTrips.value.find((item) =>
+    (item.details || []).some((detail) => detail.allocation_id === row?.allocation_id)
+  )
+  const autoColor = detailAutoColor(trip, row)
   return {
-    background: bgColor || undefined,
-    color: textColor || undefined,
+    background: autoColor?.bg || undefined,
+    color: autoColor?.text || undefined,
   }
 }
 
@@ -796,16 +833,12 @@ onMounted(async () => {
 }
 .detail-row {
   border-top: 2px solid #cbd5e1;
-  background: #bfdbfe;
 }
-.detail-row-alt {
-  background: #bbf7d0;
-}
-.detail-row-custom .product-name,
-.detail-row-custom .detail-shipto,
-.detail-row-custom .split-head,
-.detail-row-custom .split-order-no,
-.detail-row-custom .actual-readonly {
+.detail-row .product-name,
+.detail-row .detail-shipto,
+.detail-row .split-head,
+.detail-row .split-order-no,
+.detail-row .actual-readonly {
   color: inherit;
 }
 .split-wrap {
