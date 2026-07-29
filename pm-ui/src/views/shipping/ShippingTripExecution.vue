@@ -211,6 +211,8 @@ const dsSources = [
   { op: '便 読み書き', table: 't_shipping_trip', desc: '便ヘッダ（ステータス・出発時刻）' },
   { op: '便割付 読み取り', table: 't_shipping_trip_allocation', desc: '便ごとの製品割付明細' },
   { op: '出荷実績 読み取り', table: 't_shipment_actual', desc: '出荷実績数量' },
+  { op: '納入地色 読み取り', table: 'm_ship_to_lead_time', desc: '納入地別の色設定' },
+  { op: '色適用 読み取り', table: 'm_ship_to_lead_time_color_exclusion', desc: '納入地色を適用する品番' },
 ]
 
 const formatDate = (d) => {

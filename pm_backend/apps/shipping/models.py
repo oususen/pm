@@ -168,6 +168,39 @@ class ShipToLeadTime(models.Model):
         return f"{self.customer.customer_code} {self.ship_to_code}({self.ship_to_name}) +{self.additional_days}日"
 
 
+class ShipToLeadTimeColorExclusion(models.Model):
+    """納入地色設定の適用品番。
+
+    テーブル名は旧仕様の名残で ``m_ship_to_lead_time_color_exclusion`` を流用する。
+    現行UI/業務仕様では「色を適用する対象品番」を保持する。
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    ship_to_lead_time = models.ForeignKey(
+        ShipToLeadTime,
+        on_delete=models.CASCADE,
+        related_name='color_exclusions',
+        verbose_name='納入地別出荷加算日数',
+    )
+    product_code = models.CharField(max_length=50, verbose_name='品番コード')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_ship_to_lead_time_color_exclusion'
+        verbose_name = '納入地色設定適用品番'
+        verbose_name_plural = '納入地色設定適用品番'
+        unique_together = [('ship_to_lead_time', 'product_code')]
+        ordering = ['ship_to_lead_time_id', 'product_code']
+        indexes = [
+            models.Index(fields=['ship_to_lead_time', 'product_code']),
+            models.Index(fields=['product_code']),
+        ]
+
+    def __str__(self):
+        return f"{self.ship_to_lead_time_id} {self.product_code}"
+
+
 class DeliveryProgress(models.Model):
     """出荷進捗（出荷指示書用）"""
     id = models.BigAutoField(primary_key=True)

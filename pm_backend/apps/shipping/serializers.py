@@ -166,16 +166,74 @@ class ShipToLeadTimeSerializer(serializers.ModelSerializer):
     customer_code = serializers.CharField(source='customer.customer_code', read_only=True)
     customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
     calendar_name = serializers.CharField(source='calendar.calendar_name', read_only=True, default=None)
+    target_product_codes = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+        write_only=False,
+    )
 
     class Meta:
         model = ShipToLeadTime
         fields = [
             'id', 'customer', 'customer_code', 'customer_name',
             'ship_to_code', 'ship_to_name', 'additional_days', 'bg_color', 'text_color',
+            'target_product_codes',
             'calendar', 'calendar_name',
             'is_active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'customer_code', 'customer_name', 'calendar_name', 'created_at', 'updated_at']
+
+    def get_fields(self):
+        fields = super().get_fields()
+        fields['target_product_codes'].read_only = False
+        return fields
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['target_product_codes'] = [
+            str(item.product_code or '').strip()
+            for item in getattr(instance, 'color_exclusions', []).all() if hasattr(getattr(instance, 'color_exclusions', None), 'all')
+        ] if hasattr(getattr(instance, 'color_exclusions', None), 'all') else []
+        return data
+
+    def _normalize_target_product_codes(self, values):
+        normalized = []
+        seen = set()
+        for value in values or []:
+            code = str(value or '').strip()
+            if not code:
+                continue
+            upper_code = code.upper()
+            if upper_code in seen:
+                continue
+            seen.add(upper_code)
+            normalized.append(code)
+        return normalized
+
+    def create(self, validated_data):
+        target_product_codes = self._normalize_target_product_codes(validated_data.pop('target_product_codes', []))
+        instance = super().create(validated_data)
+        if target_product_codes:
+            instance.color_exclusions.bulk_create([
+                instance.color_exclusions.model(ship_to_lead_time=instance, product_code=code)
+                for code in target_product_codes
+            ])
+        return instance
+
+    def update(self, instance, validated_data):
+        target_product_codes = None
+        if 'target_product_codes' in validated_data:
+            target_product_codes = self._normalize_target_product_codes(validated_data.pop('target_product_codes', []))
+        instance = super().update(instance, validated_data)
+        if target_product_codes is not None:
+            instance.color_exclusions.all().delete()
+            if target_product_codes:
+                instance.color_exclusions.bulk_create([
+                    instance.color_exclusions.model(ship_to_lead_time=instance, product_code=code)
+                    for code in target_product_codes
+                ])
+        return instance
 
 
 class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):

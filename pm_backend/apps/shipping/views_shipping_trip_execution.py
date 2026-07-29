@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from masters.models import Calendar, KubotaSakaiTruck, Product
 from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation
 from orders.utils.calendar_utils import WorkingDayCalculator
-from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit, ShipToLeadTime
+from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit, ShipToLeadTimeColorExclusion, ShipToLeadTime
 from shipping.services.shipping_progress import get_progress_horizon_days
 
 SPLIT_TOKEN = '|PD='
@@ -608,6 +608,8 @@ class ShippingTripExecutionView(APIView):
         customer_codes = {str(t.customer_code or '').strip() for t in trips if str(t.customer_code or '').strip()}
         ship_to_codes = {str(a.ship_to_code or '').strip() for a in allocations if str(a.ship_to_code or '').strip()}
         ship_to_style_map = {}
+        target_color_keys = set()
+        target_ship_to_keys = set()
         if customer_codes and ship_to_codes:
             for row in ShipToLeadTime.objects.filter(
                 customer__customer_code__in=customer_codes,
@@ -618,6 +620,20 @@ class ShippingTripExecutionView(APIView):
                     'bg_color': str(row.get('bg_color') or '').strip(),
                     'text_color': str(row.get('text_color') or '').strip(),
                 }
+            for row in ShipToLeadTimeColorExclusion.objects.filter(
+                ship_to_lead_time__customer__customer_code__in=customer_codes,
+                ship_to_lead_time__ship_to_code__in=ship_to_codes,
+                ship_to_lead_time__is_active=True,
+            ).values(
+                'ship_to_lead_time__customer__customer_code',
+                'ship_to_lead_time__ship_to_code',
+                'product_code',
+            ):
+                customer_code = str(row['ship_to_lead_time__customer__customer_code'] or '').strip()
+                ship_to_code = str(row['ship_to_lead_time__ship_to_code'] or '').strip()
+                product_code = str(row['product_code'] or '').strip()
+                target_ship_to_keys.add((customer_code, ship_to_code))
+                target_color_keys.add((customer_code, ship_to_code, product_code))
 
         allocations_by_trip = defaultdict(list)
         for item in allocations:
@@ -649,6 +665,20 @@ class ShippingTripExecutionView(APIView):
             )
             for trip in trips
         ]
+        for payload in raw_trips_payload:
+            for detail in payload.get('details') or []:
+                ship_to_key = (
+                    str(detail.get('customer_code') or '').strip(),
+                    str(detail.get('ship_to_code') or '').strip(),
+                )
+                product_key = (
+                    ship_to_key[0],
+                    ship_to_key[1],
+                    str(detail.get('product_code') or '').strip(),
+                )
+                if ship_to_key in target_ship_to_keys and product_key not in target_color_keys:
+                    detail['bg_color'] = ''
+                    detail['text_color'] = ''
         grouped_payloads = defaultdict(list)
         for payload in raw_trips_payload:
             if payload.get('actual_departure_date') != departure_date.isoformat():

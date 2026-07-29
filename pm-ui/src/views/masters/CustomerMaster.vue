@@ -82,6 +82,7 @@
                   <th class="num">加算日数</th>
                   <th>背景色</th>
                   <th>文字色</th>
+                  <th>色適用品番</th>
                   <th>カレンダ</th>
                 </tr>
               </thead>
@@ -92,6 +93,14 @@
                   <td class="num"><input type="number" v-model.number="row.additional_days" min="0" class="inline-input num" style="width:60px" /></td>
                   <td><input type="color" v-model="row.bg_color" class="color-input" :disabled="!canEdit" /></td>
                   <td><input type="color" v-model="row.text_color" class="color-input" :disabled="!canEdit" /></td>
+                  <td>
+                    <textarea
+                      v-model="row.target_product_codes_text"
+                      class="inline-input exclusion-textarea"
+                      :disabled="!canEdit"
+                      placeholder="色を付ける品番をカンマまたは改行区切りで入力"
+                    />
+                  </td>
                   <td>
                     <select v-model="row.calendar" :disabled="!canEdit" class="cal-select">
                       <option :value="null">(顧客と同じ)</option>
@@ -126,6 +135,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 const dsSources = [
   { op: '読み書き', table: 'm_customer', desc: '得意先マスタ' },
   { op: '読み書き', table: 'm_ship_to_lead_time', desc: '納入地別カレンダ・加算日数' },
+  { op: '読み書き', table: 'm_ship_to_lead_time_color_exclusion', desc: '納入地色設定の適用品番' },
   { op: '読み取り', table: 'm_calendar', desc: 'カレンダ（選択肢）' },
 ]
 
@@ -187,6 +197,7 @@ const fetchShipToRows = async (customerId) => {
       ...r,
       bg_color: normalizeColor(r.bg_color, '#ffffff'),
       text_color: normalizeColor(r.text_color, '#000000'),
+      target_product_codes_text: formatTargetProductCodes(r.target_product_codes),
       _isNew: false,
     }))
     const existingCodes = new Set(existing.map(r => r.ship_to_code))
@@ -201,6 +212,7 @@ const fetchShipToRows = async (customerId) => {
         additional_days: 0,
         bg_color: '#ffffff',
         text_color: '#000000',
+        target_product_codes_text: '',
         calendar: null,
         is_active: true,
       }))
@@ -244,6 +256,7 @@ const saveCustomer = async () => {
           additional_days: row.additional_days,
           bg_color: normalizeColor(row.bg_color),
           text_color: normalizeColor(row.text_color),
+          target_product_codes: parseTargetProductCodes(row.target_product_codes_text),
           calendar: row.calendar || null,
           is_active: row.is_active,
         }
@@ -253,7 +266,8 @@ const saveCustomer = async () => {
             Number(row.additional_days || 0) > 0 ||
             Boolean(String(row.ship_to_name || '').trim()) ||
             normalizeColor(row.bg_color) !== '#ffffff' ||
-            normalizeColor(row.text_color) !== '#000000'
+            normalizeColor(row.text_color) !== '#000000' ||
+            parseTargetProductCodes(row.target_product_codes_text).length > 0
           if (hasSetting) {
             await api.shipToLeadTimes.create(payload)
           }
@@ -298,6 +312,21 @@ const normalizeColor = (value, fallback = '') => {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback
 }
 
+const parseTargetProductCodes = (value) => {
+  const codes = String(value || '')
+    .split(/[\r\n,]+/)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+  return Array.from(new Set(codes.map((code) => code.toUpperCase()))).map((upperCode) =>
+    codes.find((code) => code.toUpperCase() === upperCode) || upperCode
+  )
+}
+
+const formatTargetProductCodes = (values) => {
+  if (!Array.isArray(values) || !values.length) return ''
+  return values.map((item) => String(item || '').trim()).filter(Boolean).join('\n')
+}
+
 onMounted(() => {
   fetchCustomers()
   fetchCalendars()
@@ -322,8 +351,8 @@ onMounted(() => {
   background: white;
   padding: 2rem;
   border-radius: 8px;
-  min-width: 500px;
-  max-width: 600px;
+  width: min(1200px, 95vw);
+  max-width: 1200px;
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
@@ -442,5 +471,12 @@ onMounted(() => {
 
 .inline-input.num {
   text-align: right;
+}
+
+.exclusion-textarea {
+  min-width: 180px;
+  min-height: 68px;
+  resize: vertical;
+  white-space: pre-wrap;
 }
 </style>
