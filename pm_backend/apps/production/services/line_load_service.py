@@ -434,7 +434,7 @@ class LineLoadService:
                         product_details.append({
                             'product_code': product_code,
                             'product_name': product_name_map.get(product_code, ''),
-                            'finished_qty': round(product_finished_qty_map.get((line_id, current), {}).get(proc_id, {}).get(product_code, 0), 3),
+                            'finished_qty': product_finished_qty_map.get((line_id, current), {}).get(proc_id, {}).get(product_code, 0),
                             'raw_load_sec': round(product_load_sec, 1),
                             'raw_load_min': round(product_load_sec / 60, 1),
                             'load_sec': round(adjusted_product_load_sec, 1),
@@ -445,7 +445,7 @@ class LineLoadService:
                         'process_code': proc.process_code if proc else '',
                         'process_name': proc.process_name if proc else '',
                         'equipment_count': equipment_count,
-                        'finished_qty': round(process_finished_qty_map.get((line_id, current), {}).get(proc_id, 0), 3),
+                        'finished_qty': process_finished_qty_map.get((line_id, current), {}).get(proc_id, 0),
                         'raw_load_sec': round(load_sec, 1),
                         'raw_load_min': round(load_sec / 60, 1),
                         'load_sec': round(adjusted_load_sec, 1),
@@ -460,7 +460,7 @@ class LineLoadService:
                 daily_data.append({
                     'date': current.isoformat(),
                     'available_min': avail_min,
-                    'finished_qty': round(finished_qty_map.get((line_id, current), 0), 3),
+                    'finished_qty': finished_qty_map.get((line_id, current), 0),
                     'line_load_sec': round(total_load_sec, 1),
                     'line_load_min': round(total_load_sec / 60, 1),
                     'working_days': 1 if avail_min > 0 else 0,

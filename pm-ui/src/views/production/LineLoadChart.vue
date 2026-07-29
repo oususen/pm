@@ -147,7 +147,7 @@
                   @mouseleave="hideTooltip"
                 >
                   <div class="bar-label-stack">
-                    <div class="bar-label-top">需{{ formatFinishedQty(d.finished_qty) }}台</div>
+                    <div class="bar-label-top">{{ formatFinishedQty(d.finished_qty) }}台</div>
                     <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                   </div>
                   <div class="bar-track">
@@ -213,7 +213,7 @@
                   @mouseleave="hideTooltip"
                 >
                   <div class="bar-label-stack">
-                    <div class="bar-label-top">需{{ formatFinishedQty(d.finished_qty) }}台</div>
+                    <div class="bar-label-top">{{ formatFinishedQty(d.finished_qty) }}台</div>
                     <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                   </div>
                   <div class="bar-track">
@@ -281,7 +281,7 @@
                       @mouseleave="hideTooltip"
                     >
                       <div class="bar-label-stack">
-                        <div class="bar-label-top">需{{ formatFinishedQty(d.finished_qty) }}台</div>
+                        <div class="bar-label-top">{{ formatFinishedQty(d.finished_qty) }}台</div>
                         <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
                       </div>
                       <div class="bar-track">
@@ -309,7 +309,7 @@
 
     <div v-if="tooltip.visible" class="chart-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
       <div class="tooltip-title">{{ tooltip.line }} / {{ tooltip.date }}</div>
-      <div class="tooltip-row">需要: {{ formatFinishedQty(tooltip.finishedQty) }}台</div>
+      <div class="tooltip-row">完成品: {{ formatFinishedQty(tooltip.finishedQty) }}台</div>
       <div class="tooltip-row">H/日: {{ formatTooltipPerDayHours(tooltip.perDayHours) }}</div>
       <div class="tooltip-row">負荷: {{ formatHours(tooltip.loadMin) }}h</div>
       <div v-for="p in tooltip.processes" :key="p.process_code" class="tooltip-row">
@@ -741,6 +741,13 @@ const formatExcelHoursPerDay = (minutes, workingDays) => {
   return Number((hours / workingDays).toFixed(2))
 }
 
+const formatExcelQty = (qty) => {
+  const safeQty = Number(qty || 0)
+  if (!Number.isFinite(safeQty)) return ''
+  if (Math.abs(safeQty - Math.round(safeQty)) < 0.000001) return Math.round(safeQty)
+  return Number(safeQty.toFixed(3))
+}
+
 const formatExcelDateTime = (date = new Date()) => {
   const yyyy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, '0')
@@ -1058,7 +1065,7 @@ const buildProductProcessQtySheet = (dates, dateLabels) => {
           const dateEntry = dateMap.get(d.date)
           const process = dateEntry?.processes?.find(item => item.process_id === processEntry.process_id)
           const product = process?.products?.find(item => item.product_code === productEntry.product_code)
-          row.push(product ? Number(product.finished_qty || 0) : '')
+          row.push(product ? formatExcelQty(product.finished_qty) : '')
         }
         rows.push(row)
       }

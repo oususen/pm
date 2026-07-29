@@ -850,8 +850,8 @@ onMounted(async () => {
 .split-head,
 .split-row {
   display: grid;
-  grid-template-columns: 1fr 40px 100px 120px 36px;
-  gap: 3px;
+  grid-template-columns: minmax(0, 1fr) 42px 56px 96px 36px;
+  gap: 4px;
 }
 .split-head {
   font-size: 14px;
@@ -871,10 +871,12 @@ onMounted(async () => {
   font-size: 18px;
 }
 .split-row input[type="number"] {
-  width: 50px;
-  min-width: 50px;
+  width: 100%;
+  min-width: 0;
 }
 .split-order-no {
+  width: 100%;
+  min-width: 0;
   height: 38px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
@@ -1108,8 +1110,8 @@ onMounted(async () => {
     font-size: 14px;
   }
   .split-row input[type="number"] {
-    width: 50px;
-    min-width: 50px;
+    width: 100%;
+    min-width: 0;
   }
   .split-order-no {
     height: 32px;
@@ -1144,10 +1146,11 @@ onMounted(async () => {
   }
   .split-head,
   .split-row {
-    grid-template-columns: 110px 28px 70px 105px 28px;
+    grid-template-columns: minmax(92px, 1fr) 36px 44px 88px 28px;
+    gap: 4px;
   }
   .split-row input[type="date"] {
-    width: 110px;
+    width: 100%;
     padding-left: 0;
     padding-right: 0;
   }
