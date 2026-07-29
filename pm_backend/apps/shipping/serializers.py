@@ -171,7 +171,7 @@ class ShipToLeadTimeSerializer(serializers.ModelSerializer):
         model = ShipToLeadTime
         fields = [
             'id', 'customer', 'customer_code', 'customer_name',
-            'ship_to_code', 'ship_to_name', 'additional_days',
+            'ship_to_code', 'ship_to_name', 'additional_days', 'bg_color', 'text_color',
             'calendar', 'calendar_name',
             'is_active', 'created_at', 'updated_at',
         ]

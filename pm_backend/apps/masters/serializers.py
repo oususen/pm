@@ -37,6 +37,24 @@ class ProductSerializer(serializers.ModelSerializer):
     next_process_name = serializers.CharField(source='next_process.process_name', read_only=True)
     stock_locations_list = ProductStockLocationSerializer(source='stock_locations', many=True, read_only=True)
 
+    @staticmethod
+    def _sync_default_product_container(instance):
+        container = getattr(instance, 'used_container', None)
+        capacity = getattr(instance, 'capacity', None)
+        if not container or capacity in (None, ''):
+            return
+        try:
+            capacity_value = int(capacity)
+        except (TypeError, ValueError):
+            return
+        if capacity_value <= 0:
+            return
+        ProductContainer.objects.update_or_create(
+            product=instance,
+            container=container,
+            defaults={'capacity': capacity_value},
+        )
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         raw_url = data.get('image_url')
@@ -48,6 +66,18 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            instance = super().create(validated_data)
+            self._sync_default_product_container(instance)
+            return instance
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            instance = super().update(instance, validated_data)
+            self._sync_default_product_container(instance)
+            return instance
 
 
 class ProductGroupSerializer(serializers.ModelSerializer):

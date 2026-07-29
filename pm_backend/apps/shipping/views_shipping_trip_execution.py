@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from masters.models import Calendar, KubotaSakaiTruck, Product
 from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation
 from orders.utils.calendar_utils import WorkingDayCalculator
-from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit
+from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit, ShipToLeadTime
 from shipping.services.shipping_progress import get_progress_horizon_days
 
 SPLIT_TOKEN = '|PD='
@@ -442,7 +442,7 @@ def _trip_actual_departure_date(trip, calc, truck_offset_map):
     return calc.subtract_working_days(trip.departure_date, offset)
 
 
-def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_map, actual_by_allocation=None):
+def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, calc, truck_offset_map, actual_by_allocation=None):
     source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     details = []
     total_qty = Decimal('0')
@@ -456,8 +456,12 @@ def _build_trip_payload(trip, allocations, product_name_map, calc, truck_offset_
         details.append({
             'allocation_id': item.id,
             'product_code': item.product_code,
-            'product_name': product_name_map.get(item.product_code, ''),
+            'product_name': product_meta_map.get(item.product_code, {}).get('product_name', ''),
+            'capacity': int(product_meta_map.get(item.product_code, {}).get('capacity') or 1),
+            'customer_code': trip.customer_code,
             'ship_to_code': item.ship_to_code or '',
+            'bg_color': ship_to_style_map.get((trip.customer_code, item.ship_to_code or ''), {}).get('bg_color', ''),
+            'text_color': ship_to_style_map.get((trip.customer_code, item.ship_to_code or ''), {}).get('text_color', ''),
             'source_order_no': default_order_no,
             'due_date': item.due_date.isoformat() if item.due_date else None,
             'qty': _format_qty(qty),
@@ -594,10 +598,26 @@ class ShippingTripExecutionView(APIView):
             .order_by('trip_id', 'product_code', 'id')
         )
         product_codes = {a.product_code for a in allocations}
-        product_name_map = {
-            p.product_code: p.product_name
+        product_meta_map = {
+            p.product_code: {
+                'product_name': p.product_name,
+                'capacity': max(int(_to_decimal(getattr(p, 'capacity', None), default='1')), 1),
+            }
             for p in Product.objects.filter(product_code__in=product_codes)
         }
+        customer_codes = {str(t.customer_code or '').strip() for t in trips if str(t.customer_code or '').strip()}
+        ship_to_codes = {str(a.ship_to_code or '').strip() for a in allocations if str(a.ship_to_code or '').strip()}
+        ship_to_style_map = {}
+        if customer_codes and ship_to_codes:
+            for row in ShipToLeadTime.objects.filter(
+                customer__customer_code__in=customer_codes,
+                ship_to_code__in=ship_to_codes,
+                is_active=True,
+            ).values('customer__customer_code', 'ship_to_code', 'bg_color', 'text_color'):
+                ship_to_style_map[(str(row['customer__customer_code'] or '').strip(), str(row['ship_to_code'] or '').strip())] = {
+                    'bg_color': str(row.get('bg_color') or '').strip(),
+                    'text_color': str(row.get('text_color') or '').strip(),
+                }
 
         allocations_by_trip = defaultdict(list)
         for item in allocations:
@@ -618,7 +638,15 @@ class ShippingTripExecutionView(APIView):
                 actual_by_allocation[actual.shipping_trip_allocation_id] = actual
 
         raw_trips_payload = [
-            _build_trip_payload(trip, allocations_by_trip.get(trip.id, []), product_name_map, calc, truck_offset_map, actual_by_allocation)
+            _build_trip_payload(
+                trip,
+                allocations_by_trip.get(trip.id, []),
+                product_meta_map,
+                ship_to_style_map,
+                calc,
+                truck_offset_map,
+                actual_by_allocation,
+            )
             for trip in trips
         ]
         grouped_payloads = defaultdict(list)

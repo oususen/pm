@@ -147,6 +147,8 @@ class ShipToLeadTime(models.Model):
     ship_to_code = models.CharField(max_length=40, verbose_name='納入先コード')
     ship_to_name = models.CharField(max_length=100, blank=True, default='', verbose_name='納入地名')
     additional_days = models.PositiveIntegerField(default=0, verbose_name='出荷加算日数')
+    bg_color = models.CharField(max_length=10, blank=True, default='', verbose_name='背景色')
+    text_color = models.CharField(max_length=10, blank=True, default='', verbose_name='文字色')
     calendar = models.ForeignKey(
         Calendar, on_delete=models.SET_NULL, null=True, blank=True,
         verbose_name='カレンダ',

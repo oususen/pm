@@ -81,6 +81,18 @@ def _to_decimal(value, default='0'):
         return Decimal(default)
 
 
+def _append_container_option(options, container_id, container_name, capacity):
+    if not container_id:
+        return
+    if any(int(item.get('container_id') or 0) == int(container_id) for item in options):
+        return
+    options.append({
+        'container_id': container_id,
+        'container_name': container_name or '',
+        'capacity': capacity,
+    })
+
+
 def _to_int_qty(value):
     qty = _to_decimal(value)
     if qty <= 0:
@@ -777,6 +789,16 @@ class KubotaSakaiTripPlanView(APIView):
                 'container_name': pc.container.name,
                 'capacity': pc.capacity,
             })
+        for product_code, product in products.items():
+            container = getattr(product, 'used_container', None)
+            if not container:
+                continue
+            _append_container_option(
+                product_containers_map[product_code],
+                container.id,
+                container.name,
+                getattr(product, 'capacity', None) or getattr(container, 'capacity', None),
+            )
 
         # 配送進捗を取得
         progress_map = {}

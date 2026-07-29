@@ -311,7 +311,16 @@
                   },
                 ]"
               >
-                {{ truckOccupancyLabel(dateKey, slotIdx - 1) }}
+                <div class="occ-head-content">
+                  <span>{{ truckOccupancyLabel(dateKey, slotIdx - 1) }}</span>
+                  <span
+                    v-if="showTruck60Diff(dateKey, slotIdx - 1)"
+                    class="truck-60-diff"
+                    :class="{ negative: truckDiffFrom60(dateKey, slotIdx - 1) < 0 }"
+                  >
+                    {{ formatSignedNumber(truckDiffFrom60(dateKey, slotIdx - 1)) }}
+                  </span>
+                </div>
               </th>
             </template>
           </tr>
@@ -976,6 +985,37 @@ const truckOccupancyPercent = (dateKey, slotIdx) => {
 }
 
 const truckOccupancyLabel = (dateKey, slotIdx) => `${truckOccupancyPercent(dateKey, slotIdx)}%`
+const truckAssignedQtyById = (dateKey, truckId) => {
+  const normalizedTruckId = Number(truckId)
+  if (!dateKey || !normalizedTruckId) return 0
+  let sum = 0
+  mergedRows.value.forEach((row) => {
+    entriesAt(row, dateKey).forEach((entry) => {
+      ;(entry.allocations || []).forEach((allocation) => {
+        if (Number(allocation.truck_id) === normalizedTruckId) {
+          sum += parseIntegerQty(allocation.qty)
+        }
+      })
+    })
+  })
+  return sum
+}
+const isTruck2 = (truck) => {
+  const name = String(truckDisplayName(truck) || '').trim()
+  return name === '2' || name === '2便' || name === '２' || name === '２便'
+}
+const showTruck60Diff = (dateKey, slotIdx) => isTruck2(truckAt(dateKey, slotIdx))
+const truckDiffFrom60 = (dateKey, slotIdx) => {
+  const truck = truckAt(dateKey, slotIdx)
+  if (!truck) return 0
+  return truckAssignedQtyById(dateKey, truck.id) - 60
+}
+const formatSignedNumber = (value) => {
+  const num = parseNumber(value)
+  if (num > 0) return `+${formatNumber(num)}`
+  if (num < 0) return `-${formatNumber(Math.abs(num))}`
+  return '0'
+}
 const truckOccupancyPercentById = (dateKey, truckId) => {
   const normalizedTruckId = Number(truckId)
   if (!dateKey || !normalizedTruckId) return 0
@@ -2448,6 +2488,20 @@ onUnmounted(() => {
 .occ-head {
   background: #f8fafc !important;
   border-bottom: 1px solid #2d3748 !important;
+}
+.occ-head-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.truck-60-diff {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1f2937;
+}
+.truck-60-diff.negative {
+  color: #b91c1c;
 }
 .item-head {
   background: #eef2f7 !important;

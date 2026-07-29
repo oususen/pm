@@ -80,6 +80,8 @@
                   <th>納入先コード</th>
                   <th>納入地名</th>
                   <th class="num">加算日数</th>
+                  <th>背景色</th>
+                  <th>文字色</th>
                   <th>カレンダ</th>
                 </tr>
               </thead>
@@ -88,6 +90,8 @@
                   <td>{{ row.ship_to_code }}</td>
                   <td><input v-model="row.ship_to_name" class="inline-input" placeholder="納入地名" /></td>
                   <td class="num"><input type="number" v-model.number="row.additional_days" min="0" class="inline-input num" style="width:60px" /></td>
+                  <td><input type="color" v-model="row.bg_color" class="color-input" :disabled="!canEdit" /></td>
+                  <td><input type="color" v-model="row.text_color" class="color-input" :disabled="!canEdit" /></td>
                   <td>
                     <select v-model="row.calendar" :disabled="!canEdit" class="cal-select">
                       <option :value="null">(顧客と同じ)</option>
@@ -121,6 +125,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み書き', table: 'm_customer', desc: '得意先マスタ' },
+  { op: '読み書き', table: 'm_ship_to_lead_time', desc: '納入地別カレンダ・加算日数' },
   { op: '読み取り', table: 'm_calendar', desc: 'カレンダ（選択肢）' },
 ]
 
@@ -178,7 +183,12 @@ const fetchShipToRows = async (customerId) => {
       api.shipToLeadTimes.getAll({ customer: customerId }),
       api.shipToLeadTimes.getShipToCodes(customerId),
     ])
-    const existing = (existingRes.data.results || existingRes.data || []).map(r => ({ ...r, _isNew: false }))
+    const existing = (existingRes.data.results || existingRes.data || []).map(r => ({
+      ...r,
+      bg_color: normalizeColor(r.bg_color, '#ffffff'),
+      text_color: normalizeColor(r.text_color, '#000000'),
+      _isNew: false,
+    }))
     const existingCodes = new Set(existing.map(r => r.ship_to_code))
     const orderCodes = codesRes.data || []
     const newRows = orderCodes
@@ -189,6 +199,8 @@ const fetchShipToRows = async (customerId) => {
         ship_to_code: code,
         ship_to_name: '',
         additional_days: 0,
+        bg_color: '#ffffff',
+        text_color: '#000000',
         calendar: null,
         is_active: true,
       }))
@@ -230,11 +242,19 @@ const saveCustomer = async () => {
           ship_to_code: row.ship_to_code,
           ship_to_name: row.ship_to_name,
           additional_days: row.additional_days,
+          bg_color: normalizeColor(row.bg_color),
+          text_color: normalizeColor(row.text_color),
           calendar: row.calendar || null,
           is_active: row.is_active,
         }
         if (row._isNew) {
-          if (row.calendar) {
+          const hasSetting =
+            Boolean(row.calendar) ||
+            Number(row.additional_days || 0) > 0 ||
+            Boolean(String(row.ship_to_name || '').trim()) ||
+            normalizeColor(row.bg_color) !== '#ffffff' ||
+            normalizeColor(row.text_color) !== '#000000'
+          if (hasSetting) {
             await api.shipToLeadTimes.create(payload)
           }
         } else {
@@ -271,6 +291,11 @@ const deleteCustomer = async (id) => {
     console.error('削除エラー:', error)
     alert('削除に失敗しました')
   }
+}
+
+const normalizeColor = (value, fallback = '') => {
+  const color = String(value || '').trim()
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback
 }
 
 onMounted(() => {

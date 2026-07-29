@@ -4,14 +4,16 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from masters.models import BOM, BOMItem, Line, Process, Product, Routing, Supplier
-from masters.serializers import BOMItemSerializer, BOMSerializer
+from masters.models import BOM, BOMItem, ContainerCapacity, Line, Process, Product, ProductContainer, Routing, Supplier
+from masters.serializers import BOMItemSerializer, BOMSerializer, ProductSerializer
 from masters.services.routing_service import (
     build_effective_routing_range_q,
     normalize_routing_reference_datetime,
     resolve_effective_routing,
 )
 from masters.views import BOMViewSet, LineViewSet, SupplierViewSet
+from orders.core.models import KubotaSakaiDueAdjustment
+from shipping.views_kubota_sakai_trip_assignment import KubotaSakaiTripPlanView
 
 
 class RoutingEffectiveDatetimeTest(TestCase):
@@ -529,3 +531,101 @@ class SupplierAutoLineTest(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertTrue(Line.objects.filter(id=line.id).exists())
+
+
+class ProductSerializerContainerSyncTest(TestCase):
+    def test_create_syncs_default_container_to_product_container(self):
+        container = ContainerCapacity.objects.create(
+            name='グレー小',
+            container_code='GRAY-S',
+            capacity=20,
+        )
+        serializer = ProductSerializer(data={
+            'product_code': 'TEST-CONTAINER-CREATE',
+            'product_name': '容器同期作成',
+            'used_container': container.id,
+            'capacity': 28,
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        product = serializer.save()
+
+        self.assertTrue(
+            ProductContainer.objects.filter(
+                product=product,
+                container=container,
+                capacity=28,
+            ).exists()
+        )
+
+    def test_update_syncs_default_container_to_product_container(self):
+        product = Product.objects.create(
+            product_code='TEST-CONTAINER-UPDATE',
+            product_name='容器同期更新',
+        )
+        container = ContainerCapacity.objects.create(
+            name='グレー大',
+            container_code='GRAY-L',
+            capacity=18,
+        )
+        serializer = ProductSerializer(
+            instance=product,
+            data={
+                'product_code': product.product_code,
+                'product_name': product.product_name,
+                'used_container': container.id,
+                'capacity': 32,
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+
+        self.assertTrue(
+            ProductContainer.objects.filter(
+                product=product,
+                container=container,
+                capacity=32,
+            ).exists()
+        )
+
+
+class KubotaSakaiTripPlanContainerFallbackTest(TestCase):
+    def test_grid_includes_used_container_when_product_container_is_missing(self):
+        container = ContainerCapacity.objects.create(
+            name='グレー小',
+            container_code='GRAY-S-FALLBACK',
+            capacity=20,
+        )
+        Product.objects.create(
+            product_code='TEST-KBT-CONTAINER',
+            product_name='便計画容器候補',
+            used_container=container,
+            capacity=28,
+        )
+        KubotaSakaiDueAdjustment.objects.create(
+            product_code='TEST-KBT-CONTAINER',
+            ship_to_code='ZGHC',
+            source_order_no='4500000001',
+            order_type='FIRM',
+            due_date=date(2026, 7, 29),
+            demand_qty=28,
+            delivery_qty=28,
+            remaining_qty=0,
+        )
+
+        factory = APIRequestFactory()
+        request = factory.get('/api/kubota-sakai-trip-assignments/grid/', {
+            'target_date': '2026-07-29',
+        })
+        response = KubotaSakaiTripPlanView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['product_containers']['TEST-KBT-CONTAINER'],
+            [{
+                'container_id': container.id,
+                'container_name': 'グレー小',
+                'capacity': 28,
+            }],
+        )

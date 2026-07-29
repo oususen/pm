@@ -51,7 +51,13 @@
             <span class="detail-head-plan">{{ t('shippingTripExecution.plan') }}</span>
             <span class="detail-head-actual">{{ isActualInputMode ? t('shippingTripExecution.actual') : t('shippingTripExecution.actualInput') }}</span>
           </div>
-          <div v-for="(row, rowIdx) in trip.details" :key="row.allocation_id" class="detail-row" :class="{ 'detail-row-alt': rowIdx % 2 === 1 }">
+          <div
+            v-for="(row, rowIdx) in trip.details"
+            :key="row.allocation_id"
+            class="detail-row"
+            :class="{ 'detail-row-alt': rowIdx % 2 === 1, 'detail-row-custom': hasCustomRowColor(row) }"
+            :style="detailRowStyle(row)"
+          >
             <div class="detail-main">
               <div class="detail-main-left">
                 <span class="product-code">{{ row.product_code }}</span>
@@ -77,6 +83,7 @@
             <div v-if="isExecutionMode || isActualInputMode" class="split-wrap">
               <div class="split-head">
                 <span>{{ t('shippingTripExecution.productionDate') }}</span>
+                <span></span>
                 <span>{{ t('shippingTripExecution.quantity') }}</span>
                 <span>{{ t('shippingTripExecution.orderNo') }}</span>
                 <span></span>
@@ -92,6 +99,14 @@
                   :disabled="!canEditProductionDate(trip)"
                   @input="setSplitDate(trip.id, row.allocation_id, splitIdx, $event.target.value)"
                 />
+                <button
+                  type="button"
+                  class="btn split-inline-add"
+                  :disabled="!canEditProductionDate(trip)"
+                  @click="incrementSplitQty(trip.id, row.allocation_id, splitIdx, row)"
+                >
+                  ＋
+                </button>
                 <input
                   type="number"
                   min="0"
@@ -327,6 +342,7 @@ const initActualInputState = (tripList) => {
           production_date: item.production_date || '',
           quantity: String(parseQty(item.quantity || 0)),
           source_order_no: item.source_order_no || row.source_order_no || '',
+          increment_initialized: false,
         }))
         initialSaved.add(row.allocation_id)
       } else {
@@ -334,6 +350,7 @@ const initActualInputState = (tripList) => {
           production_date: prevBusinessDay.value,
           quantity: String(parseQty(row.qty)),
           source_order_no: row.source_order_no || '',
+          increment_initialized: false,
         }]
       }
       byAlloc[row.allocation_id] = String(sumSplitQuantities(byAllocSplit[row.allocation_id], row.qty))
@@ -351,6 +368,24 @@ const initActualInputState = (tripList) => {
 const actualQtyValue = (tripId, allocationId, fallbackQty) =>
   actualQtyMap.value[tripId]?.[allocationId] ?? String(parseQty(fallbackQty))
 
+const normalizeColor = (value) => {
+  const color = String(value || '').trim()
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : ''
+}
+
+const hasCustomRowColor = (row) =>
+  Boolean(normalizeColor(row?.bg_color) || normalizeColor(row?.text_color))
+
+const detailRowStyle = (row) => {
+  const bgColor = normalizeColor(row?.bg_color)
+  const textColor = normalizeColor(row?.text_color)
+  if (!bgColor && !textColor) return {}
+  return {
+    background: bgColor || undefined,
+    color: textColor || undefined,
+  }
+}
+
 const actualDateValue = (tripId, fallbackDate) =>
   actualDateMap.value[tripId] || fallbackDate
 
@@ -361,7 +396,12 @@ const setActualDate = (tripId, value) => {
 const splitRows = (tripId, allocationId, row) => {
   const rows = productionSplitMap.value[tripId]?.[allocationId]
   if (Array.isArray(rows) && rows.length) return rows
-  return [{ production_date: '', quantity: String(parseQty(row?.qty || 0)), source_order_no: row?.source_order_no || '' }]
+  return [{
+    production_date: '',
+    quantity: String(parseQty(row?.qty || 0)),
+    source_order_no: row?.source_order_no || '',
+    increment_initialized: false,
+  }]
 }
 
 const markAllocationEdited = (allocationId) => {
@@ -394,7 +434,32 @@ const setSplitQty = (tripId, allocationId, splitIdx, value, row) => {
 
 const addSplitRow = (tripId, allocationId, row) => {
   const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
-  next.push({ production_date: prevBusinessDay.value, quantity: '', source_order_no: row?.source_order_no || '' })
+  next.push({
+    production_date: prevBusinessDay.value,
+    quantity: '',
+    source_order_no: row?.source_order_no || '',
+    increment_initialized: false,
+  })
+  productionSplitMap.value = {
+    ...productionSplitMap.value,
+    [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
+  }
+  syncActualQtyWithSplits(tripId, allocationId, next, row?.qty)
+  markAllocationEdited(allocationId)
+}
+
+const incrementSplitQty = (tripId, allocationId, splitIdx, row) => {
+  const next = [...(productionSplitMap.value[tripId]?.[allocationId] || [])]
+  const current = next[splitIdx]
+  if (!current) return
+  const step = Math.max(parseQty(row?.capacity || 0), 1)
+  const currentQty = parseQty(current.quantity)
+  const nextQty = current.increment_initialized ? currentQty + step : 0
+  next[splitIdx] = {
+    ...current,
+    quantity: String(nextQty),
+    increment_initialized: true,
+  }
   productionSplitMap.value = {
     ...productionSplitMap.value,
     [tripId]: { ...(productionSplitMap.value[tripId] || {}), [allocationId]: next },
@@ -411,6 +476,7 @@ const removeSplitRow = (tripId, allocationId, splitIdx, row) => {
       production_date: '',
       quantity: String(parseQty(row?.qty || 0)),
       source_order_no: row?.source_order_no || '',
+      increment_initialized: false,
     })
   }
   productionSplitMap.value = {
@@ -733,6 +799,13 @@ onMounted(async () => {
 .detail-row-alt {
   background: #bbf7d0;
 }
+.detail-row-custom .product-name,
+.detail-row-custom .detail-shipto,
+.detail-row-custom .split-head,
+.detail-row-custom .split-order-no,
+.detail-row-custom .actual-readonly {
+  color: inherit;
+}
 .split-wrap {
   grid-column: 1 / -1;
   margin-top: 1px;
@@ -742,7 +815,7 @@ onMounted(async () => {
 .split-head,
 .split-row {
   display: grid;
-  grid-template-columns: 1fr 100px 120px 36px;
+  grid-template-columns: 1fr 40px 100px 120px 36px;
   gap: 3px;
 }
 .split-head {
@@ -751,8 +824,8 @@ onMounted(async () => {
   color: #334155;
   padding: 2px 0 0;
 }
-.split-head span:nth-child(2),
-.split-head span:nth-child(3) {
+.split-head span:nth-child(3),
+.split-head span:nth-child(4) {
   text-align: center;
 }
 .split-row input {
@@ -774,6 +847,13 @@ onMounted(async () => {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.btn.split-inline-add {
+  min-height: 36px;
+  font-size: 20px;
+  padding: 0;
+  width: 40px;
+  line-height: 1;
 }
 .btn.split-btn {
   min-height: 36px;
@@ -1021,7 +1101,7 @@ onMounted(async () => {
   }
   .split-head,
   .split-row {
-    grid-template-columns: 1fr 70px 105px 28px;
+    grid-template-columns: 110px 28px 70px 105px 28px;
   }
   .split-row input[type="date"] {
     width: 110px;

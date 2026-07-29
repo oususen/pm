@@ -16,6 +16,8 @@
           <th>納入先コード</th>
           <th>納入地名</th>
           <th class="num">出荷加算日数</th>
+          <th>背景色</th>
+          <th>文字色</th>
           <th>有効</th>
           <th>操作</th>
         </tr>
@@ -27,6 +29,8 @@
           <td>{{ row.ship_to_code }}</td>
           <td>{{ row.ship_to_name }}</td>
           <td class="num">{{ row.additional_days }}</td>
+          <td><span class="color-chip" :style="{ backgroundColor: row.bg_color || '#ffffff' }">{{ row.bg_color || '-' }}</span></td>
+          <td><span class="color-chip" :style="{ backgroundColor: row.text_color || '#ffffff' }">{{ row.text_color || '-' }}</span></td>
           <td>{{ row.is_active ? 'はい' : 'いいえ' }}</td>
           <td>
             <button class="btn-secondary btn-sm" @click="openEditDialog(row)">編集</button>
@@ -66,6 +70,14 @@
           <input type="number" v-model.number="form.additional_days" min="0" />
         </div>
         <div class="form-group">
+          <label>背景色</label>
+          <input type="color" v-model="form.bg_color" />
+        </div>
+        <div class="form-group">
+          <label>文字色</label>
+          <input type="color" v-model="form.text_color" />
+        </div>
+        <div class="form-group">
           <label>
             <input type="checkbox" v-model="form.is_active" /> 有効
           </label>
@@ -89,7 +101,7 @@ import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
-  { op: '加算日数 読み書き', table: 'm_ship_to_lead_time', desc: '納入地別出荷加算日数マスタ' },
+  { op: '加算日数・色 読み書き', table: 'm_ship_to_lead_time', desc: '納入地別出荷加算日数・色設定マスタ' },
   { op: '顧客 読み取り', table: 'm_customer', desc: '顧客マスタ（顧客コード・顧客名）' },
 ]
 const loading = ref(false)
@@ -99,7 +111,7 @@ const customers = ref([])
 const shipToCodes = ref([])
 const showDialog = ref(false)
 const editingId = ref(null)
-const form = ref({ customer: '', ship_to_code: '', ship_to_name: '', additional_days: 0, is_active: true })
+const form = ref({ customer: '', ship_to_code: '', ship_to_name: '', additional_days: 0, bg_color: '#ffffff', text_color: '#000000', is_active: true })
 
 watch(() => form.value.customer, async (customerId) => {
   shipToCodes.value = []
@@ -116,7 +128,11 @@ const fetchData = async () => {
   loading.value = true
   try {
     const res = await api.shipToLeadTimes.getAll()
-    rows.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+    rows.value = (Array.isArray(res.data) ? res.data : res.data?.results || []).map((row) => ({
+      ...row,
+      bg_color: normalizeColor(row.bg_color, '#ffffff'),
+      text_color: normalizeColor(row.text_color, '#000000'),
+    }))
   } catch (e) {
     console.error('取得エラー:', e)
   } finally {
@@ -135,7 +151,7 @@ const fetchCustomers = async () => {
 
 const openCreateDialog = () => {
   editingId.value = null
-  form.value = { customer: '', ship_to_code: '', ship_to_name: '', additional_days: 0, is_active: true }
+  form.value = { customer: '', ship_to_code: '', ship_to_name: '', additional_days: 0, bg_color: '#ffffff', text_color: '#000000', is_active: true }
   showDialog.value = true
 }
 
@@ -146,6 +162,8 @@ const openEditDialog = (row) => {
     ship_to_code: row.ship_to_code,
     ship_to_name: row.ship_to_name,
     additional_days: row.additional_days,
+    bg_color: normalizeColor(row.bg_color, '#ffffff'),
+    text_color: normalizeColor(row.text_color, '#000000'),
     is_active: row.is_active,
   }
   showDialog.value = true
@@ -158,10 +176,15 @@ const saveForm = async () => {
   }
   saving.value = true
   try {
+    const payload = {
+      ...form.value,
+      bg_color: normalizeColor(form.value.bg_color),
+      text_color: normalizeColor(form.value.text_color),
+    }
     if (editingId.value) {
-      await api.shipToLeadTimes.update(editingId.value, form.value)
+      await api.shipToLeadTimes.update(editingId.value, payload)
     } else {
-      await api.shipToLeadTimes.create(form.value)
+      await api.shipToLeadTimes.create(payload)
     }
     showDialog.value = false
     await fetchData()
@@ -183,6 +206,11 @@ const deleteRow = async (row) => {
     console.error('削除エラー:', e)
     alert('削除に失敗しました')
   }
+}
+
+const normalizeColor = (value, fallback = '') => {
+  const color = String(value || '').trim()
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback
 }
 
 onMounted(() => {
