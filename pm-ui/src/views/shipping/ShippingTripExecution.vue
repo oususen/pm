@@ -252,7 +252,7 @@ const canTripEdit = computed(() => {
 })
 const canActualEdit = computed(() => canTripEdit.value && (isExecutionMode.value || isActualInputMode.value))
 const canStatusEdit = computed(() => canTripEdit.value && !isActualInputMode.value)
-const canEditProductionDate = (trip) => isExecutionMode.value && canRegisterActual(trip)
+const canEditProductionDate = (trip) => isExecutionMode.value && trip?.status === 'PLANNED'
 const isAllocationSplitSaved = (allocationId) =>
   savedAllocationIds.value.has(allocationId) && !editedAllocationIds.value.has(allocationId)
 
@@ -870,6 +870,10 @@ onMounted(async () => {
   padding: 0 6px;
   font-size: 18px;
 }
+.split-row input[type="number"] {
+  width: 50px;
+  min-width: 50px;
+}
 .split-order-no {
   height: 38px;
   border: 1px solid #cbd5e1;
@@ -1103,6 +1107,10 @@ onMounted(async () => {
     height: 32px;
     font-size: 14px;
   }
+  .split-row input[type="number"] {
+    width: 50px;
+    min-width: 50px;
+  }
   .split-order-no {
     height: 32px;
     font-size: 14px;
@@ -1142,6 +1150,22 @@ onMounted(async () => {
     width: 110px;
     padding-left: 0;
     padding-right: 0;
+  }
+  .split-wrap {
+    gap: 8px;
+  }
+  .split-row {
+    margin-bottom: 6px;
+  }
+  .split-actions {
+    margin-top: 6px;
+    gap: 8px;
+  }
+  .btn.split-inline-add {
+    width: 36px;
+    min-width: 36px;
+    min-height: 32px;
+    font-size: 18px;
   }
 }
 </style>
