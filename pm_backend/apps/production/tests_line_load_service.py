@@ -97,6 +97,9 @@ class LineLoadServiceTest(TestCase):
         result = LineLoadService().calculate([self.line.id], '2026-07-01', '2026-07-31', 'monthly')
 
         self.assertEqual(result['demand_source_config']['orderline_until_date'], None)
+        self.assertEqual(result['lines'][0]['data'][0]['finished_qty'], 10.0)
+        self.assertEqual(result['lines'][0]['data'][0]['processes'][0]['finished_qty'], 10.0)
+        self.assertEqual(result['lines'][0]['data'][0]['processes'][0]['products'][0]['finished_qty'], 10.0)
         self.assertEqual(result['lines'][0]['data'][0]['line_load_sec'], 600.0)
 
     def test_calculate_switches_to_orderline_before_configured_date(self):
@@ -126,8 +129,10 @@ class LineLoadServiceTest(TestCase):
         self.assertEqual(result['demand_source_config']['orderline_until_date_text'], '2026-06-30')
         self.assertEqual(len(result['lines'][0]['data']), 2)
         self.assertEqual(result['lines'][0]['data'][0]['date'], '2026-06-01')
+        self.assertEqual(result['lines'][0]['data'][0]['finished_qty'], 5.0)
         self.assertEqual(result['lines'][0]['data'][0]['line_load_sec'], 300.0)
         self.assertEqual(result['lines'][0]['data'][1]['date'], '2026-07-01')
+        self.assertEqual(result['lines'][0]['data'][1]['finished_qty'], 10.0)
         self.assertEqual(result['lines'][0]['data'][1]['line_load_sec'], 600.0)
 
     def test_orderline_forecast_is_ignored_when_same_source_key_has_firm(self):
@@ -173,4 +178,5 @@ class LineLoadServiceTest(TestCase):
 
         result = LineLoadService().calculate([self.line.id], '2026-06-01', '2026-06-30', 'monthly')
 
+        self.assertEqual(result['lines'][0]['data'][0]['finished_qty'], 5.0)
         self.assertEqual(result['lines'][0]['data'][0]['line_load_sec'], 300.0)

@@ -374,6 +374,12 @@ class LineLoadService:
             ).items():
                 final_demand_map[key] += qty
 
+        # {(line_id, plan_date): quantity}
+        finished_qty_map = defaultdict(float)
+        # {(line_id, plan_date): {process_id: quantity}}
+        process_finished_qty_map = defaultdict(lambda: defaultdict(float))
+        # {(line_id, plan_date): {process_id: {product_code: quantity}}}
+        product_finished_qty_map = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         # {(line_id, plan_date): {process_id: load_seconds}}
         load_map = defaultdict(lambda: defaultdict(float))
         # {(line_id, plan_date): {process_id: {product_code: load_seconds}}}
@@ -383,10 +389,13 @@ class LineLoadService:
                 ct_by_process = ct_map.get((target_line_id, product_code))
                 if not ct_by_process:
                     continue
+                finished_qty_map[(target_line_id, plan_date)] += demand_qty
                 for proc_id, ct_sec in ct_by_process.items():
                     load_sec = demand_qty * ct_sec
                     load_map[(target_line_id, plan_date)][proc_id] += load_sec
                     product_load_map[(target_line_id, plan_date)][proc_id][product_code] += load_sec
+                    process_finished_qty_map[(target_line_id, plan_date)][proc_id] += demand_qty
+                    product_finished_qty_map[(target_line_id, plan_date)][proc_id][product_code] += demand_qty
 
         calendar_days = CalendarDay.objects.filter(
             calendar__line__in=lines,
@@ -425,6 +434,7 @@ class LineLoadService:
                         product_details.append({
                             'product_code': product_code,
                             'product_name': product_name_map.get(product_code, ''),
+                            'finished_qty': round(product_finished_qty_map.get((line_id, current), {}).get(proc_id, {}).get(product_code, 0), 3),
                             'raw_load_sec': round(product_load_sec, 1),
                             'raw_load_min': round(product_load_sec / 60, 1),
                             'load_sec': round(adjusted_product_load_sec, 1),
@@ -435,6 +445,7 @@ class LineLoadService:
                         'process_code': proc.process_code if proc else '',
                         'process_name': proc.process_name if proc else '',
                         'equipment_count': equipment_count,
+                        'finished_qty': round(process_finished_qty_map.get((line_id, current), {}).get(proc_id, 0), 3),
                         'raw_load_sec': round(load_sec, 1),
                         'raw_load_min': round(load_sec / 60, 1),
                         'load_sec': round(adjusted_load_sec, 1),
@@ -449,6 +460,7 @@ class LineLoadService:
                 daily_data.append({
                     'date': current.isoformat(),
                     'available_min': avail_min,
+                    'finished_qty': round(finished_qty_map.get((line_id, current), 0), 3),
                     'line_load_sec': round(total_load_sec, 1),
                     'line_load_min': round(total_load_sec / 60, 1),
                     'working_days': 1 if avail_min > 0 else 0,
@@ -497,6 +509,7 @@ class LineLoadService:
                     'date': week_start.isoformat(),
                     'week_label': f"{week_start.strftime('%m/%d')}~",
                     'available_min': 0,
+                    'finished_qty': 0,
                     'line_load_sec': 0,
                     'line_load_min': 0,
                     'working_days': 0,
@@ -515,6 +528,7 @@ class LineLoadService:
                 'equipment_count': 1,
                 'products': defaultdict(lambda: {
                     'product_name': '',
+                    'finished_qty': 0,
                     'raw_load_sec': 0,
                     'load_sec': 0,
                 }),
@@ -529,6 +543,7 @@ class LineLoadService:
                     for product in p.get('products', []):
                         product_total = proc_totals[p['process_id']]['products'][product['product_code']]
                         product_total['product_name'] = product.get('product_name', '')
+                        product_total['finished_qty'] += product.get('finished_qty', 0)
                         product_total['raw_load_sec'] += product.get('raw_load_sec', product.get('load_sec', 0))
                         product_total['load_sec'] += product.get('load_sec', 0)
 
@@ -540,6 +555,7 @@ class LineLoadService:
                     products.append({
                         'product_code': product_code,
                         'product_name': product_total['product_name'],
+                        'finished_qty': round(product_total['finished_qty'], 3),
                         'raw_load_sec': round(product_total['raw_load_sec'], 1),
                         'raw_load_min': round(product_total['raw_load_sec'] / 60, 1),
                         'load_sec': round(product_total['load_sec'], 1),
@@ -550,6 +566,7 @@ class LineLoadService:
                     'process_code': pt['code'],
                     'process_name': pt['name'],
                     'equipment_count': pt['equipment_count'],
+                    'finished_qty': round(sum(product['finished_qty'] for product in products), 3),
                     'raw_load_sec': round(pt['raw_load_sec'], 1),
                     'raw_load_min': round(pt['raw_load_sec'] / 60, 1),
                     'load_sec': round(pt['load_sec'], 1),
@@ -562,6 +579,7 @@ class LineLoadService:
                 'date': week_start.isoformat(),
                 'week_label': f"{week_start.strftime('%m/%d')}~",
                 'available_min': total_avail,
+                'finished_qty': round(sum(d.get('finished_qty', 0) for d in days), 3),
                 'line_load_sec': round(total_load_sec, 1),
                 'line_load_min': round(total_load_sec / 60, 1),
                 'working_days': len(working_days),
@@ -591,6 +609,7 @@ class LineLoadService:
                     'date': month_start.isoformat(),
                     'month_label': f"{month_start.strftime('%Y/%m')}",
                     'available_min': 0,
+                    'finished_qty': 0,
                     'line_load_sec': 0, 'line_load_min': 0,
                     'working_days': 0,
                     'utilization': 0, 'is_working_day': False, 'processes': [],
@@ -606,6 +625,7 @@ class LineLoadService:
                 'equipment_count': 1,
                 'products': defaultdict(lambda: {
                     'product_name': '',
+                    'finished_qty': 0,
                     'raw_load_sec': 0,
                     'load_sec': 0,
                 }),
@@ -620,6 +640,7 @@ class LineLoadService:
                     for product in p.get('products', []):
                         product_total = proc_totals[p['process_id']]['products'][product['product_code']]
                         product_total['product_name'] = product.get('product_name', '')
+                        product_total['finished_qty'] += product.get('finished_qty', 0)
                         product_total['raw_load_sec'] += product.get('raw_load_sec', product.get('load_sec', 0))
                         product_total['load_sec'] += product.get('load_sec', 0)
 
@@ -631,6 +652,7 @@ class LineLoadService:
                     products.append({
                         'product_code': product_code,
                         'product_name': product_total['product_name'],
+                        'finished_qty': round(product_total['finished_qty'], 3),
                         'raw_load_sec': round(product_total['raw_load_sec'], 1),
                         'raw_load_min': round(product_total['raw_load_sec'] / 60, 1),
                         'load_sec': round(product_total['load_sec'], 1),
@@ -639,6 +661,7 @@ class LineLoadService:
                 processes.append({
                     'process_id': pid, 'process_code': pt['code'], 'process_name': pt['name'],
                     'equipment_count': pt['equipment_count'],
+                    'finished_qty': round(sum(product['finished_qty'] for product in products), 3),
                     'raw_load_sec': round(pt['raw_load_sec'], 1),
                     'raw_load_min': round(pt['raw_load_sec'] / 60, 1),
                     'load_sec': round(pt['load_sec'], 1), 'load_min': round(pt['load_sec'] / 60, 1),
@@ -650,6 +673,7 @@ class LineLoadService:
                 'date': month_start.isoformat(),
                 'month_label': f"{month_start.strftime('%Y/%m')}",
                 'available_min': total_avail,
+                'finished_qty': round(sum(d.get('finished_qty', 0) for d in days), 3),
                 'line_load_sec': round(total_load_sec, 1), 'line_load_min': round(total_load_sec / 60, 1),
                 'working_days': len(working_days),
                 'utilization': round(util, 1), 'is_working_day': total_avail > 0 or total_load_sec > 0,

@@ -146,7 +146,10 @@
                   @mouseenter="showTooltip($event, gc.groupName, d)"
                   @mouseleave="hideTooltip"
                 >
-                  <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                  <div class="bar-label-stack">
+                    <div class="bar-label-top">需{{ formatFinishedQty(d.finished_qty) }}台</div>
+                    <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                  </div>
                   <div class="bar-track">
                     <div class="bar-fill per-day-bar" :style="barStyle(d, '#60a5fa', chartAxes(gc.data).leftMaxHours)"></div>
                   </div>
@@ -209,7 +212,10 @@
                   @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name}`, d)"
                   @mouseleave="hideTooltip"
                 >
-                  <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                  <div class="bar-label-stack">
+                    <div class="bar-label-top">需{{ formatFinishedQty(d.finished_qty) }}台</div>
+                    <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                  </div>
                   <div class="bar-track">
                     <div class="bar-fill per-day-bar" :style="barStyle(d, '#60a5fa', chartAxes(lineDisplayData(line)).leftMaxHours)"></div>
                   </div>
@@ -274,7 +280,10 @@
                       @mouseenter="showTooltip($event, `${line.line_code} ${line.line_name} / ${proc.process_code} ${proc.process_name}`, d)"
                       @mouseleave="hideTooltip"
                     >
-                      <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                      <div class="bar-label-stack">
+                        <div class="bar-label-top">需{{ formatFinishedQty(d.finished_qty) }}台</div>
+                        <div class="bar-label-top">{{ formatLoadHours(d.line_load_sec) }}h</div>
+                      </div>
                       <div class="bar-track">
                         <div class="bar-fill per-day-bar" :style="barStyle(d, '#93c5fd', chartAxes(processDisplayData(line, proc), { fixedLeftMaxHours: 24 }).leftMaxHours)"></div>
                       </div>
@@ -300,6 +309,7 @@
 
     <div v-if="tooltip.visible" class="chart-tooltip" :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }">
       <div class="tooltip-title">{{ tooltip.line }} / {{ tooltip.date }}</div>
+      <div class="tooltip-row">需要: {{ formatFinishedQty(tooltip.finishedQty) }}台</div>
       <div class="tooltip-row">H/日: {{ formatTooltipPerDayHours(tooltip.perDayHours) }}</div>
       <div class="tooltip-row">負荷: {{ formatHours(tooltip.loadMin) }}h</div>
       <div v-for="p in tooltip.processes" :key="p.process_code" class="tooltip-row">
@@ -371,7 +381,7 @@ watch(() => filters.startDate, () => {
 
 const tooltip = reactive({
   visible: false, x: 0, y: 0,
-  line: '', date: '', availMin: 0, loadMin: 0, utilization: 0, perDayHours: null, processes: [],
+  line: '', date: '', availMin: 0, loadMin: 0, utilization: 0, perDayHours: null, finishedQty: 0, processes: [],
 })
 
 const CHART_BODY_HEIGHT = 120
@@ -521,10 +531,11 @@ const groupCharts = computed(() => {
     for (const line of lines) {
       for (const d of lineDisplayData(line)) {
         if (!dateMap[d.date]) {
-          dateMap[d.date] = { available_min: 0, load_sec: 0, working_days: 0, month_label: d.month_label, week_label: d.week_label }
+          dateMap[d.date] = { available_min: 0, load_sec: 0, finished_qty: 0, working_days: 0, month_label: d.month_label, week_label: d.week_label }
         }
         dateMap[d.date].available_min += d.available_min
         dateMap[d.date].load_sec += d.line_load_sec
+        dateMap[d.date].finished_qty += Number(d.finished_qty || 0)
         dateMap[d.date].working_days = Math.max(dateMap[d.date].working_days, d.working_days || 0)
       }
     }
@@ -536,6 +547,7 @@ const groupCharts = computed(() => {
         month_label: v.month_label,
         week_label: v.week_label,
         available_min: v.available_min,
+        finished_qty: Math.round(v.finished_qty * 1000) / 1000,
         line_load_sec: v.load_sec,
         line_load_min: Math.round(v.load_sec / 60 * 10) / 10,
         working_days: v.working_days || 0,
@@ -605,6 +617,7 @@ const processDisplayData = (line, proc) => {
       month_label: d.month_label,
       week_label: d.week_label,
       available_min: d.available_min,
+      finished_qty: Number(detail?.finished_qty || 0),
       line_load_sec: loadSec,
       line_load_min: loadMin,
       working_days: d.working_days || 0,
@@ -710,6 +723,11 @@ const formatDateLabel = (d) => {
 const formatHours = (minutes) => {
   const hours = (Number(minutes) || 0) / 60
   return Math.round(hours * 10) / 10
+}
+
+const formatFinishedQty = (qty) => {
+  const safeQty = Number(qty || 0)
+  return Number.isInteger(safeQty) ? String(safeQty) : String(Math.round(safeQty * 10) / 10)
 }
 
 const formatExcelHours = (minutes) => {
@@ -844,6 +862,7 @@ const styleSimpleTable = (worksheet, startRow, rowCount, colCount, options = {})
   const integerCols = new Set(options.integerCols || [])
   const decimalCols = new Set(options.decimalCols || [])
   const leftAlignCols = new Set(options.leftAlignCols || [])
+  const decimalNumFmt = options.decimalNumFmt || '0.00'
 
   for (let col = 1; col <= colCount; col += 1) {
     applyExcelCellStyle(worksheet.getCell(startRow, col), {
@@ -859,7 +878,7 @@ const styleSimpleTable = (worksheet, startRow, rowCount, colCount, options = {})
     const zebraBg = row % 2 === 0 ? '#f8fbff' : '#ffffff'
     for (let col = 1; col <= colCount; col += 1) {
       const cell = worksheet.getCell(row, col)
-      const numFmt = integerCols.has(col) ? '0' : decimalCols.has(col) ? '0.00' : null
+      const numFmt = integerCols.has(col) ? '0' : decimalCols.has(col) ? decimalNumFmt : null
       applyExcelCellStyle(cell, {
         align: leftAlignCols.has(col) ? 'left' : numFmt ? 'right' : 'center',
         bg: zebraBg,
@@ -938,6 +957,7 @@ const showTooltip = (ev, label, d) => {
   tooltip.availMin = d.available_min
   tooltip.loadMin = d.line_load_min || 0
   tooltip.perDayHours = getPerDayHours(d)
+  tooltip.finishedQty = Number(d.finished_qty || 0)
   tooltip.utilization = d.utilization
   tooltip.processes = d.processes || []
 }
@@ -987,6 +1007,58 @@ const buildProductProcessLoadSheet = (dates, dateLabels) => {
           const process = dateEntry?.processes?.find(item => item.process_id === processEntry.process_id)
           const product = process?.products?.find(item => item.product_code === productEntry.product_code)
           row.push(product ? formatExcelHours(product.load_min) : '')
+        }
+        rows.push(row)
+      }
+    }
+  }
+
+  return rows
+}
+
+const buildProductProcessQtySheet = (dates, dateLabels) => {
+  const rows = [['ライン', '工程', '完成品コード', '完成品名', ...dateLabels]]
+
+  for (const line of result.value.lines) {
+    const displayData = lineDisplayData(line)
+    const dateMap = new Map(displayData.map(d => [d.date, d]))
+    const processMap = new Map()
+    for (const d of displayData) {
+      for (const process of (d.processes || [])) {
+        const processKey = process.process_id
+        if (!processMap.has(processKey)) {
+          processMap.set(processKey, {
+            process_id: process.process_id,
+            process_code: process.process_code,
+            process_name: process.process_name,
+            products: new Map(),
+          })
+        }
+        const processEntry = processMap.get(processKey)
+        for (const product of (process.products || [])) {
+          if (!processEntry.products.has(product.product_code)) {
+            processEntry.products.set(product.product_code, {
+              product_code: product.product_code,
+              product_name: product.product_name,
+            })
+          }
+        }
+      }
+    }
+
+    for (const processEntry of [...processMap.values()].sort((a, b) => a.process_code.localeCompare(b.process_code))) {
+      for (const productEntry of [...processEntry.products.values()].sort((a, b) => a.product_code.localeCompare(b.product_code))) {
+        const row = [
+          `${line.line_code} ${line.line_name}`,
+          `${processEntry.process_code} ${processEntry.process_name}`,
+          productEntry.product_code,
+          productEntry.product_name,
+        ]
+        for (const d of dates) {
+          const dateEntry = dateMap.get(d.date)
+          const process = dateEntry?.processes?.find(item => item.process_id === processEntry.process_id)
+          const product = process?.products?.find(item => item.product_code === productEntry.product_code)
+          row.push(product ? Number(product.finished_qty || 0) : '')
         }
         rows.push(row)
       }
@@ -1276,6 +1348,18 @@ const exportExcel = async () => {
   })
   wsProductProcess.views = [{ state: 'frozen', xSplit: 4, ySplit: 6 }]
 
+  const productProcessQtyRows = buildProductProcessQtySheet(dates, dateLabels)
+  const wsProductProcessQty = workbook.addWorksheet('完成品別各工程ライン台数')
+  setWorksheetColumns(wsProductProcessQty, productCols)
+  decorateSheetHeader(wsProductProcessQty, '長期負荷チャート 完成品別各工程ライン台数', productCols.length, userName)
+  writeSheetRows(wsProductProcessQty, 6, productProcessQtyRows)
+  styleSimpleTable(wsProductProcessQty, 6, productProcessQtyRows.length, productCols.length, {
+    leftAlignCols: [1, 2, 3, 4],
+    decimalCols: Array.from({ length: productCols.length - 4 }, (_, index) => index + 5),
+    decimalNumFmt: '0.###',
+  })
+  wsProductProcessQty.views = [{ state: 'frozen', xSplit: 4, ySplit: 6 }]
+
   const agg = filters.aggregate === 'monthly' ? '月別' : filters.aggregate === 'weekly' ? '週別' : '日別'
   await downloadWorkbook(workbook, `長期負荷_${agg}_${filters.startDate}_${filters.endDate}.xlsx`)
 }
@@ -1385,7 +1469,8 @@ const exportExcel = async () => {
 .line-path { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .line-point { fill: currentColor; stroke: #ffffff; stroke-width: 1; }
 .bar-col { display: flex; flex-direction: column; align-items: center; width: 36px; flex-shrink: 0; cursor: pointer; position: relative; z-index: 2; }
-.bar-label-top { font-size: 9px; color: #666; margin-bottom: 2px; white-space: nowrap; }
+.bar-label-stack { display: flex; flex-direction: column; align-items: center; min-height: 24px; margin-bottom: 2px; }
+.bar-label-top { font-size: 9px; color: #666; line-height: 1.1; white-space: nowrap; }
 .bar-track { width: 28px; height: 120px; background: transparent; position: relative; display: flex; align-items: flex-end; }
 .bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.3s; min-height: 1px; }
 .per-day-bar { opacity: 0.9; }

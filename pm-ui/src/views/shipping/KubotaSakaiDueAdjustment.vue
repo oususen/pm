@@ -1406,7 +1406,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid #d7dfe8;
   padding: 3px 6px;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 14px;
   height: 28px;
   box-sizing: border-box;
   vertical-align: top;
@@ -1506,7 +1506,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px dashed #e5e7eb;
   box-sizing: border-box;
   text-align: right;
-  font-size: 12px;
+  font-size: 14px;
 }
 .sub-cell:last-child {
   border-bottom: none;
