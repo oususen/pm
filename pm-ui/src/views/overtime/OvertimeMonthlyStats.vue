@@ -157,8 +157,11 @@
       <template v-if="activeTab === 'monthly'">
         <div class="summary-bar">
           <span>{{ summaryNames.length }}名</span>
-          <span class="summary-total">
-            労働時間合計: {{ totals.workH }}H　残業合計: {{ totals.overtimeH }}H　有給合計: {{ totals.paidLeaveCount }}回
+          <span class="summary-right">
+            <span class="summary-total">
+              労働時間合計: {{ totals.workH }}H　残業合計: {{ totals.overtimeH }}H　有給合計: {{ totals.paidLeaveCount }}回
+            </span>
+            <button class="btn btn-excel" @click="exportExcel">Excel出力</button>
           </span>
         </div>
         <div class="table-wrap">
@@ -1081,33 +1084,79 @@ async function load() {
 }
 
 function exportExcel() {
-  const headers = ['氏名', '班', 'グループ', '日付', '種別', '開始時間', '終了時間', '労働時間(H)', '残業(H)', '休日出勤(H)', '所定外(H)', '午前半休', '午後半休', '前日有給', '連続有給', '有給数']
-  const data = filteredRows.value.map(r => [
-    r.name, r.team, r.group, r.date, r.typeLabel,
-    r.startTime || '', r.endTime || '',
-    r.workH || '', r.overtimeH || '', r.holidayH || '',
-    Math.round((r.overtimeH + r.holidayH) * 10) / 10 || '',
-    r.halfDayAm ? '○' : '', r.halfDayPm ? '○' : '',
-    r.paidLeave ? '○' : '', r.paidLeaveConsec ? '○' : '',
-    r.paidLeaveCount || '',
-  ])
-  // 合計行
-  data.push([
-    '合計', '', '', '', '', '', '',
-    totals.value.workH, totals.value.overtimeH || '', totals.value.holidayH || '',
-    (totals.value.overtimeH + totals.value.holidayH) || '',
-    totals.value.halfDayAm || '', totals.value.halfDayPm || '',
-    totals.value.paidLeave || '', totals.value.paidLeaveConsec || '',
-    totals.value.paidLeaveCount || '',
-  ])
+  const isMonthlyTab = activeTab.value === 'monthly'
+  const headers = isMonthlyTab
+    ? [
+        '氏名',
+        ...monthlyColumns.value.flatMap((month) => [
+          `${formatMonthLabel(month)}_残業(H)`,
+          `${formatMonthLabel(month)}_労働(H)`,
+          `${formatMonthLabel(month)}_有給(回)`,
+        ]),
+        '合計_残業(H)',
+        '合計_労働(H)',
+        '合計_有給(回)',
+      ]
+    : ['氏名', '班', 'グループ', '日付', '種別', '開始時間', '終了時間', '労働時間(H)', '残業(H)', '休日出勤(H)', '所定外(H)', '午前半休', '午後半休', '前日有給', '連続有給', '有給数']
+
+  const data = isMonthlyTab
+    ? summaryNames.value.map((name) => [
+        name,
+        ...monthlyColumns.value.flatMap((month) => {
+          const cell = monthlyGrid.value[name]?.[month] || {}
+          return [
+            cell.overtimeH || '',
+            cell.workH || '',
+            cell.paidLeaveCount || '',
+          ]
+        }),
+        monthlyRowTotal(name, 'overtimeH') || '',
+        monthlyRowTotal(name, 'workH') || '',
+        monthlyRowTotal(name, 'paidLeaveCount') || '',
+      ])
+    : filteredRows.value.map((r) => [
+        r.name, r.team, r.group, r.date, r.typeLabel,
+        r.startTime || '', r.endTime || '',
+        r.workH || '', r.overtimeH || '', r.holidayH || '',
+        Math.round((r.overtimeH + r.holidayH) * 10) / 10 || '',
+        r.halfDayAm ? '○' : '', r.halfDayPm ? '○' : '',
+        r.paidLeave ? '○' : '', r.paidLeaveConsec ? '○' : '',
+        r.paidLeaveCount || '',
+      ])
+
+  data.push(
+    isMonthlyTab
+      ? [
+          '合計',
+          ...monthlyColumns.value.flatMap((month) => [
+            monthlyColTotal(month, 'overtimeH') || '',
+            monthlyColTotal(month, 'workH') || '',
+            monthlyColTotal(month, 'paidLeaveCount') || '',
+          ]),
+          totals.value.overtimeH || '',
+          totals.value.workH || '',
+          totals.value.paidLeaveCount || '',
+        ]
+      : [
+          '合計', '', '', '', '', '', '',
+          totals.value.workH, totals.value.overtimeH || '', totals.value.holidayH || '',
+          (totals.value.overtimeH + totals.value.holidayH) || '',
+          totals.value.halfDayAm || '', totals.value.halfDayPm || '',
+          totals.value.paidLeave || '', totals.value.paidLeaveConsec || '',
+          totals.value.paidLeaveCount || '',
+        ],
+  )
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
-  // 列幅設定
-  ws['!cols'] = [18, 8, 10, 12, 10, 8, 8, 12, 10, 12, 10, 8, 8, 8, 8, 8].map(w => ({ wch: w }))
+  ws['!cols'] = isMonthlyTab
+    ? [{ wch: 18 }, ...headers.slice(1).map(() => ({ wch: 12 }))]
+    : [18, 8, 10, 12, 10, 8, 8, 12, 10, 12, 10, 8, 8, 8, 8, 8].map(w => ({ wch: w }))
 
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '労働時間統計')
-  const filename = `労働時間統計_${dateFrom.value}_${dateTo.value}.xlsx`
+  XLSX.utils.book_append_sheet(wb, ws, isMonthlyTab ? '月別労働時間統計' : '労働時間統計')
+  const filename = isMonthlyTab
+    ? `労働時間統計_月別_${dateFrom.value}_${dateTo.value}.xlsx`
+    : `労働時間統計_${dateFrom.value}_${dateTo.value}.xlsx`
   XLSX.writeFile(wb, filename)
 }
 
