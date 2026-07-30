@@ -661,6 +661,22 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 if '発注番号' in normalized_header:
                     return True
 
+                sample_rows = []
+                for row in rows[1:]:
+                    data_no = row[0].strip() if len(row) > 0 else ''
+                    if data_no not in ('45', '47'):
+                        continue
+                    sample_rows.append(row)
+                    if len(sample_rows) >= 5:
+                        break
+
+                for row in sample_rows:
+                    data_no = row[0].strip() if len(row) > 0 else ''
+                    legacy_order_no = row[3].strip() if len(row) > 3 else ''
+                    new_order_no = row[33].strip() if len(row) > 33 else ''
+                    if data_no == '47' and not legacy_order_no and new_order_no:
+                        return True
+
             elif order_type == 'FORECAST':
                 # 現行枚方内示: 123列 / 日程ライン圧縮あり / 初月度(指示日/指示数)系ではない
                 if len(header) != 123:

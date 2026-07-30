@@ -94,12 +94,19 @@ class KubotaHirakataKakuteiImportService:
         if '発注番号' in header:
             return True
 
-        for row in rows[1:6]:
+        sample_rows = []
+        for row in rows[1:]:
+            data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
+            if data_no not in (self.DATA_NO_45, self.DATA_NO_47):
+                continue
+            sample_rows.append(row)
+            if len(sample_rows) >= 5:
+                break
+
+        for row in sample_rows:
             data_no = row[self.COL_DATA_NO].strip() if len(row) > self.COL_DATA_NO else ''
             legacy_order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
             new_order_no = row[33].strip() if len(row) > 33 else ''
-            if data_no not in (self.DATA_NO_45, self.DATA_NO_47):
-                return True
             if data_no == self.DATA_NO_47 and not legacy_order_no and new_order_no:
                 return True
 
