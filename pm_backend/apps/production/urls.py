@@ -52,6 +52,7 @@ from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView,
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
 from production.views_line_product_display_order import LineProductDisplayOrderViewSet
 from production.views_plan_deviation_report import PlanDeviationReportView, PlanDeviationLineConfigView
+from production.views_progress_compare import ProgressPdfCompareView
 from production.views_record_confirmation import ProductionRecordConfirmationView
 from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeLayoutConfigView, StocktakeAreaView
 from production.views_morning_meeting import MorningMeetingViewSet
@@ -169,4 +170,5 @@ urlpatterns = [
     path('finished-product-cycle-time/list/', FinishedProductCycleTimeListView.as_view(), name='finished-product-cycle-time-list'),
     path('finished-product-cycle-time/latest-for-line/', FinishedProductCycleTimeLatestForLineView.as_view(), name='finished-product-cycle-time-latest-for-line'),
     path('actual-cycle-time/delete-by-period/', ActualCycleTimeDeleteByPeriodView.as_view(), name='actual-cycle-time-delete-by-period'),
+    path('progress-pdf-compare/', ProgressPdfCompareView.as_view(), name='progress-pdf-compare'),
 ]

@@ -385,6 +385,12 @@ const production = [
     component: () => import("@/views/production/LineLoadChart.vue"),
     meta: { pageTitle: "長期負荷チャート", manualPath: "生産/長期負荷チャート.md", resource: "production" },
   },
+  {
+    path: "/production/progress-pdf-compare",
+    name: "ProgressPdfCompare",
+    component: () => import("@/views/production/ProgressPdfCompare.vue"),
+    meta: { pageTitle: "進度PDF突合", resource: "production" },
+  },
 ];
 
 export default production;

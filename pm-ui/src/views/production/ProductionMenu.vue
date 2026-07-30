@@ -291,6 +291,15 @@ const tiles = computed(() => {
       resource: "production.inventory",
     },
     {
+      to: "/production/progress-pdf-compare",
+      label: "進度PDF突合",
+      icon: "🔍",
+      iconLabel: "突合",
+      category: "inventory",
+      required: "view",
+      resource: "production",
+    },
+    {
       to: "/production/morning-meetings",
       label: "朝礼",
       icon: "☀️",
