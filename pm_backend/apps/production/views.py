@@ -4353,6 +4353,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_id: int (required),
             start_date: str (YYYY-MM-DD, required),
             end_date: str (YYYY-MM-DD, required),
+            adjustment_date: str (YYYY-MM-DD, optional) - 個別調整保存後の再計算時のみ使用
             include_progress: bool (optional, default: True),
             line_final_only: bool (optional, default: False) - Trueの場合はライン最終品のみ計算
             final_only: bool (deprecated, line_final_only を使用) - 後方互換のため残存
@@ -4364,6 +4365,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         line_id = request.data.get('line_id')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
+        adjustment_date = request.data.get('adjustment_date')
         include_progress_raw = request.data.get('include_progress', True)
         try:
             requested_product_ids = _parse_product_ids(request.data.get('product_ids'))
@@ -4400,6 +4402,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
+        adjustment_dt = None
+        if adjustment_date not in (None, ''):
+            try:
+                adjustment_dt = datetime.strptime(str(adjustment_date), '%Y-%m-%d').date()
+            except ValueError as e:
+                return Response({'detail': f'Invalid adjustment_date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
         effective_start_dt = _resolve_inventory_effective_start_date(
             line_id,
             start_dt,
@@ -4408,6 +4417,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_final_only=line_final_only,
             include_progress=include_progress or progress_only,
         )
+        if adjustment_dt and requested_product_ids and (include_progress or progress_only):
+            effective_start_dt = min(adjustment_dt, effective_start_dt)
 
         try:
             result = recalculate_inventory_for_line(

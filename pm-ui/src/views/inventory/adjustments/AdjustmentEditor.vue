@@ -351,6 +351,7 @@ const recalcThenReload = async () => {
       line_id: form.lineId,
       start_date: displayStartDate.value || today,
       end_date: formatISODate(endDateObj),
+      adjustment_date: adjustmentDate.value,
       product_ids: form.productId ? [form.productId] : undefined,
     });
     await reload();
