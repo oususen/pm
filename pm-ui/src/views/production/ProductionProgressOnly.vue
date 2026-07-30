@@ -61,6 +61,9 @@
         </button>
       </div>
     </div>
+    <div v-if="deepRecalcLockWarning" class="deep-recalc-lock-warning">
+      {{ deepRecalcLockWarning }}
+    </div>
 
     <!-- 過去から再計算 確認ダイアログ -->
     <div v-if="showDeepRecalcDialog" class="code-modal-overlay" @click.self="showDeepRecalcDialog = false">
@@ -81,6 +84,7 @@
           </ul>
           <p class="deep-recalc-danger">※ 過去の日の実績を入力した後にのみ実行してください。<br>表示開始日を実績入力日の一番古い日にしてください。<br>むやみに実行すると在庫・進度データが不整合になる恐れがあります。</p>
           <p class="deep-recalc-warn">※ 各品番のLT算出結果（calc_start_date）の最古日を開始日に採用します。</p>
+          <p v-if="deepRecalcLockWarning" class="deep-recalc-lock-text">{{ deepRecalcLockWarning }}</p>
           <div class="deep-recalc-actions">
             <button type="button" @click="showDeepRecalcDialog = false">キャンセル</button>
             <button type="button" class="btn-confirm-deep" @click="confirmDeepRecalc">実行</button>
@@ -277,6 +281,7 @@ const horizon = ref(30);
 const loading = ref(false);
 const recalculating = ref(false);
 const error = ref("");
+const progressLockDate = ref("");
 const backlogs = ref([]);
 const lineDemands = ref([]);
 const purchaseTargetProductIds = ref([]);
@@ -301,6 +306,32 @@ const handleEnter = () => {
 const hasFilter = computed(() =>
   Boolean(lineFilter.value || processFilter.value || productFilter.value)
 );
+
+const formatLocalDate = (d) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const resolveStoredLockDate = (raw) => {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (value.startsWith("days:")) {
+    const daysAgo = Number.parseInt(value.slice(5), 10);
+    if (!Number.isFinite(daysAgo) || daysAgo <= 0) return "";
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return formatLocalDate(d);
+  }
+  return value;
+};
+
+const deepRecalcLockWarning = computed(() => {
+  if (!progressLockDate.value || !startDate.value) return "";
+  if (startDate.value > progressLockDate.value) return "";
+  return `進度締め日 ${progressLockDate.value} 以前は、過去から再計算しても既存値維持です。`;
+});
 
 const columns = computed(() => {
   const start = parseISODate(startDate.value);
@@ -834,6 +865,16 @@ const confirmDeepRecalc = async () => {
   }
 };
 
+const loadProgressLockDate = async () => {
+  try {
+    const res = await api.systemSettings.getAll();
+    progressLockDate.value = resolveStoredLockDate(res.data?.["lock_date.progress"]?.value);
+  } catch (e) {
+    console.error("進度締め日の取得に失敗しました", e);
+    progressLockDate.value = "";
+  }
+};
+
 // ライン・工程コード参照 (F4で開く)
 const showCodeLookup = ref(false);
 const lineList = ref([]);
@@ -935,6 +976,7 @@ const onWindowResize = () => {
 };
 
 onMounted(() => {
+  loadProgressLockDate();
   window.addEventListener("keydown", handleKeyDown);
   window.addEventListener("resize", onWindowResize);
   nextTick(updateFloatingScroll);
@@ -1537,6 +1579,14 @@ const getCellClass = (group, date, rowKey) => {
     background: #6d28d9;
   }
 }
+.deep-recalc-lock-warning {
+  margin: 6px 0 10px;
+  padding: 6px 10px;
+  border: 1px solid #d8a35d;
+  background: #fff3cd;
+  color: #8a5a00;
+  font-size: 12px;
+}
 
 /* 過去から再計算 ダイアログ */
 .deep-recalc-modal {
@@ -1560,6 +1610,11 @@ const getCellClass = (group, date, rowKey) => {
 .deep-recalc-warn {
   color: #b45309;
   font-size: 12px;
+}
+.deep-recalc-lock-text {
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 700;
 }
 .deep-recalc-actions {
   display: flex;

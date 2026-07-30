@@ -170,7 +170,7 @@
               <tr>
                 <th class="name-header" rowspan="2">氏名</th>
                 <th v-for="month in monthlyColumns" :key="month" class="date-header" colspan="3">{{ formatMonthLabel(month) }}</th>
-                <th class="total-header" colspan="3">合計</th>
+                <th class="total-header" colspan="4">合計</th>
               </tr>
               <tr>
                 <template v-for="month in monthlyColumns" :key="`${month}-metrics`">
@@ -181,6 +181,7 @@
                 <th class="metric-header total-header">残業(H)</th>
                 <th class="metric-header total-header">労働(H)</th>
                 <th class="metric-header total-header">有給(回)</th>
+                <th class="metric-header total-header">42H超え回数</th>
               </tr>
             </thead>
             <tbody>
@@ -194,6 +195,7 @@
                 <td class="num-cell total-col">{{ monthlyRowTotal(name, 'overtimeH') }}</td>
                 <td class="num-cell total-col">{{ monthlyRowTotal(name, 'workH') }}</td>
                 <td class="num-cell total-col">{{ monthlyRowTotal(name, 'paidLeaveCount') }}</td>
+                <td class="num-cell total-col">{{ monthlyOver42Count(name) || '—' }}</td>
               </tr>
             </tbody>
             <tfoot>
@@ -207,6 +209,7 @@
                 <td class="num-cell total-col">{{ totals.overtimeH || '—' }}</td>
                 <td class="num-cell total-col">{{ totals.workH }}</td>
                 <td class="num-cell total-col">{{ totals.paidLeaveCount || '—' }}</td>
+                <td class="num-cell total-col">{{ totalOver42Count || '—' }}</td>
               </tr>
             </tfoot>
           </table>
@@ -735,6 +738,15 @@ function monthlyColTotal(month, key) {
   return total ? Math.round(total * 10) / 10 : 0
 }
 
+function monthlyOver42Count(name) {
+  const byMonth = monthlyGrid.value[name] || {}
+  return Object.values(byMonth).filter((cell) => Number(cell?.overtimeH || 0) > 42).length
+}
+
+const totalOver42Count = computed(() =>
+  summaryNames.value.reduce((sum, name) => sum + monthlyOver42Count(name), 0),
+)
+
 // 日付を短縮表示（MM/DD）
 function formatDateShort(dateStr) {
   if (!dateStr) return ''
@@ -1093,6 +1105,8 @@ const EXCEL_THEME = {
   headerFill: 'D6E4F0',
   subHeaderFill: 'EEF5FB',
   totalFill: 'E8F5E9',
+  overtimeAlertFill: 'FDE2E1',
+  overtimeAlertFont: 'B42318',
   border: 'B7C4D2',
 }
 
@@ -1156,6 +1170,15 @@ function setFrozenView(sheet) {
   sheet.views = [{ state: 'frozen', ySplit: 5, xSplit: 1 }]
 }
 
+function isMonthlyOvertimeColumn(colIndex, monthlyMetricLastCol) {
+  if (colIndex < 2 || colIndex > monthlyMetricLastCol) return false
+  return (colIndex - 2) % 3 === 0
+}
+
+function isOvertimeAlertValue(value) {
+  return Number(value || 0) > 42
+}
+
 async function exportExcel() {
   const ExcelJS = (await import('exceljs')).default
   const isMonthlyTab = activeTab.value === 'monthly'
@@ -1163,7 +1186,8 @@ async function exportExcel() {
   const sheet = workbook.addWorksheet(isMonthlyTab ? '月別労働時間統計' : '労働時間統計')
 
   if (isMonthlyTab) {
-    const lastCol = 1 + (monthlyColumns.value.length * 3) + 3
+    const monthlyMetricLastCol = 1 + (monthlyColumns.value.length * 3)
+    const lastCol = monthlyMetricLastCol + 4
     sheet.mergeCells(1, 1, 1, lastCol)
     const titleCell = sheet.getCell(1, 1)
     titleCell.value = '労働時間統計（月別）'
@@ -1193,12 +1217,13 @@ async function exportExcel() {
       col += 3
     }
 
-    sheet.mergeCells(5, col, 5, col + 2)
+    sheet.mergeCells(5, col, 5, col + 3)
     sheet.getCell(5, col).value = '合計'
     styleCell(sheet.getCell(5, col), { bold: true, bg: EXCEL_THEME.totalFill })
     styleCell(sheet.getCell(5, col + 1), { bold: true, bg: EXCEL_THEME.totalFill })
     styleCell(sheet.getCell(5, col + 2), { bold: true, bg: EXCEL_THEME.totalFill })
-    ;['残業(H)', '労働(H)', '有給(回)'].forEach((label, idx) => {
+    styleCell(sheet.getCell(5, col + 3), { bold: true, bg: EXCEL_THEME.totalFill })
+    ;['残業(H)', '労働(H)', '有給(回)', '42H超え回数'].forEach((label, idx) => {
       const cell = sheet.getCell(6, col + idx)
       cell.value = label
       styleCell(cell, { bold: true, bg: EXCEL_THEME.totalFill })
@@ -1215,14 +1240,18 @@ async function exportExcel() {
         monthlyRowTotal(name, 'overtimeH') || '',
         monthlyRowTotal(name, 'workH') || '',
         monthlyRowTotal(name, 'paidLeaveCount') || '',
+        monthlyOver42Count(name) || '',
       )
       sheet.addRow(row)
       styleCell(sheet.getCell(rowIndex, 1), { bold: true, align: 'left' })
       for (let c = 2; c <= lastCol; c += 1) {
+        const value = sheet.getCell(rowIndex, c).value
+        const isAlert = isMonthlyOvertimeColumn(c, monthlyMetricLastCol) && isOvertimeAlertValue(value)
         styleCell(sheet.getCell(rowIndex, c), {
           align: c % 3 === 1 ? 'center' : 'right',
-          bg: c > lastCol - 3 ? 'F7FBF7' : null,
-          numFmt: c % 3 === 1 ? '0.0' : '0.0',
+          bg: isAlert ? EXCEL_THEME.overtimeAlertFill : (c > monthlyMetricLastCol ? 'F7FBF7' : null),
+          color: isAlert ? EXCEL_THEME.overtimeAlertFont : null,
+          numFmt: c === lastCol ? '0' : '0.0',
         })
       }
       rowIndex += 1
@@ -1238,17 +1267,18 @@ async function exportExcel() {
       totals.value.overtimeH || '',
       totals.value.workH || '',
       totals.value.paidLeaveCount || '',
+      totalOver42Count.value || '',
     ])
     for (let c = 1; c <= lastCol; c += 1) {
       styleCell(sheet.getCell(rowIndex, c), {
         bold: true,
         align: c === 1 ? 'left' : (c % 3 === 1 ? 'center' : 'right'),
         bg: EXCEL_THEME.totalFill,
-        numFmt: c === 1 ? null : '0.0',
+        numFmt: c === 1 ? null : (c === lastCol ? '0' : '0.0'),
       })
     }
 
-    sheet.columns = [{ width: 20 }, ...Array.from({ length: lastCol - 1 }, () => ({ width: 12 }))]
+    sheet.columns = [{ width: 20 }, ...Array.from({ length: lastCol - 2 }, () => ({ width: 12 })), { width: 14 }]
   } else {
     const headers = ['氏名', '班', 'グループ', '日付', '種別', '開始時間', '終了時間', '労働時間(H)', '残業(H)', '休日出勤(H)', '所定外(H)', '午前半休', '午後半休', '前日有給', '連続有給', '有給数']
     const lastCol = headers.length
