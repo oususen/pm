@@ -248,7 +248,6 @@ def recalculate_progress_qty(
         f'LineBacklog日数={len(by_date)}, LineDemand件数={demand_row_count}, 初期進度={last_progress}, '
         f'初期計画進度={last_planned_progress}'
     )
-
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
     backlogs_to_update = []
 

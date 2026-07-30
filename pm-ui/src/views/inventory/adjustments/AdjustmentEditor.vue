@@ -16,6 +16,9 @@
         />
       </label>
     </div>
+    <div v-if="singleProgressLockWarning" class="lock-warning">
+      {{ singleProgressLockWarning }}
+    </div>
 
     <div class="tabs">
       <button class="tab" :class="{ active: activeTab === 'single' }" type="button" @click="activeTab = 'single'">個別</button>
@@ -317,6 +320,35 @@ const adjustDate = ref(today);
 const displayStartDate = ref(today);
 const adjustmentDate = ref(today); // LTから自動計算される調整可能日（この行だけ入力可）
 const activeTab = ref("single");
+const progressLockDate = ref("");
+
+const formatLocalDate = (d) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const resolveStoredLockDate = (raw) => {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (value.startsWith("days:")) {
+    const daysAgo = Number.parseInt(value.slice(5), 10);
+    if (!Number.isFinite(daysAgo) || daysAgo <= 0) return "";
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return formatLocalDate(d);
+  }
+  return value;
+};
+
+const singleProgressLockWarning = computed(() => {
+  if (activeTab.value !== "single") return "";
+  if (!(isProgressType || isPlannedProgressType)) return "";
+  if (!progressLockDate.value || !adjustmentDate.value) return "";
+  if (adjustmentDate.value > progressLockDate.value) return "";
+  return `進度締め日 ${progressLockDate.value} 以前のため、この調整対象日は再計算しても進度に反映されません。`;
+});
 
 // 在庫差分ヘルパー（STOCKタイプのみ）
 const systemStockToday = ref(null);
@@ -347,13 +379,20 @@ const recalcThenReload = async () => {
   try {
     const endDateObj = new Date(displayStartDate.value || today);
     endDateObj.setDate(endDateObj.getDate() + 29);
-    await api.lineBacklogs.recalculateInventory({
+    const payload = {
       line_id: form.lineId,
-      start_date: displayStartDate.value || today,
+      start_date: adjustmentDate.value || displayStartDate.value || today,
       end_date: formatISODate(endDateObj),
-      adjustment_date: adjustmentDate.value,
       product_ids: form.productId ? [form.productId] : undefined,
-    });
+    };
+    if (isProgressType || isPlannedProgressType) {
+      await api.lineBacklogs.recalculateInventoryDeep({
+        ...payload,
+        progress_only: true,
+      });
+    } else {
+      await api.lineBacklogs.recalculateInventory(payload);
+    }
     await reload();
   } catch (e) {
     alert(e?.response?.data?.detail || '在庫再計算に失敗しました');
@@ -390,12 +429,20 @@ const applyAndRecalc = async () => {
     // 再計算して反映
     const endDateObj = new Date(displayStartDate.value || today);
     endDateObj.setDate(endDateObj.getDate() + 29);
-    await api.lineBacklogs.recalculateInventory({
+    const payload = {
       line_id: form.lineId,
-      start_date: displayStartDate.value || today,
+      start_date: adjustmentDate.value || displayStartDate.value || today,
       end_date: formatISODate(endDateObj),
       product_ids: form.productId ? [form.productId] : undefined,
-    });
+    };
+    if (isProgressType || isPlannedProgressType) {
+      await api.lineBacklogs.recalculateInventoryDeep({
+        ...payload,
+        progress_only: true,
+      });
+    } else {
+      await api.lineBacklogs.recalculateInventory(payload);
+    }
     actualStockToday.value = null;
     await reload();
   } catch (e) {
@@ -1135,6 +1182,16 @@ const loadBatchProducts = async () => {
   }
 };
 
+const loadProgressLockDate = async () => {
+  try {
+    const res = await api.systemSettings.getAll();
+    progressLockDate.value = resolveStoredLockDate(res.data?.["lock_date.progress"]?.value);
+  } catch (e) {
+    console.error("進度締め日の取得に失敗しました", e);
+    progressLockDate.value = "";
+  }
+};
+
 const handleBatchTargetDateChange = async () => {
   batchActualInputs.value = {};
   if (batchSearchCode.value) {
@@ -1251,6 +1308,7 @@ const batchApplyAndRecalc = async () => {
 
 onMounted(() => {
   buildRows();
+  loadProgressLockDate();
   reload();
 });
 </script>
@@ -1271,6 +1329,14 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+}
+.lock-warning {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid #d8a35d;
+  background: #fff3cd;
+  color: #8a5a00;
+  font-size: 12px;
 }
 .toolbar-field {
   display: flex;

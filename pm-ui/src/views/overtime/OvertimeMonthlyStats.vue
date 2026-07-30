@@ -246,7 +246,6 @@
 
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue'
-import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -749,6 +748,10 @@ function formatMonthLabel(monthStr) {
   return `${parts[0]}/${parts[1]}`
 }
 
+function formatDateRangeLabel() {
+  return `${dateFrom.value} ～ ${dateTo.value}`
+}
+
 function formatMetric(value) {
   const num = Number(value)
   if (!Number.isFinite(num)) return '—'
@@ -1083,81 +1086,246 @@ async function load() {
   }
 }
 
-function exportExcel() {
-  const isMonthlyTab = activeTab.value === 'monthly'
-  const headers = isMonthlyTab
-    ? [
-        '氏名',
-        ...monthlyColumns.value.flatMap((month) => [
-          `${formatMonthLabel(month)}_残業(H)`,
-          `${formatMonthLabel(month)}_労働(H)`,
-          `${formatMonthLabel(month)}_有給(回)`,
-        ]),
-        '合計_残業(H)',
-        '合計_労働(H)',
-        '合計_有給(回)',
-      ]
-    : ['氏名', '班', 'グループ', '日付', '種別', '開始時間', '終了時間', '労働時間(H)', '残業(H)', '休日出勤(H)', '所定外(H)', '午前半休', '午後半休', '前日有給', '連続有給', '有給数']
+const EXCEL_THEME = {
+  titleFill: '1F6F5F',
+  titleFont: 'FFFFFF',
+  metaLabelFill: 'DDEEE8',
+  headerFill: 'D6E4F0',
+  subHeaderFill: 'EEF5FB',
+  totalFill: 'E8F5E9',
+  border: 'B7C4D2',
+}
 
-  const data = isMonthlyTab
-    ? summaryNames.value.map((name) => [
-        name,
-        ...monthlyColumns.value.flatMap((month) => {
-          const cell = monthlyGrid.value[name]?.[month] || {}
-          return [
-            cell.overtimeH || '',
-            cell.workH || '',
-            cell.paidLeaveCount || '',
-          ]
-        }),
+function excelBorder() {
+  return {
+    top: { style: 'thin', color: { argb: EXCEL_THEME.border } },
+    left: { style: 'thin', color: { argb: EXCEL_THEME.border } },
+    bottom: { style: 'thin', color: { argb: EXCEL_THEME.border } },
+    right: { style: 'thin', color: { argb: EXCEL_THEME.border } },
+  }
+}
+
+function styleCell(cell, {
+  bold = false,
+  align = 'center',
+  vertical = 'middle',
+  bg = null,
+  color = null,
+  numFmt = null,
+} = {}) {
+  cell.font = { bold, color: color ? { argb: color } : undefined, size: 11 }
+  cell.alignment = { horizontal: align, vertical, wrapText: true }
+  cell.border = excelBorder()
+  if (bg) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: bg },
+    }
+  }
+  if (numFmt) cell.numFmt = numFmt
+}
+
+async function saveWorkbook(workbook, filename) {
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function addMetaRow(sheet, rowIndex, label, value, lastCol) {
+  sheet.mergeCells(rowIndex, 2, rowIndex, lastCol)
+  const labelCell = sheet.getCell(rowIndex, 1)
+  const valueCell = sheet.getCell(rowIndex, 2)
+  labelCell.value = label
+  valueCell.value = value
+  styleCell(labelCell, { bold: true, bg: EXCEL_THEME.metaLabelFill })
+  styleCell(valueCell, { align: 'left' })
+  for (let col = 3; col <= lastCol; col += 1) {
+    styleCell(sheet.getCell(rowIndex, col), { align: 'left' })
+  }
+}
+
+function setFrozenView(sheet) {
+  sheet.views = [{ state: 'frozen', ySplit: 5, xSplit: 1 }]
+}
+
+async function exportExcel() {
+  const ExcelJS = (await import('exceljs')).default
+  const isMonthlyTab = activeTab.value === 'monthly'
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet(isMonthlyTab ? '月別労働時間統計' : '労働時間統計')
+
+  if (isMonthlyTab) {
+    const lastCol = 1 + (monthlyColumns.value.length * 3) + 3
+    sheet.mergeCells(1, 1, 1, lastCol)
+    const titleCell = sheet.getCell(1, 1)
+    titleCell.value = '労働時間統計（月別）'
+    styleCell(titleCell, { bold: true, align: 'left', bg: EXCEL_THEME.titleFill, color: EXCEL_THEME.titleFont })
+
+    addMetaRow(sheet, 2, '期間', formatDateRangeLabel(), lastCol)
+    addMetaRow(sheet, 3, '抽出条件', `班:${filterTeam.value || '全班'} / グループ:${filterGroup.value || '全グループ'} / 氏名:${filterName.value || '全員'} / 有給:${filterPaidLeave.value === 'any' ? '有給あり' : filterPaidLeave.value === 'none' ? '有給なし' : '全て'}`, lastCol)
+    addMetaRow(sheet, 4, '集計', `労働時間合計 ${totals.value.workH}H / 残業合計 ${totals.value.overtimeH || 0}H / 有給合計 ${totals.value.paidLeaveCount || 0}回`, lastCol)
+
+    sheet.mergeCells(5, 1, 6, 1)
+    sheet.getCell(5, 1).value = '氏名'
+    styleCell(sheet.getCell(5, 1), { bold: true, bg: EXCEL_THEME.headerFill })
+    styleCell(sheet.getCell(6, 1), { bold: true, bg: EXCEL_THEME.headerFill })
+
+    let col = 2
+    for (const month of monthlyColumns.value) {
+      sheet.mergeCells(5, col, 5, col + 2)
+      sheet.getCell(5, col).value = formatMonthLabel(month)
+      styleCell(sheet.getCell(5, col), { bold: true, bg: EXCEL_THEME.headerFill })
+      styleCell(sheet.getCell(5, col + 1), { bold: true, bg: EXCEL_THEME.headerFill })
+      styleCell(sheet.getCell(5, col + 2), { bold: true, bg: EXCEL_THEME.headerFill })
+      ;['残業(H)', '労働(H)', '有給(回)'].forEach((label, idx) => {
+        const cell = sheet.getCell(6, col + idx)
+        cell.value = label
+        styleCell(cell, { bold: true, bg: EXCEL_THEME.subHeaderFill })
+      })
+      col += 3
+    }
+
+    sheet.mergeCells(5, col, 5, col + 2)
+    sheet.getCell(5, col).value = '合計'
+    styleCell(sheet.getCell(5, col), { bold: true, bg: EXCEL_THEME.totalFill })
+    styleCell(sheet.getCell(5, col + 1), { bold: true, bg: EXCEL_THEME.totalFill })
+    styleCell(sheet.getCell(5, col + 2), { bold: true, bg: EXCEL_THEME.totalFill })
+    ;['残業(H)', '労働(H)', '有給(回)'].forEach((label, idx) => {
+      const cell = sheet.getCell(6, col + idx)
+      cell.value = label
+      styleCell(cell, { bold: true, bg: EXCEL_THEME.totalFill })
+    })
+
+    let rowIndex = 7
+    for (const name of summaryNames.value) {
+      const row = [name]
+      for (const month of monthlyColumns.value) {
+        const cell = monthlyGrid.value[name]?.[month] || {}
+        row.push(cell.overtimeH || '', cell.workH || '', cell.paidLeaveCount || '')
+      }
+      row.push(
         monthlyRowTotal(name, 'overtimeH') || '',
         monthlyRowTotal(name, 'workH') || '',
         monthlyRowTotal(name, 'paidLeaveCount') || '',
-      ])
-    : filteredRows.value.map((r) => [
-        r.name, r.team, r.group, r.date, r.typeLabel,
-        r.startTime || '', r.endTime || '',
-        r.workH || '', r.overtimeH || '', r.holidayH || '',
+      )
+      sheet.addRow(row)
+      styleCell(sheet.getCell(rowIndex, 1), { bold: true, align: 'left' })
+      for (let c = 2; c <= lastCol; c += 1) {
+        styleCell(sheet.getCell(rowIndex, c), {
+          align: c % 3 === 1 ? 'center' : 'right',
+          bg: c > lastCol - 3 ? 'F7FBF7' : null,
+          numFmt: c % 3 === 1 ? '0.0' : '0.0',
+        })
+      }
+      rowIndex += 1
+    }
+
+    sheet.addRow([
+      '合計',
+      ...monthlyColumns.value.flatMap((month) => [
+        monthlyColTotal(month, 'overtimeH') || '',
+        monthlyColTotal(month, 'workH') || '',
+        monthlyColTotal(month, 'paidLeaveCount') || '',
+      ]),
+      totals.value.overtimeH || '',
+      totals.value.workH || '',
+      totals.value.paidLeaveCount || '',
+    ])
+    for (let c = 1; c <= lastCol; c += 1) {
+      styleCell(sheet.getCell(rowIndex, c), {
+        bold: true,
+        align: c === 1 ? 'left' : (c % 3 === 1 ? 'center' : 'right'),
+        bg: EXCEL_THEME.totalFill,
+        numFmt: c === 1 ? null : '0.0',
+      })
+    }
+
+    sheet.columns = [{ width: 20 }, ...Array.from({ length: lastCol - 1 }, () => ({ width: 12 }))]
+  } else {
+    const headers = ['氏名', '班', 'グループ', '日付', '種別', '開始時間', '終了時間', '労働時間(H)', '残業(H)', '休日出勤(H)', '所定外(H)', '午前半休', '午後半休', '前日有給', '連続有給', '有給数']
+    const lastCol = headers.length
+    sheet.mergeCells(1, 1, 1, lastCol)
+    const titleCell = sheet.getCell(1, 1)
+    titleCell.value = '労働時間統計（詳細）'
+    styleCell(titleCell, { bold: true, align: 'left', bg: EXCEL_THEME.titleFill, color: EXCEL_THEME.titleFont })
+
+    addMetaRow(sheet, 2, '期間', formatDateRangeLabel(), lastCol)
+    addMetaRow(sheet, 3, '抽出条件', `班:${filterTeam.value || '全班'} / グループ:${filterGroup.value || '全グループ'} / 氏名:${filterName.value || '全員'} / 有給:${filterPaidLeave.value === 'any' ? '有給あり' : filterPaidLeave.value === 'none' ? '有給なし' : '全て'}`, lastCol)
+    addMetaRow(sheet, 4, '集計', `件数 ${filteredRows.value.length}件 / 労働時間合計 ${totals.value.workH}H / 残業合計 ${totals.value.overtimeH || 0}H`, lastCol)
+
+    sheet.addRow(headers)
+    headers.forEach((header, idx) => {
+      styleCell(sheet.getCell(5, idx + 1), { bold: true, bg: EXCEL_THEME.headerFill })
+      sheet.getCell(5, idx + 1).value = header
+    })
+
+    let rowIndex = 6
+    for (const r of filteredRows.value) {
+      sheet.addRow([
+        r.name,
+        r.team,
+        r.group,
+        r.date,
+        r.typeLabel,
+        r.startTime || '',
+        r.endTime || '',
+        r.workH || '',
+        r.overtimeH || '',
+        r.holidayH || '',
         Math.round((r.overtimeH + r.holidayH) * 10) / 10 || '',
-        r.halfDayAm ? '○' : '', r.halfDayPm ? '○' : '',
-        r.paidLeave ? '○' : '', r.paidLeaveConsec ? '○' : '',
+        r.halfDayAm ? '○' : '',
+        r.halfDayPm ? '○' : '',
+        r.paidLeave ? '○' : '',
+        r.paidLeaveConsec ? '○' : '',
         r.paidLeaveCount || '',
       ])
+      for (let c = 1; c <= lastCol; c += 1) {
+        styleCell(sheet.getCell(rowIndex, c), {
+          align: c >= 8 && c <= 11 ? 'right' : c >= 12 ? 'center' : (c === 1 || c === 5 ? 'left' : 'center'),
+          numFmt: c >= 8 && c <= 11 ? '0.0' : (c === 16 ? '0.0' : null),
+        })
+      }
+      rowIndex += 1
+    }
 
-  data.push(
-    isMonthlyTab
-      ? [
-          '合計',
-          ...monthlyColumns.value.flatMap((month) => [
-            monthlyColTotal(month, 'overtimeH') || '',
-            monthlyColTotal(month, 'workH') || '',
-            monthlyColTotal(month, 'paidLeaveCount') || '',
-          ]),
-          totals.value.overtimeH || '',
-          totals.value.workH || '',
-          totals.value.paidLeaveCount || '',
-        ]
-      : [
-          '合計', '', '', '', '', '', '',
-          totals.value.workH, totals.value.overtimeH || '', totals.value.holidayH || '',
-          (totals.value.overtimeH + totals.value.holidayH) || '',
-          totals.value.halfDayAm || '', totals.value.halfDayPm || '',
-          totals.value.paidLeave || '', totals.value.paidLeaveConsec || '',
-          totals.value.paidLeaveCount || '',
-        ],
-  )
+    sheet.addRow([
+      '合計', '', '', '', '', '', '',
+      totals.value.workH, totals.value.overtimeH || '', totals.value.holidayH || '',
+      (totals.value.overtimeH + totals.value.holidayH) || '',
+      totals.value.halfDayAm || '', totals.value.halfDayPm || '',
+      totals.value.paidLeave || '', totals.value.paidLeaveConsec || '',
+      totals.value.paidLeaveCount || '',
+    ])
+    for (let c = 1; c <= lastCol; c += 1) {
+      styleCell(sheet.getCell(rowIndex, c), {
+        bold: true,
+        align: c >= 8 && c <= 11 ? 'right' : c >= 12 ? 'center' : (c === 1 ? 'left' : 'center'),
+        bg: EXCEL_THEME.totalFill,
+        numFmt: c >= 8 && c <= 11 ? '0.0' : (c === 16 ? '0.0' : null),
+      })
+    }
 
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
-  ws['!cols'] = isMonthlyTab
-    ? [{ wch: 18 }, ...headers.slice(1).map(() => ({ wch: 12 }))]
-    : [18, 8, 10, 12, 10, 8, 8, 12, 10, 12, 10, 8, 8, 8, 8, 8].map(w => ({ wch: w }))
+    sheet.columns = [
+      { width: 18 }, { width: 10 }, { width: 12 }, { width: 12 },
+      { width: 12 }, { width: 10 }, { width: 10 }, { width: 12 },
+      { width: 10 }, { width: 12 }, { width: 10 }, { width: 10 },
+      { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
+    ]
+  }
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, isMonthlyTab ? '月別労働時間統計' : '労働時間統計')
+  setFrozenView(sheet)
   const filename = isMonthlyTab
     ? `労働時間統計_月別_${dateFrom.value}_${dateTo.value}.xlsx`
     : `労働時間統計_${dateFrom.value}_${dateTo.value}.xlsx`
-  XLSX.writeFile(wb, filename)
+  await saveWorkbook(workbook, filename)
 }
 
 onMounted(loadUsers)
