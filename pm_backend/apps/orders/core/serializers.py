@@ -18,7 +18,7 @@ class OrderLineSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'line_no', 'product', 'product_code', 'product_name',
             'order_type', 'order_type_display', 'effective_order_type',
-            'quantity', 'actual_shipment_qty', 'due_date', 'plant_code', 'ship_to_code', 'remark',
+            'customer_order_no', 'quantity', 'actual_shipment_qty', 'due_date', 'plant_code', 'ship_to_code', 'remark',
             'customer_code', 'customer_name', 'customer_calendar_id', 'order_no',
             'created_at', 'updated_at'
         ]

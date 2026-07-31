@@ -2,33 +2,43 @@
   <div class="master-menu">
     <h2 class="page-title">受注管理メニュー <DataSourceDialog title="受注管理メニュー" :sources="dsSources" /></h2>
 
-    <div class="master-grid">
-      <RouterLink
-        v-for="tile in visibleTiles"
-        :key="tile.key"
-        :to="tile.to || '#'"
-        class="master-tile"
-        :class="{ 'is-disabled': tile.disabled }"
-        :aria-disabled="tile.disabled ? 'true' : 'false'"
-        :tabindex="tile.disabled ? -1 : 0"
-        @click="(event) => onTileClick(event, tile)"
+    <div class="menu-sections">
+      <section
+        v-for="(section, index) in groupedTiles"
+        :key="section.key"
+        class="menu-section"
+        :class="{ 'has-divider': index > 0 }"
       >
-        <div class="icon-box">{{ tile.icon }}</div>
-        <div class="label" v-html="tile.label"></div>
-        <template v-if="tile.key === 'line_expand'">
-          <button
-            class="action-btn"
-            :disabled="running"
-            @click.prevent="runExpand"
+        <h3 class="section-title">{{ section.label }}</h3>
+        <div class="master-grid">
+          <RouterLink
+            v-for="tile in section.items"
+            :key="tile.key"
+            :to="tile.to || '#'"
+            class="master-tile"
+            :class="{ 'is-disabled': tile.disabled }"
+            :aria-disabled="tile.disabled ? 'true' : 'false'"
+            :tabindex="tile.disabled ? -1 : 0"
+            @click="(event) => onTileClick(event, tile)"
           >
-            {{ running ? '展開中...' : '展開実行' }}
-          </button>
-          <div v-if="message" class="status-text">{{ message }}</div>
-          <ul v-if="warnings.length" class="warn-list">
-            <li v-for="(w, idx) in warnings" :key="idx">{{ w }}</li>
-          </ul>
-        </template>
-      </RouterLink>
+            <div class="icon-box">{{ tile.icon }}</div>
+            <div class="label" v-html="tile.label"></div>
+            <template v-if="tile.key === 'line_expand'">
+              <button
+                class="action-btn"
+                :disabled="running"
+                @click.prevent="runExpand"
+              >
+                {{ running ? '展開中...' : '展開実行' }}
+              </button>
+              <div v-if="message" class="status-text">{{ message }}</div>
+              <ul v-if="warnings.length" class="warn-list">
+                <li v-for="(w, idx) in warnings" :key="idx">{{ w }}</li>
+              </ul>
+            </template>
+          </RouterLink>
+        </div>
+      </section>
     </div>
 
     <p class="helper-text">
@@ -58,6 +68,13 @@ const dsSources = [
 ];
 
 const PERMISSION_MODE = "hide";
+const SECTION_ORDER = ["order_ops", "analysis", "settings", "other"];
+const SECTION_LABELS = {
+  order_ops: "受注業務",
+  analysis: "分析・監査",
+  settings: "設定",
+  other: "その他",
+};
 
 const running = ref(false);
 const message = ref("");
@@ -93,6 +110,7 @@ const tiles = computed(() => [
     to: "/orders",
     label: "受注一覧",
     icon: "📑",
+    category: "order_ops",
     required: "view",
     resource: "orders.list",
   },
@@ -101,6 +119,7 @@ const tiles = computed(() => [
     to: "/csv-upload",
     label: "受注取込",
     icon: "📤",
+    category: "order_ops",
     required: "edit",
     resource: "orders.csv_import",
   },
@@ -109,6 +128,7 @@ const tiles = computed(() => [
     to: "/orders/first-article-setting",
     label: "お久しぶり製品<br>通知設定",
     icon: "🔔",
+    category: "settings",
     required: "edit",
     resource: "orders.first_article",
   },
@@ -117,6 +137,16 @@ const tiles = computed(() => [
     to: "/orders/missing-routing-items",
     label: "ルーティング未設定の注文品",
     icon: "⚠️",
+    category: "analysis",
+    required: "view",
+    resource: "orders.list",
+  },
+  {
+    key: "open_order_audit",
+    to: "/orders/open-order-audit",
+    label: "旧OPEN受注洗い出し",
+    icon: "🧾",
+    category: "analysis",
     required: "view",
     resource: "orders.list",
   },
@@ -125,6 +155,7 @@ const tiles = computed(() => [
     to: "/orders/kubota-naiji-analysis",
     label: "クボタ内示分析",
     icon: "📊",
+    category: "analysis",
     required: "view",
     resource: "orders.kubota_analysis",
   },
@@ -133,6 +164,7 @@ const tiles = computed(() => [
     to: "/orders/naiji-analysis",
     label: "内示分析",
     icon: "📈",
+    category: "analysis",
     required: "view",
     resource: "orders.naiji_analysis",
   },
@@ -141,6 +173,7 @@ const tiles = computed(() => [
     to: null,
     label: "ライン展開",
     icon: "🛠️",
+    category: "order_ops",
     required: "edit",
     resource: "orders.line_expand",
   },
@@ -154,6 +187,20 @@ const visibleTiles = computed(() => {
     return tiles.value.filter((tile) => !tile.disabled);
   }
   return tiles.value;
+});
+
+const groupedTiles = computed(() => {
+  const buckets = SECTION_ORDER.map((key) => ({
+    key,
+    label: SECTION_LABELS[key],
+    items: [],
+  }));
+  const indexMap = Object.fromEntries(SECTION_ORDER.map((key, index) => [key, index]));
+  for (const tile of visibleTiles.value) {
+    const key = tile.category && indexMap[tile.category] !== undefined ? tile.category : "other";
+    buckets[indexMap[key]].items.push(tile);
+  }
+  return buckets.filter((section) => section.items.length);
 });
 
 const onTileClick = (event, tile) => {
@@ -186,9 +233,22 @@ const runExpand = async () => {
 .master-menu {
   padding: 16px;
 }
+.menu-sections {
+  display: grid;
+  gap: 14px;
+}
+.menu-section.has-divider {
+  border-top: 1px solid #dbe2ea;
+  padding-top: 14px;
+}
+.section-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #334155;
+}
 .master-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 .master-tile {
@@ -240,5 +300,29 @@ const runExpand = async () => {
 .helper-text {
   margin-top: 10px;
   color: #64748b;
+}
+
+@media (max-width: 1400px) {
+  .master-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .master-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .master-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .master-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

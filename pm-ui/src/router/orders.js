@@ -30,6 +30,12 @@ const orders = [
     meta: { pageTitle: "受注お久しぶり製品通知設定", resource: "orders.first_article", permission: "edit" },
   },
   {
+    path: "/orders/open-order-audit",
+    name: "OpenOrderAudit",
+    component: () => import("@/views/orders/OpenOrderAudit.vue"),
+    meta: { pageTitle: "旧OPEN受注洗い出し", resource: "orders.list" },
+  },
+  {
     path: "/orders",
     name: "OrderList",
     component: () => import("@/views/orders/OrderList.vue"),
