@@ -555,22 +555,33 @@
               <svg :viewBox="truck.viewBox" class="plan-svg" preserveAspectRatio="xMidYMid meet">
                 <rect :x="0" :y="0" :width="truck.viewW" :height="truck.viewH" class="plan-bed" />
                 <template v-for="(item, idx) in truck.placed" :key="`${truck.truckId}-pl-${idx}`">
-                  <rect
-                    :x="item.x" :y="item.y"
-                    :width="item.w" :height="item.d"
-                    :fill="item.color"
-                    class="plan-container"
-                  >
-                    <title>{{ item.label }}</title>
-                  </rect>
+                  <g>
+                    <rect
+                      :x="item.x" :y="item.y"
+                      :width="item.w" :height="item.d"
+                      :fill="item.color"
+                      class="plan-container"
+                    >
+                      <title>{{ item.label }}（{{ item.layers }}段）</title>
+                    </rect>
+                    <text
+                      :x="item.x + item.w / 2"
+                      :y="item.y + item.d / 2"
+                      :font-size="item.fontSize"
+                      text-anchor="middle"
+                      dominant-baseline="central"
+                      class="plan-layer-text"
+                    >{{ item.layers }}</text>
+                  </g>
                 </template>
               </svg>
             </div>
             <div class="plan-legend">
               <div v-for="(item, idx) in truck.items" :key="`${truck.truckId}-lg-${idx}`" class="plan-legend-row">
                 <span class="plan-swatch" :style="{ background: item.color }"></span>
-                <span class="plan-legend-code">{{ item.productCode }}×{{ formatNumber(item.qty) }}</span>
-                <span v-if="item.layers > 1" class="plan-legend-layers">×{{ item.layers }}段</span>
+                <div class="plan-legend-text">
+                  <div class="plan-legend-code">{{ item.productCode }}×{{ formatNumber(item.qty) }}（{{ item.containerCount }}容器）</div>
+                </div>
               </div>
             </div>
             <div class="plan-remaining">
@@ -1267,15 +1278,22 @@ const planTruckModels = computed(() => {
         usedColors.add(color)
         truckColorMap.set(code, color)
       })
-      const placed = backendSummary.placed.map((p) => ({
-        x: parseNumber(p.x),
-        y: parseNumber(p.y),
-        w: parseNumber(p.w),
-        d: parseNumber(p.d),
-        rotated: Boolean(p.rotated),
-        color: truckColorMap.get(p.product_code) || planColorForProduct(p.product_code),
-        label: `${p.product_code}×${formatNumber(p.qty)}`,
-      }))
+      const placed = backendSummary.placed.map((p) => {
+        const pw = parseNumber(p.w)
+        const pd = parseNumber(p.d)
+        const layers = parseIntegerQty(p.layers) || 1
+        return {
+          x: parseNumber(p.x),
+          y: parseNumber(p.y),
+          w: pw,
+          d: pd,
+          layers,
+          fontSize: Math.max(60, Math.min(pw, pd) * 0.4),
+          rotated: Boolean(p.rotated),
+          color: truckColorMap.get(p.product_code) || planColorForProduct(p.product_code),
+          label: `${p.product_code}×${formatNumber(p.qty)}`,
+        }
+      })
       // 凡例（バックエンドの配置結果から集約）
       const itemMap = new Map()
       backendSummary.placed.forEach((p) => {
@@ -1297,7 +1315,9 @@ const planTruckModels = computed(() => {
           color: truckColorMap.get(code) || planColorForProduct(code),
         })
       })
-      const items = [...itemMap.values()].sort((a, b) => String(a.productCode).localeCompare(String(b.productCode)))
+      const items = [...itemMap.values()]
+        .map((item) => ({ ...item, containerCount: item.slots * item.layers }))
+        .sort((a, b) => String(a.productCode).localeCompare(String(b.productCode)))
       const viewW = bedD || 1
       const viewH = bedW || 1
       models.push({
@@ -1420,6 +1440,8 @@ const planTruckModels = computed(() => {
           y: rowY,
           w: len,
           d: wid,
+          layers: slot.item.layers || 1,
+          fontSize: Math.max(60, Math.min(len, wid) * 0.4),
           rotated: slot.rotated,
           color: slot.item.color,
           label: `${slot.item.productCode}×${formatNumber(slot.item.qty)}`,
@@ -1493,7 +1515,7 @@ const planTruckModels = computed(() => {
       viewW,
       viewH,
       viewBox: `0 0 ${viewW} ${viewH}`,
-      items,
+      items: items.map((i) => ({ ...i, containerCount: i.count })),
       placed,
       remaining,
       overloaded,
@@ -2848,7 +2870,7 @@ onUnmounted(() => {
 }
 .plan-legend-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   font-size: 11px;
   line-height: 1.3;
@@ -2860,15 +2882,29 @@ onUnmounted(() => {
   height: 10px;
   border: 1px solid #6b7280;
   border-radius: 2px;
+  margin-top: 1px;
+}
+.plan-legend-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 .plan-legend-code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.plan-legend-layers {
-  color: #6b7280;
+.plan-legend-count {
+  font-size: 10px;
+  color: #0369a1;
+  font-weight: 600;
   white-space: nowrap;
+}
+.plan-layer-text {
+  fill: #111827;
+  font-weight: 700;
+  user-select: none;
+  pointer-events: none;
 }
 .plan-remaining {
   margin-top: 6px;
