@@ -249,6 +249,7 @@ def _send_order_first_article_notice(*, created_line_ids, user=None):
 
 
 class OrderFilter(django_filters.FilterSet):
+    order_no = django_filters.CharFilter(method='filter_order_no')
     product_code = django_filters.CharFilter(method='filter_product_code')
     due_date_from = django_filters.DateFilter(method='filter_due_date_from')
     due_date_to = django_filters.DateFilter(method='filter_due_date_to')
@@ -256,7 +257,15 @@ class OrderFilter(django_filters.FilterSet):
 
     class Meta:
         model = Order
-        fields = ['customer', 'order_type', 'status', 'order_date']
+        fields = ['order_no', 'customer', 'order_type', 'status', 'order_date']
+
+    def filter_order_no(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(
+            Q(order_no__icontains=value) |
+            Q(lines__customer_order_no__icontains=value)
+        ).distinct()
 
     def filter_product_code(self, queryset, name, value):
         if not value:
@@ -301,6 +310,15 @@ class OrderViewSet(viewsets.ModelViewSet):
             from .serializers import OrderListSerializer
             return OrderListSerializer
         return super().get_serializer_class()
+
+    @action(detail=True, methods=['patch'])
+    def close(self, request, pk=None):
+        order = self.get_object()
+        if order.status == 'CLOSED':
+            return Response({'detail': 'すでにクローズ済みです'}, status=status.HTTP_400_BAD_REQUEST)
+        order.status = 'CLOSED'
+        order.save(update_fields=['status'])
+        return Response({'status': 'CLOSED'})
 
     def destroy(self, request, *args, **kwargs):
         """受注削除：Order + OrderLine（cascade）+ ステージングレコードをまとめて削除"""

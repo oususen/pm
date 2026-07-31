@@ -67,6 +67,9 @@ export const createOrdersAPI = (client) => ({
   updateOrder(id, data) {
     return client.put(`/orders/${id}/`, data)
   },
+  closeOrder(id) {
+    return client.patch(`/orders/${id}/close/`)
+  },
   deleteOrder(id) {
     return client.delete(`/orders/${id}/`)
   },

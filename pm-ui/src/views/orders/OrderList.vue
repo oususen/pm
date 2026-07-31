@@ -100,6 +100,7 @@
             <td>{{ order.status_display }}</td>
             <td>
               <button @click="viewDetails(order)" class="btn-sm">詳細</button>
+              <button v-if="canDelete && order.status === 'OPEN'" @click="confirmClose(order)" class="btn-sm btn-warning">クローズ</button>
               <button v-if="canDelete" @click="confirmDelete(order)" class="btn-sm btn-danger">削除</button>
             </td>
           </tr>
@@ -128,6 +129,10 @@
         <h3>受注明細</h3>
         <div class="detail-filter-row">
           <label class="detail-filter-item">
+            <span>注番</span>
+            <input v-model="lineFilters.customerOrderNo" class="filter-input" type="text" />
+          </label>
+          <label class="detail-filter-item">
             <span>製品コード</span>
             <input v-model="lineFilters.productCode" class="filter-input" type="text" />
           </label>
@@ -148,6 +153,7 @@
           <thead>
             <tr>
               <th>行番号</th>
+              <th>注番</th>
               <th>製品コード</th>
               <th>製品名</th>
               <th>数量</th>
@@ -160,6 +166,7 @@
           <tbody>
             <tr v-for="line in filteredOrderLines" :key="line.id">
               <td>{{ line.line_no }}</td>
+              <td>{{ line.customer_order_no || '-' }}</td>
               <td>{{ line.product_code }}</td>
               <td>{{ line.product_name || '-' }}</td>
               <td>{{ Math.round(Number(line.quantity)) }}</td>
@@ -211,7 +218,7 @@ const orders = ref([])
 const showDetailsDialog = ref(false)
 const selectedOrder = ref({})
 const orderLines = ref([])
-const lineFilters = ref({ productCode: '', dueDateFrom: '', dueDateTo: '', shipToCode: '' })
+const lineFilters = ref({ customerOrderNo: '', productCode: '', dueDateFrom: '', dueDateTo: '', shipToCode: '' })
 const loading = ref(false)
 const errorMessage = ref('')
 const filters = ref({
@@ -274,9 +281,6 @@ const customerOptions = computed(() => {
 const filteredOrders = computed(() => {
   const currentFilters = filters.value
   return orders.value.filter((order) => {
-    if (currentFilters.orderNo && !normalizeText(order.order_no).includes(normalizeText(currentFilters.orderNo))) {
-      return false
-    }
     if (
       currentFilters.sourceFile &&
       !normalizeText(order.source_file).includes(normalizeText(currentFilters.sourceFile))
@@ -302,6 +306,10 @@ const filteredOrders = computed(() => {
 const filteredOrderLines = computed(() => {
   const f = lineFilters.value
   return orderLines.value.filter((line) => {
+    if (
+      f.customerOrderNo &&
+      !normalizeText(line.customer_order_no).includes(normalizeText(f.customerOrderNo))
+    ) return false
     if (f.productCode && !normalizeText(line.product_code).includes(normalizeText(f.productCode))) return false
     if (f.dueDateFrom && (line.due_date || '') < f.dueDateFrom) return false
     if (f.dueDateTo && (line.due_date || '') > f.dueDateTo) return false
@@ -315,6 +323,7 @@ const fetchOrders = async (retry = 2) => {
   errorMessage.value = ''
   try {
     const params = { page_size: 0 }
+    if (filters.value.orderNo) params.order_no = filters.value.orderNo
     if (filters.value.productCode) params.product_code = filters.value.productCode
     if (filters.value.dueDateFrom) params.due_date_from = filters.value.dueDateFrom
     if (filters.value.dueDateTo) params.due_date_to = filters.value.dueDateTo
@@ -335,7 +344,7 @@ const fetchOrders = async (retry = 2) => {
 
 let debounceTimer = null
 watch(
-  () => [filters.value.productCode, filters.value.dueDateFrom, filters.value.dueDateTo, filters.value.shipToCode],
+  () => [filters.value.orderNo, filters.value.productCode, filters.value.dueDateFrom, filters.value.dueDateTo, filters.value.shipToCode],
   () => {
     clearTimeout(debounceTimer)
     debounceTimer = setTimeout(() => fetchOrders(), 400)
@@ -359,7 +368,7 @@ const resetFilters = () => {
 
 const viewDetails = async (order) => {
   selectedOrder.value = order
-  lineFilters.value = { productCode: '', dueDateFrom: '', dueDateTo: '', shipToCode: '' }
+  lineFilters.value = { customerOrderNo: '', productCode: '', dueDateFrom: '', dueDateTo: '', shipToCode: '' }
   try {
     const response = await api.orders.getOrderLines(order.id)
     orderLines.value = response.data.results || response.data
@@ -385,6 +394,19 @@ const deleteOrderLine = async (line) => {
   } catch (error) {
     console.error('Error deleting order line:', error)
     alert('明細行の削除に失敗しました')
+  }
+}
+
+const confirmClose = async (order) => {
+  const confirmed = window.confirm(`受注「${order.order_no}」をクローズしますか？`)
+  if (!confirmed) return
+  try {
+    await api.orders.closeOrder(order.id)
+    order.status = 'CLOSED'
+    order.status_display = 'クローズ'
+  } catch (error) {
+    console.error('Error closing order:', error)
+    alert('クローズに失敗しました')
   }
 }
 
@@ -495,6 +517,17 @@ onMounted(() => {
 
 .btn-secondary:hover {
   background-color: #f5f5f5;
+}
+
+.btn-warning {
+  background-color: #dd6b20;
+  color: white;
+  border: none;
+  margin-left: 4px;
+}
+
+.btn-warning:hover {
+  background-color: #c05621;
 }
 
 .btn-danger {
