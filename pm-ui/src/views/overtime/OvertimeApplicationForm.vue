@@ -5,7 +5,7 @@
 
     <form class="ot-form" @submit.prevent="handleSubmit">
       <div class="form-section">
-        <div class="form-row">
+        <div class="form-row form-row-vertical">
           <label class="form-label required">{{ t('overtime.type') }}</label>
           <div class="radio-group">
             <label class="radio-item">
@@ -126,18 +126,18 @@
           </div>
         </div>
 
-        <div class="form-row">
+        <div class="form-row form-row-vertical">
           <label class="form-label" :class="{ required: needsApproval }">{{ t('overtime.reason') }}</label>
           <textarea
             v-model="form.reason"
             class="form-textarea"
-            rows="5"
+            rows="2"
             :placeholder="needsApproval ? t('overtime.reasonPlaceholder') : t('overtime.remarkPlaceholder')"
             :required="needsApproval"
           ></textarea>
         </div>
 
-        <div v-if="needsApproval" class="form-row sign-row">
+        <div v-if="needsApproval" class="form-row form-row-vertical">
           <label class="form-label required">{{ t('overtime.sign') }}</label>
           <div class="sign-wrap">
             <canvas ref="signCanvas" class="sign-canvas" width="420" height="200"></canvas>
@@ -758,6 +758,9 @@ async function handleSubmit() {
 .time-input {
   width: 110px;
 }
+.time-input::placeholder {
+  color: #d1d5db;
+}
 .tilde {
   font-size: 16px;
   color: #6b7280;
@@ -767,13 +770,14 @@ async function handleSubmit() {
   color: #9ca3af;
 }
 .form-textarea {
-  flex: 1;
+  width: 100%;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 14px;
   resize: vertical;
   outline: none;
+  box-sizing: border-box;
 }
 .form-textarea:focus {
   border-color: #40916c;
@@ -785,8 +789,10 @@ async function handleSubmit() {
 }
 .radio-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  writing-mode: vertical-rl;
   font-size: 14px;
   cursor: pointer;
 }
@@ -852,7 +858,14 @@ async function handleSubmit() {
   font-size: 12px;
   font-weight: 600;
 }
-.sign-row { align-items: flex-start; }
+.form-row-vertical {
+  flex-direction: column;
+  gap: 6px;
+}
+.form-row-vertical .form-label {
+  width: auto;
+  padding-top: 0;
+}
 .sign-wrap { display: flex; flex-direction: column; gap: 6px; }
 .sign-canvas {
   border: 1px solid #d1d5db;
