@@ -39,6 +39,10 @@
             <div class="menu-icon">🔔</div>
             <div class="menu-label">{{ t('dashboard.menu.notifications') }}</div>
           </RouterLink>
+          <RouterLink to="/overtime/menu" class="menu-card">
+            <div class="menu-icon">⏰</div>
+            <div class="menu-label">{{ t('dashboard.menu.overtime') }}</div>
+          </RouterLink>
         </div>
       </section>
     </div>
