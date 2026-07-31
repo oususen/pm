@@ -17,8 +17,8 @@
       <div class="field search-field">
         <label>品番 OR検索</label>
         <div class="search-inputs">
-          <input v-model.trim="keyword" type="text" placeholder="キーワード1" @keydown.enter="loadGrid" />
-          <input v-model.trim="keyword2" type="text" placeholder="キーワード2" @keydown.enter="loadGrid" />
+          <input v-model.trim="keyword" type="text" placeholder="キーワード1" @keydown.enter="handleDisplayClick" />
+          <input v-model.trim="keyword2" type="text" placeholder="キーワード2" @keydown.enter="handleDisplayClick" />
         </div>
       </div>
       <div class="field">
@@ -46,7 +46,7 @@
       <button class="btn" :disabled="importing || loading || saving" @click="openChangeReasonDialog">計画変更</button>
       <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
       <button class="btn" :disabled="loading || !matrixColumns.length" @click="exportExcel">EXCEL出力</button>
-      <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
+      <button class="btn" :disabled="loading || importing" @click="handleDisplayClick">表示</button>
       <DataSourceDialog title="" :sources="dsSources" />
     </div>
 
@@ -54,6 +54,7 @@
       <table class="grid">
         <colgroup>
           <col style="width: 60px" />
+          <col v-if="!matrixColumns.length" style="width: auto" />
           <template v-for="col in matrixColumns" :key="`col-${col.colKey}`">
             <col style="width: 70px" />
             <col style="width: 40px" />
@@ -64,6 +65,7 @@
         <thead ref="theadRef">
           <tr class="head1">
             <th rowspan="2" class="sticky-left date-separator">日付</th>
+            <th v-if="!matrixColumns.length" rowspan="2" class="empty-grid-spacer"></th>
             <th
               v-for="(col, colIdx) in matrixColumns"
               :key="col.colKey"
@@ -110,6 +112,7 @@
             :class="{ 'carry-tr': row.isCarry, 'day-row': !row.isCarry, 'locked-row': !row.isCarry && isDateLocked(row.dateKey) }"
           >
             <td class="sticky-left date-col date-separator" :class="row.dayClass">{{ row.label }}</td>
+            <td v-if="!matrixColumns.length" class="empty-grid-spacer" :class="row.dayClass"></td>
             <template v-if="row.isCarry">
               <template v-for="(col, colIdx) in matrixColumns" :key="`${row.rowKey}-${col.colKey}`">
                 <td :class="{ 'product-start': colIdx > 0 }"></td>
@@ -175,6 +178,7 @@
         <tfoot>
           <tr class="total-row">
             <th class="sticky-left total-label date-separator">最終残</th>
+            <td v-if="!matrixColumns.length" class="total-blank empty-grid-spacer"></td>
             <template v-for="(col, colIdx) in matrixColumns" :key="`total-${col.colKey}`">
               <td class="total-blank" :class="{ 'product-start': colIdx > 0 }"></td>
               <td class="total-blank"></td>
@@ -347,7 +351,7 @@ const keyword = ref('V0')
 const keyword2 = ref('6E')
 const startDate = ref(formatLocalDate(new Date()))
 const bulkStartDate = ref(startDate.value)
-const horizonDays = ref(30)
+const horizonDays = ref(60)
 const groups = ref([])
 const lockDate = ref(null)
 const duePlanLockDate = ref(null)
@@ -372,6 +376,7 @@ const favorites = ref([])
 const selectedFavoriteId = ref('')
 const favoriteName = ref('')
 const FAVORITE_SCREEN_KEY = 'shipping.kubota_sakai_due_adjustment'
+const hasDisplayedOnce = ref(false)
 
 const dateColumns = computed(() => {
   const base = new Date(`${startDate.value}T00:00:00`)
@@ -756,14 +761,14 @@ watch([startDate, horizonDays], () => {
 })
 
 const toFavoritePayload = () => ({
-  horizonDays: Number(horizonDays.value || 30),
+  horizonDays: Number(horizonDays.value || 60),
   keyword: String(keyword.value || ''),
   keyword2: String(keyword2.value || ''),
 })
 
 const applyFavoritePayload = (payload) => {
-  const nextHorizon = Number(payload?.horizonDays || 30)
-  horizonDays.value = [7, 14, 30, 60].includes(nextHorizon) ? nextHorizon : 30
+  const nextHorizon = Number(payload?.horizonDays || 60)
+  horizonDays.value = [7, 14, 30, 60].includes(nextHorizon) ? nextHorizon : 60
   keyword.value = String(payload?.keyword || '')
   keyword2.value = String(payload?.keyword2 || '')
   normalizeBulkStartDate()
@@ -848,6 +853,7 @@ const importOrders = async () => {
       horizon_days: horizonDays.value,
     })
     const d = res.data
+    hasDisplayedOnce.value = true
     alert(`取込完了: 新規${d.created}件, 更新${d.updated}件, 内示→確定削除${d.deleted_forecast}件`)
     await loadGrid()
   } catch (error) {
@@ -856,6 +862,33 @@ const importOrders = async () => {
   } finally {
     importing.value = false
   }
+}
+
+const importOrdersForInitialDisplay = async () => {
+  importing.value = true
+  try {
+    await api.kubotaSakaiDueAdjustments.importOrders({
+      start_date: startDate.value,
+      horizon_days: horizonDays.value,
+    })
+  } finally {
+    importing.value = false
+  }
+}
+
+const handleDisplayClick = async () => {
+  if (loading.value || importing.value) return
+  if (!hasDisplayedOnce.value) {
+    try {
+      await importOrdersForInitialDisplay()
+    } catch (error) {
+      const message = error?.response?.data?.detail || '取込に失敗しました。'
+      alert(message)
+      return
+    }
+    hasDisplayedOnce.value = true
+  }
+  await loadGrid()
 }
 
 const findGroupForLine = (line) => {
@@ -1298,7 +1331,6 @@ let theadResizeObserver = null
 onMounted(async () => {
   await loadFavorites()
   normalizeBulkStartDate()
-  await loadGrid()
   await nextTick()
   setStickyTopValues()
   if (theadRef.value) {
@@ -1450,6 +1482,11 @@ onBeforeUnmount(() => {
 .grid th.product-end,
 .grid td.product-end {
   border-right: 2px solid #7b8aa7;
+}
+.empty-grid-spacer {
+  width: auto;
+  min-width: 0;
+  background: #fff;
 }
 .head-group {
   display: flex;
