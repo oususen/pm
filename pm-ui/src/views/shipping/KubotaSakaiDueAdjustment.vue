@@ -891,6 +891,24 @@ const focusNextRow = (event, currentDateKey, colKey, slotIdx) => {
   }
 }
 
+const buildPayloadRows = (targetGroups = [], dirtyOnly = true) => {
+  const payloadRows = []
+  for (const group of targetGroups) {
+    for (const line of group.lines) {
+      if (dirtyOnly && !line._dirty) continue
+      const deliveryByDate = {}
+      for (const col of dateColumns.value) {
+        deliveryByDate[col.key] = parseNumber(line.deliveryByDate[col.key])
+      }
+      payloadRows.push({
+        line_key: line.lineKey,
+        delivery_by_date: deliveryByDate,
+      })
+    }
+  }
+  return payloadRows
+}
+
 const collectChangeSummary = (payloadRows) => {
   const summary = []
   for (const row of payloadRows) {
@@ -1158,28 +1176,18 @@ const saveDeliveries = async () => {
     return
   }
 
-  const payloadRows = []
-  for (const group of groups.value) {
-    for (const line of group.lines) {
-      if (!line._dirty) continue
-      const deliveryByDate = {}
-      for (const col of dateColumns.value) {
-        const qty = parseNumber(line.deliveryByDate[col.key])
-        deliveryByDate[col.key] = qty
-      }
-      payloadRows.push({
-        line_key: line.lineKey,
-        delivery_by_date: deliveryByDate,
-      })
-    }
+  let payloadRows = buildPayloadRows(groups.value, true)
+  const noChangeSave = payloadRows.length === 0
+  if (noChangeSave) {
+    payloadRows = buildPayloadRows(filteredGroups.value, false)
   }
 
   if (payloadRows.length === 0) {
-    alert('変更された行がありません。')
+    alert('保存対象がありません。')
     return
   }
 
-  lastChangeSummary.value = collectChangeSummary(payloadRows)
+  lastChangeSummary.value = noChangeSave ? [] : collectChangeSummary(payloadRows)
 
   saving.value = true
   try {
@@ -1190,9 +1198,13 @@ const saveDeliveries = async () => {
     changeReason.value = ''
     changeReasonDraft.value = ''
     await loadGrid()
-    const wantEmail = window.confirm('保存しました。\n納期調整メールを送信しますか？')
-    if (wantEmail) {
-      openEmailDialog()
+    if (noChangeSave) {
+      alert('再保存して再配分を反映しました。')
+    } else {
+      const wantEmail = window.confirm('保存しました。\n納期調整メールを送信しますか？')
+      if (wantEmail) {
+        openEmailDialog()
+      }
     }
   } catch (error) {
     const data = error?.response?.data
