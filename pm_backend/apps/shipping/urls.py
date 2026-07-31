@@ -12,6 +12,15 @@ from shipping.views_kubota_sakai_trip_assignment import (
     KubotaSakaiTripLoadPreviewView,
     KubotaSakaiTripPlanView,
 )
+from shipping.views_kubota_sakai_trip_assignment_new import (
+    KubotaSakaiDeliveryProgressAdjustViewNew,
+    KubotaSakaiTripDisplaySettingViewNew,
+    KubotaSakaiPickupDetailPdfViewNew,
+    KubotaSakaiPseudoTruckProductViewNew,
+    KubotaSakaiTripLoadDetailViewNew,
+    KubotaSakaiTripLoadPreviewViewNew,
+    KubotaSakaiTripPlanViewNew,
+)
 from shipping.views_shipping_trip_execution import (
     ShippingTripExecutionView,
     ShippingTripProgressView,
@@ -59,6 +68,15 @@ urlpatterns = [
     path('kubota-sakai-trip-assignments/pseudo-truck-products/', KubotaSakaiPseudoTruckProductView.as_view(), name='kubota-sakai-pseudo-truck-products'),
     path('kubota-sakai-trip-assignments/display-settings/', KubotaSakaiTripDisplaySettingView.as_view(), name='kubota-sakai-trip-display-settings'),
     path('kubota-sakai-trip-assignments/delivery-progress-adjust/', KubotaSakaiDeliveryProgressAdjustView.as_view(), name='kubota-sakai-delivery-progress-adjust'),
+    # クボタ堺便計画（新・積載ロジック検証用）
+    path('kubota-sakai-trip-assignments-new/grid/', KubotaSakaiTripPlanViewNew.as_view(), name='kubota-sakai-trip-grid-new'),
+    path('kubota-sakai-trip-assignments-new/bulk_save/', KubotaSakaiTripPlanViewNew.as_view(), name='kubota-sakai-trip-save-new'),
+    path('kubota-sakai-trip-assignments-new/preview-load/', KubotaSakaiTripLoadPreviewViewNew.as_view(), name='kubota-sakai-trip-preview-load-new'),
+    path('kubota-sakai-trip-assignments-new/load-detail/', KubotaSakaiTripLoadDetailViewNew.as_view(), name='kubota-sakai-trip-load-detail-new'),
+    path('kubota-sakai-trip-assignments-new/pickup-detail-pdf/', KubotaSakaiPickupDetailPdfViewNew.as_view(), name='kubota-sakai-pickup-detail-pdf-new'),
+    path('kubota-sakai-trip-assignments-new/pseudo-truck-products/', KubotaSakaiPseudoTruckProductViewNew.as_view(), name='kubota-sakai-pseudo-truck-products-new'),
+    path('kubota-sakai-trip-assignments-new/display-settings/', KubotaSakaiTripDisplaySettingViewNew.as_view(), name='kubota-sakai-trip-display-settings-new'),
+    path('kubota-sakai-trip-assignments-new/delivery-progress-adjust/', KubotaSakaiDeliveryProgressAdjustViewNew.as_view(), name='kubota-sakai-delivery-progress-adjust-new'),
     path('shipping-trips/execution/', ShippingTripExecutionView.as_view(), name='shipping-trip-execution'),
     path('shipping-trips/progress/', ShippingTripProgressView.as_view(), name='shipping-trip-progress'),
     path('shipping-progress/', ShippingProgressView.as_view(), name='shipping-progress'),
