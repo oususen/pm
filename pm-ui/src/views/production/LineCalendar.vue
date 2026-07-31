@@ -177,15 +177,27 @@
                       <div class="day-num">{{ day.day }}</div>
                       <label
                         class="day-check"
-                        :class="{ holiday: !day.is_working_day }"
+                        :class="{ holiday: !day.is_working_day && !day.is_holiday_work, 'holiday-work-label': day.is_holiday_work }"
                       >
                         <input
                           type="checkbox"
-                          :checked="day.is_working_day"
+                          :checked="day.is_working_day && !day.is_holiday_work"
                           :disabled="savingDateKey === day.date || !canEdit || isReadOnlyLine"
                           @change="toggleDay(day)"
                         />
-                        {{ day.is_working_day ? '出' : '休み' }}
+                        {{ day.is_holiday_work ? '休出' : (day.is_working_day ? '出' : '休み') }}
+                      </label>
+                      <label
+                        v-if="day.is_line_holiday || day.is_holiday_work"
+                        class="day-check holiday-work-check"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="day.is_holiday_work"
+                          :disabled="savingDateKey === day.date || !canEdit || isReadOnlyLine"
+                          @change="toggleHolidayWork(day)"
+                        />
+                        休日出勤
                       </label>
                     </div>
                     <div class="day-right">
@@ -385,13 +397,17 @@ const monthWeeks = computed(() => {
       const existing = dayMap.value.get(dateStr)
       const daiso = daisoDayMap.value.get(dateStr)
       const fallbackWorking = daiso ? !!daiso.is_working_day : cursor.getDay() !== 0 && cursor.getDay() !== 6
+      const isHolidayWork = existing ? !!existing.is_holiday_work : false
+      const isWorkingDay = existing ? !!existing.is_working_day : fallbackWorking
       week.push({
         key: `${dateStr}-${i}`,
         date: dateStr,
         day: cursor.getDate(),
         inMonth,
         record: existing || null,
-        is_working_day: existing ? !!existing.is_working_day : fallbackWorking,
+        is_working_day: isWorkingDay,
+        is_holiday_work: isHolidayWork,
+        is_line_holiday: existing ? (!existing.is_working_day && !isHolidayWork) : !fallbackWorking,
       })
       cursor.setDate(cursor.getDate() + 1)
     }
@@ -402,8 +418,9 @@ const monthWeeks = computed(() => {
 
 const cellClass = (day) => ({
   out: !day.inMonth,
-  work: day.inMonth && day.is_working_day,
+  work: day.inMonth && day.is_working_day && !day.is_holiday_work,
   holiday: day.inMonth && !day.is_working_day,
+  'holiday-work': day.inMonth && day.is_holiday_work,
 })
 
 const loadLines = async () => {
@@ -517,11 +534,14 @@ const toggleWeekday = async (weekday, checked) => {
       const dateStr = ymd(day)
       const row = existing.get(dateStr)
       if (row?.id) {
+        // 休日出勤日を曜日一括で休日化する場合は is_holiday_work も解除
+        const holidayWork = checked ? (row.is_holiday_work || false) : false
         ops.push(
           api.calendars.updateCalendarDay(row.id, {
             calendar: selectedCalendar.value,
             target_date: dateStr,
             is_working_day: checked,
+            is_holiday_work: holidayWork,
             work_minutes: checked ? (row.work_minutes ?? 480) : 0,
             work_pattern: row.work_pattern || null,
             note: row.note || null,
@@ -533,6 +553,7 @@ const toggleWeekday = async (weekday, checked) => {
             calendar: selectedCalendar.value,
             target_date: dateStr,
             is_working_day: checked,
+            is_holiday_work: false,
             work_minutes: checked ? 480 : 0,
             work_pattern: null,
             note: null,
@@ -624,6 +645,7 @@ const applyRange = async () => {
           calendar: selectedCalendar.value,
           target_date: existing.target_date,
           is_working_day: true,
+          is_holiday_work: existing.is_holiday_work || false,
           work_minutes: range.value.workMinutes,
           work_pattern: range.value.workPattern || null,
         }))
@@ -691,6 +713,8 @@ const toggleDay = async (day) => {
   if (!canEdit.value) return
   if (isReadOnlyLine.value) return
   if (!day?.inMonth || !selectedCalendar.value) return
+  // 休日出勤中の日は、出/休みトグルで操作不要（休日出勤チェックで操作する）
+  if (day.is_holiday_work) return
   savingDateKey.value = day.date
   try {
     const nextWorking = !day.is_working_day
@@ -699,6 +723,7 @@ const toggleDay = async (day) => {
         calendar: selectedCalendar.value,
         target_date: day.date,
         is_working_day: nextWorking,
+        is_holiday_work: false,
         work_minutes: nextWorking ? (day.record.work_minutes ?? 480) : 0,
         work_pattern: day.record.work_pattern || null,
       })
@@ -707,6 +732,7 @@ const toggleDay = async (day) => {
         calendar: selectedCalendar.value,
         target_date: day.date,
         is_working_day: nextWorking,
+        is_holiday_work: false,
         work_minutes: nextWorking ? 480 : 0,
         work_pattern: null,
       })
@@ -715,6 +741,36 @@ const toggleDay = async (day) => {
   } catch (e) {
     console.error('カレンダ日更新エラー', e)
     alert('日付の更新に失敗しました。')
+  } finally {
+    savingDateKey.value = ''
+  }
+}
+
+const toggleHolidayWork = async (day) => {
+  if (!canEdit.value) return
+  if (isReadOnlyLine.value) return
+  if (!day?.inMonth || !selectedCalendar.value) return
+  savingDateKey.value = day.date
+  try {
+    const nextHolidayWork = !day.is_holiday_work
+    const payload = {
+      calendar: selectedCalendar.value,
+      target_date: day.date,
+      is_working_day: nextHolidayWork ? true : false,
+      is_holiday_work: nextHolidayWork,
+      work_minutes: nextHolidayWork ? (day.record?.work_minutes || 480) : 0,
+      work_pattern: day.record?.work_pattern || null,
+      note: day.record?.note || null,
+    }
+    if (day.record?.id) {
+      await api.calendars.updateCalendarDay(day.record.id, payload)
+    } else {
+      await api.calendars.createCalendarDay(payload)
+    }
+    await loadCalendarDays()
+  } catch (e) {
+    console.error('休日出勤切替エラー', e)
+    alert('休日出勤の切替に失敗しました。')
   } finally {
     savingDateKey.value = ''
   }
@@ -735,6 +791,7 @@ const saveDayNote = async (day, event) => {
         calendar: selectedCalendar.value,
         target_date: day.date,
         is_working_day: day.is_working_day,
+        is_holiday_work: day.is_holiday_work || false,
         work_minutes: day.is_working_day ? (day.record.work_minutes ?? 480) : 0,
         work_pattern: day.record.work_pattern || null,
         note: inputNote || null,
@@ -744,6 +801,7 @@ const saveDayNote = async (day, event) => {
         calendar: selectedCalendar.value,
         target_date: day.date,
         is_working_day: day.is_working_day,
+        is_holiday_work: false,
         work_minutes: day.is_working_day ? 480 : 0,
         work_pattern: null,
         note: inputNote || null,
@@ -1045,8 +1103,19 @@ td.work {
 td.holiday {
   background: #fef2f2;
 }
+td.holiday-work {
+  background: #fef3c7;
+}
 td.out {
   background: #f8fafc;
   color: #94a3b8;
+}
+.holiday-work-label {
+  color: #d97706;
+  font-weight: 700;
+}
+.holiday-work-check {
+  font-size: 13px;
+  color: #d97706;
 }
 </style>

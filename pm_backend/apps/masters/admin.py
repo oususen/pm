@@ -50,8 +50,8 @@ class CalendarAdmin(admin.ModelAdmin):
 
 @admin.register(CalendarDay)
 class CalendarDayAdmin(admin.ModelAdmin):
-    list_display = ['calendar', 'target_date', 'is_working_day', 'work_minutes']
-    list_filter = ['calendar', 'is_working_day']
+    list_display = ['calendar', 'target_date', 'is_working_day', 'is_holiday_work', 'work_minutes']
+    list_filter = ['calendar', 'is_working_day', 'is_holiday_work']
     date_hierarchy = 'target_date'
 
 

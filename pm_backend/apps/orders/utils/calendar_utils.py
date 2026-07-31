@@ -77,7 +77,11 @@ class WorkingDayCalculator:
             target_date=target_date
         ).first()
 
-        is_working = cal_day.is_working_day if cal_day else (target_date.weekday() < 5)
+        # 休日出勤日は受注・出荷・購買系では休日扱い
+        if cal_day:
+            is_working = cal_day.is_working_day and not cal_day.is_holiday_work
+        else:
+            is_working = target_date.weekday() < 5
 
         # キャッシュに保存
         self._cache[target_date] = is_working

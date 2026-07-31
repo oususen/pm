@@ -2062,12 +2062,23 @@ class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         except Calendar.DoesNotExist:
             return Response({'error': 'コピー先カレンダーが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
 
+        if target_calendar.is_line_assignable is False:
+            return Response({'error': 'コピー先はライン割当可能なカレンダーのみ指定できます'}, status=status.HTTP_400_BAD_REQUEST)
+
         # コピー元の期間内データ取得
         src_days = CalendarDay.objects.filter(
             calendar=src_calendar,
             target_date__gte=start_date,
             target_date__lte=end_date,
         )
+
+        has_holiday_work = src_days.filter(is_holiday_work=True).exists()
+        if has_holiday_work:
+            if src_calendar.calendar_type != 'INTERNAL' or target_calendar.calendar_type != 'INTERNAL':
+                return Response(
+                    {'error': '休日出勤を含むカレンダーコピーは社内カレンダー間のみ可能です'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # コピー先の既存データを削除してから再作成（upsert）
         target_dates = [d.target_date for d in src_days]
@@ -2078,6 +2089,7 @@ class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 calendar=target_calendar,
                 target_date=d.target_date,
                 is_working_day=d.is_working_day,
+                is_holiday_work=d.is_holiday_work,
                 work_minutes=d.work_minutes,
                 work_pattern=d.work_pattern,
                 note=d.note,

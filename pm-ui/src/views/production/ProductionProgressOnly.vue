@@ -142,7 +142,7 @@
                     <th v-for="d in columns"
                       :key="d"
                       class="day-col"
-                      :class="{ holiday: isHoliday(d) }"
+                      :class="{ holiday: isHoliday(d) && !isHolidayWork(d), 'holiday-work': isHolidayWork(d) }"
                     >{{ formatDayHeader(d) }}</th>
                   </tr>
                 </thead>
@@ -286,6 +286,7 @@ const backlogs = ref([]);
 const lineDemands = ref([]);
 const purchaseTargetProductIds = ref([]);
 const holidays = ref(new Set());
+const holidayWorkDates = ref(new Set());
 const lineCalendarMap = ref({});
 const calendarDayCache = ref({});
 const groupScrollRef = ref(null);
@@ -369,6 +370,7 @@ const isWeekend = (dateStr) => {
 };
 
 const isHoliday = (dateStr) => holidays.value.has(dateStr) || isWeekend(dateStr);
+const isHolidayWork = (dateStr) => holidayWorkDates.value.has(dateStr);
 
 const buildWeekendFallback = () => {
   return new Set(columns.value.filter((d) => isWeekend(d)));
@@ -569,6 +571,7 @@ const loadHolidayColumns = async () => {
     const end = columns.value[columns.value.length - 1];
     // 積集合: 全カレンダで休日の日だけを休日にする
     let commonHolidays = null;
+    const hwDates = new Set();
     for (const calendarId of calendarIds) {
       const dayRows = await loadCalendarDays(calendarId);
       const calHolidays = new Set();
@@ -576,7 +579,9 @@ const loadHolidayColumns = async () => {
         const dateStr = day.target_date;
         if (!dateStr) return;
         if (dateStr < start || dateStr > end) return;
-        if (isNonWorkingCalendarDay(day)) {
+        if (day.is_holiday_work) {
+          hwDates.add(dateStr);
+        } else if (isNonWorkingCalendarDay(day)) {
           calHolidays.add(dateStr);
         }
       });
@@ -587,6 +592,7 @@ const loadHolidayColumns = async () => {
       }
     }
     holidays.value = commonHolidays && commonHolidays.size ? commonHolidays : fallback;
+    holidayWorkDates.value = hwDates;
   } catch (e) {
     console.error("休日判定の取得に失敗:", e);
     holidays.value = fallback;
@@ -1257,7 +1263,9 @@ const exportToExcel = () => {
 const getCellClass = (group, date, rowKey) => {
   const val = Number(getValue(group, date, rowKey) || 0);
   const classes = [];
-  if (isHoliday(date)) {
+  if (isHolidayWork(date)) {
+    classes.push("holiday-work");
+  } else if (isHoliday(date)) {
     classes.push("holiday");
   }
   if (rowKey === "adjust" && val < 0) classes.push("negative");
@@ -1461,6 +1469,13 @@ const getCellClass = (group, date, rowKey) => {
   background: #ffc0c0;
   color: #b91c1c;
   font-weight: 700;
+}
+.matrix-table thead th.holiday-work {
+  background: #fde68a;
+  color: #92400e;
+}
+.cell.holiday-work {
+  background: #fef3c7;
 }
 
 .code-modal-overlay {

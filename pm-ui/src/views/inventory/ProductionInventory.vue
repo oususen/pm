@@ -141,7 +141,7 @@
                       v-for="d in columns"
                       :key="d"
                       class="day-col"
-                      :class="{ holiday: isHoliday(d) }"
+                      :class="{ holiday: isHoliday(d) && !isHolidayWork(d), 'holiday-work': isHolidayWork(d) }"
                     >
                       {{ formatDayHeader(d) }}
                     </th>
@@ -153,7 +153,7 @@
                     <td v-for="d in columns"
                       :key="`${row.key}-${d}`"
                       class="cell"
-                      :class="[getCellClass(g, d, row.key), { holiday: isHoliday(d) }]"
+                      :class="[getCellClass(g, d, row.key), { holiday: isHoliday(d) && !isHolidayWork(d), 'holiday-work': isHolidayWork(d) }]"
                     >
                       {{ fmt(getValue(g, d, row.key)) }}
                     </td>
@@ -325,6 +325,7 @@ const rowDefs = [
 
 // 休日判定用のキャッシュ
 const holidays = ref(new Set());
+const holidayWorkDates = ref(new Set());
 const lineCalendarMap = ref({});
 const calendarDayCache = ref({});
 
@@ -465,18 +466,22 @@ const updateHolidays = async () => {
     }
 
     const holidaySet = new Set();
+    const hwDates = new Set();
     for (const calendarId of calendarIds) {
       const days = await loadCalendarDays(calendarId);
       days.forEach((day) => {
         const dateStr = day.target_date;
         if (!dateStr) return;
         if (dateStr < start || dateStr > end) return;
-        if (isNonWorkingCalendarDay(day)) {
+        if (day.is_holiday_work) {
+          hwDates.add(dateStr);
+        } else if (isNonWorkingCalendarDay(day)) {
           holidaySet.add(dateStr);
         }
       });
     }
     holidays.value = holidaySet.size ? holidaySet : fallback;
+    holidayWorkDates.value = hwDates;
   } catch (e) {
     console.error("休日判定の更新に失敗:", e);
     holidays.value = fallback;
@@ -484,6 +489,7 @@ const updateHolidays = async () => {
 };
 
 const isHoliday = (dateStr) => holidays.value.has(dateStr);
+const isHolidayWork = (dateStr) => holidayWorkDates.value.has(dateStr);
 
 const applyDemands = (payload) => {
   const list = Array.isArray(payload) ? payload : payload.results || [];
@@ -1396,6 +1402,13 @@ const exportToExcel = () => {
 .matrix-table thead th.holiday {
   background: #ffe5ef;
   color: #b03060;
+}
+.matrix-table thead th.holiday-work {
+  background: #fde68a;
+  color: #92400e;
+}
+.cell.holiday-work {
+  background: #fef3c7;
 }
 .label-col {
   position: sticky;

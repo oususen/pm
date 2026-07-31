@@ -795,10 +795,10 @@ const ensureEditCategoryAvailable = (bar = null) => {
 function getDayClass(dateStr) {
   const d = new Date(dateStr)
   const dow = d.getDay()
+  const day = calendarDayMap.value[dateStr]
+  if (day && day.is_holiday_work) return 'holiday-work'
   if (dow === 0) return 'sun'
   if (dow === 6) return 'sat'
-  // カレンダ上の休日（祝日・GW等）も日曜と同じスタイルにする
-  const day = calendarDayMap.value[dateStr]
   if (isNonWorkingCalendarDay(day)) return 'sun'
   return ''
 }
@@ -2756,6 +2756,9 @@ onBeforeUnmount(() => {
 }
 .time-slot-header.sun {
   background: #fecaca;
+}
+.time-slot-header.holiday-work {
+  background: #fde68a;
 }
 .time-slot-day {
   font-size: 10px;

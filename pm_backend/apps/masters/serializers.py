@@ -202,6 +202,12 @@ class LineSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
 
+        calendar = attrs.get('calendar')
+        if calendar is not None and calendar.is_line_assignable is False:
+            raise serializers.ValidationError({
+                'calendar': 'ライン割当不可のカレンダは設定できません。'
+            })
+
         if not self.instance:
             return attrs
 
@@ -342,6 +348,22 @@ class CalendarDaySerializer(serializers.ModelSerializer):
     class Meta:
         model = CalendarDay
         fields = '__all__'
+
+    def validate(self, attrs):
+        is_holiday_work = attrs.get(
+            'is_holiday_work',
+            getattr(self.instance, 'is_holiday_work', False) if self.instance else False
+        )
+        if is_holiday_work:
+            # 休日出勤はラインカレンダ（INTERNAL）のみ許可
+            calendar = attrs.get('calendar', getattr(self.instance, 'calendar', None))
+            if calendar and calendar.calendar_type != 'INTERNAL':
+                raise serializers.ValidationError(
+                    {'is_holiday_work': '休日出勤はラインカレンダ（社内）のみ設定できます'}
+                )
+            # 休日出勤時は is_working_day=true を強制
+            attrs['is_working_day'] = True
+        return attrs
 
 
 class BOMItemSerializer(serializers.ModelSerializer):

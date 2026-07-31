@@ -2345,6 +2345,12 @@ const isHolidayDate = (dateKey) => {
   return weekday === 0 || weekday === 6
 }
 
+const isHolidayWorkDate = (dateKey) => {
+  if (!dateKey) return false
+  const day = calendarDayMap.value[dateKey]
+  return day ? !!day.is_holiday_work : false
+}
+
 const endDate = computed(() => {
   const d = buildLocalDate(startDate.value)
   d.setDate(d.getDate() + horizonDays.value - 1)
@@ -2365,6 +2371,9 @@ const dateColumns = computed(() => {
     // カレンダ上の休日（祝日・GW等）も日曜と同じスタイルにする
     if (!dayClass && isHolidayDate(key)) {
       dayClass = 'sun'
+    }
+    if (isHolidayWorkDate(key)) {
+      dayClass = 'holiday-work'
     }
     cols.push({ key, label, dayClass })
   }
@@ -6503,6 +6512,12 @@ thead tr.head-level2 th.sticky-col {
 }
 .sun {
   background: #ffd6d6;
+}
+.holiday-work {
+  background: #fef3c7;
+}
+.plan-grid thead th.holiday-work {
+  background: #fde68a;
 }
 .head-level1 {
   background: #cfd8ec;

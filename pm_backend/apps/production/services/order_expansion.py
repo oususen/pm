@@ -161,8 +161,11 @@ class OrderExpansionService:
             for cd in CalendarDay.objects.filter(
                 target_date__gte=date_min,
                 target_date__lte=date_max,
-            ).only('calendar_id', 'target_date', 'is_working_day'):
-                self._calendar_day_cache[(cd.calendar_id, cd.target_date)] = cd.is_working_day
+            ).only('calendar_id', 'target_date', 'is_working_day', 'is_holiday_work'):
+                # 休日出勤日は受注展開では休日扱い
+                self._calendar_day_cache[(cd.calendar_id, cd.target_date)] = (
+                    cd.is_working_day and not cd.is_holiday_work
+                )
 
     def expand_open_orders(self, clear_existing: bool = False) -> Dict[str, object]:
         """OPEN受注明細をライン需要に展開する。"""

@@ -17,6 +17,7 @@
     --col-bg: #f8f9fc;
     --work: #ecfdf5; --work-border: #86efac;
     --holiday: #fef2f2; --holiday-border: #fca5a5;
+    --hw: #fef3c7; --hw-border: #fbbf24;
   }
   :root[data-theme="dark"] {
     --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
@@ -29,6 +30,7 @@
     --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
     --work: #0f2a1a; --work-border: #2e7d4a;
     --holiday: #2a1515; --holiday-border: #8b3030;
+    --hw: #2a2010; --hw-border: #a07820;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -42,6 +44,7 @@
       --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
       --work: #0f2a1a; --work-border: #2e7d4a;
       --holiday: #2a1515; --holiday-border: #8b3030;
+      --hw: #2a2010; --hw-border: #a07820;
     }
   }
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -128,6 +131,8 @@
   .cal-cell { border:1px solid var(--grid-line); border-radius:4px; padding:4px; min-height:62px; position:relative; }
   .cal-cell.work { background:var(--work); border-color:var(--work-border); }
   .cal-cell.holiday { background:var(--holiday); border-color:var(--holiday-border); }
+  .cal-cell.hw { background:var(--hw); border-color:var(--hw-border); }
+  .cal-cell.hw .cal-tag { color:#d97706; }
   .cal-cell.empty { background:transparent; border-color:transparent; min-height:auto; }
   .cal-day { font-size:14px; font-weight:700; margin-bottom:2px; }
   .cal-cell.holiday .cal-day { color:var(--danger); }
@@ -174,8 +179,9 @@
       <li><span class="tn">4</span>勤務日を一括登録する</li>
       <li><span class="tn">5</span>カレンダをコピーする</li>
       <li><span class="tn">6</span>日別の稼働/休日を切り替える</li>
-      <li><span class="tn">7</span>メモを入力する</li>
-      <li><span class="tn">8</span>新規カレンダを作成する</li>
+      <li><span class="tn">7</span>休日出勤を設定する</li>
+      <li><span class="tn">8</span>メモを入力する</li>
+      <li><span class="tn">9</span>新規カレンダを作成する</li>
     </ul>
   </div>
 
@@ -290,9 +296,11 @@
             <div class="cal-pattern">日勤 (480分)</div>
             <div class="cal-pattern">08:00 - 17:00</div>
           </div>
-          <div class="cal-cell holiday">
+          <div class="cal-cell hw">
             <div class="cal-day">4</div>
-            <div class="cal-tag">休み</div>
+            <div class="cal-tag">休出</div>
+            <div class="cal-pattern">日勤 (480分)</div>
+            <div class="cal-pattern">08:00 - 17:00</div>
           </div>
 
           <div class="cal-cell holiday">
@@ -361,6 +369,7 @@
         <div style="display:flex;gap:14px;margin-top:10px;font-size:10px;color:var(--ink2);">
           <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:3px;background:var(--work);border:1px solid var(--work-border);"></span> 稼働日</span>
           <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:3px;background:var(--holiday);border:1px solid var(--holiday-border);"></span> 休日</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:3px;background:var(--hw);border:1px solid var(--hw-border);"></span> 休日出勤</span>
         </div>
       </div>
     </div>
@@ -408,7 +417,7 @@
     </table>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>左上の「カレンダ作成」ボタンで新規カレンダも作成できます（STEP 8参照）。</span>
+      <span>左上の「カレンダ作成」ボタンで新規カレンダも作成できます（STEP 9参照）。</span>
     </div>
   </div>
 
@@ -557,6 +566,59 @@
   <div class="step">
     <div class="step-header">
       <div class="step-num">7</div>
+      <div class="step-title">休日出勤を設定する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      負荷が高い時期に休日を臨時稼働日にするには、<strong>休日出勤チェック</strong>を使います。休日出勤に設定すると、その日は生産計画の入力が可能になります。
+    </div>
+
+    <h4 class="sub">休日出勤セルの見方</h4>
+    <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+      <div class="cal-cell hw" style="width:110px;min-height:auto;padding:8px;">
+        <div class="cal-day">4</div>
+        <div class="cal-tag">&#9745; 出</div>
+        <div class="cal-pattern">日勤 (480分)</div>
+        <div style="font-size:10px;color:#92400e;font-weight:600;">&#9745; 休日出勤</div>
+      </div>
+      <div class="cal-cell holiday" style="width:110px;min-height:auto;padding:8px;">
+        <div class="cal-day">5</div>
+        <div class="cal-tag">&#9744; 休み</div>
+        <div style="font-size:10px;color:var(--ink2);">&#9744; 休日出勤</div>
+      </div>
+    </div>
+
+    <table class="info-table">
+      <tr><th>黄色のセル</th><td><strong>休日出勤日</strong> — 休日に出勤チェックが付いた状態。生産計画の入力が可能です</td></tr>
+      <tr><th>チェックボックス</th><td>「休日出勤」チェックは<strong>休日のセルのみ</strong>に表示されます</td></tr>
+    </table>
+
+    <h4 class="sub">設定方法</h4>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>休日セルの「休日出勤」チェックボックスをONにする</td><td>セルが黄色に変わり、稼働日として扱われます</td></tr>
+        <tr><td class="num">2</td><td>解除する場合は同じチェックを外す</td><td>元の休日に戻ります</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>受注展開への影響:</strong> 休日出勤日は受注展開（需要の日割り展開）では<strong>休日扱い</strong>のままです。需要は休日出勤日には割り当てられません。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>対象カレンダ:</strong> 休日出勤はラインカレンダ（社内カレンダ）のみ設定できます。ダイソウカレンダ・顧客カレンダ・仕入先カレンダには設定できません。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>生産画面での表示:</strong> 休日出勤日は生産計画入力・ガントチャート・進度・在庫画面で<strong>黄色の背景</strong>で表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
       <div class="step-title">メモを入力する</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
@@ -578,10 +640,10 @@
     </table>
   </div>
 
-  <!-- ===== STEP 8 ===== -->
+  <!-- ===== STEP 9 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">8</div>
+      <div class="step-num">9</div>
       <div class="step-title">新規カレンダを作成する</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
@@ -598,7 +660,7 @@
     </table>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>作成されたカレンダは<strong>社内用（INTERNAL）</strong>タイプで、ライン割当可能な状態で作成されます。作成直後はカレンダ日が空なので、STEP 4の一括登録またはSTEP 5のコピーで日データを追加してください。</span>
+      <span>作成されたカレンダは<strong>社内用（INTERNAL）</strong>タイプで、ライン割当可能な状態で作成されます。作成直後はカレンダ日が空なので、STEP 4の一括登録またはSTEP 5のコピーで日データを追加してください。休日出勤の設定はSTEP 7を参照してください。</span>
     </div>
   </div>
 
@@ -611,6 +673,8 @@
       <li><strong>一括登録の対象:</strong> 勤務日一括登録は既存の稼働日のみが対象です。新規の日を作るには、先に月間カレンダーで日を作成してください</li>
       <li><strong>コピーの上書き:</strong> カレンダコピーはコピー先の既存データを上書きします。実行前に確認ダイアログが表示されます</li>
       <li><strong>購買先ライン:</strong> ライン区分が「購買先」のラインを選択した場合、編集操作は無効化されます（読み取り専用）</li>
+      <li><strong>休日出勤と受注展開:</strong> 休日出勤日は生産計画では稼働日として扱われますが、受注展開（需要の日割り）では休日のままです。需要は休日出勤日には配分されません</li>
+      <li><strong>休日出勤の対象:</strong> 休日出勤はラインカレンダ（社内）のみ設定可能です。ダイソウカレンダ・顧客カレンダ・仕入先カレンダには設定できません</li>
       <li><strong>権限:</strong> production.line_calendars の編集権限がないユーザーは設定を変更できません</li>
     </ul>
   </div>
