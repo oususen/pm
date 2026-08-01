@@ -325,6 +325,7 @@ const daisoCalendarId = ref(undefined)
 const processOutputCandidatesMap = ref({})
 const processCoproductChildMap = ref({})
 const processCodeMap = ref({})
+const processDisplayOrderMap = ref({})
 const ganttScrollRef = ref(null)
 const frontScrollbarRef = ref(null)
 const frontScrollbarContentWidth = ref(0)
@@ -1159,6 +1160,28 @@ const ensureProcessCodes = async (plans) => {
   }
 }
 
+const loadProcessDisplayOrders = async (lineId) => {
+  if (!lineId) {
+    processDisplayOrderMap.value = {}
+    return
+  }
+  try {
+    const res = await api.ganttDisplayProductMaps.getProcessDisplayOrders({ line: lineId })
+    const rows = Array.isArray(res.data) ? res.data : res.data?.results || []
+    const nextMap = {}
+    rows.forEach((row) => {
+      const processId = Number(row?.process)
+      const displayOrder = Number(row?.display_order)
+      if (!Number.isFinite(processId) || !Number.isFinite(displayOrder)) return
+      nextMap[processId] = displayOrder
+    })
+    processDisplayOrderMap.value = nextMap
+  } catch (e) {
+    console.error('工程表示順取得エラー', e)
+    processDisplayOrderMap.value = {}
+  }
+}
+
 const loadData = async () => {
   if (!selectedLine.value) return
   pendingDeletes.value = []
@@ -1173,6 +1196,7 @@ const loadData = async () => {
     logDebug('loadData', { line: selectedLine.value, startDate, endDate })
     await loadWorkPatternData(selectedLine.value, startDate, endDate)
     await loadProcessOutputCandidates(selectedLine.value)
+    await loadProcessDisplayOrders(selectedLine.value)
     const ganttRes = await api.lineGanttPlans.getLineGanttPlans({
       line: selectedLine.value,
       plan_date__gte: startDate,
@@ -1206,6 +1230,7 @@ const generateSchedule = async (clearExisting = true) => {
     logDebug('generateSchedule', { line: selectedLine.value, startDate, endDate, clearExisting })
     await loadWorkPatternData(selectedLine.value, startDate, endDate)
     await loadProcessOutputCandidates(selectedLine.value)
+    await loadProcessDisplayOrders(selectedLine.value)
     const ganttRes = await api.lineGanttPlans.generate({
       line_id: selectedLine.value,
       start_date: startDate,
@@ -2338,6 +2363,15 @@ function buildProcessGantt(plans) {
   })
 
   return Array.from(processMap.values()).sort((a, b) => {
+    const displayOrderA = Number(processDisplayOrderMap.value[a.process_id])
+    const displayOrderB = Number(processDisplayOrderMap.value[b.process_id])
+    const hasDisplayOrderA = Number.isFinite(displayOrderA)
+    const hasDisplayOrderB = Number.isFinite(displayOrderB)
+    if (hasDisplayOrderA || hasDisplayOrderB) {
+      const orderA = hasDisplayOrderA ? displayOrderA : Number.POSITIVE_INFINITY
+      const orderB = hasDisplayOrderB ? displayOrderB : Number.POSITIVE_INFINITY
+      if (orderA !== orderB) return orderA - orderB
+    }
     const diff = (b.process_number || 0) - (a.process_number || 0)
     if (diff !== 0) return diff
     return (b.process_id || 0) - (a.process_id || 0)

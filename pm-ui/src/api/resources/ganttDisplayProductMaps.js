@@ -2,6 +2,12 @@ export const createGanttDisplayProductMapsAPI = (client) => ({
   getGanttDisplayProductMaps(params = {}) {
     return client.get('/gantt-display-product-maps/', { params })
   },
+  getProcessDisplayOrders(params = {}) {
+    return client.get('/gantt-display-product-maps/process-display-orders/', { params })
+  },
+  bulkSaveProcessDisplayOrders(payload) {
+    return client.post('/gantt-display-product-maps/process-display-orders/', payload)
+  },
   getGanttDisplayProductMap(id) {
     return client.get(`/gantt-display-product-maps/${id}/`)
   },

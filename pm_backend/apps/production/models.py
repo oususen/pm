@@ -23,6 +23,7 @@ from .models_production_actual_reconcile import (
 )
 from .models_routing_migration_log import RoutingMigrationLog
 from .models_gantt_display_product_map import GanttDisplayProductMap
+from .models_gantt_process_display_order import GanttProcessDisplayOrder
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_record_confirmation import ProductionRecordConfirmation

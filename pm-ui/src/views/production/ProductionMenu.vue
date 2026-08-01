@@ -204,7 +204,7 @@ const tiles = computed(() => {
     },
     {
       to: "/production/gantt-display-product-map",
-      label: "ガント生成表示品マップ",
+      label: "ガントチャート設定",
       icon: "🗺️",
       category: "plan",
       required: "edit",

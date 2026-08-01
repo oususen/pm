@@ -174,7 +174,7 @@
 | `m_kubota_sakai_truck` | `クボタ堺納期調整及び便計画仕様書.md` | 便マスタ |
 | `accounts_*` | `権限仕様書.md` | 部署階層/ロール/権限 |
 | `t_order`, `t_order_line`, `stg_order_*`, `stg_order_daily` | `受注管理仕様書.md`, `受注展開仕様書.md` | 受注取込〜明細 |
-| `t_line_demand`, `line_backlog`, `line_plan`, `t_line_gantt_plan` | `生産計画仕様書.md`, `在庫計算仕様書.md`, `前工程需要計算仕様書.md` | 計画/需要/在庫系トランザクション |
+| `t_line_demand`, `line_backlog`, `line_plan`, `t_line_gantt_plan`, `t_gantt_process_display_order` | `生産計画仕様書.md`, `在庫計算仕様書.md`, `前工程需要計算仕様書.md` | 計画/需要/在庫系トランザクション |
 | `t_line_realtime_record`, `t_line_status`, `t_process_realtime_record`, `t_process_work_session*`, `t_production_record_confirmation`, `brake_line_record` | `生産計画仕様書.md`, `スポットライン実績入力仕様書.md`, `レーザー実績入力仕様書.md` | 実績入力・稼働監視 |
 | `t_stock_allocation`, `t_production_order`, `t_process_actual` | `生産計画仕様書.md`, `在庫計算仕様書.md` | 製造実行 |
 | `production_schedule_config`, `production_plan_lock_setting`, `production_plan_change_log`, `production_record_inquiry_setting` | `自動計画生成タスク仕様書.md`, `システム設定仕様書.md`, `生産計画仕様書.md` | 設定/履歴 |

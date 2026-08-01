@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガント生成表示品マップ 作業手順書</title>
+<title>ガントチャート設定 作業手順書</title>
 <style>
   :root {
     --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
@@ -127,10 +127,10 @@
 
   <!-- ===== COVER ===== -->
   <div class="cover">
-    <h1>ガント生成表示品マップ 作業手順書</h1>
-    <div class="subtitle">共生産（連産品）ラインで、工程ガントチャートのバーに表示する品番を指定するマッピング画面</div>
+    <h1>ガントチャート設定 作業手順書</h1>
+    <div class="subtitle">共生産ラインの表示品設定と、ラインごとのガント工程表示順を管理する画面</div>
     <div class="path">
-      生産 <span class="arrow">&#9656;</span> ガント生成表示品マップ
+      生産 <span class="arrow">&#9656;</span> ガントチャート設定
     </div>
   </div>
 
@@ -139,10 +139,12 @@
     <h2>目次</h2>
     <ul class="toc-list">
       <li><span class="tn">1</span>この画面の役割</li>
-      <li><span class="tn">2</span>一覧画面の見方</li>
-      <li><span class="tn">3</span>マッピングを新規登録する</li>
-      <li><span class="tn">4</span>工程を追加する</li>
-      <li><span class="tn">5</span>編集・削除する</li>
+      <li><span class="tn">2</span>タブ構成</li>
+      <li><span class="tn">3</span>表示品マップ一覧の見方</li>
+      <li><span class="tn">4</span>マッピングを新規登録する</li>
+      <li><span class="tn">5</span>工程を追加する</li>
+      <li><span class="tn">6</span>工程順を編集する</li>
+      <li><span class="tn">7</span>編集・削除する</li>
     </ul>
   </div>
 
@@ -195,10 +197,32 @@
   <div class="step">
     <div class="step-header">
       <div class="step-num">2</div>
-      <div class="step-title">一覧画面の見方</div>
+      <div class="step-title">タブ構成</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
-      上部ナビゲーションの<strong>「生産」</strong>メニューから<strong>「ガント生成表示品マップ」</strong>をクリックすると一覧画面が開きます。
+      上部ナビゲーションの<strong>「生産」</strong>メニューから<strong>「ガントチャート設定」</strong>をクリックすると画面が開きます。画面上部には次の2タブがあります。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr>
+        <th>ガントチャート生成表示品マップ</th>
+        <td>共生産ラインで、工程ガントバーに表示する品番を設定します。</td>
+      </tr>
+      <tr>
+        <th>ガントチャート工程順編集</th>
+        <td>ラインごとに、工程ガントの上下表示順を設定します。</td>
+      </tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>製品によって工程番号が異なるラインでも、このタブでライン共通の表示順を決められます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">表示品マップ一覧の見方</div>
     </div>
 
     <!-- 一覧モック -->
@@ -283,10 +307,10 @@
     </div>
   </div>
 
-  <!-- ===== STEP 3 ===== -->
+  <!-- ===== STEP 4 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">3</div>
+      <div class="step-num">4</div>
       <div class="step-title">マッピングを新規登録する</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
@@ -354,10 +378,10 @@
     </div>
   </div>
 
-  <!-- ===== STEP 4 ===== -->
+  <!-- ===== STEP 5 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">4</div>
+      <div class="step-num">5</div>
       <div class="step-title">工程を追加する（既存最終品へ）</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
@@ -379,10 +403,60 @@
     </div>
   </div>
 
-  <!-- ===== STEP 5 ===== -->
+  <!-- ===== STEP 6 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">5</div>
+      <div class="step-num">6</div>
+      <div class="step-title">工程順を編集する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>「ガントチャート工程順編集」</strong>タブでは、ラインごとに工程ガントの上下表示順を設定できます。
+    </div>
+    <div style="border:1px solid var(--grid-line);border-radius:6px;overflow:hidden;margin-bottom:12px;">
+      <div style="background:var(--grid-head);padding:8px 14px;font-size:13px;font-weight:700;display:flex;justify-content:space-between;align-items:center;">
+        <span>ガントチャート工程順編集</span>
+        <span style="display:flex;gap:6px;">
+          <span class="mock-btn">再読込</span>
+          <span class="mock-btn primary">保存</span>
+        </span>
+      </div>
+      <div style="background:var(--card);padding:12px 14px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+          <span style="font-size:11px;color:var(--ink2);">ライン:</span>
+          <span class="f-select">L3100 - 5連 ▾</span>
+        </div>
+        <div class="mock-grid" style="margin:0;">
+          <table>
+            <thead>
+              <tr><th>順番</th><th>工程</th><th>工程名</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td>4051-5</td><td>5連5ST</td><td>&#9650; &#9660;</td></tr>
+              <tr><td>2</td><td>4051-4</td><td>5連4ST</td><td>&#9650; &#9660;</td></tr>
+              <tr><td>3</td><td>4051-3</td><td>5連3ST</td><td>&#9650; &#9660;</td></tr>
+              <tr><td>4</td><td>4051-2</td><td>5連2ST</td><td>&#9650; &#9660;</td></tr>
+              <tr><td>5</td><td>4051-1</td><td>5連1ST</td><td>&#9650; &#9660;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th style="width:30px;text-align:center;">1</th><td>タブを<strong>「ガントチャート工程順編集」</strong>に切り替える</td></tr>
+      <tr><th style="text-align:center;">2</th><td><strong>ライン</strong>を選択して工程一覧を表示する</td></tr>
+      <tr><th style="text-align:center;">3</th><td><strong>&#9650; / &#9660;</strong> ボタンで表示順を上下に移動する</td></tr>
+      <tr><th style="text-align:center;">4</th><td><strong>「保存」</strong>をクリックしてラインごとの表示順を登録する</td></tr>
+    </table>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>保存後、次回のガント再表示・再生成からこの並び順が優先されます。未設定工程だけ従来の工程番号順に従います。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
       <div class="step-title">編集・削除する</div>
     </div>
 
@@ -410,6 +484,7 @@
       <li><strong>単品生産ライン:</strong> 共生産でないラインには通常この設定は不要です</li>
       <li><strong>4項目すべて必須:</strong> ライン・最終品・工程・表示品のいずれかが未選択の場合は保存できません</li>
       <li><strong>候補の連動:</strong> ライン → 最終品 → 工程 の順に選択すると、それぞれの候補が自動で絞り込まれます</li>
+      <li><strong>工程順編集:</strong> 工程番号が製品ごとにばらつくラインでも、ライン共通のガント表示順をここで固定できます</li>
     </ul>
   </div>
 
