@@ -9,6 +9,18 @@ def _to_decimal(value, default='0'):
         return Decimal(default)
 
 
+def _slot_orientations(slot):
+    """
+    スロットの向き候補を返す。
+    回転比較は _rotation_variants 側で行うため、ここでは現在向きのみを使う。
+    """
+    return [(
+        _to_decimal(slot.get('length')),
+        _to_decimal(slot.get('width')),
+        bool(slot.get('rotated', False)),
+    )]
+
+
 def _pack_shelf(bed_len, bed_wid, slots):
     """
     Shelf方式（長手方向に1列ずつ敷き詰め、各スロットは回転も試す）。
@@ -25,7 +37,7 @@ def _pack_shelf(bed_len, bed_wid, slots):
         wid_a = _to_decimal(slot.get('width'))
         rot_a = bool(slot.get('rotated', False))
         chosen = None
-        for (length, width, rotated) in ((len_a, wid_a, rot_a), (wid_a, len_a, not rot_a)):
+        for (length, width, rotated) in _slot_orientations(slot):
             if row_x + length <= bed_len and row_y + width <= bed_wid:
                 chosen = (length, width, rotated, row_x, row_y, False)
                 break
@@ -92,7 +104,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
         # 収まる自由矩形を探す（Best Short Side Fit）
         best = None
         for rect_idx, (fx, fy, fw, fh) in enumerate(free_rects):
-            for (length, width, rotated) in ((len_a, wid_a, rot_a), (len_b, wid_b, rot_b)):
+            for (length, width, rotated) in _slot_orientations(slot):
                 if length <= fw and width <= fh:
                     rest_w = fw - length
                     rest_h = fh - width
@@ -189,7 +201,7 @@ def _pack_bay(bed_len, bed_wid, slots):
         len_a = _to_decimal(slot.get('length'))
         wid_a = _to_decimal(slot.get('width'))
         rot_a = bool(slot.get('rotated', False))
-        options = ((len_a, wid_a, rot_a), (wid_a, len_a, not rot_a))
+        options = _slot_orientations(slot)
 
         chosen = None
         # 現在のベイの残り幅に収まる向きのうち、幅を最も埋める向きを選ぶ
@@ -321,6 +333,8 @@ def _pack_column(bed_len, bed_wid, slots):
                 if dp[cur_w] is None:
                     continue
                 if any(item[0] == gi for item in dp[cur_w][1]):
+                    continue
+                if len(dp[cur_w][1]) >= 2:
                     continue
                 new_w = cur_w + eff_w_int
                 if new_w > bed_wid_int:
@@ -472,6 +486,9 @@ def _pack_score(placed, can_fit, bed_len, bed_wid):
     max_overflow_x = Decimal('0')
     in_bed_sum_x = Decimal('0')
     in_bed_sum_y = Decimal('0')
+    edge_contact = Decimal('0')
+    row_starts = []
+    y_points = {Decimal('0'), bed_wid}
     for item in placed:
         px = _to_decimal(item['x'])
         py = _to_decimal(item['y'])
@@ -480,28 +497,175 @@ def _pack_score(placed, can_fit, bed_len, bed_wid):
         if px + pw <= bed_len and py + pd <= bed_wid:
             in_bed_sum_x += px
             in_bed_sum_y += py
+            y_points.add(py)
+            y_points.add(py + pd)
+            if px == 0:
+                edge_contact += pd
+            if py == 0:
+                edge_contact += pw
+            if px + pw == bed_len:
+                edge_contact += pd
+            if py + pd == bed_wid:
+                edge_contact += pw
             continue
         overflow_count += 1
         overflow_area += pw * pd
         max_overflow_x = max(max_overflow_x, px + pw)
         max_overflow_y = max(max_overflow_y, py + pd)
+
+    y_list = sorted(y_points)
+    for idx in range(len(y_list) - 1):
+        band_start = y_list[idx]
+        band_end = y_list[idx + 1]
+        if band_end <= band_start:
+            continue
+        min_x_in_band = None
+        for item in placed:
+            px = _to_decimal(item['x'])
+            py = _to_decimal(item['y'])
+            pw = _to_decimal(item['w'])
+            pd = _to_decimal(item['d'])
+            if px + pw > bed_len or py + pd > bed_wid:
+                continue
+            if py < band_end and py + pd > band_start:
+                min_x_in_band = px if min_x_in_band is None else min(min_x_in_band, px)
+        if min_x_in_band is not None:
+            row_starts.append(min_x_in_band)
+
+    left_gap_sum = sum(row_starts, Decimal('0'))
+    left_gap_max = max(row_starts) if row_starts else Decimal('0')
     return (
         0 if can_fit else 1,
         overflow_count,
         overflow_area,
         max_overflow_y,
         max_overflow_x,
+        left_gap_max,
+        left_gap_sum,
+        -edge_contact,
         in_bed_sum_x,
         in_bed_sum_y,
     )
 
 
-def _finalize_pack_result(pack_result, bed_len, bed_wid):
+def _swap_overflow(in_bed, overflow, bed_len, bed_wid):
+    """
+    overflowが残る場合、配置済みアイテム1個と入れ替えを試みる。
+    外したアイテムは回転含めて空きスペースに再配置する。
+    """
+    if not overflow:
+        return in_bed, overflow
+
+    improved = True
+    while improved:
+        improved = False
+        for oi, o_item in enumerate(overflow):
+            o_len = _to_decimal(o_item.get('w'))
+            o_wid = _to_decimal(o_item.get('d'))
+            o_orientations = [(o_len, o_wid), (o_wid, o_len)]
+
+            for pi in range(len(in_bed) - 1, -1, -1):
+                p_item = in_bed[pi]
+                temp_in_bed = in_bed[:pi] + in_bed[pi + 1:]
+
+                free_rects = [(Decimal('0'), Decimal('0'), bed_len, bed_wid)]
+                for p in temp_in_bed:
+                    box = (Decimal(p['x']), Decimal(p['y']),
+                           Decimal(p['w']), Decimal(p['d']))
+                    new_free = []
+                    for rect in free_rects:
+                        new_free.extend(_split_free_rect(rect, box))
+                    free_rects = _remove_contained(new_free)
+
+                o_best = None
+                o_best_score = None
+                for idx, (fx, fy, fw, fh) in enumerate(free_rects):
+                    for (length, width) in o_orientations:
+                        if length <= fw and width <= fh:
+                            anchors = (
+                                (fx, fy),
+                                (fx + fw - length, fy),
+                                (fx, fy + fh - width),
+                                (fx + fw - length, fy + fh - width),
+                            )
+                            for ax, ay in anchors:
+                                score = (
+                                    min(fw - length, fh - width),
+                                    ay, ax,
+                                )
+                                if o_best_score is None or score < o_best_score:
+                                    o_best_score = score
+                                    o_best = (length, width, ax, ay)
+
+                if o_best is None:
+                    continue
+
+                ol, ow, ox, oy = o_best
+                box = (ox, oy, ol, ow)
+                new_free = []
+                for rect in free_rects:
+                    new_free.extend(_split_free_rect(rect, box))
+                free_rects_after = _remove_contained(new_free)
+
+                p_len = _to_decimal(p_item.get('w'))
+                p_wid = _to_decimal(p_item.get('d'))
+                p_orientations = [(p_len, p_wid), (p_wid, p_len)]
+
+                p_best = None
+                p_best_score = None
+                for idx, (fx, fy, fw, fh) in enumerate(free_rects_after):
+                    for (length, width) in p_orientations:
+                        if length <= fw and width <= fh:
+                            anchors = (
+                                (fx, fy),
+                                (fx + fw - length, fy),
+                                (fx, fy + fh - width),
+                                (fx + fw - length, fy + fh - width),
+                            )
+                            for ax, ay in anchors:
+                                score = (
+                                    min(fw - length, fh - width),
+                                    ay, ax,
+                                )
+                                if p_best_score is None or score < p_best_score:
+                                    p_best_score = score
+                                    p_best = (length, width, ax, ay)
+
+                if p_best is None:
+                    continue
+
+                pl, pw_val, px, py = p_best
+                in_bed = temp_in_bed
+                in_bed.append({
+                    **o_item,
+                    'x': str(ox), 'y': str(oy),
+                    'w': str(ol), 'd': str(ow),
+                    'rotated': abs(ol - o_len) > Decimal('1'),
+                })
+                in_bed.append({
+                    **p_item,
+                    'x': str(px), 'y': str(py),
+                    'w': str(pl), 'd': str(pw_val),
+                    'rotated': abs(pl - p_len) > Decimal('1'),
+                })
+                overflow = overflow[:oi] + overflow[oi + 1:]
+                improved = True
+                break
+            if improved:
+                break
+
+    return in_bed, overflow
+
+
+def _finalize_pack_result(pack_result, bed_len, bed_wid, light=False):
     placed_all = pack_result['placed']
     in_bed, overflow = _split_in_bed_and_overflow(placed_all, bed_len, bed_wid)
     in_bed, overflow = _fill_gaps(in_bed, overflow, bed_len, bed_wid)
+    if not light:
+        in_bed, overflow = _swap_overflow(in_bed, overflow, bed_len, bed_wid)
+        in_bed = _compact_left(in_bed, bed_len, bed_wid)
     placed = in_bed + overflow
-    can_fit = pack_result['can_fit'] and not overflow
+    can_fit = not overflow
     max_x = max((_to_decimal(item['x']) + _to_decimal(item['w']) for item in placed), default=Decimal('0'))
     max_y = max((_to_decimal(item['y']) + _to_decimal(item['d']) for item in placed), default=Decimal('0'))
     return {
@@ -530,36 +694,198 @@ def _sorted_slot_variants(slots):
     return [slots, area_sorted, long_side_sorted]
 
 
+def _flip_slot_orientation(slot):
+    return {
+        **slot,
+        'length': slot.get('width'),
+        'width': slot.get('length'),
+        'rotated': not bool(slot.get('rotated', False)),
+    }
+
+
+def _rotation_variants(slots):
+    """
+    品目（product_code + container_name）単位で、初期配置前の回転あり/なし候補を作る。
+    全組み合わせは重すぎるため、
+    - 元の向き
+    - 各品目だけ回転
+    - 全品目を回転
+    を比較対象にする。
+    """
+    if not slots:
+        return [slots]
+
+    group_keys = []
+    seen = set()
+    for slot in slots:
+        key = (
+            str(slot.get('product_code', '')),
+            str(slot.get('container_name', '')),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        group_keys.append(key)
+
+    variants = [slots]
+    for target_key in group_keys:
+        variants.append([
+            _flip_slot_orientation(slot)
+            if (
+                str(slot.get('product_code', '')),
+                str(slot.get('container_name', '')),
+            ) == target_key else slot
+            for slot in slots
+        ])
+
+    variants.append([_flip_slot_orientation(slot) for slot in slots])
+
+    unique = []
+    unique_keys = set()
+    for variant in variants:
+        signature = tuple(
+            (
+                str(slot.get('product_code', '')),
+                str(slot.get('container_name', '')),
+                str(slot.get('length', '')),
+                str(slot.get('width', '')),
+                bool(slot.get('rotated', False)),
+            )
+            for slot in variant
+        )
+        if signature in unique_keys:
+            continue
+        unique_keys.add(signature)
+        unique.append(variant)
+    return unique
+
+
+def _group_order_variants(slots):
+    """
+    品目グループ単位の並び順候補を作る。
+    左寄せ行配置で「どの品目を先に詰めるか」によって結果が大きく変わるため、
+    元順に加えて、寸法ベースの順序も比較する。
+    """
+    if not slots:
+        return [slots]
+
+    groups = {}
+    order = []
+    for slot in slots:
+        key = (
+            str(slot.get('product_code', '')),
+            str(slot.get('container_name', '')),
+        )
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(slot)
+
+    def group_dims(key):
+        first = groups[key][0]
+        length = _to_decimal(first.get('length'))
+        width = _to_decimal(first.get('width'))
+        area = length * width
+        count = Decimal(len(groups[key]))
+        return length, width, area, count
+
+    order_variants = [
+        order,
+        sorted(order, key=lambda key: (-group_dims(key)[1], -group_dims(key)[0], key[0], key[1])),
+        sorted(order, key=lambda key: (-group_dims(key)[0], -group_dims(key)[1], key[0], key[1])),
+        sorted(order, key=lambda key: (-group_dims(key)[2], -group_dims(key)[3], key[0], key[1])),
+    ]
+
+    variants = []
+    seen = set()
+    for group_order in order_variants:
+        signature = tuple(group_order)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        variant = []
+        for key in group_order:
+            variant.extend(groups[key])
+        variants.append(variant)
+    return variants
+
+
+
+def _try_packers(bed_len, bed_wid, slots, packers):
+    """指定パッカーで全バリアントを試行し、最良結果を返す。"""
+    first_candidate = None
+    best_ng_candidate = None
+    best_ng_key = None
+    seen = set()
+    for rotation_variant in _rotation_variants(slots):
+        for ordered_variant in _group_order_variants(rotation_variant):
+            for variant in _sorted_slot_variants(ordered_variant):
+                for packer in packers:
+                    key = (packer.__name__, tuple(
+                        (
+                            str(slot.get('product_code', '')),
+                            str(slot.get('container_name', '')),
+                            str(slot.get('length', '')),
+                            str(slot.get('width', '')),
+                            bool(slot.get('rotated', False)),
+                        )
+                        for slot in variant
+                    ))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    finalized = _finalize_pack_result(packer(bed_len, bed_wid, variant), bed_len, bed_wid)
+                    if first_candidate is None:
+                        first_candidate = finalized
+                    if finalized['can_fit']:
+                        return finalized, True
+
+                    overflow_count = 0
+                    overflow_area = Decimal('0')
+                    for item in finalized['placed']:
+                        px = _to_decimal(item['x'])
+                        py = _to_decimal(item['y'])
+                        pw = _to_decimal(item['w'])
+                        pd = _to_decimal(item['d'])
+                        if px + pw <= bed_len and py + pd <= bed_wid:
+                            continue
+                        overflow_count += 1
+                        overflow_area += pw * pd
+                    ng_key = (overflow_count, overflow_area)
+                    if best_ng_candidate is None or ng_key < best_ng_key:
+                        best_ng_candidate = finalized
+                        best_ng_key = ng_key
+
+    return best_ng_candidate or first_candidate, False
+
 
 def _pack_slots(bed_len, bed_wid, slots):
-    """複数パッカーを試し、overflow が最も少ない結果を採用する。"""
-    candidates = []
-    seen = set()
-    for variant in _sorted_slot_variants(slots):
-        packers = (
-            _pack_column,
-            _pack_guillotine,
-            _pack_bay,
-            _pack_shelf,
-        )
-        for packer in packers:
-            key = (packer.__name__, tuple(
-                (
-                    str(slot.get('product_code', '')),
-                    str(slot.get('length', '')),
-                    str(slot.get('width', '')),
-                    bool(slot.get('rotated', False)),
-                )
-                for slot in variant
-            ))
-            if key in seen:
-                continue
-            seen.add(key)
-            finalized = _finalize_pack_result(packer(bed_len, bed_wid, variant), bed_len, bed_wid)
-            candidates.append(finalized)
+    """
+    1. _pack_columnで全バリアント試行（メイン）
+    2. 入らなければ他パッカーも試行
+    3. それでも入らなければswapを1回試行
+    """
+    result, ok = _try_packers(bed_len, bed_wid, slots, (_pack_column,))
+    if ok:
+        return result['placed'], True, result['max_x'], result['max_y']
 
-    best = min(candidates, key=lambda item: _pack_score(item['placed'], item['can_fit'], bed_len, bed_wid))
-    return best['placed'], best['can_fit'], best['max_x'], best['max_y']
+    result2, ok2 = _try_packers(bed_len, bed_wid, slots,
+                                (_pack_guillotine, _pack_bay, _pack_shelf))
+    if ok2:
+        return result2['placed'], True, result2['max_x'], result2['max_y']
+
+    fallback = result
+    if result2:
+        r1_of = sum(1 for p in result['placed']
+                    if _to_decimal(p['x']) + _to_decimal(p['w']) > bed_len
+                    or _to_decimal(p['y']) + _to_decimal(p['d']) > bed_wid)
+        r2_of = sum(1 for p in result2['placed']
+                    if _to_decimal(p['x']) + _to_decimal(p['w']) > bed_len
+                    or _to_decimal(p['y']) + _to_decimal(p['d']) > bed_wid)
+        if r2_of < r1_of:
+            fallback = result2
+
+    return fallback['placed'], fallback['can_fit'], fallback['max_x'], fallback['max_y']
 
 
 def _split_free_rect(rect, box):
@@ -594,6 +920,38 @@ def _remove_contained(rects):
     return result
 
 
+def _compact_left(placed, bed_len, bed_wid):
+    """
+    各箱のY位置は変えず、重ならない範囲で左へだけ詰める。
+    段頭の左空きを解消し、左寄せ配置を優先する。
+    """
+    compacted = []
+    for item in sorted(
+        placed,
+        key=lambda p: (
+            _to_decimal(p.get('x')),
+            _to_decimal(p.get('y')),
+        ),
+    ):
+        py = _to_decimal(item['y'])
+        pw = _to_decimal(item['w'])
+        pd = _to_decimal(item['d'])
+        target_x = Decimal('0')
+        for other in compacted:
+            oy = _to_decimal(other['y'])
+            od = _to_decimal(other['d'])
+            if oy + od <= py or py + pd <= oy:
+                continue
+            target_x = max(target_x, _to_decimal(other['x']) + _to_decimal(other['w']))
+        if target_x + pw > bed_len:
+            target_x = max(Decimal('0'), bed_len - pw)
+        compacted.append({
+            **item,
+            'x': str(target_x),
+        })
+    return compacted
+
+
 def _fill_gaps(in_bed, overflow, bed_len, bed_wid):
     """
     Maximal Rectangles方式で配置済みの隙間にoverflowの箱を詰める。
@@ -618,10 +976,24 @@ def _fill_gaps(in_bed, overflow, bed_len, bed_wid):
         for idx, (fx, fy, fw, fh) in enumerate(free_rects):
             for (length, width) in ((slot_len, slot_wid), (slot_wid, slot_len)):
                 if length <= fw and width <= fh:
-                    score = min(fw - length, fh - width)
-                    if best_score is None or score < best_score:
-                        best_score = score
-                        best = (idx, length, width, fx, fy)
+                    anchors = (
+                        (fx, fy),
+                        (fx + fw - length, fy),
+                        (fx, fy + fh - width),
+                        (fx + fw - length, fy + fh - width),
+                    )
+                    for px, py in anchors:
+                        bottom_gap = bed_wid - (py + width)
+                        score = (
+                            bottom_gap,
+                            min(fw - length, fh - width),
+                            fx + fw - (px + length),
+                            py,
+                            px,
+                        )
+                        if best_score is None or score < best_score:
+                            best_score = score
+                            best = (idx, length, width, px, py)
         if best is None:
             new_overflow.append(slot)
             continue
@@ -640,31 +1012,37 @@ def _fill_gaps(in_bed, overflow, bed_len, bed_wid):
     return in_bed, new_overflow
 
 
+def _quick_can_fit(bed_len, bed_wid, slots):
+    """_calc_remaining用の軽量判定（_pack_column単体、swap無し）"""
+    result = _finalize_pack_result(_pack_column(bed_len, bed_wid, slots), bed_len, bed_wid, light=True)
+    return result['can_fit']
+
+
 def _calc_remaining(bed_len, bed_wid, base_slots, type_records):
     """
     現在の積載(base_slots)に加えて、各容器をあと何箱置けるかを幾何学的に判定する。
+    二分探索で高速化。
     """
     result = {}
     for record in type_records:
         label = record['label']
-        extra = 0
-        while extra < 500:
-            test_slots = list(base_slots)
-            for _ in range(extra + 1):
-                test_slots.append({
-                    'product_code': '',
-                    'qty': Decimal('0'),
-                    'length': record['length'],
-                    'width': record['width'],
-                    'rotated': record['rotated'],
-                })
-            _, fits, _, _ = _pack_slots(bed_len, bed_wid, test_slots)
-            if fits:
-                extra += 1
+        extra_slot = {
+            'product_code': '',
+            'qty': Decimal('0'),
+            'length': record['length'],
+            'width': record['width'],
+            'rotated': record['rotated'],
+        }
+        lo, hi = 0, 50
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            test_slots = list(base_slots) + [dict(extra_slot) for _ in range(mid)]
+            if _quick_can_fit(bed_len, bed_wid, test_slots):
+                lo = mid
             else:
-                break
-        if extra > 0:
-            result[label] = max(result.get(label, 0), extra)
+                hi = mid - 1
+        if lo > 0:
+            result[label] = max(result.get(label, 0), lo)
     return [{'label': key, 'count': value} for key, value in result.items()]
 
 
