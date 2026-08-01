@@ -480,7 +480,8 @@
                 <div v-if="showProgressAdjust" class="sub-cell progress-adjust-cell">
                   <input
                     :value="progressAdjustAt(row, dateKey)"
-                    type="number"
+                    type="text"
+                    inputmode="numeric"
                     class="progress-adjust-input"
                     @input="setProgressAdjust(row, dateKey, $event.target.value)"
                   />
@@ -701,6 +702,13 @@ const parseIntegerQty = (value) => {
   const normalized = String(value).replace(/[，,]/g, '').replace(/[．]/g, '.')
   const num = Number(normalized)
   return Number.isFinite(num) ? Math.max(0, Math.trunc(num)) : 0
+}
+
+const parseSignedIntegerQty = (value) => {
+  if (value === null || value === undefined || value === '') return 0
+  const normalized = String(value).replace(/[，,]/g, '').replace(/[．]/g, '.')
+  const num = Number(normalized)
+  return Number.isFinite(num) ? Math.trunc(num) : 0
 }
 
 const normalizeQtyText = (value) => {
@@ -1019,7 +1027,7 @@ const progressAdjustAt = (row, dateKey) => {
 }
 const setProgressAdjust = (row, dateKey, value) => {
   const key = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}`
-  progressAdjustEdits.value[key] = parseIntegerQty(value)
+  progressAdjustEdits.value[key] = parseSignedIntegerQty(value)
 }
 
 const truckAt = (dateKey, slotIdx) => {
