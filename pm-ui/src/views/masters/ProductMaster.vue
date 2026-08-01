@@ -262,10 +262,10 @@
         <h2>{{ processModeTitle }}</h2>
         <form @submit.prevent="saveProduct">
           <fieldset class="form-fieldset process-form-fieldset" :disabled="!canEdit || isViewMode">
-            <div class="process-section">
+            <div class="process-section section-basic-info">
               <h3 class="process-section-title">基本情報</h3>
               <div class="process-form-layout">
-                <div class="process-subsection">
+                <div class="process-subsection subsection-product-basic">
                   <div class="process-subsection-title">製品基本</div>
                   <div class="process-section-grid process-section-grid-4">
                     <div class="form-group">
@@ -304,7 +304,7 @@
                   </div>
                 </div>
 
-                <div class="process-subsection">
+                <div class="process-subsection subsection-procurement">
                   <div class="process-subsection-title">調達・在庫</div>
                   <div class="process-section-grid process-section-grid-4">
                     <div class="form-group process-group-span-2">
@@ -362,10 +362,10 @@
                   </div>
                 </div>
 
-                <div class="process-subsection">
+                <div class="process-subsection subsection-container-setting">
                   <div class="process-subsection-title">容器設定</div>
                   <div class="process-section-grid process-section-grid-2">
-                    <div class="product-container-box">
+                    <div class="product-container-box product-container-box-standard">
                       <div class="product-container-box-title">標準容器</div>
                       <div class="container-setting-guide container-setting-guide-inline">
                         <div class="container-setting-guide-item">
@@ -391,13 +391,13 @@
                         </div>
                       </div>
                     </div>
-                    <div v-if="processMode !== 'create'" class="product-container-box">
+                    <div v-if="processMode !== 'create'" class="product-container-box product-container-box-temporary">
                       <div class="product-container-box-title">
                         臨時容器
                         <span class="product-container-box-note">標準容器とは別に使う臨時容器を登録します。既存の容器を選ぶと入数を更新し、新しい容器を選ぶと追加します。</span>
                       </div>
                       <div class="product-container-panel">
-                        <div class="product-container-box product-container-box-nested">
+                        <div class="product-container-box product-container-box-nested product-container-box-current">
                           <div class="product-container-box-title">現在の登録</div>
                           <div v-if="productContainers.length" class="stock-locations-edit">
                             <div v-for="pc in productContainers" :key="pc.id" class="stock-loc-row product-container-readonly-row">
@@ -415,7 +415,7 @@
                           </div>
                           <div v-else class="product-container-empty">未設定です</div>
                         </div>
-                        <div v-if="!isViewMode" class="product-container-box product-container-box-nested">
+                        <div v-if="!isViewMode" class="product-container-box product-container-box-nested product-container-box-edit">
                           <div class="product-container-box-title">追加・変更</div>
                           <div class="stock-locations-edit">
                             <div class="stock-loc-row product-container-editor-row">
@@ -435,36 +435,39 @@
                   </div>
                 </div>
 
-                <div class="process-subsection">
+                <div class="process-subsection subsection-material-info">
                   <div class="process-subsection-title">材料情報</div>
                   <div class="form-group-section">レーザ材料情報（重量 = 比重×縦×横×厚さ / 1,000,000 kg）</div>
-                  <div class="process-section-grid process-section-grid-5">
-                    <div class="form-group">
-                      <label>比重 (g/cm³)</label>
-                      <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
+                  <small v-if="!isMaterialCategory" class="field-note material-lock-note">カテゴリが「材料」の場合のみ編集できます。</small>
+                  <fieldset class="form-fieldset material-info-fieldset" :disabled="!isMaterialCategory">
+                    <div class="process-section-grid process-section-grid-5">
+                      <div class="form-group">
+                        <label>比重 (g/cm³)</label>
+                        <input v-model.number="formData.specific_gravity" type="number" step="0.0001" min="0" placeholder="例: 7.85" />
+                      </div>
+                      <div class="form-group">
+                        <label>縦 (mm)</label>
+                        <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
+                      </div>
+                      <div class="form-group">
+                        <label>横 (mm)</label>
+                        <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
+                      </div>
+                      <div class="form-group">
+                        <label>厚さ (mm)</label>
+                        <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
+                      </div>
+                      <div v-if="computedUnitWeight != null" class="form-group">
+                        <label>重量/枚 (kg) ※自動計算</label>
+                        <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
+                      </div>
                     </div>
-                    <div class="form-group">
-                      <label>縦 (mm)</label>
-                      <input v-model.number="formData.size_length" type="number" step="0.01" min="0" placeholder="例: 1219" />
-                    </div>
-                    <div class="form-group">
-                      <label>横 (mm)</label>
-                      <input v-model.number="formData.size_width" type="number" step="0.01" min="0" placeholder="例: 2438" />
-                    </div>
-                    <div class="form-group">
-                      <label>厚さ (mm)</label>
-                      <input v-model.number="formData.size_thickness" type="number" step="0.001" min="0" placeholder="例: 4.5" />
-                    </div>
-                    <div v-if="computedUnitWeight != null" class="form-group">
-                      <label>重量/枚 (kg) ※自動計算</label>
-                      <div class="computed-value">{{ computedUnitWeight.toFixed(3) }} kg</div>
-                    </div>
-                  </div>
+                  </fieldset>
                 </div>
               </div>
             </div>
 
-            <div class="process-section">
+            <div class="process-section section-process-info">
               <h3 class="process-section-title">工程情報</h3>
               <div class="process-section-grid process-section-grid-4">
                 <div class="form-group">
@@ -505,7 +508,7 @@
               </div>
             </div>
 
-            <div class="process-section">
+            <div class="process-section section-status-info">
               <h3 class="process-section-title">状態</h3>
               <div class="process-check-grid">
                 <label>
@@ -527,7 +530,7 @@
               </div>
             </div>
 
-            <div class="process-section">
+            <div class="process-section section-image-info">
               <h3 class="process-section-title">図面情報（写真など）</h3>
               <div class="process-section-grid">
                 <div class="form-group process-group-full">
@@ -897,6 +900,7 @@ const formData = ref(createEmptyFormData())
 const fileInput = ref(null)
 const canEdit = computed(() => canAccessMasterResource('masters.product', 'edit'))
 const isViewMode = computed(() => processMode.value === 'view')
+const isMaterialCategory = computed(() => formData.value.category === 'MATERIAL')
 const processModeTitle = computed(() => {
   if (processMode.value === 'edit') return '製品変更'
   if (processMode.value === 'view') return '製品照会'
@@ -1837,9 +1841,34 @@ watch(
 
 .process-section {
   border: 1px solid #dbe3ec;
+  border-left-width: 6px;
   border-radius: 6px;
   padding: 8px;
   background: #fbfdff;
+}
+
+.section-basic-info {
+  background: #fcfdf7;
+  border-color: #d9e7c1;
+  border-left-color: #7aa341;
+}
+
+.section-process-info {
+  background: #f7fbff;
+  border-color: #cfe0f3;
+  border-left-color: #4b86c5;
+}
+
+.section-status-info {
+  background: #fffaf3;
+  border-color: #f0dcc0;
+  border-left-color: #d28b2d;
+}
+
+.section-image-info {
+  background: #faf7ff;
+  border-color: #ddd1f4;
+  border-left-color: #8b63c7;
 }
 
 .process-section-title {
@@ -1876,9 +1905,34 @@ watch(
 
 .process-subsection {
   border: 1px solid #e5e7eb;
+  border-left-width: 6px;
   border-radius: 6px;
   padding: 8px;
   background: #ffffff;
+}
+
+.subsection-product-basic {
+  background: #fffdf2;
+  border-color: #eadf9d;
+  border-left-color: #c4a62a;
+}
+
+.subsection-procurement {
+  background: #f7fcf7;
+  border-color: #cae6cc;
+  border-left-color: #4ea463;
+}
+
+.subsection-container-setting {
+  background: #f7fbff;
+  border-color: #cfe0f3;
+  border-left-color: #4c8fd1;
+}
+
+.subsection-material-info {
+  background: #f6fcfb;
+  border-color: #c9e7df;
+  border-left-color: #2c9a89;
 }
 
 .process-subsection-title {
@@ -2075,13 +2129,39 @@ watch(
 }
 .product-container-box {
   border: 1px solid #dbe3ec;
+  border-left-width: 6px;
   border-radius: 6px;
   background: #f8fafc;
   padding: 8px;
 }
+
+.product-container-box-standard {
+  background: #f9f8ff;
+  border-color: #d8cff8;
+  border-left-color: #7b5dc9;
+}
+
+.product-container-box-temporary {
+  background: #fff8f1;
+  border-color: #efd5bb;
+  border-left-color: #d18a3c;
+}
+
 .product-container-box-nested {
   background: #ffffff;
   padding: 8px;
+}
+
+.product-container-box-current {
+  background: #f8fbff;
+  border-color: #d8e5f3;
+  border-left-color: #5d95c9;
+}
+
+.product-container-box-edit {
+  background: #fffef7;
+  border-color: #eee0b0;
+  border-left-color: #c7a72c;
 }
 .product-container-box-title {
   margin-bottom: 6px;
@@ -2202,6 +2282,12 @@ watch(
   color: #888;
   font-size: 11px;
   line-height: 1.4;
+}
+.material-lock-note {
+  margin-bottom: 8px;
+}
+.material-info-fieldset:disabled {
+  opacity: 0.75;
 }
 .form-group-section {
   font-size: 12px;
