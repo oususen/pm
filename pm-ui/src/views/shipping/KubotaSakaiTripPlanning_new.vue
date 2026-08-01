@@ -1250,7 +1250,7 @@ const planTruckModels = computed(() => {
   const models = []
 
   // 実出発日ベースの積載データを取得
-  const departureSummaries = previewDepartureSummaryByDate.value[dateKey] || []
+  const departureSummaries = previewDepartureSummaryByDate.value[dateKey] || departureSummaryByDate.value[dateKey] || []
 
   // 全納期日を走査し、getLoadDetailDateKeyで実出発日がdateKeyと一致する便を収集
   const allTruckMap = new Map()
@@ -1580,6 +1580,7 @@ const planTruckModels = computed(() => {
 // 平面図の日付ナビゲーション（納期日＋実出発日を含む全日付で前後移動）
 const planAvailableDates = computed(() => {
   const dateSet = new Set(allDateKeys.value)
+  Object.keys(departureSummaryByDate.value).forEach((k) => dateSet.add(k))
   Object.keys(previewDepartureSummaryByDate.value).forEach((k) => dateSet.add(k))
   return [...dateSet].sort()
 })
@@ -1681,8 +1682,18 @@ const handleQtyInputMouseLeave = (event) => {
   }
 }
 
+const mapSeries = async (items, mapper) => {
+  const results = []
+  for (let idx = 0; idx < items.length; idx += 1) {
+    results.push(await mapper(items[idx], idx))
+  }
+  return results
+}
+
 const refreshAllPreview = async () => {
-  await Promise.all(dateKeys.value.map((dateKey) => previewLoadForDate(dateKey)))
+  await mapSeries(dateKeys.value, async (dateKey) => {
+    await previewLoadForDate(dateKey)
+  })
 }
 
 const loadDisplaySettings = async () => {
@@ -1764,11 +1775,12 @@ const loadGrid = async () => {
   loading.value = true
   try {
     await loadDisplaySettings()
-    const responses = await Promise.all(
-      allDateKeys.value.map((dateKey) => api.kubotaSakaiTripAssignments_new.grid({
+    const responses = await mapSeries(
+      allDateKeys.value,
+      async (dateKey) => api.kubotaSakaiTripAssignments_new.grid({
         target_date: dateKey,
         keyword: keyword.value,
-      })),
+      }),
     )
     const nextTrucksByDate = {}
     const nextSummaryByDate = {}
@@ -1868,7 +1880,6 @@ const loadGrid = async () => {
     previewDepartureSummaryByDate.value = {}
     assignmentDeadlineDays.value = maxDeadline
     mergedRows.value = sortTripPlanningRows(rows)
-    await refreshAllPreview()
     nextTick(setStickyTopValues)
   } catch (error) {
     console.error('loadGrid error:', error)
