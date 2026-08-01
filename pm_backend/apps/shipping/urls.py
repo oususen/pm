@@ -19,6 +19,7 @@ from shipping.views_kubota_sakai_trip_assignment_new import (
     KubotaSakaiPseudoTruckProductViewNew,
     KubotaSakaiTripLoadDetailViewNew,
     KubotaSakaiTripLoadPreviewViewNew,
+    KubotaSakaiTripNoticeViewNew,
     KubotaSakaiTripPlanViewNew,
 )
 from shipping.views_shipping_trip_execution import (
@@ -77,6 +78,7 @@ urlpatterns = [
     path('kubota-sakai-trip-assignments-new/pseudo-truck-products/', KubotaSakaiPseudoTruckProductViewNew.as_view(), name='kubota-sakai-pseudo-truck-products-new'),
     path('kubota-sakai-trip-assignments-new/display-settings/', KubotaSakaiTripDisplaySettingViewNew.as_view(), name='kubota-sakai-trip-display-settings-new'),
     path('kubota-sakai-trip-assignments-new/delivery-progress-adjust/', KubotaSakaiDeliveryProgressAdjustViewNew.as_view(), name='kubota-sakai-delivery-progress-adjust-new'),
+    path('kubota-sakai-trip-assignments-new/trip-notice/', KubotaSakaiTripNoticeViewNew.as_view(), name='kubota-sakai-trip-notice-new'),
     path('shipping-trips/execution/', ShippingTripExecutionView.as_view(), name='shipping-trip-execution'),
     path('shipping-trips/progress/', ShippingTripProgressView.as_view(), name='shipping-trip-progress'),
     path('shipping-progress/', ShippingProgressView.as_view(), name='shipping-progress'),

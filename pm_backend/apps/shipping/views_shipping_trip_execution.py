@@ -2,18 +2,28 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from django.db import ProgrammingError
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from masters.models import Calendar, KubotaSakaiTruck, Product
-from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation
+from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation, ShippingTripNotice
 from orders.utils.calendar_utils import WorkingDayCalculator
 from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit, ShipToLeadTimeColorExclusion, ShipToLeadTime
 from shipping.services.shipping_progress import get_progress_horizon_days
 
 SPLIT_TOKEN = '|PD='
 REMARK_MAX_LEN = 200
+TRIP_NOTICE_TYPE_NORMAL = 'NORMAL'
+TRIP_NOTICE_TYPE_URGENT = 'URGENT'
+
+
+def _normalize_trip_notice_type(value):
+    notice_type = str(value or '').strip().upper()
+    if notice_type == TRIP_NOTICE_TYPE_URGENT:
+        return TRIP_NOTICE_TYPE_URGENT
+    return TRIP_NOTICE_TYPE_NORMAL
 
 
 def _parse_date(value):
@@ -442,7 +452,33 @@ def _trip_actual_departure_date(trip, calc, truck_offset_map):
     return calc.subtract_working_days(trip.departure_date, offset)
 
 
-def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, calc, truck_offset_map, actual_by_allocation=None):
+def _trip_notice_map(trips):
+    if not trips:
+        return {}
+    try:
+        rows = ShippingTripNotice.objects.filter(
+            business_type__in={str(item.business_type or '').strip() for item in trips},
+            customer_code__in={str(item.customer_code or '').strip() for item in trips},
+            departure_date__in={item.departure_date for item in trips if item.departure_date},
+            trip_ref__in={str(item.trip_ref or '').strip() for item in trips if str(item.trip_ref or '').strip()},
+        )
+    except ProgrammingError:
+        return {}
+    return {
+        (
+            str(row.business_type or '').strip(),
+            str(row.customer_code or '').strip(),
+            row.departure_date,
+            str(row.trip_ref or '').strip(),
+        ): {
+            'notice_text': str(row.notice_text or '').strip(),
+            'notice_type': _normalize_trip_notice_type(getattr(row, 'notice_type', TRIP_NOTICE_TYPE_NORMAL)),
+        }
+        for row in rows
+    }
+
+
+def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, calc, truck_offset_map, actual_by_allocation=None, trip_notice_map=None):
     source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     details = []
     total_qty = Decimal('0')
@@ -473,6 +509,14 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
     loading_user = getattr(trip, 'loading_by', None)
     departed_user = getattr(trip, 'departed_by', None)
     actual_departure_date = _trip_actual_departure_date(trip, calc, truck_offset_map)
+    contact_notice = (trip_notice_map or {}).get((
+        str(trip.business_type or '').strip(),
+        str(trip.customer_code or '').strip(),
+        trip.departure_date,
+        str(trip.trip_ref or '').strip(),
+    )) or {}
+    contact_notice_text = str(contact_notice.get('notice_text') or '').strip()
+    contact_notice_type = _normalize_trip_notice_type(contact_notice.get('notice_type'))
     return {
         'id': trip.id,
         'trip_ids': [trip.id],
@@ -488,6 +532,9 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
         'status': trip.status,
         'loading_by': _display_user_name(loading_user),
         'departed_by': _display_user_name(departed_user),
+        'has_contact_notice': bool(contact_notice_text),
+        'contact_notice_text': contact_notice_text,
+        'contact_notice_type': contact_notice_type,
         'total_qty': _format_qty(total_qty),
         'detail_count': len(details),
         'details': details,
@@ -521,6 +568,9 @@ def _merge_trip_payloads(payloads):
     details = []
     total_qty = Decimal('0')
     statuses = []
+    has_contact_notice = False
+    contact_notice_text = ''
+    contact_notice_type = TRIP_NOTICE_TYPE_NORMAL
 
     for payload in payloads:
         all_trip_ids.extend(payload.get('trip_ids') or [payload.get('id')])
@@ -530,6 +580,11 @@ def _merge_trip_payloads(payloads):
         details.extend(payload.get('details') or [])
         total_qty += _to_decimal(payload.get('total_qty'))
         statuses.append(payload.get('status'))
+        if payload.get('has_contact_notice'):
+            has_contact_notice = True
+        if not contact_notice_text:
+            contact_notice_text = str(payload.get('contact_notice_text') or '').strip()
+            contact_notice_type = _normalize_trip_notice_type(payload.get('contact_notice_type'))
 
     details.sort(key=lambda x: (x['product_code'], x['ship_to_code'], x['due_date'] or '', x['allocation_id']))
 
@@ -537,6 +592,9 @@ def _merge_trip_payloads(payloads):
     base['trip_ids'] = all_trip_ids
     base['ship_to_code'] = '+'.join(ship_to_codes) if ship_to_codes else ''
     base['status'] = _merged_trip_status(statuses)
+    base['has_contact_notice'] = has_contact_notice or bool(contact_notice_text)
+    base['contact_notice_text'] = contact_notice_text
+    base['contact_notice_type'] = contact_notice_type
     base['total_qty'] = _format_qty(total_qty)
     base['detail_count'] = len(details)
     base['details'] = details
@@ -591,6 +649,7 @@ class ShippingTripExecutionView(APIView):
             .select_related('run', 'loading_by', 'departed_by')
             .order_by('business_type', 'departure_time_plan', 'trip_code', 'trip_ref', 'id')
         )
+        trip_notice_map = _trip_notice_map(trips)
         trip_ids = [t.id for t in trips]
         allocations = list(
             ShippingTripAllocation.objects
@@ -662,6 +721,7 @@ class ShippingTripExecutionView(APIView):
                 calc,
                 truck_offset_map,
                 actual_by_allocation,
+                trip_notice_map,
             )
             for trip in trips
         ]
@@ -884,6 +944,7 @@ class ShippingTripExecutionView(APIView):
             p.product_code: p.product_name
             for p in Product.objects.filter(product_code__in=product_codes)
         }
+        trip_notice_map = _trip_notice_map(trips)
         merged_payload = _merge_trip_payloads([
             _build_trip_payload(
                 item,
@@ -891,6 +952,7 @@ class ShippingTripExecutionView(APIView):
                 product_name_map,
                 WorkingDayCalculator(Calendar.objects.first()),
                 _collect_truck_offset_map(),
+                trip_notice_map=trip_notice_map,
             )
             for item in trips
         ])

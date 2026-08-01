@@ -354,6 +354,46 @@ class ShippingTripAllocation(models.Model):
         return f"trip={self.trip_id} {self.source_type}:{self.source_id} qty={self.qty}"
 
 
+class ShippingTripNotice(models.Model):
+    """便番号×出発日単位の事務所連絡メモ。"""
+
+    NOTICE_TYPE_CHOICES = [
+        ('NORMAL', '普通'),
+        ('URGENT', '緊急'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    business_type = models.CharField(max_length=40, verbose_name='業務種別')
+    customer_code = models.CharField(max_length=20, verbose_name='得意先コード')
+    departure_date = models.DateField(verbose_name='出発日')
+    trip_ref = models.CharField(max_length=80, verbose_name='便参照キー')
+    notice_type = models.CharField(max_length=20, choices=NOTICE_TYPE_CHOICES, default='NORMAL', verbose_name='連絡種別')
+    notice_text = models.CharField(max_length=200, blank=True, default='', verbose_name='連絡メモ')
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipping_trip_notices',
+        verbose_name='更新者',
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+
+    class Meta:
+        db_table = 't_shipping_trip_notice'
+        verbose_name = '出荷便連絡メモ'
+        verbose_name_plural = '出荷便連絡メモ'
+        unique_together = [['business_type', 'customer_code', 'departure_date', 'trip_ref']]
+        indexes = [
+            models.Index(fields=['business_type', 'customer_code', 'departure_date']),
+            models.Index(fields=['departure_date', 'trip_ref']),
+        ]
+
+    def __str__(self):
+        return f"{self.departure_date} {self.business_type} {self.trip_ref}"
+
+
 class StgOrderRaw(models.Model):
     """受注取込ステージング（生データ） - 旧モデル、互換性のため残す"""
     ORDER_TYPE_CHOICES = [

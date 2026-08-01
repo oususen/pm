@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 from io import BytesIO
 import logging
 
-from django.db import transaction
+from django.db import ProgrammingError, transaction
 from django.db.models import Count, Max, Q
 from django.http import HttpResponse
 from rest_framework import status
@@ -39,6 +39,7 @@ from orders.core.models import (
     ShippingRun,
     ShippingTrip,
     ShippingTripAllocation,
+    ShippingTripNotice,
 )
 from production.models_line_backlog import LineBacklog
 from system_settings.models import SystemSetting
@@ -59,6 +60,15 @@ KUBOTA_COMMON_SOURCE_TYPE = 'KUBOTA_SAKAI_DUE'
 KUBOTA_CUSTOMER_CODE = '000196'
 
 logger = logging.getLogger(__name__)
+TRIP_NOTICE_TYPE_NORMAL = 'NORMAL'
+TRIP_NOTICE_TYPE_URGENT = 'URGENT'
+
+
+def _normalize_trip_notice_type(value):
+    notice_type = str(value or '').strip().upper()
+    if notice_type == TRIP_NOTICE_TYPE_URGENT:
+        return TRIP_NOTICE_TYPE_URGENT
+    return TRIP_NOTICE_TYPE_NORMAL
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +300,54 @@ def _build_departure_truck_summaries(records, target_dates, products, truck_map)
             })
 
     return summaries_by_date
+
+
+def _trip_notice_map_by_date(target_dates, truck_ids):
+    target_dates = {item for item in (target_dates or []) if item}
+    truck_ids = {int(item) for item in (truck_ids or []) if item}
+    if not target_dates or not truck_ids:
+        return {}
+
+    try:
+        rows = ShippingTripNotice.objects.filter(
+            business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            customer_code=KUBOTA_CUSTOMER_CODE,
+            departure_date__in=target_dates,
+            trip_ref__in=[f'TRUCK:{truck_id}' for truck_id in sorted(truck_ids)],
+        ).values('departure_date', 'trip_ref', 'notice_text', 'notice_type')
+    except ProgrammingError:
+        return {}
+
+    result = {}
+    for row in rows:
+        trip_ref = str(row.get('trip_ref') or '').strip()
+        if not trip_ref.startswith('TRUCK:'):
+            continue
+        try:
+            truck_id = int(trip_ref.split(':', 1)[1])
+        except Exception:
+            continue
+        date_value = row.get('departure_date')
+        if not date_value:
+            continue
+        result[(date_value.isoformat(), truck_id)] = {
+            'notice_text': str(row.get('notice_text') or '').strip(),
+            'notice_type': _normalize_trip_notice_type(row.get('notice_type')),
+        }
+    return result
+
+
+def _attach_trip_notices_to_summaries(summary_map_by_date, target_dates, truck_ids):
+    notice_map = _trip_notice_map_by_date(target_dates, truck_ids)
+    for raw_date, summaries in (summary_map_by_date or {}).items():
+        for summary in summaries or []:
+            truck_id = int(summary.get('truck_id') or 0)
+            notice = notice_map.get((raw_date, truck_id), {})
+            notice_text = str(notice.get('notice_text') or '').strip()
+            summary['contact_notice_text'] = notice_text
+            summary['contact_notice_type'] = _normalize_trip_notice_type(notice.get('notice_type'))
+            summary['has_contact_notice'] = bool(notice_text)
+    return summary_map_by_date
 
 
 def _get_deadline_days():
@@ -958,6 +1016,24 @@ class KubotaSakaiTripPlanViewNew(APIView):
             departure_products,
             truck_map,
         )
+        departure_summaries_by_date = _attach_trip_notices_to_summaries(
+            departure_summaries_by_date,
+            {target_date},
+            truck_map.keys(),
+        )
+        current_notice_map = {
+            int(item.get('truck_id') or 0): {
+                'notice_text': str(item.get('contact_notice_text') or '').strip(),
+                'notice_type': _normalize_trip_notice_type(item.get('contact_notice_type')),
+            }
+            for item in departure_summaries_by_date.get(target_date.isoformat(), [])
+        }
+        for item in truck_summaries:
+            notice = current_notice_map.get(int(item.get('truck_id') or 0), {})
+            notice_text = str(notice.get('notice_text') or '').strip()
+            item['contact_notice_text'] = notice_text
+            item['contact_notice_type'] = _normalize_trip_notice_type(notice.get('notice_type'))
+            item['has_contact_notice'] = bool(notice_text)
 
         return Response({
             'target_date': target_date.isoformat(),
@@ -1566,11 +1642,118 @@ class KubotaSakaiTripLoadPreviewViewNew(APIView):
                 departure_products,
                 truck_map,
             )
+            departure_summaries_by_date = _attach_trip_notices_to_summaries(
+                departure_summaries_by_date,
+                affected_departure_dates,
+                truck_map.keys(),
+            )
+
+        current_notice_map = {
+            int(item.get('truck_id') or 0): {
+                'notice_text': str(item.get('contact_notice_text') or '').strip(),
+                'notice_type': _normalize_trip_notice_type(item.get('contact_notice_type')),
+            }
+            for item in departure_summaries_by_date.get(target_date.isoformat(), [])
+        }
+        for item in summaries:
+            notice = current_notice_map.get(int(item.get('truck_id') or 0), {})
+            notice_text = str(notice.get('notice_text') or '').strip()
+            item['contact_notice_text'] = notice_text
+            item['contact_notice_type'] = _normalize_trip_notice_type(notice.get('notice_type'))
+            item['has_contact_notice'] = bool(notice_text)
 
         return Response({
             'target_date': target_date.isoformat(),
             'truck_summaries': summaries,
             'departure_truck_summaries_by_date': departure_summaries_by_date,
+        })
+
+
+class KubotaSakaiTripNoticeViewNew(APIView):
+    """便ごとの事務所連絡メモを取得/保存する。"""
+
+    def get(self, request):
+        target_date = _parse_date(request.query_params.get('target_date'))
+        truck_id = int(request.query_params.get('truck_id') or 0)
+        if not target_date:
+            return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if truck_id <= 0:
+            return Response({'detail': 'truck_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            notice = ShippingTripNotice.objects.filter(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=f'TRUCK:{truck_id}',
+            ).first()
+        except ProgrammingError:
+            notice = None
+        notice_text = str(getattr(notice, 'notice_text', '') or '').strip()
+        notice_type = _normalize_trip_notice_type(getattr(notice, 'notice_type', TRIP_NOTICE_TYPE_NORMAL))
+        return Response({
+            'target_date': target_date.isoformat(),
+            'truck_id': truck_id,
+            'notice_text': notice_text,
+            'notice_type': notice_type,
+            'has_contact_notice': bool(notice_text),
+        })
+
+    def post(self, request):
+        target_date = _parse_date(request.data.get('target_date'))
+        truck_id = int(request.data.get('truck_id') or 0)
+        notice_text = str(request.data.get('notice_text') or '').strip()
+        notice_type = _normalize_trip_notice_type(request.data.get('notice_type'))
+        if not target_date:
+            return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if truck_id <= 0:
+            return Response({'detail': 'truck_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(notice_text) > 200:
+            return Response({'detail': '連絡メモは200文字以内で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if getattr(request.user, 'is_authenticated', False) else None
+        trip_ref = f'TRUCK:{truck_id}'
+        try:
+            ShippingTripNotice.objects.exists()
+        except ProgrammingError:
+            return Response(
+                {'detail': '連絡メモテーブルが未作成です。先に migration を実行してください。'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if notice_text:
+            obj, _ = ShippingTripNotice.objects.get_or_create(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=trip_ref,
+                defaults={'notice_text': notice_text, 'notice_type': notice_type, 'updated_by': user},
+            )
+            update_fields = []
+            if obj.notice_text != notice_text:
+                obj.notice_text = notice_text
+                update_fields.append('notice_text')
+            if _normalize_trip_notice_type(obj.notice_type) != notice_type:
+                obj.notice_type = notice_type
+                update_fields.append('notice_type')
+            if obj.updated_by_id != getattr(user, 'id', None):
+                obj.updated_by = user
+                update_fields.append('updated_by')
+            if update_fields:
+                obj.save(update_fields=update_fields + ['updated_at'])
+        else:
+            ShippingTripNotice.objects.filter(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=trip_ref,
+            ).delete()
+
+        return Response({
+            'target_date': target_date.isoformat(),
+            'truck_id': truck_id,
+            'notice_text': notice_text,
+            'notice_type': notice_type,
+            'has_contact_notice': bool(notice_text),
         })
 
 

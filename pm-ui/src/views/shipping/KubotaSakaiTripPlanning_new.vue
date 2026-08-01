@@ -549,9 +549,26 @@
         <div class="plan-sidebar-body">
           <div v-for="truck in planTruckModels" :key="`plan-${truck.truckId}`" class="plan-truck-card">
             <div class="plan-truck-header">
-              <span class="plan-truck-name">{{ truck.label }}</span>
-              <span v-if="truck.overloaded" class="plan-overload-badge">積載超過</span>
+              <div class="plan-truck-header-main">
+                <span class="plan-truck-name">{{ truck.label }}</span>
+                <button
+                  type="button"
+                  class="plan-note-btn"
+                  :class="{ 'has-note': truck.hasNotice }"
+                  title="事務所連絡を入力"
+                  @click="openTripNoticeDialog(truck)"
+                >📝</button>
+              </div>
+              <div class="plan-truck-header-right">
+                <span
+                  v-if="truck.hasNotice"
+                  class="plan-note-badge"
+                  :class="{ urgent: truck.noticeType === 'URGENT' }"
+                >{{ truck.noticeType === 'URGENT' ? '緊急連絡' : '普通連絡' }}</span>
+                <span v-if="truck.overloaded" class="plan-overload-badge">積載超過</span>
+              </div>
             </div>
+            <div v-if="truck.hasNotice" class="plan-note-preview">{{ truck.noticeText }}</div>
             <div class="plan-svg-wrap">
               <svg :viewBox="truck.viewBox" class="plan-svg" preserveAspectRatio="xMidYMid meet">
                 <rect :x="0" :y="0" :width="truck.viewW" :height="truck.viewH" class="plan-bed" />
@@ -601,6 +618,39 @@
           </div>
         </div>
       </aside>
+    </div>
+
+    <div v-if="showTripNoticeDialog" class="modal-overlay" @click.self="closeTripNoticeDialog">
+      <div class="modal-card trip-note-modal">
+        <h3 class="modal-title">事務所連絡</h3>
+        <div class="trip-note-target">{{ activeTripNoticeLabel }}</div>
+        <div class="modal-fields">
+          <label class="modal-field trip-note-type-field">
+            <span>種類</span>
+            <select v-model="tripNoticeTypeDraft">
+              <option value="NORMAL">普通</option>
+              <option value="URGENT">緊急</option>
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>メッセージ</span>
+            <textarea
+              v-model.trim="tripNoticeDraft"
+              class="trip-note-textarea"
+              maxlength="200"
+              placeholder="出荷担当者への連絡を入力"
+            ></textarea>
+          </label>
+        </div>
+        <div class="trip-note-count">{{ tripNoticeDraft.length }}/200</div>
+        <div class="modal-actions">
+          <button class="btn" :disabled="savingTripNotice" @click="closeTripNoticeDialog">閉じる</button>
+          <button class="btn" :disabled="savingTripNotice" @click="clearTripNotice">削除</button>
+          <button class="btn save-btn" :disabled="savingTripNotice" @click="saveTripNotice">
+            {{ savingTripNotice ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="note">未割付期限: 調整後納期の{{ assignmentDeadlineDays }}営業日前</div>
@@ -847,6 +897,11 @@ const displaySettingItems = ref([])
 const savingDisplaySettings = ref(false)
 const displaySettingActiveKey = ref('')
 const displaySettingMap = ref(new Map())
+const showTripNoticeDialog = ref(false)
+const savingTripNotice = ref(false)
+const tripNoticeDraft = ref('')
+const tripNoticeTypeDraft = ref('NORMAL')
+const activeTripNotice = ref(null)
 const HIDE_WEEKENDS_KEY = 'kubotaSakaiTripPlanning.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 
@@ -875,6 +930,12 @@ const detailTrucks = computed(() => {
     })
   })
   return merged
+})
+
+const activeTripNoticeLabel = computed(() => {
+  const truck = activeTripNotice.value
+  if (!truck) return ''
+  return `${truck.label || '便'} / ${truck.dateKey || ''}`
 })
 
 const isHoliday = (dateKey) => Boolean(holidayByDate.value[dateKey])
@@ -1378,6 +1439,10 @@ const planTruckModels = computed(() => {
         placed,
         remaining: (backendSummary.remaining || []).map((r) => ({ label: r.label, count: parseIntegerQty(r.count) })),
         overloaded: backendSummary.can_fit === false,
+        noticeText: String(backendSummary.contact_notice_text || '').trim(),
+        noticeType: String(backendSummary.contact_notice_type || 'NORMAL').trim() || 'NORMAL',
+        hasNotice: Boolean(backendSummary.has_contact_notice || String(backendSummary.contact_notice_text || '').trim()),
+        dateKey,
       })
       return
     }
@@ -1580,10 +1645,99 @@ const planTruckModels = computed(() => {
       placed,
       remaining,
       overloaded,
+      noticeText: '',
+      noticeType: 'NORMAL',
+      hasNotice: false,
+      dateKey,
     })
   })
   return models
 })
+
+const patchTripNoticeSummaries = (dateKey, truckId, noticeText, noticeType) => {
+  const nextText = String(noticeText || '').trim()
+  const nextType = String(noticeType || 'NORMAL').trim() || 'NORMAL'
+  const patchMap = (source = {}) => {
+    const list = Array.isArray(source[dateKey]) ? source[dateKey] : []
+    return {
+      ...source,
+      [dateKey]: list.map((item) => (
+        Number(item?.truck_id) === Number(truckId)
+          ? {
+              ...item,
+              contact_notice_text: nextText,
+              contact_notice_type: nextType,
+              has_contact_notice: Boolean(nextText),
+            }
+          : item
+      )),
+    }
+  }
+  departureSummaryByDate.value = patchMap(departureSummaryByDate.value)
+  previewDepartureSummaryByDate.value = patchMap(previewDepartureSummaryByDate.value)
+}
+
+const openTripNoticeDialog = async (truck) => {
+  activeTripNotice.value = {
+    truckId: Number(truck?.truckId || 0),
+    label: truck?.label || '便',
+    dateKey: truck?.dateKey || planDate.value,
+  }
+  tripNoticeDraft.value = String(truck?.noticeText || '').trim()
+  tripNoticeTypeDraft.value = String(truck?.noticeType || 'NORMAL').trim() || 'NORMAL'
+  showTripNoticeDialog.value = true
+  if (!activeTripNotice.value.truckId || !activeTripNotice.value.dateKey) return
+  try {
+    const res = await api.kubotaSakaiTripAssignments_new.getTripNotice(
+      activeTripNotice.value.dateKey,
+      activeTripNotice.value.truckId,
+    )
+    tripNoticeDraft.value = String(res.data?.notice_text || '').trim()
+    tripNoticeTypeDraft.value = String(res.data?.notice_type || 'NORMAL').trim() || 'NORMAL'
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '連絡メモの取得に失敗しました。'
+    alert(detail)
+  }
+}
+
+const closeTripNoticeDialog = () => {
+  if (savingTripNotice.value) return
+  showTripNoticeDialog.value = false
+  activeTripNotice.value = null
+  tripNoticeDraft.value = ''
+  tripNoticeTypeDraft.value = 'NORMAL'
+}
+
+const saveTripNotice = async () => {
+  const truck = activeTripNotice.value
+  if (!truck?.truckId || !truck?.dateKey) return
+  savingTripNotice.value = true
+  try {
+    const res = await api.kubotaSakaiTripAssignments_new.saveTripNotice(
+      truck.dateKey,
+      truck.truckId,
+      tripNoticeDraft.value,
+      tripNoticeTypeDraft.value,
+    )
+    patchTripNoticeSummaries(
+      truck.dateKey,
+      truck.truckId,
+      res.data?.notice_text || '',
+      res.data?.notice_type || 'NORMAL',
+    )
+    closeTripNoticeDialog()
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '連絡メモの保存に失敗しました。'
+    alert(detail)
+  } finally {
+    savingTripNotice.value = false
+  }
+}
+
+const clearTripNotice = async () => {
+  tripNoticeDraft.value = ''
+  await saveTripNotice()
+}
 
 // 平面図の日付ナビゲーション（納期日＋実出発日を含む全日付で前後移動）
 const planAvailableDates = computed(() => {
@@ -2714,11 +2868,40 @@ onUnmounted(() => {
   border: 1px solid #cbd5e1;
   border-radius: 4px;
 }
+.modal-field select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
 .modal-actions {
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.trip-note-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+.trip-note-target {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+.trip-note-textarea {
+  min-height: 120px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.trip-note-count {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: #64748b;
 }
 .truck-detail-wrap {
   background: #fff;
@@ -2901,16 +3084,52 @@ onUnmounted(() => {
 .plan-truck-header {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 6px;
   margin-bottom: 4px;
+}
+.plan-truck-header-main,
+.plan-truck-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .plan-truck-name {
   font-size: 12px;
   font-weight: 700;
   color: #111827;
 }
+.plan-note-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+.plan-note-btn.has-note {
+  background: #fef3c7;
+  border-color: #d97706;
+}
+.plan-note-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fb923c;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-note-badge.urgent {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #ef4444;
+}
 .plan-overload-badge {
-  margin-left: 6px;
   padding: 1px 6px;
   font-size: 10px;
   font-weight: 700;
@@ -2918,6 +3137,17 @@ onUnmounted(() => {
   background: #dc2626;
   border-radius: 8px;
   white-space: nowrap;
+}
+.plan-note-preview {
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #7c2d12;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 4px;
+  white-space: pre-wrap;
 }
 .plan-svg-wrap {
   width: 100%;

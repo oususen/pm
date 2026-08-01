@@ -42,6 +42,15 @@
           <span class="status" :class="`status-${String(trip.status || '').toLowerCase()}`">
             {{ statusLabel(trip.status) }}
           </span>
+          <button
+            v-if="hasTripContactNotice(trip)"
+            type="button"
+            class="contact-notice-badge"
+            :class="{ urgent: tripContactNoticeType(trip) === 'URGENT' }"
+            @click="openTripContactNotice(trip)"
+          >
+            {{ tripContactNoticeType(trip) === 'URGENT' ? '警告⚠ 緊急連絡' : '連絡あり' }}
+          </button>
           <small v-if="trip.departure_time_actual" class="actual-time">{{ t('shippingTripExecution.actualDeparture') }}: {{ trip.departure_time_actual }}</small>
         </header>
 
@@ -194,6 +203,19 @@
       </section>
     </div>
 
+    <div v-if="showTripContactNoticeDialog" class="modal-overlay" @click.self="closeTripContactNoticeDialog">
+      <div class="modal-card">
+        <h3 class="modal-title">事務所連絡</h3>
+        <div class="modal-trip-label">{{ activeTripContactNoticeLabel }}</div>
+        <div class="contact-notice-type" :class="{ urgent: activeTripContactNoticeType === 'URGENT' }">
+          {{ activeTripContactNoticeType === 'URGENT' ? '緊急' : '普通' }}
+        </div>
+        <div class="contact-notice-message">{{ activeTripContactNoticeText }}</div>
+        <div class="modal-actions">
+          <button class="btn" @click="closeTripContactNoticeDialog">閉じる</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -236,6 +258,8 @@ const statusFilter = ref('')
 const loading = ref(false)
 const updatingTripId = ref(null)
 const summary = ref({ total: 0, planned: 0, loading: 0, departed: 0, closed: 0 })
+const showTripContactNoticeDialog = ref(false)
+const activeTripContactNotice = ref(null)
 const route = useRoute()
 const isActualInputMode = computed(() => Boolean(route.meta?.actualInputEnabled))
 const isExecutionMode = computed(() => !isActualInputMode.value)
@@ -280,6 +304,35 @@ const statusLabel = (status) => {
   if (status === 'DEPARTED') return t('shippingTripExecution.statusDeparted')
   if (status === 'CLOSED') return t('shippingTripExecution.statusClosedInput')
   return status || '-'
+}
+
+const hasTripContactNotice = (trip) =>
+  Boolean(
+    trip?.has_contact_notice ||
+    String(trip?.contact_notice_text || '').trim()
+  )
+
+const tripContactNoticeType = (trip) =>
+  String(trip?.contact_notice_type || 'NORMAL').trim().toUpperCase() === 'URGENT' ? 'URGENT' : 'NORMAL'
+
+const activeTripContactNoticeLabel = computed(() =>
+  String(activeTripContactNotice.value?.trip_code || activeTripContactNotice.value?.trip_ref || '').trim()
+)
+
+const activeTripContactNoticeType = computed(() => tripContactNoticeType(activeTripContactNotice.value))
+
+const activeTripContactNoticeText = computed(() =>
+  String(activeTripContactNotice.value?.contact_notice_text || '').trim()
+)
+
+const openTripContactNotice = (trip) => {
+  activeTripContactNotice.value = trip || null
+  showTripContactNoticeDialog.value = true
+}
+
+const closeTripContactNoticeDialog = () => {
+  showTripContactNoticeDialog.value = false
+  activeTripContactNotice.value = null
 }
 
 const businessTypeLabel = (value) => {
@@ -796,6 +849,90 @@ onMounted(async () => {
 .status-closed {
   background: #e2e8f0;
   border-color: #64748b;
+}
+.contact-notice-badge {
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fb923c;
+  animation: contact-notice-blink 1s step-end infinite;
+  cursor: pointer;
+}
+.contact-notice-badge.urgent {
+  color: #7f1d1d;
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+@keyframes contact-notice-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-card {
+  width: min(520px, calc(100vw - 32px));
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.18);
+}
+.modal-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+}
+.modal-trip-label {
+  margin-bottom: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #334155;
+}
+.contact-notice-type {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+}
+.contact-notice-type.urgent {
+  color: #7f1d1d;
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+.contact-notice-message {
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-size: 18px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .detail-list {
   border: 1px solid #e2e8f0;

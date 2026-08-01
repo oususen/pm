@@ -39,6 +39,19 @@ export const createKubotaSakaiTripAssignmentsAPI_new = (client) => ({
   saveDeliveryProgressAdjust(rows) {
     return client.post('/kubota-sakai-trip-assignments-new/delivery-progress-adjust/', { rows })
   },
+  getTripNotice(targetDate, truckId) {
+    return client.get('/kubota-sakai-trip-assignments-new/trip-notice/', {
+      params: { target_date: targetDate, truck_id: truckId },
+    })
+  },
+  saveTripNotice(targetDate, truckId, noticeText, noticeType = 'NORMAL') {
+    return client.post('/kubota-sakai-trip-assignments-new/trip-notice/', {
+      target_date: targetDate,
+      truck_id: truckId,
+      notice_text: noticeText,
+      notice_type: noticeType,
+    })
+  },
   get(id) {
     return client.get(`/kubota-sakai-trip-assignments-new/${id}/`)
   },
