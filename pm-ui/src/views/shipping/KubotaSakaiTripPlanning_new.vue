@@ -1252,16 +1252,31 @@ const planTruckModels = computed(() => {
   // 実出発日ベースの積載データを取得
   const departureSummaries = previewDepartureSummaryByDate.value[dateKey] || []
 
-  // loadBlocksByDate（積み荷明細）が既に出発日ベースで振り分け済み → そのまま利用
-  const loadBlocks = loadBlocksByDate.value[dateKey] || []
-  const truckIds = new Set([
-    ...loadBlocks.map((b) => Number(b.truckId)),
-    ...departureSummaries.filter((s) => Array.isArray(s.placed) && s.placed.length > 0).map((s) => Number(s.truck_id)),
-  ])
-
+  // 全納期日を走査し、getLoadDetailDateKeyで実出発日がdateKeyと一致する便を収集
   const allTruckMap = new Map()
   Object.values(trucksByDate.value).forEach((list) => {
     list.forEach((t) => allTruckMap.set(Number(t.id), t))
+  })
+  const truckIds = new Set(
+    departureSummaries.filter((s) => Array.isArray(s.placed) && s.placed.length > 0).map((s) => Number(s.truck_id)),
+  )
+  const truckDueDateMap = new Map()
+  allDateKeys.value.forEach((dk) => {
+    const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
+    mergedRows.value.forEach((row) => {
+      entriesAt(row, dk).forEach((entry) => {
+        ;(entry.allocations || []).forEach((allocation) => {
+          const truckId = Number(allocation.truck_id)
+          if (!truckId || parseIntegerQty(allocation.qty) <= 0) return
+          const truck = truckMap.get(truckId)
+          if (!truck) return
+          if (getLoadDetailDateKey(dk, truck) === dateKey) {
+            truckIds.add(truckId)
+            if (!truckDueDateMap.has(truckId)) truckDueDateMap.set(truckId, dk)
+          }
+        })
+      })
+    })
   })
 
   const planTrucks = [...truckIds]
@@ -1277,8 +1292,7 @@ const planTruckModels = computed(() => {
 
     // ---- 実出発日ベースの積載判定結果を優先 → 納期日(occupancyDateKey)ベース → 保存済みgrid ----
     const departureSummary = departureSummaries.find((s) => Number(s.truck_id) === truckId)
-    const truckLoadBlock = loadBlocks.find((b) => Number(b.truckId) === truckId)
-    const dueDateKey = truckLoadBlock?.occupancyDateKey || dateKey
+    const dueDateKey = truckDueDateMap.get(truckId) || dateKey
     const previewSummary = (previewSummaryByDate.value[dueDateKey] || []).find((s) => Number(s.truck_id) === truckId)
     const gridSummary = (summaryByDate.value[dueDateKey] || []).find((s) => Number(s.truck_id) === truckId)
     const backendSummary = (departureSummary && Array.isArray(departureSummary.placed))
