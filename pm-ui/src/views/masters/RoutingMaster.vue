@@ -354,6 +354,13 @@
                 {{ proc.label }}
               </option>
             </select>
+            <label>ライン</label>
+            <select v-model="lineFilter">
+              <option value="">すべて</option>
+              <option v-for="line in lineFilterOptions" :key="line.value" :value="line.value">
+                {{ line.label }}
+              </option>
+            </select>
             <button v-if="canEdit" class="btn-success btn-small" @click="toggleCreateStepRow" :disabled="creatingStep">
               {{ showCreateStepRow ? '工程追加を閉じる' : '工程追加' }}
             </button>
@@ -688,6 +695,7 @@ const routingHeaderDraft = ref({
 })
 const savingRoutingHeader = ref(false)
 const processFilter = ref('')
+const lineFilter = ref('')
 const representativeChildProductIds = ref(new Set())
 const products = ref([])
 const loadingProducts = ref(false)
@@ -998,9 +1006,26 @@ const processFilterOptions = computed(() => {
     .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
 })
 
+const lineFilterOptions = computed(() => {
+  const map = new Map()
+  sortedSteps.value.forEach((step) => {
+    if (!step?.line) return
+    const value = String(step.line)
+    if (!map.has(value)) {
+      map.set(value, step.line_name || String(step.line))
+    }
+  })
+  return Array.from(map.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
+})
+
 const filteredSteps = computed(() => {
-  if (!processFilter.value) return sortedSteps.value
-  return sortedSteps.value.filter((step) => String(step.process) === String(processFilter.value))
+  return sortedSteps.value.filter((step) => {
+    if (processFilter.value && String(step.process) !== String(processFilter.value)) return false
+    if (lineFilter.value && String(step.line) !== String(lineFilter.value)) return false
+    return true
+  })
 })
 
 const displayTimeUnit = (timeUnit) => {
@@ -1799,6 +1824,7 @@ watch(selectedRoutingId, async (routingId) => {
     outputProductDraftByStepId.value = {}
     parentProductDraftByStepId.value = {}
     processFilter.value = ''
+    lineFilter.value = ''
     return
   }
   await fetchStepsAndMaterials(routingId)
