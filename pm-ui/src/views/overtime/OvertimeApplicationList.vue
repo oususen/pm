@@ -19,6 +19,18 @@
         <option value="approved_manager">{{ t('overtimeList.status.approvedManager') }}</option>
         <option value="rejected">{{ t('overtimeList.status.rejected') }}</option>
       </select>
+      <select v-if="canFilterOrganization" v-model="filterSection" class="filter-select">
+        <option value="">全係</option>
+        <option v-for="section in sectionOptions" :key="section" :value="section">{{ section }}</option>
+      </select>
+      <select v-if="canFilterOrganization" v-model="filterTeam" class="filter-select">
+        <option value="">{{ t('overtimeList.allTeams') }}</option>
+        <option v-for="tm in teamOptions" :key="tm" :value="tm">{{ tm }}</option>
+      </select>
+      <select v-if="canFilterOrganization" v-model="filterGroup" class="filter-select">
+        <option value="">{{ t('overtimeList.allGroups') }}</option>
+        <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
+      </select>
       <button class="btn btn-secondary" @click="fetchList">{{ t('overtimeList.search') }}</button>
       <button class="btn btn-pdf" @click="downloadPdf">{{ t('overtimeList.pdfExport') }}</button>
       <label class="type-check-label">
@@ -27,14 +39,6 @@
       </label>
     </div>
     <div class="filters" v-if="applications.length">
-      <select v-model="filterTeam" class="filter-select">
-        <option value="">{{ t('overtimeList.allTeams') }}</option>
-        <option v-for="tm in teamOptions" :key="tm" :value="tm">{{ tm }}</option>
-      </select>
-      <select v-model="filterGroup" class="filter-select">
-        <option value="">{{ t('overtimeList.allGroups') }}</option>
-        <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
-      </select>
       <span class="type-checkboxes">
         <label v-for="tp in typeOptions" :key="tp.value" class="type-check-label">
           <input type="checkbox" :value="tp.value" v-model="filterTypes" />
@@ -51,9 +55,9 @@
       </select>
     </div>
 
-    <div v-if="loading" class="loading">{{ t('overtimeList.loading') }}</div>
-    <div v-else-if="!applications.length" class="empty">{{ t('overtimeList.empty') }}</div>
-    <div v-else-if="!filteredApplications.length" class="empty">{{ t('overtimeList.emptyFilter') }}</div>
+    <div v-if="hasSearched && loading" class="loading">{{ t('overtimeList.loading') }}</div>
+    <div v-else-if="hasSearched && !applications.length" class="empty">{{ t('overtimeList.empty') }}</div>
+    <div v-else-if="hasSearched && !filteredApplications.length" class="empty">{{ t('overtimeList.emptyFilter') }}</div>
     <template v-else>
       <div class="table-wrap">
       <table class="ot-table">
@@ -226,10 +230,15 @@ const dsSources = [
 
 const applications = ref([])
 const loading = ref(false)
+const hasSearched = ref(false)
 const detailApp = ref(null)
 const currentPage = ref(1)
 const pageSize = 30
 
+const organizationSections = ref([])
+const organizationTeams = ref([])
+const organizationUnits = ref([])
+const filterSection = ref('')
 const filterTeam = ref('')
 const filterGroup = ref('')
 const filterTypes = ref([])
@@ -249,15 +258,34 @@ const TYPE_KEYS = [
 const typeOptions = computed(() =>
   TYPE_KEYS.map(tk => ({ value: tk.value, label: t(tk.key) }))
 )
+const canFilterOrganization = computed(() =>
+  ['leader', 'supervisor', 'chief', 'manager'].includes(authState.user?.profile?.role)
+)
 
+const sectionOptions = computed(() =>
+  organizationSections.value.map(section => section.name)
+)
 const teamOptions = computed(() =>
-  [...new Set(applications.value.map(a => a.team_name).filter(Boolean))].sort()
+  organizationTeams.value
+    .filter((team) => {
+      if (!filterSection.value) return true
+      const section = organizationSections.value.find(item => Number(item.id) === Number(team.parent))
+      return section?.name === filterSection.value
+    })
+    .map(team => team.name)
 )
 const groupOptions = computed(() => {
-  const targetApps = filterTeam.value
-    ? applications.value.filter(a => a.team_name === filterTeam.value)
-    : applications.value
-  return [...new Set(targetApps.map(a => a.group_name).filter(Boolean))].sort()
+  const targetTeam = organizationTeams.value.find(team => team.name === filterTeam.value)
+  const filteredUnits = targetTeam
+    ? organizationUnits.value.filter(unit => Number(unit.parent) === Number(targetTeam.id))
+    : organizationUnits.value.filter((unit) => {
+        if (!filterSection.value) return true
+        const team = organizationTeams.value.find(item => Number(item.id) === Number(unit.parent))
+        if (!team) return false
+        const section = organizationSections.value.find(item => Number(item.id) === Number(team.parent))
+        return section?.name === filterSection.value
+      })
+  return filteredUnits.map(unit => unit.name)
 })
 const nameOptions = computed(() =>
   [...new Set(applications.value.map(a => a.applicant_name).filter(Boolean))].sort()
@@ -270,6 +298,12 @@ const filteredApplications = computed(() =>
     (!filters.value.status || a.status === filters.value.status) &&
     (!filters.value.work_date__gte || a.work_date >= filters.value.work_date__gte) &&
     (!filters.value.work_date__lte || a.work_date <= filters.value.work_date__lte) &&
+    (!filterSection.value || (() => {
+      const team = organizationTeams.value.find(item => item.name === a.team_name)
+      if (!team) return false
+      const section = organizationSections.value.find(item => Number(item.id) === Number(team.parent))
+      return section?.name === filterSection.value
+    })()) &&
     (!filterTeam.value || a.team_name === filterTeam.value) &&
     (!filterGroup.value || a.group_name === filterGroup.value) &&
     (!filterTypes.value.length || filterTypes.value.includes(a.application_type)) &&
@@ -298,20 +332,42 @@ const totalMidnight = computed(() =>
   ) * 10) / 10
 )
 
+function formatDateInput(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getDefaultFromDate() {
+  const date = new Date()
+  date.setDate(date.getDate() - 10)
+  return formatDateInput(date)
+}
+
 const filters = ref({
-  work_date__gte: '',
+  work_date__gte: getDefaultFromDate(),
   work_date__lte: '',
   status: '',
 })
 
-watch([filterTeam, filterGroup, filterTypes, filterName, filterDate, excludeRejected, filters], () => {
+watch([filterSection, filterTeam, filterGroup, filterTypes, filterName, filterDate, excludeRejected, filters], () => {
   currentPage.value = 1
 }, { deep: true })
+
+watch(filterSection, () => {
+  filterTeam.value = ''
+  filterGroup.value = ''
+})
 
 watch(groupOptions, (options) => {
   if (filterGroup.value && !options.includes(filterGroup.value)) {
     filterGroup.value = ''
   }
+})
+
+watch(filterTeam, () => {
+  filterGroup.value = ''
 })
 
 function formatDateTime(val) {
@@ -322,6 +378,7 @@ function formatDateTime(val) {
 
 async function fetchList() {
   loading.value = true
+  hasSearched.value = true
   try {
     const res = await api.overtime.getApplications()
     applications.value = res.data?.results || res.data || []
@@ -384,7 +441,30 @@ async function downloadPdf() {
   }
 }
 
-onMounted(fetchList)
+async function loadOrganizationFilters() {
+  if (!canFilterOrganization.value) {
+    organizationTeams.value = []
+    organizationUnits.value = []
+    return
+  }
+  try {
+    const [sectionsRes, teamsRes, unitsRes] = await Promise.all([
+      api.accounts.getGroups(),
+      api.accounts.getTeams(),
+      api.accounts.getUnits(),
+    ])
+    organizationSections.value = Array.isArray(sectionsRes.data) ? sectionsRes.data : []
+    organizationTeams.value = Array.isArray(teamsRes.data) ? teamsRes.data : []
+    organizationUnits.value = Array.isArray(unitsRes.data) ? unitsRes.data : []
+  } catch (e) {
+    console.error(e)
+    organizationSections.value = []
+    organizationTeams.value = []
+    organizationUnits.value = []
+  }
+}
+
+onMounted(loadOrganizationFilters)
 </script>
 
 <style scoped>
