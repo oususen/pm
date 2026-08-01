@@ -282,7 +282,11 @@ def _build_departure_truck_summaries(records, target_dates, products, truck_map)
                 'physical_truck_code': truck.physical_truck_code or '',
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
+                'can_fit': load.get('can_fit', False),
+                'placed': load.get('placed', []),
+                'remaining': load.get('remaining', []),
                 'errors': load_errors,
+                'warnings': list(load.get('warnings') or []),
             })
 
     return summaries_by_date

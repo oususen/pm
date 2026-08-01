@@ -538,7 +538,7 @@
 
       <aside class="plan-sidebar">
         <div class="plan-sidebar-header">
-          <span class="plan-sidebar-title">積載平面図</span>
+          <span class="plan-sidebar-title">積載平面図（出発日）</span>
           <div class="plan-sidebar-date-control">
             <button class="plan-date-btn" :disabled="!planPrevDate" @click="planDate = planPrevDate">‹</button>
             <input v-model="planDate" type="date" class="plan-sidebar-date-input" />
@@ -1248,18 +1248,44 @@ const planColorForProduct = (productCode) => {
 const planTruckModels = computed(() => {
   const dateKey = planDate.value
   const models = []
-  displayTrucksForDate(dateKey).forEach((truck) => {
+
+  // 実出発日ベースの積載データを取得
+  const departureSummaries = previewDepartureSummaryByDate.value[dateKey] || []
+
+  // loadBlocksByDate（積み荷明細）が既に出発日ベースで振り分け済み → そのまま利用
+  const loadBlocks = loadBlocksByDate.value[dateKey] || []
+  const truckIds = new Set([
+    ...loadBlocks.map((b) => Number(b.truckId)),
+    ...departureSummaries.filter((s) => Array.isArray(s.placed) && s.placed.length > 0).map((s) => Number(s.truck_id)),
+  ])
+
+  const allTruckMap = new Map()
+  Object.values(trucksByDate.value).forEach((list) => {
+    list.forEach((t) => allTruckMap.set(Number(t.id), t))
+  })
+
+  const planTrucks = [...truckIds]
+    .map((id) => allTruckMap.get(id))
+    .filter(Boolean)
+    .sort((a, b) => Number(a.trip_number || 0) - Number(b.trip_number || 0))
+
+  planTrucks.forEach((truck) => {
     const truckId = Number(truck.id)
     const bedW = parseNumber(truck.width)
     const bedD = parseNumber(truck.depth)
     const bedH = parseNumber(truck.height)
 
-    // ---- バックエンドの積載判定結果を優先（プレビュー → 保存済みgrid） ----
-    const previewSummary = (previewSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === truckId)
-    const gridSummary = (summaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === truckId)
-    const backendSummary = (previewSummary && Array.isArray(previewSummary.placed))
-      ? previewSummary
-      : ((gridSummary && Array.isArray(gridSummary.placed)) ? gridSummary : null)
+    // ---- 実出発日ベースの積載判定結果を優先 → 納期日(occupancyDateKey)ベース → 保存済みgrid ----
+    const departureSummary = departureSummaries.find((s) => Number(s.truck_id) === truckId)
+    const truckLoadBlock = loadBlocks.find((b) => Number(b.truckId) === truckId)
+    const dueDateKey = truckLoadBlock?.occupancyDateKey || dateKey
+    const previewSummary = (previewSummaryByDate.value[dueDateKey] || []).find((s) => Number(s.truck_id) === truckId)
+    const gridSummary = (summaryByDate.value[dueDateKey] || []).find((s) => Number(s.truck_id) === truckId)
+    const backendSummary = (departureSummary && Array.isArray(departureSummary.placed))
+      ? departureSummary
+      : (previewSummary && Array.isArray(previewSummary.placed))
+        ? previewSummary
+        : ((gridSummary && Array.isArray(gridSummary.placed)) ? gridSummary : null)
 
     if (backendSummary) {
       // この便に積まれる製品へ一意な色を割り当てる（ハッシュ衝突で同色になるのを防ぐ）
@@ -1334,17 +1360,23 @@ const planTruckModels = computed(() => {
       return
     }
 
-    // ---- フォールバック: フロント側のパッキング ----
+    // ---- フォールバック: フロント側のパッキング（実出発日ベースで全納期日を走査） ----
     const grouped = new Map()
 
-    // この便に積まれる製品へ一意な色を割り当てる（ハッシュ衝突で同色になるのを防ぐ）
     const truckProducts = new Set()
-    mergedRows.value.forEach((row) => {
-      entriesAt(row, dateKey).forEach((entry) => {
-        ;(entry.allocations || []).forEach((allocation) => {
-          if (Number(allocation.truck_id) !== truckId) return
-          if (parseIntegerQty(allocation.qty) <= 0) return
-          truckProducts.add(entry.product_code)
+    allDateKeys.value.forEach((dk) => {
+      const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
+      const dkTruck = truckMap.get(truckId)
+      if (!dkTruck) return
+      const displayDk = getLoadDetailDateKey(dk, dkTruck)
+      if (displayDk !== dateKey) return
+      mergedRows.value.forEach((row) => {
+        entriesAt(row, dk).forEach((entry) => {
+          ;(entry.allocations || []).forEach((allocation) => {
+            if (Number(allocation.truck_id) !== truckId) return
+            if (parseIntegerQty(allocation.qty) <= 0) return
+            truckProducts.add(entry.product_code)
+          })
         })
       })
     })
@@ -1363,36 +1395,43 @@ const planTruckModels = computed(() => {
       truckColorMap.set(code, color)
     })
 
-    mergedRows.value.forEach((row) => {
-      entriesAt(row, dateKey).forEach((entry) => {
-        ;(entry.allocations || []).forEach((allocation) => {
-          if (Number(allocation.truck_id) !== truckId) return
-          const qty = parseIntegerQty(allocation.qty)
-          if (qty <= 0) return
-          const container = findContainerOption(entry.product_code, allocation.container_id)
-          const capacity = resolveAllocationCapacity(entry, allocation)
-          const containerCount = Math.max(1, Math.ceil(qty / Math.max(1, capacity)))
-          const containerKey = allocation.container_id || 'default'
-          const key = `${entry.product_code}||${containerKey}`
-          const existing = grouped.get(key)
-          if (existing) {
-            existing.qty += qty
-            existing.count += containerCount
-            return
-          }
-          grouped.set(key, {
-            key,
-            productCode: entry.product_code,
-            containerName: container?.container_name || '',
-            cw: parseNumber(container?.width),
-            cd: parseNumber(container?.depth),
-            ch: parseNumber(container?.height),
-            stackable: container?.stackable == null ? true : Boolean(container.stackable),
-            maxStack: parseIntegerQty(container?.max_stack),
-            capacity: Math.max(1, capacity),
-            count: containerCount,
-            qty,
-            color: truckColorMap.get(entry.product_code) || planColorForProduct(entry.product_code),
+    allDateKeys.value.forEach((dk) => {
+      const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
+      const dkTruck = truckMap.get(truckId)
+      if (!dkTruck) return
+      const displayDk = getLoadDetailDateKey(dk, dkTruck)
+      if (displayDk !== dateKey) return
+      mergedRows.value.forEach((row) => {
+        entriesAt(row, dk).forEach((entry) => {
+          ;(entry.allocations || []).forEach((allocation) => {
+            if (Number(allocation.truck_id) !== truckId) return
+            const qty = parseIntegerQty(allocation.qty)
+            if (qty <= 0) return
+            const container = findContainerOption(entry.product_code, allocation.container_id)
+            const capacity = resolveAllocationCapacity(entry, allocation)
+            const containerCount = Math.max(1, Math.ceil(qty / Math.max(1, capacity)))
+            const containerKey = allocation.container_id || 'default'
+            const key = `${entry.product_code}||${containerKey}`
+            const existing = grouped.get(key)
+            if (existing) {
+              existing.qty += qty
+              existing.count += containerCount
+              return
+            }
+            grouped.set(key, {
+              key,
+              productCode: entry.product_code,
+              containerName: container?.container_name || '',
+              cw: parseNumber(container?.width),
+              cd: parseNumber(container?.depth),
+              ch: parseNumber(container?.height),
+              stackable: container?.stackable == null ? true : Boolean(container.stackable),
+              maxStack: parseIntegerQty(container?.max_stack),
+              capacity: Math.max(1, capacity),
+              count: containerCount,
+              qty,
+              color: truckColorMap.get(entry.product_code) || planColorForProduct(entry.product_code),
+            })
           })
         })
       })
@@ -1524,18 +1563,23 @@ const planTruckModels = computed(() => {
   return models
 })
 
-// 平面図の日付ナビゲーション（読み込み済み期間内で前日/翌日へ移動）
+// 平面図の日付ナビゲーション（納期日＋実出発日を含む全日付で前後移動）
+const planAvailableDates = computed(() => {
+  const dateSet = new Set(allDateKeys.value)
+  Object.keys(previewDepartureSummaryByDate.value).forEach((k) => dateSet.add(k))
+  return [...dateSet].sort()
+})
 const planPrevDate = computed(() => {
-  const keys = allDateKeys.value
+  const keys = planAvailableDates.value
   const idx = keys.indexOf(planDate.value)
   return idx > 0 ? keys[idx - 1] : ''
 })
 const planNextDate = computed(() => {
-  const keys = allDateKeys.value
+  const keys = planAvailableDates.value
   const idx = keys.indexOf(planDate.value)
   return idx >= 0 && idx < keys.length - 1 ? keys[idx + 1] : ''
 })
-const planDateLoaded = computed(() => allDateKeys.value.includes(planDate.value))
+const planDateLoaded = computed(() => planAvailableDates.value.includes(planDate.value))
 
 const buildPayloadRowsForDate = (dateKey) => {
   return mergedRows.value
