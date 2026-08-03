@@ -962,6 +962,13 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             items.append(row)
 
         dry_run = request.query_params.get('dry_run', '').lower() in ('true', '1')
+        append_g = request.query_params.get('append_g', '').lower() in ('true', '1')
+
+        if append_g:
+            for item in items:
+                code = item.get('product_code', '')
+                if code and not code.endswith('G'):
+                    item['product_code'] = code + 'G'
 
         try:
             result = self._bulk_update_products(items, dry_run=dry_run)

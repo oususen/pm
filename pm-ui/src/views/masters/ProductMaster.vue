@@ -646,20 +646,25 @@
           <small>対応列: 構成品番(必須), 品名規格, 品番区分名, 単位, 単価, 標準LT, 自工程LT, ライン情報, 工程情報, 後工程, 管理区分, 最終品, ライン最終品, 機種名, 識別記号, 製品グループ, 移動先, 比重, 縦, 横, 厚さ, 発注倍数, 最小発注数, 容器入り数</small>
         </div>
 
-        <div class="form-group">
-          <label>取込ファイル</label>
-          <input type="file" accept=".csv,.xlsx,.xlsm" @change="onUpdateFileSelected" ref="updateFileInput" />
+        <div class="form-group" style="display: flex; gap: 16px; align-items: center;">
+          <div>
+            <label>取込ファイル</label>
+            <input type="file" accept=".csv,.xlsx,.xlsm" @change="onUpdateFileSelected" ref="updateFileInput" />
+          </div>
+          <label style="white-space: nowrap; cursor: pointer; user-select: none;">
+            <input type="checkbox" v-model="appendGOnImport" /> 品番末尾にGを追加
+          </label>
         </div>
 
         <div v-if="updateImportPreview" class="csv-result-area">
-          <span class="result-created">新規登録: {{ updateImportPreview.created || 0 }}件</span>
-          <span class="result-created">更新: {{ updateImportPreview.updated || 0 }}件</span>
+          <span class="result-created" style="color: #dc3545;" v-if="updateImportPreview.created">未登録（新規）: {{ updateImportPreview.created }}件</span>
+          <span class="result-created">DB一致（更新）: {{ updateImportPreview.updated || 0 }}件</span>
           <span class="result-skipped">変更なし: {{ updateImportPreview.skipped || 0 }}件</span>
-          <div v-if="updateImportPreview.created_codes && updateImportPreview.created_codes.length > 0" class="skipped-codes">
-            新規: {{ updateImportPreview.created_codes.join(', ') }}
+          <div v-if="updateImportPreview.created_codes && updateImportPreview.created_codes.length > 0" class="skipped-codes" style="color: #dc3545;">
+            未登録: {{ updateImportPreview.created_codes.join(', ') }}
           </div>
           <div v-if="updateImportPreview.updated_codes && updateImportPreview.updated_codes.length > 0" class="skipped-codes">
-            更新: {{ updateImportPreview.updated_codes.join(', ') }}
+            DB一致: {{ updateImportPreview.updated_codes.join(', ') }}
           </div>
         </div>
 
@@ -1082,6 +1087,7 @@ const updateImportPreview = ref(null)
 const updateImportDone = ref(false)
 const updateImporting = ref(false)
 const updateImportFile = ref(null)
+const appendGOnImport = ref(false)
 
 const downloadUpdateImportTemplateXlsx = async () => {
   try {
@@ -1107,6 +1113,7 @@ const openUpdateImport = () => {
   updateImportPreview.value = null
   updateImportDone.value = false
   updateImportFile.value = null
+  appendGOnImport.value = false
   showUpdateImportDialog.value = true
 }
 
@@ -1128,7 +1135,7 @@ const onUpdateFileSelected = async (e) => {
   try {
     const fd = new FormData()
     fd.append('file', file)
-    const res = await api.products.bulkUpdateImport(fd, { dryRun: true })
+    const res = await api.products.bulkUpdateImport(fd, { dryRun: true, appendG: appendGOnImport.value })
     updateImportPreview.value = res.data
   } catch (error) {
     console.error('統合取込プレビューエラー:', error)
@@ -1147,7 +1154,7 @@ const executeUpdateImport = async () => {
   try {
     const fd = new FormData()
     fd.append('file', updateImportFile.value)
-    const res = await api.products.bulkUpdateImport(fd)
+    const res = await api.products.bulkUpdateImport(fd, { appendG: appendGOnImport.value })
     updateImportPreview.value = res.data
     updateImportDone.value = true
     updateImportFile.value = null
