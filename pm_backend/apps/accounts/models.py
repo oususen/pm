@@ -275,6 +275,7 @@ class UserPermission(models.Model):
         ('masters.work_pattern', 'マスタ: 勤務パターン'),
         ('masters.contact', 'マスタ: 連絡先マスタ'),
         ('masters.kubota_sakai_truck', 'マスタ: クボタ堺便マスタ'),
+        ('masters.sourcing_bulk_change', 'マスタ: 加工先一括変更'),
         ('settings', '設定'),
         ('settings.profile', '設定: プロフィール編集'),
         ('settings.users', '設定: ユーザー管理'),

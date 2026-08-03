@@ -111,7 +111,7 @@ const masters = [
     path: "/masters/sourcing-bulk-change",
     name: "SourcingBulkChange",
     component: () => import("@/views/masters/SourcingBulkChange.vue"),
-    meta: { pageTitle: "加工先一括変更", resource: "masters.bom" },
+    meta: { pageTitle: "加工先一括変更", resource: "masters.sourcing_bulk_change" },
   },
 ];
 
