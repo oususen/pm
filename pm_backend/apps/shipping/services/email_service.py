@@ -254,8 +254,9 @@ class EmailService:
         cc_emails: Optional[List[str]] = None,
         user_id: Optional[int] = None,
         reply_to: Optional[str] = None,
+        content_type: str = 'plain',
     ) -> Dict:
-        """添付なしメールを送信"""
+        """添付なしメールを送信（content_type='html'でHTML送信可）"""
         smtp_config = self.get_smtp_config(user_id)
         if not smtp_config:
             return {
@@ -273,7 +274,7 @@ class EmailService:
             if reply_to:
                 msg['Reply-To'] = reply_to
 
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(body, content_type, 'utf-8'))
 
             recipients = list(to_emails)
             if cc_emails:

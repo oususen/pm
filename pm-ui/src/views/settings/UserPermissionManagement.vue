@@ -492,6 +492,7 @@ const permissionResources = [
   { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
   { value: 'settings.orphan_backlog_maintenance', label: '設定: 孤立ライン実績メンテナンス' },
   { value: 'settings.lock_date', label: '設定: 締め日管理' },
+  { value: 'settings.kubota_import', label: '設定: クボタ堺取り込み通知設定' },
   { value: 'settings.kubota_sakai_config', label: '設定: クボタ堺便計画設定' },
   { value: 'users', label: 'ユーザー管理' },
   { value: 'manual', label: 'マニュアル' },

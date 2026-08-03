@@ -139,7 +139,7 @@ const tiles = computed(() => [
     icon: "📧",
     category: "settings",
     required: "edit",
-    resource: "settings",
+    resource: "settings.kubota_import",
   },
   {
     key: "missing_routing_items",

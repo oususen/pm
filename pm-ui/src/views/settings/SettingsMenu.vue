@@ -90,7 +90,7 @@ const tiles = computed(() => {
     { to: "/settings/task-settings", label: "タスク設定", icon: "⏰", category: "task", resource: "settings.scheduled_tasks" },
     { to: "/settings/stocktake-init", label: "棚卸初期化", icon: "📦", category: "task", resource: "settings.stocktake_init" },
     { to: "/settings/orphan-backlog-maintenance", label: "孤立ライン実績メンテナンス", icon: "🧹", category: "task", resource: "settings.orphan_backlog_maintenance" },
-    { to: "/settings/kubota-import", label: "クボタ堺取り込み通知", icon: "🔔", category: "kubota", resource: "settings" },
+    { to: "/settings/kubota-import", label: "クボタ堺取り込み通知", icon: "🔔", category: "kubota", resource: "settings.kubota_import" },
     { to: "/settings/kubota-sakai-config", label: "クボタ堺便計画設定", icon: "🚛", category: "kubota", resource: "settings.kubota_sakai_config" },
     { to: "/settings/smtp", label: "SMTP設定", icon: "📧", category: "system", resource: "settings.smtp" },
     { to: "/settings/lock-date", label: "締め日管理", icon: "📅", category: "system", resource: "settings.lock_date" },

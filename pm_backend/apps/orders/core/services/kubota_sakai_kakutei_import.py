@@ -557,12 +557,12 @@ class KubotaSakaiKakuteiImportService:
             notification.target_users.set(config.notify_users.all())
 
             if config.email_enabled:
-                self._send_diff_email(config, changed_diffs, title)
+                self._send_diff_email(config, changed_diffs, title, description)
         except Exception as e:
             print(f"通知作成エラー: {e}")
 
-    def _send_diff_email(self, config, changed_diffs, title):
-        """差分のメール通知を送信する"""
+    def _send_diff_email(self, config, changed_diffs, title, table_html):
+        """差分のメール通知をHTML形式で送信する"""
         try:
             from shipping.services.email_service import EmailService
 
@@ -576,26 +576,16 @@ class KubotaSakaiKakuteiImportService:
                 print("メール通知: 送信先メールアドレスなし")
                 return
 
-            lines = [
-                f"クボタ堺 確定取り込みで内示との差分が {len(changed_diffs)}件 検出されました。",
-                "",
-                f"{'品番':<16} {'日付':<12} {'納入地':<8} {'内示数':>8} {'確定数':>8} {'差分':>8}",
-                "-" * 72,
-            ]
-            for d in changed_diffs:
-                diff_str = f"{'+' if d['diff'] > 0 else ''}{d['diff']:,}"
-                lines.append(
-                    f"{d['product_code']:<16} {d['due_date']:<12} "
-                    f"{d.get('ship_to_code', ''):<8} "
-                    f"{d['forecast_qty']:>8,} {d['firm_qty']:>8,} "
-                    f"{diff_str:>8}"
-                )
-
-            body = "\n".join(lines)
+            body = (
+                f"<p>クボタ堺 確定取り込みで内示との差分が "
+                f"<b>{len(changed_diffs)}件</b> 検出されました。</p>"
+                f"{table_html}"
+            )
             result = EmailService().send_plain_email(
                 to_emails=emails,
                 subject=title,
                 body=body,
+                content_type='html',
             )
             if not result.get('success'):
                 print(f"差分メール送信失敗: {result.get('message')}")

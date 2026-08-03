@@ -63,6 +63,7 @@ const canAccess = (level = 'view') => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
+  if (hasPermission(user, 'settings.kubota_import', level)) return true
   return hasPermission(user, 'settings', level)
 }
 

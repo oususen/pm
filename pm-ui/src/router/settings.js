@@ -137,7 +137,7 @@ const settings = [
     path: "/settings/kubota-import",
     name: "KubotaImportSettings",
     component: () => import("@/views/settings/KubotaImportSettings.vue"),
-    meta: { pageTitle: "クボタ堺取り込み通知設定", resource: "settings" },
+    meta: { pageTitle: "クボタ堺取り込み通知設定", resource: "settings.kubota_import", permission: "edit" },
   },
   {
     path: "/settings/kubota-sakai-config",
