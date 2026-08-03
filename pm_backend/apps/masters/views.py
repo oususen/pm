@@ -5293,6 +5293,8 @@ class SourcingBulkChangeView(MastersPermissionMixin, viewsets.ViewSet):
                         proc = Process.objects.filter(id=item.process_id).first()
                         if proc and proc.line_id:
                             item.line_id = proc.line_id
+                    if 'lead_time_days' in bom_changes:
+                        item.lead_time_days = bom_changes['lead_time_days']
 
                     error = self._validate_bom_item_state(item)
                     if error:
@@ -5339,6 +5341,9 @@ class SourcingBulkChangeView(MastersPermissionMixin, viewsets.ViewSet):
                         if 'supplier_id' in routing_changes and step.supplier_id != routing_changes['supplier_id']:
                             step.supplier_id = routing_changes['supplier_id']
                             changed.append('supplier_id')
+                        if 'lead_time_days' in routing_changes and step.lead_time_days != routing_changes['lead_time_days']:
+                            step.lead_time_days = routing_changes['lead_time_days']
+                            changed.append('lead_time_days')
                         if changed:
                             step.save(update_fields=changed + ['updated_at'])
                             step_updated += 1

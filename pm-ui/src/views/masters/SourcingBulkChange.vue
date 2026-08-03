@@ -69,6 +69,16 @@
                 <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.supplier_code }} {{ s.supplier_name }}</option>
               </select>
             </div>
+            <div class="field">
+              <label>LT(日):</label>
+              <input
+                v-model.number="newLeadTimeDays"
+                type="number"
+                min="0"
+                placeholder="変更しない"
+                class="lt-input"
+              />
+            </div>
           </div>
         </fieldset>
 
@@ -195,6 +205,7 @@ const newSourcingType = ref('')
 const newProcessId = ref(null)
 const newLineId = ref(null)
 const newSupplierId = ref(null)
+const newLeadTimeDays = ref(null)
 
 const processes = ref([])
 const lines = ref([])
@@ -228,6 +239,11 @@ const search = async () => {
   routingSteps.value = []
   selectedBomIds.value = []
   selectedStepIds.value = []
+  newSourcingType.value = ''
+  newProcessId.value = null
+  newLineId.value = null
+  newSupplierId.value = null
+  newLeadTimeDays.value = null
   try {
     const res = await api.sourcingBulkChange.search(code)
     product.value = res.data.product
@@ -264,6 +280,10 @@ const applyChanges = async () => {
     const val = newSupplierId.value === 0 ? null : newSupplierId.value
     bomChanges.supplier_id = val
     routingChanges.supplier_id = val
+  }
+  if (newLeadTimeDays.value !== null && newLeadTimeDays.value !== '') {
+    bomChanges.lead_time_days = newLeadTimeDays.value
+    routingChanges.lead_time_days = newLeadTimeDays.value
   }
 
   const hasBomChanges = selectedBomIds.value.length > 0 && Object.keys(bomChanges).length > 0
@@ -349,6 +369,7 @@ onMounted(async () => {
 .change-fields .field { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .change-fields .field label { font-weight: 600; white-space: nowrap; }
 .change-fields .field select { padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+.lt-input { width: 80px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
 
 .section { margin-bottom: 14px; }
 .section h3 { font-size: 14px; margin: 0 0 6px; display: flex; align-items: center; gap: 6px; }
