@@ -1192,10 +1192,12 @@ def calculate_truck_load(assignments, truck):
         product_qty_map = {pcode: Decimal(str(pqty)) for pcode, pqty in group_products_list}
         unit_remaining = dict(product_qty_map)
         units_per_footprint = int(layers) * int(capacity)
-        footprint_products = []
+        footprint_slots = []
+        remaining_container_count = int(container_count)
         for _ in range(int(floor_slots)):
             first = None
             take = units_per_footprint
+            used_qty = Decimal('0')
             for pcode in list(unit_remaining.keys()):
                 if unit_remaining[pcode] <= 0:
                     continue
@@ -1204,18 +1206,29 @@ def calculate_truck_load(assignments, truck):
                 used = min(take, unit_remaining[pcode])
                 unit_remaining[pcode] -= used
                 take -= used
+                used_qty += used
                 if take <= 0:
                     break
-            footprint_products.append(first or '')
-        if not footprint_products and group_products_list:
-            footprint_products = [group_products_list[0][0]]
+            slot_layers = max(1, min(int(layers), remaining_container_count))
+            remaining_container_count = max(0, remaining_container_count - slot_layers)
+            footprint_slots.append({
+                'product_code': first or '',
+                'qty': used_qty,
+                'layers': slot_layers,
+            })
+        if not footprint_slots and group_products_list:
+            footprint_slots = [{
+                'product_code': group_products_list[0][0],
+                'qty': total_qty,
+                'layers': max(1, min(int(layers), int(container_count) or 1)),
+            }]
 
-        for pcode in footprint_products:
+        for slot in footprint_slots:
             slots.append({
-                'product_code': pcode,
-                'qty': product_qty_map.get(pcode, total_qty),
+                'product_code': slot['product_code'],
+                'qty': slot['qty'] if slot['qty'] > 0 else total_qty,
                 'container_name': container_name,
-                'layers': int(layers),
+                'layers': slot['layers'],
                 'length': length,
                 'width': width,
                 'rotated': rotated,

@@ -1314,6 +1314,62 @@ const planColorForProduct = (productCode) => {
   return planColorPalette[hash % planColorPalette.length]
 }
 
+const collectTruckPlanItems = (departureDateKey, truckId) => {
+  const grouped = new Map()
+  allDateKeys.value.forEach((dueDateKey) => {
+    const truckMap = new Map((trucksByDate.value[dueDateKey] || []).map((t) => [Number(t.id), t]))
+    const dueTruck = truckMap.get(Number(truckId))
+    if (!dueTruck) return
+    if (getLoadDetailDateKey(dueDateKey, dueTruck) !== departureDateKey) return
+    mergedRows.value.forEach((row) => {
+      entriesAt(row, dueDateKey).forEach((entry) => {
+        ;(entry.allocations || []).forEach((allocation) => {
+          if (Number(allocation.truck_id) !== Number(truckId)) return
+          const qty = parseIntegerQty(allocation.qty)
+          if (qty <= 0) return
+          const container = findContainerOption(entry.product_code, allocation.container_id)
+          const capacity = resolveAllocationCapacity(entry, allocation)
+          const containerCount = Math.max(1, Math.ceil(qty / Math.max(1, capacity)))
+          const key = `${entry.product_code}||${allocation.container_id || 'default'}`
+          const existing = grouped.get(key)
+          if (existing) {
+            existing.qty += qty
+            existing.containerCount += containerCount
+            return
+          }
+          grouped.set(key, {
+            key,
+            productCode: entry.product_code,
+            containerName: container?.container_name || '',
+            qty,
+            containerCount,
+          })
+        })
+      })
+    })
+  })
+  return [...grouped.values()].sort((a, b) => String(a.productCode).localeCompare(String(b.productCode)))
+}
+
+const buildTruckPlanColorMap = (items = []) => {
+  const usedColors = new Set()
+  const truckColorMap = new Map()
+  items.forEach((item) => {
+    const code = item.productCode
+    const display = displaySettingItems.value.find((row) => row.product_code === code)
+    let color = display && display.bg_color && display.bg_color !== '#ffffff' ? display.bg_color : ''
+    if (!color || usedColors.has(color)) {
+      const fallback = planColorForProduct(code)
+      color = usedColors.has(fallback)
+        ? (planColorPalette.find((c) => !usedColors.has(c)) || fallback)
+        : fallback
+    }
+    usedColors.add(color)
+    truckColorMap.set(code, color)
+  })
+  return truckColorMap
+}
+
 const planTruckModels = computed(() => {
   const dateKey = planDate.value
   const models = []
@@ -1369,24 +1425,10 @@ const planTruckModels = computed(() => {
       : (previewSummary && Array.isArray(previewSummary.placed))
         ? previewSummary
         : ((gridSummary && Array.isArray(gridSummary.placed)) ? gridSummary : null)
+    const aggregatedItems = collectTruckPlanItems(dateKey, truckId)
+    const truckColorMap = buildTruckPlanColorMap(aggregatedItems)
 
     if (backendSummary) {
-      // この便に積まれる製品へ一意な色を割り当てる（ハッシュ衝突で同色になるのを防ぐ）
-      const truckProducts = new Set(backendSummary.placed.map((p) => p.product_code).filter(Boolean))
-      const usedColors = new Set()
-      const truckColorMap = new Map()
-      ;[...truckProducts].forEach((code) => {
-        const display = displaySettingItems.value.find((item) => item.product_code === code)
-        let color = display && display.bg_color && display.bg_color !== '#ffffff' ? display.bg_color : ''
-        if (!color || usedColors.has(color)) {
-          const fallback = planColorForProduct(code)
-          color = usedColors.has(fallback)
-            ? (planColorPalette.find((c) => !usedColors.has(c)) || fallback)
-            : fallback
-        }
-        usedColors.add(color)
-        truckColorMap.set(code, color)
-      })
       const placed = backendSummary.placed.map((p) => {
         const pw = parseNumber(p.w)
         const pd = parseNumber(p.d)
@@ -1403,30 +1445,10 @@ const planTruckModels = computed(() => {
           label: `${p.product_code}×${formatNumber(p.qty)}`,
         }
       })
-      // 凡例（バックエンドの配置結果から集約）
-      const itemMap = new Map()
-      backendSummary.placed.forEach((p) => {
-        const code = p.product_code
-        if (!code) return
-        const key = `${code}||${p.container_name || ''}`
-        const existing = itemMap.get(key)
-        if (existing) {
-          existing.slots += 1
-          return
-        }
-        itemMap.set(key, {
-          key,
-          productCode: code,
-          containerName: p.container_name || '',
-          qty: parseNumber(p.qty),
-          layers: parseIntegerQty(p.layers) || 1,
-          slots: 1,
-          color: truckColorMap.get(code) || planColorForProduct(code),
-        })
-      })
-      const items = [...itemMap.values()]
-        .map((item) => ({ ...item, containerCount: item.slots * item.layers }))
-        .sort((a, b) => String(a.productCode).localeCompare(String(b.productCode)))
+      const items = aggregatedItems.map((item) => ({
+        ...item,
+        color: truckColorMap.get(item.productCode) || planColorForProduct(item.productCode),
+      }))
       const viewW = bedD || 1
       const viewH = bedW || 1
       models.push({
@@ -1449,38 +1471,6 @@ const planTruckModels = computed(() => {
 
     // ---- フォールバック: フロント側のパッキング（実出発日ベースで全納期日を走査） ----
     const grouped = new Map()
-
-    const truckProducts = new Set()
-    allDateKeys.value.forEach((dk) => {
-      const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
-      const dkTruck = truckMap.get(truckId)
-      if (!dkTruck) return
-      const displayDk = getLoadDetailDateKey(dk, dkTruck)
-      if (displayDk !== dateKey) return
-      mergedRows.value.forEach((row) => {
-        entriesAt(row, dk).forEach((entry) => {
-          ;(entry.allocations || []).forEach((allocation) => {
-            if (Number(allocation.truck_id) !== truckId) return
-            if (parseIntegerQty(allocation.qty) <= 0) return
-            truckProducts.add(entry.product_code)
-          })
-        })
-      })
-    })
-    const usedColors = new Set()
-    const truckColorMap = new Map()
-    ;[...truckProducts].forEach((code) => {
-      const display = displaySettingItems.value.find((item) => item.product_code === code)
-      let color = display && display.bg_color && display.bg_color !== '#ffffff' ? display.bg_color : ''
-      if (!color || usedColors.has(color)) {
-        const fallback = planColorForProduct(code)
-        color = usedColors.has(fallback)
-          ? (planColorPalette.find((c) => !usedColors.has(c)) || fallback)
-          : fallback
-      }
-      usedColors.add(color)
-      truckColorMap.set(code, color)
-    })
 
     allDateKeys.value.forEach((dk) => {
       const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
@@ -1641,7 +1631,10 @@ const planTruckModels = computed(() => {
       viewW,
       viewH,
       viewBox: `0 0 ${viewW} ${viewH}`,
-      items: items.map((i) => ({ ...i, containerCount: i.count })),
+      items: aggregatedItems.map((item) => ({
+        ...item,
+        color: truckColorMap.get(item.productCode) || planColorForProduct(item.productCode),
+      })),
       placed,
       remaining,
       overloaded,
