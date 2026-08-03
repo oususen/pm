@@ -142,7 +142,7 @@
               <th>単価</th>
               <th>標準LT(日)</th>
               <th>最小発注数</th>
-              <th>発注倍数</th>
+              <th>発注倍数（ロット）</th>
               <th>機種名</th>
               <th>識別記号</th>
               <th>加工先(将来用)</th>
@@ -319,7 +319,7 @@
                       <input v-model.number="formData.order_lot_min" type="number" min="0" />
                     </div>
                     <div class="form-group">
-                      <label>発注倍数</label>
+                      <label>発注倍数（ロット）</label>
                       <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
                     </div>
                     <div class="form-group">

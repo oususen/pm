@@ -366,7 +366,8 @@ class Command(BaseCommand):
 
         # 自動納入リスト送信
         from purchase.tasks_auto_delivery_list import run_auto_delivery_list_send
-        from purchase.models import PurchaseAutoDeliveryListConfig
+        from purchase.tasks_auto_order_send import run_auto_order_send
+        from purchase.models import PurchaseAutoDeliveryListConfig, PurchaseAutoOrderSendConfig
 
         auto_delivery_configs = PurchaseAutoDeliveryListConfig.objects.select_related('supplier').filter(is_enabled=True)
         for cfg in auto_delivery_configs:
@@ -378,6 +379,27 @@ class Command(BaseCommand):
             job_id = f'auto_delivery_list_{cfg.id}'
             scheduler.add_job(
                 _with_fresh_connection(run_auto_delivery_list_send),
+                trigger,
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=3600,
+                kwargs={'config_id': cfg.id},
+            )
+            logger.info(
+                f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d} '
+                f'(supplier={cfg.supplier.supplier_code if cfg.supplier_id else "-"})'
+            )
+
+        auto_order_configs = PurchaseAutoOrderSendConfig.objects.select_related('supplier').filter(is_enabled=True)
+        for cfg in auto_order_configs:
+            trigger = CronTrigger(
+                hour=cfg.scheduled_hour,
+                minute=cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            job_id = f'auto_order_send_{cfg.id}'
+            scheduler.add_job(
+                _with_fresh_connection(run_auto_order_send),
                 trigger,
                 id=job_id,
                 replace_existing=True,

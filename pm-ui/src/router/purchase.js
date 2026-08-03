@@ -107,6 +107,12 @@ const purchase = [
     component: () => import("@/views/purchase/PurchaseAutoDeliveryListSettings.vue"),
     meta: { pageTitle: "自動納入リスト送信", manualPath: "仕入れ/自動納入リスト送信.md", resource: "purchase.auto_delivery_list" },
   },
+  {
+    path: "/purchase/auto-order-send",
+    name: "PurchaseAutoOrderSend",
+    component: () => import("@/views/purchase/PurchaseAutoOrderSendSettings.vue"),
+    meta: { pageTitle: "注文書自動送信設定", resource: "purchase.auto_delivery_list" },
+  },
 ];
 
 export default purchase;

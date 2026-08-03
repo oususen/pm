@@ -200,6 +200,14 @@ const tiles = computed(() => [
     required: "edit",
     resource: "purchase.auto_delivery_list",
   },
+  {
+    to: "/purchase/auto-order-send",
+    label: "注文書自動送信設定",
+    icon: "🗂️",
+    category: "automation",
+    required: "edit",
+    resource: "purchase.auto_delivery_list",
+  },
 ].map((tile) => ({
   ...tile,
   disabled: !hasMenuPermission(

@@ -33,6 +33,7 @@ from .models import (
     EngineeringChangeCase,
     EngineeringChangePart,
     PurchaseAutoDeliveryListConfig,
+    PurchaseAutoOrderSendConfig,
     PurchasePlanLockSetting,
 )
 from .models_kikan_mapping import PurchaseActualKikanMapping
@@ -2947,6 +2948,149 @@ class PurchaseAutoDeliveryListHolidayTrialView(APIView):
         thread.start()
 
         return Response({'detail': '休日トライを開始しました', 'config_id': config.id})
+
+
+class PurchaseAutoOrderSendConfigListCreateView(APIView):
+    """注文書自動送信設定 一覧/新規作成"""
+
+    def get(self, request):
+        configs = PurchaseAutoOrderSendConfig.objects.select_related('supplier').all()
+        result = []
+        for config in configs:
+            result.append({
+                'id': config.id,
+                'supplier_id': config.supplier_id,
+                'supplier_code': config.supplier.supplier_code if config.supplier else '',
+                'supplier_name': config.supplier.supplier_name if config.supplier else '',
+                'is_enabled': config.is_enabled,
+                'scheduled_hour': config.scheduled_hour,
+                'scheduled_minute': config.scheduled_minute,
+                'lead_time_days': config.lead_time_days,
+                'progress_days_back': config.progress_days_back,
+                'progress_days_forward': config.progress_days_forward,
+                'calc_mode': config.calc_mode,
+                'send_order_excel': config.send_order_excel,
+                'email_body_custom': config.email_body_custom,
+                'reply_to_email': config.reply_to_email,
+                'cc_emails': config.cc_emails,
+                'notify_on_failure_user_ids': list(config.notify_on_failure.values_list('id', flat=True)),
+                'notify_on_non_delivery_user_ids': list(config.notify_on_non_delivery.values_list('id', flat=True)),
+                'last_run_at': config.last_run_at.strftime('%Y-%m-%d %H:%M') if config.last_run_at else None,
+                'last_run_status': config.last_run_status,
+                'last_run_message': config.last_run_message,
+                'last_run_duration_seconds': config.last_run_duration_seconds,
+            })
+        return Response(result)
+
+    def post(self, request):
+        email_errors = _validate_email_fields(request.data)
+        if email_errors:
+            return Response({'detail': '\n'.join(email_errors)}, status=status.HTTP_400_BAD_REQUEST)
+        supplier_id = request.data.get('supplier_id')
+        if not supplier_id:
+            return Response({'detail': 'supplier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if PurchaseAutoOrderSendConfig.objects.filter(supplier_id=supplier_id).exists():
+            return Response({'detail': 'この仕入先の設定は既に存在します'}, status=status.HTTP_400_BAD_REQUEST)
+
+        config = PurchaseAutoOrderSendConfig.objects.create(
+            supplier_id=supplier_id,
+            is_enabled=_parse_bool(request.data.get('is_enabled')),
+            scheduled_hour=int(request.data.get('scheduled_hour', 7)),
+            scheduled_minute=int(request.data.get('scheduled_minute', 0)),
+            lead_time_days=int(request.data.get('lead_time_days', 2)),
+            progress_days_back=int(request.data.get('progress_days_back', 7)),
+            progress_days_forward=int(request.data.get('progress_days_forward', 30)),
+            calc_mode=request.data.get('calc_mode', PurchaseAutoOrderSendConfig.CALC_MODE_DEMAND),
+            send_order_excel=_parse_bool(request.data.get('send_order_excel')),
+            email_body_custom=request.data.get('email_body_custom', ''),
+            reply_to_email=request.data.get('reply_to_email', ''),
+            cc_emails=request.data.get('cc_emails', ''),
+        )
+        failure_ids = request.data.get('notify_on_failure_user_ids', [])
+        non_delivery_ids = request.data.get('notify_on_non_delivery_user_ids', [])
+        if failure_ids:
+            config.notify_on_failure.set(failure_ids)
+        if non_delivery_ids:
+            config.notify_on_non_delivery.set(non_delivery_ids)
+        return Response({'id': config.id}, status=status.HTTP_201_CREATED)
+
+
+class PurchaseAutoOrderSendConfigDetailView(APIView):
+    """注文書自動送信設定 更新/削除"""
+
+    def put(self, request, pk):
+        email_errors = _validate_email_fields(request.data)
+        if email_errors:
+            return Response({'detail': '\n'.join(email_errors)}, status=status.HTTP_400_BAD_REQUEST)
+
+        config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        new_supplier_id = request.data.get('supplier_id')
+        if new_supplier_id and int(new_supplier_id) != config.supplier_id:
+            if PurchaseAutoOrderSendConfig.objects.filter(supplier_id=new_supplier_id).exclude(pk=pk).exists():
+                return Response({'detail': 'この仕入先の設定は既に存在します'}, status=status.HTTP_400_BAD_REQUEST)
+            config.supplier_id = int(new_supplier_id)
+
+        if 'is_enabled' in request.data:
+            config.is_enabled = _parse_bool(request.data['is_enabled'])
+        if 'scheduled_hour' in request.data:
+            config.scheduled_hour = int(request.data['scheduled_hour'])
+        if 'scheduled_minute' in request.data:
+            config.scheduled_minute = int(request.data['scheduled_minute'])
+        if 'lead_time_days' in request.data:
+            config.lead_time_days = int(request.data['lead_time_days'])
+        if 'progress_days_back' in request.data:
+            config.progress_days_back = int(request.data['progress_days_back'])
+        if 'progress_days_forward' in request.data:
+            config.progress_days_forward = int(request.data['progress_days_forward'])
+        if 'calc_mode' in request.data:
+            config.calc_mode = request.data['calc_mode']
+        if 'send_order_excel' in request.data:
+            config.send_order_excel = _parse_bool(request.data['send_order_excel'])
+        if 'email_body_custom' in request.data:
+            config.email_body_custom = request.data['email_body_custom']
+        if 'reply_to_email' in request.data:
+            config.reply_to_email = request.data['reply_to_email']
+        if 'cc_emails' in request.data:
+            config.cc_emails = request.data['cc_emails']
+        config.save()
+
+        if 'notify_on_failure_user_ids' in request.data:
+            config.notify_on_failure.set(request.data['notify_on_failure_user_ids'])
+        if 'notify_on_non_delivery_user_ids' in request.data:
+            config.notify_on_non_delivery.set(request.data['notify_on_non_delivery_user_ids'])
+
+        return Response({'detail': '保存しました'})
+
+    def delete(self, request, pk):
+        config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        config.delete()
+        return Response({'detail': '削除しました'})
+
+
+class PurchaseAutoOrderSendRunNowView(APIView):
+    """注文書自動送信 手動即時実行"""
+
+    def post(self, request, pk):
+        config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
+        if not config:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .tasks_auto_order_send import run_auto_order_send
+        import threading
+
+        config.last_run_status = 'RUNNING'
+        config.last_run_message = '手動実行中...'
+        config.last_run_at = datetime.now()
+        config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_at'])
+
+        thread = threading.Thread(target=run_auto_order_send, kwargs={'config_id': config.id})
+        thread.start()
+        return Response({'detail': '手動実行を開始しました', 'config_id': config.id})
 
 
 class PurchaseActualKikanMappingCandidatesView(APIView):

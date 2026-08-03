@@ -405,3 +405,74 @@ class PurchaseAutoDeliveryListConfig(models.Model):
 
     def __str__(self):
         return f'{self.supplier} {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'
+
+
+class PurchaseAutoOrderSendConfig(models.Model):
+    """注文書自動送信設定"""
+
+    STATUS_CHOICES = [
+        ('SUCCESS', '成功'),
+        ('FAILED', '失敗'),
+        ('RUNNING', '実行中'),
+        ('SKIPPED', 'スキップ'),
+    ]
+
+    CALC_MODE_DEMAND = 'DEMAND'
+    CALC_MODE_LOT_ROUNDED = 'LOT_ROUNDED'
+    CALC_MODE_CHOICES = [
+        (CALC_MODE_DEMAND, '需要そのまま'),
+        (CALC_MODE_LOT_ROUNDED, 'ロット丸め'),
+    ]
+
+    supplier = models.OneToOneField(
+        Supplier,
+        on_delete=models.CASCADE,
+        related_name='auto_order_send_config',
+        verbose_name='対象仕入先',
+    )
+    is_enabled = models.BooleanField(default=True, verbose_name='有効')
+    scheduled_hour = models.PositiveSmallIntegerField(default=7, verbose_name='実行時（時）')
+    scheduled_minute = models.PositiveSmallIntegerField(default=0, verbose_name='実行時（分）')
+    lead_time_days = models.PositiveSmallIntegerField(default=2, verbose_name='納入日（何営業日後）')
+    progress_days_back = models.PositiveSmallIntegerField(default=7, verbose_name='進度表（何営業日前から）')
+    progress_days_forward = models.PositiveSmallIntegerField(default=30, verbose_name='進度表（何日後まで）')
+    calc_mode = models.CharField(
+        max_length=20,
+        choices=CALC_MODE_CHOICES,
+        default=CALC_MODE_DEMAND,
+        verbose_name='数量算出方式',
+    )
+    send_order_excel = models.BooleanField(default=True, verbose_name='注文書Excel送信')
+    email_body_custom = models.TextField(blank=True, default='', verbose_name='メール本文（カスタム）')
+    reply_to_email = models.EmailField(blank=True, default='', verbose_name='返信先メールアドレス')
+    cc_emails = models.TextField(blank=True, default='', verbose_name='業務員CC送信先メール（改行区切り）')
+    notify_on_failure = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='auto_order_send_failure_notifications',
+        verbose_name='失敗時の通知先',
+    )
+    notify_on_non_delivery = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='auto_order_send_non_delivery_notifications',
+        verbose_name='納入日でないときの通知先',
+    )
+    last_run_at = models.DateTimeField(null=True, blank=True, verbose_name='最終実行日時')
+    last_run_status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name='最終実行結果',
+    )
+    last_run_message = models.TextField(blank=True, default='', verbose_name='最終実行メッセージ')
+    last_run_duration_seconds = models.FloatField(null=True, blank=True, verbose_name='最終実行時間（秒）')
+
+    class Meta:
+        db_table = 'purchase_auto_order_send_config'
+        verbose_name = '注文書自動送信設定'
+        verbose_name_plural = '注文書自動送信設定'
+
+    def __str__(self):
+        return f'{self.supplier} {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'

@@ -71,6 +71,7 @@ import { createCameraActualsAPI } from './resources/cameraActuals'
 import { createOutsourceAPI } from './resources/outsource'
 import { createAutoPlanAggregateSettingsAPI } from './resources/autoPlanAggregateSettings'
 import { createPurchaseAutoDeliveryListAPI } from './resources/purchaseAutoDeliveryList'
+import { createPurchaseAutoOrderSendAPI } from './resources/purchaseAutoOrderSend'
 import { createStocktakeRecordsAPI } from './resources/stocktakeRecords'
 import { createPurchaseActualKikanMappingAPI } from './resources/purchaseActualKikanMapping'
 import { createMorningMeetingsAPI } from './resources/morningMeetings'
@@ -227,6 +228,7 @@ export default {
   outsource: createOutsourceAPI(client),
   autoPlanAggregateSettings: createAutoPlanAggregateSettingsAPI(client),
   purchaseAutoDeliveryList: createPurchaseAutoDeliveryListAPI(client),
+  purchaseAutoOrderSend: createPurchaseAutoOrderSendAPI(client),
   stocktakeRecords: createStocktakeRecordsAPI(client),
   purchaseActualKikanMapping: createPurchaseActualKikanMappingAPI(client),
   morningMeetings: createMorningMeetingsAPI(client),
