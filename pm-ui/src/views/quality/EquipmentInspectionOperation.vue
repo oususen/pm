@@ -571,7 +571,7 @@ const parseNumericRuleText = (value) => {
     }
   }
 
-  const minMatch = text.match(/([-+]?\d+(?:\.\d+)?)以上/)
+  const minMatch = text.match(/([-+]?\d+(?:\.\d+)?)[^0-9０-９+\-]*以上/)
   if (minMatch) {
     const minimum = toNumericValue(minMatch[1])
     if (minimum !== null) {
@@ -579,7 +579,7 @@ const parseNumericRuleText = (value) => {
     }
   }
 
-  const maxMatch = text.match(/([-+]?\d+(?:\.\d+)?)以下/)
+  const maxMatch = text.match(/([-+]?\d+(?:\.\d+)?)[^0-9０-９+\-]*以下/)
   if (maxMatch) {
     const maximum = toNumericValue(maxMatch[1])
     if (maximum !== null) {

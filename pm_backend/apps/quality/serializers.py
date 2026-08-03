@@ -105,13 +105,13 @@ def _parse_numeric_rule_text(value):
                 low, high = high, low
             return {"type": "range", "min": low, "max": high}
 
-    min_match = re.search(r"([-+]?\d+(?:\.\d+)?)以上", text)
+    min_match = re.search(r"([-+]?\d+(?:\.\d+)?)[^0-9０-９+\-]*以上", text)
     if min_match:
         minimum = _to_decimal(min_match.group(1))
         if minimum is not None:
             return {"type": "min", "value": minimum}
 
-    max_match = re.search(r"([-+]?\d+(?:\.\d+)?)以下", text)
+    max_match = re.search(r"([-+]?\d+(?:\.\d+)?)[^0-9０-９+\-]*以下", text)
     if max_match:
         maximum = _to_decimal(max_match.group(1))
         if maximum is not None:
