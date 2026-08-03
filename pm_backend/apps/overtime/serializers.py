@@ -72,7 +72,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             'work_date', 'end_date', 'application_type', 'type_display',
             'work_start_time', 'scheduled_end_time',
             'start_time', 'end_time', 'hours', 'midnight_hours',
-            'work_pattern', 'work_pattern_name', 'work_pattern_hours',
+            'work_pattern', 'work_pattern_name', 'work_pattern_hours', 'holiday_work_type',
             'reason', 'team', 'team_name', 'group_name',
             'status', 'status_display', 'rejection_reason', 'signature',
             'submitted_at', 'created_at', 'updated_at',

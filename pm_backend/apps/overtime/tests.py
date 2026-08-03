@@ -76,6 +76,42 @@ class OvertimeApplicationViewSetTests(APITestCase):
         self.assertEqual(application.midnight_hours, Decimal('6.0'))
         self.assertEqual(application.hours + application.midnight_hours, Decimal('8.0'))
 
+    def test_holiday_half_day_without_work_pattern_does_not_subtract_lunch_break(self):
+        application = OvertimeApplication.objects.create(
+            applicant=self.leader,
+            created_by=self.leader,
+            work_date='2026-07-11',
+            application_type='holiday',
+            holiday_work_type='half_day',
+            start_time='21:25',
+            end_time='02:20',
+            reason='休日出勤テスト',
+            team=self.team,
+            status='draft',
+        )
+
+        self.assertEqual(application.hours, Decimal('0.5'))
+        self.assertEqual(application.midnight_hours, Decimal('4.0'))
+        self.assertEqual(application.hours + application.midnight_hours, Decimal('4.5'))
+
+    def test_holiday_full_day_without_work_pattern_subtracts_lunch_break(self):
+        application = OvertimeApplication.objects.create(
+            applicant=self.leader,
+            created_by=self.leader,
+            work_date='2026-07-11',
+            application_type='holiday',
+            holiday_work_type='full_day',
+            start_time='21:25',
+            end_time='02:20',
+            reason='休日出勤テスト',
+            team=self.team,
+            status='draft',
+        )
+
+        self.assertEqual(application.hours, Decimal('0.0'))
+        self.assertEqual(application.midnight_hours, Decimal('4.0'))
+        self.assertEqual(application.hours + application.midnight_hours, Decimal('4.0'))
+
     def test_holiday_without_work_pattern_keeps_second_example_at_9_5_hours(self):
         application = OvertimeApplication.objects.create(
             applicant=self.leader,

@@ -67,11 +67,9 @@
         <!-- 休日出勤: 勤務パターン選択 -->
         <div v-if="form.application_type === 'holiday'" class="form-row">
           <label class="form-label">勤務パターン</label>
-          <select v-model="form.work_pattern" class="form-input form-select">
-            <option :value="null">-- 選択してください（未選択=通常8H）--</option>
-            <option v-for="wp in holidayWorkPatterns" :key="wp.id" :value="wp.id">
-              {{ wp.pattern_name }}（{{ wp.start_time }} 〜 {{ wp.end_time }}）
-            </option>
+          <select v-model="form.holiday_work_type" class="form-input form-select">
+            <option value="full_day">全日</option>
+            <option value="half_day">半日</option>
           </select>
         </div>
 
@@ -181,7 +179,6 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 const dsSources = [
   { op: '読み書き', table: 't_overtime_application', desc: '残業申請の作成・更新・提出・署名アップロード' },
   { op: '読み取り', table: 't_user / t_user_profile', desc: '対象者一覧の取得' },
-  { op: '読み取り', table: 't_work_pattern', desc: '勤務パターンの取得' },
 ]
 
 // "800" "0800" "8:00" "08:00" → "08:00"、変換不能なら元の値を返す
@@ -273,17 +270,8 @@ const form = ref({
   start_time: '',
   end_time: '',
   reason: '',
-  work_pattern: null,
+  holiday_work_type: 'full_day',
 })
-
-const workPatterns = ref([])
-// 休日出勤パターンのみ: コードがk***または名称に「休日」を含む
-const holidayWorkPatterns = computed(() =>
-  workPatterns.value.filter(wp =>
-    /^k/i.test(wp.pattern_code) || wp.pattern_name.includes('休日')
-  )
-)
-const selectedPatternBreaks = ref([])  // 選択中パターンの休憩時間リスト
 
 function resolveApiErrorMessage(data, fallbackMessage) {
   const detailCode = data?.detail_code
@@ -352,17 +340,6 @@ function ensureApplicantOption(userId, label) {
   applicantOptions.value.sort((a, b) => a.label.localeCompare(b.label, 'ja'))
 }
 
-// 勤務パターン変更時に休憩時間を取得
-watch(() => form.value.work_pattern, async (newVal) => {
-  if (!newVal) { selectedPatternBreaks.value = []; return }
-  try {
-    const res = await api.workPatterns.getBreakTimes(newVal)
-    selectedPatternBreaks.value = res.data?.results ?? res.data ?? []
-  } catch (e) {
-    selectedPatternBreaks.value = []
-  }
-})
-
 watch(
   () => form.value.application_type,
   (newType) => {
@@ -385,32 +362,10 @@ function applyBreaks(wallMinutes) {
 const DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES = 9 * 60 + 5
 const DEFAULT_HOLIDAY_BREAK_WINDOWS = [
   [120, 130], // 開始2時間後の10分休憩
-  [240, 285], // 開始4時間後の45分昼休憩
   [420, 430], // 開始7時間後の10分休憩
 ]
+const DEFAULT_HOLIDAY_LUNCH_BREAK_MINUTES = 45
 const DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES = 10
-
-// 勤務パターンの実休憩時間を使った控除（分）
-function calcBreakMinutesFromPattern(startMin, endMin, breaks) {
-  let total = 0
-  const crossesMidnight = endMin > 24 * 60
-  for (const brk of breaks) {
-    const [bsh, bsm] = brk.break_start.split(':').map(Number)
-    const [beh, bem] = brk.break_end.split(':').map(Number)
-    let bs = bsh * 60 + bsm
-    let be = beh * 60 + bem
-    if (be <= bs) be += 24 * 60
-    // 日をまたぐシフトで深夜後の早朝休憩（00:00台など）を翌日扱いに補正
-    if (crossesMidnight && bs < 12 * 60 && bs < startMin) {
-      bs += 24 * 60
-      be += 24 * 60
-    }
-    const overlapS = Math.max(startMin, bs)
-    const overlapE = Math.min(endMin, be)
-    if (overlapE > overlapS) total += overlapE - overlapS
-  }
-  return total
-}
 
 function splitWorkMinutes(startMin, endMin, workMin, ratioBaseMin = null) {
   const midnightStart = 22 * 60
@@ -432,10 +387,13 @@ function calculateOvertimeMinutes(startMin, endMin) {
   return splitWorkMinutes(startMin, endMin, workMin, wallMin)
 }
 
-function calculateDefaultHolidayMinutes(startMin, endMin) {
+function calculateDefaultHolidayMinutes(startMin, endMin, holidayWorkType) {
   const wallMin = endMin - startMin
   const standardWall = Math.min(wallMin, DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES)
   let standardBreakMin = 0
+  if (holidayWorkType === 'full_day') {
+    standardBreakMin += DEFAULT_HOLIDAY_LUNCH_BREAK_MINUTES
+  }
   for (const [breakStart, breakEnd] of DEFAULT_HOLIDAY_BREAK_WINDOWS) {
     const overlapS = Math.max(0, breakStart)
     const overlapE = Math.min(standardWall, breakEnd)
@@ -473,18 +431,10 @@ const previewHours = computed(() => {
   let endMin = eh * 60 + em
   if (endMin <= startMin) endMin += 24 * 60
 
-  // 休憩控除: 休日出勤かつパターン選択あり → 実休憩時間、
-  // 勤務パターン未選択の休日出勤 → 通常8H勤務相当 + 超過分は残業計算、
-  // それ以外 → 汎用計算
+  // 休憩控除: 休日出勤は半日/全日で昼休憩有無を切り替え、それ以外は汎用計算
   let result
-  if (form.value.application_type === 'holiday' && selectedPatternBreaks.value.length > 0) {
-    const wallMin = endMin - startMin
-    const breakMin = calcBreakMinutesFromPattern(startMin, endMin, selectedPatternBreaks.value)
-    const netMin = wallMin - breakMin
-    const workMin = Math.floor(netMin / 30) * 30
-    result = splitWorkMinutes(startMin, endMin, workMin, netMin)
-  } else if (form.value.application_type === 'holiday') {
-    result = calculateDefaultHolidayMinutes(startMin, endMin)
+  if (form.value.application_type === 'holiday') {
+    result = calculateDefaultHolidayMinutes(startMin, endMin, form.value.holiday_work_type)
   } else {
     result = calculateOvertimeMinutes(startMin, endMin)
   }
@@ -512,22 +462,9 @@ function formatTime(field) {
   form.value[field] = toHHMM(form.value[field])
 }
 
-// 休日出勤の勤務時間帯開始blur: 整形 + パターン開始時間より早ければ補正
+// 休日出勤の勤務時間帯開始blur: 整形
 function onHolidayStartBlur() {
   formatTime('start_time')
-  const selected = workPatterns.value.find(wp => wp.id === form.value.work_pattern)
-  if (!selected || !selected.start_time) return
-  const patternStart = toHHMM(selected.start_time)
-  if (!patternStart) return
-  const [ph, pm] = patternStart.split(':').map(Number)
-  const patternMin = ph * 60 + pm
-  const entered = toHHMM(form.value.start_time)
-  if (!entered || !entered.includes(':')) return
-  const [eh, em] = entered.split(':').map(Number)
-  const enteredMin = eh * 60 + em
-  if (enteredMin < patternMin) {
-    form.value.start_time = patternStart
-  }
 }
 
 // 勤務開始時間のblur: 整形 + 定時終了・残業開始を自動セット
@@ -566,6 +503,7 @@ function normalizedPayload() {
     // 休日出勤は任意、他の承認種別は必須
     start_time: hasTime ? (wrapTime(toHHMM(form.value.start_time)) || null) : null,
     end_time: hasTime ? (wrapTime(toHHMM(form.value.end_time)) || null) : null,
+    work_pattern: null,
   }
 }
 
@@ -575,14 +513,6 @@ onMounted(async () => {
   // サインパッド初期化
   if (signCanvas.value) {
     signaturePad = new SignaturePad(signCanvas.value, { penColor: '#1f2a44' })
-  }
-
-  // 勤務パターン取得
-  try {
-    const res = await api.workPatterns.getWorkPatterns()
-    workPatterns.value = res.data?.results ?? res.data ?? []
-  } catch (e) {
-    console.warn('勤務パターン取得失敗:', e)
   }
 
   await loadApplicantOptions()
@@ -602,7 +532,7 @@ onMounted(async () => {
         start_time: d.start_time || '',
         end_time: d.end_time || '',
         reason: d.reason,
-        work_pattern: d.work_pattern || null,
+        holiday_work_type: d.holiday_work_type || 'full_day',
       }
     } catch (e) {
       errorMsg.value = '申請データの取得に失敗しました。'
@@ -930,4 +860,3 @@ async function handleSubmit() {
   color: #374151;
 }
 </style>
-

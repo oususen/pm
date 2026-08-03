@@ -16,9 +16,9 @@ def apply_breaks(wall_minutes):
 DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES = 9 * 60 + 5
 DEFAULT_HOLIDAY_BREAK_WINDOWS = (
     (120, 130),  # 開始2時間後の10分休憩
-    (240, 285),  # 開始4時間後の45分昼休憩
     (420, 430),  # 開始7時間後の10分休憩
 )
+DEFAULT_HOLIDAY_LUNCH_BREAK_MINUTES = 45
 DEFAULT_HOLIDAY_OVERTIME_BREAK_MINUTES = 10
 
 
@@ -105,7 +105,7 @@ def calculate_hours_with_pattern_breaks(start_time, end_time, work_pattern):
     return split_work_minutes_between(start_dt, end_dt, work_minutes, net_minutes)
 
 
-def calculate_default_holiday_hours(start_time, end_time):
+def calculate_default_holiday_hours(start_time, end_time, holiday_work_type='full_day'):
     """
     勤務パターン未選択の休日出勤を計算する。
     - 8H未満: 通常8H勤務パターン相当の休憩を適用
@@ -116,6 +116,9 @@ def calculate_default_holiday_hours(start_time, end_time):
     wall_minutes = int((end_dt - start_dt).total_seconds() / 60)
     standard_wall = min(wall_minutes, DEFAULT_HOLIDAY_STANDARD_WALL_MINUTES)
     standard_break_minutes = 0
+    if holiday_work_type == 'full_day':
+        standard_break_minutes += DEFAULT_HOLIDAY_LUNCH_BREAK_MINUTES
+
     for break_start, break_end in DEFAULT_HOLIDAY_BREAK_WINDOWS:
         overlap_start = max(0, break_start)
         overlap_end = min(standard_wall, break_end)
@@ -179,6 +182,10 @@ class OvertimeApplication(models.Model):
         ('paid_leave', '有給'),
         ('paid_leave_consec', '連続有給'),
     ]
+    HOLIDAY_WORK_TYPE_CHOICES = [
+        ('full_day', '全日'),
+        ('half_day', '半日'),
+    ]
     # 承認フローが必要な種別（時間外労働を伴う）
     NEEDS_APPROVAL_TYPES = {'overtime', 'holiday', 'half_day_am'}
 
@@ -211,6 +218,12 @@ class OvertimeApplication(models.Model):
         null=True, blank=True,
         related_name='overtime_applications',
         verbose_name='勤務パターン（休日出勤用）',
+    )
+    holiday_work_type = models.CharField(
+        max_length=20,
+        choices=HOLIDAY_WORK_TYPE_CHOICES,
+        default='full_day',
+        verbose_name='休日出勤区分',
     )
     hours = models.DecimalField(
         max_digits=5, decimal_places=1, default=0, verbose_name='時間外時間(H)'
@@ -257,7 +270,9 @@ class OvertimeApplication(models.Model):
                 )
             elif self.application_type == 'holiday':
                 self.hours, self.midnight_hours = calculate_default_holiday_hours(
-                    self.start_time, self.end_time
+                    self.start_time,
+                    self.end_time,
+                    self.holiday_work_type,
                 )
             else:
                 self.hours, self.midnight_hours = calculate_overtime_hours(
