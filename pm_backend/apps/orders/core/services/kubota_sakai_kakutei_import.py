@@ -500,7 +500,7 @@ class KubotaSakaiKakuteiImportService:
         return forecast_diffs
 
     def _create_diff_notification(self, changed_diffs, filename):
-        """確定vs内示の差分通知を作成する"""
+        """確定vs内示の差分通知を作成する（アプリ内通知 + メール）"""
         try:
             from datetime import date, timedelta
             from notifications.models import Notification
@@ -508,7 +508,7 @@ class KubotaSakaiKakuteiImportService:
 
             config = KubotaSakaiImportConfig.get_solo()
             if not config.notify_users.exists():
-                return  # 通知先なし
+                return
 
             th = "style='padding:4px 10px;border:1px solid #b8c8ff;text-align:center'"
             td = "style='padding:4px 10px;border:1px solid #d0d8f0'"
@@ -544,8 +544,9 @@ class KubotaSakaiKakuteiImportService:
             )
 
             today = date.today()
+            title = f'[クボタ堺確定] 内示との差分あり ({len(changed_diffs)}件) - {filename}'
             notification = Notification.objects.create(
-                title=f'[クボタ堺確定] 内示との差分あり ({len(changed_diffs)}件) - {filename}',
+                title=title,
                 category='受注',
                 domain='KUBOTA_SAKAI_FIRM',
                 description=description,
@@ -554,6 +555,49 @@ class KubotaSakaiKakuteiImportService:
                 operator_name='system',
             )
             notification.target_users.set(config.notify_users.all())
+
+            if config.email_enabled:
+                self._send_diff_email(config, changed_diffs, title)
         except Exception as e:
-            # 通知失敗はインポート処理を止めない
             print(f"通知作成エラー: {e}")
+
+    def _send_diff_email(self, config, changed_diffs, title):
+        """差分のメール通知を送信する"""
+        try:
+            from shipping.services.email_service import EmailService
+
+            emails = list(
+                config.notify_users
+                .filter(is_active=True)
+                .exclude(email='')
+                .values_list('email', flat=True)
+            )
+            if not emails:
+                print("メール通知: 送信先メールアドレスなし")
+                return
+
+            lines = [
+                f"クボタ堺 確定取り込みで内示との差分が {len(changed_diffs)}件 検出されました。",
+                "",
+                f"{'品番':<16} {'日付':<12} {'納入地':<8} {'内示数':>8} {'確定数':>8} {'差分':>8}",
+                "-" * 72,
+            ]
+            for d in changed_diffs:
+                diff_str = f"{'+' if d['diff'] > 0 else ''}{d['diff']:,}"
+                lines.append(
+                    f"{d['product_code']:<16} {d['due_date']:<12} "
+                    f"{d.get('ship_to_code', ''):<8} "
+                    f"{d['forecast_qty']:>8,} {d['firm_qty']:>8,} "
+                    f"{diff_str:>8}"
+                )
+
+            body = "\n".join(lines)
+            result = EmailService().send_plain_email(
+                to_emails=emails,
+                subject=title,
+                body=body,
+            )
+            if not result.get('success'):
+                print(f"差分メール送信失敗: {result.get('message')}")
+        except Exception as e:
+            print(f"差分メール送信エラー: {e}")

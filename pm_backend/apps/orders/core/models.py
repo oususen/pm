@@ -648,6 +648,10 @@ class KubotaSakaiImportConfig(models.Model):
         related_name='kubota_sakai_import_notify',
         verbose_name='通知先ユーザー',
     )
+    email_enabled = models.BooleanField(
+        default=False,
+        verbose_name='メール通知有効',
+    )
 
     class Meta:
         db_table = 'kubota_sakai_import_config'

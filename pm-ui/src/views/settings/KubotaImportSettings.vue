@@ -1,111 +1,99 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">クボタ堺 確定取り込み通知設定 <DataSourceDialog title="クボタ堺 確定取り込み通知設定" :sources="dsSources" /></h1>
-    </div>
-
-    <div v-if="!canViewPage" class="page-content">
-      <div class="loading">この画面を開く権限がありません。</div>
-    </div>
-    <div v-else class="page-content">
-      <div class="settings-card">
+  <div class="settings-container">
+    <h2 class="page-title">クボタ堺 確定取り込み通知設定</h2>
+    <div v-if="!canView" class="card no-permission">この画面を開く権限がありません。</div>
+    <div v-else class="card">
+      <div v-if="loading" class="loading">読み込み中...</div>
+      <template v-else>
         <p class="description">
           クボタ堺の確定CSVを取り込んだ際に、内示と数量が異なる品番があった場合、
-          以下のユーザーに通知を送信します。
+          以下のユーザーにアプリ内通知を送信します。メール通知を有効にすると、同じ宛先にメールも送信します。
         </p>
 
-        <div v-if="loading" class="loading">読み込み中...</div>
+        <div class="field">
+          <label>通知先</label>
+          <UserChipSelect
+            :userList="allUsers"
+            v-model="notifyUserIds"
+          />
+          <p class="helper">社員を検索して通知先に追加します。</p>
+        </div>
 
-        <template v-else>
-          <div class="section">
-            <h3>通知先ユーザー</h3>
-            <div class="user-list">
-              <label
-                v-for="user in allUsers"
-                :key="user.id"
-                class="user-row"
-              >
-                <input
-                  type="checkbox"
-                  :value="user.id"
-                  v-model="selectedUserIds"
-                  :disabled="!canEditPage"
-                />
-                <span>{{ user.full_name }}</span>
-              </label>
-            </div>
+        <div class="field">
+          <label>メール通知</label>
+          <div class="toggle-row">
+            <label class="toggle-label">
+              <input type="checkbox" v-model="emailEnabled" :disabled="!canEdit" />
+              <span>差分検知時にメールも送信する</span>
+            </label>
           </div>
+          <p class="helper">有効にすると、上記通知先ユーザーのメールアドレス宛にメールを送信します。</p>
+        </div>
 
-          <div class="form-actions">
-            <button @click="save" :disabled="saving || !canEditPage" class="btn-primary">
-              {{ saving ? '保存中...' : '保存' }}
-            </button>
-          </div>
+        <div class="actions">
+          <button class="btn primary" @click="save" :disabled="saving || !canEdit">
+            {{ saving ? '保存中...' : '保存' }}
+          </button>
+        </div>
 
-          <div v-if="saveMessage" class="save-message" :class="saveError ? 'error' : 'success'">
-            {{ saveMessage }}
-          </div>
-        </template>
-      </div>
+        <div v-if="saveMessage" class="save-message" :class="saveError ? 'error' : 'success'">
+          {{ saveMessage }}
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
-import axios from 'axios'
+import { computed, onMounted, ref } from 'vue'
+import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
-import DataSourceDialog from '@/components/DataSourceDialog.vue'
-
-const dsSources = [
-  { op: '読み書き', table: 'system_setting', desc: 'クボタ堺取り込み通知設定' },
-]
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+import UserChipSelect from '@/views/purchase/UserChipSelect.vue'
 
 const loading = ref(true)
 const saving = ref(false)
 const allUsers = ref([])
-const selectedUserIds = ref([])
+const notifyUserIds = ref([])
+const emailEnabled = ref(false)
 const saveMessage = ref('')
 const saveError = ref(false)
 
-const canViewPage = computed(() => {
+const canAccess = (level = 'view') => {
   const user = authState.user
   if (!user) return false
   if (user.is_staff || user.is_superuser) return true
-  return hasPermission(user, 'settings', 'view')
-})
+  return hasPermission(user, 'settings', level)
+}
 
-const canEditPage = computed(() => {
-  const user = authState.user
-  if (!user) return false
-  if (user.is_staff || user.is_superuser) return true
-  return hasPermission(user, 'settings', 'edit')
-})
+const canView = computed(() => canAccess('view'))
+const canEdit = computed(() => canAccess('edit'))
 
 const fetchConfig = async () => {
-  if (!canViewPage.value) return
+  if (!canView.value) return
   try {
-    const res = await axios.get(`${API_BASE_URL}/kubota-sakai-import-config/`)
-    allUsers.value = res.data.all_users
-    selectedUserIds.value = res.data.notify_users.map(u => u.id)
+    const res = await api.orders.getKubotaSakaiImportConfig()
+    allUsers.value = res.data.all_users || []
+    notifyUserIds.value = res.data.notify_user_ids || []
+    emailEnabled.value = !!res.data.email_enabled
   } catch (e) {
-    console.error(e)
+    console.error('設定取得エラー', e)
   } finally {
     loading.value = false
   }
 }
 
 const save = async () => {
-  if (!canEditPage.value) return
+  if (!canEdit.value) return
   saving.value = true
   saveMessage.value = ''
   try {
-    await axios.patch(`${API_BASE_URL}/kubota-sakai-import-config/`, {
-      notify_user_ids: selectedUserIds.value,
+    const res = await api.orders.saveKubotaSakaiImportConfig({
+      notify_user_ids: notifyUserIds.value,
+      email_enabled: emailEnabled.value,
     })
+    notifyUserIds.value = res.data.notify_user_ids || notifyUserIds.value
+    emailEnabled.value = !!res.data.email_enabled
     saveMessage.value = '保存しました'
     saveError.value = false
   } catch (e) {
@@ -117,90 +105,103 @@ const save = async () => {
 }
 
 onMounted(() => {
-  if (!canViewPage.value) return
   fetchConfig()
 })
 </script>
 
 <style scoped>
-.settings-card {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: 2rem;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+.settings-container {
+  padding: 10px 12px 16px;
+  background: #eef2f6;
+  min-height: 100%;
+  color: #1f2a44;
+  font-family: 'Segoe UI', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
 }
-
+.page-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.card {
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+  padding: 12px;
+  max-width: 720px;
+}
+.no-permission {
+  color: #b91c1c;
+  font-weight: 600;
+}
 .description {
   color: #555;
-  margin-bottom: 1.5rem;
+  margin: 0 0 14px;
+  font-size: 13px;
   line-height: 1.6;
 }
-
-.section h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1rem;
-  color: #333;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 0.5rem;
-}
-
-.user-list {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 360px;
-  overflow-y: auto;
-  padding: 4px;
+  gap: 6px;
+  margin-bottom: 14px;
 }
-
-.user-row {
+.field > label {
+  font-size: 12px;
+  color: #444;
+}
+.helper {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}
+.toggle-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 4px;
+}
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
+  font-size: 13px;
 }
-
-.user-row:hover {
-  background: #f5f7ff;
-}
-
-.user-row input[type="checkbox"] {
+.toggle-label input[type="checkbox"] {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
 }
-
-.form-actions {
-  margin-top: 1.5rem;
-  display: flex;
-  justify-content: flex-end;
+.actions {
+  margin-top: 12px;
 }
-
-.save-message {
-  margin-top: 1rem;
-  padding: 0.75rem;
+.btn {
+  padding: 6px 10px;
+  border: 1px solid #b5c1d2;
   border-radius: 4px;
-  font-size: 0.9rem;
+  background: #fff;
+  cursor: pointer;
 }
-
+.btn.primary {
+  background: #4a7ae5;
+  color: #fff;
+  border-color: #3865c7;
+}
+.save-message {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
 .save-message.success {
   background: #d4edda;
   color: #155724;
 }
-
 .save-message.error {
   background: #fee;
   color: #c00;
 }
-
 .loading {
   color: #999;
   text-align: center;
   padding: 2rem;
 }
 </style>
-

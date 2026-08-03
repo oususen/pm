@@ -105,4 +105,10 @@ export const createOrdersAPI = (client) => ({
   saveFirstArticleSetting(data) {
     return client.patch('/order-first-article-setting/', data)
   },
+  getKubotaSakaiImportConfig() {
+    return client.get('/kubota-sakai-import-config/')
+  },
+  saveKubotaSakaiImportConfig(data) {
+    return client.patch('/kubota-sakai-import-config/', data)
+  },
 })

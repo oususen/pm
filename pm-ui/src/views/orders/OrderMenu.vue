@@ -133,6 +133,15 @@ const tiles = computed(() => [
     resource: "orders.first_article",
   },
   {
+    key: "kubota_import_setting",
+    to: "/settings/kubota-import",
+    label: "クボタ堺確定<br>通知設定",
+    icon: "📧",
+    category: "settings",
+    required: "edit",
+    resource: "settings",
+  },
+  {
     key: "missing_routing_items",
     to: "/orders/missing-routing-items",
     label: "ルーティング未設定の注文品",

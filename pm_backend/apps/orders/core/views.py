@@ -2217,22 +2217,38 @@ def kubota_sakai_import_config_view(request):
     config = KubotaSakaiImportConfig.get_solo()
     User = get_user_model()
 
+    def _user_dict(u):
+        return {
+            'id': u.id,
+            'username': u.username,
+            'last_name': u.last_name,
+            'first_name': u.first_name,
+            'email': u.email,
+            'profile': {'employee_code': getattr(u, 'employee_code', '') or ''},
+        }
+
     if request.method == 'GET':
-        notify_users = [
-            {'id': u.id, 'full_name': u.get_full_name() or u.username}
-            for u in config.notify_users.all()
-        ]
+        notify_user_ids = list(config.notify_users.values_list('id', flat=True))
         all_users = [
-            {'id': u.id, 'full_name': u.get_full_name() or u.username}
+            _user_dict(u)
             for u in User.objects.filter(is_active=True).order_by('last_name', 'first_name')
         ]
-        return Response({'notify_users': notify_users, 'all_users': all_users})
+        return Response({
+            'notify_user_ids': notify_user_ids,
+            'email_enabled': config.email_enabled,
+            'all_users': all_users,
+        })
 
     # PATCH
-    user_ids = request.data.get('notify_user_ids', [])
-    config.notify_users.set(user_ids)
-    notify_users = [
-        {'id': u.id, 'full_name': u.get_full_name() or u.username}
-        for u in config.notify_users.all()
-    ]
-    return Response({'notify_users': notify_users})
+    user_ids = request.data.get('notify_user_ids')
+    if user_ids is not None:
+        config.notify_users.set(user_ids)
+    email_enabled = request.data.get('email_enabled')
+    if email_enabled is not None:
+        config.email_enabled = bool(email_enabled)
+        config.save(update_fields=['email_enabled'])
+    notify_user_ids = list(config.notify_users.values_list('id', flat=True))
+    return Response({
+        'notify_user_ids': notify_user_ids,
+        'email_enabled': config.email_enabled,
+    })
