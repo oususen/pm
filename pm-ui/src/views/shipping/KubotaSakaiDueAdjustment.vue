@@ -234,26 +234,24 @@
 
         <div class="email-field">
           <label>送信先</label>
-          <select v-model="emailTo" class="email-select" multiple>
-            <option v-for="c in emailContacts" :key="c.id" :value="c.email">
-              {{ c.display_name }} &lt;{{ c.email }}&gt;
-            </option>
-          </select>
-          <div class="email-hint">Ctrl/Command を押しながら複数選択できます。</div>
+          <ContactEmailSelect
+            v-model="emailTo"
+            :contacts="emailContacts"
+            multiple
+            placeholder="連絡先マスタから送信先を検索して追加"
+            picker-button-label="宛先選択"
+            picker-title="送信先選択"
+          />
         </div>
 
         <div class="email-field">
-          <label>CC（連絡先）</label>
-          <select v-model="emailCcSelected" class="email-select" multiple>
-            <option v-for="c in emailContacts" :key="'cc-' + c.id" :value="c.email">
-              {{ c.display_name }} &lt;{{ c.email }}&gt;
-            </option>
-          </select>
-        </div>
-
-        <div class="email-field">
-          <label>CC（手入力）</label>
-          <input v-model.trim="emailCcManual" type="text" placeholder="example1@example.com, example2@example.com" />
+          <label>CC送信先メール</label>
+          <ContactEmailSelect
+            v-model="emailCcSelected"
+            :contacts="emailContacts"
+            multiple
+            placeholder="連絡先マスタからCC送信先を検索して追加"
+          />
         </div>
 
         <div class="email-field">
@@ -284,6 +282,7 @@ import ExcelJS from 'exceljs'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import ContactEmailSelect from '@/views/purchase/ContactEmailSelect.vue'
 
 const dsSources = [
   { op: '納期調整 読み書き', table: 't_kubota_sakai_due_adjustment', desc: '品番×日付の納期調整データ（需要・出荷数）' },
@@ -368,7 +367,6 @@ const contactLoading = ref(false)
 const emailContacts = ref([])
 const emailTo = ref([])
 const emailCcSelected = ref([])
-const emailCcManual = ref('')
 const emailSubject = ref('')
 const emailBody = ref('')
 const lastChangeSummary = ref([])
@@ -1271,8 +1269,10 @@ const openEmailDialog = async () => {
   showEmailDialog.value = true
   contactLoading.value = true
   try {
-    const res = await api.kubotaSakaiDueAdjustments.getContacts()
-    emailContacts.value = res.data || []
+    const res = await api.contacts.getContacts({ is_active: true, page_size: 9999 })
+    emailContacts.value = (res.data?.results || res.data || []).filter(
+      (contact) => contact.email && contact.contact_type === '納期調整'
+    )
   } catch {
     emailContacts.value = []
   } finally {
@@ -1280,7 +1280,6 @@ const openEmailDialog = async () => {
   }
   emailTo.value = emailContacts.value.map((c) => c.email)
   emailCcSelected.value = []
-  emailCcManual.value = ''
   const today = formatLocalDate(new Date())
   emailSubject.value = `【納期調整連絡】クボタ堺 ${today}`
   emailBody.value = buildEmailBody(lastChangeSummary.value)
@@ -1300,19 +1299,11 @@ const sendEmail = async () => {
     return
   }
 
-  const ccList = [...emailCcSelected.value]
-  if (emailCcManual.value) {
-    for (const addr of emailCcManual.value.split(/[,;、\s]+/)) {
-      const trimmed = addr.trim()
-      if (trimmed && !ccList.includes(trimmed)) ccList.push(trimmed)
-    }
-  }
-
   sendingEmail.value = true
   try {
     await api.kubotaSakaiDueAdjustments.sendEmail({
       to_emails: emailTo.value,
-      cc_emails: ccList,
+      cc_emails: emailCcSelected.value,
       subject: emailSubject.value,
       body: emailBody.value,
     })

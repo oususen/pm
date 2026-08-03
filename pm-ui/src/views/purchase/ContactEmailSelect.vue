@@ -16,7 +16,7 @@
 
     <div class="action-row">
       <button type="button" class="picker-button" @click="openPicker">
-        {{ multiple ? 'CC選択' : '返信先選択' }}
+        {{ resolvedPickerButtonLabel }}
       </button>
       <button
         v-if="normalizedValue.length"
@@ -31,7 +31,7 @@
     <div v-if="showPicker" class="picker-overlay" @click.self="closePicker">
       <div class="picker-modal">
         <div class="picker-header">
-          <div class="picker-title">{{ multiple ? 'CC送信先選択' : '返信先選択' }}</div>
+          <div class="picker-title">{{ resolvedPickerTitle }}</div>
           <button type="button" class="icon-button" @click="closePicker">×</button>
         </div>
 
@@ -40,7 +40,7 @@
             ref="searchInputRef"
             v-model="searchText"
             class="search-input"
-            placeholder="会社名 / 担当者 / 部署 / 種別 / メールで検索"
+            :placeholder="searchPlaceholder"
             @keyup.enter.prevent="addFirstCandidate"
           />
           <label class="filter-toggle">
@@ -100,6 +100,9 @@ const props = defineProps({
   multiple: { type: Boolean, default: false },
   placeholder: { type: String, default: '連絡先を選択' },
   supplierKeywords: { type: Array, default: () => [] },
+  pickerButtonLabel: { type: String, default: '' },
+  pickerTitle: { type: String, default: '' },
+  searchPlaceholder: { type: String, default: '会社名 / 担当者 / 部署 / 種別 / メールで検索' },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -112,6 +115,16 @@ const searchInputRef = ref(null)
 const normalizedValue = computed(() => {
   if (props.multiple) return Array.isArray(props.modelValue) ? props.modelValue : []
   return props.modelValue ? [props.modelValue] : []
+})
+
+const resolvedPickerButtonLabel = computed(() => {
+  if (props.pickerButtonLabel) return props.pickerButtonLabel
+  return props.multiple ? 'CC選択' : '返信先選択'
+})
+
+const resolvedPickerTitle = computed(() => {
+  if (props.pickerTitle) return props.pickerTitle
+  return props.multiple ? 'CC送信先選択' : '返信先選択'
 })
 
 const searchableText = (contact) => {
