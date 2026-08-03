@@ -5080,3 +5080,272 @@ class LineCycleTimeViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             else:
                 updated += 1
         return Response({'created': created, 'updated': updated})
+
+
+class SourcingBulkChangeView(MastersPermissionMixin, viewsets.ViewSet):
+    """加工先一括変更API"""
+
+    @action(detail=False, methods=['get'], url_path='search')
+    def search(self, request):
+        product_code = request.query_params.get('product_code', '').strip()
+        if not product_code:
+            return Response({'error': '品番を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product = Product.objects.get(product_code=product_code)
+        except Product.DoesNotExist:
+            return Response({'error': f'品番 {product_code} が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        bom_items = BOMItem.objects.filter(
+            child_product=product,
+            bom__is_active=True,
+        ).select_related(
+            'bom__parent_product', 'supplier', 'process', 'line',
+        ).order_by('bom__parent_product__product_code')
+
+        routing_steps = RoutingStep.objects.filter(
+            output_product=product,
+            routing__is_active=True,
+        ).select_related(
+            'routing__product', 'process', 'line', 'supplier',
+        ).order_by('routing__product__product_code', 'step_no')
+
+        bom_data = []
+        for bi in bom_items:
+            bom_data.append({
+                'id': bi.id,
+                'bom_id': bi.bom_id,
+                'parent_product_code': bi.bom.parent_product.product_code,
+                'parent_product_name': bi.bom.parent_product.product_name,
+                'sourcing_type': bi.sourcing_type,
+                'supplier_id': bi.supplier_id,
+                'supplier_name': bi.supplier.supplier_name if bi.supplier else None,
+                'process_id': bi.process_id,
+                'process_name': bi.process.process_name if bi.process else None,
+                'line_id': bi.line_id,
+                'line_name': bi.line.line_name if bi.line else None,
+                'quantity': str(bi.quantity),
+                'lead_time_days': bi.lead_time_days,
+            })
+
+        step_data = []
+        for rs in routing_steps:
+            step_data.append({
+                'id': rs.id,
+                'routing_id': rs.routing_id,
+                'routing_product_code': rs.routing.product.product_code,
+                'routing_product_name': rs.routing.product.product_name,
+                'step_no': rs.step_no,
+                'process_id': rs.process_id,
+                'process_name': rs.process.process_name if rs.process else None,
+                'line_id': rs.line_id,
+                'line_name': rs.line.line_name if rs.line else None,
+                'supplier_id': rs.supplier_id,
+                'supplier_name': rs.supplier.supplier_name if rs.supplier else None,
+                'lead_time_days': rs.lead_time_days,
+            })
+
+        return Response({
+            'product': {
+                'id': product.id,
+                'product_code': product.product_code,
+                'product_name': product.product_name,
+                'category': product.category,
+            },
+            'bom_items': bom_data,
+            'routing_steps': step_data,
+        })
+
+    def _validate_bom_item_state(self, item):
+        """BOMItemSerializer.validate() と同等の整合性チェック"""
+        if item.sourcing_type == 'SUBCON':
+            if item.supplier_id is None:
+                return '外注の場合、仕入先は必須です。'
+            lt = getattr(item, 'lead_time_days', 0)
+            if lt is None or lt < 0:
+                return '外注の場合、リードタイム(日)は0以上で入力してください。'
+        elif item.sourcing_type == 'MAKE':
+            if item.process_id is None:
+                return '自社製造の場合、工程は必須です。'
+            tu = getattr(item, 'time_unit', 'MINUTE')
+            if tu not in ('MINUTE', 'DAY'):
+                return '時間単位は MINUTE か DAY を指定してください。'
+            if tu == 'MINUTE':
+                dm = getattr(item, 'duration_min', None)
+                if dm is None or dm <= 0:
+                    return '時間単位=MINUTEのとき、所要時間(分)は1以上で入力してください。'
+            elif tu == 'DAY':
+                lt = getattr(item, 'lead_time_days', 0)
+                if lt is None or lt < 0:
+                    return '時間単位=DAYのとき、リードタイム(日)は0以上で入力してください。'
+        elif item.sourcing_type == 'BUY':
+            if item.lead_time_days is None or item.lead_time_days <= 0:
+                return '購買の場合、リードタイム(日)は1以上で入力してください。'
+        return None
+
+    def _sync_routing_from_bom_item(self, item):
+        """BOMItemViewSet._sync_item_fields_to_routing() と同等のルーティング同期
+        Returns: (synced_ids: 対象ステップID集合, actually_changed: 実更新件数)
+        """
+        synced_ids = set()
+        actually_changed = 0
+        bom_viewset = BOMItemViewSet()
+        steps = bom_viewset._select_sync_target_steps(item)
+
+        for step in steps:
+            synced_ids.add(step.id)
+            changed_fields = []
+
+            if item.sourcing_type == 'BUY' and item.supplier_id:
+                line_obj, process_obj = bom_viewset._get_or_create_purchase_line_and_process(item.supplier)
+                if step.line_id != getattr(line_obj, 'id', None):
+                    step.line = line_obj
+                    changed_fields.append('line')
+                if process_obj and step.process_id != process_obj.id:
+                    step.process = process_obj
+                    changed_fields.append('process')
+                if step.supplier_id != item.supplier_id:
+                    step.supplier = item.supplier
+                    changed_fields.append('supplier')
+                if step.time_unit != 'DAY':
+                    step.time_unit = 'DAY'
+                    changed_fields.append('time_unit')
+            elif item.sourcing_type == 'SUBCON' and item.supplier_id:
+                line_obj, process_obj = bom_viewset._get_supplier_gaisaku_line_and_process(item.supplier)
+                if step.line_id != getattr(line_obj, 'id', None):
+                    step.line = line_obj
+                    changed_fields.append('line')
+                if process_obj and step.process_id != process_obj.id:
+                    step.process = process_obj
+                    changed_fields.append('process')
+                if step.supplier_id != item.supplier_id:
+                    step.supplier = item.supplier
+                    changed_fields.append('supplier')
+                if step.time_unit != 'DAY':
+                    step.time_unit = 'DAY'
+                    changed_fields.append('time_unit')
+            else:
+                if step.process_id != item.process_id:
+                    step.process = item.process
+                    changed_fields.append('process')
+                if step.line_id != item.line_id:
+                    step.line = item.line
+                    changed_fields.append('line')
+                if step.supplier_id != item.supplier_id:
+                    step.supplier = item.supplier
+                    changed_fields.append('supplier')
+
+            item_lt = int(getattr(item, 'lead_time_days', 0) or 0)
+            step_lt = int(getattr(step, 'lead_time_days', 0) or 0)
+            if step_lt != item_lt:
+                step.lead_time_days = item_lt
+                changed_fields.append('lead_time_days')
+
+            if changed_fields:
+                step.save(update_fields=changed_fields + ['updated_at'])
+                actually_changed += 1
+
+        return synced_ids, actually_changed
+
+    @action(detail=False, methods=['post'], url_path='apply')
+    def apply_changes(self, request):
+        data = request.data
+        product_id = data.get('product_id')
+        new_category = data.get('new_category')
+        bom_item_ids = data.get('bom_item_ids', [])
+        routing_step_ids = data.get('routing_step_ids', [])
+        bom_changes = data.get('bom_changes', {})
+        routing_changes = data.get('routing_changes', {})
+
+        if not product_id:
+            return Response({'error': '製品IDが指定されていません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response({'error': '製品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        bom_updated = 0
+        step_updated = 0
+
+        with transaction.atomic():
+            if new_category and new_category != product.category:
+                product.category = new_category
+                product.save(update_fields=['category'])
+
+            synced_step_ids = set()
+
+            if bom_item_ids and bom_changes:
+                items = BOMItem.objects.filter(
+                    id__in=bom_item_ids, child_product=product,
+                ).select_related('bom__parent_product', 'process', 'line', 'supplier')
+
+                for item in items:
+                    if 'sourcing_type' in bom_changes:
+                        item.sourcing_type = bom_changes['sourcing_type']
+                    if 'supplier_id' in bom_changes:
+                        item.supplier_id = bom_changes['supplier_id']
+                    if 'process_id' in bom_changes:
+                        item.process_id = bom_changes['process_id']
+                    if 'line_id' in bom_changes:
+                        item.line_id = bom_changes['line_id']
+                    elif 'process_id' in bom_changes and item.process_id:
+                        proc = Process.objects.filter(id=item.process_id).first()
+                        if proc and proc.line_id:
+                            item.line_id = proc.line_id
+
+                    error = self._validate_bom_item_state(item)
+                    if error:
+                        parent_code = item.bom.parent_product.product_code
+                        return Response(
+                            {'error': f'BOM検証エラー（親: {parent_code}）: {error}'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    item.save()
+                    bom_updated += 1
+
+                    item.refresh_from_db()
+                    item.bom = BOM.objects.select_related('parent_product').get(id=item.bom_id)
+                    if item.supplier_id:
+                        item.supplier = Supplier.objects.get(id=item.supplier_id)
+                    if item.process_id:
+                        item.process = Process.objects.get(id=item.process_id)
+                    ids, changed = self._sync_routing_from_bom_item(item)
+                    synced_step_ids.update(ids)
+                    step_updated += changed
+
+            if routing_step_ids and routing_changes:
+                remaining_ids = set(routing_step_ids) - synced_step_ids
+                if remaining_ids:
+                    steps = RoutingStep.objects.filter(
+                        id__in=remaining_ids, output_product=product,
+                    ).select_related('process')
+
+                    for step in steps:
+                        changed = []
+                        if 'process_id' in routing_changes and step.process_id != routing_changes['process_id']:
+                            step.process_id = routing_changes['process_id']
+                            changed.append('process_id')
+                        if 'line_id' in routing_changes:
+                            if step.line_id != routing_changes['line_id']:
+                                step.line_id = routing_changes['line_id']
+                                changed.append('line_id')
+                        elif 'process_id' in routing_changes and step.process_id:
+                            proc = Process.objects.filter(id=step.process_id).select_related('line').first()
+                            if proc and proc.line_id and step.line_id != proc.line_id:
+                                step.line_id = proc.line_id
+                                changed.append('line_id')
+                        if 'supplier_id' in routing_changes and step.supplier_id != routing_changes['supplier_id']:
+                            step.supplier_id = routing_changes['supplier_id']
+                            changed.append('supplier_id')
+                        if changed:
+                            step.save(update_fields=changed + ['updated_at'])
+                            step_updated += 1
+
+        return Response({
+            'success': True,
+            'product_code': product.product_code,
+            'bom_updated': bom_updated,
+            'routing_step_updated': step_updated,
+        })

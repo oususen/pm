@@ -107,6 +107,12 @@ const masters = [
     component: () => import("@/views/masters/MobileDeviceMaster.vue"),
     meta: { pageTitle: "携帯端末管理", resource: "masters.mobile_device" },
   },
+  {
+    path: "/masters/sourcing-bulk-change",
+    name: "SourcingBulkChange",
+    component: () => import("@/views/masters/SourcingBulkChange.vue"),
+    meta: { pageTitle: "加工先一括変更", resource: "masters.bom" },
+  },
 ];
 
 export default masters;

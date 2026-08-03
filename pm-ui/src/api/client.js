@@ -80,6 +80,7 @@ import { createLineLoadAPI } from './resources/lineLoad'
 import { createTrainingCertificationAPI } from './resources/trainingCertification'
 import { createActualCycleTimesAPI } from './resources/actualCycleTimes'
 import { createProgressPdfCompareAPI } from './resources/progressPdfCompare'
+import { createSourcingBulkChangeAPI } from './resources/sourcingBulkChange'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -235,5 +236,6 @@ export default {
   trainingCertification: createTrainingCertificationAPI(client),
   actualCycleTimes: createActualCycleTimesAPI(client),
   progressPdfCompare: createProgressPdfCompareAPI(client),
+  sourcingBulkChange: createSourcingBulkChangeAPI(client),
   client,
 }

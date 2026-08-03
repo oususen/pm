@@ -91,6 +91,7 @@ const tiles = computed(() => {
     { to: '/masters/calendar', label: 'カレンダマスタ', icon: '📅', category: 'operations', required: 'view', resource: 'masters.calendar' },
     { to: '/masters/work-pattern', label: '勤務パターン', icon: '⏰', category: 'operations', required: 'view', resource: 'masters.work_pattern' },
     { to: '/masters/kubota-sakai-truck', label: 'クボタ堺便マスタ', icon: '🚚', category: 'other', required: 'view', resource: 'masters.kubota_sakai_truck' },
+    { to: '/masters/sourcing-bulk-change', label: '加工先一括変更', icon: '🔄', description: '外作⇔社内の切替をBOM・ルーティング一括変更', category: 'structure', required: 'edit', resource: 'masters.bom' },
   ]
 
   return list.map((tile) => ({
