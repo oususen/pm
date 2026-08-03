@@ -229,11 +229,19 @@ import { t } from '@/i18n'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
-  { op: '便 読み書き', table: 't_shipping_trip', desc: '便ヘッダ（ステータス・出発時刻）' },
-  { op: '便割付 読み取り', table: 't_shipping_trip_allocation', desc: '便ごとの製品割付明細' },
-  { op: '出荷実績 読み取り', table: 't_shipment_actual', desc: '出荷実績数量' },
-  { op: '納入地色 読み取り', table: 'm_ship_to_lead_time', desc: '納入地別の色設定' },
-  { op: '色適用 読み取り', table: 'm_ship_to_lead_time_color_exclusion', desc: '納入地色を適用する品番' },
+  { op: '便 読み書き', table: 't_shipping_trip', desc: '便ヘッダ（ステータス・予定/実出発・担当者）' },
+  { op: '便割付 読み取り', table: 't_shipping_trip_allocation', desc: '便ごとの製品割付明細・数量・納入地' },
+  { op: '便割付内訳 読み書き', table: 't_shipping_trip_allocation_split', desc: 'PLANNED/LOADING 時点の生産日内訳保存' },
+  { op: '出荷実績 読み書き', table: 't_shipment_actual', desc: 'allocation単位の出荷実績数量・到着日' },
+  { op: '出荷実績履歴 書き込み', table: 't_shipment_actual_history', desc: '実績の作成・更新・削除履歴' },
+  { op: '出荷実績内訳 読み書き', table: 't_shipment_actual_split', desc: '実績登録時の生産日内訳' },
+  { op: '便連絡 読み取り', table: 't_shipping_trip_notice', desc: '事務所連絡メモ（通常/緊急）' },
+  { op: '注番 読み取り', table: 't_kubota_sakai_due_adjustment', desc: 'クボタ堺便の注番表示用' },
+  { op: '製品 読み取り', table: 'm_product', desc: '品名・容量（+ボタン刻み量）' },
+  { op: '営業日 読み取り', table: 'm_calendar', desc: '前営業日とクボタ堺の実出発日判定' },
+  { op: '便オフセット 読み取り', table: 'm_kubota_sakai_truck', desc: 'arrival_day_offset による実出発日算出' },
+  { op: '納入地色 読み取り', table: 'm_ship_to_lead_time', desc: '納入地別の背景色・文字色設定' },
+  { op: '色適用品番 読み取り', table: 'm_ship_to_lead_time_color_exclusion', desc: '納入地色を適用する品番の絞り込み' },
 ]
 
 const formatDate = (d) => {

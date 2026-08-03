@@ -409,7 +409,7 @@
                       :key="`${row.rowKey}-${dateKey}-${slotIdx}-al-${idx}`"
                       class="allocation-row"
                     >
-                      <select v-model.number="al.truck_id" @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))">
+                      <select class="truck-select" v-model.number="al.truck_id" @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))">
                         <option :value="null">便</option>
                         <option
                           v-for="truck in trucksByDate[dateKey] || []"
@@ -3511,6 +3511,13 @@ onUnmounted(() => {
 }
 .allocation-row select {
   width: 35px;
+}
+.allocation-row select.truck-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: none;
+  padding-right: 2px;
 }
 .allocation-row select.container-select {
   width: 45px;

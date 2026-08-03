@@ -641,6 +641,28 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
     if create_allocations:
         ShippingTripAllocation.objects.bulk_create(create_allocations)
 
+    # DueAdjustment 再取込で削除された元明細を参照する共通割付を掃除
+    common_allocations = list(
+        ShippingTripAllocation.objects.filter(
+            source_type=KUBOTA_COMMON_SOURCE_TYPE,
+            trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            trip__customer_code=KUBOTA_CUSTOMER_CODE,
+            trip__departure_date=target_date,
+        ).values('id', 'source_id')
+    )
+    existing_due_ids = set(
+        KubotaSakaiDueAdjustment.objects.filter(
+            id__in=[int(row['source_id']) for row in common_allocations if row.get('source_id')]
+        ).values_list('id', flat=True)
+    )
+    orphan_allocation_ids = [
+        int(row['id'])
+        for row in common_allocations
+        if int(row['source_id']) not in existing_due_ids
+    ]
+    if orphan_allocation_ids:
+        ShippingTripAllocation.objects.filter(id__in=orphan_allocation_ids).delete()
+
     # 当日・該当業務の空便を掃除
     empty_trip_ids = list(
         ShippingTrip.objects.filter(
