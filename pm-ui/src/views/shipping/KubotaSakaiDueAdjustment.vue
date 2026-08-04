@@ -1071,6 +1071,7 @@ const applyExcelCellStyle = (cell, {
   thickTop = false,
   thickBottom = false,
   wrapText = false,
+  hideZero = false,
 } = {}) => {
   cell.font = { bold, name: 'Meiryo', size: 11 }
   cell.alignment = {
@@ -1078,6 +1079,7 @@ const applyExcelCellStyle = (cell, {
     vertical: 'middle',
     wrapText,
   }
+  if (hideZero) cell.numFmt = '0;-0;'
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
@@ -1204,6 +1206,7 @@ const exportExcel = async () => {
           thickRight: offset === 2,
           thickBottom: !row.isCarry,
           wrapText: !row.isCarry && (offset === 0 || offset === 2),
+          hideZero: true,
         })
       })
     })
@@ -1226,10 +1229,12 @@ const exportExcel = async () => {
       bg: '#dbe6f7',
       thickTop: true,
       thickLeft: index > 0,
+      hideZero: true,
     })
     applyExcelCellStyle(totalRow.getCell(startCol + 1), {
       bg: '#dbe6f7',
       thickTop: true,
+      hideZero: true,
     })
     applyExcelCellStyle(totalRow.getCell(startCol + 2), {
       align: 'right',
@@ -1237,6 +1242,7 @@ const exportExcel = async () => {
       bg: '#dbe6f7',
       thickTop: true,
       thickRight: true,
+      hideZero: true,
     })
   })
 
