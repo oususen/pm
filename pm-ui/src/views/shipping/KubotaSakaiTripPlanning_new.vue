@@ -666,10 +666,10 @@
 
     <div class="note">未割付期限: 調整後納期の{{ assignmentDeadlineDays }}営業日前</div>
     <div
-      v-if="cursorProductCode"
+      v-if="cursorBubbleText"
       class="cursor-product-bubble"
       :style="cursorProductBubbleStyle"
-    >{{ cursorProductCode }}</div>
+    >{{ cursorBubbleText }}</div>
 
   </div>
 </template>
@@ -901,7 +901,7 @@ const progressByDate = ref({})
 const showProgressAdjust = ref(false)
 const savingProgressAdjust = ref(false)
 const progressAdjustEdits = ref({})
-const cursorProductCode = ref('')
+const cursorBubbleText = ref('')
 const cursorProductBubbleStyle = ref({})
 const showDisplaySettingDialog = ref(false)
 const displaySettingItems = ref([])
@@ -1814,8 +1814,8 @@ const schedulePreview = (dateKey) => {
   previewTimers.set(dateKey, timer)
 }
 
-const showProductBubble = (row, event) => {
-  cursorProductCode.value = String(row?.product_code || '')
+const showCursorBubble = (text, event) => {
+  cursorBubbleText.value = String(text || '')
   const rect = event?.target?.getBoundingClientRect?.()
   if (!rect) return
   const left = Math.round(rect.left + rect.width / 2)
@@ -1827,8 +1827,16 @@ const showProductBubble = (row, event) => {
   }
 }
 
-const hideProductBubble = () => {
-  cursorProductCode.value = ''
+const showProductBubble = (row, event) => {
+  showCursorBubble(row?.product_code || '', event)
+}
+
+const showCoordinationNoteBubble = (entry, event) => {
+  showCursorBubble(entry?.coordination_note || '', event)
+}
+
+const hideCursorBubble = () => {
+  cursorBubbleText.value = ''
   cursorProductBubbleStyle.value = {}
 }
 
@@ -1837,14 +1845,14 @@ const handleQtyInputBlur = () => {
     const root = tableWrapRef.value
     const active = document.activeElement
     if (!root || !active || !root.contains(active)) {
-      hideProductBubble()
+      hideCursorBubble()
     }
   }, 0)
 }
 
 const handleQtyInputMouseLeave = (event) => {
   if (document.activeElement !== event?.target) {
-    hideProductBubble()
+    hideCursorBubble()
   }
 }
 
@@ -2651,7 +2659,7 @@ onMounted(async () => {
 onUnmounted(() => {
   previewTimers.forEach((timerId) => clearTimeout(timerId))
   previewTimers.clear()
-  hideProductBubble()
+  hideCursorBubble()
 })
 </script>
 
@@ -3493,10 +3501,10 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   max-width: 100%;
 }
 .entry-note-badge {
+  margin-top: 2px;
   padding: 1px 5px;
   border-radius: 999px;
   border: 1px solid #f97316;
@@ -3505,16 +3513,7 @@ onUnmounted(() => {
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
-}
-.entry-note-text {
-  margin-top: 2px;
-  max-width: 100%;
-  font-size: 10px;
-  line-height: 1.25;
-  color: #9a3412;
-  text-align: center;
-  white-space: pre-wrap;
-  word-break: break-word;
+  cursor: pointer;
 }
 .select-subcell {
   padding: 2px 0 !important;

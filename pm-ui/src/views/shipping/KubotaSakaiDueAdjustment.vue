@@ -298,6 +298,11 @@
         <div class="note-count">{{ coordinationNoteDraft.length }}/200</div>
         <div class="modal-actions">
           <button class="btn" :disabled="savingCoordinationNote" @click="closeCoordinationNoteDialog">キャンセル</button>
+          <button
+            class="btn"
+            :disabled="savingCoordinationNote || !coordinationNoteDraft"
+            @click="clearCoordinationNote"
+          >削除</button>
           <button class="btn save-btn" :disabled="savingCoordinationNote" @click="saveCoordinationNote">
             {{ savingCoordinationNote ? '保存中...' : '保存' }}
           </button>
@@ -1391,6 +1396,11 @@ const saveCoordinationNote = async () => {
   } finally {
     savingCoordinationNote.value = false
   }
+}
+
+const clearCoordinationNote = async () => {
+  coordinationNoteDraft.value = ''
+  await saveCoordinationNote()
 }
 
 const sendEmail = async () => {
