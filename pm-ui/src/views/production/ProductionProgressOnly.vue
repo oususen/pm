@@ -780,6 +780,7 @@ const recalculate = async () => {
             start_date: start,
             end_date: end,
             include_progress: true,
+            progress_only: true,
           })
           .catch((e) => console.error("再計算に失敗:", e))
       )
@@ -815,6 +816,7 @@ const recalculateVisibleProducts = async () => {
           start_date: start,
           end_date: end,
           include_progress: true,
+          progress_only: true,
           product_ids: target.product_ids,
         })
       )

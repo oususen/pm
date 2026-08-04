@@ -1,6 +1,7 @@
 import math
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 
 from django.db import transaction
@@ -144,12 +145,15 @@ def _collect_supplier_product_ids(supplier):
     return sorted(bom_product_ids | routing_product_ids)
 
 
-def _load_first_cycle_progress_basis(line, product_ids, delivery_date):
+def _load_first_cycle_progress_basis(line, product_ids, delivery_date, send_date=None):
     """初回納入回の基準値を返す。
 
+    計進は当日(送信日)の生産を plan_qty で計算するため、
+    送信日に実績がある場合は実績と計画の差分で補正する。
+
     ルール:
-    - 当日実績なし: 納入日の計進
-    - 当日実績あり: 納入日の計進 + 当日実績 - 当日計画
+    - 納入日実績あり: 計進 + 実績 − 計画
+    - 送信日実績あり: さらに送信日の (実績 − 計画) を加算
     """
     progress_map = {}
     if not product_ids:
@@ -168,6 +172,19 @@ def _load_first_cycle_progress_basis(line, product_ids, delivery_date):
         basis = planned_progress
         if actual_qty > 0:
             basis = planned_progress + actual_qty - plan_qty
+
+        # 送信日の実績補正: 計進は送信日を plan で計算するため、実績との差を反映
+        if send_date and send_date != delivery_date:
+            today_qs = LineBacklog.objects.filter(
+                line_id=line.id,
+                product_id=product_id,
+                plan_date=send_date,
+            )
+            today_actual = int(today_qs.filter(sequence_no=0).aggregate(v=Sum('actual_qty'))['v'] or 0)
+            if today_actual > 0:
+                today_plan = int(today_qs.filter(sequence_no=1).aggregate(v=Sum('plan_qty'))['v'] or 0)
+                basis += today_actual - today_plan
+
         progress_map[product_id] = basis
 
     return progress_map
@@ -219,6 +236,16 @@ def _build_cycle_product_map(line, coverage_dates):
     return product_map
 
 
+def _load_safety_stock_map(product_ids):
+    from production.models_production import StockAllocation
+    if not product_ids:
+        return {}
+    return dict(
+        StockAllocation.objects.filter(product_id__in=product_ids)
+        .values_list('product_id', 'min_stock_qty')
+    )
+
+
 @transaction.atomic
 def simulate_and_save_order_plans(config, base_date=None):
     supplier = config.supplier
@@ -264,8 +291,13 @@ def simulate_and_save_order_plans(config, base_date=None):
         product_ids=product_ids,
     )
 
+    safety_stock_enabled = getattr(config, 'safety_stock_enabled', False)
+    safety_stock_multiplier = float(getattr(config, 'safety_stock_multiplier', 1) or 1)
+    safety_stock_map = _load_safety_stock_map(product_ids) if safety_stock_enabled else {}
+
     first_delivery_date = cycles[0]['delivery_date']
-    current_progress_map = _load_first_cycle_progress_basis(line, product_ids, first_delivery_date)
+    today = base_date or date.today()
+    current_progress_map = _load_first_cycle_progress_basis(line, product_ids, first_delivery_date, send_date=today)
     all_items = []
     recalculated_product_ids = set()
 
@@ -278,7 +310,11 @@ def simulate_and_save_order_plans(config, base_date=None):
             product_id = info['product_id']
             coverage_demand = int(info['coverage_demand'])
             current_planned_progress = int(current_progress_map.get(product_id, 0))
-            required_qty = max(0, coverage_demand - current_planned_progress)
+            safety_addition = 0
+            if safety_stock_enabled:
+                min_stock = int(safety_stock_map.get(product_id, 0) or 0)
+                safety_addition = int(Decimal(str(min_stock * safety_stock_multiplier)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+            required_qty = max(0, coverage_demand - current_planned_progress + safety_addition)
             process = resolve_supplier_process(
                 supplier=supplier,
                 line=line,

@@ -19,6 +19,7 @@
             <th>進度表期間</th>
             <th>納入日判定</th>
             <th>数量方式</th>
+            <th>安全在庫</th>
             <th>有効</th>
             <th>最終実行</th>
             <th>ステータス</th>
@@ -34,6 +35,7 @@
             <td>{{ config.progress_days_back }}営業日前 ～ {{ config.progress_days_forward }}日後</td>
             <td>{{ deliveryDayModeLabel(config.delivery_day_mode) }}</td>
             <td>{{ calcModeLabel(config.calc_mode) }}</td>
+            <td>{{ config.safety_stock_enabled ? `確保 (×${config.safety_stock_multiplier})` : '確保しない' }}</td>
             <td><span :class="['badge', config.is_enabled ? 'badge-on' : 'badge-off']">{{ config.is_enabled ? '有効' : '無効' }}</span></td>
             <td>{{ config.last_run_at || '-' }}</td>
             <td><span v-if="config.last_run_status" :class="['badge', `badge-${config.last_run_status.toLowerCase()}`]">{{ config.last_run_status }}</span></td>
@@ -106,6 +108,19 @@
           <div v-if="showSupplierCalendarWarning" class="form-warning">
             選択した仕入先カレンダに納入日が未設定です。仕入れ先カレンダ判定では納入日を判定できません。
           </div>
+        </div>
+
+        <div class="form-group">
+          <label>安全在庫確保</label>
+          <select v-model="form.safety_stock_enabled">
+            <option :value="false">確保しない</option>
+            <option :value="true">確保する</option>
+          </select>
+          <div v-if="form.safety_stock_enabled" class="time-row" style="margin-top: 6px;">
+            <span class="suffix">倍数:</span>
+            <input v-model.number="form.safety_stock_multiplier" type="number" min="0.1" max="10" step="0.1" class="time-input" />
+          </div>
+          <div v-if="form.safety_stock_enabled" class="form-hint">納入数 = カバー期間需要合計 − 計進 + 安全在庫 × 倍数</div>
         </div>
 
         <div class="form-group">
@@ -193,6 +208,8 @@ const form = reactive({
   progress_days_forward: 30,
   calc_mode: 'LOT_ROUNDED',
   delivery_day_mode: 'SUPPLIER_CALENDAR',
+  safety_stock_enabled: false,
+  safety_stock_multiplier: 1,
   send_order_excel: true,
   email_body_custom: '',
   reply_to_email: '',
@@ -296,6 +313,8 @@ const resetForm = () => {
   form.progress_days_forward = 30
   form.calc_mode = 'LOT_ROUNDED'
   form.delivery_day_mode = 'SUPPLIER_CALENDAR'
+  form.safety_stock_enabled = false
+  form.safety_stock_multiplier = 1
   form.send_order_excel = true
   form.email_body_custom = ''
   form.reply_to_email = ''
@@ -325,6 +344,8 @@ const openEdit = (config) => {
   form.progress_days_forward = config.progress_days_forward ?? 30
   form.calc_mode = config.calc_mode
   form.delivery_day_mode = config.delivery_day_mode || 'PATTERN'
+  form.safety_stock_enabled = !!config.safety_stock_enabled
+  form.safety_stock_multiplier = config.safety_stock_multiplier ?? 1
   form.send_order_excel = config.send_order_excel
   form.email_body_custom = config.email_body_custom || ''
   form.reply_to_email = config.reply_to_email || ''
@@ -368,6 +389,8 @@ const buildPayload = () => ({
   progress_days_forward: form.progress_days_forward,
   calc_mode: form.calc_mode,
   delivery_day_mode: form.delivery_day_mode,
+  safety_stock_enabled: form.safety_stock_enabled,
+  safety_stock_multiplier: form.safety_stock_multiplier,
   send_order_excel: form.send_order_excel,
   email_body_custom: form.email_body_custom,
   reply_to_email: form.reply_to_email,
@@ -473,6 +496,7 @@ watch(
 .form-warning { margin-top: 6px; padding: 8px 10px; border-radius: 4px; background: #fff7ed; color: #9a3412; font-size: 12px; border: 1px solid #fdba74; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.form-hint { margin-top: 4px; font-size: 11px; color: #6b7280; }
 .required { color: #dc2626; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn-primary { padding: 6px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }

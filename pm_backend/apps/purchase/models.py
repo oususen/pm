@@ -454,6 +454,13 @@ class PurchaseAutoOrderSendConfig(models.Model):
         default=DELIVERY_DAY_MODE_PATTERN,
         verbose_name='納入日判定方式',
     )
+    safety_stock_enabled = models.BooleanField(default=False, verbose_name='安全在庫確保')
+    safety_stock_multiplier = models.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        default=1,
+        verbose_name='安全在庫倍数',
+    )
     send_order_excel = models.BooleanField(default=True, verbose_name='注文書Excel送信')
     email_body_custom = models.TextField(blank=True, default='', verbose_name='メール本文（カスタム）')
     reply_to_email = models.EmailField(blank=True, default='', verbose_name='返信先メールアドレス')

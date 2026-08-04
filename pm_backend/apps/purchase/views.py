@@ -2970,6 +2970,8 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
                 'progress_days_forward': config.progress_days_forward,
                 'calc_mode': config.calc_mode,
                 'delivery_day_mode': config.delivery_day_mode,
+                'safety_stock_enabled': config.safety_stock_enabled,
+                'safety_stock_multiplier': float(config.safety_stock_multiplier),
                 'send_order_excel': config.send_order_excel,
                 'email_body_custom': config.email_body_custom,
                 'reply_to_email': config.reply_to_email,
@@ -3003,6 +3005,8 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
             progress_days_forward=int(request.data.get('progress_days_forward', 30)),
             calc_mode=request.data.get('calc_mode', PurchaseAutoOrderSendConfig.CALC_MODE_DEMAND),
             delivery_day_mode=request.data.get('delivery_day_mode', PurchaseAutoOrderSendConfig.DELIVERY_DAY_MODE_PATTERN),
+            safety_stock_enabled=_parse_bool(request.data.get('safety_stock_enabled', False)),
+            safety_stock_multiplier=max(0.1, min(10, float(request.data.get('safety_stock_multiplier', 1) or 1))),
             send_order_excel=_parse_bool(request.data.get('send_order_excel')),
             email_body_custom=request.data.get('email_body_custom', ''),
             reply_to_email=request.data.get('reply_to_email', ''),
@@ -3051,6 +3055,10 @@ class PurchaseAutoOrderSendConfigDetailView(APIView):
             config.calc_mode = request.data['calc_mode']
         if 'delivery_day_mode' in request.data:
             config.delivery_day_mode = request.data['delivery_day_mode']
+        if 'safety_stock_enabled' in request.data:
+            config.safety_stock_enabled = _parse_bool(request.data['safety_stock_enabled'])
+        if 'safety_stock_multiplier' in request.data:
+            config.safety_stock_multiplier = max(0.1, min(10, float(request.data['safety_stock_multiplier'] or 1)))
         if 'send_order_excel' in request.data:
             config.send_order_excel = _parse_bool(request.data['send_order_excel'])
         if 'email_body_custom' in request.data:
