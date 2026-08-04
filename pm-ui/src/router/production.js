@@ -344,12 +344,6 @@ const production = [
     },
   },
   {
-    path: "/production/product-photo-upload",
-    name: "ProductPhotoUpload",
-    component: () => import("@/views/production/ProductPhotoUpload.vue"),
-    meta: { pageTitle: "製品写真アップロード", manualPath: "README.md", resource: "production.process_input", permission: "edit" },
-  },
-  {
     path: "/production/product-info-editor",
     name: "ProductInfoEditor",
     component: () => import("@/views/production/ProductInfoEditor.vue"),

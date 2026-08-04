@@ -11,6 +11,9 @@ export const createSuppliersAPI = (client) => ({
   updateSupplier(id, data) {
     return client.put(`/suppliers/${id}/`, data)
   },
+  patchSupplier(id, data) {
+    return client.patch(`/suppliers/${id}/`, data)
+  },
   deleteSupplier(id) {
     return client.delete(`/suppliers/${id}/`)
   },

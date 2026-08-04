@@ -42,7 +42,8 @@ def resolve_delivery_cycles(config, base_date=None):
     today = base_date or date.today()
     daiso_cal = _get_daiso_calendar()
     calc = WorkingDayCalculator(daiso_cal)
-    earliest_delivery_date = calc.add_working_days(today, config.lead_time_days or 2)
+    lead_time_days = 2 if config.lead_time_days is None else int(config.lead_time_days)
+    earliest_delivery_date = calc.add_working_days(today, lead_time_days)
 
     schedule = SupplierOrderSchedule.objects.filter(
         supplier_id=supplier.id,
@@ -62,16 +63,16 @@ def resolve_delivery_cycles(config, base_date=None):
     window_end = horizon_end + timedelta(days=120)
     pattern_dates = _resolve_shifted_pattern_dates(schedule, window_start, window_end, calc)
 
-    first_delivery_date = next((d for d in pattern_dates if d >= earliest_delivery_date), None)
-    if first_delivery_date is None or first_delivery_date > horizon_end:
+    if earliest_delivery_date not in pattern_dates:
         return {
             'status': 'SKIPPED',
-            'message': f'{earliest_delivery_date} 以降 {horizon_end} までに {supplier.supplier_code} の納入日がありません',
+            'message': f'{earliest_delivery_date} は {supplier.supplier_code} の納入日ではありません',
             'cycles': [],
             'schedule': schedule,
             'first_delivery_date': earliest_delivery_date,
         }
 
+    first_delivery_date = earliest_delivery_date
     next_delivery_date = next((d for d in pattern_dates if d > first_delivery_date), None)
     coverage_dates = []
     if next_delivery_date:

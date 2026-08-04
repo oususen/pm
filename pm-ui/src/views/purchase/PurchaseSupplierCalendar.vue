@@ -5,7 +5,7 @@
         <h2 class="page-title">仕入れ先カレンダ <DataSourceDialog title="" :sources="dsSources" /></h2>
         <div class="title-note">注意事項：未設定日はダイソウカレンダの稼働日を既定値として表示します</div>
       </div>
-      <button class="btn primary" @click="showCreate = !showCreate" :disabled="!canEdit">
+      <button class="btn primary" @click="toggleCreatePanel" :disabled="!canEdit">
         {{ showCreate ? '新規作成を閉じる' : '新規作成' }}
       </button>
     </div>
@@ -39,7 +39,7 @@
           <button
             class="btn"
             @click="unassignCalendar"
-            :disabled="!selectedSupplierId || !currentLineCalendarId || assigning || !canEdit"
+            :disabled="!selectedSupplierId || !currentSupplierCalendarId || assigning || !canEdit"
           >
             割当解除
           </button>
@@ -80,6 +80,34 @@
           <label>カレンダ名</label>
           <input v-model.trim="newCalendar.name" placeholder="例: A社カレンダ" />
         </div>
+        <div class="field">
+          <label>区分</label>
+          <select v-model="newCalendar.calendar_type" @change="applyCalendarTypeDefaults">
+            <option value="INTERNAL">社内</option>
+            <option value="SUPPLIER">仕入れ</option>
+            <option value="COMPANY">会社</option>
+            <option value="CUSTOMER">顧客</option>
+            <option value="OTHER">その他</option>
+          </select>
+        </div>
+        <div class="field flag-field">
+          <label>ライン割当</label>
+          <label class="check-inline">
+            <input
+              :checked="newCalendar.is_line_assignable"
+              type="checkbox"
+              @change="onLineAssignableChange"
+            />
+            可
+          </label>
+        </div>
+        <div class="field flag-field">
+          <label>仕入先割当</label>
+          <label class="check-inline">
+            <input v-model="newCalendar.is_supplier_assignable" type="checkbox" />
+            可
+          </label>
+        </div>
         <div class="field action-field">
           <label>&nbsp;</label>
           <button class="btn primary" @click="createAndAssignCalendar" :disabled="creating || !canEdit">
@@ -91,7 +119,36 @@
 
     <div class="section">
       <div class="calendar-controls">
-        <div></div>
+        <div class="delivery-tools">
+          <div class="delivery-pattern" v-if="selectedSchedulePattern">
+            納入パターン: {{ selectedSchedulePattern.pattern_code }} - {{ selectedSchedulePattern.pattern_name }}
+          </div>
+          <div class="delivery-pattern" v-else-if="selectedSupplierId">
+            納入パターン: 未設定
+          </div>
+          <div class="delivery-range">
+            <label>納入日生成</label>
+            <input type="date" v-model="deliveryGenerateStartDate" :disabled="!selectedCalendarId || !canEdit" />
+            <span>〜</span>
+            <input type="date" v-model="deliveryGenerateEndDate" :disabled="!selectedCalendarId || !canEdit" />
+          </div>
+          <div class="delivery-actions">
+            <button
+              class="btn"
+              @click="generateDeliveryDays"
+              :disabled="!selectedCalendarId || !selectedSchedulePattern || generatingDeliveryDays || !canEdit"
+            >
+              {{ generatingDeliveryDays ? '生成中...' : '納入日生成' }}
+            </button>
+            <button
+              class="btn"
+              @click="clearDeliveryDays"
+              :disabled="!selectedCalendarId || clearingDeliveryDays || !canEdit"
+            >
+              {{ clearingDeliveryDays ? '削除中...' : '納入日クリア' }}
+            </button>
+          </div>
+        </div>
         <div class="month-head">
           <button class="btn" @click="moveMonth(-1)" :disabled="!selectedCalendarId">前月へ</button>
           <div class="month-title">{{ monthTitle }}</div>
@@ -126,6 +183,16 @@
               <div class="day-cell-btn">
                 <div class="day-main">
                   <div class="day-num">{{ day.day }}</div>
+                  <div v-if="day.inMonth && day.record?.is_delivery_day" class="delivery-badge">納入日</div>
+                  <label v-if="day.inMonth" class="day-check delivery-toggle">
+                    <input
+                      type="checkbox"
+                      :checked="Boolean(day.record?.is_delivery_day)"
+                      :disabled="savingDeliveryDateKey === day.date || !canEdit"
+                      @change="toggleDeliveryMarker(day)"
+                    />
+                    納入日
+                  </label>
                   <label
                     v-if="day.inMonth"
                     class="day-check"
@@ -137,7 +204,7 @@
                       :disabled="savingDateKey === day.date || !canEdit"
                       @change="toggleDay(day)"
                     />
-                    {{ day.is_working_day ? '稼働中' : '休み' }}
+                    {{ day.is_working_day ? '稼働' : '休み' }}
                   </label>
                 </div>
                 <div class="day-memo">
@@ -170,8 +237,9 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 const dsSources = [
   { op: 'カレンダー 読み書き', table: 'm_calendar', desc: 'カレンダーマスタ（新規作成・一覧）' },
   { op: 'カレンダー日 読み書き', table: 'm_calendar_day', desc: '日別の稼働/休日設定・メモ' },
-  { op: 'ライン 読み書き', table: 'm_line', desc: '購買ライン（カレンダー割当先）' },
-  { op: '仕入先 読み取り', table: 'm_supplier', desc: '仕入先マスタ' },
+  { op: '仕入先 読み書き', table: 'm_supplier', desc: '仕入先マスタ（カレンダー割当先）' },
+  { op: '納入パターン 読み取り', table: 'supplier_order_pattern', desc: '納入日自動生成ルール' },
+  { op: '仕入先スケジュール 読み取り', table: 'supplier_order_schedule', desc: '仕入先ごとの納入パターン割当' },
 ]
 
 const canEdit = computed(() => {
@@ -185,9 +253,10 @@ const canEdit = computed(() => {
 })
 
 const suppliers = ref([])
-const lines = ref([])
 const calendars = ref([])
 const calendarDays = ref([])
+const supplierOrderPatterns = ref([])
+const supplierSchedules = ref([])
 const daisoCalendarId = ref('')
 const daisoCalendarDays = ref([])
 
@@ -196,14 +265,19 @@ const selectedCalendarId = ref('')
 const showCreate = ref(false)
 const creating = ref(false)
 const assigning = ref(false)
-const currentLineCalendarId = ref('')
+const currentSupplierCalendarId = ref('')
 const savingDateKey = ref('')
+const savingDeliveryDateKey = ref('')
 const applyingWeekday = ref(false)
 const savingNoteDateKey = ref('')
 const copySourceCalendarId = ref('')
 const copyStartDate = ref('')
 const copyEndDate = ref('')
 const copying = ref(false)
+const deliveryGenerateStartDate = ref('')
+const deliveryGenerateEndDate = ref('')
+const generatingDeliveryDays = ref(false)
+const clearingDeliveryDays = ref(false)
 const weekdayNames = ['日', '月', '火', '水', '木', '金', '土']
 const weekdayChecks = ref([false, false, false, false, false, false, false])
 
@@ -212,7 +286,53 @@ const currentMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(
 const newCalendar = ref({
   code: '',
   name: '',
+  calendar_type: 'SUPPLIER',
+  is_line_assignable: false,
+  is_supplier_assignable: true,
 })
+
+const defaultFlagsByType = (calendarType) => {
+  if (calendarType === 'INTERNAL') return { is_line_assignable: true, is_supplier_assignable: false }
+  if (calendarType === 'SUPPLIER') return { is_line_assignable: false, is_supplier_assignable: true }
+  if (calendarType === 'COMPANY' || calendarType === 'CUSTOMER') {
+    return { is_line_assignable: false, is_supplier_assignable: false }
+  }
+  return { is_line_assignable: false, is_supplier_assignable: false }
+}
+
+const resetNewCalendar = () => {
+  newCalendar.value = {
+    code: '',
+    name: '',
+    calendar_type: 'SUPPLIER',
+    is_line_assignable: false,
+    is_supplier_assignable: true,
+  }
+}
+
+const applyCalendarTypeDefaults = () => {
+  Object.assign(newCalendar.value, defaultFlagsByType(newCalendar.value.calendar_type))
+}
+
+const toggleCreatePanel = () => {
+  showCreate.value = !showCreate.value
+  if (showCreate.value) {
+    resetNewCalendar()
+  }
+}
+
+const onLineAssignableChange = (event) => {
+  const checked = Boolean(event?.target?.checked)
+  if (!checked) {
+    newCalendar.value.is_line_assignable = false
+    return
+  }
+  const confirmed = window.confirm('警告: 仕入れ先カレンダです。ほんとうに社内ライン割当にしますか？')
+  newCalendar.value.is_line_assignable = confirmed
+  if (event?.target) {
+    event.target.checked = confirmed
+  }
+}
 
 const ymd = (dateObj) => {
   const y = dateObj.getFullYear()
@@ -299,21 +419,42 @@ const loadSuppliers = async () => {
   suppliers.value = res.data.results || res.data || []
 }
 
-const loadLines = async () => {
-  const res = await api.lines.getLines({ page_size: 500 })
-  lines.value = (res.data.results || res.data || []).filter((x) => x.line_type === 'PURCHASE')
-}
-
 const loadCalendars = async () => {
   const res = await api.calendars.getCalendars({ page_size: 500 })
   calendars.value = res.data.results || res.data || []
 }
 
-const supplierToLine = (supplierId) => {
-  const supplier = suppliers.value.find((x) => x.id === supplierId)
-  if (!supplier) return null
-  return lines.value.find((l) => l.line_code === supplier.supplier_code) || null
+const loadSupplierOrderPatterns = async () => {
+  const res = await api.supplierOrderPatterns.list({ page_size: 500 })
+  supplierOrderPatterns.value = res.data.results || res.data || []
 }
+
+const loadSupplierSchedules = async () => {
+  if (!selectedSupplierId.value) {
+    supplierSchedules.value = []
+    return
+  }
+  const res = await api.supplierOrderSchedules.list({
+    page_size: 50,
+    supplier: selectedSupplierId.value,
+    is_enabled: true,
+  })
+  supplierSchedules.value = res.data.results || res.data || []
+}
+
+const selectedSupplier = computed(() =>
+  suppliers.value.find((x) => x.id === selectedSupplierId.value) || null,
+)
+
+const selectedSupplierSchedule = computed(() =>
+  supplierSchedules.value.find((x) => String(x.supplier) === String(selectedSupplierId.value)) || null,
+)
+
+const selectedSchedulePattern = computed(() => {
+  const patternId = selectedSupplierSchedule.value?.pattern
+  if (!patternId) return null
+  return supplierOrderPatterns.value.find((x) => String(x.id) === String(patternId)) || null
+})
 
 const onCalendarChange = async () => {
   copySourceCalendarId.value = ''
@@ -321,10 +462,10 @@ const onCalendarChange = async () => {
 }
 
 const onSupplierChange = async () => {
-  const line = supplierToLine(selectedSupplierId.value)
-  const nextCalendarId = line?.calendar || ''
+  await loadSupplierSchedules()
+  const nextCalendarId = selectedSupplier.value?.calendar || ''
   selectedCalendarId.value = supplierAssignableCalendars.value.some((c) => c.id === nextCalendarId) ? nextCalendarId : ''
-  currentLineCalendarId.value = line?.calendar || ''
+  currentSupplierCalendarId.value = selectedSupplier.value?.calendar || ''
   await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
 }
 
@@ -367,7 +508,227 @@ const moveMonth = async (delta) => {
   const { start, end } = monthRange.value
   copyStartDate.value = ymd(start)
   copyEndDate.value = ymd(end)
+  deliveryGenerateStartDate.value = ymd(start)
+  deliveryGenerateEndDate.value = ymd(end)
   await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
+}
+
+const parseCsvInts = (value) => {
+  if (!value) return []
+  return String(value).split(',').map((x) => Number(x.trim())).filter((x) => Number.isInteger(x))
+}
+
+const nthWeekdayOfMonth = (year, month, weekday, nth) => {
+  const first = new Date(year, month - 1, 1)
+  const firstWeekday = first.getDay()
+  const jsWeekday = (weekday + 1) % 7
+  const offset = (jsWeekday - firstWeekday + 7) % 7
+  const day = 1 + offset + ((nth - 1) * 7)
+  const lastDay = new Date(year, month, 0).getDate()
+  if (day > lastDay) return null
+  return new Date(year, month - 1, day)
+}
+
+const isBusinessDayByDaiso = (dateObj) => {
+  const row = daisoDayMap.value.get(ymd(dateObj))
+  if (row) return Boolean(row.is_working_day)
+  const weekday = dateObj.getDay()
+  return weekday !== 0 && weekday !== 6
+}
+
+const getDeliveryGenerateRange = () => {
+  if (!deliveryGenerateStartDate.value || !deliveryGenerateEndDate.value) return null
+  if (deliveryGenerateStartDate.value > deliveryGenerateEndDate.value) return null
+  return {
+    start: new Date(`${deliveryGenerateStartDate.value}T00:00:00`),
+    end: new Date(`${deliveryGenerateEndDate.value}T00:00:00`),
+  }
+}
+
+const generatePatternDatesInRange = () => {
+  const schedule = selectedSupplierSchedule.value
+  const pattern = selectedSchedulePattern.value
+  const range = getDeliveryGenerateRange()
+  if (!schedule || !pattern || !range) return []
+
+  const results = []
+  const { start, end } = range
+
+  if (pattern.recurrence_type === 'WEEKLY') {
+    const daysOfWeek = new Set(parseCsvInts(pattern.days_of_week))
+    for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      const codeWeekday = (cursor.getDay() + 6) % 7
+      if (daysOfWeek.has(codeWeekday)) results.push(ymd(cursor))
+    }
+    return results
+  }
+
+  if (pattern.recurrence_type === 'MONTHLY_DATE') {
+    const daysOfMonth = parseCsvInts(pattern.days_of_month)
+    const monthCursor = new Date(start.getFullYear(), start.getMonth(), 1)
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1)
+    while (monthCursor <= endMonth) {
+      const lastDay = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0).getDate()
+      for (const dom of daysOfMonth) {
+        const hit = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), Math.min(dom, lastDay))
+        if (hit >= start && hit <= end) results.push(ymd(hit))
+      }
+      monthCursor.setMonth(monthCursor.getMonth() + 1)
+    }
+    return [...new Set(results)].sort()
+  }
+
+  if (pattern.recurrence_type === 'MONTHLY_NTH_DOW') {
+    const nthWeeks = parseCsvInts(pattern.nth_weeks)
+    const daysOfWeek = parseCsvInts(pattern.days_of_week)
+    const monthCursor = new Date(start.getFullYear(), start.getMonth(), 1)
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1)
+    while (monthCursor <= endMonth) {
+      for (const nth of nthWeeks) {
+        for (const dow of daysOfWeek) {
+          const hit = nthWeekdayOfMonth(monthCursor.getFullYear(), monthCursor.getMonth() + 1, dow, nth)
+          if (hit && hit >= start && hit <= end) results.push(ymd(hit))
+        }
+      }
+      monthCursor.setMonth(monthCursor.getMonth() + 1)
+    }
+    return [...new Set(results)].sort()
+  }
+
+  if (pattern.recurrence_type === 'EVERY_BUSINESS_DAY') {
+    for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      if (isBusinessDayByDaiso(cursor)) results.push(ymd(cursor))
+    }
+    return results
+  }
+
+  if (pattern.recurrence_type === 'EVERY_N_BUSINESS_DAYS') {
+    const interval = Number(pattern.interval_days || 1)
+    const refDateText = selectedSupplierSchedule.value?.start_date || pattern.start_date
+    if (!refDateText || interval < 1) return []
+    const refDate = new Date(`${refDateText}T00:00:00`)
+    let bizCount = 0
+    for (let cursor = new Date(refDate); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      if (!isBusinessDayByDaiso(cursor)) continue
+      if (bizCount % interval === 0 && cursor >= start) {
+        results.push(ymd(cursor))
+      }
+      bizCount += 1
+    }
+    return results
+  }
+
+  return []
+}
+
+const upsertCalendarDay = async (dateStr, updates = {}) => {
+  const row = dayMap.value.get(dateStr)
+  if (row?.id) {
+    await api.calendars.updateCalendarDay(row.id, {
+      calendar: selectedCalendarId.value,
+      target_date: dateStr,
+      is_working_day: Boolean(row.is_working_day),
+      is_delivery_day: Boolean(row.is_delivery_day),
+      work_minutes: row.is_working_day ? (row.work_minutes ?? 480) : 0,
+      work_pattern: row.work_pattern || null,
+      note: row.note || null,
+      ...updates,
+    })
+    return
+  }
+  const dateObj = new Date(`${dateStr}T00:00:00`)
+  const working = isBusinessDayByDaiso(dateObj)
+  await api.calendars.createCalendarDay({
+    calendar: selectedCalendarId.value,
+    target_date: dateStr,
+    is_working_day: working,
+    is_delivery_day: false,
+    work_minutes: working ? 480 : 0,
+    work_pattern: null,
+    note: null,
+    ...updates,
+  })
+}
+
+const clearDeliveryDays = async () => {
+  const range = getDeliveryGenerateRange()
+  if (!selectedCalendarId.value || !range) {
+    alert('納入日クリア期間を確認してください。')
+    return
+  }
+  const targetRows = calendarDays.value.filter((row) =>
+    row.target_date >= deliveryGenerateStartDate.value &&
+    row.target_date <= deliveryGenerateEndDate.value &&
+    row.is_delivery_day,
+  )
+  if (!targetRows.length) {
+    alert('指定期間に生成済みの納入日はありません。')
+    return
+  }
+  if (!confirm('指定期間の納入日をクリアしますか？メモは残します。')) return
+
+  clearingDeliveryDays.value = true
+  try {
+    await Promise.all(targetRows.map((row) => upsertCalendarDay(row.target_date, { is_delivery_day: false })))
+    await loadCalendarDays()
+    alert('指定期間の納入日をクリアしました。')
+  } catch (e) {
+    console.error('納入日クリアエラー', e)
+    alert('納入日クリアに失敗しました。')
+  } finally {
+    clearingDeliveryDays.value = false
+  }
+}
+
+const generateDeliveryDays = async () => {
+  const range = getDeliveryGenerateRange()
+  if (!selectedCalendarId.value || !range) {
+    alert('納入日生成期間を確認してください。')
+    return
+  }
+  if (!selectedSchedulePattern.value) {
+    alert('この仕入れ先の納入パターンが未設定です。')
+    return
+  }
+  const deliveryDates = generatePatternDatesInRange()
+  if (!deliveryDates.length) {
+    alert('指定期間に生成対象の納入日がありません。')
+    return
+  }
+  if (!confirm(`指定期間の納入日を ${deliveryDates.length} 件生成します。既存の生成済み納入日は更新されます。実行しますか？`)) return
+
+  generatingDeliveryDays.value = true
+  try {
+    const targetRows = calendarDays.value.filter((row) =>
+      row.target_date >= deliveryGenerateStartDate.value &&
+      row.target_date <= deliveryGenerateEndDate.value &&
+      row.is_delivery_day,
+    )
+    await Promise.all(targetRows.map((row) => upsertCalendarDay(row.target_date, { is_delivery_day: false })))
+    await Promise.all(deliveryDates.map((dateStr) => upsertCalendarDay(dateStr, { is_delivery_day: true })))
+    await loadCalendarDays()
+    alert(`指定期間の納入日を ${deliveryDates.length} 件生成しました。`)
+  } catch (e) {
+    console.error('納入日生成エラー', e)
+    alert('納入日生成に失敗しました。')
+  } finally {
+    generatingDeliveryDays.value = false
+  }
+}
+
+const toggleDeliveryMarker = async (day) => {
+  if (!canEdit.value) return
+  if (!day?.inMonth || !selectedCalendarId.value) return
+  savingDeliveryDateKey.value = day.date
+  try {
+    await upsertCalendarDay(day.date, { is_delivery_day: !Boolean(day.record?.is_delivery_day) })
+    await loadCalendarDays()
+  } catch (e) {
+    console.error('納入日変更エラー', e)
+    alert('納入日の変更に失敗しました。')
+  } finally {
+    savingDeliveryDateKey.value = ''
+  }
 }
 
 const copyCalendarDays = async () => {
@@ -428,6 +789,7 @@ const toggleWeekday = async (weekday, checked) => {
             work_minutes: checked ? (row.work_minutes ?? 480) : 0,
             work_pattern: row.work_pattern || null,
             note: row.note || null,
+            is_delivery_day: Boolean(row.is_delivery_day),
           }),
         )
       } else {
@@ -439,6 +801,7 @@ const toggleWeekday = async (weekday, checked) => {
             work_minutes: checked ? 480 : 0,
             work_pattern: null,
             note: null,
+            is_delivery_day: false,
           }),
         )
       }
@@ -467,9 +830,8 @@ const createAndAssignCalendar = async () => {
     alert('カレンダコードとカレンダ名を入力してください。')
     return
   }
-  const line = supplierToLine(selectedSupplierId.value)
-  if (!line) {
-    alert('仕入れ先に対応する購買ラインが見つかりません。')
+  if (!selectedSupplier.value) {
+    alert('仕入れ先が見つかりません。')
     return
   }
 
@@ -478,16 +840,18 @@ const createAndAssignCalendar = async () => {
     const calRes = await api.calendars.createCalendar({
       calendar_code: newCalendar.value.code,
       calendar_name: newCalendar.value.name,
-      calendar_type: 'SUPPLIER',
+      calendar_type: newCalendar.value.calendar_type,
+      is_line_assignable: newCalendar.value.is_line_assignable,
+      is_supplier_assignable: newCalendar.value.is_supplier_assignable,
     })
     const calendar = calRes.data
-    await api.lines.patchLine(line.id, { calendar: calendar.id })
+    await api.suppliers.patchSupplier(selectedSupplier.value.id, { calendar: calendar.id })
 
     await loadCalendars()
-    await loadLines()
+    await loadSuppliers()
     selectedCalendarId.value = calendar.id
-    currentLineCalendarId.value = calendar.id
-    newCalendar.value = { code: '', name: '' }
+    currentSupplierCalendarId.value = calendar.id
+    resetNewCalendar()
     showCreate.value = false
     await loadCalendarDays()
     alert('カレンダを作成し、仕入れ先へ割当しました。')
@@ -502,12 +866,11 @@ const createAndAssignCalendar = async () => {
 const assignCalendar = async () => {
   if (!canEdit.value) return
   if (!selectedSupplierId.value || !selectedCalendarId.value) return
-  const line = supplierToLine(selectedSupplierId.value)
-  if (!line) {
-    alert('仕入れ先に対応する購買ラインが見つかりません。')
+  if (!selectedSupplier.value) {
+    alert('仕入れ先が見つかりません。')
     return
   }
-  if (line.calendar === selectedCalendarId.value) {
+  if (selectedSupplier.value.calendar === selectedCalendarId.value) {
     alert('既に同じカレンダが割当されています。')
     return
   }
@@ -517,9 +880,9 @@ const assignCalendar = async () => {
 
   assigning.value = true
   try {
-    await api.lines.patchLine(line.id, { calendar: selectedCalendarId.value })
-    await loadLines()
-    currentLineCalendarId.value = selectedCalendarId.value
+    await api.suppliers.patchSupplier(selectedSupplier.value.id, { calendar: selectedCalendarId.value })
+    await loadSuppliers()
+    currentSupplierCalendarId.value = selectedCalendarId.value
     await loadCalendarDays()
     alert('カレンダを割り当てました。')
   } catch (e) {
@@ -533,16 +896,15 @@ const assignCalendar = async () => {
 const unassignCalendar = async () => {
   if (!canEdit.value) return
   if (!selectedSupplierId.value) return
-  const line = supplierToLine(selectedSupplierId.value)
-  if (!line) return
+  if (!selectedSupplier.value) return
   if (!confirm('カレンダの割当を解除しますか？ダイソウカレンダが既定値として使用されます。')) return
 
   assigning.value = true
   try {
-    await api.lines.patchLine(line.id, { calendar: null })
-    await loadLines()
+    await api.suppliers.patchSupplier(selectedSupplier.value.id, { calendar: null })
+    await loadSuppliers()
     selectedCalendarId.value = ''
-    currentLineCalendarId.value = ''
+    currentSupplierCalendarId.value = ''
     calendarDays.value = []
     alert('割当を解除しました。')
   } catch (e) {
@@ -566,6 +928,8 @@ const toggleDay = async (day) => {
         is_working_day: nextWorking,
         work_minutes: nextWorking ? (day.record.work_minutes ?? 480) : 0,
         work_pattern: day.record.work_pattern || null,
+        note: day.record.note || null,
+        is_delivery_day: Boolean(day.record.is_delivery_day),
       })
     } else {
       await api.calendars.createCalendarDay({
@@ -574,6 +938,8 @@ const toggleDay = async (day) => {
         is_working_day: nextWorking,
         work_minutes: nextWorking ? 480 : 0,
         work_pattern: null,
+        note: null,
+        is_delivery_day: false,
       })
     }
     await loadCalendarDays()
@@ -602,6 +968,7 @@ const saveDayNote = async (day, event) => {
         work_minutes: day.is_working_day ? (day.record.work_minutes ?? 480) : 0,
         work_pattern: day.record.work_pattern || null,
         note: inputNote || null,
+        is_delivery_day: Boolean(day.record.is_delivery_day),
       })
     } else {
       await api.calendars.createCalendarDay({
@@ -611,6 +978,7 @@ const saveDayNote = async (day, event) => {
         work_minutes: day.is_working_day ? 480 : 0,
         work_pattern: null,
         note: inputNote || null,
+        is_delivery_day: false,
       })
     }
     await loadCalendarDays()
@@ -623,10 +991,12 @@ const saveDayNote = async (day, event) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSuppliers(), loadLines(), loadCalendars()])
+  await Promise.all([loadSuppliers(), loadCalendars(), loadSupplierOrderPatterns()])
   const { start, end } = monthRange.value
   copyStartDate.value = ymd(start)
   copyEndDate.value = ymd(end)
+  deliveryGenerateStartDate.value = ymd(start)
+  deliveryGenerateEndDate.value = ymd(end)
   await loadDaisoCalendarDays()
 })
 </script>
@@ -695,6 +1065,18 @@ onMounted(async () => {
 .action-field .btn {
   min-width: 140px;
 }
+.flag-field {
+  min-width: 120px;
+}
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+}
+.check-inline input {
+  min-width: auto;
+}
 .calendar-label {
   font-size: 13px;
   color: #334155;
@@ -705,6 +1087,29 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+.delivery-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.delivery-pattern {
+  font-size: 12px;
+  color: #334155;
+}
+.delivery-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.delivery-range input {
+  min-width: 160px;
+}
+.delivery-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .month-head {
   display: flex;
@@ -760,6 +1165,16 @@ onMounted(async () => {
 }
 .day-main {
   text-align: left;
+}
+.delivery-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
 }
 .day-check {
   display: inline-flex;

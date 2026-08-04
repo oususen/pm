@@ -144,14 +144,6 @@ const tiles = computed(() => {
       resource: "production.process_input",
     },
     {
-      to: "/production/product-photo-upload",
-      label: t("productionMenu.tiles.productPhotoUpload"),
-      icon: "🖼️",
-      category: "other",
-      required: "edit",
-      resource: "production.process_input",
-    },
-    {
       to: "/production/record-inquiry",
       label: t("productionMenu.tiles.productionRecordInquiry"),
       icon: "📑",

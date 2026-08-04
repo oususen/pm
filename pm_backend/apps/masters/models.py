@@ -358,6 +358,7 @@ class CalendarDay(models.Model):
     calendar = models.ForeignKey(Calendar, on_delete=models.CASCADE, verbose_name='カレンダ')
     target_date = models.DateField(verbose_name='対象日')
     is_working_day = models.BooleanField(verbose_name='稼働日')
+    is_delivery_day = models.BooleanField(default=False, verbose_name='納入日')
     is_holiday_work = models.BooleanField(default=False, verbose_name='休日出勤')
     work_minutes = models.IntegerField(null=True, blank=True, verbose_name='稼働分')
     work_pattern = models.ForeignKey(WorkPattern, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='勤務パターン')

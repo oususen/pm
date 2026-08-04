@@ -306,9 +306,9 @@ class CalendarSerializer(serializers.ModelSerializer):
         calendar_type = attrs.get('calendar_type', getattr(self.instance, 'calendar_type', None))
         if self.instance is None and not calendar_type:
             raise serializers.ValidationError({'calendar_type': 'カレンダ区分は必須です。'})
-        is_line_assignable, is_supplier_assignable = self._flags_by_type(calendar_type)
-        attrs['is_line_assignable'] = is_line_assignable
-        attrs['is_supplier_assignable'] = is_supplier_assignable
+        default_line_assignable, default_supplier_assignable = self._flags_by_type(calendar_type)
+        attrs['is_line_assignable'] = attrs.get('is_line_assignable', default_line_assignable)
+        attrs['is_supplier_assignable'] = attrs.get('is_supplier_assignable', default_supplier_assignable)
         return attrs
 
     def get_created_by_name(self, obj):

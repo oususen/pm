@@ -72,7 +72,7 @@
         <div class="form-group">
           <label>納入日（実行日から何営業日後） <span class="required">*</span></label>
           <div class="time-row">
-            <input v-model.number="form.lead_time_days" type="number" min="1" max="30" class="time-input" />
+            <input v-model.number="form.lead_time_days" type="number" min="0" max="30" class="time-input" />
             <span class="suffix">営業日後</span>
           </div>
         </div>
@@ -285,7 +285,9 @@ const closeModal = () => {
 const validate = () => {
   const errors = []
   if (!form.supplier_id) errors.push('仕入先')
-  if (!form.lead_time_days) errors.push('納入日（営業日後）')
+  if (form.lead_time_days === null || form.lead_time_days === '' || Number.isNaN(form.lead_time_days)) {
+    errors.push('納入日（営業日後）')
+  }
   if (!form.progress_days_back) errors.push('進度表（営業日前）')
   if (!form.progress_days_forward) errors.push('進度表（日後・発行日基準）')
   if (!form.reply_to_email?.trim()) errors.push('返信先メールアドレス')
