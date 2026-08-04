@@ -2969,6 +2969,7 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
                 'progress_days_back': config.progress_days_back,
                 'progress_days_forward': config.progress_days_forward,
                 'calc_mode': config.calc_mode,
+                'delivery_day_mode': config.delivery_day_mode,
                 'send_order_excel': config.send_order_excel,
                 'email_body_custom': config.email_body_custom,
                 'reply_to_email': config.reply_to_email,
@@ -2997,10 +2998,11 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
             is_enabled=_parse_bool(request.data.get('is_enabled')),
             scheduled_hour=int(request.data.get('scheduled_hour', 7)),
             scheduled_minute=int(request.data.get('scheduled_minute', 0)),
-            lead_time_days=int(request.data.get('lead_time_days', 2)),
+            lead_time_days=int(request.data.get('lead_time_days', 5)),
             progress_days_back=int(request.data.get('progress_days_back', 7)),
             progress_days_forward=int(request.data.get('progress_days_forward', 30)),
             calc_mode=request.data.get('calc_mode', PurchaseAutoOrderSendConfig.CALC_MODE_DEMAND),
+            delivery_day_mode=request.data.get('delivery_day_mode', PurchaseAutoOrderSendConfig.DELIVERY_DAY_MODE_PATTERN),
             send_order_excel=_parse_bool(request.data.get('send_order_excel')),
             email_body_custom=request.data.get('email_body_custom', ''),
             reply_to_email=request.data.get('reply_to_email', ''),
@@ -3047,6 +3049,8 @@ class PurchaseAutoOrderSendConfigDetailView(APIView):
             config.progress_days_forward = int(request.data['progress_days_forward'])
         if 'calc_mode' in request.data:
             config.calc_mode = request.data['calc_mode']
+        if 'delivery_day_mode' in request.data:
+            config.delivery_day_mode = request.data['delivery_day_mode']
         if 'send_order_excel' in request.data:
             config.send_order_excel = _parse_bool(request.data['send_order_excel'])
         if 'email_body_custom' in request.data:

@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import Q, Sum
 from openpyxl import Workbook
 
-from masters.models import Product, Supplier
+from masters.models import CalendarDay, Product, Supplier
 from orders.utils.calendar_utils import WorkingDayCalculator
 from production.models import LineDemand
 from production.models_line_backlog import LineBacklog
@@ -35,6 +35,22 @@ def _resolve_shifted_pattern_dates(schedule, window_start, window_end, calc):
     return sorted(shifted_dates)
 
 
+def _resolve_supplier_calendar_delivery_dates(supplier, window_start, window_end):
+    calendar_id = getattr(supplier, 'calendar_id', None)
+    if not calendar_id:
+        return []
+    return list(
+        CalendarDay.objects.filter(
+            calendar_id=calendar_id,
+            target_date__gte=window_start,
+            target_date__lte=window_end,
+            is_delivery_day=True,
+        )
+        .order_by('target_date')
+        .values_list('target_date', flat=True)
+    )
+
+
 def resolve_delivery_cycles(config, base_date=None):
     from .models import SupplierOrderSchedule
 
@@ -42,14 +58,15 @@ def resolve_delivery_cycles(config, base_date=None):
     today = base_date or date.today()
     daiso_cal = _get_daiso_calendar()
     calc = WorkingDayCalculator(daiso_cal)
-    lead_time_days = 2 if config.lead_time_days is None else int(config.lead_time_days)
+    lead_time_days = 5 if config.lead_time_days is None else int(config.lead_time_days)
     earliest_delivery_date = calc.add_working_days(today, lead_time_days)
+    delivery_day_mode = getattr(config, 'delivery_day_mode', 'PATTERN')
 
     schedule = SupplierOrderSchedule.objects.filter(
         supplier_id=supplier.id,
         is_enabled=True,
     ).select_related('pattern').first()
-    if not schedule or not schedule.pattern:
+    if delivery_day_mode == 'PATTERN' and (not schedule or not schedule.pattern):
         return {
             'status': 'SKIPPED',
             'message': f'仕入先 {supplier.supplier_code} の納入パターンが未設定です',
@@ -61,7 +78,18 @@ def resolve_delivery_cycles(config, base_date=None):
     horizon_end = _resolve_planning_horizon_end(calc, today, config.progress_days_forward)
     window_start = earliest_delivery_date - timedelta(days=7)
     window_end = horizon_end + timedelta(days=120)
-    pattern_dates = _resolve_shifted_pattern_dates(schedule, window_start, window_end, calc)
+    if delivery_day_mode == 'SUPPLIER_CALENDAR':
+        if not getattr(supplier, 'calendar_id', None):
+            return {
+                'status': 'SKIPPED',
+                'message': f'仕入先 {supplier.supplier_code} の仕入れ先カレンダが未設定です',
+                'cycles': [],
+                'schedule': schedule,
+                'first_delivery_date': earliest_delivery_date,
+            }
+        pattern_dates = _resolve_supplier_calendar_delivery_dates(supplier, window_start, window_end)
+    else:
+        pattern_dates = _resolve_shifted_pattern_dates(schedule, window_start, window_end, calc)
 
     if earliest_delivery_date not in pattern_dates:
         return {

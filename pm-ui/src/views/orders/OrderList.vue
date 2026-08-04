@@ -472,8 +472,8 @@ onMounted(() => {
 }
 
 .modal-large {
-  min-width: 800px;
-  max-width: 900px;
+  min-width: 960px;
+  max-width: 1100px;
 }
 
 .modal-content h2 {

@@ -154,7 +154,18 @@
           <div class="month-title">{{ monthTitle }}</div>
           <button class="btn" @click="moveMonth(1)" :disabled="!selectedCalendarId">次月へ</button>
         </div>
-        <div class="weekday-bulk"></div>
+        <div class="weekday-bulk">
+          <div v-if="selectedCalendarId && unsavedDayCount > 0" class="unsaved-notice">
+            <span class="unsaved-notice-text">未保存 {{ unsavedDayCount }}日</span>
+            <button
+              class="btn primary"
+              @click="saveAllDefaults"
+              :disabled="savingAll || !canEdit"
+            >
+              {{ savingAll ? '保存中...' : '一括保存' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div v-if="!selectedCalendarId" class="empty">
@@ -182,7 +193,10 @@
             <td v-for="day in week" :key="day.key" :class="cellClass(day)">
               <div class="day-cell-btn">
                 <div class="day-main">
-                  <div class="day-num">{{ day.day }}</div>
+                  <div class="day-num">
+                    {{ day.day }}
+                    <span v-if="day.inMonth && !day.record" class="unsaved-mark">未設定</span>
+                  </div>
                   <div v-if="day.inMonth && day.record?.is_delivery_day" class="delivery-badge">納入日</div>
                   <label v-if="day.inMonth" class="day-check delivery-toggle">
                     <input
@@ -278,6 +292,7 @@ const deliveryGenerateStartDate = ref('')
 const deliveryGenerateEndDate = ref('')
 const generatingDeliveryDays = ref(false)
 const clearingDeliveryDays = ref(false)
+const savingAll = ref(false)
 const weekdayNames = ['日', '月', '火', '水', '木', '金', '土']
 const weekdayChecks = ref([false, false, false, false, false, false, false])
 
@@ -412,7 +427,45 @@ const cellClass = (day) => ({
   out: !day.inMonth,
   work: day.inMonth && day.is_working_day,
   holiday: day.inMonth && !day.is_working_day,
+  unsaved: day.inMonth && !day.record,
 })
+
+const unsavedDayCount = computed(() => {
+  if (!selectedCalendarId.value) return 0
+  return monthWeeks.value.flat().filter(d => d.inMonth && !d.record).length
+})
+
+const saveAllDefaults = async () => {
+  if (!canEdit.value || !selectedCalendarId.value) return
+  const unsavedDays = monthWeeks.value.flat().filter(d => d.inMonth && !d.record)
+  if (!unsavedDays.length) {
+    alert('すべての日が保存済みです。')
+    return
+  }
+  if (!confirm(`${unsavedDays.length}件の未設定日を現在の表示内容で保存します。実行しますか？`)) return
+
+  savingAll.value = true
+  try {
+    await Promise.all(unsavedDays.map(day =>
+      api.calendars.createCalendarDay({
+        calendar: selectedCalendarId.value,
+        target_date: day.date,
+        is_working_day: day.is_working_day,
+        is_delivery_day: false,
+        work_minutes: day.is_working_day ? 480 : 0,
+        work_pattern: null,
+        note: null,
+      }),
+    ))
+    await loadCalendarDays()
+    alert('一括保存が完了しました。')
+  } catch (e) {
+    console.error('一括保存エラー', e)
+    alert('一括保存に失敗しました。')
+  } finally {
+    savingAll.value = false
+  }
+}
 
 const loadSuppliers = async () => {
   const res = await api.suppliers.getSuppliers()
@@ -695,7 +748,44 @@ const generateDeliveryDays = async () => {
     alert('この仕入れ先の納入パターンが未設定です。')
     return
   }
+  if (unsavedDayCount.value > 0) {
+    if (!daisoCalendarId.value) {
+      alert('カレンダが未作成です。先に「一括保存」でカレンダを保存してください。')
+      return
+    }
+    if (!confirm('カレンダが未作成です。ダイソウカレンダからコピーして作成しますか？\n作成後、仕入れ先に合わせて編集してから再度「納入日生成」を実行してください。')) return
+    generatingDeliveryDays.value = true
+    try {
+      await api.calendars.copyCalendar(daisoCalendarId.value, {
+        target_calendar_id: selectedCalendarId.value,
+        start_date: deliveryGenerateStartDate.value,
+        end_date: deliveryGenerateEndDate.value,
+      })
+      await loadCalendarDays()
+      alert('ダイソウカレンダをコピーしました。必要に応じて編集してから再度「納入日生成」を実行してください。')
+    } catch (e) {
+      console.error('ダイソウカレンダコピーエラー', e)
+      alert('ダイソウカレンダのコピーに失敗しました。')
+    } finally {
+      generatingDeliveryDays.value = false
+    }
+    return
+  }
+  const savedDaisoDays = daisoCalendarDays.value
+  const pattern = selectedSchedulePattern.value
+  if (pattern.recurrence_type === 'EVERY_N_BUSINESS_DAYS') {
+    const refDateText = selectedSupplierSchedule.value?.start_date || pattern.start_date
+    if (refDateText) {
+      const res = await api.calendars.getCalendarDays(selectedCalendarId.value, {
+        page_size: 5000,
+        target_date__gte: refDateText,
+        target_date__lte: deliveryGenerateEndDate.value,
+      })
+      daisoCalendarDays.value = res.data.results || res.data || []
+    }
+  }
   const deliveryDates = generatePatternDatesInRange()
+  daisoCalendarDays.value = savedDaisoDays
   if (!deliveryDates.length) {
     alert('指定期間に生成対象の納入日がありません。')
     return
@@ -1128,6 +1218,21 @@ onMounted(async () => {
   gap: 12px;
   justify-content: flex-end;
 }
+.unsaved-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.unsaved-notice-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #b45309;
+  white-space: nowrap;
+}
 .month-title {
   font-size: 16px;
   font-weight: 700;
@@ -1218,6 +1323,22 @@ td.work .day-cell-btn {
 }
 td.holiday .day-cell-btn {
   background: #fef2f2;
+}
+td.unsaved .day-cell-btn {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 6px,
+    rgba(0, 0, 0, 0.04) 6px,
+    rgba(0, 0, 0, 0.04) 12px
+  );
+}
+.unsaved-mark {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  vertical-align: middle;
+  margin-left: 4px;
 }
 td.out .day-cell-btn {
   background: #f8fafc;

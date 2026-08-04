@@ -2069,8 +2069,11 @@ class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         except Calendar.DoesNotExist:
             return Response({'error': 'コピー先カレンダーが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
 
-        if target_calendar.is_line_assignable is False:
-            return Response({'error': 'コピー先はライン割当可能なカレンダーのみ指定できます'}, status=status.HTTP_400_BAD_REQUEST)
+        if target_calendar.is_line_assignable is False and target_calendar.is_supplier_assignable is False:
+            return Response(
+                {'error': 'コピー先は割当可能なカレンダーを指定してください'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # コピー元の期間内データ取得
         src_days = CalendarDay.objects.filter(
@@ -2096,6 +2099,7 @@ class CalendarViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 calendar=target_calendar,
                 target_date=d.target_date,
                 is_working_day=d.is_working_day,
+                is_delivery_day=d.is_delivery_day,
                 is_holiday_work=d.is_holiday_work,
                 work_minutes=d.work_minutes,
                 work_pattern=d.work_pattern,

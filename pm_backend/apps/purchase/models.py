@@ -423,6 +423,12 @@ class PurchaseAutoOrderSendConfig(models.Model):
         (CALC_MODE_DEMAND, '需要そのまま'),
         (CALC_MODE_LOT_ROUNDED, 'ロット丸め'),
     ]
+    DELIVERY_DAY_MODE_PATTERN = 'PATTERN'
+    DELIVERY_DAY_MODE_SUPPLIER_CALENDAR = 'SUPPLIER_CALENDAR'
+    DELIVERY_DAY_MODE_CHOICES = [
+        (DELIVERY_DAY_MODE_PATTERN, '納入パターン'),
+        (DELIVERY_DAY_MODE_SUPPLIER_CALENDAR, '仕入れ先カレンダ'),
+    ]
 
     supplier = models.OneToOneField(
         Supplier,
@@ -433,7 +439,7 @@ class PurchaseAutoOrderSendConfig(models.Model):
     is_enabled = models.BooleanField(default=True, verbose_name='有効')
     scheduled_hour = models.PositiveSmallIntegerField(default=7, verbose_name='実行時（時）')
     scheduled_minute = models.PositiveSmallIntegerField(default=0, verbose_name='実行時（分）')
-    lead_time_days = models.PositiveSmallIntegerField(default=2, verbose_name='納入日（何営業日後）')
+    lead_time_days = models.PositiveSmallIntegerField(default=5, verbose_name='納入日（何営業日後）')
     progress_days_back = models.PositiveSmallIntegerField(default=7, verbose_name='進度表（何営業日前から）')
     progress_days_forward = models.PositiveSmallIntegerField(default=30, verbose_name='進度表（何日後まで）')
     calc_mode = models.CharField(
@@ -441,6 +447,12 @@ class PurchaseAutoOrderSendConfig(models.Model):
         choices=CALC_MODE_CHOICES,
         default=CALC_MODE_DEMAND,
         verbose_name='数量算出方式',
+    )
+    delivery_day_mode = models.CharField(
+        max_length=30,
+        choices=DELIVERY_DAY_MODE_CHOICES,
+        default=DELIVERY_DAY_MODE_PATTERN,
+        verbose_name='納入日判定方式',
     )
     send_order_excel = models.BooleanField(default=True, verbose_name='注文書Excel送信')
     email_body_custom = models.TextField(blank=True, default='', verbose_name='メール本文（カスタム）')

@@ -17,6 +17,7 @@
             <th>実行時刻</th>
             <th>納入日</th>
             <th>進度表期間</th>
+            <th>納入日判定</th>
             <th>数量方式</th>
             <th>有効</th>
             <th>最終実行</th>
@@ -31,6 +32,7 @@
             <td>{{ String(config.scheduled_hour).padStart(2, '0') }}:{{ String(config.scheduled_minute).padStart(2, '0') }}</td>
             <td>{{ config.lead_time_days }}営業日後</td>
             <td>{{ config.progress_days_back }}営業日前 ～ {{ config.progress_days_forward }}日後</td>
+            <td>{{ deliveryDayModeLabel(config.delivery_day_mode) }}</td>
             <td>{{ calcModeLabel(config.calc_mode) }}</td>
             <td><span :class="['badge', config.is_enabled ? 'badge-on' : 'badge-off']">{{ config.is_enabled ? '有効' : '無効' }}</span></td>
             <td>{{ config.last_run_at || '-' }}</td>
@@ -96,6 +98,17 @@
         </div>
 
         <div class="form-group">
+          <label>納入日判定方式 <span class="required">*</span></label>
+          <select v-model="form.delivery_day_mode">
+            <option value="PATTERN">納入パターン</option>
+            <option value="SUPPLIER_CALENDAR">仕入れ先カレンダ</option>
+          </select>
+          <div v-if="showSupplierCalendarWarning" class="form-warning">
+            選択した仕入先カレンダに納入日が未設定です。仕入れ先カレンダ判定では納入日を判定できません。
+          </div>
+        </div>
+
+        <div class="form-group">
           <label class="checkbox-label"><input v-model="form.is_enabled" type="checkbox" /> 有効</label>
         </div>
 
@@ -151,7 +164,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
 import UserChipSelect from './UserChipSelect.vue'
 import ContactEmailSelect from './ContactEmailSelect.vue'
@@ -166,16 +179,20 @@ const showModal = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
 const running = reactive(new Set())
+const supplierCalendarHasDeliveryDays = ref(true)
+const checkingSupplierCalendarDays = ref(false)
+const todayYmd = new Date().toISOString().slice(0, 10)
 
 const form = reactive({
   supplier_id: '',
   is_enabled: true,
   scheduled_hour: 7,
   scheduled_minute: 0,
-  lead_time_days: 2,
+  lead_time_days: 5,
   progress_days_back: 7,
   progress_days_forward: 30,
-  calc_mode: 'DEMAND',
+  calc_mode: 'LOT_ROUNDED',
+  delivery_day_mode: 'SUPPLIER_CALENDAR',
   send_order_excel: true,
   email_body_custom: '',
   reply_to_email: '',
@@ -203,10 +220,24 @@ const selectedSupplierKeywords = computed(() => {
   if (!selectedSupplier.value) return []
   return [selectedSupplier.value.supplier_code, selectedSupplier.value.supplier_name]
 })
+const showSupplierCalendarWarning = computed(() => {
+  return (
+    form.delivery_day_mode === 'SUPPLIER_CALENDAR'
+    && !!selectedSupplier.value
+    && !!selectedSupplier.value.calendar
+    && !checkingSupplierCalendarDays.value
+    && !supplierCalendarHasDeliveryDays.value
+  )
+})
 
 const calcModeLabel = (mode) => {
   if (mode === 'LOT_ROUNDED') return 'ロット丸め'
   return '需要そのまま'
+}
+
+const deliveryDayModeLabel = (mode) => {
+  if (mode === 'SUPPLIER_CALENDAR') return '仕入れ先カレンダ'
+  return '納入パターン'
 }
 
 const loadConfigs = async () => {
@@ -234,21 +265,45 @@ const loadContacts = async () => {
   contactList.value = (res.data?.results || res.data || []).filter((contact) => contact.email)
 }
 
+const checkSelectedSupplierCalendarDeliveryDays = async () => {
+  supplierCalendarHasDeliveryDays.value = true
+  checkingSupplierCalendarDays.value = false
+  if (form.delivery_day_mode !== 'SUPPLIER_CALENDAR') return
+  if (!selectedSupplier.value?.calendar) return
+
+  checkingSupplierCalendarDays.value = true
+  try {
+    const res = await api.calendars.getCalendarDays(selectedSupplier.value.calendar)
+    const days = res.data?.results || res.data || []
+    supplierCalendarHasDeliveryDays.value = days.some(
+      (day) => Boolean(day.is_delivery_day) && String(day.target_date || '') >= todayYmd,
+    )
+  } catch (error) {
+    console.error('仕入先カレンダ納入日確認エラー', error)
+    supplierCalendarHasDeliveryDays.value = true
+  } finally {
+    checkingSupplierCalendarDays.value = false
+  }
+}
+
 const resetForm = () => {
   form.supplier_id = ''
   form.is_enabled = true
   form.scheduled_hour = 7
   form.scheduled_minute = 0
-  form.lead_time_days = 2
+  form.lead_time_days = 5
   form.progress_days_back = 7
   form.progress_days_forward = 30
-  form.calc_mode = 'DEMAND'
+  form.calc_mode = 'LOT_ROUNDED'
+  form.delivery_day_mode = 'SUPPLIER_CALENDAR'
   form.send_order_excel = true
   form.email_body_custom = ''
   form.reply_to_email = ''
   form.cc_emails = ''
   form.notify_on_failure_user_ids = []
   form.notify_on_non_delivery_user_ids = []
+  supplierCalendarHasDeliveryDays.value = true
+  checkingSupplierCalendarDays.value = false
 }
 
 const openNew = () => {
@@ -269,6 +324,7 @@ const openEdit = (config) => {
   form.progress_days_back = config.progress_days_back ?? 7
   form.progress_days_forward = config.progress_days_forward ?? 30
   form.calc_mode = config.calc_mode
+  form.delivery_day_mode = config.delivery_day_mode || 'PATTERN'
   form.send_order_excel = config.send_order_excel
   form.email_body_custom = config.email_body_custom || ''
   form.reply_to_email = config.reply_to_email || ''
@@ -294,6 +350,7 @@ const validate = () => {
   if (!form.cc_emails?.trim()) errors.push('業務員CC送信先メール')
   if (!form.notify_on_failure_user_ids.length) errors.push('失敗時の通知先')
   if (!form.notify_on_non_delivery_user_ids.length) errors.push('納入日でないときの通知先')
+  if (showSupplierCalendarWarning.value) errors.push('仕入先カレンダ（納入日未設定）')
   if (errors.length) {
     alert(`以下の項目は必須です:\n${errors.join('\n')}`)
     return false
@@ -310,6 +367,7 @@ const buildPayload = () => ({
   progress_days_back: form.progress_days_back,
   progress_days_forward: form.progress_days_forward,
   calc_mode: form.calc_mode,
+  delivery_day_mode: form.delivery_day_mode,
   send_order_excel: form.send_order_excel,
   email_body_custom: form.email_body_custom,
   reply_to_email: form.reply_to_email,
@@ -378,6 +436,13 @@ const runNow = async (config) => {
 onMounted(async () => {
   await Promise.all([loadConfigs(), loadSuppliers(), loadUsers(), loadContacts()])
 })
+
+watch(
+  () => [form.supplier_id, form.delivery_day_mode, selectedSupplier.value?.calendar],
+  () => {
+    checkSelectedSupplierCalendarDeliveryDays()
+  },
+)
 </script>
 
 <style scoped>
@@ -405,6 +470,7 @@ onMounted(async () => {
 .time-row { display: flex; align-items: center; gap: 4px; }
 .time-input { width: 60px; text-align: center; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
 .suffix { font-size: 13px; color: #475569; }
+.form-warning { margin-top: 6px; padding: 8px 10px; border-radius: 4px; background: #fff7ed; color: #9a3412; font-size: 12px; border: 1px solid #fdba74; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .required { color: #dc2626; }
