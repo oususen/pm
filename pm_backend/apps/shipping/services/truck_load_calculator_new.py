@@ -69,6 +69,7 @@ def _pack_shelf(bed_len, bed_wid, slots):
             'w': str(length),
             'd': str(width),
             'rotated': rotated,
+            'lock_rotation': bool(slot.get('lock_rotation', False)),
         })
         row_x = x + length
         row_h = max(row_h, width)
@@ -130,6 +131,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
                 'w': str(len_a),
                 'd': str(wid_a),
                 'rotated': rot_a,
+                'lock_rotation': bool(slot.get('lock_rotation', False)),
             })
             of_x += len_a
             of_h = max(of_h, wid_a)
@@ -167,6 +169,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
             'w': str(length),
             'd': str(width),
             'rotated': rotated,
+            'lock_rotation': bool(slot.get('lock_rotation', False)),
         })
         max_x = max(max_x, fx2)
         max_y = max(max_y, fy2)
@@ -241,6 +244,7 @@ def _pack_bay(bed_len, bed_wid, slots):
                 'w': str(len_a),
                 'd': str(wid_a),
                 'rotated': rot_a,
+                'lock_rotation': bool(slot.get('lock_rotation', False)),
             })
             of_x += len_a
             of_h = max(of_h, wid_a)
@@ -259,6 +263,7 @@ def _pack_bay(bed_len, bed_wid, slots):
             'w': str(length),
             'd': str(width),
             'rotated': rotated,
+            'lock_rotation': bool(slot.get('lock_rotation', False)),
         })
         bay_w += width
         bay_len = max(bay_len, length)
@@ -300,9 +305,14 @@ def _pack_column(bed_len, bed_wid, slots):
         rep = group_slots[0]
         len_a = _to_decimal(rep.get('length'))
         wid_a = _to_decimal(rep.get('width'))
+        locked = bool(rep.get('lock_rotation', False))
         fp_count = len(group_slots)
         options = []
-        for (w, l, rotated) in [(wid_a, len_a, False), (len_a, wid_a, True)]:
+        # 向き固定（容器マスタで長手/短手指定）の品目は現在向きのみ使用する
+        orientation_options = [(wid_a, len_a, False)]
+        if not locked:
+            orientation_options.append((len_a, wid_a, True))
+        for (w, l, rotated) in orientation_options:
             if w > bed_wid or w <= 0 or l <= 0:
                 continue
             max_units = int(bed_wid // w)
@@ -394,6 +404,7 @@ def _pack_column(bed_len, bed_wid, slots):
                         'layers': slot.get('layers', 1),
                         'x': str(band_x), 'y': str(band_y),
                         'w': str(l), 'd': str(w), 'rotated': rotated,
+                        'lock_rotation': bool(slot.get('lock_rotation', False)),
                     })
                     group_bands[bi] = (band_y, band_w, band_x + l)
                     max_x = max(max_x, band_x + l)
@@ -412,6 +423,7 @@ def _pack_column(bed_len, bed_wid, slots):
                     'layers': slot.get('layers', 1),
                     'x': str(of_x), 'y': str(of_y),
                     'w': str(l), 'd': str(w), 'rotated': rotated,
+                    'lock_rotation': bool(slot.get('lock_rotation', False)),
                 })
                 of_x += l
                 of_h = max(of_h, w)
@@ -438,6 +450,7 @@ def _pack_column(bed_len, bed_wid, slots):
                         'layers': slot.get('layers', 1),
                         'x': str(band_used_x), 'y': str(band_y),
                         'w': str(l), 'd': str(w), 'rotated': rotated,
+                        'lock_rotation': bool(slot.get('lock_rotation', False)),
                     })
                     bands[bi] = (band_y, band_w, band_used_x + l)
                     max_x = max(max_x, band_used_x + l)
@@ -456,6 +469,7 @@ def _pack_column(bed_len, bed_wid, slots):
                     'layers': slot.get('layers', 1),
                     'x': str(of_x), 'y': str(of_y),
                     'w': str(l), 'd': str(w), 'rotated': rotated,
+                    'lock_rotation': bool(slot.get('lock_rotation', False)),
                 })
                 of_x += l
                 of_h = max(of_h, w)
@@ -562,7 +576,10 @@ def _swap_overflow(in_bed, overflow, bed_len, bed_wid):
         for oi, o_item in enumerate(overflow):
             o_len = _to_decimal(o_item.get('w'))
             o_wid = _to_decimal(o_item.get('d'))
-            o_orientations = [(o_len, o_wid), (o_wid, o_len)]
+            # 向き固定のアイテムは現在向きのみで再配置する
+            o_orientations = [(o_len, o_wid)]
+            if not bool(o_item.get('lock_rotation', False)):
+                o_orientations.append((o_wid, o_len))
 
             for pi in range(len(in_bed) - 1, -1, -1):
                 p_item = in_bed[pi]
@@ -609,7 +626,10 @@ def _swap_overflow(in_bed, overflow, bed_len, bed_wid):
 
                 p_len = _to_decimal(p_item.get('w'))
                 p_wid = _to_decimal(p_item.get('d'))
-                p_orientations = [(p_len, p_wid), (p_wid, p_len)]
+                # 向き固定のアイテムは現在向きのみで再配置する
+                p_orientations = [(p_len, p_wid)]
+                if not bool(p_item.get('lock_rotation', False)):
+                    p_orientations.append((p_wid, p_len))
 
                 p_best = None
                 p_best_score = None
@@ -711,9 +731,13 @@ def _rotation_variants(slots):
     - 各品目だけ回転
     - 全品目を回転
     を比較対象にする。
+    容器マスタで向きが固定（lock_rotation=True）された品目は回転候補に含めない。
     """
     if not slots:
         return [slots]
+
+    def _is_locked(slot):
+        return bool(slot.get('lock_rotation', False))
 
     group_keys = []
     seen = set()
@@ -725,6 +749,9 @@ def _rotation_variants(slots):
         if key in seen:
             continue
         seen.add(key)
+        # 向き固定の品目は回転候補に含めない
+        if _is_locked(slot):
+            continue
         group_keys.append(key)
 
     variants = [slots]
@@ -738,7 +765,12 @@ def _rotation_variants(slots):
             for slot in slots
         ])
 
-    variants.append([_flip_slot_orientation(slot) for slot in slots])
+    # 全品目を回転（向き固定の品目は除外）
+    if group_keys:
+        variants.append([
+            _flip_slot_orientation(slot) if not _is_locked(slot) else slot
+            for slot in slots
+        ])
 
     unique = []
     unique_keys = set()
@@ -971,10 +1003,14 @@ def _fill_gaps(in_bed, overflow, bed_len, bed_wid):
     for slot in overflow:
         slot_len = _to_decimal(slot.get('w'))
         slot_wid = _to_decimal(slot.get('d'))
+        # 向き固定のアイテムは現在向きのみで隙間へ詰める
+        orientations = ((slot_len, slot_wid),)
+        if not bool(slot.get('lock_rotation', False)):
+            orientations = ((slot_len, slot_wid), (slot_wid, slot_len))
         best = None
         best_score = None
         for idx, (fx, fy, fw, fh) in enumerate(free_rects):
-            for (length, width) in ((slot_len, slot_wid), (slot_wid, slot_len)):
+            for (length, width) in orientations:
                 if length <= fw and width <= fh:
                     anchors = (
                         (fx, fy),
@@ -1032,6 +1068,7 @@ def _calc_remaining(bed_len, bed_wid, base_slots, type_records):
             'length': record['length'],
             'width': record['width'],
             'rotated': record['rotated'],
+            'lock_rotation': record.get('lock_rotation', False),
         }
         lo, hi = 0, 50
         while lo < hi:
@@ -1169,10 +1206,25 @@ def calculate_truck_load(assignments, truck):
         if layers > 0:
             floor_slots = (container_count / layers).to_integral_value(rounding=ROUND_CEILING)
 
-        # 回転判定（回転で多く積める向きを採用）
+        # 向き判定
+        # - 容器マスタの向き設定（orientation）:
+        #   - 容器長手(long)  : 容器の長い辺をトラック荷台の両側（幅方向）へ固定
+        #   - 容器短手(short) : 容器の短い辺をトラック荷台の両側（幅方向）へ固定
+        #   - 自由(free)      : 自動判定（回転で多く積める向きを採用）
+        orientation = str(container.get('orientation') or 'free').strip().lower()
         cap_normal = int(bed_depth // cd) * int(bed_width // cw)
         cap_rotated = int(bed_depth // cw) * int(bed_width // cd)
-        rotated = cap_rotated > cap_normal
+        if orientation == 'long':
+            # 長い辺を幅方向(Y)へ → 奥行(depth)が長手なら回転
+            rotated = cd > cw
+            rotation_locked = True
+        elif orientation == 'short':
+            # 短い辺を幅方向(Y)へ → 幅(width)が長手なら回転
+            rotated = cw > cd
+            rotation_locked = True
+        else:
+            rotated = cap_rotated > cap_normal
+            rotation_locked = False
         # 表示座標: 横=長手(奥行), 縦=幅
         length = cd if not rotated else cw  # 長手方向の長さ
         width = cw if not rotated else cd   # 幅方向の長さ
@@ -1186,6 +1238,7 @@ def calculate_truck_load(assignments, truck):
             'length': length,
             'width': width,
             'rotated': rotated,
+            'lock_rotation': rotation_locked,
         })
 
         # フットプリントへの製品割当（同じ容器に複数製品が混在する場合も、ユニットを順に充填）
@@ -1232,6 +1285,7 @@ def calculate_truck_load(assignments, truck):
                 'length': length,
                 'width': width,
                 'rotated': rotated,
+                'lock_rotation': rotation_locked,
             })
 
     # パッキング（収まらないものも配置し、can_fit 判定）

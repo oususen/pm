@@ -94,6 +94,7 @@ def _to_decimal(value, default='0'):
 def _append_container_option(
     options, container_id, container_name, capacity,
     width=None, depth=None, height=None, stackable=None, max_stack=None,
+    orientation='free',
 ):
     if not container_id:
         return
@@ -108,6 +109,7 @@ def _append_container_option(
         'height': height,
         'stackable': stackable,
         'max_stack': max_stack,
+        'orientation': orientation or 'free',
     })
 
 
@@ -395,6 +397,7 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
             'can_mix': getattr(container, 'can_mix', True) if container else True,
             'stackable': getattr(container, 'stackable', True) if container else True,
             'max_stack': getattr(container, 'max_stack', 999) if container else 999,
+            'orientation': getattr(container, 'orientation', 'free') if container else 'free',
         },
     }
 
@@ -885,6 +888,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 'height': pc.container.height,
                 'stackable': pc.container.stackable,
                 'max_stack': pc.container.max_stack,
+                'orientation': pc.container.orientation or 'free',
             })
         for product_code, product in products.items():
             container = getattr(product, 'used_container', None)
@@ -900,6 +904,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 container.height,
                 container.stackable,
                 container.max_stack,
+                container.orientation or 'free',
             )
 
         # 配送進捗を取得

@@ -1515,6 +1515,7 @@ const planTruckModels = computed(() => {
               ch: parseNumber(container?.height),
               stackable: container?.stackable == null ? true : Boolean(container.stackable),
               maxStack: parseIntegerQty(container?.max_stack),
+              orientation: container?.orientation || 'free',
               capacity: Math.max(1, capacity),
               count: containerCount,
               qty,
@@ -1581,7 +1582,7 @@ const planTruckModels = computed(() => {
       return { placed: result, allFit, maxX, maxY }
     }
 
-    // 各品目のフロアスロット（段積みは1フットプリント、回転判定は積載量が増える向きを採用）
+    // 各品目のフロアスロット（段積みは1フットプリント、向きは容器マスタ設定を反映）
     const allSlots = []
     const typeSlots = []
     items.forEach((item) => {
@@ -1590,7 +1591,16 @@ const planTruckModels = computed(() => {
       const floorSlots = Math.ceil(item.count / layers)
       const capNormal = Math.floor(bedW / item.cw) * Math.floor(bedD / item.cd)
       const capRotated = Math.floor(bedW / item.cd) * Math.floor(bedD / item.cw)
-      const rotated = capRotated > capNormal
+      // 容器マスタの向き設定（long=容器長手 / short=容器短手 / free=自由=自動判定）
+      const orientation = String(item.orientation || 'free')
+      let rotated
+      if (orientation === 'long') {
+        rotated = item.cd > item.cw
+      } else if (orientation === 'short') {
+        rotated = item.cw > item.cd
+      } else {
+        rotated = capRotated > capNormal
+      }
       const len = rotated ? item.cw : item.cd
       const wid = rotated ? item.cd : item.cw
       const typeSlot = { item, len, wid, rotated }

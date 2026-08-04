@@ -56,6 +56,7 @@
             <th>最大重量</th>
             <th>混載</th>
             <th>積み重ね</th>
+            <th>向き</th>
             <th>使用製品</th>
             <th>操作</th>
           </tr>
@@ -73,6 +74,7 @@
             <td>{{ container.max_weight ?? '-' }}</td>
             <td>{{ container.can_mix ? '可' : '不可' }}</td>
             <td>{{ container.stackable ? '可' : '不可' }}</td>
+            <td>{{ orientationLabel(container.orientation) }}</td>
             <td class="products-cell">
               <template v-if="container.products && container.products.length">
                 <span v-for="p in container.products" :key="p.id" class="product-tag">
@@ -172,6 +174,15 @@
           <div class="form-group">
             <label>最大積み重ね段数</label>
             <input v-model.number="formData.max_stack" type="number" min="0" :disabled="!canEdit" />
+          </div>
+          <div class="form-group">
+            <label>向き（トラック両側へ向ける辺）</label>
+            <select v-model="formData.orientation" :disabled="!canEdit">
+              <option value="free">自由（自動判定）</option>
+              <option value="long">容器長手（長い辺を両側へ）</option>
+              <option value="short">容器短手（短い辺を両側へ）</option>
+            </select>
+            <p class="helper-text">※ 便計画の積載計算（パッキング配置・積載超過判定）に反映されます</p>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
@@ -299,6 +310,7 @@ const formData = ref({
   stackable: true,
   max_stack: 1,
   capacity: null,
+  orientation: 'free',
 })
 const canEdit = computed(() => canAccessMasterResource('masters.container_capacity', 'edit'))
 const newProductCode = ref('')
@@ -332,6 +344,7 @@ const showNewDialog = () => {
     stackable: true,
     max_stack: 1,
     capacity: null,
+    orientation: 'free',
   }
   showDialog.value = true
 }
@@ -345,6 +358,7 @@ const editContainer = (container) => {
     can_mix: container.can_mix ?? true,
     stackable: container.stackable ?? true,
     max_stack: container.max_stack ?? 1,
+    orientation: container.orientation || 'free',
     product_containers: (container.products || []).map((p) => ({ ...p })),
   }
   newProductCode.value = ''
@@ -562,6 +576,12 @@ const formatSize = (container) => {
   const parts = [container.width, container.depth, container.height].filter((v) => v)
   if (!parts.length) return '-'
   return parts.join(' × ')
+}
+
+const orientationLabel = (value) => {
+  if (value === 'long') return '容器長手'
+  if (value === 'short') return '容器短手'
+  return '自由'
 }
 
 onMounted(() => {

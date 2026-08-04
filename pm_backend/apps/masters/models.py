@@ -776,6 +776,18 @@ class ContainerCapacity(models.Model):
     stackable = models.BooleanField(null=True, blank=True, default=True, verbose_name='積み重ね可能')
     max_stack = models.IntegerField(null=True, blank=True, default=1, verbose_name='最大積み重ね段数')
     capacity = models.IntegerField(null=True, blank=True, verbose_name='入り数', help_text='容器に入る製品の個数')
+    orientation = models.CharField(
+        max_length=10,
+        choices=[
+            ('free', '自由（自動判定）'),
+            ('long', '容器長手'),
+            ('short', '容器短手'),
+        ],
+        default='free',
+        blank=True,
+        verbose_name='向き',
+        help_text='トラック荷台の両側（幅方向）に向ける辺。容器長手=長い辺を両側へ、容器短手=短い辺を両側へ、自由=自動判定',
+    )
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
 
     class Meta:
