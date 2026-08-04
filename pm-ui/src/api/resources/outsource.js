@@ -169,4 +169,12 @@ export const createOutsourceAPI = (client) => ({
   getSplitImportLogs(params = {}) {
     return client.get('/outsource/split-import-logs/', { params })
   },
+
+  // お久しぶり製品通知設定
+  getFirstArticleSetting() {
+    return client.get('/outsource-first-article-setting/')
+  },
+  saveFirstArticleSetting(data) {
+    return client.patch('/outsource-first-article-setting/', data)
+  },
 })

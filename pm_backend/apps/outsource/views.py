@@ -1,11 +1,13 @@
+import json
 from io import BytesIO
 from datetime import timedelta, datetime
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.http import HttpResponse
 from django.db import models
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import api_view, action
 from rest_framework.parsers import MultiPartParser, JSONParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -13,13 +15,14 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from masters.models import Calendar, Contact
 from orders.utils.calendar_utils import subtract_working_days
 from shipping.services.email_service import EmailService
+from system_settings.models import SystemSetting
 
 from .models import (
     Subcontractor, OutsourceItem, OutsourceBOM, OutsourceMaterial,
     OutsourceOrder, OutsourceSplit, MaterialRequirement,
     SubcontractorDelivery, CustomerShipment,
     MaterialStockTransaction, ProductStockTransaction,
-    SplitImportLog,
+    SplitImportLog, OutsourceFirstArticleNoticeLog,
 )
 from .serializers import (
     SubcontractorSerializer,
@@ -37,6 +40,7 @@ from .serializers import (
 )
 from .services.csv_import import (
     FIRST_ARTICLE_CONTACT_TYPES,
+    DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS,
     build_first_article_email_body,
     import_fb_order_file,
 )
@@ -107,6 +111,51 @@ def _serialize_contact(contact):
         'contact_type': contact.contact_type,
         'display_name': display_name or contact.email,
     }
+
+
+OUTSOURCE_FIRST_ARTICLE_DAYS_KEY = 'outsource.first_article.days'
+OUTSOURCE_FIRST_ARTICLE_RECIPIENT_IDS_KEY = 'outsource.first_article.recipient_user_ids'
+
+
+def _parse_user_ids(raw_value):
+    if raw_value is None:
+        return []
+    text = str(raw_value).strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return sorted(set(int(v) for v in parsed if v is not None))
+    except Exception:
+        pass
+    return []
+
+
+def _get_outsource_first_article_settings():
+    days_setting = SystemSetting.objects.filter(key=OUTSOURCE_FIRST_ARTICLE_DAYS_KEY).first()
+    ids_setting = SystemSetting.objects.filter(key=OUTSOURCE_FIRST_ARTICLE_RECIPIENT_IDS_KEY).first()
+
+    try:
+        days = int(str(days_setting.value).strip()) if days_setting and str(days_setting.value).strip() else DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS
+    except (TypeError, ValueError):
+        days = DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS
+    if days < 1:
+        days = 1
+
+    recipient_user_ids = _parse_user_ids(ids_setting.value if ids_setting else '')
+    return {
+        'days': days,
+        'recipient_user_ids': recipient_user_ids,
+    }
+
+
+def _resolve_user_emails(user_ids):
+    if not user_ids:
+        return []
+    User = get_user_model()
+    users = User.objects.filter(id__in=user_ids, is_active=True).exclude(email='')
+    return list(users.values_list('email', flat=True))
 
 
 def _get_first_article_contacts():
@@ -192,6 +241,7 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
 
         encoding = request.data.get('encoding', 'shift_jis')
         content = file.read()
+        settings = _get_outsource_first_article_settings()
         try:
             user_id = request.user.id if request.user and request.user.is_authenticated else None
             results = import_fb_order_file(
@@ -199,6 +249,7 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
                 filename=getattr(file, 'name', ''),
                 encoding=encoding,
                 user_id=user_id,
+                lookback_days=settings['days'],
             )
         except Exception as e:
             return Response(
@@ -216,7 +267,13 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='first-article-contacts')
     def first_article_contacts(self, request):
         contacts = [_serialize_contact(contact) for contact in _get_first_article_contacts()]
-        return Response(contacts)
+        settings = _get_outsource_first_article_settings()
+        user_emails = _resolve_user_emails(settings['recipient_user_ids'])
+        return Response({
+            'contacts': contacts,
+            'setting_user_emails': user_emails,
+            'lookback_days': settings['days'],
+        })
 
     @action(detail=False, methods=['post'], url_path='send-first-article-notice', parser_classes=[JSONParser])
     def send_first_article_notice(self, request):
@@ -244,7 +301,8 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
         if not isinstance(items, list) or not items:
             return Response({'detail': '久しぶり製品データがありません。'}, status=status.HTTP_400_BAD_REQUEST)
         if not body:
-            body = build_first_article_email_body(items)
+            settings = _get_outsource_first_article_settings()
+            body = build_first_article_email_body(items, lookback_days=settings['days'])
 
         service = EmailService()
         user_id = request.user.id if request.user and request.user.is_authenticated else None
@@ -259,6 +317,21 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
                 {'detail': send_result.get('message') or 'メール送信に失敗しました。'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        for item in items:
+            try:
+                OutsourceFirstArticleNoticeLog.objects.update_or_create(
+                    item_code=str(item.get('item_code') or ''),
+                    painting_date=item.get('painting_date'),
+                    case_no=str(item.get('case_no') or ''),
+                    defaults={
+                        'product_number': str(item.get('product_number') or ''),
+                        'item_name': str(item.get('item_name') or ''),
+                        'order_qty': int(item.get('order_qty') or 0),
+                    },
+                )
+            except Exception:
+                pass
 
         return Response({
             'success': True,
@@ -891,3 +964,67 @@ class SplitImportLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = SplitImportLogSerializer
     filter_backends = [OrderingFilter]
     ordering_fields = ['created_at']
+
+
+@api_view(['GET', 'PATCH'])
+def outsource_first_article_setting_view(request):
+    User = get_user_model()
+
+    def _user_list():
+        return [
+            {'id': u.id, 'employee_code': getattr(u, 'employee_code', '') or '', 'username': u.username,
+             'last_name': u.last_name, 'first_name': u.first_name}
+            for u in User.objects.filter(is_active=True).order_by('last_name', 'first_name')
+        ]
+
+    if request.method == 'GET':
+        settings_data = _get_outsource_first_article_settings()
+        settings_data['all_users'] = _user_list()
+        contacts = [_serialize_contact(c) for c in _get_first_article_contacts()]
+        settings_data['contact_emails'] = contacts
+        settings_data['notice_logs'] = [
+            {
+                'id': row.id,
+                'item_code': row.item_code,
+                'product_number': row.product_number,
+                'item_name': row.item_name,
+                'painting_date': row.painting_date.isoformat() if row.painting_date else '',
+                'order_qty': row.order_qty,
+                'case_no': row.case_no,
+                'notified_at': row.notified_at.strftime('%Y-%m-%d %H:%M:%S') if row.notified_at else '',
+            }
+            for row in OutsourceFirstArticleNoticeLog.objects.order_by('-notified_at', '-id')[:100]
+        ]
+        return Response(settings_data)
+
+    days = request.data.get('days', DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS)
+    recipient_user_ids = request.data.get('recipient_user_ids', [])
+
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        return Response({'detail': '判定日数は整数で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+    if days < 1:
+        return Response({'detail': '判定日数は1以上で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+    cleaned_ids = sorted(set(int(v) for v in recipient_user_ids if v is not None))
+    SystemSetting.objects.update_or_create(
+        key=OUTSOURCE_FIRST_ARTICLE_DAYS_KEY,
+        defaults={
+            'value': str(days),
+            'description': 'FB外作お久しぶり製品通知の判定日数',
+            'updated_by': request.user if getattr(request.user, 'is_authenticated', False) else None,
+        },
+    )
+    SystemSetting.objects.update_or_create(
+        key=OUTSOURCE_FIRST_ARTICLE_RECIPIENT_IDS_KEY,
+        defaults={
+            'value': json.dumps(cleaned_ids),
+            'description': 'FB外作お久しぶり製品通知の送信先ユーザーID',
+            'updated_by': request.user if getattr(request.user, 'is_authenticated', False) else None,
+        },
+    )
+    return Response({
+        'days': days,
+        'recipient_user_ids': cleaned_ids,
+    })

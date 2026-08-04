@@ -8,7 +8,7 @@ from outsource.models import OutsourceOrder, OutsourceItem
 
 
 FIRST_ARTICLE_CONTACT_TYPES = ['FB初物検査', '初物検査']
-FIRST_ARTICLE_LOOKBACK_DAYS = 90
+DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS = 90
 
 
 def _decode_csv_text(file_content, encoding):
@@ -50,8 +50,8 @@ def _derive_product_number(item_code):
     return str(item_code or '').strip()
 
 
-def _has_recent_order(item_code, painting_date, import_started_at):
-    window_start = painting_date - timedelta(days=FIRST_ARTICLE_LOOKBACK_DAYS)
+def _has_recent_order(item_code, painting_date, import_started_at, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
+    window_start = painting_date - timedelta(days=lookback_days)
     return OutsourceOrder.objects.filter(
         item_code=item_code,
         painting_date__gte=window_start,
@@ -60,8 +60,8 @@ def _has_recent_order(item_code, painting_date, import_started_at):
     ).exists()
 
 
-def _collect_first_article_candidate(item_code, item_name, painting_date, order_qty, case_no, import_started_at):
-    if _has_recent_order(item_code, painting_date, import_started_at):
+def _collect_first_article_candidate(item_code, item_name, painting_date, order_qty, case_no, import_started_at, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
+    if _has_recent_order(item_code, painting_date, import_started_at, lookback_days):
         return None
     return {
         'item_code': item_code,
@@ -70,16 +70,16 @@ def _collect_first_article_candidate(item_code, item_name, painting_date, order_
         'painting_date': painting_date.isoformat(),
         'order_qty': order_qty,
         'case_no': case_no,
-        'lookback_days': FIRST_ARTICLE_LOOKBACK_DAYS,
+        'lookback_days': lookback_days,
     }
 
 
-def build_first_article_email_body(candidates):
+def build_first_article_email_body(candidates, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
     lines = [
-        'フランスベッド受注取込で、90日以上受注のなかった品番が検出されました。',
+        f'フランスベッド受注取込で、{lookback_days}日以上受注のなかった品番が検出されました。',
         '初物検査の要否を確認してください。',
         '',
-        f'判定条件: 塗装日から{FIRST_ARTICLE_LOOKBACK_DAYS}日遡った期間に同一品番の受注がないこと',
+        f'判定条件: 塗装日から{lookback_days}日遡った期間に同一品番の受注がないこと',
         '',
         '対象一覧:',
     ]
@@ -94,7 +94,7 @@ def build_first_article_email_body(candidates):
     return '\n'.join(lines)
 
 
-def _create_order(row_num, item_code, item_name, painting_name, painting_date_value, qty_value, results, raw_data, import_started_at):
+def _create_order(row_num, item_code, item_name, painting_name, painting_date_value, qty_value, results, raw_data, import_started_at, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
     item_code = str(item_code or '').strip()
     item_name = str(item_name or '').strip()
     painting_name = str(painting_name or '').strip()
@@ -146,19 +146,20 @@ def _create_order(row_num, item_code, item_name, painting_name, painting_date_va
         order_qty=order_qty,
         case_no=case_no,
         import_started_at=import_started_at,
+        lookback_days=lookback_days,
     )
     if candidate:
         results.setdefault('first_article_candidates', []).append(candidate)
 
 
-def import_fb_csv(file_content, encoding='utf-8-sig', user_id=None):
+def import_fb_csv(file_content, encoding='utf-8-sig', user_id=None, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
     """
     FB受注CSVを取り込み、案件（OutsourceOrder）を生成する。
 
     CSVフォーマット:
         品目コード,品目名称,塗装名,塗装日,数量
     """
-    results = {'created': [], 'skipped': [], 'errors': [], 'first_article_candidates': []}
+    results = {'created': [], 'skipped': [], 'errors': [], 'first_article_candidates': [], 'lookback_days': lookback_days}
     import_started_at = datetime.now()
     text = _decode_csv_text(file_content, encoding)
     reader = csv.DictReader(io.StringIO(text))
@@ -175,6 +176,7 @@ def import_fb_csv(file_content, encoding='utf-8-sig', user_id=None):
                 results=results,
                 raw_data=row,
                 import_started_at=import_started_at,
+                lookback_days=lookback_days,
             )
         except Exception as e:
             results['errors'].append({
@@ -186,14 +188,14 @@ def import_fb_csv(file_content, encoding='utf-8-sig', user_id=None):
     return results
 
 
-def import_fb_excel(file_content, user_id=None):
+def import_fb_excel(file_content, user_id=None, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
     """
     FB受注Excelを取り込み、案件（OutsourceOrder）を生成する。
 
     Excelフォーマット:
         伝票区分,伝票タイプ,品目コード,品目名称,発注数,納入期日
     """
-    results = {'created': [], 'skipped': [], 'errors': [], 'first_article_candidates': []}
+    results = {'created': [], 'skipped': [], 'errors': [], 'first_article_candidates': [], 'lookback_days': lookback_days}
     import_started_at = datetime.now()
     wb = load_workbook(io.BytesIO(file_content), data_only=True)
     ws = wb[wb.sheetnames[0]]
@@ -237,6 +239,7 @@ def import_fb_excel(file_content, user_id=None):
                 results=results,
                 raw_data=raw_data,
                 import_started_at=import_started_at,
+                lookback_days=lookback_days,
             )
         except Exception as e:
             results['errors'].append({
@@ -248,8 +251,8 @@ def import_fb_excel(file_content, user_id=None):
     return results
 
 
-def import_fb_order_file(file_content, filename='', encoding='utf-8-sig', user_id=None):
+def import_fb_order_file(file_content, filename='', encoding='utf-8-sig', user_id=None, lookback_days=DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS):
     lower_name = str(filename or '').lower()
     if lower_name.endswith(('.xlsx', '.xlsm', '.xls')):
-        return import_fb_excel(file_content, user_id=user_id)
-    return import_fb_csv(file_content, encoding=encoding, user_id=user_id)
+        return import_fb_excel(file_content, user_id=user_id, lookback_days=lookback_days)
+    return import_fb_csv(file_content, encoding=encoding, user_id=user_id, lookback_days=lookback_days)

@@ -260,6 +260,7 @@ class UserPermission(models.Model):
         ('notifications.create', '通知: 通知作成'),
         ('engineering_change', '設変'),
         ('outsource', 'FB外作管理'),
+        ('outsource.first_article', 'FB外作: お久しぶり製品通知設定'),
         ('masters', 'マスタ'),
         ('masters.product', 'マスタ: 品番マスタ'),
         ('masters.product_group', 'マスタ: 製品グループ'),

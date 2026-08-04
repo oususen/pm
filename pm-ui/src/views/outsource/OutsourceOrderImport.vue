@@ -169,6 +169,7 @@ const firstArticleToManual = ref('')
 const firstArticleSubject = ref('')
 const firstArticleBody = ref('')
 const sendMessage = ref(null)
+const lookbackDays = ref(90)
 
 function onFileSelect(e) {
   const f = e.target.files[0]
@@ -290,6 +291,7 @@ async function doImport() {
 
     const res = await api.outsource.importCSV(formData)
     result.value = res.data
+    if (res.data?.lookback_days) lookbackDays.value = res.data.lookback_days
     const candidates = Array.isArray(res.data?.first_article_candidates) ? res.data.first_article_candidates : []
     if (candidates.length) {
       await openFirstArticleDialog(candidates)
@@ -310,11 +312,12 @@ async function doImport() {
 }
 
 function buildFirstArticleBody(items) {
+  const days = lookbackDays.value
   const lines = [
-    'FB外作受注取込で、90日以上受注のなかった品番が検出されました。',
+    `FB外作受注取込で、${days}日以上受注のなかった品番が検出されました。`,
     '初物検査の要否を確認してください。',
     '',
-    '判定条件: 塗装日から90日遡った期間に同一品番の受注がないこと',
+    `判定条件: 塗装日から${days}日遡った期間に同一品番の受注がないこと`,
     '',
     '対象一覧:',
   ]
@@ -356,9 +359,12 @@ async function openFirstArticleDialog(candidates) {
   showFirstArticleDialog.value = true
   contactLoading.value = true
   sendMessage.value = null
+  let settingUserEmails = []
   try {
     const res = await api.outsource.getFirstArticleContacts()
-    firstArticleContacts.value = Array.isArray(res.data) ? res.data : []
+    firstArticleContacts.value = Array.isArray(res.data?.contacts) ? res.data.contacts : []
+    settingUserEmails = Array.isArray(res.data?.setting_user_emails) ? res.data.setting_user_emails : []
+    if (res.data?.lookback_days) lookbackDays.value = res.data.lookback_days
   } catch {
     firstArticleContacts.value = []
   } finally {
@@ -366,7 +372,9 @@ async function openFirstArticleDialog(candidates) {
   }
 
   firstArticleTo.value = firstArticleContacts.value.map((contact) => contact.email)
-  firstArticleToManual.value = ''
+  const contactSet = new Set(firstArticleTo.value.map(e => e.toLowerCase()))
+  const extraEmails = settingUserEmails.filter(e => !contactSet.has(e.toLowerCase()))
+  firstArticleToManual.value = extraEmails.join(', ')
   firstArticleSubject.value = `【FB外作】初物検査対象のお久しぶり製品通知 ${new Date().toLocaleString('ja-JP', { hour12: false })}`
   firstArticleBody.value = buildFirstArticleBody(candidates)
 }

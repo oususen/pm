@@ -67,6 +67,7 @@ const tileGroups = [
     title: '設定',
     tiles: [
       { key: 'masters', icon: '⚙️', label: 'マスタ管理', to: '/outsource/masters' },
+      { key: 'first_article', icon: '🔔', label: 'お久しぶり通知設定', to: '/outsource/first-article-setting' },
     ],
   },
 ];

@@ -17,5 +17,6 @@ router.register(r'outsource/product-stock', views.ProductStockTransactionViewSet
 router.register(r'outsource/split-import-logs', views.SplitImportLogViewSet)
 
 urlpatterns = [
+    path('outsource-first-article-setting/', views.outsource_first_article_setting_view, name='outsource-first-article-setting'),
     path('', include(router.urls)),
 ]

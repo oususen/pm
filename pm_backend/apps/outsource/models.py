@@ -392,3 +392,22 @@ class ProductStockTransaction(models.Model):
 
     def __str__(self):
         return f'{self.item_code} {self.qty_change:+d}'
+
+
+class OutsourceFirstArticleNoticeLog(models.Model):
+    item_code = models.CharField('品目コード', max_length=50)
+    product_number = models.CharField('品番', max_length=20, blank=True, default='')
+    item_name = models.CharField('品目名称', max_length=200, blank=True, default='')
+    painting_date = models.DateField('塗装日')
+    order_qty = models.IntegerField('数量', default=0)
+    case_no = models.CharField('案件番号', max_length=100, blank=True, default='')
+    notified_at = models.DateTimeField('通知日時', auto_now_add=True)
+
+    class Meta:
+        db_table = 'outsource_first_article_notice_log'
+        verbose_name = 'FB外作お久しぶり通知ログ'
+        unique_together = ['item_code', 'painting_date', 'case_no']
+        ordering = ['-notified_at', '-id']
+
+    def __str__(self):
+        return f'{self.item_code} {self.painting_date}'

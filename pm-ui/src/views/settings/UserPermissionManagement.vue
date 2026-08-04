@@ -463,6 +463,7 @@ const permissionResources = [
   { value: 'quality.product_checksheet_batch_delete', label: '品質: チェックシートバッチ削除' },
   { value: 'engineering_change', label: '設変' },
   { value: 'outsource', label: 'FB外作管理' },
+  { value: 'outsource.first_article', label: 'FB外作: お久しぶり製品通知設定' },
   { value: 'masters', label: 'マスタ' },
   { value: 'masters.product', label: 'マスタ: 品番マスタ' },
   { value: 'masters.product_group', label: 'マスタ: 製品グループ' },

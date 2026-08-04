@@ -83,6 +83,12 @@ const outsource = [
     component: () => import("@/views/outsource/masters/OutsourceMasters.vue"),
     meta: { pageTitle: "FB外作マスタ", manualPath: "FB/外作_マスタ管理.md", resource: "outsource", permission: "edit" },
   },
+  {
+    path: "/outsource/first-article-setting",
+    name: "OutsourceFirstArticleSetting",
+    component: () => import("@/views/outsource/OutsourceFirstArticleSetting.vue"),
+    meta: { pageTitle: "FB外作お久しぶり製品通知設定", resource: "outsource.first_article", permission: "edit" },
+  },
 ];
 
 export default outsource;
