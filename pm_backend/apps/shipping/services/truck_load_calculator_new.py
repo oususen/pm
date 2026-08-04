@@ -1208,19 +1208,19 @@ def calculate_truck_load(assignments, truck):
 
         # 向き判定
         # - 容器マスタの向き設定（orientation）:
-        #   - 容器長手(long)  : 容器の長い辺をトラック荷台の両側（幅方向）へ固定
-        #   - 容器短手(short) : 容器の短い辺をトラック荷台の両側（幅方向）へ固定
+        #   - 容器長手(long)  : 容器の長い辺をトラック両側（荷台長手方向・奥行き）へ固定
+        #   - 容器短手(short) : 容器の短い辺をトラック両側（荷台長手方向・奥行き）へ固定
         #   - 自由(free)      : 自動判定（回転で多く積める向きを採用）
         orientation = str(container.get('orientation') or 'free').strip().lower()
         cap_normal = int(bed_depth // cd) * int(bed_width // cw)
         cap_rotated = int(bed_depth // cw) * int(bed_width // cd)
         if orientation == 'long':
-            # 長い辺を幅方向(Y)へ → 奥行(depth)が長手なら回転
-            rotated = cd > cw
+            # 長い辺を長手方向(X=奥行き)へ → 容器の幅(width)が長手なら回転
+            rotated = cw > cd
             rotation_locked = True
         elif orientation == 'short':
-            # 短い辺を幅方向(Y)へ → 幅(width)が長手なら回転
-            rotated = cw > cd
+            # 短い辺を長手方向(X=奥行き)へ → 容器の奥行(depth)が長手なら回転
+            rotated = cd > cw
             rotation_locked = True
         else:
             rotated = cap_rotated > cap_normal

@@ -1592,12 +1592,13 @@ const planTruckModels = computed(() => {
       const capNormal = Math.floor(bedW / item.cw) * Math.floor(bedD / item.cd)
       const capRotated = Math.floor(bedW / item.cd) * Math.floor(bedD / item.cw)
       // 容器マスタの向き設定（long=容器長手 / short=容器短手 / free=自由=自動判定）
+      // トラック両側＝荷台長手方向（奥行き）。長手=長い辺を長手方向へ、短手=短い辺を長手方向へ
       const orientation = String(item.orientation || 'free')
       let rotated
       if (orientation === 'long') {
-        rotated = item.cd > item.cw
-      } else if (orientation === 'short') {
         rotated = item.cw > item.cd
+      } else if (orientation === 'short') {
+        rotated = item.cd > item.cw
       } else {
         rotated = capRotated > capNormal
       }

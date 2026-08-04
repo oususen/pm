@@ -176,11 +176,11 @@
             <input v-model.number="formData.max_stack" type="number" min="0" :disabled="!canEdit" />
           </div>
           <div class="form-group">
-            <label>向き（トラック両側へ向ける辺）</label>
+            <label>向き（トラック両側＝荷台長手方向へ向ける辺）</label>
             <select v-model="formData.orientation" :disabled="!canEdit">
               <option value="free">自由（自動判定）</option>
-              <option value="long">容器長手（長い辺を両側へ）</option>
-              <option value="short">容器短手（短い辺を両側へ）</option>
+              <option value="long">容器長手（長い辺をトラック長手方向へ）</option>
+              <option value="short">容器短手（短い辺をトラック長手方向へ）</option>
             </select>
             <p class="helper-text">※ 便計画の積載計算（パッキング配置・積載超過判定）に反映されます</p>
           </div>

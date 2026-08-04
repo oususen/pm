@@ -786,7 +786,7 @@ class ContainerCapacity(models.Model):
         default='free',
         blank=True,
         verbose_name='向き',
-        help_text='トラック荷台の両側（幅方向）に向ける辺。容器長手=長い辺を両側へ、容器短手=短い辺を両側へ、自由=自動判定',
+        help_text='トラック両側（荷台長手方向＝奥行き）へ向ける辺。容器長手=長い辺を両側（長手方向）へ、容器短手=短い辺を両側（長手方向）へ、自由=自動判定',
     )
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
 
