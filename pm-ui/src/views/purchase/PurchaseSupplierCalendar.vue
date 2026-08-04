@@ -545,6 +545,11 @@ const getDeliveryGenerateRange = () => {
   }
 }
 
+const filterWorkingDeliveryDates = (dates) =>
+  [...new Set(dates)]
+    .filter((dateStr) => isBusinessDayByDaiso(new Date(`${dateStr}T00:00:00`)))
+    .sort()
+
 const generatePatternDatesInRange = () => {
   const schedule = selectedSupplierSchedule.value
   const pattern = selectedSchedulePattern.value
@@ -560,7 +565,7 @@ const generatePatternDatesInRange = () => {
       const codeWeekday = (cursor.getDay() + 6) % 7
       if (daysOfWeek.has(codeWeekday)) results.push(ymd(cursor))
     }
-    return results
+    return filterWorkingDeliveryDates(results)
   }
 
   if (pattern.recurrence_type === 'MONTHLY_DATE') {
@@ -575,7 +580,7 @@ const generatePatternDatesInRange = () => {
       }
       monthCursor.setMonth(monthCursor.getMonth() + 1)
     }
-    return [...new Set(results)].sort()
+    return filterWorkingDeliveryDates(results)
   }
 
   if (pattern.recurrence_type === 'MONTHLY_NTH_DOW') {
@@ -592,14 +597,14 @@ const generatePatternDatesInRange = () => {
       }
       monthCursor.setMonth(monthCursor.getMonth() + 1)
     }
-    return [...new Set(results)].sort()
+    return filterWorkingDeliveryDates(results)
   }
 
   if (pattern.recurrence_type === 'EVERY_BUSINESS_DAY') {
     for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
       if (isBusinessDayByDaiso(cursor)) results.push(ymd(cursor))
     }
-    return results
+    return filterWorkingDeliveryDates(results)
   }
 
   if (pattern.recurrence_type === 'EVERY_N_BUSINESS_DAYS') {
@@ -615,7 +620,7 @@ const generatePatternDatesInRange = () => {
       }
       bizCount += 1
     }
-    return results
+    return filterWorkingDeliveryDates(results)
   }
 
   return []
