@@ -129,7 +129,19 @@
                     :key="`${row.rowKey}-${col.colKey}-label-${slotIdx}`"
                     class="sub-cell"
                     :class="{ forecast: slotLineAt(row, col.colKey, slotIdx - 1)?.orderType === 'FORECAST' }"
-                  >{{ slotLabel(row, col.colKey, slotIdx - 1) }}</div>
+                  >
+                    <div class="order-label-wrap">
+                      <span>{{ slotLabel(row, col.colKey, slotIdx - 1) }}</span>
+                      <button
+                        v-if="slotLineAt(row, col.colKey, slotIdx - 1)"
+                        class="line-note-btn"
+                        :class="{ 'has-note': hasCoordinationNote(row, col.colKey, slotIdx - 1) }"
+                        :disabled="loading || saving || importing"
+                        title="業務連絡メモ"
+                        @click.stop="openCoordinationNoteDialog(row, col.colKey, slotIdx - 1)"
+                      >連</button>
+                    </div>
+                  </div>
                 </td>
                 <td class="readonly-cell demand" :class="row.dayClass">
                   <div
@@ -273,6 +285,26 @@
       </div>
     </div>
 
+    <div v-if="showCoordinationNoteDialog" class="modal-overlay" @click.self="closeCoordinationNoteDialog">
+      <div class="modal-content">
+        <h2>業務連絡メモ</h2>
+        <div class="note-target">{{ coordinationNoteTargetLabel }}</div>
+        <textarea
+          v-model.trim="coordinationNoteDraft"
+          rows="5"
+          maxlength="200"
+          placeholder="便計画担当へ伝えたい内容を入力"
+        ></textarea>
+        <div class="note-count">{{ coordinationNoteDraft.length }}/200</div>
+        <div class="modal-actions">
+          <button class="btn" :disabled="savingCoordinationNote" @click="closeCoordinationNoteDialog">キャンセル</button>
+          <button class="btn save-btn" :disabled="savingCoordinationNote" @click="saveCoordinationNote">
+            {{ savingCoordinationNote ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -375,6 +407,10 @@ const selectedFavoriteId = ref('')
 const favoriteName = ref('')
 const FAVORITE_SCREEN_KEY = 'shipping.kubota_sakai_due_adjustment'
 const hasDisplayedOnce = ref(false)
+const showCoordinationNoteDialog = ref(false)
+const savingCoordinationNote = ref(false)
+const coordinationNoteDraft = ref('')
+const activeCoordinationNote = ref(null)
 
 const dateColumns = computed(() => {
   const base = new Date(`${startDate.value}T00:00:00`)
@@ -607,6 +643,8 @@ const buildLine = (li) => {
     orderType: li.order_type,
     demandByDate,
     deliveryByDate,
+    dueAdjustmentIdByDate: li.due_adjustment_id_by_date || {},
+    coordinationNoteByDate: li.coordination_note_by_date || {},
     remainingByDate,
     _dirty: false,
   }
@@ -654,6 +692,20 @@ const slotDemand = (row, colKey, slotIdx) => {
   const line = slotLineAt(row, colKey, slotIdx)
   return line ? formatNumber(line.demandByDate[row.dateKey]) : ''
 }
+
+const slotDueAdjustmentId = (row, colKey, slotIdx) => {
+  const line = slotLineAt(row, colKey, slotIdx)
+  if (!line) return null
+  return Number(line.dueAdjustmentIdByDate?.[row.dateKey] || 0) || null
+}
+
+const slotCoordinationNote = (row, colKey, slotIdx) => {
+  const line = slotLineAt(row, colKey, slotIdx)
+  if (!line) return ''
+  return String(line.coordinationNoteByDate?.[row.dateKey] || '').trim()
+}
+
+const hasCoordinationNote = (row, colKey, slotIdx) => Boolean(slotCoordinationNote(row, colKey, slotIdx))
 
 const slotRemaining = (row, colKey, slotIdx) => {
   const line = slotLineAt(row, colKey, slotIdx)
@@ -1289,6 +1341,58 @@ const closeEmailDialog = () => {
   showEmailDialog.value = false
 }
 
+const coordinationNoteTargetLabel = computed(() => {
+  const active = activeCoordinationNote.value
+  if (!active) return ''
+  const orderLabel = active.sourceOrderNo || (active.orderType === 'FORECAST' ? '内示' : '-')
+  const shipToCode = active.shipToCode || '-'
+  return `${active.dateLabel} / ${active.productCode} / ${shipToCode} / ${orderLabel}`
+})
+
+const openCoordinationNoteDialog = (row, colKey, slotIdx) => {
+  const line = slotLineAt(row, colKey, slotIdx)
+  const dueAdjustmentId = slotDueAdjustmentId(row, colKey, slotIdx)
+  if (!line || !dueAdjustmentId) return
+  const col = matrixColumns.value.find((item) => item.colKey === colKey)
+  activeCoordinationNote.value = {
+    dueAdjustmentId,
+    rowDateKey: row.dateKey,
+    line,
+    productCode: col?.productCode || '',
+    shipToCode: col?.shipToCode === '-' ? '' : (col?.shipToCode || ''),
+    sourceOrderNo: line.sourceOrderNo || '',
+    orderType: line.orderType || '',
+    dateLabel: row.label,
+  }
+  coordinationNoteDraft.value = slotCoordinationNote(row, colKey, slotIdx)
+  showCoordinationNoteDialog.value = true
+}
+
+const closeCoordinationNoteDialog = () => {
+  showCoordinationNoteDialog.value = false
+  activeCoordinationNote.value = null
+  coordinationNoteDraft.value = ''
+}
+
+const saveCoordinationNote = async () => {
+  const active = activeCoordinationNote.value
+  if (!active?.dueAdjustmentId) return
+  savingCoordinationNote.value = true
+  try {
+    const res = await api.kubotaSakaiDueAdjustments.saveCoordinationNote(
+      active.dueAdjustmentId,
+      coordinationNoteDraft.value,
+    )
+    active.line.coordinationNoteByDate[active.rowDateKey] = String(res.data?.coordination_note || '')
+    closeCoordinationNoteDialog()
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '業務連絡メモの保存に失敗しました。'
+    alert(detail)
+  } finally {
+    savingCoordinationNote.value = false
+  }
+}
+
 const sendEmail = async () => {
   if (emailTo.value.length === 0) {
     alert('送信先を選択してください。')
@@ -1561,6 +1665,31 @@ onBeforeUnmount(() => {
   color: #374151;
   background: #f1f5f9;
 }
+.order-label-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 100%;
+}
+.line-note-btn {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.line-note-btn.has-note {
+  background: #fff7ed;
+  border-color: #f97316;
+  color: #c2410c;
+  font-weight: 700;
+}
 .readonly-cell {
   color: #4b5563;
 }
@@ -1670,6 +1799,18 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.note-target {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+.note-count {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: #64748b;
 }
 .email-modal {
   width: 720px;

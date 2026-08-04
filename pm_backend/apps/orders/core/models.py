@@ -106,6 +106,7 @@ class KubotaSakaiDueAdjustment(models.Model):
     demand_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='受注数')
     delivery_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='納入数')
     remaining_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='残量')
+    coordination_note = models.CharField(max_length=200, blank=True, default='', verbose_name='業務連絡メモ')
 
     # 参照用（取り込み元）
     order_line = models.ForeignKey(

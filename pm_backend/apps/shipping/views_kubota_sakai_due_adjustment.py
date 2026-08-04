@@ -459,11 +459,15 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'order_type': row.order_type,
                     'demand_by_date': {},
                     'delivery_by_date': {},
+                    'due_adjustment_id_by_date': {},
+                    'coordination_note_by_date': {},
                 }
             li = outer_groups[outer_key]['lines_map'][line_key]
             d_str = row.due_date.isoformat()
             li['demand_by_date'][d_str] = str(row.demand_qty)
             li['delivery_by_date'][d_str] = str(row.delivery_qty)
+            li['due_adjustment_id_by_date'][d_str] = row.id
+            li['coordination_note_by_date'][d_str] = str(row.coordination_note or '')
             if row.order_type == 'FIRM':
                 li['order_type'] = 'FIRM'
 
@@ -477,6 +481,8 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'order_type': li['order_type'],
                     'demand_by_date': li['demand_by_date'],
                     'delivery_by_date': li['delivery_by_date'],
+                    'due_adjustment_id_by_date': li['due_adjustment_id_by_date'],
+                    'coordination_note_by_date': li['coordination_note_by_date'],
                 })
             lines_out.sort(key=lambda x: (x['source_order_no'] is None, x['source_order_no'] or ''))
             rows.append({
@@ -510,6 +516,33 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             'due_plan_lock_date': due_plan_lock_date.isoformat() if due_plan_lock_date else None,
             'last_adjusted_at': last_adjusted_at,
             'rows': rows,
+        })
+
+    @action(detail=False, methods=['post'])
+    def save_coordination_note(self, request):
+        due_adjustment_id = request.data.get('due_adjustment_id')
+        note = str(request.data.get('coordination_note') or '').strip()
+
+        try:
+            due_adjustment_id = int(due_adjustment_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'due_adjustment_id が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(note) > 200:
+            return Response({'detail': '業務連絡メモは200文字以内で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        row = KubotaSakaiDueAdjustment.objects.filter(id=due_adjustment_id).first()
+        if not row:
+            return Response({'detail': '対象データが見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
+
+        if row.coordination_note != note:
+            row.coordination_note = note
+            row.save(update_fields=['coordination_note'])
+
+        return Response({
+            'due_adjustment_id': row.id,
+            'coordination_note': row.coordination_note,
+            'has_coordination_note': bool(row.coordination_note),
         })
 
     # ========== bulk_save ==========

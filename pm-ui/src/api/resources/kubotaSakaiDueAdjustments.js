@@ -34,4 +34,10 @@ export const createKubotaSakaiDueAdjustmentsAPI = (client) => ({
   sendEmail(data) {
     return client.post('/kubota-sakai-due-adjustments/send_email/', data)
   },
+  saveCoordinationNote(dueAdjustmentId, coordinationNote) {
+    return client.post('/kubota-sakai-due-adjustments/save_coordination_note/', {
+      due_adjustment_id: dueAdjustmentId,
+      coordination_note: coordinationNote,
+    })
+  },
 })

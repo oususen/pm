@@ -373,7 +373,18 @@
                   class="sub-cell entry-text-subcell"
                   :style="slotBlockStyle(slotEntryAt(row, dateKey, slotIdx - 1))"
                 >
-                  {{ sourceOrderLabel(slotEntryAt(row, dateKey, slotIdx - 1)) }}
+                  <div class="entry-order-wrap">
+                    <span>{{ sourceOrderLabel(slotEntryAt(row, dateKey, slotIdx - 1)) }}</span>
+                  </div>
+                  <button
+                    v-if="slotEntryAt(row, dateKey, slotIdx - 1)?.coordination_note"
+                    class="entry-note-badge"
+                    type="button"
+                    @mouseenter="showCoordinationNoteBubble(slotEntryAt(row, dateKey, slotIdx - 1), $event)"
+                    @mouseleave="hideCursorBubble"
+                    @focus="showCoordinationNoteBubble(slotEntryAt(row, dateKey, slotIdx - 1), $event)"
+                    @blur="hideCursorBubble"
+                  >連絡</button>
                 </div>
               </td>
               <td class="cell-right cell-stacked col-demand">
@@ -1996,6 +2007,7 @@ const loadGrid = async () => {
           used_container_id: raw.used_container_id || null,
           source_order_no: raw.source_order_no || '',
           order_type: raw.order_type || '',
+          coordination_note: String(raw.coordination_note || '').trim(),
           delivery_qty: parseNumber(raw.delivery_qty),
           overdue: Boolean(raw.overdue),
           default_capacity: raw.capacity,
@@ -3472,9 +3484,37 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
   padding: 2px 4px !important;
   line-height: 1.2 !important;
+  white-space: normal;
+}
+.entry-order-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.entry-note-badge {
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid #f97316;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 10px;
+  font-weight: 700;
   white-space: nowrap;
+}
+.entry-note-text {
+  margin-top: 2px;
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.25;
+  color: #9a3412;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .select-subcell {
   padding: 2px 0 !important;

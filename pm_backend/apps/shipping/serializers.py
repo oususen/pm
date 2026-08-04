@@ -249,6 +249,7 @@ class KubotaSakaiDueAdjustmentSerializer(serializers.ModelSerializer):
             'demand_qty',
             'delivery_qty',
             'remaining_qty',
+            'coordination_note',
             'order_line',
             'updated_by',
             'updated_at',

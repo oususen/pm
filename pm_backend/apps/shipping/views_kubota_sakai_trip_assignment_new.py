@@ -931,6 +931,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 'ship_to_name': ship_to_name_map.get(adj.ship_to_code or '', ''),
                 'source_order_no': adj.source_order_no or '',
                 'order_type': adj.order_type,
+                'coordination_note': str(adj.coordination_note or '').strip(),
                 'delivery_qty': str(delivery_qty),
                 'assigned_qty': str(assigned_qty),
                 'unassigned_qty': str(unassigned_qty),
