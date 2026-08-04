@@ -1048,14 +1048,11 @@ const buildMultilineCell = (values = []) => {
 
 const buildExcelCellValue = (values = []) => {
   const normalized = values
-    .map((value) => {
-      const num = parseNumber(value)
-      return Math.abs(num) < 0.000001 ? '' : num
-    })
-    .filter((value) => value !== '')
-  if (!normalized.length) return ''
+    .map((value) => parseNumber(value))
+    .filter((value) => Math.abs(value) >= 0.000001)
+  if (!normalized.length) return 0
   if (normalized.length === 1) return normalized[0]
-  return buildMultilineCell(normalized)
+  return normalized.reduce((a, b) => a + b, 0)
 }
 
 const toExcelArgb = (hex) => `FF${String(hex || '#ffffff').replace('#', '').toUpperCase()}`
@@ -1189,10 +1186,10 @@ const exportExcel = async () => {
       const lines = row.isCarry ? [] : (row.cells[col.colKey] || [])
       const totalPlan = lines.reduce((sum, line) => sum + parseNumber(line.deliveryByDate[row.dateKey]), 0)
       const values = row.isCarry
-        ? ['', '', parseNumber(row.cells[col.colKey])]
+        ? [0, 0, parseNumber(row.cells[col.colKey])]
         : [
             buildExcelCellValue(lines.map((line) => line.demandByDate[row.dateKey])),
-            Math.abs(totalPlan) < 0.000001 ? '' : totalPlan,
+            Math.abs(totalPlan) < 0.000001 ? 0 : totalPlan,
             buildExcelCellValue(lines.map((line) => line.remainingByDate[row.dateKey])),
           ]
 
@@ -1222,9 +1219,9 @@ const exportExcel = async () => {
   })
   matrixColumns.value.forEach((col, index) => {
     const startCol = 2 + index * 3
-    totalRow.getCell(startCol).value = ''
-    totalRow.getCell(startCol + 1).value = ''
-    totalRow.getCell(startCol + 2).value = groupTotalRemaining(col.group) || ''
+    totalRow.getCell(startCol).value = 0
+    totalRow.getCell(startCol + 1).value = 0
+    totalRow.getCell(startCol + 2).value = groupTotalRemaining(col.group) || 0
     applyExcelCellStyle(totalRow.getCell(startCol), {
       bg: '#dbe6f7',
       thickTop: true,
