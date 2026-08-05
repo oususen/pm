@@ -907,8 +907,14 @@ const loadGrid = async () => {
   }
 }
 
+const importCautionMessage = [
+  '計算が中途半端になるため、取込または初回表示の実行中は他の画面へ遷移したり、この画面を閉じたりしないでください。',
+  '処理完了メッセージが出るまでお待ちください。',
+].join('\n')
+
 const importOrders = async () => {
   if (importing.value || loading.value) return
+  alert(importCautionMessage)
   importing.value = true
   try {
     const res = await api.kubotaSakaiDueAdjustments.importOrders({
@@ -942,6 +948,7 @@ const importOrdersForInitialDisplay = async () => {
 const handleDisplayClick = async () => {
   if (loading.value || importing.value) return
   if (!hasDisplayedOnce.value) {
+    alert(importCautionMessage)
     try {
       await importOrdersForInitialDisplay()
     } catch (error) {
