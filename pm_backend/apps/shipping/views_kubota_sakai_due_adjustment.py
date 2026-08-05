@@ -407,11 +407,51 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
 
         sync_result = sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date)
 
+        affected_groups = sync_result.get('affected_groups') or []
+        rebalanced_count = 0
+        if affected_groups:
+            input_delivery_map = {}
+            group_rows = KubotaSakaiDueAdjustment.objects.filter(
+                product_code__in=[group[0] for group in affected_groups],
+                due_date__range=(start_date, end_date),
+            ).values(
+                'product_code', 'ship_to_code', 'source_order_no', 'due_date', 'delivery_qty'
+            )
+            affected_group_set = {(group[0], group[1] or '') for group in affected_groups}
+            for row in group_rows:
+                group_key = (row['product_code'], row['ship_to_code'] or '')
+                if group_key not in affected_group_set:
+                    continue
+                input_delivery_map[(
+                    row['product_code'],
+                    row['ship_to_code'],
+                    row['source_order_no'],
+                    row['due_date'],
+                )] = row['delivery_qty']
+
+            user = request.user if request.user and request.user.is_authenticated else None
+            rebalanced_count, _ = _rebalance_delivery_qty_for_groups(
+                affected_groups=affected_groups,
+                input_delivery_map=input_delivery_map,
+                user=user,
+                now=datetime.now(),
+            )
+            _recalculate_remaining_for_groups(affected_groups)
+
+            progress_rows = KubotaSakaiDueAdjustment.objects.filter(
+                product_code__in=[group[0] for group in affected_groups],
+            )
+            progress_start = progress_rows.order_by('due_date').values_list('due_date', flat=True).first()
+            progress_end = progress_rows.order_by('-due_date').values_list('due_date', flat=True).first()
+            if progress_start and progress_end:
+                recalculate_delivery_progress(progress_start, progress_end)
+
         return Response({
             'created': sync_result['created'],
             'updated': sync_result['updated'],
             'deleted_forecast': sync_result['deleted_forecast'],
             'total_demand_rows': sync_result['total_demand_rows'],
+            'rebalanced_rows': rebalanced_count,
         })
 
     # ========== grid ==========
