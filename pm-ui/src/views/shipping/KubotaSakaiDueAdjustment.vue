@@ -584,7 +584,15 @@ const loadKubotaSakaiCalendarDays = async () => {
   try {
     const calendarId = await resolveKubotaSakaiCalendarId()
     if (!calendarId) { calendarDayMap.value = {}; return }
-    const daysRes = await api.calendars.getCalendarDays(calendarId, { page_size: 5000 })
+    const rangeStart = startDate.value
+    const baseDate = new Date(`${startDate.value}T00:00:00`)
+    const rangeEndDate = new Date(baseDate)
+    rangeEndDate.setDate(baseDate.getDate() + 89)
+    const rangeEnd = formatLocalDate(rangeEndDate)
+    const daysRes = await api.calendars.getCalendarDays(calendarId, {
+      target_date__gte: rangeStart,
+      target_date__lte: rangeEnd,
+    })
     const days = daysRes.data?.results || daysRes.data || []
     const map = {}
     days.forEach((day) => { if (day?.target_date) map[day.target_date] = day })

@@ -3,7 +3,7 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import DecimalField, ExpressionWrapper, F, Max, Q, Sum
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -261,6 +261,9 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
 
         processed_keys = set()
 
+        update_items = []
+        create_items = []
+
         for key, data in demand_map.items():
             processed_keys.add(key)
             existing = existing_map.get(key)
@@ -277,10 +280,10 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
                     existing.order_line_id = data['order_line_id']
                     changed = True
                 if changed:
-                    existing.save(update_fields=['demand_qty', 'order_type', 'order_line_id'])
+                    update_items.append(existing)
                     updated_count += 1
             else:
-                KubotaSakaiDueAdjustment.objects.create(
+                create_items.append(KubotaSakaiDueAdjustment(
                     product_code=data['product_code'],
                     ship_to_code=data['ship_to_code'],
                     source_order_no=data['source_order_no'],
@@ -290,8 +293,16 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
                     delivery_qty=Decimal('0'),
                     remaining_qty=Decimal('0'),
                     order_line_id=data['order_line_id'],
-                )
+                ))
                 created_count += 1
+
+        if update_items:
+            KubotaSakaiDueAdjustment.objects.bulk_update(
+                update_items,
+                ['demand_qty', 'order_type', 'order_line_id'],
+            )
+        if create_items:
+            KubotaSakaiDueAdjustment.objects.bulk_create(create_items)
 
         # 同日・同品番・同納入先に FIRM が来たら、旧 FORECAST 行の需要有無に関わらず
         # 入力済み納入数を FIRM 行へ引き継いで削除する。
@@ -417,15 +428,19 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         end_date = start_date + timedelta(days=horizon_days - 1)
 
         # 表示期間より前の繰越残量を計算（品番+納入場所別）
-        carry_qs = KubotaSakaiDueAdjustment.objects.filter(
-            due_date__lt=start_date,
-        ).order_by('product_code', 'ship_to_code')
-        carry_remaining = {}  # (product_code, ship_to_code) → Decimal
-        for row in carry_qs:
-            gkey = (row.product_code, row.ship_to_code or '')
-            if gkey not in carry_remaining:
-                carry_remaining[gkey] = Decimal('0')
-            carry_remaining[gkey] += row.delivery_qty - row.demand_qty
+        carry_expr = ExpressionWrapper(
+            F('delivery_qty') - F('demand_qty'),
+            output_field=DecimalField(max_digits=14, decimal_places=3),
+        )
+        carry_qs = (
+            KubotaSakaiDueAdjustment.objects.filter(due_date__lt=start_date)
+            .values('product_code', 'ship_to_code')
+            .annotate(carry_remaining=Sum(carry_expr))
+        )
+        carry_remaining = {
+            (row['product_code'], row['ship_to_code'] or ''): row['carry_remaining'] or Decimal('0')
+            for row in carry_qs
+        }
 
         # テーブル全体の最新調整日
         last_adjusted_at_raw = KubotaSakaiDueAdjustment.objects.aggregate(
