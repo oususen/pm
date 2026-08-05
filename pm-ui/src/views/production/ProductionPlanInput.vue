@@ -6876,15 +6876,6 @@ thead .sticky-col {
   width: 100%;
   text-align: right;
 }
-.num input[type="number"]::-webkit-outer-spin-button,
-.num input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.num input[type="number"] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
 .readonly-value {
   display: inline-block;
   width: 40px;
