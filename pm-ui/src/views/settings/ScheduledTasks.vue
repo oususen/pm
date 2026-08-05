@@ -1235,7 +1235,7 @@ const autoPlanConfigs = computed(() =>
 )
 const purchaseActualReconcileTaskName = 'PURCHASE_ACTUAL_RECONCILE_CHECK'
 const productionActualReconcileTaskName = 'PRODUCTION_ACTUAL_RECONCILE_CHECK'
-const inventoryTaskOrder = ['INVENTORY_RECALC', 'PICKUP_ONLY', 'INVENTORY_ONLY', 'PROGRESS_ONLY']
+const inventoryTaskOrder = ['INVENTORY_RECALC', 'PICKUP_ONLY', 'INVENTORY_ONLY', 'PROGRESS_ONLY', 'KUBOTA_SAKAI_DUE_SYNC']
 const inventoryTaskConfigs = computed(() =>
   configs.value
     .filter((cfg) => inventoryTaskOrder.includes(cfg.task_name))
@@ -1308,6 +1308,7 @@ const inventoryTaskLabel = (taskName) => {
   if (taskName === 'PICKUP_ONLY') return '取り込みのみ'
   if (taskName === 'INVENTORY_ONLY') return '在庫計算のみ'
   if (taskName === 'PROGRESS_ONLY') return '進度計算のみ'
+  if (taskName === 'KUBOTA_SAKAI_DUE_SYNC') return 'クボタ堺納期調整 取込+再配分'
   if (taskName === 'PLAN_TO_ACTUAL_COPY') return '計画実績自動セット'
   if (taskName === 'CONTAINER_IMPORT_TMP_CLEANUP') return '荷姿設定Excel取込 一時ファイル削除'
   return '取り込み＋在庫再計算'
@@ -1319,6 +1320,7 @@ const inventoryTaskHelp = (taskName) => {
   if (taskName === 'PICKUP_ONLY') return '毎日指定した時刻に需要取り込み（pickup / pickup_purchase）のみを実行します。'
   if (taskName === 'INVENTORY_ONLY') return '毎日指定した時刻に在庫・計画在庫の再計算のみを実行します（必要に応じて過去営業日まで遡って再計算、進度は更新しません）。'
   if (taskName === 'PROGRESS_ONLY') return '毎日指定した時刻に進度のみを再計算します（必要に応じてLT+1営業日前まで遡って再計算します）。'
+  if (taskName === 'KUBOTA_SAKAI_DUE_SYNC') return '毎日指定した時刻にクボタ堺納期調整の受注取込を行い、対象期間の注番再配分まで自動実行します。初回表示での手動保存待ちを解消する用途です。'
   if (taskName === 'PLAN_TO_ACTUAL_COPY') return '毎日指定した時刻に、対象ライン・工程の業務日付計画合計を実績へ反映します。既存実績（actual_qty）が0以外の品番は上書きせずスキップします。'
   return '毎日指定した時刻に需要取り込み（pickup）→ 在庫・計画在庫・進度の自動再計算を実行します。'
 }
@@ -1330,7 +1332,7 @@ const safetyStockTaskLabel = (taskName) => {
 
 // INVENTORY_RECALC は _resolve_effective_start_date が LT 基準で開始日を自動決定するため、
 // UI での開始日選択は意味を持たない。PICKUP_ONLY のみ開始日選択を表示する。
-const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY'
+const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY' || taskName === 'KUBOTA_SAKAI_DUE_SYNC'
 const showInventoryRangeSetting = (taskName) =>
   taskName !== purchaseActualReconcileTaskName
   && taskName !== productionActualReconcileTaskName

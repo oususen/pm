@@ -370,6 +370,7 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
         'updated': updated_count,
         'deleted_forecast': deleted_count,
         'total_demand_rows': len(demand_map),
+        'affected_groups': sorted(affected_groups),
     }
 
 

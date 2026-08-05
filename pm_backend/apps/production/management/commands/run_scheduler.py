@@ -84,6 +84,7 @@ class Command(BaseCommand):
         from production.scheduler.tasks_purchase_actual_reconcile import run_purchase_actual_reconcile_check
         from production.scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
         from production.scheduler.tasks_plan_to_actual import run_plan_to_actual_copy
+        from shipping.scheduler_tasks_kubota_sakai_due import run_kubota_sakai_due_sync
         from purchase.order_proposal_views import run_auto_purchase_order_check
         from masters.scheduler.tasks_container_import_cleanup import run_container_import_tmp_cleanup
 
@@ -101,6 +102,7 @@ class Command(BaseCommand):
             ('PICKUP_ONLY', 'pickup_only', {'scheduled_hour': 7, 'scheduled_minute': 30, 'is_enabled': False}),
             ('INVENTORY_ONLY', 'inventory_only', {'scheduled_hour': 8, 'scheduled_minute': 0, 'is_enabled': False}),
             ('PROGRESS_ONLY', 'progress_only', {'scheduled_hour': 8, 'scheduled_minute': 30, 'is_enabled': False}),
+            ('KUBOTA_SAKAI_DUE_SYNC', 'kubota_sakai_due_sync', {'scheduled_hour': 7, 'scheduled_minute': 45, 'is_enabled': False}),
         ]
         for task_name, job_id, defaults in inventory_jobs:
             cfg, _ = ScheduleConfig.objects.get_or_create(
@@ -117,12 +119,12 @@ class Command(BaseCommand):
                 timezone='Asia/Tokyo',
             )
             scheduler.add_job(
-                _with_fresh_connection(run_inventory_recalculation),
+                _with_fresh_connection(run_kubota_sakai_due_sync if task_name == 'KUBOTA_SAKAI_DUE_SYNC' else run_inventory_recalculation),
                 trigger,
                 id=job_id,
                 replace_existing=True,
                 misfire_grace_time=3600,
-                kwargs={'task_name': task_name},
+                kwargs={} if task_name == 'KUBOTA_SAKAI_DUE_SYNC' else {'task_name': task_name},
             )
             logger.info(f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d}')
 

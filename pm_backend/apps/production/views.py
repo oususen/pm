@@ -7263,6 +7263,7 @@ class ScheduleConfigView(APIView):
             ('PICKUP_ONLY', 7, 30, False),
             ('INVENTORY_ONLY', 8, 0, False),
             ('PROGRESS_ONLY', 8, 30, False),
+            ('KUBOTA_SAKAI_DUE_SYNC', 7, 45, False),
             ('AUTO_PURCHASE_ORDER_CHECK', 6, 30, False),
             ('PURCHASE_ACTUAL_RECONCILE_CHECK', 2, 0, False),
             ('PRODUCTION_ACTUAL_RECONCILE_CHECK', 2, 30, False),
@@ -7588,6 +7589,7 @@ class ScheduleRunNowView(APIView):
         from .scheduler.tasks_purchase_actual_reconcile import run_purchase_actual_reconcile_check
         from .scheduler.tasks_production_actual_reconcile import run_production_actual_reconcile_check
         from .scheduler.tasks_plan_to_actual import run_plan_to_actual_copy
+        from shipping.scheduler_tasks_kubota_sakai_due import run_kubota_sakai_due_sync
         from purchase.order_proposal_views import run_auto_purchase_order_check
         from masters.scheduler.tasks_container_import_cleanup import run_container_import_tmp_cleanup
         task = (request.data.get('task_name') or 'INVENTORY_RECALC').upper()
@@ -7596,6 +7598,7 @@ class ScheduleRunNowView(APIView):
             'PICKUP_ONLY': '取り込みのみ',
             'INVENTORY_ONLY': '在庫計算のみ',
             'PROGRESS_ONLY': '進度計算のみ',
+            'KUBOTA_SAKAI_DUE_SYNC': 'クボタ堺納期調整 取込+再配分',
             'AUTO_SAFETY_STOCK_INTERNAL': '自動安全在庫（社内）',
             'AUTO_SAFETY_STOCK_PURCHASE': '自動安全在庫（購入品）',
             'AUTO_PURCHASE_ORDER_CHECK': '発注タイミング日次チェック',
@@ -7666,6 +7669,8 @@ class ScheduleRunNowView(APIView):
                             run_order_expansion()
                         elif task == 'CONTAINER_IMPORT_TMP_CLEANUP':
                             run_container_import_tmp_cleanup()
+                        elif task == 'KUBOTA_SAKAI_DUE_SYNC':
+                            run_kubota_sakai_due_sync()
                         else:
                             run_inventory_recalculation(task_name=task)
                     except Exception:

@@ -16,6 +16,7 @@ class ScheduleConfig(models.Model):
         ('PICKUP_ONLY', '取り込みのみ'),
         ('INVENTORY_ONLY', '在庫計算のみ'),
         ('PROGRESS_ONLY', '進度計算のみ'),
+        ('KUBOTA_SAKAI_DUE_SYNC', 'クボタ堺納期調整 取込+再配分'),
         ('AUTO_PLAN', '生産計画自動生成'),
         ('ORDER_EXPANSION', '自動受注展開'),
         ('AUTO_SAFETY_STOCK_INTERNAL', '自動安全在庫（社内）'),
