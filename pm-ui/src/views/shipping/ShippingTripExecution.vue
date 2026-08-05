@@ -46,10 +46,10 @@
             v-if="hasTripContactNotice(trip)"
             type="button"
             class="contact-notice-badge"
-            :class="{ urgent: tripContactNoticeType(trip) === 'URGENT' }"
+            :class="{ urgent: tripMostUrgentType(trip) === 'URGENT', vendor: tripMostUrgentType(trip) === 'VENDOR' }"
             @click="openTripContactNotice(trip)"
           >
-            {{ tripContactNoticeType(trip) === 'URGENT' ? '警告⚠ 緊急連絡' : '連絡あり' }}
+            {{ tripMostUrgentType(trip) === 'URGENT' ? '警告⚠ 緊急連絡' : `連絡${tripContactNotices(trip).length}件` }}
           </button>
           <small v-if="trip.departure_time_actual" class="actual-time">{{ t('shippingTripExecution.actualDeparture') }}: {{ trip.departure_time_actual }}</small>
         </header>
@@ -207,10 +207,12 @@
       <div class="modal-card">
         <h3 class="modal-title">事務所連絡</h3>
         <div class="modal-trip-label">{{ activeTripContactNoticeLabel }}</div>
-        <div class="contact-notice-type" :class="{ urgent: activeTripContactNoticeType === 'URGENT' }">
-          {{ activeTripContactNoticeType === 'URGENT' ? '緊急' : '普通' }}
+        <div v-for="n in activeTripContactNotices" :key="n.notice_type" class="contact-notice-item">
+          <div class="contact-notice-type" :class="{ urgent: n.notice_type === 'URGENT', vendor: n.notice_type === 'VENDOR' }">
+            {{ noticeTypeLabel(n.notice_type) }}
+          </div>
+          <div class="contact-notice-message">{{ n.notice_text }}</div>
         </div>
-        <div class="contact-notice-message">{{ activeTripContactNoticeText }}</div>
         <div class="modal-actions">
           <button class="btn" @click="closeTripContactNoticeDialog">閉じる</button>
         </div>
@@ -315,23 +317,24 @@ const statusLabel = (status) => {
 }
 
 const hasTripContactNotice = (trip) =>
-  Boolean(
-    trip?.has_contact_notice ||
-    String(trip?.contact_notice_text || '').trim()
-  )
+  Boolean(trip?.has_contact_notice || (trip?.contact_notices || []).length)
 
-const tripContactNoticeType = (trip) =>
-  String(trip?.contact_notice_type || 'NORMAL').trim().toUpperCase() === 'URGENT' ? 'URGENT' : 'NORMAL'
+const tripContactNotices = (trip) => (trip?.contact_notices || []).filter((n) => n.notice_text)
+
+const tripMostUrgentType = (trip) => {
+  const notices = tripContactNotices(trip)
+  if (notices.some((n) => n.notice_type === 'URGENT')) return 'URGENT'
+  if (notices.some((n) => n.notice_type === 'VENDOR')) return 'VENDOR'
+  return 'NORMAL'
+}
+
+const noticeTypeLabel = (t) => t === 'URGENT' ? '緊急' : t === 'VENDOR' ? '業者' : '出荷担当'
 
 const activeTripContactNoticeLabel = computed(() =>
   String(activeTripContactNotice.value?.trip_code || activeTripContactNotice.value?.trip_ref || '').trim()
 )
 
-const activeTripContactNoticeType = computed(() => tripContactNoticeType(activeTripContactNotice.value))
-
-const activeTripContactNoticeText = computed(() =>
-  String(activeTripContactNotice.value?.contact_notice_text || '').trim()
-)
+const activeTripContactNotices = computed(() => tripContactNotices(activeTripContactNotice.value))
 
 const openTripContactNotice = (trip) => {
   activeTripContactNotice.value = trip || null
@@ -874,6 +877,11 @@ onMounted(async () => {
   background: #fef2f2;
   border-color: #ef4444;
 }
+.contact-notice-badge.vendor {
+  color: #1e3a5f;
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
 @keyframes contact-notice-blink {
   50% {
     opacity: 0.35;
@@ -925,8 +933,16 @@ onMounted(async () => {
   background: #fef2f2;
   border-color: #ef4444;
 }
+.contact-notice-type.vendor {
+  color: #1e3a5f;
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+.contact-notice-item {
+  margin-bottom: 8px;
+}
 .contact-notice-message {
-  min-height: 80px;
+  min-height: 60px;
   padding: 10px 12px;
   border: 1px solid #fecaca;
   border-radius: 6px;

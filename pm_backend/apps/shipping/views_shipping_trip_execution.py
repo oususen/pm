@@ -17,12 +17,14 @@ SPLIT_TOKEN = '|PD='
 REMARK_MAX_LEN = 200
 TRIP_NOTICE_TYPE_NORMAL = 'NORMAL'
 TRIP_NOTICE_TYPE_URGENT = 'URGENT'
+TRIP_NOTICE_TYPE_VENDOR = 'VENDOR'
+TRIP_NOTICE_VALID_TYPES = {TRIP_NOTICE_TYPE_NORMAL, TRIP_NOTICE_TYPE_URGENT, TRIP_NOTICE_TYPE_VENDOR}
 
 
 def _normalize_trip_notice_type(value):
     notice_type = str(value or '').strip().upper()
-    if notice_type == TRIP_NOTICE_TYPE_URGENT:
-        return TRIP_NOTICE_TYPE_URGENT
+    if notice_type in TRIP_NOTICE_VALID_TYPES:
+        return notice_type
     return TRIP_NOTICE_TYPE_NORMAL
 
 
@@ -464,18 +466,24 @@ def _trip_notice_map(trips):
         )
     except ProgrammingError:
         return {}
-    return {
-        (
+    result = {}
+    for row in rows:
+        notice_text = str(row.notice_text or '').strip()
+        if not notice_text:
+            continue
+        key = (
             str(row.business_type or '').strip(),
             str(row.customer_code or '').strip(),
             row.departure_date,
             str(row.trip_ref or '').strip(),
-        ): {
-            'notice_text': str(row.notice_text or '').strip(),
+        )
+        if key not in result:
+            result[key] = []
+        result[key].append({
+            'notice_text': notice_text,
             'notice_type': _normalize_trip_notice_type(getattr(row, 'notice_type', TRIP_NOTICE_TYPE_NORMAL)),
-        }
-        for row in rows
-    }
+        })
+    return result
 
 
 def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, calc, truck_offset_map, actual_by_allocation=None, trip_notice_map=None):
@@ -509,14 +517,12 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
     loading_user = getattr(trip, 'loading_by', None)
     departed_user = getattr(trip, 'departed_by', None)
     actual_departure_date = _trip_actual_departure_date(trip, calc, truck_offset_map)
-    contact_notice = (trip_notice_map or {}).get((
+    contact_notices = (trip_notice_map or {}).get((
         str(trip.business_type or '').strip(),
         str(trip.customer_code or '').strip(),
-        trip.departure_date,
+        actual_departure_date,
         str(trip.trip_ref or '').strip(),
-    )) or {}
-    contact_notice_text = str(contact_notice.get('notice_text') or '').strip()
-    contact_notice_type = _normalize_trip_notice_type(contact_notice.get('notice_type'))
+    )) or []
     return {
         'id': trip.id,
         'trip_ids': [trip.id],
@@ -532,9 +538,8 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
         'status': trip.status,
         'loading_by': _display_user_name(loading_user),
         'departed_by': _display_user_name(departed_user),
-        'has_contact_notice': bool(contact_notice_text),
-        'contact_notice_text': contact_notice_text,
-        'contact_notice_type': contact_notice_type,
+        'has_contact_notice': bool(contact_notices),
+        'contact_notices': contact_notices,
         'total_qty': _format_qty(total_qty),
         'detail_count': len(details),
         'details': details,
@@ -568,9 +573,8 @@ def _merge_trip_payloads(payloads):
     details = []
     total_qty = Decimal('0')
     statuses = []
-    has_contact_notice = False
-    contact_notice_text = ''
-    contact_notice_type = TRIP_NOTICE_TYPE_NORMAL
+    merged_notices = []
+    seen_notice_types = set()
 
     for payload in payloads:
         all_trip_ids.extend(payload.get('trip_ids') or [payload.get('id')])
@@ -580,11 +584,11 @@ def _merge_trip_payloads(payloads):
         details.extend(payload.get('details') or [])
         total_qty += _to_decimal(payload.get('total_qty'))
         statuses.append(payload.get('status'))
-        if payload.get('has_contact_notice'):
-            has_contact_notice = True
-        if not contact_notice_text:
-            contact_notice_text = str(payload.get('contact_notice_text') or '').strip()
-            contact_notice_type = _normalize_trip_notice_type(payload.get('contact_notice_type'))
+        for n in payload.get('contact_notices') or []:
+            nt = _normalize_trip_notice_type(n.get('notice_type'))
+            if nt not in seen_notice_types:
+                seen_notice_types.add(nt)
+                merged_notices.append(n)
 
     details.sort(key=lambda x: (x['product_code'], x['ship_to_code'], x['due_date'] or '', x['allocation_id']))
 
@@ -592,9 +596,8 @@ def _merge_trip_payloads(payloads):
     base['trip_ids'] = all_trip_ids
     base['ship_to_code'] = '+'.join(ship_to_codes) if ship_to_codes else ''
     base['status'] = _merged_trip_status(statuses)
-    base['has_contact_notice'] = has_contact_notice or bool(contact_notice_text)
-    base['contact_notice_text'] = contact_notice_text
-    base['contact_notice_type'] = contact_notice_type
+    base['has_contact_notice'] = bool(merged_notices)
+    base['contact_notices'] = merged_notices
     base['total_qty'] = _format_qty(total_qty)
     base['detail_count'] = len(details)
     base['details'] = details

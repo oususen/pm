@@ -359,8 +359,9 @@ class ShippingTripNotice(models.Model):
     """便番号×出発日単位の事務所連絡メモ。"""
 
     NOTICE_TYPE_CHOICES = [
-        ('NORMAL', '普通'),
+        ('NORMAL', '出荷担当'),
         ('URGENT', '緊急'),
+        ('VENDOR', '業者'),
     ]
 
     id = models.BigAutoField(primary_key=True)
@@ -385,7 +386,7 @@ class ShippingTripNotice(models.Model):
         db_table = 't_shipping_trip_notice'
         verbose_name = '出荷便連絡メモ'
         verbose_name_plural = '出荷便連絡メモ'
-        unique_together = [['business_type', 'customer_code', 'departure_date', 'trip_ref']]
+        unique_together = [['business_type', 'customer_code', 'departure_date', 'trip_ref', 'notice_type']]
         indexes = [
             models.Index(fields=['business_type', 'customer_code', 'departure_date']),
             models.Index(fields=['departure_date', 'trip_ref']),
