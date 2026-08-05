@@ -23,6 +23,12 @@ const overtime = [
     meta: { pageTitle: '残業申請 編集', manualPath: '勤務/残業申請.md' },
   },
   {
+    path: '/overtime/my',
+    name: 'OvertimeMyApplications',
+    component: () => import('@/views/overtime/OvertimeMyApplications.vue'),
+    meta: { pageTitle: '自分の申請一覧' },
+  },
+  {
     path: '/overtime/list',
     name: 'OvertimeList',
     component: () => import('@/views/overtime/OvertimeApplicationList.vue'),

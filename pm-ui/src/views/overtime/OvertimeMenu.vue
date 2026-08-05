@@ -7,10 +7,15 @@
         <div class="menu-label">残業申請</div>
         <div class="menu-desc">時間外・休日出勤を申請する</div>
       </RouterLink>
-      <RouterLink to="/overtime/list" class="menu-card">
+      <RouterLink to="/overtime/my" class="menu-card">
         <div class="menu-icon">📋</div>
+        <div class="menu-label">自分の申請</div>
+        <div class="menu-desc">自分の申請状況を確認する</div>
+      </RouterLink>
+      <RouterLink v-if="isApprover" to="/overtime/list" class="menu-card approver-card">
+        <div class="menu-icon">📑</div>
         <div class="menu-label">申請一覧</div>
-        <div class="menu-desc">自分の申請履歴を確認する</div>
+        <div class="menu-desc">全員の申請履歴を確認する</div>
       </RouterLink>
       <RouterLink v-if="isApprover" to="/overtime/approvals" class="menu-card approver-card">
         <div class="menu-icon">✅</div>

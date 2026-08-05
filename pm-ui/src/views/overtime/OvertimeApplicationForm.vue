@@ -161,7 +161,7 @@
         <button type="submit" class="btn btn-primary" :disabled="saving">
           {{ isEdit ? t('overtime.submitEdit') : t('overtime.submit') }}
         </button>
-        <RouterLink to="/overtime/list" class="btn btn-ghost">{{ t('overtime.cancel') }}</RouterLink>
+        <RouterLink to="/overtime/my" class="btn btn-ghost">{{ t('overtime.cancel') }}</RouterLink>
       </div>
     </form>
   </div>
@@ -565,7 +565,7 @@ async function saveDraft() {
       appId = res.data.id
     }
     await uploadSignIfNeeded(appId)
-    router.push('/overtime/list')
+    router.push('/overtime/my')
   } catch (e) {
     const data = e.response?.data
     const apiMsg = resolveApiErrorMessage(data, e.message)
@@ -599,7 +599,7 @@ async function handleSubmit() {
     await uploadSignIfNeeded(appId)
     // 申請提出
     await api.overtime.submitApplication(appId)
-    router.push('/overtime/list')
+    router.push('/overtime/my')
   } catch (e) {
     const data = e.response?.data
     const apiMsg = resolveApiErrorMessage(data, e.message)
