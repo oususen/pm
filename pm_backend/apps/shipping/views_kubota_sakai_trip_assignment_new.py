@@ -1385,6 +1385,34 @@ class KubotaSakaiTripPlanViewNew(APIView):
         })
 
 
+class KubotaSakaiTripImportViewNew(APIView):
+    """クボタ堺便計画 取込
+
+    納期調整の保存結果を読み取り対象として確認し、便計画表示の再読込に使う。
+    """
+
+    def post(self, request):
+        start_date = _parse_date(request.data.get('start_date')) or date.today()
+        horizon_days = int(request.data.get('horizon_days') or 14)
+        if horizon_days < 1:
+            horizon_days = 1
+        if horizon_days > 180:
+            horizon_days = 180
+        end_date = start_date + timedelta(days=horizon_days - 1)
+
+        row_qs = KubotaSakaiDueAdjustment.objects.filter(
+            due_date__range=(start_date, end_date),
+            delivery_qty__gt=0,
+        )
+        return Response({
+            'detail': '納期調整の保存結果を読み取りました。',
+            'target_date_from': start_date.isoformat(),
+            'target_date_to': end_date.isoformat(),
+            'total_rows': row_qs.count(),
+            'total_days': row_qs.values('due_date').distinct().count(),
+        })
+
+
 class KubotaSakaiTripLoadPreviewViewNew(APIView):
     """未保存の便割付入力を使って便占有率を試算する。"""
 

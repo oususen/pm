@@ -5,6 +5,9 @@ export const createKubotaSakaiTripAssignmentsAPI_new = (client) => ({
   grid(params = {}) {
     return client.get('/kubota-sakai-trip-assignments-new/grid/', { params })
   },
+  importOrders(data = {}) {
+    return client.post('/kubota-sakai-trip-assignments-new/import-orders/', data)
+  },
   bulkSave(targetDate, rows = []) {
     return client.post('/kubota-sakai-trip-assignments-new/bulk_save/', { target_date: targetDate, rows })
   },

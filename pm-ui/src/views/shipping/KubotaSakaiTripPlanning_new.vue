@@ -2089,12 +2089,12 @@ const importOrders = async () => {
   if (importing.value || loading.value) return
   importing.value = true
   try {
-    const res = await api.kubotaSakaiDueAdjustments.importOrders({
+    const res = await api.kubotaSakaiTripAssignments_new.importOrders({
       start_date: targetDate.value,
       horizon_days: horizonDays.value,
     })
     const d = res.data || {}
-    alert(`取込完了: 新規${d.created || 0}件, 更新${d.updated || 0}件, 内示→確定削除${d.deleted_forecast || 0}件`)
+    alert(`取込完了: 対象${d.total_rows || 0}件を読取りました。`)
     await loadGrid()
   } catch (error) {
     const message = error?.response?.data?.detail || '取込に失敗しました。'

@@ -15,6 +15,7 @@ from shipping.views_kubota_sakai_trip_assignment import (
 from shipping.views_kubota_sakai_trip_assignment_new import (
     KubotaSakaiDeliveryProgressAdjustViewNew,
     KubotaSakaiTripDisplaySettingViewNew,
+    KubotaSakaiTripImportViewNew,
     KubotaSakaiPickupDetailPdfViewNew,
     KubotaSakaiPseudoTruckProductViewNew,
     KubotaSakaiTripLoadDetailViewNew,
@@ -72,6 +73,7 @@ urlpatterns = [
     # クボタ堺便計画（新・積載ロジック検証用）
     path('kubota-sakai-trip-assignments-new/grid/', KubotaSakaiTripPlanViewNew.as_view(), name='kubota-sakai-trip-grid-new'),
     path('kubota-sakai-trip-assignments-new/bulk_save/', KubotaSakaiTripPlanViewNew.as_view(), name='kubota-sakai-trip-save-new'),
+    path('kubota-sakai-trip-assignments-new/import-orders/', KubotaSakaiTripImportViewNew.as_view(), name='kubota-sakai-trip-import-new'),
     path('kubota-sakai-trip-assignments-new/preview-load/', KubotaSakaiTripLoadPreviewViewNew.as_view(), name='kubota-sakai-trip-preview-load-new'),
     path('kubota-sakai-trip-assignments-new/load-detail/', KubotaSakaiTripLoadDetailViewNew.as_view(), name='kubota-sakai-trip-load-detail-new'),
     path('kubota-sakai-trip-assignments-new/pickup-detail-pdf/', KubotaSakaiPickupDetailPdfViewNew.as_view(), name='kubota-sakai-pickup-detail-pdf-new'),
