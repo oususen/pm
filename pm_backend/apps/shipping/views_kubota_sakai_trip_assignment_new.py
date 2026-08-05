@@ -2085,17 +2085,12 @@ class KubotaSakaiPickupDetailPdfViewNew(APIView):
             return buf.read()
 
         for dep_idx, dep in enumerate(departure_dates):
-            if y < 28 * mm:
+            if dep_idx > 0:
+                # 出荷日ごとに新しいページを開始（1日1ページ）
                 c.showPage()
                 page_no += 1
                 draw_header(page_no)
                 y = top - 14 * mm - (line_h * 2)
-            if dep_idx > 0:
-                # 日と日の間に2行ぶんの余白を入れてから二重線を描画
-                y -= (line_h * 2)
-                draw_double_line(y + 1.8 * mm, width=1.3, gap=1.2 * mm)
-                # 二重線の後も2行ぶん余白を入れる
-                y -= (line_h * 2)
 
             draw_departure_title(dep)
             y -= line_h
