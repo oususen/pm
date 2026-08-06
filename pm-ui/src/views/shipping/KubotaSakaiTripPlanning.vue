@@ -256,7 +256,8 @@
       </table>
     </div>
 
-    <div class="table-wrap" ref="tableWrapRef">
+    <div class="main-layout">
+      <div class="table-wrap" ref="tableWrapRef">
       <table class="grid">
         <thead ref="theadRef">
           <tr>
@@ -490,7 +491,8 @@
                 <div v-if="showProgressAdjust" class="sub-cell progress-adjust-cell">
                   <input
                     :value="progressAdjustAt(row, dateKey)"
-                    type="number"
+                    type="text"
+                    inputmode="numeric"
                     class="progress-adjust-input"
                     @input="setProgressAdjust(row, dateKey, $event.target.value)"
                   />
@@ -544,6 +546,129 @@
           </tr>
         </tbody>
       </table>
+      </div>
+
+      <aside class="plan-sidebar">
+        <div class="plan-sidebar-header">
+          <span class="plan-sidebar-title">積載平面図（出発日）</span>
+          <div class="plan-sidebar-date-control">
+            <button class="plan-date-btn" :disabled="!planPrevDate" @click="planDate = planPrevDate">‹</button>
+            <input v-model="planDate" type="date" class="plan-sidebar-date-input" />
+            <button class="plan-date-btn" :disabled="!planNextDate" @click="planDate = planNextDate">›</button>
+          </div>
+        </div>
+        <div class="plan-sidebar-body">
+          <div v-for="truck in planTruckModels" :key="`plan-${truck.truckId}`" class="plan-truck-card">
+            <div class="plan-truck-header">
+              <div class="plan-truck-header-main">
+                <span class="plan-truck-name">{{ truck.label }}</span>
+                <button
+                  type="button"
+                  class="plan-note-btn"
+                  :class="{ 'has-note': truck.hasNotice }"
+                  title="事務所連絡を入力"
+                  @click="openTripNoticeDialog(truck)"
+                >📝</button>
+              </div>
+              <div class="plan-truck-header-right">
+                <span
+                  v-for="n in truck.notices"
+                  :key="n.notice_type"
+                  class="plan-note-badge"
+                  :class="{ urgent: n.notice_type === 'URGENT', vendor: n.notice_type === 'VENDOR' }"
+                >{{ n.notice_type === 'URGENT' ? '緊急連絡' : n.notice_type === 'VENDOR' ? '業者連絡' : '出荷担当連絡' }}</span>
+                <span v-if="truck.overloaded" class="plan-overload-badge">積載超過</span>
+              </div>
+            </div>
+            <div v-for="n in truck.notices" :key="`preview-${n.notice_type}`" class="plan-note-preview">{{ noticeTypeLabel(n.notice_type) }}: {{ n.notice_text }}</div>
+            <div class="plan-svg-wrap">
+              <svg :viewBox="truck.viewBox" class="plan-svg" preserveAspectRatio="xMidYMid meet">
+                <rect :x="0" :y="0" :width="truck.viewW" :height="truck.viewH" class="plan-bed" />
+                <template v-for="(item, idx) in truck.placed" :key="`${truck.truckId}-pl-${idx}`">
+                  <g>
+                    <rect
+                      :x="item.x" :y="item.y"
+                      :width="item.w" :height="item.d"
+                      :fill="item.color"
+                      class="plan-container"
+                    >
+                      <title>{{ item.label }}（{{ item.layers }}段）</title>
+                    </rect>
+                    <text
+                      :x="item.x + item.w / 2"
+                      :y="item.y + item.d / 2"
+                      :font-size="item.fontSize"
+                      text-anchor="middle"
+                      dominant-baseline="central"
+                      class="plan-layer-text"
+                    >{{ item.layers }}</text>
+                  </g>
+                </template>
+              </svg>
+            </div>
+            <div class="plan-legend">
+              <div v-for="(item, idx) in truck.items" :key="`${truck.truckId}-lg-${idx}`" class="plan-legend-row">
+                <span class="plan-swatch" :style="{ background: item.color }"></span>
+                <div class="plan-legend-text">
+                  <div class="plan-legend-code">{{ item.productCode }}×{{ formatNumber(item.qty) }}（{{ item.containerCount }}容器）</div>
+                </div>
+              </div>
+            </div>
+            <div class="plan-remaining">
+              <div v-if="truck.remaining.length">
+                <span class="plan-remaining-label">残りスペース</span>
+                <div v-for="(r, idx) in truck.remaining" :key="`${truck.truckId}-rm-${idx}`" class="plan-remaining-row">
+                  <span class="plan-remaining-code">{{ r.label }}</span>
+                  <span class="plan-remaining-count">あと{{ r.count }}箱</span>
+                </div>
+              </div>
+              <div v-else class="plan-remaining-empty">残りスペースなし</div>
+            </div>
+          </div>
+          <div v-if="!planTruckModels.length" class="plan-sidebar-empty">
+            {{ planDateLoaded ? '便マスタがありません' : '指定日のデータがありません' }}
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div v-if="showTripNoticeDialog" class="modal-overlay" @click.self="closeTripNoticeDialog">
+      <div class="modal-card trip-note-modal">
+        <h3 class="modal-title">事務所連絡</h3>
+        <div class="trip-note-target">{{ activeTripNoticeLabel }}</div>
+        <div class="trip-note-tabs">
+          <button
+            v-for="t in ['NORMAL', 'URGENT', 'VENDOR']"
+            :key="t"
+            class="trip-note-tab"
+            :class="{ active: tripNoticeTypeDraft === t, 'has-text': !!tripNoticeDrafts[t] }"
+            @click="tripNoticeTypeDraft = t"
+          >{{ noticeTypeLabel(t) }}<span v-if="tripNoticeDrafts[t]" class="tab-dot"></span></button>
+        </div>
+        <div class="modal-fields">
+          <label class="modal-field">
+            <textarea
+              v-model.trim="tripNoticeDrafts[tripNoticeTypeDraft]"
+              class="trip-note-textarea"
+              maxlength="200"
+              :placeholder="`${noticeTypeLabel(tripNoticeTypeDraft)}への連絡を入力`"
+            ></textarea>
+          </label>
+        </div>
+        <div class="trip-note-count">{{ (tripNoticeDrafts[tripNoticeTypeDraft] || '').length }}/200</div>
+        <template v-for="t in ['NORMAL', 'URGENT', 'VENDOR']" :key="`ref-${t}`">
+          <div v-if="t !== tripNoticeTypeDraft && tripNoticeDrafts[t]" class="trip-note-ref">
+            <span class="trip-note-ref-label">{{ noticeTypeLabel(t) }}:</span> {{ tripNoticeDrafts[t] }}
+          </div>
+        </template>
+        <div class="modal-actions">
+          <button class="btn" :disabled="savingTripNotice" @click="closeTripNoticeDialog">閉じる</button>
+          <button class="btn" :disabled="savingTripNotice" @click="clearTripNotice">削除</button>
+          <button class="btn save-btn" :disabled="savingTripNotice" @click="saveTripNotice">
+            {{ savingTripNotice ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="note">未割付期限: 調整後納期の{{ assignmentDeadlineDays }}営業日前</div>
@@ -647,6 +772,13 @@ const parseIntegerQty = (value) => {
   return Number.isFinite(num) ? Math.max(0, Math.trunc(num)) : 0
 }
 
+const parseSignedIntegerQty = (value) => {
+  if (value === null || value === undefined || value === '') return 0
+  const normalized = String(value).replace(/[，,]/g, '').replace(/[．]/g, '.')
+  const num = Number(normalized)
+  return Number.isFinite(num) ? Math.trunc(num) : 0
+}
+
 const normalizeQtyText = (value) => {
   const qty = parseIntegerQty(value)
   return qty > 0 ? String(qty) : ''
@@ -733,6 +865,7 @@ const sortEntries = (items = []) => {
 const todayDate = formatLocalDate(new Date())
 const defaultTargetDate = ref(todayDate)
 const targetDate = ref(todayDate)
+const planDate = ref(todayDate)
 const horizonDays = ref(5)
 const keyword = ref('')
 const favorites = ref([])
@@ -782,6 +915,12 @@ const displaySettingItems = ref([])
 const savingDisplaySettings = ref(false)
 const displaySettingActiveKey = ref('')
 const displaySettingMap = ref(new Map())
+const showTripNoticeDialog = ref(false)
+const savingTripNotice = ref(false)
+const tripNoticeDrafts = ref({ NORMAL: '', URGENT: '', VENDOR: '' })
+const tripNoticeTypeDraft = ref('NORMAL')
+const activeTripNotice = ref(null)
+const noticeTypeLabel = (t) => t === 'URGENT' ? '緊急' : t === 'VENDOR' ? '業者' : '出荷担当'
 const HIDE_WEEKENDS_KEY = 'kubotaSakaiTripPlanning.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 
@@ -810,6 +949,12 @@ const detailTrucks = computed(() => {
     })
   })
   return merged
+})
+
+const activeTripNoticeLabel = computed(() => {
+  const truck = activeTripNotice.value
+  if (!truck) return ''
+  return `${truck.label || '便'} / ${truck.dateKey || ''}`
 })
 
 const isHoliday = (dateKey) => Boolean(holidayByDate.value[dateKey])
@@ -962,7 +1107,7 @@ const progressAdjustAt = (row, dateKey) => {
 }
 const setProgressAdjust = (row, dateKey, value) => {
   const key = `${row.product_code}||${row.ship_to_code || ''}||${dateKey}`
-  progressAdjustEdits.value[key] = parseIntegerQty(value)
+  progressAdjustEdits.value[key] = parseSignedIntegerQty(value)
 }
 
 const truckAt = (dateKey, slotIdx) => {
@@ -1171,6 +1316,472 @@ const loadBlocksByDate = computed(() => {
   return result
 })
 
+const planColorPalette = [
+  '#fca5a5', '#fbbf24', '#86efac', '#7dd3fc', '#c4b5fd',
+  '#f9a8d4', '#fdba74', '#a7f3d0', '#93c5fd', '#fcd34d',
+  '#d9f99d', '#f5d0fe', '#a5b4fc', '#fda4af', '#bef264',
+]
+
+const planColorForProduct = (productCode) => {
+  const display = displaySettingItems.value.find((item) => item.product_code === productCode)
+  if (display && display.bg_color && display.bg_color !== '#ffffff') return display.bg_color
+  let hash = 0
+  const str = String(productCode || '')
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0
+  }
+  return planColorPalette[hash % planColorPalette.length]
+}
+
+const collectTruckPlanItems = (departureDateKey, truckId) => {
+  const grouped = new Map()
+  allDateKeys.value.forEach((dueDateKey) => {
+    const truckMap = new Map((trucksByDate.value[dueDateKey] || []).map((t) => [Number(t.id), t]))
+    const dueTruck = truckMap.get(Number(truckId))
+    if (!dueTruck) return
+    if (getLoadDetailDateKey(dueDateKey, dueTruck) !== departureDateKey) return
+    mergedRows.value.forEach((row) => {
+      entriesAt(row, dueDateKey).forEach((entry) => {
+        ;(entry.allocations || []).forEach((allocation) => {
+          if (Number(allocation.truck_id) !== Number(truckId)) return
+          const qty = parseIntegerQty(allocation.qty)
+          if (qty <= 0) return
+          const container = findContainerOption(entry.product_code, allocation.container_id)
+          const capacity = resolveAllocationCapacity(entry, allocation)
+          const containerCount = Math.max(1, Math.ceil(qty / Math.max(1, capacity)))
+          const key = `${entry.product_code}||${allocation.container_id || 'default'}`
+          const existing = grouped.get(key)
+          if (existing) {
+            existing.qty += qty
+            existing.containerCount += containerCount
+            return
+          }
+          grouped.set(key, {
+            key,
+            productCode: entry.product_code,
+            containerName: container?.container_name || '',
+            qty,
+            containerCount,
+          })
+        })
+      })
+    })
+  })
+  return [...grouped.values()].sort((a, b) => String(a.productCode).localeCompare(String(b.productCode)))
+}
+
+const buildTruckPlanColorMap = (items = []) => {
+  const usedColors = new Set()
+  const truckColorMap = new Map()
+  items.forEach((item) => {
+    const code = item.productCode
+    const display = displaySettingItems.value.find((row) => row.product_code === code)
+    let color = display && display.bg_color && display.bg_color !== '#ffffff' ? display.bg_color : ''
+    if (!color || usedColors.has(color)) {
+      const fallback = planColorForProduct(code)
+      color = usedColors.has(fallback)
+        ? (planColorPalette.find((c) => !usedColors.has(c)) || fallback)
+        : fallback
+    }
+    usedColors.add(color)
+    truckColorMap.set(code, color)
+  })
+  return truckColorMap
+}
+
+const planTruckModels = computed(() => {
+  const dateKey = planDate.value
+  const models = []
+
+  // 実出発日ベースの積載データを取得
+  const departureSummaries = previewDepartureSummaryByDate.value[dateKey] || departureSummaryByDate.value[dateKey] || []
+
+  // 全納期日を走査し、getLoadDetailDateKeyで実出発日がdateKeyと一致する便を収集
+  const allTruckMap = new Map()
+  Object.values(trucksByDate.value).forEach((list) => {
+    list.forEach((t) => allTruckMap.set(Number(t.id), t))
+  })
+  const truckIds = new Set(
+    departureSummaries.filter((s) => Array.isArray(s.placed) && s.placed.length > 0).map((s) => Number(s.truck_id)),
+  )
+  const truckDueDateMap = new Map()
+  allDateKeys.value.forEach((dk) => {
+    const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
+    mergedRows.value.forEach((row) => {
+      entriesAt(row, dk).forEach((entry) => {
+        ;(entry.allocations || []).forEach((allocation) => {
+          const truckId = Number(allocation.truck_id)
+          if (!truckId || parseIntegerQty(allocation.qty) <= 0) return
+          const truck = truckMap.get(truckId)
+          if (!truck) return
+          if (getLoadDetailDateKey(dk, truck) === dateKey) {
+            truckIds.add(truckId)
+            if (!truckDueDateMap.has(truckId)) truckDueDateMap.set(truckId, dk)
+          }
+        })
+      })
+    })
+  })
+
+  const planTrucks = [...truckIds]
+    .map((id) => allTruckMap.get(id))
+    .filter(Boolean)
+    .sort((a, b) => Number(a.trip_number || 0) - Number(b.trip_number || 0))
+
+  planTrucks.forEach((truck) => {
+    const truckId = Number(truck.id)
+    const bedW = parseNumber(truck.width)
+    const bedD = parseNumber(truck.depth)
+    const bedH = parseNumber(truck.height)
+
+    // ---- 実出発日ベースの積載判定結果を優先 → 納期日(occupancyDateKey)ベース → 保存済みgrid ----
+    const departureSummary = departureSummaries.find((s) => Number(s.truck_id) === truckId)
+    const dueDateKey = truckDueDateMap.get(truckId) || dateKey
+    const previewSummary = (previewSummaryByDate.value[dueDateKey] || []).find((s) => Number(s.truck_id) === truckId)
+    const gridSummary = (summaryByDate.value[dueDateKey] || []).find((s) => Number(s.truck_id) === truckId)
+    const backendSummary = (departureSummary && Array.isArray(departureSummary.placed))
+      ? departureSummary
+      : (previewSummary && Array.isArray(previewSummary.placed))
+        ? previewSummary
+        : ((gridSummary && Array.isArray(gridSummary.placed)) ? gridSummary : null)
+    const aggregatedItems = collectTruckPlanItems(dateKey, truckId)
+    const truckColorMap = buildTruckPlanColorMap(aggregatedItems)
+
+    if (backendSummary) {
+      const placed = backendSummary.placed.map((p) => {
+        const pw = parseNumber(p.w)
+        const pd = parseNumber(p.d)
+        const layers = parseIntegerQty(p.layers) || 1
+        return {
+          x: parseNumber(p.x),
+          y: parseNumber(p.y),
+          w: pw,
+          d: pd,
+          layers,
+          fontSize: Math.max(60, Math.min(pw, pd) * 0.4),
+          rotated: Boolean(p.rotated),
+          color: truckColorMap.get(p.product_code) || planColorForProduct(p.product_code),
+          label: `${p.product_code}×${formatNumber(p.qty)}`,
+        }
+      })
+      const items = aggregatedItems.map((item) => ({
+        ...item,
+        color: truckColorMap.get(item.productCode) || planColorForProduct(item.productCode),
+      }))
+      const viewW = bedD || 1
+      const viewH = bedW || 1
+      models.push({
+        truckId,
+        label: truckDisplayName(truck) || truck.name || '便',
+        viewW,
+        viewH,
+        viewBox: `0 0 ${viewW} ${viewH}`,
+        items,
+        placed,
+        remaining: (backendSummary.remaining || []).map((r) => ({ label: r.label, count: parseIntegerQty(r.count) })),
+        overloaded: backendSummary.can_fit === false,
+        notices: (backendSummary.contact_notices || []).filter((n) => n.notice_text),
+        hasNotice: Boolean(backendSummary.has_contact_notice || (backendSummary.contact_notices || []).some((n) => n.notice_text)),
+        dateKey,
+      })
+      return
+    }
+
+    // ---- フォールバック: フロント側のパッキング（実出発日ベースで全納期日を走査） ----
+    const grouped = new Map()
+
+    allDateKeys.value.forEach((dk) => {
+      const truckMap = new Map((trucksByDate.value[dk] || []).map((t) => [Number(t.id), t]))
+      const dkTruck = truckMap.get(truckId)
+      if (!dkTruck) return
+      const displayDk = getLoadDetailDateKey(dk, dkTruck)
+      if (displayDk !== dateKey) return
+      mergedRows.value.forEach((row) => {
+        entriesAt(row, dk).forEach((entry) => {
+          ;(entry.allocations || []).forEach((allocation) => {
+            if (Number(allocation.truck_id) !== truckId) return
+            const qty = parseIntegerQty(allocation.qty)
+            if (qty <= 0) return
+            const container = findContainerOption(entry.product_code, allocation.container_id)
+            const capacity = resolveAllocationCapacity(entry, allocation)
+            const containerCount = Math.max(1, Math.ceil(qty / Math.max(1, capacity)))
+            const containerKey = allocation.container_id || 'default'
+            const key = `${entry.product_code}||${containerKey}`
+            const existing = grouped.get(key)
+            if (existing) {
+              existing.qty += qty
+              existing.count += containerCount
+              return
+            }
+            grouped.set(key, {
+              key,
+              productCode: entry.product_code,
+              containerName: container?.container_name || '',
+              cw: parseNumber(container?.width),
+              cd: parseNumber(container?.depth),
+              ch: parseNumber(container?.height),
+              stackable: container?.stackable == null ? true : Boolean(container.stackable),
+              maxStack: parseIntegerQty(container?.max_stack),
+              orientation: container?.orientation || 'free',
+              capacity: Math.max(1, capacity),
+              count: containerCount,
+              qty,
+              color: truckColorMap.get(entry.product_code) || planColorForProduct(entry.product_code),
+            })
+          })
+        })
+      })
+    })
+
+    const items = [...grouped.values()].sort((a, b) => (b.cw * b.cd) - (a.cw * a.cd))
+
+    // 段数と実効床面積（バックエンド計算式と同一）
+    items.forEach((item) => {
+      let layers = 1
+      if (item.cw > 0 && item.cd > 0 && item.ch > 0 && item.stackable) {
+        const truckLayers = Math.floor(bedH / item.ch)
+        const maxStack = item.maxStack > 0 ? item.maxStack : truckLayers
+        layers = Math.max(1, Math.min(truckLayers || 1, maxStack || 1))
+      }
+      item.layers = layers
+      item.effectiveFloor = (item.cw * item.cd) / layers
+    })
+
+    // パッカー: スロットを荷台内に敷き詰める。
+    // 収まらない場合も必ず配置し（allFit=false）、表示時に縮小して全体を荷台内に収める
+    const packSlots = (slotList) => {
+      const result = []
+      let rowX = 0
+      let rowY = 0
+      let rowH = 0
+      let allFit = true
+      let maxX = 0
+      let maxY = 0
+      slotList.forEach((slot) => {
+        const len = slot.len // 長手方向の長さ（表示座標: 長手=横）
+        const wid = slot.wid // 幅方向の長さ（表示座標: 幅=縦）
+        // 長手方向が溢れたら次レーンへ
+        if (rowX + len > bedD) {
+          rowX = 0
+          rowY += rowH
+          rowH = 0
+        }
+        // 幅方向が溢れる場合は超過扱い（allFit=false）にして配置は続行
+        if (rowY + wid > bedW) {
+          allFit = false
+        }
+        result.push({
+          x: rowX,
+          y: rowY,
+          w: len,
+          d: wid,
+          layers: slot.item.layers || 1,
+          fontSize: Math.max(60, Math.min(len, wid) * 0.4),
+          rotated: slot.rotated,
+          color: slot.item.color,
+          label: `${slot.item.productCode}×${formatNumber(slot.item.qty)}`,
+        })
+        rowX += len
+        rowH = Math.max(rowH, wid)
+        maxX = Math.max(maxX, rowX)
+        maxY = Math.max(maxY, rowY + wid)
+      })
+      return { placed: result, allFit, maxX, maxY }
+    }
+
+    // 各品目のフロアスロット（段積みは1フットプリント、向きは容器マスタ設定を反映）
+    const allSlots = []
+    const typeSlots = []
+    items.forEach((item) => {
+      if (item.cw <= 0 || item.cd <= 0) return
+      const layers = Math.max(1, item.layers || 1)
+      const floorSlots = Math.ceil(item.count / layers)
+      const capNormal = Math.floor(bedW / item.cw) * Math.floor(bedD / item.cd)
+      const capRotated = Math.floor(bedW / item.cd) * Math.floor(bedD / item.cw)
+      // 容器マスタの向き設定（long=容器長手 / short=容器短手 / free=自由=自動判定）
+      // トラック両側＝荷台長手方向（奥行き）。長手=長い辺を長手方向へ、短手=短い辺を長手方向へ
+      const orientation = String(item.orientation || 'free')
+      let rotated
+      if (orientation === 'long') {
+        rotated = item.cw > item.cd
+      } else if (orientation === 'short') {
+        rotated = item.cd > item.cw
+      } else {
+        rotated = capRotated > capNormal
+      }
+      const len = rotated ? item.cw : item.cd
+      const wid = rotated ? item.cd : item.cw
+      const typeSlot = { item, len, wid, rotated }
+      typeSlots.push(typeSlot)
+      for (let i = 0; i < floorSlots; i++) {
+        allSlots.push(typeSlot)
+      }
+    })
+
+    const mainPack = packSlots(allSlots)
+    const placed = mainPack.placed
+    // 実際に荷台へ収まっているか（積載可否の判定。収まらなければ積載超過）
+    const overloaded = !mainPack.allFit
+
+    // 残りスペース: 現在の積載が荷台に収まる場合のみ、各品目の容器を実際にあと何箱
+    // 置けるかをパッキングで幾何学的に判定する（面積ベースではなく、見た目と一致させる）
+    const remainingMap = new Map()
+    if (bedW > 0 && bedD > 0 && mainPack.allFit) {
+      typeSlots.forEach((typeSlot) => {
+        const { item } = typeSlot
+        let extra = 0
+        let canAdd = true
+        while (canAdd && extra < 500) {
+          const testSlots = allSlots.slice()
+          for (let i = 0; i <= extra; i++) {
+            testSlots.push(typeSlot)
+          }
+          if (packSlots(testSlots).allFit) {
+            extra++
+          } else {
+            canAdd = false
+          }
+        }
+        if (extra > 0) {
+          const label = item.containerName || item.productCode
+          remainingMap.set(label, Math.max(remainingMap.get(label) || 0, extra))
+        }
+      })
+    }
+    const remaining = [...remainingMap.entries()].map(([label, count]) => ({ label, count }))
+
+    const bedW2 = bedW || 1
+    const bedD2 = bedD || 1
+    const viewW = bedD2 // 表示上の幅（長手=奥行 を横に）
+    const viewH = bedW2 // 表示上の高さ（幅 を縦に）
+    models.push({
+      truckId,
+      label: truckDisplayName(truck) || truck.name || '便',
+      viewW,
+      viewH,
+      viewBox: `0 0 ${viewW} ${viewH}`,
+      items: aggregatedItems.map((item) => ({
+        ...item,
+        color: truckColorMap.get(item.productCode) || planColorForProduct(item.productCode),
+      })),
+      placed,
+      remaining,
+      overloaded,
+      notices: [],
+      hasNotice: false,
+      dateKey,
+    })
+  })
+  return models
+})
+
+const patchTripNoticeSummaries = (dateKey, truckId, notices) => {
+  const patchMap = (source = {}) => {
+    const list = Array.isArray(source[dateKey]) ? source[dateKey] : []
+    return {
+      ...source,
+      [dateKey]: list.map((item) => (
+        Number(item?.truck_id) === Number(truckId)
+          ? {
+              ...item,
+              contact_notices: notices,
+              has_contact_notice: notices.length > 0,
+            }
+          : item
+      )),
+    }
+  }
+  departureSummaryByDate.value = patchMap(departureSummaryByDate.value)
+  previewDepartureSummaryByDate.value = patchMap(previewDepartureSummaryByDate.value)
+}
+
+const _applyNoticesResponse = (notices) => {
+  const drafts = { NORMAL: '', URGENT: '', VENDOR: '' }
+  for (const n of notices || []) {
+    const t = String(n.notice_type || 'NORMAL').trim().toUpperCase()
+    if (t in drafts) drafts[t] = String(n.notice_text || '').trim()
+  }
+  tripNoticeDrafts.value = drafts
+}
+
+const openTripNoticeDialog = async (truck) => {
+  activeTripNotice.value = {
+    truckId: Number(truck?.truckId || 0),
+    label: truck?.label || '便',
+    dateKey: truck?.dateKey || planDate.value,
+  }
+  _applyNoticesResponse(truck?.notices || [])
+  tripNoticeTypeDraft.value = 'NORMAL'
+  showTripNoticeDialog.value = true
+  if (!activeTripNotice.value.truckId || !activeTripNotice.value.dateKey) return
+  try {
+    const res = await api.kubotaSakaiTripAssignments.getTripNotices(
+      activeTripNotice.value.dateKey,
+      activeTripNotice.value.truckId,
+    )
+    _applyNoticesResponse(res.data?.notices || [])
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '連絡メモの取得に失敗しました。'
+    alert(detail)
+  }
+}
+
+const closeTripNoticeDialog = () => {
+  if (savingTripNotice.value) return
+  showTripNoticeDialog.value = false
+  activeTripNotice.value = null
+  tripNoticeDrafts.value = { NORMAL: '', URGENT: '', VENDOR: '' }
+  tripNoticeTypeDraft.value = 'NORMAL'
+}
+
+const saveTripNotice = async () => {
+  const truck = activeTripNotice.value
+  if (!truck?.truckId || !truck?.dateKey) return
+  savingTripNotice.value = true
+  try {
+    const currentType = tripNoticeTypeDraft.value
+    const currentText = tripNoticeDrafts.value[currentType] || ''
+    const res = await api.kubotaSakaiTripAssignments.saveTripNotice(
+      truck.dateKey,
+      truck.truckId,
+      currentText,
+      currentType,
+    )
+    const notices = res.data?.notices || []
+    _applyNoticesResponse(notices)
+    patchTripNoticeSummaries(truck.dateKey, truck.truckId, notices)
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '連絡メモの保存に失敗しました。'
+    alert(detail)
+  } finally {
+    savingTripNotice.value = false
+  }
+}
+
+const clearTripNotice = async () => {
+  tripNoticeDrafts.value[tripNoticeTypeDraft.value] = ''
+  await saveTripNotice()
+}
+
+// 平面図の日付ナビゲーション（納期日＋実出発日を含む全日付で前後移動）
+const planAvailableDates = computed(() => {
+  const dateSet = new Set(allDateKeys.value)
+  Object.keys(departureSummaryByDate.value).forEach((k) => dateSet.add(k))
+  Object.keys(previewDepartureSummaryByDate.value).forEach((k) => dateSet.add(k))
+  return [...dateSet].sort()
+})
+const planPrevDate = computed(() => {
+  const keys = planAvailableDates.value
+  const idx = keys.indexOf(planDate.value)
+  return idx > 0 ? keys[idx - 1] : ''
+})
+const planNextDate = computed(() => {
+  const keys = planAvailableDates.value
+  const idx = keys.indexOf(planDate.value)
+  return idx >= 0 && idx < keys.length - 1 ? keys[idx + 1] : ''
+})
+const planDateLoaded = computed(() => planAvailableDates.value.includes(planDate.value))
+
 const buildPayloadRowsForDate = (dateKey) => {
   return mergedRows.value
     .flatMap((row) => entriesAt(row, dateKey))
@@ -1265,8 +1876,18 @@ const handleQtyInputMouseLeave = (event) => {
   }
 }
 
+const mapSeries = async (items, mapper) => {
+  const results = []
+  for (let idx = 0; idx < items.length; idx += 1) {
+    results.push(await mapper(items[idx], idx))
+  }
+  return results
+}
+
 const refreshAllPreview = async () => {
-  await Promise.all(dateKeys.value.map((dateKey) => previewLoadForDate(dateKey)))
+  await mapSeries(dateKeys.value, async (dateKey) => {
+    await previewLoadForDate(dateKey)
+  })
 }
 
 const loadDisplaySettings = async () => {
@@ -1348,11 +1969,12 @@ const loadGrid = async () => {
   loading.value = true
   try {
     await loadDisplaySettings()
-    const responses = await Promise.all(
-      allDateKeys.value.map((dateKey) => api.kubotaSakaiTripAssignments.grid({
+    const responses = await mapSeries(
+      allDateKeys.value,
+      async (dateKey) => api.kubotaSakaiTripAssignments.grid({
         target_date: dateKey,
         keyword: keyword.value,
-      })),
+      }),
     )
     const nextTrucksByDate = {}
     const nextSummaryByDate = {}
@@ -1453,7 +2075,6 @@ const loadGrid = async () => {
     previewDepartureSummaryByDate.value = {}
     assignmentDeadlineDays.value = maxDeadline
     mergedRows.value = sortTripPlanningRows(rows)
-    await refreshAllPreview()
     nextTick(setStickyTopValues)
   } catch (error) {
     console.error('loadGrid error:', error)
@@ -1468,12 +2089,12 @@ const importOrders = async () => {
   if (importing.value || loading.value) return
   importing.value = true
   try {
-    const res = await api.kubotaSakaiDueAdjustments.importOrders({
+    const res = await api.kubotaSakaiTripAssignments.importOrders({
       start_date: targetDate.value,
       horizon_days: horizonDays.value,
     })
     const d = res.data || {}
-    alert(`取込完了: 新規${d.created || 0}件, 更新${d.updated || 0}件, 内示→確定削除${d.deleted_forecast || 0}件`)
+    alert(`取込完了: 対象${d.total_rows || 0}件を読取りました。`)
     await loadGrid()
   } catch (error) {
     const message = error?.response?.data?.detail || '取込に失敗しました。'
@@ -1843,6 +2464,10 @@ const loadCalendarDays = async () => {
 
 watch(hideWeekends, (v) => {
   localStorage.setItem(HIDE_WEEKENDS_KEY, v ? '1' : '0')
+})
+
+watch(targetDate, (v) => {
+  planDate.value = v
 })
 
 watch(autoAssignCalendarId, async (newVal) => {
@@ -2276,11 +2901,84 @@ onUnmounted(() => {
   border: 1px solid #cbd5e1;
   border-radius: 4px;
 }
+.modal-field select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
 .modal-actions {
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.trip-note-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+.trip-note-target {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+.trip-note-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.trip-note-tab {
+  position: relative;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px 4px 0 0;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: pointer;
+}
+.trip-note-tab.active {
+  background: #fff;
+  color: #1e293b;
+  border-bottom-color: #fff;
+}
+.trip-note-ref {
+  margin-top: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+.trip-note-ref-label {
+  font-weight: 700;
+  color: #334155;
+}
+.trip-note-tab .tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #3b82f6;
+  vertical-align: middle;
+}
+.trip-note-textarea {
+  min-height: 120px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.trip-note-count {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: #64748b;
 }
 .truck-detail-wrap {
   background: #fff;
@@ -2371,12 +3069,265 @@ onUnmounted(() => {
 .day-split-left {
   border-left: 2px solid #111827 !important;
 }
-.table-wrap {
+.main-layout {
   flex: 1;
+  display: flex;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+.table-wrap {
+  flex: 5;
   overflow: auto;
   background: #fff;
   border: 1px solid #c5cfde;
   border-radius: 4px;
+  min-width: 0;
+}
+.plan-sidebar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.plan-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #e8edf3;
+  border-bottom: 1px solid #c5cfde;
+  flex-shrink: 0;
+}
+.plan-sidebar-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}
+.plan-sidebar-date-control {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.plan-sidebar-date-input {
+  width: 118px;
+  padding: 3px 4px;
+  font-size: 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+}
+.plan-date-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid #b5c1d2;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  text-align: center;
+}
+.plan-date-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.plan-sidebar-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-sidebar-empty {
+  color: #6b7280;
+  font-size: 12px;
+  text-align: center;
+  padding: 12px 0;
+}
+.plan-truck-card {
+  border: 1px solid #c5cfde;
+  border-radius: 4px;
+  background: #f8fafc;
+  padding: 6px;
+}
+.plan-truck-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.plan-truck-header-main,
+.plan-truck-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.plan-truck-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+.plan-note-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+.plan-note-btn.has-note {
+  background: #fef3c7;
+  border-color: #d97706;
+}
+.plan-note-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fb923c;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-note-badge.urgent {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #ef4444;
+}
+.plan-note-badge.vendor {
+  color: #1e3a5f;
+  background: #dbeafe;
+  border-color: #3b82f6;
+}
+.plan-overload-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: #dc2626;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.plan-note-preview {
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #7c2d12;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+.plan-svg-wrap {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #d7dfe8;
+  border-radius: 4px;
+}
+.plan-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.plan-bed {
+  fill: #eef2f6;
+  stroke: #1f2937;
+  stroke-width: 6;
+}
+.plan-container {
+  stroke: #111827;
+  stroke-width: 2;
+}
+.plan-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.plan-legend-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.3;
+  min-width: 0;
+}
+.plan-swatch {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #6b7280;
+  border-radius: 2px;
+  margin-top: 1px;
+}
+.plan-legend-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.plan-legend-code {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-legend-count {
+  font-size: 10px;
+  color: #0369a1;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.plan-layer-text {
+  fill: #111827;
+  font-weight: 700;
+  user-select: none;
+  pointer-events: none;
+}
+.plan-remaining {
+  margin-top: 6px;
+  border-top: 1px dashed #c5cfde;
+  padding-top: 4px;
+}
+.plan-remaining-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 2px;
+}
+.plan-remaining-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.plan-remaining-code {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-remaining-count {
+  white-space: nowrap;
+  color: #0369a1;
+  font-weight: 600;
+}
+.plan-remaining-empty {
+  font-size: 11px;
+  color: #6b7280;
 }
 .grid {
   width: max-content;

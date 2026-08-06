@@ -155,14 +155,6 @@ const tiles = computed(() => [
     resource: "shipping.kubota_sakai_trip_planning",
   },
   {
-    to: "/shipping/kubota-sakai-trip-planning-new",
-    label: "クボタ堺便計画新",
-    icon: "🚛",
-    category: "trip",
-    required: "view",
-    resource: "shipping.kubota_sakai_trip_planning",
-  },
-  {
     to: "/shipping/trip-execution",
     label: "便確認（出荷担当）",
     icon: "📱",

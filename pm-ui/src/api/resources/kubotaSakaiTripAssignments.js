@@ -5,6 +5,9 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   grid(params = {}) {
     return client.get('/kubota-sakai-trip-assignments/grid/', { params })
   },
+  importOrders(data = {}) {
+    return client.post('/kubota-sakai-trip-assignments/import-orders/', data)
+  },
   bulkSave(targetDate, rows = []) {
     return client.post('/kubota-sakai-trip-assignments/bulk_save/', { target_date: targetDate, rows })
   },
@@ -38,6 +41,19 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
   },
   saveDeliveryProgressAdjust(rows) {
     return client.post('/kubota-sakai-trip-assignments/delivery-progress-adjust/', { rows })
+  },
+  getTripNotices(targetDate, truckId) {
+    return client.get('/kubota-sakai-trip-assignments/trip-notice/', {
+      params: { target_date: targetDate, truck_id: truckId },
+    })
+  },
+  saveTripNotice(targetDate, truckId, noticeText, noticeType = 'NORMAL') {
+    return client.post('/kubota-sakai-trip-assignments/trip-notice/', {
+      target_date: targetDate,
+      truck_id: truckId,
+      notice_text: noticeText,
+      notice_type: noticeType,
+    })
   },
   get(id) {
     return client.get(`/kubota-sakai-trip-assignments/${id}/`)

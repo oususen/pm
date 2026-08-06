@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 from io import BytesIO
 import logging
 
-from django.db import transaction
+from django.db import ProgrammingError, transaction
 from django.db.models import Count, Max, Q
 from django.http import HttpResponse
 from rest_framework import status
@@ -39,6 +39,7 @@ from orders.core.models import (
     ShippingRun,
     ShippingTrip,
     ShippingTripAllocation,
+    ShippingTripNotice,
 )
 from production.models_line_backlog import LineBacklog
 from system_settings.models import SystemSetting
@@ -59,6 +60,17 @@ KUBOTA_COMMON_SOURCE_TYPE = 'KUBOTA_SAKAI_DUE'
 KUBOTA_CUSTOMER_CODE = '000196'
 
 logger = logging.getLogger(__name__)
+TRIP_NOTICE_TYPE_NORMAL = 'NORMAL'
+TRIP_NOTICE_TYPE_URGENT = 'URGENT'
+TRIP_NOTICE_TYPE_VENDOR = 'VENDOR'
+TRIP_NOTICE_VALID_TYPES = {TRIP_NOTICE_TYPE_NORMAL, TRIP_NOTICE_TYPE_URGENT, TRIP_NOTICE_TYPE_VENDOR}
+
+
+def _normalize_trip_notice_type(value):
+    notice_type = str(value or '').strip().upper()
+    if notice_type in TRIP_NOTICE_VALID_TYPES:
+        return notice_type
+    return TRIP_NOTICE_TYPE_NORMAL
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +93,11 @@ def _to_decimal(value, default='0'):
         return Decimal(default)
 
 
-def _append_container_option(options, container_id, container_name, capacity):
+def _append_container_option(
+    options, container_id, container_name, capacity,
+    width=None, depth=None, height=None, stackable=None, max_stack=None,
+    orientation='free',
+):
     if not container_id:
         return
     if any(int(item.get('container_id') or 0) == int(container_id) for item in options):
@@ -90,6 +106,12 @@ def _append_container_option(options, container_id, container_name, capacity):
         'container_id': container_id,
         'container_name': container_name or '',
         'capacity': capacity,
+        'width': width,
+        'depth': depth,
+        'height': height,
+        'stackable': stackable,
+        'max_stack': max_stack,
+        'orientation': orientation or 'free',
     })
 
 
@@ -179,6 +201,16 @@ def _subtract_business_days(target_date, days, calendar_map):
     remaining = max(int(days or 0), 0)
     while remaining > 0:
         current -= timedelta(days=1)
+        if _is_working_day(current, calendar_map):
+            remaining -= 1
+    return current
+
+
+def _add_business_days(target_date, days, calendar_map):
+    current = target_date
+    remaining = max(int(days or 0), 0)
+    while remaining > 0:
+        current += timedelta(days=1)
         if _is_working_day(current, calendar_map):
             remaining -= 1
     return current
@@ -274,10 +306,66 @@ def _build_departure_truck_summaries(records, target_dates, products, truck_map)
                 'physical_truck_code': truck.physical_truck_code or '',
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
+                'can_fit': load.get('can_fit', False),
+                'placed': load.get('placed', []),
+                'remaining': load.get('remaining', []),
                 'errors': load_errors,
+                'warnings': list(load.get('warnings') or []),
             })
 
     return summaries_by_date
+
+
+def _trip_notice_map_by_date(target_dates, truck_ids):
+    target_dates = {item for item in (target_dates or []) if item}
+    truck_ids = {int(item) for item in (truck_ids or []) if item}
+    if not target_dates or not truck_ids:
+        return {}
+
+    try:
+        rows = ShippingTripNotice.objects.filter(
+            business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            customer_code=KUBOTA_CUSTOMER_CODE,
+            departure_date__in=target_dates,
+            trip_ref__in=[f'TRUCK:{truck_id}' for truck_id in sorted(truck_ids)],
+        ).values('departure_date', 'trip_ref', 'notice_text', 'notice_type')
+    except ProgrammingError:
+        return {}
+
+    result = {}
+    for row in rows:
+        trip_ref = str(row.get('trip_ref') or '').strip()
+        if not trip_ref.startswith('TRUCK:'):
+            continue
+        try:
+            truck_id = int(trip_ref.split(':', 1)[1])
+        except Exception:
+            continue
+        date_value = row.get('departure_date')
+        if not date_value:
+            continue
+        notice_text = str(row.get('notice_text') or '').strip()
+        if not notice_text:
+            continue
+        key = (date_value.isoformat(), truck_id)
+        if key not in result:
+            result[key] = []
+        result[key].append({
+            'notice_text': notice_text,
+            'notice_type': _normalize_trip_notice_type(row.get('notice_type')),
+        })
+    return result
+
+
+def _attach_trip_notices_to_summaries(summary_map_by_date, target_dates, truck_ids):
+    notice_map = _trip_notice_map_by_date(target_dates, truck_ids)
+    for raw_date, summaries in (summary_map_by_date or {}).items():
+        for summary in summaries or []:
+            truck_id = int(summary.get('truck_id') or 0)
+            notices = notice_map.get((raw_date, truck_id), [])
+            summary['contact_notices'] = notices
+            summary['has_contact_notice'] = bool(notices)
+    return summary_map_by_date
 
 
 def _get_deadline_days():
@@ -325,6 +413,7 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
             'can_mix': getattr(container, 'can_mix', True) if container else True,
             'stackable': getattr(container, 'stackable', True) if container else True,
             'max_stack': getattr(container, 'max_stack', 999) if container else 999,
+            'orientation': getattr(container, 'orientation', 'free') if container else 'free',
         },
     }
 
@@ -682,7 +771,7 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
 # API View
 # ---------------------------------------------------------------------------
 
-class KubotaSakaiTripDisplaySettingView(APIView):
+class KubotaSakaiTripDisplaySettingViewNew(APIView):
     """クボタ堺便計画の表示順・色設定を取得/保存する。"""
 
     def get(self, request):
@@ -742,7 +831,7 @@ class KubotaSakaiTripDisplaySettingView(APIView):
 
         return Response({'detail': 'ok', 'count': len(create_items)})
 
-class KubotaSakaiTripPlanView(APIView):
+class KubotaSakaiTripPlanViewNew(APIView):
     """クボタ堺便計画
 
     GET  → grid（DueAdjustment の delivery_qty > 0 を表示）
@@ -810,6 +899,12 @@ class KubotaSakaiTripPlanView(APIView):
                 'container_id': pc.container_id,
                 'container_name': pc.container.name,
                 'capacity': pc.capacity,
+                'width': pc.container.width,
+                'depth': pc.container.depth,
+                'height': pc.container.height,
+                'stackable': pc.container.stackable,
+                'max_stack': pc.container.max_stack,
+                'orientation': pc.container.orientation or 'free',
             })
         for product_code, product in products.items():
             container = getattr(product, 'used_container', None)
@@ -820,6 +915,12 @@ class KubotaSakaiTripPlanView(APIView):
                 container.id,
                 container.name,
                 getattr(product, 'capacity', None) or getattr(container, 'capacity', None),
+                container.width,
+                container.depth,
+                container.height,
+                container.stackable,
+                container.max_stack,
+                container.orientation or 'free',
             )
 
         # 配送進捗を取得
@@ -899,7 +1000,11 @@ class KubotaSakaiTripPlanView(APIView):
                 'physical_truck_code': truck.physical_truck_code or '',
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
+                'can_fit': load['can_fit'],
+                'placed': load['placed'],
+                'remaining': load['remaining'],
                 'errors': load['errors'],
+                'warnings': load['warnings'],
             })
 
         calendar = _resolve_kubota_calendar()
@@ -955,6 +1060,19 @@ class KubotaSakaiTripPlanView(APIView):
             departure_products,
             truck_map,
         )
+        departure_summaries_by_date = _attach_trip_notices_to_summaries(
+            departure_summaries_by_date,
+            {target_date},
+            truck_map.keys(),
+        )
+        current_notice_map = {
+            int(item.get('truck_id') or 0): item.get('contact_notices', [])
+            for item in departure_summaries_by_date.get(target_date.isoformat(), [])
+        }
+        for item in truck_summaries:
+            notices = current_notice_map.get(int(item.get('truck_id') or 0), [])
+            item['contact_notices'] = notices
+            item['has_contact_notice'] = bool(notices)
 
         return Response({
             'target_date': target_date.isoformat(),
@@ -972,6 +1090,8 @@ class KubotaSakaiTripPlanView(APIView):
                     'default_use': t.default_use,
                     'width': t.width,
                     'depth': t.depth,
+                    'height': t.height,
+                    'max_weight': t.max_weight,
                     'departure_time': _format_hhmm(t.departure_time),
                     'arrival_time': _format_hhmm(t.arrival_time),
                     'arrival_day_offset': t.arrival_day_offset,
@@ -1265,7 +1385,35 @@ class KubotaSakaiTripPlanView(APIView):
         })
 
 
-class KubotaSakaiTripLoadPreviewView(APIView):
+class KubotaSakaiTripImportViewNew(APIView):
+    """クボタ堺便計画 取込
+
+    納期調整の保存結果を読み取り対象として確認し、便計画表示の再読込に使う。
+    """
+
+    def post(self, request):
+        start_date = _parse_date(request.data.get('start_date')) or date.today()
+        horizon_days = int(request.data.get('horizon_days') or 14)
+        if horizon_days < 1:
+            horizon_days = 1
+        if horizon_days > 180:
+            horizon_days = 180
+        end_date = start_date + timedelta(days=horizon_days - 1)
+
+        row_qs = KubotaSakaiDueAdjustment.objects.filter(
+            due_date__range=(start_date, end_date),
+            delivery_qty__gt=0,
+        )
+        return Response({
+            'detail': '納期調整の保存結果を読み取りました。',
+            'target_date_from': start_date.isoformat(),
+            'target_date_to': end_date.isoformat(),
+            'total_rows': row_qs.count(),
+            'total_days': row_qs.values('due_date').distinct().count(),
+        })
+
+
+class KubotaSakaiTripLoadPreviewViewNew(APIView):
     """未保存の便割付入力を使って便占有率を試算する。"""
 
     def post(self, request):
@@ -1427,9 +1575,13 @@ class KubotaSakaiTripLoadPreviewView(APIView):
             except Exception:
                 logger.exception('便占有率プレビュー計算に失敗しました: truck_id=%s', truck.id)
                 load = {
+                    'can_fit': False,
                     'occupancy_percent': Decimal('0'),
                     'total_weight': Decimal('0'),
+                    'placed': [],
+                    'remaining': [],
                     'errors': ['積載計算に失敗しました。'],
+                    'warnings': [],
                 }
             load_errors = list(per_truck_errors.get(truck.id, [])) + list(load.get('errors') or [])
             summaries.append({
@@ -1438,7 +1590,11 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                 'physical_truck_code': truck.physical_truck_code or '',
                 'occupancy_percent': str(load['occupancy_percent']),
                 'total_weight': str(load['total_weight']),
+                'can_fit': load.get('can_fit', False),
+                'placed': load.get('placed', []),
+                'remaining': load.get('remaining', []),
                 'errors': load_errors,
+                'warnings': list(load.get('warnings') or []),
             })
 
         affected_departure_dates = set()
@@ -1553,6 +1709,20 @@ class KubotaSakaiTripLoadPreviewView(APIView):
                 departure_products,
                 truck_map,
             )
+            departure_summaries_by_date = _attach_trip_notices_to_summaries(
+                departure_summaries_by_date,
+                affected_departure_dates,
+                truck_map.keys(),
+            )
+
+        current_notice_map = {
+            int(item.get('truck_id') or 0): item.get('contact_notices', [])
+            for item in departure_summaries_by_date.get(target_date.isoformat(), [])
+        }
+        for item in summaries:
+            notices = current_notice_map.get(int(item.get('truck_id') or 0), [])
+            item['contact_notices'] = notices
+            item['has_contact_notice'] = bool(notices)
 
         return Response({
             'target_date': target_date.isoformat(),
@@ -1561,7 +1731,107 @@ class KubotaSakaiTripLoadPreviewView(APIView):
         })
 
 
-class KubotaSakaiTripLoadDetailView(APIView):
+class KubotaSakaiTripNoticeViewNew(APIView):
+    """便ごとの事務所連絡メモを取得/保存する。"""
+
+    def get(self, request):
+        target_date = _parse_date(request.query_params.get('target_date'))
+        truck_id = int(request.query_params.get('truck_id') or 0)
+        if not target_date:
+            return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if truck_id <= 0:
+            return Response({'detail': 'truck_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rows = ShippingTripNotice.objects.filter(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=f'TRUCK:{truck_id}',
+            ).values('notice_text', 'notice_type')
+        except ProgrammingError:
+            rows = []
+        notices = [
+            {'notice_type': _normalize_trip_notice_type(r['notice_type']),
+             'notice_text': str(r.get('notice_text') or '').strip()}
+            for r in rows if str(r.get('notice_text') or '').strip()
+        ]
+        return Response({
+            'target_date': target_date.isoformat(),
+            'truck_id': truck_id,
+            'notices': notices,
+        })
+
+    def post(self, request):
+        target_date = _parse_date(request.data.get('target_date'))
+        truck_id = int(request.data.get('truck_id') or 0)
+        notice_text = str(request.data.get('notice_text') or '').strip()
+        notice_type = _normalize_trip_notice_type(request.data.get('notice_type'))
+        if not target_date:
+            return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if truck_id <= 0:
+            return Response({'detail': 'truck_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(notice_text) > 200:
+            return Response({'detail': '連絡メモは200文字以内で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if getattr(request.user, 'is_authenticated', False) else None
+        trip_ref = f'TRUCK:{truck_id}'
+        try:
+            ShippingTripNotice.objects.exists()
+        except ProgrammingError:
+            return Response(
+                {'detail': '連絡メモテーブルが未作成です。先に migration を実行してください。'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if notice_text:
+            obj, _ = ShippingTripNotice.objects.get_or_create(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=trip_ref,
+                notice_type=notice_type,
+                defaults={'notice_text': notice_text, 'updated_by': user},
+            )
+            update_fields = []
+            if obj.notice_text != notice_text:
+                obj.notice_text = notice_text
+                update_fields.append('notice_text')
+            if obj.updated_by_id != getattr(user, 'id', None):
+                obj.updated_by = user
+                update_fields.append('updated_by')
+            if update_fields:
+                obj.save(update_fields=update_fields + ['updated_at'])
+        else:
+            ShippingTripNotice.objects.filter(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=trip_ref,
+                notice_type=notice_type,
+            ).delete()
+
+        try:
+            all_rows = ShippingTripNotice.objects.filter(
+                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+                customer_code=KUBOTA_CUSTOMER_CODE,
+                departure_date=target_date,
+                trip_ref=trip_ref,
+            ).values('notice_text', 'notice_type')
+        except ProgrammingError:
+            all_rows = []
+        notices = [
+            {'notice_type': _normalize_trip_notice_type(r['notice_type']),
+             'notice_text': str(r.get('notice_text') or '').strip()}
+            for r in all_rows if str(r.get('notice_text') or '').strip()
+        ]
+        return Response({
+            'target_date': target_date.isoformat(),
+            'truck_id': truck_id,
+            'notices': notices,
+        })
+
+
+class KubotaSakaiTripLoadDetailViewNew(APIView):
     """便ごとの占有計算明細を返す（CSV出力用）。"""
 
     def get(self, request):
@@ -1661,7 +1931,7 @@ class KubotaSakaiTripLoadDetailView(APIView):
         return Response({'target_date': target_date.isoformat(), 'rows': rows})
 
 
-class KubotaSakaiPickupDetailPdfView(APIView):
+class KubotaSakaiPickupDetailPdfViewNew(APIView):
     """出発日別の集荷明細表PDFを返す。"""
 
     def get(self, request):
@@ -1754,7 +2024,22 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                     'alias_name': truck.alias_name or '',
                     'display_order': truck.display_order or 0,
                     'departure_time': _format_hhmm(truck.departure_time),
+                    'arrival_day_offset': int(truck.arrival_day_offset or 0),
                 }
+
+        vendor_notice_map = {}
+        vendor_rows = ShippingTripNotice.objects.filter(
+            business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            customer_code=KUBOTA_CUSTOMER_CODE,
+            departure_date__gte=start_date,
+            departure_date__lte=end_date,
+            notice_type=TRIP_NOTICE_TYPE_VENDOR,
+        )
+        for row in vendor_rows:
+            text = (row.notice_text or '').strip()
+            if text:
+                trip_ref = (row.trip_ref or '').strip()
+                vendor_notice_map[(row.departure_date, trip_ref)] = text
 
         pdf_bytes = self._render_pdf(
             start_date,
@@ -1766,6 +2051,8 @@ class KubotaSakaiPickupDetailPdfView(APIView):
             detail_container_map=detail_container_map,
             pc_capacity_map=pc_capacity_map,
             container_objs=container_objs,
+            vendor_notice_map=vendor_notice_map,
+            calendar_map=calendar_map,
         )
         filename = f"クボタ堺_集荷明細表_{start_date:%Y%m%d}_{end_date:%Y%m%d}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
@@ -1773,7 +2060,8 @@ class KubotaSakaiPickupDetailPdfView(APIView):
         return response
 
     def _render_pdf(self, start_date, end_date, grouped, truck_meta, products, ship_to_name_map,
-                    detail_container_map=None, pc_capacity_map=None, container_objs=None):
+                    detail_container_map=None, pc_capacity_map=None, container_objs=None,
+                    vendor_notice_map=None, calendar_map=None):
         try:
             pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
         except Exception:
@@ -1818,11 +2106,13 @@ class KubotaSakaiPickupDetailPdfView(APIView):
             suffix = ' (続き)' if continuation else ''
             c.drawString(left, y, f'出発日: {dep_date:%Y-%m-%d}{suffix}')
 
-        def draw_truck_title(truck_text, dep_time):
+        def draw_truck_title(truck_text, dep_time, arrival_date=None):
             c.setFont(font_name, 10)
             c.drawString(left + 2 * mm, y, f'便: {truck_text}')
             if dep_time:
                 c.drawString(left + 34 * mm, y, f'出発時刻：{dep_time}')
+            if arrival_date:
+                c.drawString(left + 80 * mm, y, f'到着日：{arrival_date:%Y-%m-%d}')
 
         def draw_columns():
             c.setFont(font_name, font_size)
@@ -1861,17 +2151,12 @@ class KubotaSakaiPickupDetailPdfView(APIView):
             return buf.read()
 
         for dep_idx, dep in enumerate(departure_dates):
-            if y < 28 * mm:
+            if dep_idx > 0:
+                # 出荷日ごとに新しいページを開始（1日1ページ）
                 c.showPage()
                 page_no += 1
                 draw_header(page_no)
                 y = top - 14 * mm - (line_h * 2)
-            if dep_idx > 0:
-                # 日と日の間に2行ぶんの余白を入れてから二重線を描画
-                y -= (line_h * 2)
-                draw_double_line(y + 1.8 * mm, width=1.3, gap=1.2 * mm)
-                # 二重線の後も2行ぶん余白を入れる
-                y -= (line_h * 2)
 
             draw_departure_title(dep)
             y -= line_h
@@ -1899,7 +2184,9 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                 meta = truck_meta.get(truck_id) or {}
                 truck_label = (meta.get('alias_name') or '').strip() or (meta.get('name') or f'便{truck_id}')
                 departure_time = meta.get('departure_time') or ''
-                draw_truck_title(truck_label, departure_time)
+                arrival_offset = meta.get('arrival_day_offset', 0)
+                arrival_date = _add_business_days(dep, arrival_offset, calendar_map or {}) if arrival_offset else dep
+                draw_truck_title(truck_label, departure_time, arrival_date)
                 y -= line_h
 
                 draw_columns()
@@ -1917,7 +2204,7 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                         y = top - 14 * mm - (line_h * 2)
                         draw_departure_title(dep, continuation=True)
                         y -= line_h
-                        draw_truck_title(truck_label, departure_time)
+                        draw_truck_title(truck_label, departure_time, arrival_date)
                         y -= line_h
                         draw_columns()
                         y -= line_h
@@ -1959,6 +2246,29 @@ class KubotaSakaiPickupDetailPdfView(APIView):
                     if detail_idx < len(detail_keys) - 1:
                         draw_line(y - 1.4 * mm, width=0.6, dashed=True)
                     y -= line_h
+
+                trip_ref = f'TRUCK:{truck_id}'
+                vendor_text = (vendor_notice_map or {}).get((dep, trip_ref), '')
+                if vendor_text:
+                    for vline in vendor_text.split('\n'):
+                        vline = vline.strip()
+                        if not vline:
+                            continue
+                        if y < 16 * mm:
+                            c.showPage()
+                            page_no += 1
+                            draw_header(page_no)
+                            y = top - 14 * mm - (line_h * 2)
+                            draw_departure_title(dep, continuation=True)
+                            y -= line_h
+                            draw_truck_title(truck_label, departure_time, arrival_date)
+                            y -= line_h
+                        c.saveState()
+                        c.setFillColorRGB(0.8, 0, 0)
+                        c.setFont(font_name, font_size)
+                        c.drawString(left + 8 * mm, y, f'【運送業者への連絡】{clip_text_to_width(vline, 155)}')
+                        c.restoreState()
+                        y -= line_h
                 y -= 1.5 * mm
 
             y -= 2.5 * mm
@@ -1968,7 +2278,7 @@ class KubotaSakaiPickupDetailPdfView(APIView):
         return buf.read()
 
 
-class KubotaSakaiPseudoTruckProductView(APIView):
+class KubotaSakaiPseudoTruckProductViewNew(APIView):
     """擬似便対象製品マスタの取得・保存。
 
     GET  → 全製品の擬似便紐付けリストを返す
@@ -2052,7 +2362,7 @@ class KubotaSakaiPseudoTruckProductView(APIView):
         return Response({'saved': len(create_items)})
 
 
-class KubotaSakaiDeliveryProgressAdjustView(APIView):
+class KubotaSakaiDeliveryProgressAdjustViewNew(APIView):
     """配送進捗の調整値を保存し、再計算する。"""
 
     def post(self, request):

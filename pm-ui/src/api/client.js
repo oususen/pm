@@ -62,7 +62,6 @@ import { createPlanDeviationReportAPI, createRecordConfirmationAPI, createPlanDe
 import { createKubotaSakaiTrucksAPI } from './resources/kubotaSakaiTrucks'
 import { createKubotaSakaiDueAdjustmentsAPI } from './resources/kubotaSakaiDueAdjustments'
 import { createKubotaSakaiTripAssignmentsAPI } from './resources/kubotaSakaiTripAssignments'
-import { createKubotaSakaiTripAssignmentsAPI_new } from './resources/kubotaSakaiTripAssignments_new'
 import { createShippingTripsAPI } from './resources/shippingTrips'
 import { createShippingProgressAPI } from './resources/shippingProgress'
 import { createShippingProgressHorizonSettingAPI } from './resources/shippingProgressHorizonSetting'
@@ -219,7 +218,6 @@ export default {
   kubotaSakaiTrucks: createKubotaSakaiTrucksAPI(client),
   kubotaSakaiDueAdjustments: createKubotaSakaiDueAdjustmentsAPI(client),
   kubotaSakaiTripAssignments: createKubotaSakaiTripAssignmentsAPI(client),
-  kubotaSakaiTripAssignments_new: createKubotaSakaiTripAssignmentsAPI_new(client),
   shippingTrips: createShippingTripsAPI(client),
   shippingProgress: createShippingProgressAPI(client),
   shippingProgressHorizonSetting: createShippingProgressHorizonSettingAPI(client),

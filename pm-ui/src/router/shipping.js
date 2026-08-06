@@ -74,12 +74,6 @@ const shipping = [
     meta: { pageTitle: "クボタ堺便計画", manualPath: "出荷/クボタ堺便計画.md", resource: "shipping.kubota_sakai_trip_planning" },
   },
   {
-    path: "/shipping/kubota-sakai-trip-planning-new",
-    name: "KubotaSakaiTripPlanningNew",
-    component: () => import("@/views/shipping/KubotaSakaiTripPlanning_new.vue"),
-    meta: { pageTitle: "クボタ堺便計画新", manualPath: "出荷/クボタ堺便計画.md", resource: "shipping.kubota_sakai_trip_planning" },
-  },
-  {
     path: "/shipping/trip-execution",
     name: "ShippingTripExecution",
     component: () => import("@/views/shipping/ShippingTripExecution.vue"),
