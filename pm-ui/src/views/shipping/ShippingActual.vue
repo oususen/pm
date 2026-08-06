@@ -12,6 +12,9 @@
         <input v-model="filters.startDate" type="date" />
         <input v-model="filters.endDate" type="date" />
         <button @click="load" :disabled="loading">検索</button>
+        <button class="btn-secondary" @click="exportExcel" :disabled="loading || exporting">
+          {{ exporting ? '出力中...' : 'Excel出力' }}
+        </button>
         <button class="btn-secondary" @click="resetFilters" :disabled="loading">クリア</button>
       </div>
     </div>
@@ -164,6 +167,7 @@ const canEdit = computed(() => {
 });
 
 const loading = ref(false);
+const exporting = ref(false);
 const error = ref("");
 const shipmentActuals = ref([]);
 const editingId = ref(null);
@@ -248,25 +252,49 @@ function resetFilters() {
   load();
 }
 
+function buildParams() {
+  return {
+    shipment_date__gte: filters.startDate,
+    shipment_date__lte: filters.endDate,
+    product_code: filters.productCode,
+    customer_code: filters.customerCode,
+    ship_to_code: filters.shipToCode,
+    page_size: 10000,
+  };
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const params = {
-      shipment_date__gte: filters.startDate,
-      shipment_date__lte: filters.endDate,
-      product_code: filters.productCode,
-      customer_code: filters.customerCode,
-      ship_to_code: filters.shipToCode,
-      page_size: 10000,
-    };
-    const res = await api.shipmentActuals.getShipmentActuals(params);
+    const res = await api.shipmentActuals.getShipmentActuals(buildParams());
     shipmentActuals.value = Array.isArray(res.data) ? res.data : res.data.results || [];
   } catch (e) {
     console.error("出荷実績取得エラー:", e);
     error.value = e?.message || "読み込みに失敗しました";
   } finally {
     loading.value = false;
+  }
+}
+
+async function exportExcel() {
+  exporting.value = true;
+  try {
+    const res = await api.shipmentActuals.exportShipmentActualsExcel(buildParams());
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `出荷実績_${filters.startDate || 'from'}_${filters.endDate || 'to'}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error("出荷実績Excel出力エラー:", e);
+    alert("Excel出力に失敗しました: " + (e.response?.data?.detail || e.message));
+  } finally {
+    exporting.value = false;
   }
 }
 
@@ -511,4 +539,3 @@ onMounted(load);
   margin-bottom: 8px;
 }
 </style>
-

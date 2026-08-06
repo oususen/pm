@@ -1,4 +1,8 @@
+import io
+
 import django_filters
+from django.http import HttpResponse
+from openpyxl import Workbook
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -92,6 +96,57 @@ class ShipmentActualViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         self._create_history(instance, 'DELETE')
         instance.delete()
+
+    @action(detail=False, methods=['get'], url_path='export-excel')
+    def export_excel(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '出荷実績'
+        ws.append(['出発日', '到着日', '品番', '数量', '生産日', '注番'])
+
+        for actual in queryset:
+            trip = getattr(getattr(actual, 'shipping_trip_allocation', None), 'trip', None)
+            departure_date = getattr(trip, 'departure_date', None) or actual.shipment_date
+            arrival_date = actual.shipment_date
+            product_code = actual.product_code or ''
+            splits = list(actual.splits.all())
+
+            if splits:
+                for split in splits:
+                    ws.append([
+                        departure_date.isoformat() if departure_date else '',
+                        arrival_date.isoformat() if arrival_date else '',
+                        product_code,
+                        float(split.quantity or 0),
+                        split.production_date.isoformat() if split.production_date else '',
+                        split.source_order_no or '',
+                    ])
+                continue
+
+            ws.append([
+                departure_date.isoformat() if departure_date else '',
+                arrival_date.isoformat() if arrival_date else '',
+                product_code,
+                float(actual.quantity or 0),
+                '',
+                '',
+            ])
+
+        for col, width in {'A': 14, 'B': 14, 'C': 18, 'D': 12, 'E': 14, 'F': 18}.items():
+            ws.column_dimensions[col].width = width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = 'attachment; filename="出荷実績.xlsx"'
+        return response
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
