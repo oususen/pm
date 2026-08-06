@@ -2,8 +2,8 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h2 class="page-title">出荷実績照会 <DataSourceDialog title="出荷実績照会" :sources="dsSources" /></h2>
-        <p class="subtitle">出荷実績の検索・閲覧ができます。</p>
+        <h2 class="page-title">出荷実績登録 <DataSourceDialog title="出荷実績登録" :sources="dsSources" /></h2>
+        <p class="subtitle">出荷実績の検索・登録・修正・削除ができます。</p>
       </div>
       <div class="page-actions">
         <input v-model="filters.productCode" type="text" placeholder="品番で検索" />
@@ -20,6 +20,44 @@
     </div>
 
     <div class="page-body">
+      <div class="form-card">
+        <h3 class="card-title">{{ editingId ? '実績編集' : '実績登録' }}</h3>
+        <div class="form-grid">
+          <label>
+            出荷日
+            <input v-model="form.shipment_date" type="date" />
+          </label>
+          <label>
+            品番
+            <input v-model="form.product_code" type="text" placeholder="例: YD6000441" />
+          </label>
+          <label>
+            得意先
+            <input v-model="form.customer_code" type="text" placeholder="例: 000001" />
+          </label>
+          <label>
+            納入先
+            <input v-model="form.ship_to_code" type="text" placeholder="納入先コード" />
+          </label>
+          <label>
+            数量
+            <input v-model="form.quantity" type="number" step="0.001" />
+          </label>
+          <label class="span-2">
+            備考
+            <input v-model="form.remark" type="text" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary" @click="saveActual" :disabled="loading">
+            {{ editingId ? '更新' : '登録' }}
+          </button>
+          <button v-if="editingId" class="btn-secondary" @click="resetForm" :disabled="loading">
+            キャンセル
+          </button>
+        </div>
+      </div>
+
       <div class="list-card">
         <div v-if="loading" class="status-text">読込中...</div>
         <div v-else-if="error" class="status-text error">エラー: {{ error }}</div>
@@ -34,10 +72,8 @@
                 <th>得意先</th>
                 <th>納入先</th>
                 <th class="num">数量</th>
-                <th>便番号</th>
                 <th>出荷者</th>
                 <th>出発時刻</th>
-                <th>注番</th>
                 <th>備考</th>
                 <th>操作</th>
               </tr>
@@ -51,17 +87,17 @@
                 <td>{{ displayCustomer(item) }}</td>
                 <td>{{ item.ship_to_code || '-' }}</td>
                 <td class="num">{{ formatQty(item.quantity) }}</td>
-                <td>{{ item.trip_code || '-' }}</td>
                 <td>{{ item.departed_by_name || '-' }}</td>
                 <td>{{ item.departure_time_actual || '-' }}</td>
-                <td>{{ formatSourceOrderNos(item.source_order_nos) }}</td>
                 <td>{{ displayRemark(item.remark) }}</td>
                 <td class="actions">
+                  <button class="btn-sm" @click="startEdit(item)">編集</button>
                   <button class="btn-sm btn-secondary" @click="loadHistory(item)">履歴</button>
+                  <button class="btn-sm btn-danger" @click="deleteActual(item)">削除</button>
                 </td>
               </tr>
               <tr v-if="!shipmentActuals.length">
-                <td colspan="13" class="no-data">データがありません</td>
+                <td colspan="11" class="no-data">データがありません</td>
               </tr>
             </tbody>
           </table>
@@ -110,16 +146,17 @@
 <script setup>
 import { onMounted, reactive, ref } from "vue";
 import api from "@/api/client";
-import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import DataSourceDialog from "@/components/DataSourceDialog.vue";
 
 const dsSources = [
-  { op: '読み書き', table: 't_shipment_actual', desc: '出荷実績データ' },
-]
+  { op: "読み書き", table: "t_shipment_actual", desc: "出荷実績データ" },
+];
 
 const loading = ref(false);
 const exporting = ref(false);
 const error = ref("");
 const shipmentActuals = ref([]);
+const editingId = ref(null);
 const historyRecords = ref([]);
 const historyTarget = ref(null);
 
@@ -132,6 +169,15 @@ const filters = reactive({
   shipToCode: "",
   startDate: formatDate(defaultStart),
   endDate: formatDate(today),
+});
+
+const form = reactive({
+  shipment_date: formatDate(today),
+  product_code: "",
+  customer_code: "",
+  ship_to_code: "",
+  quantity: "",
+  remark: "",
 });
 
 function formatDate(date) {
@@ -173,9 +219,14 @@ function displayRemark(value) {
   return v;
 }
 
-function formatSourceOrderNos(values) {
-  if (!Array.isArray(values) || !values.length) return "-";
-  return values.join(", ");
+function resetForm() {
+  editingId.value = null;
+  form.shipment_date = formatDate(today);
+  form.product_code = "";
+  form.customer_code = "";
+  form.ship_to_code = "";
+  form.quantity = "";
+  form.remark = "";
 }
 
 function resetFilters() {
@@ -217,12 +268,12 @@ async function exportExcel() {
   try {
     const res = await api.shipmentActuals.exportShipmentActualsExcel(buildParams());
     const blob = new Blob([res.data], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `出荷実績_${filters.startDate || 'from'}_${filters.endDate || 'to'}.xlsx`;
+    a.download = `出荷実績_${filters.startDate || "from"}_${filters.endDate || "to"}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
@@ -230,6 +281,72 @@ async function exportExcel() {
     alert("Excel出力に失敗しました: " + (e.response?.data?.detail || e.message));
   } finally {
     exporting.value = false;
+  }
+}
+
+async function saveActual() {
+  if (!form.shipment_date || !form.product_code || !form.customer_code || !form.quantity) {
+    alert("出荷日・品番・得意先・数量は必須です。");
+    return;
+  }
+
+  loading.value = true;
+  error.value = "";
+  const payload = {
+    shipment_date: form.shipment_date,
+    product_code: form.product_code,
+    customer_code: form.customer_code,
+    ship_to_code: form.ship_to_code,
+    quantity: form.quantity,
+    remark: form.remark,
+  };
+  try {
+    if (editingId.value) {
+      await api.shipmentActuals.updateShipmentActual(editingId.value, payload);
+      alert("更新しました。");
+    } else {
+      await api.shipmentActuals.createShipmentActual(payload);
+      alert("登録しました。");
+    }
+    resetForm();
+    await load();
+  } catch (e) {
+    console.error("出荷実績保存エラー:", e);
+    alert("保存に失敗しました: " + (e.response?.data?.detail || e.message));
+  } finally {
+    loading.value = false;
+  }
+}
+
+function startEdit(item) {
+  editingId.value = item.id;
+  form.shipment_date = item.shipment_date;
+  form.product_code = item.product_code || "";
+  form.customer_code = item.customer_code || "";
+  form.ship_to_code = item.ship_to_code || "";
+  form.quantity = item.quantity;
+  form.remark = item.remark || "";
+}
+
+async function deleteActual(item) {
+  if (!confirm("この実績を削除しますか？")) return;
+  loading.value = true;
+  error.value = "";
+  try {
+    await api.shipmentActuals.deleteShipmentActual(item.id);
+    alert("削除しました。");
+    if (editingId.value === item.id) {
+      resetForm();
+    }
+    if (historyTarget.value?.id === item.id) {
+      clearHistory();
+    }
+    await load();
+  } catch (e) {
+    console.error("出荷実績削除エラー:", e);
+    alert("削除に失敗しました: " + (e.response?.data?.detail || e.message));
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -310,6 +427,7 @@ onMounted(load);
   flex-direction: column;
   gap: 16px;
 }
+.form-card,
 .list-card,
 .history-card {
   border: 1px solid #e5e7eb;
@@ -321,6 +439,41 @@ onMounted(load);
   margin: 0 0 12px 0;
   font-size: 16px;
   font-weight: 700;
+}
+.form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.form-grid input {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.span-2 {
+  grid-column: span 2;
+}
+.form-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
 }
 .data-table {
   width: 100%;

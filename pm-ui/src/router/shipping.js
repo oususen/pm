@@ -15,7 +15,13 @@ const shipping = [
     path: "/shipping/actual",
     name: "ShippingActual",
     component: () => import("@/views/shipping/ShippingActual.vue"),
-    meta: { pageTitle: "出荷実績", manualPath: "出荷/出荷実績.md", resource: "shipping.actual" },
+    meta: { pageTitle: "出荷実績照会", manualPath: "出荷/出荷実績照会.md", resource: "shipping.actual" },
+  },
+  {
+    path: "/shipping/actual-register",
+    name: "ShippingActualRegister",
+    component: () => import("@/views/shipping/ShippingActualRegister.vue"),
+    meta: { pageTitle: "出荷実績登録", manualPath: "出荷/出荷実績登録.md", resource: "shipping.actual" },
   },
   {
     path: "/shipping/actual-trace",

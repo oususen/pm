@@ -943,18 +943,25 @@ class ShippingTripExecutionView(APIView):
             .order_by('product_code', 'id')
         )
         product_codes = {a.product_code for a in allocations}
-        product_name_map = {
-            p.product_code: p.product_name
+        product_meta_map = {
+            p.product_code: {
+                'product_name': p.product_name,
+                'capacity': max(int(_to_decimal(getattr(p, 'capacity', None), default='1')), 1),
+            }
             for p in Product.objects.filter(product_code__in=product_codes)
         }
+        ship_to_style_map = {}
         trip_notice_map = _trip_notice_map(trips)
+        calc = WorkingDayCalculator(Calendar.objects.first())
+        truck_offset_map = _collect_truck_offset_map()
         merged_payload = _merge_trip_payloads([
             _build_trip_payload(
                 item,
                 [allocation for allocation in allocations if allocation.trip_id == item.id],
-                product_name_map,
-                WorkingDayCalculator(Calendar.objects.first()),
-                _collect_truck_offset_map(),
+                product_meta_map,
+                ship_to_style_map,
+                calc,
+                truck_offset_map,
                 trip_notice_map=trip_notice_map,
             )
             for item in trips

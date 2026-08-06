@@ -91,6 +91,14 @@ const tiles = computed(() => [
     resource: "shipping.actual",
   },
   {
+    to: "/shipping/actual-register",
+    label: "出荷実績登録",
+    icon: "📝",
+    category: "shipping_ops",
+    required: "edit",
+    resource: "shipping.actual",
+  },
+  {
     to: "/shipping/actual-trace",
     label: "出荷情報追跡",
     icon: "🔎",
