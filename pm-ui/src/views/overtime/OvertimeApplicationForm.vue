@@ -274,11 +274,30 @@ const form = ref({
 })
 
 function resolveApiErrorMessage(data, fallbackMessage) {
-  const detailCode = data?.detail_code
-  if (detailCode && typeof detailCode === 'string' && detailCode.startsWith('overtime.error.')) {
+  if (!data || typeof data !== 'object') return fallbackMessage
+
+  // detail_code（配列の場合も先頭を取り出す）→ i18n キーとして翻訳
+  let detailCode = data.detail_code
+  if (Array.isArray(detailCode)) detailCode = detailCode[0]
+  if (typeof detailCode === 'string' && detailCode.startsWith('overtime.error.')) {
     return t(detailCode)
   }
-  return data?.detail || data?.non_field_errors?.[0] || fallbackMessage
+
+  // detail（DRF は配列で返すことがある）
+  let detail = data.detail
+  if (Array.isArray(detail)) detail = detail[0]
+  if (detail) return String(detail)
+
+  // 全体エラー
+  if (Array.isArray(data.non_field_errors) && data.non_field_errors.length) {
+    return String(data.non_field_errors[0])
+  }
+
+  // DRF のフィールド別エラー: { フィールド名: [メッセージ] } の先頭メッセージを表示
+  const firstFieldError = Object.values(data).find((v) => Array.isArray(v) && v.length)
+  if (firstFieldError) return String(firstFieldError[0])
+
+  return fallbackMessage
 }
 
 function buildApplicantLabel(user) {
