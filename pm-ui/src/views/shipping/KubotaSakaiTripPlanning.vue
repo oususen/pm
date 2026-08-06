@@ -275,7 +275,15 @@
             >
               <div class="date-head-content">
                 <span class="pseudo-occ pseudo-occ-left" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'A') > 95 }">A:{{ pseudoTruckOccupancyPercent(dateKey, 'A') }}%</span>
-                <span class="date-head-label">{{ formatHeaderDate(dateKey) }}</span>
+                <div class="date-head-center">
+                  <span class="date-head-label">{{ formatHeaderDate(dateKey) }}</span>
+                  <button
+                    class="date-head-note-btn"
+                    :class="{ 'has-note': hasDateHeaderNote(dateKey) }"
+                    :title="dateHeaderNoteButtonTitle(dateKey)"
+                    @click="openDateHeaderNoticeDialog(dateKey)"
+                  >{{ hasDateHeaderNote(dateKey) ? 'メモ' : '📝' }}</button>
+                </div>
                 <span class="pseudo-occ pseudo-occ-right" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'P') > 95 }">P:{{ pseudoTruckOccupancyPercent(dateKey, 'P') }}%</span>
               </div>
             </th>
@@ -634,11 +642,11 @@
 
     <div v-if="showTripNoticeDialog" class="modal-overlay" @click.self="closeTripNoticeDialog">
       <div class="modal-card trip-note-modal">
-        <h3 class="modal-title">事務所連絡</h3>
+        <h3 class="modal-title">メモ</h3>
         <div class="trip-note-target">{{ activeTripNoticeLabel }}</div>
-        <div class="trip-note-tabs">
+        <div v-if="tripNoticeTabs.length > 1" class="trip-note-tabs">
           <button
-            v-for="t in ['NORMAL', 'URGENT', 'VENDOR']"
+            v-for="t in tripNoticeTabs"
             :key="t"
             class="trip-note-tab"
             :class="{ active: tripNoticeTypeDraft === t, 'has-text': !!tripNoticeDrafts[t] }"
@@ -651,12 +659,12 @@
               v-model.trim="tripNoticeDrafts[tripNoticeTypeDraft]"
               class="trip-note-textarea"
               maxlength="200"
-              :placeholder="`${noticeTypeLabel(tripNoticeTypeDraft)}への連絡を入力`"
+              :placeholder="activeTripNotice?.noticeScope === 'date_header' ? 'メモを入力' : `${noticeTypeLabel(tripNoticeTypeDraft)}への連絡を入力`"
             ></textarea>
           </label>
         </div>
         <div class="trip-note-count">{{ (tripNoticeDrafts[tripNoticeTypeDraft] || '').length }}/200</div>
-        <template v-for="t in ['NORMAL', 'URGENT', 'VENDOR']" :key="`ref-${t}`">
+        <template v-for="t in tripNoticeTabs" :key="`ref-${t}`">
           <div v-if="t !== tripNoticeTypeDraft && tripNoticeDrafts[t]" class="trip-note-ref">
             <span class="trip-note-ref-label">{{ noticeTypeLabel(t) }}:</span> {{ tripNoticeDrafts[t] }}
           </div>
@@ -920,7 +928,9 @@ const savingTripNotice = ref(false)
 const tripNoticeDrafts = ref({ NORMAL: '', URGENT: '', VENDOR: '' })
 const tripNoticeTypeDraft = ref('NORMAL')
 const activeTripNotice = ref(null)
+const dateHeaderNoticesByDate = ref({})
 const noticeTypeLabel = (t) => t === 'URGENT' ? '緊急' : t === 'VENDOR' ? '業者' : '出荷担当'
+const DATE_HEADER_TRIP_REF = 'DATEHDR:MAIN'
 const HIDE_WEEKENDS_KEY = 'kubotaSakaiTripPlanning.hideWeekends'
 const hideWeekends = ref(localStorage.getItem(HIDE_WEEKENDS_KEY) === '1')
 
@@ -956,6 +966,7 @@ const activeTripNoticeLabel = computed(() => {
   if (!truck) return ''
   return `${truck.label || '便'} / ${truck.dateKey || ''}`
 })
+const tripNoticeTabs = computed(() => activeTripNotice.value?.noticeScope === 'date_header' ? ['NORMAL'] : ['NORMAL', 'URGENT', 'VENDOR'])
 
 const isHoliday = (dateKey) => Boolean(holidayByDate.value[dateKey])
 const isDaySplitStart = (dateKey) => dateKeys.value[0] !== dateKey
@@ -1704,11 +1715,21 @@ const _applyNoticesResponse = (notices) => {
   tripNoticeDrafts.value = drafts
 }
 
+const hasDateHeaderNote = (dateKey) => Boolean((dateHeaderNoticesByDate.value[dateKey] || []).length)
+const dateHeaderNoteButtonTitle = (dateKey) => hasDateHeaderNote(dateKey) ? '日付メモあり' : '日付メモを入力'
+const patchDateHeaderNotice = (dateKey, notices) => {
+  dateHeaderNoticesByDate.value = {
+    ...dateHeaderNoticesByDate.value,
+    [dateKey]: Array.isArray(notices) ? notices.filter((n) => String(n?.notice_text || '').trim()) : [],
+  }
+}
+
 const openTripNoticeDialog = async (truck) => {
   activeTripNotice.value = {
     truckId: Number(truck?.truckId || 0),
     label: truck?.label || '便',
     dateKey: truck?.dateKey || planDate.value,
+    noticeScope: 'truck',
   }
   _applyNoticesResponse(truck?.notices || [])
   tripNoticeTypeDraft.value = 'NORMAL'
@@ -1726,6 +1747,28 @@ const openTripNoticeDialog = async (truck) => {
   }
 }
 
+const openDateHeaderNoticeDialog = async (dateKey) => {
+  activeTripNotice.value = {
+    truckId: 0,
+    tripRef: DATE_HEADER_TRIP_REF,
+    label: '日付メモ',
+    dateKey,
+    noticeScope: 'date_header',
+  }
+  _applyNoticesResponse(dateHeaderNoticesByDate.value[dateKey] || [])
+  tripNoticeTypeDraft.value = 'NORMAL'
+  showTripNoticeDialog.value = true
+  try {
+    const res = await api.kubotaSakaiTripAssignments.getTripNotices(dateKey, null, DATE_HEADER_TRIP_REF)
+    const notices = res.data?.notices || []
+    _applyNoticesResponse(notices)
+    patchDateHeaderNotice(dateKey, notices)
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '日付メモの取得に失敗しました。'
+    alert(detail)
+  }
+}
+
 const closeTripNoticeDialog = () => {
   if (savingTripNotice.value) return
   showTripNoticeDialog.value = false
@@ -1736,22 +1779,27 @@ const closeTripNoticeDialog = () => {
 
 const saveTripNotice = async () => {
   const truck = activeTripNotice.value
-  if (!truck?.truckId || !truck?.dateKey) return
+  if (!truck?.dateKey || (!truck?.truckId && !truck?.tripRef)) return
   savingTripNotice.value = true
   try {
     const currentType = tripNoticeTypeDraft.value
     const currentText = tripNoticeDrafts.value[currentType] || ''
     const res = await api.kubotaSakaiTripAssignments.saveTripNotice(
       truck.dateKey,
-      truck.truckId,
+      truck.truckId || null,
       currentText,
       currentType,
+      truck.tripRef || '',
     )
     const notices = res.data?.notices || []
     _applyNoticesResponse(notices)
-    patchTripNoticeSummaries(truck.dateKey, truck.truckId, notices)
+    if (truck.noticeScope === 'date_header') {
+      patchDateHeaderNotice(truck.dateKey, notices)
+    } else {
+      patchTripNoticeSummaries(truck.dateKey, truck.truckId, notices)
+    }
   } catch (error) {
-    const detail = error?.response?.data?.detail || error?.message || '連絡メモの保存に失敗しました。'
+    const detail = error?.response?.data?.detail || error?.message || `${truck.noticeScope === 'date_header' ? '日付' : '連絡'}メモの保存に失敗しました。`
     alert(detail)
   } finally {
     savingTripNotice.value = false
@@ -1982,6 +2030,7 @@ const loadGrid = async () => {
     const nextHolidayByDate = {}
     const nextProgressByDate = {}
     const nextProductContainers = {}
+    const nextDateHeaderNoticesByDate = {}
     const map = new Map()
     let maxDeadline = 3
 
@@ -1995,6 +2044,7 @@ const loadGrid = async () => {
       nextSummaryByDate[dateKey] = summaries
       nextDepartureSummaryByDate[dateKey] = departureSummaries
       nextHolidayByDate[dateKey] = Boolean(res.data?.is_holiday)
+      nextDateHeaderNoticesByDate[dateKey] = Array.isArray(res.data?.date_header_notices) ? res.data.date_header_notices : []
       maxDeadline = Math.max(maxDeadline, Number(res.data?.assignment_deadline_days || 3))
       if (res.data?.last_adjusted_at) lastAdjustedAt.value = res.data.last_adjusted_at
       const pcMap = res.data?.product_containers
@@ -2069,6 +2119,7 @@ const loadGrid = async () => {
     departureSummaryByDate.value = nextDepartureSummaryByDate
     productContainersMap.value = nextProductContainers
     holidayByDate.value = nextHolidayByDate
+    dateHeaderNoticesByDate.value = nextDateHeaderNoticesByDate
     progressByDate.value = nextProgressByDate
     progressAdjustEdits.value = {}
     previewSummaryByDate.value = {}
@@ -3384,9 +3435,42 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
 }
+.date-head-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .date-head-label {
   font-size: 24px;
   line-height: 1.2;
+}
+.date-head-note-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.date-head-note-btn.has-note {
+  background: #fef3c7;
+  border-color: #d97706;
+  width: auto;
+  min-width: 44px;
+  padding: 0 8px;
+  color: #9a3412;
+  font-weight: 700;
+  animation: date-head-note-blink 1s step-end infinite;
+}
+@keyframes date-head-note-blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  50.01%, 100% {
+    opacity: 0.35;
+  }
 }
 .pseudo-occ {
   position: absolute;

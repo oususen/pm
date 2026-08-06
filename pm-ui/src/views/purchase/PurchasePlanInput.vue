@@ -79,7 +79,16 @@
               class="date-head day-end"
               :class="c.dayClass"
             >
-              {{ c.label }}
+              <div class="date-header-content">
+                <span>{{ c.label }}</span>
+                <button
+                  type="button"
+                  class="btn-day-clear"
+                  :disabled="processing || !selectedSupplier || !canEdit"
+                  @click="clearDayPlan(c.key)"
+                  title="その日の計画を削除"
+                >×</button>
+              </div>
             </th>
           </tr>
           <tr class="head-level2">
@@ -345,6 +354,59 @@ const initDaily = () => {
 
 const resetRows = () => {
   rows.value = []
+}
+
+const clearDayPlan = async (dateKey) => {
+  if (!canEdit.value) return
+  if (!selectedSupplier.value) {
+    alert('仕入先を選択してください。')
+    return
+  }
+  if (!confirm(`${dateKey} の計画を削除します。よろしいですか？`)) return
+
+  const lineId = await resolvePurchaseLineId()
+  if (!lineId || !purchaseProcessId.value) {
+    alert('仕入れラインの解決に失敗しました。')
+    return
+  }
+
+  const items = rows.value
+    .filter((r) => r.product_id)
+    .map((r) => ({
+      product_id: r.product_id,
+      process_id: r.process_id || purchaseProcessId.value,
+      plan_date: dateKey,
+      plan_qty: 0,
+      sequence_no: 1,
+    }))
+
+  if (!items.length) return
+
+  processing.value = true
+  try {
+    const payload = { line_id: lineId, items }
+    if (isEditUnlocked.value && changeReason.value) {
+      payload.change_reason = changeReason.value
+    }
+    await api.lineBacklogs.save(payload)
+    await api.lineBacklogs.recalculateInventory({
+      line_id: lineId,
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    rows.value.forEach((row) => {
+      const daily = row.daily?.[dateKey]
+      if (!daily) return
+      daily.plan = ''
+      daily.plan_base = 0
+    })
+    await fetchAndApplyData(lineId)
+  } catch (e) {
+    console.error('日別計画削除エラー', e)
+    alert('日別計画の削除に失敗しました。')
+  } finally {
+    processing.value = false
+  }
 }
 
 const savePlan = async () => {
@@ -1193,6 +1255,30 @@ thead tr.head-level2 th.sticky-col {
   font-weight: 700;
   min-width: 270px;
 }
+.date-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.btn-day-clear {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  border: 1px solid #f87171;
+  border-radius: 3px;
+  background: #fff;
+  color: #dc2626;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-day-clear:hover:not(:disabled) {
+  background: #fee2e2;
+}
+.btn-day-clear:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .mini {
   text-align: center;
   font-size: 12px;
@@ -1398,7 +1484,6 @@ thead .sticky-col {
   opacity: 0.9;
 }
 </style>
-
 
 
 

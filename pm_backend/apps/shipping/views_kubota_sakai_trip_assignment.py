@@ -58,6 +58,7 @@ KUBOTA_TRIP_PLAN_ID_PREFIX = 'KBT_T'
 KUBOTA_COMMON_BUSINESS_TYPE = 'KUBOTA_SAKAI'
 KUBOTA_COMMON_SOURCE_TYPE = 'KUBOTA_SAKAI_DUE'
 KUBOTA_CUSTOMER_CODE = '000196'
+KUBOTA_DATE_HEADER_TRIP_REF = 'DATEHDR:MAIN'
 
 logger = logging.getLogger(__name__)
 TRIP_NOTICE_TYPE_NORMAL = 'NORMAL'
@@ -366,6 +367,27 @@ def _attach_trip_notices_to_summaries(summary_map_by_date, target_dates, truck_i
             summary['contact_notices'] = notices
             summary['has_contact_notice'] = bool(notices)
     return summary_map_by_date
+
+
+def _get_trip_notices(target_date, trip_ref):
+    if not target_date or not trip_ref:
+        return []
+    try:
+        rows = ShippingTripNotice.objects.filter(
+            business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+            customer_code=KUBOTA_CUSTOMER_CODE,
+            departure_date=target_date,
+            trip_ref=trip_ref,
+        ).values('notice_text', 'notice_type')
+    except ProgrammingError:
+        rows = []
+    return [
+        {
+            'notice_type': _normalize_trip_notice_type(r['notice_type']),
+            'notice_text': str(r.get('notice_text') or '').strip(),
+        }
+        for r in rows if str(r.get('notice_text') or '').strip()
+    ]
 
 
 def _get_deadline_days():
@@ -1100,6 +1122,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
             ],
             'truck_summaries': truck_summaries,
             'departure_truck_summaries': departure_summaries_by_date.get(target_date.isoformat(), []),
+            'date_header_notices': _get_trip_notices(target_date, KUBOTA_DATE_HEADER_TRIP_REF),
         })
 
     def post(self, request):
@@ -1737,45 +1760,36 @@ class KubotaSakaiTripNoticeViewNew(APIView):
     def get(self, request):
         target_date = _parse_date(request.query_params.get('target_date'))
         truck_id = int(request.query_params.get('truck_id') or 0)
+        trip_ref = str(request.query_params.get('trip_ref') or '').strip()
         if not target_date:
             return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
-        if truck_id <= 0:
-            return Response({'detail': 'truck_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if truck_id <= 0 and not trip_ref:
+            return Response({'detail': 'truck_id または trip_ref は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            rows = ShippingTripNotice.objects.filter(
-                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
-                customer_code=KUBOTA_CUSTOMER_CODE,
-                departure_date=target_date,
-                trip_ref=f'TRUCK:{truck_id}',
-            ).values('notice_text', 'notice_type')
-        except ProgrammingError:
-            rows = []
-        notices = [
-            {'notice_type': _normalize_trip_notice_type(r['notice_type']),
-             'notice_text': str(r.get('notice_text') or '').strip()}
-            for r in rows if str(r.get('notice_text') or '').strip()
-        ]
+        resolved_trip_ref = trip_ref or f'TRUCK:{truck_id}'
+        notices = _get_trip_notices(target_date, resolved_trip_ref)
         return Response({
             'target_date': target_date.isoformat(),
-            'truck_id': truck_id,
+            'truck_id': truck_id if truck_id > 0 else None,
+            'trip_ref': resolved_trip_ref,
             'notices': notices,
         })
 
     def post(self, request):
         target_date = _parse_date(request.data.get('target_date'))
         truck_id = int(request.data.get('truck_id') or 0)
+        trip_ref = str(request.data.get('trip_ref') or '').strip()
         notice_text = str(request.data.get('notice_text') or '').strip()
         notice_type = _normalize_trip_notice_type(request.data.get('notice_type'))
         if not target_date:
             return Response({'detail': 'target_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
-        if truck_id <= 0:
-            return Response({'detail': 'truck_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if truck_id <= 0 and not trip_ref:
+            return Response({'detail': 'truck_id または trip_ref は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if len(notice_text) > 200:
             return Response({'detail': '連絡メモは200文字以内で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
         user = request.user if getattr(request.user, 'is_authenticated', False) else None
-        trip_ref = f'TRUCK:{truck_id}'
+        resolved_trip_ref = trip_ref or f'TRUCK:{truck_id}'
         try:
             ShippingTripNotice.objects.exists()
         except ProgrammingError:
@@ -1788,7 +1802,7 @@ class KubotaSakaiTripNoticeViewNew(APIView):
                 business_type=KUBOTA_COMMON_BUSINESS_TYPE,
                 customer_code=KUBOTA_CUSTOMER_CODE,
                 departure_date=target_date,
-                trip_ref=trip_ref,
+                trip_ref=resolved_trip_ref,
                 notice_type=notice_type,
                 defaults={'notice_text': notice_text, 'updated_by': user},
             )
@@ -1806,27 +1820,15 @@ class KubotaSakaiTripNoticeViewNew(APIView):
                 business_type=KUBOTA_COMMON_BUSINESS_TYPE,
                 customer_code=KUBOTA_CUSTOMER_CODE,
                 departure_date=target_date,
-                trip_ref=trip_ref,
+                trip_ref=resolved_trip_ref,
                 notice_type=notice_type,
             ).delete()
 
-        try:
-            all_rows = ShippingTripNotice.objects.filter(
-                business_type=KUBOTA_COMMON_BUSINESS_TYPE,
-                customer_code=KUBOTA_CUSTOMER_CODE,
-                departure_date=target_date,
-                trip_ref=trip_ref,
-            ).values('notice_text', 'notice_type')
-        except ProgrammingError:
-            all_rows = []
-        notices = [
-            {'notice_type': _normalize_trip_notice_type(r['notice_type']),
-             'notice_text': str(r.get('notice_text') or '').strip()}
-            for r in all_rows if str(r.get('notice_text') or '').strip()
-        ]
+        notices = _get_trip_notices(target_date, resolved_trip_ref)
         return Response({
             'target_date': target_date.isoformat(),
-            'truck_id': truck_id,
+            'truck_id': truck_id if truck_id > 0 else None,
+            'trip_ref': resolved_trip_ref,
             'notices': notices,
         })
 
