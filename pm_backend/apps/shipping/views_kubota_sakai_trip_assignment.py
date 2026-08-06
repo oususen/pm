@@ -390,6 +390,59 @@ def _get_trip_notices(target_date, trip_ref):
     ]
 
 
+def _locked_trip_map(target_date):
+    locked = {}
+    trips = ShippingTrip.objects.filter(
+        business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+        customer_code=KUBOTA_CUSTOMER_CODE,
+        departure_date=target_date,
+        status__in=('DEPARTED', 'CLOSED'),
+    ).values('trip_ref', 'status')
+    for trip in trips:
+        trip_ref = str(trip.get('trip_ref') or '').strip()
+        if not trip_ref.startswith('TRUCK:'):
+            continue
+        try:
+            truck_id = int(trip_ref.split(':', 1)[1])
+        except Exception:
+            continue
+        locked[truck_id] = str(trip.get('status') or '').strip().upper()
+    return locked
+
+
+def _locked_status_label(status_value):
+    status_key = str(status_value or '').strip().upper()
+    if status_key == 'DEPARTED':
+        return '出発済'
+    if status_key == 'CLOSED':
+        return '完了'
+    return 'ロック'
+
+
+def _locked_assignment_trucks_by_due(target_date, due_ids):
+    result = defaultdict(set)
+    if not due_ids:
+        return result
+    rows = ShippingTripAllocation.objects.filter(
+        source_type=KUBOTA_COMMON_SOURCE_TYPE,
+        source_id__in=due_ids,
+        trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+        trip__customer_code=KUBOTA_CUSTOMER_CODE,
+        trip__departure_date=target_date,
+        trip__status__in=('DEPARTED', 'CLOSED'),
+    ).values_list('source_id', 'trip__trip_ref')
+    for source_id, trip_ref in rows:
+        trip_ref = str(trip_ref or '').strip()
+        if not trip_ref.startswith('TRUCK:'):
+            continue
+        try:
+            truck_id = int(trip_ref.split(':', 1)[1])
+        except Exception:
+            continue
+        result[int(source_id)].add(truck_id)
+    return result
+
+
 def _get_deadline_days():
     row = SystemSetting.objects.filter(key='kubota_sakai.assignment_deadline_days').first()
     if not row:
@@ -646,17 +699,22 @@ def is_kubota_delivery_line(line_obj):
     )
 
 
-def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_map, user):
+def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_map, user, locked_truck_ids=None):
     """堺専用割付を共通出荷テーブルへ同期する。"""
+    locked_truck_ids = {int(item) for item in (locked_truck_ids or set()) if item}
+    locked_trip_refs = [f'TRUCK:{truck_id}' for truck_id in sorted(locked_truck_ids)]
     due_ids = [int(row['adj_id']) for row in normalized_rows]
     if due_ids:
-        ShippingTripAllocation.objects.filter(
+        delete_qs = ShippingTripAllocation.objects.filter(
             source_type=KUBOTA_COMMON_SOURCE_TYPE,
             source_id__in=due_ids,
             trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
             trip__customer_code=KUBOTA_CUSTOMER_CODE,
             trip__departure_date=target_date,
-        ).delete()
+        )
+        if locked_trip_refs:
+            delete_qs = delete_qs.exclude(trip__trip_ref__in=locked_trip_refs)
+        delete_qs.delete()
 
     run_cache = {}
     trip_cache = {}
@@ -954,6 +1012,8 @@ class KubotaSakaiTripPlanViewNew(APIView):
             }
 
         rows = []
+        locked_truck_status_map = _locked_trip_map(target_date)
+        locked_assignment_map = _locked_assignment_trucks_by_due(target_date, [adj.id for adj in adjustments])
         for adj in adjustments:
             product = products.get(adj.product_code)
             container = getattr(product, 'used_container', None) if product else None
@@ -985,6 +1045,8 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 'progress_adjust_qty': progress_info.get('adjust_qty', 0),
                 'overdue': overdue,
                 'deadline_date': deadline_date.isoformat(),
+                'is_locked': False,
+                'lock_reason': '',
                 'allocations': [
                     {
                         'id': a.id,
@@ -992,6 +1054,8 @@ class KubotaSakaiTripPlanViewNew(APIView):
                         'truck_name': a.truck.name if a.truck_id else '',
                         'container_id': a.container_id,
                         'qty': str(a.qty),
+                        'is_locked': a.truck_id in locked_assignment_map.get(adj.id, set()),
+                        'lock_reason': _locked_status_label(locked_truck_status_map.get(a.truck_id)) if a.truck_id in locked_assignment_map.get(adj.id, set()) else '',
                     }
                     for a in current_assignments
                 ],
@@ -1102,6 +1166,13 @@ class KubotaSakaiTripPlanViewNew(APIView):
             'assignment_deadline_days': deadline_days,
             'last_adjusted_at': last_adjusted_at,
             'rows': rows,
+            'locked_trips': [
+                {
+                    'truck_id': truck_id,
+                    'status': status_value,
+                }
+                for truck_id, status_value in sorted(locked_truck_status_map.items())
+            ],
             'product_containers': dict(product_containers_map),
             'trucks': [
                 {
@@ -1133,6 +1204,9 @@ class KubotaSakaiTripPlanViewNew(APIView):
         if not isinstance(rows, list):
             return Response({'detail': 'rows は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
+        locked_truck_status_map = _locked_trip_map(target_date)
+        locked_truck_ids = {int(item) for item in locked_truck_status_map.keys()}
+
         # 対象 DueAdjustment / Truck 取得
         adj_ids = []
         truck_ids = set()
@@ -1157,6 +1231,15 @@ class KubotaSakaiTripPlanViewNew(APIView):
             t.id: t
             for t in KubotaSakaiTruck.objects.filter(id__in=list(truck_ids), is_active=True)
         }
+        existing_assignments = list(
+            KubotaSakaiTripAssignment.objects.filter(
+                due_adjustment_id__in=list(adj_map.keys()),
+                departure_date=target_date,
+            )
+        )
+        existing_assignments_by_due = defaultdict(list)
+        for item in existing_assignments:
+            existing_assignments_by_due[int(item.due_adjustment_id)].append(item)
 
         # Product lookup（積載チェック用）
         product_codes = set(a.product_code for a in adj_map.values())
@@ -1174,18 +1257,41 @@ class KubotaSakaiTripPlanViewNew(APIView):
             if not adj:
                 errors.append({'due_adjustment_id': adj_id, 'detail': '対象外の納期調整データです。'})
                 continue
-
             allocations = row.get('allocations') or []
             if not isinstance(allocations, list):
                 errors.append({'due_adjustment_id': adj_id, 'detail': 'allocations は配列で指定してください。'})
                 continue
 
+            locked_existing = {
+                int(item.id): item
+                for item in existing_assignments_by_due.get(adj_id, [])
+                if int(item.truck_id or 0) in locked_truck_ids
+            }
+            seen_locked_ids = set()
             normalized_allocations = []
             row_total = Decimal('0')
             for al in allocations:
+                allocation_id = int(al.get('id') or 0)
                 truck_id = int(al.get('truck_id') or 0)
                 qty = _to_decimal(al.get('qty'))
                 if qty <= 0:
+                    continue
+                if truck_id in locked_truck_status_map:
+                    locked_assignment = locked_existing.get(allocation_id)
+                    container_id = None
+                    try:
+                        container_id = int(al.get('container_id') or 0) or None
+                    except (TypeError, ValueError):
+                        pass
+                    if (
+                        not locked_assignment
+                        or int(locked_assignment.truck_id or 0) != truck_id
+                        or _to_decimal(locked_assignment.qty) != qty
+                        or int(locked_assignment.container_id or 0) != int(container_id or 0)
+                    ):
+                        errors.append({'due_adjustment_id': adj_id, 'detail': f'出発済/完了の便は編集できません: {truck_id}'})
+                        continue
+                    seen_locked_ids.add(allocation_id)
                     continue
                 truck = truck_map.get(truck_id)
                 if not truck:
@@ -1198,6 +1304,10 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     pass
                 normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
                 row_total += qty
+
+            if set(locked_existing.keys()) - seen_locked_ids:
+                errors.append({'due_adjustment_id': adj_id, 'detail': '出発済/完了の便に割り付いた行は削除できません。'})
+                continue
 
             if adj_id not in normalized_map:
                 normalized_map[adj_id] = {'adj_id': adj_id, 'allocations': [], 'total': Decimal('0')}
@@ -1228,9 +1338,13 @@ class KubotaSakaiTripPlanViewNew(APIView):
             # NOTE:
             # 過去実装や便変更の影響で同一 due_adjustment に別日付の割付が残ると、
             # 同じ明細が二重計上されるため departure_date で絞らず全削除する。
-            KubotaSakaiTripAssignment.objects.filter(
+            delete_qs = KubotaSakaiTripAssignment.objects.filter(
                 due_adjustment_id__in=[n['adj_id'] for n in normalized],
-            ).delete()
+                departure_date=target_date,
+            )
+            if locked_truck_ids:
+                delete_qs = delete_qs.exclude(truck_id__in=list(locked_truck_ids))
+            delete_qs.delete()
 
             create_items = []
             for row in normalized:
@@ -1266,7 +1380,6 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     due_adjustment__due_date__gte=min(affected_departure_dates) if affected_departure_dates else target_date,
                     due_adjustment__due_date__lte=validation_query_end,
                 )
-                .exclude(due_adjustment_id__in=[n['adj_id'] for n in normalized])
             )
             validation_product_codes = set(product_codes)
             validation_product_codes.update(
@@ -1318,28 +1431,6 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     'container_override': item.container if item.container_id else None,
                     'capacity_override': capacity_override,
                 })
-            for row in normalized:
-                adj = adj_map.get(row['adj_id'])
-                if not adj:
-                    continue
-                for al in row['allocations']:
-                    truck = truck_map.get(al['truck_id'])
-                    if not truck:
-                        continue
-                    container_override = container_map.get(al.get('container_id')) if al.get('container_id') else None
-                    capacity_override = None
-                    if al.get('container_id'):
-                        capacity_override = saved_pc_map.get((adj.product_code, al['container_id']))
-                        if not capacity_override and container_override:
-                            capacity_override = container_override.capacity
-                    validation_records.append({
-                        'actual_departure_date': _truck_actual_departure_date(target_date, truck, calendar_map),
-                        'truck': truck,
-                        'product_code': adj.product_code,
-                        'qty': al['qty'],
-                        'container_override': container_override,
-                        'capacity_override': capacity_override,
-                    })
 
             save_errors = []
             per_group = defaultdict(list)
@@ -1389,6 +1480,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 adj_map=adj_map,
                 truck_map=truck_map,
                 user=user,
+                locked_truck_ids=locked_truck_ids,
             )
 
             # LineBacklog 同期（LinePlan不使用、LineBacklog直接保存）

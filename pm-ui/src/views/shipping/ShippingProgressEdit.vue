@@ -23,7 +23,7 @@
     <!-- 実績変更タブ -->
     <div v-else-if="tab === 'actual'" class="tab-body">
       <div class="helper-text">
-        出発済・完了の便に紐づく実績は、この画面では変更できません。
+        出発済・完了の便に紐づく実績は、この画面では変更できません。便確認（業務員）で変更してください。
       </div>
       <div v-if="!actualRows.length" class="status-text">データがありません</div>
       <div v-else class="table-wrap">

@@ -84,7 +84,7 @@ const tiles = computed(() => [
   },
   {
     to: "/shipping/actual",
-    label: "出荷実績",
+    label: "出荷実績照会",
     icon: "📦",
     category: "shipping_ops",
     required: "view",

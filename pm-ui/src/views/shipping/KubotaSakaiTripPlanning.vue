@@ -1,5 +1,8 @@
 <template>
   <div class="trip-planning-page">
+    <div v-if="lockedClickNotice" class="locked-click-toast">
+      {{ lockedClickNotice }}
+    </div>
     <div class="toolbar">
       <div class="field">
         <label>出荷開始日</label>
@@ -427,13 +430,17 @@
                       v-for="(al, idx) in slotEntryAt(row, dateKey, slotIdx - 1).allocations"
                       :key="`${row.rowKey}-${dateKey}-${slotIdx}-al-${idx}`"
                       class="allocation-row"
+                      :class="{ 'allocation-row-locked': isAllocationLocked(al) }"
+                      :title="isAllocationLocked(al) ? al.lock_reason : ''"
+                      @click="handleLockedAllocationClick(al)"
                     >
-                      <select class="truck-select" v-model.number="al.truck_id" @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))">
+                      <select class="truck-select" v-model.number="al.truck_id" :disabled="isAllocationLocked(al)" @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))">
                         <option :value="null">便</option>
                         <option
                           v-for="truck in trucksByDate[dateKey] || []"
                           :key="truck.id"
                           :value="truck.id"
+                          :disabled="isLockedTruck(dateKey, truck.id)"
                         >
                           {{ truckDisplayName(truck) }}
                         </option>
@@ -442,12 +449,14 @@
                         v-model="al.container_count"
                         type="text"
                         inputmode="numeric"
+                        :disabled="isAllocationLocked(al)"
                         @input="handleContainerCountInput(slotEntryAt(row, dateKey, slotIdx - 1))"
                       />
                       <select
                         v-if="containersForProduct(row.product_code).length > 0"
                         v-model.number="al.container_id"
                         class="container-select"
+                        :disabled="isAllocationLocked(al)"
                         @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))"
                       >
                         <option :value="null">容器</option>
@@ -463,6 +472,7 @@
                         v-model="al.qty"
                         type="text"
                         inputmode="numeric"
+                        :disabled="isAllocationLocked(al)"
                         @input="handleAllocationQtyInput(slotEntryAt(row, dateKey, slotIdx - 1))"
                         @focus="showProductBubble(row, $event)"
                         @mouseenter="showProductBubble(row, $event)"
@@ -470,10 +480,10 @@
                         @mouseleave="handleQtyInputMouseLeave($event)"
                       />
                       <div class="allocation-actions">
-                        <button class="mini" :style="getPlusButtonStyle(row)" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1), row.used_container_id)">+</button>
+                        <button class="mini" :style="getPlusButtonStyle(row)" :disabled="isEntryFullyLocked(slotEntryAt(row, dateKey, slotIdx - 1))" @click="addAllocation(slotEntryAt(row, dateKey, slotIdx - 1), row.used_container_id)">+</button>
                         <button
                           class="mini danger"
-                          :disabled="slotEntryAt(row, dateKey, slotIdx - 1).allocations.length <= 1"
+                          :disabled="isAllocationLocked(al) || slotEntryAt(row, dateKey, slotIdx - 1).allocations.length <= 1"
                           @click="removeAllocation(slotEntryAt(row, dateKey, slotIdx - 1), idx)"
                         >
                           -
@@ -834,10 +844,13 @@ const syncAllocationFromContainerCount = (entry, allocation) => {
 }
 
 const normalizeAllocation = (item = null, defaultContainerId = null) => ({
+  id: item?.id ?? null,
   truck_id: item?.truck_id ?? null,
   container_id: item?.container_id ?? defaultContainerId,
   container_count: '',
   qty: normalizeQtyText(item?.qty ?? ''),
+  is_locked: Boolean(item?.is_locked),
+  lock_reason: item?.lock_reason || '',
 })
 
 const hexToRgb = (hex) => {
@@ -888,6 +901,7 @@ const exportingCsv = ref(false)
 const exportingPickupPdf = ref(false)
 const assignmentDeadlineDays = ref(3)
 const trucksByDate = ref({})
+const lockedTripsByDate = ref({})
 const summaryByDate = ref({})
 const departureSummaryByDate = ref({})
 const previewSummaryByDate = ref({})
@@ -918,6 +932,7 @@ const savingProgressAdjust = ref(false)
 const progressAdjustEdits = ref({})
 const cursorBubbleText = ref('')
 const cursorProductBubbleStyle = ref({})
+const lockedClickNotice = ref('')
 const showDisplaySettingDialog = ref(false)
 const displaySettingItems = ref([])
 const savingDisplaySettings = ref(false)
@@ -1036,6 +1051,31 @@ const getPlusButtonStyle = (row) => {
   }
 }
 
+const isLockedTruck = (dateKey, truckId) => {
+  const rows = lockedTripsByDate.value[dateKey] || []
+  return rows.some((item) => Number(item.truck_id) === Number(truckId))
+}
+
+const isAllocationLocked = (allocation) => Boolean(allocation?.is_locked)
+const isEntryFullyLocked = (entry) => Array.isArray(entry?.allocations) && entry.allocations.length > 0
+  ? entry.allocations.every((allocation) => isAllocationLocked(allocation))
+  : false
+let lockedClickNoticeTimer = null
+
+const showLockedClickNotice = (message) => {
+  lockedClickNotice.value = message || '出発済のため、編集できません。'
+  if (lockedClickNoticeTimer) clearTimeout(lockedClickNoticeTimer)
+  lockedClickNoticeTimer = setTimeout(() => {
+    lockedClickNotice.value = ''
+    lockedClickNoticeTimer = null
+  }, 1800)
+}
+
+const handleLockedAllocationClick = (allocation) => {
+  if (!isAllocationLocked(allocation)) return
+  showLockedClickNotice('出発済のため、編集できません。')
+}
+
 const sourceOrderLabel = (entry) => {
   if (!entry) return ''
   return entry.source_order_no || (entry.order_type === 'FORECAST' ? '内示' : '')
@@ -1087,13 +1127,14 @@ const handleContainerCountInput = (entry) => {
 }
 
 const addAllocation = (entry, defaultContainerId = null) => {
-  if (!entry) return
+  if (!entry || isEntryFullyLocked(entry)) return
   entry.allocations.push(normalizeAllocation(null, defaultContainerId))
   if (entry.due_date) schedulePreview(entry.due_date)
 }
 
 const removeAllocation = (entry, idx) => {
-  if (!entry || entry.allocations.length <= 1) return
+  const target = entry?.allocations?.[idx]
+  if (!entry || isAllocationLocked(target) || entry.allocations.length <= 1) return
   entry.allocations.splice(idx, 1)
   recalcEntry(entry)
   if (entry.due_date) schedulePreview(entry.due_date)
@@ -1837,6 +1878,7 @@ const buildPayloadRowsForDate = (dateKey) => {
       due_adjustment_id: entry.due_adjustment_id,
       allocations: entry.allocations
         .map((item) => ({
+          id: item.id,
           truck_id: item.truck_id,
           container_id: item.container_id || null,
           qty: parseIntegerQty(item.qty),
@@ -2025,6 +2067,7 @@ const loadGrid = async () => {
       }),
     )
     const nextTrucksByDate = {}
+    const nextLockedTripsByDate = {}
     const nextSummaryByDate = {}
     const nextDepartureSummaryByDate = {}
     const nextHolidayByDate = {}
@@ -2039,8 +2082,10 @@ const loadGrid = async () => {
       const trucks = Array.isArray(res.data?.trucks) ? res.data.trucks : []
       const summaries = Array.isArray(res.data?.truck_summaries) ? res.data.truck_summaries : []
       const departureSummaries = Array.isArray(res.data?.departure_truck_summaries) ? res.data.departure_truck_summaries : []
+      const lockedTrips = Array.isArray(res.data?.locked_trips) ? res.data.locked_trips : []
       const payloadRows = Array.isArray(res.data?.rows) ? res.data.rows : []
       nextTrucksByDate[dateKey] = trucks
+      nextLockedTripsByDate[dateKey] = lockedTrips
       nextSummaryByDate[dateKey] = summaries
       nextDepartureSummaryByDate[dateKey] = departureSummaries
       nextHolidayByDate[dateKey] = Boolean(res.data?.is_holiday)
@@ -2092,6 +2137,8 @@ const loadGrid = async () => {
           allocations,
           unassigned_qty_preview: parseNumber(raw.unassigned_qty),
           due_date: dateKey,
+          is_locked: Boolean(raw.is_locked),
+          lock_reason: raw.lock_reason || '',
         }
         entry.allocations.forEach((al) => {
           syncAllocationFromQty(entry, al)
@@ -2115,6 +2162,7 @@ const loadGrid = async () => {
     })
 
     trucksByDate.value = nextTrucksByDate
+    lockedTripsByDate.value = nextLockedTripsByDate
     summaryByDate.value = nextSummaryByDate
     departureSummaryByDate.value = nextDepartureSummaryByDate
     productContainersMap.value = nextProductContainers
@@ -2728,6 +2776,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (lockedClickNoticeTimer) {
+    clearTimeout(lockedClickNoticeTimer)
+    lockedClickNoticeTimer = null
+  }
+})
+
+onUnmounted(() => {
   previewTimers.forEach((timerId) => clearTimeout(timerId))
   previewTimers.clear()
   hideCursorBubble()
@@ -2742,6 +2797,20 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.locked-click-toast {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 1600;
+  padding: 8px 12px;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
 }
 .toolbar {
   display: flex;
@@ -3685,6 +3754,9 @@ onUnmounted(() => {
   justify-content: center;
   width: 190px;
   margin: 0 auto;
+}
+.allocation-row-locked {
+  opacity: 0.75;
 }
 .allocation-row select,
 .allocation-row input {
