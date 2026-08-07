@@ -36,6 +36,7 @@ from .views import (
     PurchaseAutoOrderSendConfigDetailView,
     PurchaseAutoOrderSendConfigListCreateView,
     PurchaseAutoOrderSendRunNowView,
+    PurchaseAutoOrderSendTruckLoadCheckView,
     PurchaseDeliveryListAutoTemplateView,
     PurchaseDeliveryListExcelDownloadView,
     PurchaseDeliveryNotePdfDownloadView,
@@ -96,6 +97,8 @@ urlpatterns = [
     path('purchase-auto-order-send-configs/', PurchaseAutoOrderSendConfigListCreateView.as_view(), name='purchase-auto-order-send-configs'),
     path('purchase-auto-order-send-configs/<int:pk>/', PurchaseAutoOrderSendConfigDetailView.as_view(), name='purchase-auto-order-send-config-detail'),
     path('purchase-auto-order-send-configs/<int:pk>/run-now/', PurchaseAutoOrderSendRunNowView.as_view(), name='purchase-auto-order-send-run-now'),
+    path('purchase-auto-order-send-configs/<int:pk>/truck-load-check/', PurchaseAutoOrderSendTruckLoadCheckView.as_view(), name='purchase-auto-order-send-truck-load-check'),
+    path('purchase-auto-order-send-truck-load-check/', PurchaseAutoOrderSendTruckLoadCheckView.as_view(), name='purchase-auto-order-send-truck-load-check'),
     path('purchase-actual-kikan-mapping/', PurchaseActualKikanMappingView.as_view(), name='purchase-actual-kikan-mapping'),
     path('purchase-actual-kikan-mapping/candidates/', PurchaseActualKikanMappingCandidatesView.as_view(), name='purchase-actual-kikan-mapping-candidates'),
 ]

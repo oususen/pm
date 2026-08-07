@@ -24,7 +24,7 @@ from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
+    KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation, LineCycleTime,
 )
 from .serializers import (
@@ -32,7 +32,7 @@ from .serializers import (
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMListSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingChangeHistorySerializer, RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
-    KubotaSakaiTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
+    KubotaSakaiTruckSerializer, SupplierTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
     LineCycleTimeSerializer,
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
@@ -1483,7 +1483,7 @@ CONTAINER_IMPORT_TMP_DIR = 'tmp/container_import'
 
 
 class ContainerCapacityViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
-    queryset = ContainerCapacity.objects.all()
+    queryset = ContainerCapacity.objects.select_related('parent_container').all()
     serializer_class = ContainerCapacitySerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     search_fields = ['name', 'container_code']
@@ -1782,6 +1782,17 @@ class KubotaSakaiTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['name', 'alias_name']
     ordering_fields = ['display_order', 'name', 'departure_time']
     ordering = ['display_order', 'name']
+
+
+class SupplierTruckViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
+    queryset = SupplierTruck.objects.all()
+    serializer_class = SupplierTruckSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'default_use', 'supplier']
+    search_fields = ['name', 'alias_name', 'supplier__supplier_code', 'supplier__supplier_name']
+    ordering_fields = ['display_order', 'name', 'departure_time']
+    ordering = ['supplier', 'display_order', 'name']
 
 
 class CustomerViewSet(MastersPermissionMixin, viewsets.ModelViewSet):

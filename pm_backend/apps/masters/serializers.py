@@ -6,7 +6,7 @@ from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
-    KubotaSakaiTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
+    KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation, LineCycleTime,
 )
 
@@ -120,6 +120,9 @@ class ContainerCapacitySerializer(serializers.ModelSerializer):
     products = ProductContainerSerializer(
         source='product_containers', many=True, read_only=True,
     )
+    parent_container_name = serializers.CharField(
+        source='parent_container.name', read_only=True, default=None,
+    )
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -181,6 +184,50 @@ class KubotaSakaiTruckSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = KubotaSakaiTruck
+        fields = '__all__'
+
+
+class SupplierTruckSerializer(serializers.ModelSerializer):
+    supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        physical_truck_code = str(
+            attrs.get('physical_truck_code', getattr(self.instance, 'physical_truck_code', '')) or ''
+        ).strip()
+        attrs['physical_truck_code'] = physical_truck_code or None
+        return attrs
+
+    @staticmethod
+    def _sync_physical_truck_specs(instance):
+        physical_truck_code = str(getattr(instance, 'physical_truck_code', '') or '').strip()
+        if not physical_truck_code:
+            return
+        SupplierTruck.objects.filter(
+            physical_truck_code=physical_truck_code,
+        ).exclude(pk=instance.pk).update(
+            width=instance.width,
+            depth=instance.depth,
+            height=instance.height,
+            max_weight=instance.max_weight,
+        )
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            instance = super().create(validated_data)
+            self._sync_physical_truck_specs(instance)
+            return instance
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            instance = super().update(instance, validated_data)
+            self._sync_physical_truck_specs(instance)
+            return instance
+
+    class Meta:
+        model = SupplierTruck
         fields = '__all__'
 
 

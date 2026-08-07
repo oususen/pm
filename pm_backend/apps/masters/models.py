@@ -788,6 +788,15 @@ class ContainerCapacity(models.Model):
         verbose_name='向き',
         help_text='トラック両側（荷台長手方向＝奥行き）へ向ける辺。容器長手=長い辺を両側（長手方向）へ、容器短手=短い辺を両側（長手方向）へ、自由=自動判定',
     )
+    parent_container = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='child_containers', verbose_name='親容器',
+        help_text='この容器を入れる外側の容器（例: ポリコンを入れる小アミ）',
+    )
+    parent_capacity = models.IntegerField(
+        null=True, blank=True, verbose_name='親容器あたり収容数',
+        help_text='親容器1つにこの容器が何個入るか',
+    )
     image_url = models.CharField(max_length=255, null=True, blank=True, verbose_name='画像URL')
 
     class Meta:
@@ -890,6 +899,44 @@ class KubotaSakaiTruck(models.Model):
         verbose_name = 'クボタ堺向け便'
         verbose_name_plural = 'クボタ堺向け便'
         ordering = ['display_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class SupplierTruck(models.Model):
+    """仕入れ先トラックマスタ"""
+    id = models.BigAutoField(primary_key=True)
+    supplier = models.ForeignKey('Supplier', on_delete=models.PROTECT, verbose_name='仕入先')
+    name = models.CharField(max_length=50, verbose_name='便名')
+    alias_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='俗称')
+    physical_truck_code = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name='同一車両キー',
+        help_text='同じ物理トラックとして占有率を合算する便に同じ値を設定する',
+    )
+    width = models.IntegerField(verbose_name='荷台幅(mm)')
+    depth = models.IntegerField(verbose_name='荷台奥行(mm)')
+    height = models.IntegerField(verbose_name='荷台高さ(mm)')
+    max_weight = models.IntegerField(verbose_name='最大積載重量(kg)')
+    departure_time = models.TimeField(verbose_name='出発時刻')
+    arrival_time = models.TimeField(verbose_name='到着時刻')
+    arrival_day_offset = models.IntegerField(default=0, verbose_name='到着日オフセット', help_text='0=当日着, 1=翌日着')
+    default_use = models.BooleanField(default=True, verbose_name='常用便')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    notes = models.TextField(null=True, blank=True, verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_supplier_truck'
+        verbose_name = '仕入れ先トラック'
+        verbose_name_plural = '仕入れ先トラック'
+        unique_together = ('supplier', 'name')
+        ordering = ['supplier', 'display_order', 'name']
 
     def __str__(self):
         return self.name

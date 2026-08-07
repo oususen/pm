@@ -9,8 +9,42 @@
 
     <div class="page-content">
       <div v-if="loading" class="no-data">読み込み中...</div>
+      <div v-else>
+        <div class="truck-check-panel">
+          <div class="truck-check-header">
+            <h2>仕入れ先トラック積載可否チェック（別機能）</h2>
+            <button class="btn-primary" :disabled="truckCheckLoading" @click="runTruckLoadCheck">{{ truckCheckLoading ? '判定中...' : '判定実行' }}</button>
+          </div>
+          <div class="truck-check-form">
+            <div class="form-group compact">
+              <label>仕入れ先トラック</label>
+              <select v-model="truckCheck.truck_id">
+                <option value="">-- 選択 --</option>
+                <option v-for="truck in truckCandidates" :key="truck.id" :value="truck.id">
+                  {{ truck.supplier_code ? `${truck.supplier_code} / ` : '' }}{{ truck.name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group compact">
+              <label>対象品番（カンマ区切り）</label>
+              <input v-model="truckCheck.productCodes" placeholder="例: P001,P002" />
+            </div>
+            <div class="form-group compact">
+              <label>数量（カンマ区切り）</label>
+              <input v-model="truckCheck.quantities" placeholder="例: 10,20" />
+            </div>
+          </div>
+          <div v-if="truckCheckResult" class="truck-check-result">
+            <div class="result-title">判定結果</div>
+            <div class="result-line">トラック: {{ truckCheckResult.truck?.name || '-' }}</div>
+            <div class="result-line">積載可否: <strong>{{ truckCheckResult.can_fit ? '可' : '不可' }}</strong></div>
+            <div class="result-line">占有率: {{ truckCheckResult.occupancy_percent }}%</div>
+            <div class="result-line" v-if="truckCheckResult.errors?.length">エラー: {{ truckCheckResult.errors.join(' / ') }}</div>
+            <div class="result-line" v-if="truckCheckResult.warnings?.length">警告: {{ truckCheckResult.warnings.join(' / ') }}</div>
+          </div>
+        </div>
 
-      <table v-else-if="configs.length" class="data-table">
+        <table v-if="configs.length" class="data-table">
         <thead>
           <tr>
             <th>仕入先</th>
@@ -49,6 +83,7 @@
         </tbody>
       </table>
       <div v-else class="no-data">注文書自動送信設定がありません。</div>
+    </div>
     </div>
 
     <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
@@ -135,7 +170,7 @@
           <div class="label-row">
             <label>メール本文（空欄なら自動生成）</label>
           </div>
-          <textarea v-model="form.email_body_custom" rows="8" class="input-full" />
+          <textarea v-model="form.email_body_custom" rows="8" class="input-full"></textarea>
         </div>
 
         <div class="form-group">
@@ -187,6 +222,14 @@ import ContactEmailSelect from './ContactEmailSelect.vue'
 const loading = ref(true)
 const saving = ref(false)
 const configs = ref([])
+const truckCandidates = ref([])
+const truckCheckLoading = ref(false)
+const truckCheckResult = ref(null)
+const truckCheck = reactive({
+  truck_id: '',
+  productCodes: '',
+  quantities: '',
+})
 const suppliers = ref([])
 const userList = ref([])
 const contactList = ref([])
@@ -280,6 +323,58 @@ const loadUsers = async () => {
 const loadContacts = async () => {
   const res = await api.contacts.getContacts({ is_active: true, page_size: 9999 })
   contactList.value = (res.data?.results || res.data || []).filter((contact) => contact.email)
+}
+
+const loadTruckCandidates = async () => {
+  // 仕入れ先トラックマスタのトラック一覧を取得
+  try {
+    const res = await api.supplierTrucks.getSupplierTrucks({ is_active: true, page_size: 9999 })
+    truckCandidates.value = (res.data?.results || res.data || [])
+  } catch (error) {
+    console.error('仕入れ先トラック一覧取得エラー', error)
+  }
+}
+
+const runTruckLoadCheck = async () => {
+  if (!truckCheck.truck_id) {
+    alert('トラックを選択してください')
+    return
+  }
+  const productCodes = (truckCheck.productCodes || '').split(',').map((item) => item.trim()).filter(Boolean)
+  const quantities = (truckCheck.quantities || '').split(',').map((item) => item.trim()).filter(Boolean)
+  if (!productCodes.length || !quantities.length || productCodes.length !== quantities.length) {
+    alert('品番と数量の組み合わせを正しく入力してください')
+    return
+  }
+
+  truckCheckLoading.value = true
+  try {
+    const items = productCodes.map((productCode, index) => ({
+      product_code: productCode,
+      qty: Number(quantities[index]),
+    }))
+    const res = await api.purchaseAutoOrderSend.checkTruckLoad({
+      truck_id: truckCheck.truck_id,
+      items,
+    })
+    truckCheckResult.value = res.data
+  } catch (error) {
+    console.error('トラック積載判定エラー', error)
+    const data = error?.response?.data
+    const detail = data?.detail || ''
+    const invalidItems = data?.invalid_items || []
+    const lines = [detail || 'トラック積載判定に失敗しました']
+    if (invalidItems.length) {
+      lines.push('')
+      invalidItems.forEach((item) => {
+        const reason = item.reason === 'container not configured' ? '容器未設定' : item.reason === 'product not found' ? '品番不明' : item.reason
+        lines.push(`  ${item.product_code}: ${reason}`)
+      })
+    }
+    alert(lines.join('\n'))
+  } finally {
+    truckCheckLoading.value = false
+  }
 }
 
 const checkSelectedSupplierCalendarDeliveryDays = async () => {
@@ -457,7 +552,7 @@ const runNow = async (config) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadConfigs(), loadSuppliers(), loadUsers(), loadContacts()])
+  await Promise.all([loadConfigs(), loadSuppliers(), loadUsers(), loadContacts(), loadTruckCandidates()])
 })
 
 watch(
@@ -501,4 +596,13 @@ watch(
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn-primary { padding: 6px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }
 .btn-secondary { padding: 6px 16px; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; }
+ .truck-check-panel { margin-bottom: 18px; padding: 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; }
+ .truck-check-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+ .truck-check-header h2 { margin: 0; font-size: 15px; }
+ .truck-check-form { display: flex; gap: 12px; flex-wrap: wrap; }
+ .form-group.compact { margin-bottom: 0; min-width: 220px; }
+ .truck-check-form input, .truck-check-form select { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
+ .truck-check-result { margin-top: 10px; padding: 10px; border-radius: 6px; background: #fff; border: 1px solid #d1d5db; font-size: 13px; }
+ .result-title { font-weight: 700; margin-bottom: 4px; }
+ .result-line { margin-top: 2px; }
 </style>

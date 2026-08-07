@@ -4,7 +4,7 @@ from .views import (
     SupplierViewSet, CalendarViewSet, CalendarDayViewSet, WorkPatternViewSet, BreakTimeViewSet,
     BOMViewSet, BOMItemViewSet, RoutingViewSet, RoutingStepViewSet,
     RoutingStepMaterialViewSet, ProductGroupViewSet, ProductCodeMappingViewSet, ContainerCapacityViewSet, EquipmentViewSet, ContactViewSet,
-    KubotaSakaiTruckViewSet, MobileDeviceViewSet, MobileDeviceInventoryViewSet,
+    KubotaSakaiTruckViewSet, SupplierTruckViewSet, MobileDeviceViewSet, MobileDeviceInventoryViewSet,
     ManualDocumentViewSet, LineCycleTimeViewSet, SourcingBulkChangeView,
 )
 
@@ -30,6 +30,7 @@ router.register(r'routing-steps', RoutingStepViewSet)
 router.register(r'routing-step-materials', RoutingStepMaterialViewSet)
 router.register(r'contacts', ContactViewSet)
 router.register(r'kubota-sakai-trucks', KubotaSakaiTruckViewSet)
+router.register(r'supplier-trucks', SupplierTruckViewSet)
 router.register(r'mobile-devices', MobileDeviceViewSet)
 router.register(r'mobile-device-inventories', MobileDeviceInventoryViewSet)
 router.register(r'manual-documents', ManualDocumentViewSet, basename='manual-document')

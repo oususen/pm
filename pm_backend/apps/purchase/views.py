@@ -20,6 +20,7 @@ from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_line_backlog import LineBacklog
 from production.models_line_plan import LinePlan
 from production.serializers import LineBacklogSerializer
+from shipping.services.truck_load_calculator import calculate_truck_load
 from production.serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     resolve_workday_date_for_process,
@@ -3103,6 +3104,119 @@ class PurchaseAutoOrderSendRunNowView(APIView):
         thread = threading.Thread(target=run_auto_order_send, kwargs={'config_id': config.id})
         thread.start()
         return Response({'detail': '手動実行を開始しました', 'config_id': config.id})
+
+
+class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
+    """注文書自動送信の別機能: 指定トラックに指定商品群が積載できるか判定する"""
+
+    def post(self, request, pk=None):
+        if pk is not None:
+            config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
+            if not config:
+                return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        truck_id = request.data.get('truck_id')
+        items = request.data.get('items') or []
+        if not truck_id:
+            return Response({'detail': 'truck_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(items, list) or not items:
+            return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from masters.models import SupplierTruck
+
+        truck = SupplierTruck.objects.filter(pk=truck_id).first()
+        if not truck:
+            return Response({'detail': 'truck not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        assignments = []
+        invalid_items = []
+        for item in items:
+            product_code = str(item.get('product_code') or '').strip()
+            qty = item.get('qty')
+            if not product_code or qty in (None, ''):
+                continue
+            try:
+                qty_value = int(qty)
+            except (TypeError, ValueError):
+                invalid_items.append({'product_code': product_code, 'reason': 'qty must be an integer'})
+                continue
+            if qty_value <= 0:
+                invalid_items.append({'product_code': product_code, 'reason': 'qty must be greater than 0'})
+                continue
+
+            product = Product.objects.select_related('used_container__parent_container').filter(product_code=product_code).first()
+            if not product:
+                invalid_items.append({'product_code': product_code, 'reason': 'product not found'})
+                continue
+            container = getattr(product, 'used_container', None)
+            if not container:
+                invalid_items.append({'product_code': product.product_code, 'reason': 'container not configured'})
+                continue
+
+            parent = getattr(container, 'parent_container', None)
+            parent_dict = None
+            if parent:
+                parent_dict = {
+                    'width': getattr(parent, 'width', None),
+                    'depth': getattr(parent, 'depth', None),
+                    'height': getattr(parent, 'height', None),
+                    'capacity': getattr(container, 'parent_capacity', None),
+                    'can_mix': getattr(parent, 'can_mix', True),
+                    'stackable': getattr(parent, 'stackable', True),
+                    'max_stack': getattr(parent, 'max_stack', None),
+                    'name': getattr(parent, 'name', None),
+                    'orientation': getattr(parent, 'orientation', None),
+                }
+            assignments.append({
+                'product_code': product.product_code,
+                'qty': qty_value,
+                'unit_weight': Decimal('0'),
+                'container': {
+                    'width': getattr(container, 'width', None),
+                    'depth': getattr(container, 'depth', None),
+                    'height': getattr(container, 'height', None),
+                    'capacity': getattr(product, 'capacity', None) or getattr(container, 'capacity', None),
+                    'can_mix': getattr(container, 'can_mix', True),
+                    'stackable': getattr(container, 'stackable', True),
+                    'max_stack': getattr(container, 'max_stack', None),
+                    'name': getattr(container, 'name', None),
+                    'orientation': getattr(container, 'orientation', None),
+                    'parent': parent_dict,
+                },
+            })
+        if invalid_items:
+            return Response(
+                {
+                    'detail': '一部の品番に容器設定がありません。',
+                    'invalid_items': invalid_items,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not assignments:
+            return Response({'detail': 'assignments is empty'}, status=status.HTTP_400_BAD_REQUEST)
+
+        result = calculate_truck_load(assignments, truck)
+        return Response({
+            'config_id': config.id,
+            'truck': {
+                'id': truck.id,
+                'name': truck.name,
+                'alias_name': truck.alias_name,
+                'width': truck.width,
+                'depth': truck.depth,
+                'height': truck.height,
+                'max_weight': truck.max_weight,
+            },
+            'assignments': assignments,
+            'can_fit': result.get('can_fit', False),
+            'occupancy_percent': float(result.get('occupancy_percent', 0) or 0),
+            'total_weight': float(result.get('total_weight', 0) or 0),
+            'errors': result.get('errors', []),
+            'warnings': result.get('warnings', []),
+            'placed_count': len(result.get('placed', []) or []),
+            'remaining': result.get('remaining', []),
+        })
 
 
 class PurchaseActualKikanMappingCandidatesView(APIView):

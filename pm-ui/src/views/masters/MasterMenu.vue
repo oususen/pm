@@ -87,6 +87,7 @@ const tiles = computed(() => {
     { to: '/masters/line', label: 'ラインマスタ', icon: '🏗️', category: 'structure', required: 'view', resource: 'masters.line' },
     { to: '/masters/customer', label: '得意先マスタ', icon: '🏢', category: 'business', required: 'view', resource: 'masters.customer' },
     { to: '/masters/supplier', label: '仕入先マスタ', icon: '🏭', category: 'business', required: 'view', resource: 'masters.supplier' },
+    { to: '/masters/supplier-truck', label: '仕入れ先トラックマスタ', icon: '🚚', category: 'business', required: 'view', resource: 'masters.supplier_truck' },
     { to: '/masters/contact', label: '連絡先マスタ', icon: '📞', category: 'business', required: 'view', resource: 'masters.contact' },
     { to: '/masters/calendar', label: 'カレンダマスタ', icon: '📅', category: 'operations', required: 'view', resource: 'masters.calendar' },
     { to: '/masters/work-pattern', label: '勤務パターン', icon: '⏰', category: 'operations', required: 'view', resource: 'masters.work_pattern' },

@@ -1143,15 +1143,39 @@ def calculate_truck_load(assignments, truck):
         total_weight += qty * unit_weight
 
         container = item.get('container') or {}
-        cw = _to_decimal(container.get('width'))
-        cd = _to_decimal(container.get('depth'))
-        ch = _to_decimal(container.get('height'))
-        capacity = _to_decimal(container.get('capacity'), default='1')
-        if capacity <= 0:
-            capacity = Decimal('1')
-        can_mix = bool(container.get('can_mix', True))
-        stackable = bool(container.get('stackable', True))
-        max_stack = int(container.get('max_stack') or 999)
+        parent = container.get('parent') or {}
+
+        if parent and parent.get('width') and parent.get('depth'):
+            # 親容器あり（例: ポリコン→小アミ）
+            # 子容器数を算出し、親容器数に変換
+            child_capacity = _to_decimal(container.get('capacity'), default='1')
+            if child_capacity <= 0:
+                child_capacity = Decimal('1')
+            child_count = (qty / child_capacity).to_integral_value(rounding=ROUND_CEILING)
+            parent_cap = _to_decimal(parent.get('capacity'), default='1')
+            if parent_cap <= 0:
+                parent_cap = Decimal('1')
+            # 親容器の数量として扱う（qty=子容器数, capacity=親容器あたり収容数）
+            qty = child_count
+            cw = _to_decimal(parent.get('width'))
+            cd = _to_decimal(parent.get('depth'))
+            ch = _to_decimal(parent.get('height'))
+            capacity = parent_cap
+            can_mix = bool(parent.get('can_mix', True))
+            stackable = bool(parent.get('stackable', True))
+            max_stack = int(parent.get('max_stack') or 999)
+            use_container = parent
+        else:
+            cw = _to_decimal(container.get('width'))
+            cd = _to_decimal(container.get('depth'))
+            ch = _to_decimal(container.get('height'))
+            capacity = _to_decimal(container.get('capacity'), default='1')
+            if capacity <= 0:
+                capacity = Decimal('1')
+            can_mix = bool(container.get('can_mix', True))
+            stackable = bool(container.get('stackable', True))
+            max_stack = int(container.get('max_stack') or 999)
+            use_container = container
 
         if not can_mix and product_code:
             non_mix_products.add(product_code)
@@ -1161,11 +1185,11 @@ def calculate_truck_load(assignments, truck):
         key = (
             str(cw), str(cd), str(ch), str(capacity),
             can_mix, stackable, max_stack,
-            str(container.get('name') or ''),
+            str(use_container.get('name') or ''),
         )
         group_qty[key] += qty
         group_meta.setdefault(key, {
-            'container': container,
+            'container': use_container,
             'cw': cw,
             'cd': cd,
             'ch': ch,

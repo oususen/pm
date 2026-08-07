@@ -476,6 +476,19 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
         if not capacity and container:
             capacity = container.capacity
 
+    parent = getattr(container, 'parent_container', None) if container else None
+    parent_dict = None
+    if parent:
+        parent_dict = {
+            'width': getattr(parent, 'width', None),
+            'depth': getattr(parent, 'depth', None),
+            'height': getattr(parent, 'height', None),
+            'capacity': getattr(container, 'parent_capacity', None),
+            'can_mix': getattr(parent, 'can_mix', True),
+            'stackable': getattr(parent, 'stackable', True),
+            'max_stack': getattr(parent, 'max_stack', 999),
+            'orientation': getattr(parent, 'orientation', 'free'),
+        }
     return {
         'product_code': product.product_code if product else '',
         'qty': _to_decimal(qty),
@@ -489,6 +502,7 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
             'stackable': getattr(container, 'stackable', True) if container else True,
             'max_stack': getattr(container, 'max_stack', 999) if container else 999,
             'orientation': getattr(container, 'orientation', 'free') if container else 'free',
+            'parent': parent_dict,
         },
     }
 
