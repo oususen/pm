@@ -1600,6 +1600,20 @@ const planTruckModels = computed(() => {
       item.effectiveFloor = (item.cw * item.cd) / layers
     })
 
+    // 同じ容器なら製品が違っても合算して段積み効率化
+    const containerMerged = new Map()
+    items.forEach((item) => {
+      if (item.cw <= 0 || item.cd <= 0) return
+      const mergeKey = item.key.split('||')[1] || 'default'
+      const existing = containerMerged.get(mergeKey)
+      if (existing) {
+        existing.count += item.count
+      } else {
+        containerMerged.set(mergeKey, { ...item })
+      }
+    })
+    const mergedItems = [...containerMerged.values()]
+
     // パッカー: スロットを荷台内に敷き詰める。
     // 収まらない場合も必ず配置し（allFit=false）、表示時に縮小して全体を荷台内に収める
     const packSlots = (slotList) => {
@@ -1611,15 +1625,13 @@ const planTruckModels = computed(() => {
       let maxX = 0
       let maxY = 0
       slotList.forEach((slot) => {
-        const len = slot.len // 長手方向の長さ（表示座標: 長手=横）
-        const wid = slot.wid // 幅方向の長さ（表示座標: 幅=縦）
-        // 長手方向が溢れたら次レーンへ
+        const len = slot.len
+        const wid = slot.wid
         if (rowX + len > bedD) {
           rowX = 0
           rowY += rowH
           rowH = 0
         }
-        // 幅方向が溢れる場合は超過扱い（allFit=false）にして配置は続行
         if (rowY + wid > bedW) {
           allFit = false
         }
@@ -1628,11 +1640,11 @@ const planTruckModels = computed(() => {
           y: rowY,
           w: len,
           d: wid,
-          layers: slot.item.layers || 1,
+          layers: slot.layers,
           fontSize: Math.max(60, Math.min(len, wid) * 0.4),
           rotated: slot.rotated,
-          color: slot.item.color,
-          label: `${slot.item.productCode}×${formatNumber(slot.item.qty)}`,
+          color: slot.color,
+          label: slot.label,
         })
         rowX += len
         rowH = Math.max(rowH, wid)
@@ -1642,17 +1654,15 @@ const planTruckModels = computed(() => {
       return { placed: result, allFit, maxX, maxY }
     }
 
-    // 各品目のフロアスロット（段積みは1フットプリント、向きは容器マスタ設定を反映）
+    // 各品目のフロアスロット（同じ容器は合算済み。段積みは1フットプリント）
     const allSlots = []
     const typeSlots = []
-    items.forEach((item) => {
-      if (item.cw <= 0 || item.cd <= 0) return
+    mergedItems.forEach((item) => {
       const layers = Math.max(1, item.layers || 1)
-      const floorSlots = Math.ceil(item.count / layers)
+      const totalCount = item.count
+      const floorSlots = Math.ceil(totalCount / layers)
       const capNormal = Math.floor(bedW / item.cw) * Math.floor(bedD / item.cd)
       const capRotated = Math.floor(bedW / item.cd) * Math.floor(bedD / item.cw)
-      // 容器マスタの向き設定（long=容器長手 / short=容器短手 / free=自由=自動判定）
-      // トラック両側＝荷台長手方向（奥行き）。長手=長い辺を長手方向へ、短手=短い辺を長手方向へ
       const orientation = String(item.orientation || 'free')
       let rotated
       if (orientation === 'long') {
@@ -1664,10 +1674,22 @@ const planTruckModels = computed(() => {
       }
       const len = rotated ? item.cw : item.cd
       const wid = rotated ? item.cd : item.cw
+
+      // フットプリントごとの段数を計算（最後のスロットは残り容器数分）
+      let remainingCount = totalCount
       const typeSlot = { item, len, wid, rotated }
       typeSlots.push(typeSlot)
       for (let i = 0; i < floorSlots; i++) {
-        allSlots.push(typeSlot)
+        const slotLayers = Math.min(layers, remainingCount)
+        remainingCount -= slotLayers
+        allSlots.push({
+          len,
+          wid,
+          rotated,
+          layers: slotLayers,
+          color: item.color,
+          label: `${item.containerName || item.productCode}`,
+        })
       }
     })
 
@@ -1682,12 +1704,20 @@ const planTruckModels = computed(() => {
     if (bedW > 0 && bedD > 0 && mainPack.allFit) {
       typeSlots.forEach((typeSlot) => {
         const { item } = typeSlot
+        const extraSlot = {
+          len: typeSlot.len,
+          wid: typeSlot.wid,
+          rotated: typeSlot.rotated,
+          layers: item.layers || 1,
+          color: item.color,
+          label: item.containerName || item.productCode,
+        }
         let extra = 0
         let canAdd = true
         while (canAdd && extra < 500) {
           const testSlots = allSlots.slice()
           for (let i = 0; i <= extra; i++) {
-            testSlots.push(typeSlot)
+            testSlots.push(extraSlot)
           }
           if (packSlots(testSlots).allFit) {
             extra++

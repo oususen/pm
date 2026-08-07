@@ -480,6 +480,7 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
     parent_dict = None
     if parent:
         parent_dict = {
+            'container_code': getattr(parent, 'container_code', None),
             'width': getattr(parent, 'width', None),
             'depth': getattr(parent, 'depth', None),
             'height': getattr(parent, 'height', None),
@@ -494,6 +495,7 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
         'qty': _to_decimal(qty),
         'unit_weight': unit_weight,
         'container': {
+            'container_code': getattr(container, 'container_code', None) if container else None,
             'width': getattr(container, 'width', None) if container else None,
             'depth': getattr(container, 'depth', None) if container else None,
             'height': getattr(container, 'height', None) if container else None,

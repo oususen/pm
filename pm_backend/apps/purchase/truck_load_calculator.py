@@ -958,12 +958,8 @@ def calculate_truck_load(assignments, truck):
         if cw <= 0 or cd <= 0:
             continue
 
-        # ★ 購買版: capacity をキーに含めない
-        key = (
-            str(cw), str(cd), str(ch),
-            can_mix, stackable, max_stack,
-            str(use_container.get('name') or ''),
-        )
+        # 同じ容器コードなら段積み合算
+        key = str(use_container.get('container_code') or '') or str(use_container.get('name') or '') or product_code
         group_container_count[key] += container_count
         products = group_products.setdefault(key, [])
         merged = False

@@ -1182,11 +1182,8 @@ def calculate_truck_load(assignments, truck):
         if cw <= 0 or cd <= 0:
             continue
 
-        key = (
-            str(cw), str(cd), str(ch), str(capacity),
-            can_mix, stackable, max_stack,
-            str(use_container.get('name') or ''),
-        )
+        # 同じ容器コードなら段積み合算
+        key = str(use_container.get('container_code') or '') or str(use_container.get('name') or '') or product_code
         group_qty[key] += qty
         group_meta.setdefault(key, {
             'container': use_container,
