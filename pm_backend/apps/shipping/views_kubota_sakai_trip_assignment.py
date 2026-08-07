@@ -480,7 +480,9 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
     parent_dict = None
     if parent:
         parent_dict = {
+            'id': parent.id,
             'container_code': getattr(parent, 'container_code', None),
+            'name': getattr(parent, 'name', None),
             'width': getattr(parent, 'width', None),
             'depth': getattr(parent, 'depth', None),
             'height': getattr(parent, 'height', None),
@@ -495,7 +497,9 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
         'qty': _to_decimal(qty),
         'unit_weight': unit_weight,
         'container': {
+            'id': container.id if container else None,
             'container_code': getattr(container, 'container_code', None) if container else None,
+            'name': getattr(container, 'name', None) if container else None,
             'width': getattr(container, 'width', None) if container else None,
             'depth': getattr(container, 'depth', None) if container else None,
             'height': getattr(container, 'height', None) if container else None,
@@ -769,6 +773,8 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
             qty = _to_decimal(allocation.get('qty'))
             if truck_id <= 0 or qty <= 0:
                 continue
+            if truck_id in locked_truck_ids:
+                continue
             truck = truck_map.get(truck_id)
             if not truck:
                 continue
@@ -824,7 +830,15 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
             )
 
     if create_allocations:
-        ShippingTripAllocation.objects.bulk_create(create_allocations)
+        # 同じ(trip, source_type, source_id)が重複する場合はqtyを合算
+        dedup = {}
+        for alloc in create_allocations:
+            dedup_key = (alloc.trip_id, alloc.source_type, alloc.source_id)
+            if dedup_key in dedup:
+                dedup[dedup_key].qty += alloc.qty
+            else:
+                dedup[dedup_key] = alloc
+        ShippingTripAllocation.objects.bulk_create(list(dedup.values()), ignore_conflicts=True)
 
     # DueAdjustment 再取込で削除された元明細を参照する共通割付を掃除
     common_allocations = list(
@@ -1204,6 +1218,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     'departure_time': _format_hhmm(t.departure_time),
                     'arrival_time': _format_hhmm(t.arrival_time),
                     'arrival_day_offset': t.arrival_day_offset,
+                    'container_gap': t.container_gap or 0,
                 }
                 for t in trucks
             ],

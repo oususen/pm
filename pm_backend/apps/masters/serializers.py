@@ -168,6 +168,7 @@ class KubotaSakaiTruckSerializer(serializers.ModelSerializer):
             depth=instance.depth,
             height=instance.height,
             max_weight=instance.max_weight,
+            container_gap=instance.container_gap,
         )
 
     def create(self, validated_data):
@@ -212,6 +213,7 @@ class SupplierTruckSerializer(serializers.ModelSerializer):
             depth=instance.depth,
             height=instance.height,
             max_weight=instance.max_weight,
+            container_gap=instance.container_gap,
         )
 
     def create(self, validated_data):

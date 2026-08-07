@@ -1107,6 +1107,7 @@ def calculate_truck_load(assignments, truck):
     bed_depth = _to_decimal(truck.depth)  # 荷台奥行 → 表示上の横（長手）
     bed_height = _to_decimal(truck.height)
     truck_max_weight = _to_decimal(truck.max_weight)
+    container_gap = _to_decimal(getattr(truck, 'container_gap', 0) or 0)
 
     errors = []
     if bed_width <= 0 or bed_depth <= 0:
@@ -1127,9 +1128,10 @@ def calculate_truck_load(assignments, truck):
     type_records = []
     slots = []
 
-    # 同じ容器（同一寸法・入数）の割付を合算してから容器数・段数を計算する。
+    # 同じ容器コードの割付を合算してから容器数・段数を計算する。
     # 別注番や別製品でも同じ容器なら合算し、段積みで効率よく詰められるようにする。
-    group_qty = defaultdict(Decimal)
+    # 容器数は製品ごとに先に算出してから合算する（入数が製品で異なる場合がある）。
+    group_container_count = defaultdict(Decimal)
     group_products = {}
     group_meta = {}
     for item in assignments:
@@ -1146,8 +1148,6 @@ def calculate_truck_load(assignments, truck):
         parent = container.get('parent') or {}
 
         if parent and parent.get('width') and parent.get('depth'):
-            # 親容器あり（例: ポリコン→小アミ）
-            # 子容器数を算出し、親容器数に変換
             child_capacity = _to_decimal(container.get('capacity'), default='1')
             if child_capacity <= 0:
                 child_capacity = Decimal('1')
@@ -1155,7 +1155,6 @@ def calculate_truck_load(assignments, truck):
             parent_cap = _to_decimal(parent.get('capacity'), default='1')
             if parent_cap <= 0:
                 parent_cap = Decimal('1')
-            # 親容器の数量として扱う（qty=子容器数, capacity=親容器あたり収容数）
             qty = child_count
             cw = _to_decimal(parent.get('width'))
             cd = _to_decimal(parent.get('depth'))
@@ -1182,41 +1181,42 @@ def calculate_truck_load(assignments, truck):
         if cw <= 0 or cd <= 0:
             continue
 
+        # 製品ごとの容器数を先に算出（入数が製品で異なるため）
+        item_container_count = (qty / capacity).to_integral_value(rounding=ROUND_CEILING)
+
         # 同じ容器コードなら段積み合算
         key = str(use_container.get('container_code') or '') or str(use_container.get('name') or '') or product_code
-        group_qty[key] += qty
+        group_container_count[key] += item_container_count
         group_meta.setdefault(key, {
             'container': use_container,
             'cw': cw,
             'cd': cd,
             'ch': ch,
-            'capacity': capacity,
             'can_mix': can_mix,
             'stackable': stackable,
             'max_stack': max_stack,
         })
-        # グループ内の製品別数量（同じ製品は合算して保持）
+        # グループ内の製品別: (raw_qty, container_count)
         products = group_products.setdefault(key, [])
         merged = False
-        for idx, (pcode, pqty) in enumerate(products):
+        for idx, (pcode, pqty, pcnt) in enumerate(products):
             if pcode == product_code:
-                products[idx] = (pcode, pqty + qty)
+                new_cnt = (Decimal(str(pqty + qty)) / capacity).to_integral_value(rounding=ROUND_CEILING)
+                products[idx] = (pcode, pqty + qty, new_cnt)
                 merged = True
                 break
         if not merged:
-            products.append((product_code, qty))
+            products.append((product_code, qty, item_container_count))
 
     for key, meta in group_meta.items():
-        total_qty = group_qty[key]
         container = meta['container']
         cw = meta['cw']
         cd = meta['cd']
         ch = meta['ch']
-        capacity = meta['capacity']
         stackable = meta['stackable']
         max_stack = meta['max_stack']
 
-        container_count = (total_qty / capacity).to_integral_value(rounding=ROUND_CEILING)
+        container_count = group_container_count[key]
         # 段数（現在のルール: min(トラック高さ÷容器高さ, 最大段数)）
         layers = Decimal('1')
         if stackable and ch > 0 and bed_height > 0:
@@ -1262,45 +1262,44 @@ def calculate_truck_load(assignments, truck):
             'lock_rotation': rotation_locked,
         })
 
-        # フットプリントへの製品割当（同じ容器に複数製品が混在する場合も、ユニットを順に充填）
-        product_qty_map = {pcode: Decimal(str(pqty)) for pcode, pqty in group_products_list}
-        unit_remaining = dict(product_qty_map)
-        units_per_footprint = int(layers) * int(capacity)
+        # フットプリントへの製品割当（容器数ベースで製品を充填）
+        container_remaining = {pcode: int(pcnt) for pcode, _pqty, pcnt in group_products_list}
+        raw_qty_map = {pcode: pqty for pcode, pqty, _pcnt in group_products_list}
         footprint_slots = []
         remaining_container_count = int(container_count)
         for _ in range(int(floor_slots)):
             first = None
-            take = units_per_footprint
-            used_qty = Decimal('0')
-            for pcode in list(unit_remaining.keys()):
-                if unit_remaining[pcode] <= 0:
+            take = int(layers)
+            used_containers = 0
+            for pcode in list(container_remaining.keys()):
+                if container_remaining[pcode] <= 0:
                     continue
                 if first is None:
                     first = pcode
-                used = min(take, unit_remaining[pcode])
-                unit_remaining[pcode] -= used
+                used = min(take, container_remaining[pcode])
+                container_remaining[pcode] -= used
                 take -= used
-                used_qty += used
+                used_containers += used
                 if take <= 0:
                     break
             slot_layers = max(1, min(int(layers), remaining_container_count))
             remaining_container_count = max(0, remaining_container_count - slot_layers)
             footprint_slots.append({
                 'product_code': first or '',
-                'qty': used_qty,
+                'qty': raw_qty_map.get(first, Decimal('0')),
                 'layers': slot_layers,
             })
         if not footprint_slots and group_products_list:
             footprint_slots = [{
                 'product_code': group_products_list[0][0],
-                'qty': total_qty,
+                'qty': raw_qty_map.get(group_products_list[0][0], Decimal('0')),
                 'layers': max(1, min(int(layers), int(container_count) or 1)),
             }]
 
         for slot in footprint_slots:
             slots.append({
                 'product_code': slot['product_code'],
-                'qty': slot['qty'] if slot['qty'] > 0 else total_qty,
+                'qty': slot['qty'],
                 'container_name': container_name,
                 'layers': slot['layers'],
                 'length': length,
@@ -1309,8 +1308,29 @@ def calculate_truck_load(assignments, truck):
                 'lock_rotation': rotation_locked,
             })
 
+    # 容器間隔: スロット寸法にgap加算 + パッキングエリアを縁からgap分縮小
+    pack_bed_depth = bed_depth
+    pack_bed_width = bed_width
+    if container_gap > 0:
+        for slot in slots:
+            slot['length'] = _to_decimal(slot['length']) + container_gap
+            slot['width'] = _to_decimal(slot['width']) + container_gap
+        for rec in type_records:
+            rec['length'] = _to_decimal(rec['length']) + container_gap
+            rec['width'] = _to_decimal(rec['width']) + container_gap
+        pack_bed_depth = bed_depth - container_gap
+        pack_bed_width = bed_width - container_gap
+
     # パッキング（収まらないものも配置し、can_fit 判定）
-    placed, can_fit, _, _ = _pack_slots(bed_depth, bed_width, slots)
+    placed, can_fit, _, _ = _pack_slots(pack_bed_depth, pack_bed_width, slots)
+
+    # 配置結果: 縁gap分オフセット + スロット寸法を実寸に戻す
+    if container_gap > 0:
+        for p in placed:
+            p['x'] = _to_decimal(p['x']) + container_gap
+            p['y'] = _to_decimal(p['y']) + container_gap
+            p['w'] = _to_decimal(p['w']) - container_gap
+            p['d'] = _to_decimal(p['d']) - container_gap
 
     # 占有率（実フットプリント面積ベース。超過時は100%超）
     bed_area = bed_width * bed_depth
@@ -1330,7 +1350,7 @@ def calculate_truck_load(assignments, truck):
     # 残りスペース（収まる場合のみ、幾何学的に判定）
     remaining = []
     if can_fit:
-        remaining = _calc_remaining(bed_depth, bed_width, slots, type_records)
+        remaining = _calc_remaining(pack_bed_depth, pack_bed_width, slots, type_records)
 
     return {
         'can_fit': can_fit,

@@ -27,6 +27,7 @@ def _build_truck_load_assignment(product, qty_value):
     parent_dict = None
     if parent:
         parent_dict = {
+            'id': parent.id,
             'container_code': getattr(parent, 'container_code', None),
             'width': getattr(parent, 'width', None),
             'depth': getattr(parent, 'depth', None),
@@ -43,6 +44,7 @@ def _build_truck_load_assignment(product, qty_value):
         'qty': qty_value,
         'unit_weight': Decimal('0'),
         'container': {
+            'id': container.id,
             'container_code': getattr(container, 'container_code', None),
             'width': getattr(container, 'width', None),
             'depth': getattr(container, 'depth', None),

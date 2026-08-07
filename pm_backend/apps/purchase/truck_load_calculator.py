@@ -890,6 +890,7 @@ def calculate_truck_load(assignments, truck):
     bed_depth = _to_decimal(truck.depth)
     bed_height = _to_decimal(truck.height)
     truck_max_weight = _to_decimal(truck.max_weight)
+    container_gap = _to_decimal(getattr(truck, 'container_gap', 0) or 0)
 
     errors = []
     if bed_width <= 0 or bed_depth <= 0:
@@ -1081,7 +1082,29 @@ def calculate_truck_load(assignments, truck):
             })
 
     total_footprints = len(slots)
-    placed, can_fit, _, _ = _pack_slots(bed_depth, bed_width, slots)
+
+    # 容器間隔: スロット寸法にgap加算 + パッキングエリアを縁からgap分縮小
+    pack_bed_depth = bed_depth
+    pack_bed_width = bed_width
+    if container_gap > 0:
+        for slot in slots:
+            slot['length'] = _to_decimal(slot['length']) + container_gap
+            slot['width'] = _to_decimal(slot['width']) + container_gap
+        for rec in type_records:
+            rec['length'] = _to_decimal(rec['length']) + container_gap
+            rec['width'] = _to_decimal(rec['width']) + container_gap
+        pack_bed_depth = bed_depth - container_gap
+        pack_bed_width = bed_width - container_gap
+
+    placed, can_fit, _, _ = _pack_slots(pack_bed_depth, pack_bed_width, slots)
+
+    # 配置結果: 縁gap分オフセット + スロット寸法を実寸に戻す
+    if container_gap > 0:
+        for p in placed:
+            p['x'] = _to_decimal(p['x']) + container_gap
+            p['y'] = _to_decimal(p['y']) + container_gap
+            p['w'] = _to_decimal(p['w']) - container_gap
+            p['d'] = _to_decimal(p['d']) - container_gap
 
     bed_area = bed_width * bed_depth
     # 占有率はin-bed分のみ（オーバーフロー分を除外）
@@ -1111,7 +1134,7 @@ def calculate_truck_load(assignments, truck):
 
     remaining = []
     if can_fit:
-        remaining = _calc_remaining(bed_depth, bed_width, slots, type_records)
+        remaining = _calc_remaining(pack_bed_depth, pack_bed_width, slots, type_records)
 
     return {
         'can_fit': can_fit,

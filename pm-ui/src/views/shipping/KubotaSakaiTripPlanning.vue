@@ -1485,6 +1485,7 @@ const planTruckModels = computed(() => {
     const bedW = parseNumber(truck.width)
     const bedD = parseNumber(truck.depth)
     const bedH = parseNumber(truck.height)
+    const gap = parseNumber(truck.container_gap)
 
     // ---- 実出発日ベースの積載判定結果を優先 → 納期日(occupancyDateKey)ベース → 保存済みgrid ----
     const departureSummary = departureSummaries.find((s) => Number(s.truck_id) === truckId)
@@ -1614,8 +1615,9 @@ const planTruckModels = computed(() => {
     })
     const mergedItems = [...containerMerged.values()]
 
-    // パッカー: スロットを荷台内に敷き詰める。
-    // 収まらない場合も必ず配置し（allFit=false）、表示時に縮小して全体を荷台内に収める
+    // パッカー: スロットを荷台内に敷き詰める（縁gap分縮小したエリアで判定）
+    const packBedD = bedD - gap
+    const packBedW = bedW - gap
     const packSlots = (slotList) => {
       const result = []
       let rowX = 0
@@ -1627,12 +1629,12 @@ const planTruckModels = computed(() => {
       slotList.forEach((slot) => {
         const len = slot.len
         const wid = slot.wid
-        if (rowX + len > bedD) {
+        if (rowX + len > packBedD) {
           rowX = 0
           rowY += rowH
           rowH = 0
         }
-        if (rowY + wid > bedW) {
+        if (rowY + wid > packBedW) {
           allFit = false
         }
         result.push({
@@ -1676,15 +1678,18 @@ const planTruckModels = computed(() => {
       const wid = rotated ? item.cd : item.cw
 
       // フットプリントごとの段数を計算（最後のスロットは残り容器数分）
+      // 容器間隔: パッキング用にgap加算、表示時は実寸
+      const packLen = len + gap
+      const packWid = wid + gap
       let remainingCount = totalCount
-      const typeSlot = { item, len, wid, rotated }
+      const typeSlot = { item, len: packLen, wid: packWid, rotated }
       typeSlots.push(typeSlot)
       for (let i = 0; i < floorSlots; i++) {
         const slotLayers = Math.min(layers, remainingCount)
         remainingCount -= slotLayers
         allSlots.push({
-          len,
-          wid,
+          len: packLen,
+          wid: packWid,
           rotated,
           layers: slotLayers,
           color: item.color,
@@ -1694,7 +1699,7 @@ const planTruckModels = computed(() => {
     })
 
     const mainPack = packSlots(allSlots)
-    const placed = mainPack.placed
+    const placed = mainPack.placed.map((p) => ({ ...p, x: p.x + gap, y: p.y + gap, w: p.w - gap, d: p.d - gap }))
     // 実際に荷台へ収まっているか（積載可否の判定。収まらなければ積載超過）
     const overloaded = !mainPack.allFit
 

@@ -10,7 +10,7 @@
 
     <div class="page-content">
       <div class="sync-note">
-        同一車両キーを持つ便は、荷台幅・荷台奥行・荷台高さ・最大積載重量を同一値として扱います。
+        同一車両キーを持つ便は、荷台幅・荷台奥行・荷台高さ・最大積載重量・容器間隔を同一値として扱います。
         いずれか1便を更新すると、同じキーの他便にも同じ値が同期されます。
       </div>
       <table class="data-table">
@@ -25,6 +25,7 @@
             <th>荷台奥行(mm)</th>
             <th>荷台高さ(mm)</th>
             <th>最大積載(kg)</th>
+            <th>容器間隔(mm)</th>
             <th>出発時刻</th>
             <th>到着時刻</th>
             <th>到着日</th>
@@ -45,6 +46,7 @@
             <td>{{ truck.depth }}</td>
             <td>{{ truck.height }}</td>
             <td>{{ truck.max_weight }}</td>
+            <td>{{ truck.container_gap || 0 }}</td>
             <td>{{ formatTime(truck.departure_time) }}</td>
             <td>{{ formatTime(truck.arrival_time) }}</td>
             <td>{{ truck.arrival_day_offset === 0 ? '当日' : `翌${truck.arrival_day_offset}日` }}</td>
@@ -103,9 +105,15 @@
               <input type="number" min="0" v-model.number="formData.height" required :disabled="!canEdit" />
             </div>
           </div>
-          <div class="form-group">
-            <label>最大積載重量(kg) *</label>
-            <input type="number" min="0" v-model.number="formData.max_weight" required :disabled="!canEdit" />
+          <div class="form-row">
+            <div class="form-group">
+              <label>最大積載重量(kg) *</label>
+              <input type="number" min="0" v-model.number="formData.max_weight" required :disabled="!canEdit" />
+            </div>
+            <div class="form-group">
+              <label>容器間隔(mm)</label>
+              <input type="number" min="0" v-model.number="formData.container_gap" :disabled="!canEdit" />
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -190,6 +198,7 @@ function createEmptyForm() {
     depth: 9000,
     height: 2400,
     max_weight: 10000,
+    container_gap: 0,
     departure_time: '09:00',
     arrival_time: '15:00',
     arrival_day_offset: 0,
@@ -260,6 +269,7 @@ const saveTruck = async () => {
     depth: Number(formData.value.depth || 0),
     height: Number(formData.value.height || 0),
     max_weight: Number(formData.value.max_weight || 0),
+    container_gap: Number(formData.value.container_gap || 0),
     arrival_day_offset: Number(formData.value.arrival_day_offset || 0),
     display_order: Number(formData.value.display_order || 0),
     notes: formData.value.notes || null,
