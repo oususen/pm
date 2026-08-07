@@ -100,3 +100,6 @@ pm_backend/firebase-service-account-*.json
 transfer_log.txt
 仕様書/ガンチャート仕様書.md
 *.sql
+
+# PowerPoint files
+*.pptx

@@ -1276,36 +1276,14 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 errors.append({'due_adjustment_id': adj_id, 'detail': 'allocations は配列で指定してください。'})
                 continue
 
-            locked_existing = {
-                int(item.id): item
-                for item in existing_assignments_by_due.get(adj_id, [])
-                if int(item.truck_id or 0) in locked_truck_ids
-            }
-            seen_locked_ids = set()
             normalized_allocations = []
             row_total = Decimal('0')
             for al in allocations:
-                allocation_id = int(al.get('id') or 0)
                 truck_id = int(al.get('truck_id') or 0)
                 qty = _to_decimal(al.get('qty'))
                 if qty <= 0:
                     continue
                 if truck_id in locked_truck_status_map:
-                    locked_assignment = locked_existing.get(allocation_id)
-                    container_id = None
-                    try:
-                        container_id = int(al.get('container_id') or 0) or None
-                    except (TypeError, ValueError):
-                        pass
-                    if (
-                        not locked_assignment
-                        or int(locked_assignment.truck_id or 0) != truck_id
-                        or _to_decimal(locked_assignment.qty) != qty
-                        or int(locked_assignment.container_id or 0) != int(container_id or 0)
-                    ):
-                        errors.append({'due_adjustment_id': adj_id, 'detail': f'出発済/完了の便は編集できません: {truck_id}'})
-                        continue
-                    seen_locked_ids.add(allocation_id)
                     continue
                 truck = truck_map.get(truck_id)
                 if not truck:
@@ -1318,10 +1296,6 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     pass
                 normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
                 row_total += qty
-
-            if set(locked_existing.keys()) - seen_locked_ids:
-                errors.append({'due_adjustment_id': adj_id, 'detail': '出発済/完了の便に割り付いた行は削除できません。'})
-                continue
 
             if adj_id not in normalized_map:
                 normalized_map[adj_id] = {'adj_id': adj_id, 'allocations': [], 'total': Decimal('0')}
