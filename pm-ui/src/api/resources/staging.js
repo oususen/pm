@@ -51,4 +51,9 @@ export const createStagingAPI = (client) => ({
       responseType: 'arraybuffer',
     })
   },
+  downloadNaijiPptxReport(payload) {
+    return client.post('/stg-order-daily/naiji_pptx_report/', payload, {
+      responseType: 'arraybuffer',
+    })
+  },
 })

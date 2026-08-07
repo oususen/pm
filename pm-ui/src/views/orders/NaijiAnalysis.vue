@@ -576,6 +576,13 @@
           >
             {{ exporting ? 'Excel出力中...' : '📥 Excelレポート出力' }}
           </button>
+          <button
+            class="btn-export btn-export-pptx"
+            :disabled="exportingPptx || selectedCodes.length === 0 || !selectedCustomerId"
+            @click="exportPptx"
+          >
+            {{ exportingPptx ? 'PPTX出力中...' : '📊 PPTXレポート出力' }}
+          </button>
           <span v-if="rErrorMsg" class="error-msg">{{ rErrorMsg }}</span>
         </div>
       </div>
@@ -951,6 +958,7 @@ const selectedCodes = ref([])
 const rStartDate = ref('')
 const rEndDate = ref('')
 const exporting = ref(false)
+const exportingPptx = ref(false)
 const rErrorMsg = ref('')
 const previewRows = ref([])
 
@@ -1037,6 +1045,35 @@ const exportExcel = async () => {
     rErrorMsg.value = e?.response?.data?.error || 'エラーが発生しました'
   } finally {
     exporting.value = false
+  }
+}
+
+const exportPptx = async () => {
+  if (selectedCodes.value.length === 0 || !selectedCustomerId.value) return
+  exportingPptx.value = true
+  rErrorMsg.value = ''
+  try {
+    const payload = {
+      customer_id: selectedCustomerId.value,
+      entries: selectedCodes.value,
+      start_date: rStartDate.value || undefined,
+      end_date: rEndDate.value || undefined,
+    }
+    const res = await api.staging.downloadNaijiPptxReport(payload)
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const period = [rStartDate.value, rEndDate.value].filter(Boolean).join('_')
+    a.download = `内示分析レポート_${period || '全期間'}.pptx`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    rErrorMsg.value = e?.response?.data?.error || 'エラーが発生しました'
+  } finally {
+    exportingPptx.value = false
   }
 }
 
@@ -1255,6 +1292,8 @@ onUnmounted(() => {
 .btn-export { padding: 8px 24px; background: #284b8f; color: #fff; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold; }
 .btn-export:hover:not(:disabled) { background: #1a3a7a; }
 .btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-export-pptx { background: #c0392b; margin-left: 8px; }
+.btn-export-pptx:hover:not(:disabled) { background: #a93226; }
 
 .period-summary { background: #fff; border: 2px solid #1a5fb4; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
 .period-summary .section-title { margin-bottom: 12px; }

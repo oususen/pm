@@ -2142,6 +2142,47 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
         return response
 
+    @action(detail=False, methods=['post'])
+    def naiji_pptx_report(self, request):
+        """複数製品の内示分析をPPTXレポート（課題提起資料）で返す"""
+        from datetime import datetime
+        from django.http import HttpResponse
+        from urllib.parse import quote
+        from orders.core.services.naiji_analysis_service import compute_naiji_report_data
+        from orders.core.services.naiji_report_pptx import generate_naiji_pptx_report
+
+        customer_id = request.data.get('customer_id')
+        entries_list = request.data.get('entries') or []
+        start_date_str = request.data.get('start_date')
+        end_date_str = request.data.get('end_date')
+
+        if not customer_id:
+            return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        if not entries_list:
+            return Response({'error': 'entries は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+        except ValueError:
+            return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product_entries = []
+        for entry in entries_list:
+            pc, st = (entry.split(':', 1) + [''])[:2]
+            product_entries.append({'product_code': pc.strip(), 'ship_to': st.strip()})
+
+        data = compute_naiji_report_data(int(customer_id), product_entries, start_date, end_date)
+        buf = generate_naiji_pptx_report(data)
+
+        filename = f'{data["customer_name"]}_内示分析レポート.pptx'
+        response = HttpResponse(
+            buf.read(),
+            content_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        )
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
+
 
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import get_user_model

@@ -603,6 +603,293 @@ def compute_naiji_summary(customer_id, product_code, start_date=None, end_date=N
 
 
 # ---------------------------------------------------------------------------
+# PPTXレポート用データ計算
+# ---------------------------------------------------------------------------
+def _business_days_before(wdc, base_date, n):
+    """base_date から n 営業日前の日付を返す"""
+    cur = base_date
+    count = 0
+    while count < n:
+        cur -= timedelta(days=1)
+        if wdc.is_working_day(cur):
+            count += 1
+    return cur
+
+
+def _compute_volatility(all_due_dates, snapshots_map, ordered_files, snapshot_dates):
+    """納期ごとの内示変動回数（前回スナップショットからqtyが変わった回数）"""
+    change_counts = {}
+    for ds in all_due_dates:
+        prev_qty = None
+        count = 0
+        for sf in ordered_files:
+            if ds not in snapshots_map[sf]:
+                continue
+            qty = snapshots_map[sf][ds]
+            if prev_qty is not None and qty != prev_qty:
+                count += 1
+            prev_qty = qty
+        change_counts[ds] = count
+
+    counts = list(change_counts.values())
+    if not counts:
+        return {'change_counts': {}, 'avg_change_count': 0.0, 'max_change_count': 0, 'example': None}
+
+    avg_count = round(sum(counts) / len(counts), 1)
+    max_count = max(counts)
+    example_ds = max(change_counts, key=lambda d: change_counts[d])
+    series = [
+        {'snapshot_date': snapshot_dates[sf].date().isoformat(), 'qty': snapshots_map[sf][example_ds]}
+        for sf in ordered_files if example_ds in snapshots_map[sf]
+    ]
+    return {
+        'change_counts': change_counts,
+        'avg_change_count': avg_count,
+        'max_change_count': max_count,
+        'example': {'due_date': example_ds, 'change_count': change_counts[example_ds], 'series': series},
+    }
+
+
+def _compute_last_minute_changes(all_due_dates, snapshots_map, ordered_files, snapshot_dates,
+                                  firm_quantities, wdc):
+    """納期5営業日前時点の内示と確定数量の乖離イベントを集計
+
+    差(diff) = 確定数量 - 5営業日前内示。正なら確定が内示より多い（急増＝欠品リスク）、
+    負なら確定が内示より少ない（急減＝過剰在庫リスク）。
+    """
+    total_events = 0
+    large_events = 0
+    divergences = []
+    for ds in all_due_dates:
+        firm_qty = firm_quantities.get(ds)
+        if firm_qty is None:
+            continue
+        due_date_obj = date.fromisoformat(ds)
+        target_date = _business_days_before(wdc, due_date_obj, 5)
+
+        candidate = None
+        for sf in ordered_files:
+            if ds not in snapshots_map[sf]:
+                continue
+            snap_date = snapshot_dates[sf].date()
+            if snap_date <= target_date:
+                candidate = (snap_date, snapshots_map[sf][ds])
+        if candidate is None:
+            continue
+        snap_date, qty = candidate
+        if qty == firm_qty:
+            continue
+
+        total_events += 1
+        diff = round(firm_qty - qty, 1)
+        pct = round(diff / firm_qty * 100, 1) if firm_qty else None
+        is_large = pct is not None and abs(pct) >= 20
+        if is_large:
+            large_events += 1
+        divergences.append({
+            'due_date': ds,
+            'snapshot_date': snap_date.isoformat(),
+            'snapshot_qty': qty,
+            'firm_qty': firm_qty,
+            'diff': diff,
+            'pct': pct,
+            'direction': 'shortage' if diff > 0 else 'overstock',
+        })
+
+    return {
+        'total_events': total_events,
+        'large_events': large_events,
+        'large_rate': round(large_events / total_events * 100, 1) if total_events else None,
+        'divergences': divergences,
+    }
+
+
+def _compute_firm_variability(all_due_dates, firm_quantities):
+    """確定数量のばらつき統計（平均/σ/CV/レンジ）と連続納期間の日間差"""
+    sorted_ds = sorted([ds for ds in all_due_dates if ds in firm_quantities])
+    values = [firm_quantities[ds] for ds in sorted_ds]
+    if not values:
+        return None
+
+    mean_val = round(sum(values) / len(values), 1)
+    std_val = round(statistics.stdev(values), 1) if len(values) >= 2 else 0.0
+    cv = round(std_val / mean_val * 100, 1) if mean_val else 0.0
+    min_val = min(values)
+    max_val = max(values)
+
+    diffs = [abs(firm_quantities[cur] - firm_quantities[prev]) for prev, cur in zip(sorted_ds, sorted_ds[1:])]
+    diff_mean = round(sum(diffs) / len(diffs), 1) if diffs else None
+    diff_max = round(max(diffs), 1) if diffs else None
+
+    return {
+        'count': len(values),
+        'mean': mean_val,
+        'std_dev': std_val,
+        'cv': cv,
+        'min': min_val,
+        'max': max_val,
+        'range': round(max_val - min_val, 1),
+        'diff_mean': diff_mean,
+        'diff_max': diff_max,
+        'series': [{'due_date': ds, 'qty': firm_quantities[ds]} for ds in sorted_ds],
+    }
+
+
+def compute_naiji_report_data(customer_id, product_entries, start_date=None, end_date=None):
+    """PPTXレポート用データを計算
+
+    product_entries: [{'product_code': str, 'ship_to': str}, ...]
+    既存の収束/予測誤差/欠品リスク/安全在庫（_compute_period_summary）に加え、
+    変動回数・確定直前乖離・確定数量ばらつきを製品ごとに計算して返す。
+    """
+    customer = Customer.objects.select_related('calendar').filter(id=customer_id).first()
+    customer_name = customer.customer_name if customer else ''
+    cal = _get_customer_calendar(customer)
+    wdc = WorkingDayCalculator(cal)
+    customer_code = customer.customer_code if customer else ''
+
+    products = []
+    all_snapshot_dates = set()
+    all_firm_due_dates = set()
+
+    for entry in product_entries:
+        pc = entry['product_code']
+        st = (entry.get('ship_to') or '').strip()
+
+        product_name = ''
+        first = (
+            StgOrderDaily.objects
+            .filter(customer_id=customer_id, product_code=pc, order_type='FORECAST')
+            .values('product_name')
+            .first()
+        )
+        if first:
+            product_name = first['product_name'] or ''
+
+        qs = (
+            StgOrderDaily.objects
+            .filter(customer_id=customer_id, product_code=pc, order_type='FORECAST')
+            .order_by('created_at', 'id')
+        )
+        if st:
+            qs = qs.filter(ship_to_code=st)
+
+        snapshots_map = {}
+        snapshot_dates = {}
+        for row in qs:
+            sf = row.source_file
+            if not sf:
+                continue
+            ds = row.due_date.isoformat()
+            if start_date and row.due_date < start_date:
+                continue
+            if end_date and row.due_date > end_date:
+                continue
+            if sf not in snapshots_map:
+                snapshots_map[sf] = {}
+                snapshot_dates[sf] = row.created_at
+            qty = float(row.quantity or 0)
+            snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
+
+        all_due_dates = sorted({
+            ds for qtys in snapshots_map.values() for ds in qtys.keys()
+            if wdc.is_working_day(date.fromisoformat(ds))
+        })
+        ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
+        for sf in ordered_files:
+            all_snapshot_dates.add(snapshot_dates[sf].date())
+
+        firm_qs = OrderLine.objects.filter(
+            order__order_type='FIRM', order__status='OPEN',
+            order__customer_id=customer_id, product_code=pc,
+        )
+        if st:
+            firm_qs = firm_qs.filter(ship_to_code=st)
+        if start_date:
+            firm_qs = firm_qs.filter(due_date__gte=start_date)
+        if end_date:
+            firm_qs = firm_qs.filter(due_date__lte=end_date)
+
+        firm_quantities = {}
+        for row in firm_qs.values('due_date').annotate(total_qty=Sum('quantity')):
+            firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
+            all_firm_due_dates.add(row['due_date'])
+
+        firm_dates = {}
+        for line in firm_qs.select_related('order').only('due_date', 'order__order_no', 'order__order_date'):
+            issue_date_obj = _extract_firm_issue_date(line.order.order_no, customer_code)
+            if issue_date_obj is None:
+                issue_date_obj = line.order.order_date
+            if issue_date_obj is None:
+                continue
+            ds = line.due_date.isoformat()
+            if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
+                firm_dates[ds] = issue_date_obj.isoformat()
+
+        summary = _compute_period_summary(
+            all_due_dates, snapshots_map, ordered_files, snapshot_dates,
+            firm_quantities, firm_dates, wdc,
+        )
+        volatility = _compute_volatility(all_due_dates, snapshots_map, ordered_files, snapshot_dates)
+        last_minute = _compute_last_minute_changes(
+            all_due_dates, snapshots_map, ordered_files, snapshot_dates, firm_quantities, wdc,
+        )
+        firm_variability = _compute_firm_variability(all_due_dates, firm_quantities)
+
+        products.append({
+            'product_code': pc,
+            'ship_to': st,
+            'product_name': product_name,
+            'snapshot_count': len(ordered_files),
+            'summary': summary,
+            'volatility': volatility,
+            'last_minute': last_minute,
+            'firm_variability': firm_variability,
+        })
+
+    # --- 概要カード用の集計 ---
+    within7_pcts = [
+        p['summary']['stable_days_dist']['within_7_pct']
+        for p in products if p['summary'].get('stable_days_dist')
+    ]
+    avg_change_counts = [p['volatility']['avg_change_count'] for p in products if p['volatility']['example']]
+    max_diff_pcts = [
+        abs(d['pct']) for p in products for d in p['last_minute']['divergences'] if d['pct'] is not None
+    ]
+    cvs = [p['firm_variability']['cv'] for p in products if p['firm_variability']]
+    overstock_events = sum(1 for p in products for d in p['last_minute']['divergences'] if d['diff'] < 0)
+    shortage_events = sum(1 for p in products for d in p['last_minute']['divergences'] if d['diff'] > 0)
+
+    overview = {
+        'within7_pct_min': round(min(within7_pcts), 1) if within7_pcts else None,
+        'within7_pct_max': round(max(within7_pcts), 1) if within7_pcts else None,
+        'avg_change_count_min': round(min(avg_change_counts), 1) if avg_change_counts else None,
+        'avg_change_count_max': round(max(avg_change_counts), 1) if avg_change_counts else None,
+        'max_divergence_pct': round(max(max_diff_pcts), 0) if max_diff_pcts else None,
+        'cv_min': round(min(cvs), 1) if cvs else None,
+        'cv_max': round(max(cvs), 1) if cvs else None,
+        'overstock_events': overstock_events,
+        'shortage_events': shortage_events,
+    }
+
+    firm_due_counts = [p['summary']['dates_with_firm'] for p in products if p['summary']['dates_with_firm']]
+
+    return {
+        'customer_id': customer_id,
+        'customer_name': customer_name,
+        'products': products,
+        'overview': overview,
+        'snapshot_count': len(all_snapshot_dates),
+        'first_snapshot_date': min(all_snapshot_dates).isoformat() if all_snapshot_dates else None,
+        'last_snapshot_date': max(all_snapshot_dates).isoformat() if all_snapshot_dates else None,
+        'firm_due_min': min(firm_due_counts) if firm_due_counts else None,
+        'firm_due_max': max(firm_due_counts) if firm_due_counts else None,
+        'first_firm_date': min(all_firm_due_dates).isoformat() if all_firm_due_dates else None,
+        'last_firm_date': max(all_firm_due_dates).isoformat() if all_firm_due_dates else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Excelレポート生成
 # ---------------------------------------------------------------------------
 def generate_batch_report_excel(customer_id, entries, start_date=None, end_date=None):
