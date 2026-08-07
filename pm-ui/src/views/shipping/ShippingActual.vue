@@ -11,6 +11,14 @@
         <input v-model="filters.shipToCode" type="text" placeholder="納入先で検索" />
         <input v-model="filters.startDate" type="date" />
         <input v-model="filters.endDate" type="date" />
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">お気に入り選択</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">
+            {{ fav.name }}
+          </option>
+        </select>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+        <button class="btn-secondary" title="お気に入り登録" @click="saveFavorite" :disabled="loading">★</button>
         <button @click="load" :disabled="loading">検索</button>
         <button class="btn-secondary" @click="exportExcel" :disabled="loading || exporting">
           {{ exporting ? '出力中...' : 'Excel出力' }}
@@ -37,6 +45,7 @@
                 <th>便番号</th>
                 <th>出荷者</th>
                 <th>出発時刻</th>
+                <th>到着日</th>
                 <th>注番</th>
                 <th>備考</th>
                 <th>操作</th>
@@ -54,6 +63,7 @@
                 <td>{{ item.trip_code || '-' }}</td>
                 <td>{{ item.departed_by_name || '-' }}</td>
                 <td>{{ item.departure_time_actual || '-' }}</td>
+                <td>{{ formatDateOnly(item.departure_date) }}</td>
                 <td>{{ formatSourceOrderNos(item.source_order_nos) }}</td>
                 <td>{{ displayRemark(item.remark) }}</td>
                 <td class="actions">
@@ -61,7 +71,7 @@
                 </td>
               </tr>
               <tr v-if="!shipmentActuals.length">
-                <td colspan="13" class="no-data">データがありません</td>
+                <td colspan="14" class="no-data">データがありません</td>
               </tr>
             </tbody>
           </table>
@@ -122,6 +132,10 @@ const error = ref("");
 const shipmentActuals = ref([]);
 const historyRecords = ref([]);
 const historyTarget = ref(null);
+const favorites = ref([]);
+const selectedFavoriteId = ref("");
+const favoriteName = ref("");
+const FAVORITE_SCREEN_KEY = "shipping.actual";
 
 const today = new Date();
 const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -130,7 +144,7 @@ const filters = reactive({
   productCode: "",
   customerCode: "",
   shipToCode: "",
-  startDate: formatDate(defaultStart),
+  startDate: formatDate(today),
   endDate: formatDate(today),
 });
 
@@ -157,6 +171,15 @@ function formatQty(value) {
   const num = Number(value || 0);
   if (!num) return "";
   return num.toLocaleString();
+}
+
+function formatDateOnly(value) {
+  if (!value) return "-";
+  const text = String(value).trim();
+  if (!text) return "-";
+  if (text.includes("T")) return text.split("T")[0];
+  if (text.includes(" ")) return text.split(" ")[0];
+  return text;
 }
 
 function displayCustomer(item) {
@@ -196,6 +219,68 @@ function buildParams() {
     ship_to_code: filters.shipToCode,
     page_size: 10000,
   };
+}
+
+function toFavoritePayload() {
+  return {
+    productCode: filters.productCode,
+    customerCode: filters.customerCode,
+    shipToCode: filters.shipToCode,
+  };
+}
+
+function applyFavoritePayload(payload) {
+  filters.productCode = String(payload?.productCode || "");
+  filters.customerCode = String(payload?.customerCode || "");
+  filters.shipToCode = String(payload?.shipToCode || "");
+}
+
+async function loadFavorites() {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 });
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || [];
+  } catch (e) {
+    console.error("お気に入り取得失敗:", e);
+  }
+}
+
+function applyFavorite() {
+  const id = Number(selectedFavoriteId.value || 0);
+  if (!id) return;
+  const target = favorites.value.find((item) => Number(item.id) === id);
+  if (!target) return;
+  favoriteName.value = target.name || "";
+  applyFavoritePayload(target.payload || {});
+}
+
+async function saveFavorite() {
+  const name = String(favoriteName.value || "").trim();
+  if (!name) {
+    window.alert("お気に入り名を入力してください。");
+    return;
+  }
+
+  const payload = {
+    screen_key: FAVORITE_SCREEN_KEY,
+    name,
+    payload: toFavoritePayload(),
+  };
+
+  try {
+    const id = Number(selectedFavoriteId.value || 0);
+    if (id) {
+      await api.accounts.updateFavorite(id, payload);
+    } else {
+      await api.accounts.createFavorite(payload);
+    }
+    await loadFavorites();
+    const found = favorites.value.find((item) => item.name === name);
+    selectedFavoriteId.value = found ? String(found.id) : "";
+    window.alert("お気に入りを保存しました。");
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || "保存に失敗しました。";
+    window.alert(`お気に入り保存エラー: ${detail}`);
+  }
 }
 
 async function load() {
@@ -262,7 +347,10 @@ function actionLabel(action) {
   return action;
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadFavorites();
+});
 </script>
 
 <style scoped>
