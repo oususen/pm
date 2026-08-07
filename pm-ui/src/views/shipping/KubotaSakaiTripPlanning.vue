@@ -1497,6 +1497,7 @@ const planTruckModels = computed(() => {
         ? previewSummary
         : ((gridSummary && Array.isArray(gridSummary.placed)) ? gridSummary : null)
     const aggregatedItems = collectTruckPlanItems(dateKey, truckId)
+    if (aggregatedItems.length === 0) return
     const truckColorMap = buildTruckPlanColorMap(aggregatedItems)
 
     if (backendSummary) {
