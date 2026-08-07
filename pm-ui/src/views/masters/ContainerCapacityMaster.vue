@@ -57,6 +57,7 @@
             <th>混載</th>
             <th>積み重ね</th>
             <th>向き</th>
+            <th>親容器</th>
             <th>使用製品</th>
             <th>操作</th>
           </tr>
@@ -75,6 +76,12 @@
             <td>{{ container.can_mix ? '可' : '不可' }}</td>
             <td>{{ container.stackable ? '可' : '不可' }}</td>
             <td>{{ orientationLabel(container.orientation) }}</td>
+            <td>
+              <template v-if="container.parent_container_name">
+                {{ container.parent_container_name }}（{{ container.parent_capacity ?? '-' }}個）
+              </template>
+              <span v-else>-</span>
+            </td>
             <td class="products-cell">
               <template v-if="container.products && container.products.length">
                 <span v-for="p in container.products" :key="p.id" class="product-tag">
@@ -183,6 +190,19 @@
               <option value="short">容器短手（短い辺をトラック長手方向へ）</option>
             </select>
             <p class="helper-text">※ 便計画の積載計算（パッキング配置・積載超過判定）に反映されます</p>
+          </div>
+          <div class="form-group">
+            <label>親容器（この容器を入れる外側の容器）</label>
+            <select v-model="formData.parent_container" :disabled="!canEdit">
+              <option :value="null">なし</option>
+              <option v-for="c in parentCandidates" :key="c.id" :value="c.id">
+                {{ c.name }}{{ c.container_code ? ` (${c.container_code})` : '' }}
+              </option>
+            </select>
+          </div>
+          <div v-if="formData.parent_container" class="form-group">
+            <label>親容器あたり収容数（親1つにこの容器が何個入るか）</label>
+            <input v-model.number="formData.parent_capacity" type="number" min="1" :disabled="!canEdit" />
           </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary" :disabled="!canEdit">保存</button>
@@ -311,8 +331,14 @@ const formData = ref({
   max_stack: 1,
   capacity: null,
   orientation: 'free',
+  parent_container: null,
+  parent_capacity: null,
 })
 const canEdit = computed(() => canAccessMasterResource('masters.container_capacity', 'edit'))
+const parentCandidates = computed(() => {
+  const editId = formData.value?.id
+  return containers.value.filter((c) => c.id !== editId)
+})
 const newProductCode = ref('')
 const newProductCapacity = ref(1)
 
@@ -345,6 +371,8 @@ const showNewDialog = () => {
     max_stack: 1,
     capacity: null,
     orientation: 'free',
+    parent_container: null,
+    parent_capacity: null,
   }
   showDialog.value = true
 }
@@ -359,6 +387,8 @@ const editContainer = (container) => {
     stackable: container.stackable ?? true,
     max_stack: container.max_stack ?? 1,
     orientation: container.orientation || 'free',
+    parent_container: container.parent_container || null,
+    parent_capacity: container.parent_capacity || null,
     product_containers: (container.products || []).map((p) => ({ ...p })),
   }
   newProductCode.value = ''
@@ -387,6 +417,8 @@ const saveContainer = async () => {
       max_weight: normalizeNumber(formData.value.max_weight),
       max_stack: normalizeNumber(formData.value.max_stack),
       capacity: normalizeNumber(formData.value.capacity),
+      parent_container: formData.value.parent_container || null,
+      parent_capacity: formData.value.parent_container ? normalizeNumber(formData.value.parent_capacity) : null,
     }
     if (isEdit.value) {
       await api.containerCapacities.updateContainerCapacity(payload.id, payload)

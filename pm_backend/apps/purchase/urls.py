@@ -36,7 +36,6 @@ from .views import (
     PurchaseAutoOrderSendConfigDetailView,
     PurchaseAutoOrderSendConfigListCreateView,
     PurchaseAutoOrderSendRunNowView,
-    PurchaseAutoOrderSendTruckLoadCheckView,
     PurchaseDeliveryListAutoTemplateView,
     PurchaseDeliveryListExcelDownloadView,
     PurchaseDeliveryNotePdfDownloadView,
@@ -51,6 +50,7 @@ from .views import (
     PurchaseReceivingHistoryView,
     PurchaseReceivingView,
 )
+from .views_truck_load_check import PurchaseAutoOrderSendTruckLoadCheckView
 
 urlpatterns = [
     path('purchase-plan-lock-setting/', PurchasePlanLockSettingView.as_view(), name='purchase-plan-lock-setting'),

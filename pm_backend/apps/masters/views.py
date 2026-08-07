@@ -636,10 +636,12 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if val:
                     all_process_codes.add(val)
         group_codes = {str(i.get('product_group_code') or '').strip() for i in items if str(i.get('product_group_code') or '').strip()}
+        container_codes = {str(i.get('used_container_code') or '').strip() for i in items if str(i.get('used_container_code') or '').strip()}
 
         line_map = {l.line_code: l for l in Line.objects.filter(line_code__in=line_codes)} if line_codes else {}
         process_map = {p.process_code: p for p in Process.objects.filter(process_code__in=all_process_codes)} if all_process_codes else {}
         group_map = {g.group_code: g for g in ProductGroup.objects.filter(group_code__in=group_codes)} if group_codes else {}
+        container_map = {c.container_code: c for c in ContainerCapacity.objects.filter(container_code__in=container_codes)} if container_codes else {}
 
         def parse_bool(raw):
             val = str(raw or '').strip()
@@ -819,6 +821,14 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 product.order_lot_min = v
                 changed_fields.append('order_lot_min')
 
+            # 使用容器
+            val = str(item.get('used_container_code') or '').strip()
+            if val:
+                container_obj = container_map.get(val)
+                if container_obj:
+                    product.used_container = container_obj
+                    changed_fields.append('used_container')
+
             # 容器入り数
             v = to_int_or_none(item.get('capacity'))
             if v is not None:
@@ -902,6 +912,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             '厚さ': 'size_thickness', '厚さ(mm)': 'size_thickness',
             '発注倍数': 'order_lot_multiple',
             '最小発注数': 'order_lot_min',
+            '使用容器': 'used_container_code',
             '容器入り数': 'capacity',
             '置き場1': 'stock_location_1',
             '置き場2': 'stock_location_2',
@@ -993,7 +1004,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             '機種名', '製品グループ', 'グループ名',
             '移動先',
             '比重(g/cm³)', '縦(mm)', '横(mm)', '厚さ(mm)',
-            '発注倍数', '最小発注数', '容器入り数',
+            '発注倍数', '最小発注数', '使用容器', '容器入り数',
             '置き場1', '置き場2', '置き場3', '置き場4',
         ]
         ws.append(headers)
@@ -1027,6 +1038,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ws_guide.append(['管理区分', '日 / 分'])
         ws_guide.append(['最終品・ライン最終品', 'はい / いいえ'])
         ws_guide.append(['移動先', '社内ライン / 社内塗装 / CWL / 興和 / 直納 / その他'])
+        ws_guide.append(['使用容器', '容器コードを入力（容器シート参照）'])
         ws_guide.append(['置き場1〜4', '置き場名を最大4つまで入力可。置き場1が主置き場になります。空欄時は既存の置き場を維持。'])
         ws_guide.append(['注意', '同じ構成品番が複数行ある場合は先頭行のみ取込対象です。'])
 
@@ -1044,6 +1056,11 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ws_group.append(['グループコード', 'グループ名'])
         for g in ProductGroup.objects.order_by('group_code'):
             ws_group.append([g.group_code, g.group_name])
+
+        ws_container = wb.create_sheet('容器')
+        ws_container.append(['容器コード', '容器名'])
+        for c in ContainerCapacity.objects.filter(container_code__isnull=False).exclude(container_code='').order_by('container_code'):
+            ws_container.append([c.container_code, c.name])
 
         from io import BytesIO
         output = BytesIO()

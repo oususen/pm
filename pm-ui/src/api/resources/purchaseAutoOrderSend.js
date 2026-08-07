@@ -14,6 +14,9 @@ export const createPurchaseAutoOrderSendAPI = (client) => ({
   runNow(id) {
     return client.post(`/purchase-auto-order-send-configs/${id}/run-now/`)
   },
+  getTruckLoadDates(truckId) {
+    return client.get('/purchase-auto-order-send-truck-load-check/', { params: { truck_id: truckId } })
+  },
   checkTruckLoad(idOrPayload, payload = null) {
     if (payload === null) {
       return client.post('/purchase-auto-order-send-truck-load-check/', idOrPayload)

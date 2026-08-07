@@ -12,13 +12,13 @@
       <div v-else>
         <div class="truck-check-panel">
           <div class="truck-check-header">
-            <h2>仕入れ先トラック積載可否チェック（別機能）</h2>
-            <button class="btn-primary" :disabled="truckCheckLoading" @click="runTruckLoadCheck">{{ truckCheckLoading ? '判定中...' : '判定実行' }}</button>
+            <h2>トラック積載判定</h2>
+            <button class="btn-primary" :disabled="truckCheckLoading || !truckCheck.truck_id || !truckCheck.delivery_date" @click="runTruckLoadCheck">{{ truckCheckLoading ? '判定中...' : '判定実行' }}</button>
           </div>
           <div class="truck-check-form">
             <div class="form-group compact">
-              <label>仕入れ先トラック</label>
-              <select v-model="truckCheck.truck_id">
+              <label>トラック</label>
+              <select v-model="truckCheck.truck_id" @change="onTruckChange">
                 <option value="">-- 選択 --</option>
                 <option v-for="truck in truckCandidates" :key="truck.id" :value="truck.id">
                   {{ truck.supplier_code ? `${truck.supplier_code} / ` : '' }}{{ truck.name }}
@@ -26,21 +26,89 @@
               </select>
             </div>
             <div class="form-group compact">
-              <label>対象品番（カンマ区切り）</label>
-              <input v-model="truckCheck.productCodes" placeholder="例: P001,P002" />
-            </div>
-            <div class="form-group compact">
-              <label>数量（カンマ区切り）</label>
-              <input v-model="truckCheck.quantities" placeholder="例: 10,20" />
+              <label>納期</label>
+              <input v-model="truckCheck.delivery_date" type="date" />
             </div>
           </div>
-          <div v-if="truckCheckResult" class="truck-check-result">
-            <div class="result-title">判定結果</div>
-            <div class="result-line">トラック: {{ truckCheckResult.truck?.name || '-' }}</div>
-            <div class="result-line">積載可否: <strong>{{ truckCheckResult.can_fit ? '可' : '不可' }}</strong></div>
-            <div class="result-line">占有率: {{ truckCheckResult.occupancy_percent }}%</div>
-            <div class="result-line" v-if="truckCheckResult.errors?.length">エラー: {{ truckCheckResult.errors.join(' / ') }}</div>
-            <div class="result-line" v-if="truckCheckResult.warnings?.length">警告: {{ truckCheckResult.warnings.join(' / ') }}</div>
+
+          <div v-if="truckCheckResult" class="truck-check-result-area">
+            <div class="truck-result-header">
+              <span class="truck-result-name">{{ truckCheckResult.truck?.name || '-' }}</span>
+              <span :class="['badge', truckCheckResult.can_fit ? 'badge-on' : 'badge-overload']">
+                {{ truckCheckResult.can_fit ? '積載可' : '積載超過' }}
+              </span>
+              <span class="truck-result-occ">占有率: {{ truckCheckResult.occupancy_percent }}%</span>
+              <span v-if="truckCheckResult.total_footprints" class="truck-result-occ">配置: {{ truckCheckResult.total_footprints - (truckCheckResult.overflow_count || 0) }}/{{ truckCheckResult.total_footprints }}枠</span>
+              <span v-if="truckCheckResult.data_source" class="hint-text">（{{ truckCheckResult.data_source === 'proposal' ? '注文書' : '購買計画' }}）</span>
+            </div>
+
+            <div v-if="truckCheckResult.errors?.length" class="truck-result-errors">
+              <span v-for="(err, i) in truckCheckResult.errors" :key="i">{{ err }}</span>
+            </div>
+            <div v-if="truckCheckResult.warnings?.length" class="truck-result-warnings">
+              <span v-for="(w, i) in truckCheckResult.warnings" :key="i">{{ w }}</span>
+            </div>
+            <div v-if="truckCheckResult.invalid_items?.length" class="truck-result-warnings">
+              <span v-for="(item, i) in truckCheckResult.invalid_items" :key="i">{{ item.product_code }}: {{ item.reason === 'container not configured' ? '容器未設定' : item.reason }}</span>
+            </div>
+
+            <div class="truck-svg-wrap">
+              <svg :viewBox="truckSvgViewBox" class="truck-svg" preserveAspectRatio="xMidYMid meet">
+                <rect x="0" y="0" :width="truckSvgViewW" :height="truckSvgViewH" class="truck-bed" />
+                <template v-for="(item, idx) in truckPlacedItems" :key="idx">
+                  <rect
+                    :x="item.x" :y="item.y"
+                    :width="item.w" :height="item.d"
+                    :fill="item.color"
+                    class="truck-container-rect"
+                  >
+                    <title>{{ item.label }}（{{ item.layers }}段）</title>
+                  </rect>
+                  <text
+                    :x="item.x + item.w / 2"
+                    :y="item.y + item.d / 2"
+                    :font-size="item.fontSize"
+                    text-anchor="middle"
+                    dominant-baseline="central"
+                    class="truck-layer-text"
+                  >{{ item.layers }}</text>
+                </template>
+              </svg>
+            </div>
+
+            <div class="truck-legend">
+              <div v-for="(item, idx) in truckLegendItems" :key="idx" class="truck-legend-row">
+                <span class="truck-swatch" :style="{ background: item.color }"></span>
+                <span class="truck-legend-code">{{ item.product_code }}×{{ item.qty }}（{{ item.containerCount }}容器）</span>
+              </div>
+            </div>
+
+            <div class="truck-remaining" v-if="truckCheckResult.remaining?.length">
+              <span class="truck-remaining-label">残りスペース</span>
+              <div v-for="(r, idx) in truckCheckResult.remaining" :key="idx" class="truck-remaining-row">
+                <span>{{ r.label }}</span>
+                <span class="truck-remaining-count">あと{{ r.count }}箱</span>
+              </div>
+            </div>
+
+            <div v-if="truckCheckResult.fetched_items?.length" class="truck-items-table">
+              <table class="data-table compact-table">
+                <thead>
+                  <tr><th>品番</th><th>品名</th><th>数量</th><th>容器</th><th>容器数</th><th>親</th><th>積載</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(item, idx) in truckCheckResult.fetched_items" :key="idx">
+                    <td>{{ item.product_code }}</td>
+                    <td>{{ item.product_name }}</td>
+                    <td class="td-right">{{ item.order_qty }}</td>
+                    <td>{{ item.container_name || '-' }}</td>
+                    <td class="td-right">{{ item.container_count || '-' }}</td>
+                    <td>{{ item.parent_name || '-' }}</td>
+                    <td><span :class="item.loaded ? 'badge-on' : 'badge-overload'" class="badge badge-sm">{{ item.loaded ? '○' : '未' }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -227,8 +295,7 @@ const truckCheckLoading = ref(false)
 const truckCheckResult = ref(null)
 const truckCheck = reactive({
   truck_id: '',
-  productCodes: '',
-  quantities: '',
+  delivery_date: '',
 })
 const suppliers = ref([])
 const userList = ref([])
@@ -335,27 +402,92 @@ const loadTruckCandidates = async () => {
   }
 }
 
+const TRUCK_COLOR_PALETTE = [
+  '#fca5a5', '#fbbf24', '#86efac', '#7dd3fc', '#c4b5fd',
+  '#f9a8d4', '#fdba74', '#a7f3d0', '#93c5fd', '#fcd34d',
+  '#d9f99d', '#f5d0fe', '#a5b4fc', '#fda4af', '#bef264',
+]
+const truckColorForProduct = (code) => {
+  let hash = 0
+  const str = String(code || '')
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0
+  return TRUCK_COLOR_PALETTE[hash % TRUCK_COLOR_PALETTE.length]
+}
+
+const truckSvgViewW = computed(() => {
+  const truck = truckCheckResult.value?.truck
+  return truck ? truck.depth : 1
+})
+const truckSvgViewH = computed(() => {
+  const truck = truckCheckResult.value?.truck
+  return truck ? truck.width : 1
+})
+const truckSvgViewBox = computed(() => `0 0 ${truckSvgViewW.value} ${truckSvgViewH.value}`)
+
+const truckPlacedItems = computed(() => {
+  const placed = truckCheckResult.value?.placed || []
+  const usedColors = new Map()
+  return placed.map((p) => {
+    const pw = Number(p.w) || 0
+    const pd = Number(p.d) || 0
+    if (!usedColors.has(p.product_code)) {
+      usedColors.set(p.product_code, truckColorForProduct(p.product_code))
+    }
+    return {
+      x: Number(p.x) || 0,
+      y: Number(p.y) || 0,
+      w: pw,
+      d: pd,
+      layers: p.layers || 1,
+      fontSize: Math.max(60, Math.min(pw, pd) * 0.4),
+      rotated: Boolean(p.rotated),
+      color: usedColors.get(p.product_code),
+      label: `${p.product_code}×${p.qty}`,
+    }
+  })
+})
+
+const truckLegendItems = computed(() => {
+  const placed = truckCheckResult.value?.placed || []
+  const map = new Map()
+  const usedColors = new Map()
+  placed.forEach((p) => {
+    if (!usedColors.has(p.product_code)) {
+      usedColors.set(p.product_code, truckColorForProduct(p.product_code))
+    }
+    const existing = map.get(p.product_code)
+    const pLayers = Number(p.layers) || 1
+    if (existing) {
+      existing.qty += Number(p.qty) || 0
+      existing.containerCount += pLayers
+    } else {
+      map.set(p.product_code, {
+        product_code: p.product_code,
+        qty: Number(p.qty) || 0,
+        containerCount: pLayers,
+        color: usedColors.get(p.product_code),
+      })
+    }
+  })
+  return [...map.values()]
+})
+
+const onTruckChange = () => {
+  truckCheckResult.value = null
+}
+
 const runTruckLoadCheck = async () => {
-  if (!truckCheck.truck_id) {
-    alert('トラックを選択してください')
-    return
-  }
-  const productCodes = (truckCheck.productCodes || '').split(',').map((item) => item.trim()).filter(Boolean)
-  const quantities = (truckCheck.quantities || '').split(',').map((item) => item.trim()).filter(Boolean)
-  if (!productCodes.length || !quantities.length || productCodes.length !== quantities.length) {
-    alert('品番と数量の組み合わせを正しく入力してください')
+  if (!truckCheck.truck_id || !truckCheck.delivery_date) {
+    alert('トラックと納期を選択してください')
     return
   }
 
   truckCheckLoading.value = true
+  truckCheckResult.value = null
   try {
-    const items = productCodes.map((productCode, index) => ({
-      product_code: productCode,
-      qty: Number(quantities[index]),
-    }))
     const res = await api.purchaseAutoOrderSend.checkTruckLoad({
       truck_id: truckCheck.truck_id,
-      items,
+      delivery_date: truckCheck.delivery_date,
     })
     truckCheckResult.value = res.data
   } catch (error) {
@@ -599,10 +731,34 @@ watch(
  .truck-check-panel { margin-bottom: 18px; padding: 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; }
  .truck-check-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
  .truck-check-header h2 { margin: 0; font-size: 15px; }
- .truck-check-form { display: flex; gap: 12px; flex-wrap: wrap; }
+ .truck-check-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
  .form-group.compact { margin-bottom: 0; min-width: 220px; }
- .truck-check-form input, .truck-check-form select { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
- .truck-check-result { margin-top: 10px; padding: 10px; border-radius: 6px; background: #fff; border: 1px solid #d1d5db; font-size: 13px; }
- .result-title { font-weight: 700; margin-bottom: 4px; }
- .result-line { margin-top: 2px; }
+ .truck-check-form select { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
+ .hint-text { font-size: 11px; color: #6b7280; margin-left: 4px; }
+ .truck-check-result-area { margin-top: 12px; padding: 12px; border-radius: 6px; background: #fff; border: 1px solid #d1d5db; }
+ .truck-result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; }
+ .truck-result-name { font-weight: 700; }
+ .truck-result-occ { font-size: 13px; color: #475569; }
+ .badge-overload { background: #fee2e2; color: #991b1b; }
+ .badge-sm { padding: 1px 5px; font-size: 10px; }
+ .truck-result-errors { font-size: 12px; color: #991b1b; margin-bottom: 4px; display: flex; flex-direction: column; gap: 2px; }
+ .truck-result-warnings { font-size: 12px; color: #92400e; margin-bottom: 4px; display: flex; flex-direction: column; gap: 2px; }
+ .truck-svg-wrap { width: 100%; max-width: 400px; background: #fff; border: 1px solid #d7dfe8; border-radius: 4px; margin-bottom: 8px; }
+ .truck-svg { display: block; width: 100%; height: auto; }
+ .truck-bed { fill: #eef2f6; stroke: #1f2937; stroke-width: 6; }
+ .truck-container-rect { stroke: #111827; stroke-width: 2; }
+ .truck-layer-text { fill: #111827; font-weight: 700; user-select: none; }
+ .truck-legend { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; font-size: 12px; }
+ .truck-legend-row { display: flex; align-items: center; gap: 5px; }
+ .truck-swatch { flex-shrink: 0; width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
+ .truck-legend-code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ .truck-remaining { margin-top: 6px; border-top: 1px dashed #c5cfde; padding-top: 4px; font-size: 12px; }
+ .truck-remaining-label { display: block; font-weight: 700; color: #374151; margin-bottom: 2px; }
+ .truck-remaining-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
+ .truck-remaining-count { white-space: nowrap; color: #0369a1; font-weight: 600; }
+ .truck-items-table { margin-top: 10px; }
+ .compact-table { font-size: 12px; }
+ .compact-table th { padding: 4px 6px; }
+ .compact-table td { padding: 3px 6px; }
+ .td-right { text-align: right; }
 </style>
