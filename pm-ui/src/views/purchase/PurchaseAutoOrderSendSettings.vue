@@ -62,7 +62,7 @@
                     :fill="item.color"
                     class="truck-container-rect"
                   >
-                    <title>{{ item.label }}（{{ item.layers }}段）</title>
+                    <title>{{ item.label }}</title>
                   </rect>
                   <text
                     :x="item.x + item.w / 2"
@@ -232,7 +232,11 @@
         </div>
 
         <div class="form-group">
-          <label class="checkbox-label"><input v-model="form.send_order_excel" type="checkbox" /> 注文書Excel送信</label>
+          <label>送信ファイル選択</label>
+          <div class="file-toggle-grid">
+            <label class="checkbox-label"><input v-model="form.send_order_excel" type="checkbox" /> 注文書Excel送信</label>
+            <label class="checkbox-label"><input v-model="form.send_delivery_note_pdf" type="checkbox" /> 外作納品書 PDF</label>
+          </div>
         </div>
 
         <div class="form-group">
@@ -322,6 +326,7 @@ const form = reactive({
   safety_stock_enabled: false,
   safety_stock_multiplier: 1,
   send_order_excel: true,
+  send_delivery_note_pdf: true,
   email_body_custom: '',
   reply_to_email: '',
   cc_emails: '',
@@ -434,6 +439,12 @@ const truckPlacedItems = computed(() => {
     if (!usedColors.has(p.product_code)) {
       usedColors.set(p.product_code, truckColorForProduct(p.product_code))
     }
+    const slotProducts = Array.isArray(p.slot_products) ? p.slot_products : []
+    const label = slotProducts.length
+      ? slotProducts
+        .map((sp) => `${sp.product_code}（${sp.container_count}容器）`)
+        .join(' + ')
+      : `${p.product_code}×${p.qty}（${p.layers || 1}段）`
     return {
       x: Number(p.x) || 0,
       y: Number(p.y) || 0,
@@ -443,34 +454,29 @@ const truckPlacedItems = computed(() => {
       fontSize: Math.max(60, Math.min(pw, pd) * 0.4),
       rotated: Boolean(p.rotated),
       color: usedColors.get(p.product_code),
-      label: `${p.product_code}×${p.qty}`,
+      label,
     }
   })
 })
 
 const truckLegendItems = computed(() => {
+  const fetchedItems = truckCheckResult.value?.fetched_items || []
+  if (fetchedItems.length) {
+    return fetchedItems.map((item) => ({
+      product_code: item.product_code,
+      qty: Number(item.order_qty) || 0,
+      containerCount: Number(item.container_count) || 0,
+      color: truckColorForProduct(item.product_code),
+    }))
+  }
+
   const placed = truckCheckResult.value?.placed || []
-  const map = new Map()
-  const usedColors = new Map()
-  placed.forEach((p) => {
-    if (!usedColors.has(p.product_code)) {
-      usedColors.set(p.product_code, truckColorForProduct(p.product_code))
-    }
-    const existing = map.get(p.product_code)
-    const pLayers = Number(p.layers) || 1
-    if (existing) {
-      existing.qty += Number(p.qty) || 0
-      existing.containerCount += pLayers
-    } else {
-      map.set(p.product_code, {
-        product_code: p.product_code,
-        qty: Number(p.qty) || 0,
-        containerCount: pLayers,
-        color: usedColors.get(p.product_code),
-      })
-    }
-  })
-  return [...map.values()]
+  return placed.map((p, index) => ({
+    product_code: p.product_code,
+    qty: Number(p.qty) || 0,
+    containerCount: Number(p.layers) || 1,
+    color: truckColorForProduct(`${p.product_code}-${index}`),
+  }))
 })
 
 const onTruckChange = () => {
@@ -544,6 +550,7 @@ const resetForm = () => {
   form.safety_stock_enabled = false
   form.safety_stock_multiplier = 1
   form.send_order_excel = true
+  form.send_delivery_note_pdf = true
   form.email_body_custom = ''
   form.reply_to_email = ''
   form.cc_emails = ''
@@ -575,6 +582,7 @@ const openEdit = (config) => {
   form.safety_stock_enabled = !!config.safety_stock_enabled
   form.safety_stock_multiplier = config.safety_stock_multiplier ?? 1
   form.send_order_excel = config.send_order_excel
+  form.send_delivery_note_pdf = config.send_delivery_note_pdf ?? true
   form.email_body_custom = config.email_body_custom || ''
   form.reply_to_email = config.reply_to_email || ''
   form.cc_emails = config.cc_emails || ''
@@ -620,6 +628,7 @@ const buildPayload = () => ({
   safety_stock_enabled: form.safety_stock_enabled,
   safety_stock_multiplier: form.safety_stock_multiplier,
   send_order_excel: form.send_order_excel,
+  send_delivery_note_pdf: form.send_delivery_note_pdf,
   email_body_custom: form.email_body_custom,
   reply_to_email: form.reply_to_email,
   cc_emails: form.cc_emails,
@@ -751,6 +760,7 @@ watch(
 .suffix { font-size: 13px; color: #475569; }
 .form-warning { margin-top: 6px; padding: 8px 10px; border-radius: 4px; background: #fff7ed; color: #9a3412; font-size: 12px; border: 1px solid #fdba74; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.file-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
 .label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .form-hint { margin-top: 4px; font-size: 11px; color: #6b7280; }
 .required { color: #dc2626; }
