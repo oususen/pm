@@ -39,6 +39,7 @@
               </span>
               <span class="truck-result-occ">占有率: {{ truckCheckResult.occupancy_percent }}%</span>
               <span v-if="truckCheckResult.total_footprints" class="truck-result-occ">配置: {{ truckCheckResult.total_footprints - (truckCheckResult.overflow_count || 0) }}/{{ truckCheckResult.total_footprints }}枠</span>
+              <span v-if="truckContainerSummaryText" class="truck-result-occ truck-result-summary">{{ truckContainerSummaryText }}</span>
               <span v-if="truckCheckResult.data_source" class="hint-text">（{{ truckCheckResult.data_source === 'proposal' ? '注文書' : '購買計画' }}）</span>
             </div>
 
@@ -77,7 +78,6 @@
             </div>
 
             <div class="truck-legend">
-              <div v-if="truckContainerSummaryText" class="truck-container-summary">{{ truckContainerSummaryText }}</div>
               <div v-for="(item, idx) in truckLegendItems" :key="idx" class="truck-legend-row">
                 <span class="truck-swatch" :style="{ background: item.color }"></span>
                 <span class="truck-legend-code">{{ item.product_code }}×{{ item.qty }}（{{ item.containerCount }}容器）</span>
@@ -830,7 +830,7 @@ watch(
  .truck-container-rect { stroke: #111827; stroke-width: 2; }
  .truck-layer-text { fill: #111827; font-weight: 700; user-select: none; }
  .truck-legend { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; font-size: 12px; }
- .truck-container-summary { margin-bottom: 4px; font-size: 12px; color: #374151; font-weight: 600; }
+ .truck-result-summary { font-weight: 600; color: #374151; }
  .truck-legend-row { display: flex; align-items: center; gap: 5px; }
  .truck-swatch { flex-shrink: 0; width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
  .truck-legend-code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

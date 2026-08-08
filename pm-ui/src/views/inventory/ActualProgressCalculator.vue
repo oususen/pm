@@ -107,6 +107,13 @@
       <div class="panel-head">
         <h3 class="panel-title">在庫（部品換算）</h3>
         <div class="panel-actions">
+          <label class="mode-toggle">
+            <span>使用在庫</span>
+            <select v-model="inventoryQtyMode">
+              <option value="db">DB在庫</option>
+              <option value="manual">手入力在庫</option>
+            </select>
+          </label>
           <button class="btn" type="button" @click="exportInventoryListXlsx" :disabled="!inventoryRows.length">
             Excel出力
           </button>
@@ -120,8 +127,10 @@
             <th>品名</th>
             <th>階層</th>
             <th>状態</th>
-            <th>在庫数量</th>
+            <th>DB在庫数量</th>
+            <th>手入力在庫数量</th>
             <th>部品換算係数</th>
+            <th>使用在庫数量</th>
             <th>部品換算在庫</th>
             <th></th>
           </tr>
@@ -132,13 +141,15 @@
             <td><input v-model.trim="row.familyName" type="text" /></td>
             <td><input v-model.trim="row.levelName" type="text" /></td>
             <td><input v-model.trim="row.stateName" type="text" /></td>
-            <td><input v-model.number="row.stockQty" type="number" step="1" /></td>
+            <td><input :value="toNum(row.dbStockQty)" type="number" step="1" readonly /></td>
+            <td><input v-model.number="row.manualStockQty" type="number" step="1" /></td>
             <td><input v-model.number="row.conversionFactor" type="number" min="0" step="0.001" /></td>
+            <td>{{ activeStockQty(row) }}</td>
             <td>{{ stockConverted(row) }}</td>
             <td><button class="btn btn-danger" type="button" @click="removeInventory(index)">削除</button></td>
           </tr>
           <tr v-if="!inventoryRows.length">
-            <td colspan="8" class="empty">在庫データがありません</td>
+            <td colspan="10" class="empty">在庫データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -215,6 +226,7 @@ const targetPart = reactive({
 const parentRows = ref([]);
 
 const inventoryRows = ref([]);
+const inventoryQtyMode = ref("db");
 
 const demandRows = ref([]);
 const workdayMap = ref(new Map());
@@ -235,6 +247,8 @@ const normalizeCodeKey = (value) => String(value || "").trim().toUpperCase();
 const isCoproductCode = (value) => normalizeCodeKey(value).startsWith("ST");
 
 const normalizeLtDays = (value) => Math.max(0, Math.ceil(toNum(value, 0)));
+const buildInventoryManualKey = (row) =>
+  [normalizeCode(row?.familyCode), normalizeCode(row?.levelName), normalizeCode(row?.stateName)].join("__");
 
 const parseDate = (dateStr) => {
   if (!dateStr) return null;
@@ -520,6 +534,12 @@ const applyTargetPartData = async () => {
   loadingTargetData.value = true;
   targetSyncMessage.value = "";
   try {
+    const manualStockMap = new Map(
+      inventoryRows.value
+        .map((row) => [buildInventoryManualKey(row), row?.manualStockQty])
+        .filter(([key]) => Boolean(key))
+    );
+
     await ensureWorkdayCalendar();
     const whereUsedRes = await api.products.getWhereUsed(targetPart.id, true, baseDate.value);
     const parentTree = whereUsedRes?.data?.parents || [];
@@ -599,7 +619,8 @@ const applyTargetPartData = async () => {
         familyName: targetPart.productName,
         levelName: "自工程",
         stateName: "対象部品在庫",
-        stockQty: toRound3(selfStock),
+        dbStockQty: toRound3(selfStock),
+        manualStockQty: null,
         conversionFactor: 1,
       },
     ];
@@ -610,9 +631,16 @@ const applyTargetPartData = async () => {
         familyName: row.parentName,
         levelName: `親階層${row.depth}`,
         stateName: row.isFinal ? "親在庫(最終品)" : "親在庫",
-        stockQty: toRound3(stockByProduct.get(Number(row.parentId)) || 0),
+        dbStockQty: toRound3(stockByProduct.get(Number(row.parentId)) || 0),
+        manualStockQty: null,
         conversionFactor: toRound3(row.conversionFactor),
       });
+    });
+    autoInventoryRows.forEach((row) => {
+      const manualKey = buildInventoryManualKey(row);
+      if (manualStockMap.has(manualKey)) {
+        row.manualStockQty = manualStockMap.get(manualKey);
+      }
     });
     inventoryRows.value = autoInventoryRows;
 
@@ -774,8 +802,15 @@ const parentWindowEnd = (row) => {
   return addWorkingDays(baseDate.value, lt);
 };
 
+const activeStockQty = (row) => {
+  if (inventoryQtyMode.value === "manual") {
+    return toRound3(toNum(row?.manualStockQty, 0));
+  }
+  return toRound3(toNum(row?.dbStockQty, 0));
+};
+
 const stockConverted = (row) =>
-  Number((Number(row.stockQty || 0) * Number(row.conversionFactor || 0)).toFixed(3));
+  Number((activeStockQty(row) * Number(row.conversionFactor || 0)).toFixed(3));
 
 const sanitizeFileName = (value) => String(value || "").replace(/[\\/:*?"<>|]/g, "_");
 
@@ -791,9 +826,10 @@ const exportInventoryListXlsx = () => {
     "品名",
     "階層",
     "状態",
-    "机上在庫",
+    "DB在庫",
     "棚卸在庫",
     "部品換算係数",
+    "使用在庫",
     "部品換算在庫",
   ];
   const body = rows.map((row) => [
@@ -801,9 +837,10 @@ const exportInventoryListXlsx = () => {
     String(row.familyName || "").trim(),
     String(row.levelName || "").trim(),
     String(row.stateName || "").trim(),
-    toNum(row.stockQty),
-    "",
+    toNum(row.dbStockQty),
+    row.manualStockQty ?? "",
     toNum(row.conversionFactor),
+    activeStockQty(row),
     stockConverted(row),
   ]);
 
@@ -878,7 +915,8 @@ const addInventory = () => {
     familyName: "",
     levelName: "",
     stateName: "",
-    stockQty: 0,
+    dbStockQty: 0,
+    manualStockQty: 0,
     conversionFactor: 1,
   });
 };
@@ -934,6 +972,23 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #0f172a;
+}
+.mode-toggle span {
+  font-weight: 700;
+}
+.mode-toggle select {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #ffffff;
 }
 .panel-title {
   margin: 0 0 8px;
@@ -1047,7 +1102,5 @@ onMounted(() => {
   }
 }
 </style>
-
-
 
 
