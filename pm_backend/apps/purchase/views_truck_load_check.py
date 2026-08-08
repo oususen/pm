@@ -191,6 +191,9 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
                     parent = getattr(container, 'parent_container', None)
                     if parent:
                         parent_name = parent.name or ''
+                        parent_capacity = getattr(container, 'parent_capacity', None) or 1
+                        if parent_capacity and parent_capacity > 0:
+                            container_count = ceil(container_count / parent_capacity)
                 fetched_items.append({
                     'product_code': product.product_code,
                     'product_name': product.product_name,
@@ -266,6 +269,7 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
                     'd': float(p.get('d', 0)),
                     'product_code': p.get('product_code', ''),
                     'qty': p.get('qty', 0),
+                    'slot_products': p.get('slot_products', []),
                     'layers': p.get('layers', 1),
                     'rotated': p.get('rotated', False),
                 }
@@ -284,9 +288,12 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
             py = float(p.get('y', 0))
             pw = float(p.get('w', 0))
             pd = float(p.get('d', 0))
-            pc = p.get('product_code', '')
-            if pc and (px + pw > bed_depth or py + pd > bed_width):
-                overflow_codes.add(pc)
+            slot_products = p.get('slot_products') or []
+            product_codes = [sp.get('product_code', '') for sp in slot_products if sp.get('product_code')]
+            if not product_codes and p.get('product_code'):
+                product_codes = [p.get('product_code')]
+            if px + pw > bed_depth or py + pd > bed_width:
+                overflow_codes.update(product_codes)
         for fi in fetched_items:
             fi['loaded'] = fi['product_code'] not in overflow_codes and fi['has_container']
         if fetched_items:

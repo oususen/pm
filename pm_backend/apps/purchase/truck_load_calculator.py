@@ -69,6 +69,7 @@ def _pack_shelf(bed_len, bed_wid, slots):
             'product_code': slot.get('product_code', ''),
             'qty': str(slot.get('qty', Decimal('0'))),
             'container_name': slot.get('container_name', ''),
+            'slot_products': slot.get('slot_products', []),
             'layers': slot.get('layers', 1),
             'x': str(x), 'y': str(y),
             'w': str(length), 'd': str(width),
@@ -118,6 +119,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
                 'product_code': slot.get('product_code', ''),
                 'qty': str(slot.get('qty', Decimal('0'))),
                 'container_name': slot.get('container_name', ''),
+                'slot_products': slot.get('slot_products', []),
                 'layers': slot.get('layers', 1),
                 'x': str(of_x), 'y': str(of_y),
                 'w': str(len_a), 'd': str(wid_a),
@@ -153,6 +155,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
             'product_code': slot.get('product_code', ''),
             'qty': str(slot.get('qty', Decimal('0'))),
             'container_name': slot.get('container_name', ''),
+            'slot_products': slot.get('slot_products', []),
             'layers': slot.get('layers', 1),
             'x': str(fx), 'y': str(fy),
             'w': str(length), 'd': str(width),
@@ -215,6 +218,7 @@ def _pack_bay(bed_len, bed_wid, slots):
                 'product_code': slot.get('product_code', ''),
                 'qty': str(slot.get('qty', Decimal('0'))),
                 'container_name': slot.get('container_name', ''),
+                'slot_products': slot.get('slot_products', []),
                 'layers': slot.get('layers', 1),
                 'x': str(of_x), 'y': str(of_y),
                 'w': str(len_a), 'd': str(wid_a),
@@ -232,6 +236,7 @@ def _pack_bay(bed_len, bed_wid, slots):
             'product_code': slot.get('product_code', ''),
             'qty': str(slot.get('qty', Decimal('0'))),
             'container_name': slot.get('container_name', ''),
+            'slot_products': slot.get('slot_products', []),
             'layers': slot.get('layers', 1),
             'x': str(col_x), 'y': str(bay_w),
             'w': str(length), 'd': str(width),
@@ -358,6 +363,7 @@ def _pack_column(bed_len, bed_wid, slots):
                         'product_code': slot.get('product_code', ''),
                         'qty': str(slot.get('qty', Decimal('0'))),
                         'container_name': slot.get('container_name', ''),
+                        'slot_products': slot.get('slot_products', []),
                         'layers': slot.get('layers', 1),
                         'x': str(band_x), 'y': str(band_y),
                         'w': str(l), 'd': str(w), 'rotated': rotated,
@@ -377,6 +383,7 @@ def _pack_column(bed_len, bed_wid, slots):
                     'product_code': slot.get('product_code', ''),
                     'qty': str(slot.get('qty', Decimal('0'))),
                     'container_name': slot.get('container_name', ''),
+                    'slot_products': slot.get('slot_products', []),
                     'layers': slot.get('layers', 1),
                     'x': str(of_x), 'y': str(of_y),
                     'w': str(l), 'd': str(w), 'rotated': rotated,
@@ -403,6 +410,7 @@ def _pack_column(bed_len, bed_wid, slots):
                         'product_code': slot.get('product_code', ''),
                         'qty': str(slot.get('qty', Decimal('0'))),
                         'container_name': slot.get('container_name', ''),
+                        'slot_products': slot.get('slot_products', []),
                         'layers': slot.get('layers', 1),
                         'x': str(band_used_x), 'y': str(band_y),
                         'w': str(l), 'd': str(w), 'rotated': rotated,
@@ -422,6 +430,7 @@ def _pack_column(bed_len, bed_wid, slots):
                     'product_code': slot.get('product_code', ''),
                     'qty': str(slot.get('qty', Decimal('0'))),
                     'container_name': slot.get('container_name', ''),
+                    'slot_products': slot.get('slot_products', []),
                     'layers': slot.get('layers', 1),
                     'x': str(of_x), 'y': str(of_y),
                     'w': str(l), 'd': str(w), 'rotated': rotated,
@@ -1059,14 +1068,21 @@ def calculate_truck_load(assignments, truck):
             remaining_total -= slot_layers
             first = None
             consumed = 0
+            slot_products = []
             for pcode in product_keys:
                 if product_container_remaining[pcode] <= 0:
                     continue
                 if first is None:
                     first = pcode
                 take = min(slot_layers - consumed, product_container_remaining[pcode])
+                if take <= 0:
+                    continue
                 product_container_remaining[pcode] -= take
                 consumed += take
+                slot_products.append({
+                    'product_code': pcode,
+                    'container_count': take,
+                })
                 if consumed >= slot_layers:
                     break
             footprint_qty = product_qty_map.get(first, Decimal('0')) if first else Decimal('0')
@@ -1074,6 +1090,7 @@ def calculate_truck_load(assignments, truck):
                 'product_code': first or '',
                 'qty': str(footprint_qty),
                 'container_name': container_name,
+                'slot_products': slot_products,
                 'layers': slot_layers,
                 'length': length,
                 'width': width,
