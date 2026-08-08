@@ -201,6 +201,7 @@
             <th>着時刻</th>
             <th>長さ(mm)</th>
             <th>奥行き(mm)</th>
+            <th>Gap(mm)</th>
             <th>日ずれ</th>
             <th>通常便</th>
           </tr>
@@ -213,11 +214,12 @@
             <td>{{ truck.arrival_time || '-' }}</td>
             <td class="num-cell">{{ formatNumber(truck.width) }}</td>
             <td class="num-cell">{{ formatNumber(truck.depth) }}</td>
+            <td class="num-cell">{{ truck.container_gap || 0 }}</td>
             <td class="num-cell">{{ formatNumber(truck.arrival_day_offset) }}</td>
             <td>{{ truck.default_use ? '通常' : '-' }}</td>
           </tr>
           <tr v-if="!detailTrucks.length">
-            <td colspan="8" class="detail-empty">便マスタがありません</td>
+            <td colspan="9" class="detail-empty">便マスタがありません</td>
           </tr>
         </tbody>
       </table>
