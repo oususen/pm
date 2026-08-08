@@ -33,6 +33,20 @@
               @keyup.enter="loadRows"
             />
           </div>
+          <div class="filter-field">
+            <label>加工先</label>
+            <select v-model="filters.productLine">
+              <option value="">すべて</option>
+              <option v-for="name in productLineOptions" :key="name" :value="name">{{ name }}</option>
+            </select>
+          </div>
+          <div class="filter-field">
+            <label>購入先</label>
+            <select v-model="filters.productSupplier">
+              <option value="">すべて</option>
+              <option v-for="name in productSupplierOptions" :key="name" :value="name">{{ name }}</option>
+            </select>
+          </div>
           <div class="filter-field checkbox-field">
             <label>
               <input v-model="filters.shortageOnly" type="checkbox" />
@@ -127,8 +141,16 @@ const rows = ref([])
 const filters = reactive({
   search: '',
   location: '',
+  productLine: '',
+  productSupplier: '',
   shortageOnly: false,
 })
+
+const buildNameOptions = (key) =>
+  [...new Set(rows.value.map((row) => String(row[key] || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'))
+
+const productLineOptions = computed(() => buildNameOptions('product_line_name'))
+const productSupplierOptions = computed(() => buildNameOptions('product_supplier_name'))
 
 const canEdit = computed(() => {
   const user = authState.user
@@ -149,6 +171,8 @@ const isShortage = (row) => shortageQty(row) > 0
 
 const filteredRows = computed(() =>
   rows.value.filter((row) => {
+    if (filters.productLine && (row.product_line_name || '') !== filters.productLine) return false
+    if (filters.productSupplier && (row.product_supplier_name || '') !== filters.productSupplier) return false
     if (filters.shortageOnly && !isShortage(row)) return false
     return true
   })
@@ -173,6 +197,8 @@ const loadRows = async () => {
 const resetFilters = () => {
   filters.search = ''
   filters.location = ''
+  filters.productLine = ''
+  filters.productSupplier = ''
   filters.shortageOnly = false
   loadRows()
 }
@@ -270,7 +296,7 @@ onMounted(() => {
 
 .filter-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 220px;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) 220px;
   gap: 12px;
   align-items: end;
 }
@@ -285,7 +311,8 @@ onMounted(() => {
   grid-column: span 1;
 }
 
-.filter-field input {
+.filter-field input,
+.filter-field select {
   padding: 8px;
   border: 1px solid #d0d5dd;
   border-radius: 6px;
@@ -349,4 +376,3 @@ onMounted(() => {
   }
 }
 </style>
-
