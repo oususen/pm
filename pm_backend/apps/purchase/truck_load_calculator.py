@@ -918,6 +918,7 @@ def calculate_truck_load(assignments, truck):
 
     # capacity を除外したキーでグルーピング
     group_container_count = defaultdict(Decimal)
+    group_child_count = defaultdict(Decimal)
     group_products = {}
     group_meta = {}
 
@@ -933,6 +934,7 @@ def calculate_truck_load(assignments, truck):
 
         container = item.get('container') or {}
         parent = container.get('parent') or {}
+        child_count = None
 
         if parent and parent.get('width') and parent.get('depth'):
             child_capacity = _to_decimal(container.get('capacity'), default='1')
@@ -968,9 +970,21 @@ def calculate_truck_load(assignments, truck):
         if cw <= 0 or cd <= 0:
             continue
 
-        # 同じ容器コードなら段積み合算
-        key = str(use_container.get('container_code') or '') or str(use_container.get('name') or '') or product_code
-        group_container_count[key] += container_count
+        # 親容器に入る子容器グループと、親容器そのものを使う製品は別グループにする。
+        # これにより「汎用ポリ同士は同じ小アミへ混載可」だが、
+        # 「最初から小アミを使う製品」は1箱として別扱いできる。
+        if parent and parent.get('width') and parent.get('depth'):
+            key_base = str(use_container.get('container_code') or '') or str(use_container.get('name') or '') or product_code
+            key = f'parent:{key_base}'
+            group_child_count[key] += child_count
+            parent_cap = _to_decimal(parent.get('capacity'), default='1')
+            if parent_cap <= 0:
+                parent_cap = Decimal('1')
+            group_container_count[key] = (group_child_count[key] / parent_cap).to_integral_value(rounding=ROUND_CEILING)
+        else:
+            key_base = str(use_container.get('container_code') or '') or str(use_container.get('name') or '') or product_code
+            key = f'container:{key_base}'
+            group_container_count[key] += container_count
         products = group_products.setdefault(key, [])
         merged = False
         for idx, (pcode, pqty) in enumerate(products):
@@ -986,6 +1000,8 @@ def calculate_truck_load(assignments, truck):
             'can_mix': can_mix,
             'stackable': stackable,
             'max_stack': max_stack,
+            'parent_capacity': _to_decimal(parent.get('capacity'), default='1') if parent and parent.get('width') and parent.get('depth') else None,
+            'uses_parent': bool(parent and parent.get('width') and parent.get('depth')),
         })
 
     for key, meta in group_meta.items():
@@ -996,6 +1012,8 @@ def calculate_truck_load(assignments, truck):
         ch = meta['ch']
         stackable = meta['stackable']
         max_stack = meta['max_stack']
+        uses_parent = meta.get('uses_parent', False)
+        parent_capacity = meta.get('parent_capacity')
 
         layers = Decimal('1')
         if stackable and ch > 0 and bed_height > 0:
@@ -1045,11 +1063,7 @@ def calculate_truck_load(assignments, truck):
                 cc = _to_decimal(cont.get('capacity'), default='1')
                 if cc <= 0:
                     cc = Decimal('1')
-                child_cnt = (q / cc).to_integral_value(rounding=ROUND_CEILING)
-                pp = _to_decimal(par.get('capacity'), default='1')
-                if pp <= 0:
-                    pp = Decimal('1')
-                cnt = int((child_cnt / pp).to_integral_value(rounding=ROUND_CEILING))
+                cnt = int((q / cc).to_integral_value(rounding=ROUND_CEILING))
             else:
                 cc = _to_decimal(cont.get('capacity'), default='1')
                 if cc <= 0:
@@ -1069,12 +1083,18 @@ def calculate_truck_load(assignments, truck):
             first = None
             consumed = 0
             slot_products = []
+            slot_capacity = slot_layers
+            if uses_parent:
+                parent_cap_int = int(parent_capacity or 1)
+                if parent_cap_int <= 0:
+                    parent_cap_int = 1
+                slot_capacity = slot_layers * parent_cap_int
             for pcode in product_keys:
                 if product_container_remaining[pcode] <= 0:
                     continue
                 if first is None:
                     first = pcode
-                take = min(slot_layers - consumed, product_container_remaining[pcode])
+                take = min(slot_capacity - consumed, product_container_remaining[pcode])
                 if take <= 0:
                     continue
                 product_container_remaining[pcode] -= take
@@ -1083,7 +1103,7 @@ def calculate_truck_load(assignments, truck):
                     'product_code': pcode,
                     'container_count': take,
                 })
-                if consumed >= slot_layers:
+                if consumed >= slot_capacity:
                     break
             footprint_qty = product_qty_map.get(first, Decimal('0')) if first else Decimal('0')
             slots.append({

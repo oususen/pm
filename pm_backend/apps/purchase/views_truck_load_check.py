@@ -183,6 +183,7 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
                 container_name = ''
                 container_count = 0
                 parent_name = ''
+                parent_capacity = None
                 if container:
                     container_name = container.name or ''
                     cap = getattr(product, 'capacity', None) or getattr(container, 'capacity', None) or 1
@@ -191,9 +192,7 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
                     parent = getattr(container, 'parent_container', None)
                     if parent:
                         parent_name = parent.name or ''
-                        parent_capacity = getattr(container, 'parent_capacity', None) or 1
-                        if parent_capacity and parent_capacity > 0:
-                            container_count = ceil(container_count / parent_capacity)
+                        parent_capacity = getattr(container, 'parent_capacity', None)
                 fetched_items.append({
                     'product_code': product.product_code,
                     'product_name': product.product_name,
@@ -202,6 +201,7 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
                     'container_name': container_name,
                     'container_count': container_count,
                     'parent_name': parent_name,
+                    'parent_capacity': parent_capacity,
                 })
         elif items and isinstance(items, list):
             data_source = 'manual'

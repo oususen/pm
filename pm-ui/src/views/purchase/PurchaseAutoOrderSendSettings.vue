@@ -77,6 +77,7 @@
             </div>
 
             <div class="truck-legend">
+              <div v-if="truckContainerSummaryText" class="truck-container-summary">{{ truckContainerSummaryText }}</div>
               <div v-for="(item, idx) in truckLegendItems" :key="idx" class="truck-legend-row">
                 <span class="truck-swatch" :style="{ background: item.color }"></span>
                 <span class="truck-legend-code">{{ item.product_code }}×{{ item.qty }}（{{ item.containerCount }}容器）</span>
@@ -479,6 +480,47 @@ const truckLegendItems = computed(() => {
   }))
 })
 
+const truckContainerSummaryText = computed(() => {
+  const fetchedItems = truckCheckResult.value?.fetched_items || []
+  if (!fetchedItems.length) return ''
+
+  const directTotals = new Map()
+  const parentBuckets = new Map()
+  const childToParentMap = new Map()
+
+  fetchedItems.forEach((item) => {
+    const directName = String(item.container_name || '').trim()
+    const directCount = Number(item.container_count) || 0
+    if (directName && directCount > 0) {
+      directTotals.set(directName, (directTotals.get(directName) || 0) + directCount)
+    }
+
+    const parentName = String(item.parent_name || '').trim()
+    const parentCapacity = Number(item.parent_capacity) || 0
+    if (parentName && parentCapacity > 0 && directCount > 0) {
+      const bucket = parentBuckets.get(parentName) || { total: 0, capacity: parentCapacity }
+      bucket.total += directCount
+      bucket.capacity = parentCapacity
+      parentBuckets.set(parentName, bucket)
+      if (directName) {
+        childToParentMap.set(directName, parentName)
+      }
+    }
+  })
+
+  const parts = []
+  directTotals.forEach((count, name) => {
+    const parentName = childToParentMap.get(name)
+    const parentBucket = parentName ? parentBuckets.get(parentName) : null
+    if (parentBucket) {
+      parts.push(`${name}×${count}（ ${parentName}×${Math.ceil(parentBucket.total / parentBucket.capacity)}）`)
+      return
+    }
+    parts.push(`${name}×${count}`)
+  })
+  return parts.join(' ＋ ')
+})
+
 const onTruckChange = () => {
   truckCheckResult.value = null
 }
@@ -788,6 +830,7 @@ watch(
  .truck-container-rect { stroke: #111827; stroke-width: 2; }
  .truck-layer-text { fill: #111827; font-weight: 700; user-select: none; }
  .truck-legend { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; font-size: 12px; }
+ .truck-container-summary { margin-bottom: 4px; font-size: 12px; color: #374151; font-weight: 600; }
  .truck-legend-row { display: flex; align-items: center; gap: 5px; }
  .truck-swatch { flex-shrink: 0; width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
  .truck-legend-code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
