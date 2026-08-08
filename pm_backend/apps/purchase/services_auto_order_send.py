@@ -148,22 +148,27 @@ def _collect_supplier_product_ids(supplier):
 def _load_first_cycle_progress_basis(line, product_ids, delivery_date, send_date=None):
     """初回納入回の基準値を返す。
 
+    納入日当日の需要を coverage に含めるため、
+    基準計進は納入日前日の値を採用する。
+
     計進は当日(送信日)の生産を plan_qty で計算するため、
     送信日に実績がある場合は実績と計画の差分で補正する。
 
     ルール:
-    - 納入日実績あり: 計進 + 実績 − 計画
+    - 基準日は納入日前日
+    - 基準日実績あり: 計進 + 実績 − 計画
     - 送信日実績あり: さらに送信日の (実績 − 計画) を加算
     """
     progress_map = {}
     if not product_ids:
         return progress_map
+    basis_date = delivery_date - timedelta(days=1)
 
     for product_id in product_ids:
         day_qs = LineBacklog.objects.filter(
             line_id=line.id,
             product_id=product_id,
-            plan_date=delivery_date,
+            plan_date=basis_date,
         )
         planned_progress = int(day_qs.aggregate(v=Sum('planned_progress_qty'))['v'] or 0)
         actual_qty = int(day_qs.filter(sequence_no=0).aggregate(v=Sum('actual_qty'))['v'] or 0)
@@ -174,7 +179,7 @@ def _load_first_cycle_progress_basis(line, product_ids, delivery_date, send_date
             basis = planned_progress + actual_qty - plan_qty
 
         # 送信日の実績補正: 計進は送信日を plan で計算するため、実績との差を反映
-        if send_date and send_date != delivery_date:
+        if send_date and send_date != basis_date:
             today_qs = LineBacklog.objects.filter(
                 line_id=line.id,
                 product_id=product_id,

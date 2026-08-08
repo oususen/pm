@@ -1,6 +1,7 @@
 import logging
 import time
 from datetime import date, datetime, timedelta
+from io import BytesIO
 
 logger = logging.getLogger('purchase')
 
@@ -19,6 +20,8 @@ def run_auto_order_send(config_id, ignore_holiday=False):
         simulate_and_save_order_plans,
     )
     from .tasks_auto_delivery_list import (
+        _dn_nohin,
+        _dn_side,
         _generate_progress_excel,
         _generate_progress_pdf,
         _recalculate_supplier_progress_for_auto_delivery,
@@ -132,13 +135,25 @@ def run_auto_order_send(config_id, ignore_holiday=False):
                 'data': progress_pdf,
                 'filename': f'進度表_{supplier.supplier_code}_{today}.pdf',
             })
+        delivery_note_pdf = None
+        if items and config.send_delivery_note_pdf:
+            try:
+                delivery_note_pdf = _generate_order_send_delivery_note_pdf(items, supplier)
+            except Exception as e:
+                logger.warning('外作納品書PDF生成エラー: %s', e)
+        if delivery_note_pdf:
+            first_delivery_date = min(item['delivery_date'] for item in items)
+            all_attachments.append({
+                'data': delivery_note_pdf,
+                'filename': f'外作納品書_{supplier.supplier_code}_{first_delivery_date}.pdf',
+            })
 
         if not all_attachments:
             _finish(config, start_time, 'SUCCESS', result.get('message') or '対象データはありません')
             return
 
-        if not config.send_order_excel:
-            _finish(config, start_time, 'SKIPPED', '注文書Excel送信がOFFです')
+        if not config.send_order_excel and not delivery_note_pdf:
+            _finish(config, start_time, 'SKIPPED', '注文書Excel送信と外作納品書PDF送信がOFFです')
             return
 
         to_email = (supplier.order_email or '').strip()
@@ -151,11 +166,26 @@ def run_auto_order_send(config_id, ignore_holiday=False):
         reply_to = (config.reply_to_email or '').strip()
 
         delivery_dates = sorted({item['delivery_date'] for item in items}) if items else []
+        subject_parts = []
+        if items and config.send_order_excel:
+            subject_parts.append('注文書')
+        if delivery_note_pdf:
+            subject_parts.append('外作納品書')
+        if progress_excel or progress_pdf:
+            subject_parts.append('進度表')
+        subject_label = '・'.join(subject_parts) or '添付資料'
         if delivery_dates:
-            subject = f'【注文書】{supplier.supplier_code} {delivery_dates[0]}'
+            subject = f'【{subject_label}】{supplier.supplier_code} {delivery_dates[0]}'
         else:
-            subject = f'【進度表】{supplier.supplier_code} {today}'
-        body = _build_mail_body(config, supplier, items, delivery_dates)
+            subject = f'【{subject_label}】{supplier.supplier_code} {today}'
+        body = _build_mail_body(
+            config,
+            supplier,
+            items,
+            delivery_dates,
+            has_order_excel=bool(items and config.send_order_excel),
+            has_delivery_note_pdf=bool(delivery_note_pdf),
+        )
 
         # ── ステップ9: メール送信 ──
         main_attach = all_attachments[0]
@@ -180,6 +210,8 @@ def run_auto_order_send(config_id, ignore_holiday=False):
             attach_summary.append('進度表Excel')
         if progress_pdf:
             attach_summary.append('進度表PDF')
+        if delivery_note_pdf:
+            attach_summary.append('外作納品書PDF')
 
         if send_result.get('success'):
             _finish(
@@ -198,7 +230,7 @@ def run_auto_order_send(config_id, ignore_holiday=False):
         _notify_users(config.notify_on_failure, f'注文書自動送信エラー: {supplier.supplier_name}\n{str(exc)[:300]}')
 
 
-def _build_mail_body(config, supplier, items, delivery_dates):
+def _build_mail_body(config, supplier, items, delivery_dates, has_order_excel=False, has_delivery_note_pdf=False):
     if config.email_body_custom.strip():
         return f'{supplier.supplier_name} 御中\n\n{config.email_body_custom.strip()}\n'
 
@@ -210,12 +242,18 @@ def _build_mail_body(config, supplier, items, delivery_dates):
 
     if items and delivery_dates:
         first_date = delivery_dates[0].isoformat()
+        intro = '注文書を送付いたします。' if has_order_excel else '添付資料を送付いたします。'
         body_lines.extend([
-            '注文書を送付いたします。',
+            intro,
             '',
             f'対象納入回: {len(delivery_dates)}回',
             f'対象納入日: {first_date}',
             f'対象品目: {len(items)}件',
+        ])
+    if has_delivery_note_pdf:
+        body_lines.extend([
+            '',
+            '外作納品書を添付しておりますのでご利用ください。',
         ])
     body_lines.extend([
         '',
@@ -261,3 +299,85 @@ def _notify_users(user_m2m, message):
         operator_name='system',
     )
     notification.target_users.set(user_ids)
+
+
+def _generate_order_send_delivery_note_pdf(items, supplier):
+    """注文書自動送信専用の外作納品書PDFを生成する。
+
+    自動納入リスト送信とは異なり、カバー期間の日別明細へ展開せず、
+    納期日単位で保存した計画数(expected_qty)をそのまま納品書数量として使う。
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdf_canvas
+    from shipping.services.shipping_pdf_generator import register_japanese_fonts
+    from .tasks_auto_delivery_list import _dn_nohin, _dn_side
+
+    register_japanese_fonts()
+    font_name = 'MSGothic'
+
+    page_w, page_h = landscape(A4)
+    margin_left, margin_right = 10 * mm, 10 * mm
+    margin_top, margin_bottom = 3 * mm, 3 * mm
+    usable_w = page_w - margin_left - margin_right
+    usable_h = page_h - margin_top - margin_bottom
+    per_page = 3
+    block_h = usable_h / per_page
+    sep = 5 * mm
+    item_h = block_h - sep
+
+    gap = 4 * mm
+    nohin_w = usable_w * 0.50
+    side_w = (usable_w - nohin_w - gap * 2) / 2
+
+    sorted_items = sorted(
+        [item for item in items if int(item.get('expected_qty') or 0) > 0],
+        key=lambda item: (item['delivery_date'], item['product_code']),
+    )
+
+    buf = BytesIO()
+    canvas = pdf_canvas.Canvas(buf, pagesize=landscape(A4))
+    total_pages = max(1, -(-len(sorted_items) // per_page))
+
+    for page_index in range(total_pages):
+        page_items = sorted_items[page_index * per_page:(page_index + 1) * per_page]
+        for item_index, item in enumerate(page_items):
+            yt = page_h - margin_top - item_index * block_h
+            product_code = item['product_code']
+            product_name = item['product_name']
+            qty = int(item.get('expected_qty') or 0)
+            item_date = item['delivery_date']
+            date_ymd = item_date.strftime('%Y/%m/%d')
+            date_mmdd = f'{item_date.month:02d}/{item_date.day:02d}'
+            qr_data = f'{product_code},{item_date.isoformat()},{qty}'
+
+            _dn_nohin(
+                canvas, margin_left, yt, nohin_w, item_h,
+                product_code, product_name, qty, date_ymd, date_mmdd,
+                supplier.supplier_code or '', supplier.supplier_name or '', qr_data, font_name,
+            )
+            _dn_side(
+                canvas, margin_left + nohin_w + gap, yt, side_w, item_h,
+                product_code, product_name, qty, date_ymd, date_mmdd,
+                supplier.supplier_code or '', supplier.supplier_name or '', qr_data, font_name, '受領書',
+            )
+            _dn_side(
+                canvas, margin_left + nohin_w + gap + side_w + gap, yt, side_w, item_h,
+                product_code, product_name, qty, date_ymd, date_mmdd,
+                supplier.supplier_code or '', supplier.supplier_name or '', qr_data, font_name, '購入先控',
+            )
+
+            if item_index < len(page_items) - 1:
+                sep_y = yt - block_h + sep / 2
+                canvas.saveState()
+                canvas.setDash(4, 3)
+                canvas.setLineWidth(0.3)
+                canvas.setStrokeColor(colors.HexColor('#888888'))
+                canvas.line(margin_left, sep_y, page_w - margin_right, sep_y)
+                canvas.restoreState()
+        canvas.showPage()
+
+    canvas.save()
+    buf.seek(0)
+    return buf

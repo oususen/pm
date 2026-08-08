@@ -2973,6 +2973,7 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
                 'safety_stock_enabled': config.safety_stock_enabled,
                 'safety_stock_multiplier': float(config.safety_stock_multiplier),
                 'send_order_excel': config.send_order_excel,
+                'send_delivery_note_pdf': config.send_delivery_note_pdf,
                 'email_body_custom': config.email_body_custom,
                 'reply_to_email': config.reply_to_email,
                 'cc_emails': config.cc_emails,
@@ -3008,6 +3009,7 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
             safety_stock_enabled=_parse_bool(request.data.get('safety_stock_enabled', False)),
             safety_stock_multiplier=max(0.1, min(10, float(request.data.get('safety_stock_multiplier', 1) or 1))),
             send_order_excel=_parse_bool(request.data.get('send_order_excel')),
+            send_delivery_note_pdf=_parse_bool(request.data.get('send_delivery_note_pdf', True)),
             email_body_custom=request.data.get('email_body_custom', ''),
             reply_to_email=request.data.get('reply_to_email', ''),
             cc_emails=request.data.get('cc_emails', ''),
@@ -3061,6 +3063,8 @@ class PurchaseAutoOrderSendConfigDetailView(APIView):
             config.safety_stock_multiplier = max(0.1, min(10, float(request.data['safety_stock_multiplier'] or 1)))
         if 'send_order_excel' in request.data:
             config.send_order_excel = _parse_bool(request.data['send_order_excel'])
+        if 'send_delivery_note_pdf' in request.data:
+            config.send_delivery_note_pdf = _parse_bool(request.data['send_delivery_note_pdf'])
         if 'email_body_custom' in request.data:
             config.email_body_custom = request.data['email_body_custom']
         if 'reply_to_email' in request.data:
