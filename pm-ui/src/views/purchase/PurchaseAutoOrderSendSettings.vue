@@ -145,6 +145,7 @@
             <td class="td-actions">
               <button class="btn-sm" @click="openEdit(config)">編集</button>
               <button class="btn-sm btn-run" :disabled="running.has(config.id)" @click="runNow(config)">{{ running.has(config.id) ? '実行中...' : '今すぐ実行' }}</button>
+              <button class="btn-sm btn-holiday" :disabled="running.has(config.id)" @click="runHolidayTrial(config)">休日トライ</button>
               <button class="btn-sm btn-danger" @click="remove(config)">削除</button>
             </td>
           </tr>
@@ -683,6 +684,33 @@ const runNow = async (config) => {
   }
 }
 
+const runHolidayTrial = async (config) => {
+  if (!confirm(`${config.supplier_code} ${config.supplier_name} の注文書自動送信を休日トライ実行しますか？`)) return
+  running.add(config.id)
+  try {
+    await api.purchaseAutoOrderSend.runHolidayTrial(config.id)
+    const start = Date.now()
+    const timer = setInterval(async () => {
+      if (Date.now() - start > 5 * 60 * 1000) {
+        clearInterval(timer)
+        running.delete(config.id)
+        alert('5分経過しても完了しませんでした。')
+        return
+      }
+      await loadConfigs()
+      const updated = configs.value.find((item) => item.id === config.id)
+      if (updated && updated.last_run_status !== 'RUNNING') {
+        clearInterval(timer)
+        running.delete(config.id)
+        alert(`完了: ${updated.last_run_status}\n${updated.last_run_message || ''}`)
+      }
+    }, 3000)
+  } catch {
+    running.delete(config.id)
+    alert('休日トライ実行に失敗しました。')
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadConfigs(), loadSuppliers(), loadUsers(), loadContacts(), loadTruckCandidates()])
 })
@@ -710,6 +738,7 @@ watch(
 .badge-skipped { background: #fef3c7; color: #92400e; }
 .btn-sm { padding: 3px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
 .btn-run { border-color: #3b82f6; color: #2563eb; }
+.btn-holiday { border-color: #f59e0b; color: #b45309; }
 .btn-danger { border-color: #fca5a5; color: #dc2626; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
 .modal-content { background: #fff; border-radius: 8px; padding: 24px; width: 520px; max-height: 85vh; overflow-y: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.2); }
