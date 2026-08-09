@@ -312,7 +312,13 @@
 
         <div class="form-group">
           <label>失敗時の通知先 <span class="required">*</span></label>
-          <UserChipSelect :userList="userList" v-model="form.notify_on_failure_user_ids" />
+          <UserChipSelect
+            :userList="userList"
+            v-model="form.notify_on_failure_user_ids"
+            placeholder="社員コードで検索して追加"
+            search-mode="employee_code"
+            display-mode="code_only"
+          />
         </div>
 
         <div class="form-group">

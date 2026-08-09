@@ -3,7 +3,7 @@
     <input
       v-model="searchText"
       class="search-input"
-      placeholder="社員コード/氏名/ユーザー名で検索して追加"
+      :placeholder="placeholder"
       @keyup.enter.prevent="addFirstCandidate"
     />
     <div v-if="candidates.length" class="candidate-list">
@@ -27,6 +27,9 @@ import { computed, ref } from 'vue'
 const props = defineProps({
   userList: { type: Array, default: () => [] },
   modelValue: { type: Array, default: () => [] },
+  placeholder: { type: String, default: '社員コード/氏名/ユーザー名で検索して追加' },
+  searchMode: { type: String, default: 'all' },
+  displayMode: { type: String, default: 'code_name' },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -35,6 +38,7 @@ const searchText = ref('')
 const normalizeUserId = (value) => Number(value)
 
 const codeLabel = (u) => u?.profile?.employee_code || u?.username || u?.email || ''
+const employeeCodeLabel = (u) => u?.profile?.employee_code || ''
 const nameLabel = (u) => {
   const last = u?.last_name || ''
   const first = u?.first_name || ''
@@ -49,9 +53,13 @@ const candidates = computed(() => {
       const userId = normalizeUserId(u.id)
       if (props.modelValue.some((id) => normalizeUserId(id) === userId)) return false
       const code = codeLabel(u).toLowerCase()
+      const employeeCode = employeeCodeLabel(u).toLowerCase()
       const name = nameLabel(u).toLowerCase()
       const uname = (u?.username || '').toLowerCase()
       const email = (u?.email || '').toLowerCase()
+      if (props.searchMode === 'employee_code') {
+        return employeeCode.includes(kw)
+      }
       return code.includes(kw) || name.includes(kw) || uname.includes(kw) || email.includes(kw)
     })
     .slice(0, 8)
@@ -78,6 +86,9 @@ const userLabel = (uid) => {
   const targetId = normalizeUserId(uid)
   const u = props.userList.find((x) => normalizeUserId(x.id) === targetId)
   if (!u) return `ID:${uid}`
+  if (props.displayMode === 'code_only') {
+    return codeLabel(u)
+  }
   return `${codeLabel(u)} ${nameLabel(u)}`.trim()
 }
 </script>
