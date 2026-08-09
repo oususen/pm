@@ -121,6 +121,36 @@
       </div>
     </div>
 
+    <div v-if="showSaveConfirmDialog" class="modal-overlay" @click.self="closeSaveConfirmDialog">
+      <div class="modal-card save-confirm-modal">
+        <h3 class="modal-title">保存前チェック</h3>
+        <div class="save-confirm-message">保存前チェックで注意点があります。</div>
+        <div v-if="saveValidationState.missingTruckCount" class="save-confirm-section">
+          <div class="save-confirm-line">・便未選択: {{ saveValidationState.missingTruckCount }}件</div>
+          <div v-for="item in saveValidationState.missingTruckDetails" :key="`missing-${item}`" class="save-confirm-detail">
+            {{ item }}
+          </div>
+        </div>
+        <div v-if="saveValidationState.unassignedQtyCount" class="save-confirm-section">
+          <div class="save-confirm-line save-confirm-line-danger">・未割付残あり: {{ saveValidationState.unassignedQtyCount }}件</div>
+          <div v-for="item in saveValidationState.unassignedQtyDetails" :key="`unassigned-${item}`" class="save-confirm-detail save-confirm-detail-danger">
+            {{ item }}
+          </div>
+        </div>
+        <div v-for="item in saveValidationState.overAssigned" :key="`over-${item}`" class="save-confirm-line">
+          ・割付数量超過: {{ item }}
+        </div>
+        <div v-if="saveValidationState.overloaded.length" class="save-confirm-line">
+          ・便占有率100%超: {{ saveValidationState.overloaded.join(' / ') }}
+        </div>
+        <div class="save-confirm-question">このまま保存しますか？</div>
+        <div class="modal-actions">
+          <button class="btn" :disabled="saving" @click="closeSaveConfirmDialog">キャンセル</button>
+          <button class="btn save-btn" :disabled="saving" @click="proceedSave">OK</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="showDisplaySettingDialog" class="modal-overlay" @click.self="showDisplaySettingDialog = false">
       <div class="display-setting-modal">
         <h3 class="modal-title">便計画表示順設定</h3>
@@ -927,6 +957,15 @@ const calendarList = ref([])
 const autoAssignCalendarId = ref(null)
 const autoAssignStartDate = ref('')
 const autoAssignEndDate = ref('')
+const showSaveConfirmDialog = ref(false)
+const saveValidationState = ref({
+  missingTruckCount: 0,
+  missingTruckDetails: [],
+  unassignedQtyCount: 0,
+  unassignedQtyDetails: [],
+  overAssigned: [],
+  overloaded: [],
+})
 const calendarDayMap = ref({})
 const productNameMap = ref(new Map())
 const showPickupPdfDialog = ref(false)
@@ -2378,12 +2417,12 @@ const exportPickupDetailPdf = async () => {
   }
 }
 
-const save = async () => {
-  const validation = validateBeforeSave()
-  if (!validation.ok) {
-    const proceed = window.confirm(`${validation.message}\n\nこのまま保存しますか？`)
-    if (!proceed) return
-  }
+const closeSaveConfirmDialog = () => {
+  if (saving.value) return
+  showSaveConfirmDialog.value = false
+}
+
+const performSave = async () => {
   saving.value = true
   try {
     for (const dateKey of allDateKeys.value) {
@@ -2419,6 +2458,21 @@ const save = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const proceedSave = async () => {
+  showSaveConfirmDialog.value = false
+  await performSave()
+}
+
+const save = async () => {
+  const validation = validateBeforeSave()
+  if (!validation.ok) {
+    saveValidationState.value = validation
+    showSaveConfirmDialog.value = true
+    return
+  }
+  await performSave()
 }
 
 const saveProgressAdjust = async () => {
@@ -2491,17 +2545,18 @@ const validateBeforeSave = () => {
   }
 
   if (!missingTruckCount && !unassignedQtyCount && !overAssigned.length && !overloaded.length) {
-    return { ok: true, message: '' }
+    return { ok: true }
   }
 
-  const lines = ['保存前チェックで注意点があります。']
-  if (missingTruckCount) lines.push(`・便未選択: ${missingTruckCount}件`)
-  if (missingTruckDetails.length) missingTruckDetails.forEach((s) => lines.push(`  ${s}`))
-  if (unassignedQtyCount) lines.push(`・未割付残あり: ${unassignedQtyCount}件`)
-  if (unassignedQtyDetails.length) unassignedQtyDetails.forEach((s) => lines.push(`  ${s}`))
-  if (overAssigned.length) overAssigned.forEach((s) => lines.push(`・割付数量超過: ${s}`))
-  if (overloaded.length) lines.push(`・便占有率100%超: ${overloaded.join(' / ')}`)
-  return { ok: false, message: lines.join('\n') }
+  return {
+    ok: false,
+    missingTruckCount,
+    missingTruckDetails,
+    unassignedQtyCount,
+    unassignedQtyDetails,
+    overAssigned,
+    overloaded,
+  }
 }
 
 // ---- 擬似便対象製品 ----
@@ -2954,6 +3009,38 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 14px;
   box-shadow: 0 8px 24px rgba(2, 6, 23, 0.18);
+}
+.save-confirm-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+.save-confirm-message,
+.save-confirm-question {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #111827;
+}
+.save-confirm-question {
+  margin-top: 16px;
+}
+.save-confirm-section,
+.save-confirm-line {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #111827;
+  white-space: pre-wrap;
+}
+.save-confirm-detail {
+  padding-left: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #111827;
+  white-space: pre-wrap;
+}
+.save-confirm-line-danger,
+.save-confirm-detail-danger {
+  color: #b91c1c;
+  font-weight: 600;
 }
 .display-setting-modal {
   width: min(980px, calc(100vw - 32px));
