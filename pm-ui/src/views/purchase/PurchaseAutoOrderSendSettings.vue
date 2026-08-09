@@ -35,18 +35,22 @@
             </div>
           </div>
 
-          <div v-if="truckCheckResult" class="truck-check-result-area">
-            <div class="truck-result-header">
-              <span class="truck-result-name">{{ truckCheckResult.truck?.name || '-' }}</span>
-              <span :class="['badge', truckCheckResult.can_fit ? 'badge-on' : 'badge-overload']">
-                {{ truckCheckResult.can_fit ? '積載可' : '積載超過' }}
-              </span>
-              <span class="truck-result-occ">占有率: {{ truckCheckResult.occupancy_percent }}%</span>
-              <span v-if="truckCheckResult.total_footprints" class="truck-result-occ">配置: {{ truckCheckResult.total_footprints - (truckCheckResult.overflow_count || 0) }}/{{ truckCheckResult.total_footprints }}枠</span>
-              <span v-if="truckContainerSummaryText" class="truck-result-occ truck-result-summary">{{ truckContainerSummaryText }}</span>
-              <span v-if="truckCheckResult.data_source" class="hint-text">（{{ truckCheckResult.data_source === 'proposal' ? '注文書' : '購買計画' }}）</span>
-            </div>
+        <div v-if="truckCheckResult" class="truck-check-result-area">
+          <div class="truck-result-header">
+            <span class="truck-result-name">{{ truckCheckResult.truck?.name || '-' }}</span>
+            <span :class="['badge', truckCheckResult.can_fit ? 'badge-on' : 'badge-overload']">
+              {{ truckCheckResult.can_fit ? '積載可' : '積載超過' }}
+            </span>
+            <span class="truck-result-occ">占有率: {{ truckCheckResult.occupancy_percent }}%</span>
+            <span v-if="truckCheckResult.total_footprints" class="truck-result-occ">配置: {{ truckCheckResult.total_footprints - (truckCheckResult.overflow_count || 0) }}/{{ truckCheckResult.total_footprints }}枠</span>
+            <span v-if="truckContainerSummaryText" class="truck-result-occ truck-result-summary">{{ truckContainerSummaryText }}</span>
+            <span v-if="truckCheckResult.data_source" class="hint-text">（{{ truckCheckResult.data_source === 'proposal' ? '注文書' : '購買計画' }}）</span>
+            <button class="btn-sm truck-toggle-btn" @click="toggleTruckCheckResult">
+              {{ truckCheckResultCollapsed ? '詳細を表示' : 'たたむ' }}
+            </button>
+          </div>
 
+          <div v-show="!truckCheckResultCollapsed">
             <div v-if="truckCheckResult.errors?.length" class="truck-result-errors">
               <span v-for="(err, i) in truckCheckResult.errors" :key="i">{{ err }}</span>
             </div>
@@ -115,6 +119,7 @@
               </table>
             </div>
           </div>
+        </div>
         </div>
 
         <table v-if="configs.length" class="data-table">
@@ -348,6 +353,7 @@ const histories = ref([])
 const truckCandidates = ref([])
 const truckCheckLoading = ref(false)
 const truckCheckResult = ref(null)
+const truckCheckResultCollapsed = ref(false)
 const truckCheckRequestId = ref('')
 const truckCheckAbortController = ref(null)
 const truckCheck = reactive({
@@ -589,6 +595,11 @@ const truckContainerSummaryText = computed(() => {
 
 const onTruckChange = () => {
   truckCheckResult.value = null
+  truckCheckResultCollapsed.value = false
+}
+
+const toggleTruckCheckResult = () => {
+  truckCheckResultCollapsed.value = !truckCheckResultCollapsed.value
 }
 
 const createTruckLoadRequestId = () => {
@@ -610,6 +621,7 @@ const runTruckLoadCheck = async () => {
   truckCheckAbortController.value = abortController
   truckCheckLoading.value = true
   truckCheckResult.value = null
+  truckCheckResultCollapsed.value = false
   try {
     const res = await api.purchaseAutoOrderSend.checkTruckLoad({
       truck_id: truckCheck.truck_id,
@@ -960,12 +972,15 @@ watch(
  .truck-check-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
  .truck-check-header h2 { margin: 0; font-size: 15px; }
  .truck-check-actions { display: flex; gap: 8px; }
- .truck-check-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
- .form-group.compact { margin-bottom: 0; min-width: 220px; }
- .truck-check-form select { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
+.truck-check-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.form-group.compact { margin-bottom: 0; min-width: 220px; display: flex; align-items: center; gap: 8px; }
+.form-group.compact > label { margin-bottom: 0; white-space: nowrap; }
+.truck-check-form select,
+.truck-check-form input[type="date"] { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
  .hint-text { font-size: 11px; color: #6b7280; margin-left: 4px; }
- .truck-check-result-area { margin-top: 12px; padding: 12px; border-radius: 6px; background: #fff; border: 1px solid #d1d5db; }
- .truck-result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; }
+.truck-check-result-area { margin-top: 12px; padding: 12px; border-radius: 6px; background: #fff; border: 1px solid #d1d5db; }
+.truck-result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; }
+.truck-toggle-btn { margin-left: auto; }
  .truck-result-name { font-weight: 700; }
  .truck-result-occ { font-size: 13px; color: #475569; }
  .badge-overload { background: #fee2e2; color: #991b1b; }
