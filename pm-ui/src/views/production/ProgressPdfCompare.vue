@@ -1,5 +1,14 @@
 <template>
   <div class="progress-pdf-compare">
+    <div class="usage-guide">
+      <div class="usage-guide-title">使い方</div>
+      <div>1. ラインコードを入力します。</div>
+      <div>2. 比較したい日付を選択します。</div>
+      <div>3. 進度PDFを選択します。</div>
+      <div>4. 「突合実行」を押して、一致・不一致・PDF独自・DB独自を確認します。</div>
+      <div>5. 必要に応じて「Excel出力」で結果を保存します。</div>
+    </div>
+
     <div class="controls">
       <label>ラインコード:
         <input v-model="lineCode" placeholder="000180" style="width:80px" />
@@ -235,6 +244,21 @@ async function exportExcel() {
 
 <style scoped>
 .progress-pdf-compare { padding: 8px; }
+.usage-guide {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #eef7ff;
+  border: 1px solid #bbdefb;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.usage-guide-title {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1565c0;
+}
 .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .controls label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
 .controls input, .controls select { font-size: 13px; padding: 2px 4px; }

@@ -23,6 +23,7 @@
           >
             <div class="icon-box" :aria-label="tile.iconLabel || null">{{ tile.icon }}</div>
             <div class="label">{{ tile.label }}</div>
+            <div v-if="tile.description" class="description">{{ tile.description }}</div>
           </RouterLink>
         </div>
       </section>
@@ -287,6 +288,7 @@ const tiles = computed(() => {
       label: "進度PDF突合",
       icon: "🔍",
       iconLabel: "突合",
+      description: "PDFとシステム進度を比較して差異を確認",
       category: "inventory",
       required: "view",
       resource: "production",
@@ -419,6 +421,12 @@ const onTileClick = (event, tile) => {
 }
 .master-tile .label {
   font-weight: 700;
+}
+.master-tile .description {
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
 }
 .master-tile.accent {
   border: 1px solid #4f46e5;
