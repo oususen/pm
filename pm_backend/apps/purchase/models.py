@@ -462,6 +462,8 @@ class PurchaseAutoOrderSendConfig(models.Model):
         verbose_name='安全在庫倍数',
     )
     send_order_excel = models.BooleanField(default=True, verbose_name='注文書Excel送信')
+    send_progress_excel = models.BooleanField(default=True, verbose_name='進度表Excel送信')
+    send_progress_pdf = models.BooleanField(default=True, verbose_name='進度表PDF送信')
     send_delivery_note_pdf = models.BooleanField(default=True, verbose_name='外作納品書PDF送信')
     email_body_custom = models.TextField(blank=True, default='', verbose_name='メール本文（カスタム）')
     reply_to_email = models.EmailField(blank=True, default='', verbose_name='返信先メールアドレス')

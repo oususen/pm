@@ -7,6 +7,12 @@
         <button class="btn-secondary" @click="loadHistories">履歴更新</button>
       </div>
     </div>
+    <div class="page-note">
+      <div>注文書Excel・進度表Excel・進度表PDF・外作納品書PDFはそれぞれ設定でON/OFFできます。</div>
+      <div>一覧には送信先・添付内容・通知先の要約を表示します。履歴は絞り込みと詳細確認ができます。</div>
+    </div>
+    <div v-if="pageMessage" class="page-message">{{ pageMessage }}</div>
+    <div v-if="pageError" class="page-error">{{ pageError }}</div>
 
     <div class="page-content">
       <div v-if="loading" class="no-data">読み込み中...</div>
@@ -133,6 +139,9 @@
             <th>数量方式</th>
             <th>安全在庫</th>
             <th>有効</th>
+            <th>送信先</th>
+            <th>添付</th>
+            <th>通知先</th>
             <th>最終実行</th>
             <th>ステータス</th>
             <th>メッセージ</th>
@@ -149,6 +158,9 @@
             <td>{{ calcModeLabel(config.calc_mode) }}</td>
             <td>{{ config.safety_stock_enabled ? `確保 (×${config.safety_stock_multiplier})` : '確保しない' }}</td>
             <td><span :class="['badge', config.is_enabled ? 'badge-on' : 'badge-off']">{{ config.is_enabled ? '有効' : '無効' }}</span></td>
+            <td class="td-wrap">{{ configRecipientSummary(config) }}</td>
+            <td class="td-wrap">{{ configAttachmentSummary(config) }}</td>
+            <td class="td-wrap">{{ configNotifySummary(config) }}</td>
             <td>{{ config.last_run_at || '-' }}</td>
             <td><span v-if="config.last_run_status" :class="['badge', `badge-${config.last_run_status.toLowerCase()}`]">{{ config.last_run_status }}</span></td>
             <td class="td-msg">{{ config.last_run_message || '' }}</td>
@@ -166,39 +178,91 @@
       <div class="history-panel">
         <div class="history-header">
           <h2>自動送信履歴</h2>
+          <div class="history-filter-actions">
+            <button class="btn-secondary" @click="resetHistoryFilters">絞り込み解除</button>
+            <button class="btn-secondary" @click="loadHistories">再取得</button>
+          </div>
         </div>
-        <table v-if="histories.length" class="data-table history-table">
+        <div class="history-filters">
+          <div class="form-group compact">
+            <label>仕入先</label>
+            <select v-model="historyFilters.supplier_id" @change="loadHistories">
+              <option value="">すべて</option>
+              <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
+                {{ supplier.supplier_code }} {{ supplier.supplier_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group compact">
+            <label>結果</label>
+            <select v-model="historyFilters.status" @change="loadHistories">
+              <option value="">すべて</option>
+              <option value="SUCCESS">成功</option>
+              <option value="FAILED">失敗</option>
+              <option value="RUNNING">実行中</option>
+              <option value="SKIPPED">スキップ</option>
+            </select>
+          </div>
+          <div class="form-group compact">
+            <label>種別</label>
+            <select v-model="historyFilters.trigger_type" @change="loadHistories">
+              <option value="">すべて</option>
+              <option value="SCHEDULED">自動実行</option>
+              <option value="MANUAL">手動実行</option>
+              <option value="HOLIDAY_TRIAL">休日トライ</option>
+            </select>
+          </div>
+          <div class="form-group compact">
+            <label>件数</label>
+            <select v-model.number="historyFilters.limit" @change="loadHistories">
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="200">200</option>
+            </select>
+          </div>
+          <div class="form-group compact keyword-group">
+            <label>検索</label>
+            <input v-model.trim="historyFilters.keyword" type="text" placeholder="仕入先・宛先・件名・メッセージ" />
+          </div>
+        </div>
+        <table v-if="filteredHistories.length" class="data-table history-table">
           <thead>
             <tr>
               <th>実行日時</th>
+              <th>終了日時</th>
               <th>仕入先</th>
               <th>種別</th>
               <th>結果</th>
               <th>先頭納入日</th>
               <th>品目数</th>
               <th>宛先</th>
+              <th>添付</th>
               <th>注文書Excel</th>
               <th>メッセージ</th>
+              <th>詳細</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="history in histories" :key="history.id">
+            <tr v-for="history in filteredHistories" :key="history.id">
               <td>{{ history.started_at || '-' }}</td>
+              <td>{{ history.finished_at || '-' }}</td>
               <td>{{ history.supplier_code }} {{ history.supplier_name }}</td>
               <td>{{ historyTriggerLabel(history.trigger_type) }}</td>
               <td><span :class="['badge', `badge-${String(history.status || '').toLowerCase()}`]">{{ history.status }}</span></td>
               <td>{{ history.first_delivery_date || '-' }}</td>
               <td class="td-right">{{ history.order_item_count || 0 }}</td>
               <td>{{ history.to_email || '-' }}</td>
+              <td class="td-wrap">{{ historyAttachmentSummary(history) }}</td>
               <td>
                 <button v-if="history.has_order_excel_file" class="btn-sm" @click="downloadHistoryOrderExcel(history)">再DL</button>
                 <span v-else>-</span>
               </td>
               <td class="td-msg">{{ history.message || '' }}</td>
+              <td><button class="btn-sm" @click="openHistoryDetail(history)">詳細</button></td>
             </tr>
           </tbody>
         </table>
-        <div v-else class="no-data">自動送信履歴がありません。</div>
+        <div v-else class="no-data">条件に一致する自動送信履歴がありません。</div>
       </div>
     </div>
     </div>
@@ -283,8 +347,11 @@
           <label>送信ファイル選択</label>
           <div class="file-toggle-grid">
             <label class="checkbox-label"><input v-model="form.send_order_excel" type="checkbox" /> 注文書Excel送信</label>
+            <label class="checkbox-label"><input v-model="form.send_progress_excel" type="checkbox" /> 進度表 Excel</label>
+            <label class="checkbox-label"><input v-model="form.send_progress_pdf" type="checkbox" /> 進度表 PDF</label>
             <label class="checkbox-label"><input v-model="form.send_delivery_note_pdf" type="checkbox" /> 外作納品書 PDF</label>
           </div>
+          <div class="form-hint">対象データが生成できたファイルだけが添付されます。</div>
         </div>
 
         <div class="form-group">
@@ -330,6 +397,9 @@
           <label>納入日でないときの通知先 <span class="required">*</span></label>
           <UserChipSelect :userList="userList" v-model="form.notify_on_non_delivery_user_ids" />
         </div>
+        <div v-if="formErrors.length" class="form-error-list">
+          <div v-for="error in formErrors" :key="error">{{ error }}</div>
+        </div>
 
         <div class="form-actions">
           <button class="btn-primary" :disabled="saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
@@ -337,11 +407,35 @@
         </div>
       </div>
     </div>
+
+    <div v-if="selectedHistory" class="modal-overlay" @click.self="closeHistoryDetail">
+      <div class="modal-content history-detail-modal">
+        <h2 class="modal-title">履歴詳細</h2>
+        <div class="history-detail-grid">
+          <div><strong>仕入先:</strong> {{ selectedHistory.supplier_code }} {{ selectedHistory.supplier_name }}</div>
+          <div><strong>実行種別:</strong> {{ historyTriggerLabel(selectedHistory.trigger_type) }}</div>
+          <div><strong>結果:</strong> {{ selectedHistory.status }}</div>
+          <div><strong>実行時間:</strong> {{ selectedHistory.duration_seconds || '-' }}秒</div>
+          <div><strong>開始:</strong> {{ selectedHistory.started_at || '-' }}</div>
+          <div><strong>終了:</strong> {{ selectedHistory.finished_at || '-' }}</div>
+          <div><strong>先頭納入日:</strong> {{ selectedHistory.first_delivery_date || '-' }}</div>
+          <div><strong>品目数:</strong> {{ selectedHistory.order_item_count || 0 }}</div>
+          <div><strong>宛先:</strong> {{ selectedHistory.to_email || '-' }}</div>
+          <div><strong>CC:</strong> {{ historyCcSummary(selectedHistory) }}</div>
+          <div class="history-detail-full"><strong>件名:</strong> {{ selectedHistory.subject || '-' }}</div>
+          <div class="history-detail-full"><strong>添付:</strong> {{ historyAttachmentSummary(selectedHistory) }}</div>
+          <div class="history-detail-full"><strong>メッセージ:</strong><pre class="history-message-pre">{{ selectedHistory.message || '-' }}</pre></div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-secondary" @click="closeHistoryDetail">閉じる</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
 import UserChipSelect from './UserChipSelect.vue'
 import ContactEmailSelect from './ContactEmailSelect.vue'
@@ -367,9 +461,21 @@ const showModal = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
 const running = reactive(new Set())
+const pageMessage = ref('')
+const pageError = ref('')
+const formErrors = ref([])
+const selectedHistory = ref(null)
 const supplierCalendarHasDeliveryDays = ref(true)
 const checkingSupplierCalendarDays = ref(false)
 const todayYmd = new Date().toISOString().slice(0, 10)
+const historyFilters = reactive({
+  supplier_id: '',
+  status: '',
+  trigger_type: '',
+  limit: 100,
+  keyword: '',
+})
+const historyPollTimers = new Map()
 
 const form = reactive({
   supplier_id: '',
@@ -384,6 +490,8 @@ const form = reactive({
   safety_stock_enabled: false,
   safety_stock_multiplier: 1,
   send_order_excel: true,
+  send_progress_excel: true,
+  send_progress_pdf: true,
   send_delivery_note_pdf: true,
   email_body_custom: '',
   reply_to_email: '',
@@ -437,6 +545,60 @@ const historyTriggerLabel = (triggerType) => {
   return '自動実行'
 }
 
+const setPageMessage = (message) => {
+  pageMessage.value = message
+  if (message) pageError.value = ''
+}
+
+const setPageError = (message) => {
+  pageError.value = message
+  if (message) pageMessage.value = ''
+}
+
+const configAttachmentSummary = (config) => {
+  const labels = []
+  if (config.send_order_excel) labels.push('注文書Excel')
+  if (config.send_progress_excel) labels.push('進度表Excel')
+  if (config.send_progress_pdf) labels.push('進度表PDF')
+  if (config.send_delivery_note_pdf) labels.push('外作納品書PDF')
+  return labels.length ? labels.join(' / ') : 'すべてOFF'
+}
+
+const configRecipientSummary = (config) => {
+  const ccCount = splitEmailLines(config.cc_emails).length
+  return `${config.reply_to_email || '返信先未設定'} / CC${ccCount}件`
+}
+
+const configNotifySummary = (config) => {
+  return `失敗${(config.notify_on_failure_user_ids || []).length}人 / 非納入日${(config.notify_on_non_delivery_user_ids || []).length}人`
+}
+
+const historyAttachmentSummary = (history) => {
+  const labels = Array.isArray(history.attachment_labels) ? history.attachment_labels : []
+  return labels.length ? labels.join(' / ') : '-'
+}
+
+const historyCcSummary = (history) => {
+  const lines = splitEmailLines(history.cc_emails)
+  return lines.length ? lines.join(', ') : '-'
+}
+
+const filteredHistories = computed(() => {
+  const keyword = String(historyFilters.keyword || '').trim().toLowerCase()
+  if (!keyword) return histories.value
+  return histories.value.filter((history) => {
+    const haystack = [
+      history.supplier_code,
+      history.supplier_name,
+      history.to_email,
+      history.subject,
+      history.message,
+      historyAttachmentSummary(history),
+    ].join(' ').toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+
 const loadConfigs = async () => {
   loading.value = true
   try {
@@ -449,10 +611,15 @@ const loadConfigs = async () => {
 
 const loadHistories = async () => {
   try {
-    const res = await api.purchaseAutoOrderSend.getHistories({ limit: 50 })
+    const params = { limit: historyFilters.limit || 100 }
+    if (historyFilters.supplier_id) params.supplier_id = historyFilters.supplier_id
+    if (historyFilters.status) params.status = historyFilters.status
+    if (historyFilters.trigger_type) params.trigger_type = historyFilters.trigger_type
+    const res = await api.purchaseAutoOrderSend.getHistories(params)
     histories.value = res.data || []
   } catch (error) {
     console.error('注文書自動送信履歴取得エラー', error)
+    setPageError('注文書自動送信履歴の取得に失敗しました。')
   }
 }
 
@@ -743,12 +910,15 @@ const resetForm = () => {
   form.safety_stock_enabled = false
   form.safety_stock_multiplier = 1
   form.send_order_excel = true
+  form.send_progress_excel = true
+  form.send_progress_pdf = true
   form.send_delivery_note_pdf = true
   form.email_body_custom = ''
   form.reply_to_email = ''
   form.cc_emails = ''
   form.notify_on_failure_user_ids = []
   form.notify_on_non_delivery_user_ids = []
+  formErrors.value = []
   supplierCalendarHasDeliveryDays.value = true
   checkingSupplierCalendarDays.value = false
 }
@@ -775,6 +945,8 @@ const openEdit = (config) => {
   form.safety_stock_enabled = !!config.safety_stock_enabled
   form.safety_stock_multiplier = config.safety_stock_multiplier ?? 1
   form.send_order_excel = config.send_order_excel
+  form.send_progress_excel = config.send_progress_excel ?? true
+  form.send_progress_pdf = config.send_progress_pdf ?? true
   form.send_delivery_note_pdf = config.send_delivery_note_pdf ?? true
   form.email_body_custom = config.email_body_custom || ''
   form.reply_to_email = config.reply_to_email || ''
@@ -786,23 +958,28 @@ const openEdit = (config) => {
 
 const closeModal = () => {
   showModal.value = false
+  formErrors.value = []
 }
 
 const validate = () => {
   const errors = []
-  if (!form.supplier_id) errors.push('仕入先')
+  if (!form.supplier_id) errors.push('仕入先を選択してください。')
   if (form.lead_time_days === null || form.lead_time_days === '' || Number.isNaN(form.lead_time_days)) {
-    errors.push('納入日（営業日後）')
+    errors.push('納入日（営業日後）を入力してください。')
   }
-  if (!form.progress_days_back) errors.push('進度表（営業日前）')
-  if (!form.progress_days_forward) errors.push('進度表（日後・発行日基準）')
-  if (!form.reply_to_email?.trim()) errors.push('返信先メールアドレス')
-  if (!form.cc_emails?.trim()) errors.push('業務員CC送信先メール')
-  if (!form.notify_on_failure_user_ids.length) errors.push('失敗時の通知先')
-  if (!form.notify_on_non_delivery_user_ids.length) errors.push('納入日でないときの通知先')
-  if (showSupplierCalendarWarning.value) errors.push('仕入先カレンダ（納入日未設定）')
+  if (!form.progress_days_back) errors.push('進度表（営業日前）を入力してください。')
+  if (!form.progress_days_forward) errors.push('進度表（日後・発行日基準）を入力してください。')
+  if (!form.reply_to_email?.trim()) errors.push('返信先メールアドレスを選択してください。')
+  if (!form.cc_emails?.trim()) errors.push('業務員CC送信先メールを選択してください。')
+  if (!form.notify_on_failure_user_ids.length) errors.push('失敗時の通知先を選択してください。')
+  if (!form.notify_on_non_delivery_user_ids.length) errors.push('納入日でないときの通知先を選択してください。')
+  if (!form.send_order_excel && !form.send_progress_excel && !form.send_progress_pdf && !form.send_delivery_note_pdf) {
+    errors.push('送信ファイルを1つ以上ONにしてください。')
+  }
+  if (showSupplierCalendarWarning.value) errors.push('仕入先カレンダに未来の納入日が未設定です。')
+  formErrors.value = errors
   if (errors.length) {
-    alert(`以下の項目は必須です:\n${errors.join('\n')}`)
+    setPageError('保存前に入力エラーを修正してください。')
     return false
   }
   return true
@@ -821,6 +998,8 @@ const buildPayload = () => ({
   safety_stock_enabled: form.safety_stock_enabled,
   safety_stock_multiplier: form.safety_stock_multiplier,
   send_order_excel: form.send_order_excel,
+  send_progress_excel: form.send_progress_excel,
+  send_progress_pdf: form.send_progress_pdf,
   send_delivery_note_pdf: form.send_delivery_note_pdf,
   email_body_custom: form.email_body_custom,
   reply_to_email: form.reply_to_email,
@@ -842,9 +1021,10 @@ const save = async () => {
     closeModal()
     await loadConfigs()
     await loadHistories()
+    setPageMessage(isEdit.value ? '設定を更新しました。' : '設定を追加しました。')
   } catch (error) {
     const detail = error?.response?.data?.detail
-    alert(`保存に失敗しました。${detail ? `\n${detail}` : ''}`)
+    setPageError(`保存に失敗しました。${detail ? ` ${detail}` : ''}`)
   } finally {
     saving.value = false
   }
@@ -856,69 +1036,103 @@ const remove = async (config) => {
     await api.purchaseAutoOrderSend.deleteConfig(config.id)
     await loadConfigs()
     await loadHistories()
+    setPageMessage(`${config.supplier_code} ${config.supplier_name} の設定を削除しました。`)
   } catch {
-    alert('削除に失敗しました。')
+    setPageError('削除に失敗しました。')
+  }
+}
+
+const stopHistoryPolling = (configId) => {
+  const timer = historyPollTimers.get(configId)
+  if (timer) {
+    clearTimeout(timer)
+    historyPollTimers.delete(configId)
+  }
+  running.delete(configId)
+}
+
+const scheduleHistoryPolling = (config, actionLabel) => {
+  const startedAt = Date.now()
+  const tick = async () => {
+    if (Date.now() - startedAt > 5 * 60 * 1000) {
+      stopHistoryPolling(config.id)
+      setPageError(`${config.supplier_code} ${config.supplier_name} の${actionLabel}は5分経過しても完了しませんでした。`)
+      return
+    }
+    try {
+      await loadConfigs()
+      await loadHistories()
+      const updated = configs.value.find((item) => item.id === config.id)
+      if (updated && updated.last_run_status && updated.last_run_status !== 'RUNNING') {
+        stopHistoryPolling(config.id)
+        if (updated.last_run_status === 'SUCCESS') {
+          setPageMessage(`${config.supplier_code} ${config.supplier_name} の${actionLabel}が完了しました。${updated.last_run_message || ''}`)
+        } else {
+          setPageError(`${config.supplier_code} ${config.supplier_name} の${actionLabel}結果: ${updated.last_run_status} ${updated.last_run_message || ''}`)
+        }
+        return
+      }
+      historyPollTimers.set(config.id, setTimeout(tick, 3000))
+    } catch (error) {
+      stopHistoryPolling(config.id)
+      setPageError(`${config.supplier_code} ${config.supplier_name} の実行状況取得に失敗しました。`)
+    }
+  }
+  historyPollTimers.set(config.id, setTimeout(tick, 3000))
+}
+
+const runConfigAction = async (config, actionLabel, runner) => {
+  if (running.has(config.id)) return
+  running.add(config.id)
+  try {
+    await runner(config.id)
+    setPageMessage(`${config.supplier_code} ${config.supplier_name} の${actionLabel}を開始しました。`)
+    scheduleHistoryPolling(config, actionLabel)
+  } catch (error) {
+    stopHistoryPolling(config.id)
+    const detail = error?.response?.data?.detail
+    setPageError(`${actionLabel}に失敗しました。${detail ? ` ${detail}` : ''}`)
   }
 }
 
 const runNow = async (config) => {
   if (!confirm(`${config.supplier_code} ${config.supplier_name} の注文書自動送信を今すぐ実行しますか？`)) return
-  running.add(config.id)
-  try {
-    await api.purchaseAutoOrderSend.runNow(config.id)
-    const start = Date.now()
-    const timer = setInterval(async () => {
-      if (Date.now() - start > 5 * 60 * 1000) {
-        clearInterval(timer)
-        running.delete(config.id)
-        alert('5分経過しても完了しませんでした。')
-        return
-      }
-      await loadConfigs()
-      await loadHistories()
-      const updated = configs.value.find((item) => item.id === config.id)
-      if (updated && updated.last_run_status !== 'RUNNING') {
-        clearInterval(timer)
-        running.delete(config.id)
-        alert(`完了: ${updated.last_run_status}\n${updated.last_run_message || ''}`)
-      }
-    }, 3000)
-  } catch {
-    running.delete(config.id)
-    alert('実行に失敗しました。')
-  }
+  await runConfigAction(config, '手動実行', api.purchaseAutoOrderSend.runNow)
 }
 
 const runHolidayTrial = async (config) => {
   if (!confirm(`${config.supplier_code} ${config.supplier_name} の注文書自動送信を休日トライ実行しますか？`)) return
-  running.add(config.id)
-  try {
-    await api.purchaseAutoOrderSend.runHolidayTrial(config.id)
-    const start = Date.now()
-    const timer = setInterval(async () => {
-      if (Date.now() - start > 5 * 60 * 1000) {
-        clearInterval(timer)
-        running.delete(config.id)
-        alert('5分経過しても完了しませんでした。')
-        return
-      }
-      await loadConfigs()
-      await loadHistories()
-      const updated = configs.value.find((item) => item.id === config.id)
-      if (updated && updated.last_run_status !== 'RUNNING') {
-        clearInterval(timer)
-        running.delete(config.id)
-        alert(`完了: ${updated.last_run_status}\n${updated.last_run_message || ''}`)
-      }
-    }, 3000)
-  } catch {
-    running.delete(config.id)
-    alert('休日トライ実行に失敗しました。')
-  }
+  await runConfigAction(config, '休日トライ実行', api.purchaseAutoOrderSend.runHolidayTrial)
+}
+
+const resetHistoryFilters = async () => {
+  historyFilters.supplier_id = ''
+  historyFilters.status = ''
+  historyFilters.trigger_type = ''
+  historyFilters.limit = 100
+  historyFilters.keyword = ''
+  await loadHistories()
+}
+
+const openHistoryDetail = (history) => {
+  selectedHistory.value = history
+}
+
+const closeHistoryDetail = () => {
+  selectedHistory.value = null
 }
 
 onMounted(async () => {
   await Promise.all([loadConfigs(), loadHistories(), loadSuppliers(), loadUsers(), loadContacts(), loadTruckCandidates()])
+})
+
+onUnmounted(() => {
+  historyPollTimers.forEach((timer) => clearTimeout(timer))
+  historyPollTimers.clear()
+  running.clear()
+  if (truckCheckAbortController.value) {
+    truckCheckAbortController.value.abort()
+  }
 })
 
 watch(
@@ -930,11 +1144,39 @@ watch(
 </script>
 
 <style scoped>
+.page-note {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.page-message,
+.page-error {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.page-message {
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+.page-error {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+}
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .data-table th { text-align: left; padding: 6px 8px; border-bottom: 2px solid #e5e9ef; font-weight: 700; color: #374151; background: #f8fafc; white-space: nowrap; }
 .data-table td { padding: 8px; border-bottom: 1px solid #e5e9ef; }
 .td-msg { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #64748b; }
 .td-actions { white-space: nowrap; }
+.td-wrap { min-width: 180px; white-space: normal; font-size: 12px; line-height: 1.5; color: #475569; }
 .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 .badge-on { background: #dcfce7; color: #166534; }
 .badge-off { background: #f1f5f9; color: #64748b; }
@@ -949,13 +1191,18 @@ watch(
 .history-panel { margin-top: 18px; }
 .history-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .history-header h2 { margin: 0; font-size: 15px; }
+.history-filter-actions { display: flex; gap: 8px; }
+.history-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.keyword-group { min-width: 280px !important; flex: 1; }
 .history-table { margin-top: 8px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
 .modal-content { background: #fff; border-radius: 8px; padding: 24px; width: 520px; max-height: 85vh; overflow-y: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.2); }
+.history-detail-modal { width: 760px; max-width: calc(100vw - 32px); }
 .modal-title { margin: 0 0 16px; font-size: 16px; }
 .form-group { margin-bottom: 14px; }
 .form-group > label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 4px; }
 .form-group select, .input-full { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
+.form-group input[type="text"] { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
 .time-row { display: flex; align-items: center; gap: 4px; }
 .time-input { width: 60px; text-align: center; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
 .suffix { font-size: 13px; color: #475569; }
@@ -964,10 +1211,35 @@ watch(
 .file-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
 .label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .form-hint { margin-top: 4px; font-size: 11px; color: #6b7280; }
+.form-error-list {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .required { color: #dc2626; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .btn-primary { padding: 6px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }
 .btn-secondary { padding: 6px 16px; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; }
+.history-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  font-size: 13px;
+}
+.history-detail-full { grid-column: 1 / -1; }
+.history-message-pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+}
  .truck-check-panel { margin-bottom: 18px; padding: 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; }
  .truck-check-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
  .truck-check-header h2 { margin: 0; font-size: 15px; }

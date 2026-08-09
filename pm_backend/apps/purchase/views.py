@@ -2784,6 +2784,23 @@ def _validate_email_fields(data):
     return errors
 
 
+def _build_auto_order_send_history_attachment_labels(row):
+    labels = []
+    subject = str(getattr(row, 'subject', '') or '')
+    if getattr(row, 'order_excel_file', None):
+        labels.append('注文書Excel')
+    if '外作納品書' in subject:
+        labels.append('外作納品書PDF')
+    if '進度表' in subject:
+        labels.extend(['進度表Excel', '進度表PDF'])
+    # 重複を避けて順序維持
+    uniq = []
+    for label in labels:
+        if label not in uniq:
+            uniq.append(label)
+    return uniq
+
+
 class PurchaseAutoDeliveryListConfigListCreateView(APIView):
     """自動納入リスト送信設定 一覧/新規作成"""
 
@@ -2957,7 +2974,7 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
     """注文書自動送信設定 一覧/新規作成"""
 
     def get(self, request):
-        configs = PurchaseAutoOrderSendConfig.objects.select_related('supplier').all()
+        configs = PurchaseAutoOrderSendConfig.objects.select_related('supplier').all().order_by('supplier__supplier_code', 'id')
         result = []
         for config in configs:
             result.append({
@@ -2976,6 +2993,8 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
                 'safety_stock_enabled': config.safety_stock_enabled,
                 'safety_stock_multiplier': float(config.safety_stock_multiplier),
                 'send_order_excel': config.send_order_excel,
+                'send_progress_excel': config.send_progress_excel,
+                'send_progress_pdf': config.send_progress_pdf,
                 'send_delivery_note_pdf': config.send_delivery_note_pdf,
                 'email_body_custom': config.email_body_custom,
                 'reply_to_email': config.reply_to_email,
@@ -3012,6 +3031,8 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
             safety_stock_enabled=_parse_bool(request.data.get('safety_stock_enabled', False)),
             safety_stock_multiplier=max(0.1, min(10, float(request.data.get('safety_stock_multiplier', 1) or 1))),
             send_order_excel=_parse_bool(request.data.get('send_order_excel')),
+            send_progress_excel=_parse_bool(request.data.get('send_progress_excel', True)),
+            send_progress_pdf=_parse_bool(request.data.get('send_progress_pdf', True)),
             send_delivery_note_pdf=_parse_bool(request.data.get('send_delivery_note_pdf', True)),
             email_body_custom=request.data.get('email_body_custom', ''),
             reply_to_email=request.data.get('reply_to_email', ''),
@@ -3066,6 +3087,10 @@ class PurchaseAutoOrderSendConfigDetailView(APIView):
             config.safety_stock_multiplier = max(0.1, min(10, float(request.data['safety_stock_multiplier'] or 1)))
         if 'send_order_excel' in request.data:
             config.send_order_excel = _parse_bool(request.data['send_order_excel'])
+        if 'send_progress_excel' in request.data:
+            config.send_progress_excel = _parse_bool(request.data['send_progress_excel'])
+        if 'send_progress_pdf' in request.data:
+            config.send_progress_pdf = _parse_bool(request.data['send_progress_pdf'])
         if 'send_delivery_note_pdf' in request.data:
             config.send_delivery_note_pdf = _parse_bool(request.data['send_delivery_note_pdf'])
         if 'email_body_custom' in request.data:
@@ -3098,6 +3123,8 @@ class PurchaseAutoOrderSendRunNowView(APIView):
         config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
         if not config:
             return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        if config.last_run_status == 'RUNNING':
+            return Response({'detail': 'この設定は既に実行中です'}, status=status.HTTP_409_CONFLICT)
 
         from .tasks_auto_order_send import run_auto_order_send
         import threading
@@ -3122,6 +3149,8 @@ class PurchaseAutoOrderSendHolidayTrialView(APIView):
         config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
         if not config:
             return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        if config.last_run_status == 'RUNNING':
+            return Response({'detail': 'この設定は既に実行中です'}, status=status.HTTP_409_CONFLICT)
 
         from .tasks_auto_order_send import run_auto_order_send
         import threading
@@ -3150,6 +3179,18 @@ class PurchaseAutoOrderSendHistoryListView(APIView):
                 qs = qs.filter(config_id=int(config_id))
             except (TypeError, ValueError):
                 return Response({'detail': 'invalid config_id'}, status=status.HTTP_400_BAD_REQUEST)
+        supplier_id = request.query_params.get('supplier_id')
+        if supplier_id:
+            try:
+                qs = qs.filter(supplier_id=int(supplier_id))
+            except (TypeError, ValueError):
+                return Response({'detail': 'invalid supplier_id'}, status=status.HTTP_400_BAD_REQUEST)
+        status_val = request.query_params.get('status')
+        if status_val:
+            qs = qs.filter(status=status_val)
+        trigger_type = request.query_params.get('trigger_type')
+        if trigger_type:
+            qs = qs.filter(trigger_type=trigger_type)
 
         limit = request.query_params.get('limit')
         try:
@@ -3171,12 +3212,14 @@ class PurchaseAutoOrderSendHistoryListView(APIView):
                 'finished_at': row.finished_at.strftime('%Y-%m-%d %H:%M:%S') if row.finished_at else None,
                 'duration_seconds': row.duration_seconds,
                 'to_email': row.to_email,
+                'cc_emails': row.cc_emails,
                 'subject': row.subject,
                 'message': row.message,
                 'first_delivery_date': row.first_delivery_date.isoformat() if row.first_delivery_date else None,
                 'order_item_count': row.order_item_count,
                 'has_order_excel_file': bool(row.order_excel_file),
                 'order_excel_filename': Path(row.order_excel_file.name).name if row.order_excel_file else '',
+                'attachment_labels': _build_auto_order_send_history_attachment_labels(row),
             })
         return Response(result)
 

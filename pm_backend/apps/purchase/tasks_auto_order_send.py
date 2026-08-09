@@ -42,6 +42,19 @@ def _finish_history(history, start_time, status_val, message, **extra_updates):
     history.save()
 
 
+def _extract_attachment_labels(order_excel_enabled, delivery_note_enabled, progress_excel_enabled, progress_pdf_enabled):
+    labels = []
+    if order_excel_enabled:
+        labels.append('注文書Excel')
+    if delivery_note_enabled:
+        labels.append('外作納品書PDF')
+    if progress_excel_enabled:
+        labels.append('進度表Excel')
+    if progress_pdf_enabled:
+        labels.append('進度表PDF')
+    return labels
+
+
 def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED'):
     from masters.models import Calendar
     from orders.utils.calendar_utils import WorkingDayCalculator
@@ -159,23 +172,14 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
         # ── ステップ8: 注文書Excel生成 + 添付ファイル構築 ──
         all_attachments = []
         excel_filename = ''
-        if items:
+        if items and config.send_order_excel:
             excel_data = generate_order_excel(items, supplier)
             excel_filename = f'注文書_{supplier.supplier_code}_{today}.xlsx'
             _save_history_order_excel(history, excel_data, excel_filename)
             all_attachments.append({
                 'data': excel_data,
                 'filename': excel_filename,
-            })
-        if progress_excel:
-            all_attachments.append({
-                'data': progress_excel,
-                'filename': f'進度表_{supplier.supplier_code}_{today}.xlsx',
-            })
-        if progress_pdf:
-            all_attachments.append({
-                'data': progress_pdf,
-                'filename': f'進度表_{supplier.supplier_code}_{today}.pdf',
+                'label': '注文書Excel',
             })
         delivery_note_pdf = None
         if items and config.send_delivery_note_pdf:
@@ -188,6 +192,19 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
             all_attachments.append({
                 'data': delivery_note_pdf,
                 'filename': f'外作納品書_{supplier.supplier_code}_{first_delivery_date}.pdf',
+                'label': '外作納品書PDF',
+            })
+        if progress_excel and config.send_progress_excel:
+            all_attachments.append({
+                'data': progress_excel,
+                'filename': f'進度表_{supplier.supplier_code}_{today}.xlsx',
+                'label': '進度表Excel',
+            })
+        if progress_pdf and config.send_progress_pdf:
+            all_attachments.append({
+                'data': progress_pdf,
+                'filename': f'進度表_{supplier.supplier_code}_{today}.pdf',
+                'label': '進度表PDF',
             })
 
         if not all_attachments:
@@ -202,8 +219,13 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
             )
             return
 
-        if not config.send_order_excel and not delivery_note_pdf:
-            message = '注文書Excel送信と外作納品書PDF送信がOFFです'
+        if (
+            not config.send_order_excel
+            and not config.send_progress_excel
+            and not config.send_progress_pdf
+            and not delivery_note_pdf
+        ):
+            message = '送信ファイル設定がすべてOFFです'
             _finish(config, start_time, 'SKIPPED', message)
             _finish_history(
                 history,
@@ -230,6 +252,12 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
 
         cc_list = [email.strip() for email in (config.cc_emails or '').splitlines() if email.strip()]
         reply_to = (config.reply_to_email or '').strip()
+        attachment_labels = _extract_attachment_labels(
+            order_excel_enabled=bool(items and config.send_order_excel),
+            delivery_note_enabled=bool(delivery_note_pdf),
+            progress_excel_enabled=bool(progress_excel and config.send_progress_excel),
+            progress_pdf_enabled=bool(progress_pdf and config.send_progress_pdf),
+        )
 
         delivery_dates = sorted({item['delivery_date'] for item in items}) if items else []
         subject_parts = []
@@ -237,7 +265,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
             subject_parts.append('注文書')
         if delivery_note_pdf:
             subject_parts.append('外作納品書')
-        if progress_excel or progress_pdf:
+        if (progress_excel and config.send_progress_excel) or (progress_pdf and config.send_progress_pdf):
             subject_parts.append('進度表')
         subject_label = '・'.join(subject_parts) or '添付資料'
         if delivery_dates:
@@ -269,15 +297,9 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
             reply_to=reply_to or None,
         )
 
-        attach_summary = []
-        if items:
-            attach_summary.append(f'注文書{len(items)}件')
-        if progress_excel:
-            attach_summary.append('進度表Excel')
-        if progress_pdf:
-            attach_summary.append('進度表PDF')
-        if delivery_note_pdf:
-            attach_summary.append('外作納品書PDF')
+        attach_summary = attachment_labels[:]
+        if items and config.send_order_excel:
+            attach_summary[0] = f'注文書Excel{len(items)}件'
 
         if send_result.get('success'):
             message = f'送信完了 ({", ".join(attach_summary)}) → {to_email}'
