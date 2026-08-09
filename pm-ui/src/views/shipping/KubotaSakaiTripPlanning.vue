@@ -53,7 +53,7 @@
       </button>
       <DataSourceDialog title="" :sources="dsSources" />
       <button class="btn pseudo-product-btn" :disabled="loading" @click="togglePseudoProductPanel">
-        擬似便対象製品
+        AM/PM対象品
       </button>
       <button class="btn auto-assign-btn" :disabled="loading || saving || autoAssigning" @click="openAutoAssignDialog">
         自動便振分
@@ -231,7 +231,7 @@
 
     <div v-if="showPseudoProductPanel" class="pseudo-product-wrap">
       <div class="pseudo-product-toolbar">
-        <span class="pseudo-product-title">擬似便対象製品</span>
+        <span class="pseudo-product-title">AM/PMグループ対象製品</span>
         <button class="btn save-btn" :disabled="savingPseudo" @click="savePseudoProducts">
           {{ savingPseudo ? '保存中...' : '保存' }}
         </button>
@@ -283,7 +283,7 @@
               }"
             >
               <div class="date-head-content">
-                <span class="pseudo-occ pseudo-occ-left" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'A') > 95 }">A:{{ pseudoTruckOccupancyPercent(dateKey, 'A') }}%</span>
+                <span class="pseudo-occ pseudo-occ-left" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'AM') > 95 }">AM:{{ pseudoTruckOccupancyPercent(dateKey, 'AM') }}%</span>
                 <div class="date-head-center">
                   <span class="date-head-label">{{ formatHeaderDate(dateKey) }}</span>
                   <button
@@ -293,7 +293,7 @@
                     @click="openDateHeaderNoticeDialog(dateKey)"
                   >{{ hasDateHeaderNote(dateKey) ? 'メモ' : '📝' }}</button>
                 </div>
-                <span class="pseudo-occ pseudo-occ-right" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'P') > 95 }">P:{{ pseudoTruckOccupancyPercent(dateKey, 'P') }}%</span>
+                <span class="pseudo-occ pseudo-occ-right" :class="{ 'pseudo-occ-over': pseudoTruckOccupancyPercent(dateKey, 'PM') > 95 }">PM:{{ pseudoTruckOccupancyPercent(dateKey, 'PM') }}%</span>
               </div>
             </th>
           </tr>
@@ -968,12 +968,13 @@ const dateKeys = computed(() => {
 
 const detailTrucks = computed(() => {
   const firstDate = dateKeys.value[0]
-  const base = trucksByDate.value[firstDate] || []
+  const base = (trucksByDate.value[firstDate] || []).filter((truck) => !isPseudoTruck(truck))
   if (base.length > 0) return base
   const merged = []
   const seen = new Set()
   Object.values(trucksByDate.value || {}).forEach((list) => {
     ;(list || []).forEach((truck) => {
+      if (isPseudoTruck(truck)) return
       const key = Number(truck.id)
       if (seen.has(key)) return
       seen.add(key)
@@ -993,18 +994,18 @@ const tripNoticeTabs = computed(() => activeTripNotice.value?.noticeScope === 'd
 const isHoliday = (dateKey) => Boolean(holidayByDate.value[dateKey])
 const isDaySplitStart = (dateKey) => dateKeys.value[0] !== dateKey
 const pseudoTruckMarkers = {
-  A: new Set(['A', 'A便', 'Ａ', 'Ａ便']),
-  P: new Set(['P', 'P便', 'Ｐ', 'Ｐ便']),
+  AM: new Set(['A', 'A便', 'Ａ', 'Ａ便', 'AM', 'AM便', 'ＡＭ', 'ＡＭ便']),
+  PM: new Set(['P', 'P便', 'Ｐ', 'Ｐ便', 'PM', 'PM便', 'ＰＭ', 'ＰＭ便']),
 }
 const normalizeTruckMarker = (truck) => String(truck?.alias_name || truck?.name || '').trim().toUpperCase()
 const isPseudoTruckType = (truck, type) => {
   const marker = normalizeTruckMarker(truck)
   const base = marker.replace(/\s+/g, '')
-  if (type === 'A') return pseudoTruckMarkers.A.has(base)
-  if (type === 'P') return pseudoTruckMarkers.P.has(base)
+  if (type === 'AM' || type === 'A') return pseudoTruckMarkers.AM.has(base)
+  if (type === 'PM' || type === 'P') return pseudoTruckMarkers.PM.has(base)
   return false
 }
-const isPseudoTruck = (truck) => isPseudoTruckType(truck, 'A') || isPseudoTruckType(truck, 'P')
+const isPseudoTruck = (truck) => isPseudoTruckType(truck, 'AM') || isPseudoTruckType(truck, 'PM')
 const displayTrucksForDate = (dateKey) => (trucksByDate.value[dateKey] || []).filter((truck) => !isPseudoTruck(truck))
 const slotWidthClass = (slotIdx) => {
   if (slotIdx === 0) return 'col-order'
@@ -2480,7 +2481,7 @@ const validateBeforeSave = () => {
 
     for (const item of previewList) {
       const occ = parseNumber(item?.occupancy_percent)
-      if (occ > 95) {
+      if (occ > 100) {
         const key = `${dateKey}-${item?.truck_id}`
         if (overloadedSet.has(key)) continue
         overloadedSet.add(key)
@@ -2499,7 +2500,7 @@ const validateBeforeSave = () => {
   if (unassignedQtyCount) lines.push(`・未割付残あり: ${unassignedQtyCount}件`)
   if (unassignedQtyDetails.length) unassignedQtyDetails.forEach((s) => lines.push(`  ${s}`))
   if (overAssigned.length) overAssigned.forEach((s) => lines.push(`・割付数量超過: ${s}`))
-  if (overloaded.length) lines.push(`・便占有率95%超: ${overloaded.join(' / ')}`)
+  if (overloaded.length) lines.push(`・便占有率100%超: ${overloaded.join(' / ')}`)
   return { ok: false, message: lines.join('\n') }
 }
 
@@ -2536,7 +2537,7 @@ const loadPseudoProducts = async () => {
       }
     }))
   } catch (error) {
-    alert('擬似便対象製品の取得に失敗しました。')
+    alert('AM/PMグループ対象製品の取得に失敗しました。')
   }
 }
 
@@ -2557,7 +2558,7 @@ const savePseudoProducts = async () => {
       truck_ids: [...row.truckIds],
     }))
     await api.kubotaSakaiTripAssignments.savePseudoTruckProducts(rows)
-    alert('擬似便対象製品を保存しました。')
+    alert('AM/PMグループ対象製品を保存しました。')
   } catch (error) {
     alert('保存に失敗しました。')
   } finally {

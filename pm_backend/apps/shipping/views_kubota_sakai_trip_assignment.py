@@ -136,6 +136,17 @@ def _normalize_truck_alias(value):
     return str(value or '').strip().replace(' ', '').replace('　', '').removesuffix('便').upper()
 
 
+def _normalize_pseudo_group_marker(value):
+    marker = _normalize_truck_alias(value)
+    if marker == 'A':
+        return 'AM'
+    if marker == 'P':
+        return 'PM'
+    if marker in ('AM', 'PM'):
+        return marker
+    return ''
+
+
 def _physical_truck_key(truck):
     if not truck:
         return ''
@@ -1926,8 +1937,8 @@ class KubotaSakaiTripLoadPreviewViewNew(APIView):
 class KubotaSakaiTripAutoAssignViewNew(APIView):
     """未保存の割付状態をもとに、実便 2→3→4→5 の順で一括自動振分する。"""
     AUTO_ASSIGN_PSEUDO_OFFSET_MAP = {
-        'A': 0,
-        'P': 1,
+        'AM': 0,
+        'PM': 1,
     }
 
     def post(self, request):
@@ -2025,8 +2036,8 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         pseudo_label_by_truck_id = {}
         if pseudo_truck_ids:
             for truck in KubotaSakaiTruck.objects.filter(id__in=pseudo_truck_ids):
-                marker = _normalize_truck_alias(truck.alias_name or truck.name)
-                if marker in ('A', 'P'):
+                marker = _normalize_pseudo_group_marker(truck.alias_name or truck.name)
+                if marker in ('AM', 'PM'):
                     pseudo_label_by_truck_id[truck.id] = marker
 
         def candidate_trucks_for_due(due_adjustment):
@@ -2840,12 +2851,12 @@ class KubotaSakaiPseudoTruckProductViewNew(APIView):
         )
         pseudo_truck_list = []
         for t in pseudo_trucks:
-            marker = (t.alias_name or t.name or '').strip().upper().replace('　', '')
-            if marker in ('A', 'A便', 'Ａ', 'Ａ便', 'P', 'P便', 'Ｐ', 'Ｐ便'):
+            marker = _normalize_pseudo_group_marker(t.alias_name or t.name)
+            if marker in ('AM', 'PM'):
                 pseudo_truck_list.append({
                     'id': t.id,
                     'name': t.name,
-                    'alias_name': t.alias_name or '',
+                    'alias_name': marker,
                 })
 
         mapping_list = []
@@ -2870,10 +2881,11 @@ class KubotaSakaiPseudoTruckProductViewNew(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        pseudo_trucks = set(
-            KubotaSakaiTruck.objects.filter(is_active=True)
-            .values_list('id', flat=True)
-        )
+        pseudo_trucks = {
+            truck.id
+            for truck in KubotaSakaiTruck.objects.filter(is_active=True).only('id', 'name', 'alias_name')
+            if _normalize_pseudo_group_marker(truck.alias_name or truck.name) in ('AM', 'PM')
+        }
 
         with transaction.atomic():
             KubotaSakaiPseudoTruckProduct.objects.all().delete()
