@@ -4,6 +4,7 @@
       <h1 class="page-title">注文書自動送信設定</h1>
       <div class="page-actions">
         <button class="btn-primary" @click="openNew">新規追加</button>
+        <button class="btn-secondary" @click="loadHistories">履歴更新</button>
       </div>
     </div>
 
@@ -156,6 +157,44 @@
         </tbody>
       </table>
       <div v-else class="no-data">注文書自動送信設定がありません。</div>
+
+      <div class="history-panel">
+        <div class="history-header">
+          <h2>自動送信履歴</h2>
+        </div>
+        <table v-if="histories.length" class="data-table history-table">
+          <thead>
+            <tr>
+              <th>実行日時</th>
+              <th>仕入先</th>
+              <th>種別</th>
+              <th>結果</th>
+              <th>先頭納入日</th>
+              <th>品目数</th>
+              <th>宛先</th>
+              <th>注文書Excel</th>
+              <th>メッセージ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="history in histories" :key="history.id">
+              <td>{{ history.started_at || '-' }}</td>
+              <td>{{ history.supplier_code }} {{ history.supplier_name }}</td>
+              <td>{{ historyTriggerLabel(history.trigger_type) }}</td>
+              <td><span :class="['badge', `badge-${String(history.status || '').toLowerCase()}`]">{{ history.status }}</span></td>
+              <td>{{ history.first_delivery_date || '-' }}</td>
+              <td class="td-right">{{ history.order_item_count || 0 }}</td>
+              <td>{{ history.to_email || '-' }}</td>
+              <td>
+                <button v-if="history.has_order_excel_file" class="btn-sm" @click="downloadHistoryOrderExcel(history)">再DL</button>
+                <span v-else>-</span>
+              </td>
+              <td class="td-msg">{{ history.message || '' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="no-data">自動送信履歴がありません。</div>
+      </div>
     </div>
     </div>
 
@@ -299,6 +338,7 @@ import ContactEmailSelect from './ContactEmailSelect.vue'
 const loading = ref(true)
 const saving = ref(false)
 const configs = ref([])
+const histories = ref([])
 const truckCandidates = ref([])
 const truckCheckLoading = ref(false)
 const truckCheckResult = ref(null)
@@ -379,6 +419,12 @@ const deliveryDayModeLabel = (mode) => {
   return '納入パターン'
 }
 
+const historyTriggerLabel = (triggerType) => {
+  if (triggerType === 'MANUAL') return '手動実行'
+  if (triggerType === 'HOLIDAY_TRIAL') return '休日トライ'
+  return '自動実行'
+}
+
 const loadConfigs = async () => {
   loading.value = true
   try {
@@ -386,6 +432,15 @@ const loadConfigs = async () => {
     configs.value = res.data || []
   } finally {
     loading.value = false
+  }
+}
+
+const loadHistories = async () => {
+  try {
+    const res = await api.purchaseAutoOrderSend.getHistories({ limit: 50 })
+    histories.value = res.data || []
+  } catch (error) {
+    console.error('注文書自動送信履歴取得エラー', error)
   }
 }
 
@@ -604,6 +659,38 @@ const cancelTruckLoadCheck = async () => {
   alert('トラック積載判定の中断を要求しました')
 }
 
+const resolveDownloadFilename = (headers, fallback) => {
+  const contentDisposition = headers?.['content-disposition'] || ''
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch (_) {
+      return fallback
+    }
+  }
+  const plainMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+  return plainMatch?.[1] || fallback
+}
+
+const downloadHistoryOrderExcel = async (history) => {
+  try {
+    const res = await api.purchaseAutoOrderSend.downloadHistoryOrderExcel(history.id)
+    const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = resolveDownloadFilename(res.headers, history.order_excel_filename || `注文書履歴_${history.id}.xlsx`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+  } catch (error) {
+    console.error('注文書Excel再ダウンロードエラー', error)
+    alert('注文書Excelの再ダウンロードに失敗しました。')
+  }
+}
+
 const checkSelectedSupplierCalendarDeliveryDays = async () => {
   supplierCalendarHasDeliveryDays.value = true
   checkingSupplierCalendarDays.value = false
@@ -736,6 +823,7 @@ const save = async () => {
     }
     closeModal()
     await loadConfigs()
+    await loadHistories()
   } catch (error) {
     const detail = error?.response?.data?.detail
     alert(`保存に失敗しました。${detail ? `\n${detail}` : ''}`)
@@ -749,6 +837,7 @@ const remove = async (config) => {
   try {
     await api.purchaseAutoOrderSend.deleteConfig(config.id)
     await loadConfigs()
+    await loadHistories()
   } catch {
     alert('削除に失敗しました。')
   }
@@ -768,6 +857,7 @@ const runNow = async (config) => {
         return
       }
       await loadConfigs()
+      await loadHistories()
       const updated = configs.value.find((item) => item.id === config.id)
       if (updated && updated.last_run_status !== 'RUNNING') {
         clearInterval(timer)
@@ -795,6 +885,7 @@ const runHolidayTrial = async (config) => {
         return
       }
       await loadConfigs()
+      await loadHistories()
       const updated = configs.value.find((item) => item.id === config.id)
       if (updated && updated.last_run_status !== 'RUNNING') {
         clearInterval(timer)
@@ -809,7 +900,7 @@ const runHolidayTrial = async (config) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadConfigs(), loadSuppliers(), loadUsers(), loadContacts(), loadTruckCandidates()])
+  await Promise.all([loadConfigs(), loadHistories(), loadSuppliers(), loadUsers(), loadContacts(), loadTruckCandidates()])
 })
 
 watch(
@@ -837,6 +928,10 @@ watch(
 .btn-run { border-color: #3b82f6; color: #2563eb; }
 .btn-holiday { border-color: #f59e0b; color: #b45309; }
 .btn-danger { border-color: #fca5a5; color: #dc2626; }
+.history-panel { margin-top: 18px; }
+.history-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.history-header h2 { margin: 0; font-size: 15px; }
+.history-table { margin-top: 8px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
 .modal-content { background: #fff; border-radius: 8px; padding: 24px; width: 520px; max-height: 85vh; overflow-y: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.2); }
 .modal-title { margin: 0 0 16px; font-size: 16px; }

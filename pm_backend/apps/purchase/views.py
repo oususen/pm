@@ -4,7 +4,9 @@ from decimal import Decimal, InvalidOperation
 import logging
 import math
 import re
+from pathlib import Path
 
+from django.http import FileResponse
 from django.db import transaction
 from django.db.models import Sum
 from django.db.models import Q
@@ -34,6 +36,7 @@ from .models import (
     EngineeringChangePart,
     PurchaseAutoDeliveryListConfig,
     PurchaseAutoOrderSendConfig,
+    PurchaseAutoOrderSendHistory,
     PurchasePlanLockSetting,
 )
 from .models_kikan_mapping import PurchaseActualKikanMapping
@@ -3104,7 +3107,10 @@ class PurchaseAutoOrderSendRunNowView(APIView):
         config.last_run_at = datetime.now()
         config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_at'])
 
-        thread = threading.Thread(target=run_auto_order_send, kwargs={'config_id': config.id})
+        thread = threading.Thread(
+            target=run_auto_order_send,
+            kwargs={'config_id': config.id, 'trigger_type': PurchaseAutoOrderSendHistory.TRIGGER_MANUAL},
+        )
         thread.start()
         return Response({'detail': '手動実行を開始しました', 'config_id': config.id})
 
@@ -3127,10 +3133,72 @@ class PurchaseAutoOrderSendHolidayTrialView(APIView):
 
         thread = threading.Thread(
             target=run_auto_order_send,
-            kwargs={'config_id': config.id, 'ignore_holiday': True},
+            kwargs={'config_id': config.id, 'ignore_holiday': True, 'trigger_type': PurchaseAutoOrderSendHistory.TRIGGER_HOLIDAY_TRIAL},
         )
         thread.start()
         return Response({'detail': '休日トライを開始しました', 'config_id': config.id})
+
+
+class PurchaseAutoOrderSendHistoryListView(APIView):
+    """注文書自動送信履歴 一覧"""
+
+    def get(self, request):
+        qs = PurchaseAutoOrderSendHistory.objects.select_related('supplier', 'config')
+        config_id = request.query_params.get('config_id')
+        if config_id:
+            try:
+                qs = qs.filter(config_id=int(config_id))
+            except (TypeError, ValueError):
+                return Response({'detail': 'invalid config_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        limit = request.query_params.get('limit')
+        try:
+            limit_value = max(1, min(int(limit or 50), 200))
+        except (TypeError, ValueError):
+            limit_value = 50
+
+        result = []
+        for row in qs[:limit_value]:
+            result.append({
+                'id': row.id,
+                'config_id': row.config_id,
+                'supplier_id': row.supplier_id,
+                'supplier_code': row.supplier_code,
+                'supplier_name': row.supplier_name,
+                'trigger_type': row.trigger_type,
+                'status': row.status,
+                'started_at': row.started_at.strftime('%Y-%m-%d %H:%M:%S') if row.started_at else None,
+                'finished_at': row.finished_at.strftime('%Y-%m-%d %H:%M:%S') if row.finished_at else None,
+                'duration_seconds': row.duration_seconds,
+                'to_email': row.to_email,
+                'subject': row.subject,
+                'message': row.message,
+                'first_delivery_date': row.first_delivery_date.isoformat() if row.first_delivery_date else None,
+                'order_item_count': row.order_item_count,
+                'has_order_excel_file': bool(row.order_excel_file),
+                'order_excel_filename': Path(row.order_excel_file.name).name if row.order_excel_file else '',
+            })
+        return Response(result)
+
+
+class PurchaseAutoOrderSendHistoryOrderExcelDownloadView(APIView):
+    """注文書自動送信履歴の注文書Excelダウンロード"""
+
+    def get(self, request, pk):
+        history = PurchaseAutoOrderSendHistory.objects.filter(pk=pk).first()
+        if not history:
+            return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not history.order_excel_file:
+            return Response({'detail': 'order excel not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        history.order_excel_file.open('rb')
+        filename = Path(history.order_excel_file.name).name
+        return FileResponse(
+            history.order_excel_file,
+            as_attachment=True,
+            filename=filename,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
 
 
 class PurchaseActualKikanMappingCandidatesView(APIView):

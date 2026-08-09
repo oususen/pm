@@ -17,6 +17,12 @@ export const createPurchaseAutoOrderSendAPI = (client) => ({
   runHolidayTrial(id) {
     return client.post(`/purchase-auto-order-send-configs/${id}/holiday-trial/`)
   },
+  getHistories(params = {}) {
+    return client.get('/purchase-auto-order-send-histories/', { params })
+  },
+  downloadHistoryOrderExcel(id) {
+    return client.get(`/purchase-auto-order-send-histories/${id}/order-excel/`, { responseType: 'blob' })
+  },
   getTruckLoadDates(truckId) {
     return client.get('/purchase-auto-order-send-truck-load-check/', { params: { truck_id: truckId } })
   },

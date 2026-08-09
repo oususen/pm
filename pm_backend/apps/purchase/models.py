@@ -498,6 +498,84 @@ class PurchaseAutoOrderSendConfig(models.Model):
         return f'{self.supplier} {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'
 
 
+class PurchaseAutoOrderSendHistory(models.Model):
+    """注文書自動送信の実行履歴"""
+
+    TRIGGER_SCHEDULED = 'SCHEDULED'
+    TRIGGER_MANUAL = 'MANUAL'
+    TRIGGER_HOLIDAY_TRIAL = 'HOLIDAY_TRIAL'
+    TRIGGER_CHOICES = [
+        (TRIGGER_SCHEDULED, '自動実行'),
+        (TRIGGER_MANUAL, '手動実行'),
+        (TRIGGER_HOLIDAY_TRIAL, '休日トライ'),
+    ]
+
+    STATUS_SUCCESS = 'SUCCESS'
+    STATUS_FAILED = 'FAILED'
+    STATUS_RUNNING = 'RUNNING'
+    STATUS_SKIPPED = 'SKIPPED'
+    STATUS_CHOICES = [
+        (STATUS_SUCCESS, '成功'),
+        (STATUS_FAILED, '失敗'),
+        (STATUS_RUNNING, '実行中'),
+        (STATUS_SKIPPED, 'スキップ'),
+    ]
+
+    config = models.ForeignKey(
+        PurchaseAutoOrderSendConfig,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='histories',
+        verbose_name='注文書自動送信設定',
+    )
+    supplier = models.ForeignKey(
+        Supplier,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='auto_order_send_histories',
+        verbose_name='仕入先',
+    )
+    supplier_code = models.CharField(max_length=50, blank=True, default='', verbose_name='仕入先コード')
+    supplier_name = models.CharField(max_length=255, blank=True, default='', verbose_name='仕入先名')
+    trigger_type = models.CharField(
+        max_length=20,
+        choices=TRIGGER_CHOICES,
+        default=TRIGGER_SCHEDULED,
+        verbose_name='実行種別',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_RUNNING,
+        verbose_name='実行結果',
+    )
+    started_at = models.DateTimeField(auto_now_add=True, verbose_name='開始日時')
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name='終了日時')
+    duration_seconds = models.FloatField(null=True, blank=True, verbose_name='実行時間（秒）')
+    to_email = models.CharField(max_length=255, blank=True, default='', verbose_name='宛先メール')
+    cc_emails = models.TextField(blank=True, default='', verbose_name='CCメール')
+    subject = models.CharField(max_length=255, blank=True, default='', verbose_name='件名')
+    message = models.TextField(blank=True, default='', verbose_name='結果メッセージ')
+    first_delivery_date = models.DateField(null=True, blank=True, verbose_name='先頭納入日')
+    order_item_count = models.PositiveIntegerField(default=0, verbose_name='注文書品目数')
+    order_excel_file = models.FileField(
+        upload_to='purchase_auto_order_send/order_excel/',
+        blank=True,
+        verbose_name='注文書Excel',
+    )
+
+    class Meta:
+        db_table = 'purchase_auto_order_send_history'
+        verbose_name = '注文書自動送信履歴'
+        verbose_name_plural = '注文書自動送信履歴'
+        ordering = ['-started_at', '-id']
+
+    def __str__(self):
+        return f'{self.supplier_code} {self.started_at} {self.status}'
+
+
 class PurchaseAutoOrderSendTruckLoadRequest(models.Model):
     """トラック積載判定の中断要求管理"""
 

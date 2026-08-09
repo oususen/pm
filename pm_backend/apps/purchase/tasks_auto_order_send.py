@@ -6,7 +6,43 @@ from io import BytesIO
 logger = logging.getLogger('purchase')
 
 
-def run_auto_order_send(config_id, ignore_holiday=False):
+def _create_auto_order_send_history(config, trigger_type):
+    from .models import PurchaseAutoOrderSendHistory
+
+    supplier = config.supplier
+    return PurchaseAutoOrderSendHistory.objects.create(
+        config=config,
+        supplier=supplier,
+        supplier_code=getattr(supplier, 'supplier_code', '') or '',
+        supplier_name=getattr(supplier, 'supplier_name', '') or '',
+        trigger_type=trigger_type,
+        status=PurchaseAutoOrderSendHistory.STATUS_RUNNING,
+    )
+
+
+def _save_history_order_excel(history, excel_buffer, filename):
+    if not history or not excel_buffer:
+        return
+    from django.core.files.base import ContentFile
+
+    excel_buffer.seek(0)
+    history.order_excel_file.save(filename, ContentFile(excel_buffer.getvalue()), save=False)
+    history.save(update_fields=['order_excel_file'])
+
+
+def _finish_history(history, start_time, status_val, message, **extra_updates):
+    if not history:
+        return
+    history.status = status_val
+    history.message = message
+    history.duration_seconds = round(time.time() - start_time, 2)
+    history.finished_at = datetime.now()
+    for key, value in extra_updates.items():
+        setattr(history, key, value)
+    history.save()
+
+
+def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED'):
     from masters.models import Calendar
     from orders.utils.calendar_utils import WorkingDayCalculator
     from production.models_line_backlog import LineBacklog
@@ -34,6 +70,7 @@ def run_auto_order_send(config_id, ignore_holiday=False):
         return
 
     supplier = config.supplier
+    history = _create_auto_order_send_history(config, trigger_type)
     config.last_run_at = datetime.now()
     config.last_run_status = 'RUNNING'
     config.last_run_message = '実行中...'
@@ -51,6 +88,7 @@ def run_auto_order_send(config_id, ignore_holiday=False):
         if not ignore_holiday and not calc.is_working_day(today):
             message = f'本日は休日のため、{supplier.supplier_name} 向け注文書自動送信は実行しません'
             _finish(config, start_time, 'SKIPPED', message)
+            _finish_history(history, start_time, 'SKIPPED', message)
             _notify_users(config.notify_on_non_delivery, f'注文書自動送信: {message}')
             return
 
@@ -87,6 +125,7 @@ def run_auto_order_send(config_id, ignore_holiday=False):
         result = simulate_and_save_order_plans(config, base_date=today)
         if result['status'] != 'SUCCESS':
             _finish(config, start_time, result['status'], result['message'])
+            _finish_history(history, start_time, result['status'], result['message'])
             notify_target = config.notify_on_non_delivery if result['status'] == 'SKIPPED' else config.notify_on_failure
             _notify_users(notify_target, f'注文書自動送信: {result["message"]}')
             return
@@ -119,11 +158,14 @@ def run_auto_order_send(config_id, ignore_holiday=False):
 
         # ── ステップ8: 注文書Excel生成 + 添付ファイル構築 ──
         all_attachments = []
+        excel_filename = ''
         if items:
             excel_data = generate_order_excel(items, supplier)
+            excel_filename = f'注文書_{supplier.supplier_code}_{today}.xlsx'
+            _save_history_order_excel(history, excel_data, excel_filename)
             all_attachments.append({
                 'data': excel_data,
-                'filename': f'注文書_{supplier.supplier_code}_{today}.xlsx',
+                'filename': excel_filename,
             })
         if progress_excel:
             all_attachments.append({
@@ -149,16 +191,40 @@ def run_auto_order_send(config_id, ignore_holiday=False):
             })
 
         if not all_attachments:
-            _finish(config, start_time, 'SUCCESS', result.get('message') or '対象データはありません')
+            message = result.get('message') or '対象データはありません'
+            _finish(config, start_time, 'SUCCESS', message)
+            _finish_history(
+                history,
+                start_time,
+                'SUCCESS',
+                message,
+                order_item_count=len(items or []),
+            )
             return
 
         if not config.send_order_excel and not delivery_note_pdf:
-            _finish(config, start_time, 'SKIPPED', '注文書Excel送信と外作納品書PDF送信がOFFです')
+            message = '注文書Excel送信と外作納品書PDF送信がOFFです'
+            _finish(config, start_time, 'SKIPPED', message)
+            _finish_history(
+                history,
+                start_time,
+                'SKIPPED',
+                message,
+                order_item_count=len(items or []),
+            )
             return
 
         to_email = (supplier.order_email or '').strip()
         if not to_email:
-            _finish(config, start_time, 'FAILED', f'仕入先 {supplier.supplier_code} のメールアドレスが未設定です')
+            message = f'仕入先 {supplier.supplier_code} のメールアドレスが未設定です'
+            _finish(config, start_time, 'FAILED', message)
+            _finish_history(
+                history,
+                start_time,
+                'FAILED',
+                message,
+                order_item_count=len(items or []),
+            )
             _notify_users(config.notify_on_failure, f'注文書自動送信失敗: {supplier.supplier_name} のメールアドレスが未設定です')
             return
 
@@ -214,19 +280,43 @@ def run_auto_order_send(config_id, ignore_holiday=False):
             attach_summary.append('外作納品書PDF')
 
         if send_result.get('success'):
+            message = f'送信完了 ({", ".join(attach_summary)}) → {to_email}'
             _finish(
                 config,
                 start_time,
                 'SUCCESS',
-                f'送信完了 ({", ".join(attach_summary)}) → {to_email}',
+                message,
+            )
+            _finish_history(
+                history,
+                start_time,
+                'SUCCESS',
+                message,
+                to_email=to_email,
+                cc_emails='\n'.join(cc_list),
+                subject=subject,
+                first_delivery_date=delivery_dates[0] if delivery_dates else None,
+                order_item_count=len(items or []),
             )
         else:
             message = f'メール送信失敗: {send_result.get("message", "")}'
             _finish(config, start_time, 'FAILED', message)
+            _finish_history(
+                history,
+                start_time,
+                'FAILED',
+                message,
+                to_email=to_email,
+                cc_emails='\n'.join(cc_list),
+                subject=subject,
+                first_delivery_date=delivery_dates[0] if delivery_dates else None,
+                order_item_count=len(items or []),
+            )
             _notify_users(config.notify_on_failure, f'注文書自動送信失敗: {supplier.supplier_name}\n{message}')
     except Exception as exc:
         logger.exception('注文書自動送信エラー: config_id=%s', config_id)
         _finish(config, start_time, 'FAILED', f'エラー: {str(exc)[:500]}')
+        _finish_history(history, start_time, 'FAILED', f'エラー: {str(exc)[:500]}')
         _notify_users(config.notify_on_failure, f'注文書自動送信エラー: {supplier.supplier_name}\n{str(exc)[:300]}')
 
 
@@ -312,6 +402,7 @@ def _generate_order_send_delivery_note_pdf(items, supplier):
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas as pdf_canvas
     from shipping.services.shipping_pdf_generator import register_japanese_fonts
+    from masters.models import Product
     from .tasks_auto_delivery_list import _dn_nohin, _dn_side
 
     register_japanese_fonts()
@@ -336,6 +427,14 @@ def _generate_order_send_delivery_note_pdf(items, supplier):
         key=lambda item: (item['delivery_date'], item['product_code']),
     )
 
+    product_codes = list({item['product_code'] for item in sorted_items})
+    container_map = {}
+    for p in Product.objects.filter(product_code__in=product_codes).select_related('used_container'):
+        container = getattr(p, 'used_container', None)
+        if container:
+            cap = getattr(p, 'capacity', None) or getattr(container, 'capacity', None)
+            container_map[p.product_code] = (container.name or '', int(cap) if cap else 0)
+
     buf = BytesIO()
     canvas = pdf_canvas.Canvas(buf, pagesize=landscape(A4))
     total_pages = max(1, -(-len(sorted_items) // per_page))
@@ -351,11 +450,13 @@ def _generate_order_send_delivery_note_pdf(items, supplier):
             date_ymd = item_date.strftime('%Y/%m/%d')
             date_mmdd = f'{item_date.month:02d}/{item_date.day:02d}'
             qr_data = f'{product_code},{item_date.isoformat()},{qty}'
+            c_name, c_cap = container_map.get(product_code, ('', 0))
 
             _dn_nohin(
                 canvas, margin_left, yt, nohin_w, item_h,
                 product_code, product_name, qty, date_ymd, date_mmdd,
                 supplier.supplier_code or '', supplier.supplier_name or '', qr_data, font_name,
+                container_name=c_name, container_capacity=c_cap,
             )
             _dn_side(
                 canvas, margin_left + nohin_w + gap, yt, side_w, item_h,

@@ -1275,6 +1275,7 @@ def _generate_delivery_note_pdf(items, delivery_date, supplier):
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas as pdf_canvas
     from shipping.services.shipping_pdf_generator import register_japanese_fonts
+    from masters.models import Product
 
     register_japanese_fonts()
     FONT = 'MSGothic'
@@ -1295,6 +1296,14 @@ def _generate_delivery_note_pdf(items, delivery_date, supplier):
     s_code = supplier.supplier_code or ''
     s_name = supplier.supplier_name or ''
 
+    product_codes = list({item['product_code'] for item in items})
+    container_map = {}
+    for p in Product.objects.filter(product_code__in=product_codes).select_related('used_container'):
+        container = getattr(p, 'used_container', None)
+        if container:
+            cap = getattr(p, 'capacity', None) or getattr(container, 'capacity', None)
+            container_map[p.product_code] = (container.name or '', int(cap) if cap else 0)
+
     buf = BytesIO()
     c = pdf_canvas.Canvas(buf, pagesize=landscape(A4))
     total_pages = max(1, -(-len(items) // PER_PAGE))
@@ -1310,9 +1319,11 @@ def _generate_delivery_note_pdf(items, delivery_date, supplier):
             d_ymd = item_date.strftime('%Y/%m/%d')
             d_mmdd = f'{item_date.month:02d}/{item_date.day:02d}'
             qr_data = f'{pc},{item_date.isoformat()},{qty}'
+            c_name, c_cap = container_map.get(pc, ('', 0))
 
             _dn_nohin(c, ML, yt, NOHIN_W, ITEM_H,
-                      pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT)
+                      pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT,
+                      container_name=c_name, container_capacity=c_cap)
             _dn_side(c, ML + NOHIN_W + GAP, yt, SIDE_W, ITEM_H,
                      pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, FONT, '受領書')
             _dn_side(c, ML + NOHIN_W + GAP + SIDE_W + GAP, yt, SIDE_W, ITEM_H,
@@ -1468,9 +1479,23 @@ def _dn_nohin(c, x0, yt, W, H, pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_da
     c.drawString(xr + 0.5 * mm, y3 - 3 * mm, '荷姿(入り数×台数)')
     c.setFont(F, 6)
     lh = 4 * mm
-    c.drawString(xr + 0.5 * mm, y3 - 8 * mm, '１ポリ(　　×　　)')
-    c.drawString(xr + 0.5 * mm, y3 - 8 * mm - lh, '２アミ(　　×　　)')
-    c.drawString(xr + 0.5 * mm, y3 - 8 * mm - lh * 2, '３専用(　　×　　)')
+    if container_name and container_capacity and container_capacity > 0 and qty > 0:
+        full_boxes = qty // container_capacity
+        remainder = qty % container_capacity
+        line_idx = 0
+        if full_boxes > 0:
+            line_idx += 1
+            c.drawString(xr + 0.5 * mm, y3 - 8 * mm,
+                         f'{line_idx}{container_name}({container_capacity}×{full_boxes})')
+        if remainder > 0:
+            line_idx += 1
+            y_off = (line_idx - 1) * lh
+            c.drawString(xr + 0.5 * mm, y3 - 8 * mm - y_off,
+                         f'{line_idx}{container_name}({remainder}×1)')
+    else:
+        c.drawString(xr + 0.5 * mm, y3 - 8 * mm, '１(　　×　　)')
+        c.drawString(xr + 0.5 * mm, y3 - 8 * mm - lh, '２(　　×　　)')
+        c.drawString(xr + 0.5 * mm, y3 - 8 * mm - lh * 2, '３(　　×　　)')
 
     c.setFont(F, 5)
     for i, lab in enumerate(['発行', '受領', '入力']):
