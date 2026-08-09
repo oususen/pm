@@ -1,7 +1,10 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">注文書自動送信設定</h1>
+      <div class="page-title-row">
+        <h1 class="page-title">注文書自動送信設定</h1>
+        <DataSourceDialog title="注文書自動送信設定" :sources="dsSources" />
+      </div>
       <div class="page-actions">
         <button class="btn-primary" @click="openNew">新規追加</button>
         <button class="btn-secondary" @click="loadHistories">履歴更新</button>
@@ -431,12 +434,26 @@
         </div>
       </div>
     </div>
+
+    <div v-if="confirmDialog.open" class="modal-overlay" @click.self="closeConfirmDialog">
+      <div class="modal-content confirm-modal">
+        <h2 class="modal-title">{{ confirmDialog.title }}</h2>
+        <div class="confirm-message">{{ confirmDialog.message }}</div>
+        <div class="form-actions">
+          <button class="btn-primary" :disabled="confirmDialog.loading" @click="executeConfirmAction">
+            {{ confirmDialog.loading ? '実行中...' : '実行' }}
+          </button>
+          <button class="btn-secondary" :disabled="confirmDialog.loading" @click="closeConfirmDialog">キャンセル</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import UserChipSelect from './UserChipSelect.vue'
 import ContactEmailSelect from './ContactEmailSelect.vue'
 
@@ -465,9 +482,34 @@ const pageMessage = ref('')
 const pageError = ref('')
 const formErrors = ref([])
 const selectedHistory = ref(null)
+const confirmDialog = reactive({
+  open: false,
+  title: '',
+  message: '',
+  loading: false,
+  onConfirm: null,
+})
 const supplierCalendarHasDeliveryDays = ref(true)
 const checkingSupplierCalendarDays = ref(false)
 const todayYmd = new Date().toISOString().slice(0, 10)
+const dsSources = [
+  { section: '設定・履歴' },
+  { op: '設定 読み書き', table: 'purchase_auto_order_send_config', desc: '仕入先ごとの注文書自動送信設定' },
+  { op: '履歴 読み取り', table: 'purchase_auto_order_send_history', desc: '実行履歴・添付有無・結果メッセージ' },
+  { section: '送信対象算出' },
+  { op: '需要 読み取り', table: 'line_demand', desc: '納入対象期間の顧客需要（内示/確定）' },
+  { op: '計進/計画 読み書き', table: 'line_backlog', desc: '計進参照、注文書Excel生成時の計画保存、進度再計算' },
+  { op: '納入日判定 参照', table: 'supplier_order_pattern / supplier_order_schedule', desc: '納入パターン方式の納入日判定' },
+  { op: 'カレンダ 参照', table: 'm_supplier / m_calendar / m_calendar_day', desc: '仕入先カレンダ方式の納入日判定と営業日判定' },
+  { op: 'ロット 参照', table: 'm_product', desc: '最小納入数・納入倍数・容器設定' },
+  { section: '通知・送信先' },
+  { op: '仕入先/連絡先 参照', table: 'm_supplier / m_contacts', desc: '返信先・CC候補・送信先表示' },
+  { op: '通知先 参照', table: 'auth_user', desc: '失敗時・非納入日の通知先ユーザー' },
+  { section: 'トラック積載判定' },
+  { op: '判定要求 読み書き', table: 'purchase_auto_order_send_truck_load_request', desc: '手動積載判定の実行状態と中断要求' },
+  { op: 'トラック 参照', table: 'm_supplier_truck', desc: '積載判定対象のトラック寸法・仕入先紐付け' },
+  { op: '容器 参照', table: 'm_container_capacity / m_product', desc: '品目ごとの容器・積載換算数' },
+]
 const historyFilters = reactive({
   supplier_id: '',
   status: '',
@@ -553,6 +595,35 @@ const setPageMessage = (message) => {
 const setPageError = (message) => {
   pageError.value = message
   if (message) pageMessage.value = ''
+}
+
+const openConfirmDialog = (title, message, onConfirm) => {
+  confirmDialog.open = true
+  confirmDialog.title = title
+  confirmDialog.message = message
+  confirmDialog.loading = false
+  confirmDialog.onConfirm = onConfirm
+}
+
+const closeConfirmDialog = (force = false) => {
+  if (confirmDialog.loading && !force) return
+  confirmDialog.open = false
+  confirmDialog.title = ''
+  confirmDialog.message = ''
+  confirmDialog.onConfirm = null
+}
+
+const executeConfirmAction = async () => {
+  if (typeof confirmDialog.onConfirm !== 'function') return
+  confirmDialog.loading = true
+  try {
+    await confirmDialog.onConfirm()
+    closeConfirmDialog(true)
+  } catch (error) {
+    // エラー時はダイアログを残し、ページメッセージで内容を表示する
+  } finally {
+    confirmDialog.loading = false
+  }
 }
 
 const configAttachmentSummary = (config) => {
@@ -778,7 +849,7 @@ const createTruckLoadRequestId = () => {
 
 const runTruckLoadCheck = async () => {
   if (!truckCheck.truck_id || !truckCheck.delivery_date) {
-    alert('トラックと納期を選択してください')
+    setPageError('トラック積載判定を行うには、トラックと納期を選択してください。')
     return
   }
 
@@ -802,7 +873,7 @@ const runTruckLoadCheck = async () => {
     }
     const data = error?.response?.data
     if (data?.canceled) {
-      alert('トラック積載判定を中断しました')
+      setPageMessage('トラック積載判定を中断しました。')
       return
     }
     console.error('トラック積載判定エラー', error)
@@ -816,7 +887,7 @@ const runTruckLoadCheck = async () => {
         lines.push(`  ${item.product_code}: ${reason}`)
       })
     }
-    alert(lines.join('\n'))
+    setPageError(lines.join(' '))
   } finally {
     truckCheckRequestId.value = ''
     truckCheckAbortController.value = null
@@ -831,7 +902,7 @@ const cancelTruckLoadCheck = async () => {
   } catch (error) {
     const detail = error?.response?.data?.detail
     if (detail && detail !== 'running request not found') {
-      alert(`中断要求に失敗しました。\n${detail}`)
+      setPageError(`中断要求に失敗しました。 ${detail}`)
       return
     }
   }
@@ -841,7 +912,7 @@ const cancelTruckLoadCheck = async () => {
   truckCheckLoading.value = false
   truckCheckRequestId.value = ''
   truckCheckAbortController.value = null
-  alert('トラック積載判定の中断を要求しました')
+  setPageMessage('トラック積載判定の中断を要求しました。')
 }
 
 const resolveDownloadFilename = (headers, fallback) => {
@@ -872,7 +943,7 @@ const downloadHistoryOrderExcel = async (history) => {
     window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
   } catch (error) {
     console.error('注文書Excel再ダウンロードエラー', error)
-    alert('注文書Excelの再ダウンロードに失敗しました。')
+    setPageError('注文書Excelの再ダウンロードに失敗しました。')
   }
 }
 
@@ -1031,15 +1102,21 @@ const save = async () => {
 }
 
 const remove = async (config) => {
-  if (!confirm(`${config.supplier_code} ${config.supplier_name} の設定を削除しますか？`)) return
-  try {
-    await api.purchaseAutoOrderSend.deleteConfig(config.id)
-    await loadConfigs()
-    await loadHistories()
-    setPageMessage(`${config.supplier_code} ${config.supplier_name} の設定を削除しました。`)
-  } catch {
-    setPageError('削除に失敗しました。')
-  }
+  openConfirmDialog(
+    '設定削除',
+    `${config.supplier_code} ${config.supplier_name} の設定を削除しますか？`,
+    async () => {
+      try {
+        await api.purchaseAutoOrderSend.deleteConfig(config.id)
+        await loadConfigs()
+        await loadHistories()
+        setPageMessage(`${config.supplier_code} ${config.supplier_name} の設定を削除しました。`)
+      } catch {
+        setPageError('削除に失敗しました。')
+        throw new Error('delete failed')
+      }
+    },
+  )
 }
 
 const stopHistoryPolling = (configId) => {
@@ -1096,13 +1173,23 @@ const runConfigAction = async (config, actionLabel, runner) => {
 }
 
 const runNow = async (config) => {
-  if (!confirm(`${config.supplier_code} ${config.supplier_name} の注文書自動送信を今すぐ実行しますか？`)) return
-  await runConfigAction(config, '手動実行', api.purchaseAutoOrderSend.runNow)
+  openConfirmDialog(
+    '手動実行',
+    `${config.supplier_code} ${config.supplier_name} の注文書自動送信を今すぐ実行しますか？`,
+    async () => {
+      await runConfigAction(config, '手動実行', api.purchaseAutoOrderSend.runNow)
+    },
+  )
 }
 
 const runHolidayTrial = async (config) => {
-  if (!confirm(`${config.supplier_code} ${config.supplier_name} の注文書自動送信を休日トライ実行しますか？`)) return
-  await runConfigAction(config, '休日トライ実行', api.purchaseAutoOrderSend.runHolidayTrial)
+  openConfirmDialog(
+    '休日トライ実行',
+    `${config.supplier_code} ${config.supplier_name} の注文書自動送信を休日トライ実行しますか？`,
+    async () => {
+      await runConfigAction(config, '休日トライ実行', api.purchaseAutoOrderSend.runHolidayTrial)
+    },
+  )
 }
 
 const resetHistoryFilters = async () => {
@@ -1144,6 +1231,7 @@ watch(
 </script>
 
 <style scoped>
+.page-title-row { display: flex; align-items: center; gap: 8px; }
 .page-note {
   margin: 8px 0 12px;
   padding: 10px 12px;
@@ -1198,7 +1286,14 @@ watch(
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9999; display: flex; align-items: center; justify-content: center; }
 .modal-content { background: #fff; border-radius: 8px; padding: 24px; width: 520px; max-height: 85vh; overflow-y: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.2); }
 .history-detail-modal { width: 760px; max-width: calc(100vw - 32px); }
+.confirm-modal { width: 420px; max-width: calc(100vw - 32px); }
 .modal-title { margin: 0 0 16px; font-size: 16px; }
+.confirm-message {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #374151;
+  white-space: pre-wrap;
+}
 .form-group { margin-bottom: 14px; }
 .form-group > label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 4px; }
 .form-group select, .input-full { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }

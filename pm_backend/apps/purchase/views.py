@@ -2804,6 +2804,48 @@ def _build_auto_order_send_history_attachment_labels(row):
     return uniq
 
 
+AUTO_ORDER_SEND_RUNNING_TIMEOUT_MINUTES = 30
+
+
+def _ensure_auto_order_send_not_stale_running(config):
+    if not config or config.last_run_status != 'RUNNING':
+        return None
+
+    now = datetime.now()
+    started_at = config.last_run_at
+    latest_running_history = PurchaseAutoOrderSendHistory.objects.filter(
+        config_id=config.id,
+        status=PurchaseAutoOrderSendHistory.STATUS_RUNNING,
+        finished_at__isnull=True,
+    ).order_by('-started_at', '-id').first()
+    if latest_running_history and latest_running_history.started_at:
+        started_at = latest_running_history.started_at
+
+    if started_at and now - started_at <= timedelta(minutes=AUTO_ORDER_SEND_RUNNING_TIMEOUT_MINUTES):
+        started_text = started_at.strftime('%Y-%m-%d %H:%M:%S')
+        return Response(
+            {
+                'detail': f'この設定は既に実行中です（開始: {started_text}）',
+                'started_at': started_text,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    stale_message = '前回実行の実行中状態が残っていたため解除しました'
+    config.last_run_status = 'FAILED'
+    config.last_run_message = stale_message
+    config.last_run_duration_seconds = None
+    config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_duration_seconds'])
+    if latest_running_history:
+        latest_running_history.status = PurchaseAutoOrderSendHistory.STATUS_FAILED
+        latest_running_history.message = stale_message
+        latest_running_history.finished_at = now
+        if latest_running_history.started_at:
+            latest_running_history.duration_seconds = round((now - latest_running_history.started_at).total_seconds(), 2)
+        latest_running_history.save(update_fields=['status', 'message', 'finished_at', 'duration_seconds'])
+    return None
+
+
 class PurchaseAutoDeliveryListConfigListCreateView(APIView):
     """自動納入リスト送信設定 一覧/新規作成"""
 
@@ -3126,8 +3168,9 @@ class PurchaseAutoOrderSendRunNowView(APIView):
         config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
         if not config:
             return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
-        if config.last_run_status == 'RUNNING':
-            return Response({'detail': 'この設定は既に実行中です'}, status=status.HTTP_409_CONFLICT)
+        running_response = _ensure_auto_order_send_not_stale_running(config)
+        if running_response:
+            return running_response
 
         from .tasks_auto_order_send import run_auto_order_send
         import threading
@@ -3152,8 +3195,9 @@ class PurchaseAutoOrderSendHolidayTrialView(APIView):
         config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
         if not config:
             return Response({'detail': 'not found'}, status=status.HTTP_404_NOT_FOUND)
-        if config.last_run_status == 'RUNNING':
-            return Response({'detail': 'この設定は既に実行中です'}, status=status.HTTP_409_CONFLICT)
+        running_response = _ensure_auto_order_send_not_stale_running(config)
+        if running_response:
+            return running_response
 
         from .tasks_auto_order_send import run_auto_order_send
         import threading
