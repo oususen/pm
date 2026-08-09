@@ -23,6 +23,7 @@
           >
             <div class="icon-box">{{ tile.icon }}</div>
             <div class="label">{{ tile.label }}</div>
+            <div v-if="tile.description" class="description">{{ tile.description }}</div>
           </RouterLink>
         </div>
       </section>
@@ -115,6 +116,7 @@ const tiles = computed(() => [
     to: "/purchase/outsource-progress-compare",
     label: "注文書・進度表比較",
     icon: "🔎",
+    description: "注文書PDFと進度表PDF/Excelを比較して差異を確認",
     category: "inventory",
     required: "view",
     resource: "purchase.progress",
@@ -286,6 +288,12 @@ const onTileClick = (event, tile) => {
 }
 .master-tile .label {
   font-weight: 700;
+}
+.master-tile .description {
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
 }
 .master-tile.is-disabled {
   opacity: 0.5;
