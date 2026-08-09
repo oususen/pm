@@ -323,7 +323,7 @@
 
         <div class="form-group">
           <label>納入日判定方式 <span class="required">*</span></label>
-          <select v-model="form.delivery_day_mode">
+          <select v-model="form.delivery_day_mode" @change="onDeliveryDayModeChange">
             <option value="PATTERN">納入パターン</option>
             <option value="SUPPLIER_CALENDAR">仕入れ先カレンダ</option>
           </select>
@@ -450,15 +450,37 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showPatternWarning" class="modal-overlay" @click.prevent>
+      <div class="modal-content confirm-modal">
+        <h2 class="modal-title" style="color:#e65100;">納入日判定方式の警告</h2>
+        <div class="confirm-message">
+          パターン方式はカレンダの休日に左右されやすく、発注漏れの可能性があります。<br><br>
+          カレンダ方式へ変更しますか？
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary" @click="showPatternWarning = false; form.delivery_day_mode = 'SUPPLIER_CALENDAR'">変更</button>
+          <button class="btn-secondary" @click="showPatternWarning = false; form.delivery_day_mode = 'SUPPLIER_CALENDAR'">再選択</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import UserChipSelect from './UserChipSelect.vue'
 import ContactEmailSelect from './ContactEmailSelect.vue'
+
+const route = useRoute()
+const openManual = () => {
+  const path = route.meta?.manualPath || ''
+  const encoded = path.split('/').filter(Boolean).map(encodeURIComponent).join('/')
+  window.open(`/manual${encoded ? `?path=${encoded}` : ''}`, '_blank')
+}
 
 const activeTab = ref('settings')
 const loading = ref(true)
@@ -479,6 +501,7 @@ const suppliers = ref([])
 const userList = ref([])
 const contactList = ref([])
 const showModal = ref(false)
+const showPatternWarning = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
 const running = reactive(new Set())
@@ -1034,6 +1057,12 @@ const openEdit = (config) => {
 const closeModal = () => {
   showModal.value = false
   formErrors.value = []
+}
+
+const onDeliveryDayModeChange = () => {
+  if (form.delivery_day_mode === 'PATTERN') {
+    showPatternWarning.value = true
+  }
 }
 
 const validate = () => {

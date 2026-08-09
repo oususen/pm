@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>注文書自動送信 作業手順書</title>
+<style>
+  @font-face {
+    font-family: 'Manual';
+    src: local('Yu Gothic Medium'), local('Hiragino Kaku Gothic ProN'), local('Meiryo'), local('sans-serif');
+  }
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e;
+    --card: #1c2230;
+    --ink: #e2e6ee;
+    --ink2: #8b99b0;
+    --accent: #5ca0e8;
+    --accent-light: #1c3050;
+    --danger: #ef5350;
+    --danger-light: #3a1a1a;
+    --success: #66bb6a;
+    --success-light: #1a3020;
+    --warn: #ff9800;
+    --warn-light: #2e2010;
+    --border: #2e3648;
+    --grid-head: #222c3c;
+    --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac;
+    --prod-border: #4db6ac;
+    --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e;
+      --card: #1c2230;
+      --ink: #e2e6ee;
+      --ink2: #8b99b0;
+      --accent: #5ca0e8;
+      --accent-light: #1c3050;
+      --danger: #ef5350;
+      --danger-light: #3a1a1a;
+      --success: #66bb6a;
+      --success-light: #1a3020;
+      --warn: #ff9800;
+      --warn-light: #2e2010;
+      --border: #2e3648;
+      --grid-head: #222c3c;
+      --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac;
+      --prod-border: #4db6ac;
+      --col-bg: #1a2030;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Manual', 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* ---- cover ---- */
+  .cover {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 48px 40px 40px;
+    margin-bottom: 36px;
+    border-left: 5px solid var(--prod-border);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: .02em; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* ---- step card ---- */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; position: relative; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+
+  /* ---- toc ---- */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* ---- note ---- */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* ---- screen overview ---- */
+  .screen-overview { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; margin-bottom: 28px; }
+  .screen-overview h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .screen-overview h2 .badge { background: var(--step-color); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; letter-spacing: .04em; }
+  .overview-mock { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .overview-mock .om-nav { background: #1a3a5c; color: #fff; padding: 6px 16px; font-size: 13px; font-weight: 600; display: flex; gap: 18px; align-items: center; }
+  :root[data-theme="dark"] .overview-mock .om-nav { background: #0e1e30; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview-mock .om-nav { background: #0e1e30; } }
+  .overview-mock .om-nav .om-active { background: rgba(255,255,255,.18); padding: 2px 10px; border-radius: 4px; }
+  .overview-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--ink); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+  .om-anno { position: absolute; font-size: 11px; font-weight: 800; color: var(--danger); background: #fff; border: 2px solid var(--danger); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; line-height: 1; z-index: 5; font-style: normal; }
+  :root[data-theme="dark"] .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+
+  /* ---- callout ---- */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* ---- highlight ring ---- */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* ---- mock toolbar ---- */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .mock-toolbar .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 70px; }
+  .mock-toolbar .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; font-size: 12px; color: var(--ink); }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.secondary { background: var(--card); border-color: var(--border); color: var(--ink); }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn { background: var(--warn); border-color: var(--warn); color: #fff; }
+
+  /* ---- mock tab ---- */
+  .mock-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--grid-line); margin-bottom: 12px; }
+  .mock-tab { padding: 6px 16px; font-size: 13px; font-weight: 600; color: var(--ink2); border-bottom: 2px solid transparent; margin-bottom: -2px; cursor: default; }
+  .mock-tab.active { color: var(--step-color); border-bottom-color: var(--step-color); }
+
+  /* ---- mock table ---- */
+  .mock-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
+  .mock-table th { background: var(--grid-head); color: var(--ink2); font-weight: 600; font-size: 11px; text-align: left; padding: 6px 10px; border: 1px solid var(--grid-line); white-space: nowrap; }
+  .mock-table td { padding: 5px 10px; border: 1px solid var(--grid-line); color: var(--ink); vertical-align: top; }
+  .mock-table tr:nth-child(even) td { background: var(--col-bg); }
+
+  /* ---- mock form ---- */
+  .mock-form { background: var(--col-bg); border: 1px solid var(--grid-line); border-radius: 6px; padding: 16px 20px; margin: 12px 0; }
+  .mock-form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  .mock-form-label { font-size: 12px; font-weight: 700; color: var(--ink2); min-width: 90px; }
+  .mock-form-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 4px 8px; font-size: 12px; color: var(--ink); min-width: 140px; }
+  .mock-form-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 4px 6px; font-size: 12px; color: var(--ink); }
+  .mock-toggle-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
+  .mock-switch { width: 32px; height: 16px; border-radius: 8px; background: var(--border); position: relative; flex-shrink: 0; }
+  .mock-switch.on { background: var(--step-color); }
+  .mock-switch::after { content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; top: 2px; left: 2px; }
+  .mock-switch.on::after { left: auto; right: 2px; }
+
+  /* ---- status badges ---- */
+  .status-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .st-success { background: var(--success-light); color: var(--success); border: 1px solid var(--success); }
+  .st-failed { background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger); }
+  .st-skipped { background: var(--warn-light); color: var(--warn); border: 1px solid var(--warn); }
+  .st-running { background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); }
+
+  /* ---- legend ---- */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 100px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* ---- flow ---- */
+  .action-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; padding: 16px 0; }
+  .action-flow .af-step { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .action-flow .af-arrow { font-size: 20px; color: var(--ink2); font-weight: 700; }
+  .action-flow .af-label { font-size: 11px; color: var(--ink2); }
+  .flow-badge { display: inline-flex; align-items: center; padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+  .fb-schedule { background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); }
+  .fb-calc { background: var(--success-light); color: var(--success); border: 1px solid var(--success); }
+  .fb-file { background: var(--warn-light); color: var(--warn); border: 1px solid var(--warn); }
+  .fb-send { background: #f3e5f5; color: #7b1fa2; border: 1px solid #ce93d8; }
+  .fb-save { background: var(--col-bg); color: var(--ink2); border: 1px solid var(--border); }
+  :root[data-theme="dark"] .fb-send { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fb-send { background: #2a1a30; color: #ce93d8; border-color: #3a2a40; } }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step, .screen-overview { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+    .action-flow { flex-direction: column; gap: 2px; }
+    .action-flow .af-arrow { transform: rotate(90deg); }
+    .mock-form-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>注文書自動送信 作業手順書</h1>
+    <div class="subtitle">仕入先への注文書・進度表・納品書を自動生成してメール送信する機能の操作手順</div>
+    <div class="path">
+      仕入 <span class="arrow">&#9656;</span> 業務自動タスク <span class="arrow">&#9656;</span> 注文書自動送信設定
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>手順の流れ</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>新規設定を作成する</li>
+      <li><span class="tn">3</span>テスト送信で確認する</li>
+      <li><span class="tn">4</span>送信結果を確認する</li>
+      <li><span class="tn">5</span>トラック積載を判定する</li>
+      <li><span class="tn">6</span>注意事項</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面説明 ===== -->
+  <div class="screen-overview">
+    <h2>画面説明 <span class="badge">まずここを読む</span></h2>
+
+    <!-- 画面全体モック -->
+    <div class="overview-mock" style="position:relative;">
+      <div class="om-nav">
+        <span>DAISO</span>
+        <span>受注</span>
+        <span>生産</span>
+        <span class="om-active">仕入</span>
+        <span>出荷</span>
+        <span>在庫</span>
+        <span>品質</span>
+        <span>マスタ</span>
+        <span>設定</span>
+      </div>
+      <!-- ヘッダー -->
+      <div style="background:var(--grid-head);padding:8px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <span style="font-weight:800;font-size:14px;color:var(--ink);">注文書自動送信設定</span>
+        <span style="font-size:11px;color:var(--ink2);">注文書Excel・進度表Excel・進度表PDF・外作納品書PDFはそれぞれ設定でON/OFFできます。</span>
+        <span class="mock-btn secondary" style="font-size:10px;padding:2px 8px;margin-left:auto;">マニュアル</span>
+        <span class="mock-btn primary" style="font-size:10px;padding:2px 8px;">新規追加</span>
+        <span class="om-anno" style="top:-8px;left:40%;">1</span>
+      </div>
+      <!-- タブ -->
+      <div style="background:var(--card);padding:0 14px;border-bottom:1px solid var(--grid-line);position:relative;">
+        <div class="mock-tabs">
+          <div class="mock-tab active">設定</div>
+          <div class="mock-tab">履歴</div>
+          <div class="mock-tab">トラック積載判定</div>
+        </div>
+        <span class="om-anno" style="top:-6px;right:30%;">2</span>
+      </div>
+      <!-- テーブル -->
+      <div style="padding:10px 14px;background:var(--card);position:relative;">
+        <table class="mock-table">
+          <thead>
+            <tr><th>仕入先</th><th>実行時刻</th><th>納入日</th><th>計算モード</th><th>有効</th><th>ステータス</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>000180</strong> ホウダテクニカル</td>
+              <td>07:30</td>
+              <td>5営業日後</td>
+              <td>ロット丸め</td>
+              <td><span class="mock-switch on"></span></td>
+              <td><span class="status-badge st-success">SUCCESS</span></td>
+              <td>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
+                <span class="mock-btn teal" style="font-size:9px;padding:1px 6px;">今すぐ実行</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">休日トライ</span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>000387</strong> 三原金属工業</td>
+              <td>08:00</td>
+              <td>3営業日後</td>
+              <td>需要そのまま</td>
+              <td><span class="mock-switch on"></span></td>
+              <td><span class="status-badge st-skipped">SKIPPED</span></td>
+              <td>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
+                <span class="mock-btn teal" style="font-size:9px;padding:1px 6px;">今すぐ実行</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">休日トライ</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <span class="om-anno" style="top:2px;right:4px;">3</span>
+      </div>
+    </div>
+
+    <!-- 番号付き説明 -->
+    <ul class="anno-list">
+      <li><span class="anno-num">1</span><span><strong>ヘッダー</strong> — 画面タイトルと「マニュアル」「新規追加」ボタン。新規追加で仕入先ごとの送信設定を作成します。</span></li>
+      <li><span class="anno-num">2</span><span><strong>タブ</strong> — 「設定」で送信条件の管理、「履歴」で実行結果の確認、「トラック積載判定」で配送シミュレーションを行います。</span></li>
+      <li><span class="anno-num">3</span><span><strong>設定一覧</strong> — 仕入先ごとの設定が一覧表示されます。ステータス・最終実行日時・操作ボタンがここに並びます。</span></li>
+    </ul>
+
+    <!-- 処理フロー -->
+    <div class="overview-section">
+      <h3>自動送信の処理フロー</h3>
+      <div class="action-flow">
+        <div class="af-step">
+          <span class="flow-badge fb-schedule">休日判定</span>
+          <span class="af-label">営業日チェック</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="flow-badge fb-calc">数量計算</span>
+          <span class="af-label">需要と計進から算出</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="flow-badge fb-save">計画保存</span>
+          <span class="af-label">LineBacklogに保存</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="flow-badge fb-file">ファイル生成</span>
+          <span class="af-label">Excel / PDF</span>
+        </div>
+        <span class="af-arrow">&#9656;</span>
+        <div class="af-step">
+          <span class="flow-badge fb-send">メール送信</span>
+          <span class="af-label">仕入先へ送信</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ステータス -->
+    <div class="overview-section">
+      <h3>ステータスの意味</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="status-badge st-success">SUCCESS</span><span class="li-desc">送信完了（添付が空の場合もSUCCESS）</span></div>
+        <div class="legend-item"><span class="status-badge st-failed">FAILED</span><span class="li-desc">送信失敗。メッセージ欄でエラー確認</span></div>
+        <div class="legend-item"><span class="status-badge st-skipped">SKIPPED</span><span class="li-desc">休日 or 非納入日でスキップ。正常</span></div>
+        <div class="legend-item"><span class="status-badge st-running">RUNNING</span><span class="li-desc">実行中。30分超過で自動復旧</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部ナビゲーションの<strong>「仕入」</strong>をクリックし、メニューから<strong>「業務自動タスク」</strong>カテゴリの<strong>「注文書自動送信設定」</strong>を選択します。
+    </div>
+    <div class="mock-toolbar">
+      <span style="font-weight:700;">DAISO</span>
+      <span>受注</span>
+      <span>生産</span>
+      <span class="hl hl-green" style="padding:2px 8px;border-radius:4px;background:rgba(255,255,255,.18);font-weight:700;">仕入</span>
+      <span>出荷</span>
+      <span>在庫</span>
+      <span>品質</span>
+      <span>マスタ</span>
+      <span>設定</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>仕入れ管理メニュー → 「業務自動タスク」セクション → 「注文書自動送信設定」の順に選択してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">新規設定を作成する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「新規追加」</strong>ボタンを押すと設定モーダルが開きます。以下の項目を入力して<strong>「保存」</strong>を押してください。
+    </div>
+
+    <!-- モック: 設定フォーム -->
+    <div class="mock-form">
+      <div class="mock-form-row">
+        <span class="mock-form-label">仕入先 *</span>
+        <span class="mock-form-select hl" style="min-width:200px;">000180 - ホウダテクニカル</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">実行時刻 *</span>
+        <span class="mock-form-input" style="min-width:80px;">07:30</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">納入日</span>
+        <span class="mock-form-input" style="min-width:60px;">5</span>
+        <span style="font-size:12px;color:var(--ink2);">営業日後</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">進度表期間</span>
+        <span class="mock-form-input" style="min-width:50px;">7</span>
+        <span style="font-size:12px;color:var(--ink2);">営業日前 ～</span>
+        <span class="mock-form-input" style="min-width:50px;">30</span>
+        <span style="font-size:12px;color:var(--ink2);">日後</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">計算モード</span>
+        <span class="mock-form-select">ロット丸め</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">納入日判定</span>
+        <span class="mock-form-select">仕入先カレンダ</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">安全在庫</span>
+        <span class="mock-toggle-row"><span class="mock-switch on"></span> ON</span>
+        <span class="mock-form-input" style="min-width:50px;">1.5</span>
+        <span style="font-size:12px;color:var(--ink2);">倍</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">送信ファイル</span>
+        <span class="mock-toggle-row"><span class="mock-switch on"></span> 注文書Excel</span>
+        <span class="mock-toggle-row"><span class="mock-switch on"></span> 進度表Excel</span>
+        <span class="mock-toggle-row"><span class="mock-switch on"></span> 進度表PDF</span>
+        <span class="mock-toggle-row"><span class="mock-switch"></span> 外作納品書PDF</span>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <span class="mock-btn primary" style="font-size:12px;padding:4px 16px;">保存</span>
+        <span class="mock-btn secondary" style="font-size:12px;padding:4px 16px;">キャンセル</span>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>1社1設定:</strong> 同じ仕入先の設定を重複して作成することはできません。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>送信ファイル:</strong> 4種類のうち最低1つはONにしてください。すべてOFFでは保存できません。</span>
+    </div>
+
+    <div class="overview-section" style="margin-top:20px;padding-top:16px;">
+      <h3>設定項目の詳細</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><span class="li-label">計算モード</span><span class="li-desc">「需要そのまま」は差分をそのまま発注。「ロット丸め」は製品マスタのロット設定で丸めて発注</span></div>
+        <div class="legend-item"><span class="li-label">納入日判定</span><span class="li-desc">「パターン」は納入パターンマスタ、「仕入先カレンダ」は仕入先に割当てたカレンダで納入日を決定</span></div>
+        <div class="legend-item"><span class="li-label">安全在庫</span><span class="li-desc">ONにすると、在庫引当マスタの最低在庫数 × 倍率が必要数に加算される</span></div>
+        <div class="legend-item"><span class="li-label">有効</span><span class="li-desc">OFFにすると自動送信を一時停止。設定は保持される</span></div>
+        <div class="legend-item"><span class="li-label">返信先 / CC</span><span class="li-desc">連絡先マスタから選択。返信先は1件、CCは複数件追加可</span></div>
+        <div class="legend-item"><span class="li-label">通知先</span><span class="li-desc">失敗時・非納入日の社内通知先ユーザー。複数人設定可</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">テスト送信で確認する</div>
+    </div>
+    <div class="step-desc">
+      設定を保存したら、実際にメールが正しく届くか確認します。<br>
+      一覧の操作ボタンから実行方法を選んでください。
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+      <span class="mock-btn teal" style="font-size:13px;padding:5px 14px;">今すぐ実行</span>
+      <span class="mock-btn" style="font-size:13px;padding:5px 14px;">休日トライ</span>
+    </div>
+
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">今すぐ実行</span><span class="li-desc">即時実行。ただし休日の場合はスキップされる</span></div>
+      <div class="legend-item"><span class="li-label">休日トライ</span><span class="li-desc">休日判定を無視して実行。休日のテストに使用</span></div>
+    </div>
+
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span><strong>実際にメールが送信されます。</strong>テスト用の宛先に変更してからテストするか、仕入先に事前連絡してください。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>実行するとステータスが <span class="status-badge st-running">RUNNING</span> になり、完了すると <span class="status-badge st-success">SUCCESS</span> または <span class="status-badge st-failed">FAILED</span> に変わります。画面は3秒ごとに自動更新されます。</span>
+    </div>
+
+    <div class="overview-section" style="margin-top:16px;padding-top:14px;">
+      <h3>確認ポイント</h3>
+      <div class="legend-grid" style="margin-top:8px;">
+        <div class="legend-item"><span class="li-label">ステータス</span><span class="li-desc">SUCCESSになっているか</span></div>
+        <div class="legend-item"><span class="li-label">メール受信</span><span class="li-desc">仕入先・CC先にメールが届いているか</span></div>
+        <div class="legend-item"><span class="li-label">添付ファイル</span><span class="li-desc">設定どおりのファイルが添付されているか</span></div>
+        <div class="legend-item"><span class="li-label">数量</span><span class="li-desc">注文書Excelの数量が妥当か</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">送信結果を確認する（履歴タブ）</div>
+    </div>
+    <div class="step-desc">
+      <strong>「履歴」</strong>タブに切り替えると、過去の実行結果を一覧で確認できます。
+    </div>
+
+    <!-- モック: 履歴画面 -->
+    <div style="border:1px solid var(--grid-line);border-radius:6px;overflow:hidden;margin-bottom:12px;">
+      <div style="background:var(--grid-head);padding:8px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:11px;border-bottom:1px solid var(--grid-line);">
+        <span class="mock-form-select">仕入先: すべて</span>
+        <span class="mock-form-select">結果: すべて</span>
+        <span class="mock-form-select">種別: すべて</span>
+        <span class="mock-form-select">件数: 50</span>
+        <span class="mock-form-input" style="min-width:100px;" placeholder="キーワード"></span>
+        <span class="mock-btn secondary" style="font-size:10px;padding:2px 8px;">履歴更新</span>
+      </div>
+      <table class="mock-table" style="margin:0;">
+        <thead>
+          <tr><th>開始</th><th>仕入先</th><th>種別</th><th>結果</th><th>品目数</th><th>添付内容</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>08/08 07:30</td>
+            <td>000180 ホウダテクニカル</td>
+            <td>SCHEDULED</td>
+            <td><span class="status-badge st-success">SUCCESS</span></td>
+            <td>12</td>
+            <td style="font-size:10px;">注文書Excel, 進度表PDF</td>
+            <td>
+              <span class="mock-btn" style="font-size:9px;padding:1px 5px;">詳細</span>
+              <span class="mock-btn" style="font-size:9px;padding:1px 5px;">Excel</span>
+            </td>
+          </tr>
+          <tr>
+            <td>08/08 08:00</td>
+            <td>000387 三原金属工業</td>
+            <td>SCHEDULED</td>
+            <td><span class="status-badge st-skipped">SKIPPED</span></td>
+            <td>-</td>
+            <td style="font-size:10px;">-</td>
+            <td><span class="mock-btn" style="font-size:9px;padding:1px 5px;">詳細</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">詳細ボタン</span><span class="li-desc">件名・宛先・CC・添付内容・実行時間・エラーを表示</span></div>
+      <div class="legend-item"><span class="li-label">Excelボタン</span><span class="li-desc">送信した注文書Excelを再ダウンロード</span></div>
+      <div class="legend-item"><span class="li-label">キーワード検索</span><span class="li-desc">仕入先コード・名称・宛先・件名・メッセージで検索</span></div>
+      <div class="legend-item"><span class="li-label">種別フィルタ</span><span class="li-desc">SCHEDULED / MANUAL / HOLIDAY_TRIALで絞り込み</span></div>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>注文書Excel再ダウンロード:</strong> 注文書Excel = ONで実行した場合のみ、Excelボタンが表示されます。OFFで実行した履歴には表示されません。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">トラック積載を判定する</div>
+    </div>
+    <div class="step-desc">
+      <strong>「トラック積載判定」</strong>タブで、注文品がトラックに収まるか事前確認できます。
+    </div>
+
+    <!-- モック: トラック判定 -->
+    <div class="mock-form" style="margin-bottom:12px;">
+      <div class="mock-form-row">
+        <span class="mock-form-label">トラック</span>
+        <span class="mock-form-select hl" style="min-width:200px;">000180 / 4tトラック</span>
+      </div>
+      <div class="mock-form-row">
+        <span class="mock-form-label">納期</span>
+        <span class="mock-form-input hl hl-blue" style="min-width:120px;">2026-08-15</span>
+      </div>
+      <div style="margin-top:8px;">
+        <span class="mock-btn teal" style="font-size:12px;padding:4px 14px;">判定実行</span>
+      </div>
+    </div>
+
+    <div class="step-desc">
+      トラックと納期を選択して<strong>「判定実行」</strong>を押すと、荷台上の配置図が表示されます。
+    </div>
+
+    <div class="legend-grid" style="margin-top:0;">
+      <div class="legend-item"><span class="li-label">積載可 / 超過</span><span class="li-desc">全容器がトラックに収まるかどうか</span></div>
+      <div class="legend-item"><span class="li-label">占有率</span><span class="li-desc">荷台面積に対する使用率（%）</span></div>
+      <div class="legend-item"><span class="li-label">配置図</span><span class="li-desc">荷台上の容器配置を色分け表示</span></div>
+      <div class="legend-item"><span class="li-label">データソース</span><span class="li-desc">注文書提案 or 購買計画から自動選択</span></div>
+    </div>
+
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>品目が多い場合は計算に時間がかかります。<strong>「中断」</strong>ボタンで途中停止できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6: 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>実際のメール送信:</strong> 「今すぐ実行」「休日トライ」はどちらも実際にメールが送信されます。テスト時は宛先に注意してください。</li>
+      <li><strong>計画への影響:</strong> 本機能は LineBacklog (sequence_no=1) に計画数量を保存します。実行後に進度が自動再計算されるため、在庫計画にも影響します。</li>
+      <li><strong>二重実行防止:</strong> 同じ仕入先が実行中の場合、再実行はブロックされます。30分以上 RUNNING のままの場合は自動的に FAILED に変更されます。</li>
+      <li><strong>休日スキップ:</strong> ダイソウカレンダで休日の場合、通常実行と「今すぐ実行」はスキップされます。休日に動作確認するには「休日トライ」を使ってください。</li>
+      <li><strong>空送信なし:</strong> 添付ファイルがすべて空の場合、メールは送信されません（ステータスは SUCCESS）。</li>
+      <li><strong>数量不一致:</strong> ロット丸めモードの場合、注文書Excelの「数量」列と「日別内訳」列の合計が一致しないことがあります。正常な動作です。</li>
+      <li><strong>既存機能との独立性:</strong> 「自動納入リスト送信」とは別機能です。両方を同じ仕入先に設定しても互いに影響しません。</li>
+      <li><strong>連絡先マスタ:</strong> 返信先・CCのメールアドレスは連絡先マスタから選択します。新しいアドレスが必要な場合は先にマスタに登録してください。</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

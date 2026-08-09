@@ -54,6 +54,7 @@ export const manualSections = [
       { title: "仕入れ検収", path: "仕入れ/仕入れ検収.md" },
       { title: "納入予定", path: "仕入れ/納入予定.md" },
       { title: "自動納入リスト送信", path: "仕入れ/自動納入リスト送信.md" },
+      { title: "注文書自動送信", path: "仕入れ/注文書自動送信.md" },
       { title: "仕入れ在庫/残量一覧", path: "生産/仕入れ在庫残量一覧.md" },
     ],
   },

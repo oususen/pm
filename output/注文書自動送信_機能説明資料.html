@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>注文書自動送信 — 機能説明資料</title>
+<style>
+  :root {
+    --ground: #F3F5F8;
+    --surface: #FFFFFF;
+    --accent: #2252B5;
+    --accent-soft: #E8EEF8;
+    --accent-border: #B8CCE8;
+    --text: #1A2032;
+    --text-secondary: #445068;
+    --muted: #6B7A8D;
+    --border: #D4DAE3;
+    --border-light: #E8ECF2;
+    --success: #1A7F5A;
+    --success-bg: #E6F5EE;
+    --warning: #8B5A00;
+    --warning-bg: #FEF3D8;
+    --danger: #B53022;
+    --danger-bg: #FDE8E6;
+    --role-ops: #6842B5;
+    --role-ops-bg: #F0EBF8;
+    --role-plan: #1A7F5A;
+    --role-plan-bg: #E6F5EE;
+    --role-mgr: #2252B5;
+    --role-mgr-bg: #E8EEF8;
+    --flow-arrow: #94A3B8;
+    --table-stripe: #F7F9FB;
+    --shadow: 0 1px 3px rgba(26,32,50,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #13151A;
+      --surface: #1C1F27;
+      --accent: #6B9BF2;
+      --accent-soft: #1E2A40;
+      --accent-border: #2A3D5E;
+      --text: #DEE3EB;
+      --text-secondary: #A8B4C4;
+      --muted: #7B8A9E;
+      --border: #2D3343;
+      --border-light: #252A35;
+      --success: #34D399;
+      --success-bg: #0D2818;
+      --warning: #FBBF24;
+      --warning-bg: #2A2008;
+      --danger: #F87171;
+      --danger-bg: #2A1010;
+      --role-ops: #A78BFA;
+      --role-ops-bg: #1E1535;
+      --role-plan: #34D399;
+      --role-plan-bg: #0D2818;
+      --role-mgr: #6B9BF2;
+      --role-mgr-bg: #1E2A40;
+      --flow-arrow: #4B5563;
+      --table-stripe: #1F222B;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #13151A;
+    --surface: #1C1F27;
+    --accent: #6B9BF2;
+    --accent-soft: #1E2A40;
+    --accent-border: #2A3D5E;
+    --text: #DEE3EB;
+    --text-secondary: #A8B4C4;
+    --muted: #7B8A9E;
+    --border: #2D3343;
+    --border-light: #252A35;
+    --success: #34D399;
+    --success-bg: #0D2818;
+    --warning: #FBBF24;
+    --warning-bg: #2A2008;
+    --danger: #F87171;
+    --danger-bg: #2A1010;
+    --role-ops: #A78BFA;
+    --role-ops-bg: #1E1535;
+    --role-plan: #34D399;
+    --role-plan-bg: #0D2818;
+    --role-mgr: #6B9BF2;
+    --role-mgr-bg: #1E2A40;
+    --flow-arrow: #4B5563;
+    --table-stripe: #1F222B;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--text);
+    font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Meiryo", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  .doc-header {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+  .doc-meta {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .doc-title {
+    font-size: 1.75rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+    margin: 0 0 0.35rem;
+    color: var(--text);
+  }
+  .doc-subtitle {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2.5rem;
+    box-shadow: var(--shadow);
+  }
+  .toc-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+  }
+  .toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.2rem 2rem;
+  }
+  .toc-list li {
+    font-size: 0.88rem;
+    color: var(--accent);
+    line-height: 1.7;
+  }
+  .toc-list li a {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s;
+  }
+  .toc-list li a:hover {
+    border-bottom-color: var(--accent);
+  }
+
+  .section {
+    margin-bottom: 3rem;
+  }
+  .section-heading {
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--accent);
+    margin: 0 0 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  h3 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 1.5rem 0 0.6rem;
+  }
+
+  p { margin: 0 0 0.75rem; }
+
+  a { color: var(--accent); text-decoration: underline; }
+  a:hover { opacity: 0.8; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1rem;
+  }
+  .card-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.25rem;
+  }
+  .card-value {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+  .stat-number {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .stat-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+    margin-top: 0.2rem;
+  }
+
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 1.25rem 0;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .flow-step {
+    flex: 1;
+    min-width: 120px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem 0.6rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.3rem;
+    position: relative;
+  }
+  .flow-step.highlight {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .flow-num {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+  }
+  .flow-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.35;
+  }
+  .flow-detail {
+    font-size: 0.68rem;
+    color: var(--muted);
+    line-height: 1.3;
+  }
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    min-width: 28px;
+    color: var(--flow-arrow);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 0.75rem 0 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-light);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+    text-align: left;
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: top;
+  }
+  tr:nth-child(even) td {
+    background: var(--table-stripe);
+  }
+  tr:last-child td {
+    border-bottom: none;
+  }
+  td code, p code {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.82em;
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+  }
+
+  .formula-box {
+    background: var(--surface);
+    border: 1px solid var(--accent-border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 1rem 1.5rem;
+    margin: 0.75rem 0 1rem;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 0.88rem;
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+  .formula-label {
+    font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.55em;
+    border-radius: 3px;
+    vertical-align: middle;
+  }
+  .badge-ops { background: var(--role-ops-bg); color: var(--role-ops); }
+  .badge-plan { background: var(--role-plan-bg); color: var(--role-plan); }
+  .badge-mgr { background: var(--role-mgr-bg); color: var(--role-mgr); }
+  .badge-success { background: var(--success-bg); color: var(--success); }
+  .badge-warning { background: var(--warning-bg); color: var(--warning); }
+  .badge-danger { background: var(--danger-bg); color: var(--danger); }
+
+  .role-panel {
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    border: 1px solid;
+  }
+  .role-panel.ops   { background: var(--role-ops-bg); border-color: color-mix(in srgb, var(--role-ops) 25%, transparent); }
+  .role-panel.plan  { background: var(--role-plan-bg); border-color: color-mix(in srgb, var(--role-plan) 25%, transparent); }
+  .role-panel.mgr   { background: var(--role-mgr-bg); border-color: color-mix(in srgb, var(--role-mgr) 25%, transparent); }
+  .role-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .role-panel.ops  .role-title { color: var(--role-ops); }
+  .role-panel.plan .role-title { color: var(--role-plan); }
+  .role-panel.mgr  .role-title { color: var(--role-mgr); }
+  .role-panel ul {
+    margin: 0;
+    padding-left: 1.2rem;
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+  .role-panel li { margin-bottom: 0.15rem; }
+
+  .callout {
+    border-radius: 6px;
+    padding: 0.9rem 1.25rem;
+    margin: 0.75rem 0 1rem;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    border: 1px solid;
+  }
+  .callout.info    { background: var(--accent-soft); border-color: var(--accent-border); color: var(--text); }
+  .callout.warning { background: var(--warning-bg); border-color: color-mix(in srgb, var(--warning) 30%, transparent); color: var(--text); }
+  .callout.success { background: var(--success-bg); border-color: color-mix(in srgb, var(--success) 30%, transparent); color: var(--text); }
+  .callout strong { font-weight: 700; }
+
+  .tabs-preview {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .tab-card {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+    box-shadow: var(--shadow);
+  }
+  .tab-card-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.35rem;
+  }
+  .tab-card-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .attach-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .attach-item {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    box-shadow: var(--shadow);
+  }
+  .attach-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.2rem;
+  }
+  .attach-desc {
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .safeguard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0.75rem 0;
+  }
+  .safeguard {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    font-size: 0.88rem;
+    line-height: 1.55;
+  }
+  .safeguard-icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--success-bg);
+    border: 1.5px solid var(--success);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.15rem;
+  }
+  .safeguard-icon::after {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+
+  .doc-footer {
+    margin-top: 3rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border-light);
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  @media (max-width: 640px) {
+    .tabs-preview, .attach-grid { grid-template-columns: 1fr; }
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+    .flow { flex-direction: column; align-items: center; }
+    .flow-arrow { transform: rotate(90deg); width: auto; min-width: auto; height: 24px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .doc-title { font-size: 1.35rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="doc-header">
+    <div class="doc-meta">
+      <span>機能説明資料</span>
+      <span>2026年8月 第3週</span>
+    </div>
+    <h1 class="doc-title">注文書自動送信</h1>
+    <p class="doc-subtitle">
+      仕入先ごとに設定した条件で、注文書Excel・進度表・納品書を自動生成し、毎日メール送信する機能です。<br>
+      購買 &gt; 業務自動タスク &gt; 注文書自動送信設定 からアクセスします。
+    </p>
+  </header>
+
+  <nav class="toc">
+    <div class="toc-label">目次</div>
+    <ol class="toc-list">
+      <li><a href="#overview">機能の全体像</a></li>
+      <li><a href="#flow">自動送信の流れ</a></li>
+      <li><a href="#delivery">納入日決定のしくみ</a></li>
+      <li><a href="#tabs">画面構成（3タブ）</a></li>
+      <li><a href="#config">設定項目の詳細</a></li>
+      <li><a href="#calc">数量計算のしくみ</a></li>
+      <li><a href="#attach">添付ファイル</a></li>
+      <li><a href="#truck">トラック積載判定</a></li>
+      <li><a href="#safety">安全機構</a></li>
+      <li><a href="#roles">担当別ガイド</a></li>
+    </ol>
+  </nav>
+
+  <section class="section" id="overview">
+    <h2 class="section-heading">機能の全体像</h2>
+    <p>
+      既存の「自動納入リスト送信」とは<strong>別機能</strong>として、仕入先への注文書を自動で作成・送信します。
+      仕入先ごとに送信スケジュール・数量計算方法・添付ファイルの種類を設定でき、毎日指定時刻に自動実行されます。
+    </p>
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-number">4種</div>
+        <div class="stat-label">添付ファイル</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">2モード</div>
+        <div class="stat-label">数量計算</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">2方式</div>
+        <div class="stat-label">納入日判定</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">3種</div>
+        <div class="stat-label">実行方法</div>
+      </div>
+    </div>
+    <div class="callout info">
+      <strong>既存機能との違い:</strong> 「自動納入リスト送信」は納入リストの送付機能です。本機能は注文書（計画数量ベース）を生成し、<code>LineBacklog</code> に計画を保存した上でメール送信します。両機能は独立しており、互いに影響しません。
+    </div>
+  </section>
+
+  <section class="section" id="flow">
+    <h2 class="section-heading">自動送信の流れ</h2>
+    <p>毎日、設定された時刻に以下の処理が自動で実行されます。</p>
+    <div class="flow">
+      <div class="flow-step">
+        <span class="flow-num">STEP 1</span>
+        <span class="flow-label">休日判定</span>
+        <span class="flow-detail">ダイソウカレンダで<br>当日が営業日か確認</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-num">STEP 2</span>
+        <span class="flow-label">納入日決定</span>
+        <span class="flow-detail">設定から<br>納入日を算出</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step highlight">
+        <span class="flow-num">STEP 3</span>
+        <span class="flow-label">数量計算</span>
+        <span class="flow-detail">需要と計進から<br>必要数を算出・保存</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-num">STEP 4</span>
+        <span class="flow-label">ファイル生成</span>
+        <span class="flow-detail">Excel / PDF を<br>自動生成</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-num">STEP 5</span>
+        <span class="flow-label">メール送信</span>
+        <span class="flow-detail">仕入先へ<br>添付付きで送信</span>
+      </div>
+    </div>
+    <div class="callout warning">
+      <strong>休日の場合:</strong> 当日が休日ならスキップされます（メール送信なし、ステータス: SKIPPED）。<br>
+      休日でも動作確認したい場合は「休日トライ」ボタンで実行できます。
+    </div>
+
+    <h3 id="delivery">STEP 2 — 納入日決定の詳細</h3>
+    <p>納入日は以下の3段階で決定されます。いずれかの段階で条件を満たさない場合、その日はスキップされます。</p>
+
+    <div class="flow" style="margin-bottom:0.5rem;">
+      <div class="flow-step">
+        <span class="flow-num">2-1</span>
+        <span class="flow-label">最早納入日の算出</span>
+        <span class="flow-detail">実行日 + 設定日数<br>(N営業日後)</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-num">2-2</span>
+        <span class="flow-label">納入日判定</span>
+        <span class="flow-detail">パターン or<br>仕入先カレンダで確認</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-num">2-3</span>
+        <span class="flow-label">カバー期間の算出</span>
+        <span class="flow-detail">今回納入日～<br>次回納入日前日</span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>段階</th><th>設定項目</th><th>内容</th><th>スキップ条件</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>2-1</strong></td>
+            <td>納入日<br>(N営業日後)</td>
+            <td>実行日から<a class="app-link" data-path="/masters/calendar">ダイソウカレンダ</a>の営業日をN日数えて<strong>最早納入日</strong>を算出。<br>例: 設定値5 → 実行日の5営業日後<br>※ N の値は<a class="app-link" data-path="/masters/product">品番マスタ</a>のLT設定に基づく</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><strong>2-2</strong></td>
+            <td>納入日判定方式</td>
+            <td>
+              <strong>パターン方式:</strong> 納入パターンマスタに登録された曜日・日程で、最早納入日が納入日かチェック<br>
+              <strong>仕入先カレンダ方式:</strong> <a class="app-link" data-path="/purchase/supplier-calendar">仕入れ先カレンダ</a>に設定した納入日 = 納入可能日としてチェック
+            </td>
+            <td>最早納入日が納入日でない場合<br>→ SKIPPED<br>(「非納入日」として通知)</td>
+          </tr>
+          <tr>
+            <td><strong>2-3</strong></td>
+            <td>—</td>
+            <td>パターン/カレンダから<strong>次回納入日</strong>を特定し、今回納入日～次回納入日前日を<strong>カバー期間</strong>とする。<br>この期間の需要合計が発注数量の基準になる</td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="formula-box">
+      <span class="formula-label">具体例（納入日=5営業日後、パターン方式、月・水・金納入）</span>
+      実行日: 8/11(月) → 最早納入日: 8/18(月) → 納入パターン ✓<br>
+      次回納入日: 8/20(水) → カバー期間: 8/18～8/19（2日間）<br>
+      → この2日間の需要合計から必要数を計算
+    </div>
+
+    <div class="callout warning">
+      <strong>パターン方式 vs 仕入先カレンダ方式:</strong><br>
+      <strong>パターン方式</strong>は納入パターンマスタに登録した「月・水・金」などの曜日パターンで判定します。ただし納入日判定がカレンダの休日に左右されやすく、発注漏れの可能性があるため、<strong>極力使わないでください。</strong><br>
+      <strong>仕入先カレンダ方式（推奨）</strong>は仕入先マスタに割当てたカレンダに設定した納入日をそのまま納入日として判定します。カレンダ設定画面で納入日を納入パターンに基づいて自動設定でき、手動での変更も可能なため、確実に納入日を計算できます。<strong>本機能では当方式を使用してください。</strong>
+    </div>
+  </section>
+
+  <section class="section" id="tabs">
+    <h2 class="section-heading">画面構成（3タブ）</h2>
+    <div class="tabs-preview">
+      <div class="tab-card">
+        <div class="tab-card-title">設定</div>
+        <p class="tab-card-desc">
+          仕入先ごとの送信条件を管理。送信時刻、納入日数、計算モード、添付ファイルのON/OFF、宛先・CC・通知先を設定。ここから手動実行・休日トライも可能。
+        </p>
+      </div>
+      <div class="tab-card">
+        <div class="tab-card-title">履歴</div>
+        <p class="tab-card-desc">
+          過去の実行結果を確認。仕入先・結果・実行種別・キーワードで絞り込み可能。詳細表示で件名・宛先・添付内容を確認。注文書Excelの再ダウンロードも可能。
+        </p>
+      </div>
+      <div class="tab-card">
+        <div class="tab-card-title">トラック積載判定</div>
+        <p class="tab-card-desc">
+          トラックと納期を選択して、注文品がトラックに収まるか判定。荷台上の配置図（SVG）で視覚的に確認。占有率・配置数・容器内訳を表示。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="config">
+    <h2 class="section-heading">設定項目の詳細</h2>
+    <p>仕入先1社につき1件の設定を登録します。主な設定項目は以下のとおりです。</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>項目</th><th>内容</th><th>例</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>送信時刻</strong></td>
+            <td>毎日の自動送信時刻（HH:MM）</td>
+            <td>07:30</td>
+          </tr>
+          <tr>
+            <td><strong>納入日（N営業日後）</strong></td>
+            <td>実行日から何営業日後を納入日とするか</td>
+            <td>5営業日後</td>
+          </tr>
+          <tr>
+            <td><strong>進度表期間</strong></td>
+            <td>進度再計算の範囲（何営業日前～何日後）</td>
+            <td>7日前～30日後</td>
+          </tr>
+          <tr>
+            <td><strong>計算モード</strong></td>
+            <td>「需要そのまま」または「ロット丸め」<br>ロット丸めは品番マスタでロットの設定が必要</td>
+            <td>ロット丸め</td>
+          </tr>
+          <tr>
+            <td><strong>納入日判定方式</strong></td>
+            <td>「パターン」（納入パターンマスタ）<br>または「仕入先カレンダ」</td>
+            <td>仕入先カレンダ</td>
+          </tr>
+          <tr>
+            <td><strong>安全在庫</strong></td>
+            <td>ON/OFFと倍率。ONの場合、安全在庫数&times;倍率を必要数に加算。<br>安全在庫は自動タスクで自動計算できるが、設定および有効にする必要がある</td>
+            <td>ON / 1.5倍</td>
+          </tr>
+          <tr>
+            <td><strong>送信ファイル</strong></td>
+            <td>4種類を個別にON/OFF（1つ以上ON必須）</td>
+            <td>注文書Excel: ON<br>進度表PDF: ON</td>
+          </tr>
+          <tr>
+            <td><strong>宛先</strong></td>
+            <td>仕入先の連絡先メールアドレス</td>
+            <td>supplier@example.com</td>
+          </tr>
+          <tr>
+            <td><strong>返信先 / CC</strong></td>
+            <td>連絡先マスタから選択</td>
+            <td>CC: 2名</td>
+          </tr>
+          <tr>
+            <td><strong>通知先</strong></td>
+            <td>送信失敗時・非納入日の社内通知先ユーザー</td>
+            <td>業務員A, 計画員B</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="calc">
+    <h2 class="section-heading">数量計算のしくみ</h2>
+
+    <h3>基本的な考え方</h3>
+    <p>
+      在庫ではなく<strong>計画進度（計進）</strong>を基準に必要数を計算します。
+      「納入日から次回納入日の前日まで」の需要をカバーできるだけの数量を発注します。
+    </p>
+
+    <div class="formula-box">
+      <span class="formula-label">必要数の算出</span>
+      必要数 = カバー期間の需要合計 &minus; 納入日前日の計進 + 安全在庫（ONの場合）&times; 倍数
+    </div>
+
+    <div class="callout info">
+      <strong>必要数 &le; 0 の場合:</strong> その品目は今回の納入では不要と判断し、計画を保存しません（既存計画があれば削除）。
+    </div>
+
+    <h3>ロット丸め（LOT_ROUNDED モード）</h3>
+    <p>製品マスタの <code>order_lot_min</code>（最小納入数）と <code>order_lot_multiple</code>（納入倍数）を使います。</p>
+    <div class="formula-box">
+      <span class="formula-label">ロット丸め計算</span>
+      基準数量 = max(必要数, 最小納入数)<br>
+      発注数量 = ceil(基準数量 &divide; 納入倍数) &times; 納入倍数
+    </div>
+
+    <div class="formula-box">
+      <span class="formula-label">例: 必要数 = 130、最小納入数 = 100、納入倍数 = 50</span>
+      基準数量 = max(130, 100) = 130<br>
+      発注数量 = ceil(130 &divide; 50) &times; 50 = 3 &times; 50 = <strong>150</strong>
+    </div>
+
+    <div class="formula-box">
+      <span class="formula-label">例: 必要数 = 40、最小納入数 = 100、納入倍数 = 50</span>
+      基準数量 = max(40, 100) = 100（最小納入数に引き上げ）<br>
+      発注数量 = ceil(100 &divide; 50) &times; 50 = 2 &times; 50 = <strong>100</strong>
+    </div>
+
+    <h3>安全在庫</h3>
+    <p>
+      設定で安全在庫をONにした場合、<code>安全在庫数 &times; 倍率</code> が必要数に加算されます。
+      安全在庫数は在庫引当マスタ（<code>StockAllocation.min_stock_qty</code>）の値を使用します。
+    </p>
+
+    <h3>計画の保存先</h3>
+    <p>
+      計算結果は <code>LineBacklog</code> の <code>sequence_no=1</code> に <code>plan_qty</code> として保存されます。
+      保存後、進度が再計算されるため、後続の在庫計画にも自動で反映されます。
+    </p>
+  </section>
+
+  <section class="section" id="attach">
+    <h2 class="section-heading">添付ファイル</h2>
+    <p>設定で個別にON/OFFできる4種類のファイルが添付されます。</p>
+    <div class="attach-grid">
+      <div class="attach-item">
+        <div class="attach-name">注文書 Excel</div>
+        <p class="attach-desc">品番・品名・数量・納品日・日別需要内訳を含む注文書。送信後に履歴から再ダウンロード可能。</p>
+      </div>
+      <div class="attach-item">
+        <div class="attach-name">進度表 Excel</div>
+        <p class="attach-desc">設定した進度期間（N日前～M日後）の計画進度をExcel形式で出力。</p>
+      </div>
+      <div class="attach-item">
+        <div class="attach-name">進度表 PDF</div>
+        <p class="attach-desc">同じ進度データをPDF形式で出力。印刷配布用。</p>
+      </div>
+      <div class="attach-item">
+        <div class="attach-name">外作納品書 PDF</div>
+        <p class="attach-desc">A4横の納品書。1ページに3枚（納品書・受領書・仕入先控）。QRコード・容器情報付き。</p>
+      </div>
+    </div>
+    <div class="callout info">
+      <strong>送信ルール:</strong> 設定がONでも元データがない場合はそのファイルは添付されません。4種すべてが空になった場合は、メール送信自体をスキップし、ステータスは SUCCESS で終了します。
+    </div>
+  </section>
+
+  <section class="section" id="truck">
+    <h2 class="section-heading">トラック積載判定</h2>
+    <p>
+      発注した品目がトラックに収まるかを事前に確認する機能です。
+      トラックと納期を選択して実行すると、ビンパッキング算法で容器の配置をシミュレーションします。
+    </p>
+    <h3>判定結果の見方</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>表示項目</th><th>内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>積載可 / 積載超過</strong></td><td>全容器がトラックに収まるかどうか</td></tr>
+          <tr><td><strong>占有率</strong></td><td>荷台面積に対する使用率（%）</td></tr>
+          <tr><td><strong>配置図</strong></td><td>荷台上の容器配置をSVGで表示。色分けは製品別</td></tr>
+          <tr><td><strong>配置数</strong></td><td>配置済み枠数 / 全枠数</td></tr>
+          <tr><td><strong>容器内訳</strong></td><td>容器種別ごとの数量サマリ</td></tr>
+          <tr><td><strong>データソース</strong></td><td>「注文書」(注文書提案) or「購買計画」(LineBacklog) — 利用可能なデータを自動選択</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warning">
+      <strong>計算の中断:</strong> 大量の品目がある場合、積載計算に時間がかかることがあります。「中断」ボタンで途中停止できます。
+    </div>
+  </section>
+
+  <section class="section" id="safety">
+    <h2 class="section-heading">安全機構</h2>
+    <p>誤送信や二重実行を防ぐ仕組みが組み込まれています。</p>
+    <div class="safeguard-list">
+      <div class="safeguard">
+        <div class="safeguard-icon"></div>
+        <div><strong>二重実行防止</strong> — 同じ仕入先の設定が実行中の場合、再実行はブロックされます（409 Conflict）</div>
+      </div>
+      <div class="safeguard">
+        <div class="safeguard-icon"></div>
+        <div><strong>スタック自動復旧</strong> — RUNNING状態が30分以上続いた場合、自動的にFAILEDに変更し、次回実行を受け付けます</div>
+      </div>
+      <div class="safeguard">
+        <div class="safeguard-icon"></div>
+        <div><strong>休日スキップ</strong> — ダイソウカレンダで休日の場合は自動でスキップ。意図的に実行したい場合のみ「休日トライ」を使用</div>
+      </div>
+      <div class="safeguard">
+        <div class="safeguard-icon"></div>
+        <div><strong>空送信防止</strong> — 添付ファイルがすべて空の場合、メール送信をスキップ（SUCCESS扱い）</div>
+      </div>
+      <div class="safeguard">
+        <div class="safeguard-icon"></div>
+        <div><strong>失敗通知</strong> — 送信失敗時に指定ユーザーへ社内通知を送信（7日間有効）</div>
+      </div>
+      <div class="safeguard">
+        <div class="safeguard-icon"></div>
+        <div><strong>バリデーション</strong> — 送信ファイルは4種のうち最低1種類ON必須。メールアドレスの形式チェック実施</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="roles">
+    <h2 class="section-heading">担当別ガイド</h2>
+
+    <div class="role-panel ops">
+      <div class="role-title">
+        <span class="badge badge-ops">業務員</span>
+        発注業務・仕入れ計画の運用担当
+      </div>
+      <ul>
+        <li>設定タブで仕入先ごとの送信条件（時刻、宛先、添付ファイル）を登録・変更できます</li>
+        <li>「今すぐ実行」で手動送信が可能。実行中は一覧にRUNNING表示が出ます</li>
+        <li>休日に動作確認したい場合は「休日トライ」を使ってください（通常実行は休日スキップ）</li>
+        <li>履歴タブで過去の送信結果を確認。注文書Excelの再ダウンロードもここから行えます</li>
+        <li>送信失敗が発生した場合、設定した通知先ユーザーに社内通知が届きます</li>
+        <li>CC・返信先は連絡先マスタから選択します。新しいアドレスが必要な場合はマスタに追加してください</li>
+        <li>納入日判定は仕入先カレンダ方式を使用してください。パターン方式は発注漏れのリスクがあります</li>
+        <li>ロット丸めを使う場合は、品番マスタで最小納入数・納入倍数の設定を事前に確認してください</li>
+      </ul>
+    </div>
+
+    <div class="role-panel plan">
+      <div class="role-title">
+        <span class="badge badge-plan">生産計画員</span>
+        購入品を使用する側として知っておくこと
+      </div>
+      <ul>
+        <li><strong>毎日納入ではありません:</strong> 納入日はカレンダに基づいて決まり、今回の納入日から次回の納入日前日までの<strong>カバー期間の需要合計</strong>に基づいて納入数が計算されます</li>
+        <li><strong>ロット丸め・最小納入数:</strong> 必要数はロットの倍数に丸められ、最小納入数を下回る場合は最小納入数まで引き上げられます。そのため、注文書Excelの「数量」列と「日別内訳」列の合計は一致しないことがあります</li>
+        <li><strong>安全在庫の加算:</strong> 設定がONの場合、安全在庫数&times;倍率が必要数に加算されます。ただし、仕損の未登録などにより実際の在庫・進度が計算上の在庫・進度と乖離した場合は欠品リスクがあります</li>
+        <li><strong>ロット生産との関係:</strong> 購入品を使用してロット生産を行う場合、ロットサイズを日数分と設定し、その日数を購入品のLTに設定すれば対応できます。ただし、切りのいい数値をロットサイズにする運用にはこの機能では対応できません</li>
+      </ul>
+    </div>
+
+    <div class="role-panel mgr">
+      <div class="role-title">
+        導入効果と管理ポイント
+      </div>
+      <ul>
+        <li><strong>工数削減:</strong> 仕入先ごとの注文書作成・メール送信作業を自動化。手作業によるミスも防止</li>
+        <li><strong>計画精度:</strong> 需要と進度から自動算出するため、発注数量の人間のカンによるばらつきを抑制</li>
+        <li><strong>可視性:</strong> 履歴タブで全仕入先の送信状況を一覧確認可能。失敗時は社内通知で即時把握</li>
+        <li><strong>柔軟性:</strong> 仕入先ごとに計算モード・納入日数・添付ファイルを個別設定可能</li>
+        <li><strong>積載最適化:</strong> トラック積載判定により、配送効率の事前確認が可能</li>
+        <li><strong>安全性:</strong> 二重送信防止・休日スキップ・30分タイムアウト復旧など、誤動作対策を実装済み</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-heading">実行方法の比較</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>実行方法</th><th>タイミング</th><th>休日判定</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>自動実行</strong><br><span class="badge badge-success">SCHEDULED</span></td>
+            <td>毎日・設定時刻</td>
+            <td>休日ならスキップ</td>
+            <td>通常の日次運用</td>
+          </tr>
+          <tr>
+            <td><strong>今すぐ実行</strong><br><span class="badge badge-warning">MANUAL</span></td>
+            <td>ボタン押下時</td>
+            <td>休日ならスキップ</td>
+            <td>即時送信が必要な場合</td>
+          </tr>
+          <tr>
+            <td><strong>休日トライ</strong><br><span class="badge badge-danger">HOLIDAY_TRIAL</span></td>
+            <td>ボタン押下時</td>
+            <td>休日でも実行</td>
+            <td>休日の動作確認・テスト</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-heading">最後にLT設定について</h2>
+    <div class="callout warning">
+      <strong>「LTを長くすれば欠品しない」は誤解です。</strong>
+    </div>
+    <p>
+      ここでのLTとは、<strong>購入品を使用日の何営業日前に納入してもらうか</strong>という設定です。
+    </p>
+    <div class="formula-box">
+      <span class="formula-label">LTの意味</span>
+      LT = 1 → 使用日の前日に納入 → 在庫保有は1日分<br>
+      LT = 3 → 使用日の3日前に納入 → 在庫保有は3日分
+    </div>
+    <p>
+      LTを長く設定しても欠品が防げるわけではありません。<strong>早く届くだけで、その分の在庫を使わないまま抱えることになります。</strong>仕損などが正しく反映されないと、いずれ余分に抱えた在庫が消化され、欠品が発生します。
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>LT</th><th>納入タイミング</th><th>在庫保有日数</th><th>実態</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1</strong></td>
+            <td>使用日の前日</td>
+            <td>1日分</td>
+            <td>必要なタイミングで届く。在庫最小</td>
+          </tr>
+          <tr>
+            <td><strong>5</strong></td>
+            <td>使用日の5日前</td>
+            <td>5日分</td>
+            <td>5日間使わない在庫を保有。スペース圧迫・コスト増</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      欠品の原因は仕損の未登録や需要変動であり、LTを長くしても解決しません。
+    </p>
+    <h3>正しいLTの設定方法</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>ケース</th><th>LT</th><th>考え方</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>基本</strong></td>
+            <td>1</td>
+            <td>使用日の前日に納入。これが基本</td>
+          </tr>
+          <tr>
+            <td><strong>イレギュラー対応</strong></td>
+            <td>2</td>
+            <td>基本+1。納入遅延・検品等の余裕を1日持たせる</td>
+          </tr>
+          <tr>
+            <td><strong>少量生産品のロット生産</strong></td>
+            <td>1 or 2 + ロットサイズ（日数）</td>
+            <td>ロットサイズを一定数ではなく日数分として加算する</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+    </p>
+  </section>
+
+  <footer class="doc-footer">
+    生産管理システム — 購買モジュール — 注文書自動送信設定
+  </footer>
+
+</div>
+
+<script>
+document.querySelectorAll('.app-link').forEach(function(a) {
+  a.style.cursor = 'pointer';
+  a.addEventListener('click', function() {
+    var base = location.protocol === 'file:'
+      ? prompt('PMサーバーのURL（例: https://localhost:8501）', 'https://localhost:8501')
+      : location.origin;
+    if (base) window.open(base + a.dataset.path, '_blank');
+  });
+});
+</script>
+</body>
+</html>
