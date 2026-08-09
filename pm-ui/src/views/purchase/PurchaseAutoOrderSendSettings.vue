@@ -3,24 +3,27 @@
     <div class="page-header">
       <div class="page-title-row">
         <h1 class="page-title">注文書自動送信設定</h1>
+        <span v-if="activeTab === 'settings'" class="page-title-note">注文書Excel・進度表Excel・進度表PDF・外作納品書PDFはそれぞれ設定でON/OFFできます。</span>
         <DataSourceDialog title="注文書自動送信設定" :sources="dsSources" />
       </div>
       <div class="page-actions">
-        <button class="btn-primary" @click="openNew">新規追加</button>
-        <button class="btn-secondary" @click="loadHistories">履歴更新</button>
+        <button v-if="activeTab === 'settings'" class="btn-primary" @click="openNew">新規追加</button>
+        <button v-if="activeTab === 'history'" class="btn-secondary" @click="loadHistories">履歴更新</button>
       </div>
-    </div>
-    <div class="page-note">
-      <div>注文書Excel・進度表Excel・進度表PDF・外作納品書PDFはそれぞれ設定でON/OFFできます。</div>
-      <div>一覧には送信先・添付内容・通知先の要約を表示します。履歴は絞り込みと詳細確認ができます。</div>
     </div>
     <div v-if="pageMessage" class="page-message">{{ pageMessage }}</div>
     <div v-if="pageError" class="page-error">{{ pageError }}</div>
 
+    <div class="tab-bar">
+      <button :class="['tab-btn', { active: activeTab === 'settings' }]" @click="activeTab = 'settings'">設定</button>
+      <button :class="['tab-btn', { active: activeTab === 'history' }]" @click="activeTab = 'history'">履歴</button>
+      <button :class="['tab-btn', { active: activeTab === 'truck' }]" @click="activeTab = 'truck'">トラック積載判定</button>
+    </div>
+
     <div class="page-content">
       <div v-if="loading" class="no-data">読み込み中...</div>
       <div v-else>
-        <div class="truck-check-panel">
+        <div v-show="activeTab === 'truck'" class="truck-check-panel">
           <div class="truck-check-header">
             <h2>トラック積載判定</h2>
             <div class="truck-check-actions">
@@ -131,7 +134,7 @@
         </div>
         </div>
 
-        <table v-if="configs.length" class="data-table">
+        <table v-if="activeTab === 'settings' && configs.length" class="data-table">
         <thead>
           <tr>
             <th>仕入先</th>
@@ -176,9 +179,9 @@
           </tr>
         </tbody>
       </table>
-      <div v-else class="no-data">注文書自動送信設定がありません。</div>
+      <div v-else-if="activeTab === 'settings'" class="no-data">注文書自動送信設定がありません。</div>
 
-      <div class="history-panel">
+      <div v-show="activeTab === 'history'" class="history-panel">
         <div class="history-header">
           <h2>自動送信履歴</h2>
           <div class="history-filter-actions">
@@ -457,6 +460,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import UserChipSelect from './UserChipSelect.vue'
 import ContactEmailSelect from './ContactEmailSelect.vue'
 
+const activeTab = ref('settings')
 const loading = ref(true)
 const saving = ref(false)
 const configs = ref([])
@@ -1232,6 +1236,11 @@ watch(
 
 <style scoped>
 .page-title-row { display: flex; align-items: center; gap: 8px; }
+.page-title-note { font-size: 12px; color: #6b7280; white-space: nowrap; }
+.tab-bar { display: flex; gap: 0; border-bottom: 2px solid #e5e7eb; margin-bottom: 12px; }
+.tab-btn { padding: 8px 20px; border: none; background: none; font-size: 14px; font-weight: 600; color: #6b7280; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+.tab-btn:hover:not(.active) { color: #374151; }
 .page-note {
   margin: 8px 0 12px;
   padding: 10px 12px;
