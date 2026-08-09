@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from shipping.views import ShipmentActualViewSet, ShipToLeadTimeViewSet
 from shipping.views_kubota_sakai_due_adjustment import KubotaSakaiDueAdjustmentViewSet
 from shipping.views_kubota_sakai_trip_assignment import (
+    KubotaSakaiTripAutoAssignViewNew as KubotaSakaiTripAutoAssignView,
     KubotaSakaiDeliveryProgressAdjustViewNew as KubotaSakaiDeliveryProgressAdjustView,
     KubotaSakaiTripDisplaySettingViewNew as KubotaSakaiTripDisplaySettingView,
     KubotaSakaiTripImportViewNew as KubotaSakaiTripImportView,
@@ -57,6 +58,7 @@ urlpatterns = [
     path('kubota-sakai-trip-assignments/bulk_save/', KubotaSakaiTripPlanView.as_view(), name='kubota-sakai-trip-save'),
     path('kubota-sakai-trip-assignments/import-orders/', KubotaSakaiTripImportView.as_view(), name='kubota-sakai-trip-import'),
     path('kubota-sakai-trip-assignments/preview-load/', KubotaSakaiTripLoadPreviewView.as_view(), name='kubota-sakai-trip-preview-load'),
+    path('kubota-sakai-trip-assignments/auto-assign/', KubotaSakaiTripAutoAssignView.as_view(), name='kubota-sakai-trip-auto-assign'),
     path('kubota-sakai-trip-assignments/load-detail/', KubotaSakaiTripLoadDetailView.as_view(), name='kubota-sakai-trip-load-detail'),
     path('kubota-sakai-trip-assignments/pickup-detail-pdf/', KubotaSakaiPickupDetailPdfView.as_view(), name='kubota-sakai-pickup-detail-pdf'),
     path('kubota-sakai-trip-assignments/pseudo-truck-products/', KubotaSakaiPseudoTruckProductView.as_view(), name='kubota-sakai-pseudo-truck-products'),

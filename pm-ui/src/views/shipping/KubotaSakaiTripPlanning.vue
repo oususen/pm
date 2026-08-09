@@ -85,6 +85,10 @@
             <span>振分開始日</span>
             <input v-model="autoAssignStartDate" type="date" />
           </label>
+          <label class="modal-field">
+            <span>振分終了日</span>
+            <input v-model="autoAssignEndDate" type="date" />
+          </label>
         </div>
         <div class="modal-actions">
           <button class="btn" :disabled="autoAssigning" @click="closeAutoAssignDialog">閉じる</button>
@@ -922,6 +926,7 @@ const showAutoAssignDialog = ref(false)
 const calendarList = ref([])
 const autoAssignCalendarId = ref(null)
 const autoAssignStartDate = ref('')
+const autoAssignEndDate = ref('')
 const calendarDayMap = ref({})
 const productNameMap = ref(new Map())
 const showPickupPdfDialog = ref(false)
@@ -1264,6 +1269,32 @@ const pseudoTruckOccupancyPercent = (dateKey, type) => {
   if (previewSummary) return parseNumber(previewSummary.occupancy_percent)
   const savedSummary = (departureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(pseudoTruck.id))
   return parseNumber(savedSummary?.occupancy_percent)
+}
+
+const normalizeTruckAlias = (value) => String(value || '').trim().replace(/\s+/g, '').replace(/便$/u, '').toUpperCase()
+
+const isTruckAlias = (truck, alias) => {
+  const target = normalizeTruckAlias(alias)
+  if (!target) return false
+  const candidates = [
+    truck?.alias_name,
+    truck?.name,
+    truckDisplayName(truck),
+  ]
+  return candidates.some((item) => normalizeTruckAlias(item) === target)
+}
+
+const autoAssignTruckCandidatesForDate = (dateKey) => {
+  const trucks = trucksByDate.value[dateKey] || []
+  return trucks.filter((truck) => Boolean(truck?.auto_assign_target) && !isPseudoTruck(truck))
+}
+
+const autoAssignTruckSummary = (dateKey, truck) => {
+  if (!dateKey || !truck) return null
+  const summaryDateKey = topOccupancySummaryDateKey(dateKey, truck)
+  const previewSummary = (previewDepartureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(truck.id))
+  if (previewSummary) return previewSummary
+  return (departureSummaryByDate.value[summaryDateKey] || []).find((s) => Number(s.truck_id) === Number(truck.id)) || null
 }
 
 const getLoadDetailDateKey = (dateKey, truck) => {
@@ -1914,6 +1945,7 @@ const buildPayloadRowsForDate = (dateKey) => {
     .flatMap((row) => entriesAt(row, dateKey))
     .map((entry) => ({
       due_adjustment_id: entry.due_adjustment_id,
+      default_container_id: entry.used_container_id || null,
       allocations: entry.allocations
         .map((item) => ({
           id: item.id,
@@ -2420,6 +2452,8 @@ const validateBeforeSave = () => {
   const overAssigned = []
   const overloaded = []
   const overloadedSet = new Set()
+  const missingTruckDetails = []
+  const unassignedQtyDetails = []
 
   for (const dateKey of allDateKeys.value) {
     const previewList = previewDepartureSummaryByDate.value[dateKey] || departureSummaryByDate.value[dateKey] || []
@@ -2430,10 +2464,16 @@ const validateBeforeSave = () => {
         const validAllocations = (entry.allocations || []).filter(
           (item) => item?.truck_id && parseIntegerQty(item?.qty) > 0,
         )
-        if (!validAllocations.length) missingTruckCount += 1
+        if (!validAllocations.length) {
+          missingTruckCount += 1
+          missingTruckDetails.push(`${dateKey} ${row.product_code} ${formatNumber(deliveryQty)}`)
+        }
 
         const unassigned = parseNumber(entry?.unassigned_qty_preview)
-        if (unassigned < 0) unassignedQtyCount += 1
+        if (unassigned < 0) {
+          unassignedQtyCount += 1
+          unassignedQtyDetails.push(`${dateKey} ${row.product_code} ${formatNumber(Math.abs(unassigned))}`)
+        }
         if (unassigned > 0) overAssigned.push(`${dateKey} ${row.product_code} (需要${deliveryQty} 割付${deliveryQty + unassigned})`)
       }
     }
@@ -2455,7 +2495,9 @@ const validateBeforeSave = () => {
 
   const lines = ['保存前チェックで注意点があります。']
   if (missingTruckCount) lines.push(`・便未選択: ${missingTruckCount}件`)
+  if (missingTruckDetails.length) missingTruckDetails.forEach((s) => lines.push(`  ${s}`))
   if (unassignedQtyCount) lines.push(`・未割付残あり: ${unassignedQtyCount}件`)
+  if (unassignedQtyDetails.length) unassignedQtyDetails.forEach((s) => lines.push(`  ${s}`))
   if (overAssigned.length) overAssigned.forEach((s) => lines.push(`・割付数量超過: ${s}`))
   if (overloaded.length) lines.push(`・便占有率95%超: ${overloaded.join(' / ')}`)
   return { ok: false, message: lines.join('\n') }
@@ -2579,6 +2621,7 @@ const openAutoAssignDialog = async () => {
   try {
     await loadDefaultCalendar()
     autoAssignStartDate.value = addBusinessDaysByCalendar(todayDate, 4)
+    autoAssignEndDate.value = dateKeys.value.at(-1) || autoAssignStartDate.value
     showAutoAssignDialog.value = true
   } catch (error) {
     alert('カレンダー情報の取得に失敗しました。')
@@ -2611,133 +2654,95 @@ watch(autoAssignCalendarId, async (newVal) => {
   if (newVal && showAutoAssignDialog.value) {
     await loadCalendarDays()
     autoAssignStartDate.value = addBusinessDaysByCalendar(todayDate, 4)
+    autoAssignEndDate.value = dateKeys.value.at(-1) || autoAssignStartDate.value
   }
 })
+
+const ensureAutoAssignRangeVisible = async (startDate, endDate) => {
+  const visibleStart = allDateKeys.value[0]
+  const visibleEnd = allDateKeys.value.at(-1)
+  if (visibleStart && visibleEnd && startDate >= visibleStart && endDate <= visibleEnd) {
+    return
+  }
+
+  const spanDays = Math.max(1, Math.floor((new Date(`${endDate}T00:00:00`) - new Date(`${startDate}T00:00:00`)) / 86400000) + 1)
+  const allowedHorizons = [5, 14, 31, 60, 90]
+  const nextHorizon = allowedHorizons.find((value) => value >= spanDays)
+  if (!nextHorizon) {
+    throw new Error('自動振分の指定範囲は90日以内で指定してください。')
+  }
+
+  targetDate.value = startDate
+  horizonDays.value = nextHorizon
+  await loadGrid()
+}
 
 const autoAssignTrips = async () => {
   autoAssigning.value = true
   try {
-    let pseudoData = pseudoProductRows.value
-    if (!pseudoData.length || !pseudoTrucks.value.length) {
-      const res = await api.kubotaSakaiTripAssignments.getPseudoTruckProducts()
-      pseudoTrucks.value = res.data?.pseudo_trucks || []
-      const mappings = res.data?.mappings || []
-      pseudoData = mappings.map((m) => ({
-        key: `${m.product_code}||${m.ship_to_code || ''}`,
-        product_code: m.product_code,
-        ship_to_code: m.ship_to_code || '',
-        truckIds: new Set((m.trucks || []).map((t) => Number(t.truck_id))),
-      }))
-    }
-
-    const pseudoMap = new Map()
-    pseudoData.forEach((row) => {
-      if (row.truckIds.size > 0) {
-        pseudoMap.set(`${row.product_code}||${row.ship_to_code || ''}`, row.truckIds)
-      }
-    })
-
     const thresholdDate = autoAssignStartDate.value || formatLocalDate(new Date())
-
-    const skippedProducts = new Set()
-    let assignedCount = 0
-
-    const pseudoTruckA = pseudoTrucks.value.find((t) => {
-      const marker = (t.alias_name || t.name || '').trim().toUpperCase().replace(/\s+/g, '')
-      return ['A', 'A便', 'Ａ', 'Ａ便'].includes(marker)
-    })
-    const pseudoTruckP = pseudoTrucks.value.find((t) => {
-      const marker = (t.alias_name || t.name || '').trim().toUpperCase().replace(/\s+/g, '')
-      return ['P', 'P便', 'Ｐ', 'Ｐ便'].includes(marker)
-    })
-
-    if (!pseudoTruckA && !pseudoTruckP) {
-      alert('擬似便（A便/P便）がトラックマスタに登録されていません。')
+    const endDate = autoAssignEndDate.value || dateKeys.value.at(-1) || thresholdDate
+    if (thresholdDate > endDate) {
+      alert('振分開始日は振分終了日以前にしてください。')
       return
     }
-
-    const getOccupancy = (dateKey, truckId) => {
-      const preview = (previewDepartureSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
-      if (preview) return parseNumber(preview.occupancy_percent)
-      const saved = (departureSummaryByDate.value[dateKey] || []).find((s) => Number(s.truck_id) === Number(truckId))
-      return parseNumber(saved?.occupancy_percent)
+    const targetDateKeys = dateKeys.value.filter((dk) => dk >= thresholdDate && dk <= endDate)
+    if (!targetDateKeys.length) {
+      await ensureAutoAssignRangeVisible(thresholdDate, endDate)
     }
-
-    const targetDateKeys = dateKeys.value.filter((dk) => dk >= thresholdDate)
-
-    const assignEntry = (entry, truck) => {
-      const qty = parseIntegerQty(entry.delivery_qty)
-      entry.allocations = [normalizeAllocation({ truck_id: truck.id, qty }, entry.used_container_id || null)]
-      entry.allocations.forEach((al) => syncAllocationFromQty(entry, al))
-      recalcEntry(entry)
-      assignedCount++
+    const effectiveTargetDateKeys = dateKeys.value.filter((dk) => dk >= thresholdDate && dk <= endDate)
+    if (!effectiveTargetDateKeys.length) {
+      alert('指定範囲に表示中の日付がありません。')
+      return
     }
-
-    const classifyEntry = (row, entry) => {
-      if (parseNumber(entry.delivery_qty) <= 0) return null
-      if (entry.allocations.some((al) => al.truck_id && parseIntegerQty(al.qty) > 0)) return null
-
-      const lookupKey = `${row.product_code}||${row.ship_to_code || ''}`
-      const truckIds = pseudoMap.get(lookupKey)
-      if (!truckIds) { skippedProducts.add(`${row.product_code}(${row.ship_to_code || '-'})`); return null }
-
-      const hasA = pseudoTruckA && truckIds.has(pseudoTruckA.id)
-      const hasP = pseudoTruckP && truckIds.has(pseudoTruckP.id)
-      if (!hasA && !hasP) { skippedProducts.add(row.product_code); return null }
-
-      if (hasA && hasP) return 'both'
-      if (hasA) return 'A_only'
-      return 'P_only'
+    const hasAllCandidates = effectiveTargetDateKeys.every((dateKey) => autoAssignTruckCandidatesForDate(dateKey).length > 0)
+    if (!hasAllCandidates) {
+      alert('自動振分対象の実便が便マスタに設定されていない日があります。')
+      return
     }
-
-    // Phase 1: 単独製品を割当（A-only→A, P-only→P）
-    for (const dateKey of targetDateKeys) {
-      for (const row of mergedRows.value) {
-        for (const entry of entriesAt(row, dateKey)) {
-          const type = classifyEntry(row, entry)
-          if (type === 'A_only') assignEntry(entry, pseudoTruckA)
-          else if (type === 'P_only') assignEntry(entry, pseudoTruckP)
-        }
-      }
-    }
-
-    // プレビュー更新 → A便の占有率を取得
-    await Promise.all(targetDateKeys.map((dk) => previewLoadForDate(dk)))
-
-    // Phase 2: A+P両方の製品 → Aに1つずつ積んで95%超えたらPに戻す
-    for (const dateKey of targetDateKeys) {
-      const bothEntries = []
-      for (const row of mergedRows.value) {
-        for (const entry of entriesAt(row, dateKey)) {
-          if (classifyEntry(row, entry) === 'both') bothEntries.push(entry)
-        }
-      }
-      if (!bothEntries.length) continue
-
-      let aFull = false
-      for (const entry of bothEntries) {
-        if (aFull) {
-          assignEntry(entry, pseudoTruckP)
-          continue
-        }
-        // まずAに積んでみる
-        assignEntry(entry, pseudoTruckA)
-        await previewLoadForDate(dateKey)
-        if (getOccupancy(dateKey, pseudoTruckA.id) >= 95) {
-          // 超えた → この製品をPに戻す
-          entry.allocations = [normalizeAllocation({ truck_id: pseudoTruckP.id, qty: parseIntegerQty(entry.delivery_qty) }, entry.used_container_id || null)]
+    const rowsByDate = Object.fromEntries(
+      effectiveTargetDateKeys.map((dateKey) => [dateKey, buildPayloadRowsForDate(dateKey)]),
+    )
+    const res = await api.kubotaSakaiTripAssignments.autoAssign(thresholdDate, endDate, rowsByDate)
+    const resultRowsByDate = res.data?.rows_by_date || {}
+    Object.entries(resultRowsByDate).forEach(([dateKey, rows]) => {
+      if (!Array.isArray(rows)) return
+      const rowMap = new Map(rows.map((item) => [Number(item.due_adjustment_id), item]))
+      mergedRows.value.forEach((row) => {
+        entriesAt(row, dateKey).forEach((entry) => {
+          const payload = rowMap.get(Number(entry.due_adjustment_id))
+          if (!payload) return
+          const defaultContainerId = entry.used_container_id || null
+          const allocations = Array.isArray(payload.allocations) && payload.allocations.length
+            ? payload.allocations.map((item) => normalizeAllocation(item, defaultContainerId))
+            : [normalizeAllocation(null, defaultContainerId)]
+          entry.allocations = allocations
           entry.allocations.forEach((al) => syncAllocationFromQty(entry, al))
           recalcEntry(entry)
-          aFull = true
-        }
-      }
+        })
+      })
+    })
+
+    if (effectiveTargetDateKeys.length > 0) {
+      await previewLoadForDate(effectiveTargetDateKeys[0])
     }
 
-    await Promise.all(targetDateKeys.map((dk) => previewLoadForDate(dk)))
-
-    let message = `自動振分完了: ${assignedCount}件割当`
-    if (skippedProducts.size > 0) {
-      message += `\n\n未設定のためスキップした製品:\n${[...skippedProducts].sort().join(', ')}`
+    const skippedEntries = Array.isArray(res.data?.skipped) ? res.data.skipped : []
+    let message = `自動振分完了: ${Number(res.data?.assigned_count || 0)}件割当`
+    if (skippedEntries.length > 0) {
+      const lines = skippedEntries.map((item) => {
+        const remainingQty = parseNumber(item.remaining_qty)
+        const headBase = `${item.date} ${item.product_code} ${item.ship_to_code || '-'} ${item.source_order_no || '内示'}`
+        const head = remainingQty > 0 ? `${headBase} 残:${formatNumber(remainingQty)}` : headBase
+        const reasons = Array.isArray(item.reasons) ? item.reasons
+          .map((reason) => {
+            const errors = Array.isArray(reason.errors) && reason.errors.length ? reason.errors.join(' / ') : '平面図に配置できません。'
+            return `${reason.truck_name || reason.truck_id || '便'}: ${errors}`
+          })
+          .join(' | ') : ''
+        return reasons ? `${head}\n  ${reasons}` : head
+      })
+      message += `\n\n積載不可のため未割当:\n${lines.join('\n')}`
     }
     showAutoAssignDialog.value = false
     alert(message)

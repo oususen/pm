@@ -18,6 +18,13 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
       preview_rows_by_date: previewRowsByDate,
     })
   },
+  autoAssign(startDate, endDate, rowsByDate = {}) {
+    return client.post('/kubota-sakai-trip-assignments/auto-assign/', {
+      start_date: startDate,
+      end_date: endDate,
+      rows_by_date: rowsByDate,
+    })
+  },
   loadDetail(targetDate) {
     return client.get('/kubota-sakai-trip-assignments/load-detail/', { params: { target_date: targetDate } })
   },

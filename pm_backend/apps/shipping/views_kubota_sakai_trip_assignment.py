@@ -132,6 +132,10 @@ def _format_hhmm(value):
         return str(value)
 
 
+def _normalize_truck_alias(value):
+    return str(value or '').strip().replace(' ', '').replace('　', '').removesuffix('便').upper()
+
+
 def _physical_truck_key(truck):
     if not truck:
         return ''
@@ -511,6 +515,73 @@ def _build_load_item(product, qty, container_override=None, capacity_override=No
             'parent': parent_dict,
         },
     }
+
+
+def _normalize_preview_rows_by_date_payload(raw_preview_rows_by_date, due_adjustments_by_date):
+    if not isinstance(raw_preview_rows_by_date, dict):
+        raise ValueError('rows_by_date は日付をキーとするオブジェクトで指定してください。')
+
+    posted_alloc_maps = {}
+    default_container_by_due = {}
+    ordered_due_ids_by_date = {}
+
+    for raw_date, preview_rows in raw_preview_rows_by_date.items():
+        preview_date = _parse_date(raw_date)
+        if not preview_date or not isinstance(preview_rows, list):
+            raise ValueError('rows_by_date の日付またはrowsが不正です。')
+
+        posted_alloc_map_for_date = {}
+        ordered_due_ids = []
+        preview_due_adjustment_map_for_date = due_adjustments_by_date.get(preview_date, {})
+
+        for row in preview_rows:
+            try:
+                due_adjustment_id = int(row.get('due_adjustment_id') or 0)
+            except (TypeError, ValueError):
+                due_adjustment_id = 0
+            if due_adjustment_id <= 0:
+                continue
+            if due_adjustment_id not in preview_due_adjustment_map_for_date:
+                raise ValueError('対象外の納期調整データです。')
+
+            if due_adjustment_id not in posted_alloc_map_for_date:
+                ordered_due_ids.append(due_adjustment_id)
+
+            allocations = row.get('allocations') or []
+            if not isinstance(allocations, list):
+                raise ValueError('allocations は配列で指定してください。')
+
+            try:
+                default_container_id = int(row.get('default_container_id') or 0) or None
+            except (TypeError, ValueError):
+                default_container_id = None
+            default_container_by_due[due_adjustment_id] = default_container_id
+
+            normalized_allocations = []
+            for item in allocations:
+                try:
+                    truck_id = int(item.get('truck_id') or 0)
+                except (TypeError, ValueError):
+                    truck_id = 0
+                qty = _to_decimal(item.get('qty'))
+                if truck_id <= 0 or qty <= 0:
+                    continue
+                container_id = None
+                try:
+                    container_id = int(item.get('container_id') or 0) or None
+                except (TypeError, ValueError):
+                    pass
+                normalized_allocations.append({
+                    'truck_id': truck_id,
+                    'qty': qty,
+                    'container_id': container_id,
+                })
+            posted_alloc_map_for_date[due_adjustment_id] = normalized_allocations
+
+        posted_alloc_maps[preview_date] = posted_alloc_map_for_date
+        ordered_due_ids_by_date[preview_date] = ordered_due_ids
+
+    return posted_alloc_maps, default_container_by_due, ordered_due_ids_by_date
 
 
 # ---------------------------------------------------------------------------
@@ -1219,6 +1290,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     'arrival_time': _format_hhmm(t.arrival_time),
                     'arrival_day_offset': t.arrival_day_offset,
                     'container_gap': t.container_gap or 0,
+                    'auto_assign_target': bool(getattr(t, 'auto_assign_target', False)),
                 }
                 for t in trucks
             ],
@@ -1848,6 +1920,373 @@ class KubotaSakaiTripLoadPreviewViewNew(APIView):
             'target_date': target_date.isoformat(),
             'truck_summaries': summaries,
             'departure_truck_summaries_by_date': departure_summaries_by_date,
+        })
+
+
+class KubotaSakaiTripAutoAssignViewNew(APIView):
+    """未保存の割付状態をもとに、実便 2→3→4→5 の順で一括自動振分する。"""
+    AUTO_ASSIGN_PSEUDO_OFFSET_MAP = {
+        'A': 0,
+        'P': 1,
+    }
+
+    def post(self, request):
+        start_date = _parse_date(request.data.get('start_date'))
+        end_date = _parse_date(request.data.get('end_date'))
+        raw_rows_by_date = request.data.get('rows_by_date')
+        if not start_date:
+            return Response({'detail': 'start_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not end_date:
+            return Response({'detail': 'end_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if start_date > end_date:
+            return Response({'detail': 'start_date は end_date 以下で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(raw_rows_by_date, dict):
+            return Response({'detail': 'rows_by_date は日付をキーとするオブジェクトで指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        preview_dates = []
+        for raw_date in raw_rows_by_date.keys():
+            preview_date = _parse_date(raw_date)
+            if preview_date:
+                preview_dates.append(preview_date)
+        if not preview_dates:
+            return Response({'detail': 'rows_by_date に有効な日付がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        preview_due_adjustments = list(
+            KubotaSakaiDueAdjustment.objects.filter(
+                due_date__in=preview_dates,
+                delivery_qty__gt=0,
+            ).order_by('due_date', 'id')
+        )
+        due_adjustments_by_date = defaultdict(dict)
+        due_adjustment_map = {}
+        for item in preview_due_adjustments:
+            due_adjustments_by_date[item.due_date][item.id] = item
+            due_adjustment_map[item.id] = item
+
+        try:
+            posted_alloc_maps, default_container_by_due, ordered_due_ids_by_date = _normalize_preview_rows_by_date_payload(
+                raw_rows_by_date,
+                due_adjustments_by_date,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
+        truck_map = {truck.id: truck for truck in trucks}
+        candidate_trucks = [
+            truck for truck in trucks
+            if bool(getattr(truck, 'auto_assign_target', False))
+            and _normalize_truck_alias(truck.alias_name or truck.name) not in ('A', 'P')
+        ]
+        if not candidate_trucks:
+            return Response({'detail': '自動振分対象の実便が便マスタに設定されていません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        calendar = _resolve_kubota_calendar()
+        calendar_map = _build_calendar_day_map(calendar)
+
+        product_codes = {item.product_code for item in preview_due_adjustments}
+        products = {
+            product.product_code: product
+            for product in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
+        }
+
+        all_container_ids = {
+            allocation.get('container_id')
+            for posted_alloc_map_for_date in posted_alloc_maps.values()
+            for allocations in posted_alloc_map_for_date.values()
+            for allocation in allocations
+            if allocation.get('container_id')
+        }
+        all_container_ids.update({container_id for container_id in default_container_by_due.values() if container_id})
+        container_map = {}
+        if all_container_ids:
+            container_map = {c.id: c for c in ContainerCapacity.objects.filter(id__in=all_container_ids)}
+        pc_capacity_map = {}
+        if all_container_ids:
+            for pc in ProductContainer.objects.select_related('product').filter(
+                product__product_code__in=product_codes,
+                container_id__in=all_container_ids,
+            ):
+                pc_capacity_map[(pc.product.product_code, pc.container_id)] = pc.capacity
+
+        pseudo_group_by_key = defaultdict(set)
+        pseudo_truck_ids = set()
+        for row in KubotaSakaiPseudoTruckProduct.objects.filter(
+            product_code__in=product_codes,
+        ).values('product_code', 'ship_to_code', 'truck_id'):
+            product_code = str(row.get('product_code') or '').strip()
+            ship_to_code = str(row.get('ship_to_code') or '').strip()
+            truck_id = int(row.get('truck_id') or 0)
+            if not product_code or truck_id <= 0:
+                continue
+            pseudo_group_by_key[(product_code, ship_to_code)].add(truck_id)
+            pseudo_truck_ids.add(truck_id)
+
+        pseudo_label_by_truck_id = {}
+        if pseudo_truck_ids:
+            for truck in KubotaSakaiTruck.objects.filter(id__in=pseudo_truck_ids):
+                marker = _normalize_truck_alias(truck.alias_name or truck.name)
+                if marker in ('A', 'P'):
+                    pseudo_label_by_truck_id[truck.id] = marker
+
+        def candidate_trucks_for_due(due_adjustment):
+            key = (
+                str(due_adjustment.product_code or '').strip(),
+                str(due_adjustment.ship_to_code or '').strip(),
+            )
+            pseudo_truck_ids_for_due = pseudo_group_by_key.get(key) or set()
+            allowed_offsets = []
+            for pseudo_truck_id in pseudo_truck_ids_for_due:
+                pseudo_label = pseudo_label_by_truck_id.get(pseudo_truck_id)
+                if not pseudo_label:
+                    continue
+                offset = self.AUTO_ASSIGN_PSEUDO_OFFSET_MAP.get(pseudo_label)
+                if offset is not None:
+                    allowed_offsets.append(offset)
+            if not allowed_offsets:
+                return candidate_trucks
+            allowed_offset_set = set(allowed_offsets)
+            filtered = [
+                truck
+                for truck in candidate_trucks
+                if int(truck.arrival_day_offset or 0) in allowed_offset_set
+            ]
+            return filtered
+
+        def build_allocation_item(due_adjustment, allocation):
+            product = products.get(due_adjustment.product_code)
+            if not product:
+                return None
+            container_override = None
+            capacity_override = None
+            cid = allocation.get('container_id')
+            if cid and cid in container_map:
+                container_override = container_map[cid]
+                capacity_override = pc_capacity_map.get((due_adjustment.product_code, cid)) or container_override.capacity
+            return _build_load_item(product, allocation['qty'], container_override, capacity_override)
+
+        def resolve_allocation_capacity(due_adjustment, container_id=None):
+            product = products.get(due_adjustment.product_code)
+            if not product:
+                return Decimal('1')
+            if container_id and container_id in container_map:
+                return _to_decimal(
+                    pc_capacity_map.get((due_adjustment.product_code, container_id))
+                    or container_map[container_id].capacity,
+                    default='1',
+                )
+            return _to_decimal(
+                getattr(product, 'capacity', None)
+                or getattr(getattr(product, 'used_container', None), 'capacity', None),
+                default='1',
+            )
+
+        def find_max_fittable_qty(truck, due_adjustment, group_key, max_qty, container_id):
+            high = _to_int_qty(max_qty)
+            if high <= 0:
+                return Decimal('0')
+
+            base_items = [item['load_item'] for item in group_allocations.get(group_key, [])]
+            low = 0
+            best_qty = Decimal('0')
+            while low <= high:
+                mid = (low + high) // 2
+                if mid <= 0:
+                    low = 1
+                    continue
+                trial_allocation = {
+                    'truck_id': truck.id,
+                    'qty': Decimal(str(mid)),
+                    'container_id': container_id,
+                }
+                load_item = build_allocation_item(due_adjustment, trial_allocation)
+                if not load_item:
+                    break
+                load = calculate_truck_load(base_items + [load_item], truck)
+                if load.get('can_fit', False) and not (load.get('errors') or []):
+                    best_qty = Decimal(str(mid))
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            return best_qty
+
+        group_allocations = defaultdict(list)
+        for preview_date, posted_alloc_map_for_date in posted_alloc_maps.items():
+            for due_adjustment_id, allocations in posted_alloc_map_for_date.items():
+                due_adjustment = due_adjustment_map.get(due_adjustment_id)
+                if not due_adjustment:
+                    continue
+                for allocation in allocations:
+                    truck = truck_map.get(allocation['truck_id'])
+                    if not truck:
+                        continue
+                    load_item = build_allocation_item(due_adjustment, allocation)
+                    if not load_item:
+                        continue
+                    group_key = (
+                        _truck_actual_departure_date(preview_date, truck, calendar_map),
+                        _physical_truck_key(truck),
+                    )
+                    group_allocations[group_key].append({
+                        'due_adjustment_id': due_adjustment_id,
+                        'truck_id': truck.id,
+                        'allocation': allocation,
+                        'load_item': load_item,
+                    })
+
+        assigned_count = 0
+        skipped = []
+
+        for preview_date in sorted(posted_alloc_maps.keys()):
+            if preview_date < start_date or preview_date > end_date:
+                continue
+            due_ids = ordered_due_ids_by_date.get(preview_date, [])
+            for due_adjustment_id in due_ids:
+                due_adjustment = due_adjustment_map.get(due_adjustment_id)
+                if not due_adjustment:
+                    continue
+                current_allocations = posted_alloc_maps[preview_date].get(due_adjustment_id, [])
+                if current_allocations or _to_decimal(due_adjustment.delivery_qty) <= 0:
+                    continue
+
+                default_container_id = default_container_by_due.get(due_adjustment_id)
+                total_qty = _to_decimal(due_adjustment.delivery_qty)
+                remaining_qty = total_qty
+                assigned = False
+                trial_reasons = []
+                created_allocations = []
+                due_candidate_trucks = candidate_trucks_for_due(due_adjustment)
+                capacity = resolve_allocation_capacity(due_adjustment, default_container_id)
+                if capacity <= 0:
+                    capacity = Decimal('1')
+
+                if not due_candidate_trucks:
+                    skipped.append({
+                        'date': preview_date.isoformat(),
+                        'due_adjustment_id': due_adjustment_id,
+                        'product_code': due_adjustment.product_code,
+                        'ship_to_code': due_adjustment.ship_to_code or '',
+                        'source_order_no': due_adjustment.source_order_no or '',
+                        'reasons': [{
+                            'truck_id': None,
+                            'truck_name': '',
+                            'errors': ['擬似便対象製品の設定に対応する実便がありません。'],
+                        }],
+                    })
+                    continue
+
+                for truck in due_candidate_trucks:
+                    if remaining_qty <= 0:
+                        assigned = True
+                        break
+                    candidate_allocation = {
+                        'truck_id': truck.id,
+                        'qty': remaining_qty,
+                        'container_id': default_container_id,
+                    }
+                    load_item = build_allocation_item(due_adjustment, candidate_allocation)
+                    if not load_item:
+                        continue
+                    group_key = (
+                        _truck_actual_departure_date(preview_date, truck, calendar_map),
+                        _physical_truck_key(truck),
+                    )
+                    trial_items = [
+                        item['load_item']
+                        for item in group_allocations.get(group_key, [])
+                    ] + [load_item]
+                    load = calculate_truck_load(trial_items, truck)
+                    if load.get('can_fit', False) and not (load.get('errors') or []):
+                        created_allocations.append(candidate_allocation)
+                        posted_alloc_maps[preview_date][due_adjustment_id] = created_allocations
+                        group_allocations[group_key].append({
+                            'due_adjustment_id': due_adjustment_id,
+                            'truck_id': truck.id,
+                            'allocation': candidate_allocation,
+                            'load_item': load_item,
+                        })
+                        remaining_qty = Decimal('0')
+                        assigned = True
+                        break
+
+                    partial_qty = find_max_fittable_qty(
+                        truck,
+                        due_adjustment,
+                        group_key,
+                        remaining_qty,
+                        default_container_id,
+                    )
+                    if partial_qty > 0:
+                        partial_allocation = {
+                            'truck_id': truck.id,
+                            'qty': partial_qty,
+                            'container_id': default_container_id,
+                        }
+                        partial_load_item = build_allocation_item(due_adjustment, partial_allocation)
+                        if partial_load_item:
+                            created_allocations.append(partial_allocation)
+                            posted_alloc_maps[preview_date][due_adjustment_id] = created_allocations
+                            group_allocations[group_key].append({
+                                'due_adjustment_id': due_adjustment_id,
+                                'truck_id': truck.id,
+                                'allocation': partial_allocation,
+                                'load_item': partial_load_item,
+                            })
+                            remaining_qty = max(Decimal('0'), remaining_qty - partial_qty)
+                            if remaining_qty <= 0:
+                                assigned = True
+                                break
+
+                    load_errors = list(load.get('errors') or [])
+                    if not load_errors and not load.get('can_fit', False):
+                        load_errors = ['平面図に配置できません。']
+                    trial_reasons.append({
+                        'truck_id': truck.id,
+                        'truck_name': truck.alias_name or truck.name,
+                        'errors': load_errors,
+                    })
+
+                if assigned:
+                    assigned_count += 1
+                else:
+                    posted_alloc_maps[preview_date][due_adjustment_id] = created_allocations
+                    skipped.append({
+                        'date': preview_date.isoformat(),
+                        'due_adjustment_id': due_adjustment_id,
+                        'product_code': due_adjustment.product_code,
+                        'ship_to_code': due_adjustment.ship_to_code or '',
+                        'source_order_no': due_adjustment.source_order_no or '',
+                        'remaining_qty': str(remaining_qty),
+                        'assigned_qty': str(max(Decimal('0'), total_qty - remaining_qty)),
+                        'capacity': str(capacity),
+                        'reasons': trial_reasons,
+                    })
+
+        response_rows_by_date = {}
+        for preview_date, ordered_due_ids in ordered_due_ids_by_date.items():
+            response_rows = []
+            alloc_map = posted_alloc_maps.get(preview_date, {})
+            for due_adjustment_id in ordered_due_ids:
+                allocations = alloc_map.get(due_adjustment_id, [])
+                response_rows.append({
+                    'due_adjustment_id': due_adjustment_id,
+                    'allocations': [
+                        {
+                            'truck_id': item['truck_id'],
+                            'qty': str(item['qty']),
+                            'container_id': item.get('container_id'),
+                        }
+                        for item in allocations
+                    ],
+                })
+            response_rows_by_date[preview_date.isoformat()] = response_rows
+
+        return Response({
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'assigned_count': assigned_count,
+            'skipped': skipped,
+            'rows_by_date': response_rows_by_date,
         })
 
 
