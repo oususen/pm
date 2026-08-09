@@ -889,6 +889,7 @@ class KubotaSakaiTruck(models.Model):
     arrival_time = models.TimeField(verbose_name='到着時刻')
     arrival_day_offset = models.IntegerField(default=0, verbose_name='到着日オフセット', help_text='0=当日着, 1=翌日着')
     default_use = models.BooleanField(default=True, verbose_name='常用便')
+    auto_assign_target = models.BooleanField(default=False, verbose_name='自動振分対象')
     is_active = models.BooleanField(default=True, verbose_name='有効')
     display_order = models.IntegerField(default=0, verbose_name='表示順')
     notes = models.TextField(null=True, blank=True, verbose_name='備考')

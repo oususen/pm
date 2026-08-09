@@ -12,6 +12,7 @@
       <div class="sync-note">
         同一車両キーを持つ便は、荷台幅・荷台奥行・荷台高さ・最大積載重量・容器間隔を同一値として扱います。
         いずれか1便を更新すると、同じキーの他便にも同じ値が同期されます。
+        自動便振分は「自動振分対象」がONの便を、表示順の昇順で試行します。
       </div>
       <table class="data-table">
         <thead>
@@ -28,6 +29,7 @@
             <th>到着時刻</th>
             <th>到着日</th>
             <th>常用</th>
+            <th>自動振分</th>
             <th>表示順</th>
             <th>有効</th>
             <th>操作</th>
@@ -47,6 +49,7 @@
             <td>{{ formatTime(truck.arrival_time) }}</td>
             <td>{{ truck.arrival_day_offset === 0 ? '当日' : `翌${truck.arrival_day_offset}日` }}</td>
             <td>{{ truck.default_use ? '○' : '' }}</td>
+            <td>{{ truck.auto_assign_target ? '○' : '' }}</td>
             <td>{{ truck.display_order }}</td>
             <td>{{ truck.is_active ? '有効' : '無効' }}</td>
             <td>
@@ -121,7 +124,7 @@
             </div>
           </div>
           <div class="form-group">
-            <label>表示順</label>
+            <label>表示順（自動振分順）</label>
             <input type="number" min="0" v-model.number="formData.display_order" :disabled="!canEdit" />
           </div>
           <div class="form-group">
@@ -132,6 +135,12 @@
             <label>
               <input type="checkbox" v-model="formData.default_use" :disabled="!canEdit" />
               常用便
+            </label>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="formData.auto_assign_target" :disabled="!canEdit" />
+              自動振分対象
             </label>
           </div>
           <div class="form-group">
@@ -181,6 +190,7 @@ const createEmptyForm = () => ({
   arrival_time: '15:00',
   arrival_day_offset: 0,
   default_use: true,
+  auto_assign_target: false,
   is_active: true,
   display_order: 0,
   notes: '',
