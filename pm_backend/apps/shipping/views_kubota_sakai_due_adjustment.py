@@ -9,7 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from masters.models import Calendar, Contact, Line, Process, Product
-from orders.core.models import KubotaSakaiDueAdjustment, OrderLine
+from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment, OrderLine
 from production.models_plan_change_log import ProductionPlanChangeLog
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from system_settings.models import SystemSetting
@@ -249,6 +249,7 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
     created_count = 0
     updated_count = 0
     deleted_count = 0
+    deleted_trip_assignment_details = []
 
     with transaction.atomic():
         existing_qs = KubotaSakaiDueAdjustment.objects.filter(
@@ -313,6 +314,36 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
             if data['order_type'] == 'FIRM':
                 firm_keys_by_date_product[dp_key] = key
 
+        forecast_delete_rows = []
+        for ekey, existing_row in list(existing_map.items()):
+            if ekey in processed_keys:
+                continue
+            product_code, ship_to, _src_order_no, due_date_val = ekey
+            dp_key = (product_code, ship_to, due_date_val)
+            if existing_row.order_type == 'FORECAST' and dp_key in firm_keys_by_date_product:
+                forecast_delete_rows.append(existing_row)
+
+        if forecast_delete_rows:
+            delete_row_map = {row.id: row for row in forecast_delete_rows}
+            assignment_qty_rows = (
+                KubotaSakaiTripAssignment.objects
+                .filter(due_adjustment_id__in=delete_row_map.keys())
+                .values('due_adjustment_id')
+                .annotate(total_qty=Sum('qty'))
+                .order_by('due_adjustment__due_date', 'due_adjustment__product_code', 'due_adjustment__ship_to_code')
+            )
+            for qty_row in assignment_qty_rows:
+                due_adjustment_id = qty_row['due_adjustment_id']
+                deleted_row = delete_row_map.get(due_adjustment_id)
+                if not deleted_row:
+                    continue
+                deleted_trip_assignment_details.append({
+                    'due_date': deleted_row.due_date.isoformat(),
+                    'product_code': deleted_row.product_code,
+                    'ship_to_code': deleted_row.ship_to_code or '',
+                    'qty': str(qty_row['total_qty'] or Decimal('0')),
+                })
+
         for ekey, existing_row in list(existing_map.items()):
             if ekey in processed_keys:
                 continue
@@ -369,6 +400,7 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
         'created': created_count,
         'updated': updated_count,
         'deleted_forecast': deleted_count,
+        'deleted_trip_assignments': deleted_trip_assignment_details,
         'total_demand_rows': len(demand_map),
         'affected_groups': sorted(affected_groups),
     }
@@ -450,6 +482,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             'created': sync_result['created'],
             'updated': sync_result['updated'],
             'deleted_forecast': sync_result['deleted_forecast'],
+            'deleted_trip_assignments': sync_result.get('deleted_trip_assignments', []),
             'total_demand_rows': sync_result['total_demand_rows'],
             'rebalanced_rows': rebalanced_count,
         })

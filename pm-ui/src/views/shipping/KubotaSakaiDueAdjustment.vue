@@ -912,6 +912,15 @@ const importCautionMessage = [
   '処理完了メッセージが出るまでお待ちください。',
 ].join('\n')
 
+const formatDeletedTripAssignmentsMessage = (items) => {
+  if (!Array.isArray(items) || !items.length) return ''
+  const lines = items.map((item) => {
+    const qty = item?.qty ?? '0'
+    return `${item?.due_date || '-'} ${item?.product_code || '-'} ${qty}`
+  })
+  return `\n\n削除された内示便割付:\n${lines.join('\n')}`
+}
+
 const importOrders = async () => {
   if (importing.value || loading.value) return
   alert(importCautionMessage)
@@ -923,7 +932,10 @@ const importOrders = async () => {
     })
     const d = res.data
     hasDisplayedOnce.value = true
-    alert(`取込完了: 新規${d.created}件, 更新${d.updated}件, 内示→確定削除${d.deleted_forecast}件`)
+    alert(
+      `取込完了: 新規${d.created}件, 更新${d.updated}件, 内示→確定削除${d.deleted_forecast}件`
+      + formatDeletedTripAssignmentsMessage(d.deleted_trip_assignments)
+    )
     await loadGrid()
   } catch (error) {
     const message = error?.response?.data?.detail || '取込に失敗しました。'
