@@ -2785,6 +2785,9 @@ def _validate_email_fields(data):
 
 
 def _build_auto_order_send_history_attachment_labels(row):
+    stored = [line.strip() for line in str(getattr(row, 'attachment_labels', '') or '').splitlines() if line.strip()]
+    if stored:
+        return stored
     labels = []
     subject = str(getattr(row, 'subject', '') or '')
     if getattr(row, 'order_excel_file', None):

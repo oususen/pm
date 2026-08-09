@@ -560,6 +560,7 @@ class PurchaseAutoOrderSendHistory(models.Model):
     cc_emails = models.TextField(blank=True, default='', verbose_name='CCメール')
     subject = models.CharField(max_length=255, blank=True, default='', verbose_name='件名')
     message = models.TextField(blank=True, default='', verbose_name='結果メッセージ')
+    attachment_labels = models.TextField(blank=True, default='', verbose_name='添付内容（改行区切り）')
     first_delivery_date = models.DateField(null=True, blank=True, verbose_name='先頭納入日')
     order_item_count = models.PositiveIntegerField(default=0, verbose_name='注文書品目数')
     order_excel_file = models.FileField(

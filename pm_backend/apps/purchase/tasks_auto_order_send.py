@@ -258,6 +258,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
             progress_excel_enabled=bool(progress_excel and config.send_progress_excel),
             progress_pdf_enabled=bool(progress_pdf and config.send_progress_pdf),
         )
+        attachment_labels_text = '\n'.join(attachment_labels)
 
         delivery_dates = sorted({item['delivery_date'] for item in items}) if items else []
         subject_parts = []
@@ -317,6 +318,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
                 to_email=to_email,
                 cc_emails='\n'.join(cc_list),
                 subject=subject,
+                attachment_labels=attachment_labels_text,
                 first_delivery_date=delivery_dates[0] if delivery_dates else None,
                 order_item_count=len(items or []),
             )
@@ -331,6 +333,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
                 to_email=to_email,
                 cc_emails='\n'.join(cc_list),
                 subject=subject,
+                attachment_labels=attachment_labels_text,
                 first_delivery_date=delivery_dates[0] if delivery_dates else None,
                 order_item_count=len(items or []),
             )
