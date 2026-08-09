@@ -470,10 +470,10 @@
                       :title="isAllocationLocked(al) ? al.lock_reason : ''"
                       @click="handleLockedAllocationClick(al)"
                     >
-                      <select class="truck-select" v-model.number="al.truck_id" :disabled="isAllocationLocked(al)" @change="handleAllocationChange(slotEntryAt(row, dateKey, slotIdx - 1))">
+                      <select class="truck-select" v-model.number="al.truck_id" :disabled="isAllocationLocked(al)" @change="handleAllocationTruckSelect(slotEntryAt(row, dateKey, slotIdx - 1), dateKey, al.truck_id)">
                         <option :value="null">便</option>
                         <option
-                          v-for="truck in trucksByDate[dateKey] || []"
+                          v-for="truck in displayTrucksForDate(dateKey)"
                           :key="truck.id"
                           :value="truck.id"
                           :disabled="isLockedTruck(dateKey, truck.id)"
@@ -611,8 +611,14 @@
             <button class="plan-date-btn" :disabled="!planNextDate" @click="planDate = planNextDate">›</button>
           </div>
         </div>
-        <div class="plan-sidebar-body">
-          <div v-for="truck in planTruckModels" :key="`plan-${truck.truckId}`" class="plan-truck-card">
+        <div ref="planSidebarBodyRef" class="plan-sidebar-body">
+          <div
+            v-for="truck in planTruckModels"
+            :key="`plan-${truck.truckId}`"
+            class="plan-truck-card"
+            :class="{ 'plan-truck-card-active': activePlanTruckId === truck.truckId }"
+            :data-plan-truck-id="truck.truckId"
+          >
             <div class="plan-truck-header">
               <div class="plan-truck-header-main">
                 <span class="plan-truck-name">{{ truck.label }}</span>
@@ -947,6 +953,8 @@ const productContainersMap = ref({})
 const previewTimers = new Map()
 let latestDeparturePreviewRequestId = 0
 const showTruckDetail = ref(false)
+const planSidebarBodyRef = ref(null)
+const activePlanTruckId = ref(null)
 const showPseudoProductPanel = ref(false)
 const pseudoTrucks = ref([])
 const pseudoProductRows = ref([])
@@ -1151,6 +1159,25 @@ const handleAllocationChange = (entry) => {
   }
   recalcEntry(entry)
   if (entry?.due_date) schedulePreview(entry.due_date)
+}
+
+const focusPlanTruck = async (dueDateKey, truckId) => {
+  const normalizedTruckId = Number(truckId)
+  if (!dueDateKey || !normalizedTruckId) return
+  const truck = (trucksByDate.value[dueDateKey] || []).find((item) => Number(item.id) === normalizedTruckId)
+  if (!truck) return
+  const departureDateKey = getLoadDetailDateKey(dueDateKey, truck) || dueDateKey
+  activePlanTruckId.value = normalizedTruckId
+  planDate.value = departureDateKey
+  await nextTick()
+  const root = planSidebarBodyRef.value
+  const target = root?.querySelector?.(`[data-plan-truck-id="${normalizedTruckId}"]`)
+  target?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+}
+
+const handleAllocationTruckSelect = async (entry, dueDateKey, truckId) => {
+  handleAllocationChange(entry)
+  await focusPlanTruck(dueDateKey, truckId)
 }
 
 const handleAllocationQtyInput = (entry) => {
@@ -3408,6 +3435,10 @@ onUnmounted(() => {
   border-radius: 4px;
   background: #f8fafc;
   padding: 6px;
+}
+.plan-truck-card-active {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 .plan-truck-header {
   display: flex;
