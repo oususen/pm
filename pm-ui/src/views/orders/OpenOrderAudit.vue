@@ -4,14 +4,13 @@
       <h1 class="page-title">旧OPEN受注洗い出し <DataSourceDialog title="旧OPEN受注洗い出し" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button class="btn-secondary" :disabled="loading" @click="exportCsv">CSV出力</button>
-        <button class="btn-primary" :disabled="loading" @click="loadRows">更新</button>
       </div>
     </div>
 
     <div class="filter-panel">
       <div class="filter-row">
         <label class="filter-item">
-          <span>基準日</span>
+          <span>基準納期日</span>
           <input v-model="cutoffDate" class="filter-input" type="date" />
         </label>
         <label class="filter-item">
@@ -43,9 +42,13 @@
           <span>受注番号</span>
           <input v-model.trim="orderNo" class="filter-input" type="text" placeholder="部分一致" />
         </label>
+        <div class="filter-item filter-btn-wrap">
+          <span>&nbsp;</span>
+          <button class="btn-primary" :disabled="loading" @click="loadRows">検索</button>
+        </div>
       </div>
       <div class="hint-box">
-        対象は選択得意先の `OPEN` 受注明細です。基準日以前の明細を洗い出します。
+        対象は選択得意先の `OPEN` 受注明細です。基準納期日以前の明細を洗い出します。
       </div>
     </div>
 
@@ -148,9 +151,9 @@ const dsSources = [
   { op: '読み取り', table: 'm_customer', desc: '得意先マスタ（絞り込み）' },
 ]
 
-const cutoffDate = ref('2026-07-31')
-const customerCode = ref('000196')
-const orderType = ref('FIRM')
+const cutoffDate = ref('')
+const customerCode = ref('')
+const orderType = ref('')
 const shipToCode = ref('')
 const productCode = ref('')
 const orderNo = ref('')
@@ -222,15 +225,14 @@ const loadRows = async () => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const params = {
-      due_date__lte: cutoffDate.value,
-    }
+    const params = {}
+    if (cutoffDate.value) params.due_date__lte = cutoffDate.value
     if (customerCode.value) params.customer_code = customerCode.value
     if (orderType.value) params.order_type = orderType.value
     if (shipToCode.value) params.ship_to_code = shipToCode.value
     if (productCode.value) params.product_code = productCode.value
-    const res = await api.orders.listOrderLines(params)
-    rows.value = res.data?.results || res.data || []
+    const res = await api.orders.openOrderAudit(params)
+    rows.value = res.data || []
     expandedOrderNos.value = new Set()
   } catch (error) {
     errorMessage.value = error?.response?.data?.detail || '旧OPEN受注の取得に失敗しました。'
@@ -280,7 +282,6 @@ const exportCsv = () => {
 
 onMounted(async () => {
   await loadCustomers()
-  await loadRows()
 })
 </script>
 
@@ -322,6 +323,11 @@ onMounted(async () => {
   border: 1px solid #cfd8e3;
   border-radius: 4px;
   background: #fff;
+}
+
+.filter-btn-wrap {
+  min-width: auto;
+  justify-content: flex-end;
 }
 
 .hint-box {

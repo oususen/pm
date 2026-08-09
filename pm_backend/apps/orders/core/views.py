@@ -6,7 +6,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Exists, Max, Min, OuterRef, Q
+from django.db.models import Exists, F, Max, Min, OuterRef, Q, Value
+from django.db.models.functions import Coalesce
 import csv
 import json
 import re
@@ -382,6 +383,76 @@ class OrderLineViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code']
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
+
+    @action(detail=False, methods=['get'], url_path='open-order-audit')
+    def open_order_audit(self, request):
+        """旧OPEN受注洗い出し専用（軽量）エンドポイント"""
+        qs = OrderLine.objects.filter(order__status='OPEN')
+
+        due_date_lte = request.query_params.get('due_date__lte')
+        if due_date_lte:
+            qs = qs.filter(due_date__lte=due_date_lte)
+
+        customer_code = request.query_params.get('customer_code')
+        if customer_code:
+            qs = qs.filter(order__customer__customer_code__endswith=customer_code)
+
+        order_type = request.query_params.get('order_type')
+        if order_type:
+            valid = [v.strip().upper() for v in order_type.split(',') if v.strip().upper() in ('FIRM', 'FORECAST')]
+            if valid:
+                qs = qs.filter(
+                    Q(order_type__in=valid) |
+                    (Q(order_type__isnull=True) & Q(order__order_type__in=valid))
+                )
+
+        product_code = request.query_params.get('product_code')
+        if product_code:
+            qs = qs.filter(product_code__icontains=product_code)
+
+        ship_to_code = request.query_params.get('ship_to_code')
+        if ship_to_code:
+            qs = qs.filter(ship_to_code__icontains=ship_to_code)
+
+        rows = list(
+            qs.annotate(
+                effective_order_type=Coalesce(F('order_type'), F('order__order_type'), Value('')),
+                order_no_val=F('order__order_no'),
+                customer_code_val=F('order__customer__customer_code'),
+                customer_name_val=F('order__customer__customer_name'),
+                product_name_val=F('product__product_name'),
+                source_file_val=F('order__source_file'),
+            ).values(
+                'id', 'line_no', 'product_code', 'product_name_val',
+                'order_type', 'effective_order_type',
+                'customer_order_no', 'quantity', 'actual_shipment_qty',
+                'due_date', 'ship_to_code',
+                'order_no_val', 'customer_code_val', 'customer_name_val',
+                'source_file_val',
+            ).order_by('due_date', 'order_no_val', 'line_no')
+        )
+
+        data = [
+            {
+                'id': r['id'],
+                'line_no': r['line_no'],
+                'product_code': r['product_code'],
+                'product_name': r['product_name_val'] or '',
+                'order_type': r['order_type'] or '',
+                'effective_order_type': r['effective_order_type'] or '',
+                'customer_order_no': r['customer_order_no'] or '',
+                'quantity': r['quantity'],
+                'actual_shipment_qty': r['actual_shipment_qty'],
+                'due_date': str(r['due_date']) if r['due_date'] else '',
+                'ship_to_code': r['ship_to_code'] or '',
+                'order_no': r['order_no_val'] or '',
+                'customer_code': r['customer_code_val'] or '',
+                'customer_name': r['customer_name_val'] or '',
+                'source_file': r['source_file_val'] or '',
+            }
+            for r in rows
+        ]
+        return Response(data)
 
     @action(detail=False, methods=['get'], url_path='missing-routing-items')
     def missing_routing_items(self, request):

@@ -85,6 +85,9 @@ export const createOrdersAPI = (client) => ({
     const query = { page_size: 10000, ...params }
     return client.get('/order-lines/', { params: query })
   },
+  openOrderAudit(params = {}) {
+    return client.get('/order-lines/open-order-audit/', { params })
+  },
   getCustomerProductCodes(customerCode, params = {}) {
     return client.get('/order-lines/customer-product-codes/', {
       params: { customer_code: customerCode, ...params },

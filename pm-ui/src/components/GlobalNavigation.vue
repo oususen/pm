@@ -226,6 +226,10 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 
+const manualPathFallbackMap = {
+  '/purchase/auto-order-send': '仕入れ/注文書自動送信.md',
+}
+
 const isHomePage = computed(() => {
   return route.path === '/'
 })
@@ -296,8 +300,10 @@ const isActiveTab = (tabId) => {
 
 const manualPath = computed(() => {
   const path = route.meta?.manualPath
-  if (typeof path !== 'string') return ''
-  return path.trim()
+  if (typeof path === 'string' && path.trim()) {
+    return path.trim()
+  }
+  return manualPathFallbackMap[route.path] || ''
 })
 
 const helpUrl = computed(() => {
