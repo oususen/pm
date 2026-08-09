@@ -496,3 +496,36 @@ class PurchaseAutoOrderSendConfig(models.Model):
 
     def __str__(self):
         return f'{self.supplier} {self.scheduled_hour:02d}:{self.scheduled_minute:02d}'
+
+
+class PurchaseAutoOrderSendTruckLoadRequest(models.Model):
+    """トラック積載判定の中断要求管理"""
+
+    STATUS_RUNNING = 'RUNNING'
+    STATUS_CANCELED = 'CANCELED'
+    STATUS_COMPLETED = 'COMPLETED'
+    STATUS_CHOICES = [
+        (STATUS_RUNNING, '実行中'),
+        (STATUS_CANCELED, '中断'),
+        (STATUS_COMPLETED, '完了'),
+    ]
+
+    request_id = models.CharField(max_length=64, unique=True, verbose_name='リクエストID')
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_RUNNING,
+        verbose_name='状態',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+    canceled_at = models.DateTimeField(null=True, blank=True, verbose_name='中断要求日時')
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name='完了日時')
+
+    class Meta:
+        db_table = 'purchase_auto_order_send_truck_load_request'
+        verbose_name = '注文書自動送信トラック積載判定リクエスト'
+        verbose_name_plural = '注文書自動送信トラック積載判定リクエスト'
+
+    def __str__(self):
+        return f'{self.request_id} {self.status}'

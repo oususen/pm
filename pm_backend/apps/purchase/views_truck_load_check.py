@@ -1,20 +1,58 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from math import ceil
 
+from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from masters.models import Line, Product, SupplierTruck
 from production.models_line_backlog import LineBacklog
-from .truck_load_calculator import calculate_truck_load
+from .truck_load_calculator import TruckLoadCalculationCanceled, calculate_truck_load
 
 from .models import (
     PurchaseAutoOrderSendConfig,
+    PurchaseAutoOrderSendTruckLoadRequest,
     PurchaseOrderProposal,
     PurchaseOrderProposalLine,
 )
+
+
+def _normalize_request_id(raw_value):
+    return str(raw_value or '').strip()[:64]
+
+
+def _mark_truck_load_request_completed(request_id, status_value):
+    if not request_id:
+        return
+    updates = {
+        'status': status_value,
+        'updated_at': datetime.now(),
+    }
+    if status_value == PurchaseAutoOrderSendTruckLoadRequest.STATUS_CANCELED:
+        updates['canceled_at'] = datetime.now()
+    if status_value == PurchaseAutoOrderSendTruckLoadRequest.STATUS_COMPLETED:
+        updates['completed_at'] = datetime.now()
+    PurchaseAutoOrderSendTruckLoadRequest.objects.filter(request_id=request_id).update(**updates)
+
+
+def _build_truck_load_cancel_checker(request_id):
+    if not request_id:
+        return None
+
+    state = {'count': 0}
+
+    def _cancel_check():
+        state['count'] += 1
+        if state['count'] == 1 or state['count'] % 25 == 0:
+            return PurchaseAutoOrderSendTruckLoadRequest.objects.filter(
+                request_id=request_id,
+                status=PurchaseAutoOrderSendTruckLoadRequest.STATUS_CANCELED,
+            ).exists()
+        return False
+
+    return _cancel_check
 
 
 def _build_truck_load_assignment(product, qty_value):
@@ -145,6 +183,18 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
 
         delivery_date_str = (request.data.get('delivery_date') or '').strip()
         items = request.data.get('items')
+        request_id = _normalize_request_id(request.data.get('request_id'))
+
+        if request_id:
+            with transaction.atomic():
+                PurchaseAutoOrderSendTruckLoadRequest.objects.update_or_create(
+                    request_id=request_id,
+                    defaults={
+                        'status': PurchaseAutoOrderSendTruckLoadRequest.STATUS_RUNNING,
+                        'canceled_at': None,
+                        'completed_at': None,
+                    },
+                )
 
         assignments = []
         invalid_items = []
@@ -244,7 +294,21 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
         if not assignments:
             return Response({'detail': '対象品目がありません'}, status=status.HTTP_400_BAD_REQUEST)
 
-        result = calculate_truck_load(assignments, truck)
+        cancel_check = _build_truck_load_cancel_checker(request_id)
+        try:
+            result = calculate_truck_load(assignments, truck, cancel_check=cancel_check)
+        except TruckLoadCalculationCanceled:
+            _mark_truck_load_request_completed(request_id, PurchaseAutoOrderSendTruckLoadRequest.STATUS_CANCELED)
+            return Response(
+                {
+                    'detail': 'トラック積載判定を中断しました',
+                    'request_id': request_id,
+                    'canceled': True,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        _mark_truck_load_request_completed(request_id, PurchaseAutoOrderSendTruckLoadRequest.STATUS_COMPLETED)
         placed = result.get('placed', []) or []
         response_data = {
             'truck': {
@@ -302,4 +366,28 @@ class PurchaseAutoOrderSendTruckLoadCheckView(APIView):
             response_data['data_source'] = data_source
         if config_id is not None:
             response_data['config_id'] = config_id
+        if request_id:
+            response_data['request_id'] = request_id
         return Response(response_data)
+
+
+class PurchaseAutoOrderSendTruckLoadCheckCancelView(APIView):
+    """トラック積載判定の中断要求"""
+
+    def post(self, request):
+        request_id = _normalize_request_id(request.data.get('request_id'))
+        if not request_id:
+            return Response({'detail': 'request_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = PurchaseAutoOrderSendTruckLoadRequest.objects.filter(
+            request_id=request_id,
+            status=PurchaseAutoOrderSendTruckLoadRequest.STATUS_RUNNING,
+        ).update(
+            status=PurchaseAutoOrderSendTruckLoadRequest.STATUS_CANCELED,
+            canceled_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        if not updated:
+            return Response({'detail': 'running request not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({'request_id': request_id, 'status': 'CANCELED'})

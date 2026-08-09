@@ -18,6 +18,15 @@ def _to_decimal(value, default='0'):
         return Decimal(default)
 
 
+class TruckLoadCalculationCanceled(Exception):
+    """トラック積載判定の中断要求"""
+
+
+def _check_canceled(cancel_check):
+    if cancel_check and cancel_check():
+        raise TruckLoadCalculationCanceled()
+
+
 # ---------------------------------------------------------------------------
 # パッカー群（shipping版と同一ロジック）
 # ---------------------------------------------------------------------------
@@ -30,7 +39,7 @@ def _slot_orientations(slot):
     )]
 
 
-def _pack_shelf(bed_len, bed_wid, slots):
+def _pack_shelf(bed_len, bed_wid, slots, cancel_check=None):
     placed = []
     row_x = Decimal('0')
     row_y = Decimal('0')
@@ -39,6 +48,7 @@ def _pack_shelf(bed_len, bed_wid, slots):
     max_x = Decimal('0')
     max_y = Decimal('0')
     for slot in slots:
+        _check_canceled(cancel_check)
         len_a = _to_decimal(slot.get('length'))
         wid_a = _to_decimal(slot.get('width'))
         rot_a = bool(slot.get('rotated', False))
@@ -83,7 +93,7 @@ def _pack_shelf(bed_len, bed_wid, slots):
     return {'placed': placed, 'can_fit': can_fit, 'max_x': max_x, 'max_y': max_y}
 
 
-def _pack_guillotine(bed_len, bed_wid, slots):
+def _pack_guillotine(bed_len, bed_wid, slots, cancel_check=None):
     placed = []
     free_rects = [(Decimal('0'), Decimal('0'), bed_len, bed_wid)]
     can_fit = True
@@ -94,6 +104,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
     of_h = Decimal('0')
 
     for slot in slots:
+        _check_canceled(cancel_check)
         len_a = _to_decimal(slot.get('length'))
         wid_a = _to_decimal(slot.get('width'))
         rot_a = bool(slot.get('rotated', False))
@@ -168,7 +179,7 @@ def _pack_guillotine(bed_len, bed_wid, slots):
     return {'placed': placed, 'can_fit': can_fit, 'max_x': max_x, 'max_y': max_y}
 
 
-def _pack_bay(bed_len, bed_wid, slots):
+def _pack_bay(bed_len, bed_wid, slots, cancel_check=None):
     placed = []
     sorted_slots = sorted(
         slots,
@@ -186,6 +197,7 @@ def _pack_bay(bed_len, bed_wid, slots):
     of_h = Decimal('0')
 
     for slot in sorted_slots:
+        _check_canceled(cancel_check)
         len_a = _to_decimal(slot.get('length'))
         wid_a = _to_decimal(slot.get('width'))
         rot_a = bool(slot.get('rotated', False))
@@ -255,7 +267,7 @@ def _pack_bay(bed_len, bed_wid, slots):
     return {'placed': placed, 'can_fit': can_fit, 'max_x': max_x, 'max_y': max_y}
 
 
-def _pack_column(bed_len, bed_wid, slots):
+def _pack_column(bed_len, bed_wid, slots, cancel_check=None):
     from math import ceil
     placed = []
     can_fit = True
@@ -267,11 +279,13 @@ def _pack_column(bed_len, bed_wid, slots):
 
     groups = defaultdict(list)
     for slot in slots:
+        _check_canceled(cancel_check)
         name = slot.get('container_name', '') or slot.get('product_code', '')
         groups[name].append(slot)
 
     group_list = []
     for name, group_slots in groups.items():
+        _check_canceled(cancel_check)
         rep = group_slots[0]
         len_a = _to_decimal(rep.get('length'))
         wid_a = _to_decimal(rep.get('width'))
@@ -301,6 +315,7 @@ def _pack_column(bed_len, bed_wid, slots):
     dp = [None] * (bed_wid_int + 1)
     dp[0] = (Decimal('0'), [])
     for gi in range(N):
+        _check_canceled(cancel_check)
         name, group_slots, options = group_list[gi]
         for oi, (eff_w, w, l, rotated, units) in enumerate(options):
             eff_w_int = int(eff_w)
@@ -347,6 +362,7 @@ def _pack_column(bed_len, bed_wid, slots):
     bands = []
     cur_y = Decimal('0')
     for gi in [g for g in ordered if g in chosen_groups]:
+        _check_canceled(cancel_check)
         name, group_slots, options = group_list[gi]
         w, l, rotated = orientation_map[gi]
         units = units_map[gi]
@@ -355,6 +371,7 @@ def _pack_column(bed_len, bed_wid, slots):
             band_y = cur_y + w * u
             group_bands.append((band_y, w, Decimal('0')))
         for slot in group_slots:
+            _check_canceled(cancel_check)
             fitted = False
             for bi in range(len(group_bands)):
                 band_y, band_w, band_x = group_bands[bi]
@@ -398,9 +415,11 @@ def _pack_column(bed_len, bed_wid, slots):
         max_y = max(max_y, cur_y)
 
     for gi in [g for g in ordered if g not in chosen_groups]:
+        _check_canceled(cancel_check)
         name, group_slots, options = group_list[gi]
         w, l, rotated = orientation_map[gi]
         for slot in group_slots:
+            _check_canceled(cancel_check)
             fitted = False
             for bi, (band_y, band_w, band_used_x) in enumerate(bands):
                 if w > band_w:
@@ -792,14 +811,17 @@ def _group_order_variants(slots):
     return variants
 
 
-def _try_packers(bed_len, bed_wid, slots, packers):
+def _try_packers(bed_len, bed_wid, slots, packers, cancel_check=None):
     first_candidate = None
     best_ng_candidate = None
     best_ng_key = None
     seen = set()
     for rotation_variant in _rotation_variants(slots):
+        _check_canceled(cancel_check)
         for ordered_variant in _group_order_variants(rotation_variant):
+            _check_canceled(cancel_check)
             for variant in _sorted_slot_variants(ordered_variant):
+                _check_canceled(cancel_check)
                 for packer in packers:
                     key = (packer.__name__, tuple(
                         (str(slot.get('product_code', '')), str(slot.get('container_name', '')),
@@ -810,7 +832,11 @@ def _try_packers(bed_len, bed_wid, slots, packers):
                     if key in seen:
                         continue
                     seen.add(key)
-                    finalized = _finalize_pack_result(packer(bed_len, bed_wid, variant), bed_len, bed_wid)
+                    finalized = _finalize_pack_result(
+                        packer(bed_len, bed_wid, variant, cancel_check=cancel_check),
+                        bed_len,
+                        bed_wid,
+                    )
                     if first_candidate is None:
                         first_candidate = finalized
                     if finalized['can_fit']:
@@ -833,12 +859,12 @@ def _try_packers(bed_len, bed_wid, slots, packers):
     return best_ng_candidate or first_candidate, False
 
 
-def _pack_slots(bed_len, bed_wid, slots):
-    result, ok = _try_packers(bed_len, bed_wid, slots, (_pack_column,))
+def _pack_slots(bed_len, bed_wid, slots, cancel_check=None):
+    result, ok = _try_packers(bed_len, bed_wid, slots, (_pack_column,), cancel_check=cancel_check)
     if ok:
         return result['placed'], True, result['max_x'], result['max_y']
     result2, ok2 = _try_packers(bed_len, bed_wid, slots,
-                                (_pack_guillotine, _pack_bay, _pack_shelf))
+                                (_pack_guillotine, _pack_bay, _pack_shelf), cancel_check=cancel_check)
     if ok2:
         return result2['placed'], True, result2['max_x'], result2['max_y']
     fallback = result
@@ -859,9 +885,10 @@ def _quick_can_fit(bed_len, bed_wid, slots):
     return result['can_fit']
 
 
-def _calc_remaining(bed_len, bed_wid, base_slots, type_records):
+def _calc_remaining(bed_len, bed_wid, base_slots, type_records, cancel_check=None):
     result = {}
     for record in type_records:
+        _check_canceled(cancel_check)
         label = record['label']
         extra_slot = {
             'product_code': '',
@@ -873,6 +900,7 @@ def _calc_remaining(bed_len, bed_wid, base_slots, type_records):
         }
         lo, hi = 0, 50
         while lo < hi:
+            _check_canceled(cancel_check)
             mid = (lo + hi + 1) // 2
             test_slots = list(base_slots) + [dict(extra_slot) for _ in range(mid)]
             if _quick_can_fit(bed_len, bed_wid, test_slots):
@@ -892,8 +920,10 @@ def _calc_remaining(bed_len, bed_wid, base_slots, type_records):
 #   同じ物理サイズ・同名の容器は capacity が異なっても1グループにまとめ、
 #   製品別にコンテナ数を計算してからグループ内で合算して段積みする。
 
-def calculate_truck_load(assignments, truck):
+def calculate_truck_load(assignments, truck, cancel_check=None):
     from math import ceil
+
+    _check_canceled(cancel_check)
 
     bed_width = _to_decimal(truck.width)
     bed_depth = _to_decimal(truck.depth)
@@ -923,6 +953,7 @@ def calculate_truck_load(assignments, truck):
     group_meta = {}
 
     for item in assignments:
+        _check_canceled(cancel_check)
         qty = _to_decimal(item.get('qty'))
         if qty <= 0:
             continue
@@ -1005,6 +1036,7 @@ def calculate_truck_load(assignments, truck):
         })
 
     for key, meta in group_meta.items():
+        _check_canceled(cancel_check)
         total_containers = group_container_count[key]
         container = meta['container']
         cw = meta['cw']
@@ -1051,6 +1083,7 @@ def calculate_truck_load(assignments, truck):
         # 製品別コンテナ数を算出（group_productsはqtyベースなので再計算）
         product_container_remaining = {}
         for item in assignments:
+            _check_canceled(cancel_check)
             pc = str(item.get('product_code') or '')
             if pc not in {p[0] for p in group_products_list}:
                 continue
@@ -1078,6 +1111,7 @@ def calculate_truck_load(assignments, truck):
         remaining_total = int(total_containers)
         product_keys = [pc for pc in product_container_remaining if product_container_remaining[pc] > 0]
         for _ in range(total_floor):
+            _check_canceled(cancel_check)
             slot_layers = max(1, min(int(layers), remaining_total))
             remaining_total -= slot_layers
             first = None
@@ -1133,7 +1167,7 @@ def calculate_truck_load(assignments, truck):
         pack_bed_depth = bed_depth - container_gap
         pack_bed_width = bed_width - container_gap
 
-    placed, can_fit, _, _ = _pack_slots(pack_bed_depth, pack_bed_width, slots)
+    placed, can_fit, _, _ = _pack_slots(pack_bed_depth, pack_bed_width, slots, cancel_check=cancel_check)
 
     # 配置結果: 縁gap分オフセット + スロット寸法を実寸に戻す
     if container_gap > 0:
@@ -1148,6 +1182,7 @@ def calculate_truck_load(assignments, truck):
     in_bed_area = Decimal('0')
     n_overflow = 0
     for p in placed:
+        _check_canceled(cancel_check)
         px = _to_decimal(p.get('x'))
         py = _to_decimal(p.get('y'))
         pw = _to_decimal(p.get('w'))
@@ -1171,7 +1206,8 @@ def calculate_truck_load(assignments, truck):
 
     remaining = []
     if can_fit:
-        remaining = _calc_remaining(pack_bed_depth, pack_bed_width, slots, type_records)
+        _check_canceled(cancel_check)
+        remaining = _calc_remaining(pack_bed_depth, pack_bed_width, slots, type_records, cancel_check=cancel_check)
 
     return {
         'can_fit': can_fit,

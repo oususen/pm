@@ -51,7 +51,10 @@ from .views import (
     PurchaseReceivingHistoryView,
     PurchaseReceivingView,
 )
-from .views_truck_load_check import PurchaseAutoOrderSendTruckLoadCheckView
+from .views_truck_load_check import (
+    PurchaseAutoOrderSendTruckLoadCheckCancelView,
+    PurchaseAutoOrderSendTruckLoadCheckView,
+)
 
 urlpatterns = [
     path('purchase-plan-lock-setting/', PurchasePlanLockSettingView.as_view(), name='purchase-plan-lock-setting'),
@@ -101,6 +104,7 @@ urlpatterns = [
     path('purchase-auto-order-send-configs/<int:pk>/holiday-trial/', PurchaseAutoOrderSendHolidayTrialView.as_view(), name='purchase-auto-order-send-holiday-trial'),
     path('purchase-auto-order-send-configs/<int:pk>/truck-load-check/', PurchaseAutoOrderSendTruckLoadCheckView.as_view(), name='purchase-auto-order-send-truck-load-check'),
     path('purchase-auto-order-send-truck-load-check/', PurchaseAutoOrderSendTruckLoadCheckView.as_view(), name='purchase-auto-order-send-truck-load-check'),
+    path('purchase-auto-order-send-truck-load-check/cancel/', PurchaseAutoOrderSendTruckLoadCheckCancelView.as_view(), name='purchase-auto-order-send-truck-load-check-cancel'),
     path('purchase-actual-kikan-mapping/', PurchaseActualKikanMappingView.as_view(), name='purchase-actual-kikan-mapping'),
     path('purchase-actual-kikan-mapping/candidates/', PurchaseActualKikanMappingCandidatesView.as_view(), name='purchase-actual-kikan-mapping-candidates'),
 ]

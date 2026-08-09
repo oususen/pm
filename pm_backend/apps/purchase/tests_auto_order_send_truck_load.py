@@ -1,9 +1,12 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
 from masters.models import ContainerCapacity, Product, Supplier, SupplierTruck
 from .models import PurchaseAutoOrderSendConfig
+from .truck_load_calculator import TruckLoadCalculationCanceled
 
 
 class PurchaseAutoOrderSendTruckLoadCheckViewTest(TestCase):
@@ -56,4 +59,26 @@ class PurchaseAutoOrderSendTruckLoadCheckViewTest(TestCase):
         data = response.json()
         self.assertTrue(data['can_fit'])
         self.assertEqual(data['truck']['id'], self.truck.id)
-        self.assertEqual(data['assignments'][0]['product_code'], self.product.product_code)
+        self.assertEqual(data['placed'][0]['product_code'], self.product.product_code)
+
+    def test_truck_load_check_returns_canceled_when_request_already_canceled(self):
+        self.client.force_login(self.user)
+        request_id = 'cancel-me'
+        url = reverse('purchase-auto-order-send-truck-load-check', args=[self.config.id])
+        with patch('purchase.views_truck_load_check.calculate_truck_load', side_effect=TruckLoadCalculationCanceled()):
+            response = self.client.post(
+                url,
+                {
+                    'truck_id': self.truck.id,
+                    'request_id': request_id,
+                    'items': [
+                        {'product_code': self.product.product_code, 'qty': 1},
+                    ],
+                },
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 409)
+        data = response.json()
+        self.assertTrue(data['canceled'])
+        self.assertEqual(data['request_id'], request_id)

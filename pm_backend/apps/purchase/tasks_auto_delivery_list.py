@@ -1334,7 +1334,8 @@ def _generate_delivery_note_pdf(items, delivery_date, supplier):
     return buf
 
 
-def _dn_nohin(c, x0, yt, W, H, pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, F):
+def _dn_nohin(c, x0, yt, W, H, pc, pn, qty, d_ymd, d_mmdd, s_code, s_name, qr_data, F,
+              container_name='', container_capacity=0):
     """外作納品書 — 納品書セクション描画"""
     from reportlab.lib.units import mm
     from reportlab.graphics.barcode.qr import QrCodeWidget

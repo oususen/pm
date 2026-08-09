@@ -13,7 +13,10 @@
         <div class="truck-check-panel">
           <div class="truck-check-header">
             <h2>トラック積載判定</h2>
-            <button class="btn-primary" :disabled="truckCheckLoading || !truckCheck.truck_id || !truckCheck.delivery_date" @click="runTruckLoadCheck">{{ truckCheckLoading ? '判定中...' : '判定実行' }}</button>
+            <div class="truck-check-actions">
+              <button class="btn-primary" :disabled="truckCheckLoading || !truckCheck.truck_id || !truckCheck.delivery_date" @click="runTruckLoadCheck">{{ truckCheckLoading ? '判定中...' : '判定実行' }}</button>
+              <button v-if="truckCheckLoading" class="btn-secondary" @click="cancelTruckLoadCheck">中断</button>
+            </div>
           </div>
           <div class="truck-check-form">
             <div class="form-group compact">
@@ -299,6 +302,8 @@ const configs = ref([])
 const truckCandidates = ref([])
 const truckCheckLoading = ref(false)
 const truckCheckResult = ref(null)
+const truckCheckRequestId = ref('')
+const truckCheckAbortController = ref(null)
 const truckCheck = reactive({
   truck_id: '',
   delivery_date: '',
@@ -525,23 +530,42 @@ const onTruckChange = () => {
   truckCheckResult.value = null
 }
 
+const createTruckLoadRequestId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `truck-load-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 const runTruckLoadCheck = async () => {
   if (!truckCheck.truck_id || !truckCheck.delivery_date) {
     alert('トラックと納期を選択してください')
     return
   }
 
+  const requestId = createTruckLoadRequestId()
+  const abortController = new AbortController()
+  truckCheckRequestId.value = requestId
+  truckCheckAbortController.value = abortController
   truckCheckLoading.value = true
   truckCheckResult.value = null
   try {
     const res = await api.purchaseAutoOrderSend.checkTruckLoad({
       truck_id: truckCheck.truck_id,
       delivery_date: truckCheck.delivery_date,
-    })
+      request_id: requestId,
+    }, null, { signal: abortController.signal })
     truckCheckResult.value = res.data
   } catch (error) {
-    console.error('トラック積載判定エラー', error)
+    if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') {
+      return
+    }
     const data = error?.response?.data
+    if (data?.canceled) {
+      alert('トラック積載判定を中断しました')
+      return
+    }
+    console.error('トラック積載判定エラー', error)
     const detail = data?.detail || ''
     const invalidItems = data?.invalid_items || []
     const lines = [detail || 'トラック積載判定に失敗しました']
@@ -554,8 +578,30 @@ const runTruckLoadCheck = async () => {
     }
     alert(lines.join('\n'))
   } finally {
+    truckCheckRequestId.value = ''
+    truckCheckAbortController.value = null
     truckCheckLoading.value = false
   }
+}
+
+const cancelTruckLoadCheck = async () => {
+  if (!truckCheckLoading.value || !truckCheckRequestId.value) return
+  try {
+    await api.purchaseAutoOrderSend.cancelTruckLoadCheck(truckCheckRequestId.value)
+  } catch (error) {
+    const detail = error?.response?.data?.detail
+    if (detail && detail !== 'running request not found') {
+      alert(`中断要求に失敗しました。\n${detail}`)
+      return
+    }
+  }
+  if (truckCheckAbortController.value) {
+    truckCheckAbortController.value.abort()
+  }
+  truckCheckLoading.value = false
+  truckCheckRequestId.value = ''
+  truckCheckAbortController.value = null
+  alert('トラック積載判定の中断を要求しました')
 }
 
 const checkSelectedSupplierCalendarDeliveryDays = async () => {
@@ -812,6 +858,7 @@ watch(
  .truck-check-panel { margin-bottom: 18px; padding: 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; }
  .truck-check-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
  .truck-check-header h2 { margin: 0; font-size: 15px; }
+ .truck-check-actions { display: flex; gap: 8px; }
  .truck-check-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
  .form-group.compact { margin-bottom: 0; min-width: 220px; }
  .truck-check-form select { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
