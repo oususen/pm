@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">オーシャン</string>
-    <string name="title_activity_main">オーシャン</string>
+    <string name="app_name">wanoko</string>
+    <string name="title_activity_main">wanoko</string>
     <string name="package_name">com.daiso.pm</string>
     <string name="custom_url_scheme">com.daiso.pm</string>
     <string name="default_notification_channel_id">incoming_calls</string>
