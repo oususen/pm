@@ -23,9 +23,14 @@
         {{ loading ? '解析中...' : '突合実行' }}
       </button>
       <button v-if="result" @click="exportExcel" class="btn-excel">Excel出力</button>
+      <button v-if="result && result.mismatch.length" @click="adjustProgress"
+        :disabled="adjusting || selectedCount === 0" class="btn-adjust">
+        {{ adjusting ? '調整中...' : `進度調整実行 (${selectedCount}件)` }}
+      </button>
     </div>
 
     <div v-if="error" class="error-msg">{{ error }}</div>
+    <div v-if="adjustDone" class="adjust-notice">調整レコードを登録しました。進度は再計算されていません。反映するには進度再計算を実行してください。</div>
 
     <div v-if="result" class="result-area">
       <div class="summary-bar">
@@ -42,12 +47,14 @@
         <table class="compare-table">
           <thead>
             <tr>
+              <th class="chk"><input type="checkbox" :checked="allSelected" @change="toggleAll" /></th>
               <th>PDF品番</th><th>DB品番</th><th>品名</th><th>工程</th>
               <th class="num">PDF進度</th><th class="num">DB進度</th><th class="num">差異</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in result.mismatch" :key="r.pdf_code" :class="diffClass(r.diff)">
+              <td class="chk"><input type="checkbox" v-model="r.selected" /></td>
               <td>{{ r.pdf_code }}</td>
               <td>{{ r.db_code }}</td>
               <td>{{ r.product_name }}</td>
@@ -109,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import ExcelJS from 'exceljs'
 import api from '@/api/client'
 
@@ -117,8 +124,72 @@ const lineCode = ref('000180')
 const targetDate = ref('')
 const file = ref(null)
 const loading = ref(false)
+const adjusting = ref(false)
+const adjustDone = ref(false)
 const error = ref('')
 const result = ref(null)
+
+const selectedCount = computed(() => {
+  if (!result.value) return 0
+  return result.value.mismatch.filter(r => r.selected).length
+})
+
+const allSelected = computed(() => {
+  if (!result.value || !result.value.mismatch.length) return false
+  return result.value.mismatch.every(r => r.selected)
+})
+
+function toggleAll(e) {
+  const val = e.target.checked
+  result.value.mismatch.forEach(r => { r.selected = val })
+}
+
+async function adjustProgress() {
+  const items = result.value.mismatch.filter(r => r.selected)
+  if (!items.length) return
+
+  const payload = items.map(r => ({
+    db_code: r.db_code,
+    process_code: r.process_code,
+    diff: r.diff,
+  }))
+
+  adjusting.value = true
+  error.value = ''
+  try {
+    const preRes = await api.progressPdfCompare.precheck(
+      lineCode.value, result.value.target_date, payload
+    )
+    const ex = preRes.data
+    let msg = `${items.length}件の進度調整レコードを登録します。`
+    if (ex.existing_count > 0) {
+      const details = ex.existing.map(e =>
+        `  ${e.product_code} (${e.process_code}): 現在=${e.current_qty} → 新=${e.new_qty}  理由: ${e.current_reason}`
+      ).join('\n')
+      msg += `\n\n⚠ 既存の調整レコード ${ex.existing_count}件が上書きされます:\n${details}`
+    }
+    msg += '\n\nよろしいですか？'
+    if (!confirm(msg)) { adjusting.value = false; return }
+
+    const res = await api.progressPdfCompare.adjust(
+      lineCode.value, result.value.target_date, payload
+    )
+    const resultMsg = []
+    if (res.data.created) resultMsg.push(`新規: ${res.data.created}件`)
+    if (res.data.updated) resultMsg.push(`更新: ${res.data.updated}件`)
+    adjustDone.value = true
+    alert(`進度調整完了\n${resultMsg.join(' / ')}\n\n※ 進度は再計算されていません。反映するには進度再計算を実行してください。`)
+  } catch (e) {
+    const data = e.response?.data
+    if (data?.errors?.length) {
+      error.value = data.errors.join('\n')
+    } else {
+      error.value = data?.detail || e.message
+    }
+  } finally {
+    adjusting.value = false
+  }
+}
 
 function onFileChange(e) {
   file.value = e.target.files[0] || null
@@ -129,11 +200,14 @@ async function compare() {
   loading.value = true
   error.value = ''
   result.value = null
+  adjustDone.value = false
   try {
     const res = await api.progressPdfCompare.compare(
       file.value, lineCode.value, targetDate.value
     )
-    result.value = res.data
+    const data = res.data
+    data.mismatch.forEach(r => { r.selected = true })
+    result.value = data
   } catch (e) {
     error.value = e.response?.data?.detail || e.message
   } finally {
@@ -268,7 +342,13 @@ async function exportExcel() {
 }
 .controls button:disabled { background: #999; cursor: not-allowed; }
 .btn-excel { background: #2e7d32 !important; }
+.btn-adjust { background: #e65100 !important; }
+.chk { width: 28px; text-align: center; }
 .error-msg { color: #d32f2f; margin: 4px 0; font-size: 13px; }
+.adjust-notice {
+  margin: 4px 0; padding: 6px 10px; font-size: 13px; font-weight: 600;
+  background: #fff3e0; border: 1px solid #ffb74d; border-radius: 4px; color: #e65100;
+}
 
 .summary-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 3px; font-weight: 600; }

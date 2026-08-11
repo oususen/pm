@@ -1,4 +1,4 @@
-"""進度PDF突合API — PDFとDBの指定日進度を比較する（読み取り専用）"""
+"""進度PDF突合API — PDFとDBの指定日進度を比較し、差異を調整する"""
 import re
 from datetime import date
 from io import BytesIO
@@ -8,8 +8,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
 
-from masters.models import Line
+from masters.models import Line, Product, Process
 from .models_line_backlog import LineBacklog
+from .models_line_backlog_adjustment import LineBacklogAdjustment
 
 
 def _parse_progress_pdf(file_bytes):
@@ -236,3 +237,132 @@ class ProgressPdfCompareView(APIView):
             'pdf_only': pdf_only_list,
             'db_only': db_only_list,
         })
+
+
+class ProgressPdfAdjustView(APIView):
+    """突合せ不一致の差異分をLineBacklogAdjustment(PROGRESS)として一括登録"""
+
+    def _resolve_common(self, request):
+        line_code = (request.data.get('line_code') or '').strip()
+        target_date_str = (request.data.get('target_date') or '').strip()
+        items = request.data.get('items', [])
+
+        if not line_code or not target_date_str or not items:
+            return None, None, None, None, Response(
+                {'detail': 'line_code, target_date, items は必須です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        line = Line.objects.filter(line_code=line_code).first()
+        if not line:
+            return None, None, None, None, Response(
+                {'detail': f'ライン {line_code} が見つかりません'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            target_date = date.fromisoformat(target_date_str)
+        except ValueError:
+            return None, None, None, None, Response(
+                {'detail': '日付の形式が不正です'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resolved = []
+        errors = []
+        for item in items:
+            db_code = (item.get('db_code') or '').strip()
+            process_code = (item.get('process_code') or '').strip()
+            diff = item.get('diff')
+
+            if not db_code or diff is None:
+                continue
+
+            try:
+                diff = int(diff)
+            except (TypeError, ValueError):
+                errors.append(f'{db_code}: diff が不正です')
+                continue
+
+            if diff == 0:
+                continue
+
+            product = Product.objects.filter(product_code=db_code).first()
+            if not product:
+                errors.append(f'{db_code}: 品番が見つかりません')
+                continue
+
+            if not process_code:
+                errors.append(f'{db_code}: 工程コードが空です')
+                continue
+            process = Process.objects.filter(process_code=process_code).first()
+            if not process:
+                errors.append(f'{db_code}: 工程 {process_code} が見つかりません')
+                continue
+
+            resolved.append({'product': product, 'process': process, 'diff': diff})
+
+        if errors:
+            return None, None, None, None, Response(
+                {'detail': 'バリデーションエラー', 'errors': errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return line, target_date, resolved, errors, None
+
+    def put(self, request):
+        """登録前の事前チェック: 既存調整レコードの有無を返す"""
+        line, target_date, resolved, errors, err_resp = self._resolve_common(request)
+        if err_resp:
+            return err_resp
+
+        existing = []
+        for r in resolved:
+            adj = LineBacklogAdjustment.objects.filter(
+                line=line,
+                product=r['product'],
+                process=r['process'],
+                plan_date=target_date,
+                adjust_type='PROGRESS',
+            ).first()
+            if adj:
+                existing.append({
+                    'product_code': r['product'].product_code,
+                    'process_code': r['process'].process_code,
+                    'current_qty': adj.adjust_qty,
+                    'current_reason': adj.reason,
+                    'new_qty': r['diff'],
+                })
+
+        return Response({'existing_count': len(existing), 'existing': existing})
+
+    def post(self, request):
+        line, target_date, resolved, errors, err_resp = self._resolve_common(request)
+        if err_resp:
+            return err_resp
+
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+        from django.db import transaction
+        created = 0
+        updated = 0
+        with transaction.atomic():
+            for r in resolved:
+                _, is_created = LineBacklogAdjustment.objects.update_or_create(
+                    line=line,
+                    product=r['product'],
+                    process=r['process'],
+                    plan_date=target_date,
+                    adjust_type='PROGRESS',
+                    defaults={
+                        'adjust_qty': r['diff'],
+                        'reason': 'PDF突合せ調整',
+                        'updated_by': user,
+                    },
+                )
+                if is_created:
+                    created += 1
+                else:
+                    updated += 1
+
+        return Response({'created': created, 'updated': updated})
