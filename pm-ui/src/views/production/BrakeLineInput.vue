@@ -70,18 +70,18 @@
         <div class="section-title" style="margin-top:12px">印刷設定</div>
         <div class="print-setting-area">
           <label class="filter-item">
-            <span class="toggle-label">自動印刷（10.0.4.10）</span>
+            <span class="toggle-label">印刷有効</span>
             <input type="checkbox" v-model="printAutoEnabled" class="toggle-input" @change="savePrintSettings" />
             <span class="toggle-track" :class="{ on: printAutoEnabled }"></span>
           </label>
-          <div class="print-setting-hint">実績保存時に FUJIFILM Apeos C3571（10.0.4.10）へPDF送信します。EW-056A は別ボタンで印刷プレビューを開きます。画像保存は Luck Jingle 用に残しています。</div>
+          <div class="print-setting-hint">ON のときだけ印刷ボタンが使える。画像保存は Luck Jingle 用に残しています。</div>
           <div v-if="savedLabel" class="print-setting-status">
             保存済み: {{ savedLabel.fileName }} / {{ savedLabel.qty }}個 / {{ savedLabel.processDate }}
           </div>
           <div class="print-setting-actions">
             <button class="btn-luck-jingle" :disabled="!savedLabel" @click="saveSavedLabelImage">画像保存（Luck Jingle）</button>
-            <button class="btn-luck-jingle btn-luck-jingle-secondary" :disabled="!savedLabel" @click="printSavedLabelToFixedPrinter">Apeosへ印刷</button>
-            <button class="btn-luck-jingle btn-luck-jingle-secondary" :disabled="!savedLabel" @click="printSavedLabelToEwPrinter">EW-056A印刷（手動）</button>
+            <button class="btn-luck-jingle btn-luck-jingle-secondary" :disabled="!savedLabel || !printAutoEnabled" @click="printSavedLabelToFixedPrinter">Apeosへ印刷</button>
+            <button class="btn-luck-jingle btn-luck-jingle-secondary" :disabled="!savedLabel || !printAutoEnabled" @click="printSavedLabelToEwPrinter">EW-056A印刷（手動）</button>
           </div>
         </div>
 
@@ -1288,15 +1288,6 @@ async function save() {
       try {
         await saveLabelForLuckJingle(item, printQty)
         labelStatusMessage = ' / ラベル準備済み'
-        if (printAutoEnabled.value) {
-          const printed = await printSavedLabelToFixedPrinter()
-          if (printed) {
-            labelStatusMessage = ' / 固定IP印刷送信済み'
-          } else {
-            labelStatusMessage = ' / 固定IP印刷失敗'
-            labelStatusType = 'error'
-          }
-        }
       } catch {
         labelStatusMessage = ' / ラベル作成失敗'
         labelStatusType = 'error'
