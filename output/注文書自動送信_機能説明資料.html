@@ -667,7 +667,7 @@
           <tr>
             <td><strong>2-1</strong></td>
             <td>納入日<br>(N営業日後)</td>
-            <td>実行日から<a class="app-link" data-path="/masters/calendar">ダイソウカレンダ</a>の営業日をN日数えて<strong>最早納入日</strong>を算出。<br>例: 設定値5 → 実行日の5営業日後<br>※ N の値は<a class="app-link" data-path="/masters/product">品番マスタ</a>のLT設定に基づく</td>
+            <td>実行日から<a class="app-link" data-path="/masters/calendar">ダイソウカレンダ</a>の営業日をN日数えて<strong>最早納入日</strong>を算出。<br>例: 設定値5 → 実行日の5営業日後<br>※ N の値は<a class="app-link" data-path="/purchase/auto-order-send">自動送信設定</a>の納入日数に基づく</td>
             <td>—</td>
           </tr>
           <tr>
@@ -691,15 +691,17 @@
 
     <div class="formula-box">
       <span class="formula-label">具体例（納入日=5営業日後、パターン方式、月・水・金納入）</span>
-      実行日: 8/11(月) → 最早納入日: 8/18(月) → 納入パターン ✓<br>
-      次回納入日: 8/20(水) → カバー期間: 8/18～8/19（2日間）<br>
-      → この2日間の需要合計から必要数を計算
+      実行日: 8/6(木) → 5営業日後 最早納入日: 8/20(木) → 納入パターン ✗（月・水・金ではない）<br>
+      → 発信はしない<br>
+      翌日: 8/7(金) → 5営業日後 8/21(金) → 納入パターン ✓<br>
+      次回納入日: 8/24(月) なので → カバー期間: 8/21～8/21（1日間）<br>
+      → この1日間の需要合計から必要数を計算
     </div>
 
     <div class="callout warning">
       <strong>パターン方式 vs 仕入先カレンダ方式:</strong><br>
       <strong>パターン方式</strong>は納入パターンマスタに登録した「月・水・金」などの曜日パターンで判定します。ただし納入日判定がカレンダの休日に左右されやすく、発注漏れの可能性があるため、<strong>極力使わないでください。</strong><br>
-      <strong>仕入先カレンダ方式（推奨）</strong>は仕入先マスタに割当てたカレンダに設定した納入日をそのまま納入日として判定します。カレンダ設定画面で納入日を納入パターンに基づいて自動設定でき、手動での変更も可能なため、確実に納入日を計算できます。<strong>本機能では当方式を使用してください。</strong>
+      <strong>仕入先カレンダ方式（推奨）</strong>は仕入先マスタに割当てたカレンダに設定した納入日をそのまま納入日として判定します。<a class="app-link" data-path="/purchase/supplier-calendar">仕入先カレンダ設定画面</a>で納入日を納入パターンに基づいて自動設定でき、手動での変更も可能なため、確実に納入日を計算できます。<strong>本機能では当方式を使用してください。</strong>
     </div>
   </section>
 
@@ -728,7 +730,7 @@
   </section>
 
   <section class="section" id="config">
-    <h2 class="section-heading">設定項目の詳細</h2>
+    <h2 class="section-heading"><a class="app-link" data-path="/purchase/auto-order-send">設定項目の詳細</a></h2>
     <p>仕入先1社につき1件の設定を登録します。主な設定項目は以下のとおりです。</p>
     <div class="table-wrap">
       <table>
@@ -743,7 +745,7 @@
           </tr>
           <tr>
             <td><strong>納入日（N営業日後）</strong></td>
-            <td>実行日から何営業日後を納入日とするか</td>
+            <td>実行日から<a class="app-link" data-path="/masters/calendar">ダイソウカレンダ</a>の何営業日後を納入日とするか</td>
             <td>5営業日後</td>
           </tr>
           <tr>
@@ -753,17 +755,17 @@
           </tr>
           <tr>
             <td><strong>計算モード</strong></td>
-            <td>「需要そのまま」または「ロット丸め」<br>ロット丸めは品番マスタでロットの設定が必要</td>
+            <td>「需要そのまま」または「ロット丸め」<br>ロット丸めは<a class="app-link" data-path="/masters/product">品番マスタ</a>でロットの設定が必要</td>
             <td>ロット丸め</td>
           </tr>
           <tr>
             <td><strong>納入日判定方式</strong></td>
-            <td>「パターン」（納入パターンマスタ）<br>または「仕入先カレンダ」</td>
+            <td>「パターン」（納入パターンマスタ）<br>または「<a class="app-link" data-path="/purchase/supplier-calendar">仕入先カレンダ</a>」</td>
             <td>仕入先カレンダ</td>
           </tr>
           <tr>
             <td><strong>安全在庫</strong></td>
-            <td>ON/OFFと倍率。ONの場合、安全在庫数&times;倍率を必要数に加算。<br>安全在庫は自動タスクで自動計算できるが、設定および有効にする必要がある</td>
+            <td>ON/OFFと倍率。ONの場合、安全在庫数&times;倍率を必要数に加算。<br>安全在庫は<a class="app-link" data-path="/settings/scheduled-tasks?mode=safety-stock">自動タスク</a>で自動計算できるが、設定および有効にする必要がある</td>
             <td>ON / 1.5倍</td>
           </tr>
           <tr>
@@ -810,7 +812,7 @@
     </div>
 
     <h3>ロット丸め（LOT_ROUNDED モード）</h3>
-    <p>製品マスタの <code>order_lot_min</code>（最小納入数）と <code>order_lot_multiple</code>（納入倍数）を使います。</p>
+    <p><a class="app-link" data-path="/masters/product">品番マスタ</a>の <code>order_lot_min</code>（最小納入数）と <code>order_lot_multiple</code>（納入倍数）を使います。</p>
     <div class="formula-box">
       <span class="formula-label">ロット丸め計算</span>
       基準数量 = max(必要数, 最小納入数)<br>
@@ -869,10 +871,11 @@
   </section>
 
   <section class="section" id="truck">
-    <h2 class="section-heading">トラック積載判定</h2>
+    <h2 class="section-heading"><a class="app-link" data-path="/purchase/auto-order-send">トラック積載判定</a></h2>
     <p>
       発注した品目がトラックに収まるかを事前に確認する機能です。
-      トラックと納期を選択して実行すると、ビンパッキング算法で容器の配置をシミュレーションします。
+      トラックと納期を選択して実行すると、ビンパッキング算法で容器の配置をシミュレーションします。<br>
+      前提条件: <a class="app-link" data-path="/masters/supplier-truck">トラック設定</a>と<a class="app-link" data-path="/masters/container-capacity">容器設定</a>と<a class="app-link" data-path="/masters/product">品番マスタ</a>での使用容器・入り数設定が必要です。
     </p>
     <h3>判定結果の見方</h3>
     <div class="table-wrap">
@@ -1011,7 +1014,8 @@
       <strong>「LTを長くすれば欠品しない」は誤解です。</strong>
     </div>
     <p>
-      ここでのLTとは、<strong>購入品を使用日の何営業日前に納入してもらうか</strong>という設定です。
+      ここでのLTとは、<strong>購入品を使用日の何営業日前に納入してもらうか</strong>という設定です。<br>
+      ここでの使用日とは自由に設定するものではなく、<strong>完成品の出荷日から使用工程の総リードタイムを差し引いた日</strong>です。
     </p>
     <div class="formula-box">
       <span class="formula-label">LTの意味</span>
@@ -1019,7 +1023,7 @@
       LT = 3 → 使用日の3日前に納入 → 在庫保有は3日分
     </div>
     <p>
-      LTを長く設定しても欠品が防げるわけではありません。<strong>早く届くだけで、その分の在庫を使わないまま抱えることになります。</strong>仕損などが正しく反映されないと、いずれ余分に抱えた在庫が消化され、欠品が発生します。
+      LTを長く設定しても欠品が防げるわけではありません。<strong>逆に最初から欠品がはらんでいます。</strong>早く届くだけで、その分の在庫を使わないまま抱えることになります。仕損などが正しく反映されないと、いずれ余分に抱えた在庫が消化され、欠品が発生します。
     </p>
     <div class="table-wrap">
       <table>
@@ -1042,9 +1046,81 @@
         </tbody>
       </table>
     </div>
+    <h3>LTを長くすると何が起きるか</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>問題</th><th>内容</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>置き場の圧迫</strong></td>
+            <td>使わない在庫が早期に大量納入され、現場の保管スペースを圧迫する</td>
+          </tr>
+          <tr>
+            <td><strong>現場での進度調整</strong></td>
+            <td>溢れた在庫の置き場に困り、LTを伸ばすことによる在庫を抱えていることを忘れて、都合よく進度調整してしまう</td>
+          </tr>
+          <tr>
+            <td><strong>需要急減時の突然欠品</strong></td>
+            <td>需要が減少に転じた際、LT=5のため納入される数量は減少後の需要数分しか入荷しませんが、実際の使用数はまだ高需要期の数量です。入荷（少ない）と使用（多い）の差がだんだん大きくなり、欠品が発生します。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warning">
+      <strong>&#x1F4A1; 【具体例】LT=5 で現場が3日分調整後した場合のメカニズム</strong><br>
+      設定：日々の需要 23個 / LT = 5日
+    </div>
+    <div class="table-wrap" style="overflow-x:auto;">
+      <table style="font-size:0.85rem; min-width:700px;">
+        <thead>
+          <tr>
+            <th>日</th>
+            <th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th>
+            <th>10</th><th>11</th><th>12</th><th>13</th><th>14</th><th>15</th><th>16</th><th>17</th><th>18</th>
+            <th>19</th><th>20</th><th>21</th><th>22</th><th>23</th><th>24</th><th>25</th><th>26</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>需要</strong></td>
+            <td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td>
+            <td>22</td><td>21</td><td>20</td><td>19</td><td>18</td><td>17</td><td>16</td><td>15</td><td>14</td>
+            <td>13</td><td>12</td><td>11</td><td>10</td><td>9</td><td>8</td><td>7</td><td>6</td>
+          </tr>
+          <tr>
+            <td><strong>LT5時の在庫</strong></td>
+            <td>92</td><td>92</td><td>92</td><td>92</td><td>92</td><td>92</td><td>92</td><td>92</td><td>92</td>
+            <td>91</td><td>89</td><td>86</td><td>83</td><td>80</td><td>77</td><td>74</td><td>71</td><td>68</td>
+            <td>65</td><td>62</td><td>59</td><td>56</td><td>53</td><td>50</td><td>47</td><td>44</td>
+          </tr>
+          <tr>
+            <td><strong>3日分調整後</strong></td>
+            <td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td><td>23</td>
+            <td>22</td><td>20</td><td>17</td><td>14</td><td>11</td><td>8</td><td>5</td><td>2</td>
+            <td style="color:var(--danger); font-weight:bold;">-1</td>
+            <td style="color:var(--danger); font-weight:bold;">-4</td>
+            <td style="color:var(--danger); font-weight:bold;">-7</td>
+            <td style="color:var(--danger); font-weight:bold;">-10</td>
+            <td style="color:var(--danger); font-weight:bold;">-13</td>
+            <td style="color:var(--danger); font-weight:bold;">-16</td>
+            <td style="color:var(--danger); font-weight:bold;">-19</td>
+            <td style="color:var(--danger); font-weight:bold;">-22</td>
+            <td style="color:var(--danger); font-weight:bold;">-25</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p>
-      欠品の原因は仕損の未登録や需要変動であり、LTを長くしても解決しません。
+      <strong>LT=5のまま放置</strong>すると在庫92個が常に置き場に滞留します（2行目）。需要が減っても在庫は44個で欠品はしません。<br>
+      しかし<strong>現場が置き場を空けるために3日分の納入を止めるよう業務員に依頼</strong>すると（3行目）、18日目に在庫が<strong>-1個</strong>へ転落し欠品が発生します。
     </p>
+    <p>
+      &#x1F449; 「需要が減っているなら余るはず」という直感に反し、<strong>LT5日分の在庫によるスペース圧迫が現場の進度調整依頼を誘発し、需要減少期に突然欠品が発生します。</strong>
+    </p>
+
     <h3>正しいLTの設定方法</h3>
     <div class="table-wrap">
       <table>
@@ -1063,9 +1139,9 @@
             <td>基本+1。納入遅延・検品等の余裕を1日持たせる</td>
           </tr>
           <tr>
-            <td><strong>少量生産品のロット生産</strong></td>
+            <td><strong>少量生産品のロット生産に使用する購入品の場合</strong></td>
             <td>1 or 2 + ロットサイズ（日数）</td>
-            <td>ロットサイズを一定数ではなく日数分として加算する</td>
+            <td>ロットサイズは切りのいい一定数（10個等）ではなく、何日分の需要をまとめて加工するかで決まるため、その日数分を加算する。<br>例: 5日分サイズとしたら、LT = 1 + 5 = 6。<br>生産日（使用日）の前日に5日後の分を納入し、5日間のロット生産分をカバーする。<br>一定数にする場合、例: 10個とすると、生産日の5日後までの需要合計が7個の場合、3個分は購入品が納入されていないため生産不可能となる</td>
           </tr>
         </tbody>
       </table>

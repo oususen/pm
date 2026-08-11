@@ -511,10 +511,11 @@
                   <!-- PHOTO / PHOTO_NUMERIC -->
                   <template v-else-if="item.record_type === 'PHOTO' || item.record_type === 'PHOTO_NUMERIC'">
                     <div class="photo-input-row">
-                      <label class="photo-upload-btn" :class="{ disabled: !canEdit }">
-                        {{ modalResponses[item.id]?.photo_url ? '写真変更' : '写真撮影' }}
-                        <input type="file" accept="image/*" capture="environment" :disabled="!canEdit" @change="uploadCheckPhoto($event, item.id)" style="display:none" />
+                      <label v-if="!isNativeAndroidApp()" class="photo-upload-btn" :class="{ disabled: !canEdit || photoUploadingItemId === item.id }">
+                        {{ photoButtonLabel(item.id) }}
+                        <input type="file" accept="image/*" capture="environment" :disabled="!canEdit || photoUploadingItemId === item.id" @change="uploadCheckPhoto($event, item.id)" style="display:none" />
                       </label>
+                      <button v-else type="button" class="photo-upload-btn" :disabled="!canEdit || photoUploadingItemId === item.id" @click="captureCheckPhoto(item.id)">{{ photoButtonLabel(item.id) }}</button>
                       <div v-if="modalResponses[item.id]?.photo_url" class="photo-preview-mini">
                         <img :src="resolvePhotoUrl(modalResponses[item.id].photo_url)" alt="撮影写真" @click="previewPhoto(modalResponses[item.id].photo_url)" />
                       </div>
@@ -719,6 +720,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -1805,10 +1807,37 @@ const setText = (itemId, val) => {
   modalResponses.value[itemId].text_value = val
 }
 
-const uploadCheckPhoto = async (event, itemId) => {
-  const file = event.target.files?.[0]
-  event.target.value = ''
+const photoUploadingItemId = ref(null)
+
+const isNativeAndroidApp = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+
+const photoButtonLabel = (itemId) => {
+  if (photoUploadingItemId.value === itemId) return '写真送信中...'
+  return modalResponses.value[itemId]?.photo_url ? '写真変更' : '写真撮影'
+}
+
+const blobToUploadFile = (blob, fileName) => {
+  const mimeType = blob?.type || 'image/jpeg'
+  return new File([blob], fileName, { type: mimeType })
+}
+
+const cameraPhotoToFile = async (photo) => {
+  if (photo?.webPath) {
+    const response = await fetch(photo.webPath)
+    const blob = await response.blob()
+    return blobToUploadFile(blob, `integrated-check-${Date.now()}.jpg`)
+  }
+  if (photo?.dataUrl) {
+    const response = await fetch(photo.dataUrl)
+    const blob = await response.blob()
+    return blobToUploadFile(blob, `integrated-check-${Date.now()}.jpg`)
+  }
+  throw new Error('camera_photo_not_available')
+}
+
+const uploadCheckPhotoFile = async (file, itemId) => {
   if (!file) return
+  photoUploadingItemId.value = itemId
   const formData = new FormData()
   formData.append('file', file)
   try {
@@ -1817,6 +1846,46 @@ const uploadCheckPhoto = async (event, itemId) => {
       modalResponses.value[itemId] = { judgement: '', numeric_value: null, text_value: '', photo_url: '' }
     }
     modalResponses.value[itemId].photo_url = res.data.image_url
+  } finally {
+    photoUploadingItemId.value = null
+  }
+}
+
+const uploadCheckPhoto = async (event, itemId) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  try {
+    await uploadCheckPhotoFile(file, itemId)
+  } catch (err) {
+    console.error('写真アップロード失敗:', err)
+    alert('写真のアップロードに失敗しました。')
+  }
+}
+
+const isCameraCancelError = (err) => String(err?.message || '').includes('cancel')
+
+const captureCheckPhoto = async (itemId) => {
+  if (!canEdit.value || photoUploadingItemId.value === itemId) return
+  let file = null
+  try {
+    const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera')
+    const photo = await Camera.getPhoto({
+      source: CameraSource.Camera,
+      resultType: CameraResultType.Uri,
+      quality: 70,
+      correctOrientation: true,
+    })
+    file = await cameraPhotoToFile(photo)
+  } catch (err) {
+    if (isCameraCancelError(err)) return
+    console.error('ネイティブ写真撮影失敗:', err)
+    alert('写真の撮影に失敗しました。')
+    return
+  }
+
+  try {
+    await uploadCheckPhotoFile(file, itemId)
   } catch (err) {
     console.error('写真アップロード失敗:', err)
     alert('写真のアップロードに失敗しました。')

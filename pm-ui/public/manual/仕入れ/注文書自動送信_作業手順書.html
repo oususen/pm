@@ -258,6 +258,9 @@
     <ul class="toc-list">
       <li><span class="tn">1</span>画面を開く</li>
       <li><span class="tn">2</span>新規設定を作成する</li>
+      <li><span class="tn">&#9670;</span>納入日決定のしくみ</li>
+      <li><span class="tn">&#9670;</span>数量計算のしくみ</li>
+      <li><span class="tn">!</span>LT設定の注意</li>
       <li><span class="tn">3</span>テスト送信で確認する</li>
       <li><span class="tn">4</span>送信結果を確認する</li>
       <li><span class="tn">5</span>トラック積載を判定する</li>
@@ -485,14 +488,110 @@
     <div class="overview-section" style="margin-top:20px;padding-top:16px;">
       <h3>設定項目の詳細</h3>
       <div class="legend-grid">
-        <div class="legend-item"><span class="li-label">計算モード</span><span class="li-desc">「需要そのまま」は差分をそのまま発注。「ロット丸め」は製品マスタのロット設定で丸めて発注</span></div>
-        <div class="legend-item"><span class="li-label">納入日判定</span><span class="li-desc">「パターン」は納入パターンマスタ、「仕入先カレンダ」は仕入先に割当てたカレンダで納入日を決定</span></div>
-        <div class="legend-item"><span class="li-label">安全在庫</span><span class="li-desc">ONにすると、在庫引当マスタの最低在庫数 × 倍率が必要数に加算される</span></div>
+        <div class="legend-item"><span class="li-label">計算モード</span><span class="li-desc">「需要そのまま」は差分をそのまま発注。「ロット丸め」は<a href="/masters/product">品番マスタ</a>のロット設定（最小納入数・納入倍数）で丸めて発注</span></div>
+        <div class="legend-item"><span class="li-label">納入日判定</span><span class="li-desc"><strong><a href="/purchase/supplier-calendar">仕入先カレンダ</a>方式を使用してください。</strong>パターン方式はカレンダの休日に左右されやすく、発注漏れのリスクがあります</span></div>
+        <div class="legend-item"><span class="li-label">安全在庫</span><span class="li-desc">ONにすると、安全在庫数 × 倍率が必要数に加算される。安全在庫は<a href="/settings/scheduled-tasks?mode=safety-stock">定時タスク</a>で自動計算できるが、設定および有効にする必要がある</span></div>
         <div class="legend-item"><span class="li-label">有効</span><span class="li-desc">OFFにすると自動送信を一時停止。設定は保持される</span></div>
         <div class="legend-item"><span class="li-label">返信先 / CC</span><span class="li-desc">連絡先マスタから選択。返信先は1件、CCは複数件追加可</span></div>
         <div class="legend-item"><span class="li-label">通知先</span><span class="li-desc">失敗時・非納入日の社内通知先ユーザー。複数人設定可</span></div>
       </div>
     </div>
+  </div>
+
+  <!-- ===== 納入日決定のしくみ ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-title" style="font-size:18px;">納入日決定のしくみ（3段階）</div>
+    </div>
+    <div class="step-desc">
+      納入日は以下の3段階で決定されます。条件を満たさない場合はその日はスキップ（SKIPPED）されます。
+    </div>
+    <div style="display:flex;gap:0;align-items:stretch;flex-wrap:wrap;margin-bottom:16px;">
+      <div style="flex:1;min-width:100px;background:var(--col-bg);border:1px solid var(--grid-line);border-radius:6px;padding:10px;text-align:center;">
+        <div style="font-size:11px;font-weight:700;color:var(--step-color);">2-1</div>
+        <div style="font-size:13px;font-weight:600;">最早納入日の算出</div>
+        <div style="font-size:11px;color:var(--ink2);">実行日 + 設定日数（N営業日後）</div>
+      </div>
+      <div style="display:flex;align-items:center;padding:0 4px;font-size:18px;color:var(--ink2);">&#9656;</div>
+      <div style="flex:1;min-width:100px;background:var(--col-bg);border:1px solid var(--grid-line);border-radius:6px;padding:10px;text-align:center;">
+        <div style="font-size:11px;font-weight:700;color:var(--step-color);">2-2</div>
+        <div style="font-size:13px;font-weight:600;">納入日判定</div>
+        <div style="font-size:11px;color:var(--ink2);"><a href="/purchase/supplier-calendar">仕入先カレンダ</a>で確認</div>
+      </div>
+      <div style="display:flex;align-items:center;padding:0 4px;font-size:18px;color:var(--ink2);">&#9656;</div>
+      <div style="flex:1;min-width:100px;background:var(--col-bg);border:1px solid var(--grid-line);border-radius:6px;padding:10px;text-align:center;">
+        <div style="font-size:11px;font-weight:700;color:var(--step-color);">2-3</div>
+        <div style="font-size:13px;font-weight:600;">カバー期間の算出</div>
+        <div style="font-size:11px;color:var(--ink2);">今回納入日～次回納入日前日</div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>仕入先カレンダ方式を使用してください。</strong>パターン方式はカレンダの休日に左右されやすく、発注漏れのリスクがあります。<a href="/purchase/supplier-calendar">仕入先カレンダ設定画面</a>で納入日を自動設定でき、手動変更も可能です。</span>
+    </div>
+  </div>
+
+  <!-- ===== 数量計算のしくみ ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-title" style="font-size:18px;">数量計算のしくみ</div>
+    </div>
+    <div class="step-desc">
+      在庫ではなく<strong>計画進度（計進）</strong>を基準に必要数を計算します。
+    </div>
+    <div style="background:var(--col-bg);border:1px solid var(--grid-line);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:12px;font-family:monospace;font-size:13px;line-height:1.8;">
+      <div style="font-size:10px;font-weight:700;color:var(--ink2);letter-spacing:.06em;margin-bottom:4px;">必要数の算出</div>
+      必要数 = カバー期間の需要合計 &minus; 納入日前日の計進 + 安全在庫（ONの場合）&times; 倍数
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>必要数 &le; 0 の場合、その品目は今回不要と判断し、計画を保存しません。</span>
+    </div>
+
+    <div class="overview-section" style="margin-top:12px;padding-top:12px;">
+      <h3>ロット丸め（<a href="/masters/product">品番マスタ</a>の設定が必要）</h3>
+      <div style="background:var(--col-bg);border:1px solid var(--grid-line);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:12px 16px;margin-bottom:8px;font-family:monospace;font-size:13px;line-height:1.8;">
+        <div style="font-size:10px;font-weight:700;color:var(--ink2);letter-spacing:.06em;margin-bottom:4px;">ロット丸め計算</div>
+        基準数量 = max(必要数, 最小納入数)<br>
+        発注数量 = ceil(基準数量 &divide; 納入倍数) &times; 納入倍数
+      </div>
+      <div style="background:var(--col-bg);border:1px solid var(--grid-line);border-left:3px solid var(--step-color);border-radius:0 6px 6px 0;padding:10px 16px;margin-bottom:8px;font-family:monospace;font-size:12px;line-height:1.8;">
+        <div style="font-size:10px;font-weight:700;color:var(--ink2);margin-bottom:2px;">例: 必要数 = 130、最小納入数 = 100、納入倍数 = 50</div>
+        基準数量 = max(130, 100) = 130<br>
+        発注数量 = ceil(130 &divide; 50) &times; 50 = 3 &times; 50 = <strong>150</strong>
+      </div>
+      <div style="background:var(--col-bg);border:1px solid var(--grid-line);border-left:3px solid var(--step-color);border-radius:0 6px 6px 0;padding:10px 16px;margin-bottom:8px;font-family:monospace;font-size:12px;line-height:1.8;">
+        <div style="font-size:10px;font-weight:700;color:var(--ink2);margin-bottom:2px;">例: 必要数 = 40、最小納入数 = 100、納入倍数 = 50</div>
+        基準数量 = max(40, 100) = 100（最小納入数に引き上げ）<br>
+        発注数量 = ceil(100 &divide; 50) &times; 50 = 2 &times; 50 = <strong>100</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LT設定の注意 ===== -->
+  <div class="note" style="border-left-color:var(--danger);">
+    <h2 style="color:var(--danger);">&#9888; LT（納入日数）設定の注意</h2>
+    <p style="font-size:14px;color:var(--ink);margin-bottom:8px;">
+      <strong>「LTを長くすれば欠品しない」は誤解です。</strong><br>
+      ここでのLTとは、<strong>購入品を使用日の何営業日前に納入してもらうか</strong>という設定です。<br>
+      使用日とは自由に設定するものではなく、完成品の出荷日から使用工程の総リードタイムを差し引いた日です。
+    </p>
+    <table class="mock-table" style="margin:8px 0 12px;">
+      <thead>
+        <tr><th>LT</th><th>納入タイミング</th><th>実態</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>1</strong></td><td>使用日の前日</td><td>必要なタイミングで届く。在庫最小（基本）</td></tr>
+        <tr><td><strong>5</strong></td><td>使用日の5日前</td><td>5日間使わない在庫を保有。スペース圧迫・コスト増</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>LTを長く設定しても欠品は防げません。<strong>逆に最初から欠品がはらんでいます。</strong>早く届くだけで、在庫を使わないまま抱えることになります</li>
+      <li><strong>置き場圧迫 → 現場が納入停止を依頼 → 需要減少期に突然欠品</strong>という悪循環が発生します</li>
+      <li><strong>正しい設定:</strong> 基本はLT=1。イレギュラー対応で+1。ロット生産品はロットサイズ（日数分）を加算</li>
+    </ul>
   </div>
 
   <!-- ===== STEP 3 ===== -->
@@ -606,7 +705,8 @@
       <div class="step-title">トラック積載を判定する</div>
     </div>
     <div class="step-desc">
-      <strong>「トラック積載判定」</strong>タブで、注文品がトラックに収まるか事前確認できます。
+      <strong>「トラック積載判定」</strong>タブで、注文品がトラックに収まるか事前確認できます。<br>
+      前提条件: <a href="/masters/supplier-truck">トラック設定</a>・<a href="/masters/container-capacity">容器設定</a>・<a href="/masters/product">品番マスタ</a>での使用容器と入り数の設定が必要です。
     </div>
 
     <!-- モック: トラック判定 -->
@@ -648,11 +748,11 @@
       <li><strong>実際のメール送信:</strong> 「今すぐ実行」「休日トライ」はどちらも実際にメールが送信されます。テスト時は宛先に注意してください。</li>
       <li><strong>計画への影響:</strong> 本機能は LineBacklog (sequence_no=1) に計画数量を保存します。実行後に進度が自動再計算されるため、在庫計画にも影響します。</li>
       <li><strong>二重実行防止:</strong> 同じ仕入先が実行中の場合、再実行はブロックされます。30分以上 RUNNING のままの場合は自動的に FAILED に変更されます。</li>
-      <li><strong>休日スキップ:</strong> ダイソウカレンダで休日の場合、通常実行と「今すぐ実行」はスキップされます。休日に動作確認するには「休日トライ」を使ってください。</li>
+      <li><strong>休日スキップ:</strong> <a href="/masters/calendar">ダイソウカレンダ</a>で休日の場合、通常実行と「今すぐ実行」はスキップされます。休日に動作確認するには「休日トライ」を使ってください。</li>
       <li><strong>空送信なし:</strong> 添付ファイルがすべて空の場合、メールは送信されません（ステータスは SUCCESS）。</li>
       <li><strong>数量不一致:</strong> ロット丸めモードの場合、注文書Excelの「数量」列と「日別内訳」列の合計が一致しないことがあります。正常な動作です。</li>
       <li><strong>既存機能との独立性:</strong> 「自動納入リスト送信」とは別機能です。両方を同じ仕入先に設定しても互いに影響しません。</li>
-      <li><strong>連絡先マスタ:</strong> 返信先・CCのメールアドレスは連絡先マスタから選択します。新しいアドレスが必要な場合は先にマスタに登録してください。</li>
+      <li><strong>連絡先マスタ:</strong> 返信先・CCのメールアドレスは<a href="/masters/contact">連絡先マスタ</a>から選択します。新しいアドレスが必要な場合は先にマスタに登録してください。</li>
     </ul>
   </div>
 
