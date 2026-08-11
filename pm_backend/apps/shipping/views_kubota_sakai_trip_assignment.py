@@ -2092,6 +2092,28 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
                 default='1',
             )
 
+        def sort_due_ids_for_auto_assign(preview_date, due_ids):
+            def sort_key(due_adjustment_id):
+                due_adjustment = due_adjustment_map.get(due_adjustment_id)
+                if not due_adjustment:
+                    return (999, 0, 0, 999999999)
+                due_candidate_trucks = candidate_trucks_for_due(due_adjustment)
+                candidate_count = len(due_candidate_trucks)
+                default_container_id = default_container_by_due.get(due_adjustment_id)
+                capacity = resolve_allocation_capacity(due_adjustment, default_container_id)
+                if capacity <= 0:
+                    capacity = Decimal('1')
+                total_qty = _to_decimal(due_adjustment.delivery_qty)
+                container_count = (total_qty / capacity).to_integral_value(rounding=ROUND_CEILING) if total_qty > 0 else Decimal('0')
+                return (
+                    candidate_count if candidate_count > 0 else 999,
+                    -int(container_count),
+                    -_to_int_qty(total_qty),
+                    int(due_adjustment_id),
+                )
+
+            return sorted(due_ids, key=sort_key)
+
         def find_max_fittable_qty(truck, due_adjustment, group_key, max_qty, container_id):
             high = _to_int_qty(max_qty)
             if high <= 0:
@@ -2151,7 +2173,10 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         for preview_date in sorted(posted_alloc_maps.keys()):
             if preview_date < start_date or preview_date > end_date:
                 continue
-            due_ids = ordered_due_ids_by_date.get(preview_date, [])
+            due_ids = sort_due_ids_for_auto_assign(
+                preview_date,
+                ordered_due_ids_by_date.get(preview_date, []),
+            )
             for due_adjustment_id in due_ids:
                 due_adjustment = due_adjustment_map.get(due_adjustment_id)
                 if not due_adjustment:
