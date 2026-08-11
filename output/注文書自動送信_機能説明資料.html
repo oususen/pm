@@ -1161,7 +1161,7 @@ document.querySelectorAll('.app-link').forEach(function(a) {
   a.style.cursor = 'pointer';
   a.addEventListener('click', function() {
     var base = location.protocol === 'file:'
-      ? prompt('PMサーバーのURL（例: https://localhost:8501）', 'https://localhost:8501')
+      ? prompt('PMサーバーのURL（例: https://localhost:8501）',"https://10.0.1.232:8501") 
       : location.origin;
     if (base) window.open(base + a.dataset.path, '_blank');
   });

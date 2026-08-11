@@ -70,15 +70,19 @@
         <div class="section-title" style="margin-top:12px">印刷設定</div>
         <div class="print-setting-area">
           <label class="filter-item">
-            <span class="toggle-label">自動印刷</span>
+            <span class="toggle-label">自動印刷（10.0.4.10）</span>
             <input type="checkbox" v-model="printAutoEnabled" class="toggle-input" @change="savePrintSettings" />
             <span class="toggle-track" :class="{ on: printAutoEnabled }"></span>
           </label>
-          <div class="print-setting-hint">実績保存時にLuck Jingle用ラベルを保存します</div>
+          <div class="print-setting-hint">実績保存時に FUJIFILM Apeos C3571（10.0.4.10）へPDF送信します。EW-056A は別ボタンで印刷プレビューを開きます。画像保存は Luck Jingle 用に残しています。</div>
           <div v-if="savedLabel" class="print-setting-status">
-            保存済み: {{ savedLabel.productCode }} / {{ savedLabel.qty }}個 / {{ savedLabel.processDate }}
+            保存済み: {{ savedLabel.fileName }} / {{ savedLabel.qty }}個 / {{ savedLabel.processDate }}
           </div>
-          <button class="btn-luck-jingle" :disabled="!savedLabel" @click="printSavedLabel">印刷（Luck Jingle）</button>
+          <div class="print-setting-actions">
+            <button class="btn-luck-jingle" :disabled="!savedLabel" @click="saveSavedLabelImage">画像保存（Luck Jingle）</button>
+            <button class="btn-luck-jingle btn-luck-jingle-secondary" :disabled="!savedLabel" @click="printSavedLabelToFixedPrinter">Apeosへ印刷</button>
+            <button class="btn-luck-jingle btn-luck-jingle-secondary" :disabled="!savedLabel" @click="printSavedLabelToEwPrinter">EW-056A印刷（手動）</button>
+          </div>
         </div>
 
         <!-- 新規追加ボタン -->
@@ -449,7 +453,14 @@ import { authState } from '@/auth'
 import { t } from '@/i18n'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import BrakeKnowledgePanel from '@/components/production/BrakeKnowledgePanel.vue'
-import { buildLuckJingleLabelDataUrl, createLuckJingleFileName, openLuckJinglePreview, shareLuckJingleLabel } from '@/utils/luckJingleLabel'
+import {
+  buildLuckJinglePdfBase64,
+  buildLuckJingleLabelDataUrl,
+  createLuckJingleFileName,
+  createLuckJinglePdfFileName,
+  downloadLuckJingleLabel,
+  openLuckJinglePreview,
+} from '@/utils/luckJingleLabel'
 
 const dsSources = [
   { op: '取得/保存', table: 'brake_line_record', desc: 'ブレーキライン実績記録（品番・数量・設備・時刻）' },
@@ -848,28 +859,88 @@ async function saveLabelForLuckJingle(item, qty) {
   return payload
 }
 
-async function printSavedLabel() {
+async function saveSavedLabelImage() {
   if (!savedLabel.value?.imageDataUrl) {
     showToast('保存済みラベルがありません', 'error')
     return
   }
 
   try {
-    const shared = await shareLuckJingleLabel(savedLabel.value)
-    if (!shared) {
-      const opened = openLuckJinglePreview(savedLabel.value)
-      if (!opened) {
-        showToast('Luck Jingle用ラベルを開けませんでした', 'error')
-      }
-    }
-  } catch (error) {
-    if (error?.name === 'AbortError') {
+    const downloaded = downloadLuckJingleLabel(savedLabel.value)
+    if (downloaded) {
+      showToast('Luck Jingle用ラベルを保存しました', 'success')
       return
     }
+
     const opened = openLuckJinglePreview(savedLabel.value)
     if (!opened) {
       showToast('Luck Jingle用ラベルを開けませんでした', 'error')
     }
+  } catch {
+    const opened = openLuckJinglePreview(savedLabel.value)
+    if (!opened) {
+      showToast('Luck Jingle用ラベルを開けませんでした', 'error')
+    }
+  }
+}
+
+async function printSavedLabelToFixedPrinter() {
+  return await printSavedLabelToSelectedPrinter({
+    printerKey: 'apeos_c3571',
+    successMessage: 'Apeosへ送信しました',
+    fallbackErrorMessage: 'Apeos印刷に失敗しました',
+  })
+}
+
+async function printSavedLabelToEwPrinter() {
+  if (!savedLabel.value?.imageDataUrl) {
+    showToast('保存済みラベルがありません', 'error')
+    return false
+  }
+
+  try {
+    const opened = openLuckJinglePreview({
+      ...savedLabel.value,
+      title: 'EW-056A印刷用ラベル',
+      description: '印刷画面から EW-056A を選んで印刷してください。',
+    })
+    if (!opened) {
+      showToast('EW-056A用の印刷画面を開けませんでした', 'error')
+      return false
+    }
+    showToast('EW-056A用の印刷画面を開きました', 'success')
+    return true
+  } catch {
+    showToast('EW-056A用の印刷画面を開けませんでした', 'error')
+    return false
+  }
+}
+
+async function printSavedLabelToSelectedPrinter({
+  printerKey,
+  successMessage,
+  fallbackErrorMessage,
+}) {
+  if (!savedLabel.value?.imageDataUrl) {
+    showToast('保存済みラベルがありません', 'error')
+    return false
+  }
+
+  try {
+    const pdfBase64 = await buildLuckJinglePdfBase64({
+      imageDataUrl: savedLabel.value.imageDataUrl,
+    })
+    await api.brakeLineActuals.printLabel({
+      pdf_base64: pdfBase64,
+      file_name: createLuckJinglePdfFileName(savedLabel.value.fileName),
+      context: 'HOME',
+      printer_key: printerKey,
+    })
+    showToast(successMessage, 'success')
+    return true
+  } catch (error) {
+    showToast(resolveApiErrorMessage(error, fallbackErrorMessage), 'error')
+    return false
   }
 }
 
@@ -1213,12 +1284,21 @@ async function save() {
     const printQty = Number(inputQty.value || 0)
     let labelStatusMessage = ''
     let labelStatusType = 'success'
-    if (printAutoEnabled.value && shouldPrintByAction && printQty > 0) {
+    if (shouldPrintByAction && printQty > 0) {
       try {
         await saveLabelForLuckJingle(item, printQty)
-        labelStatusMessage = ' / ラベル保存済み'
+        labelStatusMessage = ' / ラベル準備済み'
+        if (printAutoEnabled.value) {
+          const printed = await printSavedLabelToFixedPrinter()
+          if (printed) {
+            labelStatusMessage = ' / 固定IP印刷送信済み'
+          } else {
+            labelStatusMessage = ' / 固定IP印刷失敗'
+            labelStatusType = 'error'
+          }
+        }
       } catch {
-        labelStatusMessage = ' / ラベル保存失敗'
+        labelStatusMessage = ' / ラベル作成失敗'
         labelStatusType = 'error'
       }
     }
@@ -1752,6 +1832,10 @@ function showToast(message, type = 'success') {
   line-height: 1.5;
   color: #2f7d61;
 }
+.print-setting-actions {
+  display: grid;
+  gap: 6px;
+}
 .btn-luck-jingle {
   width: 100%;
   height: 30px;
@@ -1768,6 +1852,11 @@ function showToast(message, type = 'success') {
   background: #f4f6f5;
   color: #9aa5a0;
   cursor: default;
+}
+.btn-luck-jingle-secondary {
+  border-color: #4e7cbf;
+  background: #f0f4ff;
+  color: #4e7cbf;
 }
 
 .add-btn-area { padding: 8px 12px; }

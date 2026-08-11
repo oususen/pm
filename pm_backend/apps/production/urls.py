@@ -47,7 +47,7 @@ from production.views import (
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet, LineLoadViewSet
-from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
+from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineLabelPrintProxyView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
 from production.views_line_product_display_order import LineProductDisplayOrderViewSet
@@ -131,6 +131,7 @@ urlpatterns = [
     path('brake-line-products/', BrakeLineProductsView.as_view(), name='brake-line-products'),
     path('brake-line-equipments/', BrakeLineEquipmentsView.as_view(), name='brake-line-equipments'),
     path('brake-line-actual/add/', BrakeLineActualAddView.as_view(), name='brake-line-actual-add'),
+    path('brake-line-label-print/', BrakeLineLabelPrintProxyView.as_view(), name='brake-line-label-print'),
     path('brake-line-record/', BrakeLineRecordView.as_view(), name='brake-line-record'),
     path('brake-line-sessions/', BrakeLineSessionView.as_view(), name='brake-line-sessions'),
     path('brake-line-sessions/<int:session_id>/', BrakeLineSessionDetailView.as_view(), name='brake-line-session-detail'),

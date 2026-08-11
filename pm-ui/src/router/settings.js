@@ -161,7 +161,7 @@ const settings = [
     path: "/settings/android-app",
     name: "AndroidAppDownload",
     component: () => import("@/views/settings/AndroidAppDownload.vue"),
-    meta: { pageTitle: "Androidアプリ配布", resource: "settings" },
+    meta: { pageTitle: "Androidアプリ配布", resource: "settings.android_app" },
   },
 ];
 

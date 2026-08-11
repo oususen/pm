@@ -4,11 +4,14 @@
 - BrakeLineActualAddView: 実績累積加算（後方互換用）
 - BrakeLineRecordView: 作業記録（開始/終了/中断/再開/一時終了）
 """
+import base64
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from itertools import groupby
 import logging
+import socket
 
+import requests
 from django.db import transaction
 from django.db.models import F, Q, Sum
 from django.utils import timezone
@@ -648,6 +651,112 @@ class BrakeLineActualAddView(APIView):
             pass
 
         return Response(response_data)
+
+
+class BrakeLineLabelPrintProxyView(APIView):
+    """
+    ブレーキラインラベル固定IP印刷
+    POST /api/production/brake-line-label-print/
+
+    payload: {
+        pdf_base64,
+        file_name,
+        context,  # 任意
+    }
+    """
+
+    DEFAULT_CONTEXT = 'HOME'
+    REQUEST_TIMEOUT = 20
+    PRINTER_CONFIGS = {
+        'apeos_c3571': {
+            'mode': 'fuji_upload',
+            'label': 'FUJIFILM Apeos C3571',
+            'url': 'http://10.0.4.10/home/api/uploadfile-print?methodName=POST',
+        },
+        'epson_ew056a': {
+            'mode': 'socket_9100',
+            'label': 'EPSON EW-056A',
+            'host': '10.0.1.37',
+            'port': 9100,
+        },
+    }
+
+    def post(self, request):
+        pdf_base64 = str(request.data.get('pdf_base64') or '').strip()
+        file_name = str(request.data.get('file_name') or 'luck-jingle-label.pdf').strip() or 'luck-jingle-label.pdf'
+        context = str(request.data.get('context') or self.DEFAULT_CONTEXT).strip() or self.DEFAULT_CONTEXT
+        printer_key = str(request.data.get('printer_key') or 'apeos_c3571').strip() or 'apeos_c3571'
+        printer_config = self.PRINTER_CONFIGS.get(printer_key)
+
+        if not pdf_base64:
+            return Response({'detail': 'pdf_base64 は必須です'}, status=400)
+        if not printer_config:
+            return Response({'detail': 'printer_key が不正です'}, status=400)
+
+        try:
+            pdf_bytes = base64.b64decode(pdf_base64, validate=True)
+        except (ValueError, TypeError):
+            return Response({'detail': 'pdf_base64 の形式が不正です'}, status=400)
+
+        if not pdf_bytes:
+            return Response({'detail': 'PDF データが空です'}, status=400)
+
+        try:
+            if printer_config['mode'] == 'fuji_upload':
+                response = requests.post(
+                    printer_config['url'],
+                    files={'File': (file_name, pdf_bytes, 'application/pdf')},
+                    data={'Context': context},
+                    timeout=self.REQUEST_TIMEOUT,
+                )
+                try:
+                    printer_result = response.json()
+                except ValueError:
+                    printer_result = {'raw': response.text[:500]}
+
+                if not response.ok:
+                    logger.warning(
+                        '固定IPプリンター応答エラー printer=%s status=%s body=%s',
+                        printer_key,
+                        response.status_code,
+                        str(printer_result)[:500],
+                    )
+                    return Response(
+                        {
+                            'detail': '固定IPプリンターが印刷を受け付けませんでした',
+                            'printer_status': response.status_code,
+                            'printer_result': printer_result,
+                        },
+                        status=502,
+                    )
+            elif printer_config['mode'] == 'socket_9100':
+                with socket.create_connection(
+                    (printer_config['host'], int(printer_config['port'])),
+                    timeout=self.REQUEST_TIMEOUT,
+                ) as sock:
+                    sock.sendall(pdf_bytes)
+                printer_result = {
+                    'result': 'SENT',
+                    'transport': '9100',
+                    'host': printer_config['host'],
+                    'port': printer_config['port'],
+                }
+            else:
+                return Response({'detail': 'printer_key の設定が不正です'}, status=500)
+        except (requests.RequestException, OSError):
+            logger.exception(
+                '固定IPプリンター送信に失敗しました。 printer=%s file_name=%s',
+                printer_key,
+                file_name,
+            )
+            return Response({'detail': '固定IPプリンターへ接続できませんでした'}, status=502)
+
+        return Response({
+            'detail': '固定IPプリンターへ送信しました',
+            'printer_key': printer_key,
+            'printer_name': printer_config['label'],
+            'printer_result': printer_result,
+        })
 
 
 class BrakeLineRecordView(APIView):

@@ -56,7 +56,7 @@
           </div>
         </form>
 
-        <div class="link-section">
+        <div v-if="canViewAndroidApp" class="link-section">
           <h3 class="section-title">アプリ</h3>
           <router-link to="/settings/android-app" class="link-item">📱 Androidアプリ ダウンロード</router-link>
         </div>
@@ -129,6 +129,7 @@ const canAccessByResource = (resource, level = 'view') => {
 
 const canView = computed(() => canAccessByResource('settings.profile', 'view'))
 const canEdit = computed(() => canAccessByResource('settings.profile', 'edit'))
+const canViewAndroidApp = computed(() => canAccessByResource('settings.android_app', 'view'))
 
 const loadProfile = async () => {
   if (!canView.value) return
@@ -373,4 +374,3 @@ onMounted(() => {
   padding: 6px 10px;
 }
 </style>
-

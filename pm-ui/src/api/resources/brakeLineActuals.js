@@ -29,6 +29,10 @@ export const createBrakeLineActualsAPI = (client) => ({
   addActual(payload) {
     return client.post('/brake-line-actual/add/', payload)
   },
+  /** 固定IPプリンターへラベル送信 POST /brake-line-label-print/ */
+  printLabel(payload) {
+    return client.post('/brake-line-label-print/', payload)
+  },
   /** 生産実績照会用セッション一覧 GET /brake-line-sessions/ */
   getSessions(params) {
     return client.get('/brake-line-sessions/', { params: params || {} })
