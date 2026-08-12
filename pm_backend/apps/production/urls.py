@@ -54,7 +54,7 @@ from production.views_line_product_display_order import LineProductDisplayOrderV
 from production.views_plan_deviation_report import PlanDeviationReportView, PlanDeviationLineConfigView
 from production.views_progress_compare import ProgressPdfCompareView, ProgressPdfAdjustView
 from production.views_record_confirmation import ProductionRecordConfirmationView
-from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeLayoutConfigView, StocktakeAreaView, StocktakeSlipPDFView
+from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeCounterView, StocktakeLayoutConfigView, StocktakeAreaView, StocktakeSlipPDFView
 from production.views_morning_meeting import MorningMeetingViewSet
 from production.views_camera_actual import (
     CameraAutoDetectView,
@@ -154,6 +154,7 @@ urlpatterns = [
     path('stocktake-records/', StocktakeRecordView.as_view(), name='stocktake-records'),
     path('stocktake-records/<int:product_id>/history/', StocktakeHistoryView.as_view(), name='stocktake-history'),
     path('stocktake-recorders/', StocktakeRecorderView.as_view(), name='stocktake-recorders'),
+    path('stocktake-counters/', StocktakeCounterView.as_view(), name='stocktake-counters'),
     path('stocktake-layout-config/', StocktakeLayoutConfigView.as_view(), name='stocktake-layout-config'),
     path('stocktake-areas/', StocktakeAreaView.as_view(), name='stocktake-areas'),
     path('stocktake-slip-pdf/', StocktakeSlipPDFView.as_view(), name='stocktake-slip-pdf'),

@@ -156,7 +156,7 @@
 
       <div class="detail-grid two">
         <label class="detail-field">
-          <span>記入者</span>
+          <span>入力者</span>
           <select v-model="selectedRecorder" class="recorder-select">
             <option value="">選択</option>
             <option v-for="r in recorders" :key="r.id" :value="r.name">{{ r.name }}</option>
@@ -166,30 +166,31 @@
           <span>カウンター</span>
           <select v-model="selectedCounter" class="recorder-select">
             <option value="">選択</option>
-            <option v-for="r in recorders" :key="'c'+r.id" :value="r.name">{{ r.name }}</option>
+            <option v-for="c in counters" :key="'c'+c.id" :value="c.name">{{ c.name }}</option>
           </select>
         </label>
       </div>
-      <label class="detail-field">
-        <span>数量</span>
-        <input
-          :value="editValues[selectedRow.product_id]"
-          type="number"
-          step="1"
-          inputmode="numeric"
-          @input="onActualInput(selectedRow.product_id, $event)"
-        />
-      </label>
-
-      <label class="detail-field detail-note">
-        <span>備考</span>
-        <input
-          :value="noteValues[selectedRow.product_id]"
-          type="text"
-          placeholder="備考"
-          @input="onNoteInput(selectedRow.product_id, $event)"
-        />
-      </label>
+      <div class="detail-grid two">
+        <label class="detail-field">
+          <span>数量</span>
+          <input
+            :value="editValues[selectedRow.product_id]"
+            type="number"
+            step="1"
+            inputmode="numeric"
+            @input="onActualInput(selectedRow.product_id, $event)"
+          />
+        </label>
+        <label class="detail-field">
+          <span>備考</span>
+          <input
+            :value="noteValues[selectedRow.product_id]"
+            type="text"
+            placeholder="備考"
+            @input="onNoteInput(selectedRow.product_id, $event)"
+          />
+        </label>
+      </div>
 
       <div class="detail-photo-label">写真</div>
       <div class="detail-photo">
@@ -216,7 +217,7 @@
         <div v-for="item in historyItems" :key="item.id" class="history-item">
           <div class="history-qty">{{ item.actual_stock_qty }}</div>
           <div class="history-meta">
-            <div>記入: {{ item.recorder_name || item.updated_by_name || '-' }}</div>
+            <div>入力: {{ item.recorder_name || item.updated_by_name || '-' }}</div>
             <div v-if="item.counter_name">カウンター: {{ item.counter_name }}</div>
             <div class="history-time">{{ formatDateTime(item.updated_at) }}</div>
             <div v-if="item.note" class="history-note">{{ item.note }}</div>
@@ -276,18 +277,39 @@
   </div>
 
   <div v-if="showRecorderModal" class="modal-overlay" @click.self="showRecorderModal = false">
-    <div class="modal-box">
-      <div class="modal-header">記入者管理</div>
+    <div class="modal-box people-modal">
+      <div class="modal-header">入力者・カウンター管理</div>
       <div class="modal-body">
-        <div class="recorder-add-row">
-          <input v-model.trim="newRecorderName" type="text" placeholder="名前を入力" @keyup.enter="addRecorder" />
-          <button type="button" @click="addRecorder" :disabled="!newRecorderName">追加</button>
+        <div class="people-manage-tabs">
+          <button type="button" class="people-manage-tab" :class="{ active: peopleManageTab === 'recorder' }" @click="peopleManageTab = 'recorder'">入力者</button>
+          <button type="button" class="people-manage-tab" :class="{ active: peopleManageTab === 'counter' }" @click="peopleManageTab = 'counter'">カウンター</button>
         </div>
-        <div v-if="recorders.length === 0" class="empty-state">記入者がいません</div>
-        <div v-else class="recorder-list">
-          <div v-for="r in recorders" :key="r.id" class="recorder-item">
-            <span>{{ r.name }}</span>
-            <button type="button" class="history-delete-btn" @click="removeRecorder(r.id)">✕</button>
+        <div v-if="peopleManageTab === 'recorder'" class="people-manage-panel">
+          <div class="people-manage-title">入力者</div>
+          <div class="recorder-add-row">
+            <input v-model.trim="newRecorderName" type="text" placeholder="名前を入力" @keyup.enter="addRecorder" />
+            <button type="button" @click="addRecorder" :disabled="!newRecorderName">追加</button>
+          </div>
+          <div v-if="recorders.length === 0" class="empty-state compact">入力者がいません</div>
+          <div v-else class="recorder-list">
+            <div v-for="r in recorders" :key="r.id" class="recorder-item">
+              <span>{{ r.name }}</span>
+              <button type="button" class="history-delete-btn" @click="removeRecorder(r.id)">✕</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="people-manage-panel">
+          <div class="people-manage-title">カウンター</div>
+          <div class="recorder-add-row">
+            <input v-model.trim="newCounterName" type="text" placeholder="名前を入力" @keyup.enter="addCounter" />
+            <button type="button" @click="addCounter" :disabled="!newCounterName">追加</button>
+          </div>
+          <div v-if="counters.length === 0" class="empty-state compact">カウンターがいません</div>
+          <div v-else class="recorder-list">
+            <div v-for="c in counters" :key="c.id" class="recorder-item">
+              <span>{{ c.name }}</span>
+              <button type="button" class="history-delete-btn" @click="removeCounter(c.id)">✕</button>
+            </div>
           </div>
         </div>
       </div>
@@ -374,6 +396,7 @@ const historyProductId = ref(null);
 const canDeleteHistory = computed(() => hasPermission(authState.user, "stocktake.delete", "edit"));
 const canEdit = computed(() => hasPermission(authState.user, "stocktake", "edit"));
 const recorders = ref([]);
+const counters = ref([]);
 const layoutCols = ref(4);
 const layoutRows = ref(4);
 const layoutCells = ref({});
@@ -387,8 +410,9 @@ const equipmentName = ref('');
 const showRecorderModal = ref(false);
 const showAreaModal = ref(false);
 const dsSources = [
-  { op: '取得/保存', table: 'production_stocktake_record', desc: '棚卸現物入力記録（数量・備考・記入者）' },
-  { op: '取得/保存', table: 'production_stocktake_recorder', desc: '棚卸記入者（日ごと）' },
+  { op: '取得/保存', table: 'production_stocktake_record', desc: '棚卸現物入力記録（数量・備考・入力者・カウンター）' },
+  { op: '取得/保存', table: 'production_stocktake_recorder', desc: '棚卸入力者（日ごと）' },
+  { op: '取得/保存', table: 'production_stocktake_counter', desc: '棚卸カウンター（日ごと）' },
   { op: '取得/保存', table: 'production_stocktake_area', desc: '棚卸エリア（置き場のグルーピング）' },
   { op: '取得', table: 'production_stocktake_layout_config', desc: 'レイアウト配置設定（エリア別）' },
   { op: '取得', table: 'm_product', desc: '製品マスタ（品番・品名・画像）' },
@@ -403,6 +427,8 @@ const allKnownLocations = ref([]);
 const zoomIn = () => { layoutZoom.value = Math.min(2, +(layoutZoom.value + 0.2).toFixed(1)); };
 const zoomOut = () => { layoutZoom.value = Math.max(0.4, +(layoutZoom.value - 0.2).toFixed(1)); };
 const newRecorderName = ref("");
+const newCounterName = ref("");
+const peopleManageTab = ref("recorder");
 const selectedRecorder = ref("");
 const selectedCounter = ref("");
 const selectedProductId = ref(null);
@@ -895,6 +921,17 @@ const loadRecorders = async () => {
     recorders.value = Array.isArray(res.data?.recorders) ? res.data.recorders : [];
   } catch (e) {
     console.error("記入者取得エラー:", e);
+    recorders.value = [];
+  }
+};
+
+const loadCounters = async () => {
+  try {
+    const res = await api.stocktakeRecords.listCounters({ stocktake_date: filters.stocktake_date });
+    counters.value = Array.isArray(res.data?.counters) ? res.data.counters : [];
+  } catch (e) {
+    console.error("カウンター取得エラー:", e);
+    counters.value = [];
   }
 };
 
@@ -910,12 +947,33 @@ const addRecorder = async () => {
   }
 };
 
+const addCounter = async () => {
+  if (!newCounterName.value) return;
+  try {
+    await api.stocktakeRecords.addCounter({ stocktake_date: filters.stocktake_date, name: newCounterName.value });
+    newCounterName.value = "";
+    await loadCounters();
+  } catch (e) {
+    console.error("カウンター追加エラー:", e);
+    alert("追加に失敗しました。");
+  }
+};
+
 const removeRecorder = async (id) => {
   try {
     await api.stocktakeRecords.removeRecorder({ id });
     await loadRecorders();
   } catch (e) {
     console.error("記入者削除エラー:", e);
+  }
+};
+
+const removeCounter = async (id) => {
+  try {
+    await api.stocktakeRecords.removeCounter({ id });
+    await loadCounters();
+  } catch (e) {
+    console.error("カウンター削除エラー:", e);
   }
 };
 
@@ -1075,6 +1133,7 @@ onMounted(() => {
   loadMasters();
   reload();
   loadRecorders();
+  loadCounters();
   loadAreas();
 });
 
@@ -1087,6 +1146,7 @@ watch(
 
 watch(() => filters.stocktake_date, () => {
   loadRecorders();
+  loadCounters();
 });
 </script>
 
@@ -1801,6 +1861,10 @@ watch(() => filters.stocktake_date, () => {
   overflow: hidden;
 }
 
+.people-modal {
+  width: 380px;
+}
+
 .modal-header {
   padding: 10px 14px;
   font-size: 14px;
@@ -1825,6 +1889,40 @@ watch(() => filters.stocktake_date, () => {
   padding: 4px 16px;
   font-size: 12px;
   cursor: pointer;
+}
+
+.people-manage-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.people-manage-tab {
+  height: 30px;
+  border: 1px solid #9ca3af;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.people-manage-tab.active {
+  background: #2f5eae;
+  border-color: #2f5eae;
+  color: #fff;
+}
+
+.people-manage-panel {
+  min-height: 180px;
+}
+
+.people-manage-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 8px;
 }
 
 .recorder-add-row {
@@ -1859,6 +1957,10 @@ watch(() => filters.stocktake_date, () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.empty-state.compact {
+  padding: 12px 10px;
 }
 
 .recorder-item {

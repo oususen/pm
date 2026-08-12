@@ -711,14 +711,15 @@
   <div class="toc">
     <h2>手順の流れ</h2>
     <ul class="toc-list">
-      <li><span class="tn">1</span>画面を開く</li>
-      <li><span class="tn">2</span>記入者を登録する</li>
-      <li><span class="tn">3</span>エリアを選ぶ</li>
-      <li><span class="tn">4</span>対象を絞り込む</li>
-      <li><span class="tn">5</span>品番を選んで数量を入力する</li>
-      <li><span class="tn">6</span>入力履歴を確認・削除する</li>
-      <li><span class="tn">7</span>レイアウトで進捗を確認する</li>
-      <li><span class="tn">8</span>エリアを管理する</li>
+      <li><span class="tn">1</span>棚卸メモ用紙を印刷する</li>
+      <li><span class="tn">2</span>画面を開く</li>
+      <li><span class="tn">3</span>入力者を登録する</li>
+      <li><span class="tn">4</span>エリアを選ぶ</li>
+      <li><span class="tn">5</span>対象を絞り込む</li>
+      <li><span class="tn">6</span>品番を選んで数量を入力する</li>
+      <li><span class="tn">7</span>入力履歴を確認・削除する</li>
+      <li><span class="tn">8</span>レイアウトで進捗を確認する</li>
+      <li><span class="tn">9</span>エリアを管理する</li>
     </ul>
   </div>
 
@@ -736,6 +737,7 @@
         <span style="font-size:11px;">2026-08-12</span>
         <span style="display:flex;gap:6px;align-items:center;font-size:12px;">
           <span>&#x1F3E2;</span>
+          <span>&#x1F5A8;</span>
           <span>レイアウト</span>
         </span>
         <span class="om-anno" style="top:-6px;left:8px;">1</span>
@@ -805,8 +807,8 @@
     <!-- 番号付き説明 -->
     <ul class="anno-list" style="margin-top:20px;">
       <li><span class="anno-num">1</span><span><strong>エリア選択</strong> — 事前に設定したエリアで置き場をグループ絞り込みします。</span></li>
-      <li><span class="anno-num">2</span><span><strong>記入者アイコン（&#x1F464;）</strong> — その日の記入者を登録・管理します。</span></li>
-      <li><span class="anno-num">3</span><span><strong>エリア管理（&#x1F3E2;）／レイアウト</strong> — エリアの追加・編集、置き場レイアウトの確認。</span></li>
+      <li><span class="anno-num">2</span><span><strong>メンバーアイコン（&#x1F464;）</strong> — その日のカウンターと入力者を登録・管理します。</span></li>
+      <li><span class="anno-num">3</span><span><strong>エリア管理（&#x1F3E2;）／紙出力（&#x1F5A8;）／レイアウト</strong> — エリアの追加・編集、棚卸メモ用紙のPDF出力、置き場レイアウトの確認。</span></li>
       <li><span class="anno-num">4</span><span><strong>検索フィルタ</strong> — ライン・置き場・品番で対象を絞り込みます。</span></li>
       <li><span class="anno-num">5</span><span><strong>品番一覧と操作ボタン</strong> — 「›」で入力画面へ、「&#x1F4CB;」で入力履歴を確認。</span></li>
     </ul>
@@ -859,8 +861,12 @@
           <span class="li-desc">入力数量 − 机上在庫。</span>
         </div>
         <div class="legend-item">
-          <span class="li-label" style="background:#fffff0;padding:1px 6px;border:1px solid #ddd;border-radius:3px;">記入者</span>
-          <span class="li-desc">事前登録した記入者から選択（必須）。</span>
+          <span class="li-label" style="background:#fffff0;padding:1px 6px;border:1px solid #ddd;border-radius:3px;">入力者</span>
+          <span class="li-desc">アプリに入力した人を選択（必須）。</span>
+        </div>
+        <div class="legend-item">
+          <span class="li-label" style="background:#fffff0;padding:1px 6px;border:1px solid #ddd;border-radius:3px;">カウンター</span>
+          <span class="li-desc">現物を数えた人を選択。</span>
         </div>
         <div class="legend-item">
           <span class="li-label" style="background:#fffff0;padding:1px 6px;border:1px solid #ddd;border-radius:3px;">数量</span>
@@ -874,6 +880,81 @@
   <div class="step">
     <div class="step-header">
       <div class="step-num">1</div>
+      <div class="step-title">棚卸メモ用紙を印刷する（事前準備）</div>
+    </div>
+    <div class="step-desc">
+      エリアを選んだ状態で、画面右上の<strong>「&#x1F5A8;」アイコン</strong>をタップします。<br>
+      棚卸日を入力するとPDFがダウンロードされます。置き場ごとに<strong>A4 1ページ（同じカードが8枚）</strong>の用紙です。
+    </div>
+
+    <div style="display:flex;gap:18px;align-items:flex-start;justify-content:center;flex-wrap:wrap;">
+      <div>
+        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">① &#x1F5A8; をタップ</div>
+        <div class="mock-phone" style="max-width:260px;">
+          <div class="mock-header">
+            <span style="display:flex;align-items:center;gap:4px;">
+              <span style="border:1px solid rgba(255,255,255,.5);border-radius:4px;padding:1px 6px;font-size:11px;">板金 ▾</span>
+              <span style="font-size:14px;">&#x1F464;</span>
+            </span>
+            <span style="font-size:10px;">2026-08-31</span>
+            <span style="display:flex;gap:6px;align-items:center;font-size:11px;">
+              <span>&#x1F3E2;</span>
+              <span class="hl hl-blue" style="position:relative;">&#x1F5A8;</span>
+              <span>レイアウト</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">② 棚卸日を入力 → PDF出力</div>
+        <div class="mock-modal" style="max-width:260px;">
+          <div class="mock-modal-header">棚卸日を入力してください</div>
+          <div class="mock-modal-body">
+            <input type="text" value="2026-08-31" readonly style="width:100%;height:30px;border:1px solid #9ca3af;padding:4px 8px;font-size:13px;background:var(--card);color:var(--ink);">
+          </div>
+          <div class="mock-modal-footer" style="display:flex;justify-content:flex-end;gap:8px;">
+            <span style="padding:4px 12px;background:#2f5eae;color:#fff;border-radius:4px;font-size:12px;">OK</span>
+            <span style="padding:4px 12px;border:1px solid #9ca3af;border-radius:4px;font-size:12px;background:var(--card);">キャンセル</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">③ 出力されるカード（A4に8枚）</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:300px;">
+          <div style="border:1px solid var(--grid-line);background:var(--card);padding:10px 12px;min-height:120px;">
+            <div style="font-size:18px;font-weight:800;margin-bottom:6px;">板金</div>
+            <div style="font-size:22px;font-weight:800;margin-bottom:8px;">B1-2</div>
+            <div style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:8px;">
+              <span style="font-weight:700;">数量</span>
+              <span style="flex:1;border-bottom:1px solid var(--grid-line);height:12px;"></span>
+            </div>
+            <div style="font-size:13px;margin-bottom:8px;">カウンター</div>
+            <div style="font-size:12px;color:var(--ink2);">棚卸日: 2026-08-31</div>
+          </div>
+          <div style="border:1px solid var(--grid-line);background:var(--card);padding:10px 12px;min-height:120px;">
+            <div style="font-size:18px;font-weight:800;margin-bottom:6px;">板金</div>
+            <div style="font-size:22px;font-weight:800;margin-bottom:8px;">B1-2</div>
+            <div style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:8px;">
+              <span style="font-weight:700;">数量</span>
+              <span style="flex:1;border-bottom:1px solid var(--grid-line);height:12px;"></span>
+            </div>
+            <div style="font-size:13px;margin-bottom:8px;">カウンター</div>
+            <div style="font-size:12px;color:var(--ink2);">棚卸日: 2026-08-31</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout info" style="margin-top:16px;">
+      <span class="icon">&#x1F4A1;</span>
+      <span>印刷したカードは切り分けて、対象品の塊ごとに貼る・挟むと入力漏れ防止に使えます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
       <div class="step-title">画面を開く</div>
     </div>
     <div class="step-desc">
@@ -886,20 +967,20 @@
     </div>
   </div>
 
-  <!-- ===== STEP 2 ===== -->
+  <!-- ===== STEP 3 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">2</div>
-      <div class="step-title">記入者を登録する（事前準備）</div>
+      <div class="step-num">3</div>
+      <div class="step-title">メンバーを登録する（事前準備）</div>
     </div>
     <div class="step-desc">
-      棚卸を始める前に、<strong>その日の記入者</strong>を登録します。<br>
-      記入者を選択しないと保存できないため、必ず最初に登録してください。
+      棚卸を始める前に、<strong>その日の入力者とカウンター</strong>を登録します。<br>
+      入力者を選択しないと保存できないため、必ず最初に登録してください。
     </div>
 
     <div style="display:flex;gap:20px;align-items:flex-start;justify-content:center;flex-wrap:wrap;">
       <div>
-        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">① &#x1F464; アイコンをタップ</div>
+        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">① メンバーアイコンをタップ</div>
         <div class="mock-phone" style="max-width:200px;">
           <div class="mock-header">
             <span style="display:flex;align-items:center;gap:4px;">
@@ -912,10 +993,14 @@
         </div>
       </div>
       <div>
-        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">② 名前を入力して「追加」</div>
-        <div class="mock-modal">
-          <div class="mock-modal-header">記入者管理</div>
+        <div style="text-align:center;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px;">② タブを選んで名前を入力して「追加」</div>
+        <div class="mock-modal" style="max-width:320px;">
+          <div class="mock-modal-header">入力者・カウンター管理</div>
           <div class="mock-modal-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+              <span style="height:28px;background:#2f5eae;color:#fff;border-radius:4px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;">入力者</span>
+              <span style="height:28px;background:#f8fafc;border:1px solid #9ca3af;color:#475569;border-radius:4px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;">カウンター</span>
+            </div>
             <div class="mock-modal-add">
               <input type="text" value="王 崇栓" readonly style="color:var(--ink);">
               <button>追加</button>
@@ -932,14 +1017,14 @@
 
     <div class="callout info" style="margin-top:16px;">
       <span class="icon">&#x1F4A1;</span>
-      <span>記入者は<strong>棚卸日ごと</strong>に管理されます。社外応援者も登録できます。不要な記入者は「✕」で削除できます。</span>
+      <span>入力者とカウンターは<strong>棚卸日ごと</strong>に管理されます。タブを切り替えてそれぞれ登録できます。不要なメンバーは「✕」で削除できます。</span>
     </div>
   </div>
 
-  <!-- ===== STEP 3 ===== -->
+  <!-- ===== STEP 4 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">3</div>
+      <div class="step-num">4</div>
       <div class="step-title">エリアを選ぶ</div>
     </div>
     <div class="step-desc">
@@ -960,14 +1045,14 @@
     </div>
     <div class="callout info" style="margin-top:12px;">
       <span class="icon">&#x1F4CC;</span>
-      <span>「全エリア」を選ぶとエリア絞り込みなしになります。エリアが未設定の場合はこのプルダウンに何も表示されません（Step 8 でエリアを作成してください）。</span>
+      <span>「全エリア」を選ぶとエリア絞り込みなしになります。エリアが未設定の場合はこのプルダウンに何も表示されません（Step 9 でエリアを作成してください）。</span>
     </div>
   </div>
 
-  <!-- ===== STEP 4 ===== -->
+  <!-- ===== STEP 5 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">4</div>
+      <div class="step-num">5</div>
       <div class="step-title">対象を絞り込む</div>
     </div>
     <div class="step-desc">
@@ -986,10 +1071,10 @@
     </div>
   </div>
 
-  <!-- ===== STEP 5 ===== -->
+  <!-- ===== STEP 6 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">5</div>
+      <div class="step-num">6</div>
       <div class="step-title">品番を選んで数量を入力する</div>
     </div>
     <div class="step-desc">
@@ -1045,15 +1130,19 @@
             </div>
             <div class="mock-detail-row">
               <div class="mock-detail-field">
-                <span class="fdl">記入者</span>
+                <span class="fdl">入力者</span>
                 <span class="fdv editable" style="position:relative;">王 崇栓 ▾
                   <span class="om-anno" style="top:-14px;right:-8px;font-size:9px;width:16px;height:16px;">!</span>
                 </span>
               </div>
               <div class="mock-detail-field">
-                <span class="fdl">数量</span>
-                <span class="fdv editable" style="font-weight:700;">148</span>
+                <span class="fdl">カウンター</span>
+                <span class="fdv editable">トアン ▾</span>
               </div>
+            </div>
+            <div class="mock-detail-field" style="margin-bottom:4px;">
+              <span class="fdl">数量</span>
+              <span class="fdv editable" style="font-weight:700;">148</span>
             </div>
             <div class="mock-detail-field" style="margin-top:4px;">
               <span class="fdl">備考</span>
@@ -1066,7 +1155,7 @@
 
     <div class="callout warn" style="margin-top:16px;">
       <span class="icon">&#x26A0;&#xFE0F;</span>
-      <span><strong>記入者</strong>を選択しないと保存ボタンが押せません。必ず先にStep 2で記入者を登録してください。</span>
+      <span><strong>入力者</strong>を選択しないと保存ボタンが押せません。必ず先にStep 3で入力者を登録してください。<strong>カウンター</strong>は数えた人を選びます（入力者と同じリストから選択）。</span>
     </div>
     <div class="callout info">
       <span class="icon">&#x1F4A1;</span>
@@ -1074,10 +1163,10 @@
     </div>
   </div>
 
-  <!-- ===== STEP 6 ===== -->
+  <!-- ===== STEP 7 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">6</div>
+      <div class="step-num">7</div>
       <div class="step-title">入力履歴を確認・削除する</div>
     </div>
     <div class="step-desc">
@@ -1112,7 +1201,8 @@
             <div style="display:flex;align-items:center;gap:8px;padding:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;margin-bottom:4px;">
               <span style="font-size:16px;font-weight:700;color:#15337a;min-width:40px;text-align:right;">80</span>
               <div style="flex:1;">
-                <div style="font-size:11px;color:#475569;">王 崇栓</div>
+                <div style="font-size:11px;color:#475569;">記入: 王 崇栓</div>
+                <div style="font-size:11px;color:#475569;">カウンター: トアン</div>
                 <div style="font-size:9px;color:#94a3b8;">2026-08-12 09:15</div>
               </div>
               <span style="color:#ef4444;font-size:12px;cursor:default;">✕</span>
@@ -1120,7 +1210,8 @@
             <div style="display:flex;align-items:center;gap:8px;padding:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;">
               <span style="font-size:16px;font-weight:700;color:#15337a;min-width:40px;text-align:right;">68</span>
               <div style="flex:1;">
-                <div style="font-size:11px;color:#475569;">トアン</div>
+                <div style="font-size:11px;color:#475569;">記入: トアン</div>
+                <div style="font-size:11px;color:#475569;">カウンター: ズイ</div>
                 <div style="font-size:9px;color:#94a3b8;">2026-08-12 09:30</div>
               </div>
               <span style="color:#ef4444;font-size:12px;cursor:default;">✕</span>
@@ -1136,10 +1227,10 @@
     </div>
   </div>
 
-  <!-- ===== STEP 7 ===== -->
+  <!-- ===== STEP 8 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">7</div>
+      <div class="step-num">8</div>
       <div class="step-title">レイアウトで進捗を確認する</div>
     </div>
     <div class="step-desc">
@@ -1219,10 +1310,10 @@
     </div>
   </div>
 
-  <!-- ===== STEP 8 ===== -->
+  <!-- ===== STEP 9 ===== -->
   <div class="step">
     <div class="step-header">
-      <div class="step-num">8</div>
+      <div class="step-num">9</div>
       <div class="step-title">エリアを管理する</div>
     </div>
     <div class="step-desc">
@@ -1288,7 +1379,7 @@
     </div>
     <div class="step-desc" style="margin-bottom:0;">
       画面上部中央の<strong>日付</strong>をタップすると日付ピッカーが開きます。<br>
-      日付を変更すると、その日の棚卸データに切り替わります。記入者リストも日付ごとに独立しています。
+      日付を変更すると、その日の棚卸データに切り替わります。入力者リストも日付ごとに独立しています。
     </div>
   </div>
 
@@ -1296,7 +1387,7 @@
   <div class="note">
     <h2>注意事項</h2>
     <ul>
-      <li><strong>記入者を選択しないと保存できません</strong>。必ず先に記入者を登録してください。</li>
+      <li><strong>入力者を選択しないと保存できません</strong>。必ず先に入力者を登録してください。</li>
       <li>写真・置き場・加工先は<strong>製品マスタの設定</strong>を参照します。表示がおかしい場合はマスタを確認してください。</li>
       <li>この画面は<strong>現物入力の記録</strong>です。棚卸の確定処理は別画面で行います。</li>
       <li>入力履歴の削除には<strong>「棚卸履歴削除」権限</strong>が必要です。</li>
@@ -1314,7 +1405,7 @@
     <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
       <div style="display:flex;align-items:flex-start;gap:12px;">
         <span style="width:32px;height:32px;border-radius:50%;background:var(--step-color);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;flex-shrink:0;">1</span>
-        <div style="font-size:14px;color:var(--ink2);line-height:1.7;"><strong>前準備</strong> — 対象品の塊ごとに紙を貼る・挟む。</div>
+        <div style="font-size:14px;color:var(--ink2);line-height:1.7;"><strong>前準備</strong> — Step 1 で棚卸メモ用紙を印刷し、切り分けて対象品の塊ごとに貼る・挟む。</div>
       </div>
       <div style="display:flex;align-items:flex-start;gap:12px;">
         <span style="width:32px;height:32px;border-radius:50%;background:var(--step-color);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;flex-shrink:0;">2</span>
@@ -1338,7 +1429,8 @@
     <ul style="padding-left:18px;font-size:14px;color:var(--ink2);line-height:1.8;">
       <li><strong>置き場単位で順番に</strong> — 置き場を1つ選んで全品番を入力→次の置き場、と進めると入力漏れが減ります。</li>
       <li><strong>レイアウトで残りチェック</strong> — 途中でレイアウト画面を見れば、未入力の置き場（グレー）がすぐわかります。</li>
-      <li><strong>記入者は最初に全員分登録</strong> — 途中で交代しても選ぶだけで済みます。</li>
+      <li><strong>レイアウトから一覧へ戻る</strong> — レイアウト画面で対象の置き場セルをタップすると、その置き場の製品一覧に移動できます。自分の居場所の製品へ遷移できるので、検索が速いです。</li>
+      <li><strong>入力者は最初に全員分登録</strong> — 途中で交代しても選ぶだけで済みます。</li>
     </ul>
   </div>
 

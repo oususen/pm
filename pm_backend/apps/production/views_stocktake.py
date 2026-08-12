@@ -16,7 +16,13 @@ from reportlab.pdfgen import canvas
 from accounts.permissions import HasResourcePermissionOrReadOnly
 from masters.models import Line, Process, Product, ProductStockLocation
 
-from .models_stocktake_record import StocktakeRecord, StocktakeRecorder, StocktakeLayoutConfig, StocktakeArea
+from .models_stocktake_record import (
+    StocktakeArea,
+    StocktakeCounter,
+    StocktakeLayoutConfig,
+    StocktakeRecord,
+    StocktakeRecorder,
+)
 from .models_line_backlog import LineBacklog
 
 
@@ -322,6 +328,48 @@ class StocktakeRecorderView(APIView):
         if not recorder_id:
             return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
         deleted, _ = StocktakeRecorder.objects.filter(id=recorder_id).delete()
+        return Response({'deleted': deleted})
+
+
+class StocktakeCounterView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _parse_date(value):
+        try:
+            return datetime.strptime(str(value), '%Y-%m-%d').date()
+        except Exception:
+            return None
+
+    def get(self, request):
+        stocktake_date = self._parse_date(request.query_params.get('stocktake_date'))
+        if not stocktake_date:
+            return Response({'detail': 'stocktake_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        counters = StocktakeCounter.objects.filter(stocktake_date=stocktake_date).order_by('name')
+        return Response({
+            'counters': [{'id': c.id, 'name': c.name} for c in counters]
+        })
+
+    def post(self, request):
+        stocktake_date = self._parse_date(request.data.get('stocktake_date'))
+        if not stocktake_date:
+            return Response({'detail': 'stocktake_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = str(request.data.get('name') or '').strip()
+        if not name:
+            return Response({'detail': '名前は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        counter, created = StocktakeCounter.objects.get_or_create(
+            stocktake_date=stocktake_date, name=name,
+        )
+        return Response({'id': counter.id, 'name': counter.name, 'created': created})
+
+    def delete(self, request):
+        counter_id = request.data.get('id')
+        if not counter_id:
+            return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = StocktakeCounter.objects.filter(id=counter_id).delete()
         return Response({'deleted': deleted})
 
 

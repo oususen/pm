@@ -61,6 +61,27 @@ class StocktakeRecorder(models.Model):
         return f'{self.stocktake_date} {self.name}'
 
 
+class StocktakeCounter(models.Model):
+    """棚卸カウンター（日ごと）"""
+
+    stocktake_date = models.DateField(verbose_name='棚卸日')
+    name = models.CharField(max_length=50, verbose_name='カウンター名')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'production_stocktake_counter'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['stocktake_date', 'name'],
+                name='uniq_stocktake_counter',
+            )
+        ]
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.stocktake_date} {self.name}'
+
+
 class StocktakeArea(models.Model):
     """棚卸エリア（置き場のグルーピング）"""
     name = models.CharField(max_length=50, unique=True, verbose_name='エリア名')

@@ -20,6 +20,15 @@ export const createStocktakeRecordsAPI = (client) => ({
   removeRecorder(payload) {
     return client.delete('/stocktake-recorders/', { data: payload })
   },
+  listCounters(params = {}) {
+    return client.get('/stocktake-counters/', { params })
+  },
+  addCounter(payload) {
+    return client.post('/stocktake-counters/', payload)
+  },
+  removeCounter(payload) {
+    return client.delete('/stocktake-counters/', { data: payload })
+  },
   getLayoutConfig(params = {}) {
     return client.get('/stocktake-layout-config/', { params })
   },
