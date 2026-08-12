@@ -766,10 +766,9 @@ const canView = computed(() =>
     isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
     'view',
     isReviewMode.value
-      ? ['quality.product_checksheet_review']
+      ? []
       : [
           'quality.integrated_checksheet_operation',
-          'quality.product_checksheet_input',
           'quality.integrated_checksheet',
           'quality',
         ],
@@ -781,10 +780,9 @@ const canEdit = computed(() =>
     isReviewMode.value ? 'quality.integrated_checksheet_review' : 'quality.integrated_checksheet_operation',
     'edit',
     isReviewMode.value
-      ? ['quality.product_checksheet_review']
+      ? []
       : [
           'quality.integrated_checksheet_operation',
-          'quality.product_checksheet_input',
           'quality.integrated_checksheet',
           'quality',
         ],

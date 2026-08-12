@@ -264,8 +264,6 @@ export default {
       }
       try {
         if (!this.editingId) {
-          const checksheetReady = await this.ensureProductChecksheetCompleted(payload)
-          if (!checksheetReady) return
         }
         if (this.editingId) {
           await api.orders.updateProcessActual(this.editingId, payload)
@@ -280,60 +278,6 @@ export default {
         console.error('保存エラー', error)
         alert('保存に失敗しました: ' + (error.response?.data?.detail || error.message))
       }
-    },
-    pendingActualKey() {
-      return this.order ? `product-checksheet:process-actual:${this.order.id}` : ''
-    },
-    restorePendingActual() {
-      const key = this.pendingActualKey()
-      if (!key) return
-      const raw = sessionStorage.getItem(key)
-      if (!raw) return
-      try {
-        const saved = JSON.parse(raw)
-        this.form = {
-          routing_step: saved.routing_step || '',
-          process: saved.process || '',
-          line: saved.line || this.order?.line || '',
-          completed_qty: Number(saved.completed_qty || 0),
-          actual_duration_min: Number(saved.actual_duration_min || 1),
-          completed_at: saved.completed_at || this.toDateTimeLocal(new Date()),
-          operator: saved.operator || '',
-          remark: saved.remark || ''
-        }
-      } catch (error) {
-        console.warn('チェックシート未完了実績の復元に失敗しました', error)
-      }
-    },
-    async ensureProductChecksheetCompleted(payload) {
-      if (!this.order?.product || !payload.line || !payload.process || !payload.completed_qty) {
-        return true
-      }
-      const response = await api.productChecksheets.prepareBatch({
-        production_order: this.order.id,
-        line: payload.line,
-        process: payload.process,
-        product: this.order.product,
-        quantity: payload.completed_qty,
-        lot_no: this.order.order_no || '',
-        operator_name: payload.operator || '',
-        source_context: {
-          source: 'ProcessActualEntry',
-          payload,
-        },
-      })
-      const batch = response.data
-      if (!batch.required || batch.is_complete) {
-        if (batch.required) sessionStorage.removeItem(this.pendingActualKey())
-        return true
-      }
-      sessionStorage.setItem(this.pendingActualKey(), JSON.stringify(payload))
-      alert(`この工程実績は製品チェックシートが必要です。${batch.completed_count}/${batch.quantity} 枚の入力が完了しています。全数入力後に登録できます。`)
-      this.$router.push({
-        path: `/quality/product-checksheet/input/${batch.id}`,
-        query: { return: this.$route.fullPath },
-      })
-      return false
     },
     editActual(actual) {
       if (!this.canEdit) return

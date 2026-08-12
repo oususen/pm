@@ -745,7 +745,6 @@ const canAccessQuality = (resource, level = 'view', aliases = []) => {
 }
 const canView = computed(() =>
   canAccessQuality('quality.integrated_checksheet_template', 'view', [
-    'quality.product_checksheet_template',
     'quality',
   ])
 )
@@ -1097,7 +1096,6 @@ const confirmDiscardUnsavedChanges = () => {
 
 const canEdit = computed(() =>
   canAccessQuality('quality.integrated_checksheet_template', 'edit', [
-    'quality.product_checksheet_template',
     'quality',
   ])
 )

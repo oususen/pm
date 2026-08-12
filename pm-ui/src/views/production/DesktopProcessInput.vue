@@ -2354,33 +2354,6 @@ const loadSelectedCoproductNotice = async () => {
 }
 
 // ──────────────────────────────
-// チェックシート
-// ──────────────────────────────
-const ensureProductChecksheetBeforeRealtime = async (data) => {
-  const recordType = String(data.record_type || '').toUpperCase()
-  const action = String(data.event_data?.action || '').toUpperCase()
-  const isProductionRecord = recordType === 'PRODUCTION'
-  const isOperatorEnd = recordType === 'OPERATOR_ACTION' && action === 'END'
-  if (!isProductionRecord && !isOperatorEnd) return true
-  const productId = data.product_id
-  const qty = isOperatorEnd ? data.production_qty : data.qty
-  if (!selectedLineId.value || !selectedProcessId.value || !productId || !qty) return true
-  const response = await api.productChecksheets.prepareBatch({
-    line: selectedLineId.value, process: selectedProcessId.value, product: productId, quantity: qty,
-    lot_no: data.batch_no || '', operator_name: data.operator_name || record.value.operator_name || '',
-    source_context: { source: 'DesktopProcessInput', payload: data },
-  })
-  const batch = response.data
-  if (!batch.required || batch.is_complete) return true
-  sessionStorage.setItem('product-checksheet:desktop-process-input', JSON.stringify({
-    selectedLineId: selectedLineId.value, selectedProcessId: selectedProcessId.value, record: record.value,
-  }))
-  alert(`この工程作業入力は製品チェックシートが必要です。${batch.completed_count}/${batch.quantity} 枚の入力が完了しています。全数入力後に登録できます。`)
-  router.push({ path: `/quality/product-checksheet/input/${batch.id}`, query: { return: route.fullPath } })
-  return false
-}
-
-// ──────────────────────────────
 // 保存
 // ──────────────────────────────
 const submitRecord = async () => {
@@ -2464,8 +2437,6 @@ const submitRecord = async () => {
       data.work_date = targetWorkDate
       data.remarks = ((data.remarks || '') + `\n【作業日変更: ${targetWorkDate}】${reasonText}`).trim()
     }
-    const checksheetReady = await ensureProductChecksheetBeforeRealtime(data)
-    if (!checksheetReady) return
     const res = await api.processRealtime.create(data)
     if (submittedOperatorProductId) {
       const nextStarted = new Set(startedProductIds.value)
@@ -3232,19 +3203,6 @@ function openIntegratedChecksheetOperation() {
   }})
 }
 
-const restorePendingProductChecksheetInput = () => {
-  const raw = sessionStorage.getItem('product-checksheet:desktop-process-input')
-  if (!raw) return false
-  try {
-    const saved = JSON.parse(raw)
-    if (saved.selectedLineId) selectedLineId.value = String(saved.selectedLineId)
-    if (saved.selectedProcessId) { selectedProcessId.value = String(saved.selectedProcessId); onProcessChange() }
-    if (saved.record) record.value = { ...record.value, ...saved.record }
-    sessionStorage.removeItem('product-checksheet:desktop-process-input')
-    return true
-  } catch { return false }
-}
-
 // ──────────────────────────────
 // ウォッチャー
 // ──────────────────────────────
@@ -3368,7 +3326,6 @@ onMounted(async () => {
   applySupportModeFromQuery()
   await Promise.all([loadLines(), loadProcesses()])
   applyInitialLineSelection()
-  if (restorePendingProductChecksheetInput()) return
   const queryLineId = route.query.line_id
   if (queryLineId) { if (availableLines.value.some((line) => String(line.id) === String(queryLineId))) selectedLineId.value = String(queryLineId) }
   const queryProcessId = route.query.process_id

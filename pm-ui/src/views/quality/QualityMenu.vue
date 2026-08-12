@@ -9,7 +9,7 @@
       </RouterLink>
       <RouterLink v-if="canViewChecksheet" to="/quality/product-checksheet" class="master-tile">
         <div class="icon-box">CS</div>
-        <div class="label">品質チェックシート</div>
+        <div class="label">工程一体チェックシート</div>
       </RouterLink>
       <RouterLink to="/quality/training-certification" class="master-tile">
         <div class="icon-box">教認</div>
@@ -47,9 +47,9 @@ const canViewEquipment = computed(() =>
   ])
 );
 const canViewChecksheet = computed(() =>
-  canAccessQuality("quality.product_checksheet_template", "view", [
-    "quality.product_checksheet_input",
-    "quality.product_checksheet_review",
+  canAccessQuality("quality.integrated_checksheet_template", "view", [
+    "quality.integrated_checksheet_operation",
+    "quality.integrated_checksheet_review",
   ])
 );
 </script>

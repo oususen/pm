@@ -2,15 +2,6 @@ from django.conf import settings
 from django.db import models
 
 from .models_scrap import ScrapRecord, ScrapRecordDetail
-from .models_checksheet import (
-    ProductChecksheetBatch,
-    ProductChecksheetField,
-    ProductChecksheetPhoto,
-    ProductChecksheetRecord,
-    ProductChecksheetTask,
-    ProductChecksheetTemplate,
-    ProductChecksheetWorkflowLog,
-)
 from .models_training import (
     TrainingBook,
     TrainingExamAttempt,
@@ -560,13 +551,6 @@ __all__ = [
     "EquipmentInspectionConfirmation",
     "EquipmentInspectionTask",
     "EquipmentInspectionWorkflowLog",
-    "ProductChecksheetTemplate",
-    "ProductChecksheetField",
-    "ProductChecksheetBatch",
-    "ProductChecksheetRecord",
-    "ProductChecksheetPhoto",
-    "ProductChecksheetTask",
-    "ProductChecksheetWorkflowLog",
     "TrainingBook",
     "TrainingQuestion",
     "TrainingExamDefinition",
