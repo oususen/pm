@@ -1945,6 +1945,7 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         start_date = _parse_date(request.data.get('start_date'))
         end_date = _parse_date(request.data.get('end_date'))
         raw_rows_by_date = request.data.get('rows_by_date')
+        reset_existing_assignments = bool(request.data.get('reset_existing_assignments'))
         if not start_date:
             return Response({'detail': 'start_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if not end_date:
@@ -1981,6 +1982,13 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
             )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reset_existing_assignments:
+            for preview_date, posted_alloc_map_for_date in posted_alloc_maps.items():
+                if preview_date < start_date or preview_date > end_date:
+                    continue
+                for due_adjustment_id in list(posted_alloc_map_for_date.keys()):
+                    posted_alloc_map_for_date[due_adjustment_id] = []
 
         trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
         truck_map = {truck.id: truck for truck in trucks}

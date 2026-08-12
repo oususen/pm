@@ -90,6 +90,10 @@
             <input v-model="autoAssignEndDate" type="date" />
           </label>
         </div>
+        <label class="modal-check">
+          <input v-model="autoAssignResetExisting" type="checkbox" />
+          <span>期間内の既存割付をリセットしてから振分</span>
+        </label>
         <div class="modal-actions">
           <button class="btn" :disabled="autoAssigning" @click="closeAutoAssignDialog">閉じる</button>
           <button class="btn auto-assign-btn" :disabled="autoAssigning" @click="autoAssignTrips">
@@ -965,6 +969,7 @@ const calendarList = ref([])
 const autoAssignCalendarId = ref(null)
 const autoAssignStartDate = ref('')
 const autoAssignEndDate = ref('')
+const autoAssignResetExisting = ref(false)
 const showSaveConfirmDialog = ref(false)
 const saveValidationState = ref({
   missingTruckCount: 0,
@@ -2705,6 +2710,7 @@ const openAutoAssignDialog = async () => {
     await loadDefaultCalendar()
     autoAssignStartDate.value = addBusinessDaysByCalendar(todayDate, 4)
     autoAssignEndDate.value = dateKeys.value.at(-1) || autoAssignStartDate.value
+    autoAssignResetExisting.value = false
     showAutoAssignDialog.value = true
   } catch (error) {
     alert('カレンダー情報の取得に失敗しました。')
@@ -2786,7 +2792,12 @@ const autoAssignTrips = async () => {
     const rowsByDate = Object.fromEntries(
       effectiveTargetDateKeys.map((dateKey) => [dateKey, buildPayloadRowsForDate(dateKey)]),
     )
-    const res = await api.kubotaSakaiTripAssignments.autoAssign(thresholdDate, endDate, rowsByDate)
+    const res = await api.kubotaSakaiTripAssignments.autoAssign(
+      thresholdDate,
+      endDate,
+      rowsByDate,
+      autoAssignResetExisting.value,
+    )
     const resultRowsByDate = res.data?.rows_by_date || {}
     Object.entries(resultRowsByDate).forEach(([dateKey, rows]) => {
       if (!Array.isArray(rows)) return
@@ -3183,6 +3194,18 @@ onUnmounted(() => {
   padding: 6px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
+}
+.modal-check {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #374151;
+}
+.modal-check input {
+  width: 16px;
+  height: 16px;
 }
 .modal-actions {
   margin-top: 12px;
