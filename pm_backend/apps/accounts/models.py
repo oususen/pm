@@ -243,6 +243,7 @@ class UserPermission(models.Model):
         ('shipping.ship_to_lead_time', '出荷: 納入地別出荷加算日数'),
         ('inventory', '在庫'),
         ('stocktake', '在庫: 棚卸入力'),
+        ('stocktake.area', '在庫: 棚卸エリア管理'),
         ('stocktake.delete', '在庫: 棚卸履歴削除'),
         ('quality', '品質'),
         ('quality.equipment_inspection_master', '品質: 設備点検項目作成'),

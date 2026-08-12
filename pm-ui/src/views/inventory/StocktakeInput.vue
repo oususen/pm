@@ -10,8 +10,8 @@
         <DataSourceDialog title="棚卸入力" :sources="dsSources" />
       </span>
       <input type="date" class="top-date" v-model="filters.stocktake_date" />
-      <span style="display:flex;gap:4px;justify-content:flex-end;align-items:center">
-        <span class="tab-link" @click="showAreaModal = true">&#x1F3E2;</span>
+        <span style="display:flex;gap:4px;justify-content:flex-end;align-items:center">
+        <span v-if="canManageAreasView" class="tab-link" @click="showAreaModal = true">&#x1F3E2;</span>
         <span class="tab-link" @click="printSlips" v-if="selectedArea">&#x1F5A8;</span>
         <span class="tab-link" @click="openLayout">レイアウト</span>
       </span>
@@ -323,7 +323,7 @@
     <div class="modal-box area-modal">
       <div class="modal-header">エリア管理</div>
       <div class="modal-body">
-        <div class="area-edit-section" v-if="canEdit && editingArea">
+        <div class="area-edit-section" v-if="canManageAreasView && editingArea">
           <div class="area-edit-name-row">
             <input v-model.trim="editingArea.name" placeholder="エリア名" />
             <button type="button" class="btn-save" @click="saveEditArea" :disabled="!editingArea.name">保存</button>
@@ -342,16 +342,48 @@
           <div v-if="allKnownLocations.length === 0" class="empty-state">置き場データがありません。先に製品マスタで保管場所を設定してください。</div>
         </div>
         <div v-else>
-          <div v-if="canEdit" class="recorder-add-row">
-            <input v-model.trim="newAreaName" placeholder="新規エリア名" @keyup.enter="createArea" />
-            <button type="button" @click="createArea" :disabled="!newAreaName">追加</button>
+          <div v-if="canManageAreasView" class="area-create-box">
+            <div class="area-create-row">
+              <select v-model="newAreaType" class="area-create-select">
+                <option value="team">班</option>
+                <option value="unit">グループ</option>
+                <option value="other">その他</option>
+              </select>
+              <select
+                v-if="newAreaType === 'team'"
+                v-model="selectedTeamAreaId"
+                class="area-create-select wide"
+                @keyup.enter="createArea"
+              >
+                <option value="">班を選択</option>
+                <option v-for="team in teamAreaOptions" :key="team.id" :value="String(team.id)">{{ team.name }}</option>
+              </select>
+              <select
+                v-else-if="newAreaType === 'unit'"
+                v-model="selectedUnitAreaId"
+                class="area-create-select wide"
+                @keyup.enter="createArea"
+              >
+                <option value="">グループを選択</option>
+                <option v-for="unit in unitAreaOptions" :key="unit.id" :value="String(unit.id)">{{ unit.name }}</option>
+              </select>
+              <input
+                v-else
+                v-model.trim="newAreaName"
+                class="area-create-input"
+                placeholder="その他エリア名"
+                @keyup.enter="createArea"
+              />
+              <button type="button" @click="createArea" :disabled="!canCreateArea">追加</button>
+            </div>
+            <div class="area-create-help">エリア作成は既存の班・グループから選択するか、「その他」で任意名を登録します。</div>
           </div>
           <div v-if="areas.length === 0" class="empty-state">エリアがありません</div>
           <div v-else class="recorder-list">
             <div v-for="area in areas" :key="area.id" class="recorder-item">
-              <span v-if="canEdit" @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
+              <span v-if="canManageAreasView" @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
               <span v-else style="flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
-              <button v-if="canEdit" type="button" class="history-delete-btn" @click="deleteArea(area.id)">✕</button>
+              <button v-if="canManageAreasEdit" type="button" class="history-delete-btn" @click="deleteArea(area.id)">✕</button>
             </div>
           </div>
         </div>
@@ -395,6 +427,16 @@ const historyLoading = ref(false);
 const historyProductId = ref(null);
 const canDeleteHistory = computed(() => hasPermission(authState.user, "stocktake.delete", "edit"));
 const canEdit = computed(() => hasPermission(authState.user, "stocktake", "edit"));
+const isAreaAdminUser = computed(() => {
+  const user = authState.user;
+  return Boolean(user?.is_superuser || user?.username === 'admin');
+});
+const canManageAreasView = computed(() =>
+  isAreaAdminUser.value || hasPermission(authState.user, "stocktake.area", "view")
+);
+const canManageAreasEdit = computed(() =>
+  isAreaAdminUser.value || hasPermission(authState.user, "stocktake.area", "edit")
+);
 const recorders = ref([]);
 const counters = ref([]);
 const layoutCols = ref(4);
@@ -421,6 +463,11 @@ const dsSources = [
 ]
 const areas = ref([]);
 const newAreaName = ref('');
+const newAreaType = ref('team');
+const selectedTeamAreaId = ref('');
+const selectedUnitAreaId = ref('');
+const teamAreaOptions = ref([]);
+const unitAreaOptions = ref([]);
 const editingArea = ref(null);
 const allKnownLocations = ref([]);
 
@@ -547,6 +594,19 @@ const selectedIndexLabel = computed(() => {
 });
 const canMovePrev = computed(() => selectedRowIndex.value > 0);
 const canMoveNext = computed(() => selectedRowIndex.value >= 0 && selectedRowIndex.value < filteredRows.value.length - 1);
+const newAreaResolvedName = computed(() => {
+  if (newAreaType.value === 'team') {
+    return teamAreaOptions.value.find((team) => String(team.id) === String(selectedTeamAreaId.value))?.name || '';
+  }
+  if (newAreaType.value === 'unit') {
+    return unitAreaOptions.value.find((unit) => String(unit.id) === String(selectedUnitAreaId.value))?.name || '';
+  }
+  return newAreaName.value.trim();
+});
+const areaNameExists = computed(() =>
+  areas.value.some((area) => area.name === newAreaResolvedName.value)
+);
+const canCreateArea = computed(() => !!newAreaResolvedName.value && !areaNameExists.value);
 
 const getRowLocations = (row) => {
   if (row.stock_locations && row.stock_locations.length) return row.stock_locations;
@@ -998,6 +1058,27 @@ const loadAreas = async () => {
   }
 };
 
+const loadAreaMasterOptions = async () => {
+  try {
+    const [teamsRes, unitsRes] = await Promise.all([
+      api.accounts.getTeams(),
+      api.accounts.getUnits(),
+    ]);
+    teamAreaOptions.value = (Array.isArray(teamsRes.data) ? teamsRes.data : [])
+      .map((item) => ({ id: item.id, name: item.name || item.team_name || '' }))
+      .filter((item) => item.name)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    unitAreaOptions.value = (Array.isArray(unitsRes.data) ? unitsRes.data : [])
+      .map((item) => ({ id: item.id, name: item.name || item.unit_name || '' }))
+      .filter((item) => item.name)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+  } catch (e) {
+    console.error('班・グループ取得エラー:', e);
+    teamAreaOptions.value = [];
+    unitAreaOptions.value = [];
+  }
+};
+
 const loadAllKnownLocations = async () => {
   try {
     const res = await api.stocktakeRecords.list({
@@ -1012,10 +1093,18 @@ const loadAllKnownLocations = async () => {
 };
 
 const createArea = async () => {
-  if (!newAreaName.value) return;
+  if (!canManageAreasView.value) return;
+  const areaName = newAreaResolvedName.value;
+  if (!areaName) return;
+  if (areaNameExists.value) {
+    alert('同じ名前のエリアが既にあります');
+    return;
+  }
   try {
-    await api.stocktakeRecords.saveArea({ name: newAreaName.value, locations: [] });
+    await api.stocktakeRecords.saveArea({ name: areaName, locations: [] });
     newAreaName.value = '';
+    selectedTeamAreaId.value = '';
+    selectedUnitAreaId.value = '';
     await loadAreas();
   } catch (e) {
     alert('エリア追加に失敗しました');
@@ -1023,6 +1112,7 @@ const createArea = async () => {
 };
 
 const deleteArea = async (id) => {
+  if (!canManageAreasEdit.value) return;
   if (!confirm('このエリアを削除しますか？')) return;
   try {
     await api.stocktakeRecords.deleteArea(id);
@@ -1034,6 +1124,7 @@ const deleteArea = async (id) => {
 };
 
 const startEditArea = (area) => {
+  if (!canManageAreasView.value) return;
   editingArea.value = { ...area, locations: [...area.locations] };
   loadAllKnownLocations();
 };
@@ -1045,6 +1136,7 @@ const toggleAreaLocation = (loc) => {
 };
 
 const saveEditArea = async () => {
+  if (!canManageAreasView.value) return;
   if (!editingArea.value?.name) return;
   try {
     await api.stocktakeRecords.saveArea({
@@ -1135,6 +1227,7 @@ onMounted(() => {
   loadRecorders();
   loadCounters();
   loadAreas();
+  loadAreaMasterOptions();
 });
 
 watch(
@@ -1147,6 +1240,12 @@ watch(
 watch(() => filters.stocktake_date, () => {
   loadRecorders();
   loadCounters();
+});
+
+watch(newAreaType, () => {
+  newAreaName.value = '';
+  selectedTeamAreaId.value = '';
+  selectedUnitAreaId.value = '';
 });
 </script>
 
@@ -2222,6 +2321,35 @@ watch(() => filters.stocktake_date, () => {
 .area-select option { color: #1f2937; background: #fff; }
 
 .area-modal { max-width: 440px; }
+.area-create-box {
+  margin-bottom: 10px;
+}
+.area-create-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.area-create-select,
+.area-create-input {
+  height: 30px;
+  border: 1px solid #9ca3af;
+  border-radius: 4px;
+  background: #fff;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.area-create-select {
+  width: 92px;
+}
+.area-create-select.wide,
+.area-create-input {
+  flex: 1;
+}
+.area-create-help {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+}
 .area-edit-name-row { display: flex; gap: 6px; margin-bottom: 8px; }
 .area-edit-name-row input { flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
 .btn-save { padding: 4px 12px; background: #16a34a; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }

@@ -6,16 +6,19 @@
       </h2>
       <div class="editor-actions">
         <select v-model="selectedAreaId" class="area-select" @change="onAreaChange">
-          <option value="">全体（デフォルト）</option>
-          <option v-for="area in areas" :key="area.id" :value="area.id">{{ area.name }}</option>
+          <option value="">エリアを選択</option>
+          <option v-for="area in editableAreas" :key="area.id" :value="area.id">{{ area.name }}</option>
         </select>
-        <button type="button" class="save-btn" @click="saveConfig" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
+        <button type="button" class="save-btn" @click="saveConfig" :disabled="saving || !selectedAreaId || !selectedAreaEditable">{{ saving ? '保存中...' : '保存' }}</button>
       </div>
     </div>
-    <div class="editor-manual-links">
-      <a href="/manual?path=在庫/棚卸レイアウト編集.md" class="manual-link">マニュアル</a>
-      <a href="/manual/在庫/棚卸レイアウト編集_作業手順書.html" class="manual-link">作業手順書</a>
-      <a href="/manual?path=在庫/棚卸現物入力.md" class="manual-link sub">棚卸現物入力を見る</a>
+    <div class="editor-notice">
+      エリアを選択してから編集してください。エリアの作成・所属置き場の編集は
+      <a href="/manual?path=在庫/棚卸現物入力.md" class="notice-link">「棚卸現物入力」画面</a>
+      で行います。
+      <template v-if="!isAreaAdminUser">
+        班・グループに対応するエリアは、その担当ロールを持つ人だけ編集できます。
+      </template>
     </div>
 
     <div class="editor-body">
@@ -196,6 +199,10 @@ const loading = ref(false);
 const allLocations = ref([]);
 const equipmentList = ref([]);
 const areas = ref([]);
+const divisions = ref([]);
+const groups = ref([]);
+const teams = ref([]);
+const units = ref([]);
 const selectedAreaId = ref("");
 const dsSources = [
   { op: '取得/保存', table: 'production_stocktake_layout_config', desc: 'レイアウト配置設定（エリア別グリッド・セル配置）' },
@@ -210,6 +217,150 @@ const editCellH = ref(1);
 const editCellType = ref("location");
 const editCellColor = ref("");
 const editCellFontSize = ref("");
+const user = computed(() => authState.user || null);
+const isAreaAdminUser = computed(() => Boolean(user.value?.is_superuser || user.value?.username === "admin"));
+const roleRankMap = {
+  staff: 0,
+  office_staff: 0,
+  leader: 1,
+  supervisor: 2,
+  chief: 3,
+  manager: 4,
+  admin: 5,
+};
+const currentRoleRank = computed(() => {
+  const role = String(user.value?.profile?.role || "").trim();
+  return roleRankMap[role] ?? 0;
+});
+const userGroupName = computed(() => String(user.value?.profile?.group_name || "").trim());
+const userDivisionName = computed(() => String(user.value?.profile?.division_name || "").trim());
+const assignedTeamNames = computed(() => {
+  const profile = user.value?.profile || {};
+  const names = new Set();
+  const addName = (value) => {
+    const name = String(value || "").trim();
+    if (name) names.add(name);
+  };
+  addName(profile.team_name);
+  if (Array.isArray(profile.supervisor_team_names)) {
+    profile.supervisor_team_names.forEach(addName);
+  }
+  return names;
+});
+const assignedUnitNames = computed(() => {
+  const profile = user.value?.profile || {};
+  const names = new Set();
+  const addName = (value) => {
+    const name = String(value || "").trim();
+    if (name) names.add(name);
+  };
+  addName(profile.unit_name);
+  if (Array.isArray(profile.leader_unit_names)) {
+    profile.leader_unit_names.forEach(addName);
+  }
+  return names;
+});
+const teamNameById = computed(() => {
+  const map = new Map();
+  teams.value.forEach((team) => {
+    map.set(Number(team.id), String(team.name || "").trim());
+  });
+  return map;
+});
+const groupNameById = computed(() => {
+  const map = new Map();
+  groups.value.forEach((group) => {
+    map.set(Number(group.id), String(group.name || "").trim());
+  });
+  return map;
+});
+const divisionNameById = computed(() => {
+  const map = new Map();
+  divisions.value.forEach((division) => {
+    map.set(Number(division.id), String(division.name || "").trim());
+  });
+  return map;
+});
+const teamByName = computed(() => {
+  const map = new Map();
+  teams.value.forEach((team) => {
+    const name = String(team.name || "").trim();
+    if (name) map.set(name, team);
+  });
+  return map;
+});
+const groupByName = computed(() => {
+  const map = new Map();
+  groups.value.forEach((group) => {
+    const name = String(group.name || "").trim();
+    if (name) map.set(name, group);
+  });
+  return map;
+});
+const unitByName = computed(() => {
+  const map = new Map();
+  units.value.forEach((unit) => {
+    const name = String(unit.name || "").trim();
+    if (name) map.set(name, unit);
+  });
+  return map;
+});
+const canEditArea = (area) => {
+  if (isAreaAdminUser.value) return true;
+  const areaName = String(area?.name || "").trim();
+  if (!areaName) return false;
+
+  const unit = unitByName.value.get(areaName);
+  if (unit) {
+    if (currentRoleRank.value >= roleRankMap.leader && assignedUnitNames.value.has(areaName)) {
+      return true;
+    }
+    const parentTeamName = teamNameById.value.get(Number(unit.parent));
+    if (parentTeamName && currentRoleRank.value >= roleRankMap.supervisor && assignedTeamNames.value.has(parentTeamName)) {
+      return true;
+    }
+    const parentTeam = teams.value.find((team) => Number(team.id) === Number(unit.parent));
+    const parentGroupName = parentTeam ? groupNameById.value.get(Number(parentTeam.parent)) : "";
+    if (parentGroupName && currentRoleRank.value >= roleRankMap.chief && userGroupName.value === parentGroupName) {
+      return true;
+    }
+    const parentGroup = parentTeam ? groups.value.find((group) => Number(group.id) === Number(parentTeam.parent)) : null;
+    const parentDivisionName = parentGroup ? divisionNameById.value.get(Number(parentGroup.parent)) : "";
+    return Boolean(parentDivisionName && currentRoleRank.value >= roleRankMap.manager && userDivisionName.value === parentDivisionName);
+  }
+
+  const team = teamByName.value.get(areaName);
+  if (team) {
+    if (currentRoleRank.value >= roleRankMap.supervisor && assignedTeamNames.value.has(areaName)) {
+      return true;
+    }
+    const parentGroupName = groupNameById.value.get(Number(team.parent));
+    if (parentGroupName && currentRoleRank.value >= roleRankMap.chief && userGroupName.value === parentGroupName) {
+      return true;
+    }
+    const parentGroup = groups.value.find((group) => Number(group.id) === Number(team.parent));
+    const parentDivisionName = parentGroup ? divisionNameById.value.get(Number(parentGroup.parent)) : "";
+    return Boolean(parentDivisionName && currentRoleRank.value >= roleRankMap.manager && userDivisionName.value === parentDivisionName);
+  }
+
+  const group = groupByName.value.get(areaName);
+  if (group) {
+    if (currentRoleRank.value >= roleRankMap.chief && userGroupName.value === areaName) {
+      return true;
+    }
+    const parentDivisionName = divisionNameById.value.get(Number(group.parent));
+    return Boolean(parentDivisionName && currentRoleRank.value >= roleRankMap.manager && userDivisionName.value === parentDivisionName);
+  }
+
+  return false;
+};
+const editableAreas = computed(() => {
+  if (isAreaAdminUser.value) return areas.value;
+  return areas.value.filter((area) => canEditArea(area));
+});
+const selectedAreaEditable = computed(() =>
+  editableAreas.value.some((area) => String(area.id) === String(selectedAreaId.value))
+);
 
 const fontSizeOptions = [
   { value: "", label: "標準" },
@@ -486,9 +637,17 @@ const removeCell = (cellKey) => {
 };
 
 const loadConfig = async () => {
+  if (!selectedAreaId.value || !selectedAreaEditable.value) {
+    cols.value = 8;
+    rowCount.value = 6;
+    cells.value = {};
+    equipmentList.value = [];
+    selectedLocation.value = null;
+    return;
+  }
   loading.value = true;
   try {
-    const params = selectedAreaId.value ? { area_id: selectedAreaId.value } : {};
+    const params = { area_id: selectedAreaId.value };
     const res = await api.stocktakeRecords.getLayoutConfig(params);
     cols.value = res.data.cols || 8;
     rowCount.value = res.data.rows || 6;
@@ -509,44 +668,48 @@ const loadConfig = async () => {
 };
 
 const loadLocations = async () => {
-  try {
-    const res = await api.stocktakeRecords.list({
-      stocktake_date: new Date().toISOString().slice(0, 10),
-      masters_only: 'true',
-    });
-    allLocations.value = res.data.locations || [];
-  } catch (e) {
-    console.error("置き場取得エラー:", e);
+  if (!selectedAreaId.value || !selectedAreaEditable.value) {
+    allLocations.value = [];
+    return;
   }
+  const area = areas.value.find((item) => String(item.id) === String(selectedAreaId.value));
+  allLocations.value = Array.isArray(area?.locations) ? [...area.locations].sort((a, b) => a.localeCompare(b, 'ja')) : [];
 };
 
 const saveConfig = async () => {
+  if (!selectedAreaId.value) {
+    alert("先にエリアを選択してください");
+    return;
+  }
+  if (!selectedAreaEditable.value) {
+    alert("このエリアは変更できません");
+    return;
+  }
   saving.value = true;
   try {
     const payload = {
       cols: cols.value,
       rows: rowCount.value,
       cells: cells.value,
+      area_id: selectedAreaId.value,
     };
-    if (selectedAreaId.value) payload.area_id = selectedAreaId.value;
     await api.stocktakeRecords.saveLayoutConfig(payload);
 
-    if (selectedAreaId.value) {
-      const layoutLocs = [];
-      for (const cell of Object.values(cells.value)) {
-        if (!cell) continue;
-        const type = typeof cell === "string" ? "location" : (cell.type || "location");
-        if (type === "location") {
-          const name = typeof cell === "string" ? cell : cell.location;
-          if (name && !layoutLocs.includes(name)) layoutLocs.push(name);
-        }
+    const layoutLocs = [];
+    for (const cell of Object.values(cells.value)) {
+      if (!cell) continue;
+      const type = typeof cell === "string" ? "location" : (cell.type || "location");
+      if (type === "location") {
+        const name = typeof cell === "string" ? cell : cell.location;
+        if (name && !layoutLocs.includes(name)) layoutLocs.push(name);
       }
-      const area = areas.value.find(a => a.id === Number(selectedAreaId.value));
-      if (area) {
-        const merged = [...new Set([...area.locations, ...layoutLocs])];
-        await api.stocktakeRecords.saveArea({ id: area.id, name: area.name, locations: merged });
-        await loadAreas();
-      }
+    }
+    const area = areas.value.find(a => a.id === Number(selectedAreaId.value));
+    if (area) {
+      const merged = [...new Set([...area.locations, ...layoutLocs])];
+      await api.stocktakeRecords.saveArea({ id: area.id, name: area.name, locations: merged });
+      await loadAreas();
+      await loadLocations();
     }
 
     alert("保存しました");
@@ -561,17 +724,46 @@ const loadAreas = async () => {
   try {
     const res = await api.stocktakeRecords.listAreas();
     areas.value = Array.isArray(res.data?.areas) ? res.data.areas : [];
+    if (selectedAreaId.value && !selectedAreaEditable.value) {
+      selectedAreaId.value = "";
+    }
   } catch (e) {
     console.error("エリア取得エラー:", e);
   }
 };
 
+const loadDepartmentMasters = async () => {
+  try {
+    const [divisionsRes, groupsRes, teamsRes, unitsRes] = await Promise.all([
+      api.accounts.getDivisions(),
+      api.accounts.getGroups(),
+      api.accounts.getTeams(),
+      api.accounts.getUnits(),
+    ]);
+    divisions.value = Array.isArray(divisionsRes.data) ? divisionsRes.data : [];
+    groups.value = Array.isArray(groupsRes.data) ? groupsRes.data : [];
+    teams.value = Array.isArray(teamsRes.data) ? teamsRes.data : [];
+    units.value = Array.isArray(unitsRes.data) ? unitsRes.data : [];
+  } catch (e) {
+    console.error("班・グループ取得エラー:", e);
+    divisions.value = [];
+    groups.value = [];
+    teams.value = [];
+    units.value = [];
+  }
+};
+
 const onAreaChange = () => {
+  selectedLocation.value = null;
+  loadLocations();
   loadConfig();
 };
 
 onMounted(async () => {
-  await Promise.all([loadConfig(), loadLocations(), loadAreas()]);
+  await loadDepartmentMasters();
+  await loadAreas();
+  await loadLocations();
+  await loadConfig();
 });
 </script>
 
@@ -588,30 +780,20 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 
-.editor-manual-links {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+.editor-notice {
   margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
-.manual-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
+.notice-link {
   color: #1d4ed8;
-  text-decoration: none;
-  font-size: 12px;
   font-weight: 700;
-}
-
-.manual-link.sub {
-  border-color: #d1d5db;
-  background: #fff;
-  color: #475569;
+  text-decoration: underline;
 }
 
 .page-title {
