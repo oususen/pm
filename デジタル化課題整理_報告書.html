@@ -1,0 +1,1274 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>デジタル化課題整理_報告書</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #667085;
+      --line: #d0d5dd;
+      --accent: #0f766e;
+      --accent-soft: #e6fffb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, #eef4f6 0%, var(--bg) 100%);
+      line-height: 1.7;
+    }
+    .wrap {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto 56px;
+    }
+    .hero, .content {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+    }
+    .hero {
+      padding: 28px 32px;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #f7fffd 0%, #ffffff 48%, #f6fbfb 100%);
+    }
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.25;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .content {
+      padding: 28px 32px 40px;
+    }
+    h1, h2, h3, h4 { color: #0f172a; line-height: 1.35; }
+    h1 { font-size: 28px; margin-top: 0; }
+    h2 {
+      font-size: 24px;
+      margin-top: 40px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #dfe7ea;
+    }
+    h3 {
+      font-size: 20px;
+      margin-top: 28px;
+      padding-left: 10px;
+      border-left: 5px solid var(--accent);
+    }
+    h4 { font-size: 17px; margin-top: 22px; }
+    p, li { font-size: 14px; }
+    ul, ol { padding-left: 22px; }
+    blockquote {
+      margin: 18px 0;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-left: 4px solid #94a3b8;
+      color: #334155;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 20px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #dbe1e8;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    tr:nth-child(even) td { background: #fcfdfd; }
+    code {
+      font-family: Consolas, Monaco, monospace;
+      background: #f4f4f5;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.95em;
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    a:hover { text-decoration: underline; }
+    hr {
+      border: 0;
+      border-top: 1px solid #e5e7eb;
+      margin: 28px 0;
+    }
+    .note {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: var(--accent-soft);
+      border: 1px solid #b8f0ea;
+      border-radius: 10px;
+      color: #115e59;
+      font-size: 13px;
+    }
+    @media (max-width: 900px) {
+      .wrap { width: min(100vw - 16px, 100%); margin: 12px auto 28px; }
+      .hero, .content { padding: 18px 16px; border-radius: 12px; }
+      .hero h1 { font-size: 24px; }
+      h2 { font-size: 21px; }
+      h3 { font-size: 18px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>業務管轄におけるデジタル化の課題整理と効果振り返り</h1>
+      <p>正式報告書 / 本番PC向けリンク付きHTML</p>
+      <div class="note">画面名リンクは本番環境 <strong>https://10.0.1.232:8501</strong> を開きます。社内ネットワーク接続が必要です。</div>
+    </section>
+    <main class="content">
+<h1 id="section">業務管轄におけるデジタル化の課題整理と効果振り返り</h1>
+<h2 id="section-1">1. 目的</h2>
+<p>業務管轄全体で進めてきたデジタル化について、各領域ごとの課題、デジタル化で実現できること、期待できる効果を整理し、今後の推進方針を明確にする。</p>
+<p>本整理では、以下の7領域を対象とする。</p>
+<ul>
+<li>受注</li>
+<li>計画</li>
+<li>在庫</li>
+<li>生産</li>
+<li>品質</li>
+<li>購買</li>
+<li>出荷</li>
+</ul>
+<hr />
+<h2 id="section-2">2. 全体方針</h2>
+<p>デジタル化の目的は、単なる紙やExcelの置き換えではなく、以下を実現することにある。</p>
+<ul>
+<li>情報の見える化</li>
+<li>作業の標準化</li>
+<li>手作業の削減</li>
+<li>判断の迅速化</li>
+<li>実態に沿う実装</li>
+<li>履歴蓄積による改善活動への展開</li>
+</ul>
+<p>そのため、各領域では「現場で使える運用」と「管理に活かせるデータ化」の両立が重要となる。</p>
+<h3 id="section-3">システム全体規模</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>数量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>画面数（ルート定義）</td>
+<td>約203画面</td>
+</tr>
+<tr>
+<td>データモデル数</td>
+<td>163モデル</td>
+</tr>
+<tr>
+<td>APIエンドポイント数</td>
+<td>約250〜300</td>
+</tr>
+<tr>
+<td>モジュール数</td>
+<td>14モジュール</td>
+</tr>
+<tr>
+<td>対応顧客数</td>
+<td>３社＋３拠点（ティエラ、リーデン、クボタ3拠点、富士商事）FBは拡張予定</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="section-4">3. 領域別整理</h2>
+<h3 id="section-5">3-1. 受注</h3>
+<blockquote>
+<p><strong>実装規模: 8画面 / 17モデル / 13種のCSV取込サービス</strong></p>
+</blockquote>
+<h4 id="section-6">現状課題</h4>
+<ul>
+<li>既存の基幹システムでは、顧客からの受注情報を十分に把握できない</li>
+<li>顧客内示、確定、変更情報の差分が見えない</li>
+<li>前回情報と今回情報の比較に手間がかかる</li>
+<li>変更点の把握が担当者依存になりやすい</li>
+<li>基幹システムでは、受注情報を将来拡張を見据えた形で保持しにくい</li>
+<li>納入地別管理、確定追跡管理、C表No管理（ブレード製品）などの個別業務管理に対応しにくい</li>
+</ul>
+<h4 id="section-7">デジタル化でできること</h4>
+<ul>
+<li>受注一覧画面で、取り込まれた受注情報と受注明細を一覧で確認できる</li>
+<li>受注取込画面で、得意先別、受注タイプ別にCSV受注データを取り込み、一元管理できる</li>
+<li>受注情報をDBに保存し、将来の拡張機能に備えたデータ基盤を作れる</li>
+<li>受注取込時に、取込結果、警告、追加注文有無、重複ファイルを確認できる</li>
+<li>内示、確定、変更履歴をシステム上に記録し、変更情報を追跡できる</li>
+<li>前回差分の自動比較と関係者への通知ができる</li>
+<li>納入地別管理、確定追跡管理、C表No管理（ブレード製品）など、基幹システムで扱いにくい管理を追加できる</li>
+<li>ルーティング未設定の注文品を抽出し、マスタ未整備品を事前に把握できる</li>
+<li>クボタ内示分析画面で、内示変動、確定との差、欠品リスク、安全在庫の目安を可視化できる</li>
+<li>ライン展開機能で、OPEN受注をライン別需要に再生成できる</li>
+<li>自動受注展開機能により、指定時刻にOPEN受注をLineDemandへ自動展開できる</li>
+<li>変更点を見える化し、必要な関係部門へ迅速に連携できる</li>
+</ul>
+<h4 id="section-8">実装済み機能の詳細</h4>
+<p><strong>対応顧客とCSV取込（13サービス）</strong></p>
+<table>
+<thead>
+<tr>
+<th>顧客</th>
+<th>内示取込</th>
+<th>確定取込</th>
+<th>備考</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ティエラ</td>
+<td>T3版・通常版の2種</td>
+<td>T3版・通常版の2種</td>
+<td>計4サービス</td>
+</tr>
+<tr>
+<td>リーデン</td>
+<td>—</td>
+<td>確定取込</td>
+<td>計1サービス</td>
+</tr>
+<tr>
+<td>クボタ（堺・枚方・KMT）</td>
+<td>拠点別に各1種</td>
+<td>拠点別に各1種</td>
+<td>計8サービス（枚方は2027年版も別途）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>主な画面構成</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://10.0.1.232:8501/orders" target="_blank" rel="noopener noreferrer">受注一覧</a></td>
+<td>受注明細の検索・一覧表示</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/csv-upload" target="_blank" rel="noopener noreferrer">CSV取込</a></td>
+<td>得意先別・タイプ別の受注データ取込</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/orders/kubota-naiji-analysis" target="_blank" rel="noopener noreferrer">クボタ内示変化推移分析</a></td>
+<td>版間の内示差分分析</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/orders/naiji-analysis" target="_blank" rel="noopener noreferrer">内示分析</a></td>
+<td>汎用の内示変動分析</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/orders/missing-routing-items" target="_blank" rel="noopener noreferrer">ルーティング未設定注文品</a></td>
+<td>マスタ未整備品の洗い出し</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/orders/first-article-setting" target="_blank" rel="noopener noreferrer">受注お久しぶり製品通知設定</a></td>
+<td>久しぶり受注品の自動通知</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/orders/open-order-audit" target="_blank" rel="noopener noreferrer">旧OPEN受注洗い出し</a></td>
+<td>長期オープン受注の監査</td>
+</tr>
+</tbody>
+</table>
+<p><strong>自動化処理</strong></p>
+<ul>
+<li>ステージングデータからの受注自動生成（<code>create_orders_from_staging</code>）</li>
+<li>久しぶり受注製品の自動通知（重複防止付き、製造漏れ防止）</li>
+<li>内示分析レポートのPowerPoint自動生成</li>
+<li>確定出荷済み自動マーク処理</li>
+</ul>
+<p><strong>データ構造</strong></p>
+<ul>
+<li>CSV → ステージング（顧客別3テーブル） → StgOrderDaily → Order/OrderLineの段階的取込</li>
+<li>クボタ堺専用の納期調整・便割付・AM/PM運用を含む便計画・通知設定テーブルを装備</li>
+</ul>
+<h4 id="section-9">期待効果</h4>
+<ul>
+<li>差分確認工数の削減</li>
+<li>受注変更の見落とし防止</li>
+<li>変更点把握の迅速化</li>
+<li>関係者への共有速度向上</li>
+<li>個別業務に合わせた管理項目追加への対応力向上</li>
+<li>将来の業務拡張に耐えられる受注データ基盤の整備</li>
+<li>ルーティング未整備による後工程トラブルの予防</li>
+<li>需要変動の傾向把握による事前判断精度向上</li>
+<li>受注展開の自動化による定型作業削減</li>
+<li>属人化の低減</li>
+</ul>
+<hr />
+<h3 id="section-10">3-2. 計画</h3>
+<blockquote>
+<p><strong>実装規模: 11画面 / 約64 APIエンドポイント / 13種の定時タスク</strong></p>
+</blockquote>
+<h4 id="section-11">現状課題</h4>
+<ul>
+<li>現基幹システムは進度管理のみで、各工程間の連携がない</li>
+<li>各工程の本当の需要（後工程が何をいつ必要としているか）が把握できない</li>
+<li>運送などの物流制約を現基幹システムは考慮しておらず、計画と実態が乖離している</li>
+<li>よって各工程は各管理者がExcel表で個別管理している</li>
+<li>需要源、実績、在庫はすべて手動取得かつクローズドな状態で、工程間の連携がなく属人化している</li>
+</ul>
+<h4 id="section-12">デジタル化でできること</h4>
+<ul>
+<li><strong>ライン単位で計画するだけで、各工程の個別計画は不要</strong>。ルーティングに基づき工程ガントチャートが自動生成される。汎用システムでは工程ごとに個別の計画立案が必要だが、本システムではライン計画から全工程の計画が連鎖的に決まる</li>
+<li>生産計画入力画面で、ライン別、日付別に計画数量と順序を入力、修正できる</li>
+<li>生産計画入力画面で、在庫、実績、需要、計画、順序、計画在庫を同時に見ながら計画判断できる</li>
+<li>需要取込、在庫計算、工程展開を画面操作で実行し、最新データを計画へ反映できる</li>
+<li>工程ガント表示により、時間軸で工程計画を可視化できる</li>
+<li>負荷表示により、工程別の負荷状況を確認できる</li>
+<li>自動計画生成タスクにより、対象ライン、対象月、実行日を設定して計画を自動生成できる（将来運用予定）</li>
+<li>手動実行機能により、必要時にその場で自動計画を再実行できる（将来運用予定）</li>
+<li>生産計画ロック設定により、過去または直近日の計画を編集不可にし、計画の無秩序な変更を防げる</li>
+<li>ロック期間内の計画変更時は理由を残して変更できる</li>
+<li>表示順、色分け、対象絞り込み、土日非表示などにより、現場が見やすい形で計画画面を使える</li>
+</ul>
+<h4 id="section-13">実装済み機能の詳細</h4>
+<p><strong>主な画面構成</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/plan-input" target="_blank" rel="noopener noreferrer">生産計画入力</a></td>
+<td>ライン別日次計画の手入力（在庫・実績・需要・計画在庫を同時表示）</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/single-process-plan" target="_blank" rel="noopener noreferrer">単独計画</a></td>
+<td>単一工程向け計画入力</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/process-gantt" target="_blank" rel="noopener noreferrer">工程ガント</a></td>
+<td>工程別ガントチャート表示</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/actual-cycle-time" target="_blank" rel="noopener noreferrer">出来高集計</a></td>
+<td>工程実績からサイクルタイムを集計し、完成品CTまで算出</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/line-cycle-time" target="_blank" rel="noopener noreferrer">ラインサイクルタイム</a></td>
+<td>長期負荷計算用の完成品 × 工程CTの登録</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/line-load-chart" target="_blank" rel="noopener noreferrer">長期負荷チャート</a></td>
+<td>ライン負荷の長期視覚化</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/load-calc-menu" target="_blank" rel="noopener noreferrer">負荷計算メニュー</a></td>
+<td>CRP/負荷計算の入口</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/line-calendars" target="_blank" rel="noopener noreferrer">ライン勤務カレンダ</a></td>
+<td>ラインごとの稼働日設定</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/plan-change-history" target="_blank" rel="noopener noreferrer">生産計画変更履歴</a></td>
+<td>計画変更ログの時系列表示</td>
+</tr>
+<tr>
+<td>計画乖離レポート</td>
+<td>計画vs実績の差異分析</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/gantt-display-product-map" target="_blank" rel="noopener noreferrer">ガントチャート設定</a></td>
+<td>表示品マップの設定</td>
+</tr>
+</tbody>
+</table>
+<p><strong>まとめ生産</strong></p>
+<ul>
+<li>特定曜日に数日分を集約する計画に対応</li>
+</ul>
+<p><strong><a href="https://10.0.1.232:8501/production/load-calc-menu" target="_blank" rel="noopener noreferrer">負荷計算メニュー</a></strong></p>
+<ul>
+<li>出来高集計: 工程実績からサイクルタイムを計算し、BOM展開で完成品CTまで算出できる</li>
+<li>ラインサイクルタイム: 長期負荷計算用の <code>製品 × ライン × 工程</code> のCT（秒/個）を登録・補正できる</li>
+<li>長期負荷チャート: 需要数量 × CT からライン別の負荷率を日・週・月単位で可視化できる</li>
+<li>ライン計画や需要に対し、どのラインが将来的に逼迫するかを早期に把握でき、前倒し調整や計画見直し判断に使える</li>
+</ul>
+<p><strong>在庫・計画在庫・進度計算エンジン</strong></p>
+<p>汎用の生産管理パッケージでは「在庫」を一元的に管理するのが一般的だが、本システムでは<strong>在庫（実績ベース）・計画在庫（計画ベース）・進度（需要に対する実績差分）を分離</strong>し、それぞれ異なる計算ロジックで算出している。</p>
+<p>計画在庫はMRP理論のPAB（Projected Available Balance）を基礎としつつ、以下の独自拡張を加えている:</p>
+<ul>
+<li><strong>工程間連携</strong>: 後工程の計画（＝自工程にとっての需要）と自工程の計画（＝供給）を組み合わせて計算。汎用パッケージでは完成品レベルの在庫管理にとどまり、工程単位で「後工程が何を計画しているか」をリアルタイムに反映する仕組みは存在しない</li>
+<li><strong>時間帯別計算ロジック</strong>: 過去（実績確定値）、今日（時間帯に応じて実績と計画を切替え）、将来（計画数）で異なる計算式を適用。日替わり時刻（8:00）も考慮した精密な切替えを実装</li>
+<li>在庫計算: 仕損・調整・BOMリードタイム・計算特例ルールを考慮した日次再計算</li>
+<li>進度計算: 「前日進度 + 実績 − 需要 + 調整 − 仕損」の日次累積方式（LineDemandベース）</li>
+<li>CRPサービス: 工程別の能力所要量計算</li>
+<li>BOM展開サービス: 構成品展開と所要量算出</li>
+</ul>
+<p><strong>定時タスク（13種）</strong></p>
+<ul>
+<li>在庫再計算、自動計画生成、受注展開、安全在庫計算、発注チェック 等</li>
+</ul>
+<p><strong>ロック機能</strong></p>
+<ul>
+<li>直近N日の計画変更を禁止するロック日数設定</li>
+<li>自動計画時の順序ロック制御</li>
+</ul>
+<h4 id="section-14">期待効果</h4>
+<ul>
+<li>計画作成時間の短縮</li>
+<li>計画変更への追従性向上</li>
+<li>計画精度の向上</li>
+<li>計画根拠を見ながら判断できることによる調整品質向上</li>
+<li>工程負荷の見える化による無理な計画の抑制</li>
+<li>自動計画による定型作業削減</li>
+<li>ロック管理による計画変更統制の強化</li>
+<li>現場と管理側の認識ずれ低減</li>
+<li>手戻りの削減</li>
+</ul>
+<hr />
+<h3 id="section-15">3-3. 在庫</h3>
+<blockquote>
+<p><strong>実装規模: 10画面 / 棚卸入力・調整・初期化を含む在庫運用基盤</strong></p>
+</blockquote>
+<h4 id="section-16">現状課題</h4>
+<ul>
+<li>紙やExcel中心の棚卸では、現物数の収集、転記、確認に時間がかかる</li>
+<li>棚ごと、置場ごと、担当者ごとの進捗が見えにくい</li>
+<li>棚卸結果を在庫、計画在庫、進度へ一貫反映しにくい</li>
+<li>棚卸後の基準値再構築が担当者作業に依存しやすい</li>
+<li>在庫調整理由や履歴が分散し、後追い確認しにくい</li>
+</ul>
+<h4 id="section-17">デジタル化でできること</h4>
+<ul>
+<li>棚卸現物入力により、置場、品番、数量、記入者、備考をその場で入力できる</li>
+<li>棚卸レイアウト編集により、倉庫や置場の見取りに沿って入力しやすい画面を構成できる</li>
+<li>在庫調整、計画在庫調整、進度調整を画面から履歴付きで実施できる</li>
+<li>棚卸初期化により、棚卸実績を基準に在庫、計画在庫、進度を一貫して再構築できる</li>
+<li>実進度求めにより、棚卸在庫と親需要窓から基準進度の妥当性確認ができる</li>
+</ul>
+<h4 id="section-18">実装済み機能の詳細</h4>
+<p><strong>主な画面構成</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory" target="_blank" rel="noopener noreferrer">在庫管理</a></td>
+<td>在庫系機能の起点メニュー</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/stocktake-input" target="_blank" rel="noopener noreferrer">棚卸現物入力</a></td>
+<td>エリア別、置場別の棚卸数量入力、記入者管理、履歴確認</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/stocktake-layout" target="_blank" rel="noopener noreferrer">棚卸レイアウト編集</a></td>
+<td>棚、置場、設備配置に合わせた入力レイアウト設定</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/adjustments" target="_blank" rel="noopener noreferrer">在庫調整メニュー</a></td>
+<td>調整系画面の入口</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/adjustments/progress" target="_blank" rel="noopener noreferrer">進度調整</a></td>
+<td>実進度の補正</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/adjustments/stock" target="_blank" rel="noopener noreferrer">在庫調整</a></td>
+<td>実在庫の補正</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/adjustments/planned-stock" target="_blank" rel="noopener noreferrer">計画在庫調整</a></td>
+<td>計画在庫の補正</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/adjustments/history" target="_blank" rel="noopener noreferrer">調整履歴</a></td>
+<td>各種調整の履歴追跡</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/inventory/actual-progress" target="_blank" rel="noopener noreferrer">実進度求め</a></td>
+<td>棚卸在庫と親別需要から実進度を試算</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/settings/stocktake-init" target="_blank" rel="noopener noreferrer">棚卸初期化</a></td>
+<td>棚卸Excel/CSV取込と在庫・計画在庫・進度の初期化計算</td>
+</tr>
+</tbody>
+</table>
+<p><strong>棚卸運用の特徴</strong></p>
+<ul>
+<li>現物入力とレイアウト編集を分けることで、現場入力しやすさと事前準備を両立できる</li>
+<li>棚卸記録は日付単位、記入者単位で保持でき、棚卸の進み具合や入力漏れを確認しやすい</li>
+<li>棚卸初期化では、棚卸日を基準に在庫だけでなく計画在庫、進度まで再構築できる</li>
+<li>通常計算と棚卸初期化計算を分離しているため、日常運用を壊さずに棚卸基準への切替ができる</li>
+<li>ルーティング未整備品や未反映品番を一覧で把握でき、初期化前提条件の整備につなげられる</li>
+</ul>
+<h4 id="section-19">期待効果</h4>
+<ul>
+<li>棚卸作業の転記工数削減</li>
+<li>棚卸反映の迅速化</li>
+<li>在庫基準値の整合性向上</li>
+<li>棚卸結果を速やかに在庫・進度へ反映し、以降の生産計画の確実性が高まる</li>
+<li>調整理由と履歴の追跡性向上</li>
+</ul>
+<hr />
+<h3 id="section-20">3-4. 生産</h3>
+<blockquote>
+<p><strong>実装規模: 48画面 / 38ルート / 7種の実績入力方式 / 51以上のマイグレーション</strong></p>
+</blockquote>
+<h4 id="section-21">現状課題</h4>
+<ul>
+<li>生産指示を紙で現場に配布し、現場作業者が手書きで実績を記入している</li>
+<li>紙の回収は翌日。基幹システムへの入力は翌日以降で、さらに遅れるラインもある</li>
+<li>手書きのため文字が読みにくい、誤入力がある、指示紙の紛失も発生する</li>
+<li>工程ごとの状況が分断され、全体像が見えにくい</li>
+<li>リアルタイムの進捗把握ができず、異常への対応が遅れる</li>
+<li>進捗の反映が遅れるため、管理判断が勘に頼りがちになる</li>
+</ul>
+<h4 id="section-22">デジタル化でできること</h4>
+<ul>
+<li>工程実績のリアルタイム入力</li>
+<li>作業者、設備、工程単位での進捗把握</li>
+<li>現時点で必要な作業対象の絞り込み表示</li>
+<li>工程順や条件に応じた入力制御</li>
+<li>進度状況の一覧化</li>
+</ul>
+<h4 id="section-23">実装済み機能の詳細</h4>
+<p><strong>実績入力方式（7種類）</strong> — 現場の作業形態に合わせた多様な入力画面を実装</p>
+<table>
+<thead>
+<tr>
+<th>入力方式</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>工程作業入力</td>
+<td>モバイルでの工程作業記録</td>
+</tr>
+<tr>
+<td>工程作業入力（デスクトップ）</td>
+<td>PC・タブレットでの工程作業記録</td>
+</tr>
+<tr>
+<td>1人2工程入力</td>
+<td>1人が2工程を同時に担当するケース</td>
+</tr>
+<tr>
+<td>2人1設備入力</td>
+<td>2人で1台の設備を操作するケース</td>
+</tr>
+<tr>
+<td>レーザー実績入力</td>
+<td>レーザー工程の専用入力</td>
+</tr>
+<tr>
+<td>ブレーキ実績入力</td>
+<td>ブレーキライン工程の専用入力（ラベル印刷機能付き）</td>
+</tr>
+<tr>
+<td>スポット実績入力</td>
+<td>スポット作業の記録</td>
+</tr>
+</tbody>
+</table>
+<p><strong>リアルタイム記録</strong></p>
+<ul>
+<li>タイムスタンプ付きの記録タイプ: 生産完成、仕損、設備状態変更、作業者アクション</li>
+<li>作業セッション管理: 開始〜終了の時間を自動追跡</li>
+</ul>
+<p><strong>進捗・監視系画面</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>進度のみ表示</td>
+<td>進度に特化した簡易表示</td>
+</tr>
+<tr>
+<td>ライン稼働監視</td>
+<td>各ラインの現在状態・本日生産数・計画数をリアルタイム表示</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/production/process-gantt" target="_blank" rel="noopener noreferrer">工程ガント</a></td>
+<td>工程別のガントチャート</td>
+</tr>
+<tr>
+<td>計画乖離レポート</td>
+<td>計画vs実績の差異分析</td>
+</tr>
+</tbody>
+</table>
+<p><strong>設備状態管理</strong></p>
+<ul>
+<li>6種の状態区分: 運転中、待機、段取り、保全、故障、停止</li>
+</ul>
+<p><strong>その他の実装済み機能</strong></p>
+<ul>
+<li>仕損品記録・仕損履歴</li>
+<li>朝礼管理（一覧/作成/実行の3画面）</li>
+<li>出来高集計・ラインサイクルタイム入力</li>
+<li>工程別コツ・注意事項管理（ナレッジ登録・閲覧）</li>
+<li>生産実績照会・実績変更</li>
+</ul>
+<h4 id="section-24">期待効果</h4>
+<ul>
+<li>進捗把握の迅速化</li>
+<li>現場と管理側の情報差の縮小</li>
+<li>遅れや異常への初動対応迅速化</li>
+<li>実績データ蓄積による改善材料の可視化</li>
+<li>作業実態に即した運用定着</li>
+</ul>
+<hr />
+<h3 id="section-25">3-5. 品質</h3>
+<blockquote>
+<p><strong>実装規模: 14画面 / 28モデル / 4段階承認ワークフロー / 教育認定システム</strong></p>
+</blockquote>
+<h4 id="section-26">現状課題</h4>
+<ul>
+<li>紙帳票中心だと記録が分散しやすい</li>
+<li>工程横断での確認や分析がしにくい</li>
+<li>帳票改訂のたびに運用負荷が発生する</li>
+<li>不良傾向や再発傾向を構造的に把握しづらい</li>
+</ul>
+<h4 id="section-27">デジタル化でできること</h4>
+<ul>
+<li>チェックシートのデジタル化</li>
+<li>品質項目の構造化管理</li>
+<li>工程順に沿った入力制御</li>
+<li>製品単位、工程単位での品質記録一元化</li>
+<li>誰が、いつ、どこを確認したかの履歴保存</li>
+<li>将来的な項目別、工程別、期間別分析への展開</li>
+</ul>
+<h4 id="section-28">実装済み機能の詳細</h4>
+<p><strong>1. 設備点検（4画面）</strong></p>
+<ul>
+<li>テンプレートマスタ: 日次点検・定期実測の2区分に対応</li>
+<li>記録種別: チェック、数値、写真+数値、写真、文字の5種</li>
+<li>月次レビュー: 週間リーダ確認・月間班長確認</li>
+<li>4段階承認ワークフロー: 下書き → 班長 → 係長 → 部長（差戻し対応・タスク管理・履歴ログ付き）</li>
+</ul>
+<p><strong>2. 工程一体チェックシート（6画面）</strong></p>
+<ul>
+<li>製品チェックシートを発展させ、1つのテンプレートで全工程のチェック項目を内包する構造に統合</li>
+<li>バッチ → 台目 → チェック結果の3階層記録</li>
+<li>台紙上の手書き描画データもJSON保持</li>
+<li>リーダ確認・班長確認のワークフロー</li>
+<li>トレンド分析画面、問題解決ツール画面</li>
+</ul>
+<p><strong>3. 教育・認定（1画面、8モデル）</strong></p>
+<ul>
+<li>教材マスタに問題バンクを紐付け</li>
+<li>試験方式: 固定出題・ランダム出題に対応</li>
+<li>自動採点（合格/再教育判定）</li>
+<li>教育 → 認定の2ステップ進捗管理</li>
+<li>受講者の組織スナップショット保持</li>
+</ul>
+<p><strong>4. 仕損管理（2画面）</strong></p>
+<ul>
+<li>判定ステータス: 判定待ち → 使用可 / 仕損確定 / 一部使用可</li>
+<li>BOM展開明細ごとの補充ステータス追跡</li>
+<li>工程リアルタイム記録との1対1紐付け</li>
+</ul>
+<h4 id="section-29">期待効果</h4>
+<ul>
+<li>記録精度の向上</li>
+<li>トレーサビリティの強化</li>
+<li>監査対応力の向上</li>
+<li>品質異常の傾向把握</li>
+<li>再発防止、工程改善への活用</li>
+</ul>
+<hr />
+<h3 id="section-30">3-6. 購買</h3>
+<blockquote>
+<p><strong>実装規模: 20画面 / 17モデル / 自動送信2種 / 5種の納入パターン</strong></p>
+</blockquote>
+<h4 id="section-31">現状課題</h4>
+<ul>
+<li>納入予定作成や仕入先連絡が手作業に依存しやすい</li>
+<li>仕入先とのやり取りが個別対応になりやすい</li>
+<li>回答内容の反映や確認に時間がかかる</li>
+<li>担当者依存が強く、抜け漏れや対応遅れが発生しやすい</li>
+</ul>
+<h4 id="section-32">デジタル化でできること</h4>
+<ul>
+<li>納入リストの自動作成</li>
+<li>納入リストの自動送信</li>
+<li>返信データの取込と保存</li>
+<li>納入パターンに応じた日付判定</li>
+<li>失敗時や対象外日の自動通知</li>
+<li>仕入先条件や区分の設定化</li>
+</ul>
+<h4 id="section-33">実装済み機能の詳細</h4>
+<p><strong>主な画面構成</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>仕入れ管理メニュー</td>
+<td>購買機能の起点画面</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/plan-input" target="_blank" rel="noopener noreferrer">仕入れ計画</a></td>
+<td>購買計画の入力</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/inventory" target="_blank" rel="noopener noreferrer">仕入れ在庫/残量</a></td>
+<td>在庫・残量照会</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/progress-only" target="_blank" rel="noopener noreferrer">仕入れ進度のみ</a></td>
+<td>進捗確認</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/supplier-calendar" target="_blank" rel="noopener noreferrer">仕入れ先カレンダ</a></td>
+<td>仕入先の稼働日管理</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/receiving" target="_blank" rel="noopener noreferrer">仕入れ検収</a></td>
+<td>入荷検収処理</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/delivery-schedule" target="_blank" rel="noopener noreferrer">納入予定</a></td>
+<td>納入スケジュール管理</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/actual-input" target="_blank" rel="noopener noreferrer">仕入れ実績入力</a></td>
+<td>納入実績の入力</td>
+</tr>
+<tr>
+<td>納入実績照会 / 編集</td>
+<td>実績の参照・修正</td>
+</tr>
+<tr>
+<td>発注提案書一覧 / 詳細</td>
+<td>発注提案の生成・確認</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/purchase/order-tasks" target="_blank" rel="noopener noreferrer">発注タスク一覧</a></td>
+<td>承認ワークフロー管理</td>
+</tr>
+<tr>
+<td>仕入先マスタ</td>
+<td>仕入先の基本情報管理</td>
+</tr>
+<tr>
+<td>仕入先トラックマスタ</td>
+<td>仕入先のトラック情報管理</td>
+</tr>
+<tr>
+<td>納入パターン設定</td>
+<td>納入スケジュールパターン定義</td>
+</tr>
+<tr>
+<td>仕入計画ロック設定</td>
+<td>直近計画の変更禁止</td>
+</tr>
+<tr>
+<td>発注承認者設定</td>
+<td>承認者の設定</td>
+</tr>
+</tbody>
+</table>
+<p><strong>自動送信機能（2種）</strong></p>
+<ul>
+<li>自動納入リスト送信: 仕入先へ納入リストをメール自動送信（リードタイム・進度日数・添付ファイル切替・本文カスタマイズ対応）</li>
+<li>注文書自動送信: 現在は注文書Excelを自動生成・メール送信している（PDF実装も可能）。安全在庫・トラック積載量計算付きで、計画進度と実進度を分離して持つことで、確定受注反映の遅れを内示反映で補いながら判断でき、自動発注判断につなげている。既存の基幹システムは内示を進度に反映しないため、同じ考え方の注文書自動作成は難しい</li>
+</ul>
+<p><strong>納入パターン（5種の繰返し種別）</strong></p>
+<table>
+<thead>
+<tr>
+<th>パターン種別</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>毎週曜日</td>
+<td>特定曜日に繰り返し</td>
+</tr>
+<tr>
+<td>毎月日付</td>
+<td>月の特定日に繰り返し</td>
+</tr>
+<tr>
+<td>月の第N週曜日</td>
+<td>第1月曜日 等</td>
+</tr>
+<tr>
+<td>毎営業日</td>
+<td>営業日ごと</td>
+</tr>
+<tr>
+<td>N営業日ごと</td>
+<td>N営業日間隔</td>
+</tr>
+</tbody>
+</table>
+<p><strong>発注提案・承認ワークフロー</strong></p>
+<ul>
+<li>発注提案 → 提案行 → 承認 → タスクの4テーブル構成</li>
+<li>上長承認フロー付き</li>
+</ul>
+<p><strong>外作管理</strong></p>
+<ul>
+<li>外作注文書・進度表比較画面を実装済み</li>
+<li>外作専用の納入・出荷管理ルートも存在</li>
+</ul>
+<p><strong>設計変更管理</strong></p>
+<ul>
+<li>設計変更案件・対象部品の管理テーブルを購買アプリ内に装備</li>
+</ul>
+<h4 id="section-34">期待効果</h4>
+<ul>
+<li>事務作業の削減</li>
+<li>仕入先対応の標準化</li>
+<li>納入予定精度の向上</li>
+<li>担当者負荷の軽減</li>
+<li>納入遅れリスクの低減</li>
+</ul>
+<hr />
+<h3 id="section-35">3-7. 出荷</h3>
+<blockquote>
+<p><strong>実装規模: 17画面 / 10モデル / 約30 APIエンドポイント / 5社の顧客別対応</strong></p>
+</blockquote>
+<h4 id="section-36">現状課題</h4>
+<ul>
+<li>出荷進度や納期状況の把握が遅れやすい</li>
+<li>内示と確定が分かりにくく、かつ納入先情報が不足しやすいため、納期調整判断が担当者の勘に依存しやすい</li>
+<li>各注文ごとの進捗追跡ができず、個別の問い合わせや確認に時間がかかりやすい</li>
+<li>各注文の出荷品がどの生産日の実績に紐づくか追えず、出荷と生産の結び付き確認がしにくい</li>
+<li>出荷実績のシステム反映が困難で、実績確定や進捗更新が遅れやすい</li>
+<li>現場、事務、顧客対応の間で情報差が発生しやすい</li>
+</ul>
+<h4 id="section-37">デジタル化でできること</h4>
+<ul>
+<li>出荷進度の見える化</li>
+<li>内示と確定の区分表示</li>
+<li>注番単位での追跡ができる</li>
+<li>出荷品を、納期、出発日、到着日、便、生産日内訳まで含めて追跡できる</li>
+<li>納期変更や不足リスクの早期把握</li>
+<li>得意先別、納入先別の必要情報整理表示</li>
+<li>対応履歴、変更履歴の記録</li>
+<li>クボタ堺向けでは、納期調整から便計画、積込、出発、完了までを一連で管理できる</li>
+<li>便計画時に、AM/PMの負荷感、便ごとの積載可否、占有率超過を事前に確認できる</li>
+<li>自動便振分により、営業日、便条件、容器条件を踏まえた割付判断を標準化できる</li>
+<li>集荷明細PDFや連絡メモ連携により、事務、現場、業者間の情報受け渡しを早く正確にできる</li>
+</ul>
+<h4 id="section-38">実装済み機能の詳細</h4>
+<p><strong>出荷業務（6画面）</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/instruction" target="_blank" rel="noopener noreferrer">出荷指示</a></td>
+<td>受注データからの出荷指示</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/actual" target="_blank" rel="noopener noreferrer">出荷実績照会</a></td>
+<td>実績の参照</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/actual-register" target="_blank" rel="noopener noreferrer">出荷実績登録</a></td>
+<td>実績の手動登録（修正履歴管理付き）</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/actual-trace" target="_blank" rel="noopener noreferrer">出荷情報追跡</a></td>
+<td>品番・納入先・注番・便・出発日・到着日・生産日内訳での出荷実績追跡</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/progress" target="_blank" rel="noopener noreferrer">出荷進度照会</a></td>
+<td>内示/確定/実績/調整による累積進度管理</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/progress-edit" target="_blank" rel="noopener noreferrer">実績変更・進度調整</a></td>
+<td>実績修正と進度調整</td>
+</tr>
+</tbody>
+</table>
+<p><strong>帳票出力（3画面）</strong></p>
+<table>
+<thead>
+<tr>
+<th>帳票名</th>
+<th>対象顧客</th>
+<th>特徴</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>出荷指示書</td>
+<td>ティエラ</td>
+<td>4便構成のPDF生成</td>
+</tr>
+<tr>
+<td>富士商事出荷指示書</td>
+<td>富士商事</td>
+<td>台車レイアウト付きPDF（1便14台車、2便まで対応）</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/hirakata-pickup" target="_blank" rel="noopener noreferrer">枚方集荷依頼書</a></td>
+<td>枚方</td>
+<td>PDF/Excel生成、メール送信機能付き</td>
+</tr>
+</tbody>
+</table>
+<p><strong>出荷情報追跡の特徴</strong></p>
+<ul>
+<li>品番、納入先、注番、便名、納期、出発日、到着日で検索でき、出荷実績を便明細単位で追跡できる</li>
+<li>各出荷実績に対し、生産日内訳と注番内訳を持てるため、「どの注文が、どの便で、どの生産日の実績から出荷されたか」を確認できる</li>
+<li>出荷担当画面で登録した生産日内訳とつながっており、出荷と生産の結び付きを後から追跡できる</li>
+<li>問い合わせ対応、トレーサビリティ確認、出荷実績検証の共通画面として使える</li>
+</ul>
+<p><strong>便計画・進捗（5画面）</strong></p>
+<table>
+<thead>
+<tr>
+<th>画面名</th>
+<th>機能概要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/kubota-sakai-due-adjustment" target="_blank" rel="noopener noreferrer">クボタ堺納期調整</a></td>
+<td>受注取込後の納期再配分、注番管理、変更理由記録、メール通知、便計画担当向け連絡メモ</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/kubota-sakai-trip-planning" target="_blank" rel="noopener noreferrer">クボタ堺便計画</a></td>
+<td>自動便振分、AM/PM負荷確認、トラック積載プレビュー、占有率警告、集荷明細PDF、表示設定</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/trip-execution" target="_blank" rel="noopener noreferrer">便確認（出荷担当）</a></td>
+<td>便ステータス管理（計画→積込中→出発済→完了の4段階）、生産日内訳、実績登録、連絡メモ</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/trip-progress" target="_blank" rel="noopener noreferrer">便確認（業務員）</a></td>
+<td>業務員向けの便ステータス確認、連絡メモ（通常/緊急/業者の3種）、便別の注意事項共有</td>
+</tr>
+<tr>
+<td><a href="https://10.0.1.232:8501/shipping/trip-progress-summary" target="_blank" rel="noopener noreferrer">便進捗サマリー</a></td>
+<td>期間指定の便進捗一覧</td>
+</tr>
+</tbody>
+</table>
+<p><strong>クボタ堺便計画・進捗の特徴</strong></p>
+<ul>
+<li>納期調整の保存結果をそのまま便計画へ連携し、再入力なしで割付判断に移れる</li>
+<li>自動便振分は、便マスタ、営業日カレンダ、到着日ずれ、容器寸法、入数、段積み条件を踏まえて実行される</li>
+<li>便計画画面では、便ごとの占有率、積載超過、積載平面図を見ながら保存前に妥当性確認できる</li>
+<li>午前便・午後便の負荷感を先に確認できるため、正式な実便割付前の山崩し判断がしやすい</li>
+<li>便の違いによる日ずれが後工程LTへ反映されるため、物流制約を織り込んだ後工程の長期計画を立てやすくなる</li>
+<li>集荷明細PDFを出発日単位で出力でき、便計画結果をそのまま現場・運送業者へ渡せる</li>
+<li>便確認では、生産日内訳を保持したまま積込完了、出発、完了へ進められ、実績履歴も追跡できる</li>
+<li>通常、緊急、業者向けの連絡メモを便単位で共有でき、現場と事務所の認識ずれを減らせる</li>
+<li>便進捗サマリーで期間内の便進捗を一覧化でき、停滞日の把握やフォロー対象の抽出がしやすい</li>
+</ul>
+<p><strong>便管理の仕組み（ティエラ4便体制）</strong></p>
+<table>
+<thead>
+<tr>
+<th>便</th>
+<th>出発時刻</th>
+<th>割当ルール</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1便</td>
+<td>06:00</td>
+<td>容器名「4-5T」製品を割当て、容器数で1便/4便に均等分割</td>
+</tr>
+<tr>
+<td>2便</td>
+<td>06:30</td>
+<td>リーデン受注・特定機種</td>
+</tr>
+<tr>
+<td>3便</td>
+<td>10:00</td>
+<td>SEATBASE/TANK製品群</td>
+</tr>
+<tr>
+<td>4便</td>
+<td>13:00</td>
+<td>1便との均等分割分</td>
+</tr>
+</tbody>
+</table>
+<p><strong>顧客別対応</strong></p>
+<table>
+<thead>
+<tr>
+<th>顧客</th>
+<th>対応内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ティエラ</td>
+<td>メインの出荷指示書（4便振分け）</td>
+</tr>
+<tr>
+<td>リーデン</td>
+<td>ティエラ2便に含めて出荷</td>
+</tr>
+<tr>
+<td>クボタ堺</td>
+<td>専用の納期調整・便計画・便進捗画面、積載判定、配送進捗モデル</td>
+</tr>
+<tr>
+<td>富士商事</td>
+<td>専用出荷指示書（台車レイアウト、品番切替日対応）</td>
+</tr>
+<tr>
+<td>枚方</td>
+<td>集荷依頼書（PDF/Excel/メール）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>設定</strong></p>
+<ul>
+<li>納入地別出荷加算日数: 納入先ごとのリードタイム・色設定</li>
+</ul>
+<h4 id="section-39">期待効果</h4>
+<ul>
+<li>納期調整の迅速化</li>
+<li>顧客対応品質の向上</li>
+<li>出荷遅延リスクの早期発見</li>
+<li>部門間の認識ずれの低減</li>
+<li>説明責任の強化</li>
+<li>便割付判断の標準化</li>
+<li>積載超過や未割付の見逃し防止</li>
+<li>事務、現場、運送業者間の連携速度向上</li>
+<li>各ステップ連携により、情報共有を進められる</li>
+<li>リアルタイムに進捗を反映できる</li>
+<li>出荷実績と便進捗の一貫管理による追跡性向上</li>
+<li>基幹システムへの自動入力により、事務作業を低減</li>
+</ul>
+<hr />
+<h2 id="section-40">4. 横断的な課題と実装済みの基盤</h2>
+<p>各領域で個別にデジタル化を進めても、全体最適に至るには横断課題の解消が必要である。</p>
+<ul>
+<li>領域間データ連携の強化</li>
+<li>例外運用の標準化</li>
+<li>通知、アラートの充実</li>
+<li>現場定着を意識したUI改善</li>
+<li>蓄積データの分析活用</li>
+<li>部門間での情報共有ルール統一</li>
+</ul>
+<h3 id="section-41">横断基盤として実装済みの機能</h3>
+<p><strong>マスタ管理（20画面 / 30モデル）</strong></p>
+<p>製品、製品グループ、品番変換、容器、設備、得意先、仕入先、仕入先トラック、工程、ライン、カレンダ、勤務パターン、BOM（構成）、ルーティング、連絡先、携帯端末、逆展開（Where Used）、加工先一括変更 等</p>
+<p><strong>通知・コミュニケーション（4画面 / 7モデル）</strong></p>
+<ul>
+<li>通知一覧・通知編集</li>
+<li>Web Push通知（VAPID）+ FCM（Android）によるプッシュ通知</li>
+<li>社内通話（WebRTCシグナリング + 録音機能付き、文字起こし機能拡張予定）</li>
+<li>通話録音一覧</li>
+</ul>
+<p><strong>ユーザー管理・権限管理（27設定画面 / 9モデル）</strong></p>
+<ul>
+<li>役職6段階: 事業部長、部長、係長、班長、リーダー、一般</li>
+<li>雇用形態6種に対応</li>
+<li>組織4階層: 事業部 → 係 → 班 → グループ</li>
+<li>4層権限モデル: ユーザー権限、部門権限、役職権限、部門×役職権限</li>
+<li>約90種のリソースに対するcan_view/can_edit制御</li>
+<li>権限テンプレート、SMTP設定、組織管理画面</li>
+</ul>
+<h3 id="section-42">計画在庫の考え方と汎用システムとの違い</h3>
+<p>本システムの中核には、<strong>在庫と計画在庫と進度を分離し、工程間の計画連鎖から需要を導出する</strong>という独自の思想がある。この思想を起点に、工程間連携、リードタイム可変、自動計画生成が派生し、汎用パッケージでは実現できない仕組みを形成している。</p>
+<h4 id="section-43">思想: 在庫と計画在庫と進度との分離</h4>
+<p>汎用の生産管理パッケージでは「在庫」を一元的に管理し、単一の前方積み上げ（現在庫 + 入庫予定 − 出庫予定）で将来在庫を計算するのが一般的である。</p>
+<p>本システムでは<strong>在庫（実績ベース）・計画在庫（計画ベース）・進度（需要に対する実績差分）を分離</strong>して管理している。計画在庫はMRP理論のPAB（Projected Available Balance）を基礎としつつ、以下の2つの独自拡張を加えている。</p>
+<p><strong>1. 工程間連携による需要導出</strong></p>
+<ul>
+<li>後工程の計画（＝自工程にとっての需要）と自工程の計画（＝供給）を組み合わせて計算</li>
+<li>汎用パッケージでは完成品レベルの在庫管理にとどまり、工程単位で「後工程が何を計画しているか」をリアルタイムに反映する仕組みは存在しない</li>
+</ul>
+<p><strong>2. 時間帯別計算ロジック</strong></p>
+<ul>
+<li>過去（実績確定値）、今日（時間帯に応じて実績と計画を切替え）、将来（計画数）で異なる計算式を適用</li>
+<li>日替わり時刻（8:00）も考慮した精密な切替えを実装</li>
+<li>汎用システムでは時間帯による計算ロジックの切替えは存在しない</li>
+</ul>
+<h4 id="section-44">展開1: 計画結果がリードタイムを決める逆転構造</h4>
+<p>汎用システムではリードタイムはマスタに設定された固定値であり、「LTは入力、計画は出力」が前提である。本システムでは計画在庫の思想を基盤に、<strong>計画の結果がLTを決める</strong>という逆方向の関係を実現している。</p>
+<ul>
+<li><strong>フロア配送のsq_no（順序番号）</strong>: 同一日内でも配送順序によって後工程への実効LTが変動。日単位でしか精度が出ない汎用システムに対し、日内の配送タイミングまで反映</li>
+<li><strong>クボタ堺便の日ずれ</strong>: 便の積載量・トラック容量などの物流制約により出荷日が決まり、それが後工程LTに反映。固定LTでは捉えられない物流実態を計画に織り込む</li>
+</ul>
+<h4 id="section-45">展開2: 工程間連携に基づく自動計画生成</h4>
+<p>計画在庫の「後工程の計画＝自工程の需要」という思想を応用し、フロアスポットの自動計画を実現している。「後工程のLT後の計画 ＝ 本日の自工程の需要」として計画を自動投入する仕組みであり、顧客需要ではなく工程間の計画連鎖から需要を導出する点が汎用システムと根本的に異なる。</p>
+<ul>
+<li>現時点でほぼ人手の調整なしで運用できており、自動計画の精度が実用レベルに達している</li>
+<li>将来は計画在庫に基づく自動計画へ拡張し、さらに高精度な自動化を目指す</li>
+<li>現在のアプリ運用は板金ライン、フロアライン、タンクラインの3ライン</li>
+<li>3班が運用に乗れば、後工程の計画データがシステム上に完全に揃い、板金スポットは完全自動計画が実現可能。運用ラインが増えるほど自動化の範囲が連鎖的に拡大する構造</li>
+</ul>
+<h4 id="section-46">自社開発だからこそ可能な業務適合</h4>
+<p>上記の思想・展開に加え、自社の業務形態に完全に適合した実装が可能であることも自社開発の強みである。</p>
+<ul>
+<li>生産では7種類の実績入力方式に対応し、現場ごとの作業形態に合わせた入力運用ができる</li>
+<li>購買では納入パターン、仕入先条件、自動送信など、多様な取引先運用に合わせた対応ができる</li>
+<li>出荷では5社の顧客別対応、帳票別対応、クボタ堺の専用便計画・進捗管理など、多タイプの出荷運用に対応できる</li>
+<li>受注では13種のCSV取込サービスにより、顧客ごとに異なる受注フォーマットへ対応できる</li>
+<li>汎用パッケージではカスタマイズ費用が膨大になるか、業務側をシステムに合わせる必要がある領域</li>
+</ul>
+<hr />
+<h2 id="section-47">5. 全体効果の整理</h2>
+<p>デジタル化推進によって期待できる全体効果は以下の通りである。</p>
+<ul>
+<li>手作業削減による工数低減</li>
+<li>入力ミス、確認漏れ、伝達漏れの抑制</li>
+<li>進捗、品質、納期の見える化</li>
+<li>判断スピード向上</li>
+<li>属人化の低減</li>
+<li>履歴データ蓄積による継続改善</li>
+</ul>
+<h3 id="section-48">実装済みシステムの全体像</h3>
+<table>
+<thead>
+<tr>
+<th>領域</th>
+<th>画面数</th>
+<th>モデル数</th>
+<th>主な特徴</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>受注</td>
+<td>8</td>
+<td>17</td>
+<td>3社対応、13種CSV取込、自動展開</td>
+</tr>
+<tr>
+<td>計画</td>
+<td>11</td>
+<td>—</td>
+<td>自動計画生成、ロック機能、在庫/進度計算エンジン、ライン計画から工程計画を自動展開し工程ガントを生成</td>
+</tr>
+<tr>
+<td>在庫</td>
+<td>10</td>
+<td>—</td>
+<td>棚卸現物入力、棚卸初期化、在庫/計画在庫/進度調整</td>
+</tr>
+<tr>
+<td>生産</td>
+<td>48</td>
+<td>52</td>
+<td>7種の実績入力、リアルタイム監視、工程別コツ・注意事項共有</td>
+</tr>
+<tr>
+<td>品質</td>
+<td>14</td>
+<td>28</td>
+<td>設備点検、工程一体チェックシート、4段階承認、教育認定</td>
+</tr>
+<tr>
+<td>購買</td>
+<td>20</td>
+<td>17</td>
+<td>自動送信2種、5種納入パターン、承認ワークフロー</td>
+</tr>
+<tr>
+<td>出荷</td>
+<td>17</td>
+<td>10</td>
+<td>5社の顧客別対応、4便体制、帳票自動生成</td>
+</tr>
+<tr>
+<td>マスタ</td>
+<td>20</td>
+<td>30</td>
+<td>製品・BOM・ルーティング等の基盤データ</td>
+</tr>
+<tr>
+<td>設定・権限</td>
+<td>27</td>
+<td>9</td>
+<td>4層権限、90種リソース制御</td>
+</tr>
+<tr>
+<td>通知</td>
+<td>4</td>
+<td>7</td>
+<td>Push通知、WebRTC通話</td>
+</tr>
+<tr>
+<td>その他</td>
+<td>30</td>
+<td>—</td>
+<td>外作、設計変更、残業、タスク管理 等</td>
+</tr>
+<tr>
+<td><strong>合計</strong></td>
+<td><strong>約203</strong></td>
+<td><strong>163</strong></td>
+<td><strong>API 約250〜300エンドポイント</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="section-49">6. 今後の方向性</h2>
+<p>今後は、各領域の個別効率化に加え、領域間をつなぐ仕組みを強化することで、全体最適を目指す必要がある。</p>
+<p>特に以下を重点化すべきである。</p>
+<ul>
+<li>受注から出荷までの一気通貫したデータ連携</li>
+<li>例外処理を含めた業務標準化</li>
+<li>現場運用に合わせた継続的な画面改善</li>
+<li>現場、顧客、協力メーカー等の要求や時代変化に合わせた継続改善</li>
+<li>蓄積したデータの活用</li>
+<li>フロアスポット自動計画の拡張: 現在の「後工程LT後の計画＝需要」方式から、計画在庫に基づく自動計画へ発展させ、さらに高精度な自動化を実現</li>
+</ul>
+<hr />
+<h2 id="section-50">7. まとめ</h2>
+<p>業務管轄におけるデジタル化は、単なる省力化ではなく、業務の標準化、情報の見える化、判断の迅速化、改善力の向上に直結する取り組みである。</p>
+<p>現在までに、全203画面・163データモデル・約250〜300のAPIエンドポイントからなる包括的な生産管理システムを構築し、受注から出荷までの一連の業務フローをカバーしている。特に、7種類の現場入力方式、13種のCSV取込サービス、自動計画生成、自動便計画、自動送信機能、4段階承認ワークフロー、教育認定システムなど、現場の実態に即した多様な機能を実装済みである。</p>
+<p>各領域で着実に効果を積み上げつつ、今後は領域横断でのデータ活用と運用定着を進めることで、より大きな成果につなげられると考える。</p>
+
+    </main>
+  </div>
+</body>
+</html>
