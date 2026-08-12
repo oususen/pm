@@ -1944,7 +1944,6 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
     def post(self, request):
         start_date = _parse_date(request.data.get('start_date'))
         end_date = _parse_date(request.data.get('end_date'))
-        raw_rows_by_date = request.data.get('rows_by_date')
         reset_existing_assignments = bool(request.data.get('reset_existing_assignments'))
         if not start_date:
             return Response({'detail': 'start_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1952,20 +1951,16 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
             return Response({'detail': 'end_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if start_date > end_date:
             return Response({'detail': 'start_date は end_date 以下で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(raw_rows_by_date, dict):
-            return Response({'detail': 'rows_by_date は日付をキーとするオブジェクトで指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
-
         preview_dates = []
-        for raw_date in raw_rows_by_date.keys():
-            preview_date = _parse_date(raw_date)
-            if preview_date:
-                preview_dates.append(preview_date)
-        if not preview_dates:
-            return Response({'detail': 'rows_by_date に有効な日付がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+        current_date = start_date
+        while current_date <= end_date:
+            preview_dates.append(current_date)
+            current_date += timedelta(days=1)
 
         preview_due_adjustments = list(
             KubotaSakaiDueAdjustment.objects.filter(
-                due_date__in=preview_dates,
+                due_date__gte=start_date,
+                due_date__lte=end_date,
                 delivery_qty__gt=0,
             ).order_by('due_date', 'id')
         )
@@ -1974,21 +1969,6 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         for item in preview_due_adjustments:
             due_adjustments_by_date[item.due_date][item.id] = item
             due_adjustment_map[item.id] = item
-
-        try:
-            posted_alloc_maps, default_container_by_due, ordered_due_ids_by_date = _normalize_preview_rows_by_date_payload(
-                raw_rows_by_date,
-                due_adjustments_by_date,
-            )
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        if reset_existing_assignments:
-            for preview_date, posted_alloc_map_for_date in posted_alloc_maps.items():
-                if preview_date < start_date or preview_date > end_date:
-                    continue
-                for due_adjustment_id in list(posted_alloc_map_for_date.keys()):
-                    posted_alloc_map_for_date[due_adjustment_id] = []
 
         trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
         truck_map = {truck.id: truck for truck in trucks}
@@ -2008,6 +1988,36 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
             product.product_code: product
             for product in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
         }
+
+        posted_alloc_maps = {preview_date: {} for preview_date in preview_dates}
+        ordered_due_ids_by_date = {
+            preview_date: [item.id for item in due_adjustments_by_date.get(preview_date, {}).values()]
+            for preview_date in preview_dates
+        }
+        default_container_by_due = {}
+        for due_adjustment in preview_due_adjustments:
+            product = products.get(due_adjustment.product_code)
+            default_container_by_due[due_adjustment.id] = getattr(getattr(product, 'used_container', None), 'id', None)
+            posted_alloc_maps[due_adjustment.due_date][due_adjustment.id] = []
+
+        existing_assignments = []
+        if not reset_existing_assignments and preview_due_adjustments:
+            existing_assignments = list(
+                KubotaSakaiTripAssignment.objects.filter(
+                    due_adjustment_id__in=[item.id for item in preview_due_adjustments]
+                ).order_by('due_adjustment__due_date', 'truck__display_order', 'truck__name', 'id')
+            )
+            for assignment in existing_assignments:
+                due_adjustment = due_adjustment_map.get(assignment.due_adjustment_id)
+                if not due_adjustment:
+                    continue
+                posted_alloc_maps[due_adjustment.due_date].setdefault(assignment.due_adjustment_id, []).append({
+                    'truck_id': assignment.truck_id,
+                    'qty': _to_decimal(assignment.qty),
+                    'container_id': assignment.container_id,
+                })
+                if assignment.container_id and not default_container_by_due.get(assignment.due_adjustment_id):
+                    default_container_by_due[assignment.due_adjustment_id] = assignment.container_id
 
         all_container_ids = {
             allocation.get('container_id')

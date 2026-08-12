@@ -2789,13 +2789,9 @@ const autoAssignTrips = async () => {
       alert('自動振分対象の実便が便マスタに設定されていない日があります。')
       return
     }
-    const rowsByDate = Object.fromEntries(
-      effectiveTargetDateKeys.map((dateKey) => [dateKey, buildPayloadRowsForDate(dateKey)]),
-    )
     const res = await api.kubotaSakaiTripAssignments.autoAssign(
       thresholdDate,
       endDate,
-      rowsByDate,
       autoAssignResetExisting.value,
     )
     const resultRowsByDate = res.data?.rows_by_date || {}
