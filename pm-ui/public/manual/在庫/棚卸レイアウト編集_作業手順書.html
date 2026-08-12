@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>棚卸レイアウト編集 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --ink: #1f2937;
+    --sub: #64748b;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --green: #87bf23;
+    --green-soft: #eaf7cd;
+    --border: #d9e2ec;
+    --warn: #ea580c;
+    --warn-soft: #fff7ed;
+    --shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Yu Gothic Medium", "Meiryo", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.7;
+  }
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 36px 20px 72px;
+  }
+  .cover, .toc, .step, .note {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .cover {
+    padding: 36px;
+    border-left: 6px solid var(--green);
+    margin-bottom: 24px;
+  }
+  .cover h1 {
+    margin: 0 0 8px;
+    font-size: 30px;
+  }
+  .cover p {
+    margin: 0;
+    color: var(--sub);
+  }
+  .toc {
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .toc h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: var(--sub);
+  }
+  .toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .toc li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+  }
+  .num {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .step {
+    padding: 28px 30px;
+    margin-bottom: 22px;
+  }
+  .step-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .step-title {
+    margin: 0;
+    font-size: 24px;
+  }
+  .step p {
+    margin: 0 0 14px;
+    color: var(--sub);
+  }
+  .mock {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .mock-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .mock-body {
+    padding: 14px;
+  }
+  .row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .col {
+    flex: 1 1 240px;
+  }
+  .label {
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--sub);
+    font-weight: 700;
+    text-align: center;
+  }
+  .sidebar-box, .grid-box, .modal-box {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+  }
+  .sidebar-box {
+    padding: 12px;
+    background: #f8fafc;
+  }
+  .sidebar-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px;
+  }
+  .sidebar-section + .sidebar-section {
+    margin-top: 10px;
+  }
+  .sidebar-title {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .chip {
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    font-size: 11px;
+  }
+  .chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .grid-box {
+    padding: 12px;
+  }
+  .mini-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 58px);
+    gap: 4px;
+    justify-content: center;
+  }
+  .cell {
+    height: 58px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #cbd5e1;
+    background: #e5e7eb;
+  }
+  .cell.empty {
+    background: #f0f9ff;
+    border-style: dashed;
+    color: #94a3b8;
+  }
+  .cell.place {
+    background: #bfdbfe;
+    border-color: #60a5fa;
+  }
+  .cell.equip {
+    background: #ddd6fe;
+    border-color: #a78bfa;
+  }
+  .cell.green {
+    background: #bbf7d0;
+    border-color: #4ade80;
+  }
+  .modal-box .mock-header {
+    background: #2f5eae;
+    color: #fff;
+    border-bottom: none;
+  }
+  .modal-box .mock-body {
+    padding: 14px;
+  }
+  .field {
+    margin-bottom: 10px;
+  }
+  .field strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+  .field .input {
+    height: 30px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--sub);
+  }
+  .callout {
+    margin-top: 14px;
+    background: var(--accent-soft);
+    color: #1d4ed8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .note {
+    padding: 22px 24px;
+    border-left: 5px solid var(--warn);
+    margin-top: 28px;
+  }
+  .note h2 {
+    margin: 0 0 10px;
+    color: var(--warn);
+    font-size: 18px;
+  }
+  .note ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--sub);
+  }
+  .note a {
+    color: var(--accent);
+  }
+  @media (max-width: 640px) {
+    .page { padding: 18px 12px 56px; }
+    .cover, .step, .note { padding: 20px 16px; }
+    .step-title { font-size: 20px; }
+    .mini-grid { grid-template-columns: repeat(4, 58px); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="cover">
+    <h1>棚卸レイアウト編集 作業手順書</h1>
+    <p>棚卸エリアごとの置き場マップをPCで作成・編集し、スマホの棚卸入力で使えるようにする手順です。</p>
+  </div>
+
+  <div class="toc">
+    <h2>手順の流れ</h2>
+    <ul>
+      <li><span class="num">1</span>画面を開く</li>
+      <li><span class="num">2</span>編集対象のエリアを選ぶ</li>
+      <li><span class="num">3</span>置き場・設備を配置する</li>
+      <li><span class="num">4</span>配置済みセルを編集する</li>
+      <li><span class="num">5</span>保存してスマホ画面で使う</li>
+    </ul>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <span class="num">1</span>
+      <h2 class="step-title">画面を開く</h2>
+    </div>
+    <p>在庫管理メニューから <strong>「棚卸レイアウト編集」</strong> を開きます。棚卸現物入力で進捗確認に使うマップは、この画面で作成します。</p>
+    <div class="callout">関連: <a href="/manual?path=在庫/棚卸現物入力.md">棚卸現物入力マニュアル</a> / <a href="/manual/在庫/棚卸現物入力_作業手順書.html">棚卸現物入力 作業手順書</a></div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <span class="num">2</span>
+      <h2 class="step-title">編集対象のエリアを選ぶ</h2>
+    </div>
+    <p>右上のエリア選択で、どのエリアのレイアウトを編集するかを決めます。全体共通で使う場合は <strong>「全体（デフォルト）」</strong> のまま編集します。</p>
+    <div class="mock">
+      <div class="mock-header">
+        <span>棚卸レイアウト編集</span>
+        <span>全体（デフォルト） ▾　保存</span>
+      </div>
+    </div>
+    <div class="callout">エリアを選んで保存すると、そのエリア専用のレイアウトとしてスマホ画面に反映されます。</div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <span class="num">3</span>
+      <h2 class="step-title">置き場・設備を配置する</h2>
+    </div>
+    <p>左側の置き場一覧または設備一覧から配置したい項目を選び、右側のグリッドをクリックして配置します。配置前に横幅・縦幅を指定すると、複数マスにまたがる大きな置き場も表現できます。</p>
+    <div class="row">
+      <div class="col">
+        <div class="label">左: 配置する対象を選ぶ</div>
+        <div class="sidebar-box">
+          <div class="sidebar-section">
+            <div class="sidebar-title">置き場</div>
+            <div class="chip-list">
+              <span class="chip active">B1-1</span>
+              <span class="chip">B1-2</span>
+              <span class="chip">B1-3</span>
+              <span class="chip">B2-1</span>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-title">設備</div>
+            <div class="chip-list">
+              <span class="chip">レーザ1号機</span>
+              <span class="chip">ブレーキ1号機</span>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-title">配置中</div>
+            <div class="input">B1-1 / 置き場 / 横1 縦1</div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="label">右: グリッドをクリックして配置</div>
+        <div class="grid-box">
+          <div class="mini-grid">
+            <div class="cell place">B1-1</div>
+            <div class="cell green">B1-2</div>
+            <div class="cell empty">空き</div>
+            <div class="cell equip">設備</div>
+            <div class="cell empty">空き</div>
+            <div class="cell empty">空き</div>
+            <div class="cell empty">空き</div>
+            <div class="cell empty">空き</div>
+            <div class="cell empty">空き</div>
+            <div class="cell empty">空き</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <span class="num">4</span>
+      <h2 class="step-title">配置済みセルを編集する</h2>
+    </div>
+    <p>配置済みのセルをクリックすると編集モーダルが開きます。名前、横幅、縦幅、種別、色、文字サイズを変更できます。不要になったセルは削除で外せます。</p>
+    <div class="row">
+      <div class="col">
+        <div class="label">セル編集モーダル</div>
+        <div class="modal-box">
+          <div class="mock-header">セル編集</div>
+          <div class="mock-body">
+            <div class="field">
+              <strong>名前</strong>
+              <div class="input">B1-1</div>
+            </div>
+            <div class="field">
+              <strong>横幅 / 縦幅</strong>
+              <div class="input">横 2 / 縦 1</div>
+            </div>
+            <div class="field">
+              <strong>種別</strong>
+              <div class="input">置き場 / 設備</div>
+            </div>
+            <div class="field">
+              <strong>色・文字サイズ</strong>
+              <div class="input">任意で調整</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout">他のセルと重なるサイズには変更できません。グリッドの外にはみ出すサイズも保存できません。</div>
+  </div>
+
+  <div class="step">
+    <div class="step-head">
+      <span class="num">5</span>
+      <h2 class="step-title">保存してスマホ画面で使う</h2>
+    </div>
+    <p>編集が終わったら右上の <strong>「保存」</strong> を押します。保存後は、スマホの <strong>「棚卸現物入力」→「レイアウト」</strong> で色付き進捗マップとして確認できます。置き場セルをタップすると、その置き場の製品一覧へ移動できます。</p>
+    <div class="callout">エリア別に保存したレイアウトは、そのエリアを選んだときだけスマホ画面に表示されます。</div>
+  </div>
+
+  <div class="note">
+    <h2>補足と注意</h2>
+    <ul>
+      <li>この画面は PC で編集する前提です。スマホ側ではレイアウト閲覧と置き場タップ移動だけを行います。</li>
+      <li>設備セルはスマホ側では進捗カウント対象にならず、タップ遷移もしません。</li>
+      <li>関連する操作手順は <a href="/manual/在庫/棚卸現物入力_作業手順書.html">棚卸現物入力 作業手順書</a> を参照してください。</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

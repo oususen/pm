@@ -21,7 +21,7 @@ const inventory = [
     path: "/inventory/stocktake-layout",
     name: "InventoryStocktakeLayout",
     component: () => import("@/views/inventory/StocktakeLayoutEditor.vue"),
-    meta: { pageTitle: "棚卸レイアウト編集", resource: "inventory" },
+    meta: { pageTitle: "棚卸レイアウト編集", manualPath: "在庫/棚卸レイアウト編集.md", resource: "inventory" },
   },
   {
     path: "/inventory/adjustments/progress",

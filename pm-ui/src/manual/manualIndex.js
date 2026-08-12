@@ -90,6 +90,7 @@ export const manualSections = [
       { title: "在庫管理メニュー", path: "在庫/在庫管理メニュー.md" },
       { title: "在庫調整メニュー", path: "在庫/在庫調整メニュー.md" },
       { title: "棚卸現物入力", path: "在庫/棚卸現物入力.md" },
+      { title: "棚卸レイアウト編集", path: "在庫/棚卸レイアウト編集.md" },
       { title: "在庫調整", path: "在庫/在庫調整.md" },
       { title: "進度調整", path: "在庫/進度調整.md" },
       { title: "調整履歴", path: "在庫/調整履歴.md" },

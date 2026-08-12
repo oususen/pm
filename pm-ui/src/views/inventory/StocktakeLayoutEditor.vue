@@ -12,6 +12,11 @@
         <button type="button" class="save-btn" @click="saveConfig" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
       </div>
     </div>
+    <div class="editor-manual-links">
+      <a href="/manual?path=在庫/棚卸レイアウト編集.md" class="manual-link">マニュアル</a>
+      <a href="/manual/在庫/棚卸レイアウト編集_作業手順書.html" class="manual-link">作業手順書</a>
+      <a href="/manual?path=在庫/棚卸現物入力.md" class="manual-link sub">棚卸現物入力を見る</a>
+    </div>
 
     <div class="editor-body">
       <div class="editor-sidebar">
@@ -581,6 +586,32 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.editor-manual-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.manual-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.manual-link.sub {
+  border-color: #d1d5db;
+  background: #fff;
+  color: #475569;
 }
 
 .page-title {

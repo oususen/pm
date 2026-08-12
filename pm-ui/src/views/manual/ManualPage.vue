@@ -165,6 +165,10 @@ const renderer = computed(() => {
     return `<img src="${src}"${altAttr}${titleAttr} />`
   }
   custom.link = (href, title, text) => {
+    if (href?.startsWith('/manual?path=')) {
+      const titleAttr = title ? ` title="${title}"` : ''
+      return `<a href="${href}"${titleAttr}>${text}</a>`
+    }
     const resolved = resolveRelativePath(href || '')
     const isMarkdown = resolved && resolved.endsWith('.md')
     const isInternal = resolved && !resolved.startsWith('/') && !resolved.startsWith('http')
@@ -432,4 +436,3 @@ watch(currentPath, () => {
   }
 }
 </style>
-
