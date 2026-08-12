@@ -1,10 +1,17 @@
 from datetime import datetime
+from io import BytesIO
 
 from django.db.models import Q, Sum
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfgen import canvas
 
 from accounts.permissions import HasResourcePermissionOrReadOnly
 from masters.models import Line, Process, Product, ProductStockLocation
@@ -220,6 +227,7 @@ class StocktakeRecordView(APIView):
             system_stock_qty = int(item.get('system_stock_qty') or 0)
             note = str(item.get('note') or '').strip()
             recorder_name = str(item.get('recorder_name') or '').strip()
+            counter_name = str(item.get('counter_name') or '').strip()
 
             StocktakeRecord.objects.create(
                 stocktake_date=stocktake_date,
@@ -230,6 +238,7 @@ class StocktakeRecordView(APIView):
                 actual_stock_qty=actual_stock_qty,
                 note=note,
                 recorder_name=recorder_name,
+                counter_name=counter_name,
                 updated_by=request.user if request.user.is_authenticated else None,
             )
             saved += 1
@@ -257,6 +266,7 @@ class StocktakeHistoryView(APIView):
                 'actual_stock_qty': r.actual_stock_qty,
                 'note': r.note,
                 'recorder_name': r.recorder_name or '',
+                'counter_name': r.counter_name if hasattr(r, 'counter_name') else '',
                 'updated_by_name': (
                     r.updated_by.get_full_name() or r.updated_by.username
                 ) if r.updated_by else '',
@@ -383,3 +393,85 @@ class StocktakeAreaView(APIView):
             return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
         deleted, _ = StocktakeArea.objects.filter(id=area_id).delete()
         return Response({'deleted': deleted})
+
+
+class StocktakeSlipPDFView(APIView):
+    """棚卸メモ用紙PDF出力 — 置き場ごとにA4 1ページ、同一カード8枚"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        area_id = request.query_params.get('area_id')
+        stocktake_date = request.query_params.get('stocktake_date', '')
+        if not area_id:
+            return Response({'detail': 'area_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            area = StocktakeArea.objects.get(id=area_id)
+        except StocktakeArea.DoesNotExist:
+            return Response({'detail': 'エリアが見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+        locations = area.locations or []
+        if not locations:
+            return Response({'detail': '置き場が登録されていません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pdf_bytes = self._render_pdf(area.name, locations, stocktake_date)
+        filename = f"棚卸メモ_{area.name}_{stocktake_date}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    def _render_pdf(self, area_name, locations, stocktake_date):
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+        except Exception:
+            pass
+        font = 'HeiseiKakuGo-W5'
+
+        buf = BytesIO()
+        c = canvas.Canvas(buf, pagesize=A4)
+        w, h = A4
+        margin = 8 * mm
+        gap = 4 * mm
+        cols, rows = 2, 4
+        card_w = (w - 2 * margin - gap) / cols
+        card_h = (h - 2 * margin - 3 * gap) / rows
+
+        for loc in locations:
+            for row in range(rows):
+                for col in range(cols):
+                    x = margin + col * (card_w + gap)
+                    y = h - margin - (row + 1) * card_h - row * gap
+
+                    c.setStrokeColorRGB(0.2, 0.2, 0.2)
+                    c.setLineWidth(1.5)
+                    c.roundRect(x, y, card_w, card_h, 3 * mm, stroke=1, fill=0)
+
+                    cx = x + 4 * mm
+                    top = y + card_h - 6 * mm
+
+                    c.setFont(font, 9)
+                    c.setFillColorRGB(0.4, 0.4, 0.4)
+                    c.drawString(cx, top, area_name)
+
+                    c.setFont(font, 36)
+                    c.setFillColorRGB(0, 0, 0)
+                    loc_y = top - 18 * mm
+                    c.drawCentredString(x + card_w / 2, loc_y, loc)
+
+                    field_y = loc_y - 12 * mm
+                    c.setFont(font, 11)
+                    c.drawString(cx, field_y, '数量')
+                    c.setLineWidth(1)
+                    c.line(cx + 14 * mm, field_y - 1 * mm, x + card_w - 4 * mm, field_y - 1 * mm)
+
+                    field_y -= 10 * mm
+                    c.drawString(cx, field_y, 'カウンター')
+                    c.line(cx + 22 * mm, field_y - 1 * mm, x + card_w - 4 * mm, field_y - 1 * mm)
+
+                    c.setFont(font, 8)
+                    c.setFillColorRGB(0.6, 0.6, 0.6)
+                    c.drawRightString(x + card_w - 4 * mm, y + 4 * mm, f'棚卸日: {stocktake_date}')
+
+            c.showPage()
+
+        c.save()
+        return buf.getvalue()

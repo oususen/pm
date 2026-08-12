@@ -12,6 +12,7 @@
       <input type="date" class="top-date" v-model="filters.stocktake_date" />
       <span style="display:flex;gap:4px;justify-content:flex-end;align-items:center">
         <span class="tab-link" @click="showAreaModal = true">&#x1F3E2;</span>
+        <span class="tab-link" @click="printSlips" v-if="selectedArea">&#x1F5A8;</span>
         <span class="tab-link" @click="openLayout">レイアウト</span>
       </span>
     </header>
@@ -162,16 +163,23 @@
           </select>
         </label>
         <label class="detail-field">
-          <span>数量</span>
-          <input
-            :value="editValues[selectedRow.product_id]"
-            type="number"
-            step="1"
-            inputmode="numeric"
-            @input="onActualInput(selectedRow.product_id, $event)"
-          />
+          <span>カウンター</span>
+          <select v-model="selectedCounter" class="recorder-select">
+            <option value="">選択</option>
+            <option v-for="r in recorders" :key="'c'+r.id" :value="r.name">{{ r.name }}</option>
+          </select>
         </label>
       </div>
+      <label class="detail-field">
+        <span>数量</span>
+        <input
+          :value="editValues[selectedRow.product_id]"
+          type="number"
+          step="1"
+          inputmode="numeric"
+          @input="onActualInput(selectedRow.product_id, $event)"
+        />
+      </label>
 
       <label class="detail-field detail-note">
         <span>備考</span>
@@ -208,7 +216,8 @@
         <div v-for="item in historyItems" :key="item.id" class="history-item">
           <div class="history-qty">{{ item.actual_stock_qty }}</div>
           <div class="history-meta">
-            <div>{{ item.recorder_name || item.updated_by_name || '-' }}</div>
+            <div>記入: {{ item.recorder_name || item.updated_by_name || '-' }}</div>
+            <div v-if="item.counter_name">カウンター: {{ item.counter_name }}</div>
             <div class="history-time">{{ formatDateTime(item.updated_at) }}</div>
             <div v-if="item.note" class="history-note">{{ item.note }}</div>
           </div>
@@ -395,6 +404,7 @@ const zoomIn = () => { layoutZoom.value = Math.min(2, +(layoutZoom.value + 0.2).
 const zoomOut = () => { layoutZoom.value = Math.max(0.4, +(layoutZoom.value - 0.2).toFixed(1)); };
 const newRecorderName = ref("");
 const selectedRecorder = ref("");
+const selectedCounter = ref("");
 const selectedProductId = ref(null);
 const viewMode = ref("list");
 
@@ -999,6 +1009,7 @@ const buildSaveItems = (targetRows) =>
       actual_stock_qty: normalizeNumber(editValues.value[row.product_id]) ?? 0,
       note: String(noteValues.value[row.product_id] || "").trim(),
       recorder_name: selectedRecorder.value,
+      counter_name: selectedCounter.value,
     }));
 
 const saveCurrent = async () => {
@@ -1034,6 +1045,30 @@ const formatDateTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+};
+
+const printSlips = async () => {
+  if (!selectedArea.value) return;
+  if (!selectedArea.value.locations?.length) {
+    alert('このエリアに置き場が登録されていません。');
+    return;
+  }
+  const inputDate = prompt('棚卸日を入力してください（例: 2026-08-12）', filters.stocktake_date);
+  if (!inputDate) return;
+  try {
+    const res = await api.stocktakeRecords.slipPdf({
+      area_id: selectedArea.value.id,
+      stocktake_date: inputDate,
+    });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `棚卸メモ_${selectedArea.value.name}_${inputDate}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('PDF出力に失敗しました');
+  }
 };
 
 onMounted(() => {
@@ -1524,7 +1559,7 @@ watch(() => filters.stocktake_date, () => {
 }
 
 .stock-list-item.active {
-  border-color: #ffef9c;
+  border-color: #000000;
 }
 
 .stock-list-item.diff {
@@ -1532,7 +1567,7 @@ watch(() => filters.stocktake_date, () => {
 }
 
 .stock-list-item.dirty {
-  outline: 2px solid #16a34a;
+  outline: 3px solid #1e40af;
 }
 
 .cell {

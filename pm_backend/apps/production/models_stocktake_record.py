@@ -13,6 +13,7 @@ class StocktakeRecord(models.Model):
     actual_stock_qty = models.IntegerField(default=0, verbose_name='現物数')
     note = models.CharField(max_length=255, blank=True, default='', verbose_name='備考')
     recorder_name = models.CharField(max_length=50, blank=True, default='', verbose_name='記入者名')
+    counter_name = models.CharField(max_length=50, blank=True, default='', verbose_name='カウンター名')
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
