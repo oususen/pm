@@ -6,6 +6,12 @@ const notifications = [
     meta: { pageTitle: "通知一覧", manualPath: "通知閲覧.md" },
   },
   {
+    path: "/notifications/communication",
+    name: "NotificationCommunication",
+    component: () => import("@/views/notifications/NotificationCommunication.vue"),
+    meta: { pageTitle: "通信", resource: "notifications" },
+  },
+  {
     path: "/notifications/sources",
     name: "NotificationSourceInput",
     component: () => import("@/views/notifications/NotificationSourceInput.vue"),

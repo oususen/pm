@@ -439,7 +439,7 @@ const openTaskInbox = () => {
 };
 
 const openCallCenter = () => {
-  router.push("/notifications/calls");
+  router.push("/notifications/communication");
 };
 
 const openRecordingList = () => {

@@ -35,7 +35,7 @@
             <div class="menu-icon">⚙️</div>
             <div class="menu-label">{{ t('dashboard.menu.masters') }}</div>
           </RouterLink>
-          <RouterLink v-if="canShowResource('notifications')" to="/notifications/sources" class="menu-card">
+          <RouterLink v-if="canShowResource('notifications')" to="/notifications/communication" class="menu-card">
             <div class="menu-icon">🔔</div>
             <div class="menu-label">{{ t('dashboard.menu.notifications') }}</div>
           </RouterLink>

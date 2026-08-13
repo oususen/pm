@@ -454,7 +454,7 @@ const permissionResources = [
   { value: 'quality.integrated_checksheet_template', label: '品質: 工程一体チェックシート（テンプレート管理）' },
   { value: 'quality.integrated_checksheet_operation', label: '品質: 工程一体チェックシート（チェック実施）' },
   { value: 'quality.integrated_checksheet_review', label: '品質: 工程一体チェックシート（確認）' },
-  { value: 'notifications', label: '通知作成' },
+  { value: 'notifications', label: '通信' },
   { value: 'notifications.create', label: '通知: 通知作成' },
   { value: 'settings.shipping_progress_horizon', label: '設定: 出荷進度再計算日数' },
   { value: 'quality.equipment_inspection', label: '品質: 設備点検実施（旧キー互換）' },

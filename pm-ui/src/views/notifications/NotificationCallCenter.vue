@@ -28,26 +28,33 @@
     <div class="layout">
       <aside class="sidebar">
         <section class="panel">
-          <div class="caller-row">
-            <div class="panel-title compact">発信</div>
-            <label class="field-label inline-label" for="peer-select">相手</label>
-          </div>
-          <div v-if="environmentWarning" class="warning-box">
-            {{ environmentWarning }}
-          </div>
-          <select id="peer-select" v-model="selectedPeerId" class="select">
-            <option value="">選択してください</option>
-            <option v-for="user in users" :key="user.id" :value="String(user.id)">
-              {{ formatUserLabel(user) }}
-            </option>
-          </select>
-          <div class="action-row">
-            <button class="btn voice-btn" type="button" @click="startCall('voice')" :disabled="!selectedPeerId || busy">
-              音声発信
-            </button>
-            <button class="btn video-btn" type="button" @click="startCall('video')" :disabled="!selectedPeerId || busy">
-              ビデオ発信
-            </button>
+          <button class="panel-toggle" type="button" @click="dialerOpen = !dialerOpen">
+            <span class="panel-title compact">発信</span>
+            <span class="toggle-arrow" :class="{ open: dialerOpen }">▶</span>
+          </button>
+          <div v-if="dialerOpen" class="dialer-body">
+            <div class="caller-row">
+              <label class="field-label inline-label" for="peer-select">相手</label>
+            </div>
+            <div v-if="environmentWarning" class="warning-box">
+              {{ environmentWarning }}
+            </div>
+            <select id="peer-select" v-model="selectedPeerId" class="select">
+              <option value="">選択してください</option>
+              <option v-for="user in users" :key="user.id" :value="String(user.id)">
+                {{ formatUserLabel(user) }}
+              </option>
+            </select>
+            <div class="action-row">
+              <button class="btn voice-btn label-icon-btn" type="button" @click="startCall('voice')" :disabled="!selectedPeerId || busy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+                <span>音声</span>
+              </button>
+              <button class="btn video-btn label-icon-btn" type="button" @click="startCall('video')" :disabled="!selectedPeerId || busy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                <span>ビデオ</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -110,6 +117,57 @@
             </div>
           </div>
 
+          <div class="control-row">
+            <button class="btn secondary-btn icon-btn" :class="{ off: !micEnabled }" type="button" @click="toggleMic" :disabled="!localStream" :title="micEnabled ? 'マイクOFF' : 'マイクON'">
+              <svg v-if="micEnabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6"/><path d="M17 16.95A7 7 0 015 12v-2m14 0v2c0 .76-.12 1.5-.35 2.18"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button class="btn secondary-btn icon-btn" :class="{ off: !cameraEnabled }" type="button" @click="toggleCamera" :disabled="!hasVideoTrack" :title="cameraEnabled ? 'カメラOFF' : 'カメラON'">
+              <svg v-if="cameraEnabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 01-2-2V8a2 2 0 012-2h3m3-3h6l2 3h4a2 2 0 012 2v9.34m-7.72-2.06a4 4 0 11-5.56-5.56"/></svg>
+            </button>
+            <button
+              v-if="hasVideoTrack && canSwitchCamera"
+              class="btn secondary-btn icon-btn camera-switch-btn"
+              type="button"
+              @click="switchCameraFacing"
+              :disabled="busy || switchingCamera"
+              :title="currentFacingModeLabel"
+            >
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><text x="12" y="16" text-anchor="middle" font-size="11" stroke="none" fill="currentColor">🔄</text></svg>
+            </button>
+            <button
+              v-if="canAcceptCurrentSession"
+              class="btn accept-btn icon-btn"
+              type="button"
+              @click="acceptCurrentSession"
+              :disabled="busy"
+              title="応答"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+            </button>
+            <button
+              v-if="canDeclineCurrentSession"
+              class="btn decline-btn icon-btn"
+              type="button"
+              @click="declineCurrentSession"
+              :disabled="busy"
+              title="辞退"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" transform="rotate(135 12 12)"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+            </button>
+            <button
+              v-if="canFinishCurrentSession"
+              class="btn finish-btn icon-btn"
+              type="button"
+              @click="finishCurrentSession"
+              :disabled="busy"
+              title="終了"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" transform="rotate(135 12 12)"/></svg>
+            </button>
+          </div>
+
           <div class="media-grid" :class="{ single: !showRemoteVideo }">
             <div
               class="video-card remote"
@@ -136,51 +194,6 @@
               </div>
             </div>
           </div>
-
-          <div class="control-row">
-            <button class="btn secondary-btn" type="button" @click="toggleMic" :disabled="!localStream">
-              {{ micEnabled ? 'マイクOFF' : 'マイクON' }}
-            </button>
-            <button class="btn secondary-btn" type="button" @click="toggleCamera" :disabled="!hasVideoTrack">
-              {{ cameraEnabled ? 'カメラOFF' : 'カメラON' }}
-            </button>
-            <button
-              v-if="hasVideoTrack && canSwitchCamera"
-              class="btn secondary-btn"
-              type="button"
-              @click="switchCameraFacing"
-              :disabled="busy || switchingCamera"
-            >
-              {{ currentFacingModeLabel }}
-            </button>
-            <button
-              v-if="canAcceptCurrentSession"
-              class="btn accept-btn"
-              type="button"
-              @click="acceptCurrentSession"
-              :disabled="busy"
-            >
-              応答
-            </button>
-            <button
-              v-if="canDeclineCurrentSession"
-              class="btn decline-btn"
-              type="button"
-              @click="declineCurrentSession"
-              :disabled="busy"
-            >
-              辞退
-            </button>
-            <button
-              v-if="canFinishCurrentSession"
-              class="btn finish-btn"
-              type="button"
-              @click="finishCurrentSession"
-              :disabled="busy"
-            >
-              終了
-            </button>
-          </div>
         </section>
       </main>
     </div>
@@ -200,6 +213,7 @@ const route = useRoute();
 
 const users = ref([]);
 const sessions = ref([]);
+const dialerOpen = ref(false);
 const selectedPeerId = ref("");
 const currentSession = ref(null);
 const loading = ref(false);
@@ -1661,6 +1675,31 @@ onBeforeUnmount(() => {
   margin-bottom: 0;
 }
 
+.panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toggle-arrow {
+  font-size: 10px;
+  color: #51627c;
+  transition: transform 0.2s;
+}
+
+.toggle-arrow.open {
+  transform: rotate(90deg);
+}
+
+.dialer-body {
+  margin-top: 8px;
+}
+
 .caller-row {
   display: flex;
   align-items: center;
@@ -1933,6 +1972,8 @@ onBeforeUnmount(() => {
 
 .control-row {
   padding: 0 16px;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn {
@@ -1942,6 +1983,50 @@ onBeforeUnmount(() => {
   color: #fff;
   cursor: pointer;
   font-size: 13px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn.off {
+  background: #b91c1c;
+}
+
+.camera-switch-btn {
+  padding: 0;
+  width: 48px;
+  height: 48px;
+}
+
+.camera-switch-btn svg {
+  width: 32px;
+  height: 32px;
+}
+
+.label-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+
+.label-icon-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .btn:disabled {
