@@ -313,6 +313,7 @@
               class="date-head"
               :class="{
                 'holiday-head': isHoliday(dateKey),
+                'overdue-head': hasOverdueDate(dateKey),
                 'day-split-left': isDaySplitStart(dateKey),
               }"
             >
@@ -1221,6 +1222,13 @@ const removeAllocation = (entry, idx) => {
 
 const entriesAt = (row, dateKey) => row.byDate?.[dateKey] || []
 const slotEntryAt = (row, dateKey, slotIdx) => entriesAt(row, dateKey)[slotIdx] || null
+const isEntryOverdue = (entry) => {
+  if (!entry) return false
+  if (parseNumber(entry.unassigned_qty_preview) >= 0) return false
+  if (entry.deadline_date) return formatLocalDate(new Date()) > entry.deadline_date
+  return Boolean(entry.overdue)
+}
+const hasOverdueDate = (dateKey) => mergedRows.value.some((row) => entriesAt(row, dateKey).some((entry) => isEntryOverdue(entry)))
 const slotBlockHeight = (entry) => {
   const allocationCount = Math.max(1, Array.isArray(entry?.allocations) ? entry.allocations.length : 0)
   return Math.max(28, allocationCount * 24 + Math.max(0, allocationCount - 1) * 3 + 4)
@@ -2275,6 +2283,7 @@ const loadGrid = async () => {
           coordination_note: String(raw.coordination_note || '').trim(),
           delivery_qty: parseNumber(raw.delivery_qty),
           overdue: Boolean(raw.overdue),
+          deadline_date: raw.deadline_date || '',
           default_capacity: raw.capacity,
           allocations,
           unassigned_qty_preview: parseNumber(raw.unassigned_qty),
@@ -3678,6 +3687,10 @@ onUnmounted(() => {
 .date-head {
   background: #eceff3 !important;
   padding: 0 6px !important;
+}
+.date-head.overdue-head {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
 }
 .date-head-content {
   position: relative;

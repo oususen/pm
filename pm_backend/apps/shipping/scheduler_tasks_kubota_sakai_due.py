@@ -2,12 +2,19 @@
 定時タスク: クボタ堺納期調整 取込 + 再配分
 """
 import logging
+import json
 import time
 from datetime import datetime, timedelta
 
+from django.contrib.auth import get_user_model
+from django.db.models import DecimalField, F, Q, Sum, Value
+from django.db.models.functions import Coalesce
+
+from masters.models import Calendar
 from notifications.models import Notification
-from orders.utils.calendar_utils import get_business_today
+from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from production.models_schedule_config import ScheduleConfig, record_schedule_run_log
+from system_settings.models import SystemSetting
 from shipping.services.kubota_sakai_delivery_progress import recalculate_delivery_progress
 from shipping.views_kubota_sakai_due_adjustment import (
     _rebalance_delivery_qty_for_groups,
@@ -17,6 +24,7 @@ from shipping.views_kubota_sakai_due_adjustment import (
 from orders.core.models import KubotaSakaiDueAdjustment
 
 logger = logging.getLogger('production')
+OVERDUE_NOTIFY_USERS_KEY = 'kubota_sakai.overdue_notify_user_ids'
 
 
 def _resolve_task_date_range(config):
@@ -31,6 +39,121 @@ def _resolve_task_date_range(config):
     days_after = int(getattr(config, 'range_days_after', 45) or 45)
     end_date = start_date + timedelta(days=days_after)
     return today, start_date, end_date
+
+
+def _resolve_kubota_calendar():
+    rows = Calendar.objects.all()
+    exact_hits = rows.filter(
+        Q(calendar_code__iexact='kubota_sakai')
+        | Q(calendar_code__iexact='kobota_sakai')
+    )
+    if exact_hits.exists():
+        return exact_hits.order_by('id').first()
+    name_hits = rows.filter(Q(calendar_name__icontains='クボタ') & Q(calendar_name__icontains='堺'))
+    if name_hits.exists():
+        return name_hits.order_by('id').first()
+    return None
+
+
+def _build_overdue_unassigned_rows(today, start_date, end_date):
+    calendar = _resolve_kubota_calendar()
+    calculator = WorkingDayCalculator(calendar)
+    deadline_days = 3
+
+    rows = (
+        KubotaSakaiDueAdjustment.objects.filter(
+            due_date__range=(start_date, end_date),
+            delivery_qty__gt=0,
+        )
+        .annotate(
+            assigned_qty=Coalesce(
+                Sum('trip_assignments__qty', filter=Q(trip_assignments__departure_date=F('due_date'))),
+                Value(0),
+                output_field=DecimalField(max_digits=14, decimal_places=3),
+            )
+        )
+        .values(
+            'product_code',
+            'ship_to_code',
+            'source_order_no',
+            'due_date',
+            'delivery_qty',
+            'assigned_qty',
+        )
+        .order_by('due_date', 'product_code', 'ship_to_code', 'source_order_no')
+    )
+
+    overdue_rows = []
+    for row in rows:
+        deadline_date = calculator.subtract_working_days(row['due_date'], deadline_days)
+        if today <= deadline_date:
+            continue
+        unassigned_qty = (row['assigned_qty'] or 0) - (row['delivery_qty'] or 0)
+        if unassigned_qty >= 0:
+            continue
+        overdue_rows.append({
+            'product_code': row['product_code'] or '',
+            'ship_to_code': row['ship_to_code'] or '',
+            'source_order_no': row['source_order_no'] or '内示',
+            'due_date': row['due_date'],
+            'deadline_date': deadline_date,
+            'unassigned_qty': abs(unassigned_qty),
+        })
+    return overdue_rows
+
+
+def _notify_overdue_unassigned_once_per_day(config, today, start_date, end_date):
+    user_ids = []
+    row = SystemSetting.objects.filter(key=OVERDUE_NOTIFY_USERS_KEY).first()
+    if row and row.value:
+        try:
+            parsed = json.loads(row.value)
+            if isinstance(parsed, list):
+                user_ids = [int(item) for item in parsed if str(item).strip()]
+        except Exception:
+            logger.exception('[スケジューラ] クボタ堺期限超過通知先の読込失敗')
+    if not user_ids:
+        return
+
+    overdue_rows = _build_overdue_unassigned_rows(today, start_date, end_date)
+    if not overdue_rows:
+        return
+
+    title = '[クボタ堺便計画] 未割付期限超過'
+    already_sent = Notification.objects.filter(
+        title=title,
+        category='業務アラート',
+        domain='出荷',
+        created_at__date=today,
+    ).exists()
+    if already_sent:
+        return
+
+    User = get_user_model()
+    users = list(User.objects.filter(id__in=user_ids, is_active=True))
+    if not users:
+        return
+
+    lines = [
+        f'{item["due_date"]} {item["product_code"]} {item["ship_to_code"] or "-"} {item["source_order_no"]} 未割付:{item["unassigned_qty"]}'
+        for item in overdue_rows[:10]
+    ]
+    if len(overdue_rows) > 10:
+        lines.append(f'ほか {len(overdue_rows) - 10} 件')
+
+    notification = Notification.objects.create(
+        title=title,
+        category='業務アラート',
+        domain='出荷',
+        description='\n'.join([
+            f'{today} 時点でクボタ堺便計画の未割付期限超過が {len(overdue_rows)} 件あります。',
+            *lines,
+        ]),
+        valid_from=today,
+        valid_to=today + timedelta(days=1),
+        operator_name='admin',
+    )
+    notification.target_users.set(users)
 
 
 def run_kubota_sakai_due_sync():
@@ -118,6 +241,7 @@ def run_kubota_sakai_due_sync():
                 'end_date': str(end_date),
                 'skipped': False,
             }
+            _notify_overdue_unassigned_once_per_day(config, today, start_date, end_date)
 
     except Exception as exc:
         logger.exception('[スケジューラ] KUBOTA_SAKAI_DUE_SYNC 実行失敗')
