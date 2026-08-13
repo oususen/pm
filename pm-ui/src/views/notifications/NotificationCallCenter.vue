@@ -59,8 +59,11 @@
         </section>
 
         <section class="panel">
-          <div class="panel-title">最近の通話</div>
-          <div v-if="recentSessions.length" class="session-list">
+          <button class="panel-toggle" type="button" @click="historyOpen = !historyOpen">
+            <span class="panel-title compact">最近の通話</span>
+            <span class="toggle-arrow" :class="{ open: historyOpen }">▶</span>
+          </button>
+          <div v-if="historyOpen && recentSessions.length" class="session-list">
             <div v-for="session in recentSessions" :key="session.id" class="session-entry">
               <button
                 type="button"
@@ -81,17 +84,20 @@
               </div>
             </div>
           </div>
-          <div v-else class="empty">履歴はありません。</div>
+          <div v-else-if="historyOpen" class="empty">履歴はありません。</div>
         </section>
 
       </aside>
 
       <main class="main-panel">
-        <section class="call-stage">
+        <div v-if="!isActiveSession" class="idle-message">
+          発信パネルから相手を選択して通話を開始してください。
+        </div>
+        <section v-else class="call-stage">
           <div class="stage-header">
             <div class="stage-status-line">
               <div class="stage-subtitle">
-                {{ currentSession ? `${currentSession.call_type === 'video' ? 'ビデオ通話' : '音声通話'}` : '相手を選択して発信してください。' }}
+                {{ currentSession.call_type === 'video' ? 'ビデオ通話' : '音声通話' }}
               </div>
               <div class="status-badge" :class="statusClass">
                 {{ statusMessage }}
@@ -214,6 +220,7 @@ const route = useRoute();
 const users = ref([]);
 const sessions = ref([]);
 const dialerOpen = ref(false);
+const historyOpen = ref(false);
 const selectedPeerId = ref("");
 const currentSession = ref(null);
 const loading = ref(false);
@@ -295,6 +302,10 @@ const incomingSessions = computed(() => {
   return sessions.value.filter(
     (session) => session.status === "ringing" && Number(session.callee) === Number(myUserId.value)
   );
+});
+
+const isActiveSession = computed(() => {
+  return currentSession.value && ["ringing", "accepted"].includes(currentSession.value.status);
 });
 
 const canAcceptCurrentSession = computed(() => {
@@ -1649,6 +1660,13 @@ onBeforeUnmount(() => {
 .sidebar,
 .main-panel {
   min-width: 0;
+}
+
+.idle-message {
+  color: #64748b;
+  font-size: 14px;
+  padding: 24px 16px;
+  text-align: center;
 }
 
 .panel,
