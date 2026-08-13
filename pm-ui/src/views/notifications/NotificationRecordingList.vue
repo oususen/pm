@@ -57,33 +57,74 @@
             <th>ファイルサイズ</th>
             <th>録音登録者</th>
             <th>再生</th>
+            <th>文字起こし</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="session in filteredSessions" :key="session.id">
-            <td>{{ formatDateTime(session.initiated_at) }}</td>
-            <td>{{ session.caller_name || "-" }}</td>
-            <td>{{ session.callee_name || "-" }}</td>
-            <td>{{ session.call_type === "video" ? "ビデオ通話" : "音声通話" }}</td>
-            <td>{{ statusLabel(session.status) }}</td>
-            <td>{{ formatDuration(session.recording?.duration_seconds) }}</td>
-            <td>{{ formatFileSize(session.recording?.file_size) }}</td>
-            <td>{{ session.recording?.recorded_by_name || "-" }}</td>
-            <td class="audio-cell">
-              <audio
-                v-if="session.recording?.file_url"
-                controls
-                preload="metadata"
-                :src="session.recording.file_url"
-              ></audio>
-              <span v-else>-</span>
-            </td>
-          </tr>
+          <template v-for="session in filteredSessions" :key="session.id">
+            <tr class="recording-row" @click="toggleTranscript(session.id)">
+              <td>{{ formatDateTime(session.initiated_at) }}</td>
+              <td>{{ session.caller_name || "-" }}</td>
+              <td>{{ session.callee_name || "-" }}</td>
+              <td>{{ session.call_type === "video" ? "ビデオ通話" : "音声通話" }}</td>
+              <td>{{ statusLabel(session.status) }}</td>
+              <td>{{ formatDuration(session.recording?.duration_seconds) }}</td>
+              <td>{{ formatFileSize(session.recording?.file_size) }}</td>
+              <td>{{ session.recording?.recorded_by_name || "-" }}</td>
+              <td class="audio-cell" @click.stop>
+                <audio
+                  v-if="session.recording?.file_url"
+                  controls
+                  preload="metadata"
+                  :src="session.recording.file_url"
+                ></audio>
+                <span v-else>-</span>
+              </td>
+              <td class="transcribe-cell" @click.stop>
+                <button
+                  v-if="session.recording?.file_url"
+                  class="btn transcribe-btn"
+                  :disabled="anyTranscribing"
+                  @click="triggerTranscribe(session)"
+                >
+                  {{ session.recording?.transcript_status === 'processing' ? '処理中' : '実行' }}
+                </button>
+                <span v-else>-</span>
+              </td>
+            </tr>
+            <tr v-if="expandedSessionId === session.id" class="transcript-row">
+              <td colspan="10">
+                <div class="transcript-box">
+                  <div class="transcript-header">
+                    <span class="transcript-label">文字起こし</span>
+                    <span v-if="session.recording?.transcript_language" class="transcript-lang">
+                      言語: {{ session.recording.transcript_language }}
+                    </span>
+                  </div>
+                  <div v-if="session.recording?.transcript_status === 'pending'" class="transcript-status">
+                    処理待ち...
+                  </div>
+                  <div v-else-if="session.recording?.transcript_status === 'processing'" class="transcript-status">
+                    文字起こし中...
+                  </div>
+                  <div v-else-if="session.recording?.transcript_status === 'failed'" class="transcript-status error">
+                    文字起こしに失敗しました
+                  </div>
+                  <div v-else-if="session.recording?.transcript" class="transcript-text">
+                    {{ session.recording.transcript }}
+                  </div>
+                  <div v-else class="transcript-status">
+                    文字起こしデータがありません
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </template>
           <tr v-if="!hasLoaded">
-            <td colspan="9" class="empty">再読込を押すまで録音データは表示しません。</td>
+            <td colspan="10" class="empty">再読込を押すまで録音データは表示しません。</td>
           </tr>
           <tr v-else-if="!filteredSessions.length">
-            <td colspan="9" class="empty">録音データはありません。</td>
+            <td colspan="10" class="empty">録音データはありません。</td>
           </tr>
         </tbody>
       </table>
@@ -109,6 +150,12 @@ const recordedByKeyword = ref("");
 const callTypeFilter = ref("");
 const hasLoaded = ref(false);
 const isReady = ref(false);
+const expandedSessionId = ref(null);
+const isTranscribing = ref(false);
+
+const anyTranscribing = computed(() => {
+  return isTranscribing.value || recordedSessions.value.some(s => s.recording?.transcript_status === 'processing');
+});
 
 const canUseRecordingFeatures = computed(() => {
   const username = String(authState.user?.username || "").toLowerCase();
@@ -210,6 +257,31 @@ const reload = async () => {
     window.alert("録音一覧の読み込みに失敗しました。");
   } finally {
     loading.value = false;
+  }
+};
+
+const toggleTranscript = (sessionId) => {
+  expandedSessionId.value = expandedSessionId.value === sessionId ? null : sessionId;
+};
+
+const triggerTranscribe = async (session) => {
+  if (!session?.id || isTranscribing.value) return;
+  isTranscribing.value = true;
+  if (session.recording) {
+    session.recording.transcript_status = 'processing';
+    session.recording.transcript = '';
+    session.recording.transcript_language = '';
+  }
+  try {
+    await api.notifications.transcribeRecording(session.id);
+  } catch (error) {
+    console.error("文字起こしリクエスト失敗", error);
+    window.alert("文字起こしリクエストに失敗しました。");
+    if (session.recording) {
+      session.recording.transcript_status = 'failed';
+    }
+  } finally {
+    isTranscribing.value = false;
   }
 };
 
@@ -328,6 +400,74 @@ onMounted(async () => {
 .audio-cell audio {
   width: 100%;
   height: 32px;
+}
+
+.recording-row {
+  cursor: pointer;
+}
+
+.recording-row:hover {
+  background: #f1f5f9;
+}
+
+.transcript-row td {
+  padding: 0 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.transcript-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.transcript-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.transcript-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f2a44;
+}
+
+.transcript-lang {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.transcript-text {
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.transcript-status {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.transcript-status.error {
+  color: #dc2626;
+}
+
+.transcribe-cell {
+  text-align: center;
+}
+
+.transcribe-btn {
+  background: #059669;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.transcribe-btn:disabled {
+  background: #94a3b8;
 }
 
 .empty {

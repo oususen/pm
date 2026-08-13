@@ -163,6 +163,20 @@ class CallRecording(models.Model):
         related_name='call_recordings',
         verbose_name='録音登録者'
     )
+    transcript = models.TextField(blank=True, default='', verbose_name='文字起こし')
+    transcript_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', '処理待ち'),
+            ('processing', '処理中'),
+            ('done', '完了'),
+            ('failed', '失敗'),
+        ],
+        default='',
+        blank=True,
+        verbose_name='文字起こし状態',
+    )
+    transcript_language = models.CharField(max_length=20, blank=True, default='', verbose_name='検出言語')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

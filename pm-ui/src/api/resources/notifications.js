@@ -44,6 +44,9 @@ export const createNotificationsAPI = (client) => ({
   getCallRecording(id) {
     return client.get(`/call-sessions/${id}/recording/`)
   },
+  transcribeRecording(id) {
+    return client.post(`/call-sessions/${id}/transcribe/`)
+  },
   getCallSignals(id, params = {}) {
     return client.get(`/call-sessions/${id}/signals/`, { params })
   },

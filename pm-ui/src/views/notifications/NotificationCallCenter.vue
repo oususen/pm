@@ -560,6 +560,7 @@ const uploadPendingRecording = async (sessionId) => {
     return;
   }
   if (!pendingRecordingBlob.value || !sessionId) return;
+  if (recordingUploadInFlight.value) return;
 
   recordingUploadInFlight.value = true;
   recordingErrorMessage.value = "";

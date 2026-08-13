@@ -222,6 +222,9 @@ class CallRecordingSerializer(serializers.ModelSerializer):
             'recording_ended_at',
             'recorded_by',
             'recorded_by_name',
+            'transcript',
+            'transcript_status',
+            'transcript_language',
             'created_at',
             'updated_at',
         ]

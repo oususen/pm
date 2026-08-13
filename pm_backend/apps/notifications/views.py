@@ -18,6 +18,7 @@ from .serializers import (
     PushSubscriptionSerializer,
     NativePushTokenSerializer,
 )
+from .transcription import transcribe_recording_async
 from .fcm_push import get_fcm_config, send_fcm_push
 from .web_push import get_web_push_config, send_web_push
 
@@ -292,7 +293,10 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
         if duration_seconds is None and recording_started_at and recording_ended_at:
             duration_seconds = max((recording_ended_at - recording_started_at).total_seconds(), 0)
 
-        existing = getattr(session, 'recording', None)
+        try:
+            existing = CallRecording.objects.get(session=session)
+        except CallRecording.DoesNotExist:
+            existing = None
         old_file_name = existing.file.name if existing and existing.file else ''
 
         if existing:
@@ -306,24 +310,58 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
             existing.save()
             recording = existing
         else:
-            recording = CallRecording.objects.create(
+            recording, _created = CallRecording.objects.get_or_create(
                 session=session,
-                file=uploaded_file,
-                mime_type=mime_type,
-                file_size=file_size,
-                duration_seconds=duration_seconds,
-                recording_started_at=recording_started_at,
-                recording_ended_at=recording_ended_at,
-                recorded_by=request.user,
+                defaults={
+                    'file': uploaded_file,
+                    'mime_type': mime_type,
+                    'file_size': file_size,
+                    'duration_seconds': duration_seconds,
+                    'recording_started_at': recording_started_at,
+                    'recording_ended_at': recording_ended_at,
+                    'recorded_by': request.user,
+                },
             )
+            if not _created:
+                recording.file = uploaded_file
+                recording.mime_type = mime_type
+                recording.file_size = file_size
+                recording.duration_seconds = duration_seconds
+                recording.recording_started_at = recording_started_at
+                recording.recording_ended_at = recording_ended_at
+                recording.recorded_by = request.user
+                recording.save()
 
         if old_file_name and old_file_name != recording.file.name:
             storage = recording.file.storage
-            if storage.exists(old_file_name):
-                storage.delete(old_file_name)
+            try:
+                if storage.exists(old_file_name):
+                    storage.delete(old_file_name)
+            except PermissionError:
+                pass
+
+        recording.transcript_status = 'pending'
+        recording.transcript = ''
+        recording.transcript_language = ''
+        recording.save(update_fields=['transcript_status', 'transcript', 'transcript_language', 'updated_at'])
+        transcribe_recording_async(recording.id)
 
         response_serializer = CallRecordingSerializer(recording, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='transcribe')
+    def transcribe(self, request, pk=None):
+        session = self.get_object()
+        recording = getattr(session, 'recording', None)
+        if not recording or not recording.file:
+            return Response({'detail': '録音がありません。'}, status=404)
+        recording.transcript_status = 'pending'
+        recording.transcript = ''
+        recording.transcript_language = ''
+        recording.save(update_fields=['transcript_status', 'transcript', 'transcript_language', 'updated_at'])
+        transcribe_recording_async(recording.id)
+        serializer = CallRecordingSerializer(recording, context=self.get_serializer_context())
+        return Response(serializer.data)
 
 
 class PushSubscriptionViewSet(
