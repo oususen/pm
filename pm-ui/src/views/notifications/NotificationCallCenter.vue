@@ -70,7 +70,7 @@
                 class="session-recording"
               >
                 <span class="session-recording-label">録音あり</span>
-                <audio controls preload="none" :src="session.recording.file_url" @click.stop></audio>
+                <audio controls preload="metadata" :src="session.recording.file_url" @click.stop></audio>
               </div>
             </div>
           </div>
@@ -193,6 +193,7 @@ import { useRoute, useRouter } from "vue-router";
 import api from "@/api/client";
 import { authState } from "@/auth";
 import { CALL_RECORDING_ALLOWED_USERS_KEY, parseAllowedRecordingUsernames } from "@/utils/callRecordingAccess";
+import fixWebmDuration from "fix-webm-duration";
 
 const router = useRouter();
 const route = useRoute();
@@ -647,7 +648,13 @@ const beginCallRecording = async (session) => {
     const endedAt = recordingEndedAt.value || new Date();
     recordingEndedAt.value = endedAt;
     const mimeType = recordingMimeType.value || recorder.mimeType || "application/octet-stream";
-    const blob = recordingChunks.length ? new Blob(recordingChunks, { type: mimeType }) : null;
+    const durationMs = recordingStartedAt.value
+      ? Math.max(endedAt.getTime() - recordingStartedAt.value.getTime(), 0)
+      : 0;
+    const rawBlob = recordingChunks.length ? new Blob(recordingChunks, { type: mimeType }) : null;
+    const blob = rawBlob && durationMs > 0
+      ? await fixWebmDuration(rawBlob, durationMs, { logger: false })
+      : rawBlob;
     if (blob) {
       pendingRecordingBlob.value = blob;
       pendingRecordingSessionId.value = targetSessionId;

@@ -73,7 +73,7 @@
               <audio
                 v-if="session.recording?.file_url"
                 controls
-                preload="none"
+                preload="metadata"
                 :src="session.recording.file_url"
               ></audio>
               <span v-else>-</span>
