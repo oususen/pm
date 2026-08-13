@@ -1,3 +1,4 @@
+import gc
 import logging
 import queue
 import threading
@@ -27,6 +28,25 @@ def _get_model():
         return _model
 
 
+def _is_model_resident():
+    from system_settings.models import SystemSetting
+    try:
+        s = SystemSetting.objects.get(key='whisper_model_resident')
+        return s.value.lower() in ('true', '1', 'yes')
+    except SystemSetting.DoesNotExist:
+        return False
+
+
+def _release_model():
+    global _model
+    with _model_lock:
+        if _model is not None:
+            del _model
+            _model = None
+            gc.collect()
+            logger.info('faster-whisper モデルをメモリから解放しました')
+
+
 def _worker():
     while True:
         recording_id = _task_queue.get()
@@ -36,6 +56,8 @@ def _worker():
             logger.exception('録音ID=%s の文字起こしワーカーで例外発生', recording_id)
         finally:
             _task_queue.task_done()
+            if _task_queue.empty() and not _is_model_resident():
+                _release_model()
 
 
 def _ensure_worker():

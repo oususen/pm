@@ -84,17 +84,10 @@ class SystemSettingViewSet(viewsets.GenericViewSet):
     def update_by_key(self, request):
         """複数キーをまとめて更新: { key: value, ... }"""
         updated = []
-        errors = {}
         for key, value in request.data.items():
-            try:
-                instance = SystemSetting.objects.get(key=key)
-                instance.value = str(value)
-                instance.updated_by = request.user
-                instance.save()
-                updated.append(key)
-            except SystemSetting.DoesNotExist:
-                errors[key] = 'キーが存在しません'
-
-        if errors:
-            return Response({'updated': updated, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+            SystemSetting.objects.update_or_create(
+                key=key,
+                defaults={'value': str(value), 'updated_by': request.user},
+            )
+            updated.append(key)
         return Response({'updated': updated})

@@ -152,6 +152,12 @@ const settings = [
     meta: { pageTitle: "締め日管理", resource: "settings.lock_date" },
   },
   {
+    path: "/settings/transcription",
+    name: "TranscriptionSettings",
+    component: () => import("@/views/settings/TranscriptionSettings.vue"),
+    meta: { pageTitle: "文字起こし設定", resource: "settings" },
+  },
+  {
     path: "/settings/system",
     name: "SystemSettings",
     component: () => import("@/views/settings/SystemSettings.vue"),
