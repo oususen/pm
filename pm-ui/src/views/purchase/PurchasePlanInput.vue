@@ -370,8 +370,9 @@ const clearDayPlan = async (dateKey) => {
     return
   }
 
-  const items = rows.value
-    .filter((r) => r.product_id)
+  const targetRows = rows.value.filter((r) => r.product_id && Number(r.daily?.[dateKey]?.plan_base || 0) !== 0)
+
+  const items = targetRows
     .map((r) => ({
       product_id: r.product_id,
       process_id: r.process_id || purchaseProcessId.value,
@@ -393,6 +394,7 @@ const clearDayPlan = async (dateKey) => {
       line_id: lineId,
       start_date: startDate.value,
       end_date: endDate.value,
+      product_ids: targetRows.map((r) => r.product_id),
     })
     rows.value.forEach((row) => {
       const daily = row.daily?.[dateKey]
@@ -869,6 +871,13 @@ const fetchAndApplyData = async (lineId) => {
     })
   })
 
+  // seq=0（需要行）から各製品の正しいprocess_idを確定する（1パス目）
+  backlogs.forEach((d) => {
+    if (!d.product || d.sequence_no !== 0 || !d.process) return
+    const row = grouped.get(d.product)
+    if (row) row.process_id = d.process
+  })
+
   backlogs.forEach((d) => {
     if (!d.product) return
     if (d.sequence_no !== 0 && d.sequence_no !== 1) return
@@ -880,7 +889,6 @@ const fetchAndApplyData = async (lineId) => {
     const dateKey = d.plan_date
     if (!row.daily[dateKey]) return
     if (d.sequence_no === 0) {
-      // 基礎行: 需要・実績・在庫・進度
       row.daily[dateKey].demand = Number(d.order_qty || 0)
       row.daily[dateKey].actual = Number(d.actual_qty || 0)
       row.daily[dateKey].stock = Number(d.stock_qty || 0)
@@ -889,7 +897,8 @@ const fetchAndApplyData = async (lineId) => {
       row.daily[dateKey].planned_progress = Number(d.planned_progress_qty || 0)
       row.daily[dateKey].has_row = true
     } else if (d.sequence_no === 1) {
-      // 計画行: plan_qty のみ
+      // seq=0で確定したprocessと異なる工程の計画行はスキップ
+      if (row.process_id && d.process && d.process !== row.process_id) return
       row.daily[dateKey].plan = d.plan_qty === null || d.plan_qty === undefined ? '' : d.plan_qty === 0 ? '' : d.plan_qty
       row.daily[dateKey].plan_base = Number(d.plan_qty || 0)
     }
@@ -1484,6 +1493,5 @@ thead .sticky-col {
   opacity: 0.9;
 }
 </style>
-
 
 
