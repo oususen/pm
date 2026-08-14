@@ -630,6 +630,14 @@
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  .pres-hint {
+    font-size: 0.72rem;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    letter-spacing: 0.03em;
+  }
   .pres-exit {
     background: none;
     border: 1px solid var(--border);
@@ -1354,6 +1362,7 @@
   <div class="pres-topbar">
     <span class="pres-title">注文書自動送信 — 機能説明資料</span>
     <span class="pres-counter" id="presCounter">1 / 10</span>
+    <span class="pres-hint">F11 で全画面</span>
     <button class="pres-exit" id="presExit">ESC 終了</button>
   </div>
   <div class="pres-viewport" id="presViewport">
@@ -1440,24 +1449,10 @@
   function enter() {
     document.body.classList.add('presentation');
     goTo(0);
-    var el = document.documentElement;
-    if (el.requestFullscreen) el.requestFullscreen();
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-    else if (el.msRequestFullscreen) el.msRequestFullscreen();
   }
   function exit() {
     document.body.classList.remove('presentation');
-    if (document.fullscreenElement || document.webkitFullscreenElement) {
-      if (document.exitFullscreen) document.exitFullscreen();
-      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-      else if (document.msExitFullscreen) document.msExitFullscreen();
-    }
   }
-  document.addEventListener('fullscreenchange', function() {
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-      document.body.classList.remove('presentation');
-    }
-  });
 
   document.getElementById('presToggle').addEventListener('click', enter);
   document.getElementById('presExit').addEventListener('click', exit);
