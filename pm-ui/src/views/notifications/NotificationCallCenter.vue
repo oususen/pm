@@ -2,25 +2,25 @@
   <div class="call-center-page">
     <div class="page-header">
       <div class="page-heading">
-        <h2 class="page-title">社内通話</h2>
+        <h2 class="page-title">{{ t('call.pageTitle') }}</h2>
         <button
           v-if="incomingSessions.length"
           type="button"
           class="incoming-summary-button"
           @click="focusIncomingSession(incomingSessions[0])"
         >
-          <span class="incoming-summary-label">着信中</span>
+          <span class="incoming-summary-label">{{ t('call.incoming') }}</span>
           <span class="incoming-summary-name">{{ incomingSessions[0].caller_name }}</span>
-          <span class="incoming-summary-type">{{ incomingSessions[0].call_type === 'video' ? 'ビデオ通話' : '音声通話' }}</span>
+          <span class="incoming-summary-type">{{ incomingSessions[0].call_type === 'video' ? t('call.videoCall') : t('call.voiceCall') }}</span>
           <span class="incoming-summary-time">{{ formatDateTime(incomingSessions[0].initiated_at) }}</span>
         </button>
       </div>
       <div class="header-actions">
         <button class="btn secondary-btn" type="button" @click="reloadAll" :disabled="loading">
-          再読込
+          {{ t('call.reload') }}
         </button>
         <button class="btn secondary-btn" type="button" @click="goNotificationList">
-          通知一覧
+          {{ t('call.notificationList') }}
         </button>
       </div>
     </div>
@@ -29,18 +29,18 @@
       <aside class="sidebar">
         <section class="panel">
           <button class="panel-toggle" type="button" @click="dialerOpen = !dialerOpen">
-            <span class="panel-title compact">発信</span>
+            <span class="panel-title compact">{{ t('call.dial') }}</span>
             <span class="toggle-arrow" :class="{ open: dialerOpen }">▶</span>
           </button>
           <div v-if="dialerOpen" class="dialer-body">
             <div class="caller-row">
-              <label class="field-label inline-label" for="peer-select">相手</label>
+              <label class="field-label inline-label" for="peer-select">{{ t('call.peer') }}</label>
             </div>
             <div v-if="environmentWarning" class="warning-box">
               {{ environmentWarning }}
             </div>
             <select id="peer-select" v-model="selectedPeerId" class="select">
-              <option value="">選択してください</option>
+              <option value="">{{ t('call.selectPeer') }}</option>
               <option v-for="user in users" :key="user.id" :value="String(user.id)">
                 {{ formatUserLabel(user) }}
               </option>
@@ -48,11 +48,11 @@
             <div class="action-row">
               <button class="btn voice-btn label-icon-btn" type="button" @click="startCall('voice')" :disabled="!selectedPeerId || busy">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-                <span>音声</span>
+                <span>{{ t('call.voice') }}</span>
               </button>
               <button class="btn video-btn label-icon-btn" type="button" @click="startCall('video')" :disabled="!selectedPeerId || busy">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                <span>ビデオ</span>
+                <span>{{ t('call.video') }}</span>
               </button>
             </div>
           </div>
@@ -60,7 +60,7 @@
 
         <section class="panel">
           <button class="panel-toggle" type="button" @click="historyOpen = !historyOpen">
-            <span class="panel-title compact">最近の通話</span>
+            <span class="panel-title compact">{{ t('call.recentCalls') }}</span>
             <span class="toggle-arrow" :class="{ open: historyOpen }">▶</span>
           </button>
           <div v-if="historyOpen && recentSessions.length" class="session-list">
@@ -72,32 +72,32 @@
                 @click="selectSession(session)"
               >
                 <strong>{{ counterpartName(session) }}</strong>
-                <span>{{ session.call_type === 'video' ? 'ビデオ通話' : '音声通話' }} / {{ statusLabel(session.status) }}</span>
+                <span>{{ session.call_type === 'video' ? t('call.videoCall') : t('call.voiceCall') }} / {{ statusLabel(session.status) }}</span>
                 <span>{{ formatDateTime(session.initiated_at) }}</span>
               </button>
               <div
                 v-if="canUseRecordingFeatures && session.has_recording && session.recording?.file_url"
                 class="session-recording"
               >
-                <span class="session-recording-label">録音あり</span>
+                <span class="session-recording-label">{{ t('call.hasRecording') }}</span>
                 <audio controls preload="metadata" :src="session.recording.file_url" @click.stop></audio>
               </div>
             </div>
           </div>
-          <div v-else-if="historyOpen" class="empty">履歴はありません。</div>
+          <div v-else-if="historyOpen" class="empty">{{ t('call.noHistory') }}</div>
         </section>
 
       </aside>
 
       <main class="main-panel">
         <div v-if="!isActiveSession" class="idle-message">
-          発信パネルから相手を選択して通話を開始してください。
+          {{ t('call.idleMessage') }}
         </div>
         <section v-else class="call-stage">
           <div class="stage-header">
             <div class="stage-status-line">
               <div class="stage-subtitle">
-                {{ currentSession.call_type === 'video' ? 'ビデオ通話' : '音声通話' }}
+                {{ currentSession.call_type === 'video' ? t('call.videoCall') : t('call.voiceCall') }}
               </div>
               <div class="status-badge" :class="statusClass">
                 {{ statusMessage }}
@@ -106,7 +106,7 @@
             <div v-if="canUseRecordingFeatures" class="recording-status-group">
               <div v-if="showRecordingBadge" class="recording-badge">
                 <span class="recording-dot"></span>
-                録音中
+                {{ t('call.recording') }}
               </div>
               <div v-if="recordingStatusText" class="recording-status-text">
                 {{ recordingStatusText }}
@@ -118,17 +118,17 @@
                 @click="retryRecordingUpload"
                 :disabled="busy || recordingUploadInFlight"
               >
-                録音再送
+                {{ t('call.retryUpload') }}
               </button>
             </div>
           </div>
 
           <div class="control-row">
-            <button class="btn secondary-btn icon-btn" :class="{ off: !micEnabled }" type="button" @click="toggleMic" :disabled="!localStream" :title="micEnabled ? 'マイクOFF' : 'マイクON'">
+            <button class="btn secondary-btn icon-btn" :class="{ off: !micEnabled }" type="button" @click="toggleMic" :disabled="!localStream" :title="micEnabled ? t('call.micOff') : t('call.micOn')">
               <svg v-if="micEnabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
               <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6"/><path d="M17 16.95A7 7 0 015 12v-2m14 0v2c0 .76-.12 1.5-.35 2.18"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
             </button>
-            <button class="btn secondary-btn icon-btn" :class="{ off: !cameraEnabled }" type="button" @click="toggleCamera" :disabled="!hasVideoTrack" :title="cameraEnabled ? 'カメラOFF' : 'カメラON'">
+            <button class="btn secondary-btn icon-btn" :class="{ off: !cameraEnabled }" type="button" @click="toggleCamera" :disabled="!hasVideoTrack" :title="cameraEnabled ? t('call.cameraOff') : t('call.cameraOn')">
               <svg v-if="cameraEnabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
               <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 01-2-2V8a2 2 0 012-2h3m3-3h6l2 3h4a2 2 0 012 2v9.34m-7.72-2.06a4 4 0 11-5.56-5.56"/></svg>
             </button>
@@ -148,7 +148,7 @@
               type="button"
               @click="acceptCurrentSession"
               :disabled="busy"
-              title="応答"
+              :title="t('call.answer')"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
             </button>
@@ -158,7 +158,7 @@
               type="button"
               @click="declineCurrentSession"
               :disabled="busy"
-              title="辞退"
+              :title="t('call.decline')"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" transform="rotate(135 12 12)"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
             </button>
@@ -168,7 +168,7 @@
               type="button"
               @click="finishCurrentSession"
               :disabled="busy"
-              title="終了"
+              :title="t('call.end')"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" transform="rotate(135 12 12)"/></svg>
             </button>
@@ -195,8 +195,8 @@
                 {{ currentCameraLabel }}
               </div>
               <div v-if="!showLocalVideo" class="video-placeholder small">
-                <div class="placeholder-name">自分</div>
-                <div class="placeholder-note">カメラオフ</div>
+                <div class="placeholder-name">{{ t('call.self') }}</div>
+                <div class="placeholder-note">{{ t('call.cameraOffNote') }}</div>
               </div>
             </div>
           </div>
@@ -210,6 +210,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import api from "@/api/client";
+import { t } from "@/i18n";
 import { authState } from "@/auth";
 import { CALL_RECORDING_ALLOWED_USERS_KEY, parseAllowedRecordingUsernames } from "@/utils/callRecordingAccess";
 import fixWebmDuration from "fix-webm-duration";
@@ -225,7 +226,7 @@ const selectedPeerId = ref("");
 const currentSession = ref(null);
 const loading = ref(false);
 const busy = ref(false);
-const statusMessage = ref("待機中");
+const statusMessage = ref(t("call.status.waiting"));
 const environmentWarning = ref("");
 
 const localVideoRef = ref(null);
@@ -332,7 +333,7 @@ const hasVideoTrack = computed(() => {
 });
 
 const currentFacingModeLabel = computed(() => {
-  return preferredFacingMode.value === "environment" ? "前面へ切替" : "背面へ切替";
+  return preferredFacingMode.value === "environment" ? t("call.switchToFront") : t("call.switchToRear");
 });
 
 const canSwitchCamera = computed(() => {
@@ -350,7 +351,7 @@ const isFrontCameraActive = computed(() => {
 
 const currentCameraLabel = computed(() => {
   if (!hasVideoTrack.value) return "";
-  return isFrontCameraActive.value ? "前面カメラ" : "背面カメラ";
+  return isFrontCameraActive.value ? t("call.frontCamera") : t("call.rearCamera");
 });
 
 const showLocalVideo = computed(() => {
@@ -387,16 +388,16 @@ const showRecordingBadge = computed(() => {
 
 const recordingStatusText = computed(() => {
   if (recordingUploadInFlight.value) {
-    return "録音アップロード中";
+    return t("call.recording.uploading");
   }
   if (recordingState.value === "failed") {
-    return recordingErrorMessage.value || "録音アップロードに失敗しました";
+    return recordingErrorMessage.value || t("call.recording.failed");
   }
   if (currentSession.value?.has_recording) {
-    return "録音保存済み";
+    return t("call.recording.saved");
   }
   if (recordingState.value === "recording") {
-    return "通話を録音しています";
+    return t("call.recording.inProgress");
   }
   return "";
 });
@@ -429,15 +430,9 @@ const counterpartName = (session) => {
 };
 
 const statusLabel = (status) => {
-  const labels = {
-    ringing: "呼出中",
-    accepted: "通話中",
-    declined: "辞退",
-    ended: "終了",
-    missed: "不在",
-    canceled: "キャンセル",
-  };
-  return labels[status] || status;
+  const key = `call.statusLabel.${status}`;
+  const translated = t(key);
+  return translated !== key ? translated : status;
 };
 
 const formatDateTime = (value) => {
@@ -619,7 +614,7 @@ const uploadPendingRecording = async (sessionId) => {
   } catch (error) {
     console.error("録音アップロード失敗", error);
     recordingState.value = "failed";
-    recordingErrorMessage.value = "録音アップロードに失敗しました。再送してください。";
+    recordingErrorMessage.value = t("call.recording.retryMessage");
   } finally {
     recordingUploadInFlight.value = false;
   }
@@ -637,7 +632,7 @@ const beginCallRecording = async (session) => {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (typeof window.MediaRecorder === "undefined" || typeof AudioContextClass === "undefined") {
     recordingState.value = "failed";
-    recordingErrorMessage.value = "このブラウザでは録音に対応していません。";
+    recordingErrorMessage.value = t("call.recording.notSupported");
     return;
   }
   if (recordingState.value === "recording") return;
@@ -819,32 +814,32 @@ const isSecureMediaContext = () => {
 
 const getMediaEnvironmentError = () => {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-    return "このブラウザではマイク・カメラ取得に対応していません。";
+    return t("call.error.mediaNotSupported");
   }
   if (!isSecureMediaContext()) {
-    return "音声通話・ビデオ通話は HTTPS または localhost で開いてください。現在の HTTP 接続ではマイク・カメラを利用できません。";
+    return t("call.error.httpsRequired");
   }
   return "";
 };
 
 const getMediaErrorMessage = (error, callType) => {
-  const mediaLabel = callType === "video" ? "マイク・カメラ" : "マイク";
+  const media = callType === "video" ? t("call.media.micCamera") : t("call.media.mic");
   if (!error) {
-    return `${mediaLabel}の取得に失敗しました。`;
+    return t("call.error.mediaFailed", { media });
   }
   if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-    return `${mediaLabel}の利用が拒否されました。ブラウザの権限設定を確認してください。`;
+    return t("call.error.permissionDenied", { media });
   }
   if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
-    return `${mediaLabel}に必要なデバイスが見つかりません。`;
+    return t("call.error.deviceNotFound", { media });
   }
   if (error.name === "NotReadableError" || error.name === "TrackStartError") {
-    return `${mediaLabel}が他のアプリで使用中のため取得できません。`;
+    return t("call.error.deviceInUse", { media });
   }
   if (error.name === "SecurityError") {
-    return "音声通話・ビデオ通話は HTTPS または localhost で開いてください。";
+    return t("call.error.httpsRequired");
   }
-  return `${mediaLabel}の取得に失敗しました。`;
+  return t("call.error.mediaFailed", { media });
 };
 
 const isFacingModeMatch = (label, facingMode) => {
@@ -1146,21 +1141,21 @@ const createPeerConnection = (session) => {
     const state = pc.connectionState;
     if (state === "connected") {
       stopConnectionStateTimer();
-      statusMessage.value = "接続中";
+      statusMessage.value = t("call.status.connected");
     } else if (state === "disconnected") {
-      statusMessage.value = "接続が不安定です";
+      statusMessage.value = t("call.status.unstable");
       stopConnectionStateTimer();
       connectionStateTimerId.value = window.setTimeout(() => {
         if (pc.connectionState === "disconnected") {
-          statusMessage.value = "接続が切れました";
+          statusMessage.value = t("call.status.disconnected");
         }
       }, CONNECTION_DISCONNECTED_GRACE_MS);
     } else if (state === "failed") {
       stopConnectionStateTimer();
-      statusMessage.value = "接続が切れました";
+      statusMessage.value = t("call.status.disconnected");
     } else if (state === "closed") {
       stopConnectionStateTimer();
-      statusMessage.value = "終了";
+      statusMessage.value = t("call.status.ended");
     }
   };
 
@@ -1246,7 +1241,7 @@ const selectSession = (session) => {
 
 const focusIncomingSession = (session) => {
   currentSession.value = session;
-  statusMessage.value = "着信中";
+  statusMessage.value = t("call.status.ringing");
 };
 
 const sendOffer = async (session) => {
@@ -1303,7 +1298,7 @@ const handleSignal = async (signal) => {
 
   if (signal.signal_type === "hangup") {
     await finalizeCallUi(currentSession.value, {
-      statusText: "相手が通話を終了しました",
+      statusText: t("call.status.peerEnded"),
       uploadRecording: true,
       refreshSession: true,
     });
@@ -1339,7 +1334,7 @@ const joinSession = async (session, { createOffer }) => {
   createPeerConnection(session);
   updateVideoBindings();
   currentSession.value = session;
-  statusMessage.value = createOffer ? "呼出中" : "接続準備中";
+  statusMessage.value = createOffer ? t("call.status.calling") : t("call.status.preparing");
   await beginCallRecording(session);
   startSignalPolling();
   if (createOffer) {
@@ -1365,7 +1360,7 @@ const startCall = async (callType) => {
     console.error("発信失敗", error);
     window.alert(error?.response?.data?.detail || getMediaErrorMessage(error, callType));
     if (!error?.response) {
-      statusMessage.value = "待機中";
+      statusMessage.value = t("call.status.waiting");
     }
   } finally {
     busy.value = false;
@@ -1395,13 +1390,13 @@ const declineCurrentSession = async () => {
   try {
     await api.notifications.declineCall(session.id);
     await finalizeCallUi(session, {
-      statusText: "辞退しました",
+      statusText: t("call.status.declined"),
       uploadRecording: true,
       refreshSession: false,
     });
   } catch (error) {
     console.error("辞退失敗", error);
-    window.alert(error?.response?.data?.detail || "辞退に失敗しました。");
+    window.alert(error?.response?.data?.detail || t("call.error.declineFailed"));
   } finally {
     busy.value = false;
   }
@@ -1414,13 +1409,13 @@ const finishCurrentSession = async () => {
   try {
     await api.notifications.finishCall(session.id);
     await finalizeCallUi(session, {
-      statusText: "終了しました",
+      statusText: t("call.status.finished"),
       uploadRecording: true,
       refreshSession: false,
     });
   } catch (error) {
     console.error("終了失敗", error);
-    window.alert(error?.response?.data?.detail || "終了に失敗しました。");
+    window.alert(error?.response?.data?.detail || t("call.error.endFailed"));
   } finally {
     busy.value = false;
   }
@@ -1539,7 +1534,7 @@ const maybeOpenSessionFromQuery = async () => {
   const found = sessions.value.find((session) => session.id === sessionId);
   if (found) {
     currentSession.value = found;
-    statusMessage.value = found.status === "ringing" ? "着信中" : statusLabel(found.status);
+    statusMessage.value = found.status === "ringing" ? t("call.status.ringing") : statusLabel(found.status);
   }
 };
 

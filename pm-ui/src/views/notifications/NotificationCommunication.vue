@@ -18,14 +18,15 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, computed } from "vue";
+import { t } from "@/i18n";
 import NotificationCallCenter from "./NotificationCallCenter.vue";
 import NotificationSourceInput from "./NotificationSourceInput.vue";
 
-const tabs = [
-  { id: "call", label: "通話" },
-  { id: "message", label: "メッセージ" },
-];
+const tabs = computed(() => [
+  { id: "call", label: t("comm.tabCall") },
+  { id: "message", label: t("comm.tabMessage") },
+]);
 
 const activeTab = ref("call");
 </script>
