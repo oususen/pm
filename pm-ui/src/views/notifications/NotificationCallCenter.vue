@@ -33,18 +33,56 @@
             <span class="toggle-arrow" :class="{ open: dialerOpen }">▶</span>
           </button>
           <div v-if="dialerOpen" class="dialer-body">
-            <div class="caller-row">
-              <label class="field-label inline-label" for="peer-select">{{ t('call.peer') }}</label>
+            <div class="dial-mode-switch" role="tablist" aria-label="発信方法">
+              <button
+                type="button"
+                class="dial-mode-btn"
+                :class="{ active: dialMode === 'peer' }"
+                @click="dialMode = 'peer'"
+              >
+                相手から選ぶ
+              </button>
+              <button
+                type="button"
+                class="dial-mode-btn"
+                :class="{ active: dialMode === 'organization' }"
+                @click="dialMode = 'organization'"
+              >
+                組織から選ぶ
+              </button>
             </div>
             <div v-if="environmentWarning" class="warning-box">
               {{ environmentWarning }}
             </div>
-            <select id="peer-select" v-model="selectedPeerId" class="select">
+            <div v-if="dialMode === 'organization'" class="caller-row stacked">
+              <label class="field-label inline-label" for="organization-select">組織</label>
+              <select id="organization-select" v-model="selectedOrganizationId" class="select">
+                <option value="">組織を選択</option>
+                <option v-for="org in organizationOptions" :key="org.id" :value="org.id">
+                  {{ org.name }}
+                </option>
+              </select>
+              <div class="helper">
+                {{ selectedOrganizationId ? `${filteredDialerUsers.length}人が対象です` : "先に組織を選択してください" }}
+              </div>
+            </div>
+            <div class="caller-row stacked">
+              <label class="field-label inline-label" for="peer-select">
+                {{ dialMode === 'organization' ? '相手選択' : t('call.peer') }}
+              </label>
+            </div>
+            <select id="peer-select" v-model="selectedPeerId" class="select" :disabled="dialMode === 'organization' && !selectedOrganizationId">
               <option value="">{{ t('call.selectPeer') }}</option>
-              <option v-for="user in users" :key="user.id" :value="String(user.id)">
+              <option v-for="user in filteredDialerUsers" :key="user.id" :value="String(user.id)">
                 {{ formatUserLabel(user) }}
               </option>
             </select>
+            <div
+              v-if="dialMode === 'organization' && selectedOrganizationId && !filteredDialerUsers.length"
+              class="helper"
+            >
+              選択した組織に通話可能な相手がいません。
+            </div>
             <div class="action-row">
               <button class="btn voice-btn label-icon-btn" type="button" @click="startCall('voice')" :disabled="!selectedPeerId || busy">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
@@ -219,9 +257,12 @@ const router = useRouter();
 const route = useRoute();
 
 const users = ref([]);
+const departments = ref([]);
 const sessions = ref([]);
 const dialerOpen = ref(false);
 const historyOpen = ref(false);
+const dialMode = ref("peer");
+const selectedOrganizationId = ref("");
 const selectedPeerId = ref("");
 const currentSession = ref(null);
 const loading = ref(false);
@@ -411,9 +452,87 @@ const canRetryRecordingUpload = computed(() => {
   );
 });
 
+const toId = (value) => (value === null || value === undefined ? "" : String(value));
+
+const departmentMap = computed(() => {
+  const map = new Map();
+  departments.value.forEach((department) => {
+    map.set(toId(department.id), department);
+  });
+  return map;
+});
+
+const departmentPathMap = computed(() => {
+  const cache = new Map();
+  const resolvePath = (departmentId) => {
+    const key = toId(departmentId);
+    if (!key) return "";
+    if (cache.has(key)) return cache.get(key);
+    const names = [];
+    const seen = new Set();
+    let cursor = departmentMap.value.get(key);
+    while (cursor && !seen.has(toId(cursor.id))) {
+      seen.add(toId(cursor.id));
+      if (cursor.name) {
+        names.unshift(cursor.name);
+      }
+      cursor = departmentMap.value.get(toId(cursor.parent));
+    }
+    const path = names.join(" / ");
+    cache.set(key, path);
+    return path;
+  };
+  departments.value.forEach((department) => {
+    resolvePath(department.id);
+  });
+  return cache;
+});
+
+const organizationOptions = computed(() => {
+  return departments.value
+    .map((department) => ({
+      id: String(department.id),
+      name: departmentPathMap.value.get(toId(department.id)) || department.name || `ID:${department.id}`,
+      level: department.level || "",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+});
+
+const getUserOrganizationIds = (user) => {
+  const profile = user?.profile || {};
+  return [
+    profile.unit_id ?? profile.unit ?? null,
+    profile.team_id ?? profile.team ?? null,
+    profile.group_id ?? profile.group ?? null,
+    profile.division_id ?? profile.division ?? null,
+    profile.department_id ?? profile.department ?? null,
+  ]
+    .map((value) => toId(value))
+    .filter(Boolean);
+};
+
+const userMatchesOrganization = (user, organizationId) => {
+  if (!organizationId) return true;
+  const targetId = toId(organizationId);
+  return getUserOrganizationIds(user).includes(targetId);
+};
+
+const filteredDialerUsers = computed(() => {
+  if (dialMode.value !== "organization") {
+    return users.value;
+  }
+  return users.value.filter((user) => userMatchesOrganization(user, selectedOrganizationId.value));
+});
+
 const formatUserLabel = (user) => {
   const name = displayName(user);
-  const dept = user.profile?.division_name || user.profile?.department_name || "";
+  const dept = [
+    user.profile?.division_name,
+    user.profile?.group_name,
+    user.profile?.team_name,
+    user.profile?.unit_name,
+    user.profile?.department_name,
+  ].filter(Boolean).join(" / ");
   return dept ? `${name} (${dept})` : name;
 };
 
@@ -1168,6 +1287,17 @@ const loadUsers = async () => {
   users.value = Array.isArray(data) ? data.filter((user) => Number(user.id) !== Number(myUserId.value)) : [];
 };
 
+const loadDepartments = async () => {
+  try {
+    const res = await api.accounts.getDepartments({ ordering: "display_id,name", page_size: 0 });
+    const data = res.data?.results || res.data || [];
+    departments.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("組織一覧の取得失敗", error);
+    departments.value = [];
+  }
+};
+
 const loadRecordingSettings = async () => {
   try {
     const res = await api.systemSettings.getAll();
@@ -1227,7 +1357,7 @@ const refreshCurrentSession = async () => {
 const reloadAll = async () => {
   loading.value = true;
   try {
-    await Promise.all([loadUsers(), loadSessions()]);
+    await Promise.all([loadUsers(), loadDepartments(), loadSessions()]);
     await maybeOpenSessionFromQuery();
   } finally {
     loading.value = false;
@@ -1542,6 +1672,17 @@ watch([localVideoRef, remoteVideoRef], () => {
   updateVideoBindings();
 });
 
+watch(dialMode, (mode) => {
+  selectedPeerId.value = "";
+  if (mode !== "organization") {
+    selectedOrganizationId.value = "";
+  }
+});
+
+watch(selectedOrganizationId, () => {
+  selectedPeerId.value = "";
+});
+
 onMounted(async () => {
   environmentWarning.value = getMediaEnvironmentError();
   await Promise.all([loadRecordingSettings(), loadCallPollingSettings(), reloadAll()]);
@@ -1713,11 +1854,41 @@ onBeforeUnmount(() => {
   margin-top: 8px;
 }
 
+.dial-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dial-mode-btn {
+  border: 1px solid #c5d0dd;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #51627c;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.dial-mode-btn.active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
 .caller-row {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.caller-row.stacked {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .field-label {
