@@ -129,23 +129,25 @@
       <div class="modal-card save-confirm-modal">
         <h3 class="modal-title">保存前チェック</h3>
         <div class="save-confirm-message">保存前チェックで注意点があります。</div>
-        <div v-if="saveValidationState.missingTruckCount" class="save-confirm-section">
-          <div class="save-confirm-line">・便未選択: {{ saveValidationState.missingTruckCount }}件</div>
-          <div v-for="item in saveValidationState.missingTruckDetails" :key="`missing-${item}`" class="save-confirm-detail">
-            {{ item }}
+        <div class="save-confirm-scroll">
+          <div v-if="saveValidationState.missingTruckCount" class="save-confirm-section">
+            <div class="save-confirm-line">・便未選択: {{ saveValidationState.missingTruckCount }}件</div>
+            <div v-for="item in saveValidationState.missingTruckDetails" :key="`missing-${item}`" class="save-confirm-detail">
+              {{ item }}
+            </div>
           </div>
-        </div>
-        <div v-if="saveValidationState.unassignedQtyCount" class="save-confirm-section">
-          <div class="save-confirm-line save-confirm-line-danger">・未割付残あり: {{ saveValidationState.unassignedQtyCount }}件</div>
-          <div v-for="item in saveValidationState.unassignedQtyDetails" :key="`unassigned-${item}`" class="save-confirm-detail save-confirm-detail-danger">
-            {{ item }}
+          <div v-if="saveValidationState.unassignedQtyCount" class="save-confirm-section">
+            <div class="save-confirm-line save-confirm-line-danger">・未割付残あり: {{ saveValidationState.unassignedQtyCount }}件</div>
+            <div v-for="item in saveValidationState.unassignedQtyDetails" :key="`unassigned-${item}`" class="save-confirm-detail save-confirm-detail-danger">
+              {{ item }}
+            </div>
           </div>
-        </div>
-        <div v-for="item in saveValidationState.overAssigned" :key="`over-${item}`" class="save-confirm-line">
-          ・割付数量超過: {{ item }}
-        </div>
-        <div v-if="saveValidationState.overloaded.length" class="save-confirm-line">
-          ・便占有率100%超: {{ saveValidationState.overloaded.join(' / ') }}
+          <div v-for="item in saveValidationState.overAssigned" :key="`over-${item}`" class="save-confirm-line">
+            ・割付数量超過: {{ item }}
+          </div>
+          <div v-if="saveValidationState.overloaded.length" class="save-confirm-line">
+            ・便占有率100%超: {{ saveValidationState.overloaded.join(' / ') }}
+          </div>
         </div>
         <div class="save-confirm-question">このまま保存しますか？</div>
         <div class="modal-actions">
@@ -2560,13 +2562,11 @@ const validateBeforeSave = () => {
         const validAllocations = (entry.allocations || []).filter(
           (item) => item?.truck_id && parseIntegerQty(item?.qty) > 0,
         )
+        const unassigned = parseNumber(entry?.unassigned_qty_preview)
         if (!validAllocations.length) {
           missingTruckCount += 1
           missingTruckDetails.push(`${dateKey} ${row.product_code} ${formatNumber(deliveryQty)}`)
-        }
-
-        const unassigned = parseNumber(entry?.unassigned_qty_preview)
-        if (unassigned < 0) {
+        } else if (unassigned < 0) {
           unassignedQtyCount += 1
           unassignedQtyDetails.push(`${dateKey} ${row.product_code} ${formatNumber(Math.abs(unassigned))}`)
         }
@@ -3055,6 +3055,14 @@ onUnmounted(() => {
 }
 .save-confirm-modal {
   width: min(680px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+.save-confirm-scroll {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 .save-confirm-message,
 .save-confirm-question {
