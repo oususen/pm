@@ -415,6 +415,14 @@
         <span class="scope-label">リスク</span>
         <span class="scope-value">低（現行に影響なし）</span>
       </div>
+      <div class="scope-item">
+        <span class="scope-label">現行システム規模</span>
+        <span class="scope-value">約203画面 / 163モデル / 約250〜300 API</span>
+      </div>
+      <div class="scope-item">
+        <span class="scope-label">将来拡張</span>
+        <span class="scope-value">pgvector による曖昧検索基盤を見据える</span>
+      </div>
     </div>
   </div>
 
@@ -618,6 +626,7 @@
       <li><code>python manage.py migrate</code> — 全マイグレーション正常完了</li>
       <li><code>python manage.py runserver 8082</code> — 別ポートで起動</li>
       <li>MySQL版からテストデータを pgloader で移行して動作確認</li>
+      <li>現行規模（約203画面 / 163モデル / 約250〜300 API）を前提に、主要業務フローを横断確認</li>
       <li>主要画面の動作確認（受注一覧・ガントチャート・在庫・進度）</li>
       <li>受注展開の安定性テスト（落ちるケースの再現確認）</li>
       <li>在庫計算の速度比較（MySQL版 vs PostgreSQL版）</li>
@@ -668,6 +677,10 @@
 
     <div class="callout">
       <strong>段階的に:</strong> まず PHASE 4 でそのまま動くことを確認してから、ボトルネック順にDB関数化を進める。一気にやらない。
+    </div>
+
+    <div class="callout">
+      <strong>将来拡張の位置づけ:</strong> デジタル化課題整理では、通話録音の文字起こし、現場の会話記録、過去トラブル事例、製品名・工程名などの曖昧検索ニーズがある。そのため将来的には <code>PostgreSQL + pgvector</code> を使ったベクトルDB基盤が必要になる。加えて、AGV導入時の搬送ログ蓄積や、AIカメラ導入時の判定イベント蓄積・分析基盤も見据える必要がある。今回の移行では既存業務データを安全に PostgreSQL へ移行することを優先し、将来の pgvector 導入や AGV・AIカメラ等のログ蓄積基盤を後続で追加しても支障が出ない構成を前提とする。
     </div>
   </div>
 
