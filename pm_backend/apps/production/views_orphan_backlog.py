@@ -43,7 +43,12 @@ class OrphanLineBacklogReportView(APIView):
             return Response({'detail': 'この機能を利用する権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
 
         product_code = (request.query_params.get('product_code') or '').strip() or None
-        report = svc.build_report(product_code)
+        include_st_coproduct = request.query_params.get('include_st_coproduct', 'false')
+        if isinstance(include_st_coproduct, str):
+            include_st_coproduct = include_st_coproduct.lower() in ('true', '1', 'yes', 'on')
+        else:
+            include_st_coproduct = bool(include_st_coproduct)
+        report = svc.build_report(product_code, include_st_coproduct=include_st_coproduct)
         return Response(report)
 
 

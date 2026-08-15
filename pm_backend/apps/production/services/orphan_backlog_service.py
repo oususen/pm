@@ -22,6 +22,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Count, Max, Min, Sum
 
+from masters.models import Product
 from masters.models import RoutingStep
 from production.models import LineDemand
 from production.models_line_backlog import LineBacklog
@@ -35,6 +36,14 @@ BACKLOG_QTY_FIELDS = [
 DEMAND_QTY_FIELDS = [
     'forecast_qty', 'firm_qty', 'plan_qty', 'actual_qty', 'plan_progress', 'actual_progress',
 ]
+
+
+def _exclude_st_coproduct_groups(qs):
+    excluded_product_ids = Product.objects.filter(
+        is_virtual_set=True,
+        product_code__istartswith='ST',
+    ).values_list('id', flat=True)
+    return qs.exclude(product_id__in=excluded_product_ids)
 
 
 def _to_jsonable(value):
@@ -81,13 +90,15 @@ def build_valid_line_process_maps():
     return valid_line_process, valid_line_only, valid_line_any_process
 
 
-def find_backlog_groups(product_code=None):
+def find_backlog_groups(product_code=None, include_st_coproduct=False):
     """LineBacklogの孤立グループ(ghosts, residuals)を検出する"""
     valid_line_process, _, valid_line_any_process = build_valid_line_process_maps()
 
     qs = LineBacklog.objects.all()
     if product_code:
         qs = qs.filter(product__product_code=product_code)
+    if not include_st_coproduct:
+        qs = _exclude_st_coproduct_groups(qs)
 
     groups = qs.values(
         'product_id', 'product__product_code', 'product__product_name',
@@ -127,13 +138,15 @@ def find_backlog_groups(product_code=None):
     return ghosts, residuals
 
 
-def find_demand_groups(product_code=None):
+def find_demand_groups(product_code=None, include_st_coproduct=False):
     """LineDemandの孤立グループ(ghosts, residuals)を検出する"""
     _, valid_line_only, _ = build_valid_line_process_maps()
 
     qs = LineDemand.objects.exclude(product_id__isnull=True)
     if product_code:
         qs = qs.filter(product_code=product_code)
+    if not include_st_coproduct:
+        qs = _exclude_st_coproduct_groups(qs)
 
     groups = qs.values(
         'product_id', 'product_code', 'product__product_name',
@@ -165,9 +178,15 @@ def find_demand_groups(product_code=None):
     return ghosts, residuals
 
 
-def build_report(product_code=None):
-    backlog_ghosts, backlog_residuals = find_backlog_groups(product_code)
-    demand_ghosts, demand_residuals = find_demand_groups(product_code)
+def build_report(product_code=None, include_st_coproduct=False):
+    backlog_ghosts, backlog_residuals = find_backlog_groups(
+        product_code,
+        include_st_coproduct=include_st_coproduct,
+    )
+    demand_ghosts, demand_residuals = find_demand_groups(
+        product_code,
+        include_st_coproduct=include_st_coproduct,
+    )
     return {
         'backlog_ghosts': backlog_ghosts,
         'backlog_residuals': backlog_residuals,
