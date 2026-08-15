@@ -8,14 +8,36 @@
 
     <div class="card">
       <div class="input-row">
-        <label>製品コード（任意・空欄で全件スキャン）</label>
+        <label>{{ productCodeLabel }}</label>
         <input type="text" v-model.trim="productCode" placeholder="例: YD40007722-11SG" :disabled="loading" @keyup.enter="loadReport" />
+        <div class="toggle-group" role="group" aria-label="連産品表示切替">
+          <button
+            type="button"
+            class="btn toggle-btn"
+            :class="{ active: !includeStCoproduct }"
+            :disabled="loading"
+            @click="includeStCoproduct = false"
+          >
+            連産品除く
+          </button>
+          <button
+            type="button"
+            class="btn toggle-btn"
+            :class="{ active: includeStCoproduct }"
+            :disabled="loading"
+            @click="includeStCoproduct = true"
+          >
+            連産品含む
+          </button>
+        </div>
         <button class="btn primary" @click="loadReport" :disabled="loading">
           {{ loading ? "検索中..." : "検索/スキャン実行" }}
         </button>
       </div>
       <p v-if="report && !productCode" class="helper warning">
-        製品コード未指定で全製品を対象に検索しました（データ量によっては時間がかかる場合があります）。
+        {{ includeStCoproduct
+          ? "製品コード未指定で全製品を対象に検索しました（連産品含む、データ量によっては時間がかかる場合があります）。"
+          : "製品コード未指定で全製品を対象に検索しました（連産品除く、データ量によっては時間がかかる場合があります）。" }}
       </p>
     </div>
 
@@ -130,10 +152,17 @@ const canEdit = computed(() => {
 });
 
 const productCode = ref("");
+const includeStCoproduct = ref(false);
 const loading = ref(false);
 const applying = ref(false);
 const report = ref(null);
 const fixResult = ref(null);
+
+const productCodeLabel = computed(() => (
+  includeStCoproduct.value
+    ? "製品コード（任意・空欄で全製品スキャン: 連産品含む）"
+    : "製品コード（任意・空欄で全製品スキャン: 連産品除く）"
+));
 
 const selected = reactive({
   backlogGhost: new Set(),
@@ -240,7 +269,13 @@ const loadReport = async () => {
   loading.value = true;
   fixResult.value = null;
   try {
-    const res = await api.orphanBacklog.getReport(productCode.value ? { product_code: productCode.value } : {});
+    const params = {
+      include_st_coproduct: includeStCoproduct.value,
+    };
+    if (productCode.value) {
+      params.product_code = productCode.value;
+    }
+    const res = await api.orphanBacklog.getReport(params);
     report.value = res.data;
     // ゴースト行はデフォルトで全選択、要確認行はデフォルト未選択
     selected.backlogGhost = new Set(report.value.backlog_ghosts.map((g) => rowKey("backlog", g)));
@@ -363,6 +398,28 @@ const runFix = async () => {
   background: #4a7ae5;
   color: #fff;
   border-color: #3865c7;
+}
+
+.toggle-group {
+  display: inline-flex;
+  border: 1px solid #b5c1d2;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.toggle-btn {
+  border: 0;
+  border-radius: 0;
+  min-width: 88px;
+}
+
+.toggle-btn + .toggle-btn {
+  border-left: 1px solid #b5c1d2;
+}
+
+.toggle-btn.active {
+  background: #1f6feb;
+  color: #fff;
 }
 
 .btn.danger {
