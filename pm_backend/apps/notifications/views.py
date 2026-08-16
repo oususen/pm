@@ -8,6 +8,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.models import UserProfile
+from accounts.role_utils import get_assigned_team_ids, get_assigned_unit_ids, get_role_rank
 from .models import Notification, NotificationRead, CallSession, CallSignal, CallRecording, PushSubscription, NativePushToken
 from .serializers import (
     NotificationSerializer,
@@ -92,6 +94,74 @@ def _normalize_naive_datetime(value):
     return value
 
 
+def _can_view_subordinate_recording(viewer_profile, target_profile):
+    if not viewer_profile or not target_profile:
+        return False
+
+    viewer_rank = get_role_rank(getattr(viewer_profile, 'role', ''))
+    target_rank = get_role_rank(getattr(target_profile, 'role', ''))
+    if viewer_rank <= target_rank:
+        return False
+
+    if (
+        viewer_rank >= get_role_rank('manager')
+        and getattr(viewer_profile, 'division_id', None)
+        and getattr(target_profile, 'division_id', None) == viewer_profile.division_id
+    ):
+        return True
+
+    if (
+        viewer_rank >= get_role_rank('chief')
+        and getattr(viewer_profile, 'group_id', None)
+        and getattr(target_profile, 'group_id', None) == viewer_profile.group_id
+    ):
+        return True
+
+    if viewer_rank >= get_role_rank('supervisor'):
+        assigned_team_ids = get_assigned_team_ids(viewer_profile)
+        if getattr(target_profile, 'team_id', None) in assigned_team_ids:
+            return True
+
+    if viewer_rank >= get_role_rank('leader'):
+        assigned_unit_ids = get_assigned_unit_ids(viewer_profile)
+        if getattr(target_profile, 'unit_id', None) in assigned_unit_ids:
+            return True
+
+    return False
+
+
+def _get_recording_accessible_user_ids(user):
+    if not user or not user.is_authenticated:
+        return {0}
+
+    if user.is_superuser:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        return set(User.objects.filter(is_active=True).values_list('id', flat=True))
+
+    allowed_user_ids = {user.id}
+    viewer_profile = (
+        UserProfile.objects.select_related('division', 'group', 'team', 'unit')
+        .prefetch_related('supervisor_teams', 'leader_units')
+        .filter(user_id=user.id)
+        .first()
+    )
+    if not viewer_profile:
+        return allowed_user_ids
+
+    target_profiles = (
+        UserProfile.objects.select_related('user', 'division', 'group', 'team', 'unit')
+        .filter(user__is_active=True)
+    )
+    for target_profile in target_profiles:
+        if target_profile.user_id == user.id:
+            continue
+        if _can_view_subordinate_recording(viewer_profile, target_profile):
+            allowed_user_ids.add(target_profile.user_id)
+
+    return allowed_user_ids
+
+
 class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = CallSession.objects.select_related('caller', 'callee', 'recording', 'recording__recorded_by')
     serializer_class = CallSessionSerializer
@@ -99,7 +169,21 @@ class CallSessionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, views
     pagination_class = None
 
     def get_queryset(self):
-        qs = self.queryset.filter(Q(caller=self.request.user) | Q(callee=self.request.user))
+        include_recording_access = str(self.request.query_params.get('include_recording_access') or '').lower() in {'1', 'true', 'yes'}
+        if self.action == 'list' and include_recording_access:
+            accessible_user_ids = _get_recording_accessible_user_ids(self.request.user)
+            subordinate_user_ids = {user_id for user_id in accessible_user_ids if user_id != self.request.user.id}
+            qs = self.queryset.filter(
+                recording__isnull=False
+            ).filter(
+                Q(caller_id=self.request.user.id) | Q(callee_id=self.request.user.id)
+                | (
+                    Q(caller_id__in=subordinate_user_ids)
+                    & Q(callee_id__in=subordinate_user_ids)
+                )
+            )
+        else:
+            qs = self.queryset.filter(Q(caller=self.request.user) | Q(callee=self.request.user))
         status_param = (self.request.query_params.get('status') or '').strip()
         if status_param:
             statuses = [value.strip() for value in status_param.split(',') if value.strip()]

@@ -1,6 +1,6 @@
 <template>
   <div v-if="isReady" class="recording-list-page">
-    <h2 class="page-title">通話録音一覧</h2>
+    <h2 class="page-title">通話録音一覧 <DataSourceDialog title="通話録音一覧" :sources="dsSources" /></h2>
     <div class="list-card">
       <div class="list-header">
         <div class="list-note">保存済みの通話録音を確認します。</div>
@@ -82,13 +82,14 @@
               </td>
               <td class="transcribe-cell" @click.stop>
                 <button
-                  v-if="session.recording?.file_url"
+                  v-if="session.recording?.file_url && isSessionParticipant(session)"
                   class="btn transcribe-btn"
                   :disabled="anyTranscribing"
                   @click="triggerTranscribe(session)"
                 >
                   {{ session.recording?.transcript_status === 'processing' ? '処理中' : '実行' }}
                 </button>
+                <span v-else-if="session.recording?.file_url">閲覧のみ</span>
                 <span v-else>-</span>
               </td>
             </tr>
@@ -137,10 +138,23 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { authState } from "@/auth";
 import api from "@/api/client";
+import DataSourceDialog from "@/components/DataSourceDialog.vue";
 import { CALL_RECORDING_ALLOWED_USERS_KEY, parseAllowedRecordingUsernames } from "@/utils/callRecordingAccess";
 
 const router = useRouter();
 const recordingAllowedUsers = ref([]);
+const dsSources = [
+  { section: "画面表示条件" },
+  { op: "参照", table: "system_settings", desc: `録音一覧利用可ユーザー設定（${CALL_RECORDING_ALLOWED_USERS_KEY}）` },
+  { section: "録音一覧" },
+  { op: "参照", table: "call_sessions", desc: "通話セッション一覧（発信者、着信者、通話種別、状態、通話日時）" },
+  { op: "参照", table: "call_recordings", desc: "録音ファイル、録音時間、ファイルサイズ、録音登録者、文字起こし結果" },
+  { op: "参照", table: "auth_user", desc: "発信者名、着信者名、録音登録者名の表示" },
+  { op: "参照", table: "accounts_userprofile", desc: "録音一覧の上位者閲覧判定に使用" },
+  { section: "API" },
+  { op: "GET", table: "/api/call-sessions/", desc: "録音一覧取得（include_recording_access=1）" },
+  { op: "POST", table: "/api/call-sessions/{id}/transcribe/", desc: "参加通話のみ文字起こし再実行" },
+];
 
 const loading = ref(false);
 const sessions = ref([]);
@@ -152,6 +166,7 @@ const hasLoaded = ref(false);
 const isReady = ref(false);
 const expandedSessionId = ref(null);
 const isTranscribing = ref(false);
+const myUserId = computed(() => Number(authState.user?.id || 0));
 
 const anyTranscribing = computed(() => {
   return isTranscribing.value || recordedSessions.value.some(s => s.recording?.transcript_status === 'processing');
@@ -161,6 +176,10 @@ const canUseRecordingFeatures = computed(() => {
   const username = String(authState.user?.username || "").toLowerCase();
   return recordingAllowedUsers.value.includes(username);
 });
+
+const isSessionParticipant = (session) => {
+  return Number(session?.caller || 0) === myUserId.value || Number(session?.callee || 0) === myUserId.value;
+};
 
 const recordedSessions = computed(() => {
   return sessions.value.filter((session) => session?.has_recording && session?.recording?.file_url);
@@ -230,6 +249,7 @@ const loadSessions = async () => {
   }
   const res = await api.notifications.listCallSessions({
     status: "ringing,accepted,declined,ended,missed,canceled",
+    include_recording_access: 1,
   });
   const data = res.data?.results || res.data || [];
   sessions.value = Array.isArray(data) ? data : [];
