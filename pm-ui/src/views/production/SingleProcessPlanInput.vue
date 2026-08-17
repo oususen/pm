@@ -312,7 +312,8 @@ import ProcessGanttView from './ProcessGanttView.vue'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
-  { op: '取得', table: 't_line_gantt_plan', desc: '参照工程ガントプラン読込・サブ工程計画読込' },
+  { op: '取得', table: 't_line_backlog', desc: '参照工程読込・サブ工程計画保存先読込' },
+  { op: '取得', table: 't_line_gantt_plan', desc: 'サブ工程ガントプラン読込・完成品エントリ読込' },
   { op: '保存', table: 't_line_backlog', desc: 'サブ工程計画保存（seq>0の行を削除→再作成）' },
   { op: '保存', table: 't_line_gantt_plan', desc: 'サブ工程計画保存（SINGLEPROC_プレフィクス行を削除→再作成）' },
   { op: '取得', table: 't_line / t_process', desc: 'ライン・工程マスタ' },
@@ -1240,46 +1241,45 @@ const loadData = async () => {
   lastLoadedPlanCount.value = 0
 
   try {
-    const res = await api.lineGanttPlans.getLineGanttPlans({
-      line: selectedLineId.value,
-      plan_date__gte: startDate.value,
-      plan_date__lte: endDate.value,
-    })
-    const plans = res?.data?.results || res?.data || []
+    const [backlogRes, ganttRes] = await Promise.all([
+      api.lineBacklogs.getLineBacklogs({
+        line: selectedLineId.value,
+        plan_date__gte: startDate.value,
+        plan_date__lte: endDate.value,
+      }),
+      api.lineGanttPlans.getLineGanttPlans({
+        line: selectedLineId.value,
+        plan_date__gte: startDate.value,
+        plan_date__lte: endDate.value,
+      }),
+    ])
+    const backlogs = backlogRes?.data?.results || backlogRes?.data || []
+    const plans = ganttRes?.data?.results || ganttRes?.data || []
     lastLoadedPlanCount.value = Array.isArray(plans) ? plans.length : 0
 
     const refProcessId = Number(selectedRefProcessId.value || 0)
     const subProcessId = Number(selectedSubProcessId.value || 0)
     const subProcessPrefix = `SINGLEPROC_${selectedLineId.value}_${selectedSubProcessId.value}_`
 
-    const refEntriesByDate = {}
+    const nextRefGrid = {}
     const subEntries = {}
     const loadedProductsMap = new Map()
 
+    if (refProcessId) {
+      backlogs.forEach((row) => {
+        if (Number(row.process) !== refProcessId) return
+        const seq = Number(row.sequence_no || 0)
+        const dateStr = String(row.plan_date || '')
+        if (!dateStr || seq <= 0) return
+        nextRefGrid[`${dateStr}|${seq}`] = {
+          productCode: row.product_code || '',
+          qty: Math.round(Number(row.plan_qty || 0)),
+        }
+      })
+    }
+
     plans.forEach((plan) => {
       const processes = Array.isArray(plan.processes_plan) ? plan.processes_plan : []
-      if (refProcessId) {
-        processes.forEach((proc) => {
-          if (Number(proc.process_id) !== refProcessId) return
-          const startDt = proc.start_time ? new Date(proc.start_time) : null
-          let dateStr = plan.plan_date
-          if (startDt) {
-            const adjusted = new Date(startDt)
-            if (adjusted.getHours() < DAY_BOUNDARY_HOUR) adjusted.setDate(adjusted.getDate() - 1)
-            dateStr = toDateStr(adjusted)
-          }
-          const productCode = proc.output_product_code || plan.product_code || ''
-          const qty = Math.round(proc.quantity || 0)
-          if (!refEntriesByDate[dateStr]) refEntriesByDate[dateStr] = []
-          refEntriesByDate[dateStr].push({
-            productCode,
-            qty,
-            start: formatTime(startDt),
-            end: formatTime(proc.end_time ? new Date(proc.end_time) : null),
-          })
-        })
-      }
-
       if (!subProcessId || !String(plan.plan_id || '').startsWith(subProcessPrefix)) return
       const subProc = processes.find((proc) => Number(proc.process_id) === subProcessId)
       if (!subProc) return
@@ -1299,15 +1299,6 @@ const loadData = async () => {
         id: productId,
         product_code: subProc.output_product_code || plan.product_code || '',
         product_name: subProc.output_product_name || plan.product_name || '',
-      })
-    })
-
-    const nextRefGrid = {}
-    Object.keys(refEntriesByDate).forEach((dateStr) => {
-      const entries = refEntriesByDate[dateStr]
-      entries.sort((a, b) => a.start.localeCompare(b.start))
-      entries.forEach((entry, idx) => {
-        nextRefGrid[`${dateStr}|${idx + 1}`] = entry
       })
     })
     refGrid.value = nextRefGrid
