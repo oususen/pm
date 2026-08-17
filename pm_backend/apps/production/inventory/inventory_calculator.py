@@ -1500,19 +1500,20 @@ def recalculate_planned_stock_qty(
         process_code_cache[pid] = code
         return code
 
-    # 計画在庫の初期値は、まず「計算開始日より前の既存 planned_stock_qty」を優先する。
-    # これがあれば、在庫(stock_qty)を直接起点にせずに計庫の連鎖を継続できる。
-    planned_anchor = LineBacklog.objects.filter(
+    # 計画在庫は「開始日の前日値」を起点にする。
+    # 前日以前は再計算せず、その日の既存値を保持する。
+    previous_planned_backlog = LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
         plan_date__lt=calc_start_date,
         planned_stock_qty__isnull=False,
     ).order_by('-plan_date', 'sequence_no', 'id').first()
 
-    if planned_anchor:
-        last_planned = planned_anchor.planned_stock_qty or 0
-        planned_by_date[planned_anchor.plan_date] = last_planned
-        initial_backlog = planned_anchor
+    has_prev_planned = previous_planned_backlog is not None
+    if has_prev_planned:
+        last_planned = previous_planned_backlog.planned_stock_qty or 0
+        planned_by_date[previous_planned_backlog.plan_date] = last_planned
+        initial_backlog = previous_planned_backlog
     else:
         # 既存計庫が無い初回だけ、実在庫を基準に LT 分の需要を差し引いて初期化する。
         # 最終品/ライン最終品: calc_start_date 当日（__lte）の在庫を使う
@@ -1525,7 +1526,7 @@ def recalculate_planned_stock_qty(
             stock_qty__isnull=False
         ).order_by('-plan_date', 'sequence_no', 'id').first()
 
-    if initial_backlog and not planned_anchor:
+    if initial_backlog and not has_prev_planned:
         # 実在庫はLTシフトなし、計画在庫はLTシフトありで計算するため、
         # initial_date+1 ～ initial_date+LT の出庫分（LTシフト）を差し引く。
         # 社内品：親の実績を BOM LT 分差し引く
@@ -1547,7 +1548,7 @@ def recalculate_planned_stock_qty(
     trace_log(
         line_id, product_id, calc_start_date,
         f'計画在庫計算開始: calc_start_date={calc_start_date}, max_lt={max_lt}, '
-        f'初期値={last_planned}, planned_anchor={"あり" if planned_anchor else "なし"}'
+        f'初期値={last_planned}, 前日値あり={"あり" if has_prev_planned else "なし"}'
     )
 
     # 更新対象のbacklogを追跡（計算開始日以前は更新しない）
@@ -1582,10 +1583,16 @@ def recalculate_planned_stock_qty(
         #   当日もスキップ。ただし LT 調整済みの初期値を DB に書き戻す必要があるため bulk_update 対象に含める。
         # 社内品: calc_start_date から通常計算を開始する（従来どおり）。
         if plan_date < calc_start_date:
-            planned_by_date[plan_date] = last_planned
-            trace_log(line_id, product_id, plan_date, f'calc_start_date({calc_start_date})より前のため既存値維持: planned_stock_qty={last_planned}')
+            existing_planned = 0
+            for row in rows:
+                if row.planned_stock_qty is not None:
+                    existing_planned = row.planned_stock_qty
+                    break
+            planned_by_date[plan_date] = existing_planned
+            last_planned = existing_planned
+            trace_log(line_id, product_id, plan_date, f'calc_start_date({calc_start_date})より前のため既存値維持: planned_stock_qty={existing_planned}')
             continue
-        if use_delivery_lt_initialization and not planned_anchor and plan_date == calc_start_date:
+        if use_delivery_lt_initialization and not has_prev_planned and plan_date == calc_start_date:
             planned_by_date[plan_date] = last_planned
             rep = pick_representative(rows)
             for row in rows:
