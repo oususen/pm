@@ -16,8 +16,9 @@ class NotificationsConfig(AppConfig):
     @staticmethod
     def _startup_tasks():
         try:
-            from .transcription import _get_model, transcribe_recording_async
-            _get_model()
+            from .transcription import _get_model, _is_model_resident, transcribe_recording_async
+            if _is_model_resident():
+                _get_model()
         except Exception:
             pass
 
