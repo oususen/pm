@@ -3850,8 +3850,11 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ).order_by('routing_id', 'step_no', 'parallel_group', 'id')
 
         affected_steps = []
+        auto_delete_steps_count = 0
         for step in steps:
             match_type = 'source_bom_item' if step.source_bom_item_id == bom_item.id else 'fallback'
+            if match_type == 'source_bom_item':
+                auto_delete_steps_count += 1
             affected_steps.append({
                 'id': step.id,
                 'routing_id': step.routing_id,
@@ -3871,18 +3874,32 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 'match_type': match_type,
             })
 
+        manual_review_steps_count = len(affected_steps) - auto_delete_steps_count
+        if auto_delete_steps_count and manual_review_steps_count:
+            warning_message = (
+                f'source_bom_item一致の {auto_delete_steps_count} 件はチェックを入れると自動削除されます。'
+                f' 推定一致の {manual_review_steps_count} 件は自動削除されないため、手動で確認・修正してください。'
+            )
+        elif auto_delete_steps_count:
+            warning_message = (
+                f'source_bom_item一致の {auto_delete_steps_count} 件はチェックを入れると自動削除されます。'
+            )
+        elif manual_review_steps_count:
+            warning_message = (
+                f'自動削除対象はありません。推定一致の {manual_review_steps_count} 件は手動で確認・修正してください。'
+            )
+        else:
+            warning_message = 'このBOM明細に紐づくルーティング工程は検出されませんでした。'
+
         return {
             'bom_item_id': bom_item.id,
             'child_product_code': getattr(getattr(bom_item, 'child_product', None), 'product_code', ''),
             'child_product_name': getattr(getattr(bom_item, 'child_product', None), 'product_name', ''),
             'affected_steps_count': len(affected_steps),
+            'auto_delete_steps_count': auto_delete_steps_count,
+            'manual_review_steps_count': manual_review_steps_count,
             'affected_steps': affected_steps,
-            'warning_message': (
-                'このBOM明細を削除しても、関連ルーティング工程は自動削除されません。'
-                ' 下記のルーティングを手動で確認・修正してください。'
-                if affected_steps else
-                'このBOM明細に紐づくルーティング工程は検出されませんでした。'
-            ),
+            'warning_message': warning_message,
         }
 
     @action(detail=True, methods=['get'], url_path='delete_preview')

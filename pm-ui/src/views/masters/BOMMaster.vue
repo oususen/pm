@@ -453,6 +453,8 @@
               <span v-if="deleteImpactPreview.child_product_name"> - {{ deleteImpactPreview.child_product_name }}</span>
             </p>
             <p>影響ステップ数: {{ deleteImpactPreview.affected_steps_count || 0 }}</p>
+            <p>自動削除対象: {{ deleteImpactPreview.auto_delete_steps_count || 0 }}</p>
+            <p>手動確認対象: {{ deleteImpactPreview.manual_review_steps_count || 0 }}</p>
 
             <div v-if="deleteImpactPreview.affected_steps?.length" class="tree-grid-container">
               <table class="tree-grid delete-impact-table">
@@ -485,7 +487,7 @@
             <div class="form-actions">
               <label v-if="deleteImpactHasLinkedSteps" class="checkbox-label" style="margin-right:12px;">
                 <input type="checkbox" v-model="deleteImpactRemoveRouting" class="checkbox-input" />
-                関連ルーティングステップも削除
+                自動削除対象のルーティングステップも削除
               </label>
               <button type="button" class="btn-danger" @click="confirmDeleteBOMItem" :disabled="deleteImpactDeleting">
                 {{ deleteImpactDeleting ? '削除中...' : '理解して削除する' }}
@@ -950,7 +952,7 @@ const deleteImpactTargetId = ref(null)
 const deleteImpactDeleting = ref(false)
 const deleteImpactRemoveRouting = ref(false)
 const deleteImpactHasLinkedSteps = computed(() =>
-  (deleteImpactPreview.value.affected_steps || []).some((step) => step.match_type === 'source_bom_item')
+  Number(deleteImpactPreview.value.auto_delete_steps_count || 0) > 0
 )
 const bomImportForm = ref({
   version: 'v1',
@@ -1119,8 +1121,8 @@ const sourcingTypeOptions = [
 ]
 
 const formatDeleteImpactMatchType = (matchType) => {
-  if (matchType === 'source_bom_item') return 'BOM紐付'
-  if (matchType === 'fallback') return '推定一致'
+  if (matchType === 'source_bom_item') return '自動削除対象'
+  if (matchType === 'fallback') return '手動確認対象'
   return '-'
 }
 
