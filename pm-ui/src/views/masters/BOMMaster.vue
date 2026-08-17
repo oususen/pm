@@ -483,6 +483,10 @@
             <p v-else class="hint-text">関連ルーティング工程は検出されませんでした。</p>
 
             <div class="form-actions">
+              <label v-if="deleteImpactHasLinkedSteps" class="checkbox-label" style="margin-right:12px;">
+                <input type="checkbox" v-model="deleteImpactRemoveRouting" class="checkbox-input" />
+                関連ルーティングステップも削除
+              </label>
               <button type="button" class="btn-danger" @click="confirmDeleteBOMItem" :disabled="deleteImpactDeleting">
                 {{ deleteImpactDeleting ? '削除中...' : '理解して削除する' }}
               </button>
@@ -944,6 +948,10 @@ const showDeleteImpactDialog = ref(false)
 const deleteImpactPreview = ref({ affected_steps: [] })
 const deleteImpactTargetId = ref(null)
 const deleteImpactDeleting = ref(false)
+const deleteImpactRemoveRouting = ref(false)
+const deleteImpactHasLinkedSteps = computed(() =>
+  (deleteImpactPreview.value.affected_steps || []).some((step) => step.match_type === 'source_bom_item')
+)
 const bomImportForm = ref({
   version: 'v1',
   completed_product_code: '',
@@ -2521,6 +2529,7 @@ const deleteBOMItem = async (id) => {
     const res = await api.boms.getBOMItemDeletePreview(id)
     deleteImpactPreview.value = res.data || { affected_steps: [] }
     deleteImpactTargetId.value = id
+    deleteImpactRemoveRouting.value = false
     showDeleteImpactDialog.value = true
   } catch (error) {
     console.error('明細削除プレビュー取得エラー:', error)
@@ -2533,13 +2542,14 @@ const closeDeleteImpactDialog = () => {
   showDeleteImpactDialog.value = false
   deleteImpactTargetId.value = null
   deleteImpactPreview.value = { affected_steps: [] }
+  deleteImpactRemoveRouting.value = false
 }
 
 const confirmDeleteBOMItem = async () => {
   if (!deleteImpactTargetId.value) return
   deleteImpactDeleting.value = true
   try {
-    await api.boms.deleteBOMItem(deleteImpactTargetId.value)
+    await api.boms.deleteBOMItem(deleteImpactTargetId.value, { deleteRoutingSteps: deleteImpactRemoveRouting.value })
     deleteImpactDeleting.value = false
     closeDeleteImpactDialog()
     await fetchBOMItems(selectedBOM.value.id)

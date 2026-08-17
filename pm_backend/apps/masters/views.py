@@ -3707,6 +3707,13 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at']
     ordering = ['id']
 
+    def destroy(self, request, *args, **kwargs):
+        delete_routing_steps = str(request.query_params.get('delete_routing_steps', '')).lower() in ('1', 'true')
+        if delete_routing_steps:
+            instance = self.get_object()
+            RoutingStep.objects.filter(source_bom_item_id=instance.id).delete()
+        return super().destroy(request, *args, **kwargs)
+
     def _get_or_create_purchase_line_and_process(self, supplier):
         if not supplier:
             return None, None

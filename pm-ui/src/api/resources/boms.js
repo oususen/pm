@@ -96,7 +96,9 @@ export const createBomsAPI = (client) => ({
   getBOMItemDeletePreview(id) {
     return client.get(`/bom-items/${id}/delete_preview/`)
   },
-  deleteBOMItem(id) {
-    return client.delete(`/bom-items/${id}/`)
+  deleteBOMItem(id, options = {}) {
+    const params = {}
+    if (options.deleteRoutingSteps) params.delete_routing_steps = 'true'
+    return client.delete(`/bom-items/${id}/`, { params })
   },
 })
