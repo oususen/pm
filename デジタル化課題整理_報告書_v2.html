@@ -13,6 +13,10 @@
     --accent-soft-border: #f0d9bc;
     --border: #e4e0da;
     --border-light: #edeae5;
+    --crown-bg: #e8f5ef;
+    --crown-text: #1c2433;
+    --crown-muted: #4a5568;
+    --crown-accent: #3a9a6e;
     --hero-bg: #4bae82;
     --hero-text: #ffffff;
     --hero-muted: #d4f0e2;
@@ -45,6 +49,10 @@
       --accent-soft-border: #3d3222;
       --border: #2a3444;
       --border-light: #232d3c;
+      --crown-bg: #1a2e24;
+      --crown-text: #e4e0da;
+      --crown-muted: #a0aab8;
+      --crown-accent: #5cc98e;
       --hero-bg: #3a9a6e;
       --hero-text: #ffffff;
       --hero-muted: #c0e6d2;
@@ -77,6 +85,10 @@
     --accent-soft-border: #3d3222;
     --border: #2a3444;
     --border-light: #232d3c;
+    --crown-bg: #1a2e24;
+    --crown-text: #e4e0da;
+    --crown-muted: #a0aab8;
+    --crown-accent: #5cc98e;
     --hero-bg: #3a9a6e;
     --hero-text: #ffffff;
     --hero-muted: #c0e6d2;
@@ -383,16 +395,17 @@
   .crown{
     margin:48px 0;
     padding:36px 32px;
-    background:var(--hero-bg);
-    color:var(--hero-text);
+    background:var(--crown-bg);
+    color:var(--crown-text);
     border-radius:16px;
+    border:1px solid var(--border);
   }
-  .crown h2{color:var(--hero-accent);font-size:24px;margin-bottom:16px}
-  .crown h4{color:var(--hero-text);margin-top:24px}
-  .crown p{color:var(--hero-muted)}
-  .crown ul{color:var(--hero-muted)}
-  .crown li::marker{color:var(--hero-accent)}
-  .crown strong{color:var(--hero-text)}
+  .crown h2{color:var(--crown-accent);font-size:24px;margin-bottom:16px}
+  .crown h4{color:var(--crown-text);margin-top:24px}
+  .crown p{color:var(--crown-muted)}
+  .crown ul{color:var(--crown-muted)}
+  .crown li::marker{color:var(--crown-accent)}
+  .crown strong{color:var(--crown-text)}
 
   /* Effects list */
   .effects{
@@ -1421,8 +1434,11 @@
       <li>部門間での情報共有ルール統一</li>
     </ul>
 
+    <p style="margin-top:16px">現状、上記の横断課題への取り組みは<strong>製缶事業部の業務エリア内</strong>にとどまっている。部門間を横断するデータ連携や情報共有ルールの統一はまだ十分に実現できておらず、今後の全社展開に向けた重要な課題である。</p>
+
     <div class="sub">
       <div class="sub-label">横断基盤として実装済みの機能</div>
+      <p>上記の横断課題に直接取り組む仕組みはこれからだが、各領域が共通で利用する基盤として、マスタ管理とユーザー・権限管理を整備している。これらは全領域のデータ統一と操作制御の土台であり、今後の横断的な連携を進める上での前提基盤となる。</p>
 
       <h4>マスタ管理（20画面 / 30モデル）</h4>
       <p>製品、製品グループ、品番変換、容器、設備、得意先、仕入先、仕入先トラック、工程、ライン、カレンダ、勤務パターン、BOM（構成）、ルーティング、連絡先、携帯端末、逆展開（Where Used）、加工先一括変更 等</p>
