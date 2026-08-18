@@ -4389,16 +4389,16 @@ const buildExportRow = (row) => {
   dateColumns.value.forEach((c, colIdx) => {
     const daily = row.daily?.[c.key] || {}
     if (isProgressMode.value) {
-      data.push(displayValue(daily.line_demand_qty))
-      data.push(displayValue(daily.actual))
       data.push(displayValue(daily.progress))
+      data.push(displayValue(daily.actual))
+      data.push(displayValue(daily.line_demand_qty))
       data.push(formatLotValues(daily, 'plan'))
       data.push(formatLotValues(daily, 'sequence_no'))
       data.push(displayValue(daily.planned_progress))
     } else {
-      data.push(displayValue(daily.demand))
-      data.push(displayValue(daily.actual))
       data.push(displayValue(getStockDisplay(row, colIdx)))
+      data.push(displayValue(daily.actual))
+      data.push(displayValue(daily.demand))
       data.push(formatLotValues(daily, 'plan'))
       data.push(formatLotValues(daily, 'sequence_no'))
       data.push(displayValue(getPlanStockDisplay(row, colIdx)))
@@ -4795,8 +4795,8 @@ const buildPrintTableHtml = () => {
     { key: 'planned_progress', label: '計進', getValue: (row, daily, colIdx) => displayValue(daily.planned_progress) },
   ] : [
     { key: 'stock', label: '在庫', getValue: (row, daily, colIdx) => displayValue(getStockDisplay(row, colIdx)) },
-    { key: 'actual', label: '実需', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
-    { key: 'demand', label: '計需', getValue: (row, daily, colIdx) => displayValue(daily.demand) },
+    { key: 'actual', label: '実績', getValue: (row, daily, colIdx) => displayValue(daily.actual) },
+    { key: 'demand', label: '需要', getValue: (row, daily, colIdx) => displayValue(daily.demand) },
     { key: 'plan', label: '計画', getValue: (row, daily, colIdx) => formatLotValues(daily, 'plan') },
     { key: 'sequence', label: '順序', getValue: (row, daily, colIdx) => formatLotValues(daily, 'sequence_no') },
     { key: 'plan_stock', label: '計庫', getValue: (row, daily, colIdx) => displayValue(getPlanStockDisplay(row, colIdx)) },
