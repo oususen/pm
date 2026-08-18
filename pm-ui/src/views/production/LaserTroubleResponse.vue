@@ -132,7 +132,7 @@
               <div v-if="step.no === 3" class="field">
                 <span class="field-label">加工対象一覧</span>
                 <div v-if="stepForm.troubleEquipment" class="selection-summary">
-                  <span>選定済みパータン: {{ selectedPatternCount }} 件</span>
+                  <span>選定済みパターン: {{ selectedPatternCount }} 件</span>
                   <button type="button" class="mini-action" @click="clearSelectedPatterns" :disabled="!selectedPatternCount">選定クリア</button>
                 </div>
                 <div v-if="stepForm.troubleEquipment" class="table-wrap">
@@ -140,7 +140,7 @@
                     <thead>
                       <tr>
                         <th>対応</th>
-                        <th>パータン</th>
+                        <th>パターン</th>
                         <th>完成品</th>
                         <th>加工時間</th>
                         <th>板厚</th>
@@ -173,7 +173,7 @@
                         <td>{{ pattern.materialLabel }}</td>
                       </tr>
                       <tr v-if="!filteredStep3Patterns.length">
-                        <td colspan="6" class="empty-cell">選択した設備に紐づくパータンがありません。</td>
+                        <td colspan="6" class="empty-cell">選択した設備に紐づくパターンがありません。</td>
                       </tr>
                     </tbody>
                   </table>
@@ -181,7 +181,7 @@
                 <span v-else class="field-help">先にトラブル設備を選択してください。</span>
               </div>
               <div v-else-if="step.no === 4" class="field">
-                <span class="field-label">手順3で選定したパータンの詳細情報</span>
+                <span class="field-label">手順3で選定したパターンの詳細情報</span>
                 <div class="policy-section">
                   <span class="field-label">対応方針</span>
                   <div class="policy-buttons">
@@ -194,7 +194,7 @@
                   <table class="target-table detail-table">
                     <thead>
                       <tr>
-                        <th>パータン</th>
+                        <th>パターン</th>
                         <th>完成品</th>
                         <th>加工時間</th>
                         <th>板厚</th>
@@ -243,7 +243,7 @@
                     </tbody>
                   </table>
                 </div>
-                <span v-else class="field-help">手順3で対応パータンを選定してください。</span>
+                <span v-else class="field-help">手順3で対応パターンを選定してください。</span>
                 <div class="generate-actions">
                   <button
                     type="button"
@@ -270,7 +270,7 @@
                     Excel出力
                   </button>
                 </div>
-                <span v-if="step4DetailRows.length && !step4Rows.length" class="field-help">手順3で選定したパータンをもとに、必要なときだけ表を生成します。</span>
+                <span v-if="step4DetailRows.length && !step4Rows.length" class="field-help">手順3で選定したパターンをもとに、必要なときだけ表を生成します。</span>
                 <div v-if="step4Rows.length" class="table-wrap step4-plan-wrap">
                   <table class="plan-table step4-plan-table">
                     <colgroup>
@@ -406,7 +406,7 @@
                   </button>
                 </div>
                 <span v-if="!step4Rows.length" class="field-help">先に手順4で表を生成してください。</span>
-                <span v-else-if="!step5SourceRows.length" class="field-help">手順4で `社内` または `別設備` を選んだパータンがありません。</span>
+                <span v-else-if="!step5SourceRows.length" class="field-help">手順4で `社内` または `別設備` を選んだパターンがありません。</span>
                 <span v-else-if="!step5Generated" class="field-help">手順4で `社内` と `別設備` にした内容だけを手順5に展開します。</span>
                 <div v-if="step5Generated && step5Rows.length" class="table-wrap step4-plan-wrap">
                   <table class="plan-table step4-plan-table">
@@ -543,7 +543,7 @@
                   </button>
                 </div>
                 <span v-if="!step4Rows.length" class="field-help">先に手順4で表を生成してください。</span>
-                <span v-else-if="!step6SourceRows.length" class="field-help">手順4で `外作` を選んだパータンがありません。</span>
+                <span v-else-if="!step6SourceRows.length" class="field-help">手順4で `外作` を選んだパターンがありません。</span>
                 <span v-else-if="!step6Generated" class="field-help">手順4で `外作` にした内容だけを手順6に展開します。</span>
                 <div v-if="step6Generated && step6Rows.length" class="table-wrap step4-plan-wrap">
                   <table class="plan-table step4-plan-table">
@@ -708,8 +708,8 @@ const demandRowSeed = ref(0)
 
 const editableSteps = reactive([
   { no: 2, title: 'トラブル設備', detail: 'どの設備でトラブルが起きているかを設備マスタから選択する。', memo: '' },
-  { no: 3, title: '加工対象', detail: '手順2で選択した設備の全パータンから対応パータンを絞り込んで選定する。', memo: '' },
-  { no: 4, title: '詳細情報と対応方針', detail: '手順3で選定したパータンの詳細確認と応援加工依頼表の作成、対応方針の決定を行う。', memo: '' },
+  { no: 3, title: '加工対象', detail: '手順2で選択した設備の全パターンから対応パターンを絞り込んで選定する。', memo: '' },
+  { no: 4, title: '詳細情報と対応方針', detail: '手順3で選定したパターンの詳細確認と応援加工依頼表の作成、対応方針の決定を行う。', memo: '' },
   { no: 5, title: '社内', detail: '社内対応または別設備対応時の内容を記入する。', memo: '' },
   { no: 6, title: '外作', detail: '外作対応時の内容を記入する。', memo: '' },
   { no: 7, title: '加工計画を応援先へ送る', detail: '生産計画シートを参照して送付する。', memo: '' },
