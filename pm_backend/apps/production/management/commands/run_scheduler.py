@@ -413,6 +413,31 @@ class Command(BaseCommand):
                 f'(supplier={cfg.supplier.supplier_code if cfg.supplier_id else "-"})'
             )
 
+        # 修正流動率 閾値通知
+        from quality.scheduler_tasks_rework_alert import run_rework_alert_check
+        from quality.models_integrated_checksheet import ChecksheetReworkAlertConfig
+
+        rework_alert_configs = ChecksheetReworkAlertConfig.objects.select_related('line').filter(is_enabled=True)
+        for cfg in rework_alert_configs:
+            trigger = CronTrigger(
+                hour=cfg.scheduled_hour,
+                minute=cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            job_id = f'rework_alert_{cfg.id}'
+            scheduler.add_job(
+                _with_fresh_connection(run_rework_alert_check),
+                trigger,
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=3600,
+                kwargs={'config_id': cfg.id},
+            )
+            logger.info(
+                f'ジョブ登録: {job_id} - {cfg.scheduled_hour:02d}:{cfg.scheduled_minute:02d} '
+                f'(line={cfg.line.line_code})'
+            )
+
     def _check_config_changes(self, scheduler):
         """DB設定の変更を検知してジョブを再登録"""
         try:

@@ -475,3 +475,57 @@ class IntegratedChecksheetWorkflowLog(models.Model):
 
     def __str__(self):
         return f"{self.template_id}:{self.action}"
+
+
+class ChecksheetReworkAlertConfig(models.Model):
+    """修正流動率の定時通知設定"""
+
+    line = models.ForeignKey(
+        Line,
+        on_delete=models.CASCADE,
+        related_name="checksheet_rework_alert_configs",
+        verbose_name="対象ライン",
+    )
+    threshold_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=5.00,
+        verbose_name="修正流動率閾値(%)",
+    )
+    scheduled_hour = models.PositiveSmallIntegerField(
+        default=17, verbose_name="実行時（時）",
+    )
+    scheduled_minute = models.PositiveSmallIntegerField(
+        default=0, verbose_name="実行時（分）",
+    )
+    is_enabled = models.BooleanField(default=True, verbose_name="有効")
+    notify_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="checksheet_rework_alert_configs",
+        verbose_name="通知先ユーザー",
+    )
+    lookback_days = models.PositiveSmallIntegerField(
+        default=1, verbose_name="集計対象日数（当日含む）",
+    )
+    last_run_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="最終実行日時",
+    )
+    last_run_message = models.TextField(
+        blank=True, default="", verbose_name="最終実行メッセージ",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="作成者",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="作成日時")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新日時")
+
+    class Meta:
+        db_table = "quality_checksheet_rework_alert_config"
+        verbose_name = "修正流動率通知設定"
+        verbose_name_plural = "修正流動率通知設定"
+
+    def __str__(self):
+        return f"{self.line.line_code} 閾値{self.threshold_rate}% {self.scheduled_hour:02d}:{self.scheduled_minute:02d}"

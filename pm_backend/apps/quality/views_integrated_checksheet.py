@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from accounts.role_utils import can_act_as_chief, can_act_as_manager, can_act_as_supervisor
 from .models_integrated_checksheet import (
+    ChecksheetReworkAlertConfig,
     IntegratedChecksheetBatch,
     IntegratedChecksheetCheck,
     IntegratedChecksheetItem,
@@ -28,6 +29,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetWorkflowLog,
 )
 from .serializers_integrated_checksheet import (
+    ChecksheetReworkAlertConfigSerializer,
     IntegratedChecksheetBatchSerializer,
     IntegratedChecksheetItemSerializer,
     IntegratedChecksheetProcessBlockSerializer,
@@ -1459,3 +1461,18 @@ class IntegratedChecksheetTaskListView(APIView):
             except Exception:
                 logger.exception("統合チェックシートタスク整形に失敗しました: task_id=%s", getattr(task, "id", None))
         return Response(data)
+
+
+class ChecksheetReworkAlertConfigViewSet(viewsets.ModelViewSet):
+    """修正流動率の定時通知設定 CRUD"""
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChecksheetReworkAlertConfigSerializer
+    queryset = (
+        ChecksheetReworkAlertConfig.objects
+        .select_related("line")
+        .prefetch_related("notify_users")
+        .order_by("line__line_code")
+    )
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models_integrated_checksheet import (
+    ChecksheetReworkAlertConfig,
     IntegratedChecksheetBatch,
     IntegratedChecksheetCheck,
     IntegratedChecksheetItem,
@@ -332,3 +333,48 @@ class IntegratedChecksheetBatchSerializer(serializers.ModelSerializer):
                 "has_rework": "修正流動" in judgements,
             })
         return result
+
+
+class _UserPKField(serializers.PrimaryKeyRelatedField):
+    def get_queryset(self):
+        from django.contrib.auth import get_user_model
+        return get_user_model().objects.all()
+
+
+class ChecksheetReworkAlertConfigSerializer(serializers.ModelSerializer):
+    line_code = serializers.CharField(source="line.line_code", read_only=True)
+    line_name = serializers.CharField(source="line.line_name", read_only=True)
+    notify_user_ids = _UserPKField(source="notify_users", many=True, required=False)
+    notify_user_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChecksheetReworkAlertConfig
+        fields = [
+            "id", "line", "line_code", "line_name",
+            "threshold_rate", "scheduled_hour", "scheduled_minute",
+            "is_enabled", "notify_user_ids", "notify_user_names",
+            "lookback_days",
+            "last_run_at", "last_run_message",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "line_code", "line_name", "last_run_at", "last_run_message", "created_at", "updated_at"]
+
+    def get_notify_user_names(self, obj):
+        return [
+            {"id": u.id, "name": _format_user_name(u)}
+            for u in obj.notify_users.all()
+        ]
+
+    def create(self, validated_data):
+        users = validated_data.pop("notify_users", [])
+        instance = super().create(validated_data)
+        if users:
+            instance.notify_users.set(users)
+        return instance
+
+    def update(self, instance, validated_data):
+        users = validated_data.pop("notify_users", None)
+        instance = super().update(instance, validated_data)
+        if users is not None:
+            instance.notify_users.set(users)
+        return instance

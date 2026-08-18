@@ -14,8 +14,10 @@
       <button type="button" class="tab-button" :class="{ active: activeTab === 'daily' }" @click="activeTab = 'daily'">日次</button>
       <button type="button" class="tab-button" :class="{ active: activeTab === 'weekly' }" @click="activeTab = 'weekly'">週次</button>
       <button type="button" class="tab-button" :class="{ active: activeTab === 'monthly' }" @click="activeTab = 'monthly'">月次</button>
+      <button type="button" class="tab-button" :class="{ active: activeTab === 'alert' }" @click="switchToAlertTab">定時通知設定</button>
     </div>
 
+    <template v-if="activeTab !== 'alert'">
     <div class="prepare-form filter-form">
       <label>
         <span class="field-label">ライン</span>
@@ -245,11 +247,103 @@
         </table>
       </div>
     </section>
+    </template>
+
+    <section v-if="activeTab === 'alert'" class="panel alert-settings-panel">
+      <div class="section-head">
+        <h3 class="section-title">修正流動率 定時通知設定</h3>
+        <span class="section-note">指定時刻にライン別修正流動率をチェックし、閾値超過時にPush通知を送ります</span>
+      </div>
+
+      <div class="alert-form">
+        <label>
+          <span class="field-label">ライン</span>
+          <select v-model="alertForm.line">
+            <option :value="null">-- 選択 --</option>
+            <option v-for="line in alertLineOptions" :key="line.id" :value="line.id">{{ line.line_name }} ({{ line.line_code }})</option>
+          </select>
+        </label>
+        <label>
+          <span class="field-label">閾値(%)</span>
+          <input type="number" v-model.number="alertForm.threshold_rate" min="0" max="100" step="0.1" class="threshold-input" />
+        </label>
+        <label>
+          <span class="field-label">集計日数</span>
+          <input type="number" v-model.number="alertForm.lookback_days" min="1" max="30" step="1" class="lookback-input" />
+          <span class="suffix">日</span>
+        </label>
+        <label>
+          <span class="field-label">実行時刻</span>
+          <div class="time-row">
+            <input type="number" v-model.number="alertForm.scheduled_hour" min="0" max="23" class="time-input" />
+            <span class="suffix">時</span>
+            <input type="number" v-model.number="alertForm.scheduled_minute" min="0" max="59" class="time-input" />
+            <span class="suffix">分</span>
+          </div>
+        </label>
+        <label class="field-notify-users">
+          <span class="field-label">通知先</span>
+          <UserChipSelect v-model="alertForm.notify_user_ids" :userList="allUsers" placeholder="ユーザー検索" />
+        </label>
+        <div class="alert-form-actions">
+          <button class="btn-primary" @click="saveAlertConfig" :disabled="alertSaving">{{ alertEditId ? '更新' : '追加' }}</button>
+          <button v-if="alertEditId" class="btn-secondary" @click="resetAlertForm">キャンセル</button>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-top: 14px">
+        <table class="data-table compact">
+          <thead>
+            <tr>
+              <th>ライン</th>
+              <th>閾値</th>
+              <th>集計日数</th>
+              <th>実行時刻</th>
+              <th>有効</th>
+              <th>通知先</th>
+              <th>最終実行</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="cfg in alertConfigs" :key="cfg.id">
+              <td>{{ cfg.line_name }} ({{ cfg.line_code }})</td>
+              <td>{{ cfg.threshold_rate }}%</td>
+              <td>{{ cfg.lookback_days }}日</td>
+              <td>{{ String(cfg.scheduled_hour).padStart(2, '0') }}:{{ String(cfg.scheduled_minute).padStart(2, '0') }}</td>
+              <td>
+                <span :class="cfg.is_enabled ? 'status-on' : 'status-off'">{{ cfg.is_enabled ? '有効' : '無効' }}</span>
+              </td>
+              <td>
+                <span v-for="u in cfg.notify_user_names" :key="u.id" class="chip">{{ u.name }}</span>
+                <span v-if="!cfg.notify_user_names?.length" class="text-muted">未設定</span>
+              </td>
+              <td class="last-run-cell">
+                <template v-if="cfg.last_run_at">
+                  <div class="last-run-time">{{ formatDateTime(cfg.last_run_at) }}</div>
+                  <div class="last-run-msg">{{ cfg.last_run_message }}</div>
+                </template>
+                <span v-else class="text-muted">未実行</span>
+              </td>
+              <td class="action-cell">
+                <button class="btn-sm" @click="editAlertConfig(cfg)">編集</button>
+                <button class="btn-sm" @click="toggleAlertEnabled(cfg)">{{ cfg.is_enabled ? '無効化' : '有効化' }}</button>
+                <button class="btn-sm btn-danger" @click="deleteAlertConfig(cfg)">削除</button>
+              </td>
+            </tr>
+            <tr v-if="!alertConfigs.length">
+              <td colspan="8" class="empty-cell">通知設定がありません。上のフォームから追加してください。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue"
+import UserChipSelect from "@/views/purchase/UserChipSelect.vue"
 import {
   BarController,
   BarElement,
@@ -350,6 +444,7 @@ const totalLabel = computed(() => aggregationMode.value === "unit" ? "判定台�
 const reworkLabel = computed(() => aggregationMode.value === "unit" ? "修正流動台数" : "修正流動件数")
 const ngLabel = computed(() => aggregationMode.value === "unit" ? "NG台数" : "NG件数")
 const tabName = computed(() => {
+  if (activeTab.value === "alert") return "定時通知設定"
   if (activeTab.value === "weekly") return "週次"
   if (activeTab.value === "monthly") return "月次"
   return "日次"
@@ -359,8 +454,11 @@ const periodLabel = computed(() => {
   if (activeTab.value === "monthly") return "月"
   return "日付"
 })
-const pageTitle = computed(() => `${tabName.value}修正流動確認`)
-const pageHelperText = computed(() => `工程一体チェックシート実績から、ライン / 工程 / 製品 / ${periodLabel.value}単位で修正流動を確認します。`)
+const pageTitle = computed(() => activeTab.value === "alert" ? "修正流動率 定時通知設定" : `${tabName.value}修正流動確認`)
+const pageHelperText = computed(() => activeTab.value === "alert"
+  ? "指定時刻にライン別修正流動率をチェックし、閾値超過時にPush通知を送ります。"
+  : `工程一体チェックシート実績から、ライン / 工程 / 製品 / ${periodLabel.value}単位で修正流動を確認します。`
+)
 const chartTitle = computed(() => `${tabName.value}修正流動率推移`)
 const chartNote = computed(() => `横軸は${activeTab.value === "daily" ? "稼働日" : periodLabel.value}、左軸は台数、右軸は修正流動率です`)
 const summarySectionTitle = computed(() => `${tabName.value}サマリー`)
@@ -880,6 +978,127 @@ const rateClass = (rateValue) => {
   return ""
 }
 
+// --- 定時通知設定タブ ---
+const alertConfigs = ref([])
+const allUsers = ref([])
+const alertLineOptions = ref([])
+const alertSaving = ref(false)
+const alertEditId = ref(null)
+const alertForm = reactive({
+  line: null,
+  threshold_rate: 5.0,
+  scheduled_hour: 17,
+  scheduled_minute: 0,
+  lookback_days: 1,
+  notify_user_ids: [],
+})
+
+const resetAlertForm = () => {
+  alertEditId.value = null
+  alertForm.line = null
+  alertForm.threshold_rate = 5.0
+  alertForm.scheduled_hour = 17
+  alertForm.scheduled_minute = 0
+  alertForm.lookback_days = 1
+  alertForm.notify_user_ids = []
+}
+
+const loadAlertConfigs = async () => {
+  try {
+    const res = await api.integratedChecksheets.listReworkAlertConfigs()
+    alertConfigs.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error("通知設定取得失敗:", e)
+  }
+}
+
+const loadAlertMasterData = async () => {
+  try {
+    const [usersRes, linesRes] = await Promise.all([
+      api.accounts.getUsers({ page_size: 500 }),
+      api.lines.getLines({ page_size: 500, line_type: "PROD" }),
+    ])
+    allUsers.value = Array.isArray(usersRes.data) ? usersRes.data : usersRes.data?.results || []
+    const lines = Array.isArray(linesRes.data) ? linesRes.data : linesRes.data?.results || []
+    alertLineOptions.value = lines
+  } catch (e) {
+    console.error("マスタデータ取得失敗:", e)
+  }
+}
+
+const switchToAlertTab = async () => {
+  activeTab.value = "alert"
+  await loadAlertConfigs()
+  if (!allUsers.value.length) await loadAlertMasterData()
+}
+
+const saveAlertConfig = async () => {
+  if (!alertForm.line) {
+    window.alert("ラインを選択してください。")
+    return
+  }
+  alertSaving.value = true
+  try {
+    const payload = {
+      line: alertForm.line,
+      threshold_rate: alertForm.threshold_rate,
+      scheduled_hour: alertForm.scheduled_hour,
+      scheduled_minute: alertForm.scheduled_minute,
+      lookback_days: alertForm.lookback_days,
+      notify_user_ids: alertForm.notify_user_ids,
+    }
+    if (alertEditId.value) {
+      await api.integratedChecksheets.updateReworkAlertConfig(alertEditId.value, payload)
+    } else {
+      await api.integratedChecksheets.createReworkAlertConfig(payload)
+    }
+    resetAlertForm()
+    await loadAlertConfigs()
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.response?.data?.line?.[0] || e?.message || "保存に失敗しました。"
+    window.alert(`保存エラー: ${detail}`)
+  } finally {
+    alertSaving.value = false
+  }
+}
+
+const editAlertConfig = (cfg) => {
+  alertEditId.value = cfg.id
+  alertForm.line = cfg.line
+  alertForm.threshold_rate = Number(cfg.threshold_rate)
+  alertForm.scheduled_hour = cfg.scheduled_hour
+  alertForm.scheduled_minute = cfg.scheduled_minute
+  alertForm.lookback_days = cfg.lookback_days
+  alertForm.notify_user_ids = (cfg.notify_user_names || []).map((u) => u.id)
+}
+
+const toggleAlertEnabled = async (cfg) => {
+  try {
+    await api.integratedChecksheets.updateReworkAlertConfig(cfg.id, { is_enabled: !cfg.is_enabled })
+    await loadAlertConfigs()
+  } catch (e) {
+    window.alert("更新に失敗しました。")
+  }
+}
+
+const deleteAlertConfig = async (cfg) => {
+  if (!window.confirm(`${cfg.line_name} の通知設定を削除しますか？`)) return
+  try {
+    await api.integratedChecksheets.deleteReworkAlertConfig(cfg.id)
+    if (alertEditId.value === cfg.id) resetAlertForm()
+    await loadAlertConfigs()
+  } catch (e) {
+    window.alert("削除に失敗しました。")
+  }
+}
+
+const formatDateTime = (iso) => {
+  if (!iso) return ""
+  const d = new Date(iso)
+  const pad = (n) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 onMounted(async () => {
   startDate.value = buildMonthStartText()
   await Promise.all([loadFavorites(), loadTemplateDefinitions()])
@@ -1133,5 +1352,149 @@ onUnmounted(() => {
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* --- 定時通知設定タブ --- */
+.alert-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.alert-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alert-form select,
+.alert-form input {
+  padding: 5px 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.threshold-input {
+  width: 70px;
+}
+
+.lookback-input {
+  width: 56px;
+}
+
+.time-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.time-input {
+  width: 52px;
+  text-align: center;
+}
+
+.suffix {
+  font-size: 13px;
+  color: #475569;
+}
+
+.field-notify-users {
+  min-width: 260px;
+  align-items: flex-start !important;
+}
+
+.alert-form-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-primary {
+  padding: 6px 16px;
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 4px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.btn-primary:disabled {
+  opacity: 0.7;
+}
+
+.btn-sm {
+  padding: 3px 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-sm:hover {
+  background: #e2e8f0;
+}
+
+.btn-danger {
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.btn-danger:hover {
+  background: #fef2f2;
+}
+
+.status-on {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.status-off {
+  color: #94a3b8;
+}
+
+.text-muted {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.action-cell {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.last-run-cell {
+  max-width: 300px;
+  white-space: normal;
+}
+
+.last-run-time {
+  font-size: 12px;
+  color: #475569;
+}
+
+.last-run-msg {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-all;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  background: #eef2f6;
+  border: 1px solid #cfd6e1;
+  border-radius: 14px;
+  padding: 2px 8px;
+  font-size: 12px;
+  margin-right: 3px;
 }
 </style>

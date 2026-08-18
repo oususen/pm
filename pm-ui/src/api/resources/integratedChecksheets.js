@@ -86,4 +86,16 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   listTasks(params = {}) {
     return client.get('/integrated-checksheet-tasks/', { params })
   },
+  listReworkAlertConfigs(params = {}) {
+    return client.get('/checksheet-rework-alert-configs/', { params })
+  },
+  createReworkAlertConfig(data) {
+    return client.post('/checksheet-rework-alert-configs/', data)
+  },
+  updateReworkAlertConfig(id, data) {
+    return client.patch(`/checksheet-rework-alert-configs/${id}/`, data)
+  },
+  deleteReworkAlertConfig(id) {
+    return client.delete(`/checksheet-rework-alert-configs/${id}/`)
+  },
 })

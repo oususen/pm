@@ -8,6 +8,7 @@ from .views import (
     EquipmentInspectionTemplateViewSet,
 )
 from .views_integrated_checksheet import (
+    ChecksheetReworkAlertConfigViewSet,
     IntegratedChecksheetBatchViewSet,
     IntegratedChecksheetTaskListView,
     IntegratedChecksheetTemplateViewSet,
@@ -54,6 +55,11 @@ router.register(
     r"integrated-checksheet-units",
     IntegratedChecksheetUnitViewSet,
     basename="integratedchecksheet-unit",
+)
+router.register(
+    r"checksheet-rework-alert-configs",
+    ChecksheetReworkAlertConfigViewSet,
+    basename="checksheet-rework-alert-config",
 )
 router.register(
     r"training-books",
