@@ -268,9 +268,9 @@
           <input type="number" v-model.number="alertForm.threshold_rate" min="0" max="100" step="0.1" class="threshold-input" />
         </label>
         <label>
-          <span class="field-label">集計日数</span>
+          <span class="field-label">何日前</span>
           <input type="number" v-model.number="alertForm.lookback_days" min="1" max="30" step="1" class="lookback-input" />
-          <span class="suffix">日</span>
+          <span class="suffix">日前</span>
         </label>
         <label>
           <span class="field-label">実行時刻</span>
@@ -294,7 +294,7 @@
           <button v-if="alertEditId" class="btn-secondary" @click="resetAlertForm">キャンセル</button>
         </div>
       </div>
-      <p class="helper-text alert-helper">製品別に修正流動率を集計し、閾値を超えた製品がある場合にPush通知を送ります。メール有効時は通知先ユーザーのメールアドレス宛にも送信します。</p>
+      <p class="helper-text alert-helper">指定日（N日前）の実績を製品別に集計し、閾値を超えた製品があればPush通知を送ります。メール有効時は通知先ユーザーのメールアドレス宛にも送信します。</p>
 
       <div class="table-wrap" style="margin-top: 14px">
         <table class="data-table compact">
@@ -302,7 +302,7 @@
             <tr>
               <th>ライン</th>
               <th>閾値</th>
-              <th>集計日数</th>
+              <th>対象日</th>
               <th>実行時刻</th>
               <th>有効</th>
               <th>メール</th>
@@ -315,7 +315,7 @@
             <tr v-for="cfg in alertConfigs" :key="cfg.id">
               <td>{{ cfg.line_name }} ({{ cfg.line_code }})</td>
               <td>{{ cfg.threshold_rate }}%</td>
-              <td>{{ cfg.lookback_days }}日</td>
+              <td>{{ cfg.lookback_days }}日前</td>
               <td>{{ String(cfg.scheduled_hour).padStart(2, '0') }}:{{ String(cfg.scheduled_minute).padStart(2, '0') }}</td>
               <td>
                 <span :class="cfg.is_enabled ? 'status-on' : 'status-off'">{{ cfg.is_enabled ? '有効' : '無効' }}</span>

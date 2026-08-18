@@ -37,15 +37,13 @@ def _build_product_stats(cfg):
     """製品別に修正流動率を集計し、閾値超過の製品リストを返す"""
     from quality.models_integrated_checksheet import IntegratedChecksheetCheck
 
-    today = date.today()
-    start_date = today - timedelta(days=cfg.lookback_days - 1)
+    target_date = date.today() - timedelta(days=cfg.lookback_days)
 
     checks = (
         IntegratedChecksheetCheck.objects
         .filter(
             unit__batch__line=cfg.line,
-            unit__batch__plan_date__gte=start_date,
-            unit__batch__plan_date__lte=today,
+            unit__batch__plan_date=target_date,
             judgement__in=["OK", "NG", "修正流動"],
         )
         .values_list("judgement", "unit_id", "unit__batch__product__product_code")
@@ -79,45 +77,33 @@ def _build_product_stats(cfg):
         if rate >= threshold:
             exceeded.append(stat)
 
-    return start_date, today, all_stats, exceeded
+    return target_date, all_stats, exceeded
 
 
 def _check_and_notify(cfg):
     from notifications.models import PushSubscription
     from notifications.web_push import send_web_push
 
-    start_date, today, all_stats, exceeded = _build_product_stats(cfg)
+    target_date, all_stats, exceeded = _build_product_stats(cfg)
     threshold = cfg.threshold_rate
-    period_str = f"{start_date}～{today}"
+    date_str = str(target_date)
 
     total_all = sum(s["total"] for s in all_stats)
     if total_all == 0:
-        return f"対象台数0 ({period_str})"
+        return f"対象台数0 ({date_str})"
 
     if not exceeded:
         summary_parts = [f"{s['product_code']}:{s['rate']:.1f}%" for s in all_stats[:5]]
         return (
             f"閾値以下 (閾値{threshold}%) "
             f"{' / '.join(summary_parts)} "
-            f"({period_str})"
+            f"({date_str})"
         )
 
     notify_user_ids = list(cfg.notify_users.values_list("id", flat=True))
     if not notify_user_ids:
         product_list = ", ".join(f"{s['product_code']}({s['rate']:.1f}%)" for s in exceeded)
-        return f"閾値超過だが通知先未設定: {product_list} ({period_str})"
-
-    exceeded_lines = []
-    for s in exceeded:
-        exceeded_lines.append(
-            f"  {s['product_code']}: {s['rate']:.1f}% ({s['rework']}/{s['total']}台)"
-        )
-
-    body_text = (
-        f"修正流動率が閾値 {threshold}% を超えた製品:\n"
-        + "\n".join(exceeded_lines)
-        + f"\n期間: {start_date.strftime('%m/%d')}～{today.strftime('%m/%d')}"
-    )
+        return f"閾値超過だが通知先未設定: {product_list} ({date_str})"
 
     push_sent = 0
     for s in exceeded:
@@ -125,8 +111,7 @@ def _check_and_notify(cfg):
             "title": f"修正流動率 閾値超過: {cfg.line.line_name} {s['product_code']}",
             "body": (
                 f"修正流動率 {s['rate']:.1f}% (閾値 {threshold}%)\n"
-                f"対象: {s['rework']}/{s['total']}台 "
-                f"({start_date.strftime('%m/%d')}～{today.strftime('%m/%d')})"
+                f"対象: {s['rework']}/{s['total']}台 ({target_date.strftime('%m/%d')})"
             ),
             "tag": f"rework-alert-{cfg.line.line_code}-{s['product_code']}",
             "url": "/quality/product-checksheet/integrated/weekly-monthly",
@@ -138,22 +123,20 @@ def _check_and_notify(cfg):
 
     email_result = ""
     if cfg.email_enabled:
-        email_result = _send_alert_email(cfg, exceeded, start_date, today)
+        email_result = _send_alert_email(cfg, exceeded, target_date)
 
     product_list = ", ".join(f"{s['product_code']}({s['rate']:.1f}%)" for s in exceeded)
     return (
         f"閾値超過{len(exceeded)}製品: {product_list} "
         f"Push{push_sent}件 {email_result}"
-        f"({period_str})"
+        f"({date_str})"
     )
 
 
-def _send_alert_email(cfg, exceeded, start_date, today):
+def _send_alert_email(cfg, exceeded, target_date):
     """閾値超過製品の一覧をメールで送信"""
     from shipping.services.email_service import EmailService
-    from django.contrib.auth import get_user_model
 
-    User = get_user_model()
     notify_users = cfg.notify_users.all()
     to_emails = []
     for user in notify_users:
@@ -164,13 +147,13 @@ def _send_alert_email(cfg, exceeded, start_date, today):
     if not to_emails:
         return "メール送信先なし "
 
-    subject = f"【修正流動率 閾値超過】{cfg.line.line_name} ({start_date.strftime('%m/%d')}～{today.strftime('%m/%d')})"
+    subject = f"【修正流動率 閾値超過】{cfg.line.line_name} ({target_date.strftime('%m/%d')})"
 
     lines = [
         f"修正流動率が閾値 {cfg.threshold_rate}% を超えた製品があります。",
         f"",
         f"ライン: {cfg.line.line_name} ({cfg.line.line_code})",
-        f"期間: {start_date} ～ {today}",
+        f"対象日: {target_date}",
         f"",
         f"{'製品コード':<16} {'修正流動率':>10} {'修正流動台数':>12} {'判定台数':>8}",
         "-" * 56,
