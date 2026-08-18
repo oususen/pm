@@ -421,7 +421,7 @@
       </div>
       <div class="scope-item">
         <span class="scope-label">将来拡張</span>
-        <span class="scope-value">pgvector による曖昧検索基盤を見据える</span>
+        <span class="scope-value">pgvector（曖昧検索）+ PostGIS（位置情報）基盤を見据える</span>
       </div>
     </div>
   </div>
@@ -681,6 +681,76 @@
 
     <div class="callout">
       <strong>将来拡張の位置づけ:</strong> デジタル化課題整理では、通話録音の文字起こし、現場の会話記録、過去トラブル事例、製品名・工程名などの曖昧検索ニーズがある。そのため将来的には <code>PostgreSQL + pgvector</code> を使ったベクトルDB基盤が必要になる。加えて、AGV導入時の搬送ログ蓄積や、AIカメラ導入時の判定イベント蓄積・分析基盤も見据える必要がある。今回の移行では既存業務データを安全に PostgreSQL へ移行することを優先し、将来の pgvector 導入や AGV・AIカメラ等のログ蓄積基盤を後続で追加しても支障が出ない構成を前提とする。
+    </div>
+  </div>
+
+  <!-- Phase 5b: PostGIS -->
+  <div class="phase">
+    <div class="phase-header">
+      <span class="phase-num">PHASE 5b</span>
+      <span class="phase-title">PostGISによる位置情報基盤の構築</span>
+    </div>
+    <p class="phase-desc">PostgreSQLのPostGIS拡張を活用し、工場内の設備・置場・棚の位置情報を管理する基盤を構築する。GPS座標ではなく、工場図面上のローカル座標系（メートル単位）を使用する。</p>
+
+    <div class="table-wrap">
+      <table class="task-table">
+        <thead><tr><th>フェーズ</th><th>内容</th><th>技術要素</th><th>期間目安</th><th>重要度</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>空間データ基盤</td>
+            <td class="task-detail">
+              PostGIS拡張の有効化<br>
+              GeoDjango (<code>django.contrib.gis</code>) 導入<br>
+              位置情報モデル: <code>EquipmentLocation</code> (PointField)、<code>StorageArea</code> (PolygonField)、<code>FactoryFloor</code> (図面メタ情報)
+            </td>
+            <td class="task-detail"><code>CREATE EXTENSION postgis;</code><br>Django <code>PointField</code> / <code>PolygonField</code></td>
+            <td>1〜2週</td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>設備配置可視化</td>
+            <td class="task-detail">
+              Leaflet.js + <code>CRS.Simple</code> で工場フロアマップ表示<br>
+              フロア図面画像をベースレイヤーに読み込み<br>
+              設備・置場をマーカー/ポリゴンで重畳表示
+            </td>
+            <td class="task-detail">Leaflet.js (ローカル座標)<br>Vue 3 コンポーネント</td>
+            <td>2〜3週</td>
+            <td><span class="tag tag-medium">MEDIUM</span></td>
+          </tr>
+          <tr>
+            <td>棚卸動線最適化</td>
+            <td class="task-detail">
+              棚卸対象の位置座標からTSPアルゴリズムで巡回順を最適化<br>
+              最適ルートをフロアマップ上に <code>LineString</code> で描画<br>
+              棚卸リストを最適順に並び替えて出力<br>
+              <strong>移動距離 30〜40% 削減見込み</strong>
+            </td>
+            <td class="task-detail">Nearest Neighbor + 2-opt<br><code>ST_Distance</code><br>将来: OR-Tools</td>
+            <td>2〜3週</td>
+            <td><span class="tag tag-high">HIGH</span></td>
+          </tr>
+          <tr>
+            <td>搬送ルート分析</td>
+            <td class="task-detail">
+              AGV導入時の搬送ログ蓄積<br>
+              <code>ST_Distance</code> / <code>ST_DWithin</code> で距離・近接分析<br>
+              ヒートマップで搬送頻度の高いエリアを可視化
+            </td>
+            <td class="task-detail">PostGIS空間関数<br>搬送ログテーブル</td>
+            <td>3〜4週</td>
+            <td><span class="tag tag-low">LOW</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>最優先の活用候補は棚卸動線最適化:</strong> PostGIS導入で最も即効性があるのは棚卸動線の最適化。置場・棚の座標データを登録すれば、TSPアルゴリズムで巡回順を自動算出でき、棚卸作業の移動時間を大幅に短縮できる。搬送ルート分析はAGV導入が前提のため、後続フェーズとする。
+    </div>
+
+    <div class="callout">
+      <strong>前提条件:</strong> PHASE 4（wanoco/ の検証）が完了し、PostgreSQL上で安定稼働していること。工場フロア図面（画像）が入手可能であること。設備・置場の位置情報は、初期登録時に図面上でクリックして座標を取得する方式とする。
     </div>
   </div>
 
