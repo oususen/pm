@@ -1,10 +1,11 @@
 <template>
   <div class="master-menu daily-review-page">
     <div class="page-header">
-      <div>
+      <div style="display:flex;align-items:center;gap:6px">
         <h2 class="page-title">{{ pageTitle }}</h2>
-        <p class="helper-text">{{ pageHelperText }}</p>
+        <DataSourceDialog title="推移確認" :sources="dsSources" />
       </div>
+      <p class="helper-text">{{ pageHelperText }}</p>
       <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
     </div>
 
@@ -353,6 +354,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import UserChipSelect from "@/views/purchase/UserChipSelect.vue"
+import DataSourceDialog from "@/components/DataSourceDialog.vue"
 import {
   BarController,
   BarElement,
@@ -378,6 +380,26 @@ Chart.register(
   Tooltip,
   Legend,
 )
+
+const dsSources = [
+  { section: "推移確認データ" },
+  { op: "読み取り", table: "quality_integrated_checksheet_batch", desc: "製品・ライン・計画日単位の実施バッチ" },
+  { op: "読み取り", table: "quality_integrated_checksheet_unit", desc: "台目ごとの進捗・刻印番号" },
+  { op: "読み取り", table: "quality_integrated_cs_check", desc: "台目×チェック項目の入力結果（判定・数値・テキスト）" },
+  { op: "読み取り", table: "quality_integrated_cs_process_block", desc: "テンプレート内の工程ブロック定義" },
+  { op: "読み取り", table: "quality_integrated_cs_item", desc: "工程ごとのチェック項目定義" },
+  { op: "読み取り", table: "quality_integrated_checksheet_template", desc: "テンプレート本体（製品・ライン紐付け）" },
+  { section: "傾向分析" },
+  { op: "集計", table: "quality_integrated_cs_check.judgement", desc: "OK/NG/修正流動の判定を日別・週別・月別に集計" },
+  { op: "集計", table: "quality_integrated_cs_check.numeric_value", desc: "数値測定項目の平均・最小・最大を期間別に集計" },
+  { section: "定時通知設定" },
+  { op: "読み書き", table: "quality_checksheet_rework_alert_config", desc: "修正流動率の閾値・通知先・実行時刻の設定" },
+  { op: "参照", table: "m_line", desc: "ライン選択肢" },
+  { op: "参照", table: "auth_user", desc: "通知先ユーザー選択肢" },
+  { section: "共通参照" },
+  { op: "参照", table: "m_product / m_line / m_process", desc: "製品・ライン・工程の選択肢と表示名" },
+  { op: "参照", table: "accounts_favorite_filter", desc: "フィルタお気に入りの保存・呼出" },
+]
 
 const loading = ref(false)
 const error = ref("")
