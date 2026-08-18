@@ -662,7 +662,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import api from '@/api/client'
 
 const activeTab = ref('example')
@@ -1090,127 +1090,218 @@ const clearStep6Table = () => {
 
 const formatQty = (value) => (value === null || value === undefined ? '' : value)
 
-const buildPlanExportSheetData = (rows, totals) => {
-  const dateHeaders = generatedStep4DateColumns.value.flatMap((day) => ([
-    `${day.label}_必要数`,
-    `${day.label}_分/日`,
-    `${day.label}_材料枚数`,
-    `${day.label}_重量`,
-  ]))
+const toNum = (v) => {
+  if (v === '' || v === null || v === undefined) return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : v
+}
 
-  const headers = [
-    'ネスティングNo.',
-    '完成品番',
-    '構成子品番',
-    '子取り数',
-    '俗称',
-    '板厚',
-    '材料仕込/日',
-    '製品重量/日',
-    '加工時間',
-    '個/枚（取り数）',
-    '依頼数',
-    '平均必要数 個/日',
-    ...dateHeaders,
-    '合計数量',
-    '合計時間',
-    '合計枚数',
-    '合計重量',
-  ]
+const exportPlanTable = async (rows, totals, fileLabel) => {
+  if (!Array.isArray(rows) || rows.length === 0) return
 
-  const body = []
-  const merges = []
-  const mergeColumns = [0, 1, 4, 5, 6, 7, 8, 9, 10, 11]
-  const dayColumnStart = 12
-  const dayColumnCount = generatedStep4DateColumns.value.length * 4
-  const totalColumnStart = dayColumnStart + dayColumnCount
+  const dateColumns = generatedStep4DateColumns.value
+  const dayColStart = 13
+  const totalColStart = dayColStart + dateColumns.length * 4
+  const lastCol = totalColStart + 3
+
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('計画表')
+
+  const thinBorder = { style: 'thin' }
+  const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder }
+  const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } }
+  const totalFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } }
+  const headerFont = { bold: true, size: 9 }
+  const bodyFont = { size: 9 }
+  const centerAlign = { horizontal: 'center', vertical: 'middle', wrapText: true }
+  const rightAlign = { horizontal: 'right', vertical: 'middle' }
+
+  // --- ヘッダー行1 ---
+  const headerRow1Data = new Array(lastCol).fill(null)
+  headerRow1Data[0] = 'ネスティング\nNo.'
+  headerRow1Data[1] = '完成\n品番'
+  headerRow1Data[2] = '俗称'
+  headerRow1Data[3] = '構成子\n品番'
+  headerRow1Data[4] = '子取り数'
+  headerRow1Data[5] = '板厚'
+  headerRow1Data[6] = '材料仕込\n/日'
+  headerRow1Data[7] = '製品重量\n/日'
+  headerRow1Data[8] = '加工\n時間'
+  headerRow1Data[9] = '個/枚\n（取り数）'
+  headerRow1Data[10] = '依頼\n数'
+  headerRow1Data[11] = '平均必要数\n個/日'
+  headerRow1Data[12] = '必要数/日'
+  headerRow1Data[totalColStart - 1] = '合計\n数量'
+  headerRow1Data[totalColStart] = '合計\n時間'
+  headerRow1Data[totalColStart + 1] = '合計\n枚数'
+  headerRow1Data[totalColStart + 2] = '合計\n重量'
+  ws.addRow(headerRow1Data)
+
+  // --- ヘッダー行2 (日付ラベル) ---
+  const headerRow2Data = new Array(lastCol).fill(null)
+  dateColumns.forEach((day, i) => {
+    headerRow2Data[dayColStart - 1 + i * 4] = day.label
+  })
+  ws.addRow(headerRow2Data)
+
+  // --- ヘッダー行3 (日付サブヘッダー) ---
+  const headerRow3Data = new Array(lastCol).fill(null)
+  dateColumns.forEach((_day, i) => {
+    const base = dayColStart - 1 + i * 4
+    headerRow3Data[base] = '必要数'
+    headerRow3Data[base + 1] = '分/日'
+    headerRow3Data[base + 2] = '材料枚数'
+    headerRow3Data[base + 3] = '重量'
+  })
+  ws.addRow(headerRow3Data)
+
+  // --- ヘッダー結合 ---
+  // A〜L列(col1〜12) + 合計列は3行結合
+  for (let c = 1; c <= 12; c++) {
+    ws.mergeCells(1, c, 3, c)
+  }
+  for (let c = totalColStart; c <= lastCol; c++) {
+    ws.mergeCells(1, c, 3, c)
+  }
+  // 「必要数/日」行1で全日付列を横結合
+  if (dateColumns.length > 0) {
+    ws.mergeCells(1, dayColStart, 1, totalColStart - 1)
+  }
+  // 各日付: 行2で4列結合
+  dateColumns.forEach((_day, i) => {
+    const base = dayColStart + i * 4
+    ws.mergeCells(2, base, 2, base + 3)
+  })
+
+  // --- ヘッダースタイル ---
+  for (let r = 1; r <= 3; r++) {
+    const row = ws.getRow(r)
+    for (let c = 1; c <= lastCol; c++) {
+      const cell = row.getCell(c)
+      cell.font = headerFont
+      cell.fill = headerFill
+      cell.alignment = centerAlign
+      cell.border = allBorders
+    }
+  }
+
+  // --- データ行 ---
+  const dataStartRow = 4
+  const bodyMerges = []
 
   rows.forEach((row) => {
     const components = Array.isArray(row.componentItems) && row.componentItems.length ? row.componentItems : [{ code: '', takeQty: '' }]
-    const groupStartRowIndex = body.length + 1
+    const groupStartRow = ws.rowCount + 1
 
     components.forEach((component, index) => {
-      body.push([
-        index === 0 ? row.groupLabel || '' : '',
-        index === 0 ? row.partNo || '' : '',
-        component.code || '',
-        component.takeQty || '',
-        index === 0 ? row.commonName || '' : '',
-        index === 0 ? row.thickness || '' : '',
-        index === 0 ? row.materialPerDay || '' : '',
-        index === 0 ? row.productWeightPerDay || '' : '',
-        index === 0 ? formatMinutes(row.processTimeMin) : '',
-        index === 0 ? row.unitPerSet || '' : '',
-        index === 0 ? row.requestQty || '' : '',
-        index === 0 ? row.requiredPerDay || '' : '',
-        ...generatedStep4DateColumns.value.flatMap((day) => (index === 0
-          ? [
-            row.daily?.[day.key] || '',
-            calculateDailyProcessMinutes(row.daily?.[day.key], row.unitPerSet, row.processTimeMin),
-            calculateDailyMaterialRequired(row.daily?.[day.key], row.unitPerSet),
-            calculateDailyMaterialWeight(row.daily?.[day.key], row.unitPerSet, row.materialUnitWeightKg),
-          ]
-          : ['', '', '', ''])),
-        index === 0 ? sumDailyQty(row.daily) : '',
-        index === 0 ? sumDailyProcessMinutes(row.daily, row.unitPerSet, row.processTimeMin) : '',
-        index === 0 ? sumDailyMaterialRequired(row.daily, row.unitPerSet) : '',
-        index === 0 ? sumDailyMaterialWeight(row.daily, row.unitPerSet, row.materialUnitWeightKg) : '',
-      ])
+      const rowData = new Array(lastCol).fill(null)
+      if (index === 0) {
+        rowData[0] = toNum(row.groupLabel) ?? ''
+        rowData[1] = row.partNo || ''
+        rowData[2] = row.commonName || ''
+        rowData[5] = row.thickness || ''
+        rowData[6] = toNum(row.materialPerDay)
+        rowData[7] = toNum(row.productWeightPerDay)
+        rowData[8] = formatMinutes(row.processTimeMin)
+        rowData[9] = toNum(row.unitPerSet)
+        rowData[10] = toNum(row.requestQty)
+        rowData[11] = toNum(row.requiredPerDay)
+        dateColumns.forEach((day, di) => {
+          const base = dayColStart - 1 + di * 4
+          rowData[base] = toNum(row.daily?.[day.key])
+          rowData[base + 1] = toNum(calculateDailyProcessMinutes(row.daily?.[day.key], row.unitPerSet, row.processTimeMin))
+          rowData[base + 2] = toNum(calculateDailyMaterialRequired(row.daily?.[day.key], row.unitPerSet))
+          rowData[base + 3] = toNum(calculateDailyMaterialWeight(row.daily?.[day.key], row.unitPerSet, row.materialUnitWeightKg))
+        })
+        rowData[totalColStart - 1] = toNum(sumDailyQty(row.daily))
+        rowData[totalColStart] = toNum(sumDailyProcessMinutes(row.daily, row.unitPerSet, row.processTimeMin))
+        rowData[totalColStart + 1] = toNum(sumDailyMaterialRequired(row.daily, row.unitPerSet))
+        rowData[totalColStart + 2] = toNum(sumDailyMaterialWeight(row.daily, row.unitPerSet, row.materialUnitWeightKg))
+      }
+      rowData[3] = component.code || ''
+      rowData[4] = toNum(component.takeQty)
+      ws.addRow(rowData)
     })
 
     if (components.length > 1) {
-      const groupEndRowIndex = groupStartRowIndex + components.length - 1
-      mergeColumns.forEach((columnIndex) => {
-        merges.push({ s: { r: groupStartRowIndex, c: columnIndex }, e: { r: groupEndRowIndex, c: columnIndex } })
+      const groupEndRow = groupStartRow + components.length - 1
+      const mergeColIndices = [1, 2, 3, 6, 7, 8, 9, 10, 11, 12]
+      mergeColIndices.forEach((col) => {
+        bodyMerges.push([groupStartRow, col, groupEndRow, col])
       })
-      for (let columnIndex = dayColumnStart; columnIndex < totalColumnStart + 4; columnIndex += 1) {
-        merges.push({ s: { r: groupStartRowIndex, c: columnIndex }, e: { r: groupEndRowIndex, c: columnIndex } })
+      for (let col = dayColStart; col <= lastCol; col++) {
+        bodyMerges.push([groupStartRow, col, groupEndRow, col])
       }
     }
   })
 
-  const totalRow = [
-    '合計',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    '',
-    totals?.requestQty || '',
-    totals?.requiredPerDay || '',
-    ...generatedStep4DateColumns.value.flatMap((day) => ([
-      totals?.daily?.[day.key]?.qty || '',
-      totals?.daily?.[day.key]?.minutes || '',
-      totals?.daily?.[day.key]?.materialRequired || '',
-      totals?.daily?.[day.key]?.weight || '',
-    ])),
-    totals?.totalQty || '',
-    totals?.totalMinutes || '',
-    totals?.totalMaterialRequired || '',
-    totals?.totalWeight || '',
-  ]
+  bodyMerges.forEach(([r1, c1, r2, c2]) => {
+    ws.mergeCells(r1, c1, r2, c2)
+  })
 
-  const totalRowIndex = body.length + 1
-  merges.push({ s: { r: totalRowIndex, c: 0 }, e: { r: totalRowIndex, c: 9 } })
+  // --- 合計行 ---
+  const totalRowData = new Array(lastCol).fill(null)
+  totalRowData[0] = '合計'
+  totalRowData[10] = toNum(totals?.requestQty)
+  totalRowData[11] = toNum(totals?.requiredPerDay)
+  dateColumns.forEach((day, di) => {
+    const base = dayColStart - 1 + di * 4
+    totalRowData[base] = toNum(totals?.daily?.[day.key]?.qty)
+    totalRowData[base + 1] = toNum(totals?.daily?.[day.key]?.minutes)
+    totalRowData[base + 2] = toNum(totals?.daily?.[day.key]?.materialRequired)
+    totalRowData[base + 3] = toNum(totals?.daily?.[day.key]?.weight)
+  })
+  totalRowData[totalColStart - 1] = toNum(totals?.totalQty)
+  totalRowData[totalColStart] = toNum(totals?.totalMinutes)
+  totalRowData[totalColStart + 1] = toNum(totals?.totalMaterialRequired)
+  totalRowData[totalColStart + 2] = toNum(totals?.totalWeight)
+  const totalRowNum = ws.addRow(totalRowData).number
+  ws.mergeCells(totalRowNum, 1, totalRowNum, 12)
 
-  return {
-    rows: [headers, ...body, totalRow],
-    merges,
+  // --- 合計行スタイル ---
+  const totalExcelRow = ws.getRow(totalRowNum)
+  for (let c = 1; c <= lastCol; c++) {
+    const cell = totalExcelRow.getCell(c)
+    cell.font = { bold: true, size: 9 }
+    cell.fill = totalFill
+    cell.alignment = rightAlign
+    cell.border = allBorders
   }
-}
+  totalExcelRow.getCell(1).alignment = centerAlign
 
-const exportPlanTable = (rows, totals, fileLabel) => {
-  if (!Array.isArray(rows) || rows.length === 0) return
-  const sheetData = buildPlanExportSheetData(rows, totals)
-  const ws = XLSX.utils.aoa_to_sheet(sheetData.rows)
-  ws['!merges'] = sheetData.merges
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '計画表')
-  XLSX.writeFile(wb, `${fileLabel}.xlsx`)
+  // --- データ行スタイル ---
+  for (let r = dataStartRow; r < totalRowNum; r++) {
+    const excelRow = ws.getRow(r)
+    for (let c = 1; c <= lastCol; c++) {
+      const cell = excelRow.getCell(c)
+      cell.font = bodyFont
+      cell.border = allBorders
+      cell.alignment = (c <= 4) ? { vertical: 'middle' } : rightAlign
+    }
+  }
+
+  // --- 列幅 ---
+  const colWidths = [8, 16, 10, 18, 7, 6, 8, 8, 10, 7, 6, 8]
+  const daySubWidths = [7, 7, 8, 8]
+  const totalSubWidths = [7, 7, 7, 8]
+  const allWidths = [
+    ...colWidths,
+    ...dateColumns.flatMap(() => daySubWidths),
+    ...totalSubWidths,
+  ]
+  allWidths.forEach((w, i) => {
+    ws.getColumn(i + 1).width = w
+  })
+
+  // --- ダウンロード ---
+  const buffer = await wb.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${fileLabel}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 const exampleDateColumns = [
