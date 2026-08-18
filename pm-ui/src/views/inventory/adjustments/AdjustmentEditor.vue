@@ -310,8 +310,7 @@ const dsSources = computed(() => {
   const desc = descMap[props.adjustType] || '調整値'
   return [
     { op: '読み書き', table: 'production_line_backlog_adjustment', desc },
-    { op: '読み取り', table: 'line_backlog', desc: '在庫・進度・計画データ参照' },
-    { op: '読み取り', table: 't_line_demand', desc: '需要データ参照' },
+    { op: '読み取り', table: 'line_backlog', desc: '需要・在庫・進度・計画データ参照' },
   ]
 })
 
@@ -1036,44 +1035,44 @@ const reload = async () => {
         plan_date__gte: startDate,
         plan_date__lte: endDate,
       };
-      const demandParams = {
-        line: form.lineId,
-        product: form.productId,
-        plan_date__gte: startDate,
-        plan_date__lte: endDate,
-        page_size: 5000,
-      };
-      if (form.processCode) {
-        demandParams.process_search = form.processCode;
-      }
-      const [backlogRes, demandRes] = await Promise.all([
-        api.lineBacklogs.getLineBacklogs(backlogParams),
-        api.lineDemands.list(demandParams),
-      ]);
+      const backlogRes = await api.lineBacklogs.getLineBacklogs(backlogParams);
       const backlogItems = Array.isArray(backlogRes.data) ? backlogRes.data : [];
-      const demandItems = normalizeList(demandRes.data).filter(
-        (item) => !form.processId || Number(item.process || 0) === Number(form.processId)
-      );
       const metricMap = {};
-      // LineBacklogから実績・計画・進度・在庫を取得
+      // LineBacklogから計需・実需・実績・計画・進度・在庫を取得（在庫/残量一覧と同一ソース）
       backlogItems.forEach((item) => {
         const key = item.plan_date;
         if (!metricMap[key]) {
           metricMap[key] = { plan: 0, firm: 0, inbound: 0, planQty: 0, progress: 0 };
         }
+        const seqVal = Number(item.sequence_no || 0);
+        const orderQty = Number(item.order_qty || 0);
+        const demandQty = Number(item.demand_qty_plan || 0);
+        const isDemandRow = (orderQty > 0 || demandQty > 0) && Number(item.plan_qty || 0) === 0;
+        if (isDemandRow) {
+          const hasForecastSplit = item.forecast_order_qty !== null && item.forecast_order_qty !== undefined;
+          const forecastVal = Number((hasForecastSplit ? item.forecast_order_qty : item.order_qty) || 0);
+          if (metricMap[key]._demandSeq === undefined || seqVal < metricMap[key]._demandSeq) {
+            metricMap[key]._demandSeq = seqVal;
+            metricMap[key].plan = forecastVal;
+          } else if (seqVal === metricMap[key]._demandSeq) {
+            metricMap[key].plan = Math.max(metricMap[key].plan, forecastVal);
+          }
+        }
+        const hasFirmSplit = item.firm_order_qty !== null && item.firm_order_qty !== undefined;
+        const firmVal = Number((hasFirmSplit ? item.firm_order_qty : item.actual_shipment_qty) || 0);
+        const shouldApplyFirm = (isDemandRow && hasFirmSplit) || !hasFirmSplit;
+        if (shouldApplyFirm) {
+          if (metricMap[key]._firmSeq === undefined || seqVal < metricMap[key]._firmSeq) {
+            metricMap[key]._firmSeq = seqVal;
+            metricMap[key].firm = firmVal;
+          } else if (seqVal === metricMap[key]._firmSeq) {
+            metricMap[key].firm = Math.max(metricMap[key].firm, firmVal);
+          }
+        }
         metricMap[key].inbound += Number(item.actual_qty || 0);
         metricMap[key].planQty += Number(item.plan_qty || 0);
         metricMap[key].progress += getMetricValueForType(item);
         metricMap[key].stock = Number(item.stock_qty || 0);
-      });
-      // LineDemandから内示・確定を取得
-      demandItems.forEach((item) => {
-        const key = item.plan_date;
-        if (!metricMap[key]) {
-          metricMap[key] = { plan: 0, firm: 0, inbound: 0, planQty: 0, progress: 0 };
-        }
-        metricMap[key].plan += Number(item.forecast_qty || 0);
-        metricMap[key].firm += Number(item.firm_qty || 0);
       });
       metricsByDate.value = metricMap;
 
