@@ -353,7 +353,7 @@ class ChecksheetReworkAlertConfigSerializer(serializers.ModelSerializer):
             "id", "line", "line_code", "line_name",
             "threshold_rate", "scheduled_hour", "scheduled_minute",
             "is_enabled", "notify_user_ids", "notify_user_names",
-            "lookback_days",
+            "lookback_days", "email_enabled",
             "last_run_at", "last_run_message",
             "created_at", "updated_at",
         ]

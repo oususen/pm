@@ -506,6 +506,9 @@ class ChecksheetReworkAlertConfig(models.Model):
     lookback_days = models.PositiveSmallIntegerField(
         default=1, verbose_name="集計対象日数（当日含む）",
     )
+    email_enabled = models.BooleanField(
+        default=False, verbose_name="メール通知有効",
+    )
     last_run_at = models.DateTimeField(
         null=True, blank=True, verbose_name="最終実行日時",
     )

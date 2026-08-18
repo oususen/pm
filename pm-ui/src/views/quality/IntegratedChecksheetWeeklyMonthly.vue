@@ -285,11 +285,16 @@
           <span class="field-label">通知先</span>
           <UserChipSelect v-model="alertForm.notify_user_ids" :userList="allUsers" placeholder="ユーザー検索" />
         </label>
+        <label class="check-label">
+          <input type="checkbox" v-model="alertForm.email_enabled" />
+          <span>メールも送信</span>
+        </label>
         <div class="alert-form-actions">
           <button class="btn-primary" @click="saveAlertConfig" :disabled="alertSaving">{{ alertEditId ? '更新' : '追加' }}</button>
           <button v-if="alertEditId" class="btn-secondary" @click="resetAlertForm">キャンセル</button>
         </div>
       </div>
+      <p class="helper-text alert-helper">製品別に修正流動率を集計し、閾値を超えた製品がある場合にPush通知を送ります。メール有効時は通知先ユーザーのメールアドレス宛にも送信します。</p>
 
       <div class="table-wrap" style="margin-top: 14px">
         <table class="data-table compact">
@@ -300,6 +305,7 @@
               <th>集計日数</th>
               <th>実行時刻</th>
               <th>有効</th>
+              <th>メール</th>
               <th>通知先</th>
               <th>最終実行</th>
               <th>操作</th>
@@ -313,6 +319,9 @@
               <td>{{ String(cfg.scheduled_hour).padStart(2, '0') }}:{{ String(cfg.scheduled_minute).padStart(2, '0') }}</td>
               <td>
                 <span :class="cfg.is_enabled ? 'status-on' : 'status-off'">{{ cfg.is_enabled ? '有効' : '無効' }}</span>
+              </td>
+              <td>
+                <span :class="cfg.email_enabled ? 'status-on' : 'status-off'">{{ cfg.email_enabled ? 'ON' : 'OFF' }}</span>
               </td>
               <td>
                 <span v-for="u in cfg.notify_user_names" :key="u.id" class="chip">{{ u.name }}</span>
@@ -332,7 +341,7 @@
               </td>
             </tr>
             <tr v-if="!alertConfigs.length">
-              <td colspan="8" class="empty-cell">通知設定がありません。上のフォームから追加してください。</td>
+              <td colspan="9" class="empty-cell">通知設定がありません。上のフォームから追加してください。</td>
             </tr>
           </tbody>
         </table>
@@ -991,6 +1000,7 @@ const alertForm = reactive({
   scheduled_minute: 0,
   lookback_days: 1,
   notify_user_ids: [],
+  email_enabled: false,
 })
 
 const resetAlertForm = () => {
@@ -1001,6 +1011,7 @@ const resetAlertForm = () => {
   alertForm.scheduled_minute = 0
   alertForm.lookback_days = 1
   alertForm.notify_user_ids = []
+  alertForm.email_enabled = false
 }
 
 const loadAlertConfigs = async () => {
@@ -1046,6 +1057,7 @@ const saveAlertConfig = async () => {
       scheduled_minute: alertForm.scheduled_minute,
       lookback_days: alertForm.lookback_days,
       notify_user_ids: alertForm.notify_user_ids,
+      email_enabled: alertForm.email_enabled,
     }
     if (alertEditId.value) {
       await api.integratedChecksheets.updateReworkAlertConfig(alertEditId.value, payload)
@@ -1070,6 +1082,7 @@ const editAlertConfig = (cfg) => {
   alertForm.scheduled_minute = cfg.scheduled_minute
   alertForm.lookback_days = cfg.lookback_days
   alertForm.notify_user_ids = (cfg.notify_user_names || []).map((u) => u.id)
+  alertForm.email_enabled = Boolean(cfg.email_enabled)
 }
 
 const toggleAlertEnabled = async (cfg) => {
@@ -1485,6 +1498,12 @@ onUnmounted(() => {
   font-size: 11px;
   color: #64748b;
   word-break: break-all;
+}
+
+.alert-helper {
+  font-size: 12px;
+  color: #64748b;
+  margin: 6px 0 0;
 }
 
 .chip {
