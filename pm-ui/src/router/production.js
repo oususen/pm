@@ -385,6 +385,12 @@ const production = [
     component: () => import("@/views/production/ProgressPdfCompare.vue"),
     meta: { pageTitle: "進度PDF突合", resource: "production" },
   },
+  {
+    path: "/production/laser-trouble-response",
+    name: "LaserTroubleResponse",
+    component: () => import("@/views/production/LaserTroubleResponse.vue"),
+    meta: { pageTitle: "トラブル対応（レーザ）", manualPath: "生産/レーザートラブル対応.md", resource: "production" },
+  },
 ];
 
 export default production;

@@ -338,6 +338,15 @@ const tiles = computed(() => {
       fallbackToParent: false,
     },
     {
+      to: "/production/laser-trouble-response",
+      label: "トラブル対応（レーザ）",
+      icon: "🚨",
+      category: "other",
+      required: "view",
+      resource: "production",
+      description: "設備トラブル時の手順と応援加工依頼表を確認",
+    },
+    {
       to: "/masters/mobile-device",
       label: "携帯端末管理",
       icon: "📱",
