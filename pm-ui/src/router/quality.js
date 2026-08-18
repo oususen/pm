@@ -63,7 +63,7 @@ const quality = [
     path: "/quality/product-checksheet/integrated/weekly-monthly",
     name: "IntegratedChecksheetWeeklyMonthly",
     component: () => import("@/views/quality/IntegratedChecksheetWeeklyMonthly.vue"),
-    meta: { pageTitle: "工程一体チェックシート 週・月確認", manualPath: "品質/工程一体チェックシート.md" },
+    meta: { pageTitle: "工程一体チェックシート 推移確認", manualPath: "品質/工程一体チェックシート.md" },
   },
   {
     path: "/quality/product-checksheet/integrated/trend-analysis",

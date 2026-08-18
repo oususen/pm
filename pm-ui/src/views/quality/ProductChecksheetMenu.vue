@@ -36,7 +36,7 @@
         class="master-tile"
       >
         <div class="icon-box">📅</div>
-        <div class="label">週・月確認</div>
+        <div class="label">推移確認</div>
       </RouterLink>
       <RouterLink
         v-if="canViewIntegratedDashboard"

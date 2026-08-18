@@ -1,6 +1,6 @@
 <template>
   <div class="master-menu">
-    <h2 class="page-title">B案: 傾向確認・分析</h2>
+    <h2 class="page-title">傾向確認・分析</h2>
     <p class="helper-text">工程一体チェックシート実績から集計（直近180日）</p>
     <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
     <div v-if="error" class="helper-text" style="color:#b91c1c;">{{ error }}</div>
@@ -190,6 +190,27 @@
         </tbody>
       </table>
     </div>
+
+    <h3 class="section-title">日別工程別 修正流動率</h3>
+    <div class="table-wrap">
+      <div class="table-title">ライン / 工程 / 製品 / 日付 別一覧</div>
+      <table class="data-table compact">
+        <thead><tr><th>日付</th><th>ライン</th><th>工程</th><th>製品</th><th>判定総数</th><th>修正流動件数</th><th>修正流動率</th><th>NG件数</th><th>NG率</th></tr></thead>
+        <tbody>
+          <tr v-for="row in lineProcessDailyRows" :key="`lpd-${row.date}-${row.line}-${row.process}-${row.product}`">
+            <td>{{ row.date }}</td>
+            <td>{{ row.line }}</td>
+            <td>{{ row.process }}</td>
+            <td>{{ row.product }}</td>
+            <td>{{ row.total }}</td>
+            <td>{{ row.reworkCount }}</td>
+            <td>{{ row.reworkRate.toFixed(1) }}%</td>
+            <td>{{ row.ngCount }}</td>
+            <td>{{ row.ngRate.toFixed(1) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
@@ -203,6 +224,8 @@ const processRows = ref([])
 const topFactors = ref([])
 const lineRows = ref([])
 const allRows = ref([])
+const BUSINESS_DAY_START_HOUR = 8
+const TEMPLATE_FETCH_CHUNK_SIZE = 10
 const selectedLine = ref("")
 const selectedProcess = ref("")
 const selectedProduct = ref("")
@@ -215,6 +238,17 @@ const endDate = ref("")
 const toArray = (data) => data?.results || data || []
 const toDate = (v) => new Date(v || "")
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+const UNIT_FETCH_CHUNK_SIZE = 10
+const toBusinessDate = (value) => {
+  const dt = toDate(value)
+  if (Number.isNaN(dt.getTime())) return null
+  const normalized = new Date(dt)
+  if (normalized.getHours() < BUSINESS_DAY_START_HOUR) {
+    normalized.setDate(normalized.getDate() - 1)
+  }
+  normalized.setHours(0, 0, 0, 0)
+  return normalized
+}
 const isJudged = (check) => ["OK", "NG", "修正流動"].includes(check?.judgement)
 const rate = (ng, total) => total ? ((ng / total) * 100).toFixed(1) : "0.0"
 const ngRateFromRows = (rows) => {
@@ -330,6 +364,46 @@ const dailyRows = computed(() => {
     .sort((a, b) => String(a.date).localeCompare(String(b.date), "ja"))
 })
 
+const lineProcessDailyRows = computed(() => {
+  const map = new Map()
+  filteredRows.value.forEach((r) => {
+    const key = `${r.dateText}__${r.line}__${r.process}__${r.product}`
+    if (!map.has(key)) {
+      map.set(key, {
+        date: r.dateText,
+        line: r.line,
+        process: r.process,
+        product: r.product,
+        total: 0,
+        ngCount: 0,
+        reworkCount: 0,
+        ngRate: 0,
+        reworkRate: 0,
+      })
+    }
+    const obj = map.get(key)
+    obj.total += 1
+    if (r.isNg) obj.ngCount += 1
+    if (r.isRework) obj.reworkCount += 1
+  })
+  return [...map.values()]
+    .map((r) => {
+      const ngBase = r.total - r.reworkCount
+      return {
+        ...r,
+        ngRate: ngBase > 0 ? (r.ngCount / ngBase) * 100 : 0,
+        reworkRate: r.total > 0 ? (r.reworkCount / r.total) * 100 : 0,
+      }
+    })
+    .sort((a, b) => {
+      if (a.date !== b.date) return String(b.date).localeCompare(String(a.date), "ja")
+      if (a.line !== b.line) return String(a.line).localeCompare(String(b.line), "ja")
+      if (a.process !== b.process) return String(a.process).localeCompare(String(b.process), "ja")
+      if (a.product !== b.product) return String(a.product).localeCompare(String(b.product), "ja")
+      return b.reworkRate - a.reworkRate
+    })
+})
+
 const dailyReworkPoints = computed(() => {
   const rows = dailyRows.value
   if (!rows.length) return ""
@@ -352,33 +426,60 @@ const dailyNgPoints = computed(() => {
   }).join(" ")
 })
 
+const loadBatchUnitsChunked = async (batches) => {
+  const results = []
+  for (let i = 0; i < batches.length; i += UNIT_FETCH_CHUNK_SIZE) {
+    const chunk = batches.slice(i, i + UNIT_FETCH_CHUNK_SIZE)
+    const chunkResults = await Promise.all(chunk.map((b) => api.integratedChecksheets.getBatchUnits(b.id)))
+    results.push(...chunkResults)
+  }
+  return results
+}
+
+const loadTemplatesChunked = async (templateIds) => {
+  const results = []
+  for (let i = 0; i < templateIds.length; i += TEMPLATE_FETCH_CHUNK_SIZE) {
+    const chunk = templateIds.slice(i, i + TEMPLATE_FETCH_CHUNK_SIZE)
+    const chunkResults = await Promise.all(chunk.map((id) => api.integratedChecksheets.getTemplate(id)))
+    results.push(...chunkResults)
+  }
+  return results
+}
+
 const loadData = async () => {
   loading.value = true
   error.value = ""
   try {
     const res = await api.integratedChecksheets.listBatches({ page_size: 200 })
     const batches = toArray(res.data)
-    const unitsRes = await Promise.all(batches.map((b) => api.integratedChecksheets.getBatchUnits(b.id)))
-    const processNameById = new Map()
+    const unitsRes = await loadBatchUnitsChunked(batches)
+    const templateIds = [...new Set(batches.map((batch) => Number(batch.template || 0)).filter((id) => id > 0))]
+    const templateResList = await loadTemplatesChunked(templateIds)
+    const templateById = new Map(templateIds.map((id, index) => [id, templateResList[index]?.data || null]))
     const rows = []
-    batches.forEach((b) => {
-      ;(b.process_progress || []).forEach((p) => processNameById.set(p.process_block_id, p.process_name || p.process_code || `工程${p.process_block_id}`))
-    })
     for (let i = 0; i < batches.length; i += 1) {
       const batch = batches[i]
+      const template = templateById.get(Number(batch.template || 0))
+      const processNameById = new Map(
+        (template?.process_blocks || []).map((block) => [
+          Number(block.id),
+          block.process_name || block.process_code || `工程${block.id}`,
+        ]),
+      )
       const units = toArray(unitsRes[i].data)
-      const date = toDate(batch.plan_date || batch.created_at)
       for (const unit of units) {
         for (const check of unit.checks || []) {
           if (!isJudged(check)) continue
+          const date = toBusinessDate(check.checked_at)
+          if (!date) continue
           rows.push({
             dateText: ymd(date),
-            product: batch.product_code || "未設定",
+            product: template?.product_code || batch.product_code || "未設定",
             person: check.checked_by_name || check.worker_name || check.worker_code || "未設定",
-            unit: String(unit.unit_no || "未設定"),
+            unit: String(unit.sequence_no || "未設定"),
             date,
-            line: batch.line_code || "未設定",
-            process: processNameById.get(check.process_block_id) || `工程${check.process_block_id}`,
+            line: template?.line_code || batch.line_code || "未設定",
+            process: processNameById.get(Number(check.process_block_id)) || `工程${check.process_block_id}`,
             itemName: check.item_name || "未設定項目",
             isNg: check.judgement === "NG",
             isRework: check.judgement === "修正流動",

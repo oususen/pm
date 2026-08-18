@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import CharField, Count, DateTimeField, ExpressionWrapper, F, Q, Value
+from django.db.models.functions import Coalesce, Concat, TruncDate
 from django.http import FileResponse
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -907,6 +908,92 @@ class IntegratedChecksheetBatchViewSet(
         if sei_ban:
             qs = qs.filter(units__sei_ban__icontains=sei_ban).distinct()
         return qs
+
+    @action(detail=False, methods=["get"])
+    def analytics_records(self, request):
+        checked_by_name_expr = Concat(
+            Coalesce("checked_by__last_name", Value("")),
+            Value(" "),
+            Coalesce("checked_by__first_name", Value("")),
+            output_field=CharField(),
+        )
+        business_date_expr = TruncDate(
+            ExpressionWrapper(
+                F("checked_at") - timedelta(hours=8),
+                output_field=DateTimeField(),
+            )
+        )
+
+        qs = (
+            IntegratedChecksheetCheck.objects
+            .filter(
+                checked_at__isnull=False,
+                judgement__in=["OK", "NG", "修正流動"],
+            )
+            .annotate(
+                business_date=business_date_expr,
+                checked_by_name_display=checked_by_name_expr,
+            )
+        )
+
+        line_id = request.query_params.get("line")
+        product_id = request.query_params.get("product")
+        process_name = request.query_params.get("process_name")
+        item_name = request.query_params.get("item_name")
+        checked_by_name = request.query_params.get("checked_by_name")
+        unit_sequence_no = request.query_params.get("unit_sequence_no")
+        date_gte = request.query_params.get("business_date__gte")
+        date_lte = request.query_params.get("business_date__lte")
+
+        if line_id:
+            qs = qs.filter(unit__batch__line_id=line_id)
+        if product_id:
+            qs = qs.filter(unit__batch__product_id=product_id)
+        if process_name:
+            qs = qs.filter(item__process_block__process__process_name=process_name)
+        if item_name:
+            qs = qs.filter(item__item_name=item_name)
+        if checked_by_name:
+            if checked_by_name == "未設定":
+                qs = qs.filter(checked_by__isnull=True)
+            else:
+                qs = qs.filter(checked_by_name_display=checked_by_name)
+        if unit_sequence_no:
+            qs = qs.filter(unit__sequence_no=unit_sequence_no)
+        if date_gte:
+            qs = qs.filter(business_date__gte=date_gte)
+        if date_lte:
+            qs = qs.filter(business_date__lte=date_lte)
+
+        rows = list(
+            qs.values(
+                "business_date",
+                "judgement",
+                "item__item_name",
+                "unit__id",
+                "unit__sequence_no",
+                "unit__batch__line__line_code",
+                "unit__batch__product__product_code",
+                "item__process_block__process__process_name",
+                "checked_by_name_display",
+            ).order_by("-business_date", "unit__batch__line__line_code", "item__process_block__sort_order", "unit__sequence_no", "item__sort_order")
+        )
+
+        return Response([
+            {
+                "date_text": row["business_date"].isoformat() if row["business_date"] else "",
+                "line": row["unit__batch__line__line_code"] or "未設定",
+                "process": row["item__process_block__process__process_name"] or "未設定",
+                "product": row["unit__batch__product__product_code"] or "未設定",
+                "person": (row["checked_by_name_display"] or "").strip() or "未設定",
+                "unit_id": row["unit__id"],
+                "unit": str(row["unit__sequence_no"] or "未設定"),
+                "item_name": row["item__item_name"] or "未設定項目",
+                "is_ng": row["judgement"] == "NG",
+                "is_rework": row["judgement"] == "修正流動",
+            }
+            for row in rows
+        ])
 
     @action(detail=True, methods=["get"])
     def units(self, request, pk=None):

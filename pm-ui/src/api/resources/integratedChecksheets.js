@@ -41,6 +41,9 @@ export const createIntegratedChecksheetsAPI = (client) => ({
   listBatches(params = {}) {
     return client.get('/integrated-checksheet-batches/', { params })
   },
+  getAnalyticsRecords(params = {}) {
+    return client.get('/integrated-checksheet-batches/analytics_records/', { params })
+  },
   getBatch(id) {
     return client.get(`/integrated-checksheet-batches/${id}/`)
   },
