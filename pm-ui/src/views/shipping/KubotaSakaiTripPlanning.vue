@@ -135,15 +135,20 @@
             <div v-for="item in saveValidationState.missingTruckDetails" :key="`missing-${item}`" class="save-confirm-detail">
               {{ item }}
             </div>
+            <div class="save-confirm-detail save-confirm-detail-danger">※ このまま保存すると、前工程３班はその便未割り振り分の計画を立てられなくなります</div>
           </div>
           <div v-if="saveValidationState.unassignedQtyCount" class="save-confirm-section">
             <div class="save-confirm-line save-confirm-line-danger">・未割付残あり: {{ saveValidationState.unassignedQtyCount }}件</div>
             <div v-for="item in saveValidationState.unassignedQtyDetails" :key="`unassigned-${item}`" class="save-confirm-detail save-confirm-detail-danger">
               {{ item }}
             </div>
+            <div class="save-confirm-detail save-confirm-detail-danger">※ このまま保存すると、前工程３班はその未割付残分の計画を立てられなくなります</div>
           </div>
-          <div v-for="item in saveValidationState.overAssigned" :key="`over-${item}`" class="save-confirm-line">
-            ・割付数量超過: {{ item }}
+          <div v-if="saveValidationState.overAssigned.length" class="save-confirm-section">
+            <div v-for="item in saveValidationState.overAssigned" :key="`over-${item}`" class="save-confirm-line">
+              ・割付数量超過: {{ item }}
+            </div>
+            <div class="save-confirm-detail save-confirm-detail-danger">※ このまま保存すると、前工程３班は超過分も含めた計画を立てることになります</div>
           </div>
           <div v-if="saveValidationState.overloaded.length" class="save-confirm-line">
             ・便占有率100%超: {{ saveValidationState.overloaded.join(' / ') }}
