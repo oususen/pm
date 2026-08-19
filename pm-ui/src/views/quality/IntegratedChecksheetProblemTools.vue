@@ -512,18 +512,37 @@ const numericGroupingOptions = [
   { value: "batchId", label: "バッチ" },
 ]
 
+const templateDefinitions = ref([])
+const TEMPLATE_FETCH_CHUNK_SIZE = 10
+
 const uniqueSorted = (rows, key) => [...new Set(rows.map((r) => r[key] || "未設定"))].sort((a, b) => String(a).localeCompare(String(b), "ja"))
-const lineOptions = computed(() => uniqueSorted(incidentRowsAll.value, "line"))
-const processOptions = computed(() => uniqueSorted(incidentRowsAll.value, "process"))
-const productOptions = computed(() => uniqueSorted(incidentRowsAll.value, "product"))
+const lineOptions = computed(() => uniqueSorted(templateDefinitions.value, "line"))
+const processOptions = computed(() => uniqueSorted(
+  templateDefinitions.value.filter((row) => {
+    if (selectedLine.value && row.line !== selectedLine.value) return false
+    if (selectedProduct.value && row.product !== selectedProduct.value) return false
+    return true
+  }),
+  "process",
+))
+const productOptions = computed(() => uniqueSorted(
+  templateDefinitions.value.filter((row) => {
+    if (selectedLine.value && row.line !== selectedLine.value) return false
+    if (selectedProcess.value && row.process !== selectedProcess.value) return false
+    return true
+  }),
+  "product",
+))
+const isItemSelectable = computed(() => Boolean(selectedProduct.value) && Boolean(selectedProcess.value))
 const itemOptions = computed(() => {
   if (!isItemSelectable.value) return []
-  const base = incidentRowsAll.value.filter((r) => r.product === selectedProduct.value && r.process === selectedProcess.value)
-  return uniqueSorted(base, "item")
+  return uniqueSorted(
+    templateDefinitions.value.filter((row) => row.product === selectedProduct.value && row.process === selectedProcess.value),
+    "itemName",
+  )
 })
 const personOptions = computed(() => uniqueSorted(incidentRowsAll.value, "person"))
 const unitOptions = computed(() => uniqueSorted(incidentRowsAll.value, "unit"))
-const isItemSelectable = computed(() => Boolean(selectedProduct.value) && Boolean(selectedProcess.value))
 
 const filteredRows = computed(() => incidentRowsAll.value.filter((r) => {
   if (startDate.value && r.date < startDate.value) return false
@@ -729,6 +748,44 @@ const recomputeByRows = (rows) => {
   }
 }
 
+const loadTemplatesChunked = async (templateIds) => {
+  const results = []
+  for (let i = 0; i < templateIds.length; i += TEMPLATE_FETCH_CHUNK_SIZE) {
+    const chunk = templateIds.slice(i, i + TEMPLATE_FETCH_CHUNK_SIZE)
+    const chunkResults = await Promise.all(chunk.map((id) => api.integratedChecksheets.getTemplate(id)))
+    results.push(...chunkResults)
+  }
+  return results
+}
+
+const loadTemplateDefinitions = async () => {
+  try {
+    const res = await api.integratedChecksheets.listTemplates({ page_size: 500 })
+    const templates = toArray(res.data)
+    const templateIds = templates.map((t) => Number(t.id || 0)).filter((id) => id > 0)
+    const templateResList = await loadTemplatesChunked(templateIds)
+    const rows = []
+    templateResList.forEach((response) => {
+      const template = response.data
+      const line = template?.line_code || "未設定"
+      const product = template?.product_code || "未設定"
+      ;(template?.process_blocks || []).forEach((block) => {
+        const process = block.process_name || block.process_code || `工程${block.id}`
+        if (!block.items?.length) {
+          rows.push({ line, product, process, itemName: "未設定項目" })
+          return
+        }
+        block.items.forEach((item) => {
+          rows.push({ line, product, process, itemName: item.item_name || "未設定項目" })
+        })
+      })
+    })
+    templateDefinitions.value = rows
+  } catch (e) {
+    console.error("テンプレート定義取得失敗:", e)
+  }
+}
+
 const loadData = async () => {
   loading.value = true
   error.value = ""
@@ -773,7 +830,9 @@ const loadData = async () => {
   }
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadTemplateDefinitions()
+})
 watch([selectedProduct, selectedProcess], () => {
   if (!isItemSelectable.value) selectedItem.value = ""
 })
@@ -811,6 +870,19 @@ watch([
   gap: 12px;
   flex-wrap: wrap;
 }
+
+.btn-secondary {
+  padding: 6px 14px;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+.btn-secondary:disabled { opacity: 0.7; cursor: default; }
 
 .error-text {
   color: #b91c1c;
