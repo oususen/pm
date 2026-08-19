@@ -90,7 +90,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
     config.save(update_fields=['last_run_at', 'last_run_status', 'last_run_message'])
 
     try:
-        today = date.today()
+        today = (datetime.now() - timedelta(hours=8)).date()
         daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
         if not daiso_cal:
             _finish(config, start_time, 'FAILED', 'ダイソウカレンダーが未設定のため、注文書自動送信を実行できません')
