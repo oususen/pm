@@ -1,5 +1,7 @@
 <template>
   <div class="app-download-page">
+    <div v-if="!canView" class="alert alert-danger">この画面を開く権限がありません。</div>
+    <template v-else>
     <div class="hero-card">
       <div class="hero-copy">
         <p class="eyebrow">Android社内配布</p>
@@ -73,12 +75,22 @@
         <p class="qr-caption">スマホでこの QR を読み取ると配布URLを開けます。</p>
       </section>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
+import { authState } from "../../auth";
 import QRCode from "qrcode";
+
+const canView = computed(() => {
+  const user = authState.user;
+  if (!user) return false;
+  if (user.is_staff || user.is_superuser) return true;
+  const role = user.profile?.role || "";
+  return ["leader", "supervisor", "chief", "manager", "admin"].includes(role);
+});
 
 const configuredDownloadUrl = (import.meta.env.VITE_ANDROID_APP_DOWNLOAD_URL || "").trim();
 const configuredReleaseLabel = (import.meta.env.VITE_ANDROID_APP_RELEASE_LABEL || "").trim();
@@ -334,6 +346,14 @@ onMounted(buildQrCode);
   .content-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.alert-danger {
+  padding: 12px;
+  border-radius: 4px;
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
 }
 
 @media (max-width: 640px) {

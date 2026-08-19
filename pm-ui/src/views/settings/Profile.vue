@@ -129,7 +129,14 @@ const canAccessByResource = (resource, level = 'view') => {
 
 const canView = computed(() => canAccessByResource('settings.profile', 'view'))
 const canEdit = computed(() => canAccessByResource('settings.profile', 'edit'))
-const canViewAndroidApp = computed(() => canAccessByResource('settings.android_app', 'view'))
+const canViewAndroidApp = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  const role = user.profile?.role || ''
+  const leaderRoles = ['leader', 'supervisor', 'chief', 'manager', 'admin']
+  return leaderRoles.includes(role)
+})
 
 const loadProfile = async () => {
   if (!canView.value) return
