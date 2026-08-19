@@ -3038,6 +3038,7 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
                 'safety_stock_enabled': config.safety_stock_enabled,
                 'safety_stock_multiplier': float(config.safety_stock_multiplier),
                 'send_order_excel': config.send_order_excel,
+                'send_order_pdf': config.send_order_pdf,
                 'send_progress_excel': config.send_progress_excel,
                 'send_progress_pdf': config.send_progress_pdf,
                 'send_delivery_note_pdf': config.send_delivery_note_pdf,
@@ -3076,6 +3077,7 @@ class PurchaseAutoOrderSendConfigListCreateView(APIView):
             safety_stock_enabled=_parse_bool(request.data.get('safety_stock_enabled', False)),
             safety_stock_multiplier=max(0.1, min(10, float(request.data.get('safety_stock_multiplier', 1) or 1))),
             send_order_excel=_parse_bool(request.data.get('send_order_excel')),
+            send_order_pdf=_parse_bool(request.data.get('send_order_pdf', False)),
             send_progress_excel=_parse_bool(request.data.get('send_progress_excel', True)),
             send_progress_pdf=_parse_bool(request.data.get('send_progress_pdf', True)),
             send_delivery_note_pdf=_parse_bool(request.data.get('send_delivery_note_pdf', True)),
@@ -3132,6 +3134,8 @@ class PurchaseAutoOrderSendConfigDetailView(APIView):
             config.safety_stock_multiplier = max(0.1, min(10, float(request.data['safety_stock_multiplier'] or 1)))
         if 'send_order_excel' in request.data:
             config.send_order_excel = _parse_bool(request.data['send_order_excel'])
+        if 'send_order_pdf' in request.data:
+            config.send_order_pdf = _parse_bool(request.data['send_order_pdf'])
         if 'send_progress_excel' in request.data:
             config.send_progress_excel = _parse_bool(request.data['send_progress_excel'])
         if 'send_progress_pdf' in request.data:

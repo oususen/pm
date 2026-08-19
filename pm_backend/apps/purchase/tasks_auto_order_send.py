@@ -42,10 +42,12 @@ def _finish_history(history, start_time, status_val, message, **extra_updates):
     history.save()
 
 
-def _extract_attachment_labels(order_excel_enabled, delivery_note_enabled, progress_excel_enabled, progress_pdf_enabled):
+def _extract_attachment_labels(order_excel_enabled, order_pdf_enabled, delivery_note_enabled, progress_excel_enabled, progress_pdf_enabled):
     labels = []
     if order_excel_enabled:
         labels.append('注文書Excel')
+    if order_pdf_enabled:
+        labels.append('注文書PDF')
     if delivery_note_enabled:
         labels.append('外作納品書PDF')
     if progress_excel_enabled:
@@ -65,6 +67,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
     from .process_resolver import resolve_purchase_line
     from .services_auto_order_send import (
         generate_order_excel,
+        generate_order_pdf,
         resolve_delivery_cycles,
         simulate_and_save_order_plans,
     )
@@ -181,6 +184,16 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
                 'filename': excel_filename,
                 'label': '注文書Excel',
             })
+        if items and config.send_order_pdf:
+            try:
+                order_pdf_data = generate_order_pdf(items, supplier)
+                all_attachments.append({
+                    'data': order_pdf_data,
+                    'filename': f'注文書_{supplier.supplier_code}_{today}.pdf',
+                    'label': '注文書PDF',
+                })
+            except Exception as e:
+                logger.warning('注文書PDF生成エラー: %s', e)
         delivery_note_pdf = None
         if items and config.send_delivery_note_pdf:
             try:
@@ -221,6 +234,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
 
         if (
             not config.send_order_excel
+            and not config.send_order_pdf
             and not config.send_progress_excel
             and not config.send_progress_pdf
             and not delivery_note_pdf
@@ -254,6 +268,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
         reply_to = (config.reply_to_email or '').strip()
         attachment_labels = _extract_attachment_labels(
             order_excel_enabled=bool(items and config.send_order_excel),
+            order_pdf_enabled=bool(items and config.send_order_pdf),
             delivery_note_enabled=bool(delivery_note_pdf),
             progress_excel_enabled=bool(progress_excel and config.send_progress_excel),
             progress_pdf_enabled=bool(progress_pdf and config.send_progress_pdf),

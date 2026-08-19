@@ -471,3 +471,79 @@ def generate_order_excel(items, supplier):
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+def generate_order_pdf(items, supplier):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+    from shipping.services.shipping_pdf_generator import register_japanese_fonts
+
+    register_japanese_fonts()
+    font_name = 'MSGothic'
+
+    sorted_items = sorted(
+        items,
+        key=lambda item: (item['delivery_date'], item['product_code']),
+    )
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+    )
+
+    elements = []
+    title_style = ParagraphStyle('Title', fontName=font_name, fontSize=14, leading=18)
+    sub_style = ParagraphStyle('Sub', fontName=font_name, fontSize=9, leading=12)
+
+    delivery_dates = sorted({item['delivery_date'] for item in items})
+    elements.append(Paragraph(f'注文書 — {supplier.supplier_name}', title_style))
+    elements.append(Spacer(1, 3 * mm))
+    elements.append(Paragraph(
+        f'対象納入日: {", ".join(d.isoformat() for d in delivery_dates)}　／　{len(items)}件',
+        sub_style,
+    ))
+    elements.append(Spacer(1, 5 * mm))
+
+    headers = ['品番', '品名', '移動先', '数量', '納品日', '伝票番号']
+    cell_style = ParagraphStyle('Cell', fontName=font_name, fontSize=9, leading=11)
+    header_style = ParagraphStyle('Header', fontName=font_name, fontSize=9, leading=11, textColor=colors.white)
+
+    data = [[Paragraph(h, header_style) for h in headers]]
+    for item in sorted_items:
+        qty = int(item.get('expected_qty') or 0)
+        data.append([
+            Paragraph(item['product_code'], cell_style),
+            Paragraph(item['product_name'], cell_style),
+            Paragraph(item.get('transfer_destination_label', ''), cell_style),
+            Paragraph(str(qty), cell_style),
+            Paragraph(item['delivery_date'].isoformat(), cell_style),
+            Paragraph('', cell_style),
+        ])
+
+    col_widths = [45 * mm, 70 * mm, 30 * mm, 25 * mm, 30 * mm, 35 * mm]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1D4ED8')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, -1), font_name),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (3, 1), (3, -1), 'RIGHT'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#999999')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
+    buf.seek(0)
+    return buf

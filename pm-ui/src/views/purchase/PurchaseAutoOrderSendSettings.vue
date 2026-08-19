@@ -353,6 +353,7 @@
           <label>送信ファイル選択</label>
           <div class="file-toggle-grid">
             <label class="checkbox-label"><input v-model="form.send_order_excel" type="checkbox" /> 注文書Excel送信</label>
+            <label class="checkbox-label"><input v-model="form.send_order_pdf" type="checkbox" /> 注文書 PDF</label>
             <label class="checkbox-label"><input v-model="form.send_progress_excel" type="checkbox" /> 進度表 Excel</label>
             <label class="checkbox-label"><input v-model="form.send_progress_pdf" type="checkbox" /> 進度表 PDF</label>
             <label class="checkbox-label"><input v-model="form.send_delivery_note_pdf" type="checkbox" /> 外作納品書 PDF</label>
@@ -559,6 +560,7 @@ const form = reactive({
   safety_stock_enabled: false,
   safety_stock_multiplier: 1,
   send_order_excel: true,
+  send_order_pdf: false,
   send_progress_excel: true,
   send_progress_pdf: true,
   send_delivery_note_pdf: true,
@@ -656,6 +658,7 @@ const executeConfirmAction = async () => {
 const configAttachmentSummary = (config) => {
   const labels = []
   if (config.send_order_excel) labels.push('注文書Excel')
+  if (config.send_order_pdf) labels.push('注文書PDF')
   if (config.send_progress_excel) labels.push('進度表Excel')
   if (config.send_progress_pdf) labels.push('進度表PDF')
   if (config.send_delivery_note_pdf) labels.push('外作納品書PDF')
@@ -1008,6 +1011,7 @@ const resetForm = () => {
   form.safety_stock_enabled = false
   form.safety_stock_multiplier = 1
   form.send_order_excel = true
+  form.send_order_pdf = false
   form.send_progress_excel = true
   form.send_progress_pdf = true
   form.send_delivery_note_pdf = true
@@ -1043,6 +1047,7 @@ const openEdit = (config) => {
   form.safety_stock_enabled = !!config.safety_stock_enabled
   form.safety_stock_multiplier = config.safety_stock_multiplier ?? 1
   form.send_order_excel = config.send_order_excel
+  form.send_order_pdf = config.send_order_pdf ?? false
   form.send_progress_excel = config.send_progress_excel ?? true
   form.send_progress_pdf = config.send_progress_pdf ?? true
   form.send_delivery_note_pdf = config.send_delivery_note_pdf ?? true
@@ -1077,7 +1082,7 @@ const validate = () => {
   if (!form.cc_emails?.trim()) errors.push('業務員CC送信先メールを選択してください。')
   if (!form.notify_on_failure_user_ids.length) errors.push('失敗時の通知先を選択してください。')
   if (!form.notify_on_non_delivery_user_ids.length) errors.push('納入日でないときの通知先を選択してください。')
-  if (!form.send_order_excel && !form.send_progress_excel && !form.send_progress_pdf && !form.send_delivery_note_pdf) {
+  if (!form.send_order_excel && !form.send_order_pdf && !form.send_progress_excel && !form.send_progress_pdf && !form.send_delivery_note_pdf) {
     errors.push('送信ファイルを1つ以上ONにしてください。')
   }
   if (showSupplierCalendarWarning.value) errors.push('仕入先カレンダに未来の納入日が未設定です。')
@@ -1102,6 +1107,7 @@ const buildPayload = () => ({
   safety_stock_enabled: form.safety_stock_enabled,
   safety_stock_multiplier: form.safety_stock_multiplier,
   send_order_excel: form.send_order_excel,
+  send_order_pdf: form.send_order_pdf,
   send_progress_excel: form.send_progress_excel,
   send_progress_pdf: form.send_progress_pdf,
   send_delivery_note_pdf: form.send_delivery_note_pdf,
