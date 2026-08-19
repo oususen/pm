@@ -1,9 +1,15 @@
 <template>
-  <div class="master-menu">
-    <h2 class="page-title">B案: 品質問題時ツール</h2>
-    <p class="helper-text">直近90日のNG履歴からQC七つ道具を表示</p>
-    <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
-    <div v-if="error" class="helper-text" style="color:#b91c1c;">{{ error }}</div>
+  <div class="master-menu problem-tools-page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">品質問題分析ダッシュボード</h2>
+        <p class="helper-text">直近90日のNG履歴からQC七つ道具を表示します</p>
+      </div>
+      <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
+    </div>
+
+    <div v-if="error" class="helper-text error-text">{{ error }}</div>
+
     <div class="prepare-form filter-form">
       <label>
         <span class="field-label">ライン</span>
@@ -57,35 +63,64 @@
       </label>
     </div>
 
-    <h3 class="section-title">1. チェックシート（要対応NG一覧）</h3>
-    <div class="chart-wrap">
-      <div class="chart-title">日別NG件数（直近表示分）</div>
-      <div v-for="row in dailyNgChart" :key="`d-chart-${row.date}`" class="bar-row">
-        <span class="bar-label">{{ row.date }}</span>
-        <div class="bar-track"><div class="bar-fill" :style="{ width: `${Math.min((row.count / Math.max(...dailyNgChart.map((x) => x.count), 1)) * 100, 100)}%` }"></div></div>
-        <span class="bar-value">{{ row.count }}</span>
+    <section class="summary-grid">
+      <div class="summary-card">
+        <div class="summary-label">NG総件数</div>
+        <div class="summary-value accent-ng">{{ filteredRows.length }}</div>
       </div>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table compact">
-        <thead><tr><th>発生日</th><th>ライン</th><th>製品</th><th>工程</th><th>項目</th><th>作業者</th><th>台目</th><th>バッチ</th></tr></thead>
-        <tbody>
-          <tr v-for="row in incidents" :key="row.key">
-            <td>{{ row.date }}</td>
-            <td>{{ row.line }}</td>
-            <td>{{ row.product }}</td>
-            <td>{{ row.process }}</td>
-            <td>{{ row.item }}</td>
-            <td>{{ row.person }}</td>
-            <td>{{ row.unit }}</td>
-            <td>#{{ row.batchId }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <div class="summary-card">
+        <div class="summary-label">発生日数</div>
+        <div class="summary-value">{{ uniqueDays }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">再発項目</div>
+        <div class="summary-value">{{ recurrenceItems.length }}</div>
+      </div>
+      <div class="summary-card" v-if="controlOutCount > 0">
+        <div class="summary-label">管理外日数</div>
+        <div class="summary-value accent-ng">{{ controlOutCount }}</div>
+      </div>
+    </section>
 
-    <h3 class="section-title">2. パレート図（上位不良要因）</h3>
-    <div class="chart-wrap">
+    <!-- 1. チェックシート -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">1. チェックシート（要対応NG一覧）</h3>
+        <span class="section-note">日別NG件数（直近14日）</span>
+      </div>
+      <div class="bar-chart">
+        <div v-for="row in dailyNgChart" :key="`d-chart-${row.date}`" class="bar-row">
+          <span class="bar-label">{{ row.date }}</span>
+          <div class="bar-track"><div class="bar-fill red" :style="{ width: `${Math.min((row.count / Math.max(...dailyNgChart.map((x) => x.count), 1)) * 100, 100)}%` }"></div></div>
+          <span class="bar-value">{{ row.count }}</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table compact">
+          <thead><tr><th>発生日</th><th>ライン</th><th>製品</th><th>工程</th><th>項目</th><th>作業者</th><th>台目</th><th>バッチ</th></tr></thead>
+          <tbody>
+            <tr v-for="row in incidents" :key="row.key">
+              <td>{{ row.date }}</td>
+              <td>{{ row.line }}</td>
+              <td>{{ row.product }}</td>
+              <td>{{ row.process }}</td>
+              <td>{{ row.item }}</td>
+              <td>{{ row.person }}</td>
+              <td>{{ row.unit }}</td>
+              <td>#{{ row.batchId }}</td>
+            </tr>
+            <tr v-if="!incidents.length"><td colspan="8" class="empty-cell">対象データがありません。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 2. パレート図 -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">2. パレート図（上位不良要因）</h3>
+        <span class="section-note">要因別累積比率</span>
+      </div>
       <div class="chart-control-row">
         <label><span class="field-label">集計項目</span>
           <select v-model="selectedParetoKey">
@@ -93,16 +128,21 @@
           </select>
         </label>
       </div>
-      <div class="chart-title">要因別累積比率</div>
-      <div v-for="row in paretoRows" :key="`p-${row.item}`" class="bar-row">
-        <span class="bar-label">{{ row.item }}</span>
-        <div class="bar-track"><div class="bar-fill pareto" :style="{ width: `${Math.min(row.ratio, 100)}%` }"></div></div>
-        <span class="bar-value">{{ row.ratio.toFixed(1) }}%</span>
+      <div class="bar-chart">
+        <div v-for="row in paretoRows" :key="`p-${row.item}`" class="bar-row">
+          <span class="bar-label">{{ row.item }}</span>
+          <div class="bar-track"><div class="bar-fill purple" :style="{ width: `${Math.min(row.ratio, 100)}%` }"></div></div>
+          <span class="bar-value">{{ row.ratio.toFixed(1) }}%</span>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <h3 class="section-title">3. ヒストグラム（日別NG件数分布）</h3>
-    <div class="chart-wrap">
+    <!-- 3. ヒストグラム -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">3. ヒストグラム（日別NG件数分布）</h3>
+        <span class="section-note">日別件数の頻度</span>
+      </div>
       <div class="chart-control-row">
         <label><span class="field-label">集計項目</span>
           <select v-model="selectedHistogramKey">
@@ -110,233 +150,291 @@
           </select>
         </label>
       </div>
-      <div class="chart-title">日別件数の頻度</div>
-      <div v-for="row in histogramRows" :key="`h-${row.bucket}`" class="bar-row">
-        <span class="bar-label">{{ row.bucket }}</span>
-        <div class="bar-track"><div class="bar-fill hist" :style="{ width: `${Math.min((row.days / Math.max(...histogramRows.map((x) => x.days), 1)) * 100, 100)}%` }"></div></div>
-        <span class="bar-value">{{ row.days }}日</span>
+      <div class="bar-chart">
+        <div v-for="row in histogramRows" :key="`h-${row.bucket}`" class="bar-row">
+          <span class="bar-label">{{ row.bucket }}</span>
+          <div class="bar-track"><div class="bar-fill teal" :style="{ width: `${Math.min((row.days / Math.max(...histogramRows.map((x) => x.days), 1)) * 100, 100)}%` }"></div></div>
+          <span class="bar-value">{{ row.days }}日</span>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <h3 class="section-title">4. 散布図（台目とNG傾向）</h3>
-    <div class="chart-wrap">
-      <div class="chart-control-row">
-        <label><span class="field-label">X軸</span>
-          <select v-model="selectedScatterXKey">
-            <option v-for="opt in numericGroupingOptions" :key="`scx-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
-          </select>
-        </label>
-      </div>
-      <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="plot-svg">
-        <line :x1="plot.left" :y1="plot.bottom" :x2="plot.right" :y2="plot.bottom" class="axis" />
-        <line :x1="plot.left" :y1="plot.top" :x2="plot.left" :y2="plot.bottom" class="axis" />
-        <circle
-          v-for="row in scatterRows"
-          :key="`sc-${row.unit}`"
-          :cx="scaleX(row.unit, scatterXMax)"
-          :cy="scaleY(row.count, scatterYMax)"
-          r="4"
-          class="dot"
-        />
-      </svg>
-    </div>
+    <!-- 4 & 5: 散布図 + 管理図 並列 -->
+    <div class="dual-panel-row">
+      <section class="panel">
+        <div class="section-head">
+          <h3 class="section-title">4. 散布図（台目とNG傾向）</h3>
+        </div>
+        <div class="chart-control-row">
+          <label><span class="field-label">X軸</span>
+            <select v-model="selectedScatterXKey">
+              <option v-for="opt in numericGroupingOptions" :key="`scx-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </label>
+        </div>
+        <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="plot-svg">
+          <line :x1="plot.left" :y1="plot.bottom" :x2="plot.right" :y2="plot.bottom" class="axis" />
+          <line :x1="plot.left" :y1="plot.top" :x2="plot.left" :y2="plot.bottom" class="axis" />
+          <circle
+            v-for="row in scatterRows"
+            :key="`sc-${row.unit}`"
+            :cx="scaleX(row.unit, scatterXMax)"
+            :cy="scaleY(row.count, scatterYMax)"
+            r="4"
+            class="dot"
+          />
+        </svg>
+      </section>
 
-    <h3 class="section-title">5. 管理図（日別NG件数）</h3>
-    <div class="chart-wrap">
-      <div class="chart-control-row">
-        <label><span class="field-label">集計項目</span>
-          <select v-model="selectedControlKey">
-            <option v-for="opt in groupingOptions" :key="`ctl-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
-          </select>
-        </label>
-      </div>
-      <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="plot-svg">
-        <line :x1="plot.left" :y1="plot.bottom" :x2="plot.right" :y2="plot.bottom" class="axis" />
-        <line :x1="plot.left" :y1="plot.top" :x2="plot.left" :y2="plot.bottom" class="axis" />
-        <polyline :points="controlLinePoints" class="line-main" />
-        <line :x1="plot.left" :y1="scaleY(controlAvg, controlYMax)" :x2="plot.right" :y2="scaleY(controlAvg, controlYMax)" class="line-avg" />
-        <line :x1="plot.left" :y1="scaleY(controlUcl, controlYMax)" :x2="plot.right" :y2="scaleY(controlUcl, controlYMax)" class="line-ucl" />
-      </svg>
-    </div>
-
-    <h3 class="section-title">6. 層別（ライン別・工程別・人別・製品別）</h3>
-    <div class="table-wrap">
-      <table class="data-table compact">
-        <thead><tr><th>ライン</th><th>NG件数</th><th>構成比</th></tr></thead>
-        <tbody>
-          <tr v-for="row in stratificationRows" :key="`st-${row.line}`">
-            <td>{{ row.line }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="table-wrap" style="margin-top:8px;">
-      <table class="data-table compact">
-        <thead><tr><th>工程</th><th>NG件数</th><th>構成比</th></tr></thead>
-        <tbody>
-          <tr v-for="row in stratificationProcessRows" :key="`sp-${row.process}`">
-            <td>{{ row.process }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="table-wrap" style="margin-top:8px;">
-      <table class="data-table compact">
-        <thead><tr><th>人</th><th>NG件数</th><th>構成比</th></tr></thead>
-        <tbody>
-          <tr v-for="row in stratificationPeopleRows" :key="`sr-${row.person}`">
-            <td>{{ row.person }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="table-wrap" style="margin-top:8px;">
-      <table class="data-table compact">
-        <thead><tr><th>製品</th><th>NG件数</th><th>構成比</th></tr></thead>
-        <tbody>
-          <tr v-for="row in stratificationProductRows" :key="`spr-${row.product}`">
-            <td>{{ row.product }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="section-title">補助グラフ（円グラフ・レーダーチャート）</h3>
-    <div class="dual-chart-wrap">
-      <div class="chart-wrap">
+      <section class="panel">
+        <div class="section-head">
+          <h3 class="section-title">5. 管理図（日別NG件数）</h3>
+        </div>
         <div class="chart-control-row">
           <label><span class="field-label">集計項目</span>
-            <select v-model="selectedPieKey">
-              <option v-for="opt in groupingOptions" :key="`pie-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+            <select v-model="selectedControlKey">
+              <option v-for="opt in groupingOptions" :key="`ctl-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
             </select>
           </label>
         </div>
-        <div class="chart-title">円グラフ（不良項目構成）</div>
-        <svg viewBox="0 0 320 240" class="pie-svg">
-          <g transform="translate(120 120)">
-            <path v-for="(slice, idx) in pieSlices" :key="`pie-${idx}`" :d="slice.d" :fill="slice.color" />
-          </g>
+        <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" class="plot-svg">
+          <line :x1="plot.left" :y1="plot.bottom" :x2="plot.right" :y2="plot.bottom" class="axis" />
+          <line :x1="plot.left" :y1="plot.top" :x2="plot.left" :y2="plot.bottom" class="axis" />
+          <polyline :points="controlLinePoints" class="line-main" />
+          <line :x1="plot.left" :y1="scaleY(controlAvg, controlYMax)" :x2="plot.right" :y2="scaleY(controlAvg, controlYMax)" class="line-avg" />
+          <line :x1="plot.left" :y1="scaleY(controlUcl, controlYMax)" :x2="plot.right" :y2="scaleY(controlUcl, controlYMax)" class="line-ucl" />
+          <text :x="plot.right + 4" :y="scaleY(controlAvg, controlYMax) + 3" class="svg-legend blue">CL</text>
+          <text :x="plot.right + 4" :y="scaleY(controlUcl, controlYMax) + 3" class="svg-legend red">UCL</text>
         </svg>
-        <div class="mini-legend">
-          <div v-for="row in pieLegendRows" :key="`pl-${row.item}`" class="mini-legend-item">
-            <span class="swatch" :style="{ background: row.color }"></span>
-            <span>{{ row.item }}: {{ row.ratio.toFixed(1) }}%</span>
+      </section>
+    </div>
+
+    <!-- 6. 層別 -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">6. 層別（ライン別・工程別・人別・製品別）</h3>
+        <span class="section-note">構成比の高い順</span>
+      </div>
+      <div class="strat-grid">
+        <div>
+          <div class="strat-heading">ライン別</div>
+          <table class="data-table compact">
+            <thead><tr><th>ライン</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <tbody>
+              <tr v-for="row in stratificationRows" :key="`st-${row.line}`">
+                <td>{{ row.line }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="strat-heading">工程別</div>
+          <table class="data-table compact">
+            <thead><tr><th>工程</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <tbody>
+              <tr v-for="row in stratificationProcessRows" :key="`sp-${row.process}`">
+                <td>{{ row.process }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="strat-heading">作業者別</div>
+          <table class="data-table compact">
+            <thead><tr><th>作業者</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <tbody>
+              <tr v-for="row in stratificationPeopleRows" :key="`sr-${row.person}`">
+                <td>{{ row.person }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="strat-heading">製品別</div>
+          <table class="data-table compact">
+            <thead><tr><th>製品</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <tbody>
+              <tr v-for="row in stratificationProductRows" :key="`spr-${row.product}`">
+                <td>{{ row.product }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 補助グラフ: 円グラフ + レーダー -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">補助グラフ（円グラフ・レーダーチャート）</h3>
+      </div>
+      <div class="dual-panel-row inner">
+        <div>
+          <div class="chart-control-row">
+            <label><span class="field-label">集計項目</span>
+              <select v-model="selectedPieKey">
+                <option v-for="opt in groupingOptions" :key="`pie-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="sub-title">不良項目構成</div>
+          <svg viewBox="0 0 320 240" class="plot-svg-sm">
+            <g transform="translate(120 120)">
+              <path v-for="(slice, idx) in pieSlices" :key="`pie-${idx}`" :d="slice.d" :fill="slice.color" />
+            </g>
+          </svg>
+          <div class="mini-legend">
+            <div v-for="row in pieLegendRows" :key="`pl-${row.item}`" class="mini-legend-item">
+              <span class="swatch" :style="{ background: row.color }"></span>
+              <span>{{ row.item }}: {{ row.ratio.toFixed(1) }}%</span>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="chart-wrap">
-        <div class="chart-title">レーダーチャート（層別バランス）</div>
-        <svg viewBox="0 0 320 240" class="radar-svg">
-          <g transform="translate(160 120)">
-            <polygon v-for="ring in radarRings" :key="`ring-${ring}`" :points="radarRingPoints(ring)" class="radar-ring" />
-            <line v-for="(axis, idx) in radarAxes" :key="`axis-${idx}`" x1="0" y1="0" :x2="axis.x" :y2="axis.y" class="radar-axis" />
-            <polygon :points="radarDataPoints" class="radar-data" />
-            <text v-for="(axis, idx) in radarAxes" :key="`label-${idx}`" :x="axis.labelX" :y="axis.labelY" class="radar-label">{{ axis.label }}</text>
-          </g>
-        </svg>
-      </div>
-    </div>
-
-    <h3 class="section-title">追加グラフ（棒グラフ・折れ線グラフ）</h3>
-    <div class="dual-chart-wrap">
-      <div class="chart-wrap">
-        <div class="chart-control-row">
-          <label><span class="field-label">対象項目</span>
-            <select v-model="selectedBarTargetKey">
-              <option v-for="opt in groupingOptions" :key="`bar-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
-            </select>
-          </label>
-          <label><span class="field-label">横軸</span>
-            <select v-model="selectedBarXAxisType">
-              <option value="category">カテゴリ</option>
-              <option value="rank">順位</option>
-            </select>
-          </label>
-          <label><span class="field-label">縦軸</span>
-            <select v-model="selectedBarYAxisType">
-              <option value="count">件数</option>
-              <option value="ratio">構成比(%)</option>
-            </select>
-          </label>
+        <div>
+          <div class="sub-title" style="margin-top:32px;">層別バランス（レーダー）</div>
+          <svg viewBox="0 0 320 240" class="plot-svg-sm">
+            <g transform="translate(160 120)">
+              <polygon v-for="ring in radarRings" :key="`ring-${ring}`" :points="radarRingPoints(ring)" class="radar-ring" />
+              <line v-for="(axis, idx) in radarAxes" :key="`axis-${idx}`" x1="0" y1="0" :x2="axis.x" :y2="axis.y" class="radar-axis" />
+              <polygon :points="radarDataPoints" class="radar-data" />
+              <text v-for="(axis, idx) in radarAxes" :key="`label-${idx}`" :x="axis.labelX" :y="axis.labelY" class="radar-label">{{ axis.label }}</text>
+            </g>
+          </svg>
         </div>
-        <div class="chart-title">棒グラフ（製品別NG件数 上位）</div>
-        <svg viewBox="0 0 320 240" class="plot-svg-small">
-          <line x1="30" y1="210" x2="300" y2="210" class="axis" />
-          <line x1="30" y1="20" x2="30" y2="210" class="axis" />
-          <text x="165" y="236" class="axis-label">横軸: {{ barAxisLabel }}</text>
-          <text x="12" y="14" class="axis-label">縦軸: {{ barYAxisTypeLabel }}</text>
-          <g v-for="tick in barYAxisTicks" :key="`bar-y-${tick.value}`">
-            <line x1="26" :y1="tick.y" x2="30" :y2="tick.y" class="axis-tick" />
-            <text x="24" :y="tick.y + 3" class="axis-tick-label">{{ tick.value }}</text>
-          </g>
-          <g v-for="(row, idx) in barRows" :key="`bar-${row.label}`">
-            <rect :x="38 + (idx * 52)" :y="210 - row.h" width="34" :height="row.h" class="bar-col" />
-            <text :x="55 + (idx * 52)" y="224" class="mini-axis-label">{{ row.label }}</text>
-          </g>
-        </svg>
       </div>
-      <div class="chart-wrap">
-        <div class="chart-control-row">
-          <label><span class="field-label">対象項目</span>
-            <select v-model="selectedLineTargetKey">
-              <option v-for="opt in groupingOptions" :key="`line-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
-            </select>
-          </label>
-          <label><span class="field-label">横軸</span>
-            <select v-model="selectedLineXAxisType">
-              <option value="sequence">時系列/ソート順</option>
-              <option value="category">カテゴリ</option>
-            </select>
-          </label>
-          <label><span class="field-label">縦軸</span>
-            <select v-model="selectedLineYAxisType">
-              <option value="count">件数</option>
-              <option value="cumulative">累積件数</option>
-            </select>
-          </label>
+    </section>
+
+    <!-- 追加グラフ: 棒グラフ + 折れ線 -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">追加グラフ（棒グラフ・折れ線グラフ）</h3>
+      </div>
+      <div class="dual-panel-row inner">
+        <div>
+          <div class="chart-control-row">
+            <label><span class="field-label">対象</span>
+              <select v-model="selectedBarTargetKey">
+                <option v-for="opt in groupingOptions" :key="`bar-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </label>
+            <label><span class="field-label">横軸</span>
+              <select v-model="selectedBarXAxisType">
+                <option value="category">カテゴリ</option>
+                <option value="rank">順位</option>
+              </select>
+            </label>
+            <label><span class="field-label">縦軸</span>
+              <select v-model="selectedBarYAxisType">
+                <option value="count">件数</option>
+                <option value="ratio">構成比(%)</option>
+              </select>
+            </label>
+          </div>
+          <div class="sub-title">棒グラフ（上位5項目）</div>
+          <svg viewBox="0 0 320 240" class="plot-svg-sm">
+            <line x1="30" y1="210" x2="300" y2="210" class="axis" />
+            <line x1="30" y1="20" x2="30" y2="210" class="axis" />
+            <text x="165" y="236" class="axis-label">{{ barAxisLabel }}</text>
+            <text x="12" y="14" class="axis-label">{{ barYAxisTypeLabel }}</text>
+            <g v-for="tick in barYAxisTicks" :key="`bar-y-${tick.value}`">
+              <line x1="26" :y1="tick.y" x2="30" :y2="tick.y" class="axis-tick" />
+              <text x="24" :y="tick.y + 3" class="axis-tick-label">{{ tick.value }}</text>
+            </g>
+            <g v-for="(row, idx) in barRows" :key="`bar-${row.label}`">
+              <rect :x="38 + (idx * 52)" :y="210 - row.h" width="34" :height="row.h" class="bar-col" />
+              <text :x="55 + (idx * 52)" y="224" class="mini-axis-label">{{ row.label }}</text>
+            </g>
+          </svg>
         </div>
-        <div class="chart-title">折れ線グラフ（日別NG件数）</div>
-        <svg viewBox="0 0 320 240" class="plot-svg-small">
-          <line x1="30" y1="210" x2="300" y2="210" class="axis" />
-          <line x1="30" y1="20" x2="30" y2="210" class="axis" />
-          <text x="165" y="236" class="axis-label">横軸: {{ lineAxisLabel }}</text>
-          <text x="12" y="14" class="axis-label">縦軸: {{ lineYAxisTypeLabel }}</text>
-          <g v-for="tick in lineYAxisTicks" :key="`line-y-${tick.value}`">
-            <line x1="26" :y1="tick.y" x2="30" :y2="tick.y" class="axis-tick" />
-            <text x="24" :y="tick.y + 3" class="axis-tick-label">{{ tick.value }}</text>
-          </g>
-          <g v-for="tick in lineXAxisTicks" :key="`line-x-${tick.x}`">
-            <line :x1="tick.x" y1="210" :x2="tick.x" y2="214" class="axis-tick" />
-            <text :x="tick.x" y="224" class="mini-axis-label">{{ tick.label }}</text>
-          </g>
-          <polyline :points="linePointsSmall" class="line-main" />
-        </svg>
+        <div>
+          <div class="chart-control-row">
+            <label><span class="field-label">対象</span>
+              <select v-model="selectedLineTargetKey">
+                <option v-for="opt in groupingOptions" :key="`line-opt-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </label>
+            <label><span class="field-label">横軸</span>
+              <select v-model="selectedLineXAxisType">
+                <option value="sequence">時系列</option>
+                <option value="category">カテゴリ</option>
+              </select>
+            </label>
+            <label><span class="field-label">縦軸</span>
+              <select v-model="selectedLineYAxisType">
+                <option value="count">件数</option>
+                <option value="cumulative">累積件数</option>
+              </select>
+            </label>
+          </div>
+          <div class="sub-title">折れ線グラフ（日別NG件数）</div>
+          <svg viewBox="0 0 320 240" class="plot-svg-sm">
+            <line x1="30" y1="210" x2="300" y2="210" class="axis" />
+            <line x1="30" y1="20" x2="30" y2="210" class="axis" />
+            <text x="165" y="236" class="axis-label">{{ lineAxisLabel }}</text>
+            <text x="12" y="14" class="axis-label">{{ lineYAxisTypeLabel }}</text>
+            <g v-for="tick in lineYAxisTicks" :key="`line-y-${tick.value}`">
+              <line x1="26" :y1="tick.y" x2="30" :y2="tick.y" class="axis-tick" />
+              <text x="24" :y="tick.y + 3" class="axis-tick-label">{{ tick.value }}</text>
+            </g>
+            <g v-for="tick in lineXAxisTicks" :key="`line-x-${tick.x}`">
+              <line :x1="tick.x" y1="210" :x2="tick.x" y2="214" class="axis-tick" />
+              <text :x="tick.x" y="224" class="mini-axis-label">{{ tick.label }}</text>
+            </g>
+            <polyline :points="linePointsSmall" class="line-main" />
+          </svg>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <h3 class="section-title">7. 特性要因図（入力補助）</h3>
-    <div class="chart-wrap">
-      <div class="fishbone-grid">
-        <div><strong>人</strong><p>{{ fishbone.people }}</p></div>
-        <div><strong>機械</strong><p>{{ fishbone.machine }}</p></div>
-        <div><strong>方法</strong><p>{{ fishbone.method }}</p></div>
-        <div><strong>材料</strong><p>{{ fishbone.material }}</p></div>
+    <!-- 7. 特性要因図 -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">7. 特性要因図（フィッシュボーン）</h3>
+        <span class="section-note">4M分析の入力補助</span>
       </div>
-    </div>
+      <svg viewBox="0 0 700 260" class="fishbone-svg">
+        <line x1="60" y1="130" x2="620" y2="130" class="bone-main" />
+        <polygon points="620,130 605,122 605,138" fill="#334155" />
+        <text x="635" y="135" class="bone-effect">結果</text>
+        <line x1="180" y1="40" x2="260" y2="130" class="bone-branch" />
+        <line x1="420" y1="40" x2="500" y2="130" class="bone-branch" />
+        <line x1="180" y1="220" x2="260" y2="130" class="bone-branch" />
+        <line x1="420" y1="220" x2="500" y2="130" class="bone-branch" />
+        <rect x="110" y="18" width="120" height="28" rx="4" class="bone-bg man" />
+        <text x="170" y="37" class="bone-text">人 (Man)</text>
+        <rect x="350" y="18" width="120" height="28" rx="4" class="bone-bg machine" />
+        <text x="410" y="37" class="bone-text">機械 (Machine)</text>
+        <rect x="110" y="214" width="120" height="28" rx="4" class="bone-bg method" />
+        <text x="170" y="233" class="bone-text">方法 (Method)</text>
+        <rect x="350" y="214" width="120" height="28" rx="4" class="bone-bg material" />
+        <text x="410" y="233" class="bone-text">材料 (Material)</text>
+        <text x="190" y="72" class="bone-detail">{{ fishbone.people }}</text>
+        <text x="430" y="72" class="bone-detail">{{ fishbone.machine }}</text>
+        <text x="190" y="200" class="bone-detail">{{ fishbone.method }}</text>
+        <text x="430" y="200" class="bone-detail">{{ fishbone.material }}</text>
+      </svg>
+    </section>
 
-    <h3 class="section-title">再発候補（同一項目の発生回数）</h3>
-    <div class="table-wrap">
-      <table class="data-table compact">
-        <thead><tr><th>項目</th><th>発生回数</th><th>最新発生日</th></tr></thead>
-        <tbody>
-          <tr v-for="row in recurrenceItems" :key="row.item">
-            <td>{{ row.item }}</td>
-            <td>{{ row.count }}</td>
-            <td>{{ row.latestDate }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- 再発候補 -->
+    <section class="panel">
+      <div class="section-head">
+        <h3 class="section-title">再発候補（同一項目の発生回数）</h3>
+        <span class="section-note">2回以上発生した項目を表示</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table compact">
+          <thead><tr><th>項目</th><th>発生回数</th><th>最新発生日</th></tr></thead>
+          <tbody>
+            <tr v-for="row in recurrenceItems" :key="row.item" :class="{ 'rate-warn': row.count >= 5 }">
+              <td>{{ row.item }}</td>
+              <td>{{ row.count }}</td>
+              <td>{{ row.latestDate }}</td>
+            </tr>
+            <tr v-if="!recurrenceItems.length"><td colspan="3" class="empty-cell">対象データがありません。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -438,6 +536,10 @@ const filteredRows = computed(() => incidentRowsAll.value.filter((r) => {
   if (selectedUnit.value && String(r.unit) !== String(selectedUnit.value)) return false
   return true
 }))
+
+const uniqueDays = computed(() => new Set(filteredRows.value.map((r) => r.date)).size)
+const controlOutCount = computed(() => controlRows.value.filter((r) => r.judge === "要注意").length)
+
 const radarRings = [0.25, 0.5, 0.75, 1]
 const radarLabels = ["ライン", "工程", "製品", "作業者", "台目"]
 const radarRadius = 72
@@ -696,21 +798,35 @@ watch([
 </script>
 
 <style scoped>
+.problem-tools-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.error-text {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 .prepare-form {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 10px;
-  margin-bottom: 10px;
 }
 .prepare-form label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0;
-  width: auto;
-  flex: 0 0 auto;
 }
 .field-label {
   white-space: nowrap;
@@ -725,61 +841,183 @@ watch([
   border-radius: 4px;
   background: #fff;
   font-size: 12px;
-  width: 180px;
+  width: 150px;
   max-width: 42vw;
 }
-.prepare-form input[type="date"] {
-  width: 165px;
+.prepare-form input[type="date"] { width: 140px; }
+.filter-form .field-worker select { width: 140px; }
+.filter-form .field-unit select { width: 110px; }
+
+/* サマリーグリッド（weekly-monthlyと統一） */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
 }
-.filter-form .field-worker select,
-.filter-form .field-unit select {
-  width: 120px;
+.summary-card {
+  padding: 12px 14px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 }
-.chart-wrap { margin: 8px 0 12px; padding: 10px; border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; }
-.chart-control-row { margin-bottom: 6px; }
+.summary-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+.summary-value {
+  font-size: 26px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.accent-ng { color: #dc2626; }
+
+/* パネル（weekly-monthlyと統一） */
+.panel {
+  padding: 12px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  background: #fff;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.section-title { margin: 0; }
+.section-note { font-size: 12px; color: #64748b; }
+
+.sub-title { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; }
+
+/* チャートコントロール */
+.chart-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
 .chart-control-row label { display: inline-flex; align-items: center; gap: 6px; }
-.chart-control-row select { width: 140px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; }
-.chart-title { font-weight: 700; margin-bottom: 8px; color: #1f2937; }
-.dual-chart-wrap { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 10px; }
-.pie-svg, .radar-svg { width: 100%; height: 240px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; }
-.plot-svg-small { width: 100%; height: 240px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; }
-.mini-legend { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 4px 8px; margin-top: 8px; }
-.mini-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #334155; }
-.swatch { width: 10px; height: 10px; border-radius: 2px; }
-.bar-col { fill: #2563eb; opacity: 0.85; }
-.mini-axis-label { font-size: 10px; fill: #334155; text-anchor: middle; }
-.axis-label { font-size: 10px; fill: #334155; text-anchor: middle; }
-.axis-tick { stroke: #94a3b8; stroke-width: 1; }
-.axis-tick-label { font-size: 9px; fill: #475569; text-anchor: end; }
-.radar-ring { fill: none; stroke: #cbd5e1; stroke-width: 1; }
-.radar-axis { stroke: #94a3b8; stroke-width: 1; }
-.radar-data { fill: rgba(37, 99, 235, 0.2); stroke: #2563eb; stroke-width: 2; }
-.radar-label { font-size: 11px; fill: #334155; text-anchor: middle; dominant-baseline: middle; }
-.bar-row { display: grid; grid-template-columns: 120px 1fr 56px; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; }
+.chart-control-row select {
+  width: 140px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* バーチャート */
+.bar-chart { margin-bottom: 10px; }
+.bar-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 56px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.bar-label { color: #334155; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-track { height: 14px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 100%; background: #dc2626; }
-.bar-fill.pareto { background: #7c3aed; }
-.bar-fill.hist { background: #0ea5a4; }
-.bar-label, .bar-value { color: #334155; }
-.fishbone-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px; }
-.fishbone-grid p { margin: 4px 0 0; color: #475569; font-size: 12px; }
-.plot-svg { width: 100%; height: 260px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; }
+.bar-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
+.bar-fill.red { background: #dc2626; }
+.bar-fill.purple { background: #7c3aed; }
+.bar-fill.teal { background: #0ea5a4; }
+.bar-value { color: #334155; font-weight: 600; }
+
+/* テーブル */
+.table-wrap { overflow-x: auto; }
+.empty-cell { text-align: center; color: #64748b; padding: 18px 8px; }
+
+/* レート強調（weekly-monthlyと統一） */
+.rate-warn {
+  color: #b45309;
+  font-weight: 800;
+  background: #fff7ed;
+}
+
+/* 2列並列 */
+.dual-panel-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 12px;
+}
+.dual-panel-row.inner {
+  gap: 14px;
+}
+
+/* 層別グリッド */
+.strat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.strat-heading {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+/* SVG共通 */
+.plot-svg {
+  width: 100%;
+  height: 260px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.plot-svg-sm {
+  width: 100%;
+  height: 240px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
 .axis { stroke: #94a3b8; stroke-width: 1; }
 .dot { fill: #2563eb; opacity: 0.85; }
 .line-main { fill: none; stroke: #0f766e; stroke-width: 2; }
 .line-avg { stroke: #2563eb; stroke-width: 1.5; stroke-dasharray: 5 4; }
 .line-ucl { stroke: #dc2626; stroke-width: 1.5; stroke-dasharray: 5 4; }
+.svg-legend { font-size: 10px; font-weight: 600; }
+.svg-legend.blue { fill: #2563eb; }
+.svg-legend.red { fill: #dc2626; }
+.axis-label { font-size: 10px; fill: #334155; text-anchor: middle; }
+.axis-tick { stroke: #94a3b8; stroke-width: 1; }
+.axis-tick-label { font-size: 9px; fill: #475569; text-anchor: end; }
+.mini-axis-label { font-size: 10px; fill: #334155; text-anchor: middle; }
+.bar-col { fill: #2563eb; opacity: 0.85; }
+
+/* 円グラフ/レーダー */
+.mini-legend { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 4px 8px; margin-top: 8px; }
+.mini-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #334155; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; }
+.radar-ring { fill: none; stroke: #cbd5e1; stroke-width: 1; }
+.radar-axis { stroke: #94a3b8; stroke-width: 1; }
+.radar-data { fill: rgba(37, 99, 235, 0.2); stroke: #2563eb; stroke-width: 2; }
+.radar-label { font-size: 11px; fill: #334155; text-anchor: middle; dominant-baseline: middle; }
+
+/* フィッシュボーン */
+.fishbone-svg { width: 100%; max-height: 260px; }
+.bone-main { stroke: #334155; stroke-width: 3; }
+.bone-branch { stroke: #64748b; stroke-width: 2; }
+.bone-effect { font-size: 14px; font-weight: 700; fill: #1e293b; }
+.bone-bg { stroke: none; }
+.bone-bg.man { fill: #dbeafe; }
+.bone-bg.machine { fill: #fef3c7; }
+.bone-bg.method { fill: #dcfce7; }
+.bone-bg.material { fill: #fce7f3; }
+.bone-text { font-size: 12px; font-weight: 700; fill: #1e293b; text-anchor: middle; }
+.bone-detail { font-size: 10px; fill: #475569; text-anchor: middle; }
+
 @media (max-width: 900px) {
-  .prepare-form select,
-  .prepare-form input {
-    width: 150px;
-    max-width: 40vw;
-  }
-  .filter-form .field-worker select,
-  .filter-form .field-unit select {
-    width: 110px;
-  }
-  .dual-chart-wrap { grid-template-columns: 1fr; }
+  .dual-panel-row { grid-template-columns: 1fr; }
+  .strat-grid { grid-template-columns: 1fr 1fr; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .strat-grid { grid-template-columns: 1fr; }
 }
 </style>
-
