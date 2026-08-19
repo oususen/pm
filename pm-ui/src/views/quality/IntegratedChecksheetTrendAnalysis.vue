@@ -59,6 +59,10 @@
         <span class="field-label">終了日</span>
         <input v-model="endDate" type="date" />
       </label>
+      <label class="check-label">
+        <input v-model="showOnlyReworkRows" type="checkbox" />
+        <span>修正流動ありのみ表示</span>
+      </label>
       <label>
         <span class="field-label">お気に入り</span>
         <select v-model="selectedFavoriteId" @change="applyFavorite">
@@ -159,10 +163,10 @@
     </div>
 
     <!-- ===== 工程別 週次推移 ===== -->
-    <h3 class="section-title">工程別 週次推移（NG率）</h3>
+    <h3 class="section-title">工程別 週次推移（修正流動率）</h3>
     <div class="chart-wrap">
       <div class="chart-header">
-        <div class="chart-title">工程別 NG率 週次推移</div>
+        <div class="chart-title">工程別 修正流動率 週次推移</div>
         <div class="chart-subtitle">直近{{ procWeeks.length }}週</div>
       </div>
       <svg v-if="procWeeks.length > 0" class="trend-svg" viewBox="0 0 920 290">
@@ -177,7 +181,7 @@
             <title>{{ entry[0] }} {{ shortDate(w) }}: {{ (entry[1].get(w) || 0).toFixed(1) }}%</title>
           </circle>
         </g>
-        <text :x="PL - 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(-90,${PL - 8},${(PT + PB) / 2})`">NG率 %</text>
+        <text :x="PL - 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(-90,${PL - 8},${(PT + PB) / 2})`">修正流動率 %</text>
       </svg>
       <div v-if="procWeeklyEntries.length" class="trend-legend proc-legend">
         <span v-for="(entry, eIdx) in procWeeklyEntries" :key="'pwleg-'+eIdx" class="legend-item">
@@ -263,11 +267,11 @@
     </div>
 
     <!-- ===== 上位不良要因（パレート分析） ===== -->
-    <h3 class="section-title">上位不良要因（パレート分析）</h3>
+    <h3 class="section-title">上位修正流動要因（パレート分析）</h3>
     <div class="chart-wrap">
       <div class="chart-header">
-        <div class="chart-title">不良要因パレート図</div>
-        <div class="chart-subtitle">NG件数上位（累積構成比）</div>
+        <div class="chart-title">修正流動要因パレート図</div>
+        <div class="chart-subtitle">修正流動件数上位（累積構成比）</div>
       </div>
       <svg v-if="paretoData.length" class="trend-svg" viewBox="0 0 920 320">
         <line v-for="t in paretoCountScale.ticks" :key="'pg-'+t" :x1="PL" :y1="yC(t, paretoCountScale.max)" :x2="PRD" :y2="yC(t, paretoCountScale.max)" class="grid-line" />
@@ -295,7 +299,7 @@
         <text :x="PRD + 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(90,${PRD + 8},${(PT + PB) / 2})`">累積 %</text>
       </svg>
       <div class="trend-legend">
-        <span class="legend-item"><span class="legend-swatch pareto-bg"></span>NG件数（棒）</span>
+        <span class="legend-item"><span class="legend-swatch pareto-bg"></span>修正流動件数（棒）</span>
         <span class="legend-item"><span class="legend-swatch cum-bg"></span>累積構成比（折れ線）</span>
         <span class="legend-item"><span class="legend-line-dash threshold-bg"></span>80%ライン</span>
       </div>
@@ -316,15 +320,15 @@
     </div>
 
     <!-- ===== ライン比較 ===== -->
-    <h3 class="section-title">ライン比較</h3>
+    <h3 class="section-title">ライン比較（修正流動率）</h3>
     <div class="table-wrap">
       <table class="data-table compact">
-        <thead><tr><th>ライン</th><th>判定総数</th><th>NG件数</th><th>NG率</th><th></th></tr></thead>
+        <thead><tr><th>ライン</th><th>判定総数</th><th>修正流動件数</th><th>修正流動率</th><th></th></tr></thead>
         <tbody>
           <tr v-for="row in lineRows" :key="row.line">
             <td>{{ row.line }}</td>
             <td>{{ row.total }}</td>
-            <td>{{ row.ng }}</td>
+            <td>{{ row.rework }}</td>
             <td :class="rateClass(Number(row.rate))">{{ row.rate }}%</td>
             <td class="inline-bar-cell"><div class="inline-bar-track"><div class="inline-bar-fill" :style="{ width: `${Math.min(Number(row.rate) / Math.max(lineMaxRate, 0.1) * 100, 100)}%` }"></div></div></td>
           </tr>
@@ -359,13 +363,12 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
 import api from "@/api/client"
+import { useIntegratedChecksheetFilters } from "@/composables/useIntegratedChecksheetFilters"
 
 // ── 定数 ──
 const PL = 65, PR = 855, PRD = 825, PT = 25, PB = 220
 const PW = PR - PL, PWD = PRD - PL, PH = PB - PT
 const BUSINESS_DAY_START_HOUR = 8
-const TEMPLATE_FETCH_CHUNK_SIZE = 10
-const UNIT_FETCH_CHUNK_SIZE = 10
 const MA_WINDOW = 7
 const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#ea580c", "#8b5cf6", "#0891b2", "#ca8a04", "#be185d", "#4f46e5", "#059669"]
 
@@ -378,39 +381,49 @@ const topFactors = ref([])
 const lineRows = ref([])
 const procWeeklyRates = ref(new Map())
 const procWeeks = ref([])
-const templateDefinitions = ref([])
-const selectedLine = ref("")
-const selectedProcess = ref("")
-const selectedProduct = ref("")
-const selectedItem = ref("")
-const selectedPerson = ref("")
-const selectedUnit = ref("")
-const startDate = ref("")
-const endDate = ref("")
-const favorites = ref([])
-const selectedFavoriteId = ref("")
-const favoriteName = ref("")
+const showOnlyReworkRows = ref(false)
 const FAVORITE_SCREEN_KEY = "quality.product_checksheet_integrated_trend_analysis"
+const {
+  templateDefinitions,
+  selectedLine,
+  selectedProcess,
+  selectedProduct,
+  selectedItem,
+  selectedPerson,
+  selectedUnit,
+  startDate,
+  endDate,
+  favorites,
+  selectedFavoriteId,
+  favoriteName,
+  lineOptions,
+  processOptions,
+  productOptions,
+  isItemSelectable,
+  itemOptions,
+  personOptions,
+  unitOptions,
+  buildMonthStartText,
+  loadTemplateDefinitions,
+  loadFavorites,
+  applyFavorite,
+  saveFavorite,
+} = useIntegratedChecksheetFilters({
+  sourceRows: allRows,
+  favoriteScreenKey: FAVORITE_SCREEN_KEY,
+  enableFavorites: true,
+})
 
 // ── ヘルパー ──
 const toArray = (data) => data?.results || data || []
 const toDate = (v) => new Date(v || "")
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-const toBusinessDate = (value) => {
-  const dt = toDate(value)
-  if (Number.isNaN(dt.getTime())) return null
-  const n = new Date(dt)
-  if (n.getHours() < BUSINESS_DAY_START_HOUR) n.setDate(n.getDate() - 1)
-  n.setHours(0, 0, 0, 0)
-  return n
-}
-const isJudged = (check) => ["OK", "NG", "修正流動"].includes(check?.judgement)
 const rate = (ng, total) => total ? ((ng / total) * 100).toFixed(1) : "0.0"
 const ngRateFromRows = (rows) => {
   const base = rows.filter((r) => !r.isRework)
   return rate(base.filter((r) => r.isNg).length, base.length)
 }
-const uniqueSorted = (rows, key) => [...new Set(rows.map((r) => r[key] || "未設定"))].sort((a, b) => String(a).localeCompare(String(b), "ja"))
+const reworkRateFromRows = (rows) => rate(rows.filter((r) => r.isRework).length, rows.length)
 
 const niceScale = (rawMax, steps = 4) => {
   if (rawMax <= 0) return { max: steps, step: 1, ticks: Array.from({ length: steps + 1 }, (_, i) => i) }
@@ -441,35 +454,6 @@ const trendArrow = (diff) => { const n = Number(diff); return n > 0.05 ? "↑" :
 const trendClass = (diff) => { const n = Number(diff); return n > 0.05 ? "trend-worse" : n < -0.05 ? "trend-better" : "trend-flat" }
 const rateClass = (r) => r >= 10 ? "rate-high" : r >= 5 ? "rate-mid" : ""
 
-// ── Computed: フィルタ & オプション ──
-const lineOptions = computed(() => uniqueSorted(templateDefinitions.value, "line"))
-const processOptions = computed(() => uniqueSorted(
-  templateDefinitions.value.filter((row) => {
-    if (selectedLine.value && row.line !== selectedLine.value) return false
-    if (selectedProduct.value && row.product !== selectedProduct.value) return false
-    return true
-  }),
-  "process",
-))
-const productOptions = computed(() => uniqueSorted(
-  templateDefinitions.value.filter((row) => {
-    if (selectedLine.value && row.line !== selectedLine.value) return false
-    if (selectedProcess.value && row.process !== selectedProcess.value) return false
-    return true
-  }),
-  "product",
-))
-const isItemSelectable = computed(() => Boolean(selectedProduct.value) && Boolean(selectedProcess.value))
-const itemOptions = computed(() => {
-  if (!isItemSelectable.value) return []
-  return uniqueSorted(
-    templateDefinitions.value.filter((row) => row.product === selectedProduct.value && row.process === selectedProcess.value),
-    "itemName",
-  )
-})
-const personOptions = computed(() => uniqueSorted(allRows.value, "person"))
-const unitOptions = computed(() => uniqueSorted(allRows.value, "unit"))
-
 const filteredRows = computed(() => allRows.value.filter((r) => {
   if (startDate.value && r.dateText < startDate.value) return false
   if (endDate.value && r.dateText > endDate.value) return false
@@ -479,6 +463,7 @@ const filteredRows = computed(() => allRows.value.filter((r) => {
   if (selectedItem.value && r.itemName !== selectedItem.value) return false
   if (selectedPerson.value && r.person !== selectedPerson.value) return false
   if (selectedUnit.value && r.unit !== selectedUnit.value) return false
+  if (showOnlyReworkRows.value && !r.isRework) return false
   return true
 }))
 
@@ -703,91 +688,58 @@ const sparkLine = (weekRateMap) => {
 // ── Computed: ライン比較 ──
 const lineMaxRate = computed(() => Math.max(...lineRows.value.map((r) => Number(r.rate)), 0.1))
 
-// ── データ取得 ──
-const loadBatchUnitsChunked = async (batches) => {
-  const results = []
-  for (let i = 0; i < batches.length; i += UNIT_FETCH_CHUNK_SIZE) {
-    const chunk = batches.slice(i, i + UNIT_FETCH_CHUNK_SIZE)
-    results.push(...(await Promise.all(chunk.map((b) => api.integratedChecksheets.getBatchUnits(b.id)))))
-  }
-  return results
-}
-const loadTemplatesChunked = async (templateIds) => {
-  const results = []
-  for (let i = 0; i < templateIds.length; i += TEMPLATE_FETCH_CHUNK_SIZE) {
-    const chunk = templateIds.slice(i, i + TEMPLATE_FETCH_CHUNK_SIZE)
-    results.push(...(await Promise.all(chunk.map((id) => api.integratedChecksheets.getTemplate(id)))))
-  }
-  return results
-}
-
-const loadTemplateDefinitions = async () => {
-  try {
-    const res = await api.integratedChecksheets.listTemplates({ page_size: 500 })
-    const templates = toArray(res.data)
-    const templateIds = templates.map((t) => Number(t.id || 0)).filter((id) => id > 0)
-    const templateResList = await loadTemplatesChunked(templateIds)
-    const rows = []
-    templateResList.forEach((response) => {
-      const template = response.data
-      const line = template?.line_code || "未設定"
-      const product = template?.product_code || "未設定"
-      ;(template?.process_blocks || []).forEach((block) => {
-        const process = block.process_name || block.process_code || `工程${block.id}`
-        if (!block.items?.length) {
-          rows.push({ templateId: Number(template.id || 0), line, product, process, itemName: "未設定項目" })
-          return
-        }
-        block.items.forEach((item) => {
-          rows.push({ templateId: Number(template.id || 0), line, product, process, itemName: item.item_name || "未設定項目" })
-        })
-      })
-    })
-    templateDefinitions.value = rows
-  } catch (e) {
-    console.error("テンプレート定義取得失敗:", e)
-  }
-}
-
 const loadData = async () => {
   loading.value = true
   error.value = ""
   try {
-    const res = await api.integratedChecksheets.listBatches({ page_size: 200 })
-    const batches = toArray(res.data)
-    const unitsRes = await loadBatchUnitsChunked(batches)
-    const templateIds = [...new Set(batches.map((b) => Number(b.template || 0)).filter((id) => id > 0))]
-    const templateResList = await loadTemplatesChunked(templateIds)
-    const templateById = new Map(templateIds.map((id, idx) => [id, templateResList[idx]?.data || null]))
-    const rows = []
-    for (let i = 0; i < batches.length; i += 1) {
-      const batch = batches[i]
-      const template = templateById.get(Number(batch.template || 0))
-      const processNameById = new Map(
-        (template?.process_blocks || []).map((block) => [Number(block.id), block.process_name || block.process_code || `工程${block.id}`]),
-      )
-      const units = toArray(unitsRes[i].data)
-      for (const unit of units) {
-        for (const check of unit.checks || []) {
-          if (!isJudged(check)) continue
-          const date = toBusinessDate(check.checked_at)
-          if (!date) continue
-          rows.push({
-            dateText: ymd(date),
-            product: template?.product_code || batch.product_code || "未設定",
-            person: check.checked_by_name || check.worker_name || check.worker_code || "未設定",
-            unit: String(unit.sequence_no || "未設定"),
-            date,
-            line: template?.line_code || batch.line_code || "未設定",
-            process: processNameById.get(Number(check.process_block_id)) || `工程${check.process_block_id}`,
-            itemName: check.item_name || "未設定項目",
-            isNg: check.judgement === "NG",
-            isRework: check.judgement === "修正流動",
-          })
-        }
-      }
+    const matchedDefinitions = templateDefinitions.value.filter((row) => {
+      if (selectedLine.value && row.line !== selectedLine.value) return false
+      if (selectedProduct.value && row.product !== selectedProduct.value) return false
+      if (selectedProcess.value && row.process !== selectedProcess.value) return false
+      return true
+    })
+    if ((selectedLine.value || selectedProduct.value || selectedProcess.value) && !matchedDefinitions.length) {
+      allRows.value = []
+      rebuildRows()
+      return
     }
-    allRows.value = rows
+
+    const params = { page_size: 200 }
+    if (startDate.value) params.plan_date__gte = startDate.value
+    if (endDate.value) params.plan_date__lte = endDate.value
+    if (selectedLine.value) {
+      const lineId = matchedDefinitions.find((row) => row.line === selectedLine.value)?.lineId
+      if (lineId) params.line = lineId
+    }
+    if (selectedProduct.value) {
+      const productId = matchedDefinitions.find((row) => row.product === selectedProduct.value)?.productId
+      if (productId) params.product = productId
+    }
+    if (selectedProcess.value) params.process_name = selectedProcess.value
+    if (selectedItem.value) params.item_name = selectedItem.value
+    if (selectedPerson.value) params.checked_by_name = selectedPerson.value
+    if (selectedUnit.value) params.unit_sequence_no = selectedUnit.value
+    params.business_date__gte = startDate.value || ""
+    params.business_date__lte = endDate.value || ""
+
+    const res = await api.integratedChecksheets.getAnalyticsRecords(params)
+    allRows.value = toArray(res.data).map((row) => {
+      const dateText = row.date_text || ""
+      const date = toDate(dateText)
+      if (!Number.isNaN(date.getTime())) date.setHours(0, 0, 0, 0)
+      return {
+        dateText,
+        product: row.product || "未設定",
+        person: row.person || "未設定",
+        unit: String(row.unit || "未設定"),
+        date,
+        line: row.line || "未設定",
+        process: row.process || "未設定",
+        itemName: row.item_name || "未設定項目",
+        isNg: Boolean(row.is_ng),
+        isRework: Boolean(row.is_rework),
+      }
+    }).filter((row) => row.dateText)
     rebuildRows()
   } catch (e) {
     error.value = `集計に失敗しました: ${e.response?.data?.detail || e.message}`
@@ -815,26 +767,26 @@ const rebuildRows = () => {
       const thisWeek = list.filter((r) => r.date >= thisWeekStart && r.date <= now)
       const lastWeek = list.filter((r) => r.date >= lastWeekStart && r.date <= lastWeekEnd)
       const ma3m = list.filter((r) => r.date >= threeMonthStart && r.date <= now)
-      const t = Number(ngRateFromRows(thisWeek))
-      const l = Number(ngRateFromRows(lastWeek))
-      return { process, thisWeek: t.toFixed(1), lastWeek: l.toFixed(1), diff: (t - l).toFixed(1), ma3m: ngRateFromRows(ma3m) }
+      const t = Number(reworkRateFromRows(thisWeek))
+      const l = Number(reworkRateFromRows(lastWeek))
+      return { process, thisWeek: t.toFixed(1), lastWeek: l.toFixed(1), diff: (t - l).toFixed(1), ma3m: reworkRateFromRows(ma3m) }
     })
     .sort((a, b) => Number(b.thisWeek) - Number(a.thisWeek))
 
-  // 上位不良要因
+  // 上位修正流動要因
   const factorMap = new Map()
-  rows.filter((r) => r.isNg).forEach((r) => factorMap.set(r.itemName, (factorMap.get(r.itemName) || 0) + 1))
+  rows.filter((r) => r.isRework).forEach((r) => factorMap.set(r.itemName, (factorMap.get(r.itemName) || 0) + 1))
   topFactors.value = [...factorMap.entries()].map(([itemName, count]) => ({ itemName, count })).sort((a, b) => b.count - a.count).slice(0, 10)
 
   // ライン比較
   const lineMap = new Map()
   rows.forEach((r) => {
-    if (!lineMap.has(r.line)) lineMap.set(r.line, { line: r.line, total: 0, ng: 0 })
+    if (!lineMap.has(r.line)) lineMap.set(r.line, { line: r.line, total: 0, rework: 0 })
     const obj = lineMap.get(r.line)
-    if (!r.isRework) obj.total += 1
-    if (r.isNg) obj.ng += 1
+    obj.total += 1
+    if (r.isRework) obj.rework += 1
   })
-  lineRows.value = [...lineMap.values()].map((r) => ({ ...r, rate: rate(r.ng, r.total) })).sort((a, b) => Number(b.rate) - Number(a.rate))
+  lineRows.value = [...lineMap.values()].map((r) => ({ ...r, rate: rate(r.rework, r.total) })).sort((a, b) => Number(b.rate) - Number(a.rate))
 
   // 工程別 週次データ
   const wMap = new Map()
@@ -844,10 +796,10 @@ const rebuildRows = () => {
     d.setDate(d.getDate() - day + (day === 0 ? -6 : 1))
     const ws = ymd(d)
     const key = `${r.process}||${ws}`
-    if (!wMap.has(key)) wMap.set(key, { process: r.process, week: ws, total: 0, ng: 0 })
+    if (!wMap.has(key)) wMap.set(key, { process: r.process, week: ws, total: 0, rework: 0 })
     const o = wMap.get(key)
-    if (!r.isRework) o.total += 1
-    if (r.isNg) o.ng += 1
+    o.total += 1
+    if (r.isRework) o.rework += 1
   })
   const weeks = [...new Set([...wMap.values()].map((v) => v.week))].sort()
   const recentWeeks = weeks.slice(-8)
@@ -855,73 +807,10 @@ const rebuildRows = () => {
   for (const [, v] of wMap) {
     if (!recentWeeks.includes(v.week)) continue
     if (!pwMap.has(v.process)) pwMap.set(v.process, new Map())
-    pwMap.get(v.process).set(v.week, v.total > 0 ? (v.ng / v.total) * 100 : 0)
+    pwMap.get(v.process).set(v.week, v.total > 0 ? (v.rework / v.total) * 100 : 0)
   }
   procWeeks.value = recentWeeks
   procWeeklyRates.value = pwMap
-}
-
-const buildMonthStartText = () => {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
-}
-const isValidDateText = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))
-
-const toFavoritePayload = () => ({
-  selectedLine: String(selectedLine.value || ""),
-  selectedProcess: String(selectedProcess.value || ""),
-  selectedProduct: String(selectedProduct.value || ""),
-  selectedItem: String(selectedItem.value || ""),
-  selectedPerson: String(selectedPerson.value || ""),
-  selectedUnit: String(selectedUnit.value || ""),
-  startDate: isValidDateText(startDate.value) ? String(startDate.value) : "",
-  endDate: isValidDateText(endDate.value) ? String(endDate.value) : "",
-})
-
-const applyFavoritePayload = (payload) => {
-  selectedLine.value = String(payload?.selectedLine || "")
-  selectedProcess.value = String(payload?.selectedProcess || "")
-  selectedProduct.value = String(payload?.selectedProduct || "")
-  selectedItem.value = String(payload?.selectedItem || "")
-  selectedPerson.value = String(payload?.selectedPerson || "")
-  selectedUnit.value = String(payload?.selectedUnit || "")
-  startDate.value = isValidDateText(payload?.startDate) ? String(payload.startDate) : ""
-  endDate.value = isValidDateText(payload?.endDate) ? String(payload.endDate) : ""
-}
-
-const loadFavorites = async () => {
-  try {
-    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
-    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
-  } catch (e) {
-    console.error("お気に入り取得失敗:", e)
-  }
-}
-
-const applyFavorite = () => {
-  const id = Number(selectedFavoriteId.value || 0)
-  if (!id) return
-  const target = favorites.value.find((item) => Number(item.id) === id)
-  if (!target) return
-  favoriteName.value = target.name || ""
-  applyFavoritePayload(target.payload || {})
-}
-
-const saveFavorite = async () => {
-  const name = String(favoriteName.value || "").trim()
-  if (!name) { window.alert("お気に入り名を入力してください。"); return }
-  const payload = { screen_key: FAVORITE_SCREEN_KEY, name, payload: toFavoritePayload() }
-  try {
-    const id = Number(selectedFavoriteId.value || 0)
-    if (id) await api.accounts.updateFavorite(id, payload)
-    else await api.accounts.createFavorite(payload)
-    await loadFavorites()
-    const found = favorites.value.find((item) => item.name === name)
-    selectedFavoriteId.value = found ? String(found.id) : ""
-    window.alert("お気に入りを保存しました。")
-  } catch (e) {
-    window.alert(`お気に入り保存エラー: ${e?.response?.data?.detail || e?.message || "保存に失敗しました。"}`)
-  }
 }
 
 onMounted(async () => {
@@ -946,6 +835,7 @@ watch([selectedLine, selectedProcess, selectedProduct, selectedItem, selectedPer
 .prepare-form select, .prepare-form input { padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
 .filter-form .field-worker select { width: 140px; }
 .filter-form .field-unit select { width: 110px; }
+.check-label { padding: 4px 8px; border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; }
 
 /* ── KPI カード ── */
 .kpi-cards { display: flex; gap: 10px; margin: 12px 0 6px; flex-wrap: wrap; }

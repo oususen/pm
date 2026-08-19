@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">品質問題分析ダッシュボード</h2>
-        <p class="helper-text">直近90日のNG履歴からQC七つ道具を表示します</p>
+        <p class="helper-text">直近90日のNG・修正流動履歴からQC七つ道具を表示します</p>
       </div>
       <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
     </div>
@@ -61,12 +61,39 @@
         <span class="field-label">終了日</span>
         <input v-model="endDate" type="date" />
       </label>
+      <label class="check-label">
+        <input v-model="showOnlyReworkRows" type="checkbox" />
+        <span>修正流動ありのみ表示</span>
+      </label>
+      <label>
+        <span class="field-label">集計種別</span>
+        <select v-model="aggregationMode">
+          <option value="record">件数別</option>
+          <option value="unit">台数別</option>
+        </select>
+      </label>
+      <label>
+        <span class="field-label">お気に入り</span>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">-- 選択 --</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">{{ fav.name }}</option>
+        </select>
+      </label>
+      <label>
+        <span class="field-label">登録名</span>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </label>
+      <button class="btn favorite-star-btn" title="お気に入り登録" :disabled="loading" @click="saveFavorite">★</button>
     </div>
 
     <section class="summary-grid">
       <div class="summary-card">
-        <div class="summary-label">NG総件数</div>
+        <div class="summary-label">対象総件数</div>
         <div class="summary-value accent-ng">{{ filteredRows.length }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">修正流動件数</div>
+        <div class="summary-value">{{ reworkCount }}</div>
       </div>
       <div class="summary-card">
         <div class="summary-label">発生日数</div>
@@ -85,8 +112,8 @@
     <!-- 1. チェックシート -->
     <section class="panel">
       <div class="section-head">
-        <h3 class="section-title">1. チェックシート（要対応NG一覧）</h3>
-        <span class="section-note">日別NG件数（直近14日）</span>
+        <h3 class="section-title">1. チェックシート（要対応一覧）</h3>
+        <span class="section-note">日別発生件数（直近14日）</span>
       </div>
       <div class="bar-chart">
         <div v-for="row in dailyNgChart" :key="`d-chart-${row.date}`" class="bar-row">
@@ -118,7 +145,7 @@
     <!-- 2. パレート図 -->
     <section class="panel">
       <div class="section-head">
-        <h3 class="section-title">2. パレート図（上位不良要因）</h3>
+        <h3 class="section-title">2. パレート図（上位要因）</h3>
         <span class="section-note">要因別累積比率</span>
       </div>
       <div class="chart-control-row">
@@ -140,7 +167,7 @@
     <!-- 3. ヒストグラム -->
     <section class="panel">
       <div class="section-head">
-        <h3 class="section-title">3. ヒストグラム（日別NG件数分布）</h3>
+        <h3 class="section-title">3. ヒストグラム（日別発生件数分布）</h3>
         <span class="section-note">日別件数の頻度</span>
       </div>
       <div class="chart-control-row">
@@ -163,7 +190,7 @@
     <div class="dual-panel-row">
       <section class="panel">
         <div class="section-head">
-          <h3 class="section-title">4. 散布図（台目とNG傾向）</h3>
+          <h3 class="section-title">4. 散布図（台目と発生傾向）</h3>
         </div>
         <div class="chart-control-row">
           <label><span class="field-label">X軸</span>
@@ -188,7 +215,7 @@
 
       <section class="panel">
         <div class="section-head">
-          <h3 class="section-title">5. 管理図（日別NG件数）</h3>
+          <h3 class="section-title">5. 管理図（日別発生件数）</h3>
         </div>
         <div class="chart-control-row">
           <label><span class="field-label">集計項目</span>
@@ -219,7 +246,7 @@
         <div>
           <div class="strat-heading">ライン別</div>
           <table class="data-table compact">
-            <thead><tr><th>ライン</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <thead><tr><th>ライン</th><th>件数</th><th>構成比</th></tr></thead>
             <tbody>
               <tr v-for="row in stratificationRows" :key="`st-${row.line}`">
                 <td>{{ row.line }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
@@ -230,7 +257,7 @@
         <div>
           <div class="strat-heading">工程別</div>
           <table class="data-table compact">
-            <thead><tr><th>工程</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <thead><tr><th>工程</th><th>件数</th><th>構成比</th></tr></thead>
             <tbody>
               <tr v-for="row in stratificationProcessRows" :key="`sp-${row.process}`">
                 <td>{{ row.process }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
@@ -241,7 +268,7 @@
         <div>
           <div class="strat-heading">作業者別</div>
           <table class="data-table compact">
-            <thead><tr><th>作業者</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <thead><tr><th>作業者</th><th>件数</th><th>構成比</th></tr></thead>
             <tbody>
               <tr v-for="row in stratificationPeopleRows" :key="`sr-${row.person}`">
                 <td>{{ row.person }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
@@ -252,7 +279,7 @@
         <div>
           <div class="strat-heading">製品別</div>
           <table class="data-table compact">
-            <thead><tr><th>製品</th><th>NG件数</th><th>構成比</th></tr></thead>
+            <thead><tr><th>製品</th><th>件数</th><th>構成比</th></tr></thead>
             <tbody>
               <tr v-for="row in stratificationProductRows" :key="`spr-${row.product}`">
                 <td>{{ row.product }}</td><td>{{ row.count }}</td><td>{{ row.ratio.toFixed(1) }}%</td>
@@ -277,7 +304,7 @@
               </select>
             </label>
           </div>
-          <div class="sub-title">不良項目構成</div>
+          <div class="sub-title">項目構成</div>
           <svg viewBox="0 0 320 240" class="plot-svg-sm">
             <g transform="translate(120 120)">
               <path v-for="(slice, idx) in pieSlices" :key="`pie-${idx}`" :d="slice.d" :fill="slice.color" />
@@ -366,7 +393,7 @@
               </select>
             </label>
           </div>
-          <div class="sub-title">折れ線グラフ（日別NG件数）</div>
+          <div class="sub-title">折れ線グラフ（日別発生件数）</div>
           <svg viewBox="0 0 320 240" class="plot-svg-sm">
             <line x1="30" y1="210" x2="300" y2="210" class="axis" />
             <line x1="30" y1="20" x2="30" y2="210" class="axis" />
@@ -441,6 +468,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
 import api from "@/api/client"
+import { useIntegratedChecksheetFilters } from "@/composables/useIntegratedChecksheetFilters"
 
 const loading = ref(false)
 const error = ref("")
@@ -478,14 +506,8 @@ const lineYAxisTicks = ref([])
 const lineXAxisTicks = ref([])
 const barYAxisTypeLabel = computed(() => (selectedBarYAxisType.value === "ratio" ? "構成比(%)" : "件数"))
 const lineYAxisTypeLabel = computed(() => (selectedLineYAxisType.value === "cumulative" ? "累積件数" : "件数"))
-const selectedLine = ref("")
-const selectedProcess = ref("")
-const selectedProduct = ref("")
-const selectedItem = ref("")
-const selectedPerson = ref("")
-const selectedUnit = ref("")
-const startDate = ref("")
-const endDate = ref("")
+const showOnlyReworkRows = ref(false)
+const aggregationMode = ref("unit")
 const selectedParetoKey = ref("item")
 const selectedHistogramKey = ref("date")
 const selectedScatterXKey = ref("unit")
@@ -497,6 +519,7 @@ const selectedBarYAxisType = ref("count")
 const selectedLineTargetKey = ref("date")
 const selectedLineXAxisType = ref("sequence")
 const selectedLineYAxisType = ref("count")
+const FAVORITE_SCREEN_KEY = "quality.product_checksheet_integrated_problem_tools"
 
 const groupingOptions = [
   { value: "item", label: "項目" },
@@ -512,37 +535,37 @@ const numericGroupingOptions = [
   { value: "batchId", label: "バッチ" },
 ]
 
-const templateDefinitions = ref([])
-const TEMPLATE_FETCH_CHUNK_SIZE = 10
-
-const uniqueSorted = (rows, key) => [...new Set(rows.map((r) => r[key] || "未設定"))].sort((a, b) => String(a).localeCompare(String(b), "ja"))
-const lineOptions = computed(() => uniqueSorted(templateDefinitions.value, "line"))
-const processOptions = computed(() => uniqueSorted(
-  templateDefinitions.value.filter((row) => {
-    if (selectedLine.value && row.line !== selectedLine.value) return false
-    if (selectedProduct.value && row.product !== selectedProduct.value) return false
-    return true
-  }),
-  "process",
-))
-const productOptions = computed(() => uniqueSorted(
-  templateDefinitions.value.filter((row) => {
-    if (selectedLine.value && row.line !== selectedLine.value) return false
-    if (selectedProcess.value && row.process !== selectedProcess.value) return false
-    return true
-  }),
-  "product",
-))
-const isItemSelectable = computed(() => Boolean(selectedProduct.value) && Boolean(selectedProcess.value))
-const itemOptions = computed(() => {
-  if (!isItemSelectable.value) return []
-  return uniqueSorted(
-    templateDefinitions.value.filter((row) => row.product === selectedProduct.value && row.process === selectedProcess.value),
-    "itemName",
-  )
+const {
+  templateDefinitions,
+  selectedLine,
+  selectedProcess,
+  selectedProduct,
+  selectedItem,
+  selectedPerson,
+  selectedUnit,
+  startDate,
+  endDate,
+  favorites,
+  selectedFavoriteId,
+  favoriteName,
+  lineOptions,
+  processOptions,
+  productOptions,
+  isItemSelectable,
+  itemOptions,
+  personOptions,
+  unitOptions,
+  buildMonthStartText,
+  loadTemplateDefinitions,
+  loadFavorites,
+  applyFavorite,
+  saveFavorite,
+} = useIntegratedChecksheetFilters({
+  sourceRows: incidentRowsAll,
+  rowItemKey: "item",
+  favoriteScreenKey: FAVORITE_SCREEN_KEY,
+  enableFavorites: true,
 })
-const personOptions = computed(() => uniqueSorted(incidentRowsAll.value, "person"))
-const unitOptions = computed(() => uniqueSorted(incidentRowsAll.value, "unit"))
 
 const filteredRows = computed(() => incidentRowsAll.value.filter((r) => {
   if (startDate.value && r.date < startDate.value) return false
@@ -553,10 +576,25 @@ const filteredRows = computed(() => incidentRowsAll.value.filter((r) => {
   if (selectedItem.value && r.item !== selectedItem.value) return false
   if (selectedPerson.value && r.person !== selectedPerson.value) return false
   if (selectedUnit.value && String(r.unit) !== String(selectedUnit.value)) return false
+  if (showOnlyReworkRows.value && !r.isRework) return false
   return true
 }))
 
+const buildUnitKey = (row) => `${row.date}__${row.line}__${row.product}__${row.process}__${row.unit}`
+const buildWeightedGroupEntries = (rows, key) => {
+  if (aggregationMode.value === "record") return rows.map((row) => [normalizeValue(row, key), 1])
+  const bucket = new Map()
+  rows.forEach((row) => {
+    const groupKey = normalizeValue(row, key)
+    const unitKey = buildUnitKey(row)
+    if (!bucket.has(groupKey)) bucket.set(groupKey, new Set())
+    bucket.get(groupKey).add(unitKey)
+  })
+  return [...bucket.entries()].map(([groupKey, unitSet]) => [groupKey, unitSet.size])
+}
+
 const uniqueDays = computed(() => new Set(filteredRows.value.map((r) => r.date)).size)
+const reworkCount = computed(() => filteredRows.value.filter((r) => r.isRework).length)
 const controlOutCount = computed(() => controlRows.value.filter((r) => r.judge === "要注意").length)
 
 const radarRings = [0.25, 0.5, 0.75, 1]
@@ -598,9 +636,8 @@ const radarRingPoints = (ratio) => radarAxes.map((a) => {
 const normalizeValue = (row, key) => String(row[key] ?? "未設定")
 const groupCountMap = (rows, key) => {
   const m = new Map()
-  rows.forEach((r) => {
-    const k = normalizeValue(r, key)
-    m.set(k, (m.get(k) || 0) + 1)
+  buildWeightedGroupEntries(rows, key).forEach(([groupKey, weight]) => {
+    m.set(groupKey, (m.get(groupKey) || 0) + weight)
   })
   return m
 }
@@ -608,7 +645,16 @@ const groupCountMap = (rows, key) => {
 const recomputeByRows = (rows) => {
   incidents.value = [...rows].sort((a, b) => b.ts - a.ts).slice(0, 100)
   const dayMap = new Map()
-  rows.forEach((r) => dayMap.set(r.date, (dayMap.get(r.date) || 0) + 1))
+  if (aggregationMode.value === "record") {
+    rows.forEach((r) => dayMap.set(r.date, (dayMap.get(r.date) || 0) + 1))
+  } else {
+    const dayUnits = new Map()
+    rows.forEach((r) => {
+      if (!dayUnits.has(r.date)) dayUnits.set(r.date, new Set())
+      dayUnits.get(r.date).add(buildUnitKey(r))
+    })
+    dayUnits.forEach((unitSet, date) => dayMap.set(date, unitSet.size))
+  }
   dailyNgChart.value = [...dayMap.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 14)
 
   const factorMap = new Map()
@@ -623,7 +669,9 @@ const recomputeByRows = (rows) => {
   })
   recurrenceItems.value = [...factorMap.values()].filter((v) => v.count >= 2).sort((a, b) => b.count - a.count).slice(0, 20)
 
-  const totalNg = rows.length || 1
+  const totalCount = aggregationMode.value === "record"
+    ? (rows.length || 1)
+    : Math.max(new Set(rows.map((row) => buildUnitKey(row))).size, 1)
   const sortedFactors = [...groupCountMap(rows, selectedParetoKey.value).entries()]
     .map(([item, count]) => ({ item, count }))
     .sort((a, b) => b.count - a.count)
@@ -631,7 +679,7 @@ const recomputeByRows = (rows) => {
     .map(([item, count]) => ({ item, count }))
     .sort((a, b) => b.count - a.count)
   const pieTop = pieFactors.slice(0, 6)
-  pieLegendRows.value = pieTop.map((r, idx) => ({ item: r.item, ratio: (r.count / totalNg) * 100, color: piePalette[idx % piePalette.length] }))
+  pieLegendRows.value = pieTop.map((r, idx) => ({ item: r.item, ratio: (r.count / totalCount) * 100, color: piePalette[idx % piePalette.length] }))
   let pieStart = -Math.PI / 2
   pieSlices.value = pieLegendRows.value.map((r) => {
     const sweep = (r.ratio / 100) * Math.PI * 2
@@ -642,7 +690,7 @@ const recomputeByRows = (rows) => {
   let cum = 0
   paretoRows.value = sortedFactors.slice(0, 10).map((v) => {
     cum += v.count
-    return { item: v.item, ratio: (cum / totalNg) * 100 }
+    return { item: v.item, ratio: (cum / totalCount) * 100 }
   })
   const histMap = new Map()
   const histogramBaseMap = groupCountMap(rows, selectedHistogramKey.value)
@@ -672,27 +720,27 @@ const recomputeByRows = (rows) => {
   controlLinePoints.value = controlRows.value.map((r, idx) => `${scaleX(idx + 1, controlRows.value.length)} ${scaleY(r.count, controlYMax.value)}`).join(" ")
   const lineMap = new Map()
   rows.forEach((r) => lineMap.set(r.line, (lineMap.get(r.line) || 0) + 1))
-  stratificationRows.value = [...lineMap.entries()].map(([line, count]) => ({ line, count, ratio: (count / totalNg) * 100 })).sort((a, b) => b.count - a.count)
+  stratificationRows.value = [...lineMap.entries()].map(([line, count]) => ({ line, count, ratio: (count / totalCount) * 100 })).sort((a, b) => b.count - a.count)
   const processMap = new Map()
   rows.forEach((r) => processMap.set(r.process, (processMap.get(r.process) || 0) + 1))
-  stratificationProcessRows.value = [...processMap.entries()].map(([process, count]) => ({ process, count, ratio: (count / totalNg) * 100 })).sort((a, b) => b.count - a.count)
+  stratificationProcessRows.value = [...processMap.entries()].map(([process, count]) => ({ process, count, ratio: (count / totalCount) * 100 })).sort((a, b) => b.count - a.count)
   const peopleMap = new Map()
   rows.forEach((r) => peopleMap.set(r.person, (peopleMap.get(r.person) || 0) + 1))
-  stratificationPeopleRows.value = [...peopleMap.entries()].map(([person, count]) => ({ person, count, ratio: (count / totalNg) * 100 })).sort((a, b) => b.count - a.count)
+  stratificationPeopleRows.value = [...peopleMap.entries()].map(([person, count]) => ({ person, count, ratio: (count / totalCount) * 100 })).sort((a, b) => b.count - a.count)
   const productMap = new Map()
   rows.forEach((r) => productMap.set(r.product, (productMap.get(r.product) || 0) + 1))
-  stratificationProductRows.value = [...productMap.entries()].map(([product, count]) => ({ product, count, ratio: (count / totalNg) * 100 })).sort((a, b) => b.count - a.count)
+  stratificationProductRows.value = [...productMap.entries()].map(([product, count]) => ({ product, count, ratio: (count / totalCount) * 100 })).sort((a, b) => b.count - a.count)
   const barBase = [...groupCountMap(rows, selectedBarTargetKey.value).entries()]
     .map(([product, count]) => ({ product, count }))
     .sort((a, b) => b.count - a.count)
   const topProducts = barBase.slice(0, 5)
-  const maxProduct = Math.max(...topProducts.map((r) => (selectedBarYAxisType.value === "ratio" ? (r.count / totalNg) * 100 : r.count)), 1)
+  const maxProduct = Math.max(...topProducts.map((r) => (selectedBarYAxisType.value === "ratio" ? (r.count / totalCount) * 100 : r.count)), 1)
   barAxisLabel.value = selectedBarXAxisType.value === "rank"
     ? "順位"
     : (groupingOptions.find((o) => o.value === selectedBarTargetKey.value)?.label || "分類")
   barRows.value = topProducts.map((r) => ({
     label: selectedBarXAxisType.value === "rank" ? `#${topProducts.findIndex((x) => x.product === r.product) + 1}` : String(r.product).slice(0, 5),
-    h: Math.max((((selectedBarYAxisType.value === "ratio" ? (r.count / totalNg) * 100 : r.count) / maxProduct) * 170), 2),
+    h: Math.max((((selectedBarYAxisType.value === "ratio" ? (r.count / totalCount) * 100 : r.count) / maxProduct) * 170), 2),
   }))
   barYAxisTicks.value = [0, 0.5, 1].map((r) => ({
     value: Math.round(maxProduct * r * 10) / 10,
@@ -748,80 +796,61 @@ const recomputeByRows = (rows) => {
   }
 }
 
-const loadTemplatesChunked = async (templateIds) => {
-  const results = []
-  for (let i = 0; i < templateIds.length; i += TEMPLATE_FETCH_CHUNK_SIZE) {
-    const chunk = templateIds.slice(i, i + TEMPLATE_FETCH_CHUNK_SIZE)
-    const chunkResults = await Promise.all(chunk.map((id) => api.integratedChecksheets.getTemplate(id)))
-    results.push(...chunkResults)
-  }
-  return results
-}
-
-const loadTemplateDefinitions = async () => {
-  try {
-    const res = await api.integratedChecksheets.listTemplates({ page_size: 500 })
-    const templates = toArray(res.data)
-    const templateIds = templates.map((t) => Number(t.id || 0)).filter((id) => id > 0)
-    const templateResList = await loadTemplatesChunked(templateIds)
-    const rows = []
-    templateResList.forEach((response) => {
-      const template = response.data
-      const line = template?.line_code || "未設定"
-      const product = template?.product_code || "未設定"
-      ;(template?.process_blocks || []).forEach((block) => {
-        const process = block.process_name || block.process_code || `工程${block.id}`
-        if (!block.items?.length) {
-          rows.push({ line, product, process, itemName: "未設定項目" })
-          return
-        }
-        block.items.forEach((item) => {
-          rows.push({ line, product, process, itemName: item.item_name || "未設定項目" })
-        })
-      })
-    })
-    templateDefinitions.value = rows
-  } catch (e) {
-    console.error("テンプレート定義取得失敗:", e)
-  }
-}
-
 const loadData = async () => {
   loading.value = true
   error.value = ""
   try {
-    const now = new Date()
-    const from = new Date(now); from.setDate(now.getDate() - 90)
-    const res = await api.integratedChecksheets.listBatches({ page_size: 200 })
-    const batches = toArray(res.data).filter((b) => toDate(b.plan_date || b.created_at) >= from)
-    const unitsRes = await Promise.all(batches.map((b) => api.integratedChecksheets.getBatchUnits(b.id)))
-    const processNameById = new Map()
-    batches.forEach((b) => (b.process_progress || []).forEach((p) => processNameById.set(p.process_block_id, p.process_name || p.process_code || `工程${p.process_block_id}`)))
-
-    const incidentRows = []
-    for (let i = 0; i < batches.length; i += 1) {
-      const batch = batches[i]
-      const units = toArray(unitsRes[i].data)
-      const date = toDate(batch.plan_date || batch.created_at)
-      for (const unit of units) {
-        for (const check of unit.checks || []) {
-          if (check.judgement !== "NG") continue
-          incidentRows.push({
-            key: `${batch.id}-${unit.id}-${check.id}`,
-            ts: date,
-            date: fmt(date),
-            line: batch.line_code || "未設定",
-            product: batch.product_code || "未設定",
-            process: processNameById.get(check.process_block_id) || `工程${check.process_block_id}`,
-            item: check.item_name || "未設定項目",
-            person: check.checked_by_name || check.worker_name || check.worker_code || "未設定",
-            unit: unit.sequence_no,
-            batchId: batch.id,
-          })
-        }
-      }
+    const matchedDefinitions = templateDefinitions.value.filter((row) => {
+      if (selectedLine.value && row.line !== selectedLine.value) return false
+      if (selectedProduct.value && row.product !== selectedProduct.value) return false
+      if (selectedProcess.value && row.process !== selectedProcess.value) return false
+      return true
+    })
+    if ((selectedLine.value || selectedProduct.value || selectedProcess.value) && !matchedDefinitions.length) {
+      incidentRowsAll.value = []
+      recomputeByRows([])
+      return
     }
-    incidentRowsAll.value = incidentRows
+
+    const params = { page_size: 200 }
+    if (startDate.value) params.plan_date__gte = startDate.value
+    if (endDate.value) params.plan_date__lte = endDate.value
+    if (selectedLine.value) {
+      const lineId = matchedDefinitions.find((row) => row.line === selectedLine.value)?.lineId
+      if (lineId) params.line = lineId
+    }
+    if (selectedProduct.value) {
+      const productId = matchedDefinitions.find((row) => row.product === selectedProduct.value)?.productId
+      if (productId) params.product = productId
+    }
+    if (selectedProcess.value) params.process_name = selectedProcess.value
+    if (selectedItem.value) params.item_name = selectedItem.value
+    if (selectedPerson.value) params.checked_by_name = selectedPerson.value
+    if (selectedUnit.value) params.unit_sequence_no = selectedUnit.value
+    params.business_date__gte = startDate.value || ""
+    params.business_date__lte = endDate.value || ""
+
+    const res = await api.integratedChecksheets.getAnalyticsRecords(params)
+    incidentRowsAll.value = toArray(res.data)
+      .filter((row) => Boolean(row.is_ng) || Boolean(row.is_rework))
+      .map((row, index) => {
+        const dateText = row.date_text || ""
+        const date = toDate(dateText)
+        return {
+          key: `${row.batch_id || row.batch || "b"}-${row.unit_id || row.unit || "u"}-${row.item_name || "i"}-${index}`,
+          ts: date,
+          date: dateText || (Number.isNaN(date.getTime()) ? "" : fmt(date)),
+          line: row.line || "未設定",
+          product: row.product || "未設定",
+          process: row.process || "未設定",
+          item: row.item_name || "未設定項目",
+          person: row.person || "未設定",
+          unit: row.unit || "未設定",
+          batchId: row.batch_id || row.batch || "-",
+          isNg: Boolean(row.is_ng),
+          isRework: Boolean(row.is_rework),
+        }
+      })
     recomputeByRows(filteredRows.value)
   } catch (e) {
     error.value = `集計に失敗しました: ${e.response?.data?.detail || e.message}`
@@ -830,8 +859,9 @@ const loadData = async () => {
   }
 }
 
-onMounted(() => {
-  loadTemplateDefinitions()
+onMounted(async () => {
+  startDate.value = buildMonthStartText()
+  await Promise.all([loadTemplateDefinitions(), loadFavorites()])
 })
 watch([selectedProduct, selectedProcess], () => {
   if (!isItemSelectable.value) selectedItem.value = ""
@@ -851,6 +881,7 @@ watch([
   selectedLineTargetKey,
   selectedLineXAxisType,
   selectedLineYAxisType,
+  aggregationMode,
 ], () => {
   recomputeByRows(filteredRows.value)
 })
@@ -892,33 +923,47 @@ watch([
 .prepare-form {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: end;
   gap: 8px;
+  margin: 8px 0 10px;
 }
 .prepare-form label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin: 0;
+  width: auto;
+  flex: 0 0 auto;
 }
 .field-label {
   white-space: nowrap;
-  min-width: 40px;
-  font-size: 12px;
-  color: #334155;
+  min-width: 56px;
 }
 .prepare-form select,
 .prepare-form input {
   padding: 5px 7px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
-  background: #fff;
-  font-size: 12px;
-  width: 150px;
-  max-width: 42vw;
+  font-size: 13px;
 }
-.prepare-form input[type="date"] { width: 140px; }
 .filter-form .field-worker select { width: 140px; }
 .filter-form .field-unit select { width: 110px; }
+.favorite-star-btn {
+  border: 1px solid #eab308;
+  background: #facc15;
+  color: #78350f;
+  min-width: 34px;
+  height: 31px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.favorite-star-btn:disabled { opacity: 0.6; cursor: default; }
+.check-label {
+  padding: 4px 8px;
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
+  background: #fff;
+}
 
 /* サマリーグリッド（weekly-monthlyと統一） */
 .summary-grid {
