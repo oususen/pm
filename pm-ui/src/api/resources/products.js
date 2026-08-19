@@ -64,6 +64,9 @@ export const createProductsAPI = (client) => ({
       params: { line_id: lineId, process_id: processId },
     })
   },
+  getExportPreview(params = {}) {
+    return client.get('/products/export-preview/', { params })
+  },
   bulkUpdateLineFinal(updates) {
     return client.post('/products/bulk-update-line-final/', { updates })
   },

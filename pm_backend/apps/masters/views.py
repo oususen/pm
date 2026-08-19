@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Exists, Max, OuterRef, Q
+from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.db import transaction
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
@@ -275,6 +275,9 @@ class ProductFilter(django_filters.FilterSet):
     product_codes_in = django_filters.CharFilter(method='filter_product_codes_in')
     stock_location = django_filters.CharFilter(method='filter_stock_location')
     processing_area = django_filters.CharFilter(field_name='processing_area', lookup_expr='exact')
+    transfer_destination = django_filters.CharFilter(field_name='transfer_destination', lookup_expr='exact')
+    line = django_filters.CharFilter(method='filter_line')
+    process = django_filters.CharFilter(method='filter_process')
 
     class Meta:
         model = Product
@@ -298,6 +301,7 @@ class ProductFilter(django_filters.FilterSet):
             'product_codes_in',
             'stock_location',
             'processing_area',
+            'transfer_destination',
         ]
 
     def filter_product_codes_in(self, queryset, name, value):
@@ -337,11 +341,36 @@ class ProductFilter(django_filters.FilterSet):
     def filter_supplier_code(self, queryset, name, value):
         if not value:
             return queryset
-        supplier_items = BOMItem.objects.filter(
-            child_product_id=OuterRef('pk'),
+        routing_steps = RoutingStep.objects.filter(
+            routing__product_id=OuterRef('pk'),
             supplier__supplier_code=value,
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
         )
-        return queryset.annotate(_has_supplier=Exists(supplier_items)).filter(_has_supplier=True)
+        return queryset.annotate(_has_supplier=Exists(routing_steps)).filter(_has_supplier=True)
+
+    def filter_line(self, queryset, name, value):
+        if not value:
+            return queryset
+        routing_steps = RoutingStep.objects.filter(
+            routing__product_id=OuterRef('pk'),
+            line_id=value,
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
+        )
+        return queryset.annotate(_has_line=Exists(routing_steps)).filter(_has_line=True)
+
+    def filter_process(self, queryset, name, value):
+        if not value:
+            return queryset
+        routing_steps = RoutingStep.objects.filter(
+            routing__product_id=OuterRef('pk'),
+            process_id=value,
+        )
+        routing_steps = routing_steps.filter(
+            build_effective_routing_q(prefix='routing__')
+        )
+        return queryset.annotate(_has_process=Exists(routing_steps)).filter(_has_process=True)
 
     def filter_stock_location(self, queryset, name, value):
         if not value:
@@ -367,6 +396,104 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['product_code', 'product_name', 'stock_location', 'stock_locations__location_name']
     ordering_fields = ['product_code', 'created_at']
     ordering = ['product_code']
+
+    @action(detail=False, methods=['get'], url_path='export-preview')
+    def export_preview(self, request):
+        line_id = str(request.query_params.get('line') or '').strip()
+        process_id = str(request.query_params.get('process') or '').strip()
+        supplier_code = str(request.query_params.get('supplier_code') or '').strip()
+        transfer_destination = str(request.query_params.get('transfer_destination') or '').strip()
+
+        routing_qs = (
+            Routing.objects.filter(
+                build_effective_routing_q()
+            )
+            .select_related('product')
+            .prefetch_related(
+                Prefetch(
+                    'steps',
+                    queryset=RoutingStep.objects.select_related(
+                        'line',
+                        'process',
+                        'supplier',
+                        'output_product',
+                        'output_product__next_process',
+                        'output_product__product_group',
+                        'output_product__used_container',
+                    ).order_by('step_no', 'parallel_group', 'id'),
+                )
+            )
+            .order_by('product__product_code', 'id')
+        )
+
+        results = []
+        seen_product_ids = set()
+        for routing in routing_qs:
+            steps = list(getattr(routing, 'steps', []).all())
+            if not steps:
+                continue
+            step_by_output_code = {}
+            for candidate_step in steps:
+                output_code = str(getattr(getattr(candidate_step, 'output_product', None), 'product_code', '') or '').strip()
+                if output_code and output_code not in step_by_output_code:
+                    step_by_output_code[output_code] = candidate_step
+
+            for idx, step in enumerate(steps):
+                if line_id and str(step.line_id or '') != line_id:
+                    continue
+                if process_id and str(step.process_id or '') != process_id:
+                    continue
+                if supplier_code and str(getattr(getattr(step, 'supplier', None), 'supplier_code', '') or '') != supplier_code:
+                    continue
+                export_product = getattr(step, 'output_product', None)
+                if not export_product:
+                    continue
+                if transfer_destination and str(export_product.transfer_destination or '') != transfer_destination:
+                    continue
+                parent_step = step_by_output_code.get(str(getattr(step, 'remark', '') or '').strip())
+                if export_product.id in seen_product_ids:
+                    continue
+                seen_product_ids.add(export_product.id)
+
+                results.append({
+                    'id': export_product.id,
+                    'export_key': f'{routing.id}:{step.id}:{export_product.id}',
+                    'product_code': export_product.product_code,
+                    'product_name': export_product.product_name,
+                    'category': export_product.category,
+                    'unit': export_product.unit,
+                    'unit_price': export_product.unit_price,
+                    'standard_lt_days': export_product.standard_lt_days,
+                    'self_lt_days': export_product.self_lt_days,
+                    'management_unit': export_product.management_unit,
+                    'is_final_product': export_product.is_final_product,
+                    'is_line_final_product': export_product.is_line_final_product,
+                    'model_name': export_product.model_name,
+                    'identification_code': export_product.identification_code,
+                    'product_group': export_product.product_group_id,
+                    'transfer_destination': export_product.transfer_destination,
+                    'specific_gravity': export_product.specific_gravity,
+                    'size_length': export_product.size_length,
+                    'size_width': export_product.size_width,
+                    'size_thickness': export_product.size_thickness,
+                    'order_lot_multiple': export_product.order_lot_multiple,
+                    'order_lot_min': export_product.order_lot_min,
+                    'capacity': export_product.capacity,
+                    'used_container': export_product.used_container_id,
+                    'stock_locations_list': list(export_product.stock_locations.values('id', 'location_name', 'sort_order')),
+                    'line': step.line_id,
+                    'process': step.process_id,
+                    'next_process': getattr(parent_step, 'process_id', None),
+                    'line_code': getattr(getattr(step, 'line', None), 'line_code', '') or '',
+                    'line_name': getattr(getattr(step, 'line', None), 'line_name', '') or '',
+                    'process_code': getattr(getattr(step, 'process', None), 'process_code', '') or '',
+                    'process_name': getattr(getattr(step, 'process', None), 'process_name', '') or '',
+                    'next_process_code': getattr(getattr(parent_step, 'process', None), 'process_code', '') or '',
+                    'next_process_name': getattr(getattr(parent_step, 'process', None), 'process_name', '') or '',
+                })
+
+        results.sort(key=lambda item: item['product_code'] or '')
+        return Response(results)
 
     @action(detail=True, methods=['post'], url_path='upload_image', parser_classes=[parsers.MultiPartParser, parsers.FormParser])
     def upload_image(self, request, pk=None):

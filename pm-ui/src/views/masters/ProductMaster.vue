@@ -6,6 +6,7 @@
         <button v-if="canEdit" @click="openLineFinalDialog" class="btn-secondary">ライン最終品 一括設定</button>
         <button v-if="canEdit" @click="downloadUpdateImportTemplateXlsx" class="btn-secondary">取込テンプレートExcel</button>
         <button v-if="canEdit" @click="openUpdateImport" class="btn-secondary">統合取込</button>
+        <button @click="openExportTab" class="btn-secondary">製品出力</button>
         <button @click="fetchProducts(1)" class="btn-primary">更新</button>
         <button @click="openProcessTab('create')" class="btn-success" :disabled="!canEdit">処理</button>
       </div>
@@ -14,6 +15,7 @@
     <div class="master-tab-bar">
       <button type="button" class="master-tab-btn" :class="{ active: activeTab === 'list' }" @click="activeTab = 'list'">一覧</button>
       <button type="button" class="master-tab-btn" :class="{ active: activeTab === 'process' }" @click="activeTab = 'process'">処理</button>
+      <button type="button" class="master-tab-btn" :class="{ active: activeTab === 'export' }" @click="openExportTab">製品出力</button>
     </div>
 
     <div v-if="activeTab === 'list'" class="page-content">
@@ -225,7 +227,7 @@
       </div>
     </div>
 
-    <div v-else class="page-content process-page-content">
+    <div v-else-if="activeTab === 'process'" class="page-content process-page-content">
       <div class="process-mode-panel">
         <div class="process-mode-row">
           <span class="process-mode-label">処理区分</span>
@@ -741,11 +743,98 @@
         </div>
       </div>
     </div>
+
+    <div v-else-if="activeTab === 'export'" class="page-content export-page-content">
+      <div class="process-form-card export-card">
+        <h2>製品出力</h2>
+        <div class="export-filter-grid">
+          <div class="form-group">
+            <label>ライン</label>
+            <select v-model="exportFilters.line">
+              <option value="">すべて</option>
+              <option v-for="line in lines" :key="line.id" :value="line.id">
+                {{ line.line_code }} - {{ line.line_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>工程</label>
+            <select v-model="exportFilters.process">
+              <option value="">すべて</option>
+              <option v-for="proc in processes" :key="proc.id" :value="proc.id">
+                {{ proc.process_code }} - {{ proc.process_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>仕入先</label>
+            <select v-model="exportFilters.supplier_code">
+              <option value="">すべて</option>
+              <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.supplier_code">
+                {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
+              </option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>移動先</label>
+            <select v-model="exportFilters.transfer_destination">
+              <option value="">すべて</option>
+              <option v-for="td in transferDestOptions" :key="td.value" :value="td.value">
+                {{ td.label }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions export-actions">
+          <button type="button" class="btn-secondary" @click="previewProductExport" :disabled="exportLoading">
+            {{ exportLoading ? '抽出中...' : '件数確認' }}
+          </button>
+          <button type="button" class="btn-primary" @click="exportProductsToExcel" :disabled="exporting">
+            {{ exporting ? '出力中...' : 'Excel出力' }}
+          </button>
+          <button type="button" class="btn-secondary" @click="resetExportFilters" :disabled="exportLoading || exporting">リセット</button>
+        </div>
+
+        <div class="export-summary">
+          <span>抽出件数: {{ exportResultCount }}件</span>
+          <span v-if="exportPreviewRows.length">プレビュー: 先頭 {{ exportPreviewRows.length }}件</span>
+        </div>
+
+        <div v-if="exportPreviewRows.length" class="list-area export-preview-area">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>構成品番</th>
+                <th>品名規格</th>
+                <th>品番区分名</th>
+                <th>ライン情報</th>
+                <th>工程情報</th>
+                <th>後工程</th>
+                <th>移動先</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in exportPreviewRows" :key="row.export_key || row.id">
+                <td>{{ row.product_code }}</td>
+                <td>{{ row.product_name }}</td>
+                <td>{{ toTemplateCategoryLabel(row.category) }}</td>
+                <td>{{ row.line_code || '' }}</td>
+                <td>{{ row.process_code || '' }}</td>
+                <td>{{ row.next_process_code || '' }}</td>
+                <td>{{ getTransferDestLabel(row.transfer_destination) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
+import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
@@ -758,6 +847,7 @@ const dsSources = [
   { op: '読み取り', table: 'm_product_group', desc: '製品グループ（選択肢）' },
   { op: '読み取り', table: 'm_container_capacity', desc: '容器（選択肢）' },
   { op: '読み取り', table: 'm_customer', desc: '得意先（選択肢）' },
+  { op: '読み取り', table: 'm_supplier', desc: '仕入先（製品出力条件）' },
 ]
 
 // カテゴリマッピング (DB英語 ⇔ UI日本語)
@@ -779,6 +869,16 @@ const categoryOptions = [
   { value: 'OUTSOURCED', label: '外作品' },
   { value: 'UNKNOWN', label: '未定' },
 ]
+
+const templateCategoryMap = {
+  ASSEMBLY: '集合部品',
+  SINGLE: '単体部品',
+  MATERIAL: '材料',
+  PURCHASED: '購入品',
+  OUTSOURCED: '外作品',
+  UNKNOWN: '未定',
+  '–¢’è': '未定',
+}
 
 const getCategoryLabel = (value) => categoryMap[value] || value
 
@@ -875,6 +975,7 @@ const mapProductToFormData = (product, options = {}) => {
 const products = ref([])
 const lines = ref([])
 const processes = ref([])
+const suppliers = ref([])
 const productGroups = ref([])
 const containers = ref([])
 const customers = ref([])
@@ -903,6 +1004,16 @@ const filters = ref({
 })
 const formData = ref(createEmptyFormData())
 const fileInput = ref(null)
+const exportFilters = ref({
+  line: '',
+  process: '',
+  supplier_code: '',
+  transfer_destination: '',
+})
+const exportPreviewRows = ref([])
+const exportResultCount = ref(0)
+const exportLoading = ref(false)
+const exporting = ref(false)
 const canEdit = computed(() => canAccessMasterResource('masters.product', 'edit'))
 const isViewMode = computed(() => processMode.value === 'view')
 const isMaterialCategory = computed(() => formData.value.category === 'MATERIAL')
@@ -925,6 +1036,20 @@ const formatStockLocations = (product) => {
   }
   return product.stock_location || '-'
 }
+
+const toTemplateCategoryLabel = (value) => templateCategoryMap[value] || value || ''
+const yesNoLabel = (value) => (value ? 'はい' : 'いいえ')
+const findLine = (lineId) => lines.value.find((line) => `${line.id}` === `${lineId}`)
+const findProcess = (processId) => processes.value.find((process) => `${process.id}` === `${processId}`)
+const findLineCode = (lineId) => findLine(lineId)?.line_code || ''
+const findLineName = (lineId) => findLine(lineId)?.line_name || ''
+const findProcessCode = (processId) => findProcess(processId)?.process_code || ''
+const findProcessName = (processId) => findProcess(processId)?.process_name || ''
+const findProductGroup = (groupId) => productGroups.value.find((group) => `${group.id}` === `${groupId}`)
+const findContainer = (containerId) => containers.value.find((container) => `${container.id}` === `${containerId}`)
+const getProductGroupCode = (groupId) => findProductGroup(groupId)?.group_code || ''
+const getContainerCode = (containerId) => findContainer(containerId)?.container_code || ''
+const getStockLocationByIndex = (product, index) => product?.stock_locations_list?.[index]?.location_name || ''
 
 // CSVインポート
 const showCsvImportDialog = ref(false)
@@ -1421,6 +1546,15 @@ const fetchProductGroups = async () => {
   }
 }
 
+const fetchSuppliers = async () => {
+  try {
+    const response = await api.suppliers.getSuppliers({ page_size: 1000, ordering: 'supplier_code' })
+    suppliers.value = response.data.results || response.data
+  } catch (error) {
+    console.error('仕入先取得エラー:', error)
+  }
+}
+
 const fetchContainers = async () => {
   try {
     const response = await api.containerCapacities.getContainerCapacities()
@@ -1458,6 +1592,10 @@ const openProcessTab = (mode = 'create', product = null) => {
       productContainers.value = Array.isArray(res.data) ? res.data : []
     }).catch(() => {})
   }
+}
+
+const openExportTab = () => {
+  activeTab.value = 'export'
 }
 
 const changeProcessMode = (mode) => {
@@ -1543,6 +1681,144 @@ const resetFilters = async () => {
     created_to: ''
   }
   await fetchProducts(1)
+}
+
+const buildExportQueryParams = () => {
+  const params = {}
+  if (exportFilters.value.line) {
+    params.line = exportFilters.value.line
+  }
+  if (exportFilters.value.process) {
+    params.process = exportFilters.value.process
+  }
+  if (exportFilters.value.supplier_code) {
+    params.supplier_code = exportFilters.value.supplier_code
+  }
+  if (exportFilters.value.transfer_destination) {
+    params.transfer_destination = exportFilters.value.transfer_destination
+  }
+  return params
+}
+
+const mapProductToExportRow = (product) => ({
+  構成品番: product.product_code || '',
+  品名規格: product.product_name || '',
+  品番区分名: toTemplateCategoryLabel(product.category),
+  単位: product.unit || '',
+  単価: product.unit_price ?? '',
+  標準LT: product.standard_lt_days ?? '',
+  自工程LT: product.self_lt_days ?? '',
+  ライン情報: product.line_code || '',
+  ライン名: product.line_name || '',
+  工程情報: product.process_code || '',
+  工程名: product.process_name || '',
+  後工程: product.next_process_code || '',
+  後工程名: product.next_process_name || '',
+  管理区分: product.management_unit === 'DAY' ? '日' : product.management_unit === 'MINUTE' ? '分' : '',
+  最終品: yesNoLabel(product.is_final_product),
+  ライン最終品: yesNoLabel(product.is_line_final_product),
+  機種名: product.model_name || '',
+  識別記号: product.identification_code || '',
+  製品グループ: getProductGroupCode(product.product_group),
+  移動先: getTransferDestLabel(product.transfer_destination) === '-' ? '' : getTransferDestLabel(product.transfer_destination),
+  比重: product.specific_gravity ?? '',
+  縦: product.size_length ?? '',
+  横: product.size_width ?? '',
+  厚さ: product.size_thickness ?? '',
+  発注倍数: product.order_lot_multiple ?? '',
+  最小発注数: product.order_lot_min ?? '',
+  容器入り数: product.capacity ?? '',
+  使用容器: getContainerCode(product.used_container),
+  置き場1: getStockLocationByIndex(product, 0),
+  置き場2: getStockLocationByIndex(product, 1),
+  置き場3: getStockLocationByIndex(product, 2),
+  置き場4: getStockLocationByIndex(product, 3),
+})
+
+const loadExportProducts = async () => {
+  const params = buildExportQueryParams()
+  const response = await api.products.getExportPreview(params)
+  return Array.isArray(response.data) ? response.data : []
+}
+
+const previewProductExport = async () => {
+  exportLoading.value = true
+  try {
+    const rows = await loadExportProducts()
+    exportResultCount.value = rows.length
+    exportPreviewRows.value = rows.slice(0, 20)
+  } catch (error) {
+    console.error('製品出力プレビューエラー:', error)
+    alert('製品出力データの取得に失敗しました')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+const exportProductsToExcel = async () => {
+  exporting.value = true
+  try {
+    const rows = await loadExportProducts()
+    exportResultCount.value = rows.length
+    exportPreviewRows.value = rows.slice(0, 20)
+    if (!rows.length) {
+      alert('出力対象がありません')
+      return
+    }
+    const worksheet = XLSX.utils.json_to_sheet(rows.map(mapProductToExportRow))
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, '製品')
+
+    const processSheet = XLSX.utils.json_to_sheet(
+      processes.value.map((process) => ({
+        工程コード: process.process_code || '',
+        工程名: process.process_name || '',
+      }))
+    )
+    XLSX.utils.book_append_sheet(workbook, processSheet, '工程')
+
+    const lineSheet = XLSX.utils.json_to_sheet(
+      lines.value.map((line) => ({
+        ラインコード: line.line_code || '',
+        ライン名: line.line_name || '',
+      }))
+    )
+    XLSX.utils.book_append_sheet(workbook, lineSheet, 'ライン')
+
+    const productGroupSheet = XLSX.utils.json_to_sheet(
+      productGroups.value.map((group) => ({
+        グループコード: group.group_code || '',
+        グループ名: group.group_name || '',
+      }))
+    )
+    XLSX.utils.book_append_sheet(workbook, productGroupSheet, '製品グループ')
+
+    const containerSheet = XLSX.utils.json_to_sheet(
+      containers.value.map((container) => ({
+        容器コード: container.container_code || '',
+        容器名: container.name || '',
+      }))
+    )
+    XLSX.utils.book_append_sheet(workbook, containerSheet, '容器')
+
+    XLSX.writeFile(workbook, 'product_export.xlsx')
+  } catch (error) {
+    console.error('製品Excel出力エラー:', error)
+    alert('Excel出力に失敗しました')
+  } finally {
+    exporting.value = false
+  }
+}
+
+const resetExportFilters = () => {
+  exportFilters.value = {
+    line: '',
+    process: '',
+    supplier_code: '',
+    transfer_destination: '',
+  }
+  exportPreviewRows.value = []
+  exportResultCount.value = 0
 }
 
 const normalizeNumber = (value) => {
@@ -1703,6 +1979,7 @@ onMounted(() => {
   fetchProducts(1)
   fetchLines()
   fetchProcesses()
+  fetchSuppliers()
   fetchProductGroups()
   fetchContainers()
   fetchCustomers()
@@ -1767,6 +2044,39 @@ watch(
 .process-page-content {
   overflow: auto;
   gap: 12px;
+}
+
+.export-page-content {
+  overflow: auto;
+}
+
+.export-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.export-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 12px;
+  align-items: end;
+}
+
+.export-actions {
+  margin-top: 0;
+}
+
+.export-summary {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #475569;
+}
+
+.export-preview-area {
+  max-height: 520px;
 }
 
 .process-mode-panel {
