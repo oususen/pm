@@ -747,6 +747,24 @@
     <div v-else-if="activeTab === 'export'" class="page-content export-page-content">
       <div class="process-form-card export-card">
         <h2>製品出力</h2>
+        <div class="export-mode-row">
+          <button
+            type="button"
+            class="master-tab-btn"
+            :class="{ active: exportMode === 'provide' }"
+            @click="setExportMode('provide')"
+          >
+            提供側
+          </button>
+          <button
+            type="button"
+            class="master-tab-btn"
+            :class="{ active: exportMode === 'use' }"
+            @click="setExportMode('use')"
+          >
+            使用側
+          </button>
+        </div>
         <div class="export-filter-grid">
           <div class="form-group">
             <label>ライン</label>
@@ -775,7 +793,7 @@
               </option>
             </select>
           </div>
-          <div class="form-group">
+          <div v-if="exportMode === 'provide'" class="form-group">
             <label>移動先</label>
             <select v-model="exportFilters.transfer_destination">
               <option value="">すべて</option>
@@ -1010,6 +1028,7 @@ const exportFilters = ref({
   supplier_code: '',
   transfer_destination: '',
 })
+const exportMode = ref('provide')
 const exportPreviewRows = ref([])
 const exportResultCount = ref(0)
 const exportLoading = ref(false)
@@ -1684,7 +1703,7 @@ const resetFilters = async () => {
 }
 
 const buildExportQueryParams = () => {
-  const params = {}
+  const params = { mode: exportMode.value }
   if (exportFilters.value.line) {
     params.line = exportFilters.value.line
   }
@@ -1694,10 +1713,16 @@ const buildExportQueryParams = () => {
   if (exportFilters.value.supplier_code) {
     params.supplier_code = exportFilters.value.supplier_code
   }
-  if (exportFilters.value.transfer_destination) {
+  if (exportMode.value === 'provide' && exportFilters.value.transfer_destination) {
     params.transfer_destination = exportFilters.value.transfer_destination
   }
   return params
+}
+
+const setExportMode = (mode) => {
+  if (exportMode.value === mode) return
+  exportMode.value = mode
+  resetExportFilters()
 }
 
 const mapProductToExportRow = (product) => ({
@@ -1801,7 +1826,7 @@ const exportProductsToExcel = async () => {
     )
     XLSX.utils.book_append_sheet(workbook, containerSheet, '容器')
 
-    XLSX.writeFile(workbook, 'product_export.xlsx')
+    XLSX.writeFile(workbook, exportMode.value === 'use' ? 'product_use_export.xlsx' : 'product_export.xlsx')
   } catch (error) {
     console.error('製品Excel出力エラー:', error)
     alert('Excel出力に失敗しました')
@@ -2054,6 +2079,12 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.export-mode-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .export-filter-grid {

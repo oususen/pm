@@ -399,6 +399,9 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export-preview')
     def export_preview(self, request):
+        mode = str(request.query_params.get('mode') or 'provide').strip().lower()
+        if mode not in ('provide', 'use'):
+            mode = 'provide'
         line_id = str(request.query_params.get('line') or '').strip()
         process_id = str(request.query_params.get('process') or '').strip()
         supplier_code = str(request.query_params.get('supplier_code') or '').strip()
@@ -426,8 +429,82 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             .order_by('product__product_code', 'id')
         )
 
+        today = date.today()
+        bom_cache = {}
+        bom_items_cache = {}
+        child_routing_step_map = {}
+
+        def find_active_bom(parent_product_id):
+            if parent_product_id in bom_cache:
+                return bom_cache[parent_product_id]
+            bom = BOM.objects.filter(
+                parent_product_id=parent_product_id,
+                is_active=True,
+                valid_from__lte=today,
+            ).order_by('-valid_from', '-id').first()
+            if bom is None:
+                bom = BOM.objects.filter(
+                    parent_product_id=parent_product_id,
+                    is_active=True,
+                ).order_by('-valid_from', '-id').first()
+            bom_cache[parent_product_id] = bom
+            return bom
+
+        def get_bom_items(parent_product_id):
+            if parent_product_id in bom_items_cache:
+                return bom_items_cache[parent_product_id]
+            bom = find_active_bom(parent_product_id)
+            if bom is None:
+                bom_items_cache[parent_product_id] = []
+                return bom_items_cache[parent_product_id]
+            items = list(
+                BOMItem.objects.filter(bom_id=bom.id).select_related(
+                    'child_product',
+                    'child_product__product_group',
+                    'child_product__used_container',
+                ).prefetch_related('child_product__stock_locations').order_by('id')
+            )
+            bom_items_cache[parent_product_id] = items
+            return items
+
+        matched_steps = []
+        if mode == 'use':
+            for routing in routing_qs:
+                steps = list(getattr(routing, 'steps', []).all())
+                if not steps:
+                    continue
+                for step in steps:
+                    if line_id and str(step.line_id or '') != line_id:
+                        continue
+                    if process_id and str(step.process_id or '') != process_id:
+                        continue
+                    if supplier_code and str(getattr(getattr(step, 'supplier', None), 'supplier_code', '') or '') != supplier_code:
+                        continue
+                    processed_product = getattr(step, 'output_product', None)
+                    if not processed_product:
+                        continue
+                    matched_steps.append(step)
+
+            child_product_ids = set()
+            for step in matched_steps:
+                for bom_item in get_bom_items(step.output_product_id):
+                    if getattr(bom_item, 'child_product_id', None):
+                        child_product_ids.add(bom_item.child_product_id)
+
+            if child_product_ids:
+                child_steps = (
+                    RoutingStep.objects.filter(
+                        output_product_id__in=child_product_ids
+                    )
+                    .filter(build_effective_routing_q(prefix='routing__'))
+                    .select_related('line', 'process', 'output_product')
+                    .order_by('output_product_id', 'step_no', 'parallel_group', 'id')
+                )
+                for child_step in child_steps:
+                    child_routing_step_map.setdefault(child_step.output_product_id, child_step)
+
         results = []
-        seen_product_ids = set()
+        seen_keys = set()
         for routing in routing_qs:
             steps = list(getattr(routing, 'steps', []).all())
             if not steps:
@@ -445,19 +522,75 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     continue
                 if supplier_code and str(getattr(getattr(step, 'supplier', None), 'supplier_code', '') or '') != supplier_code:
                     continue
-                export_product = getattr(step, 'output_product', None)
-                if not export_product:
+                parent_code = str(getattr(step, 'remark', '') or '').strip()
+                parent_step = step_by_output_code.get(parent_code)
+                if mode == 'use':
+                    processed_product = getattr(step, 'output_product', None)
+                    if not processed_product:
+                        continue
+                    bom_items = get_bom_items(processed_product.id)
+                    for bom_item in bom_items:
+                        export_product = getattr(bom_item, 'child_product', None)
+                        if not export_product:
+                            continue
+                        child_step = child_routing_step_map.get(export_product.id)
+                        export_key = f'use:{export_product.id}'
+                        if export_key in seen_keys:
+                            continue
+                        seen_keys.add(export_key)
+                        results.append({
+                            'id': export_product.id,
+                            'export_key': export_key,
+                            'product_code': export_product.product_code,
+                            'product_name': export_product.product_name,
+                            'category': export_product.category,
+                            'unit': export_product.unit,
+                            'unit_price': export_product.unit_price,
+                            'standard_lt_days': export_product.standard_lt_days,
+                            'self_lt_days': export_product.self_lt_days,
+                            'management_unit': export_product.management_unit,
+                            'is_final_product': export_product.is_final_product,
+                            'is_line_final_product': export_product.is_line_final_product,
+                            'model_name': export_product.model_name,
+                            'identification_code': export_product.identification_code,
+                            'product_group': export_product.product_group_id,
+                            'transfer_destination': export_product.transfer_destination,
+                            'specific_gravity': export_product.specific_gravity,
+                            'size_length': export_product.size_length,
+                            'size_width': export_product.size_width,
+                            'size_thickness': export_product.size_thickness,
+                            'order_lot_multiple': export_product.order_lot_multiple,
+                            'order_lot_min': export_product.order_lot_min,
+                            'capacity': export_product.capacity,
+                            'used_container': export_product.used_container_id,
+                            'stock_locations_list': list(export_product.stock_locations.values('id', 'location_name', 'sort_order')),
+                            'line': getattr(child_step, 'line_id', None),
+                            'process': getattr(child_step, 'process_id', None),
+                            'next_process': step.process_id,
+                            'line_code': getattr(getattr(child_step, 'line', None), 'line_code', '') or '',
+                            'line_name': getattr(getattr(child_step, 'line', None), 'line_name', '') or '',
+                            'process_code': getattr(getattr(child_step, 'process', None), 'process_code', '') or '',
+                            'process_name': getattr(getattr(child_step, 'process', None), 'process_name', '') or '',
+                            'next_process_code': getattr(getattr(step, 'process', None), 'process_code', '') or '',
+                            'next_process_name': getattr(getattr(step, 'process', None), 'process_name', '') or '',
+                        })
                     continue
-                if transfer_destination and str(export_product.transfer_destination or '') != transfer_destination:
+                else:
+                    export_product = getattr(step, 'output_product', None)
+                    if not export_product:
+                        continue
+                    if transfer_destination and str(export_product.transfer_destination or '') != transfer_destination:
+                        continue
+                    next_process = getattr(parent_step, 'process_id', None)
+                    next_process_obj = getattr(parent_step, 'process', None)
+                    export_key = f'provide:{export_product.id}'
+                if export_key in seen_keys:
                     continue
-                parent_step = step_by_output_code.get(str(getattr(step, 'remark', '') or '').strip())
-                if export_product.id in seen_product_ids:
-                    continue
-                seen_product_ids.add(export_product.id)
+                seen_keys.add(export_key)
 
                 results.append({
                     'id': export_product.id,
-                    'export_key': f'{routing.id}:{step.id}:{export_product.id}',
+                    'export_key': export_key,
                     'product_code': export_product.product_code,
                     'product_name': export_product.product_name,
                     'category': export_product.category,
@@ -483,13 +616,13 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     'stock_locations_list': list(export_product.stock_locations.values('id', 'location_name', 'sort_order')),
                     'line': step.line_id,
                     'process': step.process_id,
-                    'next_process': getattr(parent_step, 'process_id', None),
+                    'next_process': next_process,
                     'line_code': getattr(getattr(step, 'line', None), 'line_code', '') or '',
                     'line_name': getattr(getattr(step, 'line', None), 'line_name', '') or '',
                     'process_code': getattr(getattr(step, 'process', None), 'process_code', '') or '',
                     'process_name': getattr(getattr(step, 'process', None), 'process_name', '') or '',
-                    'next_process_code': getattr(getattr(parent_step, 'process', None), 'process_code', '') or '',
-                    'next_process_name': getattr(getattr(parent_step, 'process', None), 'process_name', '') or '',
+                    'next_process_code': getattr(next_process_obj, 'process_code', '') or '',
+                    'next_process_name': getattr(next_process_obj, 'process_name', '') or '',
                 })
 
         results.sort(key=lambda item: item['product_code'] or '')

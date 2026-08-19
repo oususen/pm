@@ -199,7 +199,8 @@ API の接続先は `src/api/client.js` の `API_BASE_URL` をバックエンド
 - `/api/products/` - 製品マスタ（品名・品名半角対応）
   - 一覧/全件取得時は `line` `process` `supplier_code` `transfer_destination` での抽出に対応
   - `line` `process` `supplier_code` は有効ルーティングの `RoutingStep` 基準、`transfer_destination` は製品マスタ基準
-  - フロントの製品マスタ画面には「製品出力」タブがあり、上記条件で絞り込んだ製品をテンプレート相当列で Excel 出力できる
+  - フロントの製品マスタ画面には「製品出力」タブがあり、`mode=provide/use` の2モードでテンプレート相当列の Excel 出力ができる
+  - `provide` は指定ライン/工程/仕入先で作成した加工後品目を返す。`use` は指定ライン/工程/仕入先で使用する親製品（`RoutingStep.remark` の親製品コード）を返す
 - `/api/customers/` - 得意先マスタ
 - `/api/processes/` - 工程マスタ
 - `/api/lines/` - ラインマスタ
