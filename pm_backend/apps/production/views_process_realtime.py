@@ -656,6 +656,10 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             'end_record',
         ).prefetch_related('session_equipments__equipment')
 
+        session_id = request.query_params.get('session_id')
+        if session_id:
+            queryset = queryset.filter(id=session_id)
+
         process_id = request.query_params.get('process_id')
         if process_id:
             queryset = queryset.filter(process_id=process_id)

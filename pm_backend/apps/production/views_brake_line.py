@@ -1016,6 +1016,23 @@ class BrakeLineSessionView(APIView):
     def get(self, request):
         qs = BrakeLineRecord.objects.select_related('process', 'product', 'line', 'equipment')
 
+        session_id_param = request.query_params.get('session_id', '').strip()
+        if session_id_param:
+            try:
+                target_rec = BrakeLineRecord.objects.get(id=int(session_id_param))
+                qs = qs.filter(
+                    plan_date=target_rec.plan_date,
+                    line_id=target_rec.line_id,
+                    process_id=target_rec.process_id,
+                    equipment_id=target_rec.equipment_id,
+                )
+                if target_rec.product_id:
+                    qs = qs.filter(product_id=target_rec.product_id)
+                else:
+                    qs = qs.filter(product_id__isnull=True, product_code=target_rec.product_code)
+            except (ValueError, TypeError, BrakeLineRecord.DoesNotExist):
+                return Response([])
+
         start_date_str        = request.query_params.get('start_date', '').strip()
         end_date_str          = request.query_params.get('end_date', '').strip()
         recorded_at_start_str = request.query_params.get('recorded_at_start', '').strip()
@@ -1254,6 +1271,9 @@ class BrakeLineSessionView(APIView):
             s['effective_work_seconds'] = _deduct_break_seconds(
                 break_config, start_dt, end_dt, raw_seconds,
             )
+
+        if session_id_param:
+            sessions = [s for s in sessions if str(s.get('id')) == session_id_param]
 
         sessions.sort(key=lambda s: s.get('started_at') or '', reverse=True)
         return Response(sessions)

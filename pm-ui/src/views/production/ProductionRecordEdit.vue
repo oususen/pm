@@ -649,12 +649,14 @@ const loadSessions = async () => {
     }
     if (lineId.value) params.line_id = lineId.value
     if (processId.value) params.process_id = processId.value
+    if (sessionId.value) params.session_id = sessionId.value
     const laserParams = {
       page_size: 1000,
       work_date__gte: startDate.value,
       work_date__lte: endDate.value,
       ordering: '-work_date,-created_at',
     }
+    if (sessionId.value) laserParams.session_id = sessionId.value
     const [processRes, brakeRes, laserRes] = await Promise.all([
       api.processRealtime.getSessions(params),
       api.brakeLineActuals.getSessions(params),

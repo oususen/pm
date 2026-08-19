@@ -6604,6 +6604,7 @@ class LaserPatternViewSet(viewsets.ModelViewSet):
 
 
 class LaserActualFilter(django_filters.FilterSet):
+    session_id = django_filters.NumberFilter(field_name='id')
     work_date__gte = django_filters.DateFilter(field_name='work_date', lookup_expr='gte')
     work_date__lte = django_filters.DateFilter(field_name='work_date', lookup_expr='lte')
     equipment = django_filters.NumberFilter(field_name='equipment_id')
