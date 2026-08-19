@@ -343,7 +343,9 @@ class ProductFilter(django_filters.FilterSet):
             return queryset
         routing_steps = RoutingStep.objects.filter(
             routing__product_id=OuterRef('pk'),
-            supplier__supplier_code=value,
+        ).filter(
+            Q(supplier__supplier_code=value) |
+            Q(source_bom_item__supplier__supplier_code=value)
         ).filter(
             build_effective_routing_q(prefix='routing__')
         )
@@ -419,6 +421,8 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                         'line',
                         'process',
                         'supplier',
+                        'source_bom_item',
+                        'source_bom_item__supplier',
                         'output_product',
                         'output_product__next_process',
                         'output_product__product_group',
@@ -433,6 +437,13 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         bom_cache = {}
         bom_items_cache = {}
         child_routing_step_map = {}
+
+        def resolve_step_supplier_code(step):
+            return str(
+                getattr(getattr(step, 'supplier', None), 'supplier_code', '') or
+                getattr(getattr(getattr(step, 'source_bom_item', None), 'supplier', None), 'supplier_code', '') or
+                ''
+            )
 
         def find_active_bom(parent_product_id):
             if parent_product_id in bom_cache:
@@ -478,7 +489,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                         continue
                     if process_id and str(step.process_id or '') != process_id:
                         continue
-                    if supplier_code and str(getattr(getattr(step, 'supplier', None), 'supplier_code', '') or '') != supplier_code:
+                    if supplier_code and resolve_step_supplier_code(step) != supplier_code:
                         continue
                     processed_product = getattr(step, 'output_product', None)
                     if not processed_product:
@@ -520,7 +531,7 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     continue
                 if process_id and str(step.process_id or '') != process_id:
                     continue
-                if supplier_code and str(getattr(getattr(step, 'supplier', None), 'supplier_code', '') or '') != supplier_code:
+                if supplier_code and resolve_step_supplier_code(step) != supplier_code:
                     continue
                 parent_code = str(getattr(step, 'remark', '') or '').strip()
                 parent_step = step_by_output_code.get(parent_code)
