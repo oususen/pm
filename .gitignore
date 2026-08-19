@@ -103,3 +103,6 @@ transfer_log.txt
 
 # PowerPoint files
 *.pptx
+
+# 報告書
+デジタル化課題整理_報告書_*.html

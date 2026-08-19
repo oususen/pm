@@ -1,8 +1,12 @@
 <template>
-  <div class="master-menu">
-    <h2 class="page-title">傾向確認・分析</h2>
-    <p class="helper-text">工程一体チェックシート実績から集計（直近180日）</p>
-    <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
+  <div class="master-menu trend-page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">傾向確認・分析</h2>
+        <p class="helper-text">工程一体チェックシート実績から集計</p>
+      </div>
+      <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
+    </div>
     <div v-if="error" class="helper-text" style="color:#b91c1c;">{{ error }}</div>
     <div class="prepare-form filter-form">
       <label>
@@ -55,127 +59,90 @@
         <span class="field-label">終了日</span>
         <input v-model="endDate" type="date" />
       </label>
+      <label>
+        <span class="field-label">お気に入り</span>
+        <select v-model="selectedFavoriteId" @change="applyFavorite">
+          <option value="">-- 選択 --</option>
+          <option v-for="fav in favorites" :key="fav.id" :value="String(fav.id)">{{ fav.name }}</option>
+        </select>
+      </label>
+      <label>
+        <span class="field-label">登録名</span>
+        <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
+      </label>
+      <button class="btn favorite-star-btn" title="お気に入り登録" :disabled="loading" @click="saveFavorite">★</button>
     </div>
 
-    <h3 class="section-title">集計結果（表＋グラフ）</h3>
-    <div class="chart-wrap">
-      <div class="prepare-form">
-        <span class="field-label">対象</span>
-        <span>{{ selectedFilterSummary }}</span>
+    <!-- KPI サマリーカード -->
+    <div class="kpi-cards">
+      <div class="kpi-card">
+        <div class="kpi-label">判定総数</div>
+        <div class="kpi-value">{{ kpi.total.toLocaleString() }}</div>
+        <div class="kpi-sub">対象期間内</div>
       </div>
-      <svg class="trend-svg" viewBox="0 0 920 240" preserveAspectRatio="none">
-        <line x1="40" y1="190" x2="900" y2="190" class="axis-line" />
-        <line x1="40" y1="20" x2="40" y2="190" class="axis-line" />
-        <g v-for="(row, idx) in summaryRows.slice(0, 12)" :key="`s-bar-${row.key}`">
-          <rect
-            :x="50 + idx * summaryBandWidth + (summaryBandWidth * 0.2)"
-            :y="190 - ((row.reworkCount / summaryMaxCount) * 150)"
-            :width="summaryBandWidth * 0.6"
-            :height="Math.max((row.reworkCount / summaryMaxCount) * 150, 1)"
-            class="summary-bar"
-          />
-        </g>
-        <polyline :points="summaryRatePoints" class="trend-line rework-rate" />
+      <div class="kpi-card">
+        <div class="kpi-label">修正流動率</div>
+        <div class="kpi-value">{{ kpi.reworkRate.toFixed(1) }}%</div>
+        <div :class="['kpi-trend', kpi.reworkDiff > 0.05 ? 'worse' : kpi.reworkDiff < -0.05 ? 'better' : 'flat']">
+          {{ kpi.reworkDiff > 0.05 ? '↑' : kpi.reworkDiff < -0.05 ? '↓' : '→' }}
+          {{ Math.abs(kpi.reworkDiff).toFixed(1) }}pt 前週比
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">NG率</div>
+        <div class="kpi-value">{{ kpi.ngRate.toFixed(1) }}%</div>
+        <div :class="['kpi-trend', kpi.ngDiff > 0.05 ? 'worse' : kpi.ngDiff < -0.05 ? 'better' : 'flat']">
+          {{ kpi.ngDiff > 0.05 ? '↑' : kpi.ngDiff < -0.05 ? '↓' : '→' }}
+          {{ Math.abs(kpi.ngDiff).toFixed(1) }}pt 前週比
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">修正流動件数</div>
+        <div class="kpi-value">{{ kpi.reworkCount.toLocaleString() }}</div>
+        <div class="kpi-sub">NG件数: {{ kpi.ngCount.toLocaleString() }}</div>
+      </div>
+    </div>
+
+    <!-- ===== 日次推移（メイントレンド） ===== -->
+    <h3 class="section-title">日次推移（メイントレンド）</h3>
+    <div class="chart-wrap">
+      <div class="chart-header">
+        <div class="chart-title">日次推移 — 修正流動件数 / NG件数</div>
+        <div class="chart-subtitle">対象: {{ selectedFilterSummary }}</div>
+      </div>
+      <svg class="trend-svg" viewBox="0 0 920 290">
+        <line v-for="t in dailyScale.ticks" :key="'dg-'+t" :x1="PL" :y1="yC(t, dailyScale.max)" :x2="PR" :y2="yC(t, dailyScale.max)" class="grid-line" />
+        <line :x1="PL" :y1="PT" :x2="PL" :y2="PB" class="axis-line" />
+        <line :x1="PL" :y1="PB" :x2="PR" :y2="PB" class="axis-line" />
+        <text v-for="t in dailyScale.ticks" :key="'dyl-'+t" :x="PL - 6" :y="yC(t, dailyScale.max) + 4" text-anchor="end" class="axis-label">{{ t }}</text>
+        <text v-for="lbl in dailyXLabels" :key="'dxl-'+lbl.idx" :x="dxC(lbl.idx)" :y="PB + 16" text-anchor="middle" class="axis-label">{{ lbl.label }}</text>
+        <!-- 平均線 -->
+        <line v-if="dailyAvgRework > 0" :x1="PL" :y1="yC(dailyAvgRework, dailyScale.max)" :x2="PR" :y2="yC(dailyAvgRework, dailyScale.max)" class="avg-line" />
+        <text v-if="dailyAvgRework > 0" :x="PR + 4" :y="yC(dailyAvgRework, dailyScale.max) + 3" class="avg-label">平均 {{ dailyAvgRework.toFixed(1) }}</text>
+        <!-- MA線 -->
+        <polyline v-if="dailyReworkMaStr" :points="dailyReworkMaStr" class="trend-line rework-ma" />
+        <polyline v-if="dailyNgMaStr" :points="dailyNgMaStr" class="trend-line ng-ma" />
+        <!-- 実線 -->
+        <polyline :points="dailyReworkStr" class="trend-line rework" />
+        <polyline :points="dailyNgStr" class="trend-line ng" />
+        <!-- マーカー -->
+        <template v-for="(pt, idx) in dailyReworkPts" :key="'drm-'+idx">
+          <circle v-if="idx % dailyMarkerInterval === 0 || idx === dailyReworkPts.length - 1" :cx="pt.x" :cy="pt.y" r="3" class="data-point rework-dot"><title>{{ pt.tip }}</title></circle>
+        </template>
+        <template v-for="(pt, idx) in dailyNgPts" :key="'dnm-'+idx">
+          <circle v-if="idx % dailyMarkerInterval === 0 || idx === dailyNgPts.length - 1" :cx="pt.x" :cy="pt.y" r="3" class="data-point ng-dot"><title>{{ pt.tip }}</title></circle>
+        </template>
+        <text :x="PL - 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(-90,${PL - 8},${(PT + PB) / 2})`">件数</text>
       </svg>
       <div class="trend-legend">
-        <span class="legend-item"><span class="legend-dot count"></span>修正流動件数（棒）</span>
-        <span class="legend-item"><span class="legend-dot rate"></span>修正流動率（折れ線）</span>
+        <span class="legend-item"><span class="legend-swatch rework-bg"></span>修正流動件数</span>
+        <span class="legend-item"><span class="legend-swatch ng-bg"></span>NG件数</span>
+        <span class="legend-item"><span class="legend-line-dash rework-bg"></span>7日移動平均</span>
+        <span class="legend-item"><span class="legend-line-dash avg-bg"></span>平均</span>
       </div>
     </div>
     <div class="table-wrap">
-      <div class="table-title">集計表（{{ selectedFilterSummary }}: 修正流動件数 / 修正流動率）</div>
-      <table class="data-table compact">
-        <thead><tr><th>分類</th><th>判定総数</th><th>修正流動件数</th><th>修正流動率</th><th>NG件数</th><th>NG率</th></tr></thead>
-        <tbody>
-          <tr v-for="row in summaryRows" :key="`s-row-${row.key}`">
-            <td>{{ row.key }}</td>
-            <td>{{ row.total }}</td>
-            <td>{{ row.reworkCount }}</td>
-            <td>{{ row.reworkRate.toFixed(1) }}%</td>
-            <td>{{ row.ngCount }}</td>
-            <td>{{ row.ngRate.toFixed(1) }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="section-title">工程別トレンド（NG率）</h3>
-    <div class="chart-wrap">
-      <div class="chart-title">工程別 今週NG率</div>
-      <div v-for="row in processRows" :key="`p-chart-${row.process}`" class="bar-row">
-        <span class="bar-label">{{ row.process }}</span>
-        <div class="bar-track"><div class="bar-fill" :style="{ width: `${Math.min(Number(row.thisWeek), 100)}%` }"></div></div>
-        <span class="bar-value">{{ row.thisWeek }}%</span>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table compact">
-        <thead><tr><th>工程</th><th>今週</th><th>先週</th><th>前週比</th><th>3か月平均</th></tr></thead>
-        <tbody>
-          <tr v-for="row in processRows" :key="row.process">
-            <td>{{ row.process }}</td>
-            <td>{{ row.thisWeek }}%</td>
-            <td>{{ row.lastWeek }}%</td>
-            <td>{{ row.diff }}pt</td>
-            <td>{{ row.ma3m }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="section-title">上位不良要因（NG件数）</h3>
-    <div class="chart-wrap">
-      <div class="chart-title">上位不良要因</div>
-      <div v-for="row in topFactors.slice(0, 8)" :key="`f-chart-${row.itemName}`" class="bar-row">
-        <span class="bar-label">{{ row.itemName }}</span>
-        <div class="bar-track"><div class="bar-fill factor" :style="{ width: `${Math.min((row.count / Math.max(...topFactors.map((x) => x.count), 1)) * 100, 100)}%` }"></div></div>
-        <span class="bar-value">{{ row.count }}</span>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table compact">
-        <thead><tr><th>順位</th><th>項目</th><th>件数</th></tr></thead>
-        <tbody>
-          <tr v-for="(row, idx) in topFactors" :key="row.itemName">
-            <td>{{ idx + 1 }}</td>
-            <td>{{ row.itemName }}</td>
-            <td>{{ row.count }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="section-title">ライン比較</h3>
-    <div class="table-wrap">
-      <table class="data-table compact">
-        <thead><tr><th>ライン</th><th>判定総数</th><th>NG件数</th><th>NG率</th></tr></thead>
-        <tbody>
-          <tr v-for="row in lineRows" :key="row.line">
-            <td>{{ row.line }}</td>
-            <td>{{ row.total }}</td>
-            <td>{{ row.ng }}</td>
-            <td>{{ row.rate }}%</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="section-title">日次 時系列（表＋グラフ）</h3>
-    <div class="chart-wrap">
-      <div class="chart-title">日次推移（{{ selectedFilterSummary }}: 修正流動件数 / NG件数）</div>
-      <svg class="trend-svg" viewBox="0 0 920 220" preserveAspectRatio="none">
-        <line x1="40" y1="180" x2="900" y2="180" class="axis-line" />
-        <line x1="40" y1="20" x2="40" y2="180" class="axis-line" />
-        <polyline :points="dailyReworkPoints" class="trend-line rework" />
-        <polyline :points="dailyNgPoints" class="trend-line ng" />
-      </svg>
-      <div class="trend-legend">
-        <span class="legend-item"><span class="legend-dot rework"></span>修正流動件数</span>
-        <span class="legend-item"><span class="legend-dot ng"></span>NG件数</span>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <div class="table-title">日次表（{{ selectedFilterSummary }}）</div>
+      <div class="table-title">日次推移表（{{ selectedFilterSummary }}）</div>
       <table class="data-table compact">
         <thead><tr><th>日付</th><th>判定総数</th><th>修正流動件数</th><th>修正流動率</th><th>NG件数</th><th>NG率</th></tr></thead>
         <tbody>
@@ -183,14 +150,189 @@
             <td>{{ row.date }}</td>
             <td>{{ row.total }}</td>
             <td>{{ row.reworkCount }}</td>
-            <td>{{ row.reworkRate.toFixed(1) }}%</td>
+            <td :class="rateClass(row.reworkRate)">{{ row.reworkRate.toFixed(1) }}%</td>
             <td>{{ row.ngCount }}</td>
-            <td>{{ row.ngRate.toFixed(1) }}%</td>
+            <td :class="rateClass(row.ngRate)">{{ row.ngRate.toFixed(1) }}%</td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <!-- ===== 工程別 週次推移 ===== -->
+    <h3 class="section-title">工程別 週次推移（NG率）</h3>
+    <div class="chart-wrap">
+      <div class="chart-header">
+        <div class="chart-title">工程別 NG率 週次推移</div>
+        <div class="chart-subtitle">直近{{ procWeeks.length }}週</div>
+      </div>
+      <svg v-if="procWeeks.length > 0" class="trend-svg" viewBox="0 0 920 290">
+        <line v-for="t in weeklyRateScale.ticks" :key="'wg-'+t" :x1="PL" :y1="yC(t, weeklyRateScale.max)" :x2="PR" :y2="yC(t, weeklyRateScale.max)" class="grid-line" />
+        <line :x1="PL" :y1="PT" :x2="PL" :y2="PB" class="axis-line" />
+        <line :x1="PL" :y1="PB" :x2="PR" :y2="PB" class="axis-line" />
+        <text v-for="t in weeklyRateScale.ticks" :key="'wyl-'+t" :x="PL - 6" :y="yC(t, weeklyRateScale.max) + 4" text-anchor="end" class="axis-label">{{ t }}%</text>
+        <text v-for="(w, i) in procWeeks" :key="'wxl-'+i" :x="wxC(i)" :y="PB + 16" text-anchor="middle" class="axis-label">{{ shortDate(w) }}</text>
+        <g v-for="(entry, eIdx) in procWeeklyEntries" :key="'pwl-'+eIdx">
+          <polyline :points="weeklyLine(entry[1])" fill="none" :stroke="PALETTE[eIdx % PALETTE.length]" stroke-width="2" />
+          <circle v-for="(w, wi) in procWeeks" :key="'pwp-'+eIdx+'-'+wi" :cx="wxC(wi)" :cy="yC(entry[1].get(w) || 0, weeklyRateScale.max)" r="3.5" :fill="PALETTE[eIdx % PALETTE.length]" class="data-point">
+            <title>{{ entry[0] }} {{ shortDate(w) }}: {{ (entry[1].get(w) || 0).toFixed(1) }}%</title>
+          </circle>
+        </g>
+        <text :x="PL - 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(-90,${PL - 8},${(PT + PB) / 2})`">NG率 %</text>
+      </svg>
+      <div v-if="procWeeklyEntries.length" class="trend-legend proc-legend">
+        <span v-for="(entry, eIdx) in procWeeklyEntries" :key="'pwleg-'+eIdx" class="legend-item">
+          <span class="legend-swatch" :style="{ background: PALETTE[eIdx % PALETTE.length] }"></span>{{ entry[0] }}
+        </span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table compact">
+        <thead><tr><th>工程</th><th>推移</th><th>今週</th><th>先週</th><th>前週比</th><th>3か月平均</th></tr></thead>
+        <tbody>
+          <tr v-for="(row, rIdx) in processRows" :key="row.process">
+            <td>{{ row.process }}</td>
+            <td class="sparkline-cell">
+              <svg width="80" height="22" viewBox="0 0 80 22">
+                <polyline :points="sparkLine(procWeeklyRates.get(row.process))" fill="none" :stroke="PALETTE[rIdx % PALETTE.length]" stroke-width="1.5" />
+              </svg>
+            </td>
+            <td>{{ row.thisWeek }}%</td>
+            <td>{{ row.lastWeek }}%</td>
+            <td :class="trendClass(row.diff)">{{ trendArrow(row.diff) }} {{ row.diff }}pt</td>
+            <td>{{ row.ma3m }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== 集計結果 ===== -->
+    <h3 class="section-title">集計結果（{{ summaryAxisLabel }}別）</h3>
+    <div class="chart-wrap">
+      <div class="chart-header">
+        <div class="chart-title">{{ summaryAxisLabel }}別 修正流動件数・修正流動率</div>
+        <div class="chart-subtitle">対象: {{ selectedFilterSummary }}</div>
+      </div>
+      <svg class="trend-svg" viewBox="0 0 920 320">
+        <line v-for="t in sumCountScale.ticks" :key="'sg-'+t" :x1="PL" :y1="yC(t, sumCountScale.max)" :x2="PRD" :y2="yC(t, sumCountScale.max)" class="grid-line" />
+        <line :x1="PL" :y1="PT" :x2="PL" :y2="PB" class="axis-line" />
+        <line :x1="PL" :y1="PB" :x2="PRD" :y2="PB" class="axis-line" />
+        <line :x1="PRD" :y1="PT" :x2="PRD" :y2="PB" class="axis-line-r" />
+        <!-- 左Y軸ラベル（件数） -->
+        <text v-for="t in sumCountScale.ticks" :key="'syl-'+t" :x="PL - 6" :y="yC(t, sumCountScale.max) + 4" text-anchor="end" class="axis-label">{{ t }}</text>
+        <!-- 右Y軸ラベル（率%） -->
+        <text v-for="t in sumRateScale.ticks" :key="'syr-'+t" :x="PRD + 6" :y="yC(t, sumRateScale.max) + 4" text-anchor="start" class="axis-label">{{ t }}%</text>
+        <!-- 棒グラフ -->
+        <g v-for="(row, idx) in summaryRows.slice(0, 12)" :key="'sbar-'+idx">
+          <rect :x="sumBarX(idx)" :y="yC(row.reworkCount, sumCountScale.max)" :width="sumBarW" :height="Math.max(PB - yC(row.reworkCount, sumCountScale.max), 1)" class="summary-bar">
+            <title>{{ row.key }}: {{ row.reworkCount }}件 ({{ row.reworkRate.toFixed(1) }}%)</title>
+          </rect>
+          <text :x="sumBarX(idx) + sumBarW / 2" :y="PB + 14" text-anchor="end" class="axis-label x-rotated" :transform="`rotate(-40,${sumBarX(idx) + sumBarW / 2},${PB + 14})`">{{ row.key.length > 10 ? row.key.slice(0, 10) + '…' : row.key }}</text>
+        </g>
+        <!-- 率折れ線 + マーカー -->
+        <polyline :points="sumRateStr" class="trend-line rework-rate" />
+        <circle v-for="(pt, idx) in sumRatePts" :key="'src-'+idx" :cx="pt.x" :cy="pt.y" r="4" class="data-point rate-dot">
+          <title>{{ pt.tip }}</title>
+        </circle>
+        <!-- 平均修正流動率 -->
+        <line v-if="sumAvgRate > 0" :x1="PL" :y1="yC(sumAvgRate, sumRateScale.max)" :x2="PRD" :y2="yC(sumAvgRate, sumRateScale.max)" class="avg-line" />
+        <text v-if="sumAvgRate > 0" :x="PRD + 6" :y="yC(sumAvgRate, sumRateScale.max) - 4" class="avg-label">平均 {{ sumAvgRate.toFixed(1) }}%</text>
+        <text :x="PL - 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(-90,${PL - 8},${(PT + PB) / 2})`">件数</text>
+        <text :x="PRD + 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(90,${PRD + 8},${(PT + PB) / 2})`">率 %</text>
+      </svg>
+      <div class="trend-legend">
+        <span class="legend-item"><span class="legend-swatch count-bg"></span>修正流動件数（棒）</span>
+        <span class="legend-item"><span class="legend-swatch rate-bg"></span>修正流動率（折れ線）</span>
+        <span class="legend-item"><span class="legend-line-dash avg-bg"></span>平均修正流動率</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <div class="table-title">集計表（{{ selectedFilterSummary }}）</div>
+      <table class="data-table compact">
+        <thead><tr><th>{{ summaryAxisLabel }}</th><th>判定総数</th><th>修正流動件数</th><th>修正流動率</th><th>NG件数</th><th>NG率</th></tr></thead>
+        <tbody>
+          <tr v-for="row in summaryRows" :key="`s-row-${row.key}`">
+            <td>{{ row.key }}</td>
+            <td>{{ row.total }}</td>
+            <td>{{ row.reworkCount }}</td>
+            <td :class="rateClass(row.reworkRate)">{{ row.reworkRate.toFixed(1) }}%</td>
+            <td>{{ row.ngCount }}</td>
+            <td :class="rateClass(row.ngRate)">{{ row.ngRate.toFixed(1) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== 上位不良要因（パレート分析） ===== -->
+    <h3 class="section-title">上位不良要因（パレート分析）</h3>
+    <div class="chart-wrap">
+      <div class="chart-header">
+        <div class="chart-title">不良要因パレート図</div>
+        <div class="chart-subtitle">NG件数上位（累積構成比）</div>
+      </div>
+      <svg v-if="paretoData.length" class="trend-svg" viewBox="0 0 920 320">
+        <line v-for="t in paretoCountScale.ticks" :key="'pg-'+t" :x1="PL" :y1="yC(t, paretoCountScale.max)" :x2="PRD" :y2="yC(t, paretoCountScale.max)" class="grid-line" />
+        <line :x1="PL" :y1="PT" :x2="PL" :y2="PB" class="axis-line" />
+        <line :x1="PL" :y1="PB" :x2="PRD" :y2="PB" class="axis-line" />
+        <line :x1="PRD" :y1="PT" :x2="PRD" :y2="PB" class="axis-line-r" />
+        <text v-for="t in paretoCountScale.ticks" :key="'pyl-'+t" :x="PL - 6" :y="yC(t, paretoCountScale.max) + 4" text-anchor="end" class="axis-label">{{ t }}</text>
+        <text v-for="p in [0, 20, 40, 60, 80, 100]" :key="'pyr-'+p" :x="PRD + 6" :y="yC(p, 100) + 4" text-anchor="start" class="axis-label">{{ p }}%</text>
+        <!-- 80%閾値 -->
+        <line :x1="PL" :y1="yC(80, 100)" :x2="PRD" :y2="yC(80, 100)" class="threshold-line" />
+        <text :x="PRD + 6" :y="yC(80, 100) - 3" class="threshold-label">80%</text>
+        <!-- 棒 -->
+        <g v-for="(f, idx) in paretoData" :key="'pb-'+idx">
+          <rect :x="paretoBarX(idx)" :y="yC(f.count, paretoCountScale.max)" :width="paretoBarW" :height="Math.max(PB - yC(f.count, paretoCountScale.max), 1)" class="pareto-bar">
+            <title>{{ f.itemName }}: {{ f.count }}件 (累計 {{ f.cumPct.toFixed(1) }}%)</title>
+          </rect>
+          <text :x="paretoBarX(idx) + paretoBarW / 2" :y="PB + 14" text-anchor="end" class="axis-label x-rotated" :transform="`rotate(-40,${paretoBarX(idx) + paretoBarW / 2},${PB + 14})`">{{ f.itemName.length > 12 ? f.itemName.slice(0, 12) + '…' : f.itemName }}</text>
+        </g>
+        <!-- 累積線 + マーカー -->
+        <polyline :points="paretoCumStr" class="trend-line cumulative" />
+        <circle v-for="(pt, idx) in paretoCumPts" :key="'pcm-'+idx" :cx="pt.x" :cy="pt.y" r="3.5" class="data-point cum-dot">
+          <title>累計 {{ pt.pct }}%</title>
+        </circle>
+        <text :x="PL - 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(-90,${PL - 8},${(PT + PB) / 2})`">件数</text>
+        <text :x="PRD + 8" :y="(PT + PB) / 2" text-anchor="middle" class="axis-title" :transform="`rotate(90,${PRD + 8},${(PT + PB) / 2})`">累積 %</text>
+      </svg>
+      <div class="trend-legend">
+        <span class="legend-item"><span class="legend-swatch pareto-bg"></span>NG件数（棒）</span>
+        <span class="legend-item"><span class="legend-swatch cum-bg"></span>累積構成比（折れ線）</span>
+        <span class="legend-item"><span class="legend-line-dash threshold-bg"></span>80%ライン</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table compact">
+        <thead><tr><th>順位</th><th>項目</th><th>件数</th><th>構成比</th><th>累積構成比</th></tr></thead>
+        <tbody>
+          <tr v-for="(f, idx) in paretoData" :key="f.itemName">
+            <td>{{ idx + 1 }}</td>
+            <td>{{ f.itemName }}</td>
+            <td>{{ f.count }}</td>
+            <td>{{ f.pct.toFixed(1) }}%</td>
+            <td>{{ f.cumPct.toFixed(1) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== ライン比較 ===== -->
+    <h3 class="section-title">ライン比較</h3>
+    <div class="table-wrap">
+      <table class="data-table compact">
+        <thead><tr><th>ライン</th><th>判定総数</th><th>NG件数</th><th>NG率</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="row in lineRows" :key="row.line">
+            <td>{{ row.line }}</td>
+            <td>{{ row.total }}</td>
+            <td>{{ row.ng }}</td>
+            <td :class="rateClass(Number(row.rate))">{{ row.rate }}%</td>
+            <td class="inline-bar-cell"><div class="inline-bar-track"><div class="inline-bar-fill" :style="{ width: `${Math.min(Number(row.rate) / Math.max(lineMaxRate, 0.1) * 100, 100)}%` }"></div></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== 日別工程別 ===== -->
     <h3 class="section-title">日別工程別 修正流動率</h3>
     <div class="table-wrap">
       <div class="table-title">ライン / 工程 / 製品 / 日付 別一覧</div>
@@ -204,9 +346,9 @@
             <td>{{ row.product }}</td>
             <td>{{ row.total }}</td>
             <td>{{ row.reworkCount }}</td>
-            <td>{{ row.reworkRate.toFixed(1) }}%</td>
+            <td :class="rateClass(row.reworkRate)">{{ row.reworkRate.toFixed(1) }}%</td>
             <td>{{ row.ngCount }}</td>
-            <td>{{ row.ngRate.toFixed(1) }}%</td>
+            <td :class="rateClass(row.ngRate)">{{ row.ngRate.toFixed(1) }}%</td>
           </tr>
         </tbody>
       </table>
@@ -218,14 +360,25 @@
 import { computed, onMounted, ref, watch } from "vue"
 import api from "@/api/client"
 
+// ── 定数 ──
+const PL = 65, PR = 855, PRD = 825, PT = 25, PB = 220
+const PW = PR - PL, PWD = PRD - PL, PH = PB - PT
+const BUSINESS_DAY_START_HOUR = 8
+const TEMPLATE_FETCH_CHUNK_SIZE = 10
+const UNIT_FETCH_CHUNK_SIZE = 10
+const MA_WINDOW = 7
+const PALETTE = ["#2563eb", "#dc2626", "#16a34a", "#ea580c", "#8b5cf6", "#0891b2", "#ca8a04", "#be185d", "#4f46e5", "#059669"]
+
+// ── State ──
 const loading = ref(false)
 const error = ref("")
+const allRows = ref([])
 const processRows = ref([])
 const topFactors = ref([])
 const lineRows = ref([])
-const allRows = ref([])
-const BUSINESS_DAY_START_HOUR = 8
-const TEMPLATE_FETCH_CHUNK_SIZE = 10
+const procWeeklyRates = ref(new Map())
+const procWeeks = ref([])
+const templateDefinitions = ref([])
 const selectedLine = ref("")
 const selectedProcess = ref("")
 const selectedProduct = ref("")
@@ -234,37 +387,85 @@ const selectedPerson = ref("")
 const selectedUnit = ref("")
 const startDate = ref("")
 const endDate = ref("")
+const favorites = ref([])
+const selectedFavoriteId = ref("")
+const favoriteName = ref("")
+const FAVORITE_SCREEN_KEY = "quality.product_checksheet_integrated_trend_analysis"
 
+// ── ヘルパー ──
 const toArray = (data) => data?.results || data || []
 const toDate = (v) => new Date(v || "")
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-const UNIT_FETCH_CHUNK_SIZE = 10
 const toBusinessDate = (value) => {
   const dt = toDate(value)
   if (Number.isNaN(dt.getTime())) return null
-  const normalized = new Date(dt)
-  if (normalized.getHours() < BUSINESS_DAY_START_HOUR) {
-    normalized.setDate(normalized.getDate() - 1)
-  }
-  normalized.setHours(0, 0, 0, 0)
-  return normalized
+  const n = new Date(dt)
+  if (n.getHours() < BUSINESS_DAY_START_HOUR) n.setDate(n.getDate() - 1)
+  n.setHours(0, 0, 0, 0)
+  return n
 }
 const isJudged = (check) => ["OK", "NG", "修正流動"].includes(check?.judgement)
 const rate = (ng, total) => total ? ((ng / total) * 100).toFixed(1) : "0.0"
 const ngRateFromRows = (rows) => {
   const base = rows.filter((r) => !r.isRework)
-  const ng = base.filter((r) => r.isNg).length
-  return rate(ng, base.length)
+  return rate(base.filter((r) => r.isNg).length, base.length)
 }
 const uniqueSorted = (rows, key) => [...new Set(rows.map((r) => r[key] || "未設定"))].sort((a, b) => String(a).localeCompare(String(b), "ja"))
-const lineOptions = computed(() => uniqueSorted(allRows.value, "line"))
-const processOptions = computed(() => uniqueSorted(allRows.value, "process"))
-const productOptions = computed(() => uniqueSorted(allRows.value, "product"))
+
+const niceScale = (rawMax, steps = 4) => {
+  if (rawMax <= 0) return { max: steps, step: 1, ticks: Array.from({ length: steps + 1 }, (_, i) => i) }
+  const rough = rawMax / steps
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)))
+  const norm = rough / mag
+  let step
+  if (norm <= 1.5) step = mag
+  else if (norm <= 3) step = 2 * mag
+  else if (norm <= 7) step = 5 * mag
+  else step = 10 * mag
+  const max = Math.ceil(rawMax / step) * step
+  const ticks = []
+  for (let v = 0; v <= max + step * 0.01; v += step) ticks.push(Math.round(v * 1000) / 1000)
+  return { max, step, ticks }
+}
+
+const calcMA = (values, win) => values.map((_, i) => {
+  const s = Math.max(0, i - win + 1)
+  const slice = values.slice(s, i + 1)
+  return slice.reduce((a, b) => a + b, 0) / slice.length
+})
+
+const yC = (val, scaleMax) => PB - (val / Math.max(scaleMax, 0.001)) * PH
+const shortDate = (d) => { const p = d.split("-"); return `${parseInt(p[1])}/${parseInt(p[2])}` }
+
+const trendArrow = (diff) => { const n = Number(diff); return n > 0.05 ? "↑" : n < -0.05 ? "↓" : "→" }
+const trendClass = (diff) => { const n = Number(diff); return n > 0.05 ? "trend-worse" : n < -0.05 ? "trend-better" : "trend-flat" }
+const rateClass = (r) => r >= 10 ? "rate-high" : r >= 5 ? "rate-mid" : ""
+
+// ── Computed: フィルタ & オプション ──
+const lineOptions = computed(() => uniqueSorted(templateDefinitions.value, "line"))
+const processOptions = computed(() => uniqueSorted(
+  templateDefinitions.value.filter((row) => {
+    if (selectedLine.value && row.line !== selectedLine.value) return false
+    if (selectedProduct.value && row.product !== selectedProduct.value) return false
+    return true
+  }),
+  "process",
+))
+const productOptions = computed(() => uniqueSorted(
+  templateDefinitions.value.filter((row) => {
+    if (selectedLine.value && row.line !== selectedLine.value) return false
+    if (selectedProcess.value && row.process !== selectedProcess.value) return false
+    return true
+  }),
+  "product",
+))
 const isItemSelectable = computed(() => Boolean(selectedProduct.value) && Boolean(selectedProcess.value))
 const itemOptions = computed(() => {
   if (!isItemSelectable.value) return []
-  const base = allRows.value.filter((r) => r.product === selectedProduct.value && r.process === selectedProcess.value)
-  return uniqueSorted(base, "itemName")
+  return uniqueSorted(
+    templateDefinitions.value.filter((row) => row.product === selectedProduct.value && row.process === selectedProcess.value),
+    "itemName",
+  )
 })
 const personOptions = computed(() => uniqueSorted(allRows.value, "person"))
 const unitOptions = computed(() => uniqueSorted(allRows.value, "unit"))
@@ -281,25 +482,6 @@ const filteredRows = computed(() => allRows.value.filter((r) => {
   return true
 }))
 
-const summaryRows = computed(() => {
-  const map = new Map()
-  filteredRows.value.forEach((r) => {
-    const key = String(r[summaryAxisKey.value] || "未設定")
-    if (!map.has(key)) map.set(key, { key, total: 0, ngCount: 0, reworkCount: 0, ngRate: 0, reworkRate: 0, metricValue: 0 })
-    const obj = map.get(key)
-    obj.total += 1
-    if (r.isNg) obj.ngCount += 1
-    if (r.isRework) obj.reworkCount += 1
-  })
-  const rows = [...map.values()].map((r) => {
-    const ngRate = r.total ? (r.ngCount / r.total) * 100 : 0
-    const reworkRate = r.total ? (r.reworkCount / r.total) * 100 : 0
-    return { ...r, ngRate, reworkRate }
-  })
-  rows.sort((a, b) => b.reworkCount - a.reworkCount)
-  return rows
-})
-
 const summaryAxisKey = computed(() => {
   if (selectedItem.value) return "itemName"
   if (selectedPerson.value) return "person"
@@ -307,17 +489,7 @@ const summaryAxisKey = computed(() => {
   if (selectedProcess.value) return "process"
   return "line"
 })
-
-const summaryAxisLabel = computed(() => {
-  const labelMap = {
-    itemName: "項目",
-    person: "作業者",
-    product: "製品",
-    process: "工程",
-    line: "ライン",
-  }
-  return labelMap[summaryAxisKey.value] || "ライン"
-})
+const summaryAxisLabel = computed(() => ({ itemName: "項目", person: "作業者", product: "製品", process: "工程", line: "ライン" })[summaryAxisKey.value] || "ライン")
 
 const selectedFilterSummary = computed(() => {
   const parts = []
@@ -330,23 +502,31 @@ const selectedFilterSummary = computed(() => {
   return parts.length ? parts.join(" + ") : "全体"
 })
 
-const summaryMaxCount = computed(() => Math.max(...summaryRows.value.slice(0, 12).map((r) => r.reworkCount), 1))
-const summaryBandWidth = computed(() => 860 / Math.max(summaryRows.value.slice(0, 12).length, 1))
-const summaryRatePoints = computed(() => {
-  const rows = summaryRows.value.slice(0, 12)
-  if (!rows.length) return ""
-  return rows.map((r, idx) => {
-    const x = 50 + idx * summaryBandWidth.value + (summaryBandWidth.value * 0.5)
-    const y = 190 - ((r.reworkRate / 100) * 150)
-    return `${x},${y}`
-  }).join(" ")
+// ── Computed: 集計データ ──
+const summaryRows = computed(() => {
+  const map = new Map()
+  filteredRows.value.forEach((r) => {
+    const key = String(r[summaryAxisKey.value] || "未設定")
+    if (!map.has(key)) map.set(key, { key, total: 0, ngCount: 0, reworkCount: 0 })
+    const obj = map.get(key)
+    obj.total += 1
+    if (r.isNg) obj.ngCount += 1
+    if (r.isRework) obj.reworkCount += 1
+  })
+  return [...map.values()]
+    .map((r) => ({
+      ...r,
+      ngRate: r.total ? (r.ngCount / r.total) * 100 : 0,
+      reworkRate: r.total ? (r.reworkCount / r.total) * 100 : 0,
+    }))
+    .sort((a, b) => b.reworkCount - a.reworkCount)
 })
 
 const dailyRows = computed(() => {
   const map = new Map()
   filteredRows.value.forEach((r) => {
     const key = r.dateText
-    if (!map.has(key)) map.set(key, { date: key, total: 0, ngCount: 0, reworkCount: 0, ngRate: 0, reworkRate: 0 })
+    if (!map.has(key)) map.set(key, { date: key, total: 0, ngCount: 0, reworkCount: 0 })
     const obj = map.get(key)
     obj.total += 1
     if (r.isNg) obj.ngCount += 1
@@ -355,11 +535,7 @@ const dailyRows = computed(() => {
   return [...map.values()]
     .map((r) => {
       const ngBase = r.total - r.reworkCount
-      return {
-        ...r,
-        ngRate: ngBase > 0 ? (r.ngCount / ngBase) * 100 : 0,
-        reworkRate: r.total > 0 ? (r.reworkCount / r.total) * 100 : 0,
-      }
+      return { ...r, ngRate: ngBase > 0 ? (r.ngCount / ngBase) * 100 : 0, reworkRate: r.total > 0 ? (r.reworkCount / r.total) * 100 : 0 }
     })
     .sort((a, b) => String(a.date).localeCompare(String(b.date), "ja"))
 })
@@ -368,19 +544,7 @@ const lineProcessDailyRows = computed(() => {
   const map = new Map()
   filteredRows.value.forEach((r) => {
     const key = `${r.dateText}__${r.line}__${r.process}__${r.product}`
-    if (!map.has(key)) {
-      map.set(key, {
-        date: r.dateText,
-        line: r.line,
-        process: r.process,
-        product: r.product,
-        total: 0,
-        ngCount: 0,
-        reworkCount: 0,
-        ngRate: 0,
-        reworkRate: 0,
-      })
-    }
+    if (!map.has(key)) map.set(key, { date: r.dateText, line: r.line, process: r.process, product: r.product, total: 0, ngCount: 0, reworkCount: 0 })
     const obj = map.get(key)
     obj.total += 1
     if (r.isNg) obj.ngCount += 1
@@ -389,61 +553,200 @@ const lineProcessDailyRows = computed(() => {
   return [...map.values()]
     .map((r) => {
       const ngBase = r.total - r.reworkCount
-      return {
-        ...r,
-        ngRate: ngBase > 0 ? (r.ngCount / ngBase) * 100 : 0,
-        reworkRate: r.total > 0 ? (r.reworkCount / r.total) * 100 : 0,
-      }
+      return { ...r, ngRate: ngBase > 0 ? (r.ngCount / ngBase) * 100 : 0, reworkRate: r.total > 0 ? (r.reworkCount / r.total) * 100 : 0 }
     })
     .sort((a, b) => {
       if (a.date !== b.date) return String(b.date).localeCompare(String(a.date), "ja")
       if (a.line !== b.line) return String(a.line).localeCompare(String(b.line), "ja")
       if (a.process !== b.process) return String(a.process).localeCompare(String(b.process), "ja")
-      if (a.product !== b.product) return String(a.product).localeCompare(String(b.product), "ja")
-      return b.reworkRate - a.reworkRate
+      return String(a.product).localeCompare(String(b.product), "ja")
     })
 })
 
-const dailyReworkPoints = computed(() => {
-  const rows = dailyRows.value
-  if (!rows.length) return ""
-  const maxY = Math.max(...rows.map((r) => Math.max(r.reworkCount, r.ngCount)), 1)
-  return rows.map((r, i) => {
-    const x = 40 + ((860 * i) / Math.max(rows.length - 1, 1))
-    const y = 180 - ((r.reworkCount / maxY) * 150)
-    return `${x},${y}`
-  }).join(" ")
+// ── Computed: KPI ──
+const kpi = computed(() => {
+  const rows = filteredRows.value
+  const total = rows.length
+  const reworkCount = rows.filter((r) => r.isRework).length
+  const ngCount = rows.filter((r) => r.isNg).length
+  const reworkRate = total > 0 ? (reworkCount / total) * 100 : 0
+  const nonRework = rows.filter((r) => !r.isRework)
+  const ngRate = nonRework.length > 0 ? (ngCount / nonRework.length) * 100 : 0
+  const now = new Date()
+  const w1 = new Date(now); w1.setDate(now.getDate() - 7)
+  const w2 = new Date(now); w2.setDate(now.getDate() - 14)
+  const tw = rows.filter((r) => r.date >= w1)
+  const lw = rows.filter((r) => r.date >= w2 && r.date < w1)
+  const twRR = tw.length > 0 ? (tw.filter((r) => r.isRework).length / tw.length) * 100 : 0
+  const lwRR = lw.length > 0 ? (lw.filter((r) => r.isRework).length / lw.length) * 100 : 0
+  const twNR = tw.filter((r) => !r.isRework)
+  const lwNR = lw.filter((r) => !r.isRework)
+  const twNG = twNR.length > 0 ? (tw.filter((r) => r.isNg).length / twNR.length) * 100 : 0
+  const lwNG = lwNR.length > 0 ? (lw.filter((r) => r.isNg).length / lwNR.length) * 100 : 0
+  return { total, reworkCount, ngCount, reworkRate, ngRate, reworkDiff: twRR - lwRR, ngDiff: twNG - lwNG }
 })
 
-const dailyNgPoints = computed(() => {
+// ── Computed: 日次チャート座標 ──
+const dailyMax = computed(() => Math.max(...dailyRows.value.map((r) => Math.max(r.reworkCount, r.ngCount)), 1))
+const dailyScale = computed(() => niceScale(dailyMax.value, 4))
+const dailyMarkerInterval = computed(() => Math.max(1, Math.ceil(dailyRows.value.length / 15)))
+const dailyXLabels = computed(() => {
   const rows = dailyRows.value
-  if (!rows.length) return ""
-  const maxY = Math.max(...rows.map((r) => Math.max(r.reworkCount, r.ngCount)), 1)
-  return rows.map((r, i) => {
-    const x = 40 + ((860 * i) / Math.max(rows.length - 1, 1))
-    const y = 180 - ((r.ngCount / maxY) * 150)
-    return `${x},${y}`
-  }).join(" ")
+  const interval = Math.max(1, Math.ceil(rows.length / 14))
+  return rows.filter((_, i) => i % interval === 0 || i === rows.length - 1).map((r) => ({ idx: rows.indexOf(r), label: shortDate(r.date) }))
+})
+const dxC = (idx) => {
+  const n = dailyRows.value.length
+  return PL + (n > 1 ? (idx / (n - 1)) * PW : PW / 2)
+}
+const dailyPts = (key) => {
+  const rows = dailyRows.value
+  const max = dailyScale.value.max
+  return rows.map((r, i) => ({ x: dxC(i), y: yC(r[key], max), tip: `${r.date}: ${r[key]}件` }))
+}
+const dailyReworkPts = computed(() => dailyPts("reworkCount"))
+const dailyNgPts = computed(() => dailyPts("ngCount"))
+const ptsToStr = (pts) => pts.map((p) => `${p.x},${p.y}`).join(" ")
+const dailyReworkStr = computed(() => ptsToStr(dailyReworkPts.value))
+const dailyNgStr = computed(() => ptsToStr(dailyNgPts.value))
+const dailyAvgRework = computed(() => {
+  const rows = dailyRows.value
+  return rows.length ? rows.reduce((s, r) => s + r.reworkCount, 0) / rows.length : 0
+})
+const dailyReworkMaStr = computed(() => {
+  const rows = dailyRows.value
+  if (rows.length < 3) return ""
+  const ma = calcMA(rows.map((r) => r.reworkCount), MA_WINDOW)
+  const max = dailyScale.value.max
+  return ma.map((v, i) => `${dxC(i)},${yC(v, max)}`).join(" ")
+})
+const dailyNgMaStr = computed(() => {
+  const rows = dailyRows.value
+  if (rows.length < 3) return ""
+  const ma = calcMA(rows.map((r) => r.ngCount), MA_WINDOW)
+  const max = dailyScale.value.max
+  return ma.map((v, i) => `${dxC(i)},${yC(v, max)}`).join(" ")
 })
 
+// ── Computed: 集計チャート座標 ──
+const sumSlice = computed(() => summaryRows.value.slice(0, 12))
+const sumCountMax = computed(() => Math.max(...sumSlice.value.map((r) => r.reworkCount), 1))
+const sumCountScale = computed(() => niceScale(sumCountMax.value, 4))
+const sumRateMax = computed(() => Math.max(...sumSlice.value.map((r) => r.reworkRate), 1))
+const sumRateScale = computed(() => niceScale(sumRateMax.value, 4))
+const sumBandW = computed(() => PWD / Math.max(sumSlice.value.length, 1))
+const sumBarW = computed(() => sumBandW.value * 0.55)
+const sumBarX = (idx) => PL + idx * sumBandW.value + (sumBandW.value - sumBarW.value) / 2
+const sumRatePts = computed(() => sumSlice.value.map((r, i) => ({
+  x: PL + i * sumBandW.value + sumBandW.value / 2,
+  y: yC(r.reworkRate, sumRateScale.value.max),
+  tip: `${r.key}: ${r.reworkRate.toFixed(1)}%`,
+})))
+const sumRateStr = computed(() => ptsToStr(sumRatePts.value))
+const sumAvgRate = computed(() => {
+  const rows = summaryRows.value
+  if (!rows.length) return 0
+  const tRework = rows.reduce((s, r) => s + r.reworkCount, 0)
+  const tAll = rows.reduce((s, r) => s + r.total, 0)
+  return tAll > 0 ? (tRework / tAll) * 100 : 0
+})
+
+// ── Computed: パレート ──
+const paretoData = computed(() => {
+  if (!topFactors.value.length) return []
+  const total = topFactors.value.reduce((s, f) => s + f.count, 0)
+  let cum = 0
+  return topFactors.value.slice(0, 8).map((f) => {
+    const pct = total > 0 ? (f.count / total) * 100 : 0
+    cum += f.count
+    return { ...f, pct, cumPct: total > 0 ? (cum / total) * 100 : 0 }
+  })
+})
+const paretoCountMax = computed(() => Math.max(...paretoData.value.map((f) => f.count), 1))
+const paretoCountScale = computed(() => niceScale(paretoCountMax.value, 4))
+const paretoBandW = computed(() => PWD / Math.max(paretoData.value.length, 1))
+const paretoBarW = computed(() => paretoBandW.value * 0.55)
+const paretoBarX = (idx) => PL + idx * paretoBandW.value + (paretoBandW.value - paretoBarW.value) / 2
+const paretoCumPts = computed(() => paretoData.value.map((f, i) => ({
+  x: PL + i * paretoBandW.value + paretoBandW.value / 2,
+  y: yC(f.cumPct, 100),
+  pct: f.cumPct.toFixed(1),
+})))
+const paretoCumStr = computed(() => ptsToStr(paretoCumPts.value))
+
+// ── Computed: 工程別週次 ──
+const procWeeklyEntries = computed(() => [...procWeeklyRates.value.entries()])
+const procWeeklyMaxRate = computed(() => {
+  let max = 0
+  for (const [, wm] of procWeeklyRates.value) for (const [, r] of wm) if (r > max) max = r
+  return max || 1
+})
+const weeklyRateScale = computed(() => niceScale(procWeeklyMaxRate.value, 4))
+const wxC = (i) => PL + (procWeeks.value.length > 1 ? (i / (procWeeks.value.length - 1)) * PW : PW / 2)
+const weeklyLine = (weekRateMap) => {
+  const weeks = procWeeks.value
+  if (!weeks.length) return ""
+  return weeks.map((w, i) => `${wxC(i)},${yC(weekRateMap.get(w) || 0, weeklyRateScale.value.max)}`).join(" ")
+}
+const sparkLine = (weekRateMap) => {
+  if (!weekRateMap || !procWeeks.value.length) return "0,11 80,11"
+  const max = procWeeklyMaxRate.value
+  const weeks = procWeeks.value
+  return weeks.map((w, i) => {
+    const r = weekRateMap.get(w) || 0
+    const x = 2 + (weeks.length > 1 ? (i / (weeks.length - 1)) * 76 : 38)
+    const y = 20 - (r / Math.max(max, 0.01)) * 16
+    return `${x},${y}`
+  }).join(" ")
+}
+
+// ── Computed: ライン比較 ──
+const lineMaxRate = computed(() => Math.max(...lineRows.value.map((r) => Number(r.rate)), 0.1))
+
+// ── データ取得 ──
 const loadBatchUnitsChunked = async (batches) => {
   const results = []
   for (let i = 0; i < batches.length; i += UNIT_FETCH_CHUNK_SIZE) {
     const chunk = batches.slice(i, i + UNIT_FETCH_CHUNK_SIZE)
-    const chunkResults = await Promise.all(chunk.map((b) => api.integratedChecksheets.getBatchUnits(b.id)))
-    results.push(...chunkResults)
+    results.push(...(await Promise.all(chunk.map((b) => api.integratedChecksheets.getBatchUnits(b.id)))))
   }
   return results
 }
-
 const loadTemplatesChunked = async (templateIds) => {
   const results = []
   for (let i = 0; i < templateIds.length; i += TEMPLATE_FETCH_CHUNK_SIZE) {
     const chunk = templateIds.slice(i, i + TEMPLATE_FETCH_CHUNK_SIZE)
-    const chunkResults = await Promise.all(chunk.map((id) => api.integratedChecksheets.getTemplate(id)))
-    results.push(...chunkResults)
+    results.push(...(await Promise.all(chunk.map((id) => api.integratedChecksheets.getTemplate(id)))))
   }
   return results
+}
+
+const loadTemplateDefinitions = async () => {
+  try {
+    const res = await api.integratedChecksheets.listTemplates({ page_size: 500 })
+    const templates = toArray(res.data)
+    const templateIds = templates.map((t) => Number(t.id || 0)).filter((id) => id > 0)
+    const templateResList = await loadTemplatesChunked(templateIds)
+    const rows = []
+    templateResList.forEach((response) => {
+      const template = response.data
+      const line = template?.line_code || "未設定"
+      const product = template?.product_code || "未設定"
+      ;(template?.process_blocks || []).forEach((block) => {
+        const process = block.process_name || block.process_code || `工程${block.id}`
+        if (!block.items?.length) {
+          rows.push({ templateId: Number(template.id || 0), line, product, process, itemName: "未設定項目" })
+          return
+        }
+        block.items.forEach((item) => {
+          rows.push({ templateId: Number(template.id || 0), line, product, process, itemName: item.item_name || "未設定項目" })
+        })
+      })
+    })
+    templateDefinitions.value = rows
+  } catch (e) {
+    console.error("テンプレート定義取得失敗:", e)
+  }
 }
 
 const loadData = async () => {
@@ -453,18 +756,15 @@ const loadData = async () => {
     const res = await api.integratedChecksheets.listBatches({ page_size: 200 })
     const batches = toArray(res.data)
     const unitsRes = await loadBatchUnitsChunked(batches)
-    const templateIds = [...new Set(batches.map((batch) => Number(batch.template || 0)).filter((id) => id > 0))]
+    const templateIds = [...new Set(batches.map((b) => Number(b.template || 0)).filter((id) => id > 0))]
     const templateResList = await loadTemplatesChunked(templateIds)
-    const templateById = new Map(templateIds.map((id, index) => [id, templateResList[index]?.data || null]))
+    const templateById = new Map(templateIds.map((id, idx) => [id, templateResList[idx]?.data || null]))
     const rows = []
     for (let i = 0; i < batches.length; i += 1) {
       const batch = batches[i]
       const template = templateById.get(Number(batch.template || 0))
       const processNameById = new Map(
-        (template?.process_blocks || []).map((block) => [
-          Number(block.id),
-          block.process_name || block.process_code || `工程${block.id}`,
-        ]),
+        (template?.process_blocks || []).map((block) => [Number(block.id), block.process_name || block.process_code || `工程${block.id}`]),
       )
       const units = toArray(unitsRes[i].data)
       for (const unit of units) {
@@ -504,30 +804,29 @@ const rebuildRows = () => {
   const lastWeekEnd = new Date(now); lastWeekEnd.setDate(now.getDate() - 7)
   const threeMonthStart = new Date(now); threeMonthStart.setMonth(now.getMonth() - 3)
 
+  // 工程別
   const byProcess = new Map()
   rows.forEach((r) => {
     if (!byProcess.has(r.process)) byProcess.set(r.process, [])
     byProcess.get(r.process).push(r)
   })
-  processRows.value = [...byProcess.entries()].map(([process, list]) => {
-    const thisWeek = list.filter((r) => r.date >= thisWeekStart && r.date <= now)
-    const lastWeek = list.filter((r) => r.date >= lastWeekStart && r.date <= lastWeekEnd)
-    const ma3m = list.filter((r) => r.date >= threeMonthStart && r.date <= now)
-    const t = Number(ngRateFromRows(thisWeek))
-    const l = Number(ngRateFromRows(lastWeek))
-    return {
-      process,
-      thisWeek: t.toFixed(1),
-      lastWeek: l.toFixed(1),
-      diff: (t - l).toFixed(1),
-      ma3m: ngRateFromRows(ma3m),
-    }
-  }).sort((a, b) => Number(b.thisWeek) - Number(a.thisWeek))
+  processRows.value = [...byProcess.entries()]
+    .map(([process, list]) => {
+      const thisWeek = list.filter((r) => r.date >= thisWeekStart && r.date <= now)
+      const lastWeek = list.filter((r) => r.date >= lastWeekStart && r.date <= lastWeekEnd)
+      const ma3m = list.filter((r) => r.date >= threeMonthStart && r.date <= now)
+      const t = Number(ngRateFromRows(thisWeek))
+      const l = Number(ngRateFromRows(lastWeek))
+      return { process, thisWeek: t.toFixed(1), lastWeek: l.toFixed(1), diff: (t - l).toFixed(1), ma3m: ngRateFromRows(ma3m) }
+    })
+    .sort((a, b) => Number(b.thisWeek) - Number(a.thisWeek))
 
+  // 上位不良要因
   const factorMap = new Map()
   rows.filter((r) => r.isNg).forEach((r) => factorMap.set(r.itemName, (factorMap.get(r.itemName) || 0) + 1))
   topFactors.value = [...factorMap.entries()].map(([itemName, count]) => ({ itemName, count })).sort((a, b) => b.count - a.count).slice(0, 10)
 
+  // ライン比較
   const lineMap = new Map()
   rows.forEach((r) => {
     if (!lineMap.has(r.line)) lineMap.set(r.line, { line: r.line, total: 0, ng: 0 })
@@ -536,43 +835,199 @@ const rebuildRows = () => {
     if (r.isNg) obj.ng += 1
   })
   lineRows.value = [...lineMap.values()].map((r) => ({ ...r, rate: rate(r.ng, r.total) })).sort((a, b) => Number(b.rate) - Number(a.rate))
+
+  // 工程別 週次データ
+  const wMap = new Map()
+  rows.forEach((r) => {
+    const d = new Date(r.date)
+    const day = d.getDay()
+    d.setDate(d.getDate() - day + (day === 0 ? -6 : 1))
+    const ws = ymd(d)
+    const key = `${r.process}||${ws}`
+    if (!wMap.has(key)) wMap.set(key, { process: r.process, week: ws, total: 0, ng: 0 })
+    const o = wMap.get(key)
+    if (!r.isRework) o.total += 1
+    if (r.isNg) o.ng += 1
+  })
+  const weeks = [...new Set([...wMap.values()].map((v) => v.week))].sort()
+  const recentWeeks = weeks.slice(-8)
+  const pwMap = new Map()
+  for (const [, v] of wMap) {
+    if (!recentWeeks.includes(v.week)) continue
+    if (!pwMap.has(v.process)) pwMap.set(v.process, new Map())
+    pwMap.get(v.process).set(v.week, v.total > 0 ? (v.ng / v.total) * 100 : 0)
+  }
+  procWeeks.value = recentWeeks
+  procWeeklyRates.value = pwMap
 }
 
-onMounted(loadData)
-watch([selectedProduct, selectedProcess], () => {
-  if (!isItemSelectable.value) selectedItem.value = ""
+const buildMonthStartText = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+}
+const isValidDateText = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))
+
+const toFavoritePayload = () => ({
+  selectedLine: String(selectedLine.value || ""),
+  selectedProcess: String(selectedProcess.value || ""),
+  selectedProduct: String(selectedProduct.value || ""),
+  selectedItem: String(selectedItem.value || ""),
+  selectedPerson: String(selectedPerson.value || ""),
+  selectedUnit: String(selectedUnit.value || ""),
+  startDate: isValidDateText(startDate.value) ? String(startDate.value) : "",
+  endDate: isValidDateText(endDate.value) ? String(endDate.value) : "",
 })
+
+const applyFavoritePayload = (payload) => {
+  selectedLine.value = String(payload?.selectedLine || "")
+  selectedProcess.value = String(payload?.selectedProcess || "")
+  selectedProduct.value = String(payload?.selectedProduct || "")
+  selectedItem.value = String(payload?.selectedItem || "")
+  selectedPerson.value = String(payload?.selectedPerson || "")
+  selectedUnit.value = String(payload?.selectedUnit || "")
+  startDate.value = isValidDateText(payload?.startDate) ? String(payload.startDate) : ""
+  endDate.value = isValidDateText(payload?.endDate) ? String(payload.endDate) : ""
+}
+
+const loadFavorites = async () => {
+  try {
+    const res = await api.accounts.getFavorites({ screen_key: FAVORITE_SCREEN_KEY, page_size: 200 })
+    favorites.value = Array.isArray(res.data) ? res.data : res.data?.results || []
+  } catch (e) {
+    console.error("お気に入り取得失敗:", e)
+  }
+}
+
+const applyFavorite = () => {
+  const id = Number(selectedFavoriteId.value || 0)
+  if (!id) return
+  const target = favorites.value.find((item) => Number(item.id) === id)
+  if (!target) return
+  favoriteName.value = target.name || ""
+  applyFavoritePayload(target.payload || {})
+}
+
+const saveFavorite = async () => {
+  const name = String(favoriteName.value || "").trim()
+  if (!name) { window.alert("お気に入り名を入力してください。"); return }
+  const payload = { screen_key: FAVORITE_SCREEN_KEY, name, payload: toFavoritePayload() }
+  try {
+    const id = Number(selectedFavoriteId.value || 0)
+    if (id) await api.accounts.updateFavorite(id, payload)
+    else await api.accounts.createFavorite(payload)
+    await loadFavorites()
+    const found = favorites.value.find((item) => item.name === name)
+    selectedFavoriteId.value = found ? String(found.id) : ""
+    window.alert("お気に入りを保存しました。")
+  } catch (e) {
+    window.alert(`お気に入り保存エラー: ${e?.response?.data?.detail || e?.message || "保存に失敗しました。"}`)
+  }
+}
+
+onMounted(async () => {
+  startDate.value = buildMonthStartText()
+  await Promise.all([loadFavorites(), loadTemplateDefinitions()])
+})
+watch([selectedProduct, selectedProcess], () => { if (!isItemSelectable.value) selectedItem.value = "" })
 watch([selectedLine, selectedProcess, selectedProduct, selectedItem, selectedPerson, selectedUnit, startDate, endDate], rebuildRows)
 </script>
 
 <style scoped>
+/* ── レイアウト ── */
+.trend-page { display: flex; flex-direction: column; gap: 14px; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-header .helper-text { margin: 0; }
+.page-header .btn-secondary { border: 1px solid #2563eb; background: #2563eb; color: #fff; border-radius: 4px; padding: 6px 16px; font-weight: 700; cursor: pointer; }
+.page-header .btn-secondary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+.page-header .btn-secondary:disabled { opacity: 0.7; cursor: default; }
 .prepare-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 8px 0 10px; }
 .prepare-form label { display: inline-flex; align-items: center; gap: 6px; margin: 0; width: auto; flex: 0 0 auto; }
 .field-label { white-space: nowrap; min-width: 56px; }
 .prepare-form select, .prepare-form input { padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
 .filter-form .field-worker select { width: 140px; }
 .filter-form .field-unit select { width: 110px; }
-.chart-wrap { margin: 8px 0 12px; padding: 10px; border: 1px solid #dbe3ea; border-radius: 6px; background: #fff; }
-.chart-title { font-weight: 700; margin-bottom: 8px; color: #1f2937; }
-.bar-row { display: grid; grid-template-columns: 220px 1fr 56px; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; }
-.bar-track { height: 14px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 100%; background: #1d4ed8; }
-.bar-fill.factor { background: #ea580c; }
-.bar-label, .bar-value { color: #334155; }
-.table-title { font-weight: 700; margin-bottom: 8px; color: #1f2937; font-size: 13px; }
-.trend-svg { width: 100%; height: 220px; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; }
-.axis-line { stroke: #94a3b8; stroke-width: 1; }
-.trend-line { fill: none; stroke-width: 2.5; }
+
+/* ── KPI カード ── */
+.kpi-cards { display: flex; gap: 10px; margin: 12px 0 6px; flex-wrap: wrap; }
+.kpi-card { flex: 1; min-width: 150px; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.kpi-label { font-size: 11px; color: #64748b; font-weight: 500; }
+.kpi-value { font-size: 22px; font-weight: 700; color: #1e293b; line-height: 1.3; }
+.kpi-sub { font-size: 11px; color: #94a3b8; }
+.kpi-trend { font-size: 12px; font-weight: 600; margin-top: 1px; }
+.kpi-trend.worse { color: #dc2626; }
+.kpi-trend.better { color: #16a34a; }
+.kpi-trend.flat { color: #94a3b8; }
+
+/* ── チャートラップ ── */
+.chart-wrap { margin: 6px 0 14px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.chart-header { margin-bottom: 8px; }
+.chart-title { font-weight: 700; font-size: 13px; color: #1e293b; }
+.chart-subtitle { font-size: 11px; color: #64748b; margin-top: 1px; }
+
+/* ── SVG ── */
+.trend-svg { width: 100%; display: block; }
+.grid-line { stroke: #e5e7eb; stroke-width: 0.8; stroke-dasharray: 3,3; }
+.axis-line { stroke: #9ca3af; stroke-width: 1; }
+.axis-line-r { stroke: #d1d5db; stroke-width: 1; stroke-dasharray: 2,2; }
+.axis-label { font-size: 10px; fill: #6b7280; font-family: system-ui, -apple-system, sans-serif; }
+.axis-title { font-size: 10px; fill: #9ca3af; font-family: system-ui, -apple-system, sans-serif; }
+.x-rotated { font-size: 10px; }
+.avg-line { stroke: #9333ea; stroke-width: 1.5; stroke-dasharray: 5,4; }
+.avg-label { font-size: 10px; fill: #9333ea; font-family: system-ui, -apple-system, sans-serif; }
+.threshold-line { stroke: #dc2626; stroke-width: 1; stroke-dasharray: 6,3; opacity: 0.5; }
+.threshold-label { font-size: 10px; fill: #dc2626; font-family: system-ui, -apple-system, sans-serif; opacity: 0.7; }
+
+/* ── トレンドライン ── */
+.trend-line { fill: none; stroke-width: 2; }
 .trend-line.rework { stroke: #0ea5a4; }
 .trend-line.ng { stroke: #ef4444; }
-.trend-legend { display: flex; gap: 14px; margin-top: 6px; font-size: 12px; color: #334155; }
-.legend-item { display: inline-flex; align-items: center; gap: 5px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
-.legend-dot.rework { background: #0ea5a4; }
-.legend-dot.ng { background: #ef4444; }
-.legend-dot.count { background: #ea580c; }
-.legend-dot.rate { background: #2563eb; }
+.trend-line.rework-ma { stroke: #0ea5a4; stroke-dasharray: 6,3; stroke-width: 1.5; opacity: 0.55; }
+.trend-line.ng-ma { stroke: #ef4444; stroke-dasharray: 6,3; stroke-width: 1.5; opacity: 0.55; }
 .trend-line.rework-rate { stroke: #2563eb; }
-.summary-bar { fill: #ea580c; }
-</style>
+.trend-line.cumulative { stroke: #ef4444; stroke-width: 2; }
 
+/* ── データポイント ── */
+.data-point { stroke: #fff; stroke-width: 1.5; }
+.rework-dot { fill: #0ea5a4; }
+.ng-dot { fill: #ef4444; }
+.rate-dot { fill: #2563eb; }
+.cum-dot { fill: #ef4444; }
+
+/* ── 棒グラフ ── */
+.summary-bar { fill: #ea580c; opacity: 0.85; rx: 2; }
+.pareto-bar { fill: #3b82f6; opacity: 0.85; rx: 2; }
+
+/* ── 凡例 ── */
+.trend-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: #475569; flex-wrap: wrap; }
+.proc-legend { gap: 10px; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+.legend-line-dash { width: 18px; height: 0; border-top: 2px dashed; display: inline-block; flex-shrink: 0; }
+.rework-bg { background: #0ea5a4; }
+.ng-bg { background: #ef4444; }
+.count-bg { background: #ea580c; }
+.rate-bg { background: #2563eb; }
+.pareto-bg { background: #3b82f6; }
+.cum-bg { background: #ef4444; }
+.avg-bg { border-color: #9333ea; }
+.threshold-bg { border-color: #dc2626; }
+
+/* ── テーブル ── */
+.table-title { font-weight: 700; margin-bottom: 6px; color: #1e293b; font-size: 13px; }
+.table-wrap { margin-bottom: 14px; }
+.sparkline-cell { padding: 2px 4px !important; }
+.rate-high { color: #dc2626; font-weight: 600; }
+.rate-mid { color: #ea580c; }
+.trend-worse { color: #dc2626; font-weight: 600; }
+.trend-better { color: #16a34a; font-weight: 600; }
+.trend-flat { color: #94a3b8; }
+
+/* ── インラインバー（ライン比較） ── */
+.inline-bar-cell { width: 120px; padding: 4px !important; }
+.inline-bar-track { height: 10px; background: #f1f5f9; border-radius: 999px; overflow: hidden; }
+.inline-bar-fill { height: 100%; background: #3b82f6; border-radius: 999px; transition: width 0.3s; }
+
+/* ── お気に入り ── */
+.favorite-star-btn { border: 1px solid #eab308; background: #facc15; color: #78350f; min-width: 34px; height: 31px; border-radius: 4px; cursor: pointer; }
+.favorite-star-btn:disabled { opacity: 0.6; cursor: default; }
+</style>
