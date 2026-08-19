@@ -98,6 +98,7 @@
               <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.note || '-' }}</td>
               <td class="action-cell">
                 <button class="btn-primary btn-sm" @click="editDevice(d)">編集</button>
+                <button class="btn-sm btn-secondary" @click="showHistory(d)">履歴</button>
                 <button class="btn-sm btn-delete-batch" @click="deleteDevice(d)">削除</button>
               </td>
             </tr>
@@ -176,6 +177,46 @@
         </div>
       </div>
     </div>
+    <!-- 使用履歴ダイアログ -->
+    <div v-if="showHistoryDialog" class="modal-overlay" @click.self="closeHistory">
+      <div class="modal-content" style="max-width:700px">
+        <h3>使用履歴: {{ historyDevice?.management_no }}</h3>
+        <div class="history-current">
+          <span class="history-label">現在:</span>
+          {{ historyDevice?.manager_name }} / {{ historyDevice?.location }}
+          <span class="status-chip" :class="statusClass(historyDevice?.status)">{{ statusLabel(historyDevice?.status) }}</span>
+        </div>
+        <div v-if="historyLoading" class="loading-message">読み込み中...</div>
+        <template v-else-if="histories.length">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>期間</th>
+                <th>管理責任者</th>
+                <th>配置場所</th>
+                <th>状態</th>
+                <th>備考</th>
+                <th>変更者</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in histories" :key="h.id">
+                <td class="mono" style="white-space:nowrap">{{ h.started_at }} ~ {{ h.ended_at }}</td>
+                <td>{{ h.manager_name }}</td>
+                <td>{{ h.location }}</td>
+                <td><span class="status-chip" :class="statusClass(h.status)">{{ h.status_display }}</span></td>
+                <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.note || '-' }}</td>
+                <td>{{ h.changed_by_name || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <div v-else class="loading-message">履歴はありません</div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="closeHistory">閉じる</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -189,6 +230,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み書き', table: 'm_mobile_device', desc: '携帯端末台帳' },
+  { op: '読み', table: 'm_mobile_device_history', desc: '端末使用履歴' },
 ]
 
 const devices = ref([])
@@ -371,6 +413,32 @@ async function handleImport(e) {
   e.target.value = ''
 }
 
+// --- 使用履歴 ---
+const showHistoryDialog = ref(false)
+const historyDevice = ref(null)
+const histories = ref([])
+const historyLoading = ref(false)
+
+async function showHistory(d) {
+  historyDevice.value = d
+  showHistoryDialog.value = true
+  historyLoading.value = true
+  try {
+    const res = await api.mobileDevices.listHistory(d.id)
+    histories.value = res.data || []
+  } catch {
+    histories.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function closeHistory() {
+  showHistoryDialog.value = false
+  historyDevice.value = null
+  histories.value = []
+}
+
 function exportExcel() {
   window.open(api.mobileDevices.exportExcelUrl(), '_blank')
 }
@@ -446,4 +514,6 @@ onMounted(fetchDevices)
 .doc-body :deep(ul), .doc-body :deep(ol) { padding-left: 24px; }
 .doc-editor-wrap { width: 100%; }
 .doc-editor { width: 100%; min-height: 500px; font-family: monospace; font-size: 0.9em; padding: 10px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; line-height: 1.6; }
+.history-current { margin-bottom: 10px; padding: 6px 10px; background: #e3f2fd; border-radius: 4px; font-size: 0.9em; }
+.history-label { font-weight: 600; margin-right: 6px; }
 </style>

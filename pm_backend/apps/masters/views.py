@@ -24,7 +24,7 @@ from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
-    KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
+    KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceHistory, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation, LineCycleTime,
 )
 from .serializers import (
@@ -32,7 +32,7 @@ from .serializers import (
     SupplierSerializer, CalendarSerializer, CalendarDaySerializer, WorkPatternSerializer, BreakTimeSerializer,
     BOMSerializer, BOMListSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingChangeHistorySerializer, RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
-    KubotaSakaiTruckSerializer, SupplierTruckSerializer, MobileDeviceSerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
+    KubotaSakaiTruckSerializer, SupplierTruckSerializer, MobileDeviceSerializer, MobileDeviceHistorySerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
     LineCycleTimeSerializer,
 )
 from .services.routing_service import build_effective_routing_q, resolve_effective_routing
@@ -4817,6 +4817,47 @@ class MobileDeviceViewSet(viewsets.ModelViewSet):
     search_fields = ['management_no', 'manufacturer', 'model_number', 'serial_number', 'location', 'manager_name']
     ordering_fields = ['management_no', 'created_at']
     ordering = ['-management_no']
+
+    HISTORY_FIELDS = ('location', 'manager_name', 'status', 'note')
+
+    def _should_record_history(self, old_device, new_data):
+        return any(
+            str(getattr(old_device, f)) != str(new_data.get(f, getattr(old_device, f)))
+            for f in self.HISTORY_FIELDS
+        )
+
+    def _record_history(self, device, user):
+        last = device.histories.first()
+        started = last.ended_at if last else (device.created_at.date() if device.created_at else date.today())
+        MobileDeviceHistory.objects.create(
+            device=device,
+            location=device.location,
+            manager_name=device.manager_name,
+            status=device.status,
+            note=device.note,
+            started_at=started,
+            ended_at=date.today(),
+            changed_by=user if user and user.is_authenticated else None,
+        )
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._should_record_history(instance, request.data):
+            self._record_history(instance, request.user)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._should_record_history(instance, request.data):
+            self._record_history(instance, request.user)
+        return super().partial_update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        device = self.get_object()
+        histories = device.histories.select_related('changed_by').all()
+        serializer = MobileDeviceHistorySerializer(histories, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser])
     def import_excel(self, request):

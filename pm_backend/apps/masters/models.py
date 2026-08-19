@@ -1010,6 +1010,26 @@ class MobileDevice(models.Model):
         return f"{self.management_no} {self.manufacturer} {self.model_number}"
 
 
+class MobileDeviceHistory(models.Model):
+    device = models.ForeignKey(MobileDevice, on_delete=models.CASCADE, related_name='histories', verbose_name='端末')
+    location = models.CharField(max_length=200, verbose_name='配置場所')
+    manager_name = models.CharField(max_length=100, verbose_name='管理責任者')
+    status = models.CharField(max_length=10, choices=MobileDevice.STATUS_CHOICES, verbose_name='状態')
+    note = models.TextField(blank=True, default='', verbose_name='備考')
+    started_at = models.DateField(verbose_name='開始日')
+    ended_at = models.DateField(verbose_name='終了日')
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='変更者')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='登録日時')
+
+    class Meta:
+        verbose_name = '端末使用履歴'
+        verbose_name_plural = '端末使用履歴'
+        ordering = ['-ended_at', '-started_at']
+
+    def __str__(self):
+        return f"{self.device.management_no} {self.started_at}~{self.ended_at} {self.manager_name}"
+
+
 class MobileDeviceInventory(models.Model):
     RESULT_OK = 'OK'
     RESULT_MISMATCH = 'MISMATCH'

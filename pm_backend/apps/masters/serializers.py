@@ -6,7 +6,7 @@ from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
-    KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
+    KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceHistory, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
     ProductStockLocation, LineCycleTime,
 )
 
@@ -792,6 +792,21 @@ class MobileDeviceSerializer(serializers.ModelSerializer):
     class Meta:
         model = MobileDevice
         fields = '__all__'
+
+
+class MobileDeviceHistorySerializer(serializers.ModelSerializer):
+    management_no = serializers.CharField(source='device.management_no', read_only=True)
+    changed_by_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = MobileDeviceHistory
+        fields = '__all__'
+
+    def get_changed_by_name(self, obj):
+        if obj.changed_by:
+            return obj.changed_by.get_full_name() or obj.changed_by.username
+        return ''
 
 
 class MobileDeviceInventorySerializer(serializers.ModelSerializer):

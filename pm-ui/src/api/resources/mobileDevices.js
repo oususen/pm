@@ -36,6 +36,9 @@ export const createMobileDevicesAPI = (client) => ({
   writeManualDoc(path, content) {
     return client.post('/manual-documents/write/', { path, content })
   },
+  listHistory(deviceId) {
+    return client.get(`/mobile-devices/${deviceId}/history/`)
+  },
   listInventories(params = {}) {
     return client.get('/mobile-device-inventories/', { params })
   },
