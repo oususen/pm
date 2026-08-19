@@ -237,7 +237,7 @@
 
             <div v-if="requiresReason" class="reason-area">
               <label class="qty-label">
-                {{ selectedAction === 'TEMP_END' ? '一時終了理由' : '中断理由' }}
+                {{ selectedAction === 'TEMP_END' ? '強制終了理由' : '中断理由' }}
                 <span class="required-mark">*</span>
               </label>
               <select v-model="actionReason" class="reason-select">
@@ -480,7 +480,7 @@ const NOT_STARTED_ACTIONS = ['START']
 const STARTED_ACTIONS     = ['END', 'PAUSE']
 const PAUSED_ACTIONS      = ['RESUME', 'TEMP_END']
 const TEMP_ENDED_ACTIONS  = ['RESUME']
-const ACTION_LABELS = { START: '開始', END: '終了', PAUSE: '中断', RESUME: '再開', TEMP_END: '一時終了' }
+const ACTION_LABELS = { START: '開始', END: '終了', PAUSE: '中断', RESUME: '再開', TEMP_END: '強制終了' }
 
 const isSameId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim()
 
@@ -607,7 +607,7 @@ watch(
   { immediate: true }
 )
 
-// セッションを閉じるアクション（終了・中断・一時終了）では全設備に一括送信する
+// セッションを閉じるアクション（終了・中断・強制終了）では全設備に一括送信する
 const CLOSING_ACTIONS = new Set(['END', 'PAUSE', 'TEMP_END'])
 
 watch(
@@ -1036,7 +1036,7 @@ async function save() {
   }
   try {
     let lastData = null
-    // 閉じるアクション（終了・中断・一時終了）はSTARTED/PAUSED状態の全設備に一括送信する（片方だけ外してENDするミス防止）
+    // 閉じるアクション（終了・中断・強制終了）はSTARTED/PAUSED状態の全設備に一括送信する（片方だけ外してENDするミス防止）
     const actionKey = String(selectedAction.value || '').toUpperCase()
     const targetEquipmentIds = CLOSING_ACTIONS.has(actionKey)
       ? equipments.value

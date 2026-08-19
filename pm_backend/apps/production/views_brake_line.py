@@ -2,7 +2,7 @@
 ブレーキライン専用ビュー
 - BrakeLinePlanView: 自動計画取得（昨日のレーザ実績 → 今日の計画）
 - BrakeLineActualAddView: 実績累積加算（後方互換用）
-- BrakeLineRecordView: 作業記録（開始/終了/中断/再開/一時終了）
+- BrakeLineRecordView: 作業記録（開始/終了/中断/再開/強制終了）
 """
 import base64
 from datetime import date, datetime, time, timedelta
@@ -374,10 +374,10 @@ class BrakeLinePlanView(APIView):
             })
             item_keys.add(key)
 
-        # 前日以前に中断（PAUSE/TEMP_END）したまま未解決のアイテムを carryover として追加
+        # 前日以前に中断（PAUSE）したまま未解決のアイテムを carryover として追加
+        # TEMP_ENDは「再開できないので終了」の意味なので翌日以降に引き継がない
         PAUSED_ACTIONS = {
             BrakeLineRecord.OPERATOR_ACTION_PAUSE,
-            BrakeLineRecord.OPERATOR_ACTION_TEMP_END,
         }
         carryover_qs = (
             BrakeLineRecord.objects
@@ -806,8 +806,9 @@ class BrakeLineRecordView(APIView):
                 if equipment_key not in latest_by_equipment:
                     latest_by_equipment[equipment_key] = rec
 
-        # 前日以前に中断（PAUSE/TEMP_END）したまま未解決のレコードを carryover として追加
-        PAUSED_ACTIONS = {BrakeLineRecord.OPERATOR_ACTION_PAUSE, BrakeLineRecord.OPERATOR_ACTION_TEMP_END}
+        # 前日以前に中断（PAUSE）したまま未解決のレコードを carryover として追加
+        # TEMP_ENDは「再開できないので終了」の意味なので翌日以降に引き継がない
+        PAUSED_ACTIONS = {BrakeLineRecord.OPERATOR_ACTION_PAUSE}
         carryover_qs = BrakeLineRecord.objects.filter(
             plan_date__lt=plan_date
         ).select_related('equipment')

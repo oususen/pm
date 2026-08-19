@@ -426,7 +426,7 @@
           <div style="display:flex;gap:3px;flex-wrap:wrap;">
             <span class="mock-btn action-end" style="font-size:10px;padding:2px 6px;">終了</span>
             <span class="mock-btn action-pause" style="font-size:10px;padding:2px 6px;">中断</span>
-            <span class="mock-btn action-tempend" style="font-size:10px;padding:2px 6px;">一時終了</span>
+            <span class="mock-btn action-tempend" style="font-size:10px;padding:2px 6px;">強制終了</span>
           </div>
           <div class="mock-stat">
             <div class="mock-stat-block"><span class="mock-stat-label">計画</span><span class="mock-stat-value plan">25</span></div>
@@ -520,7 +520,7 @@
         </div>
         <span class="af-arrow">&#9656;</span>
         <div class="af-step">
-          <span class="action-badge action-tempend">一時終了</span>
+          <span class="action-badge action-tempend">強制終了</span>
           <span class="af-label">理由選択</span>
         </div>
       </div>
@@ -532,7 +532,7 @@
         </div>
         <span class="af-arrow">&#9656;</span>
         <div class="af-step">
-          <span class="action-badge action-tempend">一時終了</span>
+          <span class="action-badge action-tempend">強制終了</span>
           <span class="af-label">状態を強制リセット</span>
         </div>
       </div>
@@ -704,13 +704,13 @@
 
     <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; 加工を終了する</h4>
     <div class="step-desc" style="margin-bottom:8px;">
-      開始済みの品番を選択すると、<strong>「終了」「中断」「一時終了」</strong>のアクションが表示されます。<br>
+      開始済みの品番を選択すると、<strong>「終了」「中断」「強制終了」</strong>のアクションが表示されます。<br>
       <strong>「終了」</strong>を選択し、数量を入力して<strong>「記録を登録」</strong>を押してください。
     </div>
     <div style="display:flex;gap:4px;margin-bottom:8px;">
       <span class="mock-btn action-end" style="font-size:12px;padding:3px 10px;">終了</span>
       <span class="mock-btn action-pause" style="font-size:12px;padding:3px 10px;opacity:.5;">中断</span>
-      <span class="mock-btn action-tempend" style="font-size:12px;padding:3px 10px;opacity:.5;">一時終了</span>
+      <span class="mock-btn action-tempend" style="font-size:12px;padding:3px 10px;opacity:.5;">強制終了</span>
     </div>
     <div class="mock-stat">
       <div class="mock-stat-block"><span class="mock-stat-label">計画</span><span class="mock-stat-value plan">25</span></div>
@@ -732,15 +732,15 @@
       <span>中断後は<strong>「再開」</strong>で作業を再開できます。再開すると再び「終了」「中断」が選べるようになります。</span>
     </div>
 
-    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; 一時終了する（本日再開しない場合）</h4>
+    <h4 style="font-size:15px;font-weight:700;margin:20px 0 10px;color:var(--ink);">&#9654; 強制終了する（本日再開しない場合）</h4>
     <div class="step-desc" style="margin-bottom:8px;">
-      本日中に再開しない場合は<strong>「一時終了」</strong>を選択します。<br>
-      <strong>一時終了理由</strong>（本日設備復旧不可・他へ製品切り替え等）を選択してください。<br>
+      本日中に再開しない場合は<strong>「強制終了」</strong>を選択します。<br>
+      <strong>強制終了理由</strong>（本日設備復旧不可・他へ製品切り替え等）を選択してください。<br>
       「その他」を選んだ場合は備考欄への入力が必須です。
     </div>
     <div class="callout warn">
       <span class="icon">&#9888;</span>
-      <span><strong>中断状態のリセット:</strong> 中断中に再開できなくなった場合も「一時終了」で状態を強制リセットできます。中断中の品番を選択すると「再開」と「取消」のほか、この一時終了が使えます。</span>
+      <span><strong>中断状態のリセット:</strong> 中断中に再開できなくなった場合も「強制終了」で状態を強制リセットできます。中断中の品番を選択すると「再開」と「取消」のほか、この強制終了が使えます。</span>
     </div>
   </div>
 

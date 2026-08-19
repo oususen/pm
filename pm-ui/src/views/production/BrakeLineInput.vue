@@ -262,7 +262,7 @@
               </div>
             </div>
 
-            <!-- 理由（中断・一時終了） -->
+            <!-- 理由（中断・強制終了） -->
             <div v-if="requiresReason" class="reason-area">
               <label class="qty-label">
                 {{ selectedAction === 'TEMP_END' ? t('brakeInput.tempEndReasonLabel') : t('brakeInput.pauseReasonLabel') }}
@@ -542,7 +542,7 @@ const selectedEquipmentId = ref('')   // メインフォーム選択設備
 
 // 作業アクション
 const selectedAction = ref('')        // 選択中アクション
-const actionReason = ref('')          // 中断/一時終了の理由
+const actionReason = ref('')          // 中断/強制終了の理由
 const workStateMap = ref({})          // {stateKey: lastAction}
 const workOperatorMap = ref({})       // {stateKey: 開始者名}
 const currentProcessingByEquipment = ref({}) // {equipmentKey: {equipmentLabel, productCode}}
@@ -570,7 +570,6 @@ const tempEndReasons = computed(() => [
 const NOT_STARTED_ACTIONS = ['START']
 const STARTED_ACTIONS     = ['END', 'PAUSE']
 const PAUSED_ACTIONS      = ['RESUME', 'TEMP_END']
-const TEMP_ENDED_ACTIONS  = ['RESUME']
 const actionLabels = computed(() => ({
   START: t('brakeInput.actionStart'),
   END: t('brakeInput.actionEnd'),
@@ -611,7 +610,6 @@ const currentWorkState = computed(() => {
   if (!selectedItem.value || !selectedEquipmentId.value) return 'NOT_STARTED'
   const last = workStateMap.value[workStateKey(selectedItem.value, selectedEquipmentId.value)]
   if (last === 'PAUSE')                   return 'PAUSED'
-  if (last === 'TEMP_END')                return 'TEMP_ENDED'
   if (last === 'START' || last === 'RESUME') return 'STARTED'
   return 'NOT_STARTED'
 })
@@ -637,7 +635,6 @@ const operatorActionOptions = computed(() => {
   if (!selectedItem.value || !selectedEquipmentId.value) return []
   if (currentWorkState.value === 'STARTED')    return toOpts(STARTED_ACTIONS)
   if (currentWorkState.value === 'PAUSED')     return toOpts(PAUSED_ACTIONS)
-  if (currentWorkState.value === 'TEMP_ENDED') return toOpts(TEMP_ENDED_ACTIONS)
   return toOpts(NOT_STARTED_ACTIONS)
 })
 
@@ -1058,10 +1055,11 @@ const pageEnd = computed(() => Math.min(currentPage.value * PAGE_SIZE, filteredI
 // ──────────────────────────────
 const isDone = (item) => {
   if (item.actual_qty <= 0) return false
-  // PAUSE/TEMP_END 中のアイテムは「加工済み」扱いしない（未完了のため常に表示）
+  // PAUSE中のアイテムは「加工済み」扱いしない（未完了のため常に表示）
+  // TEMP_ENDは「再開できないので終了」の意味なので加工済み扱い
   const hasPause = equipments.value.concat([{ id: null }]).some(eq => {
     const st = workStateMap.value[workStateKey(item, eq.id)]
-    return st === 'PAUSE' || st === 'TEMP_END'
+    return st === 'PAUSE'
   })
   return !hasPause
 }
@@ -2077,7 +2075,7 @@ function showToast(message, type = 'success') {
 /* 再開 */
 .op-action-btn.action-resume             { border-color: #8e44ad; color: #8e44ad; }
 .op-action-btn.action-resume.active      { background: #8e44ad; color: #fff; }
-/* 一時終了 */
+/* 強制終了 */
 .op-action-btn.action-temp_end           { border-color: #c0392b; color: #c0392b; }
 .op-action-btn.action-temp_end.active    { background: #c0392b; color: #fff; }
 

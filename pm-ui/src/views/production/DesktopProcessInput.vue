@@ -437,7 +437,7 @@
               >{{ preset }}</button>
             </div>
 
-            <!-- 中断/一時終了理由 -->
+            <!-- 中断/強制終了理由 -->
             <div v-if="requiresOperatorActionReason" class="reason-area">
               <label class="qty-label">
                 {{ t(operatorActionReasonLabelKey) }}

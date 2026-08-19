@@ -673,7 +673,7 @@ class LaserActualSerializer(serializers.ModelSerializer):
             else getattr(self.instance, 'operator_action_reason', '')
         ).strip()
         if action in reason_required_actions and not reason_text:
-            raise serializers.ValidationError({'operator_action_reason': '中断/一時終了時は理由を入力してください。'})
+            raise serializers.ValidationError({'operator_action_reason': '中断/強制終了時は理由を入力してください。'})
         if action not in reason_required_actions:
             attrs['operator_action_reason'] = ''
 

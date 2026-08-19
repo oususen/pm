@@ -97,7 +97,7 @@
         </div>
 
         <div v-if="requiresActionReason" class="field">
-          <label class="required">{{ form.operator_action === 'TEMP_END' ? '一時終了理由' : '中断理由' }}</label>
+          <label class="required">{{ form.operator_action === 'TEMP_END' ? '強制終了理由' : '中断理由' }}</label>
           <select v-model="form.operator_action_reason">
             <option value="">-- 選択 --</option>
             <option v-for="reason in operatorActionReasonOptions" :key="reason" :value="reason">
@@ -718,7 +718,7 @@ const operatorActionLabels = {
   START: '開始',
   END: '終了',
   PAUSE: '中断',
-  TEMP_END: '一時終了',
+  TEMP_END: '強制終了',
   RESUME: '再開',
 }
 
