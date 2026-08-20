@@ -644,6 +644,7 @@ const recalcGroupRemaining = (group) => {
       activeLines[activeLines.length - 1].remainingByDate[d] = remainingAtDate[d]
     }
   }
+  group.finalRemaining = running
 }
 
 const buildLine = (li) => {
@@ -743,19 +744,7 @@ const slotRemaining = (row, colKey, slotIdx) => {
 }
 
 const groupTotalRemaining = (group) => {
-  const dates = dateColumns.value.map((c) => c.key)
-  if (!dates.length) return 0
-  for (let i = dates.length - 1; i >= 0; i--) {
-    const d = dates[i]
-    let total = 0
-    let found = false
-    for (const line of group.lines) {
-      const r = parseNumber(line.remainingByDate[d])
-      if (r !== 0) { total += r; found = true }
-    }
-    if (found) return Number(total.toFixed(3))
-  }
-  return 0
+  return group.finalRemaining ?? 0
 }
 
 const showClearPlanDialog = ref(false)
