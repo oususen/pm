@@ -325,7 +325,7 @@
       <div class="modal-content notify-config-modal">
         <h2>納期調整 通知設定</h2>
         <p class="notify-description">
-          納期調整の保存時に、内示と数量が異なる品番があった場合、以下のユーザーにアプリ内通知を送信します。
+          納期調整で計画数を変更して保存した際に、以下のユーザーにアプリ内通知を送信します。
           メール通知を有効にすると、同じ宛先にメールも送信します。
         </p>
         <div v-if="notifyConfigLoading" class="email-loading">読み込み中...</div>

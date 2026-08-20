@@ -875,6 +875,23 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 progress_end = max(affected_dates)
             recalculate_delivery_progress(progress_start, progress_end)
 
+        # 変更があれば通知送信
+        if updated_count > 0:
+            changed_items = []
+            for key, new_qty in input_delivery_map.items():
+                old_qty = existing_delivery_map.get(key, Decimal('0'))
+                if new_qty != old_qty:
+                    p, s, so, d = key
+                    changed_items.append({
+                        'product_code': p,
+                        'ship_to_code': s or '-',
+                        'due_date': str(d),
+                        'before_qty': old_qty,
+                        'after_qty': new_qty,
+                    })
+            if changed_items:
+                _send_due_adjustment_notification(changed_items, user, change_reason)
+
         return Response({
             'updated': updated_count,
             'affected_groups': len(affected_groups),
@@ -1113,6 +1130,99 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             'notify_user_ids': notify_user_ids,
             'email_enabled': config.email_enabled,
         })
+
+
+def _send_due_adjustment_notification(changed_items, user, change_reason):
+    """計画数変更時にアプリ内通知＋メール送信"""
+    try:
+        from datetime import date, timedelta
+        from notifications.models import Notification
+
+        config = KubotaSakaiDueNotifyConfig.get_solo()
+        if not config.notify_users.exists():
+            return
+
+        operator = ''
+        if user:
+            operator = f'{user.last_name or ""} {user.first_name or ""}'.strip() or user.username
+
+        th = "style='padding:4px 10px;border:1px solid #b8c8ff;text-align:center'"
+        td = "style='padding:4px 10px;border:1px solid #d0d8f0'"
+        td_r = "style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right'"
+
+        rows_html = []
+        for item in changed_items:
+            before = int(item['before_qty'])
+            after = int(item['after_qty'])
+            diff = after - before
+            sign = '+' if diff > 0 else ''
+            diff_color = '#c00' if diff > 0 else '#0066cc'
+            td_diff = f"style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right;color:{diff_color};font-weight:600'"
+            rows_html.append(
+                f"<tr>"
+                f"<td {td}>{item['product_code']}</td>"
+                f"<td {td}>{item['due_date']}</td>"
+                f"<td {td}>{item['ship_to_code']}</td>"
+                f"<td {td_r}>{before:,}</td>"
+                f"<td {td_r}>{after:,}</td>"
+                f"<td {td_diff}>{sign}{diff:,}</td>"
+                f"</tr>"
+            )
+
+        reason_html = ''
+        if change_reason:
+            reason_html = f"<p>変更理由: {change_reason}</p>"
+
+        description = (
+            f"<p>調整者: {operator}</p>"
+            f"{reason_html}"
+            "<table style='border-collapse:collapse;font-size:0.9em'>"
+            f"<thead><tr style='background:#dde6ff'>"
+            f"<th {th}>品番</th>"
+            f"<th {th}>日付</th>"
+            f"<th {th}>納入地</th>"
+            f"<th {th}>変更前</th>"
+            f"<th {th}>変更後</th>"
+            f"<th {th}>差分</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(rows_html) + "</tbody>"
+            "</table>"
+        )
+
+        today = date.today()
+        title = f'[クボタ堺納期調整] 計画数変更 ({len(changed_items)}件)'
+        notification = Notification.objects.create(
+            title=title,
+            category='出荷',
+            domain='KUBOTA_SAKAI_DUE_ADJ',
+            description=description,
+            valid_from=today,
+            valid_to=today + timedelta(days=7),
+            operator_name=operator or 'system',
+        )
+        notification.target_users.set(config.notify_users.all())
+
+        if config.email_enabled:
+            emails = list(
+                config.notify_users
+                .filter(is_active=True)
+                .exclude(email='')
+                .values_list('email', flat=True)
+            )
+            if emails:
+                body = (
+                    f"<p>クボタ堺 納期調整で計画数が "
+                    f"<b>{len(changed_items)}件</b> 変更されました。</p>"
+                    f"{description}"
+                )
+                EmailService().send_plain_email(
+                    to_emails=emails,
+                    subject=title,
+                    body=body,
+                    content_type='html',
+                )
+    except Exception as e:
+        print(f"納期調整通知エラー: {e}")
 
 
 def _recalculate_remaining_for_groups(groups):
