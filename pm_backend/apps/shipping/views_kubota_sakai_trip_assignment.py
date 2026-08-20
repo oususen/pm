@@ -773,6 +773,33 @@ def _sync_kubota_delivery_backlog_for_date(target_date):
         LineBacklog.objects.bulk_create(to_create)
 
 
+def _cleanup_empty_due_trip_assignments(start_date, end_date):
+    """便計画取込時に、需要0・計画0の納期調整に紐づく割付を掃除する。"""
+    stale_assignments = list(
+        KubotaSakaiTripAssignment.objects.select_related('due_adjustment')
+        .filter(
+            due_adjustment__due_date__range=(start_date, end_date),
+            due_adjustment__demand_qty=Decimal('0'),
+            due_adjustment__delivery_qty=Decimal('0'),
+        )
+        .order_by('departure_date', 'id')
+    )
+    if not stale_assignments:
+        return {'deleted_count': 0, 'affected_departure_dates': []}
+
+    affected_departure_dates = sorted({item.departure_date for item in stale_assignments if item.departure_date})
+    delete_ids = [item.id for item in stale_assignments]
+    KubotaSakaiTripAssignment.objects.filter(id__in=delete_ids).delete()
+
+    for departure_date in affected_departure_dates:
+        _sync_kubota_delivery_backlog_for_date(departure_date)
+
+    return {
+        'deleted_count': len(delete_ids),
+        'affected_departure_dates': [item.isoformat() for item in affected_departure_dates],
+    }
+
+
 # ---------------------------------------------------------------------------
 # plan_id から truck_id を抽出するユーティリティ（pickup カスケード用）
 # ---------------------------------------------------------------------------
@@ -1603,6 +1630,9 @@ class KubotaSakaiTripImportViewNew(APIView):
             horizon_days = 180
         end_date = start_date + timedelta(days=horizon_days - 1)
 
+        with transaction.atomic():
+            cleanup_result = _cleanup_empty_due_trip_assignments(start_date, end_date)
+
         row_qs = KubotaSakaiDueAdjustment.objects.filter(
             due_date__range=(start_date, end_date),
             delivery_qty__gt=0,
@@ -1613,6 +1643,8 @@ class KubotaSakaiTripImportViewNew(APIView):
             'target_date_to': end_date.isoformat(),
             'total_rows': row_qs.count(),
             'total_days': row_qs.values('due_date').distinct().count(),
+            'cleaned_trip_assignments': cleanup_result['deleted_count'],
+            'synced_departure_dates': cleanup_result['affected_departure_dates'],
         })
 
 
