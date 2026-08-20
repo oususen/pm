@@ -339,6 +339,19 @@
             <p class="notify-helper">社員を検索して通知先に追加します。</p>
           </div>
           <div class="email-field">
+            <label>通知対象期間</label>
+            <div class="notify-horizon-row">
+              <input
+                v-model.number="notifyHorizonDays"
+                type="number"
+                min="0"
+                class="notify-horizon-input"
+              />
+              <span>営業日後まで（ダイソウカレンダー基準、0=制限なし）</span>
+            </div>
+            <p class="notify-helper">設定した営業日数を超える将来の変更は通知しません。</p>
+          </div>
+          <div class="email-field">
             <label>メール通知</label>
             <div class="notify-toggle-row">
               <label class="notify-toggle-label">
@@ -1551,6 +1564,7 @@ const notifyConfigSaving = ref(false)
 const notifyAllUsers = ref([])
 const notifyUserIds = ref([])
 const notifyEmailEnabled = ref(false)
+const notifyHorizonDays = ref(0)
 const notifyConfigMessage = ref('')
 const notifyConfigError = ref(false)
 
@@ -1563,6 +1577,7 @@ const openNotifyConfigDialog = async () => {
     notifyAllUsers.value = res.data.all_users || []
     notifyUserIds.value = res.data.notify_user_ids || []
     notifyEmailEnabled.value = !!res.data.email_enabled
+    notifyHorizonDays.value = res.data.notify_horizon_days || 0
   } catch {
     notifyAllUsers.value = []
     notifyUserIds.value = []
@@ -1582,9 +1597,11 @@ const saveNotifyConfig = async () => {
     const res = await api.kubotaSakaiDueAdjustments.saveNotifyConfig({
       notify_user_ids: notifyUserIds.value,
       email_enabled: notifyEmailEnabled.value,
+      notify_horizon_days: notifyHorizonDays.value || 0,
     })
     notifyUserIds.value = res.data.notify_user_ids || notifyUserIds.value
     notifyEmailEnabled.value = !!res.data.email_enabled
+    notifyHorizonDays.value = res.data.notify_horizon_days || 0
     notifyConfigMessage.value = '保存しました'
     notifyConfigError.value = false
   } catch {
@@ -2095,6 +2112,20 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
   font-size: 12px;
   color: #666;
+}
+.notify-horizon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.notify-horizon-input {
+  width: 60px;
+  padding: 4px 6px;
+  border: 1px solid #b5c1d2;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: right;
 }
 .notify-toggle-row {
   display: flex;

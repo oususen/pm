@@ -714,6 +714,11 @@ class KubotaSakaiDueNotifyConfig(models.Model):
         default=False,
         verbose_name='メール通知有効',
     )
+    notify_horizon_days = models.IntegerField(
+        default=0,
+        verbose_name='通知対象営業日数',
+        help_text='0=制限なし。ダイソウカレンダーでN営業日後までの変更のみ通知。',
+    )
 
     class Meta:
         db_table = 'kubota_sakai_due_notify_config'

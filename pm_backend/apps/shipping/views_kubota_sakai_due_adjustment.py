@@ -1115,20 +1115,32 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             return Response({
                 'notify_user_ids': notify_user_ids,
                 'email_enabled': config.email_enabled,
+                'notify_horizon_days': config.notify_horizon_days,
                 'all_users': all_users,
             })
 
         user_ids = request.data.get('notify_user_ids')
         if user_ids is not None:
             config.notify_users.set(user_ids)
+        update_fields = []
         email_enabled = request.data.get('email_enabled')
         if email_enabled is not None:
             config.email_enabled = bool(email_enabled)
-            config.save(update_fields=['email_enabled'])
+            update_fields.append('email_enabled')
+        notify_horizon_days = request.data.get('notify_horizon_days')
+        if notify_horizon_days is not None:
+            try:
+                config.notify_horizon_days = max(0, int(notify_horizon_days))
+            except (ValueError, TypeError):
+                config.notify_horizon_days = 0
+            update_fields.append('notify_horizon_days')
+        if update_fields:
+            config.save(update_fields=update_fields)
         notify_user_ids = list(config.notify_users.values_list('id', flat=True))
         return Response({
             'notify_user_ids': notify_user_ids,
             'email_enabled': config.email_enabled,
+            'notify_horizon_days': config.notify_horizon_days,
         })
 
 
@@ -1141,6 +1153,19 @@ def _send_due_adjustment_notification(changed_items, user, change_reason):
         config = KubotaSakaiDueNotifyConfig.get_solo()
         if not config.notify_users.exists():
             return
+
+        # 通知対象期間フィルタ（ダイソウカレンダーでN営業日後まで）
+        horizon_days = config.notify_horizon_days or 0
+        if horizon_days > 0:
+            daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
+            calc = WorkingDayCalculator(daiso_cal)
+            cutoff_date = calc.add_working_days(get_business_today(), horizon_days)
+            changed_items = [
+                item for item in changed_items
+                if _parse_date(item['due_date']) and _parse_date(item['due_date']) <= cutoff_date
+            ]
+            if not changed_items:
+                return
 
         operator = ''
         if user:
