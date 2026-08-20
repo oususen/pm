@@ -40,4 +40,10 @@ export const createKubotaSakaiDueAdjustmentsAPI = (client) => ({
       coordination_note: coordinationNote,
     })
   },
+  getNotifyConfig() {
+    return client.get('/kubota-sakai-due-adjustments/notify_config/')
+  },
+  saveNotifyConfig(data) {
+    return client.patch('/kubota-sakai-due-adjustments/notify_config/', data)
+  },
 })

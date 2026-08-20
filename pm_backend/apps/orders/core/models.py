@@ -702,6 +702,29 @@ class KubotaSakaiImportConfig(models.Model):
         return obj
 
 
+class KubotaSakaiDueNotifyConfig(models.Model):
+    """クボタ堺 納期調整 通知設定（シングルトン）"""
+    notify_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='kubota_sakai_due_notify',
+        verbose_name='通知先ユーザー',
+    )
+    email_enabled = models.BooleanField(
+        default=False,
+        verbose_name='メール通知有効',
+    )
+
+    class Meta:
+        db_table = 'kubota_sakai_due_notify_config'
+        verbose_name = 'クボタ堺納期調整通知設定'
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
 class FirstArticleNoticeLog(models.Model):
     """お久しぶり製品通知の送信済み記録。同一内容の重複通知を防止する。"""
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, verbose_name='得意先')

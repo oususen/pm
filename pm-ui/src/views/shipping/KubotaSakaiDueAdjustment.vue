@@ -39,14 +39,15 @@
         <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
       </div>
       <button class="btn favorite-btn" title="お気に入り登録" :disabled="loading || saving || importing" @click="saveFavorite">★</button>
-      <span v-if="lastAdjustedAt" class="lock-badge adj-badge">最新納期調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
-      <span v-if="lockDate" class="lock-badge">{{ lockDate }} まで締め済</span>
-      <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ duePlanLockDate }} まで計画ロック</span>
+      <span v-if="lastAdjustedAt" class="lock-badge adj-badge">最新調整日: {{ formatAdjDate(lastAdjustedAt) }}</span>
+      <span v-if="lockDate" class="lock-badge">{{ formatShortDate(lockDate) }} ～締め</span>
+      <span v-if="duePlanLockDate" class="lock-badge plan-lock">{{ formatShortDate(duePlanLockDate) }} ～計画lock</span>
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">{{ importing ? '取込中...' : '取込' }}</button>
       <button class="btn" :disabled="importing || loading || saving" @click="openChangeReasonDialog">計画変更</button>
       <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
       <button class="btn" :disabled="loading || !matrixColumns.length" @click="exportExcel">EXCEL出力</button>
       <button class="btn" :disabled="loading || importing" @click="handleDisplayClick">表示</button>
+      <button class="btn" @click="openNotifyConfigDialog">通知設定</button>
       <span class="fixed-help">計画欄の「固」で注番固定</span>
       <DataSourceDialog title="" :sources="dsSources" />
     </div>
@@ -320,6 +321,46 @@
       </div>
     </div>
 
+    <div v-if="showNotifyConfigDialog" class="modal-overlay" @click.self="closeNotifyConfigDialog">
+      <div class="modal-content notify-config-modal">
+        <h2>納期調整 通知設定</h2>
+        <p class="notify-description">
+          納期調整の保存時に、内示と数量が異なる品番があった場合、以下のユーザーにアプリ内通知を送信します。
+          メール通知を有効にすると、同じ宛先にメールも送信します。
+        </p>
+        <div v-if="notifyConfigLoading" class="email-loading">読み込み中...</div>
+        <template v-else>
+          <div class="email-field">
+            <label>通知先</label>
+            <UserChipSelect
+              :userList="notifyAllUsers"
+              v-model="notifyUserIds"
+            />
+            <p class="notify-helper">社員を検索して通知先に追加します。</p>
+          </div>
+          <div class="email-field">
+            <label>メール通知</label>
+            <div class="notify-toggle-row">
+              <label class="notify-toggle-label">
+                <input type="checkbox" v-model="notifyEmailEnabled" />
+                <span>差分検知時にメールも送信する</span>
+              </label>
+            </div>
+            <p class="notify-helper">有効にすると、上記通知先ユーザーのメールアドレス宛にメールを送信します。</p>
+          </div>
+          <div class="modal-actions">
+            <button class="btn save-btn" :disabled="notifyConfigSaving" @click="saveNotifyConfig">
+              {{ notifyConfigSaving ? '保存中...' : '保存' }}
+            </button>
+            <button class="btn" @click="closeNotifyConfigDialog">キャンセル</button>
+          </div>
+          <div v-if="notifyConfigMessage" class="notify-message" :class="notifyConfigError ? 'error' : 'success'">
+            {{ notifyConfigMessage }}
+          </div>
+        </template>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -330,6 +371,7 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import ContactEmailSelect from '@/views/purchase/ContactEmailSelect.vue'
+import UserChipSelect from '@/views/purchase/UserChipSelect.vue'
 
 const dsSources = [
   { op: '納期調整 読み書き', table: 't_kubota_sakai_due_adjustment', desc: '品番×日付の納期調整データ（需要・出荷数）' },
@@ -370,6 +412,12 @@ const formatAdjDate = (dateStr) => {
   if (!dateStr) return ''
   const d = new Date(dateStr)
   return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return ''
+  const parts = dateStr.split('-')
+  return `${parseInt(parts[1])}/${parseInt(parts[2])}`
 }
 
 const parseNumber = (value) => {
@@ -1496,6 +1544,57 @@ const sendEmail = async () => {
   }
 }
 
+// ========== 通知設定 ==========
+const showNotifyConfigDialog = ref(false)
+const notifyConfigLoading = ref(false)
+const notifyConfigSaving = ref(false)
+const notifyAllUsers = ref([])
+const notifyUserIds = ref([])
+const notifyEmailEnabled = ref(false)
+const notifyConfigMessage = ref('')
+const notifyConfigError = ref(false)
+
+const openNotifyConfigDialog = async () => {
+  showNotifyConfigDialog.value = true
+  notifyConfigLoading.value = true
+  notifyConfigMessage.value = ''
+  try {
+    const res = await api.kubotaSakaiDueAdjustments.getNotifyConfig()
+    notifyAllUsers.value = res.data.all_users || []
+    notifyUserIds.value = res.data.notify_user_ids || []
+    notifyEmailEnabled.value = !!res.data.email_enabled
+  } catch {
+    notifyAllUsers.value = []
+    notifyUserIds.value = []
+  } finally {
+    notifyConfigLoading.value = false
+  }
+}
+
+const closeNotifyConfigDialog = () => {
+  showNotifyConfigDialog.value = false
+}
+
+const saveNotifyConfig = async () => {
+  notifyConfigSaving.value = true
+  notifyConfigMessage.value = ''
+  try {
+    const res = await api.kubotaSakaiDueAdjustments.saveNotifyConfig({
+      notify_user_ids: notifyUserIds.value,
+      email_enabled: notifyEmailEnabled.value,
+    })
+    notifyUserIds.value = res.data.notify_user_ids || notifyUserIds.value
+    notifyEmailEnabled.value = !!res.data.email_enabled
+    notifyConfigMessage.value = '保存しました'
+    notifyConfigError.value = false
+  } catch {
+    notifyConfigMessage.value = '保存に失敗しました'
+    notifyConfigError.value = true
+  } finally {
+    notifyConfigSaving.value = false
+  }
+}
+
 let theadResizeObserver = null
 
 onMounted(async () => {
@@ -1982,5 +2081,49 @@ onBeforeUnmount(() => {
 .email-send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.notify-config-modal {
+  max-width: 620px;
+}
+.notify-description {
+  color: #555;
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.notify-helper {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #666;
+}
+.notify-toggle-row {
+  display: flex;
+  align-items: center;
+}
+.notify-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.notify-toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.notify-message {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.notify-message.success {
+  background: #d4edda;
+  color: #155724;
+}
+.notify-message.error {
+  background: #fee;
+  color: #c00;
 }
 </style>

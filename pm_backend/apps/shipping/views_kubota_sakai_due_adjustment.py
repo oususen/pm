@@ -12,6 +12,7 @@ from masters.models import Calendar, Contact, Line, Process, Product
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
     KubotaSakaiDueAllocationOverride,
+    KubotaSakaiDueNotifyConfig,
     KubotaSakaiTripAssignment,
     OrderLine,
 )
@@ -1070,6 +1071,48 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 {'detail': f'メール送信エラー: {exc}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    # ========== notify_config ==========
+    @action(detail=False, methods=['get', 'patch'])
+    def notify_config(self, request):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        config = KubotaSakaiDueNotifyConfig.get_solo()
+
+        def _user_dict(u):
+            return {
+                'id': u.id,
+                'username': u.username,
+                'last_name': u.last_name,
+                'first_name': u.first_name,
+                'email': u.email,
+                'profile': {'employee_code': getattr(u, 'employee_code', '') or ''},
+            }
+
+        if request.method == 'GET':
+            notify_user_ids = list(config.notify_users.values_list('id', flat=True))
+            all_users = [
+                _user_dict(u)
+                for u in User.objects.filter(is_active=True).order_by('last_name', 'first_name')
+            ]
+            return Response({
+                'notify_user_ids': notify_user_ids,
+                'email_enabled': config.email_enabled,
+                'all_users': all_users,
+            })
+
+        user_ids = request.data.get('notify_user_ids')
+        if user_ids is not None:
+            config.notify_users.set(user_ids)
+        email_enabled = request.data.get('email_enabled')
+        if email_enabled is not None:
+            config.email_enabled = bool(email_enabled)
+            config.save(update_fields=['email_enabled'])
+        notify_user_ids = list(config.notify_users.values_list('id', flat=True))
+        return Response({
+            'notify_user_ids': notify_user_ids,
+            'email_enabled': config.email_enabled,
+        })
 
 
 def _recalculate_remaining_for_groups(groups):
