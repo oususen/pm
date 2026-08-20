@@ -144,6 +144,43 @@ class KubotaSakaiDueAdjustment(models.Model):
         return f"{self.product_code} {self.ship_to_code} {self.source_order_no or '内示'} {self.due_date} D:{self.demand_qty} L:{self.delivery_qty}"
 
 
+class KubotaSakaiDueAllocationOverride(models.Model):
+    """クボタ堺納期調整の特例固定。
+    FIFO再配分より優先して、指定した注番・日付へ数量を固定する。
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    product_code = models.CharField(max_length=50, verbose_name='品番')
+    ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場所コード')
+    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')
+    due_date = models.DateField(verbose_name='日付')
+    fixed_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0, verbose_name='固定数量')
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kubota_sakai_due_allocation_override_updated',
+        verbose_name='更新者',
+    )
+    updated_at = models.DateTimeField(null=True, blank=True, verbose_name='更新日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+
+    class Meta:
+        db_table = 't_kubota_sakai_due_allocation_override'
+        verbose_name = 'クボタ堺納期調整固定'
+        verbose_name_plural = 'クボタ堺納期調整固定'
+        unique_together = [['product_code', 'ship_to_code', 'source_order_no', 'due_date']]
+        indexes = [
+            models.Index(fields=['product_code', 'ship_to_code'], name='kbt_due_ovr_prod_ship_idx'),
+            models.Index(fields=['due_date'], name='t_kubota_sa_due_dat_106a68_idx'),
+        ]
+        ordering = ['product_code', 'ship_to_code', 'source_order_no', 'due_date']
+
+    def __str__(self):
+        return f"{self.product_code} {self.ship_to_code} {self.source_order_no or '内示'} {self.due_date} F:{self.fixed_qty}"
+
+
 class KubotaSakaiTripAssignment(models.Model):
     """クボタ堺向け便割付
     納期調整(DueAdjustment)の delivery_qty を便に割り付ける。

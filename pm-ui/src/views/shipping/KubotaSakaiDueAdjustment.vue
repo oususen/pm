@@ -47,6 +47,7 @@
       <button class="btn save-btn" :disabled="saving || loading" @click="saveDeliveries">{{ saving ? '保存中...' : '保存' }}</button>
       <button class="btn" :disabled="loading || !matrixColumns.length" @click="exportExcel">EXCEL出力</button>
       <button class="btn" :disabled="loading || importing" @click="handleDisplayClick">表示</button>
+      <span class="fixed-help">計画欄の「固」で注番固定</span>
       <DataSourceDialog title="" :sources="dsSources" />
     </div>
 
@@ -155,22 +156,31 @@
                     v-for="slotIdx in row.maxSlots"
                     :key="`${row.rowKey}-${col.colKey}-delivery-${slotIdx}`"
                     class="sub-cell"
+                    :class="{ 'fixed-plan-cell': isFixedCell(editableLineAt(row, col, slotIdx - 1), row.dateKey) }"
                   >
-                    <input
-                      v-if="editableLineAt(row, col, slotIdx - 1)"
-                      :ref="(el) => { if (el) inputRefs[`${row.dateKey}-${col.colKey}-${slotIdx - 1}`] = el }"
-                      :data-row="row.dateKey"
-                      :data-col="col.colKey"
-                      :data-slot="slotIdx - 1"
-                      :value="displayInputValue(editableLineAt(row, col, slotIdx - 1).deliveryByDate[row.dateKey])"
-                      :disabled="isDateLocked(row.dateKey)"
-                      :class="{ 'locked-cell': isDateLocked(row.dateKey) }"
-                      type="text"
-                      inputmode="decimal"
-                      @input="onDeliveryInput(editableLineAt(row, col, slotIdx - 1), row.dateKey, $event.target.value)"
-                      @blur="onDeliveryBlur(editableLineAt(row, col, slotIdx - 1), row.dateKey)"
-                      @keydown.enter.prevent="focusNextRow($event, row.dateKey, col.colKey, slotIdx - 1)"
-                    />
+                    <template v-if="editableLineAt(row, col, slotIdx - 1)">
+                      <input
+                        :ref="(el) => { if (el) inputRefs[`${row.dateKey}-${col.colKey}-${slotIdx - 1}`] = el }"
+                        :data-row="row.dateKey"
+                        :data-col="col.colKey"
+                        :data-slot="slotIdx - 1"
+                        :value="displayInputValue(editableLineAt(row, col, slotIdx - 1).deliveryByDate[row.dateKey])"
+                        :disabled="isDateLocked(row.dateKey)"
+                        :class="{ 'locked-cell': isDateLocked(row.dateKey), 'fixed-input': isFixedCell(editableLineAt(row, col, slotIdx - 1), row.dateKey) }"
+                        type="text"
+                        inputmode="decimal"
+                        @input="onDeliveryInput(editableLineAt(row, col, slotIdx - 1), row.dateKey, $event.target.value)"
+                        @blur="onDeliveryBlur(editableLineAt(row, col, slotIdx - 1), row.dateKey)"
+                        @keydown.enter.prevent="focusNextRow($event, row.dateKey, col.colKey, slotIdx - 1)"
+                      />
+                      <button
+                        class="fixed-toggle-btn"
+                        :class="{ active: isFixedCell(editableLineAt(row, col, slotIdx - 1), row.dateKey) }"
+                        :disabled="isDateLocked(row.dateKey)"
+                        title="この注番へ計画数を固定"
+                        @click.stop="toggleFixedCell(editableLineAt(row, col, slotIdx - 1), row.dateKey)"
+                      >固</button>
+                    </template>
                   </div>
                 </td>
                 <td class="readonly-cell product-end" :class="row.dayClass">
@@ -323,6 +333,7 @@ import ContactEmailSelect from '@/views/purchase/ContactEmailSelect.vue'
 
 const dsSources = [
   { op: '納期調整 読み書き', table: 't_kubota_sakai_due_adjustment', desc: '品番×日付の納期調整データ（需要・出荷数）' },
+  { op: '固定設定 読み書き', table: 't_kubota_sakai_due_allocation_override', desc: '注番へ強制紐づけする固定数量' },
   { op: '受注明細 読み取り', table: 't_order_line', desc: '取込元の受注明細（demand_qty）' },
   { op: 'カレンダー 読み取り', table: 'm_calendar / m_calendar_day', desc: '営業日判定・計画ロック日' },
   { op: 'お気に入り 読み書き', table: 'user_favorite', desc: '画面フィルタのお気に入り保存' },
@@ -638,10 +649,12 @@ const recalcGroupRemaining = (group) => {
 const buildLine = (li) => {
   const demandByDate = {}
   const deliveryByDate = {}
+  const fixedByDate = {}
   const remainingByDate = {}
   dateColumns.value.forEach((col) => {
     demandByDate[col.key] = 0
     deliveryByDate[col.key] = 0
+    fixedByDate[col.key] = ''
     remainingByDate[col.key] = 0
   })
   Object.entries(li.demand_by_date || {}).forEach(([d, q]) => {
@@ -650,12 +663,16 @@ const buildLine = (li) => {
   Object.entries(li.delivery_by_date || {}).forEach(([d, q]) => {
     if (Object.prototype.hasOwnProperty.call(deliveryByDate, d)) deliveryByDate[d] = parseNumber(q)
   })
+  Object.entries(li.fixed_by_date || {}).forEach(([d, q]) => {
+    if (Object.prototype.hasOwnProperty.call(fixedByDate, d)) fixedByDate[d] = q === '' ? '' : parseNumber(q)
+  })
   return {
     lineKey: li.line_key,
     sourceOrderNo: li.source_order_no,
     orderType: li.order_type,
     demandByDate,
     deliveryByDate,
+    fixedByDate,
     dueAdjustmentIdByDate: li.due_adjustment_id_by_date || {},
     coordinationNoteByDate: li.coordination_note_by_date || {},
     remainingByDate,
@@ -977,9 +994,34 @@ const findGroupForLine = (line) => {
   return groups.value.find((g) => g.lines.includes(line))
 }
 
+const isFixedCell = (line, dateKey) => {
+  if (!line) return false
+  const value = line.fixedByDate?.[dateKey]
+  return value !== '' && value !== null && value !== undefined
+}
+
+const toggleFixedCell = (line, dateKey) => {
+  if (!line) return
+  if (isFixedCell(line, dateKey)) {
+    line.fixedByDate[dateKey] = ''
+  } else {
+    const qty = parseNumber(line.deliveryByDate[dateKey])
+    if (qty <= 0) {
+      alert('固定する前に計画数を入力してください。')
+      return
+    }
+    line.fixedByDate[dateKey] = qty
+  }
+  line._dirty = true
+}
+
 const onDeliveryInput = (line, dateKey, rawValue) => {
   const normalized = rawValue.replace(/[^\d.-]/g, '')
   line.deliveryByDate[dateKey] = normalized === '' ? 0 : parseNumber(normalized)
+  if (isFixedCell(line, dateKey)) {
+    const fixedQty = parseNumber(line.deliveryByDate[dateKey])
+    line.fixedByDate[dateKey] = fixedQty > 0 ? fixedQty : ''
+  }
   line._dirty = true
   const group = findGroupForLine(line)
   if (group) recalcGroupRemaining(group)
@@ -1009,15 +1051,19 @@ const focusNextRow = (event, currentDateKey, colKey, slotIdx) => {
 const buildPayloadRows = (targetGroups = [], dirtyOnly = true) => {
   const payloadRows = []
   for (const group of targetGroups) {
+    const includeWholeGroup = !dirtyOnly || group.lines.some((line) => line._dirty)
     for (const line of group.lines) {
-      if (dirtyOnly && !line._dirty) continue
+      if (!includeWholeGroup) continue
       const deliveryByDate = {}
+      const fixedByDate = {}
       for (const col of dateColumns.value) {
         deliveryByDate[col.key] = parseNumber(line.deliveryByDate[col.key])
+        fixedByDate[col.key] = isFixedCell(line, col.key) ? parseNumber(line.fixedByDate[col.key]) : ''
       }
       payloadRows.push({
         line_key: line.lineKey,
         delivery_by_date: deliveryByDate,
+        fixed_by_date: fixedByDate,
       })
     }
   }
@@ -1565,6 +1611,10 @@ onBeforeUnmount(() => {
   border-color: #3b82f6;
   color: #1e3a8a;
 }
+.fixed-help {
+  font-size: 12px;
+  color: #4b5563;
+}
 .table-wrap {
   flex: 1;
   overflow: auto;
@@ -1695,6 +1745,13 @@ onBeforeUnmount(() => {
 .sub-cell:last-child {
   border-bottom: none;
 }
+.fixed-plan-cell {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 1px;
+  background: #fff7d6;
+}
 .sub-cell.forecast {
   background: #fafcff;
   color: #64748b;
@@ -1748,6 +1805,28 @@ onBeforeUnmount(() => {
   padding: 0 4px;
   box-sizing: border-box;
   background: #fff;
+}
+.fixed-input {
+  font-weight: 700;
+  color: #92400e;
+}
+.fixed-toggle-btn {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  background: #f8fafc;
+  color: #000;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.fixed-toggle-btn.active {
+  border-color: #d97706;
+  background: #f59e0b;
+  color: #000;
 }
 .total-row th,
 .total-row td {

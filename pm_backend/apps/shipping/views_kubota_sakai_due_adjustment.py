@@ -9,7 +9,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from masters.models import Calendar, Contact, Line, Process, Product
-from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiTripAssignment, OrderLine
+from orders.core.models import (
+    KubotaSakaiDueAdjustment,
+    KubotaSakaiDueAllocationOverride,
+    KubotaSakaiTripAssignment,
+    OrderLine,
+)
 from production.models_plan_change_log import ProductionPlanChangeLog
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from system_settings.models import SystemSetting
@@ -465,6 +470,13 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             rebalanced_count, _ = _rebalance_delivery_qty_for_groups(
                 affected_groups=affected_groups,
                 input_delivery_map=input_delivery_map,
+                fixed_qty_map={
+                    (row.product_code, row.ship_to_code, row.source_order_no, row.due_date): row.fixed_qty
+                    for row in KubotaSakaiDueAllocationOverride.objects.filter(
+                        product_code__in=[group[0] for group in affected_groups],
+                        due_date__range=(start_date, end_date),
+                    )
+                },
                 user=user,
                 now=datetime.now(),
             )
@@ -526,6 +538,16 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         qs = KubotaSakaiDueAdjustment.objects.filter(
             due_date__range=(start_date, end_date),
         ).order_by('product_code', 'ship_to_code', 'source_order_no', 'due_date')
+        override_map = {}
+        for row in KubotaSakaiDueAllocationOverride.objects.filter(
+            due_date__range=(start_date, end_date),
+        ).values('product_code', 'ship_to_code', 'source_order_no', 'due_date', 'fixed_qty'):
+            override_map[(
+                row['product_code'],
+                row['ship_to_code'],
+                row['source_order_no'],
+                row['due_date'].isoformat(),
+            )] = str(row['fixed_qty'])
 
         # 外側グループ: 品番+納入場所、内側: 注番
         outer_groups = {}
@@ -548,6 +570,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'order_type': row.order_type,
                     'demand_by_date': {},
                     'delivery_by_date': {},
+                    'fixed_by_date': {},
                     'due_adjustment_id_by_date': {},
                     'coordination_note_by_date': {},
                 }
@@ -555,6 +578,10 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             d_str = row.due_date.isoformat()
             li['demand_by_date'][d_str] = str(row.demand_qty)
             li['delivery_by_date'][d_str] = str(row.delivery_qty)
+            li['fixed_by_date'][d_str] = override_map.get(
+                (row.product_code, row.ship_to_code, row.source_order_no, d_str),
+                '',
+            )
             li['due_adjustment_id_by_date'][d_str] = row.id
             li['coordination_note_by_date'][d_str] = str(row.coordination_note or '')
             if row.order_type == 'FIRM':
@@ -570,6 +597,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'order_type': li['order_type'],
                     'demand_by_date': li['demand_by_date'],
                     'delivery_by_date': li['delivery_by_date'],
+                    'fixed_by_date': li['fixed_by_date'],
                     'due_adjustment_id_by_date': li['due_adjustment_id_by_date'],
                     'coordination_note_by_date': li['coordination_note_by_date'],
                 })
@@ -658,6 +686,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             log_line, log_process = _resolve_due_adjustment_line_process()
         # 入力値（セル値）: (product_code, ship_to_code, source_order_no, due_date) -> delivery
         input_delivery_map = {}
+        fixed_qty_map = {}
         # 行分解を再実行しないために保持
         parsed_line_rows = []
 
@@ -665,6 +694,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             for row in rows:
                 line_key = row.get('line_key', '')
                 delivery_by_date = row.get('delivery_by_date', {})
+                fixed_by_date = row.get('fixed_by_date', {})
                 if not line_key or not delivery_by_date:
                     continue
 
@@ -675,7 +705,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 product_code, ship_to_code, source_order_no = parts
                 ship_to_code = ship_to_code or None
                 source_order_no = source_order_no or None
-                parsed_line_rows.append((product_code, ship_to_code, source_order_no, delivery_by_date))
+                parsed_line_rows.append((product_code, ship_to_code, source_order_no, delivery_by_date, fixed_by_date))
                 affected_groups.add((product_code, ship_to_code or ''))
 
             existing_delivery_map = {}
@@ -692,7 +722,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                         existing.due_date,
                     )] = existing.delivery_qty or Decimal('0')
 
-            for product_code, ship_to_code, source_order_no, delivery_by_date in parsed_line_rows:
+            for product_code, ship_to_code, source_order_no, delivery_by_date, fixed_by_date in parsed_line_rows:
                 for date_str, qty_val in delivery_by_date.items():
                     due_date_val = _parse_date(date_str)
                     if not due_date_val:
@@ -716,9 +746,14 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     ):
                         continue
                     input_delivery_map[(product_code, ship_to_code, source_order_no, due_date_val)] = delivery
+                    fixed_value = None
+                    if isinstance(fixed_by_date, dict):
+                        fixed_value = _parse_decimal(fixed_by_date.get(date_str))
+                    if fixed_value is not None and fixed_value > 0:
+                        fixed_qty_map[(product_code, ship_to_code, source_order_no, due_date_val)] = fixed_value
 
             # 入力で指定されたキーで行が無いものは先に作成（demand=0）
-            for product_code, ship_to_code, source_order_no, delivery_by_date in parsed_line_rows:
+            for product_code, ship_to_code, source_order_no, delivery_by_date, _fixed_by_date in parsed_line_rows:
                 for date_str, qty_val in delivery_by_date.items():
                     due_date_val = _parse_date(date_str)
                     if not due_date_val:
@@ -747,17 +782,83 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                         updated_at=now,
                     )
 
-            updated_count, change_log_count = _rebalance_delivery_qty_for_groups(
-                affected_groups=affected_groups,
-                input_delivery_map=input_delivery_map,
-                user=user,
-                now=now,
-                allow_due_plan_lock_update=allow_due_plan_lock_update,
-                change_reason=change_reason,
-                log_line=log_line,
-                log_process=log_process,
-                product_cache=product_cache,
-            )
+            for product_code, ship_to_code_norm in affected_groups:
+                ship_to_code = ship_to_code_norm or None
+                group_due_keys = {
+                    (
+                        row.product_code,
+                        row.ship_to_code,
+                        row.source_order_no,
+                        row.due_date,
+                    )
+                    for row in KubotaSakaiDueAdjustment.objects.filter(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                    )
+                }
+                existing_override_map = {
+                    (row.product_code, row.ship_to_code, row.source_order_no, row.due_date): row
+                    for row in KubotaSakaiDueAllocationOverride.objects.filter(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                    )
+                }
+                desired_override_keys = {
+                    key for key in fixed_qty_map.keys()
+                    if key[0] == product_code and (key[1] or None) == ship_to_code and key in group_due_keys
+                }
+
+                delete_ids = [
+                    row.id for key, row in existing_override_map.items()
+                    if key not in desired_override_keys
+                ]
+                update_rows = []
+                create_rows = []
+                for key in desired_override_keys:
+                    existing_override = existing_override_map.get(key)
+                    fixed_qty = fixed_qty_map[key]
+                    if existing_override:
+                        if existing_override.fixed_qty != fixed_qty:
+                            existing_override.fixed_qty = fixed_qty
+                            existing_override.updated_by = user
+                            existing_override.updated_at = now
+                            update_rows.append(existing_override)
+                    else:
+                        create_rows.append(KubotaSakaiDueAllocationOverride(
+                            product_code=key[0],
+                            ship_to_code=key[1],
+                            source_order_no=key[2],
+                            due_date=key[3],
+                            fixed_qty=fixed_qty,
+                            updated_by=user,
+                            updated_at=now,
+                        ))
+                if delete_ids:
+                    KubotaSakaiDueAllocationOverride.objects.filter(id__in=delete_ids).delete()
+                if update_rows:
+                    KubotaSakaiDueAllocationOverride.objects.bulk_update(
+                        update_rows,
+                        ['fixed_qty', 'updated_by', 'updated_at'],
+                    )
+                if create_rows:
+                    KubotaSakaiDueAllocationOverride.objects.bulk_create(create_rows)
+
+            try:
+                updated_count, change_log_count = _rebalance_delivery_qty_for_groups(
+                    affected_groups=affected_groups,
+                    input_delivery_map=input_delivery_map,
+                    fixed_qty_map=fixed_qty_map,
+                    user=user,
+                    now=now,
+                    allow_due_plan_lock_update=allow_due_plan_lock_update,
+                    change_reason=change_reason,
+                    log_line=log_line,
+                    log_process=log_process,
+                    product_cache=product_cache,
+                )
+            except ValueError as exc:
+                transaction.set_rollback(True)
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
             # 残量再計算
             _recalculate_remaining_for_groups(affected_groups)
@@ -868,6 +969,13 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             _rebalance_delivery_qty_for_groups(
                 affected_groups=[(product_code, ship_to_code or '')],
                 input_delivery_map=rebalance_input_map,
+                fixed_qty_map={
+                    (row.product_code, row.ship_to_code, row.source_order_no, row.due_date): row.fixed_qty
+                    for row in KubotaSakaiDueAllocationOverride.objects.filter(
+                        product_code=product_code,
+                        ship_to_code=ship_to_code,
+                    )
+                },
                 user=request.user if request.user and request.user.is_authenticated else None,
                 now=datetime.now(),
                 immutable_cutoff_date=business_today,
@@ -1009,6 +1117,7 @@ def _recalculate_remaining_for_groups(groups):
 def _rebalance_delivery_qty_for_groups(
     affected_groups,
     input_delivery_map,
+    fixed_qty_map,
     user,
     now,
     allow_due_plan_lock_update=False,
@@ -1101,8 +1210,30 @@ def _rebalance_delivery_qty_for_groups(
         remaining_demands = [b.demand_qty or Decimal('0') for b in demand_buckets]
         alloc_map = defaultdict(lambda: Decimal('0'))  # (source_order_no, ship_date) -> qty
         ship_dates = sorted(date_totals.keys())
+        fixed_alloc_by_date = defaultdict(list)
+        fixed_total_by_date = defaultdict(lambda: Decimal('0'))
+        for fixed_key, fixed_qty in fixed_qty_map.items():
+            p, s, so, d = fixed_key
+            if p != product_code or (s or None) != ship_to_code:
+                continue
+            fixed_qty = fixed_qty or Decimal('0')
+            if fixed_qty <= 0:
+                continue
+            fixed_alloc_by_date[d].append((so, fixed_qty))
+            fixed_total_by_date[d] += fixed_qty
+
+        for ship_date, fixed_total in fixed_total_by_date.items():
+            if fixed_total > date_totals.get(ship_date, Decimal('0')):
+                raise ValueError(
+                    f'{product_code} {ship_to_code or "-"} {ship_date} の固定数量合計が計画数を超えています。'
+                )
 
         bucket_idx = 0
+
+        bucket_indices_by_order_no = defaultdict(list)
+        for idx, bucket in enumerate(demand_buckets):
+            bucket_indices_by_order_no[bucket.source_order_no].append(idx)
+
         def consume_fifo(qty_left, ship_date=None):
             nonlocal bucket_idx
             if qty_left <= 0:
@@ -1129,11 +1260,35 @@ def _rebalance_delivery_qty_for_groups(
                 alloc_key = (last_bucket.source_order_no, ship_date)
                 alloc_map[alloc_key] += qty_left
 
+        def consume_fixed_for_order(source_order_no, qty_left):
+            if qty_left <= 0:
+                return Decimal('0')
+
+            indices = bucket_indices_by_order_no.get(source_order_no) or []
+            for idx in indices:
+                rem = remaining_demands[idx]
+                if rem <= 0:
+                    continue
+                take = rem if rem <= qty_left else qty_left
+                remaining_demands[idx] -= take
+                qty_left -= take
+                if qty_left <= 0:
+                    break
+            return qty_left
+
         for ship_date in ship_dates:
             qty_left = date_totals[ship_date]
             if immutable_cutoff_date and ship_date <= immutable_cutoff_date:
                 consume_fifo(qty_left)
                 continue
+            for source_order_no, fixed_qty in fixed_alloc_by_date.get(ship_date, []):
+                alloc_map[(source_order_no, ship_date)] += fixed_qty
+                leftover_fixed = consume_fixed_for_order(source_order_no, fixed_qty)
+                if leftover_fixed > 0:
+                    raise ValueError(
+                        f'{product_code} {ship_to_code or "-"} {ship_date} {source_order_no or "内示"} の固定数量が需要を超えています。'
+                    )
+                qty_left -= fixed_qty
             consume_fifo(qty_left, ship_date=ship_date)
 
         # 書き戻し（既存行更新/不足行作成/不要行ゼロ化）

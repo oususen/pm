@@ -21,7 +21,7 @@ from shipping.views_kubota_sakai_due_adjustment import (
     _recalculate_remaining_for_groups,
     sync_kubota_sakai_due_adjustments_from_orders,
 )
-from orders.core.models import KubotaSakaiDueAdjustment
+from orders.core.models import KubotaSakaiDueAdjustment, KubotaSakaiDueAllocationOverride
 
 logger = logging.getLogger('production')
 OVERDUE_NOTIFY_USERS_KEY = 'kubota_sakai.overdue_notify_user_ids'
@@ -214,6 +214,13 @@ def run_kubota_sakai_due_sync():
                 updated_count, _ = _rebalance_delivery_qty_for_groups(
                     affected_groups=affected_groups,
                     input_delivery_map=input_delivery_map,
+                    fixed_qty_map={
+                        (row.product_code, row.ship_to_code, row.source_order_no, row.due_date): row.fixed_qty
+                        for row in KubotaSakaiDueAllocationOverride.objects.filter(
+                            product_code__in=[group[0] for group in affected_groups],
+                            due_date__range=(start_date, end_date),
+                        )
+                    },
                     user=None,
                     now=datetime.now(),
                 )
