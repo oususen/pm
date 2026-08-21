@@ -334,6 +334,15 @@ class CSVImportService:
                 first_daily = dailies[0] if dailies else None
                 is_kubota_special = False
 
+                def _get_line_remark(d):
+                    for attr in ('raw_kubota', 'raw_tiera', 'raw_rieden', 'raw'):
+                        raw = getattr(d, attr, None)
+                        if raw:
+                            val = (raw.raw_payload or {}).get('remark')
+                            if val:
+                                return val
+                    return None
+
                 # Track latest confirmed due date per product (for Tiera-specific cleanup)
                 product_cutoffs = {}
 
@@ -477,7 +486,8 @@ class CSVImportService:
                             quantity=daily.quantity,
                             due_date=daily.due_date,
                             plant_code=daily.plant_code,
-                            ship_to_code=daily.ship_to_code
+                            ship_to_code=daily.ship_to_code,
+                            remark=_get_line_remark(daily),
                         )
                         created_line_ids.append(line.id)
                         line_no += 1
@@ -579,7 +589,8 @@ class CSVImportService:
                                 quantity=daily.quantity,
                                 due_date=daily.due_date,
                                 plant_code=daily.plant_code,
-                                ship_to_code=daily.ship_to_code
+                                ship_to_code=daily.ship_to_code,
+                                remark=_get_line_remark(daily),
                             )
                             created_line_ids.append(line.id)
                             line_no += 1
@@ -616,7 +627,8 @@ class CSVImportService:
                                 quantity=daily.quantity,
                                 due_date=daily.due_date,
                                 plant_code=daily.plant_code,
-                                ship_to_code=daily.ship_to_code
+                                ship_to_code=daily.ship_to_code,
+                                remark=_get_line_remark(daily),
                             )
                             created_line_ids.append(line.id)
                             line_no += 1
@@ -667,7 +679,8 @@ class CSVImportService:
                                 quantity=daily.quantity,
                                 due_date=daily.due_date,
                                 plant_code=daily.plant_code,
-                                ship_to_code=daily.ship_to_code
+                                ship_to_code=daily.ship_to_code,
+                                remark=_get_line_remark(daily),
                             )
                             created_line_ids.append(line.id)
                             line_no += 1
@@ -804,7 +817,8 @@ class CSVImportService:
                             quantity=daily.quantity,
                             due_date=daily.due_date,
                             plant_code=daily.plant_code,
-                            ship_to_code=daily.ship_to_code
+                            ship_to_code=daily.ship_to_code,
+                            remark=_get_line_remark(daily),
                         )
                         created_line_ids.append(line.id)
                         line_no += 1

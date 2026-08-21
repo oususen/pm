@@ -1123,6 +1123,7 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                             'ship_to': pl['ship_to_code'] or '',
                             'issue_date': issue_date,
                             'source': 'MANUAL',
+                            'remark': pl['remark'] or '',
                         }
                         if pl['customer_order_no']:
                             raw_payload['kubota_order_no'] = pl['customer_order_no']
@@ -1169,7 +1170,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                             order_document_no=pl['customer_order_no'],
                             c_table_no=pl['c_table_no'],
                             product_name=product.product_name if product else '',
-                            raw_payload={'source': 'MANUAL'},
+                            raw_payload={
+                                'source': 'MANUAL',
+                                'remark': pl['remark'] or '',
+                            },
                             parse_status='PARSED',
                         )
                         daily = StgOrderDaily.objects.create(
@@ -1196,7 +1200,10 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                             product_code=pl['product_code'],
                             due_date=pl['due_date'],
                             quantity=pl['quantity'],
-                            raw_payload={'source': 'MANUAL'},
+                            raw_payload={
+                                'source': 'MANUAL',
+                                'remark': pl['remark'] or '',
+                            },
                             parse_status='PARSED',
                         )
                         daily = StgOrderDaily.objects.create(
@@ -1222,17 +1229,6 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                     source_file=source_file,
                     raw_id_range=raw_id_range,
                 )
-
-                remarks_by_idx = {i: pl['remark'] for i, pl in enumerate(parsed_lines) if pl['remark']}
-                if remarks_by_idx:
-                    created_order_lines = OrderLine.objects.filter(
-                        order__source_file=source_file, order__source_system='MANUAL'
-                    ).order_by('order_id', 'line_no')
-                    for ol in created_order_lines:
-                        remark_text = remarks_by_idx.get(ol.line_no - 1)
-                        if remark_text:
-                            ol.remark = remark_text
-                            ol.save(update_fields=['remark'])
 
                 user = request.user if request.user and request.user.is_authenticated else None
                 if user:
