@@ -1524,10 +1524,7 @@ def recalculate_planned_stock_qty(
         last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned
     elif not initial_backlog:
-        # calc_start_date以前にデータがない場合（初回投入時など）、
-        # 対象範囲の最古のstock_qtyを初期値としてフォールバック
-        fallback = backlogs[0] if backlogs else None
-        last_planned = (fallback.stock_qty or 0) if fallback else 0
+        last_planned = 0
 
     trace_log(
         line_id, product_id, calc_start_date,
