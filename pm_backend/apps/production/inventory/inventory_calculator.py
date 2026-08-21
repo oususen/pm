@@ -224,7 +224,9 @@ def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None, pro
 def _build_demand_map(line_id, start_date, end_date):
     """
     最終品（is_final_product=True）の需要を (product_id, plan_date) で集計。
-    LineDemandから取得（plan_dateはLTシフト済み）。確定優先。
+    LineDemandから取得（plan_dateはLTシフト済み）。
+    受注展開時に同一(customer, product, ship_to, due_date)の確定がある内示は
+    既に除外されているため、LineDemandに共存するfirm/forecastは別需要であり常に合算する。
     """
     from collections import defaultdict
     from production.models import LineDemand
@@ -236,28 +238,10 @@ def _build_demand_map(line_id, start_date, end_date):
         plan_date__lte=end_date,
     )
 
-    firm_by_key = defaultdict(Decimal)
-    forecast_by_key = defaultdict(Decimal)
-    shifted_keys = set()
+    demand_map = defaultdict(Decimal)
     for ld in demands:
         key = (ld.product_id, ld.plan_date)
-        firm_qty = Decimal(str(ld.firm_qty or 0))
-        forecast_qty = Decimal(str(ld.forecast_qty or 0))
-        if firm_qty > 0:
-            firm_by_key[key] += firm_qty
-        if forecast_qty > 0:
-            forecast_by_key[key] += forecast_qty
-        if ld.is_shifted or ld.firm_is_shifted or ld.forecast_is_shifted:
-            shifted_keys.add(key)
-
-    demand_map = {}
-    for key in set(firm_by_key) | set(forecast_by_key):
-        firm = firm_by_key.get(key, Decimal('0'))
-        forecast = forecast_by_key.get(key, Decimal('0'))
-        if key in shifted_keys and firm > 0 and forecast > 0:
-            demand_map[key] = firm + forecast
-        else:
-            demand_map[key] = firm if firm > 0 else forecast
+        demand_map[key] += Decimal(str(ld.firm_qty or 0)) + Decimal(str(ld.forecast_qty or 0))
 
     traced_keys = [(product_id, plan_date) for (product_id, plan_date) in demand_map.keys() if is_traced(line_id, product_id)]
     if traced_keys:

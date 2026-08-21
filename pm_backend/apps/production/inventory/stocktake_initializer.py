@@ -650,16 +650,7 @@ def _build_global_stocktake_baseline_progress_map(baseline_date, is_working_day)
             product_id__in=demand_product_ids,
         )
         for demand in demand_qs:
-            qty = Decimal('0')
-            firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
-            forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-            is_shifted = bool(getattr(demand, 'is_shifted', False))
-            if is_shifted and firm_qty > 0 and forecast_qty > 0:
-                qty = firm_qty + forecast_qty
-            elif firm_qty > 0:
-                qty = firm_qty
-            elif forecast_qty > 0:
-                qty = forecast_qty
+            qty = Decimal(str(demand.firm_qty or 0)) + Decimal(str(demand.forecast_qty or 0))
             if not qty or not demand.product_id:
                 continue
             key = (demand.plan_date, demand.product_id)
@@ -756,16 +747,7 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
         plan_date__range=[baseline_date, end_date],
     )
     for demand in demand_qs:
-        qty = Decimal('0')
-        firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
-        forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-        is_shifted = bool(getattr(demand, 'is_shifted', False))
-        if is_shifted and firm_qty > 0 and forecast_qty > 0:
-            qty = firm_qty + forecast_qty
-        elif firm_qty > 0:
-            qty = firm_qty
-        elif forecast_qty > 0:
-            qty = forecast_qty
+        qty = Decimal(str(demand.firm_qty or 0)) + Decimal(str(demand.forecast_qty or 0))
         if demand.routing_step_id:
             key = (demand.plan_date, demand.routing_step_id)
             demand_by_step[key] = demand_by_step.get(key, Decimal('0')) + qty
@@ -826,16 +808,7 @@ def recalculate_progress_from_stocktake(line_id, baseline_date, end_date):
                 product_id__in=parent_product_ids,
             )
             for demand in parent_demand_qs:
-                qty = Decimal('0')
-                firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
-                forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
-                is_shifted = bool(getattr(demand, 'is_shifted', False))
-                if is_shifted and firm_qty > 0 and forecast_qty > 0:
-                    qty = firm_qty + forecast_qty
-                elif firm_qty > 0:
-                    qty = firm_qty
-                elif forecast_qty > 0:
-                    qty = forecast_qty
+                qty = Decimal(str(demand.firm_qty or 0)) + Decimal(str(demand.forecast_qty or 0))
                 if not qty or not demand.product_id:
                     continue
                 key = (demand.plan_date, demand.product_id)
