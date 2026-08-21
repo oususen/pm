@@ -124,6 +124,15 @@ const tiles = computed(() => [
     resource: "orders.csv_import",
   },
   {
+    key: "manual_entry",
+    to: "/orders/manual-entry",
+    label: "手動注文入力",
+    icon: "✏️",
+    category: "order_ops",
+    required: "edit",
+    resource: "orders.manual_entry",
+  },
+  {
     key: "first_article_setting",
     to: "/orders/first-article-setting",
     label: "お久しぶり製品<br>通知設定",

@@ -56,4 +56,8 @@ export const createStagingAPI = (client) => ({
       responseType: 'arraybuffer',
     })
   },
+
+  manualCreate(data) {
+    return client.post('/stg-order-raw/manual-create/', data)
+  },
 })

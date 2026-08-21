@@ -1039,6 +1039,221 @@ class StgOrderRawViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @action(detail=False, methods=['post'], url_path='manual-create')
+    def manual_create(self, request):
+        """手動注文入力: ステージングテーブル経由でOrder/OrderLineを作成"""
+        from masters.models import Customer, Product
+        from decimal import Decimal, InvalidOperation
+        from django.db import transaction
+        import uuid
+
+        try:
+            data = request.data
+            customer_code = str(data.get('customer_code', '')).strip()
+            order_type = str(data.get('order_type', 'FIRM')).strip()
+            factory = str(data.get('factory', '')).strip() or None
+            lines = data.get('lines', [])
+
+            if not customer_code:
+                return Response({'error': '顧客コードは必須です'}, status=status.HTTP_400_BAD_REQUEST)
+            if order_type not in ('FIRM', 'FORECAST'):
+                return Response({'error': '受注タイプはFIRMまたはFORECASTを指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+            if not lines:
+                return Response({'error': '明細行が必要です'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                customer = Customer.objects.get(customer_code=customer_code)
+            except Customer.DoesNotExist:
+                return Response({'error': f'顧客コード {customer_code} が見つかりません'}, status=status.HTTP_400_BAD_REQUEST)
+
+            parsed_lines = []
+            for i, line in enumerate(lines):
+                pc = line.get('product_code', '').strip()
+                if not pc:
+                    return Response({'error': f'明細行{i+1}: 製品コードは必須です'}, status=status.HTTP_400_BAD_REQUEST)
+                dd_str = line.get('due_date', '').strip()
+                if not dd_str:
+                    return Response({'error': f'明細行{i+1}: 納期は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    dd = date.fromisoformat(dd_str)
+                except ValueError:
+                    return Response({'error': f'明細行{i+1}: 納期の形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    qty = Decimal(str(line.get('quantity', '')))
+                    if qty <= 0:
+                        return Response({'error': f'明細行{i+1}: 数量は正の数を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+                except (InvalidOperation, ValueError):
+                    return Response({'error': f'明細行{i+1}: 数量が不正です'}, status=status.HTTP_400_BAD_REQUEST)
+                parsed_lines.append({
+                    'product_code': pc,
+                    'quantity': qty,
+                    'due_date': dd,
+                    'ship_to_code': line.get('ship_to_code', '').strip() or None,
+                    'inspection_type': line.get('inspection_type', '').strip() or None,
+                    'customer_order_no': line.get('customer_order_no', '').strip() or None,
+                    'c_table_no': line.get('c_table_no', '').strip() or None,
+                    'remark': line.get('remark', '').strip() or None,
+                })
+
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            unique_id = uuid.uuid4().hex[:8]
+            source_file = f"MANUAL-{timestamp}-{unique_id}"
+            source_system = 'MANUAL'
+
+            factory_plant_map = {
+                'SAKAI': '21',
+                'HIRAKATA': '23',
+                'HIRAKATA_2027': '23',
+                'KMT': '92',
+            }
+
+            with transaction.atomic():
+                created_raw_ids = []
+                created_daily_ids = []
+
+                for row_no, pl in enumerate(parsed_lines, start=1):
+                    product = Product.objects.filter(product_code=pl['product_code']).first()
+
+                    if customer_code == '000196':
+                        plant_code = factory_plant_map.get(factory, '') if factory else ''
+                        issue_date = datetime.now().strftime('%y%m%d')
+                        raw_payload = {
+                            'plant_code': plant_code,
+                            'factory': factory or '',
+                            'ship_to': pl['ship_to_code'] or '',
+                            'issue_date': issue_date,
+                            'source': 'MANUAL',
+                        }
+                        if pl['customer_order_no']:
+                            raw_payload['kubota_order_no'] = pl['customer_order_no']
+                        raw = StgOrderRawKubota.objects.create(
+                            customer_code=customer_code,
+                            order_type=order_type,
+                            source_system=source_system,
+                            source_file=source_file,
+                            source_row_no=row_no,
+                            product_code=pl['product_code'],
+                            product_name=product.product_name if product else '',
+                            delivery_date=pl['due_date'],
+                            quantity=pl['quantity'],
+                            order_no=pl['customer_order_no'] or '',
+                            inspection_type=pl['inspection_type'] or '',
+                            raw_payload=raw_payload,
+                            parse_status='PARSED',
+                        )
+                        daily = StgOrderDaily.objects.create(
+                            raw_kubota=raw,
+                            customer=customer,
+                            order_type=order_type,
+                            version_no='v1',
+                            product_code=pl['product_code'],
+                            due_date=pl['due_date'],
+                            quantity=pl['quantity'],
+                            ship_to_code=pl['ship_to_code'],
+                            source_system=source_system,
+                            source_file=source_file,
+                        )
+                        created_raw_ids.append(raw.id)
+
+                    elif customer_code == '000001':
+                        raw = StgOrderRawTiera.objects.create(
+                            customer_code=customer_code,
+                            order_type=order_type,
+                            source_system=source_system,
+                            source_file=source_file,
+                            source_row_no=row_no,
+                            data_type='Y55' if order_type == 'FIRM' else 'B17',
+                            product_code=pl['product_code'],
+                            due_date=pl['due_date'],
+                            quantity=pl['quantity'],
+                            order_document_no=pl['customer_order_no'],
+                            c_table_no=pl['c_table_no'],
+                            product_name=product.product_name if product else '',
+                            raw_payload={'source': 'MANUAL'},
+                            parse_status='PARSED',
+                        )
+                        daily = StgOrderDaily.objects.create(
+                            raw_tiera=raw,
+                            customer=customer,
+                            order_type=order_type,
+                            version_no='v1',
+                            product_code=pl['product_code'],
+                            product_name=product.product_name if product else '',
+                            due_date=pl['due_date'],
+                            quantity=pl['quantity'],
+                            source_system=source_system,
+                            source_file=source_file,
+                        )
+                        created_raw_ids.append(raw.id)
+
+                    else:
+                        raw = StgOrderRaw.objects.create(
+                            customer_code=customer_code,
+                            order_type=order_type,
+                            source_system=source_system,
+                            source_file=source_file,
+                            source_row_no=row_no,
+                            product_code=pl['product_code'],
+                            due_date=pl['due_date'],
+                            quantity=pl['quantity'],
+                            raw_payload={'source': 'MANUAL'},
+                            parse_status='PARSED',
+                        )
+                        daily = StgOrderDaily.objects.create(
+                            raw=raw,
+                            customer=customer,
+                            order_type=order_type,
+                            version_no='v1',
+                            product_code=pl['product_code'],
+                            product_name=product.product_name if product else '',
+                            due_date=pl['due_date'],
+                            quantity=pl['quantity'],
+                            ship_to_code=pl['ship_to_code'],
+                            source_system=source_system,
+                            source_file=source_file,
+                        )
+                        created_raw_ids.append(raw.id)
+
+                    created_daily_ids.append(daily.id)
+
+                raw_id_range = (min(created_raw_ids), max(created_raw_ids)) if created_raw_ids else (None, None)
+                service = CSVImportService()
+                order_result = service.create_orders_from_staging(
+                    source_file=source_file,
+                    raw_id_range=raw_id_range,
+                )
+
+                remarks_by_idx = {i: pl['remark'] for i, pl in enumerate(parsed_lines) if pl['remark']}
+                if remarks_by_idx:
+                    created_order_lines = OrderLine.objects.filter(
+                        order__source_file=source_file, order__source_system='MANUAL'
+                    ).order_by('order_id', 'line_no')
+                    for ol in created_order_lines:
+                        remark_text = remarks_by_idx.get(ol.line_no - 1)
+                        if remark_text:
+                            ol.remark = remark_text
+                            ol.save(update_fields=['remark'])
+
+                user = request.user if request.user and request.user.is_authenticated else None
+                if user:
+                    Order.objects.filter(source_file=source_file, source_system='MANUAL').update(created_by=user)
+
+            return Response({
+                'success': True,
+                'source_file': source_file,
+                'staging_records': len(created_daily_ids),
+                'orders': order_result.get('orders', 0),
+                'lines': order_result.get('lines', 0),
+                'order_result': order_result,
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            import traceback
+            return Response(
+                {'error': str(e), 'detail': traceback.format_exc()},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     @staticmethod
     def _compute_naiji_summary(product_code, start_date, end_date, ship_to=''):
         """製品1件の内示分析サマリーを計算して返す。

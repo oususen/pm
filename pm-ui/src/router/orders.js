@@ -36,6 +36,12 @@ const orders = [
     meta: { pageTitle: "旧OPEN受注洗い出し", resource: "orders.list" },
   },
   {
+    path: "/orders/manual-entry",
+    name: "ManualOrderEntry",
+    component: () => import("@/views/orders/ManualOrderEntry.vue"),
+    meta: { pageTitle: "手動注文入力", resource: "orders.manual_entry", permission: "edit" },
+  },
+  {
     path: "/orders",
     name: "OrderList",
     component: () => import("@/views/orders/OrderList.vue"),

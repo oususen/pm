@@ -29,6 +29,13 @@ class Order(models.Model):
     order_date = models.DateField(null=True, blank=True, verbose_name='受注日')
     freeze_from = models.DateField(null=True, blank=True, verbose_name='凍結開始日')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='OPEN', verbose_name='ステータス')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='created_orders',
+        verbose_name='作成者',
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 
