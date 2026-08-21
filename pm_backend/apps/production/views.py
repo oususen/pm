@@ -314,14 +314,14 @@ class LineDemandFilter(django_filters.FilterSet):
     def filter_line_search(self, queryset, name, value):
         if value:
             return queryset.filter(
-                Q(line__line_code__icontains=value) | Q(line__line_name__icontains=value)
+                Q(line__line_code__iexact=value) | Q(line__line_name__icontains=value)
             )
         return queryset
 
     def filter_process_search(self, queryset, name, value):
         if value:
             return queryset.filter(
-                Q(routing_step__process__process_code__icontains=value) |
+                Q(routing_step__process__process_code__iexact=value) |
                 Q(routing_step__process__process_name__icontains=value)
             )
         return queryset
@@ -401,18 +401,18 @@ class LineBacklogFilter(django_filters.FilterSet):
         return queryset
 
     def filter_line_search(self, queryset, name, value):
-        """ラインコード/名称の部分一致フィルタ"""
+        """ラインコード完全一致/名称部分一致フィルタ"""
         if value:
             return queryset.filter(
-                Q(line__line_code__icontains=value) | Q(line__line_name__icontains=value)
+                Q(line__line_code__iexact=value) | Q(line__line_name__icontains=value)
             )
         return queryset
 
     def filter_process_search(self, queryset, name, value):
-        """工程コード/名称の部分一致フィルタ"""
+        """工程コード完全一致/名称部分一致フィルタ"""
         if value:
             return queryset.filter(
-                Q(process__process_code__icontains=value) | Q(process__process_name__icontains=value)
+                Q(process__process_code__iexact=value) | Q(process__process_name__icontains=value)
             )
         return queryset
 
@@ -1016,7 +1016,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         if line_search:
             demand_qs = demand_qs.filter(
-                Q(line__line_code__icontains=line_search) | Q(line__line_name__icontains=line_search)
+                Q(line__line_code__iexact=line_search) | Q(line__line_name__icontains=line_search)
             )
         if product_search:
             demand_qs = demand_qs.filter(
@@ -1026,7 +1026,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             )
         if process_search:
             process_q = (
-                Q(routing_step__process__process_code__icontains=process_search) |
+                Q(routing_step__process__process_code__iexact=process_search) |
                 Q(routing_step__process__process_name__icontains=process_search)
             )
             lower_kw = process_search.lower()

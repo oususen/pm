@@ -159,11 +159,13 @@ const rows = computed(() => {
     const isProductionLine =
       productionLineIds.value.size === 0 ||
       (lineId !== null && lineId !== undefined && productionLineIds.value.has(String(lineId)));
-    const lineText = `${d.line_code || ""}${d.line_name || ""}${d.line || ""}`.toLowerCase();
-    const processText = `${d.process_code || ""}${d.process_name || ""}${d.process || ""}`.toLowerCase();
+    const lineCode = (d.line_code || "").toLowerCase();
+    const lineName = `${d.line_name || ""}${d.line || ""}`.toLowerCase();
+    const processCode = (d.process_code || "").toLowerCase();
+    const processName = `${d.process_name || ""}${d.process || ""}`.toLowerCase();
     const productText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
-    const okLine = !lineKeyword || lineText.includes(lineKeyword);
-    const okProcess = !processKeyword || processText.includes(processKeyword);
+    const okLine = !lineKeyword || lineCode === lineKeyword || lineName.includes(lineKeyword);
+    const okProcess = !processKeyword || processCode === processKeyword || processName.includes(processKeyword);
     const okProduct = !productKeyword || productText.includes(productKeyword);
     return isWithinRange(d) && isProductionLine && okLine && okProcess && okProduct;
   };

@@ -1035,11 +1035,13 @@ const groups = computed(() => {
   const filtered = backlogs.value.filter((d) => {
     if (isHiddenStCoproductParent(d)) return false;
     const within = d.plan_date >= start && d.plan_date <= end;
-    const lineText = `${d.line_code || ""}${d.line_name || ""}`.toLowerCase();
-    const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
+    const lineCode = (d.line_code || "").toLowerCase();
+    const lineName = (d.line_name || "").toLowerCase();
+    const processCode = (d.process_code || "").toLowerCase();
+    const processName = (d.process_name || "").toLowerCase();
     const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
-    const okLine = !lineKeyword || lineText.includes(lineKeyword);
-    const okProcess = !processKeyword || processText.includes(processKeyword);
+    const okLine = !lineKeyword || lineCode === lineKeyword || lineName.includes(lineKeyword);
+    const okProcess = !processKeyword || processCode === processKeyword || processName.includes(processKeyword);
     const okProd = !productKeyword || prodText.includes(productKeyword);
     return within && okLine && okProcess && okProd;
   });
@@ -1048,11 +1050,13 @@ const groups = computed(() => {
   const filteredDemands = lineDemands.value.filter((d) => {
     if (isHiddenStCoproductParent(d)) return false;
     const within = d.plan_date >= start && d.plan_date <= end;
-    const lineText = `${d.line_code || ""}${d.line_name || ""}${d.line || ""}`.toLowerCase();
-    const processText = `${d.process_code || ""}${d.process_name || ""}`.toLowerCase();
+    const lineCode = (d.line_code || "").toLowerCase();
+    const lineName = `${d.line_name || ""}${d.line || ""}`.toLowerCase();
+    const processCode = (d.process_code || "").toLowerCase();
+    const processName = (d.process_name || "").toLowerCase();
     const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
-    const okLine = !lineKeyword || lineText.includes(lineKeyword);
-    const okProcess = !processKeyword || processText.includes(processKeyword);
+    const okLine = !lineKeyword || lineCode === lineKeyword || lineName.includes(lineKeyword);
+    const okProcess = !processKeyword || processCode === processKeyword || processName.includes(processKeyword);
     const okProd = !productKeyword || prodText.includes(productKeyword);
     return within && okLine && okProcess && okProd;
   });

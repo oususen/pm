@@ -521,17 +521,23 @@ const groups = computed(() => {
     const within =
       d.plan_date >= columns.value[0] &&
       d.plan_date <= columns.value[columns.value.length - 1];
-    const lineText = `${d.line_code || ""}${d.line_name || ""}`.toLowerCase();
-    const processCodeForFilter = d.process_code === "PURCHASE" ? (d.supplier_code || d.line_code || d.process_code || "") : (d.process_code || "");
-    const processNameForFilter = d.process_code === "PURCHASE" ? (d.supplier_name || d.line_name || d.process_name || "") : (d.process_name || "");
-    const processText = `${processCodeForFilter}${processNameForFilter}`.toLowerCase();
+    const lineCode = (d.line_code || "").toLowerCase();
+    const lineName = (d.line_name || "").toLowerCase();
+    const processCodeRaw = d.process_code === "PURCHASE" ? (d.supplier_code || d.line_code || d.process_code || "") : (d.process_code || "");
+    const processNameRaw = d.process_code === "PURCHASE" ? (d.supplier_name || d.line_name || d.process_name || "") : (d.process_name || "");
+    const processCodeLower = processCodeRaw.toLowerCase();
+    const processNameLower = processNameRaw.toLowerCase();
     const prodText = `${d.product_code || ""}${d.product_name || ""}`.toLowerCase();
+    const filterLower = lineFilter.value ? lineFilter.value.trim().toLowerCase() : "";
     const okLine =
-      !lineFilter.value ||
-      lineText.includes(lineFilter.value.trim().toLowerCase());
+      !filterLower ||
+      lineCode === filterLower ||
+      lineName.includes(filterLower);
+    const processFilterLower = processFilter.value ? processFilter.value.trim().toLowerCase() : "";
     const okProcess =
-      !processFilter.value ||
-      processText.includes(processFilter.value.trim().toLowerCase());
+      !processFilterLower ||
+      processCodeLower === processFilterLower ||
+      processNameLower.includes(processFilterLower);
     const okProd =
       !productFilter.value ||
       prodText.includes(productFilter.value.trim().toLowerCase());

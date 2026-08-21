@@ -30,7 +30,7 @@ class GanttDisplayProductMapFilter(django_filters.FilterSet):
         if not value:
             return queryset
         return queryset.filter(
-            Q(line__line_code__icontains=value) |
+            Q(line__line_code__iexact=value) |
             Q(line__line_name__icontains=value)
         )
 
@@ -38,7 +38,7 @@ class GanttDisplayProductMapFilter(django_filters.FilterSet):
         if not value:
             return queryset
         return queryset.filter(
-            Q(process__process_code__icontains=value) |
+            Q(process__process_code__iexact=value) |
             Q(process__process_name__icontains=value)
         )
 
