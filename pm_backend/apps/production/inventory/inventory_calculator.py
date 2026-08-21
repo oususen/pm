@@ -274,11 +274,9 @@ def _get_max_parent_bom_lead_time(product_id):
     """
     製品の完成品向け累積LT（自分LTを含む）を取得する。
 
-    優先ロジック:
-    1. RoutingStep（output_product=対象製品）から、完成品までの階層累積LTの最大値を使用
-       - final工程のLTを起点に、hierarchy_path で子階層へ伝播した total LT を採用
-       - 対象製品の候補工程が複数ある場合は最大値
-    2. 1が取得できない場合は、従来互換として直親BOMの最大 lead_time_days を使用
+    RoutingStep（output_product=対象製品）から、完成品までの階層累積LTの最大値を使用。
+    final工程のLTを起点に、hierarchy_path で子階層へ伝播した total LT を採用。
+    対象製品の候補工程が複数ある場合は最大値。
 
     Args:
         product_id: 製品ID
@@ -286,18 +284,11 @@ def _get_max_parent_bom_lead_time(product_id):
     Returns:
         int: 最大リードタイム（日）
     """
-    from masters.models import BOMItem, RoutingStep
+    from masters.models import RoutingStep
     from masters.services.routing_service import build_effective_routing_q
 
     if not product_id:
         return 0
-
-    def fallback_direct_parent_lt():
-        max_lt = BOMItem.objects.filter(
-            child_product_id=product_id,
-            bom__is_active=True,
-        ).values_list('lead_time_days', flat=True)
-        return int(max(max_lt, default=0) or 0)
 
     step_qs = RoutingStep.objects.filter(
         output_product_id=product_id,
@@ -307,11 +298,11 @@ def _get_max_parent_bom_lead_time(product_id):
 
     candidate_steps = list(step_qs)
     if not candidate_steps:
-        return fallback_direct_parent_lt()
+        return 0
 
     routing_ids = {s.routing_id for s in candidate_steps if s.routing_id}
     if not routing_ids:
-        return fallback_direct_parent_lt()
+        return 0
 
     steps = list(
         RoutingStep.objects.filter(routing_id__in=routing_ids)
@@ -373,7 +364,7 @@ def _get_max_parent_bom_lead_time(product_id):
         if val is not None and int(val) > cumulative_lt:
             cumulative_lt = int(val)
 
-    return max(cumulative_lt, fallback_direct_parent_lt())
+    return cumulative_lt
 
 
 def _get_final_product_delivery_lt(line_id, product_id):
@@ -1775,7 +1766,24 @@ def recalculate_inventory_for_line(
         product_qs = product_qs.filter(product_id__in=target_product_ids)
     if line_final_only:
         product_qs = product_qs.filter(product__is_line_final_product=True)
-    product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
+    from masters.models import RoutingStep
+    from masters.services.routing_service import build_effective_routing_q
+    products_with_routing = set(
+        RoutingStep.objects.filter(
+            line_id=line_id,
+        ).filter(
+            build_effective_routing_q(prefix='routing__')
+        ).exclude(output_product_id__isnull=True)
+        .values_list('output_product_id', flat=True).distinct()
+    )
+    all_product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
+    excluded_ids = [pid for pid in all_product_ids if pid not in products_with_routing]
+    if excluded_ids:
+        logger.warning(
+            "RoutingStep未設定のため計算対象から除外: line_id=%s, 除外製品数=%d, product_ids=%s",
+            line_id, len(excluded_ids), excluded_ids,
+        )
+    product_ids = [pid for pid in all_product_ids if pid in products_with_routing]
     traced_product_ids = [product_id for product_id in product_ids if is_traced(line_id, product_id)]
     if traced_product_ids:
         trace_line_log(
