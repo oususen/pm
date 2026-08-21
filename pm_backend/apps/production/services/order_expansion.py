@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from masters.models import BOM, BOMItem, Line, Routing, RoutingStep
 from orders.core.models import OrderLine
-from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR, get_business_today
 from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.models import LineDemand
 
@@ -455,6 +455,13 @@ class OrderExpansionService:
         return aggregated, processed_ids
 
     def _accumulate_order_line(self, aggregated, order_line: OrderLine, exclude_forecast_source_keys=None):
+        if (
+            order_line.order.order_type == 'FORECAST'
+            and order_line.due_date
+            and order_line.due_date <= get_business_today()
+        ):
+            return
+
         source_key = self._build_source_demand_key(order_line)
         if (
             order_line.order.order_type == 'FORECAST'

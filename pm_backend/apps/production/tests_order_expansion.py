@@ -1,4 +1,6 @@
+from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
 
@@ -188,3 +190,28 @@ class OrderExpansionServiceTest(TestCase):
 
         self.assertFalse(result['forced_full_rebuild'])
         self.assertEqual(demand.firm_qty, Decimal('1'))
+
+    @patch('production.services.order_expansion.get_business_today', return_value=date(2026, 8, 21))
+    def test_forecast_due_today_or_past_is_not_expanded(self, _mock_today):
+        self._create_order_line('FC-PAST', 'FORECAST', '4', '2026-08-20', is_expanded=False)
+        self._create_order_line('FC-TODAY', 'FORECAST', '5', '2026-08-21', is_expanded=False)
+        self._create_order_line('FC-FUTURE', 'FORECAST', '6', '2026-08-22', is_expanded=False)
+        self._create_order_line('FIRM-TODAY', 'FIRM', '7', '2026-08-21', is_expanded=False)
+
+        result = OrderExpansionService().expand_open_orders(clear_existing=False)
+
+        demands = {
+            demand.plan_date: demand
+            for demand in LineDemand.objects.filter(
+                line=self.line,
+                product_code=self.product.product_code,
+            )
+        }
+
+        self.assertFalse(result['forced_full_rebuild'])
+        self.assertNotIn('2026-08-20', {str(key) for key in demands.keys()})
+        self.assertIn('2026-08-21', {str(key) for key in demands.keys()})
+        self.assertIn('2026-08-22', {str(key) for key in demands.keys()})
+        self.assertEqual(demands['2026-08-21'].firm_qty, Decimal('7'))
+        self.assertEqual(demands['2026-08-21'].forecast_qty, Decimal('0'))
+        self.assertEqual(demands['2026-08-22'].forecast_qty, Decimal('6'))
