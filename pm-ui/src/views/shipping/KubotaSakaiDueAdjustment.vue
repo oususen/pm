@@ -245,57 +245,6 @@
       </div>
     </div>
 
-    <div v-if="showEmailDialog" class="modal-overlay" @click.self="closeEmailDialog">
-      <div class="modal-content email-modal">
-        <h2>納期調整メール送信</h2>
-
-        <div v-if="contactLoading" class="email-loading">連絡先を読み込み中...</div>
-
-        <div v-if="!contactLoading && emailContacts.length === 0" class="email-warning">
-          送信先の連絡先が登録されていません。連絡先マスタで種別「納期調整」を登録してください。
-        </div>
-
-        <div class="email-field">
-          <label>送信先</label>
-          <ContactEmailSelect
-            v-model="emailTo"
-            :contacts="emailContacts"
-            multiple
-            placeholder="連絡先マスタから送信先を検索して追加"
-            picker-button-label="宛先選択"
-            picker-title="送信先選択"
-          />
-        </div>
-
-        <div class="email-field">
-          <label>CC送信先メール</label>
-          <ContactEmailSelect
-            v-model="emailCcSelected"
-            :contacts="emailContacts"
-            multiple
-            placeholder="連絡先マスタからCC送信先を検索して追加"
-          />
-        </div>
-
-        <div class="email-field">
-          <label>件名</label>
-          <input v-model="emailSubject" type="text" />
-        </div>
-
-        <div class="email-field">
-          <label>本文</label>
-          <textarea v-model="emailBody" rows="14"></textarea>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn email-send-btn" :disabled="sendingEmail || emailTo.length === 0" @click="sendEmail">
-            {{ sendingEmail ? '送信中...' : '送信' }}
-          </button>
-          <button class="btn" @click="closeEmailDialog">キャンセル</button>
-        </div>
-      </div>
-    </div>
-
     <div v-if="showCoordinationNoteDialog" class="modal-overlay" @click.self="closeCoordinationNoteDialog">
       <div class="modal-content">
         <h2>業務連絡メモ</h2>
@@ -381,9 +330,7 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import ExcelJS from 'exceljs'
 import api from '@/api/client'
-import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
-import ContactEmailSelect from '@/views/purchase/ContactEmailSelect.vue'
 import UserChipSelect from '@/views/purchase/UserChipSelect.vue'
 
 const dsSources = [
@@ -470,15 +417,6 @@ const isEditUnlocked = ref(false)
 const changeReason = ref('')
 const changeReasonDraft = ref('')
 const showChangeReasonDialog = ref(false)
-const showEmailDialog = ref(false)
-const sendingEmail = ref(false)
-const contactLoading = ref(false)
-const emailContacts = ref([])
-const emailTo = ref([])
-const emailCcSelected = ref([])
-const emailSubject = ref('')
-const emailBody = ref('')
-const lastChangeSummary = ref([])
 const favorites = ref([])
 const selectedFavoriteId = ref('')
 const favoriteName = ref('')
@@ -1120,48 +1058,6 @@ const buildPayloadRows = (targetGroups = [], dirtyOnly = true) => {
   return payloadRows
 }
 
-const collectChangeSummary = (payloadRows) => {
-  const summary = []
-  for (const row of payloadRows) {
-    const parts = row.line_key.split('||')
-    if (parts.length !== 3) continue
-    const productCode = parts[0]
-    const shipToCode = parts[1] || '-'
-    for (const [dateStr, qty] of Object.entries(row.delivery_by_date)) {
-      if (qty > 0) {
-        summary.push({ productCode, shipToCode, date: dateStr, qty })
-      }
-    }
-  }
-  summary.sort((a, b) => a.productCode.localeCompare(b.productCode) || a.date.localeCompare(b.date))
-  return summary
-}
-
-const buildEmailBody = (summary) => {
-  const today = formatLocalDate(new Date())
-  let body = `お疲れ様です。\nクボタ様向け製品の納期調整しましたため、ご連絡いたします。\n\n`
-  body += `【変更日】${today}\n`
-  if (changeReason.value) {
-    body += `【変更理由】${changeReason.value}\n`
-  }
-  body += `\n【変更内容】\n`
-  if (summary.length === 0) {
-    body += '（変更なし）\n'
-  } else {
-    body += '品番\t納入場所\t納期\t計画数\n'
-    for (const item of summary) {
-      body += `${item.productCode}\t${item.shipToCode}\t${item.date}\t${item.qty}\n`
-    }
-  }
-  body += `\nよろしくお願いいたします。\n`
-  const user = authState.user
-  const name = user ? `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username : ''
-  if (name) {
-    body += `\n調整者: ${name}\n`
-  }
-  return body
-}
-
 const formatDateCompact = (value) => String(value || '').replace(/-/g, '')
 
 const buildMultilineCell = (values = []) => {
@@ -1401,8 +1297,6 @@ const saveDeliveries = async () => {
     return
   }
 
-  lastChangeSummary.value = noChangeSave ? [] : collectChangeSummary(payloadRows)
-
   saving.value = true
   try {
     await api.kubotaSakaiDueAdjustments.bulkSave(payloadRows, {
@@ -1415,10 +1309,7 @@ const saveDeliveries = async () => {
     if (noChangeSave) {
       alert('再保存して再配分を反映しました。')
     } else {
-      const wantEmail = window.confirm('保存しました。\n納期調整メールを送信しますか？')
-      if (wantEmail) {
-        openEmailDialog()
-      }
+      alert('保存しました。')
     }
   } catch (error) {
     const data = error?.response?.data
@@ -1446,30 +1337,6 @@ const confirmChangeReason = () => {
   changeReason.value = reason
   isEditUnlocked.value = true
   showChangeReasonDialog.value = false
-}
-
-const openEmailDialog = async () => {
-  showEmailDialog.value = true
-  contactLoading.value = true
-  try {
-    const res = await api.contacts.getContacts({ is_active: true, page_size: 9999 })
-    emailContacts.value = (res.data?.results || res.data || []).filter(
-      (contact) => contact.email && contact.contact_type === '納期調整'
-    )
-  } catch {
-    emailContacts.value = []
-  } finally {
-    contactLoading.value = false
-  }
-  emailTo.value = emailContacts.value.map((c) => c.email)
-  emailCcSelected.value = []
-  const today = formatLocalDate(new Date())
-  emailSubject.value = `【納期調整連絡】クボタ堺 ${today}`
-  emailBody.value = buildEmailBody(lastChangeSummary.value)
-}
-
-const closeEmailDialog = () => {
-  showEmailDialog.value = false
 }
 
 const coordinationNoteTargetLabel = computed(() => {
@@ -1527,34 +1394,6 @@ const saveCoordinationNote = async () => {
 const clearCoordinationNote = async () => {
   coordinationNoteDraft.value = ''
   await saveCoordinationNote()
-}
-
-const sendEmail = async () => {
-  if (emailTo.value.length === 0) {
-    alert('送信先を選択してください。')
-    return
-  }
-  if (!emailSubject.value.trim()) {
-    alert('件名を入力してください。')
-    return
-  }
-
-  sendingEmail.value = true
-  try {
-    await api.kubotaSakaiDueAdjustments.sendEmail({
-      to_emails: emailTo.value,
-      cc_emails: emailCcSelected.value,
-      subject: emailSubject.value,
-      body: emailBody.value,
-    })
-    alert('メールを送信しました。')
-    showEmailDialog.value = false
-  } catch (error) {
-    const detail = error?.response?.data?.detail
-    alert(detail || 'メール送信に失敗しました。')
-  } finally {
-    sendingEmail.value = false
-  }
 }
 
 // ========== 通知設定 ==========
