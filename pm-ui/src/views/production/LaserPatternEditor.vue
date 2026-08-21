@@ -22,6 +22,11 @@
           class="filter-input"
           placeholder="完成品番号"
         />
+        <select v-model="filterFinishedProductExists" class="filter-select filter-select-narrow">
+          <option value="">完成品: すべて</option>
+          <option value="yes">完成品: あり</option>
+          <option value="no">完成品: なし</option>
+        </select>
         <input
           v-model="filterProcessTimeMin"
           type="number"
@@ -217,6 +222,7 @@ const searchKeyword = ref('')
 const filterEquipment = ref('')
 const filterMaterial = ref('')
 const filterFinishedProductCode = ref('')
+const filterFinishedProductExists = ref('')
 const filterProcessTimeMin = ref('')
 const filterProcessTimeMax = ref('')
 const patterns = ref([])
@@ -280,6 +286,11 @@ const filteredPatterns = computed(() => {
     }
     if (filterEquipment.value && item.equipment_code !== filterEquipment.value) return false
     if (filterMaterial.value && item.material_code !== filterMaterial.value) return false
+    if (filterFinishedProductExists.value) {
+      const hasFinished = (item.finished_items || []).some((f) => f?.finished_product_code)
+      if (filterFinishedProductExists.value === 'yes' && !hasFinished) return false
+      if (filterFinishedProductExists.value === 'no' && hasFinished) return false
+    }
     if (filterFinishedProductCode.value) {
       const q = filterFinishedProductCode.value.toLowerCase()
       const hasMatch = (item.finished_items || []).some((finished) =>
@@ -579,6 +590,9 @@ onMounted(async () => {
   padding: 0 8px;
   font-size: 13px;
   background: #fff;
+}
+.filter-select-narrow {
+  min-width: 120px;
 }
 .filter-input {
   width: 132px;
