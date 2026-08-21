@@ -5264,7 +5264,7 @@ const doPickup = async () => {
     await fetchAndApplyData()
   } catch (e) {
     console.error('バックログ取り込みエラー', e)
-    alert('取り込みに失敗しました。')
+    alert(e?.response?.data?.detail || '取り込みに失敗しました。')
   } finally {
     processing.value = false
   }
@@ -5728,7 +5728,7 @@ const recalculateProgressFromPast = async () => {
     alert('過去から再計算（進度のみ）が完了しました。')
   } catch (e) {
     console.error('過去から再計算エラー', e)
-    alert('過去から再計算に失敗しました。')
+    alert(e?.response?.data?.detail || '過去から再計算に失敗しました。')
   } finally {
     processing.value = false
   }

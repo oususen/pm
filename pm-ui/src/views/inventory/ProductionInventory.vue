@@ -831,7 +831,7 @@ const saveAdjust = async (group, date) => {
     delete adjustInputs.value[key];
   } catch (e) {
     console.error('調整の保存に失敗:', e);
-    alert('調整の保存に失敗しました。');
+    alert(e?.response?.data?.detail || '調整の保存に失敗しました。');
   } finally {
     delete adjustSaving.value[key];
   }
@@ -956,7 +956,12 @@ const recalculate = async () => {
           line_id: lineId,
           start_date: start,
           end_date: end,
-        }).catch((e) => console.error('在庫再計算に失敗:', e))
+        }).catch((e) => {
+          if (e?.response?.data?.code === 'LINE_CALENDAR_MISSING') {
+            alert(e.response.data.detail);
+          }
+          console.error('在庫再計算に失敗:', e);
+        })
       )
     );
 
@@ -1003,7 +1008,7 @@ const confirmDeepRecalc = async () => {
     applyDemands(finalRes.data || []);
     await updateHolidays();
   } catch (e) {
-    error.value = e?.message || "過去から再計算に失敗しました";
+    error.value = e?.response?.data?.detail || e?.message || "過去から再計算に失敗しました";
   } finally {
     recalculating.value = false;
   }

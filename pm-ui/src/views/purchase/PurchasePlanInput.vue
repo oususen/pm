@@ -485,7 +485,7 @@ const savePlan = async () => {
     await fetchAndApplyData(lineId)
   } catch (e) {
     console.error('保存エラー', e)
-    alert('保存に失敗しました。')
+    alert(e?.response?.data?.detail || '保存に失敗しました。')
   } finally {
     processing.value = false
   }
@@ -1021,7 +1021,7 @@ const doPickupWithInventory = async () => {
     await fetchAndApplyData(purchaseLineId.value)
   } catch (e) {
     console.error('仕入れ計画 取込＋在庫計算エラー', e)
-    alert('取り込みに失敗しました。')
+    alert(e?.response?.data?.detail || '取り込みに失敗しました。')
   } finally {
     processing.value = false
   }

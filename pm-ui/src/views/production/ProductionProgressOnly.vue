@@ -782,7 +782,12 @@ const recalculate = async () => {
             include_progress: true,
             progress_only: true,
           })
-          .catch((e) => console.error("再計算に失敗:", e))
+          .catch((e) => {
+            if (e?.response?.data?.code === 'LINE_CALENDAR_MISSING') {
+              alert(e.response.data.detail);
+            }
+            console.error("再計算に失敗:", e);
+          })
       )
     );
     await load();
@@ -860,7 +865,12 @@ const confirmDeepRecalc = async () => {
             end_date: end,
             product_ids: target.product_ids,
             progress_only: true,
-          }).catch((e) => console.error('過去から再計算に失敗:', target.line_id, e));
+          }).catch((e) => {
+            if (e?.response?.data?.code === 'LINE_CALENDAR_MISSING') {
+              alert(e.response.data.detail);
+            }
+            console.error('過去から再計算に失敗:', target.line_id, e);
+          });
         }
         );
       })

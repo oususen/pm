@@ -4394,6 +4394,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         if not start_date or not end_date:
             return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        line_obj = Line.objects.filter(id=line_id).only('calendar_id', 'line_type').first()
+        if line_obj and line_obj.line_type == 'PROD' and not line_obj.calendar_id:
+            return Response(
+                {'detail': 'ラインカレンダが設定されていません。ラインマスタからカレンダを設定してください。',
+                 'code': 'LINE_CALENDAR_MISSING'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
             end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
@@ -4704,6 +4712,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not start_date or not end_date:
             return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        line_obj = Line.objects.filter(id=line_id).only('calendar_id', 'line_type').first()
+        if line_obj and line_obj.line_type == 'PROD' and not line_obj.calendar_id:
+            return Response(
+                {'detail': 'ラインカレンダが設定されていません。ラインマスタからカレンダを設定してください。',
+                 'code': 'LINE_CALENDAR_MISSING'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
