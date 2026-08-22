@@ -20,6 +20,10 @@ class LineBacklog(models.Model):
     # 他ライン：後ラインのplan_qtyを集計 × BOM個数
     order_qty = models.IntegerField(default=0)
 
+    # 実績ベース需要（取り込み時に計算）
+    # 他ライン：後ラインのactual_qtyを集計 × BOM個数
+    order_qty_actual = models.IntegerField(default=0)
+
     # 計画（ユーザーが入力する生産計画数量）
     plan_qty = models.IntegerField(default=0)
 

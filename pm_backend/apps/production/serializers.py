@@ -119,7 +119,7 @@ class LineBacklogSerializer(serializers.ModelSerializer):
             'id', 'plan_date', 'process', 'process_code', 'process_name',
             'product', 'product_code', 'product_name', 'is_virtual_set', 'is_final_product', 'is_line_final_product',
             'line', 'line_code', 'line_name',
-            'demand_qty_plan', 'order_qty', 'firm_order_qty', 'forecast_order_qty',
+            'demand_qty_plan', 'order_qty', 'order_qty_actual', 'firm_order_qty', 'forecast_order_qty',
             'plan_qty', 'actual_qty', 'stock_qty', 'planned_stock_qty', 'progress_qty',
             'planned_progress_qty',
             'adjust_qty', 'scrap_qty', 'actual_shipment_qty',
@@ -822,6 +822,7 @@ class LaserActualSerializer(serializers.ModelSerializer):
         return {
             'demand_qty_plan': 0,
             'order_qty': 0,
+            'order_qty_actual': 0,
             'plan_qty': 0,
             'actual_qty': 0,
             'stock_qty': 0,

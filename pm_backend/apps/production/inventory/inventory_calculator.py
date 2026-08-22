@@ -20,7 +20,8 @@ PLANNED_STOCK_CALC_RULES_KEY = 'production.planned_stock_calc_rules'
 
 def _load_planned_stock_calc_rule_map():
     """
-    計算特例設定を読み込み、(line_code, process_code, calc_target) -> setting の辞書で返す。
+    計算特例設定を読み込み、(line_code, process_code, calc_target, product_code) -> setting の辞書で返す。
+    product_code が未指定(空/ALL)のルールは product_code='ALL' として格納される。
     """
     row = SystemSetting.objects.filter(key=PLANNED_STOCK_CALC_RULES_KEY).first()
     if not row or not row.value:
@@ -37,6 +38,7 @@ def _load_planned_stock_calc_rule_map():
         process_code = str((item or {}).get('processCode') or '').strip().upper()
         calc_target = str((item or {}).get('calcTarget') or '').strip().upper()
         setting = str((item or {}).get('setting') or '').strip().upper()
+        product_code = str((item or {}).get('productCode') or '').strip().upper() or 'ALL'
         # 旧形式互換
         old_item = str((item or {}).get('item') or '').strip().upper()
         old_mode = str((item or {}).get('mode') or '').strip().upper()
@@ -51,8 +53,17 @@ def _load_planned_stock_calc_rule_map():
             continue
         if setting not in {'ORDER_QTY', 'ACTUAL_OR_PLAN'}:
             continue
-        result[(line_code, process_code, calc_target)] = setting
+        result[(line_code, process_code, calc_target, product_code)] = setting
     return result
+
+
+def _resolve_calc_rule(calc_rule_map, line_code, process_code, calc_target, product_code=''):
+    """製品指定ルール優先、なければALLルールにフォールバック。"""
+    if product_code:
+        setting = calc_rule_map.get((line_code, process_code, calc_target, product_code))
+        if setting:
+            return setting
+    return calc_rule_map.get((line_code, process_code, calc_target, 'ALL'), '')
 
 
 def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None, product_ids=None):
@@ -1162,6 +1173,7 @@ def recalculate_stock_qty(
     calc_rule_map = _load_planned_stock_calc_rule_map()
     line_code_cache = {}
     process_code_cache = {}
+    product_code_cache = {}
 
     def _resolve_line_code(line_id_value):
         lid = int(line_id_value or 0)
@@ -1185,6 +1197,18 @@ def recalculate_stock_qty(
         proc = Process.objects.filter(id=pid).only('process_code').first()
         code = str(getattr(proc, 'process_code', '') or '').strip().upper()
         process_code_cache[pid] = code
+        return code
+
+    def _resolve_product_code(product_id_value):
+        pid = int(product_id_value or 0)
+        if pid <= 0:
+            return ''
+        if pid in product_code_cache:
+            return product_code_cache[pid]
+        from masters.models import Product
+        prod = Product.objects.filter(id=pid).only('product_code').first()
+        code = str(getattr(prod, 'product_code', '') or '').strip().upper()
+        product_code_cache[pid] = code
         return code
 
     # 計画在庫は calc_start_date の stock_qty を初期値として参照するため、
@@ -1273,7 +1297,8 @@ def recalculate_stock_qty(
             else:
                 line_code = _resolve_line_code(getattr(sample, 'line_id', None))
                 process_code = _resolve_process_code(getattr(sample, 'process_id', None))
-                setting = calc_rule_map.get((line_code, process_code, 'STOCK'), '')
+                p_code = _resolve_product_code(sample.product_id)
+                setting = _resolve_calc_rule(calc_rule_map, line_code, process_code, 'STOCK', p_code)
                 if setting == 'ORDER_QTY':
                     # 特例: pickup 済みの前工程需要(order_qty)をそのまま出庫として使用
                     actual_shipment = Decimal(str(order_total))
@@ -1450,6 +1475,7 @@ def recalculate_planned_stock_qty(
     calc_rule_map = _load_planned_stock_calc_rule_map()
     line_code_cache = {}
     process_code_cache = {}
+    product_code_cache = {}
 
     def _resolve_line_code(line_id_value):
         lid = int(line_id_value or 0)
@@ -1473,6 +1499,18 @@ def recalculate_planned_stock_qty(
         proc = Process.objects.filter(id=pid).only('process_code').first()
         code = str(getattr(proc, 'process_code', '') or '').strip().upper()
         process_code_cache[pid] = code
+        return code
+
+    def _resolve_product_code(product_id_value):
+        pid = int(product_id_value or 0)
+        if pid <= 0:
+            return ''
+        if pid in product_code_cache:
+            return product_code_cache[pid]
+        from masters.models import Product
+        prod = Product.objects.filter(id=pid).only('product_code').first()
+        code = str(getattr(prod, 'product_code', '') or '').strip().upper()
+        product_code_cache[pid] = code
         return code
 
     # 計画在庫は「開始日の前日値」を起点にする。
@@ -1602,9 +1640,9 @@ def recalculate_planned_stock_qty(
         is_line_final = bool(getattr(sample.product, 'is_line_final_product', False))
         line_code = _resolve_line_code(getattr(sample, 'line_id', None))
         process_code = _resolve_process_code(getattr(sample, 'process_id', None))
-        forced_parent_shipment_mode = calc_rule_map.get(
-            (line_code, process_code, 'PLANNED_STOCK'),
-            ''
+        p_code = _resolve_product_code(sample.product_id)
+        forced_parent_shipment_mode = _resolve_calc_rule(
+            calc_rule_map, line_code, process_code, 'PLANNED_STOCK', p_code
         )
         if is_final:
             planned_shipment = demand_map.get((sample.product_id, plan_date), Decimal('0'))

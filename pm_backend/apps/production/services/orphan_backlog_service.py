@@ -28,7 +28,7 @@ from production.models import LineDemand
 from production.models_line_backlog import LineBacklog
 
 BACKLOG_QTY_FIELDS = [
-    'demand_qty_plan', 'order_qty', 'plan_qty', 'actual_qty', 'stock_qty',
+    'demand_qty_plan', 'order_qty', 'order_qty_actual', 'plan_qty', 'actual_qty', 'stock_qty',
     'planned_stock_qty', 'adjust_qty', 'scrap_adjust_qty', 'scrap_qty',
     'actual_shipment_qty', 'progress_qty', 'planned_progress_qty',
 ]

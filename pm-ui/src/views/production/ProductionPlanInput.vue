@@ -1090,7 +1090,7 @@
             </select>
             <select v-model="plannedStockCalcDraft.processCode">
               <option value="">工程選択</option>
-              <option v-for="proc in processOptions" :key="`psc-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
+              <option v-for="proc in plannedStockCalcProcessOptions" :key="`psc-proc-${proc.id}`" :value="normalizeProcessCode(proc.process_code)">
                 {{ proc.process_code }} - {{ proc.process_name }}
               </option>
             </select>
@@ -1099,14 +1099,20 @@
               <option value="STOCK">在庫</option>
               <option value="DEMAND">需要</option>
             </select>
+            <select v-model="plannedStockCalcDraft.productCode">
+              <option value="">すべての製品</option>
+              <option v-for="prod in plannedStockCalcProductOptions" :key="`psc-prod-${prod.id}`" :value="prod.product_code">
+                {{ prod.product_code }} - {{ prod.product_name }}
+              </option>
+            </select>
             <select v-model="plannedStockCalcDraft.setting">
               <option value="ORDER_QTY">ORDER_QTY使用</option>
             </select>
             <button class="btn" type="button" @click="addPlannedStockCalcRule">追加</button>
           </div>
           <div class="settings-list settings-rules">
-            <div v-for="(rule, idx) in plannedStockCalcRules" :key="`psc-rule-${rule.lineCode}-${rule.processCode}-${rule.calcTarget}`" class="settings-rule-row">
-              <span>{{ rule.lineCode }} / {{ rule.processCode }} / {{ rule.calcTargetLabel || rule.calcTarget }} / {{ rule.settingLabel || rule.setting }}</span>
+            <div v-for="(rule, idx) in plannedStockCalcRules" :key="`psc-rule-${rule.lineCode}-${rule.processCode}-${rule.calcTarget}-${rule.productCode || 'ALL'}`" class="settings-rule-row">
+              <span>{{ rule.lineCode }} / {{ rule.processCode }} / {{ rule.productLabel || rule.productCode || 'すべて' }} / {{ rule.calcTargetLabel || rule.calcTarget }} / {{ rule.settingLabel || rule.setting }}</span>
               <button class="btn" type="button" @click="removePlannedStockCalcRule(idx)">削除</button>
             </div>
             <div v-if="!plannedStockCalcRules.length" class="settings-note">設定なし</div>
@@ -1566,6 +1572,7 @@ const plannedStockCalcRules = ref([])
 const plannedStockCalcDraft = ref({
   lineCode: '',
   processCode: '',
+  productCode: '',
   calcTarget: 'PLANNED_STOCK',
   setting: 'ORDER_QTY',
 })
@@ -1578,6 +1585,34 @@ const ganttExcludedProcessOptions = computed(() => {
   const lineObj = lines.value.find((l) => normalizeLineCode(l.line_code) === selectedLineCode)
   if (!lineObj) return processOptions.value
   return processOptions.value.filter((proc) => proc.line_id != null && String(proc.line_id) === String(lineObj.id))
+})
+const plannedStockCalcProcessOptions = computed(() => {
+  const selectedLineCode = plannedStockCalcDraft.value.lineCode
+  if (!selectedLineCode) return processOptions.value
+  const lineObj = lines.value.find((l) => normalizeLineCode(l.line_code) === selectedLineCode)
+  if (!lineObj) return processOptions.value
+  return processOptions.value.filter((proc) => proc.line_id != null && String(proc.line_id) === String(lineObj.id))
+})
+const plannedStockCalcProductOptions = ref([])
+watch(() => plannedStockCalcDraft.value.lineCode, async (lineCode) => {
+  plannedStockCalcDraft.value.productCode = ''
+  if (!lineCode) {
+    plannedStockCalcProductOptions.value = products.value.filter((p) => p.is_line_final_product)
+    return
+  }
+  const lineObj = lines.value.find((l) => normalizeLineCode(l.line_code) === lineCode)
+  if (!lineObj) {
+    plannedStockCalcProductOptions.value = products.value.filter((p) => p.is_line_final_product)
+    return
+  }
+  try {
+    const res = await api.products.getLineFinalCandidates(lineObj.id)
+    const lineData = (res.data || []).find((d) => String(d.line_id) === String(lineObj.id))
+    const lineProducts = lineData?.products || []
+    plannedStockCalcProductOptions.value = lineProducts.filter((p) => p.is_line_final_product)
+  } catch {
+    plannedStockCalcProductOptions.value = products.value.filter((p) => p.is_line_final_product)
+  }
 })
 
 const lines = ref([])
@@ -1771,17 +1806,21 @@ const normalizePlannedStockCalcRules = (rows) => {
     if (!calcTarget && oldItem === 'PARENT_SHIPMENT_SOURCE') calcTarget = 'PLANNED_STOCK'
     if (!setting && oldMode === 'PLAN') setting = 'ORDER_QTY'
     if (setting === 'PARENT_PLAN') setting = 'ORDER_QTY'
+    const productCode = String(row?.productCode || '').trim().toUpperCase()
     if (!lineCode || !processCode) return
     if (calcTarget !== 'PLANNED_STOCK' && calcTarget !== 'STOCK' && calcTarget !== 'DEMAND') return
     if (setting !== 'ORDER_QTY' && setting !== 'ACTUAL_OR_PLAN') return
-    const key = `${lineCode}|${processCode}|${calcTarget}`
+    const key = `${lineCode}|${processCode}|${calcTarget}|${productCode || 'ALL'}`
     if (seen.has(key)) return
     seen.add(key)
+    const prod = productCode ? (products.value || []).find((p) => String(p.product_code || '').trim().toUpperCase() === productCode) : null
     normalized.push({
       lineCode,
       processCode,
+      productCode: productCode || '',
       calcTarget,
       setting,
+      productLabel: prod ? `${prod.product_code} ${prod.product_name}` : (productCode || 'すべて'),
       calcTargetLabel: calcTarget === 'STOCK' ? '在庫' : (calcTarget === 'DEMAND' ? '需要' : '計画在庫'),
       settingLabel: setting === 'ORDER_QTY' ? 'ORDER_QTY使用' : '標準（実績優先）',
     })
@@ -2107,6 +2146,7 @@ const addPlannedStockCalcRule = async () => {
   const rule = {
     lineCode: normalizeLineCode(plannedStockCalcDraft.value.lineCode),
     processCode: normalizeProcessCode(plannedStockCalcDraft.value.processCode),
+    productCode: String(plannedStockCalcDraft.value.productCode || '').trim().toUpperCase(),
     calcTarget: String(plannedStockCalcDraft.value.calcTarget || '').trim().toUpperCase(),
     setting: String(plannedStockCalcDraft.value.setting || '').trim().toUpperCase(),
   }
@@ -5114,7 +5154,7 @@ const fetchAndApplyData = async () => {
       if (isDemandRow) {
         const processCode = processCodeById.get(String(d.process)) || normalizeProcessCode(d.process_code)
         const demandRuleKey = `${selectedLineCode}|${processCode}|DEMAND`
-        const current = Number(d.order_qty || 0)
+        const current = Number(d.demand_qty_plan ?? d.order_qty ?? 0)
         const prev = demandMap.get(dateKey)
         demandMap.set(dateKey, prev == null ? current : Math.max(prev, current))
       }

@@ -1294,6 +1294,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         start_dt = _parse_optional_date(start_date)
         end_dt = _parse_optional_date(end_date)
+        if start_dt and end_dt:
+            start_dt = _resolve_inventory_effective_start_date(
+                int(line_id), start_dt, end_dt,
+            )
         routing_candidate_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
 
         # このラインで生産される全製品を特定（中間品、単品完成品、ライン最終品、工程最終品を含む）
@@ -1392,6 +1396,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
         # 需要を計算：(product_id, plan_date, process_id, parent_product_id) -> order_qty
         demand_map = defaultdict(Decimal)
+        demand_actual_map = defaultdict(Decimal)
+        demand_parent_date_map = {}  # (product_id, plan_date, process_id, parent_product_id) -> 親の元plan_date
 
         # 使用するカレンダ（ライン紐付があれば優先、無ければdaiso）
         line_obj = Line.objects.filter(id=line_id).first()
@@ -1551,7 +1557,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(plan_date__gte=start_dt)
             if source_end_dt or end_dt:
                 qs = qs.filter(plan_date__lte=source_end_dt or end_dt)
-            rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id', 'sequence_no'))
+            rows = list(qs.values_list('product_id', 'plan_date', 'plan_qty', 'plan_id', 'sequence_no', 'actual_qty'))
             downstream_backlog_cache[cache_key] = rows
             return rows
 
@@ -1633,12 +1639,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 return [fallback_process_id]
             return [child_steps[0].process_id]
 
-        def add_demand(product_id, plan_date, qty, parent_product_id=None):
+        def add_demand(product_id, plan_date, qty, parent_product_id=None, actual_qty=None, parent_plan_date=None):
             process_ids = resolve_target_process_ids_for_parent(product_id, parent_product_id, plan_date)
             for process_id in process_ids:
                 if not process_id:
                     continue
                 demand_map[(product_id, plan_date, process_id, parent_product_id)] += qty
+                if actual_qty is not None:
+                    demand_actual_map[(product_id, plan_date, process_id, parent_product_id)] += actual_qty
+                if parent_plan_date is not None:
+                    key = (product_id, plan_date, process_id, parent_product_id)
+                    prev = demand_parent_date_map.get(key)
+                    if prev is None or parent_plan_date > prev:
+                        demand_parent_date_map[key] = parent_plan_date
                 trace_log(
                     line_id, product_id, plan_date,
                     f'pickup需要加算: process_id={process_id}, parent_product_id={parent_product_id}, '
@@ -1654,6 +1667,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         existing_backlogs = list(backlog_qs)
         for existing in existing_backlogs:
             demand_map[(existing.product_id, existing.plan_date, existing.process_id, None)] = Decimal('0')
+            demand_actual_map[(existing.product_id, existing.plan_date, existing.process_id, None)] = Decimal('0')
         logger.info("pickup: existing_backlogs=%s", len(existing_backlogs))
 
         # 最終品はLineDemandから、中間品は後工程から需要を取得
@@ -1697,7 +1711,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     demand_qty = firm_qty + forecast_qty
                 else:
                     demand_qty = firm_qty if firm_qty > 0 else forecast_qty
-                add_demand(key[0], key[1], demand_qty, None)
+                add_demand(key[0], key[1], demand_qty, None, actual_qty=demand_qty)
 
         # B. 中間品は後工程から需要を取得
 
@@ -1801,8 +1815,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                         delivery_line = getattr(d_step, 'line', None)
                         delivery_calendar_id = getattr(delivery_line, 'calendar_id', None) or default_calendar_id
                         selected_rows_by_date = {}
-                        for _, plan_date, plan_qty, _backlog_plan_id, sequence_no in backlog_rows:
+                        actual_by_date = {}
+                        for _, plan_date, plan_qty, _backlog_plan_id, sequence_no, row_actual_qty in backlog_rows:
                             qty = Decimal(str(plan_qty or 0))
+                            if int(sequence_no or 0) == 0:
+                                act = Decimal(str(row_actual_qty or 0))
+                                if act > 0:
+                                    actual_by_date[plan_date] = actual_by_date.get(plan_date, Decimal('0')) + act
                             if qty == 0:
                                 continue
                             selected_rows_by_date.setdefault(plan_date, []).append((qty, sequence_no))
@@ -1827,6 +1846,11 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 shifted_date = shift_business_days(shifted_date, 0)
                                 add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
                                 downstream_found = True
+                        for plan_date, act in actual_by_date.items():
+                            shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
+                            shifted_date = shift_business_days(shifted_date, 0)
+                            add_demand(current_output_product, shifted_date, Decimal('0'), parent_product.id,
+                                       actual_qty=act * total_qty_per)
                         continue
 
                     # --- クボタ配送ライン: plan_id から truck の arrival_day_offset で LT 決定 ---
@@ -1847,8 +1871,13 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             return truck_offset_cache[truck_id]
 
                         kubota_rows_by_date = defaultdict(list)
-                        for _, plan_date, plan_qty, backlog_plan_id, _seq in backlog_rows:
+                        kubota_actual_by_date = {}
+                        for _, plan_date, plan_qty, backlog_plan_id, _seq, row_actual_qty in backlog_rows:
                             qty = Decimal(str(plan_qty or 0))
+                            if int(_seq or 0) == 0:
+                                act = Decimal(str(row_actual_qty or 0))
+                                if act > 0:
+                                    kubota_actual_by_date[plan_date] = kubota_actual_by_date.get(plan_date, Decimal('0')) + act
                             if qty == 0:
                                 continue
                             kubota_rows_by_date[plan_date].append((qty, backlog_plan_id))
@@ -1876,26 +1905,38 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                                 shifted_date = shift_business_days(shifted_date, 0)
                                 add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
                                 downstream_found = True
+                        for plan_date, act in kubota_actual_by_date.items():
+                            shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
+                            shifted_date = shift_business_days(shifted_date, 0)
+                            add_demand(current_output_product, shifted_date, Decimal('0'), parent_product.id,
+                                       actual_qty=act * total_qty_per)
                         continue
 
                     fallback_map = {}
-                    for _, plan_date, plan_qty, backlog_plan_id, _sequence_no in backlog_rows:
+                    actual_map_by_date = {}
+                    for _, plan_date, plan_qty, backlog_plan_id, _sequence_no, row_actual_qty in backlog_rows:
                         qty = Decimal(str(plan_qty or 0))
+                        if int(_sequence_no or 0) == 0:
+                            act = Decimal(str(row_actual_qty or 0))
+                            if act > 0:
+                                actual_map_by_date[plan_date] = actual_map_by_date.get(plan_date, Decimal('0')) + act
                         if qty == 0:
                             continue
                         if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
                             continue
                         fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
 
-                    for plan_date in set(line_start_map) | set(fallback_map):
+                    for plan_date in set(line_start_map) | set(fallback_map) | set(actual_map_by_date):
                         qty = line_start_map.get(plan_date)
                         if qty is None or qty <= 0:
                             qty = fallback_map.get(plan_date, Decimal('0'))
-                        if qty == 0:
+                        act = actual_map_by_date.get(plan_date, Decimal('0'))
+                        if qty == 0 and act == 0:
                             continue
                         shifted_date = shift_business_days(plan_date, lt_days) if lt_days else plan_date
                         shifted_date = shift_business_days(shifted_date, 0)
-                        add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id)
+                        add_demand(current_output_product, shifted_date, qty * total_qty_per, parent_product.id,
+                                   actual_qty=act * total_qty_per, parent_plan_date=plan_date)
                         downstream_found = True
 
         # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる（中間品のみ）
@@ -1930,7 +1971,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 backlog_qs_parent = LineBacklog.objects.filter(
                     product_id__in=parent_ids_for_backlog,
-                    plan_qty__gt=0,
+                ).filter(
+                    models.Q(plan_qty__gt=0) | models.Q(actual_qty__gt=0)
                 )
                 if valid_downstream_line_ids:
                     backlog_qs_parent = backlog_qs_parent.filter(line_id__in=valid_downstream_line_ids)
@@ -1938,10 +1980,10 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     backlog_qs_parent = backlog_qs_parent.filter(plan_date__gte=start_date)
                 if source_end_dt or end_date:
                     backlog_qs_parent = backlog_qs_parent.filter(plan_date__lte=source_end_dt or end_date)
-                for prod_id, plan_date, plan_qty in backlog_qs_parent.values_list('product_id', 'plan_date', 'plan_qty'):
+                for prod_id, plan_date, plan_qty, parent_actual_qty in backlog_qs_parent.values_list('product_id', 'plan_date', 'plan_qty', 'actual_qty'):
                     if prod_id not in backlog_by_product:
                         backlog_by_product[prod_id] = []
-                    backlog_by_product[prod_id].append((plan_date, plan_qty))
+                    backlog_by_product[prod_id].append((plan_date, plan_qty, parent_actual_qty))
 
             for product_id in intermediate_products:
                 current_output_product = product_id
@@ -1966,7 +2008,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     # リードタイムを考慮
                     lt_days = resolve_lead_time_days(current_output_product, bom_item)
 
-                    for plan_date, plan_qty in backlog_items:
+                    for orig_plan_date, plan_qty, parent_actual_qty in backlog_items:
+                        plan_date = orig_plan_date
                         if lt_days:
                             plan_date = shift_business_days(plan_date, lt_days)
                         plan_date = shift_business_days(plan_date, 0)
@@ -1975,6 +2018,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             plan_date,
                             Decimal(str(plan_qty or 0)) * qty_per,
                             parent_product.id,
+                            actual_qty=Decimal(str(parent_actual_qty or 0)) * qty_per,
+                            parent_plan_date=orig_plan_date,
                         )
                         downstream_found = True
 
@@ -1984,6 +2029,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         try:
             # 対象キーを収集
             target_key_qty_map = defaultdict(Decimal)
+            target_key_actual_map = defaultdict(Decimal)
             for (product_id, plan_date, process_id, _parent_product_id), order_qty in demand_map.items():
                 if start_dt and plan_date < start_dt:
                     continue
@@ -1995,9 +2041,15 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                     line_id, product_id, plan_date,
                     f'pickup最終集計: process_id={process_id}, order_qty合計={target_key_qty_map[key]}'
                 )
-
+            for (product_id, plan_date, process_id, _parent_product_id), act_qty in demand_actual_map.items():
+                if start_dt and plan_date < start_dt:
+                    continue
+                if end_dt and plan_date > end_dt:
+                    continue
+                key = (product_id, plan_date, process_id)
+                target_key_actual_map[key] += act_qty
             target_keys = [
-                (product_id, plan_date, process_id, order_qty)
+                (product_id, plan_date, process_id, order_qty, target_key_actual_map.get((product_id, plan_date, process_id), Decimal('0')))
                 for (product_id, plan_date, process_id), order_qty in target_key_qty_map.items()
             ]
             target_key_set = set(target_key_qty_map.keys())
@@ -2028,14 +2080,63 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             key = (product_id, plan_date, process_id)
                             if key in existing_any or key in target_key_set:
                                 continue
-                            target_keys.append((product_id, plan_date, process_id, Decimal('0')))
+                            target_keys.append((product_id, plan_date, process_id, Decimal('0'), Decimal('0')))
                             target_key_set.add(key)
+
+            # DEMAND特例ルールを読み込み、demand_qty_plan の決定に使用
+            demand_order_qty_processes = set()
+            try:
+                from system_settings.models import SystemSetting as SysSetting
+                rule_row = SysSetting.objects.filter(key='production.planned_stock_calc_rules').first()
+                if rule_row:
+                    import json as _json
+                    pickup_line_code = (line_obj.line_code or '').strip().upper() if line_obj else ''
+                    process_code_by_id = {}
+                    for pid in {process_id for _, _, process_id, _, _ in target_keys}:
+                        proc = Process.objects.filter(id=pid).values_list('process_code', flat=True).first()
+                        if proc:
+                            process_code_by_id[pid] = str(proc).strip().upper()
+                    for item in _json.loads(rule_row.value or '[]'):
+                        lc = str((item or {}).get('lineCode') or '').strip().upper()
+                        pc = str((item or {}).get('processCode') or '').strip().upper()
+                        ct = str((item or {}).get('calcTarget') or '').strip().upper()
+                        st = str((item or {}).get('setting') or '').strip().upper()
+                        if lc == pickup_line_code and ct == 'DEMAND' and st == 'ORDER_QTY':
+                            for pid, pcode in process_code_by_id.items():
+                                if pcode == pc:
+                                    demand_order_qty_processes.add(pid)
+            except Exception as e:
+                logger.warning("pickup: DEMAND特例ルール読み込み失敗: %s", e)
+
+            # demand_qty_plan を親単位で判定してから合算
+            now = datetime.now()
+            today = (now - timedelta(days=1)).date() if now.hour < 8 else now.date()
+            target_key_demand_plan_map = defaultdict(Decimal)
+            all_demand_keys = set(demand_map.keys()) | set(demand_actual_map.keys())
+            for full_key in all_demand_keys:
+                product_id, plan_date, process_id, _parent_product_id = full_key
+                if start_dt and plan_date < start_dt:
+                    continue
+                if end_dt and plan_date > end_dt:
+                    continue
+                oq = demand_map.get(full_key, Decimal('0'))
+                oa = demand_actual_map.get(full_key, Decimal('0'))
+                parent_date = demand_parent_date_map.get(full_key)
+                key = (product_id, plan_date, process_id)
+                if process_id in demand_order_qty_processes:
+                    target_key_demand_plan_map[key] += oq
+                elif parent_date is not None and parent_date < today:
+                    # 親の日が過去（生産完了）: 実績があればその値、なければ0
+                    target_key_demand_plan_map[key] += oa
+                else:
+                    # 親の日が今日以降 or 親日付なし: 計画値を使用
+                    target_key_demand_plan_map[key] += oq
 
             if target_keys:
                 # 既存レコードを一括取得（巨大ORを避ける）
-                target_product_ids = sorted({product_id for product_id, _, _, _ in target_keys})
-                target_process_ids = sorted({process_id for _, _, process_id, _ in target_keys})
-                target_plan_dates = [plan_date for _, plan_date, _, _ in target_keys]
+                target_product_ids = sorted({product_id for product_id, _, _, _, _ in target_keys})
+                target_process_ids = sorted({process_id for _, _, process_id, _, _ in target_keys})
+                target_plan_dates = [plan_date for _, plan_date, _, _, _ in target_keys]
                 existing_qs = LineBacklog.objects.filter(
                     line_id=line_id,
                     sequence_no=0,
@@ -2053,12 +2154,14 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
 
                 to_create = []
                 to_update = []
-                for product_id, plan_date, process_id, order_qty in target_keys:
+                for product_id, plan_date, process_id, order_qty, order_qty_actual in target_keys:
+                    demand_qty_plan = target_key_demand_plan_map.get((product_id, plan_date, process_id), Decimal('0'))
                     key = (product_id, plan_date, process_id)
                     if key in existing_records:
                         obj = existing_records[key]
                         obj.order_qty = order_qty
-                        obj.demand_qty_plan = order_qty
+                        obj.order_qty_actual = order_qty_actual
+                        obj.demand_qty_plan = demand_qty_plan
                         # sequence_no=0 は需要行なので、計画数は常に0を維持する
                         obj.plan_qty = 0
                         to_update.append(obj)
@@ -2070,7 +2173,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                             line_id=line_id,
                             sequence_no=0,
                             order_qty=order_qty,
-                            demand_qty_plan=order_qty,
+                            order_qty_actual=order_qty_actual,
+                            demand_qty_plan=demand_qty_plan,
                             plan_qty=0,
                         ))
 
@@ -2078,7 +2182,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 if to_create:
                     LineBacklog.objects.bulk_create(to_create)
                 if to_update:
-                    LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan', 'plan_qty'])
+                    LineBacklog.objects.bulk_update(to_update, ['order_qty', 'order_qty_actual', 'demand_qty_plan', 'plan_qty'])
 
                 upserted_items = to_create + to_update
 
