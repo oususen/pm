@@ -197,6 +197,33 @@ def _resolve_kubota_calendar():
     return None
 
 
+def _resolve_kubota_line_calendar():
+    """クボタ配送ラインに割り当てられたカレンダを返す"""
+    line = (
+        Line.objects.select_related('calendar')
+        .filter(
+            Q(line_code='L3102')
+            | Q(line_name__icontains='クボタ配送ライン')
+        )
+        .order_by('id')
+        .first()
+    )
+    if not line:
+        process = (
+            Process.objects.select_related('line', 'line__calendar')
+            .filter(
+                Q(process_code='4902')
+                | Q(process_name__icontains='クボタ配送')
+            )
+            .order_by('id')
+            .first()
+        )
+        line = getattr(process, 'line', None)
+    if line and line.calendar:
+        return line.calendar
+    return _resolve_kubota_calendar()
+
+
 def _build_calendar_day_map(calendar):
     if not calendar:
         return {}
@@ -600,7 +627,7 @@ def _normalize_preview_rows_by_date_payload(raw_preview_rows_by_date, due_adjust
 # ---------------------------------------------------------------------------
 
 def _resolve_kubota_delivery_line_process():
-    calendar = _resolve_kubota_calendar()
+    fallback_calendar = _resolve_kubota_calendar()
     existing_process = (
         Process.objects.select_related('line')
         .filter(
@@ -616,8 +643,8 @@ def _resolve_kubota_delivery_line_process():
         if not line.is_active:
             line.is_active = True
             line_updates.append('is_active')
-        if calendar and line.calendar_id != calendar.id:
-            line.calendar = calendar
+        if not line.calendar_id and fallback_calendar:
+            line.calendar = fallback_calendar
             line_updates.append('calendar')
         if line_updates:
             line.save(update_fields=line_updates)
@@ -632,14 +659,14 @@ def _resolve_kubota_delivery_line_process():
         .first()
     )
     if existing_line:
-        if not existing_line.is_active or (calendar and existing_line.calendar_id != calendar.id):
-            line_updates = []
-            if not existing_line.is_active:
-                existing_line.is_active = True
-                line_updates.append('is_active')
-            if calendar and existing_line.calendar_id != calendar.id:
-                existing_line.calendar = calendar
-                line_updates.append('calendar')
+        line_updates = []
+        if not existing_line.is_active:
+            existing_line.is_active = True
+            line_updates.append('is_active')
+        if not existing_line.calendar_id and fallback_calendar:
+            existing_line.calendar = fallback_calendar
+            line_updates.append('calendar')
+        if line_updates:
             existing_line.save(update_fields=line_updates)
 
         process = (
@@ -665,8 +692,8 @@ def _resolve_kubota_delivery_line_process():
         'line_type': 'OTHER',
         'is_active': True,
     }
-    if calendar:
-        line_defaults['calendar'] = calendar
+    if fallback_calendar:
+        line_defaults['calendar'] = fallback_calendar
     line, created = Line.objects.get_or_create(
         line_code=KUBOTA_DELIVERY_LINE_CODE,
         defaults=line_defaults,
@@ -681,8 +708,8 @@ def _resolve_kubota_delivery_line_process():
     if not line.is_active:
         line.is_active = True
         update_fields.append('is_active')
-    if calendar and line.calendar_id != calendar.id:
-        line.calendar = calendar
+    if not line.calendar_id and fallback_calendar:
+        line.calendar = fallback_calendar
         update_fields.append('calendar')
     if update_fields and not created:
         line.save(update_fields=update_fields)
@@ -1095,7 +1122,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
             assignment_map[item.due_adjustment_id].append(item)
 
         # カレンダー・期限
-        calendar = _resolve_kubota_calendar()
+        calendar = _resolve_kubota_line_calendar()
         calendar_map = _build_calendar_day_map(calendar)
         deadline_days = _get_deadline_days()
         today = date.today()
@@ -1232,7 +1259,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 'warnings': load['warnings'],
             })
 
-        calendar = _resolve_kubota_calendar()
+        calendar = _resolve_kubota_line_calendar()
         calendar_map = _build_calendar_day_map(calendar)
         departure_query_end = _departure_summary_query_end(target_date, trucks)
         departure_assignments = list(
@@ -1445,7 +1472,7 @@ class KubotaSakaiTripPlanViewNew(APIView):
             )
 
         user = request.user if request.user and request.user.is_authenticated else None
-        calendar = _resolve_kubota_calendar()
+        calendar = _resolve_kubota_line_calendar()
         calendar_map = _build_calendar_day_map(calendar)
 
         with transaction.atomic():
@@ -1748,7 +1775,7 @@ class KubotaSakaiTripLoadPreviewViewNew(APIView):
 
         trucks = list(KubotaSakaiTruck.objects.filter(is_active=True).order_by('display_order', 'name'))
         truck_map = {truck.id: truck for truck in trucks}
-        calendar = _resolve_kubota_calendar()
+        calendar = _resolve_kubota_line_calendar()
         calendar_map = _build_calendar_day_map(calendar)
 
         product_codes = set(item.product_code for item in due_adjustments)
@@ -2012,7 +2039,7 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         if not candidate_trucks:
             return Response({'detail': '自動振分対象の実便が便マスタに設定されていません。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        calendar = _resolve_kubota_calendar()
+        calendar = _resolve_kubota_line_calendar()
         calendar_map = _build_calendar_day_map(calendar)
 
         product_codes = {item.product_code for item in preview_due_adjustments}
@@ -2567,7 +2594,7 @@ class KubotaSakaiPickupDetailPdfViewNew(APIView):
             return Response({'detail': '開始日は終了日以前を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
         # kubota_sakai カレンダで営業日逆算（offset>=1）
-        calendar = _resolve_kubota_calendar()
+        calendar = _resolve_kubota_line_calendar()
         calendar_map = _build_calendar_day_map(calendar)
 
         max_offset = KubotaSakaiTruck.objects.filter(is_active=True).order_by('-arrival_day_offset').values_list('arrival_day_offset', flat=True).first() or 0

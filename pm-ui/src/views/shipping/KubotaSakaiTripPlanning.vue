@@ -2325,6 +2325,11 @@ const loadGrid = async () => {
     departureSummaryByDate.value = nextDepartureSummaryByDate
     productContainersMap.value = nextProductContainers
     holidayByDate.value = nextHolidayByDate
+    const nextCalendarDayMap = {}
+    Object.entries(nextHolidayByDate).forEach(([dk, isHol]) => {
+      nextCalendarDayMap[dk] = !isHol
+    })
+    calendarDayMap.value = { ...calendarDayMap.value, ...nextCalendarDayMap }
     dateHeaderNoticesByDate.value = nextDateHeaderNoticesByDate
     progressByDate.value = nextProgressByDate
     progressAdjustEdits.value = {}
