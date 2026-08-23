@@ -6,11 +6,14 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
+from rest_framework import status
+from rest_framework.response import Response
 
-from masters.models import BOM, Product, RoutingStep
+from masters.models import BOM, Line, Process, Product, RoutingStep
 from production.models_line_backlog import LineBacklog
 from production.models_line_gantt_plan import LineGanttPlan
 from production.models_plan_change_log import ProductionPlanChangeLog
+from production.models_singleproc_finished_entry import SingleProcFinishedEntry
 
 from .gantt_planning import (
     LineWorkCalendar,
@@ -18,6 +21,49 @@ from .gantt_planning import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def sub_process_save(viewset, request, **deps):
+    line_id = request.data.get('line_id')
+    process_id = request.data.get('process_id')
+    entries = request.data.get('entries', [])
+    finished_entries = request.data.get('finished_entries', [])
+    target_dates = request.data.get('target_dates', [])
+    raw_reason = request.data.get('change_reason', 'サブ工程計画入力')
+    change_reason = str(raw_reason).strip() if raw_reason else 'サブ工程計画入力'
+
+    if not line_id or not process_id:
+        return Response({'detail': 'line_id, process_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        line_id = int(line_id)
+        process_id = int(process_id)
+    except (TypeError, ValueError):
+        return Response({'detail': 'line_id, process_id は数値で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+    line = Line.objects.filter(id=line_id).first()
+    process = Process.objects.filter(id=process_id).first()
+    if not line or not process:
+        return Response({'detail': 'ライン/工程が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+    change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+
+    try:
+        result = save_sub_process_plan(
+            line=line,
+            process=process,
+            entries=entries,
+            finished_entries=finished_entries,
+            target_dates=target_dates,
+            change_reason=change_reason,
+            change_user=change_user,
+        )
+    except ValueError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+        logger.error('sub_process_save error: %s', exc, exc_info=True)
+        return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response(result)
 
 
 def _parse_date(val):
@@ -325,11 +371,69 @@ def _expand_backlog_entries_for_coproducts(parsed_entries):
     ]
 
 
-def save_sub_process_plan(*, line, process, entries, target_dates=None, change_reason='サブ工程計画入力', change_user=None):
+def _build_finished_entry_payloads(finished_entries):
+    payloads = []
+    delete_dates = set()
+    for item in finished_entries if isinstance(finished_entries, list) else []:
+        plan_date_raw = str(item.get('plan_date', '')).strip()
+        if not plan_date_raw:
+            continue
+        try:
+            plan_date = _parse_date(plan_date_raw)
+        except (TypeError, ValueError):
+            continue
+        delete_dates.add(plan_date)
+        try:
+            product_id = int(item.get('product_id'))
+            quantity = int(item.get('quantity', 0))
+            sequence_no = int(item.get('sequence_no', 0))
+        except (TypeError, ValueError):
+            continue
+        if product_id <= 0 or quantity <= 0 or sequence_no <= 0:
+            continue
+        payloads.append({
+            'product_id': product_id,
+            'plan_date': plan_date,
+            'quantity': quantity,
+            'sequence_no': sequence_no,
+        })
+    return payloads, delete_dates
+
+
+def _save_finished_entries(*, line_id, process_id, target_dates, finished_entries):
+    payloads, delete_dates = _build_finished_entry_payloads(finished_entries)
+    delete_dates.update(_resolve_target_dates(target_dates))
+    if delete_dates:
+        SingleProcFinishedEntry.objects.filter(
+            line_id=line_id,
+            process_id=process_id,
+            plan_date__in=list(delete_dates),
+        ).delete()
+
+    if not payloads:
+        return 0
+
+    objs = [
+        SingleProcFinishedEntry(
+            line_id=line_id,
+            process_id=process_id,
+            plan_date=item['plan_date'],
+            sequence_no=item['sequence_no'],
+            product_id=item['product_id'],
+            quantity=item['quantity'],
+        )
+        for item in payloads
+    ]
+    SingleProcFinishedEntry.objects.bulk_create(objs)
+    return len(objs)
+
+
+def save_sub_process_plan(*, line, process, entries, finished_entries=None, target_dates=None, change_reason='サブ工程計画入力', change_user=None):
     """
     サブ工程計画を保存する。
 
-    LinePlanは触らない。この工程のLineBacklog(seq>0)とLineGanttPlan(SINGLEPROC_)のみ操作。
+    LinePlanは触らない。この工程のLineBacklog(seq>0)とLineGanttPlan(SINGLEPROC_)、
+    SingleProcFinishedEntry のみ操作する。
     """
     line_id = line.id
     process_id = process.id
@@ -369,6 +473,7 @@ def save_sub_process_plan(*, line, process, entries, target_dates=None, change_r
     deleted_gantt = 0
     created_backlog = 0
     created_gantt = 0
+    saved_finished_entries = 0
 
     with transaction.atomic():
         existing_backlogs = {}
@@ -479,9 +584,17 @@ def save_sub_process_plan(*, line, process, entries, target_dates=None, change_r
                     changed_by=change_user,
                 )
 
+        saved_finished_entries = _save_finished_entries(
+            line_id=line_id,
+            process_id=process_id,
+            target_dates=target_dates,
+            finished_entries=finished_entries,
+        )
+
     return {
         'deleted_backlog': deleted_backlog,
         'deleted_gantt': deleted_gantt,
         'created_backlog': created_backlog,
         'created_gantt': created_gantt,
+        'saved_finished_entries': saved_finished_entries,
     }

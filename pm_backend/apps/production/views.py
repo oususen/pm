@@ -1267,82 +1267,8 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='sub-process-save')
     def sub_process_save(self, request):
-        """
-        単独計画の保存。ロジックは services/single_process_plan.py に委譲。
-        期待payload: {
-            line_id, process_id,
-            entries: [{ product_id, plan_date, plan_qty, sequence_no }, ...],
-            finished_entries?: [{ product_id, plan_date, quantity, sequence_no }, ...],
-            target_dates?: ['2026-06-27', ...],
-            change_reason?: str
-        }
-        """
-        from .services.single_process_plan import save_sub_process_plan
-        from .models_singleproc_finished_entry import SingleProcFinishedEntry
-
-        line_id = request.data.get('line_id')
-        process_id = request.data.get('process_id')
-        entries = request.data.get('entries', [])
-        finished_entries = request.data.get('finished_entries', [])
-        target_dates = request.data.get('target_dates', [])
-        raw_reason = request.data.get('change_reason', 'サブ工程計画入力')
-        change_reason = str(raw_reason).strip() if raw_reason else 'サブ工程計画入力'
-
-        if not line_id or not process_id:
-            return Response({'detail': 'line_id, process_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            line_id = int(line_id)
-            process_id = int(process_id)
-        except (TypeError, ValueError):
-            return Response({'detail': 'line_id, process_id は数値で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
-
-        line = Line.objects.filter(id=line_id).first()
-        process = Process.objects.filter(id=process_id).first()
-        if not line or not process:
-            return Response({'detail': 'ライン/工程が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
-
-        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-
-        try:
-            result = save_sub_process_plan(
-                line=line, process=process, entries=entries, target_dates=target_dates,
-                change_reason=change_reason, change_user=change_user,
-            )
-        except ValueError as e:
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            logger.error('sub_process_save error: %s', e, exc_info=True)
-            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        if finished_entries:
-            try:
-                delete_dates = set(target_dates)
-                for fe in finished_entries:
-                    d = str(fe.get('plan_date', '')).strip()
-                    if d:
-                        delete_dates.add(d)
-                if delete_dates:
-                    SingleProcFinishedEntry.objects.filter(
-                        line_id=line_id, process_id=process_id, plan_date__in=list(delete_dates),
-                    ).delete()
-                objs = []
-                for fe in finished_entries:
-                    pid = fe.get('product_id')
-                    qty = int(fe.get('quantity', 0))
-                    seq = int(fe.get('sequence_no', 0))
-                    plan_date = str(fe.get('plan_date', '')).strip()
-                    if pid and qty > 0 and seq > 0 and plan_date:
-                        objs.append(SingleProcFinishedEntry(
-                            line_id=line_id, process_id=process_id,
-                            plan_date=plan_date, sequence_no=seq,
-                            product_id=int(pid), quantity=qty,
-                        ))
-                if objs:
-                    SingleProcFinishedEntry.objects.bulk_create(objs)
-            except Exception as e:
-                logger.warning('finished_entries save error: %s', e)
-
-        return Response(result)
+        from .services.single_process_plan import sub_process_save
+        return sub_process_save(self, request)
 
     @action(detail=False, methods=['put'], url_path='bulk-update')
     def bulk_update(self, request):
