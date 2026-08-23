@@ -4461,6 +4461,7 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
             line_final_only: bool (optional, default: False) - Trueの場合はライン最終品のみ計算
             final_only: bool (deprecated, line_final_only を使用) - 後方互換のため残存
             progress_only: bool (optional, default: False) - Trueの場合は進度のみ再計算し在庫をスキップ
+            force_from_start: bool (optional, default: False) - Trueの場合は指定開始日を計算起点として尊重
         }
         """
         from .inventory.inventory_calculator import recalculate_inventory_for_line
@@ -4493,6 +4494,12 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         else:
             progress_only = bool(progress_only_raw)
 
+        force_from_start_raw = request.data.get('force_from_start', False)
+        if isinstance(force_from_start_raw, str):
+            force_from_start = force_from_start_raw.lower() in ['true', '1', 'yes']
+        else:
+            force_from_start = bool(force_from_start_raw)
+
         if not line_id:
             return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not start_date or not end_date:
@@ -4512,14 +4519,19 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             return Response({'detail': f'Invalid date format: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
-        effective_start_dt = _resolve_inventory_effective_start_date(
-            line_id,
-            start_dt,
-            end_dt,
-            product_ids=requested_product_ids or None,
-            line_final_only=line_final_only,
-            include_progress=include_progress or progress_only,
-        )
+        if force_from_start:
+            effective_start_dt = start_dt
+            progress_calc_start_date = start_dt if (include_progress or progress_only) else None
+        else:
+            effective_start_dt = _resolve_inventory_effective_start_date(
+                line_id,
+                start_dt,
+                end_dt,
+                product_ids=requested_product_ids or None,
+                line_final_only=line_final_only,
+                include_progress=include_progress or progress_only,
+            )
+            progress_calc_start_date = None
 
         try:
             result = recalculate_inventory_for_line(
@@ -4530,6 +4542,8 @@ class LineBacklogViewSet(viewsets.ModelViewSet):
                 line_final_only=line_final_only,
                 product_ids=requested_product_ids or None,
                 progress_only=progress_only,
+                progress_calc_start_date=progress_calc_start_date,
+                force_from_start=force_from_start,
             )
             record_count = LineBacklog.objects.filter(
                 line_id=line_id,

@@ -320,6 +320,7 @@ const displayStartDate = ref(today);
 const adjustmentDate = ref(today); // LTから自動計算される調整可能日（この行だけ入力可）
 const activeTab = ref("single");
 const progressLockDate = ref("");
+const singleRecalcLtStartDate = ref("");
 
 const formatLocalDate = (d) => {
   const yyyy = d.getFullYear();
@@ -361,6 +362,21 @@ const stockDiff = computed(() =>
 
 const previewDiff = () => {};
 
+const isPlannedStockType = props.adjustType === "PLANNED_STOCK";
+
+const minIsoDate = (left, right) => {
+  const l = String(left || "").trim();
+  const r = String(right || "").trim();
+  if (!l) return r;
+  if (!r) return l;
+  return l <= r ? l : r;
+};
+
+const getSingleRecalcStartDate = () =>
+  isPlannedStockType
+    ? minIsoDate(adjustmentDate.value || today, singleRecalcLtStartDate.value || "")
+    : (adjustmentDate.value || displayStartDate.value || today);
+
 const applyStockDiff = () => {
   if (stockDiff.value === null) return;
   dateRows.value = dateRows.value.map((row) =>
@@ -380,11 +396,17 @@ const recalcThenReload = async () => {
     endDateObj.setDate(endDateObj.getDate() + 29);
     const payload = {
       line_id: form.lineId,
-      start_date: adjustmentDate.value || displayStartDate.value || today,
+      start_date: getSingleRecalcStartDate(),
       end_date: formatISODate(endDateObj),
       product_ids: form.productId ? [form.productId] : undefined,
     };
-    if (isProgressType || isPlannedProgressType) {
+    if (isPlannedStockType) {
+      await api.lineBacklogs.recalculateInventory({
+        ...payload,
+        include_progress: false,
+        force_from_start: true,
+      });
+    } else if (isProgressType || isPlannedProgressType) {
       await api.lineBacklogs.recalculateInventoryDeep({
         ...payload,
         progress_only: true,
@@ -430,11 +452,17 @@ const applyAndRecalc = async () => {
     endDateObj.setDate(endDateObj.getDate() + 29);
     const payload = {
       line_id: form.lineId,
-      start_date: adjustmentDate.value || displayStartDate.value || today,
+      start_date: getSingleRecalcStartDate(),
       end_date: formatISODate(endDateObj),
       product_ids: form.productId ? [form.productId] : undefined,
     };
-    if (isProgressType || isPlannedProgressType) {
+    if (isPlannedStockType) {
+      await api.lineBacklogs.recalculateInventory({
+        ...payload,
+        include_progress: false,
+        force_from_start: true,
+      });
+    } else if (isProgressType || isPlannedProgressType) {
       await api.lineBacklogs.recalculateInventoryDeep({
         ...payload,
         progress_only: true,
@@ -522,13 +550,19 @@ const applyProcessToForm = (item) => {
 const syncSingleDisplayStartDate = async (productId) => {
   if (!productId) return;
   try {
-    const calcRes = await api.lineBacklogs.getCalcStartDate({
-      product_id: productId,
-      base_date: adjustmentDate.value,
-    });
-    if (calcRes.data?.calc_start_date) {
-      displayStartDate.value = calcRes.data.calc_start_date;
+    const [displayCalcRes, recalcCalcRes] = await Promise.all([
+      api.lineBacklogs.getCalcStartDate({
+        product_id: productId,
+        base_date: adjustmentDate.value,
+      }),
+      api.lineBacklogs.getCalcStartDate({
+        product_id: productId,
+      }),
+    ]);
+    if (displayCalcRes.data?.calc_start_date) {
+      displayStartDate.value = displayCalcRes.data.calc_start_date;
     }
+    singleRecalcLtStartDate.value = recalcCalcRes.data?.calc_start_date || "";
   } catch (_) {
     // 表示開始日は取得失敗時に現状維持
   }
@@ -550,6 +584,7 @@ const setProcessCandidates = (items = []) => {
     form.lineId = null;
     form.lineCode = "";
     form.lineName = "";
+    singleRecalcLtStartDate.value = "";
     return;
   }
   if (items.length === 1) {
@@ -1213,11 +1248,28 @@ const getBatchRecalcRange = () => {
   };
 };
 
+const getBatchLineStartDates = () => {
+  const lineStartDates = {};
+  const targetDate = batchTargetDate.value || today;
+  for (const row of batchProducts.value) {
+    const lineId = Number(row.line_id || 0);
+    if (!lineId) continue;
+    const productStartDate = minIsoDate(targetDate, row.calc_start_date || "");
+    if (!lineStartDates[lineId]) {
+      lineStartDates[lineId] = productStartDate;
+      continue;
+    }
+    lineStartDates[lineId] = minIsoDate(lineStartDates[lineId], productStartDate);
+  }
+  return lineStartDates;
+};
+
 // 一括再計算の共通ロジック
 // - PROGRESS/PLANNED_PROGRESS: 工程の製品をline_idでグループ化して進度のみ再計算
 // - STOCK/PLANNED_STOCK: 全関連ラインを対象に在庫のみ再計算（進度スキップ）
 const executeBatchRecalc = async () => {
   const { startDate, endDate } = getBatchRecalcRange();
+  const lineStartDates = getBatchLineStartDates();
 
   const isProgressType = props.adjustType === "PROGRESS" || props.adjustType === "PLANNED_PROGRESS";
 
@@ -1232,7 +1284,7 @@ const executeBatchRecalc = async () => {
       Object.entries(productsByLine).map(([lid, pids]) =>
         api.lineBacklogs.recalculateInventory({
           line_id: Number(lid),
-          start_date: startDate,
+          start_date: lineStartDates[Number(lid)] || startDate,
           end_date: endDate,
           product_ids: pids,
           progress_only: true,
@@ -1248,13 +1300,22 @@ const executeBatchRecalc = async () => {
     }
     await Promise.all(
       Object.entries(productsByLine).map(([lid, pids]) =>
-        api.lineBacklogs.recalculateInventory({
-          line_id: Number(lid),
-          start_date: startDate,
-          end_date: endDate,
-          product_ids: pids,
-          include_progress: false,
-        })
+        isPlannedStockType
+          ? api.lineBacklogs.recalculateInventory({
+              line_id: Number(lid),
+              start_date: lineStartDates[Number(lid)] || startDate,
+              end_date: endDate,
+              product_ids: pids,
+              include_progress: false,
+              force_from_start: true,
+            })
+          : api.lineBacklogs.recalculateInventory({
+              line_id: Number(lid),
+              start_date: lineStartDates[Number(lid)] || startDate,
+              end_date: endDate,
+              product_ids: pids,
+              include_progress: false,
+            })
       )
     );
   }

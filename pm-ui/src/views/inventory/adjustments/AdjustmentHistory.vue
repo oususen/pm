@@ -213,6 +213,8 @@ load()
 .grid {
   border-collapse: collapse;
   width: 100%;
+  min-width: 1320px;
+  table-layout: fixed;
   font-size: 13px;
   background: #fff;
 }
@@ -221,6 +223,7 @@ load()
   border: 1px solid #d1d5db;
   padding: 5px 8px;
   white-space: nowrap;
+  vertical-align: top;
 }
 .grid th {
   background: #f1f5f9;
@@ -230,7 +233,31 @@ load()
 .grid tbody tr:hover { background: #f8fafc; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .negative { color: #dc2626; }
-.reason { white-space: normal; max-width: 260px; }
+.grid th:nth-child(1),
+.grid td:nth-child(1) { width: 100px; }
+.grid th:nth-child(2),
+.grid td:nth-child(2) { width: 90px; }
+.grid th:nth-child(3),
+.grid td:nth-child(3) { width: 90px; }
+.grid th:nth-child(4),
+.grid td:nth-child(4) { width: 170px; }
+.grid th:nth-child(5),
+.grid td:nth-child(5) { width: 90px; }
+.grid th:nth-child(6),
+.grid td:nth-child(6) { width: 80px; }
+.grid th:nth-child(7),
+.grid td:nth-child(7) { width: 500px; }
+.grid th:nth-child(8),
+.grid td:nth-child(8) { width: 130px; }
+.grid th:nth-child(9),
+.grid td:nth-child(9) { width: 110px; }
+.grid th:nth-child(10),
+.grid td:nth-child(10) { width: 80px; }
+.reason {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .center { text-align: center; padding: 16px; }
 .error { color: #dc2626; }
 
@@ -258,4 +285,3 @@ load()
 .btn-del:hover { background: #fecaca; }
 .btn-del:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
-
