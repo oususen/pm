@@ -321,3 +321,31 @@ def recalculate_child_stock_after_record_edit(parent_plan_date, today, child_pro
                 demand_map=demand_map,
                 reference_today=parent_plan_date,
             )
+
+
+def recalculate_inventory_after_session_change(session_obj):
+    if not session_obj:
+        return
+    plan_date = getattr(session_obj, 'plan_date', None)
+    process = getattr(session_obj, 'process', None)
+    line_id = getattr(process, 'line_id', None)
+    if not plan_date or not line_id:
+        return
+
+    end_date = (
+        LineBacklog.objects.filter(line_id=line_id)
+        .order_by('-plan_date')
+        .values_list('plan_date', flat=True)
+        .first()
+    ) or plan_date
+
+    from production.inventory.inventory_calculator import recalculate_inventory_for_line
+
+    recalculate_inventory_for_line(
+        line_id=line_id,
+        start_date=plan_date,
+        end_date=end_date,
+        include_progress=True,
+        line_final_only=False,
+        guard_cutoff=plan_date - timedelta(days=1),
+    )

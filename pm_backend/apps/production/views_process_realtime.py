@@ -30,6 +30,7 @@ from .services.process_realtime_backlog_service import (
     adjust_coproduct_children_backlog,
     apply_delta_to_inventory_and_progress,
     recalculate_child_stock_after_record_edit,
+    recalculate_inventory_after_session_change,
     rebuild_session_production_records,
     update_coproduct_children_records,
 )
@@ -39,9 +40,12 @@ from .services.process_realtime_history_service import (
     serialize_session_snapshot,
 )
 from .services.process_realtime_common import (
+    build_business_boundary_datetime,
     calculate_effective_work_seconds,
     is_countable_session_for_actual,
+    normalize_input_datetime,
 )
+from .services.process_realtime_query_service import get_gantt_plan_qty
 from .services.process_realtime_scrap_service import (
     ScrapServiceError,
     get_scrap_breakdown,
@@ -49,48 +53,9 @@ from .services.process_realtime_scrap_service import (
     mark_scrap_replenished,
     process_scrap_disposition,
 )
-from .models_line_gantt_plan import LineGanttPlan
 from masters.models import Product, Process, BOM
 from .models_line_backlog import LineBacklog
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
-
-
-def _build_business_boundary_datetime(target_date, day_offset=0):
-    boundary_dt = datetime.combine(
-        target_date + timedelta(days=day_offset),
-        time(DAY_BOUNDARY_HOUR, 0),
-    )
-    if settings.USE_TZ:
-        return timezone.make_aware(boundary_dt, timezone.get_current_timezone())
-    return boundary_dt
-
-
-def _recalculate_inventory_after_session_change(session_obj):
-    if not session_obj:
-        return
-    plan_date = getattr(session_obj, 'plan_date', None)
-    process = getattr(session_obj, 'process', None)
-    line_id = getattr(process, 'line_id', None)
-    if not plan_date or not line_id:
-        return
-
-    end_date = (
-        LineBacklog.objects.filter(line_id=line_id)
-        .order_by('-plan_date')
-        .values_list('plan_date', flat=True)
-        .first()
-    ) or plan_date
-
-    from .inventory.inventory_calculator import recalculate_inventory_for_line
-
-    recalculate_inventory_for_line(
-        line_id=line_id,
-        start_date=plan_date,
-        end_date=end_date,
-        include_progress=True,
-        line_final_only=False,
-        guard_cutoff=plan_date - timedelta(days=1),
-    )
 
 
 def _to_local_naive(dt):
@@ -99,14 +64,6 @@ def _to_local_naive(dt):
     if timezone.is_aware(dt):
         return timezone.localtime(dt).replace(tzinfo=None)
     return dt
-
-
-def _normalize_input_datetime(dt):
-    if not dt:
-        return None
-    if settings.USE_TZ:
-        return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
-    return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
 
 
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -231,7 +188,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             d = parse_date(start_date)
             if d:
                 queryset = queryset.filter(
-                    started_at__gte=_build_business_boundary_datetime(d)
+                    started_at__gte=build_business_boundary_datetime(d)
                 )
 
         end_date = request.query_params.get('end_date')
@@ -239,7 +196,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             d = parse_date(end_date)
             if d:
                 queryset = queryset.filter(
-                    started_at__lt=_build_business_boundary_datetime(d, day_offset=1)
+                    started_at__lt=build_business_boundary_datetime(d, day_offset=1)
                 )
 
         # 計画日（plan_date）での絞り込み
@@ -511,8 +468,8 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if not parsed_end:
             return Response({'detail': 'ended_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        started_at = _normalize_input_datetime(parsed_start)
-        ended_at = _normalize_input_datetime(parsed_end)
+        started_at = normalize_input_datetime(parsed_start)
+        ended_at = normalize_input_datetime(parsed_end)
 
         if ended_at < started_at:
             return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -555,7 +512,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 adjust_backlog_actual_for_session(session, int(production_qty))
                 adjust_coproduct_children_backlog(session, int(production_qty))
                 apply_delta_to_inventory_and_progress(session, int(production_qty))
-            _recalculate_inventory_after_session_change(session)
+            recalculate_inventory_after_session_change(session)
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -595,7 +552,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     record_type='PRODUCTION',
                     event_data__work_session_id=session.id,
                 ).delete()
-                _recalculate_inventory_after_session_change(session)
+                recalculate_inventory_after_session_change(session)
                 session.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -627,14 +584,14 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             parsed = parse_datetime(next_started) if isinstance(next_started, str) and next_started else None
             if next_started and parsed is None:
                 return Response({'detail': 'started_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
-            started_at = _normalize_input_datetime(parsed)
+            started_at = normalize_input_datetime(parsed)
 
         if 'ended_at' in payload:
             next_ended = payload.get('ended_at')
             parsed = parse_datetime(next_ended) if isinstance(next_ended, str) and next_ended else None
             if next_ended and parsed is None:
                 return Response({'detail': 'ended_at の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
-            ended_at = _normalize_input_datetime(parsed)
+            ended_at = normalize_input_datetime(parsed)
 
         if 'production_qty' in payload:
             try:
@@ -732,7 +689,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     before_data=before_snapshot,
                     after_data=after_snapshot,
                 )
-            _recalculate_inventory_after_session_change(session)
+            recalculate_inventory_after_session_change(session)
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data)
@@ -755,13 +712,13 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if start_date:
             d = parse_date(start_date)
             if d:
-                queryset = queryset.filter(changed_at__gte=_build_business_boundary_datetime(d))
+                queryset = queryset.filter(changed_at__gte=build_business_boundary_datetime(d))
 
         end_date = request.query_params.get('end_date')
         if end_date:
             d = parse_date(end_date)
             if d:
-                queryset = queryset.filter(changed_at__lt=_build_business_boundary_datetime(d, day_offset=1))
+                queryset = queryset.filter(changed_at__lt=build_business_boundary_datetime(d, day_offset=1))
 
         limit = request.query_params.get('limit')
         try:
@@ -934,55 +891,10 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='gantt-plan-qty')
     def gantt_plan_qty(self, request):
-        """
-        ガントプラン(LineGanttPlan)から工程別・製品別の計画数を返す。
-        GET ?line_id=X&process_id=Y&dates=2026-05-13,2026-05-14
-        Response: { "STYD40006245-4001": {"2026-05-13": 56, ...}, ... }
-        """
-        line_id = request.query_params.get('line_id')
-        process_id = request.query_params.get('process_id')
-        dates_str = request.query_params.get('dates', '')
-        if not line_id or not process_id or not dates_str:
-            return Response({})
-
-        try:
-            process_id_int = int(process_id)
-        except (ValueError, TypeError):
-            return Response({})
-
-        date_list = []
-        for d in dates_str.split(','):
-            d = d.strip()
-            if d:
-                try:
-                    date_list.append(parse_date(d))
-                except Exception:
-                    pass
-        date_list = [d for d in date_list if d]
-        if not date_list:
-            return Response({})
-
-        plans = LineGanttPlan.objects.filter(
-            line_id=line_id,
-            plan_date__in=date_list,
+        return Response(
+            get_gantt_plan_qty(
+                line_id=request.query_params.get('line_id'),
+                process_id=request.query_params.get('process_id'),
+                dates_str=request.query_params.get('dates', ''),
+            )
         )
-
-        result = {}
-        for plan in plans:
-            if not plan.processes_plan:
-                continue
-            for pp in plan.processes_plan:
-                if pp.get('process_id') != process_id_int:
-                    continue
-                product_code = pp.get('output_product_code', '')
-                qty = pp.get('quantity', 0)
-                if not product_code or not qty:
-                    continue
-                plan_date_str = str(plan.plan_date)
-                if product_code not in result:
-                    result[product_code] = {}
-                result[product_code][plan_date_str] = (
-                    result[product_code].get(plan_date_str, 0) + qty
-                )
-
-        return Response(result)

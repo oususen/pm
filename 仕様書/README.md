@@ -324,6 +324,7 @@ Django Admin: http://localhost:8000/admin/
   - `pm_backend/apps/production/services/process_realtime_common.py` を追加し、`views_process_realtime.py` から実作業秒数計算と実績集計対象判定を service へ移動
   - `pm_backend/apps/production/views_actual_cycle_time.py` と `pm_backend/apps/production/production_actual_reconcile.py` の `views_process_realtime` 直接依存を解消
   - `pm_backend/apps/production/services/process_realtime_history_service.py` `process_realtime_backlog_service.py` `process_realtime_scrap_service.py` を追加し、`views_process_realtime.py` の履歴生成、backlog / 在庫・進度差分反映、仕損参照・補充・判定を service へ移動
+  - `pm_backend/apps/production/services/process_realtime_query_service.py` を追加し、`views_process_realtime.py` に残っていたガント計画数参照と日時補助・再計算補助の一部を service へ移動
 
 ## 次のステップ
 

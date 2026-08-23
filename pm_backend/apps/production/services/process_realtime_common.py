@@ -1,6 +1,9 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
+from django.conf import settings
 from django.utils import timezone
+
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 
 
 def is_countable_session_for_actual(session_type, end_action):
@@ -13,6 +16,24 @@ def _to_local_naive(dt):
     if timezone.is_aware(dt):
         return timezone.localtime(dt).replace(tzinfo=None)
     return dt
+
+
+def build_business_boundary_datetime(target_date, day_offset=0):
+    boundary_dt = datetime.combine(
+        target_date + timedelta(days=day_offset),
+        time(DAY_BOUNDARY_HOUR, 0),
+    )
+    if settings.USE_TZ:
+        return timezone.make_aware(boundary_dt, timezone.get_current_timezone())
+    return boundary_dt
+
+
+def normalize_input_datetime(dt):
+    if not dt:
+        return None
+    if settings.USE_TZ:
+        return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+    return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
 
 
 def calculate_effective_work_seconds(calendar, started_at, ended_at):
