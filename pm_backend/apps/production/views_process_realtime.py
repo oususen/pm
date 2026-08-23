@@ -5,7 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db import transaction
-from django.db.models import Sum, F
+from django.db.models import Sum
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
 from django.conf import settings
@@ -15,138 +15,44 @@ from datetime import datetime, time, timedelta
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_process_work_session import ProcessWorkSession
 from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
-from .models_line_backlog import LineBacklog
 from .serializers_process_realtime import (
     ProcessRealtimeRecordSerializer,
     ProcessRealtimeCreateSerializer,
     ProcessWorkSessionSerializer,
     ProcessWorkSessionChangeHistorySerializer,
-    _build_session_meta,
-    build_scrap_multiplier_details,
-    expand_coproduct_children_production,
-    _resolve_product_process_line,
     resolve_workday_date_for_process,
     _next_session_no,
     check_plan_overrun,
 )
+from .services.process_realtime_backlog_service import (
+    adjust_backlog_actual_for_session,
+    adjust_backlog_scrap_for_session,
+    adjust_coproduct_children_backlog,
+    apply_delta_to_inventory_and_progress,
+    recalculate_child_stock_after_record_edit,
+    rebuild_session_production_records,
+    update_coproduct_children_records,
+)
 from .services.gantt_planning import LineWorkCalendar
+from .services.process_realtime_history_service import (
+    create_session_change_history,
+    serialize_session_snapshot,
+)
 from .services.process_realtime_common import (
     calculate_effective_work_seconds,
     is_countable_session_for_actual,
 )
+from .services.process_realtime_scrap_service import (
+    ScrapServiceError,
+    get_scrap_breakdown,
+    mark_scrap_detail_replenished,
+    mark_scrap_replenished,
+    process_scrap_disposition,
+)
 from .models_line_gantt_plan import LineGanttPlan
-from masters.models import Product, Process, Supplier, BOM
-from quality.models_scrap import ScrapRecordDetail, ScrapRecord
+from masters.models import Product, Process, BOM
+from .models_line_backlog import LineBacklog
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
-
-def _format_history_datetime(dt):
-    if not dt:
-        return ''
-    local_dt = _to_local_naive(dt)
-    return local_dt.strftime('%Y/%m/%d %H:%M') if local_dt else ''
-
-
-def _serialize_session_snapshot(session_obj):
-    if not session_obj:
-        return {}
-    return {
-        'product_code': session_obj.product_code or '',
-        'product_name': session_obj.product_name or '',
-        'started_at': _format_history_datetime(session_obj.started_at),
-        'ended_at': _format_history_datetime(session_obj.ended_at),
-        'production_qty': int(session_obj.production_qty or 0),
-        'defect_qty': int(session_obj.defect_qty or 0),
-        'operator_name': session_obj.operator_name or '',
-        'plan_date': str(session_obj.plan_date) if session_obj.plan_date else '',
-    }
-
-
-def _history_display_value(value):
-    text = str(value or '').strip()
-    return text or '—'
-
-
-def _build_history_summary(operation_type, before_data, after_data):
-    normalized_type = str(operation_type or '').upper()
-
-    if normalized_type == 'ADD':
-        parts = []
-        if after_data.get('product_code'):
-            parts.append(f"品番: {after_data['product_code']}")
-        if after_data.get('product_name'):
-            parts.append(f"品名: {after_data['product_name']}")
-        if after_data.get('plan_date'):
-            parts.append(f"作業日: {after_data['plan_date']}")
-        if after_data.get('operator_name'):
-            parts.append(f"作業者: {after_data['operator_name']}")
-        if after_data.get('started_at'):
-            parts.append(f"開始時刻: {after_data['started_at']}")
-        if after_data.get('ended_at'):
-            parts.append(f"終了時刻: {after_data['ended_at']}")
-        parts.append(f"実績数量: {after_data.get('production_qty', 0)}")
-        if int(after_data.get('defect_qty', 0) or 0):
-            parts.append(f"仕損: {after_data.get('defect_qty', 0)}")
-        return ' / '.join(parts)
-
-    if normalized_type == 'DELETE':
-        parts = []
-        if before_data.get('product_code'):
-            parts.append(f"品番: {before_data['product_code']}")
-        if before_data.get('product_name'):
-            parts.append(f"品名: {before_data['product_name']}")
-        if before_data.get('plan_date'):
-            parts.append(f"作業日: {before_data['plan_date']}")
-        if before_data.get('operator_name'):
-            parts.append(f"作業者: {before_data['operator_name']}")
-        if before_data.get('started_at'):
-            parts.append(f"開始時刻: {before_data['started_at']}")
-        if before_data.get('ended_at'):
-            parts.append(f"終了時刻: {before_data['ended_at']}")
-        parts.append(f"実績数量: {before_data.get('production_qty', 0)}")
-        if int(before_data.get('defect_qty', 0) or 0):
-            parts.append(f"仕損: {before_data.get('defect_qty', 0)}")
-        return '削除: ' + ' / '.join(parts)
-
-    labels = {
-        'product_code': '品番',
-        'product_name': '品名',
-        'plan_date': '作業日',
-        'started_at': '開始時刻',
-        'ended_at': '終了時刻',
-        'production_qty': '実績数量',
-        'defect_qty': '仕損',
-        'operator_name': '作業者',
-    }
-    parts = []
-    for key, label in labels.items():
-        before_value = before_data.get(key)
-        after_value = after_data.get(key)
-        if str(before_value or '') == str(after_value or ''):
-            continue
-        parts.append(f'{label}: {_history_display_value(before_value)} → {_history_display_value(after_value)}')
-    return ' / '.join(parts) or '変更なし'
-
-
-def _create_session_change_history(*, session_obj, operation_type, reason, changed_by, before_data=None, after_data=None):
-    if not session_obj:
-        return None
-    before_payload = before_data or {}
-    after_payload = after_data or {}
-    return ProcessWorkSessionChangeHistory.objects.create(
-        session=session_obj,
-        session_record_id=session_obj.id,
-        operation_type=str(operation_type or '').upper(),
-        process=session_obj.process,
-        product=session_obj.product,
-        product_code=session_obj.product_code or '',
-        product_name=session_obj.product_name or '',
-        plan_date=session_obj.plan_date,
-        reason=str(reason or '').strip(),
-        change_summary=_build_history_summary(operation_type, before_payload, after_payload),
-        before_data=before_payload,
-        after_data=after_payload,
-        changed_by=changed_by,
-    )
 
 
 def _build_business_boundary_datetime(target_date, day_offset=0):
@@ -159,365 +65,32 @@ def _build_business_boundary_datetime(target_date, day_offset=0):
     return boundary_dt
 
 
-def _adjust_backlog_actual_for_session(session_obj, delta_qty):
-    if not session_obj or not delta_qty:
+def _recalculate_inventory_after_session_change(session_obj):
+    if not session_obj:
         return
-    if not session_obj.product_id or not session_obj.process_id or not session_obj.plan_date:
+    plan_date = getattr(session_obj, 'plan_date', None)
+    process = getattr(session_obj, 'process', None)
+    line_id = getattr(process, 'line_id', None)
+    if not plan_date or not line_id:
         return
 
-    line = getattr(session_obj.process, 'line', None)
-    if not line:
-        return
+    end_date = (
+        LineBacklog.objects.filter(line_id=line_id)
+        .order_by('-plan_date')
+        .values_list('plan_date', flat=True)
+        .first()
+    ) or plan_date
 
-    backlog, _created = LineBacklog.objects.get_or_create(
-        line=line,
-        process_id=session_obj.process_id,
-        product_id=session_obj.product_id,
-        plan_date=session_obj.plan_date,
-        sequence_no=0,
-        defaults={
-            'order_qty': 0,
-            'plan_qty': 0,
-            'actual_qty': 0,
-            'stock_qty': 0,
-            'planned_stock_qty': 0,
-            'adjust_qty': 0,
-            'scrap_qty': 0,
-            'actual_shipment_qty': 0,
-        }
+    from .inventory.inventory_calculator import recalculate_inventory_for_line
+
+    recalculate_inventory_for_line(
+        line_id=line_id,
+        start_date=plan_date,
+        end_date=end_date,
+        include_progress=True,
+        line_final_only=False,
+        guard_cutoff=plan_date - timedelta(days=1),
     )
-    backlog.actual_qty = (backlog.actual_qty or 0) + int(delta_qty)
-    backlog.save(update_fields=['actual_qty'])
-
-
-def _adjust_coproduct_children_backlog(session_obj, delta_qty):
-    """連産品の子製品のLineBacklog.actual_qtyにデルタを反映する。"""
-    if not session_obj or not delta_qty:
-        return
-    if not session_obj.product_id or not session_obj.process_id or not session_obj.plan_date:
-        return
-
-    line = getattr(session_obj.process, 'line', None)
-    if not line:
-        return
-
-    coproduct_boms = BOM.objects.filter(
-        parent_product_id=session_obj.product_id,
-        is_active=True,
-        is_coproduct=True,
-    ).prefetch_related('items__child_product')
-
-    for bom in coproduct_boms:
-        for item in bom.items.select_related('child_product').all():
-            child_product = item.child_product
-            if not child_product:
-                continue
-            child_delta = int(round(Decimal(str(delta_qty)) * (item.quantity or 0)))
-            if child_delta == 0:
-                continue
-
-            backlog, _created = LineBacklog.objects.get_or_create(
-                line=line,
-                process_id=session_obj.process_id,
-                product_id=child_product.id,
-                plan_date=session_obj.plan_date,
-                sequence_no=0,
-                defaults={
-                    'order_qty': 0,
-                    'plan_qty': 0,
-                    'actual_qty': 0,
-                    'stock_qty': 0,
-                    'planned_stock_qty': 0,
-                    'adjust_qty': 0,
-                    'scrap_qty': 0,
-                    'actual_shipment_qty': 0,
-                }
-            )
-            backlog.actual_qty = (backlog.actual_qty or 0) + child_delta
-            backlog.save(update_fields=['actual_qty'])
-
-
-def _update_coproduct_children_records(session_obj, new_parent_qty):
-    """連産品の子製品のProcessRealtimeRecord.qtyをBOM比率に基づき更新する。"""
-    if not session_obj or not session_obj.product_id:
-        return
-
-    coproduct_boms = BOM.objects.filter(
-        parent_product_id=session_obj.product_id,
-        is_active=True,
-        is_coproduct=True,
-    ).prefetch_related('items__child_product')
-
-    bom_ratio_map = {}
-    for bom in coproduct_boms:
-        for item in bom.items.select_related('child_product').all():
-            if item.child_product_id:
-                bom_ratio_map[item.child_product_id] = item.quantity or Decimal('0')
-
-    if not bom_ratio_map:
-        return
-
-    child_records = ProcessRealtimeRecord.objects.filter(
-        record_type='PRODUCTION',
-        event_data__work_session_id=session_obj.id,
-        product_id__in=list(bom_ratio_map.keys()),
-    )
-
-    for record in child_records:
-        ratio = bom_ratio_map.get(record.product_id)
-        if ratio is not None:
-            record.qty = Decimal(str(new_parent_qty)) * ratio
-            record.save(update_fields=['qty'])
-
-
-def _rebuild_session_production_records(session_obj):
-    """手入力セッションに紐づく親・連産子の生産実績レコードを再構築する。"""
-    if not session_obj or not session_obj.process_id or not session_obj.product_id:
-        return
-
-    ProcessRealtimeRecord.objects.filter(
-        record_type='PRODUCTION',
-        event_data__work_session_id=session_obj.id,
-    ).delete()
-
-    qty_decimal = Decimal(str(session_obj.production_qty or 0))
-    event_data = {
-        'source': 'MANUAL_RECORD_EDIT',
-        'operator_action': 'MANUAL',
-        'work_session_id': session_obj.id,
-        'is_manual_record_edit': True,
-    }
-    session_meta = _build_session_meta(session_obj)
-    if session_meta:
-        event_data['session'] = session_meta
-
-    parent_record = ProcessRealtimeRecord.objects.create(
-        process=session_obj.process,
-        product=session_obj.product,
-        product_code=session_obj.product_code,
-        product_name=session_obj.product_name,
-        record_type='PRODUCTION',
-        qty=qty_decimal,
-        equipment_state=None,
-        event_data=event_data,
-        operator_name=session_obj.operator_name or '',
-    )
-
-    expand_coproduct_children_production(
-        process=session_obj.process,
-        product=session_obj.product,
-        parent_qty=qty_decimal,
-        plan_date=session_obj.plan_date,
-        operator_name=session_obj.operator_name or '',
-        parent_record_id=parent_record.id,
-        base_event_data=event_data,
-        session=session_obj,
-        session_issues=session_obj.issue_flags or [],
-        skip_backlog=True,
-    )
-
-
-def _adjust_backlog_scrap_for_session(session_obj, delta_qty):
-    """LineBacklog.scrap_qty にデルタを反映する（仕損数量変更用）。"""
-    if not session_obj or not delta_qty:
-        return
-    if not session_obj.product_id or not session_obj.process_id or not session_obj.plan_date:
-        return
-
-    line = getattr(session_obj.process, 'line', None)
-    if not line:
-        return
-
-    backlog, _created = LineBacklog.objects.get_or_create(
-        line=line,
-        process_id=session_obj.process_id,
-        product_id=session_obj.product_id,
-        plan_date=session_obj.plan_date,
-        sequence_no=0,
-        defaults={
-            'order_qty': 0,
-            'plan_qty': 0,
-            'actual_qty': 0,
-            'stock_qty': 0,
-            'planned_stock_qty': 0,
-            'adjust_qty': 0,
-            'scrap_qty': 0,
-            'actual_shipment_qty': 0,
-        }
-    )
-    backlog.scrap_qty = (backlog.scrap_qty or 0) + int(delta_qty)
-    backlog.save(update_fields=['scrap_qty'])
-
-
-def _apply_delta_to_inventory_and_progress(session, delta):
-    """
-    実績変更に伴い、当日以降の在庫・進度・計画在庫・計進に差分を反映する。
-    親製品: 全てに delta 加算
-    子製品: 在庫・計画在庫に -(delta * bom_qty) 加算
-    """
-    if not delta or not session.product_id or not session.plan_date:
-        return
-
-    today = get_business_today()
-    if session.plan_date > today:
-        return
-
-    # 1. 親製品 (変更された製品)
-    # LineBacklog (line_id=session.process.line_id)
-    line = getattr(session.process, 'line', None)
-    if line:
-        LineBacklog.objects.filter(
-            line_id=line.id,
-            product_id=session.product_id,
-            plan_date__range=[session.plan_date, today],
-            sequence_no=0,
-        ).update(
-            stock_qty=F('stock_qty') + delta,
-            planned_stock_qty=F('planned_stock_qty') + delta,
-            progress_qty=F('progress_qty') + delta,
-            planned_progress_qty=F('planned_progress_qty') + delta
-        )
-
-    # 2. 子製品 (BOM構成品)
-    # 親 = session.product_id
-    # 子の在庫・計画在庫から (delta * quantity) を減算
-    boms = BOM.objects.filter(
-        parent_product_id=session.product_id,
-        is_active=True,
-        is_coproduct=False,
-    ).prefetch_related('items')
-    child_product_ids = set()
-
-    for bom in boms:
-        for item in bom.items.all():
-            child_id = item.child_product_id
-            qty_per = item.quantity or 0
-            if not child_id or qty_per == 0:
-                continue
-            child_product_ids.add(int(child_id))
-            
-            child_delta = int(round(Decimal(str(delta)) * qty_per))
-            if child_delta == 0:
-                continue
-
-            # 在庫・計画在庫: 消費が増える(=在庫が減る)ので減算（累積のためplan_date〜today）
-            LineBacklog.objects.filter(
-                product_id=child_id,
-                plan_date__range=[session.plan_date, today],
-                sequence_no=0,
-            ).update(
-                stock_qty=F('stock_qty') - child_delta,
-                planned_stock_qty=F('planned_stock_qty') - child_delta
-            )
-            # actual_shipment_qty（実需表示に使用）: 消費実績なのでplan_dateのみ更新
-            LineBacklog.objects.filter(
-                product_id=child_id,
-                plan_date=session.plan_date,
-                sequence_no=0,
-            ).update(
-                actual_shipment_qty=F('actual_shipment_qty') + child_delta
-            )
-
-    if child_product_ids:
-        _recalculate_child_stock_after_record_edit(
-            parent_plan_date=session.plan_date,
-            today=today,
-            child_product_ids=child_product_ids,
-        )
-
-
-def _recalculate_child_stock_after_record_edit(parent_plan_date, today, child_product_ids):
-    """
-    実績変更後、子部品の在庫/計画在庫を再計算する。
-    変更日を「基準日(today相当)」として開始日を算出し、
-    その開始日から実際の今日までを再計算する。
-    """
-    if not parent_plan_date or not today or parent_plan_date > today:
-        return
-    targets = sorted({int(pid) for pid in (child_product_ids or []) if pid})
-    if not targets:
-        return
-
-    from masters.models import Line, Calendar, CalendarDay
-    from .inventory.inventory_calculator import (
-        recalculate_stock_qty,
-        recalculate_planned_stock_qty,
-        _build_demand_map,
-        _get_max_parent_bom_lead_time,
-    )
-
-    for child_id in targets:
-        line_ids = list(
-            LineBacklog.objects.filter(
-                product_id=child_id,
-                plan_date__range=[parent_plan_date, today],
-                sequence_no=0,
-            ).values_list('line_id', flat=True).distinct()
-        )
-        for line_id in line_ids:
-            line_obj = Line.objects.filter(id=line_id).first()
-            calendar_id = getattr(line_obj, 'calendar_id', None) or Calendar.objects.filter(
-                calendar_code='daiso'
-            ).values_list('id', flat=True).first()
-            workday_cache = {}
-
-            def is_working_day(target_date):
-                if not calendar_id:
-                    return target_date.weekday() < 5
-                if target_date in workday_cache:
-                    return workday_cache[target_date]
-                cal = CalendarDay.objects.filter(
-                    calendar_id=calendar_id,
-                    target_date=target_date
-                ).first()
-                is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-                workday_cache[target_date] = is_work
-                return is_work
-
-            def get_prev_working_day(target_date):
-                prev_date = target_date - timedelta(days=1)
-                while not is_working_day(prev_date):
-                    prev_date = prev_date - timedelta(days=1)
-                return prev_date
-
-            def shift_working_days(target_date, days):
-                if not days:
-                    return target_date
-                if not calendar_id:
-                    return target_date + timedelta(days=days)
-                step = 1 if days > 0 else -1
-                remaining = abs(int(days))
-                current = target_date
-                while remaining > 0:
-                    current = current + timedelta(days=step)
-                    if is_working_day(current):
-                        remaining -= 1
-                return current
-
-            stock_start = get_prev_working_day(get_prev_working_day(parent_plan_date))
-            planned_start = shift_working_days(
-                parent_plan_date,
-                -(_get_max_parent_bom_lead_time(child_id) + 1),
-            )
-            demand_start = min(stock_start, planned_start)
-            demand_map = _build_demand_map(line_id, demand_start, today)
-
-            recalculate_stock_qty(
-                line_id,
-                child_id,
-                stock_start,
-                today,
-                demand_map=demand_map,
-                reference_today=parent_plan_date,
-            )
-            recalculate_planned_stock_qty(
-                line_id,
-                child_id,
-                planned_start,
-                today,
-                demand_map=demand_map,
-                reference_today=parent_plan_date,
-            )
 
 
 def _to_local_naive(dt):
@@ -969,19 +542,20 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 operator_name=operator_name,
             )
             changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-            _create_session_change_history(
+            create_session_change_history(
                 session_obj=session,
                 operation_type='ADD',
                 reason=change_reason,
                 changed_by=changed_by,
                 before_data={},
-                after_data=_serialize_session_snapshot(session),
+                after_data=serialize_session_snapshot(session),
             )
-            _rebuild_session_production_records(session)
+            rebuild_session_production_records(session)
             if production_qty:
-                _adjust_backlog_actual_for_session(session, int(production_qty))
-                _adjust_coproduct_children_backlog(session, int(production_qty))
-                _apply_delta_to_inventory_and_progress(session, int(production_qty))
+                adjust_backlog_actual_for_session(session, int(production_qty))
+                adjust_coproduct_children_backlog(session, int(production_qty))
+                apply_delta_to_inventory_and_progress(session, int(production_qty))
+            _recalculate_inventory_after_session_change(session)
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -998,10 +572,10 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             if not change_reason:
                 return Response({'detail': 'change_reason は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
 
-            before_snapshot = _serialize_session_snapshot(session)
+            before_snapshot = serialize_session_snapshot(session)
             changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
             with transaction.atomic():
-                _create_session_change_history(
+                create_session_change_history(
                     session_obj=session,
                     operation_type='DELETE',
                     reason=change_reason,
@@ -1013,14 +587,15 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     session.session_type, session.end_action
                 ) else 0
                 if old_qty:
-                    _adjust_backlog_actual_for_session(session, -old_qty)
-                    _adjust_coproduct_children_backlog(session, -old_qty)
-                    _apply_delta_to_inventory_and_progress(session, -old_qty)
+                    adjust_backlog_actual_for_session(session, -old_qty)
+                    adjust_coproduct_children_backlog(session, -old_qty)
+                    apply_delta_to_inventory_and_progress(session, -old_qty)
 
                 ProcessRealtimeRecord.objects.filter(
                     record_type='PRODUCTION',
                     event_data__work_session_id=session.id,
                 ).delete()
+                _recalculate_inventory_after_session_change(session)
                 session.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -1032,7 +607,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         defect_qty = session.defect_qty
         new_product = None
         product_changed = False
-        before_snapshot = _serialize_session_snapshot(session)
+        before_snapshot = serialize_session_snapshot(session)
 
         if not change_reason:
             return Response({'detail': 'change_reason は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1099,9 +674,9 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
         with transaction.atomic():
             if product_changed and old_qty:
-                _adjust_backlog_actual_for_session(session, -old_qty)
-                _adjust_coproduct_children_backlog(session, -old_qty)
-                _apply_delta_to_inventory_and_progress(session, -old_qty)
+                adjust_backlog_actual_for_session(session, -old_qty)
+                adjust_coproduct_children_backlog(session, -old_qty)
+                apply_delta_to_inventory_and_progress(session, -old_qty)
 
             session.started_at = started_at
             session.ended_at = ended_at
@@ -1128,28 +703,28 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 update_fields += ['product_id', 'product_code', 'product_name']
 
             session.save(update_fields=update_fields)
-            _rebuild_session_production_records(session)
+            rebuild_session_production_records(session)
 
             if product_changed:
                 if new_qty:
-                    _adjust_backlog_actual_for_session(session, new_qty)
-                    _adjust_coproduct_children_backlog(session, new_qty)
-                    _update_coproduct_children_records(session, production_qty)
-                    _apply_delta_to_inventory_and_progress(session, new_qty)
+                    adjust_backlog_actual_for_session(session, new_qty)
+                    adjust_coproduct_children_backlog(session, new_qty)
+                    update_coproduct_children_records(session, production_qty)
+                    apply_delta_to_inventory_and_progress(session, new_qty)
             else:
                 delta = new_qty - old_qty
                 if delta:
-                    _adjust_backlog_actual_for_session(session, delta)
-                    _adjust_coproduct_children_backlog(session, delta)
-                    _update_coproduct_children_records(session, production_qty)
-                    _apply_delta_to_inventory_and_progress(session, delta)
+                    adjust_backlog_actual_for_session(session, delta)
+                    adjust_coproduct_children_backlog(session, delta)
+                    update_coproduct_children_records(session, production_qty)
+                    apply_delta_to_inventory_and_progress(session, delta)
 
             if defect_delta:
-                _adjust_backlog_scrap_for_session(session, defect_delta)
-            after_snapshot = _serialize_session_snapshot(session)
+                adjust_backlog_scrap_for_session(session, defect_delta)
+            after_snapshot = serialize_session_snapshot(session)
             if before_snapshot != after_snapshot:
                 changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-                _create_session_change_history(
+                create_session_change_history(
                     session_obj=session,
                     operation_type='UPDATE',
                     reason=change_reason,
@@ -1157,6 +732,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     before_data=before_snapshot,
                     after_data=after_snapshot,
                 )
+            _recalculate_inventory_after_session_change(session)
 
         serializer = ProcessWorkSessionSerializer(session)
         return Response(serializer.data)
@@ -1310,405 +886,51 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
     def scrap_breakdown(self, request, pk=None):
         """仕損のBOM展開明細を返す"""
         record = self.get_object()
-        if record.record_type != 'SCRAP' or not record.product_id:
-            return Response([])
-
-        details_qs = ScrapRecordDetail.objects.filter(scrap_record__process_record=record)
-        # 既存明細がなければ（古いデータ用）作成してから返す
-        if not details_qs.exists() and getattr(record, 'scrap_detail', None):
-            qty = record.qty or 0
-            gen_details = build_scrap_multiplier_details(record.product_id, qty)
-            if gen_details:
-                products = {
-                    p.id: p for p in Product.objects.filter(id__in=[d['product_id'] for d in gen_details if d.get('product_id')])
-                }
-                objs = []
-                for d in gen_details:
-                    pid = d.get('product_id')
-                    prod = products.get(pid) if pid else None
-                    objs.append(ScrapRecordDetail(
-                        scrap_record=record.scrap_detail,
-                        product=prod,
-                        product_code=prod.product_code if prod else None,
-                        product_name=prod.product_name if prod else None,
-                        process_id=d.get('process_id'),
-                        line_id=d.get('line_id'),
-                        supplier_id=d.get('supplier_id'),
-                        sourcing_type=d.get('sourcing_type'),
-                        deduct_qty=d.get('qty') or 0,
-                    ))
-                ScrapRecordDetail.objects.bulk_create(objs)
-                details_qs = ScrapRecordDetail.objects.filter(scrap_record__process_record=record)
-
-        # BOM展開結果に含まれる品目のみ表示（購入品はここで止める）
-        qty = record.qty or 0
-        allowed_ids = {
-            d.get('product_id')
-            for d in build_scrap_multiplier_details(record.product_id, qty)
-            if d.get('product_id')
-        }
-        if allowed_ids:
-            details_qs = details_qs.filter(product_id__in=allowed_ids)
-
-        # 同じ(product_id, process_id, supplier_id)の組み合わせで集約（既存データの重複対策）
-        from collections import defaultdict
-        aggregated = defaultdict(lambda: {
-            'deduct_qty': Decimal('0'),
-            'detail_ids': [],
-            'is_replenished_list': [],
-        })
-
-        products = {p.id: p for p in Product.objects.filter(id__in=details_qs.values_list('product_id', flat=True))}
-        processes = {p.id: p for p in Process.objects.filter(id__in=details_qs.values_list('process_id', flat=True))}
-        suppliers = {s.id: s for s in Supplier.objects.filter(id__in=details_qs.values_list('supplier_id', flat=True))}
-
-        for d in details_qs:
-            key = (d.product_id, d.process_id, d.supplier_id)
-            p = products.get(d.product_id)
-            proc = processes.get(d.process_id) if d.process_id else None
-            supplier = suppliers.get(d.supplier_id) if d.supplier_id else None
-
-            if key not in aggregated:
-                aggregated[key] = {
-                    'product_id': d.product_id,
-                    'product_code': d.product_code or (p.product_code if p else None),
-                    'product_name': d.product_name or (p.product_name if p else None),
-                    'process_id': d.process_id,
-                    'process_code': proc.process_code if proc else None,
-                    'process_name': proc.process_name if proc else None,
-                    'supplier_id': d.supplier_id,
-                    'supplier_code': supplier.supplier_code if supplier else None,
-                    'supplier_name': supplier.supplier_name if supplier else None,
-                    'sourcing_type': d.sourcing_type,
-                    'deduct_qty': Decimal('0'),
-                    'detail_ids': [],
-                    'is_replenished_list': [],
-                    'replenished_at': d.replenished_at,
-                    'replenished_by': d.replenished_by,
-                }
-
-            aggregated[key]['deduct_qty'] += (d.deduct_qty or Decimal('0'))
-            aggregated[key]['detail_ids'].append(d.id)
-            aggregated[key]['is_replenished_list'].append(d.is_replenished)
-
-        details = []
-        for key, item in aggregated.items():
-            # 全明細が補充完了している場合のみ完了とする
-            all_replenished = all(item['is_replenished_list']) if item['is_replenished_list'] else False
-            details.append({
-                'detail_id': item['detail_ids'][0],  # 代表IDとして最初のdetail_idを使用
-                'product_id': item['product_id'],
-                'product_code': item['product_code'],
-                'product_name': item['product_name'],
-                'deduct_qty': float(item['deduct_qty']),
-                'process_id': item['process_id'],
-                'process_code': item['process_code'],
-                'process_name': item['process_name'],
-                'supplier_id': item['supplier_id'],
-                'supplier_code': item['supplier_code'],
-                'supplier_name': item['supplier_name'],
-                'sourcing_type': item['sourcing_type'],
-                'is_replenished': all_replenished,
-                'replenished_at': item['replenished_at'],
-                'replenished_by': item['replenished_by'],
-            })
-
-        details.sort(key=lambda x: (x['product_code'] or '', x['product_id'] or 0))
-        return Response(details)
+        return Response(get_scrap_breakdown(record))
 
     @action(detail=True, methods=['post'], url_path='mark-replenished')
     def mark_replenished(self, request, pk=None):
         """仕損補充完了フラグを立てる（全明細まとめて）"""
         record = self.get_object()
-        if record.record_type != 'SCRAP':
-            return Response({'detail': 'SCRAP以外は対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
-        sd = getattr(record, 'scrap_detail', None)
-        if not sd:
-            return Response({'detail': '対応する仕損記録がありません。'}, status=status.HTTP_400_BAD_REQUEST)
-        from django.utils import timezone
-        sd.is_replenished = True
-        sd.replenished_at = timezone.now()
-        user = getattr(request, 'user', None)
-        if user and getattr(user, 'is_authenticated', False):
-            sd.replenished_by = getattr(user, 'username', None) or sd.replenished_by
-        sd.save()
-        ScrapRecordDetail.objects.filter(scrap_record=sd).update(
-            is_replenished=True,
-            replenished_at=sd.replenished_at,
-            replenished_by=sd.replenished_by,
-        )
-        # ProcessRealtimeRecord の serializer で拾えるよう event_data にも反映（任意）
-        record.event_data = record.event_data or {}
-        record.event_data['is_replenished'] = True
-        record.save(update_fields=['event_data'])
-        return Response({
-            'scrap_record_id': sd.id,
-            'is_replenished': sd.is_replenished,
-            'replenished_at': sd.replenished_at,
-            'replenished_by': sd.replenished_by,
-        })
+        try:
+            result = mark_scrap_replenished(record, user=getattr(request, 'user', None))
+        except ScrapServiceError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
+        return Response(result)
 
     @action(detail=True, methods=['post'], url_path='mark-detail-replenished')
     def mark_detail_replenished(self, request, pk=None):
         """仕損明細単位で補充完了を立てる"""
         record = self.get_object()
-        if record.record_type != 'SCRAP':
-            return Response({'detail': 'SCRAP以外は対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
-        detail_id = request.data.get('detail_id')
-        if not detail_id:
-            return Response({'detail': 'detail_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            detail = ScrapRecordDetail.objects.get(id=detail_id, scrap_record__process_record=record)
-        except ScrapRecordDetail.DoesNotExist:
-            return Response({'detail': '明細が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
-        from django.utils import timezone
-        detail.is_replenished = True
-        detail.replenished_at = timezone.now()
-        user = getattr(request, 'user', None)
-        if user and getattr(user, 'is_authenticated', False):
-            detail.replenished_by = getattr(user, 'username', None) or detail.replenished_by
-        detail.save()
-
-        # すべて完了なら親も完了
-        sd = getattr(record, 'scrap_detail', None)
-        if sd:
-            all_done = not ScrapRecordDetail.objects.filter(scrap_record=sd, is_replenished=False).exists()
-            if all_done:
-                sd.is_replenished = True
-                sd.replenished_at = detail.replenished_at
-                sd.replenished_by = detail.replenished_by
-                sd.save()
-                record.event_data = record.event_data or {}
-                record.event_data['is_replenished'] = True
-                record.save(update_fields=['event_data'])
-
-        return Response({
-            'detail_id': detail.id,
-            'is_replenished': detail.is_replenished,
-            'replenished_at': detail.replenished_at,
-            'replenished_by': detail.replenished_by,
-        })
+            result = mark_scrap_detail_replenished(
+                record,
+                detail_id=request.data.get('detail_id'),
+                user=getattr(request, 'user', None),
+            )
+        except ScrapServiceError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
+        return Response(result)
 
     @action(detail=True, methods=['post'], url_path='scrap-disposition')
     def scrap_disposition(self, request, pk=None):
         """仕損の判定（戻し/仕損確定）"""
         record = self.get_object()
-        if record.record_type != 'SCRAP':
-            return Response({'detail': 'SCRAP以外は対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
-        sd = getattr(record, 'scrap_detail', None)
-        if not sd:
-            return Response({'detail': '対応する仕損記録がありません。'}, status=status.HTTP_400_BAD_REQUEST)
-
-        action = (request.data.get('action') or '').strip().upper()
-        if action not in ('RETURN', 'CONFIRM_SCRAP'):
-            return Response({'detail': 'action is required (RETURN or CONFIRM_SCRAP)'}, status=status.HTTP_400_BAD_REQUEST)
-
         user = getattr(request, 'user', None)
         decided_by = None
         if user and getattr(user, 'is_authenticated', False):
             decided_by = getattr(user, 'username', None)
+        try:
+            result = process_scrap_disposition(
+                record,
+                action=request.data.get('action'),
+                qty_input=request.data.get('qty'),
+                decided_by=decided_by,
+            )
+        except ScrapServiceError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
 
-        with transaction.atomic():
-            if action == 'RETURN':
-                try:
-                    qty = Decimal(str(request.data.get('qty')))
-                except (InvalidOperation, TypeError):
-                    return Response({'detail': 'qty must be a valid number.'}, status=status.HTTP_400_BAD_REQUEST)
-                if qty <= 0:
-                    return Response({'detail': 'qty must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
-                product_id = record.product_id
-                if not product_id and record.product_code:
-                    prod = Product.objects.filter(product_code=record.product_code).first()
-                    product_id = prod.id if prod else None
-                product_obj = sd.product
-                if not product_obj and product_id:
-                    product_obj = Product.objects.filter(id=product_id).first()
-                if not product_id:
-                    return Response({'detail': '製品が未設定のため在庫戻しができません。'}, status=status.HTTP_400_BAD_REQUEST)
-
-                current_return = sd.return_qty or Decimal('0')
-                scrap_qty = sd.qty or Decimal('0')
-                new_return = current_return + qty
-                if new_return > scrap_qty:
-                    return Response({'detail': '戻し数量が仕損数量を超えています。'}, status=status.HTTP_400_BAD_REQUEST)
-
-                # 戻しは新規レコードとして登録（数量はマイナス）
-                now = timezone.now()
-                if timezone.is_aware(now):
-                    now = timezone.localtime(now).replace(tzinfo=None)
-                ref_process = sd.process or sd.occurrence_process
-                return_date = resolve_workday_date_for_process(ref_process, now)
-                return_record = ScrapRecord.objects.create(
-                    process=sd.process,
-                    occurrence_process=sd.occurrence_process or sd.process,
-                    line=sd.line,
-                    product=product_obj,
-                    product_code=sd.product_code,
-                    product_name=sd.product_name,
-                    event_type='RETURN',
-                    qty=-qty,
-                    plan_date=return_date,
-                    reason=sd.reason or '',
-                    reason_detail=sd.reason_detail or '',
-                    batch_no=sd.batch_no or '',
-                    operator_name=sd.operator_name or '',
-                    remarks=sd.remarks or '',
-                    return_for=sd,
-                    disposition_status='APPROVED',
-                    decided_at=timezone.now(),
-                    decided_by=decided_by,
-                )
-
-                details = build_scrap_multiplier_details(product_id, -qty)
-                if details:
-                    products = {
-                        p.id: p for p in Product.objects.filter(
-                            id__in=[d['product_id'] for d in details if d.get('product_id')]
-                        )
-                    }
-                    objs = []
-                    for d in details:
-                        pid = d.get('product_id')
-                        prod = products.get(pid) if pid else None
-                        objs.append(ScrapRecordDetail(
-                            scrap_record=return_record,
-                            product=prod,
-                            product_code=prod.product_code if prod else None,
-                            product_name=prod.product_name if prod else None,
-                            process_id=d.get('process_id'),
-                            line_id=d.get('line_id'),
-                            supplier_id=d.get('supplier_id'),
-                            sourcing_type=d.get('sourcing_type'),
-                            deduct_qty=d.get('qty') or Decimal('0'),
-                            is_backlog_processed=True,  # 即時反映済み（再集計での二重計上を防止）
-                        ))
-                    ScrapRecordDetail.objects.bulk_create(objs)
-
-                sd.return_qty = new_return
-                if new_return == scrap_qty:
-                    sd.disposition_status = 'APPROVED'
-                else:
-                    sd.disposition_status = 'PARTIAL'
-                sd.decided_at = timezone.now()
-                if decided_by:
-                    sd.decided_by = decided_by
-                sd.save()
-
-                qty_int = int(qty)
-                if qty_int and sd.line_id and sd.process_id and sd.product_id:
-                    from django.db.models import F
-
-                    # 自工程/他工程を判定（仕損登録時と同じロジック）
-                    actual_process, actual_line = _resolve_product_process_line(
-                        product_obj, sd.process
-                    )
-                    is_self = actual_process and actual_process.id == (
-                        sd.process_id if sd.process_id else None
-                    )
-
-                    target_line_id = getattr(actual_line, 'id', sd.line_id)
-                    target_process_id = getattr(actual_process, 'id', sd.process_id)
-
-                    # 基礎データレコードを確保
-                    LineBacklog.objects.get_or_create(
-                        line_id=target_line_id,
-                        process_id=target_process_id,
-                        product_id=sd.product_id,
-                        plan_date=return_date,
-                        sequence_no=0,
-                        defaults={
-                            'order_qty': 0,
-                            'plan_qty': 0,
-                            'actual_qty': 0,
-                            'stock_qty': 0,
-                            'planned_stock_qty': 0,
-                            'adjust_qty': 0,
-                            'scrap_qty': 0,
-                            'scrap_adjust_qty': 0,
-                            'actual_shipment_qty': 0,
-                        }
-                    )
-
-                    backlog_filter = dict(
-                        line_id=target_line_id,
-                        process_id=target_process_id,
-                        product_id=sd.product_id,
-                        plan_date=return_date,
-                    )
-
-                    if is_self:
-                        # 自工程仕損の戻し: scrap_qty 減算 + actual_qty 加算
-                        # 戻し時は実績入力済みフラグに関係なく実績を復元する。
-                        LineBacklog.objects.filter(**backlog_filter).update(
-                            scrap_qty=F('scrap_qty') - qty_int
-                        )
-                        LineBacklog.objects.filter(**backlog_filter).update(
-                            actual_qty=F('actual_qty') + qty_int
-                        )
-                    else:
-                        # 他工程仕損の戻し: scrap_adjust_qty をプラスに戻す
-                        LineBacklog.objects.filter(**backlog_filter).update(
-                            scrap_adjust_qty=F('scrap_adjust_qty') + qty_int
-                        )
-
-                # 子部品・前工程品のadjust_qtyを戻す（BOM展開分をプラス補正）
-                details_for_adjust = build_scrap_multiplier_details(product_id, qty)
-                if details_for_adjust:
-                    from django.db.models import F
-                    for d in details_for_adjust:
-                        detail_line_id = d.get('line_id')
-                        detail_process_id = d.get('process_id')
-                        detail_product_id = d.get('product_id')
-                        detail_qty = d.get('qty') or Decimal('0')
-                        if not detail_line_id or not detail_process_id or not detail_product_id:
-                            continue
-                        if product_id and detail_product_id == product_id:
-                            continue  # 自製品は上で処理済み
-                        qty_child = int(detail_qty or 0)
-                        if qty_child == 0:
-                            continue
-                        LineBacklog.objects.get_or_create(
-                            line_id=detail_line_id,
-                            process_id=detail_process_id,
-                            product_id=detail_product_id,
-                            plan_date=return_date,
-                            sequence_no=0,
-                            defaults={
-                                'order_qty': 0,
-                                'plan_qty': 0,
-                                'actual_qty': 0,
-                                'stock_qty': 0,
-                                'planned_stock_qty': 0,
-                                'adjust_qty': 0,
-                                'scrap_qty': 0,
-                                'actual_shipment_qty': 0,
-                            }
-                        )
-                        LineBacklog.objects.filter(
-                            line_id=detail_line_id,
-                            process_id=detail_process_id,
-                            product_id=detail_product_id,
-                            plan_date=return_date,
-                        ).update(
-                            adjust_qty=F('adjust_qty') + qty_child
-                        )
-            elif action == 'CONFIRM_SCRAP':
-                if (sd.return_qty or Decimal('0')) > 0:
-                    sd.disposition_status = 'PARTIAL'
-                else:
-                    sd.disposition_status = 'REJECTED'
-                sd.decided_at = timezone.now()
-                if decided_by:
-                    sd.decided_by = decided_by
-                sd.save()
-
-        return Response({
-            'scrap_record_id': sd.id,
-            'disposition_status': sd.disposition_status,
-            'return_qty': sd.return_qty,
-            'decided_at': sd.decided_at,
-            'decided_by': sd.decided_by,
-        })
+        return Response(result)
 
     @action(detail=False, methods=['get'], url_path='gantt-plan-qty')
     def gantt_plan_qty(self, request):

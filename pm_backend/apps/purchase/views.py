@@ -30,6 +30,9 @@ from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.inventory.inventory_calculator import (
     recalculate_inventory_for_line,
 )
+from production.services.process_realtime_backlog_service import (
+    recalculate_child_stock_after_record_edit,
+)
 from production.services.recalc_start_date import resolve_inventory_effective_start_date
 
 from .models import (
@@ -426,10 +429,9 @@ def _recalculate_purchase_child_stock(parent_product_id, target_dates):
 
     today = get_business_today()
     try:
-        from production.views_process_realtime import _recalculate_child_stock_after_record_edit
         for target_date in targets:
             if target_date and target_date <= today:
-                _recalculate_child_stock_after_record_edit(
+                recalculate_child_stock_after_record_edit(
                     parent_plan_date=target_date,
                     today=today,
                     child_product_ids=child_product_ids,

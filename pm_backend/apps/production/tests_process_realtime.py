@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
