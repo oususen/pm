@@ -457,6 +457,73 @@ def _resolve_day_adjustment(rows, ad_map):
     return int(total)
 
 
+def _ensure_daily_base_backlogs(line_id, product_id, start_date, end_date, backlogs=None):
+    """
+    指定期間の各日付に sequence_no=0 の基礎行を補完する。
+
+    - 日付自体に行が無い日: ダミー seq=0 行を作成
+    - 日付の行はあるが seq=0 が無い日: seq=0 行を作成
+    """
+    if backlogs is None:
+        backlogs = list(LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[start_date, end_date],
+        ).order_by('plan_date', 'sequence_no', 'id'))
+
+    if not backlogs:
+        return backlogs, False
+
+    base_process_id = next(
+        (r.process_id for r in backlogs if (r.sequence_no or 0) == 0 and r.process_id),
+        None,
+    )
+    sample_process_id = base_process_id or next((r.process_id for r in backlogs if r.process_id), backlogs[0].process_id)
+    by_date = {}
+    for backlog in backlogs:
+        by_date.setdefault(backlog.plan_date, []).append(backlog)
+
+    to_create = []
+    current = start_date
+    last_sample = None
+    while current <= end_date:
+        rows = by_date.get(current, [])
+        if rows:
+            last_sample = rows[0]
+        has_base = any((r.sequence_no or 0) == 0 for r in rows)
+        if not has_base:
+            sample = rows[0] if rows else (last_sample or backlogs[0])
+            to_create.append(LineBacklog(
+                plan_date=current,
+                process_id=sample.process_id or sample_process_id,
+                product_id=sample.product_id,
+                line_id=sample.line_id,
+                sequence_no=0,
+                order_qty=0,
+                demand_qty_plan=0,
+                plan_qty=0,
+                actual_qty=0,
+                stock_qty=0,
+                planned_stock_qty=0,
+                adjust_qty=0,
+                scrap_adjust_qty=0,
+                scrap_qty=0,
+                actual_shipment_qty=0,
+            ))
+        current += timedelta(days=1)
+
+    created_any = bool(to_create)
+    if to_create:
+        LineBacklog.objects.bulk_create(to_create)
+        backlogs = list(LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[start_date, end_date],
+        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+
+    return backlogs, created_any
+
+
 _ROUTING_PARENT_STEP_CACHE = {}
 
 
@@ -1064,61 +1131,6 @@ def recalculate_stock_qty(
         start_date: 開始日
         end_date: 終了日
     """
-    backlogs = list(LineBacklog.objects.filter(
-        line_id=line_id,
-        product_id=product_id,
-        plan_date__range=[start_date, end_date]
-    ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
-
-    if not backlogs:
-        return
-
-    by_date = {}
-    for backlog in backlogs:
-        by_date.setdefault(backlog.plan_date, []).append(backlog)
-
-    # 基礎行（sequence_no=0）が無い日付には新規作成してから計算する
-    to_create = []
-    for plan_date, rows in by_date.items():
-        has_base = any((r.sequence_no or 0) == 0 for r in rows)
-        if not has_base:
-            sample = rows[0]
-            to_create.append(LineBacklog(
-                plan_date=plan_date,
-                process_id=sample.process_id,
-                product_id=sample.product_id,
-                line_id=sample.line_id,
-                sequence_no=0,
-                order_qty=0,
-                demand_qty_plan=0,
-                plan_qty=0,
-                actual_qty=0,
-                stock_qty=0,
-                planned_stock_qty=0,
-                adjust_qty=0,
-                scrap_adjust_qty=0,
-                scrap_qty=0,
-                actual_shipment_qty=0,
-            ))
-    created_any = False
-    if to_create:
-        created = LineBacklog.objects.bulk_create(to_create)
-        # MySQL などでは bulk_create 直後の PK が埋まらないことがあるため、再取得して差し替える
-        created_any = True
-        for obj in created:
-            by_date.setdefault(obj.plan_date, []).append(obj)
-
-    if created_any:
-        # PK が欠落している可能性があるため、対象期間を再取得して by_date を作り直す
-        backlogs = list(LineBacklog.objects.filter(
-            line_id=line_id,
-            product_id=product_id,
-            plan_date__range=[start_date, end_date]
-        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
-        by_date = {}
-        for backlog in backlogs:
-            by_date.setdefault(backlog.plan_date, []).append(backlog)
-
     workday_cache = shared_workday_cache if shared_workday_cache is not None else {}
     if calendar_id is None and line_id:
         calendar_id = _resolve_line_calendar_id(line_id)
@@ -1220,16 +1232,26 @@ def recalculate_stock_qty(
     calc_start_date = shift_working_days(calc_today, -(max_lt + 1))
     effective_start = min(start_date, calc_start_date)
 
-    # effective_start が start_date より古い場合、バックログを再取得して by_date を再構築
-    if effective_start < start_date:
-        backlogs = list(LineBacklog.objects.filter(
-            line_id=line_id,
-            product_id=product_id,
-            plan_date__range=[effective_start, end_date]
-        ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
-        by_date = {}
-        for backlog in backlogs:
-            by_date.setdefault(backlog.plan_date, []).append(backlog)
+    backlogs = list(LineBacklog.objects.filter(
+        line_id=line_id,
+        product_id=product_id,
+        plan_date__range=[effective_start, end_date]
+    ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
+    if not backlogs:
+        return
+    backlogs, _created_any = _ensure_daily_base_backlogs(
+        line_id,
+        product_id,
+        effective_start,
+        end_date,
+        backlogs=backlogs,
+    )
+    if not backlogs:
+        return
+
+    by_date = {}
+    for backlog in backlogs:
+        by_date.setdefault(backlog.plan_date, []).append(backlog)
 
     # effective_start より前の最新在庫を初期値として取得
     initial_backlog = LineBacklog.objects.filter(
@@ -1371,18 +1393,14 @@ def recalculate_planned_stock_qty(
         start_date: 開始日
         end_date: 終了日
     """
-    backlogs = list(LineBacklog.objects.filter(
+    initial_backlogs = list(LineBacklog.objects.filter(
         line_id=line_id,
         product_id=product_id,
         plan_date__range=[start_date, end_date]
     ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
 
-    if not backlogs:
+    if not initial_backlogs:
         return
-
-    by_date = {}
-    for backlog in backlogs:
-        by_date.setdefault(backlog.plan_date, []).append(backlog)
 
     workday_cache = shared_workday_cache if shared_workday_cache is not None else {}
     if calendar_id is None and line_id:
@@ -1438,7 +1456,7 @@ def recalculate_planned_stock_qty(
     max_lt = int(max_parent_lt or 0)
     # 最終品/ライン最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。
     # self_lt_days（製造LT）ではなく、出庫基準と同じデリバリLT（RoutingStep/Line）を使う。
-    sample_product = backlogs[0].product if backlogs else None
+    sample_product = initial_backlogs[0].product if initial_backlogs else None
     is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
     is_line_final_product = bool(sample_product and getattr(sample_product, 'is_line_final_product', False))
     final_delivery_lt = 0
@@ -1451,22 +1469,31 @@ def recalculate_planned_stock_qty(
     if force_from_start and start_date < calc_start_date:
         calc_start_date = start_date
 
-    # calc_start_date が start_date より古い場合、バックログを再取得
-    if calc_start_date < start_date:
+    backlogs = initial_backlogs
+    if calc_start_date != start_date:
         backlogs = list(LineBacklog.objects.filter(
             line_id=line_id,
             product_id=product_id,
             plan_date__range=[calc_start_date, end_date]
         ).select_related('product').order_by('plan_date', 'sequence_no', 'id'))
-        if not backlogs:
-            return
-        by_date = {}
-        for backlog in backlogs:
-            by_date.setdefault(backlog.plan_date, []).append(backlog)
-        sample_product = backlogs[0].product if backlogs else None
-        is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
-        is_line_final_product = bool(sample_product and getattr(sample_product, 'is_line_final_product', False))
-        use_delivery_lt_initialization = is_final_product or is_line_final_product
+    if not backlogs:
+        return
+    backlogs, _created_any = _ensure_daily_base_backlogs(
+        line_id,
+        product_id,
+        calc_start_date,
+        end_date,
+        backlogs=backlogs,
+    )
+    if not backlogs:
+        return
+    by_date = {}
+    for backlog in backlogs:
+        by_date.setdefault(backlog.plan_date, []).append(backlog)
+    sample_product = backlogs[0].product if backlogs else None
+    is_final_product = bool(sample_product and getattr(sample_product, 'is_final_product', False))
+    is_line_final_product = bool(sample_product and getattr(sample_product, 'is_line_final_product', False))
+    use_delivery_lt_initialization = is_final_product or is_line_final_product
 
     inventory_lock_date = SystemSetting.get_lock_date('inventory')
     planned_by_date = {}
