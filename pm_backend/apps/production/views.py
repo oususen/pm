@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta, datetime, date
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -69,11 +69,12 @@ from .serializers import (
     LaserActualSerializer,
     LaserShiftRecordSerializer,
 )
-from .services.gantt_planning import generate_line_gantt_plans
 from .services import (
     backlog_pickup_service,
     backlog_recalc_service,
     backlog_save_service,
+    gantt_plan_generation_service,
+    gantt_schedule_adjustment_service,
     gantt_structure_mutation_service,
     line_plan_mutation_service,
 )
@@ -1224,82 +1225,7 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['post'])
     def generate(self, request):
-        """
-        ガント用ライン計画を生成して保存する。
-        期待payload: { line_id, start_date, end_date, clear_existing?: bool, final_process_start_time?: str, adjust_to_break_end?: bool }
-        """
-        line_id = request.data.get('line_id')
-        start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')
-        clear_existing = bool(request.data.get('clear_existing'))
-        final_process_start_time = request.data.get('final_process_start_time')
-        adjust_to_break_end = request.data.get('adjust_to_break_end', False)
-
-        logger.info(
-            'line_gantt_plans.generate: line_id=%s start=%s end=%s clear=%s final_time=%s adjust=%s',
-            line_id, start_date, end_date, clear_existing, final_process_start_time, adjust_to_break_end
-        )
-
-        if not line_id:
-            return Response({'detail': 'line_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        if not start_date or not end_date:
-            return Response({'detail': 'start_date and end_date are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            line_id = int(line_id)
-        except (TypeError, ValueError):
-            return Response({'detail': 'line_id must be numeric'}, status=status.HTTP_400_BAD_REQUEST)
-
-        plans = generate_line_gantt_plans(
-            line_id,
-            start_date,
-            end_date,
-            clear_existing=clear_existing,
-            final_process_start_time=final_process_start_time,
-            adjust_to_break_end=adjust_to_break_end
-        )
-        logger.info('line_gantt_plans.generate: plans=%s', len(plans))
-
-        upserted = []
-        for plan in plans:
-            obj, _ = LineGanttPlan.objects.update_or_create(
-                plan_id=plan['plan_id'],
-                defaults={
-                    'line_id': plan['line_id'],
-                    'product_id': plan['product_id'],
-                    'plan_date': plan['plan_date'],
-                    'plan_qty': plan['plan_qty'],
-                    'sequence_no': plan['sequence_no'],
-                    'start_datetime': plan['start_datetime'],
-                    'end_datetime': plan['end_datetime'],
-                    'processes_plan': plan['processes_plan'],
-                }
-            )
-            upserted.append(obj)
-
-        if clear_existing:
-            def parse_date(val):
-                try:
-                    return datetime.strptime(str(val), '%Y-%m-%d').date()
-                except Exception:
-                    return None
-
-            start_dt = parse_date(start_date)
-            end_dt = parse_date(end_date)
-            qs = LineGanttPlan.objects.filter(line_id=line_id)
-            if start_dt:
-                qs = qs.filter(plan_date__gte=start_dt)
-            if end_dt:
-                qs = qs.filter(plan_date__lte=end_dt)
-            plan_ids = [p['plan_id'] for p in plans]
-            if plan_ids:
-                qs = qs.exclude(plan_id__in=plan_ids)
-            qs = qs.exclude(plan_id__startswith='MANUAL_').exclude(plan_id__startswith='SINGLEPROC_')
-            deleted_count, _ = qs.delete()
-            logger.info('line_gantt_plans.generate: cleared=%s', deleted_count)
-
-        serializer = self.get_serializer(upserted, many=True)
-        return Response(serializer.data)
+        return gantt_plan_generation_service.generate(self, request, logger=logger)
 
     @action(detail=False, methods=['post'], url_path='manual-add')
     def manual_add(self, request):
@@ -1420,148 +1346,7 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['put'], url_path='bulk-update')
     def bulk_update(self, request):
-        """
-        ガントのドラッグ調整結果を一括保存する。
-        期待payload: [{ plan_id, process_id, output_product_id?, start_time?, end_time?, quantity? }, ...]
-        """
-        updates = request.data
-        if not isinstance(updates, list) or not updates:
-            return Response({'detail': 'updates must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
-
-        updated_count = 0
-        change_log_count = 0
-        change_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
-        change_reason = '工程ガント数量編集'
-        for update in updates:
-            plan_id = update.get('plan_id')
-            process_id = update.get('process_id')
-            if not plan_id or not process_id:
-                continue
-            try:
-                process_id = int(process_id)
-            except Exception:
-                continue
-            output_product_id = update.get('output_product_id')
-            if output_product_id in [None, '']:
-                output_product_id = None
-            else:
-                try:
-                    output_product_id = int(output_product_id)
-                except Exception:
-                    output_product_id = None
-            start_time = update.get('start_time')
-            end_time = update.get('end_time')
-            has_quantity = 'quantity' in update
-            quantity_value = None
-            quantity_int_value = None
-            if has_quantity:
-                try:
-                    quantity_value = Decimal(str(update.get('quantity')))
-                    if quantity_value < 0:
-                        has_quantity = False
-                    else:
-                        quantity_int_value = int(quantity_value.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-                except Exception:
-                    has_quantity = False
-
-            plan = LineGanttPlan.objects.filter(plan_id=plan_id).first()
-            if not plan or not plan.processes_plan:
-                continue
-
-            processes_plan = list(plan.processes_plan)
-            changed = False
-            matched_output_product_id = None
-            quantity_changed = False
-            before_quantity_value = None
-            for proc in processes_plan:
-                if str(proc.get('process_id')) == str(process_id):
-                    proc_output_product_id = proc.get('output_product_id')
-                    if output_product_id is not None and str(proc_output_product_id) != str(output_product_id):
-                        continue
-                    matched_output_product_id = proc_output_product_id
-                    if start_time:
-                        proc['start_time'] = start_time
-                        changed = True
-                    if end_time:
-                        proc['end_time'] = end_time
-                        changed = True
-                    if has_quantity and quantity_int_value is not None:
-                        try:
-                            before_qty = int(Decimal(str(proc.get('quantity') or 0)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-                        except Exception:
-                            before_qty = 0
-                        if before_qty != quantity_int_value:
-                            proc['quantity'] = quantity_int_value
-                            changed = True
-                            quantity_changed = True
-                            before_quantity_value = before_qty
-                    if changed:
-                        updated_count += 1
-                    break
-
-            if changed:
-                starts = []
-                ends = []
-                for proc in processes_plan:
-                    try:
-                        starts.append(datetime.fromisoformat(proc['start_time']))
-                        ends.append(datetime.fromisoformat(proc['end_time']))
-                    except Exception:
-                        continue
-                if starts:
-                    plan.start_datetime = min(starts)
-                if ends:
-                    plan.end_datetime = max(ends)
-                plan.processes_plan = processes_plan
-                plan.save()
-                if quantity_changed and quantity_int_value is not None and matched_output_product_id:
-                    try:
-                        matched_output_product_id = int(matched_output_product_id)
-                    except Exception:
-                        matched_output_product_id = None
-                if quantity_changed and quantity_int_value is not None and matched_output_product_id:
-                    backlog_qs = LineBacklog.objects.filter(
-                        line_id=plan.line_id,
-                        process_id=process_id,
-                        product_id=matched_output_product_id,
-                        plan_id=plan_id,
-                    )
-                    backlog_rows = list(backlog_qs)
-                    if backlog_rows:
-                        backlog_qs.update(plan_qty=quantity_int_value)
-                        for row in backlog_rows:
-                            before_qty = int(row.plan_qty or 0)
-                            if before_qty == quantity_int_value:
-                                continue
-                            ProductionPlanChangeLog.objects.create(
-                                plan_date=row.plan_date,
-                                product_id=row.product_id,
-                                process_id=row.process_id,
-                                line_id=row.line_id,
-                                sequence_no=row.sequence_no,
-                                plan_id=row.plan_id,
-                                before_qty=before_qty,
-                                after_qty=quantity_int_value,
-                                reason=change_reason,
-                                changed_by=change_user,
-                            )
-                            change_log_count += 1
-                    elif before_quantity_value is not None:
-                        ProductionPlanChangeLog.objects.create(
-                            plan_date=plan.plan_date,
-                            product_id=matched_output_product_id,
-                            process_id=process_id,
-                            line_id=plan.line_id,
-                            sequence_no=plan.sequence_no,
-                            plan_id=plan_id,
-                            before_qty=before_quantity_value,
-                            after_qty=quantity_int_value,
-                            reason=change_reason,
-                            changed_by=change_user,
-                        )
-                        change_log_count += 1
-
-        return Response({'updated': updated_count, 'change_logs': change_log_count})
+        return gantt_schedule_adjustment_service.bulk_update(self, request)
 
     @action(detail=False, methods=['post'], url_path='calc-end-time')
     def calc_end_time(self, request):
