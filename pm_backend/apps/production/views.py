@@ -1237,33 +1237,8 @@ class LineGanttPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='singleproc-finished-entries')
     def singleproc_finished_entries(self, request):
-        """単独計画の完成品エントリ取得"""
-        from .models_singleproc_finished_entry import SingleProcFinishedEntry
-        line_id = request.query_params.get('line')
-        process_id = request.query_params.get('process')
-        date_gte = request.query_params.get('plan_date__gte')
-        date_lte = request.query_params.get('plan_date__lte')
-        if not line_id or not process_id:
-            return Response([])
-        qs = SingleProcFinishedEntry.objects.filter(
-            line_id=line_id, process_id=process_id,
-        ).select_related('product')
-        if date_gte:
-            qs = qs.filter(plan_date__gte=date_gte)
-        if date_lte:
-            qs = qs.filter(plan_date__lte=date_lte)
-        data = [
-            {
-                'plan_date': str(e.plan_date),
-                'sequence_no': e.sequence_no,
-                'product_id': e.product_id,
-                'product_code': e.product.product_code if e.product else '',
-                'product_name': e.product.product_name if e.product else '',
-                'quantity': e.quantity,
-            }
-            for e in qs.order_by('plan_date', 'sequence_no')
-        ]
-        return Response(data)
+        from .services.single_process_plan_query_service import list_finished_entries
+        return list_finished_entries(self, request)
 
     @action(detail=False, methods=['post'], url_path='sub-process-save')
     def sub_process_save(self, request):
