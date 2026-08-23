@@ -34,15 +34,17 @@ from production.views import (
     HokushinDeliveryListLapPDFView,
     HokushinDeliveryPDFView,
     HokushinDeliveryAllPDFView,
-    LaserPatternViewSet,
-    LaserActualViewSet,
-    LaserActualDetailUpdateView,
-    LaserShiftRecordViewSet,
     ProcessActualViewSet,
     ProductionOrderViewSet,
     StockAllocationViewSet,
     StockMigrationDetectView,
     StockMigrationExecuteView,
+)
+from production.views_laser import (
+    LaserActualDetailUpdateView,
+    LaserActualViewSet,
+    LaserPatternViewSet,
+    LaserShiftRecordViewSet,
 )
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet

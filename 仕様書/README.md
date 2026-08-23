@@ -57,7 +57,8 @@ d:\pm\
 │       │       ├── kubota_hirakata_kakutei_import.py
 │       │       └── rieden_kakutei_import.py
 │       ├── production/        # 生産管理アプリ
-│       │   └── inventory/     # 在庫計算ロジック
+│       │   ├── inventory/     # 在庫計算ロジック
+│       │   └── services/      # 生産系サービス群
 │       ├── shipping/          # 出荷管理アプリ
 │       ├── purchase/          # 仕入れ管理アプリ
 │       └── quality/           # 品質管理アプリ
@@ -312,6 +313,14 @@ Django Admin: http://localhost:8000/admin/
   - マイナス在庫の赤字強調表示
   - 在庫再計算機能
   - 0値の空白表示
+
+### 構造改善履歴
+
+- 2026-08-23:
+  - 在庫/進度再計算の開始日補正ロジックを `pm_backend/apps/production/views.py` から `pm_backend/apps/production/services/recalc_start_date.py` へ移動
+  - `pm_backend/apps/purchase/views.py` および `pm_backend/apps/purchase/order_proposal_views.py` からの `production.views` 直接依存を service 参照へ変更
+  - レーザー系 API を `pm_backend/apps/production/views_laser.py` へ分離
+  - レーザー月次材料集計、加工中一覧、実績削除、明細数量更新を `pm_backend/apps/production/services/laser_service.py` へ移動し、API 層と service 層を分離
 
 ## 次のステップ
 

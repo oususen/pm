@@ -13,7 +13,7 @@ from production.models_laser_pattern import (
 )
 from production.models_line_backlog import LineBacklog
 from production.serializers import LaserActualSerializer
-from production.views import LaserActualViewSet
+from production.views_laser import LaserActualViewSet
 
 
 class LaserActualBacklogSyncTest(TestCase):

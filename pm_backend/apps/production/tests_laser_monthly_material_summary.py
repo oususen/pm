@@ -6,7 +6,7 @@ from rest_framework.test import APIRequestFactory
 from masters.models import Customer, Equipment, Line, Process, Product
 from orders.core.models import Order, OrderLine
 from production.models_laser_pattern import LaserPattern, LaserPatternFinishedProduct
-from production.views import LaserPatternViewSet
+from production.views_laser import LaserPatternViewSet
 
 
 class LaserMonthlyMaterialSummaryTest(TestCase):

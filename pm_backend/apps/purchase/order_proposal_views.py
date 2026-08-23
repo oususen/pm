@@ -641,7 +641,7 @@ def _normalize_auto_fill_source(value):
 
 def _build_auto_fill_lines(proposal: PurchaseOrderProposal, next_delivery_date: date, source: str = AUTO_FILL_SOURCE_DEFAULT):
     from production.inventory.inventory_calculator import recalculate_inventory_for_line
-    from purchase.views import _resolve_inventory_effective_start_date
+    from production.services.recalc_start_date import resolve_inventory_effective_start_date
 
     order_date = proposal.order_date
     delivery_date = proposal.desired_delivery_date
@@ -661,7 +661,7 @@ def _build_auto_fill_lines(proposal: PurchaseOrderProposal, next_delivery_date: 
         line_products_map.setdefault(line_obj.id, set()).add(product['id'])
     for line_id, product_ids in line_products_map.items():
         target_product_ids = sorted(product_ids)
-        effective_start_dt = _resolve_inventory_effective_start_date(
+        effective_start_dt = resolve_inventory_effective_start_date(
             line_id,
             today,
             recalc_end_date,

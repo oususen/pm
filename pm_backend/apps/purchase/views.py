@@ -30,6 +30,7 @@ from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.inventory.inventory_calculator import (
     recalculate_inventory_for_line,
 )
+from production.services.recalc_start_date import resolve_inventory_effective_start_date
 
 from .models import (
     EngineeringChangeCase,
@@ -149,23 +150,6 @@ def _resolve_supplier_purchase_process(
         preferred_process_id=preferred_process_id,
         sourcing_type=sourcing_type,
         create_purchase_process=create_purchase_process,
-    )
-
-
-def _resolve_inventory_effective_start_date(
-    line_id: int,
-    requested_start_date: date,
-    end_date: date,
-    product_ids=None,
-) -> date:
-    # 生産側（在庫/残量画面）と同じ開始日補正ロジックを使い、再計算結果を一致させる
-    from production.views import _resolve_inventory_effective_start_date as _resolve_inventory_effective_start_date_production
-
-    return _resolve_inventory_effective_start_date_production(
-        line_id=line_id,
-        requested_start_date=requested_start_date,
-        end_date=end_date,
-        product_ids=product_ids,
     )
 
 
@@ -1590,7 +1574,7 @@ class EngineeringChangeCaseRecalculateView(APIView):
         effective_start_dates = {}
         for line_id in sorted(line_products_map.keys()):
             target_product_ids_for_line = sorted(line_products_map[line_id])
-            effective_start_dt = _resolve_inventory_effective_start_date(
+            effective_start_dt = resolve_inventory_effective_start_date(
                 line_id,
                 today,
                 end_date,
