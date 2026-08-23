@@ -30,14 +30,14 @@ from .serializers_process_realtime import (
     check_plan_overrun,
 )
 from .services.gantt_planning import LineWorkCalendar
+from .services.process_realtime_common import (
+    calculate_effective_work_seconds,
+    is_countable_session_for_actual,
+)
 from .models_line_gantt_plan import LineGanttPlan
 from masters.models import Product, Process, Supplier, BOM
 from quality.models_scrap import ScrapRecordDetail, ScrapRecord
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
-
-
-def _is_countable_session_for_actual(session_type, end_action):
-    return str(session_type or '').upper() == 'WORK' and str(end_action or '').upper() in ('END', 'PAUSE')
 
 def _format_history_datetime(dt):
     if not dt:
@@ -536,35 +536,6 @@ def _normalize_input_datetime(dt):
     return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
 
 
-def _calculate_effective_work_seconds(calendar, started_at, ended_at):
-    """
-    ラインカレンダ（勤務パターン＋休憩）で区切った実作業秒数を返す。
-    """
-    start_dt = _to_local_naive(started_at)
-    end_dt = _to_local_naive(ended_at)
-    if not start_dt or not end_dt or end_dt <= start_dt:
-        return 0
-
-    # カレンダ未解決時は生時間差をフォールバックとして返す。
-    if not calendar:
-        return max(int((end_dt - start_dt).total_seconds()), 0)
-
-    total_seconds = 0
-    check_date = start_dt.date() - timedelta(days=1)
-    last_date = end_dt.date() + timedelta(days=1)
-
-    while check_date <= last_date:
-        segments = calendar.get_segments(check_date) or []
-        for seg_start, seg_end in segments:
-            overlap_start = max(start_dt, seg_start)
-            overlap_end = min(end_dt, seg_end)
-            if overlap_end > overlap_start:
-                total_seconds += int((overlap_end - overlap_start).total_seconds())
-        check_date += timedelta(days=1)
-
-    return max(total_seconds, 0)
-
-
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
     """工程実時間記録ViewSet"""
 
@@ -759,7 +730,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 calendar = line_calendar_cache.get(line_id)
 
             ended_at = session_obj.ended_at or timezone.now()
-            effective_seconds_map[session_id] = _calculate_effective_work_seconds(
+            effective_seconds_map[session_id] = calculate_effective_work_seconds(
                 calendar=calendar,
                 started_at=session_obj.started_at,
                 ended_at=ended_at,
@@ -1038,7 +1009,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     before_data=before_snapshot,
                     after_data={},
                 )
-                old_qty = int(session.production_qty or 0) if _is_countable_session_for_actual(
+                old_qty = int(session.production_qty or 0) if is_countable_session_for_actual(
                     session.session_type, session.end_action
                 ) else 0
                 if old_qty:
@@ -1109,7 +1080,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         if started_at and ended_at and ended_at < started_at:
             return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        is_countable = _is_countable_session_for_actual(session.session_type, session.end_action)
+        is_countable = is_countable_session_for_actual(session.session_type, session.end_action)
         old_qty = int(session.production_qty or 0) if is_countable else 0
         new_qty = int(production_qty or 0) if is_countable else 0
 

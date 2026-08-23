@@ -321,6 +321,8 @@ Django Admin: http://localhost:8000/admin/
   - `pm_backend/apps/purchase/views.py` および `pm_backend/apps/purchase/order_proposal_views.py` からの `production.views` 直接依存を service 参照へ変更
   - レーザー系 API を `pm_backend/apps/production/views_laser.py` へ分離
   - レーザー月次材料集計、加工中一覧、実績削除、明細数量更新を `pm_backend/apps/production/services/laser_service.py` へ移動し、API 層と service 層を分離
+  - `pm_backend/apps/production/services/process_realtime_common.py` を追加し、`views_process_realtime.py` から実作業秒数計算と実績集計対象判定を service へ移動
+  - `pm_backend/apps/production/views_actual_cycle_time.py` と `pm_backend/apps/production/production_actual_reconcile.py` の `views_process_realtime` 直接依存を解消
 
 ## 次のステップ
 

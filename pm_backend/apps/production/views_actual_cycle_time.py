@@ -11,7 +11,7 @@ from .models_process_work_session import ProcessWorkSession
 from .models_brake_line_record import BrakeLineRecord
 from .models_actual_cycle_time import ActualCycleTime, FinishedProductCycleTime
 from .services.gantt_planning import LineWorkCalendar
-from .views_process_realtime import _calculate_effective_work_seconds
+from .services.process_realtime_common import calculate_effective_work_seconds
 from masters.models import Process, Line, Product
 from masters.services.bom_service import BOMService
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
@@ -140,7 +140,7 @@ class ActualCycleTimeCalcView(APIView):
             entry = product_map[pid]
             entry['total_qty'] += s.production_qty or Decimal('0')
             ended_at = s.ended_at or datetime.now()
-            eff_sec = _calculate_effective_work_seconds(calendar, s.started_at, ended_at)
+            eff_sec = calculate_effective_work_seconds(calendar, s.started_at, ended_at)
             entry['total_seconds'] += int(eff_sec)
             entry['session_count'] += 1
 

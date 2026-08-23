@@ -14,7 +14,7 @@ from production.models_production_actual_reconcile import (
     ProductionActualReconcileReportDetail,
 )
 from production.serializers_process_realtime import resolve_workday_date_for_process
-from production.views_process_realtime import _is_countable_session_for_actual
+from production.services.process_realtime_common import is_countable_session_for_actual
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def collect_production_actual_reconcile_diffs():
             'process_id': _to_int_or_none(session.process_id),
             'product_id': _to_int_or_none(session.product_id),
             'plan_date': session.plan_date,
-            'countable': _is_countable_session_for_actual(session.session_type, session.end_action),
+            'countable': is_countable_session_for_actual(session.session_type, session.end_action),
         }
 
         if not session_map[int(session.id)]['countable']:
