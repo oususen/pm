@@ -5,16 +5,16 @@ from production.views_orphan_backlog import (
     OrphanLineBacklogReportView,
     OrphanLineBacklogFixView,
 )
+from production.views_line_demand import LineDemandViewSet
+from production.views_plan_line_setting import ProductionPlanLineSettingView
 from production.views import (
     LineBacklogViewSet,
-    LineDemandViewSet,
     LinePlanViewSet,
     ProductionPlanChangeLogViewSet,
     LineGanttPlanViewSet,
     LineDailyScheduleSettingViewSet,
     LineDefaultScheduleSettingViewSet,
     AutoPlanAggregateSettingViewSet,
-    ProductionPlanLineSettingView,
     ProductionPlanLockSettingView,
     ProductionRecordInquirySettingView,
     ScheduleConfigView,
