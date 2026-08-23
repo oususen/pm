@@ -44,6 +44,7 @@ from .services.process_realtime_common import (
     calculate_effective_work_seconds,
     is_countable_session_for_actual,
     normalize_input_datetime,
+    to_local_naive,
 )
 from .services.process_realtime_query_service import get_gantt_plan_qty
 from .services.process_realtime_scrap_service import (
@@ -54,16 +55,7 @@ from .services.process_realtime_scrap_service import (
     process_scrap_disposition,
 )
 from masters.models import Product, Process, BOM
-from .models_line_backlog import LineBacklog
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
-
-
-def _to_local_naive(dt):
-    if not dt:
-        return None
-    if timezone.is_aware(dt):
-        return timezone.localtime(dt).replace(tzinfo=None)
-    return dt
 
 
 class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
@@ -475,7 +467,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
 
         # 日替わり時刻（8時）を考慮して計画日を算出
-        local_start = _to_local_naive(started_at)
+        local_start = to_local_naive(started_at)
         plan_date = resolve_workday_date_for_process(process, local_start)
 
         duration_seconds = int((ended_at - started_at).total_seconds())

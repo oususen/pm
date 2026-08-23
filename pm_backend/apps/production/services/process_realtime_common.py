@@ -10,7 +10,7 @@ def is_countable_session_for_actual(session_type, end_action):
     return str(session_type or '').upper() == 'WORK' and str(end_action or '').upper() in ('END', 'PAUSE')
 
 
-def _to_local_naive(dt):
+def to_local_naive(dt):
     if not dt:
         return None
     if timezone.is_aware(dt):
@@ -40,8 +40,8 @@ def calculate_effective_work_seconds(calendar, started_at, ended_at):
     """
     ラインカレンダ（勤務パターン＋休憩）で区切った実作業秒数を返す。
     """
-    start_dt = _to_local_naive(started_at)
-    end_dt = _to_local_naive(ended_at)
+    start_dt = to_local_naive(started_at)
+    end_dt = to_local_naive(ended_at)
     if not start_dt or not end_dt or end_dt <= start_dt:
         return 0
 
