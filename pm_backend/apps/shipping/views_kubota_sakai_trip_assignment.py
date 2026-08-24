@@ -202,7 +202,7 @@ def _resolve_kubota_line_calendar():
     line = (
         Line.objects.select_related('calendar')
         .filter(
-            Q(line_code='L3102')
+            Q(line_code='L3601')
             | Q(line_name__icontains='クボタ配送ライン')
         )
         .order_by('id')
@@ -652,7 +652,7 @@ def _resolve_kubota_delivery_line_process():
 
     existing_line = (
         Line.objects.filter(
-            Q(line_code='L3102')
+            Q(line_code='L3601')
             | Q(line_name__icontains='クボタ配送ライン')
         )
         .order_by('id')
@@ -850,7 +850,7 @@ def is_kubota_delivery_line(line_obj):
     line_code = str(getattr(line_obj, 'line_code', '') or '').strip()
     line_name = str(getattr(line_obj, 'line_name', '') or '').strip()
     return (
-        line_code in ('L3102', KUBOTA_DELIVERY_LINE_CODE)
+        line_code in ('L3601', KUBOTA_DELIVERY_LINE_CODE)
         or 'クボタ配送' in line_name
     )
 
