@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.db import models
 from django.db.models import Q
 from rest_framework import status
@@ -41,8 +42,54 @@ from purchase.process_resolver import (
     resolve_purchase_line as resolve_supplier_purchase_line,
     resolve_supplier_process,
 )
+from shipping.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_admin_notification_emails():
+    User = get_user_model()
+    emails = set(
+        User.objects.filter(is_active=True, smtp_config__is_active=True, smtp_config__is_admin=True)
+        .exclude(email='')
+        .values_list('email', flat=True)
+    )
+    return sorted(emails)
+
+
+def _notify_backlog_process_resolution_failure(details):
+    if not details:
+        return
+
+    first = details[0]
+    subject = f"[進度空行補完エラー] 工程未解決 {first['line_code']} {first['product_code']}"
+    body_lines = [
+        '進度表示用空行補完で工程を解決できなかったため、処理を中断しました。',
+        '',
+    ]
+    for detail in details[:50]:
+        body_lines.append(
+            f"日付: {detail['plan_date']} / ライン: {detail['line_code']} / "
+            f"品番: {detail['product_code']} / 理由: {detail['reason']}"
+        )
+    if len(details) > 50:
+        body_lines.append(f"... 他 {len(details) - 50} 件")
+    body = '\n'.join(body_lines)
+
+    logger.error(body)
+
+    to_emails = _resolve_admin_notification_emails()
+    if not to_emails:
+        logger.warning('進度空行補完の工程未解決メール通知をスキップ: 管理者メールアドレスが見つかりません')
+        return
+
+    result = EmailService().send_plain_email(
+        to_emails=to_emails,
+        subject=subject,
+        body=body,
+    )
+    if not result.get('success'):
+        logger.warning('進度空行補完の工程未解決メール通知に失敗: %s', result.get('message'))
 
 def seed_progress_backlogs_from_demand(viewset, request, **deps):
     self = viewset
@@ -100,63 +147,49 @@ def seed_progress_backlogs_from_demand(viewset, request, **deps):
             'product_id',
             'plan_date',
             'routing_step__process_id',
+            'line__line_code',
+            'product__product_code',
+            'product_code',
             'line__line_type',
         ).distinct()
     )
     if not demand_rows:
         return Response({'created': 0, 'candidates': 0, 'skipped_no_process': 0})
-    
-    purchase_line_ids = {
-        row.get('line_id')
-        for row in demand_rows
-        if row.get('line__line_type') == 'PURCHASE' and row.get('line_id')
-    }
-    fallback_processes_by_line = {}
-    if purchase_line_ids:
-        purchase_lines = {
-            line.id: line
-            for line in Line.objects.filter(id__in=purchase_line_ids).only('id', 'line_code')
-        }
-        suppliers_by_code = {
-            supplier.supplier_code: supplier
-            for supplier in Supplier.objects.filter(
-                supplier_code__in=[line.line_code for line in purchase_lines.values() if line.line_code]
-            )
-        }
-        for purchase_line_id, purchase_line in purchase_lines.items():
-            process = resolve_supplier_process(
-                supplier=suppliers_by_code.get(purchase_line.line_code),
-                line=purchase_line,
-            )
-            if process:
-                fallback_processes_by_line[purchase_line_id] = process.id
-    
-    # 同じ(line, product, date)に実process_idがある組み合わせを収集
-    # → PURCHASEフォールバックの過剰適用防止（外作品が購買と外作で2ブロック表示になるのを防ぐ）
-    triplets_with_real_process = {
-        (row['line_id'], row['product_id'], row['plan_date'])
-        for row in demand_rows
-        if row.get('routing_step__process_id')
-    }
-    
+
     candidate_keys = set()
     skipped_no_process = 0
+    unresolved_details = []
     for row in demand_rows:
         line_id = row.get('line_id')
         product_id = row.get('product_id')
         plan_date = row.get('plan_date')
         process_id = row.get('routing_step__process_id')
-    
-        if not process_id and row.get('line__line_type') == 'PURCHASE':
-            # 同じ(line, product, date)に既に実processがある場合はフォールバックしない
-            if (line_id, product_id, plan_date) not in triplets_with_real_process:
-                process_id = fallback_processes_by_line.get(line_id)
-    
+
+        if line_id and product_id and plan_date and not process_id:
+            unresolved_details.append({
+                'plan_date': plan_date.isoformat() if hasattr(plan_date, 'isoformat') else str(plan_date),
+                'line_code': row.get('line__line_code') or str(line_id),
+                'product_code': row.get('product__product_code') or row.get('product_code') or str(product_id),
+                'reason': 'LineDemand.routing_step.process 未設定',
+            })
+            continue
+
         if not line_id or not product_id or not plan_date or not process_id:
             skipped_no_process += 1
             continue
         candidate_keys.add((line_id, process_id, product_id, plan_date))
-    
+
+    if unresolved_details:
+        _notify_backlog_process_resolution_failure(unresolved_details)
+        return Response(
+            {
+                'detail': '進度表示用空行補完で工程を解決できません。管理者に連絡してください。',
+                'code': 'BACKLOG_PROCESS_MISSING',
+                'errors': unresolved_details,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     if not candidate_keys:
         return Response({'created': 0, 'candidates': 0, 'skipped_no_process': skipped_no_process})
     
