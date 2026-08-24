@@ -1446,6 +1446,21 @@ const getOutsourceProcessId = () => {
   return outsourceProcessByFlag ? outsourceProcessByFlag.id : ''
 }
 
+const getPurchaseProcessId = () => {
+  const purchaseProcess = processes.value.find((p) => String(p.process_code || '').toUpperCase() === 'PURCHASE')
+  return purchaseProcess ? purchaseProcess.id : ''
+}
+
+const getSupplierPurchaseLineId = (supplierId) => {
+  if (!supplierId) return ''
+  const supplier = suppliers.value.find((s) => `${s.id}` === `${supplierId}`)
+  if (!supplier) return ''
+  const matchingLine = lines.value.find(
+    (l) => l.line_code === supplier.supplier_code && l.line_type === 'PURCHASE'
+  )
+  return matchingLine ? matchingLine.id : ''
+}
+
 const applySourcingSideEffects = () => {
   if (itemForm.value.sourcing_type === 'MAKE') {
     itemForm.value.supplier = ''
@@ -1474,8 +1489,10 @@ const applySourcingSideEffects = () => {
     }
   }
   if (itemForm.value.sourcing_type === 'BUY') {
-    itemForm.value.process = ''
-    itemForm.value.line = ''
+    const purchaseProcessId = getPurchaseProcessId()
+    if (purchaseProcessId) itemForm.value.process = purchaseProcessId
+    const supplierLineId = getSupplierPurchaseLineId(itemForm.value.supplier)
+    if (supplierLineId) itemForm.value.line = supplierLineId
     itemForm.value.time_unit = 'DAY'
     itemForm.value.duration_min = null
     if (itemForm.value.lead_time_days === null || itemForm.value.lead_time_days === undefined || itemForm.value.lead_time_days === '') {
@@ -2590,6 +2607,7 @@ watch(
 watch(
   () => itemForm.value.process,
   (newProcess) => {
+    if (itemForm.value.sourcing_type === 'BUY') return
     const proc = processes.value.find((p) => `${p.id}` === `${newProcess}`)
     if (proc?.line) {
       // SUBCON+仕入先設定済みなら仕入先のPURCHASEラインを優先
@@ -2634,15 +2652,12 @@ watch(
   () => itemForm.value.supplier,
   (supplierId) => {
     if (!supplierId) return
-    if (itemForm.value.sourcing_type !== 'SUBCON') return
-    const supplier = suppliers.value.find((s) => `${s.id}` === `${supplierId}`)
-    if (!supplier) return
-    const matchingLine = lines.value.find(
-      (l) => l.line_code === supplier.supplier_code && l.line_type === 'PURCHASE'
-    )
-    if (matchingLine) {
-      itemForm.value.line = matchingLine.id
+    if (itemForm.value.sourcing_type !== 'SUBCON' && itemForm.value.sourcing_type !== 'BUY') return
+    const supplierLineId = getSupplierPurchaseLineId(supplierId)
+    if (supplierLineId) {
+      itemForm.value.line = supplierLineId
     }
+    if (itemForm.value.sourcing_type === 'BUY') applySourcingSideEffects()
   }
 )
 

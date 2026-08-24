@@ -787,6 +787,7 @@ const recalculate = async () => {
               alert(e.response.data.detail);
             }
             console.error("再計算に失敗:", e);
+            throw e;
           })
       )
     );
@@ -870,6 +871,7 @@ const confirmDeepRecalc = async () => {
               alert(e.response.data.detail);
             }
             console.error('過去から再計算に失敗:', target.line_id, e);
+            throw e;
           });
         }
         );

@@ -30,6 +30,7 @@ def recalculate_inventory(viewset, request, **deps):
     }
     """
     from production.inventory.inventory_calculator import recalculate_inventory_for_line
+    from production.inventory.progress_calculator import ProgressDemandResolutionError
 
     line_id = request.data.get('line_id')
     start_date = request.data.get('start_date')
@@ -120,6 +121,15 @@ def recalculate_inventory(viewset, request, **deps):
             'product_count': result.get('product_count', 0),
             'record_count': record_count,
         })
+    except ProgressDemandResolutionError as e:
+        return Response(
+            {
+                'detail': str(e),
+                'code': 'PROGRESS_STEP_DEMAND_MISSING',
+                'errors': e.details,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     except Exception as e:
         return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -170,6 +180,7 @@ def recalculate_inventory_deep(viewset, request, **deps):
     }
     """
     from production.inventory.inventory_calculator import recalculate_inventory_for_line
+    from production.inventory.progress_calculator import ProgressDemandResolutionError
 
     line_id = request.data.get('line_id')
     start_date = request.data.get('start_date')
@@ -219,6 +230,15 @@ def recalculate_inventory_deep(viewset, request, **deps):
             'product_count': result.get('product_count', 0),
             'progress_only': progress_only,
         })
+    except ProgressDemandResolutionError as e:
+        return Response(
+            {
+                'detail': str(e),
+                'code': 'PROGRESS_STEP_DEMAND_MISSING',
+                'errors': e.details,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     except Exception as e:
         return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -967,6 +967,7 @@ const recalculate = async () => {
             alert(e.response.data.detail);
           }
           console.error('在庫再計算に失敗:', e);
+          throw e;
         })
       )
     );

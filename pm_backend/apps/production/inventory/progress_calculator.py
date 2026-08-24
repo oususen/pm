@@ -5,15 +5,30 @@ LineBacklogの進度を再計算するためのユーティリティ
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Q
-
-from masters.models import Calendar, Line, RoutingStep
+from masters.models import Calendar, Line
 from orders.utils.calendar_utils import get_business_today
 from system_settings.models import SystemSetting
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
 from .inventory_calculator import _get_max_parent_bom_lead_time, _resolve_calendar_working_day
 from .trace_debug import trace_log
+
+
+class ProgressDemandResolutionError(Exception):
+    """工程需要が解決できない場合の例外"""
+
+    def __init__(self, details):
+        self.details = details or []
+        lines = []
+        for detail in self.details:
+            lines.append(
+                f"{detail['plan_date']} line={detail['line_code']} process={detail['process_code']} "
+                f"product={detail['product_code']} reason={detail['reason']}"
+            )
+        message = '工程需要を解決できません: ' + ' / '.join(lines[:10])
+        if len(lines) > 10:
+            message += f' / ... {len(lines) - 10}件'
+        super().__init__(message)
 
 
 def recalculate_progress_qty(
@@ -191,45 +206,25 @@ def recalculate_progress_qty(
         last_planned_progress = initial_backlog.progress_qty or 0
         planned_progress_by_date[initial_backlog.plan_date] = last_planned_progress
 
-    process_ids = {r.process_id for r in backlogs if r.process_id}
-    step_map = {}
-    if process_ids:
-        steps = RoutingStep.objects.filter(
-            line_id=line_id,
-            process_id__in=process_ids,
-        ).filter(
-            Q(output_product_id=product_id) | Q(routing__product_id=product_id)
-        ).select_related('routing', 'output_product')
-        for step in steps:
-            step_product_id = step.output_product_id or (step.routing.product_id if step.routing_id else None)
-            if not step_product_id:
-                continue
-            step_key = (step.process_id, step_product_id)
-            if step_key not in step_map:
-                step_map[step_key] = step.id
-
-    demand_by_step = {}
+    demand_by_process = {}
     demand_by_product = {}
     demand_row_count = 0
     if start_date and end_date:
         demand_qs = LineDemand.objects.filter(
             line_id=line_id,
             plan_date__range=[effective_start, end_date],
-        )
-        step_ids = set(step_map.values())
-        if step_ids:
-            demand_qs = demand_qs.filter(Q(routing_step_id__in=step_ids) | Q(product_id=product_id))
-        else:
-            demand_qs = demand_qs.filter(product_id=product_id)
+            product_id=product_id,
+        ).select_related('routing_step__process')
 
         demand_row_count = demand_qs.count()
         for demand in demand_qs:
             firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
             forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
             qty = firm_qty + forecast_qty
-            if demand.routing_step_id:
-                key = (demand.plan_date, demand.routing_step_id)
-                demand_by_step[key] = demand_by_step.get(key, Decimal('0')) + qty
+            demand_process_id = getattr(demand.routing_step, 'process_id', None) if demand.routing_step_id else None
+            if demand_process_id:
+                key = (demand.plan_date, demand_process_id)
+                demand_by_process[key] = demand_by_process.get(key, Decimal('0')) + qty
             if demand.product_id:
                 key = (demand.plan_date, demand.product_id)
                 demand_by_product[key] = demand_by_product.get(key, Decimal('0')) + qty
@@ -296,12 +291,30 @@ def recalculate_progress_qty(
         # LineDemandから需要を取得（LT遡り済み）
         # 同一親需要の重複は展開時に除外済みのため、firm + forecast を需要採用する
         demand_qty = Decimal('0')
-        process_id = rows[0].process_id if rows else None
-        step_id = step_map.get((process_id, product_id)) if process_id else None
-        if step_id:
-            demand_qty = demand_by_step.get((plan_date, step_id), Decimal('0'))
-        if demand_qty == 0:
-            demand_qty = demand_by_product.get((plan_date, product_id), Decimal('0'))
+        product_demand_qty = demand_by_product.get((plan_date, product_id), Decimal('0'))
+        unique_process_ids = sorted({r.process_id for r in rows if r.process_id})
+        unresolved_details = []
+
+        for process_id in unique_process_ids:
+            step_demand_qty = demand_by_process.get((plan_date, process_id))
+            if step_demand_qty is None:
+                if product_demand_qty > 0:
+                    unresolved_details.append({
+                        'plan_date': str(plan_date),
+                        'line_id': line_id,
+                        'line_code': str(getattr(rows[0].line, 'line_code', '') or line_id),
+                        'process_id': process_id,
+                        'process_code': str(next((getattr(r.process, 'process_code', '') for r in rows if r.process_id == process_id), '') or process_id),
+                        'product_id': product_id,
+                        'product_code': str(getattr(rows[0].product, 'product_code', '') or product_id),
+                        'reason': 'routing_step需要未解決',
+                        'product_demand_qty': int(product_demand_qty or 0),
+                    })
+                continue
+            demand_qty += step_demand_qty
+
+        if unresolved_details:
+            raise ProgressDemandResolutionError(unresolved_details)
 
         progress_shipment = int(demand_qty or 0)
 

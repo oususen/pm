@@ -1634,6 +1634,7 @@ const fetchProcesses = async () => {
 }
 
 const syncLineFromProcess = (processId) => {
+  if (newStepDraft.value.sourcing_type === 'BUY' || newStepDraft.value.sourcing_type === 'SUBCON') return
   const selectedProcess = processes.value.find((proc) => String(proc.id) === String(processId))
   newStepDraft.value.line = selectedProcess?.line ? Number(selectedProcess.line) : ''
 }
@@ -1856,7 +1857,13 @@ const autoFillSupplierLineAndProcess = () => {
       autoFillProcessWarning.value = `工程マスタに「外注(G)」が未登録です。先に工程マスタで作成してください。`
     }
   } else {
-    newStepDraft.value.process = ''
+    const proc = processOptions.value.find(p => p.process_code === 'PURCHASE')
+    if (proc) {
+      newStepDraft.value.process = proc.id
+    } else {
+      newStepDraft.value.process = ''
+      autoFillProcessWarning.value = '工程マスタに「購買(PURCHASE)」が未登録です。先に工程マスタで作成してください。'
+    }
   }
 
   const supplierId = Number(newStepDraft.value.supplier)

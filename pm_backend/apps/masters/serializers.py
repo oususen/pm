@@ -2,6 +2,7 @@ import re
 from rest_framework import serializers
 from django.db import transaction
 from django.db.models import Sum
+from purchase.process_resolver import resolve_purchase_line, resolve_purchase_process
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
@@ -431,6 +432,7 @@ class BOMItemSerializer(serializers.ModelSerializer):
         sourcing_type = attrs.get('sourcing_type', getattr(self.instance, 'sourcing_type', None))
         time_unit = attrs.get('time_unit', getattr(self.instance, 'time_unit', 'MINUTE'))
         process = attrs.get('process', getattr(self.instance, 'process', None))
+        line = attrs.get('line', getattr(self.instance, 'line', None))
 
         if bom and child_product and getattr(bom, 'parent_product_id', None) == getattr(child_product, 'id', None):
             raise serializers.ValidationError({
@@ -461,6 +463,16 @@ class BOMItemSerializer(serializers.ModelSerializer):
                 if lead_time_days is None or lead_time_days < 0:
                     raise serializers.ValidationError('時間単位=DAYのとき、リードタイム(日)は0以上で入力してください。')
         elif sourcing_type == 'BUY':
+            if supplier is None:
+                raise serializers.ValidationError('購買の場合、仕入先は必須です。')
+            purchase_line = resolve_purchase_line(supplier)
+            if purchase_line:
+                attrs['line'] = purchase_line
+                line = purchase_line
+            process = resolve_purchase_process(line=line)
+            if not process:
+                raise serializers.ValidationError('購買工程(PURCHASE)が見つかりません。先に工程マスタを整備してください。')
+            attrs['process'] = process
             lead_time_days = attrs.get('lead_time_days', getattr(self.instance, 'lead_time_days', 0))
             if lead_time_days is None or lead_time_days <= 0:
                 raise serializers.ValidationError('購買の場合、リードタイム(日)は1以上で入力してください。')
@@ -588,9 +600,17 @@ class RoutingStepSerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         self._validate_hierarchy_path(attrs)
 
+        sourcing_type = attrs.get('sourcing_type', getattr(self.instance, 'sourcing_type', 'MAKE'))
+        line = attrs.get('line', getattr(self.instance, 'line', None))
         process = attrs.get('process')
         if not process and self.instance is not None:
             process = getattr(self.instance, 'process', None)
+
+        if sourcing_type == 'BUY':
+            process = resolve_purchase_process(line=line)
+            if not process:
+                raise serializers.ValidationError({'process': '購買工程(PURCHASE)が見つかりません。先に工程マスタを整備してください。'})
+            attrs['process'] = process
 
         should_fill_line = False
         if self.instance is None:
