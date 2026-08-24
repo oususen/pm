@@ -8,15 +8,13 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
-from django.db.models import Q, Max, Prefetch, Sum
+from django.db.models import Q, Prefetch, Sum
 from django.db import transaction
 import logging
 import csv
 import io
 import math
-import json
 from django.http import HttpResponse
-from system_settings.models import SystemSetting
 
 from .models import LineDemand
 from .inventory.lead_time_utils import resolve_lead_days_for_step
@@ -27,12 +25,7 @@ from .models_line_backlog_adjustment import LineBacklogAdjustment
 from .models_line_plan import LinePlan
 from .models_production import StockAllocation, ProductionOrder, ProcessActual
 from .models_line_gantt_plan import LineGanttPlan
-from .models_line_daily_schedule_setting import LineDailyScheduleSetting
-from .models_line_default_schedule_setting import LineDefaultScheduleSetting
-from .models_auto_plan_aggregate_setting import AutoPlanAggregateSetting
 from .models_plan_change_log import ProductionPlanChangeLog
-from .models_plan_lock_setting import ProductionPlanLockSetting
-from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_laser_pattern import LaserPattern
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
@@ -41,10 +34,6 @@ from .serializers import (
     LinePlanSerializer,
     ProductionPlanChangeLogSerializer,
     LineGanttPlanSerializer,
-    LineDailyScheduleSettingSerializer,
-    LineDefaultScheduleSettingSerializer,
-    AutoPlanAggregateSettingSerializer,
-    ProductionPlanLockSettingSerializer,
     StockAllocationSerializer,
     ProductionOrderSerializer,
     ProductionOrderListSerializer,
@@ -77,7 +66,6 @@ from purchase.process_resolver import (
     resolve_purchase_line as resolve_supplier_purchase_line,
     resolve_supplier_process,
 )
-from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
