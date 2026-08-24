@@ -17,14 +17,6 @@ from production.views import (
     AutoPlanAggregateSettingViewSet,
     ProductionPlanLockSettingView,
     ProductionRecordInquirySettingView,
-    ScheduleConfigView,
-    ScheduleRunLogView,
-    ScheduleRunNowView,
-    PurchaseActualReconcileReportView,
-    PurchaseActualReconcileFixView,
-    ProductionActualReconcileReportView,
-    ProductionActualReconcileFixView,
-    ScheduleCancelView,
     LineBacklogAdjustmentView,
     FloorShippingPDFView,
     FloorShippingNewPDFView,
@@ -39,6 +31,16 @@ from production.views import (
     StockAllocationViewSet,
     StockMigrationDetectView,
     StockMigrationExecuteView,
+)
+from production.views_schedule import (
+    ScheduleConfigView,
+    ScheduleRunLogView,
+    ScheduleRunNowView,
+    PurchaseActualReconcileReportView,
+    PurchaseActualReconcileFixView,
+    ProductionActualReconcileReportView,
+    ProductionActualReconcileFixView,
+    ScheduleCancelView,
 )
 from production.views_laser import (
     LaserActualDetailUpdateView,
