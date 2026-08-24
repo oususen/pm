@@ -24,6 +24,7 @@ class OrderExpansionService:
 
     LINE_DEMAND_UPDATE_FIELDS = [
         'routing_step',
+        'process',
         'product',
         'lead_time_days',
         'is_shifted',
@@ -44,6 +45,7 @@ class OrderExpansionService:
         'product_code',
         'plan_date',
         'routing_step_id',
+        'process_id',
         'product_id',
         'lead_time_days',
         'is_shifted',
@@ -405,7 +407,7 @@ class OrderExpansionService:
             )
 
         for created in to_create:
-            existing_map[(created.line_id, created.product_code, created.plan_date)] = created
+            existing_map[(created.line_id, created.product_code, created.plan_date, created.process_id)] = created
 
         return {
             'created': len(to_create),
@@ -414,14 +416,14 @@ class OrderExpansionService:
 
     def _load_existing_demand_rows(self):
         return {
-            (row['line_id'], row['product_code'], row['plan_date']): row
+            (row['line_id'], row['product_code'], row['plan_date'], row['process_id']): row
             for row in LineDemand.objects.values(*self.EXISTING_DEMAND_VALUE_FIELDS)
         }
 
     def _load_existing_actual_qty_map(self):
         return {
-            (row['line_id'], row['product_code'], row['plan_date']): Decimal(str(row['actual_qty'] or 0))
-            for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'actual_qty')
+            (row['line_id'], row['product_code'], row['plan_date'], row['process_id']): Decimal(str(row['actual_qty'] or 0))
+            for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'process_id', 'actual_qty')
         }
 
     def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map):
@@ -438,10 +440,10 @@ class OrderExpansionService:
             plan_date__in=plan_dates,
         ).values(*self.EXISTING_DEMAND_VALUE_FIELDS)
         for row in refreshed:
-            existing_map[(row['line_id'], row['product_code'], row['plan_date'])] = row
+            existing_map[(row['line_id'], row['product_code'], row['plan_date'], row['process_id'])] = row
 
     def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
-        aggregated: Dict[Tuple[int, str, object], Dict[str, object]] = {}
+        aggregated: Dict[Tuple[int, str, object, int | None], Dict[str, object]] = {}
         processed_ids: List[int] = []
 
         for order_line in order_lines:
@@ -640,12 +642,13 @@ class OrderExpansionService:
                 base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
             correction = correction_by_product.get(product_id, Decimal('1'))
 
-            key = (effective_line_id, product_code, target_date)
+            key = (effective_line_id, product_code, target_date, step.process_id)
             entry = aggregated.get(key)
             if not entry:
                 entry = {
                     'line_id': effective_line_id,
                     'routing_step_id': step.id,
+                    'process_id': step.process_id,
                     'product_id': product_id,
                     'product_code': product_code,
                     'plan_date': target_date,
@@ -695,6 +698,7 @@ class OrderExpansionService:
                     merged[key] = {
                         'line_id': entry['line_id'],
                         'routing_step_id': entry['routing_step_id'],
+                        'process_id': entry['process_id'],
                         'product_id': entry['product_id'],
                         'product_code': entry['product_code'],
                         'plan_date': entry['plan_date'],
@@ -721,6 +725,7 @@ class OrderExpansionService:
             id=row['id'],
             line_id=row['line_id'],
             routing_step_id=row['routing_step_id'],
+            process_id=row['process_id'],
             product_id=row['product_id'],
             product_code=row['product_code'],
             plan_date=row['plan_date'],
@@ -751,6 +756,7 @@ class OrderExpansionService:
         demand = LineDemand(
             line_id=entry['line_id'],
             routing_step_id=entry['routing_step_id'],
+            process_id=entry['process_id'],
             product_id=entry['product_id'],
             product_code=entry['product_code'],
             plan_date=entry['plan_date'],
@@ -768,6 +774,7 @@ class OrderExpansionService:
 
     def _apply_shared_entry_metadata(self, demand: LineDemand, entry):
         demand.routing_step_id = entry['routing_step_id']
+        demand.process_id = entry['process_id']
         demand.product_id = entry['product_id']
         demand.lead_time_days = entry['lead_time_days']
 

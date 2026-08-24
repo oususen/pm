@@ -35,8 +35,8 @@ class LineDemandFilter(django_filters.FilterSet):
     def filter_process_search(self, queryset, name, value):
         if value:
             return queryset.filter(
-                Q(routing_step__process__process_code__iexact=value)
-                | Q(routing_step__process__process_name__icontains=value)
+                Q(process__process_code__iexact=value)
+                | Q(process__process_name__icontains=value)
             )
         return queryset
 
@@ -66,8 +66,8 @@ class LineDemandViewSet(viewsets.ModelViewSet):
     queryset = LineDemand.objects.all().select_related(
         'line',
         'product',
+        'process',
         'routing_step',
-        'routing_step__process',
     )
     serializer_class = LineDemandSerializer
     pagination_class = None

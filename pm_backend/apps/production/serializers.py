@@ -73,18 +73,16 @@ class LineDemandSerializer(serializers.ModelSerializer):
         return (obj.firm_qty or Decimal('0')) + (obj.forecast_qty or Decimal('0'))
 
     def get_process(self, obj):
-        if obj.routing_step_id and obj.routing_step and obj.routing_step.process_id:
-            return obj.routing_step.process_id
-        return None
+        return obj.process_id
 
     def get_process_code(self, obj):
-        if obj.routing_step_id and obj.routing_step and obj.routing_step.process_id:
-            return obj.routing_step.process.process_code
+        if obj.process_id and obj.process:
+            return obj.process.process_code
         return None
 
     def get_process_name(self, obj):
-        if obj.routing_step_id and obj.routing_step and obj.routing_step.process_id:
-            return obj.routing_step.process.process_name
+        if obj.process_id and obj.process:
+            return obj.process.process_name
         return None
 
     def get_step_no(self, obj):

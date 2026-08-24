@@ -1,5 +1,5 @@
 from django.db import models
-from masters.models import Line, Product, RoutingStep
+from masters.models import Line, Process, Product, RoutingStep
 
 # Import all models to ensure they're registered with Django
 from .models_line_daily_schedule_setting import LineDailyScheduleSetting
@@ -49,6 +49,13 @@ class LineDemand(models.Model):
         blank=True,
         verbose_name='ルーティング工程'
     )
+    process = models.ForeignKey(
+        Process,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='工程'
+    )
     product = models.ForeignKey(
         Product,
         on_delete=models.SET_NULL,
@@ -95,10 +102,11 @@ class LineDemand(models.Model):
         db_table = 't_line_demand'
         verbose_name = 'ライン需要展開'
         verbose_name_plural = 'ライン需要展開'
-        unique_together = [['line', 'product_code', 'plan_date']]
+        unique_together = [['line', 'product_code', 'plan_date', 'process']]
         indexes = [
             models.Index(fields=['line', 'plan_date']),
             models.Index(fields=['product_code']),
+            models.Index(fields=['process']),
         ]
 
     def __str__(self):

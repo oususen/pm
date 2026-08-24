@@ -2,16 +2,21 @@
 進度計算ロジック
 LineBacklogの進度を再計算するためのユーティリティ
 """
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from masters.models import Calendar, Line
 from orders.utils.calendar_utils import get_business_today
+from shipping.services.email_service import EmailService
 from system_settings.models import SystemSetting
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
 from .inventory_calculator import _get_max_parent_bom_lead_time, _resolve_calendar_working_day
 from .trace_debug import trace_log
+
+logger = logging.getLogger('production')
 
 
 class ProgressDemandResolutionError(Exception):
@@ -29,6 +34,51 @@ class ProgressDemandResolutionError(Exception):
         if len(lines) > 10:
             message += f' / ... {len(lines) - 10}件'
         super().__init__(message)
+
+
+def _resolve_admin_notification_emails():
+    User = get_user_model()
+    emails = set(
+        User.objects.filter(is_active=True, smtp_config__is_active=True, smtp_config__is_admin=True)
+        .exclude(email='')
+        .values_list('email', flat=True)
+    )
+    return sorted(emails)
+
+
+def _notify_progress_demand_resolution_failure(details):
+    if not details:
+        return
+
+    first = details[0]
+    subject = f"[生産進度再計算エラー] 工程需要未解決 {first['line_code']} {first['product_code']}"
+    body_lines = [
+        '進度再計算で工程需要を解決できなかったため、再計算を中断しました。',
+        '',
+    ]
+    for detail in details[:50]:
+        body_lines.append(
+            f"日付: {detail['plan_date']} / ライン: {detail['line_code']} / 工程: {detail['process_code']} / "
+            f"品番: {detail['product_code']} / 理由: {detail['reason']} / 製品需要: {detail['product_demand_qty']}"
+        )
+    if len(details) > 50:
+        body_lines.append(f'... 他 {len(details) - 50} 件')
+    body = '\n'.join(body_lines)
+
+    logger.error(body)
+
+    to_emails = _resolve_admin_notification_emails()
+    if not to_emails:
+        logger.warning('工程需要未解決メール通知をスキップ: 管理者メールアドレスが見つかりません')
+        return
+
+    result = EmailService().send_plain_email(
+        to_emails=to_emails,
+        subject=subject,
+        body=body,
+    )
+    if not result.get('success'):
+        logger.warning('工程需要未解決メール通知に失敗: %s', result.get('message'))
 
 
 def recalculate_progress_qty(
@@ -214,14 +264,14 @@ def recalculate_progress_qty(
             line_id=line_id,
             plan_date__range=[effective_start, end_date],
             product_id=product_id,
-        ).select_related('routing_step__process')
+        ).select_related('process')
 
         demand_row_count = demand_qs.count()
         for demand in demand_qs:
             firm_qty = demand.firm_qty if demand.firm_qty and demand.firm_qty > 0 else Decimal('0')
             forecast_qty = demand.forecast_qty if demand.forecast_qty and demand.forecast_qty > 0 else Decimal('0')
             qty = firm_qty + forecast_qty
-            demand_process_id = getattr(demand.routing_step, 'process_id', None) if demand.routing_step_id else None
+            demand_process_id = demand.process_id
             if demand_process_id:
                 key = (demand.plan_date, demand_process_id)
                 demand_by_process[key] = demand_by_process.get(key, Decimal('0')) + qty
@@ -314,6 +364,7 @@ def recalculate_progress_qty(
             demand_qty += step_demand_qty
 
         if unresolved_details:
+            _notify_progress_demand_resolution_failure(unresolved_details)
             raise ProgressDemandResolutionError(unresolved_details)
 
         progress_shipment = int(demand_qty or 0)

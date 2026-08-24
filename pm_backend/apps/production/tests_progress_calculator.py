@@ -11,8 +11,9 @@ from production.models_line_backlog import LineBacklog
 
 
 class ProgressCalculatorTest(TestCase):
+    @patch('production.inventory.progress_calculator._notify_progress_demand_resolution_failure')
     @patch('production.inventory.progress_calculator.get_business_today', return_value=date(2026, 8, 24))
-    def test_raise_when_product_demand_exists_but_step_demand_is_unresolved(self, _mock_today):
+    def test_raise_when_product_demand_exists_but_step_demand_is_unresolved(self, _mock_today, mock_notify):
         line = Line.objects.create(
             line_code='LTEST-PROG',
             line_name='進度テストライン',
@@ -62,9 +63,11 @@ class ProgressCalculatorTest(TestCase):
 
         self.assertEqual(len(ctx.exception.details), 1)
         self.assertEqual(ctx.exception.details[0]['reason'], 'routing_step需要未解決')
+        mock_notify.assert_called_once()
 
+    @patch('production.inventory.progress_calculator._notify_progress_demand_resolution_failure')
     @patch('production.inventory.progress_calculator.get_business_today', return_value=date(2026, 8, 24))
-    def test_use_linedemand_process_demand_even_if_multiple_routing_steps_exist(self, _mock_today):
+    def test_use_linedemand_process_demand_even_if_multiple_routing_steps_exist(self, _mock_today, mock_notify):
         line = Line.objects.create(
             line_code='000030',
             line_name='購買ライン',
@@ -119,6 +122,7 @@ class ProgressCalculatorTest(TestCase):
         LineDemand.objects.create(
             line=line,
             routing_step=demand_step,
+            process=process,
             product=product,
             product_code=product.product_code,
             plan_date=date(2026, 8, 19),
@@ -140,3 +144,4 @@ class ProgressCalculatorTest(TestCase):
 
         backlog.refresh_from_db()
         self.assertEqual(backlog.progress_qty, -74)
+        mock_notify.assert_not_called()
