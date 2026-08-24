@@ -81,6 +81,23 @@ def _notify_progress_demand_resolution_failure(details):
         logger.warning('工程需要未解決メール通知に失敗: %s', result.get('message'))
 
 
+def _log_zero_demand_fallback(detail):
+    if not detail:
+        return
+
+    logger.warning(
+        '進度計算で需要0フォールバック: 日付=%s ライン=%s 品番=%s 工程数=%s 工程=%s 実績=%s 計画=%s 調整=%s',
+        detail['plan_date'],
+        detail['line_code'],
+        detail['product_code'],
+        detail['process_count'],
+        ','.join(detail['process_codes']) if detail['process_codes'] else '-',
+        detail['actual_total'],
+        detail['plan_total'],
+        detail['adjust_total'],
+    )
+
+
 def recalculate_progress_qty(
     line_id,
     product_id,
@@ -344,6 +361,10 @@ def recalculate_progress_qty(
         product_demand_qty = demand_by_product.get((plan_date, product_id), Decimal('0'))
         unique_process_ids = sorted({r.process_id for r in rows if r.process_id})
         unresolved_details = []
+        process_codes = sorted({
+            str(getattr(r.process, 'process_code', '') or r.process_id)
+            for r in rows if r.process_id
+        })
 
         for process_id in unique_process_ids:
             step_demand_qty = demand_by_process.get((plan_date, process_id))
@@ -368,6 +389,17 @@ def recalculate_progress_qty(
             raise ProgressDemandResolutionError(unresolved_details)
 
         progress_shipment = int(demand_qty or 0)
+        if product_demand_qty <= 0 and progress_shipment == 0:
+            _log_zero_demand_fallback({
+                'plan_date': str(plan_date),
+                'line_code': str(getattr(rows[0].line, 'line_code', '') or line_id),
+                'product_code': str(getattr(rows[0].product, 'product_code', '') or product_id),
+                'process_count': len(unique_process_ids),
+                'process_codes': process_codes,
+                'actual_total': int(actual_total or 0),
+                'plan_total': int(plan_total or 0),
+                'adjust_total': int((adjust_total or 0) + (scrap_adjust_total or 0)),
+            })
 
         # 進度は日次の累積値のため、休日を含めて「前日（暦日）」を基準に引き継ぐ。
         prev_date = plan_date - timedelta(days=1)
