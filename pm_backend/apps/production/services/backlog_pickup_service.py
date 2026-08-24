@@ -866,14 +866,7 @@ def pickup(viewset, request, **deps):
                 # リードタイム（日）を考慮：現ラインのRoutingStep > Line > BOM明細 の順で優先
                 lt_days = resolve_lead_time_days(current_output_product, bom_item)
     
-                # LineBacklog取得：ガントのstart_datetimeを優先し、無ければ親製品の計画を使用
-                parent_start_map, parent_plan_ids = build_line_start_map(downstream_line_id, [parent_product.id])
-                line_start_map = {
-                    plan_date: qty
-                    for plan_date, qty in parent_start_map.items()
-                    if qty
-                }
-                gantt_plan_ids = set(parent_plan_ids)
+                # 後工程需要の根拠数量は LineBacklog(seq>0) を正とする
                 backlog_rows = get_downstream_backlog_rows(downstream_line_id, [parent_product.id])
     
                 # ステップ5: 後工程の計画数 × BOM個数 = 現在ラインの必要数
@@ -980,7 +973,7 @@ def pickup(viewset, request, **deps):
                                    actual_qty=act * total_qty_per)
                     continue
     
-                fallback_map = {}
+                planned_map_by_date = {}
                 actual_map_by_date = {}
                 for _, plan_date, plan_qty, backlog_plan_id, _sequence_no, row_actual_qty in backlog_rows:
                     qty = Decimal(str(plan_qty or 0))
@@ -988,16 +981,12 @@ def pickup(viewset, request, **deps):
                         act = Decimal(str(row_actual_qty or 0))
                         if act > 0:
                             actual_map_by_date[plan_date] = actual_map_by_date.get(plan_date, Decimal('0')) + act
-                    if qty == 0:
-                        continue
-                    if backlog_plan_id and backlog_plan_id in gantt_plan_ids:
-                        continue
-                    fallback_map[plan_date] = fallback_map.get(plan_date, Decimal('0')) + qty
-    
-                for plan_date in set(line_start_map) | set(fallback_map) | set(actual_map_by_date):
-                    qty = line_start_map.get(plan_date)
-                    if qty is None or qty <= 0:
-                        qty = fallback_map.get(plan_date, Decimal('0'))
+                        if qty == 0:
+                            continue
+                    planned_map_by_date[plan_date] = planned_map_by_date.get(plan_date, Decimal('0')) + qty
+
+                for plan_date in set(planned_map_by_date) | set(actual_map_by_date):
+                    qty = planned_map_by_date.get(plan_date, Decimal('0'))
                     act = actual_map_by_date.get(plan_date, Decimal('0'))
                     if qty == 0 and act == 0:
                         continue
