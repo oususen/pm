@@ -1029,15 +1029,6 @@ const saveSubProcessPlan = async () => {
     })
   })
 
-  const allDates = []
-  if (startDate.value && endDate.value) {
-    const s = new Date(`${startDate.value}T00:00:00`)
-    const e = new Date(`${endDate.value}T00:00:00`)
-    for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-      allDates.push(toDateStr(d))
-    }
-  }
-
   const finishedEntries = []
   if (selectedChecksheetMapping.value) {
     Object.keys(subGrid.value).forEach((key) => {
@@ -1053,12 +1044,17 @@ const saveSubProcessPlan = async () => {
     })
   }
 
+  const targetDates = Array.from(new Set([
+    ...entries.map((entry) => entry.plan_date),
+    ...finishedEntries.map((entry) => entry.plan_date),
+  ])).sort()
+
   try {
     const payload = {
       line_id: selectedLineId.value,
       process_id: selectedSubProcessId.value,
       entries,
-      target_dates: allDates,
+      target_dates: targetDates,
     }
     if (finishedEntries.length) {
       payload.finished_entries = finishedEntries
