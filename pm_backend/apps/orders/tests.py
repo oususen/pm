@@ -6,9 +6,18 @@ from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
 from masters.models import Customer, Product
-from orders.core.models import KubotaSakaiDueAdjustment, Order, OrderLine, StgOrderDaily
+from orders.core.models import (
+    KubotaSakaiDueAdjustment,
+    KubotaSakaiDueAllocationOverride,
+    Order,
+    OrderLine,
+    StgOrderDaily,
+)
 from orders.core.services.kubota_sakai_kakutei_import import KubotaSakaiKakuteiImportService
-from shipping.views_kubota_sakai_due_adjustment import KubotaSakaiDueAdjustmentViewSet
+from shipping.views_kubota_sakai_due_adjustment import (
+    KubotaSakaiDueAdjustmentViewSet,
+    _link_forward_plans_for_group,
+)
 
 
 class KubotaSakaiDueAdjustmentImportTests(TestCase):
@@ -97,6 +106,101 @@ class KubotaSakaiDueAdjustmentImportTests(TestCase):
         self.assertEqual(firm_row.demand_qty, Decimal('9'))
         self.assertEqual(firm_row.delivery_qty, Decimal('9'))
         self.assertEqual(response.data['deleted_forecast'], 1)
+
+    def test_link_forward_plans_only_targets_future_forward_rows(self):
+        business_today = date(2026, 8, 24)
+        future_due = date(2026, 8, 25)
+        firm_due = date(2026, 8, 28)
+        past_due = date(2026, 8, 21)
+
+        KubotaSakaiDueAdjustment.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no='4510447094',
+            order_type='FIRM',
+            due_date=firm_due,
+            demand_qty=Decimal('10'),
+            delivery_qty=Decimal('0'),
+            remaining_qty=Decimal('0'),
+        )
+        future_row = KubotaSakaiDueAdjustment.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no=None,
+            order_type='FORECAST',
+            due_date=future_due,
+            demand_qty=Decimal('0'),
+            delivery_qty=Decimal('10'),
+            remaining_qty=Decimal('0'),
+        )
+        past_row = KubotaSakaiDueAdjustment.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no=None,
+            order_type='FORECAST',
+            due_date=past_due,
+            demand_qty=Decimal('0'),
+            delivery_qty=Decimal('7'),
+            remaining_qty=Decimal('0'),
+        )
+
+        linked = _link_forward_plans_for_group(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            business_today=business_today,
+        )
+
+        self.assertEqual(linked, 1)
+        future_row.refresh_from_db()
+        past_row.refresh_from_db()
+        self.assertEqual(future_row.source_order_no, '4510447094')
+        self.assertEqual(future_row.order_type, 'FIRM')
+        self.assertIsNone(past_row.source_order_no)
+        self.assertEqual(past_row.order_type, 'FORECAST')
+
+    def test_link_forward_plans_skips_fixed_future_rows(self):
+        business_today = date(2026, 8, 24)
+        future_due = date(2026, 8, 27)
+        firm_due = date(2026, 8, 28)
+
+        KubotaSakaiDueAdjustment.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no='4511250001',
+            order_type='FIRM',
+            due_date=firm_due,
+            demand_qty=Decimal('12'),
+            delivery_qty=Decimal('0'),
+            remaining_qty=Decimal('0'),
+        )
+        fixed_future_row = KubotaSakaiDueAdjustment.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no=None,
+            order_type='FORECAST',
+            due_date=future_due,
+            demand_qty=Decimal('0'),
+            delivery_qty=Decimal('12'),
+            remaining_qty=Decimal('0'),
+        )
+        KubotaSakaiDueAllocationOverride.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no=None,
+            due_date=future_due,
+            fixed_qty=Decimal('12'),
+        )
+
+        linked = _link_forward_plans_for_group(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            business_today=business_today,
+        )
+
+        self.assertEqual(linked, 0)
+        fixed_future_row.refresh_from_db()
+        self.assertIsNone(fixed_future_row.source_order_no)
+        self.assertEqual(fixed_future_row.order_type, 'FORECAST')
 
 
 class KubotaSakaiKakuteiImportServiceTests(TestCase):

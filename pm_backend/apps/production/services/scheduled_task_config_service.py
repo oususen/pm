@@ -158,6 +158,7 @@ def _normalize_config_payload(request_data):
         'execution_order': request_data.get('execution_order'),
         'range_base_day': (request_data.get('range_base_day') or 'TODAY').upper(),
         'range_days_after': request_data.get('range_days_after', 45),
+        'kubota_due_auto_link_enabled': _to_bool(request_data.get('kubota_due_auto_link_enabled', True), True),
         'average_days_window': request_data.get('average_days_window', 60),
         'safety_days': request_data.get('safety_days', 1),
         'is_enabled': request_data.get('is_enabled', True),
@@ -281,6 +282,7 @@ def _resolve_or_create_config(payload, line_obj, process_obj):
             'scheduled_dom': payload['scheduled_dom'],
             'range_base_day': payload['range_base_day'],
             'range_days_after': payload['range_days_after'],
+            'kubota_due_auto_link_enabled': payload['kubota_due_auto_link_enabled'],
             'average_days_window': payload['average_days_window'],
             'safety_days': payload['safety_days'],
             'is_enabled': payload['is_enabled'],
@@ -299,6 +301,7 @@ def _apply_config_values(*, config, payload, line_obj, process_obj, user):
     config.scheduled_dom = payload['scheduled_dom']
     config.range_base_day = payload['range_base_day']
     config.range_days_after = payload['range_days_after']
+    config.kubota_due_auto_link_enabled = payload['kubota_due_auto_link_enabled']
     config.average_days_window = payload['average_days_window']
     config.safety_days = payload['safety_days']
     config.is_enabled = payload['is_enabled']
@@ -318,7 +321,7 @@ def _apply_config_values(*, config, payload, line_obj, process_obj, user):
 
     update_fields = [
         'scheduled_hour', 'scheduled_minute', 'scheduled_dom',
-        'range_base_day', 'range_days_after', 'average_days_window', 'safety_days',
+        'range_base_day', 'range_days_after', 'kubota_due_auto_link_enabled', 'average_days_window', 'safety_days',
         'is_enabled', 'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
         'line', 'updated_at', 'updated_by',
     ]

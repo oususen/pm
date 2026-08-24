@@ -912,21 +912,26 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        firm_rows = list(KubotaSakaiDueAdjustment.objects.filter(
+        has_firm_rows = KubotaSakaiDueAdjustment.objects.filter(
             product_code=product_code,
             ship_to_code=ship_to_code,
             order_type='FIRM',
             demand_qty__gt=Decimal('0'),
-        ).order_by('due_date'))
-
-        if not firm_rows:
+        ).exists()
+        if not has_firm_rows:
             return Response({'linked': 0, 'detail': '紐づけ先のFIRM注文がありません。'})
 
-        firm_dates = [(r.due_date, r.source_order_no) for r in firm_rows if r.source_order_no]
-        if not firm_dates:
+        has_firm_order_no = KubotaSakaiDueAdjustment.objects.filter(
+            product_code=product_code,
+            ship_to_code=ship_to_code,
+            order_type='FIRM',
+            demand_qty__gt=Decimal('0'),
+            source_order_no__isnull=False,
+        ).exists()
+        if not has_firm_order_no:
             return Response({'linked': 0, 'detail': '注番付きのFIRM注文がありません。'})
 
-        forward_planned = list(KubotaSakaiDueAdjustment.objects.filter(
+        has_forward_planned = KubotaSakaiDueAdjustment.objects.filter(
             product_code=product_code,
             ship_to_code=ship_to_code,
             source_order_no__isnull=True,
@@ -934,44 +939,12 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             delivery_qty__gt=Decimal('0'),
             demand_qty=Decimal('0'),
             due_date__gt=business_today,
-        ).order_by('due_date'))
-
-        if not forward_planned:
+        ).exists()
+        if not has_forward_planned:
             return Response({'linked': 0, 'detail': '紐づけ対象の前倒し計画がありません。今日以前の計画は対象外です。'})
 
-        linked_count = 0
         with transaction.atomic():
-            for fp_row in forward_planned:
-                target_order_no = None
-                for firm_date, firm_son in firm_dates:
-                    if firm_date > fp_row.due_date:
-                        target_order_no = firm_son
-                        break
-                if not target_order_no:
-                    continue
-
-                conflict = KubotaSakaiDueAdjustment.objects.filter(
-                    product_code=product_code,
-                    ship_to_code=ship_to_code,
-                    source_order_no=target_order_no,
-                    due_date=fp_row.due_date,
-                ).exists()
-                if conflict:
-                    target = KubotaSakaiDueAdjustment.objects.filter(
-                        product_code=product_code,
-                        ship_to_code=ship_to_code,
-                        source_order_no=target_order_no,
-                        due_date=fp_row.due_date,
-                    ).first()
-                    target.delivery_qty += fp_row.delivery_qty
-                    target.save(update_fields=['delivery_qty'])
-                    fp_row.delete()
-                else:
-                    fp_row.source_order_no = target_order_no
-                    fp_row.order_type = 'FIRM'
-                    fp_row.save(update_fields=['source_order_no', 'order_type'])
-                linked_count += 1
-
+            linked_count = _link_forward_plans_for_group(product_code, ship_to_code, business_today)
             rebalance_input_map = {}
             for row in KubotaSakaiDueAdjustment.objects.filter(
                 product_code=product_code,
@@ -1290,6 +1263,79 @@ def _recalculate_remaining_for_groups(groups):
             if row.remaining_qty != new_remaining:
                 row.remaining_qty = new_remaining
                 row.save(update_fields=['remaining_qty'])
+
+
+def _link_forward_plans_for_group(product_code, ship_to_code, business_today):
+    fixed_keys = set(
+        KubotaSakaiDueAllocationOverride.objects.filter(
+            product_code=product_code,
+            ship_to_code=ship_to_code,
+            fixed_qty__gt=Decimal('0'),
+        ).values_list('source_order_no', 'due_date')
+    )
+
+    firm_rows = list(KubotaSakaiDueAdjustment.objects.filter(
+        product_code=product_code,
+        ship_to_code=ship_to_code,
+        order_type='FIRM',
+        demand_qty__gt=Decimal('0'),
+    ).order_by('due_date'))
+
+    if not firm_rows:
+        return 0
+
+    firm_dates = [(r.due_date, r.source_order_no) for r in firm_rows if r.source_order_no]
+    if not firm_dates:
+        return 0
+
+    forward_planned = list(KubotaSakaiDueAdjustment.objects.filter(
+        product_code=product_code,
+        ship_to_code=ship_to_code,
+        source_order_no__isnull=True,
+        order_type='FORECAST',
+        delivery_qty__gt=Decimal('0'),
+        demand_qty=Decimal('0'),
+        due_date__gt=business_today,
+    ).order_by('due_date'))
+
+    if not forward_planned:
+        return 0
+
+    linked_count = 0
+    for fp_row in forward_planned:
+        if (fp_row.source_order_no, fp_row.due_date) in fixed_keys:
+            continue
+        target_order_no = None
+        for firm_date, firm_son in firm_dates:
+            if firm_date > fp_row.due_date:
+                target_order_no = firm_son
+                break
+        if not target_order_no:
+            continue
+
+        conflict = KubotaSakaiDueAdjustment.objects.filter(
+            product_code=product_code,
+            ship_to_code=ship_to_code,
+            source_order_no=target_order_no,
+            due_date=fp_row.due_date,
+        ).exists()
+        if conflict:
+            target = KubotaSakaiDueAdjustment.objects.filter(
+                product_code=product_code,
+                ship_to_code=ship_to_code,
+                source_order_no=target_order_no,
+                due_date=fp_row.due_date,
+            ).first()
+            target.delivery_qty += fp_row.delivery_qty
+            target.save(update_fields=['delivery_qty'])
+            fp_row.delete()
+        else:
+            fp_row.source_order_no = target_order_no
+            fp_row.order_type = 'FIRM'
+            fp_row.save(update_fields=['source_order_no', 'order_type'])
+        linked_count += 1
+
+    return linked_count
 
 
 def _rebalance_delivery_qty_for_groups(

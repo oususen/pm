@@ -87,6 +87,10 @@ class ScheduleConfig(models.Model):
         default=45,
         verbose_name='計算期間終了日数（基準日から何日後）'
     )
+    kubota_due_auto_link_enabled = models.BooleanField(
+        default=True,
+        verbose_name='クボタ堺納期調整 自動紐づけ有効'
+    )
     average_days_window = models.PositiveSmallIntegerField(
         default=60,
         verbose_name='平均算出日数'

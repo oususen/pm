@@ -235,7 +235,7 @@
           <span class="suffix">日後</span>
         </div>
         <p class="helper">
-          終了日のみ指定。開始日は製品ごとのリードタイムから自動決定されます（今日 − (最大LT + 1)営業日）。業務日付は8時境界です。
+          {{ rangeSettingHelp(cfg.task_name) }}
         </p>
       </div>
 
@@ -244,6 +244,16 @@
           <input type="checkbox" v-model="cfg.is_enabled" :disabled="!canEdit" />
           有効
         </label>
+      </div>
+
+      <div v-if="cfg.task_name === 'KUBOTA_SAKAI_DUE_SYNC'" class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="cfg.kubota_due_auto_link_enabled" :disabled="!canEdit" />
+          前倒し計画の自動紐づけを有効にする
+        </label>
+        <p class="helper">
+          ON のときだけ、定時タスク実行時に将来日の前倒し計画を後続FIRM注番へ自動紐づけします。
+        </p>
       </div>
 
       <div class="field" style="margin-top: 12px">
@@ -1332,7 +1342,13 @@ const safetyStockTaskLabel = (taskName) => {
 
 // INVENTORY_RECALC は _resolve_effective_start_date が LT 基準で開始日を自動決定するため、
 // UI での開始日選択は意味を持たない。PICKUP_ONLY のみ開始日選択を表示する。
-const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY' || taskName === 'KUBOTA_SAKAI_DUE_SYNC'
+const showRangeBaseDay = (taskName) => taskName === 'PICKUP_ONLY'
+const rangeSettingHelp = (taskName) => {
+  if (taskName === 'KUBOTA_SAKAI_DUE_SYNC') {
+    return '開始日は常に今日です。今日から何日後までを受注取込・再配分の対象にするかを指定します。業務日付は8時境界です。'
+  }
+  return '終了日のみ指定。開始日は製品ごとのリードタイムから自動決定されます（今日 − (最大LT + 1)営業日）。業務日付は8時境界です。'
+}
 const showInventoryRangeSetting = (taskName) =>
   taskName !== purchaseActualReconcileTaskName
   && taskName !== productionActualReconcileTaskName
@@ -1406,6 +1422,7 @@ const loadConfig = async () => {
       ...cfg,
       average_days_window: Number.isFinite(Number(cfg.average_days_window)) ? Number(cfg.average_days_window) : 60,
       safety_days: Number.isFinite(Number(cfg.safety_days)) ? Number(cfg.safety_days) : 1,
+      kubota_due_auto_link_enabled: cfg.kubota_due_auto_link_enabled !== false,
       notify_users: cfg.notify_users || [],
       notify_user_codes: cfg.notify_user_codes || [],
       notify_user_names: cfg.notify_user_names || {},
@@ -1461,6 +1478,7 @@ const saveConfig = async (cfg) => {
       range_end_date: null,
       range_base_day: showRangeBaseDay(cfg.task_name) ? (cfg.range_base_day || 'TODAY') : 'TODAY',
       range_days_after: Number.isFinite(Number(cfg.range_days_after)) ? Number(cfg.range_days_after) : 45,
+      kubota_due_auto_link_enabled: cfg.kubota_due_auto_link_enabled !== false,
       average_days_window: Number.isFinite(Number(cfg.average_days_window)) ? Number(cfg.average_days_window) : 60,
       safety_days: Number.isFinite(Number(cfg.safety_days)) ? Number(cfg.safety_days) : 1,
       is_enabled: cfg.is_enabled,

@@ -17,6 +17,7 @@ from production.models_schedule_config import ScheduleConfig, record_schedule_ru
 from system_settings.models import SystemSetting
 from shipping.services.kubota_sakai_delivery_progress import recalculate_delivery_progress
 from shipping.views_kubota_sakai_due_adjustment import (
+    _link_forward_plans_for_group,
     _rebalance_delivery_qty_for_groups,
     _recalculate_remaining_for_groups,
     sync_kubota_sakai_due_adjustments_from_orders,
@@ -29,13 +30,16 @@ OVERDUE_NOTIFY_USERS_KEY = 'kubota_sakai.overdue_notify_user_ids'
 
 def _resolve_task_date_range(config):
     today = get_business_today()
-    base_day = getattr(config, 'range_base_day', 'TODAY') or 'TODAY'
-    if base_day == 'YESTERDAY':
-        start_date = today - timedelta(days=1)
-    elif base_day == 'TWO_DAYS_AGO':
-        start_date = today - timedelta(days=2)
-    else:
+    if getattr(config, 'task_name', '') == 'KUBOTA_SAKAI_DUE_SYNC':
         start_date = today
+    else:
+        base_day = getattr(config, 'range_base_day', 'TODAY') or 'TODAY'
+        if base_day == 'YESTERDAY':
+            start_date = today - timedelta(days=1)
+        elif base_day == 'TWO_DAYS_AGO':
+            start_date = today - timedelta(days=2)
+        else:
+            start_date = today
     days_after = int(getattr(config, 'range_days_after', 45) or 45)
     end_date = start_date + timedelta(days=days_after)
     return today, start_date, end_date
@@ -192,6 +196,14 @@ def run_kubota_sakai_due_sync():
                 'affected_groups': 0,
             }
             if affected_groups:
+                if getattr(config, 'kubota_due_auto_link_enabled', True):
+                    for product_code, ship_to_code_norm in affected_groups:
+                        _link_forward_plans_for_group(
+                            product_code=product_code,
+                            ship_to_code=ship_to_code_norm or None,
+                            business_today=today,
+                        )
+
                 input_delivery_map = {}
                 rows = KubotaSakaiDueAdjustment.objects.filter(
                     product_code__in=[group[0] for group in affected_groups],
@@ -223,6 +235,7 @@ def run_kubota_sakai_due_sync():
                     },
                     user=None,
                     now=datetime.now(),
+                    immutable_cutoff_date=today,
                 )
                 _recalculate_remaining_for_groups(affected_groups)
                 group_rows = KubotaSakaiDueAdjustment.objects.filter(

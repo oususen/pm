@@ -1171,6 +1171,7 @@ class ScheduleConfigSerializer(serializers.ModelSerializer):
             'execution_order',
             'auto_plan_sequence_locked',
             'range_base_day', 'range_days_after',
+            'kubota_due_auto_link_enabled',
             'include_current_month', 'include_next_month', 'include_second_month', 'include_third_month',
             'notify_users', 'notify_user_names', 'notify_user_codes',
             'last_run_at', 'last_run_status', 'last_run_status_display',
