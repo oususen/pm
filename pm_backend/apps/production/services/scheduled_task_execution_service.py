@@ -62,6 +62,37 @@ def run_now(request, logger=None):
         )
 
 
+def request_cancel(request, logger=None):
+    from production.scheduler.tasks import request_task_cancel
+
+    task = str(request.data.get('task_name') or 'INVENTORY_RECALC').upper()
+    config_id = request.data.get('config_id') or request.data.get('id')
+    supported_tasks = {'INVENTORY_RECALC', 'PICKUP_ONLY', 'INVENTORY_ONLY', 'PROGRESS_ONLY'}
+
+    if task not in supported_tasks:
+        return Response(
+            {'detail': f'このタスクはキャンセル未対応です: {task}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if config_id:
+        exists = ScheduleConfig.objects.filter(id=config_id, task_name=task).exists()
+        if not exists:
+            return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+
+    result = request_task_cancel(task)
+    if not result.get('ok'):
+        if result.get('reason') == 'not_found':
+            return Response({'detail': '対象設定が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+        if result.get('reason') == 'not_running':
+            return Response({'detail': '現在このタスクは実行中ではありません。'}, status=status.HTTP_409_CONFLICT)
+        return Response({'detail': 'キャンセル要求に失敗しました。'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    if result.get('already_requested'):
+        return Response({'detail': '既にキャンセル要求済みです。停止完了までお待ちください。'})
+    return Response({'detail': 'キャンセル要求を受け付けました。安全な区切りで停止します。'})
+
+
 def _resolve_task_label(task_name):
     return TASK_LABELS.get(task_name)
 
