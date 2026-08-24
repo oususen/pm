@@ -418,6 +418,60 @@ def _resolve_line_calendar_id(line_id):
     ).values_list('id', flat=True).first()
 
 
+def _resolve_calendar_working_day(target_date, calendar_id, workday_cache=None):
+    """
+    営業日判定を返す。
+
+    優先順位:
+    1. 指定カレンダの CalendarDay
+    2. daiso カレンダの CalendarDay
+    3. どちらも無い場合のみ週末判定
+    """
+    if not calendar_id:
+        return target_date.weekday() < 5
+
+    cache = workday_cache if workday_cache is not None else {}
+    cache_key = (calendar_id, target_date)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    from masters.models import Calendar, CalendarDay
+
+    cal = CalendarDay.objects.filter(
+        calendar_id=calendar_id,
+        target_date=target_date,
+    ).first()
+    if cal is not None:
+        result = cal.is_working_day
+        cache[cache_key] = result
+        return result
+
+    daiso_calendar_id = Calendar.objects.filter(
+        calendar_code='daiso'
+    ).values_list('id', flat=True).first()
+    if daiso_calendar_id and daiso_calendar_id != calendar_id:
+        daiso_cache_key = (daiso_calendar_id, target_date)
+        cached = cache.get(daiso_cache_key)
+        if cached is not None:
+            cache[cache_key] = cached
+            return cached
+
+        daiso_cal = CalendarDay.objects.filter(
+            calendar_id=daiso_calendar_id,
+            target_date=target_date,
+        ).first()
+        if daiso_cal is not None:
+            result = daiso_cal.is_working_day
+            cache[daiso_cache_key] = result
+            cache[cache_key] = result
+            return result
+
+    result = target_date.weekday() < 5
+    cache[cache_key] = result
+    return result
+
+
 def _build_adjustment_maps(line_id, start_date, end_date, product_ids=None):
     """調整を一括取得して辞書化（計算ループ中はDB参照しない）"""
     target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})
@@ -1136,18 +1190,11 @@ def recalculate_stock_qty(
         calendar_id = _resolve_line_calendar_id(line_id)
 
     def is_working_day(target_date):
-        if not calendar_id:
-            return target_date.weekday() < 5
-        if target_date in workday_cache:
-            return workday_cache[target_date]
-        from masters.models import CalendarDay
-        cal = CalendarDay.objects.filter(
-            calendar_id=calendar_id,
-            target_date=target_date
-        ).first()
-        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-        workday_cache[target_date] = is_work
-        return is_work
+        return _resolve_calendar_working_day(
+            target_date,
+            calendar_id,
+            workday_cache,
+        )
 
     def get_prev_working_day(target_date):
         prev_date = target_date - timedelta(days=1)
@@ -1407,18 +1454,11 @@ def recalculate_planned_stock_qty(
         calendar_id = _resolve_line_calendar_id(line_id)
 
     def is_working_day(target_date):
-        if not calendar_id:
-            return target_date.weekday() < 5
-        if target_date in workday_cache:
-            return workday_cache[target_date]
-        from masters.models import CalendarDay
-        cal = CalendarDay.objects.filter(
-            calendar_id=calendar_id,
-            target_date=target_date
-        ).first()
-        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-        workday_cache[target_date] = is_work
-        return is_work
+        return _resolve_calendar_working_day(
+            target_date,
+            calendar_id,
+            workday_cache,
+        )
 
     def get_prev_working_day(target_date):
         prev_date = target_date - timedelta(days=1)
@@ -1790,18 +1830,11 @@ def recalculate_inventory_for_line(
     shared_workday_cache = {}
 
     def is_working_day(target_date):
-        if not shared_calendar_id:
-            return target_date.weekday() < 5
-        if target_date in shared_workday_cache:
-            return shared_workday_cache[target_date]
-        from masters.models import CalendarDay
-        cal = CalendarDay.objects.filter(
-            calendar_id=shared_calendar_id,
-            target_date=target_date,
-        ).first()
-        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-        shared_workday_cache[target_date] = is_work
-        return is_work
+        return _resolve_calendar_working_day(
+            target_date,
+            shared_calendar_id,
+            shared_workday_cache,
+        )
 
     def get_prev_working_day(target_date):
         prev_date = target_date - timedelta(days=1)

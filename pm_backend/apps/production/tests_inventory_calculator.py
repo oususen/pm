@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from masters.models import Line, Process, Product
-from production.inventory.inventory_calculator import recalculate_planned_stock_qty
+from masters.models import Calendar, CalendarDay, Line, Process, Product
+from production.inventory.inventory_calculator import _resolve_calendar_working_day, recalculate_planned_stock_qty
 from production.models_line_backlog import LineBacklog
 
 
@@ -67,3 +67,26 @@ class PlannedStockCalculatorTest(TestCase):
         self.assertEqual(start_day.planned_stock_qty, -5)
         self.assertEqual(extra_lot.planned_stock_qty, 0)
         self.assertEqual(next_day.planned_stock_qty, -5)
+
+    def test_missing_calendar_day_falls_back_to_daiso_calendar_before_weekend(self):
+        daiso = Calendar.objects.create(
+            calendar_code='daiso',
+            calendar_name='ダイソー',
+        )
+        custom = Calendar.objects.create(
+            calendar_code='CUSTOM-CAL',
+            calendar_name='独自カレンダ',
+        )
+        CalendarDay.objects.create(
+            calendar=daiso,
+            target_date='2026-08-24',
+            is_working_day=False,
+        )
+
+        result = _resolve_calendar_working_day(
+            date(2026, 8, 24),
+            custom.id,
+            {},
+        )
+
+        self.assertFalse(result)

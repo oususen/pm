@@ -7,12 +7,12 @@ from decimal import Decimal
 
 from django.db.models import Q
 
-from masters.models import Calendar, CalendarDay, Line, RoutingStep
+from masters.models import Calendar, Line, RoutingStep
 from orders.utils.calendar_utils import get_business_today
 from system_settings.models import SystemSetting
 from ..models import LineDemand
 from ..models_line_backlog import LineBacklog
-from .inventory_calculator import _get_max_parent_bom_lead_time
+from .inventory_calculator import _get_max_parent_bom_lead_time, _resolve_calendar_working_day
 from .trace_debug import trace_log
 
 
@@ -108,19 +108,11 @@ def recalculate_progress_qty(
         ).values_list('id', flat=True).first()
 
     def is_working_day(target_date):
-        # カレンダー未設定時は土日を非稼働日として扱う
-        if not calendar_id:
-            return target_date.weekday() < 5
-        if target_date in workday_cache:
-            return workday_cache[target_date]
-        cal = CalendarDay.objects.filter(
-            calendar_id=calendar_id,
-            target_date=target_date
-        ).first()
-        # カレンダに定義が無い日も週末は非稼働とする
-        is_work = cal.is_working_day if cal is not None else target_date.weekday() < 5
-        workday_cache[target_date] = is_work
-        return is_work
+        return _resolve_calendar_working_day(
+            target_date,
+            calendar_id,
+            workday_cache,
+        )
 
     def shift_working_days(target_date, days):
         """営業日ベースで日付をシフト"""
