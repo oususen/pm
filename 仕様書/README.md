@@ -325,6 +325,14 @@ Django Admin: http://localhost:8000/admin/
   - `pm_backend/apps/production/views_actual_cycle_time.py` と `pm_backend/apps/production/production_actual_reconcile.py` の `views_process_realtime` 直接依存を解消
   - `pm_backend/apps/production/services/process_realtime_history_service.py` `process_realtime_backlog_service.py` `process_realtime_scrap_service.py` を追加し、`views_process_realtime.py` の履歴生成、backlog / 在庫・進度差分反映、仕損参照・補充・判定を service へ移動
   - `pm_backend/apps/production/services/process_realtime_query_service.py` を追加し、`views_process_realtime.py` に残っていたガント計画数参照と日時補助・再計算補助の一部を service へ移動
+- 2026-08-24:
+  - `pm_backend/apps/production/services/backlog_pickup_service.py` `backlog_recalc_service.py` `backlog_save_service.py` を追加し、`LineBacklogViewSet` の主要変更系ロジックを `views.py` から service へ移動
+  - `pm_backend/apps/production/services/line_plan_mutation_service.py` を追加し、`LinePlanViewSet.save` と `bulk_delete` を service 委譲へ変更
+  - `pm_backend/apps/production/services/gantt_plan_generation_service.py` `gantt_structure_mutation_service.py` `gantt_schedule_adjustment_service.py` を追加し、`LineGanttPlanViewSet` の生成・構造変更・既存バー調整を分離
+  - `pm_backend/apps/production/services/single_process_plan.py` へ `sub_process_save` を完全委譲し、`single_process_plan_query_service.py` を追加して `singleproc_finished_entries` を分離
+  - スケジュール実行系 API を `pm_backend/apps/production/views_schedule.py` へ移し、実行・設定・ログ・整合チェックをそれぞれ専用 service へ整理
+  - PDF 系 API を `pm_backend/apps/production/views_pdf_floor_shipping.py` `views_pdf_hokushin_list.py` `views_pdf_hokushin_delivery.py` へ分離
+  - 設定系 API を `pm_backend/apps/production/views_settings.py` と `views_schedule_settings.py` へ分離し、`views.py` の責務を縮小
 
 ## 次のステップ
 

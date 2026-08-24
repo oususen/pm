@@ -281,6 +281,7 @@ def pickup(viewset, request, **deps):
     
     logger = logging.getLogger(__name__)
     pickup_start = time.perf_counter()
+    phase_start = pickup_start
     
     line_id = request.data.get('line_id')
     if not line_id:
@@ -395,6 +396,15 @@ def pickup(viewset, request, **deps):
         prefix='routing__',
     )
     
+    logger.info(
+        "pickup: phase=setup line_id=%s target_products=%s final_products=%s intermediate_products=%s time=%.3fs",
+        line_id,
+        len(target_products),
+        len(final_products),
+        len(intermediate_products),
+        time.perf_counter() - phase_start,
+    )
+
     # 需要を計算：(product_id, plan_date, process_id, parent_product_id) -> order_qty
     demand_map = defaultdict(Decimal)
     demand_actual_map = defaultdict(Decimal)
@@ -673,6 +683,8 @@ def pickup(viewset, request, **deps):
     
     # 最終品はLineDemandから、中間品は後工程から需要を取得
     
+    phase_start = time.perf_counter()
+
     # A. 最終品（is_final_product=True）はLineDemandから取得
     if final_products:
         demand_qs = LineDemand.objects.filter(
@@ -713,6 +725,15 @@ def pickup(viewset, request, **deps):
             else:
                 demand_qty = firm_qty if firm_qty > 0 else forecast_qty
             add_demand(key[0], key[1], demand_qty, None, actual_qty=demand_qty)
+
+    logger.info(
+        "pickup: phase=final_demand line_id=%s rows=%s demand_keys=%s demand_actual_keys=%s time=%.3fs",
+        line_id,
+        len(line_demands) if final_products else 0,
+        len(demand_map),
+        len(demand_actual_map),
+        time.perf_counter() - phase_start,
+    )
     
     # B. 中間品は後工程から需要を取得
     
@@ -725,6 +746,8 @@ def pickup(viewset, request, **deps):
     #   ステップ5: BOM個数を掛けて現在ラインの必要数を計算
     downstream_found = False
     
+    phase_start = time.perf_counter()
+
     # 中間品がある場合、関連データを一括取得（N+1問題を解消）
     bom_items_by_child = {}
     parent_product_ids = set()
@@ -757,6 +780,17 @@ def pickup(viewset, request, **deps):
                 downstream_steps_by_product[prod_id] = []
             downstream_steps_by_product[prod_id].append(d_step)
     
+    logger.info(
+        "pickup: phase=intermediate_prefetch line_id=%s bom_children=%s bom_items=%s parent_products=%s downstream_steps=%s time=%.3fs",
+        line_id,
+        len(bom_items_by_child),
+        sum(len(items) for items in bom_items_by_child.values()),
+        len(parent_product_ids),
+        sum(len(items) for items in downstream_steps_by_product.values()),
+        time.perf_counter() - phase_start,
+    )
+
+    phase_start = time.perf_counter()
     for product_id in intermediate_products:
         # 現在ラインのoutput_product（例：ブレーキラインなら中間品C）
         current_output_product = product_id
@@ -940,6 +974,20 @@ def pickup(viewset, request, **deps):
                                actual_qty=act * total_qty_per, parent_plan_date=plan_date)
                     downstream_found = True
     
+    logger.info(
+        "pickup: phase=intermediate_expand_routing line_id=%s downstream_found=%s demand_keys=%s demand_actual_keys=%s parent_date_keys=%s gantt_cache=%s downstream_cache=%s time=%.3fs",
+        line_id,
+        downstream_found,
+        len(demand_map),
+        len(demand_actual_map),
+        len(demand_parent_date_map),
+        len(gantt_usage_cache),
+        len(downstream_backlog_cache),
+        time.perf_counter() - phase_start,
+    )
+
+    phase_start = time.perf_counter()
+
     # 2. RoutingStepベースの展開が失敗した場合、BOMベースの展開を試みる（中間品のみ）
     if not downstream_found and intermediate_products:
         # BOMItemを一括取得（line_idが現在ラインと一致するもの）
@@ -1023,11 +1071,23 @@ def pickup(viewset, request, **deps):
                         parent_plan_date=orig_plan_date,
                     )
                     downstream_found = True
+
+    logger.info(
+        "pickup: phase=intermediate_expand_fallback line_id=%s downstream_found=%s demand_keys=%s demand_actual_keys=%s parent_date_keys=%s time=%.3fs",
+        line_id,
+        downstream_found,
+        len(demand_map),
+        len(demand_actual_map),
+        len(demand_parent_date_map),
+        time.perf_counter() - phase_start,
+    )
     
     # 4. LineBacklogに保存（order_qtyのみ更新、他の数量は維持）- bulk操作で高速化
     upserted_items = []
     upsert_start = time.perf_counter()
     try:
+        phase_collect_start = time.perf_counter()
+
         # 対象キーを収集
         target_key_qty_map = defaultdict(Decimal)
         target_key_actual_map = defaultdict(Decimal)
@@ -1054,8 +1114,17 @@ def pickup(viewset, request, **deps):
             for (product_id, plan_date, process_id), order_qty in target_key_qty_map.items()
         ]
         target_key_set = set(target_key_qty_map.keys())
-    
+        logger.info(
+            "pickup: phase=upsert_collect_keys line_id=%s qty_keys=%s actual_keys=%s target_keys=%s time=%.3fs",
+            line_id,
+            len(target_key_qty_map),
+            len(target_key_actual_map),
+            len(target_keys),
+            time.perf_counter() - phase_collect_start,
+        )
+
         # 期間内の全日付に対して、存在しない場合はsequence_no=0の行を用意する
+        phase_fill_start = time.perf_counter()
         if start_dt and end_dt:
             # sequence_no=0(需要行)の存在だけを判定する。
             # 計画行(sequence_no>0)が存在していても、需要行が無ければ新規作成する。
@@ -1083,8 +1152,15 @@ def pickup(viewset, request, **deps):
                             continue
                         target_keys.append((product_id, plan_date, process_id, Decimal('0'), Decimal('0')))
                         target_key_set.add(key)
-    
+        logger.info(
+            "pickup: phase=upsert_fill_missing line_id=%s target_keys=%s time=%.3fs",
+            line_id,
+            len(target_keys),
+            time.perf_counter() - phase_fill_start,
+        )
+
         # DEMAND特例ルールを読み込み、demand_qty_plan の決定に使用
+        phase_rule_start = time.perf_counter()
         demand_order_qty_processes = set()
         try:
             from system_settings.models import SystemSetting as SysSetting
@@ -1108,8 +1184,15 @@ def pickup(viewset, request, **deps):
                                 demand_order_qty_processes.add(pid)
         except Exception as e:
             logger.warning("pickup: DEMAND特例ルール読み込み失敗: %s", e)
-    
+        logger.info(
+            "pickup: phase=upsert_load_rules line_id=%s matched_processes=%s time=%.3fs",
+            line_id,
+            len(demand_order_qty_processes),
+            time.perf_counter() - phase_rule_start,
+        )
+
         # demand_qty_plan を親単位で判定してから合算
+        phase_plan_map_start = time.perf_counter()
         now = datetime.now()
         today = (now - timedelta(days=1)).date() if now.hour < 8 else now.date()
         target_key_demand_plan_map = defaultdict(Decimal)
@@ -1132,9 +1215,17 @@ def pickup(viewset, request, **deps):
             else:
                 # 親の日が今日以降 or 親日付なし: 計画値を使用
                 target_key_demand_plan_map[key] += oq
-    
+        logger.info(
+            "pickup: phase=upsert_build_demand_plan line_id=%s all_demand_keys=%s demand_plan_keys=%s time=%.3fs",
+            line_id,
+            len(all_demand_keys),
+            len(target_key_demand_plan_map),
+            time.perf_counter() - phase_plan_map_start,
+        )
+
         if target_keys:
             # 既存レコードを一括取得（巨大ORを避ける）
+            phase_existing_start = time.perf_counter()
             target_product_ids = sorted({product_id for product_id, _, _, _, _ in target_keys})
             target_process_ids = sorted({process_id for _, _, process_id, _, _ in target_keys})
             target_plan_dates = [plan_date for _, plan_date, _, _, _ in target_keys]
@@ -1152,7 +1243,14 @@ def pickup(viewset, request, **deps):
                 (r.product_id, r.plan_date, r.process_id): r
                 for r in existing_qs
             }
-    
+            logger.info(
+                "pickup: phase=upsert_load_existing line_id=%s existing_records=%s time=%.3fs",
+                line_id,
+                len(existing_records),
+                time.perf_counter() - phase_existing_start,
+            )
+
+            phase_prepare_start = time.perf_counter()
             to_create = []
             to_update = []
             for product_id, plan_date, process_id, order_qty, order_qty_actual in target_keys:
@@ -1176,15 +1274,30 @@ def pickup(viewset, request, **deps):
                         order_qty=order_qty,
                         order_qty_actual=order_qty_actual,
                         demand_qty_plan=demand_qty_plan,
-                        plan_qty=0,
-                    ))
-    
+                            plan_qty=0,
+                        ))
+            logger.info(
+                "pickup: phase=upsert_prepare_mutations line_id=%s create=%s update=%s time=%.3fs",
+                line_id,
+                len(to_create),
+                len(to_update),
+                time.perf_counter() - phase_prepare_start,
+            )
+
             # bulk_create と bulk_update を実行
+            phase_write_start = time.perf_counter()
             if to_create:
                 LineBacklog.objects.bulk_create(to_create)
             if to_update:
                 LineBacklog.objects.bulk_update(to_update, ['order_qty', 'order_qty_actual', 'demand_qty_plan', 'plan_qty'])
-    
+            logger.info(
+                "pickup: phase=upsert_write line_id=%s create=%s update=%s time=%.3fs",
+                line_id,
+                len(to_create),
+                len(to_update),
+                time.perf_counter() - phase_write_start,
+            )
+
             upserted_items = to_create + to_update
     
         logger.info(
@@ -1231,7 +1344,14 @@ def pickup(viewset, request, **deps):
                     planned_stock_qty=0,
                 ))
             items_to_serialize = placeholders
+    serialize_start = time.perf_counter()
     serializer = self.get_serializer(items_to_serialize, many=True)
+    logger.info(
+        "pickup: phase=serialize line_id=%s items=%s time=%.3fs",
+        line_id,
+        len(items_to_serialize),
+        time.perf_counter() - serialize_start,
+    )
     logger.info("pickup: total_time=%.3fs", time.perf_counter() - pickup_start)
     return Response(serializer.data)
 
