@@ -32,6 +32,7 @@ import { createMobileDevicesAPI } from './resources/mobileDevices'
 import { createSmtpConfigsAPI } from './resources/smtpConfigs'
 import { createPurchasePlanLockSettingAPI } from './resources/purchasePlanLockSetting'
 import { createProductionPlanLineSettingsAPI } from './resources/productionPlanLineSettings'
+import { createDailyProcessTargetsAPI } from './resources/dailyProcessTargets'
 import { createProductionPlanLockSettingAPI } from './resources/productionPlanLockSetting'
 import { createProductionRecordSettingsAPI } from './resources/productionRecordSettings'
 import { createScheduleConfigAPI } from './resources/scheduleConfig'
@@ -186,6 +187,7 @@ export default {
   smtpConfigs: createSmtpConfigsAPI(client),
   purchasePlanLockSetting: createPurchasePlanLockSettingAPI(client),
   productionPlanLineSettings: createProductionPlanLineSettingsAPI(client),
+  dailyProcessTargets: createDailyProcessTargetsAPI(client),
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
   productionRecordSettings: createProductionRecordSettingsAPI(client),
   scheduleConfig: createScheduleConfigAPI(client),

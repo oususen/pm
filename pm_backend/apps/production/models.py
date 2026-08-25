@@ -13,6 +13,7 @@ from .models_process_work_session import ProcessWorkSession
 from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from .models_process_work_session_equipment import ProcessWorkSessionEquipment
 from .models_schedule_config import ScheduleConfig
+from .models_daily_process_target import DailyProcessTarget
 from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,

@@ -24,6 +24,10 @@
             <option value="APPROVED">承認済み</option>
             <option value="REJECTED">差戻し</option>
           </select>
+          <select v-model="listFilter.version_mode" class="list-filter-select">
+            <option value="latest">版表示: 最新</option>
+            <option value="all">版表示: 全部</option>
+          </select>
         </div>
         <div class="table-wrap">
           <table class="data-table compact">
@@ -773,18 +777,62 @@ const listCollapsed = ref(false)
 const templates = ref([])
 const loadingList = ref(false)
 const selectedTemplateId = ref(null)
-const listFilter = ref({ keyword: '', status: '' })
+const listFilter = ref({ keyword: '', status: '', version_mode: 'latest' })
 
 const filteredTemplates = computed(() => {
   const kw = listFilter.value.keyword.trim().toLowerCase()
   const st = listFilter.value.status
-  return templates.value.filter((row) => {
+  const versionMode = String(listFilter.value.version_mode || 'latest')
+  const filtered = templates.value.filter((row) => {
     if (st && row.status !== st) return false
     if (kw) {
       const haystack = `${row.product_code || ''} ${row.product_name || ''} ${row.name || ''}`.toLowerCase()
       if (!haystack.includes(kw)) return false
     }
     return true
+  })
+  if (versionMode !== 'latest') return filtered
+
+  const latestMap = new Map()
+  filtered.forEach((row) => {
+    const key = [
+      String(row.product || '').trim(),
+      String(row.line || '').trim(),
+      String(row.name || '').trim(),
+    ].join('|')
+    const current = latestMap.get(key)
+    if (!current) {
+      latestMap.set(key, row)
+      return
+    }
+    const currentVersion = Number(current.version || 0)
+    const nextVersion = Number(row.version || 0)
+    if (nextVersion > currentVersion) {
+      latestMap.set(key, row)
+      return
+    }
+    if (nextVersion < currentVersion) return
+
+    const currentUpdatedAt = new Date(current.updated_at || 0).getTime()
+    const nextUpdatedAt = new Date(row.updated_at || 0).getTime()
+    if (nextUpdatedAt > currentUpdatedAt) {
+      latestMap.set(key, row)
+      return
+    }
+    if (nextUpdatedAt < currentUpdatedAt) return
+
+    if (Number(row.id || 0) > Number(current.id || 0)) {
+      latestMap.set(key, row)
+    }
+  })
+
+  return filtered.filter((row) => {
+    const key = [
+      String(row.product || '').trim(),
+      String(row.line || '').trim(),
+      String(row.name || '').trim(),
+    ].join('|')
+    return latestMap.get(key)?.id === row.id
   })
 })
 

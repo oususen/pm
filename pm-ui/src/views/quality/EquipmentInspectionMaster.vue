@@ -72,6 +72,10 @@
               {{ e.equipment_code }} - {{ e.equipment_name || '名称未設定' }}
             </option>
           </select>
+          <select v-model="listFilter.version_mode" class="list-filter-select">
+            <option value="latest">版表示：最新</option>
+            <option value="all">版表示：全部</option>
+          </select>
         </div>
         <div class="table-wrap">
           <table class="data-table compact">
@@ -706,7 +710,7 @@ const rejectDialogVisible = ref(false)
 const rejectComment = ref("")
 const submitDialogVisible = ref(false)
 const submitComment = ref("")
-const listFilter = ref({ keyword: "", status: "", unit_id: "", line_id: "", process_id: "", sheet_code: "" })
+const listFilter = ref({ keyword: "", status: "", unit_id: "", line_id: "", process_id: "", sheet_code: "", version_mode: "latest" })
 const unitOptions = ref([])
 const unitLineMappings = ref([])
 const prevVersionItems = ref([])
@@ -875,7 +879,8 @@ const filteredTemplates = computed(() => {
   const lid = Number(listFilter.value.line_id || 0)
   const pid = Number(listFilter.value.process_id || 0)
   const sc = listFilter.value.sheet_code
-  return templates.value.filter((row) => {
+  const versionMode = String(listFilter.value.version_mode || "latest")
+  const filtered = templates.value.filter((row) => {
     if (st && row.status !== st) return false
     if (kw) {
       const haystack = `${row.sheet_code || ""} ${row.sheet_name || ""}`.toLowerCase()
@@ -896,6 +901,38 @@ const filteredTemplates = computed(() => {
     }
     return true
   })
+  if (versionMode !== "latest") return filtered
+
+  const latestMap = new Map()
+  filtered.forEach((row) => {
+    const key = String(row.sheet_code || "").trim()
+    const current = latestMap.get(key)
+    if (!current) {
+      latestMap.set(key, row)
+      return
+    }
+    const currentVersion = Number(current.version || 0)
+    const nextVersion = Number(row.version || 0)
+    if (nextVersion > currentVersion) {
+      latestMap.set(key, row)
+      return
+    }
+    if (nextVersion < currentVersion) return
+
+    const currentUpdatedAt = new Date(current.updated_at || 0).getTime()
+    const nextUpdatedAt = new Date(row.updated_at || 0).getTime()
+    if (nextUpdatedAt > currentUpdatedAt) {
+      latestMap.set(key, row)
+      return
+    }
+    if (nextUpdatedAt < currentUpdatedAt) return
+
+    if (Number(row.id || 0) > Number(current.id || 0)) {
+      latestMap.set(key, row)
+    }
+  })
+
+  return filtered.filter((row) => latestMap.get(String(row.sheet_code || "").trim())?.id === row.id)
 })
 // 差分表示: 前版との比較 / 差し戻し後修正の比較
 const DIFF_FIELDS = ["item_name", "standard", "frequency", "method", "record_type", "unit", "criteria", "is_required", "is_active"]

@@ -85,6 +85,9 @@
             <span class="processing-chip">{{ pauseNoticeLabel }}</span>
           </div>
           <div v-else class="header-processing empty">加工中なし</div>
+          <div v-if="selectedProcessId && headerProcessTargetLabel" class="header-target-chip">
+            <span>{{ headerProcessTargetLabel }}</span>
+          </div>
         </div>
       </template>
     </div>
@@ -716,6 +719,7 @@ const selectedOperatorAction = ref('')
 const startedProductIds = ref(new Set())
 const startedProductIdsLoaded = ref(false)
 const latestOperatorActionByProduct = ref(new Map())
+const dailyProcessTargets = ref([])
 const selectedCoproductChildren = ref([])
 const selectedCoproductParentCode = ref('')
 const selectedCoproductNoticeLoading = ref(false)
@@ -1401,6 +1405,36 @@ const planStatus = computed(() => {
   const remaining = Math.max(planQty - actualQty, 0)
   const remainingAfterInput = Math.max(planQty - actualQty - currentInput, 0)
   return { planQty, actualQty, remaining, remainingAfterInput }
+})
+
+const normalizeTargetText = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '')
+
+const selectedProcessTarget = computed(() => {
+  if (record.value.record_type !== 'PRODUCTION') return null
+  const list = Array.isArray(dailyProcessTargets.value) ? dailyProcessTargets.value : []
+  if (!list.length) return null
+  if (list.length === 1) return list[0]
+  const code = normalizeTargetText(selectedProductCode.value)
+  const name = normalizeTargetText(selectedProductName.value)
+  const matched = list.find((item) => {
+    const label = normalizeTargetText(item?.product_label)
+    if (!label) return false
+    return (code && (code.includes(label) || label.includes(code))) || (name && (name.includes(label) || label.includes(name)))
+  })
+  return matched || list[0] || null
+})
+
+const headerProcessTargetLabel = computed(() => {
+  const list = Array.isArray(dailyProcessTargets.value) ? dailyProcessTargets.value : []
+  if (!list.length) return ''
+  return list
+    .map((item) => {
+      const time = String(item?.target_time || '').trim()
+      const qty = formatNumber(item?.target_qty || 0)
+      const label = String(item?.product_label || '').trim()
+      return `${time}目標 ${qty}台${label ? ` (${label})` : ''}`
+    })
+    .join(' / ')
 })
 
 const shouldUseCounterInput = computed(() => {
@@ -2474,6 +2508,7 @@ const onProcessChange = () => {
   const proc = processes.value.find((p) => String(p.id) === String(selectedProcessId.value))
   if (proc?.line) selectedLineId.value = String(proc.line)
   productionProducts.value = []; scrapProducts.value = []; allPlanProducts.value = []; allScrapProducts.value = []
+  dailyProcessTargets.value = []
   timeSlots.value = []; activeSlotIndex.value = null; defaultProductId.value = null
   productImageMap.value = {}; productMetaMap.value = {}
   invalidateSelectedCoproductNotice()
@@ -2485,6 +2520,7 @@ const onProcessChange = () => {
 const onLineChange = () => {
   selectedProcessId.value = ''; recentRecords.value = []; productionProducts.value = []; scrapProducts.value = []
   allPlanProducts.value = []; allScrapProducts.value = []; timeSlots.value = []; activeSlotIndex.value = null
+  dailyProcessTargets.value = []
   startedProductIds.value = new Set(); startedProductIdsLoaded.value = false
   latestOperatorActionByProduct.value = new Map(); defaultProductId.value = null
   productImageMap.value = {}; productMetaMap.value = {}
@@ -2997,7 +3033,10 @@ const loadScrapProducts = async (processId, baseProducts, fallbackLineId = null,
 }
 
 const loadPlannedProducts = async () => {
-  if (!selectedProcessId.value) return
+  if (!selectedProcessId.value) {
+    dailyProcessTargets.value = []
+    return
+  }
   const requestSeq = ++plannedProductsRequestSeq
   isPlannedProductsLoading.value = true
   invalidateSelectedCoproductNotice()
@@ -3009,6 +3048,20 @@ const loadPlannedProducts = async () => {
     const process = processes.value.find(p => String(p.id) === String(selectedProcessId.value))
     const lineId = process?.line; if (!lineId) return
     const processId = selectedProcessId.value
+    try {
+      const targetRes = await api.dailyProcessTargets.list({
+        line: lineId,
+        process: processId,
+        plan_date: currentDateYmd.value,
+        page_size: 100,
+      })
+      if (requestSeq === plannedProductsRequestSeq) {
+        dailyProcessTargets.value = targetRes.data?.results || targetRes.data || []
+      }
+    } catch (targetError) {
+      console.error('日別目標取得エラー:', targetError)
+      if (requestSeq === plannedProductsRequestSeq) dailyProcessTargets.value = []
+    }
     if (filterCurrentTime.value) {
       const [currentSlotItemsResult, fastSlotResult] = await Promise.all([buildCurrentTimePlanItems(lineId, processId, []), buildPlanTimeSlots(lineId, processId, [])])
       if (requestSeq !== plannedProductsRequestSeq) return
@@ -3394,6 +3447,12 @@ onMounted(async () => {
 }
 .header-processing.pause { background: #ffedd5; color: #9a3412; }
 .header-processing.empty { background: #f5f5f5; color: #999; font-weight: 400; }
+.header-target-chip {
+  display: flex; align-items: center; min-height: 28px; padding: 4px 10px;
+  border-radius: 14px; background: #fff7ed; border: 1px solid #fdba74;
+  font-size: 12px; color: #9a3412; font-weight: 700;
+  flex: 1 1 260px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .processing-chip { white-space: nowrap; }
 .header-processing.clickable { cursor: pointer; }
 .header-processing.clickable:hover { filter: brightness(0.92); }

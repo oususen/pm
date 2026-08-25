@@ -593,7 +593,18 @@
               <tr v-for="proc in processLoadRows" :key="proc.process_id">
                 <td class="sticky-col load-process-col">{{ proc.process_name || proc.process_id }}</td>
                 <td v-for="c in visibleDateColumns" :key="c.key" class="num" :class="c.dayClass">
-                  <span class="readonly-value">{{ displayValue(formatLoad(proc.daily?.[c.key])) }}</span>
+                  <div class="load-cell">
+                    <span class="readonly-value">{{ displayValue(formatLoad(proc.daily?.[c.key])) }}</span>
+                    <button
+                      type="button"
+                      class="load-target-add-btn"
+                      :title="`${proc.process_name || proc.process_id} ${c.label} の目標を入力`"
+                      @click="openProcessTargetDialog(proc, c)"
+                    >＋</button>
+                    <span v-if="getProcessTargetCount(proc.process_id, c.key) > 0" class="load-target-count">
+                      {{ getProcessTargetCount(proc.process_id, c.key) }}
+                    </span>
+                  </div>
                 </td>
               </tr>
               <tr v-if="!processLoadRows.length">
@@ -604,6 +615,57 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showProcessTargetDialog" class="process-target-dialog-backdrop" @click.self="closeProcessTargetDialog">
+      <div class="process-target-dialog">
+        <div class="process-target-dialog-header">
+          <div>
+            <div class="process-target-dialog-title">日別目標入力</div>
+            <div class="process-target-dialog-meta">
+              {{ processTargetDialogState.processName }} / {{ processTargetDialogState.planDate }}
+            </div>
+          </div>
+          <button type="button" class="process-target-dialog-close" @click="closeProcessTargetDialog">×</button>
+        </div>
+
+        <div class="process-target-form">
+          <label>
+            <span>製品俗称</span>
+            <input v-model.trim="processTargetForm.productLabel" type="text" maxlength="100" placeholder="例: 17号" />
+          </label>
+          <label>
+            <span>目標時刻</span>
+            <input v-model="processTargetForm.targetTime" type="time" step="60" />
+          </label>
+          <label>
+            <span>目標台数</span>
+            <input v-model.number="processTargetForm.targetQty" type="number" min="1" step="1" placeholder="台数" />
+          </label>
+        </div>
+
+        <div class="process-target-dialog-actions">
+          <button v-if="processTargetForm.id" type="button" class="btn" @click="resetProcessTargetForm">新規</button>
+          <button type="button" class="btn primary" :disabled="processTargetSaving" @click="saveProcessTarget">
+            {{ processTargetSaving ? '保存中...' : (processTargetForm.id ? '更新' : '追加') }}
+          </button>
+        </div>
+
+        <div class="process-target-dialog-list">
+          <div class="process-target-dialog-subtitle">登録済み目標</div>
+          <div v-if="processTargetDialogItems.length" class="process-target-items">
+            <div v-for="item in processTargetDialogItems" :key="item.id" class="process-target-item">
+              <button type="button" class="process-target-item-main" @click="editProcessTarget(item)">
+                <span>{{ item.target_time }}目標 {{ item.target_qty }}台</span>
+                <span>{{ item.product_label }}</span>
+              </button>
+              <button type="button" class="btn-danger" :disabled="processTargetSaving" @click="deleteProcessTarget(item)">削除</button>
+            </div>
+          </div>
+          <div v-else class="settings-note">登録なし</div>
+        </div>
+      </div>
+    </div>
+
     <div class="footer-actions">
       <button class="btn-secondary" @click="goBack">F1: 戻る</button>
       <button class="btn-secondary" @click="goForward">F2: 進む</button>
@@ -1633,6 +1695,21 @@ let lotTempId = 1
 const processLoadLoading = ref(false)
 const processLoadRows = ref([])
 const processLoadMessage = ref('')
+const processTargetLoading = ref(false)
+const processTargets = ref([])
+const showProcessTargetDialog = ref(false)
+const processTargetSaving = ref(false)
+const processTargetDialogState = ref({
+  processId: null,
+  processName: '',
+  planDate: '',
+})
+const processTargetForm = ref({
+  id: null,
+  productLabel: '',
+  targetTime: '17:05',
+  targetQty: null,
+})
 const dailySettings = ref({})
 const calendarDayMap = ref({})
 const workPatternMap = ref({})
@@ -2446,6 +2523,25 @@ const loadTableMinWidth = computed(() => {
   return fixedColsWidth + visibleDateColumns.value.length * perDayWidth
 })
 
+const processTargetMap = computed(() => {
+  const map = new Map()
+  ;(Array.isArray(processTargets.value) ? processTargets.value : []).forEach((item) => {
+    const key = `${item.process}|${String(item.plan_date || '').slice(0, 10)}`
+    const list = map.get(key) || []
+    list.push(item)
+    map.set(key, list)
+  })
+  return map
+})
+
+const processTargetDialogItems = computed(() => {
+  const processId = processTargetDialogState.value.processId
+  const planDate = processTargetDialogState.value.planDate
+  if (!processId || !planDate) return []
+  const key = `${processId}|${planDate}`
+  return [...(processTargetMap.value.get(key) || [])]
+})
+
 const initDaily = () => {
   const daily = {}
   dateColumns.value.forEach((c) => {
@@ -2807,6 +2903,7 @@ const savePlanByRange = async (rangeStartDate, rangeEndDate) => {
       ganttReloadKey.value += 1
       if (showProcessLoad.value) {
         await loadProcessLoad()
+        await loadProcessTargets()
       }
     } catch (expandError) {
       console.error('工程展開/ガント再計算エラー', expandError)
@@ -3867,6 +3964,135 @@ const loadProcessLoad = async () => {
   }
 }
 
+const loadProcessTargets = async () => {
+  if (!selectedLine.value) {
+    processTargets.value = []
+    return
+  }
+  processTargetLoading.value = true
+  try {
+    const res = await api.dailyProcessTargets.list({
+      line: selectedLine.value,
+      plan_date__gte: startDate.value,
+      plan_date__lte: endDate.value,
+      page_size: 1000,
+    })
+    processTargets.value = res.data?.results || res.data || []
+  } catch (e) {
+    console.error('日別目標取得エラー', e)
+    processTargets.value = []
+  } finally {
+    processTargetLoading.value = false
+  }
+}
+
+const getProcessTargetCount = (processId, planDate) => {
+  const key = `${processId}|${planDate}`
+  return (processTargetMap.value.get(key) || []).length
+}
+
+const resetProcessTargetForm = () => {
+  processTargetForm.value = {
+    id: null,
+    productLabel: '',
+    targetTime: '17:05',
+    targetQty: null,
+  }
+}
+
+const openProcessTargetDialog = (proc, column) => {
+  processTargetDialogState.value = {
+    processId: proc?.process_id || null,
+    processName: proc?.process_name || String(proc?.process_id || ''),
+    planDate: column?.key || '',
+  }
+  resetProcessTargetForm()
+  showProcessTargetDialog.value = true
+}
+
+const closeProcessTargetDialog = () => {
+  showProcessTargetDialog.value = false
+  processTargetDialogState.value = {
+    processId: null,
+    processName: '',
+    planDate: '',
+  }
+  resetProcessTargetForm()
+}
+
+const editProcessTarget = (item) => {
+  processTargetForm.value = {
+    id: item.id,
+    productLabel: item.product_label || '',
+    targetTime: item.target_time || '17:05',
+    targetQty: Number(item.target_qty || 0) || null,
+  }
+}
+
+const saveProcessTarget = async () => {
+  const lineId = selectedLine.value
+  const processId = processTargetDialogState.value.processId
+  const planDate = processTargetDialogState.value.planDate
+  const productLabel = String(processTargetForm.value.productLabel || '').trim()
+  const targetTime = String(processTargetForm.value.targetTime || '').trim()
+  const targetQty = Number(processTargetForm.value.targetQty)
+  if (!lineId || !processId || !planDate) return
+  if (!productLabel) {
+    alert('製品俗称を入力してください。')
+    return
+  }
+  if (!/^\d{2}:\d{2}$/.test(targetTime)) {
+    alert('目標時刻を入力してください。')
+    return
+  }
+  if (!Number.isFinite(targetQty) || targetQty <= 0) {
+    alert('目標台数は1以上で入力してください。')
+    return
+  }
+
+  const payload = {
+    line: lineId,
+    process: processId,
+    plan_date: planDate,
+    target_time: targetTime,
+    target_qty: Math.floor(targetQty),
+    product_label: productLabel,
+  }
+  processTargetSaving.value = true
+  try {
+    if (processTargetForm.value.id) {
+      await api.dailyProcessTargets.update(processTargetForm.value.id, payload)
+    } else {
+      await api.dailyProcessTargets.create(payload)
+    }
+    await loadProcessTargets()
+    resetProcessTargetForm()
+  } catch (e) {
+    console.error('日別目標保存エラー', e)
+    alert('日別目標の保存に失敗しました。')
+  } finally {
+    processTargetSaving.value = false
+  }
+}
+
+const deleteProcessTarget = async (item) => {
+  if (!item?.id) return
+  if (!confirm(`「${item.product_label} / ${item.target_time} / ${item.target_qty}台」を削除しますか？`)) return
+  processTargetSaving.value = true
+  try {
+    await api.dailyProcessTargets.delete(item.id)
+    await loadProcessTargets()
+    if (Number(processTargetForm.value.id) === Number(item.id)) {
+      resetProcessTargetForm()
+    }
+  } catch (e) {
+    console.error('日別目標削除エラー', e)
+    alert('日別目標の削除に失敗しました。')
+  } finally {
+    processTargetSaving.value = false
+  }
+}
+
 const toggleProcessLoad = async () => {
   if (!selectedLine.value) {
     alert('ラインを選択してください。')
@@ -3875,6 +4101,7 @@ const toggleProcessLoad = async () => {
   showProcessLoad.value = !showProcessLoad.value
   if (showProcessLoad.value) {
     await loadProcessLoad()
+    await loadProcessTargets()
   }
 }
 
@@ -5794,6 +6021,7 @@ const bulkDeletePlans = async () => {
     ganttReloadKey.value += 1
     if (showProcessLoad.value) {
       await loadProcessLoad()
+      await loadProcessTargets()
     }
     const deletedPlan = Number(res.data?.deleted_plan || 0)
     const deletedGantt = Number(res.data?.deleted_gantt || 0)
@@ -7308,11 +7536,147 @@ thead .sticky-col {
   z-index: 4;
   background: #e7edf7;
 }
+.load-cell {
+  position: relative;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 18px;
+}
+.load-target-add-btn {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.load-target-count {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+}
 .load-process-col {
   width: 180px;
   min-width: 180px;
   max-width: 180px;
   border-right: 2px solid #b5c1d2 !important;
+  text-align: left;
+}
+.process-target-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.process-target-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  padding: 16px;
+}
+.process-target-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.process-target-dialog-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.process-target-dialog-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+.process-target-dialog-close {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.process-target-form {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+.process-target-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #334155;
+}
+.process-target-form input {
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.process-target-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.process-target-dialog-list {
+  margin-top: 18px;
+}
+.process-target-dialog-subtitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 8px;
+}
+.process-target-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.process-target-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.process-target-item-main {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 10px 12px;
+  cursor: pointer;
   text-align: left;
 }
 .laser-subtab-bar {

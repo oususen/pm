@@ -70,6 +70,7 @@ from production.views_progress_compare import ProgressPdfCompareView, ProgressPd
 from production.views_record_confirmation import ProductionRecordConfirmationView
 from production.views_stocktake import StocktakeRecordView, StocktakeHistoryView, StocktakeRecorderView, StocktakeCounterView, StocktakeLayoutConfigView, StocktakeAreaView, StocktakeSlipPDFView
 from production.views_morning_meeting import MorningMeetingViewSet
+from production.views_daily_process_target import DailyProcessTargetViewSet
 from production.views_camera_actual import (
     CameraAutoDetectView,
     CameraEventCreateView,
@@ -105,6 +106,7 @@ router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='laser
 router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, basename='ganttdisplayproductmap')
 router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')
 router.register(r'morning-meetings', MorningMeetingViewSet, basename='morningmeeting')
+router.register(r'daily-process-targets', DailyProcessTargetViewSet, basename='daily-process-target')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

@@ -19,6 +19,7 @@ from .models_plan_change_log import ProductionPlanChangeLog
 from .models_plan_lock_setting import ProductionPlanLockSetting
 from .models_record_inquiry_setting import ProductionRecordInquirySetting
 from .models_schedule_config import ScheduleConfig, ScheduleRunLog
+from .models_daily_process_target import DailyProcessTarget
 from .models_purchase_actual_reconcile import (
     PurchaseActualReconcileReport,
     PurchaseActualReconcileReportDetail,
@@ -1111,6 +1112,68 @@ class LineDefaultScheduleSettingSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'updated_by',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'updated_by']
+
+
+class DailyProcessTargetSerializer(serializers.ModelSerializer):
+    line_code = serializers.CharField(source='line.line_code', read_only=True)
+    line_name = serializers.CharField(source='line.line_name', read_only=True)
+    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    target_time = serializers.TimeField(format='%H:%M', input_formats=['%H:%M', '%H:%M:%S'])
+    created_by_name = serializers.SerializerMethodField()
+    updated_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DailyProcessTarget
+        fields = [
+            'id',
+            'line', 'line_code', 'line_name',
+            'process', 'process_code', 'process_name',
+            'plan_date',
+            'target_time',
+            'target_qty',
+            'product_label',
+            'created_at', 'updated_at',
+            'created_by', 'created_by_name',
+            'updated_by', 'updated_by_name',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def validate_target_qty(self, value):
+        if value is None or int(value) <= 0:
+            raise serializers.ValidationError('目標台数は1以上で入力してください。')
+        return int(value)
+
+    def validate_product_label(self, value):
+        text = str(value or '').strip()
+        if not text:
+            raise serializers.ValidationError('製品俗称を入力してください。')
+        return text
+
+    def get_created_by_name(self, obj):
+        user = obj.created_by
+        if not user:
+            return ''
+        return (user.get_full_name() or user.username or '').strip()
+
+    def get_updated_by_name(self, obj):
+        user = obj.updated_by
+        if not user:
+            return ''
+        return (user.get_full_name() or user.username or '').strip()
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and getattr(request, 'user', None) and request.user.is_authenticated:
+            validated_data['created_by'] = request.user
+            validated_data['updated_by'] = request.user
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+        if request and getattr(request, 'user', None) and request.user.is_authenticated:
+            validated_data['updated_by'] = request.user
+        return super().update(instance, validated_data)
 
 
 class AutoPlanAggregateSettingSerializer(serializers.ModelSerializer):
