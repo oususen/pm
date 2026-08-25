@@ -34,10 +34,17 @@
                 </button>
                 <button
                   class="sub-action-btn"
-                  :disabled="rebuildRunning"
-                  @click.prevent="openRebuildDialog"
+                  :disabled="maintenanceRunning"
+                  @click.prevent="openMaintenanceDialog('revert')"
                 >
-                  {{ rebuildRunning ? '戻し中...' : '展開戻し' }}
+                  {{ maintenanceRunning && maintenanceMode === 'revert' ? '戻し中...' : '展開戻し' }}
+                </button>
+                <button
+                  class="sub-action-btn secondary"
+                  :disabled="maintenanceRunning"
+                  @click.prevent="openMaintenanceDialog('expand')"
+                >
+                  {{ maintenanceRunning && maintenanceMode === 'expand' ? '再展開中...' : '再展開' }}
                 </button>
               </div>
               <div v-if="message" class="status-text">{{ message }}</div>
@@ -54,32 +61,37 @@
       展開実行でOPEN受注をライン別需要に再生成します。
     </p>
 
-    <div v-if="showRebuildDialog" class="dialog-backdrop" @click.self="closeRebuildDialog">
+    <div v-if="showMaintenanceDialog" class="dialog-backdrop" @click.self="closeMaintenanceDialog">
       <div class="dialog-card">
         <div class="dialog-head">
-          <h3>受注展開の戻し</h3>
-          <button type="button" class="plain-btn" @click="closeRebuildDialog">×</button>
+          <h3>{{ maintenanceTitle }}</h3>
+          <button type="button" class="plain-btn" @click="closeMaintenanceDialog">×</button>
         </div>
         <div class="dialog-body">
           <div class="form-row">
             <label>完成品コード</label>
-            <input v-model.trim="rebuildForm.productCode" type="text" placeholder="例: V053143615" />
+            <input v-model.trim="maintenanceForm.productCode" type="text" placeholder="例: V053143615" />
           </div>
           <div class="form-row">
-            <label>戻し開始日</label>
-            <input v-model="rebuildForm.startDate" type="date" />
+            <label>{{ maintenanceMode === 'revert' ? '戻し開始日' : '再展開開始日' }}</label>
+            <input v-model="maintenanceForm.startDate" type="date" />
           </div>
           <div class="form-row">
-            <label>戻し終了日</label>
-            <input v-model="rebuildForm.endDate" type="date" />
+            <label>{{ maintenanceMode === 'revert' ? '戻し終了日' : '再展開終了日' }}</label>
+            <input v-model="maintenanceForm.endDate" type="date" />
           </div>
-          <p class="dialog-note">対象期間のOPEN確定受注を差し戻し後、同じ対象だけ再展開します。</p>
-          <p v-if="rebuildError" class="dialog-error">{{ rebuildError }}</p>
+          <p class="dialog-note">{{ maintenanceNote }}</p>
+          <p v-if="maintenanceError" class="dialog-error">{{ maintenanceError }}</p>
         </div>
         <div class="dialog-actions">
-          <button type="button" @click="closeRebuildDialog" :disabled="rebuildRunning">キャンセル</button>
-          <button type="button" class="sub-action-btn" @click="submitRebuild" :disabled="rebuildRunning">
-            {{ rebuildRunning ? "実行中..." : "戻して再展開" }}
+          <button type="button" @click="closeMaintenanceDialog" :disabled="maintenanceRunning">キャンセル</button>
+          <button
+            type="button"
+            :class="maintenanceMode === 'revert' ? 'sub-action-btn' : 'sub-action-btn secondary'"
+            @click="submitMaintenance"
+            :disabled="maintenanceRunning"
+          >
+            {{ maintenanceRunning ? "実行中..." : maintenanceSubmitLabel }}
           </button>
         </div>
       </div>
@@ -119,14 +131,22 @@ const SECTION_LABELS = {
 const running = ref(false);
 const message = ref("");
 const warnings = ref([]);
-const showRebuildDialog = ref(false);
-const rebuildRunning = ref(false);
-const rebuildError = ref("");
-const rebuildForm = ref({
+const showMaintenanceDialog = ref(false);
+const maintenanceMode = ref("revert");
+const maintenanceRunning = ref(false);
+const maintenanceError = ref("");
+const maintenanceForm = ref({
   productCode: "",
   startDate: "",
   endDate: "",
 });
+const maintenanceTitle = computed(() => (maintenanceMode.value === "revert" ? "受注展開の戻し" : "受注展開の再展開"));
+const maintenanceSubmitLabel = computed(() => (maintenanceMode.value === "revert" ? "展開戻し実行" : "再展開実行"));
+const maintenanceNote = computed(() => (
+  maintenanceMode.value === "revert"
+    ? "対象期間のOPEN確定受注のうち、展開済み分だけを差し戻します。"
+    : "対象期間のOPEN確定受注のうち、未展開分だけを再展開します。"
+));
 
 const findPermission = (user, resource) => {
   if (!user) return null;
@@ -294,53 +314,61 @@ const runExpand = async () => {
   }
 };
 
-const openRebuildDialog = () => {
-  rebuildError.value = "";
-  rebuildForm.value = {
+const openMaintenanceDialog = (mode) => {
+  maintenanceMode.value = mode;
+  maintenanceError.value = "";
+  maintenanceForm.value = {
     productCode: "",
     startDate: "",
     endDate: "",
   };
-  showRebuildDialog.value = true;
+  showMaintenanceDialog.value = true;
 };
 
-const closeRebuildDialog = () => {
-  if (rebuildRunning.value) return;
-  showRebuildDialog.value = false;
+const closeMaintenanceDialog = () => {
+  if (maintenanceRunning.value) return;
+  showMaintenanceDialog.value = false;
 };
 
-const submitRebuild = async () => {
-  rebuildError.value = "";
-  if (!rebuildForm.value.productCode) {
-    rebuildError.value = "完成品コードを入力してください。";
+const submitMaintenance = async () => {
+  maintenanceError.value = "";
+  if (!maintenanceForm.value.productCode) {
+    maintenanceError.value = "完成品コードを入力してください。";
     return;
   }
-  if (!rebuildForm.value.startDate || !rebuildForm.value.endDate) {
-    rebuildError.value = "期間を入力してください。";
+  if (!maintenanceForm.value.startDate || !maintenanceForm.value.endDate) {
+    maintenanceError.value = "期間を入力してください。";
     return;
   }
-  if (rebuildForm.value.startDate > rebuildForm.value.endDate) {
-    rebuildError.value = "期間の大小が逆です。";
+  if (maintenanceForm.value.startDate > maintenanceForm.value.endDate) {
+    maintenanceError.value = "期間の大小が逆です。";
     return;
   }
 
-  rebuildRunning.value = true;
+  maintenanceRunning.value = true;
   message.value = "";
   warnings.value = [];
   try {
-    const res = await api.orders.rebuildOrderExpansion({
-      product_code: rebuildForm.value.productCode,
-      due_date_from: rebuildForm.value.startDate,
-      due_date_to: rebuildForm.value.endDate,
-    });
+    const payload = {
+      product_code: maintenanceForm.value.productCode,
+      due_date_from: maintenanceForm.value.startDate,
+      due_date_to: maintenanceForm.value.endDate,
+    };
+    const res = maintenanceMode.value === "revert"
+      ? await api.orders.revertOrderExpansion(payload)
+      : await api.orders.expandSelectedOrderExpansion(payload);
     const data = res.data || {};
-    message.value = `戻し再展開完了: 対象=${data.target_order_lines ?? 0}, 差し戻し=${data.reverted_order_lines ?? 0}, 再展開=${data.expanded_order_lines ?? 0}`;
+    if (maintenanceMode.value === "revert") {
+      message.value = `展開戻し完了: 対象=${data.target_order_lines ?? 0}, 差し戻し=${data.reverted_order_lines ?? 0}`;
+    } else {
+      message.value = `再展開完了: 対象=${data.target_order_lines ?? 0}, 再展開=${data.expanded_order_lines ?? 0}`;
+    }
     warnings.value = data.warnings || [];
-    showRebuildDialog.value = false;
+    showMaintenanceDialog.value = false;
   } catch (e) {
-    rebuildError.value = e?.response?.data?.detail || e?.response?.data?.errors?.[0] || "展開戻しに失敗しました。";
+    maintenanceError.value = e?.response?.data?.detail || e?.response?.data?.errors?.[0] || "保守操作に失敗しました。";
   } finally {
-    rebuildRunning.value = false;
+    maintenanceRunning.value = false;
   }
 };
 </script>
@@ -418,6 +446,9 @@ const submitRebuild = async () => {
 .sub-action-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.sub-action-btn.secondary {
+  background: #0f766e;
 }
 .status-text {
   margin-top: 6px;

@@ -387,20 +387,7 @@ class OrderLineViewSet(viewsets.ModelViewSet):
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
 
-    @action(detail=False, methods=['post'], url_path='rebuild-expansion')
-    def rebuild_expansion(self, request):
-        """完成品コードと期間で対象FIRM受注の展開を差し戻して再展開する。"""
-        product_code = str(request.data.get('product_code') or '').strip()
-        due_date_from = request.data.get('due_date_from')
-        due_date_to = request.data.get('due_date_to')
-        customer_code = str(request.data.get('customer_code') or '').strip()
-        ship_to_code = str(request.data.get('ship_to_code') or '').strip()
-
-        if not product_code:
-            return Response({'detail': 'product_code は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
-        if not due_date_from or not due_date_to:
-            return Response({'detail': 'due_date_from と due_date_to は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
-
+    def _build_target_firm_order_lines(self, *, product_code, due_date_from, due_date_to, customer_code='', ship_to_code=''):
         target_qs = (
             OrderLine.objects
             .filter(
@@ -422,6 +409,99 @@ class OrderLineViewSet(viewsets.ModelViewSet):
             effective_order_type = (line.order_type or (line.order.order_type if line.order else '') or '').upper()
             if effective_order_type == 'FIRM':
                 target_lines.append(line)
+        return target_lines
+
+    def _parse_expansion_request(self, request):
+        product_code = str(request.data.get('product_code') or '').strip()
+        due_date_from = request.data.get('due_date_from')
+        due_date_to = request.data.get('due_date_to')
+        customer_code = str(request.data.get('customer_code') or '').strip()
+        ship_to_code = str(request.data.get('ship_to_code') or '').strip()
+
+        if not product_code:
+            return None, Response({'detail': 'product_code は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not due_date_from or not due_date_to:
+            return None, Response({'detail': 'due_date_from と due_date_to は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return {
+            'product_code': product_code,
+            'due_date_from': due_date_from,
+            'due_date_to': due_date_to,
+            'customer_code': customer_code,
+            'ship_to_code': ship_to_code,
+        }, None
+
+    @action(detail=False, methods=['post'], url_path='revert-expansion')
+    def revert_expansion(self, request):
+        """完成品コードと期間で対象FIRM受注の展開だけを差し戻す。"""
+        params, error_response = self._parse_expansion_request(request)
+        if error_response:
+            return error_response
+
+        target_lines = self._build_target_firm_order_lines(**params)
+        if not target_lines:
+            return Response(
+                {'detail': '対象のOPEN確定受注明細がありません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        expanded_ids = [line.id for line in target_lines if line.is_expanded]
+        if not expanded_ids:
+            return Response({
+                'target_order_lines': len(target_lines),
+                'reverted_order_lines': 0,
+                'deleted_demands': 0,
+                'updated_demands': 0,
+                'warnings': ['展開済みの対象がありません。'],
+            })
+
+        result = OrderExpansionService().revert_firm_order_lines(expanded_ids)
+        if result.get('errors'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'target_order_lines': len(target_lines),
+            'reverted_order_lines': result.get('reverted_order_lines', 0),
+            'deleted_demands': result.get('deleted_demands', 0),
+            'updated_demands': result.get('updated_demands', 0),
+            'warnings': result.get('warnings', []),
+        })
+
+    @action(detail=False, methods=['post'], url_path='expand-selected')
+    def expand_selected(self, request):
+        """完成品コードと期間で対象FIRM受注の未展開分だけを再展開する。"""
+        params, error_response = self._parse_expansion_request(request)
+        if error_response:
+            return error_response
+
+        target_lines = self._build_target_firm_order_lines(**params)
+        if not target_lines:
+            return Response(
+                {'detail': '対象のOPEN確定受注明細がありません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_ids = [line.id for line in target_lines]
+        result = OrderExpansionService().expand_firm_order_lines(target_ids)
+        if result.get('errors'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'target_order_lines': len(target_ids),
+            'expanded_order_lines': result.get('expanded_order_lines', 0),
+            'created_demands': result.get('created', 0),
+            'updated_demands': result.get('updated', 0),
+            'warnings': result.get('warnings', []),
+        })
+
+    @action(detail=False, methods=['post'], url_path='rebuild-expansion')
+    def rebuild_expansion(self, request):
+        """完成品コードと期間で対象FIRM受注の展開を差し戻して再展開する。"""
+        params, error_response = self._parse_expansion_request(request)
+        if error_response:
+            return error_response
+
+        target_lines = self._build_target_firm_order_lines(**params)
 
         if not target_lines:
             return Response(

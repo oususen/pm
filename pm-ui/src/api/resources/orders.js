@@ -85,6 +85,12 @@ export const createOrdersAPI = (client) => ({
     const query = { page_size: 10000, ...params }
     return client.get('/order-lines/', { params: query })
   },
+  revertOrderExpansion(payload = {}) {
+    return client.post('/order-lines/revert-expansion/', payload)
+  },
+  expandSelectedOrderExpansion(payload = {}) {
+    return client.post('/order-lines/expand-selected/', payload)
+  },
   rebuildOrderExpansion(payload = {}) {
     return client.post('/order-lines/rebuild-expansion/', payload)
   },

@@ -64,6 +64,7 @@ class OrderExpansionService:
     def __init__(self) -> None:
         self.errors: List[str] = []
         self.warnings: List[str] = []
+        self._is_prefetched = False
         self._routing_cache: Dict[Tuple[int, object], List] = {}
         self._child_bom_cache: Dict[int, BOM | None] = {}
         self._bom_multiplier_cache: Dict[int, Dict[int, Decimal]] = {}
@@ -86,6 +87,9 @@ class OrderExpansionService:
 
     def _prefetch_all(self):
         """全マスタデータをメモリにプリフェッチ（N+1クエリ解消）"""
+        if self._is_prefetched:
+            return
+
         from masters.models import Calendar, CalendarDay
 
         for line in Line.objects.all().select_related():
@@ -169,6 +173,8 @@ class OrderExpansionService:
                     cd.is_working_day and not cd.is_holiday_work
                 )
 
+        self._is_prefetched = True
+
     def expand_open_orders(self, clear_existing: bool = False) -> Dict[str, object]:
         """OPEN受注明細をライン需要に展開する。"""
         self._prefetch_all()
@@ -239,7 +245,7 @@ class OrderExpansionService:
             existing = existing_map.get(key)
             if existing is None:
                 self.errors.append(
-                    f'差し戻し対象の需要が見つかりません: line_id={entry["line_id"]} product={entry["product_code"]} plan_date={entry["plan_date"]} process_id={entry["process_id"]}'
+                    f'差し戻し対象の需要が見つかりません: line_id={entry["line_id"]} product={entry["product_code"]} plan_date={entry["plan_date"]} routing_step_id={entry["routing_step_id"]} process_id={key[3]}'
                 )
                 continue
 
