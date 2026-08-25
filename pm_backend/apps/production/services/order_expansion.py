@@ -184,6 +184,180 @@ class OrderExpansionService:
         result['forced_full_rebuild'] = False
         return result
 
+    def revert_firm_order_lines(self, order_line_ids: Iterable[int]) -> Dict[str, object]:
+        """指定したFIRM受注明細の展開結果を差し戻し、未展開状態へ戻す。"""
+        target_ids = sorted({int(v) for v in order_line_ids if v is not None})
+        if not target_ids:
+            return {
+                'reverted_order_lines': 0,
+                'updated_demands': 0,
+                'deleted_demands': 0,
+                'warnings': self.warnings,
+                'errors': ['対象受注明細が指定されていません。'],
+            }
+
+        self._prefetch_all()
+
+        target_qs = (
+            OrderLine.objects
+            .filter(id__in=target_ids, order__status='OPEN')
+            .select_related('order', 'order__customer', 'product')
+            .order_by('id')
+        )
+        order_lines = list(target_qs)
+        found_ids = {line.id for line in order_lines}
+        missing_ids = [line_id for line_id in target_ids if line_id not in found_ids]
+        for line_id in missing_ids:
+            self.warnings.append(f'差し戻し対象が見つかりません: order_line_id={line_id}')
+
+        valid_lines: List[OrderLine] = []
+        for order_line in order_lines:
+            effective_order_type = (order_line.order_type or (order_line.order.order_type if order_line.order else '') or '').upper()
+            if effective_order_type != 'FIRM':
+                self.warnings.append(f'FIRM以外のためスキップ: order_line_id={order_line.id}')
+                continue
+            if not order_line.is_expanded:
+                self.warnings.append(f'未展開のためスキップ: order_line_id={order_line.id}')
+                continue
+            valid_lines.append(order_line)
+
+        if not valid_lines:
+            return {
+                'reverted_order_lines': 0,
+                'updated_demands': 0,
+                'deleted_demands': 0,
+                'warnings': self.warnings,
+                'errors': self.errors,
+            }
+
+        aggregated, _ = self._aggregate_order_lines(valid_lines)
+        existing_map = self._load_existing_demand_rows()
+        to_update: List[LineDemand] = []
+        delete_ids: List[int] = []
+
+        for key, entry in aggregated.items():
+            existing = existing_map.get(key)
+            if existing is None:
+                self.errors.append(
+                    f'差し戻し対象の需要が見つかりません: line_id={entry["line_id"]} product={entry["product_code"]} plan_date={entry["plan_date"]} process_id={entry["process_id"]}'
+                )
+                continue
+
+            demand = self._build_demand_instance_from_row(existing)
+            revert_qty = Decimal(str(entry['firm_qty'] or 0))
+            current_qty = Decimal(str(demand.firm_qty or 0))
+            if current_qty < revert_qty:
+                self.errors.append(
+                    f'差し戻し数量が既存確定数量を超えます: demand_id={demand.id} current={current_qty} revert={revert_qty}'
+                )
+                continue
+
+            demand.firm_qty = current_qty - revert_qty
+            if demand.firm_qty == 0:
+                demand.firm_is_shifted = False
+            demand.firm_order_numbers = self._remove_order_numbers(
+                demand.firm_order_numbers,
+                entry['firm_order_numbers'],
+            )
+            self._refresh_demand_fields(demand)
+
+            if self._is_empty_demand(demand):
+                if demand.pk:
+                    delete_ids.append(demand.pk)
+                existing_map.pop(key, None)
+            else:
+                to_update.append(demand)
+
+        if self.errors:
+            return {
+                'reverted_order_lines': 0,
+                'updated_demands': 0,
+                'deleted_demands': 0,
+                'warnings': self.warnings,
+                'errors': self.errors,
+            }
+
+        with transaction.atomic():
+            if delete_ids:
+                LineDemand.objects.filter(id__in=delete_ids).delete()
+            if to_update:
+                LineDemand.objects.bulk_update(
+                    to_update,
+                    self.LINE_DEMAND_UPDATE_FIELDS,
+                    batch_size=1000,
+                )
+            OrderLine.objects.filter(id__in=[line.id for line in valid_lines]).update(
+                is_expanded=False,
+                expanded_at=None,
+            )
+
+        return {
+            'reverted_order_lines': len(valid_lines),
+            'updated_demands': len(to_update),
+            'deleted_demands': len(delete_ids),
+            'warnings': self.warnings,
+            'errors': self.errors,
+        }
+
+    def expand_firm_order_lines(self, order_line_ids: Iterable[int]) -> Dict[str, object]:
+        """指定したFIRM受注明細だけを増分展開する。"""
+        target_ids = sorted({int(v) for v in order_line_ids if v is not None})
+        if not target_ids:
+            return {
+                'expanded_order_lines': 0,
+                'created': 0,
+                'updated': 0,
+                'warnings': self.warnings,
+                'errors': ['対象受注明細が指定されていません。'],
+            }
+
+        self._prefetch_all()
+        target_qs = (
+            OrderLine.objects
+            .filter(id__in=target_ids, order__status='OPEN')
+            .select_related('order', 'order__customer', 'product')
+            .order_by('id')
+        )
+        order_lines = list(target_qs)
+
+        valid_lines: List[OrderLine] = []
+        for order_line in order_lines:
+            effective_order_type = (order_line.order_type or (order_line.order.order_type if order_line.order else '') or '').upper()
+            if effective_order_type != 'FIRM':
+                self.warnings.append(f'FIRM以外のためスキップ: order_line_id={order_line.id}')
+                continue
+            if order_line.is_expanded:
+                self.warnings.append(f'展開済みのためスキップ: order_line_id={order_line.id}')
+                continue
+            valid_lines.append(order_line)
+
+        if not valid_lines:
+            return {
+                'expanded_order_lines': 0,
+                'created': 0,
+                'updated': 0,
+                'warnings': self.warnings,
+                'errors': self.errors,
+            }
+
+        aggregated, _ = self._aggregate_order_lines(valid_lines)
+        existing_map = self._load_existing_demand_rows()
+
+        with transaction.atomic():
+            firm_result = self._apply_incremental_firm_demands(aggregated, existing_map)
+            OrderLine.objects.filter(id__in=[line.id for line in valid_lines]).update(
+                is_expanded=True,
+                expanded_at=datetime.now(),
+            )
+
+        return {
+            'expanded_order_lines': len(valid_lines),
+            'created': firm_result['created'],
+            'updated': firm_result['updated'],
+            'warnings': self.warnings,
+            'errors': self.errors,
+        }
+
     def _should_force_full_rebuild(self) -> bool:
         """
         既存LineDemandがあり、OPEN FIRM が全件未展開の状態は
@@ -814,6 +988,19 @@ class OrderExpansionService:
                 continue
             merged_values.extend(item.strip() for item in str(value).split(',') if item.strip())
         return self._normalize_order_numbers(merged_values)
+
+    def _remove_order_numbers(self, current_value: str, values_to_remove) -> str:
+        current_items = {
+            item.strip()
+            for item in str(current_value or '').split(',')
+            if item and item.strip()
+        }
+        remove_items = {
+            str(item).strip()
+            for item in (values_to_remove or [])
+            if str(item).strip()
+        }
+        return self._normalize_order_numbers(sorted(current_items - remove_items))
 
     def _resolve_calendar_id(self, line_id):
         if not line_id:

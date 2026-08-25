@@ -215,3 +215,61 @@ class OrderExpansionServiceTest(TestCase):
         self.assertEqual(demands['2026-08-21'].firm_qty, Decimal('7'))
         self.assertEqual(demands['2026-08-21'].forecast_qty, Decimal('0'))
         self.assertEqual(demands['2026-08-22'].forecast_qty, Decimal('6'))
+
+    def test_revert_firm_order_lines_subtracts_demand_and_marks_unexpanded(self):
+        due_date = '2026-08-20'
+        order_line = self._create_order_line('FIRM-ROLLBACK', 'FIRM', '5', due_date, is_expanded=True)
+
+        LineDemand.objects.create(
+            line=self.line,
+            routing_step=self.step,
+            process=self.process,
+            product=self.product,
+            product_code=self.product.product_code,
+            plan_date=due_date,
+            lead_time_days=0,
+            forecast_qty=Decimal('0'),
+            firm_qty=Decimal('5'),
+            plan_qty=Decimal('5'),
+            actual_qty=Decimal('0'),
+            plan_progress=Decimal('1.000'),
+            actual_progress=Decimal('0.000'),
+            order_numbers='FIRM-ROLLBACK',
+            firm_order_numbers='FIRM-ROLLBACK',
+            forecast_order_numbers='',
+        )
+
+        result = OrderExpansionService().revert_firm_order_lines([order_line.id])
+
+        order_line.refresh_from_db()
+
+        self.assertEqual(result['reverted_order_lines'], 1)
+        self.assertEqual(result['deleted_demands'], 1)
+        self.assertFalse(result['errors'])
+        self.assertFalse(order_line.is_expanded)
+        self.assertIsNone(order_line.expanded_at)
+        self.assertFalse(LineDemand.objects.filter(
+            line=self.line,
+            product_code=self.product.product_code,
+            plan_date=due_date,
+        ).exists())
+
+    def test_expand_firm_order_lines_recreates_demand_for_target_only(self):
+        due_date = '2026-08-21'
+        order_line = self._create_order_line('FIRM-REBUILD', 'FIRM', '4', due_date, is_expanded=False)
+
+        result = OrderExpansionService().expand_firm_order_lines([order_line.id])
+
+        order_line.refresh_from_db()
+        demand = LineDemand.objects.get(
+            line=self.line,
+            product_code=self.product.product_code,
+            plan_date=due_date,
+        )
+
+        self.assertEqual(result['expanded_order_lines'], 1)
+        self.assertFalse(result['errors'])
+        self.assertTrue(order_line.is_expanded)
+        self.assertIsNotNone(order_line.expanded_at)
+        self.assertEqual(demand.firm_qty, Decimal('4'))
+        self.assertEqual(demand.firm_order_numbers, 'FIRM-REBUILD')

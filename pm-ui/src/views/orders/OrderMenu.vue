@@ -24,13 +24,22 @@
             <div class="icon-box">{{ tile.icon }}</div>
             <div class="label" v-html="tile.label"></div>
             <template v-if="tile.key === 'line_expand'">
-              <button
-                class="action-btn"
-                :disabled="running"
-                @click.prevent="runExpand"
-              >
-                {{ running ? '展開中...' : '展開実行' }}
-              </button>
+              <div class="action-stack">
+                <button
+                  class="action-btn"
+                  :disabled="running"
+                  @click.prevent="runExpand"
+                >
+                  {{ running ? '展開中...' : '展開実行' }}
+                </button>
+                <button
+                  class="sub-action-btn"
+                  :disabled="rebuildRunning"
+                  @click.prevent="openRebuildDialog"
+                >
+                  {{ rebuildRunning ? '戻し中...' : '展開戻し' }}
+                </button>
+              </div>
               <div v-if="message" class="status-text">{{ message }}</div>
               <ul v-if="warnings.length" class="warn-list">
                 <li v-for="(w, idx) in warnings" :key="idx">{{ w }}</li>
@@ -44,6 +53,37 @@
     <p class="helper-text">
       展開実行でOPEN受注をライン別需要に再生成します。
     </p>
+
+    <div v-if="showRebuildDialog" class="dialog-backdrop" @click.self="closeRebuildDialog">
+      <div class="dialog-card">
+        <div class="dialog-head">
+          <h3>受注展開の戻し</h3>
+          <button type="button" class="plain-btn" @click="closeRebuildDialog">×</button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-row">
+            <label>完成品コード</label>
+            <input v-model.trim="rebuildForm.productCode" type="text" placeholder="例: V053143615" />
+          </div>
+          <div class="form-row">
+            <label>戻し開始日</label>
+            <input v-model="rebuildForm.startDate" type="date" />
+          </div>
+          <div class="form-row">
+            <label>戻し終了日</label>
+            <input v-model="rebuildForm.endDate" type="date" />
+          </div>
+          <p class="dialog-note">対象期間のOPEN確定受注を差し戻し後、同じ対象だけ再展開します。</p>
+          <p v-if="rebuildError" class="dialog-error">{{ rebuildError }}</p>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" @click="closeRebuildDialog" :disabled="rebuildRunning">キャンセル</button>
+          <button type="button" class="sub-action-btn" @click="submitRebuild" :disabled="rebuildRunning">
+            {{ rebuildRunning ? "実行中..." : "戻して再展開" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -79,6 +119,14 @@ const SECTION_LABELS = {
 const running = ref(false);
 const message = ref("");
 const warnings = ref([]);
+const showRebuildDialog = ref(false);
+const rebuildRunning = ref(false);
+const rebuildError = ref("");
+const rebuildForm = ref({
+  productCode: "",
+  startDate: "",
+  endDate: "",
+});
 
 const findPermission = (user, resource) => {
   if (!user) return null;
@@ -245,6 +293,56 @@ const runExpand = async () => {
     running.value = false;
   }
 };
+
+const openRebuildDialog = () => {
+  rebuildError.value = "";
+  rebuildForm.value = {
+    productCode: "",
+    startDate: "",
+    endDate: "",
+  };
+  showRebuildDialog.value = true;
+};
+
+const closeRebuildDialog = () => {
+  if (rebuildRunning.value) return;
+  showRebuildDialog.value = false;
+};
+
+const submitRebuild = async () => {
+  rebuildError.value = "";
+  if (!rebuildForm.value.productCode) {
+    rebuildError.value = "完成品コードを入力してください。";
+    return;
+  }
+  if (!rebuildForm.value.startDate || !rebuildForm.value.endDate) {
+    rebuildError.value = "期間を入力してください。";
+    return;
+  }
+  if (rebuildForm.value.startDate > rebuildForm.value.endDate) {
+    rebuildError.value = "期間の大小が逆です。";
+    return;
+  }
+
+  rebuildRunning.value = true;
+  message.value = "";
+  warnings.value = [];
+  try {
+    const res = await api.orders.rebuildOrderExpansion({
+      product_code: rebuildForm.value.productCode,
+      due_date_from: rebuildForm.value.startDate,
+      due_date_to: rebuildForm.value.endDate,
+    });
+    const data = res.data || {};
+    message.value = `戻し再展開完了: 対象=${data.target_order_lines ?? 0}, 差し戻し=${data.reverted_order_lines ?? 0}, 再展開=${data.expanded_order_lines ?? 0}`;
+    warnings.value = data.warnings || [];
+    showRebuildDialog.value = false;
+  } catch (e) {
+    rebuildError.value = e?.response?.data?.detail || e?.response?.data?.errors?.[0] || "展開戻しに失敗しました。";
+  } finally {
+    rebuildRunning.value = false;
+  }
+};
 </script>
 
 <style scoped>
@@ -304,6 +402,23 @@ const runExpand = async () => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.action-stack {
+  display: grid;
+  gap: 6px;
+}
+.sub-action-btn {
+  width: 100%;
+  padding: 8px 0;
+  background: #b45309;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sub-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .status-text {
   margin-top: 6px;
   font-size: 12px;
@@ -318,6 +433,77 @@ const runExpand = async () => {
 .helper-text {
   margin-top: 10px;
   color: #64748b;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+.dialog-card {
+  width: min(460px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+.dialog-head, .dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.dialog-actions {
+  border-bottom: none;
+  border-top: 1px solid #e5e7eb;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dialog-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.plain-btn {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+}
+.dialog-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-row label {
+  font-size: 12px;
+  color: #475569;
+  font-weight: 700;
+}
+.form-row input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+.dialog-note {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+}
+.dialog-error {
+  margin: 0;
+  font-size: 12px;
+  color: #b91c1c;
 }
 
 @media (max-width: 1400px) {

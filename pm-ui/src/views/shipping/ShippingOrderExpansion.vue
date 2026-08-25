@@ -5,8 +5,13 @@
         <h2 class="page-title">受注展開</h2>
         <p class="subtitle">完成品と構成部品の内示・確定・計進・進度を表示します。</p>
       </div>
-      <button type="button" @click="goBack">戻る</button>
+      <div class="header-actions">
+        <button type="button" class="warning-btn" @click="openRebuildDialog">展開を戻して再展開</button>
+        <button type="button" @click="goBack">戻る</button>
+      </div>
     </div>
+
+    <div v-if="rebuildResult" class="status success">{{ rebuildResult }}</div>
 
     <div v-if="loading" class="status">読込中...</div>
     <div v-else-if="error" class="status error">{{ error }}</div>
@@ -141,6 +146,36 @@
     >
       <div class="floating-x-scroll-inner" :style="{ width: `${scrollContentWidth}px` }"></div>
     </div>
+    <div v-if="showRebuildDialog" class="dialog-backdrop" @click.self="closeRebuildDialog">
+      <div class="dialog-card">
+        <div class="dialog-head">
+          <h3>受注展開の戻し</h3>
+          <button type="button" class="plain-btn" @click="closeRebuildDialog">×</button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-row">
+            <label>完成品コード</label>
+            <input v-model.trim="rebuildForm.productCode" type="text" readonly />
+          </div>
+          <div class="form-row">
+            <label>戻し開始日</label>
+            <input v-model="rebuildForm.startDate" type="date" />
+          </div>
+          <div class="form-row">
+            <label>戻し終了日</label>
+            <input v-model="rebuildForm.endDate" type="date" />
+          </div>
+          <p class="dialog-note">対象期間のOPEN確定受注を差し戻し後、同じ対象だけ再展開します。</p>
+          <p v-if="rebuildError" class="dialog-error">{{ rebuildError }}</p>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" @click="closeRebuildDialog" :disabled="rebuildRunning">キャンセル</button>
+          <button type="button" class="warning-btn" @click="submitRebuild" :disabled="rebuildRunning">
+            {{ rebuildRunning ? "実行中..." : "戻して再展開" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -161,6 +196,15 @@ const topScrollRef = ref(null);
 const mainScrollRef = ref(null);
 const childScrollRef = ref(null);
 const scrollContentWidth = ref(0);
+const showRebuildDialog = ref(false);
+const rebuildRunning = ref(false);
+const rebuildError = ref("");
+const rebuildResult = ref("");
+const rebuildForm = ref({
+  productCode: "",
+  startDate: "",
+  endDate: "",
+});
 let syncingScroll = false;
 
 const productCode = computed(() => String(route.query.product_code || "").trim());
@@ -493,6 +537,56 @@ const buildShipmentActualByDate = (rows, cols) => {
   return Object.fromEntries(cols.map((d) => [d, Number(byDate.get(d) || 0)]));
 };
 
+const openRebuildDialog = () => {
+  rebuildError.value = "";
+  rebuildResult.value = "";
+  rebuildForm.value = {
+    productCode: productCode.value,
+    startDate: columns.value[0] || startDate.value,
+    endDate: columns.value[columns.value.length - 1] || startDate.value,
+  };
+  showRebuildDialog.value = true;
+};
+
+const closeRebuildDialog = () => {
+  if (rebuildRunning.value) return;
+  showRebuildDialog.value = false;
+};
+
+const submitRebuild = async () => {
+  rebuildError.value = "";
+  rebuildResult.value = "";
+  if (!rebuildForm.value.productCode) {
+    rebuildError.value = "完成品コードがありません。";
+    return;
+  }
+  if (!rebuildForm.value.startDate || !rebuildForm.value.endDate) {
+    rebuildError.value = "期間を入力してください。";
+    return;
+  }
+  if (rebuildForm.value.startDate > rebuildForm.value.endDate) {
+    rebuildError.value = "期間の大小が逆です。";
+    return;
+  }
+
+  rebuildRunning.value = true;
+  try {
+    const res = await api.orders.rebuildOrderExpansion({
+      product_code: rebuildForm.value.productCode,
+      due_date_from: rebuildForm.value.startDate,
+      due_date_to: rebuildForm.value.endDate,
+    });
+    const data = res.data || {};
+    rebuildResult.value = `対象${data.target_order_lines || 0}件 / 差し戻し${data.reverted_order_lines || 0}件 / 再展開${data.expanded_order_lines || 0}件`;
+    showRebuildDialog.value = false;
+    await load();
+  } catch (e) {
+    rebuildError.value = e?.response?.data?.detail || e?.response?.data?.errors?.[0] || "展開戻しに失敗しました。";
+  } finally {
+    rebuildRunning.value = false;
+  }
+};
+
 const load = async () => {
   if (!productCode.value) {
     error.value = "完成品が指定されていません。";
@@ -656,10 +750,12 @@ load();
 <style scoped>
 .page-container { padding: 16px; padding-bottom: 36px; display: flex; flex-direction: column; gap: 12px; }
 .page-header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.header-actions { display: flex; gap: 8px; align-items: center; }
 .page-title { margin: 0; font-size: 20px; }
 .subtitle { margin: 0; color: #64748b; font-size: 13px; }
 .status { padding: 20px; text-align: center; color: #475569; }
 .status.error { color: #b91c1c; }
+.status.success { color: #166534; background: #ecfdf5; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; }
 .block-list-wrap { display: flex; flex-direction: column; gap: 8px; }
 .sticky-root-wrap {
   position: sticky;
@@ -693,6 +789,57 @@ load();
 }
 .day-col { width: 40px; min-width: 40px; max-width: 40px; }
 .pager-info { text-align: center; color: #475569; font-size: 12px; }
+.warning-btn {
+  background: #b45309;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.warning-btn:disabled { opacity: 0.7; cursor: default; }
+.plain-btn { background: transparent; border: none; font-size: 18px; cursor: pointer; }
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+.dialog-card {
+  width: min(460px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+.dialog-head, .dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.dialog-actions {
+  border-bottom: none;
+  border-top: 1px solid #e5e7eb;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dialog-head h3 { margin: 0; font-size: 16px; }
+.dialog-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.form-row { display: flex; flex-direction: column; gap: 6px; }
+.form-row label { font-size: 12px; color: #475569; font-weight: 700; }
+.form-row input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+.dialog-note { margin: 0; font-size: 12px; color: #475569; }
+.dialog-error { margin: 0; font-size: 12px; color: #b91c1c; }
 .floating-x-scroll {
   position: fixed;
   left: 16px;

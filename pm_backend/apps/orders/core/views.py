@@ -7,6 +7,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import django_filters
 from django.db.models import Exists, F, Max, Min, OuterRef, Q, Value
+from django.db import transaction
 from django.db.models.functions import Coalesce
 import csv
 import json
@@ -35,6 +36,7 @@ from .serializers import (
     StgOrderRawSerializer,
 )
 from .services.csv_import import CSVImportService
+from production.services.order_expansion import OrderExpansionService
 
 
 ORDER_FIRST_ARTICLE_DAYS_KEY = 'orders.first_article.days'
@@ -344,6 +346,7 @@ class OrderLineFilter(django_filters.FilterSet):
     due_date__gte = django_filters.DateFilter(field_name='due_date', lookup_expr='gte')
     due_date__lte = django_filters.DateFilter(field_name='due_date', lookup_expr='lte')
     order_type = django_filters.CharFilter(method='filter_order_type')
+    is_expanded = django_filters.BooleanFilter(field_name='is_expanded')
     customer_code = django_filters.CharFilter(
         field_name='order__customer__customer_code', lookup_expr='endswith'
     )
@@ -358,7 +361,7 @@ class OrderLineFilter(django_filters.FilterSet):
         model = OrderLine
         fields = [
             'order', 'product', 'due_date', 'due_date__gte', 'due_date__lte',
-            'order_type', 'customer_code', 'product_code', 'ship_to_code'
+            'order_type', 'is_expanded', 'customer_code', 'product_code', 'ship_to_code'
         ]
 
     def filter_order_type(self, queryset, name, value):
@@ -383,6 +386,75 @@ class OrderLineViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code']
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
+
+    @action(detail=False, methods=['post'], url_path='rebuild-expansion')
+    def rebuild_expansion(self, request):
+        """完成品コードと期間で対象FIRM受注の展開を差し戻して再展開する。"""
+        product_code = str(request.data.get('product_code') or '').strip()
+        due_date_from = request.data.get('due_date_from')
+        due_date_to = request.data.get('due_date_to')
+        customer_code = str(request.data.get('customer_code') or '').strip()
+        ship_to_code = str(request.data.get('ship_to_code') or '').strip()
+
+        if not product_code:
+            return Response({'detail': 'product_code は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not due_date_from or not due_date_to:
+            return Response({'detail': 'due_date_from と due_date_to は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        target_qs = (
+            OrderLine.objects
+            .filter(
+                order__status='OPEN',
+                product_code=product_code,
+                due_date__gte=due_date_from,
+                due_date__lte=due_date_to,
+            )
+            .select_related('order', 'order__customer', 'product')
+            .order_by('due_date', 'id')
+        )
+        if customer_code:
+            target_qs = target_qs.filter(order__customer__customer_code__endswith=customer_code)
+        if ship_to_code:
+            target_qs = target_qs.filter(ship_to_code__icontains=ship_to_code)
+
+        target_lines = []
+        for line in target_qs:
+            effective_order_type = (line.order_type or (line.order.order_type if line.order else '') or '').upper()
+            if effective_order_type == 'FIRM':
+                target_lines.append(line)
+
+        if not target_lines:
+            return Response(
+                {'detail': '対象のOPEN確定受注明細がありません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_ids = [line.id for line in target_lines]
+        expanded_ids = [line.id for line in target_lines if line.is_expanded]
+
+        with transaction.atomic():
+            expansion_service = OrderExpansionService()
+            revert_result = None
+            if expanded_ids:
+                revert_result = expansion_service.revert_firm_order_lines(expanded_ids)
+                if revert_result.get('errors'):
+                    transaction.set_rollback(True)
+                    return Response(revert_result, status=status.HTTP_400_BAD_REQUEST)
+
+            expand_result = expansion_service.expand_firm_order_lines(target_ids)
+            if expand_result.get('errors'):
+                transaction.set_rollback(True)
+                return Response(expand_result, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'target_order_lines': len(target_ids),
+            'reverted_order_lines': revert_result.get('reverted_order_lines', 0) if revert_result else 0,
+            'deleted_demands': revert_result.get('deleted_demands', 0) if revert_result else 0,
+            'updated_demands': (revert_result.get('updated_demands', 0) if revert_result else 0) + expand_result.get('updated', 0),
+            'created_demands': expand_result.get('created', 0),
+            'expanded_order_lines': expand_result.get('expanded_order_lines', 0),
+            'warnings': expand_result.get('warnings', []),
+        })
 
     @action(detail=False, methods=['get'], url_path='open-order-audit')
     def open_order_audit(self, request):

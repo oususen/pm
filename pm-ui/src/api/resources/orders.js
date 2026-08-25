@@ -85,6 +85,9 @@ export const createOrdersAPI = (client) => ({
     const query = { page_size: 10000, ...params }
     return client.get('/order-lines/', { params: query })
   },
+  rebuildOrderExpansion(payload = {}) {
+    return client.post('/order-lines/rebuild-expansion/', payload)
+  },
   openOrderAudit(params = {}) {
     return client.get('/order-lines/open-order-audit/', { params })
   },

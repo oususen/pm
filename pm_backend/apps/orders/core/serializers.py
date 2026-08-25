@@ -12,6 +12,7 @@ class OrderLineSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='order.customer.customer_name', read_only=True)
     customer_calendar_id = serializers.IntegerField(source='order.customer.calendar_id', read_only=True)
     order_no = serializers.CharField(source='order.order_no', read_only=True)
+    order_status = serializers.CharField(source='order.status', read_only=True)
 
     class Meta:
         model = OrderLine
@@ -19,7 +20,8 @@ class OrderLineSerializer(serializers.ModelSerializer):
             'id', 'order', 'line_no', 'product', 'product_code', 'product_name',
             'order_type', 'order_type_display', 'effective_order_type',
             'customer_order_no', 'quantity', 'actual_shipment_qty', 'due_date', 'plant_code', 'ship_to_code', 'remark',
-            'customer_code', 'customer_name', 'customer_calendar_id', 'order_no',
+            'customer_code', 'customer_name', 'customer_calendar_id', 'order_no', 'order_status',
+            'is_expanded', 'expanded_at',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
