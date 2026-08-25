@@ -79,4 +79,21 @@ onBeforeUnmount(() => {
   top: 0;
   z-index: 9999;
 }
+
+@media print {
+  .dev-banner,
+  .global-nav {
+    display: none !important;
+  }
+
+  .app-root,
+  .app-body,
+  .app-main {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+}
 </style>

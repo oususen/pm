@@ -513,6 +513,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'shipping.ship_to_lead_time', label: '出荷: 納入地別出荷加算日数' },
   { value: 'inventory', label: '在庫' },
   { value: 'stocktake', label: '在庫: 棚卸入力' },
+  { value: 'stocktake.layout', label: '在庫: 棚卸レイアウト' },
   { value: 'stocktake.area', label: '在庫: 棚卸エリア管理' },
   { value: 'stocktake.delete', label: '在庫: 棚卸履歴削除' },
     { value: 'quality', label: '品質' },

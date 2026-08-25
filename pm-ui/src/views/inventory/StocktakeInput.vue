@@ -13,7 +13,7 @@
         <span style="display:flex;gap:4px;justify-content:flex-end;align-items:center">
         <span v-if="canManageAreasView" class="tab-link" @click="showAreaModal = true">&#x1F3E2;</span>
         <span class="tab-link" @click="printSlips" v-if="selectedArea">&#x1F5A8;</span>
-        <span class="tab-link" @click="openLayout">レイアウト</span>
+        <span v-if="canViewLayout" class="tab-link" @click="openLayout">レイアウト</span>
       </span>
     </header>
 
@@ -115,7 +115,7 @@
     <header class="detail-header">
       <button class="detail-back" type="button" @click="closeDetail">‹</button>
       <div class="detail-title">{{ selectedArea ? selectedArea.name : '棚卸' }}入力</div>
-      <button class="detail-save" type="button" @click="saveCurrent" :disabled="saving || !selectedRow || normalizeNumber(editValues[selectedRow.product_id]) === null || !selectedRecorder">
+      <button class="detail-save" type="button" @click="saveCurrent" :disabled="saving || !canEdit || !selectedRow || normalizeNumber(editValues[selectedRow.product_id]) === null || !selectedRecorder">
         保存
       </button>
     </header>
@@ -157,14 +157,14 @@
       <div class="detail-grid two">
         <label class="detail-field">
           <span>入力者</span>
-          <select v-model="selectedRecorder" class="recorder-select">
+          <select v-model="selectedRecorder" class="recorder-select" :disabled="!canEdit">
             <option value="">選択</option>
             <option v-for="r in recorders" :key="r.id" :value="r.name">{{ r.name }}</option>
           </select>
         </label>
         <label class="detail-field">
           <span>カウンター</span>
-          <select v-model="selectedCounter" class="recorder-select">
+          <select v-model="selectedCounter" class="recorder-select" :disabled="!canEdit">
             <option value="">選択</option>
             <option v-for="c in counters" :key="'c'+c.id" :value="c.name">{{ c.name }}</option>
           </select>
@@ -178,6 +178,7 @@
             type="number"
             step="1"
             inputmode="numeric"
+            :readonly="!canEdit"
             @input="onActualInput(selectedRow.product_id, $event)"
           />
         </label>
@@ -187,6 +188,7 @@
             :value="noteValues[selectedRow.product_id]"
             type="text"
             placeholder="備考"
+            :readonly="!canEdit"
             @input="onNoteInput(selectedRow.product_id, $event)"
           />
         </label>
@@ -287,28 +289,28 @@
         <div v-if="peopleManageTab === 'recorder'" class="people-manage-panel">
           <div class="people-manage-title">入力者</div>
           <div class="recorder-add-row">
-            <input v-model.trim="newRecorderName" type="text" placeholder="名前を入力" @keyup.enter="addRecorder" />
-            <button type="button" @click="addRecorder" :disabled="!newRecorderName">追加</button>
+            <input v-model.trim="newRecorderName" type="text" placeholder="名前を入力" :disabled="!canEdit" @keyup.enter="addRecorder" />
+            <button type="button" @click="addRecorder" :disabled="!newRecorderName || !canEdit">追加</button>
           </div>
           <div v-if="recorders.length === 0" class="empty-state compact">入力者がいません</div>
           <div v-else class="recorder-list">
             <div v-for="r in recorders" :key="r.id" class="recorder-item">
               <span>{{ r.name }}</span>
-              <button type="button" class="history-delete-btn" @click="removeRecorder(r.id)">✕</button>
+              <button v-if="canEdit" type="button" class="history-delete-btn" @click="removeRecorder(r.id)">✕</button>
             </div>
           </div>
         </div>
         <div v-else class="people-manage-panel">
           <div class="people-manage-title">カウンター</div>
           <div class="recorder-add-row">
-            <input v-model.trim="newCounterName" type="text" placeholder="名前を入力" @keyup.enter="addCounter" />
-            <button type="button" @click="addCounter" :disabled="!newCounterName">追加</button>
+            <input v-model.trim="newCounterName" type="text" placeholder="名前を入力" :disabled="!canEdit" @keyup.enter="addCounter" />
+            <button type="button" @click="addCounter" :disabled="!newCounterName || !canEdit">追加</button>
           </div>
           <div v-if="counters.length === 0" class="empty-state compact">カウンターがいません</div>
           <div v-else class="recorder-list">
             <div v-for="c in counters" :key="c.id" class="recorder-item">
               <span>{{ c.name }}</span>
-              <button type="button" class="history-delete-btn" @click="removeCounter(c.id)">✕</button>
+              <button v-if="canEdit" type="button" class="history-delete-btn" @click="removeCounter(c.id)">✕</button>
             </div>
           </div>
         </div>
@@ -323,10 +325,10 @@
     <div class="modal-box area-modal">
       <div class="modal-header">エリア管理</div>
       <div class="modal-body">
-        <div class="area-edit-section" v-if="canManageAreasView && editingArea">
+        <div class="area-edit-section" v-if="canManageAreasEdit && editingArea">
           <div class="area-edit-name-row">
-            <input v-model.trim="editingArea.name" placeholder="エリア名" />
-            <button type="button" class="btn-save" @click="saveEditArea" :disabled="!editingArea.name">保存</button>
+            <input v-model.trim="editingArea.name" placeholder="エリア名" :disabled="!canManageAreasEdit" />
+            <button type="button" class="btn-save" @click="saveEditArea" :disabled="!editingArea.name || !canManageAreasEdit">保存</button>
             <button type="button" class="btn-cancel" @click="editingArea = null">戻る</button>
           </div>
           <div class="area-loc-title">所属置き場 (タップで追加/解除)</div>
@@ -335,16 +337,16 @@
               v-for="loc in allKnownLocations"
               :key="loc"
               class="area-loc-chip"
-              :class="{ selected: editingArea.locations.includes(loc) }"
+              :class="{ selected: editingArea.locations.includes(loc), disabled: !canManageAreasEdit }"
               @click="toggleAreaLocation(loc)"
             >{{ loc }}</span>
           </div>
           <div v-if="allKnownLocations.length === 0" class="empty-state">置き場データがありません。先に製品マスタで保管場所を設定してください。</div>
         </div>
         <div v-else>
-          <div v-if="canManageAreasView" class="area-create-box">
+          <div v-if="canManageAreasEdit" class="area-create-box">
             <div class="area-create-row">
-              <select v-model="newAreaType" class="area-create-select">
+              <select v-model="newAreaType" class="area-create-select" :disabled="!canManageAreasEdit">
                 <option value="team">班</option>
                 <option value="unit">グループ</option>
                 <option value="other">その他</option>
@@ -353,6 +355,7 @@
                 v-if="newAreaType === 'team'"
                 v-model="selectedTeamAreaId"
                 class="area-create-select wide"
+                :disabled="!canManageAreasEdit"
                 @keyup.enter="createArea"
               >
                 <option value="">班を選択</option>
@@ -362,6 +365,7 @@
                 v-else-if="newAreaType === 'unit'"
                 v-model="selectedUnitAreaId"
                 class="area-create-select wide"
+                :disabled="!canManageAreasEdit"
                 @keyup.enter="createArea"
               >
                 <option value="">グループを選択</option>
@@ -371,17 +375,18 @@
                 v-else
                 v-model.trim="newAreaName"
                 class="area-create-input"
+                :disabled="!canManageAreasEdit"
                 placeholder="その他エリア名"
                 @keyup.enter="createArea"
               />
-              <button type="button" @click="createArea" :disabled="!canCreateArea">追加</button>
+              <button type="button" @click="createArea" :disabled="!canCreateArea || !canManageAreasEdit">追加</button>
             </div>
             <div class="area-create-help">エリア作成は既存の班・グループから選択するか、「その他」で任意名を登録します。</div>
           </div>
           <div v-if="areas.length === 0" class="empty-state">エリアがありません</div>
           <div v-else class="recorder-list">
             <div v-for="area in areas" :key="area.id" class="recorder-item">
-              <span v-if="canManageAreasView" @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
+              <span v-if="canManageAreasEdit" @click="startEditArea(area)" style="cursor:pointer;flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
               <span v-else style="flex:1">{{ area.name }} <small style="color:#6b7280">({{ area.locations.length }}置き場)</small></span>
               <button v-if="canManageAreasEdit" type="button" class="history-delete-btn" @click="deleteArea(area.id)">✕</button>
             </div>
@@ -427,6 +432,7 @@ const historyLoading = ref(false);
 const historyProductId = ref(null);
 const canDeleteHistory = computed(() => hasPermission(authState.user, "stocktake.delete", "edit"));
 const canEdit = computed(() => hasPermission(authState.user, "stocktake", "edit"));
+const canViewLayout = computed(() => hasPermission(authState.user, "stocktake.layout", "view"));
 const isAreaAdminUser = computed(() => {
   const user = authState.user;
   return Boolean(user?.is_superuser || user?.username === 'admin');
@@ -644,6 +650,7 @@ const locationTiles = computed(() => {
 });
 
 const openLayout = async () => {
+  if (!canViewLayout.value) return;
   filters.line_id = '';
   filters.stock_location = '';
   filters.product_code = '';
@@ -996,6 +1003,7 @@ const loadCounters = async () => {
 };
 
 const addRecorder = async () => {
+  if (!canEdit.value) return;
   if (!newRecorderName.value) return;
   try {
     await api.stocktakeRecords.addRecorder({ stocktake_date: filters.stocktake_date, name: newRecorderName.value });
@@ -1008,6 +1016,7 @@ const addRecorder = async () => {
 };
 
 const addCounter = async () => {
+  if (!canEdit.value) return;
   if (!newCounterName.value) return;
   try {
     await api.stocktakeRecords.addCounter({ stocktake_date: filters.stocktake_date, name: newCounterName.value });
@@ -1020,6 +1029,7 @@ const addCounter = async () => {
 };
 
 const removeRecorder = async (id) => {
+  if (!canEdit.value) return;
   try {
     await api.stocktakeRecords.removeRecorder({ id });
     await loadRecorders();
@@ -1029,6 +1039,7 @@ const removeRecorder = async (id) => {
 };
 
 const removeCounter = async (id) => {
+  if (!canEdit.value) return;
   try {
     await api.stocktakeRecords.removeCounter({ id });
     await loadCounters();
@@ -1093,7 +1104,7 @@ const loadAllKnownLocations = async () => {
 };
 
 const createArea = async () => {
-  if (!canManageAreasView.value) return;
+  if (!canManageAreasEdit.value) return;
   const areaName = newAreaResolvedName.value;
   if (!areaName) return;
   if (areaNameExists.value) {
@@ -1124,19 +1135,20 @@ const deleteArea = async (id) => {
 };
 
 const startEditArea = (area) => {
-  if (!canManageAreasView.value) return;
+  if (!canManageAreasEdit.value) return;
   editingArea.value = { ...area, locations: [...area.locations] };
   loadAllKnownLocations();
 };
 
 const toggleAreaLocation = (loc) => {
+  if (!canManageAreasEdit.value || !editingArea.value) return;
   const idx = editingArea.value.locations.indexOf(loc);
   if (idx >= 0) editingArea.value.locations.splice(idx, 1);
   else editingArea.value.locations.push(loc);
 };
 
 const saveEditArea = async () => {
-  if (!canManageAreasView.value) return;
+  if (!canManageAreasEdit.value) return;
   if (!editingArea.value?.name) return;
   try {
     await api.stocktakeRecords.saveArea({
@@ -1163,6 +1175,7 @@ const buildSaveItems = (targetRows) =>
     }));
 
 const saveCurrent = async () => {
+  if (!canEdit.value) return;
   if (!selectedRow.value) return;
   const items = buildSaveItems([selectedRow.value]);
   if (!items.length) return;

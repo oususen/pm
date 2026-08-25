@@ -3,7 +3,12 @@ const inventory = [
     path: "/inventory",
     name: "InventoryMenu",
     component: () => import("@/views/inventory/InventoryMenu.vue"),
-    meta: { pageTitle: "在庫管理", manualPath: "在庫/在庫管理メニュー.md", resource: "inventory" },
+    meta: {
+      pageTitle: "在庫管理",
+      manualPath: "在庫/在庫管理メニュー.md",
+      resource: "inventory",
+      allowChildResources: true,
+    },
   },
   {
     path: "/inventory/adjustments",
@@ -15,13 +20,23 @@ const inventory = [
     path: "/inventory/stocktake-input",
     name: "InventoryStocktakeInput",
     component: () => import("@/views/inventory/StocktakeInput.vue"),
-    meta: { pageTitle: "棚卸現物入力", manualPath: "在庫/棚卸現物入力.md", resource: "inventory" },
+    meta: {
+      pageTitle: "棚卸現物入力",
+      manualPath: "在庫/棚卸現物入力.md",
+      resource: "stocktake",
+      fallbackToParent: false,
+    },
   },
   {
     path: "/inventory/stocktake-layout",
     name: "InventoryStocktakeLayout",
     component: () => import("@/views/inventory/StocktakeLayoutEditor.vue"),
-    meta: { pageTitle: "棚卸レイアウト編集", manualPath: "在庫/棚卸レイアウト編集.md", resource: "inventory" },
+    meta: {
+      pageTitle: "棚卸レイアウト編集",
+      manualPath: "在庫/棚卸レイアウト編集.md",
+      resource: "stocktake.layout",
+      fallbackToParent: false,
+    },
   },
   {
     path: "/inventory/adjustments/progress",

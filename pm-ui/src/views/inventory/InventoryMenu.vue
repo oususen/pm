@@ -2,12 +2,12 @@
   <div class="inventory-menu">
     <h2 class="page-title">在庫管理メニュー</h2>
     <div class="tile-grid">
-      <RouterLink to="/inventory/stocktake-input" class="tile">
+      <RouterLink v-if="canViewStocktakeInput" to="/inventory/stocktake-input" class="tile">
         <div class="tile-icon">🗂️</div>
         <div class="tile-title">棚卸現物入力</div>
         <div class="tile-desc">場所・工程・写真を見ながら現物数を入力します。</div>
       </RouterLink>
-      <RouterLink to="/inventory/stocktake-layout" class="tile">
+      <RouterLink v-if="canViewStocktakeLayout" to="/inventory/stocktake-layout" class="tile">
         <div class="tile-icon">🗺️</div>
         <div class="tile-title">棚卸レイアウト編集</div>
         <div class="tile-desc">倉庫の棚・設備の配置をグリッドで編集します。</div>
@@ -29,6 +29,16 @@
 
 <script setup>
 import { RouterLink } from "vue-router";
+import { computed } from "vue";
+import { authState } from "@/auth";
+import { hasPermission } from "@/router";
+
+const canViewStocktakeInput = computed(() =>
+  hasPermission(authState.user, "stocktake", "view")
+);
+const canViewStocktakeLayout = computed(() =>
+  hasPermission(authState.user, "stocktake.layout", "view")
+);
 </script>
 
 <style scoped>
@@ -91,4 +101,3 @@ import { RouterLink } from "vue-router";
   }
 }
 </style>
-
