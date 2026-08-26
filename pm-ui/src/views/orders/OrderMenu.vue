@@ -32,20 +32,22 @@
                 >
                   {{ running ? '展開中...' : '展開実行' }}
                 </button>
-                <button
-                  class="sub-action-btn"
-                  :disabled="maintenanceRunning"
-                  @click.prevent="openMaintenanceDialog('revert')"
-                >
-                  {{ maintenanceRunning && maintenanceMode === 'revert' ? '戻し中...' : '展開戻し' }}
-                </button>
-                <button
-                  class="sub-action-btn secondary"
-                  :disabled="maintenanceRunning"
-                  @click.prevent="openMaintenanceDialog('expand')"
-                >
-                  {{ maintenanceRunning && maintenanceMode === 'expand' ? '再展開中...' : '再展開' }}
-                </button>
+                <div class="sub-action-row">
+                  <button
+                    class="sub-action-btn"
+                    :disabled="maintenanceRunning"
+                    @click.prevent="openMaintenanceDialog('revert')"
+                  >
+                    {{ maintenanceRunning && maintenanceMode === 'revert' ? '戻し中...' : '展開戻し' }}
+                  </button>
+                  <button
+                    class="sub-action-btn secondary"
+                    :disabled="maintenanceRunning"
+                    @click.prevent="openMaintenanceDialog('expand')"
+                  >
+                    {{ maintenanceRunning && maintenanceMode === 'expand' ? '再展開中...' : '再展開' }}
+                  </button>
+                </div>
               </div>
               <div v-if="message" class="status-text">{{ message }}</div>
               <ul v-if="warnings.length" class="warn-list">
@@ -434,6 +436,11 @@ const submitMaintenance = async () => {
   display: grid;
   gap: 6px;
 }
+.sub-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
 .sub-action-btn {
   width: 100%;
   padding: 8px 0;
@@ -442,6 +449,7 @@ const submitMaintenance = async () => {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .sub-action-btn:disabled {
   opacity: 0.6;

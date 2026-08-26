@@ -605,9 +605,14 @@ const load = async () => {
     const root = products.find((p) => String(p.product_code || "").trim() === productCode.value) || products[0];
     if (!root?.id) throw new Error("完成品が見つかりません。");
 
-    const bomTreeRes = await api.bomService.getBomTree(root.id);
-    const tree = bomTreeRes.data || {};
-    const rawNodes = flattenTree(tree, 0, []);
+    const treeResponses = await Promise.all(
+      columns.value.map((dateStr) => api.bomService.getBomTree(root.id, dateStr))
+    );
+    const rawNodes = [];
+    treeResponses.forEach((res) => {
+      const tree = res.data || {};
+      flattenTree(tree, 0, rawNodes);
+    });
     const nodes = dedupeNodesByProduct(rawNodes);
     const productIds = Array.from(new Set(nodes.map((n) => n.product_id)));
 
