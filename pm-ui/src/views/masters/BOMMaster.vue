@@ -176,6 +176,23 @@
         <div class="form-group">
           <label><input type="checkbox" v-model="bomImportForm.is_active" /> 有効</label>
         </div>
+        <div v-if="bomImportDuplicateDetails.length" class="duplicate-selection">
+          <h3>既存BOMの再利用指定</h3>
+          <p class="hint-text no-top-margin">
+            既存BOMを使いたい親品番だけチェックしてください。チェックした親品番は既存BOMを使い、その親配下の子明細は今回の取込で追加しません。
+          </p>
+          <div class="duplicate-list">
+            <label v-for="item in bomImportDuplicateDetails" :key="item.parent_code" class="duplicate-item">
+              <input
+                type="checkbox"
+                :value="item.parent_code"
+                v-model="bomImportSelectedReuseParentCodes"
+              />
+              <span class="duplicate-code">{{ item.parent_code }}</span>
+              <span class="duplicate-meta">既存BOM ID: {{ item.bom_id }} / 開始日: {{ item.valid_from }}</span>
+            </label>
+          </div>
+        </div>
         <div class="form-actions">
           <button type="button" class="btn-secondary" @click="executeBomImportCheck" :disabled="bomImporting || bomChecking">
             {{ bomChecking ? 'チェック中...' : '取込前チェック' }}
@@ -943,8 +960,9 @@ const canEdit = computed(() => canAccessMasterResource('masters.bom', 'edit'))
 const showBomImportDialog = ref(false)
 const bomImporting = ref(false)
 const bomChecking = ref(false)
-const bomImportUseExistingDuplicates = ref(false)
 const bomImportFile = ref(null)
+const bomImportDuplicateDetails = ref([])
+const bomImportSelectedReuseParentCodes = ref([])
 const showDeleteImpactDialog = ref(false)
 const deleteImpactPreview = ref({ affected_steps: [] })
 const deleteImpactTargetId = ref(null)
@@ -1226,12 +1244,15 @@ const downloadBomImportTemplateXlsx = async () => {
 
 const openBomImportDialog = () => {
   bomImportFile.value = null
-  bomImportUseExistingDuplicates.value = false
+  bomImportDuplicateDetails.value = []
+  bomImportSelectedReuseParentCodes.value = []
   showBomImportDialog.value = true
 }
 
 const closeBomImportDialog = () => {
   showBomImportDialog.value = false
+  bomImportDuplicateDetails.value = []
+  bomImportSelectedReuseParentCodes.value = []
 }
 
 const onBomCsvSelected = (event) => {
@@ -1253,45 +1274,29 @@ const executeBomCsvImport = async () => {
   }
   bomImporting.value = true
   try {
-    const buildImportFormData = (useExistingDuplicates) => {
-      const fd = new FormData()
-      fd.append('file', bomImportFile.value)
-      fd.append('version', bomImportForm.value.version || 'v1')
-      fd.append('completed_product_code', bomImportForm.value.completed_product_code || '')
-      fd.append('valid_from', bomImportForm.value.valid_from)
-      fd.append('valid_to', bomImportForm.value.valid_to || '')
-      fd.append('remark', bomImportForm.value.remark || '')
-      fd.append('is_active', String(!!bomImportForm.value.is_active))
-      fd.append('use_existing_duplicates', String(!!useExistingDuplicates))
-      return fd
-    }
+    const fd = new FormData()
+    fd.append('file', bomImportFile.value)
+    fd.append('version', bomImportForm.value.version || 'v1')
+    fd.append('completed_product_code', bomImportForm.value.completed_product_code || '')
+    fd.append('valid_from', bomImportForm.value.valid_from)
+    fd.append('valid_to', bomImportForm.value.valid_to || '')
+    fd.append('remark', bomImportForm.value.remark || '')
+    fd.append('is_active', String(!!bomImportForm.value.is_active))
+    fd.append('reuse_parent_codes', bomImportSelectedReuseParentCodes.value.join(','))
 
-    let res
-    try {
-      res = await api.boms.importBOMCsv(buildImportFormData(bomImportUseExistingDuplicates.value))
-    } catch (error) {
-      const duplicateBoms = error?.response?.data?.duplicate_boms || []
-      if (Array.isArray(duplicateBoms) && duplicateBoms.length > 0) {
-        const preview = duplicateBoms.slice(0, 10).join('\n')
-        const useExisting = window.confirm(
-          `既存BOM重複があります。\n${preview}\n\n既存BOMを再利用して取込しますか？`
-        )
-        if (!useExisting) {
-          throw error
-        }
-        bomImportUseExistingDuplicates.value = true
-        res = await api.boms.importBOMCsv(buildImportFormData(true))
-      } else {
-        throw error
-      }
-    }
-
+    const res = await api.boms.importBOMCsv(fd)
     const reused = res?.data?.reused_boms || 0
     alert(`${res.data.message}\nBOM: ${res.data.created_boms}件 / 明細: ${res.data.created_items}件 / 再利用: ${reused}件`)
     showBomImportDialog.value = false
     fetchBOMs(1)
   } catch (error) {
     console.error('BOM取込エラー:', error)
+    const duplicateDetails = error?.response?.data?.duplicate_bom_details
+    if (Array.isArray(duplicateDetails) && duplicateDetails.length) {
+      bomImportDuplicateDetails.value = duplicateDetails
+      alert('既存BOM重複があります。再利用したい親品番にチェックを入れて、もう一度「取込実行」を押してください。')
+      return
+    }
     const errors = error?.response?.data?.errors
     const detail = error?.response?.data?.detail || '取込に失敗しました'
     if (Array.isArray(errors) && errors.length) {
@@ -1321,16 +1326,14 @@ const executeBomImportCheck = async () => {
     fd.append('version', bomImportForm.value.version || 'v1')
     fd.append('valid_from', bomImportForm.value.valid_from || '')
     const res = await api.boms.importBOMCheck(fd)
+    bomImportDuplicateDetails.value = Array.isArray(res?.data?.duplicate_bom_details)
+      ? res.data.duplicate_bom_details
+      : []
+    bomImportSelectedReuseParentCodes.value = []
     const duplicateBoms = res?.data?.duplicate_boms || []
     if (duplicateBoms.length) {
-      const preview = duplicateBoms.slice(0, 10).join('\n')
-      const useExisting = window.confirm(
-        `既存BOM重複があります。\n${preview}\n\n既存BOMを再利用して取込しますか？`
-      )
-      bomImportUseExistingDuplicates.value = useExisting
-      alert(`チェック件数: ${res.data.checked_rows}件\n重複: ${duplicateBoms.length}件\n再利用設定: ${useExisting ? 'する' : 'しない'}`)
+      alert(`チェック件数: ${res.data.checked_rows}件\n重複: ${duplicateBoms.length}件\n下の一覧から再利用したい親品番を選択してください`)
     } else {
-      bomImportUseExistingDuplicates.value = false
       alert(`${res.data.message}\nチェック件数: ${res.data.checked_rows}件`)
     }
   } catch (error) {
@@ -3089,6 +3092,45 @@ const TreeBranch = defineComponent({
   margin-top: 8px;
   font-size: 12px;
   color: #666;
+}
+
+.no-top-margin {
+  margin-top: 0;
+}
+
+.duplicate-selection {
+  margin-top: 16px;
+}
+
+.duplicate-selection h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.duplicate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.duplicate-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #eadfca;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.duplicate-code {
+  min-width: 100px;
+  font-weight: 700;
+  color: #2e2418;
+}
+
+.duplicate-meta {
+  font-size: 12px;
+  color: #6d5a40;
 }
 
 .btn-info {
