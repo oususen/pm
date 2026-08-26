@@ -1865,15 +1865,16 @@ def recalculate_inventory_for_line(
     if line_final_only:
         product_qs = product_qs.filter(product__is_line_final_product=True)
     from masters.models import RoutingStep
-    from masters.services.routing_service import build_effective_routing_q
-    products_with_routing = set(
-        RoutingStep.objects.filter(
-            line_id=line_id,
-        ).filter(
-            build_effective_routing_q(prefix='routing__')
-        ).exclude(output_product_id__isnull=True)
-        .values_list('output_product_id', flat=True).distinct()
-    )
+    from masters.services.routing_service import build_effective_routing_range_q
+    routing_candidate_q = build_effective_routing_range_q(start_date, end_date, prefix='routing__')
+    products_with_routing = set()
+    routing_steps = RoutingStep.objects.filter(
+        line_id=line_id,
+    ).filter(
+        routing_candidate_q
+    ).exclude(output_product_id__isnull=True)
+    for step in routing_steps:
+        products_with_routing.add(step.output_product_id)
     all_product_ids = list(product_qs.values_list('product_id', flat=True).distinct())
     excluded_ids = [pid for pid in all_product_ids if pid not in products_with_routing]
     if excluded_ids:

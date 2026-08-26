@@ -417,8 +417,8 @@ def recalculate_progress_qty(
             + scrap_adjust_total
             + progress_adjust
         )
-        # 計画在庫と同じ時制考慮: 過去日は実績、今日以降は計画
-        # 計画進度の調整はPROGRESS調整と同じものを使う（PLANNED_PROGRESSは使わない）
+        # 計画進度は過去日は実績、今日以降は計画を使う
+        # 調整値は PROGRESS 調整をそのまま共通利用する
         planned_production = actual_total if plan_date < today else plan_total
         planned_progress_qty = (
             prev_planned_progress
@@ -447,7 +447,8 @@ def recalculate_progress_qty(
             f'手動調整={adjust_total}, scrap調整={scrap_adjust_total}, PROGRESS調整={progress_adjust}, '
             f'結果進度={progress_qty} / '
             f'計画進度計算: 前日計画進度={prev_planned_progress}, 当日計画生産={planned_production}, '
-            f'当日需要={progress_shipment}, 調整合計={adjust_total + scrap_adjust_total + progress_adjust}, '
+            f'当日需要={progress_shipment}, PROGRESS調整={progress_adjust}, '
+            f'調整合計={adjust_total + scrap_adjust_total + progress_adjust}, '
             f'結果計画進度={planned_progress_qty}'
         )
 
