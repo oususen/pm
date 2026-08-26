@@ -266,6 +266,7 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
             'created_count': len(results['created']),
             'skipped_count': len(results['skipped']),
             'error_count': len(results['errors']),
+            'email_enabled': settings['email_enabled'],
             **results,
         })
 
