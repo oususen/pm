@@ -82,7 +82,7 @@ def read_rows(src: Path):
 def leading_spaces(value: str) -> int:
     count = 0
     for ch in value:
-        if ch == " ":
+        if ch == "■":
             count += 1
         else:
             break
@@ -90,7 +90,7 @@ def leading_spaces(value: str) -> int:
 
 
 def normalize_code(raw_code: str, is_outsourced: bool) -> str:
-    code = (raw_code or "").strip()
+    code = (raw_code or "").lstrip("■").strip()
     if is_outsourced and code and not code.endswith("G"):
         return f"{code}G"
     return code

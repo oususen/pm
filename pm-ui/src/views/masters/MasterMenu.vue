@@ -82,7 +82,7 @@ const tiles = computed(() => {
     { to: '/masters/container-capacity', label: '容器マスタ', icon: '🗃️', category: 'product', required: 'view', resource: 'masters.container_capacity' },
     { to: '/masters/equipment', label: '設備マスタ', icon: '🛠️', category: 'structure', required: 'view', resource: 'masters.equipment' },
     { to: '/masters/bom', label: '構成マスタ', icon: '🧩', category: 'structure', required: 'view', resource: 'masters.bom' },
-    { to: '/masters/bom?tieraConverter=1', label: 'ティエラCSV変換', icon: '🆕', description: '品番導入/BOM導入ファイルを一括生成', category: 'structure', required: 'view', resource: 'masters.bom' },
+    { to: '/masters/tiera-converter', label: 'ティエラCSV変換', icon: '🆕', description: '品番導入/BOM導入を専用画面で実行', category: 'structure', required: 'view', resource: 'masters.bom' },
     { to: '/masters/routing', label: 'ルーティングマスタ', icon: '🛣️', category: 'structure', required: 'view', resource: 'masters.routing' },
     { to: '/masters/process', label: '工程マスタ', icon: '⚙️', category: 'structure', required: 'view', resource: 'masters.process' },
     { to: '/masters/line', label: 'ラインマスタ', icon: '🏗️', category: 'structure', required: 'view', resource: 'masters.line' },

@@ -188,26 +188,6 @@
       </div>
     </div>
 
-    <div v-if="showTieraConverterDialog" class="modal-overlay" @click.self="closeTieraConverterDialog">
-      <div class="modal-content">
-        <h2>ティエラCSV変換</h2>
-        <div class="csv-format-note">
-          <strong>対象:</strong> ティエラ原本CSV
-          <br><small>品番導入ファイルとBOM導入ファイルを ZIP でまとめて出力します。</small>
-        </div>
-        <div class="form-group">
-          <label>変換元CSV *</label>
-          <input type="file" accept=".csv" @change="onTieraCsvSelected" />
-        </div>
-        <div class="form-actions">
-          <button type="button" class="btn-primary" @click="executeTieraConverter" :disabled="tieraConverting">
-            {{ tieraConverting ? '変換中...' : 'ZIP出力' }}
-          </button>
-          <button type="button" class="btn-secondary" @click="closeTieraConverterDialog">閉じる</button>
-        </div>
-      </div>
-    </div>
-
     <!-- 新規/編集ダイアログ -->
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
@@ -880,7 +860,6 @@ import { formatISODate } from '@/utils/dateUtil'
 import { ref, onMounted, computed, h, defineComponent, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
-import { authState } from '@/auth'
 import { canAccessMasterResource } from '@/utils/masterPermissions'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
@@ -966,9 +945,6 @@ const bomImporting = ref(false)
 const bomChecking = ref(false)
 const bomImportUseExistingDuplicates = ref(false)
 const bomImportFile = ref(null)
-const showTieraConverterDialog = ref(false)
-const tieraConverterFile = ref(null)
-const tieraConverting = ref(false)
 const showDeleteImpactDialog = ref(false)
 const deleteImpactPreview = ref({ affected_steps: [] })
 const deleteImpactTargetId = ref(null)
@@ -1260,68 +1236,6 @@ const closeBomImportDialog = () => {
 
 const onBomCsvSelected = (event) => {
   bomImportFile.value = event.target.files?.[0] || null
-}
-
-const openTieraConverterDialog = () => {
-  tieraConverterFile.value = null
-  showTieraConverterDialog.value = true
-}
-
-const closeTieraConverterDialog = () => {
-  showTieraConverterDialog.value = false
-  if (route.query.tieraConverter) {
-    const nextQuery = { ...route.query }
-    delete nextQuery.tieraConverter
-    router.replace({ name: 'BOMMaster', query: nextQuery })
-  }
-}
-
-const onTieraCsvSelected = (event) => {
-  tieraConverterFile.value = event.target.files?.[0] || null
-}
-
-const extractFilenameFromDisposition = (disposition, fallback) => {
-  const raw = String(disposition || '')
-  const utf8Match = raw.match(/filename\*=UTF-8''([^;]+)/i)
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1])
-    } catch (_) {
-      return utf8Match[1]
-    }
-  }
-  const plainMatch = raw.match(/filename=\"?([^\";]+)\"?/i)
-  return plainMatch?.[1] || fallback
-}
-
-const executeTieraConverter = async () => {
-  if (!tieraConverterFile.value) {
-    alert('変換元CSVを選択してください')
-    return
-  }
-  tieraConverting.value = true
-  try {
-    const fd = new FormData()
-    fd.append('file', tieraConverterFile.value)
-    const response = await api.boms.downloadTieraImportBundle(fd)
-    const blob = new Blob([response.data], { type: 'application/zip' })
-    const filename = extractFilenameFromDisposition(
-      response.headers?.['content-disposition'],
-      'tiera_import_bundle.zip'
-    )
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = filename
-    link.click()
-    URL.revokeObjectURL(link.href)
-    showTieraConverterDialog.value = false
-  } catch (error) {
-    console.error('ティエラCSV変換エラー:', error)
-    const detail = error?.response?.data?.detail || '変換に失敗しました'
-    alert(detail)
-  } finally {
-    tieraConverting.value = false
-  }
 }
 
 const executeBomCsvImport = async () => {
@@ -2676,9 +2590,6 @@ onMounted(async () => {
   if (isStandaloneDetail.value && routeBomId.value) {
     await openDetailFromRoute()
   }
-  if (route.query.tieraConverter === '1' && canEdit.value) {
-    openTieraConverterDialog()
-  }
 })
 
 watch(
@@ -2688,15 +2599,6 @@ watch(
       openDetailFromRoute()
     } else if (showDetailsDialog.value) {
       closeDetailsDialog()
-    }
-  }
-)
-
-watch(
-  () => route.query.tieraConverter,
-  (value) => {
-    if (value === '1' && canEdit.value) {
-      showTieraConverterDialog.value = true
     }
   }
 )

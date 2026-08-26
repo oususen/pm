@@ -605,9 +605,15 @@ const load = async () => {
     const root = products.find((p) => String(p.product_code || "").trim() === productCode.value) || products[0];
     if (!root?.id) throw new Error("完成品が見つかりません。");
 
-    const treeResponses = await Promise.all(
-      columns.value.map((dateStr) => api.bomService.getBomTree(root.id, dateStr))
-    );
+    const treeResponses = [];
+    const CONCURRENCY = 3;
+    for (let i = 0; i < columns.value.length; i += CONCURRENCY) {
+      const batch = columns.value.slice(i, i + CONCURRENCY);
+      const batchRes = await Promise.all(
+        batch.map((dateStr) => api.bomService.getBomTree(root.id, dateStr))
+      );
+      treeResponses.push(...batchRes);
+    }
     const rawNodes = [];
     treeResponses.forEach((res) => {
       const tree = res.data || {};

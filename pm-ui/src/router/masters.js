@@ -84,6 +84,12 @@ const masters = [
     meta: { pageTitle: "構成マスタ（BOM）", manualPath: "マスタ/BOM作成マニュアル.md", resource: "masters.bom" },
   },
   {
+    path: "/masters/tiera-converter",
+    name: "TieraConverter",
+    component: () => import("@/views/masters/TieraConverter.vue"),
+    meta: { pageTitle: "ティエラCSV変換", resource: "masters.bom" },
+  },
+  {
     path: "/masters/routing",
     name: "RoutingMaster",
     component: () => import("@/views/masters/RoutingMaster.vue"),

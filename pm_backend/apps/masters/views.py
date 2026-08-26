@@ -2879,14 +2879,14 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     def _tiera_leading_spaces(self, value):
         count = 0
         for ch in str(value or ''):
-            if ch == ' ':
+            if ch == '■':
                 count += 1
             else:
                 break
         return count
 
     def _tiera_normalize_code(self, raw_code, is_outsourced):
-        code = str(raw_code or '').strip()
+        code = str(raw_code or '').lstrip('■').strip()
         if is_outsourced and code and not code.endswith('G'):
             return f'{code}G'
         return code
@@ -3116,6 +3116,51 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{final_code}_tiera_import_bundle.zip"'
         return response
 
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='tiera_import_payload')
+    def tiera_import_payload(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': 'CSVファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = upload.read()
+        text = None
+        for enc in ('utf-8-sig', 'cp932', 'shift_jis', 'utf-8'):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            return Response({'detail': 'CSV文字コードを判別できません（UTF-8/Shift_JISのみ対応）'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reader = csv.DictReader(StringIO(text))
+        fieldnames = reader.fieldnames or []
+        required_headers = ['品番', '構成品番', '品名規格', '品番区分名', '積算自数', '積算LT']
+        missing = [h for h in required_headers if h not in fieldnames]
+        if missing:
+            return Response({'detail': f'必須ヘッダー不足: {", ".join(missing)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product_headers, product_rows, bom_headers, bom_rows, final_code = self._build_tiera_import_rows(list(reader))
+        except serializers.ValidationError as exc:
+            return Response({'detail': str(exc.detail)}, status=status.HTTP_400_BAD_REQUEST)
+
+        product_sio = StringIO()
+        csv.writer(product_sio, lineterminator='\n').writerows([product_headers, *product_rows])
+
+        bom_sio = StringIO()
+        csv.writer(bom_sio, lineterminator='\n').writerows([bom_headers, *bom_rows])
+
+        return Response({
+            'final_code': final_code,
+            'product_filename': f'{final_code}_product_update_import.csv',
+            'bom_filename': f'{final_code}_bom_import.csv',
+            'product_csv': product_sio.getvalue(),
+            'bom_csv': bom_sio.getvalue(),
+            'product_row_count': len(product_rows),
+            'bom_row_count': len(bom_rows),
+        })
+
     @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_csv')
     def import_csv(self, request):
         upload = request.FILES.get('file')
@@ -3124,6 +3169,8 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         version = str(request.data.get('version') or 'v1').strip() or 'v1'
         use_existing_duplicates = str(request.data.get('use_existing_duplicates', 'false')).lower() in ['1', 'true', 'yes', 'on']
+        reuse_parent_codes_raw = str(request.data.get('reuse_parent_codes') or '').strip()
+        reuse_parent_codes = {code.strip() for code in reuse_parent_codes_raw.split(',') if code.strip()}
         completed_product_default = str(request.data.get('completed_product_code') or '').strip()
         valid_from_raw = str(request.data.get('valid_from') or '').strip()
         valid_to_raw = str(request.data.get('valid_to') or '').strip()
@@ -3418,6 +3465,51 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if row['parent_code']
             }
 
+            duplicate_bom_details = []
+            duplicate_parent_codes = set()
+            for parent_code in sorted(all_parent_codes):
+                parent_product = product_map[parent_code]
+                exist_bom = BOM.objects.filter(
+                    parent_product=parent_product,
+                    version=version,
+                ).order_by('-valid_from', '-id').first()
+                if exist_bom:
+                    duplicate_parent_codes.add(parent_code)
+                    duplicate_bom_details.append({
+                        'parent_code': parent_code,
+                        'version': version,
+                        'bom_id': exist_bom.id,
+                        'valid_from': str(exist_bom.valid_from),
+                    })
+
+            invalid_reuse_codes = sorted(reuse_parent_codes - duplicate_parent_codes)
+            if invalid_reuse_codes:
+                return Response(
+                    {
+                        'detail': '再利用対象に、既存BOMが存在しない親品番が含まれています。',
+                        'errors': [f'既存BOMなし: {code}' for code in invalid_reuse_codes],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            unresolved_duplicate_parent_codes = sorted(duplicate_parent_codes - reuse_parent_codes)
+            if unresolved_duplicate_parent_codes and not use_existing_duplicates:
+                return Response(
+                    {
+                        'detail': '既存BOM重複があります。再利用する親品番を選択してください。',
+                        'duplicate_boms': [
+                            f'{item["parent_code"]} / {item["version"]}（既存開始日: {item["valid_from"]}）'
+                            for item in duplicate_bom_details
+                            if item['parent_code'] in unresolved_duplicate_parent_codes
+                        ][:50],
+                        'duplicate_bom_details': [
+                            item for item in duplicate_bom_details
+                            if item['parent_code'] in unresolved_duplicate_parent_codes
+                        ][:50],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             created_boms = {}
             created_item_count = 0
             duplicate_boms = []
@@ -3429,7 +3521,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 ).order_by('-valid_from', '-id').first()
                 if bom:
                     duplicate_boms.append(f'{parent_code} / {version}（既存開始日: {bom.valid_from}）')
-                    if not use_existing_duplicates:
+                    if not use_existing_duplicates and parent_code not in reuse_parent_codes:
                         continue
                 else:
                     bom = BOM.objects.create(
@@ -3441,16 +3533,9 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     )
                 created_boms[parent_code] = bom
 
-            if duplicate_boms and not use_existing_duplicates:
-                return Response(
-                    {
-                        'detail': '既存BOM重複があります。再利用する場合は確認して実行してください。',
-                        'duplicate_boms': duplicate_boms[:50],
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
             for row in parsed_rows:
+                if row['parent_code'] in reuse_parent_codes:
+                    continue
                 parent_code = row['parent_code']
                 parent_bom = created_boms.get(parent_code)
                 if not parent_bom:
@@ -3482,11 +3567,24 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if row_errors:
                 return Response({'detail': '取込中にエラーが発生しました', 'errors': row_errors[:30]}, status=status.HTTP_400_BAD_REQUEST)
 
+            completed_bom = None
+            completed_code = completed_product_default
+            if not completed_code and parsed_rows:
+                completed_code = parsed_rows[0].get('completed_code') or ''
+            if completed_code:
+                completed_bom = created_boms.get(completed_code)
+
             return Response({
                 'message': 'BOMを取り込みました',
                 'created_boms': len(created_boms),
                 'created_items': created_item_count,
-                'reused_boms': len(duplicate_boms) if use_existing_duplicates else 0,
+                'reused_boms': len(reuse_parent_codes) if reuse_parent_codes else (len(duplicate_boms) if use_existing_duplicates else 0),
+                'reused_parent_codes': sorted(reuse_parent_codes),
+                'skipped_child_rows_for_reuse': sum(
+                    1 for row in parsed_rows if row['parent_code'] in reuse_parent_codes
+                ),
+                'completed_product_code': completed_code or None,
+                'completed_bom_id': completed_bom.id if completed_bom else None,
             }, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_check')
@@ -3710,6 +3808,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 row_errors.append(f"{row['row_no']}行目: 仕入先コードが未登録です ({row['supplier_code']})")
 
         duplicate_boms = []
+        duplicate_bom_details = []
         for parent_code in sorted(parent_codes):
             parent_product = product_map.get(parent_code)
             if not parent_product:
@@ -3720,6 +3819,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             ).order_by('-valid_from', '-id').first()
             if exist_bom:
                 duplicate_boms.append(f'{parent_code} / {version}（既存開始日: {exist_bom.valid_from}）')
+                duplicate_bom_details.append({
+                    'parent_code': parent_code,
+                    'version': version,
+                    'bom_id': exist_bom.id,
+                    'valid_from': str(exist_bom.valid_from),
+                })
 
         if row_errors:
             return Response({'detail': 'チェックエラーがあります', 'errors': row_errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
@@ -3731,6 +3836,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 'message': message,
                 'checked_rows': checked_count,
                 'duplicate_boms': duplicate_boms[:50],
+                'duplicate_bom_details': duplicate_bom_details[:50],
             },
             status=status.HTTP_200_OK
         )
