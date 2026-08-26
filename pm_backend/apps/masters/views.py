@@ -8,6 +8,7 @@ from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.db import transaction
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
+from django.http import HttpResponse
 import django_filters
 import os
 import uuid
@@ -2860,6 +2861,261 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = 'attachment; filename="bom_import_template.xlsx"'
         return response
 
+    def _tiera_supplier_code_map(self):
+        return {
+            '株式会社三原金属工業': '000387',
+            '抱月工業株式会社': '000259',
+            '株式会社大豊製作所': '000132',
+            '株式会社日立建機ティエラ': 'G00001',
+        }
+
+    def _tiera_process_line_map(self):
+        return {
+            'レーザー加工１': ('0801', 'L0801'),
+            'ＹＢ－００３　ブレーキ１２５ｔ': ('4010', 'L0010'),
+            'ＷＭ－０２８　製缶セルライン': ('4023', 'L3104'),
+        }
+
+    def _tiera_leading_spaces(self, value):
+        count = 0
+        for ch in str(value or ''):
+            if ch == ' ':
+                count += 1
+            else:
+                break
+        return count
+
+    def _tiera_normalize_code(self, raw_code, is_outsourced):
+        code = str(raw_code or '').strip()
+        if is_outsourced and code and not code.endswith('G'):
+            return f'{code}G'
+        return code
+
+    def _tiera_classify_sourcing(self, row):
+        process_type = str(row.get('加工区分名') or '').strip()
+        category = str(row.get('品番区分名') or '').strip()
+        if process_type == '外作':
+            return '外注', True
+        if category == '購入品':
+            return '購買', False
+        return '自社製造', False
+
+    def _build_tiera_import_rows(self, input_rows):
+        supplier_code_map = self._tiera_supplier_code_map()
+        process_line_map = self._tiera_process_line_map()
+        parsed = []
+        for row in input_rows:
+            raw_code = row.get('構成品番') or ''
+            sourcing_type, is_outsourced = self._tiera_classify_sourcing(row)
+            code = self._tiera_normalize_code(raw_code, is_outsourced)
+            if not code:
+                continue
+            supplier_name = str(row.get('加工先名') or '').strip()
+            process_code, line_code = process_line_map.get(supplier_name, ('', ''))
+            parsed.append({
+                'indent': self._tiera_leading_spaces(raw_code),
+                'code': code,
+                'name': str(row.get('品名規格') or '').strip(),
+                'category': str(row.get('品番区分名') or '').strip(),
+                'cumulative_lt': int(str(row.get('積算LT') or '0').strip() or '0'),
+                'quantity': str(row.get('積算自数') or '').strip(),
+                'supplier_name': supplier_name,
+                'supplier_code': supplier_code_map.get(supplier_name, ''),
+                'process_code': process_code,
+                'line_code': line_code,
+                'sourcing_type': sourcing_type,
+                'is_outsourced': is_outsourced,
+                'unit_price': str(row.get('合計単価') or '').strip(),
+                'final_code': str(row.get('品番') or '').strip(),
+            })
+
+        if not parsed:
+            raise serializers.ValidationError('有効な構成品番行がありません')
+
+        product_headers = [
+            '構成品番', '品名規格', '品番区分名', 'ライン情報', 'ライン名',
+            '工程情報', '工程名', '後工程', '後工程名', '管理区分',
+            '最終品', 'ライン最終品', '単位', '単価', '標準LT(日)', '自工程LT(日)',
+            '機種名', '製品グループ', 'グループ名', '移動先',
+            '比重(g/cm³)', '縦(mm)', '横(mm)', '厚さ(mm)',
+            '発注倍数', '最小発注数', '使用容器', '容器入り数',
+            '置き場1', '置き場2', '置き場3', '置き場4',
+        ]
+        bom_headers = [
+            '完成品', '親品番', '子品番', '数量', '工程コード', '工程名',
+            'ラインコード', 'ライン名', '調達区分', '仕入先コード',
+            '仕入先名', 'ＬＴ(日)', '所要時間(分)', '時間単位',
+        ]
+
+        product_rows = []
+        seen = set()
+        final_code = parsed[0]['final_code']
+        for item in parsed:
+            code = item['code']
+            if code in seen:
+                continue
+            seen.add(code)
+            is_final = code == final_code
+            product_rows.append([
+                code,
+                item['name'],
+                '外作品' if item['is_outsourced'] else item['category'],
+                item['line_code'],
+                '',
+                item['process_code'],
+                '',
+                '',
+                '',
+                '',
+                'はい' if is_final else '',
+                'はい' if is_final else '',
+                '',
+                item['unit_price'],
+                str(item['cumulative_lt']),
+                '',
+                '',
+                '',
+                '',
+                '社内ライン' if item['is_outsourced'] else '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+            ])
+
+        bom_rows = []
+        stack = []
+        for index, item in enumerate(parsed):
+            if index == 0:
+                stack = [(item['indent'], item['code'], item['cumulative_lt'])]
+                continue
+
+            while stack and stack[-1][0] >= item['indent']:
+                stack.pop()
+
+            if stack:
+                parent_code = stack[-1][1]
+                parent_cumulative_lt = stack[-1][2]
+            else:
+                parent_code = final_code
+                parent_cumulative_lt = parsed[0]['cumulative_lt']
+
+            item_lt = item['cumulative_lt'] - parent_cumulative_lt
+            if item_lt < 0:
+                item_lt = 0
+
+            process_code = item['process_code']
+            line_code = item['line_code']
+            lead_time_days = str(item_lt)
+            duration_min = ''
+            time_unit = '日'
+            if item['sourcing_type'] == '外注':
+                process_code = 'G'
+                line_code = ''
+            elif item['sourcing_type'] == '購買':
+                process_code = 'PURCHASE'
+                line_code = ''
+            elif item_lt <= 0:
+                lead_time_days = '0'
+                duration_min = '1'
+                time_unit = '分'
+
+            bom_rows.append([
+                final_code,
+                parent_code,
+                item['code'],
+                item['quantity'],
+                process_code,
+                '',
+                line_code,
+                '',
+                item['sourcing_type'],
+                item['supplier_code'],
+                item['supplier_name'],
+                lead_time_days,
+                duration_min,
+                time_unit,
+            ])
+            stack.append((item['indent'], item['code'], item['cumulative_lt']))
+
+        return product_headers, product_rows, bom_headers, bom_rows, final_code
+
+    @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='tiera_import_bundle')
+    def tiera_import_bundle(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'detail': 'CSVファイルがありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = upload.read()
+        text = None
+        for enc in ('utf-8-sig', 'cp932', 'shift_jis', 'utf-8'):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            return Response({'detail': 'CSV文字コードを判別できません（UTF-8/Shift_JISのみ対応）'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reader = csv.DictReader(StringIO(text))
+        fieldnames = reader.fieldnames or []
+        required_headers = ['品番', '構成品番', '品名規格', '品番区分名', '積算自数', '積算LT']
+        missing = [h for h in required_headers if h not in fieldnames]
+        if missing:
+            return Response({'detail': f'必須ヘッダー不足: {", ".join(missing)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product_headers, product_rows, bom_headers, bom_rows, final_code = self._build_tiera_import_rows(list(reader))
+        except serializers.ValidationError as exc:
+            return Response({'detail': str(exc.detail)}, status=status.HTTP_400_BAD_REQUEST)
+
+        product_csv_name = f'{final_code}_product_update_import.csv'
+        product_xlsx_name = f'{final_code}_product_update_import.xlsx'
+        bom_csv_name = f'{final_code}_bom_import.csv'
+        bom_xlsx_name = f'{final_code}_bom_import.xlsx'
+
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            product_sio = StringIO()
+            csv.writer(product_sio, lineterminator='\n').writerows([product_headers, *product_rows])
+            zf.writestr(product_csv_name, '\ufeff' + product_sio.getvalue())
+
+            bom_sio = StringIO()
+            csv.writer(bom_sio, lineterminator='\n').writerows([bom_headers, *bom_rows])
+            zf.writestr(bom_csv_name, '\ufeff' + bom_sio.getvalue())
+
+            product_wb = Workbook()
+            product_ws = product_wb.active
+            product_ws.title = '入力用'
+            product_ws.append(product_headers)
+            for row in product_rows:
+                product_ws.append(row)
+            product_xlsx = BytesIO()
+            product_wb.save(product_xlsx)
+            zf.writestr(product_xlsx_name, product_xlsx.getvalue())
+
+            bom_wb = Workbook()
+            bom_ws = bom_wb.active
+            bom_ws.title = '入力用'
+            bom_ws.append(bom_headers)
+            for row in bom_rows:
+                bom_ws.append(row)
+            bom_xlsx = BytesIO()
+            bom_wb.save(bom_xlsx)
+            zf.writestr(bom_xlsx_name, bom_xlsx.getvalue())
+
+        response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="{final_code}_tiera_import_bundle.zip"'
+        return response
+
     @action(detail=False, methods=['post'], parser_classes=[parsers.MultiPartParser, parsers.FormParser], url_path='import_csv')
     def import_csv(self, request):
         upload = request.FILES.get('file')
@@ -3083,9 +3339,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if lead_time_days <= 0:
                     row_errors.append(f'{idx}行目: {sourcing_raw}はリードタイム(日)を1以上で入力してください')
                     row_has_error = True
-                if process_code and sourcing_type == 'BUY':
-                    row_errors.append(f'{idx}行目: 購入は工程コードを指定できません')
-                    row_has_error = True
+                if sourcing_type == 'BUY':
+                    if process_code != 'PURCHASE':
+                        row_errors.append(f'{idx}行目: 購入の工程コードはPURCHASEを指定してください')
+                        row_has_error = True
+                    process_code = 'PURCHASE'
                 # SUBCON は工程任意。未入力時はGに補完
                 if sourcing_type == 'SUBCON' and not process_code:
                     process_code = 'G'
@@ -3198,15 +3456,22 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if not parent_bom:
                     row_errors.append(f"{row['row_no']}行目: 親BOMを作成できませんでした ({parent_code})")
                     continue
+                process_obj = process_map.get(row['process_code'])
+                line_obj = line_map.get(row['line_code'])
+                if row['sourcing_type'] == 'BUY':
+                    supplier_obj = supplier_map.get(row['supplier_code'])
+                    line_obj, process_obj = self._get_or_create_purchase_line_and_process(supplier_obj)
+                else:
+                    supplier_obj = supplier_map.get(row['supplier_code'])
                 BOMItem.objects.create(
                     bom=parent_bom,
                     child_product=product_map[row['child_code']],
                     quantity=row['quantity'],
                     loss_rate=Decimal('0'),
                     sourcing_type=row['sourcing_type'],
-                    supplier=supplier_map.get(row['supplier_code']),
-                    process=process_map.get(row['process_code']),
-                    line=line_map.get(row['line_code']),
+                    supplier=supplier_obj,
+                    process=process_obj,
+                    line=line_obj,
                     time_unit=row['time_unit'],
                     lead_time_days=row['lead_time_days'],
                     duration_min=row['duration_min'] if row['duration_min'] > 0 else None,
@@ -3384,9 +3649,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 if lead_time_days <= 0:
                     row_errors.append(f'{idx}行目: {sourcing_raw}はリードタイム(日)を1以上で入力してください')
                     row_has_error = True
-                if process_code and sourcing_type == 'BUY':
-                    row_errors.append(f'{idx}行目: 購入は工程コードを指定できません')
-                    row_has_error = True
+                if sourcing_type == 'BUY':
+                    if process_code != 'PURCHASE':
+                        row_errors.append(f'{idx}行目: 購入の工程コードはPURCHASEを指定してください')
+                        row_has_error = True
+                    process_code = 'PURCHASE'
 
             if row_has_error:
                 continue

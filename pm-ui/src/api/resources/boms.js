@@ -73,6 +73,12 @@ export const createBomsAPI = (client) => ({
       headers: { 'Content-Type': 'multipart/form-data' }
     })
   },
+  downloadTieraImportBundle(formData) {
+    return client.post('/boms/tiera_import_bundle/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    })
+  },
 
   // BOM Items
   getBOMItems(params = {}) {
