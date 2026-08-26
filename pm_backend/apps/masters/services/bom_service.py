@@ -1,5 +1,6 @@
 """BOM関連のビジネスロジックサービス"""
 import math
+from datetime import date
 from typing import Dict, Any, List, Optional
 from django.db.models import Q
 from masters.models import Product, BOM, BOMItem, Routing, RoutingStep
@@ -417,7 +418,8 @@ class BOMService:
         self,
         product_id: int,
         level: int = 0,
-        visited: Optional[set] = None
+        visited: Optional[set] = None,
+        reference_date=None,
     ) -> Dict[str, Any]:
         """
         BOM構造をツリー形式で取得（循環参照対応）
@@ -441,12 +443,21 @@ class BOMService:
 
         visited.add(product_id)
         product = Product.objects.get(id=product_id)
+        target_date = reference_date or date.today()
 
         # BOMを取得
         bom = BOM.objects.filter(
             parent_product=product,
-            is_active=True
-        ).order_by('-valid_from').first()
+            is_active=True,
+            valid_from__lte=target_date,
+        ).filter(
+            Q(valid_to__isnull=True) | Q(valid_to__gte=target_date)
+        ).order_by('-valid_from', '-id').first()
+        if bom is None:
+            bom = BOM.objects.filter(
+                parent_product=product,
+                is_active=True,
+            ).order_by('-valid_from', '-id').first()
 
         result = {
             'product_id': product.id,
@@ -473,7 +484,8 @@ class BOMService:
                 child_tree = self.get_bom_tree(
                     item.child_product_id,
                     level + 1,
-                    visited.copy()  # 各ブランチで独立したvisitedセット
+                    visited.copy(),  # 各ブランチで独立したvisitedセット
+                    reference_date=target_date,
                 )
                 child_tree['quantity'] = float(item.quantity)
                 child_tree['sourcing_type'] = item.sourcing_type

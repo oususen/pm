@@ -2,6 +2,7 @@
 サービス系API（CRP、BOM展開等）のビュー
 """
 from datetime import datetime, date
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -375,7 +376,21 @@ class BOMServiceViewSet(viewsets.ViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            tree = self.bom_service.get_bom_tree(int(product_id))
+            reference_raw = request.query_params.get('reference_date')
+            reference_date = None
+            if reference_raw:
+                reference_date = parse_datetime(reference_raw)
+                if reference_date is None:
+                    reference_date = parse_date(reference_raw)
+                if reference_date is None:
+                    return Response({
+                        'detail': 'reference_date は YYYY-MM-DD または ISO日時で指定してください。'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            tree = self.bom_service.get_bom_tree(
+                int(product_id),
+                reference_date=reference_date,
+            )
             return Response(tree)
 
         except Exception as e:

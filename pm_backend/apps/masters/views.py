@@ -2529,30 +2529,35 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             'is_phantom': product.is_phantom,
         }
 
-    def _pick_child_bom(self, product: Product):
-        """Active BOM for child product (latest by valid_from)."""
-        today = date.today()
+    def _pick_child_bom(self, product: Product, reference_date=None):
+        """基準日時点で有効な子BOMを取得する。"""
+        target_date = reference_date or date.today()
         qs = BOM.objects.filter(
             parent_product=product,
             is_active=True,
-            valid_from__lte=today,
+            valid_from__lte=target_date,
+        ).filter(
+            Q(valid_to__isnull=True) | Q(valid_to__gte=target_date)
         ).order_by('-valid_from', '-id')
         child = qs.first()
         if child:
             return child
-        # fallback: any active BOM
         return BOM.objects.filter(
             parent_product=product,
             is_active=True,
         ).order_by('-valid_from', '-id').first()
 
-    def _build_item_node(self, item: BOMItem, visited_bom_ids: set):
-        child_bom = self._pick_child_bom(item.child_product)
+    def _build_item_node(self, item: BOMItem, visited_bom_ids: set, reference_date=None):
+        child_bom = self._pick_child_bom(item.child_product, reference_date=reference_date)
         # prevent infinite loops
         if child_bom and child_bom.id in visited_bom_ids:
             child_tree = None
         elif child_bom:
-            child_tree = self._build_bom_tree(child_bom, visited_bom_ids)
+            child_tree = self._build_bom_tree(
+                child_bom,
+                visited_bom_ids,
+                reference_date=reference_date,
+            )
         else:
             child_tree = None
 
@@ -2578,10 +2583,14 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             'child_bom': child_tree,
         }
 
-    def _build_bom_tree(self, bom: BOM, visited_bom_ids: set):
+    def _build_bom_tree(self, bom: BOM, visited_bom_ids: set, reference_date=None):
         visited_bom_ids.add(bom.id)
         items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'supplier')
-        items = [self._build_item_node(item, visited_bom_ids) for item in items_qs]
+        effective_date = reference_date or bom.valid_from or date.today()
+        items = [
+            self._build_item_node(item, visited_bom_ids, reference_date=effective_date)
+            for item in items_qs
+        ]
         return {
             'id': bom.id,
             'parent_product': self._serialize_product(bom.parent_product),
@@ -2597,21 +2606,10 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         Excel出力と同一ロジックでBOM階層の行データを作成する。
         """
         rows = []
-        today = date.today()
+        effective_date = bom.valid_from or date.today()
 
         def pick_child_bom(product):
-            qs = BOM.objects.filter(
-                parent_product=product,
-                is_active=True,
-                valid_from__lte=today,
-            ).order_by('-valid_from', '-id')
-            child = qs.first()
-            if child:
-                return child
-            return BOM.objects.filter(
-                parent_product=product,
-                is_active=True,
-            ).order_by('-valid_from', '-id').first()
+            return self._pick_child_bom(product, reference_date=effective_date)
 
         def walk_bom(b, parent_prefix='', level=0, visited=None, cumulative_lt=0):
             if visited is None:
@@ -2628,7 +2626,10 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 root_lead_time_days = ''
                 root_duration_min = ''
                 if b.parent_product_id:
-                    default_routing = resolve_effective_routing(b.parent_product_id)
+                    default_routing = resolve_effective_routing(
+                        b.parent_product_id,
+                        reference=effective_date,
+                    )
                     if default_routing:
                         last_step = default_routing.steps.order_by('step_no').last()
                         if last_step:
@@ -2699,7 +2700,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def tree(self, request, pk=None):
         bom = self.get_object()
-        tree = self._build_bom_tree(bom, visited_bom_ids=set())
+        tree = self._build_bom_tree(
+            bom,
+            visited_bom_ids=set(),
+            reference_date=bom.valid_from,
+        )
         return Response(tree)
 
     @action(detail=True, methods=['get'], url_path='tree_excel_rows')
@@ -3471,6 +3476,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         depth: int = 0,
         path_prefix: tuple = (),
         include_buy: bool = False,
+        reference_date=None,
     ):
         """
         Depth-first collect routing items (MAKE/SUBCON/BUY) from bom and its descendants.
@@ -3489,7 +3495,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         items_qs = BOMItem.objects.filter(bom=bom).select_related('child_product', 'process', 'line', 'supplier').order_by('id')
         for idx, item in enumerate(items_qs, start=1):
-            child_bom = self._pick_child_bom(item.child_product)
+            child_bom = self._pick_child_bom(item.child_product, reference_date=reference_date)
             if child_bom:
                 self._collect_routing_items_recursive(
                     child_bom,
@@ -3498,6 +3504,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     depth=depth + 1,
                     path_prefix=path_prefix + (idx,),
                     include_buy=include_buy,
+                    reference_date=reference_date,
                 )
             target_types = ['MAKE', 'SUBCON', 'BUY'] if include_buy else ['MAKE', 'SUBCON']
             if item.sourcing_type in target_types:
@@ -3554,11 +3561,13 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         bom = self.get_object()
         include_buy = request.data.get('include_buy', True)
         routing_items_info = []
+        effective_date = bom.valid_from or date.today()
         self._collect_routing_items_recursive(
             bom,
             active_path_bom_ids=set(),
             collector=routing_items_info,
             include_buy=include_buy,
+            reference_date=effective_date,
         )
 
         item_types = 'MAKE/SUBCON/BUY' if include_buy else 'MAKE/SUBCON'
@@ -3568,7 +3577,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         # BOMに重複部品がないかチェック（RoutingStepMaterialのunique制約違反を事前に防ぐ）
         boms_to_check = set()
         for _, _, item, _ in routing_items_info:
-            child_bom = self._pick_child_bom(item.child_product)
+            child_bom = self._pick_child_bom(item.child_product, reference_date=effective_date)
             if child_bom:
                 boms_to_check.add(child_bom.id)
         duplicate_errors = []
@@ -3773,7 +3782,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         # 自動で工程別部品を付与（対象ステップの商品に紐づく子BOMの明細を消費部品とする）
         for item, step in created_steps:
-            child_bom = self._pick_child_bom(item.child_product)
+            child_bom = self._pick_child_bom(item.child_product, reference_date=effective_date)
             if not child_bom:
                 continue
             child_items = BOMItem.objects.filter(bom=child_bom).select_related('child_product')
