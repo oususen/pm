@@ -153,6 +153,34 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - 購買工程では `process_id=NULL` を新規作成しない。
 - 目的は、購買ルーティングが受注展開・進度計算で工程未解決にならないようにするためである。
 
+### ルーティング有効期間の使用箇所
+
+有効期間の判定には2種類がある。
+
+- **ポイント判定**（`build_effective_routing_q`）: ある1時点で有効なルーティングを取得
+- **レンジ判定**（`build_effective_routing_range_q`）: 指定期間内のどこかで有効なルーティングを取得
+
+| 場面 | 判定方法 | 基準 | ファイル |
+|------|---------|------|---------|
+| 対象製品判定（在庫・進度計算） | レンジ | `start_date〜end_date` | `inventory_calculator.py` |
+| バックログ取り込み（pickup） | レンジ + 日付別選別 | `start_dt〜end_dt` → `plan_date`ごと | `backlog_pickup_service.py` |
+| 購買需要取り込み（pickup_purchase） | レンジ | `start_dt〜end_dt` | `backlog_pickup_service.py` |
+| 計画保存時の最終品判定 | ポイント（日付ごとOR結合） | 保存対象の各日付 | `production/views.py` |
+| バックログ保存時のルーティング解決 | ポイント | `plan_date` | `backlog_save_service.py` |
+| 累積LT取得 | ポイント | `now()` | `inventory_calculator.py` |
+| 在庫移行検出 | ポイント | `now()` | `production/views.py` |
+| 棚卸初期化 | ポイント | 棚卸日 | `stocktake_initializer.py` |
+| BOM展開・LT計算 | ポイント | `reference_date` / `now()` | `bom_service.py` |
+| マスタ画面の工程表示 | ポイント | `now()` | `masters/views.py` |
+| シリアライザの工程取得 | ポイント | `now()` | `serializers.py` |
+| 購買画面の設変紐づけ | ポイント | `now()` | `purchase/views.py` |
+| 購買ライン特定 | ポイント | `now()` | `backlog_pickup_service.py` |
+
+**備考:**
+- レンジ判定を使う場面は「期間を跨ぐルーティング切替」を考慮する必要がある場面（在庫計算、需要取り込み）
+- ポイント判定を使う場面は「その時点で正しい1つのルーティング」を確定する場面（保存、表示、LT取得）
+- pickup では大枠をレンジで取得した後、`is_step_effective_for_reference(step, plan_date)` で日付ごとに有効ステップを選別する二段階方式を採用
+
 ### ルーティング工程の外作先
 - `m_routing_step` は `supplier_id`（`m_supplier` へのFK, NULL可）を持つ。
 - 丸ごと外作運用では、親ルーティングに外注工程を1行追加し、`supplier_id` で外作先を管理する。
