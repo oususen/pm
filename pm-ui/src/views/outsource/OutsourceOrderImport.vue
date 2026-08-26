@@ -35,7 +35,13 @@
           </div>
         </div>
 
-        <div v-if="sendMessage" :class="sendMessage.success ? 'notification-item success' : 'notification-item warning'">
+        <div
+          v-if="sendMessage"
+          :class="[
+            'notification-item',
+            sendMessage.variant === 'success' ? 'success' : 'warning',
+          ]"
+        >
           {{ sendMessage.message }}
         </div>
 
@@ -170,7 +176,6 @@ const firstArticleSubject = ref('')
 const firstArticleBody = ref('')
 const sendMessage = ref(null)
 const lookbackDays = ref(90)
-const firstArticleEmailEnabled = ref(true)
 
 function onFileSelect(e) {
   const f = e.target.files[0]
@@ -293,21 +298,13 @@ async function doImport() {
     const res = await api.outsource.importCSV(formData)
     result.value = res.data
     if (res.data?.lookback_days) lookbackDays.value = res.data.lookback_days
+    const emailEnabled = res.data?.email_enabled !== false
     const candidates = Array.isArray(res.data?.first_article_candidates) ? res.data.first_article_candidates : []
-    if (candidates.length) {
-      firstArticleEmailEnabled.value = true
-      try {
-        const settingsRes = await api.outsource.getFirstArticleSetting()
-        firstArticleEmailEnabled.value = settingsRes.data?.email_enabled !== false
-      } catch {
-        firstArticleEmailEnabled.value = true
-      }
-    }
-    if (candidates.length && firstArticleEmailEnabled.value) {
+    if (candidates.length && emailEnabled) {
       await openFirstArticleDialog(candidates)
     } else if (candidates.length) {
       sendMessage.value = {
-        success: false,
+        variant: 'warning',
         message: 'お久しぶり製品候補がありますが、通知設定がOFFのためメール送信は停止しています。',
       }
     }
@@ -399,10 +396,6 @@ function closeFirstArticleDialog() {
 }
 
 async function sendFirstArticleNotice() {
-  if (!firstArticleEmailEnabled.value) {
-    alert('お久しぶり製品通知はOFFです。')
-    return
-  }
   const recipients = collectFirstArticleRecipients()
   if (!recipients.length) {
     alert('送信先を1件以上指定してください。')
@@ -426,7 +419,7 @@ async function sendFirstArticleNotice() {
       items: firstArticleCandidates.value,
     })
     sendMessage.value = {
-      success: true,
+      variant: 'success',
       message: res.data?.message || 'メールを送信しました。',
     }
     showFirstArticleDialog.value = false
