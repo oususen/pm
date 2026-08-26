@@ -22,6 +22,17 @@
 
       <div v-if="activeTab === 'settings'">
         <div class="field">
+          <label>通知</label>
+          <div class="toggle-row">
+            <label class="toggle-label">
+              <input v-model="emailEnabled" type="checkbox" :disabled="loading || !canEdit" />
+              <span>{{ emailEnabled ? 'ON' : 'OFF' }}</span>
+            </label>
+          </div>
+          <p class="helper">OFF にすると、FB受注取込後のお久しぶり製品通知メール送信を停止します。</p>
+        </div>
+
+        <div class="field">
           <label>お久しぶり判定日数</label>
           <div class="input-row">
             <input v-model.number="days" type="number" min="1" :disabled="loading || !canEdit" />
@@ -117,6 +128,7 @@ import UserChipSelect from '@/views/purchase/UserChipSelect.vue'
 
 const today = formatISODate(getBusinessDate())
 const days = ref(90)
+const emailEnabled = ref(true)
 const recipientUserIds = ref([])
 const userList = ref([])
 const contactEmails = ref([])
@@ -173,6 +185,7 @@ const loadSetting = async () => {
   try {
     const res = await api.outsource.getFirstArticleSetting()
     days.value = Number(res.data?.days ?? 90)
+    emailEnabled.value = res.data?.email_enabled !== false
     recipientUserIds.value = Array.isArray(res.data?.recipient_user_ids) ? res.data.recipient_user_ids : []
     userList.value = Array.isArray(res.data?.all_users) ? res.data.all_users : []
     contactEmails.value = Array.isArray(res.data?.contact_emails) ? res.data.contact_emails : []
@@ -196,9 +209,11 @@ const saveSetting = async () => {
   try {
     const res = await api.outsource.saveFirstArticleSetting({
       days: days.value,
+      email_enabled: emailEnabled.value,
       recipient_user_ids: recipientUserIds.value,
     })
     days.value = Number(res.data?.days ?? days.value)
+    emailEnabled.value = res.data?.email_enabled !== false
     recipientUserIds.value = Array.isArray(res.data?.recipient_user_ids) ? res.data.recipient_user_ids : []
     alert('保存しました。')
   } catch (error) {
@@ -291,6 +306,22 @@ onMounted(() => {
 }
 .helper.warning {
   color: #b45309;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+}
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 .actions {
   margin-top: 12px;

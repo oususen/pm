@@ -115,6 +115,7 @@ def _serialize_contact(contact):
 
 OUTSOURCE_FIRST_ARTICLE_DAYS_KEY = 'outsource.first_article.days'
 OUTSOURCE_FIRST_ARTICLE_RECIPIENT_IDS_KEY = 'outsource.first_article.recipient_user_ids'
+OUTSOURCE_FIRST_ARTICLE_ENABLED_KEY = 'outsource.first_article.enabled'
 
 
 def _parse_user_ids(raw_value):
@@ -135,6 +136,7 @@ def _parse_user_ids(raw_value):
 def _get_outsource_first_article_settings():
     days_setting = SystemSetting.objects.filter(key=OUTSOURCE_FIRST_ARTICLE_DAYS_KEY).first()
     ids_setting = SystemSetting.objects.filter(key=OUTSOURCE_FIRST_ARTICLE_RECIPIENT_IDS_KEY).first()
+    enabled_setting = SystemSetting.objects.filter(key=OUTSOURCE_FIRST_ARTICLE_ENABLED_KEY).first()
 
     try:
         days = int(str(days_setting.value).strip()) if days_setting and str(days_setting.value).strip() else DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS
@@ -144,9 +146,12 @@ def _get_outsource_first_article_settings():
         days = 1
 
     recipient_user_ids = _parse_user_ids(ids_setting.value if ids_setting else '')
+    enabled_raw = str(enabled_setting.value).strip().lower() if enabled_setting and enabled_setting.value is not None else ''
+    email_enabled = enabled_raw not in ('false', '0', 'off', 'no')
     return {
         'days': days,
         'recipient_user_ids': recipient_user_ids,
+        'email_enabled': email_enabled,
     }
 
 
@@ -277,6 +282,10 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='send-first-article-notice', parser_classes=[JSONParser])
     def send_first_article_notice(self, request):
+        settings = _get_outsource_first_article_settings()
+        if not settings['email_enabled']:
+            return Response({'detail': 'お久しぶり製品通知はOFFです。'}, status=status.HTTP_400_BAD_REQUEST)
+
         to_emails = request.data.get('to_emails') or []
         subject = str(request.data.get('subject') or '').strip()
         body = str(request.data.get('body') or '').strip()
@@ -301,7 +310,6 @@ class OutsourceOrderViewSet(viewsets.ModelViewSet):
         if not isinstance(items, list) or not items:
             return Response({'detail': '久しぶり製品データがありません。'}, status=status.HTTP_400_BAD_REQUEST)
         if not body:
-            settings = _get_outsource_first_article_settings()
             body = build_first_article_email_body(items, lookback_days=settings['days'])
 
         service = EmailService()
@@ -999,6 +1007,7 @@ def outsource_first_article_setting_view(request):
 
     days = request.data.get('days', DEFAULT_FIRST_ARTICLE_LOOKBACK_DAYS)
     recipient_user_ids = request.data.get('recipient_user_ids', [])
+    email_enabled = request.data.get('email_enabled', True)
 
     try:
         days = int(days)
@@ -1008,6 +1017,7 @@ def outsource_first_article_setting_view(request):
         return Response({'detail': '判定日数は1以上で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
     cleaned_ids = sorted(set(int(v) for v in recipient_user_ids if v is not None))
+    email_enabled = bool(email_enabled)
     SystemSetting.objects.update_or_create(
         key=OUTSOURCE_FIRST_ARTICLE_DAYS_KEY,
         defaults={
@@ -1024,7 +1034,16 @@ def outsource_first_article_setting_view(request):
             'updated_by': request.user if getattr(request.user, 'is_authenticated', False) else None,
         },
     )
+    SystemSetting.objects.update_or_create(
+        key=OUTSOURCE_FIRST_ARTICLE_ENABLED_KEY,
+        defaults={
+            'value': '1' if email_enabled else '0',
+            'description': 'FB外作お久しぶり製品通知の有効フラグ',
+            'updated_by': request.user if getattr(request.user, 'is_authenticated', False) else None,
+        },
+    )
     return Response({
         'days': days,
         'recipient_user_ids': cleaned_ids,
+        'email_enabled': email_enabled,
     })
