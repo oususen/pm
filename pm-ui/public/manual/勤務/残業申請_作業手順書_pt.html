@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solicitacao de Hora Extra - Manual</title>
+<style>
+  body { font-family: Meiryo, sans-serif; background:#f6f7fa; color:#1a2233; margin:0; line-height:1.7; }
+  .page { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+  .card { background:#fff; border-radius:10px; box-shadow:0 2px 12px rgba(20,40,80,.08); padding:24px 28px; margin-bottom:20px; }
+  h1,h2,h3 { margin:0 0 12px; }
+  .path { display:inline-block; background:#e3effa; color:#1565c0; padding:6px 12px; border-radius:6px; font-weight:700; font-size:13px; }
+  .note { background:#fff3e0; color:#b45309; padding:12px 14px; border-radius:8px; margin-top:12px; font-size:13px; }
+  .warn { background:#fce4e4; color:#c62828; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border:1px solid #cfd8e3; padding:8px 10px; text-align:left; }
+  th { background:#eaf0f7; }
+  ul, ol { padding-left:22px; margin:0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <h1>Solicitacao de Hora Extra</h1>
+    <p>Manual de operacao para registrar hora extra, trabalho em feriado, meio periodo e ferias.</p>
+    <div class="path">Trabalho &gt; Solicitacao de Hora Extra</div>
+  </div>
+
+  <div class="card">
+    <h2>Resumo</h2>
+    <ol>
+      <li>Escolha o tipo de solicitacao.</li>
+      <li>Confirme o proprio nome como solicitante.</li>
+      <li>Informe a data.</li>
+      <li>Informe horario e motivo, quando necessario.</li>
+      <li>Assine na tela, quando houver aprovacao.</li>
+      <li>Salve em rascunho ou envie.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Tipos de solicitacao</h2>
+    <table>
+      <thead>
+        <tr><th>Tipo</th><th>Aprovacao</th><th>Assinatura</th><th>Observacao</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Hora extra</td><td>Necessaria</td><td>Necessaria</td><td>Informar horario normal e horario extra</td></tr>
+        <tr><td>Trabalho em feriado</td><td>Necessaria</td><td>Necessaria</td><td>Selecionar padrao de trabalho e horario</td></tr>
+        <tr><td>Meio periodo da manha</td><td>Necessaria</td><td>Necessaria</td><td>Informar meio periodo + hora extra</td></tr>
+        <tr><td>Meio periodo da tarde</td><td>Dispensada</td><td>Dispensada</td><td>Somente registro</td></tr>
+        <tr><td>Ferias</td><td>Dispensada</td><td>Dispensada</td><td>Somente registro</td></tr>
+        <tr><td>Ferias continuas</td><td>Dispensada</td><td>Dispensada</td><td>Definir data inicial e final</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Procedimento</h2>
+    <h3>1. Escolher o tipo</h3>
+    <p>Selecione o tipo na parte superior da tela.</p>
+    <h3>2. Confirmar o solicitante</h3>
+    <p>Seu proprio nome e selecionado automaticamente. Nao pode ser alterado.</p>
+    <h3>3. Informar a data</h3>
+    <p>Para hora extra, feriado, meio periodo e ferias, informe a data de trabalho. Para ferias continuas, informe data inicial e final.</p>
+    <h3>4. Informar horario</h3>
+    <p>Para hora extra e meio periodo da manha, informe inicio do trabalho, termino normal e termino da hora extra. Para trabalho em feriado, escolha o padrao e ajuste o horario se necessario.</p>
+    <h3>5. Confirmar horas calculadas</h3>
+    <p>As horas totais e horas noturnas sao calculadas automaticamente. O descanso tambem e descontado automaticamente.</p>
+    <h3>6. Informar o motivo</h3>
+    <p>Nos tipos com aprovacao, o motivo e obrigatorio.</p>
+    <h3>7. Assinar</h3>
+    <p>Nos tipos com aprovacao, assine com mouse ou toque.</p>
+    <h3>8. Enviar</h3>
+    <p>Use <strong>Salvar rascunho</strong> para guardar sem enviar ou <strong>Enviar</strong> para iniciar o fluxo de aprovacao.</p>
+  </div>
+
+  <div class="card">
+    <h2>Como corrigir depois de enviar</h2>
+    <ol>
+      <li>Abra <strong>Lista de solicitacoes (minhas solicitacoes)</strong>.</li>
+      <li>Clique em <strong>Editar</strong> na solicitacao alvo.</li>
+      <li>Corrija o conteudo.</li>
+      <li>Clique em <strong>Enviar</strong> novamente.</li>
+    </ol>
+    <div class="note">Ao editar uma solicitacao ja enviada, ela volta primeiro para rascunho e depois deve ser reenviada.</div>
+    <div class="note warn"><strong>Nao e possivel solicitar novamente a mesma data e o mesmo tipo enquanto a solicitacao existente nao for excluida ou cancelada.</strong></div>
+  </div>
+</div>
+</body>
+</html>

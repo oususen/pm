@@ -211,6 +211,16 @@
               </tbody>
             </table>
           </div>
+
+          <div v-if="detailApp.can_cancel_supervisor_approval" class="modal-actions">
+            <button
+              class="btn btn-warning"
+              :disabled="supervisorCanceling"
+              @click="cancelSupervisorApproval"
+            >
+              {{ supervisorCanceling ? '取消中...' : '班長承認取消' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -232,6 +242,7 @@ const applications = ref([])
 const loading = ref(false)
 const hasSearched = ref(false)
 const detailApp = ref(null)
+const supervisorCanceling = ref(false)
 const currentPage = ref(1)
 const pageSize = 30
 
@@ -391,6 +402,24 @@ async function fetchList() {
 
 function openDetail(app) {
   detailApp.value = app
+}
+
+async function cancelSupervisorApproval() {
+  if (!detailApp.value) return
+  if (!confirm(`${detailApp.value.work_date} の班長承認を取り消しますか？`)) return
+  supervisorCanceling.value = true
+  try {
+    const res = await api.overtime.cancelSupervisorApproval(detailApp.value.id)
+    const updated = res.data
+    applications.value = applications.value.map((app) => (
+      app.id === updated.id ? updated : app
+    ))
+    detailApp.value = updated
+  } catch (e) {
+    alert('班長承認取消に失敗しました: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    supervisorCanceling.value = false
+  }
 }
 
 async function deleteApp(app) {
@@ -698,4 +727,6 @@ onMounted(loadOrganizationFilters)
 .log-pending { background: #dbeafe; color: #1d4ed8; }
 .log-approved { background: #d1fae5; color: #065f46; }
 .log-rejected { background: #fee2e2; color: #dc2626; }
+.modal-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+.btn-warning { background: #b45309; color: white; }
 </style>

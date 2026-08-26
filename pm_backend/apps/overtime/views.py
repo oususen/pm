@@ -1,5 +1,6 @@
 from io import BytesIO
 import re
+from datetime import datetime
 
 from django.http import HttpResponse
 from django.utils import timezone
@@ -659,6 +660,52 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             [app.applicant],
             f"【残業申請 却下】{app.work_date} の申請が却下されました（{approver_name}）",
         )
+
+        serializer = self.get_serializer(app)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def cancel_supervisor_approval(self, request, pk=None):
+        """班長承認を取り消して一つ前の状態へ戻す"""
+        app = self.get_object()
+        user = request.user
+
+        if app.status != 'approved_supervisor':
+            return Response(
+                {'detail': '班長承認済みの申請だけ取り消せます。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        supervisor_logs = app.approval_logs.filter(role='supervisor')
+        if not supervisor_logs.filter(approver=user, status='approved').exists():
+            return Response(
+                {'detail': 'あなたが承認した班長承認だけ取り消せます。'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if app.approval_logs.filter(role__in=('chief', 'manager'), status='approved').exists():
+            return Response(
+                {'detail': '係長または部長が承認した後は班長承認を取り消せません。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 後段の承認待ちを削除し、班長承認を承認待ちへ戻す
+        app.approval_logs.filter(role__in=('chief', 'manager'), status='pending').delete()
+        supervisor_logs.filter(status='approved').update(
+            status='pending',
+            comment='',
+            acted_at=None,
+        )
+
+        has_approved_leader = app.approval_logs.filter(role='leader', status='approved').exists()
+        if has_approved_leader:
+            app.status = 'approved_leader'
+        else:
+            if not app.approval_logs.filter(role='leader', status='pending').exists():
+                create_pending_logs(app, 'leader')
+            app.status = 'submitted'
+        app.updated_at = datetime.now()
+        app.save(update_fields=['status', 'updated_at'])
 
         serializer = self.get_serializer(app)
         return Response(serializer.data)

@@ -23,6 +23,9 @@ export const createOvertimeAPI = (client) => ({
   approveApplication(id, data = {}) {
     return client.post(`/overtime/applications/${id}/approve/`, data)
   },
+  cancelSupervisorApproval(id, data = {}) {
+    return client.post(`/overtime/applications/${id}/cancel_supervisor_approval/`, data)
+  },
   rejectApplication(id, data = {}) {
     return client.post(`/overtime/applications/${id}/reject/`, data)
   },

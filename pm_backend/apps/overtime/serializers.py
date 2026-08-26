@@ -60,6 +60,7 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
     approval_logs = OvertimeApprovalLogSerializer(many=True, read_only=True)
     can_edit = serializers.SerializerMethodField()
     can_approve = serializers.SerializerMethodField()
+    can_cancel_supervisor_approval = serializers.SerializerMethodField()
     pending_role = serializers.SerializerMethodField()
     work_pattern_name = serializers.SerializerMethodField()
     work_pattern_hours = serializers.SerializerMethodField()
@@ -76,7 +77,8 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
             'reason', 'team', 'team_name', 'group_name',
             'status', 'status_display', 'rejection_reason', 'signature',
             'submitted_at', 'created_at', 'updated_at',
-            'approval_logs', 'can_edit', 'can_approve', 'pending_role', 'is_proxy_application',
+            'approval_logs', 'can_edit', 'can_approve', 'can_cancel_supervisor_approval',
+            'pending_role', 'is_proxy_application',
         ]
         read_only_fields = [
             'created_by', 'hours', 'midnight_hours', 'team',
@@ -144,6 +146,24 @@ class OvertimeApplicationSerializer(serializers.ModelSerializer):
         if role not in ('leader', 'supervisor', 'chief', 'manager'):
             return False
         return pending_logs.filter(approver=user).exists()
+
+    def get_can_cancel_supervisor_approval(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if obj.status != 'approved_supervisor':
+            return False
+        user = request.user
+        if not obj.approval_logs.filter(
+            approver=user,
+            role='supervisor',
+            status='approved',
+        ).exists():
+            return False
+        return not obj.approval_logs.filter(
+            role__in=('chief', 'manager'),
+            status='approved',
+        ).exists()
 
     def get_pending_role(self, obj):
         """現在どのロールが承認待ちか"""

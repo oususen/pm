@@ -210,6 +210,7 @@
       <li><span class="tn">6</span>発生理由を入力する</li>
       <li><span class="tn">7</span>署名する</li>
       <li><span class="tn">8</span>提出する</li>
+      <li><span class="tn">9</span>提出後に修正する</li>
     </ul>
   </div>
 
@@ -592,6 +593,54 @@
     </div>
   </div>
 
+  <!-- ===== STEP 9 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
+      <div class="step-title">提出後に修正する</div>
+    </div>
+    <div class="step-desc">
+      一度提出した申請を修正したい場合は、<strong>申請一覧（自分の申請）</strong>から対象申請を開いて編集します。
+    </div>
+
+    <ol style="padding-left:22px;font-size:14px;color:var(--ink2);margin-bottom:16px;">
+      <li><strong>勤務 → 申請一覧（自分の申請）</strong> を開きます</li>
+      <li>対象申請の <strong>編集</strong> を押します</li>
+      <li>内容を修正します</li>
+      <li>再度 <strong>提出する</strong> を押します</li>
+    </ol>
+
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>実施日</th>
+            <th>種別</th>
+            <th>ステータス</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2026-08-19</td>
+            <td>時間外</td>
+            <td><span class="badge approval">提出済み</span></td>
+            <td><span class="mock-btn primary">編集</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>提出済みの申請を編集すると、いったん下書きに戻してから再提出する流れになります。</span>
+    </div>
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span><strong>同じ日・同じ種別の申請は、既存申請を削除または取消ししない限り再申請できません。</strong> 作り直したい場合は、先に既存の申請を消してください。</span>
+    </div>
+  </div>
+
   <!-- ===== 注意事項 ===== -->
   <div class="note">
     <h2>&#9888; 注意事項</h2>
@@ -602,6 +651,7 @@
       <li><strong>深夜時間帯:</strong> 22:00〜翌05:00 が深夜時間として自動計算されます。深夜割増の対象時間を確認するために使用されます</li>
       <li><strong>休憩の自動控除:</strong> 残業は2時間ごとに10分間の休憩が自動控除されます。休日出勤は勤務パターンの休憩定義に従います</li>
       <li><strong>下書きの有効期限:</strong> 下書き保存した申請は「申請一覧」から再編集・提出できます</li>
+      <li><strong>重複申請不可:</strong> 同一申請者の同じ日・同じ種別は重複登録できません。再申請する場合は既存申請の削除または取消しが必要です</li>
     </ul>
   </div>
 

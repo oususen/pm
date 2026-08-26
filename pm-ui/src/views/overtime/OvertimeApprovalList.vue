@@ -79,6 +79,16 @@
             </td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td colspan="8" class="total-label">合計 {{ filteredApplications.length }}件</td>
+            <td class="num">
+              <span class="total-hours">{{ totalHours }}H</span>
+              <span v-if="totalMidnight > 0" class="midnight-tag">{{ t('approvalList.midnight') }}{{ totalMidnight }}H</span>
+            </td>
+            <td colspan="4"></td>
+          </tr>
+        </tfoot>
       </table>
     </template>
 
@@ -226,6 +236,16 @@ const filteredApplications = computed(() =>
     (!filterGroup.value || a.group_name === filterGroup.value) &&
     (!filterDate.value || a.work_date === filterDate.value)
   )
+)
+const totalHours = computed(() =>
+  Math.round(filteredApplications.value.reduce((sum, a) =>
+    sum + parseFloat(a.hours) + parseFloat(a.midnight_hours), 0
+  ) * 10) / 10
+)
+const totalMidnight = computed(() =>
+  Math.round(filteredApplications.value.reduce((sum, a) =>
+    sum + parseFloat(a.midnight_hours), 0
+  ) * 10) / 10
 )
 const targetApp = ref(null)
 const actionMode = ref('confirm')  // 'confirm' | 'reject'
@@ -406,6 +426,13 @@ onMounted(fetchList)
 }
 .ot-table tr:last-child td { border-bottom: none; }
 .ot-table tr.selected td { background: #f0fdf4; }
+.total-row td {
+  background: #f0fdf4;
+  border-top: 2px solid #40916c;
+  font-weight: 600;
+}
+.total-label { font-size: 13px; color: #374151; }
+.total-hours { font-size: 15px; color: #40916c; }
 .check-col { width: 36px; text-align: center; }
 .name-col { min-width: 240px; }
 .num { text-align: right; }

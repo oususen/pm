@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>班長承認取消 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --warn: #b45309;
+    --warn-light: #fff3e0;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --radius: 10px;
+    --step: #00796b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.7;
+  }
+  .page { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 28px 30px;
+    margin-bottom: 22px;
+  }
+  .cover { border-left: 5px solid var(--step); }
+  .cover h1 { margin: 0 0 8px; font-size: 28px; }
+  .subtitle { color: var(--ink2); font-size: 14px; margin-bottom: 14px; }
+  .path {
+    display: inline-block;
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .toc h2, .section h2 { margin: 0 0 12px; font-size: 18px; }
+  .toc ul, .section ul, .section ol { margin: 0; padding-left: 22px; }
+  .toc li, .section li { margin-bottom: 6px; }
+  .step-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+  .step-no {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    border-radius: 50%;
+    background: var(--step);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+  }
+  .note {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .note.warn { background: var(--warn-light); color: var(--warn); }
+  .note.danger { background: var(--danger-light); color: var(--danger); }
+  .mock {
+    border: 1px solid var(--grid-line);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 14px 0;
+  }
+  .mock-head {
+    background: var(--grid-head);
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .mock-body { padding: 14px 12px; }
+  .grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .grid th, .grid td {
+    border: 1px solid var(--grid-line);
+    padding: 6px 8px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .grid th { background: var(--grid-head); }
+  .btn {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .btn-ghost { background: #eef2f7; color: #475569; }
+  .btn-warn { background: var(--warn); color: #fff; }
+  .status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #d1fae5;
+    color: #065f46;
+  }
+  @media (max-width: 640px) {
+    .page { padding: 20px 12px 48px; }
+    .card { padding: 20px 16px; }
+    .cover h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card cover">
+    <h1>班長承認取消 作業手順書</h1>
+    <div class="subtitle">班長が自分で承認した申請を、係長承認前に取り消す手順です。</div>
+    <div class="path">勤務 ＞ 申請一覧 ＞ 詳細 ＞ 班長承認取消</div>
+  </div>
+
+  <div class="card toc">
+    <h2>目次</h2>
+    <ul>
+      <li>1. 取消できる条件を確認する</li>
+      <li>2. 申請一覧から対象を開く</li>
+      <li>3. 詳細モーダルで取消する</li>
+      <li>4. 取消後の状態を確認する</li>
+    </ul>
+  </div>
+
+  <div class="card section">
+    <h2>1. 取消できる条件を確認する</h2>
+    <ul>
+      <li>対象申請のステータスが <strong>班長承認済み</strong> であること</li>
+      <li>あなた自身がその申請を班長として承認していること</li>
+      <li>まだ係長または部長が承認していないこと</li>
+    </ul>
+    <div class="note warn">条件を満たす申請だけ、詳細モーダルに <strong>班長承認取消</strong> ボタンが表示されます。</div>
+  </div>
+
+  <div class="card section">
+    <h2>2. 申請一覧から対象を開く</h2>
+    <div class="step-row">
+      <div class="step-no">1</div>
+      <div>勤務メニューから <strong>申請一覧</strong> を開きます。</div>
+    </div>
+    <div class="step-row">
+      <div class="step-no">2</div>
+      <div>対象申請の <strong>詳細</strong> ボタンを押します。</div>
+    </div>
+
+    <div class="mock">
+      <div class="mock-head">申請一覧の例</div>
+      <div class="mock-body">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>実施日</th>
+              <th>申請者</th>
+              <th>種別</th>
+              <th>ステータス</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2026-08-19</td>
+              <td>山田 太郎</td>
+              <td>時間外</td>
+              <td><span class="status">班長承認済み</span></td>
+              <td><span class="btn btn-ghost">詳細</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <h2>3. 詳細モーダルで取消する</h2>
+    <div class="step-row">
+      <div class="step-no">1</div>
+      <div>詳細モーダルの下部にある <strong>班長承認取消</strong> を押します。</div>
+    </div>
+    <div class="step-row">
+      <div class="step-no">2</div>
+      <div>確認ダイアログで <strong>OK</strong> を押します。</div>
+    </div>
+
+    <div class="mock">
+      <div class="mock-head">詳細モーダルの例</div>
+      <div class="mock-body">
+        <p style="margin:0 0 10px;font-size:13px;color:#475569;">ステータス: <span class="status">班長承認済み</span></p>
+        <span class="btn btn-warn">班長承認取消</span>
+      </div>
+    </div>
+
+    <div class="note danger">係長または部長がすでに承認している申請では、この取消はできません。</div>
+  </div>
+
+  <div class="card section">
+    <h2>4. 取消後の状態を確認する</h2>
+    <ul>
+      <li>リーダー承認が未実施なら <strong>提出済み</strong> に戻ります</li>
+      <li>リーダー承認が済んでいれば <strong>リーダー承認済み</strong> に戻ります</li>
+      <li>係長への承認待ちは自動で外れます</li>
+      <li>必要なら内容確認後、再度承認フローを進めます</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>
