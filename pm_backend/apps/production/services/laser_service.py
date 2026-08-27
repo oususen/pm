@@ -11,6 +11,7 @@ from orders.utils.calendar_utils import add_working_days, get_business_today
 from production.models_laser_actual import LaserActual, LaserActualDetail
 from production.models_laser_pattern import LaserPattern
 from production.serializers import LaserActualSerializer
+from production.services.process_realtime_history_service import create_record_change_history
 
 
 def _parse_target_month(month_value):
@@ -571,13 +572,74 @@ def list_current_processing_laser_actuals(scan_limit):
     return {'results': active_rows}
 
 
-def delete_laser_actual(instance):
+def _build_laser_history_snapshot(*, actual, detail=None, qty_override=None):
+    product = getattr(detail, 'product', None) if detail else None
+    product_code = ''
+    product_name = ''
+    if detail:
+        product_code = str(getattr(detail, 'product_code', '') or '').strip()
+        product_name = str(getattr(detail, 'product_name', '') or '').strip()
+    if not product_code and product:
+        product_code = product.product_code or ''
+    if not product_name and product:
+        product_name = product.product_name or ''
+    production_qty = qty_override
+    if production_qty is None and detail is not None:
+        production_qty = detail.total_qty
+    return {
+        'product_code': product_code,
+        'product_name': product_name,
+        'plan_date': str(actual.work_date) if getattr(actual, 'work_date', None) else '',
+        'production_qty': float(production_qty or 0),
+    }
+
+
+def delete_laser_actual(instance, change_reason=None, changed_by=None):
     with transaction.atomic():
+        component_details = list(
+            instance.details.select_related('product').filter(
+                detail_type=LaserActualDetail.DETAIL_TYPE_COMPONENT,
+            )
+        )
+        if component_details:
+            for detail in component_details:
+                create_record_change_history(
+                    session_record_id=instance.id,
+                    operation_type='DELETE',
+                    reason=change_reason,
+                    changed_by=changed_by,
+                    process=getattr(getattr(instance, 'equipment', None), 'process', None),
+                    product=getattr(detail, 'product', None),
+                    product_code=str(getattr(detail, 'product_code', '') or '').strip(),
+                    product_name=str(getattr(detail, 'product_name', '') or '').strip(),
+                    plan_date=instance.work_date,
+                    before_data=_build_laser_history_snapshot(actual=instance, detail=detail),
+                    after_data={},
+                )
+        else:
+            create_record_change_history(
+                session_record_id=instance.id,
+                operation_type='DELETE',
+                reason=change_reason,
+                changed_by=changed_by,
+                process=getattr(getattr(instance, 'equipment', None), 'process', None),
+                product=None,
+                product_code='',
+                product_name='',
+                plan_date=instance.work_date,
+                before_data={
+                    'product_code': '',
+                    'product_name': '',
+                    'plan_date': str(instance.work_date) if instance.work_date else '',
+                    'production_qty': 0,
+                },
+                after_data={},
+            )
         LaserActualSerializer.revert_backlog_for_instance(instance)
         instance.delete()
 
 
-def update_laser_actual_detail_quantity(detail_id, total_qty_raw):
+def update_laser_actual_detail_quantity(detail_id, total_qty_raw, change_reason=None, changed_by=None):
     with transaction.atomic():
         detail = (
             LaserActualDetail.objects
@@ -605,6 +667,7 @@ def update_laser_actual_detail_quantity(detail_id, total_qty_raw):
 
         old_qty = detail.total_qty
         delta = int((new_qty - old_qty).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+        before_data = _build_laser_history_snapshot(actual=actual, detail=detail, qty_override=old_qty)
 
         detail.total_qty = new_qty
         detail.save(update_fields=['total_qty'])
@@ -615,5 +678,21 @@ def update_laser_actual_detail_quantity(detail_id, total_qty_raw):
                 LaserActualSerializer.apply_backlog_delta_map({
                     (actual.work_date, line.id, process.id, detail.product_id): delta
                 })
+
+        after_data = _build_laser_history_snapshot(actual=actual, detail=detail, qty_override=new_qty)
+        if before_data != after_data:
+            create_record_change_history(
+                session_record_id=actual.id,
+                operation_type='UPDATE',
+                reason=change_reason,
+                changed_by=changed_by,
+                process=getattr(getattr(actual, 'equipment', None), 'process', None),
+                product=getattr(detail, 'product', None),
+                product_code=str(getattr(detail, 'product_code', '') or '').strip(),
+                product_name=str(getattr(detail, 'product_name', '') or '').strip(),
+                plan_date=actual.work_date,
+                before_data=before_data,
+                after_data=after_data,
+            )
 
         return {'detail': '更新しました。'}, 200

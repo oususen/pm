@@ -119,3 +119,36 @@ def create_session_change_history(*, session_obj, operation_type, reason, change
         after_data=after_payload,
         changed_by=changed_by,
     )
+
+
+def create_record_change_history(
+    *,
+    session_record_id,
+    operation_type,
+    reason,
+    changed_by,
+    process=None,
+    product=None,
+    product_code='',
+    product_name='',
+    plan_date=None,
+    before_data=None,
+    after_data=None,
+):
+    before_payload = before_data or {}
+    after_payload = after_data or {}
+    return ProcessWorkSessionChangeHistory.objects.create(
+        session=None,
+        session_record_id=session_record_id,
+        operation_type=str(operation_type or '').upper(),
+        process=process,
+        product=product,
+        product_code=str(product_code or '').strip(),
+        product_name=str(product_name or '').strip(),
+        plan_date=plan_date,
+        reason=str(reason or '').strip(),
+        change_summary=build_history_summary(operation_type, before_payload, after_payload),
+        before_data=before_payload,
+        after_data=after_payload,
+        changed_by=changed_by,
+    )

@@ -27,6 +27,7 @@ from production.models_record_inquiry_setting import ProductionRecordInquirySett
 from production.services.brake_spot_session_sync import find_equipment_active_product_conflict
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.serializers_process_realtime import check_plan_overrun
+from production.services.process_realtime_history_service import create_record_change_history
 
 logger = logging.getLogger(__name__)
 
@@ -1486,16 +1487,57 @@ class BrakeLineSessionDetailView(APIView):
         if not record:
             return Response(status=204)
 
+        change_reason = str(request.data.get('change_reason') or '').strip()
+        if not change_reason:
+            return Response({'detail': 'change_reason は必須です。'}, status=400)
+
+        changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        ref_rec = end_record or start_record or record
+        before_snapshot = {
+            'product_code': ref_rec.product_code or '',
+            'started_at': (start_record.recorded_at.strftime('%Y/%m/%d %H:%M') if start_record and start_record.recorded_at else ''),
+            'ended_at': (end_record.recorded_at.strftime('%Y/%m/%d %H:%M') if end_record and end_record.recorded_at else ''),
+            'production_qty': int(end_record.qty or 0) if end_record and end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0,
+            'operator_name': ref_rec.operator or '',
+            'plan_date': str(ref_rec.plan_date) if ref_rec.plan_date else '',
+        }
+
         if end_record and end_record.operator_action in self.END_ACTIONS:
             rollback_qty = int(end_record.qty or 0) if end_record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
             if rollback_qty:
                 self._apply_backlog_delta(end_record, -rollback_qty)
+            create_record_change_history(
+                session_record_id=record.id,
+                operation_type='DELETE',
+                reason=change_reason,
+                changed_by=changed_by,
+                process=ref_rec.process,
+                product=ref_rec.product,
+                product_code=ref_rec.product_code or '',
+                product_name=(ref_rec.product.product_name if getattr(ref_rec, 'product', None) else ''),
+                plan_date=ref_rec.plan_date,
+                before_data=before_snapshot,
+                after_data={},
+            )
             end_record.delete()
             if start_record:
                 start_record.delete()
             return Response(status=204)
 
         if start_record and start_record.operator_action in self.START_ACTIONS:
+            create_record_change_history(
+                session_record_id=record.id,
+                operation_type='DELETE',
+                reason=change_reason,
+                changed_by=changed_by,
+                process=ref_rec.process,
+                product=ref_rec.product,
+                product_code=ref_rec.product_code or '',
+                product_name=(ref_rec.product.product_name if getattr(ref_rec, 'product', None) else ''),
+                plan_date=ref_rec.plan_date,
+                before_data=before_snapshot,
+                after_data={},
+            )
             if start_record.id == record.id:
                 record.delete()
             else:
@@ -1505,5 +1547,18 @@ class BrakeLineSessionDetailView(APIView):
         rollback_qty = int(record.qty or 0) if record.operator_action in self.BACKLOG_COUNTABLE_ACTIONS else 0
         if rollback_qty:
             self._apply_backlog_delta(record, -rollback_qty)
+        create_record_change_history(
+            session_record_id=record.id,
+            operation_type='DELETE',
+            reason=change_reason,
+            changed_by=changed_by,
+            process=ref_rec.process,
+            product=ref_rec.product,
+            product_code=ref_rec.product_code or '',
+            product_name=(ref_rec.product.product_name if getattr(ref_rec, 'product', None) else ''),
+            plan_date=ref_rec.plan_date,
+            before_data=before_snapshot,
+            after_data={},
+        )
         record.delete()
         return Response(status=204)

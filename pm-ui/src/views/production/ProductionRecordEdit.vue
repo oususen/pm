@@ -786,6 +786,7 @@ const saveRow = async (row) => {
       }
       await api.laserActuals.patchLaserActualDetail(row.detail_id, {
         total_qty: Number(edit.production_qty || 0),
+        change_reason: String(changeReason).trim(),
       })
     } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
       const brakePayload = {
@@ -844,20 +845,23 @@ const deleteRow = async (row) => {
 const _execDelete = async (row) => {
   savingId.value = row.row_key
   try {
+    const changeReason = window.prompt('削除理由を入力してください。', '実績削除')
+    if (changeReason === null) return
+    if (!String(changeReason).trim()) {
+      alert('削除理由を入力してください。')
+      return
+    }
     if (String(row?.record_source || '').toUpperCase() === 'LASER') {
-      await api.laserActuals.deleteLaserActual(row.id)
+      await api.laserActuals.deleteLaserActual(row.id, {
+        change_reason: String(changeReason).trim(),
+      })
     } else if (String(row?.record_source || '').toUpperCase() === 'BRAKE') {
       await api.brakeLineActuals.deleteSession(row.id, {
         start_record_id: row?.start_record_id ?? null,
         end_record_id: row?.end_record_id ?? null,
+        change_reason: String(changeReason).trim(),
       })
     } else {
-      const changeReason = window.prompt('削除理由を入力してください。', '実績削除')
-      if (changeReason === null) return
-      if (!String(changeReason).trim()) {
-        alert('削除理由を入力してください。')
-        return
-      }
       await api.processRealtime.deleteSession(row.id, {
         data: {
           change_reason: String(changeReason).trim(),

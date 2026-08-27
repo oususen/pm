@@ -152,8 +152,18 @@ class LaserActualViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        change_reason = str(request.data.get('change_reason') or '').strip()
+        if not change_reason:
+            return Response(
+                {'detail': 'change_reason は必須です。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            delete_laser_actual(instance)
+            delete_laser_actual(
+                instance,
+                change_reason=change_reason,
+                changed_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
+            )
         except Exception as exc:
             return Response(
                 {'detail': f'レーザー実績の削除に失敗しました: {str(exc)}'},
@@ -167,9 +177,14 @@ class LaserActualDetailUpdateView(APIView):
 
     @transaction.atomic
     def patch(self, request, detail_id):
+        change_reason = str(request.data.get('change_reason') or '').strip()
+        if not change_reason:
+            return Response({'detail': 'change_reason は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         data, status_code = update_laser_actual_detail_quantity(
             detail_id,
             request.data.get('total_qty'),
+            change_reason=change_reason,
+            changed_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
         )
         return Response(data, status=status_code)
 

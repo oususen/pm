@@ -17,8 +17,8 @@ export const createLaserActualsAPI = (client) => ({
   patchLaserActual(id, data) {
     return client.patch(`/laser-actuals/${id}/`, data)
   },
-  deleteLaserActual(id) {
-    return client.delete(`/laser-actuals/${id}/`)
+  deleteLaserActual(id, payload = null) {
+    return client.delete(`/laser-actuals/${id}/`, payload ? { data: payload } : undefined)
   },
   /** 品番別明細の数量個別更新 PATCH /laser-actual-details/{detail_id}/ */
   patchLaserActualDetail(detailId, data) {

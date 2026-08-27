@@ -6,6 +6,7 @@ from rest_framework.test import APIRequestFactory
 
 from masters.models import Equipment, Line, Process, Product, Routing, RoutingStep
 from production.models_laser_actual import LaserActual
+from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.models_laser_pattern import (
     LaserPattern,
     LaserPatternComponent,
@@ -13,7 +14,7 @@ from production.models_laser_pattern import (
 )
 from production.models_line_backlog import LineBacklog
 from production.serializers import LaserActualSerializer
-from production.views_laser import LaserActualViewSet
+from production.views_laser import LaserActualDetailUpdateView, LaserActualViewSet
 
 
 class LaserActualBacklogSyncTest(TestCase):
@@ -162,10 +163,46 @@ class LaserActualBacklogSyncTest(TestCase):
         self.assertEqual(backlog.actual_qty, 12)
 
         view = LaserActualViewSet.as_view({'delete': 'destroy'})
-        request = self.factory.delete(f'/api/laser-actuals/{actual.id}/')
+        request = self.factory.delete(
+            f'/api/laser-actuals/{actual.id}/',
+            {'change_reason': 'レーザー実績削除'},
+            format='json',
+        )
         response = view(request, pk=actual.id)
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         backlog.refresh_from_db()
         self.assertEqual(backlog.actual_qty, 0)
         self.assertFalse(LaserActual.objects.filter(id=actual.id).exists())
+        self.assertTrue(ProcessWorkSessionChangeHistory.objects.filter(
+            session_record_id=actual.id,
+            operation_type='DELETE',
+            product_code=self.component.product_code,
+            reason='レーザー実績削除',
+        ).exists())
+
+    def test_detail_update_creates_history(self):
+        actual = self._create_actual(shot_count=2, action='END')
+        detail = actual.details.filter(
+            detail_type='COMPONENT',
+            product=self.component,
+        ).first()
+        self.assertIsNotNone(detail)
+
+        view = LaserActualDetailUpdateView.as_view()
+        request = self.factory.patch(
+            f'/api/laser-actual-details/{detail.id}/',
+            {'total_qty': 8, 'change_reason': 'レーザー数量訂正'},
+            format='json',
+        )
+        response = view(request, detail_id=detail.id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        history = ProcessWorkSessionChangeHistory.objects.get(
+            session_record_id=actual.id,
+            operation_type='UPDATE',
+            product_code=self.component.product_code,
+        )
+        self.assertEqual(history.reason, 'レーザー数量訂正')
+        self.assertEqual(history.before_data['production_qty'], 6.0)
+        self.assertEqual(history.after_data['production_qty'], 8.0)
