@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from django.conf import settings
 from django.test import TestCase
@@ -9,12 +9,13 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
-from masters.models import Line, Process, Product, BOM, BOMItem
+from masters.models import Line, Process, Product, BOM, BOMItem, Routing, RoutingStep
 from production.models_line_backlog import LineBacklog
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.models_process_work_session import ProcessWorkSession
 from production.services.process_realtime_backlog_service import (
+    apply_delta_to_inventory_and_progress,
     recalculate_inventory_after_session_change,
 )
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
@@ -44,7 +45,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         return value
 
     @patch('production.inventory.inventory_calculator.recalculate_inventory_for_line')
-    def test_recalculate_helper_uses_plan_date_cutoff(self, mock_recalculate):
+    def test_recalculate_helper_uses_plan_date_range(self, mock_recalculate):
         LineBacklog.objects.create(
             plan_date=date(2026, 3, 5),
             process=self.process,
@@ -60,7 +61,11 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             sequence_no=0,
         )
 
-        session = SimpleNamespace(plan_date=date(2026, 3, 5), process=self.process)
+        session = SimpleNamespace(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product_id=self.product.id,
+        )
 
         recalculate_inventory_after_session_change(session)
 
@@ -70,7 +75,387 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             end_date=date(2026, 3, 7),
             include_progress=True,
             line_final_only=False,
-            guard_cutoff=date(2026, 3, 4),
+            product_ids=[self.product.id],
+        )
+
+    @patch('production.inventory.inventory_calculator.recalculate_inventory_for_line')
+    def test_recalculate_helper_expands_to_parent_line_with_lt(self, mock_recalculate):
+        parent_line = Line.objects.create(
+            line_code='LPARENT-RT',
+            line_name='親ライン',
+        )
+        parent_process = Process.objects.create(
+            process_code='PPARENT-RT',
+            process_name='親工程',
+            line=parent_line,
+        )
+        parent_product = Product.objects.create(
+            product_code='PARENT-RT',
+            product_name='親品番',
+        )
+        BOM.objects.create(
+            parent_product=parent_product,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+        )
+        bom = BOM.objects.get(parent_product=parent_product)
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=self.product,
+            quantity=Decimal('1'),
+            process=parent_process,
+            line=parent_line,
+            lead_time_days=2,
+        )
+        routing = Routing.objects.create(
+            product=parent_product,
+            routing_code='R-PARENT-RT',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=parent_process,
+            line=parent_line,
+            output_product=self.product,
+            lead_time_days=2,
+        )
+
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product=self.product,
+            line=self.line,
+            sequence_no=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 7),
+            process=self.process,
+            product=self.product,
+            line=self.line,
+            sequence_no=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 3),
+            process=parent_process,
+            product=parent_product,
+            line=parent_line,
+            sequence_no=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 8),
+            process=parent_process,
+            product=parent_product,
+            line=parent_line,
+            sequence_no=0,
+        )
+
+        session = SimpleNamespace(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product_id=self.product.id,
+        )
+
+        recalculate_inventory_after_session_change(session)
+
+        self.assertEqual(mock_recalculate.call_count, 2)
+        mock_recalculate.assert_has_calls(
+            [
+                call(
+                    line_id=self.line.id,
+                    start_date=date(2026, 3, 5),
+                    end_date=date(2026, 3, 7),
+                    include_progress=True,
+                    line_final_only=False,
+                    product_ids=[self.product.id],
+                ),
+                call(
+                    line_id=parent_line.id,
+                    start_date=date(2026, 3, 3),
+                    end_date=date(2026, 3, 8),
+                    include_progress=True,
+                    line_final_only=False,
+                    product_ids=[parent_product.id],
+                ),
+            ],
+            any_order=True,
+        )
+
+    @patch('production.inventory.inventory_calculator.recalculate_inventory_for_line')
+    def test_recalculate_helper_uses_bom_item_process_to_select_lt(self, mock_recalculate):
+        shared_line = Line.objects.create(
+            line_code='LSHARED-RT',
+            line_name='共通ライン',
+        )
+        process_a = Process.objects.create(
+            process_code='PSHARED-A',
+            process_name='共通工程A',
+            line=shared_line,
+        )
+        process_b = Process.objects.create(
+            process_code='PSHARED-B',
+            process_name='共通工程B',
+            line=shared_line,
+        )
+        parent_product = Product.objects.create(
+            product_code='PARENT-PROC',
+            product_name='親品番工程選択',
+        )
+        bom = BOM.objects.create(
+            parent_product=parent_product,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=self.product,
+            quantity=Decimal('1'),
+            process=process_a,
+            line=shared_line,
+            lead_time_days=1,
+        )
+        routing = Routing.objects.create(
+            product=parent_product,
+            routing_code='R-PARENT-PROC',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=process_b,
+            line=shared_line,
+            output_product=self.product,
+            lead_time_days=4,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=20,
+            process=process_a,
+            line=shared_line,
+            output_product=self.product,
+            lead_time_days=1,
+        )
+
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product=self.product,
+            line=self.line,
+            sequence_no=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 4),
+            process=process_a,
+            product=parent_product,
+            line=shared_line,
+            sequence_no=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 8),
+            process=process_a,
+            product=parent_product,
+            line=shared_line,
+            sequence_no=0,
+        )
+
+        session = SimpleNamespace(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product_id=self.product.id,
+        )
+
+        recalculate_inventory_after_session_change(session)
+
+        self.assertEqual(mock_recalculate.call_count, 2)
+        mock_recalculate.assert_has_calls(
+            [
+                call(
+                    line_id=shared_line.id,
+                    start_date=date(2026, 3, 4),
+                    end_date=date(2026, 3, 8),
+                    include_progress=True,
+                    line_final_only=False,
+                    product_ids=[parent_product.id],
+                ),
+            ],
+            any_order=True,
+        )
+
+    @patch('production.inventory.inventory_calculator.recalculate_inventory_for_line')
+    def test_recalculate_helper_uses_coproduct_children_as_recalc_targets(self, mock_recalculate):
+        child = Product.objects.create(
+            product_code='CHILD-RECALC',
+            product_name='連産子再計算',
+        )
+        parent = Product.objects.create(
+            product_code='STYD-RECALC',
+            product_name='連産親再計算',
+            is_virtual_set=True,
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+            is_coproduct=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=child,
+            quantity=Decimal('1'),
+            process=self.process,
+            line=self.line,
+        )
+        routing = Routing.objects.create(
+            product=child,
+            routing_code='R-CHILD-RECALC',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=self.process,
+            line=self.line,
+            output_product=child,
+            lead_time_days=1,
+        )
+
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product=child,
+            line=self.line,
+            sequence_no=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 7),
+            process=self.process,
+            product=child,
+            line=self.line,
+            sequence_no=0,
+        )
+
+        session = SimpleNamespace(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product_id=parent.id,
+        )
+
+        recalculate_inventory_after_session_change(session)
+
+        mock_recalculate.assert_called_once_with(
+            line_id=self.line.id,
+            start_date=date(2026, 3, 5),
+            end_date=date(2026, 3, 7),
+            include_progress=True,
+            line_final_only=False,
+            product_ids=[child.id],
+        )
+
+    @patch('production.services.process_realtime_backlog_service.recalculate_child_stock_after_record_edit')
+    def test_apply_delta_uses_coproduct_child_as_bom_parent(self, mock_recalculate_child_stock):
+        parent = Product.objects.create(
+            product_code='STYD-DELTA',
+            product_name='連産親差分',
+            is_virtual_set=True,
+        )
+        coproduct_child = Product.objects.create(
+            product_code='CHILD-DELTA',
+            product_name='連産子差分',
+        )
+        component = Product.objects.create(
+            product_code='COMP-DELTA',
+            product_name='子部品差分',
+        )
+        coproduct_bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+            is_coproduct=True,
+        )
+        BOMItem.objects.create(
+            bom=coproduct_bom,
+            child_product=coproduct_child,
+            quantity=Decimal('2'),
+            process=self.process,
+            line=self.line,
+        )
+        child_bom = BOM.objects.create(
+            parent_product=coproduct_child,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+            is_coproduct=False,
+        )
+        BOMItem.objects.create(
+            bom=child_bom,
+            child_product=component,
+            quantity=Decimal('3'),
+            process=self.process,
+            line=self.line,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product=coproduct_child,
+            line=self.line,
+            sequence_no=0,
+            stock_qty=0,
+            planned_stock_qty=0,
+            progress_qty=0,
+            planned_progress_qty=0,
+        )
+        LineBacklog.objects.create(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product=component,
+            line=self.line,
+            sequence_no=0,
+            stock_qty=100,
+            planned_stock_qty=100,
+            actual_shipment_qty=0,
+        )
+
+        session = SimpleNamespace(
+            plan_date=date(2026, 3, 5),
+            process=self.process,
+            product_id=parent.id,
+        )
+
+        with patch('production.services.process_realtime_backlog_service.get_business_today', return_value=date(2026, 3, 5)):
+            apply_delta_to_inventory_and_progress(session, 4)
+
+        coproduct_child_backlog = LineBacklog.objects.get(
+            line=self.line,
+            process=self.process,
+            product=coproduct_child,
+            plan_date=date(2026, 3, 5),
+            sequence_no=0,
+        )
+        component_backlog = LineBacklog.objects.get(
+            line=self.line,
+            process=self.process,
+            product=component,
+            plan_date=date(2026, 3, 5),
+            sequence_no=0,
+        )
+        self.assertEqual(coproduct_child_backlog.stock_qty, 8)
+        self.assertEqual(coproduct_child_backlog.planned_stock_qty, 8)
+        self.assertEqual(coproduct_child_backlog.progress_qty, 8)
+        self.assertEqual(coproduct_child_backlog.planned_progress_qty, 8)
+        self.assertEqual(component_backlog.stock_qty, 76)
+        self.assertEqual(component_backlog.planned_stock_qty, 76)
+        self.assertEqual(component_backlog.actual_shipment_qty, 24)
+        mock_recalculate_child_stock.assert_called_once_with(
+            parent_plan_date=date(2026, 3, 5),
+            today=date(2026, 3, 5),
+            child_product_ids={component.id},
         )
 
     @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
