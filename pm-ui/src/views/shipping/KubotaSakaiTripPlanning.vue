@@ -3483,8 +3483,10 @@ onUnmounted(() => {
   padding: 6px;
 }
 .plan-truck-card-active {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+  border: 1px solid #2563eb;
+  border-left-width: 10px;
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(28, 223, 44, 0.22);
 }
 .plan-truck-header {
   display: flex;
