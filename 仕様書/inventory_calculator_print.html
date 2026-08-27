@@ -1,0 +1,2086 @@
+<title>inventory_calculator.py</title>
+<style>
+body { background: #fff; color: #1e1e1e; margin: 0; padding: 0; font-family: Consolas, Monaco, monospace; }
+.header { padding: 12px 20px; border-bottom: 1px solid #ccc; font-family: system-ui, sans-serif; }
+.header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+.header .meta { font-size: 11px; color: #666; margin-top: 2px; }
+table { border-collapse: collapse; width: 100%; font-size: 11px; line-height: 1.5; }
+td { vertical-align: top; padding: 0; }
+td.ln { width: 40px; min-width: 40px; text-align: right; padding-right: 10px; color: #999; border-right: 1px solid #ddd; user-select: none; font-size: 10px; }
+td.code { padding-left: 12px; white-space: pre; }
+@media print { @page { size: A4; margin: 10mm 8mm; } body { font-size: 9px; } table { font-size: 8px; line-height: 1.35; } td.ln { width: 30px; min-width: 30px; padding-right: 6px; font-size: 7px; } td.code { padding-left: 8px; } .header { padding: 6px 10px; } .header h1 { font-size: 11px; } .header .meta { font-size: 8px; } }
+</style>
+<div class="header">
+<h1>inventory_calculator.py</h1>
+<div class="meta">pm_backend/apps/production/inventory/inventory_calculator.py | 2068 lines</div>
+</div>
+<table>
+<tr><td class="ln">1</td><td class="code">&quot;&quot;&quot;</td></tr>
+<tr><td class="ln">2</td><td class="code">在庫計算ロジック</td></tr>
+<tr><td class="ln">3</td><td class="code">LineBacklogの在庫・計画在庫を再計算するためのユーティリティ</td></tr>
+<tr><td class="ln">4</td><td class="code">&quot;&quot;&quot;</td></tr>
+<tr><td class="ln">5</td><td class="code">from datetime import datetime, timedelta</td></tr>
+<tr><td class="ln">6</td><td class="code">from decimal import Decimal</td></tr>
+<tr><td class="ln">7</td><td class="code">import json</td></tr>
+<tr><td class="ln">8</td><td class="code">from django.db.models import F</td></tr>
+<tr><td class="ln">9</td><td class="code">from orders.utils.calendar_utils import get_business_today</td></tr>
+<tr><td class="ln">10</td><td class="code">from system_settings.models import SystemSetting</td></tr>
+<tr><td class="ln">11</td><td class="code">from ..models_line_backlog import LineBacklog</td></tr>
+<tr><td class="ln">12</td><td class="code">from ..models_line_backlog_adjustment import LineBacklogAdjustment</td></tr>
+<tr><td class="ln">13</td><td class="code">from ..serializers_process_realtime import _resolve_product_process_line</td></tr>
+<tr><td class="ln">14</td><td class="code">from .lead_time_utils import resolve_lead_days_for_step</td></tr>
+<tr><td class="ln">15</td><td class="code">from .trace_debug import is_traced, trace_line_log, trace_log</td></tr>
+<tr><td class="ln">16</td><td class="code">from quality.models_scrap import ScrapRecord, ScrapRecordDetail</td></tr>
+<tr><td class="ln">17</td><td class="code"></td></tr>
+<tr><td class="ln">18</td><td class="code">PLANNED_STOCK_CALC_RULES_KEY = &#x27;production.planned_stock_calc_rules&#x27;</td></tr>
+<tr><td class="ln">19</td><td class="code"></td></tr>
+<tr><td class="ln">20</td><td class="code"></td></tr>
+<tr><td class="ln">21</td><td class="code">def _load_planned_stock_calc_rule_map():</td></tr>
+<tr><td class="ln">22</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">23</td><td class="code">    計算特例設定を読み込み、(line_code, process_code, calc_target, product_code) -&gt; setting の辞書で返す。</td></tr>
+<tr><td class="ln">24</td><td class="code">    product_code が未指定(空/ALL)のルールは product_code=&#x27;ALL&#x27; として格納される。</td></tr>
+<tr><td class="ln">25</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">26</td><td class="code">    row = SystemSetting.objects.filter(key=PLANNED_STOCK_CALC_RULES_KEY).first()</td></tr>
+<tr><td class="ln">27</td><td class="code">    if not row or not row.value:</td></tr>
+<tr><td class="ln">28</td><td class="code">        return {}</td></tr>
+<tr><td class="ln">29</td><td class="code">    try:</td></tr>
+<tr><td class="ln">30</td><td class="code">        raw = json.loads(row.value)</td></tr>
+<tr><td class="ln">31</td><td class="code">    except Exception:</td></tr>
+<tr><td class="ln">32</td><td class="code">        return {}</td></tr>
+<tr><td class="ln">33</td><td class="code">    if not isinstance(raw, list):</td></tr>
+<tr><td class="ln">34</td><td class="code">        return {}</td></tr>
+<tr><td class="ln">35</td><td class="code">    result = {}</td></tr>
+<tr><td class="ln">36</td><td class="code">    for item in raw:</td></tr>
+<tr><td class="ln">37</td><td class="code">        line_code = str((item or {}).get(&#x27;lineCode&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">38</td><td class="code">        process_code = str((item or {}).get(&#x27;processCode&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">39</td><td class="code">        calc_target = str((item or {}).get(&#x27;calcTarget&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">40</td><td class="code">        setting = str((item or {}).get(&#x27;setting&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">41</td><td class="code">        product_code = str((item or {}).get(&#x27;productCode&#x27;) or &#x27;&#x27;).strip().upper() or &#x27;ALL&#x27;</td></tr>
+<tr><td class="ln">42</td><td class="code">        # 旧形式互換</td></tr>
+<tr><td class="ln">43</td><td class="code">        old_item = str((item or {}).get(&#x27;item&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">44</td><td class="code">        old_mode = str((item or {}).get(&#x27;mode&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">45</td><td class="code">        if old_item == &#x27;PARENT_SHIPMENT_SOURCE&#x27; and old_mode == &#x27;PLAN&#x27;:</td></tr>
+<tr><td class="ln">46</td><td class="code">            calc_target = calc_target or &#x27;PLANNED_STOCK&#x27;</td></tr>
+<tr><td class="ln">47</td><td class="code">            setting = &#x27;ORDER_QTY&#x27;</td></tr>
+<tr><td class="ln">48</td><td class="code">        if setting == &#x27;PARENT_PLAN&#x27;:</td></tr>
+<tr><td class="ln">49</td><td class="code">            setting = &#x27;ORDER_QTY&#x27;</td></tr>
+<tr><td class="ln">50</td><td class="code">        if not line_code or not process_code:</td></tr>
+<tr><td class="ln">51</td><td class="code">            continue</td></tr>
+<tr><td class="ln">52</td><td class="code">        if calc_target not in {&#x27;STOCK&#x27;, &#x27;PLANNED_STOCK&#x27;}:</td></tr>
+<tr><td class="ln">53</td><td class="code">            continue</td></tr>
+<tr><td class="ln">54</td><td class="code">        if setting not in {&#x27;ORDER_QTY&#x27;, &#x27;ACTUAL_OR_PLAN&#x27;}:</td></tr>
+<tr><td class="ln">55</td><td class="code">            continue</td></tr>
+<tr><td class="ln">56</td><td class="code">        result[(line_code, process_code, calc_target, product_code)] = setting</td></tr>
+<tr><td class="ln">57</td><td class="code">    return result</td></tr>
+<tr><td class="ln">58</td><td class="code"></td></tr>
+<tr><td class="ln">59</td><td class="code"></td></tr>
+<tr><td class="ln">60</td><td class="code">def _resolve_calc_rule(calc_rule_map, line_code, process_code, calc_target, product_code=&#x27;&#x27;):</td></tr>
+<tr><td class="ln">61</td><td class="code">    &quot;&quot;&quot;製品指定ルール優先、なければALLルールにフォールバック。&quot;&quot;&quot;</td></tr>
+<tr><td class="ln">62</td><td class="code">    if product_code:</td></tr>
+<tr><td class="ln">63</td><td class="code">        setting = calc_rule_map.get((line_code, process_code, calc_target, product_code))</td></tr>
+<tr><td class="ln">64</td><td class="code">        if setting:</td></tr>
+<tr><td class="ln">65</td><td class="code">            return setting</td></tr>
+<tr><td class="ln">66</td><td class="code">    return calc_rule_map.get((line_code, process_code, calc_target, &#x27;ALL&#x27;), &#x27;&#x27;)</td></tr>
+<tr><td class="ln">67</td><td class="code"></td></tr>
+<tr><td class="ln">68</td><td class="code"></td></tr>
+<tr><td class="ln">69</td><td class="code">def aggregate_scrap_to_backlog(line_id=None, start_date=None, end_date=None, product_ids=None):</td></tr>
+<tr><td class="ln">70</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">71</td><td class="code">    ScrapRecordとScrapRecordDetailから仕損数を集計し、LineBacklogに反映</td></tr>
+<tr><td class="ln">72</td><td class="code"></td></tr>
+<tr><td class="ln">73</td><td class="code">    新しい仕様:</td></tr>
+<tr><td class="ln">74</td><td class="code">    - 自工程仕損（ScrapRecord）: scrap_qty に保存（全ての仕損）</td></tr>
+<tr><td class="ln">75</td><td class="code">    - 後工程仕損の展開分（ScrapRecordDetail）: adjust_qty に保存（負の値として）</td></tr>
+<tr><td class="ln">76</td><td class="code"></td></tr>
+<tr><td class="ln">77</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">78</td><td class="code">        line_id: 対象ラインID（Noneの場合は全ライン）</td></tr>
+<tr><td class="ln">79</td><td class="code">        start_date: 開始日</td></tr>
+<tr><td class="ln">80</td><td class="code">        end_date: 終了日</td></tr>
+<tr><td class="ln">81</td><td class="code">        product_ids: 対象製品ID配列（指定時はその製品のみ集計）</td></tr>
+<tr><td class="ln">82</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">83</td><td class="code">    target_product_ids = {int(pid) for pid in (product_ids or []) if pid is not None}</td></tr>
+<tr><td class="ln">84</td><td class="code"></td></tr>
+<tr><td class="ln">85</td><td class="code">    # まず対象期間・対象ラインを決めるために ScrapRecord を取得し、影響する line_id を集計する</td></tr>
+<tr><td class="ln">86</td><td class="code">    scrap_filter = {</td></tr>
+<tr><td class="ln">87</td><td class="code">        &#x27;disposition_status__in&#x27;: [&#x27;PENDING&#x27;, &#x27;PARTIAL&#x27;, &#x27;REJECTED&#x27;, &#x27;APPROVED&#x27;],</td></tr>
+<tr><td class="ln">88</td><td class="code">        &#x27;event_type__in&#x27;: [&#x27;SCRAP&#x27;, &#x27;RETURN&#x27;],</td></tr>
+<tr><td class="ln">89</td><td class="code">        &#x27;plan_date__isnull&#x27;: False,</td></tr>
+<tr><td class="ln">90</td><td class="code">    }</td></tr>
+<tr><td class="ln">91</td><td class="code">    if start_date and end_date:</td></tr>
+<tr><td class="ln">92</td><td class="code">        scrap_filter[&#x27;plan_date__range&#x27;] = [start_date, end_date]</td></tr>
+<tr><td class="ln">93</td><td class="code">    if target_product_ids:</td></tr>
+<tr><td class="ln">94</td><td class="code">        scrap_filter[&#x27;product_id__in&#x27;] = list(target_product_ids)</td></tr>
+<tr><td class="ln">95</td><td class="code"></td></tr>
+<tr><td class="ln">96</td><td class="code">    # 発生ラインで絞り込むと、前工程品が別ラインに計上されるケースを取りこぼすため、</td></tr>
+<tr><td class="ln">97</td><td class="code">    # line_id 指定時もフィルタしないで取得し、後段で actual_line で判定する。</td></tr>
+<tr><td class="ln">98</td><td class="code">    scrap_records = ScrapRecord.objects.filter(**scrap_filter).select_related(&#x27;product&#x27;, &#x27;line&#x27;, &#x27;process&#x27;)</td></tr>
+<tr><td class="ln">99</td><td class="code"></td></tr>
+<tr><td class="ln">100</td><td class="code">    # 影響するラインID（集計先の actual_line_id と、明細に含まれる line_id）を集める</td></tr>
+<tr><td class="ln">101</td><td class="code">    # line_id 指定時はそのラインのみリセット対象にする。未指定の場合は影響ラインを集計する。</td></tr>
+<tr><td class="ln">102</td><td class="code">    if line_id:</td></tr>
+<tr><td class="ln">103</td><td class="code">        affected_line_ids = {line_id}</td></tr>
+<tr><td class="ln">104</td><td class="code">    else:</td></tr>
+<tr><td class="ln">105</td><td class="code">        affected_line_ids = set()</td></tr>
+<tr><td class="ln">106</td><td class="code">        for scrap in scrap_records:</td></tr>
+<tr><td class="ln">107</td><td class="code">            actual_process, actual_line = _resolve_product_process_line(scrap.product, scrap.process)</td></tr>
+<tr><td class="ln">108</td><td class="code">            if not actual_line:</td></tr>
+<tr><td class="ln">109</td><td class="code">                actual_line = getattr(actual_process, &#x27;line&#x27;, None)</td></tr>
+<tr><td class="ln">110</td><td class="code">            if actual_line:</td></tr>
+<tr><td class="ln">111</td><td class="code">                affected_line_ids.add(actual_line.id if hasattr(actual_line, &#x27;id&#x27;) else actual_line)</td></tr>
+<tr><td class="ln">112</td><td class="code"></td></tr>
+<tr><td class="ln">113</td><td class="code">    # 明細（子部品）の line_id も影響ラインに含める</td></tr>
+<tr><td class="ln">114</td><td class="code">    detail_filter = {</td></tr>
+<tr><td class="ln">115</td><td class="code">        &#x27;scrap_record__disposition_status__in&#x27;: [&#x27;PENDING&#x27;, &#x27;PARTIAL&#x27;, &#x27;REJECTED&#x27;, &#x27;APPROVED&#x27;],</td></tr>
+<tr><td class="ln">116</td><td class="code">        &#x27;scrap_record__event_type__in&#x27;: [&#x27;SCRAP&#x27;, &#x27;RETURN&#x27;],</td></tr>
+<tr><td class="ln">117</td><td class="code">        &#x27;scrap_record__plan_date__isnull&#x27;: False,</td></tr>
+<tr><td class="ln">118</td><td class="code">        &#x27;is_backlog_processed&#x27;: False,  # 未処理のみ</td></tr>
+<tr><td class="ln">119</td><td class="code">    }</td></tr>
+<tr><td class="ln">120</td><td class="code">    if start_date and end_date:</td></tr>
+<tr><td class="ln">121</td><td class="code">        detail_filter[&#x27;scrap_record__plan_date__range&#x27;] = [start_date, end_date]</td></tr>
+<tr><td class="ln">122</td><td class="code">    if target_product_ids:</td></tr>
+<tr><td class="ln">123</td><td class="code">        detail_filter[&#x27;product_id__in&#x27;] = list(target_product_ids)</td></tr>
+<tr><td class="ln">124</td><td class="code"></td></tr>
+<tr><td class="ln">125</td><td class="code">    details = ScrapRecordDetail.objects.filter(**detail_filter).select_related(&#x27;scrap_record&#x27;, &#x27;product&#x27;)</td></tr>
+<tr><td class="ln">126</td><td class="code">    if not line_id:</td></tr>
+<tr><td class="ln">127</td><td class="code">        for detail in details:</td></tr>
+<tr><td class="ln">128</td><td class="code">            if detail.line_id:</td></tr>
+<tr><td class="ln">129</td><td class="code">                affected_line_ids.add(detail.line_id)</td></tr>
+<tr><td class="ln">130</td><td class="code"></td></tr>
+<tr><td class="ln">131</td><td class="code">    # リセット対象を限定（影響ライン × 対象期間）</td></tr>
+<tr><td class="ln">132</td><td class="code">    reset_filter = {}</td></tr>
+<tr><td class="ln">133</td><td class="code">    if affected_line_ids:</td></tr>
+<tr><td class="ln">134</td><td class="code">        reset_filter[&#x27;line_id__in&#x27;] = list(affected_line_ids)</td></tr>
+<tr><td class="ln">135</td><td class="code">    elif line_id:</td></tr>
+<tr><td class="ln">136</td><td class="code">        reset_filter[&#x27;line_id&#x27;] = line_id</td></tr>
+<tr><td class="ln">137</td><td class="code">    if start_date and end_date:</td></tr>
+<tr><td class="ln">138</td><td class="code">        reset_filter[&#x27;plan_date__range&#x27;] = [start_date, end_date]</td></tr>
+<tr><td class="ln">139</td><td class="code">    if target_product_ids:</td></tr>
+<tr><td class="ln">140</td><td class="code">        reset_filter[&#x27;product_id__in&#x27;] = list(target_product_ids)</td></tr>
+<tr><td class="ln">141</td><td class="code"></td></tr>
+<tr><td class="ln">142</td><td class="code">    LineBacklog.objects.filter(**reset_filter).update(scrap_qty=0, scrap_adjust_qty=0)</td></tr>
+<tr><td class="ln">143</td><td class="code">    # 仕損由来の adjust_qty もリセット（他の調整との区別が難しいため注意）</td></tr>
+<tr><td class="ln">144</td><td class="code">    # ※ 現状は adjust_qty を使っている他の機能がないためリセット可能</td></tr>
+<tr><td class="ln">145</td><td class="code">    # LineBacklog.objects.filter(**reset_filter).update(adjust_qty=0)</td></tr>
+<tr><td class="ln">146</td><td class="code"></td></tr>
+<tr><td class="ln">147</td><td class="code">    # 自工程仕損の集計（全ての仕損を scrap_qty に保存）</td></tr>
+<tr><td class="ln">148</td><td class="code">    # ※ scrap_records は前段で取得済み</td></tr>
+<tr><td class="ln">149</td><td class="code"></td></tr>
+<tr><td class="ln">150</td><td class="code">    for scrap in scrap_records:</td></tr>
+<tr><td class="ln">151</td><td class="code">        if not scrap.product or not scrap.line or not scrap.process:</td></tr>
+<tr><td class="ln">152</td><td class="code">            continue</td></tr>
+<tr><td class="ln">153</td><td class="code"></td></tr>
+<tr><td class="ln">154</td><td class="code">        # 製品のRoutingStepから正しい工程/ラインを取得（発生工程と異なる場合に対応）</td></tr>
+<tr><td class="ln">155</td><td class="code">        actual_process, actual_line = _resolve_product_process_line(scrap.product, scrap.process)</td></tr>
+<tr><td class="ln">156</td><td class="code">        if not actual_line:</td></tr>
+<tr><td class="ln">157</td><td class="code">            actual_line = getattr(actual_process, &#x27;line&#x27;, None)</td></tr>
+<tr><td class="ln">158</td><td class="code">        if not actual_line:</td></tr>
+<tr><td class="ln">159</td><td class="code">            continue</td></tr>
+<tr><td class="ln">160</td><td class="code"></td></tr>
+<tr><td class="ln">161</td><td class="code">        if line_id and getattr(actual_line, &#x27;id&#x27;, actual_line) != line_id:</td></tr>
+<tr><td class="ln">162</td><td class="code">            # 指定ラインの再計算時は、そのラインに計上されるものだけ処理</td></tr>
+<tr><td class="ln">163</td><td class="code">            continue</td></tr>
+<tr><td class="ln">164</td><td class="code">        if target_product_ids and scrap.product_id not in target_product_ids:</td></tr>
+<tr><td class="ln">165</td><td class="code">            continue</td></tr>
+<tr><td class="ln">166</td><td class="code"></td></tr>
+<tr><td class="ln">167</td><td class="code">        LineBacklog.objects.get_or_create(</td></tr>
+<tr><td class="ln">168</td><td class="code">            plan_date=scrap.plan_date,</td></tr>
+<tr><td class="ln">169</td><td class="code">            product=scrap.product,</td></tr>
+<tr><td class="ln">170</td><td class="code">            line=actual_line,</td></tr>
+<tr><td class="ln">171</td><td class="code">            process=actual_process,</td></tr>
+<tr><td class="ln">172</td><td class="code">            sequence_no=0,</td></tr>
+<tr><td class="ln">173</td><td class="code">        )</td></tr>
+<tr><td class="ln">174</td><td class="code">        # 自工程生産品か判定（製品の工程=発生工程）→ scrap_qty、異なれば scrap_adjust_qty にマイナス</td></tr>
+<tr><td class="ln">175</td><td class="code">        is_self = actual_process.id == scrap.process_id</td></tr>
+<tr><td class="ln">176</td><td class="code">        if is_self:</td></tr>
+<tr><td class="ln">177</td><td class="code">            LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">178</td><td class="code">                plan_date=scrap.plan_date,</td></tr>
+<tr><td class="ln">179</td><td class="code">                product=scrap.product,</td></tr>
+<tr><td class="ln">180</td><td class="code">                line=actual_line,</td></tr>
+<tr><td class="ln">181</td><td class="code">                process=actual_process,</td></tr>
+<tr><td class="ln">182</td><td class="code">                sequence_no=0,</td></tr>
+<tr><td class="ln">183</td><td class="code">            ).update(scrap_qty=F(&#x27;scrap_qty&#x27;) + int(scrap.qty))</td></tr>
+<tr><td class="ln">184</td><td class="code">        else:</td></tr>
+<tr><td class="ln">185</td><td class="code">            LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">186</td><td class="code">                plan_date=scrap.plan_date,</td></tr>
+<tr><td class="ln">187</td><td class="code">                product=scrap.product,</td></tr>
+<tr><td class="ln">188</td><td class="code">                line=actual_line,</td></tr>
+<tr><td class="ln">189</td><td class="code">                process=actual_process,</td></tr>
+<tr><td class="ln">190</td><td class="code">                sequence_no=0,</td></tr>
+<tr><td class="ln">191</td><td class="code">            ).update(scrap_adjust_qty=F(&#x27;scrap_adjust_qty&#x27;) - int(scrap.qty))</td></tr>
+<tr><td class="ln">192</td><td class="code"></td></tr>
+<tr><td class="ln">193</td><td class="code">    # 後工程仕損の展開分（子部品）は adjust_qty に保存（負の値として）</td></tr>
+<tr><td class="ln">194</td><td class="code">    # 未処理のレコードのみ対象（is_backlog_processed=False）</td></tr>
+<tr><td class="ln">195</td><td class="code">    processed_detail_ids = []</td></tr>
+<tr><td class="ln">196</td><td class="code"></td></tr>
+<tr><td class="ln">197</td><td class="code">    for detail in details:</td></tr>
+<tr><td class="ln">198</td><td class="code">        if not detail.product or not detail.line_id or not detail.process_id:</td></tr>
+<tr><td class="ln">199</td><td class="code">            continue</td></tr>
+<tr><td class="ln">200</td><td class="code">        if line_id and detail.line_id != line_id:</td></tr>
+<tr><td class="ln">201</td><td class="code">            # 対象ライン以外の子部品はスキップ（line_id 未指定時は全件）</td></tr>
+<tr><td class="ln">202</td><td class="code">            continue</td></tr>
+<tr><td class="ln">203</td><td class="code">        if target_product_ids and detail.product_id not in target_product_ids:</td></tr>
+<tr><td class="ln">204</td><td class="code">            continue</td></tr>
+<tr><td class="ln">205</td><td class="code">        # 自製品（親と同じ製品）はスキップ（scrap_qty で既に処理済み）</td></tr>
+<tr><td class="ln">206</td><td class="code">        if (detail.product_id == detail.scrap_record.product_id</td></tr>
+<tr><td class="ln">207</td><td class="code">            and detail.line_id == detail.scrap_record.line_id</td></tr>
+<tr><td class="ln">208</td><td class="code">            and detail.process_id == detail.scrap_record.process_id):</td></tr>
+<tr><td class="ln">209</td><td class="code">            # 自製品でも処理済みフラグは立てる</td></tr>
+<tr><td class="ln">210</td><td class="code">            processed_detail_ids.append(detail.id)</td></tr>
+<tr><td class="ln">211</td><td class="code">            continue</td></tr>
+<tr><td class="ln">212</td><td class="code"></td></tr>
+<tr><td class="ln">213</td><td class="code">        LineBacklog.objects.get_or_create(</td></tr>
+<tr><td class="ln">214</td><td class="code">            plan_date=detail.scrap_record.plan_date,</td></tr>
+<tr><td class="ln">215</td><td class="code">            product=detail.product,</td></tr>
+<tr><td class="ln">216</td><td class="code">            line_id=detail.line_id,</td></tr>
+<tr><td class="ln">217</td><td class="code">            process_id=detail.process_id,</td></tr>
+<tr><td class="ln">218</td><td class="code">            sequence_no=0,</td></tr>
+<tr><td class="ln">219</td><td class="code">        )</td></tr>
+<tr><td class="ln">220</td><td class="code">        # 子部品は adjust_qty に負の値として保存（在庫減算のため）</td></tr>
+<tr><td class="ln">221</td><td class="code">        LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">222</td><td class="code">            plan_date=detail.scrap_record.plan_date,</td></tr>
+<tr><td class="ln">223</td><td class="code">            product=detail.product,</td></tr>
+<tr><td class="ln">224</td><td class="code">            line_id=detail.line_id,</td></tr>
+<tr><td class="ln">225</td><td class="code">            process_id=detail.process_id,</td></tr>
+<tr><td class="ln">226</td><td class="code">            sequence_no=0,</td></tr>
+<tr><td class="ln">227</td><td class="code">        ).update(adjust_qty=F(&#x27;adjust_qty&#x27;) - int(detail.deduct_qty))</td></tr>
+<tr><td class="ln">228</td><td class="code">        processed_detail_ids.append(detail.id)</td></tr>
+<tr><td class="ln">229</td><td class="code"></td></tr>
+<tr><td class="ln">230</td><td class="code">    # 処理済みフラグを更新</td></tr>
+<tr><td class="ln">231</td><td class="code">    if processed_detail_ids:</td></tr>
+<tr><td class="ln">232</td><td class="code">        ScrapRecordDetail.objects.filter(id__in=processed_detail_ids).update(is_backlog_processed=True)</td></tr>
+<tr><td class="ln">233</td><td class="code"></td></tr>
+<tr><td class="ln">234</td><td class="code"></td></tr>
+<tr><td class="ln">235</td><td class="code">def _build_demand_map(line_id, start_date, end_date):</td></tr>
+<tr><td class="ln">236</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">237</td><td class="code">    最終品（is_final_product=True）の需要を (product_id, plan_date) で集計。</td></tr>
+<tr><td class="ln">238</td><td class="code">    LineDemandから取得（plan_dateはLTシフト済み）。</td></tr>
+<tr><td class="ln">239</td><td class="code">    受注展開時に同一(customer, product, ship_to, due_date)の確定がある内示は</td></tr>
+<tr><td class="ln">240</td><td class="code">    既に除外されているため、LineDemandに共存するfirm/forecastは別需要であり常に合算する。</td></tr>
+<tr><td class="ln">241</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">242</td><td class="code">    from collections import defaultdict</td></tr>
+<tr><td class="ln">243</td><td class="code">    from production.models import LineDemand</td></tr>
+<tr><td class="ln">244</td><td class="code"></td></tr>
+<tr><td class="ln">245</td><td class="code">    demands = LineDemand.objects.filter(</td></tr>
+<tr><td class="ln">246</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">247</td><td class="code">        product__is_final_product=True,</td></tr>
+<tr><td class="ln">248</td><td class="code">        plan_date__gte=start_date,</td></tr>
+<tr><td class="ln">249</td><td class="code">        plan_date__lte=end_date,</td></tr>
+<tr><td class="ln">250</td><td class="code">    )</td></tr>
+<tr><td class="ln">251</td><td class="code"></td></tr>
+<tr><td class="ln">252</td><td class="code">    demand_map = defaultdict(Decimal)</td></tr>
+<tr><td class="ln">253</td><td class="code">    for ld in demands:</td></tr>
+<tr><td class="ln">254</td><td class="code">        key = (ld.product_id, ld.plan_date)</td></tr>
+<tr><td class="ln">255</td><td class="code">        demand_map[key] += Decimal(str(ld.firm_qty or 0)) + Decimal(str(ld.forecast_qty or 0))</td></tr>
+<tr><td class="ln">256</td><td class="code"></td></tr>
+<tr><td class="ln">257</td><td class="code">    traced_keys = [(product_id, plan_date) for (product_id, plan_date) in demand_map.keys() if is_traced(line_id, product_id)]</td></tr>
+<tr><td class="ln">258</td><td class="code">    if traced_keys:</td></tr>
+<tr><td class="ln">259</td><td class="code">        traced_qty = sum(Decimal(str(demand_map[key] or 0)) for key in traced_keys)</td></tr>
+<tr><td class="ln">260</td><td class="code">        trace_line_log(</td></tr>
+<tr><td class="ln">261</td><td class="code">            line_id,</td></tr>
+<tr><td class="ln">262</td><td class="code">            start_date,</td></tr>
+<tr><td class="ln">263</td><td class="code">            f&#x27;LineDemand取得: start={start_date}, end={end_date}, traced_keys={len(traced_keys)}, traced_qty={traced_qty}&#x27;</td></tr>
+<tr><td class="ln">264</td><td class="code">        )</td></tr>
+<tr><td class="ln">265</td><td class="code"></td></tr>
+<tr><td class="ln">266</td><td class="code">    return demand_map</td></tr>
+<tr><td class="ln">267</td><td class="code"></td></tr>
+<tr><td class="ln">268</td><td class="code"></td></tr>
+<tr><td class="ln">269</td><td class="code">def _get_direct_parent_bom_lead_time(product_id):</td></tr>
+<tr><td class="ln">270</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">271</td><td class="code">    直親BOMの最大lead_time_daysを返す（在庫・計画在庫用）。</td></tr>
+<tr><td class="ln">272</td><td class="code">    累積LTではなく、直接の親BOMアイテムのLTのみを参照する。</td></tr>
+<tr><td class="ln">273</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">274</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">275</td><td class="code">    if not product_id:</td></tr>
+<tr><td class="ln">276</td><td class="code">        return 0</td></tr>
+<tr><td class="ln">277</td><td class="code">    max_lt = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">278</td><td class="code">        child_product_id=product_id,</td></tr>
+<tr><td class="ln">279</td><td class="code">        bom__is_active=True,</td></tr>
+<tr><td class="ln">280</td><td class="code">    ).values_list(&#x27;lead_time_days&#x27;, flat=True)</td></tr>
+<tr><td class="ln">281</td><td class="code">    return int(max(max_lt, default=0) or 0)</td></tr>
+<tr><td class="ln">282</td><td class="code"></td></tr>
+<tr><td class="ln">283</td><td class="code"></td></tr>
+<tr><td class="ln">284</td><td class="code">def _get_max_parent_bom_lead_time(product_id):</td></tr>
+<tr><td class="ln">285</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">286</td><td class="code">    製品の完成品向け累積LT（自分LTを含む）を取得する。</td></tr>
+<tr><td class="ln">287</td><td class="code"></td></tr>
+<tr><td class="ln">288</td><td class="code">    RoutingStep（output_product=対象製品）から、完成品までの階層累積LTの最大値を使用。</td></tr>
+<tr><td class="ln">289</td><td class="code">    final工程のLTを起点に、hierarchy_path で子階層へ伝播した total LT を採用。</td></tr>
+<tr><td class="ln">290</td><td class="code">    対象製品の候補工程が複数ある場合は最大値。</td></tr>
+<tr><td class="ln">291</td><td class="code"></td></tr>
+<tr><td class="ln">292</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">293</td><td class="code">        product_id: 製品ID</td></tr>
+<tr><td class="ln">294</td><td class="code"></td></tr>
+<tr><td class="ln">295</td><td class="code">    Returns:</td></tr>
+<tr><td class="ln">296</td><td class="code">        int: 最大リードタイム（日）</td></tr>
+<tr><td class="ln">297</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">298</td><td class="code">    from masters.models import RoutingStep</td></tr>
+<tr><td class="ln">299</td><td class="code">    from masters.services.routing_service import build_effective_routing_q</td></tr>
+<tr><td class="ln">300</td><td class="code"></td></tr>
+<tr><td class="ln">301</td><td class="code">    if not product_id:</td></tr>
+<tr><td class="ln">302</td><td class="code">        return 0</td></tr>
+<tr><td class="ln">303</td><td class="code"></td></tr>
+<tr><td class="ln">304</td><td class="code">    step_qs = RoutingStep.objects.filter(</td></tr>
+<tr><td class="ln">305</td><td class="code">        output_product_id=product_id,</td></tr>
+<tr><td class="ln">306</td><td class="code">    ).filter(</td></tr>
+<tr><td class="ln">307</td><td class="code">        build_effective_routing_q(prefix=&#x27;routing__&#x27;)</td></tr>
+<tr><td class="ln">308</td><td class="code">    ).select_related(&#x27;line&#x27;, &#x27;output_product&#x27;)</td></tr>
+<tr><td class="ln">309</td><td class="code"></td></tr>
+<tr><td class="ln">310</td><td class="code">    candidate_steps = list(step_qs)</td></tr>
+<tr><td class="ln">311</td><td class="code">    if not candidate_steps:</td></tr>
+<tr><td class="ln">312</td><td class="code">        return 0</td></tr>
+<tr><td class="ln">313</td><td class="code"></td></tr>
+<tr><td class="ln">314</td><td class="code">    routing_ids = {s.routing_id for s in candidate_steps if s.routing_id}</td></tr>
+<tr><td class="ln">315</td><td class="code">    if not routing_ids:</td></tr>
+<tr><td class="ln">316</td><td class="code">        return 0</td></tr>
+<tr><td class="ln">317</td><td class="code"></td></tr>
+<tr><td class="ln">318</td><td class="code">    steps = list(</td></tr>
+<tr><td class="ln">319</td><td class="code">        RoutingStep.objects.filter(routing_id__in=routing_ids)</td></tr>
+<tr><td class="ln">320</td><td class="code">        .filter(build_effective_routing_q(prefix=&#x27;routing__&#x27;))</td></tr>
+<tr><td class="ln">321</td><td class="code">        .select_related(&#x27;line&#x27;, &#x27;output_product&#x27;)</td></tr>
+<tr><td class="ln">322</td><td class="code">    )</td></tr>
+<tr><td class="ln">323</td><td class="code"></td></tr>
+<tr><td class="ln">324</td><td class="code">    def path_key(path):</td></tr>
+<tr><td class="ln">325</td><td class="code">        try:</td></tr>
+<tr><td class="ln">326</td><td class="code">            return tuple(int(p) for p in str(path).split(&#x27;.&#x27;))</td></tr>
+<tr><td class="ln">327</td><td class="code">        except Exception:</td></tr>
+<tr><td class="ln">328</td><td class="code">            return (str(path),)</td></tr>
+<tr><td class="ln">329</td><td class="code"></td></tr>
+<tr><td class="ln">330</td><td class="code">    lt_by_step = {}</td></tr>
+<tr><td class="ln">331</td><td class="code">    for routing_id in routing_ids:</td></tr>
+<tr><td class="ln">332</td><td class="code">        routing_steps = [s for s in steps if s.routing_id == routing_id]</td></tr>
+<tr><td class="ln">333</td><td class="code">        if not routing_steps:</td></tr>
+<tr><td class="ln">334</td><td class="code">            continue</td></tr>
+<tr><td class="ln">335</td><td class="code"></td></tr>
+<tr><td class="ln">336</td><td class="code">        step_map = {</td></tr>
+<tr><td class="ln">337</td><td class="code">            s.hierarchy_path: s</td></tr>
+<tr><td class="ln">338</td><td class="code">            for s in routing_steps</td></tr>
+<tr><td class="ln">339</td><td class="code">            if s.hierarchy_path and s.hierarchy_path != &#x27;final&#x27;</td></tr>
+<tr><td class="ln">340</td><td class="code">        }</td></tr>
+<tr><td class="ln">341</td><td class="code">        children_map = {}</td></tr>
+<tr><td class="ln">342</td><td class="code">        for path in step_map.keys():</td></tr>
+<tr><td class="ln">343</td><td class="code">            parent_path = path.rsplit(&#x27;.&#x27;, 1)[0] if &#x27;.&#x27; in path else None</td></tr>
+<tr><td class="ln">344</td><td class="code">            children_map.setdefault(parent_path, []).append(path)</td></tr>
+<tr><td class="ln">345</td><td class="code"></td></tr>
+<tr><td class="ln">346</td><td class="code">        final_step = next((s for s in routing_steps if s.hierarchy_path == &#x27;final&#x27;), None)</td></tr>
+<tr><td class="ln">347</td><td class="code">        base_days = 0</td></tr>
+<tr><td class="ln">348</td><td class="code">        if final_step:</td></tr>
+<tr><td class="ln">349</td><td class="code">            base_days = resolve_lead_days_for_step(final_step)</td></tr>
+<tr><td class="ln">350</td><td class="code">            lt_by_step[final_step.id] = {&#x27;total&#x27;: base_days, &#x27;self&#x27;: base_days}</td></tr>
+<tr><td class="ln">351</td><td class="code"></td></tr>
+<tr><td class="ln">352</td><td class="code">        def compute(path, parent_days):</td></tr>
+<tr><td class="ln">353</td><td class="code">            step = step_map.get(path)</td></tr>
+<tr><td class="ln">354</td><td class="code">            if not step:</td></tr>
+<tr><td class="ln">355</td><td class="code">                return</td></tr>
+<tr><td class="ln">356</td><td class="code">            self_days = resolve_lead_days_for_step(step)</td></tr>
+<tr><td class="ln">357</td><td class="code">            total_days = parent_days + self_days</td></tr>
+<tr><td class="ln">358</td><td class="code">            lt_by_step[step.id] = {&#x27;total&#x27;: total_days, &#x27;self&#x27;: self_days}</td></tr>
+<tr><td class="ln">359</td><td class="code">            for child_path in sorted(children_map.get(path, []), key=path_key):</td></tr>
+<tr><td class="ln">360</td><td class="code">                compute(child_path, total_days)</td></tr>
+<tr><td class="ln">361</td><td class="code"></td></tr>
+<tr><td class="ln">362</td><td class="code">        for root_path in sorted(children_map.get(None, []), key=path_key):</td></tr>
+<tr><td class="ln">363</td><td class="code">            compute(root_path, base_days)</td></tr>
+<tr><td class="ln">364</td><td class="code"></td></tr>
+<tr><td class="ln">365</td><td class="code">        # hierarchy_path が無いデータでも最低限 self LT を返せるようにする</td></tr>
+<tr><td class="ln">366</td><td class="code">        for step in routing_steps:</td></tr>
+<tr><td class="ln">367</td><td class="code">            if step.id in lt_by_step:</td></tr>
+<tr><td class="ln">368</td><td class="code">                continue</td></tr>
+<tr><td class="ln">369</td><td class="code">            self_days = resolve_lead_days_for_step(step)</td></tr>
+<tr><td class="ln">370</td><td class="code">            lt_by_step[step.id] = {&#x27;total&#x27;: self_days, &#x27;self&#x27;: self_days}</td></tr>
+<tr><td class="ln">371</td><td class="code"></td></tr>
+<tr><td class="ln">372</td><td class="code">    cumulative_lt = 0</td></tr>
+<tr><td class="ln">373</td><td class="code">    for step in candidate_steps:</td></tr>
+<tr><td class="ln">374</td><td class="code">        val = (lt_by_step.get(step.id) or {}).get(&#x27;total&#x27;)</td></tr>
+<tr><td class="ln">375</td><td class="code">        if val is not None and int(val) &gt; cumulative_lt:</td></tr>
+<tr><td class="ln">376</td><td class="code">            cumulative_lt = int(val)</td></tr>
+<tr><td class="ln">377</td><td class="code"></td></tr>
+<tr><td class="ln">378</td><td class="code">    return cumulative_lt</td></tr>
+<tr><td class="ln">379</td><td class="code"></td></tr>
+<tr><td class="ln">380</td><td class="code"></td></tr>
+<tr><td class="ln">381</td><td class="code">def _get_final_product_delivery_lt(line_id, product_id):</td></tr>
+<tr><td class="ln">382</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">383</td><td class="code">    ライン最終品/最終品のデリバリLT（RoutingStep / Line.lead_time_days）を取得する。</td></tr>
+<tr><td class="ln">384</td><td class="code">    計画在庫初期値のLT調整に使用するデリバリLT。</td></tr>
+<tr><td class="ln">385</td><td class="code">    demand_map（LineDemand由来）のplan_dateは同じLTでシフト済み。</td></tr>
+<tr><td class="ln">386</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">387</td><td class="code">    from masters.models import RoutingStep</td></tr>
+<tr><td class="ln">388</td><td class="code">    from django.db.models import Q</td></tr>
+<tr><td class="ln">389</td><td class="code">    step = (</td></tr>
+<tr><td class="ln">390</td><td class="code">        RoutingStep.objects.filter(</td></tr>
+<tr><td class="ln">391</td><td class="code">            Q(line_id=line_id) | Q(line__isnull=True, process__line_id=line_id)</td></tr>
+<tr><td class="ln">392</td><td class="code">        )</td></tr>
+<tr><td class="ln">393</td><td class="code">        .filter(</td></tr>
+<tr><td class="ln">394</td><td class="code">            Q(output_product_id=product_id)</td></tr>
+<tr><td class="ln">395</td><td class="code">            | Q(output_product_id__isnull=True, routing__product_id=product_id)</td></tr>
+<tr><td class="ln">396</td><td class="code">        )</td></tr>
+<tr><td class="ln">397</td><td class="code">        .select_related(&#x27;line&#x27;, &#x27;process__line&#x27;)</td></tr>
+<tr><td class="ln">398</td><td class="code">        .first()</td></tr>
+<tr><td class="ln">399</td><td class="code">    )</td></tr>
+<tr><td class="ln">400</td><td class="code">    if step:</td></tr>
+<tr><td class="ln">401</td><td class="code">        if step.lead_time_days:</td></tr>
+<tr><td class="ln">402</td><td class="code">            return int(step.lead_time_days)</td></tr>
+<tr><td class="ln">403</td><td class="code">        step_line = step.line or getattr(step.process, &#x27;line&#x27;, None)</td></tr>
+<tr><td class="ln">404</td><td class="code">        if step_line and step_line.lead_time_days:</td></tr>
+<tr><td class="ln">405</td><td class="code">            return int(step_line.lead_time_days)</td></tr>
+<tr><td class="ln">406</td><td class="code">    return 0</td></tr>
+<tr><td class="ln">407</td><td class="code"></td></tr>
+<tr><td class="ln">408</td><td class="code"></td></tr>
+<tr><td class="ln">409</td><td class="code">def _resolve_line_calendar_id(line_id):</td></tr>
+<tr><td class="ln">410</td><td class="code">    &quot;&quot;&quot;ラインに紐づくカレンダーIDを取得する。未設定時は daiso カレンダーを使用。&quot;&quot;&quot;</td></tr>
+<tr><td class="ln">411</td><td class="code">    from masters.models import Calendar, Line</td></tr>
+<tr><td class="ln">412</td><td class="code"></td></tr>
+<tr><td class="ln">413</td><td class="code">    if not line_id:</td></tr>
+<tr><td class="ln">414</td><td class="code">        return None</td></tr>
+<tr><td class="ln">415</td><td class="code">    line_obj = Line.objects.filter(id=line_id).only(&#x27;calendar_id&#x27;).first()</td></tr>
+<tr><td class="ln">416</td><td class="code">    return getattr(line_obj, &#x27;calendar_id&#x27;, None) or Calendar.objects.filter(</td></tr>
+<tr><td class="ln">417</td><td class="code">        calendar_code=&#x27;daiso&#x27;</td></tr>
+<tr><td class="ln">418</td><td class="code">    ).values_list(&#x27;id&#x27;, flat=True).first()</td></tr>
+<tr><td class="ln">419</td><td class="code"></td></tr>
+<tr><td class="ln">420</td><td class="code"></td></tr>
+<tr><td class="ln">421</td><td class="code">def _resolve_calendar_working_day(target_date, calendar_id, workday_cache=None):</td></tr>
+<tr><td class="ln">422</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">423</td><td class="code">    営業日判定を返す。</td></tr>
+<tr><td class="ln">424</td><td class="code"></td></tr>
+<tr><td class="ln">425</td><td class="code">    優先順位:</td></tr>
+<tr><td class="ln">426</td><td class="code">    1. 指定カレンダの CalendarDay</td></tr>
+<tr><td class="ln">427</td><td class="code">    2. daiso カレンダの CalendarDay</td></tr>
+<tr><td class="ln">428</td><td class="code">    3. どちらも無い場合のみ週末判定</td></tr>
+<tr><td class="ln">429</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">430</td><td class="code">    if not calendar_id:</td></tr>
+<tr><td class="ln">431</td><td class="code">        return target_date.weekday() &lt; 5</td></tr>
+<tr><td class="ln">432</td><td class="code"></td></tr>
+<tr><td class="ln">433</td><td class="code">    cache = workday_cache if workday_cache is not None else {}</td></tr>
+<tr><td class="ln">434</td><td class="code">    cache_key = (calendar_id, target_date)</td></tr>
+<tr><td class="ln">435</td><td class="code">    cached = cache.get(cache_key)</td></tr>
+<tr><td class="ln">436</td><td class="code">    if cached is not None:</td></tr>
+<tr><td class="ln">437</td><td class="code">        return cached</td></tr>
+<tr><td class="ln">438</td><td class="code"></td></tr>
+<tr><td class="ln">439</td><td class="code">    from masters.models import Calendar, CalendarDay</td></tr>
+<tr><td class="ln">440</td><td class="code"></td></tr>
+<tr><td class="ln">441</td><td class="code">    cal = CalendarDay.objects.filter(</td></tr>
+<tr><td class="ln">442</td><td class="code">        calendar_id=calendar_id,</td></tr>
+<tr><td class="ln">443</td><td class="code">        target_date=target_date,</td></tr>
+<tr><td class="ln">444</td><td class="code">    ).first()</td></tr>
+<tr><td class="ln">445</td><td class="code">    if cal is not None:</td></tr>
+<tr><td class="ln">446</td><td class="code">        result = cal.is_working_day</td></tr>
+<tr><td class="ln">447</td><td class="code">        cache[cache_key] = result</td></tr>
+<tr><td class="ln">448</td><td class="code">        return result</td></tr>
+<tr><td class="ln">449</td><td class="code"></td></tr>
+<tr><td class="ln">450</td><td class="code">    daiso_calendar_id = Calendar.objects.filter(</td></tr>
+<tr><td class="ln">451</td><td class="code">        calendar_code=&#x27;daiso&#x27;</td></tr>
+<tr><td class="ln">452</td><td class="code">    ).values_list(&#x27;id&#x27;, flat=True).first()</td></tr>
+<tr><td class="ln">453</td><td class="code">    if daiso_calendar_id and daiso_calendar_id != calendar_id:</td></tr>
+<tr><td class="ln">454</td><td class="code">        daiso_cache_key = (daiso_calendar_id, target_date)</td></tr>
+<tr><td class="ln">455</td><td class="code">        cached = cache.get(daiso_cache_key)</td></tr>
+<tr><td class="ln">456</td><td class="code">        if cached is not None:</td></tr>
+<tr><td class="ln">457</td><td class="code">            cache[cache_key] = cached</td></tr>
+<tr><td class="ln">458</td><td class="code">            return cached</td></tr>
+<tr><td class="ln">459</td><td class="code"></td></tr>
+<tr><td class="ln">460</td><td class="code">        daiso_cal = CalendarDay.objects.filter(</td></tr>
+<tr><td class="ln">461</td><td class="code">            calendar_id=daiso_calendar_id,</td></tr>
+<tr><td class="ln">462</td><td class="code">            target_date=target_date,</td></tr>
+<tr><td class="ln">463</td><td class="code">        ).first()</td></tr>
+<tr><td class="ln">464</td><td class="code">        if daiso_cal is not None:</td></tr>
+<tr><td class="ln">465</td><td class="code">            result = daiso_cal.is_working_day</td></tr>
+<tr><td class="ln">466</td><td class="code">            cache[daiso_cache_key] = result</td></tr>
+<tr><td class="ln">467</td><td class="code">            cache[cache_key] = result</td></tr>
+<tr><td class="ln">468</td><td class="code">            return result</td></tr>
+<tr><td class="ln">469</td><td class="code"></td></tr>
+<tr><td class="ln">470</td><td class="code">    result = target_date.weekday() &lt; 5</td></tr>
+<tr><td class="ln">471</td><td class="code">    cache[cache_key] = result</td></tr>
+<tr><td class="ln">472</td><td class="code">    return result</td></tr>
+<tr><td class="ln">473</td><td class="code"></td></tr>
+<tr><td class="ln">474</td><td class="code"></td></tr>
+<tr><td class="ln">475</td><td class="code">def _build_adjustment_maps(line_id, start_date, end_date, product_ids=None):</td></tr>
+<tr><td class="ln">476</td><td class="code">    &quot;&quot;&quot;調整を一括取得して辞書化（計算ループ中はDB参照しない）&quot;&quot;&quot;</td></tr>
+<tr><td class="ln">477</td><td class="code">    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})</td></tr>
+<tr><td class="ln">478</td><td class="code">    qs = LineBacklogAdjustment.objects.filter(</td></tr>
+<tr><td class="ln">479</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">480</td><td class="code">        plan_date__range=[start_date, end_date],</td></tr>
+<tr><td class="ln">481</td><td class="code">    )</td></tr>
+<tr><td class="ln">482</td><td class="code">    if target_product_ids:</td></tr>
+<tr><td class="ln">483</td><td class="code">        qs = qs.filter(product_id__in=target_product_ids)</td></tr>
+<tr><td class="ln">484</td><td class="code">    rows = qs.values(&#x27;adjust_type&#x27;, &#x27;product_id&#x27;, &#x27;process_id&#x27;, &#x27;plan_date&#x27;, &#x27;adjust_qty&#x27;)</td></tr>
+<tr><td class="ln">485</td><td class="code"></td></tr>
+<tr><td class="ln">486</td><td class="code">    maps = {</td></tr>
+<tr><td class="ln">487</td><td class="code">        &#x27;STOCK&#x27;: {},</td></tr>
+<tr><td class="ln">488</td><td class="code">        &#x27;PLANNED_STOCK&#x27;: {},</td></tr>
+<tr><td class="ln">489</td><td class="code">        &#x27;PROGRESS&#x27;: {},</td></tr>
+<tr><td class="ln">490</td><td class="code">        &#x27;PLANNED_PROGRESS&#x27;: {},</td></tr>
+<tr><td class="ln">491</td><td class="code">    }</td></tr>
+<tr><td class="ln">492</td><td class="code">    for row in rows:</td></tr>
+<tr><td class="ln">493</td><td class="code">        ad_type = row[&#x27;adjust_type&#x27;]</td></tr>
+<tr><td class="ln">494</td><td class="code">        if ad_type not in maps:</td></tr>
+<tr><td class="ln">495</td><td class="code">            continue</td></tr>
+<tr><td class="ln">496</td><td class="code">        key = (row[&#x27;product_id&#x27;], row[&#x27;plan_date&#x27;], row[&#x27;process_id&#x27;])</td></tr>
+<tr><td class="ln">497</td><td class="code">        maps[ad_type][key] = maps[ad_type].get(key, 0) + int(row[&#x27;adjust_qty&#x27;] or 0)</td></tr>
+<tr><td class="ln">498</td><td class="code">    return maps</td></tr>
+<tr><td class="ln">499</td><td class="code"></td></tr>
+<tr><td class="ln">500</td><td class="code"></td></tr>
+<tr><td class="ln">501</td><td class="code">def _resolve_day_adjustment(rows, ad_map):</td></tr>
+<tr><td class="ln">502</td><td class="code">    &quot;&quot;&quot;行（日付×製品）に対する調整値を解決（工程一致を優先）&quot;&quot;&quot;</td></tr>
+<tr><td class="ln">503</td><td class="code">    if not rows or not ad_map:</td></tr>
+<tr><td class="ln">504</td><td class="code">        return 0</td></tr>
+<tr><td class="ln">505</td><td class="code">    product_id = rows[0].product_id</td></tr>
+<tr><td class="ln">506</td><td class="code">    plan_date = rows[0].plan_date</td></tr>
+<tr><td class="ln">507</td><td class="code">    process_ids = {r.process_id for r in rows if r.process_id}</td></tr>
+<tr><td class="ln">508</td><td class="code">    total = ad_map.get((product_id, plan_date, None), 0)</td></tr>
+<tr><td class="ln">509</td><td class="code">    for pid in process_ids:</td></tr>
+<tr><td class="ln">510</td><td class="code">        total += ad_map.get((product_id, plan_date, pid), 0)</td></tr>
+<tr><td class="ln">511</td><td class="code">    return int(total)</td></tr>
+<tr><td class="ln">512</td><td class="code"></td></tr>
+<tr><td class="ln">513</td><td class="code"></td></tr>
+<tr><td class="ln">514</td><td class="code">def _ensure_daily_base_backlogs(line_id, product_id, start_date, end_date, backlogs=None):</td></tr>
+<tr><td class="ln">515</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">516</td><td class="code">    指定期間の各日付に sequence_no=0 の基礎行を補完する。</td></tr>
+<tr><td class="ln">517</td><td class="code"></td></tr>
+<tr><td class="ln">518</td><td class="code">    - 日付自体に行が無い日: ダミー seq=0 行を作成</td></tr>
+<tr><td class="ln">519</td><td class="code">    - 日付の行はあるが seq=0 が無い日: seq=0 行を作成</td></tr>
+<tr><td class="ln">520</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">521</td><td class="code">    if backlogs is None:</td></tr>
+<tr><td class="ln">522</td><td class="code">        backlogs = list(LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">523</td><td class="code">            line_id=line_id,</td></tr>
+<tr><td class="ln">524</td><td class="code">            product_id=product_id,</td></tr>
+<tr><td class="ln">525</td><td class="code">            plan_date__range=[start_date, end_date],</td></tr>
+<tr><td class="ln">526</td><td class="code">        ).order_by(&#x27;plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;))</td></tr>
+<tr><td class="ln">527</td><td class="code"></td></tr>
+<tr><td class="ln">528</td><td class="code">    if not backlogs:</td></tr>
+<tr><td class="ln">529</td><td class="code">        return backlogs, False</td></tr>
+<tr><td class="ln">530</td><td class="code"></td></tr>
+<tr><td class="ln">531</td><td class="code">    base_process_id = next(</td></tr>
+<tr><td class="ln">532</td><td class="code">        (r.process_id for r in backlogs if (r.sequence_no or 0) == 0 and r.process_id),</td></tr>
+<tr><td class="ln">533</td><td class="code">        None,</td></tr>
+<tr><td class="ln">534</td><td class="code">    )</td></tr>
+<tr><td class="ln">535</td><td class="code">    sample_process_id = base_process_id or next((r.process_id for r in backlogs if r.process_id), backlogs[0].process_id)</td></tr>
+<tr><td class="ln">536</td><td class="code">    by_date = {}</td></tr>
+<tr><td class="ln">537</td><td class="code">    for backlog in backlogs:</td></tr>
+<tr><td class="ln">538</td><td class="code">        by_date.setdefault(backlog.plan_date, []).append(backlog)</td></tr>
+<tr><td class="ln">539</td><td class="code"></td></tr>
+<tr><td class="ln">540</td><td class="code">    to_create = []</td></tr>
+<tr><td class="ln">541</td><td class="code">    current = start_date</td></tr>
+<tr><td class="ln">542</td><td class="code">    last_sample = None</td></tr>
+<tr><td class="ln">543</td><td class="code">    while current &lt;= end_date:</td></tr>
+<tr><td class="ln">544</td><td class="code">        rows = by_date.get(current, [])</td></tr>
+<tr><td class="ln">545</td><td class="code">        if rows:</td></tr>
+<tr><td class="ln">546</td><td class="code">            last_sample = rows[0]</td></tr>
+<tr><td class="ln">547</td><td class="code">        has_base = any((r.sequence_no or 0) == 0 for r in rows)</td></tr>
+<tr><td class="ln">548</td><td class="code">        if not has_base:</td></tr>
+<tr><td class="ln">549</td><td class="code">            sample = rows[0] if rows else (last_sample or backlogs[0])</td></tr>
+<tr><td class="ln">550</td><td class="code">            to_create.append(LineBacklog(</td></tr>
+<tr><td class="ln">551</td><td class="code">                plan_date=current,</td></tr>
+<tr><td class="ln">552</td><td class="code">                process_id=sample.process_id or sample_process_id,</td></tr>
+<tr><td class="ln">553</td><td class="code">                product_id=sample.product_id,</td></tr>
+<tr><td class="ln">554</td><td class="code">                line_id=sample.line_id,</td></tr>
+<tr><td class="ln">555</td><td class="code">                sequence_no=0,</td></tr>
+<tr><td class="ln">556</td><td class="code">                order_qty=0,</td></tr>
+<tr><td class="ln">557</td><td class="code">                demand_qty_plan=0,</td></tr>
+<tr><td class="ln">558</td><td class="code">                plan_qty=0,</td></tr>
+<tr><td class="ln">559</td><td class="code">                actual_qty=0,</td></tr>
+<tr><td class="ln">560</td><td class="code">                stock_qty=0,</td></tr>
+<tr><td class="ln">561</td><td class="code">                planned_stock_qty=0,</td></tr>
+<tr><td class="ln">562</td><td class="code">                adjust_qty=0,</td></tr>
+<tr><td class="ln">563</td><td class="code">                scrap_adjust_qty=0,</td></tr>
+<tr><td class="ln">564</td><td class="code">                scrap_qty=0,</td></tr>
+<tr><td class="ln">565</td><td class="code">                actual_shipment_qty=0,</td></tr>
+<tr><td class="ln">566</td><td class="code">            ))</td></tr>
+<tr><td class="ln">567</td><td class="code">        current += timedelta(days=1)</td></tr>
+<tr><td class="ln">568</td><td class="code"></td></tr>
+<tr><td class="ln">569</td><td class="code">    created_any = bool(to_create)</td></tr>
+<tr><td class="ln">570</td><td class="code">    if to_create:</td></tr>
+<tr><td class="ln">571</td><td class="code">        LineBacklog.objects.bulk_create(to_create)</td></tr>
+<tr><td class="ln">572</td><td class="code">        backlogs = list(LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">573</td><td class="code">            line_id=line_id,</td></tr>
+<tr><td class="ln">574</td><td class="code">            product_id=product_id,</td></tr>
+<tr><td class="ln">575</td><td class="code">            plan_date__range=[start_date, end_date],</td></tr>
+<tr><td class="ln">576</td><td class="code">        ).select_related(&#x27;product&#x27;).order_by(&#x27;plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;))</td></tr>
+<tr><td class="ln">577</td><td class="code"></td></tr>
+<tr><td class="ln">578</td><td class="code">    return backlogs, created_any</td></tr>
+<tr><td class="ln">579</td><td class="code"></td></tr>
+<tr><td class="ln">580</td><td class="code"></td></tr>
+<tr><td class="ln">581</td><td class="code">_ROUTING_PARENT_STEP_CACHE = {}</td></tr>
+<tr><td class="ln">582</td><td class="code"></td></tr>
+<tr><td class="ln">583</td><td class="code"></td></tr>
+<tr><td class="ln">584</td><td class="code">def _filter_parent_bom_items_by_routing(backlog, parent_bom_items):</td></tr>
+<tr><td class="ln">585</td><td class="code">    from masters.models import RoutingStep</td></tr>
+<tr><td class="ln">586</td><td class="code"></td></tr>
+<tr><td class="ln">587</td><td class="code">    items = list(parent_bom_items)</td></tr>
+<tr><td class="ln">588</td><td class="code">    if not items:</td></tr>
+<tr><td class="ln">589</td><td class="code">        return items</td></tr>
+<tr><td class="ln">590</td><td class="code"></td></tr>
+<tr><td class="ln">591</td><td class="code">    current_steps = list(</td></tr>
+<tr><td class="ln">592</td><td class="code">        RoutingStep.objects.filter(</td></tr>
+<tr><td class="ln">593</td><td class="code">            line_id=backlog.line_id,</td></tr>
+<tr><td class="ln">594</td><td class="code">            output_product_id=backlog.product_id,</td></tr>
+<tr><td class="ln">595</td><td class="code">            process_id=backlog.process_id,</td></tr>
+<tr><td class="ln">596</td><td class="code">        ).select_related(&#x27;routing&#x27;)</td></tr>
+<tr><td class="ln">597</td><td class="code">    )</td></tr>
+<tr><td class="ln">598</td><td class="code">    if not current_steps:</td></tr>
+<tr><td class="ln">599</td><td class="code">        return items</td></tr>
+<tr><td class="ln">600</td><td class="code"></td></tr>
+<tr><td class="ln">601</td><td class="code">    filtered = []</td></tr>
+<tr><td class="ln">602</td><td class="code">    routing_product_ids = {</td></tr>
+<tr><td class="ln">603</td><td class="code">        step.routing.product_id</td></tr>
+<tr><td class="ln">604</td><td class="code">        for step in current_steps</td></tr>
+<tr><td class="ln">605</td><td class="code">        if getattr(step, &#x27;routing_id&#x27;, None) and getattr(step.routing, &#x27;product_id&#x27;, None)</td></tr>
+<tr><td class="ln">606</td><td class="code">    }</td></tr>
+<tr><td class="ln">607</td><td class="code">    if not routing_product_ids:</td></tr>
+<tr><td class="ln">608</td><td class="code">        return items</td></tr>
+<tr><td class="ln">609</td><td class="code"></td></tr>
+<tr><td class="ln">610</td><td class="code">    child_step_nos = [int(step.step_no or 0) for step in current_steps]</td></tr>
+<tr><td class="ln">611</td><td class="code">    parent_ids = {</td></tr>
+<tr><td class="ln">612</td><td class="code">        getattr(getattr(item, &#x27;bom&#x27;, None), &#x27;parent_product_id&#x27;, None)</td></tr>
+<tr><td class="ln">613</td><td class="code">        for item in items</td></tr>
+<tr><td class="ln">614</td><td class="code">    }</td></tr>
+<tr><td class="ln">615</td><td class="code">    parent_ids.discard(None)</td></tr>
+<tr><td class="ln">616</td><td class="code">    if not parent_ids:</td></tr>
+<tr><td class="ln">617</td><td class="code">        return items</td></tr>
+<tr><td class="ln">618</td><td class="code"></td></tr>
+<tr><td class="ln">619</td><td class="code">    cache_key = (tuple(sorted(routing_product_ids)), tuple(sorted(parent_ids)))</td></tr>
+<tr><td class="ln">620</td><td class="code">    parent_steps_map = _ROUTING_PARENT_STEP_CACHE.get(cache_key)</td></tr>
+<tr><td class="ln">621</td><td class="code">    if parent_steps_map is None:</td></tr>
+<tr><td class="ln">622</td><td class="code">        parent_steps_map = {}</td></tr>
+<tr><td class="ln">623</td><td class="code">        qs = (</td></tr>
+<tr><td class="ln">624</td><td class="code">            RoutingStep.objects.filter(</td></tr>
+<tr><td class="ln">625</td><td class="code">                routing__product_id__in=routing_product_ids,</td></tr>
+<tr><td class="ln">626</td><td class="code">                output_product_id__in=parent_ids,</td></tr>
+<tr><td class="ln">627</td><td class="code">            )</td></tr>
+<tr><td class="ln">628</td><td class="code">            .select_related(&#x27;routing&#x27;)</td></tr>
+<tr><td class="ln">629</td><td class="code">            .order_by(&#x27;output_product_id&#x27;, &#x27;step_no&#x27;, &#x27;id&#x27;)</td></tr>
+<tr><td class="ln">630</td><td class="code">        )</td></tr>
+<tr><td class="ln">631</td><td class="code">        for step in qs:</td></tr>
+<tr><td class="ln">632</td><td class="code">            key = (step.routing.product_id, step.output_product_id)</td></tr>
+<tr><td class="ln">633</td><td class="code">            parent_steps_map.setdefault(key, []).append(step)</td></tr>
+<tr><td class="ln">634</td><td class="code">        _ROUTING_PARENT_STEP_CACHE[cache_key] = parent_steps_map</td></tr>
+<tr><td class="ln">635</td><td class="code"></td></tr>
+<tr><td class="ln">636</td><td class="code">    for item in items:</td></tr>
+<tr><td class="ln">637</td><td class="code">        parent_product_id = getattr(getattr(item, &#x27;bom&#x27;, None), &#x27;parent_product_id&#x27;, None)</td></tr>
+<tr><td class="ln">638</td><td class="code">        if not parent_product_id:</td></tr>
+<tr><td class="ln">639</td><td class="code">            continue</td></tr>
+<tr><td class="ln">640</td><td class="code">        matched = False</td></tr>
+<tr><td class="ln">641</td><td class="code">        for current_step in current_steps:</td></tr>
+<tr><td class="ln">642</td><td class="code">            routing_product_id = getattr(getattr(current_step, &#x27;routing&#x27;, None), &#x27;product_id&#x27;, None)</td></tr>
+<tr><td class="ln">643</td><td class="code">            if not routing_product_id:</td></tr>
+<tr><td class="ln">644</td><td class="code">                continue</td></tr>
+<tr><td class="ln">645</td><td class="code">            parent_steps = parent_steps_map.get((routing_product_id, parent_product_id), [])</td></tr>
+<tr><td class="ln">646</td><td class="code">            if not parent_steps:</td></tr>
+<tr><td class="ln">647</td><td class="code">                continue</td></tr>
+<tr><td class="ln">648</td><td class="code">            current_step_no = int(current_step.step_no or 0)</td></tr>
+<tr><td class="ln">649</td><td class="code">            if any(int(parent_step.step_no or 0) &gt; current_step_no for parent_step in parent_steps):</td></tr>
+<tr><td class="ln">650</td><td class="code">                matched = True</td></tr>
+<tr><td class="ln">651</td><td class="code">                break</td></tr>
+<tr><td class="ln">652</td><td class="code">        if matched:</td></tr>
+<tr><td class="ln">653</td><td class="code">            filtered.append(item)</td></tr>
+<tr><td class="ln">654</td><td class="code"></td></tr>
+<tr><td class="ln">655</td><td class="code">    return filtered or items</td></tr>
+<tr><td class="ln">656</td><td class="code"></td></tr>
+<tr><td class="ln">657</td><td class="code"></td></tr>
+<tr><td class="ln">658</td><td class="code">def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):</td></tr>
+<tr><td class="ln">659</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">660</td><td class="code"></td></tr>
+<tr><td class="ln">661</td><td class="code">    # 連産品（is_coproduct=True）のBOMは除外</td></tr>
+<tr><td class="ln">662</td><td class="code">    # 連産品の実績は通常の親製品とは別扱いのため、出庫計算に含めない</td></tr>
+<tr><td class="ln">663</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">664</td><td class="code">        child_product=backlog.product,</td></tr>
+<tr><td class="ln">665</td><td class="code">        bom__is_active=True,</td></tr>
+<tr><td class="ln">666</td><td class="code">        bom__is_coproduct=False</td></tr>
+<tr><td class="ln">667</td><td class="code">    ).select_related(&#x27;bom__parent_product&#x27;)</td></tr>
+<tr><td class="ln">668</td><td class="code"></td></tr>
+<tr><td class="ln">669</td><td class="code">    if not parent_bom_items.exists():</td></tr>
+<tr><td class="ln">670</td><td class="code">        return Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">671</td><td class="code"></td></tr>
+<tr><td class="ln">672</td><td class="code">    total_shipment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">673</td><td class="code">    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):</td></tr>
+<tr><td class="ln">674</td><td class="code">        parent_product = bom_item.bom.parent_product</td></tr>
+<tr><td class="ln">675</td><td class="code">        if not parent_product:</td></tr>
+<tr><td class="ln">676</td><td class="code">            continue</td></tr>
+<tr><td class="ln">677</td><td class="code">        qty_per = bom_item.quantity or Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">678</td><td class="code">        if qty_per == 0:</td></tr>
+<tr><td class="ln">679</td><td class="code">            continue</td></tr>
+<tr><td class="ln">680</td><td class="code">        lead_days = bom_item.lead_time_days or 0</td></tr>
+<tr><td class="ln">681</td><td class="code">        parent_date = backlog.plan_date</td></tr>
+<tr><td class="ln">682</td><td class="code">        if shift_fn:</td></tr>
+<tr><td class="ln">683</td><td class="code">            parent_date = shift_fn(backlog.plan_date, lead_days)</td></tr>
+<tr><td class="ln">684</td><td class="code">        downstream_backlogs = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">685</td><td class="code">            product=parent_product,</td></tr>
+<tr><td class="ln">686</td><td class="code">            plan_date=parent_date,</td></tr>
+<tr><td class="ln">687</td><td class="code">        )</td></tr>
+<tr><td class="ln">688</td><td class="code">        for downstream in downstream_backlogs:</td></tr>
+<tr><td class="ln">689</td><td class="code">            use_qty = pick_qty(downstream)</td></tr>
+<tr><td class="ln">690</td><td class="code">            if use_qty:</td></tr>
+<tr><td class="ln">691</td><td class="code">                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))</td></tr>
+<tr><td class="ln">692</td><td class="code"></td></tr>
+<tr><td class="ln">693</td><td class="code">    return total_shipment</td></tr>
+<tr><td class="ln">694</td><td class="code"></td></tr>
+<tr><td class="ln">695</td><td class="code"></td></tr>
+<tr><td class="ln">696</td><td class="code">def _get_shipment_scrap_qty(product_id, line_id, process_id, plan_date):</td></tr>
+<tr><td class="ln">697</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">698</td><td class="code">    出庫計算用の仕損数量を取得（全ての仕損）</td></tr>
+<tr><td class="ln">699</td><td class="code"></td></tr>
+<tr><td class="ln">700</td><td class="code">    仕損が発生した場合、子部品も消費されているため、出庫として計上する。</td></tr>
+<tr><td class="ln">701</td><td class="code">    is_production_recorded に関係なく全ての仕損を含める。</td></tr>
+<tr><td class="ln">702</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">703</td><td class="code">    from django.db.models import Sum</td></tr>
+<tr><td class="ln">704</td><td class="code">    result = ScrapRecord.objects.filter(</td></tr>
+<tr><td class="ln">705</td><td class="code">        product_id=product_id,</td></tr>
+<tr><td class="ln">706</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">707</td><td class="code">        process_id=process_id,</td></tr>
+<tr><td class="ln">708</td><td class="code">        plan_date=plan_date,</td></tr>
+<tr><td class="ln">709</td><td class="code">        disposition_status__in=[&#x27;PENDING&#x27;, &#x27;PARTIAL&#x27;, &#x27;REJECTED&#x27;, &#x27;APPROVED&#x27;],</td></tr>
+<tr><td class="ln">710</td><td class="code">        event_type__in=[&#x27;SCRAP&#x27;, &#x27;RETURN&#x27;],</td></tr>
+<tr><td class="ln">711</td><td class="code">    ).aggregate(total=Sum(&#x27;qty&#x27;))</td></tr>
+<tr><td class="ln">712</td><td class="code">    return result[&#x27;total&#x27;] or Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">713</td><td class="code"></td></tr>
+<tr><td class="ln">714</td><td class="code"></td></tr>
+<tr><td class="ln">715</td><td class="code">FLOOR_SHIPPING_DELIVERY_LABEL = &#x27;フロア配送&#x27;</td></tr>
+<tr><td class="ln">716</td><td class="code">FLOOR_SHIPPING_PM_THRESHOLD = 50</td></tr>
+<tr><td class="ln">717</td><td class="code"></td></tr>
+<tr><td class="ln">718</td><td class="code"></td></tr>
+<tr><td class="ln">719</td><td class="code">def _is_floor_shipping_delivery_line(line_obj):</td></tr>
+<tr><td class="ln">720</td><td class="code">    if not line_obj:</td></tr>
+<tr><td class="ln">721</td><td class="code">        return False</td></tr>
+<tr><td class="ln">722</td><td class="code">    line_code = str(getattr(line_obj, &#x27;line_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip()</td></tr>
+<tr><td class="ln">723</td><td class="code">    line_name = str(getattr(line_obj, &#x27;line_name&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip()</td></tr>
+<tr><td class="ln">724</td><td class="code">    return FLOOR_SHIPPING_DELIVERY_LABEL in f&#x27;{line_code} {line_name}&#x27;</td></tr>
+<tr><td class="ln">725</td><td class="code"></td></tr>
+<tr><td class="ln">726</td><td class="code"></td></tr>
+<tr><td class="ln">727</td><td class="code">def _check_floor_shipping_parent(parent_product_id, cache):</td></tr>
+<tr><td class="ln">728</td><td class="code">    if parent_product_id in cache:</td></tr>
+<tr><td class="ln">729</td><td class="code">        return cache[parent_product_id]</td></tr>
+<tr><td class="ln">730</td><td class="code">    from masters.models import RoutingStep</td></tr>
+<tr><td class="ln">731</td><td class="code">    step = RoutingStep.objects.filter(</td></tr>
+<tr><td class="ln">732</td><td class="code">        output_product_id=parent_product_id</td></tr>
+<tr><td class="ln">733</td><td class="code">    ).select_related(&#x27;line&#x27;).first()</td></tr>
+<tr><td class="ln">734</td><td class="code">    result = bool(step and step.line and _is_floor_shipping_delivery_line(step.line))</td></tr>
+<tr><td class="ln">735</td><td class="code">    cache[parent_product_id] = result</td></tr>
+<tr><td class="ln">736</td><td class="code">    return result</td></tr>
+<tr><td class="ln">737</td><td class="code"></td></tr>
+<tr><td class="ln">738</td><td class="code"></td></tr>
+<tr><td class="ln">739</td><td class="code">def _floor_shipping_plan_shipment(backlog, shift_fn, parent_product, qty_per):</td></tr>
+<tr><td class="ln">740</td><td class="code">    &quot;&quot;&quot;フロア配送ラインの出庫をsequence_noベースのLTで計算（pickup側と同一ロジック）</td></tr>
+<tr><td class="ln">741</td><td class="code"></td></tr>
+<tr><td class="ln">742</td><td class="code">    pickup (views.py) の便判定:</td></tr>
+<tr><td class="ln">743</td><td class="code">      sorted by sequence_no → lot_index で判定</td></tr>
+<tr><td class="ln">744</td><td class="code">      - sequence_no &gt; 50: 強制2便 (LT=1)</td></tr>
+<tr><td class="ln">745</td><td class="code">      - lot_index == 0 かつ sequence_no ≤ 50: 1便 (LT=2)</td></tr>
+<tr><td class="ln">746</td><td class="code">      - lot_index &gt; 0 かつ sequence_no ≤ 50: 2便 (LT=1)</td></tr>
+<tr><td class="ln">747</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">748</td><td class="code">    total = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">749</td><td class="code">    date_lt1 = shift_fn(backlog.plan_date, 1) if shift_fn else backlog.plan_date</td></tr>
+<tr><td class="ln">750</td><td class="code">    date_lt2 = shift_fn(backlog.plan_date, 2) if shift_fn else backlog.plan_date</td></tr>
+<tr><td class="ln">751</td><td class="code"></td></tr>
+<tr><td class="ln">752</td><td class="code">    checked_dates = set()</td></tr>
+<tr><td class="ln">753</td><td class="code">    for parent_date in [date_lt2, date_lt1]:</td></tr>
+<tr><td class="ln">754</td><td class="code">        if parent_date in checked_dates:</td></tr>
+<tr><td class="ln">755</td><td class="code">            continue</td></tr>
+<tr><td class="ln">756</td><td class="code">        checked_dates.add(parent_date)</td></tr>
+<tr><td class="ln">757</td><td class="code"></td></tr>
+<tr><td class="ln">758</td><td class="code">        plan_rows = list(LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">759</td><td class="code">            product=parent_product,</td></tr>
+<tr><td class="ln">760</td><td class="code">            plan_date=parent_date,</td></tr>
+<tr><td class="ln">761</td><td class="code">            sequence_no__gt=0,</td></tr>
+<tr><td class="ln">762</td><td class="code">        ).values_list(&#x27;sequence_no&#x27;, &#x27;plan_qty&#x27;))</td></tr>
+<tr><td class="ln">763</td><td class="code">        if not plan_rows:</td></tr>
+<tr><td class="ln">764</td><td class="code">            continue</td></tr>
+<tr><td class="ln">765</td><td class="code"></td></tr>
+<tr><td class="ln">766</td><td class="code">        def _sort_key(item):</td></tr>
+<tr><td class="ln">767</td><td class="code">            seq = int(item[0] or 0)</td></tr>
+<tr><td class="ln">768</td><td class="code">            return seq if seq &gt; 0 else 10 ** 9</td></tr>
+<tr><td class="ln">769</td><td class="code">        plan_rows.sort(key=_sort_key)</td></tr>
+<tr><td class="ln">770</td><td class="code"></td></tr>
+<tr><td class="ln">771</td><td class="code">        for lot_index, (seq_no, plan_qty) in enumerate(plan_rows):</td></tr>
+<tr><td class="ln">772</td><td class="code">            seq = int(seq_no or 0)</td></tr>
+<tr><td class="ln">773</td><td class="code">            force_pm = seq &gt; FLOOR_SHIPPING_PM_THRESHOLD</td></tr>
+<tr><td class="ln">774</td><td class="code">            effective_lt = 1 if force_pm else (2 if lot_index == 0 else 1)</td></tr>
+<tr><td class="ln">775</td><td class="code">            expected_parent = shift_fn(backlog.plan_date, effective_lt) if shift_fn else backlog.plan_date</td></tr>
+<tr><td class="ln">776</td><td class="code">            if expected_parent != parent_date:</td></tr>
+<tr><td class="ln">777</td><td class="code">                continue</td></tr>
+<tr><td class="ln">778</td><td class="code">            plan = int(plan_qty or 0)</td></tr>
+<tr><td class="ln">779</td><td class="code">            if plan:</td></tr>
+<tr><td class="ln">780</td><td class="code">                total += Decimal(str(plan)) * qty_per</td></tr>
+<tr><td class="ln">781</td><td class="code"></td></tr>
+<tr><td class="ln">782</td><td class="code">    return total</td></tr>
+<tr><td class="ln">783</td><td class="code"></td></tr>
+<tr><td class="ln">784</td><td class="code"></td></tr>
+<tr><td class="ln">785</td><td class="code">def _calculate_parent_actual_shipment(backlog, shift_fn=None):</td></tr>
+<tr><td class="ln">786</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">787</td><td class="code">    実在庫・計画在庫用の実績出庫計算（後工程の実績 + 仕損を使用）</td></tr>
+<tr><td class="ln">788</td><td class="code"></td></tr>
+<tr><td class="ln">789</td><td class="code">    親製品の仕損も出庫として計上する。</td></tr>
+<tr><td class="ln">790</td><td class="code">    仕損が発生した場合、子部品も消費されているため、全ての仕損を出庫に含める。</td></tr>
+<tr><td class="ln">791</td><td class="code"></td></tr>
+<tr><td class="ln">792</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">793</td><td class="code">        backlog: LineBacklogインスタンス</td></tr>
+<tr><td class="ln">794</td><td class="code">        shift_fn: LTシフト関数（営業日ベースで日付をシフト）</td></tr>
+<tr><td class="ln">795</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">796</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">797</td><td class="code"></td></tr>
+<tr><td class="ln">798</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">799</td><td class="code">        child_product=backlog.product,</td></tr>
+<tr><td class="ln">800</td><td class="code">        bom__is_active=True,</td></tr>
+<tr><td class="ln">801</td><td class="code">        bom__is_coproduct=False</td></tr>
+<tr><td class="ln">802</td><td class="code">    ).select_related(&#x27;bom__parent_product&#x27;)</td></tr>
+<tr><td class="ln">803</td><td class="code"></td></tr>
+<tr><td class="ln">804</td><td class="code">    if not parent_bom_items.exists():</td></tr>
+<tr><td class="ln">805</td><td class="code">        return Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">806</td><td class="code"></td></tr>
+<tr><td class="ln">807</td><td class="code">    from django.db.models import Sum</td></tr>
+<tr><td class="ln">808</td><td class="code"></td></tr>
+<tr><td class="ln">809</td><td class="code">    total_shipment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">810</td><td class="code">    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):</td></tr>
+<tr><td class="ln">811</td><td class="code">        parent_product = bom_item.bom.parent_product</td></tr>
+<tr><td class="ln">812</td><td class="code">        if not parent_product:</td></tr>
+<tr><td class="ln">813</td><td class="code">            continue</td></tr>
+<tr><td class="ln">814</td><td class="code">        qty_per = bom_item.quantity or Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">815</td><td class="code">        if qty_per == 0:</td></tr>
+<tr><td class="ln">816</td><td class="code">            continue</td></tr>
+<tr><td class="ln">817</td><td class="code">        lead_days = bom_item.lead_time_days or 0</td></tr>
+<tr><td class="ln">818</td><td class="code">        parent_date = backlog.plan_date</td></tr>
+<tr><td class="ln">819</td><td class="code">        if shift_fn:</td></tr>
+<tr><td class="ln">820</td><td class="code">            parent_date = shift_fn(backlog.plan_date, lead_days)</td></tr>
+<tr><td class="ln">821</td><td class="code">        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ</td></tr>
+<tr><td class="ln">822</td><td class="code">        downstream_groups = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">823</td><td class="code">            product=parent_product,</td></tr>
+<tr><td class="ln">824</td><td class="code">            plan_date=parent_date,</td></tr>
+<tr><td class="ln">825</td><td class="code">        ).values(&#x27;product_id&#x27;, &#x27;line_id&#x27;, &#x27;process_id&#x27;, &#x27;plan_date&#x27;).annotate(</td></tr>
+<tr><td class="ln">826</td><td class="code">            actual_total=Sum(&#x27;actual_qty&#x27;),</td></tr>
+<tr><td class="ln">827</td><td class="code">        )</td></tr>
+<tr><td class="ln">828</td><td class="code">        for downstream in downstream_groups:</td></tr>
+<tr><td class="ln">829</td><td class="code">            actual = int(downstream.get(&#x27;actual_total&#x27;) or 0)</td></tr>
+<tr><td class="ln">830</td><td class="code">            # 全ての仕損を出庫に含める（line+process単位で1回のみ）</td></tr>
+<tr><td class="ln">831</td><td class="code">            scrap = _get_shipment_scrap_qty(</td></tr>
+<tr><td class="ln">832</td><td class="code">                downstream[&#x27;product_id&#x27;],</td></tr>
+<tr><td class="ln">833</td><td class="code">                downstream[&#x27;line_id&#x27;],</td></tr>
+<tr><td class="ln">834</td><td class="code">                downstream[&#x27;process_id&#x27;],</td></tr>
+<tr><td class="ln">835</td><td class="code">                downstream[&#x27;plan_date&#x27;]</td></tr>
+<tr><td class="ln">836</td><td class="code">            )</td></tr>
+<tr><td class="ln">837</td><td class="code">            use_qty = Decimal(str(actual)) + scrap</td></tr>
+<tr><td class="ln">838</td><td class="code">            if use_qty:</td></tr>
+<tr><td class="ln">839</td><td class="code">                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))</td></tr>
+<tr><td class="ln">840</td><td class="code"></td></tr>
+<tr><td class="ln">841</td><td class="code">    return total_shipment</td></tr>
+<tr><td class="ln">842</td><td class="code"></td></tr>
+<tr><td class="ln">843</td><td class="code"></td></tr>
+<tr><td class="ln">844</td><td class="code">def _compute_planned_stock_lt_adjustment(</td></tr>
+<tr><td class="ln">845</td><td class="code">    product_id,</td></tr>
+<tr><td class="ln">846</td><td class="code">    initial_date,</td></tr>
+<tr><td class="ln">847</td><td class="code">    max_lt,</td></tr>
+<tr><td class="ln">848</td><td class="code">    shift_fn,</td></tr>
+<tr><td class="ln">849</td><td class="code">    demand_map=None,</td></tr>
+<tr><td class="ln">850</td><td class="code">    final_delivery_lt=None,</td></tr>
+<tr><td class="ln">851</td><td class="code">    line_id=None,</td></tr>
+<tr><td class="ln">852</td><td class="code">):</td></tr>
+<tr><td class="ln">853</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">854</td><td class="code">    計画在庫初期値のLT調整量を計算する。</td></tr>
+<tr><td class="ln">855</td><td class="code"></td></tr>
+<tr><td class="ln">856</td><td class="code">    実在庫はLTシフトなしで計算されるが、計画在庫はLTシフトあり。</td></tr>
+<tr><td class="ln">857</td><td class="code">    そのため、initial_dateの実在庫を計画在庫の初期値として使う際は、</td></tr>
+<tr><td class="ln">858</td><td class="code">    「initial_date+1 ～ initial_date+LT」の出庫分（LTシフト）を差し引く必要がある。</td></tr>
+<tr><td class="ln">859</td><td class="code"></td></tr>
+<tr><td class="ln">860</td><td class="code">    社内品: 親製品の実績（BOM LT 分）を差し引く</td></tr>
+<tr><td class="ln">861</td><td class="code">    最終品/ライン最終品: デリバリLT分の需要を差し引く</td></tr>
+<tr><td class="ln">862</td><td class="code"></td></tr>
+<tr><td class="ln">863</td><td class="code">    ※ initial_date+LT ≤ today-1 の条件下では全て実績確定しているため値が安定する。</td></tr>
+<tr><td class="ln">864</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">865</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">866</td><td class="code">    from django.db.models import Sum</td></tr>
+<tr><td class="ln">867</td><td class="code"></td></tr>
+<tr><td class="ln">868</td><td class="code">    total_adjustment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">869</td><td class="code"></td></tr>
+<tr><td class="ln">870</td><td class="code">    # 最終品/ライン最終品：calc_start_date（initial_date）から後ろ向きに</td></tr>
+<tr><td class="ln">871</td><td class="code">    # デリバリLT日分の需要を差し引く。</td></tr>
+<tr><td class="ln">872</td><td class="code">    #</td></tr>
+<tr><td class="ln">873</td><td class="code">    # 最終品は demand_map（LineDemand由来）を優先し、</td></tr>
+<tr><td class="ln">874</td><td class="code">    # ライン最終品など demand_map を持たないケースでは同日の order_qty を使用する。</td></tr>
+<tr><td class="ln">875</td><td class="code">    # LT 分だけ在庫の初期値から差し引いて計画在庫の初期値とする：</td></tr>
+<tr><td class="ln">876</td><td class="code">    #   LT=1: demand[initial_date]</td></tr>
+<tr><td class="ln">877</td><td class="code">    #   LT=2: demand[initial_date] + demand[initial_date - 1営業日]</td></tr>
+<tr><td class="ln">878</td><td class="code">    #   LT=N: demand[initial_date] + ... + demand[initial_date - (N-1)営業日]</td></tr>
+<tr><td class="ln">879</td><td class="code">    #</td></tr>
+<tr><td class="ln">880</td><td class="code">    # これにより初期値の段階で LT 分だけ計画在庫 &lt; 実在庫 となり、</td></tr>
+<tr><td class="ln">881</td><td class="code">    # 以降は普通の計算式（LT シフトなし）で継続する。</td></tr>
+<tr><td class="ln">882</td><td class="code">    if final_delivery_lt is not None:</td></tr>
+<tr><td class="ln">883</td><td class="code">        delivery_lt = int(final_delivery_lt or 0)</td></tr>
+<tr><td class="ln">884</td><td class="code">    else:</td></tr>
+<tr><td class="ln">885</td><td class="code">        # 呼び出し元未指定時は0日として扱う（後方互換のself_lt_days参照は廃止）</td></tr>
+<tr><td class="ln">886</td><td class="code">        delivery_lt = 0</td></tr>
+<tr><td class="ln">887</td><td class="code"></td></tr>
+<tr><td class="ln">888</td><td class="code">    if delivery_lt &gt;= 0:</td></tr>
+<tr><td class="ln">889</td><td class="code">        for offset in range(delivery_lt):  # 0, 1, ..., delivery_lt-1</td></tr>
+<tr><td class="ln">890</td><td class="code">            adj_date = shift_fn(initial_date, -offset)  # initial_date から後ろ向きにシフト</td></tr>
+<tr><td class="ln">891</td><td class="code">            qty = demand_map.get((product_id, adj_date), Decimal(&#x27;0&#x27;)) if demand_map else Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">892</td><td class="code">            if not qty and line_id:</td></tr>
+<tr><td class="ln">893</td><td class="code">                backlog_rows = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">894</td><td class="code">                    line_id=line_id,</td></tr>
+<tr><td class="ln">895</td><td class="code">                    product_id=product_id,</td></tr>
+<tr><td class="ln">896</td><td class="code">                    plan_date=adj_date,</td></tr>
+<tr><td class="ln">897</td><td class="code">                )</td></tr>
+<tr><td class="ln">898</td><td class="code">                qty = Decimal(str(sum(int(row.order_qty or 0) for row in backlog_rows)))</td></tr>
+<tr><td class="ln">899</td><td class="code">            total_adjustment += Decimal(str(qty))</td></tr>
+<tr><td class="ln">900</td><td class="code">        return int(total_adjustment)</td></tr>
+<tr><td class="ln">901</td><td class="code"></td></tr>
+<tr><td class="ln">902</td><td class="code">    # 社内品：親の BOM 経由でLTシフト分の実績出庫を差し引く</td></tr>
+<tr><td class="ln">903</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">904</td><td class="code">        child_product_id=product_id,</td></tr>
+<tr><td class="ln">905</td><td class="code">        bom__is_active=True,</td></tr>
+<tr><td class="ln">906</td><td class="code">        bom__is_coproduct=False,</td></tr>
+<tr><td class="ln">907</td><td class="code">    ).select_related(&#x27;bom__parent_product&#x27;)</td></tr>
+<tr><td class="ln">908</td><td class="code"></td></tr>
+<tr><td class="ln">909</td><td class="code">    if not parent_bom_items.exists():</td></tr>
+<tr><td class="ln">910</td><td class="code">        return 0</td></tr>
+<tr><td class="ln">911</td><td class="code"></td></tr>
+<tr><td class="ln">912</td><td class="code">    total_adjustment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">913</td><td class="code">    for bom_item in parent_bom_items:</td></tr>
+<tr><td class="ln">914</td><td class="code">        parent_product = bom_item.bom.parent_product</td></tr>
+<tr><td class="ln">915</td><td class="code">        if not parent_product:</td></tr>
+<tr><td class="ln">916</td><td class="code">            continue</td></tr>
+<tr><td class="ln">917</td><td class="code">        qty_per = bom_item.quantity or Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">918</td><td class="code">        if qty_per == 0:</td></tr>
+<tr><td class="ln">919</td><td class="code">            continue</td></tr>
+<tr><td class="ln">920</td><td class="code">        lead_days = bom_item.lead_time_days or 0</td></tr>
+<tr><td class="ln">921</td><td class="code">        if lead_days == 0:</td></tr>
+<tr><td class="ln">922</td><td class="code">            continue</td></tr>
+<tr><td class="ln">923</td><td class="code"></td></tr>
+<tr><td class="ln">924</td><td class="code">        for offset in range(1, lead_days + 1):</td></tr>
+<tr><td class="ln">925</td><td class="code">            adj_date = shift_fn(initial_date, offset)</td></tr>
+<tr><td class="ln">926</td><td class="code">            downstream_groups = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">927</td><td class="code">                product=parent_product,</td></tr>
+<tr><td class="ln">928</td><td class="code">                plan_date=adj_date,</td></tr>
+<tr><td class="ln">929</td><td class="code">            ).values(&#x27;product_id&#x27;, &#x27;line_id&#x27;, &#x27;process_id&#x27;, &#x27;plan_date&#x27;).annotate(</td></tr>
+<tr><td class="ln">930</td><td class="code">                actual_total=Sum(&#x27;actual_qty&#x27;),</td></tr>
+<tr><td class="ln">931</td><td class="code">            )</td></tr>
+<tr><td class="ln">932</td><td class="code">            for downstream in downstream_groups:</td></tr>
+<tr><td class="ln">933</td><td class="code">                actual = int(downstream.get(&#x27;actual_total&#x27;) or 0)</td></tr>
+<tr><td class="ln">934</td><td class="code">                scrap = _get_shipment_scrap_qty(</td></tr>
+<tr><td class="ln">935</td><td class="code">                    downstream[&#x27;product_id&#x27;],</td></tr>
+<tr><td class="ln">936</td><td class="code">                    downstream[&#x27;line_id&#x27;],</td></tr>
+<tr><td class="ln">937</td><td class="code">                    downstream[&#x27;process_id&#x27;],</td></tr>
+<tr><td class="ln">938</td><td class="code">                    downstream[&#x27;plan_date&#x27;],</td></tr>
+<tr><td class="ln">939</td><td class="code">                )</td></tr>
+<tr><td class="ln">940</td><td class="code">                use_qty = Decimal(str(actual)) + scrap</td></tr>
+<tr><td class="ln">941</td><td class="code">                if use_qty:</td></tr>
+<tr><td class="ln">942</td><td class="code">                    total_adjustment += use_qty * Decimal(str(qty_per))</td></tr>
+<tr><td class="ln">943</td><td class="code"></td></tr>
+<tr><td class="ln">944</td><td class="code">    return int(total_adjustment)</td></tr>
+<tr><td class="ln">945</td><td class="code"></td></tr>
+<tr><td class="ln">946</td><td class="code"></td></tr>
+<tr><td class="ln">947</td><td class="code">def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_shipping_cache=None):</td></tr>
+<tr><td class="ln">948</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">949</td><td class="code">    計画在庫用の出庫計算（実績優先、なければ計画を使用）+ 仕損</td></tr>
+<tr><td class="ln">950</td><td class="code"></td></tr>
+<tr><td class="ln">951</td><td class="code">    LTシフト後の親製品の日付で：</td></tr>
+<tr><td class="ln">952</td><td class="code">    - 実績がある場合 → 実績 + 仕損（全て）を使用</td></tr>
+<tr><td class="ln">953</td><td class="code">    - 実績がない場合 → 計画数を使用</td></tr>
+<tr><td class="ln">954</td><td class="code">    - どちらもない場合 → 0</td></tr>
+<tr><td class="ln">955</td><td class="code">    - 親参照自体がない場合 → None</td></tr>
+<tr><td class="ln">956</td><td class="code"></td></tr>
+<tr><td class="ln">957</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">958</td><td class="code">        backlog: LineBacklogインスタンス</td></tr>
+<tr><td class="ln">959</td><td class="code">        shift_fn: LTシフト関数（営業日ベースで日付をシフト）</td></tr>
+<tr><td class="ln">960</td><td class="code">        floor_shipping_cache: フロア配送ライン判定キャッシュ</td></tr>
+<tr><td class="ln">961</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">962</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">963</td><td class="code"></td></tr>
+<tr><td class="ln">964</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">965</td><td class="code">        child_product=backlog.product,</td></tr>
+<tr><td class="ln">966</td><td class="code">        bom__is_active=True,</td></tr>
+<tr><td class="ln">967</td><td class="code">        bom__is_coproduct=False</td></tr>
+<tr><td class="ln">968</td><td class="code">    ).select_related(&#x27;bom__parent_product&#x27;)</td></tr>
+<tr><td class="ln">969</td><td class="code"></td></tr>
+<tr><td class="ln">970</td><td class="code">    if not parent_bom_items.exists():</td></tr>
+<tr><td class="ln">971</td><td class="code">        return None</td></tr>
+<tr><td class="ln">972</td><td class="code"></td></tr>
+<tr><td class="ln">973</td><td class="code">    from django.db.models import Sum</td></tr>
+<tr><td class="ln">974</td><td class="code"></td></tr>
+<tr><td class="ln">975</td><td class="code">    fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}</td></tr>
+<tr><td class="ln">976</td><td class="code">    total_shipment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">977</td><td class="code">    effective_parent_items = list(_filter_parent_bom_items_by_routing(backlog, parent_bom_items))</td></tr>
+<tr><td class="ln">978</td><td class="code">    if not effective_parent_items:</td></tr>
+<tr><td class="ln">979</td><td class="code">        return None</td></tr>
+<tr><td class="ln">980</td><td class="code"></td></tr>
+<tr><td class="ln">981</td><td class="code">    for bom_item in effective_parent_items:</td></tr>
+<tr><td class="ln">982</td><td class="code">        parent_product = bom_item.bom.parent_product</td></tr>
+<tr><td class="ln">983</td><td class="code">        if not parent_product:</td></tr>
+<tr><td class="ln">984</td><td class="code">            continue</td></tr>
+<tr><td class="ln">985</td><td class="code">        qty_per = bom_item.quantity or Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">986</td><td class="code">        if qty_per == 0:</td></tr>
+<tr><td class="ln">987</td><td class="code">            continue</td></tr>
+<tr><td class="ln">988</td><td class="code"></td></tr>
+<tr><td class="ln">989</td><td class="code">        if _check_floor_shipping_parent(parent_product.id, fs_cache):</td></tr>
+<tr><td class="ln">990</td><td class="code">            total_shipment += _floor_shipping_plan_shipment(</td></tr>
+<tr><td class="ln">991</td><td class="code">                backlog, shift_fn, parent_product, qty_per,</td></tr>
+<tr><td class="ln">992</td><td class="code">            )</td></tr>
+<tr><td class="ln">993</td><td class="code">            continue</td></tr>
+<tr><td class="ln">994</td><td class="code"></td></tr>
+<tr><td class="ln">995</td><td class="code">        lead_days = bom_item.lead_time_days or 0</td></tr>
+<tr><td class="ln">996</td><td class="code">        parent_date = backlog.plan_date</td></tr>
+<tr><td class="ln">997</td><td class="code">        if shift_fn:</td></tr>
+<tr><td class="ln">998</td><td class="code">            parent_date = shift_fn(backlog.plan_date, lead_days)</td></tr>
+<tr><td class="ln">999</td><td class="code">        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ</td></tr>
+<tr><td class="ln">1000</td><td class="code">        downstream_groups = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1001</td><td class="code">            product=parent_product,</td></tr>
+<tr><td class="ln">1002</td><td class="code">            plan_date=parent_date,</td></tr>
+<tr><td class="ln">1003</td><td class="code">        ).values(&#x27;product_id&#x27;, &#x27;line_id&#x27;, &#x27;process_id&#x27;, &#x27;plan_date&#x27;).annotate(</td></tr>
+<tr><td class="ln">1004</td><td class="code">            actual_total=Sum(&#x27;actual_qty&#x27;),</td></tr>
+<tr><td class="ln">1005</td><td class="code">            plan_total=Sum(&#x27;plan_qty&#x27;),</td></tr>
+<tr><td class="ln">1006</td><td class="code">        )</td></tr>
+<tr><td class="ln">1007</td><td class="code">        for downstream in downstream_groups:</td></tr>
+<tr><td class="ln">1008</td><td class="code">            actual = int(downstream.get(&#x27;actual_total&#x27;) or 0)</td></tr>
+<tr><td class="ln">1009</td><td class="code">            plan = int(downstream.get(&#x27;plan_total&#x27;) or 0)</td></tr>
+<tr><td class="ln">1010</td><td class="code">            # 全ての仕損を出庫に含める（line+process単位で1回のみ）</td></tr>
+<tr><td class="ln">1011</td><td class="code">            scrap = _get_shipment_scrap_qty(</td></tr>
+<tr><td class="ln">1012</td><td class="code">                downstream[&#x27;product_id&#x27;],</td></tr>
+<tr><td class="ln">1013</td><td class="code">                downstream[&#x27;line_id&#x27;],</td></tr>
+<tr><td class="ln">1014</td><td class="code">                downstream[&#x27;process_id&#x27;],</td></tr>
+<tr><td class="ln">1015</td><td class="code">                downstream[&#x27;plan_date&#x27;]</td></tr>
+<tr><td class="ln">1016</td><td class="code">            )</td></tr>
+<tr><td class="ln">1017</td><td class="code">            if actual &gt; 0 or scrap &gt; 0:</td></tr>
+<tr><td class="ln">1018</td><td class="code">                use_qty = Decimal(str(actual)) + scrap</td></tr>
+<tr><td class="ln">1019</td><td class="code">            else:</td></tr>
+<tr><td class="ln">1020</td><td class="code">                use_qty = Decimal(str(plan))</td></tr>
+<tr><td class="ln">1021</td><td class="code">            if use_qty:</td></tr>
+<tr><td class="ln">1022</td><td class="code">                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))</td></tr>
+<tr><td class="ln">1023</td><td class="code"></td></tr>
+<tr><td class="ln">1024</td><td class="code">    return total_shipment</td></tr>
+<tr><td class="ln">1025</td><td class="code"></td></tr>
+<tr><td class="ln">1026</td><td class="code"></td></tr>
+<tr><td class="ln">1027</td><td class="code">def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_cache=None):</td></tr>
+<tr><td class="ln">1028</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1029</td><td class="code">    計画在庫用の出庫計算（後工程の計画値＝内示を使用）+ 仕損</td></tr>
+<tr><td class="ln">1030</td><td class="code"></td></tr>
+<tr><td class="ln">1031</td><td class="code">    計画在庫は「計画ベース」の値なので、出庫も計画値（内示）を使用する。</td></tr>
+<tr><td class="ln">1032</td><td class="code">    これは実在庫（後工程の実績を使用）とは異なる点。</td></tr>
+<tr><td class="ln">1033</td><td class="code">    ただし、仕損は実績なので計画値に加算する。</td></tr>
+<tr><td class="ln">1034</td><td class="code"></td></tr>
+<tr><td class="ln">1035</td><td class="code">    - 今日以降: 後工程の計画値 + 仕損（全て）で計算</td></tr>
+<tr><td class="ln">1036</td><td class="code"></td></tr>
+<tr><td class="ln">1037</td><td class="code">    ※ 実在庫の出庫は _calculate_parent_actual_shipment で actual_qty + scrap_qty を使用</td></tr>
+<tr><td class="ln">1038</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1039</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">1040</td><td class="code"></td></tr>
+<tr><td class="ln">1041</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">1042</td><td class="code">        child_product=backlog.product,</td></tr>
+<tr><td class="ln">1043</td><td class="code">        bom__is_active=True,</td></tr>
+<tr><td class="ln">1044</td><td class="code">        bom__is_coproduct=False</td></tr>
+<tr><td class="ln">1045</td><td class="code">    ).select_related(&#x27;bom__parent_product&#x27;)</td></tr>
+<tr><td class="ln">1046</td><td class="code"></td></tr>
+<tr><td class="ln">1047</td><td class="code">    if not parent_bom_items.exists():</td></tr>
+<tr><td class="ln">1048</td><td class="code">        return Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">1049</td><td class="code"></td></tr>
+<tr><td class="ln">1050</td><td class="code">    from django.db.models import Sum</td></tr>
+<tr><td class="ln">1051</td><td class="code"></td></tr>
+<tr><td class="ln">1052</td><td class="code">    fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}</td></tr>
+<tr><td class="ln">1053</td><td class="code">    total_shipment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">1054</td><td class="code">    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):</td></tr>
+<tr><td class="ln">1055</td><td class="code">        parent_product = bom_item.bom.parent_product</td></tr>
+<tr><td class="ln">1056</td><td class="code">        if not parent_product:</td></tr>
+<tr><td class="ln">1057</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1058</td><td class="code">        qty_per = bom_item.quantity or Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">1059</td><td class="code">        if qty_per == 0:</td></tr>
+<tr><td class="ln">1060</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1061</td><td class="code"></td></tr>
+<tr><td class="ln">1062</td><td class="code">        if _check_floor_shipping_parent(parent_product.id, fs_cache):</td></tr>
+<tr><td class="ln">1063</td><td class="code">            total_shipment += _floor_shipping_plan_shipment(</td></tr>
+<tr><td class="ln">1064</td><td class="code">                backlog, shift_fn, parent_product, qty_per,</td></tr>
+<tr><td class="ln">1065</td><td class="code">            )</td></tr>
+<tr><td class="ln">1066</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1067</td><td class="code"></td></tr>
+<tr><td class="ln">1068</td><td class="code">        lead_days = bom_item.lead_time_days or 0</td></tr>
+<tr><td class="ln">1069</td><td class="code">        parent_date = backlog.plan_date</td></tr>
+<tr><td class="ln">1070</td><td class="code">        if shift_fn:</td></tr>
+<tr><td class="ln">1071</td><td class="code">            parent_date = shift_fn(backlog.plan_date, lead_days)</td></tr>
+<tr><td class="ln">1072</td><td class="code">        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ</td></tr>
+<tr><td class="ln">1073</td><td class="code">        downstream_groups = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1074</td><td class="code">            product=parent_product,</td></tr>
+<tr><td class="ln">1075</td><td class="code">            plan_date=parent_date,</td></tr>
+<tr><td class="ln">1076</td><td class="code">        ).values(&#x27;product_id&#x27;, &#x27;line_id&#x27;, &#x27;process_id&#x27;, &#x27;plan_date&#x27;).annotate(</td></tr>
+<tr><td class="ln">1077</td><td class="code">            plan_total=Sum(&#x27;plan_qty&#x27;),</td></tr>
+<tr><td class="ln">1078</td><td class="code">        )</td></tr>
+<tr><td class="ln">1079</td><td class="code">        for downstream in downstream_groups:</td></tr>
+<tr><td class="ln">1080</td><td class="code">            plan = int(downstream.get(&#x27;plan_total&#x27;) or 0)</td></tr>
+<tr><td class="ln">1081</td><td class="code">            # 全ての仕損を出庫に含める（line+process単位で1回のみ）</td></tr>
+<tr><td class="ln">1082</td><td class="code">            scrap = _get_shipment_scrap_qty(</td></tr>
+<tr><td class="ln">1083</td><td class="code">                downstream[&#x27;product_id&#x27;],</td></tr>
+<tr><td class="ln">1084</td><td class="code">                downstream[&#x27;line_id&#x27;],</td></tr>
+<tr><td class="ln">1085</td><td class="code">                downstream[&#x27;process_id&#x27;],</td></tr>
+<tr><td class="ln">1086</td><td class="code">                downstream[&#x27;plan_date&#x27;]</td></tr>
+<tr><td class="ln">1087</td><td class="code">            )</td></tr>
+<tr><td class="ln">1088</td><td class="code">            use_qty = Decimal(str(plan)) + scrap</td></tr>
+<tr><td class="ln">1089</td><td class="code">            if use_qty:</td></tr>
+<tr><td class="ln">1090</td><td class="code">                total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))</td></tr>
+<tr><td class="ln">1091</td><td class="code"></td></tr>
+<tr><td class="ln">1092</td><td class="code">    return total_shipment</td></tr>
+<tr><td class="ln">1093</td><td class="code"></td></tr>
+<tr><td class="ln">1094</td><td class="code"></td></tr>
+<tr><td class="ln">1095</td><td class="code">def calculate_actual_shipment(backlog):</td></tr>
+<tr><td class="ln">1096</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1097</td><td class="code">    実績出庫数を後工程の実績から計算</td></tr>
+<tr><td class="ln">1098</td><td class="code"></td></tr>
+<tr><td class="ln">1099</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">1100</td><td class="code">        backlog: LineBacklogインスタンス</td></tr>
+<tr><td class="ln">1101</td><td class="code"></td></tr>
+<tr><td class="ln">1102</td><td class="code">    Returns:</td></tr>
+<tr><td class="ln">1103</td><td class="code">        int: 実績出庫数（計算できない場合はNone）</td></tr>
+<tr><td class="ln">1104</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1105</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">1106</td><td class="code"></td></tr>
+<tr><td class="ln">1107</td><td class="code">    # この製品を子製品として使用しているBOMItemを検索</td></tr>
+<tr><td class="ln">1108</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">1109</td><td class="code">        child_product=backlog.product,</td></tr>
+<tr><td class="ln">1110</td><td class="code">        bom__is_active=True</td></tr>
+<tr><td class="ln">1111</td><td class="code">    ).select_related(&#x27;bom__parent_product&#x27;)</td></tr>
+<tr><td class="ln">1112</td><td class="code"></td></tr>
+<tr><td class="ln">1113</td><td class="code">    if not parent_bom_items.exists():</td></tr>
+<tr><td class="ln">1114</td><td class="code">        return None</td></tr>
+<tr><td class="ln">1115</td><td class="code"></td></tr>
+<tr><td class="ln">1116</td><td class="code">    total_shipment = 0</td></tr>
+<tr><td class="ln">1117</td><td class="code">    found_actual = False</td></tr>
+<tr><td class="ln">1118</td><td class="code"></td></tr>
+<tr><td class="ln">1119</td><td class="code">    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):</td></tr>
+<tr><td class="ln">1120</td><td class="code">        # 後工程の実績を取得</td></tr>
+<tr><td class="ln">1121</td><td class="code">        # ※ リードタイムを考慮する場合は plan_date を調整</td></tr>
+<tr><td class="ln">1122</td><td class="code">        downstream_backlogs = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1123</td><td class="code">            product=bom_item.bom.parent_product,</td></tr>
+<tr><td class="ln">1124</td><td class="code">            plan_date=backlog.plan_date,  # 同日（またはLT調整）</td></tr>
+<tr><td class="ln">1125</td><td class="code">        )</td></tr>
+<tr><td class="ln">1126</td><td class="code"></td></tr>
+<tr><td class="ln">1127</td><td class="code">        for downstream in downstream_backlogs:</td></tr>
+<tr><td class="ln">1128</td><td class="code">            if downstream.actual_qty and downstream.actual_qty &gt; 0:</td></tr>
+<tr><td class="ln">1129</td><td class="code">                # 実績 × BOM数量 = 出庫数</td></tr>
+<tr><td class="ln">1130</td><td class="code">                quantity = bom_item.quantity or Decimal(&#x27;1&#x27;)</td></tr>
+<tr><td class="ln">1131</td><td class="code">                shipment = int(downstream.actual_qty * quantity)</td></tr>
+<tr><td class="ln">1132</td><td class="code">                total_shipment += shipment</td></tr>
+<tr><td class="ln">1133</td><td class="code">                found_actual = True</td></tr>
+<tr><td class="ln">1134</td><td class="code"></td></tr>
+<tr><td class="ln">1135</td><td class="code">    return total_shipment if found_actual else None</td></tr>
+<tr><td class="ln">1136</td><td class="code"></td></tr>
+<tr><td class="ln">1137</td><td class="code"></td></tr>
+<tr><td class="ln">1138</td><td class="code">def has_downstream_actual(backlog):</td></tr>
+<tr><td class="ln">1139</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1140</td><td class="code">    後工程に実績が入力されているかチェック</td></tr>
+<tr><td class="ln">1141</td><td class="code"></td></tr>
+<tr><td class="ln">1142</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">1143</td><td class="code">        backlog: LineBacklogインスタンス</td></tr>
+<tr><td class="ln">1144</td><td class="code"></td></tr>
+<tr><td class="ln">1145</td><td class="code">    Returns:</td></tr>
+<tr><td class="ln">1146</td><td class="code">        bool: 後工程に実績があればTrue</td></tr>
+<tr><td class="ln">1147</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1148</td><td class="code">    from masters.models import BOMItem</td></tr>
+<tr><td class="ln">1149</td><td class="code"></td></tr>
+<tr><td class="ln">1150</td><td class="code">    parent_bom_items = BOMItem.objects.filter(</td></tr>
+<tr><td class="ln">1151</td><td class="code">        child_product=backlog.product,</td></tr>
+<tr><td class="ln">1152</td><td class="code">        bom__is_active=True</td></tr>
+<tr><td class="ln">1153</td><td class="code">    )</td></tr>
+<tr><td class="ln">1154</td><td class="code"></td></tr>
+<tr><td class="ln">1155</td><td class="code">    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):</td></tr>
+<tr><td class="ln">1156</td><td class="code">        downstream_backlogs = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1157</td><td class="code">            product=bom_item.bom.parent_product,</td></tr>
+<tr><td class="ln">1158</td><td class="code">            plan_date=backlog.plan_date,</td></tr>
+<tr><td class="ln">1159</td><td class="code">            actual_qty__gt=0</td></tr>
+<tr><td class="ln">1160</td><td class="code">        )</td></tr>
+<tr><td class="ln">1161</td><td class="code">        if downstream_backlogs.exists():</td></tr>
+<tr><td class="ln">1162</td><td class="code">            return True</td></tr>
+<tr><td class="ln">1163</td><td class="code"></td></tr>
+<tr><td class="ln">1164</td><td class="code">    return False</td></tr>
+<tr><td class="ln">1165</td><td class="code"></td></tr>
+<tr><td class="ln">1166</td><td class="code"></td></tr>
+<tr><td class="ln">1167</td><td class="code">def recalculate_stock_qty(</td></tr>
+<tr><td class="ln">1168</td><td class="code">    line_id,</td></tr>
+<tr><td class="ln">1169</td><td class="code">    product_id,</td></tr>
+<tr><td class="ln">1170</td><td class="code">    start_date,</td></tr>
+<tr><td class="ln">1171</td><td class="code">    end_date,</td></tr>
+<tr><td class="ln">1172</td><td class="code">    demand_map=None,</td></tr>
+<tr><td class="ln">1173</td><td class="code">    stock_adjust_map=None,</td></tr>
+<tr><td class="ln">1174</td><td class="code">    reference_today=None,</td></tr>
+<tr><td class="ln">1175</td><td class="code">    max_parent_lt=None,</td></tr>
+<tr><td class="ln">1176</td><td class="code">    calendar_id=None,</td></tr>
+<tr><td class="ln">1177</td><td class="code">    shared_workday_cache=None,</td></tr>
+<tr><td class="ln">1178</td><td class="code">):</td></tr>
+<tr><td class="ln">1179</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1180</td><td class="code">    実在庫を日次で再計算</td></tr>
+<tr><td class="ln">1181</td><td class="code"></td></tr>
+<tr><td class="ln">1182</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">1183</td><td class="code">        line_id: ラインID</td></tr>
+<tr><td class="ln">1184</td><td class="code">        product_id: 製品ID</td></tr>
+<tr><td class="ln">1185</td><td class="code">        start_date: 開始日</td></tr>
+<tr><td class="ln">1186</td><td class="code">        end_date: 終了日</td></tr>
+<tr><td class="ln">1187</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1188</td><td class="code">    workday_cache = shared_workday_cache if shared_workday_cache is not None else {}</td></tr>
+<tr><td class="ln">1189</td><td class="code">    if calendar_id is None and line_id:</td></tr>
+<tr><td class="ln">1190</td><td class="code">        calendar_id = _resolve_line_calendar_id(line_id)</td></tr>
+<tr><td class="ln">1191</td><td class="code"></td></tr>
+<tr><td class="ln">1192</td><td class="code">    def is_working_day(target_date):</td></tr>
+<tr><td class="ln">1193</td><td class="code">        return _resolve_calendar_working_day(</td></tr>
+<tr><td class="ln">1194</td><td class="code">            target_date,</td></tr>
+<tr><td class="ln">1195</td><td class="code">            calendar_id,</td></tr>
+<tr><td class="ln">1196</td><td class="code">            workday_cache,</td></tr>
+<tr><td class="ln">1197</td><td class="code">        )</td></tr>
+<tr><td class="ln">1198</td><td class="code"></td></tr>
+<tr><td class="ln">1199</td><td class="code">    def get_prev_working_day(target_date):</td></tr>
+<tr><td class="ln">1200</td><td class="code">        prev_date = target_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1201</td><td class="code">        while not is_working_day(prev_date):</td></tr>
+<tr><td class="ln">1202</td><td class="code">            prev_date = prev_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1203</td><td class="code">        return prev_date</td></tr>
+<tr><td class="ln">1204</td><td class="code"></td></tr>
+<tr><td class="ln">1205</td><td class="code">    def shift_working_days(target_date, days):</td></tr>
+<tr><td class="ln">1206</td><td class="code">        if not days:</td></tr>
+<tr><td class="ln">1207</td><td class="code">            return target_date</td></tr>
+<tr><td class="ln">1208</td><td class="code">        if not calendar_id:</td></tr>
+<tr><td class="ln">1209</td><td class="code">            return target_date + timedelta(days=days)</td></tr>
+<tr><td class="ln">1210</td><td class="code">        step = 1 if days &gt; 0 else -1</td></tr>
+<tr><td class="ln">1211</td><td class="code">        remaining = abs(int(days))</td></tr>
+<tr><td class="ln">1212</td><td class="code">        current = target_date</td></tr>
+<tr><td class="ln">1213</td><td class="code">        while remaining &gt; 0:</td></tr>
+<tr><td class="ln">1214</td><td class="code">            current = current + timedelta(days=step)</td></tr>
+<tr><td class="ln">1215</td><td class="code">            if is_working_day(current):</td></tr>
+<tr><td class="ln">1216</td><td class="code">                remaining -= 1</td></tr>
+<tr><td class="ln">1217</td><td class="code">        return current</td></tr>
+<tr><td class="ln">1218</td><td class="code"></td></tr>
+<tr><td class="ln">1219</td><td class="code">    def pick_representative(rows):</td></tr>
+<tr><td class="ln">1220</td><td class="code">        base_rows = [r for r in rows if r.sequence_no == 0]</td></tr>
+<tr><td class="ln">1221</td><td class="code">        return min(base_rows, key=lambda r: r.id)</td></tr>
+<tr><td class="ln">1222</td><td class="code"></td></tr>
+<tr><td class="ln">1223</td><td class="code">    # 計算起点日（calc_today）と実績反映判定日（business_today）を分離する。</td></tr>
+<tr><td class="ln">1224</td><td class="code">    # 休日に再計算した場合でも、当日の実績は出庫計算に反映する。</td></tr>
+<tr><td class="ln">1225</td><td class="code">    business_today = reference_today or get_business_today()</td></tr>
+<tr><td class="ln">1226</td><td class="code">    calc_today = business_today</td></tr>
+<tr><td class="ln">1227</td><td class="code">    if reference_today is None and not is_working_day(calc_today):</td></tr>
+<tr><td class="ln">1228</td><td class="code">        calc_today = get_prev_working_day(calc_today)</td></tr>
+<tr><td class="ln">1229</td><td class="code">    inventory_lock_date = SystemSetting.get_lock_date(&#x27;inventory&#x27;)</td></tr>
+<tr><td class="ln">1230</td><td class="code">    stock_by_date = {}</td></tr>
+<tr><td class="ln">1231</td><td class="code">    demand_map = demand_map or {}</td></tr>
+<tr><td class="ln">1232</td><td class="code">    calc_rule_map = _load_planned_stock_calc_rule_map()</td></tr>
+<tr><td class="ln">1233</td><td class="code">    line_code_cache = {}</td></tr>
+<tr><td class="ln">1234</td><td class="code">    process_code_cache = {}</td></tr>
+<tr><td class="ln">1235</td><td class="code">    product_code_cache = {}</td></tr>
+<tr><td class="ln">1236</td><td class="code"></td></tr>
+<tr><td class="ln">1237</td><td class="code">    def _resolve_line_code(line_id_value):</td></tr>
+<tr><td class="ln">1238</td><td class="code">        lid = int(line_id_value or 0)</td></tr>
+<tr><td class="ln">1239</td><td class="code">        if lid &lt;= 0:</td></tr>
+<tr><td class="ln">1240</td><td class="code">            return &#x27;&#x27;</td></tr>
+<tr><td class="ln">1241</td><td class="code">        if lid in line_code_cache:</td></tr>
+<tr><td class="ln">1242</td><td class="code">            return line_code_cache[lid]</td></tr>
+<tr><td class="ln">1243</td><td class="code">        from masters.models import Line</td></tr>
+<tr><td class="ln">1244</td><td class="code">        line = Line.objects.filter(id=lid).only(&#x27;line_code&#x27;).first()</td></tr>
+<tr><td class="ln">1245</td><td class="code">        code = str(getattr(line, &#x27;line_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">1246</td><td class="code">        line_code_cache[lid] = code</td></tr>
+<tr><td class="ln">1247</td><td class="code">        return code</td></tr>
+<tr><td class="ln">1248</td><td class="code"></td></tr>
+<tr><td class="ln">1249</td><td class="code">    def _resolve_process_code(process_id_value):</td></tr>
+<tr><td class="ln">1250</td><td class="code">        pid = int(process_id_value or 0)</td></tr>
+<tr><td class="ln">1251</td><td class="code">        if pid &lt;= 0:</td></tr>
+<tr><td class="ln">1252</td><td class="code">            return &#x27;&#x27;</td></tr>
+<tr><td class="ln">1253</td><td class="code">        if pid in process_code_cache:</td></tr>
+<tr><td class="ln">1254</td><td class="code">            return process_code_cache[pid]</td></tr>
+<tr><td class="ln">1255</td><td class="code">        from masters.models import Process</td></tr>
+<tr><td class="ln">1256</td><td class="code">        proc = Process.objects.filter(id=pid).only(&#x27;process_code&#x27;).first()</td></tr>
+<tr><td class="ln">1257</td><td class="code">        code = str(getattr(proc, &#x27;process_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">1258</td><td class="code">        process_code_cache[pid] = code</td></tr>
+<tr><td class="ln">1259</td><td class="code">        return code</td></tr>
+<tr><td class="ln">1260</td><td class="code"></td></tr>
+<tr><td class="ln">1261</td><td class="code">    def _resolve_product_code(product_id_value):</td></tr>
+<tr><td class="ln">1262</td><td class="code">        pid = int(product_id_value or 0)</td></tr>
+<tr><td class="ln">1263</td><td class="code">        if pid &lt;= 0:</td></tr>
+<tr><td class="ln">1264</td><td class="code">            return &#x27;&#x27;</td></tr>
+<tr><td class="ln">1265</td><td class="code">        if pid in product_code_cache:</td></tr>
+<tr><td class="ln">1266</td><td class="code">            return product_code_cache[pid]</td></tr>
+<tr><td class="ln">1267</td><td class="code">        from masters.models import Product</td></tr>
+<tr><td class="ln">1268</td><td class="code">        prod = Product.objects.filter(id=pid).only(&#x27;product_code&#x27;).first()</td></tr>
+<tr><td class="ln">1269</td><td class="code">        code = str(getattr(prod, &#x27;product_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">1270</td><td class="code">        product_code_cache[pid] = code</td></tr>
+<tr><td class="ln">1271</td><td class="code">        return code</td></tr>
+<tr><td class="ln">1272</td><td class="code"></td></tr>
+<tr><td class="ln">1273</td><td class="code">    # 計画在庫は calc_start_date の stock_qty を初期値として参照するため、</td></tr>
+<tr><td class="ln">1274</td><td class="code">    # 在庫の再計算範囲を calc_start_date まで広げて stock_qty を常に最新に保つ。</td></tr>
+<tr><td class="ln">1275</td><td class="code">    # effective_start = min(start_date, calc_start_date)</td></tr>
+<tr><td class="ln">1276</td><td class="code">    if max_parent_lt is None:</td></tr>
+<tr><td class="ln">1277</td><td class="code">        max_parent_lt = _get_direct_parent_bom_lead_time(product_id)</td></tr>
+<tr><td class="ln">1278</td><td class="code">    max_lt = int(max_parent_lt or 0)</td></tr>
+<tr><td class="ln">1279</td><td class="code">    calc_start_date = shift_working_days(calc_today, -(max_lt + 1))</td></tr>
+<tr><td class="ln">1280</td><td class="code">    effective_start = min(start_date, calc_start_date)</td></tr>
+<tr><td class="ln">1281</td><td class="code"></td></tr>
+<tr><td class="ln">1282</td><td class="code">    backlogs = list(LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1283</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">1284</td><td class="code">        product_id=product_id,</td></tr>
+<tr><td class="ln">1285</td><td class="code">        plan_date__range=[effective_start, end_date]</td></tr>
+<tr><td class="ln">1286</td><td class="code">    ).select_related(&#x27;product&#x27;).order_by(&#x27;plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;))</td></tr>
+<tr><td class="ln">1287</td><td class="code">    if not backlogs:</td></tr>
+<tr><td class="ln">1288</td><td class="code">        return</td></tr>
+<tr><td class="ln">1289</td><td class="code">    backlogs, _created_any = _ensure_daily_base_backlogs(</td></tr>
+<tr><td class="ln">1290</td><td class="code">        line_id,</td></tr>
+<tr><td class="ln">1291</td><td class="code">        product_id,</td></tr>
+<tr><td class="ln">1292</td><td class="code">        effective_start,</td></tr>
+<tr><td class="ln">1293</td><td class="code">        end_date,</td></tr>
+<tr><td class="ln">1294</td><td class="code">        backlogs=backlogs,</td></tr>
+<tr><td class="ln">1295</td><td class="code">    )</td></tr>
+<tr><td class="ln">1296</td><td class="code">    if not backlogs:</td></tr>
+<tr><td class="ln">1297</td><td class="code">        return</td></tr>
+<tr><td class="ln">1298</td><td class="code"></td></tr>
+<tr><td class="ln">1299</td><td class="code">    by_date = {}</td></tr>
+<tr><td class="ln">1300</td><td class="code">    for backlog in backlogs:</td></tr>
+<tr><td class="ln">1301</td><td class="code">        by_date.setdefault(backlog.plan_date, []).append(backlog)</td></tr>
+<tr><td class="ln">1302</td><td class="code"></td></tr>
+<tr><td class="ln">1303</td><td class="code">    # effective_start より前の最新在庫を初期値として取得</td></tr>
+<tr><td class="ln">1304</td><td class="code">    initial_backlog = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1305</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">1306</td><td class="code">        product_id=product_id,</td></tr>
+<tr><td class="ln">1307</td><td class="code">        plan_date__lt=effective_start,</td></tr>
+<tr><td class="ln">1308</td><td class="code">        stock_qty__isnull=False</td></tr>
+<tr><td class="ln">1309</td><td class="code">    ).order_by(&#x27;-plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;).first()</td></tr>
+<tr><td class="ln">1310</td><td class="code"></td></tr>
+<tr><td class="ln">1311</td><td class="code">    if initial_backlog:</td></tr>
+<tr><td class="ln">1312</td><td class="code">        last_stock = initial_backlog.stock_qty or 0</td></tr>
+<tr><td class="ln">1313</td><td class="code">        stock_by_date[initial_backlog.plan_date] = last_stock</td></tr>
+<tr><td class="ln">1314</td><td class="code">    else:</td></tr>
+<tr><td class="ln">1315</td><td class="code">        last_stock = 0</td></tr>
+<tr><td class="ln">1316</td><td class="code"></td></tr>
+<tr><td class="ln">1317</td><td class="code">    # 更新対象のbacklogを追跡（effective_start以前は更新しない）</td></tr>
+<tr><td class="ln">1318</td><td class="code">    backlogs_to_update = []</td></tr>
+<tr><td class="ln">1319</td><td class="code"></td></tr>
+<tr><td class="ln">1320</td><td class="code">    for plan_date in sorted(by_date.keys()):</td></tr>
+<tr><td class="ln">1321</td><td class="code">        rows = by_date[plan_date]</td></tr>
+<tr><td class="ln">1322</td><td class="code">        sample = rows[0]</td></tr>
+<tr><td class="ln">1323</td><td class="code">        is_final = bool(getattr(sample.product, &#x27;is_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1324</td><td class="code"></td></tr>
+<tr><td class="ln">1325</td><td class="code">        # 棚卸確定フラグがある場合、その値を正として採用し、計算はスキップ</td></tr>
+<tr><td class="ln">1326</td><td class="code">        if any(getattr(r, &#x27;is_stocktake_fix&#x27;, False) for r in rows):</td></tr>
+<tr><td class="ln">1327</td><td class="code">            # 代表行の在庫を採用</td></tr>
+<tr><td class="ln">1328</td><td class="code">            stock_qty = sample.stock_qty or 0</td></tr>
+<tr><td class="ln">1329</td><td class="code">            stock_by_date[plan_date] = stock_qty</td></tr>
+<tr><td class="ln">1330</td><td class="code">            last_stock = stock_qty</td></tr>
+<tr><td class="ln">1331</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;棚卸確定フラグにより既存値採用: stock_qty={stock_qty}&#x27;)</td></tr>
+<tr><td class="ln">1332</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1333</td><td class="code"></td></tr>
+<tr><td class="ln">1334</td><td class="code">        # 締め日以前は既存値を維持し再計算しない</td></tr>
+<tr><td class="ln">1335</td><td class="code">        if inventory_lock_date and plan_date &lt;= inventory_lock_date:</td></tr>
+<tr><td class="ln">1336</td><td class="code">            existing_stock = 0</td></tr>
+<tr><td class="ln">1337</td><td class="code">            for row in rows:</td></tr>
+<tr><td class="ln">1338</td><td class="code">                if row.stock_qty:</td></tr>
+<tr><td class="ln">1339</td><td class="code">                    existing_stock = row.stock_qty</td></tr>
+<tr><td class="ln">1340</td><td class="code">                    break</td></tr>
+<tr><td class="ln">1341</td><td class="code">            stock_by_date[plan_date] = existing_stock</td></tr>
+<tr><td class="ln">1342</td><td class="code">            last_stock = existing_stock</td></tr>
+<tr><td class="ln">1343</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;締め日({inventory_lock_date})以前のため既存値維持: stock_qty={existing_stock}&#x27;)</td></tr>
+<tr><td class="ln">1344</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1345</td><td class="code"></td></tr>
+<tr><td class="ln">1346</td><td class="code">        # effective_start より前は既存の在庫値を使用し、更新しない（安全ガード）</td></tr>
+<tr><td class="ln">1347</td><td class="code">        if plan_date &lt; effective_start:</td></tr>
+<tr><td class="ln">1348</td><td class="code">            existing_stock = 0</td></tr>
+<tr><td class="ln">1349</td><td class="code">            for row in rows:</td></tr>
+<tr><td class="ln">1350</td><td class="code">                if row.stock_qty:</td></tr>
+<tr><td class="ln">1351</td><td class="code">                    existing_stock = row.stock_qty</td></tr>
+<tr><td class="ln">1352</td><td class="code">                    break</td></tr>
+<tr><td class="ln">1353</td><td class="code">            stock_by_date[plan_date] = existing_stock</td></tr>
+<tr><td class="ln">1354</td><td class="code">            last_stock = existing_stock</td></tr>
+<tr><td class="ln">1355</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;effective_start({effective_start})より前のため既存値維持: stock_qty={existing_stock}&#x27;)</td></tr>
+<tr><td class="ln">1356</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1357</td><td class="code"></td></tr>
+<tr><td class="ln">1358</td><td class="code">        actual_total = sum(r.actual_qty or 0 for r in rows)</td></tr>
+<tr><td class="ln">1359</td><td class="code">        order_total = sum(r.order_qty or 0 for r in rows)</td></tr>
+<tr><td class="ln">1360</td><td class="code">        scrap_adjust_total = sum(r.scrap_adjust_qty or 0 for r in rows)</td></tr>
+<tr><td class="ln">1361</td><td class="code">        # adjust_qty は在庫計算に使わない（既存仕様）</td></tr>
+<tr><td class="ln">1362</td><td class="code"></td></tr>
+<tr><td class="ln">1363</td><td class="code">        if plan_date &lt;= business_today:</td></tr>
+<tr><td class="ln">1364</td><td class="code">            if is_final:</td></tr>
+<tr><td class="ln">1365</td><td class="code">                actual_shipment = demand_map.get((sample.product_id, plan_date), Decimal(&#x27;0&#x27;))</td></tr>
+<tr><td class="ln">1366</td><td class="code">            else:</td></tr>
+<tr><td class="ln">1367</td><td class="code">                line_code = _resolve_line_code(getattr(sample, &#x27;line_id&#x27;, None))</td></tr>
+<tr><td class="ln">1368</td><td class="code">                process_code = _resolve_process_code(getattr(sample, &#x27;process_id&#x27;, None))</td></tr>
+<tr><td class="ln">1369</td><td class="code">                p_code = _resolve_product_code(sample.product_id)</td></tr>
+<tr><td class="ln">1370</td><td class="code">                setting = _resolve_calc_rule(calc_rule_map, line_code, process_code, &#x27;STOCK&#x27;, p_code)</td></tr>
+<tr><td class="ln">1371</td><td class="code">                if setting == &#x27;ORDER_QTY&#x27;:</td></tr>
+<tr><td class="ln">1372</td><td class="code">                    # 特例: pickup 済みの前工程需要(order_qty)をそのまま出庫として使用</td></tr>
+<tr><td class="ln">1373</td><td class="code">                    actual_shipment = Decimal(str(order_total))</td></tr>
+<tr><td class="ln">1374</td><td class="code">                else:</td></tr>
+<tr><td class="ln">1375</td><td class="code">                    # 標準: 親の actual_qty + scrap_qty を出庫として計算（休日実績も反映）</td></tr>
+<tr><td class="ln">1376</td><td class="code">                    actual_shipment = _calculate_parent_actual_shipment(sample)</td></tr>
+<tr><td class="ln">1377</td><td class="code">        else:</td></tr>
+<tr><td class="ln">1378</td><td class="code">            actual_shipment = Decimal(&#x27;0&#x27;)</td></tr>
+<tr><td class="ln">1379</td><td class="code">        actual_shipment = int(actual_shipment or 0)</td></tr>
+<tr><td class="ln">1380</td><td class="code"></td></tr>
+<tr><td class="ln">1381</td><td class="code">        # 在庫も進度と同様、休日を含めて「前日（暦日）」を基準に引き継ぐ。</td></tr>
+<tr><td class="ln">1382</td><td class="code">        prev_day = plan_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1383</td><td class="code">        prev_stock = stock_by_date.get(prev_day, last_stock)</td></tr>
+<tr><td class="ln">1384</td><td class="code"></td></tr>
+<tr><td class="ln">1385</td><td class="code">        stock_adjust = _resolve_day_adjustment(rows, stock_adjust_map)</td></tr>
+<tr><td class="ln">1386</td><td class="code">        # 在庫 = 前日在庫 + 実績 - 出庫 + scrap_adjust_qty(非自工程仕損は負値で蓄積) + 手動調整</td></tr>
+<tr><td class="ln">1387</td><td class="code">        stock_qty = (</td></tr>
+<tr><td class="ln">1388</td><td class="code">            prev_stock</td></tr>
+<tr><td class="ln">1389</td><td class="code">            + actual_total</td></tr>
+<tr><td class="ln">1390</td><td class="code">            - actual_shipment</td></tr>
+<tr><td class="ln">1391</td><td class="code">            + scrap_adjust_total</td></tr>
+<tr><td class="ln">1392</td><td class="code">            + stock_adjust</td></tr>
+<tr><td class="ln">1393</td><td class="code">        )</td></tr>
+<tr><td class="ln">1394</td><td class="code"></td></tr>
+<tr><td class="ln">1395</td><td class="code">        rep = pick_representative(rows)</td></tr>
+<tr><td class="ln">1396</td><td class="code">        for row in rows:</td></tr>
+<tr><td class="ln">1397</td><td class="code">            row.actual_shipment_qty = 0</td></tr>
+<tr><td class="ln">1398</td><td class="code">            row.stock_qty = 0</td></tr>
+<tr><td class="ln">1399</td><td class="code">        rep.actual_shipment_qty = actual_shipment</td></tr>
+<tr><td class="ln">1400</td><td class="code">        rep.stock_qty = stock_qty</td></tr>
+<tr><td class="ln">1401</td><td class="code">        stock_by_date[plan_date] = stock_qty</td></tr>
+<tr><td class="ln">1402</td><td class="code">        last_stock = stock_qty</td></tr>
+<tr><td class="ln">1403</td><td class="code"></td></tr>
+<tr><td class="ln">1404</td><td class="code">        trace_log(</td></tr>
+<tr><td class="ln">1405</td><td class="code">            line_id, product_id, plan_date,</td></tr>
+<tr><td class="ln">1406</td><td class="code">            f&#x27;在庫計算: 前日={prev_stock}, 当日実績={actual_total}, 当日出庫={actual_shipment}, &#x27;</td></tr>
+<tr><td class="ln">1407</td><td class="code">            f&#x27;scrap調整={scrap_adjust_total}, 手動調整={stock_adjust}, 結果={stock_qty}&#x27;</td></tr>
+<tr><td class="ln">1408</td><td class="code">        )</td></tr>
+<tr><td class="ln">1409</td><td class="code"></td></tr>
+<tr><td class="ln">1410</td><td class="code">        # 更新対象に追加</td></tr>
+<tr><td class="ln">1411</td><td class="code">        backlogs_to_update.extend(rows)</td></tr>
+<tr><td class="ln">1412</td><td class="code"></td></tr>
+<tr><td class="ln">1413</td><td class="code">    if backlogs_to_update:</td></tr>
+<tr><td class="ln">1414</td><td class="code">        LineBacklog.objects.bulk_update(backlogs_to_update, [&#x27;stock_qty&#x27;, &#x27;actual_shipment_qty&#x27;])</td></tr>
+<tr><td class="ln">1415</td><td class="code"></td></tr>
+<tr><td class="ln">1416</td><td class="code"></td></tr>
+<tr><td class="ln">1417</td><td class="code">def recalculate_planned_stock_qty(</td></tr>
+<tr><td class="ln">1418</td><td class="code">    line_id,</td></tr>
+<tr><td class="ln">1419</td><td class="code">    product_id,</td></tr>
+<tr><td class="ln">1420</td><td class="code">    start_date,</td></tr>
+<tr><td class="ln">1421</td><td class="code">    end_date,</td></tr>
+<tr><td class="ln">1422</td><td class="code">    demand_map=None,</td></tr>
+<tr><td class="ln">1423</td><td class="code">    planned_stock_adjust_map=None,</td></tr>
+<tr><td class="ln">1424</td><td class="code">    reference_today=None,</td></tr>
+<tr><td class="ln">1425</td><td class="code">    max_parent_lt=None,</td></tr>
+<tr><td class="ln">1426</td><td class="code">    calendar_id=None,</td></tr>
+<tr><td class="ln">1427</td><td class="code">    shared_workday_cache=None,</td></tr>
+<tr><td class="ln">1428</td><td class="code">    force_from_start=False,</td></tr>
+<tr><td class="ln">1429</td><td class="code">):</td></tr>
+<tr><td class="ln">1430</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1431</td><td class="code">    計画在庫を日次で再計算（時制考慮版）</td></tr>
+<tr><td class="ln">1432</td><td class="code">    - 過去（plan_date &lt; today）:</td></tr>
+<tr><td class="ln">1433</td><td class="code">        - 実績あり → 実績ベース計算</td></tr>
+<tr><td class="ln">1434</td><td class="code">        - 実績なし → 生産・出庫ゼロとして計算</td></tr>
+<tr><td class="ln">1435</td><td class="code">    - 今日以降（plan_date &gt;= today）: 計画ベース計算</td></tr>
+<tr><td class="ln">1436</td><td class="code"></td></tr>
+<tr><td class="ln">1437</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">1438</td><td class="code">        line_id: ラインID</td></tr>
+<tr><td class="ln">1439</td><td class="code">        product_id: 製品ID</td></tr>
+<tr><td class="ln">1440</td><td class="code">        start_date: 開始日</td></tr>
+<tr><td class="ln">1441</td><td class="code">        end_date: 終了日</td></tr>
+<tr><td class="ln">1442</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1443</td><td class="code">    initial_backlogs = list(LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1444</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">1445</td><td class="code">        product_id=product_id,</td></tr>
+<tr><td class="ln">1446</td><td class="code">        plan_date__range=[start_date, end_date]</td></tr>
+<tr><td class="ln">1447</td><td class="code">    ).select_related(&#x27;product&#x27;).order_by(&#x27;plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;))</td></tr>
+<tr><td class="ln">1448</td><td class="code"></td></tr>
+<tr><td class="ln">1449</td><td class="code">    if not initial_backlogs:</td></tr>
+<tr><td class="ln">1450</td><td class="code">        return</td></tr>
+<tr><td class="ln">1451</td><td class="code"></td></tr>
+<tr><td class="ln">1452</td><td class="code">    workday_cache = shared_workday_cache if shared_workday_cache is not None else {}</td></tr>
+<tr><td class="ln">1453</td><td class="code">    if calendar_id is None and line_id:</td></tr>
+<tr><td class="ln">1454</td><td class="code">        calendar_id = _resolve_line_calendar_id(line_id)</td></tr>
+<tr><td class="ln">1455</td><td class="code"></td></tr>
+<tr><td class="ln">1456</td><td class="code">    def is_working_day(target_date):</td></tr>
+<tr><td class="ln">1457</td><td class="code">        return _resolve_calendar_working_day(</td></tr>
+<tr><td class="ln">1458</td><td class="code">            target_date,</td></tr>
+<tr><td class="ln">1459</td><td class="code">            calendar_id,</td></tr>
+<tr><td class="ln">1460</td><td class="code">            workday_cache,</td></tr>
+<tr><td class="ln">1461</td><td class="code">        )</td></tr>
+<tr><td class="ln">1462</td><td class="code"></td></tr>
+<tr><td class="ln">1463</td><td class="code">    def get_prev_working_day(target_date):</td></tr>
+<tr><td class="ln">1464</td><td class="code">        prev_date = target_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1465</td><td class="code">        while not is_working_day(prev_date):</td></tr>
+<tr><td class="ln">1466</td><td class="code">            prev_date = prev_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1467</td><td class="code">        return prev_date</td></tr>
+<tr><td class="ln">1468</td><td class="code"></td></tr>
+<tr><td class="ln">1469</td><td class="code">    def shift_working_days(target_date, days):</td></tr>
+<tr><td class="ln">1470</td><td class="code">        if not days:</td></tr>
+<tr><td class="ln">1471</td><td class="code">            return target_date</td></tr>
+<tr><td class="ln">1472</td><td class="code">        if not calendar_id:</td></tr>
+<tr><td class="ln">1473</td><td class="code">            return target_date + timedelta(days=days)</td></tr>
+<tr><td class="ln">1474</td><td class="code">        step = 1 if days &gt; 0 else -1</td></tr>
+<tr><td class="ln">1475</td><td class="code">        remaining = abs(int(days))</td></tr>
+<tr><td class="ln">1476</td><td class="code">        current = target_date</td></tr>
+<tr><td class="ln">1477</td><td class="code">        while remaining &gt; 0:</td></tr>
+<tr><td class="ln">1478</td><td class="code">            current = current + timedelta(days=step)</td></tr>
+<tr><td class="ln">1479</td><td class="code">            if is_working_day(current):</td></tr>
+<tr><td class="ln">1480</td><td class="code">                remaining -= 1</td></tr>
+<tr><td class="ln">1481</td><td class="code">        return current</td></tr>
+<tr><td class="ln">1482</td><td class="code"></td></tr>
+<tr><td class="ln">1483</td><td class="code">    def pick_representative(rows):</td></tr>
+<tr><td class="ln">1484</td><td class="code">        base_rows = [r for r in rows if r.sequence_no == 0]</td></tr>
+<tr><td class="ln">1485</td><td class="code">        return min(base_rows, key=lambda r: r.id)</td></tr>
+<tr><td class="ln">1486</td><td class="code"></td></tr>
+<tr><td class="ln">1487</td><td class="code">    # 計算起点日（calc_today）と実績反映判定日（business_today）を分離する。</td></tr>
+<tr><td class="ln">1488</td><td class="code">    # 休日に再計算した場合でも、当日の実績は計画在庫計算に反映する。</td></tr>
+<tr><td class="ln">1489</td><td class="code">    business_today = reference_today or get_business_today()</td></tr>
+<tr><td class="ln">1490</td><td class="code">    calc_today = business_today</td></tr>
+<tr><td class="ln">1491</td><td class="code">    if reference_today is None and not is_working_day(calc_today):</td></tr>
+<tr><td class="ln">1492</td><td class="code">        calc_today = get_prev_working_day(calc_today)</td></tr>
+<tr><td class="ln">1493</td><td class="code">    # 直親BOMのLTを使用し、LT+1日前から再計算</td></tr>
+<tr><td class="ln">1494</td><td class="code">    if max_parent_lt is None:</td></tr>
+<tr><td class="ln">1495</td><td class="code">        max_parent_lt = _get_direct_parent_bom_lead_time(product_id)</td></tr>
+<tr><td class="ln">1496</td><td class="code">    max_lt = int(max_parent_lt or 0)</td></tr>
+<tr><td class="ln">1497</td><td class="code">    # 最終品/ライン最終品はデリバリLT分だけ初期値を調整するため、計算窓を広げる。</td></tr>
+<tr><td class="ln">1498</td><td class="code">    # self_lt_days（製造LT）ではなく、出庫基準と同じデリバリLT（RoutingStep/Line）を使う。</td></tr>
+<tr><td class="ln">1499</td><td class="code">    sample_product = initial_backlogs[0].product if initial_backlogs else None</td></tr>
+<tr><td class="ln">1500</td><td class="code">    is_final_product = bool(sample_product and getattr(sample_product, &#x27;is_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1501</td><td class="code">    is_line_final_product = bool(sample_product and getattr(sample_product, &#x27;is_line_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1502</td><td class="code">    final_delivery_lt = 0</td></tr>
+<tr><td class="ln">1503</td><td class="code">    use_delivery_lt_initialization = is_final_product or is_line_final_product</td></tr>
+<tr><td class="ln">1504</td><td class="code">    if use_delivery_lt_initialization:</td></tr>
+<tr><td class="ln">1505</td><td class="code">        final_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)</td></tr>
+<tr><td class="ln">1506</td><td class="code">        max_lt = max(max_lt, final_delivery_lt)</td></tr>
+<tr><td class="ln">1507</td><td class="code">    calc_start_date = shift_working_days(calc_today, -(max_lt + 1))</td></tr>
+<tr><td class="ln">1508</td><td class="code">    # 過去から再計算（force_from_start=True）の場合のみ、start_date から再計算する</td></tr>
+<tr><td class="ln">1509</td><td class="code">    if force_from_start and start_date &lt; calc_start_date:</td></tr>
+<tr><td class="ln">1510</td><td class="code">        calc_start_date = start_date</td></tr>
+<tr><td class="ln">1511</td><td class="code"></td></tr>
+<tr><td class="ln">1512</td><td class="code">    backlogs = initial_backlogs</td></tr>
+<tr><td class="ln">1513</td><td class="code">    if calc_start_date != start_date:</td></tr>
+<tr><td class="ln">1514</td><td class="code">        backlogs = list(LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1515</td><td class="code">            line_id=line_id,</td></tr>
+<tr><td class="ln">1516</td><td class="code">            product_id=product_id,</td></tr>
+<tr><td class="ln">1517</td><td class="code">            plan_date__range=[calc_start_date, end_date]</td></tr>
+<tr><td class="ln">1518</td><td class="code">        ).select_related(&#x27;product&#x27;).order_by(&#x27;plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;))</td></tr>
+<tr><td class="ln">1519</td><td class="code">    if not backlogs:</td></tr>
+<tr><td class="ln">1520</td><td class="code">        return</td></tr>
+<tr><td class="ln">1521</td><td class="code">    backlogs, _created_any = _ensure_daily_base_backlogs(</td></tr>
+<tr><td class="ln">1522</td><td class="code">        line_id,</td></tr>
+<tr><td class="ln">1523</td><td class="code">        product_id,</td></tr>
+<tr><td class="ln">1524</td><td class="code">        calc_start_date,</td></tr>
+<tr><td class="ln">1525</td><td class="code">        end_date,</td></tr>
+<tr><td class="ln">1526</td><td class="code">        backlogs=backlogs,</td></tr>
+<tr><td class="ln">1527</td><td class="code">    )</td></tr>
+<tr><td class="ln">1528</td><td class="code">    if not backlogs:</td></tr>
+<tr><td class="ln">1529</td><td class="code">        return</td></tr>
+<tr><td class="ln">1530</td><td class="code">    by_date = {}</td></tr>
+<tr><td class="ln">1531</td><td class="code">    for backlog in backlogs:</td></tr>
+<tr><td class="ln">1532</td><td class="code">        by_date.setdefault(backlog.plan_date, []).append(backlog)</td></tr>
+<tr><td class="ln">1533</td><td class="code">    sample_product = backlogs[0].product if backlogs else None</td></tr>
+<tr><td class="ln">1534</td><td class="code">    is_final_product = bool(sample_product and getattr(sample_product, &#x27;is_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1535</td><td class="code">    is_line_final_product = bool(sample_product and getattr(sample_product, &#x27;is_line_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1536</td><td class="code">    use_delivery_lt_initialization = is_final_product or is_line_final_product</td></tr>
+<tr><td class="ln">1537</td><td class="code"></td></tr>
+<tr><td class="ln">1538</td><td class="code">    inventory_lock_date = SystemSetting.get_lock_date(&#x27;inventory&#x27;)</td></tr>
+<tr><td class="ln">1539</td><td class="code">    planned_by_date = {}</td></tr>
+<tr><td class="ln">1540</td><td class="code">    demand_map = demand_map or {}</td></tr>
+<tr><td class="ln">1541</td><td class="code">    floor_shipping_cache = {}</td></tr>
+<tr><td class="ln">1542</td><td class="code">    calc_rule_map = _load_planned_stock_calc_rule_map()</td></tr>
+<tr><td class="ln">1543</td><td class="code">    line_code_cache = {}</td></tr>
+<tr><td class="ln">1544</td><td class="code">    process_code_cache = {}</td></tr>
+<tr><td class="ln">1545</td><td class="code">    product_code_cache = {}</td></tr>
+<tr><td class="ln">1546</td><td class="code"></td></tr>
+<tr><td class="ln">1547</td><td class="code">    def _resolve_line_code(line_id_value):</td></tr>
+<tr><td class="ln">1548</td><td class="code">        lid = int(line_id_value or 0)</td></tr>
+<tr><td class="ln">1549</td><td class="code">        if lid &lt;= 0:</td></tr>
+<tr><td class="ln">1550</td><td class="code">            return &#x27;&#x27;</td></tr>
+<tr><td class="ln">1551</td><td class="code">        if lid in line_code_cache:</td></tr>
+<tr><td class="ln">1552</td><td class="code">            return line_code_cache[lid]</td></tr>
+<tr><td class="ln">1553</td><td class="code">        from masters.models import Line</td></tr>
+<tr><td class="ln">1554</td><td class="code">        line = Line.objects.filter(id=lid).only(&#x27;line_code&#x27;).first()</td></tr>
+<tr><td class="ln">1555</td><td class="code">        code = str(getattr(line, &#x27;line_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">1556</td><td class="code">        line_code_cache[lid] = code</td></tr>
+<tr><td class="ln">1557</td><td class="code">        return code</td></tr>
+<tr><td class="ln">1558</td><td class="code"></td></tr>
+<tr><td class="ln">1559</td><td class="code">    def _resolve_process_code(process_id_value):</td></tr>
+<tr><td class="ln">1560</td><td class="code">        pid = int(process_id_value or 0)</td></tr>
+<tr><td class="ln">1561</td><td class="code">        if pid &lt;= 0:</td></tr>
+<tr><td class="ln">1562</td><td class="code">            return &#x27;&#x27;</td></tr>
+<tr><td class="ln">1563</td><td class="code">        if pid in process_code_cache:</td></tr>
+<tr><td class="ln">1564</td><td class="code">            return process_code_cache[pid]</td></tr>
+<tr><td class="ln">1565</td><td class="code">        from masters.models import Process</td></tr>
+<tr><td class="ln">1566</td><td class="code">        proc = Process.objects.filter(id=pid).only(&#x27;process_code&#x27;).first()</td></tr>
+<tr><td class="ln">1567</td><td class="code">        code = str(getattr(proc, &#x27;process_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">1568</td><td class="code">        process_code_cache[pid] = code</td></tr>
+<tr><td class="ln">1569</td><td class="code">        return code</td></tr>
+<tr><td class="ln">1570</td><td class="code"></td></tr>
+<tr><td class="ln">1571</td><td class="code">    def _resolve_product_code(product_id_value):</td></tr>
+<tr><td class="ln">1572</td><td class="code">        pid = int(product_id_value or 0)</td></tr>
+<tr><td class="ln">1573</td><td class="code">        if pid &lt;= 0:</td></tr>
+<tr><td class="ln">1574</td><td class="code">            return &#x27;&#x27;</td></tr>
+<tr><td class="ln">1575</td><td class="code">        if pid in product_code_cache:</td></tr>
+<tr><td class="ln">1576</td><td class="code">            return product_code_cache[pid]</td></tr>
+<tr><td class="ln">1577</td><td class="code">        from masters.models import Product</td></tr>
+<tr><td class="ln">1578</td><td class="code">        prod = Product.objects.filter(id=pid).only(&#x27;product_code&#x27;).first()</td></tr>
+<tr><td class="ln">1579</td><td class="code">        code = str(getattr(prod, &#x27;product_code&#x27;, &#x27;&#x27;) or &#x27;&#x27;).strip().upper()</td></tr>
+<tr><td class="ln">1580</td><td class="code">        product_code_cache[pid] = code</td></tr>
+<tr><td class="ln">1581</td><td class="code">        return code</td></tr>
+<tr><td class="ln">1582</td><td class="code"></td></tr>
+<tr><td class="ln">1583</td><td class="code">    # 計画在庫は「開始日の前日値」を起点にする。</td></tr>
+<tr><td class="ln">1584</td><td class="code">    # 前日以前は再計算せず、その日の既存値を保持する。</td></tr>
+<tr><td class="ln">1585</td><td class="code">    previous_planned_backlog = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1586</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">1587</td><td class="code">        product_id=product_id,</td></tr>
+<tr><td class="ln">1588</td><td class="code">        plan_date__lt=calc_start_date,</td></tr>
+<tr><td class="ln">1589</td><td class="code">        planned_stock_qty__isnull=False,</td></tr>
+<tr><td class="ln">1590</td><td class="code">    ).order_by(&#x27;-plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;).first()</td></tr>
+<tr><td class="ln">1591</td><td class="code"></td></tr>
+<tr><td class="ln">1592</td><td class="code">    has_prev_planned = previous_planned_backlog is not None</td></tr>
+<tr><td class="ln">1593</td><td class="code">    if has_prev_planned:</td></tr>
+<tr><td class="ln">1594</td><td class="code">        last_planned = previous_planned_backlog.planned_stock_qty or 0</td></tr>
+<tr><td class="ln">1595</td><td class="code">        planned_by_date[previous_planned_backlog.plan_date] = last_planned</td></tr>
+<tr><td class="ln">1596</td><td class="code">        initial_backlog = previous_planned_backlog</td></tr>
+<tr><td class="ln">1597</td><td class="code">    else:</td></tr>
+<tr><td class="ln">1598</td><td class="code">        # 既存計庫が無い初回だけ、実在庫を基準に LT 分の需要を差し引いて初期化する。</td></tr>
+<tr><td class="ln">1599</td><td class="code">        # 最終品/ライン最終品: calc_start_date 当日（__lte）の在庫を使う</td></tr>
+<tr><td class="ln">1600</td><td class="code">        # 社内品: calc_start_date の前日（__lt）の在庫を使う</td></tr>
+<tr><td class="ln">1601</td><td class="code">        _ib_date_lookup = &#x27;plan_date__lte&#x27; if use_delivery_lt_initialization else &#x27;plan_date__lt&#x27;</td></tr>
+<tr><td class="ln">1602</td><td class="code">        initial_backlog = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1603</td><td class="code">            line_id=line_id,</td></tr>
+<tr><td class="ln">1604</td><td class="code">            product_id=product_id,</td></tr>
+<tr><td class="ln">1605</td><td class="code">            **{_ib_date_lookup: calc_start_date},</td></tr>
+<tr><td class="ln">1606</td><td class="code">            stock_qty__isnull=False</td></tr>
+<tr><td class="ln">1607</td><td class="code">        ).order_by(&#x27;-plan_date&#x27;, &#x27;sequence_no&#x27;, &#x27;id&#x27;).first()</td></tr>
+<tr><td class="ln">1608</td><td class="code"></td></tr>
+<tr><td class="ln">1609</td><td class="code">    if initial_backlog and not has_prev_planned:</td></tr>
+<tr><td class="ln">1610</td><td class="code">        # 実在庫はLTシフトなし、計画在庫はLTシフトありで計算するため、</td></tr>
+<tr><td class="ln">1611</td><td class="code">        # initial_date+1 ～ initial_date+LT の出庫分（LTシフト）を差し引く。</td></tr>
+<tr><td class="ln">1612</td><td class="code">        # 社内品：親の実績を BOM LT 分差し引く</td></tr>
+<tr><td class="ln">1613</td><td class="code">        # 最終品/ライン最終品：デリバリLT分の需要を差し引く</td></tr>
+<tr><td class="ln">1614</td><td class="code">        lt_adjustment = _compute_planned_stock_lt_adjustment(</td></tr>
+<tr><td class="ln">1615</td><td class="code">            product_id, initial_backlog.plan_date, max_lt, shift_working_days,</td></tr>
+<tr><td class="ln">1616</td><td class="code">            demand_map=demand_map,</td></tr>
+<tr><td class="ln">1617</td><td class="code">            final_delivery_lt=final_delivery_lt if use_delivery_lt_initialization else None,</td></tr>
+<tr><td class="ln">1618</td><td class="code">            line_id=line_id,</td></tr>
+<tr><td class="ln">1619</td><td class="code">        )</td></tr>
+<tr><td class="ln">1620</td><td class="code">        last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment</td></tr>
+<tr><td class="ln">1621</td><td class="code">        planned_by_date[initial_backlog.plan_date] = last_planned</td></tr>
+<tr><td class="ln">1622</td><td class="code">    elif not initial_backlog:</td></tr>
+<tr><td class="ln">1623</td><td class="code">        last_planned = 0</td></tr>
+<tr><td class="ln">1624</td><td class="code"></td></tr>
+<tr><td class="ln">1625</td><td class="code">    trace_log(</td></tr>
+<tr><td class="ln">1626</td><td class="code">        line_id, product_id, calc_start_date,</td></tr>
+<tr><td class="ln">1627</td><td class="code">        f&#x27;計画在庫計算開始: calc_start_date={calc_start_date}, max_lt={max_lt}, &#x27;</td></tr>
+<tr><td class="ln">1628</td><td class="code">        f&#x27;初期値={last_planned}, 前日値あり={&quot;あり&quot; if has_prev_planned else &quot;なし&quot;}&#x27;</td></tr>
+<tr><td class="ln">1629</td><td class="code">    )</td></tr>
+<tr><td class="ln">1630</td><td class="code"></td></tr>
+<tr><td class="ln">1631</td><td class="code">    # 更新対象のbacklogを追跡（計算開始日以前は更新しない）</td></tr>
+<tr><td class="ln">1632</td><td class="code">    backlogs_to_update = []</td></tr>
+<tr><td class="ln">1633</td><td class="code"></td></tr>
+<tr><td class="ln">1634</td><td class="code">    for plan_date in sorted(by_date.keys()):</td></tr>
+<tr><td class="ln">1635</td><td class="code">        rows = by_date[plan_date]</td></tr>
+<tr><td class="ln">1636</td><td class="code">        sample = rows[0]</td></tr>
+<tr><td class="ln">1637</td><td class="code"></td></tr>
+<tr><td class="ln">1638</td><td class="code">        # 棚卸確定フラグがある場合、その値を正として採用</td></tr>
+<tr><td class="ln">1639</td><td class="code">        if any(getattr(r, &#x27;is_stocktake_fix&#x27;, False) for r in rows):</td></tr>
+<tr><td class="ln">1640</td><td class="code">            planned_stock = sample.planned_stock_qty or 0</td></tr>
+<tr><td class="ln">1641</td><td class="code">            planned_by_date[plan_date] = planned_stock</td></tr>
+<tr><td class="ln">1642</td><td class="code">            last_planned = planned_stock</td></tr>
+<tr><td class="ln">1643</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;棚卸確定フラグにより既存値採用: planned_stock_qty={planned_stock}&#x27;)</td></tr>
+<tr><td class="ln">1644</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1645</td><td class="code"></td></tr>
+<tr><td class="ln">1646</td><td class="code">        # 締め日以前は既存値を維持し再計算しない</td></tr>
+<tr><td class="ln">1647</td><td class="code">        if inventory_lock_date and plan_date &lt;= inventory_lock_date:</td></tr>
+<tr><td class="ln">1648</td><td class="code">            existing_planned = 0</td></tr>
+<tr><td class="ln">1649</td><td class="code">            for row in rows:</td></tr>
+<tr><td class="ln">1650</td><td class="code">                if row.planned_stock_qty:</td></tr>
+<tr><td class="ln">1651</td><td class="code">                    existing_planned = row.planned_stock_qty</td></tr>
+<tr><td class="ln">1652</td><td class="code">                    break</td></tr>
+<tr><td class="ln">1653</td><td class="code">            planned_by_date[plan_date] = existing_planned</td></tr>
+<tr><td class="ln">1654</td><td class="code">            last_planned = existing_planned</td></tr>
+<tr><td class="ln">1655</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;締め日({inventory_lock_date})以前のため既存値維持: planned_stock_qty={existing_planned}&#x27;)</td></tr>
+<tr><td class="ln">1656</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1657</td><td class="code"></td></tr>
+<tr><td class="ln">1658</td><td class="code">        # 計算開始日以前は通常計算をスキップ。</td></tr>
+<tr><td class="ln">1659</td><td class="code">        # 最終品/ライン最終品: calc_start_date 当日の計庫を初期値とするため、</td></tr>
+<tr><td class="ln">1660</td><td class="code">        #   当日もスキップ。ただし LT 調整済みの初期値を DB に書き戻す必要があるため bulk_update 対象に含める。</td></tr>
+<tr><td class="ln">1661</td><td class="code">        # 社内品: calc_start_date から通常計算を開始する（従来どおり）。</td></tr>
+<tr><td class="ln">1662</td><td class="code">        if plan_date &lt; calc_start_date:</td></tr>
+<tr><td class="ln">1663</td><td class="code">            existing_planned = 0</td></tr>
+<tr><td class="ln">1664</td><td class="code">            for row in rows:</td></tr>
+<tr><td class="ln">1665</td><td class="code">                if row.planned_stock_qty is not None:</td></tr>
+<tr><td class="ln">1666</td><td class="code">                    existing_planned = row.planned_stock_qty</td></tr>
+<tr><td class="ln">1667</td><td class="code">                    break</td></tr>
+<tr><td class="ln">1668</td><td class="code">            planned_by_date[plan_date] = existing_planned</td></tr>
+<tr><td class="ln">1669</td><td class="code">            last_planned = existing_planned</td></tr>
+<tr><td class="ln">1670</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;calc_start_date({calc_start_date})より前のため既存値維持: planned_stock_qty={existing_planned}&#x27;)</td></tr>
+<tr><td class="ln">1671</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1672</td><td class="code">        if use_delivery_lt_initialization and not has_prev_planned and plan_date == calc_start_date:</td></tr>
+<tr><td class="ln">1673</td><td class="code">            planned_by_date[plan_date] = last_planned</td></tr>
+<tr><td class="ln">1674</td><td class="code">            rep = pick_representative(rows)</td></tr>
+<tr><td class="ln">1675</td><td class="code">            for row in rows:</td></tr>
+<tr><td class="ln">1676</td><td class="code">                row.planned_stock_qty = 0</td></tr>
+<tr><td class="ln">1677</td><td class="code">            rep.planned_stock_qty = last_planned</td></tr>
+<tr><td class="ln">1678</td><td class="code">            backlogs_to_update.extend(rows)</td></tr>
+<tr><td class="ln">1679</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;calc_start_date当日(最終品LT初期化)のため初期値採用: planned_stock_qty={last_planned}&#x27;)</td></tr>
+<tr><td class="ln">1680</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1681</td><td class="code"></td></tr>
+<tr><td class="ln">1682</td><td class="code">        plan_total = sum(r.plan_qty or 0 for r in rows)</td></tr>
+<tr><td class="ln">1683</td><td class="code">        actual_total = sum(r.actual_qty or 0 for r in rows)</td></tr>
+<tr><td class="ln">1684</td><td class="code">        # 計画在庫計算でも adjust_qty を使用しない</td></tr>
+<tr><td class="ln">1685</td><td class="code">        # 仕損による子部品の消費は、出庫計算（親の実績/計画+仕損）で反映される</td></tr>
+<tr><td class="ln">1686</td><td class="code">        order_total = sum(r.order_qty or 0 for r in rows)</td></tr>
+<tr><td class="ln">1687</td><td class="code"></td></tr>
+<tr><td class="ln">1688</td><td class="code">        # 非稼働日は入庫・出庫とも発生しないため前日からそのまま繰越す。</td></tr>
+<tr><td class="ln">1689</td><td class="code">        # shift_working_daysが休日→営業日にマッピングするため、営業日と同じ親データを</td></tr>
+<tr><td class="ln">1690</td><td class="code">        # 二重カウントしてしまう問題を防ぐ。</td></tr>
+<tr><td class="ln">1691</td><td class="code">        if not is_working_day(plan_date):</td></tr>
+<tr><td class="ln">1692</td><td class="code">            prev_day = plan_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1693</td><td class="code">            prev_planned = planned_by_date.get(prev_day, last_planned)</td></tr>
+<tr><td class="ln">1694</td><td class="code">            planned_stock_adjust = _resolve_day_adjustment(rows, planned_stock_adjust_map)</td></tr>
+<tr><td class="ln">1695</td><td class="code">            planned_stock = prev_planned + planned_stock_adjust</td></tr>
+<tr><td class="ln">1696</td><td class="code">            rep = pick_representative(rows)</td></tr>
+<tr><td class="ln">1697</td><td class="code">            for row in rows:</td></tr>
+<tr><td class="ln">1698</td><td class="code">                row.planned_stock_qty = 0</td></tr>
+<tr><td class="ln">1699</td><td class="code">            rep.planned_stock_qty = planned_stock</td></tr>
+<tr><td class="ln">1700</td><td class="code">            planned_by_date[plan_date] = planned_stock</td></tr>
+<tr><td class="ln">1701</td><td class="code">            last_planned = planned_stock</td></tr>
+<tr><td class="ln">1702</td><td class="code">            backlogs_to_update.extend(rows)</td></tr>
+<tr><td class="ln">1703</td><td class="code">            trace_log(line_id, product_id, plan_date, f&#x27;非稼働日のため前日値を繰越: planned_stock_qty={planned_stock}&#x27;)</td></tr>
+<tr><td class="ln">1704</td><td class="code">            continue</td></tr>
+<tr><td class="ln">1705</td><td class="code"></td></tr>
+<tr><td class="ln">1706</td><td class="code">        is_final = bool(getattr(sample.product, &#x27;is_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1707</td><td class="code">        is_line_final = bool(getattr(sample.product, &#x27;is_line_final_product&#x27;, False))</td></tr>
+<tr><td class="ln">1708</td><td class="code">        line_code = _resolve_line_code(getattr(sample, &#x27;line_id&#x27;, None))</td></tr>
+<tr><td class="ln">1709</td><td class="code">        process_code = _resolve_process_code(getattr(sample, &#x27;process_id&#x27;, None))</td></tr>
+<tr><td class="ln">1710</td><td class="code">        p_code = _resolve_product_code(sample.product_id)</td></tr>
+<tr><td class="ln">1711</td><td class="code">        forced_parent_shipment_mode = _resolve_calc_rule(</td></tr>
+<tr><td class="ln">1712</td><td class="code">            calc_rule_map, line_code, process_code, &#x27;PLANNED_STOCK&#x27;, p_code</td></tr>
+<tr><td class="ln">1713</td><td class="code">        )</td></tr>
+<tr><td class="ln">1714</td><td class="code">        if is_final:</td></tr>
+<tr><td class="ln">1715</td><td class="code">            planned_shipment = demand_map.get((sample.product_id, plan_date), Decimal(&#x27;0&#x27;))</td></tr>
+<tr><td class="ln">1716</td><td class="code">        elif is_line_final:</td></tr>
+<tr><td class="ln">1717</td><td class="code">            if forced_parent_shipment_mode == &#x27;ORDER_QTY&#x27;:</td></tr>
+<tr><td class="ln">1718</td><td class="code">                planned_shipment = Decimal(str(order_total))</td></tr>
+<tr><td class="ln">1719</td><td class="code">            elif plan_date &lt; business_today:</td></tr>
+<tr><td class="ln">1720</td><td class="code">                # ライン最終品でも過去日は親の実績優先で整合を取る。</td></tr>
+<tr><td class="ln">1721</td><td class="code">                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)</td></tr>
+<tr><td class="ln">1722</td><td class="code">            else:</td></tr>
+<tr><td class="ln">1723</td><td class="code">                planned_shipment = Decimal(str(order_total))</td></tr>
+<tr><td class="ln">1724</td><td class="code">        else:</td></tr>
+<tr><td class="ln">1725</td><td class="code">            if forced_parent_shipment_mode == &#x27;ORDER_QTY&#x27;:</td></tr>
+<tr><td class="ln">1726</td><td class="code">                planned_shipment = Decimal(str(order_total))</td></tr>
+<tr><td class="ln">1727</td><td class="code">            elif plan_date &lt; business_today:</td></tr>
+<tr><td class="ln">1728</td><td class="code">                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)</td></tr>
+<tr><td class="ln">1729</td><td class="code">            else:</td></tr>
+<tr><td class="ln">1730</td><td class="code">                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)</td></tr>
+<tr><td class="ln">1731</td><td class="code">        planned_shipment = int(planned_shipment or 0)</td></tr>
+<tr><td class="ln">1732</td><td class="code"></td></tr>
+<tr><td class="ln">1733</td><td class="code">        # 在庫も進度と同様、休日を含めて「前日（暦日）」を基準に引き継ぐ。</td></tr>
+<tr><td class="ln">1734</td><td class="code">        prev_day = plan_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1735</td><td class="code">        prev_planned = planned_by_date.get(prev_day, last_planned)</td></tr>
+<tr><td class="ln">1736</td><td class="code">        planned_stock_adjust = _resolve_day_adjustment(rows, planned_stock_adjust_map)</td></tr>
+<tr><td class="ln">1737</td><td class="code"></td></tr>
+<tr><td class="ln">1738</td><td class="code">        # 計画在庫 = 前日計画在庫 + 実績/計画 - 出庫</td></tr>
+<tr><td class="ln">1739</td><td class="code">        # 仕損による子部品消費は出庫計算で反映済み（adjust_qty は使用しない）</td></tr>
+<tr><td class="ln">1740</td><td class="code">        if plan_date &lt; business_today:</td></tr>
+<tr><td class="ln">1741</td><td class="code">            planned_stock = (</td></tr>
+<tr><td class="ln">1742</td><td class="code">                prev_planned</td></tr>
+<tr><td class="ln">1743</td><td class="code">                + actual_total</td></tr>
+<tr><td class="ln">1744</td><td class="code">                - planned_shipment</td></tr>
+<tr><td class="ln">1745</td><td class="code">                + planned_stock_adjust</td></tr>
+<tr><td class="ln">1746</td><td class="code">            )</td></tr>
+<tr><td class="ln">1747</td><td class="code">        else:</td></tr>
+<tr><td class="ln">1748</td><td class="code">            planned_stock = (</td></tr>
+<tr><td class="ln">1749</td><td class="code">                prev_planned</td></tr>
+<tr><td class="ln">1750</td><td class="code">                + plan_total</td></tr>
+<tr><td class="ln">1751</td><td class="code">                - planned_shipment</td></tr>
+<tr><td class="ln">1752</td><td class="code">                + planned_stock_adjust</td></tr>
+<tr><td class="ln">1753</td><td class="code">            )</td></tr>
+<tr><td class="ln">1754</td><td class="code"></td></tr>
+<tr><td class="ln">1755</td><td class="code">        rep = pick_representative(rows)</td></tr>
+<tr><td class="ln">1756</td><td class="code">        for row in rows:</td></tr>
+<tr><td class="ln">1757</td><td class="code">            row.planned_stock_qty = 0</td></tr>
+<tr><td class="ln">1758</td><td class="code">        rep.planned_stock_qty = planned_stock</td></tr>
+<tr><td class="ln">1759</td><td class="code">        planned_by_date[plan_date] = planned_stock</td></tr>
+<tr><td class="ln">1760</td><td class="code">        last_planned = planned_stock</td></tr>
+<tr><td class="ln">1761</td><td class="code"></td></tr>
+<tr><td class="ln">1762</td><td class="code">        # 更新対象に追加</td></tr>
+<tr><td class="ln">1763</td><td class="code">        backlogs_to_update.extend(rows)</td></tr>
+<tr><td class="ln">1764</td><td class="code"></td></tr>
+<tr><td class="ln">1765</td><td class="code">        if plan_date &lt; business_today:</td></tr>
+<tr><td class="ln">1766</td><td class="code">            trace_log(</td></tr>
+<tr><td class="ln">1767</td><td class="code">                line_id, product_id, plan_date,</td></tr>
+<tr><td class="ln">1768</td><td class="code">                f&#x27;計画在庫計算(過去日/実績ベース): 前日={prev_planned}, 当日実績={actual_total}, &#x27;</td></tr>
+<tr><td class="ln">1769</td><td class="code">                f&#x27;当日出庫={planned_shipment}, 手動調整={planned_stock_adjust}, 結果={planned_stock}&#x27;</td></tr>
+<tr><td class="ln">1770</td><td class="code">            )</td></tr>
+<tr><td class="ln">1771</td><td class="code">        else:</td></tr>
+<tr><td class="ln">1772</td><td class="code">            trace_log(</td></tr>
+<tr><td class="ln">1773</td><td class="code">                line_id, product_id, plan_date,</td></tr>
+<tr><td class="ln">1774</td><td class="code">                f&#x27;計画在庫計算(当日以降/計画ベース): 前日={prev_planned}, 当日計画={plan_total}, &#x27;</td></tr>
+<tr><td class="ln">1775</td><td class="code">                f&#x27;当日出庫={planned_shipment}, 手動調整={planned_stock_adjust}, 結果={planned_stock}&#x27;</td></tr>
+<tr><td class="ln">1776</td><td class="code">            )</td></tr>
+<tr><td class="ln">1777</td><td class="code"></td></tr>
+<tr><td class="ln">1778</td><td class="code">    if backlogs_to_update:</td></tr>
+<tr><td class="ln">1779</td><td class="code">        LineBacklog.objects.bulk_update(backlogs_to_update, [&#x27;planned_stock_qty&#x27;])</td></tr>
+<tr><td class="ln">1780</td><td class="code"></td></tr>
+<tr><td class="ln">1781</td><td class="code"></td></tr>
+<tr><td class="ln">1782</td><td class="code">def recalculate_inventory_for_line(</td></tr>
+<tr><td class="ln">1783</td><td class="code">    line_id,</td></tr>
+<tr><td class="ln">1784</td><td class="code">    start_date,</td></tr>
+<tr><td class="ln">1785</td><td class="code">    end_date,</td></tr>
+<tr><td class="ln">1786</td><td class="code">    include_progress=True,</td></tr>
+<tr><td class="ln">1787</td><td class="code">    line_final_only=False,</td></tr>
+<tr><td class="ln">1788</td><td class="code">    product_ids=None,</td></tr>
+<tr><td class="ln">1789</td><td class="code">    progress_only=False,</td></tr>
+<tr><td class="ln">1790</td><td class="code">    progress_calc_start_date=None,</td></tr>
+<tr><td class="ln">1791</td><td class="code">    force_from_start=False,</td></tr>
+<tr><td class="ln">1792</td><td class="code">):</td></tr>
+<tr><td class="ln">1793</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1794</td><td class="code">    指定ラインの在庫を再計算</td></tr>
+<tr><td class="ln">1795</td><td class="code"></td></tr>
+<tr><td class="ln">1796</td><td class="code">    Args:</td></tr>
+<tr><td class="ln">1797</td><td class="code">        line_id: ラインID</td></tr>
+<tr><td class="ln">1798</td><td class="code">        start_date: 開始日</td></tr>
+<tr><td class="ln">1799</td><td class="code">        end_date: 終了日</td></tr>
+<tr><td class="ln">1800</td><td class="code">        include_progress: 進度も再計算するか（デフォルト: True）</td></tr>
+<tr><td class="ln">1801</td><td class="code">        line_final_only: ライン最終品のみ計算するか（デフォルト: False）</td></tr>
+<tr><td class="ln">1802</td><td class="code">        product_ids: 対象製品ID配列（指定時はその製品のみ計算）</td></tr>
+<tr><td class="ln">1803</td><td class="code">        progress_only: Trueの場合は進度のみ再計算し、在庫・計画在庫をスキップ</td></tr>
+<tr><td class="ln">1804</td><td class="code">    &quot;&quot;&quot;</td></tr>
+<tr><td class="ln">1805</td><td class="code">    import logging</td></tr>
+<tr><td class="ln">1806</td><td class="code">    import time</td></tr>
+<tr><td class="ln">1807</td><td class="code">    logger_name = &#x27;progress_calculator&#x27; if progress_only else __name__</td></tr>
+<tr><td class="ln">1808</td><td class="code">    logger = logging.getLogger(logger_name)</td></tr>
+<tr><td class="ln">1809</td><td class="code">    target_product_ids = sorted({int(pid) for pid in (product_ids or []) if pid is not None})</td></tr>
+<tr><td class="ln">1810</td><td class="code"></td></tr>
+<tr><td class="ln">1811</td><td class="code">    # progress_only=True のとき進度は必ず計算する</td></tr>
+<tr><td class="ln">1812</td><td class="code">    if progress_only:</td></tr>
+<tr><td class="ln">1813</td><td class="code">        include_progress = True</td></tr>
+<tr><td class="ln">1814</td><td class="code"></td></tr>
+<tr><td class="ln">1815</td><td class="code">    overall_start = time.perf_counter()</td></tr>
+<tr><td class="ln">1816</td><td class="code">    recalc_label = &#x27;進度再計算&#x27; if progress_only else &#x27;在庫再計算&#x27;</td></tr>
+<tr><td class="ln">1817</td><td class="code">    product_calc_label = &#x27;進度計算&#x27; if progress_only else &#x27;在庫計算&#x27;</td></tr>
+<tr><td class="ln">1818</td><td class="code">    logger.info(</td></tr>
+<tr><td class="ln">1819</td><td class="code">        &quot;%s開始: line_id=%s, %s ~ %s, line_final_only=%s, progress_only=%s, product_count=%s&quot;,</td></tr>
+<tr><td class="ln">1820</td><td class="code">        recalc_label,</td></tr>
+<tr><td class="ln">1821</td><td class="code">        line_id,</td></tr>
+<tr><td class="ln">1822</td><td class="code">        start_date,</td></tr>
+<tr><td class="ln">1823</td><td class="code">        end_date,</td></tr>
+<tr><td class="ln">1824</td><td class="code">        line_final_only,</td></tr>
+<tr><td class="ln">1825</td><td class="code">        progress_only,</td></tr>
+<tr><td class="ln">1826</td><td class="code">        len(target_product_ids) if target_product_ids else &quot;ALL&quot;,</td></tr>
+<tr><td class="ln">1827</td><td class="code">    )</td></tr>
+<tr><td class="ln">1828</td><td class="code"></td></tr>
+<tr><td class="ln">1829</td><td class="code">    shared_calendar_id = _resolve_line_calendar_id(line_id) if line_id else None</td></tr>
+<tr><td class="ln">1830</td><td class="code">    shared_workday_cache = {}</td></tr>
+<tr><td class="ln">1831</td><td class="code"></td></tr>
+<tr><td class="ln">1832</td><td class="code">    def is_working_day(target_date):</td></tr>
+<tr><td class="ln">1833</td><td class="code">        return _resolve_calendar_working_day(</td></tr>
+<tr><td class="ln">1834</td><td class="code">            target_date,</td></tr>
+<tr><td class="ln">1835</td><td class="code">            shared_calendar_id,</td></tr>
+<tr><td class="ln">1836</td><td class="code">            shared_workday_cache,</td></tr>
+<tr><td class="ln">1837</td><td class="code">        )</td></tr>
+<tr><td class="ln">1838</td><td class="code"></td></tr>
+<tr><td class="ln">1839</td><td class="code">    def get_prev_working_day(target_date):</td></tr>
+<tr><td class="ln">1840</td><td class="code">        prev_date = target_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1841</td><td class="code">        while not is_working_day(prev_date):</td></tr>
+<tr><td class="ln">1842</td><td class="code">            prev_date = prev_date - timedelta(days=1)</td></tr>
+<tr><td class="ln">1843</td><td class="code">        return prev_date</td></tr>
+<tr><td class="ln">1844</td><td class="code"></td></tr>
+<tr><td class="ln">1845</td><td class="code">    def shift_working_days(target_date, days):</td></tr>
+<tr><td class="ln">1846</td><td class="code">        if not days:</td></tr>
+<tr><td class="ln">1847</td><td class="code">            return target_date</td></tr>
+<tr><td class="ln">1848</td><td class="code">        if not shared_calendar_id:</td></tr>
+<tr><td class="ln">1849</td><td class="code">            return target_date + timedelta(days=days)</td></tr>
+<tr><td class="ln">1850</td><td class="code">        step = 1 if days &gt; 0 else -1</td></tr>
+<tr><td class="ln">1851</td><td class="code">        remaining = abs(int(days))</td></tr>
+<tr><td class="ln">1852</td><td class="code">        current = target_date</td></tr>
+<tr><td class="ln">1853</td><td class="code">        while remaining &gt; 0:</td></tr>
+<tr><td class="ln">1854</td><td class="code">            current = current + timedelta(days=step)</td></tr>
+<tr><td class="ln">1855</td><td class="code">            if is_working_day(current):</td></tr>
+<tr><td class="ln">1856</td><td class="code">                remaining -= 1</td></tr>
+<tr><td class="ln">1857</td><td class="code">        return current</td></tr>
+<tr><td class="ln">1858</td><td class="code"></td></tr>
+<tr><td class="ln">1859</td><td class="code">    product_qs = LineBacklog.objects.filter(</td></tr>
+<tr><td class="ln">1860</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">1861</td><td class="code">        plan_date__range=[start_date, end_date]</td></tr>
+<tr><td class="ln">1862</td><td class="code">    )</td></tr>
+<tr><td class="ln">1863</td><td class="code">    if target_product_ids:</td></tr>
+<tr><td class="ln">1864</td><td class="code">        product_qs = product_qs.filter(product_id__in=target_product_ids)</td></tr>
+<tr><td class="ln">1865</td><td class="code">    if line_final_only:</td></tr>
+<tr><td class="ln">1866</td><td class="code">        product_qs = product_qs.filter(product__is_line_final_product=True)</td></tr>
+<tr><td class="ln">1867</td><td class="code">    from masters.models import RoutingStep</td></tr>
+<tr><td class="ln">1868</td><td class="code">    from masters.services.routing_service import build_effective_routing_range_q</td></tr>
+<tr><td class="ln">1869</td><td class="code">    routing_candidate_q = build_effective_routing_range_q(start_date, end_date, prefix=&#x27;routing__&#x27;)</td></tr>
+<tr><td class="ln">1870</td><td class="code">    products_with_routing = set()</td></tr>
+<tr><td class="ln">1871</td><td class="code">    routing_steps = RoutingStep.objects.filter(</td></tr>
+<tr><td class="ln">1872</td><td class="code">        line_id=line_id,</td></tr>
+<tr><td class="ln">1873</td><td class="code">    ).filter(</td></tr>
+<tr><td class="ln">1874</td><td class="code">        routing_candidate_q</td></tr>
+<tr><td class="ln">1875</td><td class="code">    ).exclude(output_product_id__isnull=True)</td></tr>
+<tr><td class="ln">1876</td><td class="code">    for step in routing_steps:</td></tr>
+<tr><td class="ln">1877</td><td class="code">        products_with_routing.add(step.output_product_id)</td></tr>
+<tr><td class="ln">1878</td><td class="code">    all_product_ids = list(product_qs.values_list(&#x27;product_id&#x27;, flat=True).distinct())</td></tr>
+<tr><td class="ln">1879</td><td class="code">    excluded_ids = [pid for pid in all_product_ids if pid not in products_with_routing]</td></tr>
+<tr><td class="ln">1880</td><td class="code">    if excluded_ids:</td></tr>
+<tr><td class="ln">1881</td><td class="code">        logger.warning(</td></tr>
+<tr><td class="ln">1882</td><td class="code">            &quot;RoutingStep未設定のため計算対象から除外: line_id=%s, 除外製品数=%d, product_ids=%s&quot;,</td></tr>
+<tr><td class="ln">1883</td><td class="code">            line_id, len(excluded_ids), excluded_ids,</td></tr>
+<tr><td class="ln">1884</td><td class="code">        )</td></tr>
+<tr><td class="ln">1885</td><td class="code">    product_ids = [pid for pid in all_product_ids if pid in products_with_routing]</td></tr>
+<tr><td class="ln">1886</td><td class="code">    traced_product_ids = [product_id for product_id in product_ids if is_traced(line_id, product_id)]</td></tr>
+<tr><td class="ln">1887</td><td class="code">    if traced_product_ids:</td></tr>
+<tr><td class="ln">1888</td><td class="code">        trace_line_log(</td></tr>
+<tr><td class="ln">1889</td><td class="code">            line_id,</td></tr>
+<tr><td class="ln">1890</td><td class="code">            start_date,</td></tr>
+<tr><td class="ln">1891</td><td class="code">            f&#x27;{recalc_label}対象確認: start={start_date}, end={end_date}, 対象製品数={len(product_ids)}, traced_products={traced_product_ids}&#x27;</td></tr>
+<tr><td class="ln">1892</td><td class="code">        )</td></tr>
+<tr><td class="ln">1893</td><td class="code"></td></tr>
+<tr><td class="ln">1894</td><td class="code">    logger.info(f&quot;対象製品数: {len(product_ids)}&quot;)</td></tr>
+<tr><td class="ln">1895</td><td class="code"></td></tr>
+<tr><td class="ln">1896</td><td class="code">    direct_lt_cache = {}</td></tr>
+<tr><td class="ln">1897</td><td class="code">    max_parent_lt_cache = {}</td></tr>
+<tr><td class="ln">1898</td><td class="code">    inventory_calc_start_date = start_date</td></tr>
+<tr><td class="ln">1899</td><td class="code">    if not progress_only and product_ids:</td></tr>
+<tr><td class="ln">1900</td><td class="code">        calc_today = get_business_today()</td></tr>
+<tr><td class="ln">1901</td><td class="code">        if not is_working_day(calc_today):</td></tr>
+<tr><td class="ln">1902</td><td class="code">            calc_today = get_prev_working_day(calc_today)</td></tr>
+<tr><td class="ln">1903</td><td class="code">        for product_id in product_ids:</td></tr>
+<tr><td class="ln">1904</td><td class="code">            direct_lt = _get_direct_parent_bom_lead_time(product_id)</td></tr>
+<tr><td class="ln">1905</td><td class="code">            direct_lt_cache[product_id] = direct_lt</td></tr>
+<tr><td class="ln">1906</td><td class="code">        max_direct_lt = max((int(direct_lt_cache.get(pid) or 0) for pid in product_ids), default=0)</td></tr>
+<tr><td class="ln">1907</td><td class="code">        inventory_calc_start_date = min(</td></tr>
+<tr><td class="ln">1908</td><td class="code">            start_date,</td></tr>
+<tr><td class="ln">1909</td><td class="code">            shift_working_days(calc_today, -(max_direct_lt + 1)),</td></tr>
+<tr><td class="ln">1910</td><td class="code">        )</td></tr>
+<tr><td class="ln">1911</td><td class="code">        if traced_product_ids:</td></tr>
+<tr><td class="ln">1912</td><td class="code">            trace_line_log(</td></tr>
+<tr><td class="ln">1913</td><td class="code">                line_id,</td></tr>
+<tr><td class="ln">1914</td><td class="code">                inventory_calc_start_date,</td></tr>
+<tr><td class="ln">1915</td><td class="code">                f&#x27;在庫計算開始日補正: 要求開始={start_date}, 実効開始={inventory_calc_start_date}, max_direct_lt={max_direct_lt}&#x27;</td></tr>
+<tr><td class="ln">1916</td><td class="code">            )</td></tr>
+<tr><td class="ln">1917</td><td class="code"></td></tr>
+<tr><td class="ln">1918</td><td class="code">    progress_anchor_start_date = progress_calc_start_date or start_date</td></tr>
+<tr><td class="ln">1919</td><td class="code">    if include_progress and not progress_calc_start_date and product_ids:</td></tr>
+<tr><td class="ln">1920</td><td class="code">        calc_today = get_business_today()</td></tr>
+<tr><td class="ln">1921</td><td class="code">        if not is_working_day(calc_today):</td></tr>
+<tr><td class="ln">1922</td><td class="code">            calc_today = get_prev_working_day(calc_today)</td></tr>
+<tr><td class="ln">1923</td><td class="code">        for product_id in product_ids:</td></tr>
+<tr><td class="ln">1924</td><td class="code">            max_parent_lt = _get_max_parent_bom_lead_time(product_id)</td></tr>
+<tr><td class="ln">1925</td><td class="code">            max_parent_lt_cache[product_id] = max_parent_lt</td></tr>
+<tr><td class="ln">1926</td><td class="code">        max_cumulative_lt = max((int(max_parent_lt_cache.get(pid) or 0) for pid in product_ids), default=0)</td></tr>
+<tr><td class="ln">1927</td><td class="code">        progress_anchor_start_date = min(</td></tr>
+<tr><td class="ln">1928</td><td class="code">            start_date,</td></tr>
+<tr><td class="ln">1929</td><td class="code">            shift_working_days(calc_today, -(max_cumulative_lt + 1)),</td></tr>
+<tr><td class="ln">1930</td><td class="code">        )</td></tr>
+<tr><td class="ln">1931</td><td class="code">        if traced_product_ids:</td></tr>
+<tr><td class="ln">1932</td><td class="code">            trace_line_log(</td></tr>
+<tr><td class="ln">1933</td><td class="code">                line_id,</td></tr>
+<tr><td class="ln">1934</td><td class="code">                progress_anchor_start_date,</td></tr>
+<tr><td class="ln">1935</td><td class="code">                f&#x27;進度計算開始日補正: 要求開始={start_date}, 実効開始={progress_anchor_start_date}, max_cumulative_lt={max_cumulative_lt}&#x27;</td></tr>
+<tr><td class="ln">1936</td><td class="code">            )</td></tr>
+<tr><td class="ln">1937</td><td class="code"></td></tr>
+<tr><td class="ln">1938</td><td class="code">    if not progress_only:</td></tr>
+<tr><td class="ln">1939</td><td class="code">        # まず仕損数を集計</td></tr>
+<tr><td class="ln">1940</td><td class="code">        scrap_start = time.perf_counter()</td></tr>
+<tr><td class="ln">1941</td><td class="code">        aggregate_scrap_to_backlog(</td></tr>
+<tr><td class="ln">1942</td><td class="code">            line_id,</td></tr>
+<tr><td class="ln">1943</td><td class="code">            start_date,</td></tr>
+<tr><td class="ln">1944</td><td class="code">            end_date,</td></tr>
+<tr><td class="ln">1945</td><td class="code">            product_ids=target_product_ids or None,</td></tr>
+<tr><td class="ln">1946</td><td class="code">        )</td></tr>
+<tr><td class="ln">1947</td><td class="code">        logger.info(&quot;仕損集計時間: %.3fs&quot;, time.perf_counter() - scrap_start)</td></tr>
+<tr><td class="ln">1948</td><td class="code"></td></tr>
+<tr><td class="ln">1949</td><td class="code">        demand_start = time.perf_counter()</td></tr>
+<tr><td class="ln">1950</td><td class="code">        demand_map = _build_demand_map(line_id, inventory_calc_start_date, end_date)</td></tr>
+<tr><td class="ln">1951</td><td class="code">        logger.info(&quot;需要マップ作成時間: %.3fs&quot;, time.perf_counter() - demand_start)</td></tr>
+<tr><td class="ln">1952</td><td class="code">    else:</td></tr>
+<tr><td class="ln">1953</td><td class="code">        demand_map = {}</td></tr>
+<tr><td class="ln">1954</td><td class="code"></td></tr>
+<tr><td class="ln">1955</td><td class="code">    adj_start = min(start_date, inventory_calc_start_date, progress_anchor_start_date)</td></tr>
+<tr><td class="ln">1956</td><td class="code">    adjustment_maps = _build_adjustment_maps(</td></tr>
+<tr><td class="ln">1957</td><td class="code">        line_id,</td></tr>
+<tr><td class="ln">1958</td><td class="code">        adj_start,</td></tr>
+<tr><td class="ln">1959</td><td class="code">        end_date,</td></tr>
+<tr><td class="ln">1960</td><td class="code">        product_ids=target_product_ids or None,</td></tr>
+<tr><td class="ln">1961</td><td class="code">    )</td></tr>
+<tr><td class="ln">1962</td><td class="code">    recalculate_progress_qty = None</td></tr>
+<tr><td class="ln">1963</td><td class="code">    if include_progress:</td></tr>
+<tr><td class="ln">1964</td><td class="code">        from .progress_calculator import recalculate_progress_qty as _recalculate_progress_qty</td></tr>
+<tr><td class="ln">1965</td><td class="code">        recalculate_progress_qty = _recalculate_progress_qty</td></tr>
+<tr><td class="ln">1966</td><td class="code"></td></tr>
+<tr><td class="ln">1967</td><td class="code">    stock_total = 0.0</td></tr>
+<tr><td class="ln">1968</td><td class="code">    planned_total = 0.0</td></tr>
+<tr><td class="ln">1969</td><td class="code">    progress_total = 0.0</td></tr>
+<tr><td class="ln">1970</td><td class="code">    stock_max = (0.0, None)</td></tr>
+<tr><td class="ln">1971</td><td class="code">    planned_max = (0.0, None)</td></tr>
+<tr><td class="ln">1972</td><td class="code">    progress_max = (0.0, None)</td></tr>
+<tr><td class="ln">1973</td><td class="code"></td></tr>
+<tr><td class="ln">1974</td><td class="code">    for product_id in product_ids:</td></tr>
+<tr><td class="ln">1975</td><td class="code">        logger.info(f&quot;製品ID {product_id} の{product_calc_label}中...&quot;)</td></tr>
+<tr><td class="ln">1976</td><td class="code">        # 在庫・計画在庫は直親LT、進度は累積LTを使用</td></tr>
+<tr><td class="ln">1977</td><td class="code">        direct_lt = direct_lt_cache.get(product_id)</td></tr>
+<tr><td class="ln">1978</td><td class="code">        if direct_lt is None:</td></tr>
+<tr><td class="ln">1979</td><td class="code">            direct_lt = _get_direct_parent_bom_lead_time(product_id)</td></tr>
+<tr><td class="ln">1980</td><td class="code">            direct_lt_cache[product_id] = direct_lt</td></tr>
+<tr><td class="ln">1981</td><td class="code"></td></tr>
+<tr><td class="ln">1982</td><td class="code">        max_parent_lt = max_parent_lt_cache.get(product_id)</td></tr>
+<tr><td class="ln">1983</td><td class="code">        if max_parent_lt is None:</td></tr>
+<tr><td class="ln">1984</td><td class="code">            max_parent_lt = _get_max_parent_bom_lead_time(product_id)</td></tr>
+<tr><td class="ln">1985</td><td class="code">            max_parent_lt_cache[product_id] = max_parent_lt</td></tr>
+<tr><td class="ln">1986</td><td class="code"></td></tr>
+<tr><td class="ln">1987</td><td class="code">        if not progress_only:</td></tr>
+<tr><td class="ln">1988</td><td class="code">            # 実在庫を計算</td></tr>
+<tr><td class="ln">1989</td><td class="code">            t0 = time.perf_counter()</td></tr>
+<tr><td class="ln">1990</td><td class="code">            recalculate_stock_qty(</td></tr>
+<tr><td class="ln">1991</td><td class="code">                line_id,</td></tr>
+<tr><td class="ln">1992</td><td class="code">                product_id,</td></tr>
+<tr><td class="ln">1993</td><td class="code">                start_date,</td></tr>
+<tr><td class="ln">1994</td><td class="code">                end_date,</td></tr>
+<tr><td class="ln">1995</td><td class="code">                demand_map=demand_map,</td></tr>
+<tr><td class="ln">1996</td><td class="code">                stock_adjust_map=adjustment_maps.get(&#x27;STOCK&#x27;),</td></tr>
+<tr><td class="ln">1997</td><td class="code">                max_parent_lt=direct_lt,</td></tr>
+<tr><td class="ln">1998</td><td class="code">                calendar_id=shared_calendar_id,</td></tr>
+<tr><td class="ln">1999</td><td class="code">                shared_workday_cache=shared_workday_cache,</td></tr>
+<tr><td class="ln">2000</td><td class="code">            )</td></tr>
+<tr><td class="ln">2001</td><td class="code">            stock_elapsed = time.perf_counter() - t0</td></tr>
+<tr><td class="ln">2002</td><td class="code">            stock_total += stock_elapsed</td></tr>
+<tr><td class="ln">2003</td><td class="code">            if stock_elapsed &gt; stock_max[0]:</td></tr>
+<tr><td class="ln">2004</td><td class="code">                stock_max = (stock_elapsed, product_id)</td></tr>
+<tr><td class="ln">2005</td><td class="code"></td></tr>
+<tr><td class="ln">2006</td><td class="code">            # 計画在庫を計算</td></tr>
+<tr><td class="ln">2007</td><td class="code">            t1 = time.perf_counter()</td></tr>
+<tr><td class="ln">2008</td><td class="code">            recalculate_planned_stock_qty(</td></tr>
+<tr><td class="ln">2009</td><td class="code">                line_id,</td></tr>
+<tr><td class="ln">2010</td><td class="code">                product_id,</td></tr>
+<tr><td class="ln">2011</td><td class="code">                start_date,</td></tr>
+<tr><td class="ln">2012</td><td class="code">                end_date,</td></tr>
+<tr><td class="ln">2013</td><td class="code">                demand_map=demand_map,</td></tr>
+<tr><td class="ln">2014</td><td class="code">                planned_stock_adjust_map=adjustment_maps.get(&#x27;PLANNED_STOCK&#x27;),</td></tr>
+<tr><td class="ln">2015</td><td class="code">                max_parent_lt=direct_lt,</td></tr>
+<tr><td class="ln">2016</td><td class="code">                calendar_id=shared_calendar_id,</td></tr>
+<tr><td class="ln">2017</td><td class="code">                shared_workday_cache=shared_workday_cache,</td></tr>
+<tr><td class="ln">2018</td><td class="code">                force_from_start=force_from_start,</td></tr>
+<tr><td class="ln">2019</td><td class="code">            )</td></tr>
+<tr><td class="ln">2020</td><td class="code">            planned_elapsed = time.perf_counter() - t1</td></tr>
+<tr><td class="ln">2021</td><td class="code">            planned_total += planned_elapsed</td></tr>
+<tr><td class="ln">2022</td><td class="code">            if planned_elapsed &gt; planned_max[0]:</td></tr>
+<tr><td class="ln">2023</td><td class="code">                planned_max = (planned_elapsed, product_id)</td></tr>
+<tr><td class="ln">2024</td><td class="code"></td></tr>
+<tr><td class="ln">2025</td><td class="code">        if include_progress:</td></tr>
+<tr><td class="ln">2026</td><td class="code">            # 進度を計算</td></tr>
+<tr><td class="ln">2027</td><td class="code">            t2 = time.perf_counter()</td></tr>
+<tr><td class="ln">2028</td><td class="code">            recalculate_progress_qty(</td></tr>
+<tr><td class="ln">2029</td><td class="code">                line_id,</td></tr>
+<tr><td class="ln">2030</td><td class="code">                product_id,</td></tr>
+<tr><td class="ln">2031</td><td class="code">                start_date,</td></tr>
+<tr><td class="ln">2032</td><td class="code">                end_date,</td></tr>
+<tr><td class="ln">2033</td><td class="code">                progress_adjust_map=adjustment_maps.get(&#x27;PROGRESS&#x27;),</td></tr>
+<tr><td class="ln">2034</td><td class="code">                planned_progress_adjust_map=adjustment_maps.get(&#x27;PLANNED_PROGRESS&#x27;),</td></tr>
+<tr><td class="ln">2035</td><td class="code">                override_calc_start_date=progress_calc_start_date,</td></tr>
+<tr><td class="ln">2036</td><td class="code">                max_parent_lt=max_parent_lt,</td></tr>
+<tr><td class="ln">2037</td><td class="code">                calendar_id=shared_calendar_id,</td></tr>
+<tr><td class="ln">2038</td><td class="code">                shared_workday_cache=shared_workday_cache,</td></tr>
+<tr><td class="ln">2039</td><td class="code">            )</td></tr>
+<tr><td class="ln">2040</td><td class="code">            progress_elapsed = time.perf_counter() - t2</td></tr>
+<tr><td class="ln">2041</td><td class="code">            progress_total += progress_elapsed</td></tr>
+<tr><td class="ln">2042</td><td class="code">            if progress_elapsed &gt; progress_max[0]:</td></tr>
+<tr><td class="ln">2043</td><td class="code">                progress_max = (progress_elapsed, product_id)</td></tr>
+<tr><td class="ln">2044</td><td class="code"></td></tr>
+<tr><td class="ln">2045</td><td class="code">    product_count = max(len(product_ids), 1)</td></tr>
+<tr><td class="ln">2046</td><td class="code">    logger.info(</td></tr>
+<tr><td class="ln">2047</td><td class="code">        &quot;%s合計: stock=%.3fs (avg=%.3fs, max=%.3fs id=%s) planned=%.3fs (avg=%.3fs, max=%.3fs id=%s) progress=%.3fs (avg=%.3fs, max=%.3fs id=%s)&quot;,</td></tr>
+<tr><td class="ln">2048</td><td class="code">        recalc_label,</td></tr>
+<tr><td class="ln">2049</td><td class="code">        stock_total,</td></tr>
+<tr><td class="ln">2050</td><td class="code">        stock_total / product_count,</td></tr>
+<tr><td class="ln">2051</td><td class="code">        stock_max[0],</td></tr>
+<tr><td class="ln">2052</td><td class="code">        stock_max[1],</td></tr>
+<tr><td class="ln">2053</td><td class="code">        planned_total,</td></tr>
+<tr><td class="ln">2054</td><td class="code">        planned_total / product_count,</td></tr>
+<tr><td class="ln">2055</td><td class="code">        planned_max[0],</td></tr>
+<tr><td class="ln">2056</td><td class="code">        planned_max[1],</td></tr>
+<tr><td class="ln">2057</td><td class="code">        progress_total,</td></tr>
+<tr><td class="ln">2058</td><td class="code">        progress_total / product_count if include_progress else 0.0,</td></tr>
+<tr><td class="ln">2059</td><td class="code">        progress_max[0],</td></tr>
+<tr><td class="ln">2060</td><td class="code">        progress_max[1],</td></tr>
+<tr><td class="ln">2061</td><td class="code">    )</td></tr>
+<tr><td class="ln">2062</td><td class="code">    logger.info(&quot;%s完了: total_time=%.3fs&quot;, recalc_label, time.perf_counter() - overall_start)</td></tr>
+<tr><td class="ln">2063</td><td class="code"></td></tr>
+<tr><td class="ln">2064</td><td class="code">    return {</td></tr>
+<tr><td class="ln">2065</td><td class="code">        &#x27;line_id&#x27;: line_id,</td></tr>
+<tr><td class="ln">2066</td><td class="code">        &#x27;product_count&#x27;: len(product_ids),</td></tr>
+<tr><td class="ln">2067</td><td class="code">        &#x27;progress_product_count&#x27;: len(product_ids) if include_progress else 0,</td></tr>
+<tr><td class="ln">2068</td><td class="code">    }</td></tr>
+</table>
