@@ -3499,7 +3499,14 @@ const fetchCurrentLineProductIdSet = async (lineId) => {
   }
 
   try {
-    const res = await api.products.getLineFinalCandidates(numericLineId)
+    const res = await api.products.getLineFinalCandidates(
+      numericLineId,
+      null,
+      {
+        startDate: startDate.value,
+        endDate: endDate.value,
+      },
+    )
     const lineRows = toApiRows(res?.data)
     const targetLine = lineRows.find((row) => Number(row?.line_id) === numericLineId)
     const productIdSet = new Set()
@@ -5276,6 +5283,23 @@ const fetchAndApplyData = async () => {
   currentLineRoutingFilterMode.value = lineRoutingFilter?.mode || 'fallback'
   const backlogData = backlogRes.data?.results || backlogRes.data || []
   const planData = planRes.data?.results || planRes.data || []
+    const effectiveProductIdSet = new Set(
+      lineRoutingFilter?.productIdSet instanceof Set
+        ? Array.from(lineRoutingFilter.productIdSet)
+        : [],
+    )
+    ;(Array.isArray(backlogData) ? backlogData : []).forEach((item) => {
+      if (item?.is_line_final_product !== true) return
+      const productId = item?.product
+      if (productId === null || productId === undefined || productId === '') return
+      effectiveProductIdSet.add(String(productId))
+    })
+    ;(Array.isArray(planData) ? planData : []).forEach((item) => {
+      if (item?.is_line_final_product !== true) return
+      const productId = item?.product
+      if (productId === null || productId === undefined || productId === '') return
+      effectiveProductIdSet.add(String(productId))
+    })
     const selectedLineCode = normalizeLineCode(lines.value.find((line) => String(line.id) === String(selectedLine.value))?.line_code)
     const processCodeById = new Map((processOptions.value || []).map((proc) => [String(proc.id), normalizeProcessCode(proc.process_code)]))
     const plannedStockRuleMap = new Map(
@@ -5289,13 +5313,13 @@ const fetchAndApplyData = async () => {
       if (lineRoutingFilter?.mode === 'fallback') {
         return list
       }
-      if (!(lineRoutingFilter?.productIdSet instanceof Set)) {
+      if (!(lineRoutingFilter?.productIdSet instanceof Set) && effectiveProductIdSet.size === 0) {
         return list
       }
       return list.filter((item) => {
         const productId = item?.product
         if (productId === null || productId === undefined || productId === '') return false
-        return lineRoutingFilter.productIdSet.has(String(productId))
+        return effectiveProductIdSet.has(String(productId))
       })
     }
 
@@ -5303,7 +5327,7 @@ const fetchAndApplyData = async () => {
       backlogData.filter(d => d.is_line_final_product === true)
     )
     let displayPlans = filterRowsByCurrentLineRouting(
-      planData.filter(d => d.is_line_final_product !== false)
+      planData.filter(d => d.is_line_final_product === true)
     )
     if (shouldLimitToCoproductParentAndDriver.value) {
       const filtered = await filterPlanRowsForCoproductDisplay(backlogData, planData)

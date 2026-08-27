@@ -53,10 +53,12 @@ export const createProductsAPI = (client) => ({
       params,
     })
   },
-  getLineFinalCandidates(lineId = null, processId = null) {
+  getLineFinalCandidates(lineId = null, processId = null, options = {}) {
     const params = {}
     if (lineId) params.line_id = lineId
     if (processId) params.process_id = processId
+    if (options.startDate) params.start_date = options.startDate
+    if (options.endDate) params.end_date = options.endDate
     return client.get('/products/line-final-candidates/', { params })
   },
   getDisplayProductCandidates(lineId, processId) {

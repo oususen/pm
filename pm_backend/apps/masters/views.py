@@ -36,7 +36,11 @@ from .serializers import (
     KubotaSakaiTruckSerializer, SupplierTruckSerializer, MobileDeviceSerializer, MobileDeviceHistorySerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
     LineCycleTimeSerializer,
 )
-from .services.routing_service import build_effective_routing_q, resolve_effective_routing
+from .services.routing_service import (
+    build_effective_routing_q,
+    build_effective_routing_range_q,
+    resolve_effective_routing,
+)
 from accounts.permissions import HasResourcePermissionOrReadOnly
 from django.utils.dateparse import parse_datetime, parse_date
 
@@ -678,10 +682,17 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         """ライン別にルーティングステップの出力品目を返す（ライン最終品の一括設定用）"""
         line_id = request.query_params.get('line_id')
         process_id = request.query_params.get('process_id')
+        start_date = parse_date(request.query_params.get('start_date') or '')
+        end_date = parse_date(request.query_params.get('end_date') or '')
+        routing_q = (
+            build_effective_routing_range_q(start_date, end_date, prefix='routing__')
+            if start_date or end_date
+            else build_effective_routing_q(prefix='routing__')
+        )
         steps_qs = RoutingStep.objects.filter(
             line__isnull=False,
         ).filter(
-            build_effective_routing_q(prefix='routing__')
+            routing_q
         ).select_related('output_product', 'routing__product', 'line', 'process')
 
         if line_id:
