@@ -1316,6 +1316,13 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             if operator_action in SESSION_ACTIONS and not product:
                 raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})
         if validated_data.get('record_type') == 'OPERATOR_ACTION' and operator_action == 'END':
+            open_session = ProcessWorkSession.objects.filter(
+                process=process,
+                product=product,
+                status__in=SESSION_ACTIVE_STATUSES,
+            ).order_by('-started_at', '-id').first()
+            if not open_session:
+                raise serializers.ValidationError({'non_field_errors': ['開始されていないため終了できません。画面を更新して状態を確認してください。']})
             qty_decimal = production_qty or Decimal('0')
             remarks_text = (validated_data.get('remarks') or '').strip()
             if qty_decimal < 0:

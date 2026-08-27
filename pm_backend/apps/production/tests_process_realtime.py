@@ -345,3 +345,29 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertEqual(int(history.before_data['production_qty']), 5)
         self.assertEqual(history.after_data, {})
         mock_recalculate.assert_called_once()
+
+    @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
+    def test_operator_action_end_without_start_is_rejected(self, _mock_plan_date):
+        view = ProcessRealtimeRecordViewSet.as_view({'post': 'create'})
+        request = self.factory.post(
+            '/api/process-realtime/',
+            {
+                'process_id': self.process.id,
+                'record_type': 'OPERATOR_ACTION',
+                'product_id': self.product.id,
+                'operator_name': 'テスト作業者',
+                'production_qty': 5,
+                'event_data': {
+                    'action': 'END',
+                },
+                'remarks': '終了誤操作確認',
+            },
+            format='json',
+        )
+
+        response = view(request)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('開始されていないため終了できません', str(response.data))
+        self.assertEqual(ProcessRealtimeRecord.objects.count(), 0)
+        self.assertEqual(ProcessWorkSession.objects.count(), 0)
