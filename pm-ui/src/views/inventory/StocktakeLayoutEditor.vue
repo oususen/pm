@@ -47,6 +47,7 @@
           <div class="placing-info">
             <strong>{{ selectedLocation }}</strong>
             <span v-if="placingType === 'equipment'" class="type-badge equip">設備</span>
+            <span v-else-if="placingType === 'aisle'" class="type-badge aisle">通路</span>
             <span v-else class="type-badge loc">置き場</span>
           </div>
           <div class="span-row">
@@ -91,6 +92,24 @@
         </div>
 
         <div class="sidebar-section">
+          <div class="sidebar-title">通路</div>
+          <div class="equip-add-row">
+            <input v-model.trim="aisleName" type="text" placeholder="通路名" class="equip-input" @keyup.enter="addAisle" />
+            <button type="button" class="equip-add-btn aisle-add-btn" @click="addAisle" :disabled="!aisleName">追加</button>
+          </div>
+          <div v-if="aisleList.length > 0" class="palette-list">
+            <button
+              v-for="a in aisleList"
+              :key="'ai-' + a"
+              type="button"
+              class="palette-item palette-item-aisle"
+              :class="{ selected: selectedLocation === a && placingType === 'aisle', placed: placedAisleSet.has(a) }"
+              @click="selectAisle(a)"
+            >{{ a }}</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
           <div class="sidebar-title">ズーム</div>
           <div class="zoom-row">
             <button type="button" class="zoom-btn" @click="zoomOut">−</button>
@@ -124,6 +143,9 @@
                 <template v-if="cells[cellKey]">
                   <div class="cell-label" :class="{ vertical: isVerticalCell(cellKey) }" :style="getCellFontStyle(cellKey)">{{ getCellLocation(cellKey) }}</div>
                   <div class="cell-type-indicator" v-if="getCellType(cellKey) === 'equipment'">設備</div>
+                  <div class="cell-type-indicator aisle" v-else-if="getCellType(cellKey) === 'aisle'">通路</div>
+                  <div class="cell-comment-mark" v-if="getCellComment(cellKey)">コ</div>
+                  <div class="cell-comment-tooltip" v-if="getCellComment(cellKey)">{{ getCellComment(cellKey) }}</div>
                   <div class="cell-edit-hint">クリックで編集</div>
                 </template>
               </div>
@@ -162,6 +184,7 @@
             <div class="edit-type-row">
               <button type="button" class="edit-type-btn" :class="{ active: editCellType === 'location' }" @click="editCellType = 'location'">置き場</button>
               <button type="button" class="edit-type-btn equip" :class="{ active: editCellType === 'equipment' }" @click="editCellType = 'equipment'">設備</button>
+              <button type="button" class="edit-type-btn aisle" :class="{ active: editCellType === 'aisle' }" @click="editCellType = 'aisle'">通路</button>
             </div>
           </div>
           <div class="edit-field">
@@ -185,6 +208,10 @@
               <button v-for="fs in fontSizeOptions" :key="fs.value" type="button" class="font-size-btn" :class="{ active: editCellFontSize === fs.value }" @click="editCellFontSize = fs.value">{{ fs.label }}</button>
             </div>
           </div>
+          <label class="edit-field">
+            <span class="edit-field-label">コメント</span>
+            <input type="text" v-model.trim="editCellComment" class="edit-field-input" placeholder="ホバーで表示されるメモ" />
+          </label>
         </div>
         <div class="edit-modal-footer">
           <button type="button" class="edit-delete-btn" @click="deleteEditingCell">削除</button>
@@ -219,11 +246,13 @@ const placingW = ref(1);
 const placingH = ref(1);
 const zoom = ref(1);
 const equipName = ref("");
+const aisleName = ref("");
 const saving = ref(false);
 const loading = ref(false);
 const pdfExporting = ref(false);
 const allLocations = ref([]);
 const equipmentList = ref([]);
+const aisleList = ref([]);
 const areas = ref([]);
 const selectedAreaId = ref("");
 const pdfPaperSize = ref("A4");
@@ -241,6 +270,7 @@ const editCellH = ref(1);
 const editCellType = ref("location");
 const editCellColor = ref("");
 const editCellFontSize = ref("");
+const editCellComment = ref("");
 const dragCellKey = ref(null);
 const dragStartX = ref(0);
 const dragStartY = ref(0);
@@ -307,6 +337,12 @@ const getCellType = (cellKey) => {
   return cell.type || "location";
 };
 
+const getCellComment = (cellKey) => {
+  const cell = cells.value[cellKey];
+  if (!cell || typeof cell === "string") return "";
+  return cell.comment || "";
+};
+
 const occupiedCells = computed(() => {
   const set = new Set();
   for (const [key, cell] of Object.entries(cells.value)) {
@@ -339,6 +375,15 @@ const placedEquipSet = computed(() => {
   for (const cell of Object.values(cells.value)) {
     if (!cell || typeof cell === "string") continue;
     if (cell.type === "equipment") set.add(cell.location);
+  }
+  return set;
+});
+
+const placedAisleSet = computed(() => {
+  const set = new Set();
+  for (const cell of Object.values(cells.value)) {
+    if (!cell || typeof cell === "string") continue;
+    if (cell.type === "aisle") set.add(cell.location);
   }
   return set;
 });
@@ -379,7 +424,9 @@ const gridCellStyle = (cellKey) => {
 const gridCellClass = (cellKey) => {
   const loc = getCellLocation(cellKey);
   if (!loc) return "cell-empty";
-  if (getCellType(cellKey) === "equipment") return "cell-equipment";
+  const type = getCellType(cellKey);
+  if (type === "equipment") return "cell-equipment";
+  if (type === "aisle") return "cell-aisle";
   return "cell-location";
 };
 
@@ -434,6 +481,25 @@ const addEquipment = () => {
   equipName.value = "";
 };
 
+const selectAisle = (a) => {
+  selectedLocation.value = a;
+  placingType.value = "aisle";
+  placingW.value = 1;
+  placingH.value = 1;
+};
+
+const addAisle = () => {
+  if (!aisleName.value) return;
+  if (!aisleList.value.includes(aisleName.value)) {
+    aisleList.value.push(aisleName.value);
+  }
+  selectedLocation.value = aisleName.value;
+  placingType.value = "aisle";
+  placingW.value = 1;
+  placingH.value = 1;
+  aisleName.value = "";
+};
+
 const openCellEditor = (cellKey) => {
   const cell = cells.value[cellKey];
   if (!cell) return;
@@ -444,6 +510,7 @@ const openCellEditor = (cellKey) => {
   editCellType.value = typeof cell === "string" ? "location" : (cell.type || "location");
   editCellColor.value = typeof cell === "string" ? "" : (cell.color || "");
   editCellFontSize.value = typeof cell === "string" ? "" : (cell.fontSize || "");
+  editCellComment.value = typeof cell === "string" ? "" : (cell.comment || "");
 };
 
 const saveEditingCell = () => {
@@ -484,7 +551,7 @@ const saveEditingCell = () => {
   }
   cells.value = {
     ...cells.value,
-    [key]: { location: editCellName.value, w: newW, h: newH, type: editCellType.value, color: editCellColor.value, fontSize: editCellFontSize.value },
+    [key]: { location: editCellName.value, w: newW, h: newH, type: editCellType.value, color: editCellColor.value, fontSize: editCellFontSize.value, comment: editCellComment.value },
   };
   editingCellKey.value = null;
 };
@@ -516,13 +583,17 @@ const onCellClick = (cellKey) => {
 
 const removeCell = (cellKey) => {
   const cell = cells.value[cellKey];
-  if (cell && typeof cell !== "string" && cell.type === "equipment") {
+  if (cell && typeof cell !== "string") {
     const loc = cell.location;
-    const stillUsed = Object.entries(cells.value).some(
-      ([k, v]) => k !== cellKey && v && typeof v !== "string" && v.type === "equipment" && v.location === loc
-    );
-    if (!stillUsed) {
-      equipmentList.value = equipmentList.value.filter((e) => e !== loc);
+    const type = cell.type;
+    if (type === "equipment" || type === "aisle") {
+      const stillUsed = Object.entries(cells.value).some(
+        ([k, v]) => k !== cellKey && v && typeof v !== "string" && v.type === type && v.location === loc
+      );
+      if (!stillUsed) {
+        if (type === "equipment") equipmentList.value = equipmentList.value.filter((e) => e !== loc);
+        else if (type === "aisle") aisleList.value = aisleList.value.filter((e) => e !== loc);
+      }
     }
   }
   const newCells = { ...cells.value };
@@ -649,13 +720,16 @@ const loadConfig = async () => {
     const raw = res.data.cells || {};
     const converted = {};
     const eqSet = new Set();
+    const aiSet = new Set();
     for (const [key, val] of Object.entries(raw)) {
       const cell = typeof val === "string" ? { location: val, w: 1, h: 1, type: "location" } : val;
       converted[key] = cell;
       if (cell.type === "equipment") eqSet.add(cell.location);
+      else if (cell.type === "aisle") aiSet.add(cell.location);
     }
     cells.value = converted;
     equipmentList.value = [...eqSet].sort();
+    aisleList.value = [...aiSet].sort();
   } catch (e) {
     console.error("レイアウト設定取得エラー:", e);
   }
@@ -938,6 +1012,11 @@ onUnmounted(() => {
   color: #fff;
 }
 
+.type-badge.aisle {
+  background: #6b7280;
+  color: #fff;
+}
+
 .placing-hint {
   font-size: 11px;
   color: #6b7280;
@@ -993,6 +1072,16 @@ onUnmounted(() => {
   border-color: #6366f1;
 }
 
+.palette-item-aisle {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.palette-item-aisle.selected {
+  background: #6b7280;
+  border-color: #6b7280;
+}
+
 .palette-empty {
   font-size: 11px;
   color: #9ca3af;
@@ -1020,6 +1109,10 @@ onUnmounted(() => {
   color: #fff;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.aisle-add-btn {
+  background: #6b7280;
 }
 
 .equip-add-btn:disabled {
@@ -1105,6 +1198,12 @@ onUnmounted(() => {
   cursor: grab;
 }
 
+.cell-aisle {
+  background: #d1d5db;
+  border: 1px solid #9ca3af;
+  cursor: grab;
+}
+
 .grid-cell.dragging {
   opacity: 0.3;
   border-style: dashed;
@@ -1177,6 +1276,43 @@ onUnmounted(() => {
   font-size: 8px;
   color: #6366f1;
   font-weight: 600;
+}
+
+.cell-type-indicator.aisle {
+  color: #6b7280;
+}
+
+.cell-comment-mark {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f59e0b;
+  line-height: 1;
+}
+
+.cell-comment-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-cell:hover .cell-comment-tooltip {
+  display: block;
 }
 
 .cell-edit-hint {
@@ -1271,6 +1407,11 @@ onUnmounted(() => {
 .edit-type-btn.equip.active {
   background: #6366f1;
   border-color: #6366f1;
+}
+
+.edit-type-btn.aisle.active {
+  background: #6b7280;
+  border-color: #6b7280;
 }
 
 .edit-modal-footer {

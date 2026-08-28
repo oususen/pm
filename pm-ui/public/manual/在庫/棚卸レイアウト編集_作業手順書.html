@@ -288,8 +288,8 @@
     <ul>
       <li><span class="num">1</span>画面を開く</li>
       <li><span class="num">2</span>編集対象のエリアを選ぶ</li>
-      <li><span class="num">3</span>置き場・設備を配置する</li>
-      <li><span class="num">4</span>配置済みセルを編集する</li>
+      <li><span class="num">3</span>置き場・設備・通路を配置する</li>
+      <li><span class="num">4</span>配置済みセルを編集する（移動・コメント）</li>
       <li><span class="num">5</span>保存してスマホ画面で使う</li>
     </ul>
   </div>
@@ -321,9 +321,9 @@
   <div class="step">
     <div class="step-head">
       <span class="num">3</span>
-      <h2 class="step-title">置き場・設備を配置する</h2>
+      <h2 class="step-title">置き場・設備・通路を配置する</h2>
     </div>
-    <p>左側の置き場一覧または設備一覧から配置したい項目を選び、右側のグリッドをクリックして配置します。配置前に横幅・縦幅を指定すると、複数マスにまたがる大きな置き場も表現できます。</p>
+    <p>左側の置き場一覧・設備一覧・通路一覧から配置したい項目を選び、右側のグリッドをクリックして配置します。配置前に横幅・縦幅を指定すると、複数マスにまたがる大きな置き場も表現できます。</p>
     <div class="row">
       <div class="col">
         <div class="label">左: 配置する対象を選ぶ</div>
@@ -345,6 +345,13 @@
             </div>
           </div>
           <div class="sidebar-section">
+            <div class="sidebar-title">通路</div>
+            <div class="chip-list">
+              <span class="chip">通路A</span>
+              <span class="chip">通路B</span>
+            </div>
+          </div>
+          <div class="sidebar-section">
             <div class="sidebar-title">配置中</div>
             <div class="input">B1-1 / 置き場 / 横1 縦1</div>
           </div>
@@ -359,7 +366,7 @@
             <div class="cell empty">空き</div>
             <div class="cell equip">設備</div>
             <div class="cell empty">空き</div>
-            <div class="cell empty">空き</div>
+            <div class="cell" style="background:#d1d5db;border-color:#9ca3af;">通路A</div>
             <div class="cell empty">空き</div>
             <div class="cell empty">空き</div>
             <div class="cell empty">空き</div>
@@ -373,9 +380,9 @@
   <div class="step">
     <div class="step-head">
       <span class="num">4</span>
-      <h2 class="step-title">配置済みセルを編集する</h2>
+      <h2 class="step-title">配置済みセルを編集する（移動・コメント）</h2>
     </div>
-    <p>配置済みのセルをクリックすると編集モーダルが開きます。名前、横幅、縦幅、種別、色、文字サイズを変更できます。不要になったセルは削除で外せます。</p>
+    <p>配置済みのセルをクリックすると編集モーダルが開きます。名前、横幅、縦幅、種別、色、文字サイズ、コメントを変更できます。不要になったセルは削除で外せます。<br>また、セルをマウスでドラッグすると空きマスへ移動できます。</p>
     <div class="row">
       <div class="col">
         <div class="label">セル編集モーダル</div>
@@ -392,17 +399,22 @@
             </div>
             <div class="field">
               <strong>種別</strong>
-              <div class="input">置き場 / 設備</div>
+              <div class="input">置き場 / 設備 / 通路</div>
             </div>
             <div class="field">
               <strong>色・文字サイズ</strong>
               <div class="input">任意で調整</div>
+            </div>
+            <div class="field">
+              <strong>コメント</strong>
+              <div class="input" style="color:#999;">メモを入力（右上に黄色の「コ」マークで表示）</div>
             </div>
           </div>
         </div>
       </div>
     </div>
     <div class="callout">他のセルと重なるサイズには変更できません。グリッドの外にはみ出すサイズも保存できません。</div>
+    <div class="callout" style="margin-top:8px;">コメントを入力すると、セル右上に黄色の「コ」マークが表示されます。PCではカーソルを合わせると内容が表示され、スマホの棚卸入力画面では「コ」をタップすると表示されます。</div>
   </div>
 
   <div class="step">
@@ -419,7 +431,8 @@
     <ul>
       <li>この画面は PC で編集する前提です。スマホ側ではレイアウト閲覧と置き場タップ移動だけを行います。</li>
       <li>エリアの新規作成や所属置き場の編集は、この画面ではできません。<a href="/manual?path=在庫/棚卸現物入力.md">棚卸現物入力</a> 画面から行ってください。</li>
-      <li>設備セルはスマホ側では進捗カウント対象にならず、タップ遷移もしません。</li>
+      <li>設備・通路セルはスマホ側では進捗カウント対象にならず、タップ遷移もしません。</li>
+      <li>配置済みセルはマウスドラッグで空きマスへ移動できます。</li>
       <li>関連する操作手順は <a href="/manual/在庫/棚卸現物入力_作業手順書.html">棚卸現物入力 作業手順書</a> を参照してください。</li>
     </ul>
   </div>

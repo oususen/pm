@@ -271,6 +271,8 @@
                   <div class="map-cell-count">{{ locationProgressMap[cellLocation(cellKey)].done }}/{{ locationProgressMap[cellLocation(cellKey)].total }}</div>
                 </div>
               </template>
+              <div class="map-cell-comment-mark" v-if="cellComment(cellKey)" @click.stop="toggleComment(cellKey)">コ</div>
+              <div class="map-cell-comment-tip" v-if="cellComment(cellKey) && showingCommentKey === cellKey" @click.stop="showingCommentKey = null">{{ cellComment(cellKey) }}</div>
             </template>
           </div>
         </template>
@@ -449,6 +451,7 @@ const counters = ref([]);
 const layoutCols = ref(4);
 const layoutRows = ref(4);
 const layoutCells = ref({});
+const showingCommentKey = ref(null);
 const layoutEditing = ref(false);
 const layoutSelectedLocation = ref(null);
 const placingType = ref('location');
@@ -725,6 +728,16 @@ const cellH = (cellKey) => {
   return cell.h || 1;
 };
 
+const cellComment = (cellKey) => {
+  const cell = layoutCells.value[cellKey];
+  if (!cell || typeof cell === 'string') return '';
+  return cell.comment || '';
+};
+
+const toggleComment = (cellKey) => {
+  showingCommentKey.value = showingCommentKey.value === cellKey ? null : cellKey;
+};
+
 const occupiedCells = computed(() => {
   const set = new Set();
   for (const [key, cell] of Object.entries(layoutCells.value)) {
@@ -824,6 +837,7 @@ const mapCellClass = (cellKey) => {
   const loc = cellLocation(cellKey);
   if (!loc) return layoutEditing.value ? 'map-cell-empty-edit' : 'map-cell-empty';
   if (cellType(cellKey) === 'equipment') return 'tile-equipment';
+  if (cellType(cellKey) === 'aisle') return 'tile-aisle';
   const prog = locationProgressMap.value[loc];
   if (!prog || prog.done === 0) return 'tile-none';
   if (prog.done >= prog.total) return 'tile-complete';
@@ -1517,6 +1531,41 @@ watch(newAreaType, () => {
   background: #c7d2fe;
   border: 1px solid #6366f1;
   cursor: default;
+}
+
+.tile-aisle {
+  background: #d1d5db;
+  border: 1px solid #9ca3af;
+  cursor: default;
+}
+
+.map-cell-comment-mark {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f59e0b;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.map-cell-comment-tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 100;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .map-cell-name {
