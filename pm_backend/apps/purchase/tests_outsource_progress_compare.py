@@ -8,6 +8,27 @@ def _word(x0, y0, x1, y1, text):
 
 
 class OutsourceProgressCompareTest(SimpleTestCase):
+    def test_order_candidate_codes_require_name_and_date_header_block(self):
+        words = [
+            _word(14.0, 100.0, 70.0, 106.0, "YD40005995"),
+            _word(160.0, 100.0, 200.0, 106.0, "ブラケット"),
+            _word(210.0, 100.0, 225.0, 106.0, "t"),
+            _word(360.0, 100.0, 420.0, 106.0, "YD40005995"),
+            _word(112.0, 112.0, 128.0, 118.0, "17日"),
+            _word(134.0, 112.0, 150.0, 118.0, "18日"),
+            _word(18.0, 124.0, 40.0, 130.0, "予定"),
+            _word(112.0, 124.0, 116.0, 130.0, "5"),
+            _word(18.0, 136.0, 40.0, 142.0, "確定"),
+            _word(112.0, 136.0, 116.0, 142.0, "5"),
+            _word(14.0, 220.0, 50.0, 226.0, "ZX55U-6EB"),
+            _word(18.0, 232.0, 34.0, 238.0, "注記"),
+        ]
+
+        candidates = _collect_candidate_codes(words, "order")
+        codes = [candidate[4] for candidate in candidates]
+
+        self.assertEqual(codes, ["YD40005995"])
+
     def test_progress_candidate_codes_ignore_name_word_inside_block(self):
         words = [
             _word(14.1, 130.8, 57.1, 136.8, "YD40008380G"),

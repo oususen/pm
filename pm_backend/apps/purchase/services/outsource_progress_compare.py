@@ -122,6 +122,20 @@ def _is_progress_block_start(words, code_word) -> bool:
     return bool(date_header_words)
 
 
+def _is_order_block_start(words, code_word) -> bool:
+    code = str(code_word[4]).strip()
+    code_y = float(code_word[1])
+    window_words = [
+        w for w in words
+        if code_y - 2 <= w[1] <= code_y + 24
+    ]
+    if not _extract_name_words(window_words, code, code_y, "order"):
+        return False
+
+    date_header_words = _extract_date_header_words(window_words, code_y)
+    return bool(date_header_words)
+
+
 def _collect_candidate_codes(words, kind: str):
     if kind == "progress":
         code_re = CODE_RE_PROGRESS
@@ -139,9 +153,9 @@ def _collect_candidate_codes(words, kind: str):
         and float(w[0]) < code_max_x
     ]
     candidate_codes.sort(key=lambda w: (w[1], w[0]))
-    if kind != "progress":
-        return candidate_codes
-    return [w for w in candidate_codes if _is_progress_block_start(words, w)]
+    if kind == "progress":
+        return [w for w in candidate_codes if _is_progress_block_start(words, w)]
+    return [w for w in candidate_codes if _is_order_block_start(words, w)]
 
 
 def _extract_progress_excel_items(excel_path: str) -> dict[str, ExtractedItem]:
