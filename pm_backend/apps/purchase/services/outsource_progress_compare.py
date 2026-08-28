@@ -26,6 +26,10 @@ class ExtractedItem:
     page: int
     rows: dict[str, dict[str, int]]
 
+COMMON_EXCLUDED_NAME_WORDS = {
+    "繰越", "予定", "確定", "内示", "計画", "実績", "進度", "計進", "納入", "増減", "合計数"
+}
+
 
 def _normalize_code(code: str) -> str:
     text = str(code or "").strip().upper().replace("Ｇ", "G")
@@ -66,6 +70,78 @@ def _to_int(value) -> int:
         return int(float(text))
     except ValueError:
         return 0
+
+
+def _contains_digit(text: str) -> bool:
+    return any(ch.isdigit() for ch in str(text or ""))
+
+
+def _extract_date_header_words(block_words, code_y: float):
+    return [
+        w for w in block_words
+        if code_y + 4 <= w[1] <= code_y + 24
+        and float(w[0]) > 80
+        and DATE_RE.fullmatch(str(w[4]).strip())
+    ]
+
+
+def _extract_name_words(block_words, code: str, code_y: float, kind: str):
+    if kind == "order":
+        name_min_x, name_max_x = 90, 230
+        name_y_min, name_y_max = code_y - 2, code_y + 12
+    else:
+        name_min_x, name_max_x = 10, 105
+        name_y_min, name_y_max = code_y + 5, code_y + 22
+    return [
+        str(w[4]).strip()
+        for w in block_words
+        if name_y_min <= w[1] <= name_y_max
+        and name_min_x <= float(w[0]) <= name_max_x
+        and str(w[4]).strip() != code
+        and not NUM_RE.fullmatch(str(w[4]).strip())
+        and not DATE_RE.fullmatch(str(w[4]).strip())
+        and not MONTH_LABEL_RE.fullmatch(str(w[4]).strip())
+        and str(w[4]).strip() not in COMMON_EXCLUDED_NAME_WORDS
+    ]
+
+
+def _is_progress_block_start(words, code_word) -> bool:
+    code = str(code_word[4]).strip()
+    if not _contains_digit(code):
+        return False
+
+    code_y = float(code_word[1])
+    window_words = [
+        w for w in words
+        if code_y - 1 <= w[1] <= code_y + 24
+    ]
+    if not _extract_name_words(window_words, code, code_y, "progress"):
+        return False
+
+    date_header_words = _extract_date_header_words(window_words, code_y)
+    return bool(date_header_words)
+
+
+def _collect_candidate_codes(words, kind: str):
+    if kind == "progress":
+        code_re = CODE_RE_PROGRESS
+        code_min_y = 20
+        code_max_x = 55
+    else:
+        code_re = CODE_RE_ORDER
+        code_min_y = 80
+        code_max_x = 90
+
+    candidate_codes = [
+        w for w in words
+        if code_re.fullmatch(str(w[4]).strip())
+        and w[1] > code_min_y
+        and float(w[0]) < code_max_x
+    ]
+    candidate_codes.sort(key=lambda w: (w[1], w[0]))
+    if kind != "progress":
+        return candidate_codes
+    return [w for w in candidate_codes if _is_progress_block_start(words, w)]
 
 
 def _extract_progress_excel_items(excel_path: str) -> dict[str, ExtractedItem]:
@@ -126,29 +202,15 @@ def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:
         words.sort(key=lambda w: (w[1], w[0]))
 
         if kind == "progress":
-            code_re = CODE_RE_PROGRESS
             row_labels = ["内示", "確定"]
-            code_min_y = 20
         else:
-            code_re = CODE_RE_ORDER
             row_labels = ["予定", "確定"]
-            code_min_y = 80
 
-        candidate_codes = [
-            w for w in words
-            if code_re.fullmatch(str(w[4]).strip())
-            and w[1] > code_min_y
-            and (
-                # 注文書は左端の「品番」列のみ。右側の部品番号や数量を品番扱いしない。
-                float(w[0]) < 90 if kind == "order" else float(w[0]) < 55
-            )
-        ]
-        candidate_codes.sort(key=lambda w: (w[1], w[0]))
+        candidate_codes = _collect_candidate_codes(words, kind)
 
         for idx, code_word in enumerate(candidate_codes):
             code = str(code_word[4]).strip()
             code_y = float(code_word[1])
-            code_x = float(code_word[0])
             next_y = float(candidate_codes[idx + 1][1]) if idx + 1 < len(candidate_codes) else float(page.rect.height)
 
             block_words = [
@@ -157,12 +219,7 @@ def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:
             ]
 
             # 日付ヘッダがあるブロックのみ明細として扱う
-            date_header_words = [
-                w for w in block_words
-                if code_y + 4 <= w[1] <= code_y + 24
-                and float(w[0]) > 80
-                and DATE_RE.fullmatch(str(w[4]).strip())
-            ]
+            date_header_words = _extract_date_header_words(block_words, code_y)
             if not date_header_words:
                 continue
 
@@ -170,27 +227,7 @@ def _extract_items(pdf_path: str, kind: str) -> dict[str, ExtractedItem]:
             date_centers = [((float(w[0]) + float(w[2])) / 2.0, str(w[4]).strip()) for w in date_header_words]
             min_date_x = min(center for center, _ in date_centers)
 
-            if kind == "order":
-                name_min_x, name_max_x = 90, 230
-            else:
-                name_min_x, name_max_x = 10, 105
-            if kind == "order":
-                name_y_min, name_y_max = code_y - 2, code_y + 12
-            else:
-                name_y_min, name_y_max = code_y + 5, code_y + 22
-            name_words = [
-                str(w[4]).strip()
-                for w in block_words
-                if name_y_min <= w[1] <= name_y_max
-                and name_min_x <= float(w[0]) <= name_max_x
-                and str(w[4]).strip() != code
-                and not NUM_RE.fullmatch(str(w[4]).strip())
-                and not DATE_RE.fullmatch(str(w[4]).strip())
-                and not MONTH_LABEL_RE.fullmatch(str(w[4]).strip())
-                and str(w[4]).strip() not in {
-                    "繰越", "予定", "確定", "内示", "計画", "実績", "進度", "計進", "納入", "増減", "合計数"
-                }
-            ]
+            name_words = _extract_name_words(block_words, code, code_y, kind)
             name = " ".join(name_words).strip()
             if not name:
                 continue
