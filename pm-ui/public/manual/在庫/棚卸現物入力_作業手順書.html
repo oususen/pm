@@ -1069,6 +1069,11 @@
       <span class="icon">&#x1F4A1;</span>
       <span>各フィルタの<strong>「クリア」ボタン</strong>で条件を個別に解除できます。</span>
     </div>
+
+    <div class="callout warn" style="margin-top:10px;">
+      <span class="icon">&#x1F50D;</span>
+      <span><strong>他エリア品の検索:</strong> 特定エリアを選択した状態で<strong>品番検索</strong>を使うと、他エリアの製品も検索結果に表示されます。選択エリアの品が先頭に並び、他エリア品は<strong>置き場セルが赤背景</strong>で<strong>「他エリア品」</strong>と表示されます。他エリア品を保存すると、備考に「他エリア」が自動付与され、実際に見つかったエリアとして記録されます。</span>
+    </div>
   </div>
 
   <!-- ===== STEP 6 ===== -->
@@ -1160,6 +1165,15 @@
     <div class="callout info">
       <span class="icon">&#x1F4A1;</span>
       <span>同じ品番が複数の場所にある場合、<strong>何回でも入力できます</strong>。「›」をタップするたびに空の入力画面が開きます。</span>
+    </div>
+    <div class="callout info" style="margin-top:10px;">
+      <span class="icon">&#x1F4BE;</span>
+      <span><strong>保存時の自動記録:</strong> 保存すると以下が自動的に記録されます。<br>
+        ・<strong>エリア名</strong> — 現在選択中のエリア名がレコードに保存されます（実際に見つかった場所として）<br>
+        ・<strong>机上在庫</strong> — 保存時点のシステム上の在庫数<br>
+        ・<strong>机上進度</strong> — 保存時点のシステム上の進度値（LineBacklogの値）<br>
+        ・他エリア品の場合、備考に<strong>「他エリア」</strong>が自動付与されます
+      </span>
     </div>
   </div>
 
@@ -1393,6 +1407,9 @@
       <li>入力履歴の削除には<strong>「棚卸履歴削除」権限</strong>が必要です。</li>
       <li>レイアウトはPCの<a href="/manual?path=在庫/棚卸レイアウト編集.md" style="color:inherit;font-weight:700;text-decoration:underline;">「棚卸レイアウト編集」画面</a>で作成します。スマホからは閲覧のみです。</li>
       <li>同じ品番は何回でも入力できます。複数の場所に分散している場合に便利です。</li>
+      <li>保存時に<strong>机上進度</strong>（システム上の進度値）もレコードに自動記録されます。この値は保存時点のスナップショットです。</li>
+      <li>他エリア品を保存すると、備考に<strong>「他エリア」</strong>が自動付与されます。入力エリア名もレコードに記録されます。</li>
+      <li>入力結果の確認は<strong>「棚卸結果確認」画面</strong>（在庫管理メニュー内）で行えます。合計/分行の切替表示が可能です。</li>
     </ul>
   </div>
 
