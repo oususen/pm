@@ -103,6 +103,7 @@
       <div class="editor-main">
         <div class="grid-scroll">
           <div
+            ref="gridMapRef"
             class="grid-map"
             :style="{
               gridTemplateColumns: `repeat(${cols}, 48px)`,
@@ -115,9 +116,10 @@
               <div
                 v-if="!occupiedCells.has(cellKey)"
                 class="grid-cell"
-                :class="[gridCellClass(cellKey), { vertical: isVerticalCell(cellKey) }]"
+                :class="[gridCellClass(cellKey), { vertical: isVerticalCell(cellKey), dragging: dragCellKey === cellKey && isDragging, 'drop-target': dropTargetKey === cellKey && isDragging }]"
                 :style="gridCellStyle(cellKey)"
                 @click="onCellClick(cellKey)"
+                @mousedown="onCellMouseDown(cellKey, $event)"
               >
                 <template v-if="cells[cellKey]">
                   <div class="cell-label" :class="{ vertical: isVerticalCell(cellKey) }" :style="getCellFontStyle(cellKey)">{{ getCellLocation(cellKey) }}</div>
@@ -130,6 +132,12 @@
         </div>
       </div>
     </div>
+
+    <div
+      v-if="isDragging"
+      class="drag-ghost"
+      :style="{ left: dragGhostX + 12 + 'px', top: dragGhostY + 12 + 'px' }"
+    >{{ dragLabel }}</div>
 
     <div v-if="editingCellKey" class="modal-overlay" @click.self="editingCellKey = null">
       <div class="edit-modal">
@@ -191,7 +199,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import api from "@/api/client";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
@@ -233,6 +241,16 @@ const editCellH = ref(1);
 const editCellType = ref("location");
 const editCellColor = ref("");
 const editCellFontSize = ref("");
+const dragCellKey = ref(null);
+const dragStartX = ref(0);
+const dragStartY = ref(0);
+const isDragging = ref(false);
+const dropTargetKey = ref(null);
+const dragGhostX = ref(0);
+const dragGhostY = ref(0);
+const dragLabel = ref('');
+const gridMapRef = ref(null);
+const DRAG_THRESHOLD = 5;
 const canViewLayout = computed(() => hasPermission(authState.user, "stocktake.layout", "view"));
 const canEditLayout = computed(() => hasPermission(authState.user, "stocktake.layout", "edit"));
 const editableAreas = computed(() => areas.value);
@@ -479,10 +497,7 @@ const deleteEditingCell = () => {
 };
 
 const onCellClick = (cellKey) => {
-  if (cells.value[cellKey]) {
-    openCellEditor(cellKey);
-    return;
-  }
+  if (cells.value[cellKey]) return;
   if (!selectedLocation.value) return;
   if (occupiedCells.value.has(cellKey)) return;
   const [r, c] = cellKey.split("-").map(Number);
@@ -513,6 +528,107 @@ const removeCell = (cellKey) => {
   const newCells = { ...cells.value };
   delete newCells[cellKey];
   cells.value = newCells;
+};
+
+const onCellMouseDown = (cellKey, e) => {
+  if (!cells.value[cellKey]) return;
+  if (e.button !== 0) return;
+  e.preventDefault();
+  dragCellKey.value = cellKey;
+  dragStartX.value = e.clientX;
+  dragStartY.value = e.clientY;
+  isDragging.value = false;
+  dropTargetKey.value = null;
+  const cell = cells.value[cellKey];
+  dragLabel.value = typeof cell === 'string' ? cell : cell.location;
+  document.addEventListener('mousemove', onDocMouseMove);
+  document.addEventListener('mouseup', onDocMouseUp);
+};
+
+const onDocMouseMove = (e) => {
+  if (!dragCellKey.value) return;
+  const dx = e.clientX - dragStartX.value;
+  const dy = e.clientY - dragStartY.value;
+  if (!isDragging.value && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+    isDragging.value = true;
+  }
+  if (isDragging.value) {
+    dragGhostX.value = e.clientX;
+    dragGhostY.value = e.clientY;
+    if (gridMapRef.value) {
+      const rect = gridMapRef.value.getBoundingClientRect();
+      const stepSize = 50 * zoom.value;
+      const col = Math.floor((e.clientX - rect.left) / stepSize);
+      const row = Math.floor((e.clientY - rect.top) / stepSize);
+      if (col >= 0 && col < cols.value && row >= 0 && row < rowCount.value) {
+        const targetKey = `${row}-${col}`;
+        if (targetKey !== dragCellKey.value && canDropAt(targetKey)) {
+          dropTargetKey.value = targetKey;
+        } else if (targetKey === dragCellKey.value) {
+          dropTargetKey.value = null;
+        }
+      } else {
+        dropTargetKey.value = null;
+      }
+    }
+  }
+};
+
+const canDropAt = (targetKey) => {
+  if (!dragCellKey.value) return false;
+  const cell = cells.value[dragCellKey.value];
+  if (!cell) return false;
+  const [toR, toC] = targetKey.split('-').map(Number);
+  const w = typeof cell === 'string' ? 1 : (cell.w || 1);
+  const h = typeof cell === 'string' ? 1 : (cell.h || 1);
+  const [fromR, fromC] = dragCellKey.value.split('-').map(Number);
+  const draggedCells = new Set();
+  for (let dr = 0; dr < h; dr++) {
+    for (let dc = 0; dc < w; dc++) {
+      draggedCells.add(`${fromR + dr}-${fromC + dc}`);
+    }
+  }
+  for (let dr = 0; dr < h; dr++) {
+    for (let dc = 0; dc < w; dc++) {
+      const k = `${toR + dr}-${toC + dc}`;
+      if (toR + dr >= rowCount.value || toC + dc >= cols.value) return false;
+      if (draggedCells.has(k)) continue;
+      if (cells.value[k]) return false;
+      if (occupiedCells.value.has(k)) return false;
+    }
+  }
+  return true;
+};
+
+const moveCellTo = (fromKey, toKey) => {
+  const cell = cells.value[fromKey];
+  if (!cell) return;
+  const newCells = { ...cells.value };
+  delete newCells[fromKey];
+  newCells[toKey] = cell;
+  cells.value = newCells;
+};
+
+const onDocMouseUp = () => {
+  document.removeEventListener('mousemove', onDocMouseMove);
+  document.removeEventListener('mouseup', onDocMouseUp);
+  const cellKey = dragCellKey.value;
+  const wasDragging = isDragging.value;
+  const target = dropTargetKey.value;
+  dragCellKey.value = null;
+  isDragging.value = false;
+  dropTargetKey.value = null;
+  if (!cellKey) return;
+  if (wasDragging && target) {
+    moveCellTo(cellKey, target);
+  } else if (!wasDragging) {
+    openCellEditor(cellKey);
+  }
+};
+
+const cleanupDrag = () => {
+  document.removeEventListener('mousemove', onDocMouseMove);
+  document.removeEventListener('mouseup', onDocMouseUp);
 };
 
 const loadConfig = async () => {
@@ -656,6 +772,10 @@ onMounted(async () => {
   await loadAreas();
   await loadLocations();
   await loadConfig();
+});
+
+onUnmounted(() => {
+  cleanupDrag();
 });
 </script>
 
@@ -976,11 +1096,40 @@ onMounted(async () => {
 .cell-location {
   background: #e5e7eb;
   border: 1px solid #d1d5db;
+  cursor: grab;
 }
 
 .cell-equipment {
   background: #c7d2fe;
   border: 1px solid #6366f1;
+  cursor: grab;
+}
+
+.grid-cell.dragging {
+  opacity: 0.3;
+  border-style: dashed;
+  cursor: grabbing;
+}
+
+.grid-cell.drop-target {
+  background: #bbf7d0 !important;
+  border: 2px solid #22c55e !important;
+  box-shadow: inset 0 0 8px rgba(34, 197, 94, 0.3);
+}
+
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2000;
+  background: #c7d2fe;
+  border: 1px solid #6366f1;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f2937;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
 }
 
 .cell-label {
