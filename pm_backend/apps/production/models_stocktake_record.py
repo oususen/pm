@@ -10,10 +10,12 @@ class StocktakeRecord(models.Model):
     line = models.ForeignKey('masters.Line', on_delete=models.SET_NULL, null=True, blank=True, related_name='stocktake_records')
     process = models.ForeignKey('masters.Process', on_delete=models.SET_NULL, null=True, blank=True, related_name='stocktake_records')
     system_stock_qty = models.IntegerField(default=0, verbose_name='机上在庫')
+    system_progress_qty = models.IntegerField(default=0, verbose_name='机上進度')
     actual_stock_qty = models.IntegerField(default=0, verbose_name='現物数')
     note = models.CharField(max_length=255, blank=True, default='', verbose_name='備考')
     recorder_name = models.CharField(max_length=50, blank=True, default='', verbose_name='記入者名')
     counter_name = models.CharField(max_length=50, blank=True, default='', verbose_name='カウンター名')
+    area_name = models.CharField(max_length=50, blank=True, default='', verbose_name='入力エリア')
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

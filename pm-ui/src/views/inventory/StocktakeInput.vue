@@ -75,9 +75,10 @@
             <div class="cell-label">加工先</div>
             <div class="cell-value">{{ row.process_name || row.process_code || "-" }}</div>
           </div>
-          <div class="cell location-cell">
+          <div class="cell location-cell" :class="{ 'other-area': isOtherArea(row) }">
             <div class="cell-label">置き場:</div>
             <div class="cell-value">{{ formatRowLocations(row) }}</div>
+            <div v-if="isOtherArea(row)" class="other-area-badge">他エリア品</div>
           </div>
           <div class="cell photo-cell">
             <img v-if="row.image_url" :src="row.image_url" :alt="row.product_name" />
@@ -581,14 +582,32 @@ const filteredLocations = computed(() => {
   if (!selectedArea.value) return locations.value;
   return locations.value.filter(l => selectedArea.value.locations.includes(l));
 });
+const isInSelectedArea = (row) => {
+  if (!selectedArea.value) return true;
+  const locs = new Set(selectedArea.value.locations);
+  const rowLocs = getRowLocations(row);
+  if (!rowLocs.length) return false;
+  return rowLocs.some(l => locs.has(l));
+};
+const isOtherArea = (row) => {
+  if (!selectedArea.value) return false;
+  return !isInSelectedArea(row);
+};
 const areaFilteredRows = computed(() => {
   if (!selectedArea.value) return rows.value;
-  const locs = new Set(selectedArea.value.locations);
-  return rows.value.filter(row => {
-    const rowLocs = getRowLocations(row);
-    if (!rowLocs.length) return false;
-    return rowLocs.some(l => locs.has(l));
-  });
+  if (filters.product_code) {
+    const code = filters.product_code.toLowerCase();
+    const matched = rows.value.filter(row =>
+      row.product_code.toLowerCase().includes(code)
+    );
+    matched.sort((a, b) => {
+      const aIn = isInSelectedArea(a) ? 0 : 1;
+      const bIn = isInSelectedArea(b) ? 0 : 1;
+      return aIn - bIn;
+    });
+    return matched;
+  }
+  return rows.value.filter(row => isInSelectedArea(row));
 });
 const diffCount = computed(() => filteredRows.value.filter((row) => hasDiff(row)).length);
 const filteredRows = computed(() => areaFilteredRows.value);
@@ -1165,14 +1184,21 @@ const saveEditArea = async () => {
 
 const buildSaveItems = (targetRows) =>
   targetRows
-    .map((row) => ({
-      product_id: row.product_id,
-      system_stock_qty: Number(row.system_stock_qty || 0),
-      actual_stock_qty: normalizeNumber(editValues.value[row.product_id]) ?? 0,
-      note: String(noteValues.value[row.product_id] || "").trim(),
-      recorder_name: selectedRecorder.value,
-      counter_name: selectedCounter.value,
-    }));
+    .map((row) => {
+      let note = String(noteValues.value[row.product_id] || "").trim();
+      if (isOtherArea(row) && !note.includes("他エリア")) {
+        note = note ? `他エリア ${note}` : "他エリア";
+      }
+      return {
+        product_id: row.product_id,
+        system_stock_qty: Number(row.system_stock_qty || 0),
+        actual_stock_qty: normalizeNumber(editValues.value[row.product_id]) ?? 0,
+        note,
+        recorder_name: selectedRecorder.value,
+        counter_name: selectedCounter.value,
+        area_name: selectedArea.value?.name || '',
+      };
+    });
 
 const saveCurrent = async () => {
   if (!canEdit.value) return;
@@ -1761,6 +1787,19 @@ watch(newAreaType, () => {
 
 .location-cell {
   background: #a7c9e5;
+  position: relative;
+}
+.location-cell.other-area {
+  background: #f87171;
+}
+.other-area-badge {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #fff;
+  font-weight: bold;
 }
 
 .photo-cell {

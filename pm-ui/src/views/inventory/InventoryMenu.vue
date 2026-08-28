@@ -7,6 +7,11 @@
         <div class="tile-title">棚卸現物入力</div>
         <div class="tile-desc">場所・工程・写真を見ながら現物数を入力します。</div>
       </RouterLink>
+      <RouterLink v-if="canViewStocktakeInput" to="/inventory/stocktake-results" class="tile">
+        <div class="tile-icon">📊</div>
+        <div class="tile-title">棚卸結果確認</div>
+        <div class="tile-desc">棚卸入力結果を一覧表で確認します。</div>
+      </RouterLink>
       <RouterLink v-if="canViewStocktakeLayout" to="/inventory/stocktake-layout" class="tile">
         <div class="tile-icon">🗺️</div>
         <div class="tile-title">棚卸レイアウト編集</div>

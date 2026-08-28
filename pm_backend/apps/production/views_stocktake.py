@@ -222,6 +222,19 @@ class StocktakeRecordView(APIView):
             for product in Product.objects.filter(id__in=product_ids).select_related('line', 'process')
         }
 
+        progress_map = {
+            row['product_id']: int(row['total_progress'] or 0)
+            for row in (
+                LineBacklog.objects.filter(
+                    plan_date=stocktake_date,
+                    sequence_no=0,
+                    product_id__in=product_ids,
+                )
+                .values('product_id')
+                .annotate(total_progress=Sum('progress_qty'))
+            )
+        }
+
         saved = 0
         for item in items:
             product_id = item.get('product_id')
@@ -231,9 +244,12 @@ class StocktakeRecordView(APIView):
 
             actual_stock_qty = int(item.get('actual_stock_qty') or 0)
             system_stock_qty = int(item.get('system_stock_qty') or 0)
+            system_progress_qty = progress_map.get(product_id, 0)
             note = str(item.get('note') or '').strip()
             recorder_name = str(item.get('recorder_name') or '').strip()
             counter_name = str(item.get('counter_name') or '').strip()
+
+            area_name = str(item.get('area_name') or '').strip()
 
             StocktakeRecord.objects.create(
                 stocktake_date=stocktake_date,
@@ -241,10 +257,12 @@ class StocktakeRecordView(APIView):
                 line=product.line,
                 process=product.process,
                 system_stock_qty=system_stock_qty,
+                system_progress_qty=system_progress_qty,
                 actual_stock_qty=actual_stock_qty,
                 note=note,
                 recorder_name=recorder_name,
                 counter_name=counter_name,
+                area_name=area_name,
                 updated_by=request.user if request.user.is_authenticated else None,
             )
             saved += 1
@@ -441,6 +459,111 @@ class StocktakeAreaView(APIView):
             return Response({'detail': 'id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
         deleted, _ = StocktakeArea.objects.filter(id=area_id).delete()
         return Response({'deleted': deleted})
+
+
+class StocktakeResultView(APIView):
+    """棚卸結果確認"""
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _parse_date(value):
+        try:
+            return datetime.strptime(str(value), '%Y-%m-%d').date()
+        except Exception:
+            return None
+
+    def get(self, request):
+        stocktake_date = self._parse_date(request.query_params.get('stocktake_date'))
+        if not stocktake_date:
+            return Response({'detail': 'stocktake_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = StocktakeRecord.objects.filter(stocktake_date=stocktake_date)
+
+        area_name = str(request.query_params.get('area_name') or '').strip()
+        if area_name:
+            qs = qs.filter(area_name=area_name)
+
+        product_code = str(request.query_params.get('product_code') or '').strip()
+        stock_location = str(request.query_params.get('stock_location') or '').strip()
+
+        product_qs = Product.objects.filter(is_active=True)
+        if product_code:
+            product_qs = product_qs.filter(product_code__icontains=product_code)
+        if stock_location:
+            loc_product_ids = ProductStockLocation.objects.filter(
+                location_name=stock_location
+            ).values_list('product_id', flat=True)
+            product_qs = product_qs.filter(Q(stock_location=stock_location) | Q(id__in=loc_product_ids))
+
+        if product_code or stock_location:
+            qs = qs.filter(product_id__in=product_qs.values_list('id', flat=True))
+
+        records = list(
+            qs.select_related('product', 'updated_by')
+            .prefetch_related('product__stock_locations')
+            .order_by('product__product_code', '-updated_at')[:5000]
+        )
+
+        product_ids = list(set(r.product_id for r in records))
+        backlog_map = {
+            row['product_id']: int(row['system_stock_qty'] or 0)
+            for row in (
+                LineBacklog.objects.filter(
+                    plan_date=stocktake_date,
+                    sequence_no=0,
+                    product_id__in=product_ids,
+                )
+                .values('product_id')
+                .annotate(system_stock_qty=Sum('stock_qty'))
+            )
+        }
+
+        def _stock_locs(product):
+            locs = [sl.location_name for sl in product.stock_locations.all()]
+            if not locs and product.stock_location:
+                locs = [product.stock_location]
+            return ', '.join(locs) if locs else ''
+
+        detail_rows = []
+        for r in records:
+            p = r.product
+            detail_rows.append({
+                'id': r.id,
+                'product_id': p.id,
+                'product_code': p.product_code,
+                'product_name': p.product_name or '',
+                'area_name': r.area_name or '',
+                'stock_locations': _stock_locs(p),
+                'system_stock_qty': backlog_map.get(p.id, 0),
+                'system_progress_qty': r.system_progress_qty,
+                'actual_stock_qty': r.actual_stock_qty,
+                'recorder_name': r.recorder_name or '',
+                'counter_name': r.counter_name or '',
+                'note': r.note or '',
+                'updated_by_name': (
+                    r.updated_by.get_full_name() or r.updated_by.username
+                ) if r.updated_by else '',
+                'updated_at': r.updated_at.isoformat() if r.updated_at else None,
+            })
+
+        area_choices = sorted(
+            StocktakeRecord.objects.filter(stocktake_date=stocktake_date)
+            .exclude(area_name='')
+            .values_list('area_name', flat=True)
+            .distinct()
+        )
+        loc_choices = sorted(
+            set(
+                ProductStockLocation.objects.filter(product__is_active=True)
+                .values_list('location_name', flat=True).distinct()
+            )
+        )
+
+        return Response({
+            'rows': detail_rows,
+            'area_choices': area_choices,
+            'location_choices': loc_choices,
+        })
 
 
 class StocktakeSlipPDFView(APIView):

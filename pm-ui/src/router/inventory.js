@@ -28,6 +28,16 @@ const inventory = [
     },
   },
   {
+    path: "/inventory/stocktake-results",
+    name: "InventoryStocktakeResults",
+    component: () => import("@/views/inventory/StocktakeResults.vue"),
+    meta: {
+      pageTitle: "棚卸結果確認",
+      resource: "stocktake",
+      fallbackToParent: false,
+    },
+  },
+  {
     path: "/inventory/stocktake-layout",
     name: "InventoryStocktakeLayout",
     component: () => import("@/views/inventory/StocktakeLayoutEditor.vue"),

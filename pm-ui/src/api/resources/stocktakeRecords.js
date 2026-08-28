@@ -44,6 +44,9 @@ export const createStocktakeRecordsAPI = (client) => ({
   deleteArea(id) {
     return client.delete('/stocktake-areas/', { data: { id } })
   },
+  results(params = {}) {
+    return client.get('/stocktake-results/', { params })
+  },
   slipPdf(params = {}) {
     return client.get('/stocktake-slip-pdf/', { params, responseType: 'blob' })
   },
