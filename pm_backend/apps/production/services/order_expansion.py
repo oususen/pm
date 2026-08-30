@@ -26,6 +26,7 @@ class OrderExpansionService:
         'routing_step',
         'process',
         'product',
+        'ship_to_code',
         'lead_time_days',
         'is_shifted',
         'firm_is_shifted',
@@ -43,6 +44,7 @@ class OrderExpansionService:
         'id',
         'line_id',
         'product_code',
+        'ship_to_code',
         'plan_date',
         'routing_step_id',
         'process_id',
@@ -587,7 +589,7 @@ class OrderExpansionService:
             )
 
         for created in to_create:
-            existing_map[(created.line_id, created.product_code, created.plan_date, created.process_id)] = created
+            existing_map[(created.line_id, created.product_code, created.plan_date, created.process_id, created.ship_to_code or '')] = created
 
         return {
             'created': len(to_create),
@@ -596,14 +598,14 @@ class OrderExpansionService:
 
     def _load_existing_demand_rows(self):
         return {
-            (row['line_id'], row['product_code'], row['plan_date'], row['process_id']): row
+            (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or ''): row
             for row in LineDemand.objects.values(*self.EXISTING_DEMAND_VALUE_FIELDS)
         }
 
     def _load_existing_actual_qty_map(self):
         return {
-            (row['line_id'], row['product_code'], row['plan_date'], row['process_id']): Decimal(str(row['actual_qty'] or 0))
-            for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'process_id', 'actual_qty')
+            (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or ''): Decimal(str(row['actual_qty'] or 0))
+            for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'process_id', 'ship_to_code', 'actual_qty')
         }
 
     def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map):
@@ -620,10 +622,10 @@ class OrderExpansionService:
             plan_date__in=plan_dates,
         ).values(*self.EXISTING_DEMAND_VALUE_FIELDS)
         for row in refreshed:
-            existing_map[(row['line_id'], row['product_code'], row['plan_date'], row['process_id'])] = row
+            existing_map[(row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or '')] = row
 
     def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
-        aggregated: Dict[Tuple[int, str, object, int | None], Dict[str, object]] = {}
+        aggregated: Dict[Tuple[int, str, object, int | None, str], Dict[str, object]] = {}
         processed_ids: List[int] = []
 
         for order_line in order_lines:
@@ -822,7 +824,7 @@ class OrderExpansionService:
                 base_mult = path_multiplier.get(step.hierarchy_path, Decimal('1'))
             correction = correction_by_product.get(product_id, Decimal('1'))
 
-            key = (effective_line_id, product_code, target_date, step.process_id)
+            key = (effective_line_id, product_code, target_date, step.process_id, ship_to_code)
             entry = aggregated.get(key)
             if not entry:
                 entry = {
@@ -831,6 +833,7 @@ class OrderExpansionService:
                     'process_id': step.process_id,
                     'product_id': product_id,
                     'product_code': product_code,
+                    'ship_to_code': ship_to_code,
                     'plan_date': target_date,
                     'lead_time_days': lead_days,
                     'firm_qty': Decimal('0'),
@@ -881,6 +884,7 @@ class OrderExpansionService:
                         'process_id': entry['process_id'],
                         'product_id': entry['product_id'],
                         'product_code': entry['product_code'],
+                        'ship_to_code': entry['ship_to_code'],
                         'plan_date': entry['plan_date'],
                         'lead_time_days': entry['lead_time_days'],
                         'firm_qty': entry['firm_qty'],
@@ -908,6 +912,7 @@ class OrderExpansionService:
             process_id=row['process_id'],
             product_id=row['product_id'],
             product_code=row['product_code'],
+            ship_to_code=row.get('ship_to_code') or '',
             plan_date=row['plan_date'],
             lead_time_days=row['lead_time_days'],
             is_shifted=bool(row['is_shifted']),
@@ -939,6 +944,7 @@ class OrderExpansionService:
             process_id=entry['process_id'],
             product_id=entry['product_id'],
             product_code=entry['product_code'],
+            ship_to_code=entry.get('ship_to_code', ''),
             plan_date=entry['plan_date'],
             lead_time_days=entry['lead_time_days'],
             forecast_qty=entry['forecast_qty'],
@@ -956,6 +962,7 @@ class OrderExpansionService:
         demand.routing_step_id = entry['routing_step_id']
         demand.process_id = entry['process_id']
         demand.product_id = entry['product_id']
+        demand.ship_to_code = entry.get('ship_to_code', '')
         demand.lead_time_days = entry['lead_time_days']
 
     def _refresh_demand_fields(self, demand: LineDemand):

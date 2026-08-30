@@ -732,32 +732,21 @@ def pickup(viewset, request, **deps):
         line_demands = list(demand_qs)
         logger.info("pickup: line_demands=%s", len(line_demands))
     
-        firm_map = defaultdict(Decimal)
-        forecast_map = defaultdict(Decimal)
-        shifted_keys = set()
         for ld in line_demands:
             if not ld.product_id:
                 continue
-            key = (ld.product_id, ld.plan_date)
             firm_qty = Decimal(str(ld.firm_qty or 0))
             forecast_qty = Decimal(str(ld.forecast_qty or 0))
-            if firm_qty > 0:
-                firm_map[key] += firm_qty
-            if forecast_qty > 0:
-                forecast_map[key] += forecast_qty
-            if ld.is_shifted or ld.firm_is_shifted or ld.forecast_is_shifted:
-                shifted_keys.add(key)
-    
-        for key in set(firm_map) | set(forecast_map):
-            firm_qty = firm_map.get(key, Decimal('0'))
-            forecast_qty = forecast_map.get(key, Decimal('0'))
+            if firm_qty <= 0 and forecast_qty <= 0:
+                continue
             # 前倒しで同日に重なった需要のみ、確定＋内示を合算する。
             # 前倒しが無い場合は「確定優先」。
-            if key in shifted_keys and firm_qty > 0 and forecast_qty > 0:
+            if (ld.is_shifted or ld.firm_is_shifted or ld.forecast_is_shifted) and firm_qty > 0 and forecast_qty > 0:
                 demand_qty = firm_qty + forecast_qty
             else:
                 demand_qty = firm_qty if firm_qty > 0 else forecast_qty
-            add_demand(key[0], key[1], demand_qty, None, actual_qty=demand_qty)
+            actual_qty = firm_qty if firm_qty > 0 else Decimal('0')
+            add_demand(ld.product_id, ld.plan_date, demand_qty, None, actual_qty=actual_qty)
 
     logger.info(
         "pickup: phase=final_demand line_id=%s rows=%s demand_keys=%s demand_actual_keys=%s time=%.3fs",
@@ -1692,7 +1681,7 @@ def pickup_purchase(viewset, request, **deps):
             final_demand_qs = final_demand_qs.filter(plan_date__lte=end_dt)
     
         for row in final_demand_qs.values(
-            'product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty'
+            'product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty', 'ship_to_code'
         ):
             qty = _resolve_linedemand_qty(row)
             actual_qty = _resolve_linedemand_actual_qty(row)
@@ -1829,7 +1818,7 @@ def pickup_purchase(viewset, request, **deps):
         direct_qs = direct_qs.filter(product_id__in=requested_product_ids)
     
     direct_demand_product_ids = set()
-    for row in direct_qs.values('product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty'):
+    for row in direct_qs.values('product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty', 'ship_to_code'):
         product_id = row.get('product_id')
         plan_date = row.get('plan_date')
         qty = _resolve_linedemand_qty(row)

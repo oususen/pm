@@ -23,7 +23,7 @@ class LineDemandFilter(django_filters.FilterSet):
 
     class Meta:
         model = LineDemand
-        fields = ['line', 'routing_step', 'product', 'plan_date']
+        fields = ['line', 'routing_step', 'product', 'plan_date', 'ship_to_code']
 
     def filter_line_search(self, queryset, name, value):
         if value:

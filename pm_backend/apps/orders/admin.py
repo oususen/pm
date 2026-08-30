@@ -46,8 +46,8 @@ class StgOrderDailyAdmin(admin.ModelAdmin):
 
 @admin.register(LineDemand)
 class LineDemandAdmin(admin.ModelAdmin):
-    list_display = ['line', 'product_code', 'plan_date', 'firm_qty', 'forecast_qty', 'plan_qty', 'actual_qty']
-    list_filter = ['line', 'plan_date']
+    list_display = ['line', 'product_code', 'ship_to_code', 'plan_date', 'firm_qty', 'forecast_qty', 'plan_qty', 'actual_qty']
+    list_filter = ['line', 'plan_date', 'ship_to_code']
     search_fields = ['product_code', 'order_numbers']
 
 

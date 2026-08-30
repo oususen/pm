@@ -65,6 +65,7 @@ class LineDemand(models.Model):
         verbose_name='製品'
     )
     product_code = models.CharField(max_length=50, verbose_name='製品コード')
+    ship_to_code = models.CharField(max_length=40, default='', blank=True, verbose_name='納入先コード')
     plan_date = models.DateField(verbose_name='必要日')
     lead_time_days = models.IntegerField(default=0, verbose_name='リードタイム(日)')
     is_shifted = models.BooleanField(default=False, verbose_name='前倒し需要フラグ')
@@ -103,11 +104,12 @@ class LineDemand(models.Model):
         db_table = 't_line_demand'
         verbose_name = 'ライン需要展開'
         verbose_name_plural = 'ライン需要展開'
-        unique_together = [['line', 'product_code', 'plan_date', 'process']]
+        unique_together = [['line', 'product_code', 'plan_date', 'process', 'ship_to_code']]
         indexes = [
             models.Index(fields=['line', 'plan_date']),
             models.Index(fields=['product_code']),
             models.Index(fields=['process']),
+            models.Index(fields=['ship_to_code']),
         ]
 
     def __str__(self):

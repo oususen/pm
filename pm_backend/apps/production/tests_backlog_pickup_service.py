@@ -7,7 +7,7 @@ from rest_framework.test import APIRequestFactory
 from masters.models import Line, Process, Product, Routing, RoutingStep
 from production.models import LineDemand
 from production.models_line_backlog import LineBacklog
-from production.services.backlog_pickup_service import seed_progress_backlogs_from_demand
+from production.services.backlog_pickup_service import pickup, seed_progress_backlogs_from_demand
 
 
 class BacklogPickupServiceTest(TestCase):
@@ -19,6 +19,7 @@ class BacklogPickupServiceTest(TestCase):
             'invalid_sequence_sort_value': 999999,
             'floor_shipping_pm_sequence_threshold': 900000,
             'is_floor_shipping_delivery_line': lambda *_args, **_kwargs: False,
+            'is_kubota_delivery_line': lambda *_args, **_kwargs: False,
         }
 
     @patch('production.services.backlog_pickup_service._notify_backlog_process_resolution_failure')
@@ -114,3 +115,77 @@ class BacklogPickupServiceTest(TestCase):
         self.assertEqual(backlog.process_id, process.id)
         self.assertEqual(backlog.product_id, product.id)
         mock_notify.assert_not_called()
+
+    def test_pickup_final_product_resolves_demand_per_ship_to_then_sums(self):
+        line = Line.objects.create(
+            line_code='LTEST-PICKUP',
+            line_name='需要取込ライン',
+            line_type='PROD',
+        )
+        process = Process.objects.create(
+            process_code='PTEST-PICKUP',
+            process_name='需要取込工程',
+            line=line,
+        )
+        product = Product.objects.create(
+            product_code='TEST-FINAL',
+            product_name='最終品テスト',
+            is_final_product=True,
+        )
+        routing = Routing.objects.create(
+            product=product,
+            routing_code='RTEST-PICKUP',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=process,
+            line=line,
+            output_product=product,
+        )
+        LineDemand.objects.create(
+            line=line,
+            process=process,
+            product=product,
+            product_code=product.product_code,
+            ship_to_code='5476',
+            plan_date=date(2026, 9, 4),
+            forecast_qty=152,
+            plan_qty=152,
+        )
+        LineDemand.objects.create(
+            line=line,
+            process=process,
+            product=product,
+            product_code=product.product_code,
+            ship_to_code='833',
+            plan_date=date(2026, 9, 4),
+            firm_qty=40,
+            plan_qty=40,
+        )
+
+        request = self.factory.post(
+            '/production/linebacklogs/pickup/',
+            {
+                'line_id': line.id,
+                'start_date': '2026-09-04',
+                'end_date': '2026-09-04',
+            },
+            format='json',
+        )
+
+        response = pickup(None, request, **self.deps)
+
+        self.assertEqual(response.status_code, 200)
+        backlog = LineBacklog.objects.get(
+            line_id=line.id,
+            process_id=process.id,
+            product_id=product.id,
+            plan_date=date(2026, 9, 4),
+            sequence_no=0,
+        )
+        self.assertEqual(backlog.order_qty, 192)
+        self.assertEqual(backlog.order_qty_actual, 40)
+        self.assertEqual(backlog.demand_qty_plan, 192)

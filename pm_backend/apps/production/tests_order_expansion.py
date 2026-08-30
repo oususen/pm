@@ -53,7 +53,7 @@ class OrderExpansionServiceTest(TestCase):
             lead_time_days=0,
         )
 
-    def _create_order_line(self, order_no, order_type, quantity, due_date, is_expanded=False):
+    def _create_order_line(self, order_no, order_type, quantity, due_date, is_expanded=False, ship_to_code=''):
         order = Order.objects.create(
             customer=self.customer,
             order_no=order_no,
@@ -70,6 +70,7 @@ class OrderExpansionServiceTest(TestCase):
             quantity=Decimal(str(quantity)),
             due_date=due_date,
             is_expanded=is_expanded,
+            ship_to_code=ship_to_code,
         )
 
     def test_incremental_expand_replaces_forecast_and_increments_new_firm(self):
@@ -273,3 +274,52 @@ class OrderExpansionServiceTest(TestCase):
         self.assertIsNotNone(order_line.expanded_at)
         self.assertEqual(demand.firm_qty, Decimal('4'))
         self.assertEqual(demand.firm_order_numbers, 'FIRM-REBUILD')
+
+    def test_ship_to_code_creates_separate_demands(self):
+        due_date = '2026-04-12'
+        self._create_order_line('FIRM-A', 'FIRM', '3', due_date, ship_to_code='000010')
+        self._create_order_line('FIRM-B', 'FIRM', '5', due_date, ship_to_code='000030')
+
+        OrderExpansionService().expand_open_orders(clear_existing=True)
+
+        demands = LineDemand.objects.filter(
+            line=self.line,
+            product_code=self.product.product_code,
+            plan_date=due_date,
+        ).order_by('ship_to_code')
+        self.assertEqual(demands.count(), 2)
+        d1 = demands.get(ship_to_code='000010')
+        d2 = demands.get(ship_to_code='000030')
+        self.assertEqual(d1.firm_qty, Decimal('3'))
+        self.assertEqual(d2.firm_qty, Decimal('5'))
+
+    def test_revert_with_ship_to_code_affects_only_matching_row(self):
+        due_date = '2026-04-13'
+        ol_a = self._create_order_line('FIRM-C', 'FIRM', '4', due_date, is_expanded=True, ship_to_code='000010')
+        ol_b = self._create_order_line('FIRM-D', 'FIRM', '6', due_date, is_expanded=True, ship_to_code='000030')
+
+        LineDemand.objects.create(
+            line=self.line, routing_step=self.step, process=self.process,
+            product=self.product, product_code=self.product.product_code,
+            ship_to_code='000010', plan_date=due_date, lead_time_days=0,
+            forecast_qty=0, firm_qty=Decimal('4'), plan_qty=Decimal('4'),
+            actual_qty=0, order_numbers='FIRM-C', firm_order_numbers='FIRM-C',
+        )
+        LineDemand.objects.create(
+            line=self.line, routing_step=self.step, process=self.process,
+            product=self.product, product_code=self.product.product_code,
+            ship_to_code='000030', plan_date=due_date, lead_time_days=0,
+            forecast_qty=0, firm_qty=Decimal('6'), plan_qty=Decimal('6'),
+            actual_qty=0, order_numbers='FIRM-D', firm_order_numbers='FIRM-D',
+        )
+
+        result = OrderExpansionService().revert_firm_order_lines([ol_a.id])
+
+        self.assertEqual(result['reverted_order_lines'], 1)
+        self.assertFalse(result['errors'])
+        remaining = LineDemand.objects.filter(
+            line=self.line, product_code=self.product.product_code, plan_date=due_date,
+        )
+        self.assertEqual(remaining.count(), 1)
+        self.assertEqual(remaining.first().ship_to_code, '000030')
+        self.assertEqual(remaining.first().firm_qty, Decimal('6'))
