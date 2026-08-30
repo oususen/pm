@@ -1644,6 +1644,7 @@ def pickup_purchase(viewset, request, **deps):
                 'plan_date',
                 'plan_qty',
                 'order_qty',
+                'actual_qty',
                 'plan_id',
             ).filter(
                 Q(plan_qty__gt=0) |
@@ -1678,6 +1679,10 @@ def pickup_purchase(viewset, request, **deps):
         if forecast_qty > 0:
             return forecast_qty
         return Decimal(str(demand_row.get('plan_qty') or 0))
+
+    def _resolve_linedemand_actual_qty(demand_row):
+        firm_qty = Decimal(str(demand_row.get('firm_qty') or 0))
+        return firm_qty if firm_qty > 0 else Decimal('0')
     
     if final_parent_ids:
         final_demand_qs = LineDemand.objects.filter(product_id__in=final_parent_ids)
@@ -1690,6 +1695,7 @@ def pickup_purchase(viewset, request, **deps):
             'product_id', 'plan_date', 'firm_qty', 'forecast_qty', 'is_shifted', 'plan_qty'
         ):
             qty = _resolve_linedemand_qty(row)
+            actual_qty = _resolve_linedemand_actual_qty(row)
             if qty == 0:
                 continue
             parent_orders.append({
@@ -1700,7 +1706,9 @@ def pickup_purchase(viewset, request, **deps):
                 'plan_date': row.get('plan_date'),
                 'plan_qty': qty,
                 'order_qty': qty,
+                'actual_qty': actual_qty,
                 'plan_id': None,
+                'prefer_actual_if_available': True,
             })
     
     # 日替わり8時ルール: 8時より前は前日扱い
@@ -1759,27 +1767,52 @@ def pickup_purchase(viewset, request, **deps):
         return current
     
     demand_map = defaultdict(Decimal)
+    demand_actual_map = defaultdict(Decimal)
+    demand_plan_contributions = []
+
+    def add_purchase_demand(product_id, plan_date, qty, actual_qty=None, parent_plan_date=None, prefer_actual_if_available=False):
+        key = (product_id, plan_date)
+        demand_map[key] += qty
+        if actual_qty is not None:
+            demand_actual_map[key] += actual_qty
+        demand_plan_contributions.append((
+            product_id,
+            plan_date,
+            qty,
+            Decimal(str(actual_qty or 0)),
+            parent_plan_date,
+            bool(prefer_actual_if_available),
+        ))
+
     for row in parent_orders:
         parent_id = row['product_id']
-        line_id_parent = row.get('line_id')
         plan_date = row['plan_date']
-    
+
         # 外作ライン(OUTSOURCE)は計画未作成時に order_qty（需要）を使用する
         if row.get('line__line_type') == 'OUTSOURCE':
             plan_qty = Decimal(str(row.get('order_qty') or 0))
         else:
             plan_qty = Decimal(str(row['plan_qty'] or 0))
-    
+        actual_qty = Decimal(str(row.get('actual_qty') or 0))
+        prefer_actual_if_available = bool(row.get('prefer_actual_if_available'))
+
         # 購買需要では、計画日(plan_date)を基準にLTをシフトする
         effective_date = plan_date
-    
+
         if plan_qty == 0:
             continue
     
         # 需要 = 親数量 × 子BOM数量（LTを考慮して日付をシフト）
         for child_id, qty, lead_time_days in parent_to_children.get(parent_id, []):
             target_date = shift_business_days(effective_date, lead_time_days)
-            demand_map[(child_id, target_date)] += plan_qty * qty
+            add_purchase_demand(
+                child_id,
+                target_date,
+                plan_qty * qty,
+                actual_qty=actual_qty * qty,
+                parent_plan_date=effective_date,
+                prefer_actual_if_available=prefer_actual_if_available,
+            )
     
     # フォールバック: 購買ラインのLineDemand（内示/確定集計）を需要として取り込む
     # ただし、社内ライン最終品と同じ方針で「最終品のみ」を対象にする。
@@ -1800,6 +1833,7 @@ def pickup_purchase(viewset, request, **deps):
         product_id = row.get('product_id')
         plan_date = row.get('plan_date')
         qty = _resolve_linedemand_qty(row)
+        actual_qty = _resolve_linedemand_actual_qty(row)
         if not product_id or not plan_date or qty == 0:
             continue
         plan_date = shift_business_days(plan_date, 0)
@@ -1811,8 +1845,15 @@ def pickup_purchase(viewset, request, **deps):
             continue
         key = (product_id, plan_date)
         if key not in demand_map:
-            demand_map[key] = qty
-    
+            add_purchase_demand(
+                product_id,
+                plan_date,
+                qty,
+                actual_qty=actual_qty,
+                parent_plan_date=plan_date,
+                prefer_actual_if_available=True,
+            )
+
     target_product_ids = set(child_ids) | direct_demand_product_ids
     if requested_product_ids:
         target_product_ids = set(requested_product_ids)
@@ -1832,7 +1873,22 @@ def pickup_purchase(viewset, request, **deps):
         )
         if resolved_process:
             child_process_map[product_id] = resolved_process.id
-    
+
+    now = datetime.now()
+    today = (now - timedelta(days=1)).date() if now.hour < 8 else now.date()
+    target_key_demand_plan_map = defaultdict(Decimal)
+    for product_id, plan_date, oq, oa, parent_date, prefer_actual_if_available in demand_plan_contributions:
+        child_process_id = child_process_map.get(product_id, process_id)
+        if not child_process_id:
+            continue
+        target_key = (product_id, plan_date, child_process_id)
+        if prefer_actual_if_available and oa > 0:
+            target_key_demand_plan_map[target_key] += oa
+        elif parent_date is not None and parent_date < today:
+            target_key_demand_plan_map[target_key] += oa
+        else:
+            target_key_demand_plan_map[target_key] += oq
+
     _t4 = _time.perf_counter()
     logger.info('[pickup_purchase] demand calc: %.3fs (demand_map=%d, target_products=%d)', _t4 - _t3, len(demand_map), len(target_product_ids))
     
@@ -1865,15 +1921,22 @@ def pickup_purchase(viewset, request, **deps):
     
     for (child_id, plan_date), demand in demand_map.items():
         qty_val = int(demand)
+        qty_actual_val = int(demand_actual_map.get((child_id, plan_date), Decimal('0')))
         # SUBCON品はG工程（または外作区分）、BUY品はPURCHASEプロセス
         child_process_id = child_process_map.get(child_id, process_id)
         if not child_process_id:
             continue
+        demand_qty_plan_val = int(target_key_demand_plan_map.get((child_id, plan_date, child_process_id), Decimal('0')))
         existing_obj = existing_map.pop((child_id, plan_date, child_process_id), None)
         if existing_obj:
-            if (existing_obj.order_qty or 0) != qty_val or (existing_obj.demand_qty_plan or 0) != qty_val:
+            if (
+                (existing_obj.order_qty or 0) != qty_val
+                or (existing_obj.order_qty_actual or 0) != qty_actual_val
+                or (existing_obj.demand_qty_plan or 0) != demand_qty_plan_val
+            ):
                 existing_obj.order_qty = qty_val
-                existing_obj.demand_qty_plan = qty_val
+                existing_obj.order_qty_actual = qty_actual_val
+                existing_obj.demand_qty_plan = demand_qty_plan_val
                 to_update.append(existing_obj)
                 updated += 1
             else:
@@ -1887,14 +1950,16 @@ def pickup_purchase(viewset, request, **deps):
                 line_id=line_id,
                 sequence_no=0,
                 order_qty=qty_val,
-                demand_qty_plan=qty_val,
+                order_qty_actual=qty_actual_val,
+                demand_qty_plan=demand_qty_plan_val,
             ))
             created += 1
-    
+
     zero_update = []
     for obj in existing_map.values():
-        if (obj.order_qty or 0) != 0 or (obj.demand_qty_plan or 0) != 0:
+        if (obj.order_qty or 0) != 0 or (obj.order_qty_actual or 0) != 0 or (obj.demand_qty_plan or 0) != 0:
             obj.order_qty = 0
+            obj.order_qty_actual = 0
             obj.demand_qty_plan = 0
             zero_update.append(obj)
             updated += 1
@@ -1902,11 +1967,11 @@ def pickup_purchase(viewset, request, **deps):
     if to_create:
         LineBacklog.objects.bulk_create(to_create, batch_size=500, ignore_conflicts=True)
     if to_update:
-        LineBacklog.objects.bulk_update(to_update, ['order_qty', 'demand_qty_plan', 'updated_at'], batch_size=500)
+        LineBacklog.objects.bulk_update(to_update, ['order_qty', 'order_qty_actual', 'demand_qty_plan', 'updated_at'], batch_size=500)
     if touch_update:
         LineBacklog.objects.bulk_update(touch_update, ['updated_at'], batch_size=500)
     if zero_update:
-        LineBacklog.objects.bulk_update(zero_update, ['order_qty', 'demand_qty_plan', 'updated_at'], batch_size=500)
+        LineBacklog.objects.bulk_update(zero_update, ['order_qty', 'order_qty_actual', 'demand_qty_plan', 'updated_at'], batch_size=500)
     
     _t6 = _time.perf_counter()
     logger.info('[pickup_purchase] DB write: %.3fs (created=%d, updated=%d, touched=%d, zeroed=%d)', _t6 - _t5, len(to_create), len(to_update), len(touch_update), len(zero_update))
