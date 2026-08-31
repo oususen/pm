@@ -327,6 +327,8 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
             product_code, ship_to, _src_order_no, due_date_val = ekey
             dp_key = (product_code, ship_to, due_date_val)
             if existing_row.order_type == 'FORECAST' and dp_key in firm_keys_by_date_product:
+                if (existing_row.delivery_qty or Decimal('0')) > 0:
+                    continue
                 forecast_delete_rows.append(existing_row)
 
         if forecast_delete_rows:
@@ -356,16 +358,8 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
             product_code, ship_to, _src_order_no, due_date_val = ekey
             dp_key = (product_code, ship_to, due_date_val)
             if existing_row.order_type == 'FORECAST' and dp_key in firm_keys_by_date_product:
-                firm_key = firm_keys_by_date_product[dp_key]
-                firm_row = existing_map.get(firm_key) or KubotaSakaiDueAdjustment.objects.filter(
-                    product_code=firm_key[0],
-                    ship_to_code=firm_key[1] or None,
-                    source_order_no=firm_key[2] or None,
-                    due_date=firm_key[3],
-                ).first()
-                if firm_row and existing_row.delivery_qty > 0:
-                    firm_row.delivery_qty += existing_row.delivery_qty
-                    firm_row.save(update_fields=['delivery_qty'])
+                if (existing_row.delivery_qty or Decimal('0')) > 0:
+                    continue
                 existing_row.delete()
                 deleted_count += 1
                 processed_keys.add(ekey)
@@ -761,6 +755,8 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                         continue
                     key = (product_code, ship_to_code, source_order_no, due_date_val)
                     if key not in input_delivery_map:
+                        continue
+                    if input_delivery_map[key] <= 0:
                         continue
                     exists = KubotaSakaiDueAdjustment.objects.filter(
                         product_code=product_code,

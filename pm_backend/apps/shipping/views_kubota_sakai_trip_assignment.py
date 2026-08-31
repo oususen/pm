@@ -983,20 +983,41 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
             trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
             trip__customer_code=KUBOTA_CUSTOMER_CODE,
             trip__departure_date=target_date,
-        ).values('id', 'source_id')
+        ).values('id', 'source_id', 'trip__trip_ref')
     )
     existing_due_ids = set(
         KubotaSakaiDueAdjustment.objects.filter(
             id__in=[int(row['source_id']) for row in common_allocations if row.get('source_id')]
         ).values_list('id', flat=True)
     )
-    orphan_allocation_ids = [
+    orphan_allocation_ids = {
         int(row['id'])
         for row in common_allocations
         if int(row['source_id']) not in existing_due_ids
-    ]
+    }
     if orphan_allocation_ids:
         ShippingTripAllocation.objects.filter(id__in=orphan_allocation_ids).delete()
+
+    # 便計画に存在しない割付を掃除（DueAdjustmentは残っているが便計画から外された場合）
+    planned_keys = {
+        (due_adj_id, f'TRUCK:{truck_id}')
+        for due_adj_id, truck_id in KubotaSakaiTripAssignment.objects.filter(
+            departure_date=target_date,
+        ).values_list('due_adjustment_id', 'truck_id')
+    }
+    unplanned_allocation_ids = []
+    for row in common_allocations:
+        alloc_id = int(row['id'])
+        source_id = int(row['source_id'])
+        trip_ref = str(row.get('trip__trip_ref') or '').strip()
+        if alloc_id in orphan_allocation_ids:
+            continue
+        if trip_ref in locked_trip_refs:
+            continue
+        if (source_id, trip_ref) not in planned_keys:
+            unplanned_allocation_ids.append(alloc_id)
+    if unplanned_allocation_ids:
+        ShippingTripAllocation.objects.filter(id__in=unplanned_allocation_ids).delete()
 
     # 当日・該当業務の空便を掃除
     empty_trip_ids = list(
