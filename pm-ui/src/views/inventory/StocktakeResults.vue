@@ -29,6 +29,9 @@
       <button type="button" class="btn btn-mode" @click="toggleMode">
         表示: {{ isSummary ? '合計' : '分行' }}
       </button>
+      <button class="btn btn-excel" @click="openExportDialog('summary')" :disabled="exporting">Excel合計</button>
+      <button class="btn btn-excel" @click="openExportDialog('detail')" :disabled="exporting">Excel分行</button>
+      <button class="btn btn-excel" @click="openExportDialog('company')" :disabled="exporting">会社集計用Excel</button>
     </div>
 
     <div v-if="loading" class="center">読み込み中...</div>
@@ -113,11 +116,37 @@
       </div>
     </div>
   </div>
+
+  <div v-if="showExportDialog" class="modal-overlay" @click.self="showExportDialog = false">
+    <div class="modal-box">
+      <div class="modal-header">Excel出力 — {{ exportTypeLabel }}</div>
+      <div class="modal-body">
+        <label class="modal-field">
+          <span>棚卸日</span>
+          <input v-model="exportDate" type="date" />
+        </label>
+        <label class="modal-field">
+          <span>エリア</span>
+          <select v-model="exportArea">
+            <option value="">すべて</option>
+            <option v-for="a in exportAreaChoices" :key="a" :value="a">{{ a }}</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" @click="showExportDialog = false">キャンセル</button>
+        <button type="button" class="btn-export" @click="executeExport" :disabled="exporting || !exportDate">
+          {{ exporting ? '出力中...' : '出力' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import api from '@/api/client'
+import * as XLSX from 'xlsx'
 
 const today = new Date()
 const yyyy = today.getFullYear()
@@ -148,6 +177,7 @@ const summaryRows = computed(() => {
         product_id: pid,
         product_code: r.product_code,
         product_name: r.product_name,
+        category: r.category || '',
         stock_locations: r.stock_locations,
         system_stock_qty: r.system_stock_qty,
         system_progress_qty: r.system_progress_qty,
@@ -217,6 +247,169 @@ const load = async () => {
   }
 }
 
+const exporting = ref(false)
+const showExportDialog = ref(false)
+const exportType = ref('')
+const exportDate = ref('')
+const exportArea = ref('')
+const exportAreaChoices = ref([])
+
+const exportTypeLabel = computed(() => {
+  if (exportType.value === 'summary') return 'Excel合計'
+  if (exportType.value === 'detail') return 'Excel分行'
+  return '会社集計用Excel'
+})
+
+const openExportDialog = async (type) => {
+  exportType.value = type
+  exportDate.value = filters.value.stocktake_date
+  exportArea.value = ''
+  showExportDialog.value = true
+  try {
+    const res = await api.stocktakeRecords.results({ stocktake_date: exportDate.value })
+    exportAreaChoices.value = res.data.area_choices || []
+  } catch (_) {
+    exportAreaChoices.value = []
+  }
+}
+
+const fetchExportRows = async () => {
+  const params = { stocktake_date: exportDate.value }
+  if (exportArea.value) params.area_name = exportArea.value
+  const res = await api.stocktakeRecords.resultsExport(params)
+  return res.data.rows || []
+}
+
+const buildSummary = (rows) => {
+  const groups = {}
+  for (const r of rows) {
+    const pid = r.product_id
+    if (!groups[pid]) {
+      groups[pid] = {
+        product_code: r.product_code,
+        product_name: r.product_name,
+        category: r.category || '',
+        stock_locations: r.stock_locations,
+        system_stock_qty: r.system_stock_qty,
+        system_progress_qty: r.system_progress_qty,
+        actual_stock_qty: 0,
+        record_count: 0,
+        area_set: new Set(),
+        updated_by_name: '',
+        updated_at: null,
+      }
+    }
+    const g = groups[pid]
+    g.actual_stock_qty += r.actual_stock_qty
+    g.record_count++
+    if (r.area_name) g.area_set.add(r.area_name)
+    if (!g.updated_at || r.updated_at > g.updated_at) {
+      g.updated_at = r.updated_at
+      g.updated_by_name = r.updated_by_name
+    }
+  }
+  return Object.values(groups)
+    .map(g => ({ ...g, area_names: [...g.area_set].sort().join(', '), diff_qty: g.actual_stock_qty - g.system_stock_qty }))
+    .sort((a, b) => a.product_code.localeCompare(b.product_code))
+}
+
+const executeExport = async () => {
+  exporting.value = true
+  try {
+    const rows = await fetchExportRows()
+    if (exportType.value === 'detail') {
+      doExportDetail(rows)
+    } else if (exportType.value === 'summary') {
+      doExportSummary(rows)
+    } else {
+      doExportCompany(rows)
+    }
+    showExportDialog.value = false
+  } catch (e) {
+    alert('Excel出力に失敗しました')
+  } finally {
+    exporting.value = false
+  }
+}
+
+const doExportSummary = (rows) => {
+  const summary = buildSummary(rows)
+  const header = ['品番', '品名', '入力エリア', '置き場', '机上在庫', '机上進度', '現物数', '差異', '入力件数', '最終入力者', '最終更新日時']
+  const data = summary.map(r => [
+    r.product_code, r.product_name || '', r.area_names || '', r.stock_locations || '',
+    r.system_stock_qty, r.system_progress_qty, r.actual_stock_qty, r.diff_qty,
+    r.record_count, r.updated_by_name || '', formatDatetime(r.updated_at),
+  ])
+  const areaSuffix = exportArea.value ? `_${exportArea.value}` : ''
+  downloadExcel([header, ...data], `棚卸結果_合計_${exportDate.value}${areaSuffix}`)
+}
+
+const doExportDetail = (rows) => {
+  const header = ['品番', '品名', '入力エリア', '置き場', '机上在庫', '机上進度', '現物数', '記入者', 'カウンター', '備考', '更新者', '更新日時']
+  const data = rows.map(r => [
+    r.product_code, r.product_name || '', r.area_name || '', r.stock_locations || '',
+    r.system_stock_qty, r.system_progress_qty, r.actual_stock_qty,
+    r.recorder_name || '', r.counter_name || '', r.note || '',
+    r.updated_by_name || '', formatDatetime(r.updated_at),
+  ])
+  const areaSuffix = exportArea.value ? `_${exportArea.value}` : ''
+  downloadExcel([header, ...data], `棚卸結果_分行_${exportDate.value}${areaSuffix}`)
+}
+
+const normalizeCode = (code) => {
+  if (/SUB$/i.test(code)) return code
+  return code.replace(/[BbGg]$/, '')
+}
+
+const getCustomer = (code) => /^[RVrvＲＶ]/.test(code) ? 'クボタ' : 'ティエラ'
+
+const doExportCompany = (rows) => {
+  const summary = buildSummary(rows)
+  const groups = {}
+  for (const r of summary) {
+    const code = normalizeCode(r.product_code)
+    if (!groups[code]) {
+      groups[code] = {
+        product_code: code, product_name: r.product_name || '', category: r.category || '',
+        area_set: new Set(), actual_stock_qty: 0, customer: getCustomer(code),
+      }
+    }
+    const g = groups[code]
+    g.actual_stock_qty += r.actual_stock_qty
+    if (r.area_names) r.area_names.split(', ').forEach(a => g.area_set.add(a))
+  }
+  const allRows = Object.values(groups).sort((a, b) => a.product_code.localeCompare(b.product_code))
+  const materialRows = allRows.filter(g => g.category === 'MATERIAL')
+  const partsRows = allRows.filter(g => g.category !== 'MATERIAL')
+
+  const header = ['客先', '品番', '品名', '合計', 'エリア']
+  const toRow = g => [g.customer, g.product_code, g.product_name, g.actual_stock_qty, [...g.area_set].sort().join(', ')]
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...partsRows.map(toRow)]), '部品')
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...materialRows.map(toRow)]), '材料')
+  const areaSuffix = exportArea.value ? `_${exportArea.value}` : ''
+  XLSX.writeFile(wb, `棚卸結果_会社集計用_${exportDate.value}${areaSuffix}.xlsx`)
+}
+
+const downloadExcel = (rows, filename) => {
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+  XLSX.writeFile(wb, `${filename}.xlsx`)
+}
+
+watch(exportDate, async (newDate) => {
+  if (!newDate || !showExportDialog.value) return
+  exportArea.value = ''
+  try {
+    const res = await api.stocktakeRecords.results({ stocktake_date: newDate })
+    exportAreaChoices.value = res.data.area_choices || []
+  } catch (_) {
+    exportAreaChoices.value = []
+  }
+})
+
 load()
 </script>
 
@@ -266,6 +459,9 @@ load()
 }
 .btn-mode {
   background: #1e40af;
+}
+.btn-excel {
+  background: #16713a;
 }
 .center {
   text-align: center;
@@ -331,4 +527,74 @@ load()
 .col-person { width: 90px; }
 .col-date { width: 140px; }
 .col-note { width: 150px; }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-box {
+  width: 320px;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.modal-header {
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  background: #16713a;
+  color: #fff;
+}
+.modal-body {
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.modal-field span {
+  font-weight: 600;
+  color: #334155;
+}
+.modal-field input,
+.modal-field select {
+  padding: 5px 8px;
+  border: 1px solid #c7ced9;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+}
+.modal-footer {
+  padding: 10px 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+.modal-footer button {
+  padding: 5px 16px;
+  border: 1px solid #9ca3af;
+  background: #f8fafc;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-export {
+  background: #16713a !important;
+  color: #fff !important;
+  border-color: #16713a !important;
+}
+.btn-export:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 </style>

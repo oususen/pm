@@ -3,7 +3,7 @@
     <header class="top-tabs">
       <span class="active">
         <select v-model="filters.area_id" class="area-select">
-          <option value="">全エリア</option>
+          <option value="">エリア選択</option>
           <option v-for="area in areas" :key="area.id" :value="area.id">{{ area.name }}</option>
         </select>
         <button type="button" class="recorder-icon-btn" @click="showRecorderModal = true">&#x1F464;</button>
@@ -22,7 +22,7 @@
         <label class="search-block">
           <span class="search-label">ライン検索 <button type="button" class="field-reset-btn" @click="clearLineFilter" aria-label="ラインクリア">クリア</button></span>
           <div class="search-input-wrap">
-            <select v-model="filters.line_id">
+            <select v-model="filters.line_id" :disabled="!selectedArea">
               <option value="">すべて</option>
               <option v-for="line in lineOptions" :key="line.id" :value="line.id">
                 {{ line.line_name || line.line_code }}
@@ -33,7 +33,7 @@
         <label class="search-block">
           <span class="search-label">置き場検索 <button type="button" class="field-reset-btn" @click="clearLocationFilter" aria-label="置き場クリア">クリア</button></span>
           <div class="search-input-wrap">
-            <select v-model="filters.stock_location">
+            <select v-model="filters.stock_location" :disabled="!selectedArea">
               <option value="">すべて</option>
               <option v-for="location in filteredLocations" :key="location" :value="location">
                 {{ location }}
@@ -44,7 +44,7 @@
         <label class="search-block wide">
           <span class="search-label">品番検索 <button type="button" class="field-reset-btn" @click="clearProductCodeFilter" aria-label="品番クリア">クリア</button></span>
           <div class="search-input-wrap">
-            <input v-model.trim="filters.product_code" type="text" placeholder="品番の一部入力して" />
+            <input v-model.trim="filters.product_code" type="text" placeholder="品番の一部入力して" :disabled="!selectedArea" />
           </div>
         </label>
       </div>
@@ -52,7 +52,7 @@
 
     <section class="candidate-list">
       <div v-if="loading" class="empty-state">読込中...</div>
-      <div v-else-if="!hasFilter" class="empty-state">エリア・置き場・品番のいずれかを選択してください</div>
+      <div v-else-if="!hasFilter" class="empty-state">先にエリアを選択してください</div>
       <div v-else-if="filteredRows.length === 0" class="empty-state">対象がありません</div>
       <div v-else class="list-stack">
         <article
@@ -116,7 +116,7 @@
     <header class="detail-header">
       <button class="detail-back" type="button" @click="closeDetail">‹</button>
       <div class="detail-title">{{ selectedArea ? selectedArea.name : '棚卸' }}入力</div>
-      <button class="detail-save" type="button" @click="saveCurrent" :disabled="saving || !canEdit || !selectedRow || normalizeNumber(editValues[selectedRow.product_id]) === null || !selectedRecorder">
+      <button class="detail-save" type="button" @click="saveCurrent" :disabled="saving || !canEdit || !selectedRow || normalizeNumber(editValues[selectedRow.product_id]) === null || !selectedRecorder || !selectedCounter">
         保存
       </button>
     </header>
@@ -519,9 +519,7 @@ const syncSelectedRow = (items) => {
   }
 };
 
-const hasFilter = computed(() =>
-  !!(filters.area_id || filters.line_id || filters.stock_location || filters.product_code)
-);
+const hasFilter = computed(() => !!filters.area_id);
 
 const loadMasters = async () => {
   try {
@@ -672,7 +670,7 @@ const locationTiles = computed(() => {
 });
 
 const openLayout = async () => {
-  if (!canViewLayout.value) return;
+  if (!canViewLayout.value || !selectedArea.value) return;
   filters.line_id = '';
   filters.stock_location = '';
   filters.product_code = '';
