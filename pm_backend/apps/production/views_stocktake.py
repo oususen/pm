@@ -506,20 +506,6 @@ class StocktakeResultView(APIView):
             .order_by('product__product_code', '-updated_at')[:5000]
         )
 
-        product_ids = list(set(r.product_id for r in records))
-        backlog_map = {
-            row['product_id']: int(row['system_stock_qty'] or 0)
-            for row in (
-                LineBacklog.objects.filter(
-                    plan_date=stocktake_date,
-                    sequence_no=0,
-                    product_id__in=product_ids,
-                )
-                .values('product_id')
-                .annotate(system_stock_qty=Sum('stock_qty'))
-            )
-        }
-
         def _stock_locs(product):
             locs = [sl.location_name for sl in product.stock_locations.all()]
             if not locs and product.stock_location:
@@ -537,7 +523,7 @@ class StocktakeResultView(APIView):
                 'category': p.category or '',
                 'area_name': r.area_name or '',
                 'stock_locations': _stock_locs(p),
-                'system_stock_qty': backlog_map.get(p.id, 0),
+                'system_stock_qty': r.system_stock_qty,
                 'system_progress_qty': r.system_progress_qty,
                 'actual_stock_qty': r.actual_stock_qty,
                 'recorder_name': r.recorder_name or '',
@@ -567,6 +553,61 @@ class StocktakeResultView(APIView):
             'area_choices': area_choices,
             'location_choices': loc_choices,
         })
+
+
+class StocktakeLatestSystemView(APIView):
+    """棚卸結果: 最新の机上在庫・机上進度を LineBacklog から再取得"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        stocktake_date_str = request.query_params.get('stocktake_date')
+        try:
+            stocktake_date = datetime.strptime(str(stocktake_date_str), '%Y-%m-%d').date()
+        except Exception:
+            return Response({'detail': 'stocktake_date は必須です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = StocktakeRecord.objects.filter(stocktake_date=stocktake_date)
+        area_name = request.query_params.get('area_name')
+        if area_name:
+            qs = qs.filter(area_name=area_name)
+        product_code = request.query_params.get('product_code')
+        if product_code:
+            qs = qs.filter(product__code__icontains=product_code)
+        product_ids = qs.values_list('product_id', flat=True).distinct()
+
+        stock_map = {
+            row['product_id']: int(row['total'] or 0)
+            for row in (
+                LineBacklog.objects.filter(
+                    plan_date=stocktake_date,
+                    sequence_no=0,
+                    product_id__in=product_ids,
+                )
+                .values('product_id')
+                .annotate(total=Sum('stock_qty'))
+            )
+        }
+        progress_map = {
+            row['product_id']: int(row['total'] or 0)
+            for row in (
+                LineBacklog.objects.filter(
+                    plan_date=stocktake_date,
+                    sequence_no=0,
+                    product_id__in=product_ids,
+                )
+                .values('product_id')
+                .annotate(total=Sum('progress_qty'))
+            )
+        }
+
+        result = {
+            str(pid): {
+                'system_stock_qty': stock_map.get(pid, 0),
+                'system_progress_qty': progress_map.get(pid, 0),
+            }
+            for pid in product_ids
+        }
+        return Response(result)
 
 
 class StocktakeResultExportView(StocktakeResultView):
@@ -604,20 +645,6 @@ class StocktakeResultExportView(StocktakeResultView):
             .order_by('product__product_code', '-updated_at')
         )
 
-        product_ids = list(set(r.product_id for r in records))
-        backlog_map = {
-            row['product_id']: int(row['system_stock_qty'] or 0)
-            for row in (
-                LineBacklog.objects.filter(
-                    plan_date=stocktake_date,
-                    sequence_no=0,
-                    product_id__in=product_ids,
-                )
-                .values('product_id')
-                .annotate(system_stock_qty=Sum('stock_qty'))
-            )
-        }
-
         def _stock_locs(product):
             locs = [sl.location_name for sl in product.stock_locations.all()]
             if not locs and product.stock_location:
@@ -635,7 +662,7 @@ class StocktakeResultExportView(StocktakeResultView):
                 'category': p.category or '',
                 'area_name': r.area_name or '',
                 'stock_locations': _stock_locs(p),
-                'system_stock_qty': backlog_map.get(p.id, 0),
+                'system_stock_qty': r.system_stock_qty,
                 'system_progress_qty': r.system_progress_qty,
                 'actual_stock_qty': r.actual_stock_qty,
                 'recorder_name': r.recorder_name or '',

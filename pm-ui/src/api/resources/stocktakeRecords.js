@@ -50,6 +50,9 @@ export const createStocktakeRecordsAPI = (client) => ({
   resultsExport(params = {}) {
     return client.get('/stocktake-results/export/', { params })
   },
+  latestSystem(params = {}) {
+    return client.get('/stocktake-results/latest-system/', { params })
+  },
   slipPdf(params = {}) {
     return client.get('/stocktake-slip-pdf/', { params, responseType: 'blob' })
   },

@@ -32,6 +32,9 @@
       <button class="btn btn-excel" @click="openExportDialog('summary')" :disabled="exporting">Excel合計</button>
       <button class="btn btn-excel" @click="openExportDialog('detail')" :disabled="exporting">Excel分行</button>
       <button class="btn btn-excel" @click="openExportDialog('company')" :disabled="exporting">会社集計用Excel</button>
+      <button class="btn btn-latest" @click="fetchLatestSystem" :disabled="loading || loadingLatest || rawRows.length === 0">
+        {{ loadingLatest ? '取得中...' : '最新机上' }}
+      </button>
     </div>
 
     <div v-if="loading" class="center">読み込み中...</div>
@@ -49,10 +52,12 @@
               <th class="col-loc">置き場</th>
               <th class="col-num">机上在庫</th>
               <th class="col-num">机上進度</th>
+              <th v-if="showLatest" class="col-num col-latest">最新在庫</th>
+              <th v-if="showLatest" class="col-num col-latest">最新進度</th>
               <th class="col-num">現物数</th>
               <th class="col-num">差異</th>
               <th class="col-cnt">入力件数</th>
-              <th class="col-person">最終入力者</th>
+              <th class="col-person">最終更新者</th>
               <th class="col-date">最終更新日時</th>
             </tr>
           </thead>
@@ -64,6 +69,8 @@
               <td>{{ row.stock_locations || '-' }}</td>
               <td class="num">{{ row.system_stock_qty }}</td>
               <td class="num">{{ row.system_progress_qty }}</td>
+              <td v-if="showLatest" class="num col-latest">{{ latestSystemMap[row.product_id]?.system_stock_qty ?? '-' }}</td>
+              <td v-if="showLatest" class="num col-latest">{{ latestSystemMap[row.product_id]?.system_progress_qty ?? '-' }}</td>
               <td class="num">{{ row.actual_stock_qty }}</td>
               <td class="num" :class="diffClass(row.diff_qty)">{{ formatSigned(row.diff_qty) }}</td>
               <td class="num">{{ row.record_count }}</td>
@@ -71,7 +78,7 @@
               <td>{{ formatDatetime(row.updated_at) }}</td>
             </tr>
             <tr v-if="displayRows.length === 0">
-              <td colspan="11" class="center">データなし</td>
+              <td :colspan="showLatest ? 13 : 11" class="center">データなし</td>
             </tr>
           </tbody>
         </table>
@@ -85,6 +92,8 @@
               <th class="col-loc">置き場</th>
               <th class="col-num">机上在庫</th>
               <th class="col-num">机上進度</th>
+              <th v-if="showLatest" class="col-num col-latest">最新在庫</th>
+              <th v-if="showLatest" class="col-num col-latest">最新進度</th>
               <th class="col-num">現物数</th>
               <th class="col-person">記入者</th>
               <th class="col-person">カウンター</th>
@@ -101,6 +110,8 @@
               <td>{{ row.stock_locations || '-' }}</td>
               <td class="num">{{ row.system_stock_qty }}</td>
               <td class="num">{{ row.system_progress_qty }}</td>
+              <td v-if="showLatest" class="num col-latest">{{ latestSystemMap[row.product_id]?.system_stock_qty ?? '-' }}</td>
+              <td v-if="showLatest" class="num col-latest">{{ latestSystemMap[row.product_id]?.system_progress_qty ?? '-' }}</td>
               <td class="num">{{ row.actual_stock_qty }}</td>
               <td>{{ row.recorder_name || '-' }}</td>
               <td>{{ row.counter_name || '-' }}</td>
@@ -109,7 +120,7 @@
               <td>{{ formatDatetime(row.updated_at) }}</td>
             </tr>
             <tr v-if="displayRows.length === 0">
-              <td colspan="12" class="center">データなし</td>
+              <td :colspan="showLatest ? 14 : 12" class="center">データなし</td>
             </tr>
           </tbody>
         </table>
@@ -165,6 +176,9 @@ const locationChoices = ref([])
 const loading = ref(false)
 const error = ref('')
 const isSummary = ref(true)
+const loadingLatest = ref(false)
+const showLatest = ref(false)
+const latestSystemMap = ref({})
 
 const toggleMode = () => { isSummary.value = !isSummary.value }
 
@@ -231,6 +245,8 @@ const load = async () => {
   }
   loading.value = true
   error.value = ''
+  showLatest.value = false
+  latestSystemMap.value = {}
   try {
     const params = { stocktake_date: filters.value.stocktake_date }
     if (filters.value.area_name) params.area_name = filters.value.area_name
@@ -244,6 +260,25 @@ const load = async () => {
     error.value = e?.response?.data?.detail || '取得に失敗しました'
   } finally {
     loading.value = false
+  }
+}
+
+const fetchLatestSystem = async () => {
+  loadingLatest.value = true
+  try {
+    const params = { stocktake_date: filters.value.stocktake_date }
+    if (filters.value.area_name) params.area_name = filters.value.area_name
+    if (filters.value.product_code) params.product_code = filters.value.product_code
+    const res = await api.stocktakeRecords.latestSystem(params)
+    const raw = res.data || {}
+    const mapped = {}
+    for (const [k, v] of Object.entries(raw)) mapped[Number(k)] = v
+    latestSystemMap.value = mapped
+    showLatest.value = true
+  } catch (e) {
+    alert('最新机上の取得に失敗しました')
+  } finally {
+    loadingLatest.value = false
   }
 }
 
@@ -286,6 +321,7 @@ const buildSummary = (rows) => {
     const pid = r.product_id
     if (!groups[pid]) {
       groups[pid] = {
+        product_id: pid,
         product_code: r.product_code,
         product_name: r.product_name,
         category: r.category || '',
@@ -320,7 +356,7 @@ const executeExport = async () => {
     if (exportType.value === 'detail') {
       doExportDetail(rows)
     } else if (exportType.value === 'summary') {
-      doExportSummary(rows)
+      await doExportSummary(rows)
     } else {
       doExportCompany(rows)
     }
@@ -332,14 +368,27 @@ const executeExport = async () => {
   }
 }
 
-const doExportSummary = (rows) => {
+const doExportSummary = async (rows) => {
   const summary = buildSummary(rows)
-  const header = ['品番', '品名', '入力エリア', '置き場', '机上在庫', '机上進度', '現物数', '差異', '入力件数', '最終入力者', '最終更新日時']
-  const data = summary.map(r => [
-    r.product_code, r.product_name || '', r.area_names || '', r.stock_locations || '',
-    r.system_stock_qty, r.system_progress_qty, r.actual_stock_qty, r.diff_qty,
-    r.record_count, r.updated_by_name || '', formatDatetime(r.updated_at),
-  ])
+  const params = { stocktake_date: exportDate.value }
+  if (exportArea.value) params.area_name = exportArea.value
+  let latestMap = {}
+  try {
+    const res = await api.stocktakeRecords.latestSystem(params)
+    const raw = res.data || {}
+    for (const [k, v] of Object.entries(raw)) latestMap[Number(k)] = v
+  } catch (_) { /* 取得失敗時は空欄 */ }
+  const header = ['品番', '品名', '入力エリア', '置き場', '机上在庫', '机上進度', '最新在庫', '最新進度', '現物数', '差異', '入力件数', '最終更新者', '最終更新日時']
+  const data = summary.map(r => {
+    const lat = latestMap[r.product_id] || {}
+    return [
+      r.product_code, r.product_name || '', r.area_names || '', r.stock_locations || '',
+      r.system_stock_qty, r.system_progress_qty,
+      lat.system_stock_qty ?? '', lat.system_progress_qty ?? '',
+      r.actual_stock_qty, r.diff_qty,
+      r.record_count, r.updated_by_name || '', formatDatetime(r.updated_at),
+    ]
+  })
   const areaSuffix = exportArea.value ? `_${exportArea.value}` : ''
   downloadExcel([header, ...data], `棚卸結果_合計_${exportDate.value}${areaSuffix}`)
 }
@@ -462,6 +511,12 @@ load()
 }
 .btn-excel {
   background: #16713a;
+}
+.btn-latest {
+  background: #9333ea;
+}
+.col-latest {
+  background: #faf5ff !important;
 }
 .center {
   text-align: center;
