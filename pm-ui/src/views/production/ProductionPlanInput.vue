@@ -1433,6 +1433,7 @@ import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import { ensureLineCalendarReady } from '@/utils/lineCalendarGuard'
 import ProcessGanttView from './ProcessGanttView.vue'
 
 const dsSources = [
@@ -2782,6 +2783,15 @@ const savePlanByRange = async (rangeStartDate, rangeEndDate) => {
     alert('ラインを選択してください。')
     return
   }
+  if (!await ensureLineCalendarReady({
+    lineId: selectedLine.value,
+    lineCandidates: lines.value,
+    actionLabel: '保存',
+    startDate: rangeStartDate,
+    endDate: rangeEndDate,
+  })) {
+    return
+  }
   if (isEditUnlocked.value && !changeReason.value) {
     alert('変更理由を入力してください。')
     return
@@ -3451,6 +3461,15 @@ const loadData = async () => {
   cursorProductBubbleStyle.value = {}
   currentLineRoutingFilterMode.value = 'filtered'
   if (selectedLine.value) {
+    if (!await ensureLineCalendarReady({
+      lineId: selectedLine.value,
+      lineCandidates: lines.value,
+      actionLabel: '読込',
+      startDate: startDate.value,
+      endDate: endDate.value,
+    })) {
+      return
+    }
     await fetchLineDefaultSetting(selectedLine.value)
     await loadWorkPatternData(selectedLine.value, startDate.value, endDate.value)
     // 日別設定を読み込み、未設定の日にデフォルト値をセット
