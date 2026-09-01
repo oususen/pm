@@ -58,6 +58,11 @@ from production.views_laser import (
     LaserPatternViewSet,
     LaserShiftRecordViewSet,
 )
+from production.views_laser_weekly_plan import (
+    LaserWeeklyMaterialGroupViewSet,
+    LaserWeeklyPlanTargetViewSet,
+    LaserWeeklyPlanViewSet,
+)
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet, LineLoadViewSet
@@ -103,6 +108,9 @@ router.register(r'auto-plan-aggregate-settings', AutoPlanAggregateSettingViewSet
 router.register(r'laser-patterns', LaserPatternViewSet, basename='laserpattern')
 router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')
+router.register(r'laser-weekly-plan-targets', LaserWeeklyPlanTargetViewSet, basename='laserweeklyplantarget')
+router.register(r'laser-weekly-material-groups', LaserWeeklyMaterialGroupViewSet, basename='laserweeklymaterialgroup')
+router.register(r'laser-weekly-plans', LaserWeeklyPlanViewSet, basename='laserweeklyplan')
 router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, basename='ganttdisplayproductmap')
 router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')
 router.register(r'morning-meetings', MorningMeetingViewSet, basename='morningmeeting')

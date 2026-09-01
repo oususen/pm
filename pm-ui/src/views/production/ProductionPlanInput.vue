@@ -36,6 +36,14 @@
       <button
         type="button"
         class="laser-subtab-item"
+        :class="{ active: activeLaserTab === 'weekly-plan' }"
+        @click="activeLaserTab = 'weekly-plan'"
+      >
+        週間計画
+      </button>
+      <button
+        type="button"
+        class="laser-subtab-item"
         :class="{ active: activeLaserTab === 'tab3' }"
         @click="activeLaserTab = 'tab3'"
       >
@@ -900,6 +908,7 @@
       v-else-if="activePlanTab === 'laser' && activeLaserTab === 'pattern-editor'"
       class="laser-editor-section"
     />
+    <LaserWeeklyPlan v-else-if="activePlanTab === 'laser' && activeLaserTab === 'weekly-plan'" />
     <div v-else-if="activePlanTab === 'spot' && activeSpotTab === 'excel'" class="laser-third-tab-panel">
       <div class="spot-excel-toolbar">
         <div class="field">
@@ -1459,6 +1468,7 @@ const dsSources = [
 ]
 import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
+import LaserWeeklyPlan from './LaserWeeklyPlan.vue'
 const router = useRouter()
 const selectedLine = ref('')
 const showAllLines = ref(false)

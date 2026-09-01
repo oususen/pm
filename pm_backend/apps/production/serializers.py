@@ -29,6 +29,7 @@ from .models_production_actual_reconcile import (
     ProductionActualReconcileReportDetail,
 )
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
+from .models_laser_weekly_plan import LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
 from .models_process_realtime import ProcessRealtimeRecord
@@ -468,6 +469,45 @@ class LaserPatternSerializer(serializers.ModelSerializer):
             )
             for item in finished_items
         ])
+
+
+class LaserWeeklyPlanTargetSerializer(serializers.ModelSerializer):
+    downstream_line_name = serializers.CharField(source='downstream_line.line_name', read_only=True)
+    product_code = serializers.CharField(source='product.product_code', read_only=True)
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    pattern_no = serializers.CharField(source='laser_pattern.pattern_no', read_only=True)
+    finished_product_code = serializers.CharField(source='finished_product.product_code', read_only=True)
+    finished_product_name = serializers.CharField(source='finished_product.product_name', read_only=True)
+
+    class Meta:
+        model = LaserWeeklyPlanTarget
+        fields = [
+            'id', 'downstream_line', 'downstream_line_name', 'product', 'product_code', 'product_name',
+            'laser_pattern', 'pattern_no', 'finished_product', 'finished_product_code', 'finished_product_name',
+            'lead_time_days', 'quantity_source', 'sort_order', 'is_active',
+        ]
+        read_only_fields = ['id']
+
+    def validate(self, attrs):
+        pattern = attrs.get('laser_pattern', getattr(self.instance, 'laser_pattern', None))
+        finished_product = attrs.get('finished_product', getattr(self.instance, 'finished_product', None))
+        if pattern and finished_product and not pattern.finished_items.filter(finished_product=finished_product).exists():
+            raise serializers.ValidationError({'finished_product': '選択したレーザパターンの完成品情報に含まれていません。'})
+        return attrs
+
+
+class LaserWeeklyMaterialGroupSerializer(serializers.ModelSerializer):
+    pattern_ids = serializers.PrimaryKeyRelatedField(
+        source='patterns', queryset=LaserPattern.objects.all(), many=True, required=False,
+    )
+
+    class Meta:
+        model = LaserWeeklyMaterialGroup
+        fields = [
+            'id', 'group_name', 'material_type', 'sheets_per_material',
+            'pattern_ids', 'sort_order', 'is_active',
+        ]
+        read_only_fields = ['id']
 
 
 class LaserActualDetailSerializer(serializers.ModelSerializer):

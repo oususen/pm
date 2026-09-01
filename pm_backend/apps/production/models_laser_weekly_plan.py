@@ -1,0 +1,55 @@
+from django.db import models
+from masters.models import Line, Product
+from .models_laser_pattern import LaserPattern
+
+
+class LaserWeeklyPlanTarget(models.Model):
+    SOURCE_ORDER_QTY = 'ORDER_QTY'
+    SOURCE_PLAN_QTY = 'PLAN_QTY'
+    SOURCE_CHOICES = [(SOURCE_ORDER_QTY, '需要（order_qty）'), (SOURCE_PLAN_QTY, '後工程計画（plan_qty）')]
+    downstream_line = models.ForeignKey(Line, on_delete=models.PROTECT, related_name='laser_weekly_targets')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_targets')
+    laser_pattern = models.ForeignKey(LaserPattern, on_delete=models.PROTECT, related_name='weekly_plan_targets')
+    finished_product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_finished_targets')
+    lead_time_days = models.PositiveIntegerField(default=0, verbose_name='LT(日)')
+    quantity_source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_ORDER_QTY, verbose_name='数量取得元')
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 't_laser_weekly_plan_target'
+        ordering = ['sort_order', 'downstream_line_id', 'product_id']
+        constraints = [models.UniqueConstraint(fields=['downstream_line', 'product', 'laser_pattern', 'finished_product'], name='laser_weekly_target_unique')]
+
+
+class LaserWeeklyPlanManualQuantity(models.Model):
+    target = models.ForeignKey(LaserWeeklyPlanTarget, on_delete=models.CASCADE, related_name='manual_quantities')
+    plan_date = models.DateField(verbose_name='レーザ計画日')
+    sheets = models.PositiveIntegerField(verbose_name='手動回数')
+
+    class Meta:
+        db_table = 't_laser_weekly_plan_manual_quantity'
+        constraints = [models.UniqueConstraint(fields=['target', 'plan_date'], name='laser_weekly_manual_quantity_unique')]
+
+
+class LaserWeeklyPatternManualQuantity(models.Model):
+    laser_pattern = models.ForeignKey(LaserPattern, on_delete=models.CASCADE, related_name='weekly_manual_quantities')
+    plan_date = models.DateField(verbose_name='レーザ計画日')
+    sheets = models.PositiveIntegerField(verbose_name='手動回数')
+
+    class Meta:
+        db_table = 't_laser_weekly_pattern_manual_quantity'
+        constraints = [models.UniqueConstraint(fields=['laser_pattern', 'plan_date'], name='laser_weekly_pattern_manual_quantity_unique')]
+
+
+class LaserWeeklyMaterialGroup(models.Model):
+    group_name = models.CharField(max_length=120, unique=True)
+    material_type = models.CharField(max_length=20, blank=True, default='')
+    sheets_per_material = models.DecimalField(max_digits=14, decimal_places=3, default=1)
+    patterns = models.ManyToManyField(LaserPattern, related_name='weekly_material_groups', blank=True)
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 't_laser_weekly_material_group'
+        ordering = ['sort_order', 'group_name']
