@@ -9,13 +9,16 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import (
-    Department,
     UnitLineMapping,
     UserProfile,
     UserPermission,
     DepartmentPermission,
     PositionPermission,
     DepartmentPositionPermission,
+)
+from .permission_scope import (
+    collect_effective_department_ids,
+    collect_managed_department_ids,
 )
 
 User = get_user_model()
@@ -113,31 +116,7 @@ def _merge_permissions(base, overrides):
 
 
 def _collect_effective_department_ids(profile):
-    if not profile:
-        return []
-
-    ids = set()
-    for field in ('department', 'division', 'group', 'team'):
-        dept = getattr(profile, field, None)
-        if dept:
-            ids.add(dept.id)
-
-    leader_units = getattr(profile, 'leader_units', None)
-    if leader_units is not None:
-        ids.update(leader_units.values_list('id', flat=True))
-
-    if ids:
-        children = set(
-            Department.objects.filter(parent_id__in=ids).values_list('id', flat=True)
-        )
-        ids |= children
-        if children:
-            grandchildren = set(
-                Department.objects.filter(parent_id__in=children).values_list('id', flat=True)
-            )
-            ids |= grandchildren
-
-    return list(ids)
+    return collect_effective_department_ids(profile)
 
 
 def _build_effective_permissions(user):
@@ -161,6 +140,7 @@ def _build_effective_permissions(user):
     profile = _safe_get_profile(user)
     position_name = profile.role if profile and profile.role else ''
     department_ids = _collect_effective_department_ids(profile)
+    managed_department_ids = collect_managed_department_ids(profile) if profile else set()
 
     # 1. 部署のみの権限
     if department_ids:
@@ -179,6 +159,14 @@ def _build_effective_permissions(user):
             position_name=position_name,
         )
         permission_map = _merge_permissions(permission_map, _permissions_to_map(combined_permissions))
+
+    # 部署の長は、管理部署と配下部署に設定された一般権限を継承する。
+    if managed_department_ids:
+        staff_permissions = DepartmentPositionPermission.objects.filter(
+            department_id__in=managed_department_ids,
+            position_name='staff',
+        )
+        permission_map = _merge_permissions(permission_map, _permissions_to_map(staff_permissions))
 
     # 4. ユーザー個別権限
     user_permissions = []

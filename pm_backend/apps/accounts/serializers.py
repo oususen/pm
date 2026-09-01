@@ -3,6 +3,10 @@ from django.contrib.auth.models import User
 from rest_framework import serializers
 
 from .role_utils import build_chief_role_q, build_leader_role_q, build_supervisor_role_q
+from .permission_scope import (
+    collect_effective_department_ids,
+    collect_managed_department_ids,
+)
 from .models import (
     Department,
     UnitLineMapping,
@@ -365,29 +369,6 @@ class UserSerializer(serializers.ModelSerializer):
         if records:
             UserPermission.objects.bulk_create(records)
 
-    def _collect_dept_ids(self, profile):
-        ids = set()
-        for field in ('department', 'division', 'group', 'team'):
-            dept = getattr(profile, field, None)
-            if dept:
-                ids.add(dept.id)
-        for unit in getattr(profile, 'leader_units', None) and profile.leader_units.all() or []:
-            ids.add(unit.id)
-        if ids:
-            from accounts.models import Department
-            children = set(
-                Department.objects.filter(parent_id__in=ids)
-                .values_list('id', flat=True)
-            )
-            ids |= children
-            if children:
-                grandchildren = set(
-                    Department.objects.filter(parent_id__in=children)
-                    .values_list('id', flat=True)
-                )
-                ids |= grandchildren
-        return list(ids)
-
     @staticmethod
     def _normalize_permission_flags(can_view, can_edit):
         can_edit = bool(can_edit)
@@ -439,7 +420,8 @@ class UserSerializer(serializers.ModelSerializer):
             profile = None
         position_name = getattr(profile, 'role', '') if profile else ''
         position_label = self._get_position_label(position_name)
-        dept_ids = self._collect_dept_ids(profile) if profile else []
+        dept_ids = collect_effective_department_ids(profile) if profile else []
+        managed_dept_ids = collect_managed_department_ids(profile) if profile else set()
 
         if dept_ids:
             dept_perms = (
@@ -490,6 +472,25 @@ class UserSerializer(serializers.ModelSerializer):
                     bucket,
                     'department_position',
                     f'部署・役職: {perm.department.name} × {position_label}',
+                    can_view,
+                    can_edit,
+                )
+
+        if managed_dept_ids:
+            staff_perms = (
+                DepartmentPositionPermission.objects
+                .select_related('department')
+                .filter(department_id__in=managed_dept_ids, position_name='staff')
+            )
+            for perm in staff_perms:
+                can_view, can_edit = self._normalize_permission_flags(perm.can_view, perm.can_edit)
+                bucket = permissions[perm.resource]
+                bucket['template_can_view'] = bucket['template_can_view'] or can_view
+                bucket['template_can_edit'] = bucket['template_can_edit'] or can_edit
+                self._append_permission_source(
+                    bucket,
+                    'department_position',
+                    f'部署・役職: {perm.department.name} × 一般',
                     can_view,
                     can_edit,
                 )
