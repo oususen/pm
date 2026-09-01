@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOM作成 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00695c; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #80cbc4; --prod-border: #80cbc4; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #80cbc4; --prod-border: #80cbc4; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .page { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; color:var(--ink); margin-bottom:6px; text-wrap:balance; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; color:var(--ink); }
+
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+  .note { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:24px; border-left:4px solid var(--warn); }
+  .note h2 { font-size:16px; font-weight:700; margin-bottom:8px; color:var(--warn); }
+  .note ul { margin:0; padding-left:18px; font-size:14px; color:var(--ink2); }
+  .note li { margin-bottom:4px; }
+
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.success { background:var(--success); border-color:var(--success); color:#fff; }
+  .mock-btn.warn { background:var(--warn); border-color:var(--warn); color:#fff; }
+  .mock-btn.teal { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .mock-btn.danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+  .mock-btn.info { background:#0277bd; border-color:#0277bd; color:#fff; }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+  .f-input { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); text-align:center; }
+
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:160px; }
+  .info-table td { background:var(--card); color:var(--ink); }
+
+  .mock-grid { border:1px solid var(--grid-line); border-radius:6px; overflow-x:auto; margin:12px 0; font-size:11px; }
+  .mock-grid table { width:100%; border-collapse:collapse; }
+  .mock-grid th, .mock-grid td { border:1px solid var(--grid-line); padding:5px 8px; text-align:center; white-space:nowrap; }
+  .mock-grid th { background:var(--grid-head); font-weight:700; color:var(--ink2); font-size:10px; }
+  .mock-grid td { background:var(--card); color:var(--ink); }
+
+  .anno-num { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:13px; font-weight:800; flex-shrink:0; line-height:1; font-style:normal; }
+  :root[data-theme="dark"] .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+  .anno-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .anno-list li { display:flex; align-items:flex-start; gap:10px; font-size:14px; line-height:1.6; }
+  .anno-list li strong { color:var(--ink); }
+  .anno-list li span { color:var(--ink2); }
+  .om-anno { position:absolute; font-size:11px; font-weight:800; color:var(--danger); background:#fff; border:2px solid var(--danger); border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; line-height:1; z-index:5; font-style:normal; }
+  :root[data-theme="dark"] .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+
+  .screen-overview { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 32px; margin-bottom:28px; }
+  .screen-overview h2 { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .screen-overview h2 .badge { background:var(--step-color); color:#fff; font-size:11px; font-weight:700; padding:2px 10px; border-radius:4px; }
+
+  .mock-toolbar { background:var(--grid-head); border:1px solid var(--grid-line); border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px; color:var(--ink2); }
+
+  .proc-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .proc-table th, .proc-table td { border:1px solid var(--grid-line); padding:6px 10px; }
+  .proc-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); text-align:center; white-space:nowrap; }
+  .proc-table td { background:var(--card); color:var(--ink); }
+  .proc-table .num { text-align:center; font-weight:700; width:36px; }
+
+  .highlight-row { background:var(--warn-light) !important; }
+
+  .bom-tree { font-size:13px; line-height:2; margin:12px 0; padding:16px 20px; background:var(--col-bg); border:1px solid var(--grid-line); border-radius:6px; }
+  .bom-tree .level { padding-left:24px; border-left:2px solid var(--grid-line); margin-left:8px; }
+  .bom-tree .node { display:flex; align-items:center; gap:8px; }
+  .bom-tree .tag { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; }
+  .bom-tree .tag-make { background:var(--success-light); color:var(--success); }
+  .bom-tree .tag-buy { background:var(--accent-light); color:var(--accent); }
+  .bom-tree .tag-sub { background:var(--warn-light); color:var(--warn); }
+
+  @media (max-width:700px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step, .screen-overview { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>BOM作成 作業手順書</h1>
+    <div class="subtitle">製品の構成部品（親子関係・数量・調達区分・リードタイム）を定義する画面。需要展開・在庫計算・ルーティング自動生成の基礎データです。</div>
+    <div class="path">
+      マスタメンテ <span class="arrow">&#9656;</span> 構成マスタ（BOM）
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>画面の構成</li>
+      <li><span class="tn">3</span>BOMを検索する</li>
+      <li><span class="tn">4</span>BOMの基本構造を理解する</li>
+      <li><span class="tn">5</span>画面でBOMを新規作成する</li>
+      <li><span class="tn">6</span>構成品目を追加する</li>
+      <li><span class="tn">7</span>構成品目を削除・変更する</li>
+      <li><span class="tn">8</span>CSV/Excelで一括取込する</li>
+      <li><span class="tn">9</span>別バージョンを作成する</li>
+      <li><span class="tn">10</span>BOMからルーティングを生成する</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面概要 ===== -->
+  <div class="screen-overview">
+    <h2>画面の全体像 <span class="badge">最初に読む</span></h2>
+    <div class="step-desc">
+      画面は<strong>上部のフィルタ・ツールバー</strong>と<strong>BOM一覧テーブル</strong>で構成されています。一覧から各BOMの<strong>「詳細」</strong>を開くと、ヘッダ情報と構成品目の確認・編集ができます。
+    </div>
+
+    <!-- 画面モック -->
+    <div style="margin:16px 0;">
+      <!-- ツールバーモック -->
+      <div class="mock-toolbar" style="margin-bottom:8px;position:relative;">
+        <span class="mock-btn primary" style="font-size:11px;">更新</span>
+        <span class="mock-btn" style="font-size:11px;">取込テンプレートExcel</span>
+        <span class="mock-btn" style="font-size:11px;">取込テンプレートCSV</span>
+        <span class="mock-btn" style="font-size:11px;">CSV取込</span>
+        <span class="mock-btn success" style="font-size:11px;">新規</span>
+        <span class="mock-btn info" style="font-size:11px;">逆展開</span>
+        <span class="om-anno" style="position:relative;top:-2px;margin-left:4px;">1</span>
+      </div>
+      <!-- フィルタモック -->
+      <div class="mock-toolbar" style="margin-bottom:8px;position:relative;">
+        <span class="f-input" style="width:160px;text-align:left;">品番・品名で検索</span>
+        <span class="f-select">最終品: すべて ▾</span>
+        <span class="f-select">ライン最終品: すべて ▾</span>
+        <span class="f-select">連産品: すべて ▾</span>
+        <span class="f-input" style="width:60px;text-align:left;">版</span>
+        <span class="f-input" style="width:90px;">作成日From</span>
+        <span class="f-input" style="width:90px;">作成日To</span>
+        <span class="f-select">有効 ▾</span>
+        <span class="mock-btn primary" style="font-size:10px;">検索</span>
+        <span class="mock-btn" style="font-size:10px;">リセット</span>
+        <span class="om-anno" style="position:relative;top:-2px;margin-left:4px;">2</span>
+      </div>
+      <!-- テーブルモック -->
+      <div class="mock-grid" style="margin:0;position:relative;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th style="text-align:left;">親製品</th><th>最終品</th><th>ライン最終品</th><th>版</th><th>連産品</th><th>有効開始日</th><th>有効終了日</th><th>有効</th>
+              <th style="position:relative;">操作<span class="om-anno" style="top:-10px;right:-10px;">3</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>101</td><td style="text-align:left;font-weight:700;">YD40008387</td><td>最終</td><td></td><td>v1</td><td></td><td>2026-01-01</td><td>-</td><td>有効</td>
+              <td style="font-size:10px;">
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">詳細</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">階層図</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
+              </td>
+            </tr>
+            <tr style="background:var(--accent-light);">
+              <td>102</td><td style="text-align:left;font-weight:700;">MSXO/S300M</td><td></td><td></td><td>v1</td><td>はい</td><td>2026-04-01</td><td>-</td><td>有効</td>
+              <td style="font-size:10px;">
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">詳細</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">階層図</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
+              </td>
+            </tr>
+            <tr>
+              <td>103</td><td style="text-align:left;font-weight:700;">V053904603</td><td>最終</td><td>はい</td><td>v1</td><td></td><td>2026-06-01</td><td>-</td><td>有効</td>
+              <td style="font-size:10px;">
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">詳細</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">階層図</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:12px;">
+      <li><span class="anno-num">1</span><span><strong>ツールバー</strong> — 新規作成・CSV取込・テンプレート出力・逆展開などの操作</span></li>
+      <li><span class="anno-num">2</span><span><strong>フィルタ</strong> — 品番/品名・最終品・連産品・版・作成日・有効状態で絞り込み</span></li>
+      <li><span class="anno-num">3</span><span><strong>操作ボタン</strong> — 詳細（構成品目の確認・編集）、階層図、Excel出力、編集、削除</span></li>
+    </ul>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部ナビゲーションの<strong>「マスタメンテ」</strong>メニューから<strong>「構成マスタ（BOM）」</strong>を選択します。
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      画面が開くとフィルタが初期状態で表示されます。<strong>「検索」</strong>ボタンでBOM一覧を取得してください。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>BOMの編集には <strong>masters.bom</strong> の編集権限が必要です。権限がない場合、新規・編集・削除ボタンは表示されません。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">画面の構成</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      画面はツールバー・フィルタ・BOM一覧の3段構成です。一覧の各行から詳細ダイアログを開いて構成品目を管理します。
+    </div>
+
+    <h4 class="sub">ツールバー</h4>
+    <table class="info-table" style="margin-bottom:16px;">
+      <tr><th>更新</th><td>現在のフィルタ条件でBOM一覧を再取得</td></tr>
+      <tr><th>取込テンプレートExcel</th><td>BOM取込用Excelテンプレート（入力用・工程・ライン・仕入先シート付き）をダウンロード</td></tr>
+      <tr><th>取込テンプレートCSV</th><td>BOM取込用CSVテンプレートをダウンロード</td></tr>
+      <tr><th>CSV取込</th><td>CSV/Excelファイルからの一括取込ダイアログを開く</td></tr>
+      <tr><th>新規</th><td>BOMヘッダの新規登録ダイアログを開く</td></tr>
+      <tr><th>逆展開</th><td>指定した部品がどの親製品に使われているか検索</td></tr>
+    </table>
+
+    <h4 class="sub">一覧行の操作ボタン</h4>
+    <table class="info-table">
+      <tr><th>詳細</th><td>BOM詳細ダイアログを開く（構成品目の確認・追加・削除・ルーティング生成）</td></tr>
+      <tr><th>Excel出力</th><td>階層構成をExcelファイルで出力</td></tr>
+      <tr><th>別タブ</th><td>詳細を別タブで表示</td></tr>
+      <tr><th>階層図</th><td>BOMツリー（親→子→孫…）を表示</td></tr>
+      <tr><th>編集</th><td>BOMヘッダ（版・有効期間）を編集</td></tr>
+      <tr><th>削除</th><td>BOMを削除（構成品目も連動削除）</td></tr>
+    </table>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">BOMを検索する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      フィルタを活用して対象のBOMを探します。
+    </div>
+    <table class="info-table">
+      <tr><th>親製品（品番/品名）</th><td>品番または品名の一部で部分一致検索</td></tr>
+      <tr><th>最終品</th><td>最終品だけ / それ以外 / すべて</td></tr>
+      <tr><th>ライン最終品</th><td>ライン最終品だけ / それ以外 / すべて</td></tr>
+      <tr><th>連産品</th><td>連産品BOMのみ / 非連産 / すべて</td></tr>
+      <tr><th>版</th><td>版名で絞り込み</td></tr>
+      <tr><th>作成日 From/To</th><td>BOM作成日の範囲で絞り込み</td></tr>
+      <tr><th>有効</th><td>有効 / 無効 / すべて</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>リセット</strong>ボタンでフィルタを初期化して再取得できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">BOMの基本構造を理解する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>1つのBOMは「親製品」と「直下の子部品」の親子関係のみで構成されます。</strong>孫部品は子部品を親とする別のBOMで作成します。個々の親子BOMが連鎖することで多階層の構成になります。
+    </div>
+
+    <!-- BOMツリー図 -->
+    <div class="bom-tree">
+      <div class="node"><strong>例：製品Aの構成が A → B → C の場合</strong></div>
+      <div style="margin-top:8px;">
+        <div class="node">&#x1F4E6; <strong>BOM①</strong>　親=A、子=B を登録</div>
+        <div class="level">
+          <div class="node">&#x1F4E6; <strong>BOM②</strong>　親=B、子=C を登録</div>
+        </div>
+        <div class="node" style="margin-top:4px;">→ システムが A → B → C と自動展開</div>
+      </div>
+    </div>
+
+    <h4 class="sub">連産品の扱い</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      連産品は同一工程で複数の実品が同時に得られる品番です。BOMでは在庫を持たない<strong>「仮想セット品番」</strong>を親として作成し、そこで部材・工程を管理します。
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>連産品のルール:</strong><br>
+      ・連産品BOMの親は必ず「仮想セット品番」<br>
+      ・連産品を他のBOMの子として登録してはならない<br>
+      ・連産品の実品は、別の製品の子としてBOMを作成する<br>
+      ・製品番号ルール: <code>ST完成品番号-工程コード</code></span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">画面でBOMを新規作成する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      少量のBOMを登録する場合や、内容を確認しながら1件ずつ登録する場合に使います。
+    </div>
+
+    <h4 class="sub">BOMヘッダの登録</h4>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>ツールバーの<span class="mock-btn success" style="font-size:11px;">新規</span>をクリック</td><td>BOMヘッダ登録ダイアログが表示されます</td></tr>
+        <tr><td class="num">2</td><td>「親製品」を品番/品名で検索して選択</td><td>連産品BOMの場合は「仮想セット品番」を選択</td></tr>
+        <tr><td class="num">3</td><td>連産品BOMの場合は「連産品BOM」にチェック</td><td>作成後は変更不可。通常BOMの場合はチェック不要</td></tr>
+        <tr><td class="num">4</td><td>「版」を入力</td><td>文字列。例: v1, v2</td></tr>
+        <tr><td class="num">5</td><td>「有効開始日」を入力</td><td>BOMが適用され始める日（必須）</td></tr>
+        <tr><td class="num">6</td><td>「有効終了日」を入力（任意）</td><td>空欄なら無期限</td></tr>
+        <tr><td class="num">7</td><td>「作成」をクリック</td><td>BOMヘッダが作成され一覧に追加されます</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">BOMヘッダの入力項目</h4>
+    <table class="info-table">
+      <tr><th>親製品</th><td><strong>必須</strong>。品番/品名で検索可能。同一親製品では <code>parent_product × version × valid_from</code> が一意</td></tr>
+      <tr><th>連産品BOM</th><td>任意。同一工程で複数製品を同時生産する場合にチェック。<strong>作成後は変更不可</strong></td></tr>
+      <tr><th>版</th><td><strong>必須</strong>。文字列。改版時は別の版名で新規登録</td></tr>
+      <tr><th>有効開始日</th><td><strong>必須</strong>。BOMが適用され始める日</td></tr>
+      <tr><th>有効終了日</th><td>任意。空欄なら無期限</td></tr>
+      <tr><th>有効</th><td>既定ON。無効にすると展開対象外</td></tr>
+    </table>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>作成直後は構成品目が空です。STEP 6で構成品目を追加してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step" style="border-left:4px solid var(--step-color);">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">構成品目を追加する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      一覧から対象BOMの<strong>「詳細」</strong>を開き、<strong>構成品目フォーム</strong>で子製品を追加します。
+    </div>
+
+    <h4 class="sub">構成品目の入力項目</h4>
+    <table class="info-table">
+      <tr><th>子製品</th><td><strong>必須</strong>。品番/品名で検索可能</td></tr>
+      <tr><th>数量</th><td><strong>必須</strong>。親1個あたりの使用数（整数、1以上）</td></tr>
+      <tr><th>ロス率</th><td>任意。0以上、0.001刻み</td></tr>
+      <tr><th>調達区分</th><td><strong>必須</strong>。自社製造(MAKE) / 購買(BUY) / 外注(SUBCON)</td></tr>
+      <tr><th>仕入先</th><td>MAKEでは空。BUY・SUBCONでは<strong>必須</strong></td></tr>
+      <tr><th>工程</th><td>MAKEで<strong>必須</strong>。SUBCONは外注工程が自動設定。BUYでは入力不可</td></tr>
+      <tr><th>ライン</th><td>MAKEで<strong>必須</strong>。SUBCONは仕入先に応じて自動設定される場合あり。BUYでは入力不可</td></tr>
+      <tr><th>時間単位</th><td>MAKEは分/日を選択。BUY・SUBCONは日固定</td></tr>
+      <tr><th>リードタイム(日)</th><td>BUY<strong>必須</strong>。時間単位=日のMAKEも1以上<strong>必須</strong></td></tr>
+      <tr><th>所要時間(分)</th><td>時間単位=分かつMAKEで1以上<strong>必須</strong></td></tr>
+      <tr><th>備考</th><td>任意。200文字まで</td></tr>
+    </table>
+
+    <h4 class="sub">調達区分ごとの挙動</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr><th>調達区分</th><th>仕入先</th><th>工程</th><th>ライン</th><th>時間単位</th><th>LT(日)</th><th>所要時間(分)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mock-btn" style="font-size:10px;padding:1px 6px;background:var(--success-light);color:var(--success);border-color:var(--success);">MAKE</span></td>
+            <td style="color:var(--ink2);">空</td>
+            <td style="font-weight:700;">必須</td>
+            <td style="font-weight:700;">必須</td>
+            <td>分 or 日</td>
+            <td>日の場合必須</td>
+            <td>分の場合必須</td>
+          </tr>
+          <tr>
+            <td><span class="mock-btn" style="font-size:10px;padding:1px 6px;background:var(--accent-light);color:var(--accent);border-color:var(--accent);">BUY</span></td>
+            <td style="font-weight:700;">必須</td>
+            <td style="color:var(--ink2);">入力不可</td>
+            <td style="color:var(--ink2);">入力不可</td>
+            <td>日固定</td>
+            <td style="font-weight:700;">必須</td>
+            <td style="color:var(--ink2);">不要</td>
+          </tr>
+          <tr>
+            <td><span class="mock-btn" style="font-size:10px;padding:1px 6px;background:var(--warn-light);color:var(--warn);border-color:var(--warn);">SUBCON</span></td>
+            <td style="font-weight:700;">必須</td>
+            <td style="color:var(--ink2);">自動設定</td>
+            <td style="color:var(--ink2);">自動設定</td>
+            <td>日固定</td>
+            <td style="font-weight:700;">必須</td>
+            <td style="color:var(--ink2);">不要</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>追加した構成品目は詳細ダイアログの一覧に即座に反映されます。<strong>「階層図」</strong>で親子関係を確認してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">構成品目を削除・変更する</div>
+    </div>
+
+    <h4 class="sub">構成品目の削除</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      詳細画面の構成品目一覧で対象行の<strong>「削除」</strong>を押します。
+    </div>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>対象行の<span class="mock-btn danger" style="font-size:11px;">削除</span>をクリック</td><td>削除確認ダイアログが表示されます</td></tr>
+        <tr><td class="num">2</td><td>「対象品番」と「影響件数」を確認</td><td>関連候補として検出された工程の総数が表示されます</td></tr>
+        <tr><td class="num">3</td><td>「自動削除対象」の件数を確認</td><td>BOM明細に紐づいている工程数。チェックで一緒に削除可能</td></tr>
+        <tr><td class="num">4</td><td>必要なら「自動削除対象のルーティングステップも削除」にチェック</td><td>チェックを入れた場合のみ関連工程も削除されます</td></tr>
+        <tr><td class="num">5</td><td>「手動確認対象」がある場合はメモ</td><td>推定一致の工程。削除後にルーティングマスタで確認・修正が必要</td></tr>
+        <tr><td class="num">6</td><td>「理解して削除する」をクリック</td><td>削除が実行されます</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">削除確認ダイアログの見方</h4>
+    <table class="info-table">
+      <tr><th>影響ステップ数</th><td>関連候補として検出された工程の総数</td></tr>
+      <tr><th>自動削除対象</th><td><code>source_bom_item_id</code> で紐づいている工程。チェック時のみ削除</td></tr>
+      <tr><th>手動確認対象</th><td>推定一致の工程。自動削除されないため手動確認が必要</td></tr>
+      <tr><th>判定列</th><td>一覧の各行が「自動削除対象」か「手動確認対象」かを表示</td></tr>
+    </table>
+
+    <h4 class="sub">子部品の変更（差し替え）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      子部品の品番を変更する場合は、既存を編集するのではなく<strong>削除→新規追加</strong>の手順で行います。削除時はルーティングステップも一緒に削除でき、追加後は「BOMからルーティング生成」でルーティングに反映できます。一方、既存の子部品を編集で差し替えるとルーティングの加工後品目には自動反映されないため、必ず削除→追加で操作してください。
+    </div>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>既存の子部品を削除する</td><td>上記の削除手順に従う</td></tr>
+        <tr><td class="num">2</td><td>構成品目フォームで変更後の子部品を新規追加する</td><td>STEP 6の手順に従う</td></tr>
+        <tr><td class="num">3</td><td>数量・調達区分・工程・ライン・リードタイムを入力して保存</td><td>前の子部品と同じ設定にする必要はありません</td></tr>
+        <tr><td class="num">4</td><td>関連工程がある場合はルーティングマスタを確認</td><td>削除確認ダイアログの内容に従って対応</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout danger">
+      <span class="icon">&#9888;</span>
+      <span><strong>重要:</strong> BOM側で子部品を変更しても、ルーティングマスタの加工後品目には自動反映されません。必要に応じてルーティングマスタも確認・修正してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">CSV/Excelで一括取込する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      複数の親子関係をまとめて登録する場合や、Excelで下準備してから一括登録する場合に使います。
+    </div>
+
+    <h4 class="sub">取込の流れ</h4>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td><span class="mock-btn" style="font-size:11px;">取込テンプレートExcel</span> または CSV をダウンロード</td><td>Excel推奨（参照シート・プルダウン付き）</td></tr>
+        <tr><td class="num">2</td><td>テンプレートに必要項目を入力</td><td>下記「取込ファイルの列」参照</td></tr>
+        <tr><td class="num">3</td><td><span class="mock-btn" style="font-size:11px;">CSV取込</span> をクリック</td><td>取込ダイアログが開きます</td></tr>
+        <tr><td class="num">4</td><td>ファイル・完成品・版・有効開始日を指定</td><td>完成品（画面入力）は必須</td></tr>
+        <tr><td class="num">5</td><td><strong>「取込前チェック」</strong>を実行</td><td>エラーがあればここで検出されます</td></tr>
+        <tr><td class="num">6</td><td>問題なければ<strong>「取込実行」</strong></td><td>BOMが一括登録されます</td></tr>
+        <tr><td class="num">7</td><td>「詳細」や「階層図」で内容を確認</td><td>取込後は必ず確認してください</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">テンプレートの使い分け</h4>
+    <table class="info-table">
+      <tr><th>Excel（推奨）</th><td>入力用シート + 工程・ライン・仕入先の参照シート付き。調達区分・時間単位はプルダウン選択。コード入力で名称が自動表示</td></tr>
+      <tr><th>CSV</th><td>既存CSVを編集したい場合向け。参照シートやプルダウンなし</td></tr>
+    </table>
+
+    <h4 class="sub">取込ファイルの列</h4>
+    <div class="mock-grid">
+      <table>
+        <thead>
+          <tr><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th><th>11</th><th>12</th><th>13</th><th>14</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-size:9px;">完成品</td>
+            <td style="font-size:9px;">親品番</td>
+            <td style="font-size:9px;">子品番</td>
+            <td style="font-size:9px;">数量</td>
+            <td style="font-size:9px;">工程コード</td>
+            <td style="font-size:9px;">工程名</td>
+            <td style="font-size:9px;">ラインコード</td>
+            <td style="font-size:9px;">ライン名</td>
+            <td style="font-size:9px;">調達区分</td>
+            <td style="font-size:9px;">仕入先コード</td>
+            <td style="font-size:9px;">仕入先名</td>
+            <td style="font-size:9px;">LT(日)</td>
+            <td style="font-size:9px;">所要時間(分)</td>
+            <td style="font-size:9px;">時間単位</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="step-desc" style="margin-top:8px;">
+      必須ヘッダーは <strong>親品番・子品番・数量・調達区分</strong> です。ファイル側の「完成品」列が空なら画面入力の完成品で補完されます。
+    </div>
+
+    <h4 class="sub">区分別必須ルール（取込時）</h4>
+    <table class="info-table">
+      <tr><th>MAKE（自社製造）</th><td>工程コード必須、ラインコード必須、時間単位必須（分/日）。分→所要時間(分)>0、日→LT(日)>0</td></tr>
+      <tr><th>BUY（購買）</th><td>仕入先コード必須、時間単位=日、LT(日)>0。工程コード入力不可</td></tr>
+      <tr><th>SUBCON（外注）</th><td>仕入先コード必須、時間単位=日、LT(日)>0。工程コード空欄なら <code>G</code> に自動補完</td></tr>
+    </table>
+
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span><strong>取込前チェックで確認されること:</strong> 完成品/親品番/子品番の製品マスタ照合、区分別必須項目の不足、数量や時間値の不正、工程/ライン/仕入先コードのマスタ照合、既存BOMとの重複</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 9 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">9</div>
+      <div class="step-title">別バージョンを作成する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      既存BOMを元に設変や切替用のfuture版を作るときは、詳細画面の<strong>「別バージョン作成」</strong>を使います。明細がそのまま複製されるので、必要な箇所だけ修正すれば済みます。
+    </div>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>一覧から元になるBOMの<span class="mock-btn" style="font-size:11px;">詳細</span>を開く</td><td>コピー元のBOMを選びます</td></tr>
+        <tr><td class="num">2</td><td><strong>「別バージョン作成」</strong>をクリック</td><td>バージョン作成ダイアログが表示されます</td></tr>
+        <tr><td class="num">3</td><td>「新しい版」を入力</td><td>例: v1 → v2</td></tr>
+        <tr><td class="num">4</td><td>「有効開始日」を入力</td><td>例: 2026-09-01</td></tr>
+        <tr><td class="num">5</td><td>必要なら「有効終了日」を入力</td><td>空欄なら無期限</td></tr>
+        <tr><td class="num">6</td><td>「作成実行」をクリック</td><td>新BOMが作成され、詳細が開きます</td></tr>
+        <tr><td class="num">7</td><td>新BOMで必要な明細だけ修正する</td><td>不要な子部品は削除、追加は構成品目フォームから</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span><strong>「BOMをコピー」との違い:</strong> 「別バージョン作成」は同じ親製品のまま版と有効開始日を変えた新BOMを作ります。「BOMをコピー」は<strong>別の親製品</strong>へ構成を複製する機能で、改版用途ではありません。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 10 ===== -->
+  <div class="step" style="border-left:4px solid var(--warn);">
+    <div class="step-header">
+      <div class="step-num">10</div>
+      <div class="step-title">BOMからルーティングを生成する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      BOMの構成品目をもとに、製造工程の順序（ルーティング）を自動生成します。
+    </div>
+
+    <h4 class="sub">生成前の確認事項</h4>
+    <table class="info-table" style="margin-bottom:16px;">
+      <tr><th>MAKE明細</th><td>工程・ライン・時間情報が入っていること</td></tr>
+      <tr><th>BUY/SUBCON明細</th><td>仕入先とリードタイム(日)が入っていること</td></tr>
+      <tr><th>明細の並び順</th><td>工程順になっていること</td></tr>
+    </table>
+
+    <h4 class="sub">ルーティング生成手順</h4>
+    <table class="proc-table">
+      <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>対象BOMの<span class="mock-btn" style="font-size:11px;">詳細</span>を開く</td><td>構成品目が正しいことを確認</td></tr>
+        <tr><td class="num">2</td><td>必要に応じて「最終工程」を指定</td><td>指定すると最後に1ステップ追加されます</td></tr>
+        <tr><td class="num">3</td><td><strong>「BOMからルーティング生成」</strong>をクリック</td><td>ルーティングが自動生成されます</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">生成時の動作</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      <ul style="margin:0;padding-left:18px;font-size:14px;color:var(--ink2);">
+        <li>既存のルーティングステップは<strong>削除され、再生成</strong>されます</li>
+        <li>子BOM → 親BOMの順で<strong>深さ優先</strong>に展開されます</li>
+        <li>BUY品は仕入先ごとに購買ライン・PURCHASE工程を使用します</li>
+        <li>生成後、当該製品の<strong>既定ルーティングが自動で切り替わります</strong></li>
+      </ul>
+    </div>
+
+    <div class="callout warn" style="margin-top:14px;">
+      <span class="icon">&#9888;</span>
+      <span><strong>future版BOMからルーティング生成する場合:</strong> 「有効開始日時」を切替日の <strong>08:00</strong> に合わせてください（日替わり時刻が8時のため）。</span>
+    </div>
+
+    <div class="callout danger" style="margin-top:8px;">
+      <span class="icon">&#9888;</span>
+      <span><strong>ライン・工程が変わった場合:</strong> 旧ラインに残った在庫を新ラインへ移行する作業が必要です。ルーティングマスタの「ルーティング変更後の在庫移行」機能を使用してください。→ <a href="/manual?path=マスタ/ルーティング変更後の在庫移行.md" style="color:var(--danger);font-weight:600;">在庫移行マニュアル</a></span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>1BOM = 親と直下の子だけ:</strong> 孫部品は子部品を親とする別のBOMで作成してください。1つのBOMに多階層をまとめることはできません</li>
+      <li><strong>連産品は仮想セット品番が親:</strong> 連産品BOMは必ず仮想セット品番を親とし、連産品を他のBOMの子にしてはいけません</li>
+      <li><strong>循環BOM禁止:</strong> A→B→A のような循環構成は設定しないでください。階層取得時にエラーになります</li>
+      <li><strong>子部品の変更は削除→追加:</strong> 既存子部品の編集ではなく、削除してから新規追加の手順で行ってください</li>
+      <li><strong>BOM→ルーティングは一方向:</strong> ルーティングマスタで加工後品目を変更してもBOMには反映されません。逆も同様で、BOMの子部品変更はルーティングに自動反映されません</li>
+      <li><strong>ルーティング生成は上書き:</strong> 既存ステップは削除され再生成されます。個別に調整した工程情報は失われるので注意してください</li>
+      <li><strong>取込時は必ずチェック:</strong> 「取込実行」の前に「取込前チェック」を実行してエラーを確認してください</li>
+      <li><strong>権限:</strong> masters.bom の編集権限がないユーザーは新規・編集・削除・取込ができません</li>
+    </ul>
+  </div>
+
+  <!-- ===== Q&A ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num" style="background:var(--accent);font-size:14px;">Q&amp;A</div>
+      <div class="step-title">よくある質問</div>
+    </div>
+
+    <h4 class="sub">Q1. 画面作成と取込作成はどちらを使えばいいですか？</h4>
+    <div class="step-desc">
+      少量登録や修正なら<strong>画面作成</strong>、まとまった件数を登録するなら<strong>取込作成</strong>が向いています。
+    </div>
+
+    <h4 class="sub">Q2. 取込でエラーになるときは何を見ればいいですか？</h4>
+    <div class="step-desc">
+      まず<strong>「取込前チェック」</strong>を実行してください。未登録品番、必須項目漏れ、コード不一致、重複BOMを先に確認できます。
+    </div>
+
+    <h4 class="sub">Q3. 外注品は工程やラインを手入力する必要がありますか？</h4>
+    <div class="step-desc">
+      取込時は工程コードが空なら <code>G</code> が自動補完されます。画面作成時は外注工程が自動設定され、仕入先に応じてラインが自動設定される場合があります。
+    </div>
+
+    <h4 class="sub">Q4. 「BOMをコピー」と「別バージョン作成」の違いは？</h4>
+    <div class="step-desc">
+      <strong>「BOMをコピー」</strong>は別の親製品へ複製する機能です。<strong>「別バージョン作成」</strong>は同じ親製品のまま版と有効開始日を変えた新BOMを作る機能です。
+    </div>
+
+    <h4 class="sub">Q5. BOM明細を削除すると関連ルーティング工程も消えますか？</h4>
+    <div class="step-desc">
+      必ずではありません。削除確認の「自動削除対象」に入っている工程だけが、チェックを入れた場合に削除されます。「手動確認対象」は自動削除されないため、削除後にルーティングマスタで確認してください。
+    </div>
+
+    <h4 class="sub">Q6. BOM変更後にルーティングを作り直したら終わりですか？</h4>
+    <div class="step-desc" style="margin-bottom:0;">
+      製造ライン・工程が変わった場合は、旧ラインに残った在庫を新ラインへ移行する作業が必要です。→ <a href="/manual?path=マスタ/ルーティング変更後の在庫移行.md" style="color:var(--accent);font-weight:600;">ルーティング変更後の在庫移行マニュアル</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
