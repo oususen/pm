@@ -26,7 +26,7 @@ from .models_routing_migration_log import RoutingMigrationLog
 from .models_gantt_display_product_map import GanttDisplayProductMap
 from .models_gantt_process_display_order import GanttProcessDisplayOrder
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
-from .models_laser_weekly_plan import LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup
+from .models_laser_weekly_plan import LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup, LaserWeeklyPatternInitialProgress
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_record_confirmation import ProductionRecordConfirmation
 from .models_production import ProcessActual, ProductionOrder, StockAllocation

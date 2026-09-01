@@ -11,6 +11,9 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   savePatternManualQuantities(quantities) {
     return client.post('/laser-weekly-plans/pattern-manual-quantities/', { quantities })
   },
+  saveInitialProgress(items) {
+    return client.post('/laser-weekly-plans/save-initial-progress/', { items })
+  },
   getTargets(params = {}) {
     return client.get('/laser-weekly-plan-targets/', { params })
   },

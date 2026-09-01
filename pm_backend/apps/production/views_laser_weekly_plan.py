@@ -8,7 +8,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
+from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
 from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
@@ -19,6 +19,7 @@ from .services.recalc_start_date import _build_workday_helpers, _resolve_calenda
 class LaserWeeklyPlanTargetViewSet(viewsets.ModelViewSet):
     queryset = LaserWeeklyPlanTarget.objects.select_related('downstream_line', 'product', 'finished_product', 'laser_pattern')
     serializer_class = LaserWeeklyPlanTargetSerializer
+    pagination_class = None
 
 
 class LaserWeeklyMaterialGroupViewSet(viewsets.ModelViewSet):
@@ -86,6 +87,55 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             )
         return Response({'saved_count': len(quantities)})
 
+    @action(detail=False, methods=['post'], url_path='save-initial-progress')
+    def save_initial_progress(self, request):
+        items = request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'detail': 'items must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+        for item in items:
+            try:
+                laser_pattern_id = int(item['laser_pattern_id'])
+                week_start_date = datetime.strptime(item['week_start_date'], '%Y-%m-%d').date()
+                initial_progress = int(item['initial_progress'])
+                is_locked = bool(item.get('is_locked', True))
+            except (KeyError, TypeError, ValueError):
+                return Response({'detail': '期首進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            LaserWeeklyPatternInitialProgress.objects.update_or_create(
+                laser_pattern_id=laser_pattern_id, week_start_date=week_start_date,
+                defaults={'initial_progress': initial_progress, 'is_locked': is_locked},
+            )
+        return Response({'saved_count': len(items)})
+
+    def _calc_auto_initial_progress(self, pattern_id, week_start_date, targets, pattern_manual_map, plan_map, order_map, target_demand_dates):
+        prev_start = week_start_date - timedelta(days=7)
+        prev_dates = [prev_start + timedelta(days=i) for i in range(7) if (prev_start + timedelta(days=i)).weekday() < 5]
+        if not prev_dates:
+            return 0
+        prev_locked = LaserWeeklyPatternInitialProgress.objects.filter(
+            laser_pattern_id=pattern_id, week_start_date=prev_start, is_locked=True,
+        ).first()
+        prev_initial = prev_locked.initial_progress if prev_locked else 0
+        cum_auto = 0
+        cum_manual = 0
+        pattern_targets = [t for t in targets if t.laser_pattern_id == pattern_id]
+        for day in prev_dates:
+            day_auto = 0
+            for target in pattern_targets:
+                take = next((x.units_per_shot for x in target.laser_pattern.finished_items.all() if x.finished_product_id == target.finished_product_id), None)
+                if not take or take <= 0:
+                    continue
+                demand_date = target_demand_dates.get((target.id, day))
+                if demand_date is None:
+                    continue
+                key = (target.downstream_line_id, target.product_id, demand_date)
+                qty = plan_map[key] if target.quantity_source == 'PLAN_QTY' else order_map[key]
+                sheets = int((qty / take).to_integral_value(rounding=ROUND_CEILING)) if qty > 0 else 0
+                day_auto += sheets
+            cum_auto += day_auto
+            manual = pattern_manual_map.get((pattern_id, day), day_auto)
+            cum_manual += manual
+        return prev_initial + cum_manual - cum_auto
+
     def list(self, request):
         try:
             requested_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
@@ -114,11 +164,12 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 plan_date__range=(dates[0], dates[-1]),
             )
         }
+        prev_week_start = start_date - timedelta(days=7)
         pattern_manual_map = {
             (item.laser_pattern_id, item.plan_date): item.sheets
             for item in LaserWeeklyPatternManualQuantity.objects.filter(
                 laser_pattern_id__in=[target.laser_pattern_id for target in targets],
-                plan_date__range=(dates[0], dates[-1]),
+                plan_date__range=(prev_week_start, dates[-1]),
             )
         }
         target_demand_dates = {}
@@ -131,7 +182,8 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 calendar_id,
                 _build_workday_helpers(calendar_id),
             )[2]
-            for day in dates:
+            prev_dates = [prev_week_start + timedelta(days=i) for i in range(7) if (prev_week_start + timedelta(days=i)).weekday() < 5]
+            for day in prev_dates + dates:
                 target_demand_dates[(target.id, day)] = shift_working_days(day, target.lead_time_days)
 
         plan_map, order_map = defaultdict(Decimal), defaultdict(Decimal)
@@ -213,6 +265,27 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 totals[(pattern_row['laser_pattern_id'], day, pattern_row['machine'])] += manual_sheets
                 material_row['daily'][day] += manual_sheets
             pattern_rows.append(pattern_row)
+
+        initial_progress_map = {
+            item.laser_pattern_id: item
+            for item in LaserWeeklyPatternInitialProgress.objects.filter(
+                laser_pattern_id__in=[pr['laser_pattern_id'] for pr in pattern_rows],
+                week_start_date=start_date,
+            )
+        }
+        for pattern_row in pattern_rows:
+            pid = pattern_row['laser_pattern_id']
+            saved = initial_progress_map.get(pid)
+            if saved and saved.is_locked:
+                pattern_row['initial_progress'] = saved.initial_progress
+                pattern_row['initial_progress_locked'] = True
+            else:
+                auto_val = self._calc_auto_initial_progress(
+                    pid, start_date, targets, pattern_manual_map,
+                    plan_map, order_map, target_demand_dates,
+                )
+                pattern_row['initial_progress'] = auto_val
+                pattern_row['initial_progress_locked'] = False
 
         material_rows = []
         for material_row in sorted(material_totals.values(), key=lambda item: item['material_code']):
