@@ -480,6 +480,9 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
         if not actual and trip.status in ('DEPARTED', 'CLOSED'):
             actual = _find_actual_for_allocation(item, trip.id)
         default_order_no = str(item.source_order_no or '').strip()
+        container_name = ''
+        if item.container_id:
+            container_name = getattr(item.container, 'name', '') if item.container else ''
         details.append({
             'allocation_id': item.id,
             'product_code': item.product_code,
@@ -492,6 +495,8 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
             'source_order_no': default_order_no,
             'due_date': item.due_date.isoformat() if item.due_date else None,
             'qty': _format_qty(qty),
+            'container_name': container_name,
+            'container_count': item.container_count,
             'production_splits': _actual_split_rows(actual, default_order_no) if actual else _allocation_split_rows(item, default_order_no),
         })
 
@@ -639,6 +644,7 @@ class ShippingTripExecutionView(APIView):
         trip_ids = [t.id for t in trips]
         allocations = list(
             ShippingTripAllocation.objects
+            .select_related('container')
             .filter(trip_id__in=trip_ids)
             .order_by('trip_id', 'product_code', 'id')
         )
@@ -922,6 +928,7 @@ class ShippingTripExecutionView(APIView):
 
         allocations = list(
             ShippingTripAllocation.objects
+            .select_related('container')
             .filter(trip_id__in=trip_ids)
             .order_by('product_code', 'id')
         )

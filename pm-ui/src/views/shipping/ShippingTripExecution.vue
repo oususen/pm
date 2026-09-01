@@ -93,7 +93,10 @@
                 <span>{{ t('shippingTripExecution.productionDate') }}</span>
                 <span></span>
                 <span>{{ t('shippingTripExecution.quantity') }}</span>
-                <span>{{ t('shippingTripExecution.orderNo') }}</span>
+                <span class="split-head-order">
+                  <span>{{ t('shippingTripExecution.orderNo') }}</span>
+                  <span v-if="row.container_name && row.container_count" class="split-container">{{ row.container_name }}×{{ row.container_count }}</span>
+                </span>
                 <span></span>
               </div>
               <div
@@ -966,7 +969,7 @@ onMounted(async () => {
 .detail-head,
 .detail-row {
   display: grid;
-  grid-template-columns: 1fr 80px 120px;
+  grid-template-columns: 1fr 50px 50px;
   gap: 4px;
   align-items: center;
   padding: 3px 6px;
@@ -1024,6 +1027,11 @@ onMounted(async () => {
 .split-head span:nth-child(4) {
   text-align: center;
 }
+.split-head-order {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 .split-row input {
   height: 38px;
   border: 1px solid #cbd5e1;
@@ -1049,6 +1057,12 @@ onMounted(async () => {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.split-container {
+  font-size: 14px;
+  color: #64748b;
+  white-space: nowrap;
+  align-self: center;
 }
 .btn.split-inline-add {
   min-height: 36px;
@@ -1237,7 +1251,7 @@ onMounted(async () => {
   }
   .detail-head,
   .detail-row {
-    grid-template-columns: 1fr 70px 100px;
+    grid-template-columns: 1fr 50px 50px;
     gap: 4px;
     padding: 4px 6px;
   }
