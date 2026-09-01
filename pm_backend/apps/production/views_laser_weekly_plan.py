@@ -221,6 +221,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     'material_id': target.laser_pattern.material_id,
                     'material_code': target.laser_pattern.material.product_code,
                     'material_name': target.laser_pattern.material.product_name,
+                    'order_lot_min': target.laser_pattern.material.order_lot_min or 1,
                     'product_codes': set(),
                     'downstream_line_names': set(),
                     'take_qtys': set(),
@@ -253,6 +254,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 'material_code': pattern_row['material_code'],
                 'material_name': pattern_row['material_name'],
                 'thickness': pattern_row['thickness'],
+                'order_lot_min': pattern_row.get('order_lot_min', 1),
                 'daily': defaultdict(int),
             })
             for day, daily in automatic_daily.items():
