@@ -1324,6 +1324,7 @@ def generate_line_gantt_plans(line_id: int, start_date, end_date, clear_existing
                     spec.cycle_time_minutes = cycle_time_min
                     spec.setup_time_minutes = setup_time_min
             # ライン工程が空の場合のみ、同一keyのBacklog工程行へフォールバック
+            # 現状到達しない: ライン最終品がいるラインには必ず有効工程が定義されているため、上段の _build_line_final_line_process_fallback_specs で process_specs が埋まる
             if not process_specs and plan_backlog_rows:
                 process_specs = _build_line_final_backlog_fallback_specs(
                     plan_backlog_rows,
