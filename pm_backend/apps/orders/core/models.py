@@ -382,6 +382,16 @@ class ShippingTripAllocation(models.Model):
     ship_to_code = models.CharField(max_length=40, null=True, blank=True, verbose_name='納入場コード')
     due_date = models.DateField(null=True, blank=True, verbose_name='納期')
     qty = models.DecimalField(max_digits=14, decimal_places=3, verbose_name='割付数量')
+    source_order_no = models.CharField(max_length=50, null=True, blank=True, verbose_name='注番')
+    container = models.ForeignKey(
+        'masters.ContainerCapacity',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='shipping_trip_allocations',
+        verbose_name='容器',
+    )
+    container_count = models.IntegerField(null=True, blank=True, verbose_name='容器個数')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

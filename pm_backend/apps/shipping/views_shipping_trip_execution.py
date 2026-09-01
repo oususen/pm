@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from masters.models import Calendar, KubotaSakaiTruck, Product
-from orders.core.models import KubotaSakaiDueAdjustment, ShippingTrip, ShippingTripAllocation, ShippingTripNotice
+from orders.core.models import ShippingTrip, ShippingTripAllocation, ShippingTripNotice
 from orders.utils.calendar_utils import WorkingDayCalculator
 from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit, ShipToLeadTimeColorExclusion, ShipToLeadTime
 from shipping.services.shipping_progress import get_progress_horizon_days
@@ -226,20 +226,6 @@ def _legacy_actuals_for_allocation(allocation, trip_id=None):
     return results
 
 
-def _allocation_source_order_no_map(allocations):
-    due_ids = [
-        item.source_id
-        for item in allocations
-        if str(item.source_type or '').strip() == 'KUBOTA_SAKAI_DUE' and item.source_id
-    ]
-    if not due_ids:
-        return {}
-    return {
-        row['id']: str(row['source_order_no'] or '').strip()
-        for row in KubotaSakaiDueAdjustment.objects.filter(id__in=due_ids).values('id', 'source_order_no')
-    }
-
-
 def _save_production_splits_for_trip(trip, raw_actuals):
     if not isinstance(raw_actuals, list):
         return {'detail': 'actuals は配列で指定してください。'}, status.HTTP_400_BAD_REQUEST
@@ -256,10 +242,9 @@ def _save_production_splits_for_trip(trip, raw_actuals):
             continue
         split_map[allocation_id] = item.get('production_splits') or []
 
-    source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     updated_count = 0
     for allocation in allocations:
-        default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
+        default_order_no = str(allocation.source_order_no or '').strip()
         split_rows = split_map.get(allocation.id) or []
         normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
         existing_split_rows = _allocation_split_rows(allocation, default_order_no)
@@ -312,7 +297,6 @@ def _register_actuals_for_trips(trips, shipment_date, raw_actuals, close_trip=Fa
         ShippingTripAllocation.objects.select_related('trip').filter(trip_id__in=trip_ids).order_by('id')
     )
     allocation_map = {a.id: a for a in allocations}
-    source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
 
     normalized = {}
     split_map = {}
@@ -334,7 +318,7 @@ def _register_actuals_for_trips(trips, shipment_date, raw_actuals, close_trip=Fa
         qty = normalized.get(allocation.id, Decimal('0'))
         marker = _legacy_trip_actual_marker(allocation.trip_id, allocation.id)
         existing = _find_actual_for_allocation(allocation, allocation.trip_id)
-        default_order_no = source_order_no_by_allocation.get(allocation.source_id, '')
+        default_order_no = str(allocation.source_order_no or '').strip()
         split_rows = split_map[allocation.id] if allocation.id in split_map else _allocation_split_rows(allocation, default_order_no)
         normalized_split_rows = _normalize_split_rows(split_rows, default_order_no)
         final_remark = _encode_remark(marker, split_rows)
@@ -487,7 +471,6 @@ def _trip_notice_map(trips):
 
 
 def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, calc, truck_offset_map, actual_by_allocation=None, trip_notice_map=None):
-    source_order_no_by_allocation = _allocation_source_order_no_map(allocations)
     details = []
     total_qty = Decimal('0')
     for item in allocations:
@@ -496,7 +479,7 @@ def _build_trip_payload(trip, allocations, product_meta_map, ship_to_style_map, 
         actual = (actual_by_allocation or {}).get(item.id) if trip.status in ('DEPARTED', 'CLOSED') else None
         if not actual and trip.status in ('DEPARTED', 'CLOSED'):
             actual = _find_actual_for_allocation(item, trip.id)
-        default_order_no = source_order_no_by_allocation.get(item.source_id, '')
+        default_order_no = str(item.source_order_no or '').strip()
         details.append({
             'allocation_id': item.id,
             'product_code': item.product_code,

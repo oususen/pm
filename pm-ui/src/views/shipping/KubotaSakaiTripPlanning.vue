@@ -2039,6 +2039,7 @@ const buildPayloadRowsForDate = (dateKey) => {
           truck_id: item.truck_id,
           container_id: item.container_id || null,
           qty: parseIntegerQty(item.qty),
+          container_count: parseIntegerQty(item.container_count) || null,
         }))
         .filter((item) => item.truck_id && item.qty > 0),
     }))
@@ -2488,6 +2489,7 @@ const performSave = async () => {
               truck_id: item.truck_id,
               container_id: item.container_id || null,
               qty: parseIntegerQty(item.qty),
+              container_count: parseIntegerQty(item.container_count) || null,
             }))
             .filter((item) => item.truck_id && item.qty > 0),
         }))

@@ -859,18 +859,15 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
     """堺専用割付を共通出荷テーブルへ同期する。"""
     locked_truck_ids = {int(item) for item in (locked_truck_ids or set()) if item}
     locked_trip_refs = [f'TRUCK:{truck_id}' for truck_id in sorted(locked_truck_ids)]
-    due_ids = [int(row['adj_id']) for row in normalized_rows]
-    if due_ids:
-        delete_qs = ShippingTripAllocation.objects.filter(
-            source_type=KUBOTA_COMMON_SOURCE_TYPE,
-            source_id__in=due_ids,
-            trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
-            trip__customer_code=KUBOTA_CUSTOMER_CODE,
-            trip__departure_date=target_date,
-        )
-        if locked_trip_refs:
-            delete_qs = delete_qs.exclude(trip__trip_ref__in=locked_trip_refs)
-        delete_qs.delete()
+    delete_qs = ShippingTripAllocation.objects.filter(
+        source_type=KUBOTA_COMMON_SOURCE_TYPE,
+        trip__business_type=KUBOTA_COMMON_BUSINESS_TYPE,
+        trip__customer_code=KUBOTA_CUSTOMER_CODE,
+        trip__departure_date=target_date,
+    )
+    if locked_trip_refs:
+        delete_qs = delete_qs.exclude(trip__trip_ref__in=locked_trip_refs)
+    delete_qs.delete()
 
     run_cache = {}
     trip_cache = {}
@@ -953,6 +950,8 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
                         trip.save(update_fields=trip_updates + ['updated_at'])
                 trip_cache[trip_key] = trip
 
+            container_id = allocation.get('container_id')
+            container_count = allocation.get('container_count')
             create_allocations.append(
                 ShippingTripAllocation(
                     trip=trip,
@@ -962,6 +961,9 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
                     ship_to_code=adj.ship_to_code or '',
                     due_date=adj.due_date,
                     qty=qty,
+                    source_order_no=adj.source_order_no or '',
+                    container_id=container_id,
+                    container_count=container_count,
                 )
             )
 
@@ -971,7 +973,13 @@ def _sync_common_shipping_tables(target_date, normalized_rows, adj_map, truck_ma
         for alloc in create_allocations:
             dedup_key = (alloc.trip_id, alloc.source_type, alloc.source_id)
             if dedup_key in dedup:
-                dedup[dedup_key].qty += alloc.qty
+                existing = dedup[dedup_key]
+                existing.qty += alloc.qty
+                if existing.container_id != alloc.container_id:
+                    existing.container_id = None
+                    existing.container_count = None
+                elif alloc.container_count:
+                    existing.container_count = (existing.container_count or 0) + alloc.container_count
             else:
                 dedup[dedup_key] = alloc
         ShippingTripAllocation.objects.bulk_create(list(dedup.values()), ignore_conflicts=True)
@@ -1469,7 +1477,12 @@ class KubotaSakaiTripPlanViewNew(APIView):
                     container_id = int(al.get('container_id') or 0) or None
                 except (TypeError, ValueError):
                     pass
-                normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id})
+                container_count = None
+                try:
+                    container_count = int(al.get('container_count') or 0) or None
+                except (TypeError, ValueError):
+                    pass
+                normalized_allocations.append({'truck_id': truck_id, 'qty': qty, 'container_id': container_id, 'container_count': container_count})
                 row_total += qty
 
             if adj_id not in normalized_map:
