@@ -133,25 +133,25 @@ def _parse_month(value):
 
 
 def _build_month_weeks(target_month):
+    """週の帰属月は金曜日が属する月で決定する。"""
     month_first = _month_start(target_month)
     month_last = _month_end(target_month)
-    cursor = month_first - timedelta(days=month_first.weekday())
+    first_friday = month_first + timedelta(days=(4 - month_first.weekday()) % 7)
     weeks = []
     index = 1
-    while cursor <= month_last:
-        week_start = cursor
-        week_end = cursor + timedelta(days=6)
-        display_start = max(week_start, month_first)
-        display_end = min(week_end, month_last)
+    friday = first_friday
+    while friday.month == month_first.month and friday.year == month_first.year:
+        week_start = friday - timedelta(days=4)  # Monday
+        week_end = friday + timedelta(days=2)     # Sunday
         weeks.append(
             {
                 "week_index": index,
-                "start_date": display_start.isoformat(),
-                "end_date": display_end.isoformat(),
-                "label": f"{display_start.month}/{display_start.day} - {display_end.month}/{display_end.day}",
+                "start_date": week_start.isoformat(),
+                "end_date": week_end.isoformat(),
+                "label": f"{week_start.month}/{week_start.day} - {week_end.month}/{week_end.day}",
             }
         )
-        cursor += timedelta(days=7)
+        friday += timedelta(days=7)
         index += 1
     return weeks
 
@@ -1330,11 +1330,18 @@ class EquipmentInspectionRecordViewSet(viewsets.ModelViewSet):
 
         month_first = _month_start(month_value)
         month_last = _month_end(month_value)
+        weeks = _build_month_weeks(month_first)
+        if weeks:
+            record_start = date.fromisoformat(weeks[0]["start_date"])
+            record_end = date.fromisoformat(weeks[-1]["end_date"])
+        else:
+            record_start = month_first
+            record_end = month_last
         records = list(
             EquipmentInspectionRecord.objects.filter(
                 sheet_code=sheet_code,
-                operation_date__gte=month_first,
-                operation_date__lte=month_last,
+                operation_date__gte=record_start,
+                operation_date__lte=record_end,
             )
             .select_related("template", "operator")
             .prefetch_related("results__item__attachments")
@@ -1368,7 +1375,7 @@ class EquipmentInspectionRecordViewSet(viewsets.ModelViewSet):
                 "month": month_first.strftime("%Y-%m"),
                 "is_locked": _monthly_confirmation_exists(sheet_code, month_first),
                 "current_template": _template_summary(current_template),
-                "weeks": _build_month_weeks(month_first),
+                "weeks": weeks,
                 "daily_records": daily_records,
                 "quarterly_records": quarterly_records,
                 "confirmations": confirmation_serializer.data,
