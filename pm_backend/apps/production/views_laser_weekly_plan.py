@@ -110,7 +110,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         """加工頻度に基づいてmanual_sheetsの初期値を計算する。"""
         freq_type = pattern_row.get('freq_type', 'DAILY')
         if freq_type == 'DAILY':
-            return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
+            return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
 
         sorted_days = [d.isoformat() for d in dates]
         result = {day: 0 for day in sorted_days}
@@ -121,29 +121,29 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         if freq_type == 'WEEKLY':
             dow = pattern_row.get('freq_day_of_week')
             if dow is None:
-                return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
+                return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
             processing_days = [d for d in sorted_days if datetime.strptime(d, '%Y-%m-%d').date().weekday() == dow]
             if not processing_days:
-                return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
+                return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
             for i, proc_day in enumerate(processing_days):
                 if i + 1 < len(processing_days):
                     next_proc = processing_days[i + 1]
                     covered = [d for d in sorted_days if proc_day <= d < next_proc]
                 else:
                     covered = [d for d in sorted_days if d >= proc_day]
-                total = sum(automatic_daily.get(d, {}).get('automatic_sheets', 0) for d in covered)
+                total = sum(automatic_daily.get(d, {}).get('manual_sheets', 0) for d in covered)
                 result[proc_day] = total
 
         elif freq_type == 'EVERY_N_DAYS':
             interval = pattern_row.get('freq_interval_days') or 2
             start_date = pattern_row.get('freq_start_date')
             if not start_date:
-                return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
+                return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
             # 開始日より前の日は自回数をそのまま使用（毎日加工扱い）
             for day_str in sorted_days:
                 day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
                 if day_date < start_date:
-                    result[day_str] = automatic_daily.get(day_str, {}).get('automatic_sheets', 0)
+                    result[day_str] = automatic_daily.get(day_str, {}).get('manual_sheets', 0)
             # 開始日から表示開始日までの営業日数をカウント（カレンダー考慮）
             biz_days_from_start = 0
             scan_date = start_date
@@ -169,7 +169,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 else:
                     next_idx = len(sorted_days)
                 covered = sorted_days[idx:next_idx]
-                total = sum(automatic_daily.get(d, {}).get('automatic_sheets', 0) for d in covered)
+                total = sum(automatic_daily.get(d, {}).get('manual_sheets', 0) for d in covered)
                 result[sorted_days[idx]] = total
 
         return result
@@ -273,11 +273,12 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             for day in dates:
                 key = (target.downstream_line_id, target.product_id, target_demand_dates[(target.id, day)])
                 qty = plan_map[key] if target.quantity_source == 'PLAN_QTY' else order_map[key]
-                sheets = int((qty / take).to_integral_value(rounding=ROUND_CEILING)) if qty > 0 else 0
-                manual_sheets = sheets
+                raw = (qty / take) if qty > 0 else Decimal(0)
+                auto_sheets = float(raw.quantize(Decimal('0.01'), rounding=ROUND_CEILING)) if qty > 0 else 0.0
+                manual_sheets = int(raw.to_integral_value(rounding=ROUND_CEILING)) if qty > 0 else 0
                 daily[day.isoformat()] = {
                     'demand_qty': str(qty),
-                    'automatic_sheets': sheets,
+                    'automatic_sheets': auto_sheets,
                     'manual_sheets': manual_sheets,
                 }
                 freq = target.laser_pattern.processing_freq_pattern
@@ -313,7 +314,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 pattern_row['lead_time_days'].add(target.lead_time_days)
                 pattern_daily = pattern_row['daily'][day.isoformat()]
                 pattern_daily['demand_qty'] += qty
-                pattern_daily['automatic_sheets'] += sheets
+                pattern_daily['automatic_sheets'] += auto_sheets
                 pattern_daily['manual_sheets'] += manual_sheets
             rows.append({'id': target.id, 'downstream_line_name': target.downstream_line.line_name, 'product_code': target.product.product_code, 'product_name': target.product.product_name, 'pattern_no': target.laser_pattern.pattern_no, 'take_qty': str(take), 'thickness': str(target.laser_pattern.material.size_thickness or ''), 'machine': machine, 'hours_per_sheet': str(hours), 'lead_time_days': target.lead_time_days, 'quantity_source': target.quantity_source, 'daily': daily})
         pattern_rows = []
@@ -331,7 +332,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 'thickness': pattern_row['thickness'],
                 'order_lot_min': pattern_row.get('order_lot_min', 1),
                 'order_lot_multiple': pattern_row.get('order_lot_multiple', 1),
-                'daily': defaultdict(int),
+                'daily': defaultdict(Decimal),
             })
             cal_id = pattern_row.get('calendar_id')
             is_workday_fn = workday_helpers[cal_id][0] if cal_id in workday_helpers else None
@@ -344,16 +345,16 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             for day, daily in automatic_daily.items():
                 day_date = datetime.strptime(day, '%Y-%m-%d').date()
                 if has_any_saved:
-                    manual_sheets = pattern_manual_map.get((pattern_row['laser_pattern_id'], day_date), daily['automatic_sheets'])
+                    manual_sheets = pattern_manual_map.get((pattern_row['laser_pattern_id'], day_date), daily['manual_sheets'])
                 else:
-                    manual_sheets = freq_initial.get(day, daily['automatic_sheets'])
+                    manual_sheets = freq_initial.get(day, daily['manual_sheets'])
                 pattern_row['daily'][day] = {
                     'demand_qty': str(daily['demand_qty']),
                     'automatic_sheets': daily['automatic_sheets'],
                     'manual_sheets': manual_sheets,
                 }
                 totals[(pattern_row['laser_pattern_id'], day, pattern_row['machine'])] += manual_sheets
-                material_row['daily'][day] += manual_sheets
+                material_row['daily'][day] += Decimal(manual_sheets)
             pattern_rows.append(pattern_row)
 
         initial_progress_map = {
@@ -379,7 +380,10 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
 
         material_rows = []
         for material_row in sorted(material_totals.values(), key=lambda item: item['material_code']):
-            material_row['daily'] = dict(material_row['daily'])
+            material_row['daily'] = {
+                day: int(sheets.to_integral_value(rounding=ROUND_CEILING))
+                for day, sheets in material_row['daily'].items()
+            }
             material_rows.append(material_row)
         return Response({
             'start_date': start_date.isoformat(),
