@@ -128,7 +128,11 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, supplier=supplier, order_lots__gt=0, delivery_date__range=(export_start_date, export_end_date)).select_related('material').order_by('delivery_date', 'material__product_code'))
         if not orders:
             return Response({'detail': '出力対象の発注がありません。'}, status=status.HTTP_400_BAD_REQUEST)
-        delivery_dates = sorted({order.delivery_date for order in orders})
+        delivery_dates = []
+        current_date = export_start_date
+        while current_date <= export_end_date:
+            delivery_dates.append(current_date)
+            current_date += timedelta(days=1)
         by_material = defaultdict(list)
         for order in orders:
             by_material[order.material_id].append(order)
