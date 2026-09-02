@@ -64,3 +64,35 @@ class LaserWeeklyMaterialGroup(models.Model):
     class Meta:
         db_table = 't_laser_weekly_material_group'
         ordering = ['sort_order', 'group_name']
+
+
+class LaserWeeklyMaterialOrderProgress(models.Model):
+    SUPPLIER_SATO = 'SATO'
+    SUPPLIER_MEISEI = 'MEISEI'
+    SUPPLIER_CHOICES = [(SUPPLIER_SATO, '佐藤商事'), (SUPPLIER_MEISEI, '名成鋼機')]
+
+    plan_start_date = models.DateField(verbose_name='計画開始日')
+    material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_order_progresses')
+    required_date = models.DateField(verbose_name='必要日')
+    delivery_date = models.DateField(verbose_name='納期')
+    supplier = models.CharField(max_length=10, choices=SUPPLIER_CHOICES, verbose_name='仕入先')
+    required_sheets = models.PositiveIntegerField(verbose_name='必要枚数')
+    lot_multiple = models.PositiveIntegerField(verbose_name='発注倍数')
+    required_lots = models.PositiveIntegerField(verbose_name='必要ロット数')
+    order_lots = models.PositiveIntegerField(verbose_name='発注ロット数')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 't_laser_weekly_material_order_progress'
+        constraints = [models.UniqueConstraint(fields=['plan_start_date', 'material', 'required_date', 'supplier'], name='laser_weekly_material_order_progress_unique')]
+
+
+class LaserWeeklyMaterialInitialProgress(models.Model):
+    plan_start_date = models.DateField(verbose_name='計画開始日')
+    material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_initial_progresses')
+    initial_progress = models.IntegerField(default=0, verbose_name='期首進度')
+    is_locked = models.BooleanField(default=False, verbose_name='ロック')
+
+    class Meta:
+        db_table = 't_laser_weekly_material_initial_progress'
+        constraints = [models.UniqueConstraint(fields=['plan_start_date', 'material'], name='laser_weekly_material_initial_progress_unique')]

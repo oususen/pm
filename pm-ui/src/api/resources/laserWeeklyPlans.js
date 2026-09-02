@@ -14,6 +14,21 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveInitialProgress(items) {
     return client.post('/laser-weekly-plans/save-initial-progress/', { items })
   },
+  getMaterialOrderProgress(startDate) {
+    return client.get('/laser-weekly-plans/material-order-progress/', { params: { start_date: startDate } })
+  },
+  saveMaterialOrderProgress(startDate, items) {
+    return client.post('/laser-weekly-plans/material-order-progress/', { start_date: startDate, items })
+  },
+  getMaterialInitialProgress(startDate) {
+    return client.get('/laser-weekly-plans/material-initial-progress/', { params: { start_date: startDate } })
+  },
+  saveMaterialInitialProgress(startDate, items) {
+    return client.post('/laser-weekly-plans/material-initial-progress/', { start_date: startDate, items })
+  },
+  exportMaterialOrderExcel(startDate, supplier) {
+    return client.get('/laser-weekly-plans/material-order-excel/', { params: { start_date: startDate, supplier }, responseType: 'blob' })
+  },
   getTargets(params = {}) {
     return client.get('/laser-weekly-plan-targets/', { params })
   },

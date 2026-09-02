@@ -1,14 +1,19 @@
 from collections import defaultdict
+from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
+from django.conf import settings
 from django.db.models import Q
+from django.http import FileResponse
+from openpyxl import load_workbook
 from masters.models import Product
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
+from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
 from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
@@ -28,6 +33,116 @@ class LaserWeeklyMaterialGroupViewSet(viewsets.ModelViewSet):
 
 
 class LaserWeeklyPlanViewSet(viewsets.ViewSet):
+    @action(detail=False, methods=['get', 'post'], url_path='material-initial-progress')
+    def material_initial_progress(self, request):
+        try:
+            plan_start_date = datetime.strptime(request.query_params.get('start_date') or request.data.get('start_date'), '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+        if request.method == 'GET':
+            return Response([{'material_id': x.material_id, 'initial_progress': x.initial_progress, 'is_locked': x.is_locked} for x in LaserWeeklyMaterialInitialProgress.objects.filter(plan_start_date=plan_start_date)])
+        items = request.data.get('items', [])
+        for item in items:
+            try:
+                material_id, initial_progress, is_locked = int(item['material_id']), int(item['initial_progress']), bool(item.get('is_locked', False))
+            except (KeyError, TypeError, ValueError):
+                return Response({'detail': '期首進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            LaserWeeklyMaterialInitialProgress.objects.update_or_create(plan_start_date=plan_start_date, material_id=material_id, defaults={'initial_progress': initial_progress, 'is_locked': is_locked})
+        return Response({'saved_count': len(items)})
+
+    @action(detail=False, methods=['get', 'post'], url_path='material-order-progress')
+    def material_order_progress(self, request):
+        if request.method == 'GET':
+            try:
+                plan_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+            except (KeyError, ValueError):
+                return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+            rows = LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date).select_related('material')
+            return Response([{
+                'material_id': row.material_id, 'required_date': row.required_date.isoformat(), 'delivery_date': row.delivery_date.isoformat(),
+                'supplier': row.supplier, 'required_sheets': row.required_sheets, 'lot_multiple': row.lot_multiple,
+                'required_lots': row.required_lots, 'order_lots': row.order_lots,
+            } for row in rows])
+
+        items = request.data.get('items', [])
+        try:
+            plan_start_date = datetime.strptime(request.data['start_date'], '%Y-%m-%d').date()
+            material_ids = {int(item['material_id']) for item in items}
+        except (KeyError, TypeError, ValueError):
+            return Response({'detail': '発注進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        materials = Product.objects.in_bulk(material_ids)
+        saved_count = 0
+        for item in items:
+            try:
+                material = materials[int(item['material_id'])]
+                required_date = datetime.strptime(item['required_date'], '%Y-%m-%d').date()
+                delivery_date = datetime.strptime(item['delivery_date'], '%Y-%m-%d').date()
+                required_sheets = int(item['required_sheets'])
+                lot_multiple = int(item['lot_multiple'])
+                sato_lots, meisei_lots = int(item['sato_lots']), int(item['meisei_lots'])
+                sato_enabled = bool(item.get('sato_enabled', False))
+                if min(required_sheets, lot_multiple, sato_lots, meisei_lots) < 0 or lot_multiple == 0:
+                    raise ValueError
+            except (KeyError, TypeError, ValueError):
+                return Response({'detail': '発注進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+            required_lots = int((Decimal(required_sheets) / Decimal(lot_multiple)).to_integral_value(rounding=ROUND_CEILING))
+            if not sato_enabled:
+                LaserWeeklyMaterialOrderProgress.objects.filter(
+                    plan_start_date=plan_start_date, material=material, required_date=required_date,
+                    supplier=LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO,
+                ).delete()
+            supplier_lots = [(LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI, meisei_lots)]
+            if sato_enabled:
+                supplier_lots.append((LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, sato_lots))
+            for supplier, order_lots in supplier_lots:
+                LaserWeeklyMaterialOrderProgress.objects.update_or_create(
+                    plan_start_date=plan_start_date, material=material, required_date=required_date, supplier=supplier,
+                    defaults={'delivery_date': delivery_date, 'required_sheets': required_sheets, 'lot_multiple': lot_multiple, 'required_lots': required_lots, 'order_lots': order_lots},
+                )
+                saved_count += 1
+        return Response({'saved_count': saved_count})
+
+    @action(detail=False, methods=['get'], url_path='material-order-excel')
+    def material_order_excel(self, request):
+        try:
+            plan_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+            supplier = request.query_params['supplier']
+            supplier_name = dict(LaserWeeklyMaterialOrderProgress.SUPPLIER_CHOICES)[supplier]
+        except (KeyError, ValueError):
+            return Response({'detail': '出力条件が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, supplier=supplier, order_lots__gt=0).select_related('material').order_by('delivery_date', 'material__product_code'))
+        if not orders:
+            return Response({'detail': '出力対象の発注がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+        template = Path(settings.BASE_DIR).parent / '材料注文書原紙(名成鋼機様).xlsx'
+        if not template.exists():
+            return Response({'detail': '材料注文書原紙が見つかりません。'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        workbook = load_workbook(template)
+        worksheet = workbook['Sheet1'] if 'Sheet1' in workbook.sheetnames else workbook.active
+        for name in workbook.sheetnames[:]:
+            if name != worksheet.title:
+                del workbook[name]
+        worksheet.title = supplier_name
+        worksheet['J4'] = datetime.now()
+        worksheet['D5'] = f'  {supplier_name} 御中  '
+        for row in range(13, 73):
+            for col in range(2, 12):
+                worksheet.cell(row=row, column=col).value = None
+        for index, order in enumerate(orders, 1):
+            row = 12 + index
+            material = order.material
+            worksheet.cell(row=row, column=2, value=index)
+            worksheet.cell(row=row, column=3, value=material.product_code)
+            worksheet.cell(row=row, column=4, value=material.product_name)
+            worksheet.cell(row=row, column=5, value='x'.join(str(v) for v in (material.size_thickness, material.size_width, material.size_length) if v is not None))
+            worksheet.cell(row=row, column=8, value=f'{order.lot_multiple}枚')
+            worksheet.cell(row=row, column=9, value=order.order_lots)
+            worksheet.cell(row=row, column=10, value=order.delivery_date.strftime('%-m/%-d'))
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        filename = f'材料注文書_{supplier_name}_{plan_start_date.isoformat()}.xlsx'
+        return FileResponse(output, as_attachment=True, filename=filename)
+
     @action(detail=False, methods=['get'], url_path='downstream-products')
     def downstream_products(self, request):
         try:
