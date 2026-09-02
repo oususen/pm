@@ -34,7 +34,7 @@ def collect_effective_department_ids(profile):
         return []
 
     ids = set()
-    for field in ('department', 'division', 'group', 'team'):
+    for field in ('department', 'division', 'group', 'team', 'unit'):
         dept = getattr(profile, field, None)
         if dept:
             ids.add(dept.id)
