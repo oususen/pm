@@ -44,6 +44,36 @@ def find_equipment_active_product_conflict(*, equipment_id, product_id=None, pro
     return latest_record
 
 
+def lock_and_reject_duplicate_operator_action(
+    *,
+    line_id,
+    process_id,
+    product_id=None,
+    product_code='',
+    equipment_id=None,
+    operator_action,
+):
+    """同一の作業アクションを連続登録しないため、直前レコードを行ロックして確認する。"""
+    queryset = BrakeLineRecord.objects.select_for_update().filter(
+        line_id=line_id,
+        process_id=process_id,
+        equipment_id=equipment_id or None,
+    )
+    if product_id:
+        queryset = queryset.filter(product_id=product_id)
+    else:
+        queryset = queryset.filter(product__isnull=True, product_code=product_code)
+
+    latest_record = queryset.order_by('-recorded_at', '-id').first()
+    if not latest_record:
+        return None
+
+    action = str(operator_action or '').upper()
+    if latest_record.operator_action == action:
+        return latest_record
+    return None
+
+
 def _resolve_target_session_for_equipment(*, explicit_session, process, product, plan_date):
     if explicit_session:
         return explicit_session

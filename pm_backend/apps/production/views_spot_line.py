@@ -19,7 +19,10 @@ from orders.utils.calendar_utils import get_business_today
 from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
-from production.services.brake_spot_session_sync import find_equipment_active_product_conflict
+from production.services.brake_spot_session_sync import (
+    find_equipment_active_product_conflict,
+    lock_and_reject_duplicate_operator_action,
+)
 from production.serializers_process_realtime import check_plan_overrun
 
 logger = logging.getLogger(__name__)
@@ -461,6 +464,20 @@ class SpotLineRecordView(APIView):
                 return Response({'detail': 'qty は1以上で入力してください'}, status=400)
             if operator_action == BrakeLineRecord.OPERATOR_ACTION_PAUSE and qty < 0:
                 return Response({'detail': 'qty は0以上で入力してください'}, status=400)
+
+        duplicate_record = lock_and_reject_duplicate_operator_action(
+            line_id=line_id,
+            process_id=process_id,
+            product_id=product_id or None,
+            product_code=product_code,
+            equipment_id=equipment_id or None,
+            operator_action=operator_action,
+        )
+        if duplicate_record:
+            return Response(
+                {'detail': '同じ操作はすでに登録されています。画面を更新して状態を確認してください。'},
+                status=409,
+            )
 
         rec = BrakeLineRecord.objects.create(
             plan_date=plan_date,

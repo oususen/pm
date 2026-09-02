@@ -289,7 +289,7 @@
 
             <!-- アクションバー -->
             <div class="action-bar">
-              <button class="btn-save" :disabled="!canSave" @click="save">{{ t('brakeInput.save') }}</button>
+              <button class="btn-save" :disabled="!canSave || saving" @click="save">{{ saving ? '保存中...' : t('brakeInput.save') }}</button>
               <button class="btn-cancel" @click="cancel">{{ t('brakeInput.cancel') }}</button>
             </div>
             <div v-if="equipmentConflictError" class="equipment-conflict-error">{{ equipmentConflictError }}</div>
@@ -1078,6 +1078,7 @@ const canSave = computed(() => {
   if (requiresReason.value && !actionReason.value) return false
   return true
 })
+const saving = ref(false)
 
 // ──────────────────────────────
 // アバターカラー（品番ハッシュ）
@@ -1233,7 +1234,7 @@ function onYesterdayToggle() {
 // 保存（作業記録 + 必要に応じてLineBacklog加算）
 // ──────────────────────────────
 async function save() {
-  if (!canSave.value) return
+  if (!canSave.value || saving.value) return
   const item = selectedItem.value
   const targetWorkDate = String(workDateStr.value || '').trim()
   if (targetWorkDate !== planDateStr.value) {
@@ -1242,6 +1243,7 @@ async function save() {
     )
     if (!ok) return
   }
+  saving.value = true
   try {
     const res = await api.brakeLineActuals.saveRecord({
       line_id:               item.line_id,
@@ -1356,6 +1358,8 @@ async function save() {
     } else {
       showToast(resolveApiErrorMessage(e, t('brakeInput.error.saveFailed')), 'error')
     }
+  } finally {
+    saving.value = false
   }
 }
 

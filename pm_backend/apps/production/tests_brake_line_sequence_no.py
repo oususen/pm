@@ -480,3 +480,72 @@ class BrakeSpotDualWriteTest(TestCase):
             ).count(),
             0,
         )
+
+    def test_brake_record_rejects_repeated_end_without_double_counting(self):
+        payload = {
+            'line_id': self.brake_line.id,
+            'process_id': self.brake_process.id,
+            'product_id': self.product.id,
+            'product_code': self.product.product_code,
+            'plan_date': self.plan_date.isoformat(),
+            'operator': 'tester',
+            'operator_action': BrakeLineRecord.OPERATOR_ACTION_END,
+            'qty': 4,
+            'equipment_id': self.brake_equipment.id,
+        }
+        view = BrakeLineRecordView.as_view()
+
+        first_response = view(self.factory.post('/api/production/brake-line-record/', payload, format='json'))
+        second_response = view(self.factory.post('/api/production/brake-line-record/', payload, format='json'))
+
+        self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second_response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(BrakeLineRecord.objects.filter(
+            line=self.brake_line,
+            process=self.brake_process,
+            product=self.product,
+            operator_action=BrakeLineRecord.OPERATOR_ACTION_END,
+        ).count(), 1)
+        backlog = LineBacklog.objects.get(
+            plan_date=self.plan_date,
+            line=self.brake_line,
+            process=self.brake_process,
+            product=self.product,
+            sequence_no=0,
+        )
+        self.assertEqual(backlog.actual_qty, 4)
+
+    def test_spot_record_rejects_repeated_end_without_double_counting(self):
+        payload = {
+            'line_id': self.spot_line.id,
+            'process_id': self.spot_process.id,
+            'product_id': self.product.id,
+            'product_code': self.product.product_code,
+            'plan_date': self.plan_date.isoformat(),
+            'operator': 'tester',
+            'operator_action': BrakeLineRecord.OPERATOR_ACTION_END,
+            'qty': 6,
+            'equipment_id': self.spot_equipment_1.id,
+            'skip_qty_update': False,
+        }
+        view = SpotLineRecordView.as_view()
+
+        first_response = view(self.factory.post('/api/production/spot-line-record/', payload, format='json'))
+        second_response = view(self.factory.post('/api/production/spot-line-record/', payload, format='json'))
+
+        self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second_response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(BrakeLineRecord.objects.filter(
+            line=self.spot_line,
+            process=self.spot_process,
+            product=self.product,
+            operator_action=BrakeLineRecord.OPERATOR_ACTION_END,
+        ).count(), 1)
+        backlog = LineBacklog.objects.get(
+            plan_date=self.plan_date,
+            line=self.spot_line,
+            process=self.spot_process,
+            product=self.product,
+            sequence_no=0,
+        )
+        self.assertEqual(backlog.actual_qty, 6)

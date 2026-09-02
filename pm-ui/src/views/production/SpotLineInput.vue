@@ -260,7 +260,7 @@
             </div>
 
             <div class="action-bar">
-              <button class="btn-save" :disabled="!canSave" @click="save">保存</button>
+              <button class="btn-save" :disabled="!canSave || saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
               <button class="btn-cancel" @click="cancel">キャンセル</button>
             </div>
             <div v-if="equipmentConflictError" class="equipment-conflict-error">{{ equipmentConflictError }}</div>
@@ -893,6 +893,7 @@ const canSave = computed(() => {
   if (requiresReason.value && !actionReason.value) return false
   return true
 })
+const saving = ref(false)
 
 const AVATAR_COLORS = ['#4e7cbf', '#7b5ea7', '#2e9688', '#c0714f', '#5e9e5e', '#c0954f', '#6a7fc0']
 const avatarColor = (code) => {
@@ -1025,7 +1026,7 @@ function onYesterdayToggle() {
 // 保存
 // ──────────────────────────────
 async function save() {
-  if (!canSave.value) return
+  if (!canSave.value || saving.value) return
   const item = selectedItem.value
   const targetWorkDate = String(workDateStr.value || '').trim()
   if (targetWorkDate !== planDateStr.value) {
@@ -1034,6 +1035,7 @@ async function save() {
     )
     if (!ok) return
   }
+  saving.value = true
   try {
     let lastData = null
     // 閉じるアクション（終了・中断・強制終了）はSTARTED/PAUSED状態の全設備に一括送信する（片方だけ外してENDするミス防止）
@@ -1141,6 +1143,8 @@ async function save() {
     } else {
       showToast(resolveApiErrorMessage(e, '保存に失敗しました'), 'error')
     }
+  } finally {
+    saving.value = false
   }
 }
 
