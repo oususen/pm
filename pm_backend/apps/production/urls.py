@@ -56,6 +56,7 @@ from production.views_laser import (
     LaserActualDetailUpdateView,
     LaserActualViewSet,
     LaserPatternViewSet,
+    LaserProcessingFreqPatternViewSet,
     LaserShiftRecordViewSet,
 )
 from production.views_laser_weekly_plan import (
@@ -105,6 +106,7 @@ router.register(r'line-gantt-plans', LineGanttPlanViewSet, basename='lineganttpl
 router.register(r'line-daily-schedule-settings', LineDailyScheduleSettingViewSet, basename='linedailyschedulesetting')
 router.register(r'line-default-schedule-settings', LineDefaultScheduleSettingViewSet, basename='linedefaultschedulesetting')
 router.register(r'auto-plan-aggregate-settings', AutoPlanAggregateSettingViewSet, basename='autoplanaggregatesetting')
+router.register(r'laser-processing-freq-patterns', LaserProcessingFreqPatternViewSet, basename='laserprocessingfreqpattern')
 router.register(r'laser-patterns', LaserPatternViewSet, basename='laserpattern')
 router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')

@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
 from .models_laser_pattern import LaserPattern
+from .models_laser_processing_freq import LaserProcessingFreqPattern
 from .services.laser_service import (
     build_laser_monthly_material_summary,
     delete_laser_actual,
@@ -19,14 +20,25 @@ from .services.laser_service import (
 from .serializers import (
     LaserActualSerializer,
     LaserPatternSerializer,
+    LaserProcessingFreqPatternSerializer,
     LaserShiftRecordSerializer,
 )
+
+
+class LaserProcessingFreqPatternViewSet(viewsets.ModelViewSet):
+    """レーザ加工頻度パターンViewSet"""
+
+    queryset = LaserProcessingFreqPattern.objects.all()
+    serializer_class = LaserProcessingFreqPatternSerializer
+    pagination_class = None
+    filter_backends = [OrderingFilter]
+    ordering = ['pattern_code']
 
 
 class LaserPatternViewSet(viewsets.ModelViewSet):
     """レーザパターンマスタ編集用ViewSet"""
 
-    queryset = LaserPattern.objects.all().select_related('material', 'equipment').prefetch_related(
+    queryset = LaserPattern.objects.all().select_related('material', 'equipment', 'processing_freq_pattern').prefetch_related(
         'component_items__component_product',
         'finished_items__finished_product',
     )

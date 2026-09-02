@@ -26,6 +26,19 @@ class LaserPattern(models.Model):
         default=0,
         verbose_name='加工時間(分/回)',
     )
+    processing_freq_pattern = models.ForeignKey(
+        'production.LaserProcessingFreqPattern',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='laser_patterns',
+        verbose_name='加工頻度パターン',
+    )
+    processing_start_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='加工頻度適用開始日',
+    )
     is_budget_target = models.BooleanField(default=False, verbose_name='材料予算用')
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')

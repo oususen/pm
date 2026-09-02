@@ -109,6 +109,17 @@
             <label>加工時間(分/回)</label>
             <input v-model="form.process_time_min" type="number" step="0.1" min="0" />
           </div>
+          <div class="field">
+            <label>加工頻度パターン</label>
+            <select v-model="form.processing_freq_pattern">
+              <option :value="null">未設定（毎日）</option>
+              <option v-for="fp in freqPatterns" :key="fp.id" :value="fp.id">{{ fp.pattern_code }} - {{ fp.pattern_name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>加工頻度適用開始日</label>
+            <input v-model="form.processing_start_date" type="date" :disabled="!selectedFreqRequiresStartDate" />
+          </div>
           <div class="field field-full">
             <label>材料予算用</label>
             <label class="budget-toggle">
@@ -226,6 +237,7 @@ const filterFinishedProductExists = ref('')
 const filterProcessTimeMin = ref('')
 const filterProcessTimeMax = ref('')
 const patterns = ref([])
+const freqPatterns = ref([])
 const allProductOptions = ref([])
 const materialProductOptions = ref([])
 const equipmentOptions = ref([])
@@ -236,6 +248,8 @@ const createEmptyForm = () => ({
   material: null,
   equipment: null,
   process_time_min: '0',
+  processing_freq_pattern: null,
+  processing_start_date: '',
   is_budget_target: false,
   component_items: [{ component_product: null, take_qty: '0' }],
   finished_items: [{ finished_product: null, units_per_shot: '0' }],
@@ -272,6 +286,12 @@ const isOneDecimal = (value) => {
   if (!Number.isFinite(num)) return false
   return Math.abs(num * 10 - Math.round(num * 10)) < 1e-9
 }
+
+const selectedFreqRequiresStartDate = computed(() => {
+  if (!form.value.processing_freq_pattern) return false
+  const fp = freqPatterns.value.find((x) => x.id === form.value.processing_freq_pattern)
+  return fp?.frequency_type === 'EVERY_N_DAYS'
+})
 
 const uniqueMaterialCodes = computed(() => {
   const codes = patterns.value.map((p) => String(p.material_code || '').trim()).filter(Boolean)
@@ -341,20 +361,21 @@ const equipmentLookupOptions = computed(() =>
 )
 
 const loadMasterOptions = async () => {
-  const [productsRes, equipmentsRes] = await Promise.all([
+  const [productsRes, equipmentsRes, freqRes] = await Promise.all([
     api.products.getAllProducts(),
     api.equipments.getEquipments({ page_size: 1000, is_active: true }),
+    api.laserProcessingFreqPatterns.getPatterns(),
   ])
   const products = normalizeList(productsRes?.data ?? productsRes)
   allProductOptions.value = products
   materialProductOptions.value = products.filter(
     (item) => item?.category === 'MATERIAL' && Boolean(item?.is_active),
   )
-  // レーザラインの設備のみ（line_name に「レーザ」を含む）
   const allEquipments = normalizeList(equipmentsRes?.data)
   equipmentOptions.value = allEquipments.filter((eq) =>
     String(eq.line_name || '').includes('レーザ'),
   )
+  freqPatterns.value = normalizeList(freqRes?.data)
 }
 
 const loadPatterns = async () => {
@@ -368,6 +389,8 @@ const hydrateForm = (pattern) => ({
   material: pattern.material ?? null,
   equipment: pattern.equipment ?? null,
   process_time_min: formatOneDecimalInput(pattern.process_time_min ?? 0),
+  processing_freq_pattern: pattern.processing_freq_pattern ?? null,
+  processing_start_date: pattern.processing_start_date || '',
   is_budget_target: Boolean(pattern.is_budget_target),
   component_items: [...(pattern.component_items || [])]
     .sort((a, b) =>
@@ -415,6 +438,8 @@ const buildPayload = () => ({
   material: form.value.material,
   equipment: form.value.equipment,
   process_time_min: Number(Number(form.value.process_time_min).toFixed(1)),
+  processing_freq_pattern: form.value.processing_freq_pattern || null,
+  processing_start_date: form.value.processing_start_date || null,
   is_budget_target: Boolean(form.value.is_budget_target),
   component_items: form.value.component_items.map((item) => ({
     component_product: item.component_product,

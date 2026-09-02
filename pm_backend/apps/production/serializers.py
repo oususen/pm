@@ -28,6 +28,7 @@ from .models_production_actual_reconcile import (
     ProductionActualReconcileReport,
     ProductionActualReconcileReportDetail,
 )
+from .models_laser_processing_freq import LaserProcessingFreqPattern
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_laser_weekly_plan import LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup
 from .models_laser_actual import LaserActual, LaserActualDetail
@@ -333,6 +334,13 @@ class LineGanttPlanSerializer(serializers.ModelSerializer):
         ]
 
 
+class LaserProcessingFreqPatternSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LaserProcessingFreqPattern
+        fields = ['id', 'pattern_code', 'pattern_name', 'frequency_type', 'day_of_week', 'interval_days', 'is_active', 'note']
+        read_only_fields = ['id']
+
+
 class LaserPatternComponentSerializer(serializers.ModelSerializer):
     component_product_code = serializers.CharField(source='component_product.product_code', read_only=True)
     component_product_name = serializers.CharField(source='component_product.product_name', read_only=True)
@@ -368,6 +376,7 @@ class LaserPatternSerializer(serializers.ModelSerializer):
     material_name = serializers.CharField(source='material.product_name', read_only=True)
     equipment_code = serializers.CharField(source='equipment.equipment_code', read_only=True)
     equipment_name = serializers.CharField(source='equipment.equipment_name', read_only=True)
+    processing_freq_pattern_name = serializers.CharField(source='processing_freq_pattern.pattern_name', read_only=True, default='')
     component_items = LaserPatternComponentSerializer(many=True)
     finished_items = LaserPatternFinishedProductSerializer(many=True)
 
@@ -383,6 +392,9 @@ class LaserPatternSerializer(serializers.ModelSerializer):
             'equipment_code',
             'equipment_name',
             'process_time_min',
+            'processing_freq_pattern',
+            'processing_freq_pattern_name',
+            'processing_start_date',
             'is_budget_target',
             'is_active',
             'component_items',
@@ -478,13 +490,14 @@ class LaserWeeklyPlanTargetSerializer(serializers.ModelSerializer):
     pattern_no = serializers.CharField(source='laser_pattern.pattern_no', read_only=True)
     finished_product_code = serializers.CharField(source='finished_product.product_code', read_only=True)
     finished_product_name = serializers.CharField(source='finished_product.product_name', read_only=True)
+    freq_pattern_name = serializers.CharField(source='laser_pattern.processing_freq_pattern.pattern_name', read_only=True, default='')
 
     class Meta:
         model = LaserWeeklyPlanTarget
         fields = [
             'id', 'downstream_line', 'downstream_line_name', 'product', 'product_code', 'product_name',
             'laser_pattern', 'pattern_no', 'finished_product', 'finished_product_code', 'finished_product_name',
-            'lead_time_days', 'quantity_source', 'sort_order', 'is_active',
+            'lead_time_days', 'quantity_source', 'sort_order', 'is_active', 'freq_pattern_name',
         ]
         read_only_fields = ['id']
 

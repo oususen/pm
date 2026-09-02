@@ -44,6 +44,14 @@
       <button
         type="button"
         class="laser-subtab-item"
+        :class="{ active: activeLaserTab === 'freq-pattern' }"
+        @click="activeLaserTab = 'freq-pattern'"
+      >
+        加工頻度パターン
+      </button>
+      <button
+        type="button"
+        class="laser-subtab-item"
         :class="{ active: activeLaserTab === 'tab3' }"
         @click="activeLaserTab = 'tab3'"
       >
@@ -909,6 +917,7 @@
       class="laser-editor-section"
     />
     <LaserWeeklyPlan v-else-if="activePlanTab === 'laser' && activeLaserTab === 'weekly-plan'" />
+    <LaserProcessingFreqEditor v-else-if="activePlanTab === 'laser' && activeLaserTab === 'freq-pattern'" />
     <div v-else-if="activePlanTab === 'spot' && activeSpotTab === 'excel'" class="laser-third-tab-panel">
       <div class="spot-excel-toolbar">
         <div class="field">
@@ -1469,6 +1478,7 @@ const dsSources = [
 import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 import LaserWeeklyPlan from './LaserWeeklyPlan.vue'
+import LaserProcessingFreqEditor from './LaserProcessingFreqEditor.vue'
 const router = useRouter()
 const selectedLine = ref('')
 const showAllLines = ref(false)

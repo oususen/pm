@@ -40,6 +40,7 @@ import { createLineBacklogAdjustmentsAPI } from './resources/lineBacklogAdjustme
 import { createNotificationsAPI } from './resources/notifications'
 import { createProductionPlanChangeLogsAPI } from './resources/productionPlanChangeLogs'
 import { createLaserPatternsAPI } from './resources/laserPatterns'
+import { createLaserProcessingFreqPatternsAPI } from './resources/laserProcessingFreqPatterns'
 import { createLaserActualsAPI } from './resources/laserActuals'
 import { createLaserShiftRecordsAPI } from './resources/laserShiftRecords'
 import { createLaserWeeklyPlansAPI } from './resources/laserWeeklyPlans'
@@ -196,6 +197,7 @@ export default {
   notifications: createNotificationsAPI(client),
   productionPlanChangeLogs: createProductionPlanChangeLogsAPI(client),
   laserPatterns: createLaserPatternsAPI(client),
+  laserProcessingFreqPatterns: createLaserProcessingFreqPatternsAPI(client),
   laserActuals: createLaserActualsAPI(client),
   laserShiftRecords: createLaserShiftRecordsAPI(client),
   laserWeeklyPlans: createLaserWeeklyPlansAPI(client),
