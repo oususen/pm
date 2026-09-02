@@ -29,6 +29,8 @@
             <th>仕入先コード</th>
             <th>仕入先名</th>
             <th>区分</th>
+            <th>担当者名</th>
+            <th>電話番号</th>
             <th>送信メールアドレス</th>
             <th>専用カレンダー</th>
             <th>操作</th>
@@ -39,6 +41,8 @@
             <td>{{ supplier.supplier_code }}</td>
             <td>{{ supplier.supplier_name }}</td>
             <td>{{ supplierTypeLabel(supplier.supplier_type) }}</td>
+            <td>{{ supplier.contact_person || '-' }}</td>
+            <td>{{ supplier.phone_number || '-' }}</td>
             <td>{{ supplier.order_email || '-' }}</td>
             <td>{{ getCalendarLabelBySupplier(supplier) }}</td>
             <td>
@@ -74,6 +78,14 @@
               <option value="purchase">購入</option>
               <option value="both">両方</option>
             </select>
+          </div>
+          <div class="form-group">
+            <label>担当者名</label>
+            <input v-model="formData.contact_person" :disabled="!canEdit" />
+          </div>
+          <div class="form-group">
+            <label>電話番号</label>
+            <input v-model="formData.phone_number" type="tel" :disabled="!canEdit" />
           </div>
           <div class="form-group">
             <label>送信メールアドレス</label>
@@ -119,6 +131,8 @@ const isEdit = ref(false)
 const formData = ref({
   supplier_code: '',
   supplier_name: '',
+  contact_person: '',
+  phone_number: '',
   order_email: '',
   calendar: null,
 })
@@ -194,6 +208,8 @@ const showNewDialog = () => {
     supplier_code: '',
     supplier_name: '',
     supplier_type: 'both',
+    contact_person: '',
+    phone_number: '',
     order_email: '',
     calendar: null,
   }
@@ -219,6 +235,8 @@ const saveSupplier = async () => {
     const payload = {
       ...formData.value,
       supplier_code: normalizedSupplierCode,
+      contact_person: (formData.value.contact_person || '').trim(),
+      phone_number: (formData.value.phone_number || '').trim(),
       order_email: (formData.value.order_email || '').trim(),
       calendar: formData.value.calendar || null,
     }

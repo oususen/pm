@@ -26,8 +26,8 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveMaterialInitialProgress(startDate, items) {
     return client.post('/laser-weekly-plans/material-initial-progress/', { start_date: startDate, items })
   },
-  exportMaterialOrderExcel(startDate, supplier) {
-    return client.get('/laser-weekly-plans/material-order-excel/', { params: { start_date: startDate, supplier }, responseType: 'blob' })
+  exportMaterialOrderExcel(planStartDate, supplier, startDate, endDate) {
+    return client.get('/laser-weekly-plans/material-order-excel/', { params: { plan_start_date: planStartDate, start_date: startDate, end_date: endDate, supplier }, responseType: 'blob' })
   },
   getTargets(params = {}) {
     return client.get('/laser-weekly-plan-targets/', { params })

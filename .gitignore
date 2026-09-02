@@ -90,7 +90,6 @@ pm_backend/firebase-service-account-*.json
 # excel files
 *.xls
 *.xlsx
-!材料注文書原紙(名成鋼機様).xlsx
 *.csv
 
 # PDF files

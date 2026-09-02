@@ -1,14 +1,14 @@
 from collections import defaultdict
 from io import BytesIO
-from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
-from django.conf import settings
 from django.db.models import Q
 from django.http import FileResponse
-from openpyxl import load_workbook
-from masters.models import Product
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from masters.models import Product, Supplier
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -19,6 +19,12 @@ from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
 from .serializers import LaserWeeklyMaterialGroupSerializer, LaserWeeklyPlanTargetSerializer
 from .services.recalc_start_date import _build_workday_helpers, _resolve_calendar_id
+
+
+MATERIAL_ORDER_SUPPLIER_CODES = {
+    LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI: '000048',
+    LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO: '000131',
+}
 
 
 class LaserWeeklyPlanTargetViewSet(viewsets.ModelViewSet):
@@ -105,38 +111,131 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='material-order-excel')
     def material_order_excel(self, request):
         try:
-            plan_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+            plan_start_date = datetime.strptime(request.query_params['plan_start_date'], '%Y-%m-%d').date()
+            export_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+            export_end_date = datetime.strptime(request.query_params['end_date'], '%Y-%m-%d').date()
             supplier = request.query_params['supplier']
-            supplier_name = dict(LaserWeeklyMaterialOrderProgress.SUPPLIER_CHOICES)[supplier]
+            supplier_code = MATERIAL_ORDER_SUPPLIER_CODES[supplier]
+            if export_end_date < export_start_date:
+                raise ValueError
         except (KeyError, ValueError):
             return Response({'detail': '出力条件が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
-        orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, supplier=supplier, order_lots__gt=0).select_related('material').order_by('delivery_date', 'material__product_code'))
+        try:
+            order_supplier = Supplier.objects.get(supplier_code=supplier_code)
+        except Supplier.DoesNotExist:
+            return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        supplier_name = order_supplier.supplier_name
+        orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, supplier=supplier, order_lots__gt=0, delivery_date__range=(export_start_date, export_end_date)).select_related('material').order_by('delivery_date', 'material__product_code'))
         if not orders:
             return Response({'detail': '出力対象の発注がありません。'}, status=status.HTTP_400_BAD_REQUEST)
-        template = Path(settings.BASE_DIR).parent / '材料注文書原紙(名成鋼機様).xlsx'
-        if not template.exists():
-            return Response({'detail': '材料注文書原紙が見つかりません。'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        workbook = load_workbook(template)
-        worksheet = workbook['Sheet1'] if 'Sheet1' in workbook.sheetnames else workbook.active
-        for name in workbook.sheetnames[:]:
-            if name != worksheet.title:
-                del workbook[name]
+        delivery_dates = sorted({order.delivery_date for order in orders})
+        by_material = defaultdict(list)
+        for order in orders:
+            by_material[order.material_id].append(order)
+
+        workbook = Workbook()
+        worksheet = workbook.active
         worksheet.title = supplier_name
-        worksheet['J4'] = datetime.now()
-        worksheet['D5'] = f'  {supplier_name} 御中  '
-        for row in range(13, 73):
-            for col in range(2, 12):
-                worksheet.cell(row=row, column=col).value = None
-        for index, order in enumerate(orders, 1):
-            row = 12 + index
-            material = order.material
-            worksheet.cell(row=row, column=2, value=index)
-            worksheet.cell(row=row, column=3, value=material.product_code)
-            worksheet.cell(row=row, column=4, value=material.product_name)
-            worksheet.cell(row=row, column=5, value='x'.join(str(v) for v in (material.size_thickness, material.size_width, material.size_length) if v is not None))
-            worksheet.cell(row=row, column=8, value=f'{order.lot_multiple}枚')
-            worksheet.cell(row=row, column=9, value=order.order_lots)
-            worksheet.cell(row=row, column=10, value=order.delivery_date.strftime('%-m/%-d'))
+        worksheet.sheet_view.showGridLines = False
+        last_column = 6 + len(delivery_dates)
+        thin = Side('thin')
+        medium = Side('medium')
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        def set_range_outline(min_row, max_row, min_column, max_column, left_side=thin, right_side=thin):
+            """結合セルを含む見出し範囲の外周罫線を欠けずに設定する。"""
+            for row in range(min_row, max_row + 1):
+                for column in range(min_column, max_column + 1):
+                    cell = worksheet.cell(row=row, column=column)
+                    cell.border = Border(
+                        left=left_side if column == min_column else None,
+                        right=right_side if column == max_column else None,
+                        top=thin if row == min_row else None,
+                        bottom=thin if row == max_row else None,
+                    )
+        worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+        title = worksheet.cell(row=1, column=1, value='材 料 注 文 書')
+        title.font = Font(name='MS PMincho', bold=True, size=20)
+        title.alignment = Alignment(horizontal='center', vertical='center')
+        worksheet.merge_cells(start_row=2, start_column=max(1, last_column - 1), end_row=2, end_column=last_column)
+        issue_date = worksheet.cell(row=2, column=max(1, last_column - 1), value=f'{datetime.now():%Y/%m/%d}')
+        issue_date.font = Font(name='MS PMincho', size=12)
+        issue_date.alignment = Alignment(horizontal='right')
+        worksheet.merge_cells(start_row=3, start_column=1, end_row=3, end_column=3)
+        recipient = worksheet.cell(row=3, column=1, value=f'{supplier_name} 御中')
+        recipient.font = Font(name='MS PMincho', bold=True, size=14)
+        recipient.alignment = Alignment(horizontal='center')
+        worksheet.merge_cells(start_row=4, start_column=1, end_row=4, end_column=3)
+        contact_details = []
+        if order_supplier.contact_person:
+            contact_details.append(f'{order_supplier.contact_person} 様')
+        if order_supplier.phone_number:
+            contact_details.append(f'TEL: {order_supplier.phone_number}')
+        contact = worksheet.cell(row=4, column=1, value='  '.join(contact_details))
+        contact.font = Font(name='MS PMincho', size=11)
+        contact.alignment = Alignment(horizontal='center')
+        approval_start = max(7, last_column - 2)
+        for column, label in enumerate(['承認', '確認', '作成'], approval_start):
+            cell = worksheet.cell(row=3, column=column, value=label)
+            cell.font = Font(name='MS PMincho', size=10)
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell = worksheet.cell(row=4, column=column, value='')
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        worksheet.merge_cells(start_row=5, start_column=approval_start, end_row=5, end_column=approval_start + 2)
+        company_name = worksheet.cell(row=5, column=approval_start, value='ダイソウ工業株式会社')
+        company_name.font = Font(name='MS PMincho', size=11)
+        company_name.alignment = Alignment(horizontal='center', vertical='center')
+
+        headers = ['№', '発注コード', '材質', '材寸', '発注単位', '発注量\n（合計）']
+        header_fill = PatternFill('solid', fgColor='FFFFFF')
+        for column, header in enumerate(headers, 1):
+            worksheet.merge_cells(start_row=6, start_column=column, end_row=7, end_column=column)
+            cell = worksheet.cell(row=6, column=column, value=header)
+            cell.font = Font(name='MS PMincho', bold=True, size=12)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            set_range_outline(6, 7, column, column, right_side=medium if column == 6 else thin)
+        worksheet.merge_cells(start_row=6, start_column=7, end_row=6, end_column=last_column)
+        delivery_header = worksheet.cell(row=6, column=7, value='納期')
+        delivery_header.font = Font(name='MS PMincho', bold=True, size=12)
+        delivery_header.fill = header_fill
+        delivery_header.alignment = Alignment(horizontal='center', vertical='center')
+        set_range_outline(6, 6, 7, last_column, left_side=medium)
+        for column, delivery_date in enumerate(delivery_dates, 7):
+            cell = worksheet.cell(row=7, column=column, value=f'{delivery_date.month}/{delivery_date.day}')
+            cell.font = Font(name='MS PMincho', bold=True, size=10)
+            cell.fill = header_fill
+            cell.border = Border(left=medium if column == 7 else thin, right=thin, top=thin, bottom=thin)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        for index, material_orders in enumerate(sorted(by_material.values(), key=lambda items: items[0].material.product_code), 1):
+            material = material_orders[0].material
+            parts = material.product_code.split(maxsplit=1)
+            lots_by_date = {order.delivery_date: order.order_lots for order in material_orders}
+            values = [index, 'SO1', parts[0], parts[1] if len(parts) > 1 else '', f'{material_orders[0].lot_multiple}枚', sum(order.order_lots for order in material_orders)]
+            values += [lots_by_date.get(day, '') for day in delivery_dates]
+            for column, value in enumerate(values, 1):
+                cell = worksheet.cell(row=7 + index, column=column, value=value)
+                cell.font = Font(name='MS PMincho', size=11)
+                cell.border = Border(
+                    left=medium if column == 7 else thin,
+                    right=medium if column == 6 else thin,
+                    top=thin,
+                    bottom=thin,
+                )
+                cell.alignment = Alignment(horizontal='center' if column != 4 else 'left', vertical='center')
+            worksheet.row_dimensions[7 + index].height = 30
+        widths = [6, 12, 14, 24, 12, 10] + [9] * len(delivery_dates)
+        for column, width in enumerate(widths, 1):
+            worksheet.column_dimensions[get_column_letter(column)].width = width
+        worksheet.row_dimensions[1].height = 32
+        worksheet.row_dimensions[3].height = 24
+        worksheet.row_dimensions[4].height = 28
+        worksheet.row_dimensions[6].height = 24
+        worksheet.row_dimensions[7].height = 22
+        worksheet.freeze_panes = 'A8'
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
