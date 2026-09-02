@@ -34,6 +34,15 @@ class LaserProcessingFreqPatternViewSet(viewsets.ModelViewSet):
     filter_backends = [OrderingFilter]
     ordering = ['pattern_code']
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if LaserPattern.objects.filter(processing_freq_pattern=instance).exists():
+            return Response(
+                {'detail': 'このパターンは使用中のため削除できません。先にレーザパターンの加工頻度設定を解除してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
 
 class LaserPatternViewSet(viewsets.ModelViewSet):
     """レーザパターンマスタ編集用ViewSet"""

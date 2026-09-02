@@ -106,7 +106,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             )
         return Response({'saved_count': len(items)})
 
-    def _calc_freq_initial_sheets(self, pattern_row, automatic_daily, dates):
+    def _calc_freq_initial_sheets(self, pattern_row, automatic_daily, dates, is_workday_fn=None):
         """加工頻度に基づいてmanual_sheetsの初期値を計算する。"""
         freq_type = pattern_row.get('freq_type', 'DAILY')
         if freq_type == 'DAILY':
@@ -115,11 +115,16 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         sorted_days = [d.isoformat() for d in dates]
         result = {day: 0 for day in sorted_days}
 
+        def _is_biz(d):
+            return is_workday_fn(d) if is_workday_fn else d.weekday() < 5
+
         if freq_type == 'WEEKLY':
             dow = pattern_row.get('freq_day_of_week')
             if dow is None:
                 return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
             processing_days = [d for d in sorted_days if datetime.strptime(d, '%Y-%m-%d').date().weekday() == dow]
+            if not processing_days:
+                return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
             for i, proc_day in enumerate(processing_days):
                 if i + 1 < len(processing_days):
                     next_proc = processing_days[i + 1]
@@ -134,17 +139,26 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             start_date = pattern_row.get('freq_start_date')
             if not start_date:
                 return {day: daily['automatic_sheets'] for day, daily in automatic_daily.items()}
+            # 開始日より前の日は自回数をそのまま使用（毎日加工扱い）
+            for day_str in sorted_days:
+                day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
+                if day_date < start_date:
+                    result[day_str] = automatic_daily.get(day_str, {}).get('automatic_sheets', 0)
+            # 開始日から表示開始日までの営業日数をカウント（カレンダー考慮）
             biz_days_from_start = 0
             scan_date = start_date
             first_day = dates[0] if dates else None
             if first_day and scan_date < first_day:
                 while scan_date < first_day:
                     scan_date += timedelta(days=1)
-                    if scan_date.weekday() < 5:
+                    if _is_biz(scan_date):
                         biz_days_from_start += 1
+            # 加工日の特定（開始日以降のみ）
             processing_indices = set()
             for idx, day_str in enumerate(sorted_days):
                 day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
+                if day_date < start_date:
+                    continue
                 if day_date == start_date or (biz_days_from_start % interval == 0):
                     processing_indices.add(idx)
                 biz_days_from_start += 1
@@ -282,6 +296,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     'freq_day_of_week': freq.day_of_week if freq else None,
                     'freq_interval_days': freq.interval_days if freq else None,
                     'freq_start_date': target.laser_pattern.processing_start_date,
+                    'calendar_id': calendar_id,
                     'product_codes': set(),
                     'downstream_line_names': set(),
                     'take_qtys': set(),
@@ -318,8 +333,10 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 'order_lot_multiple': pattern_row.get('order_lot_multiple', 1),
                 'daily': defaultdict(int),
             })
+            cal_id = pattern_row.get('calendar_id')
+            is_workday_fn = workday_helpers[cal_id][0] if cal_id in workday_helpers else None
             freq_initial = self._calc_freq_initial_sheets(
-                pattern_row, automatic_daily, dates,
+                pattern_row, automatic_daily, dates, is_workday_fn,
             )
             has_any_saved = any(
                 (pattern_row['laser_pattern_id'], d) in pattern_manual_map for d in dates
