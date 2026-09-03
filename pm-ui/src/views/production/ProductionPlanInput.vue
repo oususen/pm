@@ -2638,17 +2638,44 @@ const goForward = () => {
 
 const normalizeExcelDate = (value) => {
   if (!value) return ''
+  const toIsoDate = (year, month, day) => {
+    const y = Number(year)
+    const m = Number(month)
+    const d = Number(day)
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return ''
+    const dt = new Date(y, m - 1, d)
+    if (
+      Number.isNaN(dt.getTime()) ||
+      dt.getFullYear() !== y ||
+      dt.getMonth() !== m - 1 ||
+      dt.getDate() !== d
+    ) {
+      return ''
+    }
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  }
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getFullYear()
-    const m = String(value.getMonth() + 1).padStart(2, '0')
-    const d = String(value.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
+    return toIsoDate(value.getFullYear(), value.getMonth() + 1, value.getDate())
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value)
+    if (parsed?.y && parsed?.m && parsed?.d) {
+      return toIsoDate(parsed.y, parsed.m, parsed.d)
+    }
   }
   const s = String(value).trim()
   if (!s) return ''
-  const matched = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/)
-  if (!matched) return ''
-  return `${matched[1]}-${String(matched[2]).padStart(2, '0')}-${String(matched[3]).padStart(2, '0')}`
+  const isoMatched = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/)
+  if (isoMatched) {
+    return toIsoDate(isoMatched[1], isoMatched[2], isoMatched[3])
+  }
+  const slashMatched = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/)
+  if (slashMatched) {
+    const rawYear = Number(slashMatched[3])
+    const year = slashMatched[3].length === 2 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear
+    return toIsoDate(year, slashMatched[1], slashMatched[2])
+  }
+  return ''
 }
 
 const parseSpotExcelFile = async (file) => {

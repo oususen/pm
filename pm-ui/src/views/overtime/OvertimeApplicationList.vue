@@ -391,7 +391,7 @@ async function fetchList() {
   loading.value = true
   hasSearched.value = true
   try {
-    const res = await api.overtime.getApplications()
+    const res = await api.overtime.getApplications(buildQueryParams())
     applications.value = res.data?.results || res.data || []
   } catch (e) {
     console.error(e)
@@ -440,6 +440,7 @@ async function downloadPdf() {
     const ids = filteredApplications.value.map(a => a.id).join(',')
     if (!ids) { alert(t('overtimeList.error.pdfEmpty')); return }
     const params = {
+      ...buildQueryParams(),
       ids,
       team_name: filterTeam.value || t('overtimeList.allTeams'),
       group_name: filterGroup.value || t('overtimeList.allGroups'),
@@ -468,6 +469,17 @@ async function downloadPdf() {
   } catch (e) {
     alert(t('overtimeList.error.pdfFailed') + (e.response?.data?.detail || e.message))
   }
+}
+
+function buildQueryParams() {
+  const params = {}
+  if (filters.value.work_date__gte) params.work_date__gte = filters.value.work_date__gte
+  if (filters.value.work_date__lte) params.work_date__lte = filters.value.work_date__lte
+  if (filters.value.status) params.status = filters.value.status
+  if (filterSection.value) params.section_name = filterSection.value
+  if (filterTeam.value) params.team_name = filterTeam.value
+  if (filterGroup.value) params.group_name = filterGroup.value
+  return params
 }
 
 async function loadOrganizationFilters() {
