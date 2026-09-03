@@ -359,6 +359,18 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             )
         return Response({'saved_count': len(quantities)})
 
+    @action(detail=False, methods=['post'], url_path='pattern-manual-reset')
+    def reset_pattern_manual_quantities(self, request):
+        try:
+            start_date = datetime.strptime(request.data['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(request.data['end_date'], '%Y-%m-%d').date()
+        except (KeyError, ValueError):
+            return Response({'detail': 'start_date, end_date (YYYY-MM-DD) が必要です'}, status=status.HTTP_400_BAD_REQUEST)
+        if end_date < start_date:
+            return Response({'detail': 'end_date は start_date 以降にしてください'}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = LaserWeeklyPatternManualQuantity.objects.filter(plan_date__range=(start_date, end_date)).delete()
+        return Response({'deleted_count': deleted})
+
     @action(detail=False, methods=['post'], url_path='save-initial-progress')
     def save_initial_progress(self, request):
         items = request.data.get('items', [])
@@ -378,11 +390,10 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             )
         return Response({'saved_count': len(items)})
 
-    def _calc_freq_initial_sheets(self, pattern_row, automatic_daily, dates, is_workday_fn=None):
-        """加工頻度に基づいてmanual_sheetsの初期値を計算する。"""
+    def _calc_freq_sheets(self, pattern_row, automatic_daily, dates, is_workday_fn=None, field='manual_sheets'):
         freq_type = pattern_row.get('freq_type', 'DAILY')
         if freq_type == 'DAILY':
-            return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
+            return {day: daily[field] for day, daily in automatic_daily.items()}
 
         sorted_days = [d.isoformat() for d in dates]
         result = {day: 0 for day in sorted_days}
@@ -393,30 +404,28 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         if freq_type == 'WEEKLY':
             dow = pattern_row.get('freq_day_of_week')
             if dow is None:
-                return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
+                return {day: daily[field] for day, daily in automatic_daily.items()}
             processing_days = [d for d in sorted_days if datetime.strptime(d, '%Y-%m-%d').date().weekday() == dow]
             if not processing_days:
-                return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
+                return {day: daily[field] for day, daily in automatic_daily.items()}
             for i, proc_day in enumerate(processing_days):
                 if i + 1 < len(processing_days):
                     next_proc = processing_days[i + 1]
                     covered = [d for d in sorted_days if proc_day <= d < next_proc]
                 else:
                     covered = [d for d in sorted_days if d >= proc_day]
-                total = sum(automatic_daily.get(d, {}).get('manual_sheets', 0) for d in covered)
+                total = sum(automatic_daily.get(d, {}).get(field, 0) for d in covered)
                 result[proc_day] = total
 
         elif freq_type == 'EVERY_N_DAYS':
             interval = pattern_row.get('freq_interval_days') or 2
             start_date = pattern_row.get('freq_start_date')
             if not start_date:
-                return {day: daily['manual_sheets'] for day, daily in automatic_daily.items()}
-            # 開始日より前の日は自回数をそのまま使用（毎日加工扱い）
+                return {day: daily[field] for day, daily in automatic_daily.items()}
             for day_str in sorted_days:
                 day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
                 if day_date < start_date:
-                    result[day_str] = automatic_daily.get(day_str, {}).get('manual_sheets', 0)
-            # 開始日から表示開始日までの営業日数をカウント（カレンダー考慮）
+                    result[day_str] = automatic_daily.get(day_str, {}).get(field, 0)
             biz_days_from_start = 0
             scan_date = start_date
             first_day = dates[0] if dates else None
@@ -425,7 +434,6 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     scan_date += timedelta(days=1)
                     if _is_biz(scan_date):
                         biz_days_from_start += 1
-            # 加工日の特定（開始日以降のみ）
             processing_indices = set()
             for idx, day_str in enumerate(sorted_days):
                 day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
@@ -441,7 +449,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 else:
                     next_idx = len(sorted_days)
                 covered = sorted_days[idx:next_idx]
-                total = sum(automatic_daily.get(d, {}).get('manual_sheets', 0) for d in covered)
+                total = sum(automatic_daily.get(d, {}).get(field, 0) for d in covered)
                 result[sorted_days[idx]] = total
 
         return result
@@ -608,21 +616,20 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             })
             cal_id = pattern_row.get('calendar_id')
             is_workday_fn = workday_helpers[cal_id][0] if cal_id in workday_helpers else None
-            freq_initial = self._calc_freq_initial_sheets(
-                pattern_row, automatic_daily, dates, is_workday_fn,
-            )
-            has_any_saved = any(
-                (pattern_row['laser_pattern_id'], d) in pattern_manual_map for d in dates
+            freq_auto = self._calc_freq_sheets(
+                pattern_row, automatic_daily, dates, is_workday_fn, field='automatic_sheets',
             )
             for day, daily in automatic_daily.items():
                 day_date = datetime.strptime(day, '%Y-%m-%d').date()
-                if has_any_saved:
-                    manual_sheets = pattern_manual_map.get((pattern_row['laser_pattern_id'], day_date), daily['manual_sheets'])
+                automatic_sheets = freq_auto.get(day, daily['automatic_sheets'])
+                saved = pattern_manual_map.get((pattern_row['laser_pattern_id'], day_date))
+                if saved is not None:
+                    manual_sheets = saved
                 else:
-                    manual_sheets = freq_initial.get(day, daily['manual_sheets'])
+                    manual_sheets = int(Decimal(str(automatic_sheets)).to_integral_value(rounding=ROUND_CEILING)) if automatic_sheets > 0 else 0
                 pattern_row['daily'][day] = {
                     'demand_qty': str(daily['demand_qty']),
-                    'automatic_sheets': daily['automatic_sheets'],
+                    'automatic_sheets': automatic_sheets,
                     'manual_sheets': manual_sheets,
                 }
                 totals[(pattern_row['laser_pattern_id'], day, pattern_row['machine'])] += manual_sheets

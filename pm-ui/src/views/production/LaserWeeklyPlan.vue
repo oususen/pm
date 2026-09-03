@@ -12,6 +12,7 @@
       ><button class="btn" @click="saveManualQuantities" :disabled="saving">
         {{ saving ? "保存中..." : "手回数を保存" }}</button
       ><button class="btn" @click="openPrintDialog">印刷</button
+      ><button class="btn" @click="openResetDialog">手数リセット</button
       ><button class="btn primary" @click="confirmLoadPlan">再計算</button>
     </div>
     <div
@@ -38,6 +39,24 @@
           ><button class="btn" @click="showPrintDialog = false">
             キャンセル
           </button>
+        </div>
+      </section>
+    </div>
+    <div
+      v-if="showResetDialog"
+      class="print-modal"
+      @click.self="showResetDialog = false"
+    >
+      <section class="print-dialog">
+        <h3>手回数をリセット</h3>
+        <p style="font-size:12px;color:#666;margin:0 0 8px">指定期間の保存済み手回数を削除し、自数と同じ初期値に戻します。</p>
+        <div class="print-date-fields">
+          <label>開始日<input v-model="resetStartDate" type="date" /></label
+          ><label>終了日<input v-model="resetEndDate" type="date" /></label>
+        </div>
+        <div class="print-actions">
+          <button class="btn" style="background:#c53030;color:#fff" @click="executeReset">リセット</button
+          ><button class="btn" @click="showResetDialog = false">キャンセル</button>
         </div>
       </section>
     </div>
@@ -683,9 +702,10 @@ const monday = (value = new Date()) => {
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return iso(d);
 };
-const tomorrow = () => {
+const nextBusinessDay = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   return iso(d);
 };
 const showDetail = ref(false),
@@ -706,9 +726,12 @@ const startDate = ref(monday()),
   message = ref(""),
   showSettings = ref(false),
   showPrintDialog = ref(false),
-  printStartDate = ref(tomorrow()),
-  printEndDate = ref(tomorrow()),
+  printStartDate = ref(nextBusinessDay()),
+  printEndDate = ref(nextBusinessDay()),
   printOrientation = ref("landscape"),
+  showResetDialog = ref(false),
+  resetStartDate = ref(""),
+  resetEndDate = ref(""),
   changedManualQuantities = ref({});
 const fixedColumns = [
   "後工程",
@@ -983,8 +1006,29 @@ const gridColumnCount = computed(
   () =>
     fixedColumns.length + days.value.length * 3 + weekGroups.value.length * 3,
 );
+const openResetDialog = () => {
+  const d = days.value;
+  resetStartDate.value = d[0] || startDate.value;
+  resetEndDate.value = d[d.length - 1] || startDate.value;
+  showResetDialog.value = true;
+};
+const executeReset = async () => {
+  if (!resetStartDate.value || !resetEndDate.value || resetEndDate.value < resetStartDate.value) {
+    message.value = "期間を正しく指定してください。";
+    return;
+  }
+  if (!confirm(`${resetStartDate.value} ～ ${resetEndDate.value} の手回数をリセットしますか？`)) return;
+  try {
+    const { data } = await api.laserWeeklyPlans.resetPatternManualQuantities(resetStartDate.value, resetEndDate.value);
+    showResetDialog.value = false;
+    await loadPlan();
+    message.value = `${data.deleted_count}件の手回数をリセットしました。`;
+  } catch (e) {
+    message.value = e.response?.data?.detail || "リセットに失敗しました。";
+  }
+};
 const openPrintDialog = () => {
-  const date = tomorrow();
+  const date = nextBusinessDay();
   printStartDate.value = date;
   printEndDate.value = date;
   showPrintDialog.value = true;
@@ -1023,7 +1067,11 @@ const printSummary = async () => {
       end_date: printEndDate.value,
     });
     const printDays = data.dates || [];
-    const patternsForPrint = data.pattern_rows || [];
+    const patternsForPrint = (data.pattern_rows || []).sort(
+      (a, b) =>
+        a.downstream_line_names.join(" ").localeCompare(b.downstream_line_names.join(" "), "ja") ||
+        a.representative_product_code.localeCompare(b.representative_product_code, "ja", { numeric: true }),
+    );
     const machineHours = (day, machine) =>
       patternsForPrint
         .filter((pattern) => pattern.machine === machine)
@@ -1038,19 +1086,23 @@ const printSummary = async () => {
       printDays
         .map((day) => {
           const daily = pattern.daily[day] || {};
-          return `<td>${printNumber(daily.demand_qty)}</td><td>${printNumber(daily.automatic_sheets, autoDigits(daily.automatic_sheets))}</td><td>${printNumber(daily.manual_sheets)}</td>`;
+          const ms = Number(daily.manual_sheets || 0);
+          return `<td>${printNumber(daily.demand_qty)}</td><td>${ms ? printNumber(daily.automatic_sheets, autoDigits(daily.automatic_sheets)) : ""}</td><td>${ms ? printNumber(ms) : ""}</td>`;
         })
         .join("");
     const rowsHtml =
       patternsForPrint
         .map(
-          (pattern) =>
-            `<tr><td>${escapeHtml(pattern.downstream_line_names.join(" / "))}</td><td>${printNumber(pattern.thickness, 1)}</td><td>${escapeHtml(pattern.representative_product_code)}</td><td>${escapeHtml(pattern.pattern_no)}</td><td>${pattern.machine === "TK" ? "1号" : "2号"}</td>${dailyCells(pattern)}</tr>`,
+          (pattern, i) => {
+            const prev = patternsForPrint[i - 1];
+            const border = prev && prev.representative_product_code !== pattern.representative_product_code ? ' class="group-border"' : '';
+            return `<tr${border}><td>${escapeHtml(pattern.downstream_line_names.join(" / "))}</td><td>${printNumber(pattern.thickness, 1)}</td><td>${escapeHtml(pattern.representative_product_code)}</td><td>${escapeHtml(pattern.pattern_no)}</td><td>${pattern.machine === "TK" ? "1号" : "2号"}</td>${dailyCells(pattern)}</tr>`;
+          },
         )
         .join("") ||
       `<tr><td colspan="${5 + printDays.length * 3}">対象設定を追加してください。</td></tr>`;
     printWindow.document.write(
-      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>レーザ加工計画（パターン別合計）</title><style>@page{size:${printOrientation.value};margin:10mm}body{font-family:Meiryo,sans-serif;color:#111827}h1{font-size:16px;margin:0 0 5px}.period{font-size:12px;margin:0 0 10px}table{border-collapse:collapse;font-size:9px;table-layout:fixed}th,td{border:1px solid #94a3b8;padding:3px;white-space:nowrap;text-align:right;overflow:hidden}th{background:#e2e8f0}col.c-line{width:30px}col.c-thick{width:8px}col.c-prod{width:35px}col.c-pno{width:18px}col.c-machine{width:8px}col.c-val{width:8px}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:left}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><h1>レーザ加工計画（パターン別合計）</h1><p class="period">期間: ${escapeHtml(printStartDate.value)} ～ ${escapeHtml(printEndDate.value)}</p><table><colgroup><col class="c-line"/><col class="c-thick"/><col class="c-prod"/><col class="c-pno"/><col class="c-machine"/>${printDays.map(() => '<col class="c-val"/><col class="c-val"/><col class="c-val"/>').join("")}</colgroup><thead><tr><th rowspan="3">後工程</th><th rowspan="3">板厚</th><th rowspan="3">製品番号</th><th rowspan="3">P_№</th><th rowspan="3">設備</th>${printDays.map((day) => `<th colspan="3">${escapeHtml(day.slice(5))}</th>`).join("")}</tr><tr>${printDays.map((day) => `<th colspan="3">1号 ${printNumber(machineHours(day, "TK"), 2)}h / 2号 ${printNumber(machineHours(day, "AJ"), 2)}h</th>`).join("")}</tr><tr>${printDays.map(() => "<th>需要</th><th>自数</th><th>手数</th>").join("")}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`,
+      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>レーザ加工計画（パターン別合計）</title><style>@page{size:${printOrientation.value};margin:10mm}body{font-family:Meiryo,sans-serif;color:#111827}h1{font-size:16px;margin:0 0 5px}.period{font-size:12px;margin:0 0 10px}table{border-collapse:collapse;font-size:9px;table-layout:fixed}th,td{border:1px solid #94a3b8;padding:3px;white-space:nowrap;text-align:right;overflow:hidden}th{background:#e2e8f0}col.c-line{width:30px}col.c-thick{width:8px}col.c-prod{width:35px}col.c-pno{width:18px}col.c-machine{width:8px}col.c-val{width:8px}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:left}tr.group-border>td{border-top:2px solid #333}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><h1>レーザ加工計画（パターン別合計）</h1><p class="period">期間: ${escapeHtml(printStartDate.value)} ～ ${escapeHtml(printEndDate.value)}</p><table><colgroup><col class="c-line"/><col class="c-thick"/><col class="c-prod"/><col class="c-pno"/><col class="c-machine"/>${printDays.map(() => '<col class="c-val"/><col class="c-val"/><col class="c-val"/>').join("")}</colgroup><thead><tr><th rowspan="3">後工程</th><th rowspan="3">板厚</th><th rowspan="3">製品番号</th><th rowspan="3">P_№</th><th rowspan="3">設備</th>${printDays.map((day) => `<th colspan="3">${escapeHtml(day.slice(5))}</th>`).join("")}</tr><tr>${printDays.map((day) => `<th colspan="3">1号 ${printNumber(machineHours(day, "TK"), 2)}h / 2号 ${printNumber(machineHours(day, "AJ"), 2)}h</th>`).join("")}</tr><tr>${printDays.map(() => "<th>需要</th><th>自数</th><th>手数</th>").join("")}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`,
     );
     printWindow.document.close();
     printWindow.focus();
