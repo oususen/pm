@@ -139,7 +139,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -204,9 +204,34 @@ function scopeUsersForStats(userList) {
   ))
 }
 
-const teamOptions = computed(() => [...new Set(rows.value.map(r => r.team).filter(Boolean))].sort())
-const groupOptions = computed(() => [...new Set(rows.value.map(r => r.group).filter(Boolean))].sort())
-const nameOptions = computed(() => [...new Set(rows.value.map(r => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja')))
+const teamOptions = computed(() =>
+  [...new Set(allUsers.value.map(user => user.team).filter(Boolean))].sort()
+)
+const usersForTeam = computed(() =>
+  filterTeam.value
+    ? allUsers.value.filter(user => user.team === filterTeam.value)
+    : allUsers.value
+)
+const groupOptions = computed(() =>
+  [...new Set(usersForTeam.value.map(user => user.group).filter(Boolean))].sort()
+)
+const nameOptions = computed(() =>
+  [...new Set(
+    usersForTeam.value
+      .filter(user => !filterGroup.value || user.group === filterGroup.value)
+      .map(user => user.name)
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, 'ja'))
+)
+
+watch(filterTeam, () => {
+  filterGroup.value = ''
+  filterName.value = ''
+})
+
+watch(filterGroup, () => {
+  filterName.value = ''
+})
 
 const userMetaByName = computed(() => {
   const map = new Map()
@@ -551,19 +576,23 @@ async function loadProductionMetrics() {
   unitPriceByCode.value = codePriceMap
 }
 
+async function loadUsers() {
+  const usersRes = await api.accounts.getUsers({ page_size: 1000, is_active: true })
+  const rawUsers = usersRes.data?.results ?? usersRes.data ?? []
+  const userList = scopeUsersForStats(rawUsers)
+  allUsers.value = userList.map((u) => ({
+    id: u.id,
+    name: `${u.last_name} ${u.first_name}`.trim() || u.username,
+    team: u.profile?.team_name || '',
+    group: u.profile?.unit_name || '',
+  }))
+}
+
 async function load() {
   loading.value = true
   rows.value = []
   try {
-    const usersRes = await api.accounts.getUsers({ page_size: 1000, is_active: true })
-    const rawUsers = usersRes.data?.results ?? usersRes.data ?? []
-    const userList = scopeUsersForStats(rawUsers)
-    allUsers.value = userList.map((u) => ({
-      id: u.id,
-      name: `${u.last_name} ${u.first_name}`.trim() || u.username,
-      team: u.profile?.team_name || '',
-      group: u.profile?.unit_name || '',
-    }))
+    if (!allUsers.value.length) await loadUsers()
 
     const res = await api.overtime.getApplications({ work_date__gte: dateFrom.value, work_date__lte: dateTo.value, page_size: 1000 })
     const apps = res.data?.results ?? res.data ?? []
@@ -688,7 +717,7 @@ function exportExcel() {
   XLSX.writeFile(wb, filename)
 }
 
-onMounted(load)
+onMounted(loadUsers)
 </script>
 
 <style scoped>
