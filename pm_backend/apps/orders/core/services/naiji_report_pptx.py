@@ -192,10 +192,9 @@ def _build_slide1(prs, data):
     _text(slide, 1.0, 2.8, 11.0, 0.5, data['customer_name'], size=20, color=WHITE)
 
     stats = (
-        f"内示データ: {data['snapshot_count']}回分 "
-        f"({_fmt_ym(data['first_snapshot_date'])}〜{_fmt_ym(data['last_snapshot_date'])})  |  "
-        f"確定注文: {_fmt(data['firm_due_min'])}〜{_fmt(data['firm_due_max'])}納期/品番 "
+        f"確定注文（分析対象）: {_fmt(data['firm_due_min'])}〜{_fmt(data['firm_due_max'])}納期/品番 "
         f"({_fmt_ym(data['first_firm_date'])}〜{_fmt_ym(data['last_firm_date'])})"
+        f"  |  内示データ: {data['snapshot_count']}回分"
     )
     _text(slide, 1.0, 5.0, 11.0, 0.34, stats, size=13, color=SUBTLE_TEXT)
     _text(slide, 1.0, 5.5, 11.0, 0.5, f'作成日: {_fmt_jp_date(date.today().isoformat())}', size=13, color=WHITE)
@@ -651,6 +650,32 @@ def _build_slide11(prs, data):
 
 
 # ---------------------------------------------------------------------------
+# スライド12: 希望条件
+# ---------------------------------------------------------------------------
+def _build_slide12(prs):
+    slide = _new_slide(prs)
+    _title_bar(slide, '今後の安定供給に向けたご相談（希望条件）')
+    _text(slide, 0.5, 1.25, 12.0, 0.45,
+          '生産計画および安定供給の実現に向け、下記条件での運用をご相談させてください。', size=13)
+
+    headers = ['項目', '理想案', '妥協案', '暫定案']
+    rows = [
+        ['確定時期', '納期14日前までに確定',
+         '納期10日前までに確定\n内示数量の変動は納期14日前までに収束',
+         '納期5営業日前までに確定\n内示数量の変動は納期14日前までに収束'],
+        ['3か月内示の差異（月平均）', '±5％以内', '±7％以内', '±10％以内'],
+        ['確定直前の変更', '原則ゼロ', '変更は月1回まで', '変更時は事前協議を必須化'],
+        ['まとめ注文', '廃止', '廃止', '廃止'],
+    ]
+    _add_table(slide, 0.45, 1.95, 12.45, 3.9, headers, rows,
+               col_widths=[2.45, 2.55, 3.7, 3.75], font_size=11, header_font_size=12)
+
+    _rect(slide, 0.5, 6.35, 12.3, 0.55, BLUE_BG)
+    _text(slide, 0.7, 6.45, 11.8, 0.3,
+          '※まとめ注文の廃止は、すべての案に共通するお願い事項です。', size=11, color=GRAY_TEXT)
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 def generate_naiji_pptx_report(data):
@@ -671,6 +696,7 @@ def generate_naiji_pptx_report(data):
     _build_slide9(prs, data)
     _build_slide10(prs, data)
     _build_slide11(prs, data)
+    _build_slide12(prs)
 
     buf = io.BytesIO()
     prs.save(buf)

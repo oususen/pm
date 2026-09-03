@@ -145,16 +145,32 @@ def get_naiji_products(customer_id):
 
 
 # ---------------------------------------------------------------------------
-# メイン分析
+# 共通データ構築
 # ---------------------------------------------------------------------------
-def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=None, ship_to=''):
-    """内示変化推移分析データを計算して返す（汎用版）"""
+def _build_product_data(customer_id, product_code, ship_to='', start_date=None, end_date=None):
+    """スナップショット・確定データの構築（全分析関数の共通基盤）
+
+    Returns:
+        dict with keys:
+            snapshots_map, snapshot_dates, ordered_files, all_due_dates,
+            firm_quantities, firm_dates, wdc, customer_code, product_name
+    """
     customer = Customer.objects.select_related('calendar').filter(id=customer_id).first()
     cal = _get_customer_calendar(customer)
     wdc = WorkingDayCalculator(cal)
     customer_code = customer.customer_code if customer else ''
+    customer_name = customer.customer_name if customer else ''
 
-    # --- スナップショット構築 ---
+    product_name = ''
+    first = (
+        StgOrderDaily.objects
+        .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
+        .values('product_name')
+        .first()
+    )
+    if first:
+        product_name = first['product_name'] or ''
+
     qs = (
         StgOrderDaily.objects
         .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
@@ -163,8 +179,8 @@ def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=
     if ship_to:
         qs = qs.filter(ship_to_code=ship_to)
 
-    snapshots_map = {}      # source_file -> {due_date_iso -> qty}
-    snapshot_dates = {}     # source_file -> created_at
+    snapshots_map = {}
+    snapshot_dates = {}
     for row in qs:
         sf = row.source_file
         if not sf:
@@ -180,30 +196,17 @@ def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=
         qty = float(row.quantity or 0)
         snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
 
-    # 休日除外した納期一覧
     all_due_dates = sorted({
         ds
         for qtys in snapshots_map.values()
         for ds in qtys.keys()
         if wdc.is_working_day(date.fromisoformat(ds))
     })
-
     ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
-    snapshots = [
-        {
-            'source_file': sf,
-            'snapshot_date': snapshot_dates[sf].date().isoformat(),
-            'quantities': snapshots_map[sf],
-        }
-        for sf in ordered_files
-    ]
 
-    # --- 確定数量 (OrderLine FIRM/OPEN) ---
     firm_qs = OrderLine.objects.filter(
-        order__order_type='FIRM',
-        order__status='OPEN',
-        order__customer_id=customer_id,
-        product_code=product_code,
+        order__order_type='FIRM', order__status='OPEN',
+        order__customer_id=customer_id, product_code=product_code,
     )
     if ship_to:
         firm_qs = firm_qs.filter(ship_to_code=ship_to)
@@ -216,7 +219,6 @@ def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=
     for row in firm_qs.values('due_date').annotate(total_qty=Sum('quantity')):
         firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
 
-    # --- 確定日抽出（汎用：注文番号→order_dateフォールバック） ---
     firm_dates = {}
     for line in firm_qs.select_related('order').only('due_date', 'order__order_no', 'order__order_date'):
         issue_date_obj = _extract_firm_issue_date(line.order.order_no, customer_code)
@@ -227,6 +229,43 @@ def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=
         ds = line.due_date.isoformat()
         if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
             firm_dates[ds] = issue_date_obj.isoformat()
+
+    return {
+        'snapshots_map': snapshots_map,
+        'snapshot_dates': snapshot_dates,
+        'ordered_files': ordered_files,
+        'all_due_dates': all_due_dates,
+        'firm_quantities': firm_quantities,
+        'firm_dates': firm_dates,
+        'wdc': wdc,
+        'customer_code': customer_code,
+        'customer_name': customer_name,
+        'product_name': product_name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# メイン分析
+# ---------------------------------------------------------------------------
+def compute_naiji_analysis(customer_id, product_code, start_date=None, end_date=None, ship_to=''):
+    """内示変化推移分析データを計算して返す（汎用版）"""
+    pd = _build_product_data(customer_id, product_code, ship_to, start_date, end_date)
+    snapshots_map = pd['snapshots_map']
+    snapshot_dates = pd['snapshot_dates']
+    ordered_files = pd['ordered_files']
+    all_due_dates = pd['all_due_dates']
+    firm_quantities = pd['firm_quantities']
+    firm_dates = pd['firm_dates']
+    wdc = pd['wdc']
+
+    snapshots = [
+        {
+            'source_file': sf,
+            'snapshot_date': snapshot_dates[sf].date().isoformat(),
+            'quantities': snapshots_map[sf],
+        }
+        for sf in ordered_files
+    ]
 
     # --- 統計計算（納期ごと）---
     stat_results = {}
@@ -517,87 +556,15 @@ def _compute_period_summary(all_due_dates, snapshots_map, ordered_files, snapsho
 # ---------------------------------------------------------------------------
 def compute_naiji_summary(customer_id, product_code, start_date=None, end_date=None, ship_to=''):
     """一括レポート用のサマリーデータを計算"""
-    customer = Customer.objects.select_related('calendar').filter(id=customer_id).first()
-    cal = _get_customer_calendar(customer)
-    wdc = WorkingDayCalculator(cal)
-    customer_code = customer.customer_code if customer else ''
-
-    product_name = ''
-    first = (
-        StgOrderDaily.objects
-        .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
-        .values('product_name')
-        .first()
-    )
-    if first:
-        product_name = first['product_name'] or ''
-
-    qs = (
-        StgOrderDaily.objects
-        .filter(customer_id=customer_id, product_code=product_code, order_type='FORECAST')
-        .order_by('created_at', 'id')
-    )
-    if ship_to:
-        qs = qs.filter(ship_to_code=ship_to)
-
-    snapshots_map = {}
-    snapshot_dates = {}
-    for row in qs:
-        sf = row.source_file
-        if not sf:
-            continue
-        ds = row.due_date.isoformat()
-        if start_date and row.due_date < start_date:
-            continue
-        if end_date and row.due_date > end_date:
-            continue
-        if sf not in snapshots_map:
-            snapshots_map[sf] = {}
-            snapshot_dates[sf] = row.created_at
-        qty = float(row.quantity or 0)
-        snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
-
-    all_due_dates = sorted({
-        ds
-        for qtys in snapshots_map.values()
-        for ds in qtys.keys()
-        if wdc.is_working_day(date.fromisoformat(ds))
-    })
-    ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
-
-    firm_qs = OrderLine.objects.filter(
-        order__order_type='FIRM', order__status='OPEN',
-        order__customer_id=customer_id, product_code=product_code,
-    )
-    if ship_to:
-        firm_qs = firm_qs.filter(ship_to_code=ship_to)
-    if start_date:
-        firm_qs = firm_qs.filter(due_date__gte=start_date)
-    if end_date:
-        firm_qs = firm_qs.filter(due_date__lte=end_date)
-
-    firm_quantities = {}
-    for row in firm_qs.values('due_date').annotate(total_qty=Sum('quantity')):
-        firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
-
-    firm_dates = {}
-    for line in firm_qs.select_related('order').only('due_date', 'order__order_no', 'order__order_date'):
-        issue_date_obj = _extract_firm_issue_date(line.order.order_no, customer_code)
-        if issue_date_obj is None:
-            issue_date_obj = line.order.order_date
-        if issue_date_obj is None:
-            continue
-        ds = line.due_date.isoformat()
-        if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
-            firm_dates[ds] = issue_date_obj.isoformat()
+    pd = _build_product_data(customer_id, product_code, ship_to, start_date, end_date)
 
     summary = _compute_period_summary(
-        all_due_dates, snapshots_map, ordered_files, snapshot_dates,
-        firm_quantities, firm_dates, wdc,
+        pd['all_due_dates'], pd['snapshots_map'], pd['ordered_files'],
+        pd['snapshot_dates'], pd['firm_quantities'], pd['firm_dates'], pd['wdc'],
     )
     summary['product_code'] = product_code
-    summary['product_name'] = product_name
-    summary['snapshot_count'] = len(ordered_files)
+    summary['product_name'] = pd['product_name']
+    summary['snapshot_count'] = len(pd['ordered_files'])
 
     return summary
 
@@ -739,107 +706,50 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
     """PPTXレポート用データを計算
 
     product_entries: [{'product_code': str, 'ship_to': str}, ...]
-    既存の収束/予測誤差/欠品リスク/安全在庫（_compute_period_summary）に加え、
-    変動回数・確定直前乖離・確定数量ばらつきを製品ごとに計算して返す。
+    _build_product_data で共通データを構築し、収束/変動回数/確定直前乖離/
+    確定数量ばらつきを製品ごとに計算して返す。
     """
-    customer = Customer.objects.select_related('calendar').filter(id=customer_id).first()
-    customer_name = customer.customer_name if customer else ''
-    cal = _get_customer_calendar(customer)
-    wdc = WorkingDayCalculator(cal)
-    customer_code = customer.customer_code if customer else ''
-
+    customer_name = ''
     products = []
     all_snapshot_dates = set()
-    all_firm_due_dates = set()
+    all_analysis_due_dates = set()
 
     for entry in product_entries:
         pc = entry['product_code']
         st = (entry.get('ship_to') or '').strip()
 
-        product_name = ''
-        first = (
-            StgOrderDaily.objects
-            .filter(customer_id=customer_id, product_code=pc, order_type='FORECAST')
-            .values('product_name')
-            .first()
-        )
-        if first:
-            product_name = first['product_name'] or ''
+        pd = _build_product_data(customer_id, pc, st, start_date, end_date)
+        if not customer_name:
+            customer_name = pd['customer_name']
 
-        qs = (
-            StgOrderDaily.objects
-            .filter(customer_id=customer_id, product_code=pc, order_type='FORECAST')
-            .order_by('created_at', 'id')
-        )
-        if st:
-            qs = qs.filter(ship_to_code=st)
+        snapshots_map = pd['snapshots_map']
+        snapshot_dates = pd['snapshot_dates']
+        ordered_files = pd['ordered_files']
+        all_due_dates = pd['all_due_dates']
+        firm_quantities = pd['firm_quantities']
+        firm_dates = pd['firm_dates']
+        wdc = pd['wdc']
 
-        snapshots_map = {}
-        snapshot_dates = {}
-        for row in qs:
-            sf = row.source_file
-            if not sf:
-                continue
-            ds = row.due_date.isoformat()
-            if start_date and row.due_date < start_date:
-                continue
-            if end_date and row.due_date > end_date:
-                continue
-            if sf not in snapshots_map:
-                snapshots_map[sf] = {}
-                snapshot_dates[sf] = row.created_at
-            qty = float(row.quantity or 0)
-            snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
-
-        all_due_dates = sorted({
-            ds for qtys in snapshots_map.values() for ds in qtys.keys()
-            if wdc.is_working_day(date.fromisoformat(ds))
-        })
-        ordered_files = sorted(snapshots_map.keys(), key=lambda f: snapshot_dates[f])
         for sf in ordered_files:
             all_snapshot_dates.add(snapshot_dates[sf].date())
 
-        firm_qs = OrderLine.objects.filter(
-            order__order_type='FIRM', order__status='OPEN',
-            order__customer_id=customer_id, product_code=pc,
-        )
-        if st:
-            firm_qs = firm_qs.filter(ship_to_code=st)
-        if start_date:
-            firm_qs = firm_qs.filter(due_date__gte=start_date)
-        if end_date:
-            firm_qs = firm_qs.filter(due_date__lte=end_date)
-
-        firm_quantities = {}
-        for row in firm_qs.values('due_date').annotate(total_qty=Sum('quantity')):
-            firm_quantities[row['due_date'].isoformat()] = float(row['total_qty'])
-            all_firm_due_dates.add(row['due_date'])
-
-        firm_dates = {}
-        for line in firm_qs.select_related('order').only('due_date', 'order__order_no', 'order__order_date'):
-            issue_date_obj = _extract_firm_issue_date(line.order.order_no, customer_code)
-            if issue_date_obj is None:
-                issue_date_obj = line.order.order_date
-            if issue_date_obj is None:
-                continue
-            ds = line.due_date.isoformat()
-            if ds not in firm_dates or issue_date_obj > date.fromisoformat(firm_dates[ds]):
-                firm_dates[ds] = issue_date_obj.isoformat()
+        analysis_due_dates = sorted(set(all_due_dates) & set(firm_quantities))
+        all_analysis_due_dates.update(date.fromisoformat(ds) for ds in analysis_due_dates)
 
         summary = _compute_period_summary(
-            all_due_dates, snapshots_map, ordered_files, snapshot_dates,
+            analysis_due_dates, snapshots_map, ordered_files, snapshot_dates,
             firm_quantities, firm_dates, wdc,
         )
-        volatility = _compute_volatility(all_due_dates, snapshots_map, ordered_files, snapshot_dates)
+        volatility = _compute_volatility(analysis_due_dates, snapshots_map, ordered_files, snapshot_dates)
         last_minute = _compute_last_minute_changes(
-            all_due_dates, snapshots_map, ordered_files, snapshot_dates, firm_quantities, wdc,
+            analysis_due_dates, snapshots_map, ordered_files, snapshot_dates, firm_quantities, wdc,
         )
-        firm_variability = _compute_firm_variability(all_due_dates, firm_quantities)
+        firm_variability = _compute_firm_variability(analysis_due_dates, firm_quantities)
 
         products.append({
             'product_code': pc,
             'ship_to': st,
-            'product_name': product_name,
+            'product_name': pd['product_name'],
             'snapshot_count': len(ordered_files),
             'summary': summary,
             'volatility': volatility,
@@ -884,8 +794,8 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
         'last_snapshot_date': max(all_snapshot_dates).isoformat() if all_snapshot_dates else None,
         'firm_due_min': min(firm_due_counts) if firm_due_counts else None,
         'firm_due_max': max(firm_due_counts) if firm_due_counts else None,
-        'first_firm_date': min(all_firm_due_dates).isoformat() if all_firm_due_dates else None,
-        'last_firm_date': max(all_firm_due_dates).isoformat() if all_firm_due_dates else None,
+        'first_firm_date': min(all_analysis_due_dates).isoformat() if all_analysis_due_dates else None,
+        'last_firm_date': max(all_analysis_due_dates).isoformat() if all_analysis_due_dates else None,
     }
 
 
