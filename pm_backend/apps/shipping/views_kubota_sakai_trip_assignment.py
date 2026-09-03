@@ -1510,12 +1510,9 @@ class KubotaSakaiTripPlanViewNew(APIView):
         calendar_map = _build_calendar_day_map(calendar)
 
         with transaction.atomic():
-            # 対象行の既存割付を削除 → 再作成
-            # NOTE:
-            # 過去実装や便変更の影響で同一 due_adjustment に別日付の割付が残ると、
-            # 同じ明細が二重計上されるため departure_date で絞らず全削除する。
+            # 対象日の便計画全体を保存し直す。
+            # 画面から消えた明細の古い割付も確実に消すため、対象出発日の全割付を削除して再作成する。
             delete_qs = KubotaSakaiTripAssignment.objects.filter(
-                due_adjustment_id__in=[n['adj_id'] for n in normalized],
                 departure_date=target_date,
             )
             if locked_truck_ids:
