@@ -412,10 +412,16 @@ class OvertimeApplicationFilter(django_filters.FilterSet):
     work_date__lte = django_filters.DateFilter(field_name='work_date', lookup_expr='lte')
     status = django_filters.CharFilter(field_name='status')
     applicant = django_filters.NumberFilter(field_name='applicant')
+    section_name = django_filters.CharFilter(field_name='applicant__profile__group__name')
+    team_name = django_filters.CharFilter(field_name='team__name')
+    group_name = django_filters.CharFilter(field_name='applicant__profile__unit__name')
 
     class Meta:
         model = OvertimeApplication
-        fields = ['work_date__gte', 'work_date__lte', 'status', 'applicant']
+        fields = [
+            'work_date__gte', 'work_date__lte', 'status', 'applicant',
+            'section_name', 'team_name', 'group_name',
+        ]
 
 
 class OvertimeApplicationViewSet(viewsets.ModelViewSet):
