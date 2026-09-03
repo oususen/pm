@@ -214,11 +214,18 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             cell.border = Border(left=medium if column == 7 else thin, right=thin, top=thin, bottom=thin)
             cell.alignment = Alignment(horizontal='center', vertical='center')
 
-        for index, material_orders in enumerate(sorted(by_material.values(), key=lambda items: items[0].material.product_code), 1):
+        sorted_materials = sorted(by_material.values(), key=lambda items: items[0].material.product_code)
+        daily_total_lots = defaultdict(int)
+        daily_total_weight = defaultdict(Decimal)
+        for index, material_orders in enumerate(sorted_materials, 1):
             material = material_orders[0].material
             parts = material.product_code.split(maxsplit=1)
             lots_by_date = {order.delivery_date: order.order_lots for order in material_orders}
-            values = [index, 'SO1', parts[0], parts[1] if len(parts) > 1 else '', f'{material_orders[0].lot_multiple}枚', sum(order.order_lots for order in material_orders)]
+            lot_multiple = material_orders[0].lot_multiple
+            sheet_weight_kg = Decimal(0)
+            if material.specific_gravity and material.size_length and material.size_width and material.size_thickness:
+                sheet_weight_kg = material.specific_gravity * material.size_length * material.size_width * material.size_thickness / Decimal('1000000')
+            values = [index, 'SO1', parts[0], parts[1] if len(parts) > 1 else '', f'{lot_multiple}枚', sum(order.order_lots for order in material_orders)]
             values += [lots_by_date.get(day, '') for day in delivery_dates]
             for column, value in enumerate(values, 1):
                 cell = worksheet.cell(row=7 + index, column=column, value=value)
@@ -230,15 +237,38 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     bottom=thin,
                 )
                 cell.alignment = Alignment(horizontal='center' if column != 4 else 'left', vertical='center')
-            worksheet.row_dimensions[7 + index].height = 30
+            worksheet.row_dimensions[7 + index].height = 24
+            for day in delivery_dates:
+                lots = lots_by_date.get(day, 0)
+                if lots:
+                    daily_total_lots[day] += lots
+                    daily_total_weight[day] += Decimal(lots) * Decimal(lot_multiple) * sheet_weight_kg / Decimal('1000')
+        summary_start = 7 + len(sorted_materials) + 1
+        for label_row, label, get_value in [
+            (summary_start, '発注量', lambda d: daily_total_lots.get(d, '')),
+            (summary_start + 1, '目安重量t', lambda d: float(daily_total_weight.get(d, Decimal(0)).quantize(Decimal('0.01'))) if daily_total_weight.get(d) else ''),
+        ]:
+            worksheet.merge_cells(start_row=label_row, start_column=5, end_row=label_row, end_column=6)
+            label_cell = worksheet.cell(row=label_row, column=5, value=label)
+            label_cell.font = Font(name='MS PMincho', bold=True, size=10)
+            label_cell.border = Border(left=thin, right=medium, top=thin, bottom=thin)
+            label_cell.alignment = Alignment(horizontal='center', vertical='center')
+            worksheet.cell(row=label_row, column=6).border = Border(right=medium, top=thin, bottom=thin)
+            for col_idx, day in enumerate(delivery_dates, 7):
+                val = get_value(day)
+                cell = worksheet.cell(row=label_row, column=col_idx, value=val)
+                cell.font = Font(name='MS PMincho', size=10)
+                cell.border = Border(left=medium if col_idx == 7 else thin, right=thin, top=thin, bottom=thin)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            worksheet.row_dimensions[label_row].height = 24
         widths = [6, 12, 14, 24, 12, 10] + [9] * len(delivery_dates)
         for column, width in enumerate(widths, 1):
             worksheet.column_dimensions[get_column_letter(column)].width = width
-        worksheet.row_dimensions[1].height = 32
-        worksheet.row_dimensions[3].height = 24
-        worksheet.row_dimensions[4].height = 28
-        worksheet.row_dimensions[6].height = 24
-        worksheet.row_dimensions[7].height = 22
+        worksheet.row_dimensions[1].height = 26
+        worksheet.row_dimensions[3].height = 19
+        worksheet.row_dimensions[4].height = 22
+        worksheet.row_dimensions[6].height = 19
+        worksheet.row_dimensions[7].height = 18
         worksheet.freeze_panes = 'A8'
         output = BytesIO()
         workbook.save(output)
