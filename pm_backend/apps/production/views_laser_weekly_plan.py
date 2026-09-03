@@ -63,11 +63,11 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 plan_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
             except (KeyError, ValueError):
                 return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
-            rows = LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date).select_related('material')
+            rows = LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, is_manual=False).select_related('material')
             return Response([{
                 'material_id': row.material_id, 'required_date': row.required_date.isoformat(), 'delivery_date': row.delivery_date.isoformat(),
                 'supplier': row.supplier, 'required_sheets': row.required_sheets, 'lot_multiple': row.lot_multiple,
-                'required_lots': row.required_lots, 'order_lots': row.order_lots,
+                'required_lots': row.required_lots, 'order_lots': row.order_lots, 'order_sheets': row.order_sheets,
             } for row in rows])
 
         items = request.data.get('items', [])
@@ -86,8 +86,9 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 required_sheets = int(item['required_sheets'])
                 lot_multiple = int(item['lot_multiple'])
                 sato_lots, meisei_lots = int(item['sato_lots']), int(item['meisei_lots'])
+                sato_sheets, meisei_sheets = int(item.get('sato_sheets', 0)), int(item.get('meisei_sheets', 0))
                 sato_enabled = bool(item.get('sato_enabled', False))
-                if min(required_sheets, lot_multiple, sato_lots, meisei_lots) < 0 or lot_multiple == 0:
+                if min(required_sheets, lot_multiple, sato_lots, meisei_lots, sato_sheets, meisei_sheets) < 0 or lot_multiple == 0:
                     raise ValueError
             except (KeyError, TypeError, ValueError):
                 return Response({'detail': '発注進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -95,15 +96,15 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             if not sato_enabled:
                 LaserWeeklyMaterialOrderProgress.objects.filter(
                     plan_start_date=plan_start_date, material=material, required_date=required_date,
-                    supplier=LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO,
+                    supplier=LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, is_manual=False,
                 ).delete()
-            supplier_lots = [(LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI, meisei_lots)]
+            supplier_data = [(LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI, meisei_lots, meisei_sheets)]
             if sato_enabled:
-                supplier_lots.append((LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, sato_lots))
-            for supplier, order_lots in supplier_lots:
+                supplier_data.append((LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, sato_lots, sato_sheets))
+            for supplier, order_lots, order_sheets_val in supplier_data:
                 LaserWeeklyMaterialOrderProgress.objects.update_or_create(
-                    plan_start_date=plan_start_date, material=material, required_date=required_date, supplier=supplier,
-                    defaults={'delivery_date': delivery_date, 'required_sheets': required_sheets, 'lot_multiple': lot_multiple, 'required_lots': required_lots, 'order_lots': order_lots},
+                    plan_start_date=plan_start_date, material=material, required_date=required_date, supplier=supplier, is_manual=False,
+                    defaults={'delivery_date': delivery_date, 'required_sheets': required_sheets, 'lot_multiple': lot_multiple, 'required_lots': required_lots, 'order_lots': order_lots, 'order_sheets': order_sheets_val},
                 )
                 saved_count += 1
         return Response({'saved_count': saved_count})
@@ -125,7 +126,13 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         except Supplier.DoesNotExist:
             return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
         supplier_name = order_supplier.supplier_name
-        orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, supplier=supplier, order_lots__gt=0, delivery_date__range=(export_start_date, export_end_date)).select_related('material').order_by('delivery_date', 'material__product_code'))
+        orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
+            supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
+        ).filter(
+            Q(plan_start_date=plan_start_date, is_manual=False) | Q(is_manual=True),
+        ).filter(
+            Q(order_lots__gt=0) | Q(order_sheets__gt=0),
+        ).select_related('material').order_by('delivery_date', 'material__product_code'))
         if not orders:
             return Response({'detail': '出力対象の発注がありません。'}, status=status.HTTP_400_BAD_REQUEST)
         delivery_dates = []
@@ -220,13 +227,29 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         for index, material_orders in enumerate(sorted_materials, 1):
             material = material_orders[0].material
             parts = material.product_code.split(maxsplit=1)
-            lots_by_date = {order.delivery_date: order.order_lots for order in material_orders}
+            order_by_date = {}
+            for order in material_orders:
+                prev = order_by_date.get(order.delivery_date, (0, 0))
+                order_by_date[order.delivery_date] = (prev[0] + order.order_lots, prev[1] + order.order_sheets)
             lot_multiple = material_orders[0].lot_multiple
             sheet_weight_kg = Decimal(0)
             if material.specific_gravity and material.size_length and material.size_width and material.size_thickness:
                 sheet_weight_kg = material.specific_gravity * material.size_length * material.size_width * material.size_thickness / Decimal('1000000')
-            values = [index, 'SO1', parts[0], parts[1] if len(parts) > 1 else '', f'{lot_multiple}枚', sum(order.order_lots for order in material_orders)]
-            values += [lots_by_date.get(day, '') for day in delivery_dates]
+            total_lots_all = sum(order.order_lots for order in material_orders)
+            total_sheets_all = sum(order.order_sheets for order in material_orders)
+            total_label = str(total_lots_all)
+            if total_sheets_all:
+                total_label += f'+{total_sheets_all}枚'
+            values = [index, 'SO1', parts[0], parts[1] if len(parts) > 1 else '', f'{lot_multiple}枚', total_label]
+            for day in delivery_dates:
+                lots, sheets = order_by_date.get(day, (0, 0))
+                if lots or sheets:
+                    cell_val = str(lots) if lots else ''
+                    if sheets:
+                        cell_val += f'+{sheets}枚' if cell_val else f'{sheets}枚'
+                    values.append(cell_val)
+                else:
+                    values.append('')
             for column, value in enumerate(values, 1):
                 cell = worksheet.cell(row=7 + index, column=column, value=value)
                 cell.font = Font(name='MS PMincho', size=11)
@@ -239,10 +262,11 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 cell.alignment = Alignment(horizontal='center' if column != 4 else 'left', vertical='center')
             worksheet.row_dimensions[7 + index].height = 24
             for day in delivery_dates:
-                lots = lots_by_date.get(day, 0)
-                if lots:
+                lots, sheets = order_by_date.get(day, (0, 0))
+                total_day_sheets = lots * lot_multiple + sheets
+                if total_day_sheets:
                     daily_total_lots[day] += lots
-                    daily_total_weight[day] += Decimal(lots) * Decimal(lot_multiple) * sheet_weight_kg / Decimal('1000')
+                    daily_total_weight[day] += Decimal(total_day_sheets) * sheet_weight_kg / Decimal('1000')
         summary_start = 7 + len(sorted_materials) + 1
         for label_row, label, get_value in [
             (summary_start, '発注量', lambda d: daily_total_lots.get(d, '')),
@@ -641,3 +665,123 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             'material_rows': material_rows,
             'pattern_totals': {':'.join(map(str, key)): str(value) for key, value in totals.items()},
         })
+
+    @action(detail=False, methods=['get'], url_path='material-order-summary')
+    def material_order_summary(self, request):
+        try:
+            start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(request.query_params['end_date'], '%Y-%m-%d').date()
+            if end_date < start_date:
+                raise ValueError
+        except (KeyError, ValueError):
+            return Response({'detail': 'start_date, end_date が必要です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = (
+            LaserWeeklyMaterialOrderProgress.objects
+            .filter(delivery_date__range=(start_date, end_date))
+            .select_related('material')
+            .order_by('material__product_code', 'supplier', 'delivery_date')
+        )
+
+        dates = []
+        d = start_date
+        while d <= end_date:
+            dates.append(d.isoformat())
+            d += timedelta(days=1)
+
+        grouped = defaultdict(lambda: {'daily': defaultdict(lambda: {'order_lots': 0, 'order_sheets': 0, 'total_sheets': 0}), 'ids': defaultdict(list)})
+        for row in rows:
+            key = (row.material_id, row.supplier)
+            day = row.delivery_date.isoformat()
+            entry = grouped[key]['daily'][day]
+            entry['order_lots'] += row.order_lots
+            entry['order_sheets'] += row.order_sheets
+            lot_sheets = row.order_lots * row.lot_multiple if row.lot_multiple else 0
+            entry['total_sheets'] += lot_sheets + row.order_sheets
+            if row.is_manual:
+                grouped[key]['ids'][day].append(row.id)
+            if 'material_code' not in grouped[key]:
+                grouped[key]['material_code'] = row.material.product_code
+                grouped[key]['material_name'] = row.material.product_name
+                sg = row.material.specific_gravity
+                l = row.material.size_length
+                w = row.material.size_width
+                t = row.material.size_thickness
+                if sg and l and w and t:
+                    grouped[key]['sheet_weight_kg'] = float(Decimal(str(sg)) * Decimal(str(l)) * Decimal(str(w)) * Decimal(str(t)) / Decimal('1000000'))
+                else:
+                    grouped[key]['sheet_weight_kg'] = None
+                grouped[key]['lot_multiple'] = row.lot_multiple
+                grouped[key]['supplier'] = row.supplier
+                grouped[key]['supplier_label'] = row.get_supplier_display()
+
+        result_rows = []
+        for (material_id, supplier), data in sorted(grouped.items(), key=lambda x: (x[1].get('material_code', ''), x[1].get('supplier', ''))):
+            daily = {}
+            for day in dates:
+                d_entry = data['daily'].get(day)
+                if d_entry:
+                    daily[day] = {
+                        'order_lots': d_entry['order_lots'],
+                        'order_sheets': d_entry['order_sheets'],
+                        'total_sheets': d_entry['total_sheets'],
+                        'weight_kg': round(d_entry['total_sheets'] * data['sheet_weight_kg'], 3) if data['sheet_weight_kg'] else None,
+                        'manual_ids': data['ids'].get(day, []),
+                    }
+                else:
+                    daily[day] = {'order_lots': 0, 'order_sheets': 0, 'total_sheets': 0, 'weight_kg': None, 'manual_ids': []}
+            result_rows.append({
+                'material_id': material_id,
+                'material_code': data['material_code'],
+                'material_name': data['material_name'],
+                'supplier': data['supplier'],
+                'supplier_label': data['supplier_label'],
+                'lot_multiple': data.get('lot_multiple', 0),
+                'sheet_weight_kg': data['sheet_weight_kg'],
+                'daily': daily,
+            })
+
+        return Response({'dates': dates, 'rows': result_rows})
+
+    @action(detail=False, methods=['post'], url_path='material-order-manual')
+    def material_order_manual_create(self, request):
+        try:
+            material_id = int(request.data['material_id'])
+            supplier = request.data['supplier']
+            delivery_date = datetime.strptime(request.data['delivery_date'], '%Y-%m-%d').date()
+            order_lots = int(request.data.get('order_lots', 0))
+            lot_multiple = int(request.data.get('lot_multiple', 0))
+            order_sheets = int(request.data.get('order_sheets', 0))
+            if order_lots < 0 or lot_multiple < 0 or order_sheets < 0:
+                raise ValueError
+            if order_lots == 0 and order_sheets == 0:
+                return Response({'detail': '発注ロット数または端数枚数を入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            if supplier not in dict(LaserWeeklyMaterialOrderProgress.SUPPLIER_CHOICES):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return Response({'detail': '入力値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        material = Product.objects.filter(id=material_id).first()
+        if not material:
+            return Response({'detail': '材料が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        obj, created = LaserWeeklyMaterialOrderProgress.objects.update_or_create(
+            material=material, delivery_date=delivery_date, supplier=supplier, is_manual=True,
+            defaults={
+                'order_lots': order_lots,
+                'lot_multiple': lot_multiple,
+                'order_sheets': order_sheets,
+                'required_sheets': 0,
+                'required_lots': 0,
+            },
+        )
+        return Response({'id': obj.id, 'created': created})
+
+    @action(detail=False, methods=['delete'], url_path='material-order-manual/(?P<pk>[0-9]+)')
+    def material_order_manual_delete(self, request, pk=None):
+        try:
+            obj = LaserWeeklyMaterialOrderProgress.objects.get(pk=pk, is_manual=True)
+        except LaserWeeklyMaterialOrderProgress.DoesNotExist:
+            return Response({'detail': '手動行が見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

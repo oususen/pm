@@ -71,20 +71,33 @@ class LaserWeeklyMaterialOrderProgress(models.Model):
     SUPPLIER_MEISEI = 'MEISEI'
     SUPPLIER_CHOICES = [(SUPPLIER_SATO, '佐藤商事'), (SUPPLIER_MEISEI, '名成鋼機')]
 
-    plan_start_date = models.DateField(verbose_name='計画開始日')
+    plan_start_date = models.DateField(verbose_name='計画開始日', null=True, blank=True)
     material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_order_progresses')
-    required_date = models.DateField(verbose_name='必要日')
+    required_date = models.DateField(verbose_name='必要日', null=True, blank=True)
     delivery_date = models.DateField(verbose_name='納期')
     supplier = models.CharField(max_length=10, choices=SUPPLIER_CHOICES, verbose_name='仕入先')
-    required_sheets = models.PositiveIntegerField(verbose_name='必要枚数')
-    lot_multiple = models.PositiveIntegerField(verbose_name='発注倍数')
-    required_lots = models.PositiveIntegerField(verbose_name='必要ロット数')
-    order_lots = models.PositiveIntegerField(verbose_name='発注ロット数')
+    required_sheets = models.PositiveIntegerField(default=0, verbose_name='必要枚数')
+    lot_multiple = models.PositiveIntegerField(default=0, verbose_name='発注倍数')
+    required_lots = models.PositiveIntegerField(default=0, verbose_name='必要ロット数')
+    order_lots = models.PositiveIntegerField(default=0, verbose_name='発注ロット数')
+    order_sheets = models.PositiveIntegerField(default=0, verbose_name='端数枚数')
+    is_manual = models.BooleanField(default=False, verbose_name='手動追加')
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 't_laser_weekly_material_order_progress'
-        constraints = [models.UniqueConstraint(fields=['plan_start_date', 'material', 'required_date', 'supplier'], name='laser_weekly_material_order_progress_unique')]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['plan_start_date', 'material', 'required_date', 'supplier'],
+                condition=models.Q(is_manual=False),
+                name='laser_weekly_material_order_progress_unique',
+            ),
+            models.UniqueConstraint(
+                fields=['material', 'delivery_date', 'supplier'],
+                condition=models.Q(is_manual=True),
+                name='laser_weekly_material_order_manual_unique',
+            ),
+        ]
 
 
 class LaserWeeklyMaterialInitialProgress(models.Model):

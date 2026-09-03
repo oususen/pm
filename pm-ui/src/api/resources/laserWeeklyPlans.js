@@ -53,4 +53,13 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   deleteMaterialGroup(id) {
     return client.delete(`/laser-weekly-material-groups/${id}/`)
   },
+  getMaterialOrderSummary(startDate, endDate) {
+    return client.get('/laser-weekly-plans/material-order-summary/', { params: { start_date: startDate, end_date: endDate } })
+  },
+  createMaterialOrderManual(data) {
+    return client.post('/laser-weekly-plans/material-order-manual/', data)
+  },
+  deleteMaterialOrderManual(id) {
+    return client.delete(`/laser-weekly-plans/material-order-manual/${id}/`)
+  },
 })

@@ -308,6 +308,129 @@
         </table>
       </div>
     </div>
+
+    <!-- 期間別材料発注量 -->
+    <div class="panel order-summary-panel">
+      <div class="panel-head">
+        <h3>期間別材料発注量</h3>
+      </div>
+      <div class="order-toolbar">
+        <div class="field">
+          <label>開始日</label>
+          <input v-model="orderSummaryStart" type="date" />
+        </div>
+        <span class="range-sep">〜</span>
+        <div class="field">
+          <label>終了日</label>
+          <input v-model="orderSummaryEnd" type="date" />
+        </div>
+        <button class="btn primary" type="button" @click="loadOrderSummary" :disabled="orderSummaryLoading || !orderSummaryStart || !orderSummaryEnd">集計</button>
+        <button class="btn" type="button" @click="showManualForm = !showManualForm">手動追加</button>
+      </div>
+
+      <!-- 手動追加フォーム -->
+      <div v-if="showManualForm" class="manual-form">
+        <div class="manual-form-row">
+          <div class="field">
+            <label>材料</label>
+            <select v-model="manualMaterialId">
+              <option value="">-- 選択 --</option>
+              <option v-for="m in materialOptions" :key="m.id" :value="m.id">{{ m.product_code }} {{ m.product_name }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>仕入先</label>
+            <select v-model="manualSupplier">
+              <option value="MEISEI">名成鋼機</option>
+              <option value="SATO">佐藤商事</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>納期</label>
+            <input v-model="manualDeliveryDate" type="date" />
+          </div>
+          <div class="field">
+            <label>ロット数</label>
+            <input v-model.number="manualOrderLots" type="number" min="0" style="width:70px;" />
+          </div>
+          <div class="field">
+            <label>ロット倍数</label>
+            <input v-model.number="manualLotMultiple" type="number" min="0" style="width:70px;" />
+          </div>
+          <div class="field">
+            <label>端数枚数</label>
+            <input v-model.number="manualOrderSheets" type="number" min="0" style="width:70px;" />
+          </div>
+          <button class="btn primary" type="button" @click="saveManualOrder" :disabled="!manualMaterialId || !manualDeliveryDate || (manualOrderLots === 0 && manualOrderSheets === 0)">登録</button>
+        </div>
+      </div>
+
+      <div v-if="orderSummaryMsg" class="summary-message" :class="orderSummaryMsgType === 'error' ? 'error' : 'info'">{{ orderSummaryMsg }}</div>
+
+      <div class="table-wrap" v-if="orderSummaryDates.length">
+        <table class="summary-table order-table">
+          <thead>
+            <tr>
+              <th rowspan="2" class="sticky-col col-code">材料コード</th>
+              <th rowspan="2" class="sticky-col col-name">材料名</th>
+              <th rowspan="2" class="sticky-col col-supplier">仕入先</th>
+              <th rowspan="2" class="sticky-col col-lot">倍数</th>
+              <th v-for="d in orderSummaryDates" :key="'h1-'+d" :class="['date-col', weekdayClass(d)]">{{ formatDateShort(d) }}</th>
+              <th rowspan="2">合計</th>
+            </tr>
+            <tr>
+              <th v-for="d in orderSummaryDates" :key="'h2-'+d" :class="['date-col dow-row', weekdayClass(d)]">{{ weekdayLabel(d) }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="row in orderSummaryRows" :key="`${row.material_id}-${row.supplier}`">
+              <!-- ロット数行 -->
+              <tr>
+                <td class="sticky-col col-code" rowspan="3">{{ row.material_code }}</td>
+                <td class="sticky-col col-name" rowspan="3">{{ row.material_name }}</td>
+                <td class="sticky-col col-supplier" rowspan="3">{{ row.supplier_label }}</td>
+                <td class="sticky-col col-lot num" rowspan="3">{{ row.lot_multiple || '-' }}</td>
+                <td v-for="d in orderSummaryDates" :key="`lot-${row.material_id}-${row.supplier}-${d}`" :class="['num', weekdayClass(d)]">
+                  <span v-if="row.daily[d]?.order_lots">{{ row.daily[d].order_lots }}L</span>
+                  <span v-if="row.daily[d]?.order_sheets" class="sheets-extra">+{{ row.daily[d].order_sheets }}</span>
+                  <span v-if="row.daily[d]?.manual_ids?.length" class="manual-badge" @click="deleteManual(row.daily[d].manual_ids)" title="手動 (クリックで削除)">M</span>
+                </td>
+                <td class="num total-col">{{ rowTotalLots(row) }}L<span v-if="rowTotalSheets(row)" class="sheets-extra">+{{ rowTotalSheets(row) }}</span></td>
+              </tr>
+              <!-- 枚数行 -->
+              <tr class="sub-row">
+                <td v-for="d in orderSummaryDates" :key="`sheets-${row.material_id}-${row.supplier}-${d}`" :class="['num', weekdayClass(d)]">
+                  {{ row.daily[d]?.total_sheets || '' }}
+                </td>
+                <td class="num total-col">{{ rowTotalAllSheets(row) }}</td>
+              </tr>
+              <!-- 重量行 -->
+              <tr class="sub-row weight-row">
+                <td v-for="d in orderSummaryDates" :key="`wt-${row.material_id}-${row.supplier}-${d}`" :class="['num', weekdayClass(d)]">
+                  {{ row.daily[d]?.weight_kg != null && row.daily[d]?.total_sheets ? formatNumber(row.daily[d].weight_kg / 1000, 3) + 't' : '' }}
+                </td>
+                <td class="num total-col">{{ row.sheet_weight_kg ? formatNumber(rowTotalAllSheets(row) * row.sheet_weight_kg / 1000, 3) + 't' : '' }}</td>
+              </tr>
+            </template>
+            <!-- 合計行 -->
+            <tr class="total-row" v-if="orderSummaryRows.length">
+              <td class="sticky-col col-code" colspan="4"><strong>合計</strong></td>
+              <td v-for="d in orderSummaryDates" :key="`total-${d}`" :class="['num', weekdayClass(d)]">
+                <div>{{ dailyTotalSheets(d) }}枚</div>
+                <div class="weight-text">{{ formatNumber(dailyTotalWeight(d) / 1000, 3) }}t</div>
+              </td>
+              <td class="num total-col">
+                <div>{{ grandTotalSheets() }}枚</div>
+                <div class="weight-text">{{ formatNumber(grandTotalWeight() / 1000, 3) }}t</div>
+              </td>
+            </tr>
+            <tr v-if="!orderSummaryRows.length && !orderSummaryLoading">
+              <td :colspan="4 + orderSummaryDates.length + 1" class="empty">対象データがありません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -696,8 +819,113 @@ const exportExcel = () => {
   XLSX.writeFile(workbook, `レーザ所要材料集計_${budgetStartDate.value || ''}_${budgetEndDate.value || ''}.xlsx`)
 }
 
+// ── 期間別材料発注量 ──
+const orderSummaryStart = ref(toDateStr(firstDay))
+const orderSummaryEnd = ref(toDateStr(lastDay))
+const orderSummaryLoading = ref(false)
+const orderSummaryMsg = ref('')
+const orderSummaryMsgType = ref('info')
+const orderSummaryDates = ref([])
+const orderSummaryRows = ref([])
+const showManualForm = ref(false)
+const materialOptions = ref([])
+
+const manualMaterialId = ref('')
+const manualSupplier = ref('MEISEI')
+const manualDeliveryDate = ref('')
+const manualOrderLots = ref(0)
+const manualLotMultiple = ref(100)
+const manualOrderSheets = ref(0)
+
+const formatDateShort = (d) => {
+  const parts = d.split('-')
+  return `${parseInt(parts[1])}/${parseInt(parts[2])}`
+}
+const weekdayLabel = (d) => ['日', '月', '火', '水', '木', '金', '土'][new Date(d).getDay()]
+const weekdayClass = (d) => {
+  const dow = new Date(d).getDay()
+  if (dow === 0) return 'sun'
+  if (dow === 6) return 'sat'
+  return ''
+}
+
+const rowTotalLots = (row) => orderSummaryDates.value.reduce((s, d) => s + (row.daily[d]?.order_lots || 0), 0)
+const rowTotalSheets = (row) => orderSummaryDates.value.reduce((s, d) => s + (row.daily[d]?.order_sheets || 0), 0)
+const rowTotalAllSheets = (row) => orderSummaryDates.value.reduce((s, d) => s + (row.daily[d]?.total_sheets || 0), 0)
+const dailyTotalSheets = (d) => orderSummaryRows.value.reduce((s, r) => s + (r.daily[d]?.total_sheets || 0), 0)
+const dailyTotalWeight = (d) => orderSummaryRows.value.reduce((s, r) => {
+  const w = r.daily[d]?.weight_kg
+  return s + (w || 0)
+}, 0)
+const grandTotalSheets = () => orderSummaryDates.value.reduce((s, d) => s + dailyTotalSheets(d), 0)
+const grandTotalWeight = () => orderSummaryDates.value.reduce((s, d) => s + dailyTotalWeight(d), 0)
+
+const loadOrderSummary = async () => {
+  if (!orderSummaryStart.value || !orderSummaryEnd.value) return
+  orderSummaryLoading.value = true
+  orderSummaryMsg.value = ''
+  try {
+    const res = await api.laserWeeklyPlans.getMaterialOrderSummary(orderSummaryStart.value, orderSummaryEnd.value)
+    const data = res?.data || {}
+    orderSummaryDates.value = data.dates || []
+    orderSummaryRows.value = data.rows || []
+    if (!data.rows?.length) {
+      orderSummaryMsg.value = '対象期間の発注データがありません。'
+    }
+  } catch (e) {
+    orderSummaryMsg.value = e?.response?.data?.detail || '発注量集計の取得に失敗しました。'
+    orderSummaryMsgType.value = 'error'
+    orderSummaryDates.value = []
+    orderSummaryRows.value = []
+  } finally {
+    orderSummaryLoading.value = false
+  }
+}
+
+const loadMaterialOptions = async () => {
+  try {
+    const items = await api.products.getAllProducts({ category: 'MATERIAL' })
+    materialOptions.value = items
+  } catch {
+    materialOptions.value = []
+  }
+}
+
+const saveManualOrder = async () => {
+  try {
+    await api.laserWeeklyPlans.createMaterialOrderManual({
+      material_id: manualMaterialId.value,
+      supplier: manualSupplier.value,
+      delivery_date: manualDeliveryDate.value,
+      order_lots: manualOrderLots.value || 0,
+      lot_multiple: manualLotMultiple.value || 0,
+      order_sheets: manualOrderSheets.value || 0,
+    })
+    manualOrderLots.value = 0
+    manualOrderSheets.value = 0
+    await loadOrderSummary()
+  } catch (e) {
+    orderSummaryMsg.value = e?.response?.data?.detail || '手動追加に失敗しました。'
+    orderSummaryMsgType.value = 'error'
+  }
+}
+
+const deleteManual = async (ids) => {
+  if (!ids?.length || !confirm('手動行を削除しますか？')) return
+  try {
+    for (const id of ids) {
+      await api.laserWeeklyPlans.deleteMaterialOrderManual(id)
+    }
+    await loadOrderSummary()
+  } catch (e) {
+    orderSummaryMsg.value = e?.response?.data?.detail || '削除に失敗しました。'
+    orderSummaryMsgType.value = 'error'
+  }
+}
+
 onMounted(() => {
   loadSummary()
+  loadMaterialOptions()
 })
 </script>
 
@@ -1021,6 +1249,103 @@ onMounted(() => {
     min-width: 280px;
   }
 }
+/* 期間別材料発注量 */
+.order-summary-panel {
+  margin-top: 16px;
+}
+.order-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.manual-form {
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.manual-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.manual-form select {
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: #fff;
+  max-width: 260px;
+}
+.order-table {
+  font-size: 11px;
+}
+.order-table th,
+.order-table td {
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+.order-table .date-col {
+  min-width: 44px;
+  text-align: center;
+}
+.order-table .dow-row {
+  font-size: 10px;
+  color: #64748b;
+}
+.sticky-col {
+  position: sticky;
+  background: #fff;
+  z-index: 1;
+}
+.col-code { left: 0; min-width: 80px; }
+.col-name { left: 80px; min-width: 100px; }
+.col-supplier { left: 180px; min-width: 60px; }
+.col-lot { left: 240px; min-width: 40px; }
+.sub-row td {
+  border-top: none !important;
+  padding-top: 0 !important;
+  font-size: 10px;
+  color: #475569;
+}
+.weight-row td {
+  color: #64748b;
+  font-size: 10px;
+}
+.total-row td {
+  background: #f0f9ff;
+  font-weight: 700;
+  border-top: 2px solid #0ea5e9;
+}
+.total-col {
+  background: #f8fafc;
+  font-weight: 700;
+}
+.weight-text {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 400;
+}
+.sheets-extra {
+  font-size: 10px;
+  color: #7c3aed;
+}
+.manual-badge {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: #f97316;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.sun { background: #fef2f2 !important; }
+.sat { background: #eff6ff !important; }
 </style>
 
 

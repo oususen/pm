@@ -10,8 +10,25 @@
         ><button class="btn" @click="openDownload('SATO')">
           佐藤商事注文書</button
         ><button class="btn" @click="openDownload('MEISEI')">
-          名成鋼機注文書
+          名成鋼機注文書</button
+        ><button class="btn" @click="showManualAdd = !showManualAdd">
+          手動追加
         </button>
+      </div>
+      <div v-if="showManualAdd" class="manual-add-form">
+        <label>材料<select v-model="manualMaterialId" style="max-width:220px;">
+          <option value="">-- 選択 --</option>
+          <option v-for="m in manualMaterialOptions" :key="m.id" :value="m.id">{{ m.product_code }} {{ m.product_name }}</option>
+        </select></label>
+        <label>仕入先<select v-model="manualSupplier">
+          <option value="MEISEI">名成鋼機</option>
+          <option value="SATO">佐藤商事</option>
+        </select></label>
+        <label>納期<input v-model="manualDeliveryDate" type="date" /></label>
+        <label>ロット数<input v-model.number="manualLots" type="number" min="0" style="width:60px;" /></label>
+        <label>倍数<input v-model.number="manualLotMultiple" type="number" min="0" style="width:60px;" /></label>
+        <label>端数枚数<input v-model.number="manualSheets" type="number" min="0" style="width:60px;" /></label>
+        <button class="btn primary" @click="addManualOrder" :disabled="!manualMaterialId || !manualDeliveryDate || (manualLots === 0 && manualSheets === 0)">登録</button>
       </div>
       <div
         v-if="downloadDialog"
@@ -135,6 +152,17 @@
                       min="0"
                       step="1"
                       type="number"
+                    /><input
+                      class="sheets-input"
+                      v-model.number="
+                        entry(material, day)[
+                          supplier.code === 'SATO' ? 'sato_sheets' : 'meisei_sheets'
+                        ]
+                      "
+                      min="0"
+                      step="1"
+                      type="number"
+                      placeholder="枚"
                     />
                   </td>
                   <td
@@ -186,7 +214,28 @@
                 </td></template
               >
             </tr></template
-          >
+          ><template v-for="row in manualRows" :key="`manual-${row.id}`">
+            <tr class="manual-row">
+              <td>{{ row.material_code }} <span class="manual-tag">手動</span></td>
+              <td>{{ row.material_name }}</td>
+              <td>{{ row.supplier_label }}</td>
+              <td class="initial-cell">-</td>
+              <template v-for="week in weekGroups" :key="`m-${row.id}-${week.key}`">
+                <template v-for="day in week.days" :key="`m-${row.id}-${day}`">
+                  <td colspan="3">
+                    <template v-if="day === row.delivery_date">
+                      {{ row.order_lots }}L<span v-if="row.order_sheets" class="sheets-label">+{{ row.order_sheets }}枚</span>
+                    </template>
+                  </td>
+                  <td class="date-end"></td>
+                </template>
+                <td class="week-total" colspan="3"></td>
+                <td class="week-total week-end">
+                  <button class="del-btn" @click="deleteManualRow(row.id)" title="削除">×</button>
+                </td>
+              </template>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -248,6 +297,8 @@ const entry = (material, day) =>
   (entries.value[key(material, day)] = {
     sato_lots: 0,
     meisei_lots: Math.ceil(demand(material, day)),
+    sato_sheets: 0,
+    meisei_sheets: 0,
   });
 const initial = (material) =>
   initials.value[material.material_id] ||
@@ -304,14 +355,19 @@ const load = async () => {
   ]);
   const next = {};
   orders.data.forEach((item) => {
-    const value = next[`${item.material_id}:${item.required_date}`] || {};
-    value[item.supplier === "SATO" ? "sato_lots" : "meisei_lots"] =
-      item.order_lots;
+    const value = next[`${item.material_id}:${item.required_date}`] || { sato_sheets: 0, meisei_sheets: 0 };
+    if (item.supplier === "SATO") {
+      value.sato_lots = item.order_lots;
+      value.sato_sheets = item.order_sheets || 0;
+    } else {
+      value.meisei_lots = item.order_lots;
+      value.meisei_sheets = item.order_sheets || 0;
+    }
     next[`${item.material_id}:${item.required_date}`] = value;
   });
   props.materials.forEach((material) =>
     props.dates.forEach((day) => {
-      const value = next[key(material, day)] || { sato_lots: 0 };
+      const value = next[key(material, day)] || { sato_lots: 0, sato_sheets: 0, meisei_sheets: 0 };
       if (value.meisei_lots === undefined)
         value.meisei_lots = Math.ceil(
           Math.max(demand(material, day) - Number(value.sato_lots || 0), 0),
@@ -326,6 +382,7 @@ const load = async () => {
       { value: item.initial_progress, locked: item.is_locked },
     ]),
   );
+  await loadManualRows();
 };
 const save = async () => {
   const items = props.materials.flatMap((material) =>
@@ -339,6 +396,8 @@ const save = async () => {
         sato_enabled: hasSato(material),
         sato_lots: Number(entry(material, required_date).sato_lots || 0),
         meisei_lots: Number(entry(material, required_date).meisei_lots || 0),
+        sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
+        meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
       }))
       .filter((item) => item.required_sheets > 0),
   );
@@ -367,6 +426,88 @@ const toggleLock = async (material) => {
     },
   ]);
 };
+
+const showManualAdd = ref(false);
+const manualRows = ref([]);
+const manualMaterialOptions = ref([]);
+const manualMaterialId = ref("");
+const manualSupplier = ref("MEISEI");
+const manualDeliveryDate = ref("");
+const manualLots = ref(0);
+const manualLotMultiple = ref(100);
+const manualSheets = ref(0);
+
+const loadManualRows = async () => {
+  if (!props.dates.length) return;
+  try {
+    const res = await api.laserWeeklyPlans.getMaterialOrderSummary(
+      props.dates[0],
+      props.dates[props.dates.length - 1],
+    );
+    const rows = (res?.data?.rows || []).flatMap((row) =>
+      (res?.data?.dates || [])
+        .filter((d) => {
+          const daily = row.daily[d];
+          return daily && daily.manual_ids?.length;
+        })
+        .map((d) => ({
+          id: row.daily[d].manual_ids[0],
+          material_id: row.material_id,
+          material_code: row.material_code,
+          material_name: row.material_name,
+          supplier: row.supplier,
+          supplier_label: row.supplier_label,
+          delivery_date: d,
+          order_lots: row.daily[d].order_lots,
+          order_sheets: row.daily[d].order_sheets,
+        })),
+    );
+    manualRows.value = rows;
+  } catch {
+    manualRows.value = [];
+  }
+};
+
+const loadManualMaterialOptions = async () => {
+  try {
+    manualMaterialOptions.value = await api.products.getAllProducts({ category: "MATERIAL" });
+  } catch {
+    manualMaterialOptions.value = [];
+  }
+};
+
+const addManualOrder = async () => {
+  try {
+    await api.laserWeeklyPlans.createMaterialOrderManual({
+      material_id: manualMaterialId.value,
+      supplier: manualSupplier.value,
+      delivery_date: manualDeliveryDate.value,
+      order_lots: manualLots.value || 0,
+      lot_multiple: manualLotMultiple.value || 0,
+      order_sheets: manualSheets.value || 0,
+    });
+    manualLots.value = 0;
+    manualSheets.value = 0;
+    emit("message", "手動発注を登録しました。");
+    await loadManualRows();
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "手動追加に失敗しました。");
+  }
+};
+
+const deleteManualRow = async (id) => {
+  if (!confirm("手動行を削除しますか？")) return;
+  try {
+    await api.laserWeeklyPlans.deleteMaterialOrderManual(id);
+    await loadManualRows();
+    emit("message", "手動行を削除しました。");
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "削除に失敗しました。");
+  }
+};
+
+loadManualMaterialOptions();
+
 const openDownload = (supplier) => {
   const start = new Date(`${props.startDate}T00:00:00`);
   start.setDate(start.getDate() + 7);
@@ -615,5 +756,67 @@ watch(() => [props.startDate, props.materials], load, {
 .behind {
   color: #dc2626;
   font-weight: 700;
+}
+.sheets-input {
+  width: 28px;
+  min-width: 0;
+  max-width: 28px;
+  padding: 0;
+  font-size: 10px;
+  color: #7c3aed;
+  -moz-appearance: textfield;
+}
+.sheets-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sheets-input::placeholder {
+  font-size: 9px;
+  color: #a78bfa;
+}
+.manual-add-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.manual-add-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.manual-add-form select,
+.manual-add-form input {
+  height: 28px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.manual-row td {
+  background: #fefce8 !important;
+}
+.manual-tag {
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: #f97316;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.sheets-label {
+  font-size: 10px;
+  color: #7c3aed;
+}
+.del-btn {
+  border: none;
+  background: #ef4444;
+  color: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+  line-height: 18px;
 }
 </style>
