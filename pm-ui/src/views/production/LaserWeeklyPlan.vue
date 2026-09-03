@@ -417,6 +417,7 @@
                     class="initial-progress-input"
                     v-model.number="pattern.initial_progress"
                     type="number"
+                    step="0.01"
                     :disabled="pattern.initial_progress_locked"
                     @input="dirty = true"
                   /><button
@@ -990,13 +991,10 @@ const toggleLock = async (pattern) => {
         is_locked: newLocked,
       },
     ]);
-    if (newLocked) {
-      pattern.initial_progress_locked = true;
-      message.value = "期首進度を固定しました。";
-    } else {
-      await loadPlan();
-      message.value = "期首進度のロックを解除しました。";
-    }
+    pattern.initial_progress_locked = newLocked;
+    message.value = newLocked
+      ? "期首進度を固定しました。"
+      : "期首進度のロックを解除しました。";
   } catch (e) {
     message.value =
       e.response?.data?.detail || "期首進度を保存できませんでした。";

@@ -45,7 +45,7 @@ class LaserWeeklyPatternManualQuantity(models.Model):
 class LaserWeeklyPatternInitialProgress(models.Model):
     laser_pattern = models.ForeignKey(LaserPattern, on_delete=models.CASCADE, related_name='weekly_initial_progress')
     week_start_date = models.DateField(verbose_name='週開始日')
-    initial_progress = models.IntegerField(default=0, verbose_name='期首進度')
+    initial_progress = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='期首進度')
     is_locked = models.BooleanField(default=False, verbose_name='ロック')
 
     class Meta:

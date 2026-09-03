@@ -380,7 +380,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             try:
                 laser_pattern_id = int(item['laser_pattern_id'])
                 week_start_date = datetime.strptime(item['week_start_date'], '%Y-%m-%d').date()
-                initial_progress = int(item['initial_progress'])
+                initial_progress = round(float(item['initial_progress']), 2)
                 is_locked = bool(item.get('is_locked', True))
             except (KeyError, TypeError, ValueError):
                 return Response({'detail': '期首進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -462,7 +462,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         prev_locked = LaserWeeklyPatternInitialProgress.objects.filter(
             laser_pattern_id=pattern_id, week_start_date=prev_start, is_locked=True,
         ).first()
-        prev_initial = prev_locked.initial_progress if prev_locked else 0
+        prev_initial = float(prev_locked.initial_progress) if prev_locked else 0
         cum_auto = 0
         cum_manual = 0
         pattern_targets = [t for t in targets if t.laser_pattern_id == pattern_id]
@@ -647,7 +647,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             pid = pattern_row['laser_pattern_id']
             saved = initial_progress_map.get(pid)
             if saved and saved.is_locked:
-                pattern_row['initial_progress'] = saved.initial_progress
+                pattern_row['initial_progress'] = float(saved.initial_progress)
                 pattern_row['initial_progress_locked'] = True
             else:
                 auto_val = self._calc_auto_initial_progress(
