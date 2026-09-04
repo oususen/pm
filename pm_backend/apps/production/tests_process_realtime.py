@@ -18,7 +18,10 @@ from production.services.process_realtime_backlog_service import (
     apply_delta_to_inventory_and_progress,
     recalculate_inventory_after_session_change,
 )
-from production.services.process_realtime_routing_service import is_valid_output_process
+from production.services.process_realtime_routing_service import (
+    get_input_eligible_product_ids,
+    is_valid_output_process,
+)
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 
 
@@ -611,6 +614,24 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             parent,
             date(2026, 3, 5),
         ))
+        self.assertEqual(
+            get_input_eligible_product_ids(
+                self.process,
+                [self.product.id, parent.id, child.id],
+                date(2026, 3, 5),
+            ),
+            {parent.id, child.id},
+        )
+
+        self.create_output_routing(routing_code='R-ROUTING-ELIGIBLE')
+        self.assertEqual(
+            get_input_eligible_product_ids(
+                self.process,
+                [self.product.id, parent.id, child.id],
+                date(2026, 3, 5),
+            ),
+            {self.product.id, parent.id, child.id},
+        )
 
     @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
     def test_session_detail_update_creates_history(self, mock_recalculate):

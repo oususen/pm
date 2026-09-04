@@ -3001,9 +3001,13 @@ const loadPlannedProducts = async () => {
       ])
       if (requestSeq !== plannedProductsRequestSeq) return
 
-      allPlanProducts.value = mergeProductionProductsByProduct(currentSlotItemsResult.items || [])
-      timeSlots.value = fastSlotResult.slots
-      activeSlotIndex.value = fastSlotResult.activeIndex
+      const currentSlotItems = await filterInputEligibleProducts(processId, currentSlotItemsResult.items || [])
+      if (requestSeq !== plannedProductsRequestSeq) return
+      allPlanProducts.value = mergeProductionProductsByProduct(currentSlotItems)
+      timeSlots.value = await filterTimeSlotsByEligibleProducts(processId, fastSlotResult.slots)
+      activeSlotIndex.value = timeSlots.value.length
+        ? Math.min(fastSlotResult.activeIndex ?? 0, timeSlots.value.length - 1)
+        : null
       applyTimeSlotFilter()
     }
 
@@ -3016,8 +3020,11 @@ const loadPlannedProducts = async () => {
     // 時間帯スロットを構築し、デフォルトで現在時刻スロットを選択
     const slotResult = await buildPlanTimeSlots(lineId, processId, tempProducts)
     if (requestSeq !== plannedProductsRequestSeq) return
-    timeSlots.value = slotResult.slots
-    activeSlotIndex.value = slotResult.activeIndex
+    timeSlots.value = await filterTimeSlotsByEligibleProducts(processId, slotResult.slots)
+    if (requestSeq !== plannedProductsRequestSeq) return
+    activeSlotIndex.value = timeSlots.value.length
+      ? Math.min(slotResult.activeIndex ?? 0, timeSlots.value.length - 1)
+      : null
     const ganttEntriesByProduct = new Map()
     ;(slotResult.slots || []).forEach((slot) => {
       ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
@@ -3076,6 +3083,9 @@ const loadPlannedProducts = async () => {
       )
       if (requestSeq !== plannedProductsRequestSeq) return
     }
+
+    mapFilteredForProduction = await filterInputEligibleProducts(processId, mapFilteredForProduction)
+    if (requestSeq !== plannedProductsRequestSeq) return
 
     // 計画数は t_line_gantt_plan（時間帯スロット）由来で最終確定する
     const expanded = []
@@ -3564,7 +3574,10 @@ const loadManualProducts = async (processId) => {
   try {
     const res = await api.processes.getRelatedProducts(processId)
     const items = res?.data || res || []
-    manualProducts.value = Array.isArray(items) ? items : []
+    manualProducts.value = await filterInputEligibleProducts(
+      processId,
+      Array.isArray(items) ? items : []
+    )
     manualProductsProcessId.value = processId
     manualProductsLoaded.value = true
   } catch (error) {
@@ -3572,6 +3585,38 @@ const loadManualProducts = async (processId) => {
   } finally {
     manualProductsLoading.value = false
   }
+}
+
+const filterInputEligibleProducts = async (processId, candidates) => {
+  const list = Array.isArray(candidates) ? candidates : []
+  const productIds = [...new Set(list.map((item) => item?.product ?? item?.id).filter(Boolean))]
+  if (!productIds.length) return []
+  try {
+    const res = await api.processes.getInputEligibleProducts(processId, {
+      plan_date: currentDateYmd.value,
+      product_ids: productIds,
+    })
+    const eligibleIds = new Set((res?.data?.product_ids || []).map(String))
+    return list.filter((item) => eligibleIds.has(String(item?.product ?? item?.id)))
+  } catch (error) {
+    console.error('入力可能品番の判定エラー:', error)
+    return []
+  }
+}
+
+const filterTimeSlotsByEligibleProducts = async (processId, slots) => {
+  const list = Array.isArray(slots) ? slots : []
+  const eligibleItems = await filterInputEligibleProducts(
+    processId,
+    list.flatMap((slot) => Array.isArray(slot?.items) ? slot.items : [])
+  )
+  const eligibleIds = new Set(eligibleItems.map((item) => String(item?.product ?? item?.id)))
+  return list.map((slot) => ({
+    ...slot,
+    items: (Array.isArray(slot?.items) ? slot.items : []).filter(
+      (item) => eligibleIds.has(String(item?.product ?? item?.id))
+    ),
+  })).filter((slot) => slot.items.length > 0)
 }
 
 const selectPlannedProduct = (p) => {

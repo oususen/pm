@@ -41,6 +41,7 @@ from .services.routing_service import (
     build_effective_routing_range_q,
     resolve_effective_routing,
 )
+from production.services.process_realtime_routing_service import get_input_eligible_product_ids
 from accounts.permissions import HasResourcePermissionOrReadOnly
 from django.utils.dateparse import parse_datetime, parse_date
 
@@ -2118,6 +2119,25 @@ class ProcessViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     search_fields = ['process_code', 'process_name']
     ordering_fields = ['process_code', 'created_at']
     ordering = ['process_code']
+
+    @action(detail=True, methods=['post'], url_path='input-eligible-products')
+    def input_eligible_products(self, request, pk=None):
+        """工程実績入力で選択可能な候補IDを一括判定する。"""
+        plan_date = parse_date(str(request.data.get('plan_date') or ''))
+        raw_product_ids = request.data.get('product_ids') or []
+        if not plan_date:
+            return Response({'detail': 'plan_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(raw_product_ids, list):
+            return Response({'detail': 'product_ids は配列で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            product_ids = [int(product_id) for product_id in raw_product_ids]
+        except (TypeError, ValueError):
+            return Response({'detail': 'product_ids の形式が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        process = self.get_object()
+        return Response({
+            'product_ids': sorted(get_input_eligible_product_ids(process, product_ids, plan_date)),
+        })
 
     @action(detail=True, methods=['get'], url_path='related-products')
     def related_products(self, request, pk=None):
