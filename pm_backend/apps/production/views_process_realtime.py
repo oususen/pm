@@ -4,7 +4,7 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
@@ -30,6 +30,7 @@ from .services.process_realtime_backlog_service import (
     adjust_coproduct_children_backlog,
     apply_delta_to_inventory_and_progress,
     recalculate_child_stock_after_record_edit,
+    recalculate_inventory_for_product_impact,
     recalculate_inventory_after_session_change,
     rebuild_session_production_records,
     update_coproduct_children_records,
@@ -54,7 +55,9 @@ from .services.process_realtime_scrap_service import (
     mark_scrap_replenished,
     process_scrap_disposition,
 )
-from masters.models import Product, Process, BOM
+from .models_line_backlog import LineBacklog
+from masters.models import Product, Process, BOM, RoutingStep
+from masters.services.routing_service import build_effective_routing_q
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
 
 
@@ -63,6 +66,41 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
     queryset = ProcessRealtimeRecord.objects.all()
     serializer_class = ProcessRealtimeRecordSerializer
+
+    @staticmethod
+    def _get_session_output_routing_steps(session):
+        """セッション製品を当日に出力する、同一ライン上の有効工程を取得する。"""
+        if not session.product_id or not session.process_id or not session.plan_date:
+            return []
+        line_id = getattr(session.process, 'line_id', None)
+        if not line_id:
+            return []
+
+        return list(
+            RoutingStep.objects.filter(
+                output_product_id=session.product_id,
+                process_id__isnull=False,
+            ).filter(
+                build_effective_routing_q(session.plan_date, prefix='routing__')
+            ).filter(
+                models.Q(line_id=line_id)
+                | models.Q(line__isnull=True, process__line_id=line_id)
+            ).select_related('process', 'process__line', 'line')
+        )
+
+    @staticmethod
+    def _recalculate_product_on_output_routes(session, routing_steps):
+        """誤工程削除後、製品の正規出力ラインから在庫・進度を再計算する。"""
+        line_ids = {
+            step.line_id or getattr(step.process, 'line_id', None)
+            for step in routing_steps
+        }
+        for line_id in sorted(line_id for line_id in line_ids if line_id):
+            recalculate_inventory_for_product_impact(
+                line_id=line_id,
+                product_id=session.product_id,
+                plan_date=session.plan_date,
+            )
 
     def get_queryset(self):
         queryset = ProcessRealtimeRecord.objects.select_related('process', 'product', 'scrap_detail')
@@ -523,6 +561,8 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
             before_snapshot = serialize_session_snapshot(session)
             changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            output_routing_steps = self._get_session_output_routing_steps(session)
+            is_valid_process = any(step.process_id == session.process_id for step in output_routing_steps)
             with transaction.atomic():
                 create_session_change_history(
                     session_obj=session,
@@ -532,19 +572,31 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                     before_data=before_snapshot,
                     after_data={},
                 )
-                old_qty = int(session.production_qty or 0) if is_countable_session_for_actual(
-                    session.session_type, session.end_action
-                ) else 0
-                if old_qty:
-                    adjust_backlog_actual_for_session(session, -old_qty)
-                    adjust_coproduct_children_backlog(session, -old_qty)
-                    apply_delta_to_inventory_and_progress(session, -old_qty)
+                if is_valid_process:
+                    old_qty = int(session.production_qty or 0) if is_countable_session_for_actual(
+                        session.session_type, session.end_action
+                    ) else 0
+                    if old_qty:
+                        adjust_backlog_actual_for_session(session, -old_qty)
+                        adjust_coproduct_children_backlog(session, -old_qty)
+                        apply_delta_to_inventory_and_progress(session, -old_qty)
+                else:
+                    # 誤工程で作られた基礎行・計画行は実績として扱わず全て除去する。
+                    LineBacklog.objects.filter(
+                        line_id=session.process.line_id,
+                        process_id=session.process_id,
+                        product_id=session.product_id,
+                        plan_date=session.plan_date,
+                    ).delete()
 
                 ProcessRealtimeRecord.objects.filter(
                     record_type='PRODUCTION',
                     event_data__work_session_id=session.id,
                 ).delete()
-                recalculate_inventory_after_session_change(session)
+                if is_valid_process:
+                    recalculate_inventory_after_session_change(session)
+                else:
+                    self._recalculate_product_on_output_routes(session, output_routing_steps)
                 session.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 

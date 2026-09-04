@@ -708,6 +708,19 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             sequence_no=0,
             actual_qty=5,
         )
+        routing = Routing.objects.create(
+            product=self.product,
+            routing_code='R-DELETE-VALID',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=self.process,
+            line=self.line,
+            output_product=self.product,
+        )
 
         view = ProcessRealtimeRecordViewSet.as_view({'delete': 'session_detail'})
         request = self.factory.delete(
@@ -730,6 +743,98 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertEqual(int(history.before_data['production_qty']), 5)
         self.assertEqual(history.after_data, {})
         mock_recalculate.assert_called_once()
+
+    @patch('production.views_process_realtime.recalculate_inventory_for_product_impact')
+    def test_session_detail_delete_removes_invalid_process_backlogs_and_recalculates_valid_route(self, mock_recalculate):
+        valid_process = Process.objects.create(
+            process_code='PVALID-DELETE',
+            process_name='正規工程',
+            line=self.line,
+        )
+        invalid_process = Process.objects.create(
+            process_code='PINVALID-DELETE',
+            process_name='誤工程',
+            line=self.line,
+        )
+        routing = Routing.objects.create(
+            product=self.product,
+            routing_code='R-INVALID-DELETE',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=valid_process,
+            line=self.line,
+            output_product=self.product,
+        )
+        session = ProcessWorkSession.objects.create(
+            process=invalid_process,
+            product=self.product,
+            product_code=self.product.product_code,
+            product_name=self.product.product_name,
+            plan_date=date(2026, 3, 5),
+            session_no=1,
+            session_type='WORK',
+            start_action='MANUAL',
+            end_action='END',
+            started_at=self.make_dt(2026, 3, 5, 9),
+            ended_at=self.make_dt(2026, 3, 5, 10),
+            status='CLOSED',
+            duration_seconds=3600,
+            production_qty=5,
+        )
+        LineBacklog.objects.create(
+            plan_date=session.plan_date,
+            process=invalid_process,
+            product=self.product,
+            line=self.line,
+            sequence_no=0,
+            actual_qty=5,
+        )
+        LineBacklog.objects.create(
+            plan_date=session.plan_date,
+            process=invalid_process,
+            product=self.product,
+            line=self.line,
+            sequence_no=1,
+            plan_qty=5,
+        )
+        ProcessRealtimeRecord.objects.create(
+            process=invalid_process,
+            product=self.product,
+            product_code=self.product.product_code,
+            product_name=self.product.product_name,
+            record_type='PRODUCTION',
+            qty=Decimal('5'),
+            event_data={'work_session_id': session.id},
+        )
+
+        view = ProcessRealtimeRecordViewSet.as_view({'delete': 'session_detail'})
+        request = self.factory.delete(
+            f'/api/process-realtime/sessions/{session.id}/',
+            {'change_reason': '誤工程のため削除'},
+            format='json',
+        )
+        response = view(request, session_id=session.id)
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(LineBacklog.objects.filter(
+            line=self.line,
+            process=invalid_process,
+            product=self.product,
+            plan_date=session.plan_date,
+        ).exists())
+        self.assertFalse(ProcessRealtimeRecord.objects.filter(
+            event_data__work_session_id=session.id,
+        ).exists())
+        self.assertFalse(ProcessWorkSession.objects.filter(id=session.id).exists())
+        mock_recalculate.assert_called_once_with(
+            line_id=self.line.id,
+            product_id=self.product.id,
+            plan_date=date(2026, 3, 5),
+        )
 
     @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
     def test_operator_action_end_without_start_is_rejected(self, _mock_plan_date):
