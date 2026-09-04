@@ -79,9 +79,10 @@ class OrderExpansionServiceTest(TestCase):
         new_firm = self._create_order_line('FIRM-NEW', 'FIRM', '2', due_date, is_expanded=False)
         forecast = self._create_order_line('FC-NEW', 'FORECAST', '7', due_date, is_expanded=False)
 
-        LineDemand.objects.create(
+        existing_demand = LineDemand.objects.create(
             line=self.line,
             routing_step=self.step,
+            process=self.process,
             product=self.product,
             product_code=self.product.product_code,
             plan_date=due_date,
@@ -92,7 +93,7 @@ class OrderExpansionServiceTest(TestCase):
             forecast_qty=Decimal('3'),
             firm_qty=Decimal('5'),
             plan_qty=Decimal('8'),
-            actual_qty=Decimal('0'),
+            actual_qty=Decimal('2'),
             plan_progress=Decimal('1.000'),
             actual_progress=Decimal('0.000'),
             order_numbers='FC-OLD,FIRM-OLD',
@@ -115,11 +116,35 @@ class OrderExpansionServiceTest(TestCase):
         self.assertEqual(demand.forecast_qty, Decimal('7'))
         self.assertEqual(demand.firm_qty, Decimal('7'))
         self.assertEqual(demand.plan_qty, Decimal('14'))
+        self.assertEqual(demand.actual_qty, Decimal('2'))
         self.assertEqual(demand.forecast_order_numbers, 'FC-NEW')
         self.assertEqual(demand.firm_order_numbers, 'FIRM-NEW,FIRM-OLD')
+        self.assertNotEqual(demand.id, existing_demand.id)
+        self.assertEqual(result['deleted'], 1)
         self.assertTrue(new_firm.is_expanded)
         self.assertTrue(existing_firm.is_expanded)
         self.assertFalse(forecast.is_expanded)
+
+    def test_incremental_expand_keeps_unchanged_forecast_demand(self):
+        due_date = '2026-04-10'
+        self._create_order_line('FC-UNCHANGED', 'FORECAST', '7', due_date)
+
+        first_result = OrderExpansionService().expand_open_orders(clear_existing=False)
+        demand = LineDemand.objects.get(
+            line=self.line,
+            product_code=self.product.product_code,
+            plan_date=due_date,
+        )
+        demand_id = demand.id
+
+        second_result = OrderExpansionService().expand_open_orders(clear_existing=False)
+        demand.refresh_from_db()
+
+        self.assertEqual(first_result['created'], 1)
+        self.assertEqual(second_result['created'], 0)
+        self.assertEqual(second_result['deleted'], 0)
+        self.assertEqual(second_result['updated'], 0)
+        self.assertEqual(demand.id, demand_id)
 
     def test_first_incremental_run_forces_full_rebuild_when_all_open_firm_are_unexpanded(self):
         due_date = '2026-04-11'

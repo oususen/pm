@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Tuple
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from masters.models import BOM, BOMItem, Line, Routing, RoutingStep
@@ -60,6 +61,24 @@ class OrderExpansionService:
         'plan_progress',
         'actual_progress',
         'order_numbers',
+        'firm_order_numbers',
+        'forecast_order_numbers',
+    ]
+    INCREMENTAL_DEMAND_VALUE_FIELDS = [
+        'id',
+        'line_id',
+        'product_code',
+        'ship_to_code',
+        'plan_date',
+        'routing_step_id',
+        'process_id',
+        'product_id',
+        'lead_time_days',
+        'firm_is_shifted',
+        'forecast_is_shifted',
+        'forecast_qty',
+        'firm_qty',
+        'actual_qty',
         'firm_order_numbers',
         'forecast_order_numbers',
     ]
@@ -424,7 +443,7 @@ class OrderExpansionService:
             self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
         )
 
-        existing_map = self._load_existing_demand_rows()
+        existing_map = self._load_existing_incremental_demand_rows()
 
         with transaction.atomic():
             forecast_result = self._sync_forecast_demands(forecast_aggregated, existing_map)
@@ -498,8 +517,8 @@ class OrderExpansionService:
         target_keys = set(aggregated.keys()) | existing_forecast_keys
 
         to_create: List[LineDemand] = []
-        to_update: List[LineDemand] = []
         delete_ids: List[int] = []
+        deleted_keys = set()
 
         for key in target_keys:
             entry = aggregated.get(key)
@@ -507,55 +526,79 @@ class OrderExpansionService:
 
             if entry:
                 if existing is None:
-                    existing = self._build_line_demand(entry)
-                    existing_map[key] = existing
-                    to_create.append(existing)
+                    to_create.append(self._build_line_demand(entry))
                     continue
 
-                existing = self._build_demand_instance_from_row(existing)
-                self._apply_shared_entry_metadata(existing, entry)
-                existing.forecast_qty = entry['forecast_qty']
-                existing.forecast_is_shifted = bool(entry['forecast_is_shifted'])
-                existing.forecast_order_numbers = self._normalize_order_numbers(
-                    entry['forecast_order_numbers']
-                )
-                self._refresh_demand_fields(existing)
-                to_update.append(existing)
+                replacement = self._build_line_demand(entry)
+                self._copy_existing_firm_values(replacement, existing)
+                if not self._is_same_incremental_demand(existing, replacement):
+                    delete_ids.append(existing['id'])
+                    deleted_keys.add(key)
+                    to_create.append(replacement)
                 continue
 
             if existing is None:
                 continue
 
-            existing = self._build_demand_instance_from_row(existing)
-            existing.forecast_qty = Decimal('0')
-            existing.forecast_is_shifted = False
-            existing.forecast_order_numbers = ''
-            self._refresh_demand_fields(existing)
+            replacement = self._build_demand_instance_from_row(existing)
+            replacement.forecast_qty = Decimal('0')
+            replacement.forecast_is_shifted = False
+            replacement.forecast_order_numbers = ''
+            self._refresh_demand_fields(replacement)
 
-            if self._is_empty_demand(existing):
-                if existing.pk:
-                    delete_ids.append(existing.pk)
-                existing_map.pop(key, None)
-            else:
-                to_update.append(existing)
+            delete_ids.append(existing['id'])
+            deleted_keys.add(key)
+            if not self._is_empty_demand(replacement):
+                to_create.append(replacement)
 
         if delete_ids:
             LineDemand.objects.filter(id__in=delete_ids).delete()
+        for key in deleted_keys:
+            existing_map.pop(key, None)
         if to_create:
             LineDemand.objects.bulk_create(to_create, batch_size=10000)
-            self._refresh_created_demands(to_create, existing_map)
-        if to_update:
-            LineDemand.objects.bulk_update(
-                to_update,
-                self.LINE_DEMAND_UPDATE_FIELDS,
-                batch_size=1000,
+            self._refresh_created_demands(
+                to_create,
+                existing_map,
+                value_fields=self.INCREMENTAL_DEMAND_VALUE_FIELDS,
             )
 
         return {
             'created': len(to_create),
-            'updated': len(to_update),
+            'updated': 0,
             'deleted': len(delete_ids),
         }
+
+    def _copy_existing_firm_values(self, demand, existing):
+        demand.firm_qty = Decimal(str(existing.get('firm_qty') or 0))
+        demand.actual_qty = Decimal(str(existing.get('actual_qty') or 0))
+        demand.firm_is_shifted = bool(existing.get('firm_is_shifted'))
+        demand.firm_order_numbers = existing.get('firm_order_numbers') or ''
+        self._refresh_demand_fields(demand)
+
+    def _is_same_incremental_demand(self, existing, demand):
+        return (
+            existing['routing_step_id'] == demand.routing_step_id
+            and existing['process_id'] == demand.process_id
+            and existing['product_id'] == demand.product_id
+            and existing.get('ship_to_code', '') == (demand.ship_to_code or '')
+            and existing['lead_time_days'] == demand.lead_time_days
+            and Decimal(str(existing.get('forecast_qty') or 0)) == (demand.forecast_qty or Decimal('0'))
+            and Decimal(str(existing.get('firm_qty') or 0)) == (demand.firm_qty or Decimal('0'))
+            and bool(existing.get('firm_is_shifted')) == bool(demand.firm_is_shifted)
+            and bool(existing.get('forecast_is_shifted')) == bool(demand.forecast_is_shifted)
+            and (existing.get('firm_order_numbers') or '') == (demand.firm_order_numbers or '')
+            and (existing.get('forecast_order_numbers') or '') == (demand.forecast_order_numbers or '')
+        )
+
+    def _demand_key(self, demand):
+        return (
+            demand.line_id,
+            demand.product_code,
+            demand.plan_date,
+            demand.process_id,
+            demand.ship_to_code or '',
+        )
 
     def _apply_incremental_firm_demands(self, aggregated, existing_map):
         to_create: List[LineDemand] = []
@@ -602,27 +645,39 @@ class OrderExpansionService:
             for row in LineDemand.objects.values(*self.EXISTING_DEMAND_VALUE_FIELDS)
         }
 
+    def _load_existing_incremental_demand_rows(self):
+        return {
+            (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or ''): row
+            for row in LineDemand.objects.values(*self.INCREMENTAL_DEMAND_VALUE_FIELDS)
+        }
+
     def _load_existing_actual_qty_map(self):
         return {
             (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or ''): Decimal(str(row['actual_qty'] or 0))
             for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'process_id', 'ship_to_code', 'actual_qty')
         }
 
-    def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map):
+    def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map, value_fields=None):
         if not created_demands:
             return
 
-        line_ids = {demand.line_id for demand in created_demands}
-        product_codes = {demand.product_code for demand in created_demands}
-        plan_dates = {demand.plan_date for demand in created_demands}
+        fields = value_fields or self.EXISTING_DEMAND_VALUE_FIELDS
+        for start in range(0, len(created_demands), 500):
+            target_filter = Q()
+            for demand in created_demands[start:start + 500]:
+                target_filter |= Q(
+                    line_id=demand.line_id,
+                    product_code=demand.product_code,
+                    plan_date=demand.plan_date,
+                    process_id=demand.process_id,
+                    ship_to_code=demand.ship_to_code or '',
+                )
 
-        refreshed = LineDemand.objects.filter(
-            line_id__in=line_ids,
-            product_code__in=product_codes,
-            plan_date__in=plan_dates,
-        ).values(*self.EXISTING_DEMAND_VALUE_FIELDS)
-        for row in refreshed:
-            existing_map[(row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or '')] = row
+            refreshed = LineDemand.objects.filter(target_filter).values(*fields)
+            for row in refreshed:
+                existing_map[
+                    (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or '')
+                ] = row
 
     def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
         aggregated: Dict[Tuple[int, str, object, int | None, str], Dict[str, object]] = {}
@@ -905,6 +960,9 @@ class OrderExpansionService:
         return merged
 
     def _build_demand_instance_from_row(self, row):
+        if isinstance(row, LineDemand):
+            return row
+
         return LineDemand(
             id=row['id'],
             line_id=row['line_id'],
@@ -915,16 +973,16 @@ class OrderExpansionService:
             ship_to_code=row.get('ship_to_code') or '',
             plan_date=row['plan_date'],
             lead_time_days=row['lead_time_days'],
-            is_shifted=bool(row['is_shifted']),
-            firm_is_shifted=bool(row['firm_is_shifted']),
-            forecast_is_shifted=bool(row['forecast_is_shifted']),
+            is_shifted=bool(row.get('is_shifted')),
+            firm_is_shifted=bool(row.get('firm_is_shifted')),
+            forecast_is_shifted=bool(row.get('forecast_is_shifted')),
             forecast_qty=Decimal(str(row['forecast_qty'] or 0)),
             firm_qty=Decimal(str(row['firm_qty'] or 0)),
-            plan_qty=Decimal(str(row['plan_qty'] or 0)),
-            actual_qty=Decimal(str(row['actual_qty'] or 0)),
-            plan_progress=Decimal(str(row['plan_progress'] or 0)),
-            actual_progress=Decimal(str(row['actual_progress'] or 0)),
-            order_numbers=row['order_numbers'] or '',
+            plan_qty=Decimal(str(row.get('plan_qty') or 0)),
+            actual_qty=Decimal(str(row.get('actual_qty') or 0)),
+            plan_progress=Decimal(str(row.get('plan_progress') or 0)),
+            actual_progress=Decimal(str(row.get('actual_progress') or 0)),
+            order_numbers=row.get('order_numbers') or '',
             firm_order_numbers=row['firm_order_numbers'] or '',
             forecast_order_numbers=row['forecast_order_numbers'] or '',
         )
