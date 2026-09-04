@@ -1416,6 +1416,20 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 if truck_id:
                     truck_ids.add(int(truck_id))
 
+        # 対象日の全明細が送られていない保存では、フィルタ外の割付を消すおそれがある。
+        sent_adj_ids = set(adj_ids)
+        all_adj_ids = set(
+            KubotaSakaiDueAdjustment.objects.filter(
+                due_date=target_date,
+                delivery_qty__gt=0,
+            ).values_list('id', flat=True)
+        )
+        if sent_adj_ids != all_adj_ids:
+            return Response(
+                {'detail': '対象日の全明細が送信されていないため保存できません。検索を解除して全件表示してから保存してください。'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         adj_map = {
             a.id: a
             for a in KubotaSakaiDueAdjustment.objects.filter(
