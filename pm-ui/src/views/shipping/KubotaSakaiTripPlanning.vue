@@ -39,7 +39,12 @@
       <button class="btn import-btn" :disabled="importing || loading" @click="importOrders">
         {{ importing ? '取込中...' : '取込' }}
       </button>
-      <button class="btn save-btn" :disabled="loading || saving" @click="save">保存</button>
+      <button
+        class="btn save-btn"
+        :disabled="loading || saving || isKeywordFiltered"
+        :title="isKeywordFiltered ? '品番フィルタ有効時に保存すると、ほかの製品のデータを削除するリスクがあるため保存できません。検索を解除して表示し直してください。' : ''"
+        @click="save"
+      >保存</button>
       <button class="btn" :disabled="loading" @click="loadGrid">表示</button>
       <button class="btn" :disabled="loading || !mergedRows.length" @click="openDisplaySettingDialog">表示順</button>
       <button class="btn" :disabled="loading || exportingCsv" @click="exportLoadDetailCsv">
@@ -943,6 +948,7 @@ const targetDate = ref(todayDate)
 const planDate = ref(todayDate)
 const horizonDays = ref(14)
 const keyword = ref('')
+const isKeywordFiltered = computed(() => Boolean(keyword.value.trim()))
 const favorites = ref([])
 const selectedFavoriteId = ref('')
 const favoriteName = ref('')
@@ -2477,6 +2483,10 @@ const closeSaveConfirmDialog = () => {
 }
 
 const performSave = async () => {
+  if (isKeywordFiltered.value) {
+    alert('検索中は保存できません。検索を解除して表示し直してください。')
+    return
+  }
   saving.value = true
   try {
     for (const dateKey of allDateKeys.value) {
@@ -2521,6 +2531,10 @@ const proceedSave = async () => {
 }
 
 const save = async () => {
+  if (isKeywordFiltered.value) {
+    alert('検索中は保存できません。検索を解除して表示し直してください。')
+    return
+  }
   const validation = validateBeforeSave()
   if (!validation.ok) {
     saveValidationState.value = validation
