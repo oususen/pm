@@ -2,7 +2,7 @@
 
 from django.db.models import Q
 
-from masters.models import BOM, BOMItem, RoutingStep
+from masters.models import BOM, RoutingStep
 from masters.services.routing_service import build_effective_routing_q
 
 
@@ -41,18 +41,15 @@ def is_coproduct_product(product, plan_date):
     if not product or not plan_date:
         return False
 
-    active_coproduct_boms = BOM.objects.filter(
+    return BOM.objects.filter(
         is_active=True,
         is_coproduct=True,
         valid_from__lte=plan_date,
     ).filter(
         Q(valid_to__isnull=True) | Q(valid_to__gte=plan_date)
-    )
-    return active_coproduct_boms.filter(
-        parent_product_id=product.id,
-    ).exists() or BOMItem.objects.filter(
-        child_product_id=product.id,
-        bom__in=active_coproduct_boms,
+    ).filter(
+        Q(parent_product_id=product.id)
+        | Q(items__child_product_id=product.id)
     ).exists()
 
 
