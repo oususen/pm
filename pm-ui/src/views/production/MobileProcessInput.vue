@@ -2994,22 +2994,6 @@ const loadPlannedProducts = async () => {
     if (!lineId) return
     const processId = selectedProcessId.value
     // 現在時刻のみON時は、まず LINE_GANTT_PLANS を使って即時表示する
-    if (filterCurrentTime.value) {
-      const [currentSlotItemsResult, fastSlotResult] = await Promise.all([
-        buildCurrentTimePlanItems(lineId, processId, []),
-        buildPlanTimeSlots(lineId, processId, []),
-      ])
-      if (requestSeq !== plannedProductsRequestSeq) return
-
-      const currentSlotItems = await filterInputEligibleProducts(processId, currentSlotItemsResult.items || [])
-      if (requestSeq !== plannedProductsRequestSeq) return
-      allPlanProducts.value = mergeProductionProductsByProduct(currentSlotItems)
-      timeSlots.value = await filterTimeSlotsByEligibleProducts(processId, fastSlotResult.slots)
-      activeSlotIndex.value = timeSlots.value.length
-        ? Math.min(fastSlotResult.activeIndex ?? 0, timeSlots.value.length - 1)
-        : null
-      applyTimeSlotFilter()
-    }
 
     let tempProducts = await fetchProcessPlanProductsFromBacklogs(lineId, processId)
     const lineObj = lines.value.find((line) => String(line.id) === String(lineId)) || null
@@ -3020,11 +3004,8 @@ const loadPlannedProducts = async () => {
     // 時間帯スロットを構築し、デフォルトで現在時刻スロットを選択
     const slotResult = await buildPlanTimeSlots(lineId, processId, tempProducts)
     if (requestSeq !== plannedProductsRequestSeq) return
-    timeSlots.value = await filterTimeSlotsByEligibleProducts(processId, slotResult.slots)
-    if (requestSeq !== plannedProductsRequestSeq) return
-    activeSlotIndex.value = timeSlots.value.length
-      ? Math.min(slotResult.activeIndex ?? 0, timeSlots.value.length - 1)
-      : null
+    timeSlots.value = slotResult.slots
+    activeSlotIndex.value = slotResult.activeIndex
     const ganttEntriesByProduct = new Map()
     ;(slotResult.slots || []).forEach((slot) => {
       ;(Array.isArray(slot?.items) ? slot.items : []).forEach((item) => {
@@ -3084,8 +3065,18 @@ const loadPlannedProducts = async () => {
       if (requestSeq !== plannedProductsRequestSeq) return
     }
 
-    mapFilteredForProduction = await filterInputEligibleProducts(processId, mapFilteredForProduction)
+    const eligibleCandidates = [
+      ...mapFilteredForProduction,
+      ...timeSlots.value.flatMap((slot) => slot.items || []),
+    ]
+    const eligibleItems = await filterInputEligibleProducts(processId, eligibleCandidates)
     if (requestSeq !== plannedProductsRequestSeq) return
+    const eligibleIds = new Set(eligibleItems.map((item) => String(item.product ?? item.id)))
+    mapFilteredForProduction = mapFilteredForProduction.filter((item) => eligibleIds.has(String(item.product ?? item.id)))
+    timeSlots.value = timeSlots.value.map((slot) => ({
+      ...slot,
+      items: (slot.items || []).filter((item) => eligibleIds.has(String(item.product ?? item.id))),
+    }))
 
     // 計画数は t_line_gantt_plan（時間帯スロット）由来で最終確定する
     const expanded = []
