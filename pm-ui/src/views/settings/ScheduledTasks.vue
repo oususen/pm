@@ -159,6 +159,14 @@
                 >
                   履歴
                 </button>
+                <button
+                  v-if="isStaleRunning(cfg)"
+                  class="btn cancel"
+                  @click="resetStatus(cfg)"
+                  :disabled="resetting.has(configKey(cfg)) || !canEditAutoPlan"
+                >
+                  {{ resetting.has(configKey(cfg)) ? 'リセット中...' : '状態リセット' }}
+                </button>
               </td>
               <td class="last-cell">
                 <div class="last-row">
@@ -326,6 +334,15 @@
         >
           {{ isCancelRequested(cfg) ? 'キャンセル要求中...' : (cancelling.has(configKey(cfg)) ? '要求中...' : 'キャンセル要求') }}
         </button>
+        <button
+          v-if="isStaleRunning(cfg)"
+          class="btn cancel"
+          @click="resetStatus(cfg)"
+          :disabled="resetting.has(configKey(cfg)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(cfg)) ? 'リセット中...' : '状態リセット' }}
+        </button>
       </div>
 
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
@@ -427,6 +444,14 @@
                 </button>
                 <button class="btn" type="button" @click="openHistory(cfg, `計画実績自動セット（${cfg.line_code || '-'}/${cfg.process_code || '-'}）`)">
                   履歴
+                </button>
+                <button
+                  v-if="isStaleRunning(cfg)"
+                  class="btn cancel"
+                  @click="resetStatus(cfg)"
+                  :disabled="resetting.has(configKey(cfg)) || !canEdit"
+                >
+                  {{ resetting.has(configKey(cfg)) ? 'リセット中...' : '状態リセット' }}
                 </button>
               </td>
               <td class="last-cell">
@@ -546,6 +571,15 @@
           style="margin-left: 8px"
         >
           {{ fixingReconcile ? '修正中...' : '修正実行' }}
+        </button>
+        <button
+          v-if="isStaleRunning(purchaseActualReconcileConfig)"
+          class="btn cancel"
+          @click="resetStatus(purchaseActualReconcileConfig)"
+          :disabled="resetting.has(configKey(purchaseActualReconcileConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(purchaseActualReconcileConfig)) ? 'リセット中...' : '状態リセット' }}
         </button>
       </div>
 
@@ -746,6 +780,15 @@
         >
           {{ fixingProductionReconcile ? '修正中...' : '修正実行' }}
         </button>
+        <button
+          v-if="isStaleRunning(productionActualReconcileConfig)"
+          class="btn cancel"
+          @click="resetStatus(productionActualReconcileConfig)"
+          :disabled="resetting.has(configKey(productionActualReconcileConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(productionActualReconcileConfig)) ? 'リセット中...' : '状態リセット' }}
+        </button>
       </div>
 
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
@@ -936,6 +979,15 @@
         >
           {{ isCancelRequested(cfg) ? 'キャンセル要求中...' : (cancelling.has(configKey(cfg)) ? '要求中...' : 'キャンセル要求') }}
         </button>
+        <button
+          v-if="isStaleRunning(cfg)"
+          class="btn cancel"
+          @click="resetStatus(cfg)"
+          :disabled="resetting.has(configKey(cfg)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(cfg)) ? 'リセット中...' : '状態リセット' }}
+        </button>
       </div>
 
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
@@ -1017,6 +1069,15 @@
         >
           {{ runNowLabel(orderExpansionConfig) }}
         </button>
+        <button
+          v-if="isStaleRunning(orderExpansionConfig)"
+          class="btn cancel"
+          @click="resetStatus(orderExpansionConfig)"
+          :disabled="resetting.has(configKey(orderExpansionConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(orderExpansionConfig)) ? 'リセット中...' : '状態リセット' }}
+        </button>
       </div>
 
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
@@ -1096,6 +1157,15 @@
           style="margin-left: 8px"
         >
           {{ runNowLabel(containerImportCleanupConfig) }}
+        </button>
+        <button
+          v-if="isStaleRunning(containerImportCleanupConfig)"
+          class="btn cancel"
+          @click="resetStatus(containerImportCleanupConfig)"
+          :disabled="resetting.has(configKey(containerImportCleanupConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(containerImportCleanupConfig)) ? 'リセット中...' : '状態リセット' }}
         </button>
       </div>
 
@@ -1365,6 +1435,11 @@ const isStaleCancelRequestedRun = (cfg) => {
     || lastRun.getMonth() !== now.getMonth()
     || lastRun.getDate() !== now.getDate()
   )
+}
+const isStaleRunning = (cfg) => {
+  if (!isRunningStatus(cfg) || !cfg?.last_run_at) return false
+  const elapsed = Date.now() - new Date(cfg.last_run_at).getTime()
+  return elapsed > 30 * 60 * 1000
 }
 const canCancelTask = (cfg) => inventoryTaskOrder.includes(cfg?.task_name)
 const isRunNowDisabled = (cfg) => !cfg || !cfg.id || !canEdit.value || running.has(configKey(cfg)) || (isRunningStatus(cfg) && !isStaleCancelRequestedRun(cfg))
@@ -1720,6 +1795,27 @@ const cancelRun = async (cfg) => {
     alert(detail || 'キャンセル要求に失敗しました。')
   } finally {
     cancelling.delete(key)
+  }
+}
+
+const resetting = reactive(new Set())
+const resetStatus = async (cfg) => {
+  if (!canEdit.value || !isRunningStatus(cfg)) return
+  if (!confirm('このタスクの実行中状態をリセットしますか？\n実際にはプロセスが停止していることを確認してから実行してください。')) return
+  const key = configKey(cfg)
+  resetting.add(key)
+  try {
+    const res = await api.scheduleConfig.resetStatus({
+      task_name: cfg.task_name,
+      config_id: cfg.id,
+    })
+    alert(res.data?.detail || '状態をリセットしました。')
+    await loadConfig()
+  } catch (e) {
+    const detail = e.response?.data?.detail
+    alert(detail || 'リセットに失敗しました。')
+  } finally {
+    resetting.delete(key)
   }
 }
 

@@ -64,6 +64,13 @@ class ProductionActualReconcileFixView(APIView):
         return schedule_reconcile_service.run_production_actual_reconcile_fix(request=request, logger=logger)
 
 
+class ScheduleResetView(APIView):
+    """死んだタスクのRUNNING状態を手動リセットするAPI"""
+
+    def post(self, request):
+        return scheduled_task_execution_service.reset_status(request=request, logger=logger)
+
+
 class ScheduleCancelView(APIView):
     """定時タスクのキャンセル要求API（実行中タスク向け）"""
 

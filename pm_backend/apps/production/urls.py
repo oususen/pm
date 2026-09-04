@@ -51,6 +51,7 @@ from production.views_schedule import (
     ProductionActualReconcileReportView,
     ProductionActualReconcileFixView,
     ScheduleCancelView,
+    ScheduleResetView,
 )
 from production.views_laser import (
     LaserActualDetailUpdateView,
@@ -150,6 +151,7 @@ urlpatterns = [
     path('orphan-backlog/report/', OrphanLineBacklogReportView.as_view(), name='orphan-backlog-report'),
     path('orphan-backlog/fix/', OrphanLineBacklogFixView.as_view(), name='orphan-backlog-fix'),
     path('schedule-config/cancel/', ScheduleCancelView.as_view(), name='schedule-cancel'),
+    path('schedule-config/reset/', ScheduleResetView.as_view(), name='schedule-reset'),
     path('line-backlog-adjustments/', LineBacklogAdjustmentView.as_view(), name='line-backlog-adjustments'),
     path('stock-migration/detect/', StockMigrationDetectView.as_view(), name='stock-migration-detect'),
     path('stock-migration/execute/', StockMigrationExecuteView.as_view(), name='stock-migration-execute'),

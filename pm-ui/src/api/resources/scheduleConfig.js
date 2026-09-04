@@ -26,4 +26,7 @@ export const createScheduleConfigAPI = (client) => ({
   cancel(payload = {}) {
     return client.post('/schedule-config/cancel/', payload)
   },
+  resetStatus(payload = {}) {
+    return client.post('/schedule-config/reset/', payload)
+  },
 })

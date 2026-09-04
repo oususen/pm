@@ -62,6 +62,49 @@ def run_now(request, logger=None):
         )
 
 
+def reset_status(request, logger=None):
+    """死んだタスクの RUNNING 状態を手動リセットする"""
+    task = str(request.data.get('task_name') or '').upper()
+    config_id = request.data.get('config_id') or request.data.get('id')
+
+    if not task:
+        return Response(
+            {'detail': 'task_name が必要です'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    filters = {'task_name': task, 'last_run_status': 'RUNNING'}
+    if config_id:
+        filters['id'] = config_id
+
+    cfg = ScheduleConfig.objects.filter(**filters).first()
+    if not cfg:
+        return Response(
+            {'detail': '実行中のタスクが見つかりません。既に完了している可能性があります。'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    old_message = (cfg.last_run_message or '').strip()
+    reset_note = f'手動リセット ({datetime.now():%Y-%m-%d %H:%M})'
+    cfg.last_run_status = 'FAILED'
+    cfg.last_run_message = (old_message + '\n' if old_message else '') + reset_note
+    cfg.save(update_fields=['last_run_status', 'last_run_message'])
+
+    from production.models_schedule_config import record_schedule_run_log
+    record_schedule_run_log(
+        cfg,
+        status='FAILED',
+        message=reset_note,
+        duration_seconds=cfg.last_run_duration_seconds,
+        started_at=cfg.last_run_at,
+    )
+
+    label = _resolve_task_label(task) or task
+    if logger:
+        logger.info('タスク状態を手動リセット: %s (config_id=%s)', task, cfg.id)
+    return Response({'detail': f'{label}の状態をリセットしました。'})
+
+
 def request_cancel(request, logger=None):
     from production.scheduler.tasks import request_task_cancel
 
