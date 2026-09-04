@@ -9,7 +9,7 @@
       ><span>後工程計画をLT日数だけ前倒しして算出。TK=1号機、AJ=2号機。</span
       ><button class="btn" @click="showSettings = !showSettings">
         対象設定</button
-      ><button class="btn" @click="saveManualQuantities" :disabled="saving">
+      ><button class="btn" @click="openSaveDialog" :disabled="saving">
         {{ saving ? "保存中..." : "手回数を保存" }}</button
       ><button class="btn" @click="openPrintDialog">印刷</button
       ><button class="btn" @click="openResetDialog">手数リセット</button
@@ -57,6 +57,35 @@
         <div class="print-actions">
           <button class="btn" style="background:#c53030;color:#fff" @click="executeReset">リセット</button
           ><button class="btn" @click="showResetDialog = false">キャンセル</button>
+        </div>
+      </section>
+    </div>
+    <div
+      v-if="showSaveDialog"
+      class="print-modal"
+      @click.self="showSaveDialog = false"
+    >
+      <section class="print-dialog">
+        <h3>手回数を保存</h3>
+        <div style="display:flex;gap:4px;margin-bottom:8px">
+          <button
+            v-for="(week, idx) in weekGroups"
+            :key="week.key"
+            class="btn"
+            :class="{ primary: saveWeekKey === week.key }"
+            @click="selectSaveWeek(week, idx)"
+          >{{ idx + 1 }}週目</button>
+          <button
+            class="btn"
+            :class="{ primary: saveWeekKey === 'all' }"
+            @click="selectSaveWeek(null)"
+          >全期間</button>
+        </div>
+        <div class="print-actions">
+          <button class="btn primary" @click="saveManualQuantities" :disabled="saving">
+            {{ saving ? "保存中..." : "保存" }}
+          </button
+          ><button class="btn" @click="showSaveDialog = false">キャンセル</button>
         </div>
       </section>
     </div>
@@ -732,6 +761,8 @@ const startDate = ref(monday()),
   printStartDate = ref(nextBusinessDay()),
   printEndDate = ref(nextBusinessDay()),
   printOrientation = ref("landscape"),
+  showSaveDialog = ref(false),
+  saveWeekKey = ref(""),
   showResetDialog = ref(false),
   resetStartDate = ref(""),
   resetEndDate = ref(""),
@@ -1012,6 +1043,14 @@ const gridColumnCount = computed(
   () =>
     fixedColumns.length + days.value.length * 3 + weekGroups.value.length * 3,
 );
+const openSaveDialog = () => {
+  const w1 = weekGroups.value[0];
+  saveWeekKey.value = w1?.key || 'all';
+  showSaveDialog.value = true;
+};
+const selectSaveWeek = (week) => {
+  saveWeekKey.value = week ? week.key : 'all';
+};
 const openResetDialog = () => {
   const d = days.value;
   resetStartDate.value = d[0] || startDate.value;
@@ -1132,31 +1171,36 @@ const markManualQuantity = (row, day) => {
   };
 };
 const saveManualQuantities = async () => {
+  const selectedWeek = weekGroups.value.find((w) => w.key === saveWeekKey.value);
+  const targetDays = selectedWeek ? selectedWeek.days : [...days.value];
+  if (!targetDays.length) {
+    message.value = "保存対象がありません。";
+    return;
+  }
   saving.value = true;
   try {
     const quantities = patternRows.value.flatMap((pattern) =>
-      days.value.map((day) => ({
+      targetDays.map((day) => ({
         laser_pattern_id: pattern.laser_pattern_id,
         plan_date: day,
         sheets: Number(patternDailyValue(pattern, day, "manual_sheets")),
       })),
     );
-    if (!quantities.length) {
-      saving.value = false;
-      return;
-    }
+    const lastTargetDay = targetDays[targetDays.length - 1];
+    const progressDays = days.value.filter((d) => d >= targetDays[0]);
     const progressValues = patternRows.value.flatMap((pattern) =>
-      days.value.map((day) => ({
+      progressDays.map((day) => ({
         laser_pattern_id: pattern.laser_pattern_id,
         progress_date: day,
         progress: patternProgressRaw(pattern, day),
       })),
     );
     await api.laserWeeklyPlans.savePatternManualQuantities(quantities, progressValues);
-    changedManualQuantities.value = {};
-    await loadPlan();
-    dirty.value = false;
-    message.value = "手回数を保存しました。";
+    showSaveDialog.value = false;
+    const label = selectedWeek
+      ? `${weekGroups.value.indexOf(selectedWeek) + 1}週目`
+      : "全期間";
+    message.value = `${label}の手回数を保存しました。`;
   } catch (e) {
     message.value =
       e.response?.data?.detail || "手回数を保存できませんでした。";
