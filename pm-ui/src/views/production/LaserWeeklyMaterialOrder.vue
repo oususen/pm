@@ -4,7 +4,7 @@
       {{ showOrder ? "▼" : "▶" }} 材料発注・進度
     </h3>
     <div v-show="showOrder">
-      <p>佐藤商事の手数を入力すると、残りの自数を名成鋼機へ自動配分します。</p>
+      <p>佐藤商事の手数を入力すると、残りの自数を名成鋼機へ自動配分します。手数は上段がロット数(L)、下段が端数枚数(枚)です。</p>
       <div class="actions">
         <button class="btn primary" @click="save">進度を保存</button
         ><button class="btn" @click="openDownload('SATO')">
@@ -111,7 +111,7 @@
               :key="`${material.material_id}-${supplier.code}`"
               :class="`material-group-${materialIndex % 2}`"
             >
-              <td>{{ material.material_code }}</td>
+              <td><span class="mat-code-wrap"><span>{{ material.material_code }}</span><span class="mat-unit-labels"><span>L</span><span>枚</span></span></span></td>
               <td>{{ material.material_name }}</td>
               <td>{{ supplier.name }}</td>
               <td
@@ -141,29 +141,34 @@
                   :key="`${supplier.code}-${day}`"
                   ><td>{{ number(demand(material, day)) }}</td>
                   <td>{{ number(automatic(material, day, supplier.code)) }}</td>
-                  <td class="manual-cell">
-                    <input
-                      class="manual-input"
-                      v-model.number="
-                        entry(material, day)[
-                          supplier.code === 'SATO' ? 'sato_lots' : 'meisei_lots'
-                        ]
-                      "
-                      min="0"
-                      step="1"
-                      type="number"
-                    /><input
-                      class="sheets-input"
-                      v-model.number="
-                        entry(material, day)[
-                          supplier.code === 'SATO' ? 'sato_sheets' : 'meisei_sheets'
-                        ]
-                      "
-                      min="0"
-                      step="1"
-                      type="number"
-                      placeholder="枚"
-                    />
+                  <td class="manual-cell mat-manual-cell"
+                    :data-tip="`${material.material_code} ${supplier.name}`"
+                  >
+                    <div class="mat-inputs-wrap">
+                      <input
+                        class="manual-input"
+                        v-model.number="
+                          entry(material, day)[
+                            supplier.code === 'SATO' ? 'sato_lots' : 'meisei_lots'
+                          ]
+                        "
+                        min="0"
+                        step="1"
+                        type="number"
+                        @focus="$event.target.select()"
+                      /><input
+                        class="sheets-input"
+                        v-model.number="
+                          entry(material, day)[
+                            supplier.code === 'SATO' ? 'sato_sheets' : 'meisei_sheets'
+                          ]
+                        "
+                        min="0"
+                        step="1"
+                        type="number"
+                        @focus="$event.target.select()"
+                      />
+                    </div>
                   </td>
                   <td
                     :class="[
@@ -702,6 +707,42 @@ watch(() => [props.startDate, props.materials], load, {
   min-width: 30px;
   max-width: 30px;
 }
+.mat-manual-cell {
+  position: relative;
+  overflow: visible !important;
+}
+.mat-inputs-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.mat-code-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mat-unit-labels {
+  display: flex;
+  flex-direction: column;
+  font-size: 8px;
+  color: #dc2626;
+  line-height: 1.2;
+}
+.mat-manual-cell:hover::after,
+.mat-manual-cell:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+}
 .week-total {
   background: #dbeafe !important;
   font-weight: 700;
@@ -709,7 +750,12 @@ watch(() => [props.startDate, props.materials], load, {
 .order-panel th.week-total {
   background: #93c5fd !important;
 }
-.initial-input,
+.initial-input {
+  width: 28px;
+  min-width: 0;
+  max-width: 28px;
+  padding: 0;
+}
 .manual-input {
   width: 28px;
   min-width: 0;
@@ -763,7 +809,6 @@ watch(() => [props.startDate, props.materials], load, {
   max-width: 28px;
   padding: 0;
   font-size: 10px;
-  color: #7c3aed;
   -moz-appearance: textfield;
 }
 .sheets-input::-webkit-inner-spin-button {
