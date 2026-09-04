@@ -10,6 +10,10 @@ from django.db.models import F
 from django.utils import timezone
 from masters.models import Process, Product, BOM, Supplier, Routing, RoutingStep
 from masters.services.routing_service import build_effective_routing_q, resolve_effective_routing
+from .services.process_realtime_routing_service import (
+    build_invalid_product_process_message,
+    is_valid_output_process,
+)
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from purchase.process_resolver import resolve_purchase_line, resolve_supplier_process
 from .models_process_realtime import ProcessRealtimeRecord
@@ -1312,6 +1316,21 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             product_name = product.product_name
 
         operator_action = _extract_operator_action(operator_event)
+        requires_routing_validation = (
+            validated_data.get('record_type') == 'PRODUCTION'
+            or (
+                validated_data.get('record_type') == 'OPERATOR_ACTION'
+                and operator_action in SESSION_ACTIONS
+            )
+        )
+        if requires_routing_validation:
+            if not product:
+                raise serializers.ValidationError({'product_id': '指定された製品が存在しません。'})
+            if not is_valid_output_process(process, product, plan_date):
+                raise serializers.ValidationError({
+                    'product_id': build_invalid_product_process_message(process, product),
+                })
+
         if validated_data.get('record_type') == 'OPERATOR_ACTION':
             if operator_action in SESSION_ACTIONS and not product:
                 raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})

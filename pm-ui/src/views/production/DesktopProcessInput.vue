@@ -2498,7 +2498,11 @@ const submitRecord = async () => {
     await loadRecentRecords()
   } catch (error) {
     console.error('記録登録エラー:', error)
-    alert(t('processInput.alert.saveFailed'))
+    const responseData = error?.response?.data
+    const message = responseData?.detail
+      || Object.values(responseData || {}).flat().find((value) => typeof value === 'string')
+      || t('processInput.alert.saveFailed')
+    alert(message)
   } finally {
     submitting.value = false
   }

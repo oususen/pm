@@ -18,6 +18,7 @@ from production.services.process_realtime_backlog_service import (
     apply_delta_to_inventory_and_progress,
     recalculate_inventory_after_session_change,
 )
+from production.services.process_realtime_routing_service import is_valid_output_process
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 
 
@@ -43,6 +44,23 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         if settings.USE_TZ:
             return timezone.make_aware(value)
         return value
+
+    def create_output_routing(self, process=None, product=None, routing_code='R-TEST-RT'):
+        process = process or self.process
+        product = product or self.product
+        routing = Routing.objects.create(
+            product=product,
+            routing_code=routing_code,
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=process,
+            line=process.line,
+            output_product=product,
+        )
 
     @patch('production.inventory.inventory_calculator.recalculate_inventory_for_line')
     def test_recalculate_helper_uses_plan_date_range(self, mock_recalculate):
@@ -461,6 +479,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
     @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
     @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
     def test_create_manual_session_triggers_recalculation(self, _mock_plan_date, mock_recalculate):
+        self.create_output_routing()
         view = ProcessRealtimeRecordViewSet.as_view({'post': 'sessions'})
         request = self.factory.post(
             '/api/process-realtime/sessions/',
@@ -519,6 +538,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             process=self.process,
             line=self.line,
         )
+        self.create_output_routing(product=parent, routing_code='R-COPRODUCT-RT')
 
         view = ProcessRealtimeRecordViewSet.as_view({'post': 'sessions'})
         request = self.factory.post(
@@ -557,6 +577,40 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         )
         self.assertEqual(child_backlog.actual_qty, 10)
         mock_recalculate.assert_called_once()
+
+    def test_coproduct_parent_and_child_are_excluded_from_routing_validation(self):
+        parent = Product.objects.create(
+            product_code='STYD-ROUTING-SET',
+            product_name='連産親',
+            is_virtual_set=True,
+        )
+        child = Product.objects.create(
+            product_code='CHILD-ROUTING-EXEMPT',
+            product_name='連産子',
+        )
+        bom = BOM.objects.create(
+            parent_product=parent,
+            version='v1',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+            is_coproduct=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=child,
+            quantity=Decimal('1'),
+        )
+
+        self.assertTrue(is_valid_output_process(
+            self.process,
+            child,
+            date(2026, 3, 5),
+        ))
+        self.assertTrue(is_valid_output_process(
+            self.process,
+            parent,
+            date(2026, 3, 5),
+        ))
 
     @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
     def test_session_detail_update_creates_history(self, mock_recalculate):
@@ -838,6 +892,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
 
     @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
     def test_operator_action_end_without_start_is_rejected(self, _mock_plan_date):
+        self.create_output_routing()
         view = ProcessRealtimeRecordViewSet.as_view({'post': 'create'})
         request = self.factory.post(
             '/api/process-realtime/',

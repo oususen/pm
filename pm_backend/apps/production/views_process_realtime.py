@@ -4,7 +4,7 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.db import models, transaction
+from django.db import transaction
 from django.db.models import Sum
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils import timezone
@@ -48,6 +48,11 @@ from .services.process_realtime_common import (
     to_local_naive,
 )
 from .services.process_realtime_query_service import get_gantt_plan_qty
+from .services.process_realtime_routing_service import (
+    build_invalid_product_process_message,
+    get_valid_output_routing_steps,
+    is_valid_output_process,
+)
 from .services.process_realtime_scrap_service import (
     ScrapServiceError,
     get_scrap_breakdown,
@@ -56,8 +61,7 @@ from .services.process_realtime_scrap_service import (
     process_scrap_disposition,
 )
 from .models_line_backlog import LineBacklog
-from masters.models import Product, Process, BOM, RoutingStep
-from masters.services.routing_service import build_effective_routing_q
+from masters.models import Product, Process, BOM
 from orders.utils.calendar_utils import get_business_today, DAY_BOUNDARY_HOUR
 
 
@@ -70,22 +74,10 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
     @staticmethod
     def _get_session_output_routing_steps(session):
         """セッション製品を当日に出力する、同一ライン上の有効工程を取得する。"""
-        if not session.product_id or not session.process_id or not session.plan_date:
-            return []
-        line_id = getattr(session.process, 'line_id', None)
-        if not line_id:
-            return []
-
-        return list(
-            RoutingStep.objects.filter(
-                output_product_id=session.product_id,
-                process_id__isnull=False,
-            ).filter(
-                build_effective_routing_q(session.plan_date, prefix='routing__')
-            ).filter(
-                models.Q(line_id=line_id)
-                | models.Q(line__isnull=True, process__line_id=line_id)
-            ).select_related('process', 'process__line', 'line')
+        return get_valid_output_routing_steps(
+            session.process,
+            session.product,
+            session.plan_date,
         )
 
     @staticmethod
@@ -507,6 +499,11 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         # 日替わり時刻（8時）を考慮して計画日を算出
         local_start = to_local_naive(started_at)
         plan_date = resolve_workday_date_for_process(process, local_start)
+        if not is_valid_output_process(process, product, plan_date):
+            return Response(
+                {'detail': build_invalid_product_process_message(process, product)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         duration_seconds = int((ended_at - started_at).total_seconds())
 
@@ -655,6 +652,12 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
         if started_at and ended_at and ended_at < started_at:
             return Response({'detail': '終了時刻は開始時刻以降にしてください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if product_changed and not is_valid_output_process(session.process, new_product, session.plan_date):
+            return Response(
+                {'detail': build_invalid_product_process_message(session.process, new_product)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         is_countable = is_countable_session_for_actual(session.session_type, session.end_action)
         old_qty = int(session.production_qty or 0) if is_countable else 0
