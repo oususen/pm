@@ -205,7 +205,27 @@
     <h3 class="collapsible-header" @click="showDetail = !showDetail">
       {{ showDetail ? "▼" : "▶" }} 製品別明細
     </h3>
-    <div v-show="showDetail" class="grid">
+    <div v-show="showDetail">
+      <div class="summary-filters">
+        <label>後工程<select v-model="filterDetailDownstream">
+          <option value="">全て</option>
+          <option v-for="name in filterDetailDownstreamOptions" :key="name" :value="name">{{ name }}</option>
+        </select></label>
+        <label>設備<select v-model="filterDetailMachine">
+          <option value="">全て</option>
+          <option value="TK">1号機</option>
+          <option value="AJ">2号機</option>
+        </select></label>
+        <label>製品番号<select v-model="filterDetailProductCode">
+          <option value="">全て</option>
+          <option v-for="code in filterDetailProductOptions" :key="code" :value="code">{{ code }}</option>
+        </select></label>
+        <label>パターン<select v-model="filterDetailPatternNo">
+          <option value="">全て</option>
+          <option v-for="no in filterDetailPatternOptions" :key="no" :value="String(no)">{{ no }}</option>
+        </select></label>
+      </div>
+      <div class="grid">
       <table class="plan-table">
         <colgroup>
           <col
@@ -262,7 +282,7 @@
         </thead>
         <tbody>
           <tr
-            v-for="row in rows"
+            v-for="row in filteredRows"
             :key="row.id"
             :class="`product-group-${productGroup(row.product_code)}`"
           >
@@ -335,17 +355,38 @@
               </td></template
             >
           </tr>
-          <tr v-if="!rows.length">
+          <tr v-if="!filteredRows.length">
             <td :colspan="gridColumnCount">対象設定を追加してください。</td>
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
     <section class="pattern-summary-grid">
       <h3 class="collapsible-header" @click="showSummary = !showSummary">
         {{ showSummary ? "▼" : "▶" }} レーザ加工計画（パターン別合計）
       </h3>
-      <div v-show="showSummary" class="pattern-summary-scroll">
+      <div v-show="showSummary">
+        <div class="summary-filters">
+          <label>後工程<select v-model="filterDownstream">
+            <option value="">全て</option>
+            <option v-for="name in filterDownstreamOptions" :key="name" :value="name">{{ name }}</option>
+          </select></label>
+          <label>設備<select v-model="filterMachine">
+            <option value="">全て</option>
+            <option value="TK">1号機</option>
+            <option value="AJ">2号機</option>
+          </select></label>
+          <label>製品番号<select v-model="filterProductCode">
+            <option value="">全て</option>
+            <option v-for="code in filterProductOptions" :key="code" :value="code">{{ code }}</option>
+          </select></label>
+          <label>パターン<select v-model="filterPatternNo">
+            <option value="">全て</option>
+            <option v-for="no in filterPatternOptions" :key="no" :value="String(no)">{{ no }}</option>
+          </select></label>
+        </div>
+        <div class="pattern-summary-scroll">
         <table class="pattern-summary-table">
           <colgroup>
             <col
@@ -425,7 +466,7 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="pattern in patternRows" :key="pattern.pattern_no"
+            <template v-for="pattern in filteredPatternRows" :key="pattern.pattern_no"
               ><tr
                 :class="`summary-product-${summaryProductGroup(pattern.representative_product_code)}`"
               >
@@ -567,13 +608,14 @@
                 >
               </tr></template
             >
-            <tr v-if="!patternRows.length">
+            <tr v-if="!filteredPatternRows.length">
               <td :colspan="summaryGridColumnCount">
                 対象設定を追加してください。
               </td>
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
     </section>
     <section class="material-grid">
@@ -759,6 +801,14 @@ const startDate = ref(monday()),
   patterns = ref([]),
   downstreamProducts = ref([]),
   message = ref(""),
+  filterDetailDownstream = ref(""),
+  filterDetailMachine = ref(""),
+  filterDetailProductCode = ref(""),
+  filterDetailPatternNo = ref(""),
+  filterDownstream = ref(""),
+  filterMachine = ref(""),
+  filterProductCode = ref(""),
+  filterPatternNo = ref(""),
   showSettings = ref(false),
   showPrintDialog = ref(false),
   printStartDate = ref(nextBusinessDay()),
@@ -821,6 +871,42 @@ const productGroups = computed(() => {
   return groups;
 });
 const productGroup = (productCode) => productGroups.value.get(productCode) || 0;
+const filterDetailDownstreamOptions = computed(() =>
+  [...new Set(rows.value.map((r) => r.downstream_line_name))].sort(),
+);
+const filterDetailProductOptions = computed(() =>
+  [...new Set(rows.value.map((r) => r.product_code))].sort(),
+);
+const filterDetailPatternOptions = computed(() =>
+  [...new Set(rows.value.map((r) => r.pattern_no))].sort((a, b) => a - b),
+);
+const filteredRows = computed(() =>
+  rows.value.filter((r) => {
+    if (filterDetailDownstream.value && r.downstream_line_name !== filterDetailDownstream.value) return false;
+    if (filterDetailMachine.value && r.machine !== filterDetailMachine.value) return false;
+    if (filterDetailProductCode.value && r.product_code !== filterDetailProductCode.value) return false;
+    if (filterDetailPatternNo.value && String(r.pattern_no) !== filterDetailPatternNo.value) return false;
+    return true;
+  }),
+);
+const filterDownstreamOptions = computed(() =>
+  [...new Set(patternRows.value.flatMap((p) => p.downstream_line_names))].sort(),
+);
+const filterProductOptions = computed(() =>
+  [...new Set(patternRows.value.map((p) => p.representative_product_code))].sort(),
+);
+const filterPatternOptions = computed(() =>
+  [...new Set(patternRows.value.map((p) => p.pattern_no))].sort((a, b) => a - b),
+);
+const filteredPatternRows = computed(() =>
+  patternRows.value.filter((p) => {
+    if (filterDownstream.value && !p.downstream_line_names.includes(filterDownstream.value)) return false;
+    if (filterMachine.value && p.machine !== filterMachine.value) return false;
+    if (filterProductCode.value && p.representative_product_code !== filterProductCode.value) return false;
+    if (filterPatternNo.value && String(p.pattern_no) !== filterPatternNo.value) return false;
+    return true;
+  }),
+);
 const summaryProductGroups = computed(() => {
   const groups = new Map();
   patternRows.value.forEach((pattern) => {
@@ -1523,6 +1609,25 @@ select {
   white-space: nowrap;
   z-index: 100;
   pointer-events: none;
+}
+.summary-filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.summary-filters label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.summary-filters select {
+  height: 24px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
 }
 .grid,
 .pattern-summary-scroll {
