@@ -53,6 +53,16 @@ class LaserWeeklyPatternInitialProgress(models.Model):
         constraints = [models.UniqueConstraint(fields=['laser_pattern', 'week_start_date'], name='laser_weekly_initial_progress_unique')]
 
 
+class LaserWeeklyPatternDailyProgress(models.Model):
+    laser_pattern = models.ForeignKey(LaserPattern, on_delete=models.CASCADE, related_name='weekly_daily_progress')
+    progress_date = models.DateField(verbose_name='日付')
+    progress = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='進度')
+
+    class Meta:
+        db_table = 't_laser_weekly_pattern_daily_progress'
+        constraints = [models.UniqueConstraint(fields=['laser_pattern', 'progress_date'], name='laser_weekly_daily_progress_unique')]
+
+
 class LaserWeeklyMaterialGroup(models.Model):
     group_name = models.CharField(max_length=120, unique=True)
     material_type = models.CharField(max_length=20, blank=True, default='')

@@ -13,7 +13,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
+from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
 from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
@@ -357,6 +357,22 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             LaserWeeklyPatternManualQuantity.objects.update_or_create(
                 laser_pattern=pattern, plan_date=plan_date, defaults={'sheets': sheets},
             )
+        progress_values = request.data.get('progress_values', [])
+        if progress_values:
+            for pv in progress_values:
+                try:
+                    pattern = patterns.get(int(pv['laser_pattern_id']))
+                    if not pattern:
+                        continue
+                    progress_date = datetime.strptime(pv['progress_date'], '%Y-%m-%d').date()
+                    progress = Decimal(str(pv['progress']))
+                except (InvalidOperation, KeyError, TypeError, ValueError):
+                    continue
+                LaserWeeklyPatternDailyProgress.objects.update_or_create(
+                    laser_pattern=pattern, progress_date=progress_date,
+                    defaults={'progress': progress},
+                )
+
         return Response({'saved_count': len(quantities)})
 
     @action(detail=False, methods=['post'], url_path='pattern-manual-reset')
@@ -656,6 +672,15 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 )
                 pattern_row['initial_progress'] = auto_val
                 pattern_row['initial_progress_locked'] = False
+
+        saved_daily_progress = defaultdict(dict)
+        for dp in LaserWeeklyPatternDailyProgress.objects.filter(
+            laser_pattern_id__in=[pr['laser_pattern_id'] for pr in pattern_rows],
+            progress_date__in=dates,
+        ):
+            saved_daily_progress[dp.laser_pattern_id][dp.progress_date.isoformat()] = float(dp.progress)
+        for pattern_row in pattern_rows:
+            pattern_row['saved_progress'] = saved_daily_progress.get(pattern_row['laser_pattern_id'], {})
 
         material_rows = []
         for material_row in sorted(material_totals.values(), key=lambda item: item['material_code']):

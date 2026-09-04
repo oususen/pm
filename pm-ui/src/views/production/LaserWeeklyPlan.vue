@@ -478,7 +478,7 @@
                     </td>
                     <td
                       class="progress-cell"
-                      :class="progressClass(patternProgressRaw(pattern, day))"
+                      :class="progressClass(patternProgressDisplayRaw(pattern, day))"
                     >
                       {{ patternProgress(pattern, day) }}
                     </td></template
@@ -521,7 +521,7 @@
                     class="week-total progress-cell"
                     :class="
                       progressClass(
-                        patternProgressRaw(
+                        patternProgressDisplayRaw(
                           pattern,
                           week.days[week.days.length - 1],
                         ),
@@ -965,8 +965,14 @@ const patternProgressRaw = (pattern, upToDay) =>
   (pattern.initial_progress || 0) +
   cumulativePatternValue(pattern, upToDay, "manual_sheets") -
   cumulativePatternValue(pattern, upToDay, "automatic_sheets");
+const patternProgressDisplayRaw = (pattern, upToDay) => {
+  if (!dirty.value && pattern.saved_progress?.[upToDay] !== undefined) {
+    return pattern.saved_progress[upToDay];
+  }
+  return patternProgressRaw(pattern, upToDay);
+};
 const patternProgress = (pattern, upToDay) => {
-  const v = patternProgressRaw(pattern, upToDay);
+  const v = patternProgressDisplayRaw(pattern, upToDay);
   return number(v, autoDigits(v));
 };
 const progressClass = (v) =>
@@ -1139,7 +1145,14 @@ const saveManualQuantities = async () => {
       saving.value = false;
       return;
     }
-    await api.laserWeeklyPlans.savePatternManualQuantities(quantities);
+    const progressValues = patternRows.value.flatMap((pattern) =>
+      days.value.map((day) => ({
+        laser_pattern_id: pattern.laser_pattern_id,
+        progress_date: day,
+        progress: patternProgressRaw(pattern, day),
+      })),
+    );
+    await api.laserWeeklyPlans.savePatternManualQuantities(quantities, progressValues);
     changedManualQuantities.value = {};
     await loadPlan();
     dirty.value = false;

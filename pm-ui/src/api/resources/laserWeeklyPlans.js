@@ -8,8 +8,8 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveManualQuantities(quantities) {
     return client.post('/laser-weekly-plans/manual-quantities/', { quantities })
   },
-  savePatternManualQuantities(quantities) {
-    return client.post('/laser-weekly-plans/pattern-manual-quantities/', { quantities })
+  savePatternManualQuantities(quantities, progressValues) {
+    return client.post('/laser-weekly-plans/pattern-manual-quantities/', { quantities, progress_values: progressValues })
   },
   resetPatternManualQuantities(startDate, endDate) {
     return client.post('/laser-weekly-plans/pattern-manual-reset/', { start_date: startDate, end_date: endDate })
