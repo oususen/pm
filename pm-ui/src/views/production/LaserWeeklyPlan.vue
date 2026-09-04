@@ -457,12 +457,14 @@
                       }}
                     </td>
                     <td
+                      class="manual-sheets-cell"
                       :class="{
                         'smaller-val': isSmallerValue(
                           patternDailyValue(pattern, day, 'manual_sheets'),
                           patternDailyValue(pattern, day, 'automatic_sheets'),
                         ),
                       }"
+                      :data-tip="`${pattern.representative_product_code} t${number(pattern.thickness, 1)}`"
                     >
                       <input
                         class="manual-sheets"
@@ -1406,6 +1408,25 @@ select {
   width: 38px;
   height: 26px;
   text-align: right;
+}
+.manual-sheets-cell {
+  position: relative;
+}
+.manual-sheets-cell:hover::after,
+.manual-sheets-cell:focus-within::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
 }
 .grid,
 .pattern-summary-scroll {
