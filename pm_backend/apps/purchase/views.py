@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.db.models import Q
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -25,6 +26,7 @@ from production.serializers import LineBacklogSerializer
 from production.serializers_process_realtime import (
     ProcessRealtimeCreateSerializer,
     resolve_workday_date_for_process,
+    update_line_backlog_actual_shipment,
 )
 from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.inventory.inventory_calculator import (
@@ -44,7 +46,11 @@ from .models import (
     PurchasePlanLockSetting,
 )
 from .models_kikan_mapping import PurchaseActualKikanMapping
-from .process_resolver import resolve_purchase_line, resolve_supplier_process
+from .process_resolver import (
+    resolve_purchase_line,
+    resolve_supplier_process,
+    resolve_supplier_routing_process,
+)
 from .serializers import PurchasePlanLockSettingSerializer
 
 logger = logging.getLogger(__name__)
@@ -359,45 +365,6 @@ def _resolve_purchase_actual_target_context(
     return target_line_id, target_date, serializer_plan_date
 
 
-def _update_purchase_actual_backlog(line_id, process_id, product_id, plan_date, delta_qty):
-    if not line_id or not process_id or not product_id:
-        return
-    delta_int = int(delta_qty or 0)
-    if delta_int == 0:
-        return
-
-    if delta_int > 0:
-        backlog, _ = LineBacklog.objects.get_or_create(
-            line_id=line_id,
-            process_id=process_id,
-            product_id=product_id,
-            plan_date=plan_date,
-            sequence_no=0,
-            defaults={
-                'order_qty': 0,
-                'plan_qty': 0,
-                'actual_qty': 0,
-                'stock_qty': 0,
-                'planned_stock_qty': 0,
-                'adjust_qty': 0,
-                'scrap_qty': 0,
-                'actual_shipment_qty': 0,
-            }
-        )
-    else:
-        backlog = LineBacklog.objects.filter(
-            line_id=line_id,
-            process_id=process_id,
-            product_id=product_id,
-            plan_date=plan_date,
-            sequence_no=0,
-        ).first()
-        if not backlog:
-            return
-    backlog.actual_qty = int(backlog.actual_qty or 0) + delta_int
-    backlog.save(update_fields=['actual_qty'])
-
-
 def _normalize_record_timestamp(record, target_date):
     if not record or not target_date or not getattr(record, 'timestamp', None):
         return False
@@ -412,6 +379,7 @@ def _normalize_record_timestamp(record, target_date):
 
 
 def _recalculate_purchase_child_stock(parent_product_id, target_dates):
+    """納入実績整合タスクで補正が発生した際に、関連する子部品在庫を再計算する。"""
     targets = sorted({d for d in (target_dates or []) if d})
     if not parent_product_id or not targets:
         return
@@ -440,7 +408,7 @@ def _recalculate_purchase_child_stock(parent_product_id, target_dates):
         logger.warning("子部品の在庫再計算に失敗: %s", e)
 
 
-def _recalculate_purchase_supplier_progress(supplier_obj, product_ids=None):
+def _recalculate_purchase_supplier_progress(supplier_obj, product_ids=None, start_date=None):
     if not supplier_obj:
         return
 
@@ -461,6 +429,7 @@ def _recalculate_purchase_supplier_progress(supplier_obj, product_ids=None):
             days_back,
             days_forward,
             product_ids=product_ids,
+            start_date_override=start_date,
         )
     except Exception as e:
         logger.warning(
@@ -468,6 +437,127 @@ def _recalculate_purchase_supplier_progress(supplier_obj, product_ids=None):
             getattr(supplier_obj, 'supplier_code', ''),
             e,
         )
+
+
+def _recalculate_purchase_actual_effects(changes):
+    """仕入実績変更後の子部品在庫と進度を、対象ごとにまとめて再計算する。"""
+    child_dates_by_product = defaultdict(set)
+    progress_products_by_supplier = defaultdict(set)
+    progress_dates_by_supplier = defaultdict(set)
+
+    for change in changes or []:
+        product_id = _to_int_or_none(change.get('product_id'))
+        if not product_id:
+            continue
+        for target_date in change.get('target_dates') or []:
+            if target_date:
+                child_dates_by_product[product_id].add(target_date)
+        supplier_id = _to_int_or_none(change.get('supplier_id'))
+        if supplier_id:
+            progress_products_by_supplier[supplier_id].add(product_id)
+            progress_dates_by_supplier[supplier_id].update(
+                target_date for target_date in (change.get('target_dates') or []) if target_date
+            )
+
+    for product_id, target_dates in child_dates_by_product.items():
+        _recalculate_purchase_child_stock(product_id, target_dates)
+
+    suppliers = {
+        supplier.id: supplier
+        for supplier in Supplier.objects.filter(id__in=progress_products_by_supplier.keys())
+    }
+    for supplier_id, product_ids in progress_products_by_supplier.items():
+        _recalculate_purchase_supplier_progress(
+            suppliers.get(supplier_id),
+            product_ids=sorted(product_ids),
+            start_date=min(progress_dates_by_supplier[supplier_id]) if progress_dates_by_supplier[supplier_id] else None,
+        )
+
+
+def _purchase_actual_error_detail(exc):
+    detail = getattr(exc, 'detail', None)
+    if isinstance(detail, dict):
+        for value in detail.values():
+            if isinstance(value, (list, tuple)) and value:
+                return str(value[0])
+            if value:
+                return str(value)
+    if isinstance(detail, (list, tuple)) and detail:
+        return str(detail[0])
+    return str(detail or exc)
+
+
+def _create_purchase_actual_record(
+    *,
+    supplier,
+    product,
+    qty,
+    arrival_date,
+    source,
+    operator_name='',
+    remarks='',
+    requested_line_id=None,
+    non_delivery=False,
+):
+    """仕入実績の作成とLineBacklog反映を全入力画面共通で行う。"""
+    if not supplier:
+        raise ValidationError({'supplier_id': '仕入先が見つかりません。'})
+    if not product:
+        raise ValidationError({'product_id': '品番が見つかりません。'})
+
+    canonical_line = _resolve_purchase_line(supplier)
+    target_line_id = canonical_line.id if canonical_line else _to_int_or_none(requested_line_id)
+    if not target_line_id:
+        raise ValidationError({'line_id': '仕入先ラインを特定できません。'})
+
+    process_obj = resolve_supplier_routing_process(
+        supplier=supplier,
+        line=canonical_line,
+        product=product,
+        reference=arrival_date,
+    )
+    if not process_obj:
+        raise ValidationError({
+            'detail': f'有効な仕入先ルーティング工程を一意に特定できません: {product.product_code}',
+        })
+
+    payload = {
+        'process_id': process_obj.id,
+        'product_id': product.id,
+        'record_type': 'PRODUCTION',
+        'qty': qty,
+        'work_date': arrival_date,
+        'operator_name': str(operator_name or '').strip(),
+        'remarks': str(remarks or '').strip(),
+        'event_data': {
+            'source': source,
+            'arrival_date': arrival_date.isoformat(),
+            'supplier_id': supplier.id,
+            'line_id': target_line_id,
+            **(({'non_delivery': True}) if non_delivery else {}),
+        },
+    }
+    serializer = ProcessRealtimeCreateSerializer(data=payload)
+    serializer.is_valid(raise_exception=True)
+    record = serializer.save()
+
+    if _normalize_record_timestamp(record, arrival_date):
+        record.save(update_fields=['timestamp'])
+
+    # SerializerはProcess.lineへ反映するため、仕入先ラインとの差を実績レコードから再整合する。
+    for line_id in {getattr(process_obj, 'line_id', None), target_line_id}:
+        _reconcile_purchase_actual_backlog_for_key(
+            process_id=process_obj.id,
+            product_id=product.id,
+            line_id=line_id,
+        )
+
+    return {
+        'record': record,
+        'supplier_id': supplier.id,
+        'product_id': product.id,
+        'target_date': arrival_date,
+    }
 
 
 def _resolve_purchase_line_id_from_supplier(supplier_id):
@@ -571,38 +661,40 @@ class PurchaseActualCandidatesView(APIView):
         if not product:
             return Response({'detail': f'product not found: {product_code}'}, status=status.HTTP_404_NOT_FOUND)
 
-        bom_items = list(
-            BOMItem.objects.filter(child_product_id=product.id).select_related('supplier', 'line', 'process')
+        arrival_date_text = (request.query_params.get('arrival_date') or '').strip()
+        routing_reference_date = _parse_purchase_actual_date(arrival_date_text, date.today())
+        routing_steps = list(
+            RoutingStep.objects
+            .filter(
+                output_product_id=product.id,
+                process_id__isnull=False,
+            )
+            .filter(build_effective_routing_q(routing_reference_date, prefix='routing__'))
+            .filter(Q(process__process_code='PURCHASE') | Q(process__process_code='G') | Q(process__is_outsource=True))
+            .select_related('supplier', 'line', 'process')
+            .order_by('step_no', 'id')
         )
-        purchase_like = [
-            item for item in bom_items
-            if str(item.sourcing_type or '').upper() in ('BUY', 'SUBCON') or item.supplier_id
-        ]
-
-        line_by_name = {str(l.line_name or '').strip(): l for l in Line.objects.filter(is_active=True)}
-        line_by_code = {str(l.line_code or '').strip(): l for l in Line.objects.filter(is_active=True)}
 
         candidates = []
-        for idx, item in enumerate(purchase_like):
-            supplier = item.supplier
+        for step in routing_steps:
+            supplier = step.supplier
+            if not supplier and step.line_id:
+                supplier = Supplier.objects.filter(supplier_code=step.line.line_code).first()
             if not supplier:
                 continue
-            # 在庫/残量一覧と同じ仕入ライン解決を使う
             line = _resolve_purchase_line(supplier)
-            if not line:
-                line = item.line
-            if not line:
-                line = line_by_name.get(str(supplier.supplier_name or '').strip()) or line_by_code.get(str(supplier.supplier_code or '').strip())
-            process = _resolve_supplier_purchase_process(
+            process = resolve_supplier_routing_process(
                 supplier=supplier,
                 line=line,
                 product=product,
-                preferred_process_id=getattr(item.process, 'id', None),
+                reference=routing_reference_date,
             )
+            if not process:
+                continue
 
             candidates.append({
-                'key': f'{item.id}-{idx}',
-                'step_no': int(item.id or 0),
+                'key': f'routing-{step.id}',
+                'step_no': int(step.step_no or 0),
                 'supplier_id': supplier.id,
                 'supplier_code': supplier.supplier_code,
                 'supplier_name': supplier.supplier_name,
@@ -645,101 +737,101 @@ class PurchaseActualRegisterView(APIView):
         if qty <= 0:
             return Response({'detail': 'qty must be > 0'}, status=status.HTTP_400_BAD_REQUEST)
 
-        process_id = request.data.get('process_id')
         supplier_id = request.data.get('supplier_id')
-        line_id = request.data.get('line_id')
-
         supplier_obj = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
-        canonical_line = _resolve_purchase_line(supplier_obj) if supplier_obj else None
-        effective_line_id = canonical_line.id if canonical_line else line_id
 
         product = _resolve_product_by_code(product_code)
         if not product:
             return Response({'detail': f'product not found: {product_code}'}, status=status.HTTP_404_NOT_FOUND)
 
-        process_obj = _resolve_supplier_purchase_process(
-            supplier=supplier_obj,
-            line=canonical_line,
-            product=product,
-            preferred_process_id=process_id,
-            create_purchase_process=True,
-        )
-
-        if not process_obj:
-            return Response({'detail': 'supplier process not found'}, status=status.HTTP_400_BAD_REQUEST)
-
-        payload = {
-            'process_id': process_obj.id,
-            'product_id': product.id,
-            'record_type': 'PRODUCTION',
-            'qty': qty,
-            'operator_name': (request.data.get('operator_name') or '').strip(),
-            'remarks': (request.data.get('remarks') or '').strip(),
-            'event_data': {
-                'source': 'PURCHASE_ACTUAL_INPUT',
-                'arrival_date': (request.data.get('arrival_date') or '').strip(),
-                'supplier_id': request.data.get('supplier_id'),
-                'line_id': effective_line_id,
-            },
-        }
-
-        serializer = ProcessRealtimeCreateSerializer(data=payload)
-        serializer.is_valid(raise_exception=True)
-        record = serializer.save()
-
         arrival_date_text = (request.data.get('arrival_date') or '').strip()
-        serializer_line_id = getattr(process_obj, 'line_id', None)
-        target_line_id, target_date, serializer_plan_date = _resolve_purchase_actual_target_context(
-            process_obj=process_obj,
-            supplier_id=supplier_id,
-            line_id=effective_line_id,
-            arrival_date_text=arrival_date_text,
-            reference_dt=record.timestamp,
-        )
+        routing_reference_date = _parse_purchase_actual_date(arrival_date_text, date.today())
+        try:
+            with transaction.atomic():
+                result = _create_purchase_actual_record(
+                    supplier=supplier_obj,
+                    product=product,
+                    qty=qty,
+                    arrival_date=routing_reference_date,
+                    source='PURCHASE_ACTUAL_INPUT',
+                    operator_name=request.data.get('operator_name'),
+                    remarks=request.data.get('remarks'),
+                    requested_line_id=request.data.get('line_id'),
+                )
+        except ValidationError as exc:
+            return Response({'detail': _purchase_actual_error_detail(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # register 時は serializer 側で「現在日時の plan_date」に反映済み。
-        # 納入日指定が異なる場合は、旧plan_dateから減算して指定plan_dateへ移送する。
-        if target_line_id and serializer_line_id and (
-            int(serializer_line_id) != int(target_line_id) or target_date != serializer_plan_date
-        ):
-            _update_purchase_actual_backlog(
-                line_id=serializer_line_id,
-                process_id=process_obj.id,
-                product_id=product.id,
-                plan_date=serializer_plan_date,
-                delta_qty=-int(qty),
-            )
-            _update_purchase_actual_backlog(
-                line_id=target_line_id,
-                process_id=process_obj.id,
-                product_id=product.id,
-                plan_date=target_date,
-                delta_qty=int(qty),
-            )
+        _recalculate_purchase_actual_effects([{
+            'supplier_id': result['supplier_id'],
+            'product_id': result['product_id'],
+            'target_dates': [result['target_date']],
+        }])
 
-        update_fields = []
-        event_data = dict(record.event_data or {})
-        event_data['arrival_date'] = target_date.isoformat()
-        event_data['line_id'] = target_line_id
-        record.event_data = event_data
-        update_fields.append('event_data')
-        if _normalize_record_timestamp(record, target_date):
-            update_fields.append('timestamp')
-        if update_fields:
-            record.save(update_fields=update_fields)
+        return Response({'id': result['record'].id, 'detail': 'created'}, status=status.HTTP_201_CREATED)
 
-        for lid in {serializer_line_id, target_line_id}:
-            _reconcile_purchase_actual_backlog_for_key(
-                process_id=process_obj.id,
-                product_id=product.id,
-                line_id=lid,
-            )
 
-        # 子部品の在庫・出庫を再計算（生産実績変更と同様）
-        _recalculate_purchase_child_stock(product.id, [target_date])
-        _recalculate_purchase_supplier_progress(supplier_obj, product_ids=[product.id])
+class PurchaseActualBulkRegisterView(APIView):
+    """計画数コピーとCSV取込で共用する仕入実績一括登録。"""
 
-        return Response({'id': record.id, 'detail': 'created'}, status=status.HTTP_201_CREATED)
+    def post(self, request):
+        supplier_id = _to_int_or_none(request.data.get('supplier_id'))
+        supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+        if not supplier:
+            return Response({'detail': '仕入先が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        items = request.data.get('items') or []
+        if not isinstance(items, list) or not items:
+            return Response({'detail': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        arrival_date = _parse_purchase_actual_date(request.data.get('arrival_date'), date.today())
+        operator_name = request.data.get('operator_name') or ''
+        results = []
+        changes = []
+
+        for index, item in enumerate(items):
+            try:
+                product_code = str(item.get('product_code') or '').strip()
+                product = _resolve_product_by_code(product_code)
+                if not product:
+                    raise ValidationError({'product_code': f'品番が見つかりません: {product_code}'})
+                try:
+                    qty = Decimal(str(item.get('qty')))
+                except (InvalidOperation, TypeError, ValueError) as exc:
+                    raise ValidationError({'qty': '数量は数値で入力してください。'}) from exc
+                if qty <= 0:
+                    raise ValidationError({'qty': '数量は1以上で入力してください。'})
+
+                with transaction.atomic():
+                    created = _create_purchase_actual_record(
+                        supplier=supplier,
+                        product=product,
+                        qty=qty,
+                        arrival_date=arrival_date,
+                        source='PURCHASE_ACTUAL_INPUT',
+                        operator_name=operator_name,
+                        remarks=item.get('remarks'),
+                        requested_line_id=item.get('line_id') or request.data.get('line_id'),
+                    )
+                results.append({'index': index, 'status': 'ok', 'id': created['record'].id})
+                changes.append({
+                    'supplier_id': created['supplier_id'],
+                    'product_id': created['product_id'],
+                    'target_dates': [created['target_date']],
+                })
+            except Exception as exc:
+                logger.warning('仕入実績一括登録エラー: index=%s error=%s', index, exc)
+                results.append({'index': index, 'status': 'error', 'detail': _purchase_actual_error_detail(exc)})
+
+        if changes:
+            _recalculate_purchase_actual_effects(changes)
+
+        success_count = sum(1 for result in results if result['status'] == 'ok')
+        return Response({
+            'detail': f'{success_count}件を登録しました',
+            'success_count': success_count,
+            'error_count': len(results) - success_count,
+            'results': results,
+        }, status=status.HTTP_200_OK)
 
 
 class PurchaseActualProgressView(APIView):
@@ -967,54 +1059,57 @@ class PurchaseActualDetailView(APIView):
         else:
             remarks = record.remarks or ''
 
-        old_target_line_id, old_target_date, old_serializer_plan_date = _resolve_purchase_actual_target_context(
+        old_target_line_id, old_target_date, _ = _resolve_purchase_actual_target_context(
             process_obj=record.process,
             supplier_id=old_supplier_id,
             line_id=old_line_id,
             arrival_date_text=old_arrival_date,
             reference_dt=record.timestamp,
         )
+        new_supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+        if not new_supplier:
+            return Response({'detail': '仕入先が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+        new_canonical_line = _resolve_purchase_line(new_supplier)
+        new_target_date = _parse_purchase_actual_date(arrival_date_text, record.timestamp.date())
+        new_process = resolve_supplier_routing_process(
+            supplier=new_supplier,
+            line=new_canonical_line,
+            product=record.product,
+            reference=new_target_date,
+        )
+        if not new_process:
+            return Response({
+                'detail': f'有効な仕入先ルーティング工程を一意に特定できません: {record.product.product_code}',
+            }, status=status.HTTP_400_BAD_REQUEST)
         new_target_line_id, new_target_date, _ = _resolve_purchase_actual_target_context(
-            process_obj=record.process,
+            process_obj=new_process,
             supplier_id=supplier_id,
             line_id=line_id,
             arrival_date_text=arrival_date_text,
             reference_dt=record.timestamp,
         )
         old_effective_line_id = old_target_line_id or getattr(record.process, 'line_id', None)
-        new_effective_line_id = new_target_line_id or getattr(record.process, 'line_id', None)
-        serializer_line_id = getattr(record.process, 'line_id', None)
+        new_effective_line_id = new_target_line_id or getattr(new_process, 'line_id', None)
+        old_process = record.process
+        old_process_id = record.process_id
 
         new_event_data = dict(old_event_data)
-        new_event_data['source'] = 'PURCHASE_ACTUAL_INPUT'
+        new_event_data['source'] = old_event_data.get('source') or 'PURCHASE_ACTUAL_INPUT'
         new_event_data['supplier_id'] = supplier_id
         new_event_data['line_id'] = new_effective_line_id
         new_event_data['arrival_date'] = new_target_date.isoformat()
 
         with transaction.atomic():
-            # 旧納入日(plan_date)から数量を減算
-            _update_purchase_actual_backlog(
-                line_id=old_effective_line_id,
-                process_id=record.process_id,
-                product_id=record.product_id,
-                delta_qty=-old_qty_int,
-                plan_date=old_target_date,
+            update_line_backlog_actual_shipment(
+                old_process, record.product, -old_qty_int, old_target_date,
             )
-            # 旧実装で serializer plan_date にも積まれていたレコードは同時に掃除
-            if serializer_line_id and (
-                int(serializer_line_id) != int(old_effective_line_id)
-                or old_serializer_plan_date != old_target_date
-            ):
-                _update_purchase_actual_backlog(
-                    line_id=serializer_line_id,
-                    process_id=record.process_id,
-                    product_id=record.product_id,
-                    delta_qty=-old_qty_int,
-                    plan_date=old_serializer_plan_date,
-                )
+            update_line_backlog_actual_shipment(
+                new_process, record.product, new_qty_int, new_target_date,
+            )
 
             # レコード更新
-            update_fields = ['qty', 'operator_name', 'remarks', 'event_data']
+            update_fields = ['process', 'qty', 'operator_name', 'remarks', 'event_data']
+            record.process = new_process
             record.qty = new_qty
             record.operator_name = operator_name
             record.remarks = remarks
@@ -1023,23 +1118,30 @@ class PurchaseActualDetailView(APIView):
                 update_fields.append('timestamp')
             record.save(update_fields=update_fields)
 
-            # 新納入日(plan_date)へ数量を加算
-            _update_purchase_actual_backlog(
-                line_id=new_effective_line_id,
-                process_id=record.process_id,
-                product_id=record.product_id,
-                delta_qty=new_qty_int,
-                plan_date=new_target_date,
-            )
-
-            for lid in {old_effective_line_id, new_effective_line_id, serializer_line_id}:
+            for process_id, target_line_id in {
+                (old_process_id, old_effective_line_id),
+                (old_process_id, getattr(old_process, 'line_id', None)),
+                (new_process.id, new_effective_line_id),
+                (new_process.id, getattr(new_process, 'line_id', None)),
+            }:
                 _reconcile_purchase_actual_backlog_for_key(
-                    process_id=record.process_id,
+                    process_id=process_id,
                     product_id=record.product_id,
-                    line_id=lid,
+                    line_id=target_line_id,
                 )
 
-        _recalculate_purchase_child_stock(record.product_id, [old_target_date, new_target_date])
+        _recalculate_purchase_actual_effects([
+            {
+                'supplier_id': old_supplier_id,
+                'product_id': record.product_id,
+                'target_dates': [old_target_date, new_target_date],
+            },
+            {
+                'supplier_id': supplier_id,
+                'product_id': record.product_id,
+                'target_dates': [],
+            },
+        ])
         return Response({'detail': 'updated'})
 
     def delete(self, request, record_id):
@@ -1055,7 +1157,8 @@ class PurchaseActualDetailView(APIView):
         old_arrival_date = (old_event_data.get('arrival_date') or '').strip()
         old_qty_int = int(record.qty or 0)
 
-        old_target_line_id, old_target_date, old_serializer_plan_date = _resolve_purchase_actual_target_context(
+        old_supplier = Supplier.objects.filter(id=old_supplier_id).first() if old_supplier_id else None
+        old_target_line_id, old_target_date, _ = _resolve_purchase_actual_target_context(
             process_obj=record.process,
             supplier_id=old_supplier_id,
             line_id=old_line_id,
@@ -1065,36 +1168,26 @@ class PurchaseActualDetailView(APIView):
         old_effective_line_id = old_target_line_id or getattr(record.process, 'line_id', None)
         serializer_line_id = getattr(record.process, 'line_id', None)
         product_id = record.product_id
+        process_id = record.process_id
 
         with transaction.atomic():
-            _update_purchase_actual_backlog(
-                line_id=old_effective_line_id,
-                process_id=record.process_id,
-                product_id=product_id,
-                delta_qty=-old_qty_int,
-                plan_date=old_target_date,
+            update_line_backlog_actual_shipment(
+                record.process, record.product, -old_qty_int, old_target_date,
             )
-            if serializer_line_id and (
-                int(serializer_line_id) != int(old_effective_line_id)
-                or old_serializer_plan_date != old_target_date
-            ):
-                _update_purchase_actual_backlog(
-                    line_id=serializer_line_id,
-                    process_id=record.process_id,
-                    product_id=product_id,
-                    delta_qty=-old_qty_int,
-                    plan_date=old_serializer_plan_date,
-                )
             record.delete()
 
             for lid in {old_effective_line_id, serializer_line_id}:
                 _reconcile_purchase_actual_backlog_for_key(
-                    process_id=record.process_id,
+                    process_id=process_id,
                     product_id=product_id,
                     line_id=lid,
                 )
 
-        _recalculate_purchase_child_stock(product_id, [old_target_date])
+        _recalculate_purchase_actual_effects([{
+            'supplier_id': old_supplier.id if old_supplier else old_supplier_id,
+            'product_id': product_id,
+            'target_dates': [old_target_date],
+        }])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1119,12 +1212,6 @@ class PurchaseActualBulkItemsView(APIView):
             except ValueError:
                 pass
 
-        default_process = _resolve_supplier_purchase_process(
-            supplier=supplier,
-            line=line,
-            create_purchase_process=True,
-        )
-
         # 仕入計画は LineBacklog.plan_qty (sequence_no=1) に格納されている
         backlogs = (
             LineBacklog.objects.filter(
@@ -1143,11 +1230,17 @@ class PurchaseActualBulkItemsView(APIView):
                 continue
             pid = b.product_id
             if pid not in product_map:
+                routing_process = resolve_supplier_routing_process(
+                    supplier=supplier,
+                    line=line,
+                    product=b.product,
+                    reference=plan_date,
+                )
                 product_map[pid] = {
                     'product_id': pid,
                     'product_code': b.product.product_code,
                     'product_name': b.product.product_name,
-                    'process_id': b.process_id or (default_process.id if default_process else None),
+                    'process_id': routing_process.id if routing_process else None,
                     'line_id': line.id,
                     'plan_qty': 0,
                     'actuals_by_date': {},
@@ -1178,12 +1271,13 @@ class PurchaseActualBulkItemsView(APIView):
             product_map[pid]['actuals_by_date'][date_str] = existing + int(ab.actual_qty or 0)
 
         items = _sort_delivery_list_items(product_map.values())
+        process_ids = {item['process_id'] for item in items if item.get('process_id')}
 
         return Response({
             'line_id': line.id,
             'line_code': line.line_code,
             'line_name': line.line_name,
-            'process_id': default_process.id if default_process else None,
+            'process_id': next(iter(process_ids)) if len(process_ids) == 1 else None,
             'items': items,
         })
 
@@ -1787,7 +1881,6 @@ class PurchaseReceivingView(APIView):
             'items': items,
         })
 
-    @transaction.atomic
     def post(self, request):
         supplier_id = request.data.get('supplier_id')
         target_date_str = request.data.get('target_date')
@@ -1817,11 +1910,11 @@ class PurchaseReceivingView(APIView):
             if not product:
                 continue
 
-            process_obj = _resolve_supplier_purchase_process(
+            process_obj = resolve_supplier_routing_process(
                 supplier=supplier,
                 line=canonical_line,
                 product=product,
-                create_purchase_process=True,
+                reference=target,
             )
             if not process_obj:
                 unresolved_items.append({
@@ -1839,91 +1932,42 @@ class PurchaseReceivingView(APIView):
 
         if unresolved_items:
             return Response({
-                'detail': 'supplier process not found for some items',
+                'detail': '有効な仕入先ルーティング工程を一意に特定できない品番があります',
                 'unresolved_items': unresolved_items,
             }, status=status.HTTP_400_BAD_REQUEST)
 
         created_ids = []
-        affected_product_ids = []
-        for prepared in prepared_items:
-            item = prepared['item']
-            product = prepared['product']
-            process_obj = prepared['process_obj']
-            received_qty = item.get('received_qty')
-            is_non_delivery = item.get('non_delivery', False)
-
-            qty = Decimal(str(received_qty or 0))
-
-            payload = {
-                'process_id': process_obj.id,
-                'product_id': product.id,
-                'record_type': 'PRODUCTION',
-                'qty': qty,
-                'operator_name': getattr(request.user, 'username', '') if request.user and request.user.is_authenticated else '',
-                'remarks': item.get('note', ''),
-                'event_data': {
-                    'source': 'PURCHASE_RECEIVING',
-                    'arrival_date': target.isoformat(),
-                    'supplier_id': supplier_id,
-                    'line_id': line_id,
-                    **(({'non_delivery': True}) if is_non_delivery else {}),
-                },
-            }
-
-            serializer = ProcessRealtimeCreateSerializer(data=payload)
-            serializer.is_valid(raise_exception=True)
-            record = serializer.save()
-
-            serializer_line_id = getattr(process_obj, 'line_id', None)
-            target_line_id, target_date_resolved, serializer_plan_date = _resolve_purchase_actual_target_context(
-                process_obj=process_obj,
-                supplier_id=supplier_id,
-                line_id=line_id,
-                arrival_date_text=target.isoformat(),
-                reference_dt=record.timestamp,
-            )
-
-            if not is_non_delivery:
-                if not serializer_line_id:
-                    _update_purchase_actual_backlog(
-                        line_id=target_line_id, process_id=process_obj.id,
-                        product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
-                    )
-                elif target_line_id and (
-                    int(serializer_line_id) != int(target_line_id) or target_date_resolved != serializer_plan_date
-                ):
-                    _update_purchase_actual_backlog(
-                        line_id=serializer_line_id, process_id=process_obj.id,
-                        product_id=product.id, plan_date=serializer_plan_date, delta_qty=-int(qty),
-                    )
-                    _update_purchase_actual_backlog(
-                        line_id=target_line_id, process_id=process_obj.id,
-                        product_id=product.id, plan_date=target_date_resolved, delta_qty=int(qty),
-                    )
-
-            update_fields = []
-            event_data = dict(record.event_data or {})
-            event_data['arrival_date'] = target_date_resolved.isoformat()
-            event_data['line_id'] = target_line_id
-            record.event_data = event_data
-            update_fields.append('event_data')
-            if _normalize_record_timestamp(record, target_date_resolved):
-                update_fields.append('timestamp')
-            if update_fields:
-                record.save(update_fields=update_fields)
-
-            for lid in {serializer_line_id, target_line_id}:
-                _reconcile_purchase_actual_backlog_for_key(
-                    process_id=process_obj.id,
-                    product_id=product.id,
-                    line_id=lid,
+        changes = []
+        operator_name = (
+            getattr(request.user, 'username', '')
+            if request.user and request.user.is_authenticated
+            else ''
+        )
+        with transaction.atomic():
+            for prepared in prepared_items:
+                item = prepared['item']
+                product = prepared['product']
+                qty = Decimal(str(item.get('received_qty') or 0))
+                created = _create_purchase_actual_record(
+                    supplier=supplier,
+                    product=product,
+                    qty=qty,
+                    arrival_date=target,
+                    source='PURCHASE_RECEIVING',
+                    operator_name=operator_name,
+                    remarks=item.get('note'),
+                    requested_line_id=line_id,
+                    non_delivery=bool(item.get('non_delivery', False)),
                 )
+                created_ids.append(created['record'].id)
+                if qty > 0:
+                    changes.append({
+                        'supplier_id': created['supplier_id'],
+                        'product_id': created['product_id'],
+                        'target_dates': [created['target_date']],
+                    })
 
-            created_ids.append(record.id)
-            affected_product_ids.append(product.id)
-
-        for pid in set(affected_product_ids):
-            _recalculate_purchase_child_stock(pid, [target])
+        _recalculate_purchase_actual_effects(changes)
 
         return Response({
             'detail': f'{len(created_ids)}件の検収を確定しました',

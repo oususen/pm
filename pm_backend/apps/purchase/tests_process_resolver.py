@@ -1,17 +1,27 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
 
-from masters.models import BOM, BOMItem, Line, Process, Product, Supplier
+from masters.models import BOM, BOMItem, Line, Process, Product, Routing, RoutingStep, Supplier
 from production.models_line_backlog import LineBacklog
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.views import LineBacklogViewSet
 from purchase.order_proposal_views import _write_plan_qty_on_final_approval
 from purchase.models import PurchaseOrderProposal, PurchaseOrderProposalLine
-from purchase.process_resolver import resolve_purchase_line, resolve_supplier_process
-from purchase.views import PurchaseReceivingView
+from purchase.process_resolver import (
+    resolve_purchase_line,
+    resolve_supplier_process,
+    resolve_supplier_routing_process,
+)
+from purchase.views import (
+    PurchaseActualBulkRegisterView,
+    PurchaseActualDetailView,
+    PurchaseActualRegisterView,
+    PurchaseReceivingView,
+)
 
 
 class PurchaseProcessResolverTest(TestCase):
@@ -93,6 +103,219 @@ class PurchaseProcessResolverTest(TestCase):
 
         self.assertIsNotNone(process)
         self.assertEqual(process.id, self.g_process.id)
+
+    def test_resolve_supplier_routing_process_without_bom(self):
+        supplier_line = resolve_purchase_line(self.subcon_supplier)
+        self.g_process.line = None
+        self.g_process.save(update_fields=['line'])
+        routing = Routing.objects.create(
+            product=self.parent,
+            routing_code='R-SUB-NO-BOM',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=self.g_process,
+            line=supplier_line,
+            supplier=self.subcon_supplier,
+            output_product=self.subcon_child,
+        )
+
+        process = resolve_supplier_routing_process(
+            supplier=self.subcon_supplier,
+            line=supplier_line,
+            product=self.subcon_child,
+            reference=date(2026, 7, 21),
+        )
+
+        self.assertIsNotNone(process)
+        self.assertEqual(process.id, self.g_process.id)
+
+    def test_purchase_actual_register_uses_routing_process_without_bom(self):
+        supplier_line = resolve_purchase_line(self.subcon_supplier)
+        self.g_process.line = None
+        self.g_process.save(update_fields=['line'])
+        routing = Routing.objects.create(
+            product=self.parent,
+            routing_code='R-ACTUAL-NO-BOM',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=self.g_process,
+            line=supplier_line,
+            supplier=self.subcon_supplier,
+            output_product=self.subcon_child,
+        )
+
+        view = PurchaseActualRegisterView.as_view()
+        request = self.factory.post(
+            '/api/purchase-actual/register/',
+            {
+                'supplier_id': self.subcon_supplier.id,
+                'product_code': self.subcon_child.product_code,
+                'qty': 5,
+                'arrival_date': '2026-07-21',
+                'line_id': supplier_line.id,
+            },
+            format='json',
+        )
+        response = view(request)
+
+        self.assertEqual(response.status_code, 201)
+        record = ProcessRealtimeRecord.objects.get(id=response.data['id'])
+        self.assertEqual(record.process_id, self.g_process.id)
+        backlog = LineBacklog.objects.get(
+            line_id=supplier_line.id,
+            process_id=self.g_process.id,
+            product_id=self.subcon_child.id,
+            plan_date=date(2026, 7, 21),
+            sequence_no=0,
+        )
+        self.assertEqual(backlog.actual_qty, 5)
+
+    @patch('purchase.views._recalculate_purchase_supplier_progress')
+    def test_purchase_actual_bulk_register_recalculates_progress_once(self, mock_progress):
+        supplier_line = resolve_purchase_line(self.subcon_supplier)
+        self.g_process.line = None
+        self.g_process.save(update_fields=['line'])
+        second_product = Product.objects.create(
+            product_code='SUB-02',
+            product_name='外作子品目2',
+        )
+        for index, product in enumerate([self.subcon_child, second_product], start=1):
+            routing = Routing.objects.create(
+                product=product,
+                routing_code=f'R-BULK-{index}',
+                is_default=True,
+                is_active=True,
+            )
+            RoutingStep.objects.create(
+                routing=routing,
+                step_no=10,
+                process=self.g_process,
+                line=supplier_line,
+                supplier=self.subcon_supplier,
+                output_product=product,
+            )
+
+        request = self.factory.post(
+            '/api/purchase-actual/bulk-register/',
+            {
+                'supplier_id': self.subcon_supplier.id,
+                'arrival_date': '2026-07-21',
+                'items': [
+                    {'product_code': self.subcon_child.product_code, 'qty': 5},
+                    {'product_code': second_product.product_code, 'qty': 7},
+                ],
+            },
+            format='json',
+        )
+        response = PurchaseActualBulkRegisterView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['success_count'], 2)
+        self.assertEqual(response.data['error_count'], 0)
+        self.assertEqual(ProcessRealtimeRecord.objects.filter(
+            event_data__source='PURCHASE_ACTUAL_INPUT',
+        ).count(), 2)
+        mock_progress.assert_called_once()
+        self.assertEqual(
+            mock_progress.call_args.kwargs['product_ids'],
+            sorted([self.subcon_child.id, second_product.id]),
+        )
+
+    @patch('purchase.views._recalculate_purchase_supplier_progress')
+    def test_purchase_actual_edit_and_delete_adjust_child_shipment(self, mock_progress):
+        supplier_line = resolve_purchase_line(self.subcon_supplier)
+        self.g_process.line = None
+        self.g_process.save(update_fields=['line'])
+        routing = Routing.objects.create(
+            product=self.subcon_child,
+            routing_code='R-EDIT-CHILD',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=self.g_process,
+            line=supplier_line,
+            supplier=self.subcon_supplier,
+            output_product=self.subcon_child,
+        )
+        component_line = Line.objects.create(
+            line_code='COMPONENT-LINE',
+            line_name='子部品ライン',
+        )
+        component_process = Process.objects.create(
+            process_code='COMPONENT-PROC',
+            process_name='子部品工程',
+            line=component_line,
+        )
+        component = Product.objects.create(
+            product_code='COMPONENT-01',
+            product_name='子部品',
+        )
+        bom = BOM.objects.create(
+            parent_product=self.subcon_child,
+            version='v-child',
+            valid_from=date(2026, 1, 1),
+            is_active=True,
+        )
+        BOMItem.objects.create(
+            bom=bom,
+            child_product=component,
+            quantity=2,
+            process=component_process,
+            line=component_line,
+        )
+
+        create_request = self.factory.post(
+            '/api/purchase-actual/register/',
+            {
+                'supplier_id': self.subcon_supplier.id,
+                'product_code': self.subcon_child.product_code,
+                'qty': 5,
+                'arrival_date': '2026-07-21',
+            },
+            format='json',
+        )
+        create_response = PurchaseActualRegisterView.as_view()(create_request)
+        record_id = create_response.data['id']
+        child_backlog = LineBacklog.objects.get(
+            line=component_line,
+            process=component_process,
+            product=component,
+            plan_date=date(2026, 7, 21),
+            sequence_no=0,
+        )
+        self.assertEqual(child_backlog.actual_shipment_qty, 10)
+
+        update_request = self.factory.put(
+            f'/api/purchase-actual/{record_id}/',
+            {
+                'supplier_id': self.subcon_supplier.id,
+                'qty': 8,
+                'arrival_date': '2026-07-21',
+            },
+            format='json',
+        )
+        update_response = PurchaseActualDetailView.as_view()(update_request, record_id=record_id)
+        self.assertEqual(update_response.status_code, 200)
+        child_backlog.refresh_from_db()
+        self.assertEqual(child_backlog.actual_shipment_qty, 16)
+
+        delete_request = self.factory.delete(f'/api/purchase-actual/{record_id}/')
+        delete_response = PurchaseActualDetailView.as_view()(delete_request, record_id=record_id)
+        self.assertEqual(delete_response.status_code, 204)
+        child_backlog.refresh_from_db()
+        self.assertEqual(child_backlog.actual_shipment_qty, 0)
+        self.assertGreaterEqual(mock_progress.call_count, 3)
 
     def test_pickup_purchase_writes_subcon_backlog_with_outsource_process(self):
         supplier_line = resolve_purchase_line(self.subcon_supplier)
@@ -392,6 +615,6 @@ class PurchaseProcessResolverTest(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ProcessRealtimeRecord.objects.count(), 0)
         self.assertEqual(LineBacklog.objects.count(), 0)
-        self.assertEqual(response.data['detail'], 'supplier process not found for some items')
+        self.assertEqual(response.data['detail'], '有効な仕入先ルーティング工程を一意に特定できない品番があります')
         self.assertEqual(len(response.data['unresolved_items']), 1)
         self.assertEqual(response.data['unresolved_items'][0]['product_id'], unresolved_product.id)

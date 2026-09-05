@@ -9,7 +9,14 @@ from openpyxl import Workbook
 logger = logging.getLogger('purchase')
 
 
-def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, days_forward=30, product_ids=None):
+def _recalculate_supplier_progress_for_auto_delivery(
+    supplier,
+    line,
+    days_back,
+    days_forward=30,
+    product_ids=None,
+    start_date_override=None,
+):
     """自動納入リスト送信前に、対象仕入先ラインの進度だけを最新化する。"""
     from masters.models import BOMItem, Calendar, RoutingStep
     from orders.utils.calendar_utils import WorkingDayCalculator
@@ -20,6 +27,8 @@ def _recalculate_supplier_progress_for_auto_delivery(supplier, line, days_back, 
     daiso_cal = Calendar.objects.filter(calendar_code='daiso').first()
     calc = WorkingDayCalculator(daiso_cal)
     start_date = calc.subtract_working_days(today, days_back)
+    if start_date_override:
+        start_date = min(start_date, start_date_override)
     end_date = today + timedelta(days=days_forward)
 
     if product_ids is None:

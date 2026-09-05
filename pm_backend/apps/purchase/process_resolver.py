@@ -1,6 +1,7 @@
 from django.db.models import Q
 
-from masters.models import BOMItem, Line, Process, Product, Supplier
+from masters.models import BOMItem, Line, Process, Product, RoutingStep, Supplier
+from masters.services.routing_service import build_effective_routing_q
 
 
 def _build_purchase_line_name(supplier: Supplier) -> str:
@@ -19,6 +20,44 @@ def normalize_supplier_type(supplier: Supplier | None) -> str:
 
 def is_outsource_process(process: Process | None) -> bool:
     return bool(process and (process.process_code == 'G' or process.is_outsource))
+
+
+def resolve_supplier_routing_process(
+    supplier: Supplier | None,
+    product: Product | None,
+    line: Line | None = None,
+    reference=None,
+):
+    """仕入先と加工後品目に一致する有効ルーティングから工程を一意に解決する。"""
+    if not supplier or not product:
+        return None
+
+    target_line = line or resolve_purchase_line(supplier)
+    supplier_filter = Q(supplier_id=supplier.id)
+    if target_line:
+        supplier_filter |= Q(line_id=target_line.id)
+
+    steps = (
+        RoutingStep.objects
+        .filter(
+            output_product_id=product.id,
+            process_id__isnull=False,
+        )
+        .filter(build_effective_routing_q(reference, prefix='routing__'))
+        .filter(supplier_filter)
+        .select_related('process')
+    )
+    processes = {
+        step.process_id: step.process
+        for step in steps
+        if step.process and (
+            step.process.process_code == 'PURCHASE'
+            or is_outsource_process(step.process)
+        )
+    }
+    if len(processes) != 1:
+        return None
+    return next(iter(processes.values()))
 
 
 def resolve_purchase_line(supplier: Supplier | None):

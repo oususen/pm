@@ -290,14 +290,14 @@ LOGGING = {
             'formatter': 'verbose',
         },
         'file': {
-            'class': 'logging.handlers.RotatingFileHandler',
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
             'filename': str(LOG_DIR / 'production.log'),
             'maxBytes': 10 * 1024 * 1024,  # 10MB
             'backupCount': 10,
             'formatter': 'verbose',
         },
         'trace_file': {
-            'class': 'logging.handlers.RotatingFileHandler',
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
             'filename': str(LOG_DIR / 'production_trace.log'),
             'maxBytes': 10 * 1024 * 1024,  # 10MB
             'backupCount': 10,

@@ -500,7 +500,7 @@ def update_line_backlog_actual_shipment(process, product, qty, plan_date):
     """
     後工程の実績を前工程の実績出庫（actual_shipment_qty）に即時反映する。
     """
-    if not product or not qty or qty <= 0:
+    if not product or not qty:
         return
 
     bom = BOM.objects.filter(parent_product=product, is_active=True).order_by('-valid_from', '-id').first()
@@ -537,23 +537,32 @@ def update_line_backlog_actual_shipment(process, product, qty, plan_date):
                 continue
 
         for target in targets:
-            backlog, _ = LineBacklog.objects.get_or_create(
+            backlog_qs = LineBacklog.objects.filter(
                 line_id=target['line_id'],
                 process_id=target['process_id'],
                 product_id=item.child_product_id,
                 plan_date=plan_date,
                 sequence_no=0,
-                defaults={
-                    'order_qty': 0,
-                    'plan_qty': 0,
-                    'actual_qty': 0,
-                    'stock_qty': 0,
-                    'planned_stock_qty': 0,
-                    'adjust_qty': 0,
-                    'scrap_qty': 0,
-                    'actual_shipment_qty': 0,
-                }
             )
+            backlog = backlog_qs.first()
+            if not backlog:
+                if shipment_int < 0:
+                    continue
+                backlog = LineBacklog.objects.create(
+                    line_id=target['line_id'],
+                    process_id=target['process_id'],
+                    product_id=item.child_product_id,
+                    plan_date=plan_date,
+                    sequence_no=0,
+                    order_qty=0,
+                    plan_qty=0,
+                    actual_qty=0,
+                    stock_qty=0,
+                    planned_stock_qty=0,
+                    adjust_qty=0,
+                    scrap_qty=0,
+                    actual_shipment_qty=0,
+                )
             LineBacklog.objects.filter(id=backlog.id).update(
                 actual_shipment_qty=F('actual_shipment_qty') + shipment_int
             )
@@ -1326,7 +1335,19 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         if requires_routing_validation:
             if not product:
                 raise serializers.ValidationError({'product_id': '指定された製品が存在しません。'})
-            if not is_valid_output_process(process, product, plan_date):
+            routing_line_id = None
+            event_source = str(operator_event.get('source') or '').strip().upper()
+            if event_source in {'PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'}:
+                try:
+                    routing_line_id = int(operator_event.get('line_id'))
+                except (TypeError, ValueError):
+                    routing_line_id = None
+            if not is_valid_output_process(
+                process,
+                product,
+                plan_date,
+                line_id=routing_line_id,
+            ):
                 raise serializers.ValidationError({
                     'product_id': build_invalid_product_process_message(process, product),
                 })

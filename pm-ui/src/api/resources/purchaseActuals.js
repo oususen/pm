@@ -1,6 +1,8 @@
 export const createPurchaseActualsAPI = (client) => ({
-  getCandidates(productCode) {
-    return client.get('/purchase-actual/candidates/', { params: { product_code: productCode } })
+  getCandidates(productCode, arrivalDate) {
+    return client.get('/purchase-actual/candidates/', {
+      params: { product_code: productCode, arrival_date: arrivalDate || undefined },
+    })
   },
   getProgress(params) {
     return client.get('/purchase-actual/progress/', { params })
@@ -10,6 +12,9 @@ export const createPurchaseActualsAPI = (client) => ({
   },
   register(payload) {
     return client.post('/purchase-actual/register/', payload)
+  },
+  bulkRegister(payload) {
+    return client.post('/purchase-actual/bulk-register/', payload)
   },
   update(id, payload) {
     return client.put(`/purchase-actual/${id}/`, payload)

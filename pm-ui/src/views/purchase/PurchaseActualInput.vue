@@ -384,7 +384,7 @@ const resolveSupplierCandidatesByProduct = async (_pid) => {
   resolvedProcessId.value = ''
   if (!productCode.value) return
 
-  const res = await api.purchaseActuals.getCandidates(productCode.value)
+  const res = await api.purchaseActuals.getCandidates(productCode.value, arrivalDate.value)
   const candidates = Array.isArray(res.data?.candidates) ? res.data.candidates : []
   supplierCandidates.value = candidates.map((c) => ({
     key: c.key,
@@ -409,7 +409,7 @@ const resolveProductFromCode = async () => {
   const code = String(productCode.value || '').trim()
   if (!code) return
   try {
-    const candidateRes = await api.purchaseActuals.getCandidates(code)
+    const candidateRes = await api.purchaseActuals.getCandidates(code, arrivalDate.value)
     const product = candidateRes.data?.product
     if (!product?.id) {
       productId.value = ''
@@ -908,7 +908,7 @@ const resolveBulkRow = async (i) => {
   row.planQty = 0
 
   try {
-    const res = await api.purchaseActuals.getCandidates(code)
+    const res = await api.purchaseActuals.getCandidates(code, arrivalDate.value)
     const product = res.data?.product
     if (!product?.id) {
       row.error = '品番が見つかりません'
@@ -992,24 +992,37 @@ const submitBulk = async () => {
   let successCount = 0
   let errorCount = 0
 
-  for (const row of toRegister) {
-    try {
-      await api.purchaseActuals.register({
-        process_id: row.processId ? Number(row.processId) : null,
+  try {
+    const res = await api.purchaseActuals.bulkRegister({
+      arrival_date: arrivalDate.value,
+      supplier_id: bulkSupplierId.value ? Number(bulkSupplierId.value) : null,
+      line_id: bulkLineId.value ? Number(bulkLineId.value) : null,
+      operator_name: operatorName.value || '',
+      items: toRegister.map((row) => ({
         product_code: row.productCode,
         qty: Number(row.qty),
-        arrival_date: arrivalDate.value,
-        supplier_id: bulkSupplierId.value ? Number(bulkSupplierId.value) : null,
-        line_id: row.lineId ? Number(row.lineId) : (bulkLineId.value ? Number(bulkLineId.value) : null),
-        operator_name: operatorName.value || '',
-      })
-      row.result = 'ok'
-      successCount++
-    } catch (e) {
+        line_id: row.lineId ? Number(row.lineId) : null,
+      })),
+    })
+    const resultByIndex = new Map((res.data?.results || []).map((result) => [result.index, result]))
+    toRegister.forEach((row, index) => {
+      const result = resultByIndex.get(index)
+      if (result?.status === 'ok') {
+        row.result = 'ok'
+        successCount++
+      } else {
+        row.result = 'error'
+        row.error = result?.detail || '登録失敗'
+        errorCount++
+      }
+    })
+  } catch (e) {
+    const detail = e?.response?.data?.detail || '一括登録に失敗しました。'
+    toRegister.forEach((row) => {
       row.result = 'error'
-      row.error = e?.response?.data?.detail || '登録失敗'
+      row.error = detail
       errorCount++
-    }
+    })
   }
 
   bulkSubmitting.value = false
