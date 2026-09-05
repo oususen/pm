@@ -1127,31 +1127,53 @@ const printSummary = async () => {
               Number(pattern.hours_per_sheet || 0),
           0,
         );
+    if (dirty.value) {
+      if (!confirm("未保存の変更があります。保存済みデータで印刷しますか？")) {
+        printWindow.close();
+        return;
+      }
+    }
     const dailyCells = (pattern) =>
       printDays
         .map((day) => {
           const daily = pattern.daily[day] || {};
           const ms = Number(daily.manual_sheets || 0);
-          return `<td>${printNumber(daily.demand_qty)}</td><td>${ms ? printNumber(daily.automatic_sheets, autoDigits(daily.automatic_sheets)) : ""}</td><td>${ms ? printNumber(ms) : ""}</td>`;
+          const isTK = pattern.machine === "TK";
+          return `<td class="bl">${isTK && ms ? printNumber(ms) : ""}</td><td>${printNumber(daily.demand_qty)}</td><td class="br">${!isTK && ms ? printNumber(ms) : ""}</td>`;
         })
         .join("");
+    const emptyInfo = "<td></td><td></td><td></td><td></td>";
+    const emptyData = printDays.map(() => "<td></td><td></td><td></td>").join("");
     const rowsHtml =
       patternsForPrint
-        .map(
-          (pattern, i) => {
-            const prev = patternsForPrint[i - 1];
-            const border = prev && prev.representative_product_code !== pattern.representative_product_code ? ' class="group-border"' : '';
-            return `<tr${border}><td>${escapeHtml(pattern.downstream_line_names.join(" / "))}</td><td>${printNumber(pattern.thickness, 1)}</td><td>${escapeHtml(pattern.representative_product_code)}</td><td>${escapeHtml(pattern.pattern_no)}</td><td>${pattern.machine === "TK" ? "1号" : "2号"}</td>${dailyCells(pattern)}</tr>`;
-          },
-        )
+        .map((pattern, i) => {
+          const prev = patternsForPrint[i - 1];
+          const border = prev && prev.representative_product_code !== pattern.representative_product_code ? ' class="group-border"' : '';
+          const isTK = pattern.machine === "TK";
+          const hasData = printDays.some((day) => Number(pattern.daily[day]?.manual_sheets || 0) > 0);
+          const info = hasData
+            ? `<td>${escapeHtml(pattern.downstream_line_names.join(" / "))}</td><td>${printNumber(pattern.thickness, 1)}</td><td>${escapeHtml(pattern.representative_product_code)}</td><td>${escapeHtml(pattern.pattern_no)}</td>`
+            : `<td></td><td></td><td></td><td>${escapeHtml(pattern.pattern_no)}</td>`;
+          const infoR = hasData
+            ? `<td>${escapeHtml(pattern.pattern_no)}</td><td>${escapeHtml(pattern.representative_product_code)}</td><td>${printNumber(pattern.thickness, 1)}</td><td>${escapeHtml(pattern.downstream_line_names.join(" / "))}</td>`
+            : `<td>${escapeHtml(pattern.pattern_no)}</td><td></td><td></td><td></td>`;
+          const left = isTK ? info : emptyInfo;
+          const center = dailyCells(pattern);
+          const right = isTK ? emptyInfo : infoR;
+          return `<tr${border}>${left}${center}${right}</tr>`;
+        })
         .join("") ||
-      `<tr><td colspan="${5 + printDays.length * 3}">対象設定を追加してください。</td></tr>`;
+      `<tr><td colspan="${8 + printDays.length * 3}">対象設定を追加してください。</td></tr>`;
+    const dayCols = printDays.length * 3;
+    const tkH = printDays.map((day) => `${escapeHtml(day.slice(5))} ${printNumber(machineHours(day, "TK"), 2)}h`).join(" / ");
+    const ajH = printDays.map((day) => `${escapeHtml(day.slice(5))} ${printNumber(machineHours(day, "AJ"), 2)}h`).join(" / ");
     printWindow.document.write(
-      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>レーザ加工計画（パターン別合計）</title><style>@page{size:${printOrientation.value};margin:10mm}body{font-family:Meiryo,sans-serif;color:#111827}h1{font-size:16px;margin:0 0 5px}.period{font-size:12px;margin:0 0 10px}table{border-collapse:collapse;font-size:9px;table-layout:fixed}th,td{border:1px solid #94a3b8;padding:3px;white-space:nowrap;text-align:right;overflow:hidden}th{background:#e2e8f0}col.c-line{width:30px}col.c-thick{width:8px}col.c-prod{width:35px}col.c-pno{width:18px}col.c-machine{width:8px}col.c-val{width:8px}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:left}tr.group-border>td{border-top:2px solid #333}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><h1>レーザ加工計画（パターン別合計）</h1><p class="period">期間: ${escapeHtml(printStartDate.value)} ～ ${escapeHtml(printEndDate.value)}</p><table><colgroup><col class="c-line"/><col class="c-thick"/><col class="c-prod"/><col class="c-pno"/><col class="c-machine"/>${printDays.map(() => '<col class="c-val"/><col class="c-val"/><col class="c-val"/>').join("")}</colgroup><thead><tr><th rowspan="3">後工程</th><th rowspan="3">板厚</th><th rowspan="3">製品番号</th><th rowspan="3">P_№</th><th rowspan="3">設備</th>${printDays.map((day) => `<th colspan="3">${escapeHtml(day.slice(5))}</th>`).join("")}</tr><tr>${printDays.map((day) => `<th colspan="3">1号 ${printNumber(machineHours(day, "TK"), 2)}h / 2号 ${printNumber(machineHours(day, "AJ"), 2)}h</th>`).join("")}</tr><tr>${printDays.map(() => "<th>需要</th><th>自数</th><th>手数</th>").join("")}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`,
+      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>レーザ加工計画（パターン別合計）</title><style>@page{size:${printOrientation.value};margin:10mm}body{font-family:Meiryo,sans-serif;color:#111827}h1{font-size:14px;margin:0 0 4px;display:flex;justify-content:space-between;align-items:baseline}h1 span{font-size:11px;font-weight:normal;color:#555}table{border-collapse:collapse;font-size:9px;table-layout:fixed}th,td{border:1px solid #94a3b8;padding:3px;white-space:nowrap;text-align:right;overflow:hidden}th{background:#e2e8f0}th.m-tk{background:#1e40af;color:#fff;text-align:center;font-size:10px}th.m-aj{background:#b45309;color:#fff;text-align:center;font-size:10px}.left{text-align:left}tr.group-border>td{border-top:2px solid #333}.bl{border-left:3px solid #333}.br{border-right:3px solid #333}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><h1>レーザ加工計画（パターン別合計）<span>${escapeHtml(printStartDate.value)} ～ ${escapeHtml(printEndDate.value)}</span></h1><table><thead><tr><th class="m-tk" colspan="4">1号機 ${tkH}</th>${printDays.map((day) => `<th colspan="3">${escapeHtml(day.slice(5))}</th>`).join("")}<th class="m-aj" colspan="4">2号機 ${ajH}</th></tr><tr><th>後工程</th><th>板厚</th><th>製品番号</th><th>P_№</th>${printDays.map(() => '<th class="bl">1号手数</th><th>需要</th><th class="br">2号手数</th>').join("")}<th>P_№</th><th>製品番号</th><th>板厚</th><th>後工程</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`,
     );
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
+    printWindow.close();
     showPrintDialog.value = false;
   } catch (e) {
     printWindow.close();
@@ -1399,7 +1421,7 @@ button {
 .print-modal {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 50;
   display: grid;
   place-items: center;
   background: rgba(15, 23, 42, 0.35);

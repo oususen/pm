@@ -423,7 +423,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 return {day: daily[field] for day, daily in automatic_daily.items()}
             processing_days = [d for d in sorted_days if datetime.strptime(d, '%Y-%m-%d').date().weekday() == dow]
             if not processing_days:
-                return {day: daily[field] for day, daily in automatic_daily.items()}
+                return result
             for i, proc_day in enumerate(processing_days):
                 if i + 1 < len(processing_days):
                     next_proc = processing_days[i + 1]
