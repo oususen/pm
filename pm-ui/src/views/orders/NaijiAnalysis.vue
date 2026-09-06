@@ -562,10 +562,17 @@
         </div>
 
         <div class="search-row">
+          <label class="field-label">データ開始日</label>
+          <input type="date" v-model="rSnapshotStartDate" class="form-input" />
+          <span class="field-hint">（受注ファイル採用開始日）</span>
+        </div>
+
+        <div class="search-row">
           <label class="field-label">納期範囲</label>
           <input type="date" v-model="rStartDate" class="form-input" />
           <span class="range-sep">〜</span>
           <input type="date" v-model="rEndDate" class="form-input" />
+          <span class="field-hint">（確定日範囲）</span>
         </div>
 
         <div class="search-row">
@@ -955,6 +962,7 @@ const deltaCellClass = (snap, dd) => {
 
 // ---- タブ2: 一括分析レポート ----
 const selectedCodes = ref([])
+const rSnapshotStartDate = ref('')
 const rStartDate = ref('')
 const rEndDate = ref('')
 const exporting = ref(false)
@@ -1024,6 +1032,7 @@ const exportExcel = async () => {
     const params = {
       customer_id: selectedCustomerId.value,
       product_codes: selectedCodes.value.join(','),
+      snapshot_start_date: rSnapshotStartDate.value || undefined,
       start_date: rStartDate.value || undefined,
       end_date: rEndDate.value || undefined,
     }
@@ -1056,6 +1065,7 @@ const exportPptx = async () => {
     const payload = {
       customer_id: selectedCustomerId.value,
       entries: selectedCodes.value,
+      snapshot_start_date: rSnapshotStartDate.value || undefined,
       start_date: rStartDate.value || undefined,
       end_date: rEndDate.value || undefined,
     }
@@ -1271,6 +1281,7 @@ onUnmounted(() => {
 .form-select-ship-to { min-width: 100px; }
 .form-input { padding: 6px 8px; border: 1px solid #bbb; border-radius: 4px; width: 130px; }
 .range-sep { color: #888; }
+.field-hint { color: #888; font-size: 11px; margin-left: 4px; }
 .btn-primary { padding: 7px 18px; background: #1a5fb4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .error-msg { color: #c0392b; font-size: 12px; }

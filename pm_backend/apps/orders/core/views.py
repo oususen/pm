@@ -2518,6 +2518,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         codes_str = request.query_params.get('product_codes', '')
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
+        snapshot_start_str = request.query_params.get('snapshot_start_date')
 
         if not customer_id:
             return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2528,6 +2529,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         try:
             start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
             end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+            snapshot_start_date = datetime.strptime(snapshot_start_str, '%Y-%m-%d').date() if snapshot_start_str else None
         except ValueError:
             return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2535,7 +2537,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         for entry in entries:
             pc, st = (entry.split(':', 1) + [''])[:2]
             pc, st = pc.strip(), st.strip()
-            summary = compute_naiji_summary(int(customer_id), pc, start_date, end_date, ship_to=st)
+            summary = compute_naiji_summary(int(customer_id), pc, start_date, end_date, ship_to=st, snapshot_start_date=snapshot_start_date)
             if st:
                 summary['ship_to'] = st
             results.append(summary)
@@ -2553,6 +2555,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         codes_str = request.query_params.get('product_codes', '')
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
+        snapshot_start_str = request.query_params.get('snapshot_start_date')
 
         if not customer_id:
             return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2563,10 +2566,11 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         try:
             start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
             end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+            snapshot_start_date = datetime.strptime(snapshot_start_str, '%Y-%m-%d').date() if snapshot_start_str else None
         except ValueError:
             return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
 
-        buf, customer_name = generate_batch_report_excel(int(customer_id), entries, start_date, end_date)
+        buf, customer_name = generate_batch_report_excel(int(customer_id), entries, start_date, end_date, snapshot_start_date=snapshot_start_date)
         period_label = f'{start_date_str or ""}_{end_date_str or ""}'
         filename = f'{customer_name}_内示分析_{period_label}.xlsx'
         response = HttpResponse(
@@ -2589,6 +2593,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         entries_list = request.data.get('entries') or []
         start_date_str = request.data.get('start_date')
         end_date_str = request.data.get('end_date')
+        snapshot_start_str = request.data.get('snapshot_start_date')
 
         if not customer_id:
             return Response({'error': 'customer_id は必須です'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2598,6 +2603,7 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
         try:
             start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
             end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+            snapshot_start_date = datetime.strptime(snapshot_start_str, '%Y-%m-%d').date() if snapshot_start_str else None
         except ValueError:
             return Response({'error': '日付形式が不正です (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2606,7 +2612,8 @@ class StgOrderDailyViewSet(viewsets.ModelViewSet):
             pc, st = (entry.split(':', 1) + [''])[:2]
             product_entries.append({'product_code': pc.strip(), 'ship_to': st.strip()})
 
-        data = compute_naiji_report_data(int(customer_id), product_entries, start_date, end_date)
+        data = compute_naiji_report_data(int(customer_id), product_entries, start_date, end_date,
+                                         snapshot_start_date=snapshot_start_date)
         buf = generate_naiji_pptx_report(data)
 
         filename = f'{data["customer_name"]}_内示分析レポート.pptx'

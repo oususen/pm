@@ -988,6 +988,15 @@ const submitBulk = async () => {
     return
   }
 
+  normalizeBulkPlanDate()
+  normalizeArrivalDate()
+  if (bulkPlanDate.value && arrivalDate.value && bulkPlanDate.value !== arrivalDate.value) {
+    const confirmed = window.confirm(
+      `計画日と納入日が異なります。このまま登録しますか？\n計画日: ${bulkPlanDate.value}\n納入日: ${arrivalDate.value}`,
+    )
+    if (!confirmed) return
+  }
+
   bulkSubmitting.value = true
   let successCount = 0
   let errorCount = 0

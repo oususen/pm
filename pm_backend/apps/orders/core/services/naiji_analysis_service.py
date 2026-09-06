@@ -147,7 +147,7 @@ def get_naiji_products(customer_id):
 # ---------------------------------------------------------------------------
 # 共通データ構築
 # ---------------------------------------------------------------------------
-def _build_product_data(customer_id, product_code, ship_to='', start_date=None, end_date=None):
+def _build_product_data(customer_id, product_code, ship_to='', start_date=None, end_date=None, snapshot_start_date=None):
     """スナップショット・確定データの構築（全分析関数の共通基盤）
 
     Returns:
@@ -185,6 +185,10 @@ def _build_product_data(customer_id, product_code, ship_to='', start_date=None, 
         sf = row.source_file
         if not sf:
             continue
+        if sf not in snapshot_dates:
+            snapshot_dates[sf] = row.created_at
+        if snapshot_start_date and snapshot_dates[sf].date() < snapshot_start_date:
+            continue
         ds = row.due_date.isoformat()
         if start_date and row.due_date < start_date:
             continue
@@ -192,7 +196,6 @@ def _build_product_data(customer_id, product_code, ship_to='', start_date=None, 
             continue
         if sf not in snapshots_map:
             snapshots_map[sf] = {}
-            snapshot_dates[sf] = row.created_at
         qty = float(row.quantity or 0)
         snapshots_map[sf][ds] = snapshots_map[sf].get(ds, 0.0) + qty
 
@@ -554,9 +557,9 @@ def _compute_period_summary(all_due_dates, snapshots_map, ordered_files, snapsho
 # ---------------------------------------------------------------------------
 # バッチサマリー（一括分析レポート用）
 # ---------------------------------------------------------------------------
-def compute_naiji_summary(customer_id, product_code, start_date=None, end_date=None, ship_to=''):
+def compute_naiji_summary(customer_id, product_code, start_date=None, end_date=None, ship_to='', snapshot_start_date=None):
     """一括レポート用のサマリーデータを計算"""
-    pd = _build_product_data(customer_id, product_code, ship_to, start_date, end_date)
+    pd = _build_product_data(customer_id, product_code, ship_to, start_date, end_date, snapshot_start_date=snapshot_start_date)
 
     summary = _compute_period_summary(
         pd['all_due_dates'], pd['snapshots_map'], pd['ordered_files'],
@@ -702,7 +705,7 @@ def _compute_firm_variability(all_due_dates, firm_quantities):
     }
 
 
-def compute_naiji_report_data(customer_id, product_entries, start_date=None, end_date=None):
+def compute_naiji_report_data(customer_id, product_entries, start_date=None, end_date=None, snapshot_start_date=None):
     """PPTXレポート用データを計算
 
     product_entries: [{'product_code': str, 'ship_to': str}, ...]
@@ -712,13 +715,13 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
     customer_name = ''
     products = []
     all_snapshot_dates = set()
-    all_analysis_due_dates = set()
+    all_firm_due_dates = set()
 
     for entry in product_entries:
         pc = entry['product_code']
         st = (entry.get('ship_to') or '').strip()
 
-        pd = _build_product_data(customer_id, pc, st, start_date, end_date)
+        pd = _build_product_data(customer_id, pc, st, start_date, end_date, snapshot_start_date=snapshot_start_date)
         if not customer_name:
             customer_name = pd['customer_name']
 
@@ -732,19 +735,18 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
 
         for sf in ordered_files:
             all_snapshot_dates.add(snapshot_dates[sf].date())
-
-        analysis_due_dates = sorted(set(all_due_dates) & set(firm_quantities))
-        all_analysis_due_dates.update(date.fromisoformat(ds) for ds in analysis_due_dates)
+        for ds in firm_quantities:
+            all_firm_due_dates.add(date.fromisoformat(ds))
 
         summary = _compute_period_summary(
-            analysis_due_dates, snapshots_map, ordered_files, snapshot_dates,
+            all_due_dates, snapshots_map, ordered_files, snapshot_dates,
             firm_quantities, firm_dates, wdc,
         )
-        volatility = _compute_volatility(analysis_due_dates, snapshots_map, ordered_files, snapshot_dates)
+        volatility = _compute_volatility(all_due_dates, snapshots_map, ordered_files, snapshot_dates)
         last_minute = _compute_last_minute_changes(
-            analysis_due_dates, snapshots_map, ordered_files, snapshot_dates, firm_quantities, wdc,
+            all_due_dates, snapshots_map, ordered_files, snapshot_dates, firm_quantities, wdc,
         )
-        firm_variability = _compute_firm_variability(analysis_due_dates, firm_quantities)
+        firm_variability = _compute_firm_variability(all_due_dates, firm_quantities)
 
         products.append({
             'product_code': pc,
@@ -794,15 +796,15 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
         'last_snapshot_date': max(all_snapshot_dates).isoformat() if all_snapshot_dates else None,
         'firm_due_min': min(firm_due_counts) if firm_due_counts else None,
         'firm_due_max': max(firm_due_counts) if firm_due_counts else None,
-        'first_firm_date': min(all_analysis_due_dates).isoformat() if all_analysis_due_dates else None,
-        'last_firm_date': max(all_analysis_due_dates).isoformat() if all_analysis_due_dates else None,
+        'first_firm_date': min(all_firm_due_dates).isoformat() if all_firm_due_dates else None,
+        'last_firm_date': max(all_firm_due_dates).isoformat() if all_firm_due_dates else None,
     }
 
 
 # ---------------------------------------------------------------------------
 # Excelレポート生成
 # ---------------------------------------------------------------------------
-def generate_batch_report_excel(customer_id, entries, start_date=None, end_date=None):
+def generate_batch_report_excel(customer_id, entries, start_date=None, end_date=None, snapshot_start_date=None):
     """複数製品の内示分析サマリーをExcelワークブックで返す"""
     import io
     import openpyxl
@@ -889,7 +891,7 @@ def generate_batch_report_excel(customer_id, entries, start_date=None, end_date=
 
     for row_idx, entry in enumerate(entries, start=4):
         pc, st = _parse_entry(entry)
-        summary = compute_naiji_summary(customer_id, pc, start_date, end_date, ship_to=st)
+        summary = compute_naiji_summary(customer_id, pc, start_date, end_date, ship_to=st, snapshot_start_date=snapshot_start_date)
         display_code = f"{summary['product_code']} ({st})" if st else summary['product_code']
         row_data = [
             display_code,
