@@ -477,12 +477,14 @@
                       }"
                     >
                       {{
-                        number(
-                          patternDailyValue(pattern, day, "automatic_sheets"),
-                          autoDigits(
-                            patternDailyValue(pattern, day, "automatic_sheets"),
-                          ),
-                        )
+                        patternDailyValue(pattern, day, "automatic_sheets") === 0
+                          ? ''
+                          : number(
+                              patternDailyValue(pattern, day, "automatic_sheets"),
+                              autoDigits(
+                                patternDailyValue(pattern, day, "automatic_sheets"),
+                              ),
+                            )
                       }}
                     </td>
                     <td
@@ -496,6 +498,7 @@
                       :data-tip="`${pattern.representative_product_code} t${number(pattern.thickness, 1)}`"
                     >
                       <input
+                        v-if="patternDailyValue(pattern, day, 'automatic_sheets') !== 0 || patternDailyValue(pattern, day, 'manual_sheets') !== 0"
                         class="manual-sheets"
                         v-model.number="pattern.daily[day].manual_sheets"
                         min="0"
