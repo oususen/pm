@@ -944,7 +944,7 @@
           />
           <span class="suffix">日分</span>
         </div>
-        <p class="helper">算出式: （実行日からの平均日あたり）×（安全在庫日数）で最小在庫数を更新します。</p>
+        <p class="helper">算出式: （実行日からの平均日あたり）×（安全在庫日数）で最小在庫数を更新します。需要データは顧客需要（LineDemand: 確定+内示）を使用します。後工程の需要ではありません。</p>
       </div>
 
       <div class="field" style="margin-top: 12px">

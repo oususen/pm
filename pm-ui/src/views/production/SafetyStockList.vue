@@ -4,7 +4,7 @@
       <div class="header-left">
         <h1 class="page-title">安全在庫一覧 <DataSourceDialog title="" :sources="dsSources" /></h1>
         <p class="helper-text">
-          品番ごとの安全在庫（最小在庫）と在庫不足状況を確認します。
+          品番ごとの安全在庫（最小在庫）と在庫不足状況を確認します。安全在庫は顧客需要（確定+内示）から算出されます。後工程の需要ではありません。
         </p>
       </div>
       <div class="page-actions">
