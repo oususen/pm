@@ -514,10 +514,18 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             if end_date < requested_start_date:
                 return Response({'detail': 'end_date must be on or after start_date'}, status=status.HTTP_400_BAD_REQUEST)
             start_date = requested_start_date
-            dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1) if (start_date + timedelta(days=i)).weekday() < 5]
+            from masters.models import Calendar
+            laser_cal = Calendar.objects.filter(calendar_code='reza').first()
+            grid_calendar_id = laser_cal.id if laser_cal else _resolve_calendar_id(None)
+            grid_is_working = _build_workday_helpers(grid_calendar_id)[0]
+            dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1) if grid_is_working(start_date + timedelta(days=i))]
         else:
             start_date = requested_start_date - timedelta(days=requested_start_date.weekday())
-            dates = [start_date + timedelta(days=i) for i in range(14) if (start_date + timedelta(days=i)).weekday() < 5]
+            from masters.models import Calendar
+            laser_cal = Calendar.objects.filter(calendar_code='reza').first()
+            grid_calendar_id = laser_cal.id if laser_cal else _resolve_calendar_id(None)
+            grid_is_working = _build_workday_helpers(grid_calendar_id)[0]
+            dates = [start_date + timedelta(days=i) for i in range(14) if grid_is_working(start_date + timedelta(days=i))]
         if not dates:
             return Response({'detail': '稼働日の範囲を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
         targets = list(LaserWeeklyPlanTarget.objects.filter(is_active=True).select_related('downstream_line', 'product', 'finished_product', 'laser_pattern__equipment__process__line', 'laser_pattern__material', 'laser_pattern__processing_freq_pattern').prefetch_related('laser_pattern__finished_items'))
