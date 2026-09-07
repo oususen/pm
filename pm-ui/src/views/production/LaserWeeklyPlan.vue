@@ -495,7 +495,7 @@
                           patternDailyValue(pattern, day, 'automatic_sheets'),
                         ),
                       }"
-                      :data-tip="`${pattern.representative_product_code} t${number(pattern.thickness, 1)}`"
+                      :data-tip="`${pattern.representative_product_code} t${number(pattern.thickness, 1)} ${pattern.machine === 'TK' ? '1号機' : '2号機'}`"
                     >
                       <input
                         v-if="patternDailyValue(pattern, day, 'automatic_sheets') !== 0 || patternDailyValue(pattern, day, 'manual_sheets') !== 0"
