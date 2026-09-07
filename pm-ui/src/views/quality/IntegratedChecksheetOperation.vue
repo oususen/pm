@@ -88,6 +88,14 @@
           <span class="field-label">刻印番号</span>
           <input v-model="seiBanFilter" type="text" placeholder="部分一致検索" style="width:160px" :disabled="loading" @keydown.enter="doSearch()" />
         </label>
+        <label v-if="isReviewMode" title="計画日の開始日">
+          <span class="field-label">開始日</span>
+          <input v-model="planDateStartFilter" type="date" :max="planDateEndFilter || undefined" :disabled="loading" @keydown.enter="doSearch()" />
+        </label>
+        <label v-if="isReviewMode" title="計画日の終了日">
+          <span class="field-label">終了日</span>
+          <input v-model="planDateEndFilter" type="date" :min="planDateStartFilter || undefined" :disabled="loading" @keydown.enter="doSearch()" />
+        </label>
         <button class="btn-secondary btn-sm" @click="doSearch()" :disabled="loading" style="align-self:flex-end">検索</button>
         <button class="btn-secondary btn-sm" @click="resetFilters()" :disabled="loading" style="align-self:flex-end">リセット</button>
       </div>
@@ -809,6 +817,8 @@ const selectedLine = ref('')
 const selectedProduct = ref('')
 const batchStatusFilter = ref('OPEN')
 const seiBanFilter = ref('')
+const planDateStartFilter = ref('')
+const planDateEndFilter = ref('')
 
 // --- バッチ一覧 ---
 const batches = ref([])
@@ -1192,6 +1202,10 @@ const ensureLineFinalProducts = async (lineId) => {
 }
 
 const doSearch = () => {
+  if (isReviewMode.value && planDateStartFilter.value && planDateEndFilter.value && planDateStartFilter.value > planDateEndFilter.value) {
+    alert('開始日は終了日以前の日付を指定してください。')
+    return
+  }
   loadBatches()
   if (seiBanFilter.value.trim()) {
     searchHistory()
@@ -1205,6 +1219,8 @@ const resetFilters = () => {
   selectedProduct.value = ''
   batchStatusFilter.value = 'OPEN'
   seiBanFilter.value = ''
+  planDateStartFilter.value = ''
+  planDateEndFilter.value = ''
   historyResults.value = []
   loadBatches()
 }
@@ -1222,6 +1238,8 @@ const loadBatches = async () => {
     if (selectedProduct.value) params.product = selectedProduct.value
     if (batchStatusFilter.value) params.status = batchStatusFilter.value
     if (seiBanFilter.value) params.sei_ban = seiBanFilter.value
+    if (isReviewMode.value && planDateStartFilter.value) params.plan_date__gte = planDateStartFilter.value
+    if (isReviewMode.value && planDateEndFilter.value) params.plan_date__lte = planDateEndFilter.value
     const res = await api.integratedChecksheets.listBatches(params)
     batches.value = res.data?.results || res.data || []
   } catch {
