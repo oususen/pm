@@ -1053,7 +1053,38 @@
     <p>再実行前には、履歴の結果・メッセージ・添付内容と現在の仕入れ計画を確認してください。送信済み注文書と数量が変わる場合は、仕入先への訂正連絡が必要か確認します。</p>
     <details>
       <summary>補足：システム上の保存先・項目名</summary>
-      <p>仕入れ計画の保存先は <code>LineBacklog</code> の <code>sequence_no=1</code>、数量は <code>plan_qty</code> です。ロット設定は <code>Product.order_lot_min / order_lot_multiple</code>、安全在庫は <code>StockAllocation.min_stock_qty</code> を参照します。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>対象</th><th>保存先</th><th>主な項目</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>発注計画</td>
+              <td><code>line_backlog</code><br>（<code>LineBacklog</code>）</td>
+              <td><code>line_id</code>、<code>process_id</code>、<code>product_id</code>、<code>plan_date</code>、<code>sequence_no=1</code>、<code>plan_qty</code></td>
+              <td>仕入先ライン・品番・納入日ごとの計画数量。自動送信で保存する。</td>
+            </tr>
+            <tr>
+              <td>仕入れ実績</td>
+              <td><code>t_process_realtime_record</code><br>（<code>ProcessRealtimeRecord</code>）<br><code>line_backlog</code><br>（<code>LineBacklog</code>）</td>
+              <td>実績レコード：<code>record_type=PRODUCTION</code>、<code>process_id</code>、<code>product_id</code>、<code>qty</code>、<code>timestamp</code>、<code>event_data.arrival_date</code><br>進度用：<code>sequence_no=0</code>、<code>actual_qty</code></td>
+              <td>入荷実績を実績レコードの <code>qty</code> に保存し、同じ入荷数量を仕入先ラインの <code>line_backlog.actual_qty</code> に反映する。計画から登録した実績には、下記の計画キーも保存する。</td>
+            </tr>
+            <tr>
+              <td>計画との紐付け</td>
+              <td>実績の <code>event_data.purchase_plan</code></td>
+              <td><code>supplier_id</code>、<code>product_id</code>、<code>plan_date</code></td>
+              <td>どの発注計画から登録した実績かを示す。納入日を変更しても、元の計画との紐付けは維持する。</td>
+            </tr>
+            <tr>
+              <td>未納残数</td>
+              <td>保存しない</td>
+              <td>計画数 − 計画登録済</td>
+              <td><code>plan_qty</code> から、同じ計画キーを持つ実績の <code>qty</code> 合計を引いて、その都度計算する。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>ロット設定は <code>Product.order_lot_min / order_lot_multiple</code>、安全在庫は <code>StockAllocation.min_stock_qty</code> を参照します。</p>
     </details>
   </section>
 
