@@ -3269,7 +3269,7 @@ class PurchaseAutoOrderSendRunNowView(APIView):
 
 
 class PurchaseAutoOrderSendHolidayTrialView(APIView):
-    """注文書自動送信 休日トライ実行"""
+    """注文書自動送信 休日手動実行"""
 
     def post(self, request, pk):
         config = PurchaseAutoOrderSendConfig.objects.filter(pk=pk).first()
@@ -3283,7 +3283,7 @@ class PurchaseAutoOrderSendHolidayTrialView(APIView):
         import threading
 
         config.last_run_status = 'RUNNING'
-        config.last_run_message = '休日トライ実行中...'
+        config.last_run_message = '休日手動実行中...'
         config.last_run_at = datetime.now()
         config.save(update_fields=['last_run_status', 'last_run_message', 'last_run_at'])
 
@@ -3292,7 +3292,7 @@ class PurchaseAutoOrderSendHolidayTrialView(APIView):
             kwargs={'config_id': config.id, 'ignore_holiday': True, 'trigger_type': PurchaseAutoOrderSendHistory.TRIGGER_HOLIDAY_TRIAL},
         )
         thread.start()
-        return Response({'detail': '休日トライを開始しました', 'config_id': config.id})
+        return Response({'detail': '休日手動実行を開始しました', 'config_id': config.id})
 
 
 class PurchaseAutoOrderSendHistoryListView(APIView):

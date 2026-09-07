@@ -510,7 +510,7 @@ class PurchaseAutoOrderSendHistory(models.Model):
     TRIGGER_CHOICES = [
         (TRIGGER_SCHEDULED, '自動実行'),
         (TRIGGER_MANUAL, '手動実行'),
-        (TRIGGER_HOLIDAY_TRIAL, '休日トライ'),
+        (TRIGGER_HOLIDAY_TRIAL, '休日手動実行'),
     ]
 
     STATUS_SUCCESS = 'SUCCESS'

@@ -796,7 +796,7 @@
       </div>
     </div>
     <div class="callout info">
-      <strong>既存機能との違い:</strong> 「自動納入リスト送信」は納入リストの送付機能です。本機能は注文書（計画数量ベース）を生成し、<code>LineBacklog</code> に計画を保存した上でメール送信します。両機能は独立しており、互いに影響しません。
+      <strong>既存機能との違い:</strong> 「自動納入リスト送信」は納入リストの送付機能です。本機能は注文書を生成し、仕入れ計画を保存した上でメール送信します。送信機能は別ですが、仕入れ計画・実績・進度のデータを参照するため、運用上の関係があります。
     </div>
   </section>
 
@@ -819,7 +819,7 @@
       <div class="flow-step highlight">
         <span class="flow-num">STEP 3</span>
         <span class="flow-label">数量計算</span>
-        <span class="flow-detail">需要と計進から<br>必要数を算出・保存</span>
+        <span class="flow-detail">対象日の既存計画を再作成し<br>必要数を算出・保存</span>
       </div>
       <div class="flow-arrow">&#x2192;</div>
       <div class="flow-step">
@@ -836,7 +836,7 @@
     </div>
     <div class="callout warning">
       <strong>休日の場合:</strong> 当日が休日ならスキップされます（メール送信なし、ステータス: SKIPPED）。<br>
-      休日でも動作確認したい場合は「休日トライ」ボタンで実行できます。
+      休日に処理する場合は「休日手動実行」を使用します。仕入れ計画の再作成と、設定された宛先へのメール送信を実際に行います。納入日判定などの条件は引き続き適用されます。
     </div>
 
     <h3 id="delivery">2.1. STEP 2 — 納入日決定の詳細</h3>
@@ -894,12 +894,14 @@
     </div>
 
     <div class="formula-box">
-      <span class="formula-label">具体例（納入日=5営業日後、パターン方式、月・水・金納入）</span>
-      実行日: 8/6(木) → 5営業日後 最早納入日: 8/20(木) → 納入パターン ✗（月・水・金ではない）<br>
-      → 発信はしない<br>
-      翌日: 8/7(金) → 5営業日後 8/21(金) → 納入パターン ✓<br>
-      次回納入日: 8/24(月) なので → カバー期間: 8/21～8/21（1日間）<br>
-      → この1日間の需要合計から必要数を計算
+      <span class="formula-label">カバー期間の例（金曜納入・次回は月曜の場合）</span>
+      今回の納入日：金曜日 → 次回の納入日：月曜日<br>
+      カバー期間：金曜日から日曜日まで（次回納入日の前日まで）<br>
+      土日に需要がなければ、需要合計は金曜日分のみ。土日に需要があれば、その分も含めます。
+    </div>
+    <p>納入日は、処理基準日から設定した営業日数を数え、登録済みのカレンダ・納入日設定で判定します。</p>
+    <div class="callout info">
+      <strong>再実行時も計画を再作成します。</strong>対象仕入先・納入日の既存計画を削除してから計算し直します。送信失敗時の再実行でも、以前と同じ数量になるとは限りません。送信履歴と計画を確認してください。
     </div>
 
     <div class="callout warning">
@@ -915,7 +917,7 @@
       <div class="tab-card">
         <div class="tab-card-title">設定</div>
         <p class="tab-card-desc">
-          仕入先ごとの送信条件を管理。送信時刻、納入日数、計算モード、添付ファイルのON/OFF、宛先・CC・通知先を設定。ここから手動実行・休日トライも可能。
+          仕入先ごとの送信条件を管理。送信時刻、納入日数、計算モード、添付ファイルのON/OFF、宛先・CC・通知先を設定。ここから手動実行・休日手動実行も可能。
         </p>
       </div>
       <div class="tab-card">
@@ -944,8 +946,8 @@
         <tbody>
           <tr>
             <td><strong>送信時刻</strong></td>
-            <td>毎日の自動送信時刻（HH:MM）</td>
-            <td>07:30</td>
+            <td>毎日の自動送信時刻（HH:MM）。処理基準日は8時区切りです。<br>例：木曜日7:55の実行は、水曜日を基準に休日判定・納入日計算を行います。木曜日8:00以降は木曜日が基準です。</td>
+            <td>07:55</td>
           </tr>
           <tr>
             <td><strong>納入日（N営業日後）</strong></td>
@@ -1007,45 +1009,52 @@
     </p>
 
     <div class="formula-box">
-      <span class="formula-label">必要数の算出</span>
-      必要数 = カバー期間の需要合計 &minus; 納入日前日の計進 + 安全在庫（ONの場合）&times; 倍数
+      <span class="formula-label">必要数の基本式</span>
+      必要数 = カバー期間の需要合計 &minus; 補正後の計画進度 + 安全在庫（ONの場合）&times; 倍率
     </div>
 
     <div class="callout info">
       <strong>必要数 &le; 0 の場合:</strong> その品目は今回の納入では不要と判断し、計画を保存しません（既存計画があれば削除）。
     </div>
 
-    <h3>ロット丸め（LOT_ROUNDED モード）</h3>
-    <p><a class="app-link" data-path="/masters/product">品番マスタ</a>の <code>order_lot_min</code>（最小納入数）と <code>order_lot_multiple</code>（納入倍数）を使います。</p>
+    <p>計画進度は納入日前日を基準にし、その日に実績がある場合は「実績 − 計画」を加えて補正します。処理基準日にも実績があり、納入日前日とは別の日の場合は、その日の差分も反映します。</p>
+    <h3>ロット丸め</h3>
+    <p><a class="app-link" data-path="/masters/product">品番マスタ</a>の「最小納入数」と「納入倍数」を使います。</p>
     <div class="formula-box">
       <span class="formula-label">ロット丸め計算</span>
-      基準数量 = max(必要数, 最小納入数)<br>
-      発注数量 = ceil(基準数量 &divide; 納入倍数) &times; 納入倍数
+      基準数量 = 必要数と最小納入数の大きい方<br>
+      発注数量 = （基準数量 &divide; 納入倍数）の端数切り上げ &times; 納入倍数
     </div>
 
     <div class="formula-box">
       <span class="formula-label">例: 必要数 = 130、最小納入数 = 100、納入倍数 = 50</span>
-      基準数量 = max(130, 100) = 130<br>
-      発注数量 = ceil(130 &divide; 50) &times; 50 = 3 &times; 50 = <strong>150</strong>
+      基準数量 = 130と100の大きい方 = 130<br>
+      発注数量 = （130 &divide; 50）の端数切り上げ &times; 50 = 3 &times; 50 = <strong>150</strong>
     </div>
 
     <div class="formula-box">
       <span class="formula-label">例: 必要数 = 40、最小納入数 = 100、納入倍数 = 50</span>
-      基準数量 = max(40, 100) = 100（最小納入数に引き上げ）<br>
-      発注数量 = ceil(100 &divide; 50) &times; 50 = 2 &times; 50 = <strong>100</strong>
+      基準数量 = 40と100の大きい方 = 100（最小納入数に引き上げ）<br>
+      発注数量 = （100 &divide; 50）の端数切り上げ &times; 50 = 2 &times; 50 = <strong>100</strong>
     </div>
 
     <h3>安全在庫</h3>
     <p>
       設定で安全在庫をONにした場合、<code>安全在庫数 &times; 倍率</code> が必要数に加算されます。
-      安全在庫数は在庫引当マスタ（<code>StockAllocation.min_stock_qty</code>）の値を使用します。
+      安全在庫数は在庫引当マスタの設定値を使用します。
     </p>
 
     <h3>計画の保存先</h3>
     <p>
-      計算結果は <code>LineBacklog</code> の <code>sequence_no=1</code> に <code>plan_qty</code> として保存されます。
-      保存後、進度が再計算されるため、後続の在庫計画にも自動で反映されます。
+      計算結果は、仕入先・品番・納入日ごとの仕入れ計画として保存します。計画保存後は対象品番の進度を再計算します。
+      この保存はメール送信より先に行われるため、<strong>メール送信に失敗しても、保存済みの計画は残ります。</strong>
+      既存計画の削除後、再作成の途中で失敗した場合も、対象日の計画を確認する必要があります。
     </p>
+    <p>再実行前には、履歴の結果・メッセージ・添付内容と現在の仕入れ計画を確認してください。送信済み注文書と数量が変わる場合は、仕入先への訂正連絡が必要か確認します。</p>
+    <details>
+      <summary>補足：システム上の保存先・項目名</summary>
+      <p>仕入れ計画の保存先は <code>LineBacklog</code> の <code>sequence_no=1</code>、数量は <code>plan_qty</code> です。ロット設定は <code>Product.order_lot_min / order_lot_multiple</code>、安全在庫は <code>StockAllocation.min_stock_qty</code> を参照します。</p>
+    </details>
   </section>
 
   <section class="section" id="receiving-policy">
@@ -1064,7 +1073,7 @@
       <div class="flow-arrow">&#x2192;</div>
       <div class="flow-step highlight">
         <span class="flow-label">実績登録</span>
-        <span class="flow-detail">検収の証拠を必須にするかは未定</span>
+        <span class="flow-detail">実績入力の方法を検討中</span>
       </div>
     </div>
     <h3>関係者に確認する運用案</h3>
@@ -1139,7 +1148,7 @@
           <tr><td><strong>配置図</strong></td><td>荷台上の容器配置をSVGで表示。色分けは製品別</td></tr>
           <tr><td><strong>配置数</strong></td><td>配置済み枠数 / 全枠数</td></tr>
           <tr><td><strong>容器内訳</strong></td><td>容器種別ごとの数量サマリ</td></tr>
-          <tr><td><strong>データソース</strong></td><td>「注文書」(注文書提案) or「購買計画」(LineBacklog) — 利用可能なデータを自動選択</td></tr>
+          <tr><td><strong>データソース</strong></td><td>「注文書」(注文書提案) or「仕入れ計画」 — 利用可能なデータを自動選択</td></tr>
         </tbody>
       </table>
     </div>
@@ -1150,11 +1159,11 @@
 
   <section class="section" id="safety">
     <h2 class="section-heading">9. 安全機構</h2>
-    <p>誤送信や二重実行を防ぐ仕組みが組み込まれています。</p>
+    <p>実行中の重複起動や不要な送信を防ぐ仕組みがあります。終了後の手動再実行では計画を再作成し、メールが再送される場合があります。</p>
     <div class="safeguard-list">
       <div class="safeguard">
         <div class="safeguard-icon"></div>
-        <div><strong>二重実行防止</strong> — 同じ仕入先の設定が実行中の場合、再実行はブロックされます（409 Conflict）</div>
+        <div><strong>実行中の重複起動防止</strong> — 同じ仕入先の設定が実行中の場合、再実行を受け付けません。送信完了後の再送を防ぐ機能ではありません</div>
       </div>
       <div class="safeguard">
         <div class="safeguard-icon"></div>
@@ -1162,7 +1171,7 @@
       </div>
       <div class="safeguard">
         <div class="safeguard-icon"></div>
-        <div><strong>休日スキップ</strong> — ダイソウカレンダで休日の場合は自動でスキップ。意図的に実行したい場合のみ「休日トライ」を使用</div>
+        <div><strong>休日スキップ</strong> — ダイソウカレンダで休日の場合は自動でスキップ。意図的に実行したい場合のみ「休日手動実行」を使用</div>
       </div>
       <div class="safeguard">
         <div class="safeguard-icon"></div>
@@ -1190,7 +1199,7 @@
       <ul>
         <li>設定タブで仕入先ごとの送信条件（時刻、宛先、添付ファイル）を登録・変更できます</li>
         <li>「今すぐ実行」で手動送信が可能。実行中は一覧にRUNNING表示が出ます</li>
-        <li>休日に動作確認したい場合は「休日トライ」を使ってください（通常実行は休日スキップ）</li>
+        <li>休日に計画を再作成・送信する場合は「休日手動実行」を使います。実際にメールを送るため、宛先と既存の送信履歴を確認してください</li>
         <li>履歴タブで過去の送信結果を確認。注文書Excelの再ダウンロードもここから行えます</li>
         <li>送信失敗が発生した場合、設定した通知先ユーザーに社内通知が届きます</li>
         <li>CC・返信先は連絡先マスタから選択します。新しいアドレスが必要な場合はマスタに追加してください</li>
@@ -1222,7 +1231,7 @@
         <li><strong>可視性:</strong> 履歴タブで全仕入先の送信状況を一覧確認可能。失敗時は社内通知で即時把握</li>
         <li><strong>柔軟性:</strong> 仕入先ごとに計算モード・納入日数・添付ファイルを個別設定可能</li>
         <li><strong>積載最適化:</strong> トラック積載判定により、配送効率の事前確認が可能</li>
-        <li><strong>安全性:</strong> 二重送信防止・休日スキップ・30分タイムアウト復旧など、誤動作対策を実装済み</li>
+        <li><strong>実行管理:</strong> 実行中の重複起動防止・休日スキップ・30分タイムアウト復旧に対応。終了後の手動再実行は再送になり得るため、履歴の確認が必要</li>
       </ul>
     </div>
   </section>
@@ -1248,10 +1257,10 @@
             <td>即時送信が必要な場合</td>
           </tr>
           <tr>
-            <td><strong>休日トライ</strong><br><span class="badge badge-danger">HOLIDAY_TRIAL</span></td>
+            <td><strong>休日手動実行</strong><br><span class="badge badge-danger">HOLIDAY_TRIAL</span></td>
             <td>ボタン押下時</td>
             <td>休日でも実行</td>
-            <td>休日の動作確認・テスト</td>
+            <td>休日に仕入れ計画を再作成し、実際にメール送信する場合</td>
           </tr>
         </tbody>
       </table>

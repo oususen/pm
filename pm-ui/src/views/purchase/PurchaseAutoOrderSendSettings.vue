@@ -173,7 +173,7 @@
             <td class="td-actions">
               <button class="btn-sm" @click="openEdit(config)">編集</button>
               <button class="btn-sm btn-run" :disabled="running.has(config.id)" @click="runNow(config)">{{ running.has(config.id) ? '実行中...' : '今すぐ実行' }}</button>
-              <button class="btn-sm btn-holiday" :disabled="running.has(config.id)" @click="runHolidayTrial(config)">休日トライ</button>
+              <button class="btn-sm btn-holiday" :disabled="running.has(config.id)" @click="runHolidayTrial(config)">休日手動実行</button>
               <button class="btn-sm btn-danger" @click="remove(config)">削除</button>
             </td>
           </tr>
@@ -215,7 +215,7 @@
               <option value="">すべて</option>
               <option value="SCHEDULED">自動実行</option>
               <option value="MANUAL">手動実行</option>
-              <option value="HOLIDAY_TRIAL">休日トライ</option>
+              <option value="HOLIDAY_TRIAL">休日手動実行</option>
             </select>
           </div>
           <div class="form-group compact">
@@ -612,7 +612,7 @@ const deliveryDayModeLabel = (mode) => {
 
 const historyTriggerLabel = (triggerType) => {
   if (triggerType === 'MANUAL') return '手動実行'
-  if (triggerType === 'HOLIDAY_TRIAL') return '休日トライ'
+  if (triggerType === 'HOLIDAY_TRIAL') return '休日手動実行'
   return '自動実行'
 }
 
@@ -1223,10 +1223,10 @@ const runNow = async (config) => {
 
 const runHolidayTrial = async (config) => {
   openConfirmDialog(
-    '休日トライ実行',
-    `${config.supplier_code} ${config.supplier_name} の注文書自動送信を休日トライ実行しますか？`,
+    '休日手動実行',
+    `${config.supplier_code} ${config.supplier_name} の注文書自動送信を休日手動実行しますか？ 仕入れ計画を再作成し、設定された宛先へメールを送信します。`,
     async () => {
-      await runConfigAction(config, '休日トライ実行', api.purchaseAutoOrderSend.runHolidayTrial)
+      await runConfigAction(config, '休日手動実行', api.purchaseAutoOrderSend.runHolidayTrial)
     },
   )
 }

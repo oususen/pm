@@ -319,7 +319,7 @@
               <td>
                 <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
                 <span class="mock-btn teal" style="font-size:9px;padding:1px 6px;">今すぐ実行</span>
-                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">休日トライ</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">休日手動実行</span>
               </td>
             </tr>
             <tr>
@@ -332,7 +332,7 @@
               <td>
                 <span class="mock-btn" style="font-size:9px;padding:1px 6px;">編集</span>
                 <span class="mock-btn teal" style="font-size:9px;padding:1px 6px;">今すぐ実行</span>
-                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">休日トライ</span>
+                <span class="mock-btn" style="font-size:9px;padding:1px 6px;">休日手動実行</span>
               </td>
             </tr>
           </tbody>
@@ -607,12 +607,12 @@
 
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
       <span class="mock-btn teal" style="font-size:13px;padding:5px 14px;">今すぐ実行</span>
-      <span class="mock-btn" style="font-size:13px;padding:5px 14px;">休日トライ</span>
+      <span class="mock-btn" style="font-size:13px;padding:5px 14px;">休日手動実行</span>
     </div>
 
     <div class="legend-grid" style="margin-top:0;">
       <div class="legend-item"><span class="li-label">今すぐ実行</span><span class="li-desc">即時実行。ただし休日の場合はスキップされる</span></div>
-      <div class="legend-item"><span class="li-label">休日トライ</span><span class="li-desc">休日判定を無視して実行。休日のテストに使用</span></div>
+      <div class="legend-item"><span class="li-label">休日手動実行</span><span class="li-desc">休日判定を無視して実行。仕入れ計画を再作成し、実際にメールを送信</span></div>
     </div>
 
     <div class="callout danger">
@@ -745,10 +745,10 @@
   <div class="note">
     <h2>&#9888; 注意事項</h2>
     <ul>
-      <li><strong>実際のメール送信:</strong> 「今すぐ実行」「休日トライ」はどちらも実際にメールが送信されます。テスト時は宛先に注意してください。</li>
+      <li><strong>実際のメール送信:</strong> 「今すぐ実行」「休日手動実行」はどちらも実際にメールが送信されます。テスト時は宛先に注意してください。</li>
       <li><strong>計画への影響:</strong> 本機能は LineBacklog (sequence_no=1) に計画数量を保存します。実行後に進度が自動再計算されるため、在庫計画にも影響します。</li>
       <li><strong>二重実行防止:</strong> 同じ仕入先が実行中の場合、再実行はブロックされます。30分以上 RUNNING のままの場合は自動的に FAILED に変更されます。</li>
-      <li><strong>休日スキップ:</strong> <a href="/masters/calendar">ダイソウカレンダ</a>で休日の場合、通常実行と「今すぐ実行」はスキップされます。休日に動作確認するには「休日トライ」を使ってください。</li>
+      <li><strong>休日スキップ:</strong> <a href="/masters/calendar">ダイソウカレンダ</a>で休日の場合、通常実行と「今すぐ実行」はスキップされます。休日に動作確認するには「休日手動実行」を使ってください。</li>
       <li><strong>空送信なし:</strong> 添付ファイルがすべて空の場合、メールは送信されません（ステータスは SUCCESS）。</li>
       <li><strong>数量不一致:</strong> ロット丸めモードの場合、注文書Excelの「数量」列と「日別内訳」列の合計が一致しないことがあります。正常な動作です。</li>
       <li><strong>既存機能との独立性:</strong> 「自動納入リスト送信」とは別機能です。両方を同じ仕入先に設定しても互いに影響しません。</li>
