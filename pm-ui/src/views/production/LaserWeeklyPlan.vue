@@ -13,7 +13,8 @@
         {{ saving ? "保存中..." : "手回数を保存" }}</button
       ><button class="btn" @click="openPrintDialog">印刷</button
       ><button class="btn" @click="openResetDialog">手数リセット</button
-      ><button class="btn primary" @click="confirmLoadPlan">再計算</button>
+      ><button class="btn primary" @click="confirmLoadPlan">再計算</button
+      ><span v-if="message" class="toolbar-message">{{ message }}</span>
     </div>
     <div
       v-if="showPrintDialog"
@@ -95,7 +96,6 @@
         <span>保存中...</span>
       </div>
     </div>
-    <p v-if="message">{{ message }}</p>
     <div v-if="showSettings" class="settings">
       <h3>
         週間計画対象設定
@@ -1404,9 +1404,22 @@ onMounted(async () => {
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
+.toolbar {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
 .toolbar span {
   font-size: 12px;
   color: #475569;
+}
+.toolbar-message {
+  color: #1e40af;
+  font-weight: bold;
+}
+.toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .btn,
 button {
