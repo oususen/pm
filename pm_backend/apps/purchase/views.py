@@ -52,6 +52,10 @@ from .process_resolver import (
     resolve_supplier_routing_process,
 )
 from .serializers import PurchasePlanLockSettingSerializer
+from .services.actual_plan import (
+    lock_supplier, plan_key, plan_state, plan_states, touch_plan,
+    validate_plan_registration, validate_plan_edit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -498,6 +502,7 @@ def _create_purchase_actual_record(
     remarks='',
     requested_line_id=None,
     non_delivery=False,
+    purchase_plan=None,
 ):
     """仕入実績の作成とLineBacklog反映を全入力画面共通で行う。"""
     if not supplier:
@@ -535,6 +540,7 @@ def _create_purchase_actual_record(
             'supplier_id': supplier.id,
             'line_id': target_line_id,
             **(({'non_delivery': True}) if non_delivery else {}),
+            **({'purchase_plan': purchase_plan} if purchase_plan else {}),
         },
     }
     serializer = ProcessRealtimeCreateSerializer(data=payload)
@@ -798,10 +804,15 @@ class PurchaseActualBulkRegisterView(APIView):
                     qty = Decimal(str(item.get('qty')))
                 except (InvalidOperation, TypeError, ValueError) as exc:
                     raise ValidationError({'qty': '数量は数値で入力してください。'}) from exc
-                if qty <= 0:
+                if not qty.is_finite() or qty <= 0:
                     raise ValidationError({'qty': '数量は1以上で入力してください。'})
 
                 with transaction.atomic():
+                    purchase_plan = None
+                    if 'plan_date' in item:
+                        lock_supplier(supplier.id)
+                        purchase_plan = plan_key(supplier.id, product.id, item['plan_date'])
+                        validate_plan_registration(purchase_plan, qty, item.get('plan_token'))
                     created = _create_purchase_actual_record(
                         supplier=supplier,
                         product=product,
@@ -811,8 +822,16 @@ class PurchaseActualBulkRegisterView(APIView):
                         operator_name=operator_name,
                         remarks=item.get('remarks'),
                         requested_line_id=item.get('line_id') or request.data.get('line_id'),
+                        purchase_plan=purchase_plan,
                     )
-                results.append({'index': index, 'status': 'ok', 'id': created['record'].id})
+                    updated_plan = None
+                    if purchase_plan:
+                        touch_plan(purchase_plan)
+                        updated_plan = plan_state(purchase_plan)
+                results.append({
+                    'index': index, 'status': 'ok', 'id': created['record'].id,
+                    **({'plan': updated_plan} if updated_plan else {}),
+                })
                 changes.append({
                     'supplier_id': created['supplier_id'],
                     'product_id': created['product_id'],
@@ -1012,8 +1031,19 @@ class PurchaseActualDetailView(APIView):
             .first()
         )
 
+    def _lock_plan_record(self, record):
+        key = (record.event_data or {}).get('purchase_plan')
+        if key:
+            lock_supplier(key['supplier_id'])
+            # ロック待ちの間に行われた訂正・削除を反映する。
+            return self._get_record(record.id)
+        return record
+
+    @transaction.atomic
     def put(self, request, record_id):
         record = self._get_record(record_id)
+        if record:
+            record = self._lock_plan_record(record)
         if not record:
             return Response({'detail': 'record not found'}, status=status.HTTP_404_NOT_FOUND)
         if not record.product_id:
@@ -1030,7 +1060,7 @@ class PurchaseActualDetailView(APIView):
             new_qty = Decimal(str(qty_raw))
         except (InvalidOperation, TypeError, ValueError):
             return Response({'detail': 'qty must be a number'}, status=status.HTTP_400_BAD_REQUEST)
-        if new_qty <= 0:
+        if not new_qty.is_finite() or new_qty <= 0:
             return Response({'detail': 'qty must be > 0'}, status=status.HTTP_400_BAD_REQUEST)
         new_qty_int = int(new_qty)
 
@@ -1093,6 +1123,10 @@ class PurchaseActualDetailView(APIView):
         old_process = record.process
         old_process_id = record.process_id
 
+        try:
+            validate_plan_edit(record, supplier_id, new_effective_line_id, new_qty)
+        except ValidationError as exc:
+            return Response({'detail': _purchase_actual_error_detail(exc)}, status=status.HTTP_400_BAD_REQUEST)
         new_event_data = dict(old_event_data)
         new_event_data['source'] = old_event_data.get('source') or 'PURCHASE_ACTUAL_INPUT'
         new_event_data['supplier_id'] = supplier_id
@@ -1117,6 +1151,8 @@ class PurchaseActualDetailView(APIView):
             if _normalize_record_timestamp(record, new_target_date):
                 update_fields.append('timestamp')
             record.save(update_fields=update_fields)
+            if old_event_data.get('purchase_plan'):
+                touch_plan(old_event_data['purchase_plan'])
 
             for process_id, target_line_id in {
                 (old_process_id, old_effective_line_id),
@@ -1144,8 +1180,11 @@ class PurchaseActualDetailView(APIView):
         ])
         return Response({'detail': 'updated'})
 
+    @transaction.atomic
     def delete(self, request, record_id):
         record = self._get_record(record_id)
+        if record:
+            record = self._lock_plan_record(record)
         if not record:
             return Response({'detail': 'record not found'}, status=status.HTTP_404_NOT_FOUND)
         if not record.product_id:
@@ -1175,6 +1214,8 @@ class PurchaseActualDetailView(APIView):
                 record.process, record.product, -old_qty_int, old_target_date,
             )
             record.delete()
+            if old_event_data.get('purchase_plan'):
+                touch_plan(old_event_data['purchase_plan'])
 
             for lid in {old_effective_line_id, serializer_line_id}:
                 _reconcile_purchase_actual_backlog_for_key(
@@ -1193,6 +1234,7 @@ class PurchaseActualDetailView(APIView):
 
 class PurchaseActualBulkItemsView(APIView):
     """購入先と納入日から、その日の計画品目一覧を返す"""
+    @transaction.atomic
     def get(self, request):
         supplier_id = request.query_params.get('supplier_id')
         plan_date_text = (request.query_params.get('plan_date') or '').strip()
@@ -1201,6 +1243,7 @@ class PurchaseActualBulkItemsView(APIView):
         if not supplier:
             return Response({'items': [], 'line_id': None, 'line_name': ''})
 
+        lock_supplier(supplier.id)
         line = _resolve_purchase_line(supplier)
         if not line:
             return Response({'items': [], 'line_id': None, 'line_name': ''})
@@ -1246,6 +1289,9 @@ class PurchaseActualBulkItemsView(APIView):
                     'actuals_by_date': {},
                 }
             product_map[pid]['plan_qty'] += int(b.plan_qty or 0)
+
+        for pid, state in plan_states(supplier.id, plan_date, backlogs).items():
+            product_map[pid].update(state)
 
         # 直近納入実績: 計画日±7日のsequence_no=0行からactual_qtyを取得
         range_start = plan_date - timedelta(days=7)

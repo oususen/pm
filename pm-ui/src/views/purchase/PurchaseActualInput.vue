@@ -131,19 +131,21 @@
       <div class="bulk-header">
         <div class="bulk-header-row">
           <label class="bulk-label-tag">購入先</label>
-          <select v-model="bulkSupplierId" @change="loadBulkItems" class="bulk-supplier-select">
+          <select v-model="bulkSupplierId" @change="loadBulkItems" class="bulk-supplier-select" :disabled="bulkSubmitting">
             <option value="">選択してください</option>
             <option v-for="s in suppliers" :key="s.id" :value="s.id">
               {{ s.supplier_code }} - {{ s.supplier_name }}
             </option>
           </select>
           <input :value="bulkLineLabel" type="text" readonly class="bulk-line-input" />
-          <button class="btn" type="button" :disabled="!bulkRows.length" @click="copyPlanToActual">計画数を入荷数へコピー</button>
+          <button class="btn" type="button" :disabled="bulkSubmitting || !bulkRows.some(row => row.planDate)" @click="copyPlanToActual">未納残数を入荷数へコピー</button>
+          <button class="btn" type="button" :disabled="bulkSubmitting || !bulkSupplierId" @click="loadBulkItems">計画を再読込</button>
         </div>
         <div class="bulk-header-row">
           <label class="bulk-label-tag">計画日</label>
           <input
             v-model.trim="bulkPlanDate"
+            :disabled="bulkSubmitting"
             type="text"
             placeholder="YYYY/MM/DD"
             class="bulk-date-input bulk-date-active"
@@ -188,6 +190,8 @@
             <th class="col-code" rowspan="2">品番</th>
             <th class="col-name" rowspan="2">品名</th>
             <th class="col-qty" rowspan="2">計画数</th>
+            <th class="col-qty" rowspan="2">計画登録済</th>
+            <th class="col-qty" rowspan="2">未納残数</th>
             <th class="col-qty" rowspan="2">入荷数</th>
             <th :colspan="dateColumns.length" class="col-date-group">直近納入実績</th>
             <th class="col-status" rowspan="2"></th>
@@ -228,8 +232,13 @@
             </td>
             <td class="col-name">{{ row.productName }}</td>
             <td class="col-qty text-right">{{ row.planQty > 0 ? row.planQty.toLocaleString() : '' }}</td>
+            <td class="col-qty text-right">{{ row.planDate ? row.registeredQty.toLocaleString() : '—' }}</td>
+            <td class="col-qty text-right">{{ row.planDate ? (row.remainingQty > 0 ? row.remainingQty.toLocaleString() : '登録済み') : '—' }}</td>
             <td class="col-qty">
-              <input v-model.number="row.qty" type="number" min="0" step="1" class="qty-input" />
+              <input v-model.number="row.qty" type="number" min="0" step="1" class="qty-input"
+                :max="row.planDate ? row.remainingQty : undefined"
+                :disabled="bulkSubmitting || (row.planDate && row.remainingQty <= 0)"
+                @input="row.result = ''; row.error = ''" />
             </td>
             <td
               v-for="dc in dateColumns"
@@ -548,6 +557,10 @@ const createBulkRow = (opts = {}) => ({
   selectedKey: '',
   resolved: opts.resolved || false,
   planQty: opts.planQty || 0,
+  planDate: opts.planDate || '',
+  planToken: opts.planToken || '',
+  registeredQty: Number(opts.registeredQty || 0),
+  remainingQty: Number(opts.remainingQty || 0),
   qty: opts.qty ?? null,
   actualsByDate: opts.actualsByDate || {},
   error: '',
@@ -704,6 +717,10 @@ const loadBulkItems = async () => {
         lineId: item.line_id ? String(item.line_id) : bulkLineId.value,
         processId: item.process_id ? String(item.process_id) : bulkProcessId.value,
         planQty: item.plan_qty || 0,
+        planDate: item.plan_date,
+        planToken: item.plan_token,
+        registeredQty: item.registered_qty,
+        remainingQty: item.remaining_qty,
         actualsByDate: item.actuals_by_date || {},
         resolved: true,
       })
@@ -958,7 +975,11 @@ const selectBulkCandidate = (i) => {
 
 const copyPlanToActual = () => {
   bulkRows.value.forEach((row) => {
-    if (row.planQty > 0) row.qty = row.planQty
+    if (row.planDate) {
+      row.qty = row.remainingQty > 0 ? row.remainingQty : null
+      row.result = ''
+      row.error = ''
+    }
   })
 }
 
@@ -976,12 +997,12 @@ const clearBulkRows = () => {
 }
 
 const submitBulk = async () => {
-  if (!canEdit.value) return
+  if (!canEdit.value || bulkSubmitting.value) return
 
   const toRegister = bulkRows.value.filter((r) => {
     const hasProductCode = Boolean(String(r.productCode || r.barcode || '').trim())
     const hasQty = Number(r.qty || 0) > 0
-    return hasProductCode && hasQty && !r.result
+    return hasProductCode && hasQty && r.result !== 'ok'
   })
   if (toRegister.length === 0) {
     alert('登録可能な行がありません。品番と入荷数を確認してください。')
@@ -990,6 +1011,10 @@ const submitBulk = async () => {
 
   normalizeBulkPlanDate()
   normalizeArrivalDate()
+  if (toRegister.some(row => row.planDate && row.qty > row.remainingQty)) {
+    alert('入荷数が未納残数を超えています。数量を確認してください。')
+    return
+  }
   if (bulkPlanDate.value && arrivalDate.value && bulkPlanDate.value !== arrivalDate.value) {
     const confirmed = window.confirm(
       `計画日と納入日が異なります。このまま登録しますか？\n計画日: ${bulkPlanDate.value}\n納入日: ${arrivalDate.value}`,
@@ -1011,6 +1036,7 @@ const submitBulk = async () => {
         product_code: row.productCode,
         qty: Number(row.qty),
         line_id: row.lineId ? Number(row.lineId) : null,
+        ...(row.planDate ? { plan_date: row.planDate, plan_token: row.planToken } : {}),
       })),
     })
     const resultByIndex = new Map((res.data?.results || []).map((result) => [result.index, result]))
@@ -1018,6 +1044,14 @@ const submitBulk = async () => {
       const result = resultByIndex.get(index)
       if (result?.status === 'ok') {
         row.result = 'ok'
+        row.error = ''
+        if (result.plan) {
+          row.planQty = Number(result.plan.plan_qty)
+          row.registeredQty = Number(result.plan.registered_qty)
+          row.remainingQty = Number(result.plan.remaining_qty)
+          row.planToken = result.plan.plan_token
+          row.qty = null
+        }
         successCount++
       } else {
         row.result = 'error'
@@ -1038,7 +1072,7 @@ const submitBulk = async () => {
   alert(`登録完了: ${successCount}件成功${errorCount > 0 ? `、${errorCount}件失敗` : ''}`)
 
   if (successCount > 0) {
-    bulkRows.value = bulkRows.value.filter((r) => r.result !== 'ok')
+    bulkRows.value = bulkRows.value.filter((r) => r.result !== 'ok' || r.planDate)
     if (bulkRows.value.length === 0) clearBulkRows()
   }
 }
