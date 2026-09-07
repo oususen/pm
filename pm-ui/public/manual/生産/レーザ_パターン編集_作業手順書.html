@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>レーザ パターン編集 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; }
+  .page { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; margin-bottom:6px; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; }
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:140px; }
+  .info-table td { background:var(--card); }
+  .mock-grid { border:1px solid var(--grid-line); border-radius:6px; overflow-x:auto; margin:12px 0; font-size:11px; }
+  .mock-grid table { width:100%; border-collapse:collapse; }
+  .mock-grid th, .mock-grid td { border:1px solid var(--grid-line); padding:4px 6px; text-align:center; white-space:nowrap; }
+  .mock-grid th { background:var(--grid-head); font-weight:700; color:var(--ink2); font-size:10px; }
+  .mock-grid td { background:var(--card); }
+  .mock-grid td.editable { background:#fffff0; }
+  :root[data-theme="dark"] .mock-grid td.editable { background:#22281c; }
+  @media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) .mock-grid td.editable { background:#22281c; } }
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.teal { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .mock-btn.danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+  .mock-toolbar { background:var(--grid-head); border:1px solid var(--grid-line); border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:12px; color:var(--ink2); }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+  .f-input { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); min-width:60px; }
+  .legend-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 24px; margin-top:16px; }
+  .legend-item { display:flex; align-items:flex-start; gap:10px; font-size:13px; }
+  .legend-item .li-label { font-weight:700; white-space:nowrap; min-width:100px; }
+  .legend-item .li-desc { color:var(--ink2); }
+  @media (max-width:600px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+    .legend-grid { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="cover">
+    <h1>レーザ パターン編集 作業手順書</h1>
+    <div class="subtitle">レーザ加工パターンのマスタデータを管理する画面 &#8212; 材料・設備・構成部品・完成品の紐づけ</div>
+    <div class="path">生産 <span class="arrow">&#9656;</span> 生産計画入力 <span class="arrow">&#9656;</span> レーザ <span class="arrow">&#9656;</span> パターン編集</div>
+  </div>
+
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>画面構成を理解する</li>
+      <li><span class="tn">3</span>パターンを検索・フィルタする</li>
+      <li><span class="tn">4</span>パターンを新規作成する</li>
+      <li><span class="tn">5</span>パターンを編集・保存する</li>
+      <li><span class="tn">6</span>コピー・無効化・削除</li>
+    </ul>
+  </div>
+
+  <!-- Step 1 -->
+  <div class="step">
+    <div class="step-header"><span class="step-num">1</span><span class="step-title">画面を開く</span></div>
+    <div class="step-desc">
+      上部ナビゲーションから <strong>生産 → 生産計画入力</strong> を選択し、<strong>「レーザ」タブ → 「パターン編集」</strong>サブタブを開きます。
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="step">
+    <div class="step-header"><span class="step-num">2</span><span class="step-title">画面構成を理解する</span></div>
+    <div class="step-desc">画面は左右2ペイン構成です。</div>
+
+    <h4 class="sub">左ペイン &#8212; パターン一覧</h4>
+    <div class="mock-grid">
+      <table>
+        <thead><tr><th>P番号</th><th>材料</th><th>設備</th><th>時間(分/回)</th></tr></thead>
+        <tbody>
+          <tr><td>6009</td><td>V05314352C</td><td>1号機</td><td>19.5</td></tr>
+          <tr style="background:var(--accent-light);"><td>2307</td><td>V05350464C</td><td>1号機</td><td>14.2</td></tr>
+          <tr><td>2308</td><td>V05350464C</td><td>2号機</td><td>14.2</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="step-desc">クリックで右ペインに詳細が表示されます。</div>
+
+    <h4 class="sub">右ペイン &#8212; 編集フォーム</h4>
+    <div class="legend-grid">
+      <div class="legend-item"><span class="li-label">パターン番号</span><span class="li-desc">必須。パターンの識別番号</span></div>
+      <div class="legend-item"><span class="li-label">使用材料</span><span class="li-desc">必須。カテゴリ「MATERIAL」の有効製品から選択</span></div>
+      <div class="legend-item"><span class="li-label">使用設備</span><span class="li-desc">必須。「レーザ」を含む設備から選択</span></div>
+      <div class="legend-item"><span class="li-label">加工時間(分/回)</span><span class="li-desc">必須。1回の加工時間（小数1桁）</span></div>
+      <div class="legend-item"><span class="li-label">加工頻度パターン</span><span class="li-desc">週間計画の加工日を制御（任意）</span></div>
+      <div class="legend-item"><span class="li-label">材料予算用</span><span class="li-desc">ONで月所要材料集計の予算に使用</span></div>
+    </div>
+
+    <h4 class="sub">構成部品テーブル</h4>
+    <div class="mock-grid">
+      <table>
+        <thead><tr><th>構成部品</th><th>取り数</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td>V05314352C SPHC板</td><td class="editable">1</td><td>削除</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 class="sub">完成品情報テーブル</h4>
+    <div class="mock-grid">
+      <table>
+        <thead><tr><th>完成品番号</th><th>完成品取り数</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td>YD40006000C フロアブラケット</td><td class="editable">2.0</td><td>削除</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info"><span class="icon">&#128712;</span>材料予算用パターンには完成品情報が必須です。</div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="step">
+    <div class="step-header"><span class="step-num">3</span><span class="step-title">パターンを検索・フィルタする</span></div>
+    <div class="step-desc">ツールバーで以下のフィルタが使えます。</div>
+    <table class="info-table">
+      <tr><th>パターン検索</th><td>パターン番号でテキスト検索</td></tr>
+      <tr><th>設備</th><td>設備でフィルタ（レーザ設備のみ表示）</td></tr>
+      <tr><th>材料</th><td>材料でフィルタ</td></tr>
+      <tr><th>完成品番号</th><td>完成品番号でテキスト検索</td></tr>
+      <tr><th>完成品有無</th><td>あり/なしでフィルタ</td></tr>
+      <tr><th>加工時間</th><td>以上/以下の範囲でフィルタ</td></tr>
+    </table>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="step">
+    <div class="step-header"><span class="step-num">4</span><span class="step-title">パターンを新規作成する</span></div>
+    <div class="step-desc">
+      <strong>1.</strong> ツールバーの <span class="mock-btn teal">新規</span> をクリック<br>
+      <strong>2.</strong> 右ペインでパターン番号・使用材料・使用設備・加工時間を入力<br>
+      <strong>3.</strong> 必要に応じて構成部品・完成品情報を追加（「+追加」ボタンで行追加）<br>
+      <strong>4.</strong> 加工頻度パターンを設定する場合はドロップダウンから選択<br>
+      <strong>5.</strong> <span class="mock-btn teal">保存</span> をクリック
+    </div>
+    <div class="callout warn"><span class="icon">&#9888;</span>加工時間は0以上、構成部品の取り数は1以上の整数で入力してください。</div>
+  </div>
+
+  <!-- Step 5 -->
+  <div class="step">
+    <div class="step-header"><span class="step-num">5</span><span class="step-title">パターンを編集・保存する</span></div>
+    <div class="step-desc">
+      <strong>1.</strong> 左ペインで編集したいパターンをクリック<br>
+      <strong>2.</strong> 右ペインで各項目を修正<br>
+      <strong>3.</strong> <span class="mock-btn teal">保存</span> をクリック
+    </div>
+  </div>
+
+  <!-- Step 6 -->
+  <div class="step">
+    <div class="step-header"><span class="step-num">6</span><span class="step-title">コピー・無効化・削除</span></div>
+    <table class="info-table">
+      <tr><th>コピー</th><td>既存パターンを選択した状態で <span class="mock-btn">コピー</span> をクリック。新しいパターン番号を入力して保存すると、同じ内容で複製されます</td></tr>
+      <tr><th>無効化</th><td><span class="mock-btn">無効化</span> をクリックすると確認ダイアログが表示され、確定すると一覧から非表示になります</td></tr>
+      <tr><th>削除</th><td><span class="mock-btn danger">削除</span> をクリックするとパターンを完全に削除します</td></tr>
+    </table>
+    <div class="callout warn"><span class="icon">&#9888;</span>無効化は一覧から非表示にするだけでデータは残ります。削除は完全に消去されるため注意してください。</div>
+  </div>
+
+</div>
+</body>
+</html>
