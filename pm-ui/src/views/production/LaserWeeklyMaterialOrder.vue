@@ -171,12 +171,14 @@
                     </div>
                   </td>
                   <td
+                    v-if="supplier.code === 'SATO' || !hasSato(material)"
+                    :rowspan="hasSato(material) ? 2 : 1"
                     :class="[
-                      progressClass(material, day, supplier.code),
+                      combinedProgressClass(material, day),
                       'date-end',
                     ]"
                   >
-                    {{ number(progress(material, day, supplier.code)) }}
+                    {{ number(combinedProgress(material, day)) }}
                   </td></template
                 >
                 <td class="week-total">
@@ -197,11 +199,12 @@
                   }}
                 </td>
                 <td
+                  v-if="supplier.code === 'SATO' || !hasSato(material)"
+                  :rowspan="hasSato(material) ? 2 : 1"
                   :class="[
-                    progressClass(
+                    combinedProgressClass(
                       material,
                       week.days[week.days.length - 1],
-                      supplier.code,
                     ),
                     'week-total',
                     'week-end',
@@ -209,10 +212,9 @@
                 >
                   {{
                     number(
-                      progress(
+                      combinedProgress(
                         material,
                         week.days[week.days.length - 1],
-                        supplier.code,
                       ),
                     )
                   }}
@@ -334,6 +336,20 @@ const progress = (material, day, supplier) => {
     if (currentDay === day) break;
   }
   return total;
+};
+const combinedProgress = (material, day) => {
+  let total = Number(initial(material).value || 0);
+  for (const currentDay of props.dates) {
+    const satoManual = manual(material, currentDay, "SATO");
+    const meiseiManual = manual(material, currentDay, "MEISEI");
+    total += satoManual + meiseiManual - demand(material, currentDay);
+    if (currentDay === day) break;
+  }
+  return total;
+};
+const combinedProgressClass = (material, day) => {
+  const value = combinedProgress(material, day);
+  return value > 0 ? "ahead" : value < 0 ? "behind" : "";
 };
 const progressClass = (material, day, supplier) => {
   const value = progress(material, day, supplier);
