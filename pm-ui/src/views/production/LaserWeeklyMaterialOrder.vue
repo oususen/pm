@@ -6,7 +6,8 @@
     <div v-show="showOrder">
       <p>佐藤商事の手数を入力すると、残りの自数を名成鋼機へ自動配分します。手数は上段がロット数(L)、下段が端数枚数(枚)です。</p>
       <div class="actions">
-        <button class="btn primary" @click="save">進度を保存</button
+        <button class="btn primary" @click="save" :disabled="saving">
+          {{ saving ? "保存中..." : "変更を保存" }}</button
         ><button class="btn" @click="openDownload('SATO')">
           佐藤商事注文書</button
         ><button class="btn" @click="openDownload('MEISEI')">
@@ -294,6 +295,7 @@ const supplierRows = (material) =>
 const entries = ref({});
 const initials = ref({});
 const showOrder = ref(true);
+const saving = ref(false);
 const downloadDialog = ref(false);
 const downloadSupplier = ref("");
 const downloadStartDate = ref("");
@@ -406,36 +408,43 @@ const load = async () => {
   await loadManualRows();
 };
 const save = async () => {
-  const items = props.materials.flatMap((material) =>
-    props.dates
-      .map((required_date) => ({
-        material_id: material.material_id,
-        required_date,
-        delivery_date: required_date,
-        required_sheets: Number(material.daily[required_date] || 0),
-        lot_multiple: Number(material.order_lot_multiple || 1),
-        sato_enabled: hasSato(material),
-        sato_lots: Number(entry(material, required_date).sato_lots || 0),
-        meisei_lots: Number(entry(material, required_date).meisei_lots || 0),
-        sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
-        meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
-      }))
-      .filter((item) => item.required_sheets > 0),
-  );
-  const initialItems = props.materials.map((material) => ({
-    material_id: material.material_id,
-    initial_progress: Number(initial(material).value || 0),
-    is_locked: initial(material).locked,
-  }));
-  await Promise.all([
-    api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, items),
-    api.laserWeeklyPlans.saveMaterialInitialProgress(
-      props.startDate,
-      initialItems,
-    ),
-  ]);
-  emit("message", "材料発注進度を保存しました。");
-  await load();
+  saving.value = true;
+  try {
+    const items = props.materials.flatMap((material) =>
+      props.dates
+        .map((required_date) => ({
+          material_id: material.material_id,
+          required_date,
+          delivery_date: required_date,
+          required_sheets: Number(material.daily[required_date] || 0),
+          lot_multiple: Number(material.order_lot_multiple || 1),
+          sato_enabled: hasSato(material),
+          sato_lots: Number(entry(material, required_date).sato_lots || 0),
+          meisei_lots: Number(entry(material, required_date).meisei_lots || 0),
+          sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
+          meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
+        }))
+        .filter((item) => item.required_sheets > 0),
+    );
+    const initialItems = props.materials.map((material) => ({
+      material_id: material.material_id,
+      initial_progress: Number(initial(material).value || 0),
+      is_locked: initial(material).locked,
+    }));
+    await Promise.all([
+      api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, items),
+      api.laserWeeklyPlans.saveMaterialInitialProgress(
+        props.startDate,
+        initialItems,
+      ),
+    ]);
+    emit("message", "材料発注進度を保存しました。");
+    await load();
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "保存に失敗しました。");
+  } finally {
+    saving.value = false;
+  }
 };
 const toggleLock = async (material) => {
   initial(material).locked = !initial(material).locked;
