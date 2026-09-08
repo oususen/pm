@@ -558,7 +558,6 @@ const download = async () => {
     return;
   }
   try {
-    await save();
     const response = await api.laserWeeklyPlans.exportMaterialOrderExcel(
       props.startDate,
       downloadSupplier.value,

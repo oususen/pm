@@ -761,7 +761,7 @@
     </section>
     <LaserWeeklyMaterialOrder
       :start-date="startDate"
-      :dates="days"
+      :dates="allDays"
       :materials="materialRows"
       @message="message = $event"
     />
@@ -993,16 +993,9 @@ const selectAllPatterns = () => {
     (pattern) => pattern.id,
   );
 };
-const days = computed(() => {
-  const d = new Date(`${startDate.value}T00:00:00`),
-    out = [];
-  for (let i = 0; i < 14; i++) {
-    const x = new Date(d);
-    x.setDate(d.getDate() + i);
-    if (x.getDay() > 0 && x.getDay() < 6) out.push(iso(x));
-  }
-  return out;
-});
+const allDates = ref([]);
+const days = computed(() => allDates.value.slice(0, 10));
+const allDays = computed(() => allDates.value);
 const number = (value, digits) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(digits) : "";
@@ -1335,6 +1328,7 @@ const loadPlan = async () => {
     const { data } = await api.laserWeeklyPlans.getWeeklyPlan({
       start_date: startDate.value,
     });
+    allDates.value = data.dates || [];
     rows.value = data.rows || [];
     patternRows.value = (data.pattern_rows || []).sort(
       (a, b) =>
