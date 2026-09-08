@@ -13,7 +13,7 @@
         {{ saving ? "保存中..." : "手回数を保存" }}</button
       ><button class="btn" @click="openPrintDialog">印刷</button
       ><button class="btn" @click="openResetDialog">手数リセット</button
-      ><button class="btn primary" @click="confirmLoadPlan">再計算</button
+      ><button class="btn primary" @click="confirmLoadPlan">計画・材料再計算</button
       ><span v-if="message" class="toolbar-message">{{ message }}</span>
     </div>
     <div
@@ -1313,6 +1313,7 @@ const saveManualQuantities = async () => {
       ? `${weekGroups.value.indexOf(selectedWeek) + 1}週目`
       : "全期間";
     message.value = `${label}の手回数を保存しました。`;
+    await loadPlan();
   } catch (e) {
     message.value =
       e.response?.data?.detail || "手回数を保存できませんでした。";
