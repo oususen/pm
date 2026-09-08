@@ -13,7 +13,8 @@ from django.db.models import Min, Max
 from masters.models import Customer
 from orders.core.services.ship_to_utils import normalize_kubota_ship_to_code
 from production.services.order_expansion import OrderExpansionService
-from shipping.models import ShippingProgress
+from shipping.models import KubotaSakaiDeliveryProgress, ShippingProgress
+from shipping.services.kubota_sakai_delivery_progress import recalculate_delivery_progress
 from shipping.services.shipping_progress import recalculate_shipping_progress
 
 
@@ -96,6 +97,9 @@ class Command(BaseCommand):
             for rows in groups.values():
                 if len(rows) > 1:
                     merge_settings(rows)
+            return
+        if table == 't_kubota_sakai_delivery_progress':
+            # 新旧コードが同日に併存していても rebuild_delivery_progress() で統合するため検査不要。
             return
         indexes = defaultdict(list)
         for row in self.query(f'SHOW INDEX FROM `{table}`'):
@@ -194,6 +198,29 @@ class Command(BaseCommand):
             keeper.save(update_fields=['ship_to_code', 'adjust_qty'])
         recalculate_shipping_progress(dates['start'], dates['end'], customer_code='000196', ship_to_codes=set(changed.values()))
 
+    def rebuild_delivery_progress(self):
+        codes = {r['ship_to_code'] for r in self.query('SELECT DISTINCT ship_to_code FROM t_kubota_sakai_delivery_progress')}
+        changed = {code: normalize_kubota_ship_to_code(code) for code in codes
+                   if code and normalize_kubota_ship_to_code(code).isascii()
+                   and normalize_kubota_ship_to_code(code).isdecimal() and code != normalize_kubota_ship_to_code(code)}
+        if not changed:
+            return
+        affected = KubotaSakaiDeliveryProgress.objects.filter(ship_to_code__in=set(changed) | set(changed.values()))
+        dates = affected.aggregate(start=Min('plan_date'), end=Max('plan_date'))
+        groups = defaultdict(list)
+        for row in affected.order_by('id'):
+            groups[(row.product_code, changed.get(row.ship_to_code, row.ship_to_code), row.plan_date)].append(row)
+        for (_, code, _), rows in groups.items():
+            keeper = next((row for row in rows if row.ship_to_code == code), rows[0])
+            # 手動調整は同一納入地の寄与として保持し、需要・便振分・累積進度は再計算する。
+            keeper.adjust_qty = sum(row.adjust_qty for row in rows)
+            for row in rows:
+                if row.pk != keeper.pk:
+                    row.delete()
+            keeper.ship_to_code = code
+            keeper.save(update_fields=['ship_to_code', 'adjust_qty'])
+        recalculate_delivery_progress(dates['start'], dates['end'])
+
     def handle(self, *args, **options):
         if connection.vendor != 'mysql':
             raise CommandError('この移行はMySQL専用です。')
@@ -225,6 +252,7 @@ class Command(BaseCommand):
             if actuals:
                 raise CommandError('旧コードの需要に実績値があります。実績の引継ぎ方法を確認してください。')
             self.update_settings(scopes['m_ship_to_lead_time'], mappings.pop('m_ship_to_lead_time'))
+            mappings.pop('t_kubota_sakai_delivery_progress')
             for table, mapping in mappings.items():
                 for old, new in mapping.items():
                     self.execute_sql(f'UPDATE `{table}` SET ship_to_code=%s WHERE ({scopes[table]}) AND ship_to_code=%s', (new, old))
@@ -237,4 +265,5 @@ class Command(BaseCommand):
                 raise CommandError(str(result['errors']))
             self.stdout.write(json.dumps(result, cls=DjangoJSONEncoder, ensure_ascii=False))
             self.rebuild_shipping_progress()
-            self.stdout.write(self.style.SUCCESS('5桁統一・需要再展開・出荷進度再計算が完了しました。'))
+            self.rebuild_delivery_progress()
+            self.stdout.write(self.style.SUCCESS('5桁統一・需要再展開・出荷進度再計算・配送進捗再計算が完了しました。'))
