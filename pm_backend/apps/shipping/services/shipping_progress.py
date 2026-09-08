@@ -49,11 +49,12 @@ def _build_lead_time_map():
     return lt_map
 
 
-def recalculate_shipping_progress(start_date, end_date):
+def recalculate_shipping_progress(start_date, end_date, *, customer_code=None, ship_to_codes=None):
     """指定期間の出荷進度を再計算する。
 
     start_date ~ end_date の各日について、品番×得意先×納入先ごとに
     需要(内示/確定)・実績を集計し、累積進度を計算してDBに保存する。
+    顧客・納入先の指定時は、取得と再計算の両方を同じ対象に限定する。
     """
     if start_date > end_date:
         return
@@ -62,9 +63,21 @@ def recalculate_shipping_progress(start_date, end_date):
     calc = WorkingDayCalculator(calendar)
     lt_map = _build_lead_time_map()
 
+    order_qs = OrderLine.objects.all()
+    shipment_qs = ShipmentActual.objects.all()
+    progress_qs = ShippingProgress.objects.all()
+    if customer_code is not None:
+        order_qs = order_qs.filter(order__customer__customer_code=customer_code)
+        shipment_qs = shipment_qs.filter(customer_code=customer_code)
+        progress_qs = progress_qs.filter(customer_code=customer_code)
+    if ship_to_codes is not None:
+        order_qs = order_qs.filter(ship_to_code__in=ship_to_codes)
+        shipment_qs = shipment_qs.filter(ship_to_code__in=ship_to_codes)
+        progress_qs = progress_qs.filter(ship_to_code__in=ship_to_codes)
+
     # --- 需要集計: OrderLine (OPEN受注のみ) ---
     order_lines = (
-        OrderLine.objects
+        order_qs
         .filter(order__status='OPEN')
         .select_related('order__customer')
         .only(
@@ -108,7 +121,7 @@ def recalculate_shipping_progress(start_date, end_date):
 
     # --- 実績集計: ShipmentActual ---
     actual_qs = (
-        ShipmentActual.objects
+        shipment_qs
         .filter(shipment_date__range=(start_date, end_date))
         .values('product_code', 'customer_code', 'ship_to_code', 'shipment_date')
         .annotate(total=Sum('quantity'))
@@ -124,7 +137,7 @@ def recalculate_shipping_progress(start_date, end_date):
 
     # 既存の進捗行から対象キーを追加
     existing_keys = (
-        ShippingProgress.objects
+        progress_qs
         .filter(plan_date__range=(start_date, end_date))
         .values('product_code', 'customer_code', 'ship_to_code')
         .distinct()
@@ -138,13 +151,13 @@ def recalculate_shipping_progress(start_date, end_date):
     # --- 前日進度を取得 ---
     prev_date = start_date - timedelta(days=1)
     prev_progress = {}
-    for row in ShippingProgress.objects.filter(plan_date=prev_date):
+    for row in progress_qs.filter(plan_date=prev_date):
         key = (row.product_code, row.customer_code or '', (row.ship_to_code or '').strip())
         prev_progress[key] = row.progress_qty
 
     # --- 既存行を取得(調整値の保持用) ---
     existing_rows = {}
-    for row in ShippingProgress.objects.filter(plan_date__range=(start_date, end_date)):
+    for row in progress_qs.filter(plan_date__range=(start_date, end_date)):
         existing_rows[(row.product_code, row.customer_code or '', (row.ship_to_code or '').strip(), row.plan_date)] = row
 
     # --- 日毎に累積進度を計算 ---
