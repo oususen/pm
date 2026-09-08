@@ -27,7 +27,7 @@
         </select></label>
         <label>納期<input v-model="manualDeliveryDate" type="date" /></label>
         <label>ロット数<input v-model.number="manualLots" type="number" min="0" style="width:60px;" /></label>
-        <label>倍数<input v-model.number="manualLotMultiple" type="number" min="0" style="width:60px;" /></label>
+        <label>枚/ロット<input v-model.number="manualLotMultiple" type="number" min="0" style="width:60px;" /></label>
         <label>端数枚数<input v-model.number="manualSheets" type="number" min="0" style="width:60px;" /></label>
         <button class="btn primary" @click="addManualOrder" :disabled="!manualMaterialId || !manualDeliveryDate || (manualLots === 0 && manualSheets === 0)">登録</button>
       </div>
