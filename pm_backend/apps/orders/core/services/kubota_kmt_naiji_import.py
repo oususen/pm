@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
-from orders.core.services.ship_to_utils import ensure_ship_to_records
+from orders.core.services.ship_to_utils import ensure_ship_to_records, normalize_kubota_ship_to_code
 
 
 class KubotaKmtNaijiImportService:
@@ -102,7 +102,7 @@ class KubotaKmtNaijiImportService:
 
                 product_name = row[self.COL_PRODUCT_NAME].strip() if len(row) > self.COL_PRODUCT_NAME else ''
                 plant_code = row[self.COL_FACTORY].strip() if len(row) > self.COL_FACTORY else ''
-                ship_to = row[self.COL_SHIP_TO].strip() if len(row) > self.COL_SHIP_TO else ''
+                ship_to = normalize_kubota_ship_to_code(row[self.COL_SHIP_TO] if len(row) > self.COL_SHIP_TO else '')
                 inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
                 order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
 

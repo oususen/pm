@@ -1,6 +1,15 @@
 from shipping.models import ShipToLeadTime
 
 
+def normalize_kubota_ship_to_code(value):
+    """クボタの数値納入先コードを5桁にそろえる。英数字コードは維持する。"""
+    code = (value or '').strip()
+    numeric_code = code.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+    if numeric_code and numeric_code.isascii() and numeric_code.isdecimal():
+        return numeric_code.zfill(5)
+    return code
+
+
 def ensure_ship_to_records(raw_records, customer):
     """受注取り込み時に新しい納入地をShipToLeadTimeに自動登録する。
     既存レコードのship_to_nameが空で、今回のデータに名前がある場合は更新する。

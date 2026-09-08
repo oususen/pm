@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from orders.core.models import StgOrderRawKubota, StgOrderDaily
 from masters.models import Customer, Product
-from orders.core.services.ship_to_utils import ensure_ship_to_records
+from orders.core.services.ship_to_utils import ensure_ship_to_records, normalize_kubota_ship_to_code
 
 
 class KubotaHirakataKakuteiImportService:
@@ -273,7 +273,7 @@ class KubotaHirakataKakuteiImportService:
                         issue_date_str = row[self.COL_ISSUE_DATE_45].strip() if len(row) > self.COL_ISSUE_DATE_45 else ''
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE].strip() if len(row) > self.COL_INSPECTION_TYPE else ''
-                        ship_to = row[self.COL_SHIP_TO_45].strip() if len(row) > self.COL_SHIP_TO_45 else ''
+                        ship_to = normalize_kubota_ship_to_code(row[self.COL_SHIP_TO_45] if len(row) > self.COL_SHIP_TO_45 else '')
 
                         ship_to_name = ''
 
@@ -301,7 +301,7 @@ class KubotaHirakataKakuteiImportService:
                         issue_date_str = row[self.COL_ISSUE_DATE_47].strip() if len(row) > self.COL_ISSUE_DATE_47 else ''
                         order_no = row[self.COL_ORDER_NO].strip() if len(row) > self.COL_ORDER_NO else ''
                         inspection_type = row[self.COL_INSPECTION_TYPE_47].strip() if len(row) > self.COL_INSPECTION_TYPE_47 else ''
-                        ship_to = row[self.COL_SHIP_TO_47].strip() if len(row) > self.COL_SHIP_TO_47 else ''
+                        ship_to = normalize_kubota_ship_to_code(row[self.COL_SHIP_TO_47] if len(row) > self.COL_SHIP_TO_47 else '')
                         ship_to_name = row[self.COL_SHIP_TO_NAME_47].strip() if len(row) > self.COL_SHIP_TO_NAME_47 else ''
 
                         due_date = (
