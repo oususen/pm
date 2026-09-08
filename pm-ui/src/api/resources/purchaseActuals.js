@@ -25,4 +25,7 @@ export const createPurchaseActualsAPI = (client) => ({
   getBulkItems(params) {
     return client.get('/purchase-actual/bulk-items/', { params })
   },
+  resolveCsvItems(payload) {
+    return client.post('/purchase-actual/csv-resolve/', payload)
+  },
 })

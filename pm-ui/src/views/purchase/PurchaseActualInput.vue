@@ -869,22 +869,31 @@ const onBulkCsvSelected = (event) => {
       bulkSupplierId.value = String(supplier.id)
       bulkPlanDate.value = arrivalDateText
       arrivalDate.value = arrivalDateText
-      await loadBulkItems()
 
-      const existingRowsByCode = new Map(
-        bulkRows.value.map((row) => [String(row.productCode || row.barcode || '').trim().toUpperCase(), row])
+      const productCodes = Array.from(mappedAggregated.keys())
+      const resolveRes = await api.purchaseActuals.resolveCsvItems({
+        supplier_id: supplier.id,
+        product_codes: productCodes,
+      })
+      const resolvedItems = Array.isArray(resolveRes.data?.items) ? resolveRes.data.items : []
+      const resolvedByCode = new Map(
+        resolvedItems.map((item) => [String(item.product_code || '').trim().toUpperCase(), item])
       )
+      const csvLineId = resolveRes.data?.line_id ? String(resolveRes.data.line_id) : ''
+      bulkLineId.value = csvLineId
+      bulkLineLabel.value = resolveRes.data?.line_name || ''
+
       bulkRows.value = Array.from(mappedAggregated.values()).map((item) => {
-        const existing = existingRowsByCode.get(String(item.productCode || '').trim().toUpperCase())
+        const resolved = resolvedByCode.get(String(item.productCode || '').trim().toUpperCase())
+        const lineId = resolved?.line_id ? String(resolved.line_id) : csvLineId
+        const processId = resolved?.process_id ? String(resolved.process_id) : ''
         return createBulkRow({
           productCode: item.productCode,
-          productName: existing?.productName || item.productName,
-          productId: existing?.productId || null,
-          lineId: existing?.lineId || bulkLineId.value,
-          processId: existing?.processId || bulkProcessId.value,
-          planQty: existing?.planQty || 0,
-          actualsByDate: existing?.actualsByDate || {},
-          resolved: Boolean((existing?.lineId || bulkLineId.value) && (existing?.processId || bulkProcessId.value)),
+          productName: resolved?.product_name || item.productName,
+          productId: resolved?.product_id || null,
+          lineId,
+          processId,
+          resolved: Boolean(lineId && processId),
           qty: item.qty,
         })
       })

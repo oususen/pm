@@ -1328,6 +1328,51 @@ class PurchaseActualBulkItemsView(APIView):
         })
 
 
+class PurchaseActualCsvResolveView(APIView):
+    """CSV取込用: 品番リストと仕入先からルーティング工程を解決する"""
+
+    def post(self, request):
+        supplier_id = request.data.get('supplier_id')
+        product_codes = request.data.get('product_codes', [])
+
+        supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+        if not supplier:
+            return Response({'items': []})
+
+        line = _resolve_purchase_line(supplier)
+
+        items = []
+        for code in product_codes:
+            product = _resolve_product_by_code(code)
+            if not product:
+                items.append({
+                    'product_code': code,
+                    'product_id': None,
+                    'line_id': line.id if line else None,
+                    'process_id': None,
+                })
+                continue
+
+            routing_process = resolve_supplier_routing_process(
+                supplier=supplier,
+                line=line,
+                product=product,
+            )
+            items.append({
+                'product_code': code,
+                'product_id': product.id,
+                'product_name': product.product_name,
+                'line_id': line.id if line else None,
+                'process_id': routing_process.id if routing_process else None,
+            })
+
+        return Response({
+            'items': items,
+            'line_id': line.id if line else None,
+            'line_name': line.line_name if line else '',
+        })
+
+
 class PurchasePlanLockSettingView(APIView):
     def get(self, request):
         setting = PurchasePlanLockSetting.objects.first()
