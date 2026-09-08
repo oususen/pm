@@ -424,7 +424,7 @@ const save = async () => {
           sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
           meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
         }))
-        .filter((item) => item.required_sheets > 0),
+        .filter((item) => item.required_sheets > 0 || item.sato_lots || item.meisei_lots || item.sato_sheets || item.meisei_sheets),
     );
     const initialItems = props.materials.map((material) => ({
       material_id: material.material_id,

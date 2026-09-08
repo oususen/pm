@@ -537,9 +537,11 @@
                         ),
                       }"
                       :data-tip="`${pattern.representative_product_code} t${number(pattern.thickness, 1)} ${pattern.machine === 'TK' ? '1号機' : '2号機'}`"
+                      :data-force-key="`${pattern.laser_pattern_id}_${day}`"
+                      @dblclick="forceShowInput(pattern, day)"
                     >
                       <input
-                        v-if="patternDailyValue(pattern, day, 'automatic_sheets') !== 0 || patternDailyValue(pattern, day, 'manual_sheets') !== 0"
+                        v-if="patternDailyValue(pattern, day, 'automatic_sheets') !== 0 || patternDailyValue(pattern, day, 'manual_sheets') !== 0 || forcedInputCells.has(`${pattern.laser_pattern_id}_${day}`)"
                         class="manual-sheets"
                         v-model.number="pattern.daily[day].manual_sheets"
                         min="0"
@@ -768,7 +770,7 @@
   </section>
 </template>
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import ExcelJS from "exceljs";
 import LaserWeeklyMaterialOrder from "./LaserWeeklyMaterialOrder.vue";
 import api from "@/api/client";
@@ -820,6 +822,18 @@ const startDate = ref(monday()),
   resetStartDate = ref(""),
   resetEndDate = ref(""),
   changedManualQuantities = ref({});
+const forcedInputCells = ref(new Set());
+const forceShowInput = (pattern, day) => {
+  const key = `${pattern.laser_pattern_id}_${day}`;
+  if (!forcedInputCells.value.has(key)) {
+    if (!pattern.daily[day]) pattern.daily[day] = { automatic_sheets: 0, manual_sheets: 0 };
+    forcedInputCells.value = new Set([...forcedInputCells.value, key]);
+    nextTick(() => {
+      const td = document.querySelector(`[data-force-key="${key}"] input`);
+      if (td) td.focus();
+    });
+  }
+};
 const fixedColumns = [
   "後工程",
   "取",
@@ -1343,6 +1357,7 @@ const loadPlan = async () => {
     );
     materialRows.value = data.material_rows || [];
     changedManualQuantities.value = {};
+    forcedInputCells.value = new Set();
     dirty.value = false;
     message.value = "";
   } catch (e) {
