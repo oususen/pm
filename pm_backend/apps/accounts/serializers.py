@@ -630,6 +630,7 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
             'reviewer1_proxy_user_names',
             'reviewer2_role',
             'reviewer2_role_label',
+            'reviewer2_enabled',
             'reviewer2_task_enabled',
             'reviewer2_app_notification_enabled',
             'reviewer2_email_notification_enabled',

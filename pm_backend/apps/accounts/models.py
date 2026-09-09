@@ -415,6 +415,7 @@ class ApprovalRouteConfig(models.Model):
         verbose_name='確認者1代理ユーザー',
     )
     reviewer2_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='chief', verbose_name='確認者2')
+    reviewer2_enabled = models.BooleanField(default=True, verbose_name='確認者2使用')
     reviewer2_task_enabled = models.BooleanField(default=True, verbose_name='確認者2タスク作成')
     reviewer2_app_notification_enabled = models.BooleanField(default=True, verbose_name='確認者2アプリ通知')
     reviewer2_email_notification_enabled = models.BooleanField(default=False, verbose_name='確認者2メール通知')

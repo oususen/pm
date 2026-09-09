@@ -46,10 +46,16 @@
 
           <div class="stage-grid">
             <div v-for="stage in stages" :key="stage.key" class="stage-card">
-              <div class="stage-title">{{ stage.label }}</div>
+              <div class="stage-title-row">
+                <div class="stage-title">{{ stage.label }}</div>
+                <label v-if="stage.optional" class="option-check">
+                  <input v-model="route[`${stage.key}_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  使用
+                </label>
+              </div>
               <label class="field-label">
                 基本役割
-                <select v-model="route[`${stage.key}_role`]" :disabled="!canEditPage">
+                <select v-model="route[`${stage.key}_role`]" :disabled="!canEditPage || isStageDisabled(route, stage)">
                   <option v-for="role in roleOptions" :key="role.value" :value="role.value">
                     {{ role.label }}
                   </option>
@@ -57,15 +63,15 @@
               </label>
               <div class="stage-options">
                 <label class="option-check">
-                  <input v-model="route[`${stage.key}_task_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  <input v-model="route[`${stage.key}_task_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(route, stage)" />
                   次段階タスク
                 </label>
                 <label class="option-check">
-                  <input v-model="route[`${stage.key}_app_notification_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  <input v-model="route[`${stage.key}_app_notification_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(route, stage)" />
                   アプリ通知
                 </label>
                 <label class="option-check">
-                  <input v-model="route[`${stage.key}_email_notification_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  <input v-model="route[`${stage.key}_email_notification_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(route, stage)" />
                   メール通知
                 </label>
               </div>
@@ -76,7 +82,7 @@
                 title="限定ユーザー"
                 empty-text="未設定時は基本役割から判定"
                 :users="users"
-                :disabled="!canEditPage"
+                :disabled="!canEditPage || isStageDisabled(route, stage)"
               />
               <UserPicker
                 :row="route"
@@ -85,7 +91,7 @@
                 title="代理ユーザー"
                 empty-text="代理なし"
                 :users="users"
-                :disabled="!canEditPage"
+                :disabled="!canEditPage || isStageDisabled(route, stage)"
               />
             </div>
           </div>
@@ -135,7 +141,7 @@ const dsSources = [
 const stages = [
   { key: 'creator', label: '作成者' },
   { key: 'reviewer1', label: '確認①' },
-  { key: 'reviewer2', label: '確認②' },
+  { key: 'reviewer2', label: '確認②', optional: true },
   { key: 'approver', label: '承認者' },
 ]
 
@@ -178,6 +184,7 @@ const emptyRoute = () => ({
   reviewer1_allowed_users: [],
   reviewer1_proxy_users: [],
   reviewer2_role: 'chief',
+  reviewer2_enabled: true,
   reviewer2_task_enabled: true,
   reviewer2_app_notification_enabled: true,
   reviewer2_email_notification_enabled: false,
@@ -408,6 +415,7 @@ const buildPayload = () => routes.value.map((route) => ({
   reviewer1_allowed_users: route.reviewer1_allowed_users || [],
   reviewer1_proxy_users: route.reviewer1_proxy_users || [],
   reviewer2_role: route.reviewer2_role,
+  reviewer2_enabled: Boolean(route.reviewer2_enabled),
   reviewer2_task_enabled: Boolean(route.reviewer2_task_enabled),
   reviewer2_app_notification_enabled: Boolean(route.reviewer2_app_notification_enabled),
   reviewer2_email_notification_enabled: Boolean(route.reviewer2_email_notification_enabled),
@@ -441,6 +449,8 @@ const validateRoutes = () => {
   }
   return ''
 }
+
+const isStageDisabled = (route, stage) => Boolean(stage.optional && !route[`${stage.key}_enabled`])
 
 const save = async () => {
   if (!canEditPage.value) return
@@ -550,6 +560,13 @@ onMounted(fetchAll)
   font-size: 13px;
   font-weight: 700;
   color: #1f2a44;
+}
+
+.stage-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .stage-options {
