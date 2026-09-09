@@ -55,8 +55,14 @@ const allTiles = [
     resource: 'settings.scheduled_tasks',
   },
   {
+    to: '/settings/approval-routes',
+    title: '承認設定',
+    desc: '承認項目ごとに役割・限定ユーザー・代理ユーザーを設定します。',
+    resource: 'settings.approval_routes',
+  },
+  {
     to: '/settings/purchase-order-approval',
-    title: '承認者設定',
+    title: '発注承認者設定',
     desc: '発注提案書の承認レベル別ユーザーを設定します。',
     resource: 'settings.purchase_order_approval',
   },
@@ -104,4 +110,3 @@ const tiles = computed(() => allTiles.filter((tile) => canAccess(tile.resource))
   color: #4b5563;
 }
 </style>
-

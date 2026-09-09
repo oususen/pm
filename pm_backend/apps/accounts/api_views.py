@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.db import transaction
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets
@@ -7,6 +8,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
+    ApprovalRouteConfig,
     Department,
     UnitLineMapping,
     UserProfile,
@@ -27,6 +29,7 @@ from .serializers import (
     UserSmtpConfigSerializer,
     UnitLineMappingSerializer,
     UserFavoriteSerializer,
+    ApprovalRouteConfigSerializer,
 )
 
 class DepartmentViewSet(viewsets.ModelViewSet):
@@ -413,3 +416,90 @@ class UserFavoriteViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class ApprovalRouteConfigViewSet(viewsets.ModelViewSet):
+    queryset = ApprovalRouteConfig.objects.prefetch_related(
+        'creator_allowed_users',
+        'creator_proxy_users',
+        'reviewer1_allowed_users',
+        'reviewer1_proxy_users',
+        'reviewer2_allowed_users',
+        'reviewer2_proxy_users',
+        'approver_allowed_users',
+        'approver_proxy_users',
+    )
+    serializer_class = ApprovalRouteConfigSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['item_key', 'item_name', 'note']
+    ordering_fields = ['item_key', 'item_name', 'id']
+    ordering = ['item_key', 'id']
+
+    @action(detail=False, methods=['put'], url_path='bulk-save')
+    def bulk_save(self, request):
+        routes = request.data.get('routes')
+        if not isinstance(routes, list):
+            return Response({'detail': 'routes must be list'}, status=400)
+        delete_ids = request.data.get('delete_ids', [])
+        if delete_ids is None:
+            delete_ids = []
+        if not isinstance(delete_ids, list):
+            return Response({'detail': 'delete_ids must be list'}, status=400)
+
+        try:
+            normalized_delete_ids = [int(route_id) for route_id in delete_ids]
+        except (TypeError, ValueError):
+            return Response({'detail': 'delete_ids must contain integers'}, status=400)
+
+        item_keys = [(route.get('item_key') or '').strip() for route in routes if isinstance(route, dict)]
+        if len(item_keys) != len(set(item_keys)):
+            return Response({'detail': 'item_key must be unique'}, status=400)
+
+        serializer = self.get_serializer(data=routes, many=True)
+        serializer.is_valid(raise_exception=True)
+        save_ids = [route.get('id') for route in serializer.validated_data if route.get('id')]
+        delete_id_set = set(normalized_delete_ids)
+        conflict_ids = sorted(delete_id_set.intersection(save_ids))
+        if conflict_ids:
+            return Response({'detail': f'cannot save and delete same ids: {conflict_ids}'}, status=400)
+
+        for route in serializer.validated_data:
+            route_id = route.get('id')
+            item_key = route.get('item_key')
+            duplicate = ApprovalRouteConfig.objects.filter(item_key=item_key).exclude(id__in=delete_id_set)
+            if route_id:
+                duplicate = duplicate.exclude(id=route_id)
+            if duplicate.exists():
+                return Response({'detail': f'item_key already exists: {item_key}'}, status=400)
+
+        m2m_fields = [
+            'creator_allowed_users',
+            'creator_proxy_users',
+            'reviewer1_allowed_users',
+            'reviewer1_proxy_users',
+            'reviewer2_allowed_users',
+            'reviewer2_proxy_users',
+            'approver_allowed_users',
+            'approver_proxy_users',
+        ]
+        with transaction.atomic():
+            for route in serializer.validated_data:
+                route_id = route.pop('id', None)
+                user_lists = {field: route.pop(field, []) for field in m2m_fields}
+                if route_id:
+                    obj, _ = ApprovalRouteConfig.objects.update_or_create(
+                        id=route_id,
+                        defaults=route,
+                    )
+                else:
+                    obj, _ = ApprovalRouteConfig.objects.update_or_create(
+                        item_key=route['item_key'],
+                        defaults=route,
+                    )
+                for field, users in user_lists.items():
+                    getattr(obj, field).set(users)
+
+            if normalized_delete_ids:
+                ApprovalRouteConfig.objects.filter(id__in=normalized_delete_ids).delete()
+        return Response(self.get_serializer(self.get_queryset(), many=True).data)

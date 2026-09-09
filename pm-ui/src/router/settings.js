@@ -82,6 +82,12 @@ const settings = [
     meta: { pageTitle: "タスク設定", resource: "settings.scheduled_tasks" },
   },
   {
+    path: "/settings/approval-routes",
+    name: "ApprovalRouteSettings",
+    component: () => import("@/views/settings/ApprovalRouteSettings.vue"),
+    meta: { pageTitle: "承認設定", resource: "settings.approval_routes" },
+  },
+  {
     path: "/settings/auto-plan",
     name: "AutoPlanMenu",
     component: () => import("@/views/settings/AutoPlanMenu.vue"),

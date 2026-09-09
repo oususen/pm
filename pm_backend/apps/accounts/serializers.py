@@ -1,4 +1,5 @@
 from collections import defaultdict
+import re
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
@@ -17,6 +18,7 @@ from .models import (
     DepartmentPositionPermission,
     UserSmtpConfig,
     UserFavorite,
+    ApprovalRouteConfig,
 )
 
 
@@ -585,3 +587,114 @@ class UserSmtpConfigSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'smtp_password': {'write_only': True}
         }
+
+
+class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+    creator_role_label = serializers.CharField(source='get_creator_role_display', read_only=True)
+    reviewer1_role_label = serializers.CharField(source='get_reviewer1_role_display', read_only=True)
+    reviewer2_role_label = serializers.CharField(source='get_reviewer2_role_display', read_only=True)
+    approver_role_label = serializers.CharField(source='get_approver_role_display', read_only=True)
+    creator_allowed_user_names = serializers.SerializerMethodField()
+    creator_proxy_user_names = serializers.SerializerMethodField()
+    reviewer1_allowed_user_names = serializers.SerializerMethodField()
+    reviewer1_proxy_user_names = serializers.SerializerMethodField()
+    reviewer2_allowed_user_names = serializers.SerializerMethodField()
+    reviewer2_proxy_user_names = serializers.SerializerMethodField()
+    approver_allowed_user_names = serializers.SerializerMethodField()
+    approver_proxy_user_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ApprovalRouteConfig
+        fields = [
+            'id',
+            'item_key',
+            'item_name',
+            'creator_role',
+            'creator_role_label',
+            'creator_task_enabled',
+            'creator_app_notification_enabled',
+            'creator_email_notification_enabled',
+            'creator_allowed_users',
+            'creator_allowed_user_names',
+            'creator_proxy_users',
+            'creator_proxy_user_names',
+            'reviewer1_role',
+            'reviewer1_role_label',
+            'reviewer1_task_enabled',
+            'reviewer1_app_notification_enabled',
+            'reviewer1_email_notification_enabled',
+            'reviewer1_allowed_users',
+            'reviewer1_allowed_user_names',
+            'reviewer1_proxy_users',
+            'reviewer1_proxy_user_names',
+            'reviewer2_role',
+            'reviewer2_role_label',
+            'reviewer2_task_enabled',
+            'reviewer2_app_notification_enabled',
+            'reviewer2_email_notification_enabled',
+            'reviewer2_allowed_users',
+            'reviewer2_allowed_user_names',
+            'reviewer2_proxy_users',
+            'reviewer2_proxy_user_names',
+            'approver_role',
+            'approver_role_label',
+            'approver_task_enabled',
+            'approver_app_notification_enabled',
+            'approver_email_notification_enabled',
+            'approver_allowed_users',
+            'approver_allowed_user_names',
+            'approver_proxy_users',
+            'approver_proxy_user_names',
+            'approved_result_app_notification_enabled',
+            'approved_result_email_notification_enabled',
+            'rejected_result_app_notification_enabled',
+            'rejected_result_email_notification_enabled',
+            'is_active',
+            'note',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            'item_key': {'validators': []},
+        }
+
+    def validate_item_key(self, value):
+        item_key = (value or '').strip()
+        if not item_key:
+            raise serializers.ValidationError('管理コードは必須です。')
+        if not re.fullmatch(r'[a-z0-9_]+', item_key):
+            raise serializers.ValidationError('管理コードは半角英数字と _ のみ使用できます。')
+        return item_key
+
+    def _get_user_names(self, users):
+        names = []
+        for user in users.all():
+            full_name = f'{user.last_name or ""} {user.first_name or ""}'.strip()
+            names.append(full_name or user.username)
+        return names
+
+    def get_creator_allowed_user_names(self, obj):
+        return self._get_user_names(obj.creator_allowed_users)
+
+    def get_creator_proxy_user_names(self, obj):
+        return self._get_user_names(obj.creator_proxy_users)
+
+    def get_reviewer1_allowed_user_names(self, obj):
+        return self._get_user_names(obj.reviewer1_allowed_users)
+
+    def get_reviewer1_proxy_user_names(self, obj):
+        return self._get_user_names(obj.reviewer1_proxy_users)
+
+    def get_reviewer2_allowed_user_names(self, obj):
+        return self._get_user_names(obj.reviewer2_allowed_users)
+
+    def get_reviewer2_proxy_user_names(self, obj):
+        return self._get_user_names(obj.reviewer2_proxy_users)
+
+    def get_approver_allowed_user_names(self, obj):
+        return self._get_user_names(obj.approver_allowed_users)
+
+    def get_approver_proxy_user_names(self, obj):
+        return self._get_user_names(obj.approver_proxy_users)

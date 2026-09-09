@@ -1,0 +1,719 @@
+<template>
+  <div class="page-container">
+    <div class="page-header">
+      <h1 class="page-title">承認設定 <DataSourceDialog title="" :sources="dsSources" /></h1>
+      <div class="page-actions">
+        <button class="btn-primary" @click="fetchAll" :disabled="loading || !canViewPage">
+          {{ loading ? '更新中...' : '更新' }}
+        </button>
+        <button class="btn-success" @click="save" :disabled="saving || !canEditPage">
+          {{ saving ? '保存中...' : '保存' }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="!canViewPage" class="page-content">
+      <div class="no-data">この画面を開く権限がありません。</div>
+    </div>
+    <div v-else class="page-content">
+      <div v-if="errorMessage" class="alert alert-danger">{{ errorMessage }}</div>
+      <div v-if="successMessage" class="alert alert-success">{{ successMessage }}</div>
+
+      <div class="route-toolbar">
+        <button class="btn-primary" type="button" @click="addRoute" :disabled="!canEditPage">
+          承認項目追加
+        </button>
+      </div>
+
+      <div v-if="routes.length === 0" class="no-data">承認項目がありません。</div>
+      <div v-else class="route-list">
+        <section v-for="(route, index) in routes" :key="route.local_key" class="route-section">
+          <div class="route-head">
+            <div class="route-main-fields">
+              <label>
+                承認項目名
+                <input v-model.trim="route.item_name" :disabled="!canEditPage" placeholder="例: レーザ材料発注" />
+              </label>
+              <label class="active-check">
+                <input v-model="route.is_active" type="checkbox" :disabled="!canEditPage" />
+                有効
+              </label>
+            </div>
+            <button class="btn-danger" type="button" @click="removeRoute(index)" :disabled="!canEditPage">
+              削除
+            </button>
+          </div>
+
+          <div class="stage-grid">
+            <div v-for="stage in stages" :key="stage.key" class="stage-card">
+              <div class="stage-title">{{ stage.label }}</div>
+              <label class="field-label">
+                基本役割
+                <select v-model="route[`${stage.key}_role`]" :disabled="!canEditPage">
+                  <option v-for="role in roleOptions" :key="role.value" :value="role.value">
+                    {{ role.label }}
+                  </option>
+                </select>
+              </label>
+              <div class="stage-options">
+                <label class="option-check">
+                  <input v-model="route[`${stage.key}_task_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  次段階タスク
+                </label>
+                <label class="option-check">
+                  <input v-model="route[`${stage.key}_app_notification_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  アプリ通知
+                </label>
+                <label class="option-check">
+                  <input v-model="route[`${stage.key}_email_notification_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  メール通知
+                </label>
+              </div>
+              <UserPicker
+                :row="route"
+                :stage="stage.key"
+                type="allowed"
+                title="限定ユーザー"
+                empty-text="未設定時は基本役割から判定"
+                :users="users"
+                :disabled="!canEditPage"
+              />
+              <UserPicker
+                :row="route"
+                :stage="stage.key"
+                type="proxy"
+                title="代理ユーザー"
+                empty-text="代理なし"
+                :users="users"
+                :disabled="!canEditPage"
+              />
+            </div>
+          </div>
+
+          <div class="result-options">
+            <div class="result-title">結果通知（全段階の担当者へ）</div>
+            <label class="option-check">
+              <input v-model="route.approved_result_app_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              承認時アプリ通知
+            </label>
+            <label class="option-check">
+              <input v-model="route.approved_result_email_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              承認時メール通知
+            </label>
+            <label class="option-check">
+              <input v-model="route.rejected_result_app_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              却下時アプリ通知
+            </label>
+            <label class="option-check">
+              <input v-model="route.rejected_result_email_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              却下時メール通知
+            </label>
+          </div>
+
+          <label class="note-field">
+            備考
+            <input v-model.trim="route.note" :disabled="!canEditPage" />
+          </label>
+        </section>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed, defineComponent, h, onMounted, ref } from 'vue'
+import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '承認設定 読み書き', table: 'accounts_approval_route_config', desc: '承認項目ごとの役割・限定ユーザー・代理ユーザー設定' },
+  { op: 'ユーザー 読み取り', table: 'auth_user / accounts_userprofile', desc: '限定ユーザー・代理ユーザーの候補' },
+]
+
+const stages = [
+  { key: 'creator', label: '作成者' },
+  { key: 'reviewer1', label: '確認①' },
+  { key: 'reviewer2', label: '確認②' },
+  { key: 'approver', label: '承認者' },
+]
+
+const roleOptions = [
+  { value: 'leader', label: 'リーダー' },
+  { value: 'supervisor', label: '班長' },
+  { value: 'chief', label: '係長' },
+  { value: 'manager', label: '事業部長・課長' },
+  { value: 'office_staff', label: '事務員' },
+  { value: 'staff', label: '一般' },
+]
+
+const userLabel = (user) => {
+  const code = user?.profile?.employee_code || user?.username || user?.email || `ID:${user?.id}`
+  const name = `${user?.last_name || ''} ${user?.first_name || ''}`.trim() || user?.username || ''
+  return name ? `${code} ${name}` : code
+}
+
+const normalizeUserIds = (list) => {
+  if (!Array.isArray(list)) return []
+  const ids = list.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+  return [...new Set(ids)]
+}
+
+const emptyRoute = () => ({
+  id: null,
+  local_key: `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  item_key: '',
+  item_name: '',
+  creator_role: 'leader',
+  creator_task_enabled: true,
+  creator_app_notification_enabled: true,
+  creator_email_notification_enabled: false,
+  creator_allowed_users: [],
+  creator_proxy_users: [],
+  reviewer1_role: 'supervisor',
+  reviewer1_task_enabled: true,
+  reviewer1_app_notification_enabled: true,
+  reviewer1_email_notification_enabled: false,
+  reviewer1_allowed_users: [],
+  reviewer1_proxy_users: [],
+  reviewer2_role: 'chief',
+  reviewer2_task_enabled: true,
+  reviewer2_app_notification_enabled: true,
+  reviewer2_email_notification_enabled: false,
+  reviewer2_allowed_users: [],
+  reviewer2_proxy_users: [],
+  approver_role: 'manager',
+  approver_task_enabled: true,
+  approver_app_notification_enabled: true,
+  approver_email_notification_enabled: false,
+  approver_allowed_users: [],
+  approver_proxy_users: [],
+  approved_result_app_notification_enabled: true,
+  approved_result_email_notification_enabled: false,
+  rejected_result_app_notification_enabled: true,
+  rejected_result_email_notification_enabled: false,
+  is_active: true,
+  note: '',
+})
+
+const normalizeRoute = (route) => ({
+  ...emptyRoute(),
+  ...route,
+  local_key: route.id ? `saved-${route.id}` : `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  creator_allowed_users: normalizeUserIds(route.creator_allowed_users),
+  creator_proxy_users: normalizeUserIds(route.creator_proxy_users),
+  reviewer1_allowed_users: normalizeUserIds(route.reviewer1_allowed_users),
+  reviewer1_proxy_users: normalizeUserIds(route.reviewer1_proxy_users),
+  reviewer2_allowed_users: normalizeUserIds(route.reviewer2_allowed_users),
+  reviewer2_proxy_users: normalizeUserIds(route.reviewer2_proxy_users),
+  approver_allowed_users: normalizeUserIds(route.approver_allowed_users),
+  approver_proxy_users: normalizeUserIds(route.approver_proxy_users),
+})
+
+const UserPicker = defineComponent({
+  props: {
+    row: { type: Object, required: true },
+    stage: { type: String, required: true },
+    type: { type: String, required: true },
+    title: { type: String, required: true },
+    emptyText: { type: String, required: true },
+    users: { type: Array, required: true },
+    disabled: { type: Boolean, default: false },
+  },
+  setup(props) {
+    const search = ref('')
+    const fieldKey = computed(() => `${props.stage}_${props.type}_users`)
+    const selectedUsers = computed(() => {
+      const ids = new Set((props.row[fieldKey.value] || []).map((id) => Number(id)))
+      return props.users.filter((user) => ids.has(Number(user.id)))
+    })
+    const candidates = computed(() => {
+      const keyword = search.value.trim().toLowerCase()
+      if (!keyword) return []
+      const selectedIds = new Set((props.row[fieldKey.value] || []).map((id) => Number(id)))
+      return props.users
+        .filter((user) => {
+          if (selectedIds.has(Number(user.id))) return false
+          return userLabel(user).toLowerCase().includes(keyword)
+        })
+        .slice(0, 8)
+    })
+    const addUser = (user) => {
+      if (props.disabled) return
+      const userId = Number(user.id)
+      props.row[fieldKey.value] = [...(props.row[fieldKey.value] || []), userId]
+      search.value = ''
+    }
+    const removeUser = (userId) => {
+      if (props.disabled) return
+      props.row[fieldKey.value] = (props.row[fieldKey.value] || []).filter((id) => Number(id) !== Number(userId))
+    }
+    return () => h('div', { class: 'user-picker' }, [
+      h('div', { class: 'picker-title' }, props.title),
+      h('input', {
+        value: search.value,
+        class: 'picker-search-input',
+        disabled: props.disabled,
+        placeholder: '社員コード/氏名/ユーザー名で検索',
+        onInput: (event) => { search.value = event.target.value },
+        onKeyup: (event) => {
+          if (event.key === 'Enter' && candidates.value[0]) {
+            event.preventDefault()
+            addUser(candidates.value[0])
+          }
+        },
+      }),
+      candidates.value.length
+        ? h('div', { class: 'candidate-list' }, candidates.value.map((user) =>
+            h('button', {
+              key: user.id,
+              type: 'button',
+              class: 'candidate-item',
+              onClick: () => addUser(user),
+            }, userLabel(user))
+          ))
+        : null,
+      selectedUsers.value.length
+        ? h('div', { class: 'selected-list' }, selectedUsers.value.map((user) =>
+            h('span', { key: user.id, class: 'chip' }, [
+              h('span', userLabel(user)),
+              h('button', {
+                type: 'button',
+                class: 'chip-remove',
+                disabled: props.disabled,
+                onClick: () => removeUser(user.id),
+              }, '×'),
+            ])
+          ))
+        : h('div', { class: 'picker-empty' }, props.emptyText),
+    ])
+  },
+})
+
+const routes = ref([])
+const users = ref([])
+const loading = ref(false)
+const saving = ref(false)
+const errorMessage = ref('')
+const successMessage = ref('')
+const deletedRouteIds = ref([])
+
+const canAccessByResource = (resource, level = 'view') => {
+  const user = authState.user
+  if (!user || !resource) return false
+  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
+  if (permissions.some((item) => item.resource === resource)) {
+    return hasPermission(user, resource, level)
+  }
+  return hasPermission(user, 'settings', level)
+}
+
+const canViewPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.approval_routes', 'view')
+})
+
+const canEditPage = computed(() => {
+  const user = authState.user
+  if (!user) return false
+  if (user.is_staff || user.is_superuser) return true
+  return canAccessByResource('settings.approval_routes', 'edit')
+})
+
+const normalizeList = (payload) => Array.isArray(payload) ? payload : payload?.results || []
+
+const fetchUsers = async () => {
+  const response = await api.accounts.getUsers({ page_size: 1000, is_active: true })
+  users.value = normalizeList(response.data)
+}
+
+const fetchRoutes = async () => {
+  const response = await api.accounts.getApprovalRoutes({ page_size: 1000 })
+  routes.value = normalizeList(response.data).map((route) => normalizeRoute(route))
+  deletedRouteIds.value = []
+}
+
+const fetchAll = async () => {
+  if (!canViewPage.value) return
+  loading.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    await Promise.all([fetchUsers(), fetchRoutes()])
+  } catch (error) {
+    errorMessage.value = error?.response?.data?.detail || '承認設定の取得に失敗しました。'
+  } finally {
+    loading.value = false
+  }
+}
+
+const addRoute = () => {
+  if (!canEditPage.value) return
+  routes.value.push(emptyRoute())
+}
+
+const removeRoute = (index) => {
+  if (!canEditPage.value) return
+  const route = routes.value[index]
+  if (route?.id) {
+    deletedRouteIds.value = [...new Set([...deletedRouteIds.value, Number(route.id)])]
+  }
+  routes.value.splice(index, 1)
+}
+
+const normalizeItemKey = (value) => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return normalized || ''
+}
+
+const assignItemKeys = () => {
+  const used = new Set()
+  routes.value.forEach((route, index) => {
+    let base = normalizeItemKey(route.item_key)
+    if (!base) {
+      base = `approval_route_${String(index + 1).padStart(3, '0')}`
+    }
+    let candidate = base
+    let suffix = 2
+    while (used.has(candidate)) {
+      candidate = `${base}_${suffix}`
+      suffix += 1
+    }
+    route.item_key = candidate
+    used.add(candidate)
+  })
+}
+
+const buildPayload = () => routes.value.map((route) => ({
+  id: route.id || undefined,
+  item_key: route.item_key,
+  item_name: route.item_name,
+  creator_role: route.creator_role,
+  creator_task_enabled: Boolean(route.creator_task_enabled),
+  creator_app_notification_enabled: Boolean(route.creator_app_notification_enabled),
+  creator_email_notification_enabled: Boolean(route.creator_email_notification_enabled),
+  creator_allowed_users: route.creator_allowed_users || [],
+  creator_proxy_users: route.creator_proxy_users || [],
+  reviewer1_role: route.reviewer1_role,
+  reviewer1_task_enabled: Boolean(route.reviewer1_task_enabled),
+  reviewer1_app_notification_enabled: Boolean(route.reviewer1_app_notification_enabled),
+  reviewer1_email_notification_enabled: Boolean(route.reviewer1_email_notification_enabled),
+  reviewer1_allowed_users: route.reviewer1_allowed_users || [],
+  reviewer1_proxy_users: route.reviewer1_proxy_users || [],
+  reviewer2_role: route.reviewer2_role,
+  reviewer2_task_enabled: Boolean(route.reviewer2_task_enabled),
+  reviewer2_app_notification_enabled: Boolean(route.reviewer2_app_notification_enabled),
+  reviewer2_email_notification_enabled: Boolean(route.reviewer2_email_notification_enabled),
+  reviewer2_allowed_users: route.reviewer2_allowed_users || [],
+  reviewer2_proxy_users: route.reviewer2_proxy_users || [],
+  approver_role: route.approver_role,
+  approver_task_enabled: Boolean(route.approver_task_enabled),
+  approver_app_notification_enabled: Boolean(route.approver_app_notification_enabled),
+  approver_email_notification_enabled: Boolean(route.approver_email_notification_enabled),
+  approver_allowed_users: route.approver_allowed_users || [],
+  approver_proxy_users: route.approver_proxy_users || [],
+  approved_result_app_notification_enabled: Boolean(route.approved_result_app_notification_enabled),
+  approved_result_email_notification_enabled: Boolean(route.approved_result_email_notification_enabled),
+  rejected_result_app_notification_enabled: Boolean(route.rejected_result_app_notification_enabled),
+  rejected_result_email_notification_enabled: Boolean(route.rejected_result_email_notification_enabled),
+  is_active: Boolean(route.is_active),
+  note: route.note || '',
+}))
+
+const validateRoutes = () => {
+  const seen = new Set()
+  for (const route of routes.value) {
+    if (!route.item_name) {
+      return '承認項目名を入力してください。'
+    }
+    const itemKey = normalizeItemKey(route.item_key)
+    if (itemKey && seen.has(itemKey)) {
+      return `管理コードが重複しています: ${itemKey}`
+    }
+    if (itemKey) seen.add(itemKey)
+  }
+  return ''
+}
+
+const save = async () => {
+  if (!canEditPage.value) return
+  errorMessage.value = ''
+  successMessage.value = ''
+  const validationError = validateRoutes()
+  if (validationError) {
+    errorMessage.value = validationError
+    return
+  }
+  assignItemKeys()
+  saving.value = true
+  try {
+    const response = await api.accounts.saveApprovalRoutes(buildPayload(), deletedRouteIds.value)
+    routes.value = normalizeList(response.data).map((route) => normalizeRoute(route))
+    deletedRouteIds.value = []
+    successMessage.value = '承認設定を保存しました。'
+  } catch (error) {
+    errorMessage.value = error?.response?.data?.detail || '保存に失敗しました。'
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(fetchAll)
+</script>
+
+<style scoped>
+.route-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.route-list {
+  display: grid;
+  gap: 12px;
+}
+
+.route-section {
+  border: 1px solid #d6dce8;
+  border-radius: 6px;
+  background: #fff;
+  padding: 12px;
+}
+
+.route-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.route-main-fields {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  flex: 1;
+}
+
+.route-main-fields label,
+.field-label,
+.note-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #26364f;
+}
+
+.route-main-fields input,
+.field-label select,
+.note-field input {
+  border: 1px solid #cfd6e1;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.active-check {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 5px;
+  white-space: nowrap;
+}
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.stage-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 8px;
+}
+
+.stage-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2a44;
+}
+
+.stage-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 6px;
+}
+
+.option-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #26364f;
+  white-space: nowrap;
+}
+
+.result-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  margin-top: 10px;
+  padding: 8px 10px;
+}
+
+.result-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f2a44;
+  margin-right: 4px;
+}
+
+:deep(.user-picker) {
+  display: grid;
+  gap: 5px;
+}
+
+:deep(.picker-title) {
+  font-size: 12px;
+  font-weight: 700;
+  color: #26364f;
+}
+
+:deep(.picker-search-input) {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+  border: 1px solid #cfd6e1;
+  border-radius: 4px;
+}
+
+:deep(.candidate-list) {
+  display: grid;
+  gap: 2px;
+  border: 1px solid #e5e9ef;
+  border-radius: 4px;
+  background: #fff;
+  max-height: 150px;
+  overflow: auto;
+}
+
+:deep(.candidate-item) {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+:deep(.candidate-item:hover) {
+  background: #eef3ff;
+}
+
+:deep(.selected-list) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+:deep(.chip) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #cfd6e1;
+  border-radius: 12px;
+  background: #fff;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+:deep(.chip-remove) {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+:deep(.picker-empty) {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.note-field {
+  margin-top: 10px;
+}
+
+.btn-danger {
+  background: #ef4444;
+  border: 1px solid #ef4444;
+  color: #fff;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.alert {
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.alert-danger {
+  background: #ffe5e5;
+  color: #b42318;
+  border: 1px solid #f5b7b1;
+}
+
+.alert-success {
+  background: #e7f6e9;
+  color: #1a7f37;
+  border: 1px solid #b7dfb9;
+}
+
+@media (max-width: 1400px) {
+  .stage-grid {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .route-head {
+    flex-direction: column;
+  }
+
+  .route-main-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

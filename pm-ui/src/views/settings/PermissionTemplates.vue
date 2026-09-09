@@ -555,6 +555,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'settings.purchase_plan_lock', label: '設定: 仕入計画ロック設定' },
   { value: 'settings.production_plan_lock', label: '設定: 生産計画ロック設定' },
   { value: 'settings.scheduled_tasks', label: '設定: 定時タスク設定' },
+  { value: 'settings.approval_routes', label: '設定: 承認設定' },
   { value: 'settings.purchase_order_approval', label: '設定: 発注承認者設定' },
   { value: 'settings.stocktake_init', label: '設定: 棚卸初期化' },
   { value: 'settings.orphan_backlog_maintenance', label: '設定: 孤立ライン実績メンテナンス' },

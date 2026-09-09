@@ -284,6 +284,7 @@ class UserPermission(models.Model):
         ('settings.purchase_plan_lock', '設定: 仕入計画ロック設定'),
         ('settings.production_plan_lock', '設定: 生産計画ロック設定'),
         ('settings.scheduled_tasks', '設定: 定時タスク設定'),
+        ('settings.approval_routes', '設定: 承認設定'),
         ('settings.purchase_order_approval', '設定: 発注承認者設定'),
         ('settings.stocktake_init', '設定: 棚卸初期化'),
         ('settings.orphan_backlog_maintenance', '設定: 孤立ライン実績メンテナンス'),
@@ -372,3 +373,93 @@ class UserFavorite(models.Model):
         verbose_name_plural = 'ユーザーお気に入り'
         unique_together = [['user', 'screen_key', 'name']]
         ordering = ['screen_key', 'name', 'id']
+
+
+class ApprovalRouteConfig(models.Model):
+    """承認項目ごとの役割ベース承認ルート設定"""
+
+    ROLE_CHOICES = UserProfile.ROLE_CHOICES
+
+    item_key = models.CharField(max_length=80, unique=True, verbose_name='承認項目キー')
+    item_name = models.CharField(max_length=100, verbose_name='承認項目名')
+    creator_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='leader', verbose_name='作成者')
+    creator_task_enabled = models.BooleanField(default=True, verbose_name='作成者タスク作成')
+    creator_app_notification_enabled = models.BooleanField(default=True, verbose_name='作成者アプリ通知')
+    creator_email_notification_enabled = models.BooleanField(default=False, verbose_name='作成者メール通知')
+    creator_allowed_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_creator_allowed',
+        verbose_name='作成者限定ユーザー',
+    )
+    creator_proxy_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_creator_proxy',
+        verbose_name='作成者代理ユーザー',
+    )
+    reviewer1_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='supervisor', verbose_name='確認者1')
+    reviewer1_task_enabled = models.BooleanField(default=True, verbose_name='確認者1タスク作成')
+    reviewer1_app_notification_enabled = models.BooleanField(default=True, verbose_name='確認者1アプリ通知')
+    reviewer1_email_notification_enabled = models.BooleanField(default=False, verbose_name='確認者1メール通知')
+    reviewer1_allowed_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_reviewer1_allowed',
+        verbose_name='確認者1限定ユーザー',
+    )
+    reviewer1_proxy_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_reviewer1_proxy',
+        verbose_name='確認者1代理ユーザー',
+    )
+    reviewer2_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='chief', verbose_name='確認者2')
+    reviewer2_task_enabled = models.BooleanField(default=True, verbose_name='確認者2タスク作成')
+    reviewer2_app_notification_enabled = models.BooleanField(default=True, verbose_name='確認者2アプリ通知')
+    reviewer2_email_notification_enabled = models.BooleanField(default=False, verbose_name='確認者2メール通知')
+    reviewer2_allowed_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_reviewer2_allowed',
+        verbose_name='確認者2限定ユーザー',
+    )
+    reviewer2_proxy_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_reviewer2_proxy',
+        verbose_name='確認者2代理ユーザー',
+    )
+    approver_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='manager', verbose_name='承認者')
+    approver_task_enabled = models.BooleanField(default=True, verbose_name='承認者タスク作成')
+    approver_app_notification_enabled = models.BooleanField(default=True, verbose_name='承認者アプリ通知')
+    approver_email_notification_enabled = models.BooleanField(default=False, verbose_name='承認者メール通知')
+    approver_allowed_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_approver_allowed',
+        verbose_name='承認者限定ユーザー',
+    )
+    approver_proxy_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_approver_proxy',
+        verbose_name='承認者代理ユーザー',
+    )
+    approved_result_app_notification_enabled = models.BooleanField(default=True, verbose_name='承認結果アプリ通知')
+    approved_result_email_notification_enabled = models.BooleanField(default=False, verbose_name='承認結果メール通知')
+    rejected_result_app_notification_enabled = models.BooleanField(default=True, verbose_name='却下結果アプリ通知')
+    rejected_result_email_notification_enabled = models.BooleanField(default=False, verbose_name='却下結果メール通知')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    note = models.CharField(max_length=200, blank=True, default='', verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'accounts_approval_route_config'
+        verbose_name = '承認ルート設定'
+        verbose_name_plural = '承認ルート設定'
+        ordering = ['item_key', 'id']
+
+    def __str__(self):
+        return f'{self.item_key}: {self.item_name}'

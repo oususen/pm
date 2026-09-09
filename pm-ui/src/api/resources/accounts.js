@@ -83,4 +83,10 @@ export const createAccountsAPI = (client) => ({
   deleteFavorite(id) {
     return client.delete(`/accounts/favorites/${id}/`)
   },
+  getApprovalRoutes(params = {}) {
+    return client.get('/accounts/approval-routes/', { params })
+  },
+  saveApprovalRoutes(routes, deleteIds = []) {
+    return client.put('/accounts/approval-routes/bulk-save/', { routes, delete_ids: deleteIds })
+  },
 })
