@@ -9,9 +9,9 @@
         <button class="btn primary" @click="save" :disabled="saving">
           {{ saving ? "保存中..." : "変更を保存" }}</button
         ><button class="btn" @click="openDownload('SATO')">
-          佐藤商事注文書</button
+          佐藤商事注文書PDF</button
         ><button class="btn" @click="openDownload('MEISEI')">
-          名成鋼機注文書</button
+          名成鋼機注文書PDF</button
         ><button class="btn" @click="showManualAdd = !showManualAdd">
           手動追加
         </button>
@@ -558,7 +558,7 @@ const download = async () => {
     return;
   }
   try {
-    const response = await api.laserWeeklyPlans.exportMaterialOrderExcel(
+    const response = await api.laserWeeklyPlans.exportMaterialOrderPdf(
       props.startDate,
       downloadSupplier.value,
       downloadStartDate.value,
@@ -567,7 +567,7 @@ const download = async () => {
     const url = URL.createObjectURL(response.data);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `材料注文書_${downloadSupplier.value}_${downloadStartDate.value}_${downloadEndDate.value}.xlsx`;
+    a.download = `材料注文書_${downloadSupplier.value}_${downloadStartDate.value}_${downloadEndDate.value}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
     downloadDialog.value = false;

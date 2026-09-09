@@ -32,6 +32,9 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   exportMaterialOrderExcel(planStartDate, supplier, startDate, endDate) {
     return client.get('/laser-weekly-plans/material-order-excel/', { params: { plan_start_date: planStartDate, start_date: startDate, end_date: endDate, supplier }, responseType: 'blob' })
   },
+  exportMaterialOrderPdf(planStartDate, supplier, startDate, endDate) {
+    return client.get('/laser-weekly-plans/material-order-pdf/', { params: { plan_start_date: planStartDate, start_date: startDate, end_date: endDate, supplier }, responseType: 'blob' })
+  },
   getTargets(params = {}) {
     return client.get('/laser-weekly-plan-targets/', { params })
   },

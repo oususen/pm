@@ -2,13 +2,20 @@ from collections import defaultdict
 from io import BytesIO
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
+from urllib.parse import quote
 
 from django.db.models import Q
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from masters.models import Product, Supplier
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfgen import canvas
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -299,6 +306,185 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         output.seek(0)
         filename = f'材料注文書_{supplier_name}_{plan_start_date.isoformat()}.xlsx'
         return FileResponse(output, as_attachment=True, filename=filename)
+
+    @action(detail=False, methods=['get'], url_path='material-order-pdf')
+    def material_order_pdf(self, request):
+        try:
+            plan_start_date = datetime.strptime(request.query_params['plan_start_date'], '%Y-%m-%d').date()
+            export_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+            export_end_date = datetime.strptime(request.query_params['end_date'], '%Y-%m-%d').date()
+            supplier = request.query_params['supplier']
+            supplier_code = MATERIAL_ORDER_SUPPLIER_CODES[supplier]
+            if export_end_date < export_start_date:
+                raise ValueError
+        except (KeyError, ValueError):
+            return Response({'detail': '出力条件が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order_supplier = Supplier.objects.get(supplier_code=supplier_code)
+        except Supplier.DoesNotExist:
+            return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
+            supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
+        ).filter(
+            Q(plan_start_date=plan_start_date, is_manual=False) | Q(is_manual=True),
+        ).filter(
+            Q(order_lots__gt=0) | Q(order_sheets__gt=0),
+        ).select_related('material').order_by('delivery_date', 'material__product_code'))
+        if not orders:
+            return Response({'detail': '出力対象の発注がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        delivery_dates = []
+        current_date = export_start_date
+        while current_date <= export_end_date:
+            delivery_dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        by_material = defaultdict(list)
+        for order in orders:
+            by_material[order.material_id].append(order)
+
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+            font_name = 'HeiseiKakuGo-W5'
+        except Exception:
+            font_name = 'Helvetica'
+
+        page_size = landscape(A4)
+        page_width, page_height = page_size
+        margin = 10 * mm
+        output = BytesIO()
+        pdf = canvas.Canvas(output, pagesize=page_size)
+
+        def draw_text(x, y, text, size=9, align='left'):
+            pdf.setFont(font_name, size)
+            value = str(text or '')
+            if align == 'center':
+                pdf.drawCentredString(x, y, value)
+            elif align == 'right':
+                pdf.drawRightString(x, y, value)
+            else:
+                pdf.drawString(x, y, value)
+
+        def draw_cell(x, y, w, h, text='', size=8, align='center', fill=None):
+            if fill:
+                pdf.setFillColor(fill)
+                pdf.rect(x, y - h, w, h, fill=1, stroke=0)
+                pdf.setFillColor(colors.black)
+            pdf.rect(x, y - h, w, h, fill=0, stroke=1)
+            if text not in (None, ''):
+                draw_text(
+                    x + (w / 2 if align == 'center' else w - 2 if align == 'right' else 2),
+                    y - h + 3,
+                    text,
+                    size=size,
+                    align=align,
+                )
+
+        def order_label(lots, sheets):
+            if lots and sheets:
+                return f'{lots}+{sheets}枚'
+            if lots:
+                return str(lots)
+            if sheets:
+                return f'{sheets}枚'
+            return ''
+
+        rows = []
+        daily_total_lots = defaultdict(int)
+        daily_total_weight = defaultdict(Decimal)
+        sorted_materials = sorted(by_material.values(), key=lambda items: items[0].material.product_code)
+        for index, material_orders in enumerate(sorted_materials, 1):
+            material = material_orders[0].material
+            parts = material.product_code.split(maxsplit=1)
+            order_by_date = {}
+            for order in material_orders:
+                prev = order_by_date.get(order.delivery_date, (0, 0))
+                order_by_date[order.delivery_date] = (prev[0] + order.order_lots, prev[1] + order.order_sheets)
+            lot_multiple = material_orders[0].lot_multiple
+            total_lots = sum(order.order_lots for order in material_orders)
+            total_sheets = sum(order.order_sheets for order in material_orders)
+            sheet_weight_kg = Decimal(0)
+            if material.specific_gravity and material.size_length and material.size_width and material.size_thickness:
+                sheet_weight_kg = material.specific_gravity * material.size_length * material.size_width * material.size_thickness / Decimal('1000000')
+            daily_values = []
+            for day in delivery_dates:
+                lots, sheets = order_by_date.get(day, (0, 0))
+                daily_values.append(order_label(lots, sheets))
+                total_day_sheets = lots * lot_multiple + sheets
+                if total_day_sheets:
+                    daily_total_lots[day] += lots
+                    daily_total_weight[day] += Decimal(total_day_sheets) * sheet_weight_kg / Decimal('1000')
+            rows.append([
+                index,
+                'SO1',
+                parts[0],
+                parts[1] if len(parts) > 1 else '',
+                f'{lot_multiple}枚',
+                order_label(total_lots, total_sheets),
+                *daily_values,
+            ])
+
+        fixed_widths = [9 * mm, 17 * mm, 25 * mm, 48 * mm, 19 * mm, 21 * mm]
+        daily_width = max(14 * mm, min(23 * mm, (page_width - margin * 2 - sum(fixed_widths)) / max(len(delivery_dates), 1)))
+        widths = fixed_widths + [daily_width] * len(delivery_dates)
+        row_height = 8 * mm
+        header_height = 9 * mm
+        rows_per_page = max(1, int((page_height - margin * 2 - 56 * mm) // row_height))
+
+        def draw_header():
+            draw_text(page_width / 2, page_height - margin - 4 * mm, '材 料 注 文 書', size=18, align='center')
+            draw_text(page_width - margin, page_height - margin - 4 * mm, f'{datetime.now():%Y/%m/%d}', size=10, align='right')
+            draw_text(margin, page_height - margin - 15 * mm, f'{order_supplier.supplier_name} 御中', size=13)
+            contact = []
+            if order_supplier.contact_person:
+                contact.append(f'{order_supplier.contact_person} 様')
+            if order_supplier.phone_number:
+                contact.append(f'TEL: {order_supplier.phone_number}')
+            draw_text(margin, page_height - margin - 23 * mm, '  '.join(contact), size=9)
+            stamp_x = page_width - margin - 75 * mm
+            for idx, label in enumerate(['承認', '確認', '作成']):
+                x = stamp_x + idx * 25 * mm
+                draw_cell(x, page_height - margin - 14 * mm, 25 * mm, 8 * mm, label, size=8)
+                draw_cell(x, page_height - margin - 22 * mm, 25 * mm, 14 * mm, '')
+            draw_text(page_width - margin, page_height - margin - 43 * mm, 'ダイソウ工業株式会社', size=10, align='right')
+            x = margin
+            y = page_height - margin - 50 * mm
+            headers = ['№', '発注コード', '材質', '材寸', '発注単位', '発注量 合計'] + [f'{d.month}/{d.day}' for d in delivery_dates]
+            for width, header in zip(widths, headers):
+                draw_cell(x, y, width, header_height, header, size=8, fill=colors.HexColor('#f1f5f9'))
+                x += width
+            return y - header_height
+
+        for page_index, start in enumerate(range(0, len(rows), rows_per_page)):
+            if page_index:
+                pdf.showPage()
+            y = draw_header()
+            for row in rows[start:start + rows_per_page]:
+                x = margin
+                for idx, (width, value) in enumerate(zip(widths, row)):
+                    draw_cell(x, y, width, row_height, value, size=7, align='left' if idx in (2, 3) else 'center')
+                    x += width
+                y -= row_height
+            if start + rows_per_page >= len(rows):
+                for label, values in [
+                    ('発注量', [daily_total_lots.get(day, '') for day in delivery_dates]),
+                    ('目安重量t', [daily_total_weight.get(day, Decimal(0)).quantize(Decimal('0.01')) if daily_total_weight.get(day) else '' for day in delivery_dates]),
+                ]:
+                    x = margin
+                    draw_cell(x, y, sum(fixed_widths), row_height, label, size=8, align='right', fill=colors.HexColor('#f8fafc'))
+                    x += sum(fixed_widths)
+                    for width, value in zip(widths[6:], values):
+                        draw_cell(x, y, width, row_height, value, size=7)
+                        x += width
+                    y -= row_height
+
+        pdf.save()
+        output.seek(0)
+        filename = f'材料注文書_{order_supplier.supplier_name}_{plan_start_date:%Y%m%d}.pdf'
+        response = HttpResponse(output.read(), content_type='application/pdf')
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
 
     @action(detail=False, methods=['get'], url_path='downstream-products')
     def downstream_products(self, request):
