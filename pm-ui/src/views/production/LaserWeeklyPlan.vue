@@ -788,9 +788,9 @@ const nextBusinessDay = () => {
   return iso(d);
 };
 const showDetail = ref(false),
-  showSummary = ref(true),
-  showMaterialSheets = ref(true),
-  showMaterialLots = ref(true),
+  showSummary = ref(false),
+  showMaterialSheets = ref(false),
+  showMaterialLots = ref(false),
   dirty = ref(false),
   saving = ref(false);
 const startDate = ref(monday()),
