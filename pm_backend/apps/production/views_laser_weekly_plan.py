@@ -345,14 +345,14 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             by_material[order.material_id].append(order)
 
         try:
-            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
-            font_name = 'HeiseiKakuGo-W5'
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiMin-W3'))
+            font_name = 'HeiseiMin-W3'
         except Exception:
             font_name = 'Helvetica'
 
         page_size = landscape(A4)
         page_width, page_height = page_size
-        margin = 10 * mm
+        margin = 15 * mm
         output = BytesIO()
         pdf = canvas.Canvas(output, pagesize=page_size)
 
@@ -371,15 +371,20 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 pdf.setFillColor(fill)
                 pdf.rect(x, y - h, w, h, fill=1, stroke=0)
                 pdf.setFillColor(colors.black)
+            pdf.setLineWidth(0.45)
             pdf.rect(x, y - h, w, h, fill=0, stroke=1)
             if text not in (None, ''):
-                draw_text(
-                    x + (w / 2 if align == 'center' else w - 2 if align == 'right' else 2),
-                    y - h + 3,
-                    text,
-                    size=size,
-                    align=align,
-                )
+                lines = str(text).split('\n')
+                line_height = size * 1.15
+                start_y = y - (h / 2) + ((len(lines) - 1) * line_height / 2) - (size * 0.35)
+                for line_index, line in enumerate(lines):
+                    draw_text(
+                        x + (w / 2 if align == 'center' else w - 2 if align == 'right' else 2),
+                        start_y - line_index * line_height,
+                        line,
+                        size=size,
+                        align=align,
+                    )
 
         def order_label(lots, sheets):
             if lots and sheets:
@@ -425,36 +430,45 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 *daily_values,
             ])
 
-        fixed_widths = [9 * mm, 17 * mm, 25 * mm, 48 * mm, 19 * mm, 21 * mm]
-        daily_width = max(14 * mm, min(23 * mm, (page_width - margin * 2 - sum(fixed_widths)) / max(len(delivery_dates), 1)))
+        fixed_widths = [10 * mm, 28 * mm, 32 * mm, 55 * mm, 28 * mm, 23 * mm]
+        daily_width = (page_width - margin * 2 - sum(fixed_widths)) / max(len(delivery_dates), 1)
         widths = fixed_widths + [daily_width] * len(delivery_dates)
         row_height = 8 * mm
-        header_height = 9 * mm
-        rows_per_page = max(1, int((page_height - margin * 2 - 56 * mm) // row_height))
+        header_top_height = 6 * mm
+        header_date_height = 8 * mm
+        table_top = page_height - margin - 50 * mm
+        rows_per_page = 13
 
         def draw_header():
-            draw_text(page_width / 2, page_height - margin - 4 * mm, '材 料 注 文 書', size=18, align='center')
-            draw_text(page_width - margin, page_height - margin - 4 * mm, f'{datetime.now():%Y/%m/%d}', size=10, align='right')
-            draw_text(margin, page_height - margin - 15 * mm, f'{order_supplier.supplier_name} 御中', size=13)
+            draw_text(page_width / 2, page_height - margin - 5 * mm, '材 料 注 文 書', size=27, align='center')
+            draw_text(page_width - margin, page_height - margin - 13 * mm, f'{datetime.now():%Y/%m/%d}', size=13, align='right')
+            draw_text(margin, page_height - margin - 22 * mm, f'{order_supplier.supplier_name} 御中', size=19)
             contact = []
             if order_supplier.contact_person:
                 contact.append(f'{order_supplier.contact_person} 様')
             if order_supplier.phone_number:
                 contact.append(f'TEL: {order_supplier.phone_number}')
-            draw_text(margin, page_height - margin - 23 * mm, '  '.join(contact), size=9)
-            stamp_x = page_width - margin - 75 * mm
-            for idx, label in enumerate(['承認', '確認', '作成']):
-                x = stamp_x + idx * 25 * mm
-                draw_cell(x, page_height - margin - 14 * mm, 25 * mm, 8 * mm, label, size=8)
-                draw_cell(x, page_height - margin - 22 * mm, 25 * mm, 14 * mm, '')
-            draw_text(page_width - margin, page_height - margin - 43 * mm, 'ダイソウ工業株式会社', size=10, align='right')
+            draw_text(margin + 26 * mm, page_height - margin - 31 * mm, '  '.join(contact), size=15)
+            stamp_cell_width = 23 * mm
+            stamp_x = page_width - margin - stamp_cell_width * 4
+            stamp_top = page_height - margin - 18 * mm
+            stamp_body_top = page_height - margin - 26 * mm
+            for idx, label in enumerate(['承認', '確認②', '確認①', '作成']):
+                x = stamp_x + idx * stamp_cell_width
+                draw_cell(x, stamp_top, stamp_cell_width, 8 * mm, label, size=11)
+                draw_cell(x, stamp_body_top, stamp_cell_width, 11 * mm, '')
+            draw_text(stamp_x + stamp_cell_width * 4, page_height - margin - 43 * mm, 'ダイソウ工業株式会社', size=13, align='right')
             x = margin
-            y = page_height - margin - 50 * mm
-            headers = ['№', '発注コード', '材質', '材寸', '発注単位', '発注量 合計'] + [f'{d.month}/{d.day}' for d in delivery_dates]
-            for width, header in zip(widths, headers):
-                draw_cell(x, y, width, header_height, header, size=8, fill=colors.HexColor('#f1f5f9'))
+            y = table_top
+            headers = ['№', '発注コード', '材質', '材寸', '発注単位', '発注量\n（合計）']
+            for idx, (width, header) in enumerate(zip(fixed_widths, headers)):
+                draw_cell(x, y, width, header_top_height + header_date_height, header, size=13 if idx != 5 else 12, fill=None)
                 x += width
-            return y - header_height
+            draw_cell(x, y, daily_width * len(delivery_dates), header_top_height, '納期', size=16, fill=None)
+            for delivery_date in delivery_dates:
+                draw_cell(x, y - header_top_height, daily_width, header_date_height, f'{delivery_date.month}/{delivery_date.day}', size=13, fill=None)
+                x += daily_width
+            return y - header_top_height - header_date_height
 
         for page_index, start in enumerate(range(0, len(rows), rows_per_page)):
             if page_index:
@@ -463,7 +477,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             for row in rows[start:start + rows_per_page]:
                 x = margin
                 for idx, (width, value) in enumerate(zip(widths, row)):
-                    draw_cell(x, y, width, row_height, value, size=7, align='left' if idx in (2, 3) else 'center')
+                    draw_cell(x, y, width, row_height, value, size=12 if idx != 3 else 11, align='left' if idx in (2, 3) else 'center')
                     x += width
                 y -= row_height
             if start + rows_per_page >= len(rows):
@@ -471,11 +485,11 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     ('発注量', [daily_total_lots.get(day, '') for day in delivery_dates]),
                     ('目安重量t', [daily_total_weight.get(day, Decimal(0)).quantize(Decimal('0.01')) if daily_total_weight.get(day) else '' for day in delivery_dates]),
                 ]:
-                    x = margin
-                    draw_cell(x, y, sum(fixed_widths), row_height, label, size=8, align='right', fill=colors.HexColor('#f8fafc'))
-                    x += sum(fixed_widths)
+                    x = margin + sum(fixed_widths[:4])
+                    draw_cell(x, y, sum(fixed_widths[4:6]), row_height, label, size=13, align='center', fill=None)
+                    x += sum(fixed_widths[4:6])
                     for width, value in zip(widths[6:], values):
-                        draw_cell(x, y, width, row_height, value, size=7)
+                        draw_cell(x, y, width, row_height, value, size=12)
                         x += width
                     y -= row_height
 
