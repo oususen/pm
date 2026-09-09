@@ -8,10 +8,14 @@
       <div class="actions">
         <button class="btn primary" @click="save" :disabled="saving">
           {{ saving ? "保存中..." : "変更を保存" }}</button
-        ><button class="btn" @click="openDownload('SATO')">
-          佐藤商事注文書PDF</button
-        ><button class="btn" @click="openDownload('MEISEI')">
-          名成鋼機注文書PDF</button
+        ><button class="btn" @click="openDownload('SATO', 'pdf')">
+          佐藤商事PDF</button
+        ><button class="btn" @click="openDownload('SATO', 'excel')">
+          佐藤商事Excel</button
+        ><button class="btn" @click="openDownload('MEISEI', 'pdf')">
+          名成鋼機PDF</button
+        ><button class="btn" @click="openDownload('MEISEI', 'excel')">
+          名成鋼機Excel</button
         ><button class="btn" @click="showManualAdd = !showManualAdd">
           手動追加
         </button>
@@ -38,7 +42,7 @@
       >
         <section class="download-dialog">
           <h3>
-            {{ downloadSupplier === "SATO" ? "佐藤商事" : "名成鋼機" }}注文書
+            {{ downloadSupplier === "SATO" ? "佐藤商事" : "名成鋼機" }}注文書{{ downloadFormat === "pdf" ? "PDF" : "Excel" }}
           </h3>
           <label>開始日<input v-model="downloadStartDate" type="date" /></label
           ><label>終了日<input v-model="downloadEndDate" type="date" /></label>
@@ -298,6 +302,7 @@ const showOrder = ref(true);
 const saving = ref(false);
 const downloadDialog = ref(false);
 const downloadSupplier = ref("");
+const downloadFormat = ref("pdf");
 const downloadStartDate = ref("");
 const downloadEndDate = ref("");
 const key = (material, day) => `${material.material_id}:${day}`;
@@ -538,12 +543,13 @@ const deleteManualRow = async (id) => {
 
 loadManualMaterialOptions();
 
-const openDownload = (supplier) => {
+const openDownload = (supplier, format = "pdf") => {
   const start = new Date(`${props.startDate}T00:00:00`);
   start.setDate(start.getDate() + 7);
   const end = new Date(start);
   end.setDate(end.getDate() + 4);
   downloadSupplier.value = supplier;
+  downloadFormat.value = format;
   downloadStartDate.value = iso(start);
   downloadEndDate.value = iso(end);
   downloadDialog.value = true;
@@ -558,7 +564,11 @@ const download = async () => {
     return;
   }
   try {
-    const response = await api.laserWeeklyPlans.exportMaterialOrderPdf(
+    const exportMethod = downloadFormat.value === "excel"
+      ? api.laserWeeklyPlans.exportMaterialOrderExcel
+      : api.laserWeeklyPlans.exportMaterialOrderPdf;
+    const extension = downloadFormat.value === "excel" ? "xlsx" : "pdf";
+    const response = await exportMethod(
       props.startDate,
       downloadSupplier.value,
       downloadStartDate.value,
@@ -567,7 +577,7 @@ const download = async () => {
     const url = URL.createObjectURL(response.data);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `材料注文書_${downloadSupplier.value}_${downloadStartDate.value}_${downloadEndDate.value}.pdf`;
+    a.download = `材料注文書_${downloadSupplier.value}_${downloadStartDate.value}_${downloadEndDate.value}.${extension}`;
     a.click();
     URL.revokeObjectURL(url);
     downloadDialog.value = false;
