@@ -55,6 +55,23 @@ export const createLaserWeeklyPlansAPI = (client) => ({
       action: 'reopen',
     })
   },
+  adjustMaterialOrderApproval(startDate, lockStartDate, lockEndDate, supplier) {
+    return client.post('/laser-weekly-plans/material-order-approval/', {
+      start_date: startDate,
+      lock_start_date: lockStartDate,
+      lock_end_date: lockEndDate,
+      supplier,
+      action: 'adjust',
+    })
+  },
+  saveMaterialOrderAdjustment(startDate, lockStartDate, lockEndDate, supplier) {
+    return client.post('/laser-weekly-plans/material-order-adjustment-save/', {
+      start_date: startDate,
+      lock_start_date: lockStartDate,
+      lock_end_date: lockEndDate,
+      supplier,
+    })
+  },
   sendMaterialOrder(startDate, supplier, lockStartDate, lockEndDate) {
     return client.post('/laser-weekly-plans/material-order-send/', {
       start_date: startDate,

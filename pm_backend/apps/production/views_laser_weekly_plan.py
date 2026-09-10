@@ -165,14 +165,28 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             lookup['context__lock_start_date'] = lock_start_date.isoformat() if lock_start_date else ''
             lookup['context__lock_end_date'] = lock_end_date.isoformat() if lock_end_date else ''
         approval = ApprovalRequest.objects.filter(**lookup).order_by('-updated_at').first()
-        if request.data.get('action') == 'reopen':
+        action_name = request.data.get('action')
+        if action_name in ('reopen', 'adjust'):
             if not (lock_start_date and lock_end_date):
                 return Response({'detail': '注文書期間を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
             if not approval:
                 return Response({'detail': '修正対象の注文書が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
-            if approval.status != 'created':
+            if action_name == 'reopen' and approval.status != 'created':
                 return Response({'detail': '確認依頼前の注文書だけ修正できます。'}, status=status.HTTP_400_BAD_REQUEST)
-            approval.context = {**approval.context, 'order_created': False}
+            context = {**(approval.context or {})}
+            if action_name == 'adjust':
+                adjustments = {**(context.get('material_order_adjustments') or {})}
+                adjustments[supplier] = {
+                    'lock_start_date': lock_start_date.isoformat(),
+                    'lock_end_date': lock_end_date.isoformat(),
+                    'editing': True,
+                    'started_at': datetime.now().isoformat(timespec='seconds'),
+                    'started_by': request.user.id,
+                }
+                context['material_order_adjustments'] = adjustments
+            else:
+                context['order_created'] = False
+            approval.context = context
             approval.save(update_fields=['context', 'updated_at'])
             return Response(ApprovalRequestSerializer(approval).data)
 
@@ -310,7 +324,17 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         media_root = Path(settings.MEDIA_ROOT).resolve()
         deleted_files = []
         for approval in approvals:
-            for info in (approval.context or {}).get('material_order_pdf_files', {}).values():
+            context = approval.context or {}
+            file_infos = []
+            for file_group in (
+                context.get('material_order_pdf_files', {}),
+                context.get('material_order_adjustment_pdf_files', {}),
+            ):
+                file_infos.extend(file_group.values())
+            for adjustment in context.get('material_order_adjustments', {}).values():
+                if isinstance(adjustment, dict) and isinstance(adjustment.get('file'), dict):
+                    file_infos.append(adjustment['file'])
+            for info in file_infos:
                 if not isinstance(info, dict):
                     continue
                 relative_path = info.get('path')
@@ -432,6 +456,70 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             update_fields.extend(['status', 'current_stage'])
         approval.save(update_fields=update_fields)
         return Response(ApprovalRequestSerializer(approval).data)
+
+    @action(detail=False, methods=['post'], url_path='material-order-adjustment-save')
+    def save_material_order_adjustment(self, request):
+        """納期調整後の注文書PDFを元注文書とは別名で保存する。"""
+        try:
+            plan_start_date = datetime.strptime(request.data['start_date'], '%Y-%m-%d').date()
+            lock_start_date = datetime.strptime(request.data['lock_start_date'], '%Y-%m-%d').date()
+            lock_end_date = datetime.strptime(request.data['lock_end_date'], '%Y-%m-%d').date()
+            if lock_end_date < lock_start_date:
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return Response({'detail': '納期調整期間を正しく指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = request.data.get('supplier')
+        if supplier not in MATERIAL_ORDER_SUPPLIER_CODES:
+            return Response({'detail': '仕入先を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        approval = ApprovalRequest.objects.filter(
+            route_config__item_key='laser_material_order',
+            context__start_date=plan_start_date.isoformat(),
+            context__supplier=supplier,
+            context__lock_start_date=lock_start_date.isoformat(),
+            context__lock_end_date=lock_end_date.isoformat(),
+        ).order_by('-updated_at').first()
+        if not approval:
+            return Response({'detail': '納期調整対象の注文書が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        context = approval.context or {}
+        adjustment = (context.get('material_order_adjustments') or {}).get(supplier) or {}
+        if not adjustment.get('editing'):
+            return Response({'detail': '先に納期調整を開始してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            saved_file = self._save_material_order_pdf_file(
+                plan_start_date,
+                lock_start_date,
+                lock_end_date,
+                supplier,
+                filename_prefix='納期変更_laser_material_order',
+                delete_old=False,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        adjustments = {**(context.get('material_order_adjustments') or {})}
+        adjustments[supplier] = {
+            **adjustment,
+            'editing': False,
+            'saved_at': datetime.now().isoformat(timespec='seconds'),
+            'saved_by': request.user.id,
+            'file': saved_file,
+        }
+        adjustment_files = {**(context.get('material_order_adjustment_pdf_files') or {})}
+        adjustment_files[supplier] = saved_file
+        approval.context = {
+            **context,
+            'material_order_adjustments': adjustments,
+            'material_order_adjustment_pdf_files': adjustment_files,
+        }
+        approval.save(update_fields=['context', 'updated_at'])
+        return Response({
+            'approval': ApprovalRequestSerializer(approval).data,
+            'file': saved_file,
+        })
 
     @action(detail=False, methods=['get'], url_path='material-order-excel')
     def material_order_excel(self, request):
@@ -678,14 +766,22 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         response['Content-Disposition'] = f"inline; filename*=UTF-8''{quote(filename)}"
         return response
 
-    def _save_material_order_pdf_file(self, plan_start_date, export_start_date, export_end_date, supplier):
+    def _save_material_order_pdf_file(
+        self,
+        plan_start_date,
+        export_start_date,
+        export_end_date,
+        supplier,
+        filename_prefix='laser_material_order',
+        delete_old=True,
+    ):
         target_dir = Path(settings.MEDIA_ROOT) / 'approval_material_orders'
         target_dir.mkdir(parents=True, exist_ok=True)
         pdf_bytes, generated_filename = self._build_material_order_pdf(plan_start_date, export_start_date, export_end_date, supplier)
-        filename = f'laser_material_order_{export_start_date:%Y%m%d}_{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
-        old_filename = f'laser_material_order_{plan_start_date:%Y%m%d}_{export_start_date:%Y%m%d}_{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
+        filename = f'{filename_prefix}_{export_start_date:%Y%m%d}_{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
+        old_filename = f'{filename_prefix}_{plan_start_date:%Y%m%d}_{export_start_date:%Y%m%d}_{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
         old_path = target_dir / old_filename
-        if old_path.exists() and old_path.name != filename:
+        if delete_old and old_path.exists() and old_path.name != filename:
             old_path.unlink()
         target_path = target_dir / filename
         target_path.write_bytes(pdf_bytes)
@@ -715,7 +811,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             context__lock_end_date=export_end_date.isoformat(),
             context__supplier=supplier,
         ).prefetch_related('steps__user', 'route_config__creator_proxy_users', 'route_config__reviewer1_proxy_users', 'route_config__reviewer2_proxy_users', 'route_config__approver_proxy_users').order_by('-updated_at').first()
-        if not approval or approval.status not in ('created', 'reviewing', 'approved', 'rejected'):
+        if not approval or approval.status not in ('created', 'reviewing', 'approved', 'rejected', 'sent'):
             raise ValueError('作成済み、差戻し、承認中または承認済みの材料発注のみPDF出力できます。')
         proxy_user_ids_by_stage = {
             stage: set(getattr(approval.route_config, f'{stage}_proxy_users').values_list('id', flat=True))

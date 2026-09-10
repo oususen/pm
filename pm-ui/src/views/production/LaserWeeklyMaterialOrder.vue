@@ -30,6 +30,14 @@
             佐藤商事修正</button
           ><button v-if="canReopenApproval('MEISEI')" class="btn creator-btn" @click="reopenApproval('MEISEI')" :disabled="approvalBusy">
             名成鋼機修正</button
+          ><button class="btn creator-btn" @click="openAdjustmentDialog('SATO')" :disabled="approvalBusy">
+            佐藤商事納期調整</button
+          ><button class="btn creator-btn" @click="openAdjustmentDialog('MEISEI')" :disabled="approvalBusy">
+            名成鋼機納期調整</button
+          ><button v-if="canSaveAdjustment('SATO')" class="btn creator-btn" @click="saveAdjustment('SATO')" :disabled="saving">
+            佐藤商事納期調整保存</button
+          ><button v-if="canSaveAdjustment('MEISEI')" class="btn creator-btn" @click="saveAdjustment('MEISEI')" :disabled="saving">
+            名成鋼機納期調整保存</button
           ><button class="btn creator-btn" @click="showManualAdd = !showManualAdd" :disabled="approvalLocked">
             手動追加
           </button>
@@ -108,6 +116,24 @@
           <div class="dialog-actions">
             <button class="btn primary" @click="download">{{ downloadFormat === "pdf" ? "開く" : "出力" }}</button
             ><button class="btn" @click="downloadDialog = false">
+              キャンセル
+            </button>
+          </div>
+        </section>
+      </div>
+      <div
+        v-if="adjustmentDialog"
+        class="download-modal"
+        @click.self="adjustmentDialog = false"
+      >
+        <section class="download-dialog">
+          <h3>{{ supplierName(adjustmentSupplier) }}納期調整</h3>
+          <label>開始日<input v-model="adjustmentStartDate" type="date" :min="props.dates[0]" :max="props.dates[props.dates.length - 1]" /></label
+          ><label>終了日<input v-model="adjustmentEndDate" type="date" :min="adjustmentStartDate" :max="props.dates[props.dates.length - 1]" /></label>
+          <div class="dialog-actions">
+            <button class="btn primary" @click="startAdjustment" :disabled="approvalBusy">
+              調整開始</button
+            ><button class="btn" @click="adjustmentDialog = false" :disabled="approvalBusy">
               キャンセル
             </button>
           </div>
@@ -448,14 +474,27 @@ const supplierStatusLabel = (supplier) => {
   const row = supplierApproval(supplier);
   if (!row) return "未作成";
   const editing = row.status === 'created' && row.context?.order_created === false ? " / 修正中" : "";
+  const adjusting = row.context?.material_order_adjustments?.[supplier]?.editing ? " / 納期調整中" : "";
   const sent = row.context?.material_order_sent_files?.[supplier] ? " / 送信済" : "";
   const saved = row.context?.material_order_pdf_files?.[supplier] ? " / PDF保存済" : "";
-  return `${row.status_label || row.status}（${row.current_stage_label || row.current_stage}）${editing}${saved}${sent}`;
+  return `${row.status_label || row.status}（${row.current_stage_label || row.current_stage}）${editing}${adjusting}${saved}${sent}`;
+};
+const isAdjustmentEditingDate = (row, day) => {
+  const supplier = row?.context?.supplier;
+  const adjustment = supplier ? row?.context?.material_order_adjustments?.[supplier] : null;
+  return Boolean(
+    adjustment?.editing &&
+    adjustment.lock_start_date &&
+    adjustment.lock_end_date &&
+    day >= adjustment.lock_start_date &&
+    day <= adjustment.lock_end_date,
+  );
 };
 const isApprovalDateLocked = (row, day) => {
   if (!row) return false;
   if (!['created', 'reviewing', 'approved', 'sent'].includes(row.status)) return false;
   if (row.status === 'created' && row.context?.order_created === false) return false;
+  if (isAdjustmentEditingDate(row, day)) return false;
   const start = row.context?.lock_start_date || orderStartDate.value;
   const end = row.context?.lock_end_date || orderEndDate.value;
   return Boolean(start && end && day >= start && day <= end);
@@ -508,6 +547,10 @@ const canReopenApproval = (supplier) => {
   const row = supplierApproval(supplier);
   return row?.status === 'created' && row.context?.order_created !== false;
 };
+const canSaveAdjustment = (supplier) => {
+  const row = supplierApproval(supplier);
+  return Boolean(row?.context?.material_order_adjustments?.[supplier]?.editing);
+};
 const createOrderButtonLabel = (supplier) => {
   const row = supplierApproval(supplier);
   const prefix = supplierName(supplier);
@@ -545,6 +588,10 @@ const downloadSupplier = ref("");
 const downloadFormat = ref("pdf");
 const downloadStartDate = ref("");
 const downloadEndDate = ref("");
+const adjustmentDialog = ref(false);
+const adjustmentSupplier = ref("MEISEI");
+const adjustmentStartDate = ref("");
+const adjustmentEndDate = ref("");
 const key = (material, day) => `${material.material_id}:${day}`;
 const entry = (material, day) =>
   entries.value[key(material, day)] ||
@@ -728,7 +775,7 @@ const createApproval = async (supplier) => {
       emit("message", "注文書期間を正しく指定してください。");
       return;
     }
-    await saveMaterialOrderChanges();
+    await saveMaterialOrderChanges(targetSaveDates(orderStartDate.value, orderEndDate.value));
     const result = await api.laserWeeklyPlans.createMaterialOrderApproval(props.startDate, orderStartDate.value, orderEndDate.value, supplier);
     setSupplierApproval(result.data);
     emit("message", `${supplierName(supplier)}の変更を保存し、注文書PDFをサーバーに保存しました。`);
@@ -749,6 +796,68 @@ const reopenApproval = async (supplier) => {
     emit("message", e?.response?.data?.detail || "注文書修正に失敗しました。");
   } finally {
     approvalBusy.value = false;
+  }
+};
+const openAdjustmentDialog = (supplier) => {
+  const ok = confirm(
+    `${supplierName(supplier)}の納期調整を開始します。\n\n` +
+    '・元の注文書PDFは削除しません。\n' +
+    '・承認フローは流れません。\n' +
+    '・調整保存時に「納期変更」のPDFを別ファイルで作成します。\n\n' +
+    '続行しますか？',
+  );
+  if (!ok) return;
+  adjustmentSupplier.value = supplier;
+  adjustmentStartDate.value = defaultOrderStart();
+  adjustmentEndDate.value = defaultOrderEnd();
+  adjustmentDialog.value = true;
+};
+const startAdjustment = async () => {
+  const supplier = adjustmentSupplier.value;
+  if (!adjustmentStartDate.value || !adjustmentEndDate.value || adjustmentEndDate.value < adjustmentStartDate.value) {
+    emit("message", "納期調整期間を正しく指定してください。");
+    return;
+  }
+  approvalBusy.value = true;
+  try {
+    const result = await api.laserWeeklyPlans.adjustMaterialOrderApproval(
+      props.startDate,
+      adjustmentStartDate.value,
+      adjustmentEndDate.value,
+      supplier,
+    );
+    setSupplierApproval(result.data);
+    orderStartDate.value = adjustmentStartDate.value;
+    orderEndDate.value = adjustmentEndDate.value;
+    adjustmentDialog.value = false;
+    emit("message", `${supplierName(supplier)}の納期調整期間を編集できる状態にしました。調整後は納期調整保存を押してください。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "納期調整開始に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const saveAdjustment = async (supplier) => {
+  const row = supplierApproval(supplier);
+  const adjustment = row?.context?.material_order_adjustments?.[supplier] || {};
+  const start = adjustment.lock_start_date || row?.context?.lock_start_date || orderStartDate.value;
+  const end = adjustment.lock_end_date || row?.context?.lock_end_date || orderEndDate.value;
+  if (!start || !end || end < start) {
+    emit("message", "納期調整期間を正しく指定してください。");
+    return;
+  }
+  saving.value = true;
+  try {
+    const saveDates = targetSaveDates(start, end);
+    await saveMaterialOrderChanges(saveDates);
+    const result = await api.laserWeeklyPlans.saveMaterialOrderAdjustment(props.startDate, start, end, supplier);
+    setSupplierApproval(result.data?.approval);
+    emit("message", `${supplierName(supplier)}の納期調整を保存し、納期変更PDFを作成しました。対象日数: ${saveDates.length}`);
+    await load();
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "納期調整保存に失敗しました。");
+  } finally {
+    saving.value = false;
   }
 };
 const sendOrder = async (supplier) => {
