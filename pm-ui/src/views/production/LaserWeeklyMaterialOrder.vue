@@ -14,51 +14,70 @@
         <label><input v-model="orderEndDate" type="date" :min="orderStartDate" :max="props.dates[props.dates.length - 1]" :disabled="orderPeriodLocked" /></label>
       </div>
       <div class="actions">
-        <button class="btn primary" @click="openSaveDialog" :disabled="saving || !hasEditableDate">
-          {{ saving ? "保存中..." : "変更を保存" }}</button
-        ><button class="btn" @click="createApproval('SATO')" :disabled="isCreateOrderDisabled('SATO')">
-          {{ createOrderButtonLabel("SATO") }}</button
-        ><button class="btn" @click="createApproval('MEISEI')" :disabled="isCreateOrderDisabled('MEISEI')">
-          {{ createOrderButtonLabel("MEISEI") }}</button
-        ><button v-if="canSubmitApproval('SATO')" class="btn" @click="submitApproval('SATO')" :disabled="approvalBusy">
-          佐藤商事確認依頼</button
-        ><button v-if="canSubmitApproval('MEISEI')" class="btn" @click="submitApproval('MEISEI')" :disabled="approvalBusy">
-          名成鋼機確認依頼</button
-        ><button v-if="canReopenApproval('SATO')" class="btn" @click="reopenApproval('SATO')" :disabled="approvalBusy">
-          佐藤商事修正</button
-        ><button v-if="canReopenApproval('MEISEI')" class="btn" @click="reopenApproval('MEISEI')" :disabled="approvalBusy">
-          名成鋼機修正</button
-        ><button v-if="canConfirm('SATO')" class="btn" @click="confirmApproval('SATO')" :disabled="approvalBusy">
-          佐藤商事確認</button
-        ><button v-if="canConfirm('MEISEI')" class="btn" @click="confirmApproval('MEISEI')" :disabled="approvalBusy">
-          名成鋼機確認</button
-        ><button v-if="canApprove('SATO')" class="btn primary" @click="approveApproval('SATO')" :disabled="approvalBusy">
-          佐藤商事承認</button
-        ><button v-if="canApprove('MEISEI')" class="btn primary" @click="approveApproval('MEISEI')" :disabled="approvalBusy">
-          名成鋼機承認</button
-        ><button v-if="canReview('SATO')" class="btn danger" @click="rejectApproval('SATO')" :disabled="approvalBusy">
-          佐藤商事却下</button
-        ><button v-if="canReview('MEISEI')" class="btn danger" @click="rejectApproval('MEISEI')" :disabled="approvalBusy">
-          名成鋼機却下</button
-        ><button v-if="canSendOrder('SATO')" class="btn primary" @click="sendOrder('SATO')" :disabled="approvalBusy">
-          佐藤商事送信</button
-        ><button v-if="canSendOrder('MEISEI')" class="btn primary" @click="sendOrder('MEISEI')" :disabled="approvalBusy">
-          名成鋼機送信</button
-        ><button class="btn" @click="openDownload('SATO', 'pdf')">
-          佐藤商事注文書開く</button
-        ><button class="btn" @click="openDownload('SATO', 'excel')">
-          佐藤商事Excel</button
-        ><button class="btn" @click="openDownload('MEISEI', 'pdf')">
-          名成鋼機注文書開く</button
-        ><button class="btn" @click="openDownload('MEISEI', 'excel')">
-          名成鋼機Excel</button
-        ><button v-if="canResetApproval" class="btn danger" @click="resetApproval" :disabled="approvalBusy">
-          承認リセット</button
-        ><button class="btn" @click="openEmailConfig">
-          メール設定</button
-        ><button class="btn" @click="showManualAdd = !showManualAdd" :disabled="approvalLocked">
-          手動追加
-        </button>
+        <div class="action-group creator-group">
+          <span class="action-group-title">作成者</span>
+          <button class="btn creator-btn" @click="openSaveDialog" :disabled="saving || !hasEditableDate">
+            {{ saving ? "保存中..." : "変更を保存" }}</button
+          ><button class="btn creator-btn" @click="createApproval('SATO')" :disabled="isCreateOrderDisabled('SATO')">
+            {{ createOrderButtonLabel("SATO") }}</button
+          ><button class="btn creator-btn" @click="createApproval('MEISEI')" :disabled="isCreateOrderDisabled('MEISEI')">
+            {{ createOrderButtonLabel("MEISEI") }}</button
+          ><button v-if="canSubmitApproval('SATO')" class="btn creator-btn" @click="submitApproval('SATO')" :disabled="approvalBusy">
+            佐藤商事確認依頼</button
+          ><button v-if="canSubmitApproval('MEISEI')" class="btn creator-btn" @click="submitApproval('MEISEI')" :disabled="approvalBusy">
+            名成鋼機確認依頼</button
+          ><button v-if="canReopenApproval('SATO')" class="btn creator-btn" @click="reopenApproval('SATO')" :disabled="approvalBusy">
+            佐藤商事修正</button
+          ><button v-if="canReopenApproval('MEISEI')" class="btn creator-btn" @click="reopenApproval('MEISEI')" :disabled="approvalBusy">
+            名成鋼機修正</button
+          ><button class="btn creator-btn" @click="showManualAdd = !showManualAdd" :disabled="approvalLocked">
+            手動追加
+          </button>
+        </div>
+        <div v-if="hasReviewerActions" class="action-group reviewer-group">
+          <span class="action-group-title">確認者</span>
+          <button v-if="canConfirm('SATO')" class="btn reviewer-btn" @click="confirmApproval('SATO')" :disabled="approvalBusy">
+            佐藤商事確認</button
+          ><button v-if="canConfirm('MEISEI')" class="btn reviewer-btn" @click="confirmApproval('MEISEI')" :disabled="approvalBusy">
+            名成鋼機確認</button
+          ><button v-if="canConfirm('SATO')" class="btn reject-btn" @click="rejectApproval('SATO')" :disabled="approvalBusy">
+            佐藤商事却下</button
+          ><button v-if="canConfirm('MEISEI')" class="btn reject-btn" @click="rejectApproval('MEISEI')" :disabled="approvalBusy">
+            名成鋼機却下</button>
+        </div>
+        <div v-if="hasApproverActions" class="action-group approver-group">
+          <span class="action-group-title">承認者</span>
+          <button v-if="canApprove('SATO')" class="btn approver-btn" @click="approveApproval('SATO')" :disabled="approvalBusy">
+            佐藤商事承認</button
+          ><button v-if="canApprove('MEISEI')" class="btn approver-btn" @click="approveApproval('MEISEI')" :disabled="approvalBusy">
+            名成鋼機承認</button
+          ><button v-if="canApprove('SATO')" class="btn reject-btn" @click="rejectApproval('SATO')" :disabled="approvalBusy">
+            佐藤商事却下</button
+          ><button v-if="canApprove('MEISEI')" class="btn reject-btn" @click="rejectApproval('MEISEI')" :disabled="approvalBusy">
+            名成鋼機却下</button
+          ><button v-if="canSendOrder('SATO')" class="btn approver-btn" @click="sendOrder('SATO')" :disabled="approvalBusy">
+            佐藤商事送信</button
+          ><button v-if="canSendOrder('MEISEI')" class="btn approver-btn" @click="sendOrder('MEISEI')" :disabled="approvalBusy">
+            名成鋼機送信</button>
+        </div>
+        <div class="action-group common-group">
+          <span class="action-group-title">共通</span>
+          <button class="btn common-btn" @click="openDownload('SATO', 'pdf')">
+            佐藤商事注文書開く</button
+          ><button class="btn common-btn" @click="openDownload('SATO', 'excel')">
+            佐藤商事Excel</button
+          ><button class="btn common-btn" @click="openDownload('MEISEI', 'pdf')">
+            名成鋼機注文書開く</button
+          ><button class="btn common-btn" @click="openDownload('MEISEI', 'excel')">
+            名成鋼機Excel</button
+          ><button class="btn common-btn" @click="openEmailConfig">
+            メール設定</button>
+        </div>
+        <div v-if="hasSystemActions" class="action-group system-group">
+          <span class="action-group-title">システム管理者</span>
+          <button class="btn system-btn" @click="resetApproval" :disabled="approvalBusy">
+            承認リセット</button>
+        </div>
       </div>
       <div v-if="showManualAdd" class="manual-add-form">
         <label>材料<select v-model="manualMaterialId" style="max-width:220px;">
@@ -449,7 +468,8 @@ const approvalLocked = computed(() => supplierApprovalList.value.some((row) => [
 const orderPeriodLocked = computed(() => supplierApprovalList.value.some(
   (row) => ['reviewing', 'approved', 'sent'].includes(row.status) || (row.status === 'created' && row.context?.order_created !== false),
 ));
-const hasEditableDate = computed(() => props.dates.some((day) => !isDateLocked(day)));
+const isAnySupplierDateEditable = (day) => suppliers.some((supplier) => !isDateLocked(day, supplier.code));
+const hasEditableDate = computed(() => props.dates.some((day) => isAnySupplierDateEditable(day)));
 const allSaveWeeksSelected = computed(() =>
   saveWeekOptions.value.length > 0 && selectedSaveWeekKeys.value.length === saveWeekOptions.value.length,
 );
@@ -460,7 +480,7 @@ const selectedSaveDates = computed(() => {
     .flatMap((week) => week.days);
 });
 const canSaveSelectedDates = computed(() =>
-  selectedSaveDates.value.length > 0 && selectedSaveDates.value.some((day) => !isDateLocked(day)),
+  selectedSaveDates.value.length > 0 && selectedSaveDates.value.some((day) => isAnySupplierDateEditable(day)),
 );
 const toggleAllSaveWeeks = (checked) => {
   selectedSaveWeekKeys.value = checked ? saveWeekOptions.value.map((week) => week.key) : [];
@@ -471,7 +491,6 @@ const toggleSaveWeek = (weekKey) => {
     : [...selectedSaveWeekKeys.value, weekKey];
 };
 const openSaveDialog = () => {
-  if (!selectedSaveWeekKeys.value.length) toggleAllSaveWeeks(true);
   saveDialog.value = true;
 };
 const currentUserId = computed(() => Number(authState.user?.id || 0));
@@ -516,7 +535,11 @@ const canApprove = (supplier) => {
   const row = supplierApproval(supplier);
   return row?.status === "reviewing" && row.current_stage === "approver" && hasPendingTask(row, "APPROVER_APPROVE");
 };
-const canReview = (supplier) => canConfirm(supplier) || canApprove(supplier);
+const hasReviewerActions = computed(() => canConfirm("SATO") || canConfirm("MEISEI"));
+const hasApproverActions = computed(() =>
+  canApprove("SATO") || canApprove("MEISEI") || canSendOrder("SATO") || canSendOrder("MEISEI"),
+);
+const hasSystemActions = computed(() => canResetApproval.value);
 const downloadDialog = ref(false);
 const downloadSupplier = ref("");
 const downloadFormat = ref("pdf");
@@ -942,8 +965,7 @@ const download = async () => {
 };
 watch(saveWeekOptions, (weeks) => {
   const validKeys = new Set(weeks.map((week) => week.key));
-  const nextKeys = selectedSaveWeekKeys.value.filter((key) => validKeys.has(key));
-  selectedSaveWeekKeys.value = nextKeys.length ? nextKeys : weeks.map((week) => week.key);
+  selectedSaveWeekKeys.value = selectedSaveWeekKeys.value.filter((key) => validKeys.has(key));
 }, {
   immediate: true,
 });
@@ -973,11 +995,48 @@ watch(() => [props.startDate, props.materials], load, {
   left: 0;
   z-index: 10;
   display: flex;
+  align-items: stretch;
   gap: 8px;
   width: max-content;
   margin-bottom: 8px;
   padding: 4px 0;
   background: #eef3f8;
+}
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+}
+.action-group-title {
+  min-width: 52px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+.creator-group {
+  border-color: #8ec7ad;
+  background: #ecfdf5;
+}
+.reviewer-group {
+  border-color: #f0c66d;
+  background: #fffbeb;
+}
+.approver-group {
+  border-color: #9ab5e8;
+  background: #eff6ff;
+}
+.common-group {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+.system-group {
+  border-color: #f3a2a2;
+  background: #fef2f2;
 }
 .save-week-buttons {
   display: flex;
@@ -1004,11 +1063,51 @@ watch(() => [props.startDate, props.materials], load, {
   border-radius: 4px;
   padding: 5px 8px;
   cursor: pointer;
+  white-space: nowrap;
+}
+.creator-btn {
+  color: #065f46;
+  border-color: #34d399;
+  background: #d1fae5;
+}
+.reviewer-btn {
+  color: #7c2d12;
+  border-color: #f59e0b;
+  background: #fef3c7;
+}
+.approver-btn {
+  color: #1e3a8a;
+  border-color: #60a5fa;
+  background: #dbeafe;
+}
+.common-btn {
+  color: #4c1d95;
+  border-color: #a78bfa;
+  background: #ede9fe;
+}
+.system-btn,
+.reject-btn {
+  color: #7f1d1d;
+  border-color: #f87171;
+  background: #fee2e2;
 }
 .primary {
   background: #0f766e;
   color: #fff;
   border-color: #0f766e;
+}
+.btn:disabled,
+.creator-btn:disabled,
+.reviewer-btn:disabled,
+.approver-btn:disabled,
+.common-btn:disabled,
+.system-btn:disabled,
+.reject-btn:disabled {
+  color: #94a3b8;
+  border-color: #cbd5e1;
+  background: #e5e7eb;
+  cursor: not-allowed;
+  opacity: 0.75;
 }
 .download-modal {
   position: fixed;

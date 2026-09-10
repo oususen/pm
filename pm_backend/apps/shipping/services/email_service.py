@@ -3,6 +3,7 @@
 
 import os
 import smtplib
+from email.utils import formatdate, make_msgid
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -175,6 +176,8 @@ class EmailService:
             msg['From'] = smtp_config['user']
             msg['To'] = ', '.join(to_emails)
             msg['Subject'] = subject
+            msg['Date'] = formatdate(localtime=True)
+            msg['Message-ID'] = make_msgid()
             if cc_emails:
                 msg['Cc'] = ', '.join(cc_emails)
             if reply_to:

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
@@ -197,6 +197,40 @@ def _send_stage_email(route_config, stage, users, operator_user, approval_reques
     )
 
 
+def _refresh_laser_material_order_pdf(approval_request):
+    """レーザ材料発注の保存PDFを、承認ステップ更新後の印欄で再保存する。"""
+    if approval_request.route_config.item_key != 'laser_material_order':
+        return
+
+    context = approval_request.context or {}
+    supplier = context.get('supplier')
+    saved_files = context.get('material_order_pdf_files') or {}
+    if not supplier or supplier not in saved_files:
+        return
+
+    try:
+        plan_start_date = date.fromisoformat(context.get('start_date'))
+        lock_start_date = date.fromisoformat(context.get('lock_start_date'))
+        lock_end_date = date.fromisoformat(context.get('lock_end_date'))
+    except (TypeError, ValueError):
+        return
+
+    from production.views_laser_weekly_plan import LaserWeeklyPlanViewSet
+
+    saved_file = LaserWeeklyPlanViewSet()._save_material_order_pdf_file(
+        plan_start_date,
+        lock_start_date,
+        lock_end_date,
+        supplier,
+    )
+    approval_request.context = {
+        **context,
+        'material_order_pdf_files': {**saved_files, supplier: saved_file},
+        'material_order_pdf_saved_at': datetime.now().isoformat(timespec='seconds'),
+    }
+    approval_request.save(update_fields=['context', 'updated_at'])
+
+
 def _get_result_users(approval_request, route_config):
     """承認・却下結果の通知先を、全段階の担当者候補から解決する。"""
     users = [approval_request.creator]
@@ -333,6 +367,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.reject_reason = ''
             approval.save()
 
+            _refresh_laser_material_order_pdf(approval)
             _advance_to_stage(approval, route_config, next_stage, request.user, request=request)
 
         return Response(self.get_serializer(self.get_object()).data)
@@ -363,6 +398,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.current_stage = next_stage
             approval.save()
 
+            _refresh_laser_material_order_pdf(approval)
             _advance_to_stage(approval, route_config, next_stage, request.user, request=request)
 
         return Response(self.get_serializer(self.get_object()).data)
@@ -389,6 +425,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.current_stage = 'completed'
             approval.save()
 
+            _refresh_laser_material_order_pdf(approval)
             result_users = _get_result_users(approval, route_config)
             if route_config.approved_result_app_notification_enabled:
                 _create_notification(
@@ -428,6 +465,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.reject_reason = reason
             approval.save()
 
+            _refresh_laser_material_order_pdf(approval)
             _create_tasks(approval, 'CREATOR_FIX', [approval.creator])
 
             result_users = _get_result_users(approval, route_config)

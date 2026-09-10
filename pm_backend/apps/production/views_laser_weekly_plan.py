@@ -59,6 +59,17 @@ def render_material_order_email_body(template, order_supplier, start_label='', e
     )
 
 
+def append_material_order_reply_notice(body, cc_emails=None):
+    """材料注文書メールには送信専用と返信先案内を必ず入れる。"""
+    text = (body or '').strip()
+    if '送信専用' in text and ('返信' in text or 'ご返信' in text):
+        return text
+    cc_list = [email for email in (cc_emails or []) if email]
+    reply_to = f'CC宛先（{", ".join(cc_list)}）' if cc_list else 'CC宛先'
+    notice = f'※このメールは送信専用です。ご返信は{reply_to}へお願いします。'
+    return f'{text}\n\n{notice}' if text else notice
+
+
 class LaserMaterialOrderEmailConfigViewSet(viewsets.ModelViewSet):
     serializer_class = LaserMaterialOrderEmailConfigSerializer
     pagination_class = None
@@ -383,13 +394,16 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             .filter(supplier=supplier)
             .first()
         )
-        body = render_material_order_email_body(
-            email_config.body if email_config else DEFAULT_MATERIAL_ORDER_EMAIL_BODY,
-            order_supplier,
-            start_label,
-            end_label,
-        )
         cc_emails = [user.email for user in email_config.cc_users.all() if user.email] if email_config else []
+        body = append_material_order_reply_notice(
+            render_material_order_email_body(
+                email_config.body if email_config else DEFAULT_MATERIAL_ORDER_EMAIL_BODY,
+                order_supplier,
+                start_label,
+                end_label,
+            ),
+            cc_emails,
+        )
         result = EmailService().send_email_with_attachment(
             to_emails=[order_supplier.order_email],
             cc_emails=cc_emails,
@@ -638,6 +652,22 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         if not isinstance(file_info, dict) or not file_info.get('path'):
             return Response({'detail': '保存済みPDFがありません。注文書作成を先に実行してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
+        latest_step_at = approval.steps.filter(action__in=['confirmed', 'approved']).order_by('-acted_at').values_list('acted_at', flat=True).first()
+        try:
+            saved_at = datetime.fromisoformat(file_info.get('saved_at')) if file_info.get('saved_at') else None
+        except (TypeError, ValueError):
+            saved_at = None
+        if approval.status in ('created', 'reviewing', 'approved', 'rejected') and latest_step_at and (not saved_at or latest_step_at > saved_at):
+            saved_file = self._save_material_order_pdf_file(plan_start_date, export_start_date, export_end_date, supplier)
+            saved_files = {**saved_files, supplier: saved_file}
+            approval.context = {
+                **(approval.context or {}),
+                'material_order_pdf_files': saved_files,
+                'material_order_pdf_saved_at': datetime.now().isoformat(timespec='seconds'),
+            }
+            approval.save(update_fields=['context', 'updated_at'])
+            file_info = saved_file
+
         media_root = Path(settings.MEDIA_ROOT).resolve()
         file_path = (media_root / file_info['path']).resolve()
         if not str(file_path).startswith(str(media_root)) or not file_path.exists():
@@ -692,12 +722,19 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             for stage in ('creator', 'reviewer1', 'reviewer2', 'approver')
         }
 
-        def approval_step_label(step):
-            name = step.user.last_name or step.user.username
-            if step.user_id in proxy_user_ids_by_stage.get(step.stage, set()):
+        def stamp_label(user, acted_at=None, is_proxy=False):
+            name = user.last_name or user.username
+            if is_proxy:
                 name = f'{name}（代）'
-            date_str = f'{step.acted_at.month}/{step.acted_at.day}' if step.acted_at else ''
+            date_str = f'{acted_at.month}/{acted_at.day}' if acted_at else ''
             return f'{name}\n{date_str}' if date_str else name
+
+        def approval_step_label(step):
+            return stamp_label(
+                step.user,
+                step.acted_at,
+                step.user_id in proxy_user_ids_by_stage.get(step.stage, set()),
+            )
 
         approval_steps = {
             step.stage: approval_step_label(step)
@@ -705,7 +742,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             if step.action in ('confirmed', 'approved')
         }
         if 'creator' not in approval_steps and approval.creator_id:
-            approval_steps['creator'] = approval.creator.last_name or approval.creator.username
+            approval_steps['creator'] = stamp_label(approval.creator, approval.created_at)
 
         orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
             supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
