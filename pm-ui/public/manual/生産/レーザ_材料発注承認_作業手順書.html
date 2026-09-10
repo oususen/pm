@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>レーザ 材料発注承認 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --creator-bg: #ecfdf5; --creator-border: #8ec7ad;
+    --reviewer-bg: #fffbeb; --reviewer-border: #f0c66d;
+    --approver-bg: #eff6ff; --approver-border: #9ab5e8;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+    --creator-bg: #162420; --creator-border: #2d6e4a;
+    --reviewer-bg: #2a2416; --reviewer-border: #8a7030;
+    --approver-bg: #1a2438; --approver-border: #4a6a9a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+      --creator-bg: #162420; --creator-border: #2d6e4a;
+      --reviewer-bg: #2a2416; --reviewer-border: #8a7030;
+      --approver-bg: #1a2438; --approver-border: #4a6a9a;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; }
+  .page { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; margin-bottom:6px; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; }
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:160px; }
+  .info-table td { background:var(--card); }
+  .flow-diagram { display:flex; align-items:center; gap:0; margin:20px 0; flex-wrap:wrap; justify-content:center; }
+  .flow-box { padding:12px 20px; border-radius:8px; font-size:14px; font-weight:700; text-align:center; min-width:120px; }
+  .flow-box.creator { background:var(--creator-bg); border:2px solid var(--creator-border); }
+  .flow-box.reviewer { background:var(--reviewer-bg); border:2px solid var(--reviewer-border); }
+  .flow-box.approver { background:var(--approver-bg); border:2px solid var(--approver-border); }
+  .flow-box small { display:block; font-size:11px; font-weight:400; color:var(--ink2); margin-top:2px; }
+  .flow-arrow { font-size:22px; color:var(--ink2); padding:0 6px; flex-shrink:0; }
+  .role-badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:700; }
+  .role-badge.creator { background:var(--creator-bg); border:1px solid var(--creator-border); }
+  .role-badge.reviewer { background:var(--reviewer-bg); border:1px solid var(--reviewer-border); }
+  .role-badge.approver { background:var(--approver-bg); border:1px solid var(--approver-border); }
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.creator-btn { background:#d1fae5; border-color:#34d399; color:#065f46; }
+  .mock-btn.reviewer-btn { background:#fef3c7; border-color:#f59e0b; color:#7c2d12; }
+  .mock-btn.approver-btn { background:#dbeafe; border-color:#60a5fa; color:#1e3a8a; }
+  .mock-btn.reject-btn { background:#fee2e2; border-color:#f87171; color:#7f1d1d; }
+  .mock-btn.common-btn { background:#ede9fe; border-color:#a78bfa; color:#4c1d95; }
+  ol.steps-list { margin:12px 0 0 20px; font-size:14px; }
+  ol.steps-list li { margin-bottom:8px; line-height:1.6; }
+  .section-divider { text-align:center; font-size:13px; color:var(--ink2); margin:32px 0 12px; padding:8px 0; border-top:1px dashed var(--border); }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- 表紙 -->
+<div class="cover">
+  <h1>レーザ 材料発注承認 作業手順書</h1>
+  <div class="subtitle">佐藤商事・名成鋼機への材料注文書の作成から承認・送信までの手順</div>
+  <div class="path">
+    <span>生産計画入力</span>
+    <span class="arrow">›</span>
+    <span>レーザ</span>
+    <span class="arrow">›</span>
+    <span>週間計画</span>
+    <span class="arrow">›</span>
+    <span>材料発注</span>
+  </div>
+</div>
+
+<!-- 承認フロー概要 -->
+<div class="step">
+  <div class="step-header">
+    <div class="step-title">承認フロー概要</div>
+  </div>
+  <div class="step-desc">
+    材料発注は仕入先ごと（佐藤商事・名成鋼機）に個別の承認フローで処理します。<br>
+    本フローでは確認②を未使用に設定しているため、3段階で承認が完了します。
+  </div>
+
+  <div class="flow-diagram">
+    <div class="flow-box creator">作成<small>リーダ</small></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box reviewer">確認<small>班長</small></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box approver">承認<small>係長（代理）</small></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box approver">送信<small>係長 ※全担当者可</small></div>
+  </div>
+
+  <table class="info-table">
+    <tr><th>段階</th><th>担当者</th><th>操作</th></tr>
+    <tr><td><span class="role-badge creator">作成</span></td><td>リーダ</td><td>発注数量入力 → 注文書作成 → 確認依頼</td></tr>
+    <tr><td><span class="role-badge reviewer">確認</span></td><td>班長</td><td>注文書PDFを確認 → 確認 or 却下</td></tr>
+    <tr><td><span class="role-badge approver">承認</span></td><td>係長（部長の代理）</td><td>注文書PDFを確認 → 承認 or 却下</td></tr>
+    <tr><td><span class="role-badge approver">送信</span></td><td>承認者（係長）※全担当者可</td><td>承認済み注文書を仕入先にメール送信</td></tr>
+  </table>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div>通常は「作成 → 確認① → 確認② → 承認」の4段階ですが、材料発注では係長が部長の代理として承認するため、確認②は未使用です。承認設定画面で変更できます。ただし、承認依頼の通知とメール通知は部長へも送られます。</div>
+  </div>
+</div>
+
+<!-- 目次 -->
+<div class="toc">
+  <h2>手順一覧</h2>
+  <ul class="toc-list">
+    <li><span class="tn">1</span>発注数量を入力する（リーダ）</li>
+    <li><span class="tn">2</span>注文書を作成する（リーダ）</li>
+    <li><span class="tn">3</span>確認依頼を出す（リーダ）</li>
+    <li><span class="tn">4</span>注文書を確認する（班長）</li>
+    <li><span class="tn">5</span>注文書を承認する（係長）</li>
+    <li><span class="tn">6</span>注文書を送信する（係長 ※全担当者可）</li>
+    <li><span class="tn">7</span>却下された場合（リーダ）</li>
+    <li><span class="tn">8</span>作成後に修正する場合（リーダ）</li>
+  </ul>
+</div>
+
+<!-- ステップ1 -->
+<div class="section-divider">── 作成者（リーダ）の操作 ──</div>
+
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">1</div>
+    <div class="step-title">発注数量を入力する</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge creator">リーダ</span>
+  </div>
+
+  <ol class="steps-list">
+    <li><strong>生産計画入力</strong>画面を開き、<strong>レーザ → 週間計画</strong>タブを選択します。</li>
+    <li>レーザー翌週週間計画を作成後、<strong>材料発注</strong>セクションを展開します。</li>
+    <li><strong>注文書期間</strong>（通常は翌週）を設定します（対象の開始日〜終了日）。</li>
+    <li>各材料の佐藤商事の<strong>手数</strong>（ロット数・枚数）を確認します。手数は所要枚数から自動セットされますが、変更が必要な場合は修正します。残りは名成鋼機へ自動配分されます。名成鋼機の手数も確認し、必要に応じて修正します。</li>
+    <li>確認・変更後、<span class="mock-btn creator-btn">変更を保存</span> ボタンを押します。</li>
+    <li>保存ダイアログが表示されるので、保存する週を選択して <strong>保存</strong> を押します。</li>
+  </ol>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div><strong>手数とは：</strong>材料を何ロット発注するかの数量です。上段に<strong>ロット数（L）</strong>、下段に<strong>端数枚数（枚）</strong>を入力します。所要枚数÷ロット倍数で必要ロット数が算出され、佐藤商事に入力した分の残りロット数が名成鋼機へ自動配分されます。</div>
+  </div>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div>手動で材料を追加するには <span class="mock-btn creator-btn">手動追加</span> を押し、材料・納期・数量を入力して登録します。</div>
+  </div>
+</div>
+
+<!-- ステップ2 -->
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">2</div>
+    <div class="step-title">注文書を作成する</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge creator">リーダ</span>
+  </div>
+
+  <ol class="steps-list">
+    <li><span class="mock-btn creator-btn">佐藤商事注文書作成</span> ボタンを押します。</li>
+    <li>未保存の数量変更がある場合、自動的に保存されてからPDFが生成・保存されます。</li>
+    <li>同様に <span class="mock-btn creator-btn">名成鋼機注文書作成</span> ボタンを押します。</li>
+    <li>ステータスが「作成済（作成者）」に変わります。</li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="icon">⚠️</span>
+    <div>注文書作成後は、注文書期間内の日付の数量編集がロックされます。修正が必要な場合はステップ8を参照してください。</div>
+  </div>
+
+  <h4 class="sub">注文書PDFの確認</h4>
+  <div class="step-desc">
+    <span class="mock-btn common-btn">佐藤商事注文書開く</span> / <span class="mock-btn common-btn">名成鋼機注文書開く</span> で保存済みPDFを別タブで表示できます。<br>
+    PDFには承認印欄があり、承認が進むにつれて各段階の担当者名と日付が自動的に記載されます。
+  </div>
+</div>
+
+<!-- ステップ3 -->
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">3</div>
+    <div class="step-title">確認依頼を出す</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge creator">リーダ</span>
+  </div>
+
+  <ol class="steps-list">
+    <li>注文書PDFの内容を確認します。</li>
+    <li><span class="mock-btn creator-btn">佐藤商事確認依頼</span> ボタンを押します。</li>
+    <li>同様に <span class="mock-btn creator-btn">名成鋼機確認依頼</span> ボタンを押します。</li>
+    <li>班長にタスク通知が届き、メールも送信されます。</li>
+    <li>ステータスが「確認中（確認者）」に変わります。</li>
+  </ol>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div>確認依頼後は承認完了または却下されるまで、数量の編集・手動追加・手動行削除がロックされます。</div>
+  </div>
+</div>
+
+<!-- ステップ4 -->
+<div class="section-divider">── 確認者（班長）の操作 ──</div>
+
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">4</div>
+    <div class="step-title">注文書を確認する</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge reviewer">班長</span>
+  </div>
+
+  <ol class="steps-list">
+    <li>タスク受信箱に届いた「確認①依頼」の <strong>材料発注へ</strong> リンクをクリックして画面を開きます。</li>
+    <li><span class="mock-btn common-btn">佐藤商事注文書開く</span> / <span class="mock-btn common-btn">名成鋼機注文書開く</span> でPDFを確認します。</li>
+    <li>問題なければ <span class="mock-btn reviewer-btn">佐藤商事確認</span> / <span class="mock-btn reviewer-btn">名成鋼機確認</span> を押します。</li>
+    <li>係長にタスク通知が届き、メールも送信されます。</li>
+  </ol>
+
+  <h4 class="sub">問題がある場合</h4>
+  <ol class="steps-list">
+    <li><span class="mock-btn reject-btn">佐藤商事却下</span> / <span class="mock-btn reject-btn">名成鋼機却下</span> を押します。</li>
+    <li>却下理由を入力して確定します。</li>
+    <li>リーダに差し戻しタスクが届きます（ステップ7参照）。</li>
+  </ol>
+</div>
+
+<!-- ステップ5 -->
+<div class="section-divider">── 承認者（係長）の操作 ──</div>
+
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">5</div>
+    <div class="step-title">注文書を承認する</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge approver">係長（部長の代理）</span>
+  </div>
+
+  <ol class="steps-list">
+    <li>タスク受信箱に届いた「承認依頼」の <strong>材料発注へ</strong> リンクをクリックして画面を開きます。</li>
+    <li><span class="mock-btn common-btn">佐藤商事注文書開く</span> / <span class="mock-btn common-btn">名成鋼機注文書開く</span> でPDFを確認します。</li>
+    <li>問題なければ <span class="mock-btn approver-btn">佐藤商事承認</span> / <span class="mock-btn approver-btn">名成鋼機承認</span> を押します。</li>
+    <li>全関係者に承認完了通知が届きます。</li>
+    <li>PDFの承認印欄に係長の名前と日付が記載されます（代理の場合は名前に「（代）」が付きます）。</li>
+  </ol>
+
+  <h4 class="sub">問題がある場合</h4>
+  <ol class="steps-list">
+    <li><span class="mock-btn reject-btn">佐藤商事却下</span> / <span class="mock-btn reject-btn">名成鋼機却下</span> を押します。</li>
+    <li>却下理由を入力して確定します。</li>
+    <li>リーダに差し戻しタスクが届きます（ステップ7参照）。</li>
+  </ol>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div>承認設定画面で係長が「代理ユーザー」に設定されている場合、PDFの承認印に「（代）」マークが自動で付与されます。</div>
+  </div>
+</div>
+
+<!-- ステップ6 -->
+<div class="section-divider">── 送信（係長 ※全担当者可）の操作 ──</div>
+
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">6</div>
+    <div class="step-title">注文書を仕入先に送信する</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge approver">承認者（係長）</span> ※承認済みであれば全担当者が送信可能
+  </div>
+
+  <ol class="steps-list">
+    <li>ステータスが「承認済」になっていることを確認します。</li>
+    <li><span class="mock-btn approver-btn">佐藤商事送信</span> / <span class="mock-btn approver-btn">名成鋼機送信</span> を押します。</li>
+    <li>承認済みPDFが仕入先マスタに登録されたメールアドレスへ送信されます。</li>
+    <li>ステータスが「送信済」に変わります。</li>
+  </ol>
+
+  <div class="callout ok">
+    <span class="icon">✅</span>
+    <div>メール本文とCCユーザーは <span class="mock-btn common-btn">メール設定</span> で仕入先ごとに変更できます（設定 → 材料注文書メール設定）。</div>
+  </div>
+
+  <div class="callout warn">
+    <span class="icon">⚠️</span>
+    <div>仕入先マスタにメールアドレスが登録されていない場合、送信できません。マスタ画面で事前に登録してください。</div>
+  </div>
+</div>
+
+<!-- ステップ7 -->
+<div class="section-divider">── 却下時の対応 ──</div>
+
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">7</div>
+    <div class="step-title">却下された場合</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge creator">リーダ</span>
+  </div>
+
+  <ol class="steps-list">
+    <li>タスク受信箱に「差戻し修正」タスクが届きます。</li>
+    <li><strong>材料発注へ</strong> リンクから画面を開きます。</li>
+    <li>ステータスに却下理由が表示されているので内容を確認します。</li>
+    <li>数量を修正して <span class="mock-btn creator-btn">変更を保存</span> を押します。</li>
+    <li><span class="mock-btn creator-btn">佐藤商事注文書再作成</span> / <span class="mock-btn creator-btn">名成鋼機注文書再作成</span> でPDFを再生成します。</li>
+    <li>再度 <span class="mock-btn creator-btn">確認依頼</span> を出して、ステップ3からやり直します。</li>
+  </ol>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div>却下されると数量のロックが解除され、編集可能になります。</div>
+  </div>
+</div>
+
+<!-- ステップ8 -->
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">8</div>
+    <div class="step-title">作成後に修正する場合</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge creator">リーダ</span><br>
+    注文書を作成したが、確認依頼を出す前に数量を修正したい場合の手順です。
+  </div>
+
+  <ol class="steps-list">
+    <li><span class="mock-btn creator-btn">佐藤商事修正</span> / <span class="mock-btn creator-btn">名成鋼機修正</span> を押します。</li>
+    <li>確認ダイアログで「OK」を押すと、注文書期間の日付ロックが解除されます。</li>
+    <li>数量を修正して <span class="mock-btn creator-btn">変更を保存</span> を押します。</li>
+    <li><span class="mock-btn creator-btn">佐藤商事注文書再作成</span> / <span class="mock-btn creator-btn">名成鋼機注文書再作成</span> でPDFを再生成します。</li>
+    <li>内容を確認後、<span class="mock-btn creator-btn">確認依頼</span> を出します。</li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="icon">⚠️</span>
+    <div>修正ボタンは確認依頼を出す前（ステータスが「作成済」）のときだけ使えます。確認依頼後は、班長または係長に却下してもらう必要があります。</div>
+  </div>
+</div>
+
+<!-- 補足情報 -->
+<div class="step">
+  <div class="step-header">
+    <div class="step-title">補足情報</div>
+  </div>
+
+  <h4 class="sub">ボタンの色分け</h4>
+  <div class="step-desc">ボタンは担当者の役割ごとにグループ化・色分けされています。</div>
+  <table class="info-table">
+    <tr><th>グループ</th><th>色</th><th>対象者</th></tr>
+    <tr><td><span class="mock-btn creator-btn">作成者</span></td><td>緑系</td><td>リーダ（数量保存・注文書作成・確認依頼・修正・手動追加）</td></tr>
+    <tr><td><span class="mock-btn reviewer-btn">確認者</span></td><td>黄系</td><td>班長（確認）</td></tr>
+    <tr><td><span class="mock-btn approver-btn">承認者</span></td><td>青系</td><td>係長（承認・送信）※送信は承認済みなら全担当者可</td></tr>
+    <tr><td><span class="mock-btn reject-btn">却下</span></td><td>赤系</td><td>班長・係長（却下）</td></tr>
+    <tr><td><span class="mock-btn common-btn">共通</span></td><td>紫系</td><td>全員（注文書PDF表示・Excel出力・メール設定）</td></tr>
+  </table>
+
+  <h4 class="sub">注文書PDFの承認印欄</h4>
+  <div class="step-desc">
+    PDFの右上に承認印欄があり、各段階が完了するたびに担当者名と日付が自動記載されます。<br>
+    代理ユーザーが操作した場合は名前に「（代）」が付きます。
+  </div>
+
+  <h4 class="sub">仕入先別の独立管理</h4>
+  <div class="step-desc">
+    佐藤商事と名成鋼機はそれぞれ独立した承認フローです。<br>
+    一方を先に承認・送信し、もう一方は後から処理することも可能です。<br>
+    片方が承認中でも、もう一方の仕入先の数量は編集できます。
+  </div>
+
+  <h4 class="sub">タスク受信箱からのアクセス</h4>
+  <div class="step-desc">
+    確認・承認のタスクはタスク受信箱に表示されます。<br>
+    「材料発注へ」リンクをクリックすると、該当週の材料発注画面に直接移動します。<br>
+    ナビゲーションバーのタスクバッジにも件数が反映されます。
+  </div>
+
+</div>
+
+</div>
+</body>
+</html>
