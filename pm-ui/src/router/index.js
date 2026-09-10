@@ -174,6 +174,9 @@ router.beforeEach(async (to) => {
   const fallbackResource = to.meta?.fallbackResource || null;
   const fallbackToParent = to.meta?.fallbackToParent !== false;
   const allowChildResources = to.meta?.allowChildResources === true;
+  if (to.meta?.adminOnly && !user.is_staff && !user.is_superuser) {
+    return { path: "/" };
+  }
   if (!canAccessRouteResource(user, resource, level, fallbackResource, fallbackToParent, allowChildResources)) {
     return { path: "/" };
   }

@@ -618,16 +618,34 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             export_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
             export_end_date = datetime.strptime(request.query_params['end_date'], '%Y-%m-%d').date()
             supplier = request.query_params['supplier']
-            if export_end_date < export_start_date:
+            if export_end_date < export_start_date or supplier not in MATERIAL_ORDER_SUPPLIER_CODES:
                 raise ValueError
         except (KeyError, ValueError):
             return Response({'detail': '出力条件が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            pdf_bytes, filename = self._build_material_order_pdf(plan_start_date, export_start_date, export_end_date, supplier)
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+
+        approval = ApprovalRequest.objects.filter(
+            route_config__item_key='laser_material_order',
+            context__start_date=plan_start_date.isoformat(),
+            context__lock_start_date=export_start_date.isoformat(),
+            context__lock_end_date=export_end_date.isoformat(),
+            context__supplier=supplier,
+        ).order_by('-updated_at').first()
+        if not approval:
+            return Response({'detail': '指定期間の保存済み注文書が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        saved_files = (approval.context or {}).get('material_order_pdf_files') or {}
+        file_info = saved_files.get(supplier)
+        if not isinstance(file_info, dict) or not file_info.get('path'):
+            return Response({'detail': '保存済みPDFがありません。注文書作成を先に実行してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        file_path = (media_root / file_info['path']).resolve()
+        if not str(file_path).startswith(str(media_root)) or not file_path.exists():
+            return Response({'detail': '保存済みPDFファイルが見つかりません。注文書を再作成してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        filename = file_info.get('stored_filename') or file_path.name
+        response = FileResponse(file_path.open('rb'), content_type='application/pdf')
+        response['Content-Disposition'] = f"inline; filename*=UTF-8''{quote(filename)}"
         return response
 
     def _save_material_order_pdf_file(self, plan_start_date, export_start_date, export_end_date, supplier):

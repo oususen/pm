@@ -36,10 +36,11 @@ import { RouterLink } from "vue-router";
 import { authState } from "@/auth";
 import { hasPermission } from "@/router";
 
-const SECTION_ORDER = ["user", "lock", "task", "kubota", "system"];
+const SECTION_ORDER = ["user", "lock", "production", "task", "kubota", "system"];
 const SECTION_LABELS = {
   user: "ユーザー・権限",
   lock: "日数設定",
+  production: "生産",
   task: "タスク・自動化",
   kubota: "クボタ堺",
   system: "システム",
@@ -76,6 +77,13 @@ const canAccessSetting = (resource, level = "view") => {
   return hasPermission(user, "settings", level);
 };
 
+const canAccessTile = (tile) => {
+  const user = authState.user;
+  if (!user) return false;
+  if (tile.adminOnly && !user.is_staff && !user.is_superuser) return false;
+  return canAccessSetting(tile.resource, "view");
+};
+
 const tiles = computed(() => {
   const list = [
     { to: "/settings/profile", label: "プロフィール編集", icon: "👤", category: "user", resource: "settings.profile" },
@@ -87,6 +95,9 @@ const tiles = computed(() => {
     { to: "/settings/production-plan-lock", label: "生産計画ロック設定", icon: "🔒", category: "lock", resource: "settings.production_plan_lock" },
     { to: "/settings/kubota-sakai-due-plan-lock", label: "クボタ堺納期調整ロック設定", icon: "🔒", category: "lock", resource: "settings.production_plan_lock" },
     { to: "/settings/shipping-progress-horizon", label: "出荷進度再計算日数", icon: "📊", category: "lock", resource: "settings.shipping_progress_horizon" },
+    { to: "/settings/approval-routes", label: "承認設定", icon: "✅", category: "production", resource: "settings.approval_routes", adminOnly: true },
+    { to: "/settings/material-order-email-config", label: "材料注文書メール設定", icon: "📧", category: "production", resource: "settings.material_order_email_config" },
+    { to: "/settings/purchase-order-approval", label: "発注承認者設定", icon: "🧾", category: "production", resource: "settings.purchase_order_approval" },
     { to: "/settings/task-settings", label: "タスク設定", icon: "⏰", category: "task", resource: "settings.scheduled_tasks" },
     { to: "/settings/stocktake-init", label: "棚卸初期化", icon: "📦", category: "task", resource: "settings.stocktake_init" },
     { to: "/settings/orphan-backlog-maintenance", label: "孤立ライン実績メンテナンス", icon: "🧹", category: "task", resource: "settings.orphan_backlog_maintenance" },
@@ -99,7 +110,7 @@ const tiles = computed(() => {
     { to: "/settings/system", label: "システム設定", icon: "⚙️", category: "system", resource: "settings" },
   ];
 
-  return list.filter((tile) => canAccessSetting(tile.resource, "view"));
+  return list.filter((tile) => canAccessTile(tile));
 });
 
 const groupedTiles = computed(() => {

@@ -45,11 +45,11 @@
         ><button v-if="canSendOrder('MEISEI')" class="btn primary" @click="sendOrder('MEISEI')" :disabled="approvalBusy">
           名成鋼機送信</button
         ><button class="btn" @click="openDownload('SATO', 'pdf')">
-          佐藤商事PDF</button
+          佐藤商事注文書開く</button
         ><button class="btn" @click="openDownload('SATO', 'excel')">
           佐藤商事Excel</button
         ><button class="btn" @click="openDownload('MEISEI', 'pdf')">
-          名成鋼機PDF</button
+          名成鋼機注文書開く</button
         ><button class="btn" @click="openDownload('MEISEI', 'excel')">
           名成鋼機Excel</button
         ><button v-if="canResetApproval" class="btn danger" @click="resetApproval" :disabled="approvalBusy">
@@ -87,7 +87,7 @@
           <label>開始日<input v-model="downloadStartDate" type="date" /></label
           ><label>終了日<input v-model="downloadEndDate" type="date" /></label>
           <div class="dialog-actions">
-            <button class="btn primary" @click="download">出力</button
+            <button class="btn primary" @click="download">{{ downloadFormat === "pdf" ? "開く" : "出力" }}</button
             ><button class="btn" @click="downloadDialog = false">
               キャンセル
             </button>
@@ -918,6 +918,12 @@ const download = async () => {
       downloadEndDate.value,
     );
     const url = URL.createObjectURL(response.data);
+    if (downloadFormat.value === "pdf") {
+      window.open(url, "_blank", "noopener");
+      downloadDialog.value = false;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return;
+    }
     const a = document.createElement("a");
     a.href = url;
     a.download = `材料注文書_${downloadSupplier.value}_${downloadStartDate.value}_${downloadEndDate.value}.${extension}`;

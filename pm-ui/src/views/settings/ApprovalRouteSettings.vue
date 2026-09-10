@@ -130,7 +130,6 @@
 import { computed, defineComponent, h, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
-import { hasPermission } from '@/router'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
@@ -306,28 +305,16 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const deletedRouteIds = ref([])
 
-const canAccessByResource = (resource, level = 'view') => {
-  const user = authState.user
-  if (!user || !resource) return false
-  const permissions = Array.isArray(user.effective_permissions) ? user.effective_permissions : []
-  if (permissions.some((item) => item.resource === resource)) {
-    return hasPermission(user, resource, level)
-  }
-  return hasPermission(user, 'settings', level)
-}
-
 const canViewPage = computed(() => {
   const user = authState.user
   if (!user) return false
-  if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.approval_routes', 'view')
+  return Boolean(user.is_staff || user.is_superuser)
 })
 
 const canEditPage = computed(() => {
   const user = authState.user
   if (!user) return false
-  if (user.is_staff || user.is_superuser) return true
-  return canAccessByResource('settings.approval_routes', 'edit')
+  return Boolean(user.is_staff || user.is_superuser)
 })
 
 const normalizeList = (payload) => Array.isArray(payload) ? payload : payload?.results || []

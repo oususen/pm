@@ -85,13 +85,13 @@ const settings = [
     path: "/settings/approval-routes",
     name: "ApprovalRouteSettings",
     component: () => import("@/views/settings/ApprovalRouteSettings.vue"),
-    meta: { pageTitle: "承認設定", resource: "settings.approval_routes" },
+    meta: { pageTitle: "承認設定", resource: "settings.approval_routes", adminOnly: true },
   },
   {
     path: "/settings/material-order-email-config",
     name: "MaterialOrderEmailConfig",
     component: () => import("@/views/settings/MaterialOrderEmailConfig.vue"),
-    meta: { pageTitle: "材料注文書メール設定", resource: "settings.approval_routes" },
+    meta: { pageTitle: "材料注文書メール設定", resource: "settings.material_order_email_config" },
   },
   {
     path: "/settings/auto-plan",

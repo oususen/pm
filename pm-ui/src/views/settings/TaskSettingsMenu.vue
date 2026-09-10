@@ -29,6 +29,13 @@ const canAccess = (resource) => {
   return hasPermission(user, 'settings', 'view')
 }
 
+const canAccessTile = (tile) => {
+  const user = authState.user
+  if (!user) return false
+  if (tile.adminOnly && !user.is_staff && !user.is_superuser) return false
+  return canAccess(tile.resource)
+}
+
 const allTiles = [
   {
     to: '/settings/auto-plan',
@@ -54,27 +61,9 @@ const allTiles = [
     desc: '社内品・購入品ごとの自動安全在庫タスクを設定します。',
     resource: 'settings.scheduled_tasks',
   },
-  {
-    to: '/settings/approval-routes',
-    title: '承認設定',
-    desc: '承認項目ごとに役割・限定ユーザー・代理ユーザーを設定します。',
-    resource: 'settings.approval_routes',
-  },
-  {
-    to: '/settings/material-order-email-config',
-    title: '材料注文書メール設定',
-    desc: '佐藤商事・名成鋼機ごとの送信本文とCCユーザーを設定します。',
-    resource: 'settings.approval_routes',
-  },
-  {
-    to: '/settings/purchase-order-approval',
-    title: '発注承認者設定',
-    desc: '発注提案書の承認レベル別ユーザーを設定します。',
-    resource: 'settings.purchase_order_approval',
-  },
 ]
 
-const tiles = computed(() => allTiles.filter((tile) => canAccess(tile.resource)))
+const tiles = computed(() => allTiles.filter((tile) => canAccessTile(tile)))
 </script>
 
 <style scoped>

@@ -2,7 +2,7 @@
   <div class="page">
     <div class="toolbar">
       <h2>材料注文書メール設定</h2>
-      <button class="btn primary" :disabled="saving" @click="save">
+      <button class="btn primary" :disabled="saving || !canEdit" @click="save">
         {{ saving ? "保存中..." : "保存" }}
       </button>
     </div>
@@ -43,6 +43,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import api from "@/api/client";
+import { authState } from "@/auth";
+import { hasPermission } from "@/router";
 import UserChipSelect from "@/views/purchase/UserChipSelect.vue";
 
 const supplierOptions = [
@@ -77,6 +79,7 @@ const normalizeList = (data) => {
 };
 
 const currentConfig = computed(() => configs.value[selectedSupplier.value] || null);
+const canEdit = computed(() => hasPermission(authState.user, "settings.material_order_email_config", "edit"));
 
 const applyCurrentConfig = () => {
   const row = currentConfig.value;
@@ -105,6 +108,10 @@ const load = async () => {
 };
 
 const save = async () => {
+  if (!canEdit.value) {
+    error.value = "保存権限がありません。";
+    return;
+  }
   saving.value = true;
   message.value = "";
   error.value = "";
