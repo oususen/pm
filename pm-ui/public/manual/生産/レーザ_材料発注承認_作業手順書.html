@@ -162,6 +162,7 @@
     <li><span class="tn">6</span>注文書を送信する（係長 ※全担当者可）</li>
     <li><span class="tn">7</span>却下された場合（リーダ）</li>
     <li><span class="tn">8</span>作成後に修正する場合（リーダ）</li>
+    <li><span class="tn">9</span>納期調整する場合（全担当者）</li>
   </ul>
 </div>
 
@@ -392,6 +393,39 @@
   </div>
 </div>
 
+<!-- ステップ9 -->
+<div class="step">
+  <div class="step-header">
+    <div class="step-num">9</div>
+    <div class="step-title">納期調整する場合</div>
+  </div>
+  <div class="step-desc">
+    担当: <span class="role-badge creator">全担当者</span><br>
+    承認済み・送信済みの注文書に対して、納期（数量）を調整する必要が発生した場合の手順です。<br>
+    元の注文書PDFは削除されず、「納期変更」として別PDFが生成されます。承認フローは流れません。
+  </div>
+
+  <ol class="steps-list">
+    <li><span class="mock-btn creator-btn">佐藤商事納期調整</span> / <span class="mock-btn creator-btn">名成鋼機納期調整</span> を押します。</li>
+    <li>確認ダイアログで内容を確認し「OK」を押します。</li>
+    <li>納期調整ダイアログが表示されるので、調整する期間（開始日〜終了日）を指定して <strong>調整開始</strong> を押します。</li>
+    <li>指定期間の日付ロックが解除され、数量を編集できるようになります。ステータスに「納期調整中」と表示されます。</li>
+    <li>数量を修正します。</li>
+    <li><span class="mock-btn creator-btn">佐藤商事納期調整保存</span> / <span class="mock-btn creator-btn">名成鋼機納期調整保存</span> を押します。</li>
+    <li>変更が保存され、「納期変更」PDFが別ファイルとして生成されます。</li>
+  </ol>
+
+  <div class="callout info">
+    <span class="icon">ℹ️</span>
+    <div>納期調整は承認フローを経由しません。調整後のPDFは「納期変更_」プレフィックス付きの別ファイルとして保存され、元の承認済みPDFはそのまま残ります。</div>
+  </div>
+
+  <div class="callout warn">
+    <span class="icon">⚠️</span>
+    <div>納期調整で変更した内容を仕入先に連絡する場合は、別途メールや電話で対応してください。納期調整PDFの自動送信機能はありません。</div>
+  </div>
+</div>
+
 <!-- 補足情報 -->
 <div class="step">
   <div class="step-header">
@@ -402,7 +436,7 @@
   <div class="step-desc">ボタンは担当者の役割ごとにグループ化・色分けされています。</div>
   <table class="info-table">
     <tr><th>グループ</th><th>色</th><th>対象者</th></tr>
-    <tr><td><span class="mock-btn creator-btn">作成者</span></td><td>緑系</td><td>リーダ（数量保存・注文書作成・確認依頼・修正・手動追加）</td></tr>
+    <tr><td><span class="mock-btn creator-btn">作成者</span></td><td>緑系</td><td>リーダ（数量保存・注文書作成・確認依頼・修正・手動追加・納期調整）</td></tr>
     <tr><td><span class="mock-btn reviewer-btn">確認者</span></td><td>黄系</td><td>班長（確認）</td></tr>
     <tr><td><span class="mock-btn approver-btn">承認者</span></td><td>青系</td><td>係長（承認・送信）※送信は承認済みなら全担当者可</td></tr>
     <tr><td><span class="mock-btn reject-btn">却下</span></td><td>赤系</td><td>班長・係長（却下）</td></tr>
