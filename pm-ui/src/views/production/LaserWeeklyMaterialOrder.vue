@@ -198,7 +198,7 @@
                         min="0"
                         step="1"
                         type="number"
-                        :disabled="isDateLocked(day)"
+                        :disabled="isDateLocked(day, supplier.code)"
                         @focus="$event.target.select()"
                       /><input
                         class="sheets-input"
@@ -210,7 +210,7 @@
                         min="0"
                         step="1"
                         type="number"
-                        :disabled="isDateLocked(day)"
+                        :disabled="isDateLocked(day, supplier.code)"
                         @focus="$event.target.select()"
                       />
                     </div>
@@ -380,13 +380,18 @@ const supplierStatusLabel = (supplier) => {
   const saved = row.context?.material_order_pdf_files?.[supplier] ? " / PDF保存済" : "";
   return `${row.status_label || row.status}（${row.current_stage_label || row.current_stage}）${editing}${saved}${sent}`;
 };
-const isDateLocked = (day) => supplierApprovalList.value.some((row) => {
+const isApprovalDateLocked = (row, day) => {
+  if (!row) return false;
   if (!['created', 'reviewing', 'approved', 'sent'].includes(row.status)) return false;
   if (row.status === 'created' && row.context?.order_created === false) return false;
   const start = row.context?.lock_start_date || orderStartDate.value;
   const end = row.context?.lock_end_date || orderEndDate.value;
   return Boolean(start && end && day >= start && day <= end);
-});
+};
+const isDateLocked = (day, supplier = null) => {
+  if (supplier) return isApprovalDateLocked(supplierApproval(supplier), day);
+  return supplierApprovalList.value.some((row) => isApprovalDateLocked(row, day));
+};
 const approvalLocked = computed(() => supplierApprovalList.value.some((row) => ['reviewing', 'approved', 'sent'].includes(row.status)));
 const orderPeriodLocked = computed(() => supplierApprovalList.value.some(
   (row) => ['reviewing', 'approved', 'sent'].includes(row.status) || (row.status === 'created' && row.context?.order_created !== false),
@@ -553,37 +558,42 @@ const load = async () => {
   );
   await loadManualRows();
 };
-const save = async () => {
-  saving.value = true;
-  try {
-    const items = props.materials.flatMap((material) =>
-      props.dates
-        .map((required_date) => ({
-          material_id: material.material_id,
-          required_date,
-          delivery_date: required_date,
-          required_sheets: Number(material.daily[required_date] || 0),
-          lot_multiple: Number(material.order_lot_multiple || 1),
-          sato_enabled: hasSato(material),
-          sato_lots: Number(entry(material, required_date).sato_lots || 0),
-          meisei_lots: Number(entry(material, required_date).meisei_lots || 0),
-          sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
-          meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
-        }))
-        .filter((item) => item.required_sheets > 0 || item.sato_lots || item.meisei_lots || item.sato_sheets || item.meisei_sheets),
-    );
-    const initialItems = props.materials.map((material) => ({
+const buildMaterialOrderItems = () =>
+  props.materials.flatMap((material) =>
+    props.dates
+      .map((required_date) => ({
+        material_id: material.material_id,
+        required_date,
+        delivery_date: required_date,
+        required_sheets: Number(material.daily[required_date] || 0),
+        lot_multiple: Number(material.order_lot_multiple || 1),
+        sato_enabled: hasSato(material),
+        sato_lots: Number(entry(material, required_date).sato_lots || 0),
+        meisei_lots: Number(entry(material, required_date).meisei_lots || 0),
+        sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
+        meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
+      }))
+      .filter((item) => item.required_sheets > 0 || item.sato_lots || item.meisei_lots || item.sato_sheets || item.meisei_sheets),
+  );
+const buildInitialItems = () =>
+  props.materials.map((material) => ({
       material_id: material.material_id,
       initial_progress: Number(initial(material).value || 0),
       is_locked: initial(material).locked,
     }));
-    await Promise.all([
-      api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, items),
+const saveMaterialOrderChanges = async () => {
+  await Promise.all([
+      api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, buildMaterialOrderItems()),
       api.laserWeeklyPlans.saveMaterialInitialProgress(
         props.startDate,
-        initialItems,
+        buildInitialItems(),
       ),
     ]);
+};
+const save = async () => {
+  saving.value = true;
+  try {
+    await saveMaterialOrderChanges();
     emit("message", "材料発注進度を保存しました。");
     await load();
   } catch (e) {
@@ -611,9 +621,10 @@ const createApproval = async (supplier) => {
       emit("message", "注文書期間を正しく指定してください。");
       return;
     }
+    await saveMaterialOrderChanges();
     const result = await api.laserWeeklyPlans.createMaterialOrderApproval(props.startDate, orderStartDate.value, orderEndDate.value, supplier);
     setSupplierApproval(result.data);
-    emit("message", `${supplierName(supplier)}注文書PDFをサーバーに保存しました。`);
+    emit("message", `${supplierName(supplier)}の変更を保存し、注文書PDFをサーバーに保存しました。`);
   } catch (e) {
     emit("message", e?.response?.data?.detail || "作成済み処理に失敗しました。");
   } finally {
