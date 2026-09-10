@@ -43,7 +43,8 @@ MATERIAL_ORDER_SUPPLIER_CODES = {
 DEFAULT_MATERIAL_ORDER_EMAIL_BODY = (
     '{supplier_name} 御中\n\n'
     'いつもお世話になっております。\n'
-    '材料注文書を送付いたします。添付PDFをご確認ください。\n\n'
+    '材料注文書を送付いたします。添付PDFをご確認ください。\n'
+    'このメールは送信専用です。ご返信はCC宛先へお願いします。\n\n'
     'ダイソウ工業株式会社'
 )
 
