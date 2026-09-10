@@ -14,7 +14,7 @@
         <label><input v-model="orderEndDate" type="date" :min="orderStartDate" :max="props.dates[props.dates.length - 1]" :disabled="orderPeriodLocked" /></label>
       </div>
       <div class="actions">
-        <button class="btn primary" @click="save" :disabled="saving || !hasEditableDate">
+        <button class="btn primary" @click="openSaveDialog" :disabled="saving || !hasEditableDate">
           {{ saving ? "保存中..." : "変更を保存" }}</button
         ><button class="btn" @click="createApproval('SATO')" :disabled="isCreateOrderDisabled('SATO')">
           {{ createOrderButtonLabel("SATO") }}</button
@@ -54,6 +54,8 @@
           名成鋼機Excel</button
         ><button v-if="canResetApproval" class="btn danger" @click="resetApproval" :disabled="approvalBusy">
           承認リセット</button
+        ><button class="btn" @click="openEmailConfig">
+          メール設定</button
         ><button class="btn" @click="showManualAdd = !showManualAdd" :disabled="approvalLocked">
           手動追加
         </button>
@@ -87,6 +89,42 @@
           <div class="dialog-actions">
             <button class="btn primary" @click="download">出力</button
             ><button class="btn" @click="downloadDialog = false">
+              キャンセル
+            </button>
+          </div>
+        </section>
+      </div>
+      <div
+        v-if="saveDialog"
+        class="download-modal"
+        @click.self="saveDialog = false"
+      >
+        <section class="save-dialog">
+          <h3>手数変更を保存</h3>
+          <div class="save-week-buttons">
+            <button
+              v-for="week in saveWeekOptions"
+              :key="week.key"
+              class="btn"
+              :class="{ primary: selectedSaveWeekKeys.includes(week.key) }"
+              type="button"
+              @click="toggleSaveWeek(week.key)"
+            >
+              {{ week.shortLabel }}
+            </button>
+            <button
+              class="btn"
+              :class="{ primary: allSaveWeeksSelected }"
+              type="button"
+              @click="toggleAllSaveWeeks(true)"
+            >
+              全期間
+            </button>
+          </div>
+          <div class="dialog-actions">
+            <button class="btn primary" @click="save" :disabled="saving || !canSaveSelectedDates">
+              保存</button
+            ><button class="btn" @click="saveDialog = false" :disabled="saving">
               キャンセル
             </button>
           </div>
@@ -295,6 +333,7 @@
 </template>
 <script setup>
 import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import api from "@/api/client";
 import { authState } from "@/auth";
 const props = defineProps({
@@ -303,10 +342,14 @@ const props = defineProps({
   materials: { type: Array, required: true },
 });
 const emit = defineEmits(["message"]);
+const router = useRouter();
 const suppliers = [
   { code: "SATO", name: "佐藤商事" },
   { code: "MEISEI", name: "名成鋼機" },
 ];
+const openEmailConfig = () => {
+  router.push("/settings/material-order-email-config");
+};
 const iso = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const fixedColumnWidths = ["145px", "145px", "50px", "52px"];
@@ -321,6 +364,14 @@ const weekGroups = computed(() => {
   });
   return [...groups.values()];
 });
+const saveWeekOptions = computed(() =>
+  weekGroups.value.map((week, index) => ({
+    key: week.key,
+    shortLabel: `${index + 1}週目`,
+    label: `${index + 1}週目 ${week.days[0]?.slice(5).replace("-", "/")}～${week.days[week.days.length - 1]?.slice(5).replace("-", "/")}`,
+    days: week.days,
+  })),
+);
 const dayLabel = (day) =>
   `${day.slice(5)}(${["日", "月", "火", "水", "木", "金", "土"][new Date(`${day}T00:00:00`).getDay()]})`;
 const satoMaterialCodes = new Set([
@@ -341,6 +392,8 @@ const entries = ref({});
 const initials = ref({});
 const showOrder = ref(true);
 const saving = ref(false);
+const saveDialog = ref(false);
+const selectedSaveWeekKeys = ref([]);
 const approvals = ref({ SATO: null, MEISEI: null });
 const approvalBusy = ref(false);
 const defaultOrderStart = () => {
@@ -397,6 +450,30 @@ const orderPeriodLocked = computed(() => supplierApprovalList.value.some(
   (row) => ['reviewing', 'approved', 'sent'].includes(row.status) || (row.status === 'created' && row.context?.order_created !== false),
 ));
 const hasEditableDate = computed(() => props.dates.some((day) => !isDateLocked(day)));
+const allSaveWeeksSelected = computed(() =>
+  saveWeekOptions.value.length > 0 && selectedSaveWeekKeys.value.length === saveWeekOptions.value.length,
+);
+const selectedSaveDates = computed(() => {
+  const keys = new Set(selectedSaveWeekKeys.value);
+  return saveWeekOptions.value
+    .filter((week) => keys.has(week.key))
+    .flatMap((week) => week.days);
+});
+const canSaveSelectedDates = computed(() =>
+  selectedSaveDates.value.length > 0 && selectedSaveDates.value.some((day) => !isDateLocked(day)),
+);
+const toggleAllSaveWeeks = (checked) => {
+  selectedSaveWeekKeys.value = checked ? saveWeekOptions.value.map((week) => week.key) : [];
+};
+const toggleSaveWeek = (weekKey) => {
+  selectedSaveWeekKeys.value = selectedSaveWeekKeys.value.includes(weekKey)
+    ? selectedSaveWeekKeys.value.filter((key) => key !== weekKey)
+    : [...selectedSaveWeekKeys.value, weekKey];
+};
+const openSaveDialog = () => {
+  if (!selectedSaveWeekKeys.value.length) toggleAllSaveWeeks(true);
+  saveDialog.value = true;
+};
 const currentUserId = computed(() => Number(authState.user?.id || 0));
 const canResetApproval = computed(() => authState.user?.username === "admin" || authState.user?.is_superuser === true);
 const hasPendingTask = (row, taskType) => Boolean(row?.tasks?.some(
@@ -558,9 +635,11 @@ const load = async () => {
   );
   await loadManualRows();
 };
-const buildMaterialOrderItems = () =>
+const targetSaveDates = (startDate = null, endDate = null) =>
+  props.dates.filter((day) => (!startDate || day >= startDate) && (!endDate || day <= endDate));
+const buildMaterialOrderItems = (saveDates = props.dates) =>
   props.materials.flatMap((material) =>
-    props.dates
+    saveDates
       .map((required_date) => ({
         material_id: material.material_id,
         required_date,
@@ -581,9 +660,9 @@ const buildInitialItems = () =>
       initial_progress: Number(initial(material).value || 0),
       is_locked: initial(material).locked,
     }));
-const saveMaterialOrderChanges = async () => {
+const saveMaterialOrderChanges = async (saveDates = props.dates) => {
   await Promise.all([
-      api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, buildMaterialOrderItems()),
+      api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, buildMaterialOrderItems(saveDates)),
       api.laserWeeklyPlans.saveMaterialInitialProgress(
         props.startDate,
         buildInitialItems(),
@@ -593,8 +672,13 @@ const saveMaterialOrderChanges = async () => {
 const save = async () => {
   saving.value = true;
   try {
-    await saveMaterialOrderChanges();
-    emit("message", "材料発注進度を保存しました。");
+    if (!selectedSaveDates.value.length) {
+      emit("message", "保存対象の週を選択してください。");
+      return;
+    }
+    await saveMaterialOrderChanges(selectedSaveDates.value);
+    emit("message", `材料発注進度を保存しました。対象日数: ${selectedSaveDates.value.length}`);
+    saveDialog.value = false;
     await load();
   } catch (e) {
     emit("message", e?.response?.data?.detail || "保存に失敗しました。");
@@ -850,6 +934,13 @@ const download = async () => {
     emit("message", detail || "注文書を出力できませんでした。");
   }
 };
+watch(saveWeekOptions, (weeks) => {
+  const validKeys = new Set(weeks.map((week) => week.key));
+  const nextKeys = selectedSaveWeekKeys.value.filter((key) => validKeys.has(key));
+  selectedSaveWeekKeys.value = nextKeys.length ? nextKeys : weeks.map((week) => week.key);
+}, {
+  immediate: true,
+});
 watch(() => [props.startDate, props.materials], load, {
   immediate: true,
   deep: true,
@@ -881,6 +972,25 @@ watch(() => [props.startDate, props.materials], load, {
   margin-bottom: 8px;
   padding: 4px 0;
   background: #eef3f8;
+}
+.save-week-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+}
+.save-dialog {
+  display: grid;
+  gap: 10px;
+  min-width: 240px;
+  padding: 16px;
+  background: #fff;
+  border-radius: 6px;
+}
+.save-dialog h3 {
+  margin: 0;
+  font-size: 14px;
 }
 .btn {
   border: 1px solid #94a3b8;
