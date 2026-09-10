@@ -88,6 +88,12 @@ const settings = [
     meta: { pageTitle: "承認設定", resource: "settings.approval_routes" },
   },
   {
+    path: "/settings/material-order-email-config",
+    name: "MaterialOrderEmailConfig",
+    component: () => import("@/views/settings/MaterialOrderEmailConfig.vue"),
+    meta: { pageTitle: "材料注文書メール設定", resource: "settings.approval_routes" },
+  },
+  {
     path: "/settings/auto-plan",
     name: "AutoPlanMenu",
     component: () => import("@/views/settings/AutoPlanMenu.vue"),

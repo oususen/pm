@@ -1,5 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import F, Sum
 from django.db.models.functions import Coalesce
@@ -30,7 +31,7 @@ from .models_production_actual_reconcile import (
 )
 from .models_laser_processing_freq import LaserProcessingFreqPattern
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
-from .models_laser_weekly_plan import LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup
+from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup
 from .models_laser_actual import LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
 from .models_process_realtime import ProcessRealtimeRecord
@@ -521,6 +522,16 @@ class LaserWeeklyMaterialGroupSerializer(serializers.ModelSerializer):
             'pattern_ids', 'sort_order', 'is_active',
         ]
         read_only_fields = ['id']
+
+
+class LaserMaterialOrderEmailConfigSerializer(serializers.ModelSerializer):
+    supplier_label = serializers.CharField(source='get_supplier_display', read_only=True)
+    cc_users = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, required=False)
+
+    class Meta:
+        model = LaserMaterialOrderEmailConfig
+        fields = ['id', 'supplier', 'supplier_label', 'body', 'cc_users', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'supplier', 'supplier_label', 'created_at', 'updated_at']
 
 
 class LaserActualDetailSerializer(serializers.ModelSerializer):

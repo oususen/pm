@@ -61,6 +61,12 @@ const allTiles = [
     resource: 'settings.approval_routes',
   },
   {
+    to: '/settings/material-order-email-config',
+    title: '材料注文書メール設定',
+    desc: '佐藤商事・名成鋼機ごとの送信本文とCCユーザーを設定します。',
+    resource: 'settings.approval_routes',
+  },
+  {
     to: '/settings/purchase-order-approval',
     title: '発注承認者設定',
     desc: '発注提案書の承認レベル別ユーザーを設定します。',

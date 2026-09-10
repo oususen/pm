@@ -61,6 +61,7 @@ from production.views_laser import (
     LaserShiftRecordViewSet,
 )
 from production.views_laser_weekly_plan import (
+    LaserMaterialOrderEmailConfigViewSet,
     LaserWeeklyMaterialGroupViewSet,
     LaserWeeklyPlanTargetViewSet,
     LaserWeeklyPlanViewSet,
@@ -113,6 +114,7 @@ router.register(r'laser-actuals', LaserActualViewSet, basename='laseractual')
 router.register(r'laser-shift-records', LaserShiftRecordViewSet, basename='lasershiftrecord')
 router.register(r'laser-weekly-plan-targets', LaserWeeklyPlanTargetViewSet, basename='laserweeklyplantarget')
 router.register(r'laser-weekly-material-groups', LaserWeeklyMaterialGroupViewSet, basename='laserweeklymaterialgroup')
+router.register(r'laser-material-order-email-configs', LaserMaterialOrderEmailConfigViewSet, basename='lasermaterialorderemailconfig')
 router.register(r'laser-weekly-plans', LaserWeeklyPlanViewSet, basename='laserweeklyplan')
 router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, basename='ganttdisplayproductmap')
 router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')

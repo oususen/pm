@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from masters.models import Line, Product
 from .models_laser_pattern import LaserPattern
@@ -119,3 +120,25 @@ class LaserWeeklyMaterialInitialProgress(models.Model):
     class Meta:
         db_table = 't_laser_weekly_material_initial_progress'
         constraints = [models.UniqueConstraint(fields=['plan_start_date', 'material'], name='laser_weekly_material_initial_progress_unique')]
+
+
+class LaserMaterialOrderEmailConfig(models.Model):
+    supplier = models.CharField(
+        max_length=10,
+        choices=LaserWeeklyMaterialOrderProgress.SUPPLIER_CHOICES,
+        unique=True,
+        verbose_name='仕入先',
+    )
+    body = models.TextField(blank=True, default='', verbose_name='本文')
+    cc_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='laser_material_order_email_configs',
+        verbose_name='CCユーザー',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 't_laser_material_order_email_config'
+        ordering = ['supplier']

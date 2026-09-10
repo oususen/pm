@@ -20,17 +20,18 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
 from accounts.models import ApprovalRequest, ApprovalRouteConfig
 from accounts.serializers import ApprovalRequestSerializer
 from shipping.services.email_service import EmailService
 
-from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
+from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
 from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
-from .serializers import LaserWeeklyMaterialGroupSerializer, LaserWeeklyPlanTargetSerializer
+from .serializers import LaserMaterialOrderEmailConfigSerializer, LaserWeeklyMaterialGroupSerializer, LaserWeeklyPlanTargetSerializer
 from .services.recalc_start_date import _build_workday_helpers, _resolve_calendar_id
 
 
@@ -38,6 +39,54 @@ MATERIAL_ORDER_SUPPLIER_CODES = {
     LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI: '000048',
     LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO: '000131',
 }
+
+DEFAULT_MATERIAL_ORDER_EMAIL_BODY = (
+    '{supplier_name} 御中\n\n'
+    'いつもお世話になっております。\n'
+    '材料注文書を送付いたします。添付PDFをご確認ください。\n\n'
+    'ダイソウ工業株式会社'
+)
+
+
+def render_material_order_email_body(template, order_supplier, start_label='', end_label=''):
+    body = (template or DEFAULT_MATERIAL_ORDER_EMAIL_BODY).strip() or DEFAULT_MATERIAL_ORDER_EMAIL_BODY
+    return (
+        body
+        .replace('{supplier_name}', order_supplier.supplier_name or '')
+        .replace('{start_date}', start_label or '')
+        .replace('{end_date}', end_label or '')
+    )
+
+
+class LaserMaterialOrderEmailConfigViewSet(viewsets.ModelViewSet):
+    serializer_class = LaserMaterialOrderEmailConfigSerializer
+    pagination_class = None
+    lookup_field = 'supplier'
+
+    def get_queryset(self):
+        return LaserMaterialOrderEmailConfig.objects.prefetch_related('cc_users').order_by('supplier')
+
+    def _ensure_configs(self):
+        for supplier, _label in LaserWeeklyMaterialOrderProgress.SUPPLIER_CHOICES:
+            LaserMaterialOrderEmailConfig.objects.get_or_create(
+                supplier=supplier,
+                defaults={'body': DEFAULT_MATERIAL_ORDER_EMAIL_BODY},
+            )
+
+    def list(self, request, *args, **kwargs):
+        self._ensure_configs()
+        return super().list(request, *args, **kwargs)
+
+    def get_object(self):
+        supplier = self.kwargs.get(self.lookup_field)
+        if supplier not in MATERIAL_ORDER_SUPPLIER_CODES:
+            raise NotFound('仕入先が見つかりません。')
+        obj, _created = LaserMaterialOrderEmailConfig.objects.get_or_create(
+            supplier=supplier,
+            defaults={'body': DEFAULT_MATERIAL_ORDER_EMAIL_BODY},
+        )
+        self.check_object_permissions(self.request, obj)
+        return obj
 
 
 class LaserWeeklyPlanTargetViewSet(viewsets.ModelViewSet):
@@ -327,14 +376,22 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         start_label = context.get('lock_start_date') or ''
         end_label = context.get('lock_end_date') or ''
         subject = f'材料注文書 {start_label}～{end_label}' if start_label and end_label else '材料注文書'
-        body = (
-            f'{order_supplier.supplier_name} 御中\n\n'
-            'いつもお世話になっております。\n'
-            '材料注文書を送付いたします。添付PDFをご確認ください。\n\n'
-            'ダイソウ工業株式会社'
+        email_config = (
+            LaserMaterialOrderEmailConfig.objects
+            .prefetch_related('cc_users')
+            .filter(supplier=supplier)
+            .first()
         )
+        body = render_material_order_email_body(
+            email_config.body if email_config else DEFAULT_MATERIAL_ORDER_EMAIL_BODY,
+            order_supplier,
+            start_label,
+            end_label,
+        )
+        cc_emails = [user.email for user in email_config.cc_users.all() if user.email] if email_config else []
         result = EmailService().send_email_with_attachment(
             to_emails=[order_supplier.order_email],
+            cc_emails=cc_emails,
             subject=subject,
             body=body,
             attachment_data=BytesIO(file_path.read_bytes()),
@@ -348,6 +405,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         sent_files[supplier] = {
             'sent_at': datetime.now().isoformat(timespec='seconds'),
             'to_email': order_supplier.order_email,
+            'cc_emails': cc_emails,
             'filename': file_info.get('stored_filename') or file_path.name,
         }
         context = {**context, 'material_order_sent_files': sent_files}
