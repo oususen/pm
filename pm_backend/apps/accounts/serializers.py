@@ -19,6 +19,9 @@ from .models import (
     UserSmtpConfig,
     UserFavorite,
     ApprovalRouteConfig,
+    ApprovalRequest,
+    ApprovalStep,
+    ApprovalTask,
 )
 
 
@@ -699,3 +702,56 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
 
     def get_approver_proxy_user_names(self, obj):
         return self._get_user_names(obj.approver_proxy_users)
+
+
+class ApprovalStepSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ApprovalStep
+        fields = ['id', 'stage', 'user', 'user_name', 'action', 'comment', 'acted_at']
+        read_only_fields = ['id', 'acted_at']
+
+    def get_user_name(self, obj):
+        u = obj.user
+        return f'{u.last_name or ""} {u.first_name or ""}'.strip() or u.username
+
+
+class ApprovalTaskSerializer(serializers.ModelSerializer):
+    assigned_to_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ApprovalTask
+        fields = ['id', 'task_type', 'assigned_to', 'assigned_to_name', 'status', 'due_date', 'created_at', 'done_at']
+
+    def get_assigned_to_name(self, obj):
+        u = obj.assigned_to
+        if not u:
+            return ''
+        return f'{u.last_name or ""} {u.first_name or ""}'.strip() or u.username
+
+
+class ApprovalRequestSerializer(serializers.ModelSerializer):
+    steps = ApprovalStepSerializer(many=True, read_only=True)
+    tasks = ApprovalTaskSerializer(many=True, read_only=True)
+    creator_name = serializers.SerializerMethodField()
+    route_config_name = serializers.CharField(source='route_config.item_name', read_only=True)
+    route_config_item_key = serializers.CharField(source='route_config.item_key', read_only=True)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    current_stage_label = serializers.CharField(source='get_current_stage_display', read_only=True)
+
+    class Meta:
+        model = ApprovalRequest
+        fields = [
+            'id', 'route_config', 'route_config_name', 'route_config_item_key',
+            'status', 'status_label', 'current_stage', 'current_stage_label',
+            'creator', 'creator_name', 'context',
+            'pdf_file', 'reject_reason',
+            'created_at', 'updated_at',
+            'steps', 'tasks',
+        ]
+        read_only_fields = ['id', 'status', 'current_stage', 'creator', 'created_at', 'updated_at']
+
+    def get_creator_name(self, obj):
+        u = obj.creator
+        return f'{u.last_name or ""} {u.first_name or ""}'.strip() or u.username

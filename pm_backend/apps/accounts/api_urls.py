@@ -17,6 +17,7 @@ from .api_views import (
     UserFavoriteViewSet,
     ApprovalRouteConfigViewSet,
 )
+from .approval_views import ApprovalRequestViewSet
 
 router = DefaultRouter()
 router.register(r'departments', DepartmentViewSet)
@@ -34,5 +35,6 @@ router.register(r'smtp-configs', UserSmtpConfigViewSet)
 router.register(r'unit-line-mappings', UnitLineMappingViewSet)
 router.register(r'favorites', UserFavoriteViewSet)
 router.register(r'approval-routes', ApprovalRouteConfigViewSet)
+router.register(r'approval-requests', ApprovalRequestViewSet)
 
 urlpatterns = router.urls

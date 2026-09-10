@@ -514,14 +514,19 @@ const loadPendingTaskCount = async () => {
   }
   try {
     const params = { assigned_to_me: true, status: 'PENDING' }
-    const [purchaseResponse, qualityResponse, icsResponse] = await Promise.allSettled([
+    const approvalParams = { assigned_to_me: true, task_status: 'PENDING' }
+    const [purchaseResponse, qualityResponse, icsResponse, approvalResponse] = await Promise.allSettled([
       api.purchaseOrderProposals.listTasks(params),
       api.qualityEquipmentInspections.listTasks(params),
       api.integratedChecksheets.listTasks(params),
+      api.accounts.getApprovalRequests(approvalParams),
     ])
     const pickRows = (result, label) => {
       if (result.status === 'fulfilled') {
-        return Array.isArray(result.value?.data) ? result.value.data : []
+        const payload = result.value?.data
+        if (Array.isArray(payload)) return payload
+        if (Array.isArray(payload?.results)) return payload.results
+        return []
       }
       console.error(`${label}タスク件数の取得に失敗しました:`, result.reason)
       return []
@@ -529,7 +534,15 @@ const loadPendingTaskCount = async () => {
     const purchaseRows = pickRows(purchaseResponse, '購買')
     const qualityRows = pickRows(qualityResponse, '設備点検')
     const icsRows = pickRows(icsResponse, '統合チェックシート')
-    pendingTaskCount.value = purchaseRows.length + qualityRows.length + icsRows.length
+    const approvalRows = pickRows(approvalResponse, '共通承認')
+    const currentUserId = Number(authState.user?.id || 0)
+    const approvalTaskCount = approvalRows.reduce((count, request) => {
+      const tasks = Array.isArray(request?.tasks) ? request.tasks : []
+      return count + tasks.filter((task) =>
+        task.status === 'PENDING' && Number(task.assigned_to) === currentUserId
+      ).length
+    }, 0)
+    pendingTaskCount.value = purchaseRows.length + qualityRows.length + icsRows.length + approvalTaskCount
   } catch (error) {
     console.error('タスク件数の取得に失敗しました:', error)
     pendingTaskCount.value = 0

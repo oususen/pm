@@ -464,3 +464,132 @@ class ApprovalRouteConfig(models.Model):
 
     def __str__(self):
         return f'{self.item_key}: {self.item_name}'
+
+
+class ApprovalRequest(models.Model):
+    """承認申請インスタンス"""
+
+    STATUS_CHOICES = [
+        ('created', '作成済み'),
+        ('reviewing', '確認中'),
+        ('approved', '承認済み'),
+        ('rejected', '却下'),
+        ('sent', '送信済み'),
+    ]
+    STAGE_CHOICES = [
+        ('creator', '作成者'),
+        ('reviewer1', '確認①'),
+        ('reviewer2', '確認②'),
+        ('approver', '承認者'),
+        ('completed', '完了'),
+    ]
+
+    route_config = models.ForeignKey(
+        ApprovalRouteConfig,
+        on_delete=models.PROTECT,
+        related_name='requests',
+        verbose_name='承認ルート設定',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='created', verbose_name='ステータス')
+    current_stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='creator', verbose_name='現在の段階')
+    creator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='approval_requests_created',
+        verbose_name='作成者',
+    )
+    context = models.JSONField(default=dict, verbose_name='申請コンテキスト')
+    pdf_file = models.FileField(upload_to='approval/', blank=True, default='', verbose_name='PDFファイル')
+    reject_reason = models.TextField(blank=True, default='', verbose_name='却下理由')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'accounts_approval_request'
+        verbose_name = '承認申請'
+        verbose_name_plural = '承認申請'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.route_config.item_key} #{self.id} ({self.get_status_display()})'
+
+
+class ApprovalStep(models.Model):
+    """承認フローの各段階の実行記録"""
+
+    ACTION_CHOICES = [
+        ('confirmed', '確認済み'),
+        ('approved', '承認'),
+        ('rejected', '却下'),
+    ]
+
+    request = models.ForeignKey(
+        ApprovalRequest,
+        on_delete=models.CASCADE,
+        related_name='steps',
+        verbose_name='承認申請',
+    )
+    stage = models.CharField(max_length=20, choices=ApprovalRequest.STAGE_CHOICES, verbose_name='段階')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='approval_steps',
+        verbose_name='実行者',
+    )
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, verbose_name='アクション')
+    comment = models.TextField(blank=True, default='', verbose_name='コメント')
+    acted_at = models.DateTimeField(auto_now_add=True, verbose_name='実行日時')
+
+    class Meta:
+        db_table = 'accounts_approval_step'
+        verbose_name = '承認ステップ'
+        verbose_name_plural = '承認ステップ'
+        ordering = ['acted_at']
+
+    def __str__(self):
+        return f'{self.request_id} / {self.get_stage_display()} / {self.get_action_display()}'
+
+
+class ApprovalTask(models.Model):
+    """承認フロー用タスク"""
+
+    TASK_TYPE_CHOICES = [
+        ('CREATOR_CREATE', '作成'),
+        ('REVIEWER1_REVIEW', '確認①'),
+        ('REVIEWER2_REVIEW', '確認②'),
+        ('APPROVER_APPROVE', '承認'),
+        ('CREATOR_FIX', '差戻し修正'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING', '未処理'),
+        ('DONE', '完了'),
+        ('SKIPPED', 'スキップ'),
+    ]
+
+    request = models.ForeignKey(
+        ApprovalRequest,
+        on_delete=models.CASCADE,
+        related_name='tasks',
+        verbose_name='承認申請',
+    )
+    task_type = models.CharField(max_length=30, choices=TASK_TYPE_CHOICES, verbose_name='タスク種別')
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='approval_tasks',
+        verbose_name='担当者',
+    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING', verbose_name='ステータス')
+    due_date = models.DateField(null=True, blank=True, verbose_name='期限')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    done_at = models.DateTimeField(null=True, blank=True, verbose_name='完了日時')
+
+    class Meta:
+        db_table = 'accounts_approval_task'
+        verbose_name = '承認タスク'
+        verbose_name_plural = '承認タスク'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.request_id} / {self.get_task_type_display()} / {self.get_status_display()}'

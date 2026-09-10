@@ -5,9 +5,45 @@
     </h3>
     <div v-show="showOrder">
       <p>佐藤商事の手数を入力すると、残りの自数を名成鋼機へ自動配分します。手数は上段がロット数(L)、下段が端数枚数(枚)です。</p>
+      <p v-if="hasAnyApproval" class="approval-status">
+        最新期間: {{ approvalPeriodLabel }} / 佐藤商事: {{ supplierStatusLabel('SATO') }} / 名成鋼機: {{ supplierStatusLabel('MEISEI') }}
+      </p>
+      <div class="order-period">
+        <label>注文書期間<input v-model="orderStartDate" type="date" :min="props.dates[0]" :max="props.dates[props.dates.length - 1]" :disabled="orderPeriodLocked" /></label>
+        <span>〜</span>
+        <label><input v-model="orderEndDate" type="date" :min="orderStartDate" :max="props.dates[props.dates.length - 1]" :disabled="orderPeriodLocked" /></label>
+      </div>
       <div class="actions">
-        <button class="btn primary" @click="save" :disabled="saving">
+        <button class="btn primary" @click="save" :disabled="saving || !hasEditableDate">
           {{ saving ? "保存中..." : "変更を保存" }}</button
+        ><button class="btn" @click="createApproval('SATO')" :disabled="isCreateOrderDisabled('SATO')">
+          {{ createOrderButtonLabel("SATO") }}</button
+        ><button class="btn" @click="createApproval('MEISEI')" :disabled="isCreateOrderDisabled('MEISEI')">
+          {{ createOrderButtonLabel("MEISEI") }}</button
+        ><button v-if="canSubmitApproval('SATO')" class="btn" @click="submitApproval('SATO')" :disabled="approvalBusy">
+          佐藤商事確認依頼</button
+        ><button v-if="canSubmitApproval('MEISEI')" class="btn" @click="submitApproval('MEISEI')" :disabled="approvalBusy">
+          名成鋼機確認依頼</button
+        ><button v-if="canReopenApproval('SATO')" class="btn" @click="reopenApproval('SATO')" :disabled="approvalBusy">
+          佐藤商事修正</button
+        ><button v-if="canReopenApproval('MEISEI')" class="btn" @click="reopenApproval('MEISEI')" :disabled="approvalBusy">
+          名成鋼機修正</button
+        ><button v-if="canConfirm('SATO')" class="btn" @click="confirmApproval('SATO')" :disabled="approvalBusy">
+          佐藤商事確認</button
+        ><button v-if="canConfirm('MEISEI')" class="btn" @click="confirmApproval('MEISEI')" :disabled="approvalBusy">
+          名成鋼機確認</button
+        ><button v-if="canApprove('SATO')" class="btn primary" @click="approveApproval('SATO')" :disabled="approvalBusy">
+          佐藤商事承認</button
+        ><button v-if="canApprove('MEISEI')" class="btn primary" @click="approveApproval('MEISEI')" :disabled="approvalBusy">
+          名成鋼機承認</button
+        ><button v-if="canReview('SATO')" class="btn danger" @click="rejectApproval('SATO')" :disabled="approvalBusy">
+          佐藤商事却下</button
+        ><button v-if="canReview('MEISEI')" class="btn danger" @click="rejectApproval('MEISEI')" :disabled="approvalBusy">
+          名成鋼機却下</button
+        ><button v-if="canSendOrder('SATO')" class="btn primary" @click="sendOrder('SATO')" :disabled="approvalBusy">
+          佐藤商事送信</button
+        ><button v-if="canSendOrder('MEISEI')" class="btn primary" @click="sendOrder('MEISEI')" :disabled="approvalBusy">
+          名成鋼機送信</button
         ><button class="btn" @click="openDownload('SATO', 'pdf')">
           佐藤商事PDF</button
         ><button class="btn" @click="openDownload('SATO', 'excel')">
@@ -16,7 +52,9 @@
           名成鋼機PDF</button
         ><button class="btn" @click="openDownload('MEISEI', 'excel')">
           名成鋼機Excel</button
-        ><button class="btn" @click="showManualAdd = !showManualAdd">
+        ><button v-if="canResetApproval" class="btn danger" @click="resetApproval" :disabled="approvalBusy">
+          承認リセット</button
+        ><button class="btn" @click="showManualAdd = !showManualAdd" :disabled="approvalLocked">
           手動追加
         </button>
       </div>
@@ -33,7 +71,7 @@
         <label>ロット数<input v-model.number="manualLots" type="number" min="0" style="width:60px;" /></label>
         <label>枚/ロット<input v-model.number="manualLotMultiple" type="number" min="0" style="width:60px;" /></label>
         <label>端数枚数<input v-model.number="manualSheets" type="number" min="0" style="width:60px;" /></label>
-        <button class="btn primary" @click="addManualOrder" :disabled="!manualMaterialId || !manualDeliveryDate || (manualLots === 0 && manualSheets === 0)">登録</button>
+        <button class="btn primary" @click="addManualOrder" :disabled="approvalLocked || !manualMaterialId || !manualDeliveryDate || (manualLots === 0 && manualSheets === 0)">登録</button>
       </div>
       <div
         v-if="downloadDialog"
@@ -127,7 +165,7 @@
                 <input
                   class="initial-input"
                   v-model.number="initial(material).value"
-                  :disabled="initial(material).locked"
+                  :disabled="approvalLocked || initial(material).locked"
                   step="1"
                   type="number"
                 /><button
@@ -160,6 +198,7 @@
                         min="0"
                         step="1"
                         type="number"
+                        :disabled="isDateLocked(day)"
                         @focus="$event.target.select()"
                       /><input
                         class="sheets-input"
@@ -171,6 +210,7 @@
                         min="0"
                         step="1"
                         type="number"
+                        :disabled="isDateLocked(day)"
                         @focus="$event.target.select()"
                       />
                     </div>
@@ -243,7 +283,7 @@
                 </template>
                 <td class="week-total" colspan="3"></td>
                 <td class="week-total week-end">
-                  <button class="del-btn" @click="deleteManualRow(row.id)" title="削除">×</button>
+                  <button class="del-btn" @click="deleteManualRow(row.id)" :disabled="approvalLocked" title="削除">×</button>
                 </td>
               </template>
             </tr>
@@ -256,6 +296,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import api from "@/api/client";
+import { authState } from "@/auth";
 const props = defineProps({
   startDate: { type: String, required: true },
   dates: { type: Array, required: true },
@@ -300,6 +341,100 @@ const entries = ref({});
 const initials = ref({});
 const showOrder = ref(true);
 const saving = ref(false);
+const approvals = ref({ SATO: null, MEISEI: null });
+const approvalBusy = ref(false);
+const defaultOrderStart = () => {
+  const start = new Date(`${props.startDate}T00:00:00`);
+  const dayIndex = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() + 7 - dayIndex);
+  return iso(start);
+};
+const defaultOrderEnd = () => {
+  const start = new Date(`${defaultOrderStart()}T00:00:00`);
+  start.setDate(start.getDate() + 4);
+  return iso(start);
+};
+const orderStartDate = ref('');
+const orderEndDate = ref('');
+const supplierName = (supplier) => (supplier === "SATO" ? "佐藤商事" : "名成鋼機");
+const supplierApproval = (supplier) => approvals.value?.[supplier] || null;
+const supplierApprovalList = computed(() => [supplierApproval("SATO"), supplierApproval("MEISEI")].filter(Boolean));
+const hasAnyApproval = computed(() => supplierApprovalList.value.length > 0);
+const setSupplierApproval = (data) => {
+  const supplier = data?.context?.supplier;
+  if (!supplier) return;
+  approvals.value = { ...approvals.value, [supplier]: data };
+};
+const approvalPeriodLabel = computed(() => {
+  const context = supplierApprovalList.value[0]?.context || {};
+  const start = context.lock_start_date || orderStartDate.value;
+  const end = context.lock_end_date || orderEndDate.value;
+  if (!start && !end) return "-";
+  return `${start || "-"} ～ ${end || "-"}`;
+});
+const supplierStatusLabel = (supplier) => {
+  const row = supplierApproval(supplier);
+  if (!row) return "未作成";
+  const editing = row.status === 'created' && row.context?.order_created === false ? " / 修正中" : "";
+  const sent = row.context?.material_order_sent_files?.[supplier] ? " / 送信済" : "";
+  const saved = row.context?.material_order_pdf_files?.[supplier] ? " / PDF保存済" : "";
+  return `${row.status_label || row.status}（${row.current_stage_label || row.current_stage}）${editing}${saved}${sent}`;
+};
+const isDateLocked = (day) => supplierApprovalList.value.some((row) => {
+  if (!['created', 'reviewing', 'approved', 'sent'].includes(row.status)) return false;
+  if (row.status === 'created' && row.context?.order_created === false) return false;
+  const start = row.context?.lock_start_date || orderStartDate.value;
+  const end = row.context?.lock_end_date || orderEndDate.value;
+  return Boolean(start && end && day >= start && day <= end);
+});
+const approvalLocked = computed(() => supplierApprovalList.value.some((row) => ['reviewing', 'approved', 'sent'].includes(row.status)));
+const orderPeriodLocked = computed(() => supplierApprovalList.value.some(
+  (row) => ['reviewing', 'approved', 'sent'].includes(row.status) || (row.status === 'created' && row.context?.order_created !== false),
+));
+const hasEditableDate = computed(() => props.dates.some((day) => !isDateLocked(day)));
+const currentUserId = computed(() => Number(authState.user?.id || 0));
+const canResetApproval = computed(() => authState.user?.username === "admin" || authState.user?.is_superuser === true);
+const hasPendingTask = (row, taskType) => Boolean(row?.tasks?.some(
+  (task) => task.status === "PENDING" && task.task_type === taskType && Number(task.assigned_to) === currentUserId.value,
+));
+const hasSavedOrderPdf = (supplier) => Boolean(supplierApproval(supplier)?.context?.material_order_pdf_files?.[supplier]);
+const hasSentOrderPdf = (supplier) => Boolean(supplierApproval(supplier)?.context?.material_order_sent_files?.[supplier]);
+const canSubmitApproval = (supplier) => {
+  const row = supplierApproval(supplier);
+  return row && ['created', 'rejected'].includes(row.status) && row.context?.order_created !== false;
+};
+const canReopenApproval = (supplier) => {
+  const row = supplierApproval(supplier);
+  return row?.status === 'created' && row.context?.order_created !== false;
+};
+const createOrderButtonLabel = (supplier) => {
+  const row = supplierApproval(supplier);
+  const prefix = supplierName(supplier);
+  return row?.status === "rejected" || row?.context?.order_created === false
+    ? `${prefix}注文書再作成`
+    : `${prefix}注文書作成`;
+};
+const canSendOrder = (supplier) => {
+  const row = supplierApproval(supplier);
+  return ['approved', 'sent'].includes(row?.status) && hasSavedOrderPdf(supplier) && !hasSentOrderPdf(supplier);
+};
+const isCreateOrderDisabled = (supplier) => {
+  const row = supplierApproval(supplier);
+  return approvalBusy.value ||
+    row?.status === 'reviewing' ||
+    row?.status === 'approved' ||
+    row?.status === 'sent' ||
+    (hasSavedOrderPdf(supplier) && row?.status !== 'rejected' && row?.context?.order_created !== false);
+};
+const canConfirm = (supplier) => {
+  const row = supplierApproval(supplier);
+  return row?.status === "reviewing" && ['reviewer1', 'reviewer2'].includes(row.current_stage) && hasPendingTask(row, `${row.current_stage.toUpperCase()}_REVIEW`);
+};
+const canApprove = (supplier) => {
+  const row = supplierApproval(supplier);
+  return row?.status === "reviewing" && row.current_stage === "approver" && hasPendingTask(row, "APPROVER_APPROVE");
+};
+const canReview = (supplier) => canConfirm(supplier) || canApprove(supplier);
 const downloadDialog = ref(false);
 const downloadSupplier = ref("");
 const downloadFormat = ref("pdf");
@@ -377,10 +512,16 @@ const number = (value) =>
   Number(value || 0).toFixed(Math.abs(Number(value || 0)) < 0.1 ? 2 : 1);
 const load = async () => {
   if (!props.startDate) return;
-  const [orders, initialProgress] = await Promise.all([
+  const [orders, initialProgress, approvalResponse] = await Promise.all([
     api.laserWeeklyPlans.getMaterialOrderProgress(props.startDate),
     api.laserWeeklyPlans.getMaterialInitialProgress(props.startDate),
+    api.laserWeeklyPlans.getMaterialOrderApproval(props.startDate),
   ]);
+  const approvalMap = approvalResponse.data?.approvals || {};
+  approvals.value = { SATO: approvalMap.SATO || null, MEISEI: approvalMap.MEISEI || null };
+  const firstApproval = approvals.value.SATO || approvals.value.MEISEI || null;
+  orderStartDate.value = firstApproval?.context?.lock_start_date || defaultOrderStart();
+  orderEndDate.value = firstApproval?.context?.lock_end_date || defaultOrderEnd();
   const next = {};
   orders.data.forEach((item) => {
     const value = next[`${item.material_id}:${item.required_date}`] || { sato_sheets: 0, meisei_sheets: 0 };
@@ -449,6 +590,113 @@ const save = async () => {
     emit("message", e?.response?.data?.detail || "保存に失敗しました。");
   } finally {
     saving.value = false;
+  }
+};
+const submitApproval = async (supplier) => {
+  approvalBusy.value = true;
+  try {
+    const result = await api.accounts.submitApprovalRequest(supplierApproval(supplier).id);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}の確認依頼を送信しました。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "確認依頼に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const createApproval = async (supplier) => {
+  approvalBusy.value = true;
+  try {
+    if (!orderStartDate.value || !orderEndDate.value || orderEndDate.value < orderStartDate.value) {
+      emit("message", "注文書期間を正しく指定してください。");
+      return;
+    }
+    const result = await api.laserWeeklyPlans.createMaterialOrderApproval(props.startDate, orderStartDate.value, orderEndDate.value, supplier);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}注文書PDFをサーバーに保存しました。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "作成済み処理に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const reopenApproval = async (supplier) => {
+  if (!confirm(`${supplierName(supplier)}注文書を修正状態に戻しますか？`)) return;
+  approvalBusy.value = true;
+  try {
+    const result = await api.laserWeeklyPlans.reopenMaterialOrderApproval(props.startDate, orderStartDate.value, orderEndDate.value, supplier);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}注文書を修正できる状態に戻しました。修正後は注文書を再作成してください。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "注文書修正に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const sendOrder = async (supplier) => {
+  approvalBusy.value = true;
+  try {
+    const result = await api.laserWeeklyPlans.sendMaterialOrder(props.startDate, supplier, orderStartDate.value, orderEndDate.value);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}へ注文書を送信しました。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "注文書送信に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const resetApproval = async () => {
+  if (!confirm("この注文書期間の材料発注承認・タスク・保存PDFをリセットしますか？")) return;
+  approvalBusy.value = true;
+  try {
+    const result = await api.laserWeeklyPlans.resetMaterialOrderApproval(props.startDate, orderStartDate.value, orderEndDate.value);
+    approvals.value = { SATO: null, MEISEI: null };
+    orderStartDate.value = defaultOrderStart();
+    orderEndDate.value = defaultOrderEnd();
+    emit("message", `注文書期間の承認をリセットしました。削除件数: ${result.data?.deleted_count ?? 0}`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "承認リセットに失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const confirmApproval = async (supplier) => {
+  approvalBusy.value = true;
+  try {
+    const result = await api.accounts.confirmApprovalRequest(supplierApproval(supplier).id);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}を確認しました。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "確認に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const approveApproval = async (supplier) => {
+  approvalBusy.value = true;
+  try {
+    const result = await api.accounts.approveApprovalRequest(supplierApproval(supplier).id);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}を承認しました。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "承認に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
+  }
+};
+const rejectApproval = async (supplier) => {
+  const row = supplierApproval(supplier);
+  const reason = window.prompt("却下理由を入力してください。", row?.reject_reason || "");
+  if (reason === null) return;
+  approvalBusy.value = true;
+  try {
+    const result = await api.accounts.rejectApprovalRequest(row.id, reason);
+    setSupplierApproval(result.data);
+    emit("message", `${supplierName(supplier)}を却下しました。`);
+  } catch (e) {
+    emit("message", e?.response?.data?.detail || "却下に失敗しました。");
+  } finally {
+    approvalBusy.value = false;
   }
 };
 const toggleLock = async (material) => {

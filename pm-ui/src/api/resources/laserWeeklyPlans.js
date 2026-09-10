@@ -29,6 +29,41 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveMaterialInitialProgress(startDate, items) {
     return client.post('/laser-weekly-plans/material-initial-progress/', { start_date: startDate, items })
   },
+  getMaterialOrderApproval(startDate) {
+    return client.get('/laser-weekly-plans/material-order-approval/', { params: { start_date: startDate } })
+  },
+  createMaterialOrderApproval(startDate, lockStartDate, lockEndDate, supplier) {
+    return client.post('/laser-weekly-plans/material-order-approval/', {
+      start_date: startDate,
+      lock_start_date: lockStartDate,
+      lock_end_date: lockEndDate,
+      supplier,
+    })
+  },
+  reopenMaterialOrderApproval(startDate, lockStartDate, lockEndDate, supplier) {
+    return client.post('/laser-weekly-plans/material-order-approval/', {
+      start_date: startDate,
+      lock_start_date: lockStartDate,
+      lock_end_date: lockEndDate,
+      supplier,
+      action: 'reopen',
+    })
+  },
+  sendMaterialOrder(startDate, supplier, lockStartDate, lockEndDate) {
+    return client.post('/laser-weekly-plans/material-order-send/', {
+      start_date: startDate,
+      supplier,
+      lock_start_date: lockStartDate,
+      lock_end_date: lockEndDate,
+    })
+  },
+  resetMaterialOrderApproval(startDate, lockStartDate, lockEndDate) {
+    return client.post('/laser-weekly-plans/material-order-reset/', {
+      start_date: startDate,
+      lock_start_date: lockStartDate,
+      lock_end_date: lockEndDate,
+    })
+  },
   exportMaterialOrderExcel(planStartDate, supplier, startDate, endDate) {
     return client.get('/laser-weekly-plans/material-order-excel/', { params: { plan_start_date: planStartDate, start_date: startDate, end_date: endDate, supplier }, responseType: 'blob' })
   },

@@ -89,4 +89,19 @@ export const createAccountsAPI = (client) => ({
   saveApprovalRoutes(routes, deleteIds = []) {
     return client.put('/accounts/approval-routes/bulk-save/', { routes, delete_ids: deleteIds })
   },
+  getApprovalRequests(params = {}) {
+    return client.get('/accounts/approval-requests/', { params })
+  },
+  submitApprovalRequest(id) {
+    return client.post(`/accounts/approval-requests/${id}/submit/`)
+  },
+  confirmApprovalRequest(id) {
+    return client.post(`/accounts/approval-requests/${id}/confirm/`)
+  },
+  approveApprovalRequest(id) {
+    return client.post(`/accounts/approval-requests/${id}/approve/`)
+  },
+  rejectApprovalRequest(id, reason = '') {
+    return client.post(`/accounts/approval-requests/${id}/reject/`, { reason })
+  },
 })

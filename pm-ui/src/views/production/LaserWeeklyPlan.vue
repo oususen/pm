@@ -770,10 +770,13 @@
   </section>
 </template>
 <script setup>
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import ExcelJS from "exceljs";
 import LaserWeeklyMaterialOrder from "./LaserWeeklyMaterialOrder.vue";
 import api from "@/api/client";
+const props = defineProps({
+  initialStartDate: { type: String, default: "" },
+});
 const iso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const monday = (value = new Date()) => {
@@ -793,7 +796,7 @@ const showDetail = ref(false),
   showMaterialLots = ref(false),
   dirty = ref(false),
   saving = ref(false);
-const startDate = ref(monday()),
+const startDate = ref(monday(props.initialStartDate || new Date())),
   rows = ref([]),
   patternRows = ref([]),
   materialRows = ref([]),
@@ -1468,6 +1471,16 @@ const remove = async (x) => {
   await loadMasters();
   await loadPlan();
 };
+watch(
+  () => props.initialStartDate,
+  async (value) => {
+    if (!value) return;
+    const nextStartDate = monday(value);
+    if (startDate.value === nextStartDate) return;
+    startDate.value = nextStartDate;
+    await loadPlan();
+  },
+);
 onMounted(async () => {
   await loadMasters();
   await loadPlan();

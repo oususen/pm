@@ -98,6 +98,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み取り', table: 't_task', desc: '各業務のタスク一覧取得（購買・品質・チェックシート）' },
+  { op: '読み取り', table: 'accounts_approvaltask / accounts_approvalrequest', desc: '共通承認タスク一覧取得（材料発注など）' },
 ]
 
 const router = useRouter()
@@ -123,6 +124,14 @@ const qualityTaskTypeMap = {
   SUPERVISOR_REVIEW: "班長確認",
   CHIEF_REVIEW: "係長承認",
   MANAGER_APPROVE: "部長承認",
+  CREATOR_FIX: "差戻し修正",
+}
+
+const approvalTaskTypeMap = {
+  CREATOR_CREATE: "作成",
+  REVIEWER1_REVIEW: "確認①",
+  REVIEWER2_REVIEW: "確認②",
+  APPROVER_APPROVE: "承認",
   CREATOR_FIX: "差戻し修正",
 }
 
@@ -235,6 +244,50 @@ const normalizeIntegratedCsTask = (row) => ({
   },
 })
 
+const normalizeList = (payload) => {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.results)) return payload.results
+  return []
+}
+
+const normalizeApprovalTask = (request, task) => {
+  const context = request.context || {}
+  const period = [context.lock_start_date, context.lock_end_date].filter(Boolean).join(" ～ ")
+  const category = request.route_config_item_key === "laser_material_order"
+    ? "LASER_MATERIAL_ORDER"
+    : request.route_config_item_key || "APPROVAL_REQUEST"
+  const supplierLabel = context.supplier === "SATO" ? "佐藤商事" : context.supplier === "MEISEI" ? "名成鋼機" : ""
+  const categoryLabel = request.route_config_item_key === "laser_material_order"
+    ? `レーザ材料発注${supplierLabel ? `（${supplierLabel}）` : ""}`
+    : request.route_config_name || "承認申請"
+  return {
+    row_key: `approval-${request.id}-${task.id}`,
+    module_code: "APPROVAL",
+    module_label: "承認",
+    task_category: category,
+    task_category_label: categoryLabel,
+    task_type: task.task_type,
+    task_type_label: approvalTaskTypeMap[task.task_type] || task.task_type,
+    status: task.status,
+    due_date: task.due_date || "",
+    created_at: task.created_at || request.created_at || "",
+    target_primary: request.route_config_item_key === "laser_material_order" && supplierLabel ? `${request.route_config_name || "承認申請"}（${supplierLabel}）` : request.route_config_name || "承認申請",
+    target_secondary: period ? `注文書期間 ${period}` : `申請者 ${request.creator_name || "-"}`,
+    action_label: request.route_config_item_key === "laser_material_order" ? "材料発注へ" : "承認へ",
+    navigate() {
+      if (request.route_config_item_key === "laser_material_order") {
+        router.push({
+          path: "/production/plan-input",
+          query: {
+            tab: "laser",
+            start_date: context.start_date || "",
+          },
+        })
+      }
+    },
+  }
+}
+
 const formatDateTime = (value) => {
   if (!value) return "-"
   const dt = new Date(value)
@@ -249,23 +302,28 @@ const fetchTasks = async () => {
     if (filters.value.status) {
       params.status = filters.value.status
     }
+    const approvalParams = { assigned_to_me: true }
+    if (filters.value.status) {
+      approvalParams.task_status = filters.value.status
+    }
 
-    const [purchaseResponse, qualityResponse, icsResponse] = await Promise.all([
+    const [purchaseResponse, qualityResponse, icsResponse, approvalResponse] = await Promise.all([
       api.purchaseOrderProposals.listTasks(params),
       api.qualityEquipmentInspections.listTasks(params),
       api.integratedChecksheets.listTasks(params),
+      api.accounts.getApprovalRequests(approvalParams),
     ])
 
-    const purchaseRows = Array.isArray(purchaseResponse.data)
-      ? purchaseResponse.data.map(normalizePurchaseTask)
-      : []
-    const qualityRows = Array.isArray(qualityResponse.data)
-      ? qualityResponse.data.map(normalizeQualityTask)
-      : []
-    const icsRows = Array.isArray(icsResponse.data)
-      ? icsResponse.data.map(normalizeIntegratedCsTask)
-      : []
-    allRows.value = [...purchaseRows, ...qualityRows, ...icsRows]
+    const purchaseRows = normalizeList(purchaseResponse.data).map(normalizePurchaseTask)
+    const qualityRows = normalizeList(qualityResponse.data).map(normalizeQualityTask)
+    const icsRows = normalizeList(icsResponse.data).map(normalizeIntegratedCsTask)
+    const currentUserId = Number(authState.user?.id || 0)
+    const approvalRows = normalizeList(approvalResponse.data).flatMap((request) =>
+      normalizeList(request.tasks)
+        .filter((task) => Number(task.assigned_to) === currentUserId)
+        .map((task) => normalizeApprovalTask(request, task)),
+    )
+    allRows.value = [...purchaseRows, ...qualityRows, ...icsRows, ...approvalRows]
   } catch (error) {
     console.error("タスク一覧取得に失敗:", error)
     allRows.value = []

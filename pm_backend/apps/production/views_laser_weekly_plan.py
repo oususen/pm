@@ -1,9 +1,11 @@
 from collections import defaultdict
 from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from urllib.parse import quote
 
+from django.conf import settings
 from django.db.models import Q
 from django.http import FileResponse, HttpResponse
 from openpyxl import Workbook
@@ -19,6 +21,10 @@ from reportlab.pdfgen import canvas
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
+from accounts.models import ApprovalRequest, ApprovalRouteConfig
+from accounts.serializers import ApprovalRequestSerializer
+from shipping.services.email_service import EmailService
 
 from .models_laser_weekly_plan import LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
@@ -46,6 +52,107 @@ class LaserWeeklyMaterialGroupViewSet(viewsets.ModelViewSet):
 
 
 class LaserWeeklyPlanViewSet(viewsets.ViewSet):
+    @action(detail=False, methods=['get', 'post'], url_path='material-order-approval')
+    def material_order_approval(self, request):
+        """材料発注の承認申請を仕入先別に取得または作成する。"""
+        start_date = request.query_params.get('start_date') if request.method == 'GET' else request.data.get('start_date')
+        try:
+            plan_start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        route_config = ApprovalRouteConfig.objects.filter(
+            item_key='laser_material_order',
+            is_active=True,
+        ).first()
+        if not route_config:
+            return Response({'detail': '材料発注の承認ルートが設定されていません。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.method == 'GET':
+            approvals = ApprovalRequest.objects.filter(
+                route_config=route_config,
+                context__start_date=plan_start_date.isoformat(),
+            ).order_by('-updated_at')
+            by_supplier = {}
+            for approval in approvals:
+                supplier = (approval.context or {}).get('supplier')
+                if supplier in MATERIAL_ORDER_SUPPLIER_CODES and supplier not in by_supplier:
+                    by_supplier[supplier] = ApprovalRequestSerializer(approval).data
+            return Response({'approvals': by_supplier})
+
+        lock_start_date = request.data.get('lock_start_date')
+        lock_end_date = request.data.get('lock_end_date')
+        try:
+            if lock_start_date and lock_end_date:
+                lock_start_date = datetime.strptime(lock_start_date, '%Y-%m-%d').date()
+                lock_end_date = datetime.strptime(lock_end_date, '%Y-%m-%d').date()
+                if lock_end_date < lock_start_date:
+                    raise ValueError
+        except ValueError:
+            return Response({'detail': 'ロック期間が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = request.data.get('supplier')
+        if supplier not in MATERIAL_ORDER_SUPPLIER_CODES:
+            return Response({'detail': '仕入先を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        lookup = {
+            'route_config': route_config,
+            'context__start_date': plan_start_date.isoformat(),
+        }
+        if supplier in MATERIAL_ORDER_SUPPLIER_CODES:
+            lookup['context__supplier'] = supplier
+            lookup['context__lock_start_date'] = lock_start_date.isoformat() if lock_start_date else ''
+            lookup['context__lock_end_date'] = lock_end_date.isoformat() if lock_end_date else ''
+        approval = ApprovalRequest.objects.filter(**lookup).order_by('-updated_at').first()
+        if request.data.get('action') == 'reopen':
+            if not (lock_start_date and lock_end_date):
+                return Response({'detail': '注文書期間を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            if not approval:
+                return Response({'detail': '修正対象の注文書が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+            if approval.status != 'created':
+                return Response({'detail': '確認依頼前の注文書だけ修正できます。'}, status=status.HTTP_400_BAD_REQUEST)
+            approval.context = {**approval.context, 'order_created': False}
+            approval.save(update_fields=['context', 'updated_at'])
+            return Response(ApprovalRequestSerializer(approval).data)
+
+        created_approval = False
+        if not approval:
+            approval = ApprovalRequest.objects.create(
+                route_config=route_config,
+                creator=request.user,
+                status='created',
+                current_stage='creator',
+                context={
+                    'start_date': plan_start_date.isoformat(),
+                    'supplier': supplier or '',
+                    'lock_start_date': lock_start_date.isoformat() if lock_start_date else '',
+                    'lock_end_date': lock_end_date.isoformat() if lock_end_date else '',
+                },
+            )
+            created_approval = True
+
+        if not (lock_start_date and lock_end_date):
+            return Response({'detail': '注文書期間を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            saved_file = self._save_material_order_pdf_file(plan_start_date, lock_start_date, lock_end_date, supplier)
+        except ValueError as exc:
+            if created_approval and not approval.context.get('material_order_pdf_files'):
+                approval.delete()
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        saved_files = {**approval.context.get('material_order_pdf_files', {})}
+        saved_files[supplier] = saved_file
+        context = {**approval.context, 'order_created': True}
+        context.update({
+            'supplier': supplier,
+            'lock_start_date': lock_start_date.isoformat(),
+            'lock_end_date': lock_end_date.isoformat(),
+            'material_order_pdf_files': saved_files,
+            'material_order_pdf_saved_at': datetime.now().isoformat(timespec='seconds'),
+        })
+        approval.context = context
+        approval.save(update_fields=['context', 'updated_at'])
+        return Response(ApprovalRequestSerializer(approval).data)
+
     @action(detail=False, methods=['get', 'post'], url_path='material-initial-progress')
     def material_initial_progress(self, request):
         try:
@@ -116,6 +223,143 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 saved_count += 1
         return Response({'saved_count': saved_count})
 
+
+
+    @action(detail=False, methods=['post'], url_path='material-order-reset')
+    def reset_material_order_approval(self, request):
+        """指定した注文書期間に紐づく材料発注承認と保存PDFをリセットする。"""
+        if not (request.user.is_superuser or request.user.username == 'admin'):
+            return Response({'detail': 'adminだけ承認リセットできます。'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            plan_start_date = datetime.strptime(request.data['start_date'], '%Y-%m-%d').date()
+            lock_start_date = datetime.strptime(request.data['lock_start_date'], '%Y-%m-%d').date()
+            lock_end_date = datetime.strptime(request.data['lock_end_date'], '%Y-%m-%d').date()
+            if lock_end_date < lock_start_date:
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return Response({'detail': '注文書期間を正しく指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        approvals = list(ApprovalRequest.objects.filter(
+            route_config__item_key='laser_material_order',
+            context__start_date=plan_start_date.isoformat(),
+            context__lock_start_date=lock_start_date.isoformat(),
+            context__lock_end_date=lock_end_date.isoformat(),
+        ))
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        deleted_files = []
+        for approval in approvals:
+            for info in (approval.context or {}).get('material_order_pdf_files', {}).values():
+                if not isinstance(info, dict):
+                    continue
+                relative_path = info.get('path')
+                if not relative_path:
+                    continue
+                file_path = (media_root / relative_path).resolve()
+                if str(file_path).startswith(str(media_root)) and file_path.exists():
+                    file_path.unlink()
+                    deleted_files.append(file_path.name)
+
+        deleted_count, deleted_detail = ApprovalRequest.objects.filter(
+            id__in=[approval.id for approval in approvals]
+        ).delete()
+        return Response({
+            'deleted_count': deleted_count,
+            'deleted_detail': deleted_detail,
+            'deleted_files': deleted_files,
+        })
+
+    @action(detail=False, methods=['post'], url_path='material-order-send')
+    def send_material_order(self, request):
+        """承認済み材料注文書を仕入先別にメール送信する。"""
+        try:
+            plan_start_date = datetime.strptime(request.data['start_date'], '%Y-%m-%d').date()
+        except (KeyError, TypeError, ValueError):
+            return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = request.data.get('supplier')
+        if supplier not in MATERIAL_ORDER_SUPPLIER_CODES:
+            return Response({'detail': '仕入先を指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        lock_start_date = request.data.get('lock_start_date')
+        lock_end_date = request.data.get('lock_end_date')
+        try:
+            if lock_start_date and lock_end_date:
+                lock_start_date = datetime.strptime(lock_start_date, '%Y-%m-%d').date()
+                lock_end_date = datetime.strptime(lock_end_date, '%Y-%m-%d').date()
+                if lock_end_date < lock_start_date:
+                    raise ValueError
+        except ValueError:
+            return Response({'detail': '注文書期間を正しく指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier_code = MATERIAL_ORDER_SUPPLIER_CODES[supplier]
+        try:
+            order_supplier = Supplier.objects.get(supplier_code=supplier_code)
+        except Supplier.DoesNotExist:
+            return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not order_supplier.order_email:
+            return Response({'detail': f'{order_supplier.supplier_name} の送信メールアドレスを仕入先マスタに登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        approval_filter = {
+            'route_config__item_key': 'laser_material_order',
+            'context__start_date': plan_start_date.isoformat(),
+            'context__supplier': supplier,
+        }
+        if lock_start_date and lock_end_date:
+            approval_filter['context__lock_start_date'] = lock_start_date.isoformat()
+            approval_filter['context__lock_end_date'] = lock_end_date.isoformat()
+        approval = ApprovalRequest.objects.filter(**approval_filter).order_by('-updated_at').first()
+        if not approval:
+            return Response({'detail': '材料発注の承認申請が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+        if approval.status not in ('approved', 'sent'):
+            return Response({'detail': '承認済みの注文書だけ送信できます。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        context = approval.context or {}
+        saved_files = context.get('material_order_pdf_files') or {}
+        file_info = saved_files.get(supplier)
+        if not isinstance(file_info, dict) or not file_info.get('path'):
+            return Response({'detail': f'{order_supplier.supplier_name} の注文書PDFを先に作成してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        file_path = (media_root / file_info['path']).resolve()
+        if not str(file_path).startswith(str(media_root)) or not file_path.exists():
+            return Response({'detail': '保存済みPDFファイルが見つかりません。注文書を再作成してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_label = context.get('lock_start_date') or ''
+        end_label = context.get('lock_end_date') or ''
+        subject = f'材料注文書 {start_label}～{end_label}' if start_label and end_label else '材料注文書'
+        body = (
+            f'{order_supplier.supplier_name} 御中\n\n'
+            'いつもお世話になっております。\n'
+            '材料注文書を送付いたします。添付PDFをご確認ください。\n\n'
+            'ダイソウ工業株式会社'
+        )
+        result = EmailService().send_email_with_attachment(
+            to_emails=[order_supplier.order_email],
+            subject=subject,
+            body=body,
+            attachment_data=BytesIO(file_path.read_bytes()),
+            attachment_filename=file_info.get('stored_filename') or file_path.name,
+            user_id=request.user.id,
+        )
+        if not result.get('success'):
+            return Response({'detail': result.get('message') or 'メール送信に失敗しました。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sent_files = {**(context.get('material_order_sent_files') or {})}
+        sent_files[supplier] = {
+            'sent_at': datetime.now().isoformat(timespec='seconds'),
+            'to_email': order_supplier.order_email,
+            'filename': file_info.get('stored_filename') or file_path.name,
+        }
+        context = {**context, 'material_order_sent_files': sent_files}
+        approval.context = context
+        update_fields = ['context', 'updated_at']
+        if supplier in sent_files:
+            approval.status = 'sent'
+            approval.current_stage = 'completed'
+            update_fields.extend(['status', 'current_stage'])
+        approval.save(update_fields=update_fields)
+        return Response(ApprovalRequestSerializer(approval).data)
+
     @action(detail=False, methods=['get'], url_path='material-order-excel')
     def material_order_excel(self, request):
         try:
@@ -132,6 +376,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             order_supplier = Supplier.objects.get(supplier_code=supplier_code)
         except Supplier.DoesNotExist:
             return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
         supplier_name = order_supplier.supplier_name
         orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
             supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
@@ -314,15 +559,76 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             export_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
             export_end_date = datetime.strptime(request.query_params['end_date'], '%Y-%m-%d').date()
             supplier = request.query_params['supplier']
-            supplier_code = MATERIAL_ORDER_SUPPLIER_CODES[supplier]
             if export_end_date < export_start_date:
                 raise ValueError
         except (KeyError, ValueError):
             return Response({'detail': '出力条件が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
         try:
+            pdf_bytes, filename = self._build_material_order_pdf(plan_start_date, export_start_date, export_end_date, supplier)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
+
+    def _save_material_order_pdf_file(self, plan_start_date, export_start_date, export_end_date, supplier):
+        target_dir = Path(settings.MEDIA_ROOT) / 'approval_material_orders'
+        target_dir.mkdir(parents=True, exist_ok=True)
+        pdf_bytes, generated_filename = self._build_material_order_pdf(plan_start_date, export_start_date, export_end_date, supplier)
+        filename = f'laser_material_order_{export_start_date:%Y%m%d}_{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
+        old_filename = f'laser_material_order_{plan_start_date:%Y%m%d}_{export_start_date:%Y%m%d}_{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
+        old_path = target_dir / old_filename
+        if old_path.exists() and old_path.name != filename:
+            old_path.unlink()
+        target_path = target_dir / filename
+        target_path.write_bytes(pdf_bytes)
+        relative_path = target_path.relative_to(Path(settings.MEDIA_ROOT)).as_posix()
+        return {
+            'filename': generated_filename,
+            'stored_filename': filename,
+            'path': relative_path,
+            'url': f"{settings.MEDIA_URL.rstrip('/')}/{relative_path}",
+            'saved_at': datetime.now().isoformat(timespec='seconds'),
+        }
+
+    def _build_material_order_pdf(self, plan_start_date, export_start_date, export_end_date, supplier):
+        try:
+            supplier_code = MATERIAL_ORDER_SUPPLIER_CODES[supplier]
+        except KeyError:
+            raise ValueError('出力条件が不正です。')
+        try:
             order_supplier = Supplier.objects.get(supplier_code=supplier_code)
         except Supplier.DoesNotExist:
-            return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValueError(f'仕入先マスタに発注先コード {supplier_code} を登録してください。')
+
+        approval = ApprovalRequest.objects.filter(
+            route_config__item_key='laser_material_order',
+            context__start_date=plan_start_date.isoformat(),
+            context__lock_start_date=export_start_date.isoformat(),
+            context__lock_end_date=export_end_date.isoformat(),
+            context__supplier=supplier,
+        ).prefetch_related('steps__user', 'route_config__creator_proxy_users', 'route_config__reviewer1_proxy_users', 'route_config__reviewer2_proxy_users', 'route_config__approver_proxy_users').order_by('-updated_at').first()
+        if not approval or approval.status not in ('created', 'reviewing', 'approved', 'rejected'):
+            raise ValueError('作成済み、差戻し、承認中または承認済みの材料発注のみPDF出力できます。')
+        proxy_user_ids_by_stage = {
+            stage: set(getattr(approval.route_config, f'{stage}_proxy_users').values_list('id', flat=True))
+            for stage in ('creator', 'reviewer1', 'reviewer2', 'approver')
+        }
+
+        def approval_step_label(step):
+            name = step.user.last_name or step.user.username
+            if step.user_id in proxy_user_ids_by_stage.get(step.stage, set()):
+                name = f'{name}（代）'
+            date_str = f'{step.acted_at.month}/{step.acted_at.day}' if step.acted_at else ''
+            return f'{name}\n{date_str}' if date_str else name
+
+        approval_steps = {
+            step.stage: approval_step_label(step)
+            for step in approval.steps.all()
+            if step.action in ('confirmed', 'approved')
+        }
+        if 'creator' not in approval_steps and approval.creator_id:
+            approval_steps['creator'] = approval.creator.last_name or approval.creator.username
 
         orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
             supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
@@ -332,7 +638,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             Q(order_lots__gt=0) | Q(order_sheets__gt=0),
         ).select_related('material').order_by('delivery_date', 'material__product_code'))
         if not orders:
-            return Response({'detail': '出力対象の発注がありません。'}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValueError('出力対象の発注がありません。')
 
         delivery_dates = []
         current_date = export_start_date
@@ -449,15 +755,21 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             if order_supplier.phone_number:
                 contact.append(f'TEL: {order_supplier.phone_number}')
             draw_text(margin + 26 * mm, page_height - margin - 31 * mm, '  '.join(contact), size=15)
+            stamp_items = [('承認', 'approver')]
+            if approval.route_config.reviewer2_enabled:
+                stamp_items.extend([('確認②', 'reviewer2'), ('確認①', 'reviewer1')])
+            else:
+                stamp_items.append(('確認', 'reviewer1'))
+            stamp_items.append(('作成', 'creator'))
             stamp_cell_width = 23 * mm
-            stamp_x = page_width - margin - stamp_cell_width * 4
+            stamp_x = page_width - margin - stamp_cell_width * len(stamp_items)
             stamp_top = page_height - margin - 18 * mm
             stamp_body_top = page_height - margin - 26 * mm
-            for idx, label in enumerate(['承認', '確認②', '確認①', '作成']):
+            for idx, (label, stage) in enumerate(stamp_items):
                 x = stamp_x + idx * stamp_cell_width
                 draw_cell(x, stamp_top, stamp_cell_width, 8 * mm, label, size=11)
-                draw_cell(x, stamp_body_top, stamp_cell_width, 11 * mm, '')
-            draw_text(stamp_x + stamp_cell_width * 4, page_height - margin - 43 * mm, 'ダイソウ工業株式会社', size=13, align='right')
+                draw_cell(x, stamp_body_top, stamp_cell_width, 11 * mm, approval_steps.get(stage, ''), size=8)
+            draw_text(stamp_x + stamp_cell_width * len(stamp_items), page_height - margin - 43 * mm, 'ダイソウ工業株式会社', size=13, align='right')
             x = margin
             y = table_top
             headers = ['№', '発注コード', '材質', '材寸', '発注単位', '発注量\n（合計）']
@@ -496,9 +808,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         pdf.save()
         output.seek(0)
         filename = f'材料注文書_{order_supplier.supplier_name}_{plan_start_date:%Y%m%d}.pdf'
-        response = HttpResponse(output.read(), content_type='application/pdf')
-        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
-        return response
+        return output.read(), filename
 
     @action(detail=False, methods=['get'], url_path='downstream-products')
     def downstream_products(self, request):

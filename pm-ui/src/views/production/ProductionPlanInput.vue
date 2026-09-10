@@ -916,7 +916,7 @@
       v-else-if="activePlanTab === 'laser' && activeLaserTab === 'pattern-editor'"
       class="laser-editor-section"
     />
-    <LaserWeeklyPlan v-else-if="activePlanTab === 'laser' && activeLaserTab === 'weekly-plan'" />
+    <LaserWeeklyPlan v-else-if="activePlanTab === 'laser' && activeLaserTab === 'weekly-plan'" :initial-start-date="startDate" />
     <LaserProcessingFreqEditor v-else-if="activePlanTab === 'laser' && activeLaserTab === 'freq-pattern'" />
     <div v-else-if="activePlanTab === 'spot' && activeSpotTab === 'excel'" class="laser-third-tab-panel">
       <div class="spot-excel-toolbar">
@@ -1446,7 +1446,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
 import { authState, ensureAuth } from '@/auth'
@@ -1479,6 +1479,7 @@ import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'
 import LaserWeeklyPlan from './LaserWeeklyPlan.vue'
 import LaserProcessingFreqEditor from './LaserProcessingFreqEditor.vue'
+const route = useRoute()
 const router = useRouter()
 const selectedLine = ref('')
 const showAllLines = ref(false)
@@ -1574,6 +1575,18 @@ const toDateInput = (dateObj) => {
 const defaultStart = new Date()
 defaultStart.setDate(defaultStart.getDate() - 1)
 const startDate = ref(toDateInput(defaultStart))
+const isDateQuery = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))
+const applyPlanInputQuery = () => {
+  const queryTab = String(route.query.tab || '')
+  if (queryTab === 'laser') {
+    activePlanTab.value = 'laser'
+    activeLaserTab.value = 'weekly-plan'
+  }
+  const queryStartDate = String(route.query.start_date || '')
+  if (isDateQuery(queryStartDate)) {
+    startDate.value = queryStartDate
+  }
+}
 const horizonDays = ref(30)
 const keyword = ref('')
 const TANK_LINE_CODE = 'L2200'
@@ -4205,6 +4218,7 @@ const fetchProcessOptions = async () => {
 
 onMounted(async () => {
   try {
+    applyPlanInputQuery()
     await ensureAuth()
     await Promise.all([fetchLines(), fetchProducts(), fetchLockSetting(), fetchProcessOptions()])
     await loadData()
@@ -4224,6 +4238,10 @@ watch(activePlanTab, async () => {
   lineSettingsMessage.value = ''
   await ensureSelectedLineForActiveTab()
 })
+watch(
+  () => [route.query.tab, route.query.start_date],
+  () => applyPlanInputQuery(),
+)
 watch(settingsTargetTab, () => {
   lineSettingsMessage.value = ''
 })
