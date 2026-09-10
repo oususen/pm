@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from masters.models import Calendar, Contact, Line, Process, Product
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
+    KubotaSakaiDueSharedNote,
     KubotaSakaiDueAllocationOverride,
     KubotaSakaiDueNotifyConfig,
     KubotaSakaiTripAssignment,
@@ -544,6 +545,11 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                 row['due_date'].isoformat(),
             )] = str(row['fixed_qty'])
 
+        shared_notes = {
+            (note.product_code, note.ship_to_code, note.due_date): note.coordination_note
+            for note in KubotaSakaiDueSharedNote.objects.filter(due_date__range=(start_date, end_date))
+        }
+
         # 外側グループ: 品番+納入場所、内側: 注番
         outer_groups = {}
         for row in qs:
@@ -568,6 +574,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'fixed_by_date': {},
                     'due_adjustment_id_by_date': {},
                     'coordination_note_by_date': {},
+                    'shared_coordination_note_by_date': {},
                 }
             li = outer_groups[outer_key]['lines_map'][line_key]
             d_str = row.due_date.isoformat()
@@ -579,6 +586,9 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
             )
             li['due_adjustment_id_by_date'][d_str] = row.id
             li['coordination_note_by_date'][d_str] = str(row.coordination_note or '')
+            li['shared_coordination_note_by_date'][d_str] = shared_notes.get(
+                (row.product_code, row.ship_to_code or '', row.due_date), '',
+            )
             if row.order_type == 'FIRM':
                 li['order_type'] = 'FIRM'
 
@@ -595,6 +605,7 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
                     'fixed_by_date': li['fixed_by_date'],
                     'due_adjustment_id_by_date': li['due_adjustment_id_by_date'],
                     'coordination_note_by_date': li['coordination_note_by_date'],
+                    'shared_coordination_note_by_date': li['shared_coordination_note_by_date'],
                 })
             lines_out.sort(key=lambda x: (x['source_order_no'] is None, x['source_order_no'] or ''))
             rows.append({
@@ -647,14 +658,33 @@ class KubotaSakaiDueAdjustmentViewSet(viewsets.ModelViewSet):
         if not row:
             return Response({'detail': '対象データが見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
 
-        if row.coordination_note != note:
-            row.coordination_note = note
-            row.save(update_fields=['coordination_note'])
+        shared_note = request.data.get('shared_coordination_note')
+        # 内示からの登録は、旧画面からのリクエストも含めて共通連絡へ保存する。
+        if row.order_type == 'FORECAST':
+            if shared_note is None:
+                shared_note = note
+            note = ''
+        if shared_note is not None:
+            shared_note = str(shared_note).strip()
+            if len(shared_note) > 200:
+                return Response({'detail': '共通連絡メモは200文字以内で入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            if row.coordination_note != note:
+                row.coordination_note = note
+                row.save(update_fields=['coordination_note'])
+            shared_key = dict(product_code=row.product_code, ship_to_code=row.ship_to_code or '', due_date=row.due_date)
+            if shared_note is not None:
+                KubotaSakaiDueSharedNote.objects.update_or_create(
+                    **shared_key, defaults={'coordination_note': shared_note},
+                )
+            else:
+                shared_note = KubotaSakaiDueSharedNote.objects.filter(**shared_key).values_list('coordination_note', flat=True).first() or ''
 
         return Response({
             'due_adjustment_id': row.id,
             'coordination_note': row.coordination_note,
-            'has_coordination_note': bool(row.coordination_note),
+            'shared_coordination_note': shared_note,
+            'has_coordination_note': bool(row.coordination_note or shared_note),
         })
 
     # ========== bulk_save ==========

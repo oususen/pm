@@ -34,6 +34,7 @@ from shipping.models import (
 )
 from orders.core.models import (
     KubotaSakaiDueAdjustment,
+    KubotaSakaiDueSharedNote,
     KubotaSakaiPseudoTruckProduct,
     KubotaSakaiTripAssignment,
     ShippingRun,
@@ -1126,6 +1127,10 @@ class KubotaSakaiTripPlanViewNew(APIView):
             adj_qs = adj_qs.filter(Q(product_code__icontains=keyword))
 
         adjustments = list(adj_qs.order_by('product_code', 'ship_to_code', 'source_order_no', 'id'))
+        shared_notes = {
+            (note.product_code, note.ship_to_code): note.coordination_note
+            for note in KubotaSakaiDueSharedNote.objects.filter(due_date=target_date)
+        }
         adj_ids = [a.id for a in adjustments]
 
         # Product lookup
@@ -1229,7 +1234,12 @@ class KubotaSakaiTripPlanViewNew(APIView):
                 'ship_to_name': ship_to_name_map.get(adj.ship_to_code or '', ''),
                 'source_order_no': adj.source_order_no or '',
                 'order_type': adj.order_type,
-                'coordination_note': str(adj.coordination_note or '').strip(),
+                'shared_coordination_note': shared_notes.get((adj.product_code, adj.ship_to_code or ''), ''),
+                'coordination_note': '\n'.join(text for text in (
+                    ('【同日・同品番・同納入場所の共通連絡】\n' + shared_notes[(adj.product_code, adj.ship_to_code or '')])
+                    if shared_notes.get((adj.product_code, adj.ship_to_code or '')) else '',
+                    ('【注番別連絡】\n' + adj.coordination_note) if adj.coordination_note else '',
+                ) if text),
                 'delivery_qty': str(delivery_qty),
                 'assigned_qty': str(assigned_qty),
                 'unassigned_qty': str(unassigned_qty),

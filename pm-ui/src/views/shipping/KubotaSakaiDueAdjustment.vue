@@ -249,20 +249,27 @@
       <div class="modal-content">
         <h2>業務連絡メモ</h2>
         <div class="note-target">{{ coordinationNoteTargetLabel }}</div>
+        <label for="shared-coordination-note">共通連絡（同日・同品番・同納入場所の全注番共通）</label>
         <textarea
-          v-model.trim="coordinationNoteDraft"
-          rows="5"
+          id="shared-coordination-note"
+          v-model.trim="sharedCoordinationNoteDraft"
+          rows="3"
           maxlength="200"
-          placeholder="便計画担当へ伝えたい内容を入力"
+          placeholder="内示から確定に変わっても引き継ぐ連絡"
         ></textarea>
-        <div class="note-count">{{ coordinationNoteDraft.length }}/200</div>
+        <div class="note-count">{{ sharedCoordinationNoteDraft.length }}/200</div>
+        <template v-if="activeCoordinationNote?.orderType === 'FIRM'">
+          <label for="order-coordination-note">注番別連絡（この注番のみ）</label>
+          <textarea id="order-coordination-note" v-model.trim="coordinationNoteDraft" rows="3" maxlength="200"></textarea>
+          <div class="note-count">{{ coordinationNoteDraft.length }}/200</div>
+        </template>
         <div class="modal-actions">
           <button class="btn" :disabled="savingCoordinationNote" @click="closeCoordinationNoteDialog">キャンセル</button>
           <button
             class="btn"
-            :disabled="savingCoordinationNote || !coordinationNoteDraft"
+            :disabled="savingCoordinationNote || (!coordinationNoteDraft && !sharedCoordinationNoteDraft)"
             @click="clearCoordinationNote"
-          >削除</button>
+          >両方削除</button>
           <button class="btn save-btn" :disabled="savingCoordinationNote" @click="saveCoordinationNote">
             {{ savingCoordinationNote ? '保存中...' : '保存' }}
           </button>
@@ -425,6 +432,7 @@ const hasDisplayedOnce = ref(false)
 const showCoordinationNoteDialog = ref(false)
 const savingCoordinationNote = ref(false)
 const coordinationNoteDraft = ref('')
+const sharedCoordinationNoteDraft = ref('')
 const activeCoordinationNote = ref(null)
 
 const dateColumns = computed(() => {
@@ -675,6 +683,7 @@ const buildLine = (li) => {
     fixedByDate,
     dueAdjustmentIdByDate: li.due_adjustment_id_by_date || {},
     coordinationNoteByDate: li.coordination_note_by_date || {},
+    sharedCoordinationNoteByDate: li.shared_coordination_note_by_date || {},
     remainingByDate,
     _dirty: false,
   }
@@ -735,7 +744,9 @@ const slotCoordinationNote = (row, colKey, slotIdx) => {
   return String(line.coordinationNoteByDate?.[row.dateKey] || '').trim()
 }
 
-const hasCoordinationNote = (row, colKey, slotIdx) => Boolean(slotCoordinationNote(row, colKey, slotIdx))
+const hasCoordinationNote = (row, colKey, slotIdx) => Boolean(
+  slotCoordinationNote(row, colKey, slotIdx) || slotLineAt(row, colKey, slotIdx)?.sharedCoordinationNoteByDate?.[row.dateKey],
+)
 
 const slotRemaining = (row, colKey, slotIdx) => {
   const line = slotLineAt(row, colKey, slotIdx)
@@ -1363,6 +1374,7 @@ const openCoordinationNoteDialog = (row, colKey, slotIdx) => {
     dateLabel: row.label,
   }
   coordinationNoteDraft.value = slotCoordinationNote(row, colKey, slotIdx)
+  sharedCoordinationNoteDraft.value = String(line.sharedCoordinationNoteByDate?.[row.dateKey] || '')
   showCoordinationNoteDialog.value = true
 }
 
@@ -1370,6 +1382,7 @@ const closeCoordinationNoteDialog = () => {
   showCoordinationNoteDialog.value = false
   activeCoordinationNote.value = null
   coordinationNoteDraft.value = ''
+  sharedCoordinationNoteDraft.value = ''
 }
 
 const saveCoordinationNote = async () => {
@@ -1380,8 +1393,15 @@ const saveCoordinationNote = async () => {
     const res = await api.kubotaSakaiDueAdjustments.saveCoordinationNote(
       active.dueAdjustmentId,
       coordinationNoteDraft.value,
+      sharedCoordinationNoteDraft.value,
     )
     active.line.coordinationNoteByDate[active.rowDateKey] = String(res.data?.coordination_note || '')
+    // 同じ日付・品番・納入場所に並ぶ全注番へ、共通連絡の変更を反映する。
+    const group = groups.value.find((item) => item.productCode === active.productCode &&
+      (item.shipToCode === '-' ? '' : item.shipToCode) === active.shipToCode)
+    group?.lines.forEach((line) => {
+      line.sharedCoordinationNoteByDate[active.rowDateKey] = String(res.data?.shared_coordination_note || '')
+    })
     closeCoordinationNoteDialog()
   } catch (error) {
     const detail = error?.response?.data?.detail || error?.message || '業務連絡メモの保存に失敗しました。'
@@ -1393,6 +1413,7 @@ const saveCoordinationNote = async () => {
 
 const clearCoordinationNote = async () => {
   coordinationNoteDraft.value = ''
+  sharedCoordinationNoteDraft.value = ''
   await saveCoordinationNote()
 }
 

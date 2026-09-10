@@ -1,5 +1,6 @@
 from .core.models import (
     KubotaSakaiDueAdjustment,
+    KubotaSakaiDueSharedNote,
     KubotaSakaiTripAssignment,
     Order,
     OrderLine,
@@ -26,6 +27,7 @@ __all__ = [
     'Order',
     'OrderLine',
     'KubotaSakaiDueAdjustment',
+    'KubotaSakaiDueSharedNote',
     'KubotaSakaiTripAssignment',
     'ShippingRun',
     'ShippingTrip',

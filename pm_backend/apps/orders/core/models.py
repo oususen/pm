@@ -92,6 +92,21 @@ class OrderLine(models.Model):
         return f"{self.order.order_no} - Line {self.line_no}: {self.product_code}"
 
 
+class KubotaSakaiDueSharedNote(models.Model):
+    """内示・確定の切替に依存しない、日付・品番・納入場所の共通連絡。"""
+
+    product_code = models.CharField(max_length=50, verbose_name='品番')
+    ship_to_code = models.CharField(max_length=40, blank=True, default='', verbose_name='納入場所コード')
+    due_date = models.DateField(verbose_name='日付')
+    coordination_note = models.CharField(max_length=200, blank=True, default='', verbose_name='共通連絡メモ')
+
+    class Meta:
+        db_table = 't_kubota_sakai_due_shared_note'
+        unique_together = [['product_code', 'ship_to_code', 'due_date']]
+        verbose_name = 'クボタ堺納期調整共通連絡'
+        verbose_name_plural = 'クボタ堺納期調整共通連絡'
+
+
 class KubotaSakaiDueAdjustment(models.Model):
     """クボタ堺向け納期調整（BACKLOG型）
     1行 = 品番 + 納入場所 + 注番 + 日付 の組み合わせ。
