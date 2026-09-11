@@ -547,6 +547,64 @@ def _build_slide9(prs, data):
 
 
 # ---------------------------------------------------------------------------
+# スライド9b: 3か月前内示と確定の月別乖離
+# ---------------------------------------------------------------------------
+def _build_slide9b(prs, data):
+    slide = _new_slide(prs)
+    _title_bar(slide, '課題5: 2か月前内示と確定の乖離 — 要員計画への影響')
+    _text(slide, 0.5, 1.15, 12.0, 0.5,
+          '各月の日当たり確定数量に対して、2か月前（前半月1〜15日）の日当たり内示数量がどれだけ乖離していたかを比較。'
+          '乖離が大きいと要員の過不足が発生する。', size=12)
+
+    products = data['products']
+    all_months = sorted({
+        d['month']
+        for p in products if p.get('monthly_deviation')
+        for d in p['monthly_deviation']['deviations']
+    })
+
+    if not all_months:
+        _text(slide, 0.5, 2.5, 12.0, 0.5, 'データ不足のため表示できません。', size=14)
+        return
+
+    month_labels = [m[5:] + '月' for m in all_months]
+    headers = ['品番', '納入地'] + month_labels
+    rows = []
+    for p in products:
+        md = p.get('monthly_deviation')
+        if not md:
+            continue
+        dev_map = {d['month']: d for d in md['deviations']}
+        row = [p['product_code'], p['ship_to'] or '—']
+        for m in all_months:
+            d = dev_map.get(m)
+            if d and d['pct'] is not None:
+                row.append(f"{d['pct']:+.1f}%")
+            else:
+                row.append('—')
+        rows.append(row)
+
+    col_w_first = 2.0
+    col_w_ship = 1.0
+    remaining = 12.3 - col_w_first - col_w_ship
+    col_w_month = min(1.2, remaining / len(all_months)) if all_months else 1.2
+    col_widths = [col_w_first, col_w_ship] + [col_w_month] * len(all_months)
+
+    _add_table(slide, 0.5, 2.0, 12.3, min(0.5 + 0.4 * len(rows), 4.0), headers, rows,
+               col_widths=col_widths)
+
+    avg_pcts = [p['monthly_deviation']['avg_pct'] for p in products
+                if p.get('monthly_deviation') and p['monthly_deviation']['avg_pct'] is not None]
+    if avg_pcts:
+        overall_min = min(avg_pcts)
+        overall_max = max(avg_pcts)
+        _rect(slide, 0.5, 6.85, 12.3, 0.5, RED_BG)
+        _text(slide, 0.7, 6.88, 11.8, 0.45,
+              f"結論: 2か月前の内示と確定の平均乖離率が{_fmt(overall_min)}~{_fmt(overall_max)}%。"
+              f"内示精度の低さが要員計画・材料調達の過不足に直結している。", size=11)
+
+
+# ---------------------------------------------------------------------------
 # スライド10: リードタイムと確定タイミング（簡易版）
 # ---------------------------------------------------------------------------
 def _build_slide10(prs, data):
@@ -652,6 +710,78 @@ def _build_slide11(prs, data):
 # ---------------------------------------------------------------------------
 # スライド12: 希望条件
 # ---------------------------------------------------------------------------
+def _build_slide11b(prs, data):
+    """確定日後の追加（5稼働日未満）の事例スライド"""
+    slide = _new_slide(prs)
+    _title_bar(slide, '確定日後の追加（5稼働日未満）— 事例一覧')
+    _text(slide, 0.5, 1.15, 12.0, 0.5,
+          '7月以降の確定注文のうち、標準の確定タイミング（5稼働日前）を過ぎてから追加された実例。'
+          '短納期の追加確定は、生産計画・要員・材料手配の変更を強いる。', size=12)
+
+    items = data.get('short_lead_firm', [])
+    if not items:
+        _text(slide, 0.5, 2.5, 12.0, 0.5, '該当データなし', size=14)
+        return
+
+    headers = ['品番', '納入地', '納期', '発行日', '到着日', '数量', '稼働日']
+    rows = []
+    for it in items:
+        rows.append([
+            it['product_code'],
+            it['ship_to'] or '—',
+            it['due_date'][5:].replace('-', '/'),
+            it['issue_date'][5:].replace('-', '/'),
+            it['received_date'][5:].replace('-', '/'),
+            str(int(it['quantity'])),
+            str(it['working_days']),
+        ])
+
+    col_widths = [2.5, 1.2, 1.4, 1.4, 1.4, 1.2, 1.2]
+    _add_table(slide, 0.5, 2.0, 10.3, min(0.5 + 0.4 * len(rows), 5.0), headers, rows,
+               col_widths=col_widths)
+
+    _rect(slide, 0.5, 6.85, 12.3, 0.5, RED_BG)
+    _text(slide, 0.7, 6.88, 11.8, 0.45,
+          f"7月以降で5稼働日未満の追加確定が{len(items)}件。"
+          f"生産計画確定後の急な追加は要員・材料の段取り変更を余儀なくされる。", size=11)
+
+
+def _build_slide11c(prs, data):
+    """まとめ注文の事例スライド"""
+    slide = _new_slide(prs)
+    _title_bar(slide, 'まとめ注文 — 事例一覧')
+    _text(slide, 0.5, 1.15, 12.0, 0.5,
+          'ある日の確定数量が平均の1.5倍を超え、翌稼働日に確定がないケース。'
+          '日々の均等な生産計画が崩れ、特定日に負荷が集中する。', size=12)
+
+    items = data.get('batch_orders', [])
+    if not items:
+        _text(slide, 0.5, 2.5, 12.0, 0.5, '該当データなし', size=14)
+        return
+
+    headers = ['品番', '納入地', '日付', '数量', '平均', '倍率', '翌稼働日']
+    rows = []
+    for it in items:
+        rows.append([
+            it['product_code'],
+            it['ship_to'] or '—',
+            it['due_date'][5:].replace('-', '/'),
+            str(int(it['quantity'])),
+            str(it['avg_quantity']),
+            f"x{it['ratio']}",
+            it['next_working_day'][5:].replace('-', '/') + ' なし',
+        ])
+
+    col_widths = [2.5, 1.2, 1.2, 1.0, 1.0, 1.0, 2.0]
+    table_h = min(0.5 + 0.4 * len(rows), 5.0)
+    _add_table(slide, 0.5, 2.0, 9.9, table_h, headers, rows,
+               col_widths=col_widths)
+
+    _rect(slide, 0.5, 6.85, 12.3, 0.5, RED_BG)
+    _text(slide, 0.7, 6.88, 11.8, 0.45,
+          f"まとめ注文が{len(items)}件。日々の均等発注への切り替えをお願いしたい。", size=11)
+
+
 def _build_slide12(prs):
     slide = _new_slide(prs)
     _title_bar(slide, '今後の安定供給に向けたご相談（希望条件）')
@@ -661,10 +791,10 @@ def _build_slide12(prs):
     headers = ['項目', '理想案', '妥協案', '暫定案']
     rows = [
         ['確定時期', '納期14日前までに確定',
-         '納期10日前までに確定\n内示数量の変動は納期14日前までに収束',
-         '納期5営業日前までに確定\n内示数量の変動は納期14日前までに収束'],
-        ['3か月内示の差異（月平均）', '±5％以内', '±7％以内', '±10％以内'],
-        ['確定直前の変更', '原則ゼロ', '変更は月1回まで', '変更時は事前協議を必須化'],
+         '納期10日前までに確定\n内示数量の変動は納期14日前までに5%以内に抑える',
+         '納期5営業日前までに確定\n内示数量の変動は納期14日前までに5%以内に抑える'],
+        ['2か月前内示と確定の乖離（月平均）', '±5％以内', '±7％以内', '±10％以内'],
+        ['確定日後の追加（5稼働日未満）', '原則ゼロ', '追加は月1回まで', '追加時は事前協議を必須化'],
         ['まとめ注文', '廃止', '廃止', '廃止'],
     ]
     _add_table(slide, 0.45, 1.95, 12.45, 3.9, headers, rows,
@@ -694,8 +824,11 @@ def generate_naiji_pptx_report(data):
     _build_slide7(prs, data)
     _build_slide8(prs, data)
     _build_slide9(prs, data)
+    _build_slide9b(prs, data)
     _build_slide10(prs, data)
     _build_slide11(prs, data)
+    _build_slide11b(prs, data)
+    _build_slide11c(prs, data)
     _build_slide12(prs)
 
     buf = io.BytesIO()

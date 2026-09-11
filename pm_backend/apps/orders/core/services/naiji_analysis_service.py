@@ -705,6 +705,239 @@ def _compute_firm_variability(all_due_dates, firm_quantities):
     }
 
 
+def _compute_monthly_forecast_deviation(snapshots_map, snapshot_dates, ordered_files, firm_quantities):
+    """2か月前（前半月1〜15日）の内示（日当たり平均）と確定（日当たり平均）の月別乖離率を計算
+
+    対象月Mに対して:
+      1. Mの確定数量の日当たり平均 = 確定合計 ÷ 確定日数
+      2. M-2か月の前半月（1〜15日）のスナップショットを探す
+      3. 各スナップショットごとにMの内示日当たり平均を求める（内示合計 ÷ 内示日数）
+      4. それらの日当たり平均の平均を求める
+      5. 内示日当たり平均 vs 確定日当たり平均を比較
+    """
+    from collections import defaultdict
+
+    if not firm_quantities or not ordered_files:
+        return {'months': [], 'deviations': [], 'avg_pct': None}
+
+    firm_by_month_total = defaultdict(float)
+    firm_by_month_days = defaultdict(int)
+    for ds, qty in firm_quantities.items():
+        m = ds[:7]
+        firm_by_month_total[m] += qty
+        firm_by_month_days[m] += 1
+
+    snaps_by_month = defaultdict(list)
+    for sf in ordered_files:
+        snap_date = snapshot_dates[sf].date()
+        if snap_date.day > 15:
+            continue
+        snap_month = snap_date.strftime('%Y-%m')
+        snaps_by_month[snap_month].append(sf)
+
+    def _ref_month(target_month):
+        year, mon = int(target_month[:4]), int(target_month[5:7])
+        mon -= 2
+        if mon <= 0:
+            mon += 12
+            year -= 1
+        return f'{year:04d}-{mon:02d}'
+
+    deviations = []
+    for month in sorted(firm_by_month_total.keys()):
+        ref = _ref_month(month)
+        ref_snaps = snaps_by_month.get(ref, [])
+        if not ref_snaps:
+            continue
+
+        snap_daily_avgs = []
+        for sf in ref_snaps:
+            month_entries = {ds: qty for ds, qty in snapshots_map[sf].items() if ds[:7] == month}
+            if month_entries:
+                daily_avg = sum(month_entries.values()) / len(month_entries)
+                snap_daily_avgs.append(daily_avg)
+
+        if not snap_daily_avgs:
+            continue
+
+        forecast_daily = round(sum(snap_daily_avgs) / len(snap_daily_avgs), 1)
+        firm_days = firm_by_month_days[month]
+        firm_daily = round(firm_by_month_total[month] / firm_days, 1) if firm_days > 0 else 0
+
+        if firm_daily > 0:
+            pct = round((forecast_daily - firm_daily) / firm_daily * 100, 1)
+        else:
+            pct = None
+
+        deviations.append({
+            'month': month,
+            'forecast_daily': forecast_daily,
+            'firm_daily': firm_daily,
+            'firm_days': firm_days,
+            'pct': pct,
+            'snap_count': len(snap_daily_avgs),
+            'ref_month': ref,
+        })
+
+    abs_pcts = [abs(d['pct']) for d in deviations if d['pct'] is not None]
+    avg_pct = round(sum(abs_pcts) / len(abs_pcts), 1) if abs_pcts else None
+
+    return {
+        'months': sorted(firm_by_month_total.keys()),
+        'deviations': deviations,
+        'avg_pct': avg_pct,
+    }
+
+
+def _compute_short_lead_firm(customer_id, product_entries, start_date=None):
+    """確定日後の追加（5稼働日未満）の事例を抽出
+
+    発行日の翌日（弊社到着日）から納期までの稼働日が5未満のFIRMレコードを返す。
+    """
+    from django.db import connection
+    from datetime import timedelta
+    import json
+
+    cal_start = start_date or date(2026, 1, 1)
+    product_codes = [e['product_code'] for e in product_entries]
+    if not product_codes:
+        return []
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT target_date FROM m_calendar_day"
+        " WHERE calendar_id = 1 AND is_working_day = 1"
+        " AND target_date >= %s AND target_date <= %s",
+        [cal_start - timedelta(days=90), date(2027, 12, 31)],
+    )
+    working_days = set(row[0] for row in cursor.fetchall())
+
+    placeholders = ','.join(['%s'] * len(product_codes))
+    cursor = connection.cursor()
+    cursor.execute(f"""
+        SELECT r.raw_payload, d.due_date, d.product_code, d.ship_to_code, d.quantity
+        FROM stg_order_raw_kubota r
+        JOIN stg_order_daily d ON d.raw_kubota_id = r.id
+        WHERE d.customer_id = %s AND d.order_type = 'FIRM'
+          AND d.due_date >= %s
+          AND d.product_code IN ({placeholders})
+    """, [customer_id, cal_start] + product_codes)
+
+    def _parse_issue(s):
+        if not s or len(s) != 6:
+            return None
+        try:
+            return date(2000 + int(s[:2]), int(s[2:4]), int(s[4:6]))
+        except Exception:
+            return None
+
+    def _count_wd(s, e):
+        count = 0
+        cur = s
+        while cur < e:
+            if cur in working_days:
+                count += 1
+            cur += timedelta(days=1)
+        return count
+
+    by_order = {}
+    for raw_payload, due_date, pc, st, qty in cursor.fetchall():
+        payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+        issue_d = _parse_issue(payload.get('issue_date', ''))
+        if not issue_d:
+            continue
+        received = issue_d + timedelta(days=1)
+        order_no = payload.get('order_no') or ''
+        key = (pc, st or '', due_date, order_no)
+        if key not in by_order or received < by_order[key][0]:
+            by_order[key] = (received, issue_d, qty)
+
+    results = []
+    for (pc, st, due_date, _order_no), (received, issue_d, qty) in by_order.items():
+        wd = _count_wd(received, due_date)
+        if wd < 5:
+            results.append({
+                'product_code': pc,
+                'ship_to': st,
+                'due_date': due_date.isoformat(),
+                'issue_date': issue_d.isoformat(),
+                'received_date': received.isoformat(),
+                'quantity': float(qty),
+                'working_days': wd,
+            })
+    results.sort(key=lambda x: x['due_date'])
+    return results
+
+
+def _compute_batch_orders(customer_id, product_entries, start_date=None):
+    """まとめ注文の事例を抽出
+
+    ある日の確定数量が平均の1.5倍超え、かつ翌稼働日に確定がないケース。
+    """
+    from django.db import connection
+    from datetime import timedelta
+
+    cal_start = start_date or date(2026, 1, 1)
+    product_codes = [e['product_code'] for e in product_entries]
+    if not product_codes:
+        return []
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT target_date FROM m_calendar_day"
+        " WHERE calendar_id = 1 AND is_working_day = 1"
+        " AND target_date >= %s AND target_date <= %s",
+        [cal_start, date(2027, 12, 31)],
+    )
+    working_days = sorted(row[0] for row in cursor.fetchall())
+    wd_set = set(working_days)
+
+    placeholders = ','.join(['%s'] * len(product_codes))
+    cursor.execute(f"""
+        SELECT product_code, ship_to_code, due_date, SUM(quantity)
+        FROM stg_order_daily
+        WHERE customer_id = %s AND order_type = 'FIRM' AND due_date >= %s
+          AND product_code IN ({placeholders})
+        GROUP BY product_code, ship_to_code, due_date
+        ORDER BY product_code, ship_to_code, due_date
+    """, [customer_id, cal_start] + product_codes)
+
+    from collections import defaultdict
+    by_product = defaultdict(dict)
+    for pc, st, dd, qty in cursor.fetchall():
+        by_product[(pc, st or '')][dd] = float(qty)
+
+    def _next_working_day(d):
+        nxt = d + timedelta(days=1)
+        while nxt not in wd_set and nxt < date(2027, 12, 31):
+            nxt += timedelta(days=1)
+        return nxt
+
+    results = []
+    for (pc, st), day_map in by_product.items():
+        qtys = list(day_map.values())
+        if len(qtys) < 3:
+            continue
+        avg = sum(qtys) / len(qtys)
+        if avg == 0:
+            continue
+        for dd, q in day_map.items():
+            if q > avg * 1.5:
+                nwd = _next_working_day(dd)
+                if nwd not in day_map:
+                    results.append({
+                        'product_code': pc,
+                        'ship_to': st,
+                        'due_date': dd.isoformat(),
+                        'quantity': q,
+                        'avg_quantity': round(avg, 1),
+                        'ratio': round(q / avg, 1),
+                        'next_working_day': nwd.isoformat(),
+                    })
+    results.sort(key=lambda x: (x['due_date'], x['product_code']))
+    return results
+
+
 def compute_naiji_report_data(customer_id, product_entries, start_date=None, end_date=None, snapshot_start_date=None):
     """PPTXレポート用データを計算
 
@@ -748,6 +981,10 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
         )
         firm_variability = _compute_firm_variability(all_due_dates, firm_quantities)
 
+        monthly_deviation = _compute_monthly_forecast_deviation(
+            snapshots_map, snapshot_dates, ordered_files, firm_quantities,
+        )
+
         products.append({
             'product_code': pc,
             'ship_to': st,
@@ -757,6 +994,7 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
             'volatility': volatility,
             'last_minute': last_minute,
             'firm_variability': firm_variability,
+            'monthly_deviation': monthly_deviation,
         })
 
     # --- 概要カード用の集計 ---
@@ -786,11 +1024,16 @@ def compute_naiji_report_data(customer_id, product_entries, start_date=None, end
 
     firm_due_counts = [p['summary']['dates_with_firm'] for p in products if p['summary']['dates_with_firm']]
 
+    short_lead_firm = _compute_short_lead_firm(customer_id, product_entries, start_date=date(2026, 7, 1))
+    batch_orders = _compute_batch_orders(customer_id, product_entries, start_date=start_date)
+
     return {
         'customer_id': customer_id,
         'customer_name': customer_name,
         'products': products,
         'overview': overview,
+        'short_lead_firm': short_lead_firm,
+        'batch_orders': batch_orders,
         'snapshot_count': len(all_snapshot_dates),
         'first_snapshot_date': min(all_snapshot_dates).isoformat() if all_snapshot_dates else None,
         'last_snapshot_date': max(all_snapshot_dates).isoformat() if all_snapshot_dates else None,
