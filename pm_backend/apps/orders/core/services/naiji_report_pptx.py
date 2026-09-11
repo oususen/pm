@@ -723,7 +723,7 @@ def _build_slide11b(prs, data):
         _text(slide, 0.5, 2.5, 12.0, 0.5, '該当データなし', size=14)
         return
 
-    headers = ['品番', '納入地', '納期', '発行日', '到着日', '数量', '稼働日']
+    headers = ['品番', '納入地', '納期', '顧客作成日', 'ダイソウ受領日', '数量', '確定日数']
     rows = []
     for it in items:
         rows.append([
