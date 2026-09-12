@@ -214,6 +214,14 @@
         <button
           v-if="canShowFloorSpotAutoPlanButton && activePlanTab !== 'floor-shipping'"
           class="btn"
+          :class="{ 'auto-plan-lock-active': autoPlanLockMode }"
+          @click="autoPlanLockMode = !autoPlanLockMode"
+          :disabled="processing || autoPlanLockBusy || !autoPlanLocksReady || !selectedLine"
+          :title="autoPlanLockMode ? '自動計画ロックモード ON — セルをクリックでロック/解除' : '自動計画ロックモード OFF'"
+        >{{ autoPlanLockMode ? '🔒ロック中' : '🔒ロック' }}</button>
+        <button
+          v-if="canShowFloorSpotAutoPlanButton && activePlanTab !== 'floor-shipping'"
+          class="btn"
           @click="openAggregateSettingsDialog"
         >まとめ設定</button>
         <button class="btn accent" @click="toggleProcessGantt" :disabled="processing || !selectedLine">
@@ -403,8 +411,9 @@
               <td class="num demand" :class="c.dayClass">
                 <span class="readonly-value">{{ displayValue(isProgressMode ? row.daily?.[c.key]?.line_demand_qty : row.daily?.[c.key]?.demand) }}</span>
               </td>
-              <td class="num plan" :class="c.dayClass">
-                <div class="lot-stack">
+              <td class="num plan" :class="[c.dayClass, { 'auto-plan-locked': isAutoPlanLocked(c.key, row.product_id) }]"
+                @click="autoPlanLockMode && toggleAutoPlanLock(c.key, row.product_id)">
+                <div class="lot-stack" :class="{ 'lock-mode-overlay': autoPlanLockMode }">
                   <input
                     type="text"
                     inputmode="decimal"
@@ -416,9 +425,9 @@
                     @keydown="onCellKeydown($event, idx, colIdx, 'plan')"
                     @focus="setActiveInputRow(row, $event)"
                     @blur="onCellBlur"
-                    :disabled="isPlanCellLocked(c.key)"
+                    :disabled="!autoPlanLocksReady || isPlanCellLocked(c.key) || isAutoPlanLocked(c.key, row.product_id)"
                     :readonly="isHolidayDate(c.key)"
-                    :class="{ locked: isPlanCellLocked(c.key) }"
+                    :class="{ locked: isPlanCellLocked(c.key) || isAutoPlanLocked(c.key, row.product_id) }"
                   />
                   <div
                     v-for="(lot, lotIdx) in row.daily?.[c.key]?.extraLots"
@@ -432,12 +441,12 @@
                       @input="onExtraPlanInput(row, c.key, lot, $event.target.value)"
                       @focus="setActiveInputRow(row, $event)"
                       @blur="onCellBlur"
-                      :disabled="isPlanCellLocked(c.key)"
+                      :disabled="!autoPlanLocksReady || isAutoPlanLocked(c.key, row.product_id) || isPlanCellLocked(c.key)"
                       :readonly="isHolidayDate(c.key)"
                       :class="{ locked: isPlanCellLocked(c.key) }"
                     />
                   </div>
-                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="isPlanCellLocked(c.key) || isHolidayDate(c.key) || (isFloorShippingDeliveryLine && row.daily?.[c.key]?.extraLots?.length >= 1)" :style="getPlanCellStyle(row)">+</button>
+                  <button class="mini-btn lot-add" type="button" @click="addExtraLot(row, c.key)" :disabled="!autoPlanLocksReady || isAutoPlanLocked(c.key, row.product_id) || isPlanCellLocked(c.key) || isHolidayDate(c.key) || (isFloorShippingDeliveryLine && row.daily?.[c.key]?.extraLots?.length >= 1)" :style="getPlanCellStyle(row)">+</button>
                 </div>
               </td>
               <td class="num sequence" :class="c.dayClass">
@@ -1445,6 +1454,7 @@
 </template>
 
 <script setup>
+import { usePlanQuantityLocks } from '@/composables/usePlanQuantityLocks'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
@@ -2508,6 +2518,12 @@ const endDate = computed(() => {
   return formatDateKey(d)
 })
 
+const {
+  lockMode: autoPlanLockMode, locksReady: autoPlanLocksReady, lockBusy: autoPlanLockBusy,
+  fetchLocks: fetchAutoPlanLocks, isLocked: isAutoPlanLocked, hasLocksOnDate,
+  applyQuantities: applyLockedPlanQuantities, toggleLock: toggleAutoPlanLock,
+} = usePlanQuantityLocks({ lineId: selectedLine, startDate, endDate, rows, processing })
+
 const dateColumns = computed(() => {
   const cols = []
   const base = buildLocalDate(startDate.value)
@@ -2886,6 +2902,13 @@ const savePlanByRange = async (rangeStartDate, rangeEndDate) => {
     console.error('日別設定の保存に失敗しました', e)
   }
 
+  try {
+    await fetchAutoPlanLocks()
+    applyLockedPlanQuantities(rangeStartDate, rangeEndDate)
+  } catch (e) {
+    alert('ロック情報を取得できないため保存を中止しました。再表示してください。')
+    return
+  }
   const items = []
   console.log('保存対象の行数:', rows.value.length)
   rows.value.forEach((r, rowIdx) => {
@@ -2899,7 +2922,7 @@ const savePlanByRange = async (rangeStartDate, rangeEndDate) => {
       const mainPlanQty = daily.plan === '' || daily.plan === null || daily.plan === undefined ? null : Number(daily.plan)
       const mainSeqNo = daily.sequence_no === '' || daily.sequence_no === null || daily.sequence_no === undefined ? null : Number(daily.sequence_no)
       const lots = []
-      if (!(mainPlanQty === null && mainSeqNo === null)) {
+      if (isAutoPlanLocked(c.key, r.product_id) || !(mainPlanQty === null && mainSeqNo === null)) {
         lots.push({ plan_qty: mainPlanQty, sequence_no: mainSeqNo })
       }
       const extraLots = Array.isArray(daily.extraLots) ? daily.extraLots : []
@@ -3535,6 +3558,7 @@ const loadData = async () => {
     // 日別設定を読み込み、未設定の日にデフォルト値をセット
     await loadDailySettings()
     applyDefaultToDailySettings()
+    await fetchAutoPlanLocks()
   } else {
     calendarDayMap.value = {}
     workPatternMap.value = {}
@@ -3807,6 +3831,14 @@ const getNextSequenceForDate = (dateKey) => {
 // 日付ヘッダーの×ボタン: その日の計画(LinePlan/LineGanttPlan/LineBacklog)をクリア
 const clearDayPlan = async (dateKey) => {
   if (!selectedLine.value) return
+  try { await fetchAutoPlanLocks() } catch (e) {
+    alert('ロック情報を取得できないため削除を中止しました。')
+    return
+  }
+  if (hasLocksOnDate(dateKey)) {
+    alert('この日はロック済み計画があります。先にロックを解除してください。')
+    return
+  }
   if (!confirm(`${dateKey} の計画をクリアします。よろしいですか？`)) return
   processing.value = true
   try {
@@ -3833,7 +3865,7 @@ const clearDayPlan = async (dateKey) => {
 }
 
 const onPlanInput = (row, dateKey, value) => {
-  if (isPlanCellLocked(dateKey)) return
+  if (!autoPlanLocksReady.value || isPlanCellLocked(dateKey) || isAutoPlanLocked(dateKey, row.product_id)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.plan = value === '' ? '' : value
   // 数量 > 0 かつ順が未設定の場合、入力順で自動採番
@@ -3861,7 +3893,7 @@ const onSequenceInput = (row, dateKey, value) => {
 }
 
 const addExtraLot = (row, dateKey) => {
-  if (isPlanCellLocked(dateKey)) return
+  if (!autoPlanLocksReady.value || isPlanCellLocked(dateKey) || isAutoPlanLocked(dateKey, row.product_id)) return
   const daily = ensureDailyCell(row, dateKey)
   if (isFloorShippingDeliveryLine.value && Array.isArray(daily.extraLots) && daily.extraLots.length >= 1) {
     alert('フロア配送は同一日・同一品番で2件までです。')
@@ -3886,13 +3918,13 @@ const addExtraLot = (row, dateKey) => {
 }
 
 const removeExtraLot = (row, dateKey, lotId) => {
-  if (isPlanCellLocked(dateKey)) return
+  if (!autoPlanLocksReady.value || isPlanCellLocked(dateKey) || isAutoPlanLocked(dateKey, row.product_id)) return
   const daily = ensureDailyCell(row, dateKey)
   daily.extraLots = daily.extraLots.filter((lot) => lot.id !== lotId)
 }
 
 const onExtraPlanInput = (row, dateKey, lot, value) => {
-  if (isPlanCellLocked(dateKey)) return
+  if (!autoPlanLocksReady.value || isPlanCellLocked(dateKey) || isAutoPlanLocked(dateKey, row.product_id)) return
   const daily = ensureDailyCell(row, dateKey)
   const target = daily.extraLots.find((item) => item.id === lot.id)
   if (target) {
@@ -5319,6 +5351,7 @@ const onGlobalKeydown = (event) => {
 }
 
 const fetchAndApplyData = async () => {
+  await fetchAutoPlanLocks()
   currentLineRoutingFilterMode.value = 'filtered'
   const fetchLineDemands = activePlanTab.value === 'floor-shipping'
     ? api.lineDemands.list({
@@ -5614,6 +5647,7 @@ const fetchAndApplyData = async () => {
     ensureL2201LineFinalRows(grouped, productInfoByProdKey)
 
     rows.value = sortRowsForLine(Array.from(grouped.values()))
+    applyLockedPlanQuantities()
 
     // 日別設定を読み込み、未設定の日にデフォルト値をセット
     await loadDailySettings()
@@ -5781,7 +5815,7 @@ const deleteAggRow = async (id) => {
 }
 
 const applyDemandToPlanForDay = (dateKey) => {
-  if (isPlanCellLocked(dateKey)) return
+  if (!autoPlanLocksReady.value || isPlanCellLocked(dateKey)) return
   rows.value.forEach((row) => {
     const daily = ensureDailyCell(row, dateKey)
     const sourceQty = isProgressMode.value ? daily.line_demand_qty : daily.demand
@@ -5800,9 +5834,11 @@ const applyDemandToPlanForDay = (dateKey) => {
       }
     }
   })
+  applyLockedPlanQuantities(dateKey, dateKey)
 }
 
 const applyDemandToPlanForVisiblePeriod = (fromDate = null) => {
+  if (!autoPlanLocksReady.value) throw new Error('ロック情報を再取得してください。')
   const getWeekday = (dateKey) => {
     const dt = new Date(`${dateKey}T00:00:00`)
     return dt.getDay()
@@ -5878,6 +5914,7 @@ const applyDemandToPlanForVisiblePeriod = (fromDate = null) => {
       }
     })
   })
+  applyLockedPlanQuantities(fromDate || startDate.value, endDate.value)
   return autoPlanCount
 }
 
@@ -5934,7 +5971,8 @@ const doFloorSpotAutoPlan = async () => {
     })
     await fetchAndApplyData()
     const autoPlanCount = applyDemandToPlanForVisiblePeriod(autoPlanStartDate.value)
-    if (!autoPlanCount) {
+    const hasLockedPlans = dateColumns.value.some(c => c.key >= autoPlanStartDate.value && hasLocksOnDate(c.key))
+    if (!autoPlanCount && !hasLockedPlans) {
       alert('対象期間内に需要がないため、自動計画を実行しませんでした。')
       return
     }
@@ -7185,6 +7223,30 @@ thead .sticky-col {
   background: #f1f5f9;
   color: #666;
   cursor: not-allowed;
+}
+.plan-grid td.auto-plan-locked {
+  background: #fef3c7 !important;
+  position: relative;
+}
+.plan-grid td.auto-plan-locked::after {
+  content: '🔒';
+  position: absolute;
+  top: 0;
+  right: 1px;
+  font-size: 8px;
+  line-height: 1;
+  pointer-events: none;
+}
+.auto-plan-lock-active {
+  background: #f59e0b !important;
+  color: #fff !important;
+  border-color: #d97706 !important;
+}
+.lock-mode-overlay {
+  pointer-events: none;
+}
+.lock-mode-overlay input {
+  pointer-events: none;
 }
 .plan-grid tbody tr td {
   border-top: 1px solid #000;

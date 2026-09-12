@@ -472,6 +472,7 @@
       <tr><th>保存</th><td>計画を保存（後述STEP 6）</td></tr>
       <tr><th>ガント表示/閉じ</th><td>工程ガントチャートの表示/非表示を切替（後述STEP 7）</td></tr>
       <tr><th>負荷表示/閉</th><td>工程負荷表の表示/非表示を切替（後述STEP 8）</td></tr>
+      <tr><th>🔒ロック</th><td>自動計画ロックモードのON/OFF切替。ロックモード中にセルをクリックするとロック/解除をトグル（後述STEP 9）</td></tr>
       <tr><th>自動計画<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">条件付き表示</span></th><td>需要データに基づいて計画を自動生成（後述STEP 9）。ライン編集で有効化されたラインのみ表示</td></tr>
       <tr><th>まとめ設定<br><span style="font-size:10px;font-weight:400;color:var(--ink2);">条件付き表示</span></th><td>まとめ生産ルールを設定（後述STEP 9）。ライン編集で有効化されたラインのみ表示</td></tr>
     </table>
@@ -1072,6 +1073,34 @@
     <div class="callout warn" style="margin-bottom:4px;">
       <span class="icon">&#9888;</span>
       <span>「自動計画」「まとめ設定」ボタンはライン編集の<strong>「自動計画適用設定」</strong>で有効化されたラインのみ表示されます（設定方法は<a href="/manual/生産/生産計画入力_ライン編集_作業手順書.html" style="color:inherit;font-weight:600;text-decoration:underline;">ライン編集手順書 STEP 8</a>を参照）。フロア出荷タブでは非表示です。</span>
+    </div>
+
+    <!-- ── 自動計画ロック ── -->
+    <h4 class="sub">&#9654; 自動計画ロック（特定セルを自動計画から保護）</h4>
+    <div class="step-desc" style="margin-bottom:8px;">
+      手動で調整した計画を自動計画で上書きされたくないときに、セル単位で<strong>ロック</strong>を設定します。定時自動計画・画面上の「自動計画」ではロック時の保存済み数量を使用します。変更は解除→編集→保存→再ロックの順に行います。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr>
+        <th style="width:30px;text-align:center;">1</th>
+        <td>ツールバーの<strong>「🔒ロック」</strong>ボタンをクリック → ロックモード ON（ボタンがオレンジ色に変わる）</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">2</th>
+        <td>保護したい計画セル（日付×製品）をクリック → <strong>黄色背景 + 🔒マーク</strong>が表示される</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">3</th>
+        <td>解除したいセルをもう一度クリック → ロック解除</td>
+      </tr>
+      <tr>
+        <th style="text-align:center;">4</th>
+        <td><strong>「🔒ロック中」</strong>ボタンをもう一度クリック → ロックモード OFF（通常の編集モードに戻る）</td>
+      </tr>
+    </table>
+    <div class="callout info" style="margin-bottom:4px;">
+      <span class="icon">&#9432;</span>
+      <span>ロックはライン×日×製品の単位です（工程単位ではありません）。ロック情報はサーバーに保存されるため、画面を閉じても保持されます。ロック中は計画数を編集できません。</span>
     </div>
 
     <!-- ── まとめ設定 ── -->

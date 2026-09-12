@@ -38,6 +38,7 @@ from .models_plan_deviation_config import PlanDeviationLineConfig
 from .models_stocktake_record import StocktakeRecord
 from .models_singleproc_finished_entry import SingleProcFinishedEntry
 from .models_morning_meeting import MorningMeeting, MorningMeetingParticipant, MorningMeetingAttachment
+from .models_production_lock import ProductionLock
 
 
 class LineDemand(models.Model):

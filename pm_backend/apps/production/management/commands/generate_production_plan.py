@@ -14,6 +14,7 @@ from production.models_line_backlog import LineBacklog
 from production.models_line_plan import LinePlan
 from production.models_line_gantt_plan import LineGanttPlan
 from production.models_line_default_schedule_setting import LineDefaultScheduleSetting
+from production.models_production_lock import ProductionLock
 from production.views import LineBacklogViewSet
 from production.services.gantt_planning import generate_line_gantt_plans
 from production.services.auto_plan_expansion import expand_processes_for_auto_plan
@@ -55,7 +56,6 @@ def load_config(path_str):
 
 
 def month_range(run_date: date):
-    # 翌月1日〜翌月末（既存互換）
     first = run_date.replace(day=1)
     next_month = (first + timedelta(days=32)).replace(day=1)
     start = next_month
@@ -65,7 +65,6 @@ def month_range(run_date: date):
 
 def iter_lines(line_ids):
     if line_ids:
-        # 自動計画から明示指定されたラインは種別を問わず対象化
         qs = Line.objects.filter(is_active=True, id__in=line_ids)
     else:
         qs = Line.objects.filter(is_active=True, line_type='PROD')
@@ -115,10 +114,9 @@ def fetch_final_demands(line_id, start_date, end_date):
         demand_qty_plan__gt=0,
     )
 
-    # 社内ライン(PROD)はライン最終品のみを対象にする。
-    # 外作/購入ライン(OUTSOURCE/PURCHASE)は最終品フラグに依存せず需要行を対象にする。
     if line_type == 'PROD':
         base_qs = base_qs.filter(product__is_line_final_product=True)
+
     return base_qs.values('plan_date', 'process_id', 'product_id', 'demand_qty_plan')
 
 
@@ -129,20 +127,19 @@ def delete_existing(line_id, start_date, end_date):
     - LineGanttPlan: 期間内すべて削除
     - LineBacklog: plan_idひも付き計画行（sequence_no>0）のみ削除
     """
-    plan_ids = list(LinePlan.objects.filter(
+    plan_qs = LinePlan.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date],
-    ).values_list('plan_id', flat=True))
+    )
+    gantt_qs = LineGanttPlan.objects.filter(
+        line_id=line_id,
+        plan_date__range=[start_date, end_date],
+    )
 
-    LinePlan.objects.filter(
-        line_id=line_id,
-        plan_date__range=[start_date, end_date],
-    ).delete()
+    plan_ids = list(plan_qs.values_list('plan_id', flat=True))
 
-    LineGanttPlan.objects.filter(
-        line_id=line_id,
-        plan_date__range=[start_date, end_date],
-    ).delete()
+    plan_qs.delete()
+    gantt_qs.delete()
 
     if plan_ids:
         LineBacklog.objects.filter(
@@ -174,17 +171,7 @@ def generate_line_plans(line_id, demand_rows):
     created = 0
     created_plan_ids = []
 
-    # 既存の自動対象外計画を考慮したmax sequence取得
-    existing_max = {
-        rec['plan_date']: rec['max_seq']
-        for rec in LinePlan.objects.filter(
-            line_id=line_id,
-            plan_date__in=items_by_date.keys(),
-        ).exclude(product_id__in=product_ids).values('plan_date').annotate(max_seq=Max('sequence_no'))
-    }
-
     for plan_date, items in items_by_date.items():
-        # product_code -> process_id で安定ソート
         for it in items:
             if it['product_id'] not in product_code_cache:
                 product_code_cache[it['product_id']] = Product.objects.filter(
@@ -192,7 +179,11 @@ def generate_line_plans(line_id, demand_rows):
                 ).values_list('product_code', flat=True).first() or str(it['product_id'])
         items.sort(key=lambda x: (product_code_cache.get(x['product_id'], ''), x['process_id'] or 0))
 
-        next_seq = (existing_max.get(plan_date) or 0) + 1
+        max_seq = LinePlan.objects.filter(
+            line_id=line_id,
+            plan_date=plan_date,
+        ).aggregate(max_seq=Max('sequence_no'))['max_seq'] or 0
+        next_seq = max_seq + 1
 
         for it in items:
             plan_qty = int(Decimal(it['demand_qty_plan'] or 0))
@@ -200,7 +191,7 @@ def generate_line_plans(line_id, demand_rows):
                 continue
             product_code = product_code_cache.get(it['product_id'], str(it['product_id']))
 
-            qty_label = str(plan_qty).rstrip('0').rstrip('.')
+            qty_label = str(plan_qty)
             if '.' in qty_label:
                 qty_label = qty_label.replace('.', 'p')
             plan_id = f"{product_code}_{plan_date.strftime('%Y%m%d')}_{qty_label}_{next_seq}"
@@ -239,13 +230,11 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
         process_map[key] = row.get('process_id')
         product_ids.add(product_id)
 
-    # plan_id 生成用に製品コードを取得
     product_code_map = {
         p.id: p.product_code
         for p in Product.objects.filter(id__in=product_ids).only('id', 'product_code')
     }
 
-    # 期間内の seq=1 既存レコードを取得
     qs = LineBacklog.objects.filter(
         line_id=line_id,
         plan_date__range=[start_date, end_date],
@@ -285,7 +274,6 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
             to_update.append(obj)
             updated += 1
 
-    # 需要が消えた seq=1 レコードは削除（plan_qty=0 に戻さず削除）
     for obj in existing_map.values():
         to_delete_ids.append(obj.id)
 
@@ -344,6 +332,41 @@ def generate_gantt(line_id, start_date, end_date):
     old_qs.delete()
 
 
+def apply_locked_quantities(line, start_date, end_date, demand_rows):
+    """計画生成前に、日×製品の数量を保存済みロック数値に置き換える。"""
+    locks = list(ProductionLock.objects.filter(
+        lock_type='auto_plan', line_id=line.id,
+        plan_date__range=[start_date, end_date], product_id__isnull=False,
+    ))
+    if not locks:
+        return demand_rows
+
+    # 需要がなくなった日も、保存済み計画の工程を使って計画を作成する。
+    source = (LineBacklog.objects.filter(sequence_no=1)
+              if line.line_type == 'PURCHASE' else LinePlan.objects.all())
+    process_by_key = {
+        (row['plan_date'], row['product_id']): row['process_id']
+        for row in source.filter(line_id=line.id, plan_date__range=[start_date, end_date])
+        .values('plan_date', 'product_id', 'process_id')
+    }
+    rows_by_key = defaultdict(list)
+    for row in demand_rows:
+        rows_by_key[(row['plan_date'], row['product_id'])].append(row)
+    for lock in locks:
+        key = (lock.plan_date, lock.product_id)
+        candidates = rows_by_key.get(key, [])
+        process_id = process_by_key.get(key)
+        if not process_id and candidates:
+            process_id = candidates[0]['process_id']
+        if lock.locked_qty > 0 and not process_id:
+            raise CommandError(f'ロック計画の工程がありません: line={line.id}, date={lock.plan_date}, product={lock.product_id}')
+        rows_by_key[key] = [{
+            'plan_date': lock.plan_date, 'product_id': lock.product_id,
+            'process_id': process_id, 'demand_qty_plan': lock.locked_qty,
+        }]
+    return [row for group in rows_by_key.values() for row in group]
+
+
 class Command(BaseCommand):
     help = 'LineDemandを元に生産計画を自動生成する（手動計画と同等の後処理込み）'
 
@@ -394,6 +417,7 @@ class Command(BaseCommand):
 
                 # Step2: ライン最終品需要抽出
                 demand_rows = list(fetch_final_demands(line.id, line_start, line_end))
+                demand_rows = apply_locked_quantities(line, line_start, line_end, demand_rows)
                 if not demand_rows:
                     self.stdout.write(self.style.WARNING('  需要なし（ライン最終品）'))
                     if dry_run:
@@ -404,7 +428,6 @@ class Command(BaseCommand):
                 delete_existing(line.id, line_start, line_end)
 
                 if line.line_type == 'PURCHASE':
-                    # 購買は sequence_no=1 に計画を保存する（seq=0 は基礎データ行として保護）。
                     created_count, updated_count = apply_purchase_plan_to_backlog(
                         line.id, line_start, line_end, demand_rows
                     )
@@ -423,7 +446,7 @@ class Command(BaseCommand):
                         force_direct_process=bool(line.use_direct_process),
                     )
 
-                    # Step5b: ガント生成（在庫計算は日次バッチに任せる）
+                    # Step5b: ガント生成
                     generate_gantt(line.id, line_start, line_end)
 
                 if dry_run:

@@ -28,6 +28,7 @@ from production.views_settings import (
     ProductionPlanLockSettingView,
     ProductionRecordInquirySettingView,
 )
+from production.views_production_lock import ProductionLockView
 from production.views_pdf_floor_shipping import (
     FloorShippingLapPDFView,
     FloorShippingNewPDFView,
@@ -208,4 +209,5 @@ urlpatterns = [
     path('actual-cycle-time/delete-by-period/', ActualCycleTimeDeleteByPeriodView.as_view(), name='actual-cycle-time-delete-by-period'),
     path('progress-pdf-compare/', ProgressPdfCompareView.as_view(), name='progress-pdf-compare'),
     path('progress-pdf-adjust/', ProgressPdfAdjustView.as_view(), name='progress-pdf-adjust'),
+    path('production-locks/', ProductionLockView.as_view(), name='production-locks'),
 ]

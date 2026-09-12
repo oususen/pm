@@ -52,7 +52,11 @@
       </div>
       <div class="toolbar-right">
         <button class="btn" @click="resetRows" :disabled="processing || !rows.length">クリア</button>
-        <button class="btn" @click="autoFillPlan" :disabled="processing || !rows.length || !canEdit">自動計画</button>
+        <button class="btn" @click="autoFillPlan" :disabled="processing || !autoPlanLocksReady || !rows.length || !canEdit">自動計画</button>
+        <button class="btn" :class="{ 'auto-plan-lock-active': autoPlanLockMode }"
+          @click="autoPlanLockMode = !autoPlanLockMode"
+          :disabled="processing || autoPlanLockBusy || !autoPlanLocksReady || !purchaseLineId || !canEdit"
+          title="日付・製品ごとの保存済み計画数を固定">{{ autoPlanLockMode ? '🔒ロック中' : '🔒ロック' }}</button>
         <button class="btn" @click="openChangeReasonDialog" :disabled="processing || !canEdit">計画変更</button>
         <button class="btn" @click="savePlan" :disabled="processing || !rows.length || !selectedSupplier || !canEdit">保存</button>
         <button class="btn" @click="doDisplayOnly" :disabled="processing || !selectedSupplier">表示のみ</button>
@@ -135,7 +139,8 @@
                 <td class="num" :class="c.dayClass">
                   <span class="readonly-value" :class="{ negative: isNegativeValue(row.daily?.[c.key]?.actual) }">{{ displayValue(row.daily?.[c.key]?.actual) }}</span>
                 </td>
-                <td class="num plan" :class="c.dayClass">
+                <td class="num plan" :class="[c.dayClass, { 'auto-plan-locked': isAutoPlanLocked(c.key, row.product_id), 'lock-mode': autoPlanLockMode }]"
+                  @click="autoPlanLockMode && toggleAutoPlanLock(c.key, row.product_id)">
                   <input
                     type="text"
                     inputmode="decimal"
@@ -144,7 +149,7 @@
                     :data-row="idx"
                     :data-col="colIdx"
                     @keydown="onCellKeydown($event, idx, colIdx)"
-                    :disabled="!canEdit || isPlanCellLocked(c.key)"
+                    :disabled="!canEdit || !autoPlanLocksReady || isPlanCellLocked(c.key) || isAutoPlanLocked(c.key, row.product_id)"
                     :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
                   />
                 </td>
@@ -165,7 +170,8 @@
                 <td class="num stock" :class="c.dayClass">
                   <span class="readonly-value" :class="{ negative: isNegativeValue(getStockDisplay(row, colIdx)) }">{{ displayValue(getStockDisplay(row, colIdx)) }}</span>
                 </td>
-                <td class="num plan" :class="c.dayClass">
+                <td class="num plan" :class="[c.dayClass, { 'auto-plan-locked': isAutoPlanLocked(c.key, row.product_id), 'lock-mode': autoPlanLockMode }]"
+                  @click="autoPlanLockMode && toggleAutoPlanLock(c.key, row.product_id)">
                   <input
                     type="text"
                     inputmode="decimal"
@@ -174,7 +180,7 @@
                     :data-row="idx"
                     :data-col="colIdx"
                     @keydown="onCellKeydown($event, idx, colIdx)"
-                    :disabled="!canEdit || isPlanCellLocked(c.key)"
+                    :disabled="!canEdit || !autoPlanLocksReady || isPlanCellLocked(c.key) || isAutoPlanLocked(c.key, row.product_id)"
                     :class="{ locked: isPlanCellLocked(c.key), negative: isNegativeValue(row.daily[c.key].plan) }"
                   />
                 </td>
@@ -233,6 +239,7 @@
 </template>
 
 <script setup>
+import { usePlanQuantityLocks } from '@/composables/usePlanQuantityLocks'
 import { formatISODate } from '@/utils/dateUtil'
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api/client'
@@ -331,6 +338,12 @@ const formatDateKey = (dateObj) => {
   return `${year}-${month}-${day}`
 }
 
+const {
+  lockMode: autoPlanLockMode, locksReady: autoPlanLocksReady, lockBusy: autoPlanLockBusy,
+  fetchLocks: fetchAutoPlanLocks, isLocked: isAutoPlanLocked, hasLocksOnDate,
+  applyQuantities: applyLockedPlanQuantities, toggleLock: toggleAutoPlanLock,
+} = usePlanQuantityLocks({ lineId: purchaseLineId, startDate, endDate, rows, processing, canEdit })
+
 const lockUntilDate = computed(() => {
   const base = new Date()
   base.setHours(0, 0, 0, 0)
@@ -360,6 +373,14 @@ const clearDayPlan = async (dateKey) => {
   if (!canEdit.value) return
   if (!selectedSupplier.value) {
     alert('仕入先を選択してください。')
+    return
+  }
+  try { await fetchAutoPlanLocks() } catch (e) {
+    alert('ロック情報を取得できないため削除を中止しました。')
+    return
+  }
+  if (hasLocksOnDate(dateKey)) {
+    alert('この日はロック済み計画があります。先にロックを解除してください。')
     return
   }
   if (!confirm(`${dateKey} の計画を削除します。よろしいですか？`)) return
@@ -424,6 +445,13 @@ const savePlan = async () => {
   const lineId = await resolvePurchaseLineId()
   if (!lineId || !purchaseProcessId.value) {
     alert('仕入れラインの解決に失敗しました。')
+    return
+  }
+  try {
+    await fetchAutoPlanLocks()
+    applyLockedPlanQuantities()
+  } catch (e) {
+    alert('ロック情報を取得できないため保存を中止しました。再表示してください。')
     return
   }
   const items = []
@@ -676,9 +704,7 @@ const onCellKeydown = (event, rowIdx, colIdx) => {
 }
 
 const refreshDates = () => {
-  rows.value.forEach((r) => {
-    r.daily = initDaily()
-  })
+  rows.value = []
   loadHolidayColumns()
 }
 
@@ -757,7 +783,7 @@ const loadData = async () => {
 
 const onPlanInput = (row, dateKey, value) => {
   if (!canEdit.value) return
-  if (isPlanCellLocked(dateKey)) return
+  if (!autoPlanLocksReady.value || isPlanCellLocked(dateKey) || isAutoPlanLocked(dateKey, row.product_id)) return
   row.daily[dateKey].plan = value === '' ? '' : value
 }
 
@@ -836,6 +862,7 @@ onMounted(async () => {
 })
 
 const fetchAndApplyData = async (lineId) => {
+  await fetchAutoPlanLocks()
   const productIds = products.value.map((p) => p.id)
   if (!productIds.length) {
     alert('この仕入先の購入部品が見つかりません。')
@@ -916,6 +943,7 @@ const fetchAndApplyData = async (lineId) => {
   })
 
   rows.value = Array.from(grouped.values())
+  applyLockedPlanQuantities()
 }
 
 const doDisplayOnly = async () => {
@@ -1046,7 +1074,7 @@ const resolvePurchaseLineId = async () => {
 }
 
 const autoFillPlan = () => {
-  if (!canEdit.value) return
+  if (!canEdit.value || !autoPlanLocksReady.value) return
   if (!rows.value.length) return
 
   const hasExistingPlan = rows.value.some((r) =>
@@ -1072,6 +1100,7 @@ const autoFillPlan = () => {
       }
     })
   })
+  applyLockedPlanQuantities()
 }
 
 const openChangeReasonDialog = () => {
@@ -1097,6 +1126,11 @@ const confirmChangeReason = () => {
 </script>
 
 <style scoped>
+.plan-grid td.auto-plan-locked { background: #fef3c7 !important; position: relative; }
+.plan-grid td.auto-plan-locked::after { content: '🔒'; position: absolute; top: 0; right: 1px; font-size: 8px; pointer-events: none; }
+.auto-plan-lock-active { background: #f59e0b !important; color: #fff !important; }
+.plan-grid td.lock-mode input { pointer-events: none; }
+
 .plan-container {
   padding: 8px 10px 14px;
   background: #eef2f6;
