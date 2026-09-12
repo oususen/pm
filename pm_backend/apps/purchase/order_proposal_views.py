@@ -32,6 +32,7 @@ from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from production.models_line_backlog import LineBacklog
 from production.models_production import StockAllocation
+from production.models_production_lock import ProductionLock
 from shipping.services.email_service import EmailService
 
 from .process_resolver import resolve_purchase_line, resolve_supplier_process
@@ -403,6 +404,103 @@ def _display_user_last_name(user):
     return (getattr(user, 'username', '') or '').strip()
 
 
+def _load_auto_plan_locks(line_ids, plan_date):
+    ids = sorted({int(line_id) for line_id in line_ids if line_id})
+    if not ids or not plan_date:
+        return {}
+    rows = ProductionLock.objects.filter(
+        lock_type='auto_plan',
+        line_id__in=ids,
+        plan_date=plan_date,
+    ).values('line_id', 'product_id', 'locked_qty')
+    return {
+        (row['line_id'], row['product_id']): int(row['locked_qty'] or 0)
+        for row in rows
+    }
+
+
+def _apply_locked_qty_to_proposal_lines(lines, supplier, plan_date):
+    canonical_line = resolve_purchase_line(supplier) if supplier else None
+    line_ids = {line.get('line') for line in lines if isinstance(line, dict)}
+    if canonical_line:
+        line_ids.add(canonical_line.id)
+    locks = _load_auto_plan_locks(line_ids, plan_date)
+    if not locks:
+        return lines
+
+    result = []
+    seen = set()
+    for line_data in lines:
+        item = dict(line_data)
+        key = (int(item.get('line') or 0), int(item.get('product') or 0))
+        if key in locks:
+            item['order_qty'] = locks[key]
+            seen.add(key)
+        result.append(item)
+
+    for (line_id, product_id), locked_qty in sorted(locks.items()):
+        if (line_id, product_id) in seen:
+            continue
+        result.append({
+            'product': product_id,
+            'line': line_id,
+            'shortage_date': plan_date,
+            'shortage_qty': 0,
+            'order_qty': locked_qty,
+            'snapshot_stock': 0,
+            'snapshot_min_stock': 0,
+            'note': '自動計画ロック数量',
+        })
+    return result
+
+
+def _restore_locked_plan_for_proposal_line(proposal, prop_line):
+    lock = ProductionLock.objects.filter(
+        lock_type='auto_plan',
+        line_id=prop_line.line_id,
+        product_id=prop_line.product_id,
+        plan_date=proposal.desired_delivery_date,
+    ).first()
+    if not lock:
+        return None
+
+    supplier = getattr(proposal, 'supplier', None)
+    target_line = prop_line.line or (resolve_purchase_line(supplier) if supplier else None)
+    process = resolve_supplier_process(
+        supplier=supplier,
+        line=target_line,
+        product=prop_line.product,
+        create_purchase_process=True,
+    )
+    process_id = process.id if process else None
+    if not process_id:
+        raise ValueError(f'ロック済み発注提案の工程を特定できません: product_id={prop_line.product_id}')
+
+    order_qty = int(lock.locked_qty or 0)
+    if int(prop_line.order_qty or 0) != order_qty:
+        prop_line.order_qty = order_qty
+        prop_line.save(update_fields=['order_qty'])
+
+    LineBacklog.objects.update_or_create(
+        line_id=prop_line.line_id,
+        product_id=prop_line.product_id,
+        plan_date=proposal.desired_delivery_date,
+        sequence_no=1,
+        defaults={
+            'process_id': process_id,
+            'plan_qty': order_qty,
+            'order_qty': 0,
+            'actual_qty': 0,
+            'stock_qty': 0,
+            'planned_stock_qty': 0,
+            'adjust_qty': 0,
+            'scrap_qty': 0,
+            'actual_shipment_qty': 0,
+        },
+    )
+    return order_qty
+
+
 def _resolve_notification_operator_name(proposal: PurchaseOrderProposal, fallback_user=None):
     creator_name = _display_user_name(getattr(proposal, 'created_by', None))
     if creator_name:
@@ -423,6 +521,9 @@ def _write_plan_qty_on_final_approval(proposal: PurchaseOrderProposal):
     supplier = getattr(proposal, 'supplier', None)
     canonical_line = resolve_purchase_line(supplier) if supplier else None
     for prop_line in proposal.lines.all():
+        locked_qty = _restore_locked_plan_for_proposal_line(proposal, prop_line)
+        if locked_qty is not None:
+            continue
         order_qty = int(prop_line.order_qty or 0)
         if order_qty <= 0:
             continue
@@ -439,9 +540,6 @@ def _write_plan_qty_on_final_approval(proposal: PurchaseOrderProposal):
         )
         process_id = process.id if process else None
 
-        product_code = getattr(prop_line.product, 'product_code', '') or ''
-        plan_id = f'{product_code}_{delivery_date.strftime("%Y%m%d")}_{order_qty}_1'
-
         LineBacklog.objects.update_or_create(
             line_id=line_id,
             product_id=product_id,
@@ -457,32 +555,32 @@ def _write_plan_qty_on_final_approval(proposal: PurchaseOrderProposal):
                 'adjust_qty': 0,
                 'scrap_qty': 0,
                 'actual_shipment_qty': 0,
-                'plan_id': plan_id,
             },
         )
 
 
 def _delete_plan_qty_for_proposal(proposal: PurchaseOrderProposal):
-    """提案差戻/キャンセル時に、最終承認時に書き込んだ LineBacklog.plan_qty(seq=1) を削除する。
-    仕様: plan_id = {product_code}_{YYYYMMDD}_{qty}_1 で一意特定できるため plan_id で削除。"""
+    """提案差戻/キャンセル時に、最終承認時に書き込んだ LineBacklog.plan_qty(seq=1) を削除する。"""
     delivery_date = proposal.desired_delivery_date
     if not delivery_date:
         return
     for prop_line in proposal.lines.all():
+        lock = ProductionLock.objects.filter(
+            lock_type='auto_plan',
+            line_id=prop_line.line_id,
+            product_id=prop_line.product_id,
+            plan_date=delivery_date,
+        ).first()
         order_qty = int(prop_line.order_qty or 0)
-        if order_qty <= 0:
+        if order_qty <= 0 and not lock:
             continue
-        product_code = getattr(prop_line.product, 'product_code', '') or ''
-        if not product_code:
-            continue
-        plan_id = f'{product_code}_{delivery_date.strftime("%Y%m%d")}_{order_qty}_1'
         LineBacklog.objects.filter(
             line_id=prop_line.line_id,
             product_id=prop_line.product_id,
             plan_date=delivery_date,
             sequence_no=1,
-            plan_id=plan_id,
         ).delete()
+        _restore_locked_plan_for_proposal_line(proposal, prop_line)
 
 
 def _create_tasks_for_users(proposal: PurchaseOrderProposal, task_type: str, users, due_date: date | None = None):
@@ -1405,6 +1503,7 @@ class PurchaseOrderProposalListCreateView(APIView):
         lines = request.data.get('lines') or []
         if not isinstance(lines, list):
             return Response({'detail': 'lines must be list'}, status=status.HTTP_400_BAD_REQUEST)
+        lines = _apply_locked_qty_to_proposal_lines(lines, supplier, desired_delivery_date)
 
         with transaction.atomic():
             proposal = PurchaseOrderProposal.objects.create(
@@ -1482,6 +1581,7 @@ class PurchaseOrderProposalDetailView(APIView):
                 lines = request.data.get('lines') or []
                 if not isinstance(lines, list):
                     return Response({'detail': 'lines must be list'}, status=status.HTTP_400_BAD_REQUEST)
+                lines = _apply_locked_qty_to_proposal_lines(lines, proposal.supplier, proposal.desired_delivery_date)
                 proposal.lines.all().delete()
                 for line_data in lines:
                     line_serializer = PurchaseOrderProposalLineSerializer(data=line_data)
@@ -1898,6 +1998,11 @@ class PurchaseOrderProposalAutoFillView(APIView):
             proposal,
             next_delivery_date=next_delivery_date,
             source=source,
+        )
+        generated_lines = _apply_locked_qty_to_proposal_lines(
+            generated_lines,
+            proposal.supplier,
+            proposal.desired_delivery_date,
         )
 
         with transaction.atomic():

@@ -220,7 +220,6 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
     """
     demand_map = {}
     process_map = {}
-    product_ids = set()
     for row in demand_rows:
         plan_date = row['plan_date']
         product_id = row['product_id']
@@ -228,12 +227,6 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
         qty = int(Decimal(row.get('demand_qty_plan') or 0))
         demand_map[key] = max(qty, 0)
         process_map[key] = row.get('process_id')
-        product_ids.add(product_id)
-
-    product_code_map = {
-        p.id: p.product_code
-        for p in Product.objects.filter(id__in=product_ids).only('id', 'product_code')
-    }
 
     qs = LineBacklog.objects.filter(
         line_id=line_id,
@@ -251,8 +244,6 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
     for key, qty_val in demand_map.items():
         product_id, plan_date = key
         obj = existing_map.pop(key, None)
-        product_code = product_code_map.get(product_id, str(product_id))
-        plan_id = f"{product_code}_{plan_date.strftime('%Y%m%d')}_{qty_val}_1"
         if obj is None:
             process_id = process_map.get(key)
             if not process_id:
@@ -264,13 +255,11 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
                 line_id=line_id,
                 sequence_no=1,
                 plan_qty=qty_val,
-                plan_id=plan_id,
             ))
             created += 1
             continue
-        if int(obj.plan_qty or 0) != qty_val or obj.plan_id != plan_id:
+        if int(obj.plan_qty or 0) != qty_val:
             obj.plan_qty = qty_val
-            obj.plan_id = plan_id
             to_update.append(obj)
             updated += 1
 
@@ -280,7 +269,7 @@ def apply_purchase_plan_to_backlog(line_id, start_date, end_date, demand_rows):
     if to_create:
         LineBacklog.objects.bulk_create(to_create, batch_size=1000)
     if to_update:
-        LineBacklog.objects.bulk_update(to_update, ['plan_qty', 'plan_id'], batch_size=1000)
+        LineBacklog.objects.bulk_update(to_update, ['plan_qty'], batch_size=1000)
     if to_delete_ids:
         LineBacklog.objects.filter(id__in=to_delete_ids).delete()
 
