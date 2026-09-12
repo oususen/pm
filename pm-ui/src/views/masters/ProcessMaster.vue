@@ -15,6 +15,7 @@
             <th>工程コード</th>
             <th>工程名</th>
             <th>外注工程</th>
+            <th>2人1設備</th>
             <th>有効</th>
             <th>使用ライン</th>
             <th>操作</th>
@@ -25,6 +26,7 @@
             <td>{{ process.process_code }}</td>
             <td>{{ process.process_name }}</td>
             <td>{{ process.is_outsource ? '外注' : '社内' }}</td>
+            <td>{{ process.two_person_only ? '専用' : '-' }}</td>
             <td>{{ process.is_active ? '有効' : '無効' }}</td>
             <td>
               <span v-if="process.line">{{ lineLabel(process) }}</span>
@@ -60,6 +62,12 @@
             <label>
               <input type="checkbox" v-model="formData.is_outsource" :disabled="!canEdit" />
               外注工程
+            </label>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="formData.two_person_only" :disabled="!canEdit" />
+              2人1設備専用
             </label>
           </div>
           <div class="form-group">
@@ -107,6 +115,7 @@ const formData = ref({
   process_code: '',
   process_name: '',
   is_outsource: false,
+  two_person_only: false,
   is_active: true
 })
 const canEdit = computed(() => canAccessMasterResource('masters.process', 'edit'))

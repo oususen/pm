@@ -866,8 +866,10 @@ const OPERATOR_ACTION_LABEL_KEYS = {
 // ライン・工程
 // ──────────────────────────────
 const filteredProcesses = computed(() => {
-  if (!selectedLineId.value) return processes.value
-  return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
+  let list = processes.value
+  if (selectedLineId.value) list = list.filter((p) => String(p.line) === String(selectedLineId.value))
+  if (!isTwoPersonSameEquipmentMode.value) list = list.filter((p) => !p.two_person_only)
+  return list
 })
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines
@@ -2550,6 +2552,7 @@ const loadStartedProductIds = async () => {
     const latestActionByProduct = new Map()
     ;(Array.isArray(items) ? items : []).forEach((rec) => {
       if (isTwoPersonSameEquipmentMode.value) {
+        if (!rec?.event_data?.two_person_same_equipment) return
         const scopeUserId = operatorScopeUserId.value
         if (scopeUserId) {
           const recUserId = String(rec?.event_data?.operator_user_id || '').trim()

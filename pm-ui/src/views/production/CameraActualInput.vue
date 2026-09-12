@@ -173,7 +173,7 @@ const trainingModelPath = ref("")
 const canStart = computed(() => Boolean(selectedLineId.value && selectedProcessId.value && selectedProductId.value))
 
 const filteredProcesses = computed(() =>
-  processes.value.filter((row) => String(row.line) === String(selectedLineId.value))
+  processes.value.filter((row) => String(row.line) === String(selectedLineId.value) && !row.two_person_only)
 )
 
 const filteredProducts = computed(() =>

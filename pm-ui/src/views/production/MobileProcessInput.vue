@@ -746,8 +746,9 @@ const pageTitle = computed(() => {
 })
 
 const filteredProcesses = computed(() => {
-  if (!selectedLineId.value) return processes.value
-  return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
+  let list = processes.value
+  if (selectedLineId.value) list = list.filter((p) => String(p.line) === String(selectedLineId.value))
+  return list.filter((p) => !p.two_person_only)
 })
 const userUnitLines = computed(() => {
   const unitLines = authState.user?.profile?.unit_lines

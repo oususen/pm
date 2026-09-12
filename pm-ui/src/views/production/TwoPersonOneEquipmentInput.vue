@@ -181,7 +181,7 @@ const availableLines = computed(() => {
 
 const filteredProcesses = computed(() => {
   if (!selectedLineId.value) return []
-  return processes.value.filter((p) => String(p.line) === String(selectedLineId.value))
+  return processes.value.filter((p) => String(p.line) === String(selectedLineId.value) && p.two_person_only)
 })
 
 const userMap = computed(() => {

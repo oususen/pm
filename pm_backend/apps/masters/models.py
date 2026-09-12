@@ -197,6 +197,7 @@ class Process(models.Model):
         verbose_name='設備台数',
         help_text='負荷計算用。負荷時間 ÷ 設備台数 = 実負荷'
     )
+    two_person_only = models.BooleanField(default=False, verbose_name='2人1設備専用')
     is_active = models.BooleanField(default=True, verbose_name='有効')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')

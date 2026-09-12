@@ -711,6 +711,7 @@ def _create_session(
     start_record,
     session_type=SESSION_TYPE_WORK,
     start_action='',
+    operator_name='',
 ):
     product_code = product.product_code if product else ''
     product_name = product.product_name if product else ''
@@ -726,6 +727,7 @@ def _create_session(
         session_type=session_type,
         start_action=str(start_action or '').upper(),
         start_record=start_record,
+        operator_name=operator_name or '',
     )
 
 
@@ -796,22 +798,28 @@ def apply_operator_action_session(process, product, action, action_record, plan_
     if not product:
         return None, ['MISSING_PRODUCT']
 
-    session = ProcessWorkSession.objects.filter(
-        process=process,
-        product=product,
-        status__in=SESSION_ACTIVE_STATUSES,
-    ).order_by('-started_at', '-id').first()
-    other_open_session = ProcessWorkSession.objects.filter(
-        process=process,
-        session_type=SESSION_TYPE_WORK,
-        status__in=SESSION_ACTIVE_STATUSES,
-    ).exclude(product=product).order_by('-started_at', '-id').first()
-
     issues = []
     action_time = action_record.timestamp
     action_event_data = dict(getattr(action_record, 'event_data', None) or {})
     two_person_same_equipment = bool(action_event_data.get('two_person_same_equipment'))
     current_operator_name = str(getattr(action_record, 'operator_name', '') or '').strip().lower()
+
+    # 2人1設備モード時は作業者名でセッションを絞り込む（既存の空セッションにもフォールバック）
+    base_session_qs = ProcessWorkSession.objects.filter(
+        process=process,
+        product=product,
+        status__in=SESSION_ACTIVE_STATUSES,
+    )
+    if two_person_same_equipment and current_operator_name:
+        session = base_session_qs.filter(operator_name=current_operator_name).order_by('-started_at', '-id').first()
+    else:
+        session = base_session_qs.order_by('-started_at', '-id').first()
+
+    other_open_session = ProcessWorkSession.objects.filter(
+        process=process,
+        session_type=SESSION_TYPE_WORK,
+        status__in=SESSION_ACTIVE_STATUSES,
+    ).exclude(product=product).order_by('-started_at', '-id').first()
 
     def should_mark_overlap(other_session):
         if not other_session:
@@ -820,10 +828,11 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             return True
         other_start_record = getattr(other_session, 'start_record', None)
         other_operator_name = str(getattr(other_start_record, 'operator_name', '') or '').strip().lower()
-        # 2人1設備モード時のみ、作業者が明確に異なる場合は重複不整合を付けない
         if current_operator_name and other_operator_name and current_operator_name != other_operator_name:
             return False
         return True
+
+    session_operator_name = current_operator_name if two_person_same_equipment else ''
 
     def create_work(start_action):
         return _create_session(
@@ -834,6 +843,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             start_record=action_record,
             session_type=SESSION_TYPE_WORK,
             start_action=start_action,
+            operator_name=session_operator_name,
         )
 
     def create_pause(start_action):
@@ -845,6 +855,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             start_record=action_record,
             session_type=SESSION_TYPE_PAUSE,
             start_action=start_action,
+            operator_name=session_operator_name,
         )
 
     if action_key == 'START':
@@ -903,10 +914,14 @@ def apply_operator_action_session(process, product, action, action_record, plan_
                 production_qty=qty,
             )
         else:
-            last_session = ProcessWorkSession.objects.filter(
+            cancel_last_qs = ProcessWorkSession.objects.filter(
                 process=process,
                 product=product,
-            ).order_by('-started_at', '-id').first()
+            )
+            if two_person_same_equipment and current_operator_name:
+                last_session = cancel_last_qs.filter(operator_name=current_operator_name).order_by('-started_at', '-id').first()
+            else:
+                last_session = cancel_last_qs.order_by('-started_at', '-id').first()
             last_end_action = str(getattr(last_session, 'end_action', '') or '').upper()
             if last_session and last_end_action == 'TEMP_END':
                 start_time = last_session.ended_at or action_time
@@ -919,6 +934,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
                     start_record=start_record,
                     session_type=SESSION_TYPE_WORK,
                     start_action='TEMP_END',
+                    operator_name=session_operator_name,
                 )
                 _close_session(
                     session=session,
@@ -942,10 +958,14 @@ def apply_operator_action_session(process, product, action, action_record, plan_
         qty = production_qty or Decimal('0')
         if not session:
             if action_key == 'END':
-                last_session = ProcessWorkSession.objects.filter(
+                end_last_qs = ProcessWorkSession.objects.filter(
                     process=process,
                     product=product,
-                ).order_by('-started_at', '-id').first()
+                )
+                if two_person_same_equipment and current_operator_name:
+                    last_session = end_last_qs.filter(operator_name=current_operator_name).order_by('-started_at', '-id').first()
+                else:
+                    last_session = end_last_qs.order_by('-started_at', '-id').first()
                 last_end_action = str(getattr(last_session, 'end_action', '') or '').upper()
                 if last_session and last_end_action == 'TEMP_END':
                     session = create_work('RESUME')
@@ -1356,11 +1376,17 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             if operator_action in SESSION_ACTIONS and not product:
                 raise serializers.ValidationError({'product_id': '作業時刻記録は製品の指定が必要です。'})
         if validated_data.get('record_type') == 'OPERATOR_ACTION' and operator_action == 'END':
-            open_session = ProcessWorkSession.objects.filter(
+            end_session_qs = ProcessWorkSession.objects.filter(
                 process=process,
                 product=product,
                 status__in=SESSION_ACTIVE_STATUSES,
-            ).order_by('-started_at', '-id').first()
+            )
+            end_two_person = bool(operator_event.get('two_person_same_equipment'))
+            end_operator_name = str(validated_data.get('operator_name') or '').strip().lower()
+            if end_two_person and end_operator_name:
+                open_session = end_session_qs.filter(operator_name=end_operator_name).order_by('-started_at', '-id').first()
+            else:
+                open_session = end_session_qs.order_by('-started_at', '-id').first()
             if not open_session:
                 raise serializers.ValidationError({'non_field_errors': ['開始されていないため終了できません。画面を更新して状態を確認してください。']})
             qty_decimal = production_qty or Decimal('0')
