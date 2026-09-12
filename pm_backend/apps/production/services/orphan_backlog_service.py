@@ -69,23 +69,16 @@ def build_valid_line_process_maps():
         line_id__isnull=False,
     ).values('routing__product_id', 'output_product_id', 'line_id', 'process_id')
     for s in steps:
-        product_id = s['routing__product_id']
         line_id = s['line_id']
         process_id = s['process_id']
+        # output_productのline_idで有効ラインを判定する
+        target_id = s['output_product_id'] or s['routing__product_id']
 
         if process_id is not None:
-            valid_line_process[product_id].add((line_id, process_id))
+            valid_line_process[target_id].add((line_id, process_id))
         else:
-            valid_line_any_process[product_id].add(line_id)
-        valid_line_only[product_id].add(line_id)
-
-        if s['output_product_id']:
-            out_id = s['output_product_id']
-            if process_id is not None:
-                valid_line_process[out_id].add((line_id, process_id))
-            else:
-                valid_line_any_process[out_id].add(line_id)
-            valid_line_only[out_id].add(line_id)
+            valid_line_any_process[target_id].add(line_id)
+        valid_line_only[target_id].add(line_id)
 
     return valid_line_process, valid_line_only, valid_line_any_process
 
