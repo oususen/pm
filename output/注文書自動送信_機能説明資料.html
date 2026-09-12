@@ -747,6 +747,7 @@
     <a href="#roles">10. 担当別ガイド</a>
     <a href="#execution">11. 実行方法</a>
     <a href="#lead-time">12. LT設定</a>
+    <a href="#future">13. あるべき姿</a>
   </div>
 </nav>
 
@@ -768,6 +769,7 @@
       <li><a href="#roles">10. 担当別ガイド</a></li>
       <li><a href="#execution">11. 実行方法の比較</a></li>
       <li><a href="#lead-time">12. 最後にLT設定について</a></li>
+      <li><a href="#future">13. あるべき姿 — 計画在庫ベースへの移行</a></li>
     </ol>
   </nav>
 
@@ -1206,7 +1208,7 @@
       </div>
       <div class="safeguard">
         <div class="safeguard-icon"></div>
-        <div><strong>空送信防止</strong> — 添付ファイルがすべて空の場合、メール送信をスキップ（SUCCESS扱い）</div>
+        <div><strong>空送信防止</strong>（実行時）— ファイル種別がONでも元データがなく、添付ファイルがすべて空になった場合はメール送信をスキップ（SUCCESS扱い）</div>
       </div>
       <div class="safeguard">
         <div class="safeguard-icon"></div>
@@ -1214,7 +1216,7 @@
       </div>
       <div class="safeguard">
         <div class="safeguard-icon"></div>
-        <div><strong>バリデーション</strong> — 送信ファイルは5種のうち最低1種類ON必須。メールアドレスの形式チェック実施</div>
+        <div><strong>バリデーション</strong>（設定保存時）— 送信ファイルは5種のうち最低1種類ON必須。メールアドレスの形式チェック実施</div>
       </div>
     </div>
   </section>
@@ -1440,6 +1442,142 @@
     </p>
   </section>
 
+  <section class="section" id="future">
+    <h2 class="section-heading">13. あるべき姿 — 計画在庫ベースへの移行</h2>
+
+    <h3>現状の計算基盤</h3>
+    <p>
+      現在の注文書自動送信では、<strong>顧客需要（内示・確定）</strong>を基準に発注数量を算出しています。
+      顧客の内示需要がそのまま仕入先への発注予定に直結するため、顧客内示が変動すると仕入先への発注予定もそのまま変動します。
+      （注文書は確定発注、進度表は納入依頼ではないが仕入先にとっては内示のような位置づけです。）
+    </p>
+    <div class="flow">
+      <div class="flow-step">
+        <span class="flow-num">現状</span>
+        <span class="flow-label">顧客需要</span>
+        <span class="flow-detail">内示・確定</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-label">発注数量</span>
+        <span class="flow-detail">顧客需要の変動が<br>そのまま反映</span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>現状の課題</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>内示変動の直撃</strong></td>
+            <td>顧客の内示が増減するたびに発注数量が振れる。仕入先への発注が安定しない</td>
+          </tr>
+          <tr>
+            <td><strong>安全在庫が本来の役割を果たせない</strong></td>
+            <td>現在の安全在庫は必要数に一律加算しているだけ。需要変動を吸収するバッファではなく、単なる上乗せになっている</td>
+          </tr>
+          <tr>
+            <td><strong>社内計画との乖離</strong></td>
+            <td>顧客需要ベースで発注するため、社内の生産計画と購入品の納入タイミングがずれる可能性がある</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>あるべき姿</h3>
+    <p>
+      <strong>社内計画</strong>と<strong>計画在庫</strong>を基準に発注数量と納入日を決定する方式に移行したい。
+      顧客需要は社内計画に反映された時点で吸収されるため、購買への影響が平準化されます。
+    </p>
+    <div class="flow">
+      <div class="flow-step">
+        <span class="flow-num">将来</span>
+        <span class="flow-label">顧客需要</span>
+        <span class="flow-detail">内示・確定</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step highlight">
+        <span class="flow-label">社内計画</span>
+        <span class="flow-detail">需要変動を<br>ここで吸収</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-label">計画在庫</span>
+        <span class="flow-detail">目標在庫水準と<br>安全在庫</span>
+      </div>
+      <div class="flow-arrow">&#x2192;</div>
+      <div class="flow-step">
+        <span class="flow-label">発注数量</span>
+        <span class="flow-detail">安定した発注</span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>改善点</th><th>現状</th><th>あるべき姿</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>計算の基準</strong></td>
+            <td>顧客需要 + 計画進度</td>
+            <td>社内計画 + 計画在庫</td>
+          </tr>
+          <tr>
+            <td><strong>内示変動の影響</strong></td>
+            <td>発注数量に直結する</td>
+            <td>社内計画で吸収され、発注への影響が平準化される</td>
+          </tr>
+          <tr>
+            <td><strong>安全在庫の役割</strong></td>
+            <td>必要数への一律加算</td>
+            <td>計画在庫がこの水準を下回りそうなら発注を増やす、というトリガーとして機能する。納入遅延に対する本来のバッファになる</td>
+          </tr>
+          <tr>
+            <td><strong>生産との整合性</strong></td>
+            <td>顧客需要ベースのため社内計画とずれうる</td>
+            <td>社内計画から直接算出するため、生産と購買が整合する</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout success">
+      <strong>安全在庫の本来の意味:</strong> 計画在庫ベースでは、安全在庫は「計画在庫がこの水準を下回りそうになったら発注を増やす」というトリガーになります。現状の「必要数に一律加算」とは違い、在庫水準を常に監視して必要なときだけ発動するため、納入遅延・仕損などの不確実性に対するバッファとして本来の意味で機能すべきです。
+    </div>
+
+    <h3>移行の前提条件</h3>
+    <p>
+      計画在庫ベースへの移行には、<strong>全ラインがアプリで運用されていること</strong>が前提です。
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>項目</th><th>現状</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>3班のBOM・ルーティング</strong></td>
+            <td>整備は完了済み、アプリ上は運用できる状態</td>
+          </tr>
+          <tr>
+            <td><strong>3班のアプリ運用</strong></td>
+            <td>PCの処理能力が不足する可能性があり、現段階では運用開始できない</td>
+          </tr>
+          <tr>
+            <td><strong>移行タイミング</strong></td>
+            <td>全ラインがアプリ運用に移行した後、計画在庫ベースの発注方式へ切り替える</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>生産現場へのお願い</h3>
+    <div class="callout warning">
+      <strong>計画在庫ベースへの移行には、社内計画の精度と長期性が不可欠です。</strong>
+      社内計画が実態と乖離していると、計画在庫の算出が狂い、発注数量も不正確になります。
+      生産現場では<strong>長期の生産計画を立て、維持・更新すること</strong>をお願いします。
+      計画を頻繁に変更すると安定発注ができなくなり、安全在庫が増えてしまいます。
+      計画の精度が上がるほど、購入品の発注が安定し、在庫の適正化と欠品防止の両立が実現できます。
+    </div>
+  </section>
+
   <footer class="doc-footer">
     生産管理システム — 購買モジュール — 注文書自動送信設定
   </footer>
@@ -1451,7 +1589,7 @@
 <div class="pres-overlay" id="presOverlay">
   <div class="pres-topbar">
     <span class="pres-title">注文書自動送信 — 機能説明資料</span>
-    <span class="pres-counter" id="presCounter">1 / 10</span>
+    <span class="pres-counter" id="presCounter">1 / 11</span>
     <span class="pres-hint">F11 で全画面</span>
     <button class="pres-exit" id="presExit">ESC 終了</button>
   </div>
