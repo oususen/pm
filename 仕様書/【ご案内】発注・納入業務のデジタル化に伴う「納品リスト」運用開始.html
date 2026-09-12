@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>【ご案内】発注・納入業務のデジタル化に伴う「納品リスト」運用開始.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="ご案内発注納入業務のデジタル化に伴う納品リスト運用開始のお願い">【ご案内】発注・納入業務のデジタル化に伴う「納品リスト」運用開始のお願い</h1>
+<p>拝啓　貴社におかれましては、ますますご清栄のこととお慶び申し上げます。平素は格別のご高配を賜り、厚く御礼申し上げます。</p>
+<p>さて、弊社では現在、発注から納入、検収、実績入力にいたる一連の業務において、より迅速に実態を反映できるよう、業務のデジタル化を推進しております。その一環といたしまして、今後、貴社へ送付する資料の一部を、これまでのPDF中心の運用から、Excelを活用したデータ中心の運用へと順次切り替えてまいりたいと考えております。</p>
+<p>以下、本取り組みの背景と運用ルールについてご説明いたします。</p>
+<hr>
+<h2 id="1-背景と目的">1. 背景と目的</h2>
+<h3 id="従来の運用における課題">従来の運用における課題</h3>
+<p>これまでの運用では、既存の基幹システムからPDF形式の外作注文書を送付しておりました。PDFは閲覧用としては見やすい一方で、管理においてはデータとして扱いにくい面があり、手入力などの手間が増えやすい状況がございました。</p>
+<p>また、内示の扱い方を含め、最新の変更内容が進度や納入予定へ即座に反映されにくく、手直しや進度確認に手作業が発生しやすい面もございました。さらに、貴社におかれましても、PDFの情報だけでは自社の管理用データへ変換しにくい場合があるのではないかと考えております。</p>
+<p>弊社におきましても、発注・納入・検収といった一連の業務の各ステップがPDFや紙ベースを中心に運用されており、最終的に基幹システムへ納入実績を反映する際に手入力が発生しております。</p>
+<h3 id="目指す姿">目指す姿</h3>
+<p>本取り組みは、発注・納入・検収・実績入力などの一連の業務において、情報をできるだけそのままデータとしてつなげ、業務全体をデジタル化していくことを目的としております。</p>
+<p>現行のPDF情報に加え、新たに進度表Excelおよび納品リストExcelをあわせてご提供することで、貴社におかれましても数量や進捗状況をデータ上で管理しやすくなり、差異の早期把握や変更時の確認負担の軽減にお役立ていただけるかと存じます。</p>
+<p>また、<strong>貴社に納品リストをExcelでご確認・ご返送いただくことで、納入予定数量をデータのまま次の工程へ引き継ぐことができ、納入予定登録、検収、実績反映までをより正確かつ迅速に行うことが可能となります。</strong> この点が、貴社にご協力を賜りたい最も重要なポイントでございます。</p>
+<hr>
+<h2 id="2-弊社から送付する4つのファイル">2. 弊社から送付する4つのファイル</h2>
+<p>弊社からは、以下の4つのファイルを送付いたします。</p>
+<h3 id="1-納品リストxlsx--貴社にご返送いただく対象ファイル">(1) 納品リスト.xlsx ― <strong>貴社にご返送いただく対象ファイル</strong></h3>
+<p>納入予定の一覧が記載されたExcelファイルです。以下の情報が含まれております。</p>
+<ul>
+<li>品番・品名</li>
+<li>数量</li>
+<li>納品日・日別内訳</li>
+<li>仕入先コード</li>
+<li>伝票番号</li>
+</ul>
+<p><strong>貴社には、このファイルの「数量」列をご確認・修正のうえ、そのまま返送いただきますようお願いいたします。</strong></p>
+<h3 id="2-進度表xlsx--参考資料返送不要">(2) 進度表.xlsx ― 参考資料（返送不要）</h3>
+<p>製品ごとの進度状況をご確認いただくための参考資料です。納入予定数量の背景確認用としてご活用ください。</p>
+<h3 id="3-進度表pdf--参考資料返送不要">(3) 進度表.pdf ― 参考資料（返送不要）</h3>
+<p>進度表Excelと同じ内容を、見やすいPDF形式にしたものです。印刷や閲覧用の資料としてご利用ください。</p>
+<h3 id="4-外作納品書pdf--帳票返送不要">(4) 外作納品書.pdf ― 帳票（返送不要）</h3>
+<p>納品時にご使用いただくための帳票です。納品書・受領書・購入先控などの用途でご使用ください。</p>
+<hr>
+<h2 id="3-貴社にご対応いただきたいこと">3. 貴社にご対応いただきたいこと</h2>
+<p>ご対応いただきたいのは、<strong>「納品リスト.xlsx」の確認と返送</strong>のみでございます。</p>
+<h3 id="基本の流れ">基本の流れ</h3>
+<ol>
+<li>弊社より納品リストExcelを送付いたします</li>
+<li>貴社にて数量をご確認いただきます</li>
+<li>数量変更がある場合はExcel上で修正いただきます</li>
+<li>修正後のExcelをそのまま返送いただきます</li>
+<li>弊社にて返送Excelを取り込み、納入予定として登録いたします</li>
+<li>納品当日は、登録済みの内容をもとに受入・検収を行います</li>
+</ol>
+<p><strong>ご返送いただいた数量が、そのまま受入基準となる運用</strong>でございます。</p>
+<h3 id="修正していただけるファイル項目">修正していただけるファイル・項目</h3>
+<p>修正していただくファイルは <strong>「納品リスト.xlsx」のみ</strong> です。<br>
+また、修正していただく項目は基本的に <strong>「数量」列のみ</strong> です。</p>
+<p>それ以外のファイルや、列名・シート名・並び順につきましては、変更されませんようお願いいたします。</p>
+<h3 id="送信返送のタイミング">送信・返送のタイミング</h3>
+<p>弊社からの納品リストは、<strong>納入日の５営業日前の１７時</strong>にメールにて自動送信いたします。（設定変更可）</p>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>弊社からの送信</td>
+<td>納入日の5営業日前（営業日の17時にシステム自動送信）</td>
+</tr>
+<tr>
+<td>貴社からのご返送</td>
+<td><strong>納品日の前日まで</strong>にお願いいたします</td>
+</tr>
+<tr>
+<td>返送先</td>
+<td>メール本文に記載の返送先アドレス宛にご返送ください</td>
+</tr>
+</tbody>
+</table>
+<p>※ 送信元メールアドレスは<strong>送信専用</strong>です。ご返送の際は、メール本文に記載の返送先アドレスへお送りくださいますようお願いいたします。</p>
+<hr>
+<h2 id="4-数量の確認修正ルール">4. 数量の確認・修正ルール</h2>
+<p>弊社システムでは、ご返送いただいたExcelの数量欄を以下のように処理いたします。</p>
+<table>
+<thead>
+<tr>
+<th>数量欄の状態</th>
+<th>システムの処理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数値が入力されている（1以上）</td>
+<td>その数量を納入予定として登録</td>
+</tr>
+<tr>
+<td><code>0</code> が入力されている</td>
+<td>納入なし（0）として登録</td>
+</tr>
+<tr>
+<td>空白 または 行が削除されている</td>
+<td>その行は取り込まれません（無視されます）</td>
+</tr>
+</tbody>
+</table>
+<p>この仕組みにより、初回のご返送時と、一度返送いただいた後の再返送時とでは、対応方法が異なる部分がございます。以下にそれぞれのケースをご説明いたします。</p>
+<h3 id="4-1-初回返送時の対応">4-1. 初回返送時の対応</h3>
+<p>弊社からお送りした納品リストを初めてご返送いただく場合は、以下のようにご対応ください。</p>
+<table>
+<thead>
+<tr>
+<th>やりたいこと</th>
+<th>やること</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>記載通りに納入する</td>
+<td>数量を変えずにそのまま返送</td>
+</tr>
+<tr>
+<td>数量を変更したい</td>
+<td>「数量」列を変更後の値に書き換えて返送</td>
+</tr>
+<tr>
+<td>納入しない品番がある</td>
+<td>「数量」列を <code>0</code> にして返送</td>
+</tr>
+</tbody>
+</table>
+<p>初回返送時に限り、納入しない品番の行を空白のままにしたり、行を削除していただいても問題ございません（まだ登録データがないため、影響はございません）。ただし、<strong>取消の意思を明確にするため、<code>0</code> を入力していただくことを推奨</strong>いたします。</p>
+<h3 id="4-2-一度返送された後に変更が生じた場合再返送">4-2. 一度返送された後に変更が生じた場合（再返送）</h3>
+<p>一度ご返送いただいた後に数量変更や取消が必要になった場合は、<strong>最新の数量に修正した「納品リスト.xlsx」をもう一度ご返送ください</strong>。弊社では、同じ納入日・同じ製品について、<strong>最後にご返送いただいた内容で上書き</strong>いたします。</p>
+<table>
+<thead>
+<tr>
+<th>やりたいこと</th>
+<th>やること</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数量を変更したい</td>
+<td>「数量」列を変更後の値に書き換えて再返送</td>
+</tr>
+<tr>
+<td>納入を取り消したい</td>
+<td>「数量」列を <code>0</code> に変更して再返送</td>
+</tr>
+</tbody>
+</table>
+<p><strong>⚠ 再返送時のご注意</strong></p>
+<p>再返送時に行を削除したり数量を空白にしても、<strong>前回ご返送いただいた数量がそのまま残ります</strong>。取消にはなりませんのでご注意ください。</p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数量を <code>0</code> にして再返送</td>
+<td>✅ 前回の数量が <code>0</code> に上書きされ、取消として処理されます</td>
+</tr>
+<tr>
+<td>行を削除して再返送</td>
+<td>❌ その行は取り込まれず、前回の数量がそのまま残ります</td>
+</tr>
+<tr>
+<td>数量を空白にして再返送</td>
+<td>❌ その行は取り込まれず、前回の数量がそのまま残ります</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4-3-具体例">4-3. 具体例</h3>
+<p><strong>例1: 数量変更（再返送）</strong></p>
+<ol>
+<li>初回返送: <code>A製品 100</code></li>
+<li>その後、変更が発生</li>
+<li><code>A製品 50</code> に修正して再返送 → 弊社では <code>100</code> を <code>50</code> に上書きして取り込みます</li>
+</ol>
+<p><strong>例2: 取消（再返送）</strong></p>
+<ol>
+<li>初回返送: <code>B製品 200</code></li>
+<li>その後、納入が不要になった</li>
+<li><code>B製品 0</code> に修正して再返送 → 弊社では <code>200</code> を <code>0</code> に上書きして取り込みます</li>
+</ol>
+<p><strong>例3: 誤った取消操作（再返送）</strong></p>
+<ol>
+<li>初回返送: <code>C製品 150</code></li>
+<li>その後、納入が不要になった</li>
+<li><code>C製品</code> の行を削除して再返送 → ❌ <code>150</code> がそのまま残ります（取消されません）</li>
+</ol>
+<hr>
+<h2 id="5-品番を追加する場合">5. 品番を追加する場合</h2>
+<p>品番を追加する必要がある場合は、「納品リスト.xlsx」内の <strong>「製品リスト」シートから品番をコピー</strong>して納入リストの末行の下に追加してください。</p>
+<p>品番の手入力は、入力ミスや取込エラーの原因となりますため、お控えくださいますようお願いいたします。</p>
+<hr>
+<h2 id="6-返送時のお願い">6. 返送時のお願い</h2>
+<ul>
+<li>受け取った「納品リスト.xlsx」を<strong>そのまま</strong>ご使用ください</li>
+<li>納品日は<strong>全行同じ日付のまま</strong>にしてください</li>
+<li>修正は受け取った「納品リスト.xlsx」で行ってください</li>
+<li>「進度表.xlsx」「進度表.pdf」「外作納品書.pdf」は返送不要です</li>
+</ul>
+<hr>
+<h2 id="7-まとめ">7. まとめ</h2>
+<p>貴社にご対応いただきたいルールを、以下にまとめさせていただきます。</p>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>ルール</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>返送対象</td>
+<td>「納品リスト.xlsx」のみ</td>
+</tr>
+<tr>
+<td>修正項目</td>
+<td>基本的に「数量」列のみ</td>
+</tr>
+<tr>
+<td>数量変更</td>
+<td>数値を書き換える</td>
+</tr>
+<tr>
+<td>初回の取消</td>
+<td><code>0</code> を入力（空白・行削除も可だが <code>0</code> 推奨）</td>
+</tr>
+<tr>
+<td>再返送時の取消</td>
+<td><strong>必ず <code>0</code> を入力</strong>（空白・行削除では前回数量が残ります）</td>
+</tr>
+<tr>
+<td>品番追加</td>
+<td>「製品リスト」シートからコピー（手入力不可）</td>
+</tr>
+<tr>
+<td>正式な納入予定</td>
+<td>最後にご返送いただいた内容で上書き</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p>本取り組みは、貴社と弊社の双方にとって業務負担の軽減と正確性の向上につながるものと考えております。貴社のご理解とご協力を賜りますよう、何卒よろしくお願い申し上げます。</p>
+<p>ご不明な点がございましたら、弊社担当者までお気軽にお問い合わせください。</p>
+<p>敬具</p>
+
+</body>
+</html>
