@@ -12,6 +12,7 @@ from masters.models import CalendarDay, Product, Supplier
 from orders.utils.calendar_utils import WorkingDayCalculator
 from production.models import LineDemand
 from production.models_line_backlog import LineBacklog
+from production.models_production_lock import ProductionLock
 
 from .order_proposal_views import (
     _generate_raw_pattern_dates,
@@ -252,8 +253,125 @@ def _load_safety_stock_map(product_ids):
     )
 
 
+def collect_locked_purchase_plans(line, delivery_dates):
+    """注文書自動送信中だけ使うロック計画メモを作る。"""
+    if not line or not delivery_dates:
+        return []
+
+    locks = list(
+        ProductionLock.objects.filter(
+            lock_type='auto_plan',
+            line_id=line.id,
+            plan_date__in=delivery_dates,
+        ).values('line_id', 'plan_date', 'product_id', 'locked_qty')
+    )
+    if not locks:
+        return []
+
+    keys = {(lock['plan_date'], lock['product_id']) for lock in locks}
+    products = {product_id for _, product_id in keys}
+    dates = {plan_date for plan_date, _ in keys}
+    process_map = {}
+
+    for row in LineBacklog.objects.filter(
+        line_id=line.id,
+        plan_date__in=dates,
+        product_id__in=products,
+        sequence_no=1,
+    ).values('plan_date', 'product_id', 'process_id'):
+        process_map.setdefault((row['plan_date'], row['product_id']), row['process_id'])
+
+    for row in LineBacklog.objects.filter(
+        line_id=line.id,
+        plan_date__in=dates,
+        product_id__in=products,
+        sequence_no=0,
+    ).values('plan_date', 'product_id', 'process_id'):
+        process_map.setdefault((row['plan_date'], row['product_id']), row['process_id'])
+
+    missing = [key for key in keys if not process_map.get(key)]
+    if missing:
+        details = ', '.join(f'{day}/product_id={product_id}' for day, product_id in sorted(missing))
+        raise ValueError(f'ロック済み仕入計画の工程を特定できません: {details}')
+
+    return [
+        {
+            'line_id': lock['line_id'],
+            'plan_date': lock['plan_date'],
+            'product_id': lock['product_id'],
+            'process_id': process_map[(lock['plan_date'], lock['product_id'])],
+            'locked_qty': lock['locked_qty'],
+        }
+        for lock in locks
+    ]
+
+
+def restore_locked_purchase_plans(locked_plans):
+    if not locked_plans:
+        return 0
+
+    restored = 0
+    for lock in locked_plans:
+        LineBacklog.objects.update_or_create(
+            line_id=lock['line_id'],
+            process_id=lock['process_id'],
+            product_id=lock['product_id'],
+            plan_date=lock['plan_date'],
+            sequence_no=1,
+            defaults={
+                'plan_qty': lock['locked_qty'],
+                'actual_qty': 0,
+            },
+        )
+        restored += 1
+    return restored
+
+
+def apply_locked_purchase_items(items, locked_plans):
+    if not locked_plans:
+        return items
+
+    locked_map = {
+        (lock['plan_date'], lock['product_id']): int(lock['locked_qty'] or 0)
+        for lock in locked_plans
+    }
+    touched = set()
+    for item in items:
+        key = (item['delivery_date'], item['product_id'])
+        if key in locked_map:
+            item['expected_qty'] = locked_map[key]
+            touched.add(key)
+
+    missing_keys = set(locked_map) - touched
+    if not missing_keys:
+        return [item for item in items if int(item.get('expected_qty') or 0) > 0]
+
+    products = {
+        product.id: product
+        for product in Product.objects.filter(id__in={product_id for _, product_id in missing_keys})
+    }
+    for plan_date, product_id in sorted(missing_keys):
+        product = products.get(product_id)
+        if not product:
+            continue
+        items.append({
+            'product_id': product_id,
+            'product_code': product.product_code,
+            'product_name': product.product_name,
+            'transfer_destination': product.transfer_destination or '',
+            'transfer_destination_label': product.get_transfer_destination_display() if product.transfer_destination else '',
+            'delivery_date': plan_date,
+            'expected_qty': locked_map[(plan_date, product_id)],
+            'coverage_demand': 0,
+            'required_qty': 0,
+            'daily': {},
+        })
+    return [item for item in items if int(item.get('expected_qty') or 0) > 0]
+
+
 @transaction.atomic
-def simulate_and_save_order_plans(config, base_date=None):
+def simulate_and_save_order_plans(config, base_date=None, locked_plans=None):
+    locked_plans = locked_plans or []
     supplier = config.supplier
     line = resolve_purchase_line(supplier)
     if not line:
@@ -367,6 +485,11 @@ def simulate_and_save_order_plans(config, base_date=None):
                 'required_qty': required_qty,
                 'daily': info['daily'],
             })
+
+    if locked_plans:
+        restore_locked_purchase_plans(locked_plans)
+        all_items = apply_locked_purchase_items(all_items, locked_plans)
+        recalculated_product_ids.update(lock['product_id'] for lock in locked_plans)
 
     if recalculated_product_ids:
         horizon_end = max(cycle['coverage_dates'][-1] for cycle in cycles if cycle['coverage_dates'])

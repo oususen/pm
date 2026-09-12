@@ -66,8 +66,10 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
     from .models import PurchaseAutoOrderSendConfig
     from .process_resolver import resolve_purchase_line
     from .services_auto_order_send import (
+        collect_locked_purchase_plans,
         generate_order_excel,
         generate_order_pdf,
+        restore_locked_purchase_plans,
         resolve_delivery_cycles,
         simulate_and_save_order_plans,
     )
@@ -111,11 +113,13 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
         days_back = max(int(config.progress_days_back or 7), 1)
         days_forward = int(config.progress_days_forward or 30)
         line = resolve_purchase_line(supplier)
+        locked_plans = []
 
         # ── ステップ2: 納入サイクル解決 → 対象納入日を取得 ──
         cycle_result = resolve_delivery_cycles(config, base_date=today)
         if cycle_result['status'] == 'SUCCESS' and cycle_result['cycles'] and line:
             delivery_dates_to_clean = [c['delivery_date'] for c in cycle_result['cycles']]
+            locked_plans = collect_locked_purchase_plans(line, delivery_dates_to_clean)
 
             # ── ステップ3: 対象納入日の既存計画(sequence_no=1)を全削除 ──
             deleted_count, _ = LineBacklog.objects.filter(
@@ -127,6 +131,12 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
                 '注文書自動送信: 既存計画削除 supplier=%s dates=%s deleted=%d',
                 supplier.supplier_code, delivery_dates_to_clean, deleted_count,
             )
+            if locked_plans:
+                restored_count = restore_locked_purchase_plans(locked_plans)
+                logger.info(
+                    '注文書自動送信: ロック済み計画復元(削除後) supplier=%s restored=%d',
+                    supplier.supplier_code, restored_count,
+                )
 
             # ── ステップ4: 計進・進度再計算（先頭）──
             _recalculate_supplier_progress_for_auto_delivery(
@@ -138,7 +148,7 @@ def run_auto_order_send(config_id, ignore_holiday=False, trigger_type='SCHEDULED
             )
 
         # ── ステップ5: simulate_and_save_order_plans（既存）──
-        result = simulate_and_save_order_plans(config, base_date=today)
+        result = simulate_and_save_order_plans(config, base_date=today, locked_plans=locked_plans)
         if result['status'] != 'SUCCESS':
             _finish(config, start_time, result['status'], result['message'])
             _finish_history(history, start_time, result['status'], result['message'])
