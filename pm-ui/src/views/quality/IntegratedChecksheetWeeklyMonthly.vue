@@ -6,7 +6,6 @@
         <DataSourceDialog title="推移確認" :sources="dsSources" />
       </div>
       <p class="helper-text">{{ pageHelperText }}</p>
-      <button class="btn-secondary" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
     </div>
 
     <div v-if="error" class="helper-text error-text">{{ error }}</div>
@@ -96,6 +95,7 @@
         <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
       </label>
       <button class="btn favorite-star-btn" title="お気に入り登録" :disabled="loading" @click="saveFavorite">★</button>
+      <button class="btn-secondary" style="height:2.4em" @click="loadData" :disabled="loading">{{ loading ? "更新中..." : "更新" }}</button>
     </div>
 
     <section class="summary-grid">
