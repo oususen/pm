@@ -286,7 +286,6 @@ class UserPermission(models.Model):
         ('settings.scheduled_tasks', '設定: 定時タスク設定'),
         ('settings.approval_routes', '設定: 承認設定'),
         ('settings.material_order_email_config', '設定: 材料注文書メール設定'),
-        ('settings.purchase_order_approval', '設定: 発注承認者設定'),
         ('settings.stocktake_init', '設定: 棚卸初期化'),
         ('settings.orphan_backlog_maintenance', '設定: 孤立ライン実績メンテナンス'),
         ('settings.lock_date', '設定: 締め日管理'),

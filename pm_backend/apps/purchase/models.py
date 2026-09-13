@@ -197,33 +197,6 @@ class PurchaseOrderProposalApproval(models.Model):
         return f'{self.proposal_id}:L{self.approval_level}:{self.action}'
 
 
-class PurchaseOrderApprovalConfig(models.Model):
-    approval_level = models.SmallIntegerField(unique=True)
-    level_name = models.CharField(max_length=50)
-    approver_users = models.ManyToManyField(
-        settings.AUTH_USER_MODEL,
-        blank=True,
-        related_name='purchase_order_approval_levels',
-    )
-    proxy_approver_users = models.ManyToManyField(
-        settings.AUTH_USER_MODEL,
-        blank=True,
-        related_name='purchase_order_approval_proxy_levels',
-    )
-    notify_users = models.ManyToManyField(
-        settings.AUTH_USER_MODEL,
-        blank=True,
-        related_name='purchase_order_approval_notify_levels',
-    )
-
-    class Meta:
-        db_table = 'purchase_order_approval_config'
-        ordering = ['approval_level']
-
-    def __str__(self):
-        return f'L{self.approval_level}:{self.level_name}'
-
-
 class PurchaseOrderTask(models.Model):
     TASK_CREATE_PROPOSAL = 'CREATE_PROPOSAL'
     TASK_CREATE_ORDER_PDF = 'CREATE_ORDER_PDF'
@@ -578,6 +551,37 @@ class PurchaseAutoOrderSendHistory(models.Model):
 
     def __str__(self):
         return f'{self.supplier_code} {self.started_at} {self.status}'
+
+
+
+
+class PurchaseOrderProposalEmailConfig(models.Model):
+    """発注提案の購入先送信メール設定"""
+
+    supplier = models.OneToOneField(
+        Supplier,
+        on_delete=models.CASCADE,
+        related_name='purchase_order_proposal_email_config',
+        verbose_name='仕入先',
+    )
+    body = models.TextField(blank=True, default='', verbose_name='本文テンプレート')
+    cc_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='purchase_order_proposal_email_configs',
+        verbose_name='CCユーザー',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'purchase_order_proposal_email_config'
+        verbose_name = '発注提案メール設定'
+        verbose_name_plural = '発注提案メール設定'
+        ordering = ['supplier__supplier_code']
+
+    def __str__(self):
+        return f'{self.supplier.supplier_code} {self.supplier.supplier_name}'
 
 
 class PurchaseAutoOrderSendTruckLoadRequest(models.Model):

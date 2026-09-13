@@ -178,6 +178,15 @@
           <input v-model="sendForm.to_email" type="email" />
         </div>
         <div class="form-group">
+          <label>CC（社内担当者）</label>
+          <div class="cc-options readonly">
+            <span v-for="option in sendCcOptions" :key="option.email" class="cc-option readonly">
+              {{ option.label }}
+            </span>
+            <span v-if="!sendCcOptions.length" class="cc-empty">CCは注文書メール設定で未設定です</span>
+          </div>
+        </div>
+        <div class="form-group">
           <label>件名</label>
           <input v-model="sendForm.subject" type="text" />
         </div>
@@ -208,12 +217,14 @@ const router = useRouter()
 const proposalId = Number(route.params.id)
 
 const proposal = ref(null)
-const approvalConfigs = ref([])
+const approvalRouteConfig = ref(null)
 const suppliers = ref([])
 const products = ref([])
 const purchaseLines = ref([])
 const showSendDialog = ref(false)
 const sendingMail = ref(false)
+const sendCcOptions = ref([])
+const sendEmailConfig = ref(null)
 const sendForm = ref({
   to_email: '',
   subject: '',
@@ -291,8 +302,9 @@ const myPendingApprovalTask = computed(() => {
 })
 const hasMyPendingApprovalTask = computed(() => Boolean(myPendingApprovalTask.value))
 const level4ProxyApproverSet = computed(() => {
-  const level4 = (approvalConfigs.value || []).find((row) => Number(row.approval_level) === 4)
-  const ids = Array.isArray(level4?.proxy_approver_users) ? level4.proxy_approver_users : []
+  const ids = Array.isArray(approvalRouteConfig.value?.approver_proxy_users)
+    ? approvalRouteConfig.value.approver_proxy_users
+    : []
   return new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
 })
 const isProxyFinalApproval = computed(() =>
@@ -308,19 +320,27 @@ const approveButtonLabel = computed(() => (isProxyFinalApproval.value ? '部長�
 const canApprove = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
 const canReject = computed(() => Boolean(proposal.value && hasMyPendingApprovalTask.value))
 const level4AuthorizedSet = computed(() => {
-  const level4 = (approvalConfigs.value || []).find((row) => Number(row.approval_level) === 4)
   const ids = [
-    ...(Array.isArray(level4?.approver_users) ? level4.approver_users : []),
-    ...(Array.isArray(level4?.proxy_approver_users) ? level4.proxy_approver_users : []),
+    ...(Array.isArray(approvalRouteConfig.value?.approver_allowed_users) ? approvalRouteConfig.value.approver_allowed_users : []),
+    ...(Array.isArray(approvalRouteConfig.value?.approver_proxy_users) ? approvalRouteConfig.value.approver_proxy_users : []),
   ]
   return new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
 })
+const currentUserRole = computed(() => String(authState.user?.profile?.role || '').trim())
+const canCancelByApproverRole = computed(() =>
+  Boolean(
+    approvalRouteConfig.value &&
+      !level4AuthorizedSet.value.size &&
+      currentUserRole.value &&
+      currentUserRole.value === String(approvalRouteConfig.value.approver_role || '').trim()
+  )
+)
 const canCancel = computed(() =>
   Boolean(
     proposal.value &&
       proposal.value.status === 'APPROVED' &&
       currentUserId.value &&
-      level4AuthorizedSet.value.has(currentUserId.value)
+      (level4AuthorizedSet.value.has(currentUserId.value) || canCancelByApproverRole.value)
   )
 )
 const canGenerateOrderPdf = computed(() =>
@@ -384,9 +404,10 @@ const fetchMasterData = async () => {
   purchaseLines.value = lines.filter((row) => row.line_type === 'PURCHASE')
 }
 
-const fetchApprovalConfigs = async () => {
-  const response = await api.purchaseOrderApprovalConfig.get()
-  approvalConfigs.value = response.data || []
+const fetchApprovalRouteConfig = async () => {
+  const response = await api.accounts.getApprovalRoutes({ item_key: 'purchase_order_proposal' })
+  const rows = response.data?.results || response.data || []
+  approvalRouteConfig.value = rows.find((row) => row.item_key === 'purchase_order_proposal') || null
 }
 
 const fetchDetail = async () => {
@@ -628,39 +649,102 @@ const buildDefaultSendSubject = () => {
   return `【発注書】${proposal.value.proposal_no} ${proposal.value.supplier_name}`
 }
 
-const buildDefaultSendBody = () => {
-  if (!proposal.value) return ''
-  const supplierName = proposal.value.supplier_name || ''
-  const proposalNo = proposal.value.proposal_no || ''
-  const orderDate = proposal.value.order_date || ''
-  const desiredDeliveryDate = proposal.value.desired_delivery_date || ''
-  const creatorName = proposal.value.created_by_name || proposal.value.created_by_username || '-'
-  const creatorEmail = proposal.value.created_by_email || '-'
-  return (
-    `${supplierName} 御中\n\n` +
-    'お世話になっております。\n' +
-    '発注書を送付いたします。\n\n' +
-    `注文書番号: ${proposalNo}\n` +
-    `発注日: ${orderDate}\n` +
-    `希望納入日: ${desiredDeliveryDate}\n\n` +
-    '添付のPDFをご確認のうえ、手配をお願いいたします。\n\n' +
-    '------------------------------\n' +
-    'ダイソウ工業株式会社\n' +
-    `${creatorName}\n\n` +
-    'ご不明な点がございましたら下記までご連絡ください。\n' +
-    `Email:${creatorEmail}\n`
-  )
+const addCcOption = (options, seen, name, email, roleLabel) => {
+  const normalizedEmail = String(email || '').trim()
+  if (!normalizedEmail || seen.has(normalizedEmail)) return
+  seen.add(normalizedEmail)
+  const displayName = String(name || '').trim() || normalizedEmail
+  options.push({
+    email: normalizedEmail,
+    label: roleLabel ? `${roleLabel}: ${displayName} <${normalizedEmail}>` : `${displayName} <${normalizedEmail}>`,
+  })
 }
 
-const openSendDialog = () => {
+const userDisplayName = (user) => {
+  const lastName = String(user?.last_name || '').trim()
+  const firstName = String(user?.first_name || '').trim()
+  return [lastName, firstName].filter(Boolean).join(' ') || user?.profile?.name || user?.username || user?.email || ''
+}
+
+const buildDefaultCcOptions = () => {
+  const options = []
+  const seen = new Set()
+  ;(sendEmailConfig.value?.cc_user_details || []).forEach((user) => {
+    const email = String(user.email || '').trim()
+    if (email) {
+      addCcOption(options, seen, user.name || user.username, email, '設定CC')
+      return
+    }
+    const displayName = user.name || user.username || `ID:${user.id}`
+    options.push({
+      email: `missing-${user.id}`,
+      label: `設定CC: ${displayName} <メール未設定>`,
+      missingEmail: true,
+    })
+  })
+  return options
+}
+
+const defaultSendBodyTemplate = `{supplier_name} 御中
+
+お世話になっております。
+発注書を送付いたします。
+
+注文書番号: {proposal_no}
+発注日: {order_date}
+希望納入日: {desired_delivery_date}
+
+添付のPDFをご確認のうえ、手配をお願いいたします。
+
+------------------------------
+ダイソウ工業株式会社
+{created_by_name}
+
+ご不明な点がございましたら下記までご連絡ください。
+Email:{created_by_email}
+
+このメールは送信専用です。ご返信はCC宛先へお願いします。`
+
+const appendSendOnlyNotice = (body) => {
+  const notice = 'このメールは送信専用です。ご返信はCC宛先へお願いします。'
+  const text = String(body || '')
+  if (text.includes('このメールは送信専用です。ご返信はCC宛先へお願いします。')) return text
+  return `${text.trimEnd()}\n\n${notice}`
+}
+
+const renderSendBodyTemplate = (template) => {
+  if (!proposal.value) return ''
+  const values = {
+    supplier_name: proposal.value.supplier_name || '',
+    proposal_no: proposal.value.proposal_no || '',
+    order_date: proposal.value.order_date || '',
+    desired_delivery_date: proposal.value.desired_delivery_date || '',
+    created_by_name: proposal.value.created_by_name || proposal.value.created_by_username || '',
+    created_by_email: proposal.value.created_by_email || '',
+  }
+  const body = template || defaultSendBodyTemplate
+  return appendSendOnlyNotice(body.replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key] || '') : match)))
+}
+
+const buildDefaultSendBody = () => renderSendBodyTemplate(sendEmailConfig.value?.body || defaultSendBodyTemplate)
+
+const openSendDialog = async () => {
   const toEmail = proposal.value?.supplier_order_email || ''
   if (!toEmail) {
     alert('仕入先マスタに送信メールアドレスが設定されていません')
     return
   }
+  try {
+    const { data } = await api.purchaseOrderProposals.getEmailConfig(proposal.value.supplier)
+    sendEmailConfig.value = data || null
+  } catch (err) {
+    sendEmailConfig.value = null
+  }
+  const ccOptions = buildDefaultCcOptions()
+  sendCcOptions.value = ccOptions
   sendForm.value = {
     to_email: toEmail,
-    subject: buildDefaultSendSubject(),
+      subject: buildDefaultSendSubject(),
     body: buildDefaultSendBody(),
   }
   showSendDialog.value = true
@@ -708,7 +792,7 @@ const sendProposal = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchMasterData(), fetchDetail(), fetchApprovalConfigs()])
+  await Promise.all([fetchMasterData(), fetchDetail(), fetchApprovalRouteConfig()])
 })
 </script>
 
@@ -791,6 +875,28 @@ onMounted(async () => {
 .send-dialog .form-group textarea {
   min-height: 320px;
   resize: vertical;
+}
+.cc-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+.cc-option {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  margin: 0 !important;
+  font-size: 14px !important;
+}
+.cc-option input {
+  width: auto !important;
+}
+.cc-empty {
+  color: #64748b;
+  font-size: 14px;
 }
 .dialog-actions {
   display: flex;

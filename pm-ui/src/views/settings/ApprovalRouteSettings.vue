@@ -19,27 +19,47 @@
       <div v-if="errorMessage" class="alert alert-danger">{{ errorMessage }}</div>
       <div v-if="successMessage" class="alert alert-success">{{ successMessage }}</div>
 
-      <div class="route-toolbar">
-        <button class="btn-primary" type="button" @click="addRoute" :disabled="!canEditPage">
-          承認項目追加
-        </button>
-      </div>
+      <div class="approval-layout">
+        <aside class="business-panel">
+          <h2 class="panel-title">承認対象業務一覧</h2>
+          <table class="business-table">
+            <thead>
+              <tr>
+                <th>業務</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="business in businessRows"
+                :key="business.key"
+                :class="{ selected: business.key === selectedBusinessKey }"
+                @click="openBusinessRoute(business.key)"
+              >
+                <td>{{ business.label }}</td>
+                <td>
+                  <span class="status-badge" :class="business.statusClass">{{ business.statusLabel }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </aside>
 
-      <div v-if="routes.length === 0" class="no-data">承認項目がありません。</div>
-      <div v-else class="route-list">
-        <section v-for="(route, index) in routes" :key="route.local_key" class="route-section">
+        <section class="edit-panel">
+          <div v-if="!selectedRoute" class="no-data">左の一覧から承認対象業務を選択してください。</div>
+          <section v-else class="route-section" :id="`route-${selectedRoute.local_key}`">
           <div class="route-head">
             <div class="route-main-fields">
               <label>
                 承認項目名
-                <input v-model.trim="route.item_name" :disabled="!canEditPage" placeholder="例: レーザ材料発注" />
+                <input :value="businessLabel(selectedRoute)" disabled />
               </label>
               <label class="active-check">
-                <input v-model="route.is_active" type="checkbox" :disabled="!canEditPage" />
+                <input v-model="selectedRoute.is_active" type="checkbox" :disabled="!canEditPage" />
                 有効
               </label>
             </div>
-            <button class="btn-danger" type="button" @click="removeRoute(index)" :disabled="!canEditPage">
+            <button class="btn-danger" type="button" @click="removeRoute(selectedRouteIndex)" :disabled="!canEditPage || selectedRouteIndex < 0">
               削除
             </button>
           </div>
@@ -49,13 +69,13 @@
               <div class="stage-title-row">
                 <div class="stage-title">{{ stage.label }}</div>
                 <label v-if="stage.optional" class="option-check">
-                  <input v-model="route[`${stage.key}_enabled`]" type="checkbox" :disabled="!canEditPage" />
+                  <input v-model="selectedRoute[`${stage.key}_enabled`]" type="checkbox" :disabled="!canEditPage" />
                   使用
                 </label>
               </div>
               <label class="field-label">
                 基本役割
-                <select v-model="route[`${stage.key}_role`]" :disabled="!canEditPage || isStageDisabled(route, stage)">
+                <select v-model="selectedRoute[`${stage.key}_role`]" :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)">
                   <option v-for="role in roleOptions" :key="role.value" :value="role.value">
                     {{ role.label }}
                   </option>
@@ -63,35 +83,35 @@
               </label>
               <div class="stage-options">
                 <label class="option-check">
-                  <input v-model="route[`${stage.key}_task_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(route, stage)" />
+                  <input v-model="selectedRoute[`${stage.key}_task_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)" />
                   次段階タスク
                 </label>
                 <label class="option-check">
-                  <input v-model="route[`${stage.key}_app_notification_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(route, stage)" />
+                  <input v-model="selectedRoute[`${stage.key}_app_notification_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)" />
                   アプリ通知
                 </label>
                 <label class="option-check">
-                  <input v-model="route[`${stage.key}_email_notification_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(route, stage)" />
+                  <input v-model="selectedRoute[`${stage.key}_email_notification_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)" />
                   メール通知
                 </label>
               </div>
               <UserPicker
-                :row="route"
+                :row="selectedRoute"
                 :stage="stage.key"
                 type="allowed"
                 title="限定ユーザー"
                 empty-text="未設定時は基本役割から判定"
                 :users="users"
-                :disabled="!canEditPage || isStageDisabled(route, stage)"
+                :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)"
               />
               <UserPicker
-                :row="route"
+                :row="selectedRoute"
                 :stage="stage.key"
                 type="proxy"
                 title="代理ユーザー"
                 empty-text="代理なし"
                 :users="users"
-                :disabled="!canEditPage || isStageDisabled(route, stage)"
+                :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)"
               />
             </div>
           </div>
@@ -99,27 +119,28 @@
           <div class="result-options">
             <div class="result-title">結果通知（全段階の担当者へ）</div>
             <label class="option-check">
-              <input v-model="route.approved_result_app_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              <input v-model="selectedRoute.approved_result_app_notification_enabled" type="checkbox" :disabled="!canEditPage" />
               承認時アプリ通知
             </label>
             <label class="option-check">
-              <input v-model="route.approved_result_email_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              <input v-model="selectedRoute.approved_result_email_notification_enabled" type="checkbox" :disabled="!canEditPage" />
               承認時メール通知
             </label>
             <label class="option-check">
-              <input v-model="route.rejected_result_app_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              <input v-model="selectedRoute.rejected_result_app_notification_enabled" type="checkbox" :disabled="!canEditPage" />
               却下時アプリ通知
             </label>
             <label class="option-check">
-              <input v-model="route.rejected_result_email_notification_enabled" type="checkbox" :disabled="!canEditPage" />
+              <input v-model="selectedRoute.rejected_result_email_notification_enabled" type="checkbox" :disabled="!canEditPage" />
               却下時メール通知
             </label>
           </div>
 
           <label class="note-field">
             備考
-            <input v-model.trim="route.note" :disabled="!canEditPage" />
+            <input v-model.trim="selectedRoute.note" :disabled="!canEditPage" />
           </label>
+        </section>
         </section>
       </div>
     </div>
@@ -127,7 +148,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, ref } from 'vue'
+import { computed, defineComponent, h, nextTick, onMounted, ref } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
@@ -151,6 +172,11 @@ const roleOptions = [
   { value: 'manager', label: '事業部長・課長' },
   { value: 'office_staff', label: '事務員' },
   { value: 'staff', label: '一般' },
+]
+
+const businessOptions = [
+  { key: 'laser_material_order', label: 'レーザー材料発注' },
+  { key: 'purchase_order_proposal', label: '発注提案' },
 ]
 
 const userLabel = (user) => {
@@ -299,6 +325,7 @@ const UserPicker = defineComponent({
 
 const routes = ref([])
 const users = ref([])
+const selectedBusinessKey = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
@@ -344,9 +371,49 @@ const fetchAll = async () => {
   }
 }
 
-const addRoute = () => {
-  if (!canEditPage.value) return
-  routes.value.push(emptyRoute())
+const hasRouteForBusiness = (itemKey) => routes.value.some((route) => route.item_key === itemKey)
+
+const businessLabel = (route) => {
+  const business = businessOptions.find((option) => option.key === route.item_key)
+  return business?.label || route.item_name
+}
+
+const businessRows = computed(() => businessOptions.map((business) => {
+  const route = routes.value.find((item) => item.item_key === business.key)
+  if (!route) {
+    return {
+      ...business,
+      statusLabel: '未設定',
+      statusClass: 'draft',
+    }
+  }
+  return {
+    ...business,
+    statusLabel: route.is_active ? '有効' : '無効',
+    statusClass: route.is_active ? 'active' : 'inactive',
+  }
+}))
+
+const selectedRouteIndex = computed(() => routes.value.findIndex((route) => route.item_key === selectedBusinessKey.value))
+const selectedRoute = computed(() => selectedRouteIndex.value >= 0 ? routes.value[selectedRouteIndex.value] : null)
+
+const openBusinessRoute = async (itemKey) => {
+  const business = businessOptions.find((option) => option.key === itemKey)
+  if (!business) return
+  selectedBusinessKey.value = business.key
+
+  let route = routes.value.find((item) => item.item_key === business.key)
+  if (!route) {
+    if (!canEditPage.value) return
+    route = {
+      ...emptyRoute(),
+      item_key: business.key,
+      item_name: business.label,
+    }
+    routes.value.push(route)
+  }
+  await nextTick()
+  document.getElementById(`route-${route.local_key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 const removeRoute = (index) => {
@@ -356,33 +423,6 @@ const removeRoute = (index) => {
     deletedRouteIds.value = [...new Set([...deletedRouteIds.value, Number(route.id)])]
   }
   routes.value.splice(index, 1)
-}
-
-const normalizeItemKey = (value) => {
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-  return normalized || ''
-}
-
-const assignItemKeys = () => {
-  const used = new Set()
-  routes.value.forEach((route, index) => {
-    let base = normalizeItemKey(route.item_key)
-    if (!base) {
-      base = `approval_route_${String(index + 1).padStart(3, '0')}`
-    }
-    let candidate = base
-    let suffix = 2
-    while (used.has(candidate)) {
-      candidate = `${base}_${suffix}`
-      suffix += 1
-    }
-    route.item_key = candidate
-    used.add(candidate)
-  })
 }
 
 const buildPayload = () => routes.value.map((route) => ({
@@ -424,15 +464,22 @@ const buildPayload = () => routes.value.map((route) => ({
 
 const validateRoutes = () => {
   const seen = new Set()
+  const supportedKeys = new Set(businessOptions.map((option) => option.key))
   for (const route of routes.value) {
     if (!route.item_name) {
       return '承認項目名を入力してください。'
     }
-    const itemKey = normalizeItemKey(route.item_key)
-    if (itemKey && seen.has(itemKey)) {
-      return `管理コードが重複しています: ${itemKey}`
+    const itemKey = String(route.item_key || '').trim()
+    if (!itemKey) {
+      return '対象業務を選択してください。'
     }
-    if (itemKey) seen.add(itemKey)
+    if (!route.id && !supportedKeys.has(itemKey)) {
+      return `対象業務にない承認項目は追加できません: ${route.item_name}`
+    }
+    if (seen.has(itemKey)) {
+      return `対象業務が重複しています: ${businessLabel(route)}`
+    }
+    seen.add(itemKey)
   }
   return ''
 }
@@ -448,7 +495,6 @@ const save = async () => {
     errorMessage.value = validationError
     return
   }
-  assignItemKeys()
   saving.value = true
   try {
     const response = await api.accounts.saveApprovalRoutes(buildPayload(), deletedRouteIds.value)
@@ -466,15 +512,80 @@ onMounted(fetchAll)
 </script>
 
 <style scoped>
-.route-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 10px;
+.approval-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 12px;
 }
 
-.route-list {
-  display: grid;
-  gap: 12px;
+.business-panel,
+.edit-panel {
+  min-width: 0;
+}
+
+.panel-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2a44;
+}
+
+.business-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #cfd6e1;
+  font-size: 12px;
+}
+
+.business-table th,
+.business-table td {
+  border: 1px solid #cfd6e1;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.business-table th {
+  background: #e9eef8;
+  color: #1f2a44;
+}
+
+.business-table tbody tr {
+  cursor: pointer;
+}
+
+.business-table tbody tr:hover,
+.business-table tbody tr.selected {
+  background: #e8f1ff;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  border-radius: 12px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-badge.active {
+  color: #047857;
+  border: 1px solid #86efac;
+  background: #dcfce7;
+}
+
+.status-badge.inactive {
+  color: #6b7280;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+}
+
+.status-badge.draft {
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
 }
 
 .route-section {
@@ -482,6 +593,7 @@ onMounted(fetchAll)
   border-radius: 6px;
   background: #fff;
   padding: 12px;
+  scroll-margin-top: 120px;
 }
 
 .route-head {
@@ -708,6 +820,10 @@ onMounted(fetchAll)
 }
 
 @media (max-width: 760px) {
+  .approval-layout {
+    grid-template-columns: 1fr;
+  }
+
   .route-head {
     flex-direction: column;
   }

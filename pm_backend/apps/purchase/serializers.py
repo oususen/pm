@@ -1,8 +1,9 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from .models import (
-    PurchaseOrderApprovalConfig,
     PurchaseOrderProposal,
+    PurchaseOrderProposalEmailConfig,
     PurchaseOrderProposalApproval,
     PurchaseOrderProposalLine,
     PurchaseOrderTask,
@@ -178,9 +179,49 @@ class PurchaseOrderProposalLineSerializer(serializers.ModelSerializer):
         return value
 
 
+class PurchaseOrderProposalEmailConfigSerializer(serializers.ModelSerializer):
+    cc_user_details = serializers.SerializerMethodField()
+    supplier_code = serializers.CharField(source='supplier.supplier_code', read_only=True)
+    supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
+    cc_users = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.all(),
+        many=True,
+        required=False,
+    )
+
+    class Meta:
+        model = PurchaseOrderProposalEmailConfig
+        fields = [
+            'id',
+            'supplier',
+            'supplier_code',
+            'supplier_name',
+            'body',
+            'cc_users',
+            'cc_user_details',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'supplier_code', 'supplier_name', 'cc_user_details', 'created_at', 'updated_at']
+
+    def get_cc_user_details(self, obj):
+        users = obj.cc_users.all().order_by('username')
+        return [
+            {
+                'id': user.id,
+                'username': user.username,
+                'employee_code': getattr(getattr(user, 'profile', None), 'employee_code', ''),
+                'name': _display_user_name(user),
+                'email': user.email or '',
+            }
+            for user in users
+        ]
+
+
 class PurchaseOrderProposalApprovalSerializer(serializers.ModelSerializer):
     approved_by_username = serializers.CharField(source='approved_by.username', read_only=True)
     approved_by_name = serializers.SerializerMethodField()
+    approved_by_email = serializers.CharField(source='approved_by.email', read_only=True)
 
     class Meta:
         model = PurchaseOrderProposalApproval
@@ -192,6 +233,7 @@ class PurchaseOrderProposalApprovalSerializer(serializers.ModelSerializer):
             'approved_by',
             'approved_by_username',
             'approved_by_name',
+            'approved_by_email',
             'approved_at',
             'comment',
         ]
@@ -206,6 +248,7 @@ class PurchaseOrderProposalApprovalSerializer(serializers.ModelSerializer):
 class PurchaseOrderTaskSerializer(serializers.ModelSerializer):
     assigned_to_username = serializers.CharField(source='assigned_to.username', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
+    assigned_to_email = serializers.CharField(source='assigned_to.email', read_only=True)
     proposal_no = serializers.CharField(source='proposal.proposal_no', read_only=True)
     proposal_status = serializers.CharField(source='proposal.status', read_only=True)
     supplier_code = serializers.CharField(source='proposal.supplier.supplier_code', read_only=True)
@@ -224,6 +267,7 @@ class PurchaseOrderTaskSerializer(serializers.ModelSerializer):
             'assigned_to',
             'assigned_to_username',
             'assigned_to_name',
+            'assigned_to_email',
             'status',
             'due_date',
             'created_at',
@@ -323,41 +367,3 @@ class PurchaseOrderProposalDetailSerializer(serializers.ModelSerializer):
         if not obj.created_by_id:
             return ''
         return _display_user_name(obj.created_by)
-
-
-class PurchaseOrderApprovalConfigSerializer(serializers.ModelSerializer):
-    approver_user_names = serializers.SerializerMethodField()
-    proxy_approver_user_names = serializers.SerializerMethodField()
-    notify_user_names = serializers.SerializerMethodField()
-
-    class Meta:
-        model = PurchaseOrderApprovalConfig
-        fields = [
-            'id',
-            'approval_level',
-            'level_name',
-            'approver_users',
-            'proxy_approver_users',
-            'notify_users',
-            'approver_user_names',
-            'proxy_approver_user_names',
-            'notify_user_names',
-        ]
-
-    def get_approver_user_names(self, obj):
-        names = []
-        for user in obj.approver_users.all():
-            names.append(_display_user_name(user))
-        return names
-
-    def get_notify_user_names(self, obj):
-        names = []
-        for user in obj.notify_users.all():
-            names.append(_display_user_name(user))
-        return names
-
-    def get_proxy_approver_user_names(self, obj):
-        names = []
-        for user in obj.proxy_approver_users.all():
-            names.append(_display_user_name(user))
-        return names

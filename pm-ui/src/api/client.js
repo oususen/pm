@@ -50,7 +50,6 @@ import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
 import { createSupplierOrderPatternsAPI } from './resources/supplierOrderPatterns'
 import { createSupplierOrderSchedulesAPI } from './resources/supplierOrderSchedules'
 import { createPurchaseOrderProposalsAPI } from './resources/purchaseOrderProposals'
-import { createPurchaseOrderApprovalConfigAPI } from './resources/purchaseOrderApprovalConfig'
 import { createQualityEquipmentInspectionsAPI } from './resources/qualityEquipmentInspections'
 import { createIntegratedChecksheetsAPI } from './resources/integratedChecksheets'
 import { createOvertimeAPI } from './resources/overtime'
@@ -208,7 +207,6 @@ export default {
   supplierOrderPatterns: createSupplierOrderPatternsAPI(client),
   supplierOrderSchedules: createSupplierOrderSchedulesAPI(client),
   purchaseOrderProposals: createPurchaseOrderProposalsAPI(client),
-  purchaseOrderApprovalConfig: createPurchaseOrderApprovalConfigAPI(client),
   qualityEquipmentInspections: createQualityEquipmentInspectionsAPI(client),
   integratedChecksheets: createIntegratedChecksheetsAPI(client),
   overtime: createOvertimeAPI(client),

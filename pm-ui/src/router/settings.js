@@ -91,7 +91,7 @@ const settings = [
     path: "/settings/material-order-email-config",
     name: "MaterialOrderEmailConfig",
     component: () => import("@/views/settings/MaterialOrderEmailConfig.vue"),
-    meta: { pageTitle: "材料注文書メール設定", resource: "settings.material_order_email_config" },
+    meta: { pageTitle: "注文書メール設定", resource: "settings.material_order_email_config" },
   },
   {
     path: "/settings/auto-plan",
@@ -132,12 +132,6 @@ const settings = [
     path: "/settings/supplier-order-schedule",
     name: "SupplierOrderScheduleSettings",
     redirect: "/purchase/supplier-order-pattern",
-  },
-  {
-    path: "/settings/purchase-order-approval",
-    name: "PurchaseOrderApprovalSettings",
-    component: () => import("@/views/settings/PurchaseOrderApprovalSettings.vue"),
-    meta: { pageTitle: "発注承認者設定", resource: "settings.purchase_order_approval" },
   },
   {
     path: "/settings/departments",

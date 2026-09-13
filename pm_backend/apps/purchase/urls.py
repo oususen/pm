@@ -1,11 +1,12 @@
 from django.urls import path
 
 from .order_proposal_views import (
-    PurchaseOrderApprovalConfigView,
     PurchaseOrderProposalApproveView,
     PurchaseOrderProposalAutoFillView,
     PurchaseOrderProposalCancelView,
     PurchaseOrderProposalDetailView,
+    PurchaseOrderProposalEmailConfigDetailView,
+    PurchaseOrderProposalEmailConfigListView,
     PurchaseOrderProposalListCreateView,
     PurchaseOrderProposalPdfView,
     PurchaseOrderProposalRejectView,
@@ -86,8 +87,9 @@ urlpatterns = [
     path('purchase-order-proposals/<int:pk>/send/', PurchaseOrderProposalSendView.as_view(), name='purchase-order-proposal-send'),
     path('purchase-order-proposals/<int:pk>/pdf/', PurchaseOrderProposalPdfView.as_view(), name='purchase-order-proposal-pdf'),
     path('purchase-order-proposals/<int:pk>/auto_fill/', PurchaseOrderProposalAutoFillView.as_view(), name='purchase-order-proposal-auto-fill'),
+    path('purchase-order-proposal-email-configs/', PurchaseOrderProposalEmailConfigListView.as_view(), name='purchase-order-proposal-email-configs'),
+    path('purchase-order-proposal-email-configs/<int:supplier_id>/', PurchaseOrderProposalEmailConfigDetailView.as_view(), name='purchase-order-proposal-email-config-detail'),
     path('purchase-order-tasks/', PurchaseOrderTaskListView.as_view(), name='purchase-order-tasks'),
-    path('purchase-order-approval-config/', PurchaseOrderApprovalConfigView.as_view(), name='purchase-order-approval-config'),
     path('purchase-receiving/', PurchaseReceivingView.as_view(), name='purchase-receiving'),
     path('purchase-receiving/history/', PurchaseReceivingHistoryView.as_view(), name='purchase-receiving-history'),
     path('purchase-receiving/delivery-list-template/', PurchaseReceivingDeliveryListTemplateView.as_view(), name='purchase-receiving-delivery-list-template'),

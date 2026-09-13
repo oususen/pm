@@ -26,7 +26,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.role_utils import build_supervisor_role_q
+from accounts.models import ApprovalRouteConfig
+from accounts.role_utils import build_chief_role_q, build_leader_role_q, build_supervisor_role_q
 from masters.models import BOMItem, Calendar, Contact, Line, Process, Product, Supplier
 from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
@@ -37,8 +38,8 @@ from shipping.services.email_service import EmailService
 
 from .process_resolver import resolve_purchase_line, resolve_supplier_process
 from .models import (
-    PurchaseOrderApprovalConfig,
     PurchaseOrderProposal,
+    PurchaseOrderProposalEmailConfig,
     PurchaseOrderProposalApproval,
     PurchaseOrderProposalLine,
     PurchaseOrderTask,
@@ -46,8 +47,8 @@ from .models import (
     SupplierOrderSchedule,
 )
 from .serializers import (
-    PurchaseOrderApprovalConfigSerializer,
     PurchaseOrderProposalDetailSerializer,
+    PurchaseOrderProposalEmailConfigSerializer,
     PurchaseOrderProposalLineSerializer,
     PurchaseOrderProposalListSerializer,
     PurchaseOrderTaskSerializer,
@@ -105,23 +106,31 @@ AUTO_FILL_SOURCE_PLANNED_PROGRESS = 'PLANNED_PROGRESS'
 AUTO_FILL_SOURCE_DEFAULT = AUTO_FILL_SOURCE_PLANNED_STOCK
 
 PURCHASE_ORDER_PDF_FONT = 'HeiseiKakuGo-W5'
+PURCHASE_ORDER_PROPOSAL_APPROVAL_ITEM_KEY = 'purchase_order_proposal'
+
+APPROVAL_LEVEL_TO_ROUTE_STAGE = {
+    1: 'creator',
+    2: 'reviewer1',
+    3: 'reviewer2',
+    4: 'approver',
+}
+
+APPROVAL_STAGE_LABELS = {
+    'creator': '業務員',
+    'reviewer1': '班長',
+    'reviewer2': '係長',
+    'approver': '事業部長',
+}
 
 
-def _ensure_approval_config_defaults():
-    for level, name in DEFAULT_APPROVAL_LEVELS:
-        PurchaseOrderApprovalConfig.objects.get_or_create(
-            approval_level=level,
-            defaults={'level_name': name},
-        )
-
-
-def _get_approval_config(level: int) -> PurchaseOrderApprovalConfig:
-    _ensure_approval_config_defaults()
-    config, _ = PurchaseOrderApprovalConfig.objects.get_or_create(
-        approval_level=level,
-        defaults={'level_name': dict(DEFAULT_APPROVAL_LEVELS).get(level, f'Level {level}')},
-    )
-    return config
+def _get_purchase_order_proposal_route() -> ApprovalRouteConfig:
+    route = ApprovalRouteConfig.objects.filter(
+        item_key=PURCHASE_ORDER_PROPOSAL_APPROVAL_ITEM_KEY,
+        is_active=True,
+    ).first()
+    if not route:
+        raise ValueError('承認設定に「発注提案」がありません。')
+    return route
 
 
 def _get_user_profile(user):
@@ -133,50 +142,142 @@ def _get_user_profile(user):
         return None
 
 
-def _resolve_level2_approvers_for_submit(proposal: PurchaseOrderProposal, configured_users):
-    creator = proposal.created_by
+def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, creator=None):
+    allowed_users = list(getattr(route_config, f'{stage}_allowed_users').all())
+    if allowed_users:
+        return allowed_users
+
+    role = getattr(route_config, f'{stage}_role', '')
+    user_qs = get_user_model().objects.filter(is_active=True)
     profile = _get_user_profile(creator)
-    if not profile:
-        return [u for u in configured_users if getattr(u, 'id', None)]
 
-    supervisor_team_ids = list(profile.supervisor_teams.values_list('id', flat=True))
-    if not supervisor_team_ids:
-        team_id = getattr(profile, 'team_id', None)
-        if team_id:
-            supervisor_team_ids = [team_id]
-    group_id = getattr(profile, 'group_id', None)
-    creator_id = getattr(creator, 'id', None)
+    if profile:
+        if role == 'leader' and getattr(profile, 'unit_id', None):
+            return list(user_qs.filter(build_leader_role_q(profile.unit_id)).distinct())
+        if role == 'supervisor' and getattr(profile, 'team_id', None):
+            return list(user_qs.filter(build_supervisor_role_q(profile.team_id)).distinct())
+        if role == 'chief' and getattr(profile, 'group_id', None):
+            return list(user_qs.filter(build_chief_role_q(profile.group_id)).distinct())
+        if role == 'manager' and getattr(profile, 'division_id', None):
+            return list(user_qs.filter(profile__role='manager', profile__division_id=profile.division_id).distinct())
+        return []
 
-    def _same_org_supervisors(user_ids=None):
-        user_qs = get_user_model().objects.filter(
-            is_active=True,
-            profile__role__in=['supervisor', 'chief', 'manager'],
-        ).exclude(id=creator_id)
+    return []
 
-        if user_ids is not None:
-            user_qs = user_qs.filter(id__in=user_ids)
 
-        if supervisor_team_ids:
-            team_filter = Q()
-            for supervisor_team_id in supervisor_team_ids:
-                team_filter |= build_supervisor_role_q(supervisor_team_id)
-            user_qs = user_qs.filter(team_filter)
-        elif group_id:
-            user_qs = user_qs.filter(profile__group_id=group_id)
-        else:
-            return []
-        return list(user_qs.distinct())
+def _get_route_proxy_users(route_config: ApprovalRouteConfig, stage: str):
+    return list(getattr(route_config, f'{stage}_proxy_users').all())
 
-    configured_user_ids = [u.id for u in configured_users if getattr(u, 'id', None)]
-    if configured_user_ids:
-        matched = _same_org_supervisors(configured_user_ids)
-        if matched:
-            return matched
 
-        return [u for u in configured_users if getattr(u, 'id', None)]
+def _resolve_purchase_approval_users(route_config: ApprovalRouteConfig, level: int, proposal: PurchaseOrderProposal):
+    stage = APPROVAL_LEVEL_TO_ROUTE_STAGE.get(int(level))
+    if not stage:
+        return []
+    users = _resolve_route_stage_users(route_config, stage, creator=proposal.created_by)
+    users.extend(_get_route_proxy_users(route_config, stage))
+    return list({user.id: user for user in users if getattr(user, 'id', None)}.values())
 
-    # L2設定が空でも、作成者と同班（なければ同係）の班長へ自動割当する。
-    return _same_org_supervisors()
+
+def _route_stage_task_enabled(route_config: ApprovalRouteConfig, level: int):
+    stage = APPROVAL_LEVEL_TO_ROUTE_STAGE.get(int(level))
+    if not stage:
+        return False
+    if stage == 'reviewer2' and not route_config.reviewer2_enabled:
+        return False
+    return getattr(route_config, f'{stage}_task_enabled', True)
+
+
+def _route_stage_app_notification_enabled(route_config: ApprovalRouteConfig, level: int):
+    stage = APPROVAL_LEVEL_TO_ROUTE_STAGE.get(int(level))
+    if not stage:
+        return False
+    if stage == 'reviewer2' and not route_config.reviewer2_enabled:
+        return False
+    return getattr(route_config, f'{stage}_app_notification_enabled', True)
+
+
+def _route_stage_email_notification_enabled(route_config: ApprovalRouteConfig, level: int):
+    stage = APPROVAL_LEVEL_TO_ROUTE_STAGE.get(int(level))
+    if not stage:
+        return False
+    if stage == 'reviewer2' and not route_config.reviewer2_enabled:
+        return False
+    return getattr(route_config, f'{stage}_email_notification_enabled', False)
+
+
+def _get_purchase_approval_result_users(route_config: ApprovalRouteConfig, proposal: PurchaseOrderProposal):
+    users = []
+    if proposal.created_by_id:
+        users.append(proposal.created_by)
+    for level in (2, 3, 4):
+        if level == 3 and not route_config.reviewer2_enabled:
+            continue
+        users.extend(_resolve_purchase_approval_users(route_config, level, proposal))
+    return list({user.id: user for user in users if getattr(user, 'id', None)}.values())
+
+
+def _send_purchase_approval_stage_email(
+    route_config: ApprovalRouteConfig,
+    level: int,
+    proposal: PurchaseOrderProposal,
+    users,
+    operator_user,
+):
+    if not users or not _route_stage_email_notification_enabled(route_config, level):
+        return
+    emails = sorted({user.email for user in users if getattr(user, 'email', '')})
+    if not emails:
+        return
+
+    stage = APPROVAL_LEVEL_TO_ROUTE_STAGE.get(int(level))
+    stage_label = APPROVAL_STAGE_LABELS.get(stage, '承認')
+    operator_name = _display_user_name(operator_user)
+    supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
+    body_lines = [
+        f'{operator_name}さんから発注提案書の{stage_label}依頼があります。',
+        '',
+        f'注文書番号: {proposal.proposal_no}',
+        f'仕入先: {supplier_name}',
+        f'発注日: {proposal.order_date}',
+        f'希望納入日: {proposal.desired_delivery_date}',
+    ]
+    EmailService().send_plain_email(
+        to_emails=emails,
+        subject=f'[発注提案] {stage_label}依頼: {proposal.proposal_no}',
+        body='\n'.join(body_lines),
+        user_id=getattr(operator_user, 'id', None),
+    )
+
+
+def _send_purchase_approval_result_email(
+    route_config: ApprovalRouteConfig,
+    proposal: PurchaseOrderProposal,
+    users,
+    operator_user,
+):
+    if not users or not route_config.approved_result_email_notification_enabled:
+        return
+    emails = sorted({user.email for user in users if getattr(user, 'email', '')})
+    if not emails:
+        return
+
+    operator_name = _display_user_name(operator_user)
+    supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
+    body_lines = [
+        f'{operator_name}さんが発注提案書を最終承認しました。',
+        '注文書作成を行ってください。',
+        '',
+        f'注文書番号: {proposal.proposal_no}',
+        f'仕入先: {supplier_name}',
+        f'発注日: {proposal.order_date}',
+        f'希望納入日: {proposal.desired_delivery_date}',
+    ]
+    EmailService().send_plain_email(
+        to_emails=emails,
+        subject=f'[発注提案] 承認完了: {proposal.proposal_no}',
+        body='\n'.join(body_lines),
+        user_id=getattr(operator_user, 'id', None),
+    )
 
 
 def _proposal_no_prefix(target_date: date) -> str:
@@ -1039,8 +1140,68 @@ def _resolve_line_unit_price(line):
     return None
 
 
+PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY = '''{supplier_name} 御中
+
+お世話になっております。
+発注書を送付いたします。
+
+注文書番号: {proposal_no}
+発注日: {order_date}
+希望納入日: {desired_delivery_date}
+
+添付のPDFをご確認のうえ、手配をお願いいたします。
+
+------------------------------
+ダイソウ工業株式会社
+{created_by_name}
+
+ご不明な点がございましたら下記までご連絡ください。
+Email:{created_by_email}
+
+このメールは送信専用です。ご返信はCC宛先へお願いします。
+'''
+
+
 def _build_purchase_order_email_subject(proposal: PurchaseOrderProposal):
     return f'【発注書】{proposal.proposal_no} {proposal.supplier.supplier_name}'
+
+
+def _append_purchase_order_proposal_mail_notice(body: str):
+    notice = 'このメールは送信専用です。ご返信はCC宛先へお願いします。'
+    body = body or ''
+    if 'このメールは送信専用です。ご返信はCC宛先へお願いします。' in body:
+        return body
+    return f'{body.rstrip()}\n\n{notice}'
+
+
+def _render_purchase_order_proposal_email_body(template: str, proposal: PurchaseOrderProposal):
+    creator_name = _display_user_name(proposal.created_by) if proposal.created_by_id else ''
+    values = {
+        'supplier_name': proposal.supplier.supplier_name,
+        'proposal_no': proposal.proposal_no,
+        'order_date': proposal.order_date,
+        'desired_delivery_date': proposal.desired_delivery_date,
+        'created_by_name': creator_name,
+        'created_by_email': getattr(proposal.created_by, 'email', '') if proposal.created_by_id else '',
+    }
+    body = template or PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY
+    body = re.sub(
+        r'\{(\w+)\}',
+        lambda m: str(values.get(m.group(1), '') or '') if m.group(1) in values else m.group(0),
+        body,
+    )
+    return _append_purchase_order_proposal_mail_notice(body)
+
+
+def _get_purchase_order_proposal_email_config(proposal: PurchaseOrderProposal):
+    if not proposal.supplier_id:
+        return None
+    return (
+        PurchaseOrderProposalEmailConfig.objects
+        .prefetch_related('cc_users')
+        .filter(supplier_id=proposal.supplier_id)
+        .first()
+    )
 
 
 def _build_purchase_order_email_body(proposal: PurchaseOrderProposal):
@@ -1103,7 +1264,12 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
             approval_by_level[level] = row
 
     creator_last_name = _display_user_last_name(getattr(proposal, 'created_by', None))
-    level4_proxy_user_ids = set(_get_approval_config(4).proxy_approver_users.values_list('id', flat=True))
+    level4_proxy_user_ids = set()
+    try:
+        route_config = _get_purchase_order_proposal_route()
+        level4_proxy_user_ids = set(route_config.approver_proxy_users.values_list('id', flat=True))
+    except ValueError:
+        pass
     level4_approval = approval_by_level.get(4)
     approver_name = ''
     if level4_approval and level4_approval.approved_by_id:
@@ -1275,12 +1441,19 @@ def run_auto_purchase_order_check():
 
     today = get_business_today()
     daiso_calculator = WorkingDayCalculator(_get_daiso_calendar())
-    _ensure_approval_config_defaults()
-    level1_config = _get_approval_config(1)
-    level1_users = list(level1_config.approver_users.all())
     config = ScheduleConfig.objects.filter(task_name='AUTO_PURCHASE_ORDER_CHECK', line__isnull=True).first()
+    try:
+        route_config = _get_purchase_order_proposal_route()
+    except ValueError as exc:
+        if config:
+            config.last_run_at = datetime.now()
+            config.last_run_status = 'FAILED'
+            config.last_run_message = str(exc)
+            config.save(update_fields=['last_run_at', 'last_run_status', 'last_run_message'])
+        return
+    level1_users = _resolve_route_stage_users(route_config, 'creator')
     if config:
-        config.last_run_at = timezone.now()
+        config.last_run_at = datetime.now()
         config.last_run_status = 'RUNNING'
         config.last_run_message = '実行中...'
         config.save(update_fields=['last_run_at', 'last_run_status', 'last_run_message'])
@@ -1318,7 +1491,7 @@ def run_auto_purchase_order_check():
                         )
                         created_proposals += 1
 
-                    if level1_users:
+                    if level1_users and route_config.creator_task_enabled:
                         created_tasks += _create_tasks_for_users(
                             proposal=proposal,
                             task_type=PurchaseOrderTask.TASK_CREATE_PROPOSAL,
@@ -1328,11 +1501,18 @@ def run_auto_purchase_order_check():
             except Exception as exc:
                 errors.append(f'schedule_id={schedule.id}: {exc}')
 
-        if level1_users and (created_proposals or created_tasks):
+        if level1_users and route_config.creator_app_notification_enabled and (created_proposals or created_tasks):
             _create_notification(
                 title='発注提案書作成タスクが生成されました',
                 description=f'対象日: {today} / 生成提案書: {created_proposals}件 / タスク: {created_tasks}件',
                 users=level1_users,
+            )
+        level1_emails = sorted({user.email for user in level1_users if getattr(user, 'email', '')})
+        if level1_emails and route_config.creator_email_notification_enabled and (created_proposals or created_tasks):
+            EmailService().send_plain_email(
+                to_emails=level1_emails,
+                subject='[発注提案] 発注提案書作成タスクが生成されました',
+                body=f'対象日: {today}\n生成提案書: {created_proposals}件\nタスク: {created_tasks}件',
             )
     finally:
         if config:
@@ -1617,8 +1797,10 @@ class PurchaseOrderProposalSubmitView(APIView):
         if not proposal.lines.exists():
             return Response({'detail': '明細がありません'}, status=status.HTTP_400_BAD_REQUEST)
 
-        level2_config = _get_approval_config(2)
-        configured_level2_users = list(level2_config.approver_users.all())
+        try:
+            route_config = _get_purchase_order_proposal_route()
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         level2_users = []
 
         with transaction.atomic():
@@ -1636,22 +1818,28 @@ class PurchaseOrderProposalSubmitView(APIView):
             )
             _mark_tasks_done(proposal, PurchaseOrderTask.TASK_CREATE_PROPOSAL)
 
-            level2_users = _resolve_level2_approvers_for_submit(
-                proposal=proposal,
-                configured_users=configured_level2_users,
-            )
-            _create_tasks_for_users(
-                proposal=proposal,
-                task_type=PurchaseOrderTask.TASK_APPROVE_L2,
-                users=level2_users,
-                due_date=proposal.order_date,
-            )
+            level2_users = _resolve_purchase_approval_users(route_config, 2, proposal)
+            if _route_stage_task_enabled(route_config, 2):
+                _create_tasks_for_users(
+                    proposal=proposal,
+                    task_type=PurchaseOrderTask.TASK_APPROVE_L2,
+                    users=level2_users,
+                    due_date=proposal.order_date,
+                )
 
-        _create_notification(
-            title=f'発注提案書 承認依頼: {proposal.proposal_no}',
-            description='班長承認待ちです。',
-            users=level2_users + list(level2_config.notify_users.all()),
-            operator_name=_resolve_notification_operator_name(proposal, request.user),
+        if level2_users and _route_stage_app_notification_enabled(route_config, 2):
+            _create_notification(
+                title=f'発注提案書 承認依頼: {proposal.proposal_no}',
+                description='班長承認待ちです。',
+                users=level2_users,
+                operator_name=_resolve_notification_operator_name(proposal, request.user),
+            )
+        _send_purchase_approval_stage_email(
+            route_config=route_config,
+            level=2,
+            proposal=proposal,
+            users=level2_users,
+            operator_user=request.user,
         )
 
         proposal = (
@@ -1679,21 +1867,20 @@ class PurchaseOrderProposalApproveView(APIView):
         next_status = transition['next_status']
         next_level = transition['next_level']
         next_task_type = transition['next_task_type']
+        try:
+            route_config = _get_purchase_order_proposal_route()
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         next_users = []
         notify_users = []
         if next_task_type in (PurchaseOrderTask.TASK_CREATE_ORDER_PDF, PurchaseOrderTask.TASK_SEND_TO_SUPPLIER):
             if proposal.created_by_id:
                 next_users = [proposal.created_by]
-            if not next_users:
-                next_users = list(_get_approval_config(1).approver_users.all())
             notify_users = next_users
         elif next_level:
-            next_config = _get_approval_config(next_level)
-            next_users = list(next_config.approver_users.all())
-            if int(next_level) == 4:
-                next_users.extend(list(next_config.proxy_approver_users.all()))
-            notify_users = next_users + list(next_config.notify_users.all())
+            next_users = _resolve_purchase_approval_users(route_config, next_level, proposal)
+            notify_users = next_users
 
         with transaction.atomic():
             PurchaseOrderProposalApproval.objects.create(
@@ -1713,7 +1900,11 @@ class PurchaseOrderProposalApproveView(APIView):
             if next_status == PurchaseOrderProposal.STATUS_APPROVED:
                 _write_plan_qty_on_final_approval(proposal)
 
-            if next_task_type and next_users:
+            if (
+                next_task_type
+                and next_users
+                and (next_level is None or _route_stage_task_enabled(route_config, next_level))
+            ):
                 _create_tasks_for_users(
                     proposal=proposal,
                     task_type=next_task_type,
@@ -1721,15 +1912,35 @@ class PurchaseOrderProposalApproveView(APIView):
                     due_date=proposal.order_date,
                 )
 
-        if notify_users:
-            notify_description = f'ステータスが {next_status} になりました。'
-            if next_task_type == PurchaseOrderTask.TASK_CREATE_ORDER_PDF:
-                notify_description = '最終承認済みです。注文書作成を行ってください。'
-            _create_notification(
-                title=f'発注提案書 承認依頼: {proposal.proposal_no}',
-                description=notify_description,
+        if next_level:
+            if notify_users and _route_stage_app_notification_enabled(route_config, next_level):
+                _create_notification(
+                    title=f'発注提案書 承認依頼: {proposal.proposal_no}',
+                    description=f'ステータスが {next_status} になりました。',
+                    users=notify_users,
+                    operator_name=_resolve_notification_operator_name(proposal, request.user),
+                )
+            _send_purchase_approval_stage_email(
+                route_config=route_config,
+                level=next_level,
+                proposal=proposal,
                 users=notify_users,
-                operator_name=_resolve_notification_operator_name(proposal, request.user),
+                operator_user=request.user,
+            )
+        elif next_status == PurchaseOrderProposal.STATUS_APPROVED:
+            result_users = _get_purchase_approval_result_users(route_config, proposal)
+            if route_config.approved_result_app_notification_enabled:
+                _create_notification(
+                    title=f'発注提案書 承認完了: {proposal.proposal_no}',
+                    description='最終承認済みです。注文書作成を行ってください。',
+                    users=result_users,
+                    operator_name=_resolve_notification_operator_name(proposal, request.user),
+                )
+            _send_purchase_approval_result_email(
+                route_config=route_config,
+                proposal=proposal,
+                users=result_users,
+                operator_user=request.user,
             )
 
         proposal = (
@@ -1826,10 +2037,17 @@ class PurchaseOrderProposalCancelView(APIView):
         if proposal.status != PurchaseOrderProposal.STATUS_APPROVED:
             return Response({'detail': 'この状態ではキャンセルできません'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 権限チェック: L4(事業部長) の承認者または代理承認者のみキャンセル可
-        l4_config = _get_approval_config(4)
-        authorized_ids = set(l4_config.approver_users.values_list('id', flat=True))
-        authorized_ids.update(l4_config.proxy_approver_users.values_list('id', flat=True))
+        try:
+            route_config = _get_purchase_order_proposal_route()
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 権限チェック: 汎用承認設定の承認者または代理承認者のみキャンセル可
+        authorized_ids = {
+            user.id
+            for user in _resolve_purchase_approval_users(route_config, 4, proposal)
+            if getattr(user, 'id', None)
+        }
         user_id = getattr(request.user, 'id', None)
         if not user_id or user_id not in authorized_ids:
             return Response(
@@ -1873,6 +2091,49 @@ class PurchaseOrderProposalCancelView(APIView):
         return Response(PurchaseOrderProposalDetailSerializer(proposal).data)
 
 
+class PurchaseOrderProposalEmailConfigListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = (
+            PurchaseOrderProposalEmailConfig.objects
+            .select_related('supplier')
+            .prefetch_related('cc_users')
+            .order_by('supplier__supplier_code')
+        )
+        serializer = PurchaseOrderProposalEmailConfigSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class PurchaseOrderProposalEmailConfigDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, supplier_id: int):
+        supplier = Supplier.objects.filter(pk=supplier_id).first()
+        if not supplier:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        config, _ = PurchaseOrderProposalEmailConfig.objects.get_or_create(
+            supplier=supplier,
+            defaults={'body': PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY},
+        )
+        serializer = PurchaseOrderProposalEmailConfigSerializer(config)
+        return Response(serializer.data)
+
+    def put(self, request, supplier_id: int):
+        supplier = Supplier.objects.filter(pk=supplier_id).first()
+        if not supplier:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        config, _ = PurchaseOrderProposalEmailConfig.objects.get_or_create(
+            supplier=supplier,
+            defaults={'body': PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY},
+        )
+        payload = {**request.data, 'supplier': supplier.id}
+        serializer = PurchaseOrderProposalEmailConfigSerializer(config, data=payload, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(supplier=supplier)
+        return Response(serializer.data)
+
+
 class PurchaseOrderProposalSendView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1899,14 +2160,22 @@ class PurchaseOrderProposalSendView(APIView):
         to_email = str(request.data.get('to_email') or proposal.supplier.order_email or '').strip()
         if not to_email:
             return Response({'detail': '仕入先マスタに送信メールアドレスが未設定です'}, status=status.HTTP_400_BAD_REQUEST)
+        email_config = _get_purchase_order_proposal_email_config(proposal)
+        cc_emails = sorted({user.email for user in email_config.cc_users.all() if getattr(user, 'email', '')}) if email_config else []
         subject = str(request.data.get('subject') or '').strip() or _build_purchase_order_email_subject(proposal)
         body_raw = request.data.get('body')
         if body_raw is None:
-            body = _build_purchase_order_email_body(proposal)
+            body = _render_purchase_order_proposal_email_body(
+                email_config.body if email_config else PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY,
+                proposal,
+            )
         else:
             body = str(body_raw)
             if not body.strip():
-                body = _build_purchase_order_email_body(proposal)
+                body = _render_purchase_order_proposal_email_body(
+                    email_config.body if email_config else PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY,
+                    proposal,
+                )
 
         pdf_buffer = _build_purchase_order_pdf(proposal)
         pdf_bytes = pdf_buffer.getvalue()
@@ -1918,6 +2187,7 @@ class PurchaseOrderProposalSendView(APIView):
             body=body,
             attachment_data=BytesIO(pdf_bytes),
             attachment_filename=_proposal_pdf_filename(proposal),
+            cc_emails=cc_emails if cc_emails else None,
             user_id=request.user.id if request.user and request.user.is_authenticated else None,
         )
         if not send_result.get('success'):
@@ -2046,55 +2316,4 @@ class PurchaseOrderTaskListView(APIView):
             queryset = queryset.filter(status=status_code)
 
         serializer = PurchaseOrderTaskSerializer(queryset, many=True)
-        return Response(serializer.data)
-
-
-class PurchaseOrderApprovalConfigView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        _ensure_approval_config_defaults()
-        queryset = PurchaseOrderApprovalConfig.objects.prefetch_related(
-            'approver_users',
-            'proxy_approver_users',
-            'notify_users',
-        ).order_by('approval_level')
-        serializer = PurchaseOrderApprovalConfigSerializer(queryset, many=True)
-        return Response(serializer.data)
-
-    def put(self, request):
-        _ensure_approval_config_defaults()
-        payload_configs = request.data.get('configs')
-        if payload_configs is None:
-            payload_configs = [request.data]
-        if not isinstance(payload_configs, list):
-            return Response({'detail': 'configs must be list'}, status=status.HTTP_400_BAD_REQUEST)
-
-        with transaction.atomic():
-            for item in payload_configs:
-                level = item.get('approval_level')
-                if level is None:
-                    return Response({'detail': 'approval_level is required'}, status=status.HTTP_400_BAD_REQUEST)
-                try:
-                    level = int(level)
-                except (TypeError, ValueError):
-                    return Response({'detail': 'approval_level must be integer'}, status=status.HTTP_400_BAD_REQUEST)
-                config = _get_approval_config(level)
-
-                if 'level_name' in item and item.get('level_name'):
-                    config.level_name = str(item.get('level_name'))
-                    config.save(update_fields=['level_name'])
-                if 'approver_users' in item:
-                    config.approver_users.set(item.get('approver_users') or [])
-                if 'proxy_approver_users' in item:
-                    config.proxy_approver_users.set(item.get('proxy_approver_users') or [])
-                if 'notify_users' in item:
-                    config.notify_users.set(item.get('notify_users') or [])
-
-        queryset = PurchaseOrderApprovalConfig.objects.prefetch_related(
-            'approver_users',
-            'proxy_approver_users',
-            'notify_users',
-        ).order_by('approval_level')
-        serializer = PurchaseOrderApprovalConfigSerializer(queryset, many=True)
         return Response(serializer.data)

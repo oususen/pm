@@ -72,10 +72,10 @@ def _resolve_stage_users(route_config, stage, creator=None):
             elif role == 'manager' and profile.division_id:
                 users = users.filter(profile__role='manager', profile__division_id=profile.division_id)
             else:
-                users = users.filter(profile__role=role)
+                return []
             return list(users.distinct())
 
-    return list(User.objects.filter(is_active=True, profile__role=role).distinct())
+    return []
 
 
 def _get_proxy_users(route_config, stage):

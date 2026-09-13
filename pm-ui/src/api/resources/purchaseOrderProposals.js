@@ -38,4 +38,13 @@ export const createPurchaseOrderProposalsAPI = (client) => ({
   listTasks(params = {}) {
     return client.get('/purchase-order-tasks/', { params })
   },
+  getEmailConfigs() {
+    return client.get('/purchase-order-proposal-email-configs/')
+  },
+  getEmailConfig(supplierId) {
+    return client.get(`/purchase-order-proposal-email-configs/${supplierId}/`)
+  },
+  updateEmailConfig(supplierId, data) {
+    return client.put(`/purchase-order-proposal-email-configs/${supplierId}/`, data)
+  },
 })

@@ -179,14 +179,6 @@ const tiles = computed(() => [
     fallbackToPurchase: false,
   },
   {
-    to: "/settings/purchase-order-approval",
-    label: "発注承認者設定",
-    icon: "✅",
-    category: "plan",
-    required: "view",
-    resource: "settings.purchase_order_approval",
-  },
-  {
     to: "/purchase/order-proposals",
     label: "発注業務",
     icon: "📝",
