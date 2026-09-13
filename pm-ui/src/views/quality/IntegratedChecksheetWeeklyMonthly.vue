@@ -70,9 +70,12 @@
         <span class="field-label">終了日</span>
         <input v-model="endDate" type="date" />
       </label>
-      <label class="check-label">
-        <input v-model="showOnlyReworkRows" type="checkbox" />
-        <span>修正流動ありのみ表示</span>
+      <label>
+        <span class="field-label">統計対象</span>
+        <select v-model="statsMode">
+          <option value="rework">修正流動</option>
+          <option value="ng">NG</option>
+        </select>
       </label>
       <label>
         <span class="field-label">集計種別</span>
@@ -100,29 +103,21 @@
         <div class="summary-label">{{ totalLabel }}</div>
         <div class="summary-value">{{ summaryCards.total }}</div>
       </div>
-      <div class="summary-card">
+      <div v-if="aggregationMode === 'record'" class="summary-card">
         <div class="summary-label">判定台数</div>
         <div class="summary-value">{{ summaryCards.unitCount }}</div>
       </div>
       <div class="summary-card">
-        <div class="summary-label">{{ reworkLabel }}</div>
-        <div class="summary-value accent-rework">{{ summaryCards.rework }}</div>
+        <div class="summary-label">{{ targetCountLabel }}</div>
+        <div class="summary-value" :class="targetAccentClass">{{ summaryCards.targetCount }}</div>
       </div>
       <div class="summary-card">
-        <div class="summary-label">修正流動率</div>
-        <div class="summary-value accent-rework">{{ summaryCards.reworkRate }}%</div>
+        <div class="summary-label">{{ targetRateLabel }}</div>
+        <div class="summary-value" :class="targetAccentClass">{{ summaryCards.targetRate }}%</div>
       </div>
       <div class="summary-card">
-        <div class="summary-label">{{ ngLabel }}</div>
-        <div class="summary-value accent-ng">{{ summaryCards.ng }}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">NG率</div>
-        <div class="summary-value accent-ng">{{ summaryCards.ngRate }}%</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">修正流動発生日数</div>
-        <div class="summary-value">{{ summaryCards.reworkDays }}</div>
+        <div class="summary-label">{{ targetDaysLabel }}</div>
+        <div class="summary-value">{{ summaryCards.targetDays }}</div>
       </div>
     </section>
 
@@ -140,7 +135,7 @@
     <section class="panel">
       <div class="section-head">
         <h3 class="section-title">{{ summarySectionTitle }}</h3>
-        <span class="section-note">修正流動率の高い{{ periodLabel }}が上に来ます</span>
+        <span class="section-note">{{ targetRateLabel }}の高い{{ periodLabel }}が上に来ます</span>
       </div>
       <div class="table-wrap">
         <table class="data-table compact">
@@ -174,7 +169,7 @@
     <section class="panel">
       <div class="section-head">
         <h3 class="section-title">ワースト製品</h3>
-        <span class="section-note">修正流動率が高い製品順です</span>
+        <span class="section-note">{{ targetRateLabel }}が高い製品順です</span>
       </div>
       <div class="table-wrap">
         <table class="data-table compact">
@@ -414,7 +409,7 @@ const selectedPerson = ref("")
 const selectedUnit = ref("")
 const startDate = ref("")
 const endDate = ref("")
-const showOnlyReworkRows = ref(true)
+const statsMode = ref("rework")
 const aggregationMode = ref("unit")
 const favorites = ref([])
 const selectedFavoriteId = ref("")
@@ -485,13 +480,14 @@ const periodLabel = computed(() => {
   if (activeTab.value === "monthly") return "月"
   return "日付"
 })
-const pageTitle = computed(() => activeTab.value === "alert" ? "修正流動率 定時通知設定" : `${tabName.value}修正流動確認`)
+const statsModeLabel = computed(() => isNgMode.value ? "NG" : "修正流動")
+const pageTitle = computed(() => activeTab.value === "alert" ? "修正流動率 定時通知設定" : `${tabName.value}${statsModeLabel.value}確認`)
 const pageHelperText = computed(() => activeTab.value === "alert"
   ? "指定時刻にライン別修正流動率をチェックし、閾値超過時にPush通知を送ります。"
-  : `工程一体チェックシート実績から、ライン / 工程 / 製品 / ${periodLabel.value}単位で修正流動を確認します。`
+  : `工程一体チェックシート実績から、ライン / 工程 / 製品 / ${periodLabel.value}単位で${statsModeLabel.value}を確認します。`
 )
-const chartTitle = computed(() => `${tabName.value}修正流動率推移`)
-const chartNote = computed(() => `横軸は${activeTab.value === "daily" ? "稼働日" : periodLabel.value}、左軸は台数、右軸は修正流動率です`)
+const chartTitle = computed(() => `${tabName.value}${targetRateLabel.value}推移`)
+const chartNote = computed(() => `横軸は${activeTab.value === "daily" ? "稼働日" : periodLabel.value}、左軸は台数、右軸は${targetRateLabel.value}です`)
 const summarySectionTitle = computed(() => `${tabName.value}サマリー`)
 const detailSectionNote = computed(() => `${tabName.value}の発生源をそのまま見ます`)
 
@@ -596,10 +592,14 @@ const groupedDetailRows = computed(() => buildGroupedRows(
 
 const detailRows = computed(() => {
   const rows = groupedDetailRows.value
-    .filter((row) => !showOnlyReworkRows.value || row.reworkCount > 0)
+    .filter((row) => isNgMode.value ? row.ngCount > 0 : row.reworkCount > 0)
     .sort((a, b) => {
-      if (b.reworkRate !== a.reworkRate) return b.reworkRate - a.reworkRate
-      if (b.reworkCount !== a.reworkCount) return b.reworkCount - a.reworkCount
+      const rateA = isNgMode.value ? a.ngRate : a.reworkRate
+      const rateB = isNgMode.value ? b.ngRate : b.reworkRate
+      const countA = isNgMode.value ? a.ngCount : a.reworkCount
+      const countB = isNgMode.value ? b.ngCount : b.reworkCount
+      if (rateB !== rateA) return rateB - rateA
+      if (countB !== countA) return countB - countA
       if (a.sortKey !== b.sortKey) return String(b.sortKey).localeCompare(String(a.sortKey), "ja")
       if (a.line !== b.line) return String(a.line).localeCompare(String(b.line), "ja")
       if (a.process !== b.process) return String(a.process).localeCompare(String(b.process), "ja")
@@ -625,15 +625,19 @@ const dailySummaryBaseRows = computed(() => {
     }),
   )
   return rows.sort((a, b) => {
-    if (b.reworkRate !== a.reworkRate) return b.reworkRate - a.reworkRate
-    if (b.reworkCount !== a.reworkCount) return b.reworkCount - a.reworkCount
+    const rateA = isNgMode.value ? a.ngRate : a.reworkRate
+    const rateB = isNgMode.value ? b.ngRate : b.reworkRate
+    const countA = isNgMode.value ? a.ngCount : a.reworkCount
+    const countB = isNgMode.value ? b.ngCount : b.reworkCount
+    if (rateB !== rateA) return rateB - rateA
+    if (countB !== countA) return countB - countA
     return String(b.sortKey).localeCompare(String(a.sortKey), "ja")
   })
 })
 
 const dailySummaryRows = computed(() => {
   return dailySummaryBaseRows.value
-    .filter((row) => !showOnlyReworkRows.value || row.reworkCount > 0)
+    .filter((row) => isNgMode.value ? row.ngCount > 0 : row.reworkCount > 0)
 })
 
 const groupedProductRows = computed(() => buildGroupedRows(
@@ -654,10 +658,14 @@ const groupedProductRows = computed(() => buildGroupedRows(
 ))
 
 const worstProductRows = computed(() => groupedProductRows.value
-  .filter((row) => !showOnlyReworkRows.value || row.reworkCount > 0)
+  .filter((row) => isNgMode.value ? row.ngCount > 0 : row.reworkCount > 0)
   .sort((a, b) => {
-    if (b.reworkRate !== a.reworkRate) return b.reworkRate - a.reworkRate
-    if (b.reworkCount !== a.reworkCount) return b.reworkCount - a.reworkCount
+    const rateA = isNgMode.value ? a.ngRate : a.reworkRate
+    const rateB = isNgMode.value ? b.ngRate : b.reworkRate
+    const countA = isNgMode.value ? a.ngCount : a.reworkCount
+    const countB = isNgMode.value ? b.ngCount : b.reworkCount
+    if (rateB !== rateA) return rateB - rateA
+    if (countB !== countA) return countB - countA
     if (a.sortKey !== b.sortKey) return String(b.sortKey).localeCompare(String(a.sortKey), "ja")
     if (b.total !== a.total) return b.total - a.total
     return String(a.product).localeCompare(String(b.product), "ja")
@@ -677,34 +685,34 @@ const dailyTrendRows = computed(() => {
         sortKey: period.sortKey,
         totalUnits: new Set(),
         reworkUnits: new Set(),
+        ngUnits: new Set(),
       })
     }
     const row = dayMap.get(key)
     const unitKey = buildUnitKey(record)
     row.totalUnits.add(unitKey)
     if (record.isRework) row.reworkUnits.add(unitKey)
+    if (record.isNg) row.ngUnits.add(unitKey)
   })
   return [...dayMap.values()]
     .map((row) => {
       const total = row.totalUnits.size
       const rework = row.reworkUnits.size
+      const ng = row.ngUnits.size
+      const ngBase = total - rework
       return {
         periodKey: row.periodKey,
         periodLabel: row.periodLabel,
         sortKey: row.sortKey,
         total,
         rework,
-        rate: total > 0 ? (rework / total) * 100 : 0,
+        reworkRate: total > 0 ? (rework / total) * 100 : 0,
+        ng,
+        ngRate: ngBase > 0 ? (ng / ngBase) * 100 : 0,
       }
     })
     .filter((row) => row.total > 0)
     .sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey), "ja"))
-})
-
-const summarySourceRecords = computed(() => {
-  if (!showOnlyReworkRows.value) return filteredRecords.value
-  const visiblePeriods = new Set(dailySummaryRows.value.map((row) => row.periodKey))
-  return filteredRecords.value.filter((record) => visiblePeriods.has(buildPeriodInfo(record.dateText, activeTab.value).key))
 })
 
 const currentSummaryRows = computed(() => dailySummaryRows.value)
@@ -712,8 +720,14 @@ const currentWorstProductRows = computed(() => worstProductRows.value)
 const currentDetailRows = computed(() => detailRows.value)
 const currentTrendRows = computed(() => dailyTrendRows.value)
 
+const isNgMode = computed(() => statsMode.value === "ng")
+const targetCountLabel = computed(() => isNgMode.value ? ngLabel.value : reworkLabel.value)
+const targetRateLabel = computed(() => isNgMode.value ? "NG率" : "修正流動率")
+const targetDaysLabel = computed(() => isNgMode.value ? "NG発生日数" : "修正流動発生日数")
+const targetAccentClass = computed(() => isNgMode.value ? "accent-ng" : "accent-rework")
+
 const summaryCards = computed(() => {
-  const records = summarySourceRecords.value
+  const records = filteredRecords.value
   const unitKeys = records.map((record) => buildUnitKey(record))
   const unitCount = new Set(unitKeys).size
   const total = aggregationMode.value === "unit" ? unitCount : records.length
@@ -725,14 +739,21 @@ const summaryCards = computed(() => {
     : records.filter((r) => r.isNg).length
   const ngBase = total - rework
   const reworkDays = new Set(records.filter((r) => r.isRework).map((r) => r.dateText)).size
+  const ngDays = new Set(records.filter((r) => r.isNg).map((r) => r.dateText)).size
+  const reworkRate = total > 0 ? ((rework / total) * 100).toFixed(1) : "0.0"
+  const ngRate = ngBase > 0 ? ((ng / ngBase) * 100).toFixed(1) : "0.0"
   return {
     total,
     unitCount,
     rework,
-    reworkRate: total > 0 ? ((rework / total) * 100).toFixed(1) : "0.0",
+    reworkRate,
     ng,
-    ngRate: ngBase > 0 ? ((ng / ngBase) * 100).toFixed(1) : "0.0",
+    ngRate,
     reworkDays,
+    ngDays,
+    targetCount: isNgMode.value ? ng : rework,
+    targetRate: isNgMode.value ? ngRate : reworkRate,
+    targetDays: isNgMode.value ? ngDays : reworkDays,
   }
 })
 
@@ -745,7 +766,7 @@ const toFavoritePayload = () => ({
   selectedUnit: String(selectedUnit.value || ""),
   startDate: isValidDateText(startDate.value) ? String(startDate.value) : "",
   endDate: isValidDateText(endDate.value) ? String(endDate.value) : "",
-  showOnlyReworkRows: Boolean(showOnlyReworkRows.value),
+  statsMode: String(statsMode.value || "rework"),
   aggregationMode: String(aggregationMode.value || "unit"),
   activeTab: String(activeTab.value || "daily"),
 })
@@ -759,7 +780,7 @@ const applyFavoritePayload = (payload) => {
   selectedUnit.value = String(payload?.selectedUnit || "")
   startDate.value = isValidDateText(payload?.startDate) ? String(payload.startDate) : ""
   endDate.value = isValidDateText(payload?.endDate) ? String(payload.endDate) : ""
-  showOnlyReworkRows.value = payload?.showOnlyReworkRows !== false
+  statsMode.value = payload?.statsMode === "ng" ? "ng" : "rework"
   aggregationMode.value = payload?.aggregationMode === "record" ? "record" : "unit"
   activeTab.value = payload?.activeTab === "weekly" || payload?.activeTab === "monthly" ? payload.activeTab : "daily"
 }
@@ -915,6 +936,14 @@ const renderDailyTrendChart = async () => {
   }
   if (!currentTrendRows.value.length) return
 
+  const ngMode = isNgMode.value
+  const barLabel = ngMode ? "NG数" : "修正流動数"
+  const lineLabel = ngMode ? "NG率" : "修正流動率"
+  const barData = currentTrendRows.value.map((row) => ngMode ? row.ng : row.rework)
+  const lineData = currentTrendRows.value.map((row) => ngMode ? row.ngRate : row.reworkRate)
+  const barColor = ngMode ? "#dc2626" : "#dc2626"
+  const lineColor = "#7c3aed"
+
   dailyTrendChart = new Chart(dailyTrendChartRef.value, {
     data: {
       labels: currentTrendRows.value.map((row) => row.periodLabel),
@@ -931,21 +960,21 @@ const renderDailyTrendChart = async () => {
         },
         {
           type: "bar",
-          label: "修正流動数",
-          data: currentTrendRows.value.map((row) => row.rework),
-          backgroundColor: "#dc2626cc",
-          borderColor: "#dc2626",
+          label: barLabel,
+          data: barData,
+          backgroundColor: barColor + "cc",
+          borderColor: barColor,
           borderWidth: 1,
           yAxisID: "yUnits",
           order: 2,
         },
         {
           type: "line",
-          label: "修正流動率",
-          data: currentTrendRows.value.map((row) => row.rate),
-          borderColor: "#7c3aed",
-          backgroundColor: "#7c3aed",
-          pointBackgroundColor: "#7c3aed",
+          label: lineLabel,
+          data: lineData,
+          borderColor: lineColor,
+          backgroundColor: lineColor,
+          pointBackgroundColor: lineColor,
           pointRadius: 3,
           tension: 0.2,
           yAxisID: "yRate",
@@ -990,7 +1019,7 @@ const renderDailyTrendChart = async () => {
           },
           title: {
             display: true,
-            text: "修正流動率(%)",
+            text: lineLabel + "(%)",
           },
           ticks: {
             callback: (value) => `${value}%`,
@@ -1148,6 +1177,10 @@ watch(currentTrendRows, () => {
 }, { deep: true })
 
 watch(activeTab, () => {
+  renderDailyTrendChart()
+})
+
+watch(statsMode, () => {
   renderDailyTrendChart()
 })
 
