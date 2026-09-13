@@ -205,7 +205,7 @@ class PurchaseOrderTask(models.Model):
     TASK_APPROVE_L4 = 'APPROVE_L4'
     TASK_SEND_TO_SUPPLIER = 'SEND_TO_SUPPLIER'
     TASK_TYPE_CHOICES = [
-        (TASK_CREATE_PROPOSAL, '発注提案書作成'),
+        (TASK_CREATE_PROPOSAL, '外作・購入品注文書作成'),
         (TASK_CREATE_ORDER_PDF, '注文書作成'),
         (TASK_APPROVE_L2, '班長承認'),
         (TASK_APPROVE_L3, '係長承認'),
@@ -556,7 +556,7 @@ class PurchaseAutoOrderSendHistory(models.Model):
 
 
 class PurchaseOrderProposalEmailConfig(models.Model):
-    """発注提案の購入先送信メール設定"""
+    """外作・購入品注文の購入先送信メール設定"""
 
     supplier = models.OneToOneField(
         Supplier,
@@ -576,8 +576,8 @@ class PurchaseOrderProposalEmailConfig(models.Model):
 
     class Meta:
         db_table = 'purchase_order_proposal_email_config'
-        verbose_name = '発注提案メール設定'
-        verbose_name_plural = '発注提案メール設定'
+        verbose_name = '外作・購入品注文メール設定'
+        verbose_name_plural = '外作・購入品注文メール設定'
         ordering = ['supplier__supplier_code']
 
     def __str__(self):

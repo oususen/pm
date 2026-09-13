@@ -2,18 +2,13 @@
   <div class="page">
     <div class="toolbar">
       <h2>注文書メール設定</h2>
-      <div class="toolbar-actions">
-        <label class="type-select">
-          <span>メール種別</span>
-          <select v-model="emailType">
-            <option value="material">材料注文書</option>
-            <option value="proposal">発注提案</option>
-          </select>
-        </label>
-        <button class="btn primary" :disabled="saving || !canEdit || !selectedSupplier" @click="save">
-          {{ saving ? "保存中..." : "保存" }}
-        </button>
-      </div>
+      <button class="btn primary" :disabled="saving || !canEdit || !selectedSupplier" @click="save">
+        {{ saving ? "保存中..." : "保存" }}
+      </button>
+    </div>
+    <div class="type-tabs">
+      <button :class="['tab', { active: emailType === 'material' }]" @click="emailType = 'material'">材料注文書</button>
+      <button :class="['tab', { active: emailType === 'proposal' }]" @click="emailType = 'proposal'">外作・購入品注文</button>
     </div>
 
     <div class="split-layout">
@@ -144,7 +139,7 @@ const supplierOptions = computed(() => {
 });
 
 const selectedSupplierLabel = computed(() => supplierOptions.value.find((row) => String(row.value) === String(selectedSupplier.value))?.label || "");
-const emailTypeLabel = computed(() => (emailType.value === "material" ? "材料注文書" : "発注提案"));
+const emailTypeLabel = computed(() => (emailType.value === "material" ? "材料注文書" : "外作・購入品注文"));
 const currentConfig = computed(() => {
   if (emailType.value === "material") return materialConfigs.value[selectedSupplier.value] || null;
   return proposalConfigs.value[Number(selectedSupplier.value)] || null;
@@ -267,23 +262,35 @@ onMounted(load);
   gap: 12px;
   margin-bottom: 10px;
 }
-.toolbar-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
 h2 {
   margin: 0;
   font-size: 16px;
 }
-.type-select {
-  display: grid;
-  gap: 3px;
-  font-size: 12px;
-  font-weight: 700;
+.type-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 10px;
 }
-.type-select select {
-  min-width: 160px;
+.tab {
+  padding: 7px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid #c5cfde;
+  background: #e8eef9;
+  color: #475569;
+  cursor: pointer;
+}
+.tab:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.tab:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+.tab.active {
+  background: #047857;
+  color: #fff;
+  border-color: #047857;
 }
 .split-layout {
   display: grid;

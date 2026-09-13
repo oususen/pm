@@ -225,7 +225,7 @@ class UserPermission(models.Model):
         ('purchase.supplier_calendar', '仕入: 仕入れ先カレンダ'),
         ('purchase.supplier_order_pattern', '仕入: 納入パターン設定'),
         ('purchase.delivery_schedule', '仕入: 納入予定'),
-        ('purchase.order_proposals', '仕入: 発注提案'),
+        ('purchase.order_proposals', '仕入: 外作・購入品注文'),
         ('purchase.auto_delivery_list', '仕入: 自動納入リスト送信'),
         ('shipping', '出荷'),
         ('shipping.instruction', '出荷: 出荷指示'),

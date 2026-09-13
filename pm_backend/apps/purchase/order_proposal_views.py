@@ -129,7 +129,7 @@ def _get_purchase_order_proposal_route() -> ApprovalRouteConfig:
         is_active=True,
     ).first()
     if not route:
-        raise ValueError('承認設定に「発注提案」がありません。')
+        raise ValueError('承認設定に「外作・購入品注文」がありません。')
     return route
 
 
@@ -234,7 +234,7 @@ def _send_purchase_approval_stage_email(
     operator_name = _display_user_name(operator_user)
     supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
     body_lines = [
-        f'{operator_name}さんから発注提案書の{stage_label}依頼があります。',
+        f'{operator_name}さんから外作・購入品注文書の{stage_label}依頼があります。',
         '',
         f'注文書番号: {proposal.proposal_no}',
         f'仕入先: {supplier_name}',
@@ -243,7 +243,7 @@ def _send_purchase_approval_stage_email(
     ]
     EmailService().send_plain_email(
         to_emails=emails,
-        subject=f'[発注提案] {stage_label}依頼: {proposal.proposal_no}',
+        subject=f'[外作・購入品注文] {stage_label}依頼: {proposal.proposal_no}',
         body='\n'.join(body_lines),
         user_id=getattr(operator_user, 'id', None),
     )
@@ -264,7 +264,7 @@ def _send_purchase_approval_result_email(
     operator_name = _display_user_name(operator_user)
     supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
     body_lines = [
-        f'{operator_name}さんが発注提案書を最終承認しました。',
+        f'{operator_name}さんが外作・購入品注文書を最終承認しました。',
         '注文書作成を行ってください。',
         '',
         f'注文書番号: {proposal.proposal_no}',
@@ -274,7 +274,7 @@ def _send_purchase_approval_result_email(
     ]
     EmailService().send_plain_email(
         to_emails=emails,
-        subject=f'[発注提案] 承認完了: {proposal.proposal_no}',
+        subject=f'[外作・購入品注文] 承認完了: {proposal.proposal_no}',
         body='\n'.join(body_lines),
         user_id=getattr(operator_user, 'id', None),
     )
@@ -575,7 +575,7 @@ def _restore_locked_plan_for_proposal_line(proposal, prop_line):
     )
     process_id = process.id if process else None
     if not process_id:
-        raise ValueError(f'ロック済み発注提案の工程を特定できません: product_id={prop_line.product_id}')
+        raise ValueError(f'ロック済み注文書の工程を特定できません: product_id={prop_line.product_id}')
 
     order_qty = int(lock.locked_qty or 0)
     if int(prop_line.order_qty or 0) != order_qty:
@@ -1503,7 +1503,7 @@ def run_auto_purchase_order_check():
 
         if level1_users and route_config.creator_app_notification_enabled and (created_proposals or created_tasks):
             _create_notification(
-                title='発注提案書作成タスクが生成されました',
+                title='外作・購入品注文書作成タスクが生成されました',
                 description=f'対象日: {today} / 生成提案書: {created_proposals}件 / タスク: {created_tasks}件',
                 users=level1_users,
             )
@@ -1511,7 +1511,7 @@ def run_auto_purchase_order_check():
         if level1_emails and route_config.creator_email_notification_enabled and (created_proposals or created_tasks):
             EmailService().send_plain_email(
                 to_emails=level1_emails,
-                subject='[発注提案] 発注提案書作成タスクが生成されました',
+                subject='[外作・購入品注文] 注文書作成タスクが生成されました',
                 body=f'対象日: {today}\n生成提案書: {created_proposals}件\nタスク: {created_tasks}件',
             )
     finally:
@@ -1829,7 +1829,7 @@ class PurchaseOrderProposalSubmitView(APIView):
 
         if level2_users and _route_stage_app_notification_enabled(route_config, 2):
             _create_notification(
-                title=f'発注提案書 承認依頼: {proposal.proposal_no}',
+                title=f'外作・購入品注文書 承認依頼: {proposal.proposal_no}',
                 description='班長承認待ちです。',
                 users=level2_users,
                 operator_name=_resolve_notification_operator_name(proposal, request.user),
@@ -1915,7 +1915,7 @@ class PurchaseOrderProposalApproveView(APIView):
         if next_level:
             if notify_users and _route_stage_app_notification_enabled(route_config, next_level):
                 _create_notification(
-                    title=f'発注提案書 承認依頼: {proposal.proposal_no}',
+                    title=f'外作・購入品注文書 承認依頼: {proposal.proposal_no}',
                     description=f'ステータスが {next_status} になりました。',
                     users=notify_users,
                     operator_name=_resolve_notification_operator_name(proposal, request.user),
@@ -1931,7 +1931,7 @@ class PurchaseOrderProposalApproveView(APIView):
             result_users = _get_purchase_approval_result_users(route_config, proposal)
             if route_config.approved_result_app_notification_enabled:
                 _create_notification(
-                    title=f'発注提案書 承認完了: {proposal.proposal_no}',
+                    title=f'外作・購入品注文書 承認完了: {proposal.proposal_no}',
                     description='最終承認済みです。注文書作成を行ってください。',
                     users=result_users,
                     operator_name=_resolve_notification_operator_name(proposal, request.user),
@@ -2009,7 +2009,7 @@ class PurchaseOrderProposalRejectView(APIView):
                 )
 
         _create_notification(
-            title=f'発注提案書 差戻: {proposal.proposal_no}',
+            title=f'外作・購入品注文書 差戻: {proposal.proposal_no}',
             description=comment,
             users=notify_users,
             operator_name=_resolve_notification_operator_name(proposal, request.user),
@@ -2077,7 +2077,7 @@ class PurchaseOrderProposalCancelView(APIView):
             _mark_all_pending_tasks_skipped(proposal)
 
         _create_notification(
-            title=f'発注提案書 キャンセル: {proposal.proposal_no}',
+            title=f'外作・購入品注文書 キャンセル: {proposal.proposal_no}',
             description=comment,
             users=notify_users,
             operator_name=_resolve_notification_operator_name(proposal, request.user),

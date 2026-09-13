@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">発注提案書一覧 <DataSourceDialog title="" :sources="dsSources" /></h1>
+      <h1 class="page-title">外作・購入品注文書一覧 <DataSourceDialog title="" :sources="dsSources" /></h1>
       <div class="page-actions">
         <button class="btn-primary" @click="fetchList">更新</button>
         <button class="btn-success" @click="openCreateDialog">新規作成</button>
@@ -89,7 +89,7 @@
 
     <div v-if="showDialog" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-content">
-        <h2>発注提案書作成</h2>
+        <h2>外作・購入品注文書作成</h2>
         <form @submit.prevent="createProposal">
           <div class="form-group">
             <label>仕入先 *</label>
@@ -133,7 +133,7 @@ import { authState } from '@/auth'
 const router = useRouter()
 const dsSources = [
   { section: '提案書管理' },
-  { op: '提案書 読み書き', table: 'purchase_order_proposal', desc: '発注提案書ヘッダ（仕入先・発注日・ステータス）' },
+  { op: '提案書 読み書き', table: 'purchase_order_proposal', desc: '外作・購入品注文書ヘッダ（仕入先・発注日・ステータス）' },
   { op: '提案書明細 読み書き', table: 'purchase_order_proposal_line', desc: '提案書の品目明細（製品・数量・在庫スナップショット）' },
   { op: '承認 読み書き', table: 'purchase_order_proposal_approval', desc: '承認履歴' },
   { op: 'タスク 読み書き', table: 'purchase_order_task', desc: '発注タスク（承認依頼・発注指示等）' },

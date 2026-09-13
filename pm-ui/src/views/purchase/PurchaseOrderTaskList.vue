@@ -22,7 +22,7 @@
           <label>タスク種別</label>
           <select v-model="filters.task_type">
             <option value="">すべて</option>
-            <option value="CREATE_PROPOSAL">発注提案書作成</option>
+            <option value="CREATE_PROPOSAL">外作・購入品注文書作成</option>
             <option value="CREATE_ORDER_PDF">注文書作成</option>
             <option value="APPROVE_L2">班長承認</option>
             <option value="APPROVE_L3">係長承認</option>
@@ -91,7 +91,7 @@ const filters = ref({
 })
 
 const taskTypeMap = {
-  CREATE_PROPOSAL: '発注提案書作成',
+  CREATE_PROPOSAL: '外作・購入品注文書作成',
   CREATE_ORDER_PDF: '注文書作成',
   APPROVE_L2: '班長承認',
   APPROVE_L3: '係長承認',

@@ -87,7 +87,7 @@ const purchase = [
     path: "/purchase/order-proposals",
     name: "PurchaseOrderProposalList",
     component: () => import("@/views/purchase/PurchaseOrderProposalList.vue"),
-    meta: { pageTitle: "発注提案書一覧", resource: "purchase.order_proposals" },
+    meta: { pageTitle: "外作・購入品注文書一覧", resource: "purchase.order_proposals" },
   },
   {
     path: "/purchase/order-tasks",
@@ -99,7 +99,7 @@ const purchase = [
     path: "/purchase/order-proposals/:id",
     name: "PurchaseOrderProposalDetail",
     component: () => import("@/views/purchase/PurchaseOrderProposalDetail.vue"),
-    meta: { pageTitle: "発注提案書詳細", resource: "purchase.order_proposals" },
+    meta: { pageTitle: "外作・購入品注文書詳細", resource: "purchase.order_proposals" },
   },
   {
     path: "/purchase/auto-delivery-list",

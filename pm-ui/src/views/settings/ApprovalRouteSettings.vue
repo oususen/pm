@@ -176,7 +176,7 @@ const roleOptions = [
 
 const businessOptions = [
   { key: 'laser_material_order', label: 'レーザー材料発注' },
-  { key: 'purchase_order_proposal', label: '発注提案' },
+  { key: 'purchase_order_proposal', label: '外作・購入品注文' },
 ]
 
 const userLabel = (user) => {

@@ -112,7 +112,7 @@ const filters = ref({
 })
 
 const purchaseTaskTypeMap = {
-  CREATE_PROPOSAL: "発注提案書作成",
+  CREATE_PROPOSAL: "外作・購入品注文書作成",
   CREATE_ORDER_PDF: "注文書作成",
   APPROVE_L2: "班長承認",
   APPROVE_L3: "係長承認",
@@ -181,7 +181,7 @@ const normalizePurchaseTask = (row) => {
     module_code: "PURCHASE",
     module_label: "購買",
     task_category: "PURCHASE_ORDER",
-    task_category_label: "発注提案",
+    task_category_label: "外作・購入品注文",
     task_type: row.task_type,
     task_type_label: purchaseTaskTypeMap[row.task_type] || row.task_type,
     status: row.status,

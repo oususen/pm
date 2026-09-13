@@ -1,7 +1,7 @@
 <template>
   <div class="page-container" v-if="proposal">
     <div class="page-header">
-      <h1 class="page-title">発注提案書詳細: {{ proposal.proposal_no }}</h1>
+      <h1 class="page-title">外作・購入品注文書詳細: {{ proposal.proposal_no }}</h1>
       <div class="page-actions">
         <button class="btn-secondary" @click="goBack">一覧へ戻る</button>
         <button class="btn-primary" @click="fetchDetail">更新</button>
@@ -483,7 +483,7 @@ const deleteProposal = async () => {
     alert('DRAFTのみ削除できます')
     return
   }
-  if (!window.confirm('この発注提案を削除します。よろしいですか？')) {
+  if (!window.confirm('この注文書を削除します。よろしいですか？')) {
     return
   }
   try {
@@ -527,7 +527,7 @@ const cancelProposal = async () => {
     alert('キャンセル権限がありません（事業部長または代理承認者のみ）')
     return
   }
-  if (!window.confirm('この発注提案をキャンセルします。よろしいですか？')) {
+  if (!window.confirm('この注文書をキャンセルします。よろしいですか？')) {
     return
   }
   const comment = window.prompt('キャンセル理由（任意）', '') || ''
