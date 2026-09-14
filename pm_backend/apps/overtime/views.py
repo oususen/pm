@@ -106,20 +106,43 @@ def _has_open_process_session(user):
     """
     ProcessWorkSession の未終了判定。
     旧データ向けに operator_name の表記ゆれ比較も行う。
+    戻り値: (bool, list[dict]) — 未終了有無と、未終了セッションの詳細リスト
     """
     if not user:
-        return False
+        return False, []
     candidate_names = _build_operator_name_variants(user)
     if not candidate_names:
-        return False
+        return False, []
+
+    _DETAIL_FIELDS = [
+        'id', 'plan_date',
+        'process__process_code', 'process__process_name',
+        'product_code', 'product__product_name',
+        'operator_name',
+    ]
+
+    def _build_open_items(qs):
+        items = []
+        for s in qs.values(*_DETAIL_FIELDS):
+            plan_date = s.get('plan_date')
+            items.append({
+                'id': s.get('id'),
+                'plan_date': plan_date.isoformat() if hasattr(plan_date, 'isoformat') else str(plan_date or ''),
+                'process_name': s.get('process__process_name') or '',
+                'product_code': s.get('product_code') or '',
+                'product_name': s.get('product__product_name') or '',
+                'equipment_name': '',
+            })
+        return items
 
     # まずは既存の完全一致で高速判定
-    if ProcessWorkSession.objects.filter(
+    exact_qs = ProcessWorkSession.objects.filter(
         session_type='WORK',
         status='OPEN',
         operator_name__in=candidate_names,
-    ).exists():
-        return True
+    )
+    if exact_qs.exists():
+        return True, _build_open_items(exact_qs)
 
     # 表記ゆれ吸収判定（括弧・空白差分）
     candidate_keys = {_normalize_operator_text(name) for name in candidate_names if name}
@@ -128,11 +151,12 @@ def _has_open_process_session(user):
         for name in candidate_names
         if _normalize_ascii_token(name)
     }
-    open_rows = ProcessWorkSession.objects.filter(
+    open_qs = ProcessWorkSession.objects.filter(
         session_type='WORK',
         status='OPEN',
-    ).values('operator_name', 'start_record__operator_name', 'end_record__operator_name')
-    for row in open_rows:
+    )
+    matched_ids = []
+    for row in open_qs.values('id', 'operator_name', 'start_record__operator_name', 'end_record__operator_name'):
         for operator_name in (
             row.get('operator_name'),
             row.get('start_record__operator_name'),
@@ -140,11 +164,15 @@ def _has_open_process_session(user):
         ):
             normalized = _normalize_operator_text(operator_name)
             if normalized in candidate_keys:
-                return True
+                matched_ids.append(row['id'])
+                break
             ascii_key = _normalize_ascii_token(operator_name)
             if ascii_key and len(ascii_key) >= 6 and ascii_key in candidate_ascii_keys:
-                return True
-    return False
+                matched_ids.append(row['id'])
+                break
+    if matched_ids:
+        return True, _build_open_items(open_qs.filter(id__in=matched_ids))
+    return False, []
 
 
 def _has_open_brake_or_spot_action(user):
@@ -535,12 +563,13 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
                 {'detail': '下書きまたは却下された申請のみ提出できます。'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        has_open_session = _has_open_process_session(app.applicant)
+        has_open_session, session_open_items = _has_open_process_session(app.applicant)
         if has_open_session:
             return Response(
                 {
                     'detail_code': 'overtime.error.openProcessSession',
-                    'detail': '加工実績に未終了のセッションがあります。セッションを終了してから申請してください。'
+                    'detail': '加工実績（日報）で「終了」されていない作業があります。終了してから申請してください。',
+                    'open_items': session_open_items,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -549,7 +578,7 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     'detail_code': 'overtime.error.openBrakeSpotAction',
-                    'detail': 'ブレーキ・ナット実績に未終了のアクションがあります。終了してから申請してください。',
+                    'detail': 'ブレーキ・ナット実績で「終了」されていない作業があります。終了してから申請してください。',
                     'open_items': open_items,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
