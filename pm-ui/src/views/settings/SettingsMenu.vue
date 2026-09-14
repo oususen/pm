@@ -40,7 +40,7 @@ const SECTION_ORDER = ["user", "lock", "production", "task", "kubota", "system"]
 const SECTION_LABELS = {
   user: "ユーザー・権限",
   lock: "日数設定",
-  production: "生産",
+  production: "承認・送信",
   task: "タスク・自動化",
   kubota: "クボタ堺",
   system: "システム",
