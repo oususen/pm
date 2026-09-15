@@ -1013,6 +1013,7 @@ const selectAllPatterns = () => {
 const allDates = ref([]);
 const days = computed(() => allDates.value.slice(0, 10));
 const allDays = computed(() => allDates.value);
+const weekStartKey = (dateKey) => monday(dateKey);
 const number = (value, digits) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(digits) : "";
@@ -1045,11 +1046,16 @@ const hours = (day, machine) => {
   return sum.toFixed(2).replace(/\.00$/, "");
 };
 const weekGroups = computed(() => {
-  const allDays = days.value,
-    groups = [];
-  for (let i = 0; i < allDays.length; i += 5) {
-    const w = allDays.slice(i, i + 5);
-    if (w.length) groups.push({ key: w[0], days: w });
+  const groups = [];
+  const groupMap = new Map();
+  for (const day of days.value) {
+    const key = weekStartKey(day);
+    if (!groupMap.has(key)) {
+      const group = { key, days: [] };
+      groupMap.set(key, group);
+      groups.push(group);
+    }
+    groupMap.get(key).days.push(day);
   }
   return groups;
 });
