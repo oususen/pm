@@ -2587,7 +2587,7 @@ const tableMinWidth = computed(() => {
 
 const loadTableMinWidth = computed(() => {
   const fixedColsWidth = 180
-  const perDayWidth = 80
+  const perDayWidth = 120
   return fixedColsWidth + visibleDateColumns.value.length * perDayWidth
 })
 
@@ -7724,7 +7724,7 @@ thead .sticky-col {
 .load-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
 }
 .load-table th,
 .load-table td {
@@ -7743,18 +7743,19 @@ thead .sticky-col {
   background: #e7edf7;
 }
 .load-cell {
-  position: relative;
   min-height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-right: 18px;
+  gap: 4px;
+}
+.load-cell .readonly-value {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 3px 0;
 }
 .load-target-add-btn {
-  position: absolute;
-  right: 2px;
-  top: 50%;
-  transform: translateY(-50%);
+  flex: 0 0 auto;
   width: 16px;
   height: 16px;
   border: 1px solid #93c5fd;
@@ -7767,9 +7768,7 @@ thead .sticky-col {
   padding: 0;
 }
 .load-target-count {
-  position: absolute;
-  left: 2px;
-  top: 2px;
+  flex: 0 0 auto;
   min-width: 14px;
   padding: 0 3px;
   border-radius: 999px;
