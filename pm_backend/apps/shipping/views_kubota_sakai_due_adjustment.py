@@ -1174,7 +1174,51 @@ def _send_due_adjustment_notification(changed_items, user, change_reason):
         td = "style='padding:4px 10px;border:1px solid #d0d8f0'"
         td_r = "style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right'"
 
-        rows_html = []
+        # --- 合計表: 品番・日付・納入地でグループ化し差分を合算 ---
+        summary_map = defaultdict(lambda: {'before': 0, 'after': 0})
+        for item in changed_items:
+            key = (item['product_code'], item['due_date'], item['ship_to_code'])
+            summary_map[key]['before'] += int(item['before_qty'])
+            summary_map[key]['after'] += int(item['after_qty'])
+
+        summary_rows_html = []
+        for (product_code, due_date, ship_to_code), vals in sorted(summary_map.items()):
+            diff = vals['after'] - vals['before']
+            if diff == 0:
+                continue
+            sign = '+' if diff > 0 else ''
+            diff_color = '#c00' if diff > 0 else '#0066cc'
+            td_diff = f"style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right;color:{diff_color};font-weight:600'"
+            summary_rows_html.append(
+                f"<tr>"
+                f"<td {td}>{product_code}</td>"
+                f"<td {td}>{due_date}</td>"
+                f"<td {td}>{ship_to_code}</td>"
+                f"<td {td_r}>{vals['before']:,}</td>"
+                f"<td {td_r}>{vals['after']:,}</td>"
+                f"<td {td_diff}>{sign}{diff:,}</td>"
+                f"</tr>"
+            )
+
+        summary_html = ""
+        if summary_rows_html:
+            summary_html = (
+                "<p style='font-weight:600;margin:8px 0 4px'>■ 合計</p>"
+                "<table style='border-collapse:collapse;font-size:0.9em'>"
+                f"<thead><tr style='background:#dde6ff'>"
+                f"<th {th}>品番</th>"
+                f"<th {th}>日付</th>"
+                f"<th {th}>納入地</th>"
+                f"<th {th}>変更前</th>"
+                f"<th {th}>変更後</th>"
+                f"<th {th}>差分</th>"
+                "</tr></thead>"
+                "<tbody>" + "".join(summary_rows_html) + "</tbody>"
+                "</table>"
+            )
+
+        # --- 明細表: 各行の変更詳細 ---
+        detail_rows_html = []
         for item in changed_items:
             before = int(item['before_qty'])
             after = int(item['after_qty'])
@@ -1182,7 +1226,7 @@ def _send_due_adjustment_notification(changed_items, user, change_reason):
             sign = '+' if diff > 0 else ''
             diff_color = '#c00' if diff > 0 else '#0066cc'
             td_diff = f"style='padding:4px 10px;border:1px solid #d0d8f0;text-align:right;color:{diff_color};font-weight:600'"
-            rows_html.append(
+            detail_rows_html.append(
                 f"<tr>"
                 f"<td {td}>{item['product_code']}</td>"
                 f"<td {td}>{item['due_date']}</td>"
@@ -1197,9 +1241,8 @@ def _send_due_adjustment_notification(changed_items, user, change_reason):
         if change_reason:
             reason_html = f"<p>変更理由: {change_reason}</p>"
 
-        description = (
-            f"<p>調整者: {operator}</p>"
-            f"{reason_html}"
+        detail_html = (
+            "<p style='font-weight:600;margin:16px 0 4px'>▼ 明細</p>"
             "<table style='border-collapse:collapse;font-size:0.9em'>"
             f"<thead><tr style='background:#dde6ff'>"
             f"<th {th}>品番</th>"
@@ -1209,8 +1252,15 @@ def _send_due_adjustment_notification(changed_items, user, change_reason):
             f"<th {th}>変更後</th>"
             f"<th {th}>差分</th>"
             "</tr></thead>"
-            "<tbody>" + "".join(rows_html) + "</tbody>"
+            "<tbody>" + "".join(detail_rows_html) + "</tbody>"
             "</table>"
+        )
+
+        description = (
+            f"<p>調整者: {operator}</p>"
+            f"{reason_html}"
+            f"{summary_html}"
+            f"{detail_html}"
         )
 
         today = date.today()
