@@ -1011,9 +1011,20 @@ const selectAllPatterns = () => {
   );
 };
 const allDates = ref([]);
-const days = computed(() => allDates.value.slice(0, 10));
 const allDays = computed(() => allDates.value);
 const weekStartKey = (dateKey) => monday(dateKey);
+const days = computed(() => {
+  const base = allDates.value.slice(0, 10);
+  const lastDay = base[base.length - 1];
+  if (!lastDay) return base;
+  const lastWeekKey = weekStartKey(lastDay);
+  const extended = [...base];
+  for (const day of allDates.value.slice(base.length)) {
+    if (weekStartKey(day) !== lastWeekKey) break;
+    extended.push(day);
+  }
+  return extended;
+});
 const number = (value, digits) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(digits) : "";
