@@ -1113,9 +1113,6 @@ const patternProgressRaw = (pattern, upToDay) =>
   cumulativePatternValue(pattern, upToDay, "manual_sheets") -
   cumulativePatternValue(pattern, upToDay, "automatic_sheets");
 const patternProgressDisplayRaw = (pattern, upToDay) => {
-  if (!dirty.value && pattern.saved_progress?.[upToDay] !== undefined) {
-    return pattern.saved_progress[upToDay];
-  }
   return patternProgressRaw(pattern, upToDay);
 };
 const patternProgress = (pattern, upToDay) => {

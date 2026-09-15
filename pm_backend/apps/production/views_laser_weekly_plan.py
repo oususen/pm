@@ -1190,35 +1190,14 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
 
         return result
 
-    def _calc_auto_initial_progress(self, pattern_id, week_start_date, targets, pattern_manual_map, plan_map, order_map, target_demand_dates):
+    def _calc_auto_initial_progress(self, pattern_id, week_start_date):
         prev_start = week_start_date - timedelta(days=7)
-        prev_dates = [prev_start + timedelta(days=i) for i in range(7) if (prev_start + timedelta(days=i)).weekday() < 5]
-        if not prev_dates:
-            return 0
-        prev_locked = LaserWeeklyPatternInitialProgress.objects.filter(
-            laser_pattern_id=pattern_id, week_start_date=prev_start, is_locked=True,
-        ).first()
-        prev_initial = float(prev_locked.initial_progress) if prev_locked else 0
-        cum_auto = 0
-        cum_manual = 0
-        pattern_targets = [t for t in targets if t.laser_pattern_id == pattern_id]
-        for day in prev_dates:
-            day_auto = 0
-            for target in pattern_targets:
-                take = next((x.units_per_shot for x in target.laser_pattern.finished_items.all() if x.finished_product_id == target.finished_product_id), None)
-                if not take or take <= 0:
-                    continue
-                demand_date = target_demand_dates.get((target.id, day))
-                if demand_date is None:
-                    continue
-                key = (target.downstream_line_id, target.product_id, demand_date)
-                qty = plan_map[key] if target.quantity_source == 'PLAN_QTY' else order_map[key]
-                sheets = int((qty / take).to_integral_value(rounding=ROUND_CEILING)) if qty > 0 else 0
-                day_auto += sheets
-            cum_auto += day_auto
-            manual = pattern_manual_map.get((pattern_id, day), day_auto)
-            cum_manual += manual
-        return prev_initial + cum_manual - cum_auto
+        last_day = LaserWeeklyPatternDailyProgress.objects.filter(
+            laser_pattern_id=pattern_id,
+            progress_date__gte=prev_start,
+            progress_date__lt=week_start_date,
+        ).order_by('-progress_date').first()
+        return float(last_day.progress) if last_day else 0
 
     def list(self, request):
         try:
@@ -1394,10 +1373,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 pattern_row['initial_progress'] = float(saved.initial_progress)
                 pattern_row['initial_progress_locked'] = True
             else:
-                auto_val = self._calc_auto_initial_progress(
-                    pid, start_date, targets, pattern_manual_map,
-                    plan_map, order_map, target_demand_dates,
-                )
+                auto_val = self._calc_auto_initial_progress(pid, start_date)
                 pattern_row['initial_progress'] = auto_val
                 pattern_row['initial_progress_locked'] = False
 
