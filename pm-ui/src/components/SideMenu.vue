@@ -96,6 +96,14 @@ const sections = [
     ],
   },
   {
+    id: "overtime",
+    title: "勤務管理",
+    items: [
+      { label: "勤務メニュー", link: "/overtime/menu" },
+      { label: "シフトチャート", link: "/shifts/chart" },
+    ],
+  },
+  {
     id: "masters",
     title: "マスタメンテ",
     items: [

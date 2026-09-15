@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     'overtime',
     'system_settings',
     'outsource',
+    'shifts',
 ]
 
 MIDDLEWARE = [

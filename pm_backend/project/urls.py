@@ -33,6 +33,7 @@ urlpatterns = [
     path('api/', include('overtime.urls')),
     path('api/', include('system_settings.urls')),
     path('api/', include('outsource.urls')),
+    path('api/', include('shifts.urls')),
 ]
 
 if settings.DEBUG:

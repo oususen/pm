@@ -85,6 +85,7 @@ import { createActualCycleTimesAPI } from './resources/actualCycleTimes'
 import { createProgressPdfCompareAPI } from './resources/progressPdfCompare'
 import { createSourcingBulkChangeAPI } from './resources/sourcingBulkChange'
 import { createProductionLockAPI } from './resources/productionLock'
+import { createShiftsAPI } from './resources/shifts'
 
 // ベースURL決定: 環境変数があれば最優先。なければ現在のホスト:8000 → :8081 → localhost。
 const API_BASE_URL =
@@ -245,5 +246,6 @@ export default {
   progressPdfCompare: createProgressPdfCompareAPI(client),
   sourcingBulkChange: createSourcingBulkChangeAPI(client),
   productionLock: createProductionLockAPI(client),
+  shifts: createShiftsAPI(client),
   client,
 }

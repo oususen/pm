@@ -33,6 +33,11 @@
         <div class="menu-label">加工費集計</div>
         <div class="menu-desc">日別と期間集計で加工費を確認する</div>
       </RouterLink>
+      <RouterLink to="/shifts/chart" class="menu-card shift-card">
+        <div class="menu-icon">📅</div>
+        <div class="menu-label">シフトチャート</div>
+        <div class="menu-desc">ライン別のシフト配置を管理する</div>
+      </RouterLink>
     </div>
   </div>
 </template>
@@ -117,6 +122,13 @@ onMounted(async () => {
 .productivity-card:hover {
   border-color: #0e7490;
   box-shadow: 0 4px 12px rgba(8, 145, 178, 0.15);
+}
+.shift-card {
+  border-color: #17365d;
+}
+.shift-card:hover {
+  border-color: #0f2440;
+  box-shadow: 0 4px 12px rgba(23, 54, 93, 0.15);
 }
 .menu-icon {
   font-size: 40px;
