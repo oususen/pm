@@ -56,6 +56,16 @@ from .views import (
     PurchaseReceivingHistoryView,
     PurchaseReceivingView,
 )
+from .views_discontinuation import (
+    DiscontinuationBomLookupView,
+    DiscontinuationCaseDetailView,
+    DiscontinuationCaseListCreateView,
+    DiscontinuationPartAddView,
+    DiscontinuationPartDetailView,
+    DiscontinuationProductAddView,
+    DiscontinuationProductDetailView,
+    DiscontinuationProductRecalculateView,
+)
 from .views_truck_load_check import (
     PurchaseAutoOrderSendTruckLoadCheckCancelView,
     PurchaseAutoOrderSendTruckLoadCheckView,
@@ -117,4 +127,13 @@ urlpatterns = [
     path('purchase-auto-order-send-truck-load-check/cancel/', PurchaseAutoOrderSendTruckLoadCheckCancelView.as_view(), name='purchase-auto-order-send-truck-load-check-cancel'),
     path('purchase-actual-kikan-mapping/', PurchaseActualKikanMappingView.as_view(), name='purchase-actual-kikan-mapping'),
     path('purchase-actual-kikan-mapping/candidates/', PurchaseActualKikanMappingCandidatesView.as_view(), name='purchase-actual-kikan-mapping-candidates'),
+    # 打ち切り管理
+    path('discontinuations/', DiscontinuationCaseListCreateView.as_view(), name='discontinuation-list-create'),
+    path('discontinuations/<int:pk>/', DiscontinuationCaseDetailView.as_view(), name='discontinuation-detail'),
+    path('discontinuations/<int:case_id>/products/', DiscontinuationProductAddView.as_view(), name='discontinuation-product-add'),
+    path('discontinuation-products/<int:pk>/recalculate/', DiscontinuationProductRecalculateView.as_view(), name='discontinuation-product-recalculate'),
+    path('discontinuation-products/<int:disc_product_id>/parts/', DiscontinuationPartAddView.as_view(), name='discontinuation-part-add'),
+    path('discontinuation-products/<int:pk>/', DiscontinuationProductDetailView.as_view(), name='discontinuation-product-detail'),
+    path('discontinuation-parts/<int:pk>/', DiscontinuationPartDetailView.as_view(), name='discontinuation-part-detail'),
+    path('discontinuation-bom-lookup/', DiscontinuationBomLookupView.as_view(), name='discontinuation-bom-lookup'),
 ]

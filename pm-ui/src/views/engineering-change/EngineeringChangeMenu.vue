@@ -20,6 +20,10 @@
         <div class="icon-box">🔁</div>
         <div class="label">設変タイル</div>
       </RouterLink>
+      <RouterLink to="/engineering-change/discontinuation" class="master-tile">
+        <div class="icon-box">🚫</div>
+        <div class="label">打ち切り管理</div>
+      </RouterLink>
     </div>
 
     <p class="helper-text">打ち切り製品の設変部品に対する過剰仕入れ・過剰生産を管理します。</p>

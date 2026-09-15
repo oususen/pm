@@ -324,6 +324,56 @@ class EngineeringChangePart(models.Model):
         ]
 
 
+class DiscontinuationCase(models.Model):
+    """打ち切り案件"""
+    case_code = models.CharField(max_length=30, unique=True, verbose_name='案件コード')
+    title = models.CharField(max_length=200, verbose_name='案件名')
+    end_date = models.DateField(null=True, blank=True, verbose_name='終了時期')
+    note = models.TextField(blank=True, default='', verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'discontinuation_case'
+        indexes = [
+            models.Index(fields=['end_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.case_code} {self.title}'
+
+
+class DiscontinuationProduct(models.Model):
+    """打ち切り完成品"""
+    case = models.ForeignKey(DiscontinuationCase, on_delete=models.CASCADE, related_name='products')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='discontinuation_products', verbose_name='完成品')
+    end_date = models.DateField(null=True, blank=True, verbose_name='打ち切り時期')
+    note = models.CharField(max_length=255, blank=True, default='', verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'discontinuation_product'
+        indexes = [
+            models.Index(fields=['product']),
+        ]
+
+
+class DiscontinuationPart(models.Model):
+    """打ち切り構成品"""
+    disc_product = models.ForeignKey(DiscontinuationProduct, on_delete=models.CASCADE, related_name='parts')
+    part = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='discontinuation_parts', verbose_name='構成品')
+    note = models.CharField(max_length=255, blank=True, default='', verbose_name='備考')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'discontinuation_part'
+        indexes = [
+            models.Index(fields=['part']),
+        ]
+
+
 class PurchaseAutoDeliveryListConfig(models.Model):
     """自動納入リスト送信設定"""
     STATUS_CHOICES = [

@@ -17,6 +17,12 @@ const engineeringChange = [
     component: () => import("@/views/engineering-change/EngineeringChangeTile.vue"),
     meta: { pageTitle: "設変タイル", manualPath: "設変/設変管理.md", resource: "engineering_change" },
   },
+  {
+    path: "/engineering-change/discontinuation",
+    name: "DiscontinuationManagement",
+    component: () => import("@/views/engineering-change/DiscontinuationManagement.vue"),
+    meta: { pageTitle: "打ち切り管理", resource: "engineering_change" },
+  },
 ];
 
 export default engineeringChange;

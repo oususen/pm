@@ -44,6 +44,7 @@ import { createLaserProcessingFreqPatternsAPI } from './resources/laserProcessin
 import { createLaserActualsAPI } from './resources/laserActuals'
 import { createLaserShiftRecordsAPI } from './resources/laserShiftRecords'
 import { createLaserWeeklyPlansAPI } from './resources/laserWeeklyPlans'
+import { createDiscontinuationsAPI } from './resources/discontinuations'
 import { createEngineeringChangesAPI } from './resources/engineeringChanges'
 import { createPurchaseActualsAPI } from './resources/purchaseActuals'
 import { createFujishojiDocumentAPI } from './resources/fujishojiDocument'
@@ -201,6 +202,7 @@ export default {
   laserActuals: createLaserActualsAPI(client),
   laserShiftRecords: createLaserShiftRecordsAPI(client),
   laserWeeklyPlans: createLaserWeeklyPlansAPI(client),
+  discontinuations: createDiscontinuationsAPI(client),
   engineeringChanges: createEngineeringChangesAPI(client),
   purchaseActuals: createPurchaseActualsAPI(client),
   fujishojiDocument: createFujishojiDocumentAPI(client),
