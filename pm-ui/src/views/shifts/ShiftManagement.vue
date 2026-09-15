@@ -37,8 +37,8 @@
         <select v-model="entryWorkerId" @change="syncStartFromChart">
           <option v-for="w in currentWorkers" :key="w.id" :value="w.id">{{ w.name }}</option>
         </select>
-        <select v-model="entryProcessId">
-          <option v-for="p in currentLineProcesses" :key="p.id" :value="p.process">{{ p.process_name }}</option>
+        <select v-model="entryLineProcessId">
+          <option v-for="p in currentLineProcesses" :key="p.id" :value="p.id">{{ p.process_name }}</option>
         </select>
         <label><span class="field-label">開始</span><input v-model="entryStart" type="time" @change="updateEndPreview" /></label>
         <label><span class="field-label">実働</span>
@@ -171,12 +171,20 @@
 
       <section class="card panel">
         <div class="panelhead">
-          <h2>工程設定（{{ currentLineName }}）</h2>
-          <button class="btn" @click="showProcessPicker = true">＋追加</button>
+          <h2>工程・活動設定（{{ currentLineName }}）</h2>
+          <div class="panelhead-actions">
+            <button class="btn" @click="showProcessPicker = true">＋工程</button>
+            <button class="btn activity-btn" @click="addActivity">＋活動</button>
+          </div>
         </div>
         <div v-for="lp in currentLineProcesses" :key="lp.id" class="mrow proc">
           <input type="color" class="color-pick" :value="lp.color" @change="updateLineProcess(lp.id, 'color', $event.target.value)" />
-          <span><i class="color-dot" :style="{ background: lp.color }"></i>{{ lp.process_name }}（{{ lp.process_code }}）</span>
+          <span v-if="!lp.is_activity"><i class="color-dot" :style="{ background: lp.color }"></i>{{ lp.process_name }}（{{ lp.process_code }}）</span>
+          <span v-else class="activity-name-row">
+            <i class="color-dot" :style="{ background: lp.color }"></i>
+            <input class="activity-name-input" :value="lp.process_name" placeholder="活動名を入力" @change="updateLineProcess(lp.id, 'custom_name', $event.target.value)" />
+            <small class="activity-tag">活動</small>
+          </span>
           <button class="del" @click="deleteLineProcess(lp.id)">削除</button>
         </div>
       </section>
@@ -237,6 +245,7 @@ const entryBox = ref(null)
 const editingId = ref(null)
 const entryWorkerId = ref(null)
 const entryProcessId = ref(null)
+const entryLineProcessId = ref(null)
 const entryStart = ref('08:00')
 const entryWorkHours = ref(2)
 const entryUnits = ref(10)
@@ -269,7 +278,14 @@ const currentWorkers = computed(() => currentLine.value?.workers || [])
 const currentLineProcesses = computed(() => currentLine.value?.line_processes || [])
 const processMap = computed(() => {
   const m = {}
-  for (const lp of currentLineProcesses.value) m[lp.process] = lp
+  for (const lp of currentLineProcesses.value) {
+    if (lp.process) m[lp.process] = lp
+  }
+  return m
+})
+const lineProcessMap = computed(() => {
+  const m = {}
+  for (const lp of currentLineProcesses.value) m[lp.id] = lp
   return m
 })
 
@@ -450,6 +466,12 @@ function netDuration(a) {
   return Math.max(0, mins) / 60
 }
 
+function resolveLP(a) {
+  if (a.line_process) return lineProcessMap.value[a.line_process]
+  if (a.process) return processMap.value[a.process]
+  return null
+}
+
 // --- チャート描画 ---
 const chartHtml = computed(() => {
   void renderNeeded.value
@@ -476,7 +498,7 @@ const chartHtml = computed(() => {
     h += ticks.map(t => `<i class="gridline" style="left:${(t - sm) / total * 100}%"></i>`).join('')
 
     for (const a of active.filter(x => x.worker === w.id)) {
-      const p = processMap.value[a.process]
+      const p = resolveLP(a)
       if (!p) continue
       const s = absMinute(a.start_time, sm)
       let e = endFromWorkHoursCalc(a.start_time, +a.work_hours, a.worker, a.date, sm, a.id)
@@ -509,8 +531,11 @@ const statsHtml = computed(() => {
   let h = `<article class="card final-summary"><small>このラインの最終終了時刻</small><strong>${finalText}</strong><span>${active.length ? active.length + '件の配置から自動計算' : '配置を追加すると表示されます'}</span></article>`
 
   for (const p of currentLineProcesses.value) {
-    const placed = active.filter(a => a.process === p.process).reduce((s, a) => s + netDuration(a), 0)
-    const loadData = processLoads.value[String(p.process)]
+    const placed = active.filter(a => {
+      if (a.line_process) return a.line_process === p.id
+      return a.process && a.process === p.process
+    }).reduce((s, a) => s + netDuration(a), 0)
+    const loadData = p.process ? processLoads.value[String(p.process)] : null
     const req = loadData ? +loadData.load_hours : 0
     const d = placed - req
     const achieved = req <= 0 ? true : d >= -0.01
@@ -541,14 +566,14 @@ const weekPrintHtml = computed(() => {
       const jobs = weekAssignments.value.filter(a => a.shift_line === currentLineId.value && a.date === d && a.worker === w.id).sort((a, b) => absMinute(a.start_time, sm) - absMinute(b.start_time, sm))
       if (!jobs.length) { h += '<td>－</td>'; continue }
       const bars = jobs.map(a => {
-        const p = processMap.value[a.process] || { process_name: '不明', color: '#64748b' }
+        const p = resolveLP(a) || { process_name: '不明', color: '#64748b' }
         const s = absMinute(a.start_time, sm)
         const e = endFromWorkHoursCalc(a.start_time, +a.work_hours, a.worker, a.date, sm, a.id)
         const cs = Math.max(sm, s), ce = Math.min(em, e)
         return ce <= cs ? '' : `<div class="week-mini-bar" style="--bar-color:${p.color};background:${p.color};left:${(cs - sm) / total * 100}%;width:${Math.max(1, (ce - cs) / total * 100)}%">${esc(p.process_name)}</div>`
       }).join('')
       const details = jobs.map(a => {
-        const p = processMap.value[a.process] || { process_name: '不明' }
+        const p = resolveLP(a) || { process_name: '不明' }
         return `<div class="week-detail">${a.start_time}～${clockLabel(endFromWorkHoursCalc(a.start_time, +a.work_hours, a.worker, a.date, sm, a.id))}　${esc(p.process_name)}　${a.units || 0}台</div>`
       }).join('')
       h += `<td><div class="week-mini-row">${bars}</div>${details}</td>`
@@ -622,16 +647,18 @@ async function onLineChange() {
 
 // 配置操作
 async function submitAssignment() {
-  if (!entryWorkerId.value || !entryProcessId.value || !entryWorkHours.value) {
-    alert('作業者・工程・実働時間を入力してください')
+  if (!entryWorkerId.value || !entryLineProcessId.value || !entryWorkHours.value) {
+    alert('作業者・工程/活動・実働時間を入力してください')
     return
   }
   try {
+    const lp = lineProcessMap.value[entryLineProcessId.value]
     const payload = {
       shift_line: currentLineId.value,
       date: selectedDate.value,
       worker: entryWorkerId.value,
-      process: entryProcessId.value,
+      process: lp?.process || null,
+      line_process: entryLineProcessId.value,
       start_time: entryStart.value,
       work_hours: entryWorkHours.value,
       units: entryUnits.value || 0,
@@ -655,8 +682,8 @@ async function submitAssignment() {
 async function deleteAssignmentById(id) {
   const a = assignments.value.find(x => x.id === id)
   if (!a) return
-  const p = processMap.value[a.process]
-  if (!confirm((p ? p.process_name : 'この工程') + '（' + a.start_time + '）を削除しますか？')) return
+  const p = resolveLP(a)
+  if (!confirm((p ? p.process_name : 'この配置') + '（' + a.start_time + '）を削除しますか？')) return
   await api.shifts.deleteAssignment(id)
   await loadAssignments()
   syncStartFromChart()
@@ -667,6 +694,14 @@ function editAssignment(id) {
   if (!a) return
   editingId.value = id
   entryWorkerId.value = a.worker
+  if (a.line_process) {
+    entryLineProcessId.value = a.line_process
+  } else if (a.process) {
+    const lp = currentLineProcesses.value.find(p => p.process === a.process)
+    entryLineProcessId.value = lp ? lp.id : null
+  } else {
+    entryLineProcessId.value = null
+  }
   entryProcessId.value = a.process
   entryStart.value = a.start_time
   entryWorkHours.value = +a.work_hours
@@ -794,6 +829,19 @@ async function addLineProcess(masterProcess) {
   })
   showProcessPicker.value = false
   processSearch.value = ''
+  await loadLines()
+}
+
+async function addActivity() {
+  const name = prompt('活動名を入力してください（例: 掃除, 5S, 学習, 習熟）')
+  if (!name?.trim()) return
+  await api.shifts.createLineProcess({
+    shift_line: currentLineId.value,
+    process: null,
+    custom_name: name.trim(),
+    color: '#94a3b8',
+    sort_order: currentLineProcesses.value.length,
+  })
   await loadLines()
 }
 
@@ -985,7 +1033,7 @@ function buildChartPrintBody() {
     }
 
     for (const a of active.filter(x => x.worker === w.id)) {
-      const p = processMap.value[a.process]
+      const p = resolveLP(a)
       if (!p) continue
       const s = absMinute(a.start_time, sm)
       const e = endFromWorkHoursCalc(a.start_time, +a.work_hours, a.worker, a.date, sm, a.id)
@@ -1018,8 +1066,11 @@ function buildChartPrintBody() {
   h += `<div class="stat-box final-box"><div style="font-size:8px;opacity:.8">最終終了時刻</div><div class="final-time">${finalText}</div><div style="font-size:7px;opacity:.8">${active.length}件の配置</div></div>`
 
   for (const p of currentLineProcesses.value) {
-    const placed = active.filter(a => a.process === p.process).reduce((s, a) => s + netDuration(a), 0)
-    const loadData = processLoads.value[String(p.process)]
+    const placed = active.filter(a => {
+      if (a.line_process) return a.line_process === p.id
+      return a.process && a.process === p.process
+    }).reduce((s, a) => s + netDuration(a), 0)
+    const loadData = p.process ? processLoads.value[String(p.process)] : null
     const req = loadData ? +loadData.load_hours : 0
     const d = placed - req
     const achieved = req <= 0 ? true : d >= -0.01
@@ -1062,7 +1113,7 @@ function buildWeekPrintBody() {
       const jobs = weekAssignments.value.filter(a => a.shift_line === currentLineId.value && a.date === d && a.worker === w.id).sort((a, b) => absMinute(a.start_time, sm) - absMinute(b.start_time, sm))
       if (!jobs.length) { h += '<td style="color:#bcc5d3;text-align:center">－</td>'; continue }
       const bars = jobs.map(a => {
-        const p = processMap.value[a.process] || { process_name: '不明', color: '#64748b' }
+        const p = resolveLP(a) || { process_name: '不明', color: '#64748b' }
         const s = absMinute(a.start_time, sm)
         const e = endFromWorkHoursCalc(a.start_time, +a.work_hours, a.worker, a.date, sm, a.id)
         const cs = Math.max(sm, s), ce = Math.min(em, e)
@@ -1070,7 +1121,7 @@ function buildWeekPrintBody() {
         return `<div class="mini-bar" style="background:${p.color};left:${(cs - sm) / total * 100}%;width:${Math.max(1, (ce - cs) / total * 100)}%">${esc(p.process_name)}</div>`
       }).join('')
       const details = jobs.map(a => {
-        const p = processMap.value[a.process] || { process_name: '不明' }
+        const p = resolveLP(a) || { process_name: '不明' }
         return `<div class="mini-detail">${a.start_time}～${clockLabel(endFromWorkHoursCalc(a.start_time, +a.work_hours, a.worker, a.date, sm, a.id))} ${esc(p.process_name)} ${a.units || 0}台</div>`
       }).join('')
       h += `<td><div class="mini-row">${bars}</div>${details}</td>`
@@ -1111,6 +1162,7 @@ onMounted(async () => {
     entryWorkerId.value = currentWorkers.value[0].id
   }
   if (currentLineProcesses.value.length) {
+    entryLineProcessId.value = currentLineProcesses.value[0].id
     entryProcessId.value = currentLineProcesses.value[0].process
   }
   updateEndPreview()
@@ -1252,6 +1304,11 @@ input,select{border:1px solid #cbd5e1;border-radius:5px;padding:5px 7px;font-siz
 .mrow.proc{grid-template-columns:36px 1fr 55px;align-items:center}
 .color-pick{width:32px;height:32px;padding:2px;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;background:none}
 .color-dot{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.panelhead-actions{display:flex;gap:6px}
+.activity-btn{border-color:#6366f1;color:#4f46e5;background:#f5f3ff}
+.activity-name-row{display:flex;align-items:center;gap:4px;flex:1}
+.activity-name-input{border:1px dashed #a5b4fc;border-radius:4px;padding:4px 7px;font-size:13px;background:#fafafe;flex:1;min-width:80px}
+.activity-tag{background:#e0e7ff;color:#4338ca;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:bold;white-space:nowrap}
 .del{border:0;border-radius:6px;background:#fff1f1;color:#b42318;font-weight:bold;font-size:11px;padding:6px 10px}
 .mrow.line{grid-template-columns:1fr 75px 70px;border:1px solid transparent;border-radius:7px;padding:7px}
 .mrow.line.active{background:#eaf2ff;border-color:#285ea8}

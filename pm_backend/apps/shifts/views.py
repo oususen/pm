@@ -142,6 +142,7 @@ class ShiftAssignmentViewSet(viewsets.ModelViewSet):
                         shift_line_id=line_id,
                         worker=a.worker,
                         process=a.process,
+                        line_process=a.line_process,
                         date=target_date,
                         start_time=a.start_time,
                         work_hours=a.work_hours,

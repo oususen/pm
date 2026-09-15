@@ -54,14 +54,17 @@ class ShiftWorker(models.Model):
 
 
 class ShiftLineProcess(models.Model):
-    """勤務ライン×工程の紐付け（色・必要時間・表示順）"""
+    """勤務ライン×工程/活動の紐付け（色・必要時間・表示順）"""
     shift_line = models.ForeignKey(
         ShiftLine, on_delete=models.CASCADE, related_name='line_processes',
         verbose_name='勤務ライン'
     )
     process = models.ForeignKey(
         'masters.Process', on_delete=models.CASCADE,
-        verbose_name='工程'
+        null=True, blank=True, verbose_name='工程'
+    )
+    custom_name = models.CharField(
+        max_length=50, blank=True, default='', verbose_name='活動名'
     )
     color = models.CharField(max_length=7, default='#64748b', verbose_name='表示色')
     required_hours = models.DecimalField(
@@ -73,12 +76,17 @@ class ShiftLineProcess(models.Model):
 
     class Meta:
         ordering = ['sort_order', 'id']
-        unique_together = [('shift_line', 'process')]
         verbose_name = 'ライン工程設定'
         verbose_name_plural = 'ライン工程設定'
 
+    @property
+    def display_name(self):
+        if self.process:
+            return self.process.process_name
+        return self.custom_name or '（名称未設定）'
+
     def __str__(self):
-        return f'{self.shift_line.name} - {self.process.process_name}'
+        return f'{self.shift_line.name} - {self.display_name}'
 
 
 class ShiftAssignment(models.Model):
@@ -93,7 +101,11 @@ class ShiftAssignment(models.Model):
     )
     process = models.ForeignKey(
         'masters.Process', on_delete=models.CASCADE,
-        verbose_name='工程'
+        null=True, blank=True, verbose_name='工程'
+    )
+    line_process = models.ForeignKey(
+        ShiftLineProcess, on_delete=models.SET_NULL,
+        null=True, blank=True, verbose_name='ライン工程/活動'
     )
     date = models.DateField(verbose_name='日付')
     start_time = models.TimeField(verbose_name='開始時刻')

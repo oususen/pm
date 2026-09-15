@@ -16,12 +16,28 @@ class ShiftWorkerSerializer(serializers.ModelSerializer):
 
 
 class ShiftLineProcessSerializer(serializers.ModelSerializer):
-    process_name = serializers.CharField(source='process.process_name', read_only=True)
-    process_code = serializers.CharField(source='process.process_code', read_only=True)
+    process_name = serializers.SerializerMethodField()
+    process_code = serializers.SerializerMethodField()
+    is_activity = serializers.SerializerMethodField()
 
     class Meta:
         model = ShiftLineProcess
         fields = '__all__'
+
+    def get_process_name(self, obj):
+        """生産工程ならマスタ名、活動ならcustom_name"""
+        if obj.process:
+            return obj.process.process_name
+        return obj.custom_name or ''
+
+    def get_process_code(self, obj):
+        if obj.process:
+            return obj.process.process_code
+        return ''
+
+    def get_is_activity(self, obj):
+        """活動（非生産工程）かどうか"""
+        return obj.process is None
 
 
 class ShiftLineSerializer(serializers.ModelSerializer):
@@ -35,11 +51,18 @@ class ShiftLineSerializer(serializers.ModelSerializer):
 
 class ShiftAssignmentSerializer(serializers.ModelSerializer):
     worker_name = serializers.CharField(source='worker.name', read_only=True)
-    process_name = serializers.CharField(source='process.process_name', read_only=True)
+    process_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ShiftAssignment
         fields = '__all__'
+
+    def get_process_name(self, obj):
+        if obj.process:
+            return obj.process.process_name
+        if obj.line_process:
+            return obj.line_process.display_name
+        return ''
 
 
 class ShiftAssignmentBulkSerializer(serializers.Serializer):
