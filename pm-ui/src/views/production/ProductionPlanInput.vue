@@ -76,24 +76,25 @@
         excel
       </button>
     </div>
-    <div v-else-if="activePlanTab === 'floor-shipping'" class="laser-subtab-bar">
+    <div v-else-if="showsPlanBasisSwitch" class="laser-subtab-bar">
       <button
         type="button"
         class="laser-subtab-item"
-        :class="{ active: activeFloorShippingTab === 'inventory' }"
-        @click="activeFloorShippingTab = 'inventory'"
+        :class="{ active: activePlanBasisMode === 'inventory' }"
+        @click="setPlanBasisMode('inventory')"
       >
         在庫基準
       </button>
       <button
         type="button"
         class="laser-subtab-item"
-        :class="{ active: activeFloorShippingTab === 'progress' }"
-        @click="activeFloorShippingTab = 'progress'"
+        :class="{ active: activePlanBasisMode === 'progress' }"
+        @click="setPlanBasisMode('progress')"
       >
         進度基準
       </button>
       <button
+        v-if="activePlanTab === 'floor-shipping'"
         type="button"
         class="laser-subtab-item manual-btn"
         @click="openManual('生産/配送計画.md')"
@@ -198,7 +199,7 @@
           :disabled="processing || !rows.length || !selectedLine"
         >実績保存</button>
         <button
-          v-if="activePlanTab === 'floor-shipping' && activeFloorShippingTab === 'progress'"
+          v-if="activePlanTab === 'floor-shipping' && isProgressMode"
           class="btn primary"
           @click="showRecalcWarning = true"
           :disabled="processing || !rows.length || !selectedLine"
@@ -1542,7 +1543,7 @@ const selectPlanTab = (tab) => {
   activePlanTab.value = tab.key
 }
 const activeSpotTab = ref('normal-plan')
-const activeFloorShippingTab = ref('progress')
+const activePlanBasisMode = ref('progress')
 const spotExcelRows = ref([])
 const spotExcelFileName = ref('')
 const spotExcelMessage = ref('')
@@ -1772,9 +1773,26 @@ const coproductDisplayCache = new Map()
 const selectedLineObj = computed(() =>
   lines.value.find((l) => `${l.id}` === `${selectedLine.value}`)
 )
-const isProgressMode = computed(() =>
-  activePlanTab.value === 'floor-shipping' && activeFloorShippingTab.value === 'progress'
+const activePlanTabConfig = computed(() =>
+  planTabs.value.find((tab) => tab.key === activePlanTab.value) || null
 )
+const isAllPlanTab = computed(() => {
+  const tab = activePlanTabConfig.value
+  return tab?.key === 'all' || tab?.label === '全部'
+})
+const showsPlanBasisSwitch = computed(() =>
+  activePlanTab.value === 'floor-shipping' || isAllPlanTab.value
+)
+const isProgressMode = computed(() =>
+  showsPlanBasisSwitch.value && activePlanBasisMode.value === 'progress'
+)
+const setPlanBasisMode = async (mode) => {
+  if (activePlanBasisMode.value === mode) return
+  activePlanBasisMode.value = mode
+  if (showsPlanBasisSwitch.value && selectedLine.value) {
+    await loadData()
+  }
+}
 const isFloorShippingDeliveryLine = computed(() => {
   if (activePlanTab.value !== 'floor-shipping') return false
   const line = selectedLineObj.value
@@ -5353,7 +5371,7 @@ const onGlobalKeydown = (event) => {
 const fetchAndApplyData = async () => {
   await fetchAutoPlanLocks()
   currentLineRoutingFilterMode.value = 'filtered'
-  const fetchLineDemands = activePlanTab.value === 'floor-shipping'
+  const fetchLineDemands = isProgressMode.value
     ? api.lineDemands.list({
         line: selectedLine.value,
         plan_date__gte: startDate.value,
@@ -5467,9 +5485,19 @@ const fetchAndApplyData = async () => {
       const num = Number(seq)
       return Number.isFinite(num) ? num : null
     }
+    const getProductInfoFallback = (prodKey) => {
+      const product = products.value.find((item) => String(item.id) === String(prodKey))
+      if (!product) return {}
+      return {
+        product_id: product.id,
+        product_code: product.product_code || '',
+        product_name: product.product_name || '',
+        process_id: product.process || '',
+      }
+    }
     const ensureRow = (prodKey) => {
       if (!grouped.has(prodKey)) {
-        const info = productInfoByProdKey.get(prodKey) || {}
+        const info = productInfoByProdKey.get(prodKey) || getProductInfoFallback(prodKey)
         grouped.set(prodKey, {
           id: `pl-${prodKey}`,
           product_id: info.product_id || '',
@@ -5624,6 +5652,14 @@ const fetchAndApplyData = async () => {
       demandData.forEach((d) => {
         if (!d.product) return
         const prodKey = `${d.product}`
+        if (!productInfoByProdKey.has(prodKey)) {
+          productInfoByProdKey.set(prodKey, {
+            product_id: d.product,
+            product_code: d.product_code || '',
+            product_name: d.product_name || '',
+            process_id: d.process || '',
+          })
+        }
         const dateKey = `${prodKey}__${d.plan_date}`
         const firm = Number(d.firm_qty || 0)
         const forecast = Number(d.forecast_qty || 0)
