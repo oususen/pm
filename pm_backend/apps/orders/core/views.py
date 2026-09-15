@@ -387,6 +387,54 @@ class OrderLineViewSet(viewsets.ModelViewSet):
     ordering_fields = ['due_date', 'line_no']
     ordering = ['line_no']
 
+    def perform_destroy(self, instance):
+        order_no = instance.order.order_no if instance.order else '-'
+        product_code = instance.product_code or '-'
+        quantity = instance.quantity
+        due_date = instance.due_date or '-'
+        operator = self.request.user
+
+        instance.delete()
+
+        try:
+            from django.contrib.auth import get_user_model
+            from notifications.models import Notification, PushSubscription
+            from notifications.web_push import send_web_push
+
+            User = get_user_model()
+            admin_users = User.objects.filter(username='admin', is_active=True)
+
+            title = f'[受注明細削除] {product_code} x{quantity} 納期:{due_date}'
+            description = (
+                f'操作者: {operator.get_full_name() or operator.username}\n'
+                f'受注番号: {order_no}\n'
+                f'品番: {product_code}\n'
+                f'数量: {quantity}\n'
+                f'納期: {due_date}'
+            )
+            today = date.today()
+            notification = Notification.objects.create(
+                title=title,
+                category='受注',
+                domain='ORDER_LINE_DELETE',
+                description=description,
+                valid_from=today,
+                valid_to=today + timedelta(days=7),
+                operator_name=operator.get_full_name() or operator.username,
+            )
+            notification.target_users.set(admin_users)
+
+            payload = {
+                'title': title,
+                'body': f'{product_code} x{quantity} 納期:{due_date}',
+                'tag': f'order-line-delete-{instance.pk}',
+                'url': '/orders',
+            }
+            for sub in PushSubscription.objects.filter(user__in=admin_users):
+                send_web_push(sub, payload)
+        except Exception:
+            pass
+
     def _build_target_firm_order_lines(self, *, product_code, due_date_from, due_date_to, customer_code='', ship_to_code=''):
         target_qs = (
             OrderLine.objects
