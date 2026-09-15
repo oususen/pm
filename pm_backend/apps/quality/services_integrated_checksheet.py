@@ -7,7 +7,7 @@ from .models_integrated_checksheet import (
     IntegratedChecksheetBatch,
     IntegratedChecksheetTemplate,
 )
-from .services_checksheet import _font
+from .integrated_checksheet_assets import _font
 
 
 # A4横 200dpi 相当

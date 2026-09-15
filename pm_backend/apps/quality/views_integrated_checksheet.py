@@ -761,7 +761,7 @@ class IntegratedChecksheetTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="upload_sketch/(?P<block_id>[0-9]+)", parser_classes=[MultiPartParser, FormParser])
     def upload_sketch(self, request, pk=None, block_id=None):
         """工程ブロックの台紙をアップロード（PDF or 画像）"""
-        from .services_checksheet import create_background_assets
+        from .integrated_checksheet_assets import create_background_assets
 
         template = self.get_object()
         block = IntegratedChecksheetProcessBlock.objects.filter(

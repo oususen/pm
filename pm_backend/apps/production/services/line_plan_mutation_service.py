@@ -69,7 +69,6 @@ def bulk_delete(viewset, request, **deps):
 
 def save(viewset, request, **deps):
     is_floor_shipping_delivery_line = deps.get('is_floor_shipping_delivery_line')
-    logger = deps.get('logger')
     """
     ユーザーが入力した計画データをLinePlanに保存する
     期待payload: { line_id, items: [{product_id, process_id, plan_date, plan_qty?, sequence_no?}] }
@@ -356,50 +355,6 @@ def save(viewset, request, **deps):
                     plan.sequence_no,
                     plan.plan_id,
                 )
-
-    try:
-        from masters.models import Process as ProcessModel
-        from quality.services_checksheet import active_templates_for_product, prepare_batch as cs_prepare_batch
-
-        process_cache = {}
-        processed_product_dates = set()
-        for it in items:
-            product_id = it.get('product_id')
-            process_id = it.get('process_id')
-            plan_date = it.get('plan_date')
-            plan_qty_val = int(Decimal(str(it.get('plan_qty') or 0)))
-            if not product_id or not process_id or not plan_date or plan_qty_val <= 0:
-                continue
-            prod = product_cache.get(product_id)
-            if not prod or not getattr(prod, 'is_line_final_product', False):
-                continue
-            cache_key = (product_id, plan_date)
-            if cache_key in processed_product_dates:
-                continue
-            processed_product_dates.add(cache_key)
-            templates = active_templates_for_product(product_id)
-            if not templates:
-                continue
-            plan_date_obj = parse_plan_date(plan_date)
-            for tmpl in templates:
-                tmpl_process_id = tmpl.process_id
-                if tmpl_process_id not in process_cache:
-                    try:
-                        process_cache[tmpl_process_id] = ProcessModel.objects.get(id=tmpl_process_id)
-                    except ProcessModel.DoesNotExist:
-                        continue
-                cs_prepare_batch(
-                    template=tmpl,
-                    line=tmpl.line,
-                    process=process_cache[tmpl_process_id],
-                    product=prod,
-                    quantity=plan_qty_val,
-                    plan_date=plan_date_obj,
-                    user=change_user,
-                )
-    except Exception:
-        if logger:
-            logger.exception('チェックシートバッチ自動生成でエラー')
 
     return Response({
         'created': created,
