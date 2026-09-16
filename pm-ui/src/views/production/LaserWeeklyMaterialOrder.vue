@@ -175,6 +175,12 @@
           </div>
         </section>
       </div>
+      <div class="material-filters">
+        <label>材料コード<select v-model="filterMaterialCode">
+          <option value="">全て</option>
+          <option v-for="code in filterMaterialCodeOptions" :key="code" :value="code">{{ code }}</option>
+        </select></label>
+      </div>
       <table>
         <colgroup>
           <col
@@ -230,7 +236,7 @@
         </thead>
         <tbody>
           <template
-            v-for="(material, materialIndex) in materials"
+            v-for="(material, materialIndex) in filteredMaterials"
             :key="material.material_id"
             ><tr
               v-for="supplier in supplierRows(material)"
@@ -397,6 +403,15 @@ const openEmailConfig = () => {
 };
 const iso = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const filterMaterialCode = ref("");
+const filterMaterialCodeOptions = computed(() =>
+  [...new Set(props.materials.map((m) => m.material_code))].sort(),
+);
+const filteredMaterials = computed(() =>
+  filterMaterialCode.value
+    ? props.materials.filter((m) => m.material_code === filterMaterialCode.value)
+    : props.materials,
+);
 const fixedColumnWidths = ["145px", "145px", "50px", "52px"];
 const weekGroups = computed(() => {
   const groups = new Map();
@@ -1246,6 +1261,15 @@ watch(() => [props.startDate, props.materials], load, {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.material-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.material-filters select {
+  margin-left: 4px;
 }
 .order-panel table {
   border-collapse: collapse;
