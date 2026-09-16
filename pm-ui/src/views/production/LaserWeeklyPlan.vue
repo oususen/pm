@@ -381,6 +381,10 @@
             <option value="">全て</option>
             <option v-for="code in filterProductOptions" :key="code" :value="code">{{ code }}</option>
           </select></label>
+          <label>板厚<select v-model="filterThickness">
+            <option value="">全て</option>
+            <option v-for="t in filterThicknessOptions" :key="t" :value="t">{{ t }}</option>
+          </select></label>
           <label>パターン<select v-model="filterPatternNo">
             <option value="">全て</option>
             <option v-for="no in filterPatternOptions" :key="no" :value="String(no)">{{ no }}</option>
@@ -814,6 +818,7 @@ const startDate = ref(monday(props.initialStartDate || new Date())),
   filterMachine = ref(""),
   filterProductCode = ref(""),
   filterPatternNo = ref(""),
+  filterThickness = ref(""),
   showSettings = ref(false),
   showPrintDialog = ref(false),
   printStartDate = ref(nextBusinessDay()),
@@ -915,12 +920,16 @@ const filterProductOptions = computed(() =>
 const filterPatternOptions = computed(() =>
   [...new Set(patternRows.value.map((p) => p.pattern_no))].sort((a, b) => a - b),
 );
+const filterThicknessOptions = computed(() =>
+  [...new Set(patternRows.value.map((p) => p.thickness).filter(Boolean))].sort((a, b) => Number(a) - Number(b)),
+);
 const filteredPatternRows = computed(() =>
   patternRows.value.filter((p) => {
     if (filterDownstream.value && !p.downstream_line_names.includes(filterDownstream.value)) return false;
     if (filterMachine.value && p.machine !== filterMachine.value) return false;
     if (filterProductCode.value && p.representative_product_code !== filterProductCode.value) return false;
     if (filterPatternNo.value && String(p.pattern_no) !== filterPatternNo.value) return false;
+    if (filterThickness.value && p.thickness !== filterThickness.value) return false;
     return true;
   }),
 );
