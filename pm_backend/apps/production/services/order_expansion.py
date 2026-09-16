@@ -211,48 +211,6 @@ class OrderExpansionService:
         result['forced_full_rebuild'] = False
         return result
 
-    def rebuild_from_due_date(self, due_date_from: date) -> Dict[str, object]:
-        """開始日以降の需要を削除し、同日以降納期のOPEN確定受注で再構築する。"""
-        self._prefetch_all()
-        self._collect_unrouted_warnings()
-
-        firm_lines = self._get_open_order_lines_queryset(
-            order_type='FIRM',
-        ).filter(due_date__gte=due_date_from)
-        firm_aggregated, processed_firm_line_ids = self._aggregate_order_lines(
-            firm_lines,
-            min_plan_date=due_date_from,
-        )
-
-        with transaction.atomic():
-            delete_qs = LineDemand.objects.filter(plan_date__gte=due_date_from)
-            cleared = delete_qs.count()
-            if cleared:
-                delete_qs._raw_delete(delete_qs.db)
-
-            firm_result = self._apply_incremental_firm_demands(
-                firm_aggregated,
-                existing_map={},
-            )
-
-            if processed_firm_line_ids:
-                OrderLine.objects.filter(id__in=processed_firm_line_ids).update(
-                    is_expanded=True,
-                    expanded_at=datetime.now(),
-                )
-
-        return {
-            'cleared': cleared,
-            'created': firm_result['created'],
-            'updated': firm_result['updated'],
-            'deleted': cleared,
-            'processed_order_lines': len(processed_firm_line_ids),
-            'warnings': self.warnings,
-            'errors': self.errors,
-            'forced_full_rebuild': True,
-            'due_date_from': due_date_from.isoformat(),
-        }
-
     def revert_firm_order_lines(self, order_line_ids: Iterable[int], preserve_actual: bool = False) -> Dict[str, object]:
         """指定したFIRM受注明細の展開結果を差し戻し、未展開状態へ戻す。"""
         target_ids = sorted({int(v) for v in order_line_ids if v is not None})
@@ -760,12 +718,7 @@ class OrderExpansionService:
                     (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or '')
                 ] = row
 
-    def _aggregate_order_lines(
-        self,
-        order_lines: Iterable[OrderLine],
-        exclude_forecast_source_keys=None,
-        min_plan_date: date | None = None,
-    ):
+    def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
         aggregated: Dict[Tuple[int, str, object, int | None, str], Dict[str, object]] = {}
         processed_ids: List[int] = []
 
@@ -775,18 +728,11 @@ class OrderExpansionService:
                 aggregated,
                 order_line,
                 exclude_forecast_source_keys=exclude_forecast_source_keys,
-                min_plan_date=min_plan_date,
             )
 
         return aggregated, processed_ids
 
-    def _accumulate_order_line(
-        self,
-        aggregated,
-        order_line: OrderLine,
-        exclude_forecast_source_keys=None,
-        min_plan_date: date | None = None,
-    ):
+    def _accumulate_order_line(self, aggregated, order_line: OrderLine, exclude_forecast_source_keys=None):
         if (
             order_line.order.order_type == 'FORECAST'
             and order_line.due_date
@@ -961,9 +907,6 @@ class OrderExpansionService:
                 target_date = required_by_path[_orphan_vpath_map[step.id]]
             else:
                 target_date = self._shift_business_days(calendar_ids, required_date, lead_days)
-
-            if min_plan_date is not None and target_date < min_plan_date:
-                continue
 
             is_shifted = bool(target_date != order_line.due_date)
             product_code = step_product.product_code if step_product else order_line.product_code

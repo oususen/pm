@@ -43,9 +43,9 @@
                 <button
                   class="action-btn"
                   :disabled="expansionBusy"
-                  @click.prevent="openMaintenanceDialog('rebuild')"
+                  @click.prevent="runFullExpand"
                 >
-                  {{ maintenanceRunning && maintenanceMode === 'rebuild' ? '展開中...' : '期間展開実行' }}
+                  {{ maintenanceRunning && maintenanceMode === 'full' ? '展開中...' : '全展開実行' }}
                 </button>
                 <div class="sub-action-row">
                   <button
@@ -75,7 +75,7 @@
     </div>
 
     <p class="helper-text">
-      受注展開は自動展開と同じ処理です。期間展開実行は開始日以降のライン需要を削除し、同日以降の納期のOPEN確定受注を展開します。
+      受注展開は自動展開と同じ処理です。全展開実行はライン需要を全件削除し、すべてのOPEN確定・内示受注から再構築します。
     </p>
 
     <div v-if="showMaintenanceDialog" class="dialog-backdrop" @click.self="closeMaintenanceDialog">
@@ -85,15 +85,15 @@
           <button type="button" class="plain-btn" @click="closeMaintenanceDialog">×</button>
         </div>
         <div class="dialog-body">
-          <div v-if="maintenanceMode !== 'rebuild'" class="form-row">
+          <div class="form-row">
             <label>完成品コード</label>
             <input v-model.trim="maintenanceForm.productCode" type="text" placeholder="例: V053143615" />
           </div>
           <div class="form-row">
-            <label>{{ maintenanceMode === 'rebuild' ? '開始日（受注納期）' : maintenanceMode === 'revert' ? '戻し開始日' : '再展開開始日' }}</label>
+            <label>{{ maintenanceMode === 'revert' ? '戻し開始日' : '再展開開始日' }}</label>
             <input v-model="maintenanceForm.startDate" type="date" :disabled="maintenanceRunning" />
           </div>
-          <div v-if="maintenanceMode !== 'rebuild'" class="form-row">
+          <div class="form-row">
             <label>{{ maintenanceMode === 'revert' ? '戻し終了日' : '再展開終了日' }}</label>
             <input v-model="maintenanceForm.endDate" type="date" />
           </div>
@@ -160,12 +160,10 @@ const maintenanceForm = ref({
   startDate: "",
   endDate: "",
 });
-const maintenanceTitle = computed(() => (maintenanceMode.value === "rebuild" ? "期間展開実行" : maintenanceMode.value === "revert" ? "受注展開の戻し" : "受注展開の再展開"));
-const maintenanceSubmitLabel = computed(() => (maintenanceMode.value === "rebuild" ? "期間展開実行" : maintenanceMode.value === "revert" ? "展開戻し実行" : "再展開実行"));
+const maintenanceTitle = computed(() => (maintenanceMode.value === "revert" ? "受注展開の戻し" : "受注展開の再展開"));
+const maintenanceSubmitLabel = computed(() => (maintenanceMode.value === "revert" ? "展開戻し実行" : "再展開実行"));
 const maintenanceNote = computed(() => (
-  maintenanceMode.value === "rebuild"
-    ? "開始日以降のライン需要を削除し、開始日以降の納期のOPEN確定受注だけを展開します。工程・構成品の必要日が開始日より前になる需要は作成しません。内示は展開しません。"
-    : maintenanceMode.value === "revert"
+  maintenanceMode.value === "revert"
     ? "対象期間のOPEN確定受注のうち、展開済み分だけを差し戻します。"
     : "対象期間のOPEN確定受注のうち、未展開分だけを再展開します。"
 ));
@@ -349,6 +347,27 @@ const runExpand = async () => {
   }
 };
 
+const runFullExpand = async () => {
+  if (expansionBusy.value) return;
+  maintenanceMode.value = "full";
+  maintenanceRunning.value = true;
+  message.value = "";
+  warnings.value = [];
+
+  try {
+    const res = await api.lineDemands.expand(true);
+    const data = res.data || {};
+    message.value = `全展開完了: 作成=${data.created ?? 0}, クリア=${data.cleared ?? 0}, 確定展開=${data.processed_order_lines ?? 0}`;
+    warnings.value = data.warnings || [];
+  } catch (e) {
+    const detail = e?.response?.data?.errors?.join('\n') || e?.response?.data?.error || e.message || "unknown error";
+    message.value = `全展開エラー: ${detail}`;
+    warnings.value = e?.response?.data?.warnings || [];
+  } finally {
+    maintenanceRunning.value = false;
+  }
+};
+
 const openMaintenanceDialog = (mode) => {
   if (expansionBusy.value) return;
   maintenanceMode.value = mode;
@@ -369,16 +388,15 @@ const closeMaintenanceDialog = () => {
 const submitMaintenance = async () => {
   if (expansionBusy.value) return;
   maintenanceError.value = "";
-  const isPeriodRebuild = maintenanceMode.value === "rebuild";
-  if (!isPeriodRebuild && !maintenanceForm.value.productCode) {
+  if (!maintenanceForm.value.productCode) {
     maintenanceError.value = "完成品コードを入力してください。";
     return;
   }
-  if (!maintenanceForm.value.startDate || (!isPeriodRebuild && !maintenanceForm.value.endDate)) {
-    maintenanceError.value = isPeriodRebuild ? "開始日を入力してください。" : "期間を入力してください。";
+  if (!maintenanceForm.value.startDate || !maintenanceForm.value.endDate) {
+    maintenanceError.value = "期間を入力してください。";
     return;
   }
-  if (!isPeriodRebuild && maintenanceForm.value.startDate > maintenanceForm.value.endDate) {
+  if (maintenanceForm.value.startDate > maintenanceForm.value.endDate) {
     maintenanceError.value = "期間の大小が逆です。";
     return;
   }
@@ -392,15 +410,11 @@ const submitMaintenance = async () => {
       due_date_from: maintenanceForm.value.startDate,
       due_date_to: maintenanceForm.value.endDate,
     };
-    const res = isPeriodRebuild
-      ? await api.lineDemands.rebuildFromDate(maintenanceForm.value.startDate)
-      : maintenanceMode.value === "revert"
+    const res = maintenanceMode.value === "revert"
       ? await api.orders.revertOrderExpansion(payload)
       : await api.orders.expandSelectedOrderExpansion(payload);
     const data = res.data || {};
-    if (isPeriodRebuild) {
-      message.value = `期間展開完了: 納期=${maintenanceForm.value.startDate}以降, 確定展開=${data.processed_order_lines ?? 0}, 作成=${data.created ?? 0}, 更新=${data.updated ?? 0}`;
-    } else if (maintenanceMode.value === "revert") {
+    if (maintenanceMode.value === "revert") {
       message.value = `展開戻し完了: 対象=${data.target_order_lines ?? 0}, 差し戻し=${data.reverted_order_lines ?? 0}`;
     } else {
       message.value = `再展開完了: 対象=${data.target_order_lines ?? 0}, 再展開=${data.expanded_order_lines ?? 0}`;
