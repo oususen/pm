@@ -4404,7 +4404,8 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         line_obj = ensure_supplier_purchase_line(supplier)
 
-        process_obj = Process.objects.filter(process_code='K').first()
+        # 購買工程はPURCHASEを正とする（旧コードKは現行マスタに存在しない）
+        process_obj = Process.objects.filter(process_code='PURCHASE').first()
 
         return line_obj, process_obj
 
@@ -4635,7 +4636,10 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         duration_min = bom_item.duration_min
 
         if bom_item.sourcing_type == 'BUY' and supplier:
-            line, process = self._get_or_create_purchase_line_and_process(supplier)
+            line, purchase_process = self._get_or_create_purchase_line_and_process(supplier)
+            # BOM明細で工程が指定されている場合は、その工程をルーティングへ引き継ぐ。
+            # 購買ライン・仕入先だけは購買区分から自動解決する。
+            process = bom_item.process or purchase_process
             time_unit = 'DAY'
             lead_time_days = lead_time_days or 1
             duration_min = None

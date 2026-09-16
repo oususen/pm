@@ -211,7 +211,32 @@ class OrderExpansionService:
         result['forced_full_rebuild'] = False
         return result
 
-    def revert_firm_order_lines(self, order_line_ids: Iterable[int]) -> Dict[str, object]:
+    def rebuild_from_due_date(self, due_date_from: date) -> Dict[str, object]:
+        """納期開始日以降の確定を再展開し、内示は通常どおり再集計する。"""
+        self._prefetch_all()
+        target_qs = OrderLine.objects.filter(
+            order__status='OPEN', order__order_type='FIRM',
+            due_date__gte=due_date_from,
+        )
+        self._collect_unrouted_warnings()
+        with transaction.atomic():
+            expanded_ids = list(target_qs.filter(is_expanded=True).values_list('id', flat=True))
+            reverted = {'reverted_order_lines': 0}
+            if expanded_ids:
+                reverted = self.revert_firm_order_lines(expanded_ids, preserve_actual=True)
+                if self.errors:
+                    transaction.set_rollback(True)
+                    return {'errors': self.errors, 'warnings': self.warnings}
+
+            result = self._expand_incremental(due_date_from=due_date_from)
+            if self.errors:
+                transaction.set_rollback(True)
+                return {'errors': self.errors, 'warnings': self.warnings}
+            result['reverted_order_lines'] = reverted['reverted_order_lines']
+            result['due_date_from'] = due_date_from.isoformat()
+            return result
+
+    def revert_firm_order_lines(self, order_line_ids: Iterable[int], preserve_actual: bool = False) -> Dict[str, object]:
         """指定したFIRM受注明細の展開結果を差し戻し、未展開状態へ戻す。"""
         target_ids = sorted({int(v) for v in order_line_ids if v is not None})
         if not target_ids:
@@ -265,12 +290,27 @@ class OrderExpansionService:
         for key, entry in aggregated.items():
             existing = existing_map.get(key)
             if existing is None:
-                self.errors.append(
-                    f'差し戻し対象の需要が見つかりません: line_id={entry["line_id"]} product={entry["product_code"]} plan_date={entry["plan_date"]} routing_step_id={entry["routing_step_id"]} process_id={key[3]}'
-                )
-                continue
+                # ルーティング工程を削除・再追加した場合、RoutingStep IDだけが変わる。
+                # 業務キーが一致する旧需要を、RoutingStep IDに依存せず救済する。
+                candidates = [
+                    row for row in existing_map.values()
+                    if row.get('line_id') == entry['line_id']
+                    and row.get('product_code') == entry['product_code']
+                    and row.get('plan_date') == entry['plan_date']
+                    and (row.get('ship_to_code') or '') == (entry.get('ship_to_code') or '')
+                    and row.get('process_id') == key[3]
+                ]
+                if len(candidates) == 1:
+                    existing = candidates[0]
+                else:
+                    self.errors.append(
+                        f'差し戻し対象の需要が見つかりません: line_id={entry["line_id"]} product={entry["product_code"]} plan_date={entry["plan_date"]} routing_step_id={entry["routing_step_id"]} process_id={key[3]}'
+                    )
+                    continue
 
             demand = self._build_demand_instance_from_row(existing)
+            # 再展開対象の現行RoutingStepを保存し、旧IDのまま残さない。
+            demand.routing_step_id = entry['routing_step_id']
             revert_qty = Decimal(str(entry['firm_qty'] or 0))
             current_qty = Decimal(str(demand.firm_qty or 0))
             if current_qty < revert_qty:
@@ -288,7 +328,7 @@ class OrderExpansionService:
             )
             self._refresh_demand_fields(demand)
 
-            if self._is_empty_demand(demand):
+            if self._is_empty_demand(demand) and not (preserve_actual and demand.actual_qty):
                 if demand.pk:
                     delete_ids.append(demand.pk)
                 existing_map.pop(key, None)
@@ -433,15 +473,16 @@ class OrderExpansionService:
             queryset = queryset.filter(is_expanded=is_expanded)
         return queryset.order_by('id')
 
-    def _expand_incremental(self) -> Dict[str, object]:
+    def _expand_incremental(self, due_date_from: date | None = None) -> Dict[str, object]:
         open_firm_source_keys = self._collect_open_firm_source_keys()
         forecast_aggregated, _ = self._aggregate_order_lines(
             self._get_open_order_lines_queryset(order_type='FORECAST'),
             exclude_forecast_source_keys=open_firm_source_keys,
         )
-        firm_aggregated, processed_firm_line_ids = self._aggregate_order_lines(
-            self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
-        )
+        firm_lines = self._get_open_order_lines_queryset(order_type='FIRM', is_expanded=False)
+        if due_date_from is not None:
+            firm_lines = firm_lines.filter(due_date__gte=due_date_from)
+        firm_aggregated, processed_firm_line_ids = self._aggregate_order_lines(firm_lines)
 
         existing_map = self._load_existing_incremental_demand_rows()
 

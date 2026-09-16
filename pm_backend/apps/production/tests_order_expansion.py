@@ -73,6 +73,74 @@ class OrderExpansionServiceTest(TestCase):
             ship_to_code=ship_to_code,
         )
 
+    @patch('production.services.order_expansion.get_business_today', return_value=date(2026, 8, 1))
+    def test_period_rebuild_preserves_old_firm_and_actual_and_is_repeatable(self, _today):
+        old = self._create_order_line('OLD', 'FIRM', 7, '2026-08-31')
+        target = self._create_order_line('TARGET', 'FIRM', 5, '2026-09-01')
+        OrderExpansionService().expand_firm_order_lines([old.id, target.id])
+        old_demand = LineDemand.objects.get(plan_date='2026-08-31')
+        old_snapshot = LineDemand.objects.filter(pk=old_demand.pk).values().get()
+        LineDemand.objects.filter(plan_date='2026-09-01').update(actual_qty=2)
+        unexpanded_old = self._create_order_line('OLD-UNEXPANDED', 'FIRM', 3, '2026-08-30')
+        new = self._create_order_line('NEW', 'FIRM', 4, '2026-09-01')
+        self._create_order_line('FORECAST', 'FORECAST', 9, '2026-09-02')
+
+        for _ in range(2):
+            result = OrderExpansionService().rebuild_from_due_date(date(2026, 9, 1))
+            self.assertFalse(result['errors'])
+            self.assertEqual(LineDemand.objects.filter(pk=old_demand.pk).values().get(), old_snapshot)
+            target_demand = LineDemand.objects.get(plan_date='2026-09-01')
+            self.assertEqual(target_demand.firm_qty, Decimal('9'))
+            self.assertEqual(target_demand.actual_qty, Decimal('2'))
+            self.assertEqual(LineDemand.objects.get(plan_date='2026-09-02').forecast_qty, Decimal('9'))
+        unexpanded_old.refresh_from_db()
+        new.refresh_from_db()
+        self.assertFalse(unexpanded_old.is_expanded)
+        self.assertTrue(new.is_expanded)
+
+    def test_period_rebuild_includes_demand_before_start_date(self):
+        self.step.lead_time_days = 3
+        self.step.save(update_fields=['lead_time_days'])
+        for day in range(25, 32):
+            CalendarDay.objects.create(calendar=self.calendar, target_date=date(2026, 8, day), is_working_day=True)
+        CalendarDay.objects.create(calendar=self.calendar, target_date=date(2026, 9, 1), is_working_day=True)
+        self._create_order_line('SHIFTED', 'FIRM', 5, '2026-09-01')
+        result = OrderExpansionService().rebuild_from_due_date(date(2026, 9, 1))
+        self.assertFalse(result['errors'])
+        demand = LineDemand.objects.get(firm_qty=5)
+        self.assertLess(demand.plan_date, date(2026, 9, 1))
+
+    def test_period_rebuild_rolls_back_revert_when_expansion_fails(self):
+        target = self._create_order_line('ROLLBACK', 'FIRM', 5, '2026-09-01')
+        OrderExpansionService().expand_firm_order_lines([target.id])
+        snapshot = list(LineDemand.objects.values())
+        service = OrderExpansionService()
+
+        def fail_after_revert(**kwargs):
+            service.errors.append('テスト用エラー')
+            return {'errors': service.errors}
+
+        with patch.object(service, '_expand_incremental', side_effect=fail_after_revert):
+            result = service.rebuild_from_due_date(date(2026, 9, 1))
+        self.assertTrue(result['errors'])
+        target.refresh_from_db()
+        self.assertTrue(target.is_expanded)
+        self.assertEqual(list(LineDemand.objects.values()), snapshot)
+
+    def test_period_rebuild_rejects_invalid_start_date(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from types import SimpleNamespace
+        from production.views_line_demand import LineDemandViewSet
+
+        view = LineDemandViewSet.as_view({'post': 'rebuild_from_date'})
+        for payload in ({}, {'due_date_from': ''}, {'due_date_from': '2026-02-30'}):
+            request = APIRequestFactory().post('/line-demands/rebuild-from-date/', payload, format='json')
+            force_authenticate(request, user=SimpleNamespace(is_authenticated=True))
+            with patch('production.views_line_demand.OrderExpansionService') as service:
+                response = view(request)
+            self.assertEqual(response.status_code, 400)
+            service.assert_not_called()
+
     def test_incremental_expand_replaces_forecast_and_increments_new_firm(self):
         due_date = '2026-04-10'
         existing_firm = self._create_order_line('FIRM-OLD', 'FIRM', '5', due_date, is_expanded=True)

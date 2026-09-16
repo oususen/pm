@@ -1,7 +1,7 @@
 import django_filters
 from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
@@ -9,6 +9,11 @@ from rest_framework.response import Response
 from .models import LineDemand
 from .serializers import LineDemandSerializer
 from .services.order_expansion import OrderExpansionService
+
+
+class PeriodExpansionSerializer(serializers.Serializer):
+    """期間展開の納期開始日。"""
+    due_date_from = serializers.DateField(required=True, input_formats=['%Y-%m-%d'])
 
 
 class LineDemandFilter(django_filters.FilterSet):
@@ -76,6 +81,14 @@ class LineDemandViewSet(viewsets.ModelViewSet):
     search_fields = ['product_code', 'order_numbers']
     ordering_fields = ['plan_date', 'line', 'product_code', 'created_at']
     ordering = ['plan_date', 'line']
+
+    @action(detail=False, methods=['post'], url_path='rebuild-from-date')
+    def rebuild_from_date(self, request):
+        """開始日を受注納期として期間再展開する。"""
+        validator = PeriodExpansionSerializer(data=request.data)
+        validator.is_valid(raise_exception=True)
+        result = OrderExpansionService().rebuild_from_due_date(validator.validated_data['due_date_from'])
+        return Response(result, status=status.HTTP_400_BAD_REQUEST if result.get('errors') else status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def expand(self, request):
