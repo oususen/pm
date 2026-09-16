@@ -74,7 +74,7 @@ class OrderExpansionServiceTest(TestCase):
         )
 
     @patch('production.services.order_expansion.get_business_today', return_value=date(2026, 8, 1))
-    def test_period_rebuild_preserves_old_firm_and_actual_and_is_repeatable(self, _today):
+    def test_period_rebuild_preserves_earlier_demand_and_rebuilds_firm_only(self, _today):
         old = self._create_order_line('OLD', 'FIRM', 7, '2026-08-31')
         target = self._create_order_line('TARGET', 'FIRM', 5, '2026-09-01')
         OrderExpansionService().expand_firm_order_lines([old.id, target.id])
@@ -84,6 +84,17 @@ class OrderExpansionServiceTest(TestCase):
         unexpanded_old = self._create_order_line('OLD-UNEXPANDED', 'FIRM', 3, '2026-08-30')
         new = self._create_order_line('NEW', 'FIRM', 4, '2026-09-01')
         self._create_order_line('FORECAST', 'FORECAST', 9, '2026-09-02')
+        LineDemand.objects.create(
+            line=self.line,
+            routing_step=self.step,
+            process=self.process,
+            product=self.product,
+            product_code=self.product.product_code,
+            plan_date='2026-09-02',
+            forecast_qty=Decimal('9'),
+            firm_qty=Decimal('0'),
+            plan_qty=Decimal('9'),
+        )
 
         for _ in range(2):
             result = OrderExpansionService().rebuild_from_due_date(date(2026, 9, 1))
@@ -91,14 +102,14 @@ class OrderExpansionServiceTest(TestCase):
             self.assertEqual(LineDemand.objects.filter(pk=old_demand.pk).values().get(), old_snapshot)
             target_demand = LineDemand.objects.get(plan_date='2026-09-01')
             self.assertEqual(target_demand.firm_qty, Decimal('9'))
-            self.assertEqual(target_demand.actual_qty, Decimal('2'))
-            self.assertEqual(LineDemand.objects.get(plan_date='2026-09-02').forecast_qty, Decimal('9'))
+            self.assertEqual(target_demand.actual_qty, Decimal('0'))
+            self.assertFalse(LineDemand.objects.filter(plan_date='2026-09-02').exists())
         unexpanded_old.refresh_from_db()
         new.refresh_from_db()
         self.assertFalse(unexpanded_old.is_expanded)
         self.assertTrue(new.is_expanded)
 
-    def test_period_rebuild_includes_demand_before_start_date(self):
+    def test_period_rebuild_skips_demand_before_start_date(self):
         self.step.lead_time_days = 3
         self.step.save(update_fields=['lead_time_days'])
         for day in range(25, 32):
@@ -107,22 +118,17 @@ class OrderExpansionServiceTest(TestCase):
         self._create_order_line('SHIFTED', 'FIRM', 5, '2026-09-01')
         result = OrderExpansionService().rebuild_from_due_date(date(2026, 9, 1))
         self.assertFalse(result['errors'])
-        demand = LineDemand.objects.get(firm_qty=5)
-        self.assertLess(demand.plan_date, date(2026, 9, 1))
+        self.assertFalse(LineDemand.objects.exists())
 
-    def test_period_rebuild_rolls_back_revert_when_expansion_fails(self):
+    def test_period_rebuild_rolls_back_when_expansion_fails(self):
         target = self._create_order_line('ROLLBACK', 'FIRM', 5, '2026-09-01')
         OrderExpansionService().expand_firm_order_lines([target.id])
         snapshot = list(LineDemand.objects.values())
         service = OrderExpansionService()
 
-        def fail_after_revert(**kwargs):
-            service.errors.append('テスト用エラー')
-            return {'errors': service.errors}
-
-        with patch.object(service, '_expand_incremental', side_effect=fail_after_revert):
-            result = service.rebuild_from_due_date(date(2026, 9, 1))
-        self.assertTrue(result['errors'])
+        with patch.object(service, '_apply_incremental_firm_demands', side_effect=RuntimeError('テスト用エラー')):
+            with self.assertRaises(RuntimeError):
+                service.rebuild_from_due_date(date(2026, 9, 1))
         target.refresh_from_db()
         self.assertTrue(target.is_expanded)
         self.assertEqual(list(LineDemand.objects.values()), snapshot)
@@ -347,6 +353,47 @@ class OrderExpansionServiceTest(TestCase):
             product_code=self.product.product_code,
             plan_date=due_date,
         ).exists())
+
+    def test_revert_accepts_recreated_routing_step_id(self):
+        due_date = '2026-08-20'
+        order_line = self._create_order_line('FIRM-OLD-STEP', 'FIRM', '5', due_date, is_expanded=True)
+        old_routing = Routing.objects.create(
+            product=self.product,
+            routing_code='R-OLD',
+            is_default=False,
+            is_active=False,
+        )
+        old_step = RoutingStep.objects.create(
+            routing=old_routing,
+            step_no=self.step.step_no,
+            process=self.process,
+            line=self.line,
+            output_product=self.product,
+            hierarchy_path='final',
+            time_unit='DAY',
+            lead_time_days=0,
+        )
+        LineDemand.objects.create(
+            line=self.line,
+            routing_step=old_step,
+            process=self.process,
+            product=self.product,
+            product_code=self.product.product_code,
+            plan_date=due_date,
+            lead_time_days=0,
+            forecast_qty=Decimal('0'),
+            firm_qty=Decimal('5'),
+            plan_qty=Decimal('5'),
+            actual_qty=Decimal('0'),
+            order_numbers='FIRM-OLD-STEP',
+            firm_order_numbers='FIRM-OLD-STEP',
+        )
+
+        result = OrderExpansionService().revert_firm_order_lines([order_line.id])
+
+        self.assertFalse(result['errors'])
+        self.assertEqual(result['reverted_order_lines'], 1)
+        self.assertFalse(LineDemand.objects.filter(routing_step=old_step).exists())
 
     def test_expand_firm_order_lines_recreates_demand_for_target_only(self):
         due_date = '2026-08-21'

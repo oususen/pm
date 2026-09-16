@@ -75,7 +75,7 @@
     </div>
 
     <p class="helper-text">
-      受注展開は自動展開と同じ処理です。期間展開実行は指定納期以降のOPEN確定受注を再展開し、内示を再集計します。
+      受注展開は自動展開と同じ処理です。期間展開実行は開始日以降のライン需要を削除し、同日以降の納期のOPEN確定受注を展開します。
     </p>
 
     <div v-if="showMaintenanceDialog" class="dialog-backdrop" @click.self="closeMaintenanceDialog">
@@ -164,7 +164,7 @@ const maintenanceTitle = computed(() => (maintenanceMode.value === "rebuild" ? "
 const maintenanceSubmitLabel = computed(() => (maintenanceMode.value === "rebuild" ? "期間展開実行" : maintenanceMode.value === "revert" ? "展開戻し実行" : "再展開実行"));
 const maintenanceNote = computed(() => (
   maintenanceMode.value === "rebuild"
-    ? "開始日以降の納期のOPEN確定受注を、展開済み分も含めて再展開します（終了日の指定なし）。工程の需要日は開始日より前になる場合があります。内示は通常どおり再集計します。"
+    ? "開始日以降のライン需要を削除し、開始日以降の納期のOPEN確定受注だけを展開します。工程・構成品の必要日が開始日より前になる需要は作成しません。内示は展開しません。"
     : maintenanceMode.value === "revert"
     ? "対象期間のOPEN確定受注のうち、展開済み分だけを差し戻します。"
     : "対象期間のOPEN確定受注のうち、未展開分だけを再展開します。"

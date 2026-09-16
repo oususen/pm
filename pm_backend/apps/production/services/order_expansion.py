@@ -212,29 +212,46 @@ class OrderExpansionService:
         return result
 
     def rebuild_from_due_date(self, due_date_from: date) -> Dict[str, object]:
-        """納期開始日以降の確定を再展開し、内示は通常どおり再集計する。"""
+        """開始日以降の需要を削除し、同日以降納期のOPEN確定受注で再構築する。"""
         self._prefetch_all()
-        target_qs = OrderLine.objects.filter(
-            order__status='OPEN', order__order_type='FIRM',
-            due_date__gte=due_date_from,
-        )
         self._collect_unrouted_warnings()
-        with transaction.atomic():
-            expanded_ids = list(target_qs.filter(is_expanded=True).values_list('id', flat=True))
-            reverted = {'reverted_order_lines': 0}
-            if expanded_ids:
-                reverted = self.revert_firm_order_lines(expanded_ids, preserve_actual=True)
-                if self.errors:
-                    transaction.set_rollback(True)
-                    return {'errors': self.errors, 'warnings': self.warnings}
 
-            result = self._expand_incremental(due_date_from=due_date_from)
-            if self.errors:
-                transaction.set_rollback(True)
-                return {'errors': self.errors, 'warnings': self.warnings}
-            result['reverted_order_lines'] = reverted['reverted_order_lines']
-            result['due_date_from'] = due_date_from.isoformat()
-            return result
+        firm_lines = self._get_open_order_lines_queryset(
+            order_type='FIRM',
+        ).filter(due_date__gte=due_date_from)
+        firm_aggregated, processed_firm_line_ids = self._aggregate_order_lines(
+            firm_lines,
+            min_plan_date=due_date_from,
+        )
+
+        with transaction.atomic():
+            delete_qs = LineDemand.objects.filter(plan_date__gte=due_date_from)
+            cleared = delete_qs.count()
+            if cleared:
+                delete_qs._raw_delete(delete_qs.db)
+
+            firm_result = self._apply_incremental_firm_demands(
+                firm_aggregated,
+                existing_map={},
+            )
+
+            if processed_firm_line_ids:
+                OrderLine.objects.filter(id__in=processed_firm_line_ids).update(
+                    is_expanded=True,
+                    expanded_at=datetime.now(),
+                )
+
+        return {
+            'cleared': cleared,
+            'created': firm_result['created'],
+            'updated': firm_result['updated'],
+            'deleted': cleared,
+            'processed_order_lines': len(processed_firm_line_ids),
+            'warnings': self.warnings,
+            'errors': self.errors,
+            'forced_full_rebuild': True,
+            'due_date_from': due_date_from.isoformat(),
+        }
 
     def revert_firm_order_lines(self, order_line_ids: Iterable[int], preserve_actual: bool = False) -> Dict[str, object]:
         """指定したFIRM受注明細の展開結果を差し戻し、未展開状態へ戻す。"""
@@ -300,6 +317,29 @@ class OrderExpansionService:
                     and (row.get('ship_to_code') or '') == (entry.get('ship_to_code') or '')
                     and row.get('process_id') == key[3]
                 ]
+                if not candidates:
+                    # ルーティング変更で工程・需要日が変わった場合は、展開元の受注番号で特定する。
+                    order_numbers = {
+                        str(value).strip()
+                        for value in entry.get('firm_order_numbers', set())
+                        if str(value).strip()
+                    }
+                    candidates = [
+                        row for row in existing_map.values()
+                        if row.get('line_id') == entry['line_id']
+                        and row.get('product_code') == entry['product_code']
+                        and order_numbers.intersection(
+                            set(self._normalize_order_numbers(row.get('firm_order_numbers') or '').split(','))
+                        )
+                    ]
+                if len(candidates) > 1:
+                    # 同一受注番号が複数納入先に分かれる場合は、納入先一致を優先する。
+                    same_ship_to = [
+                        row for row in candidates
+                        if (row.get('ship_to_code') or '') == (entry.get('ship_to_code') or '')
+                    ]
+                    if same_ship_to:
+                        candidates = same_ship_to
                 if len(candidates) == 1:
                     existing = candidates[0]
                 else:
@@ -720,7 +760,12 @@ class OrderExpansionService:
                     (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or '')
                 ] = row
 
-    def _aggregate_order_lines(self, order_lines: Iterable[OrderLine], exclude_forecast_source_keys=None):
+    def _aggregate_order_lines(
+        self,
+        order_lines: Iterable[OrderLine],
+        exclude_forecast_source_keys=None,
+        min_plan_date: date | None = None,
+    ):
         aggregated: Dict[Tuple[int, str, object, int | None, str], Dict[str, object]] = {}
         processed_ids: List[int] = []
 
@@ -730,11 +775,18 @@ class OrderExpansionService:
                 aggregated,
                 order_line,
                 exclude_forecast_source_keys=exclude_forecast_source_keys,
+                min_plan_date=min_plan_date,
             )
 
         return aggregated, processed_ids
 
-    def _accumulate_order_line(self, aggregated, order_line: OrderLine, exclude_forecast_source_keys=None):
+    def _accumulate_order_line(
+        self,
+        aggregated,
+        order_line: OrderLine,
+        exclude_forecast_source_keys=None,
+        min_plan_date: date | None = None,
+    ):
         if (
             order_line.order.order_type == 'FORECAST'
             and order_line.due_date
@@ -909,6 +961,9 @@ class OrderExpansionService:
                 target_date = required_by_path[_orphan_vpath_map[step.id]]
             else:
                 target_date = self._shift_business_days(calendar_ids, required_date, lead_days)
+
+            if min_plan_date is not None and target_date < min_plan_date:
+                continue
 
             is_shifted = bool(target_date != order_line.due_date)
             product_code = step_product.product_code if step_product else order_line.product_code
