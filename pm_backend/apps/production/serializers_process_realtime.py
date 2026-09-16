@@ -1601,8 +1601,8 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                         self_relation = resolved_process and resolved_process.id == process.id
                     if self_relation:
                         adjust_production_for_scrap(process, product, qty_decimal, plan_date)
-                    else:
-                        apply_nonself_scrap_adjust(process, product, qty_decimal, plan_date)
+                    # 非自工程品の scrap_adjust_qty は update_scrap_to_backlog() で反映済み。
+                    # ここで apply_nonself_scrap_adjust() を呼ぶと二重計上になるため呼び出さない。
                 else:
                     # 実績未入力の場合：BOMを最下層まで展開し、在庫引当テーブルに反映
                     # （即時在庫への反映用。LineBacklogのadjust_qtyは上で反映済み）
