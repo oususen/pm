@@ -45,7 +45,7 @@
                   :disabled="expansionBusy"
                   @click.prevent="runFullExpand"
                 >
-                  {{ maintenanceRunning && maintenanceMode === 'full' ? '展開中...' : '全展開実行' }}
+                  {{ maintenanceRunning && maintenanceMode === 'full' ? '展開中...' : '全期間展開実行' }}
                 </button>
                 <div class="sub-action-row">
                   <button
@@ -75,7 +75,7 @@
     </div>
 
     <p class="helper-text">
-      受注展開は自動展開と同じ処理です。全展開実行はライン需要を全件削除し、すべてのOPEN確定・内示受注から再構築します。
+      受注展開は自動展開と同じ処理です。全期間展開実行はライン需要を全件削除し、すべてのOPEN確定・内示受注から再構築します。
     </p>
 
     <div v-if="showMaintenanceDialog" class="dialog-backdrop" @click.self="closeMaintenanceDialog">
@@ -357,11 +357,11 @@ const runFullExpand = async () => {
   try {
     const res = await api.lineDemands.expand(true);
     const data = res.data || {};
-    message.value = `全展開完了: 作成=${data.created ?? 0}, クリア=${data.cleared ?? 0}, 確定展開=${data.processed_order_lines ?? 0}`;
+    message.value = `全期間展開完了: 作成=${data.created ?? 0}, クリア=${data.cleared ?? 0}, 確定展開=${data.processed_order_lines ?? 0}`;
     warnings.value = data.warnings || [];
   } catch (e) {
     const detail = e?.response?.data?.errors?.join('\n') || e?.response?.data?.error || e.message || "unknown error";
-    message.value = `全展開エラー: ${detail}`;
+    message.value = `全期間展開エラー: ${detail}`;
     warnings.value = e?.response?.data?.warnings || [];
   } finally {
     maintenanceRunning.value = false;

@@ -514,12 +514,10 @@ class OrderExpansionService:
             self._get_open_order_lines_queryset(order_type='FIRM')
         )
         aggregated = self._merge_aggregated_demands(forecast_aggregated, firm_aggregated)
-        actual_qty_map = self._load_existing_actual_qty_map()
 
         objects_to_create: List[LineDemand] = []
         for key, entry in aggregated.items():
-            actual_qty = actual_qty_map.get(key, Decimal('0'))
-            objects_to_create.append(self._build_line_demand(entry, actual_qty=actual_qty))
+            objects_to_create.append(self._build_line_demand(entry))
 
         routed_open_firm_qs = self._get_open_order_lines_queryset(order_type='FIRM').values_list('id', flat=True)
 
@@ -688,12 +686,6 @@ class OrderExpansionService:
         return {
             (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or ''): row
             for row in LineDemand.objects.values(*self.INCREMENTAL_DEMAND_VALUE_FIELDS)
-        }
-
-    def _load_existing_actual_qty_map(self):
-        return {
-            (row['line_id'], row['product_code'], row['plan_date'], row['process_id'], row.get('ship_to_code') or ''): Decimal(str(row['actual_qty'] or 0))
-            for row in LineDemand.objects.values('line_id', 'product_code', 'plan_date', 'process_id', 'ship_to_code', 'actual_qty')
         }
 
     def _refresh_created_demands(self, created_demands: List[LineDemand], existing_map, value_fields=None):
