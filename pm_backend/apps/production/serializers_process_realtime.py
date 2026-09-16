@@ -92,7 +92,17 @@ def build_scrap_multiplier_details(root_product_id: int, root_qty: Decimal):
     if not root_product_id or root_qty is None:
         return []
 
-    stack = [(root_product_id, Decimal(root_qty), None, None, None, None)]
+    root_proc_id = None
+    root_line_id = None
+    root_product = Product.objects.filter(id=root_product_id).first()
+    if root_product:
+        resolved_proc, resolved_line = _resolve_product_process_line(root_product, None)
+        if resolved_proc:
+            root_proc_id = resolved_proc.id
+        if resolved_line:
+            root_line_id = resolved_line.id
+
+    stack = [(root_product_id, Decimal(root_qty), root_proc_id, root_line_id, None, None)]
     detail_map = {}
     supplier_cache = {}
     product_cache = {}

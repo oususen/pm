@@ -84,9 +84,23 @@ def get_scrap_breakdown(record):
     suppliers = {s.id: s for s in Supplier.objects.filter(id__in=details_qs.values_list('supplier_id', flat=True))}
 
     for d in details_qs:
-        key = (d.product_id, d.process_id, d.supplier_id)
+        d_process_id = d.process_id
+        d_line_id = d.line_id
+        # process_id が未設定の場合、RoutingStep から解決する（既存データ補完）
+        if not d_process_id and d.product_id:
+            prod_obj = products.get(d.product_id)
+            if prod_obj:
+                resolved_proc, resolved_line = _resolve_product_process_line(prod_obj, None)
+                if resolved_proc:
+                    d_process_id = resolved_proc.id
+                    if resolved_proc.id not in processes:
+                        processes[resolved_proc.id] = resolved_proc
+                if resolved_line and not d_line_id:
+                    d_line_id = resolved_line.id
+
+        key = (d.product_id, d_process_id, d.supplier_id)
         p = products.get(d.product_id)
-        proc = processes.get(d.process_id) if d.process_id else None
+        proc = processes.get(d_process_id) if d_process_id else None
         supplier = suppliers.get(d.supplier_id) if d.supplier_id else None
 
         if key not in aggregated:
@@ -94,7 +108,7 @@ def get_scrap_breakdown(record):
                 'product_id': d.product_id,
                 'product_code': d.product_code or (p.product_code if p else None),
                 'product_name': d.product_name or (p.product_name if p else None),
-                'process_id': d.process_id,
+                'process_id': d_process_id,
                 'process_code': proc.process_code if proc else None,
                 'process_name': proc.process_name if proc else None,
                 'supplier_id': d.supplier_id,
