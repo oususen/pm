@@ -29,6 +29,9 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveMaterialInitialProgress(startDate, items) {
     return client.post('/laser-weekly-plans/material-initial-progress/', { start_date: startDate, items })
   },
+  saveMaterialDailyProgress(items) {
+    return client.post('/laser-weekly-plans/material-daily-progress/', { items })
+  },
   getMaterialOrderApproval(startDate) {
     return client.get('/laser-weekly-plans/material-order-approval/', { params: { start_date: startDate } })
   },

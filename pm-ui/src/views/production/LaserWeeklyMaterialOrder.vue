@@ -745,6 +745,14 @@ const buildInitialItems = () =>
       initial_progress: Number(initial(material).value || 0),
       is_locked: initial(material).locked,
     }));
+const buildDailyProgressItems = (targetDates = props.dates) =>
+  props.materials.flatMap((material) =>
+    targetDates.map((day) => ({
+      material_id: material.material_id,
+      progress_date: day,
+      progress: combinedProgress(material, day),
+    })),
+  );
 const saveMaterialOrderChanges = async (saveDates = props.dates) => {
   await Promise.all([
       api.laserWeeklyPlans.saveMaterialOrderProgress(props.startDate, buildMaterialOrderItems(saveDates)),
@@ -752,6 +760,7 @@ const saveMaterialOrderChanges = async (saveDates = props.dates) => {
         props.startDate,
         buildInitialItems(),
       ),
+      api.laserWeeklyPlans.saveMaterialDailyProgress(buildDailyProgressItems(saveDates)),
     ]);
 };
 const save = async () => {

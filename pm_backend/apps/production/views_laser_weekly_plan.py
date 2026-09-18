@@ -27,7 +27,7 @@ from accounts.models import ApprovalRequest, ApprovalRouteConfig
 from accounts.serializers import ApprovalRequestSerializer
 from shipping.services.email_service import EmailService
 
-from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
+from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserWeeklyMaterialDailyProgress, LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
 from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
@@ -235,15 +235,74 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         except (TypeError, ValueError):
             return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
         if request.method == 'GET':
-            return Response([{'material_id': x.material_id, 'initial_progress': x.initial_progress, 'is_locked': x.is_locked} for x in LaserWeeklyMaterialInitialProgress.objects.filter(plan_start_date=plan_start_date)])
+            saved_map = {
+                x.material_id: x
+                for x in LaserWeeklyMaterialInitialProgress.objects.filter(plan_start_date=plan_start_date)
+            }
+            prev_start = plan_start_date - timedelta(days=7)
+            prev_material_ids = set(
+                LaserWeeklyMaterialDailyProgress.objects.filter(
+                    progress_date__gte=prev_start,
+                    progress_date__lt=plan_start_date,
+                ).values_list('material_id', flat=True).distinct()
+            )
+            material_ids = set(saved_map.keys()) | prev_material_ids
+            result = []
+            for mid in material_ids:
+                saved = saved_map.get(mid)
+                if saved and saved.is_locked:
+                    result.append({'material_id': mid, 'initial_progress': saved.initial_progress, 'is_locked': True})
+                else:
+                    auto_val = self._calc_material_auto_initial_progress(mid, plan_start_date)
+                    result.append({'material_id': mid, 'initial_progress': auto_val, 'is_locked': False})
+            return Response(result)
         items = request.data.get('items', [])
         for item in items:
             try:
-                material_id, initial_progress, is_locked = int(item['material_id']), int(item['initial_progress']), bool(item.get('is_locked', False))
-            except (KeyError, TypeError, ValueError):
+                material_id, initial_progress, is_locked = int(item['material_id']), Decimal(str(item['initial_progress'])), bool(item.get('is_locked', False))
+            except (InvalidOperation, KeyError, TypeError, ValueError):
                 return Response({'detail': '期首進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
             LaserWeeklyMaterialInitialProgress.objects.update_or_create(plan_start_date=plan_start_date, material_id=material_id, defaults={'initial_progress': initial_progress, 'is_locked': is_locked})
         return Response({'saved_count': len(items)})
+
+    def _calc_material_auto_initial_progress(self, material_id, week_start_date):
+        prev_start = week_start_date - timedelta(days=7)
+        last_day = LaserWeeklyMaterialDailyProgress.objects.filter(
+            material_id=material_id,
+            progress_date__gte=prev_start,
+            progress_date__lt=week_start_date,
+        ).order_by('-progress_date').first()
+        return float(last_day.progress) if last_day else 0
+
+    @action(detail=False, methods=['post'], url_path='material-daily-progress')
+    def save_material_daily_progress(self, request):
+        items = request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'detail': '日別進度データが不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        raw_ids = set()
+        for item in items:
+            if isinstance(item, dict):
+                try:
+                    raw_ids.add(int(item.get('material_id', 0)))
+                except (TypeError, ValueError):
+                    pass
+        material_ids = set(Product.objects.filter(id__in=raw_ids).values_list('id', flat=True))
+        saved = 0
+        for item in items:
+            try:
+                material_id = int(item['material_id'])
+                if material_id not in material_ids:
+                    continue
+                progress_date = datetime.strptime(item['progress_date'], '%Y-%m-%d').date()
+                progress = Decimal(str(item['progress']))
+            except (InvalidOperation, KeyError, TypeError, ValueError):
+                continue
+            LaserWeeklyMaterialDailyProgress.objects.update_or_create(
+                material_id=material_id, progress_date=progress_date,
+                defaults={'progress': progress},
+            )
+            saved += 1
+        return Response({'saved_count': saved})
 
     @action(detail=False, methods=['get', 'post'], url_path='material-order-progress')
     def material_order_progress(self, request):

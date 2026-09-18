@@ -1485,6 +1485,9 @@ const dsSources = [
   { op: 'BOM 読み取り', table: 'm_bom / m_bom_item', desc: '部品表（材料構成）' },
   { op: 'カレンダー 読み取り', table: 'm_calendar / m_calendar_day', desc: '営業日カレンダー' },
   { op: '勤務パターン 読み取り', table: 'm_work_pattern', desc: '勤務パターンマスタ' },
+  { op: '材料期首進度 読み書き', table: 't_laser_weekly_material_initial_progress', desc: '材料セクションの期首進度' },
+  { op: '材料発注進度 読み書き', table: 't_laser_weekly_material_order_progress', desc: '材料セクションの発注・手数' },
+  { op: '材料日次進度 読み書き', table: 't_laser_weekly_material_daily_progress', desc: '材料セクションの日次進度（期首自動計算用）' },
 ]
 import LaserPatternEditor from './LaserPatternEditor.vue'
 import LaserMonthlyMaterialSummary from './LaserMonthlyMaterialSummary.vue'

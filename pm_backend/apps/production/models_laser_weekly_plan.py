@@ -114,12 +114,22 @@ class LaserWeeklyMaterialOrderProgress(models.Model):
 class LaserWeeklyMaterialInitialProgress(models.Model):
     plan_start_date = models.DateField(verbose_name='計画開始日')
     material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_initial_progresses')
-    initial_progress = models.IntegerField(default=0, verbose_name='期首進度')
+    initial_progress = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='期首進度')
     is_locked = models.BooleanField(default=False, verbose_name='ロック')
 
     class Meta:
         db_table = 't_laser_weekly_material_initial_progress'
         constraints = [models.UniqueConstraint(fields=['plan_start_date', 'material'], name='laser_weekly_material_initial_progress_unique')]
+
+
+class LaserWeeklyMaterialDailyProgress(models.Model):
+    material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_material_daily_progresses')
+    progress_date = models.DateField(verbose_name='日付')
+    progress = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='進度')
+
+    class Meta:
+        db_table = 't_laser_weekly_material_daily_progress'
+        constraints = [models.UniqueConstraint(fields=['material', 'progress_date'], name='laser_weekly_material_daily_progress_unique')]
 
 
 class LaserMaterialOrderEmailConfig(models.Model):
