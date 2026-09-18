@@ -113,7 +113,7 @@
       <template v-if="activeTab === 'summary'">
         <div class="summary-bar">
           <span>{{ summaryNames.length }}名</span>
-          <span style="font-size:12px;color:#6b7280;">— をクリックして登録</span>
+          <span style="font-size:12px;color:#6b7280;">— をクリックして登録／定時をクリックして取消</span>
         </div>
         <div class="table-wrap">
           <table class="stats-table summary-table">
@@ -133,9 +133,10 @@
                   class="num-cell work"
                   :class="{
                     'cell-empty': !summaryGrid[name]?.[d],
-                    'cell-label': summaryGrid[name]?.[d]?.label && !summaryGrid[name]?.[d]?.workH
+                    'cell-label': summaryGrid[name]?.[d]?.label && !summaryGrid[name]?.[d]?.workH,
+                    'cell-record': summaryGrid[name]?.[d]?.normalApplicationId,
                   }"
-                  @click="summaryGrid[name]?.[d] ? null : openEditModal(name, d)"
+                  @click="summaryGrid[name]?.[d] ? openExistingRecordModal(name, d) : openEditModal(name, d)"
                 >{{ getSummaryDisplay(summaryGrid[name]?.[d]) }}</td>
                 <td class="num-cell total-col">{{ summaryRowTotal(name) }}</td>
               </tr>
@@ -219,12 +220,12 @@
       <!-- 編集モーダル -->
       <div v-if="editModal.visible" class="modal-overlay" @click.self="editModal.visible = false">
         <div class="modal-box">
-          <div class="modal-title">勤務登録</div>
+          <div class="modal-title">{{ editModal.mode === 'delete' ? '勤務記録の取消' : '勤務登録' }}</div>
           <div class="modal-info">
             <span class="modal-name">{{ editModal.name }}</span>
             <span class="modal-date">{{ editModal.date }}</span>
           </div>
-          <div class="modal-field">
+          <div v-if="editModal.mode === 'create'" class="modal-field">
             <label>種別</label>
             <select v-model="editModal.type" class="modal-select">
               <option value="normal">定時（8H）</option>
@@ -233,11 +234,12 @@
               <option value="half_day_pm">午後半休</option>
             </select>
           </div>
+          <p v-else class="modal-message">この日の定時（8H）勤務記録を取り消します。取消後は「—」に戻ります。</p>
           <div v-if="editModal.error" class="modal-error">{{ editModal.error }}</div>
           <div class="modal-actions">
             <button class="btn btn-cancel" @click="editModal.visible = false">キャンセル</button>
-            <button class="btn btn-primary" :disabled="editModal.saving" @click="saveEdit">
-              {{ editModal.saving ? '保存中...' : '保存' }}
+            <button class="btn" :class="editModal.mode === 'delete' ? 'btn-danger' : 'btn-primary'" :disabled="editModal.saving" @click="editModal.mode === 'delete' ? deleteNormalRecord() : saveEdit()">
+              {{ editModal.saving ? '処理中...' : editModal.mode === 'delete' ? '取消' : '保存' }}
             </button>
           </div>
         </div>
@@ -528,9 +530,11 @@ const TYPE_LABELS = {
 // 編集モーダル
 const editModal = reactive({
   visible: false,
+  mode: 'create',
   name: '',
   date: '',
   applicantId: null,
+  applicationId: null,
   type: 'normal',
   saving: false,
   error: '',
@@ -543,9 +547,24 @@ function openEditModal(name, date) {
   const applicantId = row?.applicantId ?? user?.id ?? null
   if (!applicantId) return
   editModal.name = name
+  editModal.mode = 'create'
   editModal.date = date
   editModal.applicantId = applicantId
+  editModal.applicationId = null
   editModal.type = 'normal'
+  editModal.error = ''
+  editModal.saving = false
+  editModal.visible = true
+}
+
+function openExistingRecordModal(name, date) {
+  const cell = summaryGrid.value[name]?.[date]
+  if (!cell?.normalApplicationId) return
+  editModal.name = name
+  editModal.mode = 'delete'
+  editModal.date = date
+  editModal.applicantId = cell.applicantId
+  editModal.applicationId = cell.normalApplicationId
   editModal.error = ''
   editModal.saving = false
   editModal.visible = true
@@ -555,7 +574,7 @@ async function saveEdit() {
   editModal.saving = true
   editModal.error = ''
   try {
-    await api.overtime.createApplication({
+    const res = await api.overtime.createApplication({
       applicant: editModal.applicantId,
       work_date: editModal.date,
       application_type: editModal.type,
@@ -589,12 +608,30 @@ async function saveEdit() {
       paidLeaveCount: savedType === 'paid_leave' ? 1
         : (savedType === 'half_day_am' || savedType === 'half_day_pm') ? 0.5 : 0,
       applicantId: savedApplicantId,
+      applicationId: res.data?.id,
+      applicationType: savedType,
     })
   } catch (e) {
     const msg = e.response?.data?.non_field_errors?.[0]
       || e.response?.data?.detail
       || '保存に失敗しました'
     editModal.error = msg
+  } finally {
+    editModal.saving = false
+  }
+}
+
+async function deleteNormalRecord() {
+  if (!editModal.applicationId) return
+  if (!confirm(`${editModal.name}さんの${editModal.date}の定時勤務記録を取り消しますか？`)) return
+  editModal.saving = true
+  editModal.error = ''
+  try {
+    await api.overtime.deleteApplication(editModal.applicationId)
+    editModal.visible = false
+    await load()
+  } catch (e) {
+    editModal.error = e.response?.data?.detail || '取消に失敗しました'
   } finally {
     editModal.saving = false
   }
@@ -675,7 +712,12 @@ const summaryGrid = computed(() => {
   const grid = {}
   for (const row of filteredRows.value) {
     if (!grid[row.name]) grid[row.name] = {}
-    const cell = grid[row.name][row.date] || { workH: 0, label: '' }
+    const cell = grid[row.name][row.date] || {
+      workH: 0,
+      label: '',
+      applicantId: row.applicantId,
+      normalApplicationId: null,
+    }
     if (row.workH) {
       cell.workH = Math.round((cell.workH + row.workH) * 10) / 10
     }
@@ -683,6 +725,7 @@ const summaryGrid = computed(() => {
       if (row.paidLeave || row.paidLeaveConsec) cell.label = '有給'
       else if (row.halfDayPm || row.halfDayAm) cell.label = '半休'
     }
+    if (row.applicationType === 'normal') cell.normalApplicationId = row.applicationId
     grid[row.name][row.date] = cell
   }
   return grid
@@ -1045,6 +1088,8 @@ async function load() {
           paidLeaveConsec: false,
           paidLeaveCount: 0,
           applicantId,
+          applicationId: app.id,
+          applicationType: app.application_type,
         }
         if (app.application_type === 'normal') {
           row.workH = 8
@@ -1413,6 +1458,8 @@ onMounted(loadUsers)
 }
 .btn-primary { background: #40916c; color: white; }
 .btn-primary:hover { background: #2d6a4f; }
+.btn-danger { background: #dc2626; color: white; }
+.btn-danger:hover { background: #b91c1c; }
 .loading, .empty {
   padding: 40px;
   text-align: center;
@@ -1561,6 +1608,8 @@ onMounted(loadUsers)
   background: #f0fdf4;
   color: #40916c;
 }
+.cell-record { cursor: pointer; }
+.cell-record:hover { background: #fff7ed; color: #c2410c; }
 .cell-label {
   text-align: center;
   color: #2563eb;
@@ -1618,6 +1667,7 @@ onMounted(loadUsers)
   font-size: 13px;
   margin-bottom: 12px;
 }
+.modal-message { margin: 0 0 20px; font-size: 14px; color: #374151; }
 .modal-actions {
   display: flex;
   justify-content: flex-end;

@@ -527,9 +527,9 @@ class OvertimeApplicationViewSet(viewsets.ModelViewSet):
         app = self.get_object()
         if not can_manage_application(request.user, app):
             return Response({'detail': '権限がありません。'}, status=status.HTTP_403_FORBIDDEN)
-        if app.status not in ('draft', 'submitted', 'rejected'):
+        if app.status not in ('draft', 'submitted', 'rejected') and app.application_type != 'normal':
             return Response(
-                {'detail': '承認済み申請は削除できません。'},
+                {'detail': '承認済み申請は削除できません。定時勤務記録のみ取消できます。'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         # 申請中の場合はpendingログもクリアして削除
