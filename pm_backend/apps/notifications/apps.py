@@ -9,6 +9,9 @@ class NotificationsConfig(AppConfig):
     name = 'notifications'
 
     def ready(self):
+        from . import error_notify
+        error_notify.register()
+
         if os.environ.get('RUN_MAIN') != 'true':
             return
         threading.Thread(target=self._startup_tasks, daemon=True).start()
