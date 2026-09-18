@@ -733,7 +733,18 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             context__supplier=supplier,
         ).order_by('-updated_at').first()
         if not approval:
-            return Response({'detail': '指定期間の保存済み注文書が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+            # BOSS承認済フォールバック: 承認履歴がなくても、保存済み注文書は固定命名規則で参照できる。
+            filename = (
+                f'laser_material_order_{export_start_date:%Y%m%d}_'
+                f'{export_end_date:%Y%m%d}_{supplier.lower()}.pdf'
+            )
+            media_root = Path(settings.MEDIA_ROOT).resolve()
+            file_path = (media_root / 'approval_material_orders' / filename).resolve()
+            if not str(file_path).startswith(str(media_root)) or not file_path.exists():
+                return Response({'detail': '指定期間の保存済み注文書が見つかりません。'}, status=status.HTTP_400_BAD_REQUEST)
+            response = FileResponse(file_path.open('rb'), content_type='application/pdf')
+            response['Content-Disposition'] = f"inline; filename*=UTF-8''{quote(filename)}"
+            return response
 
         saved_files = (approval.context or {}).get('material_order_pdf_files') or {}
         file_info = saved_files.get(supplier)
