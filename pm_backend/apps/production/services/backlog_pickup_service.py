@@ -1,6 +1,6 @@
 """LineBacklogViewSet の取り込み・展開系サービス"""
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -27,6 +27,7 @@ from masters.services.routing_service import (
     build_effective_routing_range_q,
     normalize_routing_reference_datetime,
 )
+from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from production.inventory.lead_time_utils import resolve_lead_days_for_step
 from production.inventory.trace_debug import trace_log
 from production.models import LineDemand
@@ -1459,7 +1460,24 @@ def pickup_purchase(viewset, request, **deps):
     end_date = request.data.get('end_date')
     start_dt = _parse_optional_date(start_date)
     end_dt = _parse_optional_date(end_date)
-    routing_source_q = build_effective_routing_range_q(start_dt, end_dt, prefix='routing__')
+    if start_dt and end_dt:
+        if start_dt > end_dt:
+            return Response({'detail': 'start_date must be on or before end_date'}, status=status.HTTP_400_BAD_REQUEST)
+        if (end_dt - start_dt).days + 1 > 120:
+            return Response({'detail': 'purchase pickup period must be 120 days or less'}, status=status.HTTP_400_BAD_REQUEST)
+    routing_start_ref = start_dt
+    routing_end_ref = end_dt
+    if start_dt and end_dt:
+        routing_start_ref = datetime.combine(start_dt, time(DAY_BOUNDARY_HOUR, 0))
+        routing_end_ref = (
+            datetime.combine(end_dt + timedelta(days=1), time(DAY_BOUNDARY_HOUR, 0))
+            - timedelta(microseconds=1)
+        )
+    routing_source_q = build_effective_routing_range_q(
+        routing_start_ref,
+        routing_end_ref,
+        prefix='routing__',
+    )
     
     _t1 = _time.perf_counter()
     logger.info('[pickup_purchase] setup: %.3fs', _t1 - _t0)
@@ -1531,6 +1549,17 @@ def pickup_purchase(viewset, request, **deps):
     # ルーティングステップのG工程 or 外作区分でBUY/SUBCONを判定
     # pickup_purchase文脈ではrouting_stepsは仕入先ライン限定のため、
     # process_code='G' または process.is_outsource=True の工程のみSUBCONとみなす
+    routing_base_keys = set()
+    routing_base_skipped_no_process = 0
+
+    def routing_business_date(value):
+        normalized = normalize_routing_reference_datetime(value)
+        if normalized is None:
+            return None
+        if normalized.time() < time(DAY_BOUNDARY_HOUR, 0):
+            normalized -= timedelta(days=1)
+        return normalized.date()
+
     for step in routing_steps:
         source_parent_id = None
         if step.routing_id and getattr(step.routing, 'product_id', None):
@@ -1540,6 +1569,26 @@ def pickup_purchase(viewset, request, **deps):
         child_id = step.output_product_id
         if not source_parent_id or not child_id:
             continue
+
+        # 需要取込より先に、表示期間内のルーティング出力品へ基礎行を用意する。
+        # 有効期間外の日付や工程未設定のステップは対象にしない。
+        if start_dt and end_dt:
+            if step.process_id:
+                routing_obj = getattr(step, 'routing', None)
+                valid_from_dt = getattr(routing_obj, 'valid_from_datetime', None)
+                valid_to_dt = getattr(routing_obj, 'valid_to_datetime', None)
+                valid_from = routing_business_date(valid_from_dt) if valid_from_dt else None
+                valid_to = routing_business_date(valid_to_dt) if valid_to_dt else None
+                valid_from = valid_from or start_dt
+                valid_to = valid_to or end_dt
+                window_start = max(start_dt, valid_from)
+                window_end = min(end_dt, valid_to)
+                current_date = window_start
+                while current_date <= window_end:
+                    routing_base_keys.add((child_id, current_date, step.process_id))
+                    current_date += timedelta(days=1)
+            else:
+                routing_base_skipped_no_process += 1
     
         # 非最終品に対して最終品LineDemandを直接需要源にしない。
         # ルーティング由来の直結で source_parent が最終品、child が非最終品の場合は
@@ -1568,6 +1617,39 @@ def pickup_purchase(viewset, request, **deps):
             continue
         relation_keys.add(key)
         parent_to_children[source_parent_id].append((child_id, qty, lead_time_days))
+
+    routing_base_created = 0
+    if routing_base_keys:
+        base_product_ids = {key[0] for key in routing_base_keys}
+        base_process_ids = {key[2] for key in routing_base_keys}
+        existing_base_keys = set(
+            LineBacklog.objects.filter(
+                line_id=line_id,
+                product_id__in=base_product_ids,
+                process_id__in=base_process_ids,
+                plan_date__range=[start_dt, end_dt],
+                sequence_no=0,
+            ).values_list('product_id', 'plan_date', 'process_id')
+        )
+        base_rows = [
+            LineBacklog(
+                plan_date=plan_date,
+                process_id=step_process_id,
+                product_id=product_id,
+                line_id=line_id,
+                sequence_no=0,
+                order_qty=0,
+                order_qty_actual=0,
+                demand_qty_plan=0,
+                plan_qty=0,
+                actual_qty=0,
+            )
+            for product_id, plan_date, step_process_id in sorted(routing_base_keys)
+            if (product_id, plan_date, step_process_id) not in existing_base_keys
+        ]
+        if base_rows:
+            LineBacklog.objects.bulk_create(base_rows, batch_size=500, ignore_conflicts=True)
+            routing_base_created = len(base_rows)
     
     _t2 = _time.perf_counter()
     logger.info('[pickup_purchase] bom+routing scan: %.3fs (parents=%d, children=%d, subcon=%d)', _t2 - _t1, len(parent_ids), len(child_ids), len([pid for pid in child_process_map.values() if pid]))
@@ -1883,12 +1965,41 @@ def pickup_purchase(viewset, request, **deps):
     
     # SUBCON品はG工程（または外作区分）、BUY品はPURCHASEプロセスで既存レコードを検索
     all_process_ids = set(child_process_map.values())
+    all_process_ids.update(key[2] for key in routing_base_keys)
     if process_id:
         all_process_ids.add(process_id)
+
+    # 旧データで計画行(sequence_no>0)に入っている需要値だけを除去する。
+    # 計画数は計画行の正規データなので変更しない。
+    legacy_plan_demand_qs = LineBacklog.objects.filter(
+        line_id=line_id,
+        process_id__in=all_process_ids,
+        product_id__in=target_product_ids,
+        sequence_no__gt=0,
+    ).filter(
+        Q(order_qty__gt=0)
+        | Q(order_qty__lt=0)
+        | Q(order_qty_actual__gt=0)
+        | Q(order_qty_actual__lt=0)
+        | Q(demand_qty_plan__gt=0)
+        | Q(demand_qty_plan__lt=0)
+    )
+    if start_dt:
+        legacy_plan_demand_qs = legacy_plan_demand_qs.filter(plan_date__gte=start_dt)
+    if end_dt:
+        legacy_plan_demand_qs = legacy_plan_demand_qs.filter(plan_date__lte=end_dt)
+    legacy_plan_demand_cleared = legacy_plan_demand_qs.update(
+        order_qty=0,
+        order_qty_actual=0,
+        demand_qty_plan=0,
+        updated_at=datetime.now(),
+    )
+
     existing_qs = LineBacklog.objects.filter(
         line_id=line_id,
         process_id__in=all_process_ids,
         product_id__in=target_product_ids,
+        sequence_no=0,
     )
     if start_dt:
         existing_qs = existing_qs.filter(plan_date__gte=start_dt)
@@ -1966,7 +2077,16 @@ def pickup_purchase(viewset, request, **deps):
     logger.info('[pickup_purchase] DB write: %.3fs (created=%d, updated=%d, touched=%d, zeroed=%d)', _t6 - _t5, len(to_create), len(to_update), len(touch_update), len(zero_update))
     logger.info('[pickup_purchase] TOTAL: %.3fs', _t6 - _t0)
     
-    return Response({'created': created, 'updated': updated, 'items': len(demand_map), 'line_id': line_id, 'process_id': process_id})
+    return Response({
+        'created': created,
+        'updated': updated,
+        'items': len(demand_map),
+        'routing_base_created': routing_base_created,
+        'routing_base_skipped_no_process': routing_base_skipped_no_process,
+        'legacy_plan_demand_cleared': legacy_plan_demand_cleared,
+        'line_id': line_id,
+        'process_id': process_id,
+    })
 
 def pickup_purchase_for_products(viewset, request, **deps):
     self = viewset

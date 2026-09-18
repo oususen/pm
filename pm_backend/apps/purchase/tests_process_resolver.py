@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -429,6 +429,229 @@ class PurchaseProcessResolverTest(TestCase):
         )
         self.assertEqual(backlog.order_qty, 12)
         self.assertEqual(backlog.demand_qty_plan, 12)
+
+    def test_pickup_purchase_creates_base_rows_on_routing_business_dates(self):
+        supplier_line = resolve_purchase_line(self.buy_supplier)
+        purchase_process = resolve_supplier_process(
+            supplier=self.buy_supplier,
+            line=supplier_line,
+            product=self.buy_child,
+            sourcing_type='BUY',
+            create_purchase_process=True,
+        )
+        routing = Routing.objects.create(
+            product=self.parent,
+            routing_code='R-PICKUP-BASE',
+            is_default=True,
+            is_active=True,
+            valid_from_datetime=datetime(2026, 7, 21, 7, 59),
+            valid_to_datetime=datetime(2026, 7, 22, 7, 59),
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=purchase_process,
+            line=supplier_line,
+            supplier=self.buy_supplier,
+            output_product=self.buy_child,
+        )
+
+        view = LineBacklogViewSet.as_view({'post': 'pickup_purchase'})
+        request = self.factory.post(
+            '/api/line-backlogs/pickup_purchase/',
+            {
+                'supplier_id': self.buy_supplier.id,
+                'start_date': '2026-07-19',
+                'end_date': '2026-07-22',
+            },
+            format='json',
+        )
+        response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['routing_base_created'], 2)
+        rows = LineBacklog.objects.filter(
+            line=supplier_line,
+            process=purchase_process,
+            product=self.buy_child,
+            sequence_no=0,
+        ).order_by('plan_date')
+        self.assertEqual(list(rows.values_list('plan_date', flat=True)), [
+            date(2026, 7, 20),
+            date(2026, 7, 21),
+        ])
+        self.assertTrue(all(row.order_qty == 0 for row in rows))
+        self.assertTrue(all(row.demand_qty_plan == 0 for row in rows))
+
+    def test_pickup_purchase_creates_unbounded_base_rows_and_clears_only_legacy_plan_demand(self):
+        supplier_line = resolve_purchase_line(self.buy_supplier)
+        purchase_process = resolve_supplier_process(
+            supplier=self.buy_supplier,
+            line=supplier_line,
+            product=self.buy_child,
+            sourcing_type='BUY',
+            create_purchase_process=True,
+        )
+        routing = Routing.objects.create(
+            product=self.parent,
+            routing_code='R-PICKUP-BASE-UNBOUNDED',
+            is_default=True,
+            is_active=True,
+            valid_from_datetime=None,
+            valid_to_datetime=None,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=purchase_process,
+            line=supplier_line,
+            supplier=self.buy_supplier,
+            output_product=self.buy_child,
+        )
+        plan_row = LineBacklog.objects.create(
+            plan_date=date(2026, 7, 20),
+            process=purchase_process,
+            product=self.buy_child,
+            line=supplier_line,
+            sequence_no=1,
+            plan_qty=9,
+            order_qty=77,
+            order_qty_actual=55,
+            demand_qty_plan=66,
+        )
+
+        view = LineBacklogViewSet.as_view({'post': 'pickup_purchase'})
+        request = self.factory.post(
+            '/api/line-backlogs/pickup_purchase/',
+            {
+                'supplier_id': self.buy_supplier.id,
+                'start_date': '2026-07-20',
+                'end_date': '2026-07-21',
+            },
+            format='json',
+        )
+        response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['routing_base_created'], 2)
+        self.assertEqual(response.data['legacy_plan_demand_cleared'], 1)
+        self.assertEqual(
+            LineBacklog.objects.filter(
+                line=supplier_line,
+                process=purchase_process,
+                product=self.buy_child,
+                sequence_no=0,
+            ).count(),
+            2,
+        )
+        plan_row.refresh_from_db()
+        self.assertEqual(plan_row.plan_qty, 9)
+        self.assertEqual(plan_row.order_qty, 0)
+        self.assertEqual(plan_row.order_qty_actual, 0)
+        self.assertEqual(plan_row.demand_qty_plan, 0)
+
+    def test_pickup_purchase_skips_routing_step_without_process(self):
+        supplier_line = resolve_purchase_line(self.buy_supplier)
+        routing = Routing.objects.create(
+            product=self.parent,
+            routing_code='R-PICKUP-BASE-NO-PROCESS',
+            is_default=True,
+            is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=None,
+            line=supplier_line,
+            supplier=self.buy_supplier,
+            output_product=self.buy_child,
+        )
+
+        view = LineBacklogViewSet.as_view({'post': 'pickup_purchase'})
+        request = self.factory.post(
+            '/api/line-backlogs/pickup_purchase/',
+            {
+                'supplier_id': self.buy_supplier.id,
+                'start_date': '2026-07-20',
+                'end_date': '2026-07-21',
+            },
+            format='json',
+        )
+        response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['routing_base_created'], 0)
+        self.assertEqual(response.data['routing_base_skipped_no_process'], 1)
+
+    @patch('production.services.backlog_pickup_service.normalize_routing_reference_datetime', return_value=None)
+    def test_pickup_purchase_uses_requested_dates_when_routing_datetime_normalization_returns_none(self, _normalize):
+        supplier_line = resolve_purchase_line(self.buy_supplier)
+        purchase_process = resolve_supplier_process(
+            supplier=self.buy_supplier,
+            line=supplier_line,
+            product=self.buy_child,
+            sourcing_type='BUY',
+            create_purchase_process=True,
+        )
+        routing = Routing.objects.create(
+            product=self.parent,
+            routing_code='R-PICKUP-BASE-NORMALIZE-NONE',
+            is_default=True,
+            is_active=True,
+            valid_from_datetime=datetime(2026, 7, 1, 8, 0),
+            valid_to_datetime=datetime(2026, 7, 31, 8, 0),
+        )
+        RoutingStep.objects.create(
+            routing=routing,
+            step_no=10,
+            process=purchase_process,
+            line=supplier_line,
+            supplier=self.buy_supplier,
+            output_product=self.buy_child,
+        )
+
+        view = LineBacklogViewSet.as_view({'post': 'pickup_purchase'})
+        request = self.factory.post(
+            '/api/line-backlogs/pickup_purchase/',
+            {
+                'supplier_id': self.buy_supplier.id,
+                'start_date': '2026-07-20',
+                'end_date': '2026-07-21',
+            },
+            format='json',
+        )
+        response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['routing_base_created'], 2)
+        self.assertEqual(
+            list(
+                LineBacklog.objects.filter(
+                    line=supplier_line,
+                    process=purchase_process,
+                    product=self.buy_child,
+                    sequence_no=0,
+                ).order_by('plan_date').values_list('plan_date', flat=True)
+            ),
+            [date(2026, 7, 20), date(2026, 7, 21)],
+        )
+
+    def test_pickup_purchase_rejects_period_longer_than_120_days(self):
+        view = LineBacklogViewSet.as_view({'post': 'pickup_purchase'})
+        request = self.factory.post(
+            '/api/line-backlogs/pickup_purchase/',
+            {
+                'supplier_id': self.buy_supplier.id,
+                'start_date': '2026-01-01',
+                'end_date': '2026-05-01',
+            },
+            format='json',
+        )
+
+        response = view(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('120', response.data['detail'])
 
     def test_pickup_purchase_touches_updated_at_when_quantity_is_unchanged(self):
         supplier_line = resolve_purchase_line(self.buy_supplier)
