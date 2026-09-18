@@ -269,6 +269,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
     purchase_count = 0
     recalc_count = 0
     progress_count = 0
+    progress_line_count = 0
     canceled = False
     cancel_message = ''
     direct_lt_cache = {}
@@ -284,6 +285,29 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
             return True
         return False
 
+    def update_running_progress(step, completed, total, line=None, line_seconds=None):
+        """実行中画面へ進捗を表示し、処理時間を通常ログへ記録する。"""
+        if not config:
+            return
+
+        line_label = f'（現在: {line.line_code} {line.line_name}）' if line else ''
+        timing_label = f' / {line_seconds:.1f}秒' if line_seconds is not None else ''
+        message = (
+            f'実行中: {step} {completed}/{total}完了{line_label}'
+            f' / 経過 {time.perf_counter() - start_time:.1f}秒{timing_label}'
+        )
+        # キャンセル要求の印を上書きしない。
+        updated = (
+            ScheduleConfig.objects.filter(id=config.id, last_run_status='RUNNING')
+            .exclude(last_run_message__contains=CANCEL_REQUEST_MARKER)
+            .update(
+                last_run_message=message,
+                last_run_duration_seconds=round(time.perf_counter() - start_time, 2),
+            )
+        )
+        if updated:
+            logger.info('[スケジューラ] %s', message)
+
     # ViewSetインスタンスを準備
     viewset = LineBacklogViewSet()
     viewset.format_kwarg = None
@@ -291,13 +315,16 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
 
     try:
         if task_spec['pickup_prod'] and not should_cancel('取り込み開始前'):
-            pickup_lines = Line.objects.filter(is_active=True).exclude(line_type='PURCHASE')
-            logger.info(f'[スケジューラ] Step 1: pickup開始 ({pickup_lines.count()}ライン)')
+            pickup_lines = list(Line.objects.filter(is_active=True).exclude(line_type='PURCHASE'))
+            pickup_total = len(pickup_lines)
+            logger.info(f'[スケジューラ] Step 1: pickup開始 ({pickup_total}ライン)')
 
             for line in pickup_lines:
                 if should_cancel(f'pickup前 line={line.line_code}'):
                     break
                 try:
+                    update_running_progress('取込', pickup_count, pickup_total, line)
+                    line_started = time.perf_counter()
                     trace_line_log(line.id, start_date, f'pickup開始: line_code={line.line_code}, start={start_date}, end={end_date}')
                     logger.info(
                         f'[スケジューラ] pickup: ライン {line.line_code} ({line.line_name})'
@@ -310,6 +337,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     viewset.request = request
                     viewset.pickup(request)
                     pickup_count += 1
+                    update_running_progress('取込', pickup_count, pickup_total, line, time.perf_counter() - line_started)
                 except Exception as e:
                     error_msg = f'pickup {line.line_code}: {str(e)}'
                     logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
@@ -322,11 +350,14 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
             logger.info(
                 f'[スケジューラ] Step 2: pickup_purchase開始 ({len(purchase_lines)}ライン)'
             )
+            purchase_total = len(purchase_lines)
 
             for line in purchase_lines:
                 if should_cancel(f'pickup_purchase前 line={line.line_code}'):
                     break
                 try:
+                    update_running_progress('購買取込', purchase_count, purchase_total, line)
+                    line_started = time.perf_counter()
                     trace_line_log(line.id, start_date, f'pickup_purchase開始: line_code={line.line_code}, start={start_date}, end={end_date}')
                     logger.info(
                         f'[スケジューラ] pickup_purchase: line={line.line_code} ({line.line_name})'
@@ -339,20 +370,24 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                     viewset.request = request
                     viewset.pickup_purchase(request)
                     purchase_count += 1
+                    update_running_progress('購買取込', purchase_count, purchase_total, line, time.perf_counter() - line_started)
                 except Exception as e:
                     error_msg = f'pickup_purchase {line.line_code}: {str(e)}'
                     logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
                     errors.append(error_msg)
 
-        active_lines = Line.objects.filter(is_active=True)
+        active_lines = list(Line.objects.filter(is_active=True))
+        active_line_total = len(active_lines)
         if task_spec['inventory'] and not should_cancel('在庫再計算開始前'):
             logger.info(
-                f'[スケジューラ] Step 3: 在庫再計算開始 ({active_lines.count()}ライン)'
+                f'[スケジューラ] Step 3: 在庫再計算開始 ({active_line_total}ライン)'
             )
             for line in active_lines:
                 if should_cancel(f'在庫再計算前 line={line.line_code}'):
                     break
                 try:
+                    update_running_progress('在庫・進度計算', recalc_count, active_line_total, line)
+                    line_started = time.perf_counter()
                     effective_start_date = _resolve_effective_start_date(
                         line,
                         start_date,
@@ -386,6 +421,7 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                             or recalc_result.get('product_count')
                             or 0
                         )
+                    update_running_progress('在庫・進度計算', recalc_count, active_line_total, line, time.perf_counter() - line_started)
                 except Exception as e:
                     error_msg = f'在庫再計算 {line.line_code}: {str(e)}'
                     logger.error(f'[スケジューラ] {error_msg}', exc_info=True)
@@ -393,12 +429,14 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
 
         if task_spec['progress'] and not should_cancel('進度再計算開始前'):
             logger.info(
-                f'[スケジューラ] Step 4: 進度再計算開始 ({active_lines.count()}ライン)'
+                f'[スケジューラ] Step 4: 進度再計算開始 ({active_line_total}ライン)'
             )
             for line in active_lines:
                 if should_cancel(f'進度再計算前 line={line.line_code}'):
                     break
                 try:
+                    update_running_progress('進度計算', progress_line_count, active_line_total, line)
+                    line_started = time.perf_counter()
                     line_effective_start_date = _resolve_effective_start_date(
                         line,
                         start_date,
@@ -451,6 +489,8 @@ def run_inventory_recalculation(task_name='INVENTORY_RECALC'):
                             planned_progress_adjust_map=adjustment_maps.get('PLANNED_PROGRESS'),
                         )
                         progress_count += 1
+                    progress_line_count += 1
+                    update_running_progress('進度計算', progress_line_count, active_line_total, line, time.perf_counter() - line_started)
                 except Exception as e:
                     error_msg = f'進度再計算 {line.line_code}: {str(e)}'
                     logger.error(f'[スケジューラ] {error_msg}', exc_info=True)

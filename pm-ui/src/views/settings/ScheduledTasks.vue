@@ -1920,7 +1920,7 @@ const startPollingIfRunning = () => {
   running.add(key)
   stopPolling()
   const pollStart = Date.now()
-  const POLL_TIMEOUT = 10 * 60 * 1000
+  const POLL_TIMEOUT = 60 * 60 * 1000
   pollTimer.value = setInterval(async () => {
     if (Date.now() - pollStart > POLL_TIMEOUT) {
       stopPolling()
