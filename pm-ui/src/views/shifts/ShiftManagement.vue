@@ -1,7 +1,7 @@
 <template>
   <div class="shift-management">
     <div class="top">
-      <h1>シフト管理</h1>
+      <h1>シフト管理 <DataSourceDialog title="シフト管理" :sources="dsSources" /></h1>
       <div class="tabs">
         <button :class="{ on: activeTab === 'chart' }" @click="activeTab = 'chart'">シフトチャート</button>
         <button :class="{ on: activeTab === 'week' }" @click="activeTab = 'week'">週間作成</button>
@@ -224,6 +224,17 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 'shifts_shiftline', desc: '勤務ラインの取得・登録・更新・削除' },
+  { op: '読み書き', table: 'shifts_shiftworker', desc: 'ライン別作業者の取得・登録・更新・並び替え・削除' },
+  { op: '読み書き', table: 'shifts_shiftlineprocess', desc: 'ライン別工程・活動設定の取得・登録・更新・削除' },
+  { op: '読み書き', table: 'shifts_shiftassignment', desc: '日別・週間のシフト配置の取得・登録・更新・削除・複写' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '作業者候補の取得・表示' },
+  { op: '読み取り', table: 'm_process / m_line', desc: '工程・生産ラインの取得・表示' },
+  { op: '読み取り', table: 't_line_gantt_plan', desc: '工程別負荷時間の集計表示' },
+]
 
 // --- 状態 ---
 const lines = ref([])

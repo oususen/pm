@@ -257,8 +257,9 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み書き', table: 't_overtime_application', desc: '残業・有給申請データの取得・勤務登録' },
-  { op: '読み取り', table: 't_user / t_user_profile', desc: '作業者一覧の取得' },
-  { op: '読み取り', table: 't_calendar / t_calendar_day', desc: 'DAISOカレンダー非稼働日の取得' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '作業者一覧・所属の取得' },
+  { op: '読み取り', table: 'accounts_department', desc: '所属組織による絞り込み' },
+  { op: '読み取り', table: 'm_calendar / m_calendar_day', desc: 'DAISOカレンダー非稼働日の取得' },
 ]
 
 // デフォルト: 今月の1日〜末日

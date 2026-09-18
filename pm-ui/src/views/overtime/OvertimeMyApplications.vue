@@ -1,7 +1,7 @@
 <template>
   <div class="ot-list-page">
     <div class="page-header">
-      <h1 class="page-title">自分の申請一覧</h1>
+      <h1 class="page-title">自分の申請一覧 <DataSourceDialog title="自分の申請一覧" :sources="dsSources" /></h1>
       <RouterLink to="/overtime/apply" class="btn btn-primary">新規申請</RouterLink>
     </div>
 
@@ -136,6 +136,13 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { authState } from '@/auth'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_overtime_application', desc: '本人または自分が登録した申請の取得・取消・削除' },
+  { op: '読み取り', table: 't_overtime_approval_log', desc: '申請詳細の承認履歴表示' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '本人・承認者の表示' },
+]
 
 const applications = ref([])
 const loading = ref(false)

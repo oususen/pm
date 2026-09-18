@@ -1,7 +1,7 @@
 <template>
   <div class="ot-approval-page">
     <div class="page-header">
-      <h1 class="page-title">{{ t('approvalList.pageTitle') }}</h1>
+      <h1 class="page-title">{{ t('approvalList.pageTitle') }} <DataSourceDialog title="承認待ち一覧" :sources="dsSources" /></h1>
       <button
         v-if="selectedIds.length > 0"
         class="btn btn-bulk"
@@ -191,6 +191,15 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { op: '読み書き', table: 't_overtime_application', desc: '承認待ち申請の取得・承認状態更新' },
+  { op: '読み書き', table: 't_overtime_approval_log', desc: '承認待ち抽出、承認・差戻し・一括承認の記録' },
+  { op: '読み書き', table: 'notifications', desc: '承認完了・差戻し通知の登録' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '申請者・承認者・所属の表示と承認対象判定' },
+  { op: '読み取り', table: 'accounts_department', desc: '班・グループによる絞り込み表示' },
+]
 import { authState } from '@/auth'
 import { t } from '@/i18n'
 

@@ -236,6 +236,10 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み書き', table: 't_overtime_application', desc: '残業申請の取得・削除・PDF出力' },
+  { op: '読み書き', table: 't_overtime_approval_log', desc: '承認履歴の表示・班長承認取消時の更新' },
+  { op: '読み書き', table: 'notifications', desc: '承認取消に伴う通知の登録' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '申請者・承認者・所属の表示' },
+  { op: '読み取り', table: 'accounts_department', desc: '組織フィルタ・PDF出力対象の取得' },
 ]
 
 const applications = ref([])

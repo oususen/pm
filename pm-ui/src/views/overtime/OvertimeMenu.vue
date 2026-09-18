@@ -1,6 +1,6 @@
 <template>
   <div class="overtime-menu">
-    <h1 class="page-title">勤務管理</h1>
+    <h1 class="page-title">勤務管理 <DataSourceDialog title="勤務管理" :sources="dsSources" /></h1>
     <div class="menu-grid">
       <RouterLink to="/overtime/apply" class="menu-card">
         <div class="menu-icon">📝</div>
@@ -46,6 +46,25 @@
 import { ref, computed, onMounted } from 'vue'
 import { authState } from '@/auth'
 import api from '@/api/client'
+import DataSourceDialog from '@/components/DataSourceDialog.vue'
+
+const dsSources = [
+  { section: '残業・休暇申請' },
+  { op: '読み書き', table: 't_overtime_application', desc: '残業・休暇申請の登録、一覧・統計表示' },
+  { op: '読み書き', table: 't_overtime_approval_log', desc: '承認待ち件数・承認履歴の登録と表示' },
+  { op: '読み書き', table: 'notifications', desc: '申請・承認に伴う通知の登録' },
+  { section: '組織・利用者' },
+  { op: '読み取り', table: 'auth_user', desc: '申請者・承認者・作業者の表示' },
+  { op: '読み取り', table: 'accounts_userprofile', desc: '役割・所属・担当組織の判定' },
+  { op: '読み取り', table: 'accounts_department', desc: '班・グループなど所属組織の表示と絞り込み' },
+  { section: 'シフトチャート' },
+  { op: '読み書き', table: 'shifts_shiftline', desc: '勤務ラインの管理' },
+  { op: '読み書き', table: 'shifts_shiftworker', desc: 'ライン別作業者の管理' },
+  { op: '読み書き', table: 'shifts_shiftlineprocess', desc: 'ライン別工程・活動設定の管理' },
+  { op: '読み書き', table: 'shifts_shiftassignment', desc: 'シフト配置の登録・更新・削除' },
+  { op: '読み取り', table: 'm_process / m_line', desc: '工程・生産ラインの表示' },
+  { op: '読み取り', table: 't_line_gantt_plan', desc: '工程別負荷時間の集計表示' },
+]
 
 const pendingCount = ref(0)
 

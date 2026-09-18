@@ -178,7 +178,12 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み書き', table: 't_overtime_application', desc: '残業申請の作成・更新・提出・署名アップロード' },
-  { op: '読み取り', table: 't_user / t_user_profile', desc: '対象者一覧の取得' },
+  { op: '読み書き', table: 't_overtime_approval_log', desc: '提出時の承認待ち記録の作成・再申請時の削除' },
+  { op: '読み書き', table: 'notifications', desc: '記録完了・承認完了通知の登録' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '対象者・承認者・役割の取得' },
+  { op: '読み取り', table: 'accounts_department', desc: '対象者の所属組織・承認範囲の取得' },
+  { op: '読み取り', table: 'm_work_pattern / m_break_time', desc: '休日出勤時の勤務パターン・休憩時間の取得' },
+  { op: '読み取り', table: 't_process_work_session / brake_line_record', desc: '未終了の加工実績チェック' },
 ]
 
 // "800" "0800" "8:00" "08:00" → "08:00"、変換不能なら元の値を返す

@@ -147,8 +147,9 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
 const dsSources = [
   { op: '読み取り', table: 't_overtime_application', desc: '残業申請データの取得' },
-  { op: '読み取り', table: 't_user / t_user_profile', desc: '作業者一覧の取得' },
-  { op: '読み取り', table: 'レーザー/ブレーキ/工程実績', desc: '加工実績集計の取得' },
+  { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '作業者一覧・所属の取得' },
+  { op: '読み取り', table: 'accounts_department', desc: '所属組織による絞り込み' },
+  { op: '読み取り', table: 't_process_work_session / brake_line_record', desc: '加工実績集計の取得' },
 ]
 
 const today = new Date()
