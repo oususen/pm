@@ -17,8 +17,8 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveInitialProgress(items) {
     return client.post('/laser-weekly-plans/save-initial-progress/', { items })
   },
-  getMaterialOrderProgress(startDate) {
-    return client.get('/laser-weekly-plans/material-order-progress/', { params: { start_date: startDate } })
+  getMaterialOrderProgress(startDate, displayStart = '', displayEnd = '') {
+    return client.get('/laser-weekly-plans/material-order-progress/', { params: { start_date: startDate, display_start: displayStart, display_end: displayEnd } })
   },
   saveMaterialOrderProgress(startDate, items) {
     return client.post('/laser-weekly-plans/material-order-progress/', { start_date: startDate, items })
@@ -32,8 +32,8 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   saveMaterialDailyProgress(items) {
     return client.post('/laser-weekly-plans/material-daily-progress/', { items })
   },
-  getMaterialOrderApproval(startDate) {
-    return client.get('/laser-weekly-plans/material-order-approval/', { params: { start_date: startDate } })
+  getMaterialOrderApproval(startDate, displayStart = '', displayEnd = '') {
+    return client.get('/laser-weekly-plans/material-order-approval/', { params: { start_date: startDate, display_start: displayStart, display_end: displayEnd } })
   },
   getMaterialOrderEmailConfigs() {
     return client.get('/laser-material-order-email-configs/')

@@ -139,7 +139,25 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 supplier = (approval.context or {}).get('supplier')
                 if supplier in MATERIAL_ORDER_SUPPLIER_CODES and supplier not in by_supplier:
                     by_supplier[supplier] = ApprovalRequestSerializer(approval).data
-            return Response({'approvals': by_supplier})
+
+            display_start = request.query_params.get('display_start')
+            display_end = request.query_params.get('display_end')
+            overlapping = []
+            if display_start and display_end:
+                all_approvals = ApprovalRequest.objects.filter(
+                    route_config=route_config,
+                    status__in=['created', 'reviewing', 'approved', 'sent'],
+                ).exclude(
+                    context__start_date=plan_start_date.isoformat(),
+                ).order_by('-updated_at')
+                for appr in all_approvals:
+                    ctx = appr.context or {}
+                    lock_s = ctx.get('lock_start_date', '')
+                    lock_e = ctx.get('lock_end_date', '')
+                    if lock_s and lock_e and lock_s <= display_end and lock_e >= display_start:
+                        overlapping.append(ApprovalRequestSerializer(appr).data)
+
+            return Response({'approvals': by_supplier, 'overlapping_approvals': overlapping})
 
         lock_start_date = request.data.get('lock_start_date')
         lock_end_date = request.data.get('lock_end_date')
@@ -312,11 +330,28 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             except (KeyError, ValueError):
                 return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
             rows = LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, is_manual=False).select_related('material')
-            return Response([{
-                'material_id': row.material_id, 'required_date': row.required_date.isoformat(), 'delivery_date': row.delivery_date.isoformat(),
-                'supplier': row.supplier, 'required_sheets': row.required_sheets, 'lot_multiple': row.lot_multiple,
-                'required_lots': row.required_lots, 'order_lots': row.order_lots, 'order_sheets': row.order_sheets,
-            } for row in rows])
+            def _serialize_order_row(row):
+                return {
+                    'material_id': row.material_id, 'required_date': row.required_date.isoformat(), 'delivery_date': row.delivery_date.isoformat(),
+                    'supplier': row.supplier, 'required_sheets': row.required_sheets, 'lot_multiple': row.lot_multiple,
+                    'required_lots': row.required_lots, 'order_lots': row.order_lots, 'order_sheets': row.order_sheets,
+                }
+            items = [_serialize_order_row(r) for r in rows]
+            overlapping_items = []
+            display_start = request.query_params.get('display_start')
+            display_end = request.query_params.get('display_end')
+            if display_start and display_end:
+                try:
+                    ds = datetime.strptime(display_start, '%Y-%m-%d').date()
+                    de = datetime.strptime(display_end, '%Y-%m-%d').date()
+                except ValueError:
+                    ds = de = None
+                if ds and de:
+                    overlapping_rows = LaserWeeklyMaterialOrderProgress.objects.filter(
+                        required_date__gte=ds, required_date__lte=de, is_manual=False,
+                    ).exclude(plan_start_date=plan_start_date).select_related('material')
+                    overlapping_items = [_serialize_order_row(r) for r in overlapping_rows]
+            return Response({'items': items, 'overlapping_items': overlapping_items})
 
         items = request.data.get('items', [])
         try:

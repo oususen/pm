@@ -455,6 +455,7 @@ const saving = ref(false);
 const saveDialog = ref(false);
 const selectedSaveWeekKeys = ref([]);
 const approvals = ref({ SATO: null, MEISEI: null });
+const overlappingApprovals = ref([]);
 const approvalBusy = ref(false);
 const defaultOrderStart = () => {
   const start = new Date(`${props.startDate}T00:00:00`);
@@ -515,8 +516,8 @@ const isApprovalDateLocked = (row, day) => {
   return Boolean(start && end && day >= start && day <= end);
 };
 const isDateLocked = (day, supplier = null) => {
-  if (supplier) return isApprovalDateLocked(supplierApproval(supplier), day);
-  return supplierApprovalList.value.some((row) => isApprovalDateLocked(row, day));
+  if (supplier) return isApprovalDateLocked(supplierApproval(supplier), day) || overlappingApprovals.value.some((row) => isApprovalDateLocked(row, day));
+  return supplierApprovalList.value.some((row) => isApprovalDateLocked(row, day)) || overlappingApprovals.value.some((row) => isApprovalDateLocked(row, day));
 };
 const approvalLocked = computed(() => supplierApprovalList.value.some((row) => ['reviewing', 'approved', 'sent'].includes(row.status)));
 const orderPeriodLocked = computed(() => supplierApprovalList.value.some(
@@ -680,18 +681,20 @@ const number = (value) =>
 const load = async () => {
   if (!props.startDate) return;
   const [orders, initialProgress, approvalResponse] = await Promise.all([
-    api.laserWeeklyPlans.getMaterialOrderProgress(props.startDate),
+    api.laserWeeklyPlans.getMaterialOrderProgress(props.startDate, props.dates[0] || '', props.dates[props.dates.length - 1] || ''),
     api.laserWeeklyPlans.getMaterialInitialProgress(props.startDate),
-    api.laserWeeklyPlans.getMaterialOrderApproval(props.startDate),
+    api.laserWeeklyPlans.getMaterialOrderApproval(props.startDate, props.dates[0] || '', props.dates[props.dates.length - 1] || ''),
   ]);
   const approvalMap = approvalResponse.data?.approvals || {};
   approvals.value = { SATO: approvalMap.SATO || null, MEISEI: approvalMap.MEISEI || null };
+  overlappingApprovals.value = approvalResponse.data?.overlapping_approvals || [];
   const firstApproval = approvals.value.SATO || approvals.value.MEISEI || null;
   orderStartDate.value = firstApproval?.context?.lock_start_date || defaultOrderStart();
   orderEndDate.value = firstApproval?.context?.lock_end_date || defaultOrderEnd();
   const next = {};
-  orders.data.forEach((item) => {
-    const value = next[`${item.material_id}:${item.required_date}`] || { sato_sheets: 0, meisei_sheets: 0 };
+  const applyOrderItem = (item, target) => {
+    const k = `${item.material_id}:${item.required_date}`;
+    const value = target[k] || { sato_sheets: 0, meisei_sheets: 0 };
     if (item.supplier === "SATO") {
       value.sato_lots = item.order_lots;
       value.sato_sheets = item.order_sheets || 0;
@@ -699,8 +702,10 @@ const load = async () => {
       value.meisei_lots = item.order_lots;
       value.meisei_sheets = item.order_sheets || 0;
     }
-    next[`${item.material_id}:${item.required_date}`] = value;
-  });
+    target[k] = value;
+  };
+  (orders.data.overlapping_items || []).forEach((item) => applyOrderItem(item, next));
+  (orders.data.items || []).forEach((item) => applyOrderItem(item, next));
   props.materials.forEach((material) =>
     props.dates.forEach((day) => {
       const value = next[key(material, day)] || { sato_lots: 0, sato_sheets: 0, meisei_sheets: 0 };
