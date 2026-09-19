@@ -9,6 +9,12 @@ const shifts = [
     component: () => import('@/views/shifts/ShiftManagement.vue'),
     meta: { pageTitle: 'シフト管理' },
   },
+  {
+    path: '/shifts/my-line',
+    name: 'WorkerShiftChart',
+    component: () => import('@/views/shifts/WorkerShiftChart.vue'),
+    meta: { pageTitle: 'シフト確認' },
+  },
 ]
 
 export default shifts

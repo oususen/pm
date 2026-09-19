@@ -33,9 +33,14 @@
         <div class="menu-label">加工費集計</div>
         <div class="menu-desc">日別と期間集計で加工費を確認する</div>
       </RouterLink>
-      <RouterLink to="/shifts/chart" class="menu-card shift-card">
+      <RouterLink to="/shifts/my-line" class="menu-card shift-card">
         <div class="menu-icon">📅</div>
-        <div class="menu-label">シフトチャート</div>
+        <div class="menu-label">シフト確認</div>
+        <div class="menu-desc">自分と同じラインのシフトを確認する</div>
+      </RouterLink>
+      <RouterLink v-if="isShiftManager" to="/shifts/chart" class="menu-card shift-card">
+        <div class="menu-icon">🗓️</div>
+        <div class="menu-label">シフトチャート管理</div>
         <div class="menu-desc">ライン別のシフト配置を管理する</div>
       </RouterLink>
     </div>
@@ -71,6 +76,11 @@ const pendingCount = ref(0)
 const isApprover = computed(() => {
   const role = authState.user?.profile?.role
   return ['leader', 'supervisor', 'chief', 'manager'].includes(role)
+})
+
+const isShiftManager = computed(() => {
+  const user = authState.user
+  return Boolean(user?.is_staff || user?.is_superuser || isApprover.value)
 })
 
 onMounted(async () => {
