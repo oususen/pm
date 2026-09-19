@@ -11,6 +11,9 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   savePatternManualQuantities(quantities, progressValues) {
     return client.post('/laser-weekly-plans/pattern-manual-quantities/', { quantities, progress_values: progressValues })
   },
+  savePatternWeekCarryover(items) {
+    return client.post('/laser-weekly-plans/pattern-week-carryover/', { items })
+  },
   resetPatternManualQuantities(startDate, endDate) {
     return client.post('/laser-weekly-plans/pattern-manual-reset/', { start_date: startDate, end_date: endDate })
   },
@@ -31,6 +34,9 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   },
   saveMaterialDailyProgress(items) {
     return client.post('/laser-weekly-plans/material-daily-progress/', { items })
+  },
+  saveMaterialWeekCarryover(items) {
+    return client.post('/laser-weekly-plans/material-week-carryover/', { items })
   },
   getMaterialOrderApproval(startDate, displayStart = '', displayEnd = '') {
     return client.get('/laser-weekly-plans/material-order-approval/', { params: { start_date: startDate, display_start: displayStart, display_end: displayEnd } })

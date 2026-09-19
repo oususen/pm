@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from urllib.parse import quote
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse, HttpResponse
 from openpyxl import Workbook
@@ -117,6 +118,38 @@ class LaserWeeklyMaterialGroupViewSet(viewsets.ModelViewSet):
 
 
 class LaserWeeklyPlanViewSet(viewsets.ViewSet):
+    def _build_locked_plan_starts(self, date_start, date_end):
+        """承認済み注文書のロック期間から (supplier, date) → {plan_start_date} マップを構築する。"""
+        locked = defaultdict(set)
+        approvals = ApprovalRequest.objects.filter(
+            route_config__item_key='laser_material_order',
+            status__in=['created', 'reviewing', 'approved', 'sent'],
+        )
+        for approval in approvals:
+            context = approval.context or {}
+            # created は注文書作成前の承認申請。旧データでフラグが未設定でも
+            # 注文書未作成として扱い、納期・数量をロックしない。
+            if approval.status == 'created' and context.get('order_created') is not True:
+                continue
+            supplier = context.get('supplier')
+            start = context.get('start_date')
+            lock_start = context.get('lock_start_date')
+            lock_end = context.get('lock_end_date')
+            if not (supplier and start and lock_start and lock_end):
+                continue
+            try:
+                source_start = datetime.strptime(start, '%Y-%m-%d').date()
+                locked_start = datetime.strptime(lock_start, '%Y-%m-%d').date()
+                locked_end = datetime.strptime(lock_end, '%Y-%m-%d').date()
+            except ValueError:
+                continue
+            cursor = max(locked_start, date_start)
+            end = min(locked_end, date_end)
+            while cursor <= end:
+                locked[supplier, cursor].add(source_start)
+                cursor += timedelta(days=1)
+        return locked
+
     @action(detail=False, methods=['get', 'post'], url_path='material-order-approval')
     def material_order_approval(self, request):
         """材料発注の承認申請を仕入先別に取得または作成する。"""
@@ -261,22 +294,9 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 x.material_id: x
                 for x in LaserWeeklyMaterialInitialProgress.objects.filter(plan_start_date=plan_start_date)
             }
-            prev_start = plan_start_date - timedelta(days=7)
-            prev_material_ids = set(
-                LaserWeeklyMaterialDailyProgress.objects.filter(
-                    progress_date__gte=prev_start,
-                    progress_date__lt=plan_start_date,
-                ).values_list('material_id', flat=True).distinct()
-            )
-            material_ids = set(saved_map.keys()) | prev_material_ids
             result = []
-            for mid in material_ids:
-                saved = saved_map.get(mid)
-                if saved and saved.is_locked:
-                    result.append({'material_id': mid, 'initial_progress': saved.initial_progress, 'is_locked': True})
-                else:
-                    auto_val = self._calc_material_auto_initial_progress(mid, plan_start_date)
-                    result.append({'material_id': mid, 'initial_progress': auto_val, 'is_locked': False})
+            for mid, saved in saved_map.items():
+                result.append({'material_id': mid, 'initial_progress': saved.initial_progress, 'is_locked': saved.is_locked})
             return Response(result)
         items = request.data.get('items', [])
         for item in items:
@@ -286,6 +306,37 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 return Response({'detail': '期首進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
             LaserWeeklyMaterialInitialProgress.objects.update_or_create(plan_start_date=plan_start_date, material_id=material_id, defaults={'initial_progress': initial_progress, 'is_locked': is_locked})
         return Response({'saved_count': len(items)})
+
+    @action(detail=False, methods=['post'], url_path='material-week-carryover')
+    def material_week_carryover(self, request):
+        """画面の各週末進度を翌月曜の期首へ保存する。固定値は上書きしない。"""
+        items = request.data.get('items')
+        if not isinstance(items, list):
+            return Response({'detail': '週末進度の値が不正です。'}, status=400)
+        parsed = []
+        try:
+            for item in items:
+                day = datetime.strptime(item['week_end_date'], '%Y-%m-%d').date()
+                value = Decimal(str(item['progress']))
+                if not value.is_finite() or abs(value) >= Decimal('100000000'):
+                    raise ValueError
+                parsed.append((int(item['material_id']), day + timedelta(days=7 - day.weekday()), value))
+            ids = {mid for mid, _, _ in parsed}
+            if set(Product.objects.filter(id__in=ids).values_list('id', flat=True)) != ids:
+                raise ValueError
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            return Response({'detail': '週末進度の値が不正です。'}, status=400)
+        saved_count = 0
+        with transaction.atomic():
+            for mid, next_start, value in parsed:
+                row, _ = LaserWeeklyMaterialInitialProgress.objects.get_or_create(
+                    material_id=mid, plan_start_date=next_start,
+                    defaults={'initial_progress': value, 'is_locked': False},
+                )
+                saved_count += LaserWeeklyMaterialInitialProgress.objects.filter(
+                    pk=row.pk, is_locked=False,
+                ).update(initial_progress=value)
+        return Response({'saved_count': saved_count})
 
     def _calc_material_auto_initial_progress(self, material_id, week_start_date):
         prev_start = week_start_date - timedelta(days=7)
@@ -342,6 +393,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 }
             items = [_serialize_order_row(r) for r in rows]
             overlapping_items = []
+            locked_items = []
             display_start = request.query_params.get('display_start')
             display_end = request.query_params.get('display_end')
             if display_start and display_end:
@@ -355,7 +407,23 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                         required_date__gte=ds, required_date__lte=de, is_manual=False,
                     ).exclude(plan_start_date=plan_start_date).select_related('material')
                     overlapping_items = [_serialize_order_row(r) for r in overlapping_rows]
-            return Response({'items': items, 'overlapping_items': overlapping_items})
+
+                    locked_plan_starts = self._build_locked_plan_starts(ds, de)
+                    all_locked_starts = set()
+                    for starts in locked_plan_starts.values():
+                        all_locked_starts.update(starts)
+                    if all_locked_starts:
+                        locked_by_key = {}
+                        locked_rows = LaserWeeklyMaterialOrderProgress.objects.filter(
+                            required_date__gte=ds, required_date__lte=de, is_manual=False,
+                            plan_start_date__in=all_locked_starts,
+                        ).select_related('material').order_by('updated_at', 'id')
+                        for row in locked_rows:
+                            if row.plan_start_date not in locked_plan_starts.get((row.supplier, row.required_date), set()):
+                                continue
+                            locked_by_key[(row.material_id, row.supplier, row.required_date)] = row
+                        locked_items = [_serialize_order_row(row) for row in locked_by_key.values()]
+            return Response({'items': items, 'overlapping_items': overlapping_items, 'locked_items': locked_items})
 
         items = request.data.get('items', [])
         try:
@@ -408,32 +476,66 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             except (KeyError, ValueError):
                 return Response({'detail': '表示期間を正しく指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
-            orders = LaserWeeklyMaterialOrderProgress.objects.filter(
+            candidates = LaserWeeklyMaterialOrderProgress.objects.filter(
                 delivery_date__range=(start_date, end_date),
-            ).filter(
-                Q(order_lots__gt=0) | Q(order_sheets__gt=0),
             ).select_related('material').prefetch_related('receipts__received_by').order_by(
-                'delivery_date', 'supplier', 'material__product_code', 'id',
+                'material_id', 'supplier', 'required_date', 'plan_start_date', 'updated_at', 'id',
             )
+
+            locked_plan_starts = self._build_locked_plan_starts(start_date, end_date)
+
+            selected_orders = {}
+            all_receipts_by_key = defaultdict(list)
+            for order in candidates:
+                if order.is_manual:
+                    key = ('manual', order.id)
+                else:
+                    key = ('planned', order.material_id, order.supplier, order.required_date)
+                    for receipt in order.receipts.all():
+                        all_receipts_by_key[key].append(receipt)
+                current = selected_orders.get(key)
+                locked_starts = locked_plan_starts.get((order.supplier, order.required_date), set())
+                is_locked_order = order.plan_start_date in locked_starts
+                current_is_locked = bool(
+                    current and current.plan_start_date in locked_plan_starts.get(
+                        (current.supplier, current.required_date), set(),
+                    )
+                )
+                if not current or (is_locked_order and not current_is_locked) or (
+                    is_locked_order == current_is_locked
+                    and (order.plan_start_date or order.delivery_date, order.updated_at, order.id)
+                    >= (current.plan_start_date or current.delivery_date, current.updated_at, current.id)
+                ):
+                    selected_orders[key] = order
+            orders = sorted(
+                (order for order in selected_orders.values() if order.order_lots > 0 or order.order_sheets > 0),
+                key=lambda order: (order.delivery_date, order.supplier, order.material.product_code, order.id),
+            )
+
+            def _serialize_receipt(receipt):
+                photo_url = receipt.label_photo.url if receipt.label_photo else ''
+                if photo_url and request:
+                    photo_url = request.build_absolute_uri(photo_url)
+                return {
+                    'id': receipt.id,
+                    'received_date': receipt.received_date.isoformat(),
+                    'received_lots': receipt.received_lots,
+                    'received_sheets': receipt.received_sheets,
+                    'lot_number': receipt.lot_number,
+                    'label_photo_url': photo_url,
+                    'received_by_name': (receipt.received_by.get_full_name() or receipt.received_by.username) if receipt.received_by else '',
+                    'is_cancelled': receipt.cancelled_at is not None,
+                    'cancelled_at': receipt.cancelled_at.isoformat(timespec='minutes') if receipt.cancelled_at else '',
+                    'cancel_reason': receipt.cancel_reason,
+                }
+
             rows = []
             for order in orders:
-                receipts = []
-                for receipt in order.receipts.all():
-                    photo_url = receipt.label_photo.url if receipt.label_photo else ''
-                    if photo_url and request:
-                        photo_url = request.build_absolute_uri(photo_url)
-                    receipts.append({
-                        'id': receipt.id,
-                        'received_date': receipt.received_date.isoformat(),
-                        'received_lots': receipt.received_lots,
-                        'received_sheets': receipt.received_sheets,
-                        'lot_number': receipt.lot_number,
-                        'label_photo_url': photo_url,
-                        'received_by_name': (receipt.received_by.get_full_name() or receipt.received_by.username) if receipt.received_by else '',
-                        'is_cancelled': receipt.cancelled_at is not None,
-                        'cancelled_at': receipt.cancelled_at.isoformat(timespec='minutes') if receipt.cancelled_at else '',
-                        'cancel_reason': receipt.cancel_reason,
-                    })
+                if order.is_manual:
+                    key = ('manual', order.id)
+                else:
+                    key = ('planned', order.material_id, order.supplier, order.required_date)
+                receipts = [_serialize_receipt(r) for r in all_receipts_by_key.get(key, order.receipts.all())]
                 rows.append({
                     'id': order.id,
                     'delivery_date': order.delivery_date.isoformat(),
@@ -446,6 +548,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     'order_lots': order.order_lots,
                     'order_sheets': order.order_sheets,
                     'is_special_management_material': order.material.is_special_management_material,
+                    'source_status': 'ORDER_LOCKED' if order.plan_start_date in locked_plan_starts.get((order.supplier, order.required_date), set()) else 'PLAN_SAVED',
                     'receipts': receipts,
                 })
             return Response({'items': rows})
@@ -1324,6 +1427,37 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         deleted, _ = LaserWeeklyPatternManualQuantity.objects.filter(plan_date__range=(start_date, end_date)).delete()
         return Response({'deleted_count': deleted})
 
+    @action(detail=False, methods=['post'], url_path='pattern-week-carryover')
+    def pattern_week_carryover(self, request):
+        """保存対象の週末進度を翌週期首へ引き継ぐ。固定ONは保持する。"""
+        items = request.data.get('items')
+        if not isinstance(items, list):
+            return Response({'detail': '週末進度の値が不正です。'}, status=400)
+        parsed = []
+        try:
+            for item in items:
+                day = datetime.strptime(item['week_end_date'], '%Y-%m-%d').date()
+                value = Decimal(str(item['progress']))
+                if not value.is_finite() or abs(value) >= Decimal('100000000'):
+                    raise ValueError
+                parsed.append((int(item['laser_pattern_id']), day + timedelta(days=7 - day.weekday()), value))
+            ids = {pid for pid, _, _ in parsed}
+            if set(LaserPattern.objects.filter(id__in=ids).values_list('id', flat=True)) != ids:
+                raise ValueError
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            return Response({'detail': '週末進度の値が不正です。'}, status=400)
+        saved_count = 0
+        with transaction.atomic():
+            for pid, next_start, value in parsed:
+                row, _ = LaserWeeklyPatternInitialProgress.objects.get_or_create(
+                    laser_pattern_id=pid, week_start_date=next_start,
+                    defaults={'initial_progress': value, 'is_locked': False},
+                )
+                saved_count += LaserWeeklyPatternInitialProgress.objects.filter(
+                    pk=row.pk, is_locked=False,
+                ).update(initial_progress=value)
+        return Response({'saved_count': saved_count})
+
     @action(detail=False, methods=['post'], url_path='save-initial-progress')
     def save_initial_progress(self, request):
         items = request.data.get('items', [])
@@ -1586,12 +1720,11 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         for pattern_row in pattern_rows:
             pid = pattern_row['laser_pattern_id']
             saved = initial_progress_map.get(pid)
-            if saved and saved.is_locked:
+            if saved:
                 pattern_row['initial_progress'] = float(saved.initial_progress)
-                pattern_row['initial_progress_locked'] = True
+                pattern_row['initial_progress_locked'] = saved.is_locked
             else:
-                auto_val = self._calc_auto_initial_progress(pid, start_date)
-                pattern_row['initial_progress'] = auto_val
+                pattern_row['initial_progress'] = 0
                 pattern_row['initial_progress_locked'] = False
 
         saved_daily_progress = defaultdict(dict)

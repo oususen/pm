@@ -1331,7 +1331,6 @@ const saveManualQuantities = async () => {
         sheets: Number(patternDailyValue(pattern, day, "manual_sheets")),
       })),
     );
-    const lastTargetDay = targetDays[targetDays.length - 1];
     const progressDays = days.value.filter((d) => d >= targetDays[0]);
     const progressValues = patternRows.value.flatMap((pattern) =>
       progressDays.map((day) => ({
@@ -1341,6 +1340,24 @@ const saveManualQuantities = async () => {
       })),
     );
     await api.laserWeeklyPlans.savePatternManualQuantities(quantities, progressValues);
+    await api.laserWeeklyPlans.saveInitialProgress(patternRows.value.map((pattern) => ({
+      laser_pattern_id: pattern.laser_pattern_id,
+      week_start_date: startDate.value,
+      initial_progress: Number(pattern.initial_progress || 0),
+      is_locked: pattern.initial_progress_locked,
+    })));
+    // 選択した週の最終稼働日の進度を翌月曜へ引き継ぐ。
+    const savedDates = new Set(targetDays);
+    const carryovers = weekGroups.value.flatMap((week) => {
+      const lastDay = week.days[week.days.length - 1];
+      if (!savedDates.has(lastDay)) return [];
+      return patternRows.value.map((pattern) => ({
+        laser_pattern_id: pattern.laser_pattern_id,
+        week_end_date: lastDay,
+        progress: patternProgressRaw(pattern, lastDay),
+      }));
+    });
+    await api.laserWeeklyPlans.savePatternWeekCarryover(carryovers);
     showSaveDialog.value = false;
     const label = selectedWeek
       ? `${weekGroups.value.indexOf(selectedWeek) + 1}週目`

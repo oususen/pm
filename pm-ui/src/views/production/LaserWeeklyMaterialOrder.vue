@@ -706,6 +706,8 @@ const load = async () => {
   };
   (orders.data.overlapping_items || []).forEach((item) => applyOrderItem(item, next));
   (orders.data.items || []).forEach((item) => applyOrderItem(item, next));
+  // 注文書作成済み期間は、開始週を切り替えても注文書ロック時の手数を優先する。
+  (orders.data.locked_items || []).forEach((item) => applyOrderItem(item, next));
   props.materials.forEach((material) =>
     props.dates.forEach((day) => {
       const value = next[key(material, day)] || { sato_lots: 0, sato_sheets: 0, meisei_sheets: 0 };
@@ -767,6 +769,18 @@ const saveMaterialOrderChanges = async (saveDates = props.dates) => {
       ),
       api.laserWeeklyPlans.saveMaterialDailyProgress(buildDailyProgressItems(saveDates)),
     ]);
+  // 保存対象に週末を含む週だけ、翌週の期首へ引き継ぐ。
+  const savedDates = new Set(saveDates);
+  const carryovers = weekGroups.value.flatMap((week) => {
+    const lastDay = week.days[week.days.length - 1];
+    if (!savedDates.has(lastDay)) return [];
+    return props.materials.map((material) => ({
+      material_id: material.material_id,
+      week_end_date: lastDay,
+      progress: combinedProgress(material, lastDay),
+    }));
+  });
+  await api.laserWeeklyPlans.saveMaterialWeekCarryover(carryovers);
 };
 const save = async () => {
   saving.value = true;

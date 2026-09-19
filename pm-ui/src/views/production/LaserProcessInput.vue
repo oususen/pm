@@ -629,21 +629,25 @@
           <button class="btn" @click="showTodayMaterialOrders">今日入荷予定</button>
         </div>
       <div v-if="materialMessage" class="message" :class="`is-${materialMessageType}`">{{ materialMessage }}</div>
-      <div class="result-meta">{{ materialOrders.length }} 件{{ materialTodayOnly ? '（今日入荷予定）' : '' }}</div>
-      <div class="table-scroll material-table">
+      <div class="result-meta">{{ materialWeeklyRows.length }} 材料{{ materialTodayOnly ? '（今日入荷予定）' : '' }}</div>
+      <div class="table-scroll material-table material-week-table">
         <table>
           <thead>
-            <tr><th>調整後納期</th><th>仕入先</th><th>材料</th><th class="num">注文数</th><th>入荷状況</th></tr>
+            <tr>
+              <th>仕入先</th><th>材料</th><th class="num">週合計</th>
+              <th v-for="day in materialWeekDays" :key="day.date" :class="{ 'today-column': day.isToday }">{{ day.label }}</th>
+            </tr>
           </thead>
           <tbody>
-            <tr v-for="order in materialOrders" :key="order.id">
-              <td>{{ order.delivery_date }}</td>
-              <td>{{ order.supplier_label }}</td>
-              <td>{{ order.material_code }} {{ order.material_name }}<span v-if="order.is_special_management_material" class="special-tag">特別管理</span></td>
-              <td class="num">{{ order.order_lots }}L<span v-if="order.order_sheets"> + {{ order.order_sheets }}枚</span><small v-if="order.lot_multiple">（{{ order.lot_multiple }}枚/L）</small></td>
-              <td>{{ order.receipts.filter(receipt => !receipt.is_cancelled).length ? '入荷登録あり' : '未入荷' }}</td>
+            <tr v-for="row in materialWeeklyRows" :key="row.key">
+              <td>{{ row.supplier_label }}</td>
+              <td>{{ row.material_code }} {{ row.material_name }}<span v-if="row.is_special_management_material" class="special-tag">特別管理</span></td>
+              <td class="num">{{ formatMaterialOrderQty(row.total) }}</td>
+              <td v-for="day in materialWeekDays" :key="`${row.key}-${day.date}`" class="num" :class="{ 'today-column': day.isToday }">
+                {{ row.daily[day.date] ? formatMaterialOrderQty(row.daily[day.date]) : '' }}
+              </td>
             </tr>
-            <tr v-if="!materialOrders.length"><td colspan="5">入荷予定はありません。</td></tr>
+            <tr v-if="!materialWeeklyRows.length"><td colspan="8">入荷予定はありません。</td></tr>
           </tbody>
         </table>
       </div>
@@ -1315,9 +1319,52 @@ const materialWeekLabel = computed(() => {
   if (!materialWeekStart.value) return ''
   const start = new Date(`${materialWeekStart.value}T00:00:00`)
   const end = new Date(start)
-  end.setDate(end.getDate() + 6)
+  end.setDate(end.getDate() + 4)
   return `${isoDate(start)} ～ ${isoDate(end)}`
 })
+const materialWeekDays = computed(() => {
+  if (!materialWeekStart.value) return []
+  const labels = ['日', '月', '火', '水', '木', '金', '土']
+  const today = isoDate(new Date())
+  const start = new Date(`${materialWeekStart.value}T00:00:00`)
+  return Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(start)
+    date.setDate(date.getDate() + index)
+    const value = isoDate(date)
+    return { date: value, label: `${date.getMonth() + 1}/${date.getDate()}（${labels[date.getDay()]}）`, isToday: value === today }
+  })
+})
+const materialWeeklyRows = computed(() => {
+  const rows = new Map()
+  for (const order of materialOrders.value) {
+    const key = `${order.material_id}-${order.supplier}`
+    if (!rows.has(key)) {
+      rows.set(key, {
+        key,
+        supplier_label: order.supplier_label,
+        material_code: order.material_code,
+        material_name: order.material_name,
+        is_special_management_material: order.is_special_management_material,
+        total: { lots: 0, sheets: 0 },
+        daily: {},
+      })
+    }
+    const row = rows.get(key)
+    const current = row.daily[order.delivery_date] || { lots: 0, sheets: 0 }
+    current.lots += Number(order.order_lots || 0)
+    current.sheets += Number(order.order_sheets || 0)
+    row.daily[order.delivery_date] = current
+    row.total.lots += Number(order.order_lots || 0)
+    row.total.sheets += Number(order.order_sheets || 0)
+  }
+  return [...rows.values()].sort((a, b) => `${a.supplier_label}${a.material_code}`.localeCompare(`${b.supplier_label}${b.material_code}`, 'ja'))
+})
+const formatMaterialOrderQty = (quantity) => {
+  if (!quantity) return ''
+  const lots = Number(quantity.lots || 0)
+  const sheets = Number(quantity.sheets || 0)
+  return `${lots ? `${lots}L` : ''}${lots && sheets ? ' + ' : ''}${sheets ? `${sheets}枚` : ''}`
+}
 const receiptForm = (orderId) => {
   if (!materialReceiptForms.value[orderId]) {
     materialReceiptForms.value[orderId] = { received_date: isoDate(new Date()), received_lots: null, received_sheets: null, lot_number: '', photo: null }
@@ -1331,7 +1378,7 @@ const loadMaterialOrders = async () => {
   if (!materialWeekStart.value) materialWeekStart.value = startOfWeek()
   const start = materialTodayOnly.value ? isoDate(new Date()) : materialWeekStart.value
   const endDate = new Date(`${start}T00:00:00`)
-  if (!materialTodayOnly.value) endDate.setDate(endDate.getDate() + 6)
+  if (!materialTodayOnly.value) endDate.setDate(endDate.getDate() + 4)
   try {
     const res = await api.laserWeeklyPlans.getMaterialReceipts(start, isoDate(endDate))
     materialOrders.value = res.data?.items || []
@@ -2240,6 +2287,22 @@ onMounted(async () => {
 .receipt-cancelled {
   color: #64748b;
   text-decoration: line-through;
+}
+
+.material-week-table th,
+.material-week-table td {
+  min-width: 88px;
+}
+
+.material-week-table th:nth-child(2),
+.material-week-table td:nth-child(2) {
+  min-width: 220px;
+  text-align: left;
+}
+
+.material-week-table .today-column {
+  background: #fef3c7;
+  font-weight: 700;
 }
 
 .special-tag {
