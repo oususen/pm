@@ -129,4 +129,13 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   deleteMaterialOrderManual(id) {
     return client.delete(`/laser-weekly-plans/material-order-manual/${id}/`)
   },
+  getMaterialReceipts(startDate, endDate) {
+    return client.get('/laser-weekly-plans/material-receipts/', { params: { start_date: startDate, end_date: endDate } })
+  },
+  createMaterialReceipt(data) {
+    return client.post('/laser-weekly-plans/material-receipts/', data)
+  },
+  cancelMaterialReceipt(id, cancelReason = '') {
+    return client.post(`/laser-weekly-plans/material-receipts/${id}/cancel/`, { cancel_reason: cancelReason })
+  },
 })

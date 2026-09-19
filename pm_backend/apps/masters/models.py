@@ -68,6 +68,7 @@ class Product(models.Model):
     )
     order_lot_min = models.PositiveIntegerField(null=True, blank=True, verbose_name='最小発注数')
     order_lot_multiple = models.PositiveIntegerField(default=1, verbose_name='発注倍数')
+    is_special_management_material = models.BooleanField(default=False, verbose_name='特別管理材料')
     # レーザ材料用フィールド（重量計算: 比重 × 縦 × 横 × 厚さ / 1,000,000 = kg）
     specific_gravity = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True, verbose_name='比重(g/cm³)')
     size_length = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name='縦(mm)')

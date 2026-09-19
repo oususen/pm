@@ -111,6 +111,37 @@ class LaserWeeklyMaterialOrderProgress(models.Model):
         ]
 
 
+class LaserMaterialReceipt(models.Model):
+    """レーザ材料発注に対するロット単位の入荷実績。"""
+    order = models.ForeignKey(
+        LaserWeeklyMaterialOrderProgress,
+        on_delete=models.PROTECT,
+        related_name='receipts',
+        verbose_name='材料発注明細',
+    )
+    received_date = models.DateField(verbose_name='入荷日')
+    received_lots = models.PositiveIntegerField(default=0, verbose_name='入荷ロット数')
+    received_sheets = models.PositiveIntegerField(default=0, verbose_name='端数枚数')
+    lot_number = models.CharField(max_length=100, blank=True, default='', verbose_name='ロット番号')
+    label_photo = models.FileField(upload_to='laser_material_receipts/%Y/%m/', blank=True, null=True, verbose_name='ラベル写真')
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='laser_material_receipts', verbose_name='入荷登録者',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True, verbose_name='取消日時')
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='cancelled_laser_material_receipts', verbose_name='取消者',
+    )
+    cancel_reason = models.CharField(max_length=255, blank=True, default='', verbose_name='取消理由')
+
+    class Meta:
+        db_table = 't_laser_material_receipt'
+        ordering = ['-received_date', '-id']
+
+
 class LaserWeeklyMaterialInitialProgress(models.Model):
     plan_start_date = models.DateField(verbose_name='計画開始日')
     material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_initial_progresses')

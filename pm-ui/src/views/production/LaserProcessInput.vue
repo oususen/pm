@@ -27,6 +27,14 @@
         <button
           type="button"
           class="tab-item"
+          :class="{ active: activeTab === 'materials' }"
+          @click="activeTab = 'materials'"
+        >
+          材料
+        </button>
+        <button
+          type="button"
+          class="tab-item"
           :class="{ active: activeTab === 'kadojiseki' }"
           @click="activeTab = 'kadojiseki'"
         >
@@ -605,6 +613,83 @@
         </div>
     </section>
 
+    <section v-show="activeTab === 'materials'" class="panel material-panel">
+      <div class="panel-head material-head">
+        <h3>材料入荷</h3>
+        <div class="material-sub-tabs">
+          <button class="btn" :class="{ primary: materialSubTab === 'schedule' }" @click="selectMaterialSubTab('schedule')">週間予定</button>
+          <button class="btn" :class="{ primary: materialSubTab === 'receiving' }" @click="selectMaterialSubTab('receiving')">入荷実績入力</button>
+        </div>
+      </div>
+      <div v-if="materialSubTab === 'schedule'" class="material-schedule">
+        <div class="week-switcher">
+          <button class="btn" @click="changeMaterialWeek(-1)">＜</button>
+          <strong>週入荷予定 {{ materialWeekLabel }}</strong>
+          <button class="btn" @click="changeMaterialWeek(1)">＞</button>
+          <button class="btn" @click="showTodayMaterialOrders">今日入荷予定</button>
+        </div>
+      <div v-if="materialMessage" class="message" :class="`is-${materialMessageType}`">{{ materialMessage }}</div>
+      <div class="result-meta">{{ materialOrders.length }} 件{{ materialTodayOnly ? '（今日入荷予定）' : '' }}</div>
+      <div class="table-scroll material-table">
+        <table>
+          <thead>
+            <tr><th>調整後納期</th><th>仕入先</th><th>材料</th><th class="num">注文数</th><th>入荷状況</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in materialOrders" :key="order.id">
+              <td>{{ order.delivery_date }}</td>
+              <td>{{ order.supplier_label }}</td>
+              <td>{{ order.material_code }} {{ order.material_name }}<span v-if="order.is_special_management_material" class="special-tag">特別管理</span></td>
+              <td class="num">{{ order.order_lots }}L<span v-if="order.order_sheets"> + {{ order.order_sheets }}枚</span><small v-if="order.lot_multiple">（{{ order.lot_multiple }}枚/L）</small></td>
+              <td>{{ order.receipts.filter(receipt => !receipt.is_cancelled).length ? '入荷登録あり' : '未入荷' }}</td>
+            </tr>
+            <tr v-if="!materialOrders.length"><td colspan="5">入荷予定はありません。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      </div>
+
+      <div v-else class="material-receiving">
+        <div class="result-meta">{{ materialOrders.length }} 件（{{ materialWeekLabel }}）</div>
+        <div class="table-scroll material-table">
+          <table>
+            <thead>
+              <tr><th>調整後納期</th><th>仕入先</th><th>材料</th><th class="num">注文数</th><th>入荷実績</th><th>入荷確認・入力</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="order in materialOrders" :key="order.id">
+                <td>{{ order.delivery_date }}</td>
+                <td>{{ order.supplier_label }}</td>
+                <td>{{ order.material_code }} {{ order.material_name }}<span v-if="order.is_special_management_material" class="special-tag">特別管理</span></td>
+                <td class="num">{{ order.order_lots }}L<span v-if="order.order_sheets"> + {{ order.order_sheets }}枚</span><small v-if="order.lot_multiple">（{{ order.lot_multiple }}枚/L）</small></td>
+                <td>
+                  <div v-for="receipt in order.receipts" :key="receipt.id" class="receipt-history">
+                    <span :class="{ 'receipt-cancelled': receipt.is_cancelled }">{{ receipt.received_date }}: {{ receipt.received_lots }}L<span v-if="receipt.received_sheets"> + {{ receipt.received_sheets }}枚</span>
+                    <span v-if="receipt.lot_number"> / {{ receipt.lot_number }}</span>
+                    <a v-if="receipt.label_photo_url" :href="receipt.label_photo_url" target="_blank" rel="noopener">写真</a></span>
+                    <span v-if="receipt.is_cancelled">（取消{{ receipt.cancel_reason ? `: ${receipt.cancel_reason}` : '' }}）</span>
+                    <button v-else class="btn btn-sm" @click="cancelMaterialReceipt(receipt)">取消</button>
+                  </div>
+                  <span v-if="!order.receipts.length">未入荷</span>
+                </td>
+              <td>
+                <div class="receipt-form">
+                  <input v-model="receiptForm(order.id).received_date" type="date" aria-label="入荷日" />
+                  <input v-model.number="receiptForm(order.id).received_lots" type="number" min="0" step="1" placeholder="ロット数" aria-label="ロット数" />
+                  <input v-model.number="receiptForm(order.id).received_sheets" type="number" min="0" step="1" placeholder="端数枚" aria-label="端数枚" />
+                  <input v-if="order.is_special_management_material" v-model.trim="receiptForm(order.id).lot_number" type="text" placeholder="ロット番号（必須）" />
+                  <input type="file" accept="image/*" capture="environment" @change="setReceiptPhoto(order.id, $event)" />
+                  <button class="btn primary btn-sm" :disabled="materialSavingId === order.id" @click="saveMaterialReceipt(order)">{{ materialSavingId === order.id ? '保存中...' : '入荷保存' }}</button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!materialOrders.length"><td colspan="6">入荷予定はありません。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      </div>
+    </section>
+
   </div>
 </template>
 
@@ -618,6 +703,7 @@ import DataSourceDialog from '@/components/DataSourceDialog.vue'
 const dsSources = [
   { op: '取得/保存/削除', table: 't_laser_actual / t_laser_actual_detail', desc: 'レーザー実績・明細（ショット記録・品番別数量）' },
   { op: '取得/保存/更新/削除', table: 't_laser_shift_record', desc: 'レーザーシフト記録（勤務時間・稼働時間の管理）' },
+  { op: '取得/保存', table: 't_laser_weekly_material_order_progress / t_laser_material_receipt', desc: '調整後納期の材料発注・ロット別入荷実績（ラベル写真を含む）' },
   { op: '取得', table: 't_laser_pattern', desc: 'レーザーパターンマスタ（品番構成・1ショットあたり数量）' },
   { op: '取得', table: 'masters_equipment', desc: '設備マスタ（レーザー設備一覧）' },
 ]
@@ -1195,6 +1281,14 @@ const formMessage = ref('')
 const formMessageType = ref('info')
 const listMessage = ref('')
 const listMessageType = ref('info')
+const materialOrders = ref([])
+const materialWeekStart = ref('')
+const materialTodayOnly = ref(false)
+const materialSubTab = ref('schedule')
+const materialMessage = ref('')
+const materialMessageType = ref('info')
+const materialSavingId = ref(null)
+const materialReceiptForms = ref({})
 
 const setFormMessage = (message, type = 'info') => {
   formMessage.value = message
@@ -1204,6 +1298,112 @@ const setFormMessage = (message, type = 'info') => {
 const setListMessage = (message, type = 'info') => {
   listMessage.value = message
   listMessageType.value = type
+}
+
+const isoDate = (date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const startOfWeek = (value = new Date()) => {
+  const date = new Date(value.getFullYear(), value.getMonth(), value.getDate())
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
+  return isoDate(date)
+}
+const materialWeekLabel = computed(() => {
+  if (!materialWeekStart.value) return ''
+  const start = new Date(`${materialWeekStart.value}T00:00:00`)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  return `${isoDate(start)} ～ ${isoDate(end)}`
+})
+const receiptForm = (orderId) => {
+  if (!materialReceiptForms.value[orderId]) {
+    materialReceiptForms.value[orderId] = { received_date: isoDate(new Date()), received_lots: null, received_sheets: null, lot_number: '', photo: null }
+  }
+  return materialReceiptForms.value[orderId]
+}
+const setReceiptPhoto = (orderId, event) => {
+  receiptForm(orderId).photo = event.target.files?.[0] || null
+}
+const loadMaterialOrders = async () => {
+  if (!materialWeekStart.value) materialWeekStart.value = startOfWeek()
+  const start = materialTodayOnly.value ? isoDate(new Date()) : materialWeekStart.value
+  const endDate = new Date(`${start}T00:00:00`)
+  if (!materialTodayOnly.value) endDate.setDate(endDate.getDate() + 6)
+  try {
+    const res = await api.laserWeeklyPlans.getMaterialReceipts(start, isoDate(endDate))
+    materialOrders.value = res.data?.items || []
+  } catch (error) {
+    materialOrders.value = []
+    materialMessage.value = extractErrorMessage(error, '材料入荷予定の取得に失敗しました。')
+    materialMessageType.value = 'error'
+  }
+}
+const changeMaterialWeek = async (weeks) => {
+  const date = new Date(`${materialWeekStart.value || startOfWeek()}T00:00:00`)
+  date.setDate(date.getDate() + (weeks * 7))
+  materialWeekStart.value = isoDate(date)
+  materialTodayOnly.value = false
+  await loadMaterialOrders()
+}
+const showTodayMaterialOrders = async () => {
+  materialTodayOnly.value = true
+  await loadMaterialOrders()
+}
+const selectMaterialSubTab = async (tab) => {
+  materialSubTab.value = tab
+  if (tab === 'receiving' && materialTodayOnly.value) {
+    materialTodayOnly.value = false
+    await loadMaterialOrders()
+  }
+}
+const saveMaterialReceipt = async (order) => {
+  const form = receiptForm(order.id)
+  if (!form.received_lots && !form.received_sheets) {
+    materialMessage.value = '入荷ロット数または端数枚数を入力してください。'
+    materialMessageType.value = 'error'
+    return
+  }
+  if (order.is_special_management_material && !form.lot_number) {
+    materialMessage.value = '特別管理材料はロット番号を入力してください。'
+    materialMessageType.value = 'error'
+    return
+  }
+  const data = new FormData()
+  data.append('order_id', String(order.id))
+  data.append('received_date', form.received_date)
+  data.append('received_lots', String(form.received_lots || 0))
+  data.append('received_sheets', String(form.received_sheets || 0))
+  data.append('lot_number', form.lot_number || '')
+  if (form.photo) data.append('label_photo', form.photo)
+  materialSavingId.value = order.id
+  try {
+    await api.laserWeeklyPlans.createMaterialReceipt(data)
+    materialMessage.value = '入荷実績を保存しました。'
+    materialMessageType.value = 'success'
+    materialReceiptForms.value[order.id] = { received_date: isoDate(new Date()), received_lots: null, received_sheets: null, lot_number: '', photo: null }
+    await loadMaterialOrders()
+  } catch (error) {
+    materialMessage.value = extractErrorMessage(error, '入荷実績の保存に失敗しました。')
+    materialMessageType.value = 'error'
+  } finally {
+    materialSavingId.value = null
+  }
+}
+const cancelMaterialReceipt = async (receipt) => {
+  const reason = window.prompt('取消理由を入力してください（任意）。', '')
+  if (reason === null) return
+  try {
+    await api.laserWeeklyPlans.cancelMaterialReceipt(receipt.id, reason)
+    materialMessage.value = '入荷実績を取消しました。'
+    materialMessageType.value = 'success'
+    await loadMaterialOrders()
+  } catch (error) {
+    materialMessage.value = extractErrorMessage(error, '入荷実績の取消に失敗しました。')
+    materialMessageType.value = 'error'
+  }
 }
 
 const clearMessages = () => {
@@ -1828,8 +2028,13 @@ watch(
   { immediate: true }
 )
 
+watch(activeTab, async (tab) => {
+  if (tab === 'materials') await loadMaterialOrders()
+})
+
 onMounted(async () => {
   clearMessages()
+  materialWeekStart.value = startOfWeek()
   const processingStatePromise = loadCurrentProcessingState()
   await Promise.all([loadEquipments(), loadPatterns()])
   await Promise.all([loadActuals(), loadKadoRecords()])
@@ -1866,6 +2071,14 @@ onMounted(async () => {
   grid-template-areas:
     "tab"
     "kadojiseki";
+  align-items: start;
+}
+
+.laser-actual-page.mode-materials {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "tab"
+    "materials";
   align-items: start;
 }
 
@@ -1988,6 +2201,55 @@ onMounted(async () => {
 
 .kadojiseki-panel {
   grid-area: kadojiseki;
+}
+
+.material-panel {
+  grid-area: materials;
+}
+
+.material-head,
+.material-sub-tabs,
+.week-switcher,
+.receipt-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.receipt-form input[type="number"] {
+  width: 88px;
+}
+
+.receipt-form input[type="date"] {
+  width: 145px;
+}
+
+.receipt-form input[type="text"] {
+  width: 150px;
+}
+
+.receipt-history {
+  white-space: nowrap;
+}
+
+.receipt-history a {
+  margin-left: 6px;
+}
+
+.receipt-cancelled {
+  color: #64748b;
+  text-decoration: line-through;
+}
+
+.special-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
 }
 
 .kado-mode-bar {

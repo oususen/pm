@@ -145,6 +145,7 @@
               <th>標準LT(日)</th>
               <th>最小発注数</th>
               <th>発注倍数（ロット）</th>
+              <th>特別管理</th>
               <th>機種名</th>
               <th>識別記号</th>
               <th>加工先(将来用)</th>
@@ -171,6 +172,7 @@
               <td>{{ product.standard_lt_days }}</td>
               <td>{{ product.order_lot_min ?? '-' }}</td>
               <td>{{ product.order_lot_multiple ?? 1 }}</td>
+              <td>{{ product.is_special_management_material ? '対象' : '' }}</td>
               <td>{{ product.model_name || '-' }}</td>
               <td>{{ product.identification_code || '-' }}</td>
               <td>{{ getProcessingAreaLabel(product.processing_area) }}</td>
@@ -323,6 +325,10 @@
                     <div class="form-group">
                       <label>発注倍数（ロット）</label>
                       <input v-model.number="formData.order_lot_multiple" type="number" min="1" />
+                    </div>
+                    <div class="form-group">
+                      <label>特別管理材料</label>
+                      <label class="checkbox-label"><input v-model="formData.is_special_management_material" type="checkbox" /> ロット番号を必須にする</label>
                     </div>
                     <div class="form-group">
                       <label>加工先(将来用)</label>
@@ -934,6 +940,7 @@ const createEmptyFormData = () => ({
   standard_lt_days: 0,
   order_lot_min: null,
   order_lot_multiple: 1,
+  is_special_management_material: false,
   specific_gravity: 7.85,
   size_length: null,
   size_width: null,
@@ -968,6 +975,7 @@ const mapProductToFormData = (product, options = {}) => {
     identification_code: source.identification_code ?? '',
     order_lot_min: source.order_lot_min ?? null,
     order_lot_multiple: source.order_lot_multiple ?? 1,
+    is_special_management_material: Boolean(source.is_special_management_material),
     line: source.line ?? null,
     process: source.process ?? null,
     next_process: source.next_process ?? null,

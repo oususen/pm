@@ -18,16 +18,18 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
+from PIL import Image, UnidentifiedImageError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.models import ApprovalRequest, ApprovalRouteConfig
 from accounts.serializers import ApprovalRequestSerializer
 from shipping.services.email_service import EmailService
 
-from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserWeeklyMaterialDailyProgress, LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
+from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserMaterialReceipt, LaserWeeklyMaterialDailyProgress, LaserWeeklyMaterialGroup, LaserWeeklyMaterialInitialProgress, LaserWeeklyMaterialOrderProgress, LaserWeeklyPatternDailyProgress, LaserWeeklyPatternInitialProgress, LaserWeeklyPatternManualQuantity, LaserWeeklyPlanManualQuantity, LaserWeeklyPlanTarget
 from .models_laser_pattern import LaserPattern
 from .models_line_plan import LinePlan
 from .models_line_backlog import LineBacklog
@@ -39,6 +41,8 @@ MATERIAL_ORDER_SUPPLIER_CODES = {
     LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI: '000048',
     LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO: '000131',
 }
+MATERIAL_RECEIPT_IMAGE_CONTENT_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+MATERIAL_RECEIPT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 
 DEFAULT_MATERIAL_ORDER_EMAIL_BODY = (
     '{supplier_name} 御中\n\n'
@@ -391,6 +395,114 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 )
                 saved_count += 1
         return Response({'saved_count': saved_count})
+
+    @action(detail=False, methods=['get', 'post'], url_path='material-receipts', parser_classes=[MultiPartParser, FormParser])
+    def material_receipts(self, request):
+        """調整後納期の発注明細と、ロット単位の入荷実績を扱う。"""
+        if request.method == 'GET':
+            try:
+                start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
+                end_date = datetime.strptime(request.query_params['end_date'], '%Y-%m-%d').date()
+                if end_date < start_date:
+                    raise ValueError
+            except (KeyError, ValueError):
+                return Response({'detail': '表示期間を正しく指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+            orders = LaserWeeklyMaterialOrderProgress.objects.filter(
+                delivery_date__range=(start_date, end_date),
+            ).filter(
+                Q(order_lots__gt=0) | Q(order_sheets__gt=0),
+            ).select_related('material').prefetch_related('receipts__received_by').order_by(
+                'delivery_date', 'supplier', 'material__product_code', 'id',
+            )
+            rows = []
+            for order in orders:
+                receipts = []
+                for receipt in order.receipts.all():
+                    photo_url = receipt.label_photo.url if receipt.label_photo else ''
+                    if photo_url and request:
+                        photo_url = request.build_absolute_uri(photo_url)
+                    receipts.append({
+                        'id': receipt.id,
+                        'received_date': receipt.received_date.isoformat(),
+                        'received_lots': receipt.received_lots,
+                        'received_sheets': receipt.received_sheets,
+                        'lot_number': receipt.lot_number,
+                        'label_photo_url': photo_url,
+                        'received_by_name': (receipt.received_by.get_full_name() or receipt.received_by.username) if receipt.received_by else '',
+                        'is_cancelled': receipt.cancelled_at is not None,
+                        'cancelled_at': receipt.cancelled_at.isoformat(timespec='minutes') if receipt.cancelled_at else '',
+                        'cancel_reason': receipt.cancel_reason,
+                    })
+                rows.append({
+                    'id': order.id,
+                    'delivery_date': order.delivery_date.isoformat(),
+                    'supplier': order.supplier,
+                    'supplier_label': order.get_supplier_display(),
+                    'material_id': order.material_id,
+                    'material_code': order.material.product_code,
+                    'material_name': order.material.product_name,
+                    'lot_multiple': order.lot_multiple,
+                    'order_lots': order.order_lots,
+                    'order_sheets': order.order_sheets,
+                    'is_special_management_material': order.material.is_special_management_material,
+                    'receipts': receipts,
+                })
+            return Response({'items': rows})
+
+        try:
+            order = LaserWeeklyMaterialOrderProgress.objects.select_related('material').get(id=int(request.data['order_id']))
+            received_date = datetime.strptime(request.data['received_date'], '%Y-%m-%d').date()
+            received_lots = int(request.data.get('received_lots', 0))
+            received_sheets = int(request.data.get('received_sheets', 0))
+            lot_number = str(request.data.get('lot_number', '')).strip()
+            if received_lots < 0 or received_sheets < 0 or (received_lots == 0 and received_sheets == 0):
+                raise ValueError
+        except (LaserWeeklyMaterialOrderProgress.DoesNotExist, KeyError, TypeError, ValueError):
+            return Response({'detail': '入荷内容が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+        if order.material.is_special_management_material and not lot_number:
+            return Response({'detail': '特別管理材料はロット番号を入力してください。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        photo = request.FILES.get('label_photo')
+        if photo:
+            if photo.content_type not in MATERIAL_RECEIPT_IMAGE_CONTENT_TYPES:
+                return Response({'detail': 'ラベル写真はJPEG・PNG・WebP形式で登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            if photo.size > MATERIAL_RECEIPT_IMAGE_MAX_BYTES:
+                return Response({'detail': 'ラベル写真は5MB以下で登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                image = Image.open(photo)
+                if image.format not in {'JPEG', 'PNG', 'WEBP'}:
+                    raise ValueError
+                image.verify()
+                photo.seek(0)
+            except (UnidentifiedImageError, OSError, ValueError):
+                return Response({'detail': 'ラベル写真の画像データが不正です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        receipt = LaserMaterialReceipt.objects.create(
+            order=order,
+            received_date=received_date,
+            received_lots=received_lots,
+            received_sheets=received_sheets,
+            lot_number=lot_number,
+            label_photo=photo,
+            received_by=request.user,
+        )
+        return Response({'id': receipt.id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path=r'material-receipts/(?P<receipt_id>[^/.]+)/cancel')
+    def cancel_material_receipt(self, request, receipt_id=None):
+        """入荷実績を物理削除せず、取消履歴として保持する。"""
+        try:
+            receipt = LaserMaterialReceipt.objects.get(id=int(receipt_id))
+        except (LaserMaterialReceipt.DoesNotExist, TypeError, ValueError):
+            return Response({'detail': '入荷実績が見つかりません。'}, status=status.HTTP_404_NOT_FOUND)
+        if receipt.cancelled_at:
+            return Response({'detail': 'この入荷実績はすでに取消済みです。'}, status=status.HTTP_400_BAD_REQUEST)
+        receipt.cancelled_at = datetime.now()
+        receipt.cancelled_by = request.user
+        receipt.cancel_reason = str(request.data.get('cancel_reason', '')).strip()[:255]
+        receipt.save(update_fields=['cancelled_at', 'cancelled_by', 'cancel_reason', 'updated_at'])
+        return Response({'id': receipt.id, 'detail': '入荷実績を取消しました。'})
 
 
 
