@@ -40,7 +40,7 @@
         <select v-model="entryLineProcessId">
           <option v-for="p in currentLineProcesses" :key="p.id" :value="p.id">{{ p.process_name }}</option>
         </select>
-        <label><span class="field-label">開始</span><input v-model="entryStart" type="time" @change="updateEndPreview" /></label>
+        <label><span class="field-label">開始</span><input :value="entryStart" placeholder="8:00" style="width:70px" @input="onStartInput" @blur="normalizeStart" @focus="$event.target.select()" /></label>
         <label><span class="field-label">実働</span>
           <select v-model.number="entryWorkHours" @change="updateEndPreview">
             <option v-for="opt in workHoursOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
@@ -499,7 +499,7 @@ const chartHtml = computed(() => {
 
   for (const w of currentWorkers.value) {
     const day = workerDay(w.id, selectedDate.value, sm)
-    const actualStart = day ? clockLabel(day.start) : w.work_start
+    const actualStart = day ? clockLabel(day.start) : (w.work_start || '').slice(0, 5)
     const actualShift = day ? shiftFromStart(day.start) : { name: w.shift_type, css: w.shift_type === '夜' ? 'night' : w.shift_type === '昼' ? 'day' : 'morning' }
     const dayJobs = assignments.value.filter(a => a.worker === w.id && a.date === selectedDate.value)
     const totalWork = dayJobs.reduce((sum, a) => sum + netDuration(a), 0)
@@ -745,7 +745,34 @@ function syncStartFromChart() {
     const rest = breaks.find(b => next >= b.start && next < b.end)
     if (rest) next = rest.end
     entryStart.value = clockLabel(next)
+  } else {
+    const worker = currentWorkers.value.find(w => w.id === entryWorkerId.value)
+    if (worker?.work_start) entryStart.value = worker.work_start.slice(0, 5)
   }
+  updateEndPreview()
+}
+
+function parseTimeInput(raw) {
+  const s = String(raw).trim()
+  const colonMatch = s.match(/^(\d{1,2}):(\d{2})$/)
+  if (colonMatch) return `${colonMatch[1].padStart(2, '0')}:${colonMatch[2]}`
+  const num = parseInt(s, 10)
+  if (!isNaN(num) && num >= 0 && num <= 2359) {
+    if (num <= 24) return `${String(num).padStart(2, '0')}:00`
+    const h = Math.floor(num / 100)
+    const m = num % 100
+    if (h <= 24 && m < 60) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  }
+  return null
+}
+
+function onStartInput(e) {
+  entryStart.value = e.target.value
+}
+
+function normalizeStart() {
+  const parsed = parseTimeInput(entryStart.value)
+  if (parsed) entryStart.value = parsed
   updateEndPreview()
 }
 
@@ -1032,7 +1059,7 @@ function buildChartPrintBody() {
 
   for (const w of currentWorkers.value) {
     const day = workerDay(w.id, selectedDate.value, sm)
-    const actualStart = day ? clockLabel(day.start) : w.work_start
+    const actualStart = day ? clockLabel(day.start) : (w.work_start || '').slice(0, 5)
     const actualShift = day ? shiftFromStart(day.start) : { name: w.shift_type, css: w.shift_type === '夜' ? 'night' : w.shift_type === '昼' ? 'day' : 'morning' }
     const dayJobs = assignments.value.filter(a => a.worker === w.id && a.date === selectedDate.value)
     const totalWork = dayJobs.reduce((sum, a) => sum + netDuration(a), 0)
