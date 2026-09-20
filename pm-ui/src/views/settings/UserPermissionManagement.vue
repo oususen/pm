@@ -423,6 +423,8 @@ const permissionResources = [
   { value: 'purchase.inventory', label: '仕入: 在庫/残量' },
   { value: 'purchase.progress', label: '仕入: 仕入れ進度' },
   { value: 'purchase.receiving', label: '仕入: 仕入れ検収' },
+  { value: 'purchase.receiving_mobile', label: '仕入: 仕入れ検収（スマホ）' },
+  { value: 'purchase.receiving_confirm', label: '仕入: スマホ検収 確認' },
   { value: 'purchase.actual_input', label: '仕入: 仕入れ実績入力' },
   { value: 'purchase.actual_edit', label: '仕入: 納入実績編集' },
   { value: 'purchase.actual_inquiry', label: '仕入: 納入実績照会' },

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>仕入れ検収（スマホ）作業手順書</title>
+<style>
+  :root { --bg:#f6f7fa; --card:#fff; --ink:#1a2233; --ink2:#4b5a72; --accent:#1565c0; --accent-light:#e3effa; --teal:#00796b; --teal-light:#e0f2f1; --success:#2e7d32; --success-light:#e6f4ea; --warn:#e65100; --warn-light:#fff3e0; --danger:#c62828; --danger-light:#fce4e4; --border:#d4dae4; --grid:#eaf0f7; --shadow:0 2px 12px rgba(20,40,80,.08); --radius:10px; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12161e; --card:#1c2230; --ink:#e2e6ee; --ink2:#aab5c8; --accent:#5ca0e8; --accent-light:#1c3050; --teal:#4db6ac; --teal-light:#153831; --success:#66bb6a; --success-light:#1a3020; --warn:#ff9800; --warn-light:#2e2010; --danger:#ef5350; --danger-light:#3a1a1a; --border:#2e3648; --grid:#222c3c; --shadow:0 2px 16px rgba(0,0,0,.3); } }
+  * { box-sizing:border-box; } body { margin:0; font-family:"Yu Gothic Medium","Hiragino Kaku Gothic ProN",Meiryo,sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; }
+  .page { max-width:960px; margin:0 auto; padding:40px 24px 80px; } .card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:24px; }
+  .cover { padding:44px 40px 36px; border-left:5px solid var(--teal); } h1 { font-size:28px; margin:0 0 6px; } .subtitle { color:var(--ink2); margin-bottom:20px; } .path { display:inline-block; padding:5px 14px; border-radius:6px; color:var(--accent); background:var(--accent-light); font-size:13px; font-weight:bold; }
+  .toc { padding:22px 30px; } h2 { font-size:20px; margin:0 0 16px; } .toc h2 { font-size:15px; color:var(--ink2); } .toc-list { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:8px 20px; } .toc-list li { display:flex; align-items:center; gap:8px; font-size:14px; } .num { width:25px; height:25px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:#fff; background:var(--teal); font-size:12px; font-weight:bold; flex:none; }
+  .overview { padding:28px 32px; } .badge { font-size:11px; padding:2px 10px; border-radius:4px; color:#fff; background:var(--teal); vertical-align:middle; }
+  .mock-phone { max-width:390px; margin:16px auto 22px; overflow:hidden; border:6px solid #243244; border-radius:28px; box-shadow:0 5px 18px rgba(0,0,0,.25); background:#f1f5f9; position:relative; } .phone-head { padding:12px 14px; background:#1e293b; color:#fff; } .phone-title { font-size:16px; font-weight:bold; } .phone-select { margin-top:8px; padding:8px; border-radius:6px; background:#334155; font-size:12px; } .phone-tabs { display:flex; background:#e2e8f0; color:#64748b; } .phone-tab { flex:1; padding:8px; font-size:12px; text-align:center; } .phone-tab.active { background:#fff; color:#1e293b; border-bottom:3px solid #3b82f6; font-weight:bold; } .summary { display:flex; background:#fff; } .summary div { flex:1; padding:8px; text-align:center; font-size:10px; color:#64748b; border-right:1px solid #e2e8f0; } .summary strong { display:block; font-size:18px; color:#1e293b; } .mini-card { margin:10px; padding:12px; border-radius:10px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.1); font-size:11px; } .mini-head { display:flex; justify-content:space-between; font-weight:bold; font-size:13px; } .mini-name { color:#64748b; margin:2px 0 8px; } .amounts { display:flex; margin-bottom:8px; } .amounts span { flex:1; text-align:center; padding:4px 2px; background:#f8fafc; border-right:1px solid #e2e8f0; color:#64748b; } .amounts b { display:block; color:#1e293b; font-size:14px; } .input { padding:7px 10px; border:2px solid #d1d5db; border-radius:6px; text-align:right; font-weight:bold; font-size:15px; } .buttons { display:flex; gap:5px; margin-top:8px; } .button { padding:6px 8px; border-radius:6px; font-size:11px; font-weight:bold; color:#fff; background:#f59e0b; } .button.blue { background:#3b82f6; } .button.green { flex:1; text-align:center; background:#16a34a; } .fab { float:right; margin:-4px 12px 12px; width:38px; height:38px; text-align:center; padding-top:9px; border-radius:50%; color:#fff; background:#3b82f6; font-size:16px; } .pin { position:absolute; z-index:5; width:25px; height:25px; display:flex; align-items:center; justify-content:center; border:2px solid var(--danger); border-radius:50%; background:#fff; color:var(--danger); font-size:13px; font-weight:800; box-shadow:0 1px 4px rgba(0,0,0,.25); }
+  .anno-list { list-style:none; padding:0; margin:0; display:grid; gap:10px; } .anno-list li { display:flex; gap:10px; font-size:14px; } .anno { width:24px; height:24px; flex:none; display:inline-flex; align-items:center; justify-content:center; border:2px solid var(--danger); border-radius:50%; color:var(--danger); font-size:13px; font-weight:bold; }
+  .step { padding:30px 34px 26px; } .step-head { display:flex; align-items:center; gap:14px; margin-bottom:14px; } .step-no { width:38px; height:38px; flex:none; display:flex; align-items:center; justify-content:center; border-radius:50%; background:var(--teal); color:#fff; font-size:18px; font-weight:bold; } .step h2 { margin:0; } .desc { margin:0 0 14px; color:var(--ink2); font-size:14px; }
+  .flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; margin:18px 0; } .flow span { padding:7px 12px; border:1px solid var(--border); border-radius:7px; background:var(--grid); font-size:13px; font-weight:bold; } .flow i { color:var(--ink2); font-style:normal; font-size:20px; }
+  .callout { display:flex; gap:10px; margin-top:14px; padding:11px 14px; border-radius:6px; font-size:13px; } .info { background:var(--accent-light); color:var(--accent); } .ok { background:var(--success-light); color:var(--success); } .warn { background:var(--warn-light); color:var(--warn); } .danger { background:var(--danger-light); color:var(--danger); }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { padding:8px 10px; border:1px solid var(--border); text-align:left; } th { background:var(--grid); color:var(--ink2); } .operation { padding:18px; border:1px solid var(--border); border-radius:8px; background:var(--grid); } .operation ol { margin:0; padding-left:22px; } .operation li { margin:5px 0; }
+  .scanner { max-width:390px; margin:16px auto; border-radius:12px; overflow:hidden; background:#1e293b; color:#fff; } .scanner-head { padding:10px 14px; font-weight:bold; } .camera { height:180px; display:flex; align-items:center; justify-content:center; background:#111; } .scan-frame { width:130px; height:130px; border:3px solid #3b82f6; border-radius:12px; } .scan-note { padding:10px 14px; color:#cbd5e1; font-size:12px; }
+  @media (max-width:600px) { .page { padding:20px 12px 60px; } .cover,.overview,.step { padding:24px 18px 20px; } .toc { padding:20px; } .toc-list { grid-template-columns:1fr; } h1 { font-size:22px; } .flow { flex-direction:column; } .flow i { transform:rotate(90deg); } }
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="card cover">
+    <h1>仕入れ検収（スマホ）作業手順書</h1>
+    <div class="subtitle">スマートフォンで納入品を品番ごとに照合し、QRコードも利用して入荷実績を登録する手順です。</div>
+    <div class="path">仕入 <span>▶</span> 仕入れ管理メニュー <span>▶</span> 仕入れ検収（スマホ）</div>
+  </section>
+
+  <section class="card toc">
+    <h2>手順の流れ</h2>
+    <ul class="toc-list"><li><span class="num">1</span>画面を開く</li><li><span class="num">2</span>仕入先・対象日を選ぶ</li><li><span class="num">3</span>検収方式を選ぶ</li><li><span class="num">4</span>通常の検収を登録する</li><li><span class="num">5</span>QRコードを読む</li><li><span class="num">6</span>分納・数変更・未納を登録する</li><li><span class="num">7</span>絞り込みで確認する</li><li><span class="num">!</span>検収時の注意</li></ul>
+  </section>
+
+  <section class="card overview">
+    <h2>画面説明 <span class="badge">まずここを読む</span></h2>
+    <div class="mock-phone">
+      <div class="phone-head"><div class="phone-title">仕入れ検収 <small>スマホ</small></div><div class="phone-select">仕入先を選択　　▼</div><div class="phone-select">2026-09-20</div></div>
+      <div class="phone-tabs"><div class="phone-tab active">納入リスト</div><div class="phone-tab">進度方式</div></div>
+      <div class="summary"><div><strong>5</strong>全件</div><div><strong style="color:#16a34a">2</strong>検収済</div><div><strong style="color:#ea580c">3</strong>未検収</div></div>
+      <div class="mini-card"><div class="mini-head"><span>ABC-001</span><span>移動先: INLINE</span></div><div class="mini-name">ブラケット A</div><div class="amounts"><span>予定<b>100</b></span><span>実績<b>0</b></span><span>差異<b>－</b></span></div><div class="input">実数　100</div><div class="buttons"><span class="button green">検収</span><span class="button">数変更</span><span class="button blue">分納</span></div></div>
+      <div class="fab">▣</div>
+      <span class="pin" style="top:42px;right:10px;">1</span>
+      <span class="pin" style="top:128px;right:16px;">2</span>
+      <span class="pin" style="top:222px;right:16px;">3</span>
+      <span class="pin" style="bottom:10px;right:4px;">4</span>
+    </div>
+    <ul class="anno-list"><li><span class="anno">1</span><span><strong>仕入先・対象日</strong> — 仕入先を選ぶと、その対象日の検収データを読み込みます。日付を変更した場合も再読み込みされます。</span></li><li><span class="anno">2</span><span><strong>方式タブ</strong> — 「納入リスト」は登録済みの納入予定、「進度方式」は需要・計画から算出した予定数量を表示します。</span></li><li><span class="anno">3</span><span><strong>品番カード</strong> — 予定・実績・差異と、今回の入荷数を確認して品番ごとに検収します。</span></li><li><span class="anno">4</span><span><strong>QRボタン</strong> — 右下のボタンからカメラを起動し、QRコードの品番と数量を読み取ります。</span></li></ul>
+  </section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">1</span><h2>画面を開く</h2></div><p class="desc">グローバルナビゲーションから「仕入」を開き、「仕入れ管理メニュー」内の「仕入れ検収（スマホ）」を選びます。</p><div class="flow"><span>仕入</span><i>→</i><span>仕入れ管理メニュー</span><i>→</i><span>仕入れ検収（スマホ）</span></div><div class="callout info"><span>ℹ</span><span>スマートフォンのカメラを使う場合は、HTTPSでアクセスし、ブラウザのカメラ利用を許可してください。</span></div></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">2</span><h2>仕入先・対象日を選ぶ</h2></div><div class="operation"><ol><li>上部の「仕入先を選択」を押し、検収する仕入先を選びます。</li><li>対象日が納入日と合っているか確認します。</li><li>日付を変更する場合は日付欄を押して選択します。</li><li>データ読み込み後、全件・検収済・未検収の件数を確認します。</li></ol></div><div class="callout warn"><span>⚠</span><span>仕入先または対象日を変えると、表示中の未確定入力はリセットされます。変更前に必要な品番を検収してください。</span></div></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">3</span><h2>検収方式を選ぶ</h2></div><table><thead><tr><th>方式</th><th>使う場面</th><th>表示する予定数</th></tr></thead><tbody><tr><td><strong>納入リスト</strong></td><td>納入予定を作成済みで、そのリストと照合する場合</td><td>納入予定画面で登録した数量</td></tr><tr><td><strong>進度方式</strong></td><td>需要・計画を基に検収する場合</td><td>需要・計画から算出した数量</td></tr></tbody></table><div class="callout info"><span>ℹ</span><span>通常は「納入リスト」が初期表示されます。検収開始前に、納品書の対象と同じ方式であることを確認してください。</span></div></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">4</span><h2>予定どおりの数量を検収する</h2></div><p class="desc">現物・納品書・画面の予定数を照合してから、対象品番の「検収」を押します。</p><div class="operation"><ol><li>品番、品名、移動先を現物・納品書と照合します。</li><li>「予定」と「実数」が、今回の入荷数と一致していることを確認します。</li><li>「検収」を押します。</li><li>実績が予定数量に達した品番は「検収済」と表示されます。</li></ol></div><div class="callout ok"><span>✓</span><span>検収は品番ごとにすぐ登録されます。検収済みの品番は、同じ予定分を再入力する必要はありません。</span></div></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">5</span><h2>QRコードで品番・数量を入力する</h2></div><p class="desc">QRコードに品番と数量が含まれている場合、読み取り後に該当する品番カードへ移動し、「実数」に数量を入力します。</p><div class="scanner"><div class="scanner-head">QRスキャン　　×</div><div class="camera"><div class="scan-frame"></div></div><div class="scan-note">QRコードを枠内に表示してください</div></div><div class="operation"><ol><li>画面右下のQRボタンを押します。</li><li>初回はブラウザのカメラ利用を「許可」します。</li><li>納入品のQRコードを枠内に表示します。</li><li>品番カードが強調表示されたら、実数を確認します。</li><li>内容が正しければ「検収」を押します。</li></ol></div><div class="callout danger"><span>!</span><span>「リストにありません」と表示された場合は検収できません。仕入先・対象日・方式を確認し、正しい一覧を読み込んでください。</span></div></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">6</span><h2>分納・数変更・未納を登録する</h2></div><table><thead><tr><th>状況</th><th>操作</th><th>結果</th></tr></thead><tbody><tr><td>一部だけ入荷した</td><td>「分納」→ 今回の入荷数を入力 →「検収」</td><td>今回分だけ実績に登録し、残数は未検収として残ります</td></tr><tr><td>予定と異なる数量</td><td>「数変更」→「実数」を修正 →「検収」</td><td>入力した数量で実績を登録します</td></tr><tr><td>入荷しなかった</td><td>「数変更」→「未納」→「検収」</td><td>実数を0、備考を「未納」として登録します</td></tr></tbody></table><div class="callout warn"><span>⚠</span><span>数量0の検収では確認メッセージが表示されます。未納として登録する内容か、必ず確認してください。</span></div></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">7</span><h2>絞り込みで対象を確認する</h2></div><p class="desc">「絞り込み」を押すと、品番・移動先・G・数変更・差異・実績で品番カードを絞り込めます。</p><table><thead><tr><th>絞り込み</th><th>確認したいとき</th></tr></thead><tbody><tr><td>品番</td><td>特定の品番を探す</td></tr><tr><td>数変更: 有</td><td>数量変更・未納として操作中の品番だけ確認する</td></tr><tr><td>差異: 有</td><td>予定と実績が一致していない品番を確認する</td></tr><tr><td>実績: 無</td><td>まだ検収していない品番だけ確認する</td></tr></tbody></table></section>
+
+  <section class="card step"><div class="step-head"><span class="step-no">!</span><h2>検収時の注意</h2></div><ul class="anno-list"><li><span class="anno">1</span><span>検収前に、<strong>現物・納品書・画面の予定数</strong>を必ず照合してください。</span></li><li><span class="anno">2</span><span>「検収済」の品番は予定数量まで登録済みです。追加納入を扱う場合は、PC版の<a href="/manual?path=仕入れ/仕入れ検収.md">仕入れ検収マニュアル</a>を参照してください。</span></li><li><span class="anno">3</span><span>カメラが起動しない場合は、ブラウザ設定でこのサイトのカメラ権限を許可してください。</span></li></ul></section>
+</main>
+</body>
+</html>

@@ -221,6 +221,8 @@ class UserPermission(models.Model):
         ('purchase.inventory', '仕入: 在庫/残量'),
         ('purchase.progress', '仕入: 仕入れ進度'),
         ('purchase.receiving', '仕入: 仕入れ検収'),
+        ('purchase.receiving_mobile', '仕入: 仕入れ検収（スマホ）'),
+        ('purchase.receiving_confirm', '仕入: スマホ検収 確認'),
         ('purchase.actual_input', '仕入: 仕入れ実績入力'),
         ('purchase.actual_edit', '仕入: 納入実績編集'),
         ('purchase.actual_inquiry', '仕入: 納入実績照会'),

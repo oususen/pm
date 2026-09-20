@@ -39,13 +39,13 @@ const purchase = [
     path: "/purchase/receiving-mobile",
     name: "PurchaseReceivingMobile",
     component: () => import("@/views/purchase/PurchaseReceivingMobile.vue"),
-    meta: { pageTitle: "仕入れ検収（スマホ）", resource: "purchase.receiving" },
+    meta: { pageTitle: "仕入れ検収（スマホ）", manualPath: "仕入れ/仕入れ検収（スマホ）.md", resource: "purchase.receiving_mobile" },
   },
   {
     path: "/purchase/receiving-confirm",
     name: "PurchaseReceivingConfirm",
     component: () => import("@/views/purchase/PurchaseReceivingConfirm.vue"),
-    meta: { pageTitle: "スマホ検収 確認", resource: "purchase.receiving" },
+    meta: { pageTitle: "スマホ検収 確認", manualPath: "仕入れ/仕入れ検収（スマホ）.md", resource: "purchase.receiving_confirm" },
   },
   {
     path: "/purchase/delivery-schedule",

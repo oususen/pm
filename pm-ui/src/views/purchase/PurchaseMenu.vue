@@ -136,7 +136,7 @@ const tiles = computed(() => [
     description: "QRスキャン対応",
     category: "records",
     required: "edit",
-    resource: "purchase.receiving",
+    resource: "purchase.receiving_mobile",
   },
   {
     to: "/purchase/receiving-confirm",
@@ -145,7 +145,7 @@ const tiles = computed(() => [
     description: "業務員がスマホ検収を承認",
     category: "records",
     required: "edit",
-    resource: "purchase.receiving",
+    resource: "purchase.receiving_confirm",
   },
   {
     to: "/purchase/actual-input",
