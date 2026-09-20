@@ -94,6 +94,7 @@
       >
         <div class="m-card-head">
           <div class="m-card-code">{{ row.product_code }}</div>
+          <span v-if="row.transfer_destination_label" class="m-card-dest">移動先: {{ row.transfer_destination_label }}</span>
           <span v-if="isReceived(row)" class="m-badge-done">検収済</span>
           <span v-else-if="row.held" class="m-badge-held">保留</span>
         </div>
@@ -139,15 +140,15 @@
               :disabled="saving"
             >検収</button>
             <button
-              v-if="!row.held"
-              class="m-btn split"
-              @click="promptSplit(row)"
-            >分割</button>
-            <button
               class="m-btn hold"
               :class="{ active: row.held }"
               @click="toggleHold(row)"
             >{{ row.held ? '保留解除' : '数変更' }}</button>
+            <button
+              v-if="!row.held"
+              class="m-btn split"
+              @click="promptSplit(row)"
+            >分納</button>
             <button
               v-if="row.held"
               class="m-btn danger"
@@ -767,6 +768,12 @@ onUnmounted(stopScan)
   font-size: 16px;
   font-weight: 800;
   color: #1e293b;
+}
+.m-card-dest {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ea580c;
+  margin-left: auto;
 }
 .m-card-name {
   font-size: 13px;
