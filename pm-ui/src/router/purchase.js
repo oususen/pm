@@ -36,6 +36,18 @@ const purchase = [
     meta: { pageTitle: "仕入れ検収", manualPath: "仕入れ/仕入れ検収.md", resource: "purchase.receiving" },
   },
   {
+    path: "/purchase/receiving-mobile",
+    name: "PurchaseReceivingMobile",
+    component: () => import("@/views/purchase/PurchaseReceivingMobile.vue"),
+    meta: { pageTitle: "仕入れ検収（スマホ）", resource: "purchase.receiving" },
+  },
+  {
+    path: "/purchase/receiving-confirm",
+    name: "PurchaseReceivingConfirm",
+    component: () => import("@/views/purchase/PurchaseReceivingConfirm.vue"),
+    meta: { pageTitle: "スマホ検収 確認", resource: "purchase.receiving" },
+  },
+  {
     path: "/purchase/delivery-schedule",
     name: "PurchaseDeliverySchedule",
     component: () => import("@/views/purchase/PurchaseDeliverySchedule.vue"),

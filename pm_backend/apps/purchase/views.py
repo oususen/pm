@@ -503,6 +503,7 @@ def _create_purchase_actual_record(
     requested_line_id=None,
     non_delivery=False,
     purchase_plan=None,
+    receiving_status=None,
 ):
     """仕入実績の作成とLineBacklog反映を全入力画面共通で行う。"""
     if not supplier:
@@ -541,6 +542,7 @@ def _create_purchase_actual_record(
             'line_id': target_line_id,
             **(({'non_delivery': True}) if non_delivery else {}),
             **({'purchase_plan': purchase_plan} if purchase_plan else {}),
+            **({'receiving_status': receiving_status} if receiving_status else {}),
         },
     }
     serializer = ProcessRealtimeCreateSerializer(data=payload)
@@ -610,7 +612,7 @@ def _reconcile_purchase_actual_backlog_for_key(process_id, product_id, line_id):
             process_id=pid,
             product_id=product,
             record_type='PRODUCTION',
-            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'],
+            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
         )
         .select_related('process')
     )
@@ -961,7 +963,7 @@ class PurchaseActualInquiryView(APIView):
 
         qs = ProcessRealtimeRecord.objects.filter(
             record_type='PRODUCTION',
-            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'],
+            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
         ).select_related('product', 'process')
 
         if start_date_text:
@@ -1025,7 +1027,7 @@ class PurchaseActualDetailView(APIView):
             .filter(
                 id=record_id,
                 record_type='PRODUCTION',
-                event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'],
+                event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
             )
             .select_related('process', 'product')
             .first()
@@ -1976,6 +1978,7 @@ class PurchaseReceivingView(APIView):
         supplier_id = request.data.get('supplier_id')
         target_date_str = request.data.get('target_date')
         items = request.data.get('items', [])
+        request_source = request.data.get('source', 'PURCHASE_RECEIVING')
 
         if not supplier_id or not items:
             return Response({'detail': 'supplier_id and items are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2039,16 +2042,20 @@ class PurchaseReceivingView(APIView):
                 item = prepared['item']
                 product = prepared['product']
                 qty = Decimal(str(item.get('received_qty') or 0))
+                is_mobile = request_source == 'PURCHASE_RECEIVING_MOBILE'
+                purchase_plan = plan_key(supplier.id, product.id, target.isoformat())
                 created = _create_purchase_actual_record(
                     supplier=supplier,
                     product=product,
                     qty=qty,
                     arrival_date=target,
-                    source='PURCHASE_RECEIVING',
+                    source=request_source if request_source in ('PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE') else 'PURCHASE_RECEIVING',
                     operator_name=operator_name,
                     remarks=item.get('note'),
                     requested_line_id=line_id,
                     non_delivery=bool(item.get('non_delivery', False)),
+                    receiving_status='pending' if is_mobile else 'confirmed',
+                    purchase_plan=purchase_plan,
                 )
                 created_ids.append(created['record'].id)
                 if qty > 0:
@@ -2857,7 +2864,7 @@ class PurchaseReceivingHistoryView(APIView):
 
         qs = ProcessRealtimeRecord.objects.filter(
             record_type='PRODUCTION',
-            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'],
+            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
         ).order_by('-timestamp')
 
         if line_id:
@@ -2880,6 +2887,83 @@ class PurchaseReceivingHistoryView(APIView):
             })
 
         return Response({'records': records})
+
+
+class PurchaseReceivingConfirmView(APIView):
+    """スマホ検収の業務員確認API"""
+
+    def get(self, request):
+        """pending/confirmed の検収レコード一覧を返す"""
+        supplier_id = request.query_params.get('supplier_id')
+        target_date_str = request.query_params.get('target_date')
+        status_filter = request.query_params.get('status', 'pending')
+
+        qs = ProcessRealtimeRecord.objects.filter(
+            record_type='PRODUCTION',
+            event_data__source='PURCHASE_RECEIVING_MOBILE',
+        ).select_related('product', 'process').order_by('-timestamp')
+
+        if supplier_id:
+            qs = qs.filter(event_data__supplier_id=int(supplier_id))
+
+        if target_date_str:
+            target = date.fromisoformat(target_date_str)
+            qs = qs.filter(timestamp__date=target)
+
+        if status_filter and status_filter != 'all':
+            qs = qs.filter(event_data__receiving_status=status_filter)
+
+        suppliers_map = {}
+        for s in Supplier.objects.all():
+            suppliers_map[s.id] = {'code': s.supplier_code, 'name': s.supplier_name}
+
+        records = []
+        for r in qs[:200]:
+            ed = r.event_data or {}
+            sid = ed.get('supplier_id')
+            sup = suppliers_map.get(sid, {})
+            records.append({
+                'id': r.id,
+                'timestamp': r.timestamp.strftime('%Y-%m-%d %H:%M') if r.timestamp else '',
+                'product_code': r.product_code or '',
+                'product_name': r.product_name or '',
+                'qty': int(r.qty or 0),
+                'operator_name': r.operator_name or '',
+                'remarks': r.remarks or '',
+                'supplier_id': sid,
+                'supplier_code': sup.get('code', ''),
+                'supplier_name': sup.get('name', ''),
+                'arrival_date': ed.get('arrival_date', ''),
+                'receiving_status': ed.get('receiving_status', 'confirmed'),
+                'non_delivery': ed.get('non_delivery', False),
+            })
+
+        return Response({'records': records})
+
+    def patch(self, request):
+        """レコードのreceiving_statusをconfirmedに更新する"""
+        record_ids = request.data.get('record_ids', [])
+        if not record_ids:
+            return Response({'detail': 'record_ids is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = 0
+        with transaction.atomic():
+            records = ProcessRealtimeRecord.objects.filter(
+                id__in=record_ids,
+                record_type='PRODUCTION',
+                event_data__source='PURCHASE_RECEIVING_MOBILE',
+                event_data__receiving_status='pending',
+            )
+            for record in records:
+                ed = record.event_data or {}
+                ed['receiving_status'] = 'confirmed'
+                ed['confirmed_by'] = getattr(request.user, 'username', '') if request.user and request.user.is_authenticated else ''
+                ed['confirmed_at'] = datetime.now().isoformat()
+                record.event_data = ed
+                record.save(update_fields=['event_data'])
+                updated += 1
+
+        return Response({'detail': f'{updated}件を確認済みにしました', 'updated': updated})
 
 
 def _parse_bool(val, default=True):

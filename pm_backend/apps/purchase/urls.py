@@ -54,6 +54,7 @@ from .views import (
     PurchaseProgressPdfDownloadView,
     PurchaseReceivingDeliveryListTemplateView,
     PurchasePlanLockSettingView,
+    PurchaseReceivingConfirmView,
     PurchaseReceivingHistoryView,
     PurchaseReceivingView,
 )
@@ -104,6 +105,7 @@ urlpatterns = [
     path('purchase-order-tasks/', PurchaseOrderTaskListView.as_view(), name='purchase-order-tasks'),
     path('purchase-receiving/', PurchaseReceivingView.as_view(), name='purchase-receiving'),
     path('purchase-receiving/history/', PurchaseReceivingHistoryView.as_view(), name='purchase-receiving-history'),
+    path('purchase-receiving/confirm/', PurchaseReceivingConfirmView.as_view(), name='purchase-receiving-confirm'),
     path('purchase-receiving/delivery-list-template/', PurchaseReceivingDeliveryListTemplateView.as_view(), name='purchase-receiving-delivery-list-template'),
     path('purchase-receiving/delivery-list-auto-template/', PurchaseDeliveryListAutoTemplateView.as_view(), name='purchase-receiving-delivery-list-auto-template'),
     path('purchase-receiving/delivery-list-excel/', PurchaseDeliveryListExcelDownloadView.as_view(), name='purchase-receiving-delivery-list-excel'),

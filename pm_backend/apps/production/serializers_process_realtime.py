@@ -1367,7 +1367,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'product_id': '指定された製品が存在しません。'})
             routing_line_id = None
             event_source = str(operator_event.get('source') or '').strip().upper()
-            if event_source in {'PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING'}:
+            if event_source in {'PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'}:
                 try:
                     routing_line_id = int(operator_event.get('line_id'))
                 except (TypeError, ValueError):
