@@ -18,34 +18,21 @@
         <div><strong>次回納入日:</strong> {{ proposal.next_delivery_date || '-' }}</div>
       </div>
 
-      <div class="section">
-        <h3>ヘッダ編集</h3>
-        <div class="edit-grid">
-          <div class="form-group">
-            <label>仕入先</label>
-            <select v-model="form.supplier" :disabled="!canEdit">
-              <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
-                {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>発注日</label>
-            <input v-model="form.order_date" type="date" :disabled="!canEdit" />
-          </div>
-          <div class="form-group">
-            <label>希望納入日</label>
-            <input v-model="form.desired_delivery_date" type="date" :disabled="!canEdit" />
-          </div>
-          <div class="form-group">
-            <label>次回納入日</label>
-            <input v-model="form.next_delivery_date" type="date" :disabled="!canEdit" />
-          </div>
-          <div class="form-group full">
-            <label>備考</label>
-            <textarea v-model="form.note" rows="2" :disabled="!canEdit" />
-          </div>
-        </div>
+      <div class="section header-edit-row">
+        <label>仕入先</label>
+        <select v-model="form.supplier" :disabled="!canEdit">
+          <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
+            {{ supplier.supplier_code }} - {{ supplier.supplier_name }}
+          </option>
+        </select>
+        <label>発注日</label>
+        <input v-model="form.order_date" type="date" :disabled="!canEdit" />
+        <label>希望納入日</label>
+        <input v-model="form.desired_delivery_date" type="date" :disabled="!canEdit" />
+        <label>次回納入日</label>
+        <input v-model="form.next_delivery_date" type="date" :disabled="!canEdit" />
+        <label>備考</label>
+        <input v-model="form.note" :disabled="!canEdit" />
       </div>
 
       <div class="section">
@@ -222,7 +209,7 @@
 
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -236,8 +223,16 @@ const processing = ref(false)
 const processingLabel = ref('')
 const approvalRouteConfig = ref(null)
 const suppliers = ref([])
-const products = ref([])
-const purchaseLines = ref([])
+const allProducts = ref([])
+const supplierProductIds = ref(null)
+const allPurchaseLines = ref([])
+const purchaseLines = computed(() => {
+  if (!proposal.value?.supplier) return allPurchaseLines.value
+  const supplier = suppliers.value.find(s => s.id === proposal.value.supplier)
+  if (!supplier) return allPurchaseLines.value
+  const matched = allPurchaseLines.value.filter(l => l.line_code === supplier.supplier_code)
+  return matched.length ? matched : allPurchaseLines.value
+})
 const showSendDialog = ref(false)
 const sendCcOptions = ref([])
 const sendEmailConfig = ref(null)
@@ -254,6 +249,11 @@ const form = ref({
   next_delivery_date: '',
   note: '',
   lines: [],
+})
+
+const products = computed(() => {
+  if (!supplierProductIds.value) return allProducts.value
+  return allProducts.value.filter(p => supplierProductIds.value.has(p.id))
 })
 
 const canRunAutoFill = computed(() => canEdit.value && Boolean(form.value.next_delivery_date))
@@ -420,9 +420,30 @@ const fetchMasterData = async () => {
     api.lines.getLines({ page_size: 500 }),
   ])
   suppliers.value = supplierRes.data.results || supplierRes.data || []
-  products.value = productRes.data.results || productRes.data || []
+  allProducts.value = productRes.data.results || productRes.data || []
   const lines = lineRes.data.results || lineRes.data || []
-  purchaseLines.value = lines.filter((row) => row.line_type === 'PURCHASE')
+  allPurchaseLines.value = lines.filter((row) => row.line_type === 'PURCHASE')
+}
+
+const fetchSupplierProducts = async (supplierId) => {
+  if (!supplierId) {
+    supplierProductIds.value = null
+    return
+  }
+  const supplier = suppliers.value.find(s => s.id === supplierId)
+  if (!supplier) {
+    supplierProductIds.value = null
+    return
+  }
+  const supplierLine = allPurchaseLines.value.find(l => l.line_code === supplier.supplier_code)
+  if (!supplierLine) {
+    supplierProductIds.value = new Set()
+    return
+  }
+  const res = await api.routings.getRoutingSteps({ line: supplierLine.id })
+  const steps = res.data?.results || res.data || []
+  const ids = new Set(steps.map(s => s.output_product).filter(Boolean))
+  supplierProductIds.value = ids
 }
 
 const fetchApprovalRouteConfig = async () => {
@@ -843,8 +864,15 @@ const sendProposal = async () => {
   })
 }
 
+watch(() => form.value.supplier, (newVal) => {
+  fetchSupplierProducts(newVal)
+})
+
 onMounted(async () => {
   await Promise.all([fetchMasterData(), fetchDetail(), fetchApprovalRouteConfig()])
+  if (proposal.value?.supplier) {
+    await fetchSupplierProducts(proposal.value.supplier)
+  }
 })
 </script>
 
@@ -858,10 +886,38 @@ onMounted(async () => {
 .section {
   margin-bottom: 16px;
 }
-.edit-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
+.header-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.header-edit-row label {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.header-edit-row select,
+.header-edit-row input {
+  padding: 2px 4px;
+  font-size: 13px;
+}
+.header-edit-row input[type="date"] {
+  width: 130px;
+}
+.header-edit-row input:not([type="date"]) {
+  flex: 1;
+  min-width: 80px;
+}
+.page-content {
+  overflow-x: visible;
+}
+.data-table thead th {
+  position: sticky;
+  top: -1px;
+  background: #f1f5f9;
+  z-index: 10;
+  box-shadow: 0 1px 0 #cbd5e1;
 }
 .form-group.full {
   grid-column: 1 / -1;

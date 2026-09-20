@@ -1271,7 +1271,7 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
     left_margin = 8 * mm
     right_margin = 8 * mm
 
-    proposal_lines = list(proposal.lines.select_related('product', 'line').order_by('id'))
+    proposal_lines = list(proposal.lines.select_related('product', 'line').order_by('product__product_code'))
     lines_first_page = 14
     lines_other_page = 18
     chunks = []

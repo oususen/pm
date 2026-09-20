@@ -153,6 +153,7 @@ class PurchaseOrderProposalLine(models.Model):
 
     class Meta:
         db_table = 'purchase_order_proposal_line'
+        ordering = ['product__product_code']
         indexes = [
             models.Index(fields=['proposal']),
             models.Index(fields=['product']),
