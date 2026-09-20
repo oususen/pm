@@ -174,14 +174,13 @@ const filteredRows = computed(() => {
 
 const normalizePurchaseTask = (row) => {
   const targetSecondary = [row.supplier_code, row.supplier_name].filter(Boolean).join(" - ")
-  const actionLabel =
-    row.task_type === "CREATE_ORDER_PDF" || row.task_type === "SEND_TO_SUPPLIER" ? "注文書へ" : "提案書へ"
+  const actionLabel = "外作・購入品注文書へ"
   return {
     row_key: `purchase-${row.id}`,
     module_code: "PURCHASE",
     module_label: "購買",
     task_category: "PURCHASE_ORDER",
-    task_category_label: "外作・購入品注文",
+    task_category_label: "外作・購入品注文書",
     task_type: row.task_type,
     task_type_label: purchaseTaskTypeMap[row.task_type] || row.task_type,
     status: row.status,

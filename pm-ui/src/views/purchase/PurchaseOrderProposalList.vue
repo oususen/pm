@@ -56,6 +56,7 @@
             <th>発注日</th>
             <th>希望納入日</th>
             <th>ステータス</th>
+            <th>作成者</th>
             <th>明細数</th>
             <th>未完了タスク</th>
             <th>操作</th>
@@ -68,6 +69,7 @@
             <td>{{ row.order_date }}</td>
             <td>{{ row.desired_delivery_date }}</td>
             <td>{{ statusLabel(row.status) }}</td>
+            <td>{{ row.created_by_name }}</td>
             <td>{{ row.line_count }}</td>
             <td>{{ pendingTaskLabels(row.pending_tasks) }}</td>
             <td>

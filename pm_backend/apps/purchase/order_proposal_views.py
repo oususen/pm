@@ -15,7 +15,7 @@ from django.db.models import Max, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
@@ -26,9 +26,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.approval_views import _frontend_base_url
 from accounts.models import ApprovalRouteConfig
 from accounts.role_utils import build_chief_role_q, build_leader_role_q, build_supervisor_role_q
-from masters.models import BOMItem, Calendar, Contact, Line, Process, Product, Supplier
+from masters.models import BOMItem, Calendar, Line, Process, Product, Supplier
 from notifications.models import Notification
 from orders.utils.calendar_utils import WorkingDayCalculator, get_business_today
 from production.models_line_backlog import LineBacklog
@@ -222,6 +223,7 @@ def _send_purchase_approval_stage_email(
     proposal: PurchaseOrderProposal,
     users,
     operator_user,
+    request=None,
 ):
     if not users or not _route_stage_email_notification_enabled(route_config, level):
         return
@@ -233,6 +235,8 @@ def _send_purchase_approval_stage_email(
     stage_label = APPROVAL_STAGE_LABELS.get(stage, '承認')
     operator_name = _display_user_name(operator_user)
     supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
+    base_url = _frontend_base_url(request)
+    link = f'{base_url}/purchase/order-proposals/{proposal.pk}' if base_url else ''
     body_lines = [
         f'{operator_name}さんから外作・購入品注文書の{stage_label}依頼があります。',
         '',
@@ -241,6 +245,8 @@ def _send_purchase_approval_stage_email(
         f'発注日: {proposal.order_date}',
         f'希望納入日: {proposal.desired_delivery_date}',
     ]
+    if link:
+        body_lines.extend(['', '確認リンク:', link])
     EmailService().send_plain_email(
         to_emails=emails,
         subject=f'[外作・購入品注文] {stage_label}依頼: {proposal.proposal_no}',
@@ -254,6 +260,7 @@ def _send_purchase_approval_result_email(
     proposal: PurchaseOrderProposal,
     users,
     operator_user,
+    request=None,
 ):
     if not users or not route_config.approved_result_email_notification_enabled:
         return
@@ -263,6 +270,8 @@ def _send_purchase_approval_result_email(
 
     operator_name = _display_user_name(operator_user)
     supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
+    base_url = _frontend_base_url(request)
+    link = f'{base_url}/purchase/order-proposals/{proposal.pk}' if base_url else ''
     body_lines = [
         f'{operator_name}さんが外作・購入品注文書を最終承認しました。',
         '注文書作成を行ってください。',
@@ -272,9 +281,49 @@ def _send_purchase_approval_result_email(
         f'発注日: {proposal.order_date}',
         f'希望納入日: {proposal.desired_delivery_date}',
     ]
+    if link:
+        body_lines.extend(['', '確認リンク:', link])
     EmailService().send_plain_email(
         to_emails=emails,
         subject=f'[外作・購入品注文] 承認完了: {proposal.proposal_no}',
+        body='\n'.join(body_lines),
+        user_id=getattr(operator_user, 'id', None),
+    )
+
+
+def _send_purchase_rejection_email(
+    route_config: ApprovalRouteConfig,
+    proposal: PurchaseOrderProposal,
+    users,
+    operator_user,
+    comment: str = '',
+    request=None,
+):
+    if not users or not route_config.rejected_result_email_notification_enabled:
+        return
+    emails = sorted({user.email for user in users if getattr(user, 'email', '')})
+    if not emails:
+        return
+
+    operator_name = _display_user_name(operator_user)
+    supplier_name = getattr(getattr(proposal, 'supplier', None), 'supplier_name', '') or ''
+    base_url = _frontend_base_url(request)
+    link = f'{base_url}/purchase/order-proposals/{proposal.pk}' if base_url else ''
+    body_lines = [
+        f'{operator_name}さんが外作・購入品注文書を差戻しました。',
+        '',
+        f'注文書番号: {proposal.proposal_no}',
+        f'仕入先: {supplier_name}',
+        f'発注日: {proposal.order_date}',
+        f'希望納入日: {proposal.desired_delivery_date}',
+    ]
+    if comment:
+        body_lines.extend(['', f'差戻理由: {comment}'])
+    if link:
+        body_lines.extend(['', '確認リンク:', link])
+    EmailService().send_plain_email(
+        to_emails=emails,
+        subject=f'[外作・購入品注文] 差戻: {proposal.proposal_no}',
         body='\n'.join(body_lines),
         user_id=getattr(operator_user, 'id', None),
     )
@@ -1008,9 +1057,10 @@ def _proposal_total_order_amount(proposal: PurchaseOrderProposal):
 def _proposal_pdf_stem(proposal: PurchaseOrderProposal):
     order_date = proposal.order_date.strftime('%Y%m%d') if proposal.order_date else '00000000'
     supplier_code = _sanitize_filename_part(getattr(proposal.supplier, 'supplier_code', ''), 'UNKNOWN')
+    supplier_name = _sanitize_filename_part(getattr(proposal.supplier, 'supplier_name', ''), '')
     total_amount = _proposal_total_order_amount(proposal)
     daily_serial = _proposal_daily_serial_no(proposal)
-    return f'{order_date}_{supplier_code}_{total_amount}_注文書_{daily_serial}'
+    return f'{order_date}_{supplier_code}_{supplier_name}_{total_amount}_注文書_{daily_serial}'
 
 
 def _build_saved_purchase_order_pdf_path(proposal: PurchaseOrderProposal):
@@ -1107,17 +1157,7 @@ def _format_pdf_decimal(value, digits: int = 2):
 def _resolve_supplier_contact_person(supplier: Supplier):
     if not supplier:
         return 'ご担当者'
-    contact = (
-        Contact.objects.filter(
-            is_active=True,
-            company_name=str(supplier.supplier_name or '').strip(),
-        )
-        .exclude(contact_person__isnull=True)
-        .exclude(contact_person__exact='')
-        .order_by('display_order', 'id')
-        .first()
-    )
-    person = str(getattr(contact, 'contact_person', '') or '').strip()
+    person = str(getattr(supplier, 'contact_person', '') or '').strip()
     return person or 'ご担当者'
 
 
@@ -1157,8 +1197,6 @@ PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY = '''{supplier_name} 御中
 
 ご不明な点がございましたら下記までご連絡ください。
 Email:{created_by_email}
-
-このメールは送信専用です。ご返信はCC宛先へお願いします。
 '''
 
 
@@ -1166,15 +1204,17 @@ def _build_purchase_order_email_subject(proposal: PurchaseOrderProposal):
     return f'【発注書】{proposal.proposal_no} {proposal.supplier.supplier_name}'
 
 
-def _append_purchase_order_proposal_mail_notice(body: str):
-    notice = 'このメールは送信専用です。ご返信はCC宛先へお願いします。'
-    body = body or ''
-    if 'このメールは送信専用です。ご返信はCC宛先へお願いします。' in body:
-        return body
-    return f'{body.rstrip()}\n\n{notice}'
+def _append_purchase_order_reply_notice(body: str, cc_emails=None):
+    text = (body or '').strip()
+    if '送信専用' in text and ('返信' in text or 'ご返信' in text):
+        return text
+    cc_list = [email for email in (cc_emails or []) if email]
+    reply_to = f'CC宛先（{", ".join(cc_list)}）' if cc_list else 'CC宛先'
+    notice = f'※このメールは送信専用です。ご返信は{reply_to}へお願いします。'
+    return f'{text}\n\n{notice}' if text else notice
 
 
-def _render_purchase_order_proposal_email_body(template: str, proposal: PurchaseOrderProposal):
+def _render_purchase_order_proposal_email_body(template: str, proposal: PurchaseOrderProposal, cc_emails=None):
     creator_name = _display_user_name(proposal.created_by) if proposal.created_by_id else ''
     values = {
         'supplier_name': proposal.supplier.supplier_name,
@@ -1190,7 +1230,7 @@ def _render_purchase_order_proposal_email_body(template: str, proposal: Purchase
         lambda m: str(values.get(m.group(1), '') or '') if m.group(1) in values else m.group(0),
         body,
     )
-    return _append_purchase_order_proposal_mail_notice(body)
+    return _append_purchase_order_reply_notice(body, cc_emails)
 
 
 def _get_purchase_order_proposal_email_config(proposal: PurchaseOrderProposal):
@@ -1226,17 +1266,22 @@ def _build_purchase_order_email_body(proposal: PurchaseOrderProposal):
 def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
     font_name = _ensure_purchase_order_pdf_font()
     buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    page_width, page_height = A4
+    pdf = canvas.Canvas(buffer, pagesize=landscape(A4))
+    page_width, page_height = landscape(A4)
     left_margin = 8 * mm
     right_margin = 8 * mm
 
     proposal_lines = list(proposal.lines.select_related('product', 'line').order_by('id'))
-    lines_per_page = 15
-    chunks = [
-        proposal_lines[idx: idx + lines_per_page]
-        for idx in range(0, len(proposal_lines), lines_per_page)
-    ] or [[]]
+    lines_first_page = 14
+    lines_other_page = 18
+    chunks = []
+    remaining = proposal_lines[:]
+    first = remaining[:lines_first_page]
+    chunks.append(first)
+    remaining = remaining[lines_first_page:]
+    while remaining:
+        chunks.append(remaining[:lines_other_page])
+        remaining = remaining[lines_other_page:]
     total_pages = len(chunks)
     contact_person = _resolve_supplier_contact_person(proposal.supplier)
     line_amount_map = {}
@@ -1263,105 +1308,115 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
         if level and level not in approval_by_level:
             approval_by_level[level] = row
 
-    creator_last_name = _display_user_last_name(getattr(proposal, 'created_by', None))
-    level4_proxy_user_ids = set()
     try:
         route_config = _get_purchase_order_proposal_route()
-        level4_proxy_user_ids = set(route_config.approver_proxy_users.values_list('id', flat=True))
     except ValueError:
-        pass
-    level4_approval = approval_by_level.get(4)
-    approver_name = ''
-    if level4_approval and level4_approval.approved_by_id:
-        approver_name = _display_user_last_name(level4_approval.approved_by)
-        approved_profile = _get_user_profile(level4_approval.approved_by)
-        is_proxy_approval = level4_approval.approved_by_id in level4_proxy_user_ids
-        if not is_proxy_approval and approved_profile:
-            is_proxy_approval = str(getattr(approved_profile, 'role', '') or '').strip() != 'manager'
-        if approver_name and is_proxy_approval:
-            approver_name = f'{approver_name}(代)'
+        route_config = None
 
-    confirm_names = []
-    # 確認欄は左から「係長 → 班長」の順で表示する（班長を右側に配置）。
-    for level in (3, 2):
-        approved = approval_by_level.get(level)
-        if not approved or not approved.approved_by_id:
-            continue
-        name = _display_user_last_name(approved.approved_by)
-        if name:
-            confirm_names.append(name)
-    confirm_col_count = max(1, len(confirm_names))
-    while len(confirm_names) < confirm_col_count:
-        confirm_names.append('')
+    # level → stage マッピング: L2=reviewer1(班長), L3=reviewer2(係長), L4=approver(事業部長)
+    proxy_user_ids_by_stage = {}
+    if route_config:
+        for stage in ('creator', 'reviewer1', 'reviewer2', 'approver'):
+            proxy_field = getattr(route_config, f'{stage}_proxy_users', None)
+            proxy_user_ids_by_stage[stage] = set(proxy_field.values_list('id', flat=True)) if proxy_field else set()
 
-    table_col_widths = [30 * mm, 30 * mm, 31 * mm, 21 * mm, 21 * mm, 21 * mm, 21 * mm, 19 * mm]
+    def _stamp_label(user, acted_at=None, stage=''):
+        name = _display_user_last_name(user)
+        if not name:
+            return ''
+        if user and user.pk in proxy_user_ids_by_stage.get(stage, set()):
+            name = f'{name}(代)'
+        date_str = f'{acted_at.month}/{acted_at.day}' if acted_at else ''
+        return f'{name}\n{date_str}' if date_str else name
+
+    # 承認データをstageごとに構築
+    # L1=creator(業務員サイン), L2=reviewer1(班長), L3=reviewer2(係長), L4=approver(事業部長)
+    level_to_stage = {1: 'creator', 2: 'reviewer1', 3: 'reviewer2', 4: 'approver'}
+    stamp_data = {}
+    for level, row in approval_by_level.items():
+        stage = level_to_stage.get(level)
+        if stage and row.approved_by_id:
+            stamp_data[stage] = _stamp_label(row.approved_by, row.approved_at, stage)
+    if 'creator' not in stamp_data and proposal.created_by_id:
+        stamp_data['creator'] = _stamp_label(proposal.created_by, proposal.generated_at, 'creator')
+
+    # 承認枠の列構成（route_config参照）
+    stamp_items = [('承認', 'approver')]
+    if route_config and route_config.reviewer2_enabled:
+        stamp_items.extend([('確認②', 'reviewer2'), ('確認①', 'reviewer1')])
+    else:
+        stamp_items.append(('確認', 'reviewer1'))
+    stamp_items.append(('作成', 'creator'))
+
+    table_col_widths = [38 * mm, 63 * mm, 22 * mm, 24 * mm, 18 * mm, 21 * mm, 28 * mm, 67 * mm]
     table_headers = ['部品番号', '部品名', '材質・材寸', '納期', '発注量', '単価', '金額', '備考']
     header_height = 10 * mm
     row_height = 8.2 * mm
 
     for page_index, line_chunk in enumerate(chunks, start=1):
-        # タイトル
-        title_y = page_height - 20 * mm
-        pdf.setFont(font_name, 16)
-        pdf.drawCentredString(page_width / 2, title_y, '購　入　品　注　文　書')
-        pdf.line(page_width / 2 - 42 * mm, title_y - 2 * mm, page_width / 2 + 42 * mm, title_y - 2 * mm)
-
-        # 右上ヘッダ
+        # ページ番号（全ページ共通）
         pdf.setFont(font_name, 8)
         pdf.drawRightString(page_width - right_margin, page_height - 17 * mm, f'PAGE ({page_index}/{total_pages})')
-        pdf.setFont(font_name, 11)
-        pdf.drawRightString(page_width - right_margin, page_height - 30 * mm, _format_pdf_japanese_date())
-        pdf.drawRightString(page_width - right_margin, page_height - 40 * mm, 'ダイソウ工業株式会社')
 
-        # 仕入先
-        supplier_name = _short_text(getattr(proposal.supplier, 'supplier_name', ''), 22)
-        pdf.setFont(font_name, 14)
-        pdf.drawString(left_margin + 8 * mm, page_height - 42 * mm, supplier_name)
-        pdf.setDash(2, 2)
-        pdf.line(left_margin, page_height - 45 * mm, left_margin + 62 * mm, page_height - 45 * mm)
-        pdf.line(left_margin, page_height - 57 * mm, left_margin + 62 * mm, page_height - 57 * mm)
-        pdf.setDash()
-        pdf.setFont(font_name, 15)
-        pdf.drawCentredString(left_margin + 43 * mm, page_height - 53 * mm, f'{contact_person} 様')
+        if page_index == 1:
+            # タイトル
+            title_y = page_height - 14 * mm
+            pdf.setFont(font_name, 16)
+            pdf.drawCentredString(page_width / 2, title_y, '購　入　品　注　文　書')
+            pdf.line(page_width / 2 - 42 * mm, title_y - 2 * mm, page_width / 2 + 42 * mm, title_y - 2 * mm)
 
-        # 注意書き
-        pdf.setFont(font_name, 9)
-        info_x = left_margin + 68 * mm
-        info_top = page_height - 41 * mm
-        info_lines = [
-            '下記内容にて、不都合な点がございましたら',
-            '御連絡下さい。',
-            '※納期に間に合わない場合は、',
-            '早急に御連絡下さい。',
-        ]
-        for i, text in enumerate(info_lines):
-            pdf.drawString(info_x, info_top - i * 5 * mm, text)
+            # 右上：日付・社名
+            pdf.setFont(font_name, 11)
+            pdf.drawRightString(page_width - right_margin, page_height - 22 * mm, _format_pdf_japanese_date())
+            pdf.drawRightString(page_width - right_margin, page_height - 28 * mm, 'ダイソウ工業株式会社')
 
-        # 承認枠
-        sign_headers = ['承認'] + ['確認'] * confirm_col_count + ['作成']
-        sign_values = [approver_name] + list(confirm_names) + [creator_last_name]
-        sign_col_w = 16 * mm
-        sign_width = sign_col_w * len(sign_headers)
-        sign_height = 24 * mm
-        sign_x = page_width - right_margin - sign_width
-        sign_y = page_height - 82 * mm
-        sign_header_h = 8 * mm
-        pdf.rect(sign_x, sign_y, sign_width, sign_height, stroke=1, fill=0)
-        pdf.line(sign_x, sign_y + sign_height - sign_header_h, sign_x + sign_width, sign_y + sign_height - sign_header_h)
-        for idx in range(1, len(sign_headers)):
-            line_x = sign_x + sign_col_w * idx
-            pdf.line(line_x, sign_y, line_x, sign_y + sign_height)
-        pdf.setFont(font_name, 11)
-        for idx, header in enumerate(sign_headers):
-            cx = sign_x + sign_col_w * idx + sign_col_w / 2
-            pdf.drawCentredString(cx, sign_y + sign_height - 5.8 * mm, header)
-        pdf.setFont(font_name, 10)
-        sign_name_y = sign_y + (sign_height - sign_header_h) / 2 - 1.6 * mm
-        for idx, name in enumerate(sign_values):
-            if not name:
-                continue
-            cx = sign_x + sign_col_w * idx + sign_col_w / 2
-            pdf.drawCentredString(cx, sign_name_y, _short_text(name, 8))
+            # 左：仕入先・担当者
+            supplier_name = _short_text(getattr(proposal.supplier, 'supplier_name', ''), 30)
+            pdf.setFont(font_name, 14)
+            pdf.drawString(left_margin + 8 * mm, page_height - 26 * mm, supplier_name)
+            pdf.setDash(2, 2)
+            pdf.line(left_margin, page_height - 29 * mm, left_margin + 62 * mm, page_height - 29 * mm)
+            pdf.line(left_margin, page_height - 39 * mm, left_margin + 62 * mm, page_height - 39 * mm)
+            pdf.setDash()
+            pdf.setFont(font_name, 15)
+            pdf.drawCentredString(left_margin + 43 * mm, page_height - 36 * mm, f'{contact_person} 様')
+
+            # 中央：注意書き
+            pdf.setFont(font_name, 9)
+            info_x = left_margin + 68 * mm
+            info_top = page_height - 24 * mm
+            info_lines = [
+                '下記内容にて、不都合な点がございましたら',
+                '御連絡下さい。',
+                '※納期に間に合わない場合は、',
+                '早急に御連絡下さい。',
+            ]
+            for i, text in enumerate(info_lines):
+                pdf.drawString(info_x, info_top - i * 4.5 * mm, text)
+
+            # 右：承認枠（レーザ材料注文と同方式）
+            stamp_col_w = 16 * mm
+            stamp_header_h = 7 * mm
+            stamp_body_h = 13 * mm
+            stamp_x = page_width - right_margin - stamp_col_w * len(stamp_items)
+            stamp_top = page_height - 36 * mm
+            stamp_body_top = stamp_top - stamp_header_h
+            for idx, (label, stage) in enumerate(stamp_items):
+                x = stamp_x + idx * stamp_col_w
+                # ヘッダーセル
+                pdf.rect(x, stamp_top - stamp_header_h, stamp_col_w, stamp_header_h, stroke=1, fill=0)
+                pdf.setFont(font_name, 9)
+                pdf.drawCentredString(x + stamp_col_w / 2, stamp_top - stamp_header_h + 2 * mm, label)
+                # ボディセル（名前+日付）
+                pdf.rect(x, stamp_body_top - stamp_body_h, stamp_col_w, stamp_body_h, stroke=1, fill=0)
+                cell_text = stamp_data.get(stage, '')
+                if cell_text:
+                    lines = cell_text.split('\n')
+                    pdf.setFont(font_name, 8)
+                    line_h = 8 * 1.15
+                    start_y = (stamp_body_top - stamp_body_h / 2) + ((len(lines) - 1) * line_h / 2) - (8 * 0.35)
+                    for li, line_text in enumerate(lines):
+                        pdf.drawCentredString(x + stamp_col_w / 2, start_y - li * line_h, line_text)
 
         # 明細テーブル
         rows = []
@@ -1371,23 +1426,24 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
             line_amount = line_amount_map.get(getattr(line, 'id', None), Decimal(order_qty))
 
             rows.append([
-                _short_text(getattr(line.product, 'product_code', ''), 20),
-                _short_text(getattr(line.product, 'product_name', ''), 24),
+                _short_text(getattr(line.product, 'product_code', ''), 24),
+                _short_text(getattr(line.product, 'product_name', ''), 30),
                 '',
                 _format_pdf_month_day(line.shortage_date or proposal.desired_delivery_date),
                 _format_pdf_integer(order_qty),
                 _format_pdf_decimal(unit_price, 2),
                 _format_pdf_decimal(line_amount, 0),
-                _short_text(line.note or '', 20),
+                _short_text(line.note or '', 40),
             ])
 
-        while len(rows) < lines_per_page:
+        max_lines = lines_first_page if page_index == 1 else lines_other_page
+        while len(rows) < max_lines:
             rows.append(['', '', '', '', '', '', '', ''])
 
         table = Table(
             [table_headers, *rows],
             colWidths=table_col_widths,
-            rowHeights=[header_height] + [row_height] * lines_per_page,
+            rowHeights=[header_height] + [row_height] * len(rows),
             repeatRows=1,
         )
         table.setStyle(TableStyle([
@@ -1404,8 +1460,8 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
             ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.black),
         ]))
 
-        table_top_y = page_height - 90 * mm
-        table_height = header_height + row_height * lines_per_page
+        table_top_y = page_height - 58 * mm if page_index == 1 else page_height - 25 * mm
+        table_height = header_height + row_height * len(rows)
         table.wrapOn(pdf, page_width - left_margin - right_margin, table_height)
         table.drawOn(pdf, left_margin, table_top_y - table_height)
 
@@ -1417,11 +1473,19 @@ def _build_purchase_order_pdf(proposal: PurchaseOrderProposal):
         total_box_x = page_width - right_margin - 22 * mm
         total_box_w = 22 * mm
         total_box_h = 10 * mm
+        is_last_page = (page_index == total_pages)
+        if is_last_page:
+            amount_label = '合計金額'
+            amount_value = proposal_total_amount
+        else:
+            amount_label = '小計'
+            page_subtotal = sum(line_amount_map.get(getattr(l, 'id', None), Decimal(0)) for l in line_chunk)
+            amount_value = page_subtotal
         pdf.setFont(font_name, 11)
-        pdf.drawString(label_x, footer_y + 2 * mm, '合計金額')
+        pdf.drawString(label_x, footer_y + 2 * mm, amount_label)
         pdf.rect(total_box_x, footer_y - 2.5 * mm, total_box_w, total_box_h, stroke=1, fill=0)
         pdf.setFont(font_name, 12)
-        pdf.drawCentredString(total_box_x + total_box_w / 2, footer_y + 1 * mm, _format_pdf_decimal(proposal_total_amount, 0))
+        pdf.drawCentredString(total_box_x + total_box_w / 2, footer_y + 1 * mm, _format_pdf_decimal(amount_value, 0))
 
         # 識別情報
         pdf.setFont(font_name, 8)
@@ -1646,7 +1710,10 @@ class PurchaseOrderProposalListCreateView(APIView):
             except ValueError as exc:
                 return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         if str(only_my_tasks).lower() in ('true', '1', 'yes'):
-            queryset = queryset.filter(tasks__assigned_to=request.user, tasks__status=PurchaseOrderTask.STATUS_PENDING).distinct()
+            queryset = queryset.filter(
+                Q(tasks__assigned_to=request.user, tasks__status=PurchaseOrderTask.STATUS_PENDING)
+                | Q(created_by=request.user, status__in=(PurchaseOrderProposal.STATUS_DRAFT, PurchaseOrderProposal.STATUS_REJECTED))
+            ).distinct()
 
         serializer = PurchaseOrderProposalListSerializer(queryset, many=True)
         return Response(serializer.data)
@@ -1840,6 +1907,7 @@ class PurchaseOrderProposalSubmitView(APIView):
             proposal=proposal,
             users=level2_users,
             operator_user=request.user,
+            request=request,
         )
 
         proposal = (
@@ -1926,6 +1994,7 @@ class PurchaseOrderProposalApproveView(APIView):
                 proposal=proposal,
                 users=notify_users,
                 operator_user=request.user,
+                request=request,
             )
         elif next_status == PurchaseOrderProposal.STATUS_APPROVED:
             result_users = _get_purchase_approval_result_users(route_config, proposal)
@@ -1941,6 +2010,7 @@ class PurchaseOrderProposalApproveView(APIView):
                 proposal=proposal,
                 users=result_users,
                 operator_user=request.user,
+                request=request,
             )
 
         proposal = (
@@ -2015,12 +2085,43 @@ class PurchaseOrderProposalRejectView(APIView):
             operator_name=_resolve_notification_operator_name(proposal, request.user),
         )
 
+        try:
+            route_config = _get_purchase_order_proposal_route()
+        except ValueError:
+            route_config = None
+        if route_config:
+            _send_purchase_rejection_email(
+                route_config=route_config,
+                proposal=proposal,
+                users=notify_users,
+                operator_user=request.user,
+                comment=comment,
+                request=request,
+            )
+
         proposal = (
             PurchaseOrderProposal.objects.select_related('supplier', 'created_by')
             .prefetch_related('lines__product', 'lines__line', 'approvals__approved_by', 'tasks__assigned_to')
             .get(pk=pk)
         )
         return Response(PurchaseOrderProposalDetailSerializer(proposal).data)
+
+
+class PurchaseOrderProposalAdminResetView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk: int):
+        if not request.user.is_superuser:
+            return Response({'detail': '管理者権限が必要です'}, status=status.HTTP_403_FORBIDDEN)
+        proposal = PurchaseOrderProposal.objects.filter(pk=pk).first()
+        if not proposal:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        with transaction.atomic():
+            proposal.approvals.all().delete()
+            proposal.tasks.all().delete()
+            proposal.status = PurchaseOrderProposal.STATUS_DRAFT
+            proposal.save(update_fields=['status', 'updated_at'])
+        return Response({'detail': 'リセットしました'})
 
 
 class PurchaseOrderProposalCancelView(APIView):
@@ -2168,6 +2269,7 @@ class PurchaseOrderProposalSendView(APIView):
             body = _render_purchase_order_proposal_email_body(
                 email_config.body if email_config else PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY,
                 proposal,
+                cc_emails=cc_emails,
             )
         else:
             body = str(body_raw)
@@ -2175,7 +2277,10 @@ class PurchaseOrderProposalSendView(APIView):
                 body = _render_purchase_order_proposal_email_body(
                     email_config.body if email_config else PURCHASE_ORDER_PROPOSAL_EMAIL_DEFAULT_BODY,
                     proposal,
+                    cc_emails=cc_emails,
                 )
+            else:
+                body = _append_purchase_order_reply_notice(body, cc_emails)
 
         pdf_buffer = _build_purchase_order_pdf(proposal)
         pdf_bytes = pdf_buffer.getvalue()

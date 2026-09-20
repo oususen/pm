@@ -108,7 +108,7 @@
         <button class="btn-success" v-if="canApprove" @click="approveProposal">{{ approveButtonLabel }}</button>
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
         <button class="btn-danger" v-if="canCancel" @click="cancelProposal">キャンセル</button>
-        <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">注文書作成</button>
+        <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">{{ orderPdfButtonLabel }}</button>
         <button
           class="btn-success"
           v-if="canShowSendButton"
@@ -119,6 +119,14 @@
         <span v-if="proposal.status === 'APPROVED' && hasPendingCreateOrderPdfTask" class="pending-send-hint">
           注文書作成後に送信できます
         </span>
+        <button
+          class="btn-danger"
+          v-if="isSuperuser && proposal.status !== 'DRAFT'"
+          @click="adminReset"
+          style="margin-left: auto;"
+        >
+          管理者リセット
+        </button>
       </div>
 
       <div class="section">
@@ -195,11 +203,18 @@
           <textarea v-model="sendForm.body" rows="10" />
         </div>
         <div class="dialog-actions">
-          <button class="btn-primary" :disabled="sendingMail" @click="sendProposal">
-            {{ sendingMail ? '送信中...' : '送信' }}
+          <button class="btn-primary" :disabled="processing" @click="sendProposal">
+            {{ processing ? '送信中...' : '送信' }}
           </button>
-          <button class="btn-secondary" :disabled="sendingMail" @click="closeSendDialog">キャンセル</button>
+          <button class="btn-secondary" :disabled="processing" @click="closeSendDialog">キャンセル</button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="processing" class="processing-overlay">
+      <div class="processing-box">
+        <div class="spinner"></div>
+        <span>{{ processingLabel }}</span>
       </div>
     </div>
   </div>
@@ -217,12 +232,13 @@ const router = useRouter()
 const proposalId = Number(route.params.id)
 
 const proposal = ref(null)
+const processing = ref(false)
+const processingLabel = ref('')
 const approvalRouteConfig = ref(null)
 const suppliers = ref([])
 const products = ref([])
 const purchaseLines = ref([])
 const showSendDialog = ref(false)
-const sendingMail = ref(false)
 const sendCcOptions = ref([])
 const sendEmailConfig = ref(null)
 const sendForm = ref({
@@ -283,6 +299,7 @@ const taskStatusLabel = (taskStatus) => taskStatusMap[taskStatus] || taskStatus
 
 const canEdit = computed(() => proposal.value && ['DRAFT', 'REJECTED'].includes(proposal.value.status))
 const currentUserId = computed(() => Number(authState.user?.id || 0))
+const isSuperuser = computed(() => !!authState.user?.is_superuser)
 const approvalTaskTypeByStatus = {
   SUBMITTED: 'APPROVE_L2',
   APPROVED_L2: 'APPROVE_L3',
@@ -344,7 +361,11 @@ const canCancel = computed(() =>
   )
 )
 const canGenerateOrderPdf = computed(() =>
+  proposal.value && !['CANCELED'].includes(proposal.value.status)
+)
+const orderPdfButtonLabel = computed(() =>
   proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)
+    ? '注文書作成' : '注文書プレビュー'
 )
 const hasPendingCreateOrderPdfTask = computed(() =>
   Boolean(
@@ -437,7 +458,29 @@ const serializeLines = () =>
       note: line.note || '',
     }))
 
-const saveProposal = async () => {
+const withProcessing = async (label, fn) => {
+  if (processing.value) return
+  processing.value = true
+  processingLabel.value = label
+  try {
+    await fn()
+  } catch (e) {
+    const responseData = e?.response?.data
+    if (responseData instanceof Blob) {
+      const msg = await parsePdfErrorMessage(e)
+      alert(msg)
+    } else {
+      const detail = responseData?.detail
+      if (detail) alert(detail)
+      else throw e
+    }
+  } finally {
+    processing.value = false
+    processingLabel.value = ''
+  }
+}
+
+const saveProposal = () => withProcessing('保存中...', async () => {
   if (!canEdit.value) return
   await api.purchaseOrderProposals.update(proposalId, {
     supplier: form.value.supplier,
@@ -449,7 +492,7 @@ const saveProposal = async () => {
   })
   await fetchDetail()
   alert('保存しました')
-}
+})
 
 const autoFillSourceLabel = (source) => {
   if (source === 'PROGRESS') return '進度'
@@ -457,7 +500,7 @@ const autoFillSourceLabel = (source) => {
   return '計画在庫'
 }
 
-const runAutoFill = async (source) => {
+const runAutoFill = (source) => withProcessing('提案中...', async () => {
   if (!form.value.next_delivery_date) {
     alert('次回納入日を入力してください')
     return
@@ -469,31 +512,34 @@ const runAutoFill = async (source) => {
   })
   await fetchDetail()
   alert(`${autoFillSourceLabel(source)}から提案を反映しました（〜${form.value.next_delivery_date}）`)
-}
+})
 
-const submitProposal = async () => {
-  await saveProposal()
+const submitProposal = () => withProcessing('提出中...', async () => {
+  if (!canEdit.value) return
+  await api.purchaseOrderProposals.update(proposalId, {
+    supplier: form.value.supplier,
+    order_date: form.value.order_date,
+    desired_delivery_date: form.value.desired_delivery_date,
+    next_delivery_date: form.value.next_delivery_date || null,
+    note: form.value.note,
+    lines: serializeLines(),
+  })
   await api.purchaseOrderProposals.submit(proposalId, {})
   await fetchDetail()
   alert('提出しました')
-}
+})
 
 const deleteProposal = async () => {
   if (!proposal.value || proposal.value.status !== 'DRAFT') {
     alert('DRAFTのみ削除できます')
     return
   }
-  if (!window.confirm('この注文書を削除します。よろしいですか？')) {
-    return
-  }
-  try {
+  if (!window.confirm('この注文書を削除します。よろしいですか？')) return
+  await withProcessing('削除中...', async () => {
     await api.purchaseOrderProposals.delete(proposalId)
     alert('削除しました')
     router.push('/purchase/order-proposals')
-  } catch (error) {
-    const detail = error?.response?.data?.detail || '削除に失敗しました'
-    alert(detail)
-  }
+  })
 }
 
 const approveProposal = async () => {
@@ -502,9 +548,11 @@ const approveProposal = async () => {
     return
   }
   const comment = window.prompt('承認コメント（任意）', '') || ''
-  await api.purchaseOrderProposals.approve(proposalId, { comment })
-  await fetchDetail()
-  alert('承認しました')
+  await withProcessing('承認中...', async () => {
+    await api.purchaseOrderProposals.approve(proposalId, { comment })
+    await fetchDetail()
+    alert('承認しました')
+  })
 }
 
 const rejectProposal = async () => {
@@ -517,9 +565,11 @@ const rejectProposal = async () => {
     alert('差戻理由を入力してください')
     return
   }
-  await api.purchaseOrderProposals.reject(proposalId, { comment })
-  await fetchDetail()
-  alert('差戻しました')
+  await withProcessing('差戻中...', async () => {
+    await api.purchaseOrderProposals.reject(proposalId, { comment })
+    await fetchDetail()
+    alert('差戻しました')
+  })
 }
 
 const cancelProposal = async () => {
@@ -527,18 +577,22 @@ const cancelProposal = async () => {
     alert('キャンセル権限がありません（事業部長または代理承認者のみ）')
     return
   }
-  if (!window.confirm('この注文書をキャンセルします。よろしいですか？')) {
-    return
-  }
+  if (!window.confirm('この注文書をキャンセルします。よろしいですか？')) return
   const comment = window.prompt('キャンセル理由（任意）', '') || ''
-  try {
+  await withProcessing('キャンセル中...', async () => {
     await api.purchaseOrderProposals.cancel(proposalId, { comment })
     await fetchDetail()
     alert('キャンセルしました')
-  } catch (error) {
-    const detail = error?.response?.data?.detail || 'キャンセルに失敗しました'
-    alert(detail)
-  }
+  })
+}
+
+const adminReset = async () => {
+  if (!window.confirm('承認履歴・タスクを全て削除し、ステータスを「作成中」に戻します。よろしいですか？')) return
+  await withProcessing('リセット中...', async () => {
+    await api.purchaseOrderProposals.adminReset(proposalId)
+    await fetchDetail()
+    alert('リセットしました')
+  })
 }
 
 const resolvePdfFilename = (contentDisposition, fallback) => {
@@ -613,8 +667,8 @@ const parsePdfErrorMessage = async (error) => {
   }
 }
 
-const downloadOrderPdf = async () => {
-  try {
+const downloadOrderPdf = () => withProcessing('PDF作成中...', async () => {
+  {
     const response = await api.purchaseOrderProposals.downloadPdf(proposalId)
     const blob = new Blob([response.data], { type: 'application/pdf' })
     const contentDisposition = response.headers?.['content-disposition'] || ''
@@ -638,21 +692,20 @@ const downloadOrderPdf = async () => {
     }, 60000)
 
     await fetchDetail()
-  } catch (error) {
-    const message = await parsePdfErrorMessage(error)
-    alert(message)
   }
-}
+})
 
 const buildDefaultSendSubject = () => {
   if (!proposal.value) return ''
   return `【発注書】${proposal.value.proposal_no} ${proposal.value.supplier_name}`
 }
 
-const addCcOption = (options, seen, name, email, roleLabel) => {
+const addCcOption = (options, seen, name, email, userId, roleLabel) => {
   const normalizedEmail = String(email || '').trim()
-  if (!normalizedEmail || seen.has(normalizedEmail)) return
-  seen.add(normalizedEmail)
+  if (!normalizedEmail) return
+  const key = userId ? `user-${userId}` : normalizedEmail
+  if (seen.has(key)) return
+  seen.add(key)
   const displayName = String(name || '').trim() || normalizedEmail
   options.push({
     email: normalizedEmail,
@@ -672,7 +725,7 @@ const buildDefaultCcOptions = () => {
   ;(sendEmailConfig.value?.cc_user_details || []).forEach((user) => {
     const email = String(user.email || '').trim()
     if (email) {
-      addCcOption(options, seen, user.name || user.username, email, '設定CC')
+      addCcOption(options, seen, user.name || user.username, email, user.id, '設定CC')
       return
     }
     const displayName = user.name || user.username || `ID:${user.id}`
@@ -701,15 +754,15 @@ const defaultSendBodyTemplate = `{supplier_name} 御中
 {created_by_name}
 
 ご不明な点がございましたら下記までご連絡ください。
-Email:{created_by_email}
+Email:{created_by_email}`
 
-このメールは送信専用です。ご返信はCC宛先へお願いします。`
-
-const appendSendOnlyNotice = (body) => {
-  const notice = 'このメールは送信専用です。ご返信はCC宛先へお願いします。'
+const appendSendOnlyNotice = (body, ccOptions = []) => {
   const text = String(body || '')
-  if (text.includes('このメールは送信専用です。ご返信はCC宛先へお願いします。')) return text
-  return `${text.trimEnd()}\n\n${notice}`
+  if (text.includes('送信専用') && (text.includes('返信') || text.includes('ご返信'))) return text
+  const ccEmails = ccOptions.filter(o => o.email && !o.missingEmail).map(o => o.email)
+  const replyTo = ccEmails.length ? `CC宛先（${ccEmails.join(', ')}）` : 'CC宛先'
+  const notice = `※このメールは送信専用です。ご返信は${replyTo}へお願いします。`
+  return text ? `${text.trimEnd()}\n\n${notice}` : notice
 }
 
 const renderSendBodyTemplate = (template) => {
@@ -723,7 +776,10 @@ const renderSendBodyTemplate = (template) => {
     created_by_email: proposal.value.created_by_email || '',
   }
   const body = template || defaultSendBodyTemplate
-  return appendSendOnlyNotice(body.replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key] || '') : match)))
+  return appendSendOnlyNotice(
+    body.replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key] || '') : match)),
+    sendCcOptions.value,
+  )
 }
 
 const buildDefaultSendBody = () => renderSendBodyTemplate(sendEmailConfig.value?.body || defaultSendBodyTemplate)
@@ -770,9 +826,7 @@ const sendProposal = async () => {
     alert('本文を入力してください')
     return
   }
-
-  sendingMail.value = true
-  try {
+  await withProcessing('送信中...', async () => {
     const response = await api.purchaseOrderProposals.send(proposalId, {
       to_email: toEmail,
       subject,
@@ -786,9 +840,7 @@ const sendProposal = async () => {
     if (result) lines.push(result)
     if (savedPath) lines.push(`保存先: ${savedPath}`)
     alert(lines.join('\n'))
-  } finally {
-    sendingMail.value = false
-  }
+  })
 }
 
 onMounted(async () => {
@@ -902,6 +954,37 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.processing-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.processing-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px 36px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 16px;
+  font-weight: 500;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
 

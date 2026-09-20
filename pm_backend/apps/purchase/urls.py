@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .order_proposal_views import (
+    PurchaseOrderProposalAdminResetView,
     PurchaseOrderProposalApproveView,
     PurchaseOrderProposalAutoFillView,
     PurchaseOrderProposalCancelView,
@@ -94,6 +95,7 @@ urlpatterns = [
     path('purchase-order-proposals/<int:pk>/approve/', PurchaseOrderProposalApproveView.as_view(), name='purchase-order-proposal-approve'),
     path('purchase-order-proposals/<int:pk>/reject/', PurchaseOrderProposalRejectView.as_view(), name='purchase-order-proposal-reject'),
     path('purchase-order-proposals/<int:pk>/cancel/', PurchaseOrderProposalCancelView.as_view(), name='purchase-order-proposal-cancel'),
+    path('purchase-order-proposals/<int:pk>/admin-reset/', PurchaseOrderProposalAdminResetView.as_view(), name='purchase-order-proposal-admin-reset'),
     path('purchase-order-proposals/<int:pk>/send/', PurchaseOrderProposalSendView.as_view(), name='purchase-order-proposal-send'),
     path('purchase-order-proposals/<int:pk>/pdf/', PurchaseOrderProposalPdfView.as_view(), name='purchase-order-proposal-pdf'),
     path('purchase-order-proposals/<int:pk>/auto_fill/', PurchaseOrderProposalAutoFillView.as_view(), name='purchase-order-proposal-auto-fill'),

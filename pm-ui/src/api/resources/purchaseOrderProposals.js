@@ -26,6 +26,9 @@ export const createPurchaseOrderProposalsAPI = (client) => ({
   cancel(id, data = {}) {
     return client.post(`/purchase-order-proposals/${id}/cancel/`, data)
   },
+  adminReset(id) {
+    return client.post(`/purchase-order-proposals/${id}/admin-reset/`)
+  },
   send(id, data = {}) {
     return client.post(`/purchase-order-proposals/${id}/send/`, data)
   },
