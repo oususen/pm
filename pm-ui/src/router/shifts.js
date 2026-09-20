@@ -7,7 +7,7 @@ const shifts = [
     path: '/shifts/chart',
     name: 'ShiftChart',
     component: () => import('@/views/shifts/ShiftManagement.vue'),
-    meta: { pageTitle: 'シフト管理' },
+    meta: { pageTitle: 'シフト管理', resource: 'overtime.shift_management' },
   },
   {
     path: '/shifts/my-line',

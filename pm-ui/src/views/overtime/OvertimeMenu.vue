@@ -50,6 +50,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 import api from '@/api/client'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
@@ -80,7 +81,7 @@ const isApprover = computed(() => {
 
 const isShiftManager = computed(() => {
   const user = authState.user
-  return Boolean(user?.is_staff || user?.is_superuser || isApprover.value)
+  return hasPermission(user, 'overtime.shift_management', 'view')
 })
 
 onMounted(async () => {

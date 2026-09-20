@@ -214,6 +214,8 @@ class UserPermission(models.Model):
         ('production.line_calendars', '生産: ライン勤務カレンダ'),
         ('production.morning_meeting', '生産: 朝礼'),
         ('production.line_monitor', '生産: ライン稼働監視'),
+        ('overtime', '勤務'),
+        ('overtime.shift_management', '勤務: シフト管理'),
         ('purchase', '仕入'),
         ('purchase.plan_input', '仕入: 仕入れ計画'),
         ('purchase.inventory', '仕入: 在庫/残量'),

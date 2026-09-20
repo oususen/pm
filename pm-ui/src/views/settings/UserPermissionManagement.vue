@@ -416,6 +416,8 @@ const permissionResources = [
   { value: 'production.scrap_history', label: '生産: 仕損履歴' },
   { value: 'production.line_calendars', label: '生産: ライン勤務カレンダ' },
   { value: 'production.line_monitor', label: '生産: ライン稼働監視' },
+  { value: 'overtime', label: '勤務' },
+  { value: 'overtime.shift_management', label: '勤務: シフト管理' },
   { value: 'purchase', label: '仕入' },
   { value: 'purchase.plan_input', label: '仕入: 仕入れ計画' },
   { value: 'purchase.inventory', label: '仕入: 在庫/残量' },
