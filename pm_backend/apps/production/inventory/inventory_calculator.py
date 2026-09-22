@@ -511,6 +511,156 @@ def _resolve_day_adjustment(rows, ad_map):
     return int(total)
 
 
+def _preload_parent_shipment_data(
+    line_id, product_id,
+    start_date, end_date,
+    shift_working_days_fn=None,
+    max_bom_lt=None,
+    delivery_lt=None,
+):
+    """
+    1製品の出庫計算に必要な親データを期間一括取得。
+    recalculate_inventory_for_line から呼び出し、日付ループ中のN+1クエリを解消する。
+
+    start_date: 在庫/計画在庫の計算開始日のうち最も古い日付
+    end_date: 計算終了日
+    shift_working_days_fn: 営業日シフト関数（正確な親参照日付の算出に使用）
+    max_bom_lt: 親BOMの最大LT（未指定時はBOMItemから算出）
+    delivery_lt: 最終品/ライン最終品のデリバリLT（self_backlog_order_mapの取得範囲に反映）
+    """
+    from masters.models import BOMItem, RoutingStep
+    from django.db.models import Sum
+
+    # self_backlog_order_map: 最終品/ライン最終品のデリバリLT調整用
+    # 親BOMの有無に関係なく必要（最終品は親BOMがない）
+    self_backlog_order_map = {}
+    effective_delivery_lt = int(delivery_lt or 0)
+    if line_id and product_id and effective_delivery_lt > 0:
+        if shift_working_days_fn:
+            self_fetch_start = shift_working_days_fn(start_date, -(effective_delivery_lt + 1))
+        else:
+            self_fetch_start = start_date - timedelta(days=(effective_delivery_lt + 1) * 3)
+        order_qs = LineBacklog.objects.filter(
+            line_id=line_id,
+            product_id=product_id,
+            plan_date__range=[self_fetch_start, end_date],
+        ).values('plan_date').annotate(order_total=Sum('order_qty'))
+        for row in order_qs:
+            self_backlog_order_map[row['plan_date']] = int(row['order_total'] or 0)
+
+    parent_bom_items = list(BOMItem.objects.filter(
+        child_product_id=product_id,
+        bom__is_active=True,
+        bom__is_coproduct=False,
+    ).select_related('bom__parent_product'))
+
+    if not parent_bom_items:
+        return {
+            'parent_bom_items': [],
+            'current_steps_by_process': {},
+            'parent_backlog_map': {},
+            'parent_backlog_by_product_map': {},
+            'self_backlog_order_map': self_backlog_order_map,
+            'scrap_map': {},
+            'floor_lot_map': {},
+            'floor_parent_ids': set(),
+        }
+
+    # current_steps: process_id別にグループ化（日付ごとの正しいprocess_idで引けるようにする）
+    all_current_steps = list(RoutingStep.objects.filter(
+        line_id=line_id,
+        output_product_id=product_id,
+    ).select_related('routing'))
+    current_steps_by_process = {}
+    for step in all_current_steps:
+        current_steps_by_process.setdefault(step.process_id, []).append(step)
+
+    parent_product_ids = list({
+        item.bom.parent_product_id
+        for item in parent_bom_items
+        if item.bom and item.bom.parent_product_id
+    })
+
+    if max_bom_lt is None:
+        max_bom_lt = max((item.lead_time_days or 0 for item in parent_bom_items), default=0)
+    max_bom_lt = abs(int(max_bom_lt or 0))
+
+    if shift_working_days_fn and max_bom_lt > 0:
+        fetch_start = shift_working_days_fn(start_date, -(max_bom_lt + 1))
+        fetch_end = shift_working_days_fn(end_date, max_bom_lt + 1)
+    else:
+        margin = timedelta(days=(max_bom_lt + 1) * 3)
+        fetch_start = start_date - margin
+        fetch_end = end_date + margin
+
+    parent_backlog_map = {}
+    parent_backlog_by_product_map = {}
+    if parent_product_ids:
+        qs = LineBacklog.objects.filter(
+            product_id__in=parent_product_ids,
+            plan_date__range=[fetch_start, fetch_end],
+        ).values(
+            'product_id', 'line_id', 'process_id', 'plan_date',
+        ).annotate(
+            actual_total=Sum('actual_qty'),
+            plan_total=Sum('plan_qty'),
+        )
+        for row in qs:
+            entry = {
+                'product_id': row['product_id'],
+                'line_id': row['line_id'],
+                'process_id': row['process_id'],
+                'plan_date': row['plan_date'],
+                'actual_total': row['actual_total'] or 0,
+                'plan_total': row['plan_total'] or 0,
+            }
+            key = (row['product_id'], row['plan_date'])
+            parent_backlog_map.setdefault(key, []).append(entry)
+            parent_backlog_by_product_map.setdefault(key, 0)
+            parent_backlog_by_product_map[key] += entry['actual_total'] + entry['plan_total']
+
+    scrap_map = {}
+    if parent_product_ids:
+        scrap_qs = ScrapRecord.objects.filter(
+            product_id__in=parent_product_ids,
+            plan_date__range=[fetch_start, fetch_end],
+            disposition_status__in=['PENDING', 'PARTIAL', 'REJECTED', 'APPROVED'],
+            event_type__in=['SCRAP', 'RETURN'],
+        ).values(
+            'product_id', 'line_id', 'process_id', 'plan_date',
+        ).annotate(total=Sum('qty'))
+        for row in scrap_qs:
+            key = (row['product_id'], row['line_id'], row['process_id'], row['plan_date'])
+            scrap_map[key] = row['total'] or Decimal('0')
+
+    floor_parent_ids = set()
+    for pid in parent_product_ids:
+        if _check_floor_shipping_parent(pid, {}):
+            floor_parent_ids.add(pid)
+
+    floor_lot_map = {}
+    if floor_parent_ids:
+        lot_qs = LineBacklog.objects.filter(
+            product_id__in=list(floor_parent_ids),
+            plan_date__range=[fetch_start, fetch_end],
+            sequence_no__gt=0,
+        ).values_list('product_id', 'plan_date', 'sequence_no', 'plan_qty')
+        for pid, pdate, seq, pqty in lot_qs:
+            key = (pid, pdate)
+            floor_lot_map.setdefault(key, []).append((seq, pqty))
+
+    return {
+        'parent_bom_items': parent_bom_items,
+        'current_steps_by_process': current_steps_by_process,
+        'parent_backlog_map': parent_backlog_map,
+        'parent_backlog_by_product_map': parent_backlog_by_product_map,
+        'self_backlog_order_map': self_backlog_order_map,
+        'scrap_map': scrap_map,
+        'floor_lot_map': floor_lot_map,
+        'floor_parent_ids': floor_parent_ids,
+    }
+
+
 def _ensure_daily_base_backlogs(line_id, product_id, start_date, end_date, backlogs=None):
     """
     指定期間の各日付に sequence_no=0 の基礎行を補完する。
@@ -581,20 +731,23 @@ def _ensure_daily_base_backlogs(line_id, product_id, start_date, end_date, backl
 _ROUTING_PARENT_STEP_CACHE = {}
 
 
-def _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
+def _filter_parent_bom_items_by_routing(backlog, parent_bom_items, preloaded=None):
     from masters.models import RoutingStep
 
     items = list(parent_bom_items)
     if not items:
         return items
 
-    current_steps = list(
-        RoutingStep.objects.filter(
-            line_id=backlog.line_id,
-            output_product_id=backlog.product_id,
-            process_id=backlog.process_id,
-        ).select_related('routing')
-    )
+    if preloaded is not None:
+        current_steps = preloaded.get('current_steps_by_process', {}).get(backlog.process_id, [])
+    else:
+        current_steps = list(
+            RoutingStep.objects.filter(
+                line_id=backlog.line_id,
+                output_product_id=backlog.product_id,
+                process_id=backlog.process_id,
+            ).select_related('routing')
+        )
     if not current_steps:
         return items
 
@@ -693,13 +846,17 @@ def _sum_parent_shipments(backlog, pick_qty, shift_fn=None):
     return total_shipment
 
 
-def _get_shipment_scrap_qty(product_id, line_id, process_id, plan_date):
+def _get_shipment_scrap_qty(product_id, line_id, process_id, plan_date, preloaded=None):
     """
     出庫計算用の仕損数量を取得（全ての仕損）
 
     仕損が発生した場合、子部品も消費されているため、出庫として計上する。
     is_production_recorded に関係なく全ての仕損を含める。
     """
+    if preloaded is not None:
+        return preloaded.get('scrap_map', {}).get(
+            (product_id, line_id, process_id, plan_date), Decimal('0')
+        )
     from django.db.models import Sum
     result = ScrapRecord.objects.filter(
         product_id=product_id,
@@ -736,7 +893,7 @@ def _check_floor_shipping_parent(parent_product_id, cache):
     return result
 
 
-def _floor_shipping_plan_shipment(backlog, shift_fn, parent_product, qty_per):
+def _floor_shipping_plan_shipment(backlog, shift_fn, parent_product, qty_per, preloaded=None):
     """フロア配送ラインの出庫をsequence_noベースのLTで計算（pickup側と同一ロジック）
 
     pickup (views.py) の便判定:
@@ -755,11 +912,15 @@ def _floor_shipping_plan_shipment(backlog, shift_fn, parent_product, qty_per):
             continue
         checked_dates.add(parent_date)
 
-        plan_rows = list(LineBacklog.objects.filter(
-            product=parent_product,
-            plan_date=parent_date,
-            sequence_no__gt=0,
-        ).values_list('sequence_no', 'plan_qty'))
+        if preloaded is not None:
+            floor_lot_map = preloaded.get('floor_lot_map', {})
+            plan_rows = list(floor_lot_map.get((parent_product.id, parent_date), []))
+        else:
+            plan_rows = list(LineBacklog.objects.filter(
+                product=parent_product,
+                plan_date=parent_date,
+                sequence_no__gt=0,
+            ).values_list('sequence_no', 'plan_qty'))
         if not plan_rows:
             continue
 
@@ -782,7 +943,7 @@ def _floor_shipping_plan_shipment(backlog, shift_fn, parent_product, qty_per):
     return total
 
 
-def _calculate_parent_actual_shipment(backlog, shift_fn=None):
+def _calculate_parent_actual_shipment(backlog, shift_fn=None, preloaded=None):
     """
     実在庫・計画在庫用の実績出庫計算（後工程の実績 + 仕損を使用）
 
@@ -792,22 +953,28 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
     Args:
         backlog: LineBacklogインスタンス
         shift_fn: LTシフト関数（営業日ベースで日付をシフト）
+        preloaded: プリロード済みデータ辞書（None時は従来どおりDB取得）
     """
-    from masters.models import BOMItem
+    if preloaded is not None:
+        parent_bom_items = preloaded.get('parent_bom_items', [])
+    else:
+        from masters.models import BOMItem
+        parent_bom_items = BOMItem.objects.filter(
+            child_product=backlog.product,
+            bom__is_active=True,
+            bom__is_coproduct=False
+        ).select_related('bom__parent_product')
 
-    parent_bom_items = BOMItem.objects.filter(
-        child_product=backlog.product,
-        bom__is_active=True,
-        bom__is_coproduct=False
-    ).select_related('bom__parent_product')
-
-    if not parent_bom_items.exists():
+    if not parent_bom_items:
+        return Decimal('0')
+    if preloaded is None and hasattr(parent_bom_items, 'exists') and not parent_bom_items.exists():
         return Decimal('0')
 
     from django.db.models import Sum
 
+    filtered_items = _filter_parent_bom_items_by_routing(backlog, parent_bom_items, preloaded=preloaded)
     total_shipment = Decimal('0')
-    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
+    for bom_item in filtered_items:
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -818,21 +985,26 @@ def _calculate_parent_actual_shipment(backlog, shift_fn=None):
         parent_date = backlog.plan_date
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
-        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ
-        downstream_groups = LineBacklog.objects.filter(
-            product=parent_product,
-            plan_date=parent_date,
-        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
-            actual_total=Sum('actual_qty'),
-        )
+
+        if preloaded is not None:
+            downstream_groups = preloaded.get('parent_backlog_map', {}).get(
+                (parent_product.id, parent_date), []
+            )
+        else:
+            downstream_groups = LineBacklog.objects.filter(
+                product=parent_product,
+                plan_date=parent_date,
+            ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+                actual_total=Sum('actual_qty'),
+            )
         for downstream in downstream_groups:
             actual = int(downstream.get('actual_total') or 0)
-            # 全ての仕損を出庫に含める（line+process単位で1回のみ）
             scrap = _get_shipment_scrap_qty(
                 downstream['product_id'],
                 downstream['line_id'],
                 downstream['process_id'],
-                downstream['plan_date']
+                downstream['plan_date'],
+                preloaded=preloaded,
             )
             use_qty = Decimal(str(actual)) + scrap
             if use_qty:
@@ -849,6 +1021,7 @@ def _compute_planned_stock_lt_adjustment(
     demand_map=None,
     final_delivery_lt=None,
     line_id=None,
+    preloaded=None,
 ):
     """
     計画在庫初期値のLT調整量を計算する。
@@ -882,31 +1055,38 @@ def _compute_planned_stock_lt_adjustment(
     if final_delivery_lt is not None:
         delivery_lt = int(final_delivery_lt or 0)
     else:
-        # 呼び出し元未指定時は0日として扱う（後方互換のself_lt_days参照は廃止）
         delivery_lt = 0
 
     if delivery_lt >= 0:
-        for offset in range(delivery_lt):  # 0, 1, ..., delivery_lt-1
-            adj_date = shift_fn(initial_date, -offset)  # initial_date から後ろ向きにシフト
+        for offset in range(delivery_lt):
+            adj_date = shift_fn(initial_date, -offset)
             qty = demand_map.get((product_id, adj_date), Decimal('0')) if demand_map else Decimal('0')
             if not qty and line_id:
-                backlog_rows = LineBacklog.objects.filter(
-                    line_id=line_id,
-                    product_id=product_id,
-                    plan_date=adj_date,
-                )
-                qty = Decimal(str(sum(int(row.order_qty or 0) for row in backlog_rows)))
+                if preloaded is not None:
+                    qty = Decimal(str(preloaded.get('self_backlog_order_map', {}).get(adj_date, 0)))
+                else:
+                    backlog_rows = LineBacklog.objects.filter(
+                        line_id=line_id,
+                        product_id=product_id,
+                        plan_date=adj_date,
+                    )
+                    qty = Decimal(str(sum(int(row.order_qty or 0) for row in backlog_rows)))
             total_adjustment += Decimal(str(qty))
         return int(total_adjustment)
 
     # 社内品：親の BOM 経由でLTシフト分の実績出庫を差し引く
-    parent_bom_items = BOMItem.objects.filter(
-        child_product_id=product_id,
-        bom__is_active=True,
-        bom__is_coproduct=False,
-    ).select_related('bom__parent_product')
+    if preloaded is not None:
+        parent_bom_items = preloaded.get('parent_bom_items', [])
+    else:
+        parent_bom_items = BOMItem.objects.filter(
+            child_product_id=product_id,
+            bom__is_active=True,
+            bom__is_coproduct=False,
+        ).select_related('bom__parent_product')
 
-    if not parent_bom_items.exists():
+    if not parent_bom_items:
+        return 0
+    if preloaded is None and hasattr(parent_bom_items, 'exists') and not parent_bom_items.exists():
         return 0
 
     total_adjustment = Decimal('0')
@@ -923,12 +1103,17 @@ def _compute_planned_stock_lt_adjustment(
 
         for offset in range(1, lead_days + 1):
             adj_date = shift_fn(initial_date, offset)
-            downstream_groups = LineBacklog.objects.filter(
-                product=parent_product,
-                plan_date=adj_date,
-            ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
-                actual_total=Sum('actual_qty'),
-            )
+            if preloaded is not None:
+                downstream_groups = preloaded.get('parent_backlog_map', {}).get(
+                    (parent_product.id, adj_date), []
+                )
+            else:
+                downstream_groups = LineBacklog.objects.filter(
+                    product=parent_product,
+                    plan_date=adj_date,
+                ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+                    actual_total=Sum('actual_qty'),
+                )
             for downstream in downstream_groups:
                 actual = int(downstream.get('actual_total') or 0)
                 scrap = _get_shipment_scrap_qty(
@@ -936,6 +1121,7 @@ def _compute_planned_stock_lt_adjustment(
                     downstream['line_id'],
                     downstream['process_id'],
                     downstream['plan_date'],
+                    preloaded=preloaded,
                 )
                 use_qty = Decimal(str(actual)) + scrap
                 if use_qty:
@@ -944,7 +1130,7 @@ def _compute_planned_stock_lt_adjustment(
     return int(total_adjustment)
 
 
-def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_shipping_cache=None):
+def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_shipping_cache=None, preloaded=None):
     """
     計画在庫用の出庫計算（実績優先、なければ計画を使用）+ 仕損
 
@@ -958,23 +1144,28 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
         backlog: LineBacklogインスタンス
         shift_fn: LTシフト関数（営業日ベースで日付をシフト）
         floor_shipping_cache: フロア配送ライン判定キャッシュ
+        preloaded: プリロード済みデータ辞書（None時は従来どおりDB取得）
     """
-    from masters.models import BOMItem
+    if preloaded is not None:
+        parent_bom_items = preloaded.get('parent_bom_items', [])
+    else:
+        from masters.models import BOMItem
+        parent_bom_items = BOMItem.objects.filter(
+            child_product=backlog.product,
+            bom__is_active=True,
+            bom__is_coproduct=False
+        ).select_related('bom__parent_product')
 
-    parent_bom_items = BOMItem.objects.filter(
-        child_product=backlog.product,
-        bom__is_active=True,
-        bom__is_coproduct=False
-    ).select_related('bom__parent_product')
-
-    if not parent_bom_items.exists():
+    if not parent_bom_items:
+        return None
+    if preloaded is None and hasattr(parent_bom_items, 'exists') and not parent_bom_items.exists():
         return None
 
     from django.db.models import Sum
 
     fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
-    effective_parent_items = list(_filter_parent_bom_items_by_routing(backlog, parent_bom_items))
+    effective_parent_items = list(_filter_parent_bom_items_by_routing(backlog, parent_bom_items, preloaded=preloaded))
     if not effective_parent_items:
         return None
 
@@ -986,9 +1177,13 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
         if qty_per == 0:
             continue
 
-        if _check_floor_shipping_parent(parent_product.id, fs_cache):
+        if preloaded is not None:
+            is_floor = parent_product.id in preloaded.get('floor_parent_ids', set())
+        else:
+            is_floor = _check_floor_shipping_parent(parent_product.id, fs_cache)
+        if is_floor:
             total_shipment += _floor_shipping_plan_shipment(
-                backlog, shift_fn, parent_product, qty_per,
+                backlog, shift_fn, parent_product, qty_per, preloaded=preloaded,
             )
             continue
 
@@ -996,23 +1191,28 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
         parent_date = backlog.plan_date
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
-        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ
-        downstream_groups = LineBacklog.objects.filter(
-            product=parent_product,
-            plan_date=parent_date,
-        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
-            actual_total=Sum('actual_qty'),
-            plan_total=Sum('plan_qty'),
-        )
+
+        if preloaded is not None:
+            downstream_groups = preloaded.get('parent_backlog_map', {}).get(
+                (parent_product.id, parent_date), []
+            )
+        else:
+            downstream_groups = LineBacklog.objects.filter(
+                product=parent_product,
+                plan_date=parent_date,
+            ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+                actual_total=Sum('actual_qty'),
+                plan_total=Sum('plan_qty'),
+            )
         for downstream in downstream_groups:
             actual = int(downstream.get('actual_total') or 0)
             plan = int(downstream.get('plan_total') or 0)
-            # 全ての仕損を出庫に含める（line+process単位で1回のみ）
             scrap = _get_shipment_scrap_qty(
                 downstream['product_id'],
                 downstream['line_id'],
                 downstream['process_id'],
-                downstream['plan_date']
+                downstream['plan_date'],
+                preloaded=preloaded,
             )
             if actual > 0 or scrap > 0:
                 use_qty = Decimal(str(actual)) + scrap
@@ -1024,7 +1224,7 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
     return total_shipment
 
 
-def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_cache=None):
+def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_cache=None, preloaded=None):
     """
     計画在庫用の出庫計算（後工程の計画値＝内示を使用）+ 仕損
 
@@ -1036,22 +1236,27 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_
 
     ※ 実在庫の出庫は _calculate_parent_actual_shipment で actual_qty + scrap_qty を使用
     """
-    from masters.models import BOMItem
+    if preloaded is not None:
+        parent_bom_items = preloaded.get('parent_bom_items', [])
+    else:
+        from masters.models import BOMItem
+        parent_bom_items = BOMItem.objects.filter(
+            child_product=backlog.product,
+            bom__is_active=True,
+            bom__is_coproduct=False
+        ).select_related('bom__parent_product')
 
-    parent_bom_items = BOMItem.objects.filter(
-        child_product=backlog.product,
-        bom__is_active=True,
-        bom__is_coproduct=False
-    ).select_related('bom__parent_product')
-
-    if not parent_bom_items.exists():
+    if not parent_bom_items:
+        return Decimal('0')
+    if preloaded is None and hasattr(parent_bom_items, 'exists') and not parent_bom_items.exists():
         return Decimal('0')
 
     from django.db.models import Sum
 
     fs_cache = floor_shipping_cache if floor_shipping_cache is not None else {}
     total_shipment = Decimal('0')
-    for bom_item in _filter_parent_bom_items_by_routing(backlog, parent_bom_items):
+    filtered_items = _filter_parent_bom_items_by_routing(backlog, parent_bom_items, preloaded=preloaded)
+    for bom_item in filtered_items:
         parent_product = bom_item.bom.parent_product
         if not parent_product:
             continue
@@ -1059,9 +1264,13 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_
         if qty_per == 0:
             continue
 
-        if _check_floor_shipping_parent(parent_product.id, fs_cache):
+        if preloaded is not None:
+            is_floor = parent_product.id in preloaded.get('floor_parent_ids', set())
+        else:
+            is_floor = _check_floor_shipping_parent(parent_product.id, fs_cache)
+        if is_floor:
             total_shipment += _floor_shipping_plan_shipment(
-                backlog, shift_fn, parent_product, qty_per,
+                backlog, shift_fn, parent_product, qty_per, preloaded=preloaded,
             )
             continue
 
@@ -1069,21 +1278,26 @@ def _calculate_parent_planned_shipment(backlog, today, shift_fn, floor_shipping_
         parent_date = backlog.plan_date
         if shift_fn:
             parent_date = shift_fn(backlog.plan_date, lead_days)
-        # sequence_no違いの同一工程行を集約し、仕損の重複加算を防ぐ
-        downstream_groups = LineBacklog.objects.filter(
-            product=parent_product,
-            plan_date=parent_date,
-        ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
-            plan_total=Sum('plan_qty'),
-        )
+
+        if preloaded is not None:
+            downstream_groups = preloaded.get('parent_backlog_map', {}).get(
+                (parent_product.id, parent_date), []
+            )
+        else:
+            downstream_groups = LineBacklog.objects.filter(
+                product=parent_product,
+                plan_date=parent_date,
+            ).values('product_id', 'line_id', 'process_id', 'plan_date').annotate(
+                plan_total=Sum('plan_qty'),
+            )
         for downstream in downstream_groups:
             plan = int(downstream.get('plan_total') or 0)
-            # 全ての仕損を出庫に含める（line+process単位で1回のみ）
             scrap = _get_shipment_scrap_qty(
                 downstream['product_id'],
                 downstream['line_id'],
                 downstream['process_id'],
-                downstream['plan_date']
+                downstream['plan_date'],
+                preloaded=preloaded,
             )
             use_qty = Decimal(str(plan)) + scrap
             if use_qty:
@@ -1175,6 +1389,7 @@ def recalculate_stock_qty(
     max_parent_lt=None,
     calendar_id=None,
     shared_workday_cache=None,
+    preloaded=None,
 ):
     """
     実在庫を日次で再計算
@@ -1373,7 +1588,7 @@ def recalculate_stock_qty(
                     actual_shipment = Decimal(str(order_total))
                 else:
                     # 標準: 親の actual_qty + scrap_qty を出庫として計算（休日実績も反映）
-                    actual_shipment = _calculate_parent_actual_shipment(sample)
+                    actual_shipment = _calculate_parent_actual_shipment(sample, preloaded=preloaded)
         else:
             actual_shipment = Decimal('0')
         actual_shipment = int(actual_shipment or 0)
@@ -1426,6 +1641,7 @@ def recalculate_planned_stock_qty(
     calendar_id=None,
     shared_workday_cache=None,
     force_from_start=False,
+    preloaded=None,
 ):
     """
     計画在庫を日次で再計算（時制考慮版）
@@ -1616,6 +1832,7 @@ def recalculate_planned_stock_qty(
             demand_map=demand_map,
             final_delivery_lt=final_delivery_lt if use_delivery_lt_initialization else None,
             line_id=line_id,
+            preloaded=preloaded,
         )
         last_planned = (initial_backlog.stock_qty or 0) - lt_adjustment
         planned_by_date[initial_backlog.plan_date] = last_planned
@@ -1717,17 +1934,16 @@ def recalculate_planned_stock_qty(
             if forced_parent_shipment_mode == 'ORDER_QTY':
                 planned_shipment = Decimal(str(order_total))
             elif plan_date < business_today:
-                # ライン最終品でも過去日は親の実績優先で整合を取る。
-                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache, preloaded=preloaded)
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
             if forced_parent_shipment_mode == 'ORDER_QTY':
                 planned_shipment = Decimal(str(order_total))
             elif plan_date < business_today:
-                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache, preloaded=preloaded)
             else:
-                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache)
+                planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache, preloaded=preloaded)
         planned_shipment = int(planned_shipment or 0)
 
         # 在庫も進度と同様、休日を含めて「前日（暦日）」を基準に引き継ぐ。
@@ -1984,6 +2200,19 @@ def recalculate_inventory_for_line(
             max_parent_lt = _get_max_parent_bom_lead_time(product_id)
             max_parent_lt_cache[product_id] = max_parent_lt
 
+        # 出庫計算用データを一括プリロード（N+1解消）
+        preloaded = None
+        if not progress_only:
+            preload_start = min(start_date, inventory_calc_start_date)
+            preload_delivery_lt = _get_final_product_delivery_lt(line_id, product_id)
+            preloaded = _preload_parent_shipment_data(
+                line_id, product_id,
+                preload_start, end_date,
+                shift_working_days_fn=shift_working_days,
+                max_bom_lt=int(direct_lt or 0),
+                delivery_lt=preload_delivery_lt,
+            )
+
         if not progress_only:
             # 実在庫を計算
             t0 = time.perf_counter()
@@ -1997,6 +2226,7 @@ def recalculate_inventory_for_line(
                 max_parent_lt=direct_lt,
                 calendar_id=shared_calendar_id,
                 shared_workday_cache=shared_workday_cache,
+                preloaded=preloaded,
             )
             stock_elapsed = time.perf_counter() - t0
             stock_total += stock_elapsed
@@ -2016,6 +2246,7 @@ def recalculate_inventory_for_line(
                 calendar_id=shared_calendar_id,
                 shared_workday_cache=shared_workday_cache,
                 force_from_start=force_from_start,
+                preloaded=preloaded,
             )
             planned_elapsed = time.perf_counter() - t1
             planned_total += planned_elapsed

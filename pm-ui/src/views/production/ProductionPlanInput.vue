@@ -7134,8 +7134,13 @@ thead .sticky-col {
   width: 30px;
   min-width: 30px;
   max-width: 30px;
-  text-align: center;
+  text-align: left;
+  padding: 0 !important;
   position: sticky;
+}
+.number-col .product-info {
+  font-size: 10px;
+  padding: 3px 2px;
 }
 .number-col::after {
   content: '';
