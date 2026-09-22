@@ -154,44 +154,142 @@
     <div v-else>
       <div class="summary-block">
         <div class="summary-line">
-          <div class="summary-line-head">中断除く加工情報</div>
+          <div class="summary-line-head">全時間（休憩・中断含む）</div>
           <div class="summary-line-item">
             <span class="summary-label">期間合計実績</span>
             <span class="summary-value summary-value--md">{{ formatNumber(totalProductionQty) }}</span>
           </div>
           <div class="summary-line-item">
-            <span class="summary-label">期間合計作業時間（休憩除外）</span>
+            <span class="summary-label">期間合計継続時間</span>
+            <span class="summary-value summary-value--md">{{ formatDuration(totalElapsedSeconds, true) }}</span>
+          </div>
+          <div class="summary-line-item">
+            <span class="summary-label">期間出来高（台/h）</span>
+            <span class="summary-value summary-value--md">{{ formatProductivity(totalElapsedProductivityPerHour) }}</span>
+          </div>
+        </div>
+        <div class="summary-line">
+          <div class="summary-line-head">休憩除く（中断含む）</div>
+          <div class="summary-line-item">
+            <span class="summary-label">期間合計実績</span>
+            <span class="summary-value summary-value--md">{{ formatNumber(totalProductionQty) }}</span>
+          </div>
+          <div class="summary-line-item">
+            <span class="summary-label">期間合計時間（休憩除外）</span>
+            <span class="summary-value summary-value--md">{{ formatDuration(totalEffectiveIncludingPauseSeconds, true) }}</span>
+          </div>
+          <div class="summary-line-item">
+            <span class="summary-label">期間出来高（台/h）</span>
+            <span class="summary-value summary-value--md">{{ formatProductivity(totalEffectiveIncludingPauseProductivityPerHour) }}</span>
+          </div>
+        </div>
+        <div class="summary-line">
+          <div class="summary-line-head">休憩・中断除く</div>
+          <div class="summary-line-item">
+            <span class="summary-label">期間合計実績</span>
+            <span class="summary-value summary-value--md">{{ formatNumber(totalProductionQty) }}</span>
+          </div>
+          <div class="summary-line-item">
+            <span class="summary-label">期間合計作業時間（休憩・中断除外）</span>
             <span class="summary-value summary-value--md">{{ formatDuration(totalEffectiveWorkSeconds, true) }}</span>
           </div>
           <div class="summary-line-item">
             <span class="summary-label">期間出来高（台/h）</span>
-            <span class="summary-value summary-value--md">{{ formatProductivity(totalProductivityPerHour) }}</span>
-          </div>
-        </div>
-        <div class="summary-line">
-          <div class="summary-line-head">中断含む加工情報</div>
-          <div class="summary-line-item">
-            <span class="summary-label">期間合計実績</span>
-            <span class="summary-value summary-value--md">{{ formatNumber(totalProductionQty) }}</span>
-          </div>
-          <div class="summary-line-item">
-            <span class="summary-label">期間合計作業時間（中断含む）</span>
-            <span class="summary-value summary-value--md">{{ formatDuration(totalDurationIncludingPauseSeconds, true) }}</span>
-            <span class="summary-meta">正味加工時間 {{ formatDuration(totalEffectiveWorkSeconds, true) }}</span>
-            <span class="summary-meta">中断時間 {{ formatDuration(totalPauseSeconds, true) }}</span>
-          </div>
-          <div class="summary-line-item">
-            <span class="summary-label">期間出来高（台/h）</span>
-            <span class="summary-value summary-value--md">{{ formatProductivity(totalProductivityIncludingPausePerHour) }}</span>
+            <span class="summary-value summary-value--md">{{ formatProductivity(totalEffectiveWorkProductivityPerHour) }}</span>
           </div>
         </div>
         <div class="summary-formula">
-          計算式（中断除く）: 出来高 = 実績台数 / 作業時間（休憩除外）
+          計算式（全時間）: 出来高 = 実績台数 / 継続時間（休憩・中断含む）
         </div>
         <div class="summary-formula">
-          計算式（中断含む）: 出来高 = 実績台数 / 作業時間（中断含む）
+          計算式（休憩除く・中断含む）: 出来高 = 実績台数 / 作業時間（休憩除外）
+        </div>
+        <div class="summary-formula">
+          計算式（休憩・中断除く）: 出来高 = 実績台数 / 作業時間（休憩・中断除外）
         </div>
       </div>
+
+      <section class="interruption-stats">
+        <button
+          type="button"
+          class="interruption-stats-toggle"
+          :aria-expanded="interruptionStatsExpanded"
+          @click="interruptionStatsExpanded = !interruptionStatsExpanded"
+        >
+          <span>中断理由別の影響</span>
+          <span class="interruption-stats-toggle-hint">{{ interruptionStatsExpanded ? '閉じる' : '表示する' }} ▼</span>
+        </button>
+        <div v-if="interruptionStatsExpanded" class="interruption-stats-content">
+          <div class="interruption-stats-head">
+            <span>表示中の中断待機セッションを集計（休憩除外時間を影響時間として表示）</span>
+          </div>
+          <div class="table-wrap interruption-stats-table">
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>中断理由</th>
+                <th class="num">中断回数</th>
+                <th class="num">中断時間（全経過）</th>
+                <th class="num">影響時間（休憩除外）</th>
+                <th class="num">影響時間構成比</th>
+                <th class="num">平均中断時間</th>
+                <th>対象工程数</th>
+                <th>対象品番数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in interruptionSummaryRows" :key="item.reason">
+                <td>{{ item.reason }}</td>
+                <td class="num">{{ formatNumber(item.count) }}</td>
+                <td class="num">{{ formatDuration(item.durationSeconds, true) }}</td>
+                <td class="num">{{ formatDuration(item.effectiveSeconds, true) }}</td>
+                <td class="num">{{ formatPercent(item.effectiveSeconds, totalInterruptionEffectiveSeconds) }}</td>
+                <td class="num">{{ formatDuration(item.durationSeconds / item.count, true) }}</td>
+                <td>{{ formatNumber(item.processCount) }}</td>
+                <td>{{ formatNumber(item.productCount) }}</td>
+              </tr>
+              <tr v-if="!interruptionSummaryRows.length">
+                <td colspan="8" class="no-data">中断待機セッションがありません</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+
+          <div class="interruption-stats-head interruption-force-end-head">
+            <h3>強制終了記録</h3>
+            <span>TEMP_END の記録一覧（強制終了後の時間は集計しません）</span>
+          </div>
+          <div class="table-wrap interruption-stats-table">
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>強制終了時刻</th>
+                <th>中断理由</th>
+                <th>工程</th>
+                <th>品番</th>
+                <th>作業者</th>
+                <th class="num">強制終了までの中断時間</th>
+                <th>不整合</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in forceEndRows" :key="`force-end-${row.id}`" class="row-pause">
+                <td>{{ formatDateTime(row.ended_at) }}</td>
+                <td>{{ row.pause_reason || '理由未入力' }}</td>
+                <td>{{ row.process_code }} / {{ row.process_name }}</td>
+                <td>{{ row.product_code || '—' }}</td>
+                <td>{{ row.operator_name || '—' }}</td>
+                <td class="num">{{ formatDuration(row.duration_seconds, true) }}</td>
+                <td><span v-if="row.issue_count > 0" class="issue">{{ (row.issue_flags || []).join(', ') }}</span><span v-else>—</span></td>
+              </tr>
+              <tr v-if="!forceEndRows.length">
+                <td colspan="7" class="no-data">強制終了の記録がありません</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </section>
 
       <div class="table-wrap">
         <table class="list-table">
@@ -440,6 +538,7 @@ const dsSources = [
 const loading = ref(false)
 const error = ref('')
 const rawSessions = ref([])
+const interruptionStatsExpanded = ref(false)
 // フィルタ変更後に検索が必要かどうかのフラグ
 const needsSearch = ref(true)
 const sessions = computed(() => {
@@ -618,6 +717,35 @@ const isCanceledSession = (row) => {
   return String(row.end_action || '').toUpperCase() === 'CANCEL'
 }
 
+const isClosedPauseSession = (row) => {
+  if (!row) return false
+  return String(row.start_action || '').toUpperCase() === 'PAUSE' && Boolean(row.ended_at)
+}
+
+// 強制終了は実績数量を登録しないが、開始から強制終了までの作業時間は出来高の分母に含める。
+const isClosedWorkSessionForTiming = (row) => {
+  if (!row) return false
+  const endAction = String(row.end_action || '').toUpperCase()
+  const source = String(row.record_source || '').toUpperCase()
+  const timingEndActions = ['END', 'PAUSE', 'TEMP_END', 'CANCEL']
+  if (!timingEndActions.includes(endAction)) return false
+  if (source === 'LASER' || source === 'BRAKE') return true
+  return row.session_type === 'WORK'
+}
+
+const sumSessionSeconds = (predicate, fieldName) => {
+  const countedSessionIds = new Set()
+  return (Array.isArray(sessions.value) ? sessions.value : []).reduce((sum, row) => {
+    if (!predicate(row)) return sum
+    const sessionId = row?.id == null ? '' : String(row.id)
+    if (sessionId) {
+      if (countedSessionIds.has(sessionId)) return sum
+      countedSessionIds.add(sessionId)
+    }
+    return sum + Math.max(Number(row?.[fieldName] || 0), 0)
+  }, 0)
+}
+
 const getSessionTypeLabel = (row) => {
   if (isCanceledSession(row)) return '中止'
   if (String(row.start_action || '').toUpperCase() === 'PAUSE') return '中断待機'
@@ -638,58 +766,76 @@ const totalProductionQty = computed(() => {
 })
 
 const totalEffectiveWorkSeconds = computed(() => {
-  const rows = Array.isArray(sessions.value) ? sessions.value : []
-  const countedSessionIds = new Set()
-  return rows.reduce((sum, row) => {
-    if (!isCountableProductionRow(row)) return sum
-    const sessionId = row?.id == null ? '' : String(row.id)
-    if (sessionId) {
-      if (countedSessionIds.has(sessionId)) return sum
-      countedSessionIds.add(sessionId)
-    }
-    return sum + Number(row.effective_work_seconds || 0)
-  }, 0)
+  return sumSessionSeconds(isClosedWorkSessionForTiming, 'effective_work_seconds')
 })
 
-const totalProductivityPerHour = computed(() => {
+const totalEffectiveWorkProductivityPerHour = computed(() => {
   const workSeconds = Number(totalEffectiveWorkSeconds.value || 0)
   if (workSeconds <= 0) return null
   return (Number(totalProductionQty.value || 0) * 3600) / workSeconds
 })
 
-const totalDurationIncludingPauseSeconds = computed(() => {
-  const rows = Array.isArray(sessions.value) ? sessions.value : []
-  const countedSessionIds = new Set()
-  return rows.reduce((sum, row) => {
-    const sessionId = row?.id == null ? '' : String(row.id)
-    if (sessionId) {
-      if (countedSessionIds.has(sessionId)) return sum
-      countedSessionIds.add(sessionId)
-    }
-    return sum + Number(row.effective_work_seconds || 0)
-  }, 0)
+const isIncludedInElapsedTime = (row) => (
+  isClosedWorkSessionForTiming(row) || isClosedPauseSession(row)
+)
+
+const totalElapsedSeconds = computed(() => {
+  return sumSessionSeconds(isIncludedInElapsedTime, 'duration_seconds')
 })
 
-const totalProductivityIncludingPausePerHour = computed(() => {
-  const workSeconds = Number(totalDurationIncludingPauseSeconds.value || 0)
+const totalElapsedProductivityPerHour = computed(() => {
+  const workSeconds = Number(totalElapsedSeconds.value || 0)
   if (workSeconds <= 0) return null
   return (Number(totalProductionQty.value || 0) * 3600) / workSeconds
 })
 
-const totalPauseSeconds = computed(() => {
-  const rows = Array.isArray(sessions.value) ? sessions.value : []
-  const countedSessionIds = new Set()
-  return rows.reduce((sum, row) => {
-    const sessionId = row?.id == null ? '' : String(row.id)
-    if (sessionId) {
-      if (countedSessionIds.has(sessionId)) return sum
-      countedSessionIds.add(sessionId)
-    }
-    return String(row?.start_action || '').toUpperCase() === 'PAUSE'
-      ? sum + Number(row?.duration_seconds || 0)
-      : sum
-  }, 0)
+const totalEffectiveIncludingPauseSeconds = computed(() => {
+  return sumSessionSeconds(isIncludedInElapsedTime, 'effective_work_seconds')
 })
+
+const totalEffectiveIncludingPauseProductivityPerHour = computed(() => {
+  const workSeconds = Number(totalEffectiveIncludingPauseSeconds.value || 0)
+  if (workSeconds <= 0) return null
+  return (Number(totalProductionQty.value || 0) * 3600) / workSeconds
+})
+
+const interruptionRows = computed(() => {
+  const seenIds = new Set()
+  return (Array.isArray(sessions.value) ? sessions.value : []).filter((row) => {
+    if (!isClosedPauseSession(row)) return false
+    const id = row?.id == null ? '' : String(row.id)
+    if (id && seenIds.has(id)) return false
+    if (id) seenIds.add(id)
+    return true
+  })
+})
+
+const totalInterruptionEffectiveSeconds = computed(() => (
+  interruptionRows.value.reduce((sum, row) => sum + Math.max(Number(row.effective_work_seconds || 0), 0), 0)
+))
+
+const interruptionSummaryRows = computed(() => {
+  const grouped = new Map()
+  for (const row of interruptionRows.value) {
+    const reason = String(row.pause_reason || '').trim() || '理由未入力'
+    if (!grouped.has(reason)) {
+      grouped.set(reason, { reason, count: 0, durationSeconds: 0, effectiveSeconds: 0, processes: new Set(), products: new Set() })
+    }
+    const item = grouped.get(reason)
+    item.count += 1
+    item.durationSeconds += Math.max(Number(row.duration_seconds || 0), 0)
+    item.effectiveSeconds += Math.max(Number(row.effective_work_seconds || 0), 0)
+    if (row.process_code) item.processes.add(String(row.process_code))
+    if (row.product_code) item.products.add(String(row.product_code))
+  }
+  return [...grouped.values()]
+    .map((item) => ({ ...item, processCount: item.processes.size, productCount: item.products.size }))
+    .sort((a, b) => b.effectiveSeconds - a.effectiveSeconds || b.durationSeconds - a.durationSeconds || a.reason.localeCompare(b.reason, 'ja'))
+})
+
+const forceEndRows = computed(() => interruptionRows.value.filter(
+  (row) => String(row.end_action || '').toUpperCase() === 'TEMP_END'
+))
 
 const loadMasters = async () => {
   try {
@@ -1404,6 +1550,13 @@ const formatNumber = (value) => {
   return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 }
 
+const formatPercent = (value, total) => {
+  const numerator = Number(value || 0)
+  const denominator = Number(total || 0)
+  if (denominator <= 0 || numerator <= 0) return '0.0%'
+  return `${((numerator * 100) / denominator).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
 const formatProductionQty = (row) => {
   if (!isCountableProductionRow(row)) return '—'
   return formatNumber(row.production_qty || 0)
@@ -1553,11 +1706,12 @@ const exportPdf = () => {
     endDate: endDate.value,
     summary: {
       totalProductionQty: totalProductionQty.value,
+      totalElapsedSeconds: totalElapsedSeconds.value,
+      totalElapsedProductivityPerHour: totalElapsedProductivityPerHour.value,
+      totalEffectiveIncludingPauseSeconds: totalEffectiveIncludingPauseSeconds.value,
+      totalEffectiveIncludingPauseProductivityPerHour: totalEffectiveIncludingPauseProductivityPerHour.value,
       totalEffectiveWorkSeconds: totalEffectiveWorkSeconds.value,
-      totalProductivityPerHour: totalProductivityPerHour.value,
-      totalDurationIncludingPauseSeconds: totalDurationIncludingPauseSeconds.value,
-      totalPauseSeconds: totalPauseSeconds.value,
-      totalProductivityIncludingPausePerHour: totalProductivityIncludingPausePerHour.value,
+      totalEffectiveWorkProductivityPerHour: totalEffectiveWorkProductivityPerHour.value,
     },
   })
 }
@@ -1732,6 +1886,56 @@ onMounted(async () => {
 }
 .summary-block {
   margin-bottom: 8px;
+}
+.interruption-stats {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.interruption-stats-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.interruption-stats-toggle-hint {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+.interruption-stats-content {
+  margin-top: 10px;
+}
+.interruption-stats-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.interruption-stats-head h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #0f172a;
+}
+.interruption-stats-head span {
+  color: #64748b;
+  font-size: 12px;
+}
+.interruption-force-end-head {
+  margin-top: 14px;
+}
+.interruption-stats-table {
+  background: #fff;
 }
 .summary-line {
   display: flex;

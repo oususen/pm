@@ -161,18 +161,22 @@ export const buildPrintTableHtml = (sessions, { lineLabel, processLabel, startDa
   const summaryBlock = `
     <div class="summary">
       <div class="summary-line">
-        <div><strong>中断除く加工情報</strong></div>
+        <div><strong>全時間（休憩・中断含む）</strong></div>
         <div>期間合計実績: ${escapeHtml(formatNumber(summary.totalProductionQty))}</div>
-        <div>期間合計作業時間（休憩除外）: ${escapeHtml(formatDuration(summary.totalEffectiveWorkSeconds, true))}</div>
-        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(summary.totalProductivityPerHour))}</div>
+        <div>期間合計継続時間: ${escapeHtml(formatDuration(summary.totalElapsedSeconds, true))}</div>
+        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(summary.totalElapsedProductivityPerHour))}</div>
       </div>
       <div class="summary-line">
-        <div><strong>中断含む加工情報</strong></div>
+        <div><strong>休憩除く（中断含む）</strong></div>
         <div>期間合計実績: ${escapeHtml(formatNumber(summary.totalProductionQty))}</div>
-        <div>期間合計作業時間（中断含む）: ${escapeHtml(formatDuration(summary.totalDurationIncludingPauseSeconds, true))}</div>
-        <div>正味加工時間: ${escapeHtml(formatDuration(summary.totalEffectiveWorkSeconds, true))}</div>
-        <div>中断時間: ${escapeHtml(formatDuration(summary.totalPauseSeconds, true))}</div>
-        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(summary.totalProductivityIncludingPausePerHour))}</div>
+        <div>期間合計時間（休憩除外）: ${escapeHtml(formatDuration(summary.totalEffectiveIncludingPauseSeconds, true))}</div>
+        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(summary.totalEffectiveIncludingPauseProductivityPerHour))}</div>
+      </div>
+      <div class="summary-line">
+        <div><strong>休憩・中断除く</strong></div>
+        <div>期間合計実績: ${escapeHtml(formatNumber(summary.totalProductionQty))}</div>
+        <div>期間合計作業時間（休憩・中断除外）: ${escapeHtml(formatDuration(summary.totalEffectiveWorkSeconds, true))}</div>
+        <div>期間出来高（台/h）: ${escapeHtml(formatProductivity(summary.totalEffectiveWorkProductivityPerHour))}</div>
       </div>
     </div>`
   const thead = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
