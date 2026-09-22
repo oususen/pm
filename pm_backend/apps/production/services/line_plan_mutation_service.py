@@ -218,6 +218,40 @@ def save(viewset, request, **deps):
     sorted_items = sorted(indexed_items, key=item_sort_key)
 
     with transaction.atomic():
+        # 保存対象の完成品計画を置換する前に、旧plan_idを控えておく。
+        # 同一plan_idは工程展開後の構成部品行にも引き継がれるため、
+        # 数量を0/空欄にした場合でも残骸を残さず削除するために使用する。
+        replacement_plan_ids = set()
+        if affected_dates and affected_products:
+            replacement_plan_ids = set(
+                LinePlan.objects.filter(
+                    line_id=line_id,
+                    plan_date__in=affected_dates,
+                    product_id__in=affected_products,
+                ).exclude(plan_id__isnull=True).exclude(plan_id='').values_list('plan_id', flat=True)
+            )
+
+            # 過去に完成品行だけが削除され、展開行だけが残っているケースも回収する。
+            # plan_idは「完成品コード_日付_数量_順番」なので、画面表示製品のコードを
+            # 先頭に持つ行を対象にすれば、構成部品側に残った旧計画も特定できる。
+            from django.db.models import Q
+            product_codes = list(
+                Product.objects.filter(id__in=affected_products).values_list('product_code', flat=True)
+            )
+            plan_id_prefix_q = Q()
+            for product_code in product_codes:
+                normalized_code = str(product_code or '').strip()
+                if normalized_code:
+                    plan_id_prefix_q |= Q(plan_id__startswith=f'{normalized_code}_')
+            if plan_id_prefix_q:
+                replacement_plan_ids.update(
+                    LineBacklog.objects.filter(
+                        line_id=line_id,
+                        plan_date__in=affected_dates,
+                        sequence_no__gt=0,
+                    ).filter(plan_id_prefix_q).exclude(plan_id__startswith='SINGLEPROC_').values_list('plan_id', flat=True)
+                )
+
         if change_reason and affected_dates and affected_products:
             existing_plans = LinePlan.objects.filter(
                 line_id=line_id,
@@ -236,12 +270,28 @@ def save(viewset, request, **deps):
             ).delete()
             deleted_plan = deleted_plan_result[0] if deleted_plan_result else 0
 
+            # 画面表示製品の旧計画から展開された構成部品・全工程行も削除する。
+            # line_idで限定し、別ラインの同一plan_idを削除しない。
+            if replacement_plan_ids:
+                deleted_gantt_by_plan_id = LineGanttPlan.objects.filter(
+                    line_id=line_id,
+                    plan_id__in=replacement_plan_ids,
+                ).exclude(plan_id__startswith='SINGLEPROC_').delete()
+                deleted_gantt += deleted_gantt_by_plan_id[0] if deleted_gantt_by_plan_id else 0
+
+                deleted_backlog_by_plan_id = LineBacklog.objects.filter(
+                    line_id=line_id,
+                    plan_id__in=replacement_plan_ids,
+                ).exclude(plan_id__startswith='SINGLEPROC_').delete()
+                deleted_backlog += deleted_backlog_by_plan_id[0] if deleted_backlog_by_plan_id else 0
+
+            # plan_idを持たない旧行も従来どおり対象製品・期間で削除する。
             deleted_gantt_result = LineGanttPlan.objects.filter(
                 line_id=line_id,
                 plan_date__in=affected_dates,
                 product_id__in=affected_products,
             ).exclude(plan_id__startswith='SINGLEPROC_').delete()
-            deleted_gantt = deleted_gantt_result[0] if deleted_gantt_result else 0
+            deleted_gantt += deleted_gantt_result[0] if deleted_gantt_result else 0
 
             deleted_backlog_result = LineBacklog.objects.filter(
                 line_id=line_id,
@@ -249,7 +299,7 @@ def save(viewset, request, **deps):
                 product_id__in=affected_products,
                 sequence_no__gt=0,
             ).exclude(plan_id__startswith='SINGLEPROC_').delete()
-            deleted_backlog = deleted_backlog_result[0] if deleted_backlog_result else 0
+            deleted_backlog += deleted_backlog_result[0] if deleted_backlog_result else 0
 
         for _original_idx, it in sorted_items:
             try:
