@@ -80,18 +80,10 @@ export const ensureLineCalendarReady = async ({
       window.alert(`ライン ${lineLabel} の勤務カレンダに日別設定がないため${actionLabel}できません。`)
       return false
     }
-    if (dateKeys.length) {
-      const registeredDates = new Set(rows.map((row) => toDateKey(row?.target_date)))
-      const missingDates = dateKeys.filter((dateKey) => !registeredDates.has(dateKey))
-      if (missingDates.length) {
-        const missingRange = missingDates.length === 1
-          ? missingDates[0]
-          : `${missingDates[0]}〜${missingDates.at(-1)}`
-        window.alert(
-          `ライン ${lineLabel} の勤務カレンダに ${missingRange} の日別設定がないため${actionLabel}できません。`
-        )
-        return false
-      }
+    const hasWorkingDay = rows.some((row) => row?.is_working_day)
+    if (!hasWorkingDay) {
+      window.alert(`ライン ${lineLabel} の勤務カレンダに出勤日がないため${actionLabel}できません。`)
+      return false
     }
   } catch (error) {
     window.alert(`勤務カレンダの確認に失敗したため${actionLabel}できません。`)

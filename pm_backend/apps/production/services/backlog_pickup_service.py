@@ -2484,6 +2484,22 @@ def expand_processes(viewset, request, **deps):
                 remaining -= 1
         return current
     
+    # ガント展開除外工程のprocess_codeセットをロード
+    gantt_excluded_process_codes = set()
+    try:
+        from system_settings.models import SystemSetting as _SysSetting
+        _excluded_row = _SysSetting.objects.filter(key='production.gantt_excluded_process_rules').first()
+        if _excluded_row and _excluded_row.value:
+            import json as _json_exc
+            _line_code_upper = (line_obj.line_code or '').strip().upper() if line_obj else ''
+            for _item in _json_exc.loads(_excluded_row.value or '[]'):
+                _lc = str((_item or {}).get('lineCode') or '').strip().upper()
+                _pc = str((_item or {}).get('processCode') or '').strip().upper()
+                if _lc == _line_code_upper and _pc:
+                    gantt_excluded_process_codes.add(_pc)
+    except Exception as e:
+        logger.warning("expand_processes: ガント展開除外ルール読み込み失敗: %s", e)
+
     # 対象ラインのRoutingStepを製品別にグルーピング
     steps_map = defaultdict(list)
     steps_qs = RoutingStep.objects.filter(
@@ -2495,6 +2511,10 @@ def expand_processes(viewset, request, **deps):
     steps_by_process = defaultdict(list)
     cycle_product_ids = set(p['product_id'] for p in base_plans)
     for step in steps_qs:
+        if gantt_excluded_process_codes and step.process:
+            step_process_code = (step.process.process_code or '').strip().upper()
+            if step_process_code in gantt_excluded_process_codes:
+                continue
         product_keys = []
         if step.output_product_id:
             product_keys.append(step.output_product_id)
