@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">外作・購入品注文書一覧 <DataSourceDialog title="" :sources="dsSources" /></h1>
       <div class="page-actions">
-        <RouterLink :to="{ path: '/settings/scheduled-tasks', query: { mode: 'purchase-order-check' } }" class="btn-setting" title="自動タスク生成 設定">⚙ 設定</RouterLink>
+        <RouterLink v-if="authState.user?.is_staff || authState.user?.is_superuser" :to="{ path: '/settings/scheduled-tasks', query: { mode: 'purchase-order-check' } }" class="btn-setting" title="自動タスク生成 設定">⚙ 設定</RouterLink>
         <button class="btn-primary" @click="fetchList">更新</button>
         <button class="btn-success" @click="openCreateDialog">新規作成</button>
       </div>

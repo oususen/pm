@@ -1238,7 +1238,7 @@
               <td>{{ s.lead_time_days }}</td>
               <td>
                 <label class="checkbox-label poc-toggle">
-                  <input type="checkbox" :checked="s.is_enabled" @change="toggleScheduleEnabled(s)" :disabled="!canEdit" />
+                  <input type="checkbox" :checked="s.is_enabled" @click.prevent="toggleScheduleEnabled(s)" :disabled="!canEdit || togglingScheduleId === s.id" />
                   {{ s.is_enabled ? '有効' : '無効' }}
                 </label>
               </td>
@@ -1480,6 +1480,7 @@ const safetyStockConfigs = computed(() =>
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
 const purchaseOrderCheckConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'AUTO_PURCHASE_ORDER_CHECK'))
 const pocSchedules = ref([])
+const togglingScheduleId = ref(null)
 const pocApprovalRoute = ref(null)
 const containerImportCleanupConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'CONTAINER_IMPORT_TMP_CLEANUP'))
 const planToActualConfigs = computed(() => {
@@ -1681,6 +1682,10 @@ const loadPurchaseOrderCheckDetails = async () => {
 
 const toggleScheduleEnabled = async (schedule) => {
   const newVal = !schedule.is_enabled
+  const label = `${schedule.supplier_code} - ${schedule.supplier_name}`
+  const action = newVal ? '有効' : '無効'
+  if (!confirm(`${label} を「${action}」に変更しますか？`)) return
+  togglingScheduleId.value = schedule.id
   try {
     await api.supplierOrderSchedules.update(schedule.id, {
       supplier: schedule.supplier || schedule.supplier_id,
@@ -1693,6 +1698,8 @@ const toggleScheduleEnabled = async (schedule) => {
     schedule.is_enabled = newVal
   } catch (e) {
     alert('更新に失敗しました')
+  } finally {
+    togglingScheduleId.value = null
   }
 }
 
