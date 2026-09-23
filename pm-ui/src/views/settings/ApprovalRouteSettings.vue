@@ -81,6 +81,15 @@
                   </option>
                 </select>
               </label>
+              <label class="field-label">
+                部署
+                <select v-model="selectedRoute[`${stage.key}_department`]" :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)">
+                  <option :value="null">指定なし</option>
+                  <option v-for="dept in departmentOptions" :key="dept.value" :value="dept.value">
+                    {{ dept.label }}
+                  </option>
+                </select>
+              </label>
               <div class="stage-options">
                 <label class="option-check">
                   <input v-model="selectedRoute[`${stage.key}_task_enabled`]" type="checkbox" :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)" />
@@ -179,6 +188,54 @@ const businessOptions = [
   { key: 'purchase_order_proposal', label: '外作・購入品注文' },
 ]
 
+const departments = ref([])
+
+const levelLabels = {
+  division: '事業部',
+  group: '係',
+  team: '班',
+  unit: 'グループ',
+}
+
+const levelIndent = {
+  division: '',
+  group: '　',
+  team: '　　',
+  unit: '　　　',
+}
+
+const buildDepartmentTree = (depts) => {
+  const levelOrder = ['division', 'group', 'team', 'unit']
+  const byParent = {}
+  for (const dept of depts) {
+    const pid = dept.parent || null
+    if (!byParent[pid]) byParent[pid] = []
+    byParent[pid].push(dept)
+  }
+  for (const key of Object.keys(byParent)) {
+    byParent[key].sort((a, b) => {
+      const li = levelOrder.indexOf(a.level) - levelOrder.indexOf(b.level)
+      if (li !== 0) return li
+      return (a.name || '').localeCompare(b.name || '')
+    })
+  }
+  const result = []
+  const walk = (parentId) => {
+    for (const dept of (byParent[parentId] || [])) {
+      const indent = levelIndent[dept.level] || ''
+      result.push({
+        value: dept.id,
+        label: `${indent}${dept.name} (${levelLabels[dept.level] || dept.level})`,
+      })
+      walk(dept.id)
+    }
+  }
+  walk(null)
+  return result
+}
+
+const departmentOptions = computed(() => buildDepartmentTree(departments.value))
+
 const userLabel = (user) => {
   const code = user?.profile?.employee_code || user?.username || user?.email || `ID:${user?.id}`
   const name = `${user?.last_name || ''} ${user?.first_name || ''}`.trim() || user?.username || ''
@@ -197,18 +254,21 @@ const emptyRoute = () => ({
   item_key: '',
   item_name: '',
   creator_role: 'leader',
+  creator_department: null,
   creator_task_enabled: true,
   creator_app_notification_enabled: true,
   creator_email_notification_enabled: false,
   creator_allowed_users: [],
   creator_proxy_users: [],
   reviewer1_role: 'supervisor',
+  reviewer1_department: null,
   reviewer1_task_enabled: true,
   reviewer1_app_notification_enabled: true,
   reviewer1_email_notification_enabled: false,
   reviewer1_allowed_users: [],
   reviewer1_proxy_users: [],
   reviewer2_role: 'chief',
+  reviewer2_department: null,
   reviewer2_enabled: true,
   reviewer2_task_enabled: true,
   reviewer2_app_notification_enabled: true,
@@ -216,6 +276,7 @@ const emptyRoute = () => ({
   reviewer2_allowed_users: [],
   reviewer2_proxy_users: [],
   approver_role: 'manager',
+  approver_department: null,
   approver_task_enabled: true,
   approver_app_notification_enabled: true,
   approver_email_notification_enabled: false,
@@ -351,6 +412,12 @@ const fetchUsers = async () => {
   users.value = normalizeList(response.data)
 }
 
+const fetchDepartments = async () => {
+  const response = await api.accounts.getDepartments({ page_size: 20000 })
+  const data = response.data
+  departments.value = Array.isArray(data) ? data : data.results || []
+}
+
 const fetchRoutes = async () => {
   const response = await api.accounts.getApprovalRoutes({ page_size: 1000 })
   routes.value = normalizeList(response.data).map((route) => normalizeRoute(route))
@@ -363,7 +430,7 @@ const fetchAll = async () => {
   errorMessage.value = ''
   successMessage.value = ''
   try {
-    await Promise.all([fetchUsers(), fetchRoutes()])
+    await Promise.all([fetchUsers(), fetchRoutes(), fetchDepartments()])
   } catch (error) {
     errorMessage.value = error?.response?.data?.detail || '承認設定の取得に失敗しました。'
   } finally {
@@ -430,18 +497,21 @@ const buildPayload = () => routes.value.map((route) => ({
   item_key: route.item_key,
   item_name: route.item_name,
   creator_role: route.creator_role,
+  creator_department: route.creator_department || null,
   creator_task_enabled: Boolean(route.creator_task_enabled),
   creator_app_notification_enabled: Boolean(route.creator_app_notification_enabled),
   creator_email_notification_enabled: Boolean(route.creator_email_notification_enabled),
   creator_allowed_users: route.creator_allowed_users || [],
   creator_proxy_users: route.creator_proxy_users || [],
   reviewer1_role: route.reviewer1_role,
+  reviewer1_department: route.reviewer1_department || null,
   reviewer1_task_enabled: Boolean(route.reviewer1_task_enabled),
   reviewer1_app_notification_enabled: Boolean(route.reviewer1_app_notification_enabled),
   reviewer1_email_notification_enabled: Boolean(route.reviewer1_email_notification_enabled),
   reviewer1_allowed_users: route.reviewer1_allowed_users || [],
   reviewer1_proxy_users: route.reviewer1_proxy_users || [],
   reviewer2_role: route.reviewer2_role,
+  reviewer2_department: route.reviewer2_department || null,
   reviewer2_enabled: Boolean(route.reviewer2_enabled),
   reviewer2_task_enabled: Boolean(route.reviewer2_task_enabled),
   reviewer2_app_notification_enabled: Boolean(route.reviewer2_app_notification_enabled),
@@ -449,6 +519,7 @@ const buildPayload = () => routes.value.map((route) => ({
   reviewer2_allowed_users: route.reviewer2_allowed_users || [],
   reviewer2_proxy_users: route.reviewer2_proxy_users || [],
   approver_role: route.approver_role,
+  approver_department: route.approver_department || null,
   approver_task_enabled: Boolean(route.approver_task_enabled),
   approver_app_notification_enabled: Boolean(route.approver_app_notification_enabled),
   approver_email_notification_enabled: Boolean(route.approver_email_notification_enabled),

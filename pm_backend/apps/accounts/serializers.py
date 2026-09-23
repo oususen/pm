@@ -598,12 +598,16 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
     reviewer1_role_label = serializers.CharField(source='get_reviewer1_role_display', read_only=True)
     reviewer2_role_label = serializers.CharField(source='get_reviewer2_role_display', read_only=True)
     approver_role_label = serializers.CharField(source='get_approver_role_display', read_only=True)
+    creator_department_name = serializers.CharField(source='creator_department.name', read_only=True, default=None)
     creator_allowed_user_names = serializers.SerializerMethodField()
     creator_proxy_user_names = serializers.SerializerMethodField()
+    reviewer1_department_name = serializers.CharField(source='reviewer1_department.name', read_only=True, default=None)
     reviewer1_allowed_user_names = serializers.SerializerMethodField()
     reviewer1_proxy_user_names = serializers.SerializerMethodField()
+    reviewer2_department_name = serializers.CharField(source='reviewer2_department.name', read_only=True, default=None)
     reviewer2_allowed_user_names = serializers.SerializerMethodField()
     reviewer2_proxy_user_names = serializers.SerializerMethodField()
+    approver_department_name = serializers.CharField(source='approver_department.name', read_only=True, default=None)
     approver_allowed_user_names = serializers.SerializerMethodField()
     approver_proxy_user_names = serializers.SerializerMethodField()
 
@@ -615,6 +619,8 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
             'item_name',
             'creator_role',
             'creator_role_label',
+            'creator_department',
+            'creator_department_name',
             'creator_task_enabled',
             'creator_app_notification_enabled',
             'creator_email_notification_enabled',
@@ -624,6 +630,8 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
             'creator_proxy_user_names',
             'reviewer1_role',
             'reviewer1_role_label',
+            'reviewer1_department',
+            'reviewer1_department_name',
             'reviewer1_task_enabled',
             'reviewer1_app_notification_enabled',
             'reviewer1_email_notification_enabled',
@@ -633,6 +641,8 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
             'reviewer1_proxy_user_names',
             'reviewer2_role',
             'reviewer2_role_label',
+            'reviewer2_department',
+            'reviewer2_department_name',
             'reviewer2_enabled',
             'reviewer2_task_enabled',
             'reviewer2_app_notification_enabled',
@@ -643,6 +653,8 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
             'reviewer2_proxy_user_names',
             'approver_role',
             'approver_role_label',
+            'approver_department',
+            'approver_department_name',
             'approver_task_enabled',
             'approver_app_notification_enabled',
             'approver_email_notification_enabled',

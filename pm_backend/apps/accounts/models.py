@@ -387,6 +387,10 @@ class ApprovalRouteConfig(models.Model):
     item_key = models.CharField(max_length=80, unique=True, verbose_name='承認項目キー')
     item_name = models.CharField(max_length=100, verbose_name='承認項目名')
     creator_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='leader', verbose_name='作成者')
+    creator_department = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='approval_route_creator', verbose_name='作成者部署',
+    )
     creator_task_enabled = models.BooleanField(default=True, verbose_name='作成者タスク作成')
     creator_app_notification_enabled = models.BooleanField(default=True, verbose_name='作成者アプリ通知')
     creator_email_notification_enabled = models.BooleanField(default=False, verbose_name='作成者メール通知')
@@ -403,6 +407,10 @@ class ApprovalRouteConfig(models.Model):
         verbose_name='作成者代理ユーザー',
     )
     reviewer1_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='supervisor', verbose_name='確認者1')
+    reviewer1_department = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='approval_route_reviewer1', verbose_name='確認者1部署',
+    )
     reviewer1_task_enabled = models.BooleanField(default=True, verbose_name='確認者1タスク作成')
     reviewer1_app_notification_enabled = models.BooleanField(default=True, verbose_name='確認者1アプリ通知')
     reviewer1_email_notification_enabled = models.BooleanField(default=False, verbose_name='確認者1メール通知')
@@ -419,6 +427,10 @@ class ApprovalRouteConfig(models.Model):
         verbose_name='確認者1代理ユーザー',
     )
     reviewer2_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='chief', verbose_name='確認者2')
+    reviewer2_department = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='approval_route_reviewer2', verbose_name='確認者2部署',
+    )
     reviewer2_enabled = models.BooleanField(default=True, verbose_name='確認者2使用')
     reviewer2_task_enabled = models.BooleanField(default=True, verbose_name='確認者2タスク作成')
     reviewer2_app_notification_enabled = models.BooleanField(default=True, verbose_name='確認者2アプリ通知')
@@ -436,6 +448,10 @@ class ApprovalRouteConfig(models.Model):
         verbose_name='確認者2代理ユーザー',
     )
     approver_role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='manager', verbose_name='承認者')
+    approver_department = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='approval_route_approver', verbose_name='承認者部署',
+    )
     approver_task_enabled = models.BooleanField(default=True, verbose_name='承認者タスク作成')
     approver_app_notification_enabled = models.BooleanField(default=True, verbose_name='承認者アプリ通知')
     approver_email_notification_enabled = models.BooleanField(default=False, verbose_name='承認者メール通知')

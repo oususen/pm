@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">外作・購入品注文書一覧 <DataSourceDialog title="" :sources="dsSources" /></h1>
       <div class="page-actions">
+        <RouterLink :to="{ path: '/settings/scheduled-tasks', query: { mode: 'purchase-order-check' } }" class="btn-setting" title="自動タスク生成 設定">⚙ 設定</RouterLink>
         <button class="btn-primary" @click="fetchList">更新</button>
         <button class="btn-success" @click="openCreateDialog">新規作成</button>
       </div>
@@ -128,7 +129,7 @@
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 
@@ -340,6 +341,19 @@ onMounted(async () => {
   justify-content: flex-end;
   gap: 8px;
 }
+.btn-setting {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #475569;
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-setting:hover { background: #e2e8f0; border-color: #6f89bf; }
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }
 </style>

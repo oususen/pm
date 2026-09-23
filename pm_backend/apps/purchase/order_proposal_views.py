@@ -143,6 +143,14 @@ def _get_user_profile(user):
         return None
 
 
+_DEPT_LEVEL_TO_PROFILE_FIELD = {
+    'division': 'profile__division',
+    'group': 'profile__group',
+    'team': 'profile__team',
+    'unit': 'profile__department',
+}
+
+
 def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, creator=None):
     allowed_users = list(getattr(route_config, f'{stage}_allowed_users').all())
     if allowed_users:
@@ -150,6 +158,15 @@ def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, cr
 
     role = getattr(route_config, f'{stage}_role', '')
     user_qs = get_user_model().objects.filter(is_active=True)
+
+    dept = getattr(route_config, f'{stage}_department', None)
+    if dept:
+        field = _DEPT_LEVEL_TO_PROFILE_FIELD.get(dept.level)
+        if field and role:
+            return list(user_qs.filter(**{field: dept, 'profile__role': role}).distinct())
+        if field:
+            return list(user_qs.filter(**{field: dept}).distinct())
+
     profile = _get_user_profile(creator)
 
     if profile:
@@ -163,6 +180,8 @@ def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, cr
             return list(user_qs.filter(profile__role='manager', profile__division_id=profile.division_id).distinct())
         return []
 
+    if role:
+        return list(user_qs.filter(profile__role=role).distinct())
     return []
 
 
@@ -484,8 +503,8 @@ def _is_order_timing_today(schedule: SupplierOrderSchedule, today: date, daiso_c
     window_start = today - timedelta(days=62)
     window_end = today + timedelta(days=62)
     for raw_date in _generate_raw_pattern_dates(schedule, window_start, window_end, daiso_calculator):
-        shifted_date = _shift_to_previous_working_day(raw_date, daiso_calculator)
-        if shifted_date == today:
+        shifted = _shift_to_previous_working_day(raw_date, daiso_calculator)
+        if shifted == today:
             return True
     return False
 
