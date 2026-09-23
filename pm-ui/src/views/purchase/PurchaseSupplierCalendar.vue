@@ -149,6 +149,30 @@
             </button>
           </div>
         </div>
+        <div class="order-tools">
+          <div class="delivery-range">
+            <label>発注日生成</label>
+            <input type="date" v-model="orderGenerateStartDate" :disabled="!selectedCalendarId || !canEdit" />
+            <span>〜</span>
+            <input type="date" v-model="orderGenerateEndDate" :disabled="!selectedCalendarId || !canEdit" />
+          </div>
+          <div class="delivery-actions">
+            <button
+              class="btn"
+              @click="generateOrderDays"
+              :disabled="!selectedCalendarId || !selectedSchedulePattern || generatingOrderDays || !canEdit"
+            >
+              {{ generatingOrderDays ? '生成中...' : '発注日生成' }}
+            </button>
+            <button
+              class="btn"
+              @click="clearOrderDays"
+              :disabled="!selectedCalendarId || clearingOrderDays || !canEdit"
+            >
+              {{ clearingOrderDays ? '削除中...' : '発注日クリア' }}
+            </button>
+          </div>
+        </div>
         <div class="month-head">
           <button class="btn" @click="moveMonth(-1)" :disabled="!selectedCalendarId">前月へ</button>
           <div class="month-title">{{ monthTitle }}</div>
@@ -197,7 +221,6 @@
                     {{ day.day }}
                     <span v-if="day.inMonth && !day.record" class="unsaved-mark">未設定</span>
                   </div>
-                  <div v-if="day.inMonth && day.record?.is_delivery_day" class="delivery-badge">納入日</div>
                   <label v-if="day.inMonth" class="day-check delivery-toggle">
                     <input
                       type="checkbox"
@@ -206,6 +229,15 @@
                       @change="toggleDeliveryMarker(day)"
                     />
                     納入日
+                  </label>
+                  <label v-if="day.inMonth" class="day-check order-toggle">
+                    <input
+                      type="checkbox"
+                      :checked="Boolean(day.record?.is_order_day)"
+                      :disabled="savingOrderDateKey === day.date || !canEdit"
+                      @change="toggleOrderMarker(day)"
+                    />
+                    発注日
                   </label>
                   <label
                     v-if="day.inMonth"
@@ -221,7 +253,11 @@
                     {{ day.is_working_day ? '稼働' : '休み' }}
                   </label>
                 </div>
-                <div class="day-memo">
+                <div class="day-right">
+                  <div class="day-badges">
+                    <div v-if="day.inMonth && day.record?.is_delivery_day" class="delivery-badge">納入日</div>
+                    <div v-if="day.inMonth && day.record?.is_order_day" class="order-badge">発注日</div>
+                  </div>
                   <textarea
                     v-if="day.inMonth"
                     class="note-input"
@@ -292,6 +328,11 @@ const deliveryGenerateStartDate = ref('')
 const deliveryGenerateEndDate = ref('')
 const generatingDeliveryDays = ref(false)
 const clearingDeliveryDays = ref(false)
+const orderGenerateStartDate = ref('')
+const orderGenerateEndDate = ref('')
+const generatingOrderDays = ref(false)
+const clearingOrderDays = ref(false)
+const savingOrderDateKey = ref('')
 const savingAll = ref(false)
 const weekdayNames = ['日', '月', '火', '水', '木', '金', '土']
 const weekdayChecks = ref([false, false, false, false, false, false, false])
@@ -490,7 +531,6 @@ const loadSupplierSchedules = async () => {
   const res = await api.supplierOrderSchedules.list({
     page_size: 50,
     supplier: selectedSupplierId.value,
-    is_enabled: true,
   })
   supplierSchedules.value = res.data.results || res.data || []
 }
@@ -563,6 +603,8 @@ const moveMonth = async (delta) => {
   copyEndDate.value = ymd(end)
   deliveryGenerateStartDate.value = ymd(start)
   deliveryGenerateEndDate.value = ymd(end)
+  orderGenerateStartDate.value = ymd(start)
+  orderGenerateEndDate.value = ymd(end)
   await Promise.all([loadCalendarDays(), loadDaisoCalendarDays()])
 }
 
@@ -603,10 +645,10 @@ const filterWorkingDeliveryDates = (dates) =>
     .filter((dateStr) => isBusinessDayByDaiso(new Date(`${dateStr}T00:00:00`)))
     .sort()
 
-const generatePatternDatesInRange = () => {
+const generatePatternDatesInRange = (overrideRange = null) => {
   const schedule = selectedSupplierSchedule.value
   const pattern = selectedSchedulePattern.value
-  const range = getDeliveryGenerateRange()
+  const range = overrideRange || getDeliveryGenerateRange()
   if (!schedule || !pattern || !range) return []
 
   const results = []
@@ -687,6 +729,7 @@ const upsertCalendarDay = async (dateStr, updates = {}) => {
       target_date: dateStr,
       is_working_day: Boolean(row.is_working_day),
       is_delivery_day: Boolean(row.is_delivery_day),
+      is_order_day: Boolean(row.is_order_day),
       work_minutes: row.is_working_day ? (row.work_minutes ?? 480) : 0,
       work_pattern: row.work_pattern || null,
       note: row.note || null,
@@ -701,6 +744,7 @@ const upsertCalendarDay = async (dateStr, updates = {}) => {
     target_date: dateStr,
     is_working_day: working,
     is_delivery_day: false,
+    is_order_day: false,
     work_minutes: working ? 480 : 0,
     work_pattern: null,
     note: null,
@@ -823,6 +867,116 @@ const toggleDeliveryMarker = async (day) => {
     alert('納入日の変更に失敗しました。')
   } finally {
     savingDeliveryDateKey.value = ''
+  }
+}
+
+const toggleOrderMarker = async (day) => {
+  if (!canEdit.value) return
+  if (!day?.inMonth || !selectedCalendarId.value) return
+  savingOrderDateKey.value = day.date
+  try {
+    await upsertCalendarDay(day.date, { is_order_day: !Boolean(day.record?.is_order_day) })
+    await loadCalendarDays()
+  } catch (e) {
+    console.error('発注日変更エラー', e)
+    alert('発注日の変更に失敗しました。')
+  } finally {
+    savingOrderDateKey.value = ''
+  }
+}
+
+const getOrderGenerateRange = () => {
+  if (!orderGenerateStartDate.value || !orderGenerateEndDate.value) return null
+  if (orderGenerateStartDate.value > orderGenerateEndDate.value) return null
+  return {
+    start: new Date(`${orderGenerateStartDate.value}T00:00:00`),
+    end: new Date(`${orderGenerateEndDate.value}T00:00:00`),
+  }
+}
+
+const clearOrderDays = async () => {
+  const range = getOrderGenerateRange()
+  if (!selectedCalendarId.value || !range) {
+    alert('発注日クリア期間を確認してください。')
+    return
+  }
+  const targetRows = calendarDays.value.filter((row) =>
+    row.target_date >= orderGenerateStartDate.value &&
+    row.target_date <= orderGenerateEndDate.value &&
+    row.is_order_day,
+  )
+  if (!targetRows.length) {
+    alert('指定期間に生成済みの発注日はありません。')
+    return
+  }
+  if (!confirm('指定期間の発注日をクリアしますか？')) return
+
+  clearingOrderDays.value = true
+  try {
+    await Promise.all(targetRows.map((row) => upsertCalendarDay(row.target_date, { is_order_day: false })))
+    await loadCalendarDays()
+    alert('指定期間の発注日をクリアしました。')
+  } catch (e) {
+    console.error('発注日クリアエラー', e)
+    alert('発注日クリアに失敗しました。')
+  } finally {
+    clearingOrderDays.value = false
+  }
+}
+
+const generateOrderDays = async () => {
+  const range = getOrderGenerateRange()
+  if (!selectedCalendarId.value || !range) {
+    alert('発注日生成期間を確認してください。')
+    return
+  }
+  if (!selectedSchedulePattern.value) {
+    alert('この仕入れ先の納入パターンが未設定です。')
+    return
+  }
+  if (unsavedDayCount.value > 0) {
+    alert('カレンダが未保存です。先に「一括保存」でカレンダを保存してください。')
+    return
+  }
+
+  const savedDaisoDays = daisoCalendarDays.value
+  const pattern = selectedSchedulePattern.value
+  if (pattern.recurrence_type === 'EVERY_N_BUSINESS_DAYS') {
+    const refDateText = selectedSupplierSchedule.value?.start_date || pattern.start_date
+    if (refDateText) {
+      const res = await api.calendars.getCalendarDays(selectedCalendarId.value, {
+        page_size: 5000,
+        target_date__gte: refDateText,
+        target_date__lte: orderGenerateEndDate.value,
+      })
+      daisoCalendarDays.value = res.data.results || res.data || []
+    }
+  }
+  const orderDates = generatePatternDatesInRange(range)
+  daisoCalendarDays.value = savedDaisoDays
+
+  if (!orderDates.length) {
+    alert('指定期間に生成対象の発注日がありません。')
+    return
+  }
+  if (!confirm(`指定期間の発注日を ${orderDates.length} 件生成します。既存の発注日は更新されます。実行しますか？`)) return
+
+  generatingOrderDays.value = true
+  try {
+    const targetRows = calendarDays.value.filter((row) =>
+      row.target_date >= orderGenerateStartDate.value &&
+      row.target_date <= orderGenerateEndDate.value &&
+      row.is_order_day,
+    )
+    await Promise.all(targetRows.map((row) => upsertCalendarDay(row.target_date, { is_order_day: false })))
+    await Promise.all(orderDates.map((dateStr) => upsertCalendarDay(dateStr, { is_order_day: true })))
+    await loadCalendarDays()
+    alert(`指定期間の発注日を ${orderDates.length} 件生成しました。`)
+  } catch (e) {
+    console.error('発注日生成エラー', e)
+    alert('発注日生成に失敗しました。')
+  } finally {
+    generatingOrderDays.value = false
   }
 }
 
@@ -1092,6 +1246,8 @@ onMounted(async () => {
   copyEndDate.value = ymd(end)
   deliveryGenerateStartDate.value = ymd(start)
   deliveryGenerateEndDate.value = ymd(end)
+  orderGenerateStartDate.value = ymd(start)
+  orderGenerateEndDate.value = ymd(end)
   await loadDaisoCalendarDays()
 })
 </script>
@@ -1183,7 +1339,8 @@ onMounted(async () => {
   gap: 8px;
   margin-bottom: 8px;
 }
-.delivery-tools {
+.delivery-tools,
+.order-tools {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1247,7 +1404,7 @@ onMounted(async () => {
 }
 .calendar-table th,
 .calendar-table td {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #94a3b8;
   width: calc(100% / 7);
   vertical-align: top;
   padding: 0;
@@ -1267,31 +1424,54 @@ onMounted(async () => {
   width: 100%;
   min-height: 130px;
   cursor: default;
-  padding: 6px;
+  padding: 4px;
   display: grid;
-  grid-template-columns: 1fr 3fr;
-  gap: 8px;
-  align-items: stretch;
+  grid-template-columns: 70px 1fr;
+  gap: 2px;
+  align-items: start;
 }
 .day-main {
+  display: flex;
+  flex-direction: column;
   text-align: left;
+}
+.day-right {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.day-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .delivery-badge {
   display: inline-block;
   margin-top: 4px;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: #f59e0b;
   color: #fff;
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.order-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 14px;
   font-weight: 700;
 }
 .day-check {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  font-size: 12px;
+  gap: 2px;
+  margin-top: 2px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .day-check.holiday {
   color: #ff0000;
@@ -1302,19 +1482,14 @@ onMounted(async () => {
   font-weight: 700;
   line-height: 1;
 }
-.day-memo {
-  display: flex;
-  align-items: stretch;
-}
 .note-input {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
-  padding: 6px 8px;
-  height: 100%;
-  min-height: 118px;
-  font-size: 12px;
+  padding: 4px 6px;
+  min-height: 36px;
+  font-size: 11px;
   line-height: 1.2;
   resize: vertical;
 }

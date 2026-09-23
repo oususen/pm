@@ -121,6 +121,7 @@ class SupplierOrderScheduleSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source='supplier.supplier_name', read_only=True)
     pattern_code = serializers.CharField(source='pattern.pattern_code', read_only=True)
     pattern_name = serializers.CharField(source='pattern.pattern_name', read_only=True)
+    next_order_date = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierOrderSchedule
@@ -136,7 +137,29 @@ class SupplierOrderScheduleSerializer(serializers.ModelSerializer):
             'lead_time_days',
             'is_enabled',
             'note',
+            'next_order_date',
         ]
+
+    def get_next_order_date(self, obj):
+        from datetime import date
+        from django.apps import apps
+        CalendarDay = apps.get_model('masters', 'CalendarDay')
+        supplier = obj.supplier
+        if not supplier or not supplier.calendar_id:
+            return None
+        today = date.today()
+        nearest = (
+            CalendarDay.objects
+            .filter(
+                calendar_id=supplier.calendar_id,
+                is_order_day=True,
+                target_date__gte=today,
+            )
+            .order_by('target_date')
+            .values_list('target_date', flat=True)
+            .first()
+        )
+        return nearest
 
     def validate(self, attrs):
         pattern = attrs.get('pattern', getattr(self.instance, 'pattern', None))

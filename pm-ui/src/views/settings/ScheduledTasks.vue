@@ -1196,6 +1196,57 @@
           </tbody>
         </table>
       </div>
+
+      <div class="poc-section">
+        <h3 class="section-title">タスク割当先（業務員）</h3>
+        <p class="helper">承認ルート設定「外作・購入品注文」の作成者に指定されたユーザーにタスクが割り当てられます。</p>
+        <div v-if="pocApprovalRoute">
+          <div class="poc-users">
+            <span class="poc-label">作成者:</span>
+            <span v-if="pocApprovalRoute.creator_allowed_user_names && Object.keys(pocApprovalRoute.creator_allowed_user_names).length">
+              <span v-for="(name, id) in pocApprovalRoute.creator_allowed_user_names" :key="id" class="user-chip">{{ name }}</span>
+            </span>
+            <span v-else class="poc-note">ロール「{{ pocApprovalRoute.creator_role_label }}」のユーザー全員</span>
+          </div>
+          <div class="poc-users" style="margin-top: 4px">
+            <span class="poc-label">通知:</span>
+            <span class="poc-note">
+              アプリ通知 {{ pocApprovalRoute.creator_app_notification_enabled ? '有効' : '無効' }} /
+              メール通知 {{ pocApprovalRoute.creator_email_notification_enabled ? '有効' : '無効' }}
+            </span>
+          </div>
+          <RouterLink to="/settings/approval-routes" class="edit-link">承認ルート設定で変更</RouterLink>
+        </div>
+        <div v-else class="poc-note">承認ルート「外作・購入品注文」が未設定です。</div>
+      </div>
+
+      <div class="poc-section">
+        <h3 class="section-title">対象仕入先 <RouterLink to="/purchase/supplier-order-pattern" class="edit-link">編集</RouterLink></h3>
+        <table v-if="pocSchedules.length" class="info-table poc-table">
+          <thead>
+            <tr>
+              <th>仕入先</th>
+              <th>次発注日</th>
+              <th>LT(日)</th>
+              <th>有効</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in pocSchedules" :key="s.id">
+              <td>{{ s.supplier_code }} - {{ s.supplier_name }}</td>
+              <td>{{ s.next_order_date || '未設定' }}</td>
+              <td>{{ s.lead_time_days }}</td>
+              <td>
+                <label class="checkbox-label poc-toggle">
+                  <input type="checkbox" :checked="s.is_enabled" @change="toggleScheduleEnabled(s)" :disabled="!canEdit" />
+                  {{ s.is_enabled ? '有効' : '無効' }}
+                </label>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="poc-note">仕入先割当がありません。</div>
+      </div>
     </div>
 
     <div class="card" v-if="containerImportCleanupConfig">
@@ -1323,7 +1374,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
@@ -1428,6 +1479,8 @@ const safetyStockConfigs = computed(() =>
 )
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
 const purchaseOrderCheckConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'AUTO_PURCHASE_ORDER_CHECK'))
+const pocSchedules = ref([])
+const pocApprovalRoute = ref(null)
 const containerImportCleanupConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'CONTAINER_IMPORT_TMP_CLEANUP'))
 const planToActualConfigs = computed(() => {
   const persisted = configs.value.filter((cfg) => cfg.task_name === 'PLAN_TO_ACTUAL_COPY')
@@ -1611,6 +1664,38 @@ const loadUsers = async () => {
   }
 }
 
+const loadPurchaseOrderCheckDetails = async () => {
+  if (!showPurchaseOrderCheckSection.value) return
+  try {
+    const [schedRes, routeRes] = await Promise.all([
+      api.supplierOrderSchedules.list(),
+      api.accounts.getApprovalRoutes({ search: 'purchase_order_proposal' }),
+    ])
+    pocSchedules.value = schedRes.data || []
+    const routes = routeRes.data?.results || routeRes.data || []
+    pocApprovalRoute.value = routes.find((r) => r.item_key === 'purchase_order_proposal') || null
+  } catch (e) {
+    console.error('発注チェック詳細の取得に失敗', e)
+  }
+}
+
+const toggleScheduleEnabled = async (schedule) => {
+  const newVal = !schedule.is_enabled
+  try {
+    await api.supplierOrderSchedules.update(schedule.id, {
+      supplier: schedule.supplier || schedule.supplier_id,
+      pattern: schedule.pattern || schedule.pattern_id,
+      start_date: schedule.start_date || null,
+      lead_time_days: schedule.lead_time_days,
+      is_enabled: newVal,
+      note: schedule.note || '',
+    })
+    schedule.is_enabled = newVal
+  } catch (e) {
+    alert('更新に失敗しました')
+  }
+}
+
 const loadLineProcessMasters = async () => {
   try {
     const [lineRes, processRes] = await Promise.all([
@@ -1750,6 +1835,8 @@ const runNow = async (cfg) => {
       ? `生産計画自動生成（${cfg.line_name || cfg.line_code || 'ライン未設定'}）`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開'
+        : cfg.task_name === 'AUTO_PURCHASE_ORDER_CHECK'
+          ? '外作・購入品注文書 自動タスク生成'
         : isSafetyStockTask(cfg.task_name)
           ? safetyStockTaskLabel(cfg.task_name)
         : inventoryTaskLabel(cfg.task_name)
@@ -1758,6 +1845,8 @@ const runNow = async (cfg) => {
       ? `${targetName}を今すぐ実行しますか？`
       : cfg.task_name === 'ORDER_EXPANSION'
         ? '自動受注展開を今すぐ実行しますか？'
+        : cfg.task_name === 'AUTO_PURCHASE_ORDER_CHECK'
+          ? '外作・購入品注文書 自動タスク生成を今すぐ実行しますか？\n発注タイミングに該当する仕入先の注文書とタスクを生成します。'
         : cfg.task_name === purchaseActualReconcileTaskName
           ? '納入実績整合チェック（比較のみ）を今すぐ実行しますか？\n差分があればレポートへ保存され、通知設定がある場合は通知します。'
         : cfg.task_name === productionActualReconcileTaskName
@@ -2048,6 +2137,7 @@ onMounted(async () => {
   await loadReconcileReport()
   await loadProductionReconcileReport()
   loadUsers()
+  loadPurchaseOrderCheckDetails()
   startPollingIfRunning()
 })
 
@@ -2417,5 +2507,55 @@ onUnmounted(() => {
   padding: 6px 8px;
   border-bottom: 1px solid #eee;
   vertical-align: top;
+}
+.poc-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+.poc-users {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.poc-label {
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 50px;
+}
+.poc-note {
+  color: #6b7280;
+  font-size: 13px;
+}
+.user-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #e0e7ff;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #3730a3;
+}
+.poc-table {
+  margin-top: 8px;
+}
+.poc-table th {
+  background: #f3f4f6;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.poc-table td {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.edit-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: none;
+}
+.edit-link:hover {
+  text-decoration: underline;
 }
 </style>
