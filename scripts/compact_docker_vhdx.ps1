@@ -44,12 +44,12 @@ if (-not (Test-Path $vhdxPath)) {
 # 圧縮前サイズ確認
 $sizeBefore = Get-FileSizeGB -Path $vhdxPath
 $freeBefore = Get-FreeSpaceGB -Drive "C"
-Write-Host "[1/4] 圧縮前サイズ確認" -ForegroundColor Cyan
+Write-Host "[1/5] 圧縮前サイズ確認" -ForegroundColor Cyan
 Write-Host "  VHDX:    $sizeBefore GB"
 Write-Host "  C: 空き: $freeBefore GB"
 
 # Docker Desktop 停止
-Write-Host "`n[2/4] Docker Desktop を停止" -ForegroundColor Cyan
+Write-Host "`n[2/5] Docker Desktop を停止" -ForegroundColor Cyan
 $dockerProc = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
 if ($dockerProc) {
     if ($WhatIfMode) {
@@ -63,8 +63,17 @@ if ($dockerProc) {
     Write-Host "  すでに停止しています"
 }
 
+# TRIM実行（WSL2のext4上の削除済みブロックをVHDXへ未使用として通知）
+Write-Host "`n[3/5] TRIM実行（docker-desktop）" -ForegroundColor Cyan
+if ($WhatIfMode) {
+    Write-Host "  [WhatIf] wsl -d docker-desktop -e /sbin/fstrim -av"
+} else {
+    wsl -d docker-desktop -e /sbin/fstrim -av
+    Write-Host "  TRIM完了"
+}
+
 # WSL2 シャットダウン
-Write-Host "`n[3/4] WSL2 シャットダウン" -ForegroundColor Cyan
+Write-Host "`n[4/5] WSL2 シャットダウン" -ForegroundColor Cyan
 if ($WhatIfMode) {
     Write-Host "  [WhatIf] wsl --shutdown"
 } else {
@@ -74,7 +83,7 @@ if ($WhatIfMode) {
 }
 
 # VHDX 圧縮
-Write-Host "`n[4/4] VHDX 圧縮（数分〜20分かかる場合があります）" -ForegroundColor Cyan
+Write-Host "`n[5/5] VHDX 圧縮（数分〜20分かかる場合があります）" -ForegroundColor Cyan
 $diskpartCommands = @"
 select vdisk file="$vhdxPath"
 attach vdisk readonly

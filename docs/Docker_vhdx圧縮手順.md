@@ -52,9 +52,10 @@ cd C:\PST\pm
 スクリプトが自動で行う内容：
 
 1. Docker Desktop を強制停止
-2. `wsl --shutdown` でWSL2をシャットダウン
-3. `diskpart` で vhdx を圧縮（数分〜20分）
-4. 圧縮前後のvhdxサイズ・C:空き容量を表示
+2. `wsl -d docker-desktop -e /sbin/fstrim -av` でWSL2内の削除済みブロックをTRIM
+3. `wsl --shutdown` でWSL2をシャットダウン
+4. `diskpart` で vhdx を圧縮（数分〜20分）
+5. 圧縮前後のvhdxサイズ・C:空き容量を表示
 
 ### 3. 復旧確認
 
@@ -74,12 +75,22 @@ cd C:\PST\kaizen_pp; docker-compose up -d
 cd C:\PST\ts_pm_all_v2; docker-compose up -d
 ```
 
-## 実績（2026-08-25実施）
+## 実績
 
-| 項目 | 圧縮前 | 圧縮後 |
-|---|---|---|
-| VHDXサイズ | 62.68 GB | 53.25 GB |
-| C:空き容量 | 13.85 GB | 29.65 GB |
+| 実施日 | VHDXサイズ（圧縮前→後） | C:空き容量（圧縮前→後） | 備考 |
+|---|---|---|---|
+| 2026-08-25 | 62.68 GB → 53.25 GB | 13.85 GB → 29.65 GB | |
+| 2026-09-23 | 47.06 GB → 46.92 GB | 20.77 GB → 20.94 GB | fstrim未実施。`docker builder prune -f`で8.5GB回収後も圧縮効果ほぼなし → 原因調査の結果、TRIM未実施と判明し手順にfstrimを追加 |
+
+## トラブルシューティング：圧縮してもC:空き容量がほとんど増えない
+
+**原因:** WSL2のext4ファイルシステムはファイル削除時に領域を「空き」とマークするだけで、VHDXの物理ブロックには「未使用」であることを通知（TRIM/discard）しない。`diskpart compact vdisk` はTRIM済み（ゼロ埋め）のブロックしか圧縮対象にできないため、TRIMを行わずに圧縮しても効果が出ない。
+
+**対処:** `wsl --shutdown` の前に、docker-desktopディストロ内で `fstrim` を実行する（本スクリプトの[3/5]で自動実行済み）。手動で確認する場合：
+
+```powershell
+wsl -d docker-desktop -e /sbin/fstrim -av
+```
 
 ## トラブルシューティング：スクリプト実行時の構文エラー
 
