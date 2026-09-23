@@ -1130,18 +1130,20 @@ def _compute_planned_stock_lt_adjustment(
     return int(total_adjustment)
 
 
-def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_shipping_cache=None, preloaded=None):
+def _calculate_parent_actual_or_plan_shipment(
+    backlog, business_today, shift_fn=None, floor_shipping_cache=None, preloaded=None,
+):
     """
-    計画在庫用の出庫計算（実績優先、なければ計画を使用）+ 仕損
+    計画在庫用の出庫計算（実績ベース）+ 仕損
 
-    LTシフト後の親製品の日付で：
-    - 実績がある場合 → 実績 + 仕損（全て）を使用
-    - 実績がない場合 → 計画数を使用
-    - どちらもない場合 → 0
+    親製品ごとに、LTシフト後の親参照日で時制を判定する。
+    - 親参照日が過去: 実績 + 仕損を使用。実績・仕損がない場合は0
+    - 親参照日が今日以降: 計画 + 仕損を使用
     - 親参照自体がない場合 → None
 
     Args:
         backlog: LineBacklogインスタンス
+        business_today: 業務日付（親参照日の時制判定に使用）
         shift_fn: LTシフト関数（営業日ベースで日付をシフト）
         floor_shipping_cache: フロア配送ライン判定キャッシュ
         preloaded: プリロード済みデータ辞書（None時は従来どおりDB取得）
@@ -1214,10 +1216,12 @@ def _calculate_parent_actual_or_plan_shipment(backlog, shift_fn=None, floor_ship
                 downstream['plan_date'],
                 preloaded=preloaded,
             )
-            if actual > 0 or scrap > 0:
-                use_qty = Decimal(str(actual)) + scrap
+            if parent_date < business_today:
+                # 過去の親参照日は実績のみ。未実施計画を出庫にしない。
+                use_qty = Decimal(str(actual)) + scrap if actual > 0 or scrap > 0 else Decimal('0')
             else:
-                use_qty = Decimal(str(plan))
+                # 今日以降の親参照日は計画を使用する。
+                use_qty = Decimal(str(plan)) + scrap
             if use_qty:
                 total_shipment += Decimal(str(use_qty)) * Decimal(str(qty_per))
 
@@ -1934,14 +1938,18 @@ def recalculate_planned_stock_qty(
             if forced_parent_shipment_mode == 'ORDER_QTY':
                 planned_shipment = Decimal(str(order_total))
             elif plan_date < business_today:
-                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache, preloaded=preloaded)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(
+                    sample, business_today, shift_working_days, floor_shipping_cache, preloaded=preloaded,
+                )
             else:
                 planned_shipment = Decimal(str(order_total))
         else:
             if forced_parent_shipment_mode == 'ORDER_QTY':
                 planned_shipment = Decimal(str(order_total))
             elif plan_date < business_today:
-                planned_shipment = _calculate_parent_actual_or_plan_shipment(sample, shift_working_days, floor_shipping_cache, preloaded=preloaded)
+                planned_shipment = _calculate_parent_actual_or_plan_shipment(
+                    sample, business_today, shift_working_days, floor_shipping_cache, preloaded=preloaded,
+                )
             else:
                 planned_shipment = _calculate_parent_planned_shipment(sample, business_today, shift_working_days, floor_shipping_cache, preloaded=preloaded)
         planned_shipment = int(planned_shipment or 0)
