@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>発注業務 作業手順書</title>
+<style>
+  :root { --bg:#f6f7fa; --card:#fff; --ink:#1a2233; --ink2:#4b5a72; --accent:#1565c0; --accent-light:#e3effa; --teal:#00796b; --teal-light:#e0f2f1; --success:#2e7d32; --success-light:#e6f4ea; --warn:#e65100; --warn-light:#fff3e0; --danger:#c62828; --danger-light:#fce4e4; --border:#d4dae4; --grid:#eaf0f7; --shadow:0 2px 12px rgba(20,40,80,.08); --radius:10px; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12161e; --card:#1c2230; --ink:#e2e6ee; --ink2:#aab5c8; --accent:#5ca0e8; --accent-light:#1c3050; --teal:#4db6ac; --teal-light:#153831; --success:#66bb6a; --success-light:#1a3020; --warn:#ff9800; --warn-light:#2e2010; --danger:#ef5350; --danger-light:#3a1a1a; --border:#2e3648; --grid:#222c3c; --shadow:0 2px 16px rgba(0,0,0,.3); } }
+  * { box-sizing:border-box; } body { margin:0; font-family:"Yu Gothic Medium","Hiragino Kaku Gothic ProN",Meiryo,sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; }
+  .page { max-width:960px; margin:0 auto; padding:40px 24px 80px; } .card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:24px; }
+  .cover { padding:44px 40px 36px; border-left:5px solid var(--teal); } h1 { font-size:28px; margin:0 0 6px; } .subtitle { color:var(--ink2); margin-bottom:20px; } .path { display:inline-block; padding:5px 14px; border-radius:6px; color:var(--accent); background:var(--accent-light); font-size:13px; font-weight:bold; }
+  .toc { padding:22px 30px; } h2 { font-size:20px; margin:0 0 16px; } .toc h2 { font-size:15px; color:var(--ink2); } .toc-list { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:8px 20px; } .toc-list li { display:flex; align-items:center; gap:8px; font-size:14px; } .num { width:25px; height:25px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:#fff; background:var(--teal); font-size:12px; font-weight:bold; flex:none; }
+  .overview { padding:28px 32px; } .badge { font-size:11px; padding:2px 10px; border-radius:4px; color:#fff; background:var(--teal); vertical-align:middle; }
+  .step { padding:30px 34px 26px; } .step-head { display:flex; align-items:center; gap:14px; margin-bottom:14px; } .step-no { width:38px; height:38px; flex:none; display:flex; align-items:center; justify-content:center; border-radius:50%; background:var(--teal); color:#fff; font-size:18px; font-weight:bold; } .step h2 { margin:0; } .desc { margin:0 0 14px; color:var(--ink2); font-size:14px; }
+  .flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; margin:18px 0; } .flow span { padding:7px 12px; border:1px solid var(--border); border-radius:7px; background:var(--grid); font-size:13px; font-weight:bold; } .flow i { color:var(--ink2); font-style:normal; font-size:20px; }
+  .callout { display:flex; gap:10px; margin-top:14px; padding:11px 14px; border-radius:6px; font-size:13px; } .info { background:var(--accent-light); color:var(--accent); } .ok { background:var(--success-light); color:var(--success); } .warn { background:var(--warn-light); color:var(--warn); } .danger { background:var(--danger-light); color:var(--danger); }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:12px; } th,td { padding:8px 10px; border:1px solid var(--border); text-align:left; } th { background:var(--grid); color:var(--ink2); }
+  .operation { padding:18px; border:1px solid var(--border); border-radius:8px; background:var(--grid); } .operation ol { margin:0; padding-left:22px; } .operation li { margin:5px 0; }
+  .anno-list { list-style:none; padding:0; margin:0; display:grid; gap:10px; } .anno-list li { display:flex; gap:10px; font-size:14px; } .anno { width:24px; height:24px; flex:none; display:inline-flex; align-items:center; justify-content:center; border:2px solid var(--danger); border-radius:50%; color:var(--danger); font-size:13px; font-weight:bold; }
+  .status-flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:6px; margin:18px 0; } .status-flow span { padding:6px 10px; border-radius:6px; font-size:12px; font-weight:bold; } .sf-draft { background:#e0e7ff; color:#3730a3; } .sf-signed { background:#dbeafe; color:#1d4ed8; } .sf-l2 { background:#d1fae5; color:#065f46; } .sf-l3 { background:#a7f3d0; color:#047857; } .sf-approved { background:#bbf7d0; color:#15803d; } .sf-sent { background:#f0fdf4; color:#166534; border:1px solid #86efac; } .sf-arrow { color:var(--ink2); font-size:16px; }
+  @media (max-width:600px) { .page { padding:20px 12px 60px; } .cover,.overview,.step { padding:24px 18px 20px; } .toc { padding:20px; } .toc-list { grid-template-columns:1fr; } h1 { font-size:22px; } .flow { flex-direction:column; } .flow i { transform:rotate(90deg); } .status-flow { flex-direction:column; } .status-flow .sf-arrow { transform:rotate(90deg); } }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <section class="card cover">
+    <h1>発注業務 作業手順書</h1>
+    <div class="subtitle">外作・購入品の注文書を作成し、承認を経て購入先へ送信するまでの手順です。</div>
+    <div class="path">仕入 <span>&#9654;</span> 仕入れ管理メニュー <span>&#9654;</span> 発注業務</div>
+  </section>
+
+  <section class="card toc">
+    <h2>手順の流れ</h2>
+    <ul class="toc-list">
+      <li><span class="num">1</span>注文書を作成する</li>
+      <li><span class="num">2</span>明細を入力する</li>
+      <li><span class="num">3</span>業務員サインをする</li>
+      <li><span class="num">4</span>承認する（班長・係長・部長）</li>
+      <li><span class="num">5</span>注文書PDFを作成する</li>
+      <li><span class="num">6</span>購入先へ送信する</li>
+      <li><span class="num">!</span>差戻・キャンセルの対応</li>
+    </ul>
+  </section>
+
+  <section class="card overview">
+    <h2>承認フロー <span class="badge">全体像</span></h2>
+    <div class="status-flow">
+      <span class="sf-draft">作成中</span><span class="sf-arrow">&#8594;</span>
+      <span class="sf-signed">業務員サイン</span><span class="sf-arrow">&#8594;</span>
+      <span class="sf-l2">班長承認</span><span class="sf-arrow">&#8594;</span>
+      <span class="sf-l3">係長承認</span><span class="sf-arrow">&#8594;</span>
+      <span class="sf-approved">部長承認</span><span class="sf-arrow">&#8594;</span>
+      <span class="sf-sent">購入先送信</span>
+    </div>
+    <table>
+      <thead><tr><th>ステップ</th><th>担当</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>1. 注文書作成</td><td>業務員</td><td>仕入先を選び、明細（品番・数量）を入力</td></tr>
+        <tr><td>2. 業務員サイン</td><td>業務員</td><td>内容を確定し承認フローを開始</td></tr>
+        <tr><td>3. 班長承認</td><td>班長</td><td>タスク通知を受け、承認 or 差戻</td></tr>
+        <tr><td>4. 係長承認</td><td>係長</td><td>タスク通知を受け、承認 or 差戻</td></tr>
+        <tr><td>5. 部長承認</td><td>事業部長</td><td>最終承認（代理承認者も可）</td></tr>
+        <tr><td>6. 注文書作成</td><td>業務員</td><td>注文書PDFを作成</td></tr>
+        <tr><td>7. 購入先送信</td><td>業務員</td><td>PDF添付メールを購入先へ送信</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">1</span><h2>注文書を作成する</h2></div>
+    <p class="desc">仕入れ管理メニューから発注業務を開き、新規作成します。</p>
+    <div class="flow"><span>仕入</span><i>&#8594;</i><span>仕入れ管理メニュー</span><i>&#8594;</i><span>発注業務</span><i>&#8594;</i><span>新規作成</span></div>
+    <div class="operation">
+      <ol>
+        <li>「新規作成」ボタンを押します。</li>
+        <li>仕入先を選択します（必須）。</li>
+        <li>発注日を確認します（初期値は当日）。</li>
+        <li>希望納入日を入力します（任意）。</li>
+        <li>備考があれば入力します。</li>
+        <li>「作成」を押すと詳細画面に遷移します。</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">2</span><h2>明細を入力する</h2></div>
+    <p class="desc">品番と発注数量を入力します。自動提案を使うと不足品を自動で提案できます。</p>
+
+    <h2 style="font-size:16px; margin-top:18px;">自動提案（推奨）</h2>
+    <div class="operation">
+      <ol>
+        <li>「次回納入日」を入力します（自動提案の基準日）。</li>
+        <li>提案ボタンを押します。</li>
+      </ol>
+    </div>
+    <table>
+      <thead><tr><th>ボタン</th><th>基準</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td>進度から提案</td><td>進度</td><td>顧客需要に対する進度の遅れから不足品を算出</td></tr>
+        <tr><td>計画進度から提案</td><td>計画進度</td><td>計画進度ベースで不足品を算出</td></tr>
+        <tr><td>計画在庫から提案</td><td>計画在庫</td><td>安全在庫を下回る品目を算出</td></tr>
+      </tbody>
+    </table>
+    <div class="callout info"><span>&#8505;</span><span>自動提案は在庫・進度を最新に再計算してから実行されます。提案結果は手動で修正できます。</span></div>
+
+    <h2 style="font-size:16px; margin-top:18px;">手動入力</h2>
+    <div class="operation">
+      <ol>
+        <li>「行追加」ボタンで明細行を追加します。</li>
+        <li>品番・購買ラインを選択します。</li>
+        <li>発注数を入力します。</li>
+        <li>「保存」を押して下書き保存します。</li>
+      </ol>
+    </div>
+    <div class="callout warn"><span>&#9888;</span><span>「次回納入日」が未入力だと自動提案ボタンは押せません。先に次回納入日を入力してください。</span></div>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">3</span><h2>業務員サインをする</h2></div>
+    <p class="desc">明細の内容が確定したら業務員サインを行い、承認フローを開始します。</p>
+    <div class="operation">
+      <ol>
+        <li>明細の内容を最終確認します。</li>
+        <li>「業務員サイン」ボタンを押します。</li>
+        <li>班長に承認タスクが自動通知されます。</li>
+      </ol>
+    </div>
+    <div class="callout warn"><span>&#9888;</span><span>サイン後は明細の編集ができなくなります。修正が必要な場合は差戻してもらう必要があります。</span></div>
+    <div class="callout info"><span>&#8505;</span><span>明細が1件もない状態ではサインできません。</span></div>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">4</span><h2>承認する（班長・係長・部長）</h2></div>
+    <p class="desc">自分のタスクに承認待ちが届いたら、内容を確認して承認します。</p>
+    <div class="operation">
+      <ol>
+        <li>タスク受信箱またはメール通知から対象の注文書を開きます。</li>
+        <li>明細と承認履歴を確認します。</li>
+        <li>問題なければ「承認」ボタンを押します。</li>
+        <li>承認コメントを入力して確定します（任意）。</li>
+        <li>次のレベルの承認者に自動通知されます。</li>
+      </ol>
+    </div>
+    <div class="callout danger"><span>!</span><span>問題がある場合は「差戻」ボタンを押し、差戻理由を入力してください（必須）。作成者に差戻通知が届きます。</span></div>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">5</span><h2>注文書PDFを作成する</h2></div>
+    <p class="desc">最終承認後、正式な注文書PDFを作成します。</p>
+    <div class="operation">
+      <ol>
+        <li>ステータスが「最終承認済」の注文書を開きます。</li>
+        <li>「注文書作成」ボタンを押します。</li>
+        <li>PDFが新しいタブで表示されます（ポップアップ不可時はダウンロード）。</li>
+        <li>内容を確認します。</li>
+      </ol>
+    </div>
+    <div class="callout info"><span>&#8505;</span><span>承認前でも「注文書プレビュー」ボタンでPDFを確認できます。押印欄は正式版のみ表示されます。</span></div>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">6</span><h2>購入先へ送信する</h2></div>
+    <p class="desc">注文書PDFを添付したメールを購入先に送信します。</p>
+    <div class="operation">
+      <ol>
+        <li>「購入先へ送信」ボタンを押します。</li>
+        <li>送信ダイアログで宛先・件名・本文を確認します。</li>
+        <li>必要に応じて内容を編集します。</li>
+        <li>「送信」を押します。</li>
+        <li>送信完了後、ステータスが「送信済」に変わります。</li>
+      </ol>
+    </div>
+    <table>
+      <thead><tr><th>項目</th><th>初期値</th><th>編集</th></tr></thead>
+      <tbody>
+        <tr><td>宛先</td><td>仕入先マスタの注文書メールアドレス</td><td>可</td></tr>
+        <tr><td>CC</td><td>注文書メール設定で登録済みの社内担当者</td><td>不可（読み取り専用）</td></tr>
+        <tr><td>件名</td><td>【発注書】注文書番号 仕入先名</td><td>可</td></tr>
+        <tr><td>本文</td><td>テンプレートから自動生成</td><td>可</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><span>&#9888;</span><span>仕入先マスタに送信メールアドレスが設定されていない場合、送信ボタンを押すとエラーになります。マスタ管理で事前に設定してください。</span></div>
+  </section>
+
+  <section class="card step">
+    <div class="step-head"><span class="step-no">!</span><h2>差戻・キャンセルの対応</h2></div>
+
+    <h2 style="font-size:16px; margin-top:4px;">差戻された場合（業務員）</h2>
+    <div class="operation">
+      <ol>
+        <li>注文書一覧で「差戻」ステータスの注文書を開きます。</li>
+        <li>承認履歴のコメントで差戻理由を確認します。</li>
+        <li>明細を修正して「保存」します。</li>
+        <li>「業務員サイン」で再提出します。</li>
+      </ol>
+    </div>
+
+    <h2 style="font-size:16px; margin-top:18px;">キャンセルする場合（部長・代理承認者のみ）</h2>
+    <div class="operation">
+      <ol>
+        <li>ステータスが「最終承認済」の注文書を開きます。</li>
+        <li>「キャンセル」ボタンを押します。</li>
+        <li>キャンセル理由を入力します（任意）。</li>
+        <li>ステータスが「キャンセル」に変わります。</li>
+      </ol>
+    </div>
+    <div class="callout danger"><span>!</span><span>キャンセルは元に戻せません。管理者のみ「管理者リセット」でステータスを作成中に戻すことができます。</span></div>
+  </section>
+
+</main>
+</body>
+</html>

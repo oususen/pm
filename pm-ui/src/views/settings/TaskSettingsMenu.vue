@@ -61,6 +61,12 @@ const allTiles = [
     desc: '社内品・購入品ごとの自動安全在庫タスクを設定します。',
     resource: 'settings.scheduled_tasks',
   },
+  {
+    to: { path: '/settings/scheduled-tasks', query: { mode: 'purchase-order-check' } },
+    title: '発注タイミング日次チェック',
+    desc: '発注スケジュールに該当する仕入先の注文書・タスクを毎日自動生成します。',
+    resource: 'settings.scheduled_tasks',
+  },
 ]
 
 const tiles = computed(() => allTiles.filter((tile) => canAccessTile(tile)))

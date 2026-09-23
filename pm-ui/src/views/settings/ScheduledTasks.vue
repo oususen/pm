@@ -1109,6 +1109,95 @@
       </div>
     </div>
 
+    <div class="card" v-if="purchaseOrderCheckConfig && showPurchaseOrderCheckSection">
+      <div class="field">
+        <label>発注タイミング日次チェック - 実行時刻</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="0"
+            max="23"
+            v-model.number="purchaseOrderCheckConfig.scheduled_hour"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">時</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            v-model.number="purchaseOrderCheckConfig.scheduled_minute"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">分</span>
+        </div>
+        <p class="helper">毎日指定した時刻に発注スケジュールを確認し、該当する仕入先の注文書・タスクを自動生成します。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="purchaseOrderCheckConfig.is_enabled" :disabled="!canEdit" />
+          有効
+        </label>
+      </div>
+
+      <div class="actions">
+        <button
+          class="btn primary"
+          @click="saveConfig(purchaseOrderCheckConfig)"
+          :disabled="saving.has(configKey(purchaseOrderCheckConfig)) || !canEdit"
+        >
+          {{ saving.has(configKey(purchaseOrderCheckConfig)) ? '保存中...' : '保存' }}
+        </button>
+        <button
+          class="btn"
+          @click="runNow(purchaseOrderCheckConfig)"
+          :disabled="isRunNowDisabled(purchaseOrderCheckConfig)"
+          style="margin-left: 8px"
+        >
+          {{ runNowLabel(purchaseOrderCheckConfig) }}
+        </button>
+        <button
+          v-if="isStaleRunning(purchaseOrderCheckConfig)"
+          class="btn cancel"
+          @click="resetStatus(purchaseOrderCheckConfig)"
+          :disabled="resetting.has(configKey(purchaseOrderCheckConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(purchaseOrderCheckConfig)) ? 'リセット中...' : '状態リセット' }}
+        </button>
+      </div>
+
+      <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
+
+      <div v-if="purchaseOrderCheckConfig.last_run_at" class="last-run">
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(purchaseOrderCheckConfig, '発注タイミング日次チェック')">履歴</button></h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>実行日時</th>
+              <td>{{ formatDateTime(purchaseOrderCheckConfig.last_run_at) }}</td>
+            </tr>
+            <tr>
+              <th>結果</th>
+              <td>
+                <span :class="statusClass(purchaseOrderCheckConfig)">{{ purchaseOrderCheckConfig.last_run_status_display || '-' }}</span>
+              </td>
+            </tr>
+            <tr>
+              <th>実行時間</th>
+              <td>{{ purchaseOrderCheckConfig.last_run_duration_seconds != null ? purchaseOrderCheckConfig.last_run_duration_seconds + '秒' : '-' }}</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ purchaseOrderCheckConfig.last_run_message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="card" v-if="containerImportCleanupConfig">
       <div class="field">
         <label>荷姿設定Excel取込 - 一時ファイル削除 実行時刻</label>
@@ -1338,6 +1427,7 @@ const safetyStockConfigs = computed(() =>
     .sort((a, b) => safetyStockTaskOrder.indexOf(a.task_name) - safetyStockTaskOrder.indexOf(b.task_name))
 )
 const orderExpansionConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'ORDER_EXPANSION'))
+const purchaseOrderCheckConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'AUTO_PURCHASE_ORDER_CHECK'))
 const containerImportCleanupConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'CONTAINER_IMPORT_TMP_CLEANUP'))
 const planToActualConfigs = computed(() => {
   const persisted = configs.value.filter((cfg) => cfg.task_name === 'PLAN_TO_ACTUAL_COPY')
@@ -1370,6 +1460,10 @@ const showSafetyStockSection = computed(() => {
 const showOrderExpansionSection = computed(() => {
   const mode = String(route.query?.mode || '').toLowerCase()
   return mode === '' || mode === 'order-expansion'
+})
+const showPurchaseOrderCheckSection = computed(() => {
+  const mode = String(route.query?.mode || '').toLowerCase()
+  return mode === '' || mode === 'purchase-order-check'
 })
 const autoPlanLocked = computed(() =>
   autoPlanConfigs.value.some((cfg) => cfg.auto_plan_sequence_locked)

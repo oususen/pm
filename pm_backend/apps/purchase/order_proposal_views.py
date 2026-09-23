@@ -2422,3 +2422,49 @@ class PurchaseOrderTaskListView(APIView):
 
         serializer = PurchaseOrderTaskSerializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class PurchaseOrderProposalDeliveryNotePdfView(APIView):
+    """注文書詳細から外作納品書PDFを生成"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk: int):
+        from .tasks_auto_delivery_list import _generate_delivery_note_pdf
+
+        proposal = (
+            PurchaseOrderProposal.objects.select_related('supplier')
+            .prefetch_related('lines__product')
+            .filter(pk=pk)
+            .first()
+        )
+        if not proposal:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        items = []
+        for line in proposal.lines.select_related('product').all():
+            product = line.product
+            if not product:
+                continue
+            delivery_date = line.next_delivery_date or proposal.next_delivery_date or proposal.desired_delivery_date
+            if not delivery_date:
+                continue
+            items.append({
+                'product_code': product.product_code or '',
+                'product_name': product.product_name or '',
+                'expected_qty': int(line.order_qty or 0),
+                'delivery_date': delivery_date,
+            })
+
+        if not items:
+            return Response({'detail': '納品書に出力する明細がありません'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supplier = proposal.supplier
+        representative_date = items[0]['delivery_date']
+        pdf_buffer = _generate_delivery_note_pdf(items, representative_date, supplier)
+
+        s_code = supplier.supplier_code or ''
+        filename = f'外作納品書_{s_code}_{representative_date}.pdf'
+        quoted = quote(filename)
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quoted}"
+        return response

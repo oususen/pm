@@ -96,6 +96,7 @@
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
         <button class="btn-danger" v-if="canCancel" @click="cancelProposal">キャンセル</button>
         <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">{{ orderPdfButtonLabel }}</button>
+        <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadDeliveryNotePdf">納品書作成</button>
         <button
           class="btn-success"
           v-if="canShowSendButton"
@@ -714,6 +715,29 @@ const downloadOrderPdf = () => withProcessing('PDF作成中...', async () => {
 
     await fetchDetail()
   }
+})
+
+const downloadDeliveryNotePdf = () => withProcessing('納品書作成中...', async () => {
+  const response = await api.purchaseOrderProposals.downloadDeliveryNotePdf(proposalId)
+  const blob = new Blob([response.data], { type: 'application/pdf' })
+  const contentDisposition = response.headers?.['content-disposition'] || ''
+  let filename = '外作納品書.pdf'
+  if (contentDisposition) {
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''(.+)/i)
+    if (utf8Match) filename = decodeURIComponent(utf8Match[1])
+  }
+  const url = window.URL.createObjectURL(blob)
+  const opened = window.open(url, '_blank')
+  if (!opened) {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    alert('PDFをダウンロードしました（ポップアップを許可すると画面表示できます）')
+  }
+  window.setTimeout(() => { window.URL.revokeObjectURL(url) }, 60000)
 })
 
 const buildDefaultSendSubject = () => {
