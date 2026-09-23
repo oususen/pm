@@ -599,7 +599,9 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
     reviewer2_role_label = serializers.CharField(source='get_reviewer2_role_display', read_only=True)
     approver_role_label = serializers.CharField(source='get_approver_role_display', read_only=True)
     creator_department_name = serializers.CharField(source='creator_department.name', read_only=True, default=None)
+    creator_department_level = serializers.CharField(source='creator_department.level', read_only=True, default=None)
     creator_allowed_user_names = serializers.SerializerMethodField()
+    creator_authorized_user_names = serializers.SerializerMethodField()
     creator_proxy_user_names = serializers.SerializerMethodField()
     reviewer1_department_name = serializers.CharField(source='reviewer1_department.name', read_only=True, default=None)
     reviewer1_allowed_user_names = serializers.SerializerMethodField()
@@ -621,11 +623,14 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
             'creator_role_label',
             'creator_department',
             'creator_department_name',
+            'creator_department_level',
             'creator_task_enabled',
             'creator_app_notification_enabled',
             'creator_email_notification_enabled',
             'creator_allowed_users',
             'creator_allowed_user_names',
+            'creator_authorized_users',
+            'creator_authorized_user_names',
             'creator_proxy_users',
             'creator_proxy_user_names',
             'reviewer1_role',
@@ -693,6 +698,9 @@ class ApprovalRouteConfigSerializer(serializers.ModelSerializer):
 
     def get_creator_allowed_user_names(self, obj):
         return self._get_user_names(obj.creator_allowed_users)
+
+    def get_creator_authorized_user_names(self, obj):
+        return self._get_user_names(obj.creator_authorized_users)
 
     def get_creator_proxy_user_names(self, obj):
         return self._get_user_names(obj.creator_proxy_users)

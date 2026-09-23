@@ -5,7 +5,7 @@
       <div class="page-actions">
         <RouterLink v-if="authState.user?.is_staff || authState.user?.is_superuser" :to="{ path: '/settings/scheduled-tasks', query: { mode: 'purchase-order-check' } }" class="btn-setting" title="自動タスク生成 設定">⚙ 設定</RouterLink>
         <button class="btn-primary" @click="fetchList">更新</button>
-        <button class="btn-success" @click="openCreateDialog">新規作成</button>
+        <button class="btn-success" @click="openCreateDialog" :disabled="loadingCreatorPermission || !canCreateProposal">新規作成</button>
       </div>
     </div>
 
@@ -128,7 +128,7 @@
 
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
@@ -158,6 +158,51 @@ const dsSources = [
 const rows = ref([])
 const suppliers = ref([])
 const showDialog = ref(false)
+const purchaseOrderRoute = ref(null)
+const loadingCreatorPermission = ref(true)
+
+const profileDepartmentField = {
+  division: 'division',
+  group: 'group',
+  team: 'team',
+  unit: 'unit',
+}
+
+const profileDepartmentId = (profile, level) => {
+  const field = profileDepartmentField[level]
+  if (!field) return null
+  return profile?.[`${field}_id`] ?? profile?.[field] ?? null
+}
+
+const canCreateProposal = computed(() => {
+  const route = purchaseOrderRoute.value
+  const user = authState.user
+  if (!route || !route.is_active || !user?.id) return false
+
+  const authorizedUsers = (route.creator_authorized_users || []).map(Number)
+  if (authorizedUsers.includes(Number(user.id))) return true
+
+  const allowedUsers = (route.creator_allowed_users || []).map(Number)
+  if (allowedUsers.length) return allowedUsers.includes(Number(user.id))
+
+  const profile = user.profile || {}
+  if (String(profile.role || '') !== String(route.creator_role || '')) return false
+  if (!route.creator_department) return true
+  return Number(profileDepartmentId(profile, route.creator_department_level)) === Number(route.creator_department)
+})
+
+const loadPurchaseOrderRoute = async () => {
+  loadingCreatorPermission.value = true
+  try {
+    const response = await api.accounts.getApprovalRoutes({ search: 'purchase_order_proposal' })
+    const routes = Array.isArray(response.data) ? response.data : response.data?.results || []
+    purchaseOrderRoute.value = routes.find((route) => route.item_key === 'purchase_order_proposal') || null
+  } catch {
+    purchaseOrderRoute.value = null
+  } finally {
+    loadingCreatorPermission.value = false
+  }
+}
 
 const filters = ref({
   supplier: '',
@@ -250,6 +295,10 @@ const deleteProposal = async (row) => {
 }
 
 const openCreateDialog = () => {
+  if (!canCreateProposal.value) {
+    alert('提案書作成権限がありません')
+    return
+  }
   const today = new Date()
   const ymd = formatISODate(today)
   createForm.value = {
@@ -266,6 +315,10 @@ const closeDialog = () => {
 }
 
 const createProposal = async () => {
+  if (!canCreateProposal.value) {
+    alert('提案書作成権限がありません')
+    return
+  }
   const payload = {
     supplier: createForm.value.supplier,
     order_date: createForm.value.order_date,
@@ -281,7 +334,7 @@ const createProposal = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchSuppliers(), fetchList()])
+  await Promise.all([fetchSuppliers(), fetchList(), loadPurchaseOrderRoute()])
 })
 </script>
 
@@ -357,6 +410,5 @@ onMounted(async () => {
 .ds-btn { margin-left: 8px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: middle; display: inline-flex; align-items: center; }
 .ds-btn:hover { background: #e2e8f0; }
 </style>
-
 
 

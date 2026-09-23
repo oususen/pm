@@ -152,9 +152,10 @@ _DEPT_LEVEL_TO_PROFILE_FIELD = {
 
 
 def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, creator=None):
+    authorized_users = list(route_config.creator_authorized_users.all()) if stage == 'creator' else []
     allowed_users = list(getattr(route_config, f'{stage}_allowed_users').all())
     if allowed_users:
-        return allowed_users
+        return list({user.id: user for user in allowed_users + authorized_users if getattr(user, 'id', None)}.values())
 
     role = getattr(route_config, f'{stage}_role', '')
     user_qs = get_user_model().objects.filter(is_active=True)
@@ -163,26 +164,33 @@ def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, cr
     if dept:
         field = _DEPT_LEVEL_TO_PROFILE_FIELD.get(dept.level)
         if field and role:
-            return list(user_qs.filter(**{field: dept, 'profile__role': role}).distinct())
+            users = list(user_qs.filter(**{field: dept, 'profile__role': role}).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
         if field:
-            return list(user_qs.filter(**{field: dept}).distinct())
+            users = list(user_qs.filter(**{field: dept}).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
 
     profile = _get_user_profile(creator)
 
     if profile:
         if role == 'leader' and getattr(profile, 'unit_id', None):
-            return list(user_qs.filter(build_leader_role_q(profile.unit_id)).distinct())
+            users = list(user_qs.filter(build_leader_role_q(profile.unit_id)).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
         if role == 'supervisor' and getattr(profile, 'team_id', None):
-            return list(user_qs.filter(build_supervisor_role_q(profile.team_id)).distinct())
+            users = list(user_qs.filter(build_supervisor_role_q(profile.team_id)).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
         if role == 'chief' and getattr(profile, 'group_id', None):
-            return list(user_qs.filter(build_chief_role_q(profile.group_id)).distinct())
+            users = list(user_qs.filter(build_chief_role_q(profile.group_id)).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
         if role == 'manager' and getattr(profile, 'division_id', None):
-            return list(user_qs.filter(profile__role='manager', profile__division_id=profile.division_id).distinct())
-        return []
+            users = list(user_qs.filter(profile__role='manager', profile__division_id=profile.division_id).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
+        return authorized_users
 
     if role:
-        return list(user_qs.filter(profile__role=role).distinct())
-    return []
+        users = list(user_qs.filter(profile__role=role).distinct())
+        return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
+    return authorized_users
 
 
 def _get_route_proxy_users(route_config: ApprovalRouteConfig, stage: str):

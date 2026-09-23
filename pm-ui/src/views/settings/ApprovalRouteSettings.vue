@@ -114,6 +114,16 @@
                 :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)"
               />
               <UserPicker
+                v-if="stage.key === 'creator' && ['laser_material_order', 'purchase_order_proposal'].includes(selectedRoute.item_key)"
+                :row="selectedRoute"
+                :stage="stage.key"
+                type="authorized"
+                title="作成可能ユーザー"
+                empty-text="基本役割・部署に加えて作成を許可するユーザー"
+                :users="users"
+                :disabled="!canEditPage"
+              />
+              <UserPicker
                 :row="selectedRoute"
                 :stage="stage.key"
                 type="proxy"
@@ -259,6 +269,7 @@ const emptyRoute = () => ({
   creator_app_notification_enabled: true,
   creator_email_notification_enabled: false,
   creator_allowed_users: [],
+  creator_authorized_users: [],
   creator_proxy_users: [],
   reviewer1_role: 'supervisor',
   reviewer1_department: null,
@@ -295,6 +306,7 @@ const normalizeRoute = (route) => ({
   ...route,
   local_key: route.id ? `saved-${route.id}` : `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   creator_allowed_users: normalizeUserIds(route.creator_allowed_users),
+  creator_authorized_users: normalizeUserIds(route.creator_authorized_users),
   creator_proxy_users: normalizeUserIds(route.creator_proxy_users),
   reviewer1_allowed_users: normalizeUserIds(route.reviewer1_allowed_users),
   reviewer1_proxy_users: normalizeUserIds(route.reviewer1_proxy_users),
@@ -502,6 +514,7 @@ const buildPayload = () => routes.value.map((route) => ({
   creator_app_notification_enabled: Boolean(route.creator_app_notification_enabled),
   creator_email_notification_enabled: Boolean(route.creator_email_notification_enabled),
   creator_allowed_users: route.creator_allowed_users || [],
+  creator_authorized_users: route.creator_authorized_users || [],
   creator_proxy_users: route.creator_proxy_users || [],
   reviewer1_role: route.reviewer1_role,
   reviewer1_department: route.reviewer1_department || null,

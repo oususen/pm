@@ -41,6 +41,7 @@
           ><button class="btn creator-btn" @click="showManualAdd = !showManualAdd" :disabled="approvalLocked">
             手動追加
           </button>
+          <span v-if="!loadingCreatorPermission && !canCreateMaterialOrder" class="creator-permission-note">注文書作成権限がありません</span>
         </div>
         <div v-if="hasReviewerActions" class="action-group reviewer-group">
           <span class="action-group-title">確認者</span>
@@ -383,7 +384,7 @@
   </section>
 </template>
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import api from "@/api/client";
 import { authState } from "@/auth";
@@ -457,6 +458,8 @@ const selectedSaveWeekKeys = ref([]);
 const approvals = ref({ SATO: null, MEISEI: null });
 const overlappingApprovals = ref([]);
 const approvalBusy = ref(false);
+const materialOrderRoute = ref(null);
+const loadingCreatorPermission = ref(true);
 const defaultOrderStart = () => {
   const start = new Date(`${props.startDate}T00:00:00`);
   const dayIndex = (start.getDay() + 6) % 7;
@@ -549,6 +552,46 @@ const openSaveDialog = () => {
   saveDialog.value = true;
 };
 const currentUserId = computed(() => Number(authState.user?.id || 0));
+const profileDepartmentField = {
+  division: 'division',
+  group: 'group',
+  team: 'team',
+  unit: 'unit',
+};
+const profileDepartmentId = (profile, level) => {
+  const field = profileDepartmentField[level];
+  if (!field) return null;
+  return profile?.[`${field}_id`] ?? profile?.[field] ?? null;
+};
+const canCreateMaterialOrder = computed(() => {
+  const route = materialOrderRoute.value;
+  const user = authState.user;
+  if (!route || !route.is_active || !user?.id) return false;
+
+  const authorizedUsers = (route.creator_authorized_users || []).map(Number);
+  if (authorizedUsers.includes(Number(user.id))) return true;
+
+  const allowedUsers = (route.creator_allowed_users || []).map(Number);
+  if (allowedUsers.length) return allowedUsers.includes(Number(user.id));
+
+  const profile = user.profile || {};
+  if (String(profile.role || '') !== String(route.creator_role || '')) return false;
+
+  if (!route.creator_department) return true;
+  return Number(profileDepartmentId(profile, route.creator_department_level)) === Number(route.creator_department);
+});
+const loadMaterialOrderRoute = async () => {
+  loadingCreatorPermission.value = true;
+  try {
+    const response = await api.accounts.getApprovalRoutes({ search: 'laser_material_order' });
+    const routes = Array.isArray(response.data) ? response.data : response.data?.results || [];
+    materialOrderRoute.value = routes.find((route) => route.item_key === 'laser_material_order') || null;
+  } catch {
+    materialOrderRoute.value = null;
+  } finally {
+    loadingCreatorPermission.value = false;
+  }
+};
 const canResetApproval = computed(() => authState.user?.username === "admin" || authState.user?.is_superuser === true);
 const hasPendingTask = (row, taskType) => Boolean(row?.tasks?.some(
   (task) => task.status === "PENDING" && task.task_type === taskType && Number(task.assigned_to) === currentUserId.value,
@@ -580,7 +623,9 @@ const canSendOrder = (supplier) => {
 };
 const isCreateOrderDisabled = (supplier) => {
   const row = supplierApproval(supplier);
-  return approvalBusy.value ||
+  return !canCreateMaterialOrder.value ||
+    loadingCreatorPermission.value ||
+    approvalBusy.value ||
     row?.status === 'reviewing' ||
     row?.status === 'approved' ||
     row?.status === 'sent' ||
@@ -812,6 +857,10 @@ const submitApproval = async (supplier) => {
   }
 };
 const createApproval = async (supplier) => {
+  if (!canCreateMaterialOrder.value) {
+    emit("message", "注文書作成権限がありません。");
+    return;
+  }
   approvalBusy.value = true;
   try {
     if (!orderStartDate.value || !orderEndDate.value || orderEndDate.value < orderStartDate.value) {
@@ -1059,7 +1108,10 @@ const deleteManualRow = async (id) => {
   }
 };
 
-loadManualMaterialOptions();
+onMounted(() => {
+  loadManualMaterialOptions();
+  loadMaterialOrderRoute();
+});
 
 const openDownload = (supplier, format = "pdf") => {
   const start = new Date(`${props.startDate}T00:00:00`);
@@ -1173,6 +1225,12 @@ watch(() => [props.startDate, props.materials], load, {
 .creator-group {
   border-color: #8ec7ad;
   background: #ecfdf5;
+}
+.creator-permission-note {
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .reviewer-group {
   border-color: #f0c66d;

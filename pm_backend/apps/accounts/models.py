@@ -400,6 +400,12 @@ class ApprovalRouteConfig(models.Model):
         related_name='approval_route_creator_allowed',
         verbose_name='作成者限定ユーザー',
     )
+    creator_authorized_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='approval_route_creator_authorized',
+        verbose_name='作成可能ユーザー',
+    )
     creator_proxy_users = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         blank=True,

@@ -421,6 +421,7 @@ class UserFavoriteViewSet(viewsets.ModelViewSet):
 class ApprovalRouteConfigViewSet(viewsets.ModelViewSet):
     queryset = ApprovalRouteConfig.objects.prefetch_related(
         'creator_allowed_users',
+        'creator_authorized_users',
         'creator_proxy_users',
         'reviewer1_allowed_users',
         'reviewer1_proxy_users',
@@ -475,6 +476,7 @@ class ApprovalRouteConfigViewSet(viewsets.ModelViewSet):
 
         m2m_fields = [
             'creator_allowed_users',
+            'creator_authorized_users',
             'creator_proxy_users',
             'reviewer1_allowed_users',
             'reviewer1_proxy_users',
