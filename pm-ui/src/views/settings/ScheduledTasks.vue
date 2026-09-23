@@ -1111,7 +1111,7 @@
 
     <div class="card" v-if="purchaseOrderCheckConfig && showPurchaseOrderCheckSection">
       <div class="field">
-        <label>発注タイミング日次チェック - 実行時刻</label>
+        <label>外作・購入品注文書 - 自動タスク生成 実行時刻</label>
         <div class="input-row">
           <input
             type="number"
@@ -1132,7 +1132,7 @@
           />
           <span class="suffix">分</span>
         </div>
-        <p class="helper">毎日指定した時刻に発注スケジュールを確認し、該当する仕入先の注文書・タスクを自動生成します。</p>
+        <p class="helper">毎日指定した時刻に仕入先の発注スケジュールを確認し、該当日の注文書と承認タスクを自動生成します（仕入れ管理 → 発注業務）。</p>
       </div>
 
       <div class="field" style="margin-top: 12px">
@@ -1172,7 +1172,7 @@
       <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
 
       <div v-if="purchaseOrderCheckConfig.last_run_at" class="last-run">
-        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(purchaseOrderCheckConfig, '発注タイミング日次チェック')">履歴</button></h3>
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(purchaseOrderCheckConfig, '外作・購入品注文書 自動タスク生成')">履歴</button></h3>
         <table class="info-table">
           <tbody>
             <tr>

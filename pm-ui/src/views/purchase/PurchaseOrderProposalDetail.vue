@@ -96,7 +96,7 @@
         <button class="btn-danger" v-if="canReject" @click="rejectProposal">差戻</button>
         <button class="btn-danger" v-if="canCancel" @click="cancelProposal">キャンセル</button>
         <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadOrderPdf">{{ orderPdfButtonLabel }}</button>
-        <button class="btn-secondary" v-if="canGenerateOrderPdf" @click="downloadDeliveryNotePdf">納品書作成</button>
+        <button class="btn-secondary" v-if="canGenerateDeliveryNotePdf" @click="downloadDeliveryNotePdf">{{ deliveryNotePdfButtonLabel }}</button>
         <button
           class="btn-success"
           v-if="canShowSendButton"
@@ -363,6 +363,13 @@ const canCancel = computed(() =>
 )
 const canGenerateOrderPdf = computed(() =>
   proposal.value && !['CANCELED'].includes(proposal.value.status)
+)
+const canGenerateDeliveryNotePdf = computed(() =>
+  proposal.value && !['CANCELED'].includes(proposal.value.status)
+)
+const deliveryNotePdfButtonLabel = computed(() =>
+  proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)
+    ? '納品書作成' : '納品書プレビュー'
 )
 const orderPdfButtonLabel = computed(() =>
   proposal.value && ['APPROVED', 'SENT'].includes(proposal.value.status)

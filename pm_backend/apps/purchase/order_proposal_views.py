@@ -2448,10 +2448,13 @@ class PurchaseOrderProposalDeliveryNotePdfView(APIView):
             delivery_date = line.next_delivery_date or proposal.next_delivery_date or proposal.desired_delivery_date
             if not delivery_date:
                 continue
+            qty = int(line.order_qty or 0)
+            if qty <= 0:
+                continue
             items.append({
                 'product_code': product.product_code or '',
                 'product_name': product.product_name or '',
-                'expected_qty': int(line.order_qty or 0),
+                'expected_qty': qty,
                 'delivery_date': delivery_date,
             })
 

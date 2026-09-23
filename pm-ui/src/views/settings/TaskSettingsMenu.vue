@@ -63,8 +63,8 @@ const allTiles = [
   },
   {
     to: { path: '/settings/scheduled-tasks', query: { mode: 'purchase-order-check' } },
-    title: '発注タイミング日次チェック',
-    desc: '発注スケジュールに該当する仕入先の注文書・タスクを毎日自動生成します。',
+    title: '外作・購入品注文書 自動タスク生成',
+    desc: '仕入先の発注スケジュールに基づき、注文書と承認タスクを毎日自動生成します。',
     resource: 'settings.scheduled_tasks',
   },
 ]
