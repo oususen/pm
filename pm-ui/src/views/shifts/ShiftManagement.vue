@@ -71,7 +71,37 @@
             <div class="chart" v-html="chartHtml"></div>
           </div>
         </section>
-        <aside class="stats side-stats" v-html="statsHtml"></aside>
+        <aside class="stats side-stats" v-html="statsHtml" @click="onProcessStatClick"></aside>
+      </div>
+
+      <div v-if="selectedProcess" class="modal-overlay" @click.self="selectedProcessId = null">
+        <section class="modal process-chart-modal card" role="dialog" aria-modal="true" :aria-label="`${selectedProcess.process_name}の工程別チャート`">
+          <header class="process-chart-header">
+            <div>
+              <h3>{{ selectedProcess.process_name }}　工程別チャート</h3>
+              <p>{{ selectedDate.replaceAll('-', '/') }}　誰が・何時から何時まで作業するかを表示します。</p>
+            </div>
+            <button class="btn" type="button" @click="selectedProcessId = null">閉じる</button>
+          </header>
+          <div v-if="selectedProcessAssignments.length" class="process-chart-scroll">
+            <div class="process-timeline">
+              <div class="process-timeline-head">
+                <strong>作業者</strong>
+                <div class="process-axis">
+                  <span v-for="time in processTimelineTicks" :key="time" :style="{ left: `${(time - processTimelineStart) / processTimelineDuration * 100}%` }">{{ clockLabel(time) }}</span>
+                </div>
+              </div>
+              <div v-for="assignment in selectedProcessAssignments" :key="assignment.id" class="process-timeline-row">
+                <div class="process-worker">{{ assignment.workerName }}</div>
+                <div class="process-track">
+                  <i v-for="time in processTimelineTicks" :key="time" :style="{ left: `${(time - processTimelineStart) / processTimelineDuration * 100}%` }"></i>
+                  <div class="process-bar" :style="processAssignmentStyle(assignment)">{{ assignment.start_time }}〜{{ assignment.endTime }}　{{ assignment.units || 0 }}台</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="process-empty">この工程には配置がありません。</p>
+        </section>
       </div>
     </div>
 
@@ -278,6 +308,7 @@ const processSearch = ref('')
 const showWorkerPicker = ref(false)
 const userSearch = ref('')
 const allUsers = ref([])
+const selectedProcessId = ref(null)
 
 // 工程別負荷時間（動的）
 const processLoads = ref({})
@@ -298,6 +329,36 @@ const lineProcessMap = computed(() => {
   const m = {}
   for (const lp of currentLineProcesses.value) m[lp.id] = lp
   return m
+})
+const selectedProcess = computed(() => currentLineProcesses.value.find(p => p.id === selectedProcessId.value) || null)
+const processTimelineStart = computed(() => tm(rangeStart.value))
+const processTimelineEnd = computed(() => {
+  let end = tm(rangeEnd.value)
+  if (end <= processTimelineStart.value) end += 1440
+  return end
+})
+const processTimelineDuration = computed(() => processTimelineEnd.value - processTimelineStart.value)
+const processTimelineTicks = computed(() => {
+  const ticks = []
+  for (let time = processTimelineStart.value; time <= processTimelineEnd.value; time += 60) ticks.push(time)
+  if (ticks[ticks.length - 1] !== processTimelineEnd.value) ticks.push(processTimelineEnd.value)
+  return ticks
+})
+const selectedProcessAssignments = computed(() => {
+  if (!selectedProcess.value) return []
+  const anchor = processTimelineStart.value
+  return assignments.value
+    .filter(assignment => {
+      if (assignment.shift_line !== currentLineId.value || assignment.date !== selectedDate.value) return false
+      if (assignment.line_process) return assignment.line_process === selectedProcess.value.id
+      return assignment.process && assignment.process === selectedProcess.value.process
+    })
+    .map(assignment => ({
+      ...assignment,
+      workerName: currentWorkers.value.find(worker => worker.id === assignment.worker)?.name || '未設定',
+      endTime: clockLabel(endFromWorkHoursCalc(assignment.start_time, +assignment.work_hours, assignment.worker, assignment.date, anchor, assignment.id)),
+    }))
+    .sort((a, b) => absMinute(a.start_time, anchor) - absMinute(b.start_time, anchor))
 })
 
 const filteredUsers = computed(() => {
@@ -483,6 +544,31 @@ function resolveLP(a) {
   return null
 }
 
+function processAssignmentStyle(assignment) {
+  const start = absMinute(assignment.start_time, processTimelineStart.value)
+  const end = endFromWorkHoursCalc(
+    assignment.start_time,
+    +assignment.work_hours,
+    assignment.worker,
+    assignment.date,
+    processTimelineStart.value,
+    assignment.id,
+  )
+  const visibleStart = Math.max(start, processTimelineStart.value)
+  const visibleEnd = Math.min(end, processTimelineEnd.value)
+  return {
+    left: `${(visibleStart - processTimelineStart.value) / processTimelineDuration.value * 100}%`,
+    width: `${Math.max(0, (visibleEnd - visibleStart) / processTimelineDuration.value * 100)}%`,
+    background: selectedProcess.value?.color || '#64748b',
+  }
+}
+
+function onProcessStatClick(event) {
+  const stat = event.target.closest('[data-process-id]')
+  if (!stat) return
+  selectedProcessId.value = Number(stat.dataset.processId)
+}
+
 // --- チャート描画 ---
 const chartHtml = computed(() => {
   void renderNeeded.value
@@ -495,7 +581,7 @@ const chartHtml = computed(() => {
 
   const active = assignments.value.filter(a => a.shift_line === currentLineId.value && a.date === selectedDate.value)
   let h = '<div class="nh">作業者</div><div class="axis">' +
-    ticks.map((t, i) => `<span style="left:${(t - sm) / total * 100}%">${i % Math.max(1, 60 / step.value) === 0 ? Math.floor((t % 1440) / 60) + ':' + String(t % 60).padStart(2, '0') : ''}</span>`).join('') + '</div>'
+    ticks.map(t => `<span style="left:${(t - sm) / total * 100}%">${clockLabel(t)}</span>`).join('') + '</div>'
 
   for (const w of currentWorkers.value) {
     const day = workerDay(w.id, selectedDate.value, sm)
@@ -505,7 +591,7 @@ const chartHtml = computed(() => {
     const totalWork = dayJobs.reduce((sum, a) => sum + netDuration(a), 0)
     const breaks = autoBreaks(w.id, selectedDate.value, sm).filter(b => b.end > sm && b.start < em)
 
-    h += `<div class="row"><div class="worker shift-${actualShift.css}"><b>${esc(w.name)}</b><small class="shift-info">${actualShift.name}勤 · ${actualStart}出勤</small><small class="worker-total">実働合計 ${fmtHours(totalWork)}</small></div><div class="track">`
+    h += `<div class="row"><div class="worker shift-${actualShift.css}"><b title="${esc(w.name)}">${esc(w.name)}</b><small class="shift-info">${actualShift.name}勤 · ${actualStart}出勤</small><small class="worker-total">実働合計 ${fmtHours(totalWork)}</small></div><div class="track">`
     h += ticks.map(t => `<i class="gridline" style="left:${(t - sm) / total * 100}%"></i>`).join('')
 
     for (const a of active.filter(x => x.worker === w.id)) {
@@ -552,7 +638,7 @@ const statsHtml = computed(() => {
     const achieved = req <= 0 ? true : d >= -0.01
     const rate = req > 0 ? Math.round(placed / req * 100) : (placed > 0 ? 100 : 0)
     const reqLabel = req > 0 ? fmtHours(req) : '負荷なし'
-    h += `<article class="card stat"><header><span><i style="background:${p.color}"></i>${esc(p.process_name)}</span><b class="${achieved ? 'good' : 'bad'}">${req <= 0 ? '負荷なし' : achieved ? (Math.abs(d) < 0.01 ? '達成' : fmtHours(d) + '余裕') : fmtHours(-d) + '不足'}</b></header><div class="meter"><span class="${achieved ? 'achievement-good' : 'achievement-bad'}" style="width:${Math.min(100, rate)}%"></span></div><p>達成度 <b>${rate}%</b><span>必要 ${reqLabel}／配置 ${fmtHours(placed)}</span></p></article>`
+    h += `<article class="card stat process-stat" data-process-id="${p.id}"><header><span><i style="background:${p.color}"></i>${esc(p.process_name)}</span><b class="${achieved ? 'good' : 'bad'}">${req <= 0 ? '負荷なし' : achieved ? (Math.abs(d) < 0.01 ? '達成' : fmtHours(d) + '余裕') : fmtHours(-d) + '不足'}</b></header><div class="meter"><span class="${achieved ? 'achievement-good' : 'achievement-bad'}" style="width:${Math.min(100, rate)}%"></span></div><p>達成度 <b>${rate}%</b><span>必要 ${reqLabel}／配置 ${fmtHours(placed)}</span></p></article>`
   }
   return h
 })
@@ -1253,9 +1339,9 @@ input,select{border:1px solid #cbd5e1;border-radius:5px;padding:5px 7px;font-siz
 :deep(.axis),:deep(.track){position:relative}
 :deep(.axis span){position:absolute;top:16px;font-size:10px;color:#627083;font-weight:bold}
 :deep(.row){display:contents}
-:deep(.worker){height:94px;border-top:1px solid #dfe5ec;border-right:1px solid #dfe5ec;padding:12px 16px}
-:deep(.worker b),:deep(.worker small){display:block}
-:deep(.worker small){color:#7a8798;margin-top:3px}
+:deep(.worker){height:94px;border-top:1px solid #dfe5ec;border-right:1px solid #dfe5ec;padding:8px 12px}
+:deep(.worker b){display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;min-height:2.4em;line-height:1.2;word-break:break-word}
+:deep(.worker small){display:block;color:#7a8798;margin-top:2px;font-size:10px;line-height:1.15}
 :deep(.track){height:94px;border-top:1px solid #dfe5ec}
 :deep(.gridline){position:absolute;height:100%;width:1px;background:#edf0f4}
 :deep(.bar){position:absolute;top:7px;height:48px;border:0;border-radius:6px;color:white;text-align:left;padding:6px 9px;overflow:hidden;box-shadow:0 2px 4px #1d29394d;cursor:pointer}
@@ -1285,6 +1371,8 @@ input,select{border:1px solid #cbd5e1;border-radius:5px;padding:5px 7px;font-siz
 :deep(.meter span.achievement-good){background:#16a34a!important}
 :deep(.stat p){margin:0;color:#667085;font-size:11px}
 :deep(.stat p span){float:right}
+:deep(.process-stat){cursor:pointer}
+:deep(.process-stat:hover){border-color:#285ea8;box-shadow:0 2px 7px #1c34521f}
 :deep(.final-summary){padding:14px;background:linear-gradient(135deg,#17365d,#285ea8);color:#fff;border-color:#17365d}
 :deep(.final-summary small){display:block;font-size:10px;opacity:.8;font-weight:bold}
 :deep(.final-summary strong){display:block;margin-top:4px;font-size:25px;letter-spacing:.03em}
@@ -1369,6 +1457,24 @@ input,select{border:1px solid #cbd5e1;border-radius:5px;padding:5px 7px;font-siz
 .process-list{max-height:300px;overflow-y:auto}
 .process-item{padding:10px;border-bottom:1px solid #eef1f5;cursor:pointer}
 .process-item:hover{background:#eaf2ff}
+.process-chart-modal{max-width:900px;width:min(92vw,900px)}
+.process-chart-header{display:flex;justify-content:space-between;gap:12px;align-items:start;margin-bottom:14px}
+.process-chart-header h3{margin:0 0 4px}
+.process-chart-header p{margin:0;color:#667085;font-size:12px}
+.process-chart-scroll{overflow-x:auto}
+.process-timeline{min-width:680px;border:1px solid #dfe5ec;border-radius:6px;overflow:hidden}
+.process-timeline-head,.process-timeline-row{display:grid;grid-template-columns:140px 1fr}
+.process-timeline-head{font-size:11px;background:#f7f9fb;color:#526174}
+.process-timeline-head>strong{padding:12px;border-right:1px solid #dfe5ec}
+.process-axis,.process-track{position:relative;background-image:linear-gradient(to right,#edf0f4 1px,transparent 1px);background-size:calc(100% / 14) 100%}
+.process-axis{height:42px}
+.process-axis span{position:absolute;top:13px;transform:translateX(-50%);font-size:10px;font-weight:bold}
+.process-axis span:first-child{transform:none}.process-axis span:last-child{transform:translateX(-100%)}
+.process-worker{padding:16px 12px;border-top:1px solid #dfe5ec;border-right:1px solid #dfe5ec;font-size:13px;font-weight:bold;background:#f8fafc}
+.process-track{height:54px;border-top:1px solid #dfe5ec}
+.process-track i{position:absolute;top:0;bottom:0;width:1px;background:#edf0f4}
+.process-bar{position:absolute;top:8px;height:36px;padding:10px 8px;border-radius:5px;color:#fff;font-size:11px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:4px}
+.process-empty{margin:0;padding:22px;color:#667085;text-align:center}
 
 /* 印刷 */
 @media print{
