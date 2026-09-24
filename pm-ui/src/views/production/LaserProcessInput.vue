@@ -644,7 +644,17 @@
               <td>{{ row.material_code }} {{ row.material_name }}<span v-if="row.is_special_management_material" class="special-tag">特別管理</span></td>
               <td class="num">{{ formatMaterialOrderQty(row.total) }}</td>
               <td v-for="day in materialWeekDays" :key="`${row.key}-${day.date}`" class="num" :class="{ 'today-column': day.isToday }">
-                {{ row.daily[day.date] ? formatMaterialOrderQty(row.daily[day.date]) : '' }}
+                <button
+                  v-if="day.isToday && row.daily[day.date]"
+                  class="material-qty-code-button"
+                  type="button"
+                  :aria-label="`材料コード ${row.material_code} を表示`"
+                  @click="toggleMaterialCode(row.key)"
+                >
+                  {{ formatMaterialOrderQty(row.daily[day.date]) }}
+                  <span v-if="visibleMaterialCodeKey === row.key" class="material-code-popover" role="status">{{ row.material_code }}</span>
+                </button>
+                <template v-else>{{ row.daily[day.date] ? formatMaterialOrderQty(row.daily[day.date]) : '' }}</template>
               </td>
             </tr>
             <tr v-if="!materialWeeklyRows.length"><td colspan="8">入荷予定はありません。</td></tr>
@@ -1293,6 +1303,7 @@ const materialMessage = ref('')
 const materialMessageType = ref('info')
 const materialSavingId = ref(null)
 const materialReceiptForms = ref({})
+const visibleMaterialCodeKey = ref('')
 
 const setFormMessage = (message, type = 'info') => {
   formMessage.value = message
@@ -1364,6 +1375,9 @@ const formatMaterialOrderQty = (quantity) => {
   const lots = Number(quantity.lots || 0)
   const sheets = Number(quantity.sheets || 0)
   return `${lots ? `${lots}L` : ''}${lots && sheets ? ' + ' : ''}${sheets ? `${sheets}枚` : ''}`
+}
+const toggleMaterialCode = (rowKey) => {
+  visibleMaterialCodeKey.value = visibleMaterialCodeKey.value === rowKey ? '' : rowKey
 }
 const receiptForm = (orderId) => {
   if (!materialReceiptForms.value[orderId]) {
@@ -2303,6 +2317,48 @@ onMounted(async () => {
 .material-week-table .today-column {
   background: #fef3c7;
   font-weight: 700;
+}
+
+.material-qty-code-button {
+  position: relative;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.material-qty-code-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.material-code-popover {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: calc(100% + 7px);
+  padding: 5px 8px;
+  border: 1px solid #b45309;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #78350f;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.material-code-popover::after {
+  position: absolute;
+  right: 9px;
+  top: 100%;
+  border: 5px solid transparent;
+  border-top-color: #b45309;
+  content: '';
 }
 
 .special-tag {
