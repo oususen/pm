@@ -1333,7 +1333,7 @@ input,select{border:1px solid #cbd5e1;border-radius:5px;padding:5px 7px;font-siz
 .legend{font-size:12px;font-weight:bold;flex-wrap:wrap}
 .legend i,.stat i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px}
 .scroll{overflow-x:auto}
-:deep(.chart){display:grid;grid-template-columns:140px 1fr;min-width:900px}
+:deep(.chart){display:grid;grid-template-columns:114px minmax(0,1fr);min-width:0;width:100%}
 :deep(.nh),:deep(.axis){height:49px;background:#f7f9fb}
 :deep(.nh){padding:16px;border-right:1px solid #dfe5ec;font-size:12px;font-weight:bold}
 :deep(.axis),:deep(.track){position:relative}
@@ -1358,7 +1358,7 @@ input,select{border:1px solid #cbd5e1;border-radius:5px;padding:5px 7px;font-siz
 :deep(.break-summary){position:absolute;left:0;right:0;bottom:5px;height:27px;display:flex;align-items:center;gap:12px;padding:4px 8px;background:#fff9d8;border-top:1px solid #e2c75d;color:#624b00;font-size:10px;font-weight:bold;white-space:nowrap;overflow:hidden}
 :deep(.break-summary strong){background:#ffd52b;color:#493700;border-radius:4px;padding:2px 6px}
 :deep(.break-summary .meal-text){background:#ffed9b;padding:2px 5px;border-radius:4px}
-.chart-workspace{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px;align-items:start}
+.chart-workspace{display:grid;grid-template-columns:minmax(0,1fr) 218px;gap:12px;align-items:start}
 .chart-card{min-width:0}
 .side-stats{display:grid;grid-template-columns:1fr;gap:9px}
 :deep(.stat){padding:12px}
