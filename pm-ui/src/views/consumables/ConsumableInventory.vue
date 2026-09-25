@@ -7,6 +7,13 @@
 
     <div class="filter-bar">
       <label>検索: <input v-model="filters.search" placeholder="コード/発注コード/品名" @keyup.enter="fetchCards" /></label>
+      <label>QRコード検索:
+        <div class="qr-search">
+          <input v-model="qrText" placeholder="QRコードを読み取る / 手入力" @keyup.enter="searchQr" />
+          <button class="btn-secondary" @click="searchQr">検索</button>
+          <button class="btn-qr" @click="showScanner = true">📷 QR</button>
+        </div>
+      </label>
       <label>注文状態:
         <select v-model="filters.order_status" @change="fetchCards">
           <option value="">すべて</option>
@@ -47,6 +54,7 @@
           <div class="card-main">
             <div class="card-name">{{ c.name }}</div>
             <div class="card-line">コード: {{ c.code }}</div>
+            <div class="card-line">発注コード: {{ c.order_code || '-' }} | カテゴリ: {{ c.category || '-' }}</div>
             <div class="card-line">
               在庫数: <b class="stock">{{ c.stock_quantity }} {{ c.unit }}</b> | 安全在庫: {{ c.safety_stock }}
             </div>
@@ -77,17 +85,20 @@
         </div>
       </div>
     </div>
+    <button v-show="showScrollTop" class="scroll-top-btn" @click="scrollToTop">最上部</button>
+    <QrScanner v-if="showScanner" @scanned="onQrScanned" @close="showScanner = false" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 import { formatDateTime } from './consumableUtils'
+import QrScanner from './QrScanner.vue'
 
 const dsSources = [
   { op: '読み', table: 't_consumable', desc: '消耗品・在庫数' },
@@ -101,6 +112,8 @@ const cards = ref([])
 const loading = ref(false)
 const filterOptions = ref({ categories: [], storage_locations: [] })
 const filters = ref({ search: '', order_status: '', shortage: '', category: '', storage_location: '' })
+const qrText = ref('')
+const showScanner = ref(false)
 
 const shortageCount = computed(() => cards.value.filter((c) => c.is_shortage).length)
 
@@ -117,17 +130,51 @@ async function fetchCards() {
   }
 }
 
+async function searchQr(raw = qrText.value) {
+  const value = (raw || '').trim()
+  if (!value) return
+  try {
+    const item = (await api.consumables.lookupByQr(value)).data
+    filters.value.search = item.multiple ? value : item.code
+    qrText.value = value
+    await fetchCards()
+  } catch {
+    filters.value.search = value
+    await fetchCards()
+  }
+}
+
+function onQrScanned(value) {
+  showScanner.value = false
+  qrText.value = value
+  searchQr(value)
+}
+
+const showScrollTop = ref(false)
+let scrollContainer = null
+const onScroll = () => { showScrollTop.value = scrollContainer && scrollContainer.scrollTop > 300 }
+const scrollToTop = () => { if (scrollContainer) scrollContainer.scrollTo({ top: 0, behavior: 'smooth' }) }
+
 onMounted(async () => {
+  scrollContainer = document.querySelector('.app-main')
+  if (scrollContainer) scrollContainer.addEventListener('scroll', onScroll)
   filterOptions.value = (await api.consumables.getFilterOptions()).data
   fetchCards()
 })
+onUnmounted(() => { if (scrollContainer) scrollContainer.removeEventListener('scroll', onScroll) })
 </script>
 
 <style scoped>
 .page-container { padding: 12px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .page-title { font-size: 1.2em; margin: 0; }
-.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 0.85em; }
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 0.85em; position: sticky; top: 0; z-index: 10; background: #fff; padding: 8px 12px; border-bottom: 2px solid #52b788; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+.filter-bar input, .filter-bar select { height: 28px; padding: 2px 6px; font-size: 0.85em; }
+.qr-search { display: flex; gap: 4px; }
+.qr-search input { min-width: 150px; }
+.btn-secondary, .btn-qr { border: 0; border-radius: 4px; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
+.btn-secondary { background: #eee; color: #222; }
+.btn-qr { background: #37474f; color: #fff; }
 .summary { color: #555; }
 .loading-message { padding: 12px; color: #666; }
 .btn-primary { background: #1565c0; color: #fff; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.85em; }
@@ -154,4 +201,6 @@ onMounted(async () => {
 .act.outbound { background: #e65100; }
 .act.inbound { background: #2e7d32; }
 .act.request { background: #1565c0; }
+.scroll-top-btn { position: fixed; bottom: 24px; right: 24px; z-index: 20; padding: 8px 14px; border-radius: 6px; border: none; background: #1565c0; color: #fff; font-size: 0.85em; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.scroll-top-btn:hover { background: #0d47a1; }
 </style>
