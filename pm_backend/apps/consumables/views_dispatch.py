@@ -14,7 +14,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import ApprovalRequest, ApprovalRouteConfig
-from accounts.permissions import HasResourcePermissionOrReadOnly
 from production.serializers_camera_actual import resolve_business_date
 from purchase.order_proposal_views import _get_route_proxy_users, _resolve_route_stage_users
 from shipping.services.email_service import EmailService
@@ -45,7 +44,7 @@ ALLOWED_TRANSITIONS = {
 class ConsumableRequestViewSet(viewsets.ModelViewSet):
     queryset = ConsumableRequest.objects.select_related('consumable', 'consumable__supplier')
     serializer_class = ConsumableRequestSerializer
-    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'request_type', 'consumable']
     search_fields = ['consumable__code', 'consumable__name', 'requester_name', 'note']
@@ -175,7 +174,7 @@ class ConsumableDispatchOrderViewSet(viewsets.ReadOnlyModelViewSet):
         'supplier', 'created_by', 'approval_request', 'approval_request__route_config'
     ).prefetch_related('items')
     serializer_class = ConsumableDispatchOrderSerializer
-    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'supplier']
     search_fields = ['order_number', 'supplier_name']

@@ -14,7 +14,6 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.permissions import HasResourcePermissionOrReadOnly
 
 from .models import Consumable, ConsumableRequest, ConsumableStockMovement, ConsumableSupplier
 from .serializers import (
@@ -55,7 +54,7 @@ def _to_decimal(value, default=Decimal('0')):
 class ConsumableSupplierViewSet(viewsets.ModelViewSet):
     queryset = ConsumableSupplier.objects.all()
     serializer_class = ConsumableSupplierSerializer
-    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'contact_person', 'email']
@@ -101,7 +100,7 @@ class ConsumableSupplierViewSet(viewsets.ModelViewSet):
 class ConsumableViewSet(viewsets.ModelViewSet):
     queryset = Consumable.objects.select_related('supplier')
     serializer_class = ConsumableSerializer
-    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'supplier', 'category', 'storage_location']
     search_fields = ['code', 'order_code', 'name']
@@ -346,7 +345,7 @@ class ConsumableStockMovementViewSet(viewsets.ReadOnlyModelViewSet):
     """入出庫履歴の照会と、入庫・出庫の登録"""
     queryset = ConsumableStockMovement.objects.select_related('consumable')
     serializer_class = ConsumableStockMovementSerializer
-    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['movement_type', 'inbound_type', 'consumable', 'worker']
     search_fields = ['consumable__code', 'consumable__name', 'worker_name', 'note']

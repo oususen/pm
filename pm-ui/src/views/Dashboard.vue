@@ -39,6 +39,10 @@
             <div class="menu-icon">🔔</div>
             <div class="menu-label">{{ t('dashboard.menu.notifications') }}</div>
           </RouterLink>
+          <RouterLink v-if="canShowResource('consumables')" to="/consumables" class="menu-card">
+            <div class="menu-icon">🧰</div>
+            <div class="menu-label">消耗品</div>
+          </RouterLink>
           <RouterLink to="/overtime/menu" class="menu-card">
             <div class="menu-icon">⏰</div>
             <div class="menu-label">{{ t('dashboard.menu.overtime') }}</div>
