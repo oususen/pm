@@ -235,9 +235,11 @@ class ConsumableStockMovement(OrgSnapshotMixin):
     """入出庫履歴（入庫・出庫を1テーブルで管理）"""
     TYPE_INBOUND = 'inbound'
     TYPE_OUTBOUND = 'outbound'
+    TYPE_ADJUSTMENT = 'adjustment'
     TYPE_CHOICES = [
         (TYPE_INBOUND, '入庫'),
         (TYPE_OUTBOUND, '出庫'),
+        (TYPE_ADJUSTMENT, '在庫調整'),
     ]
     INBOUND_MANUAL = 'manual'
     INBOUND_DISPATCH = 'dispatch'

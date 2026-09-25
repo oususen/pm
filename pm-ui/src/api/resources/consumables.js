@@ -19,7 +19,7 @@ export const createConsumablesAPI = (client) => ({
     return client.post('/consumables/items/', data)
   },
   updateItem(id, data) {
-    return client.put(`/consumables/items/${id}/`, data)
+    return client.patch(`/consumables/items/${id}/`, data)
   },
   deleteItem(id) {
     return client.delete(`/consumables/items/${id}/`)
@@ -64,8 +64,11 @@ export const createConsumablesAPI = (client) => ({
   inbound(data) {
     return client.post('/consumables/movements/inbound/', data)
   },
-  listWorkers() {
-    return client.get('/consumables/movements/workers/')
+  adjustment(data) {
+    return client.post('/consumables/movements/adjustment/', data)
+  },
+  listWorkers(params = {}) {
+    return client.get('/consumables/movements/workers/', { params })
   },
 
   // 注文依頼

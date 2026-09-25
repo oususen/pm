@@ -160,7 +160,21 @@ class ConsumableViewSet(viewsets.ModelViewSet):
         if consumable is None:
             consumable = qs.filter(code__istartswith=code).order_by('code').first()
         if consumable is None:
-            return Response({'detail': f'コード「{code}」の消耗品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+            name_matches = list(qs.filter(name__icontains=code).order_by('code')[:20])
+            if len(name_matches) == 1:
+                consumable = name_matches[0]
+            elif name_matches:
+                return Response({
+                    'multiple': True,
+                    'results': [
+                        {'id': c.id, 'code': c.code, 'name': c.name,
+                         'stock_quantity': c.stock_quantity, 'unit': c.unit,
+                         'image_url': c.image.url if c.image else ''}
+                        for c in name_matches
+                    ],
+                })
+        if consumable is None:
+            return Response({'detail': f'「{code}」に一致する消耗品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
         return Response(self.get_serializer(consumable).data)
 
     @action(detail=False, methods=['get'])
@@ -387,22 +401,41 @@ class ConsumableStockMovementViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'])
     def workers(self, request):
-        """作業者の選択肢（有効な pm ユーザー。社員コード・班付き）"""
+        """作業者の選択肢（有効な pm ユーザー。班・グループでフィルタ可）"""
+        from accounts.models import Department
+        from masters.models import Line
+
         users = (
             get_user_model().objects.filter(is_active=True)
-            .select_related('profile__team')
+            .select_related('profile__group', 'profile__team', 'profile__unit')
             .order_by('profile__employee_code', 'username')
         )
-        result = []
+        group_id = request.query_params.get('group')
+        team_id = request.query_params.get('team')
+        unit_id = request.query_params.get('unit')
+        if group_id:
+            users = users.filter(profile__group_id=group_id)
+        if team_id:
+            users = users.filter(profile__team_id=team_id)
+        if unit_id:
+            users = users.filter(profile__unit_id=unit_id)
+
+        worker_list = []
         for user in users:
             profile = getattr(user, 'profile', None)
-            result.append({
+            worker_list.append({
                 'id': user.id,
                 'name': display_user_name(user),
                 'employee_code': (profile.employee_code if profile else '') or '',
                 'team_name': profile.team.name if profile and profile.team else '',
             })
-        return Response(result)
+
+        groups = list(Department.objects.filter(level='group').order_by('display_id', 'name').values('id', 'name'))
+        teams = list(Department.objects.filter(level='team').order_by('display_id', 'name').values('id', 'name', 'parent_id'))
+        units = list(Department.objects.filter(level='unit').order_by('display_id', 'name').values('id', 'name', 'parent_id'))
+        lines = list(Line.objects.filter(is_active=True, line_type='PROD').order_by('line_code').values('id', 'line_code', 'line_name'))
+
+        return Response({'workers': worker_list, 'groups': groups, 'teams': teams, 'units': units, 'lines': lines})
 
     def _register(self, request, movement_type):
         consumable_id = request.data.get('consumable')
@@ -458,3 +491,45 @@ class ConsumableStockMovementViewSet(viewsets.ReadOnlyModelViewSet):
     def inbound(self, request):
         """手動入庫（注文書による発注分の一括入庫は注文書APIで行う）"""
         return self._register(request, ConsumableStockMovement.TYPE_INBOUND)
+
+    @action(detail=False, methods=['post'])
+    def adjustment(self, request):
+        """在庫調整（+/- の調整数で在庫を増減し、履歴を残す）"""
+        consumable_id = request.data.get('consumable')
+        try:
+            adjust_qty = _to_int(request.data.get('quantity'), 0)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not consumable_id or adjust_qty == 0:
+            return Response({'detail': '消耗品と調整数（0以外）を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            consumable = Consumable.objects.select_for_update().filter(id=consumable_id).first()
+            if consumable is None:
+                return Response({'detail': '消耗品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+            new_stock = consumable.stock_quantity + adjust_qty
+            if new_stock < 0:
+                return Response(
+                    {'detail': f'調整後の在庫がマイナスになります（現在庫: {consumable.stock_quantity}, 調整: {adjust_qty}）'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            consumable.stock_quantity = new_stock
+            consumable.save(update_fields=['stock_quantity', 'updated_at'])
+
+            movement = ConsumableStockMovement.objects.create(
+                consumable=consumable,
+                movement_type=ConsumableStockMovement.TYPE_ADJUSTMENT,
+                quantity=abs(adjust_qty),
+                stock_after=new_stock,
+                worker=request.user,
+                worker_name=display_user_name(request.user),
+                note=request.data.get('note', '') or f'在庫調整: {"+" if adjust_qty > 0 else ""}{adjust_qty}',
+                moved_at=datetime.now(),
+                created_by=request.user,
+                **org_snapshot(request.user),
+            )
+        return Response({
+            'stock_after': new_stock,
+            'adjustment': adjust_qty,
+            'movement_id': movement.id,
+        })
