@@ -641,7 +641,7 @@
           <tbody>
             <tr v-for="row in materialWeeklyRows" :key="row.key">
               <td>{{ row.supplier_label }}</td>
-              <td>{{ row.material_code }} {{ row.material_name }}<span v-if="row.is_special_management_material" class="special-tag">特別管理</span></td>
+              <td>{{ row.material_name }}<span v-if="row.is_special_management_material" class="special-tag">特別管理</span></td>
               <td class="num">{{ formatMaterialOrderQty(row.total) }}</td>
               <td v-for="day in materialWeekDays" :key="`${row.key}-${day.date}`" class="num" :class="{ 'today-column': day.isToday }">
                 <button

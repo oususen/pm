@@ -12,7 +12,7 @@ from django.http import FileResponse, HttpResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from masters.models import Product, Supplier
+from masters.models import Line, Product, Supplier
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
@@ -44,6 +44,7 @@ MATERIAL_ORDER_SUPPLIER_CODES = {
 }
 MATERIAL_RECEIPT_IMAGE_CONTENT_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 MATERIAL_RECEIPT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+LASER_LINE_CODE = 'L0801'
 
 DEFAULT_MATERIAL_ORDER_EMAIL_BODY = (
     '{supplier_name} 御中\n\n'
@@ -52,6 +53,15 @@ DEFAULT_MATERIAL_ORDER_EMAIL_BODY = (
     'このメールは送信専用です。ご返信はCC宛先へお願いします。\n\n'
     'ダイソウ工業株式会社'
 )
+
+
+def _resolve_laser_calendar_id():
+    """レーザラインに現在割り当てられたカレンダIDを取得する。"""
+    return (
+        Line.objects.filter(line_code=LASER_LINE_CODE)
+        .values_list('calendar_id', flat=True)
+        .first()
+    )
 
 
 def render_material_order_email_body(template, order_supplier, start_label='', end_label=''):
@@ -1564,16 +1574,12 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             if end_date < requested_start_date:
                 return Response({'detail': 'end_date must be on or after start_date'}, status=status.HTTP_400_BAD_REQUEST)
             start_date = requested_start_date
-            from masters.models import Calendar
-            laser_cal = Calendar.objects.filter(calendar_code='reza').first()
-            grid_calendar_id = laser_cal.id if laser_cal else _resolve_calendar_id(None)
+            grid_calendar_id = _resolve_laser_calendar_id() or _resolve_calendar_id(None)
             grid_is_working = _build_workday_helpers(grid_calendar_id)[0]
             dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1) if grid_is_working(start_date + timedelta(days=i))]
         else:
             start_date = requested_start_date - timedelta(days=requested_start_date.weekday())
-            from masters.models import Calendar
-            laser_cal = Calendar.objects.filter(calendar_code='reza').first()
-            grid_calendar_id = laser_cal.id if laser_cal else _resolve_calendar_id(None)
+            grid_calendar_id = _resolve_laser_calendar_id() or _resolve_calendar_id(None)
             grid_is_working = _build_workday_helpers(grid_calendar_id)[0]
             dates = [start_date + timedelta(days=i) for i in range(28) if grid_is_working(start_date + timedelta(days=i))]
         if not dates:
