@@ -250,7 +250,7 @@
               {{ column }}
             </th>
             <template v-for="week in weekGroups" :key="`dates-${week.key}`"
-              ><th v-for="day in week.days" :key="day" colspan="3">
+              ><th v-for="day in week.days" :key="day" colspan="3" :style="isHolidayWork(day) ? { background: '#fed7aa' } : {}">
                 {{ day.slice(5) }}
               </th>
               <th class="week-total" colspan="3">週合計</th></template
@@ -427,6 +427,7 @@
                   v-for="day in week.days"
                   :key="`summary-date-${day}`"
                   colspan="4"
+                  :class="{ 'holiday-work': isHolidayWork(day) }"
                 >
                   {{ day.slice(5) }}
                 </th>
@@ -441,6 +442,7 @@
                   v-for="day in week.days"
                   :key="`summary-total-${day}`"
                   colspan="4"
+                  :class="{ 'holiday-work': isHolidayWork(day) }"
                 >
                   1号 {{ hours(day, "TK") }}h / 2号 {{ hours(day, "AJ") }}h
                 </th>
@@ -457,10 +459,10 @@
                 ><template
                   v-for="day in week.days"
                   :key="`summary-label-${day}`"
-                  ><th>需要</th>
-                  <th>自数</th>
-                  <th>手数</th>
-                  <th>進度</th></template
+                  ><th :class="{ 'holiday-work': isHolidayWork(day) }">需要</th>
+                  <th :class="{ 'holiday-work': isHolidayWork(day) }">自数</th>
+                  <th :class="{ 'holiday-work': isHolidayWork(day) }">手数</th>
+                  <th :class="{ 'holiday-work': isHolidayWork(day) }">進度</th></template
                 >
                 <th class="week-total">需要</th>
                 <th class="week-total">自数</th>
@@ -768,6 +770,7 @@
     <LaserWeeklyMaterialOrder
       :start-date="startDate"
       :dates="allDays"
+      :holiday-work-dates="[...holidayWorkDates]"
       :materials="materialRows"
       @message="message = $event"
     />
@@ -1020,6 +1023,8 @@ const selectAllPatterns = () => {
   );
 };
 const allDates = ref([]);
+const holidayWorkDates = ref(new Set());
+const isHolidayWork = (day) => holidayWorkDates.value.has(day);
 const allDays = computed(() => allDates.value);
 const weekStartKey = (dateKey) => monday(dateKey);
 const days = computed(() => {
@@ -1386,6 +1391,7 @@ const loadPlan = async () => {
       start_date: startDate.value,
     });
     allDates.value = data.dates || [];
+    holidayWorkDates.value = new Set(data.holiday_work_dates || []);
     rows.value = data.rows || [];
     patternRows.value = (data.pattern_rows || []).sort(
       (a, b) =>
@@ -1729,6 +1735,10 @@ select {
 .plan-table th,
 .pattern-summary-table th {
   background: #e2e8f0;
+}
+.plan-table thead th.holiday-work,
+.pattern-summary-table thead th.holiday-work {
+  background: #fed7aa;
 }
 .plan-table thead tr:nth-child(1) th,
 .pattern-summary-table thead tr:nth-child(1) th {

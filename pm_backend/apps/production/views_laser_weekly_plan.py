@@ -12,7 +12,7 @@ from django.http import FileResponse, HttpResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from masters.models import Line, Product, Supplier
+from masters.models import CalendarDay, Line, Product, Supplier
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
@@ -1600,19 +1600,41 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 plan_date__range=(prev_week_start, dates[-1]),
             )
         }
+        # 休日出勤日は需要・LTシフトで休日扱い（受注展開と同じ）
+        _hw_dates = set(
+            CalendarDay.objects.filter(
+                calendar_id=grid_calendar_id,
+                is_holiday_work=True,
+                target_date__range=(start_date - timedelta(days=7), dates[-1] + timedelta(days=14)),
+            ).values_list('target_date', flat=True)
+        ) if grid_calendar_id else set()
+
+        def _demand_shift(base_is_working, day, days):
+            if not days:
+                return day
+            step = 1 if days > 0 else -1
+            remaining = abs(int(days))
+            current = day
+            while remaining > 0:
+                current += timedelta(days=step)
+                if base_is_working(current) and current not in _hw_dates:
+                    remaining -= 1
+            return current
+
         target_demand_dates = {}
         workday_helpers = {}
         for target in targets:
             laser_process = target.laser_pattern.equipment.process
             laser_line_id = laser_process.line_id if laser_process else None
             calendar_id = _resolve_calendar_id(laser_line_id)
-            shift_working_days = workday_helpers.setdefault(
+            helpers = workday_helpers.setdefault(
                 calendar_id,
                 _build_workday_helpers(calendar_id),
-            )[2]
+            )
+            base_is_working = helpers[0]
             prev_dates = [prev_week_start + timedelta(days=i) for i in range(7) if (prev_week_start + timedelta(days=i)).weekday() < 5]
             for day in prev_dates + dates:
-                target_demand_dates[(target.id, day)] = shift_working_days(day, target.lead_time_days)
+                target_demand_dates[(target.id, day)] = _demand_shift(base_is_working, day, target.lead_time_days)
 
         plan_map, order_map = defaultdict(Decimal), defaultdict(Decimal)
         if targets:
@@ -1631,8 +1653,11 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             hours = Decimal(target.laser_pattern.process_time_min or 0) / Decimal(60)
             daily = {}
             for day in dates:
-                key = (target.downstream_line_id, target.product_id, target_demand_dates[(target.id, day)])
-                qty = plan_map[key] if target.quantity_source == 'PLAN_QTY' else order_map[key]
+                if day in _hw_dates:
+                    qty = Decimal(0)
+                else:
+                    key = (target.downstream_line_id, target.product_id, target_demand_dates[(target.id, day)])
+                    qty = plan_map[key] if target.quantity_source == 'PLAN_QTY' else order_map[key]
                 raw = (qty / take) if qty > 0 else Decimal(0)
                 auto_sheets = float(raw.quantize(Decimal('0.01'), rounding=ROUND_CEILING)) if qty > 0 else 0.0
                 manual_sheets = int(raw.to_integral_value(rounding=ROUND_CEILING)) if qty > 0 else 0
@@ -1752,6 +1777,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         return Response({
             'start_date': start_date.isoformat(),
             'dates': [d.isoformat() for d in dates],
+            'holiday_work_dates': [d.isoformat() for d in dates if d in _hw_dates],
             'rows': rows,
             'pattern_rows': pattern_rows,
             'material_rows': material_rows,

@@ -214,6 +214,7 @@
                 :key="day"
                 class="date-end"
                 colspan="4"
+                :class="{ 'holiday-work': props.holidayWorkDates.includes(day) }"
               >
                 {{ dayLabel(day) }}
               </th>
@@ -223,10 +224,10 @@
           <tr>
             <template v-for="week in weekGroups" :key="`${week.key}-labels`"
               ><template v-for="day in week.days" :key="`${day}-labels`"
-                ><th>需要</th>
-                <th>自数</th>
-                <th class="manual-cell">手数</th>
-                <th class="date-end">進度</th></template
+                ><th :class="{ 'holiday-work': props.holidayWorkDates.includes(day) }">需要</th>
+                <th :class="{ 'holiday-work': props.holidayWorkDates.includes(day) }">自数</th>
+                <th class="manual-cell" :class="{ 'holiday-work': props.holidayWorkDates.includes(day) }">手数</th>
+                <th class="date-end" :class="{ 'holiday-work': props.holidayWorkDates.includes(day) }">進度</th></template
               >
               <th class="week-total">需要</th>
               <th class="week-total">自数</th>
@@ -391,6 +392,7 @@ import { authState } from "@/auth";
 const props = defineProps({
   startDate: { type: String, required: true },
   dates: { type: Array, required: true },
+  holidayWorkDates: { type: Array, default: () => [] },
   materials: { type: Array, required: true },
 });
 const emit = defineEmits(["message"]);
@@ -1379,6 +1381,9 @@ watch(() => [props.startDate, props.materials], load, {
 }
 .order-panel th {
   background: #e2e8f0;
+}
+.order-panel thead th.holiday-work {
+  background: #fed7aa;
 }
 .order-panel td:nth-child(-n + 3) {
   text-align: left;
