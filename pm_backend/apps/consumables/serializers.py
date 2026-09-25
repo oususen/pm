@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 
 from masters.serializers import build_media_absolute_url
 
@@ -6,10 +7,37 @@ from .models import (
     Consumable,
     ConsumableDispatchOrder,
     ConsumableDispatchOrderItem,
+    ConsumableOrderEmailConfig,
     ConsumableRequest,
     ConsumableStockMovement,
     ConsumableSupplier,
 )
+from .services import display_user_name
+
+
+class ConsumableOrderEmailConfigSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    cc_users = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.all(), many=True, required=False,
+    )
+    cc_user_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConsumableOrderEmailConfig
+        fields = ['id', 'supplier', 'supplier_name', 'body', 'cc_users', 'cc_user_details', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'supplier_name', 'cc_user_details', 'created_at', 'updated_at']
+
+    def get_cc_user_details(self, obj):
+        return [
+            {
+                'id': user.id,
+                'username': user.username,
+                'employee_code': getattr(getattr(user, 'profile', None), 'employee_code', ''),
+                'name': display_user_name(user),
+                'email': user.email or '',
+            }
+            for user in obj.cc_users.all().order_by('username')
+        ]
 
 
 class ConsumableSupplierSerializer(serializers.ModelSerializer):

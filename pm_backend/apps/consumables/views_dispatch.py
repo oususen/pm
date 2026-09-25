@@ -12,25 +12,76 @@ from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from accounts.models import ApprovalRequest, ApprovalRouteConfig
 from production.serializers_camera_actual import resolve_business_date
 from purchase.order_proposal_views import _get_route_proxy_users, _resolve_route_stage_users
 from shipping.services.email_service import EmailService
 
-from .dispatch_service import APPROVAL_ITEM_KEY, build_order_email, save_dispatch_order_pdf
+from .dispatch_service import (
+    APPROVAL_ITEM_KEY,
+    CONSUMABLE_ORDER_EMAIL_DEFAULT_BODY,
+    build_order_email,
+    render_order_email_body,
+    save_dispatch_order_pdf,
+)
 from .models import (
     Consumable,
     ConsumableDispatchOrder,
     ConsumableDispatchOrderItem,
+    ConsumableOrderEmailConfig,
     ConsumableRequest,
+    ConsumableSupplier,
     ConsumableStockMovement,
 )
-from .serializers import ConsumableDispatchOrderSerializer, ConsumableRequestSerializer
+from .serializers import (
+    ConsumableDispatchOrderSerializer,
+    ConsumableOrderEmailConfigSerializer,
+    ConsumableRequestSerializer,
+)
 from .services import display_user_name, org_snapshot
 from .views import _resolve_worker, _to_int
 
 R = ConsumableRequest
+
+
+class ConsumableOrderEmailConfigListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        configs = ConsumableOrderEmailConfig.objects.select_related('supplier').prefetch_related('cc_users')
+        return Response(ConsumableOrderEmailConfigSerializer(configs, many=True).data)
+
+
+class ConsumableOrderEmailConfigDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _get_config(self, supplier_id):
+        supplier = ConsumableSupplier.objects.filter(pk=supplier_id).first()
+        if not supplier:
+            return None
+        config, _ = ConsumableOrderEmailConfig.objects.get_or_create(
+            supplier=supplier,
+            defaults={'body': CONSUMABLE_ORDER_EMAIL_DEFAULT_BODY},
+        )
+        return config
+
+    def get(self, request, supplier_id):
+        config = self._get_config(supplier_id)
+        if not config:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(ConsumableOrderEmailConfigSerializer(config).data)
+
+    def put(self, request, supplier_id):
+        config = self._get_config(supplier_id)
+        if not config:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        payload = {**request.data, 'supplier': config.supplier_id}
+        serializer = ConsumableOrderEmailConfigSerializer(config, data=payload, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(supplier=config.supplier)
+        return Response(serializer.data)
 
 
 def _is_valid_deadline(value):
@@ -335,9 +386,21 @@ class ConsumableDispatchOrderViewSet(viewsets.ReadOnlyModelViewSet):
 
         # 承認欄を最新にしてから送る
         content = save_dispatch_order_pdf(dispatch_order)
-        subject, body = build_order_email(dispatch_order)
+        subject, _default_body = build_order_email(dispatch_order)
+        email_config = (
+            ConsumableOrderEmailConfig.objects
+            .prefetch_related('cc_users')
+            .filter(supplier=dispatch_order.supplier)
+            .first()
+        )
+        body = render_order_email_body(
+            email_config.body if email_config else CONSUMABLE_ORDER_EMAIL_DEFAULT_BODY,
+            dispatch_order,
+        )
+        cc_emails = [user.email for user in email_config.cc_users.all() if user.email] if email_config else []
         result = EmailService().send_email_with_attachment(
             to_emails=[email],
+            cc_emails=cc_emails,
             subject=subject,
             body=body,
             attachment_data=BytesIO(content),

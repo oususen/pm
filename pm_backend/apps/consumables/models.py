@@ -24,6 +24,34 @@ class ConsumableSupplier(models.Model):
         return self.name
 
 
+class ConsumableOrderEmailConfig(models.Model):
+    """消耗品注文書の購入先別メール本文・CC設定"""
+    supplier = models.OneToOneField(
+        ConsumableSupplier,
+        on_delete=models.CASCADE,
+        related_name='order_email_config',
+        verbose_name='購入先',
+    )
+    body = models.TextField(blank=True, default='', verbose_name='本文')
+    cc_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='consumable_order_email_configs',
+        verbose_name='CCユーザー',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 't_consumable_order_email_config'
+        ordering = ['supplier__name']
+        verbose_name = '消耗品注文書メール設定'
+        verbose_name_plural = '消耗品注文書メール設定'
+
+    def __str__(self):
+        return f'{self.supplier.name} 注文書メール設定'
+
+
 class Consumable(models.Model):
     """消耗品マスタ（在庫数を保持）"""
     code = models.CharField(max_length=50, unique=True, verbose_name='コード')

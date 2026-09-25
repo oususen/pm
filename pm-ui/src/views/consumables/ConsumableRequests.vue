@@ -34,12 +34,37 @@
               <td class="chk"><input v-model="selected" type="checkbox" :value="r.id" :disabled="!g.supplier_id" /></td>
               <td class="mono">{{ r.consumable_code }}</td>
               <td>{{ r.consumable_name }}</td>
-              <td class="num">{{ r.quantity }} {{ r.unit }}</td>
+              <td class="num">
+                <template v-if="preparingEditingId === r.id">
+                  <input v-model.number="preparingEditQuantity" type="number" min="1" class="qty-input" /> {{ r.unit }}
+                </template>
+                <template v-else>{{ r.quantity }} {{ r.unit }}</template>
+              </td>
               <td class="num">{{ formatPrice(r.total_amount) }}円</td>
-              <td>納期: {{ r.deadline }}</td>
+              <td>
+                <template v-if="preparingEditingId === r.id">
+                  <select v-if="preparingDeadlineType === 'preset'" v-model="preparingEditDeadline">
+                    <option value="最短">最短</option><option value="通常">通常</option><option value="余裕あり">余裕あり</option>
+                  </select>
+                  <input v-else v-model="preparingEditDeadline" type="date" />
+                  <select v-model="preparingDeadlineType" @change="switchPreparingDeadlineType">
+                    <option value="preset">区分</option><option value="date">日付</option>
+                  </select>
+                </template>
+                <template v-else>納期: {{ r.deadline }}</template>
+              </td>
               <td>依頼者: {{ r.requester_name || '-' }}</td>
               <td>{{ r.note }}</td>
-              <td class="action-cell"><button class="btn-sm btn-secondary" @click="setStatus(r, 'requested')">依頼中に戻す</button></td>
+              <td class="action-cell">
+                <template v-if="preparingEditingId === r.id">
+                  <button class="btn-sm btn-success" :disabled="savingPreparingEdit" @click="savePreparingEdit(r)">保存</button>
+                  <button class="btn-sm btn-secondary" :disabled="savingPreparingEdit" @click="cancelPreparingEdit">取消</button>
+                </template>
+                <template v-else>
+                  <button class="btn-sm btn-primary" @click="startPreparingEdit(r)">数量・納期変更</button>
+                  <button class="btn-sm btn-secondary" @click="setStatus(r, 'requested')">依頼中に戻す</button>
+                </template>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -136,6 +161,11 @@ const notes = ref({})
 const creating = ref(false)
 const editingId = ref(null)
 const editQuantity = ref(1)
+const preparingEditingId = ref(null)
+const preparingEditQuantity = ref(1)
+const preparingEditDeadline = ref('最短')
+const preparingDeadlineType = ref('preset')
+const savingPreparingEdit = ref(false)
 
 const preparingGroups = computed(() => {
   const map = new Map()
@@ -208,6 +238,41 @@ async function saveQuantity(r) {
     fetchAll()
   } catch (err) {
     alert(errorMessage(err))
+  }
+}
+
+function startPreparingEdit(r) {
+  preparingEditingId.value = r.id
+  preparingEditQuantity.value = r.quantity
+  preparingDeadlineType.value = /^\d{4}-\d{2}-\d{2}$/.test(r.deadline) ? 'date' : 'preset'
+  preparingEditDeadline.value = r.deadline || '最短'
+}
+
+function switchPreparingDeadlineType() {
+  preparingEditDeadline.value = preparingDeadlineType.value === 'preset' ? '最短' : ''
+}
+
+function cancelPreparingEdit() {
+  preparingEditingId.value = null
+}
+
+async function savePreparingEdit(r) {
+  if (!Number.isInteger(preparingEditQuantity.value) || preparingEditQuantity.value < 1) {
+    alert('数量は1以上の整数を入力してください')
+    return
+  }
+  const deadline = preparingDeadlineType.value === 'date'
+    ? (preparingEditDeadline.value || '最短')
+    : preparingEditDeadline.value
+  savingPreparingEdit.value = true
+  try {
+    await api.consumables.updateRequest(r.id, { quantity: preparingEditQuantity.value, deadline })
+    preparingEditingId.value = null
+    await fetchAll()
+  } catch (err) {
+    alert(`依頼を更新できませんでした: ${errorMessage(err)}`)
+  } finally {
+    savingPreparingEdit.value = false
   }
 }
 

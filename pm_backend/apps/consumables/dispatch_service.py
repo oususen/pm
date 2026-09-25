@@ -4,6 +4,18 @@ from django.core.files.base import ContentFile
 from .pdf import build_dispatch_order_pdf, dispatch_order_pdf_filename
 
 APPROVAL_ITEM_KEY = 'consumable_dispatch_order'
+CONSUMABLE_ORDER_EMAIL_DEFAULT_BODY = """いつもお世話になっております。
+ダイソウ工業株式会社 製缶事業部です。
+
+下記の通り、注文書を送付いたします。
+添付のPDFファイルをご確認ください。
+ダイソウ工業株式会社
+{created_by_name}
+
+ご不明な点がございましたら下記までご連絡ください。
+Email:{created_by_email}
+
+このメールは送信専用です。ご返信はCC宛先へお願いします。"""
 
 
 def save_dispatch_order_pdf(dispatch_order):
@@ -32,30 +44,19 @@ def refresh_dispatch_pdf_for_approval(approval_request):
 
 
 def build_order_email(dispatch_order):
-    """注文書送付メールの件名・本文（syomohin と同じ文面）"""
-    contact_person = dispatch_order.supplier.contact_person
-    greeting = f'{contact_person} 様' if contact_person else 'ご担当者様'
+    """消耗品注文書送付メールの件名・本文"""
     subject = f'【注文書送付】{dispatch_order.order_number} - {dispatch_order.supplier_name}'
-    body = f"""{dispatch_order.supplier_name}
-{greeting}
+    return subject, CONSUMABLE_ORDER_EMAIL_DEFAULT_BODY
 
-いつもお世話になっております。
-ダイソウ工業株式会社 製缶事業部です。
 
-下記の通り、注文書を送付いたします。
-添付のPDFファイルをご確認ください。
+def render_order_email_body(body, dispatch_order):
+    """本文テンプレートの作成者プレースホルダーを置換する"""
+    from .services import display_user_name
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-注文書番号: {dispatch_order.order_number}
-購入先: {dispatch_order.supplier_name}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-ご不明な点がございましたら、お気軽にお問い合わせください。
-
-何卒よろしくお願い申し上げます。
-
-――――――――――――――――――――――――――
-ダイソウ工業株式会社
-製缶事業部
-――――――――――――――――――――――――――"""
-    return subject, body
+    values = {
+        '{created_by_name}': display_user_name(dispatch_order.created_by),
+        '{created_by_email}': dispatch_order.created_by.email or '',
+    }
+    for placeholder, value in values.items():
+        body = body.replace(placeholder, value)
+    return body

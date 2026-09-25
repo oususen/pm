@@ -50,6 +50,12 @@ export const createConsumablesAPI = (client) => ({
   importSuppliersCsv(formData) {
     return client.post('/consumables/suppliers/import-csv/', formData)
   },
+  listOrderEmailConfigs() {
+    return client.get('/consumables/order-email-configs/')
+  },
+  updateOrderEmailConfig(supplierId, data) {
+    return client.put(`/consumables/order-email-configs/${supplierId}/`, data)
+  },
 
   // 入出庫
   listMovements(params = {}) {

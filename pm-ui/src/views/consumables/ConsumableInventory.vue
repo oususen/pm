@@ -68,7 +68,7 @@
         <div v-if="c.open_requests.length" class="sub-section">
           <div class="sub-title">📝 未完了の依頼</div>
           <div v-for="r in c.open_requests" :key="r.id" class="sub-line">
-            {{ r.status_label }}: {{ r.quantity }}{{ c.unit }} | 依頼日: {{ formatDateTime(r.requested_at) }}
+            {{ r.status_label }}: {{ r.quantity }}{{ c.unit }} | 依頼日: {{ formatDateTime(r.requested_at) }} | 依頼者: {{ r.requester_name || '-' }}
             <span v-if="r.ordered_at">| 発注日: {{ formatDateTime(r.ordered_at) }}</span>
           </div>
         </div>

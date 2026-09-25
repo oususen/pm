@@ -9,6 +9,7 @@
     <div class="type-tabs">
       <button :class="['tab', { active: emailType === 'material' }]" @click="emailType = 'material'">材料注文書</button>
       <button :class="['tab', { active: emailType === 'proposal' }]" @click="emailType = 'proposal'">外作・購入品注文</button>
+      <button :class="['tab', { active: emailType === 'consumable' }]" @click="emailType = 'consumable'">消耗品注文書</button>
     </div>
 
     <div class="split-layout">
@@ -109,12 +110,27 @@ Email:{created_by_email}
 
 このメールは送信専用です。ご返信はCC宛先へお願いします。`;
 
+const defaultConsumableBody = `いつもお世話になっております。
+ダイソウ工業株式会社 製缶事業部です。
+
+下記の通り、注文書を送付いたします。
+添付のPDFファイルをご確認ください。
+ダイソウ工業株式会社
+{created_by_name}
+
+ご不明な点がございましたら下記までご連絡ください。
+Email:{created_by_email}
+
+このメールは送信専用です。ご返信はCC宛先へお願いします。`;
+
 const emailType = ref("material");
 const selectedSupplier = ref("MEISEI");
 const materialConfigs = ref({});
 const proposalConfigs = ref({});
+const consumableConfigs = ref({});
 const users = ref([]);
 const suppliers = ref([]);
+const consumableSuppliers = ref([]);
 const saving = ref(false);
 const loading = ref(false);
 const message = ref("");
@@ -132,6 +148,7 @@ const normalizeList = (data) => {
 
 const supplierOptions = computed(() => {
   if (emailType.value === "material") return materialSupplierOptions;
+  if (emailType.value === "consumable") return consumableSuppliers.value.map((supplier) => ({ value: supplier.id, label: supplier.name }));
   return suppliers.value.map((supplier) => ({
     value: supplier.id,
     label: `${supplier.supplier_code || ""} ${supplier.supplier_name || ""}`.trim(),
@@ -139,21 +156,25 @@ const supplierOptions = computed(() => {
 });
 
 const selectedSupplierLabel = computed(() => supplierOptions.value.find((row) => String(row.value) === String(selectedSupplier.value))?.label || "");
-const emailTypeLabel = computed(() => (emailType.value === "material" ? "材料注文書" : "外作・購入品注文"));
+const emailTypeLabel = computed(() => ({ material: "材料注文書", proposal: "外作・購入品注文", consumable: "消耗品注文書" }[emailType.value]));
 const currentConfig = computed(() => {
   if (emailType.value === "material") return materialConfigs.value[selectedSupplier.value] || null;
+  if (emailType.value === "consumable") return consumableConfigs.value[Number(selectedSupplier.value)] || null;
   return proposalConfigs.value[Number(selectedSupplier.value)] || null;
 });
 const canEdit = computed(() => hasPermission(authState.user, "settings.material_order_email_config", "edit"));
 const placeholderHint = computed(() =>
-  emailType.value === "material"
-    ? "{supplier_name}=仕入先名、{start_date}=注文書開始日、{end_date}=注文書終了日"
-    : "{supplier_name}=仕入先名、{proposal_no}=注文書番号、{order_date}=発注日、{desired_delivery_date}=希望納入日、{created_by_name}=作成者名、{created_by_email}=作成者メール"
+  ({
+    material: "{supplier_name}=仕入先名、{start_date}=注文書開始日、{end_date}=注文書終了日",
+    proposal: "{supplier_name}=仕入先名、{proposal_no}=注文書番号、{order_date}=発注日、{desired_delivery_date}=希望納入日、{created_by_name}=作成者名、{created_by_email}=作成者メール",
+    consumable: "{created_by_name}=注文書作成者名、{created_by_email}=作成者メール",
+  }[emailType.value])
 );
-const defaultBody = computed(() => (emailType.value === "material" ? defaultMaterialBody : defaultProposalBody));
+const defaultBody = computed(() => ({ material: defaultMaterialBody, proposal: defaultProposalBody, consumable: defaultConsumableBody }[emailType.value]));
 
 const getConfigBySupplier = (supplierValue) => {
   if (emailType.value === "material") return materialConfigs.value[supplierValue] || null;
+  if (emailType.value === "consumable") return consumableConfigs.value[Number(supplierValue)] || null;
   return proposalConfigs.value[Number(supplierValue)] || null;
 };
 
@@ -175,7 +196,8 @@ const ensureSelectedSupplier = () => {
     if (!materialSupplierOptions.some((row) => row.value === selectedSupplier.value)) selectedSupplier.value = "MEISEI";
     return;
   }
-  const firstSupplier = suppliers.value[0];
+  const availableSuppliers = emailType.value === "consumable" ? consumableSuppliers.value : suppliers.value;
+  const firstSupplier = availableSuppliers[0];
   if (!supplierOptions.value.some((row) => Number(row.value) === Number(selectedSupplier.value))) {
     selectedSupplier.value = firstSupplier?.id || null;
   }
@@ -189,16 +211,20 @@ const load = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const [materialRes, proposalRes, userRes, supplierRes] = await Promise.all([
+    const [materialRes, proposalRes, userRes, supplierRes, consumableSupplierRes, consumableConfigRes] = await Promise.all([
       api.laserWeeklyPlans.getMaterialOrderEmailConfigs(),
       api.purchaseOrderProposals.getEmailConfigs(),
       api.accounts.getUsers({ is_active: true, page_size: 1000 }),
       api.suppliers.getSuppliers({ page_size: 10000 }),
+      api.consumables.listSuppliers({ page_size: 10000 }),
+      api.consumables.listOrderEmailConfigs(),
     ]);
     materialConfigs.value = Object.fromEntries(normalizeList(materialRes.data).map((row) => [row.supplier, row]));
     proposalConfigs.value = Object.fromEntries(normalizeList(proposalRes.data).map((row) => [Number(row.supplier), row]));
+    consumableConfigs.value = Object.fromEntries(normalizeList(consumableConfigRes.data).map((row) => [Number(row.supplier), row]));
     users.value = normalizeList(userRes.data);
     suppliers.value = normalizeList(supplierRes.data);
+    consumableSuppliers.value = normalizeList(consumableSupplierRes.data);
     ensureSelectedSupplier();
     applyCurrentConfig();
   } catch (err) {
@@ -229,6 +255,9 @@ const save = async () => {
     if (emailType.value === "material") {
       const { data } = await api.laserWeeklyPlans.updateMaterialOrderEmailConfig(selectedSupplier.value, payload);
       materialConfigs.value = { ...materialConfigs.value, [data.supplier]: data };
+    } else if (emailType.value === "consumable") {
+      const { data } = await api.consumables.updateOrderEmailConfig(selectedSupplier.value, payload);
+      consumableConfigs.value = { ...consumableConfigs.value, [Number(data.supplier)]: data };
     } else {
       const { data } = await api.purchaseOrderProposals.updateEmailConfig(selectedSupplier.value, payload);
       proposalConfigs.value = { ...proposalConfigs.value, [Number(data.supplier)]: data };
