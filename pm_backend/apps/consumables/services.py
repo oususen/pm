@@ -1,6 +1,8 @@
 """消耗品管理の共通処理"""
 import csv
 import io
+import re
+from datetime import datetime, time, timedelta
 
 from .models import ConsumableRequest
 
@@ -38,6 +40,45 @@ def open_request_status_map(consumable_ids=None):
         if current is None or rank[status] > rank[current]:
             result[consumable_id] = status
     return result
+
+
+def business_day_range(date_from, date_to):
+    """業務日（日替わり8時）の期間を実日時の範囲 [開始, 終了) に変換する"""
+    start = datetime.combine(date_from, time(8, 0)) if date_from else None
+    end = datetime.combine(date_to + timedelta(days=1), time(8, 0)) if date_to else None
+    return start, end
+
+
+def normalize_qr_code_value(raw_value):
+    """
+    QR文字列を検索用の消耗品コードに正規化する（syomohin から移植）。
+    既存の貼付ラベルには次の書式が混在しているため、すべてに対応する。
+    - 「管理番号：<コード> 品名：...」
+    - 「code=<コード>name=...」（区切り不備を含む）
+    - 「6 MASINA-00178 日東 ...」のように先頭に不要文字がある1行ラベル
+    """
+    if not raw_value:
+        return ''
+    value = raw_value.strip()
+
+    match = re.search(r'管理番号\s*[：:]\s*(.*?)\s*品名', value, flags=re.DOTALL)
+    if match:
+        return re.sub(r'\s+', '', match.group(1).strip())
+
+    match = re.search(r'code\s*[=＝]\s*(.+?)(?:name\s*[=＝]|$)', value, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        extracted = re.sub(r'\s+', '', match.group(1).strip())
+        if extracted:
+            return extracted
+
+    # 英字と数字を両方含むトークンをコードとして優先採用する
+    tokens = [t.strip('.,;:：') for t in re.split(r'\s+', value) if t.strip()]
+    for token in tokens:
+        if re.search(r'[A-Za-z]', token) and re.search(r'\d', token):
+            return token
+    if tokens:
+        return tokens[0]
+    return re.sub(r'\s+', '', value)
 
 
 # CSV列名 → モデル項目（syomohin の CSV_FIELD_ALIASES を移植）

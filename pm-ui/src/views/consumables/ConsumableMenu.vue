@@ -21,6 +21,27 @@ import { hasPermission } from "@/router";
 // 画面を追加したらここにタイルを追加する
 const tiles = [
   {
+    to: "/consumables/inventory",
+    label: "在庫一覧",
+    icon: "📦",
+    description: "在庫数・注文状態・直近の入庫",
+    resource: "consumables.inventory",
+  },
+  {
+    to: "/consumables/operations",
+    label: "入出庫",
+    icon: "📱",
+    description: "QR読取で出庫・入庫（スマホ対応）",
+    resource: "consumables.operations",
+  },
+  {
+    to: "/consumables/history",
+    label: "入出庫履歴",
+    icon: "🧾",
+    description: "期間・部署別の集計と明細",
+    resource: "consumables.history",
+  },
+  {
     to: "/consumables/masters",
     label: "消耗品マスタ",
     icon: "🗂️",

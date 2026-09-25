@@ -1,8 +1,12 @@
+import re
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.contrib.auth import get_user_model
+from django.db.models import Count, F, Sum, Value, Window
+from django.db.models.functions import Replace, RowNumber
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
@@ -12,12 +16,20 @@ from rest_framework.response import Response
 
 from accounts.permissions import HasResourcePermissionOrReadOnly
 
-from .models import Consumable, ConsumableSupplier
-from .serializers import ConsumableSerializer, ConsumableSupplierSerializer
+from .models import Consumable, ConsumableRequest, ConsumableStockMovement, ConsumableSupplier
+from .serializers import (
+    ConsumableSerializer,
+    ConsumableStockMovementSerializer,
+    ConsumableSupplierSerializer,
+)
 from .services import (
     CONSUMABLE_CSV_ALIASES,
     SUPPLIER_CSV_ALIASES,
+    business_day_range,
+    display_user_name,
+    normalize_qr_code_value,
     open_request_status_map,
+    org_snapshot,
     read_csv_rows,
 )
 
@@ -112,7 +124,7 @@ class ConsumableViewSet(viewsets.ModelViewSet):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        if self.action == 'list':
+        if self.action in ('list', 'cards'):
             # 一覧の注文状態は1クエリでまとめて導出する
             context['order_status_map'] = open_request_status_map()
         return context
@@ -126,15 +138,76 @@ class ConsumableViewSet(viewsets.ModelViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
-    @action(detail=False, methods=['get'], url_path='by-code/(?P<code>[^/]+)')
-    def by_code(self, request, code=None):
-        """QR読取用: コード（または発注コード）で1件取得"""
-        consumable = (
-            self.get_queryset().filter(Q(code=code) | Q(order_code=code)).order_by('-is_active', 'id').first()
-        )
-        if not consumable:
-            return Response({'detail': f'コード {code} の消耗品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+    @action(detail=False, methods=['get'])
+    def lookup(self, request):
+        """
+        QR読取用: QR文字列（?qr=）から消耗品を1件特定する。照合順は syomohin と同じ。
+        1. コード完全一致（大文字小文字無視） 2. ハイフン・空白を除いて一致 3. 前方一致
+        """
+        code = normalize_qr_code_value(request.query_params.get('qr', ''))
+        if not code:
+            return Response({'detail': 'QRコードが空です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = Consumable.objects.select_related('supplier').filter(is_active=True)
+        consumable = qs.filter(code__iexact=code).first()
+        if consumable is None:
+            compact = re.sub(r'[-\s]', '', code)
+            consumable = (
+                qs.annotate(compact_code=Replace(Replace('code', Value('-'), Value('')), Value(' '), Value('')))
+                .filter(compact_code__iexact=compact)
+                .first()
+            )
+        if consumable is None:
+            consumable = qs.filter(code__istartswith=code).order_by('code').first()
+        if consumable is None:
+            return Response({'detail': f'コード「{code}」の消耗品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
         return Response(self.get_serializer(consumable).data)
+
+    @action(detail=False, methods=['get'])
+    def cards(self, request):
+        """在庫一覧（カード）用: 消耗品に未完了の依頼と直近2件の入庫を付けて返す"""
+        items = list(self.filter_queryset(self.get_queryset()))
+        ids = [item.id for item in items]
+        data = self.get_serializer(items, many=True).data
+
+        open_requests = {}
+        for req in ConsumableRequest.objects.filter(
+            consumable_id__in=ids, status__in=ConsumableRequest.OPEN_STATUSES
+        ).order_by('-requested_at'):
+            open_requests.setdefault(req.consumable_id, []).append({
+                'id': req.id,
+                'status': req.status,
+                'status_label': req.get_status_display(),
+                'quantity': req.quantity,
+                'requested_at': req.requested_at,
+                'ordered_at': req.ordered_at,
+                'requester_name': req.requester_name,
+            })
+
+        # 品目ごとの直近2件（ROW_NUMBER）
+        recent_inbounds = {}
+        inbound_qs = (
+            ConsumableStockMovement.objects.filter(
+                consumable_id__in=ids, movement_type=ConsumableStockMovement.TYPE_INBOUND
+            )
+            .annotate(rn=Window(RowNumber(), partition_by=[F('consumable_id')],
+                                order_by=[F('moved_at').desc(), F('id').desc()]))
+            .filter(rn__lte=2)
+        )
+        for mv in inbound_qs:
+            recent_inbounds.setdefault(mv.consumable_id, []).append({
+                'quantity': mv.quantity,
+                'moved_at': mv.moved_at,
+                'inbound_type_label': mv.get_inbound_type_display(),
+                'worker_name': mv.worker_name,
+            })
+
+        for row in data:
+            row['open_requests'] = open_requests.get(row['id'], [])
+            row['recent_inbounds'] = sorted(
+                recent_inbounds.get(row['id'], []), key=lambda m: m['moved_at'], reverse=True
+            )
+        return Response(data)
 
     @action(detail=False, methods=['get'], url_path='filter-options')
     def filter_options(self, request):
@@ -223,3 +296,165 @@ class ConsumableViewSet(viewsets.ModelViewSet):
                     Consumable.objects.create(code=code, stock_quantity=stock_quantity, **defaults)
                     created += 1
         return Response({'created': created, 'updated': updated, 'errors': errors})
+
+
+ORG_LEVEL_FIELDS = {
+    'division': 'division_name',
+    'group': 'group_name',
+    'team': 'team_name',
+    'unit': 'unit_name',
+}
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        raise ValueError(f'日付の形式が正しくありません: {value}')
+
+
+def _resolve_worker(request):
+    """作業者: 指定があればそのユーザー、なければログインユーザー"""
+    worker_id = request.data.get('worker')
+    if not worker_id:
+        return request.user
+    worker = get_user_model().objects.select_related(
+        'profile__division', 'profile__group', 'profile__team', 'profile__unit'
+    ).filter(id=worker_id, is_active=True).first()
+    if worker is None:
+        raise ValueError('作業者が見つかりません')
+    return worker
+
+
+class ConsumableStockMovementViewSet(viewsets.ReadOnlyModelViewSet):
+    """入出庫履歴の照会と、入庫・出庫の登録"""
+    queryset = ConsumableStockMovement.objects.select_related('consumable')
+    serializer_class = ConsumableStockMovementSerializer
+    permission_classes = [IsAuthenticated, HasResourcePermissionOrReadOnly]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['movement_type', 'inbound_type', 'consumable', 'worker']
+    search_fields = ['consumable__code', 'consumable__name', 'worker_name', 'note']
+    ordering = ['-moved_at', '-id']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        # 期間は業務日（日替わり8時）で絞り込む
+        start, end = business_day_range(_parse_date(params.get('date_from')), _parse_date(params.get('date_to')))
+        if start:
+            qs = qs.filter(moved_at__gte=start)
+        if end:
+            qs = qs.filter(moved_at__lt=end)
+        org_field = ORG_LEVEL_FIELDS.get(params.get('org_level', ''))
+        if org_field and 'org_name' in params:
+            qs = qs.filter(**{org_field: params.get('org_name')})
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        try:
+            return super().list(request, *args, **kwargs)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """部署別集計。org_level（division/group/team/unit、初期値 team）ごとに数量・金額を合計する"""
+        org_level = request.query_params.get('org_level') or 'team'
+        org_field = ORG_LEVEL_FIELDS.get(org_level)
+        if not org_field:
+            return Response({'detail': 'org_level が正しくありません'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            qs = self.filter_queryset(self.get_queryset())
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        rows = (
+            qs.values(org_field, 'movement_type')
+            .annotate(count=Count('id'), quantity=Sum('quantity'), total_amount=Sum('total_amount'))
+            .order_by(org_field, 'movement_type')
+        )
+        return Response([
+            {
+                'org_name': row[org_field] or '（未設定）',
+                'movement_type': row['movement_type'],
+                'count': row['count'],
+                'quantity': row['quantity'],
+                'total_amount': row['total_amount'],
+            }
+            for row in rows
+        ])
+
+    @action(detail=False, methods=['get'])
+    def workers(self, request):
+        """作業者の選択肢（有効な pm ユーザー。社員コード・班付き）"""
+        users = (
+            get_user_model().objects.filter(is_active=True)
+            .select_related('profile__team')
+            .order_by('profile__employee_code', 'username')
+        )
+        result = []
+        for user in users:
+            profile = getattr(user, 'profile', None)
+            result.append({
+                'id': user.id,
+                'name': display_user_name(user),
+                'employee_code': (profile.employee_code if profile else '') or '',
+                'team_name': profile.team.name if profile and profile.team else '',
+            })
+        return Response(result)
+
+    def _register(self, request, movement_type):
+        consumable_id = request.data.get('consumable')
+        try:
+            quantity = _to_int(request.data.get('quantity'), 0)
+            worker = _resolve_worker(request)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not consumable_id or quantity <= 0:
+            return Response({'detail': '消耗品と数量（1以上）を指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            consumable = Consumable.objects.select_for_update().filter(id=consumable_id).first()
+            if consumable is None:
+                return Response({'detail': '消耗品が見つかりません'}, status=status.HTTP_404_NOT_FOUND)
+            if movement_type == ConsumableStockMovement.TYPE_OUTBOUND:
+                if consumable.stock_quantity < quantity:
+                    return Response(
+                        {'detail': f'在庫が不足しています（在庫: {consumable.stock_quantity}）'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                consumable.stock_quantity -= quantity
+            else:
+                consumable.stock_quantity += quantity
+            consumable.save(update_fields=['stock_quantity', 'updated_at'])
+
+            movement = ConsumableStockMovement.objects.create(
+                consumable=consumable,
+                movement_type=movement_type,
+                inbound_type=(
+                    ConsumableStockMovement.INBOUND_MANUAL
+                    if movement_type == ConsumableStockMovement.TYPE_INBOUND else ''
+                ),
+                quantity=quantity,
+                stock_after=consumable.stock_quantity,
+                worker=worker,
+                worker_name=display_user_name(worker),
+                usage_line=request.data.get('usage_line', '') or '',
+                unit_price=consumable.unit_price,
+                total_amount=consumable.unit_price * quantity,
+                note=request.data.get('note', '') or '',
+                moved_at=datetime.now(),
+                created_by=request.user,
+                **org_snapshot(worker),
+            )
+        return Response(self.get_serializer(movement).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'])
+    def outbound(self, request):
+        return self._register(request, ConsumableStockMovement.TYPE_OUTBOUND)
+
+    @action(detail=False, methods=['post'])
+    def inbound(self, request):
+        """手動入庫（注文書による発注分の一括入庫は注文書APIで行う）"""
+        return self._register(request, ConsumableStockMovement.TYPE_INBOUND)

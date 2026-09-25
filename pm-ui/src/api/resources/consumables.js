@@ -7,8 +7,13 @@ export const createConsumablesAPI = (client) => ({
   getItem(id) {
     return client.get(`/consumables/items/${id}/`)
   },
-  getItemByCode(code) {
-    return client.get(`/consumables/items/by-code/${encodeURIComponent(code)}/`)
+  // QR文字列から消耗品を特定（正規化・照合はサーバー側）
+  lookupByQr(qr) {
+    return client.get('/consumables/items/lookup/', { params: { qr } })
+  },
+  // 在庫一覧カード（未完了の依頼・直近入庫付き）
+  listCards(params = {}) {
+    return client.get('/consumables/items/cards/', { params })
   },
   createItem(data) {
     return client.post('/consumables/items/', data)
@@ -44,5 +49,22 @@ export const createConsumablesAPI = (client) => ({
   },
   importSuppliersCsv(formData) {
     return client.post('/consumables/suppliers/import-csv/', formData)
+  },
+
+  // 入出庫
+  listMovements(params = {}) {
+    return client.get('/consumables/movements/', { params })
+  },
+  summarizeMovements(params = {}) {
+    return client.get('/consumables/movements/summary/', { params })
+  },
+  outbound(data) {
+    return client.post('/consumables/movements/outbound/', data)
+  },
+  inbound(data) {
+    return client.post('/consumables/movements/inbound/', data)
+  },
+  listWorkers() {
+    return client.get('/consumables/movements/workers/')
   },
 })

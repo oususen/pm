@@ -166,6 +166,7 @@ import api from '@/api/client'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import { errorMessage, formatPrice, rowsOf } from './consumableUtils'
 
 const dsSources = [
   { op: '読み書き', table: 't_consumable', desc: '消耗品マスタ（在庫数を保持）' },
@@ -188,18 +189,6 @@ const formError = ref('')
 const imageFile = ref(null)
 const csvInput = ref(null)
 
-// page_size=0 は全件返却（配列）。ページング形式にも対応する
-const rowsOf = (res) => (Array.isArray(res.data) ? res.data : res.data?.results || [])
-
-const errorMessage = (err) => {
-  const data = err?.response?.data
-  if (!data) return err?.message || 'エラーが発生しました'
-  if (typeof data === 'string') return data
-  if (data.detail) return data.detail
-  return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' ') : v}`).join('\n')
-}
-
-const formatPrice = (v) => Number(v || 0).toLocaleString('ja-JP')
 
 async function fetchItems() {
   loading.value = true
