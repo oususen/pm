@@ -315,16 +315,16 @@ def _parse_date(value):
         raise ValueError(f'日付の形式が正しくありません: {value}')
 
 
-def _resolve_worker(request):
-    """作業者: 指定があればそのユーザー、なければログインユーザー"""
-    worker_id = request.data.get('worker')
+def _resolve_worker(request, field='worker'):
+    """作業者（依頼者）: 指定があればそのユーザー、なければログインユーザー"""
+    worker_id = request.data.get(field)
     if not worker_id:
         return request.user
     worker = get_user_model().objects.select_related(
         'profile__division', 'profile__group', 'profile__team', 'profile__unit'
     ).filter(id=worker_id, is_active=True).first()
     if worker is None:
-        raise ValueError('作業者が見つかりません')
+        raise ValueError('指定されたユーザーが見つかりません')
     return worker
 
 

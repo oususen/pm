@@ -151,9 +151,11 @@ class ConsumableDispatchOrder(models.Model):
     """注文書（購入先単位）。確認・承認は accounts.ApprovalRequest で管理する"""
     STATUS_UNSENT = 'unsent'
     STATUS_SENT = 'sent'
+    STATUS_RECEIVED = 'received'
     STATUS_CHOICES = [
         (STATUS_UNSENT, '未送信'),
         (STATUS_SENT, '送信済'),
+        (STATUS_RECEIVED, '入庫済'),
     ]
 
     order_number = models.CharField(max_length=50, unique=True, verbose_name='注文書番号')
@@ -177,6 +179,7 @@ class ConsumableDispatchOrder(models.Model):
     pdf_file = models.FileField(upload_to='consumables/purchase_orders/', blank=True, default='', verbose_name='PDF')
     sent_at = models.DateTimeField(null=True, blank=True, verbose_name='送信日時')
     sent_email = models.CharField(max_length=255, blank=True, default='', verbose_name='送信先')
+    received_at = models.DateTimeField(null=True, blank=True, verbose_name='入庫日時')
     note = models.TextField(blank=True, default='', verbose_name='備考')
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

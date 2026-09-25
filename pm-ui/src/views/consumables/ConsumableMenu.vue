@@ -35,6 +35,20 @@ const tiles = [
     resource: "consumables.operations",
   },
   {
+    to: "/consumables/requests",
+    label: "注文依頼",
+    icon: "📝",
+    description: "依頼の発注準備・却下、購入先別の注文書作成",
+    resource: "consumables.dispatch",
+  },
+  {
+    to: "/consumables/dispatch-orders",
+    label: "注文書",
+    icon: "📄",
+    description: "承認・PDF・メール送信・一括入庫",
+    resource: "consumables.dispatch",
+  },
+  {
     to: "/consumables/history",
     label: "入出庫履歴",
     icon: "🧾",

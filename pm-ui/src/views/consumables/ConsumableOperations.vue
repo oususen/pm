@@ -35,7 +35,7 @@
           <button class="qty-btn" @click="quantity += 1">＋</button>
         </div>
       </label>
-      <label>作業者
+      <label>{{ mode === 'request' ? '依頼者' : '作業者' }}
         <select v-model="workerId">
           <option v-for="w in workers" :key="w.id" :value="w.id">
             {{ w.employee_code ? `${w.employee_code} ` : '' }}{{ w.name }}{{ w.team_name ? `（${w.team_name}）` : '' }}
@@ -43,6 +43,14 @@
         </select>
       </label>
       <label v-if="mode === 'outbound'">使用ライン<input v-model="usageLine" /></label>
+      <label v-if="mode === 'request'">納期
+        <select v-model="deadline">
+          <option v-for="d in deadlineOptions" :key="d" :value="d">{{ d }}</option>
+        </select>
+      </label>
+      <p v-if="mode === 'request' && item.order_status" class="warn-text">
+        この品目には未完了の依頼があります（注文状態: {{ item.order_status_label }}）
+      </p>
       <label>備考<input v-model="note" /></label>
       <p v-if="submitError" class="error-text">{{ submitError }}</p>
       <button :class="['submit-btn', mode]" :disabled="submitting" @click="submit">
@@ -67,6 +75,7 @@ import { errorMessage } from './consumableUtils'
 const modes = [
   { key: 'outbound', label: '出庫' },
   { key: 'inbound', label: '入庫' },
+  { key: 'request', label: '注文依頼' },
 ]
 
 const route = useRoute()
@@ -82,6 +91,8 @@ const workers = ref([])
 const workerId = ref(authState.user?.id || null)
 const quantity = ref(1)
 const usageLine = ref('')
+const deadlineOptions = ['最短', '通常', '余裕あり']
+const deadline = ref('通常')
 const note = ref('')
 const submitting = ref(false)
 const submitError = ref('')
@@ -90,6 +101,7 @@ const resultMessage = ref('')
 function resetInputs() {
   quantity.value = 1
   usageLine.value = ''
+  deadline.value = '通常'
   note.value = ''
   submitError.value = ''
 }
@@ -132,19 +144,29 @@ async function submit() {
   }
   submitting.value = true
   submitError.value = ''
-  const payload = {
-    consumable: item.value.id,
-    quantity: quantity.value,
-    worker: workerId.value,
-    usage_line: mode.value === 'outbound' ? usageLine.value : '',
-    note: note.value,
-  }
   try {
-    const res = mode.value === 'outbound'
-      ? await api.consumables.outbound(payload)
-      : await api.consumables.inbound(payload)
-    const mv = res.data
-    resultMessage.value = `${currentMode.value.label}しました: ${mv.consumable_name} ${mv.quantity}${mv.unit}（処理後在庫: ${mv.stock_after}）`
+    if (mode.value === 'request') {
+      const req = (await api.consumables.createRequest({
+        consumable: item.value.id,
+        quantity: quantity.value,
+        requester: workerId.value,
+        deadline: deadline.value,
+        note: note.value,
+      })).data
+      resultMessage.value = `注文依頼を登録しました: ${req.consumable_name} ${req.quantity}${req.unit}（納期: ${req.deadline}）`
+    } else {
+      const payload = {
+        consumable: item.value.id,
+        quantity: quantity.value,
+        worker: workerId.value,
+        usage_line: mode.value === 'outbound' ? usageLine.value : '',
+        note: note.value,
+      }
+      const mv = (mode.value === 'outbound'
+        ? await api.consumables.outbound(payload)
+        : await api.consumables.inbound(payload)).data
+      resultMessage.value = `${currentMode.value.label}しました: ${mv.consumable_name} ${mv.quantity}${mv.unit}（処理後在庫: ${mv.stock_after}）`
+    }
     item.value = null
     qrText.value = ''
     resetInputs()
@@ -167,6 +189,7 @@ onMounted(async () => {
 .mode-btn { flex: 1; padding: 10px; font-size: 1.05em; border: 2px solid #ccc; border-radius: 6px; background: #f5f5f5; cursor: pointer; }
 .mode-btn.active.outbound { background: #e65100; border-color: #e65100; color: #fff; }
 .mode-btn.active.inbound { background: #2e7d32; border-color: #2e7d32; color: #fff; }
+.mode-btn.active.request { background: #1565c0; border-color: #1565c0; color: #fff; }
 .scan-row { display: flex; gap: 6px; }
 .code-input { flex: 1; padding: 8px; font-size: 1em; }
 .btn-primary { background: #1565c0; color: #fff; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
@@ -185,6 +208,8 @@ onMounted(async () => {
 .submit-btn { padding: 12px; font-size: 1.1em; font-weight: 700; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
 .submit-btn.outbound { background: #e65100; }
 .submit-btn.inbound { background: #2e7d32; }
+.submit-btn.request { background: #1565c0; }
+.warn-text { color: #e65100; font-size: 0.85em; margin: 0; }
 .submit-btn:disabled { opacity: 0.6; }
 .error-text { color: #c62828; white-space: pre-wrap; font-size: 0.9em; }
 .result-text { margin-top: 10px; padding: 8px; background: #e8f5e9; border-radius: 4px; }

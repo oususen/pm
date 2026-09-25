@@ -94,6 +94,8 @@ const sections = [
       { label: "消耗品メニュー", link: "/consumables" },
       { label: "在庫一覧", link: "/consumables/inventory" },
       { label: "入出庫", link: "/consumables/operations" },
+      { label: "注文依頼", link: "/consumables/requests" },
+      { label: "注文書", link: "/consumables/dispatch-orders" },
       { label: "入出庫履歴", link: "/consumables/history" },
       { label: "消耗品マスタ", link: "/consumables/masters" },
     ],

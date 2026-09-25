@@ -67,4 +67,48 @@ export const createConsumablesAPI = (client) => ({
   listWorkers() {
     return client.get('/consumables/movements/workers/')
   },
+
+  // 注文依頼
+  listRequests(params = {}) {
+    return client.get('/consumables/requests/', { params })
+  },
+  createRequest(data) {
+    return client.post('/consumables/requests/', data)
+  },
+  updateRequest(id, data) {
+    return client.patch(`/consumables/requests/${id}/`, data)
+  },
+  deleteRequest(id) {
+    return client.delete(`/consumables/requests/${id}/`)
+  },
+  setRequestStatus(id, status) {
+    return client.post(`/consumables/requests/${id}/set-status/`, { status })
+  },
+
+  // 注文書（確認・承認は accounts の承認申請APIを使う）
+  listDispatchOrders(params = {}) {
+    return client.get('/consumables/dispatch-orders/', { params })
+  },
+  getDispatchOrder(id) {
+    return client.get(`/consumables/dispatch-orders/${id}/`)
+  },
+  getDispatchRouteStatus() {
+    return client.get('/consumables/dispatch-orders/route-status/')
+  },
+  createDispatchOrder(data) {
+    return client.post('/consumables/dispatch-orders/create-order/', data)
+  },
+  deleteDispatchOrder(id) {
+    return client.delete(`/consumables/dispatch-orders/${id}/`)
+  },
+  sendDispatchOrder(id, email) {
+    return client.post(`/consumables/dispatch-orders/${id}/send/`, { email })
+  },
+  receiveDispatchOrder(id, data = {}) {
+    return client.post(`/consumables/dispatch-orders/${id}/receive/`, data)
+  },
+  // PDFはログインセッション付きで取得する（Blob）
+  fetchDispatchOrderPdf(id) {
+    return client.get(`/consumables/dispatch-orders/${id}/pdf/`, { responseType: 'blob' })
+  },
 })

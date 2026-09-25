@@ -272,8 +272,17 @@ const normalizeApprovalTask = (request, task) => {
     created_at: task.created_at || request.created_at || "",
     target_primary: request.route_config_item_key === "laser_material_order" && supplierLabel ? `${request.route_config_name || "承認申請"}（${supplierLabel}）` : request.route_config_name || "承認申請",
     target_secondary: period ? `注文書期間 ${period}` : `申請者 ${request.creator_name || "-"}`,
-    action_label: request.route_config_item_key === "laser_material_order" ? "材料発注へ" : "承認へ",
+    action_label: request.route_config_item_key === "laser_material_order"
+      ? "材料発注へ"
+      : request.route_config_item_key === "consumable_dispatch_order" ? "注文書へ" : "承認へ",
+    ...(request.route_config_item_key === "consumable_dispatch_order" && context.order_number
+      ? { target_secondary: `${context.supplier_name || ""} ${context.order_number}（申請者 ${request.creator_name || "-"}）` }
+      : {}),
     navigate() {
+      if (request.route_config_item_key === "consumable_dispatch_order") {
+        router.push({ path: "/consumables/dispatch-orders", query: { id: context.dispatch_order_id || "" } })
+        return
+      }
       if (request.route_config_item_key === "laser_material_order") {
         router.push({
           path: "/production/plan-input",

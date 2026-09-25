@@ -132,6 +132,8 @@ class ConsumableDispatchOrderSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     supplier_email = serializers.CharField(source='supplier.email', read_only=True, default='')
     pdf_url = serializers.SerializerMethodField()
+    reject_reason = serializers.CharField(source='approval_request.reject_reason', read_only=True, default='')
+    my_pending_task_types = serializers.SerializerMethodField()
 
     class Meta:
         model = ConsumableDispatchOrder
@@ -139,8 +141,9 @@ class ConsumableDispatchOrderSerializer(serializers.ModelSerializer):
             'id', 'order_number', 'business_date', 'daily_count',
             'supplier', 'supplier_name', 'supplier_email', 'total_items', 'total_amount',
             'status', 'status_label', 'approval_request', 'approval_status', 'approval_status_label',
-            'approval_stage', 'pdf_url', 'sent_at', 'sent_email', 'note',
+            'approval_stage', 'pdf_url', 'sent_at', 'sent_email', 'received_at', 'note',
             'created_by', 'created_by_name', 'created_at', 'items',
+            'reject_reason', 'my_pending_task_types',
         ]
 
     def get_created_by_name(self, obj):
@@ -151,3 +154,13 @@ class ConsumableDispatchOrderSerializer(serializers.ModelSerializer):
         if not obj.pdf_file:
             return ''
         return build_media_absolute_url(self.context.get('request'), obj.pdf_file.url)
+
+    def get_my_pending_task_types(self, obj):
+        """ログインユーザーに割り当てられた未処理の承認タスク（画面の確認・承認ボタン表示用）"""
+        request = self.context.get('request')
+        if not obj.approval_request_id or not request or not request.user.is_authenticated:
+            return []
+        return list(
+            obj.approval_request.tasks.filter(assigned_to=request.user, status='PENDING')
+            .values_list('task_type', flat=True)
+        )

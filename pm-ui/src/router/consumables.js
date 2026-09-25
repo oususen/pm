@@ -18,6 +18,18 @@ export default [
     meta: { pageTitle: "消耗品 入出庫", resource: "consumables.operations" },
   },
   {
+    path: "/consumables/requests",
+    name: "ConsumableRequests",
+    component: () => import("@/views/consumables/ConsumableRequests.vue"),
+    meta: { pageTitle: "消耗品 注文依頼", resource: "consumables.dispatch" },
+  },
+  {
+    path: "/consumables/dispatch-orders",
+    name: "ConsumableDispatchOrders",
+    component: () => import("@/views/consumables/ConsumableDispatchOrders.vue"),
+    meta: { pageTitle: "消耗品 注文書", resource: "consumables.dispatch" },
+  },
+  {
     path: "/consumables/history",
     name: "ConsumableHistory",
     component: () => import("@/views/consumables/ConsumableHistory.vue"),

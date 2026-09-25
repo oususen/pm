@@ -149,6 +149,9 @@ def _approval_request_path(approval_request):
         start_date = (approval_request.context or {}).get('start_date') or ''
         query = urlencode({'tab': 'laser', 'start_date': start_date})
         return f'/production/plan-input?{query}'
+    if approval_request.route_config.item_key == 'consumable_dispatch_order':
+        dispatch_order_id = (approval_request.context or {}).get('dispatch_order_id') or ''
+        return f'/consumables/dispatch-orders?id={dispatch_order_id}'
     return '/tasks'
 
 
@@ -165,6 +168,11 @@ def _approval_context_label(approval_request):
     labels = []
     supplier = context.get('supplier')
     supplier_label = {'SATO': '佐藤商事', 'MEISEI': '名成鋼機'}.get(supplier, '')
+    # 消耗品注文書: 購入先名・注文書番号を件名に入れる
+    if context.get('supplier_name'):
+        labels.append(context['supplier_name'])
+    if context.get('order_number'):
+        labels.append(context['order_number'])
     if supplier_label:
         labels.append(supplier_label)
     start_date = context.get('lock_start_date')
@@ -229,6 +237,13 @@ def _refresh_laser_material_order_pdf(approval_request):
         'material_order_pdf_saved_at': datetime.now().isoformat(timespec='seconds'),
     }
     approval_request.save(update_fields=['context', 'updated_at'])
+
+
+def _refresh_consumable_dispatch_pdf(approval_request):
+    """消耗品注文書の保存PDFを、承認ステップ更新後の承認欄で再保存する。"""
+    from consumables.dispatch_service import refresh_dispatch_pdf_for_approval
+
+    refresh_dispatch_pdf_for_approval(approval_request)
 
 
 def _get_result_users(approval_request, route_config):
@@ -368,6 +383,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.save()
 
             _refresh_laser_material_order_pdf(approval)
+            _refresh_consumable_dispatch_pdf(approval)
             _advance_to_stage(approval, route_config, next_stage, request.user, request=request)
 
         return Response(self.get_serializer(self.get_object()).data)
@@ -399,6 +415,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.save()
 
             _refresh_laser_material_order_pdf(approval)
+            _refresh_consumable_dispatch_pdf(approval)
             _advance_to_stage(approval, route_config, next_stage, request.user, request=request)
 
         return Response(self.get_serializer(self.get_object()).data)
@@ -426,6 +443,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.save()
 
             _refresh_laser_material_order_pdf(approval)
+            _refresh_consumable_dispatch_pdf(approval)
             result_users = _get_result_users(approval, route_config)
             if route_config.approved_result_app_notification_enabled:
                 _create_notification(
@@ -466,6 +484,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             approval.save()
 
             _refresh_laser_material_order_pdf(approval)
+            _refresh_consumable_dispatch_pdf(approval)
             _create_tasks(approval, 'CREATOR_FIX', [approval.creator])
 
             result_users = _get_result_users(approval, route_config)

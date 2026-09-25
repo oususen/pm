@@ -114,7 +114,7 @@
                 :disabled="!canEditPage || isStageDisabled(selectedRoute, stage)"
               />
               <UserPicker
-                v-if="stage.key === 'creator' && ['laser_material_order', 'purchase_order_proposal'].includes(selectedRoute.item_key)"
+                v-if="stage.key === 'creator' && ['laser_material_order', 'purchase_order_proposal', 'consumable_dispatch_order'].includes(selectedRoute.item_key)"
                 :row="selectedRoute"
                 :stage="stage.key"
                 type="authorized"
@@ -196,6 +196,7 @@ const roleOptions = [
 const businessOptions = [
   { key: 'laser_material_order', label: 'レーザー材料発注' },
   { key: 'purchase_order_proposal', label: '外作・購入品注文' },
+  { key: 'consumable_dispatch_order', label: '消耗品注文書' },
 ]
 
 const departments = ref([])

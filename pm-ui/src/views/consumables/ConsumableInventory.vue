@@ -73,6 +73,7 @@
         <div v-if="canOperate" class="card-actions">
           <RouterLink :to="{ path: '/consumables/operations', query: { mode: 'outbound', code: c.code } }" class="act outbound">出庫</RouterLink>
           <RouterLink :to="{ path: '/consumables/operations', query: { mode: 'inbound', code: c.code } }" class="act inbound">入庫</RouterLink>
+          <RouterLink :to="{ path: '/consumables/operations', query: { mode: 'request', code: c.code } }" class="act request">注文依頼</RouterLink>
         </div>
       </div>
     </div>
@@ -152,4 +153,5 @@ onMounted(async () => {
 .act { flex: 1; text-align: center; padding: 4px; border-radius: 4px; color: #fff; text-decoration: none; font-weight: 600; }
 .act.outbound { background: #e65100; }
 .act.inbound { background: #2e7d32; }
+.act.request { background: #1565c0; }
 </style>
