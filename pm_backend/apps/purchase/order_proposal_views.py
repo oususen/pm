@@ -185,6 +185,9 @@ def _resolve_route_stage_users(route_config: ApprovalRouteConfig, stage: str, cr
         if role == 'manager' and getattr(profile, 'division_id', None):
             users = list(user_qs.filter(profile__role='manager', profile__division_id=profile.division_id).distinct())
             return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
+        if role in ('office_staff', 'staff'):
+            users = list(user_qs.filter(profile__role=role).distinct())
+            return list({user.id: user for user in users + authorized_users if getattr(user, 'id', None)}.values())
         return authorized_users
 
     if role:

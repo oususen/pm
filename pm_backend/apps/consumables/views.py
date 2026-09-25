@@ -141,7 +141,8 @@ class ConsumableViewSet(viewsets.ModelViewSet):
     def lookup(self, request):
         """
         QR読取用: QR文字列（?qr=）から消耗品を1件特定する。照合順は syomohin と同じ。
-        1. コード完全一致（大文字小文字無視） 2. ハイフン・空白を除いて一致 3. 前方一致
+        1. コード完全一致（大文字小文字無視） 2. ハイフン・空白を除いて一致
+        3. コード前方一致（複数候補があれば一覧表示） 4. 品名部分一致
         """
         code = normalize_qr_code_value(request.query_params.get('qr', ''))
         if not code:
@@ -157,7 +158,19 @@ class ConsumableViewSet(viewsets.ModelViewSet):
                 .first()
             )
         if consumable is None:
-            consumable = qs.filter(code__istartswith=code).order_by('code').first()
+            code_matches = list(qs.filter(code__istartswith=code).order_by('code')[:20])
+            if len(code_matches) == 1:
+                consumable = code_matches[0]
+            elif code_matches:
+                return Response({
+                    'multiple': True,
+                    'results': [
+                        {'id': c.id, 'code': c.code, 'name': c.name,
+                         'stock_quantity': c.stock_quantity, 'unit': c.unit,
+                         'image_url': c.image.url if c.image else ''}
+                        for c in code_matches
+                    ],
+                })
         if consumable is None:
             name_matches = list(qs.filter(name__icontains=code).order_by('code')[:20])
             if len(name_matches) == 1:

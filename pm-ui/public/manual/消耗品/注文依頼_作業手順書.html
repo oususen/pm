@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>消耗品 注文依頼 作業手順書</title>
+<title>消耗品 発注準備 作業手順書</title>
 <style>
   :root {
     --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
@@ -111,9 +111,9 @@
 <div class="page">
 
   <div class="cover">
-    <h1>消耗品 注文依頼・注文書作成 作業手順書</h1>
+    <h1>消耗品 発注準備・注文書作成 作業手順書</h1>
     <div class="subtitle">依頼の受付から発注準備、購入先別注文書の作成、承認・PDF送信・一括入庫までの一連の発注フローを説明します。</div>
-    <div class="path">消耗品 <span class="arrow">&#9656;</span> 注文依頼 / 注文書</div>
+    <div class="path">消耗品 <span class="arrow">&#9656;</span> 発注準備 / 注文書</div>
   </div>
 
   <div class="toc">
@@ -152,7 +152,7 @@
     <table class="info-table">
       <tr><th>画面</th><th>役割</th></tr>
       <tr><th>入出庫画面</th><td>現場の作業者が注文依頼を作成（ステータス: <span class="status-chip requested">依頼中</span>）</td></tr>
-      <tr><th>注文依頼画面</th><td>管理者が依頼を<span class="status-chip preparing">発注準備</span>に移行し、購入先別に注文書を作成</td></tr>
+      <tr><th>発注準備画面</th><td>管理者が依頼を<span class="status-chip preparing">発注準備</span>に移行し、購入先別に注文書を作成</td></tr>
       <tr><th>注文書画面</th><td>承認・PDF出力・メール送信・一括入庫</td></tr>
     </table>
 
@@ -166,12 +166,12 @@
   <div class="step">
     <div class="step-header"><div class="step-num">2</div><div class="step-title">依頼を発注準備にする</div></div>
     <div class="step-desc" style="margin-bottom:8px;">
-      <strong>注文依頼画面</strong>の依頼一覧で、依頼中の依頼を発注準備に移行します。
+      <strong>発注準備画面</strong>の依頼一覧で、依頼中の依頼を発注準備に移行します。
     </div>
     <table class="proc-table">
       <thead><tr><th></th><th>操作</th><th>説明</th></tr></thead>
       <tbody>
-        <tr><td class="num">1</td><td>消耗品 &gt; 注文依頼 画面を開く</td><td>依頼一覧が表示されます（初期: 依頼中のみ）</td></tr>
+        <tr><td class="num">1</td><td>消耗品 &gt; 発注準備 画面を開く</td><td>依頼一覧が表示されます（初期: 依頼中のみ）</td></tr>
         <tr><td class="num">2</td><td>対象の依頼行で<span class="mock-btn teal" style="font-size:10px;">発注準備</span>をクリック</td><td>ステータスが「発注準備」に変わります</td></tr>
         <tr><td class="num">3</td><td>必要に応じて数量を編集</td><td>数量欄の「編集」をクリックして変更可能</td></tr>
       </tbody>
@@ -285,7 +285,7 @@
 
     <h4 class="sub">却下</h4>
     <div class="step-desc" style="margin-bottom:8px;">
-      注文依頼画面の依頼一覧で、対象行の<span class="mock-btn danger" style="font-size:10px;">却下</span>をクリックします。却下された依頼は以後処理されません。
+      発注準備画面の依頼一覧で、対象行の<span class="mock-btn danger" style="font-size:10px;">却下</span>をクリックします。却下された依頼は以後処理されません。
     </div>
 
     <h4 class="sub">数量編集</h4>

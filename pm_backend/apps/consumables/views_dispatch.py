@@ -32,6 +32,15 @@ from .views import _resolve_worker, _to_int
 
 R = ConsumableRequest
 
+
+def _is_valid_deadline(value):
+    if value in dict(R.DEADLINE_CHOICES):
+        return True
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').strftime('%Y-%m-%d') == value
+    except (TypeError, ValueError):
+        return False
+
 # 依頼の手動状態変更で許可する遷移（発注済・入庫済は注文書の送信・入庫でのみ変わる）
 ALLOWED_TRANSITIONS = {
     R.STATUS_REQUESTED: {R.STATUS_PREPARING, R.STATUS_REJECTED, R.STATUS_CANCELLED},
@@ -78,8 +87,8 @@ class ConsumableRequestViewSet(viewsets.ModelViewSet):
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         if quantity <= 0:
             return Response({'detail': '数量は1以上で入力してください'}, status=status.HTTP_400_BAD_REQUEST)
-        deadline = request.data.get('deadline') or '通常'
-        if deadline not in dict(R.DEADLINE_CHOICES):
+        deadline = request.data.get('deadline') or '最短'
+        if not _is_valid_deadline(deadline):
             return Response({'detail': '納期が正しくありません'}, status=status.HTTP_400_BAD_REQUEST)
 
         is_direct = str(request.data.get('direct', '')).lower() in ('1', 'true')
@@ -111,8 +120,8 @@ class ConsumableRequestViewSet(viewsets.ModelViewSet):
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         if quantity <= 0:
             return Response({'detail': '数量は1以上で入力してください'}, status=status.HTTP_400_BAD_REQUEST)
-        deadline = request.data.get('deadline', req.deadline)
-        if deadline not in dict(R.DEADLINE_CHOICES):
+        deadline = request.data.get('deadline', req.deadline) or '最短'
+        if not _is_valid_deadline(deadline):
             return Response({'detail': '納期が正しくありません'}, status=status.HTTP_400_BAD_REQUEST)
         req.quantity = quantity
         req.total_amount = req.unit_price * quantity

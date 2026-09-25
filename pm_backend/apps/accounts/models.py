@@ -248,7 +248,7 @@ class UserPermission(models.Model):
         ('consumables', '消耗品'),
         ('consumables.inventory', '消耗品: 在庫一覧'),
         ('consumables.operations', '消耗品: 入出庫・注文依頼'),
-        ('consumables.dispatch', '消耗品: 注文書'),
+        ('consumables.dispatch', '消耗品: 発注準備・注文書'),
         ('consumables.history', '消耗品: 入出庫履歴'),
         ('consumables.masters', '消耗品: マスタ'),
         ('inventory', '在庫'),

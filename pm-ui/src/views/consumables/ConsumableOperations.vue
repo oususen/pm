@@ -6,11 +6,46 @@
       </button>
     </div>
 
+    <div v-if="mode === 'inbound'" class="inbound-type-bar">
+      <button :class="['inbound-type-btn', { active: inboundType === 'manual' }]" @click="switchInboundType('manual')">個別入庫</button>
+      <button :class="['inbound-type-btn', { active: inboundType === 'dispatch' }]" @click="switchInboundType('dispatch')">注文書分入庫</button>
+    </div>
+
+    <section v-if="mode === 'inbound' && inboundType === 'dispatch'" class="dispatch-inbound">
+      <div class="dispatch-header">
+        <strong>入庫待ちの注文書</strong>
+        <button class="btn-primary" :disabled="dispatchLoading" @click="fetchDispatchOrders">更新</button>
+      </div>
+      <p v-if="dispatchLoading">読み込み中...</p>
+      <p v-else-if="!dispatchOrders.length">入庫待ちの注文書はありません。</p>
+      <article v-for="order in dispatchOrders" :key="order.id" class="dispatch-order-card">
+        <div><strong>{{ order.order_number }}</strong> | 購入先: {{ order.supplier_name }}</div>
+        <div>明細: {{ order.total_items }}件 | 合計: {{ formatPrice(order.total_amount) }}円</div>
+        <div v-if="order.sent_at">送信日: {{ formatDateTime(order.sent_at) }}</div>
+        <button class="submit-btn inbound" :disabled="receivingOrderId === order.id" @click="receiveOrder(order)">
+          {{ receivingOrderId === order.id ? '入庫中...' : 'この注文書を一括入庫' }}
+        </button>
+      </article>
+      <p v-if="dispatchError" class="error-text">{{ dispatchError }}</p>
+    </section>
+
     <!-- 品目の特定 -->
-    <div class="scan-row">
-      <input v-model="qrText" class="code-input" placeholder="コードまたは品名を入力" @keyup.enter="lookup(qrText)" />
-      <button class="btn-primary" @click="lookup(qrText)">検索</button>
-      <button class="btn-qr" @click="showScanner = true">📷 QR</button>
+    <div v-if="mode !== 'inbound' || inboundType === 'manual'" class="lookup-fields">
+      <div class="qr-search-group">
+        <div class="scan-row lookup-line">
+          <label v-if="mode === 'inbound'" class="lookup-label">QRコード検索</label>
+          <input v-model="qrText" class="code-input" placeholder="QRコードを読み取る / 手入力" @keyup.enter="lookup(qrText)" />
+          <button class="btn-primary" @click="lookup(qrText)">検索</button>
+          <button class="btn-qr" @click="showScanner = true">📷 QR</button>
+        </div>
+      </div>
+      <div v-if="mode === 'inbound'" class="name-search">
+        <div class="scan-row lookup-line">
+          <label for="inboundNameSearch" class="lookup-label">品名検索</label>
+          <input id="inboundNameSearch" v-model="nameSearch" class="code-input" placeholder="品名で検索" @keyup.enter="lookup(nameSearch)" />
+          <button class="btn-primary" @click="lookup(nameSearch)">検索</button>
+        </div>
+      </div>
     </div>
     <p v-if="lookupError" class="error-text">{{ lookupError }}</p>
 
@@ -83,7 +118,7 @@
         </div>
       </label>
       <div v-if="mode === 'inbound'" class="inbound-worker">入庫者: {{ authState.user?.last_name || authState.user?.username }}</div>
-      <template v-if="mode !== 'inbound'">
+      <template v-if="mode === 'outbound'">
         <div class="filter-row">
           <label class="filter-label">係
             <select v-model="filterGroupId" @change="onGroupChange">
@@ -104,7 +139,7 @@
             </select>
           </label>
         </div>
-        <label>{{ mode === 'request' ? '依頼者' : '作業者' }}
+        <label>作業者
           <select v-model="workerId">
             <option v-for="w in workers" :key="w.id" :value="w.id">
               {{ w.employee_code ? `${w.employee_code} ` : '' }}{{ w.name }}{{ w.team_name ? `（${w.team_name}）` : '' }}
@@ -118,10 +153,9 @@
           </select>
         </label>
       </template>
+      <div v-if="mode === 'request'" class="inbound-worker">依頼者: {{ authState.user?.last_name || authState.user?.username || '-' }}</div>
       <label v-if="mode === 'request'">納期
-        <select v-model="deadline">
-          <option v-for="d in deadlineOptions" :key="d" :value="d">{{ d }}</option>
-        </select>
+        <input v-model="deadline" type="date" />
       </label>
       <p v-if="mode === 'request' && item.order_status" class="warn-text">
         この品目には未完了の依頼があります（注文状態: {{ item.order_status_label }}）
@@ -145,7 +179,7 @@ import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { authState } from '@/auth'
 import QrScanner from './QrScanner.vue'
-import { errorMessage } from './consumableUtils'
+import { errorMessage, formatDateTime, formatPrice, rowsOf } from './consumableUtils'
 
 const modes = [
   { key: 'outbound', label: '出庫' },
@@ -156,8 +190,10 @@ const modes = [
 const route = useRoute()
 const mode = ref(modes.some((m) => m.key === route.query.mode) ? route.query.mode : 'outbound')
 const currentMode = computed(() => modes.find((m) => m.key === mode.value))
+const inboundType = ref('manual')
 
 const qrText = ref('')
+const nameSearch = ref('')
 const item = ref(null)
 const lookupError = ref('')
 const showScanner = ref(false)
@@ -174,8 +210,7 @@ const lineOptions = ref([])
 const workerId = ref(authState.user?.id || null)
 const quantity = ref(1)
 const usageLine = ref('')
-const deadlineOptions = ['最短', '通常', '余裕あり']
-const deadline = ref('通常')
+const deadline = ref('')
 const note = ref('')
 const submitting = ref(false)
 const submitError = ref('')
@@ -188,11 +223,15 @@ const editSaving = ref(false)
 const editMessage = ref('')
 const editError = ref('')
 const adjustQty = ref(0)
+const dispatchOrders = ref([])
+const dispatchLoading = ref(false)
+const dispatchError = ref('')
+const receivingOrderId = ref(null)
 
 function resetInputs() {
   quantity.value = 1
   usageLine.value = ''
-  deadline.value = '通常'
+  deadline.value = ''
   note.value = ''
   submitError.value = ''
 }
@@ -201,6 +240,41 @@ function switchMode(key) {
   mode.value = key
   submitError.value = ''
   resultMessage.value = ''
+}
+
+function switchInboundType(type) {
+  inboundType.value = type
+  item.value = null
+  candidates.value = []
+  lookupError.value = ''
+  submitError.value = ''
+  if (type === 'dispatch') fetchDispatchOrders()
+}
+
+async function fetchDispatchOrders() {
+  dispatchLoading.value = true
+  dispatchError.value = ''
+  try {
+    dispatchOrders.value = rowsOf(await api.consumables.listDispatchOrders({ page_size: 0, status: 'sent' }))
+  } catch (err) {
+    dispatchError.value = errorMessage(err)
+  } finally {
+    dispatchLoading.value = false
+  }
+}
+
+async function receiveOrder(order) {
+  if (!confirm(`${order.order_number}（${order.supplier_name}）の全明細 ${order.total_items}件を一括入庫しますか？`)) return
+  receivingOrderId.value = order.id
+  dispatchError.value = ''
+  try {
+    await api.consumables.receiveDispatchOrder(order.id)
+    await fetchDispatchOrders()
+  } catch (err) {
+    dispatchError.value = errorMessage(err)
+  } finally {
+    receivingOrderId.value = null
+  }
 }
 
 async function lookup(raw) {
@@ -323,7 +397,7 @@ async function submit() {
     submitError.value = '数量は1以上の整数で入力してください'
     return
   }
-  if (mode.value !== 'inbound' && !workerId.value) {
+  if (mode.value === 'outbound' && !workerId.value) {
     submitError.value = '作業者を選択してください'
     return
   }
@@ -334,8 +408,8 @@ async function submit() {
       const req = (await api.consumables.createRequest({
         consumable: item.value.id,
         quantity: quantity.value,
-        requester: workerId.value,
-        deadline: deadline.value,
+        requester: authState.user.id,
+        deadline: deadline.value || '最短',
         note: note.value,
       })).data
       resultMessage.value = `注文依頼を登録しました: ${req.consumable_name} ${req.quantity}${req.unit}（納期: ${req.deadline}）`
@@ -411,11 +485,6 @@ function onFilterChange() {
 
 onMounted(async () => {
   await fetchWorkers()
-  const seikan = groupOptions.value.find((g) => g.name === '製缶係')
-  if (seikan) {
-    filterGroupId.value = seikan.id
-    await fetchWorkers()
-  }
   if (authState.user?.id && workers.value.some((w) => w.id === authState.user.id)) {
     workerId.value = authState.user.id
   }
@@ -424,12 +493,23 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.ops-page { padding: 10px; max-width: 560px; margin: 0 auto; }
+.ops-page { padding: 10px; max-width: 900px; margin: 0 auto; }
 .mode-bar { display: flex; gap: 6px; margin-bottom: 8px; }
-.mode-btn { flex: 1; padding: 10px; font-size: 1.05em; border: 2px solid #ccc; border-radius: 6px; background: #f5f5f5; cursor: pointer; }
+.mode-btn { flex: 1; padding: 10px; font-size: 1em; border: 2px solid #ccc; border-radius: 6px; background: #f5f5f5; cursor: pointer; text-align: center; color: #222; text-decoration: none; }
+.mode-btn.active { color: #fff; }
 .mode-btn.active.outbound { background: #e65100; border-color: #e65100; color: #fff; }
 .mode-btn.active.inbound { background: #2e7d32; border-color: #2e7d32; color: #fff; }
 .mode-btn.active.request { background: #1565c0; border-color: #1565c0; color: #fff; }
+.inbound-type-bar { display: flex; gap: 6px; margin: 12px 0; }
+.inbound-type-btn { flex: 1; padding: 9px; border: 0; border-radius: 5px; background: #eee; cursor: pointer; font-weight: 600; }
+.inbound-type-btn.active { background: #009688; color: #fff; }
+.lookup-fields, .dispatch-inbound { margin: 12px 0; padding: 12px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fff; }
+.lookup-fields { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 12px; align-items: end; }
+.lookup-label { flex: 0 0 auto; margin: 0; font-size: 0.85em; white-space: nowrap; }
+.lookup-line { align-items: center; }
+.dispatch-header { display: flex; justify-content: space-between; align-items: center; }
+.dispatch-order-card { margin-top: 8px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; line-height: 1.7; }
+.dispatch-order-card .submit-btn { width: 100%; margin-top: 8px; }
 .scan-row { display: flex; gap: 6px; }
 .code-input { flex: 1; padding: 8px; font-size: 1em; }
 .btn-primary { background: #1565c0; color: #fff; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
@@ -483,4 +563,5 @@ onMounted(async () => {
 .submit-btn:disabled { opacity: 0.6; }
 .error-text { color: #c62828; white-space: pre-wrap; font-size: 0.9em; }
 .result-text { margin-top: 10px; padding: 8px; background: #e8f5e9; border-radius: 4px; }
+@media (max-width: 600px) { .ops-page { padding: 8px; } .mode-bar { flex-wrap: wrap; } .mode-btn { min-width: 42%; } .lookup-fields { grid-template-columns: 1fr; } }
 </style>

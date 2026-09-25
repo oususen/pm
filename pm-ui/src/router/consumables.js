@@ -21,7 +21,7 @@ export default [
     path: "/consumables/requests",
     name: "ConsumableRequests",
     component: () => import("@/views/consumables/ConsumableRequests.vue"),
-    meta: { pageTitle: "消耗品 注文依頼", manualPath: "消耗品/注文依頼.md", resource: "consumables.dispatch" },
+    meta: { pageTitle: "消耗品 発注準備", manualPath: "消耗品/注文依頼.md", resource: "consumables.dispatch" },
   },
   {
     path: "/consumables/dispatch-orders",

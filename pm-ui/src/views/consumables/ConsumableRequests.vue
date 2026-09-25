@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">消耗品 注文依頼 <DataSourceDialog title="消耗品 注文依頼" :sources="dsSources" /></h1>
+      <h1 class="page-title">消耗品 発注準備 <DataSourceDialog title="消耗品 発注準備" :sources="dsSources" /></h1>
       <button class="btn-primary" :disabled="loading" @click="fetchAll">更新</button>
     </div>
 

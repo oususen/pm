@@ -36,7 +36,7 @@ const tiles = [
   },
   {
     to: "/consumables/requests",
-    label: "注文依頼",
+    label: "発注準備",
     icon: "📝",
     description: "依頼の発注準備・却下、購入先別の注文書作成",
     resource: "consumables.dispatch",

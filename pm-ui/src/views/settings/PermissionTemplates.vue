@@ -535,7 +535,7 @@ const departmentTemplatePermissions = ref([])
     { value: 'consumables', label: '消耗品' },
     { value: 'consumables.inventory', label: '消耗品: 在庫一覧' },
     { value: 'consumables.operations', label: '消耗品: 入出庫・注文依頼' },
-    { value: 'consumables.dispatch', label: '消耗品: 注文書' },
+    { value: 'consumables.dispatch', label: '消耗品: 発注準備・注文書' },
     { value: 'consumables.history', label: '消耗品: 入出庫履歴' },
     { value: 'consumables.masters', label: '消耗品: マスタ' },
     { value: 'outsource', label: 'FB外作管理' },

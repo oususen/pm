@@ -142,7 +142,7 @@ export const manualSections = [
       { title: "消耗品メニュー", path: "消耗品/消耗品メニュー.md" },
       { title: "在庫一覧", path: "消耗品/在庫一覧.md" },
       { title: "入出庫", path: "消耗品/入出庫.md" },
-      { title: "注文依頼", path: "消耗品/注文依頼.md" },
+      { title: "発注準備", path: "消耗品/注文依頼.md" },
       { title: "注文書", path: "消耗品/注文書.md" },
       { title: "入出庫履歴", path: "消耗品/入出庫履歴.md" },
       { title: "消耗品マスタ", path: "消耗品/消耗品マスタ.md" },
