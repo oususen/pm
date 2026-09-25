@@ -1338,6 +1338,95 @@
       </div>
     </div>
 
+    <div class="card" v-if="consumableAutoRequestConfig">
+      <div class="field">
+        <label>消耗品 安全在庫割れ自動依頼 実行時刻</label>
+        <div class="input-row">
+          <input
+            type="number"
+            min="0"
+            max="23"
+            v-model.number="consumableAutoRequestConfig.scheduled_hour"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">時</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            v-model.number="consumableAutoRequestConfig.scheduled_minute"
+            :disabled="!canEdit"
+            class="time-input"
+          />
+          <span class="suffix">分</span>
+        </div>
+        <p class="helper">在庫数が安全在庫以下の消耗品に、注文依頼（依頼者: システム自動）を毎日作成します。未完了の依頼（依頼中・発注準備・発注済）がある品目は作成しません。数量は max(発注単位, int((安全在庫×2−在庫)/発注単位+1)×発注単位) です。</p>
+      </div>
+
+      <div class="field" style="margin-top: 12px">
+        <label class="checkbox-label">
+          <input type="checkbox" v-model="consumableAutoRequestConfig.is_enabled" :disabled="!canEdit" />
+          有効
+        </label>
+      </div>
+
+      <div class="actions">
+        <button
+          class="btn primary"
+          @click="saveConfig(consumableAutoRequestConfig)"
+          :disabled="saving.has(configKey(consumableAutoRequestConfig)) || !canEdit"
+        >
+          {{ saving.has(configKey(consumableAutoRequestConfig)) ? '保存中...' : '保存' }}
+        </button>
+        <button
+          class="btn"
+          @click="runNow(consumableAutoRequestConfig)"
+          :disabled="isRunNowDisabled(consumableAutoRequestConfig)"
+          style="margin-left: 8px"
+        >
+          {{ runNowLabel(consumableAutoRequestConfig) }}
+        </button>
+        <button
+          v-if="isStaleRunning(consumableAutoRequestConfig)"
+          class="btn cancel"
+          @click="resetStatus(consumableAutoRequestConfig)"
+          :disabled="resetting.has(configKey(consumableAutoRequestConfig)) || !canEdit"
+          style="margin-left: 8px"
+        >
+          {{ resetting.has(configKey(consumableAutoRequestConfig)) ? 'リセット中...' : '状態リセット' }}
+        </button>
+      </div>
+
+      <p v-if="!canEdit" class="helper warning">この設定を変更する権限がありません。</p>
+
+      <div v-if="consumableAutoRequestConfig.last_run_at" class="last-run">
+        <h3 class="section-title">最終実行情報 <button class="history-link" type="button" @click="openHistory(consumableAutoRequestConfig, '消耗品 安全在庫割れ自動依頼')">履歴</button></h3>
+        <table class="info-table">
+          <tbody>
+            <tr>
+              <th>実行日時</th>
+              <td>{{ formatDateTime(consumableAutoRequestConfig.last_run_at) }}</td>
+            </tr>
+            <tr>
+              <th>結果</th>
+              <td>
+                <span :class="statusClass(consumableAutoRequestConfig)">{{ consumableAutoRequestConfig.last_run_status_display || '-' }}</span>
+              </td>
+            </tr>
+            <tr>
+              <th>実行時間</th>
+              <td>{{ consumableAutoRequestConfig.last_run_duration_seconds != null ? consumableAutoRequestConfig.last_run_duration_seconds + '秒' : '-' }}</td>
+            </tr>
+            <tr>
+              <th>詳細</th>
+              <td class="message-cell">{{ consumableAutoRequestConfig.last_run_message || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div v-if="showHistoryModal" class="modal-overlay" @click.self="closeHistory">
       <div class="modal-content history-modal">
         <h2>実行履歴 - {{ historyModalLabel }}</h2>
@@ -1483,6 +1572,7 @@ const pocSchedules = ref([])
 const togglingScheduleId = ref(null)
 const pocApprovalRoute = ref(null)
 const containerImportCleanupConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'CONTAINER_IMPORT_TMP_CLEANUP'))
+const consumableAutoRequestConfig = computed(() => configs.value.find((cfg) => cfg.task_name === 'CONSUMABLE_AUTO_REQUEST'))
 const planToActualConfigs = computed(() => {
   const persisted = configs.value.filter((cfg) => cfg.task_name === 'PLAN_TO_ACTUAL_COPY')
   const merged = [...persisted, ...planToActualDrafts.value]
@@ -1539,6 +1629,7 @@ const inventoryTaskLabel = (taskName) => {
   if (taskName === 'KUBOTA_SAKAI_DUE_SYNC') return 'クボタ堺納期調整 取込+再配分'
   if (taskName === 'PLAN_TO_ACTUAL_COPY') return '計画実績自動セット'
   if (taskName === 'CONTAINER_IMPORT_TMP_CLEANUP') return '荷姿設定Excel取込 一時ファイル削除'
+  if (taskName === 'CONSUMABLE_AUTO_REQUEST') return '消耗品 安全在庫割れ自動依頼'
   return '取り込み＋在庫再計算'
 }
 

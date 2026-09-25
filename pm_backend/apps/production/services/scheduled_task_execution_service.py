@@ -22,6 +22,7 @@ TASK_LABELS = {
     'PLAN_TO_ACTUAL_COPY': '計画実績自動セット',
     'ORDER_EXPANSION': '自動受注展開',
     'CONTAINER_IMPORT_TMP_CLEANUP': '荷姿設定Excel取込 一時ファイル削除',
+    'CONSUMABLE_AUTO_REQUEST': '消耗品 安全在庫割れ自動依頼',
 }
 
 
@@ -221,6 +222,7 @@ def _execute_task(*, task, config_id=None):
     from shipping.scheduler_tasks_kubota_sakai_due import run_kubota_sakai_due_sync
     from purchase.order_proposal_views import run_auto_purchase_order_check
     from masters.scheduler.tasks_container_import_cleanup import run_container_import_tmp_cleanup
+    from consumables.scheduler_tasks import run_consumable_auto_request
 
     if task in {'AUTO_SAFETY_STOCK_INTERNAL', 'AUTO_SAFETY_STOCK_PURCHASE'}:
         run_auto_safety_stock(task_name=task)
@@ -238,6 +240,8 @@ def _execute_task(*, task, config_id=None):
         run_order_expansion()
     elif task == 'CONTAINER_IMPORT_TMP_CLEANUP':
         run_container_import_tmp_cleanup()
+    elif task == 'CONSUMABLE_AUTO_REQUEST':
+        run_consumable_auto_request()
     elif task == 'KUBOTA_SAKAI_DUE_SYNC':
         run_kubota_sakai_due_sync()
     else:

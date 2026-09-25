@@ -87,6 +87,7 @@ class Command(BaseCommand):
         from shipping.scheduler_tasks_kubota_sakai_due import run_kubota_sakai_due_sync
         from purchase.order_proposal_views import run_auto_purchase_order_check
         from masters.scheduler.tasks_container_import_cleanup import run_container_import_tmp_cleanup
+        from consumables.scheduler_tasks import run_consumable_auto_request
 
         # 既存ジョブ（設定チェックを除く）をクリア
         for job in scheduler.get_jobs():
@@ -336,6 +337,35 @@ class Command(BaseCommand):
             )
         else:
             logger.info('ジョブ無効: container_import_tmp_cleanup')
+
+        consumable_auto_request_cfg, _ = ScheduleConfig.objects.get_or_create(
+            task_name='CONSUMABLE_AUTO_REQUEST',
+            line=None,
+            defaults={
+                'scheduled_hour': 7,
+                'scheduled_minute': 0,
+                'is_enabled': False,
+            },
+        )
+        if consumable_auto_request_cfg.is_enabled:
+            trigger = CronTrigger(
+                hour=consumable_auto_request_cfg.scheduled_hour,
+                minute=consumable_auto_request_cfg.scheduled_minute,
+                timezone='Asia/Tokyo',
+            )
+            scheduler.add_job(
+                _with_fresh_connection(run_consumable_auto_request),
+                trigger,
+                id='consumable_auto_request',
+                replace_existing=True,
+                misfire_grace_time=3600,
+            )
+            logger.info(
+                f'ジョブ登録: consumable_auto_request - '
+                f'{consumable_auto_request_cfg.scheduled_hour:02d}:{consumable_auto_request_cfg.scheduled_minute:02d}'
+            )
+        else:
+            logger.info('ジョブ無効: consumable_auto_request')
 
         plan_to_actual_configs = (
             ScheduleConfig.objects.select_related('line', 'process')

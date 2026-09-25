@@ -66,6 +66,7 @@ def _ensure_defaults():
         ('PURCHASE_ACTUAL_RECONCILE_CHECK', 2, 0, False),
         ('PRODUCTION_ACTUAL_RECONCILE_CHECK', 2, 30, False),
         ('CONTAINER_IMPORT_TMP_CLEANUP', 3, 0, False),
+        ('CONSUMABLE_AUTO_REQUEST', 7, 0, False),
     ]
     for task_name, hour, minute, is_enabled in inventory_defaults:
         ScheduleConfig.objects.get_or_create(

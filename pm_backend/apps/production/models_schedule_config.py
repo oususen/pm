@@ -26,6 +26,7 @@ class ScheduleConfig(models.Model):
         ('PRODUCTION_ACTUAL_RECONCILE_CHECK', '生産実績整合チェック'),
         ('PLAN_TO_ACTUAL_COPY', '計画実績自動セット'),
         ('CONTAINER_IMPORT_TMP_CLEANUP', '荷姿設定Excel取込 一時ファイル削除'),
+        ('CONSUMABLE_AUTO_REQUEST', '消耗品 安全在庫割れ自動依頼'),
     ]
     STATUS_CHOICES = [
         ('SUCCESS', '成功'),
