@@ -244,6 +244,7 @@ const mainTabs = computed(() => [
   { id: 'purchase', label: t('nav.tabs.purchase'), link: '/purchase/menu', resource: 'purchase' },
   { id: 'shipping', label: t('nav.tabs.shipping'), link: '/shipping/menu', resource: 'shipping' },
   { id: 'inventory', label: t('nav.tabs.inventory'), link: '/inventory', resource: 'inventory' },
+  { id: 'consumables', label: '消耗品', link: '/consumables', resource: 'consumables' },
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
   { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/communication', resource: 'notifications' },
   { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'engineering_change' },
@@ -289,6 +290,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'purchase' && path.startsWith('/purchase')) return true
   if (tabId === 'shipping' && path.startsWith('/shipping')) return true
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
+  if (tabId === 'consumables' && path.startsWith('/consumables')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'notifications' && path.startsWith('/notifications')) return true
   if (tabId === 'engineeringChange' && path.startsWith('/engineering-change')) return true

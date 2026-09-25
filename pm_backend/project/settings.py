@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     'system_settings',
     'outsource',
     'shifts',
+    'consumables',
 ]
 
 MIDDLEWARE = [

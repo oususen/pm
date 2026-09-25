@@ -29,6 +29,7 @@ import { createAuthAPI } from './resources/auth'
 import { createAccountsAPI } from './resources/accounts'
 import { createContactsAPI } from './resources/contacts'
 import { createMobileDevicesAPI } from './resources/mobileDevices'
+import { createConsumablesAPI } from './resources/consumables'
 import { createSmtpConfigsAPI } from './resources/smtpConfigs'
 import { createPurchasePlanLockSettingAPI } from './resources/purchasePlanLockSetting'
 import { createProductionPlanLineSettingsAPI } from './resources/productionPlanLineSettings'
@@ -188,6 +189,7 @@ export default {
   accounts: createAccountsAPI(client),
   contacts: createContactsAPI(client),
   mobileDevices: createMobileDevicesAPI(client),
+  consumables: createConsumablesAPI(client),
   smtpConfigs: createSmtpConfigsAPI(client),
   purchasePlanLockSetting: createPurchasePlanLockSettingAPI(client),
   productionPlanLineSettings: createProductionPlanLineSettingsAPI(client),

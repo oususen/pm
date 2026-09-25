@@ -34,6 +34,7 @@ urlpatterns = [
     path('api/', include('system_settings.urls')),
     path('api/', include('outsource.urls')),
     path('api/', include('shifts.urls')),
+    path('api/consumables/', include('consumables.urls')),
 ]
 
 if settings.DEBUG:

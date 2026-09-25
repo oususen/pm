@@ -88,6 +88,14 @@ const sections = [
     ],
   },
   {
+    id: "consumables",
+    title: "消耗品",
+    items: [
+      { label: "消耗品メニュー", link: "/consumables" },
+      { label: "消耗品マスタ", link: "/consumables/masters" },
+    ],
+  },
+  {
     id: "quality",
     title: "品質管理",
     items: [
