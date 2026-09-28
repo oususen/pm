@@ -153,6 +153,16 @@ const tiles = computed(() => {
       resource: "production.record_inquiry",
     },
     {
+      to: "/production/ai-data-analysis",
+      label: "社内AIチャット",
+      icon: "✨",
+      category: "records",
+      required: "view",
+      resource: "production.record_inquiry",
+      description: "社内データを質問・可視化。報告書の下書きも作成",
+      accent: true,
+    },
+    {
       to: "/production/record-edit",
       label: t("productionMenu.tiles.productionRecordEdit"),
       icon: "✏️",

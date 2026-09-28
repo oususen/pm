@@ -196,6 +196,17 @@ export default {
   dailyProcessTargets: createDailyProcessTargetsAPI(client),
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
   productionRecordSettings: createProductionRecordSettingsAPI(client),
+  productionAIDemo: {
+    chat(payload) { return client.post('/production-ai-demo/', payload || {}) },
+    status() { return client.get('/production-ai-demo/') },
+  },
+  aiSearchConfigs: {
+    list() { return client.get('/ai-search-configs/') },
+    create(data) { return client.post('/ai-search-configs/', data) },
+    update(id, data) { return client.put(`/ai-search-configs/${id}/`, data) },
+    delete(id) { return client.delete(`/ai-search-configs/${id}/`) },
+    models() { return client.get('/ai-search-config-models/') },
+  },
   scheduleConfig: createScheduleConfigAPI(client),
   lineBacklogAdjustments: createLineBacklogAdjustmentsAPI(client),
   notifications: createNotificationsAPI(client),

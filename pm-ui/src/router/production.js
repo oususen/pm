@@ -1,5 +1,17 @@
 const production = [
   {
+    path: "/production/ai-data-analysis",
+    name: "ProductionAIDataAnalysis",
+    component: () => import("@/views/production/ProductionAIDataAnalysis.vue"),
+    meta: { pageTitle: "社内AIチャット", resource: "production.record_inquiry" },
+  },
+  {
+    path: "/production/ai-search-config",
+    name: "AISearchConfigManager",
+    component: () => import("@/views/production/AISearchConfigManager.vue"),
+    meta: { pageTitle: "AI検索設定", resource: "production.record_inquiry" },
+  },
+  {
     path: "/production/menu",
     name: "ProductionMenu",
     component: () => import("@/views/production/ProductionMenu.vue"),
