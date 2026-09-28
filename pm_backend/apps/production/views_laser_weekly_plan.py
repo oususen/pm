@@ -1531,9 +1531,9 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             first_day = dates[0] if dates else None
             if first_day and scan_date < first_day:
                 while scan_date < first_day:
-                    scan_date += timedelta(days=1)
                     if _is_biz(scan_date):
                         biz_days_from_start += 1
+                    scan_date += timedelta(days=1)
             processing_indices = set()
             for idx, day_str in enumerate(sorted_days):
                 day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
