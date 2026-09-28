@@ -57,6 +57,9 @@ export const createBomsAPI = (client) => ({
   exportBOMExcel(bomId) {
     return client.get(`/boms/${bomId}/export_excel/`, { responseType: 'blob' })
   },
+  exportBOMImportFormatCsv(bomId) {
+    return client.get(`/boms/${bomId}/export_import_format_csv/`, { responseType: 'blob' })
+  },
   downloadImportTemplateCsv() {
     return client.get('/boms/import_template_csv/', { responseType: 'blob' })
   },

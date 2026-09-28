@@ -2729,6 +2729,81 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         walk_bom(bom, parent_prefix='', level=0, visited=set())
         return rows
 
+    def _build_import_format_rows(self, bom: BOM):
+        """
+        BOM階層図（_build_tree_excel_rows）と同一の辿り方で、
+        取込テンプレートCSVと同じ列構成（完成品/親品番/子品番/…）の行データを作成する。
+        """
+        rows = []
+        effective_date = bom.valid_from or date.today()
+        root_product_code = bom.parent_product.product_code if bom.parent_product else ''
+
+        def pick_child_bom(product):
+            return self._pick_child_bom(product, reference_date=effective_date)
+
+        def walk_bom(b, visited):
+            if b.id in visited:
+                return
+            visited.add(b.id)
+
+            parent_code = b.parent_product.product_code if b.parent_product else ''
+            items_qs = list(
+                BOMItem.objects.filter(bom=b)
+                .select_related('child_product', 'process', 'line', 'supplier')
+                .order_by('id')
+            )
+            for item in items_qs:
+                rows.append({
+                    '完成品': root_product_code,
+                    '親品番': parent_code,
+                    '子品番': item.child_product.product_code if item.child_product else '',
+                    '数量': float(item.quantity) if item.quantity is not None else '',
+                    '工程コード': item.process.process_code if item.process else '',
+                    '工程名': item.process.process_name if item.process else '',
+                    'ラインコード': item.line.line_code if item.line else '',
+                    'ライン名': item.line.line_name if item.line else '',
+                    '調達区分': item.get_sourcing_type_display() if item.sourcing_type else '',
+                    '仕入先コード': item.supplier.supplier_code if item.supplier else '',
+                    '仕入先名': item.supplier.supplier_name if item.supplier else '',
+                    'ＬＴ(日)': item.lead_time_days if item.lead_time_days is not None else '',
+                    '所要時間(分)': item.duration_min if item.duration_min is not None else '',
+                    '時間単位': item.get_time_unit_display() if item.time_unit else '',
+                })
+
+                child_bom = pick_child_bom(item.child_product) if item.child_product else None
+                if child_bom and child_bom.id not in visited:
+                    # visited.copy() で枝ごとに独立させ、同一BOMが複数箇所に現れても全て展開する
+                    walk_bom(child_bom, visited.copy())
+
+        walk_bom(bom, visited=set())
+        return rows
+
+    @action(detail=True, methods=['get'], url_path='export_import_format_csv')
+    def export_import_format_csv(self, request, pk=None):
+        bom = self.get_object()
+        headers = [
+            '完成品', '親品番', '子品番', '数量',
+            '工程コード', '工程名', 'ラインコード', 'ライン名', '調達区分', '仕入先コード', '仕入先名',
+            'ＬＴ(日)', '所要時間(分)', '時間単位'
+        ]
+        rows = self._build_import_format_rows(bom)
+
+        sio = StringIO()
+        writer = csv.writer(sio, lineterminator='\n')
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow([row.get(h, '') for h in headers])
+
+        product_code = bom.parent_product.product_code if bom.parent_product else 'BOM'
+        filename = f'{product_code}_BOM_IMPORT.csv'
+
+        from django.http import HttpResponse
+        response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.write('﻿')
+        response.write(sio.getvalue())
+        return response
+
     @action(detail=True, methods=['get'])
     def tree(self, request, pk=None):
         bom = self.get_object()
