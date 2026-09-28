@@ -21,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, timedelta
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.utils import get_column_letter
 from .models import (
     Product, Customer, Process, Line, Supplier, Calendar, CalendarDay, WorkPattern, BreakTime,
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
@@ -2778,11 +2779,11 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         walk_bom(bom, visited=set())
         return rows
 
-    # Excelでの誤変換（日付化・先頭ゼロ落ち）を防ぐため、先頭に ' を付けて文字列扱いにする列
+    # Excelでの誤変換（日付化・先頭ゼロ落ち）を防ぐため、セル書式を文字列にする列
     _IMPORT_FORMAT_TEXT_COLUMNS = ['完成品', '親品番', '子品番', '工程コード', 'ラインコード', '仕入先コード']
 
-    @action(detail=True, methods=['get'], url_path='export_import_format_csv')
-    def export_import_format_csv(self, request, pk=None):
+    @action(detail=True, methods=['get'], url_path='export_import_format_xlsx')
+    def export_import_format_xlsx(self, request, pk=None):
         bom = self.get_object()
         headers = [
             '完成品', '親品番', '子品番', '数量',
@@ -2791,26 +2792,39 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         ]
         rows = self._build_import_format_rows(bom)
 
-        sio = StringIO()
-        writer = csv.writer(sio, lineterminator='\n')
-        writer.writerow(headers)
+        from openpyxl.styles import numbers
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '入力用'
+        ws.append(headers)
+
+        text_col_letters = [
+            get_column_letter(idx + 1)
+            for idx, h in enumerate(headers)
+            if h in self._IMPORT_FORMAT_TEXT_COLUMNS
+        ]
+
         for row in rows:
-            out_row = []
-            for h in headers:
-                value = row.get(h, '')
-                if h in self._IMPORT_FORMAT_TEXT_COLUMNS and value != '':
-                    value = f"'{value}"
-                out_row.append(value)
-            writer.writerow(out_row)
+            ws.append([row.get(h, '') for h in headers])
+
+        for col_letter in text_col_letters:
+            for row_no in range(2, len(rows) + 2):
+                ws[f'{col_letter}{row_no}'].number_format = numbers.FORMAT_TEXT
 
         product_code = bom.parent_product.product_code if bom.parent_product else 'BOM'
-        filename = f'{product_code}_BOM_IMPORT.csv'
+        filename = f'{product_code}_BOM_IMPORT.xlsx'
+
+        from io import BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
 
         from django.http import HttpResponse
-        response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response.write('﻿')
-        response.write(sio.getvalue())
         return response
 
     @action(detail=True, methods=['get'])
@@ -3349,13 +3363,6 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             fieldnames = reader.fieldnames or []
             input_rows = list(reader)
 
-        # Excelの日付誤変換・先頭ゼロ落ち対策で出力側が付与した先頭の ' を除去する
-        for row in input_rows:
-            for key in list(row.keys()):
-                value = row.get(key)
-                if isinstance(value, str) and value.startswith("'"):
-                    row[key] = value[1:]
-
         required_headers = ['親品番', '子品番', '数量', '調達区分']
         missing = [h for h in required_headers if h not in fieldnames]
         if missing:
@@ -3763,13 +3770,6 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             reader = csv.DictReader(StringIO(text))
             fieldnames = reader.fieldnames or []
             input_rows = list(reader)
-
-        # Excelの日付誤変換・先頭ゼロ落ち対策で出力側が付与した先頭の ' を除去する
-        for row in input_rows:
-            for key in list(row.keys()):
-                value = row.get(key)
-                if isinstance(value, str) and value.startswith("'"):
-                    row[key] = value[1:]
 
         required_headers = ['親品番', '子品番', '数量', '調達区分']
         missing = [h for h in required_headers if h not in fieldnames]
