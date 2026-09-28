@@ -38,6 +38,8 @@ MAX_RANGE_DAYS = 93
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
 PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
+REDACTION_PLACEHOLDER_PATTERN = re.compile(r'(?:実績作業者|作業者|得意先|仕入先)\d+')
+FORCE_TOOL_CALL_TERMS = ('グラフ', 'ぐらふ', 'チャート', '図表', 'もう一回', 'もう一度', '再集計', '再度', '再表示')
 DATA_OPTION_SELECTIONS = {
     '1': {'intent': 'production', 'label': '生産数の日別推移', 'terms': ('生産数', '日別推移')},
     '2': {'intent': 'scrap', 'label': '仕損の理由別集計', 'terms': ('仕損', '理由別')},
@@ -382,6 +384,47 @@ DEEPSEEK_PERSONAL_OVERTIME_TOOL = {
     },
 }
 
+DEEPSEEK_EMPLOYEE_SEARCH_TOOL = {
+    'type': 'function',
+    'function': {
+        'name': 'search_employee',
+        'description': (
+            '権限がある画面だけで使える社員氏名検索。姓だけなど部分一致でも検索できる。'
+            '候補を確定するのはAIではなく利用者であり、1件でも利用者に確認してから使うこと。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {'name': {'type': 'string', 'description': '利用者が入力した氏名（姓のみ・部分一致可、敬称は除く）'}},
+            'required': ['name'],
+        },
+    },
+}
+
+DEEPSEEK_INDIVIDUAL_OVERTIME_TOOL = {
+    'type': 'function',
+    'function': {
+        'name': 'get_individual_overtime',
+        'description': '権限がある画面だけで使える、指定した一人の残業申請時間を承認段階別に集計する。氏名はPM内のユーザーと照合する。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'employee_name': {'type': 'string', 'description': '利用者が指定した氏名（敬称は除く）'},
+                'start_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                'end_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                'show_total_bar': {
+                    'type': 'boolean',
+                    'description': (
+                        '利用者が「合計グラフ」「トータルで」のように合計を含むグラフを求めている場合はtrue。'
+                        '内訳(時間外・休日出勤など)だけのグラフで良い場合はfalse。'
+                        '合計の数値自体はPM側が実データから計算するため、AIが数値を作る必要はない。'
+                    ),
+                },
+            },
+            'required': ['employee_name', 'start_date', 'end_date', 'show_total_bar'],
+        },
+    },
+}
+
 
 def _confirmed_product_codes(question, history):
     """利用者が正式に入力済みの品番だけを、集計ツールで使用可能にする。"""
@@ -508,7 +551,7 @@ def _personal_overtime_threshold(arguments):
     queryset = OvertimeApplication.objects.filter(
         work_date__gte=start,
         work_date__lte=end,
-        application_type='overtime',
+        application_type__in=['overtime', 'holiday'],
         status__in=['approved_supervisor', 'approved_chief', 'approved_manager'],
     )
     rows = list(queryset.values(
@@ -544,6 +587,72 @@ def _personal_overtime_threshold(arguments):
     return data, chart, period
 
 
+def _agent_employee_lookup(name, redactor):
+    """DeepSeekエージェント向けの社員氏名検索。部分一致（姓のみ等）を許可し、候補は確定せず利用者に確認させる。"""
+    from django.contrib.auth import get_user_model
+
+    query = str(name or '').strip()[:50]
+    if redactor:
+        query = redactor.restore_text(query)
+    normalized_query = _normalized_text(query).removesuffix('さん').removesuffix('氏')
+    if not normalized_query:
+        return {'status': 'invalid_request', 'detail': '氏名を指定してください。'}
+    matches = []
+    for user in get_user_model().objects.filter(is_active=True).only('id', 'username', 'first_name', 'last_name'):
+        full_name = f'{user.last_name} {user.first_name}'.strip() or user.username
+        if normalized_query in _normalized_text(full_name):
+            matches.append(full_name)
+    matches = sorted(set(matches))
+    if not matches:
+        return {
+            'status': 'not_found', 'input_name': query,
+            'instruction': '該当する社員がいない。氏名の誤りがないか利用者に確認する。',
+        }
+    if len(matches) == 1:
+        return {
+            'status': 'found', 'employee_name': matches[0],
+            'instruction': 'この氏名で良いか必ず利用者に確認してから get_individual_overtime を呼ぶこと。確認なしに断定してはいけない。',
+        }
+    return {
+        'status': 'ambiguous', 'candidates': matches[:5],
+        'instruction': '複数該当する。候補を提示し、利用者が選んだ氏名で get_individual_overtime を呼ぶこと。AIが勝手に選んではいけない。',
+    }
+
+
+def _agent_individual_overtime(arguments, redactor):
+    """DeepSeekが指定した一人の残業申請時間を、承認段階別に集計する。氏名は伏字→復元してから照合する。"""
+    start, end, error = _agent_date_range(arguments)
+    if error:
+        return error, None, None
+    name = str(arguments.get('employee_name') or '').strip()[:50]
+    if redactor:
+        name = redactor.restore_text(name)
+    if not name:
+        return {'status': 'invalid_request', 'detail': '氏名を指定してください。'}, None, None
+    try:
+        facts = _individual_overtime_facts(start, end, name)
+    except LocalAIError as exc:
+        return {'status': 'invalid_request', 'detail': str(exc)}, None, None
+    period = {'start_date': start.isoformat(), 'end_date': end.isoformat()}
+    data = {
+        'status': 'ok',
+        'source': '残業申請時間（指定社員・承認段階別）',
+        'period': period,
+        'employee_name': facts['employee_name'],
+        'total_hours': facts['total_hours'],
+        'total_records': facts['total_records'],
+        'items': facts['items'],
+    }
+    labels = list(facts['labels'])
+    values = list(facts['values'])
+    # 合計棒を含めるかはDeepSeekの判断(show_total_bar)に従う。数値自体はDBから計算した実データのみを使う。
+    if arguments.get('show_total_bar') is True and len(facts['items']) > 1:
+        labels.append('合計')
+        values.append(facts['total_hours'])
+    chart = {'labels': labels, 'values': values, 'series_label': '時間'}
+    return data, chart, period
+
+
 def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_personal_overtime=False):
     """DeepSeekが読み取り専用ツールを選び、段階的に調査して回答する。"""
     if not DEEPSEEK_API_KEY:
@@ -557,8 +666,26 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
             '利用できるのは品番マスタ検索と、許可済みの読み取り専用集計ツールだけです。SQL、更新、削除、DDL、明細取得はできません。\n'
             '品番を含む質問では、必ず最初にsearch_productを呼び、見つからなければ「現在この品番はありません」と回答してください。候補を勝手に選んではいけません。\n'
             '生産数・仕損・中断・残業の数値を答えるときは、必ずget_business_dataを呼び、ツール結果にない数値を作らないでください。\n'
-            '個人別残業は、get_personal_overtime_threshold が利用可能な場合だけ使用し、結果に含まれる一時ID以外の個人情報を推測してはいけません。\n'
+            '個人別残業は、search_employee・get_individual_overtime・get_personal_overtime_threshold が利用可能な場合だけ使用してください。'
+            '指定した一人の合計を聞かれたら、氏名が姓だけ・曖昧でも必ず最初にsearch_employeeで検索し、'
+            '候補が1件でも「○○さんですか？」のように利用者に確認してから get_individual_overtime を呼んでください。'
+            '複数候補がある場合は候補を提示し、利用者が選んだ氏名だけを使ってください。AIが候補を勝手に確定してはいけません。'
+            '重要: 氏名はsearch_employeeまたはget_individual_overtimeの結果に実際に含まれる文字列だけを使ってください。'
+            'ツールを呼ばずに氏名を記憶・推測・生成することは重大な誤りです。ツールを呼んでいないのに'
+            '「検索したところ」「見つかりました」のように述べてはいけません。'
+            'しきい値超過者の抽出を聞かれたら get_personal_overtime_threshold を選んでください。'
+            'get_individual_overtime の結果を使うときは、必ず最初に合計時間(total_hours)と件数(total_records)を明示し、'
+            'その後に時間外・休日出勤などの内訳(items)を説明してください。合計を省略してはいけません。'
+            'get_individual_overtime の show_total_bar は、利用者が「合計グラフ」のように合計を含むグラフを'
+            '求めているかどうかをあなたが判断して指定してください。合計の数値はPM側が実データから計算するので、'
+            'あなたが数値を作る必要はありません。'
+            '結果に含まれる氏名・一時ID以外の個人情報を推測してはいけません。\n'
             'tool結果のsourceは画面へ根拠として表示されます。回答では結論を先に短く伝え、必要なら日別傾向を説明してください。\n'
+            'グラフはツールを呼んだ回だけ画面側に自動描画されます。ツールを呼ばずに記憶だけで答えた回には'
+            'グラフは出ません。「グラフをください」と言われて記憶だけで答える場合は、'
+            '「グラフを表示するには、もう一度集計しますか？」のように確認するか、その場でツールを呼び直してください。'
+            'ツールを呼んでいないのに「グラフは画面側に表示されます」のように、実際に出ていないグラフを'
+            '出たかのように説明してはいけません。「グラフ機能はない」という誤った説明も避けてください。\n'
             'selected_data_option がある場合は、利用者が直前の選択肢を選んだものとして解釈し、必要なツールを自分で選んでください。\n'
             f'本日: {date.today().isoformat()}。直近のDB集計期間: {json.dumps(recent_period, ensure_ascii=False)}。'
             f'選択済みの業務候補: {json.dumps(selected_option, ensure_ascii=False)}。'
@@ -571,21 +698,32 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
     period = None
     chart = None
     payload = {}
+    # そのターンで実際にDeepSeekへ提示された一時ID(＝根拠あり)だけを復元対象にする。
+    # ツールを呼ばず推測した一時IDが実在社員名に化けるのを防ぐ。
+    grounded_placeholders = set()
 
     try:
-        for _ in range(4):
+        for attempt in range(4):
+            redacted_messages = redactor.redact_messages(messages) if redactor else messages
+            if redactor:
+                for row in redacted_messages:
+                    grounded_placeholders.update(REDACTION_PLACEHOLDER_PATTERN.findall(str(row.get('content', ''))))
             body = {
                 'model': model or DEEPSEEK_MODEL,
                 'stream': False,
-                'messages': redactor.redact_messages(messages) if redactor else messages,
+                'messages': redacted_messages,
                 'thinking': {'type': 'disabled'},
                 'temperature': 0.4,
                 'max_tokens': 768,
                 'tools': (
-                    [*DEEPSEEK_AGENT_TOOLS, DEEPSEEK_PERSONAL_OVERTIME_TOOL]
+                    [*DEEPSEEK_AGENT_TOOLS, DEEPSEEK_PERSONAL_OVERTIME_TOOL, DEEPSEEK_EMPLOYEE_SEARCH_TOOL, DEEPSEEK_INDIVIDUAL_OVERTIME_TOOL]
                     if allow_personal_overtime else DEEPSEEK_AGENT_TOOLS
                 ),
             }
+            # 「グラフ」「もう一回」等は、記憶だけで答えて実データが伴わない誤答が多いため、
+            # 最初の1回だけツール呼び出しを必須化する。どのツールを呼ぶかはDeepSeekの判断のまま。
+            if attempt == 0 and any(term in question for term in FORCE_TOOL_CALL_TERMS):
+                body['tool_choice'] = 'required'
             request = Request(
                 f'{DEEPSEEK_BASE_URL}/chat/completions',
                 data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
@@ -600,6 +738,12 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
             if not tool_calls:
                 answer = str(message.get('content') or '').strip()
                 if redactor:
+                    used_placeholders = set(REDACTION_PLACEHOLDER_PATTERN.findall(answer))
+                    if used_placeholders - grounded_placeholders:
+                        raise LocalAIError(
+                            'AIの回答に、ツールで確認していない対象が含まれていたため回答を中止しました。'
+                            '氏名を確認のうえ、もう一度お尋ねください。'
+                        )
                     answer = redactor.restore_text(answer)
                 if not answer:
                     raise LocalAIError('DeepSeek APIから回答が返りませんでした。時間をおいて再度お試しください。')
@@ -626,6 +770,10 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                         result, tool_chart, tool_period = _agent_business_data(arguments, confirmed_codes)
                     elif function.get('name') == 'get_personal_overtime_threshold' and allow_personal_overtime:
                         result, tool_chart, tool_period = _personal_overtime_threshold(arguments)
+                    elif function.get('name') == 'search_employee' and allow_personal_overtime:
+                        result, tool_chart, tool_period = _agent_employee_lookup(arguments.get('name'), redactor), None, None
+                    elif function.get('name') == 'get_individual_overtime' and allow_personal_overtime:
+                        result, tool_chart, tool_period = _agent_individual_overtime(arguments, redactor)
                     else:
                         result, tool_chart, tool_period = {'status': 'invalid_request', 'detail': '許可されていないツールです。'}, None, None
                 if result.get('status') == 'ok':
@@ -874,7 +1022,7 @@ def _find_user_by_name(name):
 
 
 def _individual_overtime_facts(start, end, name):
-    """指定した一人の提出済み残業申請を承認段階別に集計する。"""
+    """指定した一人の提出済み時間外・休日出勤申請を、種別・承認段階別に集計する。"""
     user = _find_user_by_name(name)
     statuses = {
         'submitted': '申請中',
@@ -883,25 +1031,29 @@ def _individual_overtime_facts(start, end, name):
         'approved_chief': '係長承認済み',
         'approved_manager': '最終承認済み',
     }
+    type_labels = {'overtime': '時間外', 'holiday': '休日出勤'}
     rows = list(
         OvertimeApplication.objects.filter(
             applicant=user,
             work_date__gte=start,
             work_date__lte=end,
-            application_type='overtime',
+            application_type__in=type_labels,
             status__in=statuses,
-        ).values('status').annotate(
+        ).values('application_type', 'status').annotate(
             hours=Sum('hours'), midnight_hours=Sum('midnight_hours'), records=Count('id')
         )
     )
-    by_status = {row['status']: row for row in rows}
+    by_key = {(row['application_type'], row['status']): row for row in rows}
     items = []
-    for status, label in statuses.items():
-        row = by_status.get(status)
-        hours = (row['hours'] or Decimal('0')) + (row['midnight_hours'] or Decimal('0')) if row else Decimal('0')
-        records = row['records'] if row else 0
-        if records:
-            items.append({'label': label, 'hours': float(hours), 'records': records})
+    for app_type, type_label in type_labels.items():
+        for status, status_label in statuses.items():
+            row = by_key.get((app_type, status))
+            if not row:
+                continue
+            hours = (row['hours'] or Decimal('0')) + (row['midnight_hours'] or Decimal('0'))
+            records = row['records']
+            if records:
+                items.append({'label': f'{type_label}・{status_label}', 'hours': float(hours), 'records': records})
     display_name = f'{user.last_name} {user.first_name}'.strip() or user.username
     return {
         'employee_name': display_name,
