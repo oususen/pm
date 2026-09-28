@@ -486,6 +486,7 @@ const departmentTemplatePermissions = ref([])
   { value: 'production.line_monitor', label: '生産: ライン稼働監視' },
   { value: 'overtime', label: '勤務' },
   { value: 'overtime.shift_management', label: '勤務: シフト管理' },
+  { value: 'overtime.personal_summary', label: '勤務: 個人別残業集計' },
   { value: 'purchase', label: '仕入' },
   { value: 'purchase.plan_input', label: '仕入: 仕入れ計画' },
   { value: 'purchase.inventory', label: '仕入: 在庫/残量' },
