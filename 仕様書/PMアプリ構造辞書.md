@@ -54,7 +54,7 @@ API入口: `/process-realtime-records/sessions/`、レーザー実績API、ブ�
 | 通常工程 | `t_process_realtime_record` | `product_code` | `qty` | `record_type='PRODUCTION'` | 工程実績 |
 | 工程作業セッション | `t_process_work_session` | `product_code` | `production_qty` | 画面のセッション条件（計画日／実施日、作業・終了状態）に従う | セッション実績。定義確認を終えるまで単独の標準回答には使わない |
 | レーザー（板金タブ） | `t_laser_actual` + `t_laser_actual_detail` | 明細の`product_code` | 明細の`total_qty` | ヘッダが`operator_action='END'`、明細が`detail_type='COMPONENT'` | レーザー実績。START、PAUSE、未終了を除外 |
-| ブレーキ | `brake_line_record` と関連セッション | 製品・計画行 | 実績数量 | ブレーキ画面の専用集計条件 | 定義確認待ち |
+| ブレーキ | `brake_line_record` | `product_code`または製品FK | `qty` | `operator_action='END'` のみ | ブレーキ実績。START・PAUSE・TEMP_ENDは生産数に含めない |
 | スポット | スポット専用実績と関連セッション | 製品・計画行 | 実績数量 | スポット画面の専用集計条件 | 定義確認待ち |
 
 ### 4.1 レーザー実績の確定例
@@ -75,13 +75,12 @@ AND t_laser_actual_detail.detail_type = 'COMPONENT'
 
 ```text
 質問
- ├─ 対象業務を判定（生産、品質、残業、購買、出荷など）
- ├─ 会話中の品番・工程・ライン・期間を確定
- ├─ 本書の正規データソース規則を選択
- ├─ 品番マスタを完全一致で照合
- ├─ 読み取り専用の固定集計関数で集計
- ├─ 根拠テーブル、条件、期間、集計値を返却
- └─ DeepSeek利用時は、伏字化済み質問と集計済み結果だけを送信
+ ├─ DeepSeek: 読み取り専用ツールの必要な呼出順を判断
+ │   ├─ 品番を含む場合は品番マスタを完全一致で照合
+ │   └─ 正規データソース規則に対応する集計ツールを呼ぶ
+ ├─ PM: 引数・期間・品番確定を検証し、固定集計関数だけを実行
+ ├─ PM: 根拠テーブル、条件、期間、集計値を返却
+ └─ DeepSeek: 伏字化済み質問と集計済み結果だけを基に回答
 ```
 
 品番を会話中に指定した場合、後続の「今月の生産数」のような質問にも引き継ぐ。品番マスタに存在しない場合は、全品番集計をせず未登録として回答する。

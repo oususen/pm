@@ -6,7 +6,7 @@ import unicodedata
 from difflib import SequenceMatcher
 from calendar import monthrange
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -38,6 +38,11 @@ MAX_RANGE_DAYS = 93
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
 PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
+DATA_OPTION_SELECTIONS = {
+    '1': {'intent': 'production', 'label': '生産数の日別推移', 'terms': ('生産数', '日別推移')},
+    '2': {'intent': 'scrap', 'label': '仕損の理由別集計', 'terms': ('仕損', '理由別')},
+    '3': {'intent': 'overtime', 'label': '残業申請時間の照会', 'terms': ('残業',)},
+}
 
 AI_DB_ACCESS = [
     {
@@ -108,7 +113,8 @@ class ExternalDataRedactor:
 
     def restore_text(self, value):
         text = str(value or '')
-        for original, replacement in self.replacements:
+        # 作業者1 と 作業者14 のような一時IDが部分一致しないよう、長いIDから復元する。
+        for original, replacement in sorted(self.replacements, key=lambda item: len(item[1]), reverse=True):
             text = text.replace(replacement, original)
         return text
 
@@ -259,6 +265,388 @@ def _deepseek_chat(messages, json_mode=False, num_predict=180, timeout=90, inclu
         raise LocalAIError('DeepSeek APIに接続できません。接続設定を確認してください。') from exc
 
 
+def _deepseek_query_intent(messages, model=None, redactor=None):
+    """DeepSeekの関数呼び出しで、DB照会条件だけを構造化して取得する。"""
+    if not DEEPSEEK_API_KEY:
+        raise LocalAIError('DeepSeek APIキーが未設定です。サーバーの DEEPSEEK_API_KEY を設定してください。')
+    body = {
+        'model': model or DEEPSEEK_MODEL,
+        'stream': False,
+        'messages': redactor.redact_messages(messages) if redactor else messages,
+        'thinking': {'type': 'disabled'},
+        'max_tokens': 512,
+        'tools': [{
+            'type': 'function',
+            'function': {
+                'name': 'select_production_query',
+                'description': 'PMの読み取り専用集計に必要な照会条件を返す。DB操作は行わない。',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'intent': {'type': 'string', 'enum': ['production', 'operator', 'scrap', 'interruption', 'overtime', 'report', 'help']},
+                        'start_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                        'end_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                        'operator_name': {'type': 'string'},
+                        'group_name': {'type': 'string'},
+                        'process_name': {'type': 'string'},
+                        'product_code': {'type': 'string'},
+                        'document': {'type': 'boolean'},
+                        'show_chart': {'type': 'boolean'},
+                    },
+                    'required': ['intent', 'start_date', 'end_date', 'operator_name', 'group_name', 'process_name', 'product_code', 'document', 'show_chart'],
+                },
+            },
+        }],
+        'tool_choice': 'required',
+    }
+    request = Request(
+        f'{DEEPSEEK_BASE_URL}/chat/completions',
+        data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+        },
+        method='POST',
+    )
+    try:
+        for _ in range(2):
+            with urlopen(request, timeout=90) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            message = ((payload.get('choices') or [{}])[0].get('message') or {})
+            tool_calls = message.get('tool_calls') or []
+            if tool_calls:
+                arguments = (((tool_calls[0].get('function') or {}).get('arguments')) or '').strip()
+                if redactor:
+                    arguments = redactor.restore_text(arguments)
+                if arguments:
+                    return arguments
+        raise LocalAIError('DeepSeek APIが照会条件を返しませんでした。時間をおいて再度お試しください。')
+    except TimeoutError as exc:
+        raise LocalAIError('DeepSeek APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。') from exc
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise LocalAIError('DeepSeek APIキーを確認してください。') from exc
+        raise LocalAIError('DeepSeek APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
+    except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise LocalAIError('DeepSeek APIに接続できません。接続設定を確認してください。') from exc
+
+
+DEEPSEEK_AGENT_TOOLS = [
+    {
+        'type': 'function',
+        'function': {
+            'name': 'search_product',
+            'description': '品番マスタを検索する。品番を含む生産実績を照会する前に必ず呼び出す。',
+            'parameters': {
+                'type': 'object',
+                'properties': {'product_code': {'type': 'string', 'description': '利用者が入力した品番'}},
+                'required': ['product_code'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_business_data',
+            'description': '許可済みの読み取り専用集計を実行する。任意SQL、更新、削除はできない。',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'intent': {'type': 'string', 'enum': ['production', 'scrap', 'interruption', 'overtime']},
+                    'start_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                    'end_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                    'product_code': {'type': 'string', 'description': '利用者が正式に指定した品番。生産数のみ使用する。'},
+                    'process_name': {'type': 'string', 'description': '仕損の工程名。不要なら空文字。'},
+                    'group_name': {'type': 'string', 'description': '残業の組織名。不要なら空文字。'},
+                },
+                'required': ['intent', 'start_date', 'end_date', 'product_code', 'process_name', 'group_name'],
+            },
+        },
+    },
+]
+
+DEEPSEEK_PERSONAL_OVERTIME_TOOL = {
+    'type': 'function',
+    'function': {
+        'name': 'get_personal_overtime_threshold',
+        'description': '権限がある画面だけで使える個人別残業時間のしきい値超過者集計。申請明細は返さない。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'start_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                'end_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                'threshold_hours': {'type': 'number', 'description': '超過判定する時間。例: 42'},
+            },
+            'required': ['start_date', 'end_date', 'threshold_hours'],
+        },
+    },
+}
+
+
+def _confirmed_product_codes(question, history):
+    """利用者が正式に入力済みの品番だけを、集計ツールで使用可能にする。"""
+    confirmed = set()
+    for candidate in _product_code_candidates(question, history):
+        code, _ = _resolve_product_code(candidate, [candidate])
+        if code:
+            confirmed.add(code)
+    return confirmed
+
+
+def _agent_product_lookup(product_code):
+    """DeepSeekエージェント向けの品番マスタ照会。候補を勝手に確定しない。"""
+    input_code = str(product_code or '').strip()[:50]
+    registered_code, candidates = _resolve_product_code(input_code, [input_code])
+    if not registered_code:
+        return {
+            'status': 'not_found' if not candidates else 'ambiguous',
+            'input_product_code': input_code,
+            'candidates': candidates,
+            'instruction': '候補がある場合もAIは選ばず、利用者に正式品番の入力を依頼する。',
+        }
+    product = Product.objects.filter(product_code=registered_code).values('product_code', 'product_name').first()
+    return {
+        'status': 'found',
+        'product_code': registered_code,
+        'product_name': (product or {}).get('product_name', ''),
+    }
+
+
+def _agent_date_range(arguments):
+    """エージェントの期間引数を検証し、許可範囲に制限する。"""
+    try:
+        start = date.fromisoformat(str(arguments.get('start_date') or ''))
+        end = date.fromisoformat(str(arguments.get('end_date') or ''))
+    except (TypeError, ValueError):
+        return None, None, {'status': 'invalid_request', 'detail': '開始日と終了日はYYYY-MM-DDで指定してください。'}
+    if start > end or (end - start).days >= MAX_RANGE_DAYS:
+        return None, None, {'status': 'invalid_request', 'detail': f'集計期間は{MAX_RANGE_DAYS}日未満で指定してください。'}
+    return start, end, None
+
+
+def _agent_business_data(arguments, confirmed_product_codes):
+    """許可済み集計関数だけをDeepSeekのツール呼び出しから実行する。"""
+    start, end, error = _agent_date_range(arguments)
+    if error:
+        return error, None, None
+    intent = str(arguments.get('intent') or '').strip()
+    product_code = str(arguments.get('product_code') or '').strip()[:50]
+    process_name = str(arguments.get('process_name') or '').strip()[:100]
+    group_name = str(arguments.get('group_name') or '').strip()[:100]
+
+    try:
+        if intent == 'production':
+            if product_code:
+                registered_code, candidates = _resolve_product_code(product_code, [product_code])
+                if not registered_code:
+                    return {
+                        'status': 'product_not_found' if not candidates else 'product_confirmation_required',
+                        'input_product_code': product_code,
+                        'candidates': candidates,
+                        'instruction': '候補をAIが選んで集計してはいけない。利用者に正式品番を確認する。',
+                    }, None, None
+                if registered_code not in confirmed_product_codes:
+                    return {
+                        'status': 'product_confirmation_required',
+                        'product_code': registered_code,
+                        'instruction': 'この品番は利用者が正式に指定していない。利用者に確認する。',
+                    }, None, None
+                product_code = registered_code
+            facts = _production_facts(start, end, product_code=product_code)
+            source = f"{facts['source']}（品番: {product_code}）" if product_code else '工程実績（生産数）'
+            data = {
+                'status': 'ok', 'source': source,
+                'period': {'start_date': start.isoformat(), 'end_date': end.isoformat()},
+                'product_code': product_code or '全品番',
+                'production_quantity': facts['total'], 'record_count': facts['records'],
+                'daily': list(zip(facts['labels'], facts['values'])), 'by_process': facts['processes'],
+            }
+            return data, {'labels': facts['labels'], 'values': facts['values'], 'series_label': '個'}, data['period']
+        if intent == 'scrap':
+            facts = _scrap_facts(start, end, process_name)
+            source = f'{process_name}工程の確定仕損記録' if process_name else '確定仕損記録'
+            data = {
+                'status': 'ok', 'source': source,
+                'period': {'start_date': start.isoformat(), 'end_date': end.isoformat()},
+                'scrap_quantity': facts['total'], 'record_count': facts['records'], 'by_reason': facts['items'],
+            }
+            return data, {'labels': facts['labels'], 'values': facts['values'], 'series_label': '個'}, data['period']
+        if intent == 'interruption':
+            facts = _interruption_facts(start, end)
+            data = {
+                'status': 'ok', 'source': 'ブレーキライン作業記録（中断・強制終了）',
+                'period': {'start_date': start.isoformat(), 'end_date': end.isoformat()},
+                'interruption_count': facts['total'], 'by_reason': facts['items'],
+            }
+            return data, {'labels': facts['labels'], 'values': facts['values'], 'series_label': '件'}, data['period']
+        if intent == 'overtime':
+            facts = _overtime_facts(start, end, group_name)
+            data = {
+                'status': 'ok', 'source': '残業申請時間（承認段階別・グループ集計）',
+                'period': {'start_date': start.isoformat(), 'end_date': end.isoformat()},
+                'group_name': facts['group_name'],
+                'final_approved_hours': facts['final_approved_hours'],
+                'pending_final_approval_hours': facts['pending_final_approval_hours'],
+            }
+            return data, {'labels': facts['labels'], 'values': facts['values'], 'series_label': '時間'}, data['period']
+    except LocalAIError as exc:
+        return {'status': 'invalid_request', 'detail': str(exc)}, None, None
+    return {'status': 'invalid_request', 'detail': 'この集計種別は利用できません。'}, None, None
+
+
+def _personal_overtime_threshold(arguments):
+    """個人別の残業申請時間を、しきい値超過者だけへ最小化して集計する。"""
+    start, end, error = _agent_date_range(arguments)
+    if error:
+        return error, None, None
+    try:
+        threshold = Decimal(str(arguments.get('threshold_hours')))
+    except (InvalidOperation, TypeError, ValueError):
+        return {'status': 'invalid_request', 'detail': 'しきい値の時間を数値で指定してください。'}, None, None
+    if threshold < 0 or threshold > Decimal('300'):
+        return {'status': 'invalid_request', 'detail': 'しきい値は0〜300時間で指定してください。'}, None, None
+    queryset = OvertimeApplication.objects.filter(
+        work_date__gte=start,
+        work_date__lte=end,
+        application_type='overtime',
+        status__in=['approved_supervisor', 'approved_chief', 'approved_manager'],
+    )
+    rows = list(queryset.values(
+        'applicant_id', 'applicant__last_name', 'applicant__first_name', 'applicant__username'
+    ).annotate(
+        hours=Sum('hours'), midnight_hours=Sum('midnight_hours'), records=Count('id')
+    ))
+    exceeders = []
+    for row in rows:
+        total_hours = (row['hours'] or Decimal('0')) + (row['midnight_hours'] or Decimal('0'))
+        if total_hours <= threshold:
+            continue
+        employee_name = f"{row['applicant__last_name']} {row['applicant__first_name']}".strip()
+        exceeders.append({
+            'employee_name': employee_name or row['applicant__username'],
+            'total_hours': float(total_hours),
+            'record_count': row['records'],
+        })
+    exceeders.sort(key=lambda row: (-row['total_hours'], row['employee_name']))
+    period = {'start_date': start.isoformat(), 'end_date': end.isoformat()}
+    data = {
+        'status': 'ok',
+        'source': '残業申請時間（個人別・しきい値超過）',
+        'period': period,
+        'threshold_hours': float(threshold),
+        'exceeders': exceeders,
+    }
+    chart = {
+        'labels': [row['employee_name'] for row in exceeders],
+        'values': [row['total_hours'] for row in exceeders],
+        'series_label': '時間',
+    }
+    return data, chart, period
+
+
+def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_personal_overtime=False):
+    """DeepSeekが読み取り専用ツールを選び、段階的に調査して回答する。"""
+    if not DEEPSEEK_API_KEY:
+        raise LocalAIError('DeepSeek APIキーが未設定です。サーバーの DEEPSEEK_API_KEY を設定してください。')
+    recent_period = _recent_data_period(history)
+    selected_option = _selected_data_option(question, history)
+    messages = [{
+        'role': 'system',
+        'content': (
+            'あなたは本社の生産管理を支援する社内AIです。利用者の質問を自分で調査して回答してください。\n'
+            '利用できるのは品番マスタ検索と、許可済みの読み取り専用集計ツールだけです。SQL、更新、削除、DDL、明細取得はできません。\n'
+            '品番を含む質問では、必ず最初にsearch_productを呼び、見つからなければ「現在この品番はありません」と回答してください。候補を勝手に選んではいけません。\n'
+            '生産数・仕損・中断・残業の数値を答えるときは、必ずget_business_dataを呼び、ツール結果にない数値を作らないでください。\n'
+            '個人別残業は、get_personal_overtime_threshold が利用可能な場合だけ使用し、結果に含まれる一時ID以外の個人情報を推測してはいけません。\n'
+            'tool結果のsourceは画面へ根拠として表示されます。回答では結論を先に短く伝え、必要なら日別傾向を説明してください。\n'
+            'selected_data_option がある場合は、利用者が直前の選択肢を選んだものとして解釈し、必要なツールを自分で選んでください。\n'
+            f'本日: {date.today().isoformat()}。直近のDB集計期間: {json.dumps(recent_period, ensure_ascii=False)}。'
+            f'選択済みの業務候補: {json.dumps(selected_option, ensure_ascii=False)}。'
+        ),
+    }]
+    messages.extend({'role': row['role'], 'content': row['content']} for row in history[-12:])
+    messages.append({'role': 'user', 'content': question})
+    confirmed_codes = _confirmed_product_codes(question, history)
+    source = 'DeepSeek APIとの会話'
+    period = None
+    chart = None
+    payload = {}
+
+    try:
+        for _ in range(4):
+            body = {
+                'model': model or DEEPSEEK_MODEL,
+                'stream': False,
+                'messages': redactor.redact_messages(messages) if redactor else messages,
+                'thinking': {'type': 'disabled'},
+                'temperature': 0.4,
+                'max_tokens': 768,
+                'tools': (
+                    [*DEEPSEEK_AGENT_TOOLS, DEEPSEEK_PERSONAL_OVERTIME_TOOL]
+                    if allow_personal_overtime else DEEPSEEK_AGENT_TOOLS
+                ),
+            }
+            request = Request(
+                f'{DEEPSEEK_BASE_URL}/chat/completions',
+                data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
+                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {DEEPSEEK_API_KEY}'},
+                method='POST',
+            )
+            with urlopen(request, timeout=120) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            choice = (payload.get('choices') or [{}])[0]
+            message = choice.get('message') or {}
+            tool_calls = message.get('tool_calls') or []
+            if not tool_calls:
+                answer = str(message.get('content') or '').strip()
+                if redactor:
+                    answer = redactor.restore_text(answer)
+                if not answer:
+                    raise LocalAIError('DeepSeek APIから回答が返りませんでした。時間をおいて再度お試しください。')
+                usage = payload.get('usage') or {}
+                return answer, {
+                    'provider': 'deepseek', 'model': payload.get('model', model or DEEPSEEK_MODEL),
+                    'duration_seconds': None, 'output_tokens': usage.get('completion_tokens'),
+                    'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
+                }, source, period, chart
+
+            messages.append({
+                'role': 'assistant', 'content': message.get('content') or '', 'tool_calls': tool_calls,
+            })
+            for tool_call in tool_calls:
+                function = tool_call.get('function') or {}
+                try:
+                    arguments = json.loads(function.get('arguments') or '{}')
+                except json.JSONDecodeError:
+                    result, tool_chart, tool_period = {'status': 'invalid_request', 'detail': 'ツール引数が不正です。'}, None, None
+                else:
+                    if function.get('name') == 'search_product':
+                        result, tool_chart, tool_period = _agent_product_lookup(arguments.get('product_code')), None, None
+                    elif function.get('name') == 'get_business_data':
+                        result, tool_chart, tool_period = _agent_business_data(arguments, confirmed_codes)
+                    elif function.get('name') == 'get_personal_overtime_threshold' and allow_personal_overtime:
+                        result, tool_chart, tool_period = _personal_overtime_threshold(arguments)
+                    else:
+                        result, tool_chart, tool_period = {'status': 'invalid_request', 'detail': '許可されていないツールです。'}, None, None
+                if result.get('status') == 'ok':
+                    source = result.get('source', source)
+                    period = tool_period
+                    chart = tool_chart
+                messages.append({
+                    'role': 'tool', 'tool_call_id': tool_call.get('id', ''),
+                    'content': json.dumps(result, ensure_ascii=False),
+                })
+        raise LocalAIError('DeepSeek APIが調査を完了できませんでした。質問を具体的にして再度お試しください。')
+    except TimeoutError as exc:
+        raise LocalAIError('DeepSeek APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。') from exc
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise LocalAIError('DeepSeek APIキーを確認してください。') from exc
+        raise LocalAIError('DeepSeek APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
+    except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise LocalAIError('DeepSeek APIに接続できません。接続設定を確認してください。') from exc
+
+
 def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, include_metadata=False, model=None, redactor=None):
     if provider == 'deepseek':
         return _deepseek_chat(messages, json_mode, num_predict, timeout, include_metadata, model, redactor)
@@ -337,10 +725,42 @@ def _is_all_products_request(question):
     return any(term in str(question or '') for term in ('全品番', 'すべての品番', '全ての品番', '全体の生産', '総生産'))
 
 
+def _selected_data_option(question, history):
+    """直前の業務選択肢に対する番号回答だけを、対応する集計質問へ復元する。"""
+    selected_number = unicodedata.normalize('NFKC', str(question or '')).strip()
+    option = DATA_OPTION_SELECTIONS.get(selected_number)
+    if not option:
+        return None
+    for row in reversed(history):
+        if row.get('role') != 'assistant':
+            continue
+        content = str(row.get('content', ''))
+        if all(term in content for term in option['terms']):
+            return option
+        return None
+    return None
+
+
+def _recent_data_period(history):
+    """会話中の直近のDB集計期間だけを、次の照会条件へ引き継ぐ。"""
+    for row in reversed(history):
+        period = row.get('period') if row.get('role') == 'assistant' else None
+        if not isinstance(period, dict):
+            continue
+        try:
+            start = date.fromisoformat(str(period.get('start_date') or ''))
+            end = date.fromisoformat(str(period.get('end_date') or ''))
+        except ValueError:
+            continue
+        return {'start_date': start.isoformat(), 'end_date': end.isoformat()}
+    return None
+
+
 def _date_range(question, history, provider, model=None, redactor=None):
     today = date.today()
     start_default = today.replace(day=1)
     product_candidates = _product_code_candidates(question, history)
+    selected_option = _selected_data_option(question, history)
     prompt = {
         'today': today.isoformat(),
         'default_start_date': start_default.isoformat(),
@@ -348,12 +768,15 @@ def _date_range(question, history, provider, model=None, redactor=None):
         'recent_context': history[-4:],
         'current_request': question,
         'user_product_code_candidates': product_candidates,
+        'selected_data_option': selected_option,
+        'recent_data_period': _recent_data_period(history),
     }
-    raw = _chat([
+    messages = [
         {
             'role': 'system',
             'content': (
-                '社内生産AIのリクエスト分類器です。次のJSONだけを返してください。'
+                '社内生産AIのリクエスト分類器です。'
+                'このチャットは本社の生産管理を基本対象とする。'
                 'intent は production, operator, scrap, interruption, overtime, report, help のいずれか。'
                 'production=生産数・出来高、operator=特定作業者の生産数、scrap=仕損・不良、'
                 'interruption=ブレーキラインの中断・強制終了、overtime=残業時間、report=複合報告書。'
@@ -365,12 +788,22 @@ def _date_range(question, history, provider, model=None, redactor=None):
                 '質問または直近会話でユーザーが品番を明記している場合、product_code にその品番を正確に抽出する。'
                 'user_product_code_candidates がある場合は、現在の質問が明示的な全品番集計でない限り、その候補を必ず引き継ぐ。'
                 '品番指定がなければ空文字。'
+                'selected_data_option がある場合、現在の番号回答はその label の質問を選択したものとして、指定された intent を必ず設定する。'
+                'recent_data_period があり、質問で期間を変更していない場合は、その開始日と終了日を引き継ぐ。'
                 'document は報告書・文書作成の依頼なら true。show_chart は図表・グラフ表示を頼まれた場合だけ true。'
-                '形式: {"intent":"production","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","operator_name":"","group_name":"","process_name":"","product_code":"","document":false,"show_chart":false}'
+                '日付・対象が会話中にあれば必ず引き継ぐ。'
             ),
         },
         {'role': 'user', 'content': json.dumps(prompt, ensure_ascii=False)},
-    ], provider, json_mode=True, num_predict=256, timeout=90, model=model, redactor=redactor)
+    ]
+    if provider == 'deepseek':
+        raw = _deepseek_query_intent(messages, model=model, redactor=redactor)
+    else:
+        messages[0]['content'] += (
+            '次のJSONだけを返してください。'
+            '形式: {"intent":"production","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","operator_name":"","group_name":"","process_name":"","product_code":"","document":false,"show_chart":false}'
+        )
+        raw = _chat(messages, provider, json_mode=True, num_predict=256, timeout=90, model=model, redactor=redactor)
     try:
         plan = json.loads(raw)
         if plan.get('intent') not in {'production', 'operator', 'scrap', 'interruption', 'overtime', 'report', 'help'}:
@@ -387,6 +820,8 @@ def _date_range(question, history, provider, model=None, redactor=None):
     plan['group_name'] = str(plan.get('group_name') or '').strip()[:100]
     plan['process_name'] = str(plan.get('process_name') or '').strip()[:100]
     plan['product_code'] = str(plan.get('product_code') or '').strip()[:50]
+    if selected_option:
+        plan['intent'] = selected_option['intent']
     # AIの応答漏れで、明示済みの品番が全品番集計に化けないようにする。
     if plan['intent'] in {'production', 'operator'} and product_candidates and not _is_all_products_request(question):
         plan['product_code'] = product_candidates[0]
@@ -571,6 +1006,9 @@ def _production_facts(start, end, operator_name='', product_code=''):
     laser_by_day = []
     laser_total = Decimal('0')
     laser_records = 0
+    brake_by_day = []
+    brake_total = Decimal('0')
+    brake_records = 0
     # 生産実績照会のレーザータブと同じ定義。終了済みの構成部品明細だけを数量根拠にする。
     if product_code and not operator_name:
         laser_queryset = LaserActualDetail.objects.filter(
@@ -594,8 +1032,38 @@ def _production_facts(start, end, operator_name='', product_code=''):
                 'records': laser_records,
             })
 
-    # 同じ生産事実を複数テーブルから二重に足さない。レーザー実績があればそれを正規根拠とする。
-    if laser_records:
+    # 生産実績照会のブレーキタブと同じ定義。終了済み行の加工数だけを数量根拠にする。
+    if product_code and not operator_name:
+        brake_queryset = BrakeLineRecord.objects.filter(
+            plan_date__gte=start,
+            plan_date__lte=end,
+            operator_action=BrakeLineRecord.OPERATOR_ACTION_END,
+        ).filter(
+            Q(product_code__iexact=product_code) | Q(product__product_code__iexact=product_code)
+        )
+        brake_by_day = list(
+            brake_queryset.values('plan_date')
+            .annotate(quantity=Sum('qty'), records=Count('id'))
+            .order_by('plan_date')
+        )
+        brake_total = sum((row['quantity'] or Decimal('0') for row in brake_by_day), Decimal('0'))
+        brake_records = sum(row['records'] for row in brake_by_day)
+        if brake_records:
+            by_process.append({
+                'process__process_name': 'ブレーキ実績',
+                'quantity': brake_total,
+                'records': brake_records,
+            })
+
+    # 同じ生産事実を複数テーブルから二重に足さない。画面別の専用実績を正規根拠とする。
+    if brake_records:
+        selected_by_day = [
+            {'day': row['plan_date'], 'quantity': row['quantity'] or Decimal('0'), 'records': row['records']}
+            for row in brake_by_day
+        ]
+        selected_by_process = [row for row in by_process if row['process__process_name'] == 'ブレーキ実績']
+        source = 'ブレーキ実績（終了済み加工数）'
+    elif laser_records:
         selected_by_day = [
             {'day': row['actual__work_date'], 'quantity': row['quantity'] or Decimal('0'), 'records': row['records']}
             for row in laser_by_day
@@ -618,6 +1086,8 @@ def _production_facts(start, end, operator_name='', product_code=''):
         'source': source,
         'laser_total': float(laser_total),
         'laser_records': laser_records,
+        'brake_total': float(brake_total),
+        'brake_records': brake_records,
     }
 
 
@@ -766,14 +1236,40 @@ class ProductionAIDemoView(APIView):
         if provider == 'deepseek' and model not in DEEPSEEK_MODELS:
             return Response({'detail': '選択できないDeepSeekモデルです。'}, status=400)
         redactor = _build_external_data_redactor() if provider == 'deepseek' else None
+        # 権限の判定はフロントエンドだけで行い、この値は画面で許可されたツール範囲を表す。
+        allow_personal_overtime = request.data.get('allow_personal_overtime') is True
         raw_history = request.data.get('history') or []
         history = [
-            {'role': row['role'], 'content': str(row.get('content', ''))[:1200]}
-            for row in raw_history[-8:]
+            {
+                'role': row['role'],
+                'content': str(row.get('content', ''))[:1200],
+                'period': row.get('period') if isinstance(row.get('period'), dict) else None,
+            }
+            for row in raw_history[-16:]
             if isinstance(row, dict)
             and row.get('role') in {'user', 'assistant'}
             and str(row.get('content', '')).strip()
         ]
+        # DeepSeekは、固定の分岐結果ではなく読み取り専用ツールを自ら選んで調査する。
+        if provider == 'deepseek':
+            try:
+                answer, inference, source, period, chart = _deepseek_agent_chat(
+                    question, history, model=model, redactor=redactor,
+                    allow_personal_overtime=allow_personal_overtime,
+                )
+            except LocalAIError as exc:
+                return Response({'detail': str(exc)}, status=503)
+            return Response({
+                'answer': answer,
+                'analysis': '',
+                'source': source,
+                'period': period,
+                'chart': chart,
+                'document': '',
+                'provider': 'deepseek',
+                'model': inference['model'],
+                'inference': inference,
+            })
         # 曖昧な品番は、AIの意図解析を待たずに候補を返す。空応答でも全件集計やエラーにしない。
         product_inputs = _product_code_candidates(question, history)
         if product_inputs:
@@ -850,6 +1346,7 @@ class ProductionAIDemoView(APIView):
             'role': 'system',
             'content': (
                 'あなたは製造業の社内生産管理システムに組み込まれたAIアシスタント「社内AI」です。'
+                'このチャットは本社の生産管理を基本対象とします。'
                 'できること:\n'
                 '- 生産数の日別推移やチャート表示（例: 「今月の日別生産数をチャートで見せて」）\n'
                 '- 仕損の理由別集計（例: 「今月の確定仕損を理由別に教えて」）\n'
@@ -864,7 +1361,10 @@ class ProductionAIDemoView(APIView):
                 '日本語で簡潔に回答してください。'
             ),
         }
-        chat_history = history if _uses_chat_context(question) else []
+        chat_history = (
+            [{'role': row['role'], 'content': row['content']} for row in history]
+            if _uses_chat_context(question) else []
+        )
         try:
             answer, inference = _chat([
                 system,
@@ -1124,6 +1624,8 @@ def _is_report_followup(question, history):
 
 def _needs_database(question, history):
     """生産・残業・仕損などDB根拠を要する話題だけ固定集計へ回す。"""
+    if _selected_data_option(question, history):
+        return True
     data_terms = (
         '生産', '出来高', '実績', '作業者', '担当', '残業', '仕損', '不良', 'スクラップ',
         '中断', '強制終了', '停止', 'ブレーキ', 'ライン', '工程', '品番', '製品', '数量',
