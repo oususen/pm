@@ -183,6 +183,14 @@
             既存BOMを使いたい親品番だけチェックしてください。チェックした親品番は既存BOMを使い、その親配下の子明細は今回の取込で追加しません。
           </p>
           <div class="duplicate-list">
+            <label class="duplicate-item select-all-item">
+              <input
+                type="checkbox"
+                :checked="bomImportSelectedReuseParentCodes.length === bomImportDuplicateDetails.length"
+                @change="toggleAllReuseParentCodes($event.target.checked)"
+              />
+              <span class="duplicate-code">全選択</span>
+            </label>
             <label v-for="item in bomImportDuplicateDetails" :key="item.parent_code" class="duplicate-item">
               <input
                 type="checkbox"
@@ -1248,6 +1256,12 @@ const openBomImportDialog = () => {
   bomImportDuplicateDetails.value = []
   bomImportSelectedReuseParentCodes.value = []
   showBomImportDialog.value = true
+}
+
+const toggleAllReuseParentCodes = (checked) => {
+  bomImportSelectedReuseParentCodes.value = checked
+    ? bomImportDuplicateDetails.value.map(item => item.parent_code)
+    : []
 }
 
 const closeBomImportDialog = () => {
@@ -3141,6 +3155,11 @@ const TreeBranch = defineComponent({
   border: 1px solid #eadfca;
   border-radius: 8px;
   background: #fff;
+}
+
+.select-all-item {
+  background: #f5f0e8;
+  border-color: #d4c9b5;
 }
 
 .duplicate-code {
