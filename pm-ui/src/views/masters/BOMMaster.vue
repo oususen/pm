@@ -106,7 +106,7 @@
               <td>
                 <button @click="viewDetails(bom)" class="btn-sm">詳細</button>
                 <button @click="downloadBOMExcel(bom)" class="btn-sm btn-excel">Excel出力</button>
-                <button @click="downloadBOMImportFormatCsv(bom)" class="btn-sm btn-excel">取込形式で出力</button>
+                <button @click="downloadBOMImportFormatXlsx(bom)" class="btn-sm btn-excel">取込形式で出力</button>
                 <button @click="openDetailsInNewTab(bom)" class="btn-sm">別タブ</button>
                 <button @click="viewTreeOnly(bom)" class="btn-sm">階層図</button>
                 <button v-if="canEdit" @click="editBOM(bom)" class="btn-sm">編集</button>
@@ -2405,11 +2405,11 @@ const downloadTreeExcel = async () => {
   await downloadBOMExcel(treeSourceBom.value)
 }
 
-const downloadBOMImportFormatCsv = async (bom) => {
+const downloadBOMImportFormatXlsx = async (bom) => {
   try {
-    const response = await api.boms.exportBOMImportFormatCsv(bom.id)
+    const response = await api.boms.exportBOMImportFormatXlsx(bom.id)
     const productCode = getParentProductCode(bom)
-    const filename = `${productCode}_BOM_IMPORT.csv`
+    const filename = `${productCode}_BOM_IMPORT.xlsx`
     const url = URL.createObjectURL(response.data)
     const link = document.createElement('a')
     link.setAttribute('href', url)
@@ -2420,8 +2420,8 @@ const downloadBOMImportFormatCsv = async (bom) => {
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
   } catch (error) {
-    console.error('取込形式CSV出力エラー:', error)
-    alert('取込形式CSV出力に失敗しました')
+    console.error('取込形式Excel出力エラー:', error)
+    alert('取込形式Excel出力に失敗しました')
   }
 }
 
