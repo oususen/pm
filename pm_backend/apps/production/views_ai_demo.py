@@ -37,6 +37,7 @@ DEEPSEEK_MODELS = {
 MAX_RANGE_DAYS = 93
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
+PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
 
 AI_DB_ACCESS = [
     {
@@ -275,6 +276,11 @@ def _product_code_candidates(question, history):
     candidates = []
     for message in messages:
         normalized_message = unicodedata.normalize('NFKC', message)
+        # 音声入力などの「V123 の 03B」を、枝番付きの品番候補として先に扱う。
+        for match in PRODUCT_CODE_JA_SUFFIX_PATTERN.finditer(normalized_message):
+            code = f'{match.group(1)}-{match.group(2)}'.upper()[:50]
+            if code.lower() not in {item.lower() for item in candidates}:
+                candidates.append(code)
         for match in PRODUCT_CODE_PATTERN.finditer(normalized_message):
             code = match.group(1)[:50]
             if code.lower() not in {item.lower() for item in candidates}:
@@ -303,8 +309,12 @@ def _resolve_product_code(product_code, product_candidates):
     raw_codes = [code for code in raw_codes if _product_code_key(code)]
     master_codes = list(Product.objects.values_list('product_code', flat=True))
     master_keys = {code: _product_code_key(code) for code in master_codes}
+    raw_keys = [_product_code_key(code) for code in raw_codes]
     for raw_code in raw_codes:
         raw_key = _product_code_key(raw_code)
+        # 枝番を含む候補がある場合、親品番だけの完全一致を優先してはいけない。
+        if any(key.startswith(raw_key) and len(key) > len(raw_key) for key in raw_keys):
+            continue
         exact = [code for code, key in master_keys.items() if key == raw_key]
         if len(exact) == 1:
             return exact[0], []
