@@ -1487,8 +1487,9 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             )
         return Response({'saved_count': len(items)})
 
-    def _calc_freq_sheets(self, pattern_row, automatic_daily, dates, is_workday_fn=None, field='manual_sheets'):
+    def _calc_freq_sheets(self, pattern_row, automatic_daily, dates, is_workday_fn=None, field='manual_sheets', holiday_work_dates=None):
         freq_type = pattern_row.get('freq_type', 'DAILY')
+        hw = holiday_work_dates or set()
         if freq_type == 'DAILY':
             return {day: daily[field] for day, daily in automatic_daily.items()}
 
@@ -1496,13 +1497,15 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         result = {day: 0 for day in sorted_days}
 
         def _is_biz(d):
+            if d in hw:
+                return False
             return is_workday_fn(d) if is_workday_fn else d.weekday() < 5
 
         if freq_type == 'WEEKLY':
             dow = pattern_row.get('freq_day_of_week')
             if dow is None:
                 return {day: daily[field] for day, daily in automatic_daily.items()}
-            processing_days = [d for d in sorted_days if datetime.strptime(d, '%Y-%m-%d').date().weekday() == dow]
+            processing_days = [d for d in sorted_days if datetime.strptime(d, '%Y-%m-%d').date().weekday() == dow and datetime.strptime(d, '%Y-%m-%d').date() not in hw]
             if not processing_days:
                 return result
             for i, proc_day in enumerate(processing_days):
@@ -1535,6 +1538,8 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             for idx, day_str in enumerate(sorted_days):
                 day_date = datetime.strptime(day_str, '%Y-%m-%d').date()
                 if day_date < start_date:
+                    continue
+                if day_date in hw:
                     continue
                 if day_date == start_date or (biz_days_from_start % interval == 0):
                     processing_indices.add(idx)
@@ -1723,9 +1728,17 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             is_workday_fn = workday_helpers[cal_id][0] if cal_id in workday_helpers else None
             freq_auto = self._calc_freq_sheets(
                 pattern_row, automatic_daily, dates, is_workday_fn, field='automatic_sheets',
+                holiday_work_dates=_hw_dates,
             )
             for day, daily in automatic_daily.items():
                 day_date = datetime.strptime(day, '%Y-%m-%d').date()
+                if day_date in _hw_dates:
+                    pattern_row['daily'][day] = {
+                        'demand_qty': '0',
+                        'automatic_sheets': 0,
+                        'manual_sheets': 0,
+                    }
+                    continue
                 automatic_sheets = freq_auto.get(day, daily['automatic_sheets'])
                 saved = pattern_manual_map.get((pattern_row['laser_pattern_id'], day_date))
                 if saved is not None:
