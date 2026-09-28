@@ -200,6 +200,10 @@ export default {
     chat(payload) { return client.post('/production-ai-demo/', payload || {}) },
     status() { return client.get('/production-ai-demo/') },
   },
+  aiChat: {
+    chat(payload) { return client.post('/ai/chat/', payload || {}) },
+    status() { return client.get('/ai/chat/') },
+  },
   aiSearchConfigs: {
     list() { return client.get('/ai-search-configs/') },
     create(data) { return client.post('/ai-search-configs/', data) },

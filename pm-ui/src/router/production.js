@@ -1,9 +1,7 @@
 const production = [
   {
     path: "/production/ai-data-analysis",
-    name: "ProductionAIDataAnalysis",
-    component: () => import("@/views/production/ProductionAIDataAnalysis.vue"),
-    meta: { pageTitle: "社内AIチャット", resource: "production.record_inquiry" },
+    redirect: '/ai/chat',
   },
   {
     path: "/production/ai-search-config",

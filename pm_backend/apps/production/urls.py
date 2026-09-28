@@ -7,7 +7,6 @@ from production.views_orphan_backlog import (
 )
 from production.views_line_demand import LineDemandViewSet
 from production.views_ai_demo import ProductionAIDemoView
-from production.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
 from production.views_plan_line_setting import ProductionPlanLineSettingView
 from production.views import (
     LineBacklogViewSet,
@@ -123,7 +122,6 @@ router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, ba
 router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')
 router.register(r'morning-meetings', MorningMeetingViewSet, basename='morningmeeting')
 router.register(r'daily-process-targets', DailyProcessTargetViewSet, basename='daily-process-target')
-router.register(r'ai-search-configs', AISearchConfigViewSet, basename='aisearchconfig')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')
@@ -145,7 +143,6 @@ router.register(r'process-realtime-records', ProcessRealtimeRecordViewSet, basen
 urlpatterns = [
     path('', include(router.urls)),
     path('production-ai-demo/', ProductionAIDemoView.as_view(), name='production-ai-demo'),
-    path('ai-search-config-models/', AISearchConfigModelsView.as_view(), name='ai-search-config-models'),
     path('production-plan-line-settings/', ProductionPlanLineSettingView.as_view(), name='production-plan-line-settings'),
     path('production-plan-lock-setting/', ProductionPlanLockSettingView.as_view(), name='production-plan-lock-setting'),
     path('production-record-settings/', ProductionRecordInquirySettingView.as_view(), name='production-record-settings'),

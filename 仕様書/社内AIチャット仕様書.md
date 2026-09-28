@@ -49,8 +49,16 @@
 
 ## API
 
+実装は、生産管理アプリから独立した `ai` アプリで管理する。`ai/views.py` はHTTP入口、`ai/services/chat_service.py` は業務ロジックを担当する。旧 `production/views_ai_demo.py` と `/api/production-ai-demo/` は互換入口として残す。
+
 - `GET /api/production-ai-demo/`: QwenとDeepSeek APIの準備状態を返す。
 - `POST /api/production-ai-demo/`: `message`、直近会話、`provider`（`deepseek` または `qwen`）、DeepSeek利用時の`model`（`deepseek-v4-pro` または `deepseek-flash`）を受け取り、以下のいずれかで回答する。
   - パターンマッチ即回答（残業個人照会）
   - DB集計結果＋選択モデルの自然文回答（チャート・報告書含む）
   - 選択モデルの一般会話
+- `GET /api/ai/chat/` と `POST /api/ai/chat/`: 社内AIの正式API。リクエスト・レスポンスは旧APIと同じ。
+
+## AIアプリの権限
+
+- AI画面は `ai.chat` の閲覧権限で表示する。`ai.chat` は `ai` 親権限へフォールバックしない。
+- 個人別残業集計は、AI画面の利用可否とは別に `overtime.personal_summary` の閲覧権限を必要とする。

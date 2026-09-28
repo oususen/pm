@@ -2,7 +2,7 @@
   <main class="workspace">
     <header class="topbar">
       <div class="brand-mark">✦</div>
-      <div class="brand-title"><strong>社内AI</strong><span>製造データアシスタント</span></div>
+      <div class="brand-title"><strong>社内AI</strong><span>社内データアシスタント</span></div>
       <div class="local-badge" :class="{ offline: !providerReady() }"><i></i> {{ providerReady() ? `${providerLabel()} · ${providerModel()}` : `${providerLabel()} · 要確認` }}</div>
       <label class="provider-select">AIプロバイダ<select v-model="provider" :disabled="loading"><option value="deepseek">DeepSeek API</option><option value="qwen">ローカルQwen</option></select></label>
       <label v-if="provider === 'deepseek'" class="provider-select">モデル<select v-model="deepseekModel" :disabled="loading"><option v-for="item in deepseekModels()" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
@@ -126,7 +126,7 @@ const ask = async (question) => {
   await scrollToBottom()
   try {
     const history = messages.value.slice(-15, -1).map(({ role, content, period }) => ({ role, content, period }))
-    const { data } = await api.productionAIDemo.chat({
+    const { data } = await api.aiChat.chat({
       message: question.trim(), history, provider: provider.value,
       model: provider.value === 'deepseek' ? deepseekModel.value : undefined,
       allow_personal_overtime: canViewPersonalOvertime.value,
@@ -172,7 +172,7 @@ const clearChat = () => {
 
 const refreshModelStatus = async () => {
   try {
-    const { data } = await api.productionAIDemo.status()
+    const { data } = await api.aiChat.status()
     providerStatus.value = data.providers || {}
     const defaultModel = data.providers?.deepseek?.model
     if (deepseekModels().some((item) => item.id === defaultModel)) deepseekModel.value = defaultModel

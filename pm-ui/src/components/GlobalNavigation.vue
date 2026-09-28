@@ -246,6 +246,7 @@ const mainTabs = computed(() => [
   { id: 'inventory', label: t('nav.tabs.inventory'), link: '/inventory', resource: 'inventory' },
   { id: 'consumables', label: '消耗品', link: '/consumables', resource: 'consumables' },
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
+  { id: 'ai', label: 'AI', link: '/ai/chat', resource: 'ai' },
   { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/communication', resource: 'notifications' },
   { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'engineering_change' },
   { id: 'outsource', label: 'FB', link: '/outsource/menu', resource: 'outsource' },
@@ -292,6 +293,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
   if (tabId === 'consumables' && path.startsWith('/consumables')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
+  if (tabId === 'ai' && path.startsWith('/ai')) return true
   if (tabId === 'notifications' && path.startsWith('/notifications')) return true
   if (tabId === 'engineeringChange' && path.startsWith('/engineering-change')) return true
   if (tabId === 'overtime' && path.startsWith('/overtime')) return true
