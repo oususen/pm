@@ -3,6 +3,7 @@ import json
 import os
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from calendar import monthrange
 from datetime import date
 from decimal import Decimal
@@ -16,7 +17,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Department
+from masters.models import Product
 from production.models_brake_line_record import BrakeLineRecord
+from production.models_laser_actual import LaserActual, LaserActualDetail
 from production.models_process_realtime import ProcessRealtimeRecord
 from quality.models_scrap import ScrapRecord
 from overtime.models import OvertimeApplication
@@ -24,7 +27,16 @@ from overtime.models import OvertimeApplication
 
 MODEL = os.environ.get('OLLAMA_MODEL', 'qwen3:4b-instruct')
 OLLAMA_URL = os.environ.get('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+DEEPSEEK_MODEL = os.environ.get('DEEPSEEK_MODEL', 'deepseek-v4-pro')
+DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com').rstrip('/')
+DEEPSEEK_MODELS = {
+    'deepseek-v4-pro': 'DeepSeek V4 Pro（高精度）',
+    'deepseek-flash': 'DeepSeek Flash（高速）',
+}
 MAX_RANGE_DAYS = 93
+PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
+PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
 
 AI_DB_ACCESS = [
     {
@@ -70,7 +82,67 @@ AI_DB_ACCESS = [
 
 
 class LocalAIError(Exception):
-    """ローカルLLMと通信できない、または応答形式が不正。"""
+    """選択したAIモデルと通信できない、または応答形式が不正。"""
+
+
+class ExternalDataRedactor:
+    """外部AIへ送る前に、PM内で管理している識別子を一時IDへ置換する。"""
+
+    def __init__(self):
+        self.replacements = []
+
+    def add(self, value, replacement):
+        value = str(value or '').strip()
+        if value and not any(value == original for original, _ in self.replacements):
+            self.replacements.append((value, replacement))
+
+    def redact_text(self, value):
+        text = str(value or '')
+        for original, replacement in sorted(self.replacements, key=lambda item: len(item[0]), reverse=True):
+            text = text.replace(original, replacement)
+        # 連絡先はAI回答で復元しないため、外部送信前に常に除去する。
+        text = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[メールアドレス]', text)
+        text = re.sub(r'(?<!\d)(?:0\d{1,4}-?\d{1,4}-?\d{3,4})(?!\d)', '[電話番号]', text)
+        return text
+
+    def restore_text(self, value):
+        text = str(value or '')
+        for original, replacement in self.replacements:
+            text = text.replace(replacement, original)
+        return text
+
+    def redact_messages(self, messages):
+        return [
+            {**message, 'content': self.redact_text(message.get('content', ''))}
+            for message in messages
+        ]
+
+
+def _build_external_data_redactor():
+    """外部送信時に伏字化するPM内の識別子を収集する。対応表はリクエスト内だけで使う。"""
+    from django.contrib.auth import get_user_model
+    from masters.models import Customer, Supplier
+
+    redactor = ExternalDataRedactor()
+    for index, user in enumerate(get_user_model().objects.filter(is_active=True).only(
+        'username', 'first_name', 'last_name'
+    ), start=1):
+        label = f'作業者{index}'
+        redactor.add(f'{user.last_name} {user.first_name}'.strip(), label)
+        redactor.add(f'{user.last_name}{user.first_name}'.strip(), label)
+        redactor.add(user.username, label)
+    for index, name in enumerate(
+        ProcessRealtimeRecord.objects.exclude(operator_name__isnull=True).exclude(operator_name='')
+        .values_list('operator_name', flat=True).distinct(),
+        start=1,
+    ):
+        redactor.add(name, f'実績作業者{index}')
+    for index, customer in enumerate(Customer.objects.filter(is_active=True).only('customer_name', 'short_name'), start=1):
+        redactor.add(customer.customer_name, f'得意先{index}')
+        redactor.add(customer.short_name, f'得意先{index}')
+    for index, supplier in enumerate(Supplier.objects.only('supplier_name'), start=1):
+        redactor.add(supplier.supplier_name, f'仕入先{index}')
+    return redactor
 
 
 def _ollama_chat(messages, json_mode=False, num_predict=180, timeout=90, include_metadata=False):
@@ -123,17 +195,151 @@ def _ollama_chat(messages, json_mode=False, num_predict=180, timeout=90, include
         ) from exc
 
 
-def _date_range(question, history):
+def _deepseek_chat(messages, json_mode=False, num_predict=180, timeout=90, include_metadata=False, model=None, redactor=None):
+    """DeepSeek Chat Completions APIを呼び出す。APIキーは環境変数だけから取得する。"""
+    if not DEEPSEEK_API_KEY:
+        raise LocalAIError('DeepSeek APIキーが未設定です。サーバーの DEEPSEEK_API_KEY を設定してください。')
+    body = {
+        'model': model or DEEPSEEK_MODEL,
+        'stream': False,
+        'messages': redactor.redact_messages(messages) if redactor else messages,
+        'temperature': 0.3 if json_mode else 0.7,
+        'max_tokens': num_predict,
+    }
+    if json_mode:
+        body['response_format'] = {'type': 'json_object'}
+        # 意図解析は構造化JSONだけが必要なため、思考モードを無効化して空応答を抑える。
+        body['thinking'] = {'type': 'disabled'}
+    request = Request(
+        f'{DEEPSEEK_BASE_URL}/chat/completions',
+        data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+        },
+        method='POST',
+    )
+    try:
+        answer = ''
+        payload = {}
+        choice = {}
+        # JSON Outputは公式仕様上、まれに空応答になるため1回だけ再試行する。
+        for _ in range(2 if json_mode else 1):
+            with urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            choice = (payload.get('choices') or [{}])[0]
+            answer = ((choice.get('message') or {}).get('content') or '').strip()
+            if answer:
+                break
+        if redactor and answer:
+            answer = redactor.restore_text(answer)
+        if not answer:
+            raise LocalAIError('DeepSeek APIから空の応答が返りました。時間をおいて再度お試しください。')
+        if json_mode and choice.get('finish_reason') == 'length':
+            raise LocalAIError('質問の解析が生成上限で中断しました。生成上限設定を確認してください。')
+        if include_metadata:
+            usage = payload.get('usage') or {}
+            return answer, {
+                'provider': 'deepseek',
+                'model': payload.get('model', model or DEEPSEEK_MODEL),
+                'duration_seconds': None,
+                'output_tokens': usage.get('completion_tokens'),
+                'done_reason': choice.get('finish_reason', ''),
+                'truncated': choice.get('finish_reason') == 'length',
+            }
+        return answer
+    except TimeoutError as exc:
+        raise LocalAIError('DeepSeek APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。') from exc
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise LocalAIError('DeepSeek APIキーを確認してください。') from exc
+        raise LocalAIError('DeepSeek APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
+    except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise LocalAIError('DeepSeek APIに接続できません。接続設定を確認してください。') from exc
+
+
+def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, include_metadata=False, model=None, redactor=None):
+    if provider == 'deepseek':
+        return _deepseek_chat(messages, json_mode, num_predict, timeout, include_metadata, model, redactor)
+    return _ollama_chat(messages, json_mode, num_predict, timeout, include_metadata)
+
+
+def _product_code_candidates(question, history):
+    """ユーザーが明示した品番候補を、空白区切りを含めて会話から集める。"""
+    messages = [str(question or '')]
+    messages.extend(
+        str(row.get('content', ''))
+        for row in reversed(history)
+        if row.get('role') == 'user'
+    )
+    candidates = []
+    for message in messages:
+        normalized_message = unicodedata.normalize('NFKC', message)
+        for match in PRODUCT_CODE_PATTERN.finditer(normalized_message):
+            code = match.group(1)[:50]
+            if code.lower() not in {item.lower() for item in candidates}:
+                candidates.append(code)
+        for match in PRODUCT_CODE_LOOSE_PATTERN.finditer(normalized_message):
+            code = match.group(1).strip()[:50]
+            normalized_code = re.sub(r'[^A-Za-z0-9]', '', code)
+            if (
+                len(normalized_code) >= 6
+                and any(char.isalpha() for char in normalized_code)
+                and any(char.isdigit() for char in normalized_code)
+                and code.lower() not in {item.lower() for item in candidates}
+            ):
+                candidates.append(code)
+    return candidates
+
+
+def _product_code_key(value):
+    """品番の照合用に空白・ハイフン・英字の表記揺れだけを吸収する。"""
+    return re.sub(r'[^A-Z0-9]', '', unicodedata.normalize('NFKC', str(value or '')).upper())
+
+
+def _resolve_product_code(product_code, product_candidates):
+    """正式品番へ解決し、曖昧な入力時は候補だけを返す。"""
+    raw_codes = [str(product_code or '').strip(), *product_candidates]
+    raw_codes = [code for code in raw_codes if _product_code_key(code)]
+    master_codes = list(Product.objects.values_list('product_code', flat=True))
+    master_keys = {code: _product_code_key(code) for code in master_codes}
+    for raw_code in raw_codes:
+        raw_key = _product_code_key(raw_code)
+        exact = [code for code, key in master_keys.items() if key == raw_key]
+        if len(exact) == 1:
+            return exact[0], []
+
+    scored = {}
+    for raw_code in raw_codes:
+        raw_key = _product_code_key(raw_code)
+        if len(raw_key) < 6 or not any(char.isalpha() for char in raw_key) or not any(char.isdigit() for char in raw_key):
+            continue
+        for master_code, master_key in master_keys.items():
+            score = SequenceMatcher(None, raw_key, master_key).ratio()
+            if score >= 0.78:
+                scored[master_code] = max(scored.get(master_code, 0), score)
+    candidates = [code for code, _ in sorted(scored.items(), key=lambda item: (-item[1], item[0]))[:3]]
+    return None, candidates
+
+
+def _is_all_products_request(question):
+    """明示的な全品番指定では、以前の品番条件を引き継がない。"""
+    return any(term in str(question or '') for term in ('全品番', 'すべての品番', '全ての品番', '全体の生産', '総生産'))
+
+
+def _date_range(question, history, provider, model=None, redactor=None):
     today = date.today()
     start_default = today.replace(day=1)
+    product_candidates = _product_code_candidates(question, history)
     prompt = {
         'today': today.isoformat(),
         'default_start_date': start_default.isoformat(),
         'default_end_date': today.isoformat(),
         'recent_context': history[-4:],
         'current_request': question,
+        'user_product_code_candidates': product_candidates,
     }
-    raw = _ollama_chat([
+    raw = _chat([
         {
             'role': 'system',
             'content': (
@@ -146,12 +352,15 @@ def _date_range(question, history):
                 'overtime は残業時間の質問。質問中に「板金の残業」または「板金グループの残業」とあれば group_name は必ず「板金」。'
                 '「グループ」という語がなくても組織名をgroup_nameに抽出し、末尾の「グループ」は含めない。'
                 'process_name は仕損が起きた工程名だけ。工程指定がなければ空文字。'
+                '質問または直近会話でユーザーが品番を明記している場合、product_code にその品番を正確に抽出する。'
+                'user_product_code_candidates がある場合は、現在の質問が明示的な全品番集計でない限り、その候補を必ず引き継ぐ。'
+                '品番指定がなければ空文字。'
                 'document は報告書・文書作成の依頼なら true。show_chart は図表・グラフ表示を頼まれた場合だけ true。'
-                '形式: {"intent":"production","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","operator_name":"","group_name":"","process_name":"","document":false,"show_chart":false}'
+                '形式: {"intent":"production","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","operator_name":"","group_name":"","process_name":"","product_code":"","document":false,"show_chart":false}'
             ),
         },
         {'role': 'user', 'content': json.dumps(prompt, ensure_ascii=False)},
-    ], json_mode=True, num_predict=256, timeout=90)
+    ], provider, json_mode=True, num_predict=256, timeout=90, model=model, redactor=redactor)
     try:
         plan = json.loads(raw)
         if plan.get('intent') not in {'production', 'operator', 'scrap', 'interruption', 'overtime', 'report', 'help'}:
@@ -167,6 +376,17 @@ def _date_range(question, history):
     plan['operator_name'] = str(plan.get('operator_name') or '').strip()[:50]
     plan['group_name'] = str(plan.get('group_name') or '').strip()[:100]
     plan['process_name'] = str(plan.get('process_name') or '').strip()[:100]
+    plan['product_code'] = str(plan.get('product_code') or '').strip()[:50]
+    # AIの応答漏れで、明示済みの品番が全品番集計に化けないようにする。
+    if plan['intent'] in {'production', 'operator'} and product_candidates and not _is_all_products_request(question):
+        plan['product_code'] = product_candidates[0]
+    if plan['product_code'] or product_candidates:
+        registered_code, matched_candidates = _resolve_product_code(plan['product_code'], product_candidates)
+        if not registered_code:
+            plan['product_not_found'] = plan['product_code'] or product_candidates[0]
+            plan['product_match_candidates'] = matched_candidates
+        else:
+            plan['product_code'] = registered_code
     plan['document'] = plan.get('document') is True
     plan['show_chart'] = plan.get('show_chart') is True
     if plan['intent'] == 'operator' and not plan['operator_name']:
@@ -318,7 +538,7 @@ def _scrap_facts(start, end, process_name=''):
     }
 
 
-def _production_facts(start, end, operator_name=''):
+def _production_facts(start, end, operator_name='', product_code=''):
     queryset = ProcessRealtimeRecord.objects.filter(
         timestamp__date__gte=start,
         timestamp__date__lte=end,
@@ -326,6 +546,8 @@ def _production_facts(start, end, operator_name=''):
     )
     if operator_name:
         queryset = queryset.filter(operator_name__iexact=operator_name)
+    if product_code:
+        queryset = queryset.filter(product_code__iexact=product_code)
     by_day = list(
         queryset.annotate(day=TruncDate('timestamp'))
         .values('day').annotate(quantity=Sum('qty'), records=Count('id'))
@@ -336,14 +558,56 @@ def _production_facts(start, end, operator_name=''):
         .annotate(quantity=Sum('qty'), records=Count('id'))
         .order_by('-quantity')[:8]
     )
-    total = sum((row['quantity'] or Decimal('0') for row in by_day), Decimal('0'))
+    laser_by_day = []
+    laser_total = Decimal('0')
+    laser_records = 0
+    # 生産実績照会のレーザータブと同じ定義。終了済みの構成部品明細だけを数量根拠にする。
+    if product_code and not operator_name:
+        laser_queryset = LaserActualDetail.objects.filter(
+            actual__work_date__gte=start,
+            actual__work_date__lte=end,
+            actual__operator_action=LaserActual.OPERATOR_ACTION_END,
+            detail_type=LaserActualDetail.DETAIL_TYPE_COMPONENT,
+            product_code__iexact=product_code,
+        )
+        laser_by_day = list(
+            laser_queryset.values('actual__work_date')
+            .annotate(quantity=Sum('total_qty'), records=Count('id'))
+            .order_by('actual__work_date')
+        )
+        laser_total = sum((row['quantity'] or Decimal('0') for row in laser_by_day), Decimal('0'))
+        laser_records = sum(row['records'] for row in laser_by_day)
+        if laser_records:
+            by_process.append({
+                'process__process_name': 'レーザー実績',
+                'quantity': laser_total,
+                'records': laser_records,
+            })
+
+    # 同じ生産事実を複数テーブルから二重に足さない。レーザー実績があればそれを正規根拠とする。
+    if laser_records:
+        selected_by_day = [
+            {'day': row['actual__work_date'], 'quantity': row['quantity'] or Decimal('0'), 'records': row['records']}
+            for row in laser_by_day
+        ]
+        selected_by_process = [row for row in by_process if row['process__process_name'] == 'レーザー実績']
+        source = 'レーザー実績（終了済み構成部品明細）'
+    else:
+        selected_by_day = by_day
+        selected_by_process = by_process
+        source = '工程実績'
+    total = sum((row['quantity'] or Decimal('0') for row in selected_by_day), Decimal('0'))
     return {
         'total': float(total),
-        'records': sum(row['records'] for row in by_day),
-        'labels': [row['day'].isoformat() for row in by_day],
-        'values': [float(row['quantity'] or 0) for row in by_day],
-        'processes': [{'process': row['process__process_name'] or '工程未登録', 'quantity': float(row['quantity'] or 0), 'records': row['records']} for row in by_process],
+        'records': sum(row['records'] for row in selected_by_day),
+        'labels': [row['day'].isoformat() for row in selected_by_day],
+        'values': [float(row['quantity'] or 0) for row in selected_by_day],
+        'processes': [{'process': row['process__process_name'] or '工程未登録', 'quantity': float(row['quantity'] or 0), 'records': row['records']} for row in selected_by_process],
         'operator_name': operator_name,
+        'product_code': product_code,
+        'source': source,
+        'laser_total': float(laser_total),
+        'laser_records': laser_records,
     }
 
 
@@ -415,11 +679,17 @@ def _build_facts(plan):
     start, end = plan['start_date'], plan['end_date']
     intent = plan['intent']
     if intent in {'production', 'operator'}:
-        production = _production_facts(start, end, plan['operator_name'] if intent == 'operator' else '')
-        return '工程実績（生産数）', production, {
+        production = _production_facts(
+            start,
+            end,
+            plan['operator_name'] if intent == 'operator' else '',
+            plan['product_code'],
+        )
+        source = f"{production['source']}（品番: {plan['product_code']}）" if plan['product_code'] else '工程実績（生産数）'
+        return source, production, {
             '生産数量': production['total'], '記録件数': production['records'],
             '作業者': production['operator_name'] or '全体', '日別推移': list(zip(production['labels'], production['values'])),
-            '工程別': production['processes'],
+            '工程別': production['processes'], '品番': production['product_code'] or '全品番',
         }
     if intent == 'scrap':
         scrap = _scrap_facts(start, end, plan['process_name'])
@@ -456,22 +726,36 @@ def _build_facts(plan):
 
 
 class ProductionAIDemoView(APIView):
-    """Ollama上のQwenに会話をそのまま渡すチャットAPI。"""
+    """QwenまたはDeepSeekを選択して使う社内AIチャットAPI。"""
 
     def get(self, request):
-        """ローカルOllamaと指定モデルの起動状態を返す。"""
+        """選択可能なAIモデルの準備状態を返す。"""
         try:
             with urlopen(f'{OLLAMA_URL}/api/tags', timeout=3) as response:
                 payload = json.loads(response.read().decode('utf-8'))
             models = [item.get('name', '') for item in payload.get('models', [])]
-            return Response({'connected': True, 'model_ready': MODEL in models, 'model': MODEL})
+            qwen = {'connected': True, 'model_ready': MODEL in models, 'model': MODEL}
         except (HTTPError, URLError, TimeoutError, OSError, ValueError):
-            return Response({'connected': False, 'model_ready': False, 'model': MODEL})
+            qwen = {'connected': False, 'model_ready': False, 'model': MODEL}
+        deepseek = {
+            'connected': bool(DEEPSEEK_API_KEY),
+            'model_ready': bool(DEEPSEEK_API_KEY),
+            'model': DEEPSEEK_MODEL,
+            'models': [{'id': model_id, 'label': label} for model_id, label in DEEPSEEK_MODELS.items()],
+        }
+        return Response({'providers': {'qwen': qwen, 'deepseek': deepseek}})
 
     def post(self, request):
         question = str(request.data.get('message') or '').strip()
         if not question or len(question) > 1200:
             return Response({'detail': '質問を入力してください（最大1200文字）。'}, status=400)
+        provider = str(request.data.get('provider') or 'deepseek').strip().lower()
+        if provider not in {'qwen', 'deepseek'}:
+            return Response({'detail': 'AIモデルの指定が不正です。'}, status=400)
+        model = str(request.data.get('model') or DEEPSEEK_MODEL).strip()
+        if provider == 'deepseek' and model not in DEEPSEEK_MODELS:
+            return Response({'detail': '選択できないDeepSeekモデルです。'}, status=400)
+        redactor = _build_external_data_redactor() if provider == 'deepseek' else None
         raw_history = request.data.get('history') or []
         history = [
             {'role': row['role'], 'content': str(row.get('content', ''))[:1200]}
@@ -480,6 +764,26 @@ class ProductionAIDemoView(APIView):
             and row.get('role') in {'user', 'assistant'}
             and str(row.get('content', '')).strip()
         ]
+        # 曖昧な品番は、AIの意図解析を待たずに候補を返す。空応答でも全件集計やエラーにしない。
+        product_inputs = _product_code_candidates(question, history)
+        if product_inputs:
+            registered_code, matches = _resolve_product_code('', product_inputs)
+            if not registered_code and matches:
+                candidate_text = '、'.join(f'「{code}」' for code in matches)
+                return Response({
+                    'answer': (
+                        f'入力された品番「{product_inputs[0]}」は品番マスタに完全一致しません。'
+                        f'候補は {candidate_text} です。正式品番を指定してください。'
+                    ),
+                    'analysis': '',
+                    'source': '品番マスタ',
+                    'period': None,
+                    'chart': None,
+                    'document': '',
+                    'provider': 'database',
+                    'model': '',
+                    'inference': None,
+                })
         # 1. パターンマッチで即回答（Qwen不要）
         quick = _quick_overtime_response(question, history)
         if quick:
@@ -499,7 +803,8 @@ class ProductionAIDemoView(APIView):
                 'period': quick.get('period'),
                 'chart': chart,
                 'document': '',
-                'local_model': MODEL,
+                'provider': 'database',
+                'model': '',
                 'inference': None,
             })
 
@@ -513,28 +818,28 @@ class ProductionAIDemoView(APIView):
                 'period': None,
                 'chart': None,
                 'document': '',
-                'local_model': MODEL,
+                'provider': 'database',
+                'model': '',
                 'inference': None,
             })
 
         # 3. 報告書の追質問（前回データを使い、再分類・再集計をスキップ）
         if _is_report_followup(question, history):
-            return self._report_from_context(question, history)
+            return self._report_from_context(question, history, provider, model, redactor)
 
         # 4. DB集計が必要な質問
         if _needs_database(question, history):
-            return self._data_chat(question, history)
+            return self._data_chat(question, history, provider, model, redactor)
 
         # 5. 一般会話
-        return self._general_chat(question, history)
+        return self._general_chat(question, history, provider, model, redactor)
 
-    def _general_chat(self, question, history):
-        """システムプロンプトで役割を与え、Qwenの会話として実行する。"""
+    def _general_chat(self, question, history, provider, model=None, redactor=None):
+        """システムプロンプトで役割を与え、選択中のモデルで会話を実行する。"""
         system = {
             'role': 'system',
             'content': (
                 'あなたは製造業の社内生産管理システムに組み込まれたAIアシスタント「社内AI」です。'
-                'PC内のローカルモデルとして動作し、外部にデータを送信しません。\n'
                 'できること:\n'
                 '- 生産数の日別推移やチャート表示（例: 「今月の日別生産数をチャートで見せて」）\n'
                 '- 仕損の理由別集計（例: 「今月の確定仕損を理由別に教えて」）\n'
@@ -551,37 +856,60 @@ class ProductionAIDemoView(APIView):
         }
         chat_history = history if _uses_chat_context(question) else []
         try:
-            answer, inference = _ollama_chat([
+            answer, inference = _chat([
                 system,
                 *chat_history,
                 {'role': 'user', 'content': question},
-            ], num_predict=512, timeout=180, include_metadata=True)
+            ], provider, num_predict=512, timeout=180, include_metadata=True, model=model, redactor=redactor)
         except LocalAIError as exc:
             return Response({'detail': str(exc)}, status=503)
         return Response({
             'answer': answer,
             'analysis': '',
             'document': '',
-            'source': 'ローカルQwenの会話',
+            'source': 'DeepSeek APIとの会話' if provider == 'deepseek' else 'ローカルQwenの会話',
             'chart': None,
-            'local_model': inference['model'],
+            'provider': provider,
+            'model': inference['model'],
             'inference': inference,
         })
 
 
-    def _data_chat(self, question, history):
-        """DB集計結果をQwenに渡して自然文で回答する。"""
+    def _data_chat(self, question, history, provider, model=None, redactor=None):
+        """DB集計結果を選択中のモデルに渡して自然文で回答する。"""
         try:
-            plan = _date_range(question, history)
+            plan = _date_range(question, history, provider, model, redactor)
         except LocalAIError as exc:
             return Response({'detail': str(exc)}, status=400)
 
         if plan['intent'] == 'help':
-            return self._general_chat(question, history)
+            return self._general_chat(question, history, provider, model, redactor)
+
+        if plan.get('product_not_found'):
+            matches = plan.get('product_match_candidates') or []
+            if matches:
+                candidate_text = '、'.join(f'「{code}」' for code in matches)
+                answer = (
+                    f'入力された品番「{plan["product_not_found"]}」は品番マスタに完全一致しません。'
+                    f'候補は {candidate_text} です。正式品番を指定してください。'
+                )
+            else:
+                answer = f'品番「{plan["product_not_found"]}」は、現在の品番マスタにありません。品番を確認してください。'
+            return Response({
+                'answer': answer,
+                'analysis': '',
+                'source': '品番マスタ',
+                'period': None,
+                'chart': None,
+                'document': '',
+                'provider': 'database',
+                'model': '',
+                'inference': None,
+            })
 
         source, raw_data, facts = _build_facts(plan)
         if source is None:
-            return self._general_chat(question, history)
+            return self._general_chat(question, history, provider, model, redactor)
 
         start = plan['start_date']
         end = plan['end_date']
@@ -594,7 +922,7 @@ class ProductionAIDemoView(APIView):
                 'interruption': '件', 'overtime': '時間', 'report': '個',
             }
             chart_titles = {
-                'production': '日別生産数',
+                'production': f"{plan['product_code']} 日別生産数" if plan.get('product_code') else '日別生産数',
                 'operator': f"{plan['operator_name']}の日別生産数",
                 'scrap': '仕損 理由別数量',
                 'interruption': '中断・強制終了 理由別件数',
@@ -610,7 +938,7 @@ class ProductionAIDemoView(APIView):
 
         facts_text = json.dumps(facts, ensure_ascii=False, default=str)
         try:
-            answer, inference = _ollama_chat([
+            answer, inference = _chat([
                 {
                     'role': 'system',
                     'content': (
@@ -625,14 +953,14 @@ class ProductionAIDemoView(APIView):
                     ),
                 },
                 {'role': 'user', 'content': f'質問: {question}\n\nDB集計結果:\n{facts_text}'},
-            ], num_predict=512, timeout=180, include_metadata=True)
+            ], provider, num_predict=512, timeout=180, include_metadata=True, model=model, redactor=redactor)
         except LocalAIError as exc:
             return Response({'detail': str(exc)}, status=503)
 
         document = ''
         if plan.get('document'):
             try:
-                document = _ollama_chat([
+                document = _chat([
                     {
                         'role': 'system',
                         'content': (
@@ -641,7 +969,7 @@ class ProductionAIDemoView(APIView):
                         ),
                     },
                     {'role': 'user', 'content': f'対象期間: {start.isoformat()} ～ {end.isoformat()}\n\nDB集計結果:\n{facts_text}'},
-                ], num_predict=1024, timeout=180)
+                ], provider, num_predict=1024, timeout=180, model=model, redactor=redactor)
             except LocalAIError:
                 document = ''
 
@@ -652,12 +980,13 @@ class ProductionAIDemoView(APIView):
             'period': period,
             'chart': chart,
             'document': document,
-            'local_model': inference['model'],
+            'provider': provider,
+            'model': inference['model'],
             'inference': inference,
         })
 
 
-    def _report_from_context(self, question, history):
+    def _report_from_context(self, question, history, provider, model=None, redactor=None):
         """前回の回答データから報告書を生成する。DB再集計・意図分類をスキップする。"""
         last_data = ''
         for msg in reversed(history):
@@ -665,9 +994,9 @@ class ProductionAIDemoView(APIView):
                 last_data = msg['content']
                 break
         if not last_data:
-            return self._general_chat(question, history)
+            return self._general_chat(question, history, provider, model, redactor)
         try:
-            document, inference = _ollama_chat([
+            document, inference = _chat([
                 {
                     'role': 'system',
                     'content': (
@@ -677,7 +1006,7 @@ class ProductionAIDemoView(APIView):
                     ),
                 },
                 {'role': 'user', 'content': f'以下のデータを報告書にまとめてください:\n\n{last_data}'},
-            ], num_predict=1024, timeout=180, include_metadata=True)
+            ], provider, num_predict=1024, timeout=180, include_metadata=True, model=model, redactor=redactor)
         except LocalAIError as exc:
             return Response({'detail': str(exc)}, status=503)
         return Response({
@@ -687,7 +1016,8 @@ class ProductionAIDemoView(APIView):
             'period': None,
             'chart': None,
             'document': document,
-            'local_model': inference['model'],
+            'provider': provider,
+            'model': inference['model'],
             'inference': inference,
         })
 
