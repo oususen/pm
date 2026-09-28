@@ -160,7 +160,7 @@
           <span>{{ summaryNames.length }}名</span>
           <span class="summary-right">
             <span class="summary-total">
-              労働時間合計: {{ totals.workH }}H　残業合計: {{ totals.overtimeH }}H　有給合計: {{ totals.paidLeaveCount }}回
+              労働時間合計: {{ totals.workH }}H　残業合計: {{ totals.overtimeH }}H　休日出勤合計: {{ totals.holidayH }}H　時間外合計: {{ Math.round((totals.overtimeH + totals.holidayH) * 10) / 10 }}H　有給合計: {{ totals.paidLeaveCount }}回
             </span>
             <button class="btn btn-excel" @click="exportExcel">Excel出力</button>
           </span>
@@ -170,16 +170,20 @@
             <thead>
               <tr>
                 <th class="name-header" rowspan="2">氏名</th>
-                <th v-for="month in monthlyColumns" :key="month" class="date-header" colspan="3">{{ formatMonthLabel(month) }}</th>
-                <th class="total-header" colspan="4">合計</th>
+                <th v-for="month in monthlyColumns" :key="month" class="date-header" colspan="5">{{ formatMonthLabel(month) }}</th>
+                <th class="total-header" colspan="6">合計</th>
               </tr>
               <tr>
                 <template v-for="month in monthlyColumns" :key="`${month}-metrics`">
                   <th class="metric-header">残業(H)</th>
+                  <th class="metric-header">休日出勤(H)</th>
+                  <th class="metric-header">時間外(H)</th>
                   <th class="metric-header">労働(H)</th>
                   <th class="metric-header">有給(回)</th>
                 </template>
                 <th class="metric-header total-header">残業(H)</th>
+                <th class="metric-header total-header">休日出勤(H)</th>
+                <th class="metric-header total-header">時間外(H)</th>
                 <th class="metric-header total-header">労働(H)</th>
                 <th class="metric-header total-header">有給(回)</th>
                 <th class="metric-header total-header">42H超え回数</th>
@@ -189,11 +193,15 @@
               <tr v-for="name in summaryNames" :key="name">
                 <td class="name-cell">{{ name }}</td>
                 <template v-for="month in monthlyColumns" :key="`${name}-${month}`">
-                  <td class="num-cell">{{ monthlyGrid[name]?.[month]?.overtimeH || '—' }}</td>
+                  <td class="num-cell" :class="{ highlight: monthlyGrid[name]?.[month]?.overtimeH > 0 }">{{ monthlyGrid[name]?.[month]?.overtimeH || '—' }}</td>
+                  <td class="num-cell" :class="{ highlight: monthlyGrid[name]?.[month]?.holidayH > 0 }">{{ monthlyGrid[name]?.[month]?.holidayH || '—' }}</td>
+                  <td class="num-cell" :class="{ highlight: monthlyNonScheduledH(name, month) > 0 }">{{ monthlyNonScheduledH(name, month) || '—' }}</td>
                   <td class="num-cell work">{{ monthlyGrid[name]?.[month]?.workH || '—' }}</td>
                   <td class="num-cell leave">{{ monthlyGrid[name]?.[month]?.paidLeaveCount || '—' }}</td>
                 </template>
                 <td class="num-cell total-col">{{ monthlyRowTotal(name, 'overtimeH') }}</td>
+                <td class="num-cell total-col">{{ monthlyRowTotal(name, 'holidayH') }}</td>
+                <td class="num-cell total-col">{{ monthlyRowNonScheduled(name) }}</td>
                 <td class="num-cell total-col">{{ monthlyRowTotal(name, 'workH') }}</td>
                 <td class="num-cell total-col">{{ monthlyRowTotal(name, 'paidLeaveCount') }}</td>
                 <td class="num-cell total-col">{{ monthlyOver42Count(name) || '—' }}</td>
@@ -204,10 +212,14 @@
                 <td class="total-label">合計</td>
                 <template v-for="month in monthlyColumns" :key="`total-${month}`">
                   <td class="num-cell highlight">{{ monthlyColTotal(month, 'overtimeH') || '—' }}</td>
+                  <td class="num-cell highlight">{{ monthlyColTotal(month, 'holidayH') || '—' }}</td>
+                  <td class="num-cell highlight">{{ monthlyColNonScheduled(month) || '—' }}</td>
                   <td class="num-cell work">{{ monthlyColTotal(month, 'workH') || '—' }}</td>
                   <td class="num-cell leave">{{ monthlyColTotal(month, 'paidLeaveCount') || '—' }}</td>
                 </template>
                 <td class="num-cell total-col">{{ totals.overtimeH || '—' }}</td>
+                <td class="num-cell total-col">{{ totals.holidayH || '—' }}</td>
+                <td class="num-cell total-col">{{ Math.round((totals.overtimeH + totals.holidayH) * 10) / 10 || '—' }}</td>
                 <td class="num-cell total-col">{{ totals.workH }}</td>
                 <td class="num-cell total-col">{{ totals.paidLeaveCount || '—' }}</td>
                 <td class="num-cell total-col">{{ totalOver42Count || '—' }}</td>
@@ -738,9 +750,10 @@ const monthlyGrid = computed(() => {
     const month = String(row.date || '').slice(0, 7)
     if (!month) continue
     if (!grid[row.name]) grid[row.name] = {}
-    const cell = grid[row.name][month] || { workH: 0, overtimeH: 0, paidLeaveCount: 0 }
+    const cell = grid[row.name][month] || { workH: 0, overtimeH: 0, holidayH: 0, paidLeaveCount: 0 }
     cell.workH = Math.round((cell.workH + Number(row.workH || 0)) * 10) / 10
-    cell.overtimeH = Math.round((cell.overtimeH + Number(row.overtimeH || 0) + Number(row.holidayH || 0)) * 10) / 10
+    cell.overtimeH = Math.round((cell.overtimeH + Number(row.overtimeH || 0)) * 10) / 10
+    cell.holidayH = Math.round((cell.holidayH + Number(row.holidayH || 0)) * 10) / 10
     cell.paidLeaveCount = Math.round((cell.paidLeaveCount + Number(row.paidLeaveCount || 0)) * 10) / 10
     grid[row.name][month] = cell
   }
@@ -778,6 +791,29 @@ function monthlyColTotal(month, key) {
   let total = 0
   for (const name of summaryNames.value) {
     total += Number(monthlyGrid.value[name]?.[month]?.[key] || 0)
+  }
+  return total ? Math.round(total * 10) / 10 : 0
+}
+
+function monthlyNonScheduledH(name, month) {
+  const cell = monthlyGrid.value[name]?.[month]
+  if (!cell) return 0
+  return Math.round((Number(cell.overtimeH || 0) + Number(cell.holidayH || 0)) * 10) / 10
+}
+
+function monthlyRowNonScheduled(name) {
+  const byMonth = monthlyGrid.value[name] || {}
+  let total = 0
+  for (const cell of Object.values(byMonth)) {
+    total += Number(cell.overtimeH || 0) + Number(cell.holidayH || 0)
+  }
+  return total ? Math.round(total * 10) / 10 : '—'
+}
+
+function monthlyColNonScheduled(month) {
+  let total = 0
+  for (const name of summaryNames.value) {
+    total += monthlyNonScheduledH(name, month)
   }
   return total ? Math.round(total * 10) / 10 : 0
 }
@@ -1218,7 +1254,8 @@ function setFrozenView(sheet) {
 
 function isMonthlyOvertimeColumn(colIndex, monthlyMetricLastCol) {
   if (colIndex < 2 || colIndex > monthlyMetricLastCol) return false
-  return (colIndex - 2) % 3 === 0
+  const offset = (colIndex - 2) % 5
+  return offset === 0 || offset === 1 || offset === 2
 }
 
 function isOvertimeAlertValue(value) {
@@ -1232,8 +1269,8 @@ async function exportExcel() {
   const sheet = workbook.addWorksheet(isMonthlyTab ? '月別労働時間統計' : '労働時間統計')
 
   if (isMonthlyTab) {
-    const monthlyMetricLastCol = 1 + (monthlyColumns.value.length * 3)
-    const lastCol = monthlyMetricLastCol + 4
+    const monthlyMetricLastCol = 1 + (monthlyColumns.value.length * 5)
+    const lastCol = monthlyMetricLastCol + 6
     sheet.mergeCells(1, 1, 1, lastCol)
     const titleCell = sheet.getCell(1, 1)
     titleCell.value = '労働時間統計（月別）'
@@ -1241,7 +1278,10 @@ async function exportExcel() {
 
     addMetaRow(sheet, 2, '期間', formatDateRangeLabel(), lastCol)
     addMetaRow(sheet, 3, '抽出条件', `班:${filterTeam.value || '全班'} / グループ:${filterGroup.value || '全グループ'} / 氏名:${filterName.value || '全員'} / 有給:${filterPaidLeave.value === 'any' ? '有給あり' : filterPaidLeave.value === 'none' ? '有給なし' : '全て'}`, lastCol)
-    addMetaRow(sheet, 4, '集計', `労働時間合計 ${totals.value.workH}H / 残業合計 ${totals.value.overtimeH || 0}H / 有給合計 ${totals.value.paidLeaveCount || 0}回`, lastCol)
+    const excelTotalOt = totals.value.overtimeH || 0
+    const excelTotalHol = totals.value.holidayH || 0
+    const excelTotalNonSched = Math.round((excelTotalOt + excelTotalHol) * 10) / 10
+    addMetaRow(sheet, 4, '集計', `労働時間合計 ${totals.value.workH}H / 残業合計 ${excelTotalOt}H / 休日出勤合計 ${excelTotalHol}H / 時間外合計 ${excelTotalNonSched}H / 有給合計 ${totals.value.paidLeaveCount || 0}回`, lastCol)
 
     sheet.mergeCells(5, 1, 6, 1)
     sheet.getCell(5, 1).value = '氏名'
@@ -1250,26 +1290,25 @@ async function exportExcel() {
 
     let col = 2
     for (const month of monthlyColumns.value) {
-      sheet.mergeCells(5, col, 5, col + 2)
+      sheet.mergeCells(5, col, 5, col + 4)
       sheet.getCell(5, col).value = formatMonthLabel(month)
-      styleCell(sheet.getCell(5, col), { bold: true, bg: EXCEL_THEME.headerFill })
-      styleCell(sheet.getCell(5, col + 1), { bold: true, bg: EXCEL_THEME.headerFill })
-      styleCell(sheet.getCell(5, col + 2), { bold: true, bg: EXCEL_THEME.headerFill })
-      ;['残業(H)', '労働(H)', '有給(回)'].forEach((label, idx) => {
+      for (let i = 0; i < 5; i += 1) {
+        styleCell(sheet.getCell(5, col + i), { bold: true, bg: EXCEL_THEME.headerFill })
+      }
+      ;['残業(H)', '休日出勤(H)', '時間外(H)', '労働(H)', '有給(回)'].forEach((label, idx) => {
         const cell = sheet.getCell(6, col + idx)
         cell.value = label
         styleCell(cell, { bold: true, bg: EXCEL_THEME.subHeaderFill })
       })
-      col += 3
+      col += 5
     }
 
-    sheet.mergeCells(5, col, 5, col + 3)
+    sheet.mergeCells(5, col, 5, col + 5)
     sheet.getCell(5, col).value = '合計'
-    styleCell(sheet.getCell(5, col), { bold: true, bg: EXCEL_THEME.totalFill })
-    styleCell(sheet.getCell(5, col + 1), { bold: true, bg: EXCEL_THEME.totalFill })
-    styleCell(sheet.getCell(5, col + 2), { bold: true, bg: EXCEL_THEME.totalFill })
-    styleCell(sheet.getCell(5, col + 3), { bold: true, bg: EXCEL_THEME.totalFill })
-    ;['残業(H)', '労働(H)', '有給(回)', '42H超え回数'].forEach((label, idx) => {
+    for (let i = 0; i < 6; i += 1) {
+      styleCell(sheet.getCell(5, col + i), { bold: true, bg: EXCEL_THEME.totalFill })
+    }
+    ;['残業(H)', '休日出勤(H)', '時間外(H)', '労働(H)', '有給(回)', '42H超え回数'].forEach((label, idx) => {
       const cell = sheet.getCell(6, col + idx)
       cell.value = label
       styleCell(cell, { bold: true, bg: EXCEL_THEME.totalFill })
@@ -1280,12 +1319,22 @@ async function exportExcel() {
       const row = [name]
       for (const month of monthlyColumns.value) {
         const cell = monthlyGrid.value[name]?.[month] || {}
-        row.push(cell.overtimeH || '', cell.workH || '', cell.paidLeaveCount || '')
+        const ot = cell.overtimeH || 0
+        const hol = cell.holidayH || 0
+        const nonSched = Math.round((ot + hol) * 10) / 10
+        row.push(ot || '', hol || '', nonSched || '', cell.workH || '', cell.paidLeaveCount || '')
       }
+      const totalOt = monthlyRowTotal(name, 'overtimeH')
+      const totalHol = monthlyRowTotal(name, 'holidayH')
+      const numOt = totalOt === '—' ? 0 : totalOt
+      const numHol = totalHol === '—' ? 0 : totalHol
+      const totalNonSched = Math.round((numOt + numHol) * 10) / 10
       row.push(
-        monthlyRowTotal(name, 'overtimeH') || '',
-        monthlyRowTotal(name, 'workH') || '',
-        monthlyRowTotal(name, 'paidLeaveCount') || '',
+        totalOt === '—' ? '' : totalOt,
+        totalHol === '—' ? '' : totalHol,
+        totalNonSched || '',
+        monthlyRowTotal(name, 'workH') === '—' ? '' : monthlyRowTotal(name, 'workH'),
+        monthlyRowTotal(name, 'paidLeaveCount') === '—' ? '' : monthlyRowTotal(name, 'paidLeaveCount'),
         monthlyOver42Count(name) || '',
       )
       sheet.addRow(row)
@@ -1294,7 +1343,7 @@ async function exportExcel() {
         const value = sheet.getCell(rowIndex, c).value
         const isAlert = isMonthlyOvertimeColumn(c, monthlyMetricLastCol) && isOvertimeAlertValue(value)
         styleCell(sheet.getCell(rowIndex, c), {
-          align: c % 3 === 1 ? 'center' : 'right',
+          align: 'right',
           bg: isAlert ? EXCEL_THEME.overtimeAlertFill : (c > monthlyMetricLastCol ? 'F7FBF7' : null),
           color: isAlert ? EXCEL_THEME.overtimeAlertFont : null,
           numFmt: c === lastCol ? '0' : '0.0',
@@ -1305,12 +1354,15 @@ async function exportExcel() {
 
     sheet.addRow([
       '合計',
-      ...monthlyColumns.value.flatMap((month) => [
-        monthlyColTotal(month, 'overtimeH') || '',
-        monthlyColTotal(month, 'workH') || '',
-        monthlyColTotal(month, 'paidLeaveCount') || '',
-      ]),
-      totals.value.overtimeH || '',
+      ...monthlyColumns.value.flatMap((month) => {
+        const ot = monthlyColTotal(month, 'overtimeH') || 0
+        const hol = monthlyColTotal(month, 'holidayH') || 0
+        const ns = Math.round((ot + hol) * 10) / 10
+        return [ot || '', hol || '', ns || '', monthlyColTotal(month, 'workH') || '', monthlyColTotal(month, 'paidLeaveCount') || '']
+      }),
+      excelTotalOt || '',
+      excelTotalHol || '',
+      excelTotalNonSched || '',
       totals.value.workH || '',
       totals.value.paidLeaveCount || '',
       totalOver42Count.value || '',
@@ -1318,7 +1370,7 @@ async function exportExcel() {
     for (let c = 1; c <= lastCol; c += 1) {
       styleCell(sheet.getCell(rowIndex, c), {
         bold: true,
-        align: c === 1 ? 'left' : (c % 3 === 1 ? 'center' : 'right'),
+        align: c === 1 ? 'left' : 'right',
         bg: EXCEL_THEME.totalFill,
         numFmt: c === 1 ? null : (c === lastCol ? '0' : '0.0'),
       })
@@ -1599,7 +1651,7 @@ onMounted(loadUsers)
 .summary-table .name-header { text-align: left; min-width: 120px; }
 .summary-table .date-header { min-width: 52px; }
 .summary-table .total-header { min-width: 60px; background: #e8f5e9; }
-.monthly-table .date-header { min-width: 210px; }
+.monthly-table .date-header { min-width: 350px; }
 .monthly-table .metric-header { min-width: 70px; }
 .cell-empty {
   cursor: pointer;
