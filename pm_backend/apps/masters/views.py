@@ -2754,13 +2754,18 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 .order_by('id')
             )
             for item in items_qs:
+                process_code = item.process.process_code if item.process else ''
+                process_name = item.process.process_name if item.process else ''
+                if item.sourcing_type == 'BUY':
+                    process_code = 'PURCHASE'
+                    process_name = '購買'
                 rows.append({
                     '完成品': root_product_code,
                     '親品番': parent_code,
                     '子品番': item.child_product.product_code if item.child_product else '',
                     '数量': float(item.quantity) if item.quantity is not None else '',
-                    '工程コード': item.process.process_code if item.process else '',
-                    '工程名': item.process.process_name if item.process else '',
+                    '工程コード': process_code,
+                    '工程名': process_name,
                     'ラインコード': item.line.line_code if item.line else '',
                     'ライン名': item.line.line_name if item.line else '',
                     '調達区分': item.get_sourcing_type_display() if item.sourcing_type else '',
