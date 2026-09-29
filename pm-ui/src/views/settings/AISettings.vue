@@ -31,10 +31,11 @@
       <div v-if="dataPolicy" class="policy-grid">
         <label class="check-line"><input v-model="dataPolicy.allow_aggregated_external_transfer" :disabled="!canEdit" type="checkbox" @change="saveDataPolicy" /> DeepSeekへ集計結果を送信する</label>
         <label class="check-line"><input v-model="dataPolicy.allow_authorized_personal_data" :disabled="!canEdit" type="checkbox" @change="saveDataPolicy" /> 権限を持つ利用者の個人別集計を許可する</label>
+        <label class="check-line"><input v-model="dataPolicy.allow_external_image_transfer" :disabled="!canEdit" type="checkbox" @change="saveDataPolicy" /> 添付画像・PDFをOpenRouterへ送信して内容を判定する</label>
         <label>外部送信する最大集計行数
           <input v-model.number="dataPolicy.max_external_result_rows" :disabled="!canEdit" type="number" min="1" max="100" @change="saveDataPolicy" />
         </label>
-        <p>氏名・ログインID・連絡先・未集計明細は外部送信しません。個人別集計は画面権限とこの設定の両方が有効な場合だけ利用できます。</p>
+        <p>画像は利用者が添付した時だけ、OpenRouterの画像対応モデルへ縮小して送信します。PDFは先頭3ページを画像化して一時送信します。個人別集計は画面権限とこの設定の両方が有効な場合だけ利用できます。</p>
       </div>
     </section>
 
@@ -64,6 +65,24 @@
           <span><input v-model="source.is_enabled" :disabled="!canEdit" type="checkbox" @change="saveKnowledge(source)" /> 有効</span>
         </label>
       </div>
+      <div v-if="canEdit" class="knowledge-upload">
+        <select v-model="knowledgeUpload.category">
+          <option value="manual">マニュアル</option>
+          <option value="procedure">手順書</option>
+          <option value="pm_structure">PMアプリ構造</option>
+          <option value="security">安全・運用規約</option>
+        </select>
+        <input v-model.trim="knowledgeUpload.name" placeholder="資料名" />
+        <input ref="knowledgeFileInput" type="file" accept=".pdf,.xlsx,.xls,.csv,.tsv,.png,.jpg,.jpeg,.webp,.bmp" @change="selectKnowledgeFile" />
+        <button class="reload-button" :disabled="!knowledgeUpload.file || !knowledgeUpload.name" @click="uploadKnowledge">資料を追加</button>
+      </div>
+      <p class="section-help">PDF、Excel（.xlsx / .xls）、CSV、TSV、画像（PNG / JPG / WEBP / BMP）を15MBまで登録できます。画像はローカルOCRで文字を抽出します。チャットに画像・PDFを添付した時だけ、OpenRouterでは画像そのもの、またはPDF先頭3ページの見た目も内容判定に使えます。</p>
+      <div v-if="knowledgeDocuments.length" class="knowledge-list">
+        <label v-for="document in knowledgeDocuments" :key="document.id" class="knowledge-row" :class="{ disabled: !document.is_enabled }">
+          <span><strong>{{ document.name }}</strong><small>{{ document.file }}<template v-if="document.description"> · {{ document.description }}</template></small></span>
+          <span class="knowledge-actions"><label><input v-model="document.is_enabled" :disabled="!canEdit" type="checkbox" @change="saveKnowledgeDocument(document)" /> 有効</label><button v-if="canEdit" class="delete-button" @click.prevent="removeKnowledgeDocument(document)">削除</button></span>
+        </label>
+      </div>
     </section>
 
     <section class="setting-section">
@@ -91,6 +110,9 @@ const providers = ref([])
 const tools = ref([])
 const dataPolicy = ref(null)
 const knowledgeSources = ref([])
+const knowledgeDocuments = ref([])
+const knowledgeFileInput = ref(null)
+const knowledgeUpload = ref({ category: 'manual', name: '', file: null })
 const sqlDictionary = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -113,13 +135,14 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, dictionaryResponse] = await Promise.all([
-      api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.sqlDictionary(),
+    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse] = await Promise.all([
+      api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(),
     ])
     providers.value = providerResponse.data
     tools.value = toolResponse.data
     dataPolicy.value = policyResponse.data
     knowledgeSources.value = knowledgeResponse.data
+    knowledgeDocuments.value = documentResponse.data
     sqlDictionary.value = dictionaryResponse.data
   } catch (requestError) {
     failed(requestError)
@@ -140,10 +163,31 @@ const saveDataPolicy = async () => {
 const saveKnowledge = async (item) => {
   try { await api.aiSettings.updateKnowledgeSource(item.id, { is_enabled: item.is_enabled }); saved('ナレッジ設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
 }
+const selectKnowledgeFile = (event) => { knowledgeUpload.value.file = event.target.files?.[0] || null }
+const uploadKnowledge = async () => {
+  const form = new FormData()
+  form.append('category', knowledgeUpload.value.category)
+  form.append('name', knowledgeUpload.value.name)
+  form.append('file', knowledgeUpload.value.file)
+  try {
+    await api.aiSettings.createKnowledgeDocument(form)
+    knowledgeUpload.value = { category: 'manual', name: '', file: null }
+    if (knowledgeFileInput.value) knowledgeFileInput.value.value = ''
+    saved('AIナレッジ資料を追加しました。')
+    await load()
+  } catch (requestError) { failed(requestError) }
+}
+const saveKnowledgeDocument = async (item) => {
+  try { await api.aiSettings.updateKnowledgeDocument(item.id, { is_enabled: item.is_enabled }); saved('ナレッジ資料の設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
+}
+const removeKnowledgeDocument = async (item) => {
+  try { await api.aiSettings.deleteKnowledgeDocument(item.id); saved('AIナレッジ資料を削除しました。'); await load() } catch (requestError) { failed(requestError) }
+}
 
 load()
 </script>
 
 <style scoped>
 .ai-settings{max-width:1180px;padding:14px 16px;margin:0 auto;color:#334155}.page-header{display:flex;justify-content:space-between;align-items:start;gap:16px}.page-header h2{margin:0;font-size:19px}.page-header p,.section-help,.policy-grid p{margin:5px 0 0;font-size:12px;line-height:1.6;color:#64748b}.reload-button{border:1px solid #93bfb5;background:#fff;color:#147a6d;border-radius:6px;padding:5px 11px;cursor:pointer}.setting-section{margin-top:15px;padding:13px;border:1px solid #dce8e5;border-radius:10px;background:#fff}.setting-section h3{margin:0 0 9px;font-size:14px;color:#176b60}.provider-grid,.policy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.setting-card,.policy-grid{padding:10px;border-radius:7px;background:#f7fbfa}.card-title,.tool-row,.knowledge-row{display:flex;align-items:center;justify-content:space-between;gap:10px}.setting-card label{display:grid;gap:4px;margin-top:7px;font-size:11px}.setting-card select,.policy-grid input[type=number]{border:1px solid #cdded9;border-radius:5px;padding:5px;background:white}.setting-card small,.tool-row small,.knowledge-row small{display:block;margin-top:3px;font-size:10px;color:#73878a}.check-line{font-size:12px}.tool-group{margin-top:10px}.tool-group h4{margin:0;padding:6px 8px;background:#eef7f5;font-size:12px}.tool-list,.knowledge-list{border:1px solid #e1ece9}.tool-row,.knowledge-row{padding:7px 9px;border-bottom:1px solid #e8efed;font-size:12px}.tool-row:last-child,.knowledge-row:last-child{border-bottom:0}.tool-actions{display:flex;gap:10px;font-size:11px;white-space:nowrap}.dictionary-screen{margin-top:6px;border:1px solid #e1ece9;border-radius:6px;padding:7px;font-size:12px}.dictionary-screen summary{cursor:pointer;font-weight:700;color:#356c66}.dictionary-table{display:grid;gap:2px;padding:7px 3px;border-top:1px solid #edf2f1}.dictionary-table:first-of-type{margin-top:7px}.dictionary-table small{font-family:Consolas,monospace;font-size:10px;color:#687d81;word-break:break-all}.disabled{opacity:.48}.notice,.error{margin:9px 0;padding:7px 10px;border-radius:6px;font-size:12px}.notice{background:#e9f8f1;color:#237765}.error{background:#fff1ee;color:#ae5146}@media(max-width:760px){.provider-grid,.policy-grid{grid-template-columns:1fr}.tool-row{align-items:start;flex-direction:column}.tool-actions{width:100%;justify-content:space-between}}
+.knowledge-actions,.knowledge-upload{display:flex;gap:10px;font-size:11px;white-space:nowrap}.knowledge-upload{margin-top:10px;align-items:center;flex-wrap:wrap}.knowledge-upload select,.knowledge-upload input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff}.delete-button{border:1px solid #f0b7ae;background:#fff;color:#b04c40;border-radius:5px;padding:3px 7px;cursor:pointer}
 </style>

@@ -2,7 +2,7 @@
 from rest_framework import serializers
 
 from ai.config.catalog import PROVIDER_CATALOG, TOOL_CATALOG
-from ai.config.models import AIDataPolicy, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+from ai.config.models import AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 
 
 class AIProviderConfigSerializer(serializers.ModelSerializer):
@@ -59,6 +59,7 @@ class AIDataPolicySerializer(serializers.ModelSerializer):
         model = AIDataPolicy
         fields = (
             'id', 'allow_aggregated_external_transfer', 'allow_authorized_personal_data',
+            'allow_external_image_transfer',
             'max_external_result_rows', 'updated_at',
         )
         read_only_fields = ('updated_at',)
@@ -82,3 +83,19 @@ class AIKnowledgeSourceSerializer(serializers.ModelSerializer):
         if '..' in normalized.split('/'):
             raise serializers.ValidationError('親フォルダへの移動は指定できません。')
         return normalized
+
+
+class AIKnowledgeDocumentSerializer(serializers.ModelSerializer):
+    """アップロード可能な資料種別とサイズを限定する。"""
+    class Meta:
+        model = AIKnowledgeDocument
+        fields = '__all__'
+        read_only_fields = ('uploaded_at', 'updated_at')
+
+    def validate_file(self, value):
+        suffix = value.name.rsplit('.', 1)[-1].lower() if '.' in value.name else ''
+        if suffix not in {'pdf', 'xlsx', 'xls', 'csv', 'tsv', 'png', 'jpg', 'jpeg', 'webp', 'bmp'}:
+            raise serializers.ValidationError('PDF、Excel、CSV、TSV、画像（PNG / JPG / WEBP / BMP）だけを登録できます。')
+        if value.size > 15 * 1024 * 1024:
+            raise serializers.ValidationError('登録できる資料は15MBまでです。')
+        return value

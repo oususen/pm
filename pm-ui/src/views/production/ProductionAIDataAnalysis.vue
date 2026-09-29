@@ -81,13 +81,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { authState } from '@/auth'
 import api from '@/api/client'
 import { hasPermission } from '@/router'
 
-const provider = ref('deepseek')
+const provider = ref('openrouter')
 const route = useRoute()
 const providerStatus = ref({})
 const EXTERNAL_PROVIDERS = ['deepseek', 'openrouter']
@@ -210,6 +210,17 @@ const refreshModelStatus = async () => {
     providerStatus.value = {}
   }
 }
+
+// DeepSeekは有料のため、選択時に確認する。同じ画面の間は1回承認すれば再確認しない。
+let deepseekConfirmed = false
+watch(provider, (next, prev) => {
+  if (next !== 'deepseek' || deepseekConfirmed) return
+  if (window.confirm('DeepSeekは有料です。使いますか？')) {
+    deepseekConfirmed = true
+  } else {
+    provider.value = prev
+  }
+})
 
 onMounted(refreshModelStatus)
 </script>

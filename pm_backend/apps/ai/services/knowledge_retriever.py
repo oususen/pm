@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import re
+import csv
+import os
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 
-from ai.config.models import AIKnowledgeSource
+from ai.config.models import AIKnowledgeDocument, AIKnowledgeSource
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -17,6 +20,11 @@ MANUAL_ROOT = PROJECT_ROOT / 'pm-ui' / 'public' / 'manual'
 SPEC_ROOT = PROJECT_ROOT / '仕様書'
 LOCAL_KNOWLEDGE_ROOT = PROJECT_ROOT / 'pm_backend' / 'apps' / 'ai' / 'knowledge'
 MAX_CHUNK_CHARS = 1400
+OCR_EXECUTABLE = os.environ.get('OCR_TESSERACT_PATH', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
+OCR_TESSDATA_DIR = os.environ.get(
+    'OCR_TESSDATA_DIR', str(PROJECT_ROOT / 'pm_backend' / 'ocr_data'),
+)
+IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
 SCREEN_KEYWORDS = {
     'orders': ('受注', '注文', 'ルーティング'),
     'production': ('生産', '工程', '実績', '作業'),
@@ -35,25 +43,54 @@ def _enabled_categories():
     )
 
 
-def _paths_for_categories(categories):
+def _paths_for_categories(categories, document_ids=None):
     """区分に対応する正式原本だけを返す。READMEは案内文のため検索しない。"""
     paths = []
+    document_ids = tuple(document_ids or ())
+    # 資料を指定した会話では、その資料だけを検索し、応答を速く・根拠を明確にする。
+    # 明示添付は利用者自身の今回限りの指定なので、ナレッジ一覧の有効/無効には従わない。
+    # 添付しない通常会話だけは、下段の is_enabled=True で自動検索対象を限定する。
+    if document_ids:
+        documents = AIKnowledgeDocument.objects.filter(
+            category__in=categories, id__in=document_ids,
+        )
+        for document in documents:
+            try:
+                path = Path(document.file.path)
+            except (ValueError, OSError):
+                continue
+            if path.exists():
+                paths.append((path, f'AIナレッジ資料/{document.name}'))
+        return sorted(set(paths), key=lambda item: item[1])
     if 'manual' in categories and MANUAL_ROOT.exists():
-        paths.extend(path for path in MANUAL_ROOT.rglob('*.md') if path.name.lower() != 'readme.md')
+        paths.extend((path, path.relative_to(PROJECT_ROOT).as_posix()) for path in MANUAL_ROOT.rglob('*.md') if path.name.lower() != 'readme.md')
     if 'pm_structure' in categories:
         for name in ('PMアプリ構造辞書.md', '社内AIチャット仕様書.md'):
             path = SPEC_ROOT / name
             if path.exists():
-                paths.append(path)
+                paths.append((path, path.relative_to(PROJECT_ROOT).as_posix()))
     if 'security' in categories:
         path = SPEC_ROOT / '社内AI運用規約・AI用DB辞書.md'
         if path.exists():
-            paths.append(path)
+            paths.append((path, path.relative_to(PROJECT_ROOT).as_posix()))
     if 'procedure' in categories:
         procedure_root = LOCAL_KNOWLEDGE_ROOT / 'procedures'
         if procedure_root.exists():
-            paths.extend(path for path in procedure_root.rglob('*.md') if path.name.lower() != 'readme.md')
-    return sorted(set(paths))
+            paths.extend((path, path.relative_to(PROJECT_ROOT).as_posix()) for path in procedure_root.rglob('*.md') if path.name.lower() != 'readme.md')
+        # 承認済みの運用手順・トラブル対応は既存仕様書を正式原本として参照する。
+        paths.extend(
+            (path, path.relative_to(PROJECT_ROOT).as_posix())
+            for path in SPEC_ROOT.glob('*.md')
+            if any(word in path.name for word in ('手順', '対応'))
+        )
+    for document in AIKnowledgeDocument.objects.filter(is_enabled=True, category__in=categories):
+        try:
+            path = Path(document.file.path)
+        except (ValueError, OSError):
+            continue
+        if path.exists():
+            paths.append((path, f'AIナレッジ資料/{document.name}'))
+    return sorted(set(paths), key=lambda item: item[1])
 
 
 def _normalize(value):
@@ -91,17 +128,94 @@ def _split_sections(text):
     return chunks
 
 
+def _extract_spreadsheet_text(path):
+    """表計算資料は見出しと値をテキスト化する。式は再計算せず保存済みの値だけを読む。"""
+    suffix = path.suffix.lower()
+    if suffix in {'.csv', '.tsv'}:
+        delimiter = '\t' if suffix == '.tsv' else ','
+        for encoding in ('utf-8-sig', 'cp932'):
+            try:
+                with path.open('r', encoding=encoding, newline='') as stream:
+                    rows = list(csv.reader(stream, delimiter=delimiter))[:300]
+                return '\n'.join(' | '.join(cell.strip() for cell in row[:50] if cell.strip()) for row in rows)
+            except UnicodeDecodeError:
+                continue
+        return ''
+    if suffix == '.xlsx':
+        from openpyxl import load_workbook
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        rows = []
+        for sheet in workbook.worksheets[:20]:
+            rows.append(f'## シート: {sheet.title}')
+            for row in sheet.iter_rows(max_row=300, max_col=50, values_only=True):
+                values = [str(value).strip() for value in row if value not in (None, '')]
+                if values:
+                    rows.append(' | '.join(values))
+        workbook.close()
+        return '\n'.join(rows)
+    if suffix == '.xls':
+        import pandas as pd
+        rows = []
+        workbook = pd.ExcelFile(path, engine='xlrd')
+        try:
+            for sheet_name in workbook.sheet_names[:20]:
+                rows.append(f'## シート: {sheet_name}')
+                frame = pd.read_excel(workbook, sheet_name=sheet_name, header=None, nrows=300).iloc[:, :50]
+                for row in frame.fillna('').astype(str).values.tolist():
+                    values = [value.strip() for value in row if value.strip()]
+                    if values:
+                        rows.append(' | '.join(values))
+        finally:
+            workbook.close()
+        return '\n'.join(rows)
+    return ''
+
+
+def _extract_text(path):
+    suffix = path.suffix.lower()
+    if suffix == '.pdf':
+        from pypdf import PdfReader
+        reader = PdfReader(path)
+        return '\n'.join((page.extract_text() or '') for page in reader.pages[:100])
+    if suffix in {'.xlsx', '.xls', '.csv', '.tsv'}:
+        return _extract_spreadsheet_text(path)
+    if suffix in IMAGE_SUFFIXES:
+        return _extract_image_text(path)
+    return path.read_text(encoding='utf-8')
+
+
+def _extract_image_text(path):
+    """ローカルTesseractで画像内の日本語・英数字をOCRする。画像は外部へ送信しない。"""
+    executable = Path(OCR_EXECUTABLE)
+    tessdata_dir = Path(OCR_TESSDATA_DIR)
+    if not executable.exists() or not tessdata_dir.exists():
+        return ''
+    result = subprocess.run(
+        [
+            str(executable), str(path), 'stdout', '-l', 'jpn+eng',
+            '--tessdata-dir', str(tessdata_dir), '--psm', '6',
+        ],
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        timeout=30,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ''
+
+
 @lru_cache(maxsize=1024)
 def _read_chunks(path_text, modified_ns):
     """更新時刻をキャッシュキーに含め、開発中のMarkdown編集を次回検索へ反映する。"""
     path = Path(path_text)
     try:
-        return tuple(_split_sections(path.read_text(encoding='utf-8')))
-    except (OSError, UnicodeDecodeError):
+        return tuple(_split_sections(_extract_text(path)))
+    # 利用者が登録した壊れた資料1件で、AIチャット全体を失敗させない。
+    except Exception:  # 解析対象は利用者が登録する外部ファイルのため、形式不正も無視する。
         return ()
 
 
-def retrieve_knowledge(question, screen_context=None, limit=4, max_chars=5200):
+def retrieve_knowledge(question, screen_context=None, limit=4, max_chars=5200, document_ids=None):
     """質問と起点画面に近い正式原本の断片を返す。"""
     categories = _enabled_categories()
     if not categories:
@@ -110,16 +224,18 @@ def retrieve_knowledge(question, screen_context=None, limit=4, max_chars=5200):
     screen_id = (screen_context or {}).get('id', 'ai_home')
     screen_terms = set(SCREEN_KEYWORDS.get(screen_id, ()))
     candidates = []
-    for path in _paths_for_categories(categories):
+    for path, relative in _paths_for_categories(categories, document_ids):
         try:
             modified_ns = path.stat().st_mtime_ns
         except OSError:
             continue
-        relative = path.relative_to(PROJECT_ROOT).as_posix()
         path_terms = _keywords(relative)
         for heading, content in _read_chunks(str(path), modified_ns):
             content_terms = _keywords(content)
             score = len(query_terms & content_terms) * 4 + len(query_terms & path_terms) * 7
+            # 利用者がAI設定から追加した資料は、その固有の記述を優先して参照する。
+            if relative.startswith('AIナレッジ資料/'):
+                score += len(query_terms & content_terms) * 8 + 12
             # 起点画面の用語が原本のパスまたは本文にあれば優先する。
             score += sum(5 for term in screen_terms if term in relative or term in content)
             if score <= 0:

@@ -39,6 +39,7 @@ class AIDataPolicy(models.Model):
     """外部AIへ渡すデータ範囲の全体方針。常に1行だけ保持する。"""
     allow_aggregated_external_transfer = models.BooleanField(default=True, verbose_name='集計結果の外部送信を許可')
     allow_authorized_personal_data = models.BooleanField(default=True, verbose_name='権限者への個人別集計を許可')
+    allow_external_image_transfer = models.BooleanField(default=True, verbose_name='添付画像の外部AI送信を許可')
     max_external_result_rows = models.PositiveIntegerField(default=30, verbose_name='外部送信する最大集計行数')
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -63,3 +64,20 @@ class AIKnowledgeSource(models.Model):
         ordering = ['category', 'display_order', 'name']
         verbose_name = 'AIナレッジ登録'
         verbose_name_plural = 'AIナレッジ登録'
+
+
+class AIKnowledgeDocument(models.Model):
+    """設定画面から登録するPDF・Excel等のナレッジ原本。抽出本文はDBへ保存しない。"""
+    category = models.CharField(max_length=30, choices=KNOWLEDGE_CATEGORY_CHOICES, verbose_name='区分')
+    name = models.CharField(max_length=150, verbose_name='資料名')
+    file = models.FileField(upload_to='ai_knowledge/', verbose_name='資料ファイル')
+    description = models.CharField(max_length=300, blank=True, default='', verbose_name='説明')
+    is_enabled = models.BooleanField(default=True, verbose_name='有効')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ai_knowledge_document'
+        ordering = ['category', 'name', 'id']
+        verbose_name = 'AIナレッジ資料'
+        verbose_name_plural = 'AIナレッジ資料'

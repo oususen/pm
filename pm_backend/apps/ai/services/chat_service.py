@@ -22,6 +22,7 @@ from ai.config.service import (
     apply_tool_policy,
     authorized_personal_data_allowed,
     external_aggregate_transfer_allowed,
+    external_image_transfer_allowed,
     limit_external_result_rows,
 )
 from accounts.models import Department
@@ -35,6 +36,7 @@ from ai.services.order_queries import get_missing_routing_orders
 from ai.services.knowledge_retriever import knowledge_prompt, knowledge_source_label, retrieve_knowledge
 from ai.services.query_common import AI_DB_ALIAS
 from ai.services.sql_queries import execute_readonly_sql, schema_text
+from ai.services.vision import selected_visual_attachment
 
 
 MODEL = os.environ.get('OLLAMA_MODEL', 'qwen3:4b-instruct')
@@ -67,6 +69,8 @@ EXTERNAL_AGENT_PROVIDERS = {
     },
 }
 MAX_RANGE_DAYS = 93
+AGENT_MAX_ROUNDS = 8
+AGENT_MAX_TOKENS = 4096
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
 PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
@@ -153,10 +157,21 @@ class ExternalDataRedactor:
         return text
 
     def redact_messages(self, messages):
-        return [
-            {**message, 'content': self.redact_text(message.get('content', ''))}
-            for message in messages
-        ]
+        redacted = []
+        for message in messages:
+            content = message.get('content', '')
+            # 画像付きメッセージはOpenAI互換形式の配列になる。文章部分だけを伏字化し、
+            # 明示添付された画像データは壊さずそのまま残す。
+            if isinstance(content, list):
+                content = [
+                    {**part, 'text': self.redact_text(part.get('text', ''))}
+                    if isinstance(part, dict) and part.get('type') == 'text' else part
+                    for part in content
+                ]
+            else:
+                content = self.redact_text(content)
+            redacted.append({**message, 'content': content})
+        return redacted
 
 
 def _build_external_data_redactor():
@@ -818,6 +833,7 @@ def _agent_individual_overtime(arguments, redactor):
 def _deepseek_agent_chat(
     question, history, model=None, redactor=None, allow_personal_overtime=False, screen_context=None,
     base_url=None, api_key=None, default_model=None, provider_key='deepseek', provider_label='DeepSeek',
+    knowledge_document_ids=None, vision_attachment=None,
 ):
     """DeepSeek互換のOpenAI形式APIが、読み取り専用ツールを選び、段階的に調査して回答する。"""
     base_url = base_url or DEEPSEEK_BASE_URL
@@ -828,7 +844,7 @@ def _deepseek_agent_chat(
     recent_period = _recent_data_period(history)
     selected_option = _selected_data_option(question, history)
     screen_context = screen_context or resolve_screen_context(None)
-    knowledge_chunks = retrieve_knowledge(question, screen_context)
+    knowledge_chunks = retrieve_knowledge(question, screen_context, document_ids=knowledge_document_ids)
     retrieved_knowledge = knowledge_prompt(knowledge_chunks)
     knowledge_source = knowledge_source_label(knowledge_chunks)
     allowed_tools = screen_context['allowed_tools']
@@ -855,6 +871,16 @@ def _deepseek_agent_chat(
             '返された数量は代表受注明細の数量であり、全受注明細の合計ではないことを守ってください。'
             '得意先名、受注番号、受注明細は結果に含まれないため、推測・要求・回答してはいけません。\n'
         )
+    pdf_page_notice = ''
+    if vision_attachment and vision_attachment['kind'] == 'PDF':
+        sent_pages = len(vision_attachment['data_urls'])
+        total_pages = vision_attachment['total_pages']
+        if total_pages > sent_pages:
+            pdf_page_notice = (
+                f'添付PDFは全{total_pages}ページ中、先頭{sent_pages}ページだけを確認しています。'
+                f'この回答には「{sent_pages + 1}ページ以降はまだ確認していません」と必ず明記してください。'
+                '未確認ページの内容を推測・要約してはいけません。\n'
+            )
     messages = [{
         'role': 'system',
         'content': (
@@ -897,13 +923,32 @@ def _deepseek_agent_chat(
             'selected_data_option がある場合は、利用者が直前の選択肢を選んだものとして解釈し、必要なツールを自分で選んでください。\n'
             f'本日: {date.today().isoformat()}。直近のDB集計期間: {json.dumps(recent_period, ensure_ascii=False)}。'
             f'選択済みの業務候補: {json.dumps(selected_option, ensure_ascii=False)}。'
+            + (
+                'このターンには利用者が明示添付した画像またはPDFページがあります。内容・文字・設備・帳票の見た目を確認し、'
+                '見えていないことを推測で断定しないでください。\n'
+                if vision_attachment else ''
+            )
+            + pdf_page_notice
             + retrieved_knowledge
         ),
     }]
     messages.extend({'role': row['role'], 'content': row['content']} for row in history[-12:])
-    messages.append({'role': 'user', 'content': question})
+    messages.append({
+        'role': 'user',
+        'content': [
+            {'type': 'text', 'text': question},
+            *[
+                {'type': 'image_url', 'image_url': {'url': data_url}}
+                for data_url in vision_attachment['data_urls']
+            ],
+        ] if vision_attachment else question,
+    })
     confirmed_codes = _confirmed_product_codes(question, history)
     source = f'{provider_label} APIとの会話'
+    if vision_attachment:
+        source += f" / 添付{vision_attachment['kind']}: {vision_attachment['name']}"
+        if vision_attachment['kind'] == 'PDF' and vision_attachment['total_pages'] > len(vision_attachment['data_urls']):
+            source += f"（先頭{len(vision_attachment['data_urls'])}/{vision_attachment['total_pages']}ページ）"
     period = None
     chart = None
     payload = {}
@@ -912,7 +957,7 @@ def _deepseek_agent_chat(
     grounded_placeholders = set()
 
     try:
-        for attempt in range(4):
+        for attempt in range(AGENT_MAX_ROUNDS):
             redacted_messages = redactor.redact_messages(messages) if redactor else messages
             if redactor:
                 for row in redacted_messages:
@@ -922,15 +967,18 @@ def _deepseek_agent_chat(
                 'stream': False,
                 'messages': redacted_messages,
                 'temperature': 0.4,
-                'max_tokens': 768,
+                'max_tokens': AGENT_MAX_TOKENS,
                 'tools': available_tools,
             }
             if provider_key == 'deepseek':
-                # DeepSeek独自パラメータ。思考モードのトークン浪費を防ぐ（OpenAI互換の他プロバイダには送らない）。
-                body['thinking'] = {'type': 'disabled'}
+                # DeepSeek独自パラメータ。複数ツールを跨ぐ調査・分析のため思考モードを有効にする
+                # （OpenAI互換の他プロバイダには送らない）。意図解析のJSON出力は別関数で無効のまま。
+                body['thinking'] = {'type': 'enabled'}
             if provider_key == 'openrouter':
                 # 無料枠が特定の提供元(例: ModelRun)だけで混雑する場合、他の提供元へ自動振り分けする。
                 body['provider'] = {'allow_fallbacks': True}
+                # OpenRouter共通の推論パラメータ。DeepSeekの thinking に相当する。
+                body['reasoning'] = {'enabled': True}
             # 「グラフ」「もう一回」等は、記憶だけで答えて実データが伴わない誤答が多いため、
             # 最初の1回だけツール呼び出しを必須化する。どのツールを呼ぶかはDeepSeekの判断のまま。
             if attempt == 0 and available_tools and any(term in question for term in FORCE_TOOL_CALL_TERMS):
@@ -972,6 +1020,9 @@ def _deepseek_agent_chat(
             # 思考モードのツール呼び出しでは、同一ターン内のreasoning_contentを次の呼び出しへ戻す必要がある。
             if message.get('reasoning_content'):
                 assistant_message['reasoning_content'] = message['reasoning_content']
+            # OpenRouterは推論をreasoning_detailsで返す。ツール呼び出しの継続時は同じ内容を戻す。
+            if message.get('reasoning_details'):
+                assistant_message['reasoning_details'] = message['reasoning_details']
             messages.append(assistant_message)
             for tool_call in tool_calls:
                 function = tool_call.get('function') or {}
@@ -1626,7 +1677,7 @@ class ProductionAIDemoView(APIView):
         question = str(request.data.get('message') or '').strip()
         if not question or len(question) > 1200:
             return Response({'detail': '質問を入力してください（最大1200文字）。'}, status=400)
-        provider = str(request.data.get('provider') or 'deepseek').strip().lower()
+        provider = str(request.data.get('provider') or 'openrouter').strip().lower()
         if provider not in {'qwen', *EXTERNAL_AGENT_PROVIDERS}:
             return Response({'detail': 'AIモデルの指定が不正です。'}, status=400)
         provider_config = AIProviderConfig.objects.get(provider=provider)
@@ -1649,6 +1700,27 @@ class ProductionAIDemoView(APIView):
         if is_external_provider and not external_aggregate_transfer_allowed():
             screen_context = {**screen_context, 'allowed_tools': frozenset()}
         raw_history = request.data.get('history') or []
+        raw_document_ids = request.data.get('knowledge_document_ids') or []
+        if not isinstance(raw_document_ids, list):
+            return Response({'detail': '参照資料の指定が不正です。'}, status=400)
+        knowledge_document_ids = []
+        for document_id in raw_document_ids[:3]:
+            try:
+                normalized_id = int(document_id)
+            except (TypeError, ValueError):
+                return Response({'detail': '参照資料の指定が不正です。'}, status=400)
+            if normalized_id > 0 and normalized_id not in knowledge_document_ids:
+                knowledge_document_ids.append(normalized_id)
+        vision_attachment = None
+        if provider == 'openrouter':
+            try:
+                vision_attachment = selected_visual_attachment(knowledge_document_ids)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=400)
+            if vision_attachment and not external_image_transfer_allowed():
+                return Response({
+                    'detail': '添付画像・PDFの外部AI送信はAI設定で無効です。有効にするか、OCRで読める文字だけを質問してください。',
+                }, status=400)
         history = [
             {
                 'role': row['role'],
@@ -1671,6 +1743,8 @@ class ProductionAIDemoView(APIView):
                     base_url=agent_provider['base_url'], api_key=agent_provider['api_key'],
                     default_model=agent_provider['default_model'],
                     provider_key=provider, provider_label=agent_provider['label'],
+                    knowledge_document_ids=knowledge_document_ids,
+                    vision_attachment=vision_attachment,
                 )
             except LocalAIError as exc:
                 return Response({'detail': str(exc)}, status=503)
@@ -1746,18 +1820,18 @@ class ProductionAIDemoView(APIView):
 
         # 3. 報告書の追質問（前回データを使い、再分類・再集計をスキップ）
         if _is_report_followup(question, history):
-            return self._report_from_context(question, history, provider, model, redactor, screen_context)
+            return self._report_from_context(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
         # 4. DB集計が必要な質問
         if _needs_database(question, history):
-            return self._data_chat(question, history, provider, model, redactor, screen_context)
+            return self._data_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
         # 5. 一般会話
-        return self._general_chat(question, history, provider, model, redactor, screen_context)
+        return self._general_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
-    def _general_chat(self, question, history, provider, model=None, redactor=None, screen_context=None):
+    def _general_chat(self, question, history, provider, model=None, redactor=None, screen_context=None, knowledge_document_ids=None):
         """システムプロンプトで役割を与え、選択中のモデルで会話を実行する。"""
-        knowledge_chunks = retrieve_knowledge(question, screen_context)
+        knowledge_chunks = retrieve_knowledge(question, screen_context, document_ids=knowledge_document_ids)
         retrieved_knowledge = knowledge_prompt(knowledge_chunks)
         knowledge_source = knowledge_source_label(knowledge_chunks)
         system = {
@@ -1806,7 +1880,7 @@ class ProductionAIDemoView(APIView):
         })
 
 
-    def _data_chat(self, question, history, provider, model=None, redactor=None, screen_context=None):
+    def _data_chat(self, question, history, provider, model=None, redactor=None, screen_context=None, knowledge_document_ids=None):
         """DB集計結果を選択中のモデルに渡して自然文で回答する。"""
         try:
             plan = _date_range(question, history, provider, model, redactor)
@@ -1814,7 +1888,7 @@ class ProductionAIDemoView(APIView):
             return Response({'detail': str(exc)}, status=400)
 
         if plan['intent'] == 'help':
-            return self._general_chat(question, history, provider, model, redactor, screen_context)
+            return self._general_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
         if plan.get('product_not_found'):
             matches = plan.get('product_match_candidates') or []
@@ -1840,7 +1914,7 @@ class ProductionAIDemoView(APIView):
 
         source, raw_data, facts = _build_facts(plan)
         if source is None:
-            return self._general_chat(question, history, provider, model, redactor, screen_context)
+            return self._general_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
         start = plan['start_date']
         end = plan['end_date']
@@ -1868,7 +1942,7 @@ class ProductionAIDemoView(APIView):
             }
 
         facts_text = json.dumps(facts, ensure_ascii=False, default=str)
-        knowledge_chunks = retrieve_knowledge(question, screen_context)
+        knowledge_chunks = retrieve_knowledge(question, screen_context, document_ids=knowledge_document_ids)
         retrieved_knowledge = knowledge_prompt(knowledge_chunks)
         knowledge_source = knowledge_source_label(knowledge_chunks)
         try:
@@ -1921,7 +1995,7 @@ class ProductionAIDemoView(APIView):
         })
 
 
-    def _report_from_context(self, question, history, provider, model=None, redactor=None, screen_context=None):
+    def _report_from_context(self, question, history, provider, model=None, redactor=None, screen_context=None, knowledge_document_ids=None):
         """前回の回答データから報告書を生成する。DB再集計・意図分類をスキップする。"""
         last_data = ''
         for msg in reversed(history):
@@ -1929,7 +2003,7 @@ class ProductionAIDemoView(APIView):
                 last_data = msg['content']
                 break
         if not last_data:
-            return self._general_chat(question, history, provider, model, redactor, screen_context)
+            return self._general_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
         try:
             document, inference = _chat([
                 {

@@ -57,6 +57,11 @@ def authorized_personal_data_allowed():
     return get_data_policy().allow_authorized_personal_data
 
 
+def external_image_transfer_allowed():
+    """利用者が明示添付した画像を外部AIへ渡す全体許可を返す。"""
+    return get_data_policy().allow_external_image_transfer
+
+
 def limit_external_result_rows(result):
     """DeepSeekへ渡すリスト型の集計結果を、管理上限までに限定する。"""
     max_rows = get_data_policy().max_external_result_rows

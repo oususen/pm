@@ -1,11 +1,12 @@
 """AI管理設定API。権限判定はフロントエンドUIで行う。"""
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, parsers, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ai.config.models import AIDataPolicy, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+from ai.config.models import AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 from ai.config.serializers import (
     AIDataPolicySerializer,
+    AIKnowledgeDocumentSerializer,
     AIKnowledgeSourceSerializer,
     AIProviderConfigSerializer,
     AIToolPolicySerializer,
@@ -82,3 +83,16 @@ class AIKnowledgeSourceViewSet(viewsets.ModelViewSet):
     queryset = AIKnowledgeSource.objects.all()
     serializer_class = AIKnowledgeSourceSerializer
     pagination_class = None
+
+
+class AIKnowledgeDocumentViewSet(viewsets.ModelViewSet):
+    """ナレッジ原本の登録。権限制御はAI設定画面のUIで行う。"""
+    queryset = AIKnowledgeDocument.objects.all()
+    serializer_class = AIKnowledgeDocumentSerializer
+    pagination_class = None
+    parser_classes = [parsers.JSONParser, parsers.MultiPartParser, parsers.FormParser]
+
+    def perform_destroy(self, instance):
+        """利用者が資料を削除した場合は、ナレッジ原本もmediaから削除する。"""
+        instance.file.delete(save=False)
+        instance.delete()

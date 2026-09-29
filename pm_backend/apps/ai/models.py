@@ -1,6 +1,6 @@
 from django.db import models
 
-from ai.config.models import AIDataPolicy, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+from ai.config.models import AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 
 
 class AISearchConfig(models.Model):
