@@ -32,6 +32,7 @@ from production.models_process_realtime import ProcessRealtimeRecord
 from quality.models_scrap import ScrapRecord
 from overtime.models import OvertimeApplication
 from ai.services.order_queries import get_missing_routing_orders
+from ai.services.knowledge_retriever import knowledge_prompt, knowledge_source_label, retrieve_knowledge
 from ai.services.query_common import AI_DB_ALIAS
 from ai.services.sql_queries import execute_readonly_sql, schema_text
 
@@ -51,6 +52,8 @@ OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'qwen/qwen3.8-27b:free')
 OPENROUTER_BASE_URL = os.environ.get('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
 OPENROUTER_MODELS = {
     'qwen/qwen3.8-27b:free': 'Qwen3.8 27B（OpenRouter・無料枠）',
+    'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B A4B（OpenRouter・無料枠）',
+    'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B（OpenRouter・有料/要クレジット）',
 }
 # 外部AI(DeepSeek互換のOpenAI形式API)。エージェント方式のツール呼び出しはこれらすべてで共通ロジックを使う。
 EXTERNAL_AGENT_PROVIDERS = {
@@ -825,6 +828,9 @@ def _deepseek_agent_chat(
     recent_period = _recent_data_period(history)
     selected_option = _selected_data_option(question, history)
     screen_context = screen_context or resolve_screen_context(None)
+    knowledge_chunks = retrieve_knowledge(question, screen_context)
+    retrieved_knowledge = knowledge_prompt(knowledge_chunks)
+    knowledge_source = knowledge_source_label(knowledge_chunks)
     allowed_tools = screen_context['allowed_tools']
     available_tools = [
         tool for tool in DEEPSEEK_AGENT_TOOLS
@@ -865,7 +871,11 @@ def _deepseek_agent_chat(
             '確認した内訳を提示して利用者に確認してください。\n'
             '生産数・仕損・中断・残業の数値を答えるときは、必ずget_business_dataを呼び、ツール結果にない数値を作らないでください。\n'
             '個人別残業は、search_employee・get_individual_overtime・get_personal_overtime_threshold が利用可能な場合だけ使用してください。'
-            '指定した一人の合計を聞かれたら、氏名が姓だけ・曖昧でも必ず最初にsearch_employeeで検索し、'
+            '注意: 個人名は外部送信前に「作業者1」の形式の識別子に変換されています。これは氏名として'
+            'そのまま検索・集計に使える文字列です。質問文に「作業者12」のような表記があれば、'
+            'それをsearch_employeeやget_individual_overtimeのemployee_name引数へそのまま渡し、'
+            '通常の氏名の質問と同じ手順で処理してください。\n'
+            '指定した一人の合計を聞かれたら、氏名(一時IDを含む)が姓だけ・曖昧でも必ず最初にsearch_employeeで検索し、'
             '候補が1件でも「○○さんですか？」のように利用者に確認してから get_individual_overtime を呼んでください。'
             '複数候補がある場合は候補を提示し、利用者が選んだ氏名だけを使ってください。AIが候補を勝手に確定してはいけません。'
             '重要: 氏名はsearch_employeeまたはget_individual_overtimeの結果に実際に含まれる文字列だけを使ってください。'
@@ -887,6 +897,7 @@ def _deepseek_agent_chat(
             'selected_data_option がある場合は、利用者が直前の選択肢を選んだものとして解釈し、必要なツールを自分で選んでください。\n'
             f'本日: {date.today().isoformat()}。直近のDB集計期間: {json.dumps(recent_period, ensure_ascii=False)}。'
             f'選択済みの業務候補: {json.dumps(selected_option, ensure_ascii=False)}。'
+            + retrieved_knowledge
         ),
     }]
     messages.extend({'role': row['role'], 'content': row['content']} for row in history[-12:])
@@ -917,6 +928,9 @@ def _deepseek_agent_chat(
             if provider_key == 'deepseek':
                 # DeepSeek独自パラメータ。思考モードのトークン浪費を防ぐ（OpenAI互換の他プロバイダには送らない）。
                 body['thinking'] = {'type': 'disabled'}
+            if provider_key == 'openrouter':
+                # 無料枠が特定の提供元(例: ModelRun)だけで混雑する場合、他の提供元へ自動振り分けする。
+                body['provider'] = {'allow_fallbacks': True}
             # 「グラフ」「もう一回」等は、記憶だけで答えて実データが伴わない誤答が多いため、
             # 最初の1回だけツール呼び出しを必須化する。どのツールを呼ぶかはDeepSeekの判断のまま。
             if attempt == 0 and available_tools and any(term in question for term in FORCE_TOOL_CALL_TERMS):
@@ -945,11 +959,12 @@ def _deepseek_agent_chat(
                 if not answer:
                     raise LocalAIError(f'{provider_label} APIから回答が返りませんでした。時間をおいて再度お試しください。')
                 usage = payload.get('usage') or {}
+                display_source = ' / '.join(item for item in (source, knowledge_source) if item)
                 return answer, {
                     'provider': provider_key, 'model': payload.get('model', model or default_model),
                     'duration_seconds': None, 'output_tokens': usage.get('completion_tokens'),
                     'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
-                }, source, period, chart
+                }, display_source, period, chart
 
             assistant_message = {
                 'role': 'assistant', 'content': message.get('content') or '', 'tool_calls': tool_calls,
@@ -1003,6 +1018,11 @@ def _deepseek_agent_chat(
             raise LocalAIError(
                 f'【レート制限】{provider_label} APIが現在レート制限中です。時間をおいて再試行するか、'
                 '無料枠以外のモデル・自分のプロバイダキーの設定を検討してください。'
+            ) from exc
+        if exc.code == 402:
+            raise LocalAIError(
+                f'【残高不足】{provider_label} APIの無料枠(トライアル残高)を使い切りました。'
+                'クレジットを追加購入するか、無料モデルに切り替えてください。'
             ) from exc
         raise LocalAIError(f'{provider_label} APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
     except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
@@ -1726,17 +1746,20 @@ class ProductionAIDemoView(APIView):
 
         # 3. 報告書の追質問（前回データを使い、再分類・再集計をスキップ）
         if _is_report_followup(question, history):
-            return self._report_from_context(question, history, provider, model, redactor)
+            return self._report_from_context(question, history, provider, model, redactor, screen_context)
 
         # 4. DB集計が必要な質問
         if _needs_database(question, history):
-            return self._data_chat(question, history, provider, model, redactor)
+            return self._data_chat(question, history, provider, model, redactor, screen_context)
 
         # 5. 一般会話
-        return self._general_chat(question, history, provider, model, redactor)
+        return self._general_chat(question, history, provider, model, redactor, screen_context)
 
-    def _general_chat(self, question, history, provider, model=None, redactor=None):
+    def _general_chat(self, question, history, provider, model=None, redactor=None, screen_context=None):
         """システムプロンプトで役割を与え、選択中のモデルで会話を実行する。"""
+        knowledge_chunks = retrieve_knowledge(question, screen_context)
+        retrieved_knowledge = knowledge_prompt(knowledge_chunks)
+        knowledge_source = knowledge_source_label(knowledge_chunks)
         system = {
             'role': 'system',
             'content': (
@@ -1754,6 +1777,7 @@ class ProductionAIDemoView(APIView):
                 '- 不明確な場合は1回だけ簡潔に聞き返してください。選択肢は最大3つ。\n'
                 '- 対応できない質問には「現在この機能は対応していません」と短く伝えてください。\n'
                 '日本語で簡潔に回答してください。'
+                + retrieved_knowledge
             ),
         }
         chat_history = (
@@ -1772,7 +1796,9 @@ class ProductionAIDemoView(APIView):
             'answer': answer,
             'analysis': '',
             'document': '',
-            'source': 'DeepSeek APIとの会話' if provider == 'deepseek' else 'ローカルQwenの会話',
+            'source': ' / '.join(item for item in (
+                'DeepSeek APIとの会話' if provider == 'deepseek' else 'ローカルQwenの会話', knowledge_source,
+            ) if item),
             'chart': None,
             'provider': provider,
             'model': inference['model'],
@@ -1780,7 +1806,7 @@ class ProductionAIDemoView(APIView):
         })
 
 
-    def _data_chat(self, question, history, provider, model=None, redactor=None):
+    def _data_chat(self, question, history, provider, model=None, redactor=None, screen_context=None):
         """DB集計結果を選択中のモデルに渡して自然文で回答する。"""
         try:
             plan = _date_range(question, history, provider, model, redactor)
@@ -1788,7 +1814,7 @@ class ProductionAIDemoView(APIView):
             return Response({'detail': str(exc)}, status=400)
 
         if plan['intent'] == 'help':
-            return self._general_chat(question, history, provider, model, redactor)
+            return self._general_chat(question, history, provider, model, redactor, screen_context)
 
         if plan.get('product_not_found'):
             matches = plan.get('product_match_candidates') or []
@@ -1814,7 +1840,7 @@ class ProductionAIDemoView(APIView):
 
         source, raw_data, facts = _build_facts(plan)
         if source is None:
-            return self._general_chat(question, history, provider, model, redactor)
+            return self._general_chat(question, history, provider, model, redactor, screen_context)
 
         start = plan['start_date']
         end = plan['end_date']
@@ -1842,6 +1868,9 @@ class ProductionAIDemoView(APIView):
             }
 
         facts_text = json.dumps(facts, ensure_ascii=False, default=str)
+        knowledge_chunks = retrieve_knowledge(question, screen_context)
+        retrieved_knowledge = knowledge_prompt(knowledge_chunks)
+        knowledge_source = knowledge_source_label(knowledge_chunks)
         try:
             answer, inference = _chat([
                 {
@@ -1855,6 +1884,7 @@ class ProductionAIDemoView(APIView):
                         '- 不明確な場合は1回だけ簡潔に聞き返してください。何度も聞き返さないこと。\n'
                         '- サプライヤー名・作業者名・製品名など特定できない情報がある場合は、コードや正式名称を尋ねてください。\n'
                         f'対象期間: {start.isoformat()} ～ {end.isoformat()}'
+                        + retrieved_knowledge
                     ),
                 },
                 {'role': 'user', 'content': f'質問: {question}\n\nDB集計結果:\n{facts_text}'},
@@ -1881,7 +1911,7 @@ class ProductionAIDemoView(APIView):
         return Response({
             'answer': answer,
             'analysis': '',
-            'source': source,
+            'source': ' / '.join(item for item in (source, knowledge_source) if item),
             'period': period,
             'chart': chart,
             'document': document,
@@ -1891,7 +1921,7 @@ class ProductionAIDemoView(APIView):
         })
 
 
-    def _report_from_context(self, question, history, provider, model=None, redactor=None):
+    def _report_from_context(self, question, history, provider, model=None, redactor=None, screen_context=None):
         """前回の回答データから報告書を生成する。DB再集計・意図分類をスキップする。"""
         last_data = ''
         for msg in reversed(history):
@@ -1899,7 +1929,7 @@ class ProductionAIDemoView(APIView):
                 last_data = msg['content']
                 break
         if not last_data:
-            return self._general_chat(question, history, provider, model, redactor)
+            return self._general_chat(question, history, provider, model, redactor, screen_context)
         try:
             document, inference = _chat([
                 {

@@ -30,7 +30,7 @@
             <article v-for="(message, index) in messages" :key="index" class="message" :class="message.role">
               <div v-if="message.role === 'assistant'" class="avatar">✦</div>
               <div class="message-content">
-                <div class="sender">{{ message.role === 'user' ? 'あなた' : '社内AI' }}<span v-if="message.role === 'assistant' && message.provider">{{ providerLabel(message.provider) }}</span></div>
+                <div class="sender">{{ message.role === 'user' ? 'あなた' : '社内AI' }}<span v-if="message.role === 'assistant' && message.provider">{{ providerLabel(message.provider) }}<template v-if="message.model"> · {{ modelLabel(message.model) }}</template></span></div>
                 <div class="bubble" :class="{ 'user-bubble': message.role === 'user' }">{{ message.content }}</div>
                 <div v-if="message.analysis" class="reasoning-note"><span>✦ Qwenの確認メモ</span><p>{{ message.analysis }}</p></div>
                 <div v-if="message.source" class="source-line"><span>▤</span> 根拠データ: {{ message.source }}<span v-if="message.period" class="source-period">{{ message.period.start_date }} — {{ message.period.end_date }}</span></div>
@@ -113,9 +113,23 @@ const DEFAULT_EXTERNAL_MODELS = {
   ],
   openrouter: [
     { id: 'qwen/qwen3.8-27b:free', label: 'Qwen3.8 27B（OpenRouter・無料枠）' },
+    { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B（OpenRouter・無料枠）' },
+    { id: 'google/gemma-4-26b-a4b-it', label: 'Gemma 4 26B A4B（OpenRouter・有料/要クレジット）' },
   ],
 }
 const externalModels = () => providerStatus.value[provider.value]?.models || DEFAULT_EXTERNAL_MODELS[provider.value] || []
+const modelLabel = (modelId) => {
+  if (!modelId) return ''
+  for (const key of Object.keys(providerStatus.value)) {
+    const found = (providerStatus.value[key]?.models || []).find((item) => item.id === modelId)
+    if (found) return found.label
+  }
+  for (const key of Object.keys(DEFAULT_EXTERNAL_MODELS)) {
+    const found = DEFAULT_EXTERNAL_MODELS[key].find((item) => item.id === modelId)
+    if (found) return found.label
+  }
+  return modelId
+}
 const providerModel = () => isExternalProvider.value ? externalModel.value[provider.value] : (providerStatus.value.qwen?.model || 'qwen3:4b-instruct')
 const providerReady = () => Boolean(providerStatus.value[provider.value]?.connected && providerStatus.value[provider.value]?.model_ready)
 const canViewPersonalOvertime = computed(() => hasPermission(authState.user, 'overtime.personal_summary', 'view'))

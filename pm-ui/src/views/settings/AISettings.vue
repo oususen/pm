@@ -57,7 +57,7 @@
 
     <section class="setting-section">
       <h3>AIナレッジ</h3>
-      <p class="section-help">AIフォルダ内の構造辞書・マニュアル・手順書・運用規約の登録状態です。ファイル本文はリポジトリで管理します。</p>
+      <p class="section-help">有効な区分だけを、質問と起点画面に応じてRAG検索します。正式原本は仕様書とマニュアルで管理し、回答には参照したファイルを根拠として表示します。</p>
       <div class="knowledge-list">
         <label v-for="source in knowledgeSources" :key="source.id" class="knowledge-row" :class="{ disabled: !source.is_enabled }">
           <span><strong>{{ source.name }}</strong><small>{{ source.relative_path }}<template v-if="source.description"> · {{ source.description }}</template></small></span>

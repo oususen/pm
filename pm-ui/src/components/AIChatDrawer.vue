@@ -9,6 +9,9 @@
         <select v-model="provider" :disabled="loading" aria-label="AIプロバイダ">
           <option v-for="item in availableProviders" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
+        <select v-if="currentProviderModels.length > 1" v-model="model" :disabled="loading" aria-label="モデル">
+          <option v-for="item in currentProviderModels" :key="item.id" :value="item.id">{{ item.label }}</option>
+        </select>
         <button type="button" title="新しい会話" :disabled="loading" @click="clearChat">＋</button>
         <button type="button" title="閉じる" @click="closeAIDrawer">×</button>
       </div>
@@ -43,6 +46,7 @@ import { hasPermission } from '@/router'
 import { aiDrawerOpen, aiDrawerSourcePath, closeAIDrawer } from '@/composables/aiDrawer'
 
 const provider = ref('deepseek')
+const model = ref('')
 const messages = ref([])
 const draft = ref('')
 const loading = ref(false)
@@ -53,6 +57,10 @@ const availableProviders = ref([
   { value: 'qwen', label: 'Qwen' },
 ])
 const canViewPersonalOvertime = computed(() => hasPermission(authState.user, 'overtime.personal_summary', 'view'))
+const currentProviderModels = computed(() => availableProviders.value.find((item) => item.value === provider.value)?.item?.models || [])
+watch(currentProviderModels, (models) => {
+  if (!models.some((item) => item.id === model.value)) model.value = models[0]?.id || ''
+}, { immediate: true })
 
 const sourceLabel = computed(() => {
   const source = aiDrawerSourcePath.value
@@ -106,6 +114,7 @@ const send = async () => {
       message: question,
       history,
       provider: provider.value,
+      model: model.value || undefined,
       allow_personal_overtime: canViewPersonalOvertime.value,
       screen_context: aiDrawerSourcePath.value,
     })
