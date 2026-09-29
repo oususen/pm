@@ -1,5 +1,7 @@
 from django.db import models
 
+from ai.config.models import AIDataPolicy, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+
 
 class AISearchConfig(models.Model):
     """AIチャットのDB検索対象設定"""

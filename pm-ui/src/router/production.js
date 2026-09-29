@@ -6,8 +6,7 @@ const production = [
   {
     path: "/production/ai-search-config",
     name: "AISearchConfigManager",
-    component: () => import("@/views/production/AISearchConfigManager.vue"),
-    meta: { pageTitle: "AI検索設定", resource: "production.record_inquiry" },
+    redirect: "/settings/ai",
   },
   {
     path: "/production/menu",

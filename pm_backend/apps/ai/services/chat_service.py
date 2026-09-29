@@ -17,6 +17,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ai.context.screen_context import resolve_screen_context
+from ai.config.models import AIProviderConfig
+from ai.config.service import (
+    apply_tool_policy,
+    authorized_personal_data_allowed,
+    external_aggregate_transfer_allowed,
+    limit_external_result_rows,
+)
 from accounts.models import Department
 from masters.models import Product
 from production.models_brake_line_record import BrakeLineRecord
@@ -26,6 +33,7 @@ from quality.models_scrap import ScrapRecord
 from overtime.models import OvertimeApplication
 from ai.services.order_queries import get_missing_routing_orders
 from ai.services.query_common import AI_DB_ALIAS
+from ai.services.sql_queries import execute_readonly_sql, schema_text
 
 
 MODEL = os.environ.get('OLLAMA_MODEL', 'qwen3:4b-instruct')
@@ -41,7 +49,7 @@ MAX_RANGE_DAYS = 93
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
 PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
-REDACTION_PLACEHOLDER_PATTERN = re.compile(r'(?:実績作業者|作業者|得意先|仕入先)\d+')
+REDACTION_PLACEHOLDER_PATTERN = re.compile(r'(?:実績作業者|作業者|得意先|仕入先|照会情報)\d+')
 FORCE_TOOL_CALL_TERMS = ('グラフ', 'ぐらふ', 'チャート', '図表', 'もう一回', 'もう一度', '再集計', '再度', '再表示')
 DATA_OPTION_SELECTIONS = {
     '1': {'intent': 'production', 'label': '生産数の日別推移', 'terms': ('生産数', '日別推移')},
@@ -420,6 +428,27 @@ DEEPSEEK_AGENT_TOOLS = [
     },
 ]
 
+def _readonly_sql_tool(screen_context, allow_personal_data=False):
+    """画面ごとの許可テーブル・列だけをDeepSeekへ提示する。"""
+    return {
+        'type': 'function',
+        'function': {
+            'name': 'execute_readonly_sql',
+            'description': (
+                'AI用DB辞書にある列だけを使い、読み取り専用SQLを実行する。'
+                'SELECTのみ、単一文、明示列、最大件数までに限定される。'
+                '既存の専用集計ツールで回答できる場合はそちらを優先し、SQLで更新・削除・DDL・個人情報取得はしない。\n'
+                f"この画面で使えるテーブルと列:\n{schema_text(screen_context['id'], allow_personal_data)}"
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {'sql': {'type': 'string', 'description': 'AI用DB辞書の列だけを明示したSELECT文'}},
+                'required': ['sql'],
+            },
+        },
+    }
+
+
 DEEPSEEK_PERSONAL_OVERTIME_TOOL = {
     'type': 'function',
     'function': {
@@ -777,6 +806,8 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
         tool for tool in DEEPSEEK_AGENT_TOOLS
         if tool['function']['name'] in allowed_tools
     ]
+    if 'execute_readonly_sql' in allowed_tools:
+        available_tools.append(_readonly_sql_tool(screen_context, allow_personal_overtime))
     if allow_personal_overtime:
         available_tools.extend(
             tool for tool in (
@@ -799,7 +830,8 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
         'content': (
             'あなたは本社の生産管理を支援する社内AIです。利用者の質問を自分で調査して回答してください。\n'
             f"今回の起点画面: {screen_context['label']}。この画面に許可されたツール以外を使ってはいけません。\n"
-            '利用できるのは品番マスタ検索と、許可済みの読み取り専用集計ツールだけです。SQL、更新、削除、DDL、明細取得はできません。\n'
+            '利用できるのは品番マスタ検索、許可済みの読み取り専用集計ツール、および許可された場合のAI用DB辞書SQLだけです。'
+            'SQLはexecute_readonly_sqlでSELECT一文だけを使えます。更新、削除、DDL、管理SQL、個人情報取得はできません。\n'
             + order_context_instruction +
             '品番を含む質問では、必ず最初にsearch_productを呼び、見つからなければ「現在この品番はありません」と回答してください。候補を勝手に選んではいけません。\n'
             '品番マスタの件数質問ではcount_productsを使ってください。「最終品」はis_final_product、'
@@ -893,9 +925,13 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                     'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
                 }, source, period, chart
 
-            messages.append({
+            assistant_message = {
                 'role': 'assistant', 'content': message.get('content') or '', 'tool_calls': tool_calls,
-            })
+            }
+            # 思考モードのツール呼び出しでは、同一ターン内のreasoning_contentを次の呼び出しへ戻す必要がある。
+            if message.get('reasoning_content'):
+                assistant_message['reasoning_content'] = message['reasoning_content']
+            messages.append(assistant_message)
             for tool_call in tool_calls:
                 function = tool_call.get('function') or {}
                 try:
@@ -909,6 +945,10 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                         result, tool_chart, tool_period = _agent_product_category_counts(arguments), None, None
                     elif function.get('name') == 'get_missing_routing_orders' and 'get_missing_routing_orders' in allowed_tools:
                         result, tool_chart, tool_period = get_missing_routing_orders(arguments)
+                    elif function.get('name') == 'execute_readonly_sql' and 'execute_readonly_sql' in allowed_tools:
+                        result, tool_chart, tool_period = execute_readonly_sql(
+                            arguments, screen_context, allow_personal_overtime, redactor,
+                        )
                     elif function.get('name') == 'get_business_data' and 'get_business_data' in allowed_tools:
                         result, tool_chart, tool_period = _agent_business_data(arguments, confirmed_codes, screen_context)
                     elif function.get('name') == 'get_personal_overtime_threshold' and allow_personal_overtime and 'get_personal_overtime_threshold' in allowed_tools:
@@ -925,7 +965,7 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                     chart = tool_chart
                 messages.append({
                     'role': 'tool', 'tool_call_id': tool_call.get('id', ''),
-                    'content': json.dumps(result, ensure_ascii=False),
+                    'content': json.dumps(limit_external_result_rows(result), ensure_ascii=False),
                 })
         raise LocalAIError('DeepSeek APIが調査を完了できませんでした。質問を具体的にして再度お試しください。')
     except TimeoutError as exc:
@@ -1512,10 +1552,16 @@ class ProductionAIDemoView(APIView):
             qwen = {'connected': True, 'model_ready': MODEL in models, 'model': MODEL}
         except (HTTPError, URLError, TimeoutError, OSError, ValueError):
             qwen = {'connected': False, 'model_ready': False, 'model': MODEL}
+        provider_configs = {item.provider: item for item in AIProviderConfig.objects.all()}
+        deepseek_config = provider_configs['deepseek']
+        qwen_config = provider_configs['qwen']
+        qwen['is_enabled'] = qwen_config.is_enabled
+        qwen['configured_model'] = qwen_config.default_model
         deepseek = {
             'connected': bool(DEEPSEEK_API_KEY),
             'model_ready': bool(DEEPSEEK_API_KEY),
-            'model': DEEPSEEK_MODEL,
+            'model': deepseek_config.default_model,
+            'is_enabled': deepseek_config.is_enabled,
             'models': [{'id': model_id, 'label': label} for model_id, label in DEEPSEEK_MODELS.items()],
         }
         return Response({'providers': {'qwen': qwen, 'deepseek': deepseek}})
@@ -1527,13 +1573,24 @@ class ProductionAIDemoView(APIView):
         provider = str(request.data.get('provider') or 'deepseek').strip().lower()
         if provider not in {'qwen', 'deepseek'}:
             return Response({'detail': 'AIモデルの指定が不正です。'}, status=400)
-        model = str(request.data.get('model') or DEEPSEEK_MODEL).strip()
+        provider_config = AIProviderConfig.objects.get(provider=provider)
+        if not provider_config.is_enabled:
+            return Response({'detail': 'このAIプロバイダは管理設定で無効になっています。'}, status=400)
+        model = str(request.data.get('model') or provider_config.default_model).strip()
         if provider == 'deepseek' and model not in DEEPSEEK_MODELS:
             return Response({'detail': '選択できないDeepSeekモデルです。'}, status=400)
         redactor = _build_external_data_redactor() if provider == 'deepseek' else None
         # 権限の判定はフロントエンドだけで行い、この値は画面で許可されたツール範囲を表す。
-        allow_personal_overtime = request.data.get('allow_personal_overtime') is True
-        screen_context = resolve_screen_context(request.data.get('screen_context'))
+        allow_personal_overtime = (
+            request.data.get('allow_personal_overtime') is True
+            and authorized_personal_data_allowed()
+        )
+        screen_context = apply_tool_policy(
+            resolve_screen_context(request.data.get('screen_context')),
+            is_external_provider=provider == 'deepseek',
+        )
+        if provider == 'deepseek' and not external_aggregate_transfer_allowed():
+            screen_context = {**screen_context, 'allowed_tools': frozenset()}
         raw_history = request.data.get('history') or []
         history = [
             {

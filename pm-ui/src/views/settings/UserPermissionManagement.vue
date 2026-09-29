@@ -421,6 +421,7 @@ const permissionResources = [
   { value: 'overtime.personal_summary', label: '勤務: 個人別残業集計' },
   { value: 'ai', label: '社内AI' },
   { value: 'ai.chat', label: '社内AI: チャット' },
+  { value: 'settings.ai', label: '設定: AI設定' },
   { value: 'purchase', label: '仕入' },
   { value: 'purchase.plan_input', label: '仕入: 仕入れ計画' },
   { value: 'purchase.inventory', label: '仕入: 在庫/残量' },

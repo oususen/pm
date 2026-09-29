@@ -7,8 +7,7 @@
       </div>
       <div class="drawer-actions">
         <select v-model="provider" :disabled="loading" aria-label="AIプロバイダ">
-          <option value="deepseek">DeepSeek</option>
-          <option value="qwen">Qwen</option>
+          <option v-for="item in availableProviders" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
         <button type="button" title="新しい会話" :disabled="loading" @click="clearChat">＋</button>
         <button type="button" title="閉じる" @click="closeAIDrawer">×</button>
@@ -37,7 +36,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { authState } from '@/auth'
 import api from '@/api/client'
 import { hasPermission } from '@/router'
@@ -49,6 +48,10 @@ const draft = ref('')
 const loading = ref(false)
 const error = ref('')
 const conversation = ref(null)
+const availableProviders = ref([
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'qwen', label: 'Qwen' },
+])
 const canViewPersonalOvertime = computed(() => hasPermission(authState.user, 'overtime.personal_summary', 'view'))
 
 const sourceLabel = computed(() => {
@@ -73,6 +76,19 @@ const clearChat = () => {
   messages.value = []
   draft.value = ''
   error.value = ''
+}
+
+const loadProviderSettings = async () => {
+  try {
+    const { data } = await api.aiChat.status()
+    const nextProviders = Object.entries(data.providers || {})
+      .filter(([, item]) => item.is_enabled !== false)
+      .map(([value, item]) => ({ value, label: value === 'deepseek' ? 'DeepSeek' : 'Qwen', item }))
+    if (nextProviders.length) {
+      availableProviders.value = nextProviders
+      if (!nextProviders.some((item) => item.value === provider.value)) provider.value = nextProviders[0].value
+    }
+  } catch { /* チャット送信時に接続エラーを表示する */ }
 }
 
 const send = async () => {
@@ -104,6 +120,7 @@ const send = async () => {
 }
 
 watch(aiDrawerSourcePath, clearChat)
+onMounted(loadProviderSettings)
 </script>
 
 <style scoped>

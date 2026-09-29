@@ -107,6 +107,7 @@ const tiles = computed(() => {
     { to: "/settings/android-app", label: "Androidアプリ配布", icon: "📱", category: "system", resource: "settings.android_app" },
     { to: "/settings/transcription", label: "文字起こし設定", icon: "🎙️", category: "system", resource: "settings" },
     { to: "/settings/system", label: "システム設定", icon: "⚙️", category: "system", resource: "settings" },
+    { to: "/settings/ai", label: "AI設定", icon: "✦", category: "system", resource: "settings.ai" },
   ];
 
   return list.filter((tile) => canAccessTile(tile));

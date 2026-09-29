@@ -170,6 +170,12 @@ const settings = [
     meta: { pageTitle: "システム設定", resource: "settings" },
   },
   {
+    path: "/settings/ai",
+    name: "AISettings",
+    component: () => import("@/views/settings/AISettings.vue"),
+    meta: { pageTitle: "AI設定", resource: "settings.ai" },
+  },
+  {
     path: "/settings/android-app",
     name: "AndroidAppDownload",
     component: () => import("@/views/settings/AndroidAppDownload.vue"),
