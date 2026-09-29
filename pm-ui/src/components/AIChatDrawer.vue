@@ -81,9 +81,10 @@ const clearChat = () => {
 const loadProviderSettings = async () => {
   try {
     const { data } = await api.aiChat.status()
+    const providerLabels = { deepseek: 'DeepSeek', qwen: 'Qwen', openrouter: 'OpenRouter' }
     const nextProviders = Object.entries(data.providers || {})
       .filter(([, item]) => item.is_enabled !== false)
-      .map(([value, item]) => ({ value, label: value === 'deepseek' ? 'DeepSeek' : 'Qwen', item }))
+      .map(([value, item]) => ({ value, label: providerLabels[value] || value, item }))
     if (nextProviders.length) {
       availableProviders.value = nextProviders
       if (!nextProviders.some((item) => item.value === provider.value)) provider.value = nextProviders[0].value

@@ -14,10 +14,24 @@
 ## 2. 規約を強制する場所
 
 - 正式な規約本文: 本書
-- 規約をコードで強制する入口: `pm_backend/apps/production/views_ai_demo.py`
-- 画面: `pm-ui/src/views/production/ProductionAIDataAnalysis.vue`
+- 規約をコードで強制する入口: `pm_backend/apps/ai/services/chat_service.py`（旧 `production/views_ai_demo.py` と `production/services/ai_demo_service.py` は互換入口として残すだけで、業務ロジックは持たない）
+- 画面: `pm-ui/src/views/ai/AIChat.vue`（`/ai/chat`）
+- 運用設定の管理画面: `pm-ui/src/views/settings/AISettings.vue`（`/settings/ai`、権限 `settings.ai`）
 
-モデルの変更（DeepSeek、Qwenなど）は許可するが、本書のデータアクセス・外部送信・禁止操作の規約を迂回してはならない。
+モデルの変更（DeepSeek、Qwenなど）は許可するが、本書のデータアクセス・外部送信・禁止操作の規約を迂回してはならない。2-1 の運用設定で有効化できる範囲も、本書が許可した範囲を超えてはならない。
+
+## 2-1. 運用設定管理（画面: `/settings/ai`）
+
+社内AIの一部の挙動は、コード変更なしに管理画面から調整できる。ただし調整できる範囲は本書が許可した範囲内に限り、画面(`ai/context/screen_context.py`)が許可していないツールを有効化しても使われない。
+
+| 設定モデル（テーブル） | 内容 | 備考 |
+|---|---|---|
+| `AIProviderConfig`（`ai_provider_config`） | DeepSeek／Qwenの有効化・既定モデル | APIキー自体は含まない（4.3参照） |
+| `AIToolPolicy`（`ai_tool_policy`） | 画面領域(`screen_id`)ごとに、ツール(`tool_code`)を有効化するか、外部AI（DeepSeek）への結果送信を許可するか(`allow_external_transfer`) | 無効化した組み合わせはDeepSeek・Qwenどちらからも呼べない |
+| `AIDataPolicy`（`ai_data_policy`） | 集計結果の外部送信可否(`allow_aggregated_external_transfer`)、権限者への個人別集計許可(`allow_authorized_personal_data`)、外部送信する最大集計行数(`max_external_result_rows`) | 常に1行だけ保持する全体方針 |
+| `AIKnowledgeSource`（`ai_knowledge_source`） | AIに参照させるリポジトリ内ドキュメントの登録（PMアプリ構造／マニュアル／手順書／安全・運用規約） | 参照させるファイルは登録済みのものに限る |
+
+画面領域(`screen_id`)は `ai_home`（本社横断）、`orders`、`production`、`quality`、`overtime`、`purchase`、`shipping`、`inventory` を持つ。`purchase`／`shipping`／`inventory` は現時点でどのツールも割り当てていない（9章の区分Cに対応）。
 
 ## 3. 絶対禁止事項
 
@@ -50,7 +64,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 | 集計済み生産実績 | 許可 | 品番・工程・期間・数量など分析に必要な最小項目 |
 | 集計済み仕損・中断 | 許可 | 理由・工程・期間・数量または件数 |
 | グループ単位の残業集計 | 許可 | 氏名を含めない |
-| 個人別・明細別データ | 条件付き許可 | 個人別残業集計は画面の `overtime.personal_summary` 閲覧権限がある場合だけ、識別子を一時IDへ置換し、しきい値超過者の合計時間に限定 |
+| 個人別・明細別データ | 条件付き許可 | 個人別残業集計は画面の `overtime.personal_summary` 閲覧権限がある場合だけ、識別子を一時IDへ置換して送信する。氏名指定の個人別集計（`search_employee`で候補確認後に`get_individual_overtime`）としきい値超過者集計（`get_personal_overtime_threshold`）の両方が対象 |
 | 連絡先、認証情報、署名、添付ファイル | 禁止 | 伏字化しても送信しない |
 | 未集計の全件エクスポート | 禁止 | 件数に関係なく送信しない |
 
@@ -177,7 +191,7 @@ Department ──< OvertimeApplication >── User
 2. 既存仕様書と実データで、数量・状態・日付の業務上の意味を確認する。
 3. AIが使う集計関数、入力条件、出力項目、二重計上防止条件を本書へ追記する。
 4. 外部APIへ送る項目、伏字化対象、禁止項目を決定する。
-5. `production/services/ai_demo_service.py` に読み取り専用の専用関数として実装する。API入口の `views_ai_demo.py` には業務ロジックを置かない。
+5. `ai/services/chat_service.py`（または関連する`ai/services/*.py`）に読み取り専用の専用関数として実装する。API入口の `ai/views.py` には業務ロジックを置かない。
 6. 代表データで根拠・数量・期間を検証してから画面へ公開する。
 
 未確認のまま、モデル名だけを根拠にAIの参照範囲へ追加してはならない。
@@ -191,12 +205,15 @@ DeepSeekは、専用集計ツールだけでは回答できない場合に限り
 - 氏名、連絡先、受注番号、顧客発注番号、備考、ロット番号、作業者・申請者・承認者の列は、通常のSQL辞書から除外する。AI設定で個人別集計を許可し、画面の個人別残業集計権限を持つ利用者に限り、個人情報列として参照できる。DeepSeekへ送る値は一時IDまたは伏字に置き換え、回答時にだけ復元する。
 - 行数はAI設定の「外部送信する最大集計行数」以下とし、`LIMIT`がない場合はサーバーが付与する。
 - 画面別に許可したテーブルを超える参照は拒否する。購買・出荷・在庫は、定義確認が完了するまでSQL照会を公開しない。
+- このツール自体の有効化・無効化と、外部AI（DeepSeek）への送信可否は、2-1 の `AIToolPolicy`（画面ごと）で管理する。無効化した画面・プロバイダの組み合わせでは呼び出せない。
 
 ## 11. 実装状況
 
 | 規約 | 現状 | 次の対応 |
 |---|---|---|
-| 書込み・任意SQL禁止 | 実装済み | 読み取り専用集計関数のみを追加する |
+| 更新・削除・DDL・管理SQLの拒否 | 実装済み | `sql_queries.py`のFORBIDDEN_SQLで常に拒否。追加時はキーワードを本書とコードへ同時追記 |
+| AI用DB辞書の読み取り専用SQL（10-1） | 実装済み | `execute_readonly_sql`を`pm_ai_reader`（SELECT権限のみ、接続元IP限定）経由で実行。画面別ホワイトリスト外・書込み系・ワイルドカードは拒否 |
+| 運用設定管理画面（2-1） | 実装済み | `/settings/ai`（権限`settings.ai`）でプロバイダ・ツール有効化・データ送信方針・ナレッジ登録を管理 |
 | DeepSeekモデル許可リスト | 実装済み | モデル追加時は本書とコードを同時更新 |
 | 生産・仕損・中断・残業の集計 | 実装済み | DeepSeekが品番検索・読み取り専用集計ツールを選択し、数値根拠を回答に継続表示 |
 | 個人名などの一時伏字化 | 実装済み | PMに登録されたユーザー・作業者名・得意先名・仕入先名を一時IDへ置換する。個人別残業は `overtime.personal_summary` を持つ画面でだけ応答時に復元する。連絡先は復元しない |

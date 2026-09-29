@@ -45,6 +45,24 @@ DEEPSEEK_MODELS = {
     'deepseek-v4-pro': 'DeepSeek V4 Pro（高精度）',
     'deepseek-flash': 'DeepSeek Flash（高速）',
 }
+# ローカルLLM(Qwen)導入前の評価用。OpenRouter経由でQwen3.8 27B相当のモデルを試す。
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'qwen/qwen3.8-27b:free')
+OPENROUTER_BASE_URL = os.environ.get('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
+OPENROUTER_MODELS = {
+    'qwen/qwen3.8-27b:free': 'Qwen3.8 27B（OpenRouter・無料枠）',
+}
+# 外部AI(DeepSeek互換のOpenAI形式API)。エージェント方式のツール呼び出しはこれらすべてで共通ロジックを使う。
+EXTERNAL_AGENT_PROVIDERS = {
+    'deepseek': {
+        'base_url': DEEPSEEK_BASE_URL, 'api_key': DEEPSEEK_API_KEY,
+        'models': DEEPSEEK_MODELS, 'default_model': DEEPSEEK_MODEL, 'label': 'DeepSeek',
+    },
+    'openrouter': {
+        'base_url': OPENROUTER_BASE_URL, 'api_key': OPENROUTER_API_KEY,
+        'models': OPENROUTER_MODELS, 'default_model': OPENROUTER_MODEL, 'label': 'OpenRouter',
+    },
+}
 MAX_RANGE_DAYS = 93
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
@@ -794,10 +812,16 @@ def _agent_individual_overtime(arguments, redactor):
     return data, chart, period
 
 
-def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_personal_overtime=False, screen_context=None):
-    """DeepSeekが読み取り専用ツールを選び、段階的に調査して回答する。"""
-    if not DEEPSEEK_API_KEY:
-        raise LocalAIError('DeepSeek APIキーが未設定です。サーバーの DEEPSEEK_API_KEY を設定してください。')
+def _deepseek_agent_chat(
+    question, history, model=None, redactor=None, allow_personal_overtime=False, screen_context=None,
+    base_url=None, api_key=None, default_model=None, provider_key='deepseek', provider_label='DeepSeek',
+):
+    """DeepSeek互換のOpenAI形式APIが、読み取り専用ツールを選び、段階的に調査して回答する。"""
+    base_url = base_url or DEEPSEEK_BASE_URL
+    api_key = api_key or DEEPSEEK_API_KEY
+    default_model = default_model or DEEPSEEK_MODEL
+    if not api_key:
+        raise LocalAIError(f'{provider_label} APIキーが未設定です。サーバーの環境変数を設定してください。')
     recent_period = _recent_data_period(history)
     selected_option = _selected_data_option(question, history)
     screen_context = screen_context or resolve_screen_context(None)
@@ -868,7 +892,7 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
     messages.extend({'role': row['role'], 'content': row['content']} for row in history[-12:])
     messages.append({'role': 'user', 'content': question})
     confirmed_codes = _confirmed_product_codes(question, history)
-    source = 'DeepSeek APIとの会話'
+    source = f'{provider_label} APIとの会話'
     period = None
     chart = None
     payload = {}
@@ -883,22 +907,24 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                 for row in redacted_messages:
                     grounded_placeholders.update(REDACTION_PLACEHOLDER_PATTERN.findall(str(row.get('content', ''))))
             body = {
-                'model': model or DEEPSEEK_MODEL,
+                'model': model or default_model,
                 'stream': False,
                 'messages': redacted_messages,
-                'thinking': {'type': 'disabled'},
                 'temperature': 0.4,
                 'max_tokens': 768,
                 'tools': available_tools,
             }
+            if provider_key == 'deepseek':
+                # DeepSeek独自パラメータ。思考モードのトークン浪費を防ぐ（OpenAI互換の他プロバイダには送らない）。
+                body['thinking'] = {'type': 'disabled'}
             # 「グラフ」「もう一回」等は、記憶だけで答えて実データが伴わない誤答が多いため、
             # 最初の1回だけツール呼び出しを必須化する。どのツールを呼ぶかはDeepSeekの判断のまま。
             if attempt == 0 and available_tools and any(term in question for term in FORCE_TOOL_CALL_TERMS):
                 body['tool_choice'] = 'required'
             request = Request(
-                f'{DEEPSEEK_BASE_URL}/chat/completions',
+                f'{base_url}/chat/completions',
                 data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {DEEPSEEK_API_KEY}'},
+                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
                 method='POST',
             )
             with urlopen(request, timeout=120) as response:
@@ -917,10 +943,10 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                         )
                     answer = redactor.restore_text(answer)
                 if not answer:
-                    raise LocalAIError('DeepSeek APIから回答が返りませんでした。時間をおいて再度お試しください。')
+                    raise LocalAIError(f'{provider_label} APIから回答が返りませんでした。時間をおいて再度お試しください。')
                 usage = payload.get('usage') or {}
                 return answer, {
-                    'provider': 'deepseek', 'model': payload.get('model', model or DEEPSEEK_MODEL),
+                    'provider': provider_key, 'model': payload.get('model', model or default_model),
                     'duration_seconds': None, 'output_tokens': usage.get('completion_tokens'),
                     'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
                 }, source, period, chart
@@ -967,15 +993,20 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                     'role': 'tool', 'tool_call_id': tool_call.get('id', ''),
                     'content': json.dumps(limit_external_result_rows(result), ensure_ascii=False),
                 })
-        raise LocalAIError('DeepSeek APIが調査を完了できませんでした。質問を具体的にして再度お試しください。')
+        raise LocalAIError(f'{provider_label} APIが調査を完了できませんでした。質問を具体的にして再度お試しください。')
     except TimeoutError as exc:
-        raise LocalAIError('DeepSeek APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。') from exc
+        raise LocalAIError(f'{provider_label} APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。') from exc
     except HTTPError as exc:
         if exc.code in {401, 403}:
-            raise LocalAIError('DeepSeek APIキーを確認してください。') from exc
-        raise LocalAIError('DeepSeek APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
+            raise LocalAIError(f'{provider_label} APIキーを確認してください。') from exc
+        if exc.code == 429:
+            raise LocalAIError(
+                f'【レート制限】{provider_label} APIが現在レート制限中です。時間をおいて再試行するか、'
+                '無料枠以外のモデル・自分のプロバイダキーの設定を検討してください。'
+            ) from exc
+        raise LocalAIError(f'{provider_label} APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
     except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        raise LocalAIError('DeepSeek APIに接続できません。接続設定を確認してください。') from exc
+        raise LocalAIError(f'{provider_label} APIに接続できません。接続設定を確認してください。') from exc
 
 
 def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, include_metadata=False, model=None, redactor=None):
@@ -1553,33 +1584,39 @@ class ProductionAIDemoView(APIView):
         except (HTTPError, URLError, TimeoutError, OSError, ValueError):
             qwen = {'connected': False, 'model_ready': False, 'model': MODEL}
         provider_configs = {item.provider: item for item in AIProviderConfig.objects.all()}
-        deepseek_config = provider_configs['deepseek']
-        qwen_config = provider_configs['qwen']
-        qwen['is_enabled'] = qwen_config.is_enabled
-        qwen['configured_model'] = qwen_config.default_model
-        deepseek = {
-            'connected': bool(DEEPSEEK_API_KEY),
-            'model_ready': bool(DEEPSEEK_API_KEY),
-            'model': deepseek_config.default_model,
-            'is_enabled': deepseek_config.is_enabled,
-            'models': [{'id': model_id, 'label': label} for model_id, label in DEEPSEEK_MODELS.items()],
-        }
-        return Response({'providers': {'qwen': qwen, 'deepseek': deepseek}})
+        qwen_config = provider_configs.get('qwen')
+        if qwen_config:
+            qwen['is_enabled'] = qwen_config.is_enabled
+            qwen['configured_model'] = qwen_config.default_model
+        providers = {'qwen': qwen}
+        for provider_key, agent_provider in EXTERNAL_AGENT_PROVIDERS.items():
+            config = provider_configs.get(provider_key)
+            if not config:
+                continue
+            providers[provider_key] = {
+                'connected': bool(agent_provider['api_key']),
+                'model_ready': bool(agent_provider['api_key']),
+                'model': config.default_model,
+                'is_enabled': config.is_enabled,
+                'models': [{'id': model_id, 'label': label} for model_id, label in agent_provider['models'].items()],
+            }
+        return Response({'providers': providers})
 
     def post(self, request):
         question = str(request.data.get('message') or '').strip()
         if not question or len(question) > 1200:
             return Response({'detail': '質問を入力してください（最大1200文字）。'}, status=400)
         provider = str(request.data.get('provider') or 'deepseek').strip().lower()
-        if provider not in {'qwen', 'deepseek'}:
+        if provider not in {'qwen', *EXTERNAL_AGENT_PROVIDERS}:
             return Response({'detail': 'AIモデルの指定が不正です。'}, status=400)
         provider_config = AIProviderConfig.objects.get(provider=provider)
         if not provider_config.is_enabled:
             return Response({'detail': 'このAIプロバイダは管理設定で無効になっています。'}, status=400)
         model = str(request.data.get('model') or provider_config.default_model).strip()
-        if provider == 'deepseek' and model not in DEEPSEEK_MODELS:
-            return Response({'detail': '選択できないDeepSeekモデルです。'}, status=400)
-        redactor = _build_external_data_redactor() if provider == 'deepseek' else None
+        is_external_provider = provider in EXTERNAL_AGENT_PROVIDERS
+        if is_external_provider and model not in EXTERNAL_AGENT_PROVIDERS[provider]['models']:
+            return Response({'detail': f"選択できない{EXTERNAL_AGENT_PROVIDERS[provider]['label']}モデルです。"}, status=400)
+        redactor = _build_external_data_redactor() if is_external_provider else None
         # 権限の判定はフロントエンドだけで行い、この値は画面で許可されたツール範囲を表す。
         allow_personal_overtime = (
             request.data.get('allow_personal_overtime') is True
@@ -1587,9 +1624,9 @@ class ProductionAIDemoView(APIView):
         )
         screen_context = apply_tool_policy(
             resolve_screen_context(request.data.get('screen_context')),
-            is_external_provider=provider == 'deepseek',
+            is_external_provider=is_external_provider,
         )
-        if provider == 'deepseek' and not external_aggregate_transfer_allowed():
+        if is_external_provider and not external_aggregate_transfer_allowed():
             screen_context = {**screen_context, 'allowed_tools': frozenset()}
         raw_history = request.data.get('history') or []
         history = [
@@ -1603,13 +1640,17 @@ class ProductionAIDemoView(APIView):
             and row.get('role') in {'user', 'assistant'}
             and str(row.get('content', '')).strip()
         ]
-        # DeepSeekは、固定の分岐結果ではなく読み取り専用ツールを自ら選んで調査する。
-        if provider == 'deepseek':
+        # 外部AI(DeepSeek/OpenRouter)は、固定の分岐結果ではなく読み取り専用ツールを自ら選んで調査する。
+        if is_external_provider:
+            agent_provider = EXTERNAL_AGENT_PROVIDERS[provider]
             try:
                 answer, inference, source, period, chart = _deepseek_agent_chat(
                     question, history, model=model, redactor=redactor,
                     allow_personal_overtime=allow_personal_overtime,
                     screen_context=screen_context,
+                    base_url=agent_provider['base_url'], api_key=agent_provider['api_key'],
+                    default_model=agent_provider['default_model'],
+                    provider_key=provider, provider_label=agent_provider['label'],
                 )
             except LocalAIError as exc:
                 return Response({'detail': str(exc)}, status=503)
@@ -1620,7 +1661,7 @@ class ProductionAIDemoView(APIView):
                 'period': period,
                 'chart': chart,
                 'document': '',
-                'provider': 'deepseek',
+                'provider': provider,
                 'model': inference['model'],
                 'inference': inference,
             })

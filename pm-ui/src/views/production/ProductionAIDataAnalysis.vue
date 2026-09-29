@@ -4,8 +4,8 @@
       <div class="brand-mark">✦</div>
       <div class="brand-title"><strong>社内AI</strong><span>社内データアシスタント</span></div>
       <div class="local-badge" :class="{ offline: !providerReady() }"><i></i> {{ providerReady() ? `${providerLabel()} · ${providerModel()}` : `${providerLabel()} · 要確認` }}</div>
-      <label class="provider-select">AIプロバイダ<select v-model="provider" :disabled="loading"><option value="deepseek">DeepSeek API</option><option value="qwen">ローカルQwen</option></select></label>
-      <label v-if="provider === 'deepseek'" class="provider-select">モデル<select v-model="deepseekModel" :disabled="loading"><option v-for="item in deepseekModels()" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
+      <label class="provider-select">AIプロバイダ<select v-model="provider" :disabled="loading"><option value="deepseek">DeepSeek API</option><option value="qwen">ローカルQwen</option><option value="openrouter">OpenRouter（評価用）</option></select></label>
+      <label v-if="isExternalProvider" class="provider-select">モデル<select v-model="externalModel[provider]" :disabled="loading"><option v-for="item in externalModels()" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
       <button class="new-chat" @click="clearChat">＋ <span>新しいチャット</span></button>
     </header>
 
@@ -57,14 +57,14 @@
             <textarea v-model="draft" rows="1" :disabled="loading" placeholder="社内データについて質問、または作成したい資料を入力…" @keydown.enter.exact.prevent="send"></textarea>
             <button class="send" :disabled="loading || !draft.trim()" aria-label="送信" @click="send">↑</button>
           </div>
-          <div class="composer-foot"><span>↳ Enterで送信 · Shift + Enterで改行</span><span><i></i> {{ provider === 'deepseek' ? '質問・会話・必要な集計結果をDeepSeek APIへ送信' : '質問とデータはこのPC内で処理' }}</span></div>
+          <div class="composer-foot"><span>↳ Enterで送信 · Shift + Enterで改行</span><span><i></i> {{ isExternalProvider ? `質問・会話・必要な集計結果を${providerLabel()}へ送信` : '質問とデータはこのPC内で処理' }}</span></div>
         </div>
       </section>
 
       <aside class="side-panel">
         <div class="side-heading">このAIについて <span>ⓘ</span></div>
         <div class="local-card"><div class="local-symbol">✦</div><div><strong>{{ providerLabel() }}</strong><small>{{ providerModel() }}</small></div><div class="online" :class="{ offline: !providerReady() }"><i></i> {{ providerReady() ? '利用可能' : '要確認' }}</div></div>
-        <p class="side-description">{{ provider === 'deepseek' ? '質問・会話履歴・回答に必要なDB集計結果をDeepSeek APIへ送信します。' : '質問と回答はPC内のOllamaで処理し、外部AIへ送信しません。' }}</p>
+        <p class="side-description">{{ isExternalProvider ? `質問・会話履歴・回答に必要なDB集計結果を${providerLabel()}へ送信します。` : '質問と回答はPC内のOllamaで処理し、外部AIへ送信しません。' }}</p>
         <div class="side-divider"></div>
         <div class="side-heading">参照できるデータ</div>
         <div class="source-item"><span class="db-icon">▤</span><div><strong>工程の生産実績</strong><small>日付・作業者・工程・数量</small></div></div>
@@ -90,7 +90,9 @@ import { hasPermission } from '@/router'
 const provider = ref('deepseek')
 const route = useRoute()
 const providerStatus = ref({})
-const deepseekModel = ref('deepseek-v4-pro')
+const EXTERNAL_PROVIDERS = ['deepseek', 'openrouter']
+const externalModel = ref({ deepseek: 'deepseek-v4-pro', openrouter: 'qwen/qwen3.8-27b:free' })
+const isExternalProvider = computed(() => EXTERNAL_PROVIDERS.includes(provider.value))
 const suggestions = [
   { icon: '↗', color: 'teal', title: '生産数の推移', subtitle: '今月の日別生産数をチャートで', prompt: '今月の日別生産数をチャートで見せて' },
   { icon: '◎', color: 'coral', title: '仕損の傾向', subtitle: '仕損の多い理由を教えて', prompt: '今月の確定仕損を理由別に教えて、チャートで見せて' },
@@ -103,12 +105,18 @@ const draft = ref('')
 const loading = ref(false)
 const error = ref('')
 const scrollArea = ref(null)
-const providerLabel = (value = provider.value) => ({ deepseek: 'DEEPSEEK API', qwen: 'LOCAL QWEN', database: 'DB集計' }[value] || '社内AI')
-const deepseekModels = () => providerStatus.value.deepseek?.models || [
-  { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（高精度）' },
-  { id: 'deepseek-flash', label: 'DeepSeek Flash（高速）' },
-]
-const providerModel = () => provider.value === 'deepseek' ? deepseekModel.value : (providerStatus.value.qwen?.model || 'qwen3:4b-instruct')
+const providerLabel = (value = provider.value) => ({ deepseek: 'DEEPSEEK API', qwen: 'LOCAL QWEN', openrouter: 'OPENROUTER', database: 'DB集計' }[value] || '社内AI')
+const DEFAULT_EXTERNAL_MODELS = {
+  deepseek: [
+    { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（高精度）' },
+    { id: 'deepseek-flash', label: 'DeepSeek Flash（高速）' },
+  ],
+  openrouter: [
+    { id: 'qwen/qwen3.8-27b:free', label: 'Qwen3.8 27B（OpenRouter・無料枠）' },
+  ],
+}
+const externalModels = () => providerStatus.value[provider.value]?.models || DEFAULT_EXTERNAL_MODELS[provider.value] || []
+const providerModel = () => isExternalProvider.value ? externalModel.value[provider.value] : (providerStatus.value.qwen?.model || 'qwen3:4b-instruct')
 const providerReady = () => Boolean(providerStatus.value[provider.value]?.connected && providerStatus.value[provider.value]?.model_ready)
 const canViewPersonalOvertime = computed(() => hasPermission(authState.user, 'overtime.personal_summary', 'view'))
 const screenContext = computed(() => String(route.query.source || ''))
@@ -131,7 +139,7 @@ const ask = async (question) => {
     const history = messages.value.slice(-15, -1).map(({ role, content, period }) => ({ role, content, period }))
     const { data } = await api.aiChat.chat({
       message: question.trim(), history, provider: provider.value,
-      model: provider.value === 'deepseek' ? deepseekModel.value : undefined,
+      model: isExternalProvider.value ? externalModel.value[provider.value] : undefined,
       allow_personal_overtime: canViewPersonalOvertime.value,
       screen_context: screenContext.value,
     })
@@ -178,8 +186,12 @@ const refreshModelStatus = async () => {
   try {
     const { data } = await api.aiChat.status()
     providerStatus.value = data.providers || {}
-    const defaultModel = data.providers?.deepseek?.model
-    if (deepseekModels().some((item) => item.id === defaultModel)) deepseekModel.value = defaultModel
+    for (const key of EXTERNAL_PROVIDERS) {
+      const defaultModel = data.providers?.[key]?.model
+      if (defaultModel && (data.providers?.[key]?.models || []).some((item) => item.id === defaultModel)) {
+        externalModel.value[key] = defaultModel
+      }
+    }
   } catch {
     providerStatus.value = {}
   }

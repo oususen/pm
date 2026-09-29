@@ -12,6 +12,10 @@ PROVIDER_CATALOG = {
         'label': 'ローカルQwen',
         'models': (('qwen3:4b-instruct', 'Qwen3 4B Instruct（ローカル）'),),
     },
+    'openrouter': {
+        'label': 'OpenRouter（評価用）',
+        'models': (('qwen/qwen3.8-27b:free', 'Qwen3.8 27B（OpenRouter・無料枠）'),),
+    },
 }
 
 SCREEN_CATALOG = {
