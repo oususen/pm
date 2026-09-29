@@ -16,6 +16,7 @@ from django.db.models.functions import Coalesce, TruncDate
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from ai.context.screen_context import resolve_screen_context
 from accounts.models import Department
 from masters.models import Product
 from production.models_brake_line_record import BrakeLineRecord
@@ -23,6 +24,8 @@ from production.models_laser_actual import LaserActual, LaserActualDetail
 from production.models_process_realtime import ProcessRealtimeRecord
 from quality.models_scrap import ScrapRecord
 from overtime.models import OvertimeApplication
+from ai.services.order_queries import get_missing_routing_orders
+from ai.services.query_common import AI_DB_ALIAS
 
 
 MODEL = os.environ.get('OLLAMA_MODEL', 'qwen3:4b-instruct')
@@ -133,7 +136,7 @@ def _build_external_data_redactor():
     from masters.models import Customer, Supplier
 
     redactor = ExternalDataRedactor()
-    for index, user in enumerate(get_user_model().objects.filter(is_active=True).only(
+    for index, user in enumerate(get_user_model().objects.using(AI_DB_ALIAS).filter(is_active=True).only(
         'username', 'first_name', 'last_name'
     ), start=1):
         label = f'作業者{index}'
@@ -141,15 +144,15 @@ def _build_external_data_redactor():
         redactor.add(f'{user.last_name}{user.first_name}'.strip(), label)
         redactor.add(user.username, label)
     for index, name in enumerate(
-        ProcessRealtimeRecord.objects.exclude(operator_name__isnull=True).exclude(operator_name='')
+        ProcessRealtimeRecord.objects.using(AI_DB_ALIAS).exclude(operator_name__isnull=True).exclude(operator_name='')
         .values_list('operator_name', flat=True).distinct(),
         start=1,
     ):
         redactor.add(name, f'実績作業者{index}')
-    for index, customer in enumerate(Customer.objects.filter(is_active=True).only('customer_name', 'short_name'), start=1):
+    for index, customer in enumerate(Customer.objects.using(AI_DB_ALIAS).filter(is_active=True).only('customer_name', 'short_name'), start=1):
         redactor.add(customer.customer_name, f'得意先{index}')
         redactor.add(customer.short_name, f'得意先{index}')
-    for index, supplier in enumerate(Supplier.objects.only('supplier_name'), start=1):
+    for index, supplier in enumerate(Supplier.objects.using(AI_DB_ALIAS).only('supplier_name'), start=1):
         redactor.add(supplier.supplier_name, f'仕入先{index}')
     return redactor
 
@@ -349,6 +352,35 @@ DEEPSEEK_AGENT_TOOLS = [
     {
         'type': 'function',
         'function': {
+            'name': 'count_products',
+            'description': (
+                '品番マスタの件数を集計する。何も指定しなければカテゴリ別の内訳(件数)を返す。'
+                '「最終品」はis_final_product、「ライン最終品」はis_line_final_productで絞り込める。'
+                'それ以外の業務用語がどの項目に対応するか自明でない場合は、まず条件指定なしで呼んで'
+                '実際に存在するカテゴリと件数を確認し、対応が明確でなければ推測せず利用者に確認すること。'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'category': {
+                        'type': 'string',
+                        'enum': ['ASSEMBLY', 'SINGLE', 'MATERIAL', 'PURCHASED', 'OUTSOURCED', 'UNKNOWN'],
+                        'description': '絞り込むカテゴリコード。不明・未指定なら全カテゴリの内訳を返す。',
+                    },
+                    'is_final_product': {'type': 'boolean', 'description': '最終製品(「最終品」)かどうかで絞り込む。'},
+                    'is_line_final_product': {
+                        'type': 'boolean',
+                        'description': 'そのラインで最後に出力される「ライン最終品」（次ラインへの中間品）かどうかで絞り込む。',
+                    },
+                    'is_active': {'type': 'boolean', 'description': '有効な品番だけに絞るか。既定はtrue。'},
+                },
+                'required': [],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
             'name': 'get_business_data',
             'description': '許可済みの読み取り専用集計を実行する。任意SQL、更新、削除はできない。',
             'parameters': {
@@ -362,6 +394,27 @@ DEEPSEEK_AGENT_TOOLS = [
                     'group_name': {'type': 'string', 'description': '残業の組織名。不要なら空文字。'},
                 },
                 'required': ['intent', 'start_date', 'end_date', 'product_code', 'process_name', 'group_name'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_missing_routing_orders',
+            'description': (
+                '受注画面の「ルーティング未設定の注文品」を読み取り専用で照会する。'
+                'OPEN受注明細のうち、品番マスタがあり有効なルーティングがない品番だけを返す。'
+                '画面と同じく品番ごとに1件へ絞り込み、得意先名・受注番号・明細は返さない。'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'due_date_from': {
+                        'type': 'string',
+                        'description': '納期開始日（YYYY-MM-DD）。省略時は画面既定の90日前から。',
+                    },
+                },
+                'required': [],
             },
         },
     },
@@ -447,11 +500,64 @@ def _agent_product_lookup(product_code):
             'candidates': candidates,
             'instruction': '候補がある場合もAIは選ばず、利用者に正式品番の入力を依頼する。',
         }
-    product = Product.objects.filter(product_code=registered_code).values('product_code', 'product_name').first()
+    product = Product.objects.using(AI_DB_ALIAS).filter(product_code=registered_code).values('product_code', 'product_name').first()
     return {
         'status': 'found',
         'product_code': registered_code,
         'product_name': (product or {}).get('product_name', ''),
+    }
+
+
+def _agent_product_category_counts(arguments):
+    """品番マスタの件数を集計する。category・is_final_product・is_line_final_productで絞り込める。"""
+    category_labels = dict(Product.CATEGORY_CHOICES)
+    is_active = arguments.get('is_active')
+    is_active = True if is_active is None else bool(is_active)
+    queryset = Product.objects.using(AI_DB_ALIAS).filter(is_active=is_active)
+    filters_applied = {'is_active': is_active}
+
+    category = str(arguments.get('category') or '').strip().upper()
+    if category:
+        if category not in category_labels:
+            return {
+                'status': 'invalid_request',
+                'detail': f'カテゴリ「{category}」は存在しません。',
+                'valid_categories': [{'code': code, 'label': label} for code, label in Product.CATEGORY_CHOICES],
+            }
+        queryset = queryset.filter(category=category)
+        filters_applied['category'] = category
+
+    if arguments.get('is_final_product') is not None:
+        value = bool(arguments['is_final_product'])
+        queryset = queryset.filter(is_final_product=value)
+        filters_applied['is_final_product'] = value
+
+    if arguments.get('is_line_final_product') is not None:
+        value = bool(arguments['is_line_final_product'])
+        queryset = queryset.filter(is_line_final_product=value)
+        filters_applied['is_line_final_product'] = value
+
+    if len(filters_applied) > 1:
+        return {
+            'status': 'ok',
+            'source': '品番マスタ（条件別件数）',
+            'filters': filters_applied,
+            'count': queryset.count(),
+        }
+    rows = list(queryset.values('category').annotate(count=Count('id')).order_by('-count'))
+    return {
+        'status': 'ok',
+        'source': '品番マスタ（カテゴリ別件数）',
+        'is_active': is_active,
+        'total': queryset.count(),
+        'breakdown': [
+            {
+                'category': row['category'] or 'NULL',
+                'category_label': category_labels.get(row['category'], 'カテゴリ未設定'),
+                'count': row['count'],
+            }
+            for row in rows
+        ],
     }
 
 
@@ -467,7 +573,7 @@ def _agent_date_range(arguments):
     return start, end, None
 
 
-def _agent_business_data(arguments, confirmed_product_codes):
+def _agent_business_data(arguments, confirmed_product_codes, screen_context):
     """許可済み集計関数だけをDeepSeekのツール呼び出しから実行する。"""
     start, end, error = _agent_date_range(arguments)
     if error:
@@ -476,6 +582,12 @@ def _agent_business_data(arguments, confirmed_product_codes):
     product_code = str(arguments.get('product_code') or '').strip()[:50]
     process_name = str(arguments.get('process_name') or '').strip()[:100]
     group_name = str(arguments.get('group_name') or '').strip()[:100]
+
+    if intent not in screen_context['allowed_intents']:
+        return {
+            'status': 'invalid_request',
+            'detail': f"{screen_context['label']}画面からは、この集計種別を参照できません。",
+        }, None, None
 
     try:
         if intent == 'production':
@@ -548,7 +660,7 @@ def _personal_overtime_threshold(arguments):
         return {'status': 'invalid_request', 'detail': 'しきい値の時間を数値で指定してください。'}, None, None
     if threshold < 0 or threshold > Decimal('300'):
         return {'status': 'invalid_request', 'detail': 'しきい値は0〜300時間で指定してください。'}, None, None
-    queryset = OvertimeApplication.objects.filter(
+    queryset = OvertimeApplication.objects.using(AI_DB_ALIAS).filter(
         work_date__gte=start,
         work_date__lte=end,
         application_type__in=['overtime', 'holiday'],
@@ -598,7 +710,7 @@ def _agent_employee_lookup(name, redactor):
     if not normalized_query:
         return {'status': 'invalid_request', 'detail': '氏名を指定してください。'}
     matches = []
-    for user in get_user_model().objects.filter(is_active=True).only('id', 'username', 'first_name', 'last_name'):
+    for user in get_user_model().objects.using(AI_DB_ALIAS).filter(is_active=True).only('id', 'username', 'first_name', 'last_name'):
         full_name = f'{user.last_name} {user.first_name}'.strip() or user.username
         if normalized_query in _normalized_text(full_name):
             matches.append(full_name)
@@ -653,18 +765,48 @@ def _agent_individual_overtime(arguments, redactor):
     return data, chart, period
 
 
-def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_personal_overtime=False):
+def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_personal_overtime=False, screen_context=None):
     """DeepSeekが読み取り専用ツールを選び、段階的に調査して回答する。"""
     if not DEEPSEEK_API_KEY:
         raise LocalAIError('DeepSeek APIキーが未設定です。サーバーの DEEPSEEK_API_KEY を設定してください。')
     recent_period = _recent_data_period(history)
     selected_option = _selected_data_option(question, history)
+    screen_context = screen_context or resolve_screen_context(None)
+    allowed_tools = screen_context['allowed_tools']
+    available_tools = [
+        tool for tool in DEEPSEEK_AGENT_TOOLS
+        if tool['function']['name'] in allowed_tools
+    ]
+    if allow_personal_overtime:
+        available_tools.extend(
+            tool for tool in (
+                DEEPSEEK_PERSONAL_OVERTIME_TOOL,
+                DEEPSEEK_EMPLOYEE_SEARCH_TOOL,
+                DEEPSEEK_INDIVIDUAL_OVERTIME_TOOL,
+            )
+            if tool['function']['name'] in allowed_tools
+        )
+    order_context_instruction = ''
+    if screen_context['id'] == 'orders':
+        order_context_instruction = (
+            '受注画面では、ルーティング未設定の注文品について質問された場合は、'
+            '必ずget_missing_routing_ordersを呼んでください。'
+            '返された数量は代表受注明細の数量であり、全受注明細の合計ではないことを守ってください。'
+            '得意先名、受注番号、受注明細は結果に含まれないため、推測・要求・回答してはいけません。\n'
+        )
     messages = [{
         'role': 'system',
         'content': (
             'あなたは本社の生産管理を支援する社内AIです。利用者の質問を自分で調査して回答してください。\n'
+            f"今回の起点画面: {screen_context['label']}。この画面に許可されたツール以外を使ってはいけません。\n"
             '利用できるのは品番マスタ検索と、許可済みの読み取り専用集計ツールだけです。SQL、更新、削除、DDL、明細取得はできません。\n'
+            + order_context_instruction +
             '品番を含む質問では、必ず最初にsearch_productを呼び、見つからなければ「現在この品番はありません」と回答してください。候補を勝手に選んではいけません。\n'
+            '品番マスタの件数質問ではcount_productsを使ってください。「最終品」はis_final_product、'
+            '「ライン最終品」はis_line_final_productで絞り込めます。それ以外の業務用語がDB上の分類'
+            '(カテゴリ等)に対応するか自明でない場合は、まず条件指定なしで呼んで実際に存在するカテゴリと'
+            '件数を確認してください。用語がどの項目に対応するか自分で判断できない場合は、推測せず'
+            '確認した内訳を提示して利用者に確認してください。\n'
             '生産数・仕損・中断・残業の数値を答えるときは、必ずget_business_dataを呼び、ツール結果にない数値を作らないでください。\n'
             '個人別残業は、search_employee・get_individual_overtime・get_personal_overtime_threshold が利用可能な場合だけ使用してください。'
             '指定した一人の合計を聞かれたら、氏名が姓だけ・曖昧でも必ず最初にsearch_employeeで検索し、'
@@ -715,14 +857,11 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                 'thinking': {'type': 'disabled'},
                 'temperature': 0.4,
                 'max_tokens': 768,
-                'tools': (
-                    [*DEEPSEEK_AGENT_TOOLS, DEEPSEEK_PERSONAL_OVERTIME_TOOL, DEEPSEEK_EMPLOYEE_SEARCH_TOOL, DEEPSEEK_INDIVIDUAL_OVERTIME_TOOL]
-                    if allow_personal_overtime else DEEPSEEK_AGENT_TOOLS
-                ),
+                'tools': available_tools,
             }
             # 「グラフ」「もう一回」等は、記憶だけで答えて実データが伴わない誤答が多いため、
             # 最初の1回だけツール呼び出しを必須化する。どのツールを呼ぶかはDeepSeekの判断のまま。
-            if attempt == 0 and any(term in question for term in FORCE_TOOL_CALL_TERMS):
+            if attempt == 0 and available_tools and any(term in question for term in FORCE_TOOL_CALL_TERMS):
                 body['tool_choice'] = 'required'
             request = Request(
                 f'{DEEPSEEK_BASE_URL}/chat/completions',
@@ -764,15 +903,19 @@ def _deepseek_agent_chat(question, history, model=None, redactor=None, allow_per
                 except json.JSONDecodeError:
                     result, tool_chart, tool_period = {'status': 'invalid_request', 'detail': 'ツール引数が不正です。'}, None, None
                 else:
-                    if function.get('name') == 'search_product':
+                    if function.get('name') == 'search_product' and 'search_product' in allowed_tools:
                         result, tool_chart, tool_period = _agent_product_lookup(arguments.get('product_code')), None, None
-                    elif function.get('name') == 'get_business_data':
-                        result, tool_chart, tool_period = _agent_business_data(arguments, confirmed_codes)
-                    elif function.get('name') == 'get_personal_overtime_threshold' and allow_personal_overtime:
+                    elif function.get('name') == 'count_products' and 'count_products' in allowed_tools:
+                        result, tool_chart, tool_period = _agent_product_category_counts(arguments), None, None
+                    elif function.get('name') == 'get_missing_routing_orders' and 'get_missing_routing_orders' in allowed_tools:
+                        result, tool_chart, tool_period = get_missing_routing_orders(arguments)
+                    elif function.get('name') == 'get_business_data' and 'get_business_data' in allowed_tools:
+                        result, tool_chart, tool_period = _agent_business_data(arguments, confirmed_codes, screen_context)
+                    elif function.get('name') == 'get_personal_overtime_threshold' and allow_personal_overtime and 'get_personal_overtime_threshold' in allowed_tools:
                         result, tool_chart, tool_period = _personal_overtime_threshold(arguments)
-                    elif function.get('name') == 'search_employee' and allow_personal_overtime:
+                    elif function.get('name') == 'search_employee' and allow_personal_overtime and 'search_employee' in allowed_tools:
                         result, tool_chart, tool_period = _agent_employee_lookup(arguments.get('name'), redactor), None, None
-                    elif function.get('name') == 'get_individual_overtime' and allow_personal_overtime:
+                    elif function.get('name') == 'get_individual_overtime' and allow_personal_overtime and 'get_individual_overtime' in allowed_tools:
                         result, tool_chart, tool_period = _agent_individual_overtime(arguments, redactor)
                     else:
                         result, tool_chart, tool_period = {'status': 'invalid_request', 'detail': '許可されていないツールです。'}, None, None
@@ -843,7 +986,7 @@ def _resolve_product_code(product_code, product_candidates):
     """正式品番へ解決し、曖昧な入力時は候補だけを返す。"""
     raw_codes = [str(product_code or '').strip(), *product_candidates]
     raw_codes = [code for code in raw_codes if _product_code_key(code)]
-    master_codes = list(Product.objects.values_list('product_code', flat=True))
+    master_codes = list(Product.objects.using(AI_DB_ALIAS).values_list('product_code', flat=True))
     master_keys = {code: _product_code_key(code) for code in master_codes}
     raw_keys = [_product_code_key(code) for code in raw_codes]
     for raw_code in raw_codes:
@@ -1008,7 +1151,7 @@ def _find_user_by_name(name):
 
     requested = _normalized_text(name).removesuffix('さん').removesuffix('氏')
     matches = []
-    for user in get_user_model().objects.filter(is_active=True).only(
+    for user in get_user_model().objects.using(AI_DB_ALIAS).filter(is_active=True).only(
         'id', 'username', 'first_name', 'last_name'
     ):
         full_name = _normalized_text(f'{user.last_name}{user.first_name}')
@@ -1033,7 +1176,7 @@ def _individual_overtime_facts(start, end, name):
     }
     type_labels = {'overtime': '時間外', 'holiday': '休日出勤'}
     rows = list(
-        OvertimeApplication.objects.filter(
+        OvertimeApplication.objects.using(AI_DB_ALIAS).filter(
             applicant=user,
             work_date__gte=start,
             work_date__lte=end,
@@ -1112,7 +1255,7 @@ def _scrap_facts(start, end, process_name=''):
         F('qty') - Coalesce(F('return_qty'), Value(Decimal('0'))),
         output_field=DecimalField(max_digits=14, decimal_places=3),
     )
-    queryset = ScrapRecord.objects.filter(
+    queryset = ScrapRecord.objects.using(AI_DB_ALIAS).filter(
             plan_date__gte=start,
             plan_date__lte=end,
             event_type='SCRAP',
@@ -1136,7 +1279,7 @@ def _scrap_facts(start, end, process_name=''):
 
 
 def _production_facts(start, end, operator_name='', product_code=''):
-    queryset = ProcessRealtimeRecord.objects.filter(
+    queryset = ProcessRealtimeRecord.objects.using(AI_DB_ALIAS).filter(
         timestamp__date__gte=start,
         timestamp__date__lte=end,
         record_type='PRODUCTION',
@@ -1163,7 +1306,7 @@ def _production_facts(start, end, operator_name='', product_code=''):
     brake_records = 0
     # 生産実績照会のレーザータブと同じ定義。終了済みの構成部品明細だけを数量根拠にする。
     if product_code and not operator_name:
-        laser_queryset = LaserActualDetail.objects.filter(
+        laser_queryset = LaserActualDetail.objects.using(AI_DB_ALIAS).filter(
             actual__work_date__gte=start,
             actual__work_date__lte=end,
             actual__operator_action=LaserActual.OPERATOR_ACTION_END,
@@ -1186,7 +1329,7 @@ def _production_facts(start, end, operator_name='', product_code=''):
 
     # 生産実績照会のブレーキタブと同じ定義。終了済み行の加工数だけを数量根拠にする。
     if product_code and not operator_name:
-        brake_queryset = BrakeLineRecord.objects.filter(
+        brake_queryset = BrakeLineRecord.objects.using(AI_DB_ALIAS).filter(
             plan_date__gte=start,
             plan_date__lte=end,
             operator_action=BrakeLineRecord.OPERATOR_ACTION_END,
@@ -1244,7 +1387,7 @@ def _production_facts(start, end, operator_name='', product_code=''):
 
 
 def _interruption_facts(start, end):
-    queryset = BrakeLineRecord.objects.filter(
+    queryset = BrakeLineRecord.objects.using(AI_DB_ALIAS).filter(
         plan_date__gte=start,
         plan_date__lte=end,
         operator_action__in=['PAUSE', 'TEMP_END'],
@@ -1268,13 +1411,13 @@ def _interruption_facts(start, end):
 def _overtime_facts(start, end, group_name):
     """最終承認済みと最終承認待ちを個人名なしでグループ集計する。"""
     search_name = group_name.removesuffix('グループ').strip()
-    groups = list(Department.objects.filter(level='unit', name__iexact=search_name).values('id', 'name')[:2])
+    groups = list(Department.objects.using(AI_DB_ALIAS).filter(level='unit', name__iexact=search_name).values('id', 'name')[:2])
     if not groups:
         raise LocalAIError(f'「{group_name}」に一致する組織グループがDBにありません。')
     if len(groups) > 1:
         raise LocalAIError(f'「{group_name}」に一致する組織グループが複数あります。正式なグループ名を指定してください。')
     group = groups[0]
-    queryset = OvertimeApplication.objects.filter(
+    queryset = OvertimeApplication.objects.using(AI_DB_ALIAS).filter(
         work_date__gte=start,
         work_date__lte=end,
         application_type='overtime',
@@ -1390,6 +1533,7 @@ class ProductionAIDemoView(APIView):
         redactor = _build_external_data_redactor() if provider == 'deepseek' else None
         # 権限の判定はフロントエンドだけで行い、この値は画面で許可されたツール範囲を表す。
         allow_personal_overtime = request.data.get('allow_personal_overtime') is True
+        screen_context = resolve_screen_context(request.data.get('screen_context'))
         raw_history = request.data.get('history') or []
         history = [
             {
@@ -1408,6 +1552,7 @@ class ProductionAIDemoView(APIView):
                 answer, inference, source, period, chart = _deepseek_agent_chat(
                     question, history, model=model, redactor=redactor,
                     allow_personal_overtime=allow_personal_overtime,
+                    screen_context=screen_context,
                 )
             except LocalAIError as exc:
                 return Response({'detail': str(exc)}, status=503)
@@ -1693,7 +1838,7 @@ _LOOKUP_PATTERNS = [
 def _get_search_configs():
     """DB設定を取得し、未登録時はデフォルト設定にフォールバックする。"""
     from ai.models import AISearchConfig
-    configs = list(AISearchConfig.objects.filter(is_active=True))
+    configs = list(AISearchConfig.objects.using(AI_DB_ALIAS).filter(is_active=True))
     if configs:
         return [
             {
@@ -1738,7 +1883,7 @@ def _master_lookup(question):
         for field in config['search_fields']:
             q |= Q(**{f'{field}__icontains': search})
 
-        queryset = model.objects.filter(q)
+        queryset = model.objects.using(AI_DB_ALIAS).filter(q)
         if config.get('filter'):
             queryset = queryset.filter(**config['filter'])
 

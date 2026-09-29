@@ -17,15 +17,25 @@
 
     <div class="global-nav-center">
       <div class="nav-tabs">
-        <RouterLink
-          v-for="tab in displayTabs"
-          :key="tab.id"
-          :to="tab.link"
-          class="nav-tab"
-          :class="{ active: isActiveTab(tab.id) }"
-        >
-          {{ tab.label }}
-        </RouterLink>
+        <template v-for="tab in displayTabs" :key="tab.id">
+          <button
+            v-if="tab.id === 'ai'"
+            type="button"
+            class="nav-tab nav-tab-button"
+            :class="{ active: isActiveTab(tab.id) }"
+            @click="openAiChat"
+          >
+            {{ tab.label }}
+          </button>
+          <RouterLink
+            v-else
+            :to="tab.link"
+            class="nav-tab"
+            :class="{ active: isActiveTab(tab.id) }"
+          >
+            {{ tab.label }}
+          </RouterLink>
+        </template>
       </div>
     </div>
 
@@ -211,6 +221,7 @@ import { hasPermission } from '../router'
 import api from '@/api/client'
 import { locale, t, setLocale, getLocaleOptions } from '@/i18n'
 import { syncNativePushRegistration } from '@/nativePush'
+import { aiDrawerOpen, openAIDrawer } from '@/composables/aiDrawer'
 
 const props = defineProps({
   isMobile: {
@@ -238,7 +249,12 @@ const goBack = () => {
   window.history.back()
 }
 
+const openAiChat = () => {
+  openAIDrawer(route.fullPath)
+}
+
 const mainTabs = computed(() => [
+  { id: 'ai', label: 'AI', link: '/ai/chat', resource: 'ai' },
   { id: 'orders', label: t('nav.tabs.orders'), link: '/orders/menu', resource: 'orders' },
   { id: 'production', label: t('nav.tabs.production'), link: '/production/menu', resource: 'production' },
   { id: 'purchase', label: t('nav.tabs.purchase'), link: '/purchase/menu', resource: 'purchase' },
@@ -246,7 +262,6 @@ const mainTabs = computed(() => [
   { id: 'inventory', label: t('nav.tabs.inventory'), link: '/inventory', resource: 'inventory' },
   { id: 'consumables', label: '消耗品', link: '/consumables', resource: 'consumables' },
   { id: 'quality', label: t('nav.tabs.quality'), link: '/quality', resource: 'quality' },
-  { id: 'ai', label: 'AI', link: '/ai/chat', resource: 'ai' },
   { id: 'notifications', label: t('nav.tabs.notifications'), link: '/notifications/communication', resource: 'notifications' },
   { id: 'engineeringChange', label: t('nav.tabs.engineeringChange'), link: '/engineering-change/menu', resource: 'engineering_change' },
   { id: 'outsource', label: 'FB', link: '/outsource/menu', resource: 'outsource' },
@@ -293,7 +308,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'inventory' && path.startsWith('/inventory')) return true
   if (tabId === 'consumables' && path.startsWith('/consumables')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
-  if (tabId === 'ai' && path.startsWith('/ai')) return true
+  if (tabId === 'ai' && (path.startsWith('/ai') || aiDrawerOpen.value)) return true
   if (tabId === 'notifications' && path.startsWith('/notifications')) return true
   if (tabId === 'engineeringChange' && path.startsWith('/engineering-change')) return true
   if (tabId === 'overtime' && path.startsWith('/overtime')) return true
@@ -1291,6 +1306,12 @@ const handleLogout = async () => {
   background: rgba(255, 255, 255, 0.25);
   color: white;
   font-weight: 600;
+}
+
+.nav-tab-button {
+  border: none;
+  background: transparent;
+  font-family: inherit;
 }
 
 .global-nav-right {

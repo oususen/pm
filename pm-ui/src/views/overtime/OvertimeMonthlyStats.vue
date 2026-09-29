@@ -306,9 +306,12 @@ const groupOptions = computed(() => {
     : allUsers.value
   return [...new Set(targetUsers.flatMap(u => [u.group, ...u.leaderUnitNames]).filter(Boolean))].sort()
 })
-const nameOptions = computed(() =>
-  [...new Set(allUsers.value.map(u => u.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'))
-)
+const nameOptions = computed(() => {
+  let users = allUsers.value
+  if (filterTeam.value) users = users.filter(u => u.team === filterTeam.value)
+  if (filterGroup.value) users = users.filter(u => u.group === filterGroup.value || u.leaderUnitNames.includes(filterGroup.value))
+  return [...new Set(users.map(u => u.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'))
+})
 
 const filteredRows = computed(() =>
   rows.value.filter(r =>
@@ -1142,10 +1145,10 @@ async function load() {
           if (app.work_start_time) {
             // 旧形式: work_start_timeあり → hoursは残業分のみ、パターン基準 + 残業
             const baseH = app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8
-            row.workH = Math.round((baseH + h) * 10) / 10
-          } else if (h > 0) {
-            // 新形式: 勤務時間帯入力あり → hoursがそのまま総勤務時間
-            row.workH = h
+            row.workH = Math.round((baseH + overtimeTotalH) * 10) / 10
+          } else if (h > 0 || midnightH > 0) {
+            // 新形式: hours=通常時間, midnight_hours=深夜時間 → 合計が総勤務時間
+            row.workH = overtimeTotalH
           } else {
             // 新形式: 勤務時間帯未入力 → パターン時間 or 8H
             row.workH = app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8

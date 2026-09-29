@@ -82,11 +82,13 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { authState } from '@/auth'
 import api from '@/api/client'
 import { hasPermission } from '@/router'
 
 const provider = ref('deepseek')
+const route = useRoute()
 const providerStatus = ref({})
 const deepseekModel = ref('deepseek-v4-pro')
 const suggestions = [
@@ -109,6 +111,7 @@ const deepseekModels = () => providerStatus.value.deepseek?.models || [
 const providerModel = () => provider.value === 'deepseek' ? deepseekModel.value : (providerStatus.value.qwen?.model || 'qwen3:4b-instruct')
 const providerReady = () => Boolean(providerStatus.value[provider.value]?.connected && providerStatus.value[provider.value]?.model_ready)
 const canViewPersonalOvertime = computed(() => hasPermission(authState.user, 'overtime.personal_summary', 'view'))
+const screenContext = computed(() => String(route.query.source || ''))
 const number = (value) => new Intl.NumberFormat('ja-JP', { maximumFractionDigits: 1 }).format(value || 0)
 const barHeight = (value, values) => Math.max(3, Math.round((value / Math.max(...values, 1)) * 100))
 const shortLabel = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(5) : value.length > 8 ? `${value.slice(0, 7)}…` : value
@@ -130,6 +133,7 @@ const ask = async (question) => {
       message: question.trim(), history, provider: provider.value,
       model: provider.value === 'deepseek' ? deepseekModel.value : undefined,
       allow_personal_overtime: canViewPersonalOvertime.value,
+      screen_context: screenContext.value,
     })
     messages.value.push({
       role: 'assistant', content: data.answer, analysis: data.analysis, source: data.source,

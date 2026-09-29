@@ -115,6 +115,25 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+AI_READER_DB_OPTIONS = {
+    'charset': 'utf8mb4',
+    'init_command': "SET sql_mode='STRICT_TRANS_TABLES', time_zone='+09:00'",
+    'connection_timeout': 10,
+}
+_ai_reader_ssl_ca = os.getenv('AI_DB_SSL_CA', '').strip()
+_ai_reader_ssl_cert = os.getenv('AI_DB_SSL_CERT', '').strip()
+_ai_reader_ssl_key = os.getenv('AI_DB_SSL_KEY', '').strip()
+# MySQL公式コネクタ向けのTLS設定。CA指定時はサーバー証明書も検証する。
+if _ai_reader_ssl_ca:
+    AI_READER_DB_OPTIONS['ssl_ca'] = _ai_reader_ssl_ca
+    AI_READER_DB_OPTIONS['ssl_verify_cert'] = True
+    if _ai_reader_ssl_cert:
+        AI_READER_DB_OPTIONS['ssl_cert'] = _ai_reader_ssl_cert
+    if _ai_reader_ssl_key:
+        AI_READER_DB_OPTIONS['ssl_key'] = _ai_reader_ssl_key
+else:
+    AI_READER_DB_OPTIONS['ssl_disabled'] = False
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
@@ -129,7 +148,18 @@ DATABASES = {
             'connect_timeout': 10,
         },
         'CONN_HEALTH_CHECKS': True,
-    }
+    },
+    # AIチャットの集計専用。通常業務の default 接続へフォールバックしない。
+    'ai_reader': {
+        'ENGINE': 'mysql.connector.django',
+        'NAME': os.getenv('AI_DB_NAME', os.getenv('DB_NAME', '')),
+        'USER': os.getenv('AI_DB_USER', ''),
+        'PASSWORD': os.getenv('AI_DB_PASSWORD', ''),
+        'HOST': os.getenv('AI_DB_HOST', os.getenv('DB_HOST', '')),
+        'PORT': os.getenv('AI_DB_PORT', os.getenv('DB_PORT', '3306')),
+        'OPTIONS': AI_READER_DB_OPTIONS,
+        'CONN_HEALTH_CHECKS': True,
+    },
 }
 
 

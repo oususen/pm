@@ -10,6 +10,7 @@
         <RouterView />
       </main>
     </div>
+    <AIChatDrawer v-if="showLayout" />
 
   </div>
 </template>
@@ -18,6 +19,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import GlobalNavigation from "./components/GlobalNavigation.vue";
+import AIChatDrawer from "./components/AIChatDrawer.vue";
 
 const todayText = computed(() => {
   const d = new Date();
