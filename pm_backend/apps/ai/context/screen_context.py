@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 _ALL_CURRENT_TOOLS = frozenset({
     'search_product', 'count_products', 'get_business_data',
-    'search_employee', 'get_individual_overtime', 'get_personal_overtime_threshold',
+    'search_employee', 'get_individual_overtime', 'get_personal_overtime_threshold', 'get_my_overtime',
     'execute_readonly_sql',
 })
 _ALL_CURRENT_INTENTS = frozenset({'production', 'scrap', 'interruption', 'overtime'})
@@ -33,7 +33,7 @@ SCREEN_CONTEXTS = (
         'id': 'overtime', 'label': '勤務', 'coverage': '残業申請時間(グループ別・個人別)',
         'allowed_tools': frozenset({
             'get_business_data', 'search_employee', 'get_individual_overtime',
-            'get_personal_overtime_threshold', 'execute_readonly_sql',
+            'get_personal_overtime_threshold', 'get_my_overtime', 'execute_readonly_sql',
         }),
         'allowed_intents': frozenset({'overtime'}),
     }),

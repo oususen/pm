@@ -41,6 +41,7 @@ TOOL_CATALOG = {
     'search_employee': {'label': '社員候補検索', 'kind': 'personal'},
     'get_individual_overtime': {'label': '個人別残業集計', 'kind': 'personal'},
     'get_personal_overtime_threshold': {'label': '残業しきい値超過者集計', 'kind': 'personal'},
+    'get_my_overtime': {'label': '本人の残業集計', 'kind': 'personal'},
     'execute_readonly_sql': {'label': 'AI用DB辞書の読み取りSQL', 'kind': 'sql'},
 }
 

@@ -25,6 +25,11 @@ DROP_VIEW = 'DROP VIEW IF EXISTS v_ai_shipment'
 
 
 class Migration(migrations.Migration):
-    dependencies = [('ai', '0013_ai_purchase_receipt_view_record_type')]
+    # ビューの元になる t_shipment_actual(shipping 0006 で shipping_trip_allocation を追加)と m_product(masters 0001)より後に実行する
+    dependencies = [
+        ('ai', '0013_ai_purchase_receipt_view_record_type'),
+        ('shipping', '0006_shipmentactual_shipping_trip_allocation_and_more'),
+        ('masters', '0001_initial'),
+    ]
 
     operations = [migrations.RunSQL(CREATE_VIEW, DROP_VIEW)]

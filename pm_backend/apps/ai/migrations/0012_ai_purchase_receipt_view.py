@@ -30,6 +30,10 @@ DROP_VIEW = 'DROP VIEW IF EXISTS v_ai_purchase_receipt'
 
 
 class Migration(migrations.Migration):
-    dependencies = [('ai', '0011_aidatapolicy_conversation_retention_days')]
+    # ビューの元になる t_process_realtime_record を作る production 0001 より後に実行する(新しいDBでの migrate 順序)
+    dependencies = [
+        ('ai', '0011_aidatapolicy_conversation_retention_days'),
+        ('production', '0001_initial'),
+    ]
 
     operations = [migrations.RunSQL(CREATE_VIEW, DROP_VIEW)]

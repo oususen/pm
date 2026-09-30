@@ -559,6 +559,31 @@ DEEPSEEK_INDIVIDUAL_OVERTIME_TOOL = {
 }
 
 
+# 利用者本人の残業を調べる。氏名・利用者IDは引数にせず、サーバーがログイン者に固定する。
+MY_OVERTIME_TOOL = {
+    'type': 'function',
+    'function': {
+        'name': 'get_my_overtime',
+        'description': (
+            '「わたしの残業」「自分の残業」のように、利用者本人の残業申請時間を承認段階別に集計する。'
+            '氏名は不要で、ログインしている本人の分だけが返る。他人の残業は調べられない。'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'start_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                'end_date': {'type': 'string', 'description': 'YYYY-MM-DD'},
+                'show_total_bar': {
+                    'type': 'boolean',
+                    'description': '利用者が「合計グラフ」のように合計を含むグラフを求めている場合だけtrue。合計の数値はPM側が計算する。',
+                },
+            },
+            'required': ['start_date', 'end_date', 'show_total_bar'],
+        },
+    },
+}
+
+
 def _confirmed_product_codes(question, history):
     """利用者が正式に入力済みの品番だけを、集計ツールで使用可能にする。"""
     confirmed = set()
@@ -845,10 +870,35 @@ def _agent_individual_overtime(arguments, redactor):
     return data, chart, period
 
 
+def _agent_my_overtime(arguments, user):
+    """ログイン本人の残業申請時間を集計する。対象ユーザーはサーバー側で固定し、AIの引数では変えられない。"""
+    start, end, error = _agent_date_range(arguments)
+    if error:
+        return error, None, None
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return {'status': 'invalid_request', 'detail': '利用者を特定できません。'}, None, None
+    facts = _overtime_facts_for_user(user, start, end)
+    period = {'start_date': start.isoformat(), 'end_date': end.isoformat()}
+    data = {
+        'status': 'ok',
+        'source': 'あなたの残業申請時間（承認段階別）',
+        'period': period,
+        'total_hours': facts['total_hours'],
+        'total_records': facts['total_records'],
+        'items': facts['items'],
+    }
+    labels = list(facts['labels'])
+    values = list(facts['values'])
+    if arguments.get('show_total_bar') is True and len(facts['items']) > 1:
+        labels.append('合計')
+        values.append(facts['total_hours'])
+    return data, {'labels': labels, 'values': values, 'series_label': '時間'}, period
+
+
 def _deepseek_agent_chat(
     question, history, model=None, redactor=None, allow_personal_overtime=False, screen_context=None,
     base_url=None, api_key=None, default_model=None, provider_key='deepseek', provider_label='DeepSeek',
-    knowledge_document_ids=None, vision_attachment=None,
+    knowledge_document_ids=None, vision_attachment=None, current_user=None,
 ):
     """DeepSeek互換のOpenAI形式APIが、読み取り専用ツールを選び、段階的に調査して回答する。"""
     base_url = base_url or DEEPSEEK_BASE_URL
@@ -878,6 +928,8 @@ def _deepseek_agent_chat(
             )
             if tool['function']['name'] in allowed_tools
         )
+    if 'get_my_overtime' in allowed_tools and current_user is not None:
+        available_tools.append(MY_OVERTIME_TOOL)
     available_tools.append(EXCEL_EXPORT_TOOL)
     order_context_instruction = ''
     if screen_context['id'] == 'orders':
@@ -923,6 +975,17 @@ def _deepseek_agent_chat(
     else:
         personal_overtime_instruction = (
             '個人別の残業は、この利用者には権限がないため答えられません。個人名での残業の質問には、そのことを伝え、ツールは呼ばないでください。\n'
+        )
+    if 'get_my_overtime' in allowed_tools and current_user is not None:
+        # 本人の残業はget_my_overtimeで調べられる。他人の分は権限の有無にかかわらずこのツールでは調べられない。
+        if not allow_personal_overtime:
+            personal_overtime_instruction = (
+                '他人の個人別の残業は、この利用者には権限がないため答えられません。他人の名前での残業の質問には、そのことを伝え、個人名を調べるツールは呼ばないでください。\n'
+            )
+        personal_overtime_instruction += (
+            '「わたしの残業」「自分の残業」のように利用者本人の残業を聞かれたら、氏名を聞かずにget_my_overtimeを呼んでください。'
+            '結果は必ず最初に合計時間(total_hours)と件数(total_records)を明示し、その後に内訳(items)を説明してください。'
+            '合計の数値はPM側が計算するので、あなたが作ってはいけません。get_my_overtimeで他人の残業は調べられません。\n'
         )
     messages = [{
         'role': 'system',
@@ -1081,6 +1144,8 @@ def _deepseek_agent_chat(
                         )
                     elif function.get('name') == 'get_business_data' and 'get_business_data' in allowed_tools:
                         result, tool_chart, tool_period = _agent_business_data(arguments, confirmed_codes, screen_context)
+                    elif function.get('name') == 'get_my_overtime' and 'get_my_overtime' in allowed_tools and current_user is not None:
+                        result, tool_chart, tool_period = _agent_my_overtime(arguments, current_user)
                     elif function.get('name') == 'get_personal_overtime_threshold' and allow_personal_overtime and 'get_personal_overtime_threshold' in allowed_tools:
                         result, tool_chart, tool_period = _personal_overtime_threshold(arguments)
                     elif function.get('name') == 'search_employee' and allow_personal_overtime and 'search_employee' in allowed_tools:
@@ -1363,7 +1428,11 @@ def _find_user_by_name(name):
 
 def _individual_overtime_facts(start, end, name):
     """指定した一人の提出済み時間外・休日出勤申請を、種別・承認段階別に集計する。"""
-    user = _find_user_by_name(name)
+    return _overtime_facts_for_user(_find_user_by_name(name), start, end)
+
+
+def _overtime_facts_for_user(user, start, end):
+    """指定ユーザーの提出済み時間外・休日出勤申請を、種別・承認段階別に集計する(氏名検索・本人照会で共用)。"""
     statuses = {
         'submitted': '申請中',
         'approved_leader': 'リーダー承認済み',
@@ -1445,6 +1514,60 @@ def _quick_overtime_response(question, history):
             'facts': None,
         }
     return None
+
+
+# 「わたしの(…)残業」のように、本人の残業を指す質問だけを対象にする。
+_MY_OVERTIME_PATTERN = re.compile(r'(?:私|わたし|自分)の.{0,12}?残業')
+# 班・グループなど本人以外を指す語を含む質問は、本人の分として答えない。
+_NOT_PERSONAL_WORDS = ('班', 'グループ', '達', 'たち', 'チーム', '全員', 'みんな', '皆', '部門', '部署', '課', '係')
+
+
+def _quick_my_overtime_response(question, user):
+    """Qwenの本人照会を、モデルへ個人情報を渡さずサーバー側で集計する。"""
+    compact_question = _normalized_text(question)
+    if not _MY_OVERTIME_PATTERN.search(compact_question) or any(word in compact_question for word in _NOT_PERSONAL_WORDS):
+        return None
+    month_match = re.search(r'(?:(?P<year>\d{4})年)?(?P<month>1[0-2]|[1-9])月', compact_question)
+    if month_match:
+        start, end = _month_period(month_match.group('year'), month_match.group('month'))
+    else:
+        today = date.today()
+        start = today.replace(day=1)
+        end = today.replace(day=monthrange(today.year, today.month)[1])
+    facts = _overtime_facts_for_user(user, start, end)
+    breakdown = '、'.join(
+        f"{item['label']} {item['hours']:g}時間（{item['records']}件）" for item in facts['items']
+    ) or '対象となる提出済み申請はありません'
+    return {
+        'answer': (
+            f"{start.year}年{start.month}月のあなたの残業申請時間は"
+            f"合計 {facts['total_hours']:g}時間（{facts['total_records']}件）です。"
+            f"内訳: {breakdown}。\n残業申請時間の集計であり、打刻実績ではありません。"
+        ),
+        'intent': 'my_overtime',
+        'period': {'start_date': start.isoformat(), 'end_date': end.isoformat()},
+        'source': 'あなたの残業申請時間（承認段階別）',
+        'chart_title': 'あなたの残業申請時間',
+        'facts': facts,
+    }
+
+
+def _is_qwen_my_overtime_followup(question, history):
+    """本人残業の直後の感想・説明要求だけを、再集計せずQwenへ文脈付きで渡す。"""
+    last_answer = next(
+        (str(row.get('content', '')) for row in reversed(history) if row.get('role') == 'assistant'),
+        '',
+    )
+    if 'あなたの残業申請時間' not in last_answer:
+        return False
+    compact_question = _normalized_text(question)
+    if re.search(r'\d{4}年|\d{1,2}月|今月|先月|今年|昨年|期間|から|まで|グループ|班|さん|氏', compact_question):
+        return False
+    followup_terms = (
+        '多', '少', '大変', '内訳', '詳', 'グラフ', 'チャート', '割合', '理由', '比較',
+        '傾向', '分析', 'どう', '何時間', '何件', '教えて', '見せて', '確認',
+    )
+    return any(term in compact_question for term in followup_terms)
 
 
 def _scrap_facts(start, end, process_name=''):
@@ -1840,6 +1963,7 @@ class AIChatAPIView(APIView):
                     provider_key=provider, provider_label=agent_provider['label'],
                     knowledge_document_ids=knowledge_document_ids,
                     vision_attachment=vision_attachment,
+                    current_user=request.user,
                 )
             except LocalAIError as exc:
                 return Response({'detail': str(exc)}, status=503)
@@ -1875,14 +1999,20 @@ class AIChatAPIView(APIView):
                     'model': '',
                     'inference': None,
                 })
-        # 1. パターンマッチで即回答（Qwen不要）
-        quick = _quick_overtime_response(question, history)
+        # 1. ローカルQwenの本人残業照会は、モデルに個人情報を渡さずサーバー側で即回答する。
+        # ツール管理設定で get_my_overtime が無効な画面では、本人照会も行わない。
+        quick = (
+            _quick_my_overtime_response(question, request.user)
+            if provider == 'qwen' and 'get_my_overtime' in screen_context['allowed_tools'] else None
+        )
+        # 2. パターンマッチで即回答（Qwen不要）
+        quick = quick or _quick_overtime_response(question, history)
         if quick:
             chart = None
             facts = quick.get('facts')
             if facts and facts.get('values'):
                 chart = {
-                    'title': f"{facts['employee_name']}の残業申請時間",
+                    'title': quick.get('chart_title', f"{facts['employee_name']}の残業申請時間"),
                     'labels': facts['labels'],
                     'values': facts['values'],
                     'series_label': '時間',
@@ -1914,6 +2044,14 @@ class AIChatAPIView(APIView):
                 'inference': None,
             })
 
+        # 本人残業への短い感想・説明要求は、前回の集計結果だけをQwenへ渡す。
+        # 新しい期間・対象条件を含む質問は従来どおり集計経路へ送る。
+        if provider == 'qwen' and _is_qwen_my_overtime_followup(question, history):
+            return self._general_chat(
+                question, history, provider, model, redactor, screen_context, knowledge_document_ids,
+                use_history=True,
+            )
+
         # 3. 報告書の追質問（前回データを使い、再分類・再集計をスキップ）
         if _is_report_followup(question, history):
             return self._report_from_context(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
@@ -1925,7 +2063,7 @@ class AIChatAPIView(APIView):
         # 5. 一般会話
         return self._general_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
-    def _general_chat(self, question, history, provider, model=None, redactor=None, screen_context=None, knowledge_document_ids=None):
+    def _general_chat(self, question, history, provider, model=None, redactor=None, screen_context=None, knowledge_document_ids=None, use_history=False):
         """システムプロンプトで役割を与え、選択中のモデルで会話を実行する。"""
         knowledge_chunks = retrieve_knowledge(question, screen_context, document_ids=knowledge_document_ids)
         retrieved_knowledge = knowledge_prompt(knowledge_chunks)
@@ -1947,13 +2085,14 @@ class AIChatAPIView(APIView):
                 '- 不明確な場合は1回だけ簡潔に聞き返してください。選択肢は最大3つ。\n'
                 '- 対応できない質問には「現在この機能は対応していません」と短く伝えてください。\n'
                 '- 利用者が表・一覧・Excelでの出力を求めた場合は、回答に必ずMarkdownの表（`| 列名 | 列名 |`形式）を書いてください。\n'
+                '- 会話履歴にある集計結果への感想・説明要求には、その数値だけを根拠に回答してください。比較基準がなければ、多い・少ないを断定しないでください。\n'
                 '日本語で簡潔に回答してください。'
                 + retrieved_knowledge
             ),
         }
         chat_history = (
             [{'role': row['role'], 'content': row['content']} for row in history]
-            if _uses_chat_context(question) else []
+            if use_history or _uses_chat_context(question) else []
         )
         try:
             answer, inference = _chat([
