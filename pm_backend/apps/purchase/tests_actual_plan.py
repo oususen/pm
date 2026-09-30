@@ -83,7 +83,8 @@ class PurchaseActualPlanTest(PurchaseActualPlanFixture, TestCase):
     def test_unlinked_records_and_other_plan_dates_are_excluded(self):
         self.assertEqual(self.register(5, plan=False)['status'], 'ok')
         ProcessRealtimeRecord.objects.create(process=self.process, product=self.product, record_type='PURCHASE', qty=7,
-            event_data={'purchase_plan': plan_key(self.supplier.id, self.product.id, '2026-09-03')})
+            event_data={'source': 'PURCHASE_ACTUAL_INPUT', 'line_id': self.line.id,
+                        'purchase_plan': plan_key(self.supplier.id, self.product.id, '2026-09-03')})
         self.assertEqual(self.state()['registered_qty'], 0)
         self.assertEqual(self.register(10)['status'], 'ok')
 
