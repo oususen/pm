@@ -88,7 +88,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 伏字化で必要な分析ができない場合は、対象項目、送信目的、保存有無を規約に追記し、承認後に範囲を拡張する。
 
-会話履歴（`ai_conversation`）には、画面に表示した復元後の回答（権限者の場合は氏名・個人別残業時間を含む）を保存する。外部APIへは送らず、閲覧・削除は会話の作成者本人に限る。対応表（一時ID⇔実名）自体は保存しない。
+会話履歴（`ai_conversation`）には、画面に表示した復元後の回答（権限者の場合は氏名・個人別残業時間を含む）を保存する。外部APIへは送らず、閲覧・削除は会話の作成者本人に限る。対応表（一時ID⇔実名）自体は保存しない。保存期間はAI設定の「会話履歴の保存期間」で管理し（0は無期限）、期限を過ぎた会話は自動削除する。
 
 ### 4.3 APIキー
 
@@ -122,7 +122,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 | モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
-| `production.ProcessRealtimeRecord` | `timestamp`, `record_type`, `qty`, `line`, `process`, `product`, `product_code`, `operator_name` | 製品、ライン、工程、仕損 | `record_type='PRODUCTION'` の `qty` 合計を生産実績とする。品番を質問で指定した場合は `product_code` の完全一致で絞り込む | 日別・工程別・品番別の生産数。作業者別は伏字化利用 |
+| `production.ProcessRealtimeRecord` | `timestamp`, `record_type`, `qty`, `line`, `process`, `product`, `product_code`, `operator_name` | 製品、ライン、工程、仕損 | `record_type='PRODUCTION'` の `qty` 合計を生産実績とする。ただし `event_data.source` が `PURCHASE_ACTUAL_INPUT`・`PURCHASE_RECEIVING`・`PURCHASE_RECEIVING_MOBILE` の行は仕入の入荷実績なので除外する（2026年9月は数量の46%が仕入分だった）。品番を質問で指定した場合は `product_code` の完全一致で絞り込む | 日別・工程別・品番別の生産数。作業者別は伏字化利用 |
 | `production.LaserActual` / `LaserActualDetail`（`t_laser_actual` / `t_laser_actual_detail`） | `work_date`, `operator_action`, `detail_type`, `product_code`, `total_qty` | レーザー実績ヘッダ、品番別明細、製品、工程 | 生産実績照会のレーザータブと同じく、`operator_action='END'` かつ `detail_type='COMPONENT'` の `total_qty` を品番別生産数とする。START・PAUSE・未終了の明細は含めない | 品番指定時にレーザー実績があれば、`ProcessRealtimeRecord` と合算せずレーザー実績を正規根拠にする |
 | `production.LineRealtimeRecord` | ライン、工程、製品、数量、記録時刻 | ライン、工程、製品 | ライン実績として登録された数量。ProcessRealtimeRecordとの二重集計を禁止 | 定義差分確認後に限定利用 |
 | `production.ProductionOrder` / `ProcessActual` | 製造指示、工程実績 | 製品、工程、ルーティング | 指示・実績の意味を個別仕様で確認する | 区分C。将来の指示対実績分析候補 |
@@ -150,6 +150,17 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 | `overtime.OvertimeApprovalLog` | 申請、承認者、役割、状態、コメント | 残業申請、ユーザー | 承認経過の履歴 | 区分B。コメント・氏名は伏字化必須 |
 
 残業申請時間は打刻実績ではない。個人間比較・順位付けは禁止する。
+
+### 6.5-2 仕入（入荷実績）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_purchase_receipt`（`ai/0012`で作成） | `id`, `arrival_date`, `registered_at`, `supplier_id`, `line_id`, `product_id`, `product_code`, `product_name`, `qty`, `process_id`, `input_source` | `t_process_realtime_record` のうち `record_type='PRODUCTION'` かつ `event_data.source` が仕入の3種類の行だけ。仕入れ実績照会画面と同じ定義 | 仕入画面・本社横断から読み取り専用SQLで、仕入先別・品番別・日別の入荷数を集計する |
+
+- 入荷数量は `qty`、入荷日は `arrival_date`（`event_data.arrival_date`）。日別集計は `arrival_date` を使い、登録日時 `registered_at` は使わない（2026-09-30時点の全2,531件中34件は入荷日と登録日が異なる）。
+- `event_data` に入っているのは `source`・`line_id`・`supplier_id`・`arrival_date` だけで、個人情報は含まない。
+- 仕入先名（`m_supplier.supplier_name`）は外部AIへ送る直前に一時ID（仕入先N）へ伏字化される。連絡先の列は従来どおり個人情報扱い。
+- 仕入計画・入荷予定（`LineBacklog` の購買・外作ライン）と、在庫/残量・仕入れ進度（専用計算）はまだ対象外。
 
 ### 6.6 受注（ルーティング未設定の注文品）
 
@@ -190,7 +201,7 @@ Department ──< OvertimeApplication >── User
 | 領域 | 区分 | 理由 |
 |---|---|---|
 | 受注・出荷・便計画 | C（一部A） | 受注は「ルーティング未設定の注文品」だけ区分A。その他は納期・数量・顧客との関係、正規の進捗定義を領域ごとに確認する必要がある |
-| 購買・発注提案・仕入先納入 | C | 発注数量・価格・取引先情報の送信範囲を決める必要がある |
+| 購買・発注提案・仕入先納入 | C（一部A） | 入荷実績（`v_ai_purchase_receipt`）だけ区分A。仕入計画・入荷予定・発注提案・在庫/進度は定義確認後に追加する |
 | 在庫・棚卸・引当・進度 | C | 数量の意味と再計算責務が複雑なため、専用仕様を確認後に追加する |
 | 設備点検・品質チェックシート・画像・添付 | D | 添付、画像、作業記録の送信可否を別途決める必要がある |
 | ユーザー、権限、承認、通知、通話、認証 | D | 個人情報・認証情報・通信内容を含むため |

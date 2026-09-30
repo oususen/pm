@@ -41,6 +41,7 @@ class AIDataPolicy(models.Model):
     allow_authorized_personal_data = models.BooleanField(default=True, verbose_name='権限者への個人別集計を許可')
     allow_external_image_transfer = models.BooleanField(default=True, verbose_name='添付画像の外部AI送信を許可')
     max_external_result_rows = models.PositiveIntegerField(default=30, verbose_name='外部送信する最大集計行数')
+    conversation_retention_days = models.PositiveIntegerField(default=0, verbose_name='会話履歴の保存期間(日、0は無期限)')
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

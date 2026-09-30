@@ -13,23 +13,24 @@ _ALL_CURRENT_TOOLS = frozenset({
 })
 _ALL_CURRENT_INTENTS = frozenset({'production', 'scrap', 'interruption', 'overtime'})
 
+# coverage は画面へ表示する「この画面で答えられる業務データ」。空文字はその画面の業務データに未対応。
 SCREEN_CONTEXTS = (
     ('/orders/', {
-        'id': 'orders', 'label': '受注',
+        'id': 'orders', 'label': '受注', 'coverage': 'ルーティング未設定の注文品',
         'allowed_tools': frozenset({'get_missing_routing_orders', 'execute_readonly_sql'}), 'allowed_intents': frozenset(),
     }),
     ('/production/', {
-        'id': 'production', 'label': '生産',
+        'id': 'production', 'label': '生産', 'coverage': '生産数・仕損・中断・残業',
         'allowed_tools': frozenset({'search_product', 'count_products', 'get_business_data', 'execute_readonly_sql'}),
         'allowed_intents': frozenset({'production', 'scrap', 'interruption', 'overtime'}),
     }),
     ('/quality/', {
-        'id': 'quality', 'label': '品質',
+        'id': 'quality', 'label': '品質', 'coverage': '確定仕損',
         'allowed_tools': frozenset({'search_product', 'get_business_data', 'execute_readonly_sql'}),
         'allowed_intents': frozenset({'scrap'}),
     }),
     ('/overtime/', {
-        'id': 'overtime', 'label': '勤務',
+        'id': 'overtime', 'label': '勤務', 'coverage': '残業申請時間(グループ別・個人別)',
         'allowed_tools': frozenset({
             'get_business_data', 'search_employee', 'get_individual_overtime',
             'get_personal_overtime_threshold', 'execute_readonly_sql',
@@ -37,20 +38,24 @@ SCREEN_CONTEXTS = (
         'allowed_intents': frozenset({'overtime'}),
     }),
     ('/purchase/', {
-        'id': 'purchase', 'label': '仕入', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
+        'id': 'purchase', 'label': '仕入', 'coverage': '入荷実績(仕入先別・品番別・日別)',
+        'allowed_tools': frozenset({'execute_readonly_sql'}), 'allowed_intents': frozenset(),
     }),
     ('/shipping/', {
-        'id': 'shipping', 'label': '出荷', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
+        'id': 'shipping', 'label': '出荷', 'coverage': '', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
     }),
     ('/inventory/', {
-        'id': 'inventory', 'label': '在庫', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
+        'id': 'inventory', 'label': '在庫', 'coverage': '', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
     }),
 )
 
 DEFAULT_SCREEN_CONTEXT = {
-    'id': 'ai_home', 'label': '本社横断',
+    'id': 'ai_home', 'label': '本社横断', 'coverage': '生産数・仕損・中断・残業・品番マスタ',
     'allowed_tools': _ALL_CURRENT_TOOLS, 'allowed_intents': _ALL_CURRENT_INTENTS,
 }
+
+# 未対応の画面から開いた場合でも、共通ツールで答えられる範囲。
+COMMON_COVERAGE = '生産数・仕損・中断・残業'
 
 
 def resolve_screen_context(value):

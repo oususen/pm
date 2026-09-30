@@ -23,6 +23,27 @@ BASE_SQL_SCHEMA = {
     't_order': ('id', 'order_type', 'order_date', 'freeze_from', 'status'),
     't_order_line': ('id', 'order_id', 'product_id', 'product_code', 'order_type', 'quantity', 'actual_shipment_qty', 'due_date', 'is_expanded'),
     'm_routing': ('id', 'product_id', 'is_active'),
+    # 仕入先名は外部AIへ送る直前に一時ID(仕入先N)へ伏字化される。連絡先の列は個人情報側だけで扱う。
+    'm_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type'),
+    'v_ai_purchase_receipt': (
+        'id', 'arrival_date', 'registered_at', 'supplier_id', 'line_id',
+        'product_id', 'product_code', 'product_name', 'qty', 'process_id', 'input_source',
+    ),
+}
+
+# LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
+TABLE_NOTES = {
+    't_process_realtime_record': (
+        '工程実績。仕入の入荷実績も同じ record_type=PRODUCTION で含まれるため、'
+        'この表の qty を合計して生産数や入荷数としてはいけない。生産数は集計ツール、入荷数は v_ai_purchase_receipt を使う。'
+    ),
+    'v_ai_purchase_receipt': (
+        '仕入の入荷実績(仕入れ実績入力・検収・スマホ検収)だけを抜き出したビュー。1行=1回の入荷登録。'
+        '入荷数量は qty、入荷日は arrival_date(日別・期間の集計は registered_at ではなく arrival_date を使う)。supplier_id は m_supplier.id、line_id は m_line.id、product_id は m_product.id。'
+        'input_source は登録元(PURCHASE_ACTUAL_INPUT=実績入力、PURCHASE_RECEIVING=検収、PURCHASE_RECEIVING_MOBILE=スマホ検収)。'
+    ),
+    'm_supplier': '仕入先マスタ。supplier_type は仕入先の区分。',
+    'm_line': 'ラインマスタ。line_type は PROD=生産、PURCHASE=購買、OUTSOURCE=外作、OTHER=その他。',
 }
 
 # 個人情報を扱う権限を持つ利用者だけに追加公開する列。DeepSeekへは一時IDへ伏字化して渡す。
@@ -42,7 +63,7 @@ SCREEN_SQL_TABLES = {
     'production': frozenset({'m_product', 'm_line', 'm_process', 'm_calendar_day', 't_process_realtime_record', 't_laser_actual', 't_laser_actual_detail', 'brake_line_record'}),
     'quality': frozenset({'m_product', 'm_line', 'm_process', 't_scrap_record'}),
     'overtime': frozenset({'t_overtime_application'}),
-    'purchase': frozenset({'m_supplier'}),
+    'purchase': frozenset({'m_supplier', 'm_product', 'm_line', 'm_calendar_day', 'v_ai_purchase_receipt'}),
     'shipping': frozenset(),
     'inventory': frozenset(),
 }
@@ -71,16 +92,22 @@ def _schema_for_table(table, allow_personal_data=False):
     columns = list(BASE_SQL_SCHEMA.get(table, ()))
     if allow_personal_data:
         columns.extend(PERSONAL_SQL_COLUMNS.get(table, ()))
-    return tuple(columns)
+    return tuple(dict.fromkeys(columns))
 
 
 def schema_text(screen_id, allow_personal_data=False):
-    """LLMへ渡す、画面領域に限定したSQL辞書。"""
+    """LLMへ渡す、画面領域に限定したSQL辞書。列に加えてテーブルの業務上の意味も渡す。"""
     tables = SCREEN_SQL_TABLES.get(screen_id, frozenset())
-    return '\n'.join(
-        f"- {table}: {', '.join(_schema_for_table(table, allow_personal_data))}"
-        for table in sorted(tables)
-    ) or 'この画面ではSQL照会を公開していません。'
+    lines = []
+    for table in sorted(tables):
+        columns = _schema_for_table(table, allow_personal_data)
+        if not columns:
+            continue
+        line = f"- {table}: {', '.join(columns)}"
+        if TABLE_NOTES.get(table):
+            line += f"\n  意味: {TABLE_NOTES[table]}"
+        lines.append(line)
+    return '\n'.join(lines) or 'この画面ではSQL照会を公開していません。'
 
 
 def _without_literals(sql):

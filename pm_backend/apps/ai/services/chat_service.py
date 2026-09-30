@@ -17,7 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ai.context.screen_context import resolve_screen_context
+from ai.context.screen_context import COMMON_COVERAGE, resolve_screen_context
 from ai.config.models import AIProviderConfig
 from ai.config.service import (
     apply_tool_policy,
@@ -1421,12 +1421,16 @@ def _scrap_facts(start, end, process_name=''):
     }
 
 
+PURCHASE_RECEIPT_SOURCES = ('PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE')
+
+
 def _production_facts(start, end, operator_name='', product_code=''):
+    # 仕入の入荷実績も同じ record_type='PRODUCTION' で保存されるため、生産数からは除外する。
     queryset = ProcessRealtimeRecord.objects.using(AI_DB_ALIAS).filter(
         timestamp__date__gte=start,
         timestamp__date__lte=end,
         record_type='PRODUCTION',
-    )
+    ).exclude(event_data__source__in=PURCHASE_RECEIPT_SOURCES)
     if operator_name:
         queryset = queryset.filter(operator_name__iexact=operator_name)
     if product_code:
@@ -1688,7 +1692,22 @@ class AIChatAPIView(APIView):
                 'is_enabled': config.is_enabled,
                 'models': [{'id': model_id, 'label': label} for model_id, label in agent_provider['models'].items()],
             }
-        return Response({'providers': providers})
+        # 起点画面の業務データに答えられるかを、管理設定で有効なツールまで含めて判定して画面へ返す。
+        screen = apply_tool_policy(resolve_screen_context(request.query_params.get('screen_context')))
+        if screen['id'] == 'ai_home':
+            supported = bool(screen['allowed_tools'])
+        else:
+            supported = bool(screen.get('coverage')) and bool(screen['priority_tools'])
+        return Response({
+            'providers': providers,
+            'screen': {
+                'id': screen['id'],
+                'label': screen['label'],
+                'supported': supported,
+                'coverage': screen.get('coverage', '') if supported else '',
+                'common_coverage': COMMON_COVERAGE,
+            },
+        })
 
     def post(self, request):
         if not _has_resource_permission(request.user, 'ai.chat'):

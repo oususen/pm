@@ -60,9 +60,14 @@ class AIDataPolicySerializer(serializers.ModelSerializer):
         fields = (
             'id', 'allow_aggregated_external_transfer', 'allow_authorized_personal_data',
             'allow_external_image_transfer',
-            'max_external_result_rows', 'updated_at',
+            'max_external_result_rows', 'conversation_retention_days', 'updated_at',
         )
         read_only_fields = ('updated_at',)
+
+    def validate_conversation_retention_days(self, value):
+        if value > 3650:
+            raise serializers.ValidationError('保存期間は3650日以下で指定してください。')
+        return value
 
     def validate_max_external_result_rows(self, value):
         if not 1 <= value <= 100:

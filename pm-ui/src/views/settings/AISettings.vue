@@ -35,6 +35,9 @@
         <label>外部送信する最大集計行数
           <input v-model.number="dataPolicy.max_external_result_rows" :disabled="!canEdit" type="number" min="1" max="100" @change="saveDataPolicy" />
         </label>
+        <label>会話履歴の保存期間（日・0は無期限）
+          <input v-model.number="dataPolicy.conversation_retention_days" :disabled="!canEdit" type="number" min="0" max="3650" @change="saveDataPolicy" />
+        </label>
         <p>画像は利用者が添付した時だけ、OpenRouterの画像対応モデルへ縮小して送信します。PDFは先頭3ページを画像化して一時送信します。個人別集計は画面権限とこの設定の両方が有効な場合だけ利用できます。</p>
       </div>
     </section>

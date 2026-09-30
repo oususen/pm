@@ -198,7 +198,7 @@ export default {
   productionRecordSettings: createProductionRecordSettingsAPI(client),
   aiChat: {
     chat(payload) { return client.post('/ai/chat/', payload || {}) },
-    status() { return client.get('/ai/chat/') },
+    status(params) { return client.get('/ai/chat/', { params }) },
   },
   aiConversations: {
     list(params) { return client.get('/ai/conversations/', { params }) },
