@@ -1124,7 +1124,9 @@ def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, incl
     return _ollama_chat(messages, json_mode, num_predict, timeout, include_metadata)
 
 
-_QWEN_EXCEL_REQUEST_PATTERN = re.compile(r'(?:Excel|excel|エクセル|表|一覧|リスト).*(?:で|に)?(?:出(?:して|力)|表示|作(?:って|成))')
+_QWEN_EXCEL_REQUEST_PATTERN = re.compile(
+    r'(?:Excel|excel|エクセル|表|一覧|リスト).*?(?:出して|出力|にして|表示(?:して)?|作って|作成)'
+)
 _MARKDOWN_TABLE_PATTERN = re.compile(
     r'^\s*\|.*\|\s*\n\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?\s*$',
     re.MULTILINE,
