@@ -54,7 +54,7 @@ API入口: `/process-realtime-records/sessions/`、レーザー実績API、ブ�
 | 通常工程 | `t_process_realtime_record` | `product_code` | `qty` | `record_type='PRODUCTION'`（仕入の入荷実績は `record_type='PURCHASE'` のため含まれない） | 工程実績 |
 | 工程作業セッション | `t_process_work_session` | `product_code` | `production_qty` | 画面のセッション条件（計画日／実施日、作業・終了状態）に従う | セッション実績。定義確認を終えるまで単独の標準回答には使わない |
 | レーザー（板金タブ） | `t_laser_actual` + `t_laser_actual_detail` | 明細の`product_code` | 明細の`total_qty` | ヘッダが`operator_action='END'`、明細が`detail_type='COMPONENT'` | レーザー実績。START、PAUSE、未終了を除外 |
-| ブレーキ | `brake_line_record` | `product_code`または製品FK | `qty` | `operator_action='END'` のみ | ブレーキ実績。START・PAUSE・TEMP_ENDは生産数に含めない |
+| ブレーキ | `brake_line_record` | `product_code`または製品FK | `qty` | `operator_action in ('END','PAUSE')` | ブレーキ実績。作業区間ごとの終了・中断時点の加工数を合計する（`ProductionRecordInquiry.vue` の `isCountableProductionRow`、`LineBacklog.actual_qty` と同じ）。START・RESUME・TEMP_ENDは数量0 |
 | スポット | スポット専用実績と関連セッション | 製品・計画行 | 実績数量 | スポット画面の専用集計条件 | 定義確認待ち |
 
 ### 4.1 レーザー実績の確定例

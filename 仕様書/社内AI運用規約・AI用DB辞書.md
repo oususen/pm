@@ -138,7 +138,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 | モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
-| `production.BrakeLineRecord`（`brake_line_record`） | `plan_date`, `process`, `product`, `product_code`, `operator_action`, `operator_action_reason`, `qty` | 工程、製品、ライン | 生産数は`operator_action='END'`の`qty`合計。中断・強制終了は`operator_action in ('PAUSE','TEMP_END')`のレコード件数 | 品番指定時のブレーキ生産数、理由別・工程別の中断件数 |
+| `production.BrakeLineRecord`（`brake_line_record`） | `plan_date`, `process`, `product`, `product_code`, `operator_action`, `operator_action_reason`, `qty` | 工程、製品、ライン | 生産数は`operator_action in ('END','PAUSE')`の`qty`合計（作業区間ごとに終了・中断時点の加工数を登録するため重複しない。生産実績照会・`LineBacklog.actual_qty`と同じ定義）。中断・強制終了は`operator_action in ('PAUSE','TEMP_END')`のレコード件数 | 品番指定時のブレーキ生産数、理由別・工程別の中断件数 |
 
 作業者ユーザーと作業者名は外部送信前に伏字化する。
 
