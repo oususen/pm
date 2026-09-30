@@ -1,12 +1,13 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from ai.views import AIChatView
+from ai.views import AIChatView, AIConversationViewSet
 from ai.config.views import AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
 
 router = DefaultRouter()
 router.register(r'ai-search-configs', AISearchConfigViewSet, basename='aisearchconfig')
+router.register(r'ai/conversations', AIConversationViewSet, basename='ai-conversation')
 router.register(r'ai/settings/providers', AIProviderConfigViewSet, basename='ai-provider-config')
 router.register(r'ai/settings/tools', AIToolPolicyViewSet, basename='ai-tool-policy')
 router.register(r'ai/settings/knowledge-sources', AIKnowledgeSourceViewSet, basename='ai-knowledge-source')

@@ -200,6 +200,13 @@ export default {
     chat(payload) { return client.post('/ai/chat/', payload || {}) },
     status() { return client.get('/ai/chat/') },
   },
+  aiConversations: {
+    list(params) { return client.get('/ai/conversations/', { params }) },
+    get(id) { return client.get(`/ai/conversations/${id}/`) },
+    create(data) { return client.post('/ai/conversations/', data) },
+    update(id, data) { return client.patch(`/ai/conversations/${id}/`, data) },
+    delete(id) { return client.delete(`/ai/conversations/${id}/`) },
+  },
   aiSearchConfigs: {
     list() { return client.get('/ai-search-configs/') },
     create(data) { return client.post('/ai-search-configs/', data) },

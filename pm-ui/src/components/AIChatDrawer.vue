@@ -12,10 +12,22 @@
         <select v-if="currentProviderModels.length > 1" v-model="model" :disabled="loading" aria-label="モデル" class="model-select" :title="modelLabel">
           <option v-for="item in currentProviderModels" :key="item.id" :value="item.id">{{ item.label }}</option>
         </select>
+        <button type="button" title="会話履歴" :class="{ active: historyOpen }" @click="toggleHistory">🕘</button>
         <button type="button" title="新しい会話" :disabled="loading" @click="clearChat">＋</button>
         <button type="button" title="閉じる" @click="closeAIDrawer">×</button>
       </div>
     </header>
+
+    <div v-if="historyOpen" class="drawer-history">
+      <div v-if="!historyList.length" class="drawer-history-empty">まだ会話履歴がありません。</div>
+      <div v-for="item in historyList" :key="item.id" class="drawer-history-item" :class="{ active: item.id === conversationId }" @click="openConversation(item.id)">
+        <div>
+          <strong>{{ item.title || '無題の会話' }}</strong>
+          <small>{{ formatRelativeTime(item.updated_at) }}</small>
+        </div>
+        <button type="button" title="削除" @click.stop="deleteConversation(item.id)">×</button>
+      </div>
+    </div>
 
     <div ref="conversation" class="drawer-conversation">
       <div v-if="messages.length === 0" class="drawer-welcome">
@@ -62,6 +74,9 @@ const conversation = ref(null)
 const attachmentInput = ref(null)
 const attachedFile = ref(null)
 const selectedDocument = ref(null)
+const conversationId = ref(null)
+const historyList = ref([])
+const historyOpen = ref(false)
 const availableProviders = ref([
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'deepseek', label: 'DeepSeek' },
@@ -96,7 +111,76 @@ const clearChat = () => {
   messages.value = []
   draft.value = ''
   error.value = ''
+  conversationId.value = null
   clearAttachment()
+}
+
+const formatRelativeTime = (value) => {
+  if (!value) return ''
+  const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000)
+  if (minutes < 1) return 'たった今'
+  if (minutes < 60) return `${minutes}分前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}時間前`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}日前`
+  return new Date(value).toLocaleDateString('ja-JP')
+}
+
+const loadHistory = async () => {
+  try {
+    const { data } = await api.aiConversations.list()
+    historyList.value = data.results || data
+  } catch {
+    historyList.value = []
+  }
+}
+
+const toggleHistory = () => {
+  historyOpen.value = !historyOpen.value
+  if (historyOpen.value) void loadHistory()
+}
+
+const saveConversation = async () => {
+  try {
+    const payload = { screen_context: aiDrawerSourcePath.value, provider: provider.value, messages: messages.value }
+    if (conversationId.value) {
+      await api.aiConversations.update(conversationId.value, payload)
+    } else {
+      const { data } = await api.aiConversations.create(payload)
+      conversationId.value = data.id
+    }
+    if (historyOpen.value) await loadHistory()
+  } catch {
+    // 会話の保存に失敗しても、その場のチャット表示は継続する。
+  }
+}
+
+const openConversation = async (id) => {
+  if (loading.value) return
+  try {
+    const { data } = await api.aiConversations.get(id)
+    messages.value = data.messages || []
+    conversationId.value = data.id
+    if (data.provider && availableProviders.value.some((item) => item.value === data.provider)) provider.value = data.provider
+    error.value = ''
+    clearAttachment()
+    historyOpen.value = false
+    await scrollToBottom()
+  } catch {
+    error.value = '会話を読み込めませんでした。'
+  }
+}
+
+const deleteConversation = async (id) => {
+  if (!window.confirm('この会話を削除しますか？')) return
+  try {
+    await api.aiConversations.delete(id)
+    historyList.value = historyList.value.filter((item) => item.id !== id)
+    if (conversationId.value === id) clearChat()
+  } catch {
+    error.value = '会話を削除できませんでした。'
+  }
 }
 
 const selectAttachment = (event) => {
@@ -169,6 +253,7 @@ const send = async () => {
     messages.value.push({
       role: 'assistant', content: data.answer, source: data.source, period: data.period,
     })
+    await saveConversation()
   } catch (requestError) {
     error.value = requestError.response?.data?.detail || '社内AIから応答を取得できませんでした。'
   } finally {
@@ -193,5 +278,5 @@ onMounted(loadProviderSettings)
 </script>
 
 <style scoped>
-.ai-drawer{position:fixed;top:74px;right:0;bottom:0;z-index:900;width:min(430px,100vw);display:flex;flex-direction:column;background:#fff;border-left:1px solid #cfe0dc;box-shadow:-8px 0 24px rgba(24,62,57,.16);color:#27454a}.drawer-header{min-height:58px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 10px;padding:9px 12px;border-bottom:1px solid #e2ece9;background:#f5fbf9}.drawer-header strong,.drawer-header small{display:block}.drawer-header strong{font-size:14px;color:#087b6e}.drawer-header small{margin-top:3px;font-size:10px;color:#71878b}.drawer-actions{display:flex;flex-wrap:wrap;align-items:center;gap:5px}.drawer-actions select,.drawer-actions button{height:29px;border:1px solid #d1e2dd;border-radius:6px;background:#fff;color:#466169;font-size:11px}.drawer-actions select{max-width:104px;padding:0 5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drawer-actions select.model-select{max-width:150px}.drawer-actions button{width:29px;cursor:pointer;flex:0 0 29px}.drawer-actions button:disabled{opacity:.5;cursor:default}.drawer-conversation{flex:1;overflow:auto;padding:14px 13px;background:#fbfdfc}.drawer-welcome{margin:18px 2px;color:#547177}.drawer-welcome strong{font-size:13px}.drawer-welcome p{font-size:11px;line-height:1.7}.drawer-message{display:grid;gap:4px;margin:0 0 14px;max-width:92%}.drawer-message.user{margin-left:auto;justify-items:end}.drawer-message small{font-size:9px;color:#82969a}.drawer-message p{white-space:pre-wrap;line-height:1.65;margin:0;padding:8px 10px;border-radius:9px;background:#fff;border:1px solid #e3ece9;font-size:12px}.drawer-message.user p{background:#e7f4f0;border-color:#d6ebe5}.drawer-message em{font-style:normal;font-size:9px;color:#789196}.drawer-loading,.drawer-error{font-size:11px;padding:9px;border-radius:7px}.drawer-loading{color:#438b7c;background:#edf8f5}.drawer-error{color:#a06d43;background:#fff7ef;border:1px solid #f1dcc8}.drawer-composer{display:flex;flex-wrap:wrap;gap:7px;padding:10px;border-top:1px solid #e2ece9;background:#fff}.drawer-composer textarea{flex:1;min-width:0;resize:none;border:1px solid #cfdfdb;border-radius:8px;padding:7px;font:inherit;font-size:12px;outline:none}.drawer-composer textarea:focus{border-color:#56aa99}.drawer-composer button{width:34px;border:0;border-radius:8px;background:#087b6e;color:white;font-size:18px}.drawer-composer button:disabled{background:#cbdad7}.attachment-input{display:none}.attachment-button{flex:0 0 34px}.attachment-state{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;padding:4px 7px;border-radius:5px;background:#edf8f5;color:#28796c;font-size:10px}.attachment-state span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attachment-state button{width:20px;height:20px;font-size:13px;background:transparent;color:#28796c}@media(max-width:768px){.ai-drawer{top:0;width:100%;z-index:1100}}
+.ai-drawer{position:fixed;top:74px;right:0;bottom:0;z-index:900;width:min(430px,100vw);display:flex;flex-direction:column;background:#fff;border-left:1px solid #cfe0dc;box-shadow:-8px 0 24px rgba(24,62,57,.16);color:#27454a}.drawer-header{min-height:58px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 10px;padding:9px 12px;border-bottom:1px solid #e2ece9;background:#f5fbf9}.drawer-header strong,.drawer-header small{display:block}.drawer-header strong{font-size:14px;color:#087b6e}.drawer-header small{margin-top:3px;font-size:10px;color:#71878b}.drawer-actions{display:flex;flex-wrap:wrap;align-items:center;gap:5px}.drawer-actions select,.drawer-actions button{height:29px;border:1px solid #d1e2dd;border-radius:6px;background:#fff;color:#466169;font-size:11px}.drawer-actions select{max-width:104px;padding:0 5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drawer-actions select.model-select{max-width:150px}.drawer-actions button{width:29px;cursor:pointer;flex:0 0 29px}.drawer-actions button:disabled{opacity:.5;cursor:default}.drawer-actions button.active{background:#e7f4f0;border-color:#9ccfc2}.drawer-history{flex:none;max-height:45%;overflow:auto;padding:6px;border-bottom:1px solid #e2ece9;background:#fff}.drawer-history-empty{padding:12px;font-size:11px;color:#82969a;text-align:center}.drawer-history-item{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:6px;cursor:pointer}.drawer-history-item:hover{background:#f5fbf9}.drawer-history-item.active{background:#e7f4f0}.drawer-history-item>div{min-width:0;flex:1;display:grid;gap:2px}.drawer-history-item strong{font-size:11px;color:#27454a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.drawer-history-item small{font-size:9px;color:#82969a}.drawer-history-item button{flex:none;width:20px;height:20px;border:0;border-radius:5px;background:transparent;color:#a9b8bb;font-size:13px;cursor:pointer}.drawer-history-item button:hover{background:#fdeceb;color:#c0564a}.drawer-conversation{flex:1;overflow:auto;padding:14px 13px;background:#fbfdfc}.drawer-welcome{margin:18px 2px;color:#547177}.drawer-welcome strong{font-size:13px}.drawer-welcome p{font-size:11px;line-height:1.7}.drawer-message{display:grid;gap:4px;margin:0 0 14px;max-width:92%}.drawer-message.user{margin-left:auto;justify-items:end}.drawer-message small{font-size:9px;color:#82969a}.drawer-message p{white-space:pre-wrap;line-height:1.65;margin:0;padding:8px 10px;border-radius:9px;background:#fff;border:1px solid #e3ece9;font-size:12px}.drawer-message.user p{background:#e7f4f0;border-color:#d6ebe5}.drawer-message em{font-style:normal;font-size:9px;color:#789196}.drawer-loading,.drawer-error{font-size:11px;padding:9px;border-radius:7px}.drawer-loading{color:#438b7c;background:#edf8f5}.drawer-error{color:#a06d43;background:#fff7ef;border:1px solid #f1dcc8}.drawer-composer{display:flex;flex-wrap:wrap;gap:7px;padding:10px;border-top:1px solid #e2ece9;background:#fff}.drawer-composer textarea{flex:1;min-width:0;resize:none;border:1px solid #cfdfdb;border-radius:8px;padding:7px;font:inherit;font-size:12px;outline:none}.drawer-composer textarea:focus{border-color:#56aa99}.drawer-composer button{width:34px;border:0;border-radius:8px;background:#087b6e;color:white;font-size:18px}.drawer-composer button:disabled{background:#cbdad7}.attachment-input{display:none}.attachment-button{flex:0 0 34px}.attachment-state{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;padding:4px 7px;border-radius:5px;background:#edf8f5;color:#28796c;font-size:10px}.attachment-state span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attachment-state button{width:20px;height:20px;font-size:13px;background:transparent;color:#28796c}@media(max-width:768px){.ai-drawer{top:0;width:100%;z-index:1100}}
 </style>
