@@ -89,6 +89,21 @@
     </section>
 
     <section class="setting-section">
+      <h3>画像文字認識（OCR）</h3>
+      <p class="section-help">AIアプリが画像資料を検索するための文字認識です。Tesseractのコンソール操作は不要です。テスト画像は保存せず、認識結果だけを表示します。</p>
+      <div class="ocr-status" :class="{ unavailable: ocrStatus && !ocrStatus.available }">
+        <strong>{{ ocrStatus?.available ? '利用可能' : '確認中・利用不可' }}</strong>
+        <span>{{ ocrStatus?.message || 'OCRの状態を確認しています。' }}</span>
+        <small v-if="ocrStatus?.languages?.length">言語データ: {{ ocrStatus.languages.join(', ') }}</small>
+      </div>
+      <div v-if="canEdit" class="knowledge-upload">
+        <input ref="ocrFileInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp" @change="selectOcrFile" />
+        <button class="reload-button" :disabled="!ocrTestFile || ocrTesting" @click="runOcrTest">{{ ocrTesting ? '文字認識中…' : 'OCRテスト' }}</button>
+      </div>
+      <p v-if="ocrTestResult" class="ocr-result"><strong>{{ ocrTestResult.file_name }}（{{ ocrTestResult.character_count }}文字）</strong><br />{{ ocrTestResult.text || '文字を認識できませんでした。画像を大きく・鮮明にしてお試しください。' }}</p>
+    </section>
+
+    <section class="setting-section">
       <h3>AI用DB辞書（読み取りSQL）</h3>
       <p class="section-help">ここに表示されたテーブル・列だけをLLMがSELECTで参照できます。「個人情報列」は権限を持つ利用者だけに公開され、DeepSeekへは一時IDに置き換えて送信します。</p>
       <details v-for="screen in sqlDictionary" :key="screen.screen_id" class="dictionary-screen">
@@ -116,6 +131,11 @@ const knowledgeSources = ref([])
 const knowledgeDocuments = ref([])
 const knowledgeFileInput = ref(null)
 const knowledgeUpload = ref({ category: 'manual', name: '', file: null })
+const ocrStatus = ref(null)
+const ocrFileInput = ref(null)
+const ocrTestFile = ref(null)
+const ocrTestResult = ref(null)
+const ocrTesting = ref(false)
 const sqlDictionary = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -138,8 +158,8 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse] = await Promise.all([
-      api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(),
+    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse] = await Promise.all([
+      api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(), api.ocr.status(),
     ])
     providers.value = providerResponse.data
     tools.value = toolResponse.data
@@ -147,6 +167,7 @@ const load = async () => {
     knowledgeSources.value = knowledgeResponse.data
     knowledgeDocuments.value = documentResponse.data
     sqlDictionary.value = dictionaryResponse.data
+    ocrStatus.value = ocrResponse.data.tesseract
   } catch (requestError) {
     failed(requestError)
   } finally {
@@ -167,6 +188,17 @@ const saveKnowledge = async (item) => {
   try { await api.aiSettings.updateKnowledgeSource(item.id, { is_enabled: item.is_enabled }); saved('ナレッジ設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
 }
 const selectKnowledgeFile = (event) => { knowledgeUpload.value.file = event.target.files?.[0] || null }
+const selectOcrFile = (event) => { ocrTestFile.value = event.target.files?.[0] || null; ocrTestResult.value = null }
+const runOcrTest = async () => {
+  const form = new FormData()
+  form.append('image', ocrTestFile.value)
+  ocrTesting.value = true
+  try {
+    const { data } = await api.ocr.recognize(form)
+    ocrTestResult.value = data
+    saved(data.message)
+  } catch (requestError) { failed(requestError) } finally { ocrTesting.value = false }
+}
 const uploadKnowledge = async () => {
   const form = new FormData()
   form.append('category', knowledgeUpload.value.category)
@@ -193,4 +225,5 @@ load()
 <style scoped>
 .ai-settings{max-width:1180px;padding:14px 16px;margin:0 auto;color:#334155}.page-header{display:flex;justify-content:space-between;align-items:start;gap:16px}.page-header h2{margin:0;font-size:19px}.page-header p,.section-help,.policy-grid p{margin:5px 0 0;font-size:12px;line-height:1.6;color:#64748b}.reload-button{border:1px solid #93bfb5;background:#fff;color:#147a6d;border-radius:6px;padding:5px 11px;cursor:pointer}.setting-section{margin-top:15px;padding:13px;border:1px solid #dce8e5;border-radius:10px;background:#fff}.setting-section h3{margin:0 0 9px;font-size:14px;color:#176b60}.provider-grid,.policy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.setting-card,.policy-grid{padding:10px;border-radius:7px;background:#f7fbfa}.card-title,.tool-row,.knowledge-row{display:flex;align-items:center;justify-content:space-between;gap:10px}.setting-card label{display:grid;gap:4px;margin-top:7px;font-size:11px}.setting-card select,.policy-grid input[type=number]{border:1px solid #cdded9;border-radius:5px;padding:5px;background:white}.setting-card small,.tool-row small,.knowledge-row small{display:block;margin-top:3px;font-size:10px;color:#73878a}.check-line{font-size:12px}.tool-group{margin-top:10px}.tool-group h4{margin:0;padding:6px 8px;background:#eef7f5;font-size:12px}.tool-list,.knowledge-list{border:1px solid #e1ece9}.tool-row,.knowledge-row{padding:7px 9px;border-bottom:1px solid #e8efed;font-size:12px}.tool-row:last-child,.knowledge-row:last-child{border-bottom:0}.tool-actions{display:flex;gap:10px;font-size:11px;white-space:nowrap}.dictionary-screen{margin-top:6px;border:1px solid #e1ece9;border-radius:6px;padding:7px;font-size:12px}.dictionary-screen summary{cursor:pointer;font-weight:700;color:#356c66}.dictionary-table{display:grid;gap:2px;padding:7px 3px;border-top:1px solid #edf2f1}.dictionary-table:first-of-type{margin-top:7px}.dictionary-table small{font-family:Consolas,monospace;font-size:10px;color:#687d81;word-break:break-all}.disabled{opacity:.48}.notice,.error{margin:9px 0;padding:7px 10px;border-radius:6px;font-size:12px}.notice{background:#e9f8f1;color:#237765}.error{background:#fff1ee;color:#ae5146}@media(max-width:760px){.provider-grid,.policy-grid{grid-template-columns:1fr}.tool-row{align-items:start;flex-direction:column}.tool-actions{width:100%;justify-content:space-between}}
 .knowledge-actions,.knowledge-upload{display:flex;gap:10px;font-size:11px;white-space:nowrap}.knowledge-upload{margin-top:10px;align-items:center;flex-wrap:wrap}.knowledge-upload select,.knowledge-upload input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff}.delete-button{border:1px solid #f0b7ae;background:#fff;color:#b04c40;border-radius:5px;padding:3px 7px;cursor:pointer}
+.ocr-status{display:grid;gap:3px;margin-top:9px;padding:8px 10px;border:1px solid #b8ded3;border-radius:7px;background:#eef9f5;font-size:12px;color:#176b60}.ocr-status small{color:#5c7772}.ocr-status.unavailable{border-color:#efc7bd;background:#fff4f1;color:#ad5548}.ocr-result{white-space:pre-wrap;max-height:260px;overflow:auto;margin:10px 0 0;padding:9px;border:1px solid #e1ece9;border-radius:7px;background:#f8fbfa;font-size:12px;line-height:1.6}
 </style>

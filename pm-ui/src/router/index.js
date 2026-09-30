@@ -17,6 +17,7 @@ import outsource from "./outsource";
 import shifts from "./shifts";
 import consumables from "./consumables";
 import ai from "./ai";
+import ocr from "./ocr";
 import Login from "../views/auth/Login.vue";
 import { ensureAuth } from "../auth";
 
@@ -57,6 +58,7 @@ const router = createRouter({
     ...shifts,
     ...consumables,
     ...ai,
+    ...ocr,
     ...manual,
   ],
 });

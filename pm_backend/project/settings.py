@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_filters',
     'ai',
+    'ocr',
     'masters',
     'orders',
     'production',

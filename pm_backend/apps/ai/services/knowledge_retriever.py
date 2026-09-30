@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import re
 import csv
-import os
-import subprocess
 from functools import lru_cache
 from pathlib import Path
 
 from ai.config.models import AIKnowledgeDocument, AIKnowledgeSource
+from ocr.services import IMAGE_SUFFIXES, extract_image_text
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -20,11 +19,6 @@ MANUAL_ROOT = PROJECT_ROOT / 'pm-ui' / 'public' / 'manual'
 SPEC_ROOT = PROJECT_ROOT / '仕様書'
 LOCAL_KNOWLEDGE_ROOT = PROJECT_ROOT / 'pm_backend' / 'apps' / 'ai' / 'knowledge'
 MAX_CHUNK_CHARS = 1400
-OCR_EXECUTABLE = os.environ.get('OCR_TESSERACT_PATH', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
-OCR_TESSDATA_DIR = os.environ.get(
-    'OCR_TESSDATA_DIR', str(PROJECT_ROOT / 'pm_backend' / 'ocr_data'),
-)
-IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
 SCREEN_KEYWORDS = {
     'orders': ('受注', '注文', 'ルーティング'),
     'production': ('生産', '工程', '実績', '作業'),
@@ -185,23 +179,7 @@ def _extract_text(path):
 
 
 def _extract_image_text(path):
-    """ローカルTesseractで画像内の日本語・英数字をOCRする。画像は外部へ送信しない。"""
-    executable = Path(OCR_EXECUTABLE)
-    tessdata_dir = Path(OCR_TESSDATA_DIR)
-    if not executable.exists() or not tessdata_dir.exists():
-        return ''
-    result = subprocess.run(
-        [
-            str(executable), str(path), 'stdout', '-l', 'jpn+eng',
-            '--tessdata-dir', str(tessdata_dir), '--psm', '6',
-        ],
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        timeout=30,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ''
+    return extract_image_text(path)
 
 
 @lru_cache(maxsize=1024)

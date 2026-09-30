@@ -18,17 +18,7 @@
     <div class="global-nav-center">
       <div class="nav-tabs">
         <template v-for="tab in displayTabs" :key="tab.id">
-          <button
-            v-if="tab.id === 'ai'"
-            type="button"
-            class="nav-tab nav-tab-button"
-            :class="{ active: isActiveTab(tab.id) }"
-            @click="openAiChat"
-          >
-            {{ tab.label }}
-          </button>
           <RouterLink
-            v-else
             :to="tab.link"
             class="nav-tab"
             :class="{ active: isActiveTab(tab.id) }"
@@ -221,7 +211,7 @@ import { hasPermission } from '../router'
 import api from '@/api/client'
 import { locale, t, setLocale, getLocaleOptions } from '@/i18n'
 import { syncNativePushRegistration } from '@/nativePush'
-import { aiDrawerOpen, openAIDrawer } from '@/composables/aiDrawer'
+import { aiDrawerOpen } from '@/composables/aiDrawer'
 
 const props = defineProps({
   isMobile: {
@@ -249,12 +239,9 @@ const goBack = () => {
   window.history.back()
 }
 
-const openAiChat = () => {
-  openAIDrawer(route.fullPath)
-}
-
 const mainTabs = computed(() => [
   { id: 'ai', label: 'AI', link: '/ai/chat', resource: 'ai' },
+  { id: 'ocr', label: 'OCR', link: '/ocr', resource: 'ai' },
   { id: 'orders', label: t('nav.tabs.orders'), link: '/orders/menu', resource: 'orders' },
   { id: 'production', label: t('nav.tabs.production'), link: '/production/menu', resource: 'production' },
   { id: 'purchase', label: t('nav.tabs.purchase'), link: '/purchase/menu', resource: 'purchase' },
@@ -309,6 +296,7 @@ const isActiveTab = (tabId) => {
   if (tabId === 'consumables' && path.startsWith('/consumables')) return true
   if (tabId === 'quality' && path.startsWith('/quality')) return true
   if (tabId === 'ai' && (path.startsWith('/ai') || aiDrawerOpen.value)) return true
+  if (tabId === 'ocr' && path.startsWith('/ocr')) return true
   if (tabId === 'notifications' && path.startsWith('/notifications')) return true
   if (tabId === 'engineeringChange' && path.startsWith('/engineering-change')) return true
   if (tabId === 'overtime' && path.startsWith('/overtime')) return true
