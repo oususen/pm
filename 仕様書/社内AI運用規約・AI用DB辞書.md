@@ -162,6 +162,18 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 - 仕入先名（`m_supplier.supplier_name`）は外部AIへ送る直前に一時ID（仕入先N）へ伏字化される。連絡先の列は従来どおり個人情報扱い。
 - 仕入計画・入荷予定（`LineBacklog` の購買・外作ライン）と、在庫/残量・仕入れ進度（専用計算）はまだ対象外。
 
+### 6.5-3 出荷（出荷実績）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_shipment`（`ai/0014`で作成） | `id`, `shipment_date`, `product_code`, `product_id`, `product_name`, `customer_code`, `ship_to_code`, `quantity`, `trip_allocation_id`, `remark_text` | `t_shipment_actual` 全行。製品は品番コードで `m_product` と結ぶ（`t_shipment_actual.product_id` は全行NULLのため） | 出荷画面・本社横断から読み取り専用SQLで、品番別・納入場別・日別の出荷数を集計する |
+
+- 出荷数量は `quantity`、出荷日は `shipment_date`。日別・期間集計は `shipment_date` を使う。
+- `customer_code`（得意先コード）・`ship_to_code`（納入場コード）はコードであり個人情報ではないため、全利用者に公開する。受注側（`m_customer.customer_code`・`t_order_line.ship_to_code`）も同じ扱いに変更した（得意先名・`customer_id` は従来どおり個人情報区分）。備考は列名 `remark` が個人情報の伏字化対象のため、ビューでは `remark_text` とする。
+- `trip_allocation_id`（出荷便割付ID。なければNULL）と `remark_text`（システムが書く便の割付情報。例: `[TRIP_ACTUAL]54:576|PD=2026-07-22:42`）もAIへ渡す。`remark_text` は業務メモではない。
+- 2026-10-01時点の開発DBでは488行すべてがクボタ（得意先コード000196）向け。本番の内容は未確認のため、TABLE_NOTES の「現在はクボタ向けのみ」は本番確認後に見直す。
+- 出荷計画・便の進捗と、在庫・進度はまだ対象外。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | 主な項目 | 有効条件 | AI利用 |

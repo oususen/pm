@@ -21,13 +21,19 @@ BASE_SQL_SCHEMA = {
     't_scrap_record': ('id', 'line_id', 'process_id', 'occurrence_process_id', 'product_id', 'product_code', 'product_name', 'event_type', 'qty', 'recorded_at', 'plan_date', 'disposition_status', 'return_qty', 'reason'),
     't_overtime_application': ('id', 'work_date', 'application_type', 'hours', 'midnight_hours', 'team_id', 'status'),
     't_order': ('id', 'order_type', 'order_date', 'freeze_from', 'status'),
-    't_order_line': ('id', 'order_id', 'product_id', 'product_code', 'order_type', 'quantity', 'actual_shipment_qty', 'due_date', 'is_expanded'),
+    't_order_line': ('id', 'order_id', 'product_id', 'product_code', 'order_type', 'quantity', 'actual_shipment_qty', 'due_date', 'is_expanded', 'ship_to_code'),
     'm_routing': ('id', 'product_id', 'is_active'),
     # 仕入先名は外部AIへ送る直前に一時ID(仕入先N)へ伏字化される。連絡先の列は個人情報側だけで扱う。
+    # 得意先コード・納入場コードはコードであり個人情報ではないため全利用者に公開する(得意先名は個人情報側)。
+    'm_customer': ('id', 'customer_code'),
     'm_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type'),
     'v_ai_purchase_receipt': (
         'id', 'arrival_date', 'registered_at', 'supplier_id', 'line_id',
         'product_id', 'product_code', 'product_name', 'qty', 'process_id', 'input_source',
+    ),
+    'v_ai_shipment': (
+        'id', 'shipment_date', 'product_code', 'product_id', 'product_name',
+        'customer_code', 'ship_to_code', 'quantity', 'trip_allocation_id', 'remark_text',
     ),
 }
 
@@ -45,6 +51,12 @@ TABLE_NOTES = {
         '日別・期間の集計は必ず arrival_date を使う。supplier_id は m_supplier.id、line_id は m_line.id、product_id は m_product.id。'
         'input_source は登録元(PURCHASE_ACTUAL_INPUT=実績入力、PURCHASE_RECEIVING=検収、PURCHASE_RECEIVING_MOBILE=スマホ検収)。'
     ),
+    'v_ai_shipment': (
+        '出荷実績(t_shipment_actual)のビュー。1行=1回の出荷実績登録。出荷数は quantity、出荷日は shipment_date。'
+        '日別・期間の集計は shipment_date を使う。customer_code は得意先コード、ship_to_code は納入場コード。'
+        'trip_allocation_id は出荷便割付のID(なければNULL)、remark_text はシステムが書く便の割付情報(例: [TRIP_ACTUAL]54:576|PD=2026-07-22:42)で業務メモではない。'
+        '現在はクボタ(得意先コード000196)向けの出荷だけが登録されている。'
+    ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
         '生産数は operator_action が END(終了) と PAUSE(中断) の qty 合計(作業区間ごとの加工数で重複しない)。'
@@ -56,13 +68,13 @@ TABLE_NOTES = {
 
 # 個人情報を扱う権限を持つ利用者だけに追加公開する列。DeepSeekへは一時IDへ伏字化して渡す。
 PERSONAL_SQL_COLUMNS = {
-    'm_customer': ('id', 'customer_code', 'customer_name', 'short_name', 'is_active'),
+    'm_customer': ('id', 'customer_name', 'short_name', 'is_active'),
     'm_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type', 'contact_person', 'phone_number', 'order_email'),
     't_process_realtime_record': ('operator_name', 'batch_no', 'remarks'),
     'brake_line_record': ('operator',),
     't_scrap_record': ('decided_by', 'reason_detail', 'batch_no', 'operator_name', 'remarks'),
     't_order': ('customer_id', 'order_no'),
-    't_order_line': ('customer_order_no', 'ship_to_code', 'remark'),
+    't_order_line': ('customer_order_no', 'remark'),
 }
 
 SCREEN_SQL_TABLES = {
@@ -72,7 +84,7 @@ SCREEN_SQL_TABLES = {
     'quality': frozenset({'m_product', 'm_line', 'm_process', 't_scrap_record'}),
     'overtime': frozenset({'t_overtime_application'}),
     'purchase': frozenset({'m_supplier', 'm_product', 'm_line', 'm_calendar_day', 'v_ai_purchase_receipt'}),
-    'shipping': frozenset(),
+    'shipping': frozenset({'m_product', 'm_calendar_day', 'v_ai_shipment'}),
     'inventory': frozenset(),
 }
 

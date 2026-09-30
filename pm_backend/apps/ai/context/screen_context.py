@@ -42,7 +42,8 @@ SCREEN_CONTEXTS = (
         'allowed_tools': frozenset({'execute_readonly_sql'}), 'allowed_intents': frozenset(),
     }),
     ('/shipping/', {
-        'id': 'shipping', 'label': '出荷', 'coverage': '', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
+        'id': 'shipping', 'label': '出荷', 'coverage': '出荷実績(品番別・納入場別・日別、現在はクボタ向けのみ)',
+        'allowed_tools': frozenset({'execute_readonly_sql'}), 'allowed_intents': frozenset(),
     }),
     ('/inventory/', {
         'id': 'inventory', 'label': '在庫', 'coverage': '', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
