@@ -897,6 +897,33 @@ def _deepseek_agent_chat(
                 f'この回答には「{sent_pages + 1}ページ以降はまだ確認していません」と必ず明記してください。'
                 '未確認ページの内容を推測・要約してはいけません。\n'
             )
+    # 個人別残業のツールは権限がある利用者にだけ提示される。権限がない利用者へ使い方を教えると、
+    # 提示されていないツールを呼ぼうとして、呼び出しの文字列がそのまま回答に出るため、手順は権限がある場合だけ渡す。
+    if allow_personal_overtime:
+        personal_overtime_instruction = (
+            '個人別残業は、search_employee・get_individual_overtime・get_personal_overtime_threshold が利用可能な場合だけ使用してください。'
+            '注意: 個人名は外部送信前に「作業者1」の形式の識別子に変換されています。これは氏名として'
+            'そのまま検索・集計に使える文字列です。質問文に「作業者12」のような表記があれば、'
+            'それをsearch_employeeやget_individual_overtimeのemployee_name引数へそのまま渡し、'
+            '通常の氏名の質問と同じ手順で処理してください。\n'
+            '指定した一人の合計を聞かれたら、氏名(一時IDを含む)が姓だけ・曖昧でも必ず最初にsearch_employeeで検索し、'
+            '候補が1件でも「○○さんですか？」のように利用者に確認してから get_individual_overtime を呼んでください。'
+            '複数候補がある場合は候補を提示し、利用者が選んだ氏名だけを使ってください。AIが候補を勝手に確定してはいけません。'
+            '重要: 氏名はsearch_employeeまたはget_individual_overtimeの結果に実際に含まれる文字列だけを使ってください。'
+            'ツールを呼ばずに氏名を記憶・推測・生成することは重大な誤りです。ツールを呼んでいないのに'
+            '「検索したところ」「見つかりました」のように述べてはいけません。'
+            'しきい値超過者の抽出を聞かれたら get_personal_overtime_threshold を選んでください。'
+            'get_individual_overtime の結果を使うときは、必ず最初に合計時間(total_hours)と件数(total_records)を明示し、'
+            'その後に時間外・休日出勤などの内訳(items)を説明してください。合計を省略してはいけません。'
+            'get_individual_overtime の show_total_bar は、利用者が「合計グラフ」のように合計を含むグラフを'
+            '求めているかどうかをあなたが判断して指定してください。合計の数値はPM側が実データから計算するので、'
+            'あなたが数値を作る必要はありません。'
+            '結果に含まれる氏名・一時ID以外の個人情報を推測してはいけません。\n'
+        )
+    else:
+        personal_overtime_instruction = (
+            '個人別の残業は、この利用者には権限がないため答えられません。個人名での残業の質問には、そのことを伝え、ツールは呼ばないでください。\n'
+        )
     messages = [{
         'role': 'system',
         'content': (
@@ -916,24 +943,7 @@ def _deepseek_agent_chat(
             '件数を確認してください。用語がどの項目に対応するか自分で判断できない場合は、推測せず'
             '確認した内訳を提示して利用者に確認してください。\n'
             '生産数・仕損・中断・残業の数値を答えるときは、必ずget_business_dataを呼び、ツール結果にない数値を作らないでください。\n'
-            '個人別残業は、search_employee・get_individual_overtime・get_personal_overtime_threshold が利用可能な場合だけ使用してください。'
-            '注意: 個人名は外部送信前に「作業者1」の形式の識別子に変換されています。これは氏名として'
-            'そのまま検索・集計に使える文字列です。質問文に「作業者12」のような表記があれば、'
-            'それをsearch_employeeやget_individual_overtimeのemployee_name引数へそのまま渡し、'
-            '通常の氏名の質問と同じ手順で処理してください。\n'
-            '指定した一人の合計を聞かれたら、氏名(一時IDを含む)が姓だけ・曖昧でも必ず最初にsearch_employeeで検索し、'
-            '候補が1件でも「○○さんですか？」のように利用者に確認してから get_individual_overtime を呼んでください。'
-            '複数候補がある場合は候補を提示し、利用者が選んだ氏名だけを使ってください。AIが候補を勝手に確定してはいけません。'
-            '重要: 氏名はsearch_employeeまたはget_individual_overtimeの結果に実際に含まれる文字列だけを使ってください。'
-            'ツールを呼ばずに氏名を記憶・推測・生成することは重大な誤りです。ツールを呼んでいないのに'
-            '「検索したところ」「見つかりました」のように述べてはいけません。'
-            'しきい値超過者の抽出を聞かれたら get_personal_overtime_threshold を選んでください。'
-            'get_individual_overtime の結果を使うときは、必ず最初に合計時間(total_hours)と件数(total_records)を明示し、'
-            'その後に時間外・休日出勤などの内訳(items)を説明してください。合計を省略してはいけません。'
-            'get_individual_overtime の show_total_bar は、利用者が「合計グラフ」のように合計を含むグラフを'
-            '求めているかどうかをあなたが判断して指定してください。合計の数値はPM側が実データから計算するので、'
-            'あなたが数値を作る必要はありません。'
-            '結果に含まれる氏名・一時ID以外の個人情報を推測してはいけません。\n'
+            + personal_overtime_instruction +
             'tool結果のsourceは画面へ根拠として表示されます。回答では結論を先に短く伝え、必要なら日別傾向を説明してください。\n'
             'グラフはツールを呼んだ回だけ画面側に自動描画されます。ツールを呼ばずに記憶だけで答えた回には'
             'グラフは出ません。「グラフをください」と言われて記憶だけで答える場合は、'
@@ -1112,6 +1122,21 @@ def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, incl
     if provider == 'deepseek':
         return _deepseek_chat(messages, json_mode, num_predict, timeout, include_metadata, model, redactor)
     return _ollama_chat(messages, json_mode, num_predict, timeout, include_metadata)
+
+
+_QWEN_EXCEL_REQUEST_PATTERN = re.compile(r'(?:Excel|excel|エクセル|表|一覧|リスト).*(?:で|に)?(?:出(?:して|力)|表示|作(?:って|成))')
+_MARKDOWN_TABLE_PATTERN = re.compile(
+    r'^\s*\|.*\|\s*\n\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?\s*$',
+    re.MULTILINE,
+)
+
+
+def _qwen_excel_export_requested(question, answer):
+    """Qwenが表形式で回答し、利用者が表・Excel出力を求めたときだけダウンロードを有効にする。"""
+    return bool(
+        _QWEN_EXCEL_REQUEST_PATTERN.search(str(question or ''))
+        and _MARKDOWN_TABLE_PATTERN.search(str(answer or ''))
+    )
 
 
 def _product_code_candidates(question, history):
@@ -1919,6 +1944,7 @@ class AIChatAPIView(APIView):
                 '- 明確な質問にはすぐ行動してください。何度も聞き返さないこと。\n'
                 '- 不明確な場合は1回だけ簡潔に聞き返してください。選択肢は最大3つ。\n'
                 '- 対応できない質問には「現在この機能は対応していません」と短く伝えてください。\n'
+                '- 利用者が表・一覧・Excelでの出力を求めた場合は、回答に必ずMarkdownの表（`| 列名 | 列名 |`形式）を書いてください。\n'
                 '日本語で簡潔に回答してください。'
                 + retrieved_knowledge
             ),
@@ -1943,6 +1969,7 @@ class AIChatAPIView(APIView):
                 'DeepSeek APIとの会話' if provider == 'deepseek' else 'ローカルQwenの会話', knowledge_source,
             ) if item),
             'chart': None,
+            'excel_export': provider == 'qwen' and _qwen_excel_export_requested(question, answer),
             'provider': provider,
             'model': inference['model'],
             'inference': inference,
@@ -2026,6 +2053,7 @@ class AIChatAPIView(APIView):
                         '- 無関係なデータを流用して回答を作らないでください。\n'
                         '- 不明確な場合は1回だけ簡潔に聞き返してください。何度も聞き返さないこと。\n'
                         '- サプライヤー名・作業者名・製品名など特定できない情報がある場合は、コードや正式名称を尋ねてください。\n'
+                        '- 利用者が表・一覧・Excelでの出力を求めた場合は、回答に必ずMarkdownの表（`| 列名 | 列名 |`形式）を書いてください。\n'
                         f'対象期間: {start.isoformat()} ～ {end.isoformat()}'
                         + retrieved_knowledge
                     ),
@@ -2058,6 +2086,7 @@ class AIChatAPIView(APIView):
             'period': period,
             'chart': chart,
             'document': document,
+            'excel_export': provider == 'qwen' and _qwen_excel_export_requested(question, answer),
             'provider': provider,
             'model': inference['model'],
             'inference': inference,
