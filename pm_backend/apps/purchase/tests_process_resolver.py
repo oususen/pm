@@ -169,6 +169,7 @@ class PurchaseProcessResolverTest(TestCase):
         self.assertEqual(response.status_code, 201)
         record = ProcessRealtimeRecord.objects.get(id=response.data['id'])
         self.assertEqual(record.process_id, self.g_process.id)
+        self.assertEqual(record.record_type, 'PURCHASE')
         backlog = LineBacklog.objects.get(
             line_id=supplier_line.id,
             process_id=self.g_process.id,
@@ -221,6 +222,7 @@ class PurchaseProcessResolverTest(TestCase):
         self.assertEqual(response.data['success_count'], 2)
         self.assertEqual(response.data['error_count'], 0)
         self.assertEqual(ProcessRealtimeRecord.objects.filter(
+            record_type='PURCHASE',
             event_data__source='PURCHASE_ACTUAL_INPUT',
         ).count(), 2)
         mock_progress.assert_called_once()

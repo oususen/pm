@@ -1421,16 +1421,13 @@ def _scrap_facts(start, end, process_name=''):
     }
 
 
-PURCHASE_RECEIPT_SOURCES = ('PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE')
-
-
 def _production_facts(start, end, operator_name='', product_code=''):
-    # 仕入の入荷実績も同じ record_type='PRODUCTION' で保存されるため、生産数からは除外する。
+    # 仕入の入荷実績は record_type='PURCHASE' で保存されるため、生産数には含まれない。
     queryset = ProcessRealtimeRecord.objects.using(AI_DB_ALIAS).filter(
         timestamp__date__gte=start,
         timestamp__date__lte=end,
         record_type='PRODUCTION',
-    ).exclude(event_data__source__in=PURCHASE_RECEIPT_SOURCES)
+    )
     if operator_name:
         queryset = queryset.filter(operator_name__iexact=operator_name)
     if product_code:

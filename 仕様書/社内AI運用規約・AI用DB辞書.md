@@ -122,7 +122,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 | モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
-| `production.ProcessRealtimeRecord` | `timestamp`, `record_type`, `qty`, `line`, `process`, `product`, `product_code`, `operator_name` | 製品、ライン、工程、仕損 | `record_type='PRODUCTION'` の `qty` 合計を生産実績とする。ただし `event_data.source` が `PURCHASE_ACTUAL_INPUT`・`PURCHASE_RECEIVING`・`PURCHASE_RECEIVING_MOBILE` の行は仕入の入荷実績なので除外する（2026年9月は数量の46%が仕入分だった）。品番を質問で指定した場合は `product_code` の完全一致で絞り込む | 日別・工程別・品番別の生産数。作業者別は伏字化利用 |
+| `production.ProcessRealtimeRecord` | `timestamp`, `record_type`, `qty`, `line`, `process`, `product`, `product_code`, `operator_name` | 製品、ライン、工程、仕損 | `record_type='PRODUCTION'` の `qty` 合計を生産実績とする。仕入の入荷実績は `record_type='PURCHASE'` で保存されるため含まれない（区別前の2026年9月は `PRODUCTION` の数量の46%が仕入分だった）。品番を質問で指定した場合は `product_code` の完全一致で絞り込む | 日別・工程別・品番別の生産数。作業者別は伏字化利用 |
 | `production.LaserActual` / `LaserActualDetail`（`t_laser_actual` / `t_laser_actual_detail`） | `work_date`, `operator_action`, `detail_type`, `product_code`, `total_qty` | レーザー実績ヘッダ、品番別明細、製品、工程 | 生産実績照会のレーザータブと同じく、`operator_action='END'` かつ `detail_type='COMPONENT'` の `total_qty` を品番別生産数とする。START・PAUSE・未終了の明細は含めない | 品番指定時にレーザー実績があれば、`ProcessRealtimeRecord` と合算せずレーザー実績を正規根拠にする |
 | `production.LineRealtimeRecord` | ライン、工程、製品、数量、記録時刻 | ライン、工程、製品 | ライン実績として登録された数量。ProcessRealtimeRecordとの二重集計を禁止 | 定義差分確認後に限定利用 |
 | `production.ProductionOrder` / `ProcessActual` | 製造指示、工程実績 | 製品、工程、ルーティング | 指示・実績の意味を個別仕様で確認する | 区分C。将来の指示対実績分析候補 |
@@ -155,7 +155,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 | ビュー | 列 | 有効条件 | AI利用 |
 |---|---|---|---|
-| `v_ai_purchase_receipt`（`ai/0012`で作成） | `id`, `arrival_date`, `registered_at`, `supplier_id`, `line_id`, `product_id`, `product_code`, `product_name`, `qty`, `process_id`, `input_source` | `t_process_realtime_record` のうち `record_type='PRODUCTION'` かつ `event_data.source` が仕入の3種類の行だけ。仕入れ実績照会画面と同じ定義 | 仕入画面・本社横断から読み取り専用SQLで、仕入先別・品番別・日別の入荷数を集計する |
+| `v_ai_purchase_receipt`（`ai/0012`で作成、`ai/0013`で抽出条件を変更） | `id`, `arrival_date`, `registered_at`, `supplier_id`, `line_id`, `product_id`, `product_code`, `product_name`, `qty`, `process_id`, `input_source` | `t_process_realtime_record` のうち `record_type='PURCHASE'` の行だけ。仕入れ実績照会画面と同じ定義 | 仕入画面・本社横断から読み取り専用SQLで、仕入先別・品番別・日別の入荷数を集計する |
 
 - 入荷数量は `qty`、入荷日は `arrival_date`（`event_data.arrival_date`）。`arrival_date` は実際に入荷した日、`registered_at` はシステムへ登録した日時。検収（`PURCHASE_RECEIVING`・`PURCHASE_RECEIVING_MOBILE`）は入荷時にその場で登録するので両者は同じ日になるが、仕入れ実績入力（`PURCHASE_ACTUAL_INPUT`）は後から入力できるので異なることがある。入荷の日別・期間集計は必ず `arrival_date` を使う（2026-09-30時点では全2,531件が実績入力で、うち34件は入荷日と登録日が異なる）。
 - `event_data` に入っているのは `source`・`line_id`・`supplier_id`・`arrival_date` だけで、個人情報は含まない。

@@ -70,8 +70,7 @@ def collect_purchase_actual_reconcile_diffs():
     expected_by_key = defaultdict(int)
     rec_qs = (
         ProcessRealtimeRecord.objects.filter(
-            record_type='PRODUCTION',
-            event_data__source='PURCHASE_ACTUAL_INPUT',
+            record_type='PURCHASE',
         )
         .select_related('process')
         .only('id', 'process_id', 'product_id', 'qty', 'timestamp', 'event_data', 'process__line_id')

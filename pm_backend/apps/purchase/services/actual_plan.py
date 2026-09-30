@@ -34,7 +34,7 @@ def plan_state(key, *, lock=False):
         plans = plans.select_for_update()
     plans = list(plans)
     records = list(ProcessRealtimeRecord.objects.filter(
-        record_type='PRODUCTION', product_id=key['product_id'], event_data__purchase_plan=key,
+        record_type='PURCHASE', product_id=key['product_id'], event_data__purchase_plan=key,
     ).order_by('id').values_list('id', 'qty'))
     return _build_state(key, plans, records)
 
@@ -47,7 +47,7 @@ def plan_states(supplier_id, plan_date, plans):
     keys = {pid: plan_key(supplier_id, pid, plan_date) for pid in plans_by_product}
     records_by_product = defaultdict(list)
     records = ProcessRealtimeRecord.objects.filter(
-        record_type='PRODUCTION', product_id__in=keys,
+        record_type='PURCHASE', product_id__in=keys,
         event_data__purchase_plan__supplier_id=supplier_id,
         event_data__purchase_plan__plan_date=str(plan_date),
     ).order_by('id').values_list('id', 'qty', 'product_id', 'event_data')

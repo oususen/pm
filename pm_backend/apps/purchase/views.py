@@ -530,7 +530,7 @@ def _create_purchase_actual_record(
     payload = {
         'process_id': process_obj.id,
         'product_id': product.id,
-        'record_type': 'PRODUCTION',
+        'record_type': 'PURCHASE',
         'qty': qty,
         'work_date': arrival_date,
         'operator_name': str(operator_name or '').strip(),
@@ -611,8 +611,7 @@ def _reconcile_purchase_actual_backlog_for_key(process_id, product_id, line_id):
         ProcessRealtimeRecord.objects.filter(
             process_id=pid,
             product_id=product,
-            record_type='PRODUCTION',
-            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
+            record_type='PURCHASE',
         )
         .select_related('process')
     )
@@ -962,8 +961,7 @@ class PurchaseActualInquiryView(APIView):
         supplier_id = request.query_params.get('supplier_id')
 
         qs = ProcessRealtimeRecord.objects.filter(
-            record_type='PRODUCTION',
-            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
+            record_type='PURCHASE',
         ).select_related('product', 'process')
 
         if start_date_text:
@@ -1026,8 +1024,7 @@ class PurchaseActualDetailView(APIView):
             ProcessRealtimeRecord.objects
             .filter(
                 id=record_id,
-                record_type='PRODUCTION',
-                event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
+                record_type='PURCHASE',
             )
             .select_related('process', 'product')
             .first()
@@ -2863,8 +2860,7 @@ class PurchaseReceivingHistoryView(APIView):
         line_id = line.id if line else None
 
         qs = ProcessRealtimeRecord.objects.filter(
-            record_type='PRODUCTION',
-            event_data__source__in=['PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'],
+            record_type='PURCHASE',
         ).order_by('-timestamp')
 
         if line_id:
@@ -2899,7 +2895,7 @@ class PurchaseReceivingConfirmView(APIView):
         status_filter = request.query_params.get('status', 'pending')
 
         qs = ProcessRealtimeRecord.objects.filter(
-            record_type='PRODUCTION',
+            record_type='PURCHASE',
             event_data__source='PURCHASE_RECEIVING_MOBILE',
         ).select_related('product', 'process').order_by('-timestamp')
 
@@ -2950,7 +2946,7 @@ class PurchaseReceivingConfirmView(APIView):
         with transaction.atomic():
             records = ProcessRealtimeRecord.objects.filter(
                 id__in=record_ids,
-                record_type='PRODUCTION',
+                record_type='PURCHASE',
                 event_data__source='PURCHASE_RECEIVING_MOBILE',
                 event_data__receiving_status='pending',
             )

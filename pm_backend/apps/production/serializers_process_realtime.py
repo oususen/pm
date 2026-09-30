@@ -16,7 +16,11 @@ from .services.process_realtime_routing_service import (
 )
 from orders.utils.calendar_utils import DAY_BOUNDARY_HOUR
 from purchase.process_resolver import resolve_purchase_line, resolve_supplier_process
-from .models_process_realtime import ProcessRealtimeRecord
+from .models_process_realtime import (
+    OUTPUT_RECORD_TYPES,
+    PURCHASE_ACTUAL_SOURCES,
+    ProcessRealtimeRecord,
+)
 from .models_process_work_session import ProcessWorkSession
 from .models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from .models_line_backlog import LineBacklog
@@ -591,9 +595,11 @@ def expand_coproduct_children_production(
     session=None,
     session_issues=None,
     skip_backlog=False,
+    record_type='PRODUCTION',
 ):
     """
     連産品（仮想セット品番）の親実績から子製品実績を展開する。
+    子実績の record_type は親実績と同じ値（生産: PRODUCTION / 仕入: PURCHASE）にする。
     """
     if not product or not getattr(product, 'is_virtual_set', False):
         return
@@ -621,7 +627,7 @@ def expand_coproduct_children_production(
             product=child_product,
             product_code=child_product.product_code,
             product_name=child_product.product_name,
-            record_type='PRODUCTION',
+            record_type=record_type,
             qty=child_qty,
             equipment_state=None,
             event_data=child_event_data,
@@ -1293,11 +1299,25 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
     work_date = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs):
-        if attrs.get('record_type') in ['PRODUCTION', 'SCRAP']:
+        if attrs.get('record_type') in ['PRODUCTION', 'PURCHASE', 'SCRAP']:
             has_product_id = bool(attrs.get('product_id'))
             has_product_code = bool((attrs.get('product_code') or '').strip())
             if not has_product_id and not has_product_code:
                 raise serializers.ValidationError({'product_id': '生産記録は製品（品番）の指定が必要です。'})
+        # 仕入実績は record_type=PURCHASE と仕入の入力元（event_data.source）を必ず対で持つ。
+        event_data = attrs.get('event_data')
+        event_source = ''
+        if isinstance(event_data, dict):
+            event_source = str(event_data.get('source') or '').strip().upper()
+        if attrs.get('record_type') == 'PURCHASE':
+            if event_source not in PURCHASE_ACTUAL_SOURCES:
+                raise serializers.ValidationError({'event_data': '仕入実績は仕入の入力元（event_data.source）の指定が必要です。'})
+            try:
+                int(event_data.get('line_id'))
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({'event_data': '仕入実績は仕入先ライン（event_data.line_id）の指定が必要です。'})
+        elif event_source in PURCHASE_ACTUAL_SOURCES:
+            raise serializers.ValidationError({'record_type': '仕入実績は record_type=PURCHASE で登録してください。'})
         if attrs.get('record_type') == 'OPERATOR_ACTION':
             event_data = attrs.get('event_data') or {}
             action = _extract_operator_action(event_data)
@@ -1355,10 +1375,12 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             product_name = product.product_name
 
         operator_action = _extract_operator_action(operator_event)
+        record_type = validated_data.get('record_type')
+        is_output_record = record_type in OUTPUT_RECORD_TYPES
         requires_routing_validation = (
-            validated_data.get('record_type') == 'PRODUCTION'
+            is_output_record
             or (
-                validated_data.get('record_type') == 'OPERATOR_ACTION'
+                record_type == 'OPERATOR_ACTION'
                 and operator_action in SESSION_ACTIONS
             )
         )
@@ -1366,12 +1388,9 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             if not product:
                 raise serializers.ValidationError({'product_id': '指定された製品が存在しません。'})
             routing_line_id = None
-            event_source = str(operator_event.get('source') or '').strip().upper()
-            if event_source in {'PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE'}:
-                try:
-                    routing_line_id = int(operator_event.get('line_id'))
-                except (TypeError, ValueError):
-                    routing_line_id = None
+            if record_type == 'PURCHASE':
+                # 仕入工程(G/PURCHASE)はラインを持たないため、仕入先ラインでルーティングを検証する（validateで整数を保証済み）
+                routing_line_id = int(operator_event.get('line_id'))
             if not is_valid_output_process(
                 process,
                 product,
@@ -1502,15 +1521,23 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     session_issues=session_issues,
                 )
 
-            # 生産実績の場合、LineBacklogに反映
-            if validated_data.get('record_type') == 'PRODUCTION':
+            # 生産実績・仕入実績の場合、LineBacklogに反映
+            if is_output_record:
                 qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
                 update_line_backlog_production(process, product, qty_decimal, plan_date)
                 update_line_backlog_actual_shipment(process, product, qty_decimal, plan_date)
 
             # 連産品（仮想セット品番）の場合、子製品にも実績を保存する
-            if validated_data.get('record_type') == 'PRODUCTION':
+            if is_output_record:
                 qty_decimal = validated_data.get('qty', Decimal('0')) or Decimal('0')
+                child_base_event_data = None
+                if record_type == 'PURCHASE':
+                    # 仕入の子実績も仕入実績として識別できるよう、入力元・仕入先・ライン・入荷日を引き継ぐ
+                    child_base_event_data = {
+                        key: operator_event[key]
+                        for key in ('source', 'supplier_id', 'line_id', 'arrival_date')
+                        if key in operator_event
+                    }
                 expand_coproduct_children_production(
                     process=process,
                     product=product,
@@ -1520,6 +1547,8 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     operator_name=validated_data.get('operator_name', ''),
                     remarks=validated_data.get('remarks', ''),
                     parent_record_id=parent_record.id,
+                    base_event_data=child_base_event_data,
+                    record_type=record_type,
                 )
 
             # 仕損は別テーブルにも保存

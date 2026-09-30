@@ -5,6 +5,12 @@ from django.db import models
 from masters.models import Process, Product
 
 
+# 仕入実績（record_type='PURCHASE'）を登録する入力元（event_data.source）
+PURCHASE_ACTUAL_SOURCES = ('PURCHASE_ACTUAL_INPUT', 'PURCHASE_RECEIVING', 'PURCHASE_RECEIVING_MOBILE')
+# 出来高としてLineBacklogへ反映する記録タイプ（生産実績・仕入実績）
+OUTPUT_RECORD_TYPES = ('PRODUCTION', 'PURCHASE')
+
+
 class ProcessRealtimeRecord(models.Model):
     """工程リアルタイム作業記録（シンプル版）"""
 

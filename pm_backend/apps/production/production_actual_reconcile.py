@@ -101,8 +101,8 @@ def collect_production_actual_reconcile_diffs():
         expected_by_key[key] += int(session.production_qty or 0)
 
     rec_qs = (
+        # 仕入実績は record_type='PURCHASE' のため、生産実績の比較対象に含まれない
         ProcessRealtimeRecord.objects.filter(record_type='PRODUCTION')
-        .exclude(event_data__source='PURCHASE_ACTUAL_INPUT')
         .select_related('process', 'process__line', 'product')
         .only('id', 'process_id', 'product_id', 'qty', 'timestamp', 'event_data', 'process__line_id', 'process__line__line_type')
     )

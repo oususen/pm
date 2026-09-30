@@ -51,7 +51,7 @@ API入口: `/process-realtime-records/sessions/`、レーザー実績API、ブ�
 
 | 実績の種類 | 正規テーブル | 品番 | 数量 | 有効条件 | AIの回答根拠 |
 |---|---|---|---|---|---|
-| 通常工程 | `t_process_realtime_record` | `product_code` | `qty` | `record_type='PRODUCTION'` | 工程実績 |
+| 通常工程 | `t_process_realtime_record` | `product_code` | `qty` | `record_type='PRODUCTION'`（仕入の入荷実績は `record_type='PURCHASE'` のため含まれない） | 工程実績 |
 | 工程作業セッション | `t_process_work_session` | `product_code` | `production_qty` | 画面のセッション条件（計画日／実施日、作業・終了状態）に従う | セッション実績。定義確認を終えるまで単独の標準回答には使わない |
 | レーザー（板金タブ） | `t_laser_actual` + `t_laser_actual_detail` | 明細の`product_code` | 明細の`total_qty` | ヘッダが`operator_action='END'`、明細が`detail_type='COMPONENT'` | レーザー実績。START、PAUSE、未終了を除外 |
 | ブレーキ | `brake_line_record` | `product_code`または製品FK | `qty` | `operator_action='END'` のみ | ブレーキ実績。START・PAUSE・TEMP_ENDは生産数に含めない |

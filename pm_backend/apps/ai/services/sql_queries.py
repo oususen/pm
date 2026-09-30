@@ -34,8 +34,9 @@ BASE_SQL_SCHEMA = {
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
 TABLE_NOTES = {
     't_process_realtime_record': (
-        '工程実績。仕入の入荷実績も同じ record_type=PRODUCTION で含まれるため、'
-        'この表の qty を合計して生産数や入荷数としてはいけない。生産数は集計ツール、入荷数は v_ai_purchase_receipt を使う。'
+        '工程実績。record_type=PRODUCTION が生産実績、record_type=PURCHASE が仕入の入荷実績。'
+        'SCRAP(仕損)・EQUIPMENT_STATE・OPERATOR_ACTION も同じ表に入るため、record_type を指定せずに qty を合計してはいけない。'
+        '生産数は集計ツール、入荷数は v_ai_purchase_receipt を使う。'
     ),
     'v_ai_purchase_receipt': (
         '仕入の入荷実績(仕入れ実績入力・検収・スマホ検収)だけを抜き出したビュー。1行=1回の入荷登録。'
