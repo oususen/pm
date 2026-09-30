@@ -197,7 +197,7 @@ export default {
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
   productionRecordSettings: createProductionRecordSettingsAPI(client),
   aiChat: {
-    chat(payload) { return client.post('/ai/chat/', payload || {}) },
+    chat(payload, config) { return client.post('/ai/chat/', payload || {}, config) },
     status(params) { return client.get('/ai/chat/', { params }) },
   },
   aiConversations: {
