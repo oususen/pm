@@ -18,6 +18,10 @@
   - `PURCHASE` なのに `event_data.line_id`（仕入先ライン）が整数でない・未指定
   - `PURCHASE` 以外なのに `event_data.source` が仕入の入力元
 - 入力元の一覧は `production.models_process_realtime.PURCHASE_ACTUAL_SOURCES` に定義する。
+- DBでも CHECK 制約 `prr_purchase_requires_purchase_source`（`production` 0115）で、`record_type='PURCHASE'` の行は `event_data` が NULL でなく、`source` キーを持ち、その値が仕入の入力元3種のいずれかであることを強制する。
+  - Django の `models.CheckConstraint` で定義しているため、接続先DBに合わせたSQLが生成される（MySQL: `JSON_CONTAINS_PATH`・`JSON_EXTRACT`、PostgreSQL: `?`・`->`）。PostgreSQL へ移行する場合も Django の migration でテーブルを作成すれば同じ制約が作られる。DBをツールで丸ごと複製する場合は制約が移ることを確認する。
+  - MySQL は 8.0.16 以上で CHECK 制約が有効になる（本番は 8.0.44）。8.0.16 未満では Django が制約作成を黙って省略する。
+  - 逆方向（仕入の入力元なら `PURCHASE`）と `line_id` 必須は DB 制約にしない。移行前の既存データと、`event_data.line_id` を持たない既存の仕入実績（移行時点で41件）があるため、serializer で新規登録時にだけ検証する。
 - 工程は仕入先に関係なく `G`（外作）または `PURCHASE`（購買）で、工程にラインは持たない。仕入先ごとの区別は `event_data.line_id`（仕入先ライン、`line_type='PURCHASE'`）で行う。
 
 ## 3. LineBacklog への反映（従来と同じ）
@@ -52,7 +56,14 @@
 1. 仕入の入力（仕入れ実績入力・検収・スマホ検収）を止める。
 2. 移行前の確認（6章の①②）を実行して結果を控える。
 3. `git push` → 本番で pull・ビルド。
-4. `docker exec -it pm-backend python manage.py migrate`（`ai.0013` で `v_ai_purchase_receipt` を作り直す）。
+4. `docker exec -it pm-backend python manage.py migrate`
+   - `production.0115`: CHECK 制約 `prr_purchase_requires_purchase_source` を追加（この時点で `PURCHASE` の行は0件のため既存データは違反しない）
+   - `ai.0013`: `v_ai_purchase_receipt` を `record_type='PURCHASE'` で作り直す（UPDATE 完了まで0件になる）
+   - 制約ができたことを確認する（1行返れば作成済み）
+     ```sql
+     SELECT CONSTRAINT_NAME, CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS
+     WHERE CONSTRAINT_NAME = 'prr_purchase_requires_purchase_source';
+     ```
 5. 直ちに次のSQLを実行する。
 
 ```sql
@@ -69,10 +80,38 @@ WHERE record_type='PRODUCTION'
 SELECT record_type, COUNT(*) cnt, SUM(qty) qty FROM t_process_realtime_record
 WHERE JSON_UNQUOTE(JSON_EXTRACT(event_data,'$.source')) LIKE 'PURCHASE%'
 GROUP BY record_type;
+-- 社内AI入荷ビューも同じ件数・数量になること（同じセッション内なので未COMMITの更新が見える）
+SELECT COUNT(*) cnt, SUM(qty) qty FROM v_ai_purchase_receipt;
 COMMIT;   -- 一致しなければ ROLLBACK;
 ```
 
-6. 移行後の確認（6章の①②③）を実行し、移行前と一致したら仕入の入力を再開する。
+- COMMIT 前の更新は、UPDATE を実行したセッション（Adminer の同じSQL実行）からしか見えない。画面・API での確認は COMMIT 後に行う。
+- UPDATE は `line_backlog` を変更しないため、LineBacklog の一致は6章①で確認する。
+
+6. 移行後の確認（6章の①〜④）を実行し、移行前と一致したら仕入の入力を再開する。
+
+### 5.1 COMMIT 後に異常が見つかった場合の戻し方
+
+データとコードは必ず同時に戻す。片方だけ戻すと、コードとデータの record_type が食い違い、再集計で `actual_qty` が上書きされる。
+
+1. 仕入の入力を止めたままにする。
+2. 新しいコードのまま、`docker exec -it pm-backend python manage.py migrate ai 0012` と `docker exec -it pm-backend python manage.py migrate production 0114` を実行する（AIビューを旧定義へ戻し、CHECK 制約を削除する）。前のコードには `ai.0013`・`production.0115` のファイルがないため、必ずデプロイの前に戻す。
+3. 本変更のコミット（`f11829e` と CHECK 制約を追加したコミット）を `git revert` したコードを本番へデプロイする。本変更より後のコミットを残すため、特定のコミットまで巻き戻す（reset）方法は使わない。
+4. 直ちに次のSQLを実行する。
+
+```sql
+START TRANSACTION;
+UPDATE t_process_realtime_record SET record_type='PRODUCTION'
+WHERE record_type='PURCHASE'
+  AND JSON_UNQUOTE(JSON_EXTRACT(event_data,'$.source')) IN ('PURCHASE_ACTUAL_INPUT','PURCHASE_RECEIVING','PURCHASE_RECEIVING_MOBILE');
+-- PURCHASE が0件、PRODUCTION 側の件数・数量が移行前と同じであること
+SELECT record_type, COUNT(*) cnt, SUM(qty) qty FROM t_process_realtime_record
+WHERE JSON_UNQUOTE(JSON_EXTRACT(event_data,'$.source')) LIKE 'PURCHASE%'
+GROUP BY record_type;
+COMMIT;   -- 一致しなければ ROLLBACK;
+```
+
+5. 6章①②を実行し、移行前の値と一致することを確認してから仕入の入力を再開する。
 
 ## 6. 移行前後の確認
 
@@ -95,6 +134,9 @@ GROUP BY ym ORDER BY ym;
 SELECT COUNT(*) FROM t_process_realtime_record
 WHERE record_type='PRODUCTION'
   AND JSON_UNQUOTE(JSON_EXTRACT(event_data,'$.source')) IN ('PURCHASE_ACTUAL_INPUT','PURCHASE_RECEIVING','PURCHASE_RECEIVING_MOBILE');
+
+-- ④ 移行後：社内AI入荷ビューが②の合計と一致すること
+SELECT COUNT(*) cnt, SUM(qty) qty FROM v_ai_purchase_receipt;
 ```
 
 あわせて、設定 → スケジュールタスクから「納入実績整合チェック」「生産実績整合チェック」を比較モードで移行前後に1回ずつ実行し、差分件数が増えていないことを確認する。

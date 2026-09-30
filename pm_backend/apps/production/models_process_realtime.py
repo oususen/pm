@@ -2,6 +2,7 @@
 工程実時間記録モデル（ライン実時間記録の工程版）
 """
 from django.db import models
+from django.db.models import Q
 from masters.models import Process, Product
 
 
@@ -80,6 +81,21 @@ class ProcessRealtimeRecord(models.Model):
             models.Index(fields=['process', 'timestamp']),
             models.Index(fields=['record_type']),
             models.Index(fields=['product_code']),
+        ]
+        constraints = [
+            # 仕入実績（PURCHASE）は仕入の入力元（event_data.source）を必ず持つ。
+            # event_data が NULL・source キーなしの場合、IN 判定だけでは結果が NULL となり CHECK を通過するため、
+            # NOT NULL とキー存在も条件に含める。
+            # 逆方向（仕入の入力元なら PURCHASE）と line_id 必須は serializer で検証する
+            # （移行前の既存データ・line_id未設定の既存データがあるためDB制約にはしない）。
+            models.CheckConstraint(
+                condition=~Q(record_type='PURCHASE') | Q(
+                    event_data__isnull=False,
+                    event_data__has_key='source',
+                    event_data__source__in=list(PURCHASE_ACTUAL_SOURCES),
+                ),
+                name='prr_purchase_requires_purchase_source',
+            ),
         ]
         ordering = ['-timestamp']
 

@@ -646,7 +646,7 @@ WHERE rs.time_unit='DAY';
 | product_code | VARCHAR(50) NULL | 製品コード |
 | product_name | VARCHAR(100) NULL | 品名 |
 | timestamp | DATETIME | 記録時刻 |
-| record_type | VARCHAR(20) | 記録タイプ（`PRODUCTION`=生産完成、`PURCHASE`=仕入実績、`SCRAP`=仕損、`EQUIPMENT_STATE`=設備状態変更、`OPERATOR_ACTION`=作業者アクション）。仕入実績は `event_data.source` が `PURCHASE_ACTUAL_INPUT`・`PURCHASE_RECEIVING`・`PURCHASE_RECEIVING_MOBILE` のいずれかで、`event_data.line_id` に仕入先ラインを持つ |
+| record_type | VARCHAR(20) | 記録タイプ（`PRODUCTION`=生産完成、`PURCHASE`=仕入実績、`SCRAP`=仕損、`EQUIPMENT_STATE`=設備状態変更、`OPERATOR_ACTION`=作業者アクション）。仕入実績は `event_data.source` が `PURCHASE_ACTUAL_INPUT`・`PURCHASE_RECEIVING`・`PURCHASE_RECEIVING_MOBILE` のいずれかで、`event_data.line_id` に仕入先ラインを持つ。CHECK 制約 `prr_purchase_requires_purchase_source` で `PURCHASE` の行は仕入の入力元を必須とする |
 | qty | DECIMAL(10,3)| 数量 |
 | equipment_state | VARCHAR(20) NULL | 設備状態 |
 | event_data | JSON NULL | 付帯情報 |
