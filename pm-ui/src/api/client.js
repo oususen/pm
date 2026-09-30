@@ -232,6 +232,7 @@ export default {
   ocr: {
     status() { return client.get('/ocr/status/') },
     recognize(data) { return client.post('/ocr/recognize/', data) },
+    stopWorker() { return client.post('/ocr/worker/stop/') },
   },
   scheduleConfig: createScheduleConfigAPI(client),
   lineBacklogAdjustments: createLineBacklogAdjustmentsAPI(client),

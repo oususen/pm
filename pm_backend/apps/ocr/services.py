@@ -1,12 +1,16 @@
 """OCR・文書読取アプリのローカル文字認識サービス。"""
 from __future__ import annotations
 
+import atexit
 import os
 import json
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import uuid
 from functools import lru_cache
 from importlib.util import find_spec
 from pathlib import Path
@@ -21,10 +25,122 @@ ENGINE_CHOICES = {
     'paddle': 'PaddleOCR（高精度・手書き対応）',
 }
 PADDLE_VENV_PYTHON = PROJECT_ROOT / 'pm_backend' / 'ocr_data' / 'venv' / 'Scripts' / 'python.exe'
+_PADDLE_WORKER = None
+_PADDLE_WORKER_LOCK = threading.Lock()
+_PADDLE_REQUEST_LOCK = threading.Lock()
 
 
 class OCRRecognitionError(RuntimeError):
     """OCRエンジンが認識を完了できなかった場合のエラー。"""
+
+
+def _paddle_environment():
+    """隔離PaddleOCRがモデルを開発PC内だけで使用する環境変数を返す。"""
+    cache_dir = PROJECT_ROOT / 'pm_backend' / 'ocr_data'
+    environment = os.environ.copy()
+    environment.update({
+        'USERPROFILE': str(cache_dir / 'profile'),
+        'HOME': str(cache_dir / 'profile'),
+        'PADDLE_PDX_CACHE_HOME': str(cache_dir / 'models'),
+        'PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK': 'True',
+        'PYTHONIOENCODING': 'utf-8',
+    })
+    return environment
+
+
+class _PersistentPaddleWorker:
+    """隔離PaddleOCRを常駐させ、読み込んだモデルを次の要求でも再利用する。"""
+
+    def __init__(self, paddle_python):
+        worker = Path(__file__).with_name('paddle_worker.py')
+        self.process = subprocess.Popen(
+            [str(paddle_python), str(worker), '--server'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=1,
+            env=_paddle_environment(),
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        self.responses = queue.Queue()
+        self.reader = threading.Thread(target=self._read_responses, daemon=True, name='pm-ocr-paddle-reader')
+        self.reader.start()
+
+    @property
+    def running(self):
+        return self.process.poll() is None
+
+    def _read_responses(self):
+        try:
+            for line in self.process.stdout:
+                self.responses.put(line)
+        finally:
+            self.responses.put(None)
+
+    def request(self, mode, paths):
+        if not self.running or not self.process.stdin:
+            raise OCRRecognitionError('常駐PaddleOCRが停止しています。')
+        request_id = uuid.uuid4().hex
+        try:
+            self.process.stdin.write(json.dumps({
+                'id': request_id,
+                'mode': mode,
+                'paths': [str(path) for path in paths],
+            }, ensure_ascii=False) + '\n')
+            self.process.stdin.flush()
+            response_line = self.responses.get(timeout=900)
+        except queue.Empty as exc:
+            raise OCRRecognitionError('PaddleOCRの処理が15分でタイムアウトしました。') from exc
+        except (BrokenPipeError, OSError) as exc:
+            raise OCRRecognitionError('常駐PaddleOCRへ要求を送信できません。') from exc
+        if response_line is None:
+            raise OCRRecognitionError('常駐PaddleOCRが予期せず停止しました。')
+        try:
+            response = json.loads(response_line)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise OCRRecognitionError('PaddleOCRの結果を読み取れませんでした。') from exc
+        if response.get('id') != request_id or not response.get('ok'):
+            raise OCRRecognitionError('PaddleOCRの画像認識に失敗しました。')
+        return response.get('pages')
+
+    def stop(self):
+        if not self.running:
+            return False
+        try:
+            if self.process.stdin:
+                self.process.stdin.write(json.dumps({'id': uuid.uuid4().hex, 'mode': 'shutdown'}) + '\n')
+                self.process.stdin.flush()
+            self.process.wait(timeout=10)
+        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+        return True
+
+
+def stop_paddle_worker():
+    """常駐PaddleOCRを停止してメモリを解放する。"""
+    global _PADDLE_WORKER
+    with _PADDLE_REQUEST_LOCK:
+        with _PADDLE_WORKER_LOCK:
+            worker = _PADDLE_WORKER
+            _PADDLE_WORKER = None
+        return worker.stop() if worker else False
+
+
+def paddle_worker_status():
+    """常駐PaddleOCRプロセスの状態を返す。"""
+    with _PADDLE_WORKER_LOCK:
+        running = bool(_PADDLE_WORKER and _PADDLE_WORKER.running)
+    return {'running': running}
+
+
+atexit.register(stop_paddle_worker)
 
 
 def _paddle_python():
@@ -155,14 +271,15 @@ def all_status():
         'tesseract': status(),
         'paddle': paddle_status(),
         'table_recognition': paddle_table_status(),
+        'paddle_worker': paddle_worker_status(),
         'engines': ENGINE_CHOICES,
     }
 
 
-def extract_image_text(path, engine='tesseract'):
+def extract_image_text(path, engine='tesseract', keep_alive=False):
     """画像をローカルTesseractで文字化する。画像は外部へ送信しない。"""
     if engine == 'paddle':
-        return _extract_paddle_text(path)
+        return _extract_paddle_text(path, keep_alive=keep_alive)
     if not status()['available']:
         return ''
     command = [str(_ocr_executable()), str(path), 'stdout', '-l', 'jpn+eng']
@@ -174,22 +291,26 @@ def extract_image_text(path, engine='tesseract'):
     return result.stdout.strip() if result.returncode == 0 else ''
 
 
-def extract_images_text(paths, engine='tesseract'):
+def extract_images_text(paths, engine='tesseract', keep_alive=False):
     """複数のPDFページ画像を読み取り、PaddleOCRは1回の起動で処理する。"""
     image_paths = [str(path) for path in paths]
     if engine == 'paddle':
-        return _extract_paddle_texts(image_paths)
+        return _extract_paddle_texts(image_paths, keep_alive=keep_alive)
     return [extract_image_text(path, engine=engine) for path in image_paths]
 
 
-def extract_image_tables(path):
-    """開発PC内のPP-StructureV3で画像内の表を行列として認識する。"""
-    return _extract_paddle_outputs([str(path)], mode='table')[0]
+def extract_image_tables(path, table_mode='accurate', keep_alive=False):
+    """開発PC内のPaddleOCRで画像内の表を行列として認識する。"""
+    return _extract_paddle_outputs([str(path)], mode=f'table_{table_mode}', keep_alive=keep_alive)[0]
 
 
-def extract_images_tables(paths):
+def extract_images_tables(paths, table_mode='accurate', keep_alive=False):
     """PDFの全ページを一度のPaddle起動で表認識する。"""
-    return _extract_paddle_outputs([str(path) for path in paths], mode='table')
+    return _extract_paddle_outputs(
+        [str(path) for path in paths],
+        mode=f'table_{table_mode}',
+        keep_alive=keep_alive,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -206,18 +327,23 @@ def _paddle_ocr():
     )
 
 
-def _extract_paddle_text(path):
+def _extract_paddle_text(path, keep_alive=False):
     """PaddleOCRの結果から認識済みテキスト行だけを取り出す。"""
-    return _extract_paddle_texts([path])[0]
+    return _extract_paddle_texts([path], keep_alive=keep_alive)[0]
 
 
-def _extract_paddle_texts(paths):
+def _extract_paddle_texts(paths, keep_alive=False):
     """複数画像から認識した行を画像ごとに返す。"""
     if not paddle_status()['available']:
         raise OCRRecognitionError('PaddleOCRが利用できません。開発環境のOCR設定を確認してください。')
     paddle_python = _paddle_python()
     if paddle_python and paddle_python.resolve() != Path(sys.executable).resolve():
-        return _extract_paddle_outputs(paths, mode='text', paddle_python=paddle_python)
+        return _extract_paddle_outputs(
+            paths,
+            mode='text',
+            paddle_python=paddle_python,
+            keep_alive=keep_alive,
+        )
     pages = []
     try:
         ocr = _paddle_ocr()
@@ -236,21 +362,38 @@ def _extract_paddle_texts(paths):
     return pages
 
 
-def _extract_paddle_outputs(paths, mode, paddle_python=None):
+def _validate_paddle_outputs(outputs, paths, mode):
+    """隔離プロセスのJSON結果が要求件数・形式と一致するか確認する。"""
+    if not isinstance(outputs, list) or len(outputs) != len(paths):
+        raise OCRRecognitionError('PaddleOCRの結果を読み取れませんでした。')
+    if mode.startswith('table_'):
+        if any(not isinstance(page, list) for page in outputs):
+            raise OCRRecognitionError('PaddleOCRの表認識結果を読み取れませんでした。')
+        return outputs
+    return ['\n'.join(str(text).strip() for text in page if str(text).strip()) for page in outputs]
+
+
+def _extract_persistent_paddle_outputs(paths, mode, paddle_python):
+    """常駐プロセスへ直列で要求し、読み込んだモデルを再利用する。"""
+    global _PADDLE_WORKER
+    with _PADDLE_REQUEST_LOCK:
+        with _PADDLE_WORKER_LOCK:
+            if not _PADDLE_WORKER or not _PADDLE_WORKER.running:
+                _PADDLE_WORKER = _PersistentPaddleWorker(paddle_python)
+            worker = _PADDLE_WORKER
+        return worker.request(mode, paths)
+
+
+def _extract_paddle_outputs(paths, mode, paddle_python=None, keep_alive=False):
     """開発用の隔離環境で複数画像を一括処理し、JSON結果だけを受け取る。"""
-    if mode == 'table' and not paddle_table_status()['available']:
+    if mode.startswith('table_') and not paddle_table_status()['available']:
         raise OCRRecognitionError('表認識は開発PCのPaddleOCR 3系隔離環境でのみ利用できます。')
     paddle_python = paddle_python or PADDLE_VENV_PYTHON
+    if keep_alive:
+        outputs = _extract_persistent_paddle_outputs(paths, mode, paddle_python)
+        return _validate_paddle_outputs(outputs, paths, mode)
+    stop_paddle_worker()
     worker = Path(__file__).with_name('paddle_worker.py')
-    cache_dir = PROJECT_ROOT / 'pm_backend' / 'ocr_data'
-    environment = os.environ.copy()
-    environment.update({
-        'USERPROFILE': str(cache_dir / 'profile'),
-        'HOME': str(cache_dir / 'profile'),
-        'PADDLE_PDX_CACHE_HOME': str(cache_dir / 'models'),
-        'PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK': 'True',
-        'PYTHONIOENCODING': 'utf-8',
-    })
     manifest_descriptor, manifest_path = tempfile.mkstemp(prefix='pm-ocr-', suffix='.json')
     try:
         with os.fdopen(manifest_descriptor, 'w', encoding='utf-8') as manifest:
@@ -263,7 +406,7 @@ def _extract_paddle_outputs(paths, mode, paddle_python=None):
             errors='replace',
             timeout=900,
             check=False,
-            env=environment,
+            env=_paddle_environment(),
         )
     except subprocess.TimeoutExpired as exc:
         raise OCRRecognitionError('PaddleOCRの処理が15分でタイムアウトしました。') from exc
@@ -274,13 +417,7 @@ def _extract_paddle_outputs(paths, mode, paddle_python=None):
     if result.returncode != 0:
         raise OCRRecognitionError('PaddleOCRの画像認識に失敗しました。')
     try:
-        texts = json.loads(result.stdout)
+        outputs = json.loads(result.stdout)
     except (json.JSONDecodeError, TypeError) as exc:
         raise OCRRecognitionError('PaddleOCRの結果を読み取れませんでした。') from exc
-    if not isinstance(texts, list) or len(texts) != len(paths):
-        raise OCRRecognitionError('PaddleOCRの結果を読み取れませんでした。')
-    if mode == 'table':
-        if any(not isinstance(page, list) for page in texts):
-            raise OCRRecognitionError('PaddleOCRの表認識結果を読み取れませんでした。')
-        return texts
-    return ['\n'.join(str(text).strip() for text in page if str(text).strip()) for page in texts]
+    return _validate_paddle_outputs(outputs, paths, mode)

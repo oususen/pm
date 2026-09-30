@@ -9,7 +9,7 @@ from rest_framework import parsers, status as http_status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ocr.services import ENGINE_CHOICES, IMAGE_SUFFIXES, OCRRecognitionError, all_status, extract_image_tables, extract_image_text, extract_images_tables, extract_images_text, paddle_status, paddle_table_status, status
+from ocr.services import ENGINE_CHOICES, IMAGE_SUFFIXES, OCRRecognitionError, all_status, extract_image_tables, extract_image_text, extract_images_tables, extract_images_text, paddle_status, paddle_table_status, status, stop_paddle_worker
 
 
 PDF_SUFFIX = '.pdf'
@@ -20,6 +20,17 @@ class OCRStatusView(APIView):
         return Response(all_status())
 
 
+class OCRWorkerStopView(APIView):
+    """常駐PaddleOCRを明示的に停止してメモリを解放する。"""
+
+    def post(self, request):
+        stopped = stop_paddle_worker()
+        return Response({
+            'stopped': stopped,
+            'message': 'PaddleOCRの常駐を停止しました。' if stopped else 'PaddleOCRは常駐していません。',
+        })
+
+
 class OCRRecognitionView(APIView):
     """画像またはPDFを一時ファイルで認識し、文字列または編集用表を返す。"""
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
@@ -28,6 +39,8 @@ class OCRRecognitionView(APIView):
         image = request.FILES.get('image')
         engine = request.data.get('engine', 'tesseract')
         mode = request.data.get('mode', 'text')
+        table_mode = request.data.get('table_mode', 'accurate')
+        keep_alive = str(request.data.get('keep_alive', 'false')).lower() in {'1', 'true', 'yes', 'on'}
         if not image:
             return Response({'detail': '認識する画像を選択してください。'}, status=http_status.HTTP_400_BAD_REQUEST)
         suffix = Path(image.name).suffix.lower()
@@ -39,6 +52,8 @@ class OCRRecognitionView(APIView):
             return Response({'detail': '選択できないOCRエンジンです。'}, status=http_status.HTTP_400_BAD_REQUEST)
         if mode not in {'text', 'table'}:
             return Response({'detail': '選択できない読み取り方式です。'}, status=http_status.HTTP_400_BAD_REQUEST)
+        if table_mode not in {'fast', 'accurate'}:
+            return Response({'detail': '選択できない表認識モードです。'}, status=http_status.HTTP_400_BAD_REQUEST)
         if mode == 'table' and engine != 'paddle':
             return Response({'detail': '表認識にはPaddleOCRを選択してください。'}, status=http_status.HTTP_400_BAD_REQUEST)
         current_status = paddle_table_status() if mode == 'table' else (paddle_status() if engine == 'paddle' else status())
@@ -65,11 +80,15 @@ class OCRRecognitionView(APIView):
                                 pixmap.save(str(page_path))
                                 page_paths.append(page_path)
                             if mode == 'table':
-                                page_tables = extract_images_tables(page_paths)
+                                page_tables = extract_images_tables(
+                                    page_paths,
+                                    table_mode=table_mode,
+                                    keep_alive=keep_alive,
+                                )
                                 page_texts = None
                                 extracted_text = ''
                             else:
-                                page_texts = extract_images_text(page_paths, engine=engine)
+                                page_texts = extract_images_text(page_paths, engine=engine, keep_alive=keep_alive)
                                 page_tables = None
                                 extracted_text = '\n\n'.join(
                                     f'【{page_number}ページ】\n{text}'
@@ -82,12 +101,16 @@ class OCRRecognitionView(APIView):
             else:
                 if mode == 'table':
                     page_texts = None
-                    page_tables = [extract_image_tables(temporary_path)]
+                    page_tables = [extract_image_tables(
+                        temporary_path,
+                        table_mode=table_mode,
+                        keep_alive=keep_alive,
+                    )]
                     extracted_text = ''
                 else:
                     page_texts = None
                     page_tables = None
-                    extracted_text = extract_image_text(temporary_path, engine=engine)
+                    extracted_text = extract_image_text(temporary_path, engine=engine, keep_alive=keep_alive)
         except OCRRecognitionError as exc:
             return Response({'detail': str(exc)}, status=http_status.HTTP_503_SERVICE_UNAVAILABLE)
         finally:
@@ -106,6 +129,8 @@ class OCRRecognitionView(APIView):
             'page_count': processed_page_count,
             'completed_page_count': processed_page_count,
             'mode': mode,
+            'table_mode': table_mode if mode == 'table' else None,
+            'keep_alive': keep_alive,
             'tables': [
                 {'page_number': page_number, 'table_number': table_number, 'rows': rows}
                 for page_number, tables in enumerate(page_tables or [], start=1)

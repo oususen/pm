@@ -11,12 +11,15 @@
 - AI利用権限（`ai`）を持つ利用者に表示する。
 - PNG、JPG、WEBP、BMP、PDFを15MBまで選択できる。スマートフォンではカメラ撮影も選択可能とする。
 - 「文字を抽出」と「表として読み取る」を選択できる。表認識結果は画面上でセルを修正し、タブ区切りでコピーできる。
+- 表認識は、罫線付き表向けの「高速」と、複雑な表向けの「高精度」を切り替えられる。
+- 「Paddleモデルを常駐」をONにするとモデルをメモリへ残して2回目以降を高速化する。設定はブラウザに保存し、OFFにすると常駐プロセスを停止する。
 - 表認識は開発PCの隔離PaddleOCR 3系環境でのみ有効とし、本番環境では無効とする。
 
 ## 処理と保存
 
 - `POST /api/ocr/recognize/` は画像・PDFをOSの一時ファイルへ書き込み、指定エンジンで日本語・英語を認識する。PDFは全ページを処理する。
-- `mode=table` の場合はPaddleOCR PP-StructureV3で表構造を認識し、編集用の行列を返す。表モデルは開発PCの `pm_backend/ocr_data/models` にキャッシュする。
+- `mode=table` の場合、`table_mode=fast` はOpenCVで罫線セルを検出して軽量PaddleOCRで文字を読み、`table_mode=accurate` はPP-StructureV3で表構造を認識する。いずれも編集用の行列を返し、モデルは開発PCの `pm_backend/ocr_data/models` にキャッシュする。
+- `keep_alive=true` の場合は隔離PaddleOCRプロセスを再利用する。`POST /api/ocr/worker/stop/` で停止し、メモリを解放する。常駐設定はDBへ保存しない。
 - 一時ファイルは応答前に削除する。画像・認識結果ともDBやmediaへ保存せず、外部送信しない。
 - `GET /api/ocr/status/` はTesseract本体と言語データ（`jpn`、`eng`）、PaddleOCRの状態、および開発PC専用の表認識利用可否を返す。
 - AIナレッジの画像OCRも、このアプリの `ocr.services.extract_image_text` を共通利用する。
