@@ -37,7 +37,7 @@
           <p v-if="!result.tables?.length" class="empty-tables">表を検出できませんでした。通常の「文字を抽出」でもお試しください。</p>
           <section v-for="table in result.tables" :key="`${table.page_number}-${table.table_number}`" class="recognized-table">
             <h4>{{ isPdf ? `${table.page_number}ページ・` : '' }}表{{ table.table_number }} <small>セルは直接編集できます</small></h4>
-            <div class="table-scroll"><table><tbody><tr v-for="(row, rowIndex) in table.rows" :key="rowIndex"><td v-for="(cell, columnIndex) in row" :key="columnIndex"><input v-model="table.rows[rowIndex][columnIndex]" :aria-label="`表${table.table_number} 行${rowIndex + 1} 列${columnIndex + 1}`" /></td></tr></tbody></table></div>
+            <div class="table-scroll"><table><tbody><tr v-for="(row, rowIndex) in table.rows" :key="rowIndex"><td v-for="(cell, columnIndex) in row" :key="columnIndex"><input v-model="table.rows[rowIndex][columnIndex]" :style="{ width: `${cellInputSize(cell)}ch` }" :aria-label="`表${table.table_number} 行${rowIndex + 1} 列${columnIndex + 1}`" /></td></tr></tbody></table></div>
           </section>
         </template>
         <textarea v-else readonly :value="result?.text || (recognizing ? '認識しています…' : mode === 'table' ? '「表を読み取る」を押すと結果が表示されます。' : '「文字を認識」を押すと結果が表示されます。')" />
@@ -61,6 +61,7 @@ const error = ref('')
 const selectedEngineStatus = computed(() => mode.value === 'table' ? ocrStatus.value?.table_recognition : ocrStatus.value?.[engine.value])
 const isPdf = computed(() => selectedFile.value?.name?.toLowerCase().endsWith('.pdf'))
 const hasCopyableResult = computed(() => mode.value === 'table' ? Boolean(result.value?.tables?.length) : Boolean(result.value?.text))
+const cellInputSize = (cell) => Math.min(48, Math.max(12, Array.from(String(cell ?? '')).length + 3))
 
 const loadStatus = async () => {
   try {

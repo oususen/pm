@@ -80,7 +80,8 @@ def _table_html_to_rows(table_html):
     parser = _TableRowsParser()
     parser.feed(table_html or '')
     parser.close()
-    return parser.rows
+    column_count = max((len(row) for row in parser.rows), default=0)
+    return [row + [''] * (column_count - len(row)) for row in parser.rows]
 
 
 def main():
@@ -126,7 +127,11 @@ def main():
             pages = []
             for image_path in image_paths:
                 page_tables = []
-                for page in recognizer.predict(image_path):
+                for page in recognizer.predict(
+                    image_path,
+                    use_wired_table_cells_trans_to_html=True,
+                    use_wireless_table_cells_trans_to_html=True,
+                ):
                     data = page.json if hasattr(page, 'json') else page
                     data = data() if callable(data) else data
                     if isinstance(data, dict):
