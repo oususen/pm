@@ -14,11 +14,20 @@
 ## 2. 規約を強制する場所
 
 - 正式な規約本文: 本書
-- 規約をコードで強制する入口: `pm_backend/apps/ai/services/chat_service.py`（旧 `production/views_ai_demo.py` と `production/services/ai_demo_service.py` は互換入口として残すだけで、業務ロジックは持たない）
+- 規約をコードで強制する入口: `pm_backend/apps/ai/services/chat_service.py`の`AIChatAPIView`（旧 `ProductionAIDemoView`という名称、および互換入口だった `production/views_ai_demo.py` と `production/services/ai_demo_service.py`、旧URL `/api/production-ai-demo/` は削除済み）
 - 画面: `pm-ui/src/views/ai/AIChat.vue`（`/ai/chat`）
 - 運用設定の管理画面: `pm-ui/src/views/settings/AISettings.vue`（`/settings/ai`、権限 `settings.ai`）
 
 モデルの変更（DeepSeek、Qwenなど）は許可するが、本書のデータアクセス・外部送信・禁止操作の規約を迂回してはならない。2-1 の運用設定で有効化できる範囲も、本書が許可した範囲を超えてはならない。
+
+### 2-2. 権限のサーバー側検証
+
+このプロジェクトは基本的に「権限判定はフロントエンドで行い、バックエンドは`IsAuthenticated`（ログイン済みであること）だけを見る」という設計方針（`accounts/permissions.py`の`HasResourcePermissionOrReadOnly`）を取る。ただし社内AIチャットは、次の2点についてサーバー側でも権限を検証する。
+
+- `ai.chat`: `POST/GET /api/ai/chat/`の入口で、`accounts`の実効権限（`_build_effective_permissions`と同じ判定）に`ai.chat`の閲覧権限がなければ403を返す。
+- `overtime.personal_summary`: フロントエンドが送る`allow_personal_overtime`は、サーバー側でも同じ実効権限を確認し、権限がなければ強制的に無効化する。フロントの申告だけを信用しない。
+
+これは、個人別残業（誰がいつどれだけ残業したか）が社内でも特に慎重に扱うべきデータであり、`allow_personal_overtime`のようなクライアント申告のブール値だけを信用すると、ログイン済みの任意の利用者が直接APIを叩いて個人別残業を閲覧できてしまうために例外的に追加した。他のリソースへは展開しない。
 
 ## 2-1. 運用設定管理（画面: `/settings/ai`）
 
@@ -214,6 +223,7 @@ DeepSeekは、専用集計ツールだけでは回答できない場合に限り
 | 更新・削除・DDL・管理SQLの拒否 | 実装済み | `sql_queries.py`のFORBIDDEN_SQLで常に拒否。追加時はキーワードを本書とコードへ同時追記 |
 | AI用DB辞書の読み取り専用SQL（10-1） | 実装済み | `execute_readonly_sql`を`pm_ai_reader`（SELECT権限のみ、接続元IP限定）経由で実行。画面別ホワイトリスト外・書込み系・ワイルドカードは拒否 |
 | 運用設定管理画面（2-1） | 実装済み | `/settings/ai`（権限`settings.ai`）でプロバイダ・ツール有効化・データ送信方針・ナレッジ登録を管理 |
+| `ai.chat`・個人別残業のサーバー側権限検証（2-2） | 実装済み | `AIChatAPIView`（旧`ProductionAIDemoView`）に`IsAuthenticated`を追加し、`ai.chat`と`overtime.personal_summary`は実効権限をサーバー側でも確認する。あわせて`accounts.models.UserPermission.RESOURCE_CHOICES`に不足していた`ai`/`ai.chat`/`settings.ai`/`overtime.personal_summary`を追加した（未登録だと実効権限に一切現れず、一般ユーザーが権限を持てなかったため） |
 | DeepSeekモデル許可リスト | 実装済み | モデル追加時は本書とコードを同時更新 |
 | 生産・仕損・中断・残業の集計 | 実装済み | DeepSeekが品番検索・読み取り専用集計ツールを選択し、数値根拠を回答に継続表示 |
 | 個人名などの一時伏字化 | 実装済み | PMに登録されたユーザー・作業者名・得意先名・仕入先名を一時IDへ置換する。個人別残業は `overtime.personal_summary` を持つ画面でだけ応答時に復元する。連絡先は復元しない |

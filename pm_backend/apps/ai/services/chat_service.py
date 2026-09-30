@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum, Value
 from django.db.models.functions import Coalesce, TruncDate
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -1642,8 +1643,24 @@ def _build_facts(plan):
     return None, None, None
 
 
-class ProductionAIDemoView(APIView):
-    """QwenまたはDeepSeekを選択して使う社内AIチャットAPI。"""
+def _has_resource_permission(user, resource, level='view'):
+    """フロントエンドの hasPermission と同じ判定をサーバー側でも行う。親権限へフォールバックしない。"""
+    if getattr(user, 'is_superuser', False):
+        return True
+    from accounts.views import _build_effective_permissions
+
+    permissions = _build_effective_permissions(user)
+    perm = next((item for item in permissions if item['resource'] == resource), None)
+    if not perm:
+        return False
+    if level == 'edit':
+        return bool(perm.get('can_edit'))
+    return bool(perm.get('can_view') or perm.get('can_edit'))
+
+
+class AIChatAPIView(APIView):
+    """Qwen・DeepSeek・OpenRouterから選択して使う社内AIチャットAPI。"""
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """選択可能なAIモデルの準備状態を返す。"""
@@ -1674,6 +1691,8 @@ class ProductionAIDemoView(APIView):
         return Response({'providers': providers})
 
     def post(self, request):
+        if not _has_resource_permission(request.user, 'ai.chat'):
+            return Response({'detail': '社内AIチャットを利用する権限がありません。'}, status=403)
         question = str(request.data.get('message') or '').strip()
         if not question or len(question) > 1200:
             return Response({'detail': '質問を入力してください（最大1200文字）。'}, status=400)
@@ -1688,10 +1707,12 @@ class ProductionAIDemoView(APIView):
         if is_external_provider and model not in EXTERNAL_AGENT_PROVIDERS[provider]['models']:
             return Response({'detail': f"選択できない{EXTERNAL_AGENT_PROVIDERS[provider]['label']}モデルです。"}, status=400)
         redactor = _build_external_data_redactor() if is_external_provider else None
-        # 権限の判定はフロントエンドだけで行い、この値は画面で許可されたツール範囲を表す。
+        # 個人別残業はフロントエンドの申告(allow_personal_overtime)だけでなく、
+        # サーバー側でも overtime.personal_summary の閲覧権限を検証する。
         allow_personal_overtime = (
             request.data.get('allow_personal_overtime') is True
             and authorized_personal_data_allowed()
+            and _has_resource_permission(request.user, 'overtime.personal_summary')
         )
         screen_context = apply_tool_policy(
             resolve_screen_context(request.data.get('screen_context')),

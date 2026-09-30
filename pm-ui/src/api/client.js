@@ -196,10 +196,6 @@ export default {
   dailyProcessTargets: createDailyProcessTargetsAPI(client),
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
   productionRecordSettings: createProductionRecordSettingsAPI(client),
-  productionAIDemo: {
-    chat(payload) { return client.post('/production-ai-demo/', payload || {}) },
-    status() { return client.get('/production-ai-demo/') },
-  },
   aiChat: {
     chat(payload) { return client.post('/ai/chat/', payload || {}) },
     status() { return client.get('/ai/chat/') },
@@ -225,6 +221,10 @@ export default {
     createKnowledgeDocument(data) { return client.post('/ai/settings/knowledge-documents/', data) },
     updateKnowledgeDocument(id, data) { return client.patch(`/ai/settings/knowledge-documents/${id}/`, data) },
     deleteKnowledgeDocument(id) { return client.delete(`/ai/settings/knowledge-documents/${id}/`) },
+  },
+  ocr: {
+    status() { return client.get('/ocr/status/') },
+    recognize(data) { return client.post('/ocr/recognize/', data) },
   },
   scheduleConfig: createScheduleConfigAPI(client),
   lineBacklogAdjustments: createLineBacklogAdjustmentsAPI(client),

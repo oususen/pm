@@ -50,14 +50,13 @@
 
 ## API
 
-実装は、生産管理アプリから独立した `ai` アプリで管理する。`ai/views.py` はHTTP入口、`ai/services/chat_service.py` は業務ロジックを担当する。旧 `production/views_ai_demo.py` と `/api/production-ai-demo/` は互換入口として残す。
+実装は、生産管理アプリから独立した `ai` アプリで管理する。`ai/views.py` はHTTP入口、`ai/services/chat_service.py` の `AIChatAPIView` が業務ロジックを担当する。旧 `production/views_ai_demo.py` と `/api/production-ai-demo/`（`ProductionAIDemoView`という名称だった頃の互換入口）は削除済み。`/api/ai/chat/` に一本化されている。
 
-- `GET /api/production-ai-demo/`: QwenとDeepSeek APIの準備状態を返す。
-- `POST /api/production-ai-demo/`: `message`、直近会話、`provider`（`deepseek` または `qwen`）、DeepSeek利用時の`model`（`deepseek-v4-pro` または `deepseek-flash`）を受け取り、以下のいずれかで回答する。
-  - パターンマッチ即回答（残業個人照会）
+- `GET /api/ai/chat/`: Qwen・DeepSeek・OpenRouter各プロバイダのAPI準備状態を返す。
+- `POST /api/ai/chat/`: `message`、直近会話、`provider`（`deepseek`・`qwen`・`openrouter`）、外部プロバイダ利用時の`model`を受け取り、以下のいずれかで回答する。
+  - パターンマッチ即回答（残業個人照会、Qwen利用時のみ）
   - DB集計結果＋選択モデルの自然文回答（チャート・報告書含む）
   - 選択モデルの一般会話
-- `GET /api/ai/chat/` と `POST /api/ai/chat/`: 社内AIの正式API。リクエスト・レスポンスは旧APIと同じ。
 
 ## AIアプリの権限
 

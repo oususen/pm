@@ -6,7 +6,6 @@ from production.views_orphan_backlog import (
     OrphanLineBacklogFixView,
 )
 from production.views_line_demand import LineDemandViewSet
-from production.views_ai_demo import ProductionAIDemoView
 from production.views_plan_line_setting import ProductionPlanLineSettingView
 from production.views import (
     LineBacklogViewSet,
@@ -142,7 +141,6 @@ router.register(r'process-realtime-records', ProcessRealtimeRecordViewSet, basen
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('production-ai-demo/', ProductionAIDemoView.as_view(), name='production-ai-demo'),
     path('production-plan-line-settings/', ProductionPlanLineSettingView.as_view(), name='production-plan-line-settings'),
     path('production-plan-lock-setting/', ProductionPlanLockSettingView.as_view(), name='production-plan-lock-setting'),
     path('production-record-settings/', ProductionRecordInquirySettingView.as_view(), name='production-record-settings'),

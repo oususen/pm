@@ -1,6 +1,6 @@
 """社内AIのHTTP API。"""
-from ai.services.chat_service import ProductionAIDemoView
+from ai.services.chat_service import AIChatAPIView
 
 
-class AIChatView(ProductionAIDemoView):
-    """正式な社内AIチャットAPI。既存チャットの互換動作を継承する。"""
+class AIChatView(AIChatAPIView):
+    """正式な社内AIチャットAPI。"""
