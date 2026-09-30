@@ -145,9 +145,10 @@ class ExternalDataRedactor:
         text = str(value or '')
         for original, replacement in sorted(self.replacements, key=lambda item: len(item[0]), reverse=True):
             text = text.replace(original, replacement)
-        # 連絡先はAI回答で復元しないため、外部送信前に常に除去する。
+        # メールアドレスはAI回答で復元しないため、外部送信前に常に除去する。
+        # 電話番号の文字列置換は行わない(品番 V053143521 や得意先コード 000196 を電話番号と誤判定して
+        # 値が失われたため)。連絡先の列(contact_person・phone_number 等)は、SQL辞書の個人情報列として別に制御する。
         text = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[メールアドレス]', text)
-        text = re.sub(r'(?<!\d)(?:0\d{1,4}-?\d{1,4}-?\d{3,4})(?!\d)', '[電話番号]', text)
         return text
 
     def restore_text(self, value):
