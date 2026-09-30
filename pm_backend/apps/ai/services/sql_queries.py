@@ -45,6 +45,11 @@ TABLE_NOTES = {
         '日別・期間の集計は必ず arrival_date を使う。supplier_id は m_supplier.id、line_id は m_line.id、product_id は m_product.id。'
         'input_source は登録元(PURCHASE_ACTUAL_INPUT=実績入力、PURCHASE_RECEIVING=検収、PURCHASE_RECEIVING_MOBILE=スマホ検収)。'
     ),
+    'brake_line_record': (
+        'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
+        '生産数は operator_action が END(終了) と PAUSE(中断) の qty 合計(作業区間ごとの加工数で重複しない)。'
+        'START・RESUME・TEMP_END は qty=0 で生産数に含めない。中断件数は PAUSE・TEMP_END の件数。'
+    ),
     'm_supplier': '仕入先マスタ。supplier_type は仕入先の区分。',
     'm_line': 'ラインマスタ。line_type は PROD=生産、PURCHASE=購買、OUTSOURCE=外作、OTHER=その他。',
 }

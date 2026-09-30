@@ -1471,12 +1471,16 @@ def _production_facts(start, end, operator_name='', product_code=''):
                 'records': laser_records,
             })
 
-    # 生産実績照会のブレーキタブと同じ定義。終了済み行の加工数だけを数量根拠にする。
+    # 生産実績照会（ProductionRecordInquiry.vue の isCountableProductionRow）・LineBacklog.actual_qty と同じ定義。
+    # 作業区間ごとに終了(END)・中断(PAUSE)時点の加工数を登録するため、両方の qty を合計する。
     if product_code and not operator_name:
         brake_queryset = BrakeLineRecord.objects.using(AI_DB_ALIAS).filter(
             plan_date__gte=start,
             plan_date__lte=end,
-            operator_action=BrakeLineRecord.OPERATOR_ACTION_END,
+            operator_action__in=[
+                BrakeLineRecord.OPERATOR_ACTION_END,
+                BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+            ],
         ).filter(
             Q(product_code__iexact=product_code) | Q(product__product_code__iexact=product_code)
         )
@@ -1501,7 +1505,7 @@ def _production_facts(start, end, operator_name='', product_code=''):
             for row in brake_by_day
         ]
         selected_by_process = [row for row in by_process if row['process__process_name'] == 'ブレーキ実績']
-        source = 'ブレーキ実績（終了済み加工数）'
+        source = 'ブレーキ実績（終了・中断時の加工数）'
     elif laser_records:
         selected_by_day = [
             {'day': row['actual__work_date'], 'quantity': row['quantity'] or Decimal('0'), 'records': row['records']}
