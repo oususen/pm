@@ -157,7 +157,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 |---|---|---|---|
 | `v_ai_purchase_receipt`（`ai/0012`で作成） | `id`, `arrival_date`, `registered_at`, `supplier_id`, `line_id`, `product_id`, `product_code`, `product_name`, `qty`, `process_id`, `input_source` | `t_process_realtime_record` のうち `record_type='PRODUCTION'` かつ `event_data.source` が仕入の3種類の行だけ。仕入れ実績照会画面と同じ定義 | 仕入画面・本社横断から読み取り専用SQLで、仕入先別・品番別・日別の入荷数を集計する |
 
-- 入荷数量は `qty`、入荷日は `arrival_date`（`event_data.arrival_date`）。日別集計は `arrival_date` を使い、登録日時 `registered_at` は使わない（2026-09-30時点の全2,531件中34件は入荷日と登録日が異なる）。
+- 入荷数量は `qty`、入荷日は `arrival_date`（`event_data.arrival_date`）。`arrival_date` は実際に入荷した日、`registered_at` はシステムへ登録した日時。検収（`PURCHASE_RECEIVING`・`PURCHASE_RECEIVING_MOBILE`）は入荷時にその場で登録するので両者は同じ日になるが、仕入れ実績入力（`PURCHASE_ACTUAL_INPUT`）は後から入力できるので異なることがある。入荷の日別・期間集計は必ず `arrival_date` を使う（2026-09-30時点では全2,531件が実績入力で、うち34件は入荷日と登録日が異なる）。
 - `event_data` に入っているのは `source`・`line_id`・`supplier_id`・`arrival_date` だけで、個人情報は含まない。
 - 仕入先名（`m_supplier.supplier_name`）は外部AIへ送る直前に一時ID（仕入先N）へ伏字化される。連絡先の列は従来どおり個人情報扱い。
 - 仕入計画・入荷予定（`LineBacklog` の購買・外作ライン）と、在庫/残量・仕入れ進度（専用計算）はまだ対象外。

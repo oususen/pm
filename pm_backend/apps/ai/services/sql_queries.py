@@ -39,7 +39,9 @@ TABLE_NOTES = {
     ),
     'v_ai_purchase_receipt': (
         '仕入の入荷実績(仕入れ実績入力・検収・スマホ検収)だけを抜き出したビュー。1行=1回の入荷登録。'
-        '入荷数量は qty、入荷日は arrival_date(日別・期間の集計は registered_at ではなく arrival_date を使う)。supplier_id は m_supplier.id、line_id は m_line.id、product_id は m_product.id。'
+        '入荷数量は qty、入荷日は arrival_date(実際に入荷した日)、registered_at はシステム登録日時。'
+        '検収は入荷時に登録するので同じ日だが、実績入力は後から入力できるので異なることがある。'
+        '日別・期間の集計は必ず arrival_date を使う。supplier_id は m_supplier.id、line_id は m_line.id、product_id は m_product.id。'
         'input_source は登録元(PURCHASE_ACTUAL_INPUT=実績入力、PURCHASE_RECEIVING=検収、PURCHASE_RECEIVING_MOBILE=スマホ検収)。'
     ),
     'm_supplier': '仕入先マスタ。supplier_type は仕入先の区分。',
