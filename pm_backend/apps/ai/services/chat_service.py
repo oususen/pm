@@ -487,6 +487,19 @@ def _readonly_sql_tool(screen_context, allow_personal_data=False):
     }
 
 
+# 利用者が表・一覧・Excelでの出力を求めたときにAIが呼ぶ。DBへはアクセスせず、画面のExcelボタンを出す印を立てるだけ。
+EXCEL_EXPORT_TOOL = {
+    'type': 'function',
+    'function': {
+        'name': 'request_excel_export',
+        'description': (
+            '利用者が「表で出して」「Excelにして」「一覧にして」など、表やExcelでの出力を求めたときに呼ぶ。'
+            'ダウンロードボタンは画面が自動で付けるので、ボタンやHTMLは書かない。Excelの元になるのは回答本文のMarkdownの表なので、回答には集計結果を必ず `| 列名 | 列名 |` 形式のMarkdownの表で書くこと。'
+        ),
+        'parameters': {'type': 'object', 'properties': {}},
+    },
+}
+
 DEEPSEEK_PERSONAL_OVERTIME_TOOL = {
     'type': 'function',
     'function': {
@@ -865,6 +878,7 @@ def _deepseek_agent_chat(
             )
             if tool['function']['name'] in allowed_tools
         )
+    available_tools.append(EXCEL_EXPORT_TOOL)
     order_context_instruction = ''
     if screen_context['id'] == 'orders':
         order_context_instruction = (
@@ -892,6 +906,8 @@ def _deepseek_agent_chat(
             'SQLはexecute_readonly_sqlでSELECT一文だけを使えます。更新、削除、DDL、管理SQL、個人情報取得はできません。\n'
             'SQLで「〇〇別」の集計を聞かれたら、そのキーとなるコード列(品番ならproduct_code)でGROUP BYし、回答の表にはコードを先頭列に出してください。'
             '名称は併記にとどめ、名称だけの表にしてはいけません(別のコードに同じ名称がある場合があります)。\n'
+            '利用者が「表で出して」「Excelにして」「一覧にして」など、表やExcelでの出力を求めたときは、回答にMarkdownの表を書いたうえで、'
+            'request_excel_exportを呼んでください。ボタンは画面が付けるので、ボタンやHTMLは書かず、表はMarkdownで書いてください。出力を求められていないときは呼ばないでください。\n'
             + order_context_instruction +
             '品番を含む質問では、必ず最初にsearch_productを呼び、見つからなければ「現在この品番はありません」と回答してください。候補を勝手に選んではいけません。\n'
             '品番マスタの件数質問ではcount_productsを使ってください。「最終品」はis_final_product、'
@@ -955,6 +971,7 @@ def _deepseek_agent_chat(
             source += f"（先頭{len(vision_attachment['data_urls'])}/{vision_attachment['total_pages']}ページ）"
     period = None
     chart = None
+    excel_export = False
     payload = {}
     # そのターンで実際にDeepSeekへ提示された一時ID(＝根拠あり)だけを復元対象にする。
     # ツールを呼ばず推測した一時IDが実在社員名に化けるのを防ぐ。
@@ -1016,7 +1033,7 @@ def _deepseek_agent_chat(
                     'provider': provider_key, 'model': payload.get('model', model or default_model),
                     'duration_seconds': None, 'output_tokens': usage.get('completion_tokens'),
                     'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
-                }, display_source, period, chart
+                }, display_source, period, chart, excel_export
 
             assistant_message = {
                 'role': 'assistant', 'content': message.get('content') or '', 'tool_calls': tool_calls,
@@ -1030,6 +1047,13 @@ def _deepseek_agent_chat(
             messages.append(assistant_message)
             for tool_call in tool_calls:
                 function = tool_call.get('function') or {}
+                if function.get('name') == 'request_excel_export':
+                    excel_export = True
+                    messages.append({
+                        'role': 'tool', 'tool_call_id': tool_call.get('id', ''),
+                        'content': json.dumps({'status': 'ok', 'detail': '画面にExcelダウンロードボタンを表示します。'}, ensure_ascii=False),
+                    })
+                    continue
                 try:
                     arguments = json.loads(function.get('arguments') or '{}')
                 except json.JSONDecodeError:
@@ -1780,7 +1804,7 @@ class AIChatAPIView(APIView):
         if is_external_provider:
             agent_provider = EXTERNAL_AGENT_PROVIDERS[provider]
             try:
-                answer, inference, source, period, chart = _deepseek_agent_chat(
+                answer, inference, source, period, chart, excel_export = _deepseek_agent_chat(
                     question, history, model=model, redactor=redactor,
                     allow_personal_overtime=allow_personal_overtime,
                     screen_context=screen_context,
@@ -1799,6 +1823,7 @@ class AIChatAPIView(APIView):
                 'period': period,
                 'chart': chart,
                 'document': '',
+                'excel_export': excel_export,
                 'provider': provider,
                 'model': inference['model'],
                 'inference': inference,

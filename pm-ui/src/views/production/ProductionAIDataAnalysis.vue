@@ -58,6 +58,7 @@
                   </div>
                   <div class="chart-axis">単位: {{ message.chart.series_label }}</div>
                 </section>
+                <button v-if="message.excel_export && hasMarkdownTable(message.content)" class="download" @click="downloadMarkdownTablesAsExcel(message.content)">⇩　回答の表をExcelでダウンロード <small>.xlsx</small></button>
                 <button v-if="message.document" class="download" @click="downloadReport(message)">⇩　報告書の下書きをダウンロード <small>.md</small></button>
               </div>
               <div v-if="message.role === 'user'" class="user-avatar">YOU</div>
@@ -101,6 +102,7 @@ import { useRoute } from 'vue-router'
 import { authState } from '@/auth'
 import api from '@/api/client'
 import { hasPermission } from '@/router'
+import { downloadMarkdownTablesAsExcel, hasMarkdownTable } from '@/utils/aiMarkdownTableExcel'
 
 const provider = ref('openrouter')
 const route = useRoute()
@@ -190,7 +192,7 @@ const ask = async (question) => {
     })
     messages.value.push({
       role: 'assistant', content: data.answer, analysis: data.analysis, source: data.source,
-      period: data.period, chart: data.chart, document: data.document,
+      period: data.period, chart: data.chart, document: data.document, excel_export: data.excel_export === true,
       inference: data.inference, provider: data.provider, model: data.model,
     })
     await saveConversation()
