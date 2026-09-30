@@ -889,6 +889,8 @@ def _deepseek_agent_chat(
             f"今回の起点画面: {screen_context['label']}。この画面に許可されたツール以外を使ってはいけません。\n"
             '利用できるのは品番マスタ検索、許可済みの読み取り専用集計ツール、および許可された場合のAI用DB辞書SQLだけです。'
             'SQLはexecute_readonly_sqlでSELECT一文だけを使えます。更新、削除、DDL、管理SQL、個人情報取得はできません。\n'
+            'SQLで「〇〇別」の集計を聞かれたら、そのキーとなるコード列(品番ならproduct_code)でGROUP BYし、回答の表にはコードを先頭列に出してください。'
+            '名称は併記にとどめ、名称だけの表にしてはいけません(別のコードに同じ名称がある場合があります)。\n'
             + order_context_instruction +
             '品番を含む質問では、必ず最初にsearch_productを呼び、見つからなければ「現在この品番はありません」と回答してください。候補を勝手に選んではいけません。\n'
             '品番マスタの件数質問ではcount_productsを使ってください。「最終品」はis_final_product、'
