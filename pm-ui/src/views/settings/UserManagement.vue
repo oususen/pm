@@ -243,6 +243,10 @@
               <label>有効</label>
               <input v-model="form.is_active" type="checkbox" />
             </div>
+            <div class="form-row inline">
+              <label>システム管理者</label>
+              <input v-model="form.profile.is_system_admin" type="checkbox" :disabled="!authState.user?.is_superuser" />
+            </div>
             <div class="form-actions">
               <button type="submit" class="btn primary" :disabled="saving || !canManageBasic">
                 {{ saving ? '保存中...' : '保存' }}
@@ -335,6 +339,7 @@ const emptyProfile = () => ({
   leader_units: [],
   unit: null,
   joined_on: '',
+  is_system_admin: false,
 })
 
 const form = reactive({

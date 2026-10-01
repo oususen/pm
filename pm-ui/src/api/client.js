@@ -196,6 +196,9 @@ export default {
   dailyProcessTargets: createDailyProcessTargetsAPI(client),
   productionPlanLockSetting: createProductionPlanLockSettingAPI(client),
   productionRecordSettings: createProductionRecordSettingsAPI(client),
+  userRequests: {
+    send(formData) { return client.post('/user-requests/', formData) },
+  },
   aiChat: {
     chat(payload, config) { return client.post('/ai/chat/', payload || {}, config) },
     status(params) { return client.get('/ai/chat/', { params }) },

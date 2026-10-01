@@ -246,6 +246,10 @@
               <input v-model="form.is_active" type="checkbox" />
             </div>
             <div class="form-row inline">
+              <label>システム管理者</label>
+              <input v-model="form.profile.is_system_admin" type="checkbox" :disabled="!authState.user?.is_superuser" />
+            </div>
+            <div class="form-row inline">
               <label>backendスタッフ</label>
               <input v-model="form.is_staff" type="checkbox" />
             </div>
@@ -536,6 +540,7 @@ const emptyProfile = () => ({
   leader_units: [],
   unit: null,
   joined_on: '',
+  is_system_admin: false,
 })
 
 const emptyPermissions = () =>

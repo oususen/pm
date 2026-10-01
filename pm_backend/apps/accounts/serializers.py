@@ -107,6 +107,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'unit_name',
             'unit_lines',
             'joined_on',
+            'is_system_admin',
         ]
         extra_kwargs = {
             'employee_code': {'validators': []},  # Disable default unique validator
@@ -254,6 +255,12 @@ class UserSerializer(serializers.ModelSerializer):
             profile_data['division'] = profile_data.get('department')
         return profile_data
 
+    def _guard_system_admin_flag(self, profile_data):
+        """システム管理者フラグは superuser のみ変更できる（それ以外は値を無視する）"""
+        request = self.context.get('request')
+        if not (request and request.user and request.user.is_superuser):
+            profile_data.pop('is_system_admin', None)
+
     def create(self, validated_data):
         profile_data = validated_data.pop('profile', None)
         permissions_data = validated_data.pop('permissions', None)
@@ -264,6 +271,9 @@ class UserSerializer(serializers.ModelSerializer):
             employee_code = profile_data.get('employee_code')
             if employee_code == '':
                 employee_code = None
+
+        if profile_data is not None:
+            self._guard_system_admin_flag(profile_data)
 
         user = User(**validated_data)
         if password:
@@ -319,6 +329,7 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
 
         if profile_data is not None:
+            self._guard_system_admin_flag(profile_data)
             supervisor_teams = profile_data.pop('supervisor_teams', None)
             leader_units = profile_data.pop('leader_units', None)
             profile_data = self._sync_department_and_division(profile_data)

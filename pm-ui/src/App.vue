@@ -12,16 +12,19 @@
     </div>
     <AIChatDrawer v-if="showLayout" />
     <AIFloatingButton v-if="showLayout" />
+    <RequestDialog v-if="showLayout" />
 
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import GlobalNavigation from "./components/GlobalNavigation.vue";
 import AIChatDrawer from "./components/AIChatDrawer.vue";
 import AIFloatingButton from "./components/AIFloatingButton.vue";
+import RequestDialog from "./components/RequestDialog.vue";
+import { aiDrawerOpen, aiDrawerSourcePath } from "./composables/aiDrawer";
 
 const todayText = computed(() => {
   const d = new Date();
@@ -34,6 +37,11 @@ let mediaQuery = null;
 
 const route = useRoute();
 const showLayout = computed(() => !route.meta?.hideLayout && route.query.embed !== 'tablet');
+
+// ドロワーを開いたまま画面遷移した場合も、AIの起点画面を現在の画面に合わせる。
+watch(() => route.fullPath, (path) => {
+  if (aiDrawerOpen.value) aiDrawerSourcePath.value = path;
+});
 
 // 開発環境かどうか判定（本番IP以外は全て開発環境）
 const isDev = computed(() => {

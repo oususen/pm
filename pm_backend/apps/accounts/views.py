@@ -92,6 +92,7 @@ def _profile_payload(user):
         'unit_name': profile.unit.name if profile.unit_id else None,
         'unit_lines': unit_lines,
         'joined_on': profile.joined_on.isoformat() if profile.joined_on else None,
+        'is_system_admin': profile.is_system_admin,
     }
 
 def _permissions_to_map(permissions):
