@@ -48,6 +48,7 @@
             <th rowspan="2">加工費合計</th>
             <th class="section-title" colspan="5">セッションから</th>
             <th class="section-title section-divider" colspan="5">勤務時間から</th>
+            <th v-if="activeTab === 'period'" class="section-title section-divider" colspan="5">全出勤時間から</th>
             <th class="section-title section-divider" colspan="1">稼働率</th>
           </tr>
           <tr>
@@ -61,6 +62,13 @@
             <th>出来高順</th>
             <th>加工費/H</th>
             <th>加工費/H順</th>
+            <template v-if="activeTab === 'period'">
+              <th class="section-divider">全出勤時間(H)</th>
+              <th>出来高</th>
+              <th>出来高順</th>
+              <th>加工費/H</th>
+              <th>加工費/H順</th>
+            </template>
             <th class="section-divider">(加工時間/出勤時間)</th>
           </tr>
         </thead>
@@ -104,6 +112,11 @@
               <td class="num-cell">—</td>
               <td class="num-cell">{{ periodTotal.attendanceRate != null ? formatMetric(periodTotal.attendanceRate) : '—' }}</td>
               <td class="num-cell">—</td>
+              <td class="num-cell section-divider">{{ periodTotal.fullAttendanceHours > 0 ? formatMetric(periodTotal.fullAttendanceHours) : '—' }}</td>
+              <td class="num-cell">{{ periodTotal.fullAttendanceThroughput != null ? formatMetric(periodTotal.fullAttendanceThroughput) : '—' }}</td>
+              <td class="num-cell">—</td>
+              <td class="num-cell">{{ periodTotal.fullAttendanceRate != null ? formatMetric(periodTotal.fullAttendanceRate) : '—' }}</td>
+              <td class="num-cell">—</td>
               <td class="num-cell section-divider">{{ formatUtilization(periodTotal.sessionHours, periodTotal.attendanceHours) }}</td>
             </tr>
             <tr v-for="(row, index) in filteredPeriodRows" :key="`p-${row.name}`" :class="{ 'date-start': index === 0 }">
@@ -123,6 +136,11 @@
               <td class="num-cell">{{ row.attendanceQtyRank || '—' }}</td>
               <td class="num-cell heat-rate" :style="heatStyle(row.attendanceRateIntensity)">{{ row.attendanceRate != null ? formatMetric(row.attendanceRate) : '—' }}</td>
               <td class="num-cell">{{ row.attendanceRateRank || '—' }}</td>
+              <td class="num-cell section-divider">{{ row.fullAttendanceHours > 0 ? formatMetric(row.fullAttendanceHours) : '—' }}</td>
+              <td class="num-cell heat-qty" :style="heatStyle(row.fullAttendanceQtyIntensity)">{{ row.fullAttendanceThroughput != null ? formatMetric(row.fullAttendanceThroughput) : '—' }}</td>
+              <td class="num-cell">{{ row.fullAttendanceQtyRank || '—' }}</td>
+              <td class="num-cell heat-rate" :style="heatStyle(row.fullAttendanceRateIntensity)">{{ row.fullAttendanceRate != null ? formatMetric(row.fullAttendanceRate) : '—' }}</td>
+              <td class="num-cell">{{ row.fullAttendanceRateRank || '—' }}</td>
               <td class="num-cell section-divider">{{ formatUtilization(row.sessionHours, row.attendanceHours) }}</td>
             </tr>
           </template>
@@ -130,7 +148,7 @@
             <td colspan="17" class="empty">データがありません</td>
           </tr>
           <tr v-if="activeTab === 'period' && !filteredPeriodRows.length">
-            <td colspan="17" class="empty">データがありません</td>
+            <td colspan="22" class="empty">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -253,6 +271,15 @@ const attendanceHoursByPersonDate = computed(() => {
   return map
 })
 
+const fullAttendanceHoursByPerson = computed(() => {
+  const map = new Map()
+  for (const row of rows.value) {
+    const key = normalizePersonName(row.name)
+    map.set(key, (map.get(key) || 0) + Number(row.workH || 0))
+  }
+  return map
+})
+
 const overtimeGapByPersonDate = computed(() => {
   const map = new Map()
   for (const row of rows.value) {
@@ -341,15 +368,22 @@ const periodRows = computed(() => {
     target.sessionHours += Number(row.sessionHours || 0)
     target.attendanceHours += Number(row.attendanceHours || 0)
   }
-  const out = [...aggregate.values()].map((item) => ({
-    ...item,
-    sessionRate: item.sessionHours > 0 ? Math.round(item.amountTotal / item.sessionHours) : null,
-    attendanceRate: item.attendanceHours > 0 ? Math.round(item.amountTotal / item.attendanceHours) : null,
-    sessionThroughput: item.sessionHours > 0 ? Math.round(item.qtyTotal / item.sessionHours) : null,
-    attendanceThroughput: item.attendanceHours > 0 ? Math.round(item.qtyTotal / item.attendanceHours) : null,
-  }))
+  const out = [...aggregate.values()]
+    .map((item) => ({
+      ...item,
+      fullAttendanceHours: Math.round((fullAttendanceHoursByPerson.value.get(normalizePersonName(item.name)) || 0) * 1000) / 1000,
+    }))
+    .map((item) => ({
+      ...item,
+      sessionRate: item.sessionHours > 0 ? Math.round(item.amountTotal / item.sessionHours) : null,
+      attendanceRate: item.attendanceHours > 0 ? Math.round(item.amountTotal / item.attendanceHours) : null,
+      fullAttendanceRate: item.fullAttendanceHours > 0 ? Math.round(item.amountTotal / item.fullAttendanceHours) : null,
+      sessionThroughput: item.sessionHours > 0 ? Math.round(item.qtyTotal / item.sessionHours) : null,
+      attendanceThroughput: item.attendanceHours > 0 ? Math.round(item.qtyTotal / item.attendanceHours) : null,
+      fullAttendanceThroughput: item.fullAttendanceHours > 0 ? Math.round(item.qtyTotal / item.fullAttendanceHours) : null,
+    }))
   out.sort((a, b) => b.qtyTotal - a.qtyTotal)
-  return applyDateRanking(out)
+  return applyFullAttendanceRanking(applyDateRanking(out))
 })
 
 const filteredPeriodRows = computed(() => periodRows.value)
@@ -359,15 +393,19 @@ const periodTotal = computed(() => {
   const amountTotal = filteredPeriodRows.value.reduce((s, r) => s + Number(r.amountTotal || 0), 0)
   const sessionHours = filteredPeriodRows.value.reduce((s, r) => s + Number(r.sessionHours || 0), 0)
   const attendanceHours = filteredPeriodRows.value.reduce((s, r) => s + Number(r.attendanceHours || 0), 0)
+  const fullAttendanceHours = filteredPeriodRows.value.reduce((s, r) => s + Number(r.fullAttendanceHours || 0), 0)
   return {
     qtyTotal,
     amountTotal,
     sessionHours,
     attendanceHours,
+    fullAttendanceHours,
     sessionRate: sessionHours > 0 ? Math.round(amountTotal / sessionHours) : null,
     attendanceRate: attendanceHours > 0 ? Math.round(amountTotal / attendanceHours) : null,
+    fullAttendanceRate: fullAttendanceHours > 0 ? Math.round(amountTotal / fullAttendanceHours) : null,
     sessionThroughput: sessionHours > 0 ? Math.round(qtyTotal / sessionHours) : null,
     attendanceThroughput: attendanceHours > 0 ? Math.round(qtyTotal / attendanceHours) : null,
+    fullAttendanceThroughput: fullAttendanceHours > 0 ? Math.round(qtyTotal / fullAttendanceHours) : null,
   }
 })
 
@@ -431,6 +469,39 @@ function applyDateRanking(inputRows) {
       row.attendanceRateIntensity = maxAttendanceRate > 0 && row.attendanceRate != null ? Number(row.attendanceRate || 0) / maxAttendanceRate : 0
     })
   }
+  return rowsOut
+}
+
+function applyFullAttendanceRanking(inputRows) {
+  const rowsOut = inputRows.map((row) => ({ ...row }))
+  const qtySorted = [...rowsOut]
+    .filter((row) => row.fullAttendanceThroughput != null)
+    .sort((a, b) => Number(b.fullAttendanceThroughput || 0) - Number(a.fullAttendanceThroughput || 0))
+  let previousQty = null
+  let qtyRank = 0
+  qtySorted.forEach((row, index) => {
+    if (previousQty === null || row.fullAttendanceThroughput !== previousQty) qtyRank = index + 1
+    row.fullAttendanceQtyRank = qtyRank
+    previousQty = row.fullAttendanceThroughput
+  })
+
+  const rateSorted = [...rowsOut]
+    .filter((row) => row.fullAttendanceRate != null)
+    .sort((a, b) => Number(b.fullAttendanceRate || 0) - Number(a.fullAttendanceRate || 0))
+  let previousRate = null
+  let rateRank = 0
+  rateSorted.forEach((row, index) => {
+    if (previousRate === null || row.fullAttendanceRate !== previousRate) rateRank = index + 1
+    row.fullAttendanceRateRank = rateRank
+    previousRate = row.fullAttendanceRate
+  })
+
+  const maxQty = Math.max(...rowsOut.map((row) => Number(row.fullAttendanceThroughput || 0)), 0)
+  const maxRate = Math.max(...rowsOut.map((row) => Number(row.fullAttendanceRate || 0)), 0)
+  rowsOut.forEach((row) => {
+    row.fullAttendanceQtyIntensity = maxQty > 0 && row.fullAttendanceThroughput != null ? Number(row.fullAttendanceThroughput || 0) / maxQty : 0
+    row.fullAttendanceRateIntensity = maxRate > 0 && row.fullAttendanceRate != null ? Number(row.fullAttendanceRate || 0) / maxRate : 0
+  })
   return rowsOut
 }
 
@@ -642,38 +713,33 @@ async function load() {
 }
 
 function exportExcel() {
+  const isPeriodTab = activeTab.value === 'period'
   const headerTop = [
     '氏名', '班', 'グループ', '日付', '加工数合計', '加工費合計',
     'セッションから', '', '', '', '',
     '勤務時間から', '', '', '', '',
+    ...(isPeriodTab ? ['全出勤時間から', '', '', '', ''] : []),
     '稼働率',
   ]
   const headerBottom = [
     '', '', '', '', '', '',
     '加工時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順',
     '出勤時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順',
+    ...(isPeriodTab ? ['全出勤時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順'] : []),
     '(加工時間/出勤時間)',
   ]
 
-  const toRow = (r, dateLabel = r.date || '合計') => ([
-    r.name || '',
-    r.team || '',
-    r.group || '',
-    dateLabel,
-    Number(r.qtyTotal || 0),
-    Number(r.amountTotal || 0),
-    Number(r.sessionHours || 0),
-    r.sessionThroughput ?? '',
-    r.sessionQtyRank ?? '',
-    r.sessionRate ?? '',
-    r.rateRank ?? '',
-    Number(r.attendanceHours || 0),
-    r.attendanceThroughput ?? '',
-    r.attendanceQtyRank ?? '',
-    r.attendanceRate ?? '',
-    r.attendanceRateRank ?? '',
-    formatUtilization(r.sessionHours, r.attendanceHours),
-  ])
+  const toRow = (r, dateLabel = r.date || '合計') => {
+    const values = [
+      r.name || '', r.team || '', r.group || '', dateLabel,
+      Number(r.qtyTotal || 0), Number(r.amountTotal || 0), Number(r.sessionHours || 0),
+      r.sessionThroughput ?? '', r.sessionQtyRank ?? '', r.sessionRate ?? '', r.rateRank ?? '',
+      Number(r.attendanceHours || 0), r.attendanceThroughput ?? '', r.attendanceQtyRank ?? '', r.attendanceRate ?? '', r.attendanceRateRank ?? '',
+    ]
+    if (isPeriodTab) values.push(Number(r.fullAttendanceHours || 0), r.fullAttendanceThroughput ?? '', r.fullAttendanceQtyRank ?? '', r.fullAttendanceRate ?? '', r.fullAttendanceRateRank ?? '')
+    values.push(formatUtilization(r.sessionHours, r.attendanceHours))
+    return values
+  }
 
   const data = []
   if (activeTab.value === 'daily') {
@@ -695,12 +761,17 @@ function exportExcel() {
       attendanceQtyRank: '',
       attendanceRate: periodTotal.value.attendanceRate,
       attendanceRateRank: '',
+      fullAttendanceHours: periodTotal.value.fullAttendanceHours,
+      fullAttendanceThroughput: periodTotal.value.fullAttendanceThroughput,
+      fullAttendanceQtyRank: '',
+      fullAttendanceRate: periodTotal.value.fullAttendanceRate,
+      fullAttendanceRateRank: '',
     }, '合計'))
     for (const row of filteredPeriodRows.value) data.push(toRow(row, '合計'))
   }
 
   const ws = XLSX.utils.aoa_to_sheet([headerTop, headerBottom, ...data])
-  ws['!merges'] = [
+  const merges = [
     { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
     { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
     { s: { r: 0, c: 2 }, e: { r: 1, c: 2 } },
@@ -709,9 +780,14 @@ function exportExcel() {
     { s: { r: 0, c: 5 }, e: { r: 1, c: 5 } },
     { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },
     { s: { r: 0, c: 11 }, e: { r: 0, c: 15 } },
-    { s: { r: 0, c: 16 }, e: { r: 0, c: 16 } },
   ]
-  ws['!cols'] = [22, 10, 12, 12, 12, 12, 12, 14, 14, 14, 16, 12, 12, 14, 14, 16, 18].map((w) => ({ wch: w }))
+  if (isPeriodTab) merges.push({ s: { r: 0, c: 16 }, e: { r: 0, c: 20 } }, { s: { r: 0, c: 21 }, e: { r: 0, c: 21 } })
+  else merges.push({ s: { r: 0, c: 16 }, e: { r: 0, c: 16 } })
+  ws['!merges'] = merges
+  const widths = [22, 10, 12, 12, 12, 12, 12, 14, 14, 14, 16, 12, 12, 14, 14, 16]
+  if (isPeriodTab) widths.push(14, 12, 14, 14, 16)
+  widths.push(18)
+  ws['!cols'] = widths.map((w) => ({ wch: w }))
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, activeTab.value === 'daily' ? '日別' : '期間集計')
   const filename = `加工費集計_${activeTab.value === 'daily' ? '日別' : '期間集計'}_${dateFrom.value}_${dateTo.value}.xlsx`
