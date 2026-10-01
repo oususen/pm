@@ -49,7 +49,7 @@
             <th class="section-title" colspan="5">セッションから</th>
             <th class="section-title section-divider" colspan="5">勤務時間から</th>
             <th v-if="activeTab === 'period'" class="section-title section-divider" colspan="5">全出勤時間から</th>
-            <th class="section-title section-divider" colspan="1">稼働率</th>
+            <th class="section-title section-divider" :colspan="activeTab === 'period' ? 2 : 1">稼働率</th>
           </tr>
           <tr>
             <th>加工時間(H)</th>
@@ -69,7 +69,11 @@
               <th>加工費/H</th>
               <th>加工費/H順</th>
             </template>
-            <th class="section-divider">(加工時間/出勤時間)</th>
+            <template v-if="activeTab === 'period'">
+              <th class="section-divider">稼働率</th>
+              <th>全期間稼働率</th>
+            </template>
+            <th v-else class="section-divider">(加工時間/出勤時間)</th>
           </tr>
         </thead>
         <tbody>
@@ -118,6 +122,7 @@
               <td class="num-cell">{{ periodTotal.fullAttendanceRate != null ? formatMetric(periodTotal.fullAttendanceRate) : '—' }}</td>
               <td class="num-cell">—</td>
               <td class="num-cell section-divider">{{ formatUtilization(periodTotal.sessionHours, periodTotal.attendanceHours) }}</td>
+              <td class="num-cell">{{ formatUtilization(periodTotal.sessionHours, periodTotal.fullAttendanceHours) }}</td>
             </tr>
             <tr v-for="(row, index) in filteredPeriodRows" :key="`p-${row.name}`" :class="{ 'date-start': index === 0 }">
               <td class="name-cell">{{ row.name }}</td>
@@ -142,13 +147,14 @@
               <td class="num-cell heat-rate" :style="heatStyle(row.fullAttendanceRateIntensity)">{{ row.fullAttendanceRate != null ? formatMetric(row.fullAttendanceRate) : '—' }}</td>
               <td class="num-cell">{{ row.fullAttendanceRateRank || '—' }}</td>
               <td class="num-cell section-divider">{{ formatUtilization(row.sessionHours, row.attendanceHours) }}</td>
+              <td class="num-cell">{{ formatUtilization(row.sessionHours, row.fullAttendanceHours) }}</td>
             </tr>
           </template>
           <tr v-if="activeTab === 'daily' && !filteredDailyRows.length">
             <td colspan="17" class="empty">データがありません</td>
           </tr>
           <tr v-if="activeTab === 'period' && !filteredPeriodRows.length">
-            <td colspan="22" class="empty">データがありません</td>
+            <td colspan="23" class="empty">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -631,6 +637,7 @@ async function loadProductionMetrics() {
     if (seenKeys.has(key)) continue
     seenKeys.add(key)
     dedupedSessions.push(row)
+    if (isPeriodTab) values.push(formatUtilization(r.sessionHours, r.fullAttendanceHours))
   }
   productionSessions.value = dedupedSessions
 
@@ -680,6 +687,7 @@ async function load() {
       const overtimeTotalH = Math.round((h + midnightH) * 10) / 10
       let workH = 0
       if (app.application_type === 'normal') workH = 8
+  if (isPeriodTab) widths.push(22)
       else if (app.application_type === 'overtime') workH = Math.round((8 + overtimeTotalH) * 10) / 10
       else if (app.application_type === 'half_day_am') workH = Math.round((4 + overtimeTotalH) * 10) / 10
       else if (app.application_type === 'holiday') workH = h > 0 ? h : (app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8)
@@ -719,14 +727,14 @@ function exportExcel() {
     'セッションから', '', '', '', '',
     '勤務時間から', '', '', '', '',
     ...(isPeriodTab ? ['全出勤時間から', '', '', '', ''] : []),
-    '稼働率',
+    ...(isPeriodTab ? ['稼働率', ''] : ['稼働率']),
   ]
   const headerBottom = [
     '', '', '', '', '', '',
     '加工時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順',
     '出勤時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順',
     ...(isPeriodTab ? ['全出勤時間(H)', '出来高', '出来高順', '加工費/H', '加工費/H順'] : []),
-    '(加工時間/出勤時間)',
+    ...(isPeriodTab ? ['稼働率(加工時間/出勤時間)', '全期間稼働率(加工時間/全出勤時間)'] : ['(加工時間/出勤時間)']),
   ]
 
   const toRow = (r, dateLabel = r.date || '合計') => {
@@ -781,7 +789,7 @@ function exportExcel() {
     { s: { r: 0, c: 6 }, e: { r: 0, c: 10 } },
     { s: { r: 0, c: 11 }, e: { r: 0, c: 15 } },
   ]
-  if (isPeriodTab) merges.push({ s: { r: 0, c: 16 }, e: { r: 0, c: 20 } }, { s: { r: 0, c: 21 }, e: { r: 0, c: 21 } })
+  if (isPeriodTab) merges.push({ s: { r: 0, c: 16 }, e: { r: 0, c: 20 } }, { s: { r: 0, c: 21 }, e: { r: 0, c: 22 } })
   else merges.push({ s: { r: 0, c: 16 }, e: { r: 0, c: 16 } })
   ws['!merges'] = merges
   const widths = [22, 10, 12, 12, 12, 12, 12, 14, 14, 14, 16, 12, 12, 14, 14, 16]

@@ -402,7 +402,8 @@
       <li><span class="anno-num">2</span><span><strong>セッションから</strong> &#8212; 生産セッション（実加工時間）ベースの指標。加工時間(H)は実際に機械を動かした時間、出来高は加工数/加工時間、加工費/Hは加工費合計/加工時間</span></li>
       <li><span class="anno-num">3</span><span><strong>勤務時間から</strong> &#8212; 承認済み勤務時間ベースの指標。出勤時間(H)は残業申請の承認データから取得。出来高・加工費/Hは出勤時間で割った値</span></li>
       <li><span class="anno-num">4</span><span><strong>全出勤時間から</strong> &#8212; 期間集計でのみ表示。加工実績がない日も含めた全出勤時間を分母にして、出来高・加工費/Hを比較します</span></li>
-      <li><span class="anno-num">5</span><span><strong>稼働率</strong> &#8212; 加工時間 / 出勤時間 をパーセントで表示。出勤時間のうち実際に加工に費やした割合です</span></li>
+      <li><span class="anno-num">5</span><span><strong>稼働率</strong> &#8212; 加工時間 / 加工実績がある日の出勤時間 をパーセントで表示。出勤時間のうち実際に加工に費やした割合です</span></li>
+      <li><span class="anno-num">6</span><span><strong>全期間稼働率</strong> &#8212; 期間集計でのみ表示。加工時間 / 対象期間内の全出勤時間 をパーセントで表示し、加工実績がない日も含めた実稼働割合を確認できます</span></li>
     </ul>
 
     <h4 class="sub">&#9654; 表示上の特徴</h4>
@@ -645,7 +646,7 @@
     <h4 class="sub">&#9654; 出力内容</h4>
     <ul class="anno-list" style="margin-top:8px;">
       <li><span class="anno-num">1</span><span><strong>対象タブ</strong> &#8212; 現在アクティブなタブ（日別 or 期間集計）のデータが出力されます</span></li>
-      <li><span class="anno-num">2</span><span><strong>セクションヘッダー</strong> &#8212; 「セッションから」「勤務時間から」「稼働率」のセクション区分がExcelにも反映されます</span></li>
+      <li><span class="anno-num">2</span><span><strong>セクションヘッダー</strong> &#8212; 「セッションから」「勤務時間から」「全出勤時間から」「稼働率」のセクション区分がExcelにも反映されます</span></li>
       <li><span class="anno-num">3</span><span><strong>セル結合</strong> &#8212; 2段ヘッダーのセル結合がExcel上でも再現されます</span></li>
     </ul>
 
