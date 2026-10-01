@@ -173,7 +173,8 @@ const dsSources = [
   { op: '読み取り', table: 't_overtime_application', desc: '残業申請データの取得' },
   { op: '読み取り', table: 'auth_user / accounts_userprofile', desc: '作業者一覧・所属の取得' },
   { op: '読み取り', table: 'accounts_department', desc: '所属組織による絞り込み' },
-  { op: '読み取り', table: 't_process_work_session / brake_line_record', desc: '加工実績集計の取得' },
+  { op: '読み取り', table: 't_process_work_session / brake_line_record / t_laser_actual', desc: '加工実績集計の取得（サーバー側で作業者×日付に集計）' },
+  { op: '読み取り', table: 'm_product', desc: '単価（加工費）の取得' },
 ]
 
 const today = new Date()
@@ -189,8 +190,7 @@ const activeTab = ref('daily')
 
 const rows = ref([])
 const allUsers = ref([])
-const productionSessions = ref([])
-const unitPriceByCode = ref({})
+const productionStats = ref([])
 
 const filterTeam = ref('')
 const filterGroup = ref('')
@@ -198,17 +198,8 @@ const filterName = ref('')
 
 const NEEDS_APPROVAL = new Set(['overtime', 'holiday', 'half_day_am'])
 const APPROVED_STATUSES = new Set(['approved_manager', 'approved_chief', 'approved_supervisor', 'approved_leader'])
-const COUNTABLE_END_ACTIONS = new Set(['END', 'PAUSE'])
 
-const normalizeList = (payload) => Array.isArray(payload) ? payload : (Array.isArray(payload?.results) ? payload.results : [])
 const normalizePersonName = (value) => String(value || '').replace(/\s+/g, '').toLowerCase()
-const normalizeIsoSecond = (value) => {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  const ms = Date.parse(text)
-  if (!Number.isFinite(ms)) return text
-  return new Date(ms).toISOString().slice(0, 19)
-}
 
 function scopeUsersForStats(userList) {
   const profile = authState.user?.profile || {}
@@ -298,23 +289,19 @@ const overtimeGapByPersonDate = computed(() => {
 
 const dailyRows = computed(() => {
   const aggregate = new Map()
-  for (const session of productionSessions.value) {
-    const nameRaw = String(session?.operator_name || '').trim()
+  for (const stat of productionStats.value) {
+    const nameRaw = String(stat?.name || '').trim()
     const nameKey = normalizePersonName(nameRaw)
-    const date = String(session?.plan_date || session?.work_date || '').slice(0, 10)
+    const date = String(stat?.date || '').slice(0, 10)
     if (!nameKey || !date) continue
-    const qty = Number(session?.production_qty || 0)
-    if (qty === 0) continue
-    const seconds = Math.max(Number(session?.effective_work_seconds || 0), 0)
-    const productCode = String(session?.product_code || '').trim()
-    const unitPrice = Number(unitPriceByCode.value[productCode] || 0)
-    const amount = qty * unitPrice
-    const key = `${nameKey}|${date}`
-    if (!aggregate.has(key)) aggregate.set(key, { name: nameRaw, nameKey, date, qtyTotal: 0, amountTotal: 0, sessionSeconds: 0 })
-    const target = aggregate.get(key)
-    target.qtyTotal += qty
-    target.amountTotal += amount
-    target.sessionSeconds += seconds
+    aggregate.set(`${nameKey}|${date}`, {
+      name: nameRaw,
+      nameKey,
+      date,
+      qtyTotal: Number(stat.qty_total || 0),
+      amountTotal: Number(stat.amount_total || 0),
+      sessionSeconds: Number(stat.session_seconds || 0),
+    })
   }
 
   const out = [...aggregate.values()].map((item) => {
@@ -555,104 +542,9 @@ function isDateStart(index, rowsRef) {
 }
 
 async function loadProductionMetrics() {
-  productionSessions.value = []
-  unitPriceByCode.value = {}
-
-  const [laserRes, brakeRes, pwsRes] = await Promise.all([
-    api.laserActuals.getLaserActuals({ page_size: 1000, work_date__gte: dateFrom.value, work_date__lte: dateTo.value, ordering: '-work_date,-created_at' }),
-    api.brakeLineActuals.getSessions({ start_date: dateFrom.value, end_date: dateTo.value }),
-    api.processRealtime.getSessions({ limit: 10000, plan_date_start: dateFrom.value, plan_date_end: dateTo.value }),
-  ])
-
-  const laserRecords = normalizeList(laserRes.data)
-  const brakeSessions = normalizeList(brakeRes.data)
-  const pwsSessions = normalizeList(pwsRes.data)
-
-  const laserByEquipment = {}
-  for (const row of laserRecords) {
-    const key = row?.equipment_code || '__unknown__'
-    if (!laserByEquipment[key]) laserByEquipment[key] = []
-    laserByEquipment[key].push(row)
-  }
-
-  const laserDurationById = new Map()
-  for (const rows of Object.values(laserByEquipment)) {
-    const sorted = [...rows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    let pendingStart = null
-    for (const row of sorted) {
-      const action = String(row?.operator_action || '').toUpperCase()
-      if (action === 'START' || action === 'RESUME') pendingStart = row
-      else if (pendingStart) {
-        const diff = new Date(row.created_at) - new Date(pendingStart.created_at)
-        laserDurationById.set(row.id, Math.max(0, Math.round(diff / 1000)))
-        pendingStart = null
-      }
-    }
-  }
-
-  const laserItems = laserRecords.flatMap((row) => {
-    const action = String(row?.operator_action || '').toUpperCase()
-    if (!COUNTABLE_END_ACTIONS.has(action)) return []
-    const duration = laserDurationById.get(row?.id) || 0
-    const details = normalizeList(row?.details).filter((d) => String(d?.detail_type || '').toUpperCase() === 'COMPONENT')
-    const buildOne = (detail) => ({
-      id: row?.id,
-      record_source: 'LASER',
-      operator_name: row?.created_by_name || row?.updated_by_name || '—',
-      plan_date: row?.work_date || null,
-      work_date: row?.work_date || null,
-      product_code: detail?.product_code || '',
-      production_qty: Number(detail?.total_qty || 0),
-      effective_work_seconds: duration,
-      session_type: 'WORK',
-      end_action: action,
-    })
-    return details.length ? details.map(buildOne) : [buildOne(null)]
-  })
-
-  const brakeItems = brakeSessions.map((row) => ({ ...row, record_source: 'BRAKE' }))
-  const pwsItems = pwsSessions.filter((row) => {
-    const source = String(row?.record_source || '').toUpperCase()
-    return source !== 'BRAKE' && source !== 'LASER'
-  })
-
-  const rawCountableSessions = [...laserItems, ...brakeItems, ...pwsItems].filter((row) => {
-    if (String(row?.session_type || '') !== 'WORK') return false
-    if (!COUNTABLE_END_ACTIONS.has(String(row?.end_action || '').toUpperCase())) return false
-    return Number(row?.production_qty || 0) !== 0
-  })
-  const dedupedSessions = []
-  const seenKeys = new Set()
-  for (const row of rawCountableSessions) {
-    const key = [
-      String(row?.plan_date || row?.work_date || '').slice(0, 10),
-      normalizePersonName(row?.operator_name || ''),
-      String(row?.process_code || ''),
-      String(row?.product_code || '').trim(),
-      String(row?.end_action || '').toUpperCase(),
-      Number(row?.production_qty || 0),
-      normalizeIsoSecond(row?.started_at),
-      normalizeIsoSecond(row?.ended_at),
-    ].join('|')
-    if (seenKeys.has(key)) continue
-    seenKeys.add(key)
-    dedupedSessions.push(row)
-    if (isPeriodTab) values.push(formatUtilization(r.sessionHours, r.fullAttendanceHours))
-  }
-  productionSessions.value = dedupedSessions
-
-  const productCodes = [...new Set(dedupedSessions.map((row) => String(row?.product_code || '').trim()).filter(Boolean))]
-  const codePriceMap = {}
-  for (let i = 0; i < productCodes.length; i += 200) {
-    const chunk = productCodes.slice(i, i + 200)
-    const productsRes = await api.products.getProductsByCodesIn(chunk)
-    const products = Array.isArray(productsRes.data?.results) ? productsRes.data.results : (Array.isArray(productsRes.data) ? productsRes.data : [])
-    for (const p of products) {
-      const code = String(p?.product_code || '').trim()
-      if (code) codePriceMap[code] = Number(p?.unit_price || 0)
-    }
-  }
-  unitPriceByCode.value = codePriceMap
+  productionStats.value = []
+  const res = await api.brakeLineActuals.getProductivityStats(dateFrom.value, dateTo.value)
+  productionStats.value = Array.isArray(res.data?.rows) ? res.data.rows : []
 }
 
 async function loadUsers() {
@@ -687,7 +579,6 @@ async function load() {
       const overtimeTotalH = Math.round((h + midnightH) * 10) / 10
       let workH = 0
       if (app.application_type === 'normal') workH = 8
-  if (isPeriodTab) widths.push(22)
       else if (app.application_type === 'overtime') workH = Math.round((8 + overtimeTotalH) * 10) / 10
       else if (app.application_type === 'half_day_am') workH = Math.round((4 + overtimeTotalH) * 10) / 10
       else if (app.application_type === 'holiday') workH = h > 0 ? h : (app.work_pattern_hours != null ? parseFloat(app.work_pattern_hours) : 8)
@@ -746,6 +637,7 @@ function exportExcel() {
     ]
     if (isPeriodTab) values.push(Number(r.fullAttendanceHours || 0), r.fullAttendanceThroughput ?? '', r.fullAttendanceQtyRank ?? '', r.fullAttendanceRate ?? '', r.fullAttendanceRateRank ?? '')
     values.push(formatUtilization(r.sessionHours, r.attendanceHours))
+    if (isPeriodTab) values.push(formatUtilization(r.sessionHours, r.fullAttendanceHours))
     return values
   }
 
@@ -795,6 +687,7 @@ function exportExcel() {
   const widths = [22, 10, 12, 12, 12, 12, 12, 14, 14, 14, 16, 12, 12, 14, 14, 16]
   if (isPeriodTab) widths.push(14, 12, 14, 14, 16)
   widths.push(18)
+  if (isPeriodTab) widths.push(22)
   ws['!cols'] = widths.map((w) => ({ wch: w }))
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, activeTab.value === 'daily' ? '日別' : '期間集計')

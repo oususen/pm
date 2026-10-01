@@ -1,4 +1,8 @@
 export const createBrakeLineActualsAPI = (client) => ({
+  /** 加工費集計用: 作業者×日付の加工数・加工金額・セッション秒数 GET /productivity-stats/?date_from=&date_to= */
+  getProductivityStats(dateFrom, dateTo) {
+    return client.get('/productivity-stats/', { params: { date_from: dateFrom, date_to: dateTo } })
+  },
   /** ブレーキライン自動計画取得 GET /brake-line-plan/?date=YYYY-MM-DD */
   getPlan(date) {
     return client.get('/brake-line-plan/', { params: date ? { date } : {} })

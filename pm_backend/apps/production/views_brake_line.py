@@ -50,7 +50,7 @@ def _get_line_break_config(line_id):
     return {'calendar_id': calendar_id}
 
 
-def _deduct_break_seconds(break_config, start_dt, end_dt, raw_seconds):
+def _deduct_break_seconds(break_config, start_dt, end_dt, raw_seconds, cache=None):
     """セッションの生時間から、カレンダー休憩の重複分だけを減算する"""
     if not break_config:
         return raw_seconds
@@ -61,13 +61,26 @@ def _deduct_break_seconds(break_config, start_dt, end_dt, raw_seconds):
     total_break = 0
 
     while check_date <= last_date:
-        cal_day = CalendarDay.objects.filter(
-            calendar_id=calendar_id, target_date=check_date,
-        ).first()
-        if cal_day and cal_day.work_pattern_id:
-            breaks = BreakTime.objects.filter(
-                work_pattern_id=cal_day.work_pattern_id,
-            ).order_by('order')
+        cal_day_key = ('day', calendar_id, check_date)
+        if cache is not None and cal_day_key in cache:
+            work_pattern_id = cache[cal_day_key]
+        else:
+            cal_day = CalendarDay.objects.filter(
+                calendar_id=calendar_id, target_date=check_date,
+            ).first()
+            work_pattern_id = cal_day.work_pattern_id if cal_day else None
+            if cache is not None:
+                cache[cal_day_key] = work_pattern_id
+        if work_pattern_id:
+            break_key = ('break', work_pattern_id)
+            if cache is not None and break_key in cache:
+                breaks = cache[break_key]
+            else:
+                breaks = list(BreakTime.objects.filter(
+                    work_pattern_id=work_pattern_id,
+                ).order_by('order'))
+                if cache is not None:
+                    cache[break_key] = breaks
             for br in breaks:
                 br_start_min = br.break_start.hour * 60 + br.break_start.minute
                 br_end_min = br.break_end.hour * 60 + br.break_end.minute
@@ -1024,6 +1037,205 @@ class BrakeLineRecordView(APIView):
         return Response(response_data, status=201)
 
 
+def build_brake_sessions(records):
+    """
+    BrakeLineRecord（line_id, process_id, product, equipment, recorded_at 順）から
+    作業/中断待機セッションを組み立て、休憩控除後の effective_work_seconds を設定して返す。
+    """
+
+    START_ACTIONS = {BrakeLineRecord.OPERATOR_ACTION_START, BrakeLineRecord.OPERATOR_ACTION_RESUME}
+    END_ACTIONS   = {
+        BrakeLineRecord.OPERATOR_ACTION_END,
+        BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+        BrakeLineRecord.OPERATOR_ACTION_TEMP_END,
+    }
+
+    def group_key(r):
+        return (r.line_id, r.process_id, r.product_id or r.product_code, r.equipment_id)
+
+    sessions = []
+    for _key, grp in groupby(records, key=group_key):
+        group = list(grp)
+        open_rec = None
+        pause_rec = None  # 中断待機セッション用：直前のPAUSE/TEMP_ENDレコード
+        for rec in group:
+            action = rec.operator_action
+            if action in START_ACTIONS:
+                # PAUSE→RESUME の待機セッションを生成
+                if action == BrakeLineRecord.OPERATOR_ACTION_RESUME and pause_rec is not None:
+                    wait_started_at = pause_rec.recorded_at
+                    wait_ended_at   = rec.recorded_at
+                    wait_duration   = int((wait_ended_at - wait_started_at).total_seconds())
+                    w_proc    = pause_rec.process
+                    w_product = pause_rec.product
+                    w_p_code  = (w_product.product_code if w_product else '') or pause_rec.product_code or ''
+                    w_p_name  = (w_product.product_name if w_product else '') or ''
+                    w_pr_code = (w_proc.process_code if w_proc else '') or ''
+                    w_pr_name = (w_proc.process_name if w_proc else '') or ''
+                    sessions.append({
+                        'id':                   f'wait_{pause_rec.id}',
+                        'start_record_id':      pause_rec.id,
+                        'end_record_id':        rec.id,
+                        'started_at':           wait_started_at.isoformat(),
+                        'ended_at':             wait_ended_at.isoformat(),
+                        'session_type':         'PAUSE',
+                        'start_action':         'PAUSE',
+                        'end_action':           'RESUME',
+                        'pause_reason':         pause_rec.operator_action_reason or '',
+                        'process_code':         w_pr_code,
+                        'process_name':         w_pr_name,
+                        'product_code':         w_p_code,
+                        'product_name':         w_p_name,
+                        'operator_name':        pause_rec.operator or '',
+                        'duration_seconds':     wait_duration,
+                        'effective_work_seconds': 0,
+                        'production_qty':       0,
+                        'issue_count':          0,
+                        'issue_flags':          [],
+                        'record_source':        'BRAKE',
+                        'line_id':              pause_rec.line_id,
+                        'plan_date':            str(pause_rec.plan_date),
+                    })
+                    pause_rec = None
+                open_rec = rec
+            elif action in END_ACTIONS:
+                start_rec = open_rec
+                started_at = start_rec.recorded_at if start_rec else rec.recorded_at
+                ended_at   = rec.recorded_at
+                duration   = int((ended_at - started_at).total_seconds()) if start_rec else 0
+
+                proc    = (start_rec or rec).process
+                product = (start_rec or rec).product
+                p_code  = (product.product_code if product else '') or (start_rec.product_code if start_rec else '') or rec.product_code or ''
+                p_name  = (product.product_name if product else '') or ''
+                pr_code = (proc.process_code if proc else '') or ''
+                pr_name = (proc.process_name if proc else '') or ''
+
+                sessions.append({
+                    'id':                   rec.id,
+                    'start_record_id':      start_rec.id if start_rec else None,
+                    'end_record_id':        rec.id,
+                    'started_at':           started_at.isoformat(),
+                    'ended_at':             ended_at.isoformat(),
+                    'session_type':         'WORK',
+                    'start_action':         start_rec.operator_action if start_rec else '',
+                    'end_action':           action,
+                    'pause_reason':         rec.operator_action_reason or '',
+                    'process_code':         pr_code,
+                    'process_name':         pr_name,
+                    'product_code':         p_code,
+                    'product_name':         p_name,
+                    'operator_name':        (start_rec or rec).operator or '',
+                    'duration_seconds':     duration,
+                    'effective_work_seconds': duration,
+                    'production_qty':       int(rec.qty) if action in {
+                        BrakeLineRecord.OPERATOR_ACTION_END,
+                        BrakeLineRecord.OPERATOR_ACTION_PAUSE,
+                    } else 0,
+                    'issue_count':          0,
+                    'issue_flags':          [],
+                    'record_source':        'BRAKE',
+                    'line_id':              rec.line_id,
+                    'plan_date':            str(rec.plan_date),
+                })
+                if action == BrakeLineRecord.OPERATOR_ACTION_END:
+                    open_rec = None
+                    pause_rec = None
+                elif action in {BrakeLineRecord.OPERATOR_ACTION_PAUSE, BrakeLineRecord.OPERATOR_ACTION_TEMP_END}:
+                    pause_rec = rec
+                    open_rec = None
+
+        # 未終了・未復帰の中断待機セッション（PAUSE後まだRESUMEしていない）
+        if pause_rec and not open_rec:
+            now = timezone.now()
+            w_proc    = pause_rec.process
+            w_product = pause_rec.product
+            sessions.append({
+                'id':                   f'wait_{pause_rec.id}',
+                'start_record_id':      pause_rec.id,
+                'end_record_id':        None,
+                'started_at':           pause_rec.recorded_at.isoformat(),
+                'ended_at':             None,
+                'session_type':         'PAUSE',
+                'start_action':         'PAUSE',
+                'end_action':           '',
+                'pause_reason':         pause_rec.operator_action_reason or '',
+                'process_code':         (w_proc.process_code if w_proc else '') or '',
+                'process_name':         (w_proc.process_name if w_proc else '') or '',
+                'product_code':         (w_product.product_code if w_product else '') or pause_rec.product_code or '',
+                'product_name':         (w_product.product_name if w_product else '') or '',
+                'operator_name':        pause_rec.operator or '',
+                'duration_seconds':     int((now - pause_rec.recorded_at).total_seconds()),
+                'effective_work_seconds': 0,
+                'production_qty':       0,
+                'issue_count':          0,
+                'issue_flags':          [],
+                'record_source':        'BRAKE',
+                'line_id':              pause_rec.line_id,
+                'plan_date':            str(pause_rec.plan_date),
+            })
+
+        # 未終了（加工中）セッション
+        if open_rec:
+            now     = timezone.now()
+            proc    = open_rec.process
+            product = open_rec.product
+            p_code  = (product.product_code if product else '') or open_rec.product_code or ''
+            p_name  = (product.product_name if product else '') or ''
+            pr_code = (proc.process_code if proc else '') or ''
+            pr_name = (proc.process_name if proc else '') or ''
+            sessions.append({
+                'id':                   open_rec.id,
+                'start_record_id':      open_rec.id,
+                'end_record_id':        None,
+                'started_at':           open_rec.recorded_at.isoformat(),
+                'ended_at':             None,
+                'session_type':         'WORK',
+                'start_action':         open_rec.operator_action,
+                'end_action':           '',
+                'pause_reason':         '',
+                'process_code':         pr_code,
+                'process_name':         pr_name,
+                'product_code':         p_code,
+                'product_name':         p_name,
+                'operator_name':        open_rec.operator or '',
+                'duration_seconds':     int((now - open_rec.recorded_at).total_seconds()),
+                'effective_work_seconds': int((now - open_rec.recorded_at).total_seconds()),
+                'production_qty':       0,
+                'issue_count':          0,
+                'issue_flags':          [],
+                'record_source':        'BRAKE',
+                'line_id':              open_rec.line_id,
+                'plan_date':            str(open_rec.plan_date),
+            })
+
+    line_breaks_cache = {}
+    break_query_cache = {}
+    for s in sessions:
+        if s.get('session_type') != 'WORK':
+            continue
+        s_started = s.get('started_at')
+        s_ended = s.get('ended_at')
+        if not s_started or not s_ended:
+            continue
+        start_dt = datetime.fromisoformat(s_started)
+        end_dt = datetime.fromisoformat(s_ended)
+        raw_seconds = int((end_dt - start_dt).total_seconds())
+        if raw_seconds <= 0:
+            continue
+
+        lid = s.get('line_id')
+        if lid is not None and lid not in line_breaks_cache:
+            line_breaks_cache[lid] = _get_line_break_config(lid)
+        break_config = line_breaks_cache.get(lid)
+
+        s['effective_work_seconds'] = _deduct_break_seconds(
+            break_config, start_dt, end_dt, raw_seconds, break_query_cache,
+        )
+
+    return sessions
+
+
 class BrakeLineSessionView(APIView):
     """
     ブレーキライン作業記録をセッション形式で返す（生産実績照会用）
@@ -1101,195 +1313,7 @@ class BrakeLineSessionView(APIView):
             )
 
         records = list(qs.order_by('line_id', 'process_id', 'product_id', 'equipment_id', 'recorded_at'))
-
-        START_ACTIONS = {BrakeLineRecord.OPERATOR_ACTION_START, BrakeLineRecord.OPERATOR_ACTION_RESUME}
-        END_ACTIONS   = {
-            BrakeLineRecord.OPERATOR_ACTION_END,
-            BrakeLineRecord.OPERATOR_ACTION_PAUSE,
-            BrakeLineRecord.OPERATOR_ACTION_TEMP_END,
-        }
-
-        def group_key(r):
-            return (r.line_id, r.process_id, r.product_id or r.product_code, r.equipment_id)
-
-        sessions = []
-        for _key, grp in groupby(records, key=group_key):
-            group = list(grp)
-            open_rec = None
-            pause_rec = None  # 中断待機セッション用：直前のPAUSE/TEMP_ENDレコード
-            for rec in group:
-                action = rec.operator_action
-                if action in START_ACTIONS:
-                    # PAUSE→RESUME の待機セッションを生成
-                    if action == BrakeLineRecord.OPERATOR_ACTION_RESUME and pause_rec is not None:
-                        wait_started_at = pause_rec.recorded_at
-                        wait_ended_at   = rec.recorded_at
-                        wait_duration   = int((wait_ended_at - wait_started_at).total_seconds())
-                        w_proc    = pause_rec.process
-                        w_product = pause_rec.product
-                        w_p_code  = (w_product.product_code if w_product else '') or pause_rec.product_code or ''
-                        w_p_name  = (w_product.product_name if w_product else '') or ''
-                        w_pr_code = (w_proc.process_code if w_proc else '') or ''
-                        w_pr_name = (w_proc.process_name if w_proc else '') or ''
-                        sessions.append({
-                            'id':                   f'wait_{pause_rec.id}',
-                            'start_record_id':      pause_rec.id,
-                            'end_record_id':        rec.id,
-                            'started_at':           wait_started_at.isoformat(),
-                            'ended_at':             wait_ended_at.isoformat(),
-                            'session_type':         'PAUSE',
-                            'start_action':         'PAUSE',
-                            'end_action':           'RESUME',
-                            'pause_reason':         pause_rec.operator_action_reason or '',
-                            'process_code':         w_pr_code,
-                            'process_name':         w_pr_name,
-                            'product_code':         w_p_code,
-                            'product_name':         w_p_name,
-                            'operator_name':        pause_rec.operator or '',
-                            'duration_seconds':     wait_duration,
-                            'effective_work_seconds': 0,
-                            'production_qty':       0,
-                            'issue_count':          0,
-                            'issue_flags':          [],
-                            'record_source':        'BRAKE',
-                            'line_id':              pause_rec.line_id,
-                            'plan_date':            str(pause_rec.plan_date),
-                        })
-                        pause_rec = None
-                    open_rec = rec
-                elif action in END_ACTIONS:
-                    start_rec = open_rec
-                    started_at = start_rec.recorded_at if start_rec else rec.recorded_at
-                    ended_at   = rec.recorded_at
-                    duration   = int((ended_at - started_at).total_seconds()) if start_rec else 0
-
-                    proc    = (start_rec or rec).process
-                    product = (start_rec or rec).product
-                    p_code  = (product.product_code if product else '') or (start_rec.product_code if start_rec else '') or rec.product_code or ''
-                    p_name  = (product.product_name if product else '') or ''
-                    pr_code = (proc.process_code if proc else '') or ''
-                    pr_name = (proc.process_name if proc else '') or ''
-
-                    sessions.append({
-                        'id':                   rec.id,
-                        'start_record_id':      start_rec.id if start_rec else None,
-                        'end_record_id':        rec.id,
-                        'started_at':           started_at.isoformat(),
-                        'ended_at':             ended_at.isoformat(),
-                        'session_type':         'WORK',
-                        'start_action':         start_rec.operator_action if start_rec else '',
-                        'end_action':           action,
-                        'pause_reason':         rec.operator_action_reason or '',
-                        'process_code':         pr_code,
-                        'process_name':         pr_name,
-                        'product_code':         p_code,
-                        'product_name':         p_name,
-                        'operator_name':        (start_rec or rec).operator or '',
-                        'duration_seconds':     duration,
-                        'effective_work_seconds': duration,
-                        'production_qty':       int(rec.qty) if action in {
-                            BrakeLineRecord.OPERATOR_ACTION_END,
-                            BrakeLineRecord.OPERATOR_ACTION_PAUSE,
-                        } else 0,
-                        'issue_count':          0,
-                        'issue_flags':          [],
-                        'record_source':        'BRAKE',
-                        'line_id':              rec.line_id,
-                        'plan_date':            str(rec.plan_date),
-                    })
-                    if action == BrakeLineRecord.OPERATOR_ACTION_END:
-                        open_rec = None
-                        pause_rec = None
-                    elif action in {BrakeLineRecord.OPERATOR_ACTION_PAUSE, BrakeLineRecord.OPERATOR_ACTION_TEMP_END}:
-                        pause_rec = rec
-                        open_rec = None
-
-            # 未終了・未復帰の中断待機セッション（PAUSE後まだRESUMEしていない）
-            if pause_rec and not open_rec:
-                now = timezone.now()
-                w_proc    = pause_rec.process
-                w_product = pause_rec.product
-                sessions.append({
-                    'id':                   f'wait_{pause_rec.id}',
-                    'start_record_id':      pause_rec.id,
-                    'end_record_id':        None,
-                    'started_at':           pause_rec.recorded_at.isoformat(),
-                    'ended_at':             None,
-                    'session_type':         'PAUSE',
-                    'start_action':         'PAUSE',
-                    'end_action':           '',
-                    'pause_reason':         pause_rec.operator_action_reason or '',
-                    'process_code':         (w_proc.process_code if w_proc else '') or '',
-                    'process_name':         (w_proc.process_name if w_proc else '') or '',
-                    'product_code':         (w_product.product_code if w_product else '') or pause_rec.product_code or '',
-                    'product_name':         (w_product.product_name if w_product else '') or '',
-                    'operator_name':        pause_rec.operator or '',
-                    'duration_seconds':     int((now - pause_rec.recorded_at).total_seconds()),
-                    'effective_work_seconds': 0,
-                    'production_qty':       0,
-                    'issue_count':          0,
-                    'issue_flags':          [],
-                    'record_source':        'BRAKE',
-                    'line_id':              pause_rec.line_id,
-                    'plan_date':            str(pause_rec.plan_date),
-                })
-
-            # 未終了（加工中）セッション
-            if open_rec:
-                now     = timezone.now()
-                proc    = open_rec.process
-                product = open_rec.product
-                p_code  = (product.product_code if product else '') or open_rec.product_code or ''
-                p_name  = (product.product_name if product else '') or ''
-                pr_code = (proc.process_code if proc else '') or ''
-                pr_name = (proc.process_name if proc else '') or ''
-                sessions.append({
-                    'id':                   open_rec.id,
-                    'start_record_id':      open_rec.id,
-                    'end_record_id':        None,
-                    'started_at':           open_rec.recorded_at.isoformat(),
-                    'ended_at':             None,
-                    'session_type':         'WORK',
-                    'start_action':         open_rec.operator_action,
-                    'end_action':           '',
-                    'pause_reason':         '',
-                    'process_code':         pr_code,
-                    'process_name':         pr_name,
-                    'product_code':         p_code,
-                    'product_name':         p_name,
-                    'operator_name':        open_rec.operator or '',
-                    'duration_seconds':     int((now - open_rec.recorded_at).total_seconds()),
-                    'effective_work_seconds': int((now - open_rec.recorded_at).total_seconds()),
-                    'production_qty':       0,
-                    'issue_count':          0,
-                    'issue_flags':          [],
-                    'record_source':        'BRAKE',
-                    'line_id':              open_rec.line_id,
-                    'plan_date':            str(open_rec.plan_date),
-                })
-
-        line_breaks_cache = {}
-        for s in sessions:
-            if s.get('session_type') != 'WORK':
-                continue
-            s_started = s.get('started_at')
-            s_ended = s.get('ended_at')
-            if not s_started or not s_ended:
-                continue
-            start_dt = datetime.fromisoformat(s_started)
-            end_dt = datetime.fromisoformat(s_ended)
-            raw_seconds = int((end_dt - start_dt).total_seconds())
-            if raw_seconds <= 0:
-                continue
-
-            lid = s.get('line_id')
-            if lid is not None and lid not in line_breaks_cache:
-                line_breaks_cache[lid] = _get_line_break_config(lid)
-            break_config = line_breaks_cache.get(lid)
-
-            s['effective_work_seconds'] = _deduct_break_seconds(
-                break_config, start_dt, end_dt, raw_seconds,
-            )
+        sessions = build_brake_sessions(records)
 
         if session_id_param:
             sessions = [s for s in sessions if str(s.get('id')) == session_id_param]

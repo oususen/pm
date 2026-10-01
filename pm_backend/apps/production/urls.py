@@ -70,6 +70,7 @@ from production.views_laser_weekly_plan import (
 from production.views_line_realtime import LineRealtimeRecordViewSet, LineStatusViewSet
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
 from production.views_services import BOMServiceViewSet, CRPViewSet, LineLoadViewSet
+from production.views_productivity_stats import ProductivityStatsView
 from production.views_brake_line import BrakeLinePlanView, BrakeLineProductsView, BrakeLineEquipmentsView, BrakeLineActualAddView, BrakeLineLabelPrintProxyView, BrakeLineRecordView, BrakeLineSessionView, BrakeLineSessionDetailView
 from production.views_spot_line import SpotLinePlanView, SpotLineEquipmentsView, SpotLineProductsView, SpotLineRecordView
 from production.views_gantt_display_product_map import GanttDisplayProductMapViewSet
@@ -164,6 +165,7 @@ urlpatterns = [
     path('brake-line-actual/add/', BrakeLineActualAddView.as_view(), name='brake-line-actual-add'),
     path('brake-line-label-print/', BrakeLineLabelPrintProxyView.as_view(), name='brake-line-label-print'),
     path('brake-line-record/', BrakeLineRecordView.as_view(), name='brake-line-record'),
+    path('productivity-stats/', ProductivityStatsView.as_view(), name='productivity-stats'),
     path('brake-line-sessions/', BrakeLineSessionView.as_view(), name='brake-line-sessions'),
     path('brake-line-sessions/<int:session_id>/', BrakeLineSessionDetailView.as_view(), name='brake-line-session-detail'),
     path('laser-actual-details/<int:detail_id>/', LaserActualDetailUpdateView.as_view(), name='laser-actual-detail-update'),
