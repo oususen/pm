@@ -3,7 +3,10 @@
     <div class="rh-dialog" role="dialog" aria-label="リクエスト履歴">
       <header>
         <strong>リクエスト履歴</strong>
-        <button type="button" title="閉じる" @click="close">×</button>
+        <div class="hdr-actions">
+          <button type="button" title="閉じる" @click="close">×</button>
+          <button type="button" title="マニュアルを開く" aria-label="マニュアルを開く" @click="openManual(MANUAL_PATH)">?</button>
+        </div>
       </header>
       <p class="note">全員のリクエストが表示されます。同じ内容を送る前に確認してください。</p>
       <form class="filters" @submit.prevent="load">
@@ -60,6 +63,9 @@
 import { ref, watch } from 'vue'
 import api from '@/api/client'
 import { requestHistoryOpen, closeRequestHistory } from '@/composables/requestDialog'
+import { openManual } from '@/composables/manualLink'
+
+const MANUAL_PATH = '共通/リクエスト.md'
 
 const LIMIT = 200
 const STATUS_OPTIONS = [
@@ -133,6 +139,8 @@ watch(requestHistoryOpen, (open) => {
 header,footer{display:flex;align-items:center;gap:8px}
 header{justify-content:space-between}
 header button{border:0;background:none;font-size:18px;cursor:pointer}
+.hdr-actions{display:flex;align-items:center;gap:4px}
+.hdr-actions button+button{width:22px;height:22px;border:1px solid #c8ccd0;border-radius:50%;font-size:13px;line-height:1;padding:0}
 .note{margin:0;color:#666;font-size:12px}
 .filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px}
 .filters label{display:flex;flex-direction:column;gap:2px;font-weight:600;font-size:12px}

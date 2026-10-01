@@ -3,7 +3,10 @@
     <form class="req-dialog" aria-label="システム管理者へのリクエスト" @submit.prevent="submit" @paste="onPaste">
       <header>
         <strong>システム管理者へリクエスト</strong>
-        <button type="button" title="閉じる" :disabled="sending" @click="close">×</button>
+        <div class="hdr-actions">
+          <button type="button" title="閉じる" :disabled="sending" @click="close">×</button>
+          <button type="button" title="マニュアルを開く" aria-label="マニュアルを開く" @click="openManual(MANUAL_PATH)">?</button>
+        </div>
       </header>
       <div class="row">
         <label>種別</label>
@@ -51,6 +54,9 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { requestDialogOpen, closeRequestDialog } from '@/composables/requestDialog'
+import { openManual } from '@/composables/manualLink'
+
+const MANUAL_PATH = '共通/リクエスト.md'
 
 const MAX_FILES = 5
 const MAX_MB = 10
@@ -184,6 +190,8 @@ onBeforeUnmount(revokeAll)
 header,footer{display:flex;align-items:center;gap:8px}
 header{justify-content:space-between}
 header button{border:0;background:none;font-size:18px;cursor:pointer}
+.hdr-actions{display:flex;align-items:center;gap:4px}
+.hdr-actions button+button{width:22px;height:22px;border:1px solid #c8ccd0;border-radius:50%;font-size:13px;line-height:1;padding:0}
 .row{display:flex;gap:8px;align-items:center}
 .row.top{align-items:flex-start}
 .row>label{flex:0 0 48px;font-weight:600}

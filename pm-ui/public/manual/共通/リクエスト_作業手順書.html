@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>リクエスト 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa;
+    --card: #ffffff;
+    --ink: #1a2233;
+    --ink2: #4b5a72;
+    --accent: #1565c0;
+    --accent-light: #e3effa;
+    --danger: #c62828;
+    --danger-light: #fce4e4;
+    --success: #2e7d32;
+    --success-light: #e6f4ea;
+    --warn: #e65100;
+    --warn-light: #fff3e0;
+    --border: #d4dae4;
+    --grid-head: #eaf0f7;
+    --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b;
+    --radius: 10px;
+    --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+    --selected-bg: #e0f2f1;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac;
+    --col-bg: #1a2030; --selected-bg: #1a3028;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac;
+      --col-bg: #1a2030; --selected-bg: #1a3028;
+    }
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* cover */
+  .cover { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 48px 40px 40px; margin-bottom: 36px; border-left: 5px solid var(--prod-border); }
+  .cover h1 { font-size: 28px; font-weight: 800; color: var(--ink); margin-bottom: 6px; text-wrap: balance; }
+  .cover .subtitle { font-size: 15px; color: var(--ink2); margin-bottom: 20px; }
+  .cover .path { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); color: var(--accent); font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  /* step */
+  .step { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 36px 28px; margin-bottom: 24px; }
+  .step-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .step-num { width: 38px; height: 38px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+  .step-title { font-size: 20px; font-weight: 700; }
+  .step-desc { font-size: 14px; color: var(--ink2); margin-bottom: 16px; line-height: 1.7; }
+  h4.sub { font-size: 15px; font-weight: 700; margin: 18px 0 10px; color: var(--ink); }
+
+  /* toc */
+  .toc { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 28px; }
+  .toc h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--ink2); text-transform: uppercase; letter-spacing: .06em; }
+  .toc-list { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .toc-list li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .toc-list .tn { width: 26px; height: 26px; border-radius: 50%; background: var(--step-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  /* note */
+  .note { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 32px; margin-bottom: 24px; border-left: 4px solid var(--warn); }
+  .note h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--warn); }
+  .note ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--ink2); }
+  .note li { margin-bottom: 4px; }
+
+  /* callout */
+  .callout { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+  .callout.info { background: var(--accent-light); color: var(--accent); }
+  .callout.warn { background: var(--warn-light); color: var(--warn); }
+  .callout.danger { background: var(--danger-light); color: var(--danger); }
+  .callout.ok { background: var(--success-light); color: var(--success); }
+  .callout .icon { font-size: 18px; flex-shrink:0; line-height:1.4; }
+
+  /* mock toolbar */
+  .mock-toolbar { background: var(--grid-head); border: 1px solid var(--grid-line); border-radius: 6px; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); overflow-x: auto; }
+  .mock-toolbar .f-group { display: flex; align-items: center; gap: 4px; }
+  .mock-toolbar label { font-size: 11px; white-space: nowrap; }
+  .f-select { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); }
+  .f-input { background: var(--card); border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 12px; color: var(--ink); min-width: 60px; }
+  .mock-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--card); color: var(--ink); cursor: default; white-space: nowrap; }
+  .mock-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock-btn.teal { background: var(--step-color); border-color: var(--step-color); color: #fff; }
+  .mock-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mock-btn.warn-btn { background: #ff9800; border-color: #ff9800; color: #fff; }
+
+  /* highlight */
+  .hl { position: relative; z-index: 2; }
+  .hl::after { content: ''; position: absolute; inset: -4px; border: 3px solid var(--danger); border-radius: 6px; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+  .hl-blue::after { border-color: var(--accent); }
+  .hl-green::after { border-color: var(--success); }
+
+  /* annotation */
+  .anno-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 2px solid var(--danger); color: var(--danger); font-size: 13px; font-weight: 800; flex-shrink: 0; line-height: 1; font-style: normal; }
+  :root[data-theme="dark"] .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background: var(--card); border-color: #ef5350; color: #ef5350; } }
+  .anno-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .anno-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
+  .anno-list li strong { color: var(--ink); }
+  .anno-list li span { color: var(--ink2); }
+
+  /* legend */
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 16px; }
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+  .legend-item .li-label { font-weight: 700; white-space: nowrap; min-width: 80px; color: var(--ink); }
+  .legend-item .li-desc { color: var(--ink2); }
+
+  /* mini grid mockup */
+  .mock-grid { border: 1px solid var(--grid-line); border-radius: 6px; overflow-x: auto; margin: 12px 0; font-size: 11px; }
+  .mock-grid table { width: 100%; border-collapse: collapse; }
+  .mock-grid th, .mock-grid td { border: 1px solid var(--grid-line); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .mock-grid th { background: var(--grid-head); font-weight: 700; color: var(--ink2); font-size: 10px; }
+  .mock-grid td { background: var(--card); color: var(--ink); }
+  .mock-grid td.editable { background: #fffff0; }
+  :root[data-theme="dark"] .mock-grid td.editable { background: #22281c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mock-grid td.editable { background: #22281c; } }
+  .mock-grid td.negative { color: var(--danger); font-weight: 700; }
+  .mock-grid td.positive { color: var(--success); font-weight: 700; }
+  .mock-grid .sticky { position: sticky; left: 0; z-index: 2; background: var(--grid-head); }
+
+  /* table inside step */
+  .info-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .info-table th, .info-table td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; }
+  .info-table th { background: var(--grid-head); font-weight: 700; color: var(--ink2); white-space: nowrap; width: 140px; }
+  .info-table td { background: var(--card); color: var(--ink); }
+
+  /* checkbox mock */
+  .mock-checkbox { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink); }
+  .mock-checkbox .box { display: inline-block; width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 2px; background: var(--card); text-align: center; line-height: 14px; font-size: 10px; }
+
+  /* status badges */
+  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .status-badge.submitted { background: #e3f2fd; color: #1565c0; }
+  .status-badge.leader { background: #fff3e0; color: #e65100; }
+  .status-badge.chief { background: #f3e5f5; color: #7b1fa2; }
+  .status-badge.section { background: #e8f5e9; color: #2e7d32; }
+  .status-badge.approved { background: #e6f4ea; color: #1b5e20; }
+  .status-badge.rejected { background: #fce4e4; color: #c62828; }
+  :root[data-theme="dark"] .status-badge.submitted { background: #1c3050; color: #5ca0e8; }
+  :root[data-theme="dark"] .status-badge.leader { background: #2e2010; color: #ff9800; }
+  :root[data-theme="dark"] .status-badge.chief { background: #2a1a30; color: #ce93d8; }
+  :root[data-theme="dark"] .status-badge.section { background: #1a3020; color: #66bb6a; }
+  :root[data-theme="dark"] .status-badge.approved { background: #1a3020; color: #4caf50; }
+  :root[data-theme="dark"] .status-badge.rejected { background: #3a1a1a; color: #ef5350; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .status-badge.submitted { background: #1c3050; color: #5ca0e8; }
+    :root:not([data-theme="light"]) .status-badge.leader { background: #2e2010; color: #ff9800; }
+    :root:not([data-theme="light"]) .status-badge.chief { background: #2a1a30; color: #ce93d8; }
+    :root:not([data-theme="light"]) .status-badge.section { background: #1a3020; color: #66bb6a; }
+    :root:not([data-theme="light"]) .status-badge.approved { background: #1a3020; color: #4caf50; }
+    :root:not([data-theme="light"]) .status-badge.rejected { background: #3a1a1a; color: #ef5350; }
+  }
+
+  /* flow diagram */
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 16px 0; font-size: 13px; }
+  .flow-node { display: inline-flex; align-items: center; justify-content: center; padding: 6px 16px; border-radius: 6px; font-weight: 700; background: var(--grid-head); color: var(--ink); border: 1px solid var(--grid-line); }
+  .flow-node.active { background: var(--step-color); color: #fff; border-color: var(--step-color); }
+  .flow-arrow { color: var(--ink2); font-size: 16px; }
+
+  /* modal mockup */
+  .mock-modal { background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); padding: 20px 24px; margin: 14px 0; box-shadow: var(--shadow); }
+  .mock-modal-title { font-size: 16px; font-weight: 700; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--grid-line); }
+  .mock-modal-row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 6px; }
+  .mock-modal-row .ml { font-weight: 700; color: var(--ink2); min-width: 90px; white-space: nowrap; }
+  .mock-modal-row .mv { color: var(--ink); }
+  .mock-modal-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--grid-line); }
+
+  /* signature box */
+  .sig-box { width: 200px; height: 70px; border: 1px dashed var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink2); background: var(--col-bg); margin: 4px 0; }
+
+  @media (max-width: 600px) {
+    .page { padding: 20px 12px 60px; }
+    .cover, .step { padding: 24px 18px 20px; }
+    .toc-list { grid-template-columns: 1fr; }
+    .cover h1 { font-size: 22px; }
+    .legend-grid { grid-template-columns: 1fr; }
+    .flow { justify-content: center; }
+  }
+
+  /* AIドロワーのモック */
+  .mock-drawer { max-width: 380px; border: 1px solid var(--grid-line); border-radius: 8px; background: var(--card); overflow: hidden; margin: 12px 0; font-size: 12px; }
+  .mock-drawer .mh { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 10px; background: var(--grid-head); border-bottom: 1px solid var(--grid-line); }
+  .mock-drawer .mh strong { display: block; font-size: 14px; color: var(--step-color); }
+  .mock-drawer .mh small { color: var(--ink2); font-size: 11px; }
+  .mock-drawer .qa { display: flex; gap: 4px; }
+  .mock-drawer .qa span { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); color: var(--ink); font-size: 13px; }
+  .mock-drawer .qa span.hl { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger-light); }
+  .mock-drawer .sel { display: flex; gap: 6px; padding: 6px 10px; }
+  .mock-drawer .body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .mock-drawer .bubble { padding: 6px 9px; border-radius: 8px; max-width: 90%; line-height: 1.5; }
+  .mock-drawer .bubble.me { align-self: flex-end; background: var(--accent-light); color: var(--accent); }
+  .mock-drawer .bubble.ai { background: var(--bg); border: 1px solid var(--border); }
+  .mock-drawer .mini { display: inline-block; margin-top: 4px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; color: var(--ink2); }
+  .mock-drawer .input { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--grid-line); }
+  .mock-drawer .input .ta { flex: 1; border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; color: var(--ink2); background: var(--card); }
+  .mock-fab { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 6px; margin: 8px 0; }
+  .mock-fab .menu { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; box-shadow: var(--shadow); }
+  .mock-fab .menu span { padding: 7px 18px; font-size: 13px; font-weight: 600; }
+  .mock-fab .menu span.hl { background: var(--success-light); color: var(--success); }
+  .mock-fab .circle { width: 52px; height: 52px; border-radius: 50%; background: #087b6e; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+  .tbl th, .tbl td { border: 1px solid var(--grid-line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  .tbl th { background: var(--grid-head); color: var(--ink2); width: 28%; }
+
+  /* リクエスト画面のモック */
+  .mock-form .fr { display: flex; align-items: center; gap: 8px; padding: 3px 10px; }
+  .mock-form .fr.top { align-items: flex-start; }
+  .mock-form .fr > b { flex: 0 0 48px; font-size: 12px; }
+  .mock-form .fr .f { flex: 1; border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: var(--ink2); background: var(--card); min-height: 26px; }
+  .mock-form .fr .f.tall { min-height: 70px; }
+  .mock-form .star { color: var(--danger); margin-left: 2px; }
+  .mock-form .warnbar { margin: 4px 10px; padding: 4px 8px; border-radius: 4px; background: var(--warn-light); color: var(--warn); font-size: 11px; }
+  .mock-form .foot { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--grid-line); }
+  .mock-form .chipf { display: inline-block; padding: 1px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--grid-head); font-size: 11px; margin-right: 4px; }
+  .mock-form .hl { border-color: var(--danger) !important; box-shadow: 0 0 0 2px var(--danger-light); }
+  .mock-hist { max-width: 560px; }
+  .mock-hist .flt { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; align-items: flex-end; }
+  .mock-hist .flt .c { display: flex; flex-direction: column; gap: 2px; font-size: 11px; font-weight: 700; }
+  .mock-hist table { width: calc(100% - 20px); margin: 0 10px 8px; border-collapse: collapse; font-size: 12px; }
+  .mock-hist th, .mock-hist td { border-bottom: 1px solid var(--grid-line); padding: 4px 6px; text-align: left; }
+  .mock-hist th { background: var(--grid-head); color: var(--ink2); font-size: 11px; }
+  .mock-hist .st { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 11px; }
+  .mock-hist .st.p { background: var(--danger-light); color: var(--danger); }
+  .mock-hist .st.i { background: var(--warn-light); color: var(--warn); }
+  .mock-hist .st.d { background: var(--success-light); color: var(--success); }
+  .mock-hist .st.r { background: var(--grid-head); color: var(--ink2); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="cover">
+    <h1>リクエスト 作業手順書</h1>
+    <div class="subtitle">要望・不具合・問い合わせをシステム管理者へ送り、状況を確認する手順を解説します。</div>
+    <div class="path">
+      画面右下 <span class="arrow">&#9656;</span> Q&amp;A <span class="arrow">&#9656;</span> リクエスト
+    </div>
+  </div>
+
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>送る前に履歴で確認する</li>
+      <li><span class="tn">2</span>リクエストを送る</li>
+      <li><span class="tn">3</span>ファイルを添付する</li>
+      <li><span class="tn">4</span>状況を確認する</li>
+      <li><span class="tn">5</span>システム管理者の対応（管理者向け）</li>
+    </ul>
+  </div>
+
+  <div class="note" style="border-left-color:var(--accent);">
+    <h2 style="color:var(--accent);">&#9881; 前提条件</h2>
+    <ul>
+      <li>ログインしていれば、誰でも送れます（特別な権限は不要です）</li>
+      <li>リクエストは<strong>システム管理者へメールで届きます</strong>。同時に、システム管理者のタスクにも登録されます</li>
+      <li>送信したあとの取り消しや、内容の追記はできません</li>
+    </ul>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="step-header"><div class="step-num">1</div><div class="step-title">送る前に履歴で確認する</div></div>
+    <div class="step-desc">
+      同じ内容のリクエストが、すでに出ていることがあります。画面右下の<strong>「Q&amp;A」</strong>を押し、<strong>「3 リクエスト履歴」</strong>を選んで、確認してください。（AIの権限がない人は「2 リクエスト履歴」です）
+    </div>
+    <div class="mock-fab">
+      <div class="menu"><span>1 AI</span><span>2 リクエスト</span><span class="hl">3 リクエスト履歴</span></div>
+      <div class="circle">Q&amp;A</div>
+    </div>
+
+    <h4 class="sub">&#9654; リクエスト履歴</h4>
+    <div class="mock-drawer mock-hist" style="max-width:560px;">
+      <div class="mh"><div><strong>リクエスト履歴</strong><small>全員のリクエストが表示されます</small></div><div class="qa"><span>&times;</span><span>?</span></div></div>
+      <div class="flt">
+        <div class="c">依頼者<span class="mock-btn">すべて &#9662;</span></div>
+        <div class="c">状態<span class="mock-btn">すべて &#9662;</span></div>
+        <div class="c" style="flex:1;">キーワード<span class="f" style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--ink2);">件名・内容</span></div>
+        <span class="mock-btn primary">検索</span><span class="mock-btn">リセット</span>
+      </div>
+      <table>
+        <thead><tr><th>送信日時</th><th>種類</th><th>件名</th><th>依頼者</th><th>状況</th></tr></thead>
+        <tbody>
+          <tr><td>2026/10/2 1:06</td><td>要望</td><td>残業労働時間統計</td><td>王 崇栓</td><td><span class="st p">未対応</span></td></tr>
+          <tr><td>2026/10/1 9:30</td><td>不具合</td><td>ガントの表示が遅い</td><td>山田 花子</td><td><span class="st i">対応中</span></td></tr>
+          <tr><td>2026/9/30 16:10</td><td>問い合わせ</td><td>権限の申請方法</td><td>佐藤 次郎</td><td><span class="st d">完了</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout info"><span class="icon">&#9432;</span><span><strong>依頼者・状態・キーワード</strong>（件名・内容）で絞り込めます。行をクリックすると内容が開きます。最新200件まで表示されます。</span></div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="step-header"><div class="step-num">2</div><div class="step-title">リクエストを送る</div></div>
+    <div class="step-desc">
+      <strong>① </strong>「Q&amp;A」→<strong>「2 リクエスト」</strong>を選びます。（AIの権限がない人は「1 リクエスト」です）<br>
+      <strong>② 種別</strong>を選びます（要望／不具合／問い合わせ／その他）。<br>
+      <strong>③ 件名と内容</strong>を入力します。<span style="color:var(--danger);font-weight:700;">＊</span>は必須で、空のままでは送信できません。<br>
+      <strong>④ 「送信」</strong>を押します。
+    </div>
+    <div class="mock-drawer mock-form" style="max-width:460px;">
+      <div class="mh"><div><strong>システム管理者へリクエスト</strong></div><div class="qa"><span>&times;</span><span class="hl">?</span></div></div>
+      <div class="fr" style="margin-top:6px;"><b>種別</b><span class="f">要望 &#9662;</span></div>
+      <div class="fr"><b>件名<span class="star">*</span></b><span class="f">残業労働時間統計の表示について</span></div>
+      <div class="fr top"><b>内容<span class="star">*</span></b><span class="f tall">月次の統計を、班ごとに見られるようにしてください。</span></div>
+      <div class="warnbar">送信した内容は「リクエスト履歴」で全員に表示されます。個人情報は書かないでください。</div>
+      <div class="fr"><b>添付</b><span class="mock-btn">ファイルを選択</span><span style="font-size:11px;color:var(--ink2);">0/5個</span></div>
+      <div class="foot"><span class="mock-btn primary">送信</span><span class="mock-btn">閉じる</span></div>
+    </div>
+    <div class="callout ok"><span class="icon">&#10003;</span><span>「システム管理者へ送信しました。」と表示されれば完了です。</span></div>
+    <div class="callout info"><span class="icon">&#9432;</span><span>画面右上の<strong>「?」</strong>（赤枠）を押すと、このマニュアルが別のタブで開きます。リクエスト履歴の画面にも「?」があります。</span></div>
+    <div class="callout warn"><span class="icon">&#9888;</span><span><strong>個人情報は書かないでください。</strong>件名・内容・依頼者名は、リクエスト履歴で全員に表示されます。</span></div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="step-header"><div class="step-num">3</div><div class="step-title">ファイルを添付する</div></div>
+    <div class="step-desc">
+      <strong>「ファイルを選択」</strong>を押して、ファイルを選びます。画面（スクリーンショット）は、コピーしてからリクエスト画面で<strong>Ctrl+V</strong>を押すと、貼り付けて添付できます。
+    </div>
+    <table class="tbl">
+      <tr><th>個数・容量</th><td>最大5個、1ファイル10MBまで、合計20MBまで</td></tr>
+      <tr><th>対応形式</th><td>画像（png / jpg / gif / webp）、Excel（xlsx / xlsm / xls）、Word（docx / doc）、PDF、CSV、テキスト（txt）</td></tr>
+      <tr><th>表示</th><td>画像は小さな写真、書類はファイル名とサイズで表示されます。「&times;」で外せます</td></tr>
+    </table>
+    <div class="callout info"><span class="icon">&#9432;</span><span>添付ファイルは、システム管理者宛の<strong>メールにだけ</strong>付きます。リクエスト履歴には表示されません。実行ファイルやZIPは添付できません。</span></div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <div class="step-header"><div class="step-num">4</div><div class="step-title">状況を確認する</div></div>
+    <div class="step-desc">自分のリクエストが今どうなっているかは、「リクエスト履歴」の<strong>「状況」</strong>で確認します。依頼者で自分の名前を選ぶと、自分の分だけに絞れます。</div>
+    <table class="tbl">
+      <tr><th><span class="mock-hist"><span class="st p" style="display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;background:var(--danger-light);color:var(--danger);">未対応</span></span></th><td>まだ対応が始まっていません</td></tr>
+      <tr><th><span class="mock-hist"><span class="st i" style="display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;background:var(--warn-light);color:var(--warn);">対応中</span></span></th><td>システム管理者が対応しています</td></tr>
+      <tr><th><span class="mock-hist"><span class="st d" style="display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;background:var(--success-light);color:var(--success);">完了</span></span></th><td>対応が完了しました</td></tr>
+      <tr><th><span class="mock-hist"><span class="st r" style="display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;background:var(--grid-head);color:var(--ink2);">却下</span></span></th><td>対応しないことになりました。<strong>理由は、登録されているメールアドレスへ届きます</strong></td></tr>
+    </table>
+    <div class="callout info"><span class="icon">&#9432;</span><span>メールが届くのは<strong>却下のときだけ</strong>です。対応中・完了になったときは届かないので、履歴で確認してください。履歴には、却下の理由や、対応した人の名前は表示されません。</span></div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step">
+    <div class="step-header"><div class="step-num">5</div><div class="step-title">システム管理者の対応（管理者向け）</div></div>
+    <div class="step-desc">
+      リクエストは、メールで届くと同時に、<strong>タスク受信箱</strong>に表示されます（システム管理者のみ）。右上の<strong>「タスク」</strong>には、未対応の件数が表示されます。
+    </div>
+    <ol style="font-size:14px;line-height:1.9;padding-left:22px;color:var(--ink2);">
+      <li>右上の「タスク」を開き、業務「リクエスト」の行で<strong>「内容を見る」</strong>を押します。</li>
+      <li>種類・依頼者・件名・内容を確認します。添付ファイルは、届いたメールで確認します。</li>
+      <li><strong>状況</strong>（未対応／対応中／完了／却下）を選んで、<strong>「保存」</strong>を押します。</li>
+      <li><strong>却下</strong>にする場合は、<strong>却下理由（必須）</strong>を入力します。保存すると、依頼者へ返信メールが送られます。</li>
+      <li>不要になったタスクは<strong>「削除」</strong>できます。元に戻せず、履歴からも消えます。</li>
+    </ol>
+    <div class="callout warn"><span class="icon">&#9888;</span><span>依頼者のメールアドレスが未登録の場合、却下は保存されますが、返信メールは送られません（警告が表示されます）。</span></div>
+    <div class="callout info"><span class="icon">&#9432;</span><span>このタスクは、システム管理者全員で共有する1件です。誰が状況を変更しても、全員の画面に反映されます。</span></div>
+  </div>
+
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>全員に表示:</strong> 件名・内容・依頼者名・状況は、リクエスト履歴で全員に表示されます。個人情報は書かないでください</li>
+      <li><strong>取り消し・追記はできません:</strong> 追加で伝えたいことは、新しいリクエストとして送ってください</li>
+      <li><strong>送信できないとき:</strong> 「システム管理者が設定されていません」と表示された場合は、システム管理者への連絡先が登録されていません。担当者へ直接連絡してください</li>
+      <li><strong>メールのエラーが表示されたとき:</strong> 添付ファイルを減らす、またはしばらくしてからもう一度送ってください</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>
