@@ -131,9 +131,17 @@ def _schema_for_table(table, allow_personal_data=False):
     return tuple(dict.fromkeys(columns))
 
 
-def schema_text(screen_id, allow_personal_data=False):
+def allowed_tables_for_screen(screen_id, cross_screen_ids=()):
+    """起点画面と、その質問で承認された横断領域のテーブルだけを返す。"""
+    tables = set(SCREEN_SQL_TABLES.get(screen_id, frozenset()))
+    for cross_screen_id in cross_screen_ids or ():
+        tables.update(SCREEN_SQL_TABLES.get(cross_screen_id, frozenset()))
+    return frozenset(tables)
+
+
+def schema_text(screen_id, allow_personal_data=False, cross_screen_ids=()):
     """LLMへ渡す、画面領域に限定したSQL辞書。列に加えてテーブルの業務上の意味も渡す。"""
-    tables = SCREEN_SQL_TABLES.get(screen_id, frozenset())
+    tables = allowed_tables_for_screen(screen_id, cross_screen_ids)
     lines = []
     for table in sorted(tables):
         columns = _schema_for_table(table, allow_personal_data)
@@ -205,7 +213,9 @@ def _serialize_value(value):
 def execute_readonly_sql(arguments, screen_context, allow_personal_data=False, redactor=None):
     """SQLを検査してAI専用読み取り接続で実行し、最大行数の集計・参照結果だけを返す。"""
     policy = get_data_policy()
-    allowed_tables = SCREEN_SQL_TABLES.get(screen_context['id'], frozenset())
+    allowed_tables = allowed_tables_for_screen(
+        screen_context['id'], screen_context.get('cross_screen_ids', ()),
+    )
     statement, error = _validate_sql(
         arguments.get('sql'), allowed_tables, policy.max_external_result_rows, allow_personal_data,
     )

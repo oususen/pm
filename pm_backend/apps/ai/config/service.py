@@ -1,6 +1,7 @@
 """AIチャットに適用する設定値を、固定カタログの範囲内で読み出す。"""
 from ai.config.catalog import PROVIDER_CATALOG, TOOL_CATALOG
-from ai.config.models import AIDataPolicy, AIProviderConfig, AIToolPolicy
+from ai.config.models import AICrossScreenAccessPolicy, AIDataPolicy, AIProviderConfig, AIToolPolicy
+from ai.context.screen_context import screen_context_by_id
 
 
 def get_provider_settings():
@@ -45,6 +46,47 @@ def apply_tool_policy(screen_context, is_external_provider=False):
     )
     priority_tools = frozenset(screen_context.get('priority_tools', ())) & allowed_tools
     return {**screen_context, 'allowed_tools': allowed_tools, 'priority_tools': priority_tools}
+
+
+def approved_cross_screen_context(screen_context, policy_ids, is_external_provider=False):
+    """その質問で承認された横断定義だけを起点画面の参照範囲へ加える。"""
+    normalized_ids = []
+    for value in policy_ids or ():
+        try:
+            policy_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if policy_id > 0 and policy_id not in normalized_ids:
+            normalized_ids.append(policy_id)
+    policies = AICrossScreenAccessPolicy.objects.filter(
+        id__in=normalized_ids,
+        source_screen_id=screen_context['id'],
+        is_enabled=True,
+    )
+    if is_external_provider:
+        policies = policies.filter(allow_external_transfer=True)
+
+    allowed_tools = set(screen_context['allowed_tools'])
+    allowed_intents = set(screen_context['allowed_intents'])
+    target_ids = []
+    labels = []
+    for policy in policies:
+        target = screen_context_by_id(policy.target_screen_id)
+        if not target:
+            continue
+        target = apply_tool_policy(target, is_external_provider=is_external_provider)
+        allowed_tools.update(target['allowed_tools'])
+        allowed_intents.update(target['allowed_intents'])
+        target_ids.append(policy.target_screen_id)
+        labels.append(f"{policy.get_source_screen_id_display()}・{policy.get_target_screen_id_display()}")
+    return {
+        **screen_context,
+        'allowed_tools': frozenset(allowed_tools),
+        'allowed_intents': frozenset(allowed_intents),
+        'cross_screen_ids': tuple(target_ids),
+        'cross_screen_policy_ids': tuple(policy.id for policy in policies if policy.target_screen_id in target_ids),
+        'cross_screen_labels': tuple(labels),
+    }
 
 
 def external_aggregate_transfer_allowed():

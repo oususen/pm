@@ -18,9 +18,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ai.context.screen_context import COMMON_COVERAGE, resolve_screen_context
-from ai.config.models import AIProviderConfig
+from ai.config.catalog import SCREEN_CATALOG
+from ai.config.models import AICrossScreenAccessPolicy, AIProviderConfig
 from ai.config.service import (
     apply_tool_policy,
+    approved_cross_screen_context,
     authorized_personal_data_allowed,
     external_aggregate_transfer_allowed,
     external_image_transfer_allowed,
@@ -73,6 +75,88 @@ MAX_RANGE_DAYS = 93
 AGENT_MAX_ROUNDS = 8
 AGENT_MAX_TOKENS = 4096
 PRODUCT_CODE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{1,10}\d{3,}(?:-[A-Za-z0-9]+)+)(?![A-Za-z0-9])')
+
+
+class CrossScreenAccessRequired(Exception):
+    """利用者の今回だけの承認を画面へ返すための中断。"""
+    def __init__(self, policy, reason=''):
+        self.policy = policy
+        self.reason = reason
+
+
+class CrossScreenDefinitionRequired(Exception):
+    """未定義の横断参照を、管理者定義依頼として画面へ返すための中断。"""
+    def __init__(self, source_screen_id, target_screen_id):
+        self.source_screen_id = source_screen_id
+        self.target_screen_id = target_screen_id
+
+
+def _cross_screen_target_from_question(question, screen_context):
+    """ツール非対応モデルでも、明確な横断質問は先に承認へ進める。"""
+    text = str(question or '')
+    source = screen_context['id']
+    if source == 'production':
+        if re.search(r'残業|時間外|休日出勤', text):
+            return 'overtime'
+        if re.search(r'品質|検査|不良', text):
+            return 'quality'
+        if re.search(r'仕入|入荷|購買', text):
+            return 'purchase'
+    if source == 'quality' and re.search(r'生産数|生産実績|出来高', text):
+        return 'production'
+    if source == 'overtime' and re.search(r'生産数|生産実績|出来高', text):
+        return 'production'
+    return None
+
+
+def _cross_screen_response(policy, reason=''):
+    """フロントエンドが承認ボタンを描画するための、データを含まない応答。"""
+    source_label = policy.get_source_screen_id_display()
+    target_label = policy.get_target_screen_id_display()
+    return {
+        'answer': (
+            f'{source_label}と{target_label}のデータを、この質問だけ横断参照しますか？\n'
+            f'参照範囲: {source_label}・{target_label}の許可済みテーブルと列だけ（読み取り専用）'
+        ),
+        'analysis': '',
+        'source': '横断参照の承認待ち',
+        'period': None,
+        'chart': None,
+        'document': '',
+        'excel_export': False,
+        'provider': 'database',
+        'model': '',
+        'inference': None,
+        'cross_screen_request': {
+            'policy_id': policy.id,
+            'source_screen_id': policy.source_screen_id,
+            'target_screen_id': policy.target_screen_id,
+            'source_label': source_label,
+            'target_label': target_label,
+            'purpose': policy.purpose,
+            'reason': reason,
+        },
+    }
+
+
+def _cross_screen_definition_response(source_screen_id, target_screen_id):
+    source_label = SCREEN_CATALOG.get(source_screen_id, source_screen_id)
+    target_label = SCREEN_CATALOG.get(target_screen_id, target_screen_id)
+    return {
+        'answer': (
+            f'{source_label}・{target_label}の横断参照は未定義です。'
+            'システム管理者へ横断参照定義を依頼してください。'
+        ),
+        'analysis': '',
+        'source': '横断参照の定義待ち',
+        'period': None,
+        'chart': None,
+        'document': '',
+        'excel_export': False,
+        'provider': 'database',
+        'model': '',
+        'inference': None,
+    }
 PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9\s-]{4,49}))(?![A-Za-z0-9])')
 PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
 REDACTION_PLACEHOLDER_PATTERN = re.compile(r'(?:実績作業者|作業者|得意先|仕入先|照会情報)\d+')
@@ -476,7 +560,7 @@ def _readonly_sql_tool(screen_context, allow_personal_data=False):
                 'AI用DB辞書にある列だけを使い、読み取り専用SQLを実行する。'
                 'SELECTのみ、単一文、明示列、最大件数までに限定される。'
                 '既存の専用集計ツールで回答できる場合はそちらを優先し、SQLで更新・削除・DDL・個人情報取得はしない。\n'
-                f"この画面で使えるテーブルと列:\n{schema_text(screen_context['id'], allow_personal_data)}"
+                f"この画面で使えるテーブルと列:\n{schema_text(screen_context['id'], allow_personal_data, screen_context.get('cross_screen_ids', ()))}"
             ),
             'parameters': {
                 'type': 'object',
@@ -485,6 +569,46 @@ def _readonly_sql_tool(screen_context, allow_personal_data=False):
             },
         },
     }
+
+
+def _cross_screen_access_tool(screen_context):
+    """外部AIに、未承認の別画面データを直接渡さず承認要求だけをさせる。"""
+    targets = [screen_id for screen_id in SCREEN_CATALOG if screen_id not in {screen_context['id'], 'ai_home'}]
+    return {
+        'type': 'function',
+        'function': {
+            'name': 'request_cross_screen_access',
+            'description': (
+                '現在の起点画面にない別業務領域のデータが必要なときに、利用者へ今回だけの参照承認を求める。'
+                'テーブル名や列名を指定して取得する機能ではない。未定義の組合せなら管理者への定義依頼として画面に表示される。'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'target_screen_id': {'type': 'string', 'enum': targets},
+                    'reason': {'type': 'string', 'description': '横断参照が必要な理由（200文字以内）'},
+                },
+                'required': ['target_screen_id', 'reason'],
+            },
+        },
+    }
+
+
+def _request_cross_screen_access(arguments, screen_context, is_external_provider=False):
+    """定義済みの画面組合せだけを、承認画面へ渡す。"""
+    target_screen_id = str(arguments.get('target_screen_id') or '').strip()
+    if target_screen_id not in SCREEN_CATALOG or target_screen_id in {screen_context['id'], 'ai_home'}:
+        return {'status': 'invalid_request', 'detail': '追加参照領域の指定が不正です。'}
+    policy = AICrossScreenAccessPolicy.objects.filter(
+        source_screen_id=screen_context['id'], target_screen_id=target_screen_id, is_enabled=True,
+    ).first()
+    if not policy:
+        raise CrossScreenDefinitionRequired(screen_context['id'], target_screen_id)
+    if is_external_provider and not policy.allow_external_transfer:
+        return {'status': 'invalid_request', 'detail': 'この横断参照は外部AIへの送信を許可していません。ローカルQwenで実行してください。'}
+    if policy.id not in screen_context.get('cross_screen_policy_ids', ()):
+        raise CrossScreenAccessRequired(policy, str(arguments.get('reason') or '')[:200])
+    return {'status': 'ok', 'detail': f'{policy.get_source_screen_id_display()}・{policy.get_target_screen_id_display()}の横断参照は今回だけ承認済みです。'}
 
 
 # 利用者が表・一覧・Excelでの出力を求めたときにAIが呼ぶ。DBへはアクセスせず、画面のExcelボタンを出す印を立てるだけ。
@@ -919,6 +1043,8 @@ def _deepseek_agent_chat(
     ]
     if 'execute_readonly_sql' in allowed_tools:
         available_tools.append(_readonly_sql_tool(screen_context, allow_personal_overtime))
+    if screen_context['id'] != 'ai_home':
+        available_tools.append(_cross_screen_access_tool(screen_context))
     if allow_personal_overtime:
         available_tools.extend(
             tool for tool in (
@@ -992,6 +1118,8 @@ def _deepseek_agent_chat(
         'content': (
             'あなたは本社の生産管理を支援する社内AIです。利用者の質問を自分で調査して回答してください。\n'
             f"今回の起点画面: {screen_context['label']}。この画面に許可されたツール以外を使ってはいけません。\n"
+            '別の画面領域のデータが必要な質問では、推測や聞き返しをせず、最初にrequest_cross_screen_accessを呼んでください。'
+            'このツールで指定できるのは業務領域だけで、任意テーブル名・任意列を直接参照してはいけません。\n'
             '利用できるのは品番マスタ検索、許可済みの読み取り専用集計ツール、および許可された場合のAI用DB辞書SQLだけです。'
             'SQLはexecute_readonly_sqlでSELECT一文だけを使えます。更新、削除、DDL、管理SQL、個人情報取得はできません。\n'
             'SQLで「〇〇別」の集計を聞かれたら、そのキーとなるコード列(品番ならproduct_code)でGROUP BYし、回答の表にはコードを先頭列に出してください。'
@@ -1138,6 +1266,10 @@ def _deepseek_agent_chat(
                         result, tool_chart, tool_period = _agent_product_category_counts(arguments), None, None
                     elif function.get('name') == 'get_missing_routing_orders' and 'get_missing_routing_orders' in allowed_tools:
                         result, tool_chart, tool_period = get_missing_routing_orders(arguments)
+                    elif function.get('name') == 'request_cross_screen_access':
+                        result, tool_chart, tool_period = _request_cross_screen_access(
+                            arguments, screen_context, is_external_provider=provider_key in EXTERNAL_AGENT_PROVIDERS,
+                        ), None, None
                     elif function.get('name') == 'execute_readonly_sql' and 'execute_readonly_sql' in allowed_tools:
                         result, tool_chart, tool_period = execute_readonly_sql(
                             arguments, screen_context, allow_personal_overtime, redactor,
@@ -1915,8 +2047,28 @@ class AIChatAPIView(APIView):
             resolve_screen_context(request.data.get('screen_context')),
             is_external_provider=is_external_provider,
         )
+        raw_cross_screen_ids = request.data.get('cross_screen_access_ids') or []
+        if not isinstance(raw_cross_screen_ids, list):
+            return Response({'detail': '横断参照の承認情報が不正です。'}, status=400)
+        screen_context = approved_cross_screen_context(
+            screen_context, raw_cross_screen_ids, is_external_provider=is_external_provider,
+        )
         if is_external_provider and not external_aggregate_transfer_allowed():
             screen_context = {**screen_context, 'allowed_tools': frozenset()}
+        requested_cross_target = _cross_screen_target_from_question(question, screen_context)
+        if requested_cross_target and requested_cross_target not in screen_context.get('cross_screen_ids', ()):
+            cross_policy = AICrossScreenAccessPolicy.objects.filter(
+                source_screen_id=screen_context['id'], target_screen_id=requested_cross_target, is_enabled=True,
+            ).first()
+            if not cross_policy:
+                return Response(_cross_screen_definition_response(screen_context['id'], requested_cross_target))
+            if is_external_provider and not cross_policy.allow_external_transfer:
+                return Response({
+                    **_cross_screen_definition_response(screen_context['id'], requested_cross_target),
+                    'answer': 'この横断参照は外部AIへの送信を許可していません。ローカルQwenを選択してください。',
+                    'source': '横断参照の送信方針',
+                })
+            return Response(_cross_screen_response(cross_policy))
         raw_history = request.data.get('history') or []
         raw_document_ids = request.data.get('knowledge_document_ids') or []
         if not isinstance(raw_document_ids, list):
@@ -1965,12 +2117,19 @@ class AIChatAPIView(APIView):
                     vision_attachment=vision_attachment,
                     current_user=request.user,
                 )
+            except CrossScreenAccessRequired as exc:
+                return Response(_cross_screen_response(exc.policy, exc.reason))
+            except CrossScreenDefinitionRequired as exc:
+                return Response(_cross_screen_definition_response(exc.source_screen_id, exc.target_screen_id))
             except LocalAIError as exc:
                 return Response({'detail': str(exc)}, status=503)
             return Response({
                 'answer': answer,
                 'analysis': '',
-                'source': source,
+                'source': ' / '.join(item for item in (
+                    source,
+                    *[f'承認済み横断参照：{label}' for label in screen_context.get('cross_screen_labels', ())],
+                ) if item),
                 'period': period,
                 'chart': chart,
                 'document': '',
@@ -2127,6 +2286,13 @@ class AIChatAPIView(APIView):
         if plan['intent'] == 'help':
             return self._general_chat(question, history, provider, model, redactor, screen_context, knowledge_document_ids)
 
+        if plan['intent'] not in screen_context['allowed_intents']:
+            return Response({
+                'answer': 'この集計は現在の画面では参照できません。横断参照の定義と、この質問での承認が必要です。',
+                'analysis': '', 'source': '画面別参照範囲', 'period': None, 'chart': None, 'document': '',
+                'provider': 'database', 'model': '', 'inference': None,
+            })
+
         if plan.get('product_not_found'):
             matches = plan.get('product_match_candidates') or []
             if matches:
@@ -2223,7 +2389,10 @@ class AIChatAPIView(APIView):
         return Response({
             'answer': answer,
             'analysis': '',
-            'source': ' / '.join(item for item in (source, knowledge_source) if item),
+            'source': ' / '.join(item for item in (
+                source, knowledge_source,
+                *[f'承認済み横断参照：{label}' for label in screen_context.get('cross_screen_labels', ())],
+            ) if item),
             'period': period,
             'chart': chart,
             'document': document,

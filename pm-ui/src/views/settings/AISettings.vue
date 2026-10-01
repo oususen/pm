@@ -60,6 +60,24 @@
     </section>
 
     <section class="setting-section">
+      <h3>横断参照の定義</h3>
+      <p class="section-help">ここで定義した画面の組合せだけ、利用者が質問ごとに「今回だけ許可」できます。AIが任意のテーブル名や列を指定して参照することはできず、各画面のAI用DB辞書にある読み取り専用の列だけが対象です。</p>
+      <div v-if="canEdit" class="cross-screen-form">
+        <select v-model="newCrossScreen.source_screen_id"><option v-for="screen in screens" :key="screen.id" :value="screen.id">起点: {{ screen.label }}</option></select>
+        <select v-model="newCrossScreen.target_screen_id"><option v-for="screen in targetScreenOptions" :key="screen.id" :value="screen.id">追加: {{ screen.label }}</option></select>
+        <input v-model.trim="newCrossScreen.purpose" placeholder="利用目的（例: 日別の生産数と残業申請時間を比較）" />
+        <label><input v-model="newCrossScreen.allow_external_transfer" type="checkbox" /> 外部AIへ集計結果を送信</label>
+        <button class="reload-button" :disabled="!newCrossScreen.purpose || newCrossScreen.source_screen_id === newCrossScreen.target_screen_id" @click="addCrossScreen">組合せを追加</button>
+      </div>
+      <div class="knowledge-list">
+        <label v-for="item in crossScreenAccess" :key="item.id" class="knowledge-row" :class="{ disabled: !item.is_enabled }">
+          <span><strong>{{ item.source_screen_label }} × {{ item.target_screen_label }}</strong><small>{{ item.purpose }}</small></span>
+          <span class="knowledge-actions"><label><input v-model="item.is_enabled" :disabled="!canEdit" type="checkbox" @change="saveCrossScreen(item)" /> 有効</label><label><input v-model="item.allow_external_transfer" :disabled="!canEdit || !item.is_enabled" type="checkbox" @change="saveCrossScreen(item)" /> 外部送信</label><button v-if="canEdit" class="delete-button" @click.prevent="removeCrossScreen(item)">削除</button></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="setting-section">
       <h3>AIナレッジ</h3>
       <p class="section-help">有効な区分だけを、質問と起点画面に応じてRAG検索します。正式原本は仕様書とマニュアルで管理し、回答には参照したファイルを根拠として表示します。</p>
       <div class="knowledge-list">
@@ -137,6 +155,13 @@ const ocrTestFile = ref(null)
 const ocrTestResult = ref(null)
 const ocrTesting = ref(false)
 const sqlDictionary = ref([])
+const crossScreenAccess = ref([])
+const screens = [
+  { id: 'orders', label: '受注' }, { id: 'production', label: '生産' }, { id: 'quality', label: '品質' },
+  { id: 'overtime', label: '勤務' }, { id: 'purchase', label: '仕入' }, { id: 'shipping', label: '出荷' },
+  { id: 'inventory', label: '在庫' }, { id: 'masters', label: 'マスタ' },
+]
+const newCrossScreen = ref({ source_screen_id: 'production', target_screen_id: 'quality', purpose: '', allow_external_transfer: true })
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -149,6 +174,7 @@ const toolGroups = computed(() => screenOrder
     return { screenId, label: items[0]?.screen_label || '', items }
   })
   .filter((group) => group.items.length))
+const targetScreenOptions = computed(() => screens.filter((screen) => screen.id !== newCrossScreen.value.source_screen_id))
 
 const kindLabel = (kind) => ({ master: 'マスタ参照', aggregate: '集計', personal: '個人別集計', sql: '読み取りSQL' }[kind] || kind)
 const saved = (message) => { notice.value = message; setTimeout(() => { notice.value = '' }, 2500) }
@@ -158,8 +184,8 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse] = await Promise.all([
-      api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(), api.ocr.status(),
+    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse, crossScreenResponse] = await Promise.all([
+      api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(), api.ocr.status(), api.aiSettings.crossScreenAccess(),
     ])
     providers.value = providerResponse.data
     tools.value = toolResponse.data
@@ -168,6 +194,7 @@ const load = async () => {
     knowledgeDocuments.value = documentResponse.data
     sqlDictionary.value = dictionaryResponse.data
     ocrStatus.value = ocrResponse.data.tesseract
+    crossScreenAccess.value = crossScreenResponse.data.results || crossScreenResponse.data
   } catch (requestError) {
     failed(requestError)
   } finally {
@@ -218,6 +245,23 @@ const saveKnowledgeDocument = async (item) => {
 const removeKnowledgeDocument = async (item) => {
   try { await api.aiSettings.deleteKnowledgeDocument(item.id); saved('AIナレッジ資料を削除しました。'); await load() } catch (requestError) { failed(requestError) }
 }
+const addCrossScreen = async () => {
+  try {
+    await api.aiSettings.createCrossScreenAccess(newCrossScreen.value)
+    newCrossScreen.value = { source_screen_id: 'production', target_screen_id: 'quality', purpose: '', allow_external_transfer: true }
+    saved('横断参照の組合せを追加しました。')
+    await load()
+  } catch (requestError) { failed(requestError) }
+}
+const saveCrossScreen = async (item) => {
+  try {
+    await api.aiSettings.updateCrossScreenAccess(item.id, { is_enabled: item.is_enabled, allow_external_transfer: item.allow_external_transfer })
+    saved('横断参照の設定を保存しました。')
+  } catch (requestError) { failed(requestError); await load() }
+}
+const removeCrossScreen = async (item) => {
+  try { await api.aiSettings.deleteCrossScreenAccess(item.id); saved('横断参照の組合せを削除しました。'); await load() } catch (requestError) { failed(requestError) }
+}
 
 load()
 </script>
@@ -225,5 +269,6 @@ load()
 <style scoped>
 .ai-settings{max-width:1180px;padding:14px 16px;margin:0 auto;color:#334155}.page-header{display:flex;justify-content:space-between;align-items:start;gap:16px}.page-header h2{margin:0;font-size:19px}.page-header p,.section-help,.policy-grid p{margin:5px 0 0;font-size:12px;line-height:1.6;color:#64748b}.reload-button{border:1px solid #93bfb5;background:#fff;color:#147a6d;border-radius:6px;padding:5px 11px;cursor:pointer}.setting-section{margin-top:15px;padding:13px;border:1px solid #dce8e5;border-radius:10px;background:#fff}.setting-section h3{margin:0 0 9px;font-size:14px;color:#176b60}.provider-grid,.policy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.setting-card,.policy-grid{padding:10px;border-radius:7px;background:#f7fbfa}.card-title,.tool-row,.knowledge-row{display:flex;align-items:center;justify-content:space-between;gap:10px}.setting-card label{display:grid;gap:4px;margin-top:7px;font-size:11px}.setting-card select,.policy-grid input[type=number]{border:1px solid #cdded9;border-radius:5px;padding:5px;background:white}.setting-card small,.tool-row small,.knowledge-row small{display:block;margin-top:3px;font-size:10px;color:#73878a}.check-line{font-size:12px}.tool-group{margin-top:10px}.tool-group h4{margin:0;padding:6px 8px;background:#eef7f5;font-size:12px}.tool-list,.knowledge-list{border:1px solid #e1ece9}.tool-row,.knowledge-row{padding:7px 9px;border-bottom:1px solid #e8efed;font-size:12px}.tool-row:last-child,.knowledge-row:last-child{border-bottom:0}.tool-actions{display:flex;gap:10px;font-size:11px;white-space:nowrap}.dictionary-screen{margin-top:6px;border:1px solid #e1ece9;border-radius:6px;padding:7px;font-size:12px}.dictionary-screen summary{cursor:pointer;font-weight:700;color:#356c66}.dictionary-table{display:grid;gap:2px;padding:7px 3px;border-top:1px solid #edf2f1}.dictionary-table:first-of-type{margin-top:7px}.dictionary-table small{font-family:Consolas,monospace;font-size:10px;color:#687d81;word-break:break-all}.disabled{opacity:.48}.notice,.error{margin:9px 0;padding:7px 10px;border-radius:6px;font-size:12px}.notice{background:#e9f8f1;color:#237765}.error{background:#fff1ee;color:#ae5146}@media(max-width:760px){.provider-grid,.policy-grid{grid-template-columns:1fr}.tool-row{align-items:start;flex-direction:column}.tool-actions{width:100%;justify-content:space-between}}
 .knowledge-actions,.knowledge-upload{display:flex;gap:10px;font-size:11px;white-space:nowrap}.knowledge-upload{margin-top:10px;align-items:center;flex-wrap:wrap}.knowledge-upload select,.knowledge-upload input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff}.delete-button{border:1px solid #f0b7ae;background:#fff;color:#b04c40;border-radius:5px;padding:3px 7px;cursor:pointer}
+.cross-screen-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.cross-screen-form select,.cross-screen-form input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff;font-size:11px}.cross-screen-form input[type=text]{min-width:280px}.cross-screen-form label{font-size:11px}
 .ocr-status{display:grid;gap:3px;margin-top:9px;padding:8px 10px;border:1px solid #b8ded3;border-radius:7px;background:#eef9f5;font-size:12px;color:#176b60}.ocr-status small{color:#5c7772}.ocr-status.unavailable{border-color:#efc7bd;background:#fff4f1;color:#ad5548}.ocr-result{white-space:pre-wrap;max-height:260px;overflow:auto;margin:10px 0 0;padding:9px;border:1px solid #e1ece9;border-radius:7px;background:#f8fbfa;font-size:12px;line-height:1.6}
 </style>

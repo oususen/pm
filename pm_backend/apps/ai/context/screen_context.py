@@ -20,9 +20,9 @@ SCREEN_CONTEXTS = (
         'allowed_tools': frozenset({'get_missing_routing_orders', 'execute_readonly_sql'}), 'allowed_intents': frozenset(),
     }),
     ('/production/', {
-        'id': 'production', 'label': '生産', 'coverage': '生産数・仕損・中断・残業',
+        'id': 'production', 'label': '生産', 'coverage': '生産数・中断',
         'allowed_tools': frozenset({'search_product', 'count_products', 'get_business_data', 'execute_readonly_sql'}),
-        'allowed_intents': frozenset({'production', 'scrap', 'interruption', 'overtime'}),
+        'allowed_intents': frozenset({'production', 'interruption'}),
     }),
     ('/quality/', {
         'id': 'quality', 'label': '品質', 'coverage': '確定仕損',
@@ -67,8 +67,8 @@ COMMON_COVERAGE = '生産数・仕損・中断・残業'
 def resolve_screen_context(value):
     """クエリ文字列を含めず、登録済みの画面領域だけを返す。
 
-    priority_tools / priority_intents は画面で優先して調べる対象。
-    allowed_tools / allowed_intents は本社横断を含む許可範囲で、実際に使えるかは管理設定で最終決定する。
+    priority_tools / priority_intents と allowed_tools / allowed_intents は、起点画面で
+    使える範囲。別の画面のデータは横断参照の定義と、その質問での承認後にだけ追加する。
     """
     path = urlsplit(str(value or '')).path
     for prefix, context in SCREEN_CONTEXTS:
@@ -77,7 +77,23 @@ def resolve_screen_context(value):
                 **context,
                 'priority_tools': context['allowed_tools'],
                 'priority_intents': context['allowed_intents'],
-                'allowed_tools': _ALL_CURRENT_TOOLS | context['allowed_tools'],
-                'allowed_intents': _ALL_CURRENT_INTENTS,
+                'allowed_tools': context['allowed_tools'],
+                'allowed_intents': context['allowed_intents'],
             }
     return {**DEFAULT_SCREEN_CONTEXT, 'priority_tools': frozenset(), 'priority_intents': frozenset()}
+
+
+def screen_context_by_id(screen_id):
+    """横断参照で追加する領域を、URLではなく固定IDから安全に取得する。"""
+    for _, context in SCREEN_CONTEXTS:
+        if context['id'] == screen_id:
+            return {
+                **context,
+                'priority_tools': context['allowed_tools'],
+                'priority_intents': context['allowed_intents'],
+                'allowed_tools': context['allowed_tools'],
+                'allowed_intents': context['allowed_intents'],
+            }
+    if screen_id == 'ai_home':
+        return {**DEFAULT_SCREEN_CONTEXT, 'priority_tools': frozenset(), 'priority_intents': frozenset()}
+    return None

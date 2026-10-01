@@ -236,6 +236,10 @@ export default {
     createKnowledgeDocument(data) { return client.post('/ai/settings/knowledge-documents/', data) },
     updateKnowledgeDocument(id, data) { return client.patch(`/ai/settings/knowledge-documents/${id}/`, data) },
     deleteKnowledgeDocument(id) { return client.delete(`/ai/settings/knowledge-documents/${id}/`) },
+    crossScreenAccess() { return client.get('/ai/settings/cross-screen-access/') },
+    createCrossScreenAccess(data) { return client.post('/ai/settings/cross-screen-access/', data) },
+    updateCrossScreenAccess(id, data) { return client.patch(`/ai/settings/cross-screen-access/${id}/`, data) },
+    deleteCrossScreenAccess(id) { return client.delete(`/ai/settings/cross-screen-access/${id}/`) },
   },
   ocr: {
     status() { return client.get('/ocr/status/') },

@@ -51,6 +51,11 @@
                 <div v-if="message.analysis" class="reasoning-note"><span>✦ Qwenの確認メモ</span><p>{{ message.analysis }}</p></div>
                 <div v-if="message.role === 'assistant'" class="evidence-line" :class="evidenceKind(message)"><span>{{ evidenceIcon(message) }}</span> {{ evidenceLabel(message) }}</div>
                 <div v-if="message.source" class="source-line"><span>▤</span> 根拠データ: {{ message.source }}<span v-if="message.period" class="source-period">{{ message.period.start_date }} — {{ message.period.end_date }}</span></div>
+                <section v-if="message.cross_screen_request" class="cross-screen-request">
+                  <strong>横断参照: {{ message.cross_screen_request.source_label }}・{{ message.cross_screen_request.target_label }}</strong>
+                  <small>{{ message.cross_screen_request.purpose }}</small>
+                  <div><button type="button" @click="approveCrossScreen(message)">今回だけ許可</button><button type="button" class="decline" @click="declineCrossScreen(message)">許可しない</button></div>
+                </section>
                 <section v-if="message.chart && message.chart.values.length" class="chart-card">
                   <div class="chart-heading"><div><small>DATA VISUALIZATION</small><strong>{{ message.chart.title }}</strong></div><span class="chart-kind">▥ 棒グラフ</span></div>
                   <div class="bar-chart">
@@ -227,7 +232,7 @@ const scrollToBottom = async () => {
   if (scrollArea.value) scrollArea.value.scrollTop = scrollArea.value.scrollHeight
 }
 
-const ask = async (question) => {
+const ask = async (question, crossScreenAccessIds = []) => {
   if (loading.value || !question?.trim()) return
   error.value = ''
   failedQuestion.value = ''
@@ -242,11 +247,13 @@ const ask = async (question) => {
       model: isExternalProvider.value ? externalModel.value[provider.value] : undefined,
       allow_personal_overtime: canViewPersonalOvertime.value,
       screen_context: screenContext.value,
+      cross_screen_access_ids: crossScreenAccessIds,
     }, { signal: abortController.signal })
     messages.value.push({
       role: 'assistant', content: data.answer, analysis: data.analysis, source: data.source,
       period: data.period, chart: data.chart, document: data.document, excel_export: data.excel_export === true,
       inference: data.inference, provider: data.provider, model: data.model,
+      cross_screen_request: data.cross_screen_request ? { ...data.cross_screen_request, question: question.trim() } : null,
     })
     await saveConversation()
   } catch (e) {
@@ -262,6 +269,20 @@ const ask = async (question) => {
     loading.value = false
     await scrollToBottom()
   }
+}
+
+const approveCrossScreen = (message) => {
+  const request = message.cross_screen_request
+  if (!request || loading.value) return
+  request.approved = true
+  ask(request.question, [request.policy_id])
+}
+
+const declineCrossScreen = (message) => {
+  const request = message.cross_screen_request
+  if (!request) return
+  message.content = '横断参照は許可されなかったため、この質問では別画面のデータを参照しません。'
+  message.cross_screen_request = null
 }
 
 const saveConversation = async () => {
@@ -434,4 +455,5 @@ onMounted(() => {
 .reasoning-note{border-left:2px solid #a9d8ca;padding:5px 9px;margin:2px 0 4px;color:#748b83}.reasoning-note span{font-size:8px;font-weight:800;letter-spacing:.3px;color:#438c79}.reasoning-note p{font-size:10px;line-height:1.65;margin:3px 0 0}
 .local-badge.offline{border-color:#f0e2c5;color:#a37b2f}.local-badge.offline i,.online.offline i{background:#dfa746;box-shadow:0 0 0 3px #dfa74620}.online.offline{color:#a37b2f}
 .evidence-line{width:max-content;max-width:100%;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700}.evidence-line span{display:inline-grid;place-items:center;width:12px;height:12px;margin-right:3px;border-radius:50%;font-size:8px}.evidence-line.database{background:#e9f8f1;color:#207762}.evidence-line.database span{background:#3da68c;color:#fff}.evidence-line.knowledge{background:#eef3ff;color:#4c6296}.evidence-line.knowledge span{background:#7790ca;color:#fff}.evidence-line.general{background:#f5f6f7;color:#77848a}.evidence-line.general span{background:#98a4a8;color:#fff}.knowledge-library{display:grid;gap:7px}.knowledge-library .side-divider{margin:0 0 4px}.knowledge-library p,.knowledge-library small{margin:0;font-size:9px;line-height:1.55;color:#788e88}.knowledge-library select,.knowledge-library input{width:100%;box-sizing:border-box;border:1px solid #d8e4e1;border-radius:6px;background:#fff;padding:6px;font-size:9px;color:#526970}.knowledge-library input[type=file]{padding:4px}.knowledge-library button{border:1px solid #2d9a83;border-radius:6px;background:#168875;color:#fff;padding:6px;font-size:9px;cursor:pointer}.knowledge-library button:disabled{opacity:.55;cursor:default}.knowledge-notice,.knowledge-error{padding:6px;border-radius:6px;font-size:9px;line-height:1.5}.knowledge-notice{background:#e9f8f1;color:#237765}.knowledge-error{background:#fff1ee;color:#ae5146}
+.cross-screen-request{display:grid;gap:5px;padding:8px;border:1px solid #b8ded3;border-radius:7px;background:#f1faf7;font-size:10px;color:#176b60}.cross-screen-request small{color:#617b76}.cross-screen-request div{display:flex;gap:6px}.cross-screen-request button{border:0;border-radius:5px;background:#168875;color:#fff;padding:5px 8px;font-size:10px;cursor:pointer}.cross-screen-request button.decline{background:#fff;color:#65777d;border:1px solid #cfdcda}
 </style>
