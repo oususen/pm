@@ -12,11 +12,11 @@
         </select>
       </div>
       <div class="row">
-        <label>件名</label>
+        <label>件名<span class="req" title="必須">*</span></label>
         <input v-model="subject" type="text" maxlength="100" :disabled="sending" />
       </div>
       <div class="row top">
-        <label>内容</label>
+        <label>内容<span class="req" title="必須">*</span></label>
         <textarea v-model="body" rows="7" maxlength="5000" placeholder="スクリーンショットは Ctrl+V で貼り付けできます" :disabled="sending"></textarea>
       </div>
       <div class="row top">
@@ -185,7 +185,8 @@ header{justify-content:space-between}
 header button{border:0;background:none;font-size:18px;cursor:pointer}
 .row{display:flex;gap:8px;align-items:center}
 .row.top{align-items:flex-start}
-.row>label{flex:0 0 40px;font-weight:600}
+.row>label{flex:0 0 48px;font-weight:600}
+.req{margin-left:2px;color:#c0392b}
 .row input[type=text],.row select,.row textarea{flex:1;min-width:0;padding:4px 6px;border:1px solid #c8ccd0;border-radius:4px;font:inherit}
 .row textarea{resize:vertical}
 .files{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
