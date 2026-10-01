@@ -10,12 +10,13 @@
         <button type="button" title="新しい会話" :disabled="loading" @click="clearChat">＋</button>
         <button type="button" title="右へ畳む" @click="collapseAIDrawer">›</button>
         <button type="button" title="閉じる" @click="closeAIDrawer">×</button>
+        <button type="button" title="マニュアルを開く" aria-label="マニュアルを開く" @click="openManual">?</button>
       </div>
       <div class="drawer-model-actions">
-        <select v-model="provider" :disabled="loading" aria-label="AIプロバイダ" :title="providerLabel">
+        <select v-model="provider" :disabled="loading" aria-label="AIプロバイダ" :title="providerLabel" @change="onSelectionChange">
           <option v-for="item in availableProviders" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
-        <select v-if="currentProviderModels.length > 1" v-model="model" :disabled="loading" aria-label="モデル" class="model-select" :title="modelLabel">
+        <select v-if="currentProviderModels.length > 1" v-model="model" :disabled="loading" aria-label="モデル" class="model-select" :title="modelLabel" @change="onSelectionChange">
           <option v-for="item in currentProviderModels" :key="item.id" :value="item.id">{{ item.label }}</option>
         </select>
       </div>
@@ -88,6 +89,11 @@ const draft = ref('')
 const loading = ref(false)
 const error = ref('')
 const conversation = ref(null)
+const MANUAL_PATH = '共通/社内AIチャット.md'
+const openManual = () => {
+  const encoded = MANUAL_PATH.split('/').map(encodeURIComponent).join('/')
+  window.open(`/manual?path=${encoded}`, '_blank', 'noopener')
+}
 const QUESTION_MAX = 1200
 const HISTORY_LIMIT = 15
 const failedRequest = ref(null)
@@ -373,11 +379,34 @@ watch(provider, (next, prev) => {
   }
 })
 
+// OpenRouterの有料モデルは、利用者が選択したときに確認する。同じ画面の間は1回承認すれば再確認しない。
+const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it'])
+let paidModelConfirmed = false
+let lastSelection = null
+const rememberSelection = () => { lastSelection = { provider: provider.value, model: model.value } }
+const onSelectionChange = async () => {
+  await nextTick()
+  const isPaid = provider.value === 'openrouter' && OPENROUTER_PAID_MODELS.has(model.value)
+  if (isPaid && !paidModelConfirmed) {
+    if (window.confirm('このモデル（Gemma 4 26B A4B）は有料です。使いますか？')) {
+      paidModelConfirmed = true
+    } else if (lastSelection) {
+      provider.value = lastSelection.provider
+      model.value = lastSelection.model
+      return
+    }
+  }
+  rememberSelection()
+}
+
 watch(aiDrawerSourcePath, () => {
   clearChat()
   void loadProviderSettings()
 })
-onMounted(loadProviderSettings)
+onMounted(async () => {
+  await loadProviderSettings()
+  rememberSelection()
+})
 </script>
 
 <style scoped>

@@ -9,6 +9,7 @@ export const manualSections = [
     title: "共通",
     items: [
       { title: "基本操作", path: "共通/基本操作.md" },
+      { title: "社内AIチャット", path: "共通/社内AIチャット.md" },
       { title: "タスク受信箱", path: "共通/タスク受信箱.md" },
     ],
   },
