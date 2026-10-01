@@ -142,7 +142,7 @@ const error = ref('')
 const notice = ref('')
 const canEdit = computed(() => hasPermission(authState.user, 'settings.ai', 'edit'))
 
-const screenOrder = ['ai_home', 'orders', 'production', 'quality', 'overtime', 'purchase', 'shipping', 'inventory']
+const screenOrder = ['ai_home', 'orders', 'production', 'quality', 'overtime', 'purchase', 'shipping', 'inventory', 'masters']
 const toolGroups = computed(() => screenOrder
   .map((screenId) => {
     const items = tools.value.filter((tool) => tool.screen_id === screenId)

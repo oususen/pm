@@ -13,6 +13,12 @@ BASE_SQL_SCHEMA = {
     'm_product': ('id', 'product_code', 'product_name', 'category', 'unit', 'line_id', 'process_id', 'is_active'),
     'm_line': ('id', 'line_code', 'line_name', 'line_type', 'lead_time_days', 'is_active'),
     'm_process': ('id', 'process_code', 'process_name', 'line_id', 'management_unit', 'is_active'),
+    'm_bom': ('id', 'parent_product_id', 'version', 'valid_from', 'valid_to', 'is_active', 'is_coproduct'),
+    'm_bom_item': (
+        'id', 'bom_id', 'child_product_id', 'quantity', 'loss_rate', 'sourcing_type',
+        'supplier_id', 'process_id', 'line_id', 'time_unit', 'lead_time_days',
+        'duration_min', 'is_coproduct_driver', 'remark',
+    ),
     'm_calendar_day': ('id', 'target_date', 'is_working_day', 'work_minutes'),
     't_process_realtime_record': ('id', 'process_id', 'product_id', 'product_code', 'product_name', 'timestamp', 'record_type', 'qty', 'equipment_state'),
     't_laser_actual': ('id', 'work_date', 'operator_action', 'pattern_no', 'equipment_code', 'equipment_name', 'material_code', 'material_name', 'total_process_time'),
@@ -64,6 +70,15 @@ TABLE_NOTES = {
     ),
     'm_supplier': '仕入先マスタ。supplier_type は仕入先の区分。',
     'm_line': 'ラインマスタ。line_type は PROD=生産、PURCHASE=購買、OUTSOURCE=外作、OTHER=その他。',
+    'm_bom': (
+        'BOMヘッダ。parent_product_id は m_product.id。BOMの有効期間は valid_from から valid_to までで、'
+        'valid_to がNULLの場合は終了日なし。'
+    ),
+    'm_bom_item': (
+        'BOM明細。bom_id は m_bom.id、child_product_id は m_product.id。quantity は親製品1個当たりの必要数。'
+        'sourcing_type は MAKE=自社製造、BUY=購買、SUBCON=外注。'
+        'supplier_id、process_id、line_id はそれぞれ対応するマスタのID。remark は明細備考。'
+    ),
 }
 
 # 個人情報を扱う権限を持つ利用者だけに追加公開する列。DeepSeekへは一時IDへ伏字化して渡す。
@@ -86,6 +101,7 @@ SCREEN_SQL_TABLES = {
     'purchase': frozenset({'m_supplier', 'm_product', 'm_line', 'm_calendar_day', 'v_ai_purchase_receipt'}),
     'shipping': frozenset({'m_product', 'm_calendar_day', 'v_ai_shipment'}),
     'inventory': frozenset(),
+    'masters': frozenset({'m_product', 'm_bom', 'm_bom_item', 'm_process', 'm_line', 'm_supplier'}),
 }
 
 FORBIDDEN_SQL = re.compile(

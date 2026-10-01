@@ -48,6 +48,11 @@ SCREEN_CONTEXTS = (
     ('/inventory/', {
         'id': 'inventory', 'label': '在庫', 'coverage': '', 'allowed_tools': frozenset(), 'allowed_intents': frozenset(),
     }),
+    ('/masters/', {
+        'id': 'masters', 'label': 'マスタ', 'coverage': '品番・BOM・工程・ライン・仕入先のマスタ参照',
+        'allowed_tools': frozenset({'search_product', 'count_products', 'execute_readonly_sql'}),
+        'allowed_intents': frozenset(),
+    }),
 )
 
 DEFAULT_SCREEN_CONTEXT = {

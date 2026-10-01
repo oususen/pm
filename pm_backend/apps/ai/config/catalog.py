@@ -31,6 +31,7 @@ SCREEN_CATALOG = {
     'purchase': '仕入',
     'shipping': '出荷',
     'inventory': '在庫',
+    'masters': 'マスタ',
 }
 
 TOOL_CATALOG = {

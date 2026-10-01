@@ -40,7 +40,7 @@
 | `AIDataPolicy`（`ai_data_policy`） | 集計結果の外部送信可否(`allow_aggregated_external_transfer`)、権限者への個人別集計許可(`allow_authorized_personal_data`)、外部送信する最大集計行数(`max_external_result_rows`) | 常に1行だけ保持する全体方針 |
 | `AIKnowledgeSource`（`ai_knowledge_source`） | AIに参照させるリポジトリ内ドキュメントの登録（PMアプリ構造／マニュアル／手順書／安全・運用規約） | 参照させるファイルは登録済みのものに限る |
 
-画面領域(`screen_id`)は `ai_home`（本社横断）、`orders`、`production`、`quality`、`overtime`、`purchase`、`shipping`、`inventory` を持つ。`purchase`／`shipping`／`inventory` は現時点でどのツールも割り当てていない（9章の区分Cに対応）。
+画面領域(`screen_id`)は `ai_home`（本社横断）、`orders`、`production`、`quality`、`overtime`、`purchase`、`shipping`、`inventory`、`masters` を持つ。`masters` では品番・BOM・工程・ライン・仕入先の読み取り照会だけを許可し、登録・更新・削除は許可しない。`inventory` は現時点でどのツールも割り当てていない（9章の区分Cに対応）。
 
 ## 3. 絶対禁止事項
 
@@ -113,6 +113,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 | モデル（テーブル） | 主な項目 | 関連 | AI利用目的 | 外部送信 |
 |---|---|---|---|---|
 | `masters.Product`（`m_product`） | `product_code`, `product_name`, `category`, `unit`, `line`, `process`, `is_active` | ライン、工程、BOM、実績、需要 | 品番・品名・工程の特定 | 品番・品名は必要時のみ。個人情報は含めない |
+| `masters.BOM` / `BOMItem`（`m_bom` / `m_bom_item`） | 親製品、版、有効期間、子製品、必要数、調達区分、工程、ライン、仕入先、LT、備考 | 製品、工程、ライン、仕入先 | BOM構成・有効期間・調達条件・備考の読み取り照会 | 許可。備考は質問に必要な該当行だけを外部AIへ送信する |
 | `masters.Line`（`m_line`） | `line_code`, `line_name`, `line_type`, `lead_time_days` | 工程、需要、進度、実績 | ライン別集計の軸 | 許可 |
 | `masters.Process`（`m_process`） | `process_code`, `process_name`, `line`, `management_unit` | 製品、実績、仕損、中断 | 工程別分析の軸 | 許可 |
 | `masters.CalendarDay`（`m_calendar_day`） | `target_date`, `is_working_day`, `work_minutes` | カレンダ、ライン、仕入先 | 稼働日・期間判定 | 許可 |

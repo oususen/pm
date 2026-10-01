@@ -108,6 +108,28 @@ watch(currentProviderModels, (models) => {
 }, { immediate: true })
 const providerLabel = computed(() => availableProviders.value.find((item) => item.value === provider.value)?.label || '')
 const modelLabel = computed(() => currentProviderModels.value.find((item) => item.id === model.value)?.label || '')
+const masterSourceLabels = {
+  '/masters/product': '製品',
+  '/masters/product-group': '製品グループ',
+  '/masters/product-code-mapping': '品番変換',
+  '/masters/container-capacity': '容器',
+  '/masters/equipment': '設備',
+  '/masters/customer': '得意先',
+  '/masters/supplier': '仕入先',
+  '/masters/supplier-truck': '仕入先トラック',
+  '/masters/process': '工程',
+  '/masters/line': 'ライン',
+  '/masters/calendar': 'カレンダ',
+  '/masters/work-pattern': '勤務パターン',
+  '/masters/bom': 'BOM',
+  '/masters/tiera-converter': 'ティエラCSV変換',
+  '/masters/routing': 'ルーティング',
+  '/masters/contact': '連絡先',
+  '/masters/kubota-sakai-truck': 'クボタ堺便',
+  '/masters/where-used': '逆展開',
+  '/masters/mobile-device': '携帯端末管理',
+  '/masters/sourcing-bulk-change': '加工先一括変更',
+}
 const sourceLabel = computed(() => {
   const source = aiDrawerSourcePath.value
   if (source.startsWith('/orders/')) return '受注'
@@ -117,6 +139,10 @@ const sourceLabel = computed(() => {
   if (source.startsWith('/purchase/')) return '仕入'
   if (source.startsWith('/shipping/')) return '出荷'
   if (source.startsWith('/inventory/')) return '在庫'
+  if (source.startsWith('/masters/')) {
+    const path = source.split(/[?#]/)[0]
+    return masterSourceLabels[path] ? `マスタ ⇒ ${masterSourceLabels[path]}` : 'マスタ'
+  }
   return '本社横断'
 })
 
