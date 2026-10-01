@@ -709,9 +709,16 @@ const filteredUsers = computed(() => {
 
 const summaryNames = computed(() => {
   const names = new Set(filteredUsers.value.map(u => u.name))
+  const userIdByName = new Map(filteredUsers.value.map(u => [u.name, Number(u.id)]))
   // 申請データにいるがallUsersにいない人も念のため含める
-  for (const r of filteredRows.value) names.add(r.name)
-  return [...names].sort((a, b) => a.localeCompare(b, 'ja'))
+  for (const r of filteredRows.value) {
+    names.add(r.name)
+    if (!userIdByName.has(r.name)) userIdByName.set(r.name, Number(r.applicantId))
+  }
+  return [...names].sort((a, b) => {
+    const userIdDiff = (userIdByName.get(a) || Number.MAX_SAFE_INTEGER) - (userIdByName.get(b) || Number.MAX_SAFE_INTEGER)
+    return userIdDiff || a.localeCompare(b, 'ja')
+  })
 })
 
 const summaryDates = computed(() =>
