@@ -49,6 +49,7 @@
                 <div class="bubble" :class="{ 'user-bubble': message.role === 'user' }">{{ message.content }}</div>
                 <button v-if="message.role === 'assistant'" type="button" class="copy-btn" @click="copyMessage(index, message.content)">{{ copiedIndex === index ? '✓ コピーしました' : '⧉ コピー' }}</button>
                 <div v-if="message.analysis" class="reasoning-note"><span>✦ Qwenの確認メモ</span><p>{{ message.analysis }}</p></div>
+                <div v-if="message.role === 'assistant'" class="evidence-line" :class="evidenceKind(message)"><span>{{ evidenceIcon(message) }}</span> {{ evidenceLabel(message) }}</div>
                 <div v-if="message.source" class="source-line"><span>▤</span> 根拠データ: {{ message.source }}<span v-if="message.period" class="source-period">{{ message.period.start_date }} — {{ message.period.end_date }}</span></div>
                 <section v-if="message.chart && message.chart.values.length" class="chart-card">
                   <div class="chart-heading"><div><small>DATA VISUALIZATION</small><strong>{{ message.chart.title }}</strong></div><span class="chart-kind">▥ 棒グラフ</span></div>
@@ -96,6 +97,23 @@
         <div class="side-heading">できること</div>
         <ul class="capabilities"><li><span>✓</span>期間・工程・グループを指定して質問</li><li><span>✓</span>集計結果をチャートで表示</li><li><span>✓</span>幹部会向け報告書を下書き</li></ul>
         <div class="safety-note"><span>♧</span><p><strong>安全なデータ利用</strong><br>DBは読み取り専用で集計します。個人の評価・順位付けには使いません。作成した文書はこの画面から端末へダウンロードされ、サーバーには保存されません。</p></div>
+        <section v-if="canManageKnowledge" class="knowledge-library">
+          <div class="side-divider"></div>
+          <div class="side-heading">RAG資料庫</div>
+          <p>登録した資料は、以後の社内AIの検索対象になります。</p>
+          <select v-model="knowledgeUpload.category" :disabled="knowledgeUploading">
+            <option value="manual">マニュアル</option>
+            <option value="procedure">手順書</option>
+            <option value="pm_structure">PMアプリ構造</option>
+            <option value="security">安全・運用規約</option>
+          </select>
+          <input v-model.trim="knowledgeUpload.name" :disabled="knowledgeUploading" placeholder="資料名" />
+          <input ref="knowledgeFileInput" type="file" :disabled="knowledgeUploading" accept=".pdf,.xlsx,.xls,.csv,.tsv,.png,.jpg,.jpeg,.webp,.bmp" @change="selectKnowledgeFile" />
+          <button type="button" :disabled="!knowledgeUpload.file || !knowledgeUpload.name || knowledgeUploading" @click="uploadKnowledge">{{ knowledgeUploading ? '登録中…' : '資料庫へ追加' }}</button>
+          <small>PDF・Excel・CSV・画像を15MBまで登録できます。</small>
+          <div v-if="knowledgeNotice" class="knowledge-notice">{{ knowledgeNotice }}</div>
+          <div v-if="knowledgeError" class="knowledge-error">{{ knowledgeError }}</div>
+        </section>
       </aside>
     </div>
   </main>
@@ -131,6 +149,11 @@ const loading = ref(false)
 const error = ref('')
 const failedQuestion = ref('')
 const copiedIndex = ref(-1)
+const knowledgeFileInput = ref(null)
+const knowledgeUpload = ref({ category: 'manual', name: '', file: null })
+const knowledgeUploading = ref(false)
+const knowledgeNotice = ref('')
+const knowledgeError = ref('')
 let abortController = null
 const overLimit = computed(() => draft.value.length > QUESTION_MAX)
 // 音声入力: 文字にした結果を入力欄の末尾へ足す(自動送信はしない)
@@ -172,11 +195,20 @@ const modelLabel = (modelId) => {
 const providerModel = () => isExternalProvider.value ? externalModel.value[provider.value] : (providerStatus.value.qwen?.model || 'qwen3:4b-instruct')
 const providerReady = () => Boolean(providerStatus.value[provider.value]?.connected && providerStatus.value[provider.value]?.model_ready)
 const canViewPersonalOvertime = computed(() => hasPermission(authState.user, 'overtime.personal_summary', 'view'))
+const canManageKnowledge = computed(() => hasPermission(authState.user, 'settings.ai', 'edit'))
 const screenContext = computed(() => String(route.query.source || ''))
 const screenInfo = ref(null)
 const number = (value) => new Intl.NumberFormat('ja-JP', { maximumFractionDigits: 1 }).format(value || 0)
 const barHeight = (value, values) => Math.max(3, Math.round((value / Math.max(...values, 1)) * 100))
 const shortLabel = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(5) : value.length > 8 ? `${value.slice(0, 7)}…` : value
+const evidenceKind = (message) => {
+  const source = String(message.source || '')
+  if (message.provider === 'database' || /AI用DB辞書|工程実績|確定仕損|ブレーキ|残業申請|品番マスタ|マスタ検索|受注明細|仕入れ実績|出荷実績/.test(source)) return 'database'
+  if (source.includes('ナレッジ:')) return 'knowledge'
+  return 'general'
+}
+const evidenceLabel = (message) => ({ database: 'DB集計済み', knowledge: '正式ナレッジに基づく', general: '一般回答（PMデータは未確認）' }[evidenceKind(message)])
+const evidenceIcon = (message) => ({ database: '✓', knowledge: '▤', general: 'i' }[evidenceKind(message)])
 const formatRelativeTime = (value) => {
   if (!value) return ''
   const diffMs = Date.now() - new Date(value).getTime()
@@ -286,6 +318,33 @@ const deleteConversation = async (id) => {
   }
 }
 
+const selectKnowledgeFile = (event) => {
+  knowledgeUpload.value.file = event.target.files?.[0] || null
+  knowledgeNotice.value = ''
+  knowledgeError.value = ''
+}
+
+const uploadKnowledge = async () => {
+  if (!knowledgeUpload.value.file || !knowledgeUpload.value.name || knowledgeUploading.value) return
+  const form = new FormData()
+  form.append('category', knowledgeUpload.value.category)
+  form.append('name', knowledgeUpload.value.name)
+  form.append('file', knowledgeUpload.value.file)
+  knowledgeUploading.value = true
+  knowledgeNotice.value = ''
+  knowledgeError.value = ''
+  try {
+    await api.aiSettings.createKnowledgeDocument(form)
+    knowledgeUpload.value = { category: 'manual', name: '', file: null }
+    if (knowledgeFileInput.value) knowledgeFileInput.value.value = ''
+    knowledgeNotice.value = 'RAG資料庫へ登録しました。以後の質問で検索対象になります。'
+  } catch (requestError) {
+    knowledgeError.value = requestError.response?.data?.detail || '資料を登録できませんでした。'
+  } finally {
+    knowledgeUploading.value = false
+  }
+}
+
 // 画面の待ちを止める。サーバー側の処理は止まらない(応答は捨てる)
 const stopAsk = () => { abortController?.abort() }
 
@@ -374,4 +433,5 @@ onMounted(() => {
 @media(max-width:660px){.workspace{min-height:calc(100vh - 16px);border-radius:9px}.layout{display:block;position:relative;flex:1}.chat-area{min-height:calc(100vh - 85px)}.side-panel{display:none}.topbar{padding:0 14px;height:54px}.local-badge{margin-left:2px;font-size:8px}.new-chat{padding:7px}.new-chat span{display:none}.history-toggle{padding:7px}.history-toggle span{display:none}.history-panel{width:240px}.conversation{padding:22px 15px 14px}.composer-wrap{padding:8px 13px 12px}.welcome-card h1{font-size:24px}.welcome-card>p{font-size:11px}.suggestions{grid-template-columns:1fr;gap:7px;margin-top:19px}.suggestion{padding:9px}.suggestion-icon{width:27px;height:27px}.composer-foot{font-size:8px}.message-content{max-width:calc(100% - 38px)}.chart-card{padding:12px 10px}.bar-chart{gap:3px}}
 .reasoning-note{border-left:2px solid #a9d8ca;padding:5px 9px;margin:2px 0 4px;color:#748b83}.reasoning-note span{font-size:8px;font-weight:800;letter-spacing:.3px;color:#438c79}.reasoning-note p{font-size:10px;line-height:1.65;margin:3px 0 0}
 .local-badge.offline{border-color:#f0e2c5;color:#a37b2f}.local-badge.offline i,.online.offline i{background:#dfa746;box-shadow:0 0 0 3px #dfa74620}.online.offline{color:#a37b2f}
+.evidence-line{width:max-content;max-width:100%;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700}.evidence-line span{display:inline-grid;place-items:center;width:12px;height:12px;margin-right:3px;border-radius:50%;font-size:8px}.evidence-line.database{background:#e9f8f1;color:#207762}.evidence-line.database span{background:#3da68c;color:#fff}.evidence-line.knowledge{background:#eef3ff;color:#4c6296}.evidence-line.knowledge span{background:#7790ca;color:#fff}.evidence-line.general{background:#f5f6f7;color:#77848a}.evidence-line.general span{background:#98a4a8;color:#fff}.knowledge-library{display:grid;gap:7px}.knowledge-library .side-divider{margin:0 0 4px}.knowledge-library p,.knowledge-library small{margin:0;font-size:9px;line-height:1.55;color:#788e88}.knowledge-library select,.knowledge-library input{width:100%;box-sizing:border-box;border:1px solid #d8e4e1;border-radius:6px;background:#fff;padding:6px;font-size:9px;color:#526970}.knowledge-library input[type=file]{padding:4px}.knowledge-library button{border:1px solid #2d9a83;border-radius:6px;background:#168875;color:#fff;padding:6px;font-size:9px;cursor:pointer}.knowledge-library button:disabled{opacity:.55;cursor:default}.knowledge-notice,.knowledge-error{padding:6px;border-radius:6px;font-size:9px;line-height:1.5}.knowledge-notice{background:#e9f8f1;color:#237765}.knowledge-error{background:#fff1ee;color:#ae5146}
 </style>

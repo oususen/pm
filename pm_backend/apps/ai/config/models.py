@@ -82,3 +82,20 @@ class AIKnowledgeDocument(models.Model):
         ordering = ['category', 'name', 'id']
         verbose_name = 'AIナレッジ資料'
         verbose_name_plural = 'AIナレッジ資料'
+
+
+class AICrossScreenAccessPolicy(models.Model):
+    """画面をまたぐ読み取り参照を、管理者定義と利用者承認の両方で制御する。"""
+    source_screen_id = models.CharField(max_length=40, choices=list(SCREEN_CATALOG.items()), verbose_name='起点画面')
+    target_screen_id = models.CharField(max_length=40, choices=list(SCREEN_CATALOG.items()), verbose_name='追加参照領域')
+    purpose = models.CharField(max_length=200, verbose_name='利用目的')
+    is_enabled = models.BooleanField(default=True, verbose_name='有効')
+    allow_external_transfer = models.BooleanField(default=True, verbose_name='外部AIへの集計結果送信を許可')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ai_cross_screen_access_policy'
+        constraints = [models.UniqueConstraint(fields=['source_screen_id', 'target_screen_id'], name='ai_cross_screen_access_unique')]
+        ordering = ['source_screen_id', 'target_screen_id']
+        verbose_name = 'AI横断参照定義'
+        verbose_name_plural = 'AI横断参照定義'

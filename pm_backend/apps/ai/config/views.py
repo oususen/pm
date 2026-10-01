@@ -3,13 +3,14 @@ from rest_framework import mixins, parsers, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ai.config.models import AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+from ai.config.models import AICrossScreenAccessPolicy, AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 from ai.config.serializers import (
     AIDataPolicySerializer,
     AIKnowledgeDocumentSerializer,
     AIKnowledgeSourceSerializer,
     AIProviderConfigSerializer,
     AIToolPolicySerializer,
+    AICrossScreenAccessPolicySerializer,
 )
 from ai.config.catalog import SCREEN_CATALOG
 from ai.services.sql_queries import PERSONAL_SQL_COLUMNS, SCREEN_SQL_TABLES, _schema_for_table
@@ -96,3 +97,10 @@ class AIKnowledgeDocumentViewSet(viewsets.ModelViewSet):
         """利用者が資料を削除した場合は、ナレッジ原本もmediaから削除する。"""
         instance.file.delete(save=False)
         instance.delete()
+
+
+class AICrossScreenAccessPolicyViewSet(viewsets.ModelViewSet):
+    """管理者が定義する横断参照の候補。利用者承認だけでは新規作成できない。"""
+    queryset = AICrossScreenAccessPolicy.objects.all()
+    serializer_class = AICrossScreenAccessPolicySerializer
+    pagination_class = None

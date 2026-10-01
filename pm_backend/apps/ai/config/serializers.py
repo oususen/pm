@@ -1,8 +1,8 @@
 """AI管理設定APIの入力検証。固定カタログ以外のツールは登録させない。"""
 from rest_framework import serializers
 
-from ai.config.catalog import PROVIDER_CATALOG, TOOL_CATALOG
-from ai.config.models import AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+from ai.config.catalog import PROVIDER_CATALOG, SCREEN_CATALOG, TOOL_CATALOG
+from ai.config.models import AICrossScreenAccessPolicy, AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 
 
 class AIProviderConfigSerializer(serializers.ModelSerializer):
@@ -104,3 +104,26 @@ class AIKnowledgeDocumentSerializer(serializers.ModelSerializer):
         if value.size > 15 * 1024 * 1024:
             raise serializers.ValidationError('登録できる資料は15MBまでです。')
         return value
+
+
+class AICrossScreenAccessPolicySerializer(serializers.ModelSerializer):
+    source_screen_label = serializers.SerializerMethodField()
+    target_screen_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AICrossScreenAccessPolicy
+        fields = '__all__'
+        read_only_fields = ('updated_at',)
+
+    def get_source_screen_label(self, obj):
+        return SCREEN_CATALOG[obj.source_screen_id]
+
+    def get_target_screen_label(self, obj):
+        return SCREEN_CATALOG[obj.target_screen_id]
+
+    def validate(self, attrs):
+        source = attrs.get('source_screen_id', getattr(self.instance, 'source_screen_id', None))
+        target = attrs.get('target_screen_id', getattr(self.instance, 'target_screen_id', None))
+        if source == target:
+            raise serializers.ValidationError('起点画面と追加参照領域は別にしてください。')
+        return attrs
