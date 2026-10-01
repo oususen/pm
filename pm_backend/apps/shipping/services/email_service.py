@@ -5,7 +5,8 @@ import os
 import smtplib
 from email.utils import formatdate, make_msgid
 from email.mime.application import MIMEApplication
-from email.mime.image import MIMEImage
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from io import BytesIO
@@ -259,9 +260,9 @@ class EmailService:
         user_id: Optional[int] = None,
         reply_to: Optional[str] = None,
         content_type: str = 'plain',
-        image_attachments: Optional[List[Dict]] = None,
+        file_attachments: Optional[List[Dict]] = None,
     ) -> Dict:
-        """メールを送信（content_type='html'でHTML送信可、image_attachmentsは[{'filename','data'(bytes),'subtype'}]）"""
+        """メールを送信（content_type='html'でHTML送信可、file_attachmentsは[{'filename','data'(bytes),'maintype','subtype'}]）"""
         smtp_config = self.get_smtp_config(user_id)
         if not smtp_config:
             return {
@@ -281,9 +282,12 @@ class EmailService:
 
             msg.attach(MIMEText(body, content_type, 'utf-8'))
 
-            for image in image_attachments or []:
-                part = MIMEImage(image['data'], _subtype=image['subtype'])
-                part.add_header('Content-Disposition', 'attachment', filename=image['filename'])
+            for attachment in file_attachments or []:
+                part = MIMEBase(attachment['maintype'], attachment['subtype'])
+                part.set_payload(attachment['data'])
+                encoders.encode_base64(part)
+                # 日本語のファイル名も文字化けしないよう RFC 2231 形式で付ける
+                part.add_header('Content-Disposition', 'attachment', filename=('utf-8', '', attachment['filename']))
                 msg.attach(part)
 
             recipients = list(to_emails)
