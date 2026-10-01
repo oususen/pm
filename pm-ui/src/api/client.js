@@ -199,6 +199,7 @@ export default {
   aiChat: {
     chat(payload, config) { return client.post('/ai/chat/', payload || {}, config) },
     status(params) { return client.get('/ai/chat/', { params }) },
+    transcribe(formData) { return client.post('/ai/transcribe/', formData) },
   },
   aiConversations: {
     list(params) { return client.get('/ai/conversations/', { params }) },

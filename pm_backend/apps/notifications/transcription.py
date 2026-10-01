@@ -12,6 +12,10 @@ _model_lock = threading.Lock()
 _task_queue = queue.Queue()
 _worker_started = False
 _worker_lock = threading.Lock()
+# 業務用語のヒント(設定 WHISPER_INITIAL_PROMPT で上書き可)。通話録音とチャット音声入力で共用する
+_DEFAULT_INITIAL_PROMPT = '社内業務通話。レーザー、ブレーキ、パレット、ノズル、仕事がある、仕事がない、段取り、金型、出荷、品質、在庫、製造、生産管理。'
+# 通話録音とチャット音声入力が同じモデルを同時に推論しないようにする
+_infer_lock = threading.Lock()
 
 
 def _get_model():
@@ -97,16 +101,16 @@ def _transcribe_one(recording_id):
         if recording.transcript_status != 'processing':
             return
         file_path = recording.file.path
-        initial_prompt = getattr(settings, 'WHISPER_INITIAL_PROMPT',
-            '社内業務通話。レーザー、ブレーキ、パレット、ノズル、仕事がある、仕事がない、段取り、金型、出荷、品質、在庫、製造、生産管理。')
-        segments, info = model.transcribe(
-            file_path,
-            beam_size=5,
-            initial_prompt=initial_prompt,
-            vad_filter=True,
-            condition_on_previous_text=False,
-        )
-        text_parts = [segment.text.strip() for segment in segments if segment.text.strip()]
+        initial_prompt = getattr(settings, 'WHISPER_INITIAL_PROMPT', _DEFAULT_INITIAL_PROMPT)
+        with _infer_lock:
+            segments, info = model.transcribe(
+                file_path,
+                beam_size=5,
+                initial_prompt=initial_prompt,
+                vad_filter=True,
+                condition_on_previous_text=False,
+            )
+            text_parts = [segment.text.strip() for segment in segments if segment.text.strip()]
         transcript = '\n'.join(text_parts)
 
         recording.transcript = transcript
@@ -128,3 +132,35 @@ def transcribe_recording_async(recording_id):
     _ensure_worker()
     _task_queue.put(recording_id)
     logger.info('録音ID=%s をキューに追加 (キュー残=%s)', recording_id, _task_queue.qsize())
+
+
+class AudioTooLongError(Exception):
+    """音声が上限の長さを超えている。"""
+
+
+def transcribe_audio_file(file_path, max_seconds=60, language='ja'):
+    """チャット音声入力用に、短い音声ファイルを文字にして返す。音声・文字は保存しない。
+
+    通話録音の文字起こしと同じモデルを共用する。モデルが常駐設定でなく、ほかに待ちがなければ、
+    終了後にモデルを解放する(通話側のワーカーと同じ扱い)。
+    """
+    model = _get_model()
+    initial_prompt = getattr(settings, 'WHISPER_INITIAL_PROMPT', _DEFAULT_INITIAL_PROMPT)
+    try:
+        with _infer_lock:
+            segments, info = model.transcribe(
+                file_path,
+                beam_size=5,
+                language=language,
+                initial_prompt=initial_prompt,
+                vad_filter=True,
+                condition_on_previous_text=False,
+            )
+            if info.duration and info.duration > max_seconds:
+                raise AudioTooLongError(f'音声は{max_seconds}秒以内にしてください。')
+            text = ''.join(segment.text.strip() for segment in segments)
+    finally:
+        if _task_queue.empty() and not _is_model_resident():
+            _release_model()
+    return text.strip()
+

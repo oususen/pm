@@ -56,6 +56,7 @@
   - 再送信: 応答のエラー時と中止時に、直前の質問をもう一度送る「再送信」ボタンを表示する（成功した回答の再生成ではない）。ドロワーでは添付資料も同じものを使う。
   - 履歴の切り捨て通知: AIへ渡す会話履歴は直近14件（質問直前までの発言）までで、これを超える会話では、入力欄の上に「古い発言はAIへ渡していません」と表示する。
   - 文字数: 質問は1200文字までとし、入力中に `n/1200文字` を表示する。超えたら送信できない。
+  - 音声入力: 入力欄の横のマイクボタンで録音し（最大60秒）、もう一度押すと文字にして入力欄の末尾へ足す。自動送信はしない。録音はブラウザの `MediaRecorder` で行い、マイクの許可が必要。文字起こしは `POST /api/ai/transcribe/`（下記）で行う。スマホのキーボードの音声入力とは別に使える。
 
 
 ## API
@@ -63,6 +64,7 @@
 実装は、生産管理アプリから独立した `ai` アプリで管理する。`ai/views.py` はHTTP入口、`ai/services/chat_service.py` の `AIChatAPIView` が業務ロジックを担当する。旧 `production/views_ai_demo.py` と `/api/production-ai-demo/`（`ProductionAIDemoView`という名称だった頃の互換入口）は削除済み。`/api/ai/chat/` に一本化されている。
 
 - `GET /api/ai/chat/`: Qwen・DeepSeek・OpenRouter各プロバイダのAPI準備状態を返す。`?screen_context=元パス` を付けると、起点画面の対応状況（`screen.supported`・`screen.coverage`・`screen.common_coverage`）も返す。
+- `POST /api/ai/transcribe/`: チャットの音声入力。`multipart/form-data` の `audio`（webm・mp4・m4a・ogg・wav・mp3、10MB以内、60秒以内）を受け取り、PC内のWhisper（通話録音の文字起こしと同じ `faster-whisper` とモデル `WHISPER_MODEL_SIZE`、日本語固定、業務用語のヒント `WHISPER_INITIAL_PROMPT` を共用）で文字にして `{"text": ...}` を返す。`ai.chat` の権限が必要。音声は一時ファイルとして処理後すぐ削除し、保存しない。音声・文字とも外部へは送らない。通話の文字起こしと同時に動かないよう、モデルの推論は排他制御する。開発PC（CPU）での測定では、`large-v3` は音声の約2.2倍の時間がかかる（17.8秒の音声に約40秒）。モデルが常駐設定でない場合は、終了後にモデルを解放するため、次の利用時に読み込みの時間（10〜20秒）が加わる。
 - `POST /api/ai/chat/`: `message`、直近会話、`provider`（`deepseek`・`qwen`・`openrouter`）、外部プロバイダ利用時の`model`を受け取り、以下のいずれかで回答する。
   - パターンマッチ即回答（残業個人照会、Qwen利用時のみ）
   - DB集計結果＋選択モデルの自然文回答（チャート・報告書含む。表の出力を求められたとき、外部プロバイダはツール呼び出し、ローカルQwenはMarkdown表の形式確認により `excel_export: true` も返す）

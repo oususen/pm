@@ -1,15 +1,24 @@
 """社内AIのHTTP API。"""
+import logging
+import os
+import tempfile
 from datetime import datetime, timedelta
 
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from ai.config.service import get_data_policy
 from ai.models import AIConversation
 from ai.serializers import AIConversationListSerializer, AIConversationSerializer
 from ai.services.chat_service import AIChatAPIView, _has_resource_permission
+from notifications.transcription import AudioTooLongError, transcribe_audio_file
+
+logger = logging.getLogger('production')
 
 
 def purge_expired_conversations():
@@ -68,3 +77,40 @@ class AIConversationViewSet(viewsets.ModelViewSet):
         self._check_ai_chat_permission()
         serializer.save()
         purge_expired_conversations()
+
+
+class AITranscribeView(APIView):
+    """チャットの音声入力。短い音声をPC内のWhisperで文字にして返す。音声・文字は保存しない。"""
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser]
+    MAX_BYTES = 10 * 1024 * 1024
+    MAX_SECONDS = 60
+    ALLOWED_SUFFIXES = {'.webm', '.mp4', '.m4a', '.ogg', '.wav', '.mp3'}
+
+    def post(self, request):
+        if not _has_resource_permission(request.user, 'ai.chat'):
+            return Response({'detail': '社内AIチャットを利用する権限がありません。'}, status=403)
+        audio = request.FILES.get('audio')
+        if not audio:
+            return Response({'detail': '音声ファイルを指定してください。'}, status=400)
+        if audio.size > self.MAX_BYTES:
+            return Response({'detail': '音声ファイルは10MB以内にしてください。'}, status=400)
+        suffix = os.path.splitext(audio.name or '')[1].lower()
+        if suffix not in self.ALLOWED_SUFFIXES:
+            suffix = '.webm'
+        # 文字にしたらすぐ削除する一時ファイル。音声は保存しない。
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+            for chunk in audio.chunks():
+                temp_file.write(chunk)
+            temp_path = temp_file.name
+        try:
+            text = transcribe_audio_file(temp_path, max_seconds=self.MAX_SECONDS)
+        except AudioTooLongError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        except Exception:
+            logger.exception('チャット音声入力の文字起こしに失敗しました')
+            return Response({'detail': '音声を文字にできませんでした。もう一度お試しください。'}, status=503)
+        finally:
+            os.remove(temp_path)
+        return Response({'text': text})
+
