@@ -198,6 +198,7 @@ export default {
   productionRecordSettings: createProductionRecordSettingsAPI(client),
   userRequests: {
     send(formData) { return client.post('/user-requests/', formData) },
+    history(params) { return client.get('/user-requests/history/', { params }) },
     listTasks(params) { return client.get('/user-requests/tasks/', { params }) },
     updateTask(id, data) { return client.patch(`/user-requests/tasks/${id}/`, data) },
     deleteTask(id) { return client.delete(`/user-requests/tasks/${id}/`) },

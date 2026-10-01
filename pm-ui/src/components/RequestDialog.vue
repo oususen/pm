@@ -19,6 +19,7 @@
         <label>内容<span class="req" title="必須">*</span></label>
         <textarea v-model="body" rows="7" maxlength="5000" placeholder="スクリーンショットは Ctrl+V で貼り付けできます" :disabled="sending"></textarea>
       </div>
+      <p class="hint public">送信した内容（種類・件名・内容・依頼者・状況）は、「リクエスト履歴」で全員に表示されます。個人情報は書かないでください。添付ファイルは表示されません。</p>
       <div class="row top">
         <label>添付</label>
         <div class="files">
@@ -201,6 +202,7 @@ footer .primary{background:#087b6e;color:#fff;border-color:#087b6e}
 footer button:disabled,.add:disabled{opacity:.5;cursor:default}
 .count,.hint{color:#666;font-size:12px}
 .hint{width:100%}
+.hint.public{margin:0;color:#8a5a00;background:#fff7e0;border-radius:4px;padding:4px 8px}
 .msg{margin:0;font-weight:600}
 .msg.error{color:#c0392b}
 .msg.ok{color:#087b6e}

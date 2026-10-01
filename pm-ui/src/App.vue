@@ -13,6 +13,7 @@
     <AIChatDrawer v-if="showLayout" />
     <AIFloatingButton v-if="showLayout" />
     <RequestDialog v-if="showLayout" />
+    <RequestHistoryDialog v-if="showLayout" />
 
   </div>
 </template>
@@ -24,6 +25,7 @@ import GlobalNavigation from "./components/GlobalNavigation.vue";
 import AIChatDrawer from "./components/AIChatDrawer.vue";
 import AIFloatingButton from "./components/AIFloatingButton.vue";
 import RequestDialog from "./components/RequestDialog.vue";
+import RequestHistoryDialog from "./components/RequestHistoryDialog.vue";
 import { aiDrawerOpen, aiDrawerSourcePath } from "./composables/aiDrawer";
 
 const todayText = computed(() => {

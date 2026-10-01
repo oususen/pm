@@ -5,6 +5,7 @@ from datetime import datetime
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import BasePermission
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -188,6 +189,55 @@ class UserRequestTaskListView(APIView):
         if status:
             queryset = queryset.filter(status=status)
         return Response([_serialize_task(task) for task in queryset])
+
+
+class UserRequestHistoryView(APIView):
+    """GET /api/user-requests/history/ : 全ユーザーが見られるリクエスト履歴（重複リクエストを避けるため）
+
+    絞り込み: ?requester=<ユーザーID>&status=<状況>&q=<件名・内容のキーワード>
+    見せない項目: 却下理由、対応者（最終対応者・日時）。最新200件まで。
+    """
+
+    permission_classes = [IsAuthenticated]
+    LIMIT = 200
+
+    def get(self, request):
+        queryset = UserRequestTask.objects.select_related('requester')
+        requester = (request.query_params.get('requester') or '').strip()
+        status = (request.query_params.get('status') or '').strip()
+        keyword = (request.query_params.get('q') or '').strip()
+        if requester.isdigit():
+            queryset = queryset.filter(requester_id=int(requester))
+        if status:
+            queryset = queryset.filter(status=status)
+        if keyword:
+            queryset = queryset.filter(Q(subject__icontains=keyword) | Q(body__icontains=keyword))
+
+        results = [
+            {
+                'id': task.id,
+                'request_type': task.request_type,
+                'request_type_label': task.get_request_type_display(),
+                'subject': task.subject,
+                'body': task.body,
+                'requester_id': task.requester_id,
+                'requester_name': _display_name(task.requester),
+                'status': task.status,
+                'status_label': task.get_status_display(),
+                'created_at': task.created_at.isoformat() if task.created_at else None,
+            }
+            for task in queryset[:self.LIMIT]
+        ]
+        # 依頼者の絞り込み用（依頼実績のあるユーザー）。絞り込み条件には影響されない。
+        requester_ids = (
+            UserRequestTask.objects.exclude(requester__isnull=True)
+            .values_list('requester_id', flat=True).distinct()
+        )
+        requesters = [
+            {'id': user.id, 'name': _display_name(user)}
+            for user in get_user_model().objects.filter(id__in=list(requester_ids)).order_by('last_name', 'first_name', 'username')
+        ]
+        return Response({'results': results, 'requesters': requesters})
 
 
 class UserRequestTaskDetailView(APIView):

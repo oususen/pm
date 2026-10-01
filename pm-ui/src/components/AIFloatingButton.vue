@@ -1,8 +1,9 @@
 <template>
-  <div v-if="!aiDrawerOpen && !requestDialogOpen" ref="root" class="qa-floating">
+  <div v-if="!aiDrawerOpen && !requestDialogOpen && !requestHistoryOpen" ref="root" class="qa-floating">
     <div v-if="menuOpen" class="qa-menu" role="menu">
       <button v-if="canUseAI" type="button" role="menuitem" @click="chooseAI">1 AI</button>
       <button type="button" role="menuitem" @click="chooseRequest">{{ canUseAI ? '2' : '1' }} リクエスト</button>
+      <button type="button" role="menuitem" @click="chooseHistory">{{ canUseAI ? '3' : '2' }} リクエスト履歴</button>
     </div>
     <button
       class="ai-floating-button"
@@ -27,7 +28,7 @@ import { useRoute } from 'vue-router'
 import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 import { aiDrawerOpen, openAIDrawer } from '@/composables/aiDrawer'
-import { requestDialogOpen, openRequestDialog } from '@/composables/requestDialog'
+import { requestDialogOpen, openRequestDialog, requestHistoryOpen, openRequestHistory } from '@/composables/requestDialog'
 
 const route = useRoute()
 const root = ref(null)
@@ -41,6 +42,10 @@ const chooseAI = () => {
 const chooseRequest = () => {
   menuOpen.value = false
   openRequestDialog()
+}
+const chooseHistory = () => {
+  menuOpen.value = false
+  openRequestHistory()
 }
 
 const onOutside = (event) => {

@@ -9,3 +9,13 @@ export const openRequestDialog = () => {
 export const closeRequestDialog = () => {
   requestDialogOpen.value = false
 }
+
+export const requestHistoryOpen = ref(false)
+
+export const openRequestHistory = () => {
+  requestHistoryOpen.value = true
+}
+
+export const closeRequestHistory = () => {
+  requestHistoryOpen.value = false
+}
