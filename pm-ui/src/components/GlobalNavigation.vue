@@ -522,11 +522,14 @@ const loadPendingTaskCount = async () => {
   try {
     const params = { assigned_to_me: true, status: 'PENDING' }
     const approvalParams = { assigned_to_me: true, task_status: 'PENDING' }
-    const [purchaseResponse, qualityResponse, icsResponse, approvalResponse] = await Promise.allSettled([
+    // システム管理者リクエスト（共通の1件）は、システム管理者にだけ未対応件数へ含める
+    const isSystemAdmin = Boolean(authState.user?.profile?.is_system_admin)
+    const [purchaseResponse, qualityResponse, icsResponse, approvalResponse, requestResponse] = await Promise.allSettled([
       api.purchaseOrderProposals.listTasks(params),
       api.qualityEquipmentInspections.listTasks(params),
       api.integratedChecksheets.listTasks(params),
       api.accounts.getApprovalRequests(approvalParams),
+      isSystemAdmin ? api.userRequests.listTasks({ status: 'PENDING' }) : Promise.resolve({ data: [] }),
     ])
     const pickRows = (result, label) => {
       if (result.status === 'fulfilled') {
@@ -542,6 +545,7 @@ const loadPendingTaskCount = async () => {
     const qualityRows = pickRows(qualityResponse, '設備点検')
     const icsRows = pickRows(icsResponse, '統合チェックシート')
     const approvalRows = pickRows(approvalResponse, '共通承認')
+    const requestRows = pickRows(requestResponse, 'システム管理者リクエスト')
     const currentUserId = Number(authState.user?.id || 0)
     const approvalTaskCount = approvalRows.reduce((count, request) => {
       const tasks = Array.isArray(request?.tasks) ? request.tasks : []
@@ -549,7 +553,7 @@ const loadPendingTaskCount = async () => {
         task.status === 'PENDING' && Number(task.assigned_to) === currentUserId
       ).length
     }, 0)
-    pendingTaskCount.value = purchaseRows.length + qualityRows.length + icsRows.length + approvalTaskCount
+    pendingTaskCount.value = purchaseRows.length + qualityRows.length + icsRows.length + approvalTaskCount + requestRows.length
   } catch (error) {
     console.error('タスク件数の取得に失敗しました:', error)
     pendingTaskCount.value = 0

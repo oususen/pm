@@ -1,14 +1,20 @@
 """利用者からシステム管理者へのリクエスト（メール送信のみ・DB保存なし）"""
 
 import os
+from datetime import datetime
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+from rest_framework.permissions import BasePermission
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from shipping.services.email_service import EmailService
+
+from .models import UserRequestTask
 
 REQUEST_TYPES = {
     'request': '要望',
@@ -40,6 +46,46 @@ def _safe_filename(name, index):
     base = os.path.basename((name or '').replace('\\', '/'))
     base = ''.join(ch for ch in base if ch >= ' ' and ch != '\x7f').strip()
     return base or f'file{index}'
+
+
+class _MailFailed(Exception):
+    """メール送信失敗（タスク作成・状況変更をロールバックするために使う）"""
+
+
+class IsSystemAdmin(BasePermission):
+    """システム管理者フラグ（UserProfile.is_system_admin）が付いたユーザーのみ許可する"""
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        profile = getattr(user, 'profile', None)
+        return bool(profile and profile.is_system_admin)
+
+
+def _display_name(user):
+    if not user:
+        return ''
+    return f'{user.last_name} {user.first_name}'.strip() or user.username
+
+
+def _serialize_task(task):
+    return {
+        'id': task.id,
+        'request_type': task.request_type,
+        'request_type_label': task.get_request_type_display(),
+        'subject': task.subject,
+        'body': task.body,
+        'requester_id': task.requester_id,
+        'requester_name': _display_name(task.requester),
+        'requester_email': task.requester.email if task.requester else '',
+        'status': task.status,
+        'status_label': task.get_status_display(),
+        'reject_reason': task.reject_reason,
+        'handled_by_name': _display_name(task.handled_by),
+        'handled_at': task.handled_at.isoformat() if task.handled_at else None,
+        'created_at': task.created_at.isoformat() if task.created_at else None,
+    }
 
 
 class UserRequestView(APIView):
@@ -107,14 +153,95 @@ class UserRequestView(APIView):
             f'{body}\n'
         )
 
-        result = EmailService().send_plain_email(
-            to_emails=admin_emails,
-            subject=f'[PMリクエスト] {REQUEST_TYPES[type_key]}: {subject}',
-            body=mail_body,
-            user_id=user.id,
-            reply_to=user.email or None,
-            file_attachments=attachments,
-        )
-        if not result.get('success'):
-            return Response({'detail': result.get('message') or '送信に失敗しました。'}, status=502)
+        # タスク作成とメール送信は1つのトランザクション。メール送信が失敗したらタスクも作らない。
+        try:
+            with transaction.atomic():
+                UserRequestTask.objects.create(
+                    request_type=type_key,
+                    subject=subject[:200],
+                    body=body,
+                    requester=user,
+                )
+                result = EmailService().send_plain_email(
+                    to_emails=admin_emails,
+                    subject=f'[PMリクエスト] {REQUEST_TYPES[type_key]}: {subject}',
+                    body=mail_body,
+                    user_id=user.id,
+                    reply_to=user.email or None,
+                    file_attachments=attachments,
+                )
+                if not result.get('success'):
+                    raise _MailFailed(result.get('message') or '送信に失敗しました。')
+        except _MailFailed as exc:
+            return Response({'detail': str(exc)}, status=502)
         return Response({'detail': 'システム管理者へ送信しました。'})
+
+
+class UserRequestTaskListView(APIView):
+    """GET /api/user-requests/tasks/ : システム管理者向けのリクエストタスク一覧（?status= で絞り込み）"""
+
+    permission_classes = [IsAuthenticated, IsSystemAdmin]
+
+    def get(self, request):
+        queryset = UserRequestTask.objects.select_related('requester', 'handled_by')
+        status = (request.query_params.get('status') or '').strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        return Response([_serialize_task(task) for task in queryset])
+
+
+class UserRequestTaskDetailView(APIView):
+    """PATCH: 状況の変更（却下は理由が必須で、依頼者へ返信メールを送る） / DELETE: 削除"""
+
+    permission_classes = [IsAuthenticated, IsSystemAdmin]
+
+    def patch(self, request, pk):
+        task = get_object_or_404(UserRequestTask.objects.select_related('requester', 'handled_by'), pk=pk)
+        status = (request.data.get('status') or '').strip()
+        reject_reason = (request.data.get('reject_reason') or '').strip()
+        if status not in dict(UserRequestTask.STATUS_CHOICES):
+            return Response({'detail': '状況が正しくありません。'}, status=400)
+        if status == UserRequestTask.STATUS_REJECTED and not reject_reason:
+            return Response({'detail': '却下する場合は却下理由を入力してください。'}, status=400)
+
+        newly_rejected = status == UserRequestTask.STATUS_REJECTED and task.status != UserRequestTask.STATUS_REJECTED
+        warning = ''
+        try:
+            with transaction.atomic():
+                task.status = status
+                task.reject_reason = reject_reason if status == UserRequestTask.STATUS_REJECTED else ''
+                task.handled_by = request.user
+                task.handled_at = datetime.now()
+                task.save()
+                if newly_rejected:
+                    requester_email = task.requester.email if task.requester else ''
+                    if requester_email:
+                        result = EmailService().send_plain_email(
+                            to_emails=[requester_email],
+                            subject=f'[PMリクエスト] 却下: {task.subject}',
+                            body=(
+                                f'{_display_name(task.requester)} 様\n\n'
+                                '送信いただいたリクエストは、次の理由により却下となりました。\n\n'
+                                f'種別: {task.get_request_type_display()}\n'
+                                f'件名: {task.subject}\n'
+                                f'却下理由: {task.reject_reason}\n\n'
+                                f'対応者: {_display_name(request.user)}\n'
+                            ),
+                            user_id=request.user.id,
+                            reply_to=request.user.email or None,
+                        )
+                        if not result.get('success'):
+                            raise _MailFailed(result.get('message') or '返信メールの送信に失敗しました。')
+                    else:
+                        warning = '依頼者のメールアドレスが未登録のため、返信メールは送信していません。'
+        except _MailFailed as exc:
+            return Response({'detail': f'却下を保存できませんでした（返信メール送信失敗）: {exc}'}, status=502)
+        data = _serialize_task(task)
+        if warning:
+            data['warning'] = warning
+        return Response(data)
+
+    def delete(self, request, pk):
+        task = get_object_or_404(UserRequestTask, pk=pk)
+        task.delete()
+        return Response(status=204)

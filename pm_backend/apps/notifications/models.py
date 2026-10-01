@@ -242,3 +242,57 @@ class NativePushToken(models.Model):
         ordering = ['-updated_at', '-id']
         verbose_name = 'ネイティブ Push トークン'
         verbose_name_plural = 'ネイティブ Push トークン'
+
+
+class UserRequestTask(models.Model):
+    """システム管理者リクエストのタスク（全システム管理者で共有する1件）。添付ファイルは保存しない。"""
+    REQUEST_TYPE_CHOICES = [
+        ('request', '要望'),
+        ('bug', '不具合'),
+        ('question', '問い合わせ'),
+        ('other', 'その他'),
+    ]
+    STATUS_PENDING = 'PENDING'
+    STATUS_IN_PROGRESS = 'IN_PROGRESS'
+    STATUS_DONE = 'DONE'
+    STATUS_REJECTED = 'REJECTED'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, '未対応'),
+        (STATUS_IN_PROGRESS, '対応中'),
+        (STATUS_DONE, '完了'),
+        (STATUS_REJECTED, '却下'),
+    ]
+
+    request_type = models.CharField(max_length=20, choices=REQUEST_TYPE_CHOICES, verbose_name='種類')
+    subject = models.CharField(max_length=200, verbose_name='件名')
+    body = models.TextField(verbose_name='内容')
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='user_request_tasks',
+        verbose_name='依頼者',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, verbose_name='状況')
+    reject_reason = models.TextField(blank=True, default='', verbose_name='却下理由')
+    handled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='handled_user_request_tasks',
+        verbose_name='最終対応者',
+    )
+    handled_at = models.DateTimeField(null=True, blank=True, verbose_name='最終対応日時')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+
+    class Meta:
+        db_table = 'notifications_user_request_task'
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['status'])]
+        verbose_name = 'システム管理者リクエスト'
+        verbose_name_plural = 'システム管理者リクエスト'
+
+    def __str__(self):
+        return f'{self.get_request_type_display()}:{self.subject}:{self.status}'

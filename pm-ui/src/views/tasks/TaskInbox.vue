@@ -16,7 +16,9 @@
           <select v-model="filters.status">
             <option value="">すべて</option>
             <option value="PENDING">未対応</option>
+            <option value="IN_PROGRESS">対応中</option>
             <option value="DONE">完了</option>
+            <option value="REJECTED">却下</option>
             <option value="SKIPPED">スキップ</option>
           </select>
         </div>
@@ -86,6 +88,7 @@
 
       <div v-if="!filteredRows.length && !loading" class="no-data">タスクはありません</div>
     </div>
+    <UserRequestTaskDialog :task="selectedRequestTask" @close="selectedRequestTask = null" @changed="fetchTasks" />
   </div>
 </template>
 
@@ -95,15 +98,18 @@ import { useRouter } from "vue-router"
 import api from "@/api/client"
 import { authState } from '@/auth'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
+import UserRequestTaskDialog from '@/components/UserRequestTaskDialog.vue'
 
 const dsSources = [
   { op: '読み取り', table: 't_task', desc: '各業務のタスク一覧取得（購買・品質・チェックシート）' },
   { op: '読み取り', table: 'accounts_approvaltask / accounts_approvalrequest', desc: '共通承認タスク一覧取得（材料発注など）' },
+  { op: '読み取り・更新・削除', table: 'notifications_user_request_task', desc: 'システム管理者リクエストの一覧取得・状況変更・削除（システム管理者のみ）' },
 ]
 
 const router = useRouter()
 const loading = ref(false)
 const allRows = ref([])
+const selectedRequestTask = ref(null)
 const filters = ref({
   status: "PENDING",
   module_code: "",
@@ -137,7 +143,9 @@ const approvalTaskTypeMap = {
 
 const statusMap = {
   PENDING: "未対応",
+  IN_PROGRESS: "対応中",
   DONE: "完了",
+  REJECTED: "却下",
   SKIPPED: "スキップ",
 }
 
@@ -170,6 +178,25 @@ const filteredRows = computed(() => {
     if (filters.value.task_type && row.task_type !== filters.value.task_type) return false
     return true
   })
+})
+
+const normalizeUserRequestTask = (row) => ({
+  row_key: `user-request-${row.id}`,
+  module_code: "USER_REQUEST",
+  module_label: "リクエスト",
+  task_category: "USER_REQUEST",
+  task_category_label: "システム管理者リクエスト",
+  task_type: row.request_type,
+  task_type_label: row.request_type_label || row.request_type,
+  status: row.status,
+  due_date: "",
+  created_at: row.created_at || "",
+  target_primary: row.subject,
+  target_secondary: `依頼者 ${row.requester_name || "-"}`,
+  action_label: "内容を見る",
+  navigate() {
+    selectedRequestTask.value = row
+  },
 })
 
 const normalizePurchaseTask = (row) => {
@@ -315,11 +342,14 @@ const fetchTasks = async () => {
       approvalParams.task_status = filters.value.status
     }
 
-    const [purchaseResponse, qualityResponse, icsResponse, approvalResponse] = await Promise.all([
+    // システム管理者リクエストは、システム管理者にだけ表示する（他のユーザーは取得しない）
+    const isSystemAdmin = Boolean(authState.user?.profile?.is_system_admin)
+    const [purchaseResponse, qualityResponse, icsResponse, approvalResponse, requestResponse] = await Promise.all([
       api.purchaseOrderProposals.listTasks(params),
       api.qualityEquipmentInspections.listTasks(params),
       api.integratedChecksheets.listTasks(params),
       api.accounts.getApprovalRequests(approvalParams),
+      isSystemAdmin ? api.userRequests.listTasks(params) : Promise.resolve({ data: [] }),
     ])
 
     const purchaseRows = normalizeList(purchaseResponse.data).map(normalizePurchaseTask)
@@ -331,7 +361,8 @@ const fetchTasks = async () => {
         .filter((task) => Number(task.assigned_to) === currentUserId)
         .map((task) => normalizeApprovalTask(request, task)),
     )
-    allRows.value = [...purchaseRows, ...qualityRows, ...icsRows, ...approvalRows]
+    const requestRows = normalizeList(requestResponse.data).map(normalizeUserRequestTask)
+    allRows.value = [...purchaseRows, ...qualityRows, ...icsRows, ...approvalRows, ...requestRows]
   } catch (error) {
     console.error("タスク一覧取得に失敗:", error)
     allRows.value = []
