@@ -709,15 +709,14 @@ const filteredUsers = computed(() => {
 
 const summaryNames = computed(() => {
   const names = new Set(filteredUsers.value.map(u => u.name))
-  const userIdByName = new Map(filteredUsers.value.map(u => [u.name, Number(u.id)]))
+  const userIdByName = new Map(filteredUsers.value.map(u => [u.name, u.userId]))
   // 申請データにいるがallUsersにいない人も念のため含める
-  for (const r of filteredRows.value) {
-    names.add(r.name)
-    if (!userIdByName.has(r.name)) userIdByName.set(r.name, Number(r.applicantId))
-  }
+  for (const r of filteredRows.value) names.add(r.name)
   return [...names].sort((a, b) => {
-    const userIdDiff = (userIdByName.get(a) || Number.MAX_SAFE_INTEGER) - (userIdByName.get(b) || Number.MAX_SAFE_INTEGER)
-    return userIdDiff || a.localeCompare(b, 'ja')
+    const aUserId = userIdByName.get(a) || ''
+    const bUserId = userIdByName.get(b) || ''
+    if (!aUserId || !bUserId) return aUserId ? -1 : bUserId ? 1 : a.localeCompare(b, 'ja')
+    return aUserId.localeCompare(bUserId, 'ja', { numeric: true }) || a.localeCompare(b, 'ja')
   })
 })
 
@@ -957,6 +956,7 @@ const loadUsers = async () => {
     const userList = scopeUsersForStats(rawUsers)
     allUsers.value = userList.map(u => ({
       id: u.id,
+      userId: u.username,
       name: `${u.last_name} ${u.first_name}`.trim() || u.username,
       team: u.profile?.team_name || '',
       group: u.profile?.unit_name || '',
