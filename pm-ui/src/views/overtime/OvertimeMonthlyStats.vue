@@ -134,7 +134,7 @@
                   :class="{
                     'cell-empty': !summaryGrid[name]?.[d],
                     'cell-label': summaryGrid[name]?.[d]?.label && !summaryGrid[name]?.[d]?.workH,
-                    'cell-record': summaryGrid[name]?.[d]?.normalApplicationId,
+                    'cell-record': summaryGrid[name]?.[d]?.cancellableApplicationId,
                   }"
                   @click="summaryGrid[name]?.[d] ? openExistingRecordModal(name, d) : openEditModal(name, d)"
                 >{{ getSummaryDisplay(summaryGrid[name]?.[d]) }}</td>
@@ -246,11 +246,11 @@
               <option value="half_day_pm">午後半休</option>
             </select>
           </div>
-          <p v-else class="modal-message">この日の定時（8H）勤務記録を取り消します。取消後は「—」に戻ります。</p>
+          <p v-else class="modal-message">この日の{{ editModal.typeLabel }}勤務記録を取り消します。取消後は「—」に戻ります。</p>
           <div v-if="editModal.error" class="modal-error">{{ editModal.error }}</div>
           <div class="modal-actions">
             <button class="btn btn-cancel" @click="editModal.visible = false">キャンセル</button>
-            <button class="btn" :class="editModal.mode === 'delete' ? 'btn-danger' : 'btn-primary'" :disabled="editModal.saving" @click="editModal.mode === 'delete' ? deleteNormalRecord() : saveEdit()">
+            <button class="btn" :class="editModal.mode === 'delete' ? 'btn-danger' : 'btn-primary'" :disabled="editModal.saving" @click="editModal.mode === 'delete' ? deleteRecord() : saveEdit()">
               {{ editModal.saving ? '処理中...' : editModal.mode === 'delete' ? '取消' : '保存' }}
             </button>
           </div>
@@ -547,6 +547,7 @@ const TYPE_LABELS = {
   paid_leave: '有給',
   paid_leave_consec: '連続有給',
 }
+const CANCELLABLE_RECORD_TYPES = new Set(['normal', 'paid_leave', 'half_day_am', 'half_day_pm'])
 
 // 編集モーダル
 const editModal = reactive({
@@ -557,6 +558,7 @@ const editModal = reactive({
   applicantId: null,
   applicationId: null,
   type: 'normal',
+  typeLabel: '',
   saving: false,
   error: '',
 })
@@ -573,6 +575,7 @@ function openEditModal(name, date) {
   editModal.applicantId = applicantId
   editModal.applicationId = null
   editModal.type = 'normal'
+  editModal.typeLabel = ''
   editModal.error = ''
   editModal.saving = false
   editModal.visible = true
@@ -580,12 +583,13 @@ function openEditModal(name, date) {
 
 function openExistingRecordModal(name, date) {
   const cell = summaryGrid.value[name]?.[date]
-  if (!cell?.normalApplicationId) return
+  if (!cell?.cancellableApplicationId) return
   editModal.name = name
   editModal.mode = 'delete'
   editModal.date = date
   editModal.applicantId = cell.applicantId
-  editModal.applicationId = cell.normalApplicationId
+  editModal.applicationId = cell.cancellableApplicationId
+  editModal.typeLabel = TYPE_LABELS[cell.cancellableType]
   editModal.error = ''
   editModal.saving = false
   editModal.visible = true
@@ -642,9 +646,9 @@ async function saveEdit() {
   }
 }
 
-async function deleteNormalRecord() {
+async function deleteRecord() {
   if (!editModal.applicationId) return
-  if (!confirm(`${editModal.name}さんの${editModal.date}の定時勤務記録を取り消しますか？`)) return
+  if (!confirm(`${editModal.name}さんの${editModal.date}の${editModal.typeLabel}勤務記録を取り消しますか？`)) return
   editModal.saving = true
   editModal.error = ''
   try {
@@ -741,7 +745,8 @@ const summaryGrid = computed(() => {
       workH: 0,
       label: '',
       applicantId: row.applicantId,
-      normalApplicationId: null,
+      cancellableApplicationId: null,
+      cancellableType: '',
     }
     if (row.workH) {
       cell.workH = Math.round((cell.workH + row.workH) * 10) / 10
@@ -750,7 +755,10 @@ const summaryGrid = computed(() => {
       if (row.paidLeave || row.paidLeaveConsec) cell.label = '有給'
       else if (row.halfDayPm || row.halfDayAm) cell.label = '半休'
     }
-    if (row.applicationType === 'normal') cell.normalApplicationId = row.applicationId
+    if (CANCELLABLE_RECORD_TYPES.has(row.applicationType)) {
+      cell.cancellableApplicationId = row.applicationId
+      cell.cancellableType = row.applicationType
+    }
     grid[row.name][row.date] = cell
   }
   return grid
