@@ -5,9 +5,9 @@
     <div class="filters">
       <div class="filter-item">
         <label>期間</label>
-        <input type="date" v-model="dateFrom" class="filter-input" />
+        <input type="month" v-model="monthFrom" class="filter-input" />
         <span>〜</span>
-        <input type="date" v-model="dateTo" class="filter-input" />
+        <input type="month" v-model="monthTo" class="filter-input" />
       </div>
       <button class="btn btn-primary" @click="load">表示</button>
       <select v-model="filterTeam" class="filter-select">
@@ -274,14 +274,19 @@ const dsSources = [
   { op: '読み取り', table: 'm_calendar / m_calendar_day', desc: 'DAISOカレンダー非稼働日の取得' },
 ]
 
-// デフォルト: 今月の1日〜末日
+// デフォルト: 今月
 const today = new Date()
 const pad = (n) => String(n).padStart(2, '0')
 const y = today.getFullYear()
 const m = today.getMonth() + 1
-const lastDay = new Date(y, m, 0).getDate()
-const dateFrom = ref(`${y}-${pad(m)}-01`)
-const dateTo = ref(`${y}-${pad(m)}-${pad(lastDay)}`)
+const monthFrom = ref(`${y}-${pad(m)}`)
+const monthTo = ref(`${y}-${pad(m)}`)
+const dateFrom = computed(() => monthFrom.value ? `${monthFrom.value}-01` : '')
+const dateTo = computed(() => {
+  const [year, month] = monthTo.value.split('-').map(Number)
+  if (!year || !month) return ''
+  return `${monthTo.value}-${pad(new Date(year, month, 0).getDate())}`
+})
 
 const loading = ref(false)
 const hasSearched = ref(false)
@@ -710,15 +715,19 @@ const summaryDates = computed(() =>
 )
 
 const monthlyColumns = computed(() => {
-  const start = dateFrom.value ? new Date(dateFrom.value) : null
-  const end = dateTo.value ? new Date(dateTo.value) : null
-  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return []
+  const [startYear, startMonth] = monthFrom.value.split('-').map(Number)
+  const [endYear, endMonth] = monthTo.value.split('-').map(Number)
+  if (!startYear || !startMonth || !endYear || !endMonth || (startYear * 12 + startMonth) > (endYear * 12 + endMonth)) return []
   const months = []
-  const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
-  const last = new Date(end.getFullYear(), end.getMonth(), 1)
-  while (cursor <= last) {
-    months.push(`${cursor.getFullYear()}-${pad(cursor.getMonth() + 1)}`)
-    cursor.setMonth(cursor.getMonth() + 1)
+  let year = startYear
+  let month = startMonth
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    months.push(`${year}-${pad(month)}`)
+    month += 1
+    if (month === 13) {
+      year += 1
+      month = 1
+    }
   }
   return months
 })
@@ -844,7 +853,7 @@ function formatMonthLabel(monthStr) {
 }
 
 function formatDateRangeLabel() {
-  return `${dateFrom.value} ～ ${dateTo.value}`
+  return `${monthFrom.value} ～ ${monthTo.value}`
 }
 
 function formatMetric(value) {
@@ -1454,8 +1463,8 @@ async function exportExcel() {
 
   setFrozenView(sheet)
   const filename = isMonthlyTab
-    ? `労働時間統計_月別_${dateFrom.value}_${dateTo.value}.xlsx`
-    : `労働時間統計_${dateFrom.value}_${dateTo.value}.xlsx`
+    ? `労働時間統計_月別_${monthFrom.value}_${monthTo.value}.xlsx`
+    : `労働時間統計_${monthFrom.value}_${monthTo.value}.xlsx`
   await saveWorkbook(workbook, filename)
 }
 

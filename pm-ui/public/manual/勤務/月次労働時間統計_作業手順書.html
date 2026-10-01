@@ -236,12 +236,12 @@
     <h4 class="sub">&#9654; ツールバー構成</h4>
     <div class="mock-toolbar">
       <div class="f-group hl">
-        <label>開始日</label>
-        <span class="f-input" style="min-width:110px;">2026/07/01</span>
+        <label>開始月</label>
+        <span class="f-input" style="min-width:110px;">2026/07</span>
       </div>
       <div class="f-group hl">
-        <label>終了日</label>
-        <span class="f-input" style="min-width:110px;">2026/07/31</span>
+        <label>終了月</label>
+        <span class="f-input" style="min-width:110px;">2026/07</span>
       </div>
       <div class="f-group">
         <label>班</label>
@@ -263,7 +263,7 @@
     </div>
 
     <ul class="anno-list" style="margin-top:16px;">
-      <li><span class="anno-num">1</span><span><strong>開始日・終了日</strong> &#8212; デフォルトは当月1日～末日。任意の期間に変更可能です</span></li>
+      <li><span class="anno-num">1</span><span><strong>開始月・終了月</strong> &#8212; デフォルトは当月。指定した各月の月初日から月末日までを集計します</span></li>
       <li><span class="anno-num">2</span><span><strong>班・グループ</strong> &#8212; ドロップダウンで絞り込み。「全て」で全員表示</span></li>
       <li><span class="anno-num">3</span><span><strong>氏名</strong> &#8212; 名前で部分一致検索します</span></li>
       <li><span class="anno-num">4</span><span><strong>有給フィルタ</strong> &#8212; 「全て」「有給あり」「有給なし」から選択。有給取得者だけを抽出する場合に使います</span></li>
@@ -271,7 +271,7 @@
     </ul>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>画面を開いた時点で当月のデータが自動表示されます。期間を変更した場合は「表示」ボタンを押してください。</span>
+      <span>画面を開いた時点で当月のデータが自動表示されます。対象月を変更した場合は「表示」ボタンを押してください。</span>
     </div>
   </div>
 
@@ -654,7 +654,7 @@
 
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>月別タブの集計期間は、ツールバーの開始日～終了日に含まれる月が自動的に列として展開されます。</span>
+      <span>月別タブの集計期間は、ツールバーの開始月～終了月が列として展開されます。</span>
     </div>
   </div>
 
@@ -729,8 +729,8 @@
     <table class="info-table">
       <tr><th>項目</th><th>説明</th></tr>
       <tr><td>列構成</td><td>氏名, 班, グループ, 日付, 種別, 開始時間, 終了時間, 労働時間(H), 残業(H), 休日出勤(H), 所定外(H), 午前半休, 午後半休, 前日有給, 連続有給, 有給数</td></tr>
-      <tr><td>ファイル名</td><td>労働時間統計_{開始日}_{終了日}.xlsx</td></tr>
-      <tr><td>例</td><td>労働時間統計_2026-07-01_2026-07-31.xlsx</td></tr>
+      <tr><td>ファイル名</td><td>労働時間統計_{開始月}_{終了月}.xlsx</td></tr>
+      <tr><td>例</td><td>労働時間統計_2026-07_2026-07.xlsx</td></tr>
     </table>
 
     <div class="callout ok">
