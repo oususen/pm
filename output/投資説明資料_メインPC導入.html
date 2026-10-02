@@ -27,6 +27,8 @@
   .flow { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:10px 0; }
   .flow div { flex:1; min-width:150px; border:1px solid var(--accent); border-radius:8px; padding:8px 10px; font-size:14px; }
   .flow b { display:block; color:var(--accent); }
+  a { color:var(--accent); }
+  .demo li { word-break:break-all; }
   .note { font-size:13px; color:var(--sub); }
   @media (max-width:760px) { .cols { grid-template-columns:1fr; } .slide { padding:18px; } th { white-space:normal; } }
   @media print { body { background:#fff; } .slide { margin:0; border:none; border-radius:0; } }
@@ -90,6 +92,14 @@
     <li>管理業務の簡易化、属人化の解消、業務処理時間の削減を実現。</li>
   </ul>
   <p class="note">削減できた時間・工数の実績：<span class="ph">数字は後で追加</span></p>
+  <h3>実演リンク（社内ネットワークで開く）</h3>
+  <ul class="demo">
+    <li>生産計画入力：<a href="https://10.0.1.232:8501/production/plan-input" target="_blank" rel="noopener">https://10.0.1.232:8501/production/plan-input</a></li>
+    <li>工程ガント：<a href="https://10.0.1.232:8501/production/process-gantt" target="_blank" rel="noopener">https://10.0.1.232:8501/production/process-gantt</a></li>
+    <li>進度：<a href="https://10.0.1.232:8501/production/progress" target="_blank" rel="noopener">https://10.0.1.232:8501/production/progress</a></li>
+    <li>在庫：<a href="https://10.0.1.232:8501/production/inventory" target="_blank" rel="noopener">https://10.0.1.232:8501/production/inventory</a></li>
+    <li>出荷メニュー：<a href="https://10.0.1.232:8501/shipping/menu" target="_blank" rel="noopener">https://10.0.1.232:8501/shipping/menu</a></li>
+  </ul>
 </section>
 
 <section class="slide">
@@ -103,7 +113,7 @@
   </div>
   <table>
     <tr><th>全生産現場への展開</th><td>残り半数のラインへ運用を拡大する。</td></tr>
-    <tr><th>注文書自動送信<br>トラック積載判定</th><td>注文書Excel/PDF・進度表・外作納品書を自動生成し、自動でメール送信する。安全在庫・ロット丸めを加味して発注数量を自動算出する。トラック荷台寸法と容器情報から積載可否・占有率を自動判定する。</td></tr>
+    <tr><th>注文書自動送信<br>トラック積載判定</th><td>注文書Excel/PDF・進度表・外作納品書を自動生成し、自動でメール送信する（<a href="https://10.0.1.232:8501/purchase/auto-order-send" target="_blank" rel="noopener">注文書自動送信の画面</a>）。安全在庫・ロット丸めを加味して発注数量を自動算出する。トラック荷台寸法と容器情報から積載可否・占有率を自動判定する。</td></tr>
     <tr><th>通話の録音・文字起こし</th><td>社内通話をWhisperモデルで自動文字起こしし、現場の判断・対処事例を原始データとして蓄積する。将来のナレッジ検索・AI活用の基盤とする。</td></tr>
     <tr><th>自動計画の高度化</th><td>工程間連携方式から、計画在庫に基づく自動計画へ拡張する。</td></tr>
     <tr><th>社内AIチャット</th><td>外部AI APIで、業務知識の検索・回答、帳票作成支援、データ分析補助を行う。社内アプリが必要最小限の情報だけをAPIへ連携し、APIは社内DBへ直接接続させない。</td></tr>
