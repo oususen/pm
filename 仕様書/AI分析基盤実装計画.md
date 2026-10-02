@@ -41,7 +41,7 @@ PMの業務データをAIで分析できるようにする。AIはPM本体テー
 
 ### 第3段階：テンプレートと承認
 
-1. AIアプリのマイグレーション`0022`として`ai_analysis_template`と、単一設定`ai_analysis_execution_policy`を追加する。
+1. AIアプリのマイグレーション`0022`として`ai_analysis_template`、通知履歴`ai_analysis_template_notification`、単一設定`ai_analysis_execution_policy`、実行履歴`ai_analysis_run`を追加する。
 2. 利用者承認後に、SQL・Python・利用ビュー・分析条件・利用者・状態・版を保存する。
 3. システム管理者へ確認依頼メールを送信する。
 4. 管理者の確認・却下・却下理由の保存と、利用者へのメール・PM通知を実装する。管理者の承認・却下・訂正・置換は`settings.ai`の`can_edit`に限定する。

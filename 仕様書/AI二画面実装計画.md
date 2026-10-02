@@ -154,7 +154,7 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 ## 7. 実装順序
 
 1. 既存のAI用ビューを正常化し、`pm_ai_reader`のビュー限定権限を確認する。
-2. `AIAnalysisTemplate`と`AIAnalysisExecutionPolicy`モデルをAIアプリのマイグレーション`0022`で追加し、テンプレートAPI、分析実行設定API、管理者通知、`ai.analysis`権限を追加する。
+2. `AIAnalysisTemplate`・通知履歴`ai_analysis_template_notification`・`AIAnalysisExecutionPolicy`・実行履歴`AIAnalysisRun`をAIアプリのマイグレーション`0022`で追加し、テンプレートAPI、分析実行設定API、管理者通知、`ai.analysis`権限を追加する。
 3. `pm_internal`限定のRedis共有キャッシュと、内部HTTPで呼び出す`analysis-runner`コンテナを追加する。一時DuckDBの削除処理をテストする。
 4. 分析APIを追加し、承認前・期限切れの分析案は実行できないことをテストする。
 5. `AIAnalysis.vue`と`/ai/analysis`を追加する。
