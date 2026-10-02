@@ -102,6 +102,16 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 - Windows開発環境もDocker DesktopのComposeで`analysis-runner`を起動する。Windows上でPythonを直接実行する経路は作らない。
 - 実行時間・CPU・メモリの上限値は、実データ量を確認後にBOSSが承認して設定する。
 
+### 5.4 分析実行設定画面
+
+- 既存の`/settings/ai`へ「分析実行設定」を追加する。保存先は新規モデル`AIAnalysisExecutionPolicy`、テーブル名は`ai_analysis_execution_policy`とする。
+- 編集項目は、分析案キャッシュ有効期限（分）、Python最大実行時間（秒）、Python最大メモリ（MB）、Python CPU上限（コア数）とする。
+- 初期値は、60分、300秒、2048MB、1コアとする。
+- 保存可能範囲と入力単位は、有効期限5〜480分（1分単位）、最大実行時間30〜600秒（1秒単位）、最大メモリ512〜4096MB（128MB単位）、CPU上限0.5〜2コア（0.5コア単位）とする。範囲外・0・空欄は設定API側でも必ずエラーにして保存しない。
+- `settings.ai / can_edit`を持つ利用者だけに編集・保存ボタンを表示する。閲覧だけは`settings.ai / can_view`で可能とする。設定APIへ新たな権限判定は追加しない（既存のフロントエンドUI方針）。
+- 保存した設定は、次に開始するジョブの実行依頼へ含める。実行中のジョブは設定変更の影響を受けない。
+- runnerは受領した設定値を実行時間・メモリ・CPU制限およびDuckDB並列度へ反映する。Docker Compose側の実行可能上限を超える値は、ジョブ実行時にエラー表示し、実行しない。
+
 ### 5.3 データと権限
 
 - 分析用の読み取り接続は`AI_DB_NAME=pm_db`、`AI_DB_USER=pm_ai_reader`を使用する。
@@ -144,7 +154,7 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 ## 7. 実装順序
 
 1. 既存のAI用ビューを正常化し、`pm_ai_reader`のビュー限定権限を確認する。
-2. `AIAnalysisTemplate`モデルとAIアプリのマイグレーション`0022`、テンプレートAPI、管理者通知、`ai.analysis`権限を追加する。
+2. `AIAnalysisTemplate`と`AIAnalysisExecutionPolicy`モデルをAIアプリのマイグレーション`0022`で追加し、テンプレートAPI、分析実行設定API、管理者通知、`ai.analysis`権限を追加する。
 3. `pm_internal`限定のRedis共有キャッシュと、内部HTTPで呼び出す`analysis-runner`コンテナを追加する。一時DuckDBの削除処理をテストする。
 4. 分析APIを追加し、承認前・期限切れの分析案は実行できないことをテストする。
 5. `AIAnalysis.vue`と`/ai/analysis`を追加する。
