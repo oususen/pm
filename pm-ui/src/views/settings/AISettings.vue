@@ -45,21 +45,21 @@
     <section class="setting-section">
       <h3>分析実行設定</h3>
       <p class="section-help">分析機能の実装後、次に開始する分析から適用します。取得行数の上限を超えた場合は、対象の期間・条件を絞って再実行します。</p>
+      <p v-if="executionError" class="error" role="alert">{{ executionError }}</p>
       <form v-if="analysisExecutionPolicy" @submit.prevent="saveAnalysisExecutionPolicy">
         <div class="policy-grid execution-policy-grid">
           <label v-for="field in executionFields" :key="field.key" :for="`analysis-setting-${field.key}`">
             {{ field.label }}
             <input :id="`analysis-setting-${field.key}`" v-model.number="analysisExecutionPolicy[field.key]"
-              :disabled="!canEdit || loading || savingExecutionPolicy" type="number" required
+              :disabled="!canEdit || loadingExecutionPolicy || savingExecutionPolicy" type="number" required
               :min="field.min" :max="field.max" :step="field.step"
               :aria-invalid="Boolean(executionErrors[field.key])" :aria-describedby="`analysis-help-${field.key}`" />
             <small :id="`analysis-help-${field.key}`">{{ field.help }}</small>
             <small v-if="executionErrors[field.key]" class="field-error" role="alert">{{ executionErrors[field.key].join(' ') }}</small>
           </label>
         </div>
-        <p v-if="executionError" class="error" role="alert">{{ executionError }}</p>
         <p v-if="executionNotice" class="notice" role="status">{{ executionNotice }}</p>
-        <button v-if="canEdit" class="reload-button execution-save" type="submit" :disabled="loading || savingExecutionPolicy">
+        <button v-if="canEdit" class="reload-button execution-save" type="submit" :disabled="loadingExecutionPolicy || savingExecutionPolicy">
           {{ savingExecutionPolicy ? '保存中…' : '分析実行設定を保存' }}
         </button>
         <p v-else class="section-help">閲覧のみの権限です。</p>
@@ -170,6 +170,7 @@ const providers = ref([])
 const tools = ref([])
 const dataPolicy = ref(null)
 const analysisExecutionPolicy = ref(null)
+const loadingExecutionPolicy = ref(false)
 const savingExecutionPolicy = ref(false)
 const executionErrors = ref({})
 const executionError = ref('')
@@ -216,21 +217,33 @@ const kindLabel = (kind) => ({ master: 'マスタ参照', aggregate: '集計', p
 const saved = (message) => { notice.value = message; setTimeout(() => { notice.value = '' }, 2500) }
 const failed = (requestError) => { error.value = requestError.response?.data?.detail || 'AI設定の保存に失敗しました。' }
 
+const loadAnalysisExecutionPolicy = async () => {
+  loadingExecutionPolicy.value = true
+  executionErrors.value = {}
+  executionError.value = ''
+  executionNotice.value = ''
+  try {
+    const { data } = await api.aiSettings.analysisExecutionPolicy()
+    analysisExecutionPolicy.value = data
+  } catch (requestError) {
+    executionError.value = requestError.response?.data?.detail || '分析実行設定を取得できませんでした。更新して再試行してください。'
+  } finally {
+    loadingExecutionPolicy.value = false
+  }
+}
+
 const load = async () => {
   loading.value = true
   error.value = ''
+  // 分析設定は、ほかの設定APIの応答状況に依存せず取得する。
+  const executionPolicyRequest = loadAnalysisExecutionPolicy()
   try {
-    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse, crossScreenResponse, executionPolicyResponse] = await Promise.all([
+    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse, crossScreenResponse] = await Promise.all([
       api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(), api.ocr.status(), api.aiSettings.crossScreenAccess(),
-      api.aiSettings.analysisExecutionPolicy(),
     ])
     providers.value = providerResponse.data
     tools.value = toolResponse.data
     dataPolicy.value = policyResponse.data
-    analysisExecutionPolicy.value = executionPolicyResponse.data
-    executionErrors.value = {}
-    executionError.value = ''
-    executionNotice.value = ''
     knowledgeSources.value = knowledgeResponse.data
     knowledgeDocuments.value = documentResponse.data
     sqlDictionary.value = dictionaryResponse.data
@@ -239,6 +252,7 @@ const load = async () => {
   } catch (requestError) {
     failed(requestError)
   } finally {
+    await executionPolicyRequest
     loading.value = false
   }
 }
@@ -253,7 +267,7 @@ const saveDataPolicy = async () => {
   try { const { data } = await api.aiSettings.updateDataPolicy(dataPolicy.value); dataPolicy.value = data; saved('データ送信設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
 }
 const saveAnalysisExecutionPolicy = async () => {
-  if (!canEdit.value || loading.value || savingExecutionPolicy.value) return
+  if (!canEdit.value || loadingExecutionPolicy.value || savingExecutionPolicy.value) return
   executionErrors.value = {}
   executionError.value = ''
   executionNotice.value = ''
