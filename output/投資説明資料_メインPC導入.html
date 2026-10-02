@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>投資説明資料 メインPC導入</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#1c2733; --sub:#5b6b7c; --accent:#1f5fae; --line:#d9e0e8; --ph-bg:#fff4cc; --ph-ink:#7a5a00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12171d; --card:#1b232c; --ink:#e8edf2; --sub:#9aa9b8; --accent:#6aa7ee; --line:#2d3946; --ph-bg:#4a3d10; --ph-ink:#ffe08a; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif; line-height:1.6; }
+  .slide { max-width:1100px; margin:20px auto; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:28px 36px; page-break-after:always; }
+  h1 { font-size:30px; margin:0 0 8px; }
+  h2 { font-size:22px; margin:0 0 14px; padding-left:12px; border-left:6px solid var(--accent); }
+  h3 { font-size:16px; margin:16px 0 6px; color:var(--accent); }
+  p, li { font-size:15px; }
+  ul { margin:4px 0; padding-left:22px; }
+  table { width:100%; border-collapse:collapse; margin:8px 0; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--bg); width:22%; white-space:nowrap; }
+  .meta { color:var(--sub); font-size:14px; }
+  .ph { background:var(--ph-bg); color:var(--ph-ink); padding:1px 8px; border-radius:4px; font-weight:bold; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .box { border:1px solid var(--line); border-radius:8px; padding:10px 16px; }
+  .flow { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:10px 0; }
+  .flow div { flex:1; min-width:150px; border:1px solid var(--accent); border-radius:8px; padding:8px 10px; font-size:14px; }
+  .flow b { display:block; color:var(--accent); }
+  .note { font-size:13px; color:var(--sub); }
+  @media (max-width:760px) { .cols { grid-template-columns:1fr; } .slide { padding:18px; } th { white-space:normal; } }
+  @media print { body { background:#fff; } .slide { margin:0; border:none; border-radius:0; } }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <h1>メインPC導入に関する投資説明</h1>
+  <p>生産・業務管理アプリ 本番サーバー基盤の整備（外部AI API利用構成）</p>
+  <table>
+    <tr><th>申請部署</th><td>製缶事業部</td></tr>
+    <tr><th>申請者</th><td>王　崇栓</td></tr>
+    <tr><th>投資額</th><td><span class="ph">見積取得後に記入</span></td></tr>
+    <tr><th>希望導入時期</th><td><span class="ph">（年月）</span></td></tr>
+  </table>
+</section>
+
+<section class="slide">
+  <h2>1. 投資のお願い（要旨）</h2>
+  <ul>
+    <li>自社開発の生産・業務管理アプリは、現状、現場ラインの<b>半数</b>で運用中。利用者の増加により、現在のサーバーPCの処理能力が不足しつつある。</li>
+    <li>全ラインへ展開するため、安定稼働を支える<b>本番運用基盤（メインPC 1台）</b>を導入したい。</li>
+    <li>併せて、注文書自動送信、通話の文字起こし、社内AIチャットなど、今後の機能拡張の受け皿とする。</li>
+  </ul>
+  <h3>ご判断いただきたい事項</h3>
+  <p>メインPC 1台の購入（投資額：<span class="ph">見積取得後に記入</span>）</p>
+</section>
+
+<section class="slide">
+  <h2>2. 背景と現状の課題</h2>
+  <div class="cols">
+    <div class="box">
+      <h3>背景</h3>
+      <ul>
+        <li>既存の基幹システムは、製缶領域では実績の入力・管理に限られ、計画や進度管理の基盤として活用できていない。</li>
+        <li>生産計画は各ラインが個別のExcelで管理しており、計画・進度・在庫を部門横断で確認しにくく、属人化しやすい。</li>
+        <li>外作品・購入品の一部は、仕入先へ進度表を共有する運用で、納期・納入数量の一元管理が不足している。</li>
+        <li>製造業ではIoT・DX・AIの活用が加速しており、紙・Excel依存からの脱却が急務である。</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>現状の課題</h3>
+      <ul>
+        <li>アプリの実運用は現場ラインの半数にとどまる。</li>
+        <li>利用者の増加により、現行サーバーPCの処理能力が不足しつつある。</li>
+        <li>全ラインへ展開するには、安定稼働できる本番基盤が必要。</li>
+      </ul>
+      <p class="note">現行PCの具体的な処理遅延の実測値：<span class="ph">数字は後で追加</span></p>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>3. アプリの現状機能と成果</h2>
+  <ul>
+    <li>受注、生産計画、工程実績、進度、在庫、発注、納入、検収の情報を<b>一元管理</b>。</li>
+    <li>ライン計画を立てると工程計画を自動生成。後ラインの計画から前ラインの計画も自動生成。</li>
+    <li>出荷便の自動振り分けにより、手作業による便割り当てを削減。</li>
+    <li>工程間のデータ連携で、計画変更・納入遅れ・在庫不足を早期に把握できる。</li>
+    <li>管理業務の簡易化、属人化の解消、業務処理時間の削減を実現。</li>
+  </ul>
+  <p class="note">削減できた時間・工数の実績：<span class="ph">数字は後で追加</span></p>
+</section>
+
+<section class="slide">
+  <h2>4. PC導入後に実現すること</h2>
+  <div class="flow">
+    <div><b>STEP1 全ライン展開</b>残り半数のラインへ段階展開</div>
+    <div><b>STEP2 購買の自動化</b>注文書自動送信、トラック積載判定</div>
+    <div><b>STEP3 ノウハウ蓄積</b>通話録音と自動文字起こし</div>
+    <div><b>STEP4 AI活用</b>外部AI API、社内AIチャット、RAG</div>
+    <div><b>STEP5 現場連携</b>IoT連携、カメラ検査</div>
+  </div>
+  <table>
+    <tr><th>全生産現場への展開</th><td>残り半数のラインへ運用を拡大する。</td></tr>
+    <tr><th>注文書自動送信<br>トラック積載判定</th><td>注文書Excel/PDF・進度表・外作納品書を自動生成し、自動でメール送信する。安全在庫・ロット丸めを加味して発注数量を自動算出する。トラック荷台寸法と容器情報から積載可否・占有率を自動判定する。</td></tr>
+    <tr><th>通話の録音・文字起こし</th><td>社内通話をWhisperモデルで自動文字起こしし、現場の判断・対処事例を原始データとして蓄積する。将来のナレッジ検索・AI活用の基盤とする。</td></tr>
+    <tr><th>自動計画の高度化</th><td>工程間連携方式から、計画在庫に基づく自動計画へ拡張する。</td></tr>
+    <tr><th>社内AIチャット</th><td>外部AI APIで、業務知識の検索・回答、帳票作成支援、データ分析補助を行う。社内アプリが必要最小限の情報だけをAPIへ連携し、APIは社内DBへ直接接続させない。</td></tr>
+    <tr><th>AI知識基盤</th><td>Difyによる社内文書のRAG化、PostgreSQL + pgvectorによる品番・工程名等の自然言語あいまい検索。</td></tr>
+    <tr><th>分析基盤</th><td>実績・仕損・設備状態・品質記録から、トラブル傾向分析と再発防止を行う。</td></tr>
+    <tr><th>IoT連携</th><td>設備の稼働状態・サイクルタイム・停止要因を取得し、稼働監視・予防保全・生産効率分析を行う。</td></tr>
+    <tr><th>カメラ検査の自動化</th><td>RTX 5060 Ti 16GBで画像認識モデルを学習・検証し、検査を自動化する。</td></tr>
+  </table>
+</section>
+
+<section class="slide">
+  <h2>5. 購入内容（仕様）</h2>
+  <table>
+    <tr><th>対象・数量</th><td>組立・動作確認済みの完成品PC　1台</td></tr>
+    <tr><th>用途</th><td>生産・業務管理アプリ本番サーバー、外部AI API連携基盤</td></tr>
+    <tr><th>OS</th><td>Windows 11 Pro</td></tr>
+    <tr><th>CPU</th><td>Intel Core Ultra 9 285K</td></tr>
+    <tr><th>メモリ</th><td>DDR5 64GB（将来128GBへ増設可能）</td></tr>
+    <tr><th>GPU</th><td>初期：NVIDIA GeForce RTX 5060 Ti 16GB（8GB版は不可）。将来、RTX 5090へ換装できる構成。</td></tr>
+    <tr><th>ストレージ</th><td>NVMe SSD 2TB以上</td></tr>
+    <tr><th>ネットワーク</th><td>2.5GbE LAN</td></tr>
+    <tr><th>保守性</th><td>ATXマザーボード、M.2スロット2基以上、DDR5メモリ4スロット、PCIe x16 1基以上、4スロット大型GPU対応ケース</td></tr>
+    <tr><th>電源・冷却</th><td>1200W以上（ATX 3.1対応、600W対応のネイティブ12V-2x6ケーブル）、360mm簡易水冷</td></tr>
+  </table>
+</section>
+
+<section class="slide">
+  <h2>6. 仕様の選定理由</h2>
+  <table>
+    <tr><th>Core Ultra 9 285K</th><td>業務アプリ、データベース、帳票作成、RAG検索、API連携を同時に実行するため。</td></tr>
+    <tr><th>メモリ64GB</th><td>Docker上の業務アプリ・データベース・検索基盤を安定して同時稼働させるため。利用拡大時は128GBへ増設できる。</td></tr>
+    <tr><th>RTX 5060 Ti 16GB</th><td>カメラ検査・YOLO画像認識の推論と初期学習・検証のため。16GB VRAMで、8GB版より学習・検証に余裕がある。</td></tr>
+    <tr><th>RTX 5090への換装余地</th><td>将来ローカルLLMや大規模な画像処理が必要になったとき、GPUのみ更新できる。PC全体の買い替えを避けられる。</td></tr>
+    <tr><th>NVMe SSD 2TB</th><td>OS、アプリ、DB、社内文書、文字起こしデータ、検索インデックスを高速に扱うため。</td></tr>
+    <tr><th>2.5GbE LAN</th><td>業務端末からのアクセス、バックアップ、文書登録時の通信余裕を確保するため。</td></tr>
+    <tr><th>1200W電源・360mm水冷</th><td>CPUとGPUを安定稼働させ、将来のRTX 5090換装にも対応するため。</td></tr>
+  </table>
+  <p class="note">LLMの文章生成は当面、外部AI APIを利用する。そのため初期GPUは5060 Ti 16GBに抑えている。</p>
+</section>
+
+<section class="slide">
+  <h2>7. 投資額</h2>
+  <table>
+    <tr><th>区分</th><th>概算金額</th></tr>
+    <tr><td>メインPC本体</td><td><span class="ph">見積取得後に記入</span></td></tr>
+    <tr><td>RAID1用NVMe SSD 2TB追加（任意）</td><td><span class="ph">見積取得後に記入</span></td></tr>
+    <tr><td>メインPC本体 + RAID1（任意）</td><td><span class="ph">見積取得後に記入</span></td></tr>
+    <tr><td>参考：将来RTX 5090へ換装した場合の部品・工賃</td><td><span class="ph">見積取得後に記入</span></td></tr>
+  </table>
+  <ul class="note">
+    <li>外部AI APIの利用料、RAG構築費、アプリ改修費は本PC見積に含まない。</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <h2>8. 期待される効果</h2>
+  <div class="cols">
+    <div class="box">
+      <h3>定性効果</h3>
+      <ul>
+        <li>全ラインで計画・進度・在庫を一元管理でき、Excel管理と属人化を解消できる。</li>
+        <li>注文書・進度表・納品書の自動化で、購買業務の手作業を削減できる。</li>
+        <li>計画変更・納入遅れ・在庫不足を早期に把握できる。</li>
+        <li>通話の文字起こしで現場ノウハウを蓄積し、AI活用の基盤にできる。</li>
+        <li>サーバーの処理能力不足による業務停止リスクを低減できる。</li>
+        <li>将来のGPU換装により、PC全体を買い替えずに拡張できる。</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>定量効果</h3>
+      <table>
+        <tr><th>業務時間の削減</th><td><span class="ph">数字は後で追加</span></td></tr>
+        <tr><th>購買業務の削減工数</th><td><span class="ph">数字は後で追加</span></td></tr>
+        <tr><th>処理時間の短縮</th><td><span class="ph">数字は後で追加</span></td></tr>
+        <tr><th>投資回収期間</th><td><span class="ph">数字は後で追加</span></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2>9. リスクと対策</h2>
+  <table>
+    <tr><th>情報漏えい</th><td>外部AI APIへは、社内アプリが必要最小限の情報だけを連携する。APIは社内DBへ直接接続させない。</td></tr>
+    <tr><th>データ消失</th><td>NVMe SSDのRAID1追加を検討する（任意）。</td></tr>
+    <tr><th>将来の性能不足</th><td>メモリは128GBへ、GPUはRTX 5090へ増設・換装できる構成とする。</td></tr>
+  </table>
+</section>
+
+<section class="slide">
+  <h2>10. スケジュールとご判断事項</h2>
+  <table>
+    <tr><th>導入時期</th><td><span class="ph">（年月）</span></td></tr>
+    <tr><th>承認後の流れ</th><td>見積確定 → 発注 → 納品・動作確認 → 本番環境の構築 → 全ラインへ段階展開</td></tr>
+  </table>
+  <h3>ご承認のお願い</h3>
+  <p>メインPC 1台の購入（<span class="ph">見積取得後に記入</span>）についてご承認をお願いします。</p>
+</section>
+
+</body>
+</html>
