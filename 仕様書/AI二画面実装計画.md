@@ -77,7 +77,7 @@
 | `POST /api/ai/analysis/templates/` | 利用者承認済みのSQL・Pythonを保存する |
 | `PATCH /api/ai/analysis/templates/{id}/` | システム管理者が確認・却下・置換関係を更新する |
 
-分析案の一時状態は、テンプレートとして保存するまでPM本体DBへ保存しない。複数のgunicornワーカーで承認・実行を継続できるよう、`pm_internal`内だけに公開するRedisコンテナへ分析案ID単位で有効期限付き保存する。Redisは外部ポート・永続ボリュームを持たない。有効期限の設定値は実装前にBOSSが承認する。
+分析案の一時状態は、テンプレートとして保存するまでPM本体DBへ保存しない。複数のgunicornワーカーで承認・実行を継続できるよう、`pm_internal`内だけに公開するRedisコンテナへ分析案ID単位で有効期限付き保存する。Redisは外部ポート・永続ボリュームを持たない。有効期限はAI分析基盤仕様書§4.7の設定値による。
 
 ### 5.2 サービス分割
 
@@ -100,7 +100,7 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 - 生成Pythonの`load_view()`は、runner内の一時DuckDBに投入済みのビュー・スナップショットだけを読む。MySQLへの直接接続ではない。
 - runnerの生成Python子プロセスには、MySQL・Redis・内部HTTPの接続情報を渡さない。PMソースコード、ホストの任意フォルダ、Dockerソケットをマウントしない。
 - Windows開発環境もDocker DesktopのComposeで`analysis-runner`を起動する。Windows上でPythonを直接実行する経路は作らない。
-- 実行時間・CPU・メモリの上限値は、実データ量を確認後にBOSSが承認して設定する。
+- 実行時間・CPU・メモリの上限値は、AI分析基盤仕様書§4.7の設定値による。
 
 ### 5.4 分析実行設定画面
 
