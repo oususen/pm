@@ -38,7 +38,7 @@
 | `AIProviderConfig`（`ai_provider_config`） | DeepSeek／Qwenの有効化・既定モデル | APIキー自体は含まない（4.3参照） |
 | `AIToolPolicy`（`ai_tool_policy`） | 画面領域(`screen_id`)ごとに、ツール(`tool_code`)を有効化するか、外部AI（DeepSeek）への結果送信を許可するか(`allow_external_transfer`) | 無効化した組み合わせはDeepSeek・Qwenどちらからも呼べない |
 | `AIDataPolicy`（`ai_data_policy`） | 集計結果の外部送信可否(`allow_aggregated_external_transfer`)、権限者への個人別集計許可(`allow_authorized_personal_data`)、外部送信する最大集計行数(`max_external_result_rows`) | 常に1行だけ保持する全体方針 |
-| `AIAnalysisExecutionPolicy`（`ai_analysis_execution_policy`） | 分析案キャッシュ有効期限(`plan_cache_ttl_minutes`)、Python最大実行時間(`max_execution_seconds`)、最大メモリ(`max_memory_mb`)、CPU上限(`max_cpu_cores`) | 常に1行だけ保持する分析実行設定。初期値は60分・300秒・2048MB・1コア。保存可能範囲は5〜480分・30〜600秒・512〜4096MB（128MB単位）・0.5〜2コア（0.5コア単位）で、API側で検証する |
+| `AIAnalysisExecutionPolicy`（`ai_analysis_execution_policy`） | 分析案キャッシュ有効期限(`plan_cache_ttl_minutes`)、Python最大実行時間(`max_execution_seconds`)、最大メモリ(`max_memory_mb`)、CPU上限(`max_cpu_cores`)、取得行数の上限(`max_fetch_rows`、暫定) | 常に1行だけ保持する分析実行設定。初期値は60分・300秒・2048MB・1コア・100,000行。保存可能範囲は5〜480分・30〜600秒・512〜4096MB（128MB単位）・0.5〜2コア（0.5コア単位）・1,000〜100,000行（1,000行単位）で、API側で検証する。取得行数の上限は実測後にBOSSが確定する |
 | `AIKnowledgeSource`（`ai_knowledge_source`） | AIに参照させるリポジトリ内ドキュメントの登録（PMアプリ構造／マニュアル／手順書／安全・運用規約） | 参照させるファイルは登録済みのものに限る |
 
 画面領域(`screen_id`)は `ai_home`（本社横断）、`orders`、`production`、`quality`、`overtime`、`purchase`、`shipping`、`inventory`、`masters` を持つ。`masters` では品番・BOM・工程・ライン・仕入先の読み取り照会だけを許可し、登録・更新・削除は許可しない。`inventory` は現時点でどのツールも割り当てていない（9章の区分Cに対応）。
