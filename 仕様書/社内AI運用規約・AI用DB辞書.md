@@ -110,10 +110,10 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 ### 6.1 基本マスタ
 
-| モデル（テーブル） | 主な項目 | 関連 | AI利用目的 | 外部送信 |
+| モデル（テーブル） | フィールド名 | 関連 | AI利用目的 | 外部送信 |
 |---|---|---|---|---|
 | `masters.Product`（`m_product`） | `product_code`, `product_name`, `category`, `unit`, `line`, `process`, `is_active` | ライン、工程、BOM、実績、需要 | 品番・品名・工程の特定 | 品番・品名は必要時のみ。個人情報は含めない |
-| `masters.BOM` / `BOMItem`（`m_bom` / `m_bom_item`） | 親製品、版、有効期間、子製品、必要数、調達区分、工程、ライン、仕入先、LT、備考 | 製品、工程、ライン、仕入先 | BOM構成・有効期間・調達条件・備考の読み取り照会 | 許可。備考は質問に必要な該当行だけを外部AIへ送信する |
+| `masters.BOM` / `BOMItem`（`m_bom` / `m_bom_item`） | `parent_product_id`, `version`, `valid_from`, `valid_to`, `is_active`, `child_product_id`, `quantity`, `sourcing_type`, `supplier_id`, `process_id`, `line_id`, `lead_time_days`, `remark` | 製品、工程、ライン、仕入先 | BOM構成・有効期間・調達条件・備考の読み取り照会 | 許可。備考は質問に必要な該当行だけを外部AIへ送信する |
 | `masters.Line`（`m_line`） | `line_code`, `line_name`, `line_type`, `lead_time_days` | 工程、需要、進度、実績 | ライン別集計の軸 | 許可 |
 | `masters.Process`（`m_process`） | `process_code`, `process_name`, `line`, `management_unit` | 製品、実績、仕損、中断 | 工程別分析の軸 | 許可 |
 | `masters.CalendarDay`（`m_calendar_day`） | `target_date`, `is_working_day`, `work_minutes` | カレンダ、ライン、仕入先 | 稼働日・期間判定 | 許可 |
@@ -122,23 +122,23 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 ### 6.2 生産実績
 
-| モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
+| モデル（テーブル） | フィールド名 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
 | `production.ProcessRealtimeRecord` | `timestamp`, `record_type`, `qty`, `line`, `process`, `product`, `product_code`, `operator_name` | 製品、ライン、工程、仕損 | `record_type='PRODUCTION'` の `qty` 合計を生産実績とする。仕入の入荷実績は `record_type='PURCHASE'` で保存されるため含まれない（区別前の2026年9月は `PRODUCTION` の数量の46%が仕入分だった）。品番を質問で指定した場合は `product_code` の完全一致で絞り込む | 日別・工程別・品番別の生産数。作業者別は伏字化利用 |
 | `production.LaserActual` / `LaserActualDetail`（`t_laser_actual` / `t_laser_actual_detail`） | `work_date`, `operator_action`, `detail_type`, `product_code`, `total_qty` | レーザー実績ヘッダ、品番別明細、製品、工程 | 生産実績照会のレーザータブと同じく、`operator_action='END'` かつ `detail_type='COMPONENT'` の `total_qty` を品番別生産数とする。START・PAUSE・未終了の明細は含めない | 品番指定時にレーザー実績があれば、`ProcessRealtimeRecord` と合算せずレーザー実績を正規根拠にする |
-| `production.LineRealtimeRecord` | ライン、工程、製品、数量、記録時刻 | ライン、工程、製品 | ライン実績として登録された数量。ProcessRealtimeRecordとの二重集計を禁止 | 定義差分確認後に限定利用 |
-| `production.ProductionOrder` / `ProcessActual` | 製造指示、工程実績 | 製品、工程、ルーティング | 指示・実績の意味を個別仕様で確認する | 区分C。将来の指示対実績分析候補 |
+| `production.LineRealtimeRecord` | `line`, `product`, `product_code`, `product_name`, `timestamp`, `record_type`, `qty`, `equipment_state` | ライン、工程、製品 | ライン実績として登録された数量。ProcessRealtimeRecordとの二重集計を禁止 | 定義差分確認後に限定利用 |
+| `production.ProductionOrder` / `ProcessActual` | `order_no`, `product`, `routing`, `line`, `order_qty`, `scheduled_start_date`, `scheduled_end_date`, `status`, `production_order`, `routing_step`, `process`, `completed_qty`, `actual_duration_min`, `completed_at` | 製品、工程、ルーティング | 指示・実績の意味を個別仕様で確認する | 区分C。将来の指示対実績分析候補 |
 
 ### 6.3 仕損・品質
 
-| モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
+| モデル（テーブル） | フィールド名 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
 | `quality.ScrapRecord`（`t_scrap_record`） | `plan_date`, `event_type`, `disposition_status`, `qty`, `return_qty`, `reason`, `occurrence_process`, `product` | ライン、工程、製品、実績 | 確定仕損は `event_type='SCRAP'` かつ `disposition_status in ('REJECTED','PARTIAL')`。正味数量は `qty - return_qty` | 理由別・工程別・期間別の正味仕損数量 |
-| `quality.ScrapRecordDetail`（`t_scrap_record_detail`） | 仕損、子品目、減算数量、補充状態 | ScrapRecord、製品、BOM | BOM展開明細。親仕損との二重合計禁止 | 区分C。部品影響分析は定義確認後 |
+| `quality.ScrapRecordDetail`（`t_scrap_record_detail`） | `scrap_record`, `product`, `product_code`, `product_name`, `process_id`, `line_id`, `supplier_id`, `sourcing_type`, `deduct_qty`, `is_replenished`, `replenished_at`, `is_backlog_processed` | ScrapRecord、製品、BOM | BOM展開明細。親仕損との二重合計禁止 | 区分C。部品影響分析は定義確認後 |
 
 ### 6.4 中断・トラブル
 
-| モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
+| モデル（テーブル） | フィールド名 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
 | `production.BrakeLineRecord`（`brake_line_record`） | `plan_date`, `process`, `product`, `product_code`, `operator_action`, `operator_action_reason`, `qty` | 工程、製品、ライン | 生産数は`operator_action in ('END','PAUSE')`の`qty`合計（作業区間ごとに終了・中断時点の加工数を登録するため重複しない。生産実績照会・`LineBacklog.actual_qty`と同じ定義）。中断・強制終了は`operator_action in ('PAUSE','TEMP_END')`のレコード件数 | 品番指定時のブレーキ生産数、理由別・工程別の中断件数 |
 
@@ -146,10 +146,10 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 ### 6.5 残業
 
-| モデル（テーブル） | 主な項目 | 関連 | 数値定義 | AI利用 |
+| モデル（テーブル） | フィールド名 | 関連 | 数値定義 | AI利用 |
 |---|---|---|---|---|
 | `overtime.OvertimeApplication`（`t_overtime_application`） | `work_date`, `application_type`, `hours`, `midnight_hours`, `team`, `status`, `applicant` | 組織、ユーザー、承認ログ | `application_type='overtime'` かつ提出済み以降の対象状態について、`hours + midnight_hours` を残業申請時間として合算 | グループ別・期間別集計。個人別は伏字化利用 |
-| `overtime.OvertimeApprovalLog` | 申請、承認者、役割、状態、コメント | 残業申請、ユーザー | 承認経過の履歴 | 区分B。コメント・氏名は伏字化必須 |
+| `overtime.OvertimeApprovalLog` | `application`, `approver`, `role`, `status`, `comment`, `acted_at` | 残業申請、ユーザー | 承認経過の履歴 | 区分B。コメント・氏名は伏字化必須 |
 
 残業申請時間は打刻実績ではない。個人間比較・順位付けは禁止する。
 
@@ -178,7 +178,7 @@ AIが利用するDBアクセスは、規約に登録したDjango ORMの読み取
 
 ### 6.6 受注（ルーティング未設定の注文品）
 
-| モデル（テーブル） | 主な項目 | 有効条件 | AI利用 |
+| モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |
 |---|---|---|---|
 | `orders.OrderLine`（`t_order_line`） | `product_code`, `quantity`, `due_date`, `order_type`, `product`, `order` | `order.status='OPEN'`、製品あり、有効な`Routing`なし、画面既定では納期が90日前以降 | 「ルーティング未設定の注文品」画面と同じく品番ごとに1件へ絞った件数・品番・納期を参照する |
 | `masters.Routing` | `product`, `is_active` | 同一製品に`is_active=True`が1件でもあれば対象外 | 未設定判定だけに利用する |
