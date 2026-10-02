@@ -185,6 +185,10 @@ router.beforeEach(async (to) => {
   if (to.meta?.adminOnly && !user.is_staff && !user.is_superuser) {
     return { path: "/" };
   }
+  // 複数機能を持つ画面は、いずれかの明示的な権限で入口を許可する。
+  if (Array.isArray(to.meta?.anyResources) && !to.meta.anyResources.some(item => hasPermission(user, item, level))) {
+    return { path: "/" };
+  }
   if (!canAccessRouteResource(user, resource, level, fallbackResource, fallbackToParent, allowChildResources)) {
     return { path: "/" };
   }

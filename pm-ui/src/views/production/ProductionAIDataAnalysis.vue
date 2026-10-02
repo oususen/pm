@@ -19,6 +19,7 @@
           </div>
         </div>
       </div>
+      <button v-if="canAnalyze" class="new-chat" type="button" @click="requestAnalysis">分析する</button>
       <button class="new-chat" @click="clearChat">＋ <span>新しいチャット</span></button>
     </header>
 
@@ -132,6 +133,13 @@ import api from '@/api/client'
 import { hasPermission } from '@/router'
 import { downloadMarkdownTablesAsExcel, hasMarkdownTable } from '@/utils/aiMarkdownTableExcel'
 import { useVoiceInput } from '@/composables/useVoiceInput'
+
+defineProps({ canAnalyze: { type: Boolean, default: false } })
+const emit = defineEmits(['analyze'])
+function requestAnalysis() {
+  const lastQuestion = [...messages.value].reverse().find(message => message.role === 'user')
+  emit('analyze', { question: draft.value.trim() || lastQuestion?.content || '', screenContext: screenContext.value })
+}
 
 const provider = ref('openrouter')
 const route = useRoute()

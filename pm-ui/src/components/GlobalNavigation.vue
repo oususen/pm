@@ -240,8 +240,8 @@ const goBack = () => {
 }
 
 const mainTabs = computed(() => [
-  { id: 'ai', label: 'AI', link: '/ai/chat', resource: 'ai' },
-  { id: 'ocr', label: 'OCR', link: '/ocr', resource: 'ai' },
+  { id: 'ai', label: 'AI', link: '/ai/chat', anyResources: ['ai.chat', 'ai.analysis'] },
+  { id: 'ocr', label: 'OCR', link: '/ocr', resource: 'ocr', explicitPermission: true },
   { id: 'orders', label: t('nav.tabs.orders'), link: '/orders/menu', resource: 'orders' },
   { id: 'production', label: t('nav.tabs.production'), link: '/production/menu', resource: 'production' },
   { id: 'purchase', label: t('nav.tabs.purchase'), link: '/purchase/menu', resource: 'purchase' },
@@ -278,7 +278,11 @@ const canShowTabByPermission = (user, resource) => {
 const displayTabs = computed(() => {
   const user = authState.user
   // 権限がないタブを非表示
-  let tabs = mainTabs.value.filter((tab) => canShowTabByPermission(user, tab.resource))
+  let tabs = mainTabs.value.filter((tab) => {
+    if (tab.anyResources) return tab.anyResources.some(resource => hasPermission(user, resource, 'view'))
+    if (tab.explicitPermission) return hasPermission(user, tab.resource, 'view')
+    return canShowTabByPermission(user, tab.resource)
+  })
   // スマホでは生産・マニュアルのみ表示（権限がある場合）
   if (props.isMobile) {
     tabs = tabs.filter(tab => ['production', 'manual'].includes(tab.id))
@@ -632,6 +636,10 @@ const loadSwitchableUsers = async () => {
 }
 
 const moveAfterUserSwitch = async (nextUser) => {
+  if (Array.isArray(route.meta?.anyResources) && !route.meta.anyResources.some(resource => hasPermission(nextUser, resource, 'view'))) {
+    await router.replace('/')
+    return
+  }
   const resource = typeof route.meta?.resource === 'string' ? route.meta.resource : ''
   if (resource && !hasPermission(nextUser, resource, 'view')) {
     await router.replace('/')
