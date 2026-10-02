@@ -92,9 +92,23 @@ AI生成Pythonは、専用Docker実行コンテナが提供する読み取り専
 
 ### 4.5 分析案の一時保持
 
-テンプレートとして保存する前の分析案・承認内容は、PM本体DBへ保存しない。複数のgunicornワーカーで承認APIと実行APIが分かれても継続できるよう、Redis等の共有キャッシュへ分析案ID単位で保存する。
+テンプレートとして保存する前の分析案・承認内容は、PM本体DBへ保存しない。複数のgunicornワーカーで承認APIと実行APIが分かれても継続できるよう、`pm_internal`内だけに公開するRedisコンテナへ分析案ID単位で保存する。Redisは外部ポート・永続ボリュームを持たず、分析案の永続保存先にはしない。
 
 キャッシュの有効期限は設定値で管理する。期限値は実装前にBOSSが承認し、期限切れの分析案は実行できない。利用者・分析目的・承認済みビュー・フィールド・条件を照合してから実行する。
+
+### 4.6 実行コンテナとの受渡し
+
+Python実行用に、`analysis-runner`サービスをDocker Composeへ追加する。Djangoは`analysis_execution_service.py`から、`pm_internal`内の内部HTTPだけで実行依頼を送る。`docker exec`、Windows上でのPython直接実行、外部公開APIは使用しない。
+
+1. Djangoが、利用者承認済みのビュー・フィールド・条件を検証する。
+2. Djangoだけが`pm_ai_reader`で対象ビューを取得する。
+3. Djangoが取得結果と生成Pythonをジョブ単位で`analysis-runner`へ送る。
+4. `analysis-runner`が一時DuckDBへ承認済みビューのスナップショットを投入し、生成Pythonを非rootの子プロセスで実行する。
+5. `analysis-runner`が結果・グラフ・報告書をDjangoへ返し、Djangoが画面へ返却する。
+
+生成Pythonが使う`load_view('v_ai_...')`は、MySQLへ直接接続する関数ではない。Djangoが承認済みビューから取得済みの一時DuckDBスナップショットを読み出す関数とする。生成Pythonには、MySQL・Redis・内部HTTPの認証情報を渡さない。
+
+`analysis-runner`はPMソースコード、ホストの任意フォルダ、Dockerソケットをマウントしない。実行用子プロセスには外部ネットワークを与えず、ジョブごとの一時領域だけを操作可能にする。実行時間・CPU・メモリの上限値は、実データ量の確認後にBOSSが承認して設定する。
 
 ## 5. 分析テンプレート
 

@@ -77,7 +77,7 @@
 | `POST /api/ai/analysis/templates/` | 利用者承認済みのSQL・Pythonを保存する |
 | `PATCH /api/ai/analysis/templates/{id}/` | システム管理者が確認・却下・置換関係を更新する |
 
-分析案の一時状態は、テンプレートとして保存するまでPM本体DBへ保存しない。複数のgunicornワーカーで承認・実行を継続できるよう、Redis等の共有キャッシュに分析案ID単位で有効期限付き保存する。有効期限の設定値は実装前にBOSSが承認する。
+分析案の一時状態は、テンプレートとして保存するまでPM本体DBへ保存しない。複数のgunicornワーカーで承認・実行を継続できるよう、`pm_internal`内だけに公開するRedisコンテナへ分析案ID単位で有効期限付き保存する。Redisは外部ポート・永続ボリュームを持たない。有効期限の設定値は実装前にBOSSが承認する。
 
 ### 5.2 サービス分割
 
@@ -91,6 +91,16 @@
 | `analysis_template_service.py` | テンプレート保存、状態遷移、置換関係、管理者通知 |
 
 HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない。
+
+### 5.3 実行コンテナの実装単位
+
+- Docker Composeへ`redis`と`analysis-runner`を追加する。どちらも`pm_internal`だけに接続し、外部ポートを公開しない。
+- Djangoは`analysis_execution_service.py`から`analysis-runner`へ内部HTTPでジョブを送る。`docker exec`は使用しない。
+- `analysis_data_service.py`が、承認済みの`v_ai_...`だけを`pm_ai_reader`で取得する。取得結果はジョブ単位で`analysis-runner`へ渡し、runnerが一時DuckDBへ投入する。
+- 生成Pythonの`load_view()`は、runner内の一時DuckDBに投入済みのビュー・スナップショットだけを読む。MySQLへの直接接続ではない。
+- runnerの生成Python子プロセスには、MySQL・Redis・内部HTTPの接続情報を渡さない。PMソースコード、ホストの任意フォルダ、Dockerソケットをマウントしない。
+- Windows開発環境もDocker DesktopのComposeで`analysis-runner`を起動する。Windows上でPythonを直接実行する経路は作らない。
+- 実行時間・CPU・メモリの上限値は、実データ量を確認後にBOSSが承認して設定する。
 
 ### 5.3 データと権限
 
@@ -135,7 +145,7 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 
 1. 既存のAI用ビューを正常化し、`pm_ai_reader`のビュー限定権限を確認する。
 2. `AIAnalysisTemplate`モデルとAIアプリのマイグレーション`0022`、テンプレートAPI、管理者通知、`ai.analysis`権限を追加する。
-3. 共有キャッシュによる分析案の有効期限付き保持と、専用Docker実行コンテナを追加する。一時DuckDBの削除処理をテストする。
+3. `pm_internal`限定のRedis共有キャッシュと、内部HTTPで呼び出す`analysis-runner`コンテナを追加する。一時DuckDBの削除処理をテストする。
 4. 分析APIを追加し、承認前・期限切れの分析案は実行できないことをテストする。
 5. `AIAnalysis.vue`と`/ai/analysis`を追加する。
 6. 既存`AIChat.vue`・`AIChatDrawer.vue`へ分析画面の導線だけを追加する。
