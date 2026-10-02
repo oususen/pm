@@ -33,6 +33,7 @@
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'detail' }" @click="activeTab = 'detail'">詳細</button>
       <button class="tab-btn" :class="{ active: activeTab === 'summary' }" @click="activeTab = 'summary'">集計</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'dailyOvertime' }" @click="activeTab = 'dailyOvertime'">日別残業</button>
       <button class="tab-btn" :class="{ active: activeTab === 'monthly' }" @click="activeTab = 'monthly'">月別</button>
     </div>
 
@@ -148,6 +149,47 @@
                   {{ summaryColTotal(d) || '—' }}
                 </td>
                 <td class="num-cell total-col">{{ totals.workH }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </template>
+
+      <!-- 日別残業タブ（残業＋休日出勤＝所定外(H)を氏名×日付で表示） -->
+      <template v-if="activeTab === 'dailyOvertime'">
+        <div class="summary-bar">
+          <span>{{ summaryNames.length }}名</span>
+          <span class="summary-right">
+            <span class="summary-total">所定外(残業＋休日出勤)合計: {{ overtimeGridTotal }}H</span>
+            <button class="btn btn-excel" @click="exportExcel">Excel出力</button>
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="stats-table summary-table">
+            <thead>
+              <tr>
+                <th class="name-header">氏名</th>
+                <th v-for="d in summaryDates" :key="d" class="date-header">{{ formatDateShort(d) }}</th>
+                <th class="total-header">合計</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="name in summaryNames" :key="name">
+                <td class="name-cell">{{ name }}</td>
+                <td
+                  v-for="d in summaryDates"
+                  :key="d"
+                  class="num-cell"
+                  :class="{ highlight: overtimeGrid[name]?.[d] > 0, 'cell-empty': !(overtimeGrid[name]?.[d] > 0) }"
+                >{{ overtimeGrid[name]?.[d] > 0 ? overtimeGrid[name][d] : '—' }}</td>
+                <td class="num-cell total-col">{{ overtimeRowTotal(name) || '—' }}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td class="total-label">合計</td>
+                <td v-for="d in summaryDates" :key="d" class="num-cell work">{{ overtimeColTotal(d) || '—' }}</td>
+                <td class="num-cell total-col">{{ overtimeGridTotal || '—' }}</td>
               </tr>
             </tfoot>
           </table>
@@ -786,6 +828,33 @@ const monthlyGrid = computed(() => {
   return grid
 })
 
+// overtimeGrid[name][date] = 所定外(H) = 残業(H) + 休日出勤(H)
+const overtimeGrid = computed(() => {
+  const grid = {}
+  for (const row of filteredRows.value) {
+    const h = Number(row.overtimeH || 0) + Number(row.holidayH || 0)
+    if (!h) continue
+    if (!grid[row.name]) grid[row.name] = {}
+    grid[row.name][row.date] = Math.round(((grid[row.name][row.date] || 0) + h) * 10) / 10
+  }
+  return grid
+})
+
+function overtimeRowTotal(name) {
+  const total = Object.values(overtimeGrid.value[name] || {}).reduce((s, v) => s + v, 0)
+  return Math.round(total * 10) / 10
+}
+
+function overtimeColTotal(date) {
+  let total = 0
+  for (const name of summaryNames.value) total += overtimeGrid.value[name]?.[date] || 0
+  return Math.round(total * 10) / 10
+}
+
+const overtimeGridTotal = computed(() =>
+  Math.round(summaryNames.value.reduce((s, name) => s + overtimeRowTotal(name), 0) * 10) / 10
+)
+
 function getSummaryDisplay(cell) {
   if (!cell) return '—'
   if (cell.label) return cell.label  // 「半休」「有給」はラベル優先
@@ -1292,10 +1361,52 @@ function isOvertimeAlertValue(value) {
 async function exportExcel() {
   const ExcelJS = (await import('exceljs')).default
   const isMonthlyTab = activeTab.value === 'monthly'
+  const isDailyOvertimeTab = activeTab.value === 'dailyOvertime'
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet(isMonthlyTab ? '月別労働時間統計' : '労働時間統計')
+  const sheet = workbook.addWorksheet(isMonthlyTab ? '月別労働時間統計' : (isDailyOvertimeTab ? '日別残業' : '労働時間統計'))
 
-  if (isMonthlyTab) {
+  if (isDailyOvertimeTab) {
+    const dates = summaryDates.value
+    const lastCol = dates.length + 2
+    sheet.mergeCells(1, 1, 1, lastCol)
+    const titleCell = sheet.getCell(1, 1)
+    titleCell.value = '労働時間統計（日別残業：残業＋休日出勤）'
+    styleCell(titleCell, { bold: true, align: 'left', bg: EXCEL_THEME.titleFill, color: EXCEL_THEME.titleFont })
+
+    addMetaRow(sheet, 2, '期間', formatDateRangeLabel(), lastCol)
+    addMetaRow(sheet, 3, '抽出条件', `班:${filterTeam.value || '全班'} / グループ:${filterGroup.value || '全グループ'} / 氏名:${filterName.value || '全員'} / 有給:${filterPaidLeave.value === 'any' ? '有給あり' : filterPaidLeave.value === 'none' ? '有給なし' : '全て'}`, lastCol)
+    addMetaRow(sheet, 4, '集計', `所定外(残業＋休日出勤)合計 ${overtimeGridTotal.value}H`, lastCol)
+
+    sheet.addRow(['氏名', ...dates.map(formatDateShort), '合計'])
+    for (let c = 1; c <= lastCol; c += 1) {
+      styleCell(sheet.getCell(5, c), { bold: true, bg: c === lastCol ? EXCEL_THEME.totalFill : EXCEL_THEME.headerFill })
+    }
+
+    let rowIndex = 6
+    for (const name of summaryNames.value) {
+      sheet.addRow([name, ...dates.map((d) => overtimeGrid.value[name]?.[d] || ''), overtimeRowTotal(name) || ''])
+      styleCell(sheet.getCell(rowIndex, 1), { bold: true, align: 'left' })
+      for (let c = 2; c <= lastCol; c += 1) {
+        styleCell(sheet.getCell(rowIndex, c), {
+          align: 'right',
+          bg: c === lastCol ? 'F7FBF7' : null,
+          numFmt: '0.0',
+        })
+      }
+      rowIndex += 1
+    }
+
+    sheet.addRow(['合計', ...dates.map((d) => overtimeColTotal(d) || ''), overtimeGridTotal.value || ''])
+    for (let c = 1; c <= lastCol; c += 1) {
+      styleCell(sheet.getCell(rowIndex, c), {
+        bold: true,
+        align: c === 1 ? 'left' : 'right',
+        bg: EXCEL_THEME.totalFill,
+        numFmt: c === 1 ? null : '0.0',
+      })
+    }
+    sheet.columns = [{ width: 20 }, ...dates.map(() => ({ width: 8 })), { width: 10 }]
+  } else if (isMonthlyTab) {
     const monthlyMetricLastCol = 1 + (monthlyColumns.value.length * 5)
     const lastCol = monthlyMetricLastCol + 6
     sheet.mergeCells(1, 1, 1, lastCol)
@@ -1479,7 +1590,9 @@ async function exportExcel() {
   setFrozenView(sheet)
   const filename = isMonthlyTab
     ? `労働時間統計_月別_${monthFrom.value}_${monthTo.value}.xlsx`
-    : `労働時間統計_${monthFrom.value}_${monthTo.value}.xlsx`
+    : (isDailyOvertimeTab
+      ? `労働時間統計_日別残業_${monthFrom.value}_${monthTo.value}.xlsx`
+      : `労働時間統計_${monthFrom.value}_${monthTo.value}.xlsx`)
   await saveWorkbook(workbook, filename)
 }
 
