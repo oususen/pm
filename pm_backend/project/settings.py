@@ -116,6 +116,9 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# 未保存の分析案は共有Redisだけへ保持し、未設定時に代替先へ保存しない。
+AI_ANALYSIS_REDIS_URL = os.getenv('AI_ANALYSIS_REDIS_URL', '').strip()
+
 AI_READER_DB_OPTIONS = {
     'charset': 'utf8mb4',
     'init_command': "SET sql_mode='STRICT_TRANS_TABLES', time_zone='+09:00'",

@@ -16,9 +16,52 @@ from ai.config.service import get_data_policy
 from ai.models import AIConversation
 from ai.serializers import AIConversationListSerializer, AIConversationSerializer
 from ai.services.chat_service import AIChatAPIView, _has_resource_permission
+from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore, public_plan
+from ai.services.analysis_planning_service import approve_plan, create_plan, planning_options, preview_plan
 from notifications.transcription import AudioTooLongError, transcribe_audio_file
 
 logger = logging.getLogger('production')
+
+
+class AIAnalysisOptionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(planning_options())
+
+
+class AIAnalysisPlansView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        return Response(public_plan(create_plan(request.user.pk, request.data)), status=201)
+
+
+class AIAnalysisPlanView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, plan_id):
+        return Response(public_plan(AnalysisPlanStore().get(str(plan_id), request.user.pk)))
+
+
+class AIAnalysisApproveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        if not isinstance(request.data, dict) or set(request.data) != {'revision', 'stage'}:
+            raise AnalysisError('承認する版と段階のみを指定してください。')
+        plan = approve_plan(AnalysisPlanStore(), str(plan_id), request.user.pk, request.data['revision'], request.data['stage'])
+        return Response(public_plan(plan))
+
+
+class AIAnalysisPreviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        if not isinstance(request.data, dict) or set(request.data) != {'revision'}:
+            raise AnalysisError('対象件数を確認する版のみを指定してください。')
+        plan = preview_plan(AnalysisPlanStore(), str(plan_id), request.user.pk, request.data['revision'])
+        return Response(public_plan(plan))
 
 
 def purge_expired_conversations():
@@ -113,4 +156,3 @@ class AITranscribeView(APIView):
         finally:
             os.remove(temp_path)
         return Response({'text': text})
-

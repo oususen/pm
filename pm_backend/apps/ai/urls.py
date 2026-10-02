@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from ai.views import AIChatView, AIConversationViewSet, AITranscribeView
+from ai.views import AIAnalysisApproveView, AIAnalysisOptionsView, AIAnalysisPlansView, AIAnalysisPlanView, AIAnalysisPreviewView
 from ai.config.views import AIAnalysisExecutionPolicyView, AICrossScreenAccessPolicyViewSet, AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
 
@@ -18,6 +19,11 @@ urlpatterns = [
     path('', include(router.urls)),
     path('ai/chat/', AIChatView.as_view(), name='ai-chat'),
     path('ai/transcribe/', AITranscribeView.as_view(), name='ai-transcribe'),
+    path('ai/analysis/options/', AIAnalysisOptionsView.as_view(), name='ai-analysis-options'),
+    path('ai/analysis/plans/', AIAnalysisPlansView.as_view(), name='ai-analysis-plans'),
+    path('ai/analysis/plans/<uuid:plan_id>/', AIAnalysisPlanView.as_view(), name='ai-analysis-plan'),
+    path('ai/analysis/plans/<uuid:plan_id>/approve/', AIAnalysisApproveView.as_view(), name='ai-analysis-approve'),
+    path('ai/analysis/plans/<uuid:plan_id>/data-preview/', AIAnalysisPreviewView.as_view(), name='ai-analysis-preview'),
     path('ai/settings/data-policy/', AIDataPolicyView.as_view(), name='ai-data-policy'),
     path('ai/settings/analysis-execution-policy/', AIAnalysisExecutionPolicyView.as_view(), name='ai-analysis-execution-policy'),
     path('ai/settings/sql-dictionary/', AISQLDictionaryView.as_view(), name='ai-sql-dictionary'),

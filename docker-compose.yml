@@ -22,6 +22,7 @@ services:
       - AI_DB_SSL_CA=${AI_DB_SSL_CA}
       - AI_DB_SSL_CERT=${AI_DB_SSL_CERT}
       - AI_DB_SSL_KEY=${AI_DB_SSL_KEY}
+      - AI_ANALYSIS_REDIS_URL=redis://analysis-redis:6379/0
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-pro}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -52,6 +53,16 @@ services:
     networks:
       - pm_internal
       - ts_pm_network_v2
+
+  # 未保存の分析案だけを保持する。外部ポート・永続ボリュームは設けない。
+  analysis-redis:
+    image: redis:7.4-alpine
+    restart: always
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
+    networks:
+      - pm_internal
 
   # Scheduler (APScheduler - 定時タスク実行)
   pm-scheduler:

@@ -39,6 +39,8 @@ PMの業務データをAIで分析できるようにする。AIはPM本体テー
 7. runnerのPython子プロセスを非rootで隔離し、PM本体DBの更新、外部ネットワーク、ホスト側の任意ファイル操作、MySQL・Redis・内部HTTPの接続情報へのアクセスを禁止する。時間・CPU・メモリの上限値はAI分析基盤仕様書§4.7の設定値による。
 8. 一時DuckDBの終了時削除を実装する。
 
+現時点では1〜4のうち、タブ、ローカルQwenの分析案作成、手順承認、期間付き必要データのCOUNT確認・承認、Redis共有状態管理のコード・モックテストを実装済み。実Redis・実LLMでの通し確認、追加条件・資料、外部AI対応は未完了。開発PCではRedis/Dockerが利用できず、`pm_ai_reader`の接続は認証エラー1045。DBアカウントや権限を変更せず、環境確認後に実動作を検証する。5〜8の実行コンテナ・明細取得・DuckDBは未着手。
+
 ### 第3段階：テンプレートと承認
 
 1. AIアプリのマイグレーション`0022`は、分析実行設定`ai_analysis_execution_policy`と初期値1行の追加だけに使用する。テンプレート`ai_analysis_template`、通知履歴`ai_analysis_template_notification`、実行履歴`ai_analysis_run`は後続の`0023`で追加する。

@@ -208,6 +208,13 @@ export default {
     status(params) { return client.get('/ai/chat/', { params }) },
     transcribe(formData) { return client.post('/ai/transcribe/', formData) },
   },
+  aiAnalysis: {
+    options() { return client.get('/ai/analysis/options/') },
+    createPlan(data) { return client.post('/ai/analysis/plans/', data) },
+    getPlan(id) { return client.get(`/ai/analysis/plans/${id}/`) },
+    approve(id, data) { return client.post(`/ai/analysis/plans/${id}/approve/`, data) },
+    preview(id, data) { return client.post(`/ai/analysis/plans/${id}/data-preview/`, data) },
+  },
   aiConversations: {
     list(params) { return client.get('/ai/conversations/', { params }) },
     get(id) { return client.get(`/ai/conversations/${id}/`) },
