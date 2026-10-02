@@ -104,9 +104,34 @@ def _cross_screen_target_from_question(question, screen_context):
             return 'purchase'
     if source == 'quality' and re.search(r'生産数|生産実績|出来高', text):
         return 'production'
-    if source == 'overtime' and re.search(r'生産数|生産実績|出来高', text):
+    if source == 'overtime' and re.search(r'生産数|生産実績|出来高|ブレーキ|工程実績|作業者|作業員|加工数', text):
         return 'production'
     return None
+
+
+def _unavailable_data_reason(question):
+    """正規データの結び付けが未定義な質問を、推測せず理由付きで終了する。"""
+    text = str(question or '')
+    if 'ブレーキ' in text and '残業' in text and re.search(r'作業者|作業員|個人別|日別', text):
+        return 'ブレーキ工程の作業者を残業申請の申請者へ結び付ける正規データが未定義のため、個人別・日別残業を集計できません。'
+    if '残業' in text and re.search(r'工程|ライン|作業者|作業員', text):
+        return '工程と残業申請対象者を結び付ける正規データがないため、推測した回答はできません。'
+    return ''
+
+
+def _grounding_unavailable_answer(reason=''):
+    detail = reason or '実データを取得する読み取り専用ツールを実行できなかったため、回答できません。'
+    return f'この質問には実データの確認が必要です。{detail} 推測した数値・氏名・仮の一覧は表示しません。'
+
+
+def _unusable_model_answer_reason(answer):
+    """利用者へ出してはいけない、モデル内部文や未取得データの見せかけを検出する。"""
+    text = str(answer or '')
+    if '<channel|>' in text or text.lstrip().startswith('thought'):
+        return 'AIの内部処理文が混入したため、回答を表示できません。'
+    if 'データ取得中' in text or re.search(r'\|[^\n]*\|\s*-\s*\|\s*-\s*\|', text):
+        return '未取得のデータを一覧として表示しようとしたため、回答を表示できません。'
+    return ''
 
 
 def _cross_screen_response(policy, reason=''):
@@ -161,6 +186,10 @@ PRODUCT_CODE_LOOSE_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z](?:[A-Za-z0-9
 PRODUCT_CODE_JA_SUFFIX_PATTERN = re.compile(r'(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{4,49})\s*の\s*([0-9]{1,3}[A-Za-z]?)(?![A-Za-z0-9])')
 REDACTION_PLACEHOLDER_PATTERN = re.compile(r'(?:実績作業者|作業者|得意先|仕入先|照会情報)\d+')
 FORCE_TOOL_CALL_TERMS = ('グラフ', 'ぐらふ', 'チャート', '図表', 'もう一回', 'もう一度', '再集計', '再度', '再表示')
+GROUNDING_TOOL_CODES = frozenset({
+    'count_products', 'get_business_data', 'get_missing_routing_orders', 'execute_readonly_sql',
+    'get_my_overtime', 'get_personal_overtime_threshold', 'get_individual_overtime',
+})
 DATA_OPTION_SELECTIONS = {
     '1': {'intent': 'production', 'label': '生産数の日別推移', 'terms': ('生産数', '日別推移')},
     '2': {'intent': 'scrap', 'label': '仕損の理由別集計', 'terms': ('仕損', '理由別')},
@@ -1134,6 +1163,7 @@ def _deepseek_agent_chat(
             '件数を確認してください。用語がどの項目に対応するか自分で判断できない場合は、推測せず'
             '確認した内訳を提示して利用者に確認してください。\n'
             '生産数・仕損・中断・残業の数値を答えるときは、必ずget_business_dataを呼び、ツール結果にない数値を作らないでください。\n'
+            '実データを取得できない場合は、できない理由だけを簡潔に答えてください。内部処理文、thought、取得中、仮の数値・氏名・表は出してはいけません。\n'
             + personal_overtime_instruction +
             'tool結果のsourceは画面へ根拠として表示されます。回答では結論を先に短く伝え、必要なら日別傾向を説明してください。\n'
             'グラフはツールを呼んだ回だけ画面側に自動描画されます。ツールを呼ばずに記憶だけで答えた回には'
@@ -1174,6 +1204,9 @@ def _deepseek_agent_chat(
     chart = None
     excel_export = False
     payload = {}
+    requires_grounded_data = _needs_database(question, history)
+    has_grounded_data = False
+    last_data_error = ''
     # そのターンで実際にDeepSeekへ提示された一時ID(＝根拠あり)だけを復元対象にする。
     # ツールを呼ばず推測した一時IDが実在社員名に化けるのを防ぐ。
     grounded_placeholders = set()
@@ -1203,7 +1236,9 @@ def _deepseek_agent_chat(
                 body['reasoning'] = {'enabled': True}
             # 「グラフ」「もう一回」等は、記憶だけで答えて実データが伴わない誤答が多いため、
             # 最初の1回だけツール呼び出しを必須化する。どのツールを呼ぶかはDeepSeekの判断のまま。
-            if attempt == 0 and available_tools and any(term in question for term in FORCE_TOOL_CALL_TERMS):
+            if attempt == 0 and available_tools and (
+                requires_grounded_data or any(term in question for term in FORCE_TOOL_CALL_TERMS)
+            ):
                 body['tool_choice'] = 'required'
             request = Request(
                 f'{base_url}/chat/completions',
@@ -1217,6 +1252,12 @@ def _deepseek_agent_chat(
             message = choice.get('message') or {}
             tool_calls = message.get('tool_calls') or []
             if not tool_calls:
+                if requires_grounded_data and not has_grounded_data:
+                    return _grounding_unavailable_answer(last_data_error), {
+                        'provider': provider_key, 'model': payload.get('model', model or default_model),
+                        'duration_seconds': None, 'output_tokens': (payload.get('usage') or {}).get('completion_tokens'),
+                        'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
+                    }, 'データ取得未完了', None, None, False
                 answer = str(message.get('content') or '').strip()
                 if redactor:
                     used_placeholders = set(REDACTION_PLACEHOLDER_PATTERN.findall(answer))
@@ -1226,6 +1267,13 @@ def _deepseek_agent_chat(
                             '氏名を確認のうえ、もう一度お尋ねください。'
                         )
                     answer = redactor.restore_text(answer)
+                unusable_reason = _unusable_model_answer_reason(answer)
+                if unusable_reason:
+                    return _grounding_unavailable_answer(unusable_reason), {
+                        'provider': provider_key, 'model': payload.get('model', model or default_model),
+                        'duration_seconds': None, 'output_tokens': (payload.get('usage') or {}).get('completion_tokens'),
+                        'done_reason': choice.get('finish_reason', ''), 'truncated': choice.get('finish_reason') == 'length',
+                    }, '回答の検証失敗', None, None, False
                 if not answer:
                     raise LocalAIError(f'{provider_label} APIから回答が返りませんでした。時間をおいて再度お試しください。')
                 usage = payload.get('usage') or {}
@@ -1290,6 +1338,10 @@ def _deepseek_agent_chat(
                     source = result.get('source', source)
                     period = tool_period
                     chart = tool_chart
+                    if function.get('name') in GROUNDING_TOOL_CODES:
+                        has_grounded_data = True
+                elif function.get('name') in GROUNDING_TOOL_CODES:
+                    last_data_error = str(result.get('detail') or '読み取り専用データを取得できませんでした。')
                 messages.append({
                     'role': 'tool', 'tool_call_id': tool_call.get('id', ''),
                     'content': json.dumps(limit_external_result_rows(result), ensure_ascii=False),
@@ -2069,6 +2121,13 @@ class AIChatAPIView(APIView):
                     'source': '横断参照の送信方針',
                 })
             return Response(_cross_screen_response(cross_policy))
+        unavailable_data_reason = _unavailable_data_reason(question)
+        if unavailable_data_reason:
+            return Response({
+                'answer': _grounding_unavailable_answer(unavailable_data_reason),
+                'analysis': '', 'source': 'データ定義の確認待ち', 'period': None, 'chart': None, 'document': '',
+                'excel_export': False, 'provider': 'database', 'model': '', 'inference': None,
+            })
         raw_history = request.data.get('history') or []
         raw_document_ids = request.data.get('knowledge_document_ids') or []
         if not isinstance(raw_document_ids, list):
@@ -2369,6 +2428,14 @@ class AIChatAPIView(APIView):
             ], provider, num_predict=512, timeout=180, include_metadata=True, model=model, redactor=redactor)
         except LocalAIError as exc:
             return Response({'detail': str(exc)}, status=503)
+
+        unusable_reason = _unusable_model_answer_reason(answer)
+        if unusable_reason:
+            return Response({
+                'answer': _grounding_unavailable_answer(unusable_reason),
+                'analysis': '', 'source': '回答の検証失敗', 'period': None, 'chart': None, 'document': '',
+                'excel_export': False, 'provider': 'database', 'model': '', 'inference': None,
+            })
 
         document = ''
         if plan.get('document'):
