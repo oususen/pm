@@ -1,6 +1,6 @@
 <template>
   <div class="master-menu">
-    <h2 class="page-title">設変新規管理メニュー</h2>
+    <h2 class="page-title">設変メニュー</h2>
 
     <p v-if="!canView" class="helper-text">この画面を閲覧する権限がありません。</p>
 

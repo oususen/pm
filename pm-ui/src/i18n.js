@@ -86,7 +86,7 @@ const MESSAGES = {
     'nav.tabs.notifications': '通信',
     'nav.tabs.masters': 'マスタ',
     'nav.tabs.settings': '設定',
-    'nav.tabs.engineeringChange': '設変新規管理',
+    'nav.tabs.engineeringChange': '設変',
     'nav.tabs.overtime': '勤務',
     'nav.notifications': '通知',
     'nav.settings': '設定',
