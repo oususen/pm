@@ -229,6 +229,8 @@ export default {
     updateTool(id, data) { return client.patch(`/ai/settings/tools/${id}/`, data) },
     dataPolicy() { return client.get('/ai/settings/data-policy/') },
     updateDataPolicy(data) { return client.put('/ai/settings/data-policy/', data) },
+    analysisExecutionPolicy() { return client.get('/ai/settings/analysis-execution-policy/') },
+    updateAnalysisExecutionPolicy(data) { return client.put('/ai/settings/analysis-execution-policy/', data) },
     sqlDictionary() { return client.get('/ai/settings/sql-dictionary/') },
     knowledgeSources() { return client.get('/ai/settings/knowledge-sources/') },
     updateKnowledgeSource(id, data) { return client.patch(`/ai/settings/knowledge-sources/${id}/`, data) },

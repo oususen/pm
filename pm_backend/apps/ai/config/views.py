@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 
 from ai.config.models import AICrossScreenAccessPolicy, AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 from ai.config.serializers import (
+    AIAnalysisExecutionPolicySerializer,
     AIDataPolicySerializer,
     AIKnowledgeDocumentSerializer,
     AIKnowledgeSourceSerializer,
@@ -13,6 +14,7 @@ from ai.config.serializers import (
     AICrossScreenAccessPolicySerializer,
 )
 from ai.config.catalog import SCREEN_CATALOG
+from ai.config.service import get_analysis_execution_policy
 from ai.services.sql_queries import PERSONAL_SQL_COLUMNS, SCREEN_SQL_TABLES, _schema_for_table
 
 
@@ -58,6 +60,18 @@ class AIDataPolicyView(APIView):
         return Response(serializer.data)
 
     patch = put
+
+
+class AIAnalysisExecutionPolicyView(APIView):
+    """分析実行設定の取得・一括保存。編集権限は設定画面で判定する。"""
+    def get(self, request):
+        return Response(AIAnalysisExecutionPolicySerializer(get_analysis_execution_policy()).data)
+
+    def put(self, request):
+        serializer = AIAnalysisExecutionPolicySerializer(get_analysis_execution_policy(), data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class AISQLDictionaryView(APIView):

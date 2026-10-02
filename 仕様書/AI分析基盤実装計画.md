@@ -41,7 +41,7 @@ PMの業務データをAIで分析できるようにする。AIはPM本体テー
 
 ### 第3段階：テンプレートと承認
 
-1. AIアプリのマイグレーション`0022`として`ai_analysis_template`、通知履歴`ai_analysis_template_notification`、単一設定`ai_analysis_execution_policy`、実行履歴`ai_analysis_run`を追加する。
+1. AIアプリのマイグレーション`0022`は、分析実行設定`ai_analysis_execution_policy`と初期値1行の追加だけに使用する。テンプレート`ai_analysis_template`、通知履歴`ai_analysis_template_notification`、実行履歴`ai_analysis_run`は後続の`0023`で追加する。
 2. 利用者承認後に、SQL・Python・利用ビュー・分析条件・利用者・状態・版を保存する。
 3. システム管理者へ確認依頼メールを送信する。
 4. 管理者の確認・却下・却下理由の保存と、利用者へのメール・PM通知を実装する。管理者の承認・却下・訂正・置換は`settings.ai`の`can_edit`に限定する。
@@ -54,6 +54,10 @@ PMの業務データをAIで分析できるようにする。AIはPM本体テー
 3. `settings.ai / can_edit`を持つ利用者だけに編集・保存操作を表示する。
 4. 権限制御はフロントエンドUIだけで行う。APIは権限判定を追加せず、0、空欄、範囲外、指定単位に合わない値を拒否する範囲検証だけを行う。
 5. 設定値を次のrunnerジョブへ渡し、実行時間・メモリ・CPU制限とDuckDB並列度へ適用する。
+
+設定モデル・初期値・GET/PUT API・画面の5項目一括保存は実装済み。runnerへの適用は分析実行基盤の実装時に行う。
+
+開発・本番の反映には、各環境でAIアプリのマイグレーション`0022_aianalysisexecutionpolicy`を適用する。新規設定テーブルと初期値1行を追加し、既存テーブルのデータは変更しない。本番反映時は通常のデプロイ手順で`python manage.py migrate ai`を実行する。
 
 ### 第4段階：AI用ビューの拡張
 

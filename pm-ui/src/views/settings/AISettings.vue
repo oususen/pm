@@ -43,6 +43,30 @@
     </section>
 
     <section class="setting-section">
+      <h3>分析実行設定</h3>
+      <p class="section-help">分析機能の実装後、次に開始する分析から適用します。取得行数の上限を超えた場合は、対象の期間・条件を絞って再実行します。</p>
+      <form v-if="analysisExecutionPolicy" @submit.prevent="saveAnalysisExecutionPolicy">
+        <div class="policy-grid execution-policy-grid">
+          <label v-for="field in executionFields" :key="field.key" :for="`analysis-setting-${field.key}`">
+            {{ field.label }}
+            <input :id="`analysis-setting-${field.key}`" v-model.number="analysisExecutionPolicy[field.key]"
+              :disabled="!canEdit || loading || savingExecutionPolicy" type="number" required
+              :min="field.min" :max="field.max" :step="field.step"
+              :aria-invalid="Boolean(executionErrors[field.key])" :aria-describedby="`analysis-help-${field.key}`" />
+            <small :id="`analysis-help-${field.key}`">{{ field.help }}</small>
+            <small v-if="executionErrors[field.key]" class="field-error" role="alert">{{ executionErrors[field.key].join(' ') }}</small>
+          </label>
+        </div>
+        <p v-if="executionError" class="error" role="alert">{{ executionError }}</p>
+        <p v-if="executionNotice" class="notice" role="status">{{ executionNotice }}</p>
+        <button v-if="canEdit" class="reload-button execution-save" type="submit" :disabled="loading || savingExecutionPolicy">
+          {{ savingExecutionPolicy ? '保存中…' : '分析実行設定を保存' }}
+        </button>
+        <p v-else class="section-help">閲覧のみの権限です。</p>
+      </form>
+    </section>
+
+    <section class="setting-section">
       <h3>画面別に利用できるAIツール</h3>
       <p class="section-help">この一覧の有効なツールだけをAIへ提示します。任意SQLや任意テーブル検索を追加する設定ではありません。</p>
       <div v-for="group in toolGroups" :key="group.screenId" class="tool-group">
@@ -145,6 +169,18 @@ import { hasPermission } from '@/router'
 const providers = ref([])
 const tools = ref([])
 const dataPolicy = ref(null)
+const analysisExecutionPolicy = ref(null)
+const savingExecutionPolicy = ref(false)
+const executionErrors = ref({})
+const executionError = ref('')
+const executionNotice = ref('')
+const executionFields = [
+  { key: 'plan_cache_ttl_minutes', label: '分析案キャッシュ有効期限（分）', min: 5, max: 480, step: 1, help: '5〜480分・1分単位' },
+  { key: 'max_execution_seconds', label: 'Python最大実行時間（秒）', min: 30, max: 600, step: 1, help: '30〜600秒・1秒単位' },
+  { key: 'max_memory_mb', label: 'Python最大メモリ（MB）', min: 512, max: 4096, step: 128, help: '512〜4096MB・128MB単位' },
+  { key: 'max_cpu_cores', label: 'Python CPU上限（コア数）', min: 0.5, max: 2, step: 0.5, help: '0.5〜2コア・0.5コア単位' },
+  { key: 'max_fetch_rows', label: '取得行数の上限（行）', min: 1000, max: 100000, step: 1000, help: '1,000〜100,000行・1,000行単位' },
+]
 const knowledgeSources = ref([])
 const knowledgeDocuments = ref([])
 const knowledgeFileInput = ref(null)
@@ -184,12 +220,17 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse, crossScreenResponse] = await Promise.all([
+    const [providerResponse, toolResponse, policyResponse, knowledgeResponse, documentResponse, dictionaryResponse, ocrResponse, crossScreenResponse, executionPolicyResponse] = await Promise.all([
       api.aiSettings.providers(), api.aiSettings.tools(), api.aiSettings.dataPolicy(), api.aiSettings.knowledgeSources(), api.aiSettings.knowledgeDocuments(), api.aiSettings.sqlDictionary(), api.ocr.status(), api.aiSettings.crossScreenAccess(),
+      api.aiSettings.analysisExecutionPolicy(),
     ])
     providers.value = providerResponse.data
     tools.value = toolResponse.data
     dataPolicy.value = policyResponse.data
+    analysisExecutionPolicy.value = executionPolicyResponse.data
+    executionErrors.value = {}
+    executionError.value = ''
+    executionNotice.value = ''
     knowledgeSources.value = knowledgeResponse.data
     knowledgeDocuments.value = documentResponse.data
     sqlDictionary.value = dictionaryResponse.data
@@ -210,6 +251,27 @@ const saveTool = async (item) => {
 }
 const saveDataPolicy = async () => {
   try { const { data } = await api.aiSettings.updateDataPolicy(dataPolicy.value); dataPolicy.value = data; saved('データ送信設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
+}
+const saveAnalysisExecutionPolicy = async () => {
+  if (!canEdit.value || loading.value || savingExecutionPolicy.value) return
+  executionErrors.value = {}
+  executionError.value = ''
+  executionNotice.value = ''
+  savingExecutionPolicy.value = true
+  try {
+    const payload = Object.fromEntries(executionFields.map(field => [field.key, analysisExecutionPolicy.value[field.key]]))
+    const { data } = await api.aiSettings.updateAnalysisExecutionPolicy(payload)
+    analysisExecutionPolicy.value = data
+    executionNotice.value = '分析実行設定を保存しました。'
+  } catch (requestError) {
+    const response = requestError.response?.data
+    executionErrors.value = Object.fromEntries(executionFields
+      .filter(field => response?.[field.key])
+      .map(field => [field.key, [response[field.key]].flat()]))
+    executionError.value = response?.detail || '分析実行設定を保存できませんでした。入力値を確認してください。'
+  } finally {
+    savingExecutionPolicy.value = false
+  }
 }
 const saveKnowledge = async (item) => {
   try { await api.aiSettings.updateKnowledgeSource(item.id, { is_enabled: item.is_enabled }); saved('ナレッジ設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
@@ -271,4 +333,5 @@ load()
 .knowledge-actions,.knowledge-upload{display:flex;gap:10px;font-size:11px;white-space:nowrap}.knowledge-upload{margin-top:10px;align-items:center;flex-wrap:wrap}.knowledge-upload select,.knowledge-upload input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff}.delete-button{border:1px solid #f0b7ae;background:#fff;color:#b04c40;border-radius:5px;padding:3px 7px;cursor:pointer}
 .cross-screen-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.cross-screen-form select,.cross-screen-form input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff;font-size:11px}.cross-screen-form input[type=text]{min-width:280px}.cross-screen-form label{font-size:11px}
 .ocr-status{display:grid;gap:3px;margin-top:9px;padding:8px 10px;border:1px solid #b8ded3;border-radius:7px;background:#eef9f5;font-size:12px;color:#176b60}.ocr-status small{color:#5c7772}.ocr-status.unavailable{border-color:#efc7bd;background:#fff4f1;color:#ad5548}.ocr-result{white-space:pre-wrap;max-height:260px;overflow:auto;margin:10px 0 0;padding:9px;border:1px solid #e1ece9;border-radius:7px;background:#f8fbfa;font-size:12px;line-height:1.6}
+.execution-policy-grid label{display:grid;gap:4px;font-size:12px}.execution-policy-grid small{font-size:11px;color:#64748b}.execution-policy-grid .field-error{color:#ae5146}.execution-save{margin-top:10px}
 </style>

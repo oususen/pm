@@ -50,6 +50,21 @@ class AIDataPolicy(models.Model):
         verbose_name_plural = 'AIデータ送信設定'
 
 
+class AIAnalysisExecutionPolicy(models.Model):
+    """分析ジョブ開始時に適用する実行設定。初期データにより1行だけ保持する。"""
+    plan_cache_ttl_minutes = models.PositiveIntegerField(default=60, verbose_name='分析案キャッシュ有効期限（分）')
+    max_execution_seconds = models.PositiveIntegerField(default=300, verbose_name='Python最大実行時間（秒）')
+    max_memory_mb = models.PositiveIntegerField(default=2048, verbose_name='Python最大メモリ（MB）')
+    max_cpu_cores = models.DecimalField(max_digits=2, decimal_places=1, default='1.0', verbose_name='Python CPU上限（コア数）')
+    max_fetch_rows = models.PositiveIntegerField(default=100000, verbose_name='取得行数の上限（行）')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ai_analysis_execution_policy'
+        verbose_name = 'AI分析実行設定'
+        verbose_name_plural = 'AI分析実行設定'
+
+
 class AIKnowledgeSource(models.Model):
     """AI運用時に参照する、リポジトリ内ナレッジの登録情報。"""
     category = models.CharField(max_length=30, choices=KNOWLEDGE_CATEGORY_CHOICES, verbose_name='区分')

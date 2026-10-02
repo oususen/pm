@@ -1,6 +1,6 @@
 """AIチャットに適用する設定値を、固定カタログの範囲内で読み出す。"""
 from ai.config.catalog import PROVIDER_CATALOG, TOOL_CATALOG
-from ai.config.models import AICrossScreenAccessPolicy, AIDataPolicy, AIProviderConfig, AIToolPolicy
+from ai.config.models import AIAnalysisExecutionPolicy, AICrossScreenAccessPolicy, AIDataPolicy, AIProviderConfig, AIToolPolicy
 from ai.context.screen_context import screen_context_by_id
 
 
@@ -24,6 +24,11 @@ def get_provider_settings():
 def get_data_policy():
     """全体データ送信方針を返す。初期データにより必ず1件存在する。"""
     return AIDataPolicy.objects.get()
+
+
+def get_analysis_execution_policy():
+    """保存済み分析実行設定を返す。未適用時に既定値で代替しない。"""
+    return AIAnalysisExecutionPolicy.objects.get()
 
 
 def apply_tool_policy(screen_context, is_external_provider=False):

@@ -1,8 +1,10 @@
 """AI管理設定APIの入力検証。固定カタログ以外のツールは登録させない。"""
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from ai.config.catalog import PROVIDER_CATALOG, SCREEN_CATALOG, TOOL_CATALOG
-from ai.config.models import AICrossScreenAccessPolicy, AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
+from ai.config.models import AIAnalysisExecutionPolicy, AICrossScreenAccessPolicy, AIDataPolicy, AIKnowledgeDocument, AIKnowledgeSource, AIProviderConfig, AIToolPolicy
 
 
 class AIProviderConfigSerializer(serializers.ModelSerializer):
@@ -72,6 +74,40 @@ class AIDataPolicySerializer(serializers.ModelSerializer):
     def validate_max_external_result_rows(self, value):
         if not 1 <= value <= 100:
             raise serializers.ValidationError('外部送信する集計行数は1〜100件で指定してください。')
+        return value
+
+
+class AIAnalysisExecutionPolicySerializer(serializers.ModelSerializer):
+    """全5項目を必須にし、範囲と入力単位を検証してからまとめて保存する。"""
+    plan_cache_ttl_minutes = serializers.IntegerField(min_value=5, max_value=480)
+    max_execution_seconds = serializers.IntegerField(min_value=30, max_value=600)
+    max_memory_mb = serializers.IntegerField(min_value=512, max_value=4096)
+    max_cpu_cores = serializers.DecimalField(
+        max_digits=2, decimal_places=1, min_value=Decimal('0.5'), max_value=Decimal('2.0'),
+    )
+    max_fetch_rows = serializers.IntegerField(min_value=1000, max_value=100000)
+
+    class Meta:
+        model = AIAnalysisExecutionPolicy
+        fields = (
+            'id', 'plan_cache_ttl_minutes', 'max_execution_seconds', 'max_memory_mb',
+            'max_cpu_cores', 'max_fetch_rows', 'updated_at',
+        )
+        read_only_fields = ('id', 'updated_at')
+
+    def validate_max_memory_mb(self, value):
+        if value % 128:
+            raise serializers.ValidationError('最大メモリは128MB単位で指定してください。')
+        return value
+
+    def validate_max_cpu_cores(self, value):
+        if value % Decimal('0.5'):
+            raise serializers.ValidationError('CPU上限は0.5コア単位で指定してください。')
+        return value
+
+    def validate_max_fetch_rows(self, value):
+        if value % 1000:
+            raise serializers.ValidationError('取得行数の上限は1,000行単位で指定してください。')
         return value
 
 

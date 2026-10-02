@@ -9,6 +9,7 @@
 ## 2. 現状
 
 - フル画面の検索・分析タブ枠、個別の権限制御、タブ切替時の状態保持、質問文と起点画面の引継ぎを実装した。分析タブは準備中であり、分析API・DuckDB・runner・承認・保存は未実装である。
+- `/settings/ai`の分析実行設定（5項目の取得・一括保存）は実装済み。分析ジョブへの適用は実行基盤の実装時に行う。
 
 - 全画面チャットは`/ai/chat`、`pm-ui/src/views/ai/AIChat.vue`、ルート名`AIChat`で提供している。
 - 通常画面では`AIChatDrawer.vue`から同じチャット機能を開く。
@@ -113,6 +114,7 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 - 初期値は、60分、300秒、2048MB、1コア、100,000行とする。
 - 保存可能範囲と入力単位は、有効期限5〜480分（1分単位）、最大実行時間30〜600秒（1秒単位）、最大メモリ512〜4096MB（128MB単位）、CPU上限0.5〜2コア（0.5コア単位）、取得行数の上限1,000〜100,000行（1,000行単位）とする。範囲外・0・空欄は設定API側でも必ずエラーにして保存しない。
 - `settings.ai / can_edit`を持つ利用者だけに編集・保存ボタンを表示する。閲覧だけは`settings.ai / can_view`で可能とする。設定APIへ新たな権限判定は追加しない（既存のフロントエンドUI方針）。
+- 設定APIは`GET /api/ai/settings/analysis-execution-policy/`と`PUT /api/ai/settings/analysis-execution-policy/`とする。PUTでは5項目すべてを必須とし、不正な項目があれば全項目を保存せず400を返す。
 - 保存した設定は、次に開始するジョブの実行依頼へ含める。実行中のジョブは設定変更の影響を受けない。
 - runnerは受領した設定値を実行時間・メモリ・CPU制限およびDuckDB並列度へ反映する。Docker Compose側の実行可能上限を超える値は、ジョブ実行時にエラー表示し、実行しない。
 
@@ -158,7 +160,7 @@ HTTP処理は`ai/views.py`に置き、分析ロジックはViewへ置かない�
 ## 7. 実装順序
 
 1. 既存のAI用ビューを正常化し、`pm_ai_reader`のビュー限定権限を確認する。
-2. `AIAnalysisTemplate`・通知履歴`ai_analysis_template_notification`・`AIAnalysisExecutionPolicy`・実行履歴`AIAnalysisRun`をAIアプリのマイグレーション`0022`で追加し、テンプレートAPI、分析実行設定API、管理者通知、`ai.analysis`権限を追加する。
+2. `AIAnalysisExecutionPolicy`と初期値1行をAIアプリのマイグレーション`0022`で追加し、分析実行設定API・画面を実装する。`AIAnalysisTemplate`・通知履歴`ai_analysis_template_notification`・実行履歴`AIAnalysisRun`は後続の`0023`で追加し、テンプレートAPIと管理者通知を実装する。`ai.analysis`権限は追加済み。
 3. `pm_internal`限定のRedis共有キャッシュと、内部HTTPで呼び出す`analysis-runner`コンテナを追加する。一時DuckDBの削除処理をテストする。
 4. 分析APIを追加し、承認前・期限切れの分析案は実行できないことをテストする。
 5. `AIAnalysis.vue`とフル画面の検索・分析タブを追加し、タブごとの権限と状態保持を実装する。
