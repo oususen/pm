@@ -110,7 +110,7 @@
     <tr><th>AI知識基盤</th><td>Difyによる社内文書のRAG化、PostgreSQL + pgvectorによる品番・工程名等の自然言語あいまい検索。</td></tr>
     <tr><th>分析基盤</th><td>実績・仕損・設備状態・品質記録から、トラブル傾向分析と再発防止を行う。</td></tr>
     <tr><th>IoT連携</th><td>設備の稼働状態・サイクルタイム・停止要因を取得し、稼働監視・予防保全・生産効率分析を行う。</td></tr>
-    <tr><th>カメラ検査の自動化</th><td>RTX 5060 Ti 16GBで画像認識モデルを学習・検証し、検査を自動化する。</td></tr>
+    <tr><th>カメラ検査の自動化</th><td>RTX 5070 Ti 16GBで画像認識モデルを学習・検証し、検査を自動化する。</td></tr>
   </table>
 </section>
 
@@ -122,7 +122,7 @@
     <tr><th>OS</th><td>Windows 11 Pro</td></tr>
     <tr><th>CPU</th><td>Intel Core Ultra 9 285K</td></tr>
     <tr><th>メモリ</th><td>DDR5 64GB（将来128GBへ増設可能）</td></tr>
-    <tr><th>GPU</th><td>初期：NVIDIA GeForce RTX 5060 Ti 16GB（8GB版は不可）。将来、RTX 5090へ換装できる構成。</td></tr>
+    <tr><th>GPU</th><td>初期：NVIDIA GeForce RTX 5070 Ti 16GB（VRAM 16GB搭載品）。将来、RTX 5090へ換装できる構成。</td></tr>
     <tr><th>ストレージ</th><td>NVMe SSD 2TB以上</td></tr>
     <tr><th>ネットワーク</th><td>2.5GbE LAN</td></tr>
     <tr><th>保守性</th><td>ATXマザーボード、M.2スロット2基以上、DDR5メモリ4スロット、PCIe x16 1基以上、4スロット大型GPU対応ケース</td></tr>
@@ -135,13 +135,13 @@
   <table>
     <tr><th>Core Ultra 9 285K</th><td>業務アプリ、データベース、帳票作成、RAG検索、API連携を同時に実行するため。</td></tr>
     <tr><th>メモリ64GB</th><td>Docker上の業務アプリ・データベース・検索基盤を安定して同時稼働させるため。利用拡大時は128GBへ増設できる。</td></tr>
-    <tr><th>RTX 5060 Ti 16GB</th><td>カメラ検査・YOLO画像認識の推論と初期学習・検証のため。16GB VRAMで、8GB版より学習・検証に余裕がある。</td></tr>
+    <tr><th>RTX 5070 Ti 16GB</th><td>カメラ検査・YOLO画像認識の推論と初期学習・検証のため。VRAM 16GB、メモリ帯域896GB/sで、学習・検証に余裕がある。</td></tr>
     <tr><th>RTX 5090への換装余地</th><td>将来ローカルLLMや大規模な画像処理が必要になったとき、GPUのみ更新できる。PC全体の買い替えを避けられる。</td></tr>
     <tr><th>NVMe SSD 2TB</th><td>OS、アプリ、DB、社内文書、文字起こしデータ、検索インデックスを高速に扱うため。</td></tr>
     <tr><th>2.5GbE LAN</th><td>業務端末からのアクセス、バックアップ、文書登録時の通信余裕を確保するため。</td></tr>
     <tr><th>1200W電源・360mm水冷</th><td>CPUとGPUを安定稼働させ、将来のRTX 5090換装にも対応するため。</td></tr>
   </table>
-  <p class="note">LLMの文章生成は当面、外部AI APIを利用する。そのため初期GPUは5060 Ti 16GBに抑えている。</p>
+  <p class="note">LLMの文章生成は当面、外部AI APIを利用する。そのため初期GPUは5070 Ti 16GBに抑えている。</p>
 </section>
 
 <section class="slide">
