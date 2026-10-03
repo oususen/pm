@@ -23,11 +23,13 @@ MAX_RESULT_BYTES = 5 * 1024 * 1024
 MAX_TABLE_ROWS = 10_000
 MAX_LOG_BYTES = 64 * 1024
 
+CHART_KINDS = {'bar', 'line'}
 NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 COLUMN_TYPES = {'BIGINT', 'INTEGER', 'DOUBLE', 'DECIMAL(18,3)', 'VARCHAR', 'DATE', 'TIMESTAMP', 'BOOLEAN'}
 NULL_MARK = '\\N'
 OOM_EVENTS = '/sys/fs/cgroup/memory.events'
-DATA_DIR = '/tmp/data'
+CHUNK_PATH = '/tmp/chunk.csv'  # 投入中の1チャンクだけを置く一時ファイル(投入後に削除する)
+MAX_CHUNK_ROWS = 5_000  # 1チャンクの行数の上限(分割サイズ。検証用の暫定値)。これを超えるフレームは拒否する
 DB_PATH = '/tmp/job.duckdb'
 META_PATH = '/tmp/job_meta.json'
 CODE_PATH = '/tmp/user_code.py'
@@ -69,37 +71,22 @@ def read_exact(stream, size):
     return data
 
 
-def receive(stream):
+def read_frame(stream):
     """フレーム: 種別1バイト + 長さ4バイト(BE) + 本文。H=ヘッダJSON、D=データ(view番号2B + 行数4B + CSV)、E=終端。"""
-    header = None
-    rows_seen = {}
-    os.makedirs(DATA_DIR, mode=0o700, exist_ok=True)
-    while True:
-        kind = read_exact(stream, 1)
-        (length,) = struct.unpack('>I', read_exact(stream, 4))
-        if length > MAX_FRAME_BYTES:
-            raise JobFailed('frame_too_large', f'{length}バイト')
-        payload = read_exact(stream, length)
-        if kind == b'H':
-            if header is not None:
-                raise JobFailed('protocol_error', 'ヘッダが重複しています。')
-            header = json.loads(payload.decode('utf-8'))
-        elif kind == b'D':
-            if header is None:
-                raise JobFailed('protocol_error', 'ヘッダより前にデータが届きました。')
-            index, rows = struct.unpack('>HI', payload[:6])
-            if index >= len(header['views']):
-                raise JobFailed('protocol_error', 'ビュー番号が不正です。')
-            with open(f'{DATA_DIR}/{index}.csv', 'ab') as handle:
-                handle.write(payload[6:])
-            rows_seen[index] = rows_seen.get(index, 0) + rows
-        elif kind == b'E':
-            break
-        else:
-            raise JobFailed('protocol_error', '不明なフレーム種別です。')
-    if header is None:
-        raise JobFailed('protocol_error', 'ヘッダがありません。')
-    return header, rows_seen
+    kind = read_exact(stream, 1)
+    (length,) = struct.unpack('>I', read_exact(stream, 4))
+    if length > MAX_FRAME_BYTES:
+        raise JobFailed('frame_too_large', f'{length}バイト')
+    return kind, read_exact(stream, length)
+
+
+def notify_state(name):
+    """状態の切替(transfer=受信待ち、load=投入・照合、python=生成コードの実行)を、監督プロセスのstderrへ通知する。
+
+    launcherが、状態ごとの時間を積算して、各段階の期限(各段階全体の予算)を判定する。生成コードのstderrは別のパイプ。
+    """
+    sys.stderr.write(f'PMSTATE {name}\n')
+    sys.stderr.flush()
 
 
 def validate_header(header):
@@ -121,36 +108,75 @@ def validate_header(header):
             raise JobFailed('header_invalid', '一意キーが列にありません。')
 
 
-def prepare(header, rows_seen):
-    """受信件数と投入後の件数・一意キーを照合し、不一致なら失敗にする。"""
+def receive_and_load(stream):
+    """ヘッダ(H)を受け取って表を作り、データ(D)は、1チャンク受信するたびにDuckDBへ順次投入する。
+
+    本文全体は、メモリにも一時領域にも溜めない(一時領域に置くのは、投入中の1チャンクだけ)。
+    チャンクごとに、申告された行数と投入された行数を照合し、終端(E)の後に、ビューごとの総件数と一意キーを照合する。
+    1つでも合わなければ、失敗にする。
+    """
     import duckdb
 
+    notify_state('transfer')
+    kind, payload = read_frame(stream)
+    if kind != b'H':
+        raise JobFailed('protocol_error', '先頭フレームがヘッダではありません。')
+    try:
+        header = json.loads(payload.decode('utf-8'))
+    except ValueError as exc:
+        raise JobFailed('header_invalid', 'ヘッダを解析できません。') from exc
+    notify_state('load')
+    validate_header(header)
+    views = header['views']
     connection = duckdb.connect(DB_PATH, config={
         'memory_limit': f"{header['limits']['duckdb_memory_limit_mb']}MB", 'threads': header['limits']['threads'],
     })
-    loaded = {}
+    loaded = [0] * len(views)
     try:
-        for index, view in enumerate(header['views']):
-            name = view['name']
-            if rows_seen.get(index, 0) != view['expected_rows']:
-                raise JobFailed('row_count_mismatch', f'{name}: 受信{rows_seen.get(index, 0)}行 / 期待{view["expected_rows"]}行')
+        for view in views:
             columns = ', '.join(f'"{c["name"]}" {c["type"]}' for c in view['columns'])
-            connection.execute(f'CREATE TABLE "{name}" ({columns})')
-            path = f'{DATA_DIR}/{index}.csv'
-            if os.path.exists(path):
-                connection.execute(f"COPY \"{name}\" FROM '{path}' (FORMAT csv, HEADER false, NULLSTR '{NULL_MARK}')")
+            connection.execute(f'CREATE TABLE "{view["name"]}" ({columns})')
+        while True:
+            notify_state('transfer')
+            kind, payload = read_frame(stream)
+            if kind == b'E':
+                break
+            if kind != b'D':
+                raise JobFailed('protocol_error', '不明なフレーム種別です。')
+            notify_state('load')
+            if len(payload) < 6:
+                raise JobFailed('protocol_error', 'データフレームが短すぎます。')
+            index, rows = struct.unpack('>HI', payload[:6])
+            if index >= len(views):
+                raise JobFailed('protocol_error', 'ビュー番号が不正です。')
+            if rows > MAX_CHUNK_ROWS:
+                raise JobFailed('chunk_too_large', f'1チャンクは{MAX_CHUNK_ROWS}行までです({rows}行)。')
+            name = views[index]['name']
+            with open(CHUNK_PATH, 'wb') as handle:
+                handle.write(payload[6:])
+            connection.execute(f"COPY \"{name}\" FROM '{CHUNK_PATH}' (FORMAT csv, HEADER false, NULLSTR '{NULL_MARK}')")
+            os.remove(CHUNK_PATH)
             count = connection.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
-            if count != view['expected_rows']:
-                raise JobFailed('insert_count_mismatch', f'{name}: 投入{count}行 / 期待{view["expected_rows"]}行')
+            if count - loaded[index] != rows:
+                raise JobFailed('chunk_row_count_mismatch', f'{name}: 申告{rows}行 / 投入{count - loaded[index]}行')
+            loaded[index] = count
+            if count > views[index]['expected_rows']:
+                raise JobFailed('row_count_exceeded', f'{name}: 期待{views[index]["expected_rows"]}行を超えました。')
+        notify_state('load')
+        result = {}
+        for index, view in enumerate(views):
+            name = view['name']
+            if loaded[index] != view['expected_rows']:
+                raise JobFailed('row_count_mismatch', f'{name}: 受信{loaded[index]}行 / 期待{view["expected_rows"]}行')
             key = view.get('unique_key')
             if key is not None:
                 distinct = connection.execute(f'SELECT COUNT(DISTINCT "{key}") FROM "{name}"').fetchone()[0]
-                if distinct != count:
+                if distinct != loaded[index]:
                     raise JobFailed('duplicate_key', f'{name}: {key}に重複があります。')
-            loaded[name] = count
+            result[name] = loaded[index]
     finally:
         connection.close()
-    return loaded
+    return header, result
 
 
 def kill_everything_else():
@@ -223,17 +249,57 @@ def load_result():
     with open(RESULT_PATH, 'rb') as handle:
         raw = handle.read()
     try:
-        result = json.loads(raw.decode('utf-8'))
-        if not isinstance(result, dict) or set(result) != {'tables', 'charts', 'report'}:
-            raise ValueError('構造が不正です。')
-        for table in result['tables']:
-            if set(table) != {'name', 'columns', 'rows'} or len(table['rows']) > MAX_TABLE_ROWS:
-                raise ValueError('表が不正、または行数が上限を超えています。')
-            if any(len(row) != len(table['columns']) for row in table['rows']):
-                raise ValueError('表の列数が一致しません。')
+        result = json.loads(raw.decode('utf-8'), parse_constant=reject_constant)
+        validate_result(result)
     except (ValueError, TypeError, KeyError) as exc:
         raise JobFailed('result_invalid', str(exc)) from exc
     return raw
+
+
+def reject_constant(name):
+    """NaN・Infinityは、標準のJSONではなく、画面で扱えないため拒否する。"""
+    raise ValueError(f'JSONにない値です: {name}')
+
+
+def is_scalar(value):
+    return value is None or isinstance(value, (bool, int, float, str))
+
+
+def validate_result(result):
+    """結果の型を、表・グラフ・報告書のすべてについて厳密に検証する。1つでも不正なら、結果全体を採用しない。"""
+    if type(result) is not dict or set(result) != {'tables', 'charts', 'report'}:
+        raise ValueError('結果の構造が不正です。')
+    if type(result['tables']) is not list or type(result['charts']) is not list:
+        raise ValueError('tablesとchartsは配列にしてください。')
+    if result['report'] is not None and type(result['report']) is not str:
+        raise ValueError('reportは文字列またはnullにしてください。')
+    for table in result['tables']:
+        if type(table) is not dict or set(table) != {'name', 'columns', 'rows'}:
+            raise ValueError('表の構造が不正です。')
+        if type(table['name']) is not str or type(table['columns']) is not list or type(table['rows']) is not list:
+            raise ValueError('表の名前・列・行の型が不正です。')
+        if any(type(column) is not str for column in table['columns']):
+            raise ValueError('表の列名は文字列にしてください。')
+        if len(table['rows']) > MAX_TABLE_ROWS:
+            raise ValueError(f'表の行数が上限({MAX_TABLE_ROWS})を超えています。')
+        for row in table['rows']:
+            if type(row) is not list or len(row) != len(table['columns']) or not all(is_scalar(v) for v in row):
+                raise ValueError('表の行の列数または値の型が不正です。')
+    for chart in result['charts']:
+        if type(chart) is not dict or set(chart) != {'kind', 'title', 'x', 'series'}:
+            raise ValueError('グラフの構造が不正です。')
+        if chart['kind'] not in CHART_KINDS or type(chart['title']) is not str:
+            raise ValueError('グラフの種類(bar・line)またはタイトルが不正です。')
+        if type(chart['x']) is not list or not all(is_scalar(v) for v in chart['x']):
+            raise ValueError('グラフのxは、値の配列にしてください。')
+        if type(chart['series']) is not list:
+            raise ValueError('グラフのseriesは配列にしてください。')
+        for series in chart['series']:
+            if type(series) is not dict or set(series) != {'name', 'values'} or type(series['name']) is not str:
+                raise ValueError('グラフの系列の構造が不正です。')
+            if type(series['values']) is not list or len(series['values']) != len(chart['x']) \
+                    or not all(is_scalar(v) for v in series['values']):
+                raise ValueError('グラフの系列の値の個数・型が、xと一致しません。')
 
 
 def emit(status, body=b'', **meta):
@@ -252,18 +318,15 @@ def main():
     try:
         if baseline is None:
             raise JobFailed('oom_status_unavailable', 'cgroupのOOM情報を読めないため、実行しません。')
-        header, rows_seen = receive(sys.stdin.buffer)
-        validate_header(header)
-        received = time.monotonic()
-        loaded = prepare(header, rows_seen)
+        header, loaded = receive_and_load(sys.stdin.buffer)
         prepared = time.monotonic()
+        notify_state('python')
         code, timed_out, stderr_reader = run_user_code(header)
         finished = time.monotonic()
         oom_after = read_oom_kills()
         diagnostics.update({
             'oom_kill': None if oom_after is None else oom_after - baseline, 'rows_loaded': loaded,
-            'seconds': {'receive': round(received - started, 3), 'prepare': round(prepared - received, 3),
-                        'python': round(finished - prepared, 3)},
+            'seconds': {'receive_and_load': round(prepared - started, 3), 'python': round(finished - prepared, 3)},
             'stderr': stderr_reader.data.decode('utf-8', 'replace'), 'stderr_truncated': stderr_reader.truncated,
         })
         if oom_after is None or oom_after != baseline:

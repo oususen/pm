@@ -7,6 +7,8 @@
 """
 import json
 import math
+import os
+import struct
 import subprocess
 import sys
 import threading
@@ -484,6 +486,18 @@ class FailClosedTest(IsolationBase):
             'ケーパビリティを落とさない': variant(remove=('--cap-drop', 1)),
             'rootで実行': variant(replace=[('--user', '0:0')]),
             'ポート公開': variant(extra=['-p', '127.0.0.1:18080:8080']),
+            'tmpfsの容量が大きい': variant(replace=[('--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=4096m,uid=10001,gid=10001,mode=0700')]),
+            'tmpfsで実行できる': variant(replace=[('--tmpfs', '/tmp:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0700')]),
+            'tmpfsでsetuidを許す': variant(replace=[('--tmpfs', '/tmp:rw,noexec,nodev,size=128m,uid=10001,gid=10001,mode=0700')]),
+            'tmpfsでデバイスを許す': variant(replace=[('--tmpfs', '/tmp:rw,noexec,nosuid,size=128m,uid=10001,gid=10001,mode=0700')]),
+            'tmpfsの権限が緩い': variant(replace=[('--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=1777')]),
+            'tmpfsの所有者がroot': variant(replace=[('--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=128m,uid=0,gid=0,mode=0700')]),
+            'tmpfsが追加される': variant(extra=['--tmpfs', '/var/tmp:rw,size=1g']),
+            '共有メモリが大きい': variant(extra=['--shm-size', '2g']),
+            'IPCがホスト': variant(extra=['--ipc', 'host']),
+            'PIDがホスト': variant(extra=['--pid', 'host']),
+            'ulimitを変更': variant(extra=['--ulimit', 'nofile=1048576']),
+            'sysctlを変更': variant(extra=['--sysctl', 'net.core.somaxconn=1024']),
         }
         for label, command in weakened.items():
             name = f'pmjob-test-{abs(hash(label)) % 10**8}'
@@ -529,6 +543,267 @@ class FailClosedTest(IsolationBase):
         self.assertEqual(leftover_containers(), before)
 
 
+def container_names():
+    return L.docker('ps', '-a', '--filter', f'label={L.LABEL}=1', '--format', '{{.Names}}').stdout.split()
+
+
+class RunningJobProtectionTest(IsolationBase):
+    """掃除は、稼働中のジョブを削除しない。削除するのは、停止済みのlauncherが残した孤児だけ。"""
+
+    def test_sweep_never_removes_a_running_job(self):
+        box = {}
+        thread = threading.Thread(target=lambda: box.update(result=run("import time\ntime.sleep(5)\nemit_report('slow')", python_seconds=30)))
+        thread.start()
+        for _ in range(100):  # ジョブ用コンテナが現れるまで待つ
+            if container_names():
+                break
+            time.sleep(0.1)
+        time.sleep(1.5)
+        removed = L.sweep_leftovers()  # 実行中のジョブがある間に掃除しても、そのコンテナは削除されない
+        thread.join()
+        self.assertEqual(removed, 0)
+        self.assertEqual(box['result']['status'], 'ok', box['result'])
+
+    def test_only_orphans_of_other_launchers_are_removed(self):
+        for name, labels in (
+            ('pmjob-orphan-other', [f'{L.OWNER_LABEL}=deadbeef0000']),  # 別のlauncherが残したもの
+            ('pmjob-orphan-nolabel', []),  # 所有者のラベルがないもの
+            ('pmjob-mine', [f'{L.OWNER_LABEL}={L.LAUNCHER_ID}']),  # このlauncherが管理しているもの
+        ):
+            command = ['create', '--name', name, '--label', f'{L.LABEL}=1']
+            for label in labels:
+                command += ['--label', label]
+            L.docker(*command, L.IMAGE)
+        try:
+            self.assertEqual(L.sweep_leftovers(), 2)
+            self.assertEqual(container_names(), ['pmjob-mine'])
+        finally:
+            L.docker('rm', '-f', 'pmjob-mine', check=False)
+
+    def test_launcher_is_a_single_instance(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), 'launcher.lock')
+        first = L.acquire_single_instance_lock(path)
+        with self.assertRaises(L.IsolationUnavailable):
+            L.acquire_single_instance_lock(path)
+        first.close()
+        L.acquire_single_instance_lock(path).close()  # 解放後は、再び取得できる
+
+
+class StreamingTest(IsolationBase):
+    """分割転送・順次投入: 本文全体をメモリに保持せず、チャンクを受信するたびに投入する。"""
+
+    def test_http_frames_never_hold_the_whole_body(self):
+        import tracemalloc
+        payload = b'x' * (1024 * 1024)
+        chunks = 200  # 本文の合計は約200MB
+
+        def frame_stream():
+            yield L.frame(b'H', b'{}')
+            for _ in range(chunks):
+                yield L.frame(b'D', payload)
+            yield L.frame(b'E', b'')
+
+        total = 5 + 2 + chunks * (5 + len(payload)) + 5
+        source, buffer = frame_stream(), bytearray()
+
+        def read1(count):
+            if not buffer:
+                try:
+                    buffer.extend(next(source))
+                except StopIteration:
+                    return b''
+            data = bytes(buffer[:count])
+            del buffer[:count]
+            return data
+
+        tracemalloc.start()
+        seen = sum(1 for _ in L.iter_http_frames(read1, lambda timeout: None, total, time.monotonic(), 60))
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        self.assertEqual(seen, chunks + 2)
+        self.assertLess(peak, 8 * 1024 * 1024, f'ピークメモリ{peak}バイト(本文全体は200MB)')
+
+    def test_chunks_are_loaded_in_order_and_no_chunk_file_remains(self):
+        views = [{'name': 'v_ai_shipment', 'columns': SHIPMENT_COLUMNS, 'expected_rows': 20_000, 'unique_key': 'id'}]
+        rows = [[i, '1.000', 'x'] for i in range(20_000)]
+        chunks = [(0, rows[i:i + 5000]) for i in range(0, 20_000, 5000)]
+        code = ("import json, os\nemit_report(json.dumps({'tmp': sorted(os.listdir('/tmp')), "
+                "'rows': con.sql('SELECT COUNT(*) FROM v_ai_shipment').fetchone()[0]}))")
+        result = run(code, chunks=chunks, views=views, memory_mb=512)
+        self.assertEqual(result['status'], 'ok', result)
+        observed = report(result)
+        self.assertEqual(observed['rows'], 20_000)
+        self.assertNotIn('chunk.csv', observed['tmp'])  # 投入後に、チャンクの一時ファイルを残さない
+        self.assertNotIn('data', observed['tmp'])
+
+    def test_chunk_level_checks_fail_the_job(self):
+        def job(expected, claimed, csv_rows, code="emit_report('到達しない')"):
+            header = make_header(code, views=[{'name': 'v_ai_shipment', 'columns': SHIPMENT_COLUMNS,
+                                              'expected_rows': expected, 'unique_key': 'id'}])
+            frames = (L.frame(b'H', json.dumps(header).encode()) +
+                      L.frame(b'D', struct.pack('>HI', 0, claimed) + L.rows_to_csv(csv_rows)) + L.frame(b'E', b''))
+            return L.run_job(frames, ranges=TEST_RANGES)
+
+        two = [[1, '1', 'a'], [2, '2', 'b']]
+        cases = {
+            'chunk_too_large': job(6000, 6000, [[i, '1', 'x'] for i in range(6000)]),  # 1チャンクが5,000行を超える
+            'chunk_row_count_mismatch': job(3, 3, two),  # 申告3行 / 実際2行
+            'row_count_exceeded': job(1, 2, two),  # 期待1行を超えた
+            'row_count_mismatch': job(3, 2, two),  # 終端まで受信しても、期待3行に満たない
+        }
+        for reason, result in cases.items():
+            with self.subTest(reason=reason):
+                self.assertEqual((result['status'], result.get('reason')), ('failed', reason), result)
+                self.assertNotIn('result', result)
+
+
+class ResultTypeTest(IsolationBase):
+    """表だけでなく、グラフ・報告書の型も厳密に検証する。1つでも不正なら、結果全体を採用しない。"""
+
+    def test_invalid_table_chart_and_report_types_are_never_adopted(self):
+        chart = '{"kind": "bar", "title": "t", "x": [1, 2], "series": [{"name": "s", "values": [1, 2]}]}'
+        invalid = {
+            'report_dict': '{"tables": [], "charts": [], "report": {"a": 1}}',
+            'report_number': '{"tables": [], "charts": [], "report": 5}',
+            'report_list': '{"tables": [], "charts": [], "report": ["x"]}',
+            'tables_not_list': '{"tables": {}, "charts": [], "report": null}',
+            'charts_not_list': '{"tables": [], "charts": {}, "report": null}',
+            'chart_unknown_kind': chart.replace('"bar"', '"pie"').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'chart_title_not_str': chart.replace('"t"', '5').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'chart_x_not_list': chart.replace('[1, 2], "series"', '"abc", "series"').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'chart_series_length_mismatch': chart.replace('"values": [1, 2]', '"values": [1]').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'chart_series_missing_values': chart.replace('"values": [1, 2]', '"vals": [1, 2]').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'chart_extra_key': chart.replace('"kind"', '"extra": 1, "kind"').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'chart_value_object': chart.replace('"values": [1, 2]', '"values": [{"a": 1}, 2]').join(['{"tables": [], "charts": [', '], "report": null}']),
+            'table_cell_object': '{"tables": [{"name": "t", "columns": ["a"], "rows": [[{"a": 1}]]}], "charts": [], "report": null}',
+            'table_name_not_str': '{"tables": [{"name": 5, "columns": ["a"], "rows": []}], "charts": [], "report": null}',
+            'table_column_not_str': '{"tables": [{"name": "t", "columns": [5], "rows": []}], "charts": [], "report": null}',
+            'table_row_length': '{"tables": [{"name": "t", "columns": ["a", "b"], "rows": [[1]]}], "charts": [], "report": null}',
+            'nan_cell': '{"tables": [{"name": "t", "columns": ["a"], "rows": [[NaN]]}], "charts": [], "report": null}',
+            'infinity_cell': '{"tables": [{"name": "t", "columns": ["a"], "rows": [[Infinity]]}], "charts": [], "report": null}',
+        }
+        for label, raw in invalid.items():
+            with self.subTest(label=label):
+                result = run("import os\nopen('/tmp/result.json', 'w').write(%r)\nos._exit(0)" % raw)
+                self.assertEqual((result['status'], result.get('reason')), ('failed', 'result_invalid'), result)
+                self.assertNotIn('result', result)
+
+    def test_valid_chart_and_report_types_are_adopted(self):
+        raw = '{"tables": [], "charts": [{"kind": "line", "title": "t", "x": ["a", "b"], "series": [{"name": "s", "values": [1, null]}]}], "report": "文"}'
+        result = run("import os\nopen('/tmp/result.json', 'w').write(%r)\nos._exit(0)" % raw)
+        self.assertEqual(result['status'], 'ok', result)
+        self.assertEqual(result['result']['report'], '文')
+
+
+class StageDeadlineTest(IsolationBase):
+    """転送・投入・Pythonは、それぞれ各段階全体の期限。合算にせず、進捗(チャンクの到着)でリセットもしない。"""
+
+    DEADLINES = {'transfer': 60, 'load': 60, 'margin': 20}
+
+    def test_each_stage_has_its_own_budget_that_chunk_arrival_never_resets(self):
+        # 転送(受信待ち)と投入は、チャンクごとに交互に進む。各段階の予算は、全体の合計で数え、リセットしない。
+        clock = L.StageClock(1000, self.DEADLINES, 30)
+        self.assertIsNone(clock.violation(1059))
+        self.assertEqual(clock.violation(1061), 'stage_deadline_transfer')  # 受信開始から60秒
+        clock = L.StageClock(1000, self.DEADLINES, 30)
+        for index in range(10):  # 受信待ち(5秒)→投入(5秒)を10回繰り返す: 転送の合計50秒、投入の合計50秒
+            clock.switch('load', 1000 + index * 10 + 5)
+            clock.switch('transfer', 1000 + index * 10 + 10)
+        self.assertEqual(clock.used, {'transfer': 50.0, 'load': 50.0})
+        self.assertIsNone(clock.violation(1100 + 9))  # 転送の累計59秒 → 期限内(合算の119秒ではない)
+        self.assertEqual(clock.violation(1100 + 11), 'stage_deadline_transfer')  # 累計61秒 → 超過(進捗があってもリセットされない)
+        clock = L.StageClock(1000, self.DEADLINES, 30)
+        clock.switch('load', 1001)
+        self.assertIsNone(clock.violation(1060))
+        self.assertEqual(clock.violation(1062), 'stage_deadline_load')  # 投入の累計が61秒
+        clock = L.StageClock(1000, self.DEADLINES, 30)
+        clock.switch('python', 1020)
+        self.assertIsNone(clock.violation(1069))  # Python実行時間30秒 + 余裕20秒
+        self.assertEqual(clock.violation(1071), 'stage_deadline_python')
+
+    def test_transfer_deadline_counts_from_the_start_of_reception(self):
+        # Djangoからの本文の受信に、すでに100秒かかった場合(転送の期限60秒を超過)。受信の開始時刻から数えるため、
+        # コンテナの起動後は、監督プロセスの受信完了を待たずに、転送の期限超過として強制終了する。
+        frames = L.encode_frames(make_header("emit_report('x')"), [])
+        result = L.run_job(frames, ranges=TEST_RANGES, transfer_started=time.monotonic() - 100)
+        self.assertEqual((result['status'], result['reason']), ('failed', 'stage_deadline_transfer'), result)
+        self.assertNotIn('result', result)
+
+    def test_truncated_input_fails_immediately_instead_of_waiting(self):
+        frames = L.encode_frames(make_header("emit_report('x')"), [])[:-5]  # 終端フレームを欠く
+        result = L.run_job(frames, ranges=TEST_RANGES)
+        self.assertEqual((result['status'], result['reason']), ('failed', 'input_truncated'), result)
+        self.assertNotIn('result', result)
+
+    def test_slow_load_is_killed_at_the_load_deadline(self):
+        views = [{'name': 'v_ai_shipment', 'columns': SHIPMENT_COLUMNS, 'expected_rows': 30_000, 'unique_key': 'id'}]
+        rows = [[i, '1.000', 'x'] for i in range(30_000)]
+        chunks = [(0, rows[i:i + 5000]) for i in range(0, 30_000, 5000)]
+        result = run("emit_report('到達しない')", chunks=chunks, views=views, deadlines={'load': 0.01}, memory_mb=512)
+        self.assertEqual((result['status'], result['reason']), ('failed', 'stage_deadline_load'), result)
+        self.assertNotIn('result', result)
+
+
+class CleanupLockTest(IsolationBase):
+    """コンテナの削除が失敗・時間切れになっても、実行ロックは残さない。削除できていない間は、新しいジョブを受け付けない。"""
+
+    def test_docker_command_timeouts_do_not_raise_out_of_cleanup(self):
+        from unittest.mock import patch
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('docker', 1)):
+            self.assertEqual(L.docker('rm', 'x', check=False).returncode, 124)
+            self.assertFalse(L.remove_container('x'))
+            with self.assertRaises(L.IsolationUnavailable):
+                L.docker('ps')
+
+    def test_failed_removal_releases_the_lock_and_blocks_new_jobs_until_cleaned(self):
+        from unittest.mock import patch
+        with patch.object(L, 'remove_container', return_value=False):
+            first = run("emit_report('first')")
+        self.assertEqual(first['status'], 'ok')  # 結果は完結している。後始末の失敗は、別に記録する
+        self.assertFalse(first['cleanup']['ok'])
+        self.assertTrue(leftover_containers())  # 実際に残っている
+        with patch.object(L, 'remove_container', return_value=False):
+            second = run("emit_report('second')")  # Busy(ロックが残った状態)にはならない
+        self.assertEqual((second['status'], second['reason']), ('refused', 'cleanup_pending'))
+        third = run("emit_report('third')")  # 削除できるようになれば、再試行で解消して実行できる
+        self.assertEqual(third['status'], 'ok', third)
+        self.assertTrue(third['cleanup']['ok'])
+        self.assertEqual(L._PENDING_CLEANUP, set())
+
+    def test_startup_sweep_failure_blocks_new_jobs(self):
+        """起動時に孤児を削除できなかったら、受付を始めない(削除待ちとして記録し、解消するまでジョブを拒否する)。"""
+        from unittest.mock import patch
+        orphan = subprocess.run(
+            ['docker', 'create', '--name', 'pmjob-orphan-test', '--label', f'{L.LABEL}=1', '--network', 'none', L.IMAGE],
+            capture_output=True, text=True)
+        self.assertEqual(orphan.returncode, 0, orphan.stderr)
+        try:
+            with patch.object(L, 'remove_container', return_value=False):
+                self.assertEqual(L.sweep_leftovers(), 0)
+                self.assertIn('pmjob-orphan-test', L._PENDING_CLEANUP)
+                blocked = run("emit_report('x')")
+            self.assertEqual((blocked['status'], blocked['reason']), ('refused', 'cleanup_pending'))
+            self.assertTrue(leftover_containers())  # 残骸は、まだ残っている
+            self.assertEqual(run("emit_report('after')")['status'], 'ok')  # 削除できれば解消して実行できる
+            self.assertEqual(L._PENDING_CLEANUP, set())
+        finally:
+            subprocess.run(['docker', 'rm', '-f', 'pmjob-orphan-test'], capture_output=True)
+            L._PENDING_CLEANUP.clear()
+
+    def test_startup_sweep_refuses_to_start_when_listing_fails(self):
+        from unittest.mock import patch
+        failed = subprocess.CompletedProcess([], 1, '', 'daemon error')
+        with patch.object(L, 'docker', return_value=failed), self.assertRaises(L.IsolationUnavailable):
+            L.sweep_leftovers()
+
+    def test_unexpected_exceptions_release_the_lock(self):
+        from unittest.mock import patch
+        with patch.object(L, 'preflight', side_effect=RuntimeError('想定外')), self.assertRaises(RuntimeError):
+            run("emit_report('x')")
+        self.assertEqual(run("emit_report('after')")['status'], 'ok')
+
+
 class HttpApiTest(IsolationBase):
     """DjangoがHTTPで使う入口(開発では127.0.0.1のみ)。本番の範囲(設定画面と同じ)で入力を検証する。"""
 
@@ -566,6 +841,93 @@ class HttpApiTest(IsolationBase):
             time.sleep(2)
             self.assertEqual(post(L.encode_frames(ok_header, []))[0], 429)
             holder.join()
+        finally:
+            server.shutdown()
+
+    def test_large_job_is_streamed_over_http(self):
+        import urllib.request
+
+        server = L.ThreadingHTTPServer(('127.0.0.1', 0), L.Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        views = [{'name': 'v_ai_shipment', 'columns': SHIPMENT_COLUMNS, 'expected_rows': 100_000, 'unique_key': 'id'}]
+        rows = [[i, '1.000', 'x'] for i in range(100_000)]
+        chunks = [(0, rows[i:i + 5000]) for i in range(0, 100_000, 5000)]
+        header = make_header("emit_table('n', ['n'], con.sql('SELECT COUNT(*) FROM v_ai_shipment').fetchall())",
+                             memory_mb=512, python_seconds=30, views=views)
+        try:
+            request = urllib.request.Request(f'http://127.0.0.1:{server.server_address[1]}/v1/jobs',
+                                             data=L.encode_frames(header, chunks), method='POST')
+            with urllib.request.urlopen(request, timeout=180) as response:
+                body = json.load(response)
+            self.assertEqual(body['status'], 'ok', body)
+            self.assertEqual(body['result']['tables'][0]['rows'], [[100_000]])
+            self.assertEqual(body['diagnostics']['rows_loaded'], {'v_ai_shipment': 100_000})
+        finally:
+            server.shutdown()
+
+    def test_body_reception_has_a_whole_stage_deadline_that_progress_does_not_reset(self):
+        import socket
+
+        class ShortDeadlineHandler(L.Handler):
+            transfer_deadline = 2
+
+        server = L.ThreadingHTTPServer(('127.0.0.1', 0), ShortDeadlineHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        frames = L.encode_frames(make_header("emit_report('x')", memory_mb=512, python_seconds=30), [])
+
+        def exchange(prefix, declared_length, dribble):
+            with socket.create_connection(('127.0.0.1', server.server_address[1]), timeout=15) as connection:
+                connection.sendall(b'POST /v1/jobs HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n' % declared_length + prefix)
+                for _ in range(dribble):  # 少しずつ送り続けても(進捗があっても)、受信開始から2秒で打ち切られる
+                    time.sleep(0.8)
+                    try:
+                        connection.sendall(b'\x00')
+                    except OSError:
+                        break
+                connection.settimeout(20)
+                raw = b''
+                while b'\r\n\r\n' not in raw or not raw.rstrip().endswith(b'}'):
+                    piece = connection.recv(65536)
+                    if not piece:
+                        break
+                    raw += piece
+            head, _, body = raw.partition(b'\r\n\r\n')
+            return head.split(b'\r\n')[0], json.loads(body or b'{}')
+
+        try:
+            # (a) ヘッダのフレームの途中で止まる: コンテナを作らずに、転送の期限超過(408)
+            status_line, body = exchange(frames[:12], len(frames), 4)
+            self.assertIn(b' 408 ', status_line)
+            self.assertEqual(body['reason'], 'stage_deadline_transfer')
+            self.assertEqual(leftover_containers(), [])
+        finally:
+            server.shutdown()
+
+    def test_incomplete_body_is_not_adopted_even_if_the_container_finishes(self):
+        """宣言した本文の長さに満たないまま、コンテナだけが完結しても、結果を採用しない(転送の期限超過)。"""
+        import socket
+
+        class ShortDeadlineHandler(L.Handler):
+            transfer_deadline = 10
+
+        server = L.ThreadingHTTPServer(('127.0.0.1', 0), ShortDeadlineHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        frames = L.encode_frames(make_header("emit_report('x')", memory_mb=512, python_seconds=30), [])
+        try:
+            with socket.create_connection(('127.0.0.1', server.server_address[1]), timeout=30) as connection:
+                connection.sendall(b'POST /v1/jobs HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n' % (len(frames) + 1000) + frames)
+                connection.settimeout(30)
+                raw = b''
+                while not raw.rstrip().endswith(b'}'):
+                    piece = connection.recv(65536)
+                    if not piece:
+                        break
+                    raw += piece
+            head, _, body = raw.partition(b'\r\n\r\n')
+            self.assertIn(b' 408 ', head.split(b'\r\n')[0])
+            payload = json.loads(body)
+            self.assertEqual((payload['status'], payload['reason']), ('failed', 'stage_deadline_transfer'))
+            self.assertNotIn('result', payload)
         finally:
             server.shutdown()
 
