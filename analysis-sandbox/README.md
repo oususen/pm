@@ -8,7 +8,7 @@ AI分析の生成Python・SQLを、ジョブごとの使い捨てコンテナで
 | `job/` | ジョブ用イメージ。`job_main.py`(監督プロセス、PID 1)と`runtime.py`(生成コードの実行環境) |
 | `launcher/launcher.py` | Dockerを操作する唯一のプロセス。preflight・設定の完全照合・実行・結果の採否判定・後始末 |
 | `tools/build.py` | イメージを作成し、イメージIDを`.image-id`へ記録する(launcherはこのIDと一致しないと拒否) |
-| `tests/test_isolation.py` | 実Dockerでの隔離・資源制限・段階の期限・後始末・結果採否のテスト(48件) |
+| `tests/test_isolation.py` | 実Dockerでの隔離・資源制限・段階の期限・後始末・結果採否のテスト(49件) |
 
 ## 使い方(Windows開発PC。WSL2のUbuntu-24.04に導入したDocker Engineを使う)
 ```

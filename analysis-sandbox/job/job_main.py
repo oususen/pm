@@ -320,6 +320,8 @@ def main():
             raise JobFailed('oom_status_unavailable', 'cgroupのOOM情報を読めないため、実行しません。')
         header, loaded = receive_and_load(sys.stdin.buffer)
         prepared = time.monotonic()
+        # 投入(件数・一意キーの照合を含む)が終わった時刻。Python実行の失敗後も報告できるよう、すぐ診断情報へ入れる
+        diagnostics['loaded_at_epoch'] = time.time()
         notify_state('python')
         code, timed_out, stderr_reader = run_user_code(header)
         finished = time.monotonic()

@@ -209,6 +209,24 @@ def _container_cleanup(launcher):
     return 'closed' if (launcher['cleanup'] or {}).get('ok') else 'pending'
 
 
+LOADED_AT_TOLERANCE_SECONDS = 5  # 取得完了より前、現在より後の時刻は、時計のずれなどの異常として採用しない
+
+
+def _loaded_at(diagnostics, fetched_at, now=None):
+    """コンテナが報告した投入完了の時刻(epoch秒)を、日時にする。報告がない・値が不正・範囲外ならNULL(推測で補わない)。"""
+    epoch = diagnostics.get('loaded_at_epoch')
+    if type(epoch) not in (int, float) or epoch != epoch:
+        return None
+    try:
+        loaded_at = datetime.fromtimestamp(epoch)
+    except (OverflowError, OSError, ValueError):
+        return None
+    tolerance = timedelta(seconds=LOADED_AT_TOLERANCE_SECONDS)
+    if (fetched_at is not None and loaded_at < fetched_at - tolerance) or loaded_at > (now or datetime.now()) + tolerance:
+        return None
+    return loaded_at
+
+
 def outcome_from_result(result):
     fetch, launcher = result.get('fetch') or {}, result.get('launcher') or {}
     diagnostics = launcher.get('diagnostics') or {}
@@ -224,6 +242,7 @@ def outcome_from_result(result):
         'unique_key_check': {'column': 'id', 'django': 'ok', 'container': 'ok' if ok else (
             'failed' if reason == 'duplicate_key' else 'not_confirmed')},
         'fetched_at': fetch.get('fetched_at'), 'sent_at': fetch.get('sent_at'),
+        'loaded_at': _loaded_at(diagnostics, fetch.get('fetched_at')),
         'fetch_seconds': fetch.get('fetch_seconds'), 'transfer_seconds': fetch.get('transfer_seconds'),
         'launcher_seconds': fetch.get('launcher_seconds'),
         'container_load_seconds': seconds.get('receive_and_load'), 'python_seconds': seconds.get('python'),
@@ -242,7 +261,7 @@ def outcome_from_exception(exc):
         'sent_rows': progress.get('sent_rows'), 'loaded_rows': None,
         'unique_key_check': {'column': 'id', 'django': 'failed' if getattr(exc, 'reason', '') == 'duplicate_key' else (
             'ok' if progress.get('fetched_rows') is not None else 'not_confirmed'), 'container': 'not_run'},
-        'fetched_at': progress.get('fetched_at'), 'sent_at': progress.get('sent_at'),
+        'fetched_at': progress.get('fetched_at'), 'sent_at': progress.get('sent_at'), 'loaded_at': None,
         'fetch_seconds': progress.get('fetch_seconds'), 'transfer_seconds': None, 'launcher_seconds': None,
         'container_load_seconds': None, 'python_seconds': None,
     }
@@ -341,5 +360,9 @@ def serialize_run(run):
         'sent_rows': run.sent_rows, 'loaded_rows': run.loaded_rows, 'unique_key_check': run.unique_key_check,
         'sql_sha256': run.sql_sha256, 'python_sha256': run.python_sha256, 'settings': run.settings_snapshot,
         'cleanup': run.cleanup,
-        'started_at': run.started_at.isoformat(), 'finished_at': run.finished_at.isoformat() if run.finished_at else None,
+        'started_at': run.started_at.isoformat(),
+        'fetched_at': run.fetched_at.isoformat() if run.fetched_at else None,
+        'sent_at': run.sent_at.isoformat() if run.sent_at else None,
+        'loaded_at': run.loaded_at.isoformat() if run.loaded_at else None,
+        'finished_at': run.finished_at.isoformat() if run.finished_at else None,
     }

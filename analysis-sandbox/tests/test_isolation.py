@@ -72,6 +72,24 @@ class DataLoadingTest(IsolationBase):
         self.assertEqual(result['diagnostics']['rows_loaded'], {'v_ai_shipment': 3})
         self.assertEqual(result['diagnostics']['oom_kill'], 0)
 
+    def test_load_completion_time_is_reported_between_start_and_finish(self):
+        """投入完了の時刻(epoch秒)を診断情報で返す。投入の後にPythonが失敗しても返し、投入が終わる前に失敗した場合は返さない。"""
+        rows = [[1, '1', 'a'], [2, '2', 'b']]
+        views = [{'name': 'v_ai_shipment', 'columns': SHIPMENT_COLUMNS, 'expected_rows': 2, 'unique_key': 'id'}]
+        before = time.time()
+        ok = run("import time\ntime.sleep(1.5)\nemit_report('x')", chunks=[(0, rows)], views=views)
+        after = time.time()
+        self.assertEqual(ok['status'], 'ok', ok)
+        loaded_at = ok['diagnostics']['loaded_at_epoch']
+        self.assertTrue(before <= loaded_at <= after, (before, loaded_at, after))
+        self.assertLess(loaded_at, after - 1.0)  # Python実行(1.5秒)の前に、投入が終わっている
+        failed = run('raise SystemExit(1)', chunks=[(0, rows)], views=views)
+        self.assertEqual(failed['reason'], 'child_exit_nonzero')
+        self.assertIn('loaded_at_epoch', failed['diagnostics'])
+        mismatch = run("emit_report('x')", chunks=[(0, rows[:1])], views=views)  # 投入の照合に失敗(期待2行に対して1行)
+        self.assertEqual(mismatch['reason'], 'row_count_mismatch')
+        self.assertNotIn('loaded_at_epoch', mismatch['diagnostics'])
+
     def test_count_and_key_mismatches_fail_without_a_result(self):
         views = [{'name': 'v_ai_shipment', 'columns': SHIPMENT_COLUMNS, 'expected_rows': 3, 'unique_key': 'id'}]
         two = [[1, '1', 'a'], [2, '2', 'b']]

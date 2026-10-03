@@ -55,6 +55,9 @@ class RunBase(TransactionTestCase):
 
 class RecordTest(RunBase):
     def test_success_is_recorded_with_distinct_counts_two_hashes_and_no_code_body(self):
+        self.launcher.respond = lambda header: {
+            'status': 'ok', 'result': {'report': 'ok'}, 'cleanup': {'ok': True},
+            'diagnostics': {'rows_loaded': {v['name']: v['expected_rows'] for v in header['views']}, 'loaded_at_epoch': time.time()}}
         result = self.run_it()
         run = AIAnalysisRun.objects.get(pk=result['run_id'])
         self.assertEqual((run.status, run.reason), ('success', ''))
@@ -72,6 +75,8 @@ class RecordTest(RunBase):
         self.assertIsNotNone(run.fetched_at)
         self.assertIsNotNone(run.sent_at)
         self.assertIsNotNone(run.finished_at)
+        self.assertIsNotNone(run.loaded_at)  # コンテナが報告した投入完了の時刻
+        self.assertTrue(run.fetched_at <= run.loaded_at <= run.finished_at)
         self.assertEqual(run.settings_snapshot['max_fetch_rows'], 100_000)
         self.assertEqual(run.method_approved_at, datetime(2026, 10, 4, 9, 0))
         # コード本文・結果の中身は、どの列にも保存しない
@@ -290,6 +295,8 @@ class RealLauncherRecordTest(TransactionTestCase):
         self.assertEqual(result['launcher']['result']['report'], str(counts['v_ai_shipment']))
         self.assertEqual((run.fetched_rows, run.sent_rows, run.loaded_rows), (counts, counts, counts))
         self.assertIsNone(run.sql_sha256)  # 別のSQLがない実行
+        self.assertTrue(run.fetched_at <= run.loaded_at <= run.finished_at)  # コンテナ内の投入が終わった実際の時刻
+        self.assertLessEqual(run.loaded_at, run.finished_at)
         self.assertEqual(run.cleanup, {'db_connection': 'closed', 'container': 'closed'})
         self.assertGreater(run.container_load_seconds, 0)
         self.assertIsNotNone(run.python_seconds)
@@ -385,3 +392,34 @@ class ReviewFixTest(RunBase):
         while time.time() < deadline and AIAnalysisRun.objects.get(pk=run_id).cleanup['db_connection'] == 'pending':
             time.sleep(0.1)
         self.assertEqual(AIAnalysisRun.objects.get(pk=run_id).cleanup['db_connection'], 'failed')  # closedにならない
+
+
+class LoadedAtTest(RunBase):
+    """投入完了日時(コンテナの報告)。報告がない・不正・範囲外はNULLとし、推測で補わない。"""
+
+    def test_loaded_at_is_taken_from_the_container_report_and_only_when_valid(self):
+        fetched = datetime(2026, 10, 4, 10, 0, 0)
+        now = datetime(2026, 10, 4, 10, 5, 0)
+        good = (fetched + timedelta(seconds=30)).timestamp()
+        self.assertEqual(runs._loaded_at({'loaded_at_epoch': good}, fetched, now), fetched + timedelta(seconds=30))
+        for bad in (None, 'x', True, float('nan'), float('inf'), (fetched - timedelta(seconds=60)).timestamp(),
+                    (now + timedelta(seconds=60)).timestamp()):
+            self.assertIsNone(runs._loaded_at({'loaded_at_epoch': bad}, fetched, now), bad)
+        self.assertIsNone(runs._loaded_at({}, fetched, now))
+
+    def test_run_records_the_reported_time_and_a_failure_before_loading_leaves_it_null(self):
+        report = {'epoch': None}
+
+        def respond(header):
+            report['epoch'] = time.time()
+            return {'status': 'ok', 'result': {'report': 'ok'}, 'cleanup': {'ok': True},
+                    'diagnostics': {'rows_loaded': {v['name']: v['expected_rows'] for v in header['views']},
+                                    'loaded_at_epoch': report['epoch']}}
+
+        self.launcher.respond = respond
+        run = AIAnalysisRun.objects.get(pk=self.run_it()['run_id'])
+        self.assertAlmostEqual(run.loaded_at.timestamp(), report['epoch'], delta=0.01)
+        self.launcher.respond = lambda header: {'status': 'failed', 'reason': 'row_count_mismatch', 'cleanup': {'ok': True}, 'diagnostics': {}}
+        failed = AIAnalysisRun.objects.get(pk=self.run_it()['run_id'])
+        self.assertIsNone(failed.loaded_at)  # 投入が終わる前に失敗した実行は、報告がない
+        self.assertIn('loaded_at', runs.serialize_run(failed))

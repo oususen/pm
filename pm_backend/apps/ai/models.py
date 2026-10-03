@@ -91,6 +91,7 @@ class AIAnalysisRun(models.Model):
     started_at = models.DateTimeField(verbose_name='開始')
     fetched_at = models.DateTimeField(null=True, blank=True, verbose_name='取得完了')
     sent_at = models.DateTimeField(null=True, blank=True, verbose_name='送信完了')
+    loaded_at = models.DateTimeField(null=True, blank=True, verbose_name='投入完了(コンテナ内の件数・一意キーの照合を含む)')
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name='終了')
     fetch_seconds = models.FloatField(null=True, blank=True, verbose_name='取得の所要秒')
     transfer_seconds = models.FloatField(null=True, blank=True, verbose_name='送信の所要秒')
