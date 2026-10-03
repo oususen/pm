@@ -1,7 +1,7 @@
 <template>
   <main class="analysis-workspace">
     <header><h1>AI分析</h1><span>分析案・承認</span></header>
-    <p class="notice">分析案とデータ範囲の承認まで対応しています。SQL／Python実行・結果生成・テンプレート保存は未実装です。外部AIへは送信しません。</p>
+    <p class="notice">分析案とデータ範囲の承認まで対応しています。SQL／Python実行・結果生成・テンプレート保存は未実装です。{{ options?.notice || '' }}</p>
     <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認には「AI分析」の編集権限が必要です。</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <label for="analysis-purpose">分析目的</label>
@@ -10,14 +10,28 @@
     <div class="period">
       <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
       <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
-      <span>利用AI: {{ options ? options.model : '確認中' }}（ローカルQwen）</span>
     </div>
+    <div class="period">
+      <label>AI
+        <select v-model="provider" :disabled="!canEdit || !!busy || !!plan || !options" @change="onProviderChange">
+          <option v-for="item in options?.providers || []" :key="item.provider" :value="item.provider" :disabled="!item.available">
+            {{ item.label }}{{ item.available ? '' : '（利用不可）' }}
+          </option>
+        </select>
+      </label>
+      <label>モデル
+        <select v-model="model" :disabled="!canEdit || !!busy || !!plan || !selectedProvider" @change="onModelChange">
+          <option v-for="item in selectedProvider?.models || []" :key="item.id" :value="item.id">{{ item.label }}</option>
+        </select>
+      </label>
+    </div>
+    <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、分析目的（登録済みの人名・社名などは一時IDへ置換）・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。登録されていない人名・社名や、自由記述の機密は置換されないため、目的に含めないでください。</p>
+    <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
     <p>対象: 入荷実績・出荷実績の指定期間の全登録行。追加の絞り条件・資料取込み、生産・仕損・中断・残業は未対応です。</p>
-    <p v-if="options && !options.available" class="error">ローカルQwenが無効、またはモデル設定が一致していません。AI設定を確認してください。</p>
     <button v-if="!plan" type="button" :disabled="!canCreate" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : '分析案を作成' }}</button>
     <section v-if="plan" class="plan">
       <div class="plan-heading"><h2>{{ plan.proposal.title }}</h2><span>{{ statusLabel }}</span></div>
-      <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }}</small>
+      <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }} / 作成AI: {{ planProviderLabel }}</small>
       <h3>1. 分析目的・手順</h3>
       <p>目的: {{ plan.proposal.purpose }}</p>
       <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
@@ -63,12 +77,49 @@ const source = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 const options = ref(null)
+const provider = ref('')
+const model = ref('')
 const plan = ref(null)
 const busy = ref('')
 const error = ref('')
 let generation = 0
 let disposed = false
-const canCreate = computed(() => props.canEdit && !busy.value && options.value?.available && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value)
+let lastSelection = { provider: '', model: '' }
+// 有料モデルは、検索AIと同じく選択時に確認し、同じ画面の間は1回の承認で再確認しない。
+const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it'])
+const paidApproved = new Set()
+const selectedProvider = computed(() => options.value?.providers.find(item => item.provider === provider.value) || null)
+const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value)
+const planProviderLabel = computed(() => {
+  const proposal = plan.value?.proposal
+  const label = options.value?.providers.find(item => item.provider === proposal?.provider)?.label || proposal?.provider || ''
+  return proposal?.model ? `${label} / ${proposal.model}` : label
+})
+
+function defaultModelFor(key) {
+  const current = options.value?.providers.find(item => item.provider === key)
+  return current?.models.some(item => item.id === current.default_model) ? current.default_model : (current?.models[0]?.id || '')
+}
+function paidKey() {
+  if (provider.value === 'deepseek') return { key: 'deepseek', message: 'DeepSeekは有料です。使いますか？' }
+  if (provider.value === 'openrouter' && OPENROUTER_PAID_MODELS.has(model.value)) {
+    return { key: model.value, message: 'このモデル（Gemma 4 26B A4B）は有料です。使いますか？' }
+  }
+  return null
+}
+function confirmSelection() {
+  const paid = paidKey()
+  if (paid && !paidApproved.has(paid.key)) {
+    if (window.confirm(paid.message)) paidApproved.add(paid.key)
+    else { provider.value = lastSelection.provider; model.value = lastSelection.model; return }
+  }
+  lastSelection = { provider: provider.value, model: model.value }
+}
+function onProviderChange() {
+  model.value = defaultModelFor(provider.value)
+  confirmSelection()
+}
+function onModelChange() { confirmSelection() }
 const statusLabel = computed(() => ({ awaiting_method: '分析案の承認待ち', awaiting_data: 'データ範囲の承認待ち', data_approved: 'データ範囲承認済み・未実行' })[plan.value?.status] || '')
 const formatNumber = value => value == null ? '未確認' : Number(value).toLocaleString('ja-JP')
 const formatDate = value => value?.replace('T', ' ').slice(0, 19) || ''
@@ -90,7 +141,14 @@ onBeforeUnmount(() => { disposed = true; generation += 1 })
 onMounted(async () => {
   try {
     const response = await api.aiAnalysis.options()
-    if (!disposed) options.value = response.data
+    if (disposed) return
+    options.value = response.data
+    // 初期選択は検索AIと同じ。選べない場合は、選べる先頭のAIへ切り替える。
+    const initial = response.data.providers.find(item => item.provider === response.data.default_provider && item.available)
+      || response.data.providers.find(item => item.available)
+    provider.value = initial?.provider || response.data.default_provider
+    model.value = defaultModelFor(provider.value)
+    lastSelection = { provider: provider.value, model: model.value }
   } catch (exception) {
     if (!disposed) error.value = exception.response?.data?.detail || '分析用AI設定を確認できませんでした。'
   }
@@ -123,7 +181,10 @@ async function perform(action, operation) {
 }
 function createPlan() {
   if (!canCreate.value) return
-  perform('create', () => api.aiAnalysis.createPlan({ purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value }))
+  perform('create', () => api.aiAnalysis.createPlan({
+    purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value,
+    provider: provider.value, model: model.value,
+  }))
 }
 function approve(stage) {
   if (!props.canEdit || !plan.value) return
@@ -158,6 +219,8 @@ input { padding: 4px; font: inherit; }
 .plan h3 { font-size: 16px; margin: 14px 0 8px; }
 .dataset { background: #f4f8f8; padding: 1px 8px; overflow-wrap: anywhere; }
 .error { background: #fff0ee; color: #9a362b; padding: 8px; }
+.warning { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 8px 10px; }
+select { padding: 4px; font: inherit; max-width: 100%; }
 button:not(:disabled) { border-color: #168779; color: white; background: #168779; cursor: pointer; }
 small { overflow-wrap: anywhere; }
 </style>
