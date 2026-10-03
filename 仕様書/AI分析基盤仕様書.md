@@ -177,6 +177,31 @@ Docker導入は実行環境の準備であり、集計機能の実装・隔離�
 
 操作はPowerShellで`wsl.exe -d Ubuntu-24.04`を実行してUbuntuへ入り、`sudo docker version`、`sudo docker compose version`で確認する。`daiso`をDockerグループへ追加しておらず、Docker操作には`sudo`を使用する。WindowsのPATH・ファイアウォール・自動起動タスクは今回変更していない。本番へは接続・反映していない。
 
+#### 開発Dockerの管理画面（Portainer）
+
+2026-10-03にBOSSがDocker Desktopを使わないブラウザ管理画面の追加を承認し、公式Portainer CEのLTSイメージ（実行バージョン2.45.1）を導入した。開発専用の`scripts/portainer.dev.compose.yml`を使用し、本番Composeは変更しない。イメージは導入時のダイジェストで固定する。コンテナ名は`pm-portainer-dev`、管理情報はUbuntu内の専用Dockerボリューム`pm_portainer_dev_data`に保存する。PM本体DBには保存しない。
+
+管理画面は`https://localhost:9443`で、公開ポートは`127.0.0.1:9443`だけとする。8000・9000はホストへ公開しない。自己署名証明書を使用する。専用ネットワーク`pm_portainer_admin`を使用し、PMや分析用ネットワークへは接続しない。再起動ポリシーは`unless-stopped`（Docker起動時に再開し、手動停止したものは自動再開しない）とし、Windowsの自動起動タスクは追加しない。
+
+Portainerだけに`/var/run/docker.sock`を渡す。この権限は開発UbuntuのDocker全体を操作でき、Linuxホストのroot相当の操作につながるため、管理者パスワードで保護し、外部公開・本番への接続を行わない。分析用runner・launcher・生成PythonへDockerソケットを渡す承認とは別であり、分析実行の隔離方式を変更しない。`cap_drop: ALL`・`no-new-privileges`を設定しても、Dockerソケット経由の管理権限が制限されるとは扱わない。
+
+導入後、状態APIでバージョン2.45.1を確認し、コンテナの稼働、127.0.0.1限定の公開、専用ボリュームとDockerソケットだけのマウントを確認した。BOSSから提供された画面で、管理者作成後のローカルDocker接続と、`pm-portainer-dev`が稼働中のコンテナ一覧を確認した。初回設定トークンはログから本人が取得し、パスワードとともにチャット・仕様書へ記録しない（[公式の初回設定説明](https://docs.portainer.io/faqs/installing/setup-token)）。
+
+通常の起動は、リポジトリ直下の`start-portainer-dev.bat`をダブルクリックする。`scripts/start-portainer-dev.ps1`がUbuntu-24.04を非表示の待機プロセス（一般ユーザー`daiso`）で維持し、Dockerサービスと既存の`pm-portainer-dev`を起動する。状態APIの応答後、既定ブラウザで管理画面を開く。Ubuntuの端末を開き続ける必要はない。再実行時は同じ待機プロセスを再利用し、Windowsの起動タスク・ファイアウォール・証明書設定は変更しない。待機中はWSLの資源を使用する。Windowsを終了した後は、次回利用時にBATを実行する。起動確認ではブラウザを開かない`-NoBrowser`で2回実行し、両方で状態APIの応答を確認した。ブラウザの自己署名証明書の警告を回避する設定は、スクリプトでは行わない。
+
+PowerShellでの管理コマンドは次のとおり。本番Composeや既存PMは操作しない。
+
+```powershell
+# 起動（初回設定が時間切れの場合は、次の再起動コマンドを使う）
+wsl.exe -d Ubuntu-24.04 -u root -- docker compose -f /mnt/d/pm/scripts/portainer.dev.compose.yml up -d
+# 初回設定トークンの取得。表示されたトークンは管理画面へだけ入力する。
+wsl.exe -d Ubuntu-24.04 -u root -- docker logs pm-portainer-dev
+# 初回設定の時間切れから復帰
+wsl.exe -d Ubuntu-24.04 -u root -- docker restart pm-portainer-dev
+# 停止（管理情報のボリュームは保持する）
+wsl.exe -d Ubuntu-24.04 -u root -- docker stop pm-portainer-dev
+```
+
 ### 4.6 実行コンテナとの受渡し
 
 Python実行用に、`analysis-runner`サービスをDocker Composeへ追加する。Djangoは`analysis_execution_service.py`から、`pm_internal`内の内部HTTPだけで実行依頼を送る。`docker exec`、Windows上でのPython直接実行、外部公開APIは使用しない。
@@ -190,6 +215,24 @@ Python実行用に、`analysis-runner`サービスをDocker Composeへ追加す�
 生成Pythonが使う`load_view('v_ai_...')`は、MySQLへ直接接続する関数ではない。Djangoが承認済みビューから取得済みの一時DuckDBスナップショットを読み出す関数とする。生成Pythonには、MySQL・Redis・内部HTTPの認証情報を渡さない。
 
 `analysis-runner`はPMソースコード、ホストの任意フォルダ、Dockerソケットをマウントしない。実行用子プロセスにはネットワークを与えず、ジョブごとの一時領域だけを操作可能にする。実行時間・CPU・メモリの上限値は§4.7の設定値による。
+
+### 4.6-2 ジョブごとの使い捨てコンテナ方式（開発での検証限定・本番は無効）
+
+2026-10-03にBOSSが承認した。上記の常駐`analysis-runner`では、ジョブの設定値（メモリ・CPU）をカーネルに強制できないため（cgroupのメモリ・CPUは、コンテナ単位でしか効かず、`cap_drop ALL`の非rootでは子のcgroupを作れない）、**1ジョブ=1コンテナ**とし、設定値を`--memory`・`--cpus`へ渡す。§4.3・§4.6の「常駐runner」「Dockerソケットを持たない」との違いは、次のとおり。
+
+- **launcher**（`analysis-sandbox/launcher/launcher.py`）がDockerを操作する唯一のプロセスで、DockerソケットはLinuxのroot相当の権限である。承認は**開発での検証に限定**する。開発ではWSL2のUbuntu上で、`127.0.0.1`のみで待ち受ける（認証なし）。ジョブ用コンテナと生成コードにソケットは渡さない。**本番は別途判断するまで実行を無効**とし、本番のcomposeには含めない。launcherが乗っ取られた場合のリスク（Docker経由のホストのroot相当）は、非rootで動かしても弱まらない。
+- **ジョブ用コンテナ**（`analysis-sandbox/job/`）は、`--network none`、読み取り専用のルート、小さなtmpfs、非root（10001）、`cap_drop ALL`、`no-new-privileges`、標準seccomp、`--pids-limit`、`--memory`（スワップなし）、`--cpus`で作る。イメージは固定したダイジェストのPython（`python:3.12-slim`）に固定版`duckdb==1.4.4`だけを加え、pipも削除する。PMのソース・`.env`・Dockerソケットは含めない。
+- **`max_memory_mb`の意味**: ジョブ用コンテナ全体の上限である。Python本体だけでなく、DuckDB、ライブラリ、一時領域（tmpfs）、カーネルのバッファが含まれる。`max_cpu_cores`はコンテナのCPU上限（`--cpus`）で、子孫・スレッドを含む。
+- **`--network none`の意味**: コンテナの外へは通信できない。コンテナ内のループバック（`lo`）は残るため、ソケットの作成そのものを禁止するものではない。
+- **データの受け渡し**: ネットワークを使わず、stdinでフレーム（ヘッダ、5,000行単位のCSVチャンク、終端）を送り、結果をstdoutで受け取る。監督プロセス（PID 1）が件数と一意キーを照合してDuckDBへ投入し、生成コードは別プロセスで実行する。
+- **隔離が確認できない場合は実行しない（fail-closed）**: 各ジョブの前にpreflight（cgroup v2、seccomp、固定イメージID、小さなコンテナで`memory.max`・`cpu.max`・`pids.max`が反映されること）を行い、コンテナ作成後に`docker inspect`で設定を完全に照合する（ネットワーク、読み取り専用、メモリ・CPU・プロセス数、権限、マウント、環境変数、イメージ）。1つでも違えば、起動せず削除し、明示エラー（`isolation_unavailable`）を返す。Landlockは使用しない。
+- **結果の採用条件**: 終了コード0、`OOMKilled`でない、ジョブ内のcgroup `oom_kill`が0（孫プロセスだけのOOMも検出する）、期限内、出力が完結（先頭・長さ・SHA-256・終端マーカー）、件数照合済み、出力が上限以内、の**すべて**を満たす場合だけ。それ以外は、途中の結果を含めて全て破棄し、失敗として扱う。結果の上限超過は切り捨てず失敗にする。ログ（stderr）だけは、64KBまでを保持し、欠落を明示して切り捨てる。
+- **後始末**: 終了後にコンテナを削除し、launcher起動時にラベルで残骸を削除する。同時に実行できるジョブは1件で、超えたら429を返す。
+- **暫定値**（検証用。BOSS承認前）: tmpfs 128MB、プロセス数128、結果5MB、表10,000行、コード64KB、ログ64KB、各段階の期限60秒（取得・転送・投入は、各段階全体の期限で、分割ごとにリセットしない）。
+
+**第1段階の検証結果（2026-10-03、開発PCのWSL2・Docker 29.8.2・cgroup v2・カーネル6.6）**: 実Dockerで28件のテストがすべて成功した（`analysis-sandbox/tests/test_isolation.py`）。確認した内容は、外部・Docker bridge・開発PCへの接続とDNSが失敗しインターフェースが`lo`のみ、継承したソケットなし、ルート・`/job`・`/etc`への書き込みと`/tmp`からの実行が拒否される、PMのソース・`.env`・`docker.sock`・pipがない、親（PID 1）の`/proc/1/mem`・`environ`・`maps`の読み取りと`ptrace`が拒否される（PID 1への停止・終了シグナルでもジョブが決定的に終了）、スレッド・フォークがプロセス数128で止まる、CPU 0.5コアの上限でスレッド・孫プロセスを使っても平均0.50コア（スロットリングあり）、メモリ上限でのOOM（単独・スレッド経由・孫プロセスのみ）では結果を採用しない、実行時間の超過（SIGTERMを無視するループを含む）で強制終了される、tmpfsが満杯になると失敗して後始末される、途中で終了・改ざん・余分なデータ・終端なし・上限超過・不正な結果ファイルを採用しない、弱めた設定（ネットワークあり、書き込み可能なルート、特権、マウント、環境変数、メモリ・CPU違い、スワップ許可、rootなど）をinspectの照合が拒否する、隔離機能が不足した場合にコンテナを作らず拒否する、残骸の削除、同時実行1件。10万行（5,000行単位）の全体時間は約9〜15秒、コンテナ内の投入は約1秒だった（件数照合・一意キー確認を含む）。
+
+未確認・未実施: 本番のホストでの動作（カーネル・cgroup・Docker構成は未確認）、実際のAI生成コードでの動作、Django側の取得・照合・分割送信、実DBの取得性能、生成コードの画面表示。
 
 ### 4.7 分析実行設定
 
