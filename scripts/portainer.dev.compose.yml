@@ -1,0 +1,29 @@
+# 開発PCのWSL2専用。本番Composeとは別に起動する。
+name: pm-portainer-dev
+
+services:
+  portainer:
+    # 導入時の公式LTSイメージを固定し、更新は別途確認する。
+    image: portainer/portainer-ce@sha256:4d616db18cfeb5dd41a69c0958bc825c84483ea9cde1106eb82a5d26f3bd8b0e
+    container_name: pm-portainer-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9443:9443"
+    volumes:
+      # 管理画面だけにDocker管理権限を渡す。分析ジョブには渡さない。
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - portainer_admin
+
+volumes:
+  portainer_data:
+    name: pm_portainer_dev_data
+
+networks:
+  portainer_admin:
+    name: pm_portainer_admin
