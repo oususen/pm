@@ -10,10 +10,11 @@ from ai.config.models import AIAnalysisExecutionPolicy, AICrossScreenAccessPolic
 class AIProviderConfigSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
     models = serializers.SerializerMethodField()
+    analysis_plan_timeout_seconds = serializers.IntegerField(min_value=30, max_value=600, required=False)
 
     class Meta:
         model = AIProviderConfig
-        fields = ('id', 'provider', 'label', 'models', 'default_model', 'is_enabled', 'display_order', 'updated_at')
+        fields = ('id', 'provider', 'label', 'models', 'default_model', 'is_enabled', 'display_order', 'analysis_plan_timeout_seconds', 'updated_at')
         read_only_fields = ('provider', 'label', 'models', 'updated_at')
 
     def get_label(self, obj):
@@ -30,6 +31,12 @@ class AIProviderConfigSerializer(serializers.ModelSerializer):
         allowed = {model_id for model_id, _ in PROVIDER_CATALOG.get(provider, {}).get('models', ())}
         if value not in allowed:
             raise serializers.ValidationError('このプロバイダで選択できないモデルです。')
+        return value
+
+    def validate_analysis_plan_timeout_seconds(self, value):
+        provider = self.instance.provider if self.instance else self.initial_data.get('provider')
+        if provider != 'qwen':
+            raise serializers.ValidationError('この設定はローカルQwenの分析案作成専用です。')
         return value
 
 

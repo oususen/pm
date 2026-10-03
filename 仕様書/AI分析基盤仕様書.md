@@ -165,6 +165,18 @@ AI生成Pythonは、`load_view()`でDjangoが取得済みのビュー・スナ�
 
 分析案・承認部分は実装済み。現在はローカルQwen・DeepSeek・OpenRouterの選択（初期選択は検索AIと同じ）と、既存の入荷・出荷ビューの期間指定（追加条件・資料なし）に限る。外部AIへ送るのは、社員・顧客・仕入先の登録コードに置換して利用者が確認した分析目的・期間・公開ビューの説明だけで、DBの明細・件数は送らない。無効化済みも対象とし、コード不明・同名による曖昧さ・取得失敗なら送信を止める。未登録名称の自動検出は保証せず、送信前の画面確認で人名・社名・機密が残っていないことを利用者が確認する。入力・対応コードが変わったら確認を取り直す。コードは先頭ゼロを保持し、応答で名前へ自動復元しない。検索AIの伏字方式は変更しない。Redisの共有保存、期限付き状態管理、手順承認、固定COUNTによる件数確認、データ範囲承認を提供する。承認時に期限を延長せず、版競合・所有者不一致・未確認件数・上限超過を拒否する。実行API・DuckDB・SQL／Python・テンプレート保存は未実装。APIの入力と現時点の検証状況は`AI二画面実装計画.md`§5.1に記載する。
 
+#### WSL2・Dockerを使う開発方針（2026-10-03承認）
+
+BOSSは開発PCにもDocker環境を導入し、実runnerを検証する方針（案B）を承認した。WSL2へUbuntu 24.04 LTSを追加し、そのLinux内にDocker公式配布のDocker EngineとComposeプラグインを導入する。Docker Desktopは使用しない。Ubuntuの保存先は`C:\Users\user\AppData\Local\WSL\Ubuntu-24.04`とする。初回のLinuxユーザー名・パスワードはBOSS本人が設定する。Windows上の既存PM・DB・Memuraiは移行せず維持し、本番へは接続・反映しない。
+
+Docker導入は実行環境の準備であり、集計機能の実装・隔離確認の完了ではない。生成PythonはWindows上で直接実行せず、§4.3・§4.6のDocker runnerでだけ実行する。既存の本番用Compose全体を開発PCでそのまま起動しない。開発向けの接続・ポート・DBの構成は、runner実装時に確認する。分割サイズ・各段階の時間制限・同時実行・出力上限の未承認値は、Docker導入の承認によって確定したものとは扱わない。
+
+2026-10-03に公式WSL配布の`Ubuntu-24.04`を上記保存先へWSLバージョン2で導入し、BOSS本人がLinuxユーザー`daiso`とパスワードを設定した。パスワードはエージェントへ送信しない。その後、[Docker公式手順](https://docs.docker.com/engine/install/ubuntu/)のAPTリポジトリからDocker Engine 29.8.2、Compose v5.6.0、Buildx v0.37.1を導入した。Ubuntu内のDockerサービスが有効・稼働中であること、クライアント・サーバー双方のバージョン、cgroups v2を確認した。Docker APIのTCP公開は追加していない。
+
+公式`hello-world`を`--rm --network none`で実行し、`Hello from Docker!`と正常終了を確認した。ホストのマウント・ポート公開は行わず、確認用コンテナは終了時に削除済み（イメージは残す）。確認後のコンテナ一覧は空で、既存Windowsサービスの待受け（PM画面8501、Django8081、MySQL3306、Memurai127.0.0.1:6379）は維持されている。PM用Compose、集計runner、生成Pythonは実行していない。Docker標準seccompが有効でも、生成Pythonのネットワーク遮断・隔離が検証済みとは扱わない。
+
+操作はPowerShellで`wsl.exe -d Ubuntu-24.04`を実行してUbuntuへ入り、`sudo docker version`、`sudo docker compose version`で確認する。`daiso`をDockerグループへ追加しておらず、Docker操作には`sudo`を使用する。WindowsのPATH・ファイアウォール・自動起動タスクは今回変更していない。本番へは接続・反映していない。
+
 ### 4.6 実行コンテナとの受渡し
 
 Python実行用に、`analysis-runner`サービスをDocker Composeへ追加する。Djangoは`analysis_execution_service.py`から、`pm_internal`内の内部HTTPだけで実行依頼を送る。`docker exec`、Windows上でのPython直接実行、外部公開APIは使用しない。
@@ -180,6 +192,16 @@ Python実行用に、`analysis-runner`サービスをDocker Composeへ追加す�
 `analysis-runner`はPMソースコード、ホストの任意フォルダ、Dockerソケットをマウントしない。実行用子プロセスにはネットワークを与えず、ジョブごとの一時領域だけを操作可能にする。実行時間・CPU・メモリの上限値は§4.7の設定値による。
 
 ### 4.7 分析実行設定
+
+#### ローカルQwenの分析案作成タイムアウト
+
+`/settings/ai`の「AIプロバイダ・モデル」内、「ローカルQwen」カードの既定モデルの下に「分析案作成タイムアウト（秒）」を配置する。初期値180秒、30〜600秒の整数（1秒単位）を入力し、専用の「保存」ボタンで確定する。PM本体DBの既存テーブル`ai_provider_config`へ`analysis_plan_timeout_seconds`列を追加する（AIマイグレーション`0023`）。既存のモデル・有効状態は変更しない。社外プロバイダ行にも列は存在するが使用せず、この値の更新はQwen行に限る。
+
+取得は既存の`GET /api/ai/settings/providers/`、保存は`PATCH /api/ai/settings/providers/{id}/`で行う。範囲外・0・空欄・小数・nullは400と項目別エラーを返して保存しない。閲覧・編集権限は既存の`settings.ai`に従い、フロントエンドUIのみで制御する。
+
+分析案作成時に保存済みの値を読み取り、ローカルOllamaへの応答待ち時間として渡す。設定変更は次のQwen分析案作成から適用し、既に待機中の呼出しは変えない。設定の取得失敗・不正値は503で停止し、90秒などの別の値で代替しない。検索AI、社外API、Python実行時間には適用しない。タイムアウト時の途中応答を分析案として採用しない。上限の600秒はOllama呼出しの設定値であり、プロキシ・ワーカーの制限を延長する設定ではない。
+
+#### Python・データ取得の実行設定
 
 分析実行の上限値は、`/settings/ai`の「分析実行設定」で変更できる。設定はPM本体DBの単一設定テーブル`ai_analysis_execution_policy`（モデル`AIAnalysisExecutionPolicy`）へ保存し、本番コンテナの環境変数やソースコードへ保存しない。
 

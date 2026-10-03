@@ -163,14 +163,16 @@ class ExternalPlanningTest(SimpleTestCase):
                 self.assertIn(text, str(error.detail))
         self.assertEqual(self.redis.values, {})
 
-    def test_local_qwen_path_is_unchanged_and_never_calls_external_api(self):
+    def test_local_qwen_uses_its_timeout_and_never_calls_external_api(self):
         raw = json.dumps(PROPOSAL, ensure_ascii=False)
         with patch('ai.services.analysis_planning_service.planning_options', return_value={'available': True}), \
                 patch('ai.services.analysis_planning_service.chat_service._chat', return_value=raw) as chat, \
+                patch('ai.services.analysis_planning_service.get_qwen_analysis_timeout', return_value=180), \
                 patch('ai.services.analysis_llm.urlopen') as urlopen:
             plan = self.create()
         urlopen.assert_not_called()
         self.assertEqual(chat.call_args.args[1], 'qwen')
+        self.assertEqual(chat.call_args.kwargs['timeout'], 180)
         self.assertEqual((plan['proposal']['provider'], plan['proposal']['model']), ('qwen', chat_service.MODEL))
         self.assertEqual(plan['proposal']['title'], PROPOSAL['title'])
 

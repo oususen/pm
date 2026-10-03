@@ -21,6 +21,20 @@
               <option v-for="model in item.models" :key="model.id" :value="model.id">{{ model.label }}</option>
             </select>
           </label>
+          <form v-if="item.provider === 'qwen'" class="qwen-timeout-form" @submit.prevent="saveQwenTimeout(item)">
+            <label for="qwen-analysis-timeout">分析案作成タイムアウト（秒）</label>
+              <div class="qwen-timeout-controls">
+                <input id="qwen-analysis-timeout" v-model.number="item.analysis_plan_timeout_seconds" type="number"
+                  min="30" max="600" step="1" required :disabled="!canEdit || loading || savingQwenTimeout"
+                  :aria-invalid="Boolean(qwenTimeoutError)" aria-describedby="qwen-timeout-help" />
+                <button v-if="canEdit" class="reload-button" type="submit" :disabled="loading || savingQwenTimeout">
+                  {{ savingQwenTimeout ? '保存中…' : '保存' }}
+                </button>
+              </div>
+            <small id="qwen-timeout-help">30〜600秒・1秒単位。保存後の分析案作成だけに適用します。検索AI・社外API・Python実行時間は変わりません。</small>
+            <p v-if="qwenTimeoutError" class="error" role="alert">{{ qwenTimeoutError }}</p>
+            <p v-if="qwenTimeoutNotice" class="notice" role="status">{{ qwenTimeoutNotice }}</p>
+          </form>
           <small>認証情報はここには保存せず、サーバーの環境変数で管理します。</small>
         </article>
       </div>
@@ -167,6 +181,9 @@ import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 
 const providers = ref([])
+const savingQwenTimeout = ref(false)
+const qwenTimeoutError = ref('')
+const qwenTimeoutNotice = ref('')
 const tools = ref([])
 const dataPolicy = ref(null)
 const analysisExecutionPolicy = ref(null)
@@ -260,6 +277,28 @@ const load = async () => {
 const saveProvider = async (item) => {
   try { await api.aiSettings.updateProvider(item.id, { is_enabled: item.is_enabled, default_model: item.default_model }); saved('プロバイダ設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
 }
+const saveQwenTimeout = async (item) => {
+  if (!canEdit.value || loading.value || savingQwenTimeout.value || item.provider !== 'qwen') return
+  qwenTimeoutError.value = ''
+  qwenTimeoutNotice.value = ''
+  const timeout = item.analysis_plan_timeout_seconds
+  if (!Number.isInteger(timeout) || timeout < 30 || timeout > 600) {
+    qwenTimeoutError.value = '30〜600秒の整数を入力してください。'
+    return
+  }
+  savingQwenTimeout.value = true
+  try {
+    const { data } = await api.aiSettings.updateProvider(item.id, { analysis_plan_timeout_seconds: timeout })
+    item.analysis_plan_timeout_seconds = data.analysis_plan_timeout_seconds
+    qwenTimeoutNotice.value = '保存しました。次のQwen分析案作成から適用します。'
+  } catch (requestError) {
+    const response = requestError.response?.data
+    qwenTimeoutError.value = [response?.analysis_plan_timeout_seconds].flat().filter(Boolean).join(' ')
+      || response?.detail || '保存できませんでした。入力値を確認して再試行してください。'
+  } finally {
+    savingQwenTimeout.value = false
+  }
+}
 const saveTool = async (item) => {
   try { await api.aiSettings.updateTool(item.id, { is_enabled: item.is_enabled, allow_external_transfer: item.allow_external_transfer }); saved('ツール設定を保存しました。') } catch (requestError) { failed(requestError); await load() }
 }
@@ -348,4 +387,5 @@ load()
 .cross-screen-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.cross-screen-form select,.cross-screen-form input{border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff;font-size:11px}.cross-screen-form input[type=text]{min-width:280px}.cross-screen-form label{font-size:11px}
 .ocr-status{display:grid;gap:3px;margin-top:9px;padding:8px 10px;border:1px solid #b8ded3;border-radius:7px;background:#eef9f5;font-size:12px;color:#176b60}.ocr-status small{color:#5c7772}.ocr-status.unavailable{border-color:#efc7bd;background:#fff4f1;color:#ad5548}.ocr-result{white-space:pre-wrap;max-height:260px;overflow:auto;margin:10px 0 0;padding:9px;border:1px solid #e1ece9;border-radius:7px;background:#f8fbfa;font-size:12px;line-height:1.6}
 .execution-policy-grid label{display:grid;gap:4px;font-size:12px}.execution-policy-grid small{font-size:11px;color:#64748b}.execution-policy-grid .field-error{color:#ae5146}.execution-save{margin-top:10px}
+.qwen-timeout-controls{display:flex;align-items:center;gap:7px}.qwen-timeout-controls input{min-width:0;flex:1;border:1px solid #cdded9;border-radius:5px;padding:5px;background:#fff}.qwen-timeout-form .reload-button:disabled{opacity:.5;cursor:default}
 </style>

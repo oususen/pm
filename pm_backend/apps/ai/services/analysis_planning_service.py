@@ -171,9 +171,12 @@ def create_plan(owner_id, data):
         {'role': 'user', 'content': json.dumps({'purpose': external_purpose if provider != 'qwen' else purpose, 'date_from': start, 'date_to': end}, ensure_ascii=False)},
     ]
     try:
-        # チャットのツール・履歴・集計結果は使わない。既存LLM呼出しの時間・出力予算を使用する。
+        # チャットのツール・履歴・集計結果は使わない。Qwenの分析案だけ保存済み時間を適用する。
         if provider == 'qwen':
-            raw = chat_service._chat(messages, 'qwen', json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS)
+            raw = chat_service._chat(
+                messages, 'qwen', json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS,
+                timeout=get_qwen_analysis_timeout(),
+            )
         else:
             raw = analysis_llm.request_external_json(provider, model, messages)
     except chat_service.LocalAIError as exc:
@@ -184,6 +187,17 @@ def create_plan(owner_id, data):
         proposal['external_purpose'] = external_purpose
     proposal = {**proposal, 'provider': provider, 'model': model}
     return store.create(owner_id, proposal, policy.plan_cache_ttl_minutes)
+
+
+def get_qwen_analysis_timeout():
+    """毎回保存済み設定を取得する。未適用・不正値は別の秒数で代替せず停止する。"""
+    try:
+        timeout = AIProviderConfig.objects.get(provider='qwen').analysis_plan_timeout_seconds
+    except (DatabaseError, AIProviderConfig.DoesNotExist) as exc:
+        raise AnalysisError('Qwenの分析案作成タイムアウトを取得できません。AI設定とマイグレーションを確認してください。', 503) from exc
+    if type(timeout) is not int or not 30 <= timeout <= 600:
+        raise AnalysisError('Qwenの分析案作成タイムアウトが不正です。AI設定で30〜600秒を保存してください。', 503)
+    return timeout
 
 
 def approve_plan(store, plan_id, owner_id, revision, stage):

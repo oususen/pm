@@ -159,14 +159,24 @@ class AnalysisPlanningTest(SimpleTestCase):
         raw = json.dumps({key: self.proposal[key] for key in ('title', 'steps', 'outputs', 'datasets')})
         with patch('ai.services.analysis_planning_service.planning_options', return_value={'available': True}), patch(
             'ai.services.analysis_planning_service.chat_service._chat', return_value=raw,
-        ) as chat:
+        ) as chat, patch('ai.services.analysis_planning_service.get_qwen_analysis_timeout', return_value=240):
             plan = create_plan(3, {'purpose': '出荷傾向を見る', 'date_from': '2026-09-01', 'date_to': '2026-09-30'})
         messages, provider = chat.call_args.args
         self.assertEqual(provider, 'qwen')
+        self.assertEqual(chat.call_args.kwargs['timeout'], 240)
         self.assertEqual([message['role'] for message in messages], ['system', 'user'])
         self.assertNotIn('t_shipment_actual', messages[0]['content'])
         self.assertNotIn('000196', messages[0]['content'])
         self.assertEqual(plan['status'], 'awaiting_method')
+
+    def test_invalid_qwen_timeout_stops_before_ai_and_plan_save(self):
+        with patch('ai.services.analysis_planning_service.planning_options', return_value={'available': True}), patch(
+            'ai.services.analysis_planning_service.get_qwen_analysis_timeout', side_effect=AnalysisError('設定不正', 503),
+        ), patch('ai.services.analysis_planning_service.chat_service._chat') as chat:
+            before = dict(self.redis.values)
+            self.assert_error(503, lambda: create_plan(3, {'purpose': '目的', 'date_from': '2026-09-01', 'date_to': '2026-09-30'}))
+            chat.assert_not_called()
+            self.assertEqual(self.redis.values, before)
 
     def test_cache_failure_stops_before_ai_call(self):
         with patch('ai.services.analysis_planning_service.planning_options', return_value={'available': True}), patch.object(

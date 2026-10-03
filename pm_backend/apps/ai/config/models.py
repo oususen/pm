@@ -1,4 +1,5 @@
 """社内AIの運用設定モデル。認証情報や業務明細は保存しない。"""
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from ai.config.catalog import KNOWLEDGE_CATEGORY_CHOICES, PROVIDER_CATALOG, SCREEN_CATALOG, TOOL_CATALOG
@@ -10,6 +11,11 @@ class AIProviderConfig(models.Model):
     default_model = models.CharField(max_length=100)
     is_enabled = models.BooleanField(default=True, verbose_name='有効')
     display_order = models.PositiveIntegerField(default=0, verbose_name='表示順')
+    # ローカルQwenの分析案作成だけで使用する。検索AI・社外APIには適用しない。
+    analysis_plan_timeout_seconds = models.PositiveIntegerField(
+        default=180, validators=[MinValueValidator(30), MaxValueValidator(600)],
+        verbose_name='分析案作成タイムアウト（秒）',
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
