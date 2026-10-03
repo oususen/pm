@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pm-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "pm-ui", "run", "dev"],
+      "port": 8501
+    },
+    {
+      "name": "pm-backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["pm_backend/manage.py", "runserver", "8081"],
+      "port": 8081
+    }
+  ]
+}
