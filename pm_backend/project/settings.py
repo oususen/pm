@@ -117,6 +117,7 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 # 未保存の分析案は共有Redisだけへ保持し、未設定時に代替先へ保存しない。
+# Dockerなしの開発接続先は pm_backend/.env、本番はComposeの内部サービスURLを使う。
 AI_ANALYSIS_REDIS_URL = os.getenv('AI_ANALYSIS_REDIS_URL', '').strip()
 
 AI_READER_DB_OPTIONS = {
