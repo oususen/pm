@@ -1,0 +1,2 @@
+# Dockerfile・シェル・Pythonは、チェックアウト環境のautocrlfに関わらずLFで取り扱う(CRLFだとDockerのビルドが壊れる)
+* text eol=lf
