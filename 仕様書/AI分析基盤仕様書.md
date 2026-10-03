@@ -106,7 +106,7 @@ AI用ユーザーは`pm_ai_reader`とする。接続先は`pm_db`である。
 
 MySQLでは`root`@`localhost`と`root`@`%`は別アカウントである。存在しない定義者が記録されたビューはエラー1449で実行できなくなるため、環境ごとに存在が保証できる専用ユーザーを定義者にする。
 
-開発DB（`localhost:3306/pm_db`）は承認済みの`pm_ai_view_owner`@`localhost`を使用する。ACCOUNT LOCKでログインを禁止し、入荷・出荷ビューが参照する元テーブルの必要列だけにSELECTを付与する。2026-10-03に両ビューの定義者を変更し、SELECT本文・列・文字セット・既存reader権限が変わっていないこと、PMのTLS付き`ai_reader`接続から参照できることを確認した。新規マイグレーションは追加していない。DDLを行う管理者と、ビュー実行の定義者の権限は区別する。
+開発DB（`localhost:3306/pm_db`）では`pm_ai_view_owner`@`localhost`を作成・使用済み。専用定義者への変更方針はBOSSの承認を得たが、当初の提案にこのアカウント名は記載しておらず、名前自体まで「承認済み」とした記載は不正確だった。その訂正後、2026-10-03にBOSSから、このアカウント名での利用継続について明示承認を得た。今回の更新は承認記録の仕様書反映だけで、追加のDB変更は行っていない。ACCOUNT LOCKでログインを禁止し、入荷・出荷ビューが参照する元テーブルの必要列だけにSELECTを付与した。2026-10-03に両ビューの定義者を変更し、SELECT本文・列・文字セット・既存reader権限が変わっていないこと、PMのTLS付き`ai_reader`接続から参照できることを確認した。新規マイグレーションは追加していない。DDLを行う管理者と、ビュー実行の定義者の権限は区別する。
 
 本番のアカウント名・ホスト部分・作成手順は別途確認・承認する。今回、本番DBには接続・変更していない。
 
@@ -153,7 +153,7 @@ AI生成Pythonは、`load_view()`でDjangoが取得済みのビュー・スナ�
 
 #### DockerなしのWindows開発
 
-開発PCだけにMemurai Developer（Redis互換）を導入し、本番のCompose Redisとは分離する。Windowsサービス登録・PATH変更・ファイアウォール開放は行わない。`scripts/analysis-redis-dev.conf`で`127.0.0.1:6379`だけに待ち受け、RDB/AOFを無効にする。分析案は停止・再起動で失われる。Developer版は開発・テスト限定で、連続稼働10日後に再起動が必要（[公式案内](https://www.memurai.com/get-memurai)）。
+開発PCだけにMemurai Developer（Redis互換）を導入し、本番のCompose Redisとは分離する。Windowsサービス登録・PATH変更・ファイアウォール開放は行わない。`scripts/analysis-redis-dev.conf`で`127.0.0.1:6379`だけに待ち受け、RDB/AOFを無効にする。分析案は停止・再起動で失われる。Developer版は開発・テスト限定で、連続稼働10日で自動停止し、再起動が必要（2026-10-03に[公式案内](https://www.memurai.com/get-memurai)で確認）。
 
 1. 公式Memurai Developerのインストーラーを実行し、利用規約への同意と必要な管理者操作は利用者本人が行う。MSIには`INSTALL_SERVICE=0 ADD_FIREWALL_RULE=0 ADD_INSTALLFOLDER_TO_PATH=0`を指定する。無人インストールで規約同意を代行しない。
 2. リポジトリルートで`.\scripts\start-analysis-redis-dev.ps1`を実行する。起動した端末を維持し、停止はCtrl+C。既存の6379番ポートを使うプロセスは勝手に停止しない。
@@ -161,7 +161,7 @@ AI生成Pythonは、`load_view()`でDjangoが取得済みのビュー・スナ�
 
 2026-10-03に利用者本人がインストールを完了。Janea Systems署名を検証し、上記設定で開発用Memuraiを起動した。PING、ループバック限定待受け、RDB/AOF無効、サービス・Memurai用ファイアウォール規則なしを確認済み。開発`pm_backend/.env`に接続先を設定し、Djangoの開発サーバーは設定再読込み後に稼働している。初回確認ではバックグラウンド起動しているが、Windows起動時の自動起動は登録していない。PC再起動後は手順2で起動する。本番構成・本番DB・本番環境変数は変更していない。生成Pythonの実行環境は別課題であり、Memurai導入によってWindows上で生成Pythonを直接実行できるようにはしない。
 
-導入後の確認では、MSIにPATH変更無効を指定していたが、開発PCのMachine PATHへ`C:\Program Files\Memurai\`が追加されていた。起動スクリプトはフルパスを使用するためこの項目は不要。管理者権限による当該1項目だけの削除は利用者承認待ちで、ほかのPATH項目は変更しない。
+導入後の確認では、MSIにPATH変更無効を指定していたが、開発PCのMachine PATHへ`C:\Program Files\Memurai\`が追加されていた。起動スクリプトはフルパスを使用するためこの項目は不要。2026-10-03にBOSSの明示依頼とWindowsの管理者確認を経て当該1項目だけを削除し、Machine/User PATHにMemurai項目がないことを確認した。残りの項目の文字列・順序・レジストリ値の型は維持した。ダウンロードしたMSIはごみ箱へ移動済みで復元可能。Memurai本体・起動設定は残し、削除後もPINGが成功することを確認した。
 
 分析案・承認部分は実装済み。現在はローカルQwenと既存の入荷・出荷ビューの期間指定（追加条件・資料なし）に限る。Redisの共有保存、期限付き状態管理、手順承認、固定COUNTによる件数確認、データ範囲承認を提供する。承認時に期限を延長せず、版競合・所有者不一致・未確認件数・上限超過を拒否する。外部AI・実行API・DuckDB・SQL／Python・テンプレート保存は未実装。APIの入力と現時点の検証状況は`AI二画面実装計画.md`§5.1に記載する。
 
