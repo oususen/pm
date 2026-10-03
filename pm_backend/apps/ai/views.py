@@ -35,7 +35,7 @@ class AIAnalysisPlansView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        return Response(public_plan(create_plan(request.user.pk, request.data)), status=201)
+        return Response(_codegen_response(create_plan(request.user.pk, request.data)), status=201)
 
 
 class AIAnalysisExternalPreviewView(APIView):
@@ -49,7 +49,7 @@ class AIAnalysisPlanView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, plan_id):
-        return Response(public_plan(AnalysisPlanStore().get(str(plan_id), request.user.pk)))
+        return Response(_codegen_response(AnalysisPlanStore().get(str(plan_id), request.user.pk)))
 
 
 class AIAnalysisApproveView(APIView):
@@ -59,7 +59,7 @@ class AIAnalysisApproveView(APIView):
         if not isinstance(request.data, dict) or set(request.data) != {'revision', 'stage'}:
             raise AnalysisError('承認する版と段階のみを指定してください。')
         plan = approve_plan(AnalysisPlanStore(), str(plan_id), request.user.pk, request.data['revision'], request.data['stage'])
-        return Response(public_plan(plan))
+        return Response(_codegen_response(plan))
 
 
 class AIAnalysisPreviewView(APIView):
@@ -69,7 +69,7 @@ class AIAnalysisPreviewView(APIView):
         if not isinstance(request.data, dict) or set(request.data) != {'revision'}:
             raise AnalysisError('対象件数を確認する版のみを指定してください。')
         plan = preview_plan(AnalysisPlanStore(), str(plan_id), request.user.pk, request.data['revision'])
-        return Response(public_plan(plan))
+        return Response(_codegen_response(plan))
 
 
 def _codegen_response(plan):

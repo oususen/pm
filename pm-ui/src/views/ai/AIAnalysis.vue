@@ -1,8 +1,8 @@
 <template>
   <main class="analysis-workspace">
     <header><h1>AI分析</h1><span>分析案・承認</span></header>
-    <p class="notice">分析案とデータ範囲の承認まで対応しています。SQL／Python実行・結果生成・テンプレート保存は未実装です。{{ options?.notice || '' }}</p>
-    <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認には「AI分析」の編集権限が必要です。</p>
+    <p class="notice">分析案・データ範囲の承認から、SQL／Python生成・SQLの試行・コード承認まで対応しています。実データでの分析実行・結果表示・テンプレート保存は未対応です。{{ options?.notice || '' }}</p>
+    <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認、コード生成・SQL試行・コード承認・状態不明の解除には「AI分析」の編集権限が必要です。</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <label for="analysis-purpose">分析目的</label>
     <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
@@ -69,7 +69,48 @@
           <button :disabled="!canEdit || !!busy || !plan.preview || plan.preview.over_limit" @click="approve('data')">データ範囲を承認</button>
         </div>
         <p v-if="plan.data_approved_at" role="status">データ承認日時: {{ formatDate(plan.data_approved_at) }}。承認は完了しましたが、分析はまだ実行していません。</p>
-        <button disabled>分析を実行（実行基盤は未実装）</button>
+        <section v-if="plan.status === 'data_approved'" class="codegen">
+          <h3>3. SQL・Pythonの生成と承認</h3>
+          <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
+          <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
+          <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
+          <p v-if="codeInFlight" class="warning">{{ codeState?.inflight_state === 'unknown' ? '生成が中断した可能性があります（状態不明）。停止したとは断定できません。' : 'コードを生成中です。' }} 自動再送・有効期限の延長はしません。「分析案の状態を再取得」で最新状態を確認してください。</p>
+          <button v-if="codeState?.inflight_state === 'unknown'" :disabled="!canReleaseCodegen" @click="releaseCodegen">状態不明の生成を解除（回数は戻りません）</button>
+          <template v-if="!codeInFlight">
+            <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未登録の名称・機密は自動判別できません。</p>
+            <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">コード生成で社外送信する全文を確認</button>
+            <section v-if="codeExternal && codePreview" class="dataset">
+              <h4>コード生成の社外送信前確認（まだ送信していません）</h4>
+              <p>送信先: {{ codePreview.provider }} / モデル: {{ codePreview.model }} / 生成: {{ codePreview.attempt }}回目</p>
+              <p>送らないもの: {{ codePreview.not_sent.join('、') }}</p>
+              <div v-for="(message, index) in codePreview.messages" :key="index">
+                <p>送信文 {{ index + 1 }}（{{ message.role }}）</p><pre>{{ message.content }}</pre>
+              </div>
+              <label><input v-model="codeSendAccepted" type="checkbox" :disabled="!canEdit || !!busy">置換後の全文を確認し、未登録の人名・社名・機密が残っていないことを確認しました</label>
+            </section>
+            <button v-if="!codeExternal || codePreview" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode">{{ busy === 'code-generate' ? 'SQL・Pythonを生成中…' : codeExternal ? '確認した全文を社外AIへ送ってコードを生成' : 'ローカルQwenでコードを生成' }}</button>
+            <p v-if="codeState && codeState.attempts >= codeState.max_attempts">AI生成回数の上限に達しました。試行のやり直しは生成回数に含みません。再生成が必要なら分析案を作り直してください。</p>
+          </template>
+          <p v-if="codeState?.status === 'failed'" class="error">コード生成に失敗したか、状態不明の生成を解除しました。採用できるコードはありません。再生成には新しい送信確認が必要です。</p>
+          <ul v-if="codeState?.status === 'failed' && codeFailureLabels.length" class="error"><li v-for="label in codeFailureLabels" :key="label">{{ label }}</li></ul>
+          <template v-if="hasCode">
+            <h4>生成SQL（中間テーブル作成の手順）</h4>
+            <p v-if="!codegen.steps.length">SQLの中間テーブル作成なし。</p>
+            <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
+            <h4>生成Python</h4><pre>{{ codegen.python }}</pre>
+            <small>コード全体のSHA-256: {{ codegen.executed_code_sha256 }} / 固定外枠の版: {{ codegen.wrapper_version }}</small>
+            <p role="status">SQL試行: {{ trialStatusLabel }}{{ codegen.trial?.at ? ` / 確認日時: ${formatDate(codegen.trial.at)}` : '' }}</p>
+            <p v-if="trialFailureLabel" class="error">{{ trialStepLabel ? `${trialStepLabel}: ` : '' }}{{ trialFailureLabel }}</p>
+            <p>試行は実DBを使わず、空のテーブルでSQLの構文・参照・中間テーブルの規則だけを確認します。Pythonは静的検査のみです。実データでの成功や分析の正しさは保証しません。試行は実行履歴に残しません。</p>
+            <button v-if="codeState?.status === 'generated'" :disabled="!canTrial" @click="trialCode">{{ busy === 'code-trial' ? 'SQLを試行中…' : 'SQLを試行（実データなし）' }}</button>
+            <template v-if="codeState?.status === 'generated'">
+              <label><input v-model="codeAccepted" type="checkbox" :disabled="!canEdit || !!busy || !trialPassed">表示したSQL・Pythonと分析目的を確認し、このコードを承認します（実行はまだ行いません）</label>
+              <button :disabled="!canApproveCode || !codeAccepted" @click="approveCode">確認したSQL・Pythonを承認</button>
+            </template>
+            <p v-if="codeState?.status === 'code_approved'" role="status">コード承認日時: {{ formatDate(codegen.code_approved_at) }}。コード承認済み・分析未実行です。</p>
+          </template>
+        </section>
+        <button disabled>分析を実行（実行API・結果画面は次工程で対応）</button>
       </template>
       <div class="actions">
         <button :disabled="!!busy" @click="refresh">分析案の状態を再取得</button>
@@ -97,6 +138,10 @@ const busy = ref('')
 const error = ref('')
 const externalPreview = ref(null)
 const externalAccepted = ref(false)
+const codePreview = ref(null)
+const codeSendAccepted = ref(false)
+const codeAccepted = ref(false)
+const codeStateFresh = ref(true)
 let generation = 0
 let disposed = false
 let lastSelection = { provider: '', model: '' }
@@ -110,6 +155,85 @@ const planProviderLabel = computed(() => {
   const label = options.value?.providers.find(item => item.provider === proposal?.provider)?.label || proposal?.provider || ''
   return proposal?.model ? `${label} / ${proposal.model}` : label
 })
+const codegen = computed(() => plan.value?.codegen || null)
+const codeState = computed(() => plan.value?.codegen_state || null)
+const codeExternal = computed(() => plan.value?.proposal.provider !== 'qwen')
+const codeInFlight = computed(() => !!codegen.value?.inflight || !!codeState.value?.inflight_state || codeState.value?.status === 'generating')
+const canGenerate = computed(() => props.canEdit && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && codeState.value && !codeInFlight.value && codeState.value.attempts < codeState.value.max_attempts)
+const hasCode = computed(() => ['generated', 'code_approved'].includes(codeState.value?.status) && Array.isArray(codegen.value?.steps) && typeof codegen.value?.python === 'string')
+const trialPassed = computed(() => codegen.value?.trial?.status === 'passed' && !!codegen.value?.executed_code_sha256 && codegen.value.trial.executed_code_sha256 === codegen.value.executed_code_sha256)
+const canTrial = computed(() => props.canEdit && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && hasCode.value && !codeInFlight.value && codeState.value?.status === 'generated')
+const canApproveCode = computed(() => canTrial.value && trialPassed.value)
+const canReleaseCodegen = computed(() => props.canEdit && !busy.value && codeStateFresh.value && codeState.value?.inflight_state === 'unknown')
+const codeStatusLabel = computed(() => ({ none: '未生成', generating: '生成中', generated: '生成済み・承認待ち', code_approved: '承認済み・未実行', failed: '生成失敗／解除済み' })[codeState.value?.status] || '状態未確認')
+const trialStatusLabel = computed(() => ({ passed: '合格', failed: '不合格', unverified: '未検証（実行基盤の状態を確認して試行をやり直してください）' })[codegen.value?.trial?.status] || '未実施')
+// 理由コードだけを固定文へ変換する。AI・DuckDBの説明文や未知の理由の本文は表示しない。
+const FAILURE_LABELS = Object.freeze({
+  ai_request_failed: 'AIとの通信に失敗しました。生成回数は消費されています。',
+  response_invalid: 'AIの応答が指定された形式ではありません。',
+  ai_unsupported: 'AIが、このデータ範囲では分析コードを作成できないと判定しました。',
+  inflight_released: '状態不明の生成を利用者の操作で解除しました。生成回数は戻りません。',
+  steps_invalid: 'SQL手順の形式が正しくありません。',
+  step_name_invalid: '中間テーブル名が規則に合っていません。',
+  query_empty: 'SQLの問い合わせが空です。',
+  python_empty: 'Pythonのコードが空です。',
+  too_many_steps: 'SQL手順の数が上限を超えています。',
+  sql_too_large: 'SQLのサイズが上限を超えています。',
+  python_too_large: 'Pythonのサイズが上限を超えています。',
+  code_too_large: '固定外枠を含むコード全体のサイズが上限を超えています。',
+  'python:syntax_error': 'Pythonの構文に誤りがあります。',
+  'python:import_not_allowed': 'Pythonが許可されていないライブラリを使用しています。',
+  'python:forbidden_name': 'Pythonが禁止された操作を使用しています。',
+  'python:private_attribute': 'Pythonが禁止された属性へアクセスしています。',
+  'python:con_method_not_allowed': 'Pythonが許可されていないDB接続の操作を使用しています。',
+  'python:construct_not_allowed': 'Pythonが許可されていない構文を使用しています。',
+  'python:no_output': 'Pythonに表・グラフ・報告書の出力処理がありません。',
+  reference_not_allowed: 'SQLが承認されていないテーブル・参照先を使用しています。',
+  table_function_not_allowed: 'SQLが許可されていないテーブル関数を使用しています。',
+  function_not_allowed: 'SQLが禁止された関数を使用しています。',
+  syntax_not_supported: 'SQLに対応していない構文が含まれています。',
+  query_unparseable: 'SQLの構文を解析できませんでした。',
+  query_not_single_select: 'SQLは単一の読み取り問い合わせにしてください。',
+  query_not_select: 'SQLに読み取り以外の操作が含まれています。',
+  query_too_deep: 'SQLの構文が複雑すぎるため検査を中止しました。',
+  query_failed: 'SQLの実行に失敗しました。構文と承認した列・型を確認してください。',
+  source_modified: '承認ビューの値の変更を検出したため、結果を採用しません。',
+  trial_report_invalid: '試行結果の形式が正しくありません。',
+  launcher_disabled: '開発用の実行基盤が有効になっていません。',
+  launcher_unreachable: '実行基盤に接続できませんでした。',
+  launcher_failed: '実行基盤で試行に失敗しました。',
+  busy: '実行基盤が使用中です。しばらく待って試行をやり直してください。',
+})
+function failureLabel(reason) {
+  return typeof reason === 'string' && Object.hasOwn(FAILURE_LABELS, reason)
+    ? FAILURE_LABELS[reason] : '検査に合格しませんでした。分析目的・手順とコードを確認してください。'
+}
+const codeFailureLabels = computed(() => [...new Set((Array.isArray(codegen.value?.reasons) ? codegen.value.reasons : []).map(failureLabel))])
+const trialFailureLabel = computed(() => {
+  const trial = codegen.value?.trial
+  if (!['failed', 'unverified'].includes(trial?.status)) return ''
+  // 未検証はコード不合格と区別する。未知の理由本文は表示せず、実行基盤の確認を案内する。
+  if (trial.status === 'unverified' && !(typeof trial.reason === 'string' && Object.hasOwn(FAILURE_LABELS, trial.reason))) {
+    return '試行の検証が完了していません。実行基盤の状態を確認して試行をやり直してください。'
+  }
+  return failureLabel(trial.reason)
+})
+const trialStepLabel = computed(() => {
+  const step = codegen.value?.trial?.step
+  // 診断情報の任意文字列を表示せず、現在の検証済み手順と一致する名前だけを使う。
+  const index = typeof step === 'string' && /^w_[a-z0-9_]+$/.test(step)
+    ? (codegen.value?.steps || []).findIndex(item => item.name === step) : -1
+  return index >= 0 ? `SQL手順${index + 1}（${step}）` : ''
+})
+
+function clearCodeConfirmations() {
+  codePreview.value = null
+  codeSendAccepted.value = false
+  codeAccepted.value = false
+}
+// 版・コード・状態が変われば、送信確認もコード確認も取り直す。
+watch(plan, clearCodeConfirmations, { flush: 'sync', deep: true })
+watch(() => props.canEdit, value => { if (!value) clearCodeConfirmations() }, { flush: 'sync' })
 
 function defaultModelFor(key) {
   const current = options.value?.providers.find(item => item.provider === key)
@@ -146,6 +270,8 @@ function resetPlan() {
   busy.value = ''
   externalPreview.value = null
   externalAccepted.value = false
+  clearCodeConfirmations()
+  codeStateFresh.value = true
 }
 // 入力・AI選択を変えたら、以前の送信確認は使い回さない。
 watch([purpose, dateFrom, dateTo, provider, model], () => {
@@ -183,16 +309,19 @@ async function perform(action, operation) {
   error.value = ''
   try {
     const response = await operation()
-    if (!disposed && current === generation) plan.value = response.data
+    if (!disposed && current === generation) { plan.value = response.data; codeStateFresh.value = true }
   } catch (exception) {
     if (disposed || current !== generation) return
+    if (action === 'refresh') codeStateFresh.value = false
     error.value = exception.response?.data?.detail || '分析案の操作に失敗しました。'
     if ([404, 410].includes(exception.response?.status)) plan.value = null
-    if (exception.response?.status === 409 && plan.value) {
+    clearCodeConfirmations()
+    if ((exception.response?.status === 409 || action.startsWith('code-')) && plan.value) {
+      codeStateFresh.value = false
       // 競合した操作を自動再実行せず、利用者が最新の内容を再確認する。
       try {
         const response = await api.aiAnalysis.getPlan(plan.value.id)
-        if (!disposed && current === generation) plan.value = response.data
+        if (!disposed && current === generation) { plan.value = response.data; codeStateFresh.value = true }
       } catch (refreshError) {
         if (!disposed && current === generation && [404, 410].includes(refreshError.response?.status)) plan.value = null
       }
@@ -243,7 +372,69 @@ function preview() {
 }
 function refresh() {
   if (!plan.value) return
-  perform('refresh', () => api.aiAnalysis.getPlan(plan.value.id))
+  return perform('refresh', () => api.aiAnalysis.getPlan(plan.value.id))
+}
+async function prepareCodePreview() {
+  if (!canGenerate.value || !codeExternal.value) return
+  clearCodeConfirmations()
+  const current = ++generation
+  const target = { id: plan.value.id, revision: plan.value.revision }
+  busy.value = 'code-preview'
+  error.value = ''
+  try {
+    const response = await api.aiAnalysis.codegenPreview(target.id, { revision: target.revision })
+    if (!disposed && props.canEdit && current === generation && plan.value?.id === target.id && plan.value?.revision === target.revision) {
+      codePreview.value = { ...response.data, planId: target.id, revision: target.revision }
+    }
+  } catch (exception) {
+    if (!disposed && current === generation) {
+      error.value = exception.response?.data?.detail || '送信内容を確認できませんでした。社外AIへは送信していません。'
+      if ([404, 410].includes(exception.response?.status)) plan.value = null
+      if (exception.response?.status === 409 && plan.value) {
+        codeStateFresh.value = false
+        // 確認要求は送信・生成をしない。競合時は状態だけ取得し、要求を再実行しない。
+        try {
+          const response = await api.aiAnalysis.getPlan(target.id)
+          if (!disposed && current === generation) { plan.value = response.data; codeStateFresh.value = true }
+        } catch (refreshError) {
+          if (!disposed && current === generation && [404, 410].includes(refreshError.response?.status)) plan.value = null
+        }
+      }
+    }
+  } finally {
+    if (!disposed && current === generation) busy.value = ''
+  }
+}
+function generateCode() {
+  if (!canGenerate.value) return
+  const target = { id: plan.value.id, revision: plan.value.revision }
+  const data = { revision: target.revision }
+  if (codeExternal.value) {
+    if (!codeSendAccepted.value || !codePreview.value?.confirmation || codePreview.value.planId !== target.id || codePreview.value.revision !== target.revision) return
+    data.confirmation = codePreview.value.confirmation
+  }
+  // 通信失敗でも使い回さず、再生成には必ず新しい送信確認が必要。
+  clearCodeConfirmations()
+  return perform('code-generate', () => api.aiAnalysis.generateCode(target.id, data))
+}
+function trialCode() {
+  if (!canTrial.value) return
+  const target = { id: plan.value.id, revision: plan.value.revision }
+  clearCodeConfirmations()
+  return perform('code-trial', () => api.aiAnalysis.trialCode(target.id, { revision: target.revision }))
+}
+function approveCode() {
+  if (!canApproveCode.value || !codeAccepted.value) return
+  const target = { id: plan.value.id, revision: plan.value.revision, hash: codegen.value.executed_code_sha256 }
+  clearCodeConfirmations()
+  return perform('code-approve', () => api.aiAnalysis.approveCode(target.id, { revision: target.revision, executed_code_sha256: target.hash }))
+}
+function releaseCodegen() {
+  if (!canReleaseCodegen.value) return
+  if (!window.confirm('状態不明の生成を解除しますか？ 停止したとは断定できません。回数は戻らず、有効期限は延長しません。解除後も自動で再送しません。')) return
+  const target = { id: plan.value.id, revision: plan.value.revision }
+  clearCodeConfirmations()
+  return perform('code-release', () => api.aiAnalysis.releaseCodegen(target.id, { revision: target.revision }))
 }
 </script>
 
@@ -271,4 +462,6 @@ input { padding: 4px; font: inherit; }
 select { padding: 4px; font: inherit; max-width: 100%; }
 button:not(:disabled) { border-color: #168779; color: white; background: #168779; cursor: pointer; }
 small { overflow-wrap: anywhere; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: #f4f8f8; border: 1px solid #d1dddd; font-size: 13px; }
+.codegen h4 { margin: 12px 0 6px; }
 </style>

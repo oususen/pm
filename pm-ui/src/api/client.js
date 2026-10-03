@@ -215,6 +215,11 @@ export default {
     getPlan(id) { return client.get(`/ai/analysis/plans/${id}/`) },
     approve(id, data) { return client.post(`/ai/analysis/plans/${id}/approve/`, data) },
     preview(id, data) { return client.post(`/ai/analysis/plans/${id}/data-preview/`, data) },
+    codegenPreview(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/preview/`, data) },
+    generateCode(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/`, data) },
+    trialCode(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/trial/`, data) },
+    approveCode(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/approve/`, data) },
+    releaseCodegen(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/release/`, data) },
   },
   aiConversations: {
     list(params) { return client.get('/ai/conversations/', { params }) },
