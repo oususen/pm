@@ -138,6 +138,9 @@ class FetchAndSendTest(ExecutionBase):
             sent[name] = sent.get(name, 0) + rows
         self.assertEqual(sent, counts)
         self.assertEqual(result['fetch']['counts'], counts)
+        self.assertEqual(result['fetch']['sent_rows'], counts)  # 2回目に送った行数
+        self.assertIsNotNone(result['fetch']['fetched_at'])
+        self.assertIsNotNone(result['fetch']['sent_at'])  # 終端フレームまで送り終えた日時
         self.assertEqual(result['fetch']['cleanup'], {'db_connection': 'closed'})
         self.assertEqual(result['fetch']['body_bytes'], len(body))
         self.assertEqual(result['fetch']['chunks'], chunk_count(counts))
@@ -364,7 +367,7 @@ emit_report(json.dumps(out))
         self.assertEqual(Decimal(report['qty_sum']), qty_sum)
         self.assertEqual(Decimal(report['ship_sum']), ship_sum)
         self.assertEqual((report['remark_nulls'], report['empty_strings']), (int(remark_nulls), int(empty)))
-        self.assertEqual(result['fetch']['loaded_rows'], counts)
+        self.assertEqual(result['fetch']['fetched_rows'], counts)
 
     def test_second_pass_mismatch_leaves_the_launcher_usable(self):
         """2回目の不一致で中止しても、launcherは詰まらず、次のジョブを実行できる(未完結の本文は結果にならない)。"""
@@ -615,3 +618,26 @@ class ManagementColumnTest(ExecutionBase):
         for view in header['views']:
             self.assertEqual(view['unique_key'], 'id')
             self.assertEqual(view['columns'][0]['name'], 'id')
+
+
+class ProgressOnStopTest(ExecutionBase):
+    def test_stopped_run_carries_cleanup_and_progress_for_the_history(self):
+        real = service._data_frame
+        state = {'calls': 0, 'first_pass': chunk_count(approved_counts())}
+
+        def altered(index, rows, types):
+            state['calls'] += 1
+            if state['calls'] == state['first_pass'] + 2:
+                changed = list(rows[0])
+                changed[0] += 1_000_000
+                rows = [tuple(changed)] + list(rows[1:])
+            return real(index, rows, types)
+
+        with patch.object(service, '_data_frame', altered), self.assertRaises(service.ExecutionStopped) as caught:
+            self.run_job()
+        counts = approved_counts()
+        self.assertEqual(caught.exception.cleanup, {'db_connection': 'closed'})
+        self.assertEqual(caught.exception.progress['snapshot_counts'], counts)
+        self.assertEqual(caught.exception.progress['fetched_rows'], counts)  # 1回目は、すべて取得できている
+        self.assertLess(sum(caught.exception.progress['sent_rows'].values()), sum(counts.values()))  # 送信は、途中まで
+        self.assertNotIn('sent_at', caught.exception.progress)  # 終端まで送っていない

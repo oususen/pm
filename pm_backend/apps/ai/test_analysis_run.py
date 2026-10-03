@@ -1,0 +1,295 @@
+"""分析の実行履歴(2-D): 保存・確定・生存確認・状態不明・後始末の反映・保存失敗・閲覧を検証する。
+
+履歴はPM本体DB(テストDB)へ保存する。取得は開発DB(pm_ai_reader)の読み取りと、模擬launcherを使う。
+"""
+import json
+import os
+import unittest
+import threading
+import time
+from datetime import datetime, timedelta
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from django.contrib.auth import get_user_model
+from django.db import models
+from django.test import TransactionTestCase, override_settings
+
+from ai.models import AIAnalysisRun
+from ai.services import analysis_run_service as runs
+from ai.services.analysis_execution_service import ExecutionStopped
+from ai.test_analysis_execution import PROPOSAL, FakeLauncher, approved_counts
+
+POLICY = SimpleNamespace(max_memory_mb=512, max_cpu_cores=Decimal('1.0'), max_execution_seconds=60, max_fetch_rows=100_000,
+                         plan_cache_ttl_minutes=60)
+PYTHON = "emit_report('SECRET-PYTHON-BODY')"
+SQL = 'SELECT SECRET_SQL_BODY'
+
+
+def make_plan(counts):
+    proposal = {**PROPOSAL, 'conditions': '指定期間の全登録行（追加の絞り条件なし）'}
+    return {
+        'id': 'plan-1', 'status': 'data_approved', 'proposal': proposal,
+        'method_approved_at': '2026-10-04T09:00:00', 'data_approved_at': '2026-10-04T09:01:00',
+        'preview': {'datasets': [{'view': view, 'rows': rows} for view, rows in counts.items()], 'total_rows': sum(counts.values())},
+    }
+
+
+class RunBase(TransactionTestCase):
+    databases = {'default'}
+
+    def setUp(self):
+        self.user = get_user_model().objects.create(username='run-tester')
+        self.launcher = FakeLauncher()
+        self.addCleanup(self.launcher.close)
+        overrides = override_settings(AI_ANALYSIS_LAUNCHER_URL=self.launcher.url)
+        overrides.enable()
+        self.addCleanup(overrides.disable)
+        self.counts = approved_counts()
+        self.plan = make_plan(self.counts)
+
+    def run_it(self, **kwargs):
+        return runs.run_and_record(self.user, self.plan, SQL, PYTHON, POLICY, chunk_rows=500, **kwargs)
+
+
+class RecordTest(RunBase):
+    def test_success_is_recorded_with_distinct_counts_two_hashes_and_no_code_body(self):
+        result = self.run_it()
+        run = AIAnalysisRun.objects.get(pk=result['run_id'])
+        self.assertEqual((run.status, run.reason), ('success', ''))
+        self.assertEqual(run.approved_counts, self.counts)  # 承認時
+        self.assertEqual(run.snapshot_counts, self.counts)  # スナップショットのCOUNT
+        self.assertEqual(run.fetched_rows, self.counts)  # 1回目の取得
+        self.assertEqual(run.sent_rows, self.counts)  # 2回目の送信
+        self.assertEqual(run.loaded_rows, self.counts)  # コンテナへの投入
+        self.assertEqual(run.unique_key_check, {'column': 'id', 'django': 'ok', 'container': 'ok'})
+        self.assertEqual(run.sql_sha256, runs.sha256_of(SQL))
+        self.assertEqual(run.python_sha256, runs.sha256_of(PYTHON))
+        self.assertNotEqual(run.sql_sha256, run.python_sha256)
+        self.assertEqual(run.cleanup['db_connection'], 'closed')
+        self.assertEqual(run.worker_id, runs.WORKER_ID)
+        self.assertIsNotNone(run.fetched_at)
+        self.assertIsNotNone(run.sent_at)
+        self.assertIsNotNone(run.finished_at)
+        self.assertEqual(run.settings_snapshot['max_fetch_rows'], 100_000)
+        self.assertEqual(run.method_approved_at, datetime(2026, 10, 4, 9, 0))
+        # コード本文・結果の中身は、どの列にも保存しない
+        dump = json.dumps({f.name: str(getattr(run, f.name)) for f in AIAnalysisRun._meta.fields}, ensure_ascii=False)
+        self.assertNotIn('SECRET-PYTHON-BODY', dump)
+        self.assertNotIn('SECRET_SQL_BODY', dump)
+
+    def test_execution_failure_is_recorded_then_the_original_error_is_raised_with_run_id(self):
+        counts = {**self.counts, 'v_ai_shipment': self.counts['v_ai_shipment'] + 1}
+        self.plan = make_plan(counts)  # 承認時から件数が変わった状況
+        with self.assertRaises(ExecutionStopped) as caught:
+            self.run_it()
+        run = AIAnalysisRun.objects.get(pk=caught.exception.run_id)
+        self.assertEqual((run.status, run.reason), ('failed', 'approved_count_changed'))
+        self.assertEqual(run.cleanup['db_connection'], 'closed')
+        self.assertEqual(run.cleanup['container'], 'not_started')
+        self.assertIsNone(run.loaded_rows)
+        self.assertEqual(self.launcher.bodies, [])
+
+    def test_launcher_failure_result_is_recorded_as_failed_with_its_reason(self):
+        self.launcher.respond = lambda header: {'status': 'failed', 'reason': 'duplicate_key', 'detail': 'x', 'cleanup': {'ok': False},
+                                                'diagnostics': {'rows_loaded': None}}
+        result = self.run_it()
+        run = AIAnalysisRun.objects.get(pk=result['run_id'])
+        self.assertEqual((run.status, run.reason), ('failed', 'duplicate_key'))
+        self.assertEqual(run.cleanup['container'], 'pending')  # コンテナを削除できていなければ、完了扱いにしない
+        self.assertEqual(run.unique_key_check['container'], 'failed')
+
+    def test_not_run_cases_are_recorded(self):
+        run = runs.record_not_run(self.user, self.plan, 'expired', 'plan_expired', '分析案の有効期限が切れました', POLICY)
+        self.assertEqual((run.status, run.reason, run.python_sha256), ('expired', 'plan_expired', None))
+        with self.assertRaises(ValueError):
+            runs.record_not_run(self.user, self.plan, 'success', 'x', 'x', POLICY)
+
+    def test_unapproved_plan_is_not_executed(self):
+        self.plan['status'] = 'awaiting_data'
+        with self.assertRaises(Exception):
+            self.run_it()
+        self.assertEqual(AIAnalysisRun.objects.count(), 0)
+
+
+class SaveFailureTest(RunBase):
+    def test_start_save_failure_prevents_execution(self):
+        with patch.object(runs.AIAnalysisRun.objects, 'create', side_effect=RuntimeError('DB障害')), \
+                patch.object(runs, 'execute_approved_analysis') as execute, self.assertRaises(runs.HistoryError):
+            self.run_it()
+        execute.assert_not_called()
+        self.assertEqual(self.launcher.bodies, [])
+
+    def test_finish_failure_does_not_return_the_result_and_keeps_the_original_outcome(self):
+        with patch.object(runs, 'finish_run', side_effect=RuntimeError('確定できない')), self.assertRaises(runs.HistoryError) as caught:
+            self.run_it()
+        self.assertEqual(caught.exception.outcome['status'], 'success')  # 元の結果は、エラーに残る
+        self.assertEqual(AIAnalysisRun.objects.get().status, 'running')  # 確定できていない行を、成功と偽らない
+
+    def test_finish_failure_after_an_execution_failure_keeps_the_original_reason(self):
+        self.plan = make_plan({**self.counts, 'v_ai_shipment': 0})
+        with patch.object(runs, 'finish_run', side_effect=RuntimeError('確定できない')), self.assertRaises(runs.HistoryError) as caught:
+            self.run_it()
+        self.assertEqual(caught.exception.outcome['reason'], 'approved_count_changed')
+
+    def test_finish_does_not_touch_a_row_owned_by_another_worker(self):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        other = SimpleNamespace(pk=run.pk, worker_id='another-worker')
+        with self.assertRaises(runs.HistoryError):
+            runs.finish_run(other, runs.outcome_from_exception(RuntimeError('x')))
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).status, 'running')
+
+
+class LivenessTest(RunBase):
+    def make_running(self, heartbeat_age):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        AIAnalysisRun.objects.filter(pk=run.pk).update(heartbeat_at=datetime.now() - timedelta(seconds=heartbeat_age))
+        return AIAnalysisRun.objects.get(pk=run.pk)
+
+    def test_only_stale_running_rows_become_unknown_and_cleanup_is_not_complete(self):
+        stale, fresh = self.make_running(120), self.make_running(5)
+        self.assertEqual(runs.mark_unknown_stale(), 1)
+        stale.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertEqual((stale.status, stale.reason), ('unknown', 'heartbeat_lost'))
+        self.assertIn('断定できない', stale.detail)
+        self.assertEqual(stale.cleanup, {'db_connection': 'pending', 'container': 'pending'})
+        self.assertEqual(fresh.status, 'running')
+
+    def test_a_row_whose_heartbeat_came_back_late_is_not_overwritten(self):
+        stale = self.make_running(120)
+        real_filter = runs.AIAnalysisRun.objects.filter
+
+        def filter_then_heartbeat_returns(*args, **kwargs):
+            queryset = real_filter(*args, **kwargs)
+            if 'heartbeat_at__lt' in kwargs:
+                rows = list(queryset.only('pk', 'heartbeat_at'))
+                real_filter(pk=stale.pk).update(heartbeat_at=datetime.now())  # 判定の読み取りの後に、遅れていたheartbeatが戻る
+                return SimpleNamespace(only=lambda *a: rows)
+            return queryset
+
+        with patch.object(runs.AIAnalysisRun.objects, 'filter', filter_then_heartbeat_returns):
+            self.assertEqual(runs.mark_unknown_stale(), 0)
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, 'running')
+
+    def test_the_owner_can_still_report_the_real_outcome_of_an_unknown_run(self):
+        stale = self.make_running(120)
+        runs.mark_unknown_stale()
+        runs.finish_run(stale, runs.outcome_from_exception(RuntimeError('x')))
+        stale.refresh_from_db()
+        self.assertEqual((stale.status, stale.reason), ('failed', 'unexpected_error'))
+
+    def test_heartbeat_thread_updates_only_a_running_row_and_stops(self):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        AIAnalysisRun.objects.filter(pk=run.pk).update(heartbeat_at=datetime.now() - timedelta(seconds=30))
+        before = AIAnalysisRun.objects.get(pk=run.pk).heartbeat_at
+        beat = runs.Heartbeat(run, interval=0.2).start()
+        time.sleep(0.8)
+        self.assertGreater(AIAnalysisRun.objects.get(pk=run.pk).heartbeat_at, before)
+        AIAnalysisRun.objects.filter(pk=run.pk).update(status='unknown')  # 状態不明にされた行は、更新しない
+        frozen = AIAnalysisRun.objects.get(pk=run.pk).heartbeat_at
+        time.sleep(0.6)
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).heartbeat_at, frozen)
+        beat.stop()
+        self.assertFalse(beat.thread.is_alive())
+
+    def test_startup_does_not_mark_other_workers_fresh_runs(self):
+        other = self.make_running(3)
+        AIAnalysisRun.objects.filter(pk=other.pk).update(worker_id='another-worker:1:abcd')
+        runs.run_and_record(self.user, self.plan, SQL, PYTHON, POLICY, chunk_rows=500)
+        self.assertEqual(AIAnalysisRun.objects.get(pk=other.pk).status, 'running')
+
+
+class CleanupPendingTest(RunBase):
+    def test_late_final_cleanup_before_finish_replaces_pending(self):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        tracker = runs.CleanupTracker(run.pk)
+        tracker.notify('closed')  # 確定の前に、待機中だった後始末が終わった
+        runs.finish_run(run, {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'pending', 'container': 'not_started'}}, tracker)
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'closed')
+
+    def test_late_final_cleanup_after_finish_updates_only_a_pending_row(self):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        tracker = runs.CleanupTracker(run.pk)
+        runs.finish_run(run, {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'pending', 'container': 'not_started'}}, tracker)
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'pending')  # 通知までは、完了扱いにしない
+        tracker.notify('failed')
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'failed')
+
+    def test_a_closed_row_is_not_changed_by_a_late_notification(self):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        tracker = runs.CleanupTracker(run.pk)
+        runs.finish_run(run, {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'closed', 'container': 'not_started'}}, tracker)
+        tracker.notify('failed')
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'closed')
+
+    def test_pending_connection_cleanup_in_a_real_run_is_recorded_as_pending_then_updated(self):
+        """取得の期限で待ちをやめた問い合わせが動いている間は、pendingと記録し、終わったら最終状態へ更新する。"""
+        real = runs.execute_approved_analysis
+
+        def hung_start(*args, **kwargs):
+            time.sleep(0.01)
+            fake = MagicMock()
+            fake.start_transaction.side_effect = lambda *a, **k: time.sleep(1.5)
+
+            with patch('ai.services.analysis_execution_service.mysql.connector.connect', return_value=fake):
+                return real(*args, **kwargs)
+
+        with patch.object(runs, 'execute_approved_analysis', hung_start), self.assertRaises(ExecutionStopped) as caught:
+            self.run_it(deadlines={'fetch': 0.3})
+        run = AIAnalysisRun.objects.get(pk=caught.exception.run_id)
+        self.assertEqual(run.reason, 'stage_deadline_fetch')
+        self.assertEqual(run.cleanup['db_connection'], 'pending')  # 完了扱いにしない
+        deadline = time.time() + 6
+        while time.time() < deadline and AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'] == 'pending':
+            time.sleep(0.1)
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'closed')
+
+
+class ViewingTest(RunBase):
+    def test_deleted_user_is_shown_without_personal_data_and_the_run_survives(self):
+        other = get_user_model().objects.create(username='other-user')
+        mine = runs.record_not_run(self.user, self.plan, 'expired', 'plan_expired', 'x', POLICY)
+        theirs = runs.record_not_run(other, self.plan, 'cancelled', 'user_cancelled', 'x', POLICY)
+        self.assertEqual(sorted(r.pk for r in runs.visible_runs(self.user, include_all=False)), [mine.pk])
+        self.assertEqual(sorted(r.pk for r in runs.visible_runs(self.user, include_all=True)), sorted([mine.pk, theirs.pk]))
+        self.assertEqual(runs.serialize_run(AIAnalysisRun.objects.get(pk=theirs.pk))['executed_by'], 'other-user')
+        # ユーザーの削除時は、履歴を消さずに実行者をNULLにする(SET_NULL)。テストDBは、他アプリの未管理テーブルを持たず、
+        # ユーザーの実削除(関連行の収集)ができないため、削除の設定と、NULLになった後の表示を確認する。
+        self.assertIs(AIAnalysisRun._meta.get_field('user').remote_field.on_delete, models.SET_NULL)
+        AIAnalysisRun.objects.filter(pk=theirs.pk).update(user=None)
+        run = AIAnalysisRun.objects.get(pk=theirs.pk)
+        self.assertIsNone(run.user_id)
+        self.assertEqual(runs.serialize_run(run)['executed_by'], '削除済みユーザー')
+
+    def test_concurrent_runs_are_recorded_independently(self):
+        first = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        second = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        self.assertNotEqual(first.pk, second.pk)
+        threads = [threading.Thread(target=lambda r=r: runs.finish_run(r, runs.outcome_from_exception(RuntimeError('x')))) for r in (first, second)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        self.assertEqual(AIAnalysisRun.objects.filter(status='failed').count(), 2)
+
+
+@unittest.skipUnless(os.environ.get('AI_ANALYSIS_LAUNCHER_URL_FOR_TEST'), '実launcherの通しは、接続先を指定したときだけ実行する')
+class RealLauncherRecordTest(TransactionTestCase):
+    """実launcher(Docker)で実行し、履歴の件数・後始末・所要時間が実際の値で保存されること。"""
+    databases = {'default'}
+
+    def test_real_run_is_recorded(self):
+        user = get_user_model().objects.create(username='real-run')
+        counts = approved_counts()
+        code = "n = con.execute('SELECT COUNT(*) FROM v_ai_shipment').fetchone()[0]\nemit_report(str(n))"
+        with override_settings(AI_ANALYSIS_LAUNCHER_URL=os.environ['AI_ANALYSIS_LAUNCHER_URL_FOR_TEST']):
+            result = runs.run_and_record(user, make_plan(counts), None, code, POLICY, chunk_rows=500)
+        run = AIAnalysisRun.objects.get(pk=result['run_id'])
+        self.assertEqual(run.status, 'success', (run.reason, run.detail))
+        self.assertEqual(result['launcher']['result']['report'], str(counts['v_ai_shipment']))
+        self.assertEqual((run.fetched_rows, run.sent_rows, run.loaded_rows), (counts, counts, counts))
+        self.assertIsNone(run.sql_sha256)  # 別のSQLがない実行
+        self.assertEqual(run.cleanup, {'db_connection': 'closed', 'container': 'closed'})
+        self.assertGreater(run.container_load_seconds, 0)
+        self.assertIsNotNone(run.python_seconds)

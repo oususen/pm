@@ -203,7 +203,7 @@ def _close_connection(connection):
     return 'closed'
 
 
-def _close_snapshot(connection, abandoned):
+def _close_snapshot(connection, abandoned, on_done=None):
     """トランザクションと接続を閉じ、状態('closed' / 'pending' / 'failed')を返す。
 
     期限で待ちをやめた問い合わせ・接続開始がまだ動いている間は、接続を閉じず、その終了後に閉じる(動作中に閉じない)。
@@ -214,8 +214,16 @@ def _close_snapshot(connection, abandoned):
             worker.join()
         return 'closed' if connection is None else _close_connection(connection)
 
+    def close_later():
+        status = close()
+        if on_done is not None:  # 待機中だった後始末の最終結果(closed / failed)を、履歴へ反映するために通知する
+            try:
+                on_done(status)
+            except Exception:
+                pass
+
     if any(worker.is_alive() for worker in abandoned):
-        threading.Thread(target=close, daemon=True).start()
+        threading.Thread(target=close_later, daemon=True).start()
         return 'pending'
     return close()
 
@@ -345,8 +353,11 @@ def _transmit(host, port, length, frames, transfer, response_timeout, timing=Non
         connection.close()  # 中止した場合は、Eを送らないまま閉じる(launcherは不完全な本文として結果を採用しない)
 
 
-def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
-    """承認済みの範囲を取得・照合して送り、launcherの結果を返す。履歴の保存は行わない(2-D)。
+def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines=None, chunk_rows=CHUNK_ROWS, on_cleanup_done=None):
+    """承認済みの範囲を取得・照合して送り、launcherの結果を返す。履歴の保存は呼び出し側(analysis_run_service)が行う。
+
+    止めた場合のExecutionStoppedには、cleanup(後始末の状態)とprogress(そこまでの件数・日時)を付ける。
+    on_cleanup_done: 待機中(pending)だった接続の後始末が終わったときに、最終状態(closed / failed)を通知する。
 
     proposal: {'datasets': [{'view', 'fields'}], 'date_from', 'date_to'}。承認済み。
     approved_counts: {ビュー名: 承認時のCOUNT}。
@@ -368,11 +379,12 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
     transfer = None
     connection = None
     cleanup = {}
+    progress = {}  # 止めた場合に、履歴へ残す、そこまでの件数・日時
 
     def finish():
         """接続の後始末(1回だけ)。期限で待ちをやめた問い合わせが動いている間は、'pending'(待機中)とする。"""
         if 'db_connection' not in cleanup:
-            status = _close_snapshot(connection, [*fetch.abandoned, *(transfer.abandoned if transfer else [])])
+            status = _close_snapshot(connection, [*fetch.abandoned, *(transfer.abandoned if transfer else [])], on_cleanup_done)
             failed = fetch.cleanup_failed or (transfer is not None and transfer.cleanup_failed)
             cleanup['db_connection'] = 'failed' if failed else status
         return dict(cleanup)
@@ -396,15 +408,20 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
             digests.append(hashlib.sha256(frame).digest())
             loaded[datasets[index]['view']] += len(rows)
             body_length += len(frame)
+        progress.update(snapshot_counts=dict(counts), fetched_rows=dict(loaded))
         fetch.remaining()  # 1回目の全体が、取得の期限を超えていないこと
         if loaded != counts:
             raise ExecutionStopped('fetch_count_mismatch', f'取得行数がCOUNTと一致しません: 取得{loaded} / COUNT{counts}', 422)
         fetch_seconds = time.monotonic() - started
+        progress.update(fetched_at=datetime.now(), fetch_seconds=round(fetch_seconds, 3))
 
         # 3. 2回目の取得を送信する。チャンクごとに1回目と照合し、全件が一致した後にだけ、終端(E)を送る
         transfer = Deadline(limits['transfer'], 'stage_deadline_transfer')
         transfer_started = time.monotonic()
         timing = {}
+
+        sent_rows = {d['view']: 0 for d in datasets}
+        progress['sent_rows'] = sent_rows  # 送ったチャンクまでの行数(中止時は、途中まで)
 
         def frames():
             yield header
@@ -413,22 +430,26 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
                 if sent >= len(digests) or hashlib.sha256(frame).digest() != digests[sent]:
                     raise ExecutionStopped('refetch_mismatch', '2回目の取得が1回目と一致しません。同一スナップショットを確認できないため、実行しません。', 409)
                 sent += 1
+                sent_rows[datasets[index]['view']] += len(rows)
                 yield frame
             if sent != len(digests):
                 raise ExecutionStopped('refetch_mismatch', '2回目の取得の件数が1回目と一致しません。', 409)
             yield _frame(b'E', b'')
+            progress['sent_at'] = datetime.now()  # 終端フレームまで送り終えた日時
 
         response_timeout = limits['transfer'] + LAUNCHER_STAGE_SECONDS + policy.max_execution_seconds
         status, launcher = _transmit(host, port, body_length, frames(), transfer, response_timeout, timing)
         total_seconds = time.monotonic() - transfer_started
-    except ExecutionStopped as exc:
-        exc.cleanup = finish()  # 履歴へ残す後始末の状態(closed / pending)
+    except Exception as exc:
+        exc.cleanup = finish()  # 履歴へ残す後始末の状態(closed / pending / failed)
+        exc.progress = dict(progress)
         raise
     finally:
         finish()
     record = {
         'views': [d['view'] for d in datasets], 'date_from': date_from, 'date_to': date_to,
-        'approved_counts': dict(approved_counts), 'counts': counts, 'loaded_rows': loaded, 'chunks': len(digests),
+        'approved_counts': dict(approved_counts), 'counts': counts, 'fetched_rows': loaded, 'sent_rows': dict(sent_rows), 'chunks': len(digests),
+        'fetched_at': progress['fetched_at'], 'sent_at': progress.get('sent_at'),
         'body_bytes': body_length, 'fetch_seconds': round(fetch_seconds, 3), 'transfer_seconds': round(timing.get('send_seconds', total_seconds), 3),
         'launcher_seconds': round(total_seconds - timing.get('send_seconds', total_seconds), 3),
         'code_sha256': hashlib.sha256(code.encode('utf-8')).hexdigest(), 'http_status': status, 'cleanup': dict(cleanup),
