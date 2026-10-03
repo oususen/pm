@@ -17,7 +17,7 @@ from ai.models import AIConversation
 from ai.serializers import AIConversationListSerializer, AIConversationSerializer
 from ai.services.chat_service import AIChatAPIView, _has_resource_permission
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore, public_plan
-from ai.services.analysis_planning_service import approve_plan, create_plan, planning_options, preview_plan
+from ai.services.analysis_planning_service import approve_plan, create_plan, external_send_preview, planning_options, preview_plan
 from notifications.transcription import AudioTooLongError, transcribe_audio_file
 
 logger = logging.getLogger('production')
@@ -35,6 +35,13 @@ class AIAnalysisPlansView(APIView):
 
     def post(self, request):
         return Response(public_plan(create_plan(request.user.pk, request.data)), status=201)
+
+
+class AIAnalysisExternalPreviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        return Response(external_send_preview(request.user.pk, request.data))
 
 
 class AIAnalysisPlanView(APIView):

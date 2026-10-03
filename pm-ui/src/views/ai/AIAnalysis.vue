@@ -25,15 +25,27 @@
         </select>
       </label>
     </div>
-    <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、分析目的（登録済みの人名・社名などは一時IDへ置換）・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。登録されていない人名・社名や、自由記述の機密は置換されないため、目的に含めないでください。</p>
+    <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
     <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
     <p>対象: 入荷実績・出荷実績の指定期間の全登録行。追加の絞り条件・資料取込み、生産・仕損・中断・残業は未対応です。</p>
-    <button v-if="!plan" type="button" :disabled="!canCreate" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : '分析案を作成' }}</button>
+    <template v-if="!plan">
+      <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
+      <section v-if="selectedProvider?.external && externalPreview" class="dataset">
+        <h2>社外送信前の確認</h2>
+        <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
+        <p>期間: {{ externalPreview.date_from }} ～ {{ externalPreview.date_to }}</p>
+        <p class="external-purpose">送信する目的文: {{ externalPreview.purpose }}</p>
+        <p>この目的文と期間、公開ビューの説明を送信します。確認だけでは社外AIへ送信しません。</p>
+        <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">名称ではなく登録コードになっており、未登録の人名・社名・機密を含まないことを確認しました</label>
+      </section>
+      <button v-if="!selectedProvider?.external || externalPreview" type="button" :disabled="!canCreate || (selectedProvider?.external && !externalAccepted)" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : selectedProvider?.external ? '確認した内容を社外AIへ送って分析案を作成' : '分析案を作成' }}</button>
+    </template>
     <section v-if="plan" class="plan">
       <div class="plan-heading"><h2>{{ plan.proposal.title }}</h2><span>{{ statusLabel }}</span></div>
       <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }} / 作成AI: {{ planProviderLabel }}</small>
       <h3>1. 分析目的・手順</h3>
       <p>目的: {{ plan.proposal.purpose }}</p>
+      <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
       <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
       <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
       <p v-if="plan.method_approved_at">手順承認日時: {{ formatDate(plan.method_approved_at) }}</p>
@@ -82,6 +94,8 @@ const model = ref('')
 const plan = ref(null)
 const busy = ref('')
 const error = ref('')
+const externalPreview = ref(null)
+const externalAccepted = ref(false)
 let generation = 0
 let disposed = false
 let lastSelection = { provider: '', model: '' }
@@ -129,7 +143,14 @@ function resetPlan() {
   plan.value = null
   error.value = ''
   busy.value = ''
+  externalPreview.value = null
+  externalAccepted.value = false
 }
+// 入力・AI選択を変えたら、以前の送信確認は使い回さない。
+watch([purpose, dateFrom, dateTo, provider, model], () => {
+  externalPreview.value = null
+  externalAccepted.value = false
+}, { flush: 'sync' })
 watch(() => props.request, (request) => {
   if (!request) return
   resetPlan()
@@ -179,12 +200,37 @@ async function perform(action, operation) {
     if (!disposed && current === generation) busy.value = ''
   }
 }
+function planningInput() {
+  return { purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value, provider: provider.value, model: model.value }
+}
+async function prepareExternalPreview() {
+  if (!canCreate.value || !selectedProvider.value?.external) return
+  const current = ++generation
+  busy.value = 'external-preview'
+  error.value = ''
+  externalPreview.value = null
+  externalAccepted.value = false
+  try {
+    const response = await api.aiAnalysis.externalPreview(planningInput())
+    if (!disposed && current === generation) externalPreview.value = response.data
+  } catch (exception) {
+    if (!disposed && current === generation) error.value = exception.response?.data?.detail || '社外送信する目的文を確認できませんでした。社外AIへは送信していません。'
+  } finally {
+    if (!disposed && current === generation) busy.value = ''
+  }
+}
 function createPlan() {
   if (!canCreate.value) return
-  perform('create', () => api.aiAnalysis.createPlan({
-    purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value,
-    provider: provider.value, model: model.value,
-  }))
+  if (selectedProvider.value.external && (!externalPreview.value || !externalAccepted.value)) return
+  // 初期選択が有料の場合も、実送信前には料金確認を必ず通す。
+  const paid = paidKey()
+  if (paid && !paidApproved.has(paid.key)) {
+    if (!window.confirm(paid.message)) return
+    paidApproved.add(paid.key)
+  }
+  const data = planningInput()
+  if (selectedProvider.value.external) data.external_confirmation = externalPreview.value.confirmation
+  perform('create', () => api.aiAnalysis.createPlan(data))
 }
 function approve(stage) {
   if (!props.canEdit || !plan.value) return
@@ -218,6 +264,7 @@ input { padding: 4px; font: inherit; }
 .plan h2 { font-size: 18px; margin: 0; }
 .plan h3 { font-size: 16px; margin: 14px 0 8px; }
 .dataset { background: #f4f8f8; padding: 1px 8px; overflow-wrap: anywhere; }
+.external-purpose { white-space: pre-wrap; }
 .error { background: #fff0ee; color: #9a362b; padding: 8px; }
 .warning { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 8px 10px; }
 select { padding: 4px; font: inherit; max-width: 100%; }

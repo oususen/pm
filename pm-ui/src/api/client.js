@@ -210,6 +210,7 @@ export default {
   },
   aiAnalysis: {
     options() { return client.get('/ai/analysis/options/') },
+    externalPreview(data) { return client.post('/ai/analysis/external-preview/', data) },
     createPlan(data) { return client.post('/ai/analysis/plans/', data) },
     getPlan(id) { return client.get(`/ai/analysis/plans/${id}/`) },
     approve(id, data) { return client.post(`/ai/analysis/plans/${id}/approve/`, data) },

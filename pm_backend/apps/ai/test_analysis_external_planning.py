@@ -7,15 +7,18 @@ from urllib.error import HTTPError
 
 from django.db import DatabaseError
 from django.test import SimpleTestCase, override_settings
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from ai.services import analysis_llm, analysis_planning_service as planning, chat_service
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.test_analysis_planning import FakeRedis
+from ai.services.analysis_redaction import AnalysisCodeRedactor, build_analysis_code_redactor
+from ai.views import AIAnalysisExternalPreviewView, AIAnalysisPlansView
 
 PROPOSAL = {
-    'title': '作業者1向けの日別出荷',
+    'title': '000175向けの日別出荷',
     'steps': ['日別に全行の出荷数量を合計する'],
-    'outputs': ['作業者1が確認する日別の表'],
+    'outputs': ['000175が確認する日別の表'],
     'datasets': [{'view': 'v_ai_shipment', 'fields': ['id', 'shipment_date', 'quantity']}],
 }
 PAYLOAD = {'purpose': '山田太郎さんの出荷傾向を見る', 'date_from': '2026-09-01', 'date_to': '2026-09-30'}
@@ -30,8 +33,8 @@ def fake_response(content, finish_reason='stop'):
 
 
 def make_redactor():
-    redactor = chat_service.ExternalDataRedactor()
-    redactor.add('山田太郎', '作業者1')
+    redactor = AnalysisCodeRedactor()
+    redactor.add('山田太郎', '000175')
     return redactor
 
 
@@ -47,7 +50,7 @@ class ExternalPlanningTest(SimpleTestCase):
             ('ai.services.analysis_planning_service.AIProviderConfig.objects.filter', {
                 'return_value': MagicMock(first=lambda: SimpleNamespace(is_enabled=True, default_model='deepseek-v4-pro')),
             }),
-            ('ai.services.analysis_planning_service.chat_service._build_external_data_redactor', {'side_effect': make_redactor}),
+            ('ai.services.analysis_planning_service.build_analysis_code_redactor', {'side_effect': make_redactor}),
         ]:
             patcher = patch(target, **kwargs)
             patcher.start()
@@ -64,7 +67,10 @@ class ExternalPlanningTest(SimpleTestCase):
         return caught.exception
 
     def create(self, **extra):
-        return planning.create_plan(3, {**PAYLOAD, **extra})
+        data = {**PAYLOAD, **extra}
+        if data.get('provider', 'qwen') != 'qwen':
+            data['external_confirmation'] = planning.external_send_preview(3, data)['confirmation']
+        return planning.create_plan(3, data)
 
     def test_external_request_is_redacted_and_sends_no_rows(self):
         with patch('ai.services.analysis_llm.urlopen', return_value=fake_response(json.dumps(PROPOSAL, ensure_ascii=False))) as urlopen:
@@ -75,15 +81,17 @@ class ExternalPlanningTest(SimpleTestCase):
         body = json.loads(request.data.decode('utf-8'))
         sent = json.dumps(body['messages'], ensure_ascii=False)
         self.assertNotIn('山田太郎', sent)
-        self.assertIn('作業者1', sent)
+        self.assertIn('000175', sent)
         self.assertNotIn('t_shipment_actual', sent)
         self.assertEqual([message['role'] for message in body['messages']], ['system', 'user'])
         self.assertEqual(json.loads(body['messages'][1]['content']).keys(), {'purpose', 'date_from', 'date_to'})
         self.assertEqual(body['thinking'], {'type': 'disabled'})
         self.assertEqual(body['response_format'], {'type': 'json_object'})
-        # 画面に出す分析案は元の名称へ戻し、使ったAIを記録する。保存する目的文は元の文のまま。
-        self.assertIn('山田太郎', plan['proposal']['title'])
-        self.assertIn('山田太郎', plan['proposal']['outputs'][0])
+        # 実コードは自動復元しない。元の目的文と確認済み送信文はRedis上だけに保存する。
+        self.assertIn('000175', plan['proposal']['title'])
+        self.assertIn('000175', plan['proposal']['outputs'][0])
+        self.assertNotIn('山田太郎', plan['proposal']['title'])
+        self.assertEqual(plan['proposal']['external_purpose'], '000175さんの出荷傾向を見る')
         self.assertEqual(plan['proposal']['purpose'], PAYLOAD['purpose'])
         self.assertEqual((plan['proposal']['provider'], plan['proposal']['model']), ('deepseek', 'deepseek-v4-pro'))
 
@@ -131,7 +139,7 @@ class ExternalPlanningTest(SimpleTestCase):
                 urlopen.assert_not_called()
 
     def test_redaction_failure_or_cache_failure_stops_before_sending(self):
-        with patch('ai.services.analysis_planning_service.chat_service._build_external_data_redactor', side_effect=DatabaseError()), \
+        with patch('ai.services.analysis_planning_service.build_analysis_code_redactor', side_effect=DatabaseError()), \
                 patch('ai.services.analysis_llm.urlopen') as urlopen:
             error = self.assert_error(503, lambda: self.create(provider='deepseek'))
             self.assertIn('送信していません', str(error.detail))
@@ -187,3 +195,93 @@ class ExternalPlanningTest(SimpleTestCase):
         self.assertIn('許可されていません', blocked['openrouter']['reason'])
         self.assertFalse(blocked['openrouter']['available'])
         self.assertTrue(analysis_llm.REQUEST_TIMEOUT_SECONDS == 90)
+
+    def test_preview_never_calls_ai_or_saves_a_plan(self):
+        with patch('ai.services.analysis_llm.urlopen') as urlopen:
+            preview = planning.external_send_preview(3, {**PAYLOAD, 'provider': 'deepseek'})
+        self.assertEqual(preview['purpose'], '000175さんの出荷傾向を見る')
+        urlopen.assert_not_called()
+        self.assertEqual(self.redis.values, {})
+
+    def test_http_preview_and_unconfirmed_create(self):
+        factory = APIRequestFactory()
+        data = {**PAYLOAD, 'provider': 'deepseek'}
+        with patch('ai.services.analysis_llm.urlopen') as urlopen:
+            request = factory.post('/api/ai/analysis/external-preview/', data, format='json')
+            force_authenticate(request, user=SimpleNamespace(pk=3, is_authenticated=True))
+            response = AIAnalysisExternalPreviewView.as_view()(request)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['purpose'], '000175さんの出荷傾向を見る')
+            request = factory.post('/api/ai/analysis/plans/', data, format='json')
+            force_authenticate(request, user=SimpleNamespace(pk=3, is_authenticated=True))
+            self.assertEqual(AIAnalysisPlansView.as_view()(request).status_code, 409)
+            urlopen.assert_not_called()
+
+    def test_unconfirmed_or_changed_requests_never_send(self):
+        data = {**PAYLOAD, 'provider': 'deepseek'}
+        token = planning.external_send_preview(3, data)['confirmation']
+        changes = [
+            {}, {'external_confirmation': True}, {'external_confirmation': 'fake'},
+            {'external_confirmation': token, 'purpose': '別の目的'},
+            {'external_confirmation': token, 'date_to': '2026-10-01'},
+            {'external_confirmation': token, 'model': 'deepseek-v4-flash'},
+        ]
+        for change in changes:
+            with self.subTest(change=change), patch('ai.services.analysis_llm.urlopen') as urlopen:
+                # 未許可モデルは400、確認内容の不一致は409。
+                self.assert_error(400 if change.get('model') and change['model'] not in chat_service.DEEPSEEK_MODELS else 409,
+                                  lambda: planning.create_plan(3, {**data, **change}))
+                urlopen.assert_not_called()
+        with patch('ai.services.analysis_llm.urlopen') as urlopen:
+            self.assert_error(409, lambda: planning.create_plan(4, {**data, 'external_confirmation': token}))
+            changed = AnalysisCodeRedactor()
+            changed.add('山田太郎', '000999')
+            with patch('ai.services.analysis_planning_service.build_analysis_code_redactor', return_value=changed):
+                self.assert_error(409, lambda: planning.create_plan(3, {**data, 'external_confirmation': token}))
+            urlopen.assert_not_called()
+
+    def test_missing_or_ambiguous_code_stops_preview_and_send(self):
+        for codes in ((None,), ('000175', '000999')):
+            redactor = AnalysisCodeRedactor()
+            for code in codes:
+                redactor.add('山田太郎', code)
+            with patch('ai.services.analysis_planning_service.build_analysis_code_redactor', return_value=redactor), \
+                    patch('ai.services.analysis_llm.urlopen') as urlopen:
+                self.assert_error(400, lambda: planning.external_send_preview(3, {**PAYLOAD, 'provider': 'deepseek'}))
+                self.assert_error(400, lambda: planning.create_plan(3, {**PAYLOAD, 'provider': 'deepseek', 'external_confirmation': 'fake'}))
+                urlopen.assert_not_called()
+
+
+class AnalysisCodeRedactorTest(SimpleTestCase):
+    def test_codes_keep_zeroes_no_cascade_and_email_removed(self):
+        redactor = AnalysisCodeRedactor()
+        redactor.add('王崇栓', '000175')
+        redactor.add('クボタ', '000196')
+        redactor.add('000175', '000999')
+        self.assertEqual(redactor.redact_text('王崇栓 クボタ test@example.com'), '000175 000196 [メールアドレス]')
+
+    def test_builder_includes_inactive_and_uncoded_registered_names(self):
+        users = MagicMock()
+        users.values.return_value = [
+            {'username': 'former', 'last_name': '王', 'first_name': '崇栓', 'profile__employee_code': '000175'},
+            {'username': 'no-code', 'last_name': 'コード', 'first_name': '未登録', 'profile__employee_code': None},
+        ]
+        customers = MagicMock()
+        customers.values.return_value = [{'customer_name': 'クボタ', 'short_name': '旧顧客', 'customer_code': '000196'}]
+        suppliers = MagicMock()
+        suppliers.values.return_value = [{'supplier_name': '旧仕入先', 'supplier_code': '000007'}]
+        operators = MagicMock()
+        operators.exclude.return_value.exclude.return_value.values_list.return_value.distinct.return_value = ['王  崇栓', '未解決作業者']
+        with patch('ai.services.analysis_redaction.get_user_model') as user_model, \
+                patch('ai.services.analysis_redaction.Customer.objects.using', return_value=customers), \
+                patch('ai.services.analysis_redaction.Supplier.objects.using', return_value=suppliers), \
+                patch('ai.services.analysis_redaction.ProcessRealtimeRecord.objects.using', return_value=operators):
+            user_model.return_value.objects.using.return_value = users
+            redactor = build_analysis_code_redactor()
+        self.assertEqual(redactor.redact_text('王崇栓 former 王　崇栓 王  崇栓 クボタ 旧顧客 旧仕入先'),
+                         '000175 000175 000175 000175 000196 000196 000007')
+        users.filter.assert_not_called()
+        customers.filter.assert_not_called()
+        for text in ('コード未登録', '未解決作業者'):
+            with self.assertRaises(AnalysisError):
+                redactor.redact_text(text)

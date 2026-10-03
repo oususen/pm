@@ -27,10 +27,10 @@ def _strip_code_fence(text):
     return match.group(1) if match else text
 
 
-def request_external_json(provider, model, messages, redactor):
+def request_external_json(provider, model, messages):
     """OpenAI互換APIへ分析案の作成を依頼し、JSON文字列を返す。
 
-    送信前に伏字化し、応答はそのまま返す（元の名前への復元は、JSONを解析した後に呼出し側で行う）。
+    呼出し側でコード置換・利用者確認済みのメッセージだけを受け取る。応答のコードは名前へ復元しない。
     """
     agent = external_provider(provider)
     label = agent['label']
@@ -39,7 +39,7 @@ def request_external_json(provider, model, messages, redactor):
     body = {
         'model': model,
         'stream': False,
-        'messages': redactor.redact_messages(messages),
+        'messages': messages,
         'temperature': 0.3,
         'max_tokens': chat_service.AGENT_MAX_TOKENS,
     }
