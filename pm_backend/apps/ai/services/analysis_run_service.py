@@ -181,8 +181,10 @@ class CleanupTracker:
             close_old_connections()
 
 
-def start_run(user, plan, sql_text, python_code, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
-    """`running`の行を保存する。保存できなければ、HistoryErrorとし、実行しない。"""
+def start_run(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
+    """`running`の行を保存する。保存できなければ、HistoryErrorとし、実行しない。
+
+    bundle: 実行するコードと識別(SQL・Pythonのハッシュ、固定外枠を含むコード全体のハッシュ、外枠の版)。"""
     proposal = plan['proposal']
     now = datetime.now()
     try:
@@ -191,7 +193,8 @@ def start_run(user, plan, sql_text, python_code, policy, deadlines=None, chunk_r
             date_from=proposal['date_from'], date_to=proposal['date_to'], conditions=proposal.get('conditions', ''),
             method_approved_at=_parse(plan.get('method_approved_at')), data_approved_at=_parse(plan.get('data_approved_at')),
             approved_counts={d['view']: d['rows'] for d in (plan.get('preview') or {}).get('datasets', [])},
-            sql_sha256=sha256_of(sql_text), python_sha256=sha256_of(python_code),
+            sql_sha256=bundle.sql_sha256, python_sha256=bundle.python_sha256,
+            executed_code_sha256=bundle.executed_code_sha256, wrapper_version=bundle.wrapper_version,
             settings_snapshot=_settings_snapshot(policy, deadlines, chunk_rows),
             status='running', worker_id=WORKER_ID, heartbeat_at=now, started_at=now,
         )
@@ -283,7 +286,7 @@ def finish_run(run, outcome, tracker=None):
         tracker.finalize(write)
 
 
-def run_and_record(user, plan, sql_text, python_code, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
+def run_and_record(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
     """履歴を保存しながら、承認済みの分析を実行する。
 
     開始行を保存できなければ実行しない。確定に失敗した場合は、結果を返さず、元の結果を含むHistoryErrorを送出する。
@@ -295,13 +298,13 @@ def run_and_record(user, plan, sql_text, python_code, policy, deadlines=None, ch
         mark_unknown_stale()
     except Exception:
         logger.exception('停止した可能性のある実行の判定に失敗しました')
-    run = start_run(user, plan, sql_text, python_code, policy, deadlines, chunk_rows)
+    run = start_run(user, plan, bundle, policy, deadlines, chunk_rows)
     heartbeat = Heartbeat(run).start()
     tracker = CleanupTracker(run.pk)
     result, error = None, None
     try:
         result = execute_approved_analysis(
-            plan['proposal'], run.approved_counts, python_code, policy, deadlines, chunk_rows, on_cleanup_done=tracker.notify)
+            plan['proposal'], run.approved_counts, bundle.executed_code, policy, deadlines, chunk_rows, on_cleanup_done=tracker.notify)
         outcome = outcome_from_result(result)
     except Exception as exc:
         error, outcome = exc, outcome_from_exception(exc)
@@ -358,7 +361,8 @@ def serialize_run(run):
         'views': run.views, 'date_from': run.date_from.isoformat(), 'date_to': run.date_to.isoformat(), 'conditions': run.conditions,
         'approved_counts': run.approved_counts, 'snapshot_counts': run.snapshot_counts, 'fetched_rows': run.fetched_rows,
         'sent_rows': run.sent_rows, 'loaded_rows': run.loaded_rows, 'unique_key_check': run.unique_key_check,
-        'sql_sha256': run.sql_sha256, 'python_sha256': run.python_sha256, 'settings': run.settings_snapshot,
+        'sql_sha256': run.sql_sha256, 'python_sha256': run.python_sha256,
+        'executed_code_sha256': run.executed_code_sha256, 'wrapper_version': run.wrapper_version, 'settings': run.settings_snapshot,
         'cleanup': run.cleanup,
         'started_at': run.started_at.isoformat(),
         'fetched_at': run.fetched_at.isoformat() if run.fetched_at else None,

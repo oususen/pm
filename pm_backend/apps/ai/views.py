@@ -17,6 +17,7 @@ from ai.models import AIConversation
 from ai.serializers import AIConversationListSerializer, AIConversationSerializer
 from ai.services.chat_service import AIChatAPIView, _has_resource_permission
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore, public_plan
+from ai.services import analysis_codegen_service as codegen
 from ai.services.analysis_planning_service import approve_plan, create_plan, external_send_preview, planning_options, preview_plan
 from notifications.transcription import AudioTooLongError, transcribe_audio_file
 
@@ -69,6 +70,64 @@ class AIAnalysisPreviewView(APIView):
             raise AnalysisError('対象件数を確認する版のみを指定してください。')
         plan = preview_plan(AnalysisPlanStore(), str(plan_id), request.user.pk, request.data['revision'])
         return Response(public_plan(plan))
+
+
+def _codegen_response(plan):
+    return {**public_plan(plan), 'codegen_state': codegen.describe_codegen(plan)}
+
+
+def _only(data, keys, message):
+    if not isinstance(data, dict) or set(data) != set(keys):
+        raise AnalysisError(message)
+    return data
+
+
+class AIAnalysisCodegenPreviewView(APIView):
+    """コード生成で送る内容の確認(送信しない)。外部AIの場合は、確認コードを返す。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        _only(request.data, {'revision'}, '対象の版のみを指定してください。')
+        return Response(codegen.preview(request.user.pk, str(plan_id), request.data['revision']))
+
+
+class AIAnalysisCodegenView(APIView):
+    """SQL・Pythonの生成。外部AIは、確認コードが必要。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        if not isinstance(request.data, dict) or not {'revision'} <= set(request.data) <= {'revision', 'confirmation'}:
+            raise AnalysisError('対象の版と、(外部AIの場合は)確認コードのみを指定してください。')
+        plan = codegen.generate(request.user.pk, str(plan_id), request.data['revision'], request.data.get('confirmation'))
+        return Response(_codegen_response(plan))
+
+
+class AIAnalysisCodegenTrialView(APIView):
+    """試行実行(実DBなし。空のテーブルでSQLだけを確認する)。分析の実行ではなく、履歴には残さない。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        _only(request.data, {'revision'}, '対象の版のみを指定してください。')
+        plan, trial = codegen.run_trial(request.user.pk, str(plan_id), request.data['revision'])
+        return Response({**_codegen_response(plan), 'trial': trial})
+
+
+class AIAnalysisCodegenApproveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        _only(request.data, {'revision', 'executed_code_sha256'}, '対象の版と、確認したコードのハッシュのみを指定してください。')
+        plan = codegen.approve_code(request.user.pk, str(plan_id), request.data['revision'], request.data['executed_code_sha256'])
+        return Response(_codegen_response(plan))
+
+
+class AIAnalysisCodegenReleaseView(APIView):
+    """状態不明の「生成中」を、明示の操作で解除する(生成回数は戻さず、有効期限は延長しない)。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        _only(request.data, {'revision'}, '対象の版のみを指定してください。')
+        return Response(_codegen_response(codegen.release_inflight(request.user.pk, str(plan_id), request.data['revision'])))
 
 
 def purge_expired_conversations():

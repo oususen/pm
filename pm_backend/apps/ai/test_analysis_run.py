@@ -25,6 +25,8 @@ POLICY = SimpleNamespace(max_memory_mb=512, max_cpu_cores=Decimal('1.0'), max_ex
                          plan_cache_ttl_minutes=60)
 PYTHON = "emit_report('SECRET-PYTHON-BODY')"
 SQL = 'SELECT SECRET_SQL_BODY'
+BUNDLE = SimpleNamespace(sql_sha256=runs.sha256_of(SQL), python_sha256=runs.sha256_of(PYTHON), executed_code=PYTHON,
+                         executed_code_sha256=runs.sha256_of('WRAPPED' + PYTHON), wrapper_version='test-wrapper')
 
 
 def make_plan(counts):
@@ -50,7 +52,7 @@ class RunBase(TransactionTestCase):
         self.plan = make_plan(self.counts)
 
     def run_it(self, **kwargs):
-        return runs.run_and_record(self.user, self.plan, SQL, PYTHON, POLICY, chunk_rows=500, **kwargs)
+        return runs.run_and_record(self.user, self.plan, BUNDLE, POLICY, chunk_rows=500, **kwargs)
 
 
 class RecordTest(RunBase):
@@ -69,6 +71,7 @@ class RecordTest(RunBase):
         self.assertEqual(run.unique_key_check, {'column': 'id', 'django': 'ok', 'container': 'ok'})
         self.assertEqual(run.sql_sha256, runs.sha256_of(SQL))
         self.assertEqual(run.python_sha256, runs.sha256_of(PYTHON))
+        self.assertEqual((run.executed_code_sha256, run.wrapper_version), (BUNDLE.executed_code_sha256, 'test-wrapper'))
         self.assertNotEqual(run.sql_sha256, run.python_sha256)
         self.assertEqual(run.cleanup['db_connection'], 'closed')
         self.assertEqual(run.worker_id, runs.WORKER_ID)
@@ -139,7 +142,7 @@ class SaveFailureTest(RunBase):
         self.assertEqual(caught.exception.outcome['reason'], 'approved_count_changed')
 
     def test_finish_does_not_touch_a_row_owned_by_another_worker(self):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         other = SimpleNamespace(pk=run.pk, worker_id='another-worker')
         with self.assertRaises(runs.HistoryError):
             runs.finish_run(other, runs.outcome_from_exception(RuntimeError('x')))
@@ -148,7 +151,7 @@ class SaveFailureTest(RunBase):
 
 class LivenessTest(RunBase):
     def make_running(self, heartbeat_age):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         AIAnalysisRun.objects.filter(pk=run.pk).update(heartbeat_at=datetime.now() - timedelta(seconds=heartbeat_age))
         return AIAnalysisRun.objects.get(pk=run.pk)
 
@@ -187,7 +190,7 @@ class LivenessTest(RunBase):
         self.assertEqual((stale.status, stale.reason), ('failed', 'unexpected_error'))
 
     def test_heartbeat_thread_updates_only_a_running_row_and_stops(self):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         AIAnalysisRun.objects.filter(pk=run.pk).update(heartbeat_at=datetime.now() - timedelta(seconds=30))
         before = AIAnalysisRun.objects.get(pk=run.pk).heartbeat_at
         beat = runs.Heartbeat(run, interval=0.2).start()
@@ -203,20 +206,20 @@ class LivenessTest(RunBase):
     def test_startup_does_not_mark_other_workers_fresh_runs(self):
         other = self.make_running(3)
         AIAnalysisRun.objects.filter(pk=other.pk).update(worker_id='another-worker:1:abcd')
-        runs.run_and_record(self.user, self.plan, SQL, PYTHON, POLICY, chunk_rows=500)
+        runs.run_and_record(self.user, self.plan, BUNDLE, POLICY, chunk_rows=500)
         self.assertEqual(AIAnalysisRun.objects.get(pk=other.pk).status, 'running')
 
 
 class CleanupPendingTest(RunBase):
     def test_late_final_cleanup_before_finish_replaces_pending(self):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         tracker = runs.CleanupTracker(run.pk)
         tracker.notify('closed')  # 確定の前に、待機中だった後始末が終わった
         runs.finish_run(run, {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'pending', 'container': 'not_started'}}, tracker)
         self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'closed')
 
     def test_late_final_cleanup_after_finish_updates_only_a_pending_row(self):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         tracker = runs.CleanupTracker(run.pk)
         runs.finish_run(run, {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'pending', 'container': 'not_started'}}, tracker)
         self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'pending')  # 通知までは、完了扱いにしない
@@ -224,7 +227,7 @@ class CleanupPendingTest(RunBase):
         self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'failed')
 
     def test_a_closed_row_is_not_changed_by_a_late_notification(self):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         tracker = runs.CleanupTracker(run.pk)
         runs.finish_run(run, {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'closed', 'container': 'not_started'}}, tracker)
         tracker.notify('failed')
@@ -270,8 +273,8 @@ class ViewingTest(RunBase):
         self.assertEqual(runs.serialize_run(run)['executed_by'], '削除済みユーザー')
 
     def test_concurrent_runs_are_recorded_independently(self):
-        first = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
-        second = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        first = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
+        second = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         self.assertNotEqual(first.pk, second.pk)
         threads = [threading.Thread(target=lambda r=r: runs.finish_run(r, runs.outcome_from_exception(RuntimeError('x')))) for r in (first, second)]
         [t.start() for t in threads]
@@ -289,7 +292,9 @@ class RealLauncherRecordTest(TransactionTestCase):
         counts = approved_counts()
         code = "n = con.execute('SELECT COUNT(*) FROM v_ai_shipment').fetchone()[0]\nemit_report(str(n))"
         with override_settings(AI_ANALYSIS_LAUNCHER_URL=os.environ['AI_ANALYSIS_LAUNCHER_URL_FOR_TEST']):
-            result = runs.run_and_record(user, make_plan(counts), None, code, POLICY, chunk_rows=500)
+            bundle = SimpleNamespace(sql_sha256=None, python_sha256=runs.sha256_of(code), executed_code=code,
+                                 executed_code_sha256=runs.sha256_of(code), wrapper_version='test-wrapper')
+            result = runs.run_and_record(user, make_plan(counts), bundle, POLICY, chunk_rows=500)
         run = AIAnalysisRun.objects.get(pk=result['run_id'])
         self.assertEqual(run.status, 'success', (run.reason, run.detail))
         self.assertEqual(result['launcher']['result']['report'], str(counts['v_ai_shipment']))
@@ -323,7 +328,7 @@ class ReviewFixTest(RunBase):
         self.assertEqual(runs.outcome_from_exception(RuntimeError(self.SECRET))['detail'], runs.REASON_TEXT['unexpected_error'])
 
     def test_notification_arriving_during_the_final_write_is_not_lost(self):
-        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        run = runs.start_run(self.user, self.plan, BUNDLE, POLICY)
         tracker = runs.CleanupTracker(run.pk)
         outcome = {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'pending', 'container': 'not_started'}}
         real_filter = runs.AIAnalysisRun.objects.filter
@@ -423,3 +428,136 @@ class LoadedAtTest(RunBase):
         failed = AIAnalysisRun.objects.get(pk=self.run_it()['run_id'])
         self.assertIsNone(failed.loaded_at)  # 投入が終わる前に失敗した実行は、報告がない
         self.assertIn('loaded_at', runs.serialize_run(failed))
+
+
+@unittest.skipUnless(os.environ.get('AI_ANALYSIS_LAUNCHER_URL_FOR_TEST'), '実launcherの通しは、接続先を指定したときだけ実行する')
+class RealCodegenToRunTest(TransactionTestCase):
+    """生成(模擬AI)→ 試行(実コンテナ、実DBなし)→ コード承認 → 実行(実DBの実データ)→ 履歴まで、実launcher(Docker)で通す。"""
+    databases = {'default'}
+
+    def setUp(self):
+        from ai.services import analysis_codegen_service as cg
+        from ai.services.analysis_plan_store import AnalysisPlanStore
+        self.cg = cg
+        self.store = AnalysisPlanStore()
+        self.user = get_user_model().objects.create(username='codegen-run')
+        override = override_settings(AI_ANALYSIS_LAUNCHER_URL=os.environ['AI_ANALYSIS_LAUNCHER_URL_FOR_TEST'])
+        override.enable()
+        self.addCleanup(override.disable)
+        for item in (patch.object(cg, 'build_analysis_code_redactor', lambda: SimpleNamespace(redact_text=lambda text: text)),
+                     patch.object(cg, 'get_analysis_execution_policy', lambda: POLICY),
+                     patch.object(cg, 'resolve_planning_provider', lambda data: (data['provider'], data['model']))):
+            item.start()
+            self.addCleanup(item.stop)
+        self.counts = approved_counts()
+        proposal = {**PROPOSAL, 'title': 't', 'steps': ['s'], 'outputs': ['o'], 'purpose': 'p', 'external_purpose': 'p', 'materials': [],
+                    'conditions': '指定期間の全登録行（追加の絞り条件なし）', 'provider': 'deepseek', 'model': 'm'}
+        plan = self.store.create(self.user.pk, proposal, 30)
+        self.addCleanup(lambda: self.store.client.delete(self.store._key(plan['id'])))
+
+        def approve(current):
+            current['status'] = 'data_approved'
+            current['preview'] = {'datasets': [{'view': v, 'rows': n} for v, n in self.counts.items()], 'total_rows': sum(self.counts.values())}
+            current['method_approved_at'] = current['data_approved_at'] = datetime.now().isoformat()
+
+        self.plan = self.store.update(plan['id'], self.user.pk, plan['revision'], approve)
+
+    def go(self, steps, python):
+        cg = self.cg
+        response = json.dumps({'steps': steps, 'python': python}, ensure_ascii=False)
+        confirmation = cg.preview(self.user.pk, self.plan['id'], self.plan['revision'])['confirmation']
+        with patch.object(cg, '_call_ai', return_value=response):
+            plan = cg.generate(self.user.pk, self.plan['id'], self.plan['revision'], confirmation)
+        self.assertEqual(plan['codegen']['status'], 'generated', plan['codegen'])
+        for _ in range(15):
+            plan, trial = cg.run_trial(self.user.pk, plan['id'], plan['revision'])
+            if trial['reason'] not in ('busy', 'launcher_unreachable'):
+                break
+            time.sleep(2)
+        self.assertEqual(trial['status'], 'passed', trial)
+        plan = cg.approve_code(self.user.pk, plan['id'], plan['revision'], plan['codegen']['executed_code_sha256'])
+        return plan, cg.bundle_from_plan(plan)
+
+    def test_generated_code_runs_on_real_data_and_the_history_identifies_the_executed_code(self):
+        steps = [{'name': 'w_total', 'query': 'SELECT count(*) AS n, sum(quantity) AS q FROM v_ai_shipment'}]
+        python = "import json\nn, q = con.sql('SELECT n, q FROM w_total').fetchone()\nemit_report(json.dumps({'n': n, 'q': str(q)}))"
+        plan, bundle = self.go(steps, python)
+        for _ in range(15):  # 試行のコンテナの後始末が終わるまで、launcherは使用中として断る
+            try:
+                result = runs.run_and_record(self.user, plan, bundle, POLICY, chunk_rows=500)
+            except ExecutionStopped as exc:
+                self.assertEqual(exc.reason, 'launcher_unreachable')
+                time.sleep(2)
+                continue
+            if result['status'] != 'refused':
+                break
+            time.sleep(2)
+        run = AIAnalysisRun.objects.get(pk=result['run_id'])
+        self.assertEqual(run.status, 'success', (run.reason, run.detail))
+        report = json.loads(result['launcher']['result']['report'])
+        from ai.services.analysis_execution_service import open_snapshot_connection, Deadline
+        connection = open_snapshot_connection(Deadline(30, 'x'), read_timeout=30)
+        try:
+            cursor = connection.cursor()
+            cursor.execute('SELECT COUNT(*), SUM(quantity) FROM v_ai_shipment')
+            count, total = cursor.fetchone()
+        finally:
+            connection.close()
+        self.assertEqual((report['n'], Decimal(report['q'])), (count, total))  # 生成コードの結果が、DB側の集計と一致する
+        self.assertEqual(run.sql_sha256, bundle.sql_sha256)
+        self.assertEqual(run.python_sha256, bundle.python_sha256)
+        self.assertEqual(run.executed_code_sha256, bundle.executed_code_sha256)
+        self.assertEqual(run.wrapper_version, bundle.wrapper_version)
+        self.assertEqual(run.executed_code_sha256, runs.sha256_of(bundle.executed_code))
+        self.assertEqual(run.loaded_rows, self.counts)
+
+    def test_guard_violation_in_python_sql_fails_the_run_without_a_result(self):
+        steps = [{'name': 'w_total', 'query': 'SELECT count(*) AS n FROM v_ai_shipment'}]
+        python = "con.sql('SELECT * FROM information_schema.tables').fetchall()\nemit_report('到達してはいけない')"
+        plan, bundle = self.go(steps, python)  # 静的検査・試行(SQLだけ)では見つからず、実行時の窓口で拒否される
+        for _ in range(15):
+            try:
+                result = runs.run_and_record(self.user, plan, bundle, POLICY, chunk_rows=500)
+            except ExecutionStopped:
+                time.sleep(2)
+                continue
+            if result['status'] != 'refused':
+                break
+            time.sleep(2)
+        self.assertEqual(result['status'], 'failed')
+        self.assertNotIn('result', result['launcher'])
+        self.assertIn('reference_not_allowed', result['launcher']['diagnostics']['stderr'])
+        run = AIAnalysisRun.objects.get(pk=result['run_id'])
+        self.assertEqual(run.status, 'failed')
+
+
+    def run_bundle(self, steps, python):
+        """静的検査を通さずに、組み立てたコードを、そのまま実コンテナで実行する(実行時の防御だけを確認する)。"""
+        bundle = self.cg.make_bundle(steps, python, [d['view'] for d in PROPOSAL['datasets']])
+        for _ in range(15):
+            try:
+                result = runs.run_and_record(self.user, self.plan, bundle, POLICY, chunk_rows=500)
+            except ExecutionStopped:
+                time.sleep(2)
+                continue
+            if result['status'] != 'refused':
+                return result
+            time.sleep(2)
+        return result
+
+    def test_module_attributes_cannot_reach_sys_or_other_modules_at_runtime(self):
+        """許可したモジュールの属性から、sys・osなどのモジュールへ届く迂回を、実行時に拒否する。"""
+        cases = {
+            'statistics.sys': "import statistics\nx = statistics.sys.modules\nemit_report('到達してはいけない')",
+            'from import': "from statistics import sys\nemit_report('到達してはいけない')",
+            'json.decoder': "import json\nx = json.decoder\nemit_report('到達してはいけない')",
+            're.enum': "import re\nx = re.enum\nemit_report('到達してはいけない')",
+        }
+        for label, python in cases.items():
+            with self.subTest(label):
+                result = self.run_bundle([], python)
+                self.assertEqual(result['status'], 'failed', result)
+                self.assertNotIn('result', result['launcher'])
+        ok = self.run_bundle([], "import statistics, json, decimal\nemit_report(json.dumps({'m': statistics.mean([1, 2, 3]), 'd': str(decimal.Decimal('1.5'))}))")
+        self.assertEqual(ok['status'], 'ok', ok)
+        self.assertEqual(json.loads(ok['launcher']['result']['report']), {'m': 2, 'd': '1.5'})

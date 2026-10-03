@@ -81,6 +81,8 @@ class AIAnalysisRun(models.Model):
     unique_key_check = models.JSONField(null=True, blank=True, verbose_name='一意キー重複の確認結果')
     sql_sha256 = models.CharField(max_length=64, null=True, blank=True, verbose_name='SQLのハッシュ(別のSQLがない実行はNULL)')
     python_sha256 = models.CharField(max_length=64, null=True, blank=True, verbose_name='Pythonのハッシュ(コードを作る前に終わった実行はNULL)')
+    executed_code_sha256 = models.CharField(max_length=64, null=True, blank=True, verbose_name='コンテナへ送ったコード全体(固定外枠を含む)のハッシュ')
+    wrapper_version = models.CharField(max_length=40, null=True, blank=True, verbose_name='固定外枠の版')
     settings_snapshot = models.JSONField(default=dict, verbose_name='実行時の設定値')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='running', verbose_name='状態')
     reason = models.CharField(max_length=80, blank=True, default='', verbose_name='失敗理由コード')
