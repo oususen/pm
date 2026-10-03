@@ -8,7 +8,7 @@ from django.utils.crypto import constant_time_compare, salted_hmac
 from ai.config.models import AIProviderConfig
 from ai.config.service import external_aggregate_transfer_allowed, get_analysis_execution_policy
 from ai.services import analysis_llm, chat_service
-from ai.services.analysis_data_service import ANALYSIS_VIEWS, count_target_rows, validate_datasets, validate_period
+from ai.services.analysis_data_service import ANALYSIS_VIEWS, count_target_rows, validate_datasets, validate_period, with_management_columns
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services.sql_queries import BASE_SQL_SCHEMA
 from ai.services.analysis_redaction import build_analysis_code_redactor
@@ -98,6 +98,8 @@ def validate_proposal(raw, purpose, date_from, date_to):
         validate_datasets(proposal['datasets'], date_from, date_to)
     except (ValueError, TypeError, KeyError, AnalysisError) as exc:
         raise AnalysisError('AIの分析案を検証できませんでした。未公開データや追加条件・資料が必要な目的は、現在対応していません。目的を見直してください。', 502) from exc
+    # 管理列(id)は、検証後にサーバーが加える。データ範囲の承認に含まれ、別の確認操作は設けない。
+    proposal = {**proposal, 'datasets': with_management_columns(proposal['datasets'])}
     return {**proposal, 'purpose': purpose, 'date_from': date_from, 'date_to': date_to, 'materials': [], 'conditions': '指定期間の全登録行（追加の絞り条件なし）'}
 
 

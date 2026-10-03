@@ -234,3 +234,21 @@ class AnalysisPlanningTest(SimpleTestCase):
             response = AIAnalysisPlansView.as_view()(factory.post('/', {}, format='json'))
             self.assertIn(response.status_code, (401, 403))
             create.assert_not_called()
+
+
+class ManagementColumnPlanningTest(SimpleTestCase):
+    def test_server_adds_id_after_validation_without_asking_the_ai(self):
+        from ai.services.analysis_data_service import with_management_columns
+        datasets = [{'view': 'v_ai_shipment', 'fields': ['shipment_date', 'quantity']},
+                    {'view': 'v_ai_purchase_receipt', 'fields': ['arrival_date', 'id', 'qty']}]
+        self.assertEqual(with_management_columns(datasets), [
+            {'view': 'v_ai_shipment', 'fields': ['id', 'shipment_date', 'quantity']},
+            {'view': 'v_ai_purchase_receipt', 'fields': ['id', 'arrival_date', 'qty']},
+        ])
+        self.assertEqual(datasets[0]['fields'], ['shipment_date', 'quantity'])  # 元の内容は変えない
+
+    def test_validated_proposal_contains_id_and_the_prompt_does_not_ask_for_it(self):
+        raw = json.dumps({'title': 't', 'steps': ['s'], 'outputs': ['o'],
+                          'datasets': [{'view': 'v_ai_shipment', 'fields': ['shipment_date', 'quantity']}]})
+        proposal = validate_proposal(raw, '目的', '2026-01-01', '2026-01-31')
+        self.assertEqual(proposal['datasets'][0]['fields'][0], 'id')

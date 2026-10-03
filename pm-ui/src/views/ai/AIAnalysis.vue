@@ -57,6 +57,7 @@
           <p>ビュー: {{ dataset.view }} / 必要フィールド: {{ dataset.fields.join('、') }}</p>
           <p v-if="plan.preview">対象行数: {{ formatNumber(plan.preview.datasets.find(item => item.view === dataset.view)?.rows) }}行</p>
         </div>
+        <small>id: 重複・欠落の確認用に、分析用コンテナへ必ず送ります。社外AIには送りません。</small>
         <p>追加資料: なし（資料の取込みは未実装）</p>
         <template v-if="plan.preview">
           <p>対象行数の合計: {{ formatNumber(plan.preview.total_rows) }}行 / 取得行数の上限: {{ formatNumber(plan.preview.max_fetch_rows) }}行</p>

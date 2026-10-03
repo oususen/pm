@@ -21,6 +21,16 @@ ANALYSIS_VIEWS = {
 }
 
 
+# 重複・欠落の確認に必要な管理列。分析用コンテナへ必ず送る(BOSS承認 2026-10-03)。社外AIには、値を送らない。
+MANAGEMENT_COLUMN = 'id'
+MANAGEMENT_COLUMN_PURPOSE = '重複・欠落の確認用'
+
+
+def with_management_columns(datasets):
+    """各ビューの取得列へ、管理列(id)を先頭に加える。AIの回答の検証後に、サーバーが加える(AIには、idを指定させない)。"""
+    return [{**dataset, 'fields': [MANAGEMENT_COLUMN, *[f for f in dataset['fields'] if f != MANAGEMENT_COLUMN]]} for dataset in datasets]
+
+
 def validate_period(date_from, date_to):
     try:
         start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)

@@ -119,6 +119,8 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # 未保存の分析案は共有Redisだけへ保持し、未設定時に代替先へ保存しない。
 # Dockerなしの開発接続先は pm_backend/.env、本番はComposeの内部サービスURLを使う。
 AI_ANALYSIS_REDIS_URL = os.getenv('AI_ANALYSIS_REDIS_URL', '').strip()
+# 生成コードの隔離実行launcher(開発限定。例: http://127.0.0.1:8091)。未設定なら分析の実行は無効。本番は設定しない。
+AI_ANALYSIS_LAUNCHER_URL = os.getenv('AI_ANALYSIS_LAUNCHER_URL', '').strip()
 
 AI_READER_DB_OPTIONS = {
     'charset': 'utf8mb4',
