@@ -101,10 +101,10 @@ class RecordTest(RunBase):
         self.assertEqual(run.unique_key_check['container'], 'failed')
 
     def test_not_run_cases_are_recorded(self):
-        run = runs.record_not_run(self.user, self.plan, 'expired', 'plan_expired', '分析案の有効期限が切れました', POLICY)
+        run = runs.record_not_run(self.user, self.plan, 'expired', 'plan_expired', POLICY)
         self.assertEqual((run.status, run.reason, run.python_sha256), ('expired', 'plan_expired', None))
         with self.assertRaises(ValueError):
-            runs.record_not_run(self.user, self.plan, 'success', 'x', 'x', POLICY)
+            runs.record_not_run(self.user, self.plan, 'success', 'x', POLICY)
 
     def test_unapproved_plan_is_not_executed(self):
         self.plan['status'] = 'awaiting_data'
@@ -251,8 +251,8 @@ class CleanupPendingTest(RunBase):
 class ViewingTest(RunBase):
     def test_deleted_user_is_shown_without_personal_data_and_the_run_survives(self):
         other = get_user_model().objects.create(username='other-user')
-        mine = runs.record_not_run(self.user, self.plan, 'expired', 'plan_expired', 'x', POLICY)
-        theirs = runs.record_not_run(other, self.plan, 'cancelled', 'user_cancelled', 'x', POLICY)
+        mine = runs.record_not_run(self.user, self.plan, 'expired', 'plan_expired', POLICY)
+        theirs = runs.record_not_run(other, self.plan, 'cancelled', 'user_cancelled', POLICY)
         self.assertEqual(sorted(r.pk for r in runs.visible_runs(self.user, include_all=False)), [mine.pk])
         self.assertEqual(sorted(r.pk for r in runs.visible_runs(self.user, include_all=True)), sorted([mine.pk, theirs.pk]))
         self.assertEqual(runs.serialize_run(AIAnalysisRun.objects.get(pk=theirs.pk))['executed_by'], 'other-user')
@@ -293,3 +293,95 @@ class RealLauncherRecordTest(TransactionTestCase):
         self.assertEqual(run.cleanup, {'db_connection': 'closed', 'container': 'closed'})
         self.assertGreater(run.container_load_seconds, 0)
         self.assertIsNotNone(run.python_seconds)
+
+
+class ReviewFixTest(RunBase):
+    """レビュー指摘4件: 実データを含み得る説明文を保存しない／通知と確定の競合／送信後の通信失敗は未確認／遅れて開いた接続の削除失敗。"""
+
+    SECRET = 'SECRET-ROW-DATA-777'
+
+    def test_failure_detail_is_a_fixed_text_and_never_the_launcher_or_exception_message(self):
+        self.launcher.respond = lambda header: {'status': 'failed', 'reason': 'duckdb_error', 'cleanup': {'ok': True},
+                                                'detail': f'Conversion Error: Could not convert string {self.SECRET} to INT',
+                                                'diagnostics': {'stderr': self.SECRET}}
+        run = AIAnalysisRun.objects.get(pk=self.run_it()['run_id'])
+        self.assertEqual(run.reason, 'duckdb_error')
+        self.assertNotIn(self.SECRET, json.dumps({f.name: str(getattr(run, f.name)) for f in AIAnalysisRun._meta.fields}, ensure_ascii=False))
+        self.assertEqual(run.detail, runs.GENERIC_REASON_TEXT)  # 未知の理由コードは、固定の汎用文
+        # 例外の説明文に実データが入っていても、保存しない
+        error = ExecutionStopped('fetch_failed', f'取得失敗 {self.SECRET}')
+        outcome = runs.outcome_from_exception(error)
+        self.assertNotIn(self.SECRET, json.dumps(outcome, ensure_ascii=False, default=str))
+        self.assertEqual(outcome['detail'], runs.REASON_TEXT['fetch_failed'])
+        self.assertEqual(runs.outcome_from_exception(RuntimeError(self.SECRET))['detail'], runs.REASON_TEXT['unexpected_error'])
+
+    def test_notification_arriving_during_the_final_write_is_not_lost(self):
+        run = runs.start_run(self.user, self.plan, SQL, PYTHON, POLICY)
+        tracker = runs.CleanupTracker(run.pk)
+        outcome = {**runs.outcome_from_exception(RuntimeError('x')), 'cleanup': {'db_connection': 'pending', 'container': 'not_started'}}
+        real_filter = runs.AIAnalysisRun.objects.filter
+        notifier = {}
+
+        def filter_then_notify_during_write(*args, **kwargs):
+            queryset = real_filter(*args, **kwargs)
+            real_update = queryset.update
+
+            def update(**fields):
+                # 確定の書き込みの直前に、後始末の完了通知が届く
+                notifier['thread'] = threading.Thread(target=tracker.notify, args=('closed',))
+                notifier['thread'].start()
+                time.sleep(0.3)
+                notifier['blocked'] = notifier['thread'].is_alive()  # 書き込みが終わるまで、通知は待たされる
+                return real_update(**fields)
+
+            queryset.update = update
+            return queryset
+
+        with patch.object(runs.AIAnalysisRun.objects, 'filter', filter_then_notify_during_write):
+            runs.finish_run(run, outcome, tracker)
+        notifier['thread'].join(5)
+        self.assertTrue(notifier['blocked'])
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run.pk).cleanup['db_connection'], 'closed')  # pendingのままにならない
+
+    def test_communication_failure_after_sending_everything_leaves_the_container_unconfirmed(self):
+        def no_response(header):
+            raise RuntimeError('応答を返さずに終わる')
+
+        self.launcher.respond = no_response
+        with self.assertRaises(ExecutionStopped) as caught:
+            self.run_it()
+        run = AIAnalysisRun.objects.get(pk=caught.exception.run_id)
+        self.assertEqual(run.reason, 'launcher_unreachable')
+        self.assertEqual(run.cleanup['container'], 'unconfirmed')  # 開始・削除を確認できない
+        self.assertEqual(len(self.launcher.bodies), 1)  # 全データは送り終えている
+
+    def test_stop_after_sending_started_is_unconfirmed_but_before_sending_is_not_started(self):
+        sent_rows = {'v_ai_shipment': 1}
+        started = runs.outcome_from_exception(type('E', (ExecutionStopped,), {})('refetch_mismatch', 'x'))
+        self.assertEqual(started['cleanup']['container'], 'not_started')
+        error = ExecutionStopped('refetch_mismatch', 'x')
+        error.progress = {'transmit_started': True, 'sent_rows': sent_rows}
+        self.assertEqual(runs.outcome_from_exception(error)['cleanup']['container'], 'unconfirmed')
+
+    def test_response_without_cleanup_result_is_unconfirmed(self):
+        self.launcher.respond = lambda header: {'status': 'refused', 'reason': 'busy'}
+        run = AIAnalysisRun.objects.get(pk=self.run_it()['run_id'])
+        self.assertEqual((run.status, run.reason, run.cleanup['container']), ('failed', 'busy', 'unconfirmed'))
+
+    def test_late_connection_close_failure_is_reported_as_failed_in_the_notification(self):
+        fake = MagicMock()
+        fake.close.side_effect = RuntimeError('close失敗')
+        fake.start_transaction.side_effect = lambda *a, **k: time.sleep(1.2)
+        real = runs.execute_approved_analysis
+
+        def with_fake_connection(*args, **kwargs):
+            with patch('ai.services.analysis_execution_service.mysql.connector.connect', return_value=fake):
+                return real(*args, **kwargs)
+
+        with patch.object(runs, 'execute_approved_analysis', with_fake_connection), self.assertRaises(ExecutionStopped) as caught:
+            self.run_it(deadlines={'fetch': 0.3})
+        run_id = caught.exception.run_id
+        deadline = time.time() + 6
+        while time.time() < deadline and AIAnalysisRun.objects.get(pk=run_id).cleanup['db_connection'] == 'pending':
+            time.sleep(0.1)
+        self.assertEqual(AIAnalysisRun.objects.get(pk=run_id).cleanup['db_connection'], 'failed')  # closedにならない

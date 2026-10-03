@@ -203,7 +203,7 @@ def _close_connection(connection):
     return 'closed'
 
 
-def _close_snapshot(connection, abandoned, on_done=None):
+def _close_snapshot(connection, abandoned, on_done=None, failed=lambda: False):
     """トランザクションと接続を閉じ、状態('closed' / 'pending' / 'failed')を返す。
 
     期限で待ちをやめた問い合わせ・接続開始がまだ動いている間は、接続を閉じず、その終了後に閉じる(動作中に閉じない)。
@@ -212,7 +212,9 @@ def _close_snapshot(connection, abandoned, on_done=None):
     def close():
         for worker in abandoned:
             worker.join()
-        return 'closed' if connection is None else _close_connection(connection)
+        status = 'closed' if connection is None else _close_connection(connection)
+        # 期限切れの後に開いた接続を、そのスレッドが閉じられなかった場合も、完了とは扱わない
+        return 'failed' if status == 'closed' and failed() else status
 
     def close_later():
         status = close()
@@ -384,9 +386,9 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
     def finish():
         """接続の後始末(1回だけ)。期限で待ちをやめた問い合わせが動いている間は、'pending'(待機中)とする。"""
         if 'db_connection' not in cleanup:
-            status = _close_snapshot(connection, [*fetch.abandoned, *(transfer.abandoned if transfer else [])], on_cleanup_done)
-            failed = fetch.cleanup_failed or (transfer is not None and transfer.cleanup_failed)
-            cleanup['db_connection'] = 'failed' if failed else status
+            cleanup['db_connection'] = _close_snapshot(
+                connection, [*fetch.abandoned, *(transfer.abandoned if transfer else [])], on_cleanup_done,
+                failed=lambda: fetch.cleanup_failed or (transfer is not None and transfer.cleanup_failed))
         return dict(cleanup)
 
     try:
@@ -438,6 +440,7 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
             progress['sent_at'] = datetime.now()  # 終端フレームまで送り終えた日時
 
         response_timeout = limits['transfer'] + LAUNCHER_STAGE_SECONDS + policy.max_execution_seconds
+        progress['transmit_started'] = True  # これ以降は、launcherがコンテナを作った可能性がある(開始・削除は、応答がなければ未確認)
         status, launcher = _transmit(host, port, body_length, frames(), transfer, response_timeout, timing)
         total_seconds = time.monotonic() - transfer_started
     except Exception as exc:

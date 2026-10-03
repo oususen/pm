@@ -30,6 +30,40 @@ logger = logging.getLogger(__name__)
 # 開発用の暫定値(BOSS承認 2026-10-04)。
 HEARTBEAT_SECONDS = 10
 STALE_SECONDS = 60
+# 失敗理由の説明は、理由コードごとの固定文だけを保存する。launcher・DuckDB・例外の説明文は、実データを含み得るため保存しない。
+REASON_TEXT = {
+    'approved_count_changed': '承認時から件数が変わりました。',
+    'fetch_rows_exceeded': '対象が取得行数の上限を超えました。',
+    'fetch_count_mismatch': '取得行数がCOUNTと一致しませんでした。',
+    'refetch_mismatch': '2回目の取得が1回目と一致しませんでした。',
+    'duplicate_key': '一意キー(id)の重複または逆順を検出しました。',
+    'stage_deadline_fetch': '取得の期限を超えました。',
+    'stage_deadline_transfer': '転送の期限を超えました。',
+    'stage_deadline_load': '投入の期限を超えました。',
+    'stage_deadline_python': 'Pythonの実行時間を超えました。',
+    'fetch_failed': 'データの取得に失敗しました。',
+    'unsupported_value': '投入できない値を検出しました。',
+    'management_column_missing': '管理列(id)が取得列にありません。',
+    'column_type_unknown': '列型が未定義の列があります。',
+    'launcher_disabled': '隔離実行が無効です。',
+    'launcher_not_allowed': '隔離実行の接続先が許可されていません。',
+    'launcher_unreachable': 'launcherとの通信に失敗しました。',
+    'load_count_mismatch': 'コンテナへの投入行数が送信行数と一致しませんでした。',
+    'busy': '実行中のジョブがあります。',
+    'isolation_unavailable': '隔離機能を確認できませんでした。',
+    'cleanup_pending': '前回のコンテナを削除できていません。',
+    'unexpected_error': '想定外のエラーが発生しました。',
+    'plan_expired': '分析案の有効期限が切れました。',
+    'user_cancelled': '利用者が実行を中止しました。',
+    'heartbeat_lost': '生存確認が途切れました。実行が停止したとは断定できないため、状態不明として記録します。',
+}
+GENERIC_REASON_TEXT = '失敗しました。詳細は理由コードを参照してください。'
+
+
+def reason_text(reason):
+    return REASON_TEXT.get(reason, GENERIC_REASON_TEXT)
+
+
 UNKNOWN_DETAIL = '生存確認が途切れました。実行が停止したとは断定できないため、状態不明として記録します。'
 DELETED_USER_LABEL = '削除済みユーザー'
 WORKER_ID = f'{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:8]}'  # プロセスの起動ごとに異なる。実行を担当するプロセスの識別
@@ -71,7 +105,7 @@ def mark_unknown_stale(now=None, stale_seconds=STALE_SECONDS):
     changed = 0
     for run in AIAnalysisRun.objects.filter(status='running', heartbeat_at__lt=limit).only('pk', 'heartbeat_at'):
         changed += AIAnalysisRun.objects.filter(pk=run.pk, status='running', heartbeat_at=run.heartbeat_at).update(
-            status='unknown', reason='heartbeat_lost', detail=UNKNOWN_DETAIL,
+            status='unknown', reason='heartbeat_lost', detail=reason_text('heartbeat_lost'),
             cleanup={'db_connection': 'pending', 'container': 'pending'},
         )
     return changed
@@ -106,11 +140,14 @@ class Heartbeat:
 
 
 class CleanupTracker:
-    """待機中(pending)だった後始末の最終結果を、履歴へ反映する。確定前に通知が来ても、取りこぼさない。"""
+    """待機中(pending)だった後始末の最終結果を、履歴へ反映する。
+
+    履歴の確定の書き込みと、通知の反映は、同じロックの下で行う。確定の直前・最中に通知が届いても、取りこぼさない。
+    """
 
     def __init__(self, run_id):
         self.run_id, self.final, self.finished = run_id, None, False
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def notify(self, status):
         """接続の後始末が、遅れて終わった(closed / failed)。"""
@@ -119,13 +156,17 @@ class CleanupTracker:
             if self.finished:
                 self._update_db()
 
-    def apply(self, cleanup):
-        """確定する後始末の内容へ、すでに届いた最終結果を反映する。"""
+    def finalize(self, write):
+        """確定する後始末へ、すでに届いた最終結果を反映して、書き込み(write(merge))を行う。書き込みの間、通知は待たせる。"""
         with self.lock:
+            result = write(self._merge)
             self.finished = True
-            if cleanup.get('db_connection') == 'pending' and self.final:
-                cleanup = {**cleanup, 'db_connection': self.final}
-            return cleanup
+            return result
+
+    def _merge(self, cleanup):
+        if cleanup.get('db_connection') == 'pending' and self.final:
+            return {**cleanup, 'db_connection': self.final}
+        return cleanup
 
     def _update_db(self):
         try:
@@ -159,9 +200,12 @@ def start_run(user, plan, sql_text, python_code, policy, deadlines=None, chunk_r
 
 
 def _container_cleanup(launcher):
-    """launcherのジョブ用コンテナの後始末。削除できていなければ、完了扱いにしない(launcherが次のジョブの前に再試行する)。"""
+    """launcherのジョブ用コンテナの後始末。launcherの応答に後始末の結果がなければ、未確認(unconfirmed)とする。
+
+    削除できていなければ完了扱いにしない(launcherが次のジョブの前に再試行する)。
+    """
     if not launcher or 'cleanup' not in launcher:
-        return 'not_started'
+        return 'unconfirmed'
     return 'closed' if (launcher['cleanup'] or {}).get('ok') else 'pending'
 
 
@@ -173,7 +217,7 @@ def outcome_from_result(result):
     reason = '' if ok else (result.get('reason') or launcher.get('reason') or 'launcher_failed')
     return {
         'status': 'success' if ok else 'failed', 'reason': reason,
-        'detail': '' if ok else str(launcher.get('detail') or '')[:300],
+        'detail': '' if ok else reason_text(reason),
         'cleanup': {**(fetch.get('cleanup') or {}), 'container': _container_cleanup(launcher)},
         'snapshot_counts': fetch.get('counts'), 'fetched_rows': fetch.get('fetched_rows'), 'sent_rows': fetch.get('sent_rows'),
         'loaded_rows': diagnostics.get('rows_loaded'),
@@ -191,8 +235,9 @@ def outcome_from_exception(exc):
     stopped = isinstance(exc, ExecutionStopped)
     return {
         'status': 'failed', 'reason': exc.reason if stopped else 'unexpected_error',
-        'detail': (str(exc.detail) if stopped else type(exc).__name__)[:300],
-        'cleanup': {**(getattr(exc, 'cleanup', None) or {}), 'container': 'not_started'},
+        'detail': reason_text(exc.reason if stopped else 'unexpected_error'),
+        # 送信を始める前に止めた場合だけ、コンテナは作られていない。送信後は、開始・削除を確認できないため未確認とする
+        'cleanup': {**(getattr(exc, 'cleanup', None) or {}), 'container': 'unconfirmed' if progress.get('transmit_started') else 'not_started'},
         'snapshot_counts': progress.get('snapshot_counts'), 'fetched_rows': progress.get('fetched_rows'),
         'sent_rows': progress.get('sent_rows'), 'loaded_rows': None,
         'unique_key_check': {'column': 'id', 'django': 'failed' if getattr(exc, 'reason', '') == 'duplicate_key' else (
@@ -205,13 +250,18 @@ def outcome_from_exception(exc):
 
 def finish_run(run, outcome, tracker=None):
     """元の実行結果を確定する。更新できる行は、自分のworker_idで、`running`または`unknown`のものに限る。"""
-    fields = dict(outcome)
-    if tracker is not None:
-        fields['cleanup'] = tracker.apply(fields['cleanup'])
-    fields['finished_at'] = datetime.now()
-    updated = AIAnalysisRun.objects.filter(pk=run.pk, worker_id=run.worker_id, status__in=('running', 'unknown')).update(**fields)
-    if updated != 1:
-        raise HistoryError('実行履歴の行を確定できません(行が変更または削除されています)。', outcome)
+    def write(merge=lambda cleanup: cleanup):
+        fields = dict(outcome)
+        fields['cleanup'] = merge(fields['cleanup'])
+        fields['finished_at'] = datetime.now()
+        updated = AIAnalysisRun.objects.filter(pk=run.pk, worker_id=run.worker_id, status__in=('running', 'unknown')).update(**fields)
+        if updated != 1:
+            raise HistoryError('実行履歴の行を確定できません(行が変更または削除されています)。', outcome)
+
+    if tracker is None:
+        write()
+    else:
+        tracker.finalize(write)
 
 
 def run_and_record(user, plan, sql_text, python_code, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
@@ -251,7 +301,7 @@ def run_and_record(user, plan, sql_text, python_code, policy, deadlines=None, ch
     return result
 
 
-def record_not_run(user, plan, status, reason, detail, policy):
+def record_not_run(user, plan, status, reason, policy):
     """実行を始める前に終わった場合(期限切れ・中止)を、履歴へ残す。コードは作られていないため、ハッシュはNULLとする。"""
     if status not in ('expired', 'cancelled'):
         raise ValueError('statusはexpiredまたはcancelledです。')
@@ -263,7 +313,7 @@ def record_not_run(user, plan, status, reason, detail, policy):
             conditions=proposal.get('conditions', ''), method_approved_at=_parse(plan.get('method_approved_at')),
             data_approved_at=_parse(plan.get('data_approved_at')),
             approved_counts={d['view']: d['rows'] for d in (plan.get('preview') or {}).get('datasets', [])},
-            settings_snapshot=_settings_snapshot(policy, None, CHUNK_ROWS), status=status, reason=reason, detail=str(detail)[:300],
+            settings_snapshot=_settings_snapshot(policy, None, CHUNK_ROWS), status=status, reason=reason, detail=reason_text(reason),
             cleanup={'db_connection': 'not_started', 'container': 'not_started'},
             worker_id=WORKER_ID, heartbeat_at=now, started_at=now, finished_at=now,
         )

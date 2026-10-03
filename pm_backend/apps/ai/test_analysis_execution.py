@@ -641,3 +641,21 @@ class ProgressOnStopTest(ExecutionBase):
         self.assertEqual(caught.exception.progress['fetched_rows'], counts)  # 1回目は、すべて取得できている
         self.assertLess(sum(caught.exception.progress['sent_rows'].values()), sum(counts.values()))  # 送信は、途中まで
         self.assertNotIn('sent_at', caught.exception.progress)  # 終端まで送っていない
+
+
+class LateCloseFailureNotificationTest(SimpleTestCase):
+    def test_pending_cleanup_notifies_failed_when_the_late_connection_could_not_be_closed(self):
+        results = []
+        worker = threading.Thread(target=time.sleep, args=(0.3,))
+        worker.start()
+        status = service._close_snapshot(None, [worker], on_done=results.append, failed=lambda: True)
+        self.assertEqual(status, 'pending')
+        worker.join()
+        deadline = time.time() + 3
+        while not results and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(results, ['failed'])
+
+    def test_sync_cleanup_reports_failed_too(self):
+        self.assertEqual(service._close_snapshot(None, [], failed=lambda: True), 'failed')
+        self.assertEqual(service._close_snapshot(None, [], failed=lambda: False), 'closed')
