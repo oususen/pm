@@ -81,6 +81,7 @@ function Wait-For($label, [scriptblock]$condition, [int]$seconds = 45) {
 
 function Show-Status {
     Write-Host '=== 分析AI実行基盤の状態 ===' -ForegroundColor Cyan
+    Write-Host '  起動できない場合は、PCの時刻帯が日本標準時か確認してください' -ForegroundColor Yellow
     if (Test-Redis) { Write-Host '  Redis(Memurai) : 動作中' -ForegroundColor Green }
     else { Write-Host '  Redis(Memurai) : 停止中(起動してください)' -ForegroundColor Red }
 
@@ -111,6 +112,7 @@ function Show-Status {
 
 function Start-Dev {
     Write-Host '=== 分析AI実行基盤を起動します ===' -ForegroundColor Cyan
+    Write-Host '  起動できない場合は、PCの時刻帯が日本標準時か確認してください' -ForegroundColor Yellow
     # 1. Redis(Memurai)。既存の開発用起動スクリプトを、新しい窓で実行する
     if (Test-Redis) {
         Write-Host '  Redis(Memurai): すでに動いています。' -ForegroundColor Green
@@ -153,7 +155,11 @@ function Start-Dev {
             Start-Process powershell.exe -ArgumentList @('-NoExit', '-NoProfile', '-Command', $command) | Out-Null
         }
         $ok = Wait-For '専用ワーカー' { $s = Get-State; $s -and $s.worker }
-        if (-not $ok) { Write-Host '  ワーカーの窓にエラーが出ていないか、確認してください。' -ForegroundColor Red; return }
+        if (-not $ok) {
+            Write-Host '  ワーカーの窓にエラーが出ていないか、確認してください。' -ForegroundColor Red
+            Write-Host '  起動できない場合は、PCの時刻帯が日本標準時か確認してください' -ForegroundColor Yellow
+            return
+        }
         Write-Host '  専用ワーカー: 起動しました。' -ForegroundColor Green
     }
     Write-Host ''

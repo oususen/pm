@@ -170,3 +170,10 @@ class WorkerIdentityTests(SimpleTestCase):
         self.assertIn('worker_version_matches(worker, current_code_version())', source)
         self.assertIn('if ($state.worker_stale)', source)
         self.assertIn('専用ワーカーを再起動してください。', source)
+        guidance = '起動できない場合は、PCの時刻帯が日本標準時か確認してください'
+        status = source.split('function Show-Status {', 1)[1].split('function Start-Dev {', 1)[0]
+        start = source.split('function Start-Dev {', 1)[1].split('function Stop-Dev {', 1)[0]
+        failure = start.split("$ok = Wait-For '専用ワーカー'", 1)[1].split("Write-Host '  専用ワーカー: 起動しました。'", 1)[0]
+        self.assertIn(guidance, status)
+        self.assertIn(guidance, start.split('# 1. Redis', 1)[0])
+        self.assertIn(guidance, failure)

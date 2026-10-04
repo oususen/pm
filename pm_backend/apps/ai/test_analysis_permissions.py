@@ -1,5 +1,6 @@
 """分析APIの全入口を実ユーザー・実効権限で照合する(一時SQLiteのみ)。"""
-from unittest.mock import patch
+import json
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
@@ -154,6 +155,51 @@ class AnalysisPermissionsTests(TestCase):
             store.return_value.get.side_effect = AnalysisError('分析案が見つかりません。', 404)
             self.assertEqual(self.request('ai-analysis-plan', 'get', 'plan_id', self.user).status_code, 404)
             self.assertEqual(store.return_value.get.call_args.args[1], self.user.pk)
+
+    @override_settings(AI_ANALYSIS_REDIS_URL='redis://localhost/0')
+    def test_view_only_user_reaches_real_plan_owner_check_and_cannot_post(self):
+        self.grant(view=True)
+        other = get_user_model().objects.create_user(username='analysis-other-owner')
+        plan_id = uuid4()
+        plan = {'id': str(plan_id), 'owner_id': self.user.pk,
+                'proposal': {'title': '所有者だけに見える分析案'}, 'revision': 1}
+        client = MagicMock()
+        # Redisの読み取りだけを模擬し、API・資源権限・Store.get/_decodeは実処理を通す。
+        with patch('ai.services.analysis_plan_store.Redis.from_url', return_value=client):
+            client.get.return_value = json.dumps(plan, ensure_ascii=False)
+            request = self.factory.get('/')
+            force_authenticate(request, self.user)
+            response = ROUTES['ai-analysis-plan'].callback(request, plan_id=plan_id)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['proposal'], plan['proposal'])
+            self.assertNotIn('owner_id', response.data)
+            client.get.assert_called_once_with(f'pm:ai:analysis:plan:{plan_id}')
+
+            client.get.reset_mock()
+            plan['owner_id'] = other.pk
+            client.get.return_value = json.dumps(plan, ensure_ascii=False)
+            request = self.factory.get('/')
+            force_authenticate(request, self.user)
+            response = ROUTES['ai-analysis-plan'].callback(request, plan_id=plan_id)
+            self.assertEqual(response.status_code, 404)
+            self.assertNotIn(plan['proposal']['title'], str(response.data))
+            client.get.assert_called_once_with(f'pm:ai:analysis:plan:{plan_id}')
+
+            client.reset_mock()
+            plan['owner_id'] = self.user.pk
+            client.get.return_value = json.dumps(plan, ensure_ascii=False)
+            for name, method, argument in ENDPOINTS:
+                if method != 'post':
+                    continue
+                with self.subTest(name=name):
+                    request = self.factory.post('/', {}, format='json')
+                    force_authenticate(request, self.user)
+                    kwargs = {argument: plan_id if argument == 'plan_id' else uuid4()} if argument else {}
+                    response = ROUTES[name].callback(request, **kwargs)
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(str(response.data['detail']), CanUseAIAnalysis.message)
+            # POSTは資源権限で拒否し、他人／自分の判定前にRedisへ触れない。
+            self.assertEqual(client.mock_calls, [])
 
 
 def endpoint_test(name, method, argument):
