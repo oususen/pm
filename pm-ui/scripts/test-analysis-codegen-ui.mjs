@@ -18,7 +18,7 @@ const template = compileTemplate({ source: parsed.descriptor.template.content, f
 assert.deepEqual(template.errors, [])
 const exposed = 'plan,busy,error,codePreview,codeSendAccepted,codeAccepted,codeStateFresh,codeInFlight,canGenerate,canTrial,canApproveCode,trialPassed,hasCode,prepareCodePreview,generateCode,trialCode,approveCode,releaseCodegen,refresh,resetPlan'
 const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll', 'visible'].includes(name))
-const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisExecution', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
+const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisExecution', 'AIAnalysisTemplates', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   `${parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')}\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code
   .replace(/import \{([^}]+)\} from "vue"/, (_, imports) => `const {${imports.replace(/ as /g, ':')}} = Vue`)
@@ -58,7 +58,7 @@ async function setup(provider = 'openrouter') {
     calls.push([name, ...args]); return methods[name](...args)
   }])) }
   const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, () => props, fn => { mount = fn }, fn => { unmount = fn }, api,
-    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>分析実行の専用画面</section>' }, AnalysisErrorBanner, useAnalysisErrorNotices))
+    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>分析実行の専用画面</section>' }, { template: '<section>テンプレートの専用画面</section>' }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount()
   state.plan.value = dataPlan(provider)
   calls.length = 0

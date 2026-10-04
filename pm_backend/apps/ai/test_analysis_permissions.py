@@ -33,6 +33,9 @@ ENDPOINTS = (
     ('ai-analysis-job', 'get', 'job_id'),
     ('ai-analysis-job-cancel', 'post', 'job_id'),
     ('ai-analysis-runs', 'get', None),
+    ('ai-analysis-templates', 'get', None),
+    ('ai-analysis-templates', 'post', None),
+    ('ai-analysis-template', 'get', 'template_id'),
 )
 ROUTES = {route.name: route for route in urls.urlpatterns if str(route.pattern).startswith('ai/analysis/')}
 
@@ -56,7 +59,7 @@ class AnalysisPermissionsTests(TestCase):
 
     def test_endpoint_set_and_permission_class_have_no_omissions(self):
         self.assertEqual(set(ROUTES), {row[0] for row in ENDPOINTS})
-        self.assertEqual(len(ROUTES), len(ENDPOINTS))
+        self.assertEqual(len(ROUTES), len({row[0] for row in ENDPOINTS}))
         for route in ROUTES.values():
             self.assertIn(CanUseAIAnalysis, route.callback.view_class.permission_classes)
 

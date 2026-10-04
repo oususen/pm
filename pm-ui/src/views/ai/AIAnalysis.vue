@@ -119,6 +119,7 @@
       </div>
     </section>
     <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
+    <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :blocked="!!busy || !codeStateFresh" />
     <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
   </main>
 </template>
@@ -127,6 +128,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '../../api/client'
 import AIAnalysisExecution from './AIAnalysisExecution.vue'
+import AIAnalysisTemplates from './AIAnalysisTemplates.vue'
 import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
 import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 

@@ -7,6 +7,7 @@ from ai.views import AIAnalysisCodegenRefreshWrapperView
 from ai.views import AIAnalysisApproveView, AIAnalysisExternalPreviewView, AIAnalysisOptionsView, AIAnalysisPlansView, AIAnalysisPlanView, AIAnalysisPreviewView
 from ai.config.views import AIAnalysisExecutionPolicyView, AICrossScreenAccessPolicyViewSet, AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
+from ai.analysis_template_views import AIAnalysisTemplatesView, AIAnalysisTemplateView
 from ai.analysis_execution_views import AIAnalysisExecuteView, AIAnalysisExecutionOptionsView, AIAnalysisJobView, AIAnalysisJobCancelView, AIAnalysisRunsView
 
 router = DefaultRouter()
@@ -24,6 +25,8 @@ urlpatterns = [
     path('ai/analysis/jobs/<uuid:job_id>/', AIAnalysisJobView.as_view(), name='ai-analysis-job'),
     path('ai/analysis/jobs/<uuid:job_id>/cancel/', AIAnalysisJobCancelView.as_view(), name='ai-analysis-job-cancel'),
     path('ai/analysis/runs/', AIAnalysisRunsView.as_view(), name='ai-analysis-runs'),
+    path('ai/analysis/templates/', AIAnalysisTemplatesView.as_view(), name='ai-analysis-templates'),
+    path('ai/analysis/templates/<int:template_id>/', AIAnalysisTemplateView.as_view(), name='ai-analysis-template'),
     path('', include(router.urls)),
     path('ai/chat/', AIChatView.as_view(), name='ai-chat'),
     path('ai/transcribe/', AITranscribeView.as_view(), name='ai-transcribe'),

@@ -113,3 +113,64 @@ class AIAnalysisRun(models.Model):
 
     def __str__(self):
         return f'実行{self.pk}（{self.get_status_display()}）'
+
+
+class AIAnalysisTemplate(models.Model):
+    """承認済みの分析コードのテンプレート(AI分析基盤仕様書§5、第3段階設計案3-A)。
+
+    本文は版ごとに不変で、修正は新しい行(新しい版)にする。実データ・結果・AIへ送った本文・
+    AIの応答本文・接続情報は保存しない。固定外枠の本文も保存せず、外枠の版とハッシュだけを残す。
+    履歴(AIAnalysisRun)の template_id にはこの行の id、template_version にはこの行の version を記録する。
+    承認者は、ユーザーが削除されたらNULLになる(表示は「削除済みユーザー」)。
+    """
+    STATUS_CHOICES = [
+        ('pending_admin', '管理者承認待ち'), ('approved', '正式'), ('rejected', '却下'), ('superseded', '置換済み'),
+    ]
+
+    family_id = models.UUIDField(verbose_name='系統ID')
+    version = models.PositiveIntegerField(default=1, verbose_name='版')
+    source_plan_id = models.CharField(max_length=64, verbose_name='元の分析案ID')
+    source_plan_revision = models.PositiveIntegerField(verbose_name='元の分析案の承認版')
+    name = models.CharField(max_length=300, verbose_name='名称')
+    purpose = models.TextField(verbose_name='分析目的')
+    procedure = models.JSONField(verbose_name='分析手順')
+    output_spec = models.JSONField(verbose_name='出力案')
+    conditions = models.TextField(blank=True, default='', verbose_name='条件')
+    datasets = models.JSONField(verbose_name='利用ビュー・承認列')
+    date_from = models.DateField(verbose_name='期間開始')
+    date_to = models.DateField(verbose_name='期間終了')
+    sql_steps = models.JSONField(verbose_name='SQLの手順')
+    python_code = models.TextField(verbose_name='承認済みPython')
+    wrapper_version = models.CharField(max_length=40, verbose_name='承認時の固定外枠の版')
+    sql_sha256 = models.CharField(max_length=64, null=True, blank=True, verbose_name='SQLのハッシュ(SQLの手順がなければNULL)')
+    python_sha256 = models.CharField(max_length=64, verbose_name='Pythonのハッシュ')
+    executed_code_sha256 = models.CharField(max_length=64, verbose_name='固定外枠を含むコード全体のハッシュ')
+    content_sha256 = models.CharField(max_length=64, verbose_name='承認対象全体のハッシュ')
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='ai_analysis_templates', verbose_name='利用者承認を行った人',
+    )
+    method_approved_at = models.DateTimeField(verbose_name='手順の承認日時')
+    data_approved_at = models.DateTimeField(verbose_name='データ範囲の承認日時')
+    code_approved_at = models.DateTimeField(verbose_name='コードの承認日時')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending_admin', verbose_name='状態')
+    state_revision = models.PositiveIntegerField(default=1, verbose_name='状態の版(競合検出用)')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='保存日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'ai_analysis_template'
+        ordering = ['-created_at', '-id']
+        constraints = [
+            models.UniqueConstraint(fields=['family_id', 'version'], name='ai_tpl_family_version'),
+            models.UniqueConstraint(fields=['source_plan_id', 'source_plan_revision'], name='ai_tpl_source_revision'),
+            models.UniqueConstraint(fields=['source_plan_id', 'content_sha256'], name='ai_tpl_source_content'),
+        ]
+        indexes = [
+            models.Index(fields=['status', 'updated_at', 'id'], name='ai_tpl_status_updated'),
+            models.Index(fields=['approved_by', 'created_at', 'id'], name='ai_tpl_user_created'),
+        ]
+        verbose_name = 'AI分析テンプレート'
+        verbose_name_plural = 'AI分析テンプレート'
+
+    def __str__(self):
+        return f'テンプレート{self.pk}（{self.get_status_display()}）'
