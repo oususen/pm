@@ -154,6 +154,15 @@ class AIAnalysisTemplate(models.Model):
     code_approved_at = models.DateTimeField(verbose_name='コードの承認日時')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending_admin', verbose_name='状態')
     state_revision = models.PositiveIntegerField(default=1, verbose_name='状態の版(競合検出用)')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='ai_analysis_template_reviews',
+        verbose_name='承認・却下した管理者',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name='承認・却下の日時')
+    rejection_reason = models.TextField(blank=True, default='', verbose_name='却下理由(管理者が入力。作成者と管理者だけが閲覧)')
+    replaces = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.PROTECT, related_name='corrections', verbose_name='この訂正版が置き換える、却下された版',
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='保存日時')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
 

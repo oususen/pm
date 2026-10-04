@@ -11,7 +11,8 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Max, Q
+from rest_framework.exceptions import PermissionDenied
 
 from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import bundle_from_plan, steps_text, validate_generated
@@ -113,35 +114,86 @@ def _fields_from_plan(plan):
 
 
 def _find_existing(plan_id, revision, content_sha256):
-    """同じ分析案の同じ版、または同じ内容(版が進んでいても)の保存済みの行。重複保存と同時要求の判定に使う。"""
+    """同じ分析案の同じ版、または同じ内容(版が進んでいても)の保存済みの行。重複保存と同時要求の判定に使う。
+
+    前提: 分析案の内容は版(revision)で決まる。通常は両条件が同じ行になるため、idの小さい方を返す。
+    版を変えずに内容が変わる経路を足す場合は、この選び方を見直すこと(訂正版の保存は、呼び出し側のsame_requestで置き換え元の一致を確認する)。
+    """
     return AIAnalysisTemplate.objects.filter(
         Q(source_plan_id=plan_id, source_plan_revision=revision) | Q(source_plan_id=plan_id, content_sha256=content_sha256),
     ).order_by('id').first()
 
 
-def save_template(user, plan_id, revision):
-    """本人の承認済み分析案から保存する。(テンプレート, 新規作成か)を返す。同じ内容の再送は、既存の行を返す。"""
+def _check_correction_request(user, replaces):
+    """訂正版の保存要求の形式と権限(管理者だけ)。保存済みの行の確認より先に行う。"""
+    if type(replaces) is not int or replaces < 1:
+        raise AnalysisError('置き換える版の指定が不正です。')
+    if not is_template_admin(user):
+        raise PermissionDenied('AIテンプレートの訂正版を保存する権限がありません。')
+
+
+def _replaced_template(replaces, content_sha256):
+    """訂正版の置き換え元。却下された版に対して、内容が違う場合だけ保存できる。"""
+    old = AIAnalysisTemplate.objects.filter(pk=replaces).first()
+    if old is None:
+        raise AnalysisError('置き換える版が見つかりません。', 404)
+    if old.status != 'rejected':
+        raise AnalysisError('訂正版を保存できるのは、却下された版だけです。', 409)
+    if old.content_sha256 == content_sha256:
+        raise AnalysisError('却下された版と同じ内容は、訂正版として保存できません。', 409)
+    return old
+
+
+def save_template(user, plan_id, revision, replaces=None):
+    """本人の承認済み分析案から保存する。(テンプレート, 新規作成か)を返す。同じ内容の再送は、既存の行を返す。
+
+    replacesを指定すると、却下された版の訂正版(同じ系統の次の版)として保存する(管理者のみ)。
+    """
     if type(revision) is not int or revision < 1:
         raise AnalysisError('分析案の版が不正です。')
     plan = AnalysisPlanStore().get(str(plan_id), user.pk)
     if plan['revision'] != revision:
         raise AnalysisError('分析案が別の操作で更新されました。最新の内容を確認してください。', 409)
     fields = _fields_from_plan(plan)
+    if replaces is not None:
+        _check_correction_request(user, replaces)
     key = {'source_plan_id': str(plan_id), 'source_plan_revision': revision}
+
+    def same_request(row):
+        # 同じ分析案の保存済みの行を返す。ただし訂正版として保存する要求が、別の保存(置き換えなし・別の置き換え元)に当たったら拒否する
+        if replaces != row.replaces_id:
+            raise AnalysisError('この分析案は、すでに別のテンプレートとして保存されています。', 409)
+        return row, False
+
+    # 保存済みの行の確認を先に行う: 訂正版の承認後(元が置換済み)の再送も、既存の行を返す
     existing = _find_existing(key['source_plan_id'], revision, fields['content_sha256'])
     if existing is not None:
-        return existing, False
+        return same_request(existing)
+    old = _replaced_template(replaces, fields['content_sha256']) if replaces is not None else None
     try:
         with transaction.atomic():
+            if old is None:
+                family_id, version = uuid4(), 1
+            else:
+                # 元の却下版をロックして、状態と「承認待ちの訂正版がすでにあるか」を確認する(同時の訂正版保存でも片方だけが成立する)。
+                # 承認待ちの訂正版がある間は、次の訂正版を保存できない。先の訂正版を承認または却下してから保存する
+                locked = AIAnalysisTemplate.objects.select_for_update().get(pk=old.pk)
+                if locked.status != 'rejected':
+                    raise AnalysisError('訂正版を保存できるのは、却下された版だけです。', 409)
+                if AIAnalysisTemplate.objects.filter(replaces=locked, status='pending_admin').exists():
+                    raise AnalysisError('この却下版には、承認待ちの訂正版がすでにあります。先に承認または却下してください。', 409)
+                # 同じ系統の次の版。同時の訂正版は(family_id, version)の一意制約でも保護される
+                family_id = old.family_id
+                version = AIAnalysisTemplate.objects.filter(family_id=family_id).aggregate(top=Max('version'))['top'] + 1
             template = AIAnalysisTemplate.objects.create(
-                family_id=uuid4(), version=1, approved_by=user, **key, **fields,
+                family_id=family_id, version=version, approved_by=user, replaces=old, **key, **fields,
             )
     except IntegrityError:
         # 同時の保存要求に負けた場合は、先に成立した行を返す(別内容を作らない。見つからなければ固定文で拒否)
         existing = _find_existing(key['source_plan_id'], revision, fields['content_sha256'])
         if existing is None:
             raise AnalysisError('テンプレートを保存できませんでした。時間をおいて再度お試しください。', 409) from None
-        return existing, False
+        return same_request(existing)
     return template, True
 
 
@@ -165,12 +217,18 @@ def serialize_template(template, user, admin, detail):
     }
     if visible:
         data.update({
+            'state_revision': template.state_revision, 'replaces': template.replaces_id,
             'date_from': template.date_from.isoformat(), 'date_to': template.date_to.isoformat(),
             'wrapper_version': template.wrapper_version, 'executed_code_sha256': template.executed_code_sha256,
             'content_sha256': template.content_sha256,
         })
         if detail:
+            # 却下理由・確認者は、作成者と管理者だけ(visibleと同じ範囲)に返す。置換先は、承認された訂正版
+            replacement = template.corrections.filter(status='approved').order_by('id').first() if template.status == 'superseded' else None
             data.update({
+                'reviewed_by': (template.reviewed_by.get_username() if template.reviewed_by_id else DELETED_USER_LABEL) if template.reviewed_at else None,
+                'reviewed_at': template.reviewed_at.isoformat() if template.reviewed_at else None,
+                'rejection_reason': template.rejection_reason, 'replacement_id': replacement.pk if replacement else None,
                 'procedure': template.procedure, 'output_spec': template.output_spec, 'conditions': template.conditions,
                 'datasets': template.datasets, 'sql_steps': template.sql_steps, 'python_code': template.python_code,
                 'sql_sha256': template.sql_sha256, 'python_sha256': template.python_sha256,

@@ -1,11 +1,16 @@
-"""テンプレートの保存・一覧・詳細(第3段階3-A)。権限は分析画面と同じai.analysis(閲覧はGET、保存はPOST)。"""
+"""テンプレートの保存・一覧・詳細(第3段階3-A)と、管理者の承認・却下(3-B)。
+
+保存・一覧・詳細の権限は分析画面と同じai.analysis(閲覧はGET、保存はPOST)。承認・却下はAI設定の編集権限(settings.ai / can_edit)。
+"""
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ai.analysis_permissions import CanUseAIAnalysis
+from ai.analysis_permissions import CanReviewAITemplates, CanUseAIAnalysis
+from ai.models import AIAnalysisTemplate
 from ai.services.analysis_plan_store import AnalysisError
+from ai.services.analysis_template_review_service import approve_template, reject_template
 from ai.services.analysis_template_service import (
     get_visible_template, is_template_admin, parse_plan_id, save_template, serialize_template, visible_templates,
 )
@@ -23,14 +28,24 @@ class AIAnalysisTemplatesView(APIView):
 
     def get(self, request):
         admin = is_template_admin(request.user)
+        queryset = visible_templates(request.user, admin)
+        status = request.query_params.get('status')
+        if status is not None:
+            # 状態の絞り込み(管理者の確認一覧など)。値は4つの状態だけ。見える範囲は変えない
+            if status not in dict(AIAnalysisTemplate.STATUS_CHOICES):
+                raise AnalysisError('状態の指定が不正です。')
+            queryset = queryset.filter(status=status)
         paginator = TemplatePagination()
-        rows = paginator.paginate_queryset(visible_templates(request.user, admin), request, view=self)
+        rows = paginator.paginate_queryset(queryset, request, view=self)
         return paginator.get_paginated_response([serialize_template(row, request.user, admin, False) for row in rows])
 
     def post(self, request):
-        if not isinstance(request.data, dict) or set(request.data) != {'plan_id', 'revision'}:
-            raise AnalysisError('plan_idとrevisionだけを指定してください。')
-        template, created = save_template(request.user, parse_plan_id(request.data['plan_id']), request.data['revision'])
+        keys = set(request.data) if isinstance(request.data, dict) else set()
+        if keys not in ({'plan_id', 'revision'}, {'plan_id', 'revision', 'replaces'}):
+            raise AnalysisError('plan_idとrevision(訂正版はreplacesも)だけを指定してください。')
+        template, created = save_template(
+            request.user, parse_plan_id(request.data['plan_id']), request.data['revision'], request.data.get('replaces'),
+        )
         data = serialize_template(template, request.user, is_template_admin(request.user), True)
         return Response({**data, 'created': created}, status=201 if created else 200)
 
@@ -41,3 +56,23 @@ class AIAnalysisTemplateView(APIView):
     def get(self, request, template_id):
         admin = is_template_admin(request.user)
         return Response(serialize_template(get_visible_template(template_id, request.user, admin), request.user, admin, True))
+
+
+class AIAnalysisTemplateApproveView(APIView):
+    permission_classes = [IsAuthenticated, CanReviewAITemplates]
+
+    def post(self, request, template_id):
+        if not isinstance(request.data, dict) or set(request.data) != {'state_revision'}:
+            raise AnalysisError('state_revisionだけを指定してください。')
+        template = approve_template(request.user, template_id, request.data['state_revision'])
+        return Response(serialize_template(template, request.user, True, True))
+
+
+class AIAnalysisTemplateRejectView(APIView):
+    permission_classes = [IsAuthenticated, CanReviewAITemplates]
+
+    def post(self, request, template_id):
+        if not isinstance(request.data, dict) or set(request.data) != {'state_revision', 'reason'}:
+            raise AnalysisError('state_revisionとreasonだけを指定してください。')
+        template = reject_template(request.user, template_id, request.data['state_revision'], request.data['reason'])
+        return Response(serialize_template(template, request.user, True, True))

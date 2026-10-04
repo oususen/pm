@@ -14,8 +14,8 @@ assert.deepEqual(parsed.errors, [])
 const script = compileScript(parsed.descriptor, { id: 'templates-test' })
 const template = compileTemplate({ source: parsed.descriptor.template.content, filename: filename.pathname, id: 'templates-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
-const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'plan', 'canEdit', 'blocked'].includes(n))
-const create = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'defineProps', 'api', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
+const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'plan', 'canEdit', 'canReview', 'blocked'].includes(n))
+const create = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'defineProps', 'api', 'window', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '') + `\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
 
@@ -24,21 +24,23 @@ function plan(extra = {}) { return { id: 'plan-1', revision: 6, status: 'data_ap
 function row(id, extra = {}) { return { id, name: `分析${id}`, purpose: `目的${id}`, status: 'pending_admin', status_label: '管理者承認待ち', created_by: 'tester', created_at: '2026-10-04T10:20:30', content_visible: true, ...extra } }
 const page = results => ({ results, count: results.length, next: null, previous: null })
 async function setup(propsInit = {}, methodsInit = {}) {
-  const props = Vue.reactive({ plan: plan(), canEdit: true, blocked: false, ...propsInit }), calls = []
+  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }
   const methods = {
     templates: async () => ({ data: page([row(1)]) }),
     saveTemplate: async () => ({ data: { ...row(2), version: 1, created: true } }),
+    approveTemplate: async id => ({ data: { ...row(id), status: 'approved' } }),
+    rejectTemplate: async id => ({ data: { ...row(id), status: 'rejected' } }),
     template: async id => ({ data: { ...row(id), date_from: '2026-01-01', date_to: '2026-01-31', conditions: '全行', procedure: ['集計', '表'], sql_steps: [{ name: 'w_a', query: 'SELECT 1' }], python_code: PYTHON, executed_code_sha256: 'hash', wrapper_version: 'w1' } }),
     ...methodsInit,
   }
   const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
   const scope = Vue.effectScope()
   let mount, unmount
-  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, api, AnalysisErrorBanner, useAnalysisErrorNotices))
+  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount(); await Promise.resolve()
-  return { state, props, calls, stop: () => { unmount(); scope.stop() } }
+  return { state, props, calls, confirms, consent, stop: () => { unmount(); scope.stop() } }
 }
-function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'blocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
+function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
 
 test('表示時に一覧を取得し、保存済みがなければ空の案内を出す', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([]) }) })
@@ -188,4 +190,134 @@ test('一覧・詳細の取得失敗は固定文で、ページ番号は失敗�
   } finally { f.stop() }
   const g = await setup({}, { template: async () => { throw new Error('SECRET') } })
   try { await g.state.showDetail(1); assert.equal(g.state.error.value, 'テンプレートの詳細を取得できませんでした。') } finally { g.stop() }
+})
+
+const pending = (id, extra = {}) => ({ ...row(id), state_revision: 3, status: 'pending_admin', replaces: null, date_from: '2026-01-01', date_to: '2026-01-31', conditions: '全行', procedure: ['集計'], sql_steps: [{ name: 'w_a', query: 'SELECT 1' }], python_code: PYTHON, executed_code_sha256: 'hash', wrapper_version: 'w1', reviewed_by: null, reviewed_at: null, rejection_reason: '', replacement_id: null, ...extra })
+
+test('管理者だけが承認・却下の操作を見られる。一般の利用者には出ない', async () => {
+  const admin = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }) })
+  const user = await setup({ canReview: false }, { template: async id => ({ data: pending(id) }) })
+  try {
+    await admin.state.showDetail(1); await user.state.showDetail(1)
+    const adminText = await html(admin), userText = await html(user)
+    assert.ok(adminText.includes('承認（正式にする）')); assert.ok(adminText.includes('>却下<')); assert.ok(adminText.includes('状態の絞り込み'))
+    for (const word of ['承認（正式にする）', '>却下<', '状態の絞り込み', '却下理由（']) assert.equal(userText.includes(word), false, word)
+    // 一般の利用者の画面からは、操作しても何も呼ばない
+    user.calls.length = 0; await user.state.approve(); await user.state.reject()
+    assert.deepEqual(user.calls, [])
+  } finally { admin.stop(); user.stop() }
+})
+
+test('承認は確認後に、詳細で見た状態の版つきで呼び、成否にかかわらず一覧と詳細を取り直す', async () => {
+  const f = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }) })
+  try {
+    await f.state.showDetail(1)
+    f.calls.length = 0
+    f.consent.value = false; await f.state.approve()
+    assert.deepEqual(f.calls, [], '確認を断ったら何も呼ばない'); assert.equal(f.confirms.length, 1)
+    f.consent.value = true; await f.state.approve()
+    assert.deepEqual(f.calls.map(c => c[0]), ['approveTemplate', 'templates', 'template'])
+    assert.deepEqual(f.calls[0].slice(1), [1, { state_revision: 3 }])
+    assert.equal(f.state.busy.value, '')
+  } finally { f.stop() }
+})
+
+test('却下は理由が必須で、最大長を超える入力は送らない。理由は却下の呼び出しにだけ使う', async () => {
+  const f = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }) })
+  try {
+    await f.state.showDetail(1); f.calls.length = 0
+    f.state.reason.value = '   '; await f.state.reject(); assert.deepEqual(f.calls, [])
+    f.state.reason.value = 'あ'.repeat(501); await f.state.reject(); assert.deepEqual(f.calls, [])
+    f.state.reason.value = '内容が不十足'; await f.state.reject()
+    assert.deepEqual(f.calls.map(c => c[0]), ['rejectTemplate', 'templates', 'template'])
+    assert.deepEqual(f.calls[0].slice(1), [1, { state_revision: 3, reason: '内容が不十足' }])
+    assert.equal(f.state.reason.value, '')
+  } finally { f.stop() }
+})
+
+test('承認・却下の失敗は固定文で、状態の競合(409)でも最新の状態を取り直す', async () => {
+  for (const [status, text] of [[403, '権限がありません'], [409, '状態が変わりました'], [400, '却下理由は必須'], [500, '一覧で状態を確認してください']]) {
+    const f = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }), approveTemplate: async () => { throw { response: { status, data: { detail: 'SECRET-DETAIL' } } } } })
+    try {
+      await f.state.showDetail(1); f.calls.length = 0
+      await f.state.approve()
+      assert.ok(f.state.error.value.includes(text), String(status)); assert.equal(f.state.error.value.includes('SECRET'), false)
+      assert.deepEqual(f.calls.map(c => c[0]), ['approveTemplate', 'templates', 'template'])
+      assert.equal(f.state.busy.value, '')
+    } finally { f.stop() }
+  }
+})
+
+test('却下された版の訂正版は、確認チェック後に、置き換え元つきで保存できる。管理者以外には出ない', async () => {
+  const rejected = id => pending(id, { status: 'rejected', status_label: '却下', rejection_reason: '<b>理由</b>', reviewed_by: 'admin', reviewed_at: '2026-10-05T01:02:03' })
+  const f = await setup({ canReview: true }, { template: async id => ({ data: rejected(id) }) })
+  const user = await setup({ canReview: false }, { template: async id => ({ data: rejected(id) }) })
+  try {
+    await f.state.showDetail(1); await user.state.showDetail(1)
+    const text = await html(f)
+    assert.ok(text.includes('この版の訂正版として保存')); assert.ok(text.includes('却下理由: &lt;b&gt;理由&lt;/b&gt;')); assert.equal(text.includes('<b>理由'), false)
+    assert.equal((await html(user)).includes('この版の訂正版として保存'), false)
+    f.calls.length = 0
+    await f.state.saveCorrection(4); assert.deepEqual(f.calls, [], '確認チェック前は保存しない')
+    f.state.accepted.value = true // 通常の保存の確認は、訂正版の保存の確認にならない
+    await f.state.saveCorrection(1); assert.deepEqual(f.calls, [], '通常の確認チェックで訂正版を保存しない')
+    f.state.acceptedCorrection.value = true
+    await f.state.saveCorrection(MouseEventLike()); assert.deepEqual(f.calls, [], 'イベントを置き換え元として送らない')
+    await f.state.saveCorrection(1)
+    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, replaces: 1 }])
+    assert.equal(f.state.acceptedCorrection.value, false); assert.equal(f.state.accepted.value, true, '訂正版の保存は通常の確認を消費しない')
+    // 通常の保存には、置き換え元を含めない。訂正版の確認は通常の保存にならない
+    f.state.acceptedCorrection.value = true; f.state.accepted.value = false; f.calls.length = 0; await f.state.save(); assert.deepEqual(f.calls, [])
+    f.state.accepted.value = true; await f.state.save()
+    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6 }])
+  } finally { f.stop(); user.stop() }
+})
+
+function MouseEventLike() { return { type: 'click' } }
+
+test('状態の絞り込みは、一覧の取得に状態を渡す(管理者)', async () => {
+  const f = await setup({ canReview: true })
+  try {
+    f.calls.length = 0
+    f.state.statusFilter.value = 'rejected'
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.deepEqual(f.calls[0], ['templates', { page: 1, status: 'rejected' }])
+  } finally { f.stop() }
+})
+
+test('確認済みの版では、承認・却下の操作を出さず、置換先と確認情報を表示する', async () => {
+  const f = await setup({ canReview: true }, { template: async id => ({ data: pending(id, { status: 'superseded', status_label: '置換済み', replacement_id: 9, reviewed_by: 'admin', reviewed_at: '2026-10-05T01:02:03' }) }) })
+  try {
+    await f.state.showDetail(1)
+    const text = await html(f)
+    assert.equal(text.includes('承認（正式にする）'), false); assert.ok(text.includes('置換先: テンプレート9')); assert.ok(text.includes('確認者: admin'))
+  } finally { f.stop() }
+})
+
+test('承認・却下に失敗したときは入力した却下理由を残し、成功したときだけ消す', async () => {
+  const f = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }), rejectTemplate: async () => { throw { response: { status: 409, data: {} } } } })
+  try {
+    await f.state.showDetail(1)
+    f.state.reason.value = '入力した理由'
+    await f.state.reject()
+    assert.equal(f.state.reason.value, '入力した理由'); assert.ok(f.state.error.value.includes('状態が変わりました'))
+  } finally { f.stop() }
+  const g = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }) })
+  try {
+    await g.state.showDetail(1)
+    g.state.reason.value = '入力した理由'
+    await g.state.reject()
+    assert.equal(g.state.reason.value, ''); assert.equal(g.state.error.value, '')
+  } finally { g.stop() }
+})
+
+test('分析案が変わると、通常の保存と訂正版の保存の確認チェックを両方取り直す', async () => {
+  const f = await setup({ canReview: true })
+  try {
+    f.state.accepted.value = true; f.state.acceptedCorrection.value = true
+    f.props.plan = plan({ revision: 8 })
+    assert.equal(f.state.accepted.value, false); assert.equal(f.state.acceptedCorrection.value, false)
+    f.state.accepted.value = true; f.state.acceptedCorrection.value = true; f.props.canEdit = false
+    assert.equal(f.state.accepted.value, false); assert.equal(f.state.acceptedCorrection.value, false)
+  } finally { f.stop() }
 })

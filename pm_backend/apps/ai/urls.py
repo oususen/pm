@@ -7,7 +7,9 @@ from ai.views import AIAnalysisCodegenRefreshWrapperView
 from ai.views import AIAnalysisApproveView, AIAnalysisExternalPreviewView, AIAnalysisOptionsView, AIAnalysisPlansView, AIAnalysisPlanView, AIAnalysisPreviewView
 from ai.config.views import AIAnalysisExecutionPolicyView, AICrossScreenAccessPolicyViewSet, AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
-from ai.analysis_template_views import AIAnalysisTemplatesView, AIAnalysisTemplateView
+from ai.analysis_template_views import (
+    AIAnalysisTemplateApproveView, AIAnalysisTemplateRejectView, AIAnalysisTemplatesView, AIAnalysisTemplateView,
+)
 from ai.analysis_execution_views import AIAnalysisExecuteView, AIAnalysisExecutionOptionsView, AIAnalysisJobView, AIAnalysisJobCancelView, AIAnalysisRunsView
 
 router = DefaultRouter()
@@ -43,6 +45,8 @@ urlpatterns = [
     path('ai/analysis/plans/<uuid:plan_id>/codegen/release/', AIAnalysisCodegenReleaseView.as_view(), name='ai-analysis-codegen-release'),
     path('ai/analysis/plans/<uuid:plan_id>/codegen/refresh-wrapper/', AIAnalysisCodegenRefreshWrapperView.as_view(), name='ai-analysis-codegen-refresh-wrapper'),
     path('ai/settings/data-policy/', AIDataPolicyView.as_view(), name='ai-data-policy'),
+    path('ai/settings/analysis-templates/<int:template_id>/approve/', AIAnalysisTemplateApproveView.as_view(), name='ai-analysis-template-approve'),
+    path('ai/settings/analysis-templates/<int:template_id>/reject/', AIAnalysisTemplateRejectView.as_view(), name='ai-analysis-template-reject'),
     path('ai/settings/analysis-execution-policy/', AIAnalysisExecutionPolicyView.as_view(), name='ai-analysis-execution-policy'),
     path('ai/settings/sql-dictionary/', AISQLDictionaryView.as_view(), name='ai-sql-dictionary'),
     path('ai-search-config-models/', AISearchConfigModelsView.as_view(), name='ai-search-config-models'),

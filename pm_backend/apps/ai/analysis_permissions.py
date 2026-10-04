@@ -16,3 +16,16 @@ class CanUseAIAnalysis(BasePermission):
         except Exception:
             # 判定できない場合も拒否。例外文や内部情報は応答へ出さない。
             return False
+
+
+class CanReviewAITemplates(BasePermission):
+    """テンプレートの承認・却下。AI設定の編集権限(settings.ai / can_edit)だけ。判定できない場合も拒否し、内部情報を出さない。"""
+    message = 'AIテンプレートを確認する権限がありません。'
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        try:
+            return bool(_has_resource_permission(request.user, 'settings.ai', 'edit'))
+        except Exception:
+            return False
