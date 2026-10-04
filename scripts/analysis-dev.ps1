@@ -14,7 +14,11 @@ $healthUrl = 'http://127.0.0.1:8091/v1/health'
 $wslRoot = '/mnt/' + $root.Substring(0, 1).ToLower() + ($root.Substring(2) -replace '\\', '/')
 
 function Get-Health {
-    try { return Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5 } catch { return $null }
+    # 一時的な遅れで「停止」と誤表示しないよう、2回まで試す(各8秒)。
+    foreach ($attempt in 1..2) {
+        try { return Invoke-RestMethod -Uri $healthUrl -TimeoutSec 8 } catch { }
+    }
+    return $null
 }
 
 function Get-State {
@@ -49,8 +53,10 @@ function Test-Redis {
 
 function Get-ContainerCount {
     try {
-        $out = & wsl.exe -d Ubuntu-24.04 -u root -- docker ps -aq --filter label=pm.analysis.job=1 2>$null
-        return @($out | Where-Object { $_ }).Count
+        # WSLやDockerの確認に失敗した場合は、エラー文を件数として数えず「確認できません」($null)にする。
+        $out = & wsl.exe -d Ubuntu-24.04 -u root -- docker ps -aq --filter label=pm.analysis.job=1 2>&1
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return @($out | Where-Object { $_ -is [string] -and $_ -match '^[0-9a-f]{12,}$' }).Count
     } catch { return $null }
 }
 
