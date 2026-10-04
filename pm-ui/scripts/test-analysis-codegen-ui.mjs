@@ -486,3 +486,25 @@ test('コード生成用APIの5経路と後半の実行APIを接続する', () =
   assert.equal(block.includes('/execute/'), true)
   for (const name of exposed.split(',')) assert.ok(names.includes(name))
 })
+
+test('テンプレート由来の分析案は、AI生成の操作を出さず、テンプレートの表示と保存済みコードを承認前から表示する', async () => {
+  const f = await setup()
+  try {
+    const proposal = { ...generated().proposal, provider: 'template', model: '' }
+    const fromTemplate = (status, template) => ({ ...generated(), proposal, status, template, codegen_state: { status: 'generated', attempts: 0, max_attempts: 4, inflight_state: null } })
+    f.state.plan.value = fromTemplate('awaiting_method', { id: 7, version: 2, name: '日別出荷', status: 'pending_admin' })
+    let html = await htmlFor(f)
+    assert.ok(html.includes('テンプレート7（版2・日別出荷）から作成した分析案です'))
+    assert.ok(html.includes('システム管理者未承認のテンプレートです'))
+    assert.ok(html.includes('テンプレート（AI未使用）'))
+    assert.ok(html.includes('SELECT SUM(quantity) FROM v_ai_shipment'), '手順の承認前から保存済みSQLを表示')
+    f.state.plan.value = fromTemplate('data_approved', { id: 7, version: 2, name: '日別出荷', status: 'approved' })
+    html = await htmlFor(f)
+    assert.ok(html.includes('正式なテンプレートです'))
+    assert.ok(html.includes('AIによるコード生成は行いません'))
+    for (const word of ['コード生成で社外送信する全文を確認', 'ローカルQwenでコードを生成', '確認した全文を社外AIへ送ってコードを生成', '社外送信']) assert.equal(html.includes(word), false, word)
+    // 通常の分析案では、従来どおり生成の操作を出す
+    f.state.plan.value = { ...generated('openrouter'), status: 'data_approved' }
+    assert.ok((await htmlFor(f)).includes('コード生成で社外送信する全文を確認'))
+  } finally { f.stop() }
+})

@@ -14,8 +14,8 @@ assert.deepEqual(parsed.errors, [])
 const script = compileScript(parsed.descriptor, { id: 'templates-test' })
 const template = compileTemplate({ source: parsed.descriptor.template.content, filename: filename.pathname, id: 'templates-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
-const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'plan', 'canEdit', 'canReview', 'blocked'].includes(n))
-const create = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'defineProps', 'api', 'window', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
+const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked'].includes(n))
+const create = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'defineProps', 'defineEmits', 'api', 'window', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '') + `\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
 
@@ -24,10 +24,11 @@ function plan(extra = {}) { return { id: 'plan-1', revision: 6, status: 'data_ap
 function row(id, extra = {}) { return { id, name: `分析${id}`, purpose: `目的${id}`, status: 'pending_admin', status_label: '管理者承認待ち', created_by: 'tester', created_at: '2026-10-04T10:20:30', content_visible: true, ...extra } }
 const page = results => ({ results, count: results.length, next: null, previous: null })
 async function setup(propsInit = {}, methodsInit = {}) {
-  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }
+  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, reuseBlocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }, events = []
   const methods = {
     templates: async () => ({ data: page([row(1)]) }),
     saveTemplate: async () => ({ data: { ...row(2), version: 1, created: true } }),
+    createTemplatePlan: async id => ({ data: { id: 'new-plan', template: { id, version: 1, status: 'approved' }, proposal: { provider: 'template' } } }),
     approveTemplate: async id => ({ data: { ...row(id), status: 'approved' } }),
     rejectTemplate: async id => ({ data: { ...row(id), status: 'rejected' } }),
     template: async id => ({ data: { ...row(id), date_from: '2026-01-01', date_to: '2026-01-31', conditions: '全行', procedure: ['集計', '表'], sql_steps: [{ name: 'w_a', query: 'SELECT 1' }], python_code: PYTHON, executed_code_sha256: 'hash', wrapper_version: 'w1' } }),
@@ -36,11 +37,11 @@ async function setup(propsInit = {}, methodsInit = {}) {
   const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
   const scope = Vue.effectScope()
   let mount, unmount
-  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices))
+  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount(); await Promise.resolve()
-  return { state, props, calls, confirms, consent, stop: () => { unmount(); scope.stop() } }
+  return { state, props, calls, confirms, consent, events, stop: () => { unmount(); scope.stop() } }
 }
-function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
+function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
 
 test('表示時に一覧を取得し、保存済みがなければ空の案内を出す', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([]) }) })
@@ -320,4 +321,50 @@ test('分析案が変わると、通常の保存と訂正版の保存の確認�
     f.state.accepted.value = true; f.state.acceptedCorrection.value = true; f.props.canEdit = false
     assert.equal(f.state.accepted.value, false); assert.equal(f.state.acceptedCorrection.value, false)
   } finally { f.stop() }
+})
+
+test('再利用: 全文を見られる正式・管理者承認待ちの行だけに「分析案を作る」を出し、未承認には警告を出す', async () => {
+  const f = await setup({ plan: null }, { templates: async () => ({ data: page([
+    row(1, { status: 'approved', status_label: '正式' }), row(2, { status: 'pending_admin' }), row(3, { status: 'rejected', status_label: '却下' }),
+    row(4, { content_visible: false }), row(5, { status: 'superseded', status_label: '置換済み' })]) }) })
+  try {
+    const text = await html(f)
+    assert.equal((text.match(/このテンプレートで分析案を作る/g) || []).length, 2, '正式と管理者承認待ち(全文を見られる行)だけ')
+    assert.equal((text.match(/システム管理者未承認/g) || []).length, 1)
+    f.props.canEdit = false
+    assert.equal((await html(f)).includes('このテンプレートで分析案を作る</button>'), false, '閲覧のみでは出さない')
+  } finally { f.stop() }
+})
+
+test('再利用: 分析案を作ると親へ渡し、AIは使わない。現在の分析案があれば確認し、断れば何もしない', async () => {
+  const f = await setup({ plan: null })
+  try {
+    f.calls.length = 0
+    await f.state.startPlan(row(1, { status: 'approved' }))
+    assert.deepEqual(f.calls, [['createTemplatePlan', 1]])
+    assert.equal(f.events.length, 1); assert.equal(f.events[0][0], 'plan-created'); assert.equal(f.events[0][1].template.id, 1)
+    assert.equal(f.state.busy.value, '')
+  } finally { f.stop() }
+  const g = await setup({ plan: plan() })
+  try {
+    g.calls.length = 0; g.consent.value = false
+    await g.state.startPlan(row(1)); assert.deepEqual(g.calls, []); assert.equal(g.confirms.length, 1)
+    g.consent.value = true
+    await g.state.startPlan(row(1)); assert.deepEqual(g.calls, [['createTemplatePlan', 1]])
+  } finally { g.stop() }
+})
+
+test('再利用: 実行中・権限なし・全文が見えない・却下の行では作らない。失敗は固定文で、APIの本文を出さない', async () => {
+  for (const [init, target] of [[{ reuseBlocked: true }, row(1)], [{ canEdit: false }, row(1)], [{ blocked: true }, row(1)], [{}, row(1, { content_visible: false })], [{}, row(1, { status: 'rejected' })]]) {
+    const f = await setup(init)
+    try { f.calls.length = 0; await f.state.startPlan(target); assert.deepEqual(f.calls, []); assert.deepEqual(f.events, []) } finally { f.stop() }
+  }
+  for (const [status, text] of [[403, '作成者と管理者だけ'], [404, '見つかりません'], [409, '再利用できません'], [500, '作成できませんでした']]) {
+    const f = await setup({ plan: null }, { createTemplatePlan: async () => { throw { response: { status, data: { detail: 'SECRET-DETAIL' } } } } })
+    try {
+      await f.state.startPlan(row(1))
+      assert.ok(f.state.error.value.includes(text), String(status)); assert.equal(f.state.error.value.includes('SECRET'), false)
+      assert.deepEqual(f.events, []); assert.equal(f.state.busy.value, '')
+    } finally { f.stop() }
+  }
 })

@@ -198,8 +198,9 @@ def save_template(user, plan_id, revision, replaces=None):
 
 
 def content_visible(template, user, admin):
-    """全文(SQL・Python・手順・条件など)を見られるのは、作成者と管理者だけ。"""
-    return admin or (template.approved_by_id is not None and template.approved_by_id == user.pk)
+    """全文(SQL・Python・手順・条件など)を見られるのは、正式のテンプレートなら分析権限を持つ全員。
+    管理者承認前・却下・置換済みは、作成者と管理者だけ。"""
+    return template.status == 'approved' or admin or (template.approved_by_id is not None and template.approved_by_id == user.pk)
 
 
 def _creator(template):
@@ -215,9 +216,12 @@ def serialize_template(template, user, admin, detail):
         'created_by': _creator(template), 'created_at': template.created_at.isoformat(),
         'content_visible': visible,
     }
+    # 確認者・確認日時・却下理由・状態の版・置き換え関係は、正式でも作成者と管理者だけに返す(全文より狭い範囲)
+    review_visible = admin or (template.approved_by_id is not None and template.approved_by_id == user.pk)
     if visible:
+        if review_visible:
+            data.update({'state_revision': template.state_revision, 'replaces': template.replaces_id})
         data.update({
-            'state_revision': template.state_revision, 'replaces': template.replaces_id,
             'date_from': template.date_from.isoformat(), 'date_to': template.date_to.isoformat(),
             'wrapper_version': template.wrapper_version, 'executed_code_sha256': template.executed_code_sha256,
             'content_sha256': template.content_sha256,
@@ -225,10 +229,13 @@ def serialize_template(template, user, admin, detail):
         if detail:
             # 却下理由・確認者は、作成者と管理者だけ(visibleと同じ範囲)に返す。置換先は、承認された訂正版
             replacement = template.corrections.filter(status='approved').order_by('id').first() if template.status == 'superseded' else None
+            if review_visible:
+                data.update({
+                    'reviewed_by': (template.reviewed_by.get_username() if template.reviewed_by_id else DELETED_USER_LABEL) if template.reviewed_at else None,
+                    'reviewed_at': template.reviewed_at.isoformat() if template.reviewed_at else None,
+                    'rejection_reason': template.rejection_reason, 'replacement_id': replacement.pk if replacement else None,
+                })
             data.update({
-                'reviewed_by': (template.reviewed_by.get_username() if template.reviewed_by_id else DELETED_USER_LABEL) if template.reviewed_at else None,
-                'reviewed_at': template.reviewed_at.isoformat() if template.reviewed_at else None,
-                'rejection_reason': template.rejection_reason, 'replacement_id': replacement.pk if replacement else None,
                 'procedure': template.procedure, 'output_spec': template.output_spec, 'conditions': template.conditions,
                 'datasets': template.datasets, 'sql_steps': template.sql_steps, 'python_code': template.python_code,
                 'sql_sha256': template.sql_sha256, 'python_sha256': template.python_sha256,

@@ -2,6 +2,7 @@
   <section class="templates">
     <AnalysisErrorBanner v-if="errorNotices.renderBanner" :notices="errorNotices.notices.value" />
     <h2>5. テンプレート</h2>
+    <p>保存済みのテンプレートから、新しい分析案を作れます（AIは使いません。手順・データ範囲の承認、SQL試行、コード承認は、毎回行います）。</p>
     <p>承認したコードを、管理者承認待ちのテンプレートとして保存します。保存するのは、名称・目的・手順・条件・承認済みSQL・Python・期間・ハッシュです。実データ・結果・AIへ送った本文は保存しません。</p>
     <template v-if="canEdit">
       <p v-if="!savable">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
@@ -21,7 +22,9 @@
     <article v-for="row in list.results" :key="row.id">
       <p><strong>テンプレート{{ row.id }}: {{ row.name }}</strong> / 状態: {{ row.status_label }} / 作成者: {{ row.created_by }} / 保存日時: {{ formatDate(row.created_at) }} / 目的: {{ row.purpose }}
         <span v-if="!row.content_visible"> / SQL・Python・条件・期間は、作成者と管理者だけが確認できます。</span>
-        <button v-else :disabled="!!busy" @click="showDetail(row.id)">{{ detail?.id === row.id ? '詳細を再取得' : '詳細を表示' }}</button></p>
+        <button v-else :disabled="!!busy" @click="showDetail(row.id)">{{ detail?.id === row.id ? '詳細を再取得' : '詳細を表示' }}</button>
+        <button v-if="canReuse(row)" :disabled="!canStartPlan" @click="startPlan(row)">このテンプレートで分析案を作る</button>
+        <span v-if="row.status === 'pending_admin' && row.content_visible"> / システム管理者未承認</span></p>
       <div v-if="detail?.id === row.id">
         <p>期間: {{ detail.date_from }} ～ {{ detail.date_to }} / 条件: {{ detail.conditions }}</p>
         <p>手順: {{ (detail.procedure || []).join(' → ') }}</p>
@@ -58,7 +61,8 @@ import api from '../../api/client'
 import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
 import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 
-const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canReview: Boolean, blocked: Boolean })
+const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canReview: Boolean, blocked: Boolean, reuseBlocked: Boolean })
+const emit = defineEmits(['plan-created'])
 const busy = ref(''), error = ref(''), saved = ref(null), accepted = ref(false), acceptedCorrection = ref(false), detail = ref(null), reason = ref(''), statusFilter = ref('')
 const REASON_MAX = 500 // 却下理由の最大長(BOSS承認)。超える入力は送らない
 const list = ref({ results: [], count: 0, next: null, previous: null }), page = ref(1), loaded = ref(false)
@@ -72,6 +76,12 @@ const SAVE_ERRORS = Object.freeze({
   409: '保存できる状態ではありません。承認・コード・版が最新か確認してください。',
   410: '分析案の期限が切れました。分析案を作り直してください。',
 })
+const REUSE_ERRORS = Object.freeze({
+  400: '分析案の作成の指定が正しくありません。',
+  403: '管理者承認前のテンプレートを再利用できるのは、作成者と管理者だけです。',
+  404: 'テンプレートが見つかりません。',
+  409: 'このテンプレートは再利用できません（却下・置換済み、内容や検査・ビューの公開定義の不一致）。新しい分析として作成してください。',
+})
 const REVIEW_ERRORS = Object.freeze({
   400: '入力が正しくありません。却下理由は必須で、500文字以内です。',
   403: 'テンプレートを確認する権限がありません。',
@@ -82,6 +92,9 @@ const hasCode = computed(() => props.plan?.codegen?.status === 'code_approved' &
 const savable = computed(() => props.plan?.status === 'data_approved' && hasCode.value)
 const canSave = computed(() => props.canEdit && !props.blocked && !busy.value && savable.value)
 const saveHint = computed(() => !props.plan ? '分析案なし' : props.plan.status !== 'data_approved' ? 'データ範囲が未承認' : 'コードが未承認')
+// 再利用できるのは、全文を見られる正式・管理者承認待ちの行だけ(サーバーでも状態・権限を確認する)
+const canReuse = row => props.canEdit && row.content_visible && ['approved', 'pending_admin'].includes(row.status)
+const canStartPlan = computed(() => props.canEdit && !props.blocked && !props.reuseBlocked && !busy.value)
 const formatDate = value => typeof value === 'string' ? value.replace('T', ' ').slice(0, 19) : ''
 
 // 分析案・版が変われば、保存の確認を取り直す。保存結果と詳細は、別の分析案へ持ち越さない。
@@ -153,6 +166,18 @@ function reject() {
   if (!window.confirm('このテンプレートを却下します。却下理由は作成者と管理者だけが確認できます。')) return
   const text = reason.value
   return review(target => api.aiAnalysis.rejectTemplate(target.id, { state_revision: target.state_revision, reason: text }), 'テンプレートを却下できませんでした。一覧で状態を確認してください。')
+}
+async function startPlan(row) {
+  if (!canReuse(row) || !canStartPlan.value) return
+  if (props.plan && !window.confirm('現在の分析案を破棄して、このテンプレートから新しい分析案を作ります。よろしいですか？')) return
+  const current = epoch
+  busy.value = 'reuse'; error.value = ''
+  try {
+    const response = await api.aiAnalysis.createTemplatePlan(row.id)
+    if (!disposed && current === epoch) emit('plan-created', response.data)
+  } catch (e) {
+    if (!disposed && current === epoch) error.value = REUSE_ERRORS[e.response?.status] || '分析案を作成できませんでした。'
+  } finally { if (!disposed && current === epoch) busy.value = '' }
 }
 async function showDetail(id) {
   if (busy.value) return

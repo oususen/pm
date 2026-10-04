@@ -54,6 +54,7 @@ REASON_TEXT = {
     'cleanup_pending': '前回のコンテナを削除できていません。',
     'unexpected_error': '想定外のエラーが発生しました。',
     'plan_expired': '分析案の有効期限が切れました。',
+    'template_unavailable': 'テンプレートが再利用できない状態になったため、実行しませんでした。',
     'user_cancelled': '利用者が実行を中止しました。',
     'heartbeat_lost': '生存確認が途切れました。実行が停止したとは断定できないため、状態不明として記録します。',
     'worker_unknown': '分析専用ワーカーの生存確認が失敗しました。状態不明です。',
@@ -188,6 +189,12 @@ class CleanupTracker:
             close_old_connections()
 
 
+def _template_columns(plan):
+    """テンプレートから作成した分析案の、テンプレートの行のidと版。それ以外はNULL。"""
+    template = plan.get('template') or {}
+    return {'template_id': template.get('id'), 'template_version': template.get('version')}
+
+
 def start_run(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
     """`running`の行を保存する。保存できなければ、HistoryErrorとし、実行しない。
 
@@ -196,7 +203,7 @@ def start_run(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS)
     now = datetime.now()
     try:
         return AIAnalysisRun.objects.create(
-            plan_id=plan['id'], user=user, views=proposal['datasets'],
+            plan_id=plan['id'], user=user, views=proposal['datasets'], **_template_columns(plan),
             date_from=proposal['date_from'], date_to=proposal['date_to'], conditions=proposal.get('conditions', ''),
             method_approved_at=_parse(plan.get('method_approved_at')), data_approved_at=_parse(plan.get('data_approved_at')),
             approved_counts={d['view']: d['rows'] for d in (plan.get('preview') or {}).get('datasets', [])},
@@ -348,6 +355,7 @@ def record_not_run(user, plan, status, reason, policy):
     try:
         return AIAnalysisRun.objects.create(
             plan_id=plan['id'], user=user, views=proposal['datasets'], date_from=proposal['date_from'], date_to=proposal['date_to'],
+            **_template_columns(plan),
             conditions=proposal.get('conditions', ''), method_approved_at=_parse(plan.get('method_approved_at')),
             data_approved_at=_parse(plan.get('data_approved_at')),
             approved_counts={d['view']: d['rows'] for d in (plan.get('preview') or {}).get('datasets', [])},

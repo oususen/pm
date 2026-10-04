@@ -24,11 +24,13 @@ class AIAnalysisExecuteView(APIView):
     permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
-        if not isinstance(request.data, dict) or set(request.data) != {'revision', 'executed_code_sha256'}:
-            raise AnalysisError('承認した版とコード全体のハッシュのみを指定してください。')
+        keys = set(request.data) if isinstance(request.data, dict) else set()
+        if keys not in ({'revision', 'executed_code_sha256'}, {'revision', 'executed_code_sha256', 'template_confirmed'}):
+            raise AnalysisError('承認した版とコード全体のハッシュ(テンプレートから作成した場合はtemplate_confirmedも)のみを指定してください。')
         try:
             job = state_operation(lambda: JobStore().submit(
-                request.user, str(plan_id), request.data['revision'], request.data['executed_code_sha256']))
+                request.user, str(plan_id), request.data['revision'], request.data['executed_code_sha256'],
+                request.data.get('template_confirmed')))
         except WorkerStaleError:
             return Response({'reason': 'worker_stale', 'detail': '専用ワーカーを再起動してください。'}, status=503)
         return Response(job, status=202)

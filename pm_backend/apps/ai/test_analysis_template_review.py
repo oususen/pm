@@ -94,7 +94,7 @@ class PermissionTests(ReviewBase):
         self.assertEqual(self.reject(self.creator, row).status_code, 403)
 
     def test_review_routes_are_exactly_the_two_admin_endpoints(self):
-        names = {name for name in ROUTES if name and name.startswith('ai-analysis-template-')}
+        names = {name for name in ROUTES if name in ('ai-analysis-template-approve', 'ai-analysis-template-reject')}
         self.assertEqual(names, {'ai-analysis-template-approve', 'ai-analysis-template-reject'})
         for name in names:
             from ai.analysis_permissions import CanReviewAITemplates

@@ -357,3 +357,48 @@ test('復元したジョブの初回GETに失敗しても、停止理由と手�
     await f.clock.advance(3000); assert.equal(f.calls.length, 3)
   } finally { f.stop() }
 })
+
+test('管理者未承認のテンプレートから作成した分析案は、確認チェックなしで実行できない。確認はテンプレートIDに結び付けて送る', async () => {
+  const f = await setup()
+  try {
+    f.props.plan = { ...plan(), template: { id: 7, version: 2, status: 'pending_admin' } }
+    await f.state.checkAvailability(); f.calls.length = 0
+    assert.equal(f.state.canExecute.value, false)
+    await f.state.execute(); assert.deepEqual(f.calls, [])
+    const text = await html(f)
+    assert.ok(text.includes('システム管理者未承認のテンプレート（テンプレート7・版2）'))
+    f.state.templateConfirmed.value = true
+    assert.equal(f.state.canExecute.value, true)
+    await f.state.execute()
+    assert.deepEqual(f.calls[0], ['execute', 'plan', { revision: 4, executed_code_sha256: 'hash', template_confirmed: 7 }])
+  } finally { f.stop() }
+})
+
+test('正式なテンプレート・通常の分析案は、確認なしで実行でき、template_confirmedを送らない。分析案・版が変われば確認を取り直す', async () => {
+  const f = await setup()
+  try {
+    f.props.plan = { ...plan(), template: { id: 7, version: 2, status: 'approved' } }
+    await f.state.checkAvailability(); f.calls.length = 0
+    assert.equal(f.state.canExecute.value, true)
+    await f.state.execute()
+    assert.deepEqual(f.calls[0], ['execute', 'plan', { revision: 4, executed_code_sha256: 'hash' }])
+  } finally { f.stop() }
+  const g = await setup()
+  try {
+    g.props.plan = { ...plan(), template: { id: 7, version: 2, status: 'pending_admin' } }
+    g.state.templateConfirmed.value = true
+    g.props.plan = { ...plan(), revision: 5, template: { id: 7, version: 2, status: 'pending_admin' } }
+    assert.equal(g.state.templateConfirmed.value, false)
+    g.state.templateConfirmed.value = true
+    g.props.plan = { ...plan(), revision: 5, template: { id: 8, version: 1, status: 'pending_admin' } }
+    assert.equal(g.state.templateConfirmed.value, false, '別のテンプレートの確認を転用しない')
+  } finally { g.stop() }
+})
+
+test('実行の失敗理由 template_unavailable は固定文で表示する', async () => {
+  const f = await setup()
+  try {
+    f.state.job.value = { ...job('failed'), reason: 'template_unavailable' }
+    assert.ok((await html(f)).includes('テンプレートが再利用できない状態になったため、実行しませんでした。'))
+  } finally { f.stop() }
+})

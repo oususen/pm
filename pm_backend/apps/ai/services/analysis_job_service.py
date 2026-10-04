@@ -27,6 +27,7 @@ from ai.models import AIAnalysisRun
 from ai.services.analysis_codegen_service import bundle_from_plan
 from ai.services.analysis_execution_service import ExecutionStopped, launcher_endpoint
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
+from ai.services.analysis_template_reuse_service import check_plan_template
 from ai.services.analysis_worker_identity import (
     current_code_version, ensure_jst_clock, worker_registration, worker_version_matches,
 )
@@ -152,7 +153,7 @@ class JobStore:
             except WatchError:
                 continue
 
-    def submit(self, user, plan_id, revision, code_hash):
+    def submit(self, user, plan_id, revision, code_hash, template_confirmed=None):
         execution_enabled()
         policy = get_analysis_execution_policy()
         plan_key = self.plans._key(plan_id)
@@ -161,6 +162,8 @@ class JobStore:
                 pipe.watch(plan_key, self.active_key, self.worker_key)
                 plan = self.plans._decode(pipe.get(plan_key), user.pk)
                 checked_bundle(plan, revision, code_hash)
+                # テンプレート由来の分析案は、受付時にも状態・内容・本人の権限を確認し、未承認なら明示の確認(テンプレートIDつき)を求める
+                check_plan_template(plan, user, template_confirmed, accepting=True)
                 if pipe.get(self.active_key):
                     raise AnalysisError('実行中、または後始末未確認の分析があります。完了を待ってください。', 429)
                 worker = pipe.get(self.worker_key)
@@ -310,6 +313,8 @@ def process_job(store, job_id, worker):
             run = record_not_run(user, plan, 'expired', 'plan_expired', policy)
             outcome = {'status': 'expired', 'reason': 'plan_expired', 'run_id': run.pk, 'cleanup': job['cleanup']}
         if outcome is None:
+            # 受付後に却下・置換済みになった場合は、実行を開始しない(開始済みの実行は止めない)
+            check_plan_template(current, user, accepting=False)
             bundle = checked_bundle(current, job['revision'], job['executed_code_sha256'])
             if job['cancel_requested']:
                 run = record_not_run(user, plan, 'cancelled', 'user_cancelled', policy)

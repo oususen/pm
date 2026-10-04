@@ -31,7 +31,7 @@ class AnalysisPlanStore:
         except RedisError as exc:
             raise AnalysisError('分析案用Redisへ接続できません。分析案は保存されていません。', 503) from exc
 
-    def create(self, owner_id, proposal, ttl_minutes):
+    def create(self, owner_id, proposal, ttl_minutes, extra=None):
         now = datetime.now()
         plan = {
             'id': str(uuid4()), 'owner_id': owner_id, 'revision': 1,
@@ -40,6 +40,8 @@ class AnalysisPlanStore:
             'expires_at': (now + timedelta(minutes=ttl_minutes)).isoformat(),
             'method_approved_at': None, 'data_approved_at': None, 'preview': None,
         }
+        if extra:
+            plan.update(extra)  # テンプレートからの分析案など、作成時に決まる項目
         try:
             saved = self.client.set(self._key(plan['id']), json.dumps(plan, ensure_ascii=False), ex=ttl_minutes * 60, nx=True)
             if not saved:

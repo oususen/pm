@@ -4,6 +4,11 @@
     <h2>4. 分析の実行・結果</h2>
     <p>{{ availability?.notice || '実行基盤の状態を確認してください。' }}</p>
     <button :disabled="!!busy" @click="checkAvailability">実行基盤の状態を確認</button>
+    <template v-if="plan?.template?.status === 'pending_admin'">
+      <p class="template-unapproved" role="alert">システム管理者未承認のテンプレート（テンプレート{{ plan.template.id }}・版{{ plan.template.version }}）から作成した分析案です。</p>
+      <label><input v-model="templateConfirmed" type="checkbox" :disabled="!!busy">管理者の承認前であることと、保存済みのSQL・Pythonの内容を確認したうえで、実行します</label>
+    </template>
+    <p v-else-if="plan?.template">テンプレート{{ plan.template.id }}（版{{ plan.template.version }}）から作成した分析案です。</p>
     <button :disabled="!canExecute" @click="execute">分析を実行</button>
     <p v-if="!canEdit">閲覧のみです。実行・中止にはAI分析の編集権限が必要です。</p>
     <div v-if="!job && plan?.execution?.job_id">
@@ -87,7 +92,7 @@ const emit = defineEmits(['active', 'accepted'])
 const job = ref(null), busy = ref(''), error = ref(''), availability = ref(null)
 const history = ref({ results: [], count: 0, next: null, previous: null }), historyError = ref(''), historyLoaded = ref(false)
 const errorNotices = useAnalysisErrorNotices([['execution', error], ['history', historyError]])
-const page = ref(1), includeAll = ref(false), fresh = ref(true)
+const page = ref(1), includeAll = ref(false), fresh = ref(true), templateConfirmed = ref(false)
 const uncertain = ref(false)
 let disposed = false, epoch = 0
 const monitor = createAnalysisStatusMonitor({
@@ -106,7 +111,7 @@ const completionText = computed(() => {
 const terminal = ['success', 'failed', 'cancelled', 'expired']
 const active = computed(() => uncertain.value || (!job.value && !!props.plan?.execution?.job_id) || (!!job.value && (!terminal.includes(job.value.status) || !cleanupComplete.value)))
 const cleanupComplete = computed(() => ['db_connection', 'container'].every(k => ['closed', 'not_started'].includes(job.value?.cleanup?.[k])))
-const canExecute = computed(() => props.canEdit && !props.blocked && !busy.value && fresh.value && !active.value && availability.value?.ready && props.plan?.status === 'data_approved' && props.plan?.codegen?.status === 'code_approved' && props.plan.codegen.trial?.status === 'passed' && props.plan.codegen.trial.executed_code_sha256 === props.plan.codegen.executed_code_sha256)
+const canExecute = computed(() => props.canEdit && !props.blocked && !busy.value && fresh.value && !active.value && availability.value?.ready && props.plan?.status === 'data_approved' && props.plan?.codegen?.status === 'code_approved' && props.plan.codegen.trial?.status === 'passed' && props.plan.codegen.trial.executed_code_sha256 === props.plan.codegen.executed_code_sha256 && (props.plan.template?.status !== 'pending_admin' || templateConfirmed.value))
 const canCancel = computed(() => props.canEdit && !busy.value && fresh.value && !!job.value && !terminal.includes(job.value.status) && job.value.status !== 'cancel_requested')
 const statusLabel = computed(() => ({ pending: '受付済み', running: '実行中', cancel_requested: '中止要求中', cancelled: '中止', expired: '期限切れ', failed: '失敗', success: '成功', unknown: '生存確認失敗・状態不明' })[job.value?.status] || '未確認')
 // 失敗の説明は理由コードから固定文を引く。APIの理由本文・AI・DuckDBの文面は表示しない。
@@ -122,6 +127,7 @@ const FAILURE_LABELS = Object.freeze({
   stage_deadline_load: '投入の期限を超えました。',
   stage_deadline_python: 'Pythonの実行時間を超えました。',
   result_too_large: '結果の容量上限を超えました。',
+  template_unavailable: 'テンプレートが再利用できない状態になったため、実行しませんでした。',
 })
 const jobDetail = computed(() => job.value?.status === 'failed'
   ? (typeof job.value.reason === 'string' && Object.hasOwn(FAILURE_LABELS, job.value.reason) ? FAILURE_LABELS[job.value.reason] : '失敗しました。詳細は理由コードを参照してください。')
@@ -141,6 +147,8 @@ function geometry(chart) {
   return { min, max, baseline: y(0), series, segments, nonNumeric, barWidth: stride * 0.8 / Math.max(1, chart.series.length) }
 }
 watch(active, value => emit('active', value), { immediate: true })
+// 分析案・版・テンプレートが変われば、管理者未承認の確認を取り直す(別のテンプレートの確認を転用しない)
+watch(() => [props.plan?.id, props.plan?.revision, props.plan?.template?.id], () => { templateConfirmed.value = false }, { flush: 'sync' })
 watch(() => props.plan?.id, () => { epoch++; monitor.track(null); busy.value = ''; job.value = null; fresh.value = true; uncertain.value = false; error.value = '' }, { flush: 'sync' })
 watch(() => [job.value?.id || props.plan?.execution?.job_id, job.value?.status], ([id, status]) => monitor.track(id, status ?? null), { immediate: true, flush: 'sync' })
 watch(() => props.plan?.execution?.job_id, id => {
@@ -173,7 +181,9 @@ function checkAvailability() { if (busy.value) return; availability.value = null
 function execute() {
   if (!canExecute.value) return
   const plan = props.plan
-  return operation('execute', () => api.aiAnalysis.execute(plan.id, { revision: plan.revision, executed_code_sha256: plan.codegen.executed_code_sha256 }), data => { job.value = data; emit('accepted') }, '実行受付を確認できません。自動再送せず、分析案・実行状態を再取得してください。')
+  const body = { revision: plan.revision, executed_code_sha256: plan.codegen.executed_code_sha256 }
+  if (plan.template?.status === 'pending_admin') body.template_confirmed = plan.template.id // 確認したテンプレートのIDに結び付ける
+  return operation('execute', () => api.aiAnalysis.execute(plan.id, body), data => { job.value = data; emit('accepted') }, '実行受付を確認できません。自動再送せず、分析案・実行状態を再取得してください。')
 }
 function refreshJob(id = job.value?.id || props.plan?.execution?.job_id) {
   // @clickのMouseEventをIDとして送らない。
@@ -202,7 +212,7 @@ async function loadHistory(target = 1) {
 </script>
 
 <style scoped>
-.execution { border-top: 1px solid #ccc; margin-top: 20px; } button { margin: 4px; padding: 8px; } article { margin: 16px 0; padding: 10px; background: #f5f9f8; }
+.execution { border-top: 1px solid #ccc; margin-top: 20px; } .template-unapproved { font-weight: bold; color: #7a4b00; background: #fff4d6; padding: 6px; } button { margin: 4px; padding: 8px; } article { margin: 16px 0; padding: 10px; background: #f5f9f8; }
 .scroll { overflow: auto; } table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #ccd; padding: 5px; text-align: left; } pre { white-space: pre-wrap; overflow-wrap: anywhere; } svg { width: 100%; max-height: 300px; } [role=alert], .execution-failed { color: #a22; }
 .completion-notice { border: 2px solid currentColor; padding: 10px; margin: 12px 0; }
 .completion-success { color: #126d63; background: #edf6f5; }

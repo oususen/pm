@@ -43,11 +43,17 @@
     <section v-if="plan" class="plan">
       <div class="plan-heading"><h2>{{ plan.proposal.title }}</h2><span>{{ statusLabel }}</span></div>
       <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }} / 作成AI: {{ planProviderLabel }}</small>
+      <p v-if="plan.template" class="warning" role="status">テンプレート{{ plan.template.id }}（版{{ plan.template.version }}・{{ plan.template.name }}）から作成した分析案です。{{ plan.template.status === 'pending_admin' ? 'システム管理者未承認のテンプレートです。内容を確認してください。' : '正式なテンプレートです。' }}AIは使いません。保存済みのSQL・Pythonは、現行の外枠に組み直しています。</p>
       <h3>1. 分析目的・手順</h3>
       <p>目的: {{ plan.proposal.purpose }}</p>
       <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
       <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
       <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
+      <template v-if="plan.template && hasCode">
+        <h4>保存済みのSQL・Python（承認前から確認できます。試行・コード承認は、承認後に行います）</h4>
+        <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
+        <pre>{{ codegen.python }}</pre>
+      </template>
       <p v-if="plan.method_approved_at">手順承認日時: {{ formatDate(plan.method_approved_at) }}</p>
       <button v-if="plan.status === 'awaiting_method'" :disabled="!canEdit || !!busy" @click="approve('method')">分析案・手順を承認</button>
       <template v-if="plan.status !== 'awaiting_method'">
@@ -76,7 +82,8 @@
           <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
           <p v-if="codeInFlight" class="warning">{{ codeState?.inflight_state === 'unknown' ? '生成が中断した可能性があります（状態不明）。停止したとは断定できません。' : 'コードを生成中です。' }} 自動再送・有効期限の延長はしません。「分析案の状態を再取得」で最新状態を確認してください。</p>
           <button v-if="codeState?.inflight_state === 'unknown'" :disabled="!canReleaseCodegen" @click="releaseCodegen">状態不明の生成を解除（回数は戻りません）</button>
-          <template v-if="!codeInFlight">
+          <p v-if="plan.template">テンプレートから作成した分析案では、AIによるコード生成は行いません。現行の外枠でSQLを試行し、コードを承認してから実行します（コードを変えるときは、新しい分析として作成してください）。</p>
+          <template v-if="!codeInFlight && !plan.template">
             <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未登録の名称・機密は自動判別できません。</p>
             <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">コード生成で社外送信する全文を確認</button>
             <section v-if="codeExternal && codePreview" class="dataset">
@@ -119,7 +126,7 @@
       </div>
     </section>
     <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
-    <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" />
+    <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive" @plan-created="useTemplatePlan" />
     <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
   </main>
 </template>
@@ -161,12 +168,13 @@ const selectedProvider = computed(() => options.value?.providers.find(item => it
 const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value)
 const planProviderLabel = computed(() => {
   const proposal = plan.value?.proposal
+  if (proposal?.provider === 'template') return 'テンプレート（AI未使用）'
   const label = options.value?.providers.find(item => item.provider === proposal?.provider)?.label || proposal?.provider || ''
   return proposal?.model ? `${label} / ${proposal.model}` : label
 })
 const codegen = computed(() => plan.value?.codegen || null)
 const codeState = computed(() => plan.value?.codegen_state || null)
-const codeExternal = computed(() => plan.value?.proposal.provider !== 'qwen')
+const codeExternal = computed(() => !['qwen', 'template'].includes(plan.value?.proposal.provider))
 const codeInFlight = computed(() => !!codegen.value?.inflight || !!codeState.value?.inflight_state || codeState.value?.status === 'generating')
 const canGenerate = computed(() => props.canEdit && !executionActive.value && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && codeState.value && !codeInFlight.value && codeState.value.attempts < codeState.value.max_attempts)
 const hasCode = computed(() => ['generated', 'code_approved'].includes(codeState.value?.status) && Array.isArray(codegen.value?.steps) && typeof codegen.value?.python === 'string')
@@ -276,6 +284,18 @@ const statusLabel = computed(() => ({ awaiting_method: '分析案の承認待ち
 const formatNumber = value => value == null ? '未確認' : Number(value).toLocaleString('ja-JP')
 const formatDate = value => value?.replace('T', ' ').slice(0, 19) || ''
 
+// テンプレートから作成した分析案を、現在の分析案にする(AIは使わない。承認・件数確認・試行・コード承認は、この画面で取り直す)
+function useTemplatePlan(created) {
+  if (executionActive.value) return
+  generation += 1
+  error.value = ''
+  busy.value = ''
+  externalPreview.value = null
+  externalAccepted.value = false
+  clearCodeConfirmations()
+  codeStateFresh.value = true
+  plan.value = created
+}
 function resetPlan() {
   if (executionActive.value) return
   generation += 1

@@ -185,6 +185,12 @@ def _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, dige
     return salted_hmac('ai.analysis.codegen-send', value, algorithm='sha256').hexdigest()
 
 
+def _reject_template_plan(plan):
+    """テンプレートから作成した分析案では、AIによる生成・生成前の確認を行わない(承認された内容を、気づかないうちに変えない)。"""
+    if plan.get('template') is not None:
+        raise AnalysisError('テンプレートから作成した分析案では、コードを再生成できません。コードを変えるときは、新しい分析として作成してください。', 409)
+
+
 def _plan_for_codegen(store, plan_id, owner_id, revision):
     plan = store.get(plan_id, owner_id)
     if type(revision) is not int or plan['revision'] != revision:
@@ -232,6 +238,7 @@ def preview(owner_id, plan_id, revision):
     """送る文面と、(外部AIの場合の)確認コードを返す。まだ送信しない。"""
     store = AnalysisPlanStore()
     plan = _plan_for_codegen(store, plan_id, owner_id, revision)
+    _reject_template_plan(plan)
     codegen = _codegen(plan)
     provider, model = _provider_for(plan)
     external = provider != 'qwen'
@@ -273,6 +280,7 @@ def generate(owner_id, plan_id, revision, confirmation=None):
     store = AnalysisPlanStore()
     store.check_connection()
     plan = _plan_for_codegen(store, plan_id, owner_id, revision)
+    _reject_template_plan(plan)
     codegen = _codegen(plan)
     if codegen.get('inflight'):
         raise AnalysisError('生成中、または状態不明の生成が残っています。状態を確認してください。', 409)

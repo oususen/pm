@@ -8,7 +8,8 @@ from ai.views import AIAnalysisApproveView, AIAnalysisExternalPreviewView, AIAna
 from ai.config.views import AIAnalysisExecutionPolicyView, AICrossScreenAccessPolicyViewSet, AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
 from ai.analysis_template_views import (
-    AIAnalysisTemplateApproveView, AIAnalysisTemplateRejectView, AIAnalysisTemplatesView, AIAnalysisTemplateView,
+    AIAnalysisTemplateApproveView, AIAnalysisTemplatePlanView, AIAnalysisTemplateRejectView, AIAnalysisTemplatesView,
+    AIAnalysisTemplateView,
 )
 from ai.analysis_execution_views import AIAnalysisExecuteView, AIAnalysisExecutionOptionsView, AIAnalysisJobView, AIAnalysisJobCancelView, AIAnalysisRunsView
 
@@ -29,6 +30,7 @@ urlpatterns = [
     path('ai/analysis/runs/', AIAnalysisRunsView.as_view(), name='ai-analysis-runs'),
     path('ai/analysis/templates/', AIAnalysisTemplatesView.as_view(), name='ai-analysis-templates'),
     path('ai/analysis/templates/<int:template_id>/', AIAnalysisTemplateView.as_view(), name='ai-analysis-template'),
+    path('ai/analysis/templates/<int:template_id>/plans/', AIAnalysisTemplatePlanView.as_view(), name='ai-analysis-template-plans'),
     path('', include(router.urls)),
     path('ai/chat/', AIChatView.as_view(), name='ai-chat'),
     path('ai/transcribe/', AITranscribeView.as_view(), name='ai-transcribe'),

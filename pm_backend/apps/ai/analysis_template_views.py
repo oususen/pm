@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from ai.analysis_permissions import CanReviewAITemplates, CanUseAIAnalysis
 from ai.models import AIAnalysisTemplate
 from ai.services.analysis_plan_store import AnalysisError
+from ai.services.analysis_template_reuse_service import create_plan_from_template
 from ai.services.analysis_template_review_service import approve_template, reject_template
 from ai.services.analysis_template_service import (
     get_visible_template, is_template_admin, parse_plan_id, save_template, serialize_template, visible_templates,
@@ -76,3 +77,14 @@ class AIAnalysisTemplateRejectView(APIView):
             raise AnalysisError('state_revisionとreasonだけを指定してください。')
         template = reject_template(request.user, template_id, request.data['state_revision'], request.data['reason'])
         return Response(serialize_template(template, request.user, True, True))
+
+
+class AIAnalysisTemplatePlanView(APIView):
+    """保存済みのテンプレートから、新しい分析案(手順の承認待ち)を作る。AIは呼ばない。"""
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
+
+    def post(self, request, template_id):
+        if not isinstance(request.data, dict) or len(request.data):
+            raise AnalysisError('本文は指定できません。')
+        from ai.views import _codegen_response  # 分析案の応答の形を、既存の分析案APIと同じにする
+        return Response(_codegen_response(create_plan_from_template(request.user, template_id)), status=201)

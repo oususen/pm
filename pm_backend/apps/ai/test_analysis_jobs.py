@@ -172,6 +172,40 @@ class JobTests(SimpleTestCase):
         execute.assert_not_called()
         self.assertEqual(self.store.get(job['id'], self.user.pk)['status'], 'expired')
 
+    def test_template_plan_is_checked_at_accept_with_the_confirmation_and_not_accepted_when_unavailable(self):
+        from ai.services.analysis_template_reuse_service import TemplateUnavailable
+        with patch.object(jobs, 'check_plan_template') as check:
+            job = self.store.submit(self.user, self.plan['id'], self.plan['revision'], self.hash, 9)
+        self.assertEqual(job['status'], 'pending')
+        args, kwargs = check.call_args
+        self.assertEqual((args[0]['id'], args[1], args[2], kwargs), (self.plan['id'], self.user, 9, {'accepting': True}))
+        self.store.client.delete(self.store.active_key)
+        with patch.object(jobs, 'check_plan_template', side_effect=TemplateUnavailable()):
+            with self.assertRaises(AnalysisError) as error:
+                self.store.submit(self.user, self.plan['id'], self.plan['revision'] + 1, self.hash)
+        self.assertEqual(error.exception.status_code, 409)
+
+    def test_template_plan_refused_at_accept_leaves_no_job_or_active_key(self):
+        from ai.services.analysis_template_reuse_service import TemplateUnavailable
+        with patch.object(jobs, 'check_plan_template', side_effect=TemplateUnavailable()):
+            with self.assertRaises(AnalysisError):
+                self.submit()
+        self.assertFalse(self.store.client.exists(self.store.active_key))
+        self.assertEqual(list(self.store.client.scan_iter(self.store.prefix + 'job:*')), [])
+
+    def test_template_that_became_unavailable_before_the_worker_starts_is_recorded_and_not_run(self):
+        from ai.services.analysis_template_reuse_service import TemplateUnavailable
+        job = self.submit()
+        with patch.object(jobs, 'check_plan_template', side_effect=TemplateUnavailable()) as check,                 patch.object(jobs, 'record_not_run', return_value=SimpleNamespace(pk=41)) as record:
+            execute = self.process(job['id'])
+        execute.assert_not_called()
+        self.assertEqual(check.call_args.kwargs, {'accepting': False})
+        self.assertEqual(record.call_args.args[2:4], ('failed', 'template_unavailable'))
+        actual = self.store.get(job['id'], self.user.pk)
+        self.assertEqual((actual['status'], actual['reason']), ('failed', 'template_unavailable'))
+        self.assertEqual(actual['cleanup'], {'db_connection': 'not_started', 'container': 'not_started'})
+        self.assertFalse(self.store.client.exists(self.store.active_key))
+
     def test_cancel_racing_success_discards_result(self):
         job = self.submit()
         def execute(*args, **kwargs):

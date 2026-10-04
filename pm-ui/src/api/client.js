@@ -217,6 +217,7 @@ export default {
     templates(params) { return client.get('/ai/analysis/templates/', { params }) },
     template(id) { return client.get(`/ai/analysis/templates/${id}/`) },
     saveTemplate(data) { return client.post('/ai/analysis/templates/', data) },
+    createTemplatePlan(id) { return client.post(`/ai/analysis/templates/${id}/plans/`, {}) },
     approveTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/approve/`, data) },
     rejectTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/reject/`, data) },
     options() { return client.get('/ai/analysis/options/') },
