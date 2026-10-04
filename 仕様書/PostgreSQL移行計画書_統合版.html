@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PM PostgreSQL移行計画 統合版</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 配置: 上部固定の目次チップ + 1カラムの章立て。表は各自で横スクロール。MySQL=琥珀、PostgreSQL=青で系統を分ける */
+:root {
+  --bg: #f4f6f9; --surface: #ffffff; --fg: #1b2330; --muted: #596475; --line: #d6dce5;
+  --pg: #2b5c9a; --pg-soft: #e3edf9; --my: #a85b14; --my-soft: #f8ead9;
+  --ok: #26734a; --ok-soft: #dff1e7; --warn: #8f5c00; --warn-soft: #fbefcf; --bad: #a8322b; --bad-soft: #f9e0dd;
+  --code-bg: #eceff4;
+  --font-body: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10151c; --surface: #172029; --fg: #e4e9f0; --muted: #98a3b3; --line: #2a3542;
+    --pg: #82b3ee; --pg-soft: #1b2c42; --my: #e3a460; --my-soft: #3a2a18;
+    --ok: #6fc79a; --ok-soft: #1a3328; --warn: #e5b653; --warn-soft: #3a3016; --bad: #f0928a; --bad-soft: #3d2220;
+    --code-bg: #1d2733; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10151c; --surface: #172029; --fg: #e4e9f0; --muted: #98a3b3; --line: #2a3542;
+  --pg: #82b3ee; --pg-soft: #1b2c42; --my: #e3a460; --my-soft: #3a2a18;
+  --ok: #6fc79a; --ok-soft: #1a3328; --warn: #e5b653; --warn-soft: #3a3016; --bad: #f0928a; --bad-soft: #3d2220;
+  --code-bg: #1d2733; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.75; padding-inline: 16px; }
+.wrap { max-width: 960px; margin-inline: auto; padding-block: 20px 56px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.4; margin: 0; }
+h1 { font-size: 1.65rem; font-weight: 700; }
+h2 { font-size: 1.25rem; font-weight: 700; padding-bottom: 6px; border-bottom: 2px solid var(--pg); }
+h3 { font-size: 1.02rem; font-weight: 700; margin-top: 4px; }
+p { margin: 0; }
+a { color: var(--pg); }
+section { margin-top: 40px; display: flex; flex-direction: column; gap: 14px; scroll-margin-top: 64px; }
+.eyebrow { font-family: var(--font-mono); font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.meta { color: var(--muted); font-size: .85rem; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.banner { background: var(--warn-soft); color: var(--fg); border: 1px solid var(--warn); border-radius: 6px; padding: 10px 14px; font-size: .9rem; }
+.banner b { color: var(--warn); }
+
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); margin-inline: -16px; padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; overflow-x: auto; white-space: nowrap; }
+nav.toc a { text-decoration: none; font-size: .78rem; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; }
+nav.toc a:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--pg); outline-offset: 2px; }
+
+.glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.glance > div { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; min-width: 0; }
+.glance .k { font-size: .75rem; color: var(--muted); }
+.glance .v { font-weight: 700; font-size: 1rem; }
+
+.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.flow .node { flex: 1 1 180px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.flow .node.my { border-left: 4px solid var(--my); }
+.flow .node.pg { border-left: 4px solid var(--pg); }
+.flow .node small { display: block; color: var(--muted); font-size: .78rem; }
+
+.tablebox { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .86rem; line-height: 1.6; }
+th, td { padding: 7px 11px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); min-width: 110px; }
+th { background: var(--code-bg); font-weight: 700; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.narrow, th.narrow { min-width: 0; white-space: nowrap; }
+td.num { font-variant-numeric: tabular-nums; }
+tr.pick td { background: var(--ok-soft); }
+
+code, pre { font-family: var(--font-mono); font-size: .82rem; }
+code { background: var(--code-bg); border-radius: 3px; padding: 1px 5px; overflow-wrap: anywhere; }
+.codebox { position: relative; }
+pre { margin: 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; overflow-x: auto; line-height: 1.6; }
+.copy { position: absolute; top: 6px; right: 6px; font: inherit; font-size: .72rem; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 9px; cursor: pointer; }
+
+.pill { display: inline-block; font-size: .72rem; font-weight: 700; border-radius: 999px; padding: 0 9px; line-height: 1.6; white-space: nowrap; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.pg { background: var(--pg-soft); color: var(--pg); }
+.pill.my { background: var(--my-soft); color: var(--my); }
+.pill.new { background: var(--pg); color: var(--surface); }
+
+.note { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--pg); border-radius: 6px; padding: 10px 14px; font-size: .9rem; }
+.note.warn { border-left-color: var(--warn); }
+.note.bad { border-left-color: var(--bad); }
+ul { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 3px; }
+
+.tl { display: flex; flex-direction: column; border-left: 2px solid var(--pg); margin-left: 6px; }
+.tl > div { padding: 0 0 14px 16px; position: relative; }
+.tl > div::before { content: ""; position: absolute; left: -7px; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--pg); }
+.tl > div.key::before { background: var(--pg); }
+.tl .when { font-family: var(--font-mono); font-size: .8rem; color: var(--pg); font-weight: 500; }
+.tl .what { font-weight: 700; }
+.tl .memo { color: var(--muted); font-size: .85rem; }
+footer { margin-top: 48px; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); padding-top: 12px; }
+@media (max-width: 520px) { h1 { font-size: 1.4rem; } }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+<header style="display:flex;flex-direction:column;gap:10px">
+  <div class="eyebrow">PM / Database Migration Plan</div>
+  <h1>PM PostgreSQL 移行計画 統合版</h1>
+  <div class="meta"><span>作成日: 2026-10-04</span><span>統合元: v2(2026-07-07) + v3(2026-10-04) + レビュー8点</span></div>
+  <div class="banner"><b>状態: 案(BOSS未承認)。</b>この文書は計画のみです。実装・インストール・既存環境の変更・コミット・push・本番反映は、BOSSの承認と指示の後に行います。</div>
+</header>
+
+<nav class="toc" aria-label="目次">
+  <a href="#s0">概要</a><a href="#s1">文書の関係</a><a href="#s2">順番の比較</a><a href="#s3">全体フェーズ</a><a href="#s4">リハーサル環境</a><a href="#s5">データ移行と突合</a><a href="#s6">SQL対応</a><a href="#s7">AI分析層</a><a href="#s8">切替手順</a><a href="#s9">新PC</a><a href="#s10">会社確認</a><a href="#s11">日程</a><a href="#s12">リスク</a><a href="#s13">承認事項</a><a href="#s14">未確認</a>
+</nav>
+
+<section id="s0">
+  <h2>概要</h2>
+  <div class="glance">
+    <div><div class="k">推奨する順番</div><div class="v">B案: 新PC入替を先、PostgreSQLはその後</div></div>
+    <div><div class="k">本番PC入替</div><div class="v">2026年11月末ごろ(MySQLのまま)</div></div>
+    <div><div class="k">PostgreSQL切替</div><div class="v">12月〜年明け(案)</div></div>
+    <div><div class="k">AI分析の本番実行</div><div class="v">PC入替+PG移行+AI層移植の後</div></div>
+  </div>
+  <div class="flow">
+    <div class="node my"><b>本番(現行)</b><small>MySQL / メモリ8GB / 変更しない</small></div>
+    <div class="node my"><b>新PC(11月末)</b><small>MySQLのまま入替。旧PC・旧MySQLを残す</small></div>
+    <div class="node pg"><b>PG切替(12月〜)</b><small>リハーサルで検証済みの構成を適用</small></div>
+    <div class="node pg"><b>AI分析 本番有効化</b><small>安定を確認してから</small></div>
+  </div>
+  <div class="note">アプリ名は「PM」のままです。会社が許可していない名称は、ファイル・フォルダ・コンテナ・DB・ロールのいずれにも使いません。PostgreSQLへ移行することは、BOSSが決めた方針です。</div>
+</section>
+
+<section id="s1">
+  <h2>文書の関係</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>文書</th><th>内容</th><th>この統合版での扱い</th></tr></thead>
+    <tbody>
+      <tr><td>v1</td><td>ファイルとしては存在しません(gitにも履歴なし)。v2の中の「一括移行(旧プラン)」との比較表が、その考え方にあたります。</td><td>参考のみ</td></tr>
+      <tr><td><code>docs/PostgreSQL移行プラン.html</code>(v2)</td><td>併存方式。7フェーズ。2026-07-07</td><td>元ファイルは残す。骨格(フェーズ構成・修正箇所・DB関数化・PostGIS)を本書へ取り込む</td></tr>
+      <tr><td><code>仕様書/PostgreSQL移行計画書_v3.md</code></td><td>v2の差分改訂。順番の比較、リハーサル環境、切替手順の骨子、承認事項</td><td>元ファイルは残す。内容を本書へ取り込む</td></tr>
+      <tr><td>レビュー8点</td><td>v3に対する指摘(共通MySQLの停止方法、接続経路、照合順序、AI層の漏れ、Redis/.env/バックアップ、psycopg、性能、表記)</td><td>本書に反映済み。反映箇所に <span class="pill new">追加</span> を付けた</td></tr>
+    </tbody>
+  </table></div>
+  <h3>v2からの主な変更</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>項目</th><th>v2</th><th>本書</th></tr></thead>
+    <tbody>
+      <tr><td>複製側の名前</td><td>複製側にアプリ名を付けた別フォルダ</td><td>使用禁止。<code>D:\pm_pg\</code>、<code>pm_pg_rehearsal</code> など</td></tr>
+      <tr><td>PGの導入</td><td>Windowsへインストール(5432)</td><td>WSL2 Ubuntu-24.04 の Docker Engine で別コンテナ。Docker Desktopは入れない</td></tr>
+      <tr><td>スキーマ作成</td><td>Django migrate前提</td><td>migrateが通るかを先に試験。通らなければ方式を選ぶ</td></tr>
+      <tr><td>新PCとPG切替</td><td>同時(PHASE 6)</td><td>同時にする必須性なし。順番を比較して決める</td></tr>
+      <tr><td>AI分析層</td><td>記載なし</td><td>PG対応を追加</td></tr>
+      <tr><td>DB関数化・PostGIS・統合</td><td>PHASE 5 / 5b / 7</td><td>後続フェーズとして残す(§3)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s2">
+  <h2>順番の比較と推奨</h2>
+  <div class="note"><b>前提(確認済み・BOSS指示)</b>: 本番PC入替は2026年11月末ごろ。現行の本番PCはメモリ8GB、ディスク228GB(空き57GB)。Docker Desktop、共通MySQLコンテナ、バックエンド(gunicorn 3)、nginxが動作。分析実行は1件最大2GBで、8GBではMySQLとPGの併走や分析実行に余裕がありません。</div>
+  <div class="tablebox"><table>
+    <thead><tr><th class="narrow"></th><th>A: 現行PCで先にPG</th><th>B: 新PC入替を先、その後PG <span class="pill ok">推奨</span></th><th>C: 新PC入替と同時にPG</th></tr></thead>
+    <tbody>
+      <tr><td>リスク</td><td><span class="pill bad">高</span> 作業が2回。8GB機でリハーサル・pgloader・検証の負荷</td><td><span class="pill ok">低〜中</span> 変更が1つずつ。PG切替が12月以降にずれる</td><td><span class="pill bad">高</span> PC・OS・Docker基盤・DBエンジンが同時に変わり、切り分け不能</td></tr>
+      <tr><td>戻し方</td><td>旧MySQLのダンプで戻せる。切替後の入力データは逆変換が必要</td><td>旧PC・旧MySQLを残せば即戻せる。PG切替も新PC上のMySQLを残して戻せる</td><td>旧PC・旧MySQLで戻せる。原因がPC側かPG側か判別できない</td></tr>
+      <tr><td>メモリ</td><td>不足の恐れ(併存が必要になり得る)</td><td>新PC上で併存できる(§9)</td><td>新PC。検証中の余裕はスペック次第</td></tr>
+      <tr><td>日程</td><td>10月中に切替とPC入替の準備が重なる</td><td>11月末はPC入替のみ。PGは12月〜で余裕あり</td><td>11月末に集中。リハーサルが遅れると全体が遅れる</td></tr>
+      <tr><td>分析実行の有効化</td><td>8GB機では余裕なし</td><td>新PC+PG切替後(12月以降)</td><td>新PC+PG稼働後</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Bを推奨する理由</h3>
+  <ul>
+    <li>変更を1つずつにでき、不具合の原因を切り分けられる</li>
+    <li>戻し方が単純(旧PC・旧MySQLを残すだけ)</li>
+    <li>8GB機でPG移行作業を行わずに済む</li>
+    <li>11月末の期限をPC入替だけに絞れ、PG側の遅れが入替日程に影響しない</li>
+  </ul>
+  <p><b>代償</b>: PGへの切替と、分析実行の本番有効化が12月以降になります。</p>
+  <div class="note"><b>Cへ切り替えてよい条件</b>: リハーサルが11月上旬までに「突合の合格」「migrate/スキーマ作成方式の確定」「計算結果の一致」を満たし、新PCの納入・セットアップに余裕があること。満たさなければBのままです。Aは、新PCの納入が大幅に遅れ、かつMySQLに性能・安定性の緊急問題が出た場合のみ再検討します。</div>
+</section>
+
+<section id="s3">
+  <h2>全体フェーズ</h2>
+  <p>v2の7フェーズを骨格にし、v3の内容と順番(B案)を当てはめました。</p>
+  <div class="tablebox"><table>
+    <thead><tr><th class="narrow">フェーズ</th><th>内容</th><th>v2との対応</th><th>時期(案)</th></tr></thead>
+    <tbody>
+      <tr><td class="narrow">P0</td><td>会社で実測(メモリ、DB容量、共通MySQLの他システム利用、バックアップ、連携、証明書・IP)</td><td>新設</td><td>10/5週</td></tr>
+      <tr><td class="narrow">P1</td><td>リハーサル環境の構築(WSL2 Docker Engine上のPGコンテナ、複製側の準備)</td><td>PHASE 1・2を改訂</td><td>10/5週〜</td></tr>
+      <tr><td class="narrow">P2</td><td>PG対応: 接続設定・ライブラリ・Dockerfile、migrate試験(S1)、方式決定(S2)、migration・生SQL修正(S3・S4)</td><td>PHASE 2・3を改訂</td><td>10月中旬〜下旬</td></tr>
+      <tr><td class="narrow">P3</td><td>データ投入・突合・計算結果の一致・性能比較</td><td>PHASE 4</td><td>10月下旬〜11月上旬</td></tr>
+      <tr><td class="narrow">P4</td><td>AI分析層のPG移植</td><td>新設</td><td>11月上旬</td></tr>
+      <tr><td class="narrow">P5</td><td>新PC入替(MySQLのまま)</td><td>PHASE 6の前半</td><td>11月末</td></tr>
+      <tr><td class="narrow">P6</td><td>PG切替</td><td>PHASE 6の後半</td><td>12月〜年明け</td></tr>
+      <tr><td class="narrow">P7</td><td>ドキュメント更新・統合(CLAUDE.md、本番移行マニュアル、旧環境の撤去は任意)</td><td>PHASE 7</td><td>PG切替の安定後</td></tr>
+      <tr><td class="narrow">後続</td><td>在庫計算などのDB関数化(PL/pgSQL)。段階的に、ボトルネック順</td><td>PHASE 5</td><td>PG安定後に再計画</td></tr>
+      <tr><td class="narrow">後続</td><td>位置情報基盤(PostGIS)、曖昧検索(pgvector)、AGV・AIカメラのログ蓄積基盤</td><td>PHASE 5b</td><td>PG安定後に再計画</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note">後続の2行は、今回の移行の範囲外です。既存業務データを安全にPostgreSQLへ移すことを優先し、後から追加しても支障が出ない構成にします。</div>
+</section>
+
+<section id="s4">
+  <h2>リハーサル環境(開発PC)</h2>
+  <div class="note bad"><b>基本方針</b>: MySQL開発DBには触れません(コピー元として読み取りのみ)。本番の接続情報は一切入れません。</div>
+  <div class="tablebox"><table>
+    <thead><tr><th>項目</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>基盤</td><td>WSL2 Ubuntu-24.04 の Docker Engine(29.8.2、導入済み)</td></tr>
+      <tr><td>置き場所</td><td><code>D:\pm_pg\</code>(リポジトリの外を推奨)。<code>.env</code> はコピーせず、専用の <code>.env.pg_rehearsal</code> を新規作成(<code>.gitignore</code> 対象)</td></tr>
+      <tr><td>compose プロジェクト名</td><td><code>pm_pg_rehearsal</code></td></tr>
+      <tr><td>イメージ</td><td><code>postgres:16</code>(固定。<b>BOSS確認事項</b>)</td></tr>
+      <tr><td>ボリューム / ネットワーク</td><td><code>pm_pg_rehearsal_data</code> / <code>pm_pg_rehearsal_net</code>(専用。<code>pm_internal</code>・<code>ts_pm_network_v2</code> には参加させない)</td></tr>
+      <tr><td>ポート</td><td>PG: <code>127.0.0.1:15432</code>(LAN非公開)。複製アプリ: バックエンド 18081 / フロント 18501</td></tr>
+      <tr><td>DB・ロール</td><td>DB <code>pm_pg_rehearsal</code>。ロール <code>pm_pg_admin</code> / <code>pm_pg_ai_reader</code> / <code>pm_pg_ai_view_owner</code></td></tr>
+      <tr><td>パスワード</td><td>新規にランダム生成。既存 <code>.env</code>・本番の値は使わない。コマンドラインに直接書かない</td></tr>
+      <tr><td>Redis</td><td>6379(Memurai)を共用し、複製側はDB番号 <code>/1</code> で分離。AI分析のlauncher(8091)は1つで同時1件のため、同時に分析を動かさない</td></tr>
+      <tr><td>使用中ポート(確認済み)</td><td>3306(MySQL)、6379(Memurai)、8081、8501、8091。5432・15432は空き</td></tr>
+    </tbody>
+  </table></div>
+  <h3>起動前の安全チェック</h3>
+  <ul>
+    <li>複製側の <code>.env</code> の <code>DB_HOST</code> がコンテナ名またはループバックで、3306・本番IP(10.0.1.232)でないこと</li>
+    <li><code>.env.pg_rehearsal</code> がgit管理対象外であること</li>
+  </ul>
+</section>
+
+<section id="s5">
+  <h2>データ移行と突合</h2>
+  <h3>コピー方式</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>方式</th><th>内容</th><th>長所</th><th>短所</th></tr></thead>
+    <tbody>
+      <tr><td><b>P</b></td><td>スキーマ=Django migrate、データ=pgloader(data only)</td><td>Djangoのスキーマと一致する</td><td>migrateが通らない恐れ(§6)</td></tr>
+      <tr><td><b>Q</b></td><td>pgloaderでスキーマ込み</td><td>migrateに依存しない。管理対象外3テーブルも作られる</td><td>Djangoの制約・型とずれる恐れ。<code>migrate --fake</code> で履歴を合わせる必要</td></tr>
+      <tr><td><b>R</b></td><td><code>dumpdata</code> / <code>loaddata</code></td><td>スキーマ作成はDjango</td><td>遅い。巨大テーブルに不向き。型の扱いに注意</td></tr>
+    </tbody>
+  </table></div>
+  <p>まずPの前提(空のPGでmigrate)を試験し、結果で決めます。pgloaderがWindowsで動かない場合は、WSL2内またはDockerイメージで実行します。方式の切替(P→Q→R)は、そのつどBOSSへ報告して承認を得ます。</p>
+  <h3>コピー元MySQLの読み取りユーザーと接続経路 <span class="pill new">追加</span></h3>
+  <ul>
+    <li>コピー元は、<b>新規作成するSELECT専用ユーザー</b>で読み、作業終了後にそのユーザーを削除します(MySQL側の権限変更にあたるため、BOSS承認事項)</li>
+    <li>MySQLはWindows上、リハーサルのコンテナはWSL2のDocker内です。接続には「WSLから見たWindowsのIPアドレスの指定」「MySQL側での接続元の許可」「Windowsファイアウォールの設定」が必要です。ユーザーの作成とセットで承認を得ます</li>
+  </ul>
+  <h3>突合の手順</h3>
+  <ul>
+    <li><b>件数</b>: 全テーブルの <code>COUNT(*)</code> をMySQLとPGで比較(管理対象外3テーブルを含む)</li>
+    <li><b>代表値</b>: 主要テーブル(LineBacklog / LineDemand / LinePlan / Order / OrderLine / 在庫・進度関連)で、日付・数量・ステータス列の合計、最小・最大、NULL件数を比較。抜き取り行は主キー指定で全列を比較</li>
+    <li><b>計算結果の一致</b>: 同一入力で、在庫・計画在庫・進度の再計算結果を比較。差分が出たら、まずDBの実データで原因を切り分ける(生成ロジックの修正は最後)</li>
+    <li><b>性能比較</b> <span class="pill new">追加</span>: データ投入後に <code>ANALYZE</code> を実行し、インデックスを確認。在庫計算の速度と、主要画面の応答時間をMySQL版と比較します。移行の目的が速度の改善であるためです</li>
+  </ul>
+  <h3>挙動差の個別確認</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>差異</th><th>内容</th><th>確認方法</th></tr></thead>
+    <tbody>
+      <tr><td>文字比較の大文字小文字</td><td>MySQLは区別しない。PGは区別する</td><td>製品コード・顧客コードの検索・JOINで結果件数を比較</td></tr>
+      <tr><td>照合順序(ロケール) <span class="pill new">追加</span></td><td>日本語の並び順と比較規則は、DB作成時に決まり、後から変更しにくい</td><td>DB作成前にBOSSへ確認。並び順を使う画面の出力を比較</td></tr>
+      <tr><td>NULLの並び順</td><td>MySQLはNULLが先、PGは後(昇順)</td><td>ORDER BY を使う画面・APIの出力順を比較</td></tr>
+      <tr><td>整数の割り算</td><td>PGは切り捨て。在庫計算に影響の可能性</td><td>割り算を含むSQL・ORMの式を洗い出して結果を比較</td></tr>
+      <tr><td>不正な日付(0000-00-00)</td><td>PGは保持できない</td><td>MySQL側の該当行の有無を件数で確認</td></tr>
+      <tr><td><code>tinyint(1)</code> → boolean</td><td>型変換</td><td>真偽列の値の分布を比較</td></tr>
+      <tr><td>JSON → jsonb</td><td>キーの順序・重複・空白が変わる</td><td>JSONFieldの読み書きと、JSON_VALUE系ビューの結果を比較</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s6">
+  <h2>MySQL固有SQL・マイグレーションの対応</h2>
+  <h3>調査済みの事実(数値は転記・未再確認)</h3>
+  <ul>
+    <li>マイグレーションのMySQL固有SQL: RunSQL 13箇所 / 9ファイル、JSON_VALUE系 12箇所 / 2ファイル(AI用ビュー ai 0012〜0014を含む)</li>
+    <li><code>managed=False</code> のモデルが3つあり、マイグレーションで作られないテーブルがある(以前、テストDB作成時に <code>t_scrap_record</code> が無くて失敗)</li>
+    <li>生SQL: <code>cursor.execute</code> 24箇所 / 12ファイル、<code>.raw(</code> 7箇所 / 2ファイル、<code>FOR UPDATE</code> 1箇所。<code>ON DUPLICATE KEY</code>・<code>GROUP_CONCAT</code>・<code>IFNULL</code>・<code>DATE_FORMAT</code>系・<code>REPLACE INTO</code> は見つからなかった</li>
+  </ul>
+  <div class="note warn">これらの数値は、別の会話の調査結果の転記です。着手時に再確認します。</div>
+  <h3>段階</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th class="narrow">段階</th><th>内容</th><th>承認</th></tr></thead>
+    <tbody>
+      <tr><td class="narrow">S1 試験</td><td>空のPGへ複製側から <code>migrate</code> をそのまま実行し、落ちる箇所を記録のみする(コードは変更しない)</td><td>BOSS承認</td></tr>
+      <tr><td class="narrow">S2 方式決定</td><td>落ちた箇所を報告し、<b>案X</b>(migrationを「MySQLの場合のみ実行」に分岐。複製側のコード変更)か<b>案Y</b>(pgloaderでスキーマ込み。§5のQ)かを決める</td><td>BOSS判断</td></tr>
+      <tr><td class="narrow">S3 修正</td><td>決定した案で修正。現行 <code>pm/</code> は変更しない。修正は複製側(別ブランチ、または <code>D:\pm_pg\</code> の複製)</td><td>BOSS承認</td></tr>
+      <tr><td class="narrow">S4 生SQL</td><td>24+7+1箇所をPG互換に直す。MySQL/PG両対応の分岐(フォールバック)は、規約により事前同意なしに入れない</td><td>都度BOSS承認</td></tr>
+    </tbody>
+  </table></div>
+  <h3>v2で挙げられていた修正箇所(2026-07時点、未再確認)</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>タスク</th><th>対象</th><th>変更内容</th></tr></thead>
+    <tbody>
+      <tr><td>DB設定</td><td><code>pm_backend/project/settings.py</code></td><td>ENGINEをpostgresqlへ。PORT 5432。OPTIONSの charset/init_command を削除し、<code>-c timezone=Asia/Tokyo</code> を指定</td></tr>
+      <tr><td>Pythonパッケージ</td><td><code>pm_backend/requirements.txt</code></td><td>mysqlclient を外し、PG用ドライバを追加。<b>psycopg2-binary か psycopg(v3)かは未決定</b>(AI分析層は psycopg を想定)。§13の承認事項</td></tr>
+      <tr><td>Dockerビルド</td><td><code>pm_backend/Dockerfile</code></td><td><code>default-libmysqlclient-dev</code> → <code>libpq-dev</code></td></tr>
+      <tr><td>Docker構成</td><td><code>docker-compose.yml</code></td><td>PostgreSQLコンテナ追加。DB_HOST・DB_PORTの変更</td></tr>
+      <tr><td>環境変数</td><td><code>pm_backend/.env</code></td><td>ポート・ユーザー・パスワードの変更</td></tr>
+      <tr><td>TINYINT → BOOLEAN</td><td>quality/migrations/0002, 0003</td><td><code>TINYINT(1)</code> → <code>BOOLEAN DEFAULT FALSE</code></td></tr>
+      <tr><td>DROP FOREIGN KEY</td><td>quality/migrations/0004</td><td><code>DROP FOREIGN KEY</code> → <code>DROP CONSTRAINT</code></td></tr>
+      <tr><td>CHANGE COLUMN / RENAME TABLE</td><td>accounts/migrations/0025, 0026</td><td><code>ALTER COLUMN ... RENAME TO</code> / <code>ALTER TABLE ... RENAME TO</code></td></tr>
+      <tr><td>ENUM / AFTER句</td><td><code>apply_schema_changes.py</code></td><td>ENUM → VARCHAR + CHECK。AFTER句を削除</td></tr>
+      <tr><td>バッククォート / datetime</td><td>accounts の create_userprofile_table</td><td>バッククォート → 二重引用符。<code>datetime(6)</code> → <code>timestamp</code></td></tr>
+      <tr><td>SQL Exportコマンド</td><td>masters の export_*_sql.py(4ファイル)</td><td><code>SET NAMES utf8mb4</code> 削除、<code>FROM DUAL</code> 削除</td></tr>
+    </tbody>
+  </table></div>
+  <h3>管理対象外テーブル3つ</h3>
+  <ul>
+    <li>3モデルのテーブル名と、DDLの取得元(実DBか、<code>予備資料/</code> のスキーマ定義か)をまず特定する</li>
+    <li>取得元を確定できなければ、推測でDDLを作らず、BOSSへ報告する</li>
+    <li>案Xなら、取得元から複製側に作成手段を用意する。案YならpgloaderがPG側に作る</li>
+  </ul>
+</section>
+
+<section id="s7">
+  <h2>AI分析層のPG対応</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>現行(MySQL)</th><th>PostgreSQL</th></tr></thead>
+    <tbody>
+      <tr><td><code>mysql.connector.django</code>(ai_reader接続)</td><td>psycopg(要バージョン確認)</td></tr>
+      <tr><td><code>analysis_execution_service.py</code> の <code>mysql.connector</code> 直接接続</td><td>psycopg に置換</td></tr>
+      <tr><td><code>max_execution_time</code> / <code>lock_wait_timeout</code></td><td><code>statement_timeout</code> / <code>lock_timeout</code></td></tr>
+      <tr><td><code>CONSISTENT SNAPSHOT</code></td><td><code>REPEATABLE READ READ ONLY</code></td></tr>
+      <tr><td>バッククォート</td><td>二重引用符</td></tr>
+      <tr><td>中止</td><td>cancel(<code>pg_cancel_backend</code> 等)が可能</td></tr>
+      <tr><td>ai_reader の ENGINE(<code>settings.py</code>)、<code>AI_DB_*</code> 環境変数</td><td>PG用に作り直し</td></tr>
+      <tr><td>migrations 0012〜0014 の JSON_VALUE ビュー</td><td><code>-&gt;&gt;</code> 等で書き直し(jsonb対応)</td></tr>
+      <tr><td>ビュー定義者 <code>pm_ai_view_owner</code></td><td>ビュー所有者+GRANTで作り直し</td></tr>
+      <tr><td>件数確認(<code>analysis_data_service.py</code>)のバッククォートとCOUNT <span class="pill new">追加</span></td><td>二重引用符に置換</td></tr>
+      <tr><td>列型の対応表(<code>ANALYSIS_COLUMN_TYPES</code>) <span class="pill new">追加</span></td><td><code>decimal</code>→<code>numeric</code>、<code>datetime(6)</code>→<code>timestamp(6)</code> など</td></tr>
+      <tr><td>セッション初期化(<code>sql_mode</code>、<code>time_zone</code>)と接続タイムアウト <span class="pill new">追加</span></td><td>PG側の同等設定へ</td></tr>
+      <tr><td>例外クラス <code>mysql.connector.Error</code> <span class="pill new">追加</span></td><td>psycopg の例外へ</td></tr>
+      <tr><td>テスト設定(<code>project.analysis_test_settings</code>)、実DBを読むテストの前提 <span class="pill new">追加</span></td><td>PG前提に見直し</td></tr>
+      <tr><td>履歴テーブル(ai 0024〜0026)</td><td>Django標準機能でPGでも作れる見込み(要確認)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note">AI分析の<b>本番実行は、PC入替+PG移行+AI層移植の後</b>に有効化します。それまで本番では無効です。</div>
+</section>
+
+<section id="s8">
+  <h2>本番切替の手順書(骨子)</h2>
+  <div class="note warn">骨子のみです。停止時間・件数・容量の数値は、リハーサルと会社での確認の後に確定します。ここに推測の数値は書きません。</div>
+  <h3>P5: PC入替(MySQLのまま)</h3>
+  <ol>
+    <li>新PCにWSL2 + Docker Engineを構築(旧PCは稼働継続)</li>
+    <li>本番のダンプを取得し、新PCのMySQLへ復元。件数突合</li>
+    <li>新PCでアプリを起動し、IP(10.0.1.232)と証明書(<code>pm-ui/certs/pm-prod.crt</code>)の扱いを確認(§10)</li>
+    <li><b>引き継ぎ項目の確認</b> <span class="pill new">追加</span>: 本番ComposeのRedis(AI分析)と <code>AI_ANALYSIS_REDIS_URL</code>、<code>.env</code> の項目(AI用DBユーザー、外部AIのAPIキー、SMTP、FCMなど)を安全に引き継ぐ方法。バックアップの取得方法(MySQLの <code>mysqldump</code>)</li>
+    <li>切替: 旧PCを停止 → 最終差分を反映 → IPを新PCへ → 動作確認</li>
+    <li>旧PC・旧MySQLは停止状態で残す(戻し先)</li>
+  </ol>
+  <h3>P6: PG切替</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th class="narrow">手順</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td class="narrow">0</td><td>事前: 切替直前の全体バックアップ(<code>mysqldump</code>)を取得し、リストアできることを確認。PG側のバックアップ(<code>pg_dump</code>)の方法も決めておく <span class="pill new">追加</span></td></tr>
+      <tr><td class="narrow">1</td><td>利用停止の通知。<b>PM用DBだけを止める</b>(PMアプリの停止、PM用ユーザーの権限取り下げ)。共通MySQL全体を読み取り専用にすると、他システムも書き込めなくなる恐れがあるため、これを基本にする <span class="pill new">追加</span></td></tr>
+      <tr><td class="narrow">2</td><td>方式P/Qに従ってPGへ移行(§5)</td></tr>
+      <tr><td class="narrow">3</td><td>件数・代表値・計算結果の突合</td></tr>
+      <tr><td class="narrow">4</td><td><code>migrate --fake</code> で履歴を同期(方式Qの場合)。シーケンスの <code>setval</code></td></tr>
+      <tr><td class="narrow">5</td><td>アプリをPG設定で起動。主要業務フローの確認</td></tr>
+      <tr><td class="narrow">6</td><td>切替完了の通知。分析実行の有効化は別途(§7の完了後)</td></tr>
+    </tbody>
+  </table></div>
+  <h3>戻す条件(案)</h3>
+  <ul>
+    <li>突合で重大な不一致(件数不一致、計算結果の不一致)が解消できない</li>
+    <li>主要業務フロー(受注展開、ガント、在庫・進度)が動かない</li>
+    <li>運用開始までに、一定時間内に原因を特定できない(<b>時間はBOSSが決める</b>)</li>
+  </ul>
+  <div class="note bad"><b>戻し方</b>: アプリの接続先をMySQLに戻します。PG稼働中に入力されたデータはMySQLに反映されないため、<b>運用開始前に戻すのが原則</b>です。運用開始後の戻しには、データ逆変換の手順が別途必要です(未設計)。</div>
+  <h3>未決定の項目</h3>
+  <ul>
+    <li><b>旧PC・MySQLを残す期間</b>: BOSS判断。目安として、PG切替後に1か月の月次処理を一巡するまでを提案</li>
+    <li><b>停止時間</b>: DB容量(§10)と、pgloaderの所要時間(リハーサルで測定)から算出。実測の後に決める</li>
+  </ul>
+</section>
+
+<section id="s9">
+  <h2>新PCの必要スペックの目安</h2>
+  <div class="note warn">確定値ではありません。会社での実測(§10)とリハーサルの実測の後に見直します。</div>
+  <div class="tablebox"><table>
+    <thead><tr><th>項目</th><th>目安・根拠</th></tr></thead>
+    <tbody>
+      <tr><td>OS + WSL2 / Docker Engine</td><td>実測が必要</td></tr>
+      <tr><td>MySQL(コンテナ)</td><td>現行の <code>docker stats</code> 実測値を基準にする</td></tr>
+      <tr><td>PostgreSQL</td><td>切替期間はMySQLと併存。実測が必要</td></tr>
+      <tr><td>バックエンド(gunicorn 3) + スケジューラ + nginx</td><td>現行の <code>docker stats</code> 実測値を基準にする</td></tr>
+      <tr><td>Redis</td><td>小さい(実測)</td></tr>
+      <tr><td>分析実行</td><td>1件最大2GB(確認済み)。同時1件(launcherは1つ)</td></tr>
+      <tr><td>ピーク同時利用</td><td>上記の合計 + 余裕</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><b>メモリ</b>: 「現行の実測合計(MySQL+PG併存期間を含む) + 分析実行2GB」に余裕を足した容量。現行8GBでは不足、というBOSSの判断と一致</li>
+    <li><b>ディスク</b>: 現行は228GB中、空き57GB(使用は約171GB、内訳は未確認)。MySQL+PG併存+ダンプ+バックアップが入る容量。DB容量の実測が先</li>
+    <li><b>WSL</b>: <code>.wslconfig</code> のメモリ上限の方針は未決定</li>
+    <li>具体的に何GBを買うかは、実測の後に提示します</li>
+  </ul>
+</section>
+
+<section id="s10">
+  <h2>会社で確認する項目(来週)</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th class="narrow">#</th><th>項目</th><th>方法</th><th>目的</th></tr></thead>
+    <tbody>
+      <tr><td class="narrow num">1</td><td>コンテナのメモリ使用量</td><td><code>docker stats --no-stream</code> を、業務時間帯に複数回</td><td>§9の積み上げ</td></tr>
+      <tr><td class="narrow num">2</td><td>Docker Desktopのメモリ設定</td><td>設定画面、または <code>%UserProfile%\.wslconfig</code></td><td>§9・WSL上限の方針</td></tr>
+      <tr><td class="narrow num">3</td><td>MySQLのDB容量</td><td>下のSQL</td><td>停止時間・ディスク</td></tr>
+      <tr><td class="narrow num">4</td><td>共通MySQLを他システムが使っているか</td><td>接続元・DB一覧の確認(下のSQL)。他システム担当への確認</td><td>使っていればMySQL全体は止められない。PG切替の影響範囲</td></tr>
+      <tr><td class="narrow num">5</td><td>バックアップの現状</td><td>頻度・保存先・世代・リストア実績</td><td>戻し条件</td></tr>
+      <tr><td class="narrow num">6</td><td>モバイル(PWA)・他システム連携</td><td>PWAの接続先、外部連携(CSV取込、API、メール、FCM等)の洗い出し</td><td>切替の影響範囲</td></tr>
+      <tr><td class="narrow num">7</td><td>証明書・IP(10.0.1.232)</td><td>有効期限、新PCへの引き継ぎ、IPの付け替え手順</td><td>§8のP5</td></tr>
+    </tbody>
+  </table></div>
+  <h3>確認用SQL(MySQL、読み取りのみ)</h3>
+  <div class="codebox"><button class="copy" type="button" data-target="sql1">コピー</button><pre id="sql1">-- DB別容量(GB)とテーブル数
+SELECT table_schema,
+       ROUND(SUM(data_length + index_length) / 1024 / 1024 / 1024, 2) AS gb,
+       COUNT(*) AS tables
+FROM information_schema.tables
+GROUP BY table_schema;
+
+-- テーブル別容量の上位(巨大テーブルの特定)
+SELECT table_name, table_rows,
+       ROUND((data_length + index_length) / 1024 / 1024, 1) AS mb
+FROM information_schema.tables
+WHERE table_schema = 'pm_db'
+ORDER BY (data_length + index_length) DESC
+LIMIT 30;</pre></div>
+  <div class="codebox"><button class="copy" type="button" data-target="sql2">コピー</button><pre id="sql2">-- 他システムの利用状況(接続中のユーザー・接続元・DB)
+SELECT user, host, db, COUNT(*) AS conns
+FROM information_schema.processlist
+GROUP BY user, host, db;
+
+-- 共通MySQL上のDB一覧とアカウント
+SHOW DATABASES;
+SELECT user, host FROM mysql.user;
+
+-- 不正な日付(0000-00-00)の有無: 日付列ごとに実行(列・表名は要確認)
+-- SELECT COUNT(*) FROM &lt;表&gt; WHERE &lt;列&gt; = '0000-00-00';</pre></div>
+  <p class="meta"><span><code>processlist</code> は実行時点の接続のみです。他システムの利用有無は、数日間の取得または担当者への確認が必要です。</span></p>
+</section>
+
+<section id="s11">
+  <h2>日程(案)</h2>
+  <div class="note warn">「来週から会社での作業」というBOSS指示に基づき、週の起点を2026-10-05(月)と仮定しています。日付は案です。</div>
+  <div class="tl">
+    <div><div class="when">10/5週</div><div class="what">会社で§10を確認。開発PCでWSLのDocker確認とPGコンテナ構築</div><div class="memo">承認が前提</div></div>
+    <div><div class="when">10月中旬</div><div class="what">S1(migrate試験)、S2(方式決定)</div><div class="memo">BOSS判断が必要</div></div>
+    <div><div class="when">10月下旬</div><div class="what">方式に沿った修正(S3)、データ投入と突合</div></div>
+    <div class="key"><div class="when">11月上旬</div><div class="what">計算結果の突合、生SQL対応(S4)、AI分析層の移植</div><div class="memo">C案への切替可否の判断点</div></div>
+    <div><div class="when">11月中旬</div><div class="what">新PC納入・構築の準備、PC入替の手順書確定</div><div class="memo">新PCの納入日は未確認</div></div>
+    <div class="key"><div class="when">11月末</div><div class="what">新PC入替(MySQLのまま)</div></div>
+    <div><div class="when">12月〜年明け</div><div class="what">PG切替、旧PC・旧MySQLの保持期間</div><div class="memo">停止時間は実測後に確定</div></div>
+    <div><div class="when">PG切替後</div><div class="what">AI分析の本番実行の有効化</div></div>
+  </div>
+</section>
+
+<section id="s12">
+  <h2>リスクと代案</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>リスク</th><th>影響</th><th>対応・代案</th></tr></thead>
+    <tbody>
+      <tr><td>migrateが通らない</td><td>スキーマ作成が遅れる</td><td>案Y(pgloaderでスキーマ込み)へ切替。BOSS承認</td></tr>
+      <tr><td>管理対象外テーブルのDDL取得元が不明</td><td>PGに作れない</td><td>実DBから取得。確定できなければBOSSへ報告</td></tr>
+      <tr><td>挙動差(大文字小文字、整数割り算、NULL順、照合順序)</td><td>在庫・進度の数値ずれ</td><td>突合で検出。ずれた箇所を実データで切り分けてから修正</td></tr>
+      <tr><td>リハーサルの遅れ</td><td>11月末に間に合わない</td><td>B案ならPC入替に影響しない。PG切替を12月以降に延期</td></tr>
+      <tr><td>新PCの納入が遅れる</td><td>入替の遅れ</td><td>旧PCでMySQL継続。PGは新PC後</td></tr>
+      <tr><td>共通MySQLを他システムが使用</td><td>MySQL全体を止められない / PG化の影響</td><td>§10-4で確認。使用していれば、PM専用DBを分離して移行する案を別途提案</td></tr>
+      <tr><td>PG切替後の戻し(データ逆変換)</td><td>運用開始後の戻しが困難</td><td>運用開始前に戻す原則。逆変換の手順は別途用意</td></tr>
+      <tr><td>8GB機で分析実行</td><td>メモリ不足</td><td>本番の分析実行は新PC+PG後。それまで無効</td></tr>
+      <tr><td>本書の数値の多くが未確認</td><td>計画の精度</td><td>§10の実測後に改訂</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s13">
+  <h2>BOSS承認が必要な項目</h2>
+  <p>承認前に着手しません。<span class="pill new">追加</span> は、今回の統合・レビューで加えた項目です。</p>
+  <div class="tablebox"><table>
+    <thead><tr><th class="narrow">#</th><th>項目</th><th class="narrow">区分</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><b>順番の決定</b>: A / B(推奨) / C</td><td>方針</td></tr>
+      <tr><td class="num">2</td><td>PGバージョン(<code>postgres:16</code> でよいか)</td><td>構成</td></tr>
+      <tr><td class="num">3</td><td>複製の置き場所(<code>D:\pm_pg\</code>、リポジトリ外でよいか)</td><td>構成</td></tr>
+      <tr><td class="num">4</td><td>ポート(15432 / 18081 / 18501)、名前(<code>pm_pg_rehearsal</code> 系)</td><td>構成</td></tr>
+      <tr><td class="num">5</td><td>MySQL側にSELECT専用ユーザーを新規作成し終了後に削除してよいか。あわせて、WSLからの接続経路(Windows IP、接続元の許可、ファイアウォール) <span class="pill new">追加</span></td><td>MySQLの権限変更</td></tr>
+      <tr><td class="num">6</td><td>空のPGへの <code>migrate</code> 試験(S1)の実施</td><td>実行</td></tr>
+      <tr><td class="num">7</td><td>方式の決定(案X/案Y、P/Q/R)と、途中での切替</td><td>方針</td></tr>
+      <tr><td class="num">8</td><td>migration・生SQLの修正方針(複製側のみ、別ブランチ)</td><td>コード変更</td></tr>
+      <tr><td class="num">9</td><td>MySQL/PG両対応の分岐(フォールバック)を入れるか</td><td>規約上、事前同意</td></tr>
+      <tr><td class="num">10</td><td>データの投入範囲(全テーブルか、巨大テーブルを除外するか)</td><td>データ</td></tr>
+      <tr><td class="num">11</td><td>取得件数・タイムアウト等の上限を新設する場合の値</td><td>規約上、事前確認</td></tr>
+      <tr><td class="num">12</td><td>戻す条件、旧PC・MySQLを残す期間、停止時間の許容</td><td>運用</td></tr>
+      <tr><td class="num">13</td><td>新PCのスペック(実測の後に提示)</td><td>購入</td></tr>
+      <tr><td class="num">14</td><td>WSL2 Docker Engineの設定(<code>.wslconfig</code> のメモリ上限など)と、WSLへの変更全般</td><td>環境</td></tr>
+      <tr><td class="num">15</td><td>AI分析の本番有効化のタイミング</td><td>運用</td></tr>
+      <tr><td class="num">16</td><td>コミット・push・本番反映・<code>migrate</code> の実行</td><td>BOSSの指示まで行わない</td></tr>
+      <tr><td class="num">17</td><td>PostgreSQLの照合順序(日本語の並び順、大文字小文字を区別しない比較の方法) <span class="pill new">追加</span></td><td>構成(DB作成後は変更しにくい)</td></tr>
+      <tr><td class="num">18</td><td>PG用ドライバ(psycopg2-binary か psycopg)を <code>requirements</code> に追加すること <span class="pill new">追加</span></td><td>依存ライブラリ</td></tr>
+      <tr><td class="num">19</td><td>新PCへの <code>.env</code> 項目とRedisの引き継ぎ方法、PG側のバックアップ方式 <span class="pill new">追加</span></td><td>運用</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s14">
+  <h2>未確認事項(この計画書の限界)</h2>
+  <ul>
+    <li>§6の件数(RunSQL 13、JSON_VALUE 12、managed=False 3、生SQL)は、他会話の調査結果の転記で、再確認していません</li>
+    <li>v2が述べる規模(約203画面 / 163モデル / 約250〜300 API、影響ファイル約20件)と、v2の修正箇所一覧も、2026-07時点の記載で、再確認していません</li>
+    <li>本番のDB容量、メモリ使用量、他システムの利用有無、バックアップ状況は未確認(§10で確認)</li>
+    <li>開発DBの容量は未確認(§10のSQLを開発DBにも流して確認する)</li>
+    <li>新PCの納入日・仕様は未確認</li>
+    <li>pgloaderのバージョン、Windows/WSLでの動作は未確認</li>
+    <li>psycopg2-binary と psycopg(v3)のどちらを使うかは未決定</li>
+    <li>実装計画書(<code>AI分析基盤実装計画.md</code> 等)への反映は、承認後の実装時に行う</li>
+  </ul>
+</section>
+
+<footer>統合元: <code>docs/PostgreSQL移行プラン.html</code>(v2) / <code>仕様書/PostgreSQL移行計画書_v3.md</code>。どちらの元ファイルも変更していません。</footer>
+</div>
+
+<script>
+(function () {
+  var buttons = document.querySelectorAll('.copy');
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var el = document.getElementById(b.getAttribute('data-target'));
+      var text = el.innerText;
+      var done = function () { b.textContent = 'コピーしました'; setTimeout(function () { b.textContent = 'コピー'; }, 1500); };
+      var fallback = function () {
+        var r = document.createRange(); r.selectNodeContents(el);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        b.textContent = '選択しました';
+      };
+      try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>
