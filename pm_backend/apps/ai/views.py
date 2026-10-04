@@ -121,6 +121,15 @@ class AIAnalysisCodegenApproveView(APIView):
         return Response(_codegen_response(plan))
 
 
+class AIAnalysisCodegenRefreshWrapperView(APIView):
+    """AIを呼ばずに外枠を更新する。本人の明示操作で旧試行・承認を破棄する。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id):
+        _only(request.data, {'revision'}, '対象の版のみを指定してください。')
+        return Response(_codegen_response(codegen.refresh_wrapper(request.user.pk, str(plan_id), request.data['revision'])))
+
+
 class AIAnalysisCodegenReleaseView(APIView):
     """状態不明の「生成中」を、明示の操作で解除する(生成回数は戻さず、有効期限は延長しない)。"""
     permission_classes = [IsAuthenticated]

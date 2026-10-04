@@ -66,17 +66,28 @@ class ExecutionStopped(AnalysisError):
 class Deadline:
     """段階ごとの全体の期限。残り時間を返し、超過したら止める。"""
 
-    def __init__(self, seconds, reason):
+    def __init__(self, seconds, reason, control=None):
         self.end = time.monotonic() + seconds
         self.reason = reason
         self.abandoned = []  # 期限で待ちをやめたDB問い合わせのスレッド(終了するまで、接続を閉じない)
         self.cleanup_failed = False  # 接続を閉じる処理に失敗した
+        self.control = control
 
     def remaining(self):
+        if self.control is not None:
+            self.control.check()
         left = self.end - time.monotonic()
         if left <= 0:
             raise ExecutionStopped(self.reason, f'{self.reason}: 期限を超えました。', 408)
         return left
+
+    def wait(self, worker, left):
+        """DB操作中の接続は触らず、期限・中止で待機だけを終了する。"""
+        if self.control is None:
+            worker.join(left)
+            return
+        while worker.is_alive():
+            worker.join(min(self.remaining(), 0.1))
 
 
 def launcher_endpoint():
@@ -135,7 +146,16 @@ def open_snapshot_connection(deadline, read_timeout):
     left = deadline.remaining()  # 期限切れなら、接続を開始する前に止める(開始後に例外を出して、接続を残さない)
     worker = threading.Thread(target=work, daemon=True)
     worker.start()
-    worker.join(left)
+    try:
+        deadline.wait(worker, left)
+    except ExecutionStopped:
+        with lock:
+            state['abandoned'] = True
+            if state['connection'] is not None:
+                if _close_connection(state['connection']) == 'failed':
+                    deadline.cleanup_failed = True
+            deadline.abandoned.append(worker)
+        raise
     with lock:
         if state['connection'] is None and state['error'] is None:
             state['abandoned'] = True
@@ -174,7 +194,11 @@ def _execute(cursor, deadline, sql, params):
 
     worker = threading.Thread(target=work, daemon=True)
     worker.start()
-    worker.join(left)
+    try:
+        deadline.wait(worker, left)
+    except ExecutionStopped:
+        deadline.abandoned.append(worker)
+        raise
     if worker.is_alive():
         deadline.abandoned.append(worker)
         raise ExecutionStopped(deadline.reason, f'{deadline.reason}: データベースの応答が期限内に返りませんでした。', 408)
@@ -321,7 +345,7 @@ def _chunks(cursor, deadline, datasets, date_from, date_to, chunk_rows):
             yield index, rows, _data_frame(index, rows, types)
 
 
-def _transmit(host, port, length, frames, transfer, response_timeout, timing=None):
+def _transmit(host, port, length, frames, transfer, response_timeout, timing=None, control=None):
     """本文を、フレームごとに送る。送信元(frames)が例外を出したら、Eを送らずに接続を閉じる。
 
     timing(辞書)へ、send_seconds(本文の送信だけの時間)を記録する。
@@ -332,17 +356,33 @@ def _transmit(host, port, length, frames, transfer, response_timeout, timing=Non
     try:
         connection.putrequest('POST', '/v1/jobs')
         connection.putheader('Content-Length', str(length))
+        if control is not None:
+            control.check()
+            connection.putheader('X-Analysis-Job', control.job_id)
+            connection.putheader('X-Analysis-Control', control.token)
+        connection.connect()  # 接続拒否なら、HTTPヘッダも本文もまだ送っていない。
+        transfer.remaining()
+        timing['transmit_started'] = True  # endheadersの途中失敗も、相手へ届いた可能性を残す。
         connection.endheaders()
+        if control is not None:
+            control.attach(connection.sock)
         for frame in frames:
             connection.sock.settimeout(transfer.remaining())
             connection.sock.sendall(frame)
         timing['send_seconds'] = time.monotonic() - started  # 本文の送信だけの時間(2回目の取得を含む)。launcherの実行・応答待ちは含めない
         connection.sock.settimeout(response_timeout)
         response = connection.getresponse()
-        return response.status, json.loads(response.read().decode('utf-8'))
+        result = json.loads(response.read().decode('utf-8'))
+        if control is not None:
+            control.check()
+        return response.status, result
     except (socket.timeout, TimeoutError) as exc:
+        if control is not None:
+            control.check()
         raise ExecutionStopped('stage_deadline_transfer', '転送の期限内にlauncherへ送れませんでした。', 408) from exc
     except (OSError, http.client.HTTPException, ValueError) as exc:
+        if control is not None:
+            control.check()
         # launcherは、実行中のジョブがある場合などに、本文を読まずに応答して接続を閉じる。応答を読めれば、その理由を返す
         try:
             connection.sock.settimeout(2)
@@ -352,10 +392,25 @@ def _transmit(host, port, length, frames, transfer, response_timeout, timing=Non
             pass
         raise ExecutionStopped('launcher_unreachable', 'launcherとの通信に失敗しました(実行中のジョブがある場合も、この失敗になります)。', 503) from exc
     finally:
+        if control is not None:
+            control.detach()
         connection.close()  # 中止した場合は、Eを送らないまま閉じる(launcherは不完全な本文として結果を採用しない)
 
 
-def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines=None, chunk_rows=CHUNK_ROWS, on_cleanup_done=None):
+def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines=None, chunk_rows=CHUNK_ROWS, on_cleanup_done=None, control=None):
+    """検証段階の拒否も、取得・転送を開始したかどうかを明示して呼出し側へ返す。"""
+    progress = {'db_started': False, 'transmit_started': False}
+    try:
+        return _execute_approved_analysis(proposal, approved_counts, code, policy, deadlines, chunk_rows, on_cleanup_done, control, progress)
+    except Exception as exc:
+        if getattr(exc, 'cleanup', None) is None:
+            exc.cleanup = {'db_connection': 'unconfirmed' if progress['db_started'] else 'not_started'}
+        if getattr(exc, 'progress', None) is None:
+            exc.progress = dict(progress)
+        raise
+
+
+def _execute_approved_analysis(proposal, approved_counts, code, policy, deadlines=None, chunk_rows=CHUNK_ROWS, on_cleanup_done=None, control=None, progress=None):
     """承認済みの範囲を取得・照合して送り、launcherの結果を返す。履歴の保存は呼び出し側(analysis_run_service)が行う。
 
     止めた場合のExecutionStoppedには、cleanup(後始末の状態)とprogress(そこまでの件数・日時)を付ける。
@@ -376,12 +431,12 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
         if missing or set(ANALYSIS_COLUMN_TYPES[dataset['view']]) != set(BASE_SQL_SCHEMA[dataset['view']]):
             raise ExecutionStopped('column_type_unknown', f'{dataset["view"]}: 列型が未定義の列があります。', 422)
     limits = {**DEADLINES, **(deadlines or {})}
-    fetch = Deadline(limits['fetch'], 'stage_deadline_fetch')
+    fetch = Deadline(limits['fetch'], 'stage_deadline_fetch', control)
     started = time.monotonic()
     transfer = None
     connection = None
     cleanup = {}
-    progress = {}  # 止めた場合に、履歴へ残す、そこまでの件数・日時
+    progress = {} if progress is None else progress  # 止めた場合に、履歴へ残す、そこまでの件数・日時
 
     def finish():
         """接続の後始末(1回だけ)。期限で待ちをやめた問い合わせが動いている間は、'pending'(待機中)とする。"""
@@ -392,6 +447,7 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
         return dict(cleanup)
 
     try:
+        progress['db_started'] = True
         connection = open_snapshot_connection(fetch, read_timeout=math.ceil(limits['fetch'] + limits['transfer']) + 5)  # read_timeoutは最後の備え。期限は別スレッドで守る
         cursor = connection.cursor()
         # 1. 同じスナップショットでCOUNTし、承認時の件数・上限と照合する(違えば、何も送らずに止める)
@@ -418,7 +474,7 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
         progress.update(fetched_at=datetime.now(), fetch_seconds=round(fetch_seconds, 3))
 
         # 3. 2回目の取得を送信する。チャンクごとに1回目と照合し、全件が一致した後にだけ、終端(E)を送る
-        transfer = Deadline(limits['transfer'], 'stage_deadline_transfer')
+        transfer = Deadline(limits['transfer'], 'stage_deadline_transfer', control)
         transfer_started = time.monotonic()
         timing = {}
 
@@ -440,10 +496,12 @@ def execute_approved_analysis(proposal, approved_counts, code, policy, deadlines
             progress['sent_at'] = datetime.now()  # 終端フレームまで送り終えた日時
 
         response_timeout = limits['transfer'] + LAUNCHER_STAGE_SECONDS + policy.max_execution_seconds
-        progress['transmit_started'] = True  # これ以降は、launcherがコンテナを作った可能性がある(開始・削除は、応答がなければ未確認)
-        status, launcher = _transmit(host, port, body_length, frames(), transfer, response_timeout, timing)
+        args = {'control': control} if control is not None else {}
+        status, launcher = _transmit(host, port, body_length, frames(), transfer, response_timeout, timing, **args)
         total_seconds = time.monotonic() - transfer_started
     except Exception as exc:
+        if transfer is not None:
+            progress['transmit_started'] = timing.get('transmit_started', False)
         exc.cleanup = finish()  # 履歴へ残す後始末の状態(closed / pending / failed)
         exc.progress = dict(progress)
         raise

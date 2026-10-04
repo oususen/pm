@@ -95,6 +95,17 @@ def validate_python(source):
             add('construct_not_allowed')
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in OUTPUT_FUNCTIONS:
             has_output = True
+            # 定数で誤った型が明らかな呼出しだけを静的に拒否する。変数は実行時にも検査する。
+            targets = ((2, 'x', 'chart_x_not_list'),) if node.func.id == 'emit_chart' else (
+                ((1, 'columns', 'table_columns_not_list'), (2, 'rows', 'table_rows_not_list')) if node.func.id == 'emit_table' else ())
+            for index, name, reason in targets:
+                value = node.args[index] if len(node.args) > index and not any(isinstance(a, ast.Starred) for a in node.args[:index + 1]) else None
+                value = next((k.value for k in node.keywords if k.arg == name), value)
+                if isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.USub, ast.UAdd)) and isinstance(value.operand, ast.Constant):
+                    value = value.operand
+                if isinstance(value, ast.Constant) and (isinstance(value.value, str) or (
+                        node.func.id == 'emit_chart' and isinstance(value.value, (int, float, complex)))):
+                    add(reason)
     if not has_output:
         add('no_output')
     return problems
@@ -294,6 +305,27 @@ def _run_steps(raw, steps, approved):
     return allowed
 
 
+def _checked_outputs(table, chart):
+    """外枠で出力の形を早期検査する。実データを例外文へ入れず、最終検証は監督プロセスにも残す。"""
+    sequences = (list, tuple)  # fetchall()のタプル行も受け付ける。文字列等の任意の反復可能値には広げない。
+
+    def emit_table(name, columns, rows):
+        if not isinstance(columns, sequences) or any(not isinstance(c, str) for c in columns):
+            raise GuardError('table_columns_not_list')
+        if not isinstance(rows, sequences) or any(not isinstance(r, sequences) or len(r) != len(columns) for r in rows):
+            raise GuardError('table_rows_invalid')
+        table(name, list(columns), [list(row) for row in rows])
+
+    def emit_chart(kind, title, x, series):
+        if not isinstance(x, sequences):
+            raise GuardError('chart_x_not_list')
+        if not isinstance(series, sequences) or any(not isinstance(s, dict) or not isinstance(s.get('values'), sequences)
+                                              or len(s['values']) != len(x) for s in series):
+            raise GuardError('chart_series_invalid')
+        chart(kind, title, list(x), [dict(s, values=list(s['values'])) for s in series])
+    return emit_table, emit_chart
+
+
 def _main():
     namespace = globals()
     raw = namespace['con']
@@ -319,10 +351,11 @@ def _main():
         namespace['emit_report'](json.dumps({'trial': 'passed', 'steps': len(steps)}))
         return
     guarded = _GuardedConnection(raw, allowed)
+    table, chart = _checked_outputs(namespace['emit_table'], namespace['emit_chart'])
     scope = {
         '__builtins__': _safe_builtins(), '__name__': 'ai_python', 'con': guarded,
         'load_view': lambda name: guarded.table(name),
-        'emit_table': namespace['emit_table'], 'emit_chart': namespace['emit_chart'], 'emit_report': namespace['emit_report'],
+        'emit_table': table, 'emit_chart': chart, 'emit_report': namespace['emit_report'],
     }
     exec(compile(source, 'ai_python', 'exec'), scope)
     if _fingerprint(raw, approved) != before:

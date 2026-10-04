@@ -1,7 +1,7 @@
 <template>
   <main class="analysis-workspace">
     <header><h1>AI分析</h1><span>分析案・承認</span></header>
-    <p class="notice">分析案・データ範囲の承認から、SQL／Python生成・SQLの試行・コード承認まで対応しています。実データでの分析実行・結果表示・テンプレート保存は未対応です。{{ options?.notice || '' }}</p>
+    <p class="notice">分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します。テンプレート保存は未対応です。{{ options?.notice || '' }}</p>
     <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認、コード生成・SQL試行・コード承認・状態不明の解除には「AI分析」の編集権限が必要です。</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <label for="analysis-purpose">分析目的</label>
@@ -68,7 +68,7 @@
           <button :disabled="!canEdit || !!busy" @click="preview">{{ busy === 'preview' ? '件数を確認中…' : '対象件数を確認' }}</button>
           <button :disabled="!canEdit || !!busy || !plan.preview || plan.preview.over_limit" @click="approve('data')">データ範囲を承認</button>
         </div>
-        <p v-if="plan.data_approved_at" role="status">データ承認日時: {{ formatDate(plan.data_approved_at) }}。承認は完了しましたが、分析はまだ実行していません。</p>
+        <p v-if="plan.data_approved_at" role="status">データ承認日時: {{ formatDate(plan.data_approved_at) }}。{{ plan.execution ? '実行依頼済みです。実行状態・結果は下の実行欄で確認してください。' : '承認は完了しましたが、分析はまだ実行していません。' }}</p>
         <section v-if="plan.status === 'data_approved'" class="codegen">
           <h3>3. SQL・Pythonの生成と承認</h3>
           <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
@@ -99,6 +99,8 @@
             <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
             <h4>生成Python</h4><pre>{{ codegen.python }}</pre>
             <small>コード全体のSHA-256: {{ codegen.executed_code_sha256 }} / 固定外枠の版: {{ codegen.wrapper_version }}</small>
+            <p v-if="codeState?.wrapper_outdated">外枠が更新されています。保存済みSQL・Pythonが新しい検査に合格すれば、AIを呼ばずに更新・再試行・再承認できます。不合格なら再生成が必要です。</p>
+            <button v-if="codeState?.wrapper_outdated" :disabled="!canRefreshWrapper" @click="refreshWrapper">保存済みコードの外枠を更新（AI生成回数は消費しません）</button>
             <p role="status">SQL試行: {{ trialStatusLabel }}{{ codegen.trial?.at ? ` / 確認日時: ${formatDate(codegen.trial.at)}` : '' }}</p>
             <p v-if="trialFailureLabel" class="error">{{ trialStepLabel ? `${trialStepLabel}: ` : '' }}{{ trialFailureLabel }}</p>
             <p>試行は実DBを使わず、空のテーブルでSQLの構文・参照・中間テーブルの規則だけを確認します。Pythonは静的検査のみです。実データでの成功や分析の正しさは保証しません。試行は実行履歴に残しません。</p>
@@ -107,16 +109,16 @@
               <label><input v-model="codeAccepted" type="checkbox" :disabled="!canEdit || !!busy || !trialPassed">表示したSQL・Pythonと分析目的を確認し、このコードを承認します（実行はまだ行いません）</label>
               <button :disabled="!canApproveCode || !codeAccepted" @click="approveCode">確認したSQL・Pythonを承認</button>
             </template>
-            <p v-if="codeState?.status === 'code_approved'" role="status">コード承認日時: {{ formatDate(codegen.code_approved_at) }}。コード承認済み・分析未実行です。</p>
+            <p v-if="codeState?.status === 'code_approved'" role="status">コード承認日時: {{ formatDate(codegen.code_approved_at) }}。{{ plan.execution ? 'コード承認済みです。実行状態・結果は下の実行欄で確認してください。' : 'コード承認済み・分析未実行です。' }}</p>
           </template>
         </section>
-        <button disabled>分析を実行（実行API・結果画面は次工程で対応）</button>
       </template>
       <div class="actions">
         <button :disabled="!!busy" @click="refresh">分析案の状態を再取得</button>
-        <button v-if="canEdit" :disabled="!!busy" @click="resetPlan">目的・期間を変更して作り直す</button>
+        <button v-if="canEdit" :disabled="!!busy || executionActive" @click="resetPlan">目的・期間を変更して作り直す</button>
       </div>
     </section>
+    <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
     <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
   </main>
 </template>
@@ -124,8 +126,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '../../api/client'
+import AIAnalysisExecution from './AIAnalysisExecution.vue'
 
-const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false } })
+const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean })
+const executionActive = ref(false)
 const purpose = ref('')
 const source = ref('')
 const dateFrom = ref('')
@@ -159,13 +163,14 @@ const codegen = computed(() => plan.value?.codegen || null)
 const codeState = computed(() => plan.value?.codegen_state || null)
 const codeExternal = computed(() => plan.value?.proposal.provider !== 'qwen')
 const codeInFlight = computed(() => !!codegen.value?.inflight || !!codeState.value?.inflight_state || codeState.value?.status === 'generating')
-const canGenerate = computed(() => props.canEdit && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && codeState.value && !codeInFlight.value && codeState.value.attempts < codeState.value.max_attempts)
+const canGenerate = computed(() => props.canEdit && !executionActive.value && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && codeState.value && !codeInFlight.value && codeState.value.attempts < codeState.value.max_attempts)
 const hasCode = computed(() => ['generated', 'code_approved'].includes(codeState.value?.status) && Array.isArray(codegen.value?.steps) && typeof codegen.value?.python === 'string')
 const trialPassed = computed(() => codegen.value?.trial?.status === 'passed' && !!codegen.value?.executed_code_sha256 && codegen.value.trial.executed_code_sha256 === codegen.value.executed_code_sha256)
-const canTrial = computed(() => props.canEdit && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && hasCode.value && !codeInFlight.value && codeState.value?.status === 'generated')
+const canTrial = computed(() => props.canEdit && !executionActive.value && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && hasCode.value && !codeInFlight.value && !codeState.value?.wrapper_outdated && codeState.value?.status === 'generated')
 const canApproveCode = computed(() => canTrial.value && trialPassed.value)
-const canReleaseCodegen = computed(() => props.canEdit && !busy.value && codeStateFresh.value && codeState.value?.inflight_state === 'unknown')
-const codeStatusLabel = computed(() => ({ none: '未生成', generating: '生成中', generated: '生成済み・承認待ち', code_approved: '承認済み・未実行', failed: '生成失敗／解除済み' })[codeState.value?.status] || '状態未確認')
+const canRefreshWrapper = computed(() => props.canEdit && !executionActive.value && !busy.value && codeStateFresh.value && hasCode.value && !codeInFlight.value && !!codeState.value?.wrapper_outdated)
+const canReleaseCodegen = computed(() => props.canEdit && !executionActive.value && !busy.value && codeStateFresh.value && codeState.value?.inflight_state === 'unknown')
+const codeStatusLabel = computed(() => ({ none: '未生成', generating: '生成中', generated: '生成済み・承認待ち', code_approved: plan.value?.execution ? '承認済み・実行依頼あり' : '承認済み・未実行', failed: '生成失敗／解除済み' })[codeState.value?.status] || '状態未確認')
 const trialStatusLabel = computed(() => ({ passed: '合格', failed: '不合格', unverified: '未検証（実行基盤の状態を確認して試行をやり直してください）' })[codegen.value?.trial?.status] || '未実施')
 // 理由コードだけを固定文へ変換する。AI・DuckDBの説明文や未知の理由の本文は表示しない。
 const FAILURE_LABELS = Object.freeze({
@@ -188,6 +193,9 @@ const FAILURE_LABELS = Object.freeze({
   'python:con_method_not_allowed': 'Pythonが許可されていないDB接続の操作を使用しています。',
   'python:construct_not_allowed': 'Pythonが許可されていない構文を使用しています。',
   'python:no_output': 'Pythonに表・グラフ・報告書の出力処理がありません。',
+  'python:chart_x_not_list': 'グラフの横軸(x)は値のリストにしてください。文字列や数値1つは使えません。',
+  'python:table_columns_not_list': '表の列名(columns)は文字列のリストにしてください。',
+  'python:table_rows_not_list': '表の行(rows)は行(リスト)のリストにしてください。',
   reference_not_allowed: 'SQLが承認されていないテーブル・参照先を使用しています。',
   table_function_not_allowed: 'SQLが許可されていないテーブル関数を使用しています。',
   function_not_allowed: 'SQLが禁止された関数を使用しています。',
@@ -259,11 +267,12 @@ function onProviderChange() {
   confirmSelection()
 }
 function onModelChange() { confirmSelection() }
-const statusLabel = computed(() => ({ awaiting_method: '分析案の承認待ち', awaiting_data: 'データ範囲の承認待ち', data_approved: 'データ範囲承認済み・未実行' })[plan.value?.status] || '')
+const statusLabel = computed(() => ({ awaiting_method: '分析案の承認待ち', awaiting_data: 'データ範囲の承認待ち', data_approved: plan.value?.execution ? 'データ範囲承認済み・実行依頼あり' : 'データ範囲承認済み・未実行' })[plan.value?.status] || '')
 const formatNumber = value => value == null ? '未確認' : Number(value).toLocaleString('ja-JP')
 const formatDate = value => value?.replace('T', ' ').slice(0, 19) || ''
 
 function resetPlan() {
+  if (executionActive.value) return
   generation += 1
   plan.value = null
   error.value = ''
@@ -279,7 +288,7 @@ watch([purpose, dateFrom, dateTo, provider, model], () => {
   externalAccepted.value = false
 }, { flush: 'sync' })
 watch(() => props.request, (request) => {
-  if (!request) return
+  if (!request || executionActive.value) return
   resetPlan()
   // 検索結果や会話履歴は受け取らず、質問文と起点だけを画面内で引き継ぐ。
   purpose.value = request.question || ''
@@ -416,6 +425,12 @@ function generateCode() {
   // 通信失敗でも使い回さず、再生成には必ず新しい送信確認が必要。
   clearCodeConfirmations()
   return perform('code-generate', () => api.aiAnalysis.generateCode(target.id, data))
+}
+function refreshWrapper() {
+  if (!canRefreshWrapper.value || !window.confirm('外枠を更新し、現在の試行とコード承認を破棄しますか？ AIは呼びません。再試行・再承認が必要です。')) return
+  const target = { id: plan.value.id, revision: plan.value.revision }
+  clearCodeConfirmations()
+  return perform('code-refresh-wrapper', () => api.aiAnalysis.refreshWrapper(target.id, { revision: target.revision }))
 }
 function trialCode() {
   if (!canTrial.value) return

@@ -3,9 +3,11 @@ from rest_framework.routers import DefaultRouter
 
 from ai.views import AIChatView, AIConversationViewSet, AITranscribeView
 from ai.views import AIAnalysisCodegenApproveView, AIAnalysisCodegenPreviewView, AIAnalysisCodegenReleaseView, AIAnalysisCodegenTrialView, AIAnalysisCodegenView
+from ai.views import AIAnalysisCodegenRefreshWrapperView
 from ai.views import AIAnalysisApproveView, AIAnalysisExternalPreviewView, AIAnalysisOptionsView, AIAnalysisPlansView, AIAnalysisPlanView, AIAnalysisPreviewView
 from ai.config.views import AIAnalysisExecutionPolicyView, AICrossScreenAccessPolicyViewSet, AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
+from ai.analysis_execution_views import AIAnalysisExecuteView, AIAnalysisExecutionOptionsView, AIAnalysisJobView, AIAnalysisJobCancelView, AIAnalysisRunsView
 
 router = DefaultRouter()
 router.register(r'ai-search-configs', AISearchConfigViewSet, basename='aisearchconfig')
@@ -17,6 +19,11 @@ router.register(r'ai/settings/knowledge-documents', AIKnowledgeDocumentViewSet, 
 router.register(r'ai/settings/cross-screen-access', AICrossScreenAccessPolicyViewSet, basename='ai-cross-screen-access')
 
 urlpatterns = [
+    path('ai/analysis/execution-options/', AIAnalysisExecutionOptionsView.as_view(), name='ai-analysis-execution-options'),
+    path('ai/analysis/plans/<uuid:plan_id>/execute/', AIAnalysisExecuteView.as_view(), name='ai-analysis-execute'),
+    path('ai/analysis/jobs/<uuid:job_id>/', AIAnalysisJobView.as_view(), name='ai-analysis-job'),
+    path('ai/analysis/jobs/<uuid:job_id>/cancel/', AIAnalysisJobCancelView.as_view(), name='ai-analysis-job-cancel'),
+    path('ai/analysis/runs/', AIAnalysisRunsView.as_view(), name='ai-analysis-runs'),
     path('', include(router.urls)),
     path('ai/chat/', AIChatView.as_view(), name='ai-chat'),
     path('ai/transcribe/', AITranscribeView.as_view(), name='ai-transcribe'),
@@ -31,6 +38,7 @@ urlpatterns = [
     path('ai/analysis/plans/<uuid:plan_id>/codegen/trial/', AIAnalysisCodegenTrialView.as_view(), name='ai-analysis-codegen-trial'),
     path('ai/analysis/plans/<uuid:plan_id>/codegen/approve/', AIAnalysisCodegenApproveView.as_view(), name='ai-analysis-codegen-approve'),
     path('ai/analysis/plans/<uuid:plan_id>/codegen/release/', AIAnalysisCodegenReleaseView.as_view(), name='ai-analysis-codegen-release'),
+    path('ai/analysis/plans/<uuid:plan_id>/codegen/refresh-wrapper/', AIAnalysisCodegenRefreshWrapperView.as_view(), name='ai-analysis-codegen-refresh-wrapper'),
     path('ai/settings/data-policy/', AIDataPolicyView.as_view(), name='ai-data-policy'),
     path('ai/settings/analysis-execution-policy/', AIAnalysisExecutionPolicyView.as_view(), name='ai-analysis-execution-policy'),
     path('ai/settings/sql-dictionary/', AISQLDictionaryView.as_view(), name='ai-sql-dictionary'),

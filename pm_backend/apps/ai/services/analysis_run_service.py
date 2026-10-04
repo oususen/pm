@@ -56,6 +56,13 @@ REASON_TEXT = {
     'plan_expired': '分析案の有効期限が切れました。',
     'user_cancelled': '利用者が実行を中止しました。',
     'heartbeat_lost': '生存確認が途切れました。実行が停止したとは断定できないため、状態不明として記録します。',
+    'worker_unknown': '分析専用ワーカーの生存確認が失敗しました。状態不明です。',
+    'execution_state_unavailable': '実行状態の保持先との通信が失敗しました。',
+    'execution_failed': '実行を開始・継続できませんでした。',
+    'history_failed': '実行履歴の保存に失敗したため、結果を返しません。',
+    'result_too_large': '結果の容量上限を超えました。',
+    'result_invalid': '結果の形式が正しくありません。グラフの横軸(x)は値のリストで、各系列の値の個数をxと同じにしてください。',
+    'child_exit_nonzero': 'Pythonの実行に失敗しました。出力関数の引数の型・個数やコードを確認してください。',
 }
 GENERIC_REASON_TEXT = '失敗しました。詳細は理由コードを参照してください。'
 
@@ -209,6 +216,8 @@ def _container_cleanup(launcher):
     """
     if not launcher or 'cleanup' not in launcher:
         return 'unconfirmed'
+    if launcher['cleanup'].get('state') == 'not_started':
+        return 'not_started'
     return 'closed' if (launcher['cleanup'] or {}).get('ok') else 'pending'
 
 
@@ -256,7 +265,7 @@ def outcome_from_exception(exc):
     progress = getattr(exc, 'progress', None) or {}
     stopped = isinstance(exc, ExecutionStopped)
     return {
-        'status': 'failed', 'reason': exc.reason if stopped else 'unexpected_error',
+        'status': 'cancelled' if stopped and exc.reason == 'user_cancelled' else 'failed', 'reason': exc.reason if stopped else 'unexpected_error',
         'detail': reason_text(exc.reason if stopped else 'unexpected_error'),
         # 送信を始める前に止めた場合だけ、コンテナは作られていない。送信後は、開始・削除を確認できないため未確認とする
         'cleanup': {**(getattr(exc, 'cleanup', None) or {}), 'container': 'unconfirmed' if progress.get('transmit_started') else 'not_started'},
@@ -286,7 +295,7 @@ def finish_run(run, outcome, tracker=None):
         tracker.finalize(write)
 
 
-def run_and_record(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
+def run_and_record(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS, control=None, on_started=None, on_cleanup_done=None):
     """履歴を保存しながら、承認済みの分析を実行する。
 
     開始行を保存できなければ実行しない。確定に失敗した場合は、結果を返さず、元の結果を含むHistoryErrorを送出する。
@@ -303,8 +312,15 @@ def run_and_record(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_
     tracker = CleanupTracker(run.pk)
     result, error = None, None
     try:
+        if on_started is not None:
+            on_started(run.pk)
+        def notify(status):
+            tracker.notify(status)
+            if on_cleanup_done is not None:
+                on_cleanup_done(status)
+        args = {'control': control} if control is not None else {}
         result = execute_approved_analysis(
-            plan['proposal'], run.approved_counts, bundle.executed_code, policy, deadlines, chunk_rows, on_cleanup_done=tracker.notify)
+            plan['proposal'], run.approved_counts, bundle.executed_code, policy, deadlines, chunk_rows, on_cleanup_done=notify, **args)
         outcome = outcome_from_result(result)
     except Exception as exc:
         error, outcome = exc, outcome_from_exception(exc)
@@ -324,9 +340,9 @@ def run_and_record(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_
 
 
 def record_not_run(user, plan, status, reason, policy):
-    """実行を始める前に終わった場合(期限切れ・中止)を、履歴へ残す。コードは作られていないため、ハッシュはNULLとする。"""
-    if status not in ('expired', 'cancelled'):
-        raise ValueError('statusはexpiredまたはcancelledです。')
+    """実行前の期限切れ・中止・検証失敗を記録する。実行コードを組み立てないためハッシュはNULL。"""
+    if status not in ('expired', 'cancelled', 'failed'):
+        raise ValueError('statusはexpired・cancelled・failedです。')
     proposal = plan['proposal']
     now = datetime.now()
     try:
@@ -369,4 +385,5 @@ def serialize_run(run):
         'sent_at': run.sent_at.isoformat() if run.sent_at else None,
         'loaded_at': run.loaded_at.isoformat() if run.loaded_at else None,
         'finished_at': run.finished_at.isoformat() if run.finished_at else None,
+        'seconds': {key: getattr(run, key) for key in ('fetch_seconds', 'transfer_seconds', 'launcher_seconds', 'container_load_seconds', 'python_seconds')},
     }

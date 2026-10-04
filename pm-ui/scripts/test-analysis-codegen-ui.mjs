@@ -15,8 +15,8 @@ const template = compileTemplate({ source: parsed.descriptor.template.content, f
   id: 'codegen-ui-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
 const exposed = 'plan,busy,error,codePreview,codeSendAccepted,codeAccepted,codeStateFresh,codeInFlight,canGenerate,canTrial,canApproveCode,trialPassed,hasCode,prepareCodePreview,generateCode,trialCode,approveCode,releaseCodegen,refresh,resetPlan'
-const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit'].includes(name))
-const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window',
+const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll'].includes(name))
+const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisExecution',
   `${parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')}\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code
   .replace(/import \{([^}]+)\} from "vue"/, (_, imports) => `const {${imports.replace(/ as /g, ':')}} = Vue`)
@@ -50,18 +50,40 @@ async function setup(provider = 'openrouter') {
     approveCode: async () => ({ data: { ...generated(provider), revision: 7, codegen_state: { ...generated(provider).codegen_state, status: 'code_approved' },
       codegen: { ...generated(provider).codegen, status: 'code_approved', code_approved_at: '2026-10-04T12:01:00' } } }),
     releaseCodegen: async () => ({ data: { ...dataPlan(provider), revision: 9, codegen_state: { status: 'failed', attempts: 2, max_attempts: 4, inflight_state: null } } }),
+    refreshWrapper: async () => ({ data: { ...generated(provider), revision: 10, codegen_state: { ...generated(provider).codegen_state, wrapper_outdated: false }, codegen: { ...generated(provider).codegen, trial: null } } }),
   }
   const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => {
     calls.push([name, ...args]); return methods[name](...args)
   }])) }
   const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, () => props, fn => { mount = fn }, fn => { unmount = fn }, api,
-    { confirm: text => { confirms.push(text); return consent.value } }))
+    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>分析実行の専用画面</section>' }))
   await mount()
   state.plan.value = dataPlan(provider)
   calls.length = 0
   return { state, props, methods, responses, calls, confirms, consent, unmount, stop: () => scope.stop() }
 }
 const mutationCalls = fixture => fixture.calls.filter(call => call[0] !== 'getPlan')
+
+test('外枠の明示更新はAI生成APIを呼ばず旧確認を破棄。閲覧専用・実行中・未確認は禁止', async () => {
+  const f = await setup()
+  try {
+    f.state.plan.value = generated()
+    f.state.plan.value.codegen_state.wrapper_outdated = true
+    f.state.codeAccepted.value = true
+    assert.equal(f.state.canRefreshWrapper.value, true)
+    await f.state.refreshWrapper()
+    assert.equal(f.calls.length, 1)
+    assert.equal(f.calls[0][0], 'refreshWrapper')
+    assert.equal(f.state.codeAccepted.value, false)
+    assert.equal(f.state.trialPassed.value, false)
+    f.state.plan.value = generated(); f.state.plan.value.codegen_state.wrapper_outdated = true
+    for (const change of [() => { f.props.canEdit = false }, () => { f.state.codeStateFresh.value = false }, () => { f.state.executionActive.value = true }]) {
+      f.props.canEdit = true; f.state.codeStateFresh.value = true; f.state.executionActive.value = false
+      change(); await f.state.refreshWrapper()
+      assert.equal(f.calls.length, 1)
+    }
+  } finally { f.stop() }
+})
 
 test('社外送信は全文確認後のみ。同時クリックでも1回、確認コードを消費する', async () => {
   const f = await setup()
@@ -415,7 +437,7 @@ test('画面破棄・分析案作り直し後に、遅れて返る送信確認�
   } finally { f.stop() }
 })
 
-test('VueテンプレートのSSRはコードをエスケープし、承認後も実行ボタンを無効にする', async () => {
+test('VueテンプレートのSSRはコードをエスケープし、実行専用画面を接続する', async () => {
   const f = await setup()
   try {
     f.state.plan.value = generated()
@@ -424,20 +446,20 @@ test('VueテンプレートのSSRはコードをエスケープし、承認後�
     const generatedHTML = await html()
     assert.ok(generatedHTML.includes('&lt;script&gt;alert(1)&lt;/script&gt;'))
     assert.equal(generatedHTML.includes('<script>'), false)
-    assert.match(generatedHTML, /<button disabled[^>]*>分析を実行/)
+    assert.ok(generatedHTML.includes('分析実行の専用画面'))
     assert.ok(generatedHTML.includes('SQLを試行'))
     f.state.plan.value.codegen_state.status = 'code_approved'
     const approvedHTML = await html()
     assert.ok(approvedHTML.includes('コード承認済み・分析未実行'))
-    assert.match(approvedHTML, /<button disabled[^>]*>分析を実行/)
+    assert.ok(approvedHTML.includes('分析実行の専用画面'))
   } finally { f.stop() }
 })
 
 // 公開する操作一覧が変わったら、意図せず実行APIを追加していないかも確認する。
-test('コード生成用APIの5経路を接続し、分析のexecuteは追加しない', () => {
+test('コード生成用APIの5経路と後半の実行APIを接続する', () => {
   const client = readFileSync(new URL('../src/api/client.js', import.meta.url), 'utf8')
   const block = client.slice(client.indexOf('  aiAnalysis: {'), client.indexOf('  aiConversations: {'))
   for (const endpoint of ['codegen/preview/', 'codegen/`', 'codegen/trial/', 'codegen/approve/', 'codegen/release/']) assert.ok(block.includes(endpoint))
-  assert.equal(block.includes('/execute/'), false)
+  assert.equal(block.includes('/execute/'), true)
   for (const name of exposed.split(',')) assert.ok(names.includes(name))
 })

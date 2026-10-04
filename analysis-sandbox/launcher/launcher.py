@@ -16,6 +16,9 @@ import itertools
 import json
 import math
 import os
+import re
+import secrets
+import socket
 import struct
 import subprocess
 import threading
@@ -215,17 +218,20 @@ class StageClock:
     launcherが自分の時計で、状態ごとの時間を積算する。
     """
 
-    def __init__(self, transfer_started, deadlines, python_seconds):
+    def __init__(self, transfer_started, deadlines, python_seconds, control=None):
         self._lock = threading.Lock()
         self.used = {'transfer': 0.0, 'load': 0.0}
         self.state, self.since = 'transfer', transfer_started
         self.deadlines, self.python_seconds = deadlines, python_seconds
+        self.control = control
 
     def switch(self, name, now):
         with self._lock:
             if self.state in self.used:
                 self.used[self.state] += now - self.since
             self.state, self.since = name, now
+            if self.control is not None:
+                self.control.stage = name
 
     def violation(self, now):
         with self._lock:
@@ -274,6 +280,38 @@ def evaluate(stdout, state, kill_reason, overflow):
 _LOCK = threading.Lock()
 _ACTIVE = set()  # このlauncherが、いま実行中のジョブ用コンテナ名。掃除の対象にしない。
 _PENDING_CLEANUP = set()  # 削除に失敗したコンテナ。解消するまで、新しいジョブを受け付けない(fail-closed)。
+_CONTROL_LOCK = threading.Lock()
+_CONTROL = None  # 現在または直前の1件だけ。コンテナ名をHTTP入力から受け取らない。
+
+
+class JobControl:
+    def __init__(self, job_id, token, connection):
+        self.job_id, self.token, self.connection = job_id, token, connection
+        self.cancel = threading.Event()
+        self.done = False
+        self.cleanup = None
+        self.stage = 'transfer'
+
+    def request_cancel(self):
+        with _CONTROL_LOCK:
+            if self.done:
+                return False
+            self.cancel.set()
+            # 不完全な本文の受信待ちも止める。応答の送信側は閉じない。
+            try:
+                self.connection.shutdown(socket.SHUT_RD)
+            except OSError:
+                pass
+            return True
+
+
+def find_control(job_id, token):
+    if not isinstance(token, str) or not token.isascii():
+        return None
+    with _CONTROL_LOCK:
+        if _CONTROL is not None and _CONTROL.job_id == job_id and secrets.compare_digest(_CONTROL.token, token):
+            return _CONTROL
+    return None
 
 
 def remove_container(name):
@@ -410,7 +448,7 @@ def header_from_frame(first):
         raise InvalidInput('ヘッダを解析できません。') from exc
 
 
-def run_job(source, ranges=PRODUCTION_RANGES, deadlines=None, info=None, transfer_started=None):
+def run_job(source, ranges=PRODUCTION_RANGES, deadlines=None, info=None, transfer_started=None, control=None):
     """ジョブを1つ実行する。同時に実行できるのは1件だけ。どの経路でも、実行ロックは必ず解放する。
 
     source: フレームのバイト列、またはフレームを順に返すイテレータ(HTTPでは、受信しながら返す)。
@@ -420,24 +458,28 @@ def run_job(source, ranges=PRODUCTION_RANGES, deadlines=None, info=None, transfe
         raise Busy('実行中のジョブがあります。')
     try:
         frames = iter_frames(source) if isinstance(source, (bytes, bytearray)) else iter(source)
-        return _run_locked(frames, ranges, deadlines, info, transfer_started or time.monotonic())
+        return _run_locked(frames, ranges, deadlines, info, transfer_started or time.monotonic(), control)
     finally:
         _LOCK.release()
 
 
-def _run_locked(frames, ranges, deadlines, info, transfer_started):
+def _run_locked(frames, ranges, deadlines, info, transfer_started, control=None):
     pending = retry_pending_cleanup()
     if pending:
         return {'status': 'refused', 'reason': 'cleanup_pending',
+                'cleanup': {'ok': True, 'state': 'not_started'},
                 'detail': f'前回のコンテナを削除できていないため、新しいジョブを受け付けません: {pending}'}
     try:
         first = next(frames)
     except TransferTimeout:
-        return {'status': 'failed', 'reason': 'stage_deadline_transfer', 'detail': '転送の期限内に、ヘッダを受信できませんでした。'}
+        return {'status': 'failed', 'reason': 'stage_deadline_transfer', 'detail': '転送の期限内に、ヘッダを受信できませんでした。', 'cleanup': {'ok': True, 'state': 'not_started'}}
     except (StopIteration, InvalidInput):
-        return {'status': 'refused', 'reason': 'input_invalid', 'detail': 'ヘッダを受信できません。'}
+        return {'status': 'refused', 'reason': 'input_invalid', 'detail': 'ヘッダを受信できません。', 'cleanup': {'ok': True, 'state': 'not_started'}}
+    if control is not None and control.cancel.is_set():
+        return {'status': 'failed', 'reason': 'user_cancelled', 'cleanup': {'ok': True, 'state': 'not_started'}}
     name = f'pmjob-{uuid.uuid4().hex[:16]}'
     created = False
+    creation_attempted = False
     result = None
     try:
         try:
@@ -449,12 +491,15 @@ def _run_locked(frames, ranges, deadlines, info, transfer_started):
         preflight(info)
         image_id = pinned_image_id()
         image_env = json.loads(docker('image', 'inspect', IMAGE, '--format', '{{json .Config.Env}}').stdout)
+        if control is not None and control.cancel.is_set():
+            return {'status': 'failed', 'reason': 'user_cancelled', 'cleanup': {'ok': True, 'state': 'not_started'}}
         _ACTIVE.add(name)
+        creation_attempted = True  # Dockerの応答が失われても、作成済みの可能性がある。
         docker(*create_command(name, limits))
         created = True
         verify_container(json.loads(docker('inspect', name).stdout)[0], limits, image_id, image_env)
         deadlines = {**STAGE_DEADLINES, **(deadlines or {})}
-        clock = StageClock(transfer_started, deadlines, limits['python_seconds'])
+        clock = StageClock(transfer_started, deadlines, limits['python_seconds'], control)
         process = subprocess.Popen(['docker', 'start', '-a', '-i', name], stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         sink, feed_state = {'data': b'', 'overflow': False}, {'error': None}
@@ -482,6 +527,10 @@ def _run_locked(frames, ranges, deadlines, info, transfer_started):
             thread.start()
         kill_reason = None
         while process.poll() is None:
+            if control is not None and control.cancel.is_set():
+                kill_reason = 'user_cancelled'
+                docker('kill', name, check=False)
+                break
             violation = None if sink['overflow'] else clock.violation(time.monotonic())
             if sink['overflow'] or violation:
                 kill_reason = violation
@@ -513,13 +562,16 @@ def _run_locked(frames, ranges, deadlines, info, transfer_started):
         result = {'status': 'refused', 'reason': 'isolation_unavailable', 'detail': str(exc)}
     finally:
         cleanup_ok = True
-        if created:
+        if creation_attempted:
             cleanup_ok = remove_container(name)
             if not cleanup_ok:
                 _PENDING_CLEANUP.add(name)
         _ACTIVE.discard(name)
     # 後始末の成否は、結果と一緒に返す(実行履歴へ残す)。削除できなかった場合は、解消するまで新しいジョブを受け付けない。
-    result['cleanup'] = {'ok': cleanup_ok}
+    cleanup = {'ok': cleanup_ok, 'state': 'not_started' if not creation_attempted else ('closed' if cleanup_ok else 'unconfirmed')}
+    result['cleanup'] = cleanup
+    if control is not None and control.cancel.is_set():
+        result = {'status': 'failed', 'reason': 'user_cancelled', 'cleanup': cleanup}
     return result
 
 
@@ -545,17 +597,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 中止で呼出し側が閉じた場合。削除状態は制御窓口に保持済みで、結果の再送はしない。
 
     def do_GET(self):
+        if self.path.startswith('/v1/jobs/'):
+            control = find_control(self.path[len('/v1/jobs/'):], self.headers.get('X-Analysis-Control', ''))
+            if control is None:
+                return self._send(404, {'reason': 'not_found'})
+            return self._send(200, {'done': control.done, 'cleanup': control.cleanup, 'stage': control.stage})
         if self.path != '/v1/health':
             return self._send(404, {'detail': 'not found'})
         try:
-            self._send(200, {'status': 'ready', **preflight()})
+            self._send(200, {'status': 'ready', 'busy': _LOCK.locked() or bool(_PENDING_CLEANUP), **preflight()})
         except IsolationUnavailable as exc:
             self._send(503, {'status': 'refused', 'reason': 'isolation_unavailable', 'detail': str(exc)})
 
@@ -563,7 +623,14 @@ class Handler(BaseHTTPRequestHandler):
     transfer_deadline = STAGE_DEADLINES['transfer']
 
     def do_POST(self):
+        global _CONTROL
         started = time.monotonic()
+        if self.path.startswith('/v1/jobs/') and self.path.endswith('/cancel'):
+            control = find_control(self.path[len('/v1/jobs/'):-len('/cancel')], self.headers.get('X-Analysis-Control', ''))
+            if control is None:
+                return self._send(404, {'reason': 'not_found'})
+            accepted = control.request_cancel()
+            return self._send(202 if accepted else 409, {'accepted': accepted, 'done': control.done, 'cleanup': control.cleanup})
         if self.path != '/v1/jobs':
             return self._send(404, {'detail': 'not found'})
         try:
@@ -571,16 +638,46 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             length = 0
         if not 0 < length <= MAX_REQUEST_BYTES:
-            return self._send(413, {'status': 'refused', 'reason': 'request_size', 'detail': '本文の大きさが不正です。'})
+            return self._send(413, {'status': 'refused', 'reason': 'request_size', 'detail': '本文の大きさが不正です。', 'cleanup': {'ok': True, 'state': 'not_started'}})
+        control = None
+        job_id, token = self.headers.get('X-Analysis-Job'), self.headers.get('X-Analysis-Control')
+        if job_id is not None or token is not None:
+            try:
+                valid = str(uuid.UUID(job_id)) == job_id and re.fullmatch('[0-9a-f]{64}', token or '')
+            except (ValueError, TypeError):
+                valid = False
+            if not valid:
+                return self._send(400, {'reason': 'control_invalid', 'cleanup': {'ok': True, 'state': 'not_started'}})
+            with _CONTROL_LOCK:
+                if _CONTROL is not None and (not _CONTROL.done or _CONTROL.job_id == job_id):
+                    # 同じIDの再受付は、以前のジョブも未開始と誤認させない。
+                    state = (_CONTROL.cleanup or 'unconfirmed') if _CONTROL.job_id == job_id else 'not_started'
+                    return self._send(409, {'status': 'refused', 'reason': 'busy', 'cleanup': {'state': state, 'ok': state in ('closed', 'not_started')}})
+                control = JobControl(job_id, token, self.connection)
+                _CONTROL = control
         # 本文は、受信しながら1フレームずつコンテナへ流す(全体をメモリに保持しない)。結果を返したら、接続は閉じる。
         self.close_connection = True
         source = iter_http_frames(self.rfile.read1, self.connection.settimeout, length, started, self.transfer_deadline)
         try:
-            result = run_job(source, transfer_started=started)
+            result = run_job(source, transfer_started=started, control=control)
         except Busy:
-            return self._send(429, {'status': 'refused', 'reason': 'busy', 'detail': '実行中のジョブがあります。'})
+            if control is not None:
+                with _CONTROL_LOCK:
+                    control.done, control.cleanup = True, 'not_started'
+            return self._send(429, {'status': 'refused', 'reason': 'busy', 'detail': '実行中のジョブがあります。', 'cleanup': {'ok': True, 'state': 'not_started'}})
         except Exception as exc:  # 想定外の例外も、ロックを残さず、結果なしの失敗として返す
+            if control is not None:
+                with _CONTROL_LOCK:
+                    control.done, control.cleanup = True, 'unconfirmed'
             return self._send(500, {'status': 'failed', 'reason': 'launcher_error', 'detail': type(exc).__name__})
+        if control is not None:
+            with _CONTROL_LOCK:
+                if control.cancel.is_set():
+                    result = {k: v for k, v in result.items() if k != 'result'}
+                    result.update(status='failed', reason='user_cancelled')
+                cleanup = result.get('cleanup') or {}
+                control.cleanup = cleanup.get('state') or ('closed' if cleanup.get('ok') is True else 'unconfirmed')
+                control.done = True
         if result['status'] == 'ok':
             status = 200
         elif result['status'] == 'refused':

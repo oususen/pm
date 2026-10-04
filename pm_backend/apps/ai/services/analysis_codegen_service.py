@@ -50,6 +50,10 @@ SYSTEM_PROMPT = (
     '参照できるのは承認済みビューと、先のstepで作った中間テーブルだけ。システムテーブル・メタデータ関数・ファイルを読む関数は使えない。'
     'Pythonの規則: 使えるのは con.sql(問い合わせ) / con.execute(問い合わせ) / load_view(ビュー名) と、'
     'emit_table(名前, 列名のリスト, 行のリスト) / emit_chart(種類, タイトル, x, [{"name":..,"values":[..]}]) / emit_report(文章)。'
+    'emit_chartのxは値のリスト。文字列1つは不可。各系列のvaluesもxと同じ個数のリスト。'
+    'emit_tableのcolumnsは文字列のリスト、rowsは行(リスト)のリスト。'
+    '例: emit_chart("bar", "月別", ["8月", "9月"], [{"name":"数量", "values":[aug_qty, sep_qty]}])。'
+    '例: emit_table("集計", ["月", "数量"], [["8月", aug_qty], ["9月", sep_qty]])。'
     'con.sql/executeの結果は fetchall() / fetchone() / columns で読む。問い合わせはSELECT/WITH 1つだけで、データは変更できない。'
     'importできるのは json, math, datetime, decimal, statistics, collections, itertools, re だけ。ファイル・ネットワーク・OS・動的実行・'
     'アンダースコアで始まる属性は使えない。emit_* を少なくとも1回呼ぶ。グラフの種類は bar か line。'
@@ -99,7 +103,7 @@ def bundle_from_plan(plan):
         raise AnalysisError('コードの承認後に実行してください。', 409)
     bundle = make_bundle(codegen['steps'], codegen['python'], [d['view'] for d in plan['proposal']['datasets']])
     if bundle.executed_code_sha256 != codegen['executed_code_sha256'] or bundle.wrapper_version != codegen['wrapper_version']:
-        raise AnalysisError('承認したコードと、実行するコードが一致しません(外枠が更新された可能性があります)。コードを作り直して確認してください。', 409)
+        raise AnalysisError('承認したコードと、実行するコードが一致しません。外枠の更新の場合は保存済みコードの外枠を更新し、再試行・再承認してください。検査不合格なら再生成が必要です。', 409)
     return bundle
 
 
@@ -217,6 +221,7 @@ def describe_codegen(plan, now=None):
         state = 'unknown' if elapsed > inflight_limit_seconds(plan['proposal']['provider']) else 'running'
     return {
         'status': codegen.get('status', 'none'), 'attempts': codegen.get('attempts', 0), 'max_attempts': MAX_GENERATIONS,
+        'wrapper_outdated': bool(codegen.get('wrapper_version') and codegen['wrapper_version'] != WRAPPER_VERSION),
         'inflight_state': state,
         'inflight_message': ('生成中、またはプロセスが中断した可能性があります(状態不明)。自動の再送・期限の延長は行いません。'
                              '解除は、明示の操作だけです。') if state == 'unknown' else None,
@@ -332,6 +337,35 @@ def generate(owner_id, plan_id, revision, confirmation=None):
 
 # ---- 試行実行(実DBなし。空のテーブルでSQLだけを、隔離コンテナで確認する) ----
 
+def refresh_wrapper(owner_id, plan_id, revision):
+    """本人の明示操作で保存済みコードを新外枠へ移す。AIを呼ばず、旧試行・承認は破棄する。"""
+    store = AnalysisPlanStore()
+    plan = _plan_for_codegen(store, plan_id, owner_id, revision)
+    codegen = _codegen(plan)
+    if codegen.get('status') not in ('generated', 'code_approved') or codegen.get('inflight'):
+        raise AnalysisError('更新できる保存済みコードがありません。', 409)
+    if plan.get('execution'):
+        # 実行中や後始末未確認のコードを更新しない。既存ジョブの状態を直接照合する。
+        from ai.services.analysis_job_service import JobStore, TERMINAL, _cleanup_complete
+        job = JobStore().raw(plan['execution']['job_id'])
+        if job['owner_id'] != owner_id or job['status'] not in TERMINAL or not _cleanup_complete(job['cleanup']):
+            raise AnalysisError('実行・後始末の完了確認後に外枠を更新してください。', 409)
+    views = [d['view'] for d in plan['proposal']['datasets']]
+    bundle = make_bundle(codegen['steps'], codegen['python'], views)
+    if bundle.sql_sha256 != codegen.get('sql_sha256') or bundle.python_sha256 != codegen.get('python_sha256'):
+        raise AnalysisError('保存済みSQL・Pythonのハッシュが一致しません。コードを再生成してください。', 409)
+    reasons = validate_generated(bundle.steps, bundle.python, views)
+    if reasons:
+        raise AnalysisError('保存済みコードが新しい検査に合格しません。コードを再生成してください。', 409)
+    if codegen.get('wrapper_version') == WRAPPER_VERSION:
+        raise AnalysisError('外枠は更新済みです。', 409)
+    def apply(current):
+        current['codegen'].update(status='generated', executed_code_sha256=bundle.executed_code_sha256,
+                                  wrapper_version=WRAPPER_VERSION, trial=None)
+        current['codegen'].pop('code_approved_at', None)
+    return store.update(plan_id, owner_id, revision, apply)
+
+
 def run_trial(owner_id, plan_id, revision):
     store = AnalysisPlanStore()
     plan = _plan_for_codegen(store, plan_id, owner_id, revision)
@@ -385,6 +419,10 @@ def approve_code(owner_id, plan_id, revision, executed_code_sha256):
     plan = _plan_for_codegen(store, plan_id, owner_id, revision)
     codegen = _codegen(plan)
     trial = codegen.get('trial') or {}
+    if codegen.get('status') in ('generated', 'code_approved'):
+        bundle = make_bundle(codegen['steps'], codegen['python'], [d['view'] for d in plan['proposal']['datasets']])
+        if codegen.get('wrapper_version') != WRAPPER_VERSION or codegen.get('executed_code_sha256') != bundle.executed_code_sha256:
+            raise AnalysisError('外枠が更新されています。保存済みコードの外枠を更新し、再試行してください。', 409)
     if codegen.get('status') != 'generated' or trial.get('status') != 'passed' or trial.get('executed_code_sha256') != codegen.get('executed_code_sha256'):
         raise AnalysisError('試行に合格したコードだけを承認できます。試行が未実施・未検証・不合格のコードは承認できません。', 409)
     if not isinstance(executed_code_sha256, str) or not constant_time_compare(executed_code_sha256, codegen['executed_code_sha256']):

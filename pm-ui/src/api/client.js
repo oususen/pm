@@ -209,6 +209,11 @@ export default {
     transcribe(formData) { return client.post('/ai/transcribe/', formData) },
   },
   aiAnalysis: {
+    executionOptions() { return client.get('/ai/analysis/execution-options/') },
+    execute(id, data) { return client.post(`/ai/analysis/plans/${id}/execute/`, data) },
+    getJob(id) { return client.get(`/ai/analysis/jobs/${id}/`) },
+    cancelJob(id) { return client.post(`/ai/analysis/jobs/${id}/cancel/`, {}) },
+    runs(params) { return client.get('/ai/analysis/runs/', { params }) },
     options() { return client.get('/ai/analysis/options/') },
     externalPreview(data) { return client.post('/ai/analysis/external-preview/', data) },
     createPlan(data) { return client.post('/ai/analysis/plans/', data) },
@@ -220,6 +225,7 @@ export default {
     trialCode(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/trial/`, data) },
     approveCode(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/approve/`, data) },
     releaseCodegen(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/release/`, data) },
+    refreshWrapper(id, data) { return client.post(`/ai/analysis/plans/${id}/codegen/refresh-wrapper/`, data) },
   },
   aiConversations: {
     list(params) { return client.get('/ai/conversations/', { params }) },
