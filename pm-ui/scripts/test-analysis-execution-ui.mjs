@@ -77,6 +77,21 @@ test('失敗だけ状態行・理由が同じ赤のクラス。固定文は維�
     }
   } finally { f.stop() }
 })
+test('古い専用ワーカーの503は受付拒否。固定の再起動案内だけを表示し状態不明にしない', async () => {
+  const f = await setup()
+  try {
+    f.methods.execute = async () => { throw { response: { status: 503, data: { reason: 'worker_stale', detail: 'SECRET-internal-version' } } } }
+    await f.state.execute()
+    assert.equal(f.state.error.value, '専用ワーカーを再起動してください。')
+    assert.equal(f.state.uncertain.value, false)
+    assert.equal(f.state.fresh.value, true)
+    assert.equal(f.state.job.value, null)
+    const text = await html(f)
+    assert.ok(text.includes('専用ワーカーを再起動してください。'))
+    assert.equal(text.includes('SECRET'), false)
+    assert.equal(f.calls.filter(([name]) => name === 'execute').length, 1)
+  } finally { f.stop() }
+})
 test('結果形式の固定文・未知理由の汎用文、日時のローカル整形をSSRで確認', async () => {
   const f = await setup()
   try {

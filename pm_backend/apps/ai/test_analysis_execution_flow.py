@@ -37,6 +37,8 @@ class ExecutionFlowTests(TransactionTestCase):
         self.prefix.start()
         self.addCleanup(self.prefix.stop)
         self.user = get_user_model().objects.create(username='analysis-flow-test')
+        from accounts.models import UserPermission
+        UserPermission.objects.create(user=self.user, resource='ai.analysis', can_edit=True)
         AIAnalysisExecutionPolicy.objects.create(plan_cache_ttl_minutes=5, max_memory_mb=512, max_cpu_cores=1, max_execution_seconds=30)
         self.store, self.factory = jobs.JobStore(), APIRequestFactory()
         self.counts = approved_counts()

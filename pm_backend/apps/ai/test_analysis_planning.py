@@ -228,7 +228,8 @@ class AnalysisPlanningTest(SimpleTestCase):
                               (AIAnalysisPreviewView, [])]:
             request = factory.post('/', payload, format='json')
             force_authenticate(request, user=user)
-            response = view.as_view()(request, plan_id=self.plan['id'])
+            with patch('ai.analysis_permissions._has_resource_permission', return_value=True):
+                response = view.as_view()(request, plan_id=self.plan['id'])
             self.assertEqual(response.status_code, 400)
         with patch('ai.views.create_plan') as create:
             response = AIAnalysisPlansView.as_view()(factory.post('/', {}, format='json'))

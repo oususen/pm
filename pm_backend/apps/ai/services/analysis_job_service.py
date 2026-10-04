@@ -27,6 +27,9 @@ from ai.models import AIAnalysisRun
 from ai.services.analysis_codegen_service import bundle_from_plan
 from ai.services.analysis_execution_service import ExecutionStopped, launcher_endpoint
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
+from ai.services.analysis_worker_identity import (
+    current_code_version, ensure_jst_clock, worker_registration, worker_version_matches,
+)
 from ai.services.analysis_run_service import (
     HEARTBEAT_SECONDS, STALE_SECONDS, HistoryError, reason_text, record_not_run, run_and_record,
     _container_cleanup,
@@ -39,6 +42,15 @@ TERMINAL = ('success', 'failed', 'cancelled', 'expired')
 PUBLIC_FIELDS = ('id', 'plan_id', 'revision', 'status', 'reason', 'detail', 'created_at', 'finished_at',
                  'run_id', 'scope', 'counts', 'cleanup', 'result', 'result_expires_at', 'executed_code_sha256')
 _PROCESS_LOCKS = []  # プロセス終了まで保持。Redis再起動で旧ワーカーとの二重実行を許さない。
+# モジュール読込み時の版を固定する。heartbeatで新しいファイルの版を名乗らない。
+_LOADED_CODE_VERSION = current_code_version()
+
+
+class WorkerStaleError(AnalysisError):
+    reason = 'worker_stale'
+
+    def __init__(self):
+        super().__init__('専用ワーカーを再起動してください。', 503)
 
 
 def acquire_worker_lock(namespace):
@@ -99,6 +111,12 @@ class JobStore:
     def key(self, job_id):
         return self.prefix + str(job_id)
 
+    def worker_current(self, raw):
+        try:
+            return worker_version_matches(raw, current_code_version())
+        except OSError:
+            return False  # 現行版を確認できない場合も実行しない。
+
     def raw(self, job_id):
         raw = self.client.get(self.key(job_id))
         if raw is None:
@@ -148,6 +166,8 @@ class JobStore:
                 worker = pipe.get(self.worker_key)
                 if not worker:
                     raise AnalysisError('分析専用ワーカーが起動していません。実行していません。', 503)
+                if not self.worker_current(worker):
+                    raise WorkerStaleError()
                 job_id = str(uuid4())
                 plan = deepcopy(plan)
                 plan['revision'] += 1
@@ -400,8 +420,16 @@ def reconcile_cleanup(store, job_id):
 def worker_loop(stop=None):
     """管理コマンドから明示起動する。Webサーバー・本番の起動処理には組み込まない。"""
     execution_enabled()
+    if settings.USE_TZ or settings.TIME_ZONE != 'Asia/Tokyo':
+        raise AnalysisError('専用ワーカーの時刻設定をJST・naiveにしてください。', 503)
+    try:
+        ensure_jst_clock()
+    except ValueError:
+        raise AnalysisError('専用ワーカーの時刻帯をJSTに設定してください。', 503) from None
+    if _LOADED_CODE_VERSION != current_code_version():
+        raise WorkerStaleError()
     stop = stop or threading.Event()
-    store, worker = JobStore(), uuid4().hex
+    store, worker = JobStore(), worker_registration(uuid4().hex, _LOADED_CODE_VERSION)
     process_lock = acquire_worker_lock(store.prefix)
     try:
         host, port = launcher_endpoint()

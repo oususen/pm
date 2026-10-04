@@ -13,6 +13,9 @@ from ai.views import AIAnalysisPlanView, AIAnalysisPlansView, AIAnalysisApproveV
 
 class CodegenStateAPITests(SimpleTestCase):
     def setUp(self):
+        permissions = patch('ai.analysis_permissions._has_resource_permission', return_value=True)
+        permissions.start()
+        self.addCleanup(permissions.stop)
         self.user = SimpleNamespace(pk=987002, is_authenticated=True)
         self.plan = {'id': 'test-plan', 'owner_id': self.user.pk, 'revision': 3, 'status': 'data_approved',
                      'proposal': {'provider': 'deepseek'}}

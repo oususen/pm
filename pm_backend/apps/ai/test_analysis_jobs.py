@@ -29,7 +29,7 @@ class JobTests(SimpleTestCase):
         self.addCleanup(self.prefix_patch.stop)
         self.store = jobs.JobStore()
         self.user = SimpleNamespace(pk=987006, is_authenticated=True)
-        self.worker = uuid4().hex
+        self.worker = jobs.worker_registration(uuid4().hex, jobs.current_code_version())
         self.store.client.set(self.store.worker_key, self.worker, ex=60)
         self.policy_patch = patch.object(jobs, 'get_analysis_execution_policy', return_value=POLICY)
         self.policy_patch.start()
@@ -297,6 +297,12 @@ class CancellationTests(SimpleTestCase):
 
 
 class ExecutionAPITests(SimpleTestCase):
+    def setUp(self):
+        # 入力・既存処理の回帰。実効権限はtest_analysis_permissionsで実モデルを検証する。
+        permissions = patch('ai.analysis_permissions._has_resource_permission', return_value=True)
+        permissions.start()
+        self.addCleanup(permissions.stop)
+
     @override_settings(ALLOWED_HOSTS=['testserver'])
     def test_history_is_paginated_and_owner_or_admin_ui_selection_is_forwarded(self):
         user = SimpleNamespace(pk=44, is_authenticated=True)

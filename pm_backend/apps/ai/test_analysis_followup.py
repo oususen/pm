@@ -280,6 +280,7 @@ class HistoryPermissions(TestCase):
 
     def test_real_users_superuser_no_profile_individual_grant_view_only_and_parent(self):
         user = get_user_model().objects.create(username='no-profile')
+        UserPermission.objects.create(user=user, resource='ai.analysis', can_view=True)
         admin = get_user_model().objects.create(username='admin', is_superuser=True)
         self.assertEqual(self.request(admin)[0].status_code, 200)
         response, visible = self.request(user)
@@ -294,6 +295,7 @@ class HistoryPermissions(TestCase):
 
     def test_permission_lookup_failure_is_403_not_all_history(self):
         user = get_user_model().objects.create(username='lookup-failed')
+        UserPermission.objects.create(user=user, resource='ai.analysis', can_view=True)
         with patch.object(views, '_has_resource_permission', side_effect=OperationalError('SECRET')):
             response, visible = self.request(user)
         self.assertEqual(response.status_code, 403); visible.assert_not_called()

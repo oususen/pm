@@ -28,12 +28,15 @@ function Get-State {
 import json, sys
 import redis
 from dotenv import dotenv_values
+sys.path.insert(0, sys.argv[2] + '/apps')
+from ai.services.analysis_worker_identity import current_code_version, worker_version_matches
 r = redis.Redis.from_url(dotenv_values(sys.argv[1]).get('AI_ANALYSIS_REDIS_URL'), decode_responses=True)
 k = 'pm:ai:analysis:execution:'
-print(json.dumps({'worker': bool(r.get(k + 'worker')), 'active': r.get(k + 'active')}))
+worker = r.get(k + 'worker')
+print(json.dumps({'worker': bool(worker), 'worker_stale': bool(worker) and not worker_version_matches(worker, current_code_version()), 'active': r.get(k + 'active')}))
 '@ | Set-Content -Path $script -Encoding UTF8
     try {
-        $lines = & $python $script $envFile 2>$null
+        $lines = & $python $script $envFile $backend 2>$null
         $json = ($lines | Where-Object { $_ -like '{*' } | Select-Object -Last 1)
         if ($json) { return $json | ConvertFrom-Json }
     } catch { }
@@ -96,10 +99,12 @@ function Show-Status {
     if ($null -eq $state) {
         Write-Host '  専用ワーカー   : 確認できません(Redisに接続できません)' -ForegroundColor Yellow
     } else {
-        if ($state.worker) { Write-Host '  専用ワーカー   : 動作中' -ForegroundColor Green }
+        if ($state.worker_stale) { Write-Host '  専用ワーカー   : 版が古いか確認できません。専用ワーカーを再起動してください。' -ForegroundColor Yellow }
+        elseif ($state.worker) { Write-Host '  専用ワーカー   : 動作中' -ForegroundColor Green }
         else { Write-Host '  専用ワーカー   : 停止中(起動してください)' -ForegroundColor Red }
         if ($state.active) { Write-Host "  実行枠         : 使用中 (ジョブID $($state.active))" -ForegroundColor Yellow }
-        else { Write-Host '  実行枠         : 空き(実行できます)' -ForegroundColor Green }
+        elseif ($state.worker -and -not $state.worker_stale) { Write-Host '  実行枠         : 空き(ワーカーの版は一致しています)' -ForegroundColor Green }
+        else { Write-Host '  実行枠         : 空き(専用ワーカーの起動・再起動が必要です)' -ForegroundColor Yellow }
     }
     return @{ Health = $health; State = $state }
 }
@@ -134,6 +139,10 @@ function Start-Dev {
     # 3. 専用ワーカー
     $state = Get-State
     if ($state -and $state.worker) {
+        if ($state.worker_stale) {
+            Write-Host '  専用ワーカーの版が古いか確認できません。実行・後始末の状態を確認して、専用ワーカーを再起動してください。' -ForegroundColor Yellow
+            return
+        }
         Write-Host '  専用ワーカー: すでに動いています。' -ForegroundColor Green
     } else {
         if (Get-WorkerProcesses) {

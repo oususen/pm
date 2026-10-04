@@ -157,8 +157,9 @@ async function operation(name, call, apply, message) {
   try { const response = await call(); if (!disposed && current === epoch) { apply(response.data); if (['execute', 'refresh', 'cancel'].includes(name)) fresh.value = true; if (['execute', 'refresh'].includes(name)) uncertain.value = false } }
   catch (e) {
     if (!disposed && current === epoch) {
-      const rejected = name === 'execute' && [400, 403, 404, 409, 410, 429].includes(e.response?.status)
-      error.value = rejected ? '実行は受け付けられませんでした。分析案・実行基盤の状態を確認してください。' : message
+      const staleWorker = name === 'execute' && e.response?.data?.reason === 'worker_stale'
+      const rejected = name === 'execute' && (staleWorker || [400, 403, 404, 409, 410, 429].includes(e.response?.status))
+      error.value = staleWorker ? '専用ワーカーを再起動してください。' : (rejected ? '実行は受け付けられませんでした。分析案・実行基盤の状態を確認してください。' : message)
       if (['execute', 'refresh', 'cancel'].includes(name)) fresh.value = rejected
       if (name === 'execute') {
         uncertain.value = !rejected

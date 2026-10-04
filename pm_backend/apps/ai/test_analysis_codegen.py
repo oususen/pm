@@ -740,7 +740,8 @@ class ApiWiringTest(CodegenBase):
         from rest_framework.test import APIRequestFactory, force_authenticate
         request = APIRequestFactory().post('/x/', body, format='json')
         force_authenticate(request, user=SimpleNamespace(pk=OWNER, is_authenticated=True))
-        return view.as_view()(request, plan_id=plan['id'])
+        with patch('ai.analysis_permissions._has_resource_permission', return_value=True):
+            return view.as_view()(request, plan_id=plan['id'])
 
     def test_endpoints_validate_input_and_reach_the_services(self):
         from ai import views

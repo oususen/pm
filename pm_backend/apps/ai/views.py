@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ai.config.service import get_data_policy
+from ai.analysis_permissions import CanUseAIAnalysis
 from ai.models import AIConversation
 from ai.serializers import AIConversationListSerializer, AIConversationSerializer
 from ai.services.chat_service import AIChatAPIView, _has_resource_permission
@@ -25,35 +26,35 @@ logger = logging.getLogger('production')
 
 
 class AIAnalysisOptionsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def get(self, request):
         return Response(planning_options())
 
 
 class AIAnalysisPlansView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request):
         return Response(_codegen_response(create_plan(request.user.pk, request.data)), status=201)
 
 
 class AIAnalysisExternalPreviewView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request):
         return Response(external_send_preview(request.user.pk, request.data))
 
 
 class AIAnalysisPlanView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def get(self, request, plan_id):
         return Response(_codegen_response(AnalysisPlanStore().get(str(plan_id), request.user.pk)))
 
 
 class AIAnalysisApproveView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         if not isinstance(request.data, dict) or set(request.data) != {'revision', 'stage'}:
@@ -63,7 +64,7 @@ class AIAnalysisApproveView(APIView):
 
 
 class AIAnalysisPreviewView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         if not isinstance(request.data, dict) or set(request.data) != {'revision'}:
@@ -84,7 +85,7 @@ def _only(data, keys, message):
 
 class AIAnalysisCodegenPreviewView(APIView):
     """コード生成で送る内容の確認(送信しない)。外部AIの場合は、確認コードを返す。"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         _only(request.data, {'revision'}, '対象の版のみを指定してください。')
@@ -93,7 +94,7 @@ class AIAnalysisCodegenPreviewView(APIView):
 
 class AIAnalysisCodegenView(APIView):
     """SQL・Pythonの生成。外部AIは、確認コードが必要。"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         if not isinstance(request.data, dict) or not {'revision'} <= set(request.data) <= {'revision', 'confirmation'}:
@@ -104,7 +105,7 @@ class AIAnalysisCodegenView(APIView):
 
 class AIAnalysisCodegenTrialView(APIView):
     """試行実行(実DBなし。空のテーブルでSQLだけを確認する)。分析の実行ではなく、履歴には残さない。"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         _only(request.data, {'revision'}, '対象の版のみを指定してください。')
@@ -113,7 +114,7 @@ class AIAnalysisCodegenTrialView(APIView):
 
 
 class AIAnalysisCodegenApproveView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         _only(request.data, {'revision', 'executed_code_sha256'}, '対象の版と、確認したコードのハッシュのみを指定してください。')
@@ -123,7 +124,7 @@ class AIAnalysisCodegenApproveView(APIView):
 
 class AIAnalysisCodegenRefreshWrapperView(APIView):
     """AIを呼ばずに外枠を更新する。本人の明示操作で旧試行・承認を破棄する。"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         _only(request.data, {'revision'}, '対象の版のみを指定してください。')
@@ -132,7 +133,7 @@ class AIAnalysisCodegenRefreshWrapperView(APIView):
 
 class AIAnalysisCodegenReleaseView(APIView):
     """状態不明の「生成中」を、明示の操作で解除する(生成回数は戻さず、有効期限は延長しない)。"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
         _only(request.data, {'revision'}, '対象の版のみを指定してください。')

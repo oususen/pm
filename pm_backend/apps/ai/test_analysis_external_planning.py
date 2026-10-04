@@ -208,7 +208,7 @@ class ExternalPlanningTest(SimpleTestCase):
     def test_http_preview_and_unconfirmed_create(self):
         factory = APIRequestFactory()
         data = {**PAYLOAD, 'provider': 'deepseek'}
-        with patch('ai.services.analysis_llm.urlopen') as urlopen:
+        with patch('ai.analysis_permissions._has_resource_permission', return_value=True), patch('ai.services.analysis_llm.urlopen') as urlopen:
             request = factory.post('/api/ai/analysis/external-preview/', data, format='json')
             force_authenticate(request, user=SimpleNamespace(pk=3, is_authenticated=True))
             response = AIAnalysisExternalPreviewView.as_view()(request)
