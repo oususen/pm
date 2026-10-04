@@ -211,7 +211,7 @@ export default {
   aiAnalysis: {
     executionOptions() { return client.get('/ai/analysis/execution-options/') },
     execute(id, data) { return client.post(`/ai/analysis/plans/${id}/execute/`, data) },
-    getJob(id) { return client.get(`/ai/analysis/jobs/${id}/`) },
+    getJob(id, config) { return client.get(`/ai/analysis/jobs/${id}/`, config) },
     cancelJob(id) { return client.post(`/ai/analysis/jobs/${id}/cancel/`, {}) },
     runs(params) { return client.get('/ai/analysis/runs/', { params }) },
     options() { return client.get('/ai/analysis/options/') },

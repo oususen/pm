@@ -10,7 +10,7 @@
       <ProductionAIDataAnalysis :can-analyze="canAnalyze" @analyze="openAnalysis" />
     </div>
     <div v-if="canAnalyze && visited.analysis" v-show="activeTab === 'analysis'" id="ai-panel-analysis" role="tabpanel" aria-labelledby="ai-tab-analysis">
-      <AIAnalysis :request="analysisRequest" :can-edit="canEditAnalysis" :can-view-all="canViewAllAnalysisRuns" />
+      <AIAnalysis :request="analysisRequest" :can-edit="canEditAnalysis" :can-view-all="canViewAllAnalysisRuns" :visible="activeTab === 'analysis'" />
     </div>
     <p v-if="!tabs.length">社内AIの閲覧権限がありません。</p>
   </section>

@@ -5,6 +5,8 @@ import test from 'node:test'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import { useAnalysisErrorNotices } from '../src/composables/analysisErrorNotices.js'
+import { AnalysisErrorBanner } from './analysis-error-banner-test-helper.mjs'
 
 const filename = new URL('../src/views/ai/AIAnalysis.vue', import.meta.url)
 const source = readFileSync(filename, 'utf8')
@@ -15,8 +17,8 @@ const template = compileTemplate({ source: parsed.descriptor.template.content, f
   id: 'codegen-ui-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
 const exposed = 'plan,busy,error,codePreview,codeSendAccepted,codeAccepted,codeStateFresh,codeInFlight,canGenerate,canTrial,canApproveCode,trialPassed,hasCode,prepareCodePreview,generateCode,trialCode,approveCode,releaseCodegen,refresh,resetPlan'
-const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll'].includes(name))
-const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisExecution',
+const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll', 'visible'].includes(name))
+const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisExecution', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   `${parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')}\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code
   .replace(/import \{([^}]+)\} from "vue"/, (_, imports) => `const {${imports.replace(/ as /g, ':')}} = Vue`)
@@ -56,13 +58,34 @@ async function setup(provider = 'openrouter') {
     calls.push([name, ...args]); return methods[name](...args)
   }])) }
   const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, () => props, fn => { mount = fn }, fn => { unmount = fn }, api,
-    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>分析実行の専用画面</section>' }))
+    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>分析実行の専用画面</section>' }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount()
   state.plan.value = dataPlan(provider)
   calls.length = 0
   return { state, props, methods, responses, calls, confirms, consent, unmount, stop: () => scope.stop() }
 }
 const mutationCalls = fixture => fixture.calls.filter(call => call[0] !== 'getPlan')
+
+test('分析エラーは帯・見出し・閉じるボタンを表示し、本文をエスケープ。閉じる／次の操作で消える', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    assert.equal((await html()).includes('analysis-error-banner'), false)
+    f.state.error.value = '<img src=x onerror=SECRET>'
+    let text = await html()
+    assert.ok(text.includes('analysis-error-banner')); assert.ok(text.includes('エラー</strong>'))
+    assert.ok(text.includes('aria-label="エラーを閉じる"')); assert.ok(text.includes('role="alert"'))
+    assert.ok(text.includes('&lt;img')); assert.equal(text.includes('<img'), false)
+    f.state.errorNotices.notices.value[0].dismiss()
+    assert.equal(f.state.error.value, ''); assert.equal((await html()).includes('analysis-error-banner'), false)
+    f.state.error.value = '以前のエラー'
+    let resolve
+    f.methods.generateCode = () => new Promise(done => { resolve = done })
+    const pending = f.state.generateCode()
+    assert.equal(f.state.error.value, '')
+    resolve({ data: generated('qwen') }); await pending
+  } finally { f.stop() }
+})
 
 test('外枠の明示更新はAI生成APIを呼ばず旧確認を破棄。閲覧専用・実行中・未確認は禁止', async () => {
   const f = await setup()

@@ -1,16 +1,22 @@
 <template>
   <section class="execution">
+    <AnalysisErrorBanner v-if="errorNotices.renderBanner" :notices="errorNotices.notices.value" />
     <h2>4. 分析の実行・結果</h2>
     <p>{{ availability?.notice || '実行基盤の状態を確認してください。' }}</p>
     <button :disabled="!!busy" @click="checkAvailability">実行基盤の状態を確認</button>
     <button :disabled="!canExecute" @click="execute">分析を実行</button>
     <p v-if="!canEdit">閲覧のみです。実行・中止にはAI分析の編集権限が必要です。</p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <div v-if="!job && plan?.execution?.job_id">
+      <p>{{ monitor.message.value || '実行情報を確認しています。まだ実行状態・後始末は確認できていません。' }}</p>
+      <button :disabled="!!busy" @click="refreshJob">実行状態・結果を再取得</button>
+    </div>
     <template v-if="job">
       <p role="status" :class="{ 'execution-failed': job.status === 'failed' }">実行: {{ statusLabel }} / 開始受付: {{ formatDate(job.created_at) }} / 終了: {{ formatDate(job.finished_at) || '未確認' }}</p>
       <p v-if="jobDetail" :class="{ 'execution-failed': job.status === 'failed' }">{{ jobDetail }}</p>
       <small>この実行のコード全体SHA-256: {{ job.executed_code_sha256 }}</small>
       <p v-if="plan?.codegen?.executed_code_sha256 && plan.codegen.executed_code_sha256 !== job.executed_code_sha256">現在表示されているSQL・Pythonは、この実行のコードとは異なります。上の実行ハッシュで区別してください。</p>
+      <p v-if="monitor.message.value" class="monitor-message">{{ monitor.message.value }}</p>
+      <p v-else>進行中の実行状態だけを自動更新します（暫定3秒間隔・上限20分）。実行・中止・再送は自動で行いません。</p>
       <button :disabled="!!busy" @click="refreshJob">実行状態・結果を再取得</button>
       <button :disabled="!canCancel" @click="cancel">実行を中止</button>
       <p v-if="job.status === 'cancel_requested'">中止を要求しました。停止・削除の完了はまだ確認していません。</p>
@@ -20,6 +26,12 @@
       <p>実行時の期間: {{ job.scope?.date_from }} ～ {{ job.scope?.date_to }} / 条件: {{ job.scope?.conditions }}</p>
       <p v-for="dataset in job.scope?.datasets || []" :key="dataset.view">{{ dataset.view }} / 取得行数: {{ job.counts?.[dataset.view] ?? '未確認' }}行</p>
       <p>行数は数量の合計ではありません。入荷はqty、出荷はquantityの集計結果を数量として確認してください。</p>
+      <div :class="{ 'completion-notice': !!completionText, 'completion-success': monitor.notice.value?.status === 'success', 'completion-failed': monitor.notice.value?.status === 'failed', 'completion-attention': !!completionText && !['success', 'failed'].includes(monitor.notice.value?.status), 'completion-pulse': monitor.notice.value?.status === 'success' && !monitor.acknowledged.value }">
+        <div class="completion-live" aria-live="polite" aria-atomic="true">
+          <strong v-if="completionText">{{ completionText }}</strong>
+        </div>
+        <button v-if="monitor.notice.value?.status === 'success' && !monitor.acknowledged.value" @click="monitor.acknowledge">確認しました</button>
+      </div>
       <template v-if="job.status === 'success' && job.result">
         <p>結果保持期限: {{ formatDate(job.result_expires_at) }}。結果本文はRedisに一時保持し、履歴には保存しません。</p>
         <article v-for="(table, index) in job.result.tables || []" :key="`table-${index}`">
@@ -49,7 +61,6 @@
     <label v-if="canViewAll"><input v-model="includeAll" type="checkbox" :disabled="!!busy" @change="loadHistory(1)">全利用者の履歴（管理者表示）</label>
     <button :disabled="!!busy" @click="loadHistory(1)">履歴を取得</button>
     <p>履歴にはコード・結果・明細の本文はありません。保持期限後の結果は再表示できません。</p>
-    <p v-if="historyError" role="alert">{{ historyError }}</p>
     <article v-for="run in history.results" :key="run.id">
       <h3>実行{{ run.id }} / {{ run.status_label }} / {{ run.executed_by }}</h3>
       <p>{{ run.started_at }} ～ {{ run.finished_at || '未確定' }} / {{ run.detail }}</p>
@@ -67,16 +78,33 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '../../api/client'
+import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
+import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
+import { createAnalysisStatusMonitor } from '../../composables/analysisStatusMonitor'
 
-const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canViewAll: Boolean, blocked: Boolean })
+const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canViewAll: Boolean, blocked: Boolean, visible: { type: Boolean, default: true } })
 const emit = defineEmits(['active', 'accepted'])
 const job = ref(null), busy = ref(''), error = ref(''), availability = ref(null)
 const history = ref({ results: [], count: 0, next: null, previous: null }), historyError = ref(''), historyLoaded = ref(false)
+const errorNotices = useAnalysisErrorNotices([['execution', error], ['history', historyError]])
 const page = ref(1), includeAll = ref(false), fresh = ref(true)
 const uncertain = ref(false)
 let disposed = false, epoch = 0
+const monitor = createAnalysisStatusMonitor({
+  request: async (id, signal) => (await api.aiAnalysis.getJob(id, { signal })).data,
+  apply: data => { job.value = data; fresh.value = true; uncertain.value = false },
+  manualError: () => { fresh.value = false; error.value = '実行状態・結果を取得できません。期限切れの場合は履歴を確認してください。' },
+  canRead: () => !busy.value,
+})
+const completionText = computed(() => {
+  const notification = monitor.notice.value
+  if (!notification) return ''
+  return ({ success: '結果が出ました（成功）。', failed: '実行に失敗しました。理由と後始末を確認してください。',
+    cancelled: notification.cleanupComplete ? '中止されました。後始末の完了を確認しました。' : '中止状態になりましたが、後始末は未完了／未確認です。中止完了とは扱いません。',
+    expired: '実行は期限切れになりました。履歴と後始末を確認してください。', unknown: '実行は状態不明です。停止・後始末完了とは断定できません。' })[notification.status] || ''
+})
 const terminal = ['success', 'failed', 'cancelled', 'expired']
-const active = computed(() => uncertain.value || (!!job.value && (!terminal.includes(job.value.status) || !cleanupComplete.value)))
+const active = computed(() => uncertain.value || (!job.value && !!props.plan?.execution?.job_id) || (!!job.value && (!terminal.includes(job.value.status) || !cleanupComplete.value)))
 const cleanupComplete = computed(() => ['db_connection', 'container'].every(k => ['closed', 'not_started'].includes(job.value?.cleanup?.[k])))
 const canExecute = computed(() => props.canEdit && !props.blocked && !busy.value && fresh.value && !active.value && availability.value?.ready && props.plan?.status === 'data_approved' && props.plan?.codegen?.status === 'code_approved' && props.plan.codegen.trial?.status === 'passed' && props.plan.codegen.trial.executed_code_sha256 === props.plan.codegen.executed_code_sha256)
 const canCancel = computed(() => props.canEdit && !busy.value && fresh.value && !!job.value && !terminal.includes(job.value.status) && job.value.status !== 'cancel_requested')
@@ -113,11 +141,15 @@ function geometry(chart) {
   return { min, max, baseline: y(0), series, segments, nonNumeric, barWidth: stride * 0.8 / Math.max(1, chart.series.length) }
 }
 watch(active, value => emit('active', value), { immediate: true })
-watch(() => props.plan?.id, () => { epoch++; busy.value = ''; job.value = null; fresh.value = true; uncertain.value = false; error.value = '' })
-watch(() => props.plan?.execution?.job_id, id => { if (id && id !== job.value?.id) refreshJob(id) }, { immediate: true })
+watch(() => props.plan?.id, () => { epoch++; monitor.track(null); busy.value = ''; job.value = null; fresh.value = true; uncertain.value = false; error.value = '' }, { flush: 'sync' })
+watch(() => [job.value?.id || props.plan?.execution?.job_id, job.value?.status], ([id, status]) => monitor.track(id, status ?? null), { immediate: true, flush: 'sync' })
+watch(() => props.plan?.execution?.job_id, id => {
+  if (id && id !== job.value?.id) { job.value = null; monitor.track(id) }
+}, { flush: 'sync' })
+watch(() => props.visible, visible => monitor.setVisible(visible !== false), { immediate: true, flush: 'sync' })
 watch(() => props.canViewAll, allowed => { if (!allowed && includeAll.value) { includeAll.value = false; history.value = { results: [] }; loadHistory(1) } })
-onBeforeUnmount(() => { disposed = true; epoch++ })
-onMounted(checkAvailability)
+onBeforeUnmount(() => { disposed = true; epoch++; monitor.dispose() })
+onMounted(() => { monitor.mount(typeof document === 'undefined' ? null : document); return checkAvailability() })
 async function operation(name, call, apply, message) {
   if (busy.value) return
   const current = epoch
@@ -145,11 +177,14 @@ function execute() {
 function refreshJob(id = job.value?.id || props.plan?.execution?.job_id) {
   // @clickのMouseEventをIDとして送らない。
   if (typeof id !== 'string') id = job.value?.id || props.plan?.execution?.job_id
-  if (!id) return
-  return operation('refresh', () => api.aiAnalysis.getJob(id), data => { job.value = data }, '実行状態・結果を取得できません。期限切れの場合は履歴を確認してください。')
+  if (!id || busy.value) return
+  error.value = ''; monitor.acknowledge()
+  monitor.track(id, job.value?.status ?? null)
+  return monitor.read(true)
 }
 function cancel() {
   if (!canCancel.value || !window.confirm('実行を中止しますか？ 途中結果は採用しません。後始末の確認まで中止完了とは扱いません。')) return
+  monitor.invalidate() // 中止より前に開始したGETの古い応答で状態を戻さない。
   return operation('cancel', () => api.aiAnalysis.cancelJob(job.value.id), data => { job.value = data }, '中止の受付を確認できません。状態を再取得してください。')
 }
 async function loadHistory(target = 1) {
@@ -168,4 +203,11 @@ async function loadHistory(target = 1) {
 <style scoped>
 .execution { border-top: 1px solid #ccc; margin-top: 20px; } button { margin: 4px; padding: 8px; } article { margin: 16px 0; padding: 10px; background: #f5f9f8; }
 .scroll { overflow: auto; } table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #ccd; padding: 5px; text-align: left; } pre { white-space: pre-wrap; overflow-wrap: anywhere; } svg { width: 100%; max-height: 300px; } [role=alert], .execution-failed { color: #a22; }
+.completion-notice { border: 2px solid currentColor; padding: 10px; margin: 12px 0; }
+.completion-success { color: #126d63; background: #edf6f5; }
+.completion-failed { color: #a22; background: #fff0ee; }
+.completion-attention { color: #6f5314; background: #fff8e6; }
+.completion-pulse { animation: completion-emphasis 1.5s ease-in-out infinite; }
+@keyframes completion-emphasis { 50% { box-shadow: 0 0 0 3px #168779; } }
+@media (prefers-reduced-motion: reduce) { .completion-pulse { animation: none; } }
 </style>

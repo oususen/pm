@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { computed, effectScope, ref, watch } from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import { useAnalysisErrorNotices } from '../src/composables/analysisErrorNotices.js'
 
 const filename = new URL('../src/views/ai/AIAnalysis.vue', import.meta.url)
 const text = readFileSync(filename, 'utf8')
@@ -13,7 +14,7 @@ assert.deepEqual(compileTemplate({ source: parsed.descriptor.template.content, f
   id: 'analysis-test', compilerOptions: { bindingMetadata: script.bindings } }).errors, [])
 const source = parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')
 const exposed = 'purpose,dateFrom,dateTo,provider,model,externalPreview,externalAccepted,plan,prepareExternalPreview,createPlan,resetPlan'
-const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window',
+const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'useAnalysisErrorNotices',
   `${source}\nreturn {${exposed}}`)
 
 async function setup(provider = 'openrouter', model = 'test:free', paidConsent = true) {
@@ -30,7 +31,7 @@ async function setup(provider = 'openrouter', model = 'test:free', paidConsent =
     createPlan: async data => { calls.push(['create', data]); return { data: { status: 'awaiting_method' } } },
   } }
   const state = scope.run(() => create(ref, computed, watch, () => ({ canEdit: true, request: null }),
-    fn => { mount = fn }, () => {}, api, { confirm: message => { confirms.push(message); return paidConsent } }))
+    fn => { mount = fn }, () => {}, api, { confirm: message => { confirms.push(message); return paidConsent } }, useAnalysisErrorNotices))
   await mount()
   state.purpose.value = '王崇栓がクボタの出荷傾向を見る'
   state.dateFrom.value = '2026-09-01'

@@ -3,7 +3,7 @@
     <header><h1>AI分析</h1><span>分析案・承認</span></header>
     <p class="notice">分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します。テンプレート保存は未対応です。{{ options?.notice || '' }}</p>
     <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認、コード生成・SQL試行・コード承認・状態不明の解除には「AI分析」の編集権限が必要です。</p>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <AnalysisErrorBanner :notices="errorNotices.notices.value" />
     <label for="analysis-purpose">分析目的</label>
     <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
     <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
@@ -118,7 +118,7 @@
         <button v-if="canEdit" :disabled="!!busy || executionActive" @click="resetPlan">目的・期間を変更して作り直す</button>
       </div>
     </section>
-    <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
+    <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
     <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
   </main>
 </template>
@@ -127,8 +127,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '../../api/client'
 import AIAnalysisExecution from './AIAnalysisExecution.vue'
+import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
+import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 
-const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean })
+const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean, visible: { type: Boolean, default: true } })
 const executionActive = ref(false)
 const purpose = ref('')
 const source = ref('')
@@ -140,6 +142,7 @@ const model = ref('')
 const plan = ref(null)
 const busy = ref('')
 const error = ref('')
+const errorNotices = useAnalysisErrorNotices([['analysis', error]], true)
 const externalPreview = ref(null)
 const externalAccepted = ref(false)
 const codePreview = ref(null)
