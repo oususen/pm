@@ -17,119 +17,164 @@
         </select>
       </label>
     </header>
-    <p class="notice">分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します。テンプレート保存は未対応です。{{ options?.notice || '' }}</p>
     <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認、コード生成・SQL試行・コード承認・状態不明の解除には「AI分析」の編集権限が必要です。</p>
     <AnalysisErrorBanner :notices="errorNotices.notices.value" />
-    <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
     <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
-    <label for="analysis-purpose">分析目的</label>
-    <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-    <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
-    <div class="period">
-      <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
-      <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
-    </div>
-    <p>対象: 入荷実績・出荷実績の指定期間の全登録行。追加の絞り条件・資料取込み、生産・仕損・中断・残業は未対応です。</p>
-    <template v-if="!plan">
-      <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
-      <section v-if="selectedProvider?.external && externalPreview" class="dataset">
-        <h2>社外送信前の確認</h2>
-        <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
-        <p>期間: {{ externalPreview.date_from }} ～ {{ externalPreview.date_to }}</p>
-        <p class="external-purpose">送信する目的文: {{ externalPreview.purpose }}</p>
-        <p>この目的文と期間、公開ビューの説明を送信します。確認だけでは社外AIへ送信しません。</p>
-        <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">名称ではなく登録コードになっており、未登録の人名・社名・機密を含まないことを確認しました</label>
-      </section>
-      <button v-if="!selectedProvider?.external || externalPreview" type="button" :disabled="!canCreate || (selectedProvider?.external && !externalAccepted)" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : selectedProvider?.external ? '確認した内容を社外AIへ送って分析案を作成' : '分析案を作成' }}</button>
-    </template>
-    <section v-if="plan" class="plan">
-      <div class="plan-heading"><h2>{{ plan.proposal.title }}</h2><span>{{ statusLabel }}</span></div>
-      <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }} / 作成AI: {{ planProviderLabel }}</small>
-      <p v-if="plan.template" class="warning" role="status">テンプレート{{ plan.template.id }}（版{{ plan.template.version }}・{{ plan.template.name }}）から作成した分析案です。{{ plan.template.status === 'pending_admin' ? 'システム管理者未承認のテンプレートです。内容を確認してください。' : '正式なテンプレートです。' }}AIは使いません。保存済みのSQL・Pythonは、現行の外枠に組み直しています。</p>
-      <h3>1. 分析目的・手順</h3>
-      <p>目的: {{ plan.proposal.purpose }}</p>
-      <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
-      <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
-      <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
-      <template v-if="plan.template && hasCode">
-        <h4>保存済みのSQL・Python（承認前から確認できます。試行・コード承認は、承認後に行います）</h4>
-        <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
-        <pre>{{ codegen.python }}</pre>
-      </template>
-      <p v-if="plan.method_approved_at">手順承認日時: {{ formatDate(plan.method_approved_at) }}</p>
-      <button v-if="plan.status === 'awaiting_method'" :disabled="!canEdit || !!busy" @click="approve('method')">分析案・手順を承認</button>
-      <template v-if="plan.status !== 'awaiting_method'">
-        <h3>2. 必要なデータ範囲</h3>
-        <p>期間: {{ plan.proposal.date_from }} ～ {{ plan.proposal.date_to }} / 条件: {{ plan.proposal.conditions }}</p>
-        <div v-for="dataset in plan.proposal.datasets" :key="dataset.view" class="dataset">
-          <p>ビュー: {{ dataset.view }} / 必要フィールド: {{ dataset.fields.join('、') }}</p>
-          <p v-if="plan.preview">対象行数: {{ formatNumber(plan.preview.datasets.find(item => item.view === dataset.view)?.rows) }}行</p>
-        </div>
-        <small>id: 重複・欠落の確認用に、分析用コンテナへ必ず送ります。社外AIには送りません。</small>
-        <p>追加資料: なし（資料の取込みは未実装）</p>
-        <template v-if="plan.preview">
-          <p>対象行数の合計: {{ formatNumber(plan.preview.total_rows) }}行 / 取得行数の上限: {{ formatNumber(plan.preview.max_fetch_rows) }}行</p>
-          <small>件数確認日時: {{ formatDate(plan.preview.counted_at) }}。数量の合計ではありません。実行時には最新スナップショットで再確認が必要です。</small>
-          <p v-if="plan.preview.over_limit" class="error">対象が上限を超えました。一部だけを採用せず、期間を絞って分析案を作り直してください。</p>
-        </template>
-        <div v-if="plan.status === 'awaiting_data'" class="actions">
-          <button :disabled="!canEdit || !!busy" @click="preview">{{ busy === 'preview' ? '件数を確認中…' : '対象件数を確認' }}</button>
-          <button :disabled="!canEdit || !!busy || !plan.preview || plan.preview.over_limit" @click="approve('data')">データ範囲を承認</button>
-        </div>
-        <p v-if="plan.data_approved_at" role="status">データ承認日時: {{ formatDate(plan.data_approved_at) }}。{{ plan.execution ? '実行依頼済みです。実行状態・結果は下の実行欄で確認してください。' : '承認は完了しましたが、分析はまだ実行していません。' }}</p>
-        <section v-if="plan.status === 'data_approved'" class="codegen">
-          <h3>3. SQL・Pythonの生成と承認</h3>
-          <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
-          <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
-          <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
-          <p v-if="codeInFlight" class="warning">{{ codeState?.inflight_state === 'unknown' ? '生成が中断した可能性があります（状態不明）。停止したとは断定できません。' : 'コードを生成中です。' }} 自動再送・有効期限の延長はしません。「分析案の状態を再取得」で最新状態を確認してください。</p>
-          <button v-if="codeState?.inflight_state === 'unknown'" :disabled="!canReleaseCodegen" @click="releaseCodegen">状態不明の生成を解除（回数は戻りません）</button>
-          <p v-if="plan.template">テンプレートから作成した分析案では、AIによるコード生成は行いません。現行の外枠でSQLを試行し、コードを承認してから実行します（コードを変えるときは、新しい分析として作成してください）。</p>
-          <template v-if="!codeInFlight && !plan.template">
-            <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未登録の名称・機密は自動判別できません。</p>
-            <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">コード生成で社外送信する全文を確認</button>
-            <section v-if="codeExternal && codePreview" class="dataset">
-              <h4>コード生成の社外送信前確認（まだ送信していません）</h4>
-              <p>送信先: {{ codePreview.provider }} / モデル: {{ codePreview.model }} / 生成: {{ codePreview.attempt }}回目</p>
-              <p>送らないもの: {{ codePreview.not_sent.join('、') }}</p>
-              <div v-for="(message, index) in codePreview.messages" :key="index">
-                <p>送信文 {{ index + 1 }}（{{ message.role }}）</p><pre>{{ message.content }}</pre>
-              </div>
-              <label><input v-model="codeSendAccepted" type="checkbox" :disabled="!canEdit || !!busy">置換後の全文を確認し、未登録の人名・社名・機密が残っていないことを確認しました</label>
-            </section>
-            <button v-if="!codeExternal || codePreview" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode">{{ busy === 'code-generate' ? 'SQL・Pythonを生成中…' : codeExternal ? '確認した全文を社外AIへ送ってコードを生成' : 'ローカルQwenでコードを生成' }}</button>
-            <p v-if="codeState && codeState.attempts >= codeState.max_attempts">AI生成回数の上限に達しました。試行のやり直しは生成回数に含みません。再生成が必要なら分析案を作り直してください。</p>
-          </template>
-          <p v-if="codeState?.status === 'failed'" class="error">コード生成に失敗したか、状態不明の生成を解除しました。採用できるコードはありません。再生成には新しい送信確認が必要です。</p>
-          <ul v-if="codeState?.status === 'failed' && codeFailureLabels.length" class="error"><li v-for="label in codeFailureLabels" :key="label">{{ label }}</li></ul>
-          <template v-if="hasCode">
-            <h4>生成SQL（中間テーブル作成の手順）</h4>
-            <p v-if="!codegen.steps.length">SQLの中間テーブル作成なし。</p>
-            <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
-            <h4>生成Python</h4><pre>{{ codegen.python }}</pre>
-            <small>コード全体のSHA-256: {{ codegen.executed_code_sha256 }} / 固定外枠の版: {{ codegen.wrapper_version }}</small>
-            <p v-if="codeState?.wrapper_outdated">外枠が更新されています。保存済みSQL・Pythonが新しい検査に合格すれば、AIを呼ばずに更新・再試行・再承認できます。不合格なら再生成が必要です。</p>
-            <button v-if="codeState?.wrapper_outdated" :disabled="!canRefreshWrapper" @click="refreshWrapper">保存済みコードの外枠を更新（AI生成回数は消費しません）</button>
-            <p role="status">SQL試行: {{ trialStatusLabel }}{{ codegen.trial?.at ? ` / 確認日時: ${formatDate(codegen.trial.at)}` : '' }}</p>
-            <p v-if="trialFailureLabel" class="error">{{ trialStepLabel ? `${trialStepLabel}: ` : '' }}{{ trialFailureLabel }}</p>
-            <p>試行は実DBを使わず、空のテーブルでSQLの構文・参照・中間テーブルの規則だけを確認します。Pythonは静的検査のみです。実データでの成功や分析の正しさは保証しません。試行は実行履歴に残しません。</p>
-            <button v-if="codeState?.status === 'generated'" :disabled="!canTrial" @click="trialCode">{{ busy === 'code-trial' ? 'SQLを試行中…' : 'SQLを試行（実データなし）' }}</button>
-            <template v-if="codeState?.status === 'generated'">
-              <label><input v-model="codeAccepted" type="checkbox" :disabled="!canEdit || !!busy || !trialPassed">表示したSQL・Pythonと分析目的を確認し、このコードを承認します（実行はまだ行いません）</label>
-              <button :disabled="!canApproveCode || !codeAccepted" @click="approveCode">確認したSQL・Pythonを承認</button>
-            </template>
-            <p v-if="codeState?.status === 'code_approved'" role="status">コード承認日時: {{ formatDate(codegen.code_approved_at) }}。{{ plan.execution ? 'コード承認済みです。実行状態・結果は下の実行欄で確認してください。' : 'コード承認済み・分析未実行です。' }}</p>
-          </template>
+    <div class="analysis-layout">
+      <section class="analysis-main" aria-label="実行・結果・履歴・テンプレート">
+        <section class="notes" aria-label="ご利用上の注意">
+          <button type="button" class="notes-head" :aria-expanded="notesOpen" aria-controls="notes-body" @click="notesOpen = !notesOpen">
+            <strong>ご利用上の注意</strong><em>{{ notesOpen ? '畳む' : '開く' }}</em>
+            <small v-if="!notesOpen && selectedProvider?.external">社外サービス（{{ selectedProvider.label }}）へ、分析目的・期間・公開ビューの説明を送ります</small>
+          </button>
+          <div v-show="notesOpen" id="notes-body" class="notes-body">
+            <p class="notice">分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します。{{ options?.notice || '' }}</p>
+            <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
+          </div>
         </section>
-      </template>
-      <div class="actions">
-        <button :disabled="!!busy" @click="refresh">分析案の状態を再取得</button>
-        <button v-if="canEdit" :disabled="!!busy || executionActive" @click="resetPlan">目的・期間を変更して作り直す</button>
+      <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
+      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive" @plan-created="useTemplatePlan" />
+      <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
+      </section>
+      <aside class="analysis-side" aria-label="分析の進め方">
+        <h2 class="side-title">分析の進め方</h2>
+      <section class="stage" :class="stageState(1)">
+        <button type="button" class="stage-head" :aria-expanded="isOpen(1)" aria-controls="stage-body-1" @click="toggleStage(1)">
+          <span class="stage-no">①</span><strong>分析目的</strong><em>{{ stageLabel(1) }}</em><small v-if="stageSummary(1)">{{ stageSummary(1) }}</small>
+        </button>
+        <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
+      <label for="analysis-purpose">分析目的</label>
+      <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
+      <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
+      <div class="period">
+        <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
+        <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
       </div>
-    </section>
-    <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
-    <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive" @plan-created="useTemplatePlan" />
-    <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
+      <p>対象: 入荷実績・出荷実績の指定期間の全登録行。追加の絞り条件・資料取込み、生産・仕損・中断・残業は未対応です。</p>
+      <template v-if="!plan">
+        <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
+        <section v-if="selectedProvider?.external && externalPreview" class="dataset">
+          <h2>社外送信前の確認</h2>
+          <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
+          <p>期間: {{ externalPreview.date_from }} ～ {{ externalPreview.date_to }}</p>
+          <p class="external-purpose">送信する目的文: {{ externalPreview.purpose }}</p>
+          <p>この目的文と期間、公開ビューの説明を送信します。確認だけでは社外AIへ送信しません。</p>
+          <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">名称ではなく登録コードになっており、未登録の人名・社名・機密を含まないことを確認しました</label>
+        </section>
+        <button v-if="!selectedProvider?.external || externalPreview" type="button" :disabled="!canCreate || (selectedProvider?.external && !externalAccepted)" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : selectedProvider?.external ? '確認した内容を社外AIへ送って分析案を作成' : '分析案を作成' }}</button>
+      </template>
+        </div>
+      </section>
+        <div v-if="plan" class="plan-head">
+        <div class="plan-heading"><h2>{{ plan.proposal.title }}</h2><span>{{ statusLabel }}</span></div>
+        <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }} / 作成AI: {{ planProviderLabel }}</small>
+        <p v-if="plan.template" class="warning" role="status">テンプレート{{ plan.template.id }}（版{{ plan.template.version }}・{{ plan.template.name }}）から作成した分析案です。{{ plan.template.status === 'pending_admin' ? 'システム管理者未承認のテンプレートです。内容を確認してください。' : '正式なテンプレートです。' }}AIは使いません。保存済みのSQL・Pythonは、現行の外枠に組み直しています。</p>
+        </div>
+      <section v-if="plan" class="stage" :class="stageState(2)">
+        <button type="button" class="stage-head" :aria-expanded="isOpen(2)" aria-controls="stage-body-2" @click="toggleStage(2)">
+          <span class="stage-no">②</span><strong>目的・手順</strong><em>{{ stageLabel(2) }}</em><small v-if="stageSummary(2)">{{ stageSummary(2) }}</small>
+        </button>
+        <div v-show="isOpen(2)" id="stage-body-2" class="stage-body">
+        <p>目的: {{ plan.proposal.purpose }}</p>
+        <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
+        <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
+        <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
+        <template v-if="plan.template && hasCode">
+          <h4>保存済みのSQL・Python（承認前から確認できます。試行・コード承認は、承認後に行います）</h4>
+          <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
+          <pre>{{ codegen.python }}</pre>
+        </template>
+        <p v-if="plan.method_approved_at">手順承認日時: {{ formatDate(plan.method_approved_at) }}</p>
+        <button v-if="plan.status === 'awaiting_method'" :disabled="!canEdit || !!busy" @click="approve('method')">分析案・手順を承認</button>
+        </div>
+      </section>
+      <section v-if="plan && plan.status !== 'awaiting_method'" class="stage" :class="stageState(3)">
+        <button type="button" class="stage-head" :aria-expanded="isOpen(3)" aria-controls="stage-body-3" @click="toggleStage(3)">
+          <span class="stage-no">③</span><strong>必要なデータ範囲</strong><em>{{ stageLabel(3) }}</em><small v-if="stageSummary(3)">{{ stageSummary(3) }}</small>
+        </button>
+        <div v-show="isOpen(3)" id="stage-body-3" class="stage-body">
+          <p>期間: {{ plan.proposal.date_from }} ～ {{ plan.proposal.date_to }} / 条件: {{ plan.proposal.conditions }}</p>
+          <div v-for="dataset in plan.proposal.datasets" :key="dataset.view" class="dataset">
+            <p>ビュー: {{ dataset.view }} / 必要フィールド: {{ dataset.fields.join('、') }}</p>
+            <p v-if="plan.preview">対象行数: {{ formatNumber(plan.preview.datasets.find(item => item.view === dataset.view)?.rows) }}行</p>
+          </div>
+          <small>id: 重複・欠落の確認用に、分析用コンテナへ必ず送ります。社外AIには送りません。</small>
+          <p>追加資料: なし（資料の取込みは未実装）</p>
+          <template v-if="plan.preview">
+            <p>対象行数の合計: {{ formatNumber(plan.preview.total_rows) }}行 / 取得行数の上限: {{ formatNumber(plan.preview.max_fetch_rows) }}行</p>
+            <small>件数確認日時: {{ formatDate(plan.preview.counted_at) }}。数量の合計ではありません。実行時には最新スナップショットで再確認が必要です。</small>
+            <p v-if="plan.preview.over_limit" class="error">対象が上限を超えました。一部だけを採用せず、期間を絞って分析案を作り直してください。</p>
+          </template>
+          <div v-if="plan.status === 'awaiting_data'" class="actions">
+            <button :disabled="!canEdit || !!busy" @click="preview">{{ busy === 'preview' ? '件数を確認中…' : '対象件数を確認' }}</button>
+            <button :disabled="!canEdit || !!busy || !plan.preview || plan.preview.over_limit" @click="approve('data')">データ範囲を承認</button>
+          </div>
+          <p v-if="plan.data_approved_at" role="status">データ承認日時: {{ formatDate(plan.data_approved_at) }}。{{ plan.execution ? '実行依頼済みです。実行状態・結果は実行欄で確認してください。' : '承認は完了しましたが、分析はまだ実行していません。' }}</p>
+        </div>
+      </section>
+      <section v-if="plan && plan.status === 'data_approved'" class="stage" :class="stageState(4)">
+        <button type="button" class="stage-head" :aria-expanded="isOpen(4)" aria-controls="stage-body-4" @click="toggleStage(4)">
+          <span class="stage-no">④</span><strong>SQL・Python</strong><em>{{ stageLabel(4) }}</em><small v-if="stageSummary(4)">{{ stageSummary(4) }}</small>
+        </button>
+        <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
+            <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
+            <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
+            <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
+            <p v-if="codeInFlight" class="warning">{{ codeState?.inflight_state === 'unknown' ? '生成が中断した可能性があります（状態不明）。停止したとは断定できません。' : 'コードを生成中です。' }} 自動再送・有効期限の延長はしません。「分析案の状態を再取得」で最新状態を確認してください。</p>
+            <button v-if="codeState?.inflight_state === 'unknown'" :disabled="!canReleaseCodegen" @click="releaseCodegen">状態不明の生成を解除（回数は戻りません）</button>
+            <p v-if="plan.template">テンプレートから作成した分析案では、AIによるコード生成は行いません。現行の外枠でSQLを試行し、コードを承認してから実行します（コードを変えるときは、新しい分析として作成してください）。</p>
+            <template v-if="!codeInFlight && !plan.template">
+              <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未登録の名称・機密は自動判別できません。</p>
+              <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">コード生成で社外送信する全文を確認</button>
+              <section v-if="codeExternal && codePreview" class="dataset">
+                <h4>コード生成の社外送信前確認（まだ送信していません）</h4>
+                <p>送信先: {{ codePreview.provider }} / モデル: {{ codePreview.model }} / 生成: {{ codePreview.attempt }}回目</p>
+                <p>送らないもの: {{ codePreview.not_sent.join('、') }}</p>
+                <div v-for="(message, index) in codePreview.messages" :key="index">
+                  <p>送信文 {{ index + 1 }}（{{ message.role }}）</p><pre>{{ message.content }}</pre>
+                </div>
+                <label><input v-model="codeSendAccepted" type="checkbox" :disabled="!canEdit || !!busy">置換後の全文を確認し、未登録の人名・社名・機密が残っていないことを確認しました</label>
+              </section>
+              <button v-if="!codeExternal || codePreview" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode">{{ busy === 'code-generate' ? 'SQL・Pythonを生成中…' : codeExternal ? '確認した全文を社外AIへ送ってコードを生成' : 'ローカルQwenでコードを生成' }}</button>
+              <p v-if="codeState && codeState.attempts >= codeState.max_attempts">AI生成回数の上限に達しました。試行のやり直しは生成回数に含みません。再生成が必要なら分析案を作り直してください。</p>
+            </template>
+            <p v-if="codeState?.status === 'failed'" class="error">コード生成に失敗したか、状態不明の生成を解除しました。採用できるコードはありません。再生成には新しい送信確認が必要です。</p>
+            <ul v-if="codeState?.status === 'failed' && codeFailureLabels.length" class="error"><li v-for="label in codeFailureLabels" :key="label">{{ label }}</li></ul>
+            <template v-if="hasCode">
+              <h4>生成SQL（中間テーブル作成の手順）</h4>
+              <p v-if="!codegen.steps.length">SQLの中間テーブル作成なし。</p>
+              <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
+              <h4>生成Python</h4><pre>{{ codegen.python }}</pre>
+              <small>コード全体のSHA-256: {{ codegen.executed_code_sha256 }} / 固定外枠の版: {{ codegen.wrapper_version }}</small>
+              <p v-if="codeState?.wrapper_outdated">外枠が更新されています。保存済みSQL・Pythonが新しい検査に合格すれば、AIを呼ばずに更新・再試行・再承認できます。不合格なら再生成が必要です。</p>
+              <button v-if="codeState?.wrapper_outdated" :disabled="!canRefreshWrapper" @click="refreshWrapper">保存済みコードの外枠を更新（AI生成回数は消費しません）</button>
+              </template>
+        </div>
+      </section>
+      <section v-if="plan && plan.status === 'data_approved' && hasCode" class="stage" :class="stageState(5)">
+        <button type="button" class="stage-head" :aria-expanded="isOpen(5)" aria-controls="stage-body-5" @click="toggleStage(5)">
+          <span class="stage-no">⑤</span><strong>試行・コード承認</strong><em>{{ stageLabel(5) }}</em><small v-if="stageSummary(5)">{{ stageSummary(5) }}</small>
+        </button>
+        <div v-show="isOpen(5)" id="stage-body-5" class="stage-body">
+              <template v-if="hasCode">
+              <p role="status">SQL試行: {{ trialStatusLabel }}{{ codegen.trial?.at ? ` / 確認日時: ${formatDate(codegen.trial.at)}` : '' }}</p>
+              <p v-if="trialFailureLabel" class="error">{{ trialStepLabel ? `${trialStepLabel}: ` : '' }}{{ trialFailureLabel }}</p>
+              <p>試行は実DBを使わず、空のテーブルでSQLの構文・参照・中間テーブルの規則だけを確認します。Pythonは静的検査のみです。実データでの成功や分析の正しさは保証しません。試行は実行履歴に残しません。</p>
+              <button v-if="codeState?.status === 'generated'" :disabled="!canTrial" @click="trialCode">{{ busy === 'code-trial' ? 'SQLを試行中…' : 'SQLを試行（実データなし）' }}</button>
+              <template v-if="codeState?.status === 'generated'">
+                <label><input v-model="codeAccepted" type="checkbox" :disabled="!canEdit || !!busy || !trialPassed">表示したSQL・Pythonと分析目的を確認し、このコードを承認します（実行はまだ行いません）</label>
+                <button :disabled="!canApproveCode || !codeAccepted" @click="approveCode">確認したSQL・Pythonを承認</button>
+              </template>
+              <p v-if="codeState?.status === 'code_approved'" role="status">コード承認日時: {{ formatDate(codegen.code_approved_at) }}。{{ plan.execution ? 'コード承認済みです。実行状態・結果は実行欄で確認してください。' : 'コード承認済み・分析未実行です。' }}</p>
+              </template>
+        </div>
+      </section>
+        <div v-if="plan" class="actions">
+          <button :disabled="!!busy" @click="refresh">分析案の状態を再取得</button>
+          <button v-if="canEdit" :disabled="!!busy || executionActive" @click="resetPlan">目的・期間を変更して作り直す</button>
+        </div>
+      </aside>
+    </div>
   </main>
 </template>
 
@@ -250,6 +295,46 @@ const trialStepLabel = computed(() => {
     ? (codegen.value?.steps || []).findIndex(item => item.name === step) : -1
   return index >= 0 ? `SQL手順${index + 1}（${step}）` : ''
 })
+
+// 段階の状態(pending=未、current=今、done=済)。⑥実行は、左のメインで扱う(R2で右へ移す)
+function stageState(n) {
+  const p = plan.value
+  if (n === 1) return p ? 'done' : 'current'
+  if (!p) return 'pending'
+  if (n === 2) return p.status === 'awaiting_method' ? 'current' : 'done'
+  if (n === 3) return p.status === 'awaiting_method' ? 'pending' : (p.status === 'awaiting_data' ? 'current' : 'done')
+  if (p.status !== 'data_approved') return 'pending'
+  if (n === 4) return hasCode.value ? 'done' : 'current'
+  if (!hasCode.value) return 'pending'
+  return codeState.value?.status === 'code_approved' ? 'done' : 'current'
+}
+const STAGE_LABELS = { pending: '未', current: '今', done: '済' }
+const stageLabel = n => STAGE_LABELS[stageState(n)]
+// 今の段階を開く。コードの確認のため、試行・コード承認の間は、SQL・Python(④)も開いておく。利用者が開閉した段階は、その操作を優先する
+// 左のメインの「ご利用上の注意」(利用者が畳める。外部AIへの送信の注意は、畳んだときも見出しに要点を出す)
+const notesOpen = ref(true)
+const toggledStages = ref({})
+// コードの警告(外枠が古い・最新状態を確認できない・生成中/状態不明・生成失敗)がある間は、④を畳まない(警告・更新ボタンを隠さない)
+const codeAttention = computed(() => plan.value?.status === 'data_approved' && (!!codeState.value?.wrapper_outdated || !codeStateFresh.value || codeInFlight.value || codeState.value?.status === 'failed'))
+// 外枠が古い間は、再試行・再承認のため、⑤も開く
+const wrapperOutdated = computed(() => plan.value?.status === 'data_approved' && hasCode.value && !!codeState.value?.wrapper_outdated)
+const isForcedOpen = n => (n === 4 && codeAttention.value) || (n === 5 && wrapperOutdated.value)
+const isOpen = n => isForcedOpen(n) || (n in toggledStages.value ? toggledStages.value[n] : (stageState(n) === 'current' || (n === 4 && stageState(5) === 'current')))
+function toggleStage(n) {
+  if (isForcedOpen(n)) return // 警告で強制的に開いている間は、開閉を保存しない
+  toggledStages.value = { ...toggledStages.value, [n]: !isOpen(n) }
+}
+// 折りたたんだときも分かる要約(承認日時など)
+function stageSummary(n) {
+  const p = plan.value
+  if (!p) return ''
+  if (n === 1) return p.proposal.title ? `分析案: ${p.proposal.title}` : ''
+  if (n === 2) return p.method_approved_at ? `手順承認 ${formatDate(p.method_approved_at)}` : ''
+  if (n === 3) return p.data_approved_at ? `データ承認 ${formatDate(p.data_approved_at)}` : ''
+  if (n === 4) return hasCode.value ? (codeAttention.value ? 'コード生成済み・要確認' : 'コード生成済み') : (codeAttention.value ? 'コード・要確認' : '')
+  return codeState.value?.status === 'code_approved' ? `コード承認 ${formatDate(codegen.value?.code_approved_at)}` : ''
+}
+watch(() => plan.value?.id, () => { toggledStages.value = {} })
 
 function clearCodeConfirmations() {
   codePreview.value = null
@@ -483,7 +568,32 @@ function releaseCodegen() {
 </script>
 
 <style scoped>
-.analysis-workspace { padding: 20px; max-width: 980px; margin: auto; color: #334b50; }
+.analysis-workspace { padding: 20px; max-width: 1600px; margin: auto; color: #334b50; }
+.analysis-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 440px); gap: 18px; align-items: start; }
+.analysis-main { min-width: 0; }
+.notes { border: 1px solid #d1dddd; border-radius: 8px; margin-bottom: 12px; overflow: hidden; background: #fff; }
+.notes-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 0; }
+.notes-head:not(:disabled) { background: #f4f8f8; color: #334b50; border-color: transparent; }
+.notes-head em { font-style: normal; font-size: 11px; border-radius: 10px; padding: 1px 8px; background: #e6ecef; color: #647777; }
+.notes-head small { display: inline; margin: 0; flex-basis: 100%; color: #6f5314; overflow-wrap: anywhere; }
+.notes-body { padding: 4px 12px 10px; }
+.notes-body p { margin: 6px 0; }
+.analysis-side { min-width: 0; display: grid; gap: 8px; border-left: 1px solid #e6ecef; padding-left: 16px; }
+.side-title { font-size: 13px; margin: 0; color: #81929b; letter-spacing: .5px; }
+.stage { border: 1px solid #d1dddd; border-radius: 8px; overflow: hidden; background: #fff; }
+.stage.current { border-color: #168779; box-shadow: 0 0 0 2px #16877922; }
+.stage.pending { opacity: .75; }
+.stage-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 0; }
+.stage-head:not(:disabled) { background: #f4f8f8; color: #334b50; border-color: transparent; }
+.stage-head strong { font-size: 14px; }
+.stage-head em { font-style: normal; font-size: 11px; border-radius: 10px; padding: 1px 8px; background: #e6ecef; color: #647777; }
+.stage.current .stage-head em { background: #168779; color: #fff; }
+.stage.done .stage-head em { background: #d8ebe6; color: #328476; }
+.stage-head small { display: inline; margin: 0; flex-basis: 100%; color: #81929b; overflow-wrap: anywhere; }
+.stage-no { color: #0e786d; font-weight: 700; }
+.stage-body { padding: 8px 12px 12px; overflow-wrap: anywhere; }
+.plan-head { border: 1px solid #d1dddd; border-radius: 8px; padding: 8px 12px; }
+@media (max-width: 960px) { .analysis-layout { grid-template-columns: minmax(0, 1fr); } .analysis-side { order: -1; border-left: 0; padding-left: 0; } }
 .topbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 11px; padding: 0 0 12px; margin-bottom: 12px; border-bottom: 1px solid #e6ecef; }
 .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: #0e786d; color: #fff; display: grid; place-items: center; font-size: 16px; }
 .brand-title { display: grid; gap: 1px; }
@@ -504,9 +614,7 @@ small { display: block; margin-top: 12px; color: #657b80; }
 .period, .actions, .plan-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
 .period label { margin: 0; }
 input { padding: 4px; font: inherit; }
-.plan { border: 1px solid #d1dddd; border-radius: 6px; padding: 12px; margin-top: 12px; }
-.plan h2 { font-size: 18px; margin: 0; }
-.plan h3 { font-size: 16px; margin: 14px 0 8px; }
+.plan-head h2 { font-size: 16px; margin: 0; }
 .dataset { background: #f4f8f8; padding: 1px 8px; overflow-wrap: anywhere; }
 .external-purpose { white-space: pre-wrap; }
 .error { background: #fff0ee; color: #9a362b; padding: 8px; }
@@ -515,5 +623,5 @@ select { padding: 4px; font: inherit; max-width: 100%; }
 button:not(:disabled) { border-color: #168779; color: white; background: #168779; cursor: pointer; }
 small { overflow-wrap: anywhere; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: #f4f8f8; border: 1px solid #d1dddd; font-size: 13px; }
-.codegen h4 { margin: 12px 0 6px; }
+.stage-body h4 { margin: 12px 0 6px; }
 </style>

@@ -523,3 +523,185 @@ test('ヘッダ行に、タイトル・状態のチップ・AIプロバイダ・
     assert.equal(html.split('AIプロバイダ').length - 1, 1, 'AIの選択はヘッダの1か所だけ')
   } finally { f.stop() }
 })
+
+test('右サイドに段階カード(①〜⑤)を置き、今の段階を開き、済みの段階を畳む。コード確認のため④は⑤の間も開く(R1)', async () => {
+  const f = await setup()
+  try {
+    // 分析案なし: ①が今、ほかは未
+    f.state.plan.value = null
+    let html = await htmlFor(f)
+    assert.ok(html.includes('class="analysis-layout"') && html.includes('class="analysis-side"') && html.includes('分析の進め方'))
+    assert.deepEqual([1, 2, 3, 4, 5].map(n => f.state.stageState(n)), ['current', 'pending', 'pending', 'pending', 'pending'])
+    assert.equal((html.match(/class="stage[ "]/g) || []).length, 1, '分析案がなければ①だけ')
+    // 手順の承認待ち
+    f.state.plan.value = { ...dataPlan(), status: 'awaiting_method' }
+    assert.deepEqual([1, 2, 3].map(n => f.state.stageState(n)), ['done', 'current', 'pending'])
+    assert.deepEqual([1, 2].map(n => f.state.isOpen(n)), [false, true])
+    // データ範囲の承認待ち
+    f.state.plan.value = { ...dataPlan(), status: 'awaiting_data' }
+    assert.deepEqual([2, 3].map(n => f.state.stageState(n)), ['done', 'current'])
+    // データ承認済み・コード未生成: ④が今
+    f.state.plan.value = dataPlan()
+    assert.deepEqual([3, 4, 5].map(n => f.state.stageState(n)), ['done', 'current', 'pending'])
+    // コード生成済み(試行・承認待ち): ④は済みだが、コードを確認するため開く。⑤が今
+    f.state.plan.value = generated()
+    assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['done', 'current'])
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [true, true])
+    html = await htmlFor(f)
+    assert.equal((html.match(/class="stage[ "]/g) || []).length, 5)
+    assert.ok(html.includes('SELECT SUM(quantity) FROM v_ai_shipment'))
+    // 利用者の開閉が、初期の開閉より優先される。分析案が変われば初期に戻る
+    f.state.toggleStage(4)
+    assert.equal(f.state.isOpen(4), false)
+    f.state.plan.value = { ...generated(), id: 'other-plan' }
+    await Promise.resolve()
+    assert.equal(f.state.isOpen(4), true)
+    // コード承認済み: ④⑤とも済みで畳み、要約に承認日時を出す
+    const approved = generated(); approved.codegen_state = { ...approved.codegen_state, status: 'code_approved' }
+    approved.codegen = { ...approved.codegen, status: 'code_approved', code_approved_at: '2026-10-05T11:00:00' }
+    f.state.plan.value = approved
+    assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['done', 'done'])
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [false, false])
+    assert.ok(f.state.stageSummary(5).includes('コード承認 2026-10-05 11:00:00'))
+    assert.ok((await htmlFor(f)).includes('コード承認 2026-10-05 11:00:00'))
+  } finally { f.stop() }
+})
+
+test('分析案がなければ、再取得・作り直しのボタンを出さない(元の条件)。分析案があれば出す', async () => {
+  const f = await setup()
+  try {
+    f.state.plan.value = null
+    let html = await htmlFor(f)
+    assert.equal(html.includes('分析案の状態を再取得'), false)
+    assert.equal(html.includes('目的・期間を変更して作り直す'), false)
+    f.state.plan.value = dataPlan()
+    html = await htmlFor(f)
+    assert.ok(html.includes('分析案の状態を再取得')); assert.ok(html.includes('目的・期間を変更して作り直す'))
+  } finally { f.stop() }
+})
+
+test('コードの警告がある間は、コード承認済みでも④を畳まず、利用者の開閉でも畳めない。要約に「要確認」を出す(警告を隠さない)', async () => {
+  const f = await setup()
+  try {
+    const approved = (extra = {}) => {
+      const p = generated(); p.codegen_state = { ...p.codegen_state, status: 'code_approved', ...extra }
+      p.codegen = { ...p.codegen, status: 'code_approved', code_approved_at: '2026-10-05T11:00:00' }
+      return p
+    }
+    // 通常のコード承認済み: ④⑤とも済みで畳む
+    f.state.plan.value = approved()
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [false, false])
+    assert.equal(f.state.codeAttention.value, false)
+    // 外枠が古い: ④を開き、更新の警告とボタンを見せる。畳む操作をしても開いたまま
+    f.state.plan.value = approved({ wrapper_outdated: true })
+    assert.equal(f.state.isOpen(4), true); f.state.toggleStage(4); assert.equal(f.state.isOpen(4), true)
+    assert.ok(f.state.stageSummary(4).includes('要確認'))
+    const html = await htmlFor(f)
+    assert.ok(html.includes('外枠が更新されています')); assert.ok(html.includes('保存済みコードの外枠を更新'))
+    assert.ok(html.includes('stage-head') && html.includes('コード生成済み・要確認'))
+    // 最新状態を確認できない
+    f.state.plan.value = approved(); f.state.codeStateFresh.value = false
+    assert.equal(f.state.isOpen(4), true)
+    f.state.codeStateFresh.value = true
+    assert.equal(f.state.isOpen(4), false)
+    // 生成中・状態不明、生成失敗は、④が今で開いている(警告を見せる)
+    f.state.plan.value = { ...dataPlan(), codegen_state: { status: 'generating', attempts: 1, max_attempts: 4, inflight_state: 'unknown' }, codegen: { inflight: { attempt: 1 } } }
+    assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['current', 'pending']); assert.equal(f.state.isOpen(4), true)
+    f.state.plan.value = { ...dataPlan(), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: ['response_invalid'] } }
+    assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['current', 'pending']); assert.equal(f.state.isOpen(4), true)
+    // 実行依頼済み(plan.execution)でも、コード承認済みなら④⑤は済み
+    f.state.plan.value = { ...approved(), execution: { job_id: 'job-1' } }
+    assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['done', 'done'])
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [false, false])
+  } finally { f.stop() }
+})
+
+test('①の要約にラベルを付ける(UI方針: ラベルを省略しない)', async () => {
+  const f = await setup()
+  try {
+    f.state.plan.value = dataPlan()
+    assert.equal(f.state.stageSummary(1), '分析案: 出荷分析')
+  } finally { f.stop() }
+})
+
+test('外枠が古い間は、⑤も開く。畳んだ段階は、画面では非表示(v-show)になる(開閉のテンプレートへの反映)', async () => {
+  const f = await setup()
+  try {
+    const approved = (extra = {}) => {
+      const p = generated(); p.codegen_state = { ...p.codegen_state, status: 'code_approved', ...extra }
+      p.codegen = { ...p.codegen, status: 'code_approved', code_approved_at: '2026-10-05T11:00:00' }
+      return p
+    }
+    const closed = html => (html.match(/class="stage-body" style="display:none;?"/g) || []).length
+    // 通常のコード承認済み: ①〜⑤の5枚とも畳まれ、非表示
+    f.state.plan.value = approved()
+    assert.equal(closed(await htmlFor(f)), 5)
+    // 外枠が古い: ④⑤が開く(非表示は①②③の3枚だけ)
+    f.state.plan.value = approved({ wrapper_outdated: true })
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [true, true])
+    assert.equal(closed(await htmlFor(f)), 3)
+    // コード承認の前(⑤が今)は、④⑤が開く。②③は済みで非表示
+    f.state.plan.value = generated()
+    assert.equal(closed(await htmlFor(f)), 3)
+  } finally { f.stop() }
+})
+
+test('2つの注意文(利用範囲の案内・社外サービスへの送信の注意)を左のメインの先頭に置き、畳めるようにする(BOSS要望 2026-10-05)', async () => {
+  const f = await setup()
+  try {
+    f.state.plan.value = null
+    f.state.options.value = { notice: '追加の案内', providers: [{ provider: 'openrouter', label: 'OpenRouter', external: true, available: true, models: [{ id: 'm1', label: 'M1' }] }] }
+    f.state.provider.value = 'openrouter'
+    let html = await htmlFor(f)
+    const main = html.indexOf('class="analysis-main"'), notes = html.indexOf('class="notes"'), exec = html.indexOf('分析実行の専用画面')
+    assert.ok(main >= 0 && notes > main && exec > notes, '左のメインの先頭(実行欄より前)')
+    // 上部(ヘッダの直下・レイアウトの前)には、注意文がない
+    const beforeLayout = html.slice(0, html.indexOf('class="analysis-layout"'))
+    assert.equal(beforeLayout.includes('class="notice"'), false); assert.equal(beforeLayout.includes('名称を登録コードに置換した分析目的'), false)
+    // 2つの文面が、そのまま入っている
+    for (const part of ['分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します', '追加の案内',
+      '社外サービス（OpenRouter）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。']) {
+      assert.ok(html.includes(part), part)
+    }
+    assert.equal(html.includes('テンプレート保存は未対応です'), false, '事実と合わない一文は削除(BOSS指示 2026-10-05)')
+    // 開いている間は表示、畳むと非表示(v-show)になり、見出しに外部送信の要点を出す
+    assert.equal(f.state.notesOpen.value, true)
+    assert.ok(/class="notes-body"(?! style)/.test(html))
+    f.state.notesOpen.value = false
+    html = await htmlFor(f)
+    assert.ok(/class="notes-body" style="display:none;?"/.test(html), '畳むと非表示')
+    assert.ok(html.includes('aria-expanded="false"')); assert.ok(html.includes('社外サービス（OpenRouter）へ、分析目的・期間・公開ビューの説明を送ります'))
+    // 外部AIでなければ、外部送信の注意とその要点を出さない。利用できないAIのエラーは、上部に残す
+    f.state.options.value = { providers: [{ provider: 'qwen', label: 'ローカルQwen', external: false, available: false, reason: '未起動', models: [] }] }
+    f.state.provider.value = 'qwen'
+    html = await htmlFor(f)
+    assert.equal(html.includes('名称を登録コードに置換した分析目的'), false)
+    const top = html.slice(0, html.indexOf('class="analysis-layout"'))
+    assert.ok(top.includes('ローカルQwenは利用できません: 未起動'))
+  } finally { f.stop() }
+})
+
+test('警告で強制的に開いている間の見出しの操作は保存しない(警告が解消したとき、押した覚えのない開閉が現れない)。見出しはaria-controlsで本体と対応づける', async () => {
+  const f = await setup()
+  try {
+    const outdated = flag => { const p = generated(); p.codegen_state = { ...p.codegen_state, wrapper_outdated: flag }; return p }
+    f.state.plan.value = outdated(true)
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [true, true])
+    f.state.toggleStage(4); f.state.toggleStage(5)
+    assert.deepEqual(f.state.toggledStages.value, {}, '強制で開いている間は保存しない')
+    // 警告が解消すると、初期の規則(⑤が今なら⑤・④が開く)に従い、勝手に閉じない
+    f.state.plan.value = outdated(false)
+    await Promise.resolve()
+    assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['done', 'current'])
+    assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [true, true])
+    // 警告がないときの操作は、従来どおり保存される
+    f.state.toggleStage(5); assert.equal(f.state.isOpen(5), false)
+    // aria-controls と本体のid
+    const html = await htmlFor(f)
+    for (const n of [1, 2, 3, 4, 5]) {
+      if (n <= 3 && !html.includes(`aria-controls="stage-body-${n}"`)) continue
+      assert.ok(html.includes(`aria-controls="stage-body-${n}"`) && html.includes(`id="stage-body-${n}"`), String(n))
+    }
+    assert.ok(html.includes('aria-controls="notes-body"') && html.includes('id="notes-body"'))
+  } finally { f.stop() }
+})
