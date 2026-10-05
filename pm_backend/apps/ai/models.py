@@ -127,7 +127,12 @@ class AIAnalysisTemplate(models.Model):
         ('pending_admin', '管理者承認待ち'), ('approved', '正式'), ('rejected', '却下'), ('superseded', '置換済み'),
     ]
 
+    CATEGORY_CHOICES = [
+        ('receipt', '入荷'), ('shipment', '出荷'), ('inventory', '在庫'), ('production', '生産'), ('quality', '品質'), ('other', 'その他'),
+    ]
+
     family_id = models.UUIDField(verbose_name='系統ID')
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other', verbose_name='カテゴリ')
     version = models.PositiveIntegerField(default=1, verbose_name='版')
     source_plan_id = models.CharField(max_length=64, verbose_name='元の分析案ID')
     source_plan_revision = models.PositiveIntegerField(verbose_name='元の分析案の承認版')

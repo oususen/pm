@@ -217,6 +217,7 @@ export default {
     templates(params) { return client.get('/ai/analysis/templates/', { params }) },
     template(id) { return client.get(`/ai/analysis/templates/${id}/`) },
     saveTemplate(data) { return client.post('/ai/analysis/templates/', data) },
+    changeTemplateCategory(id, data) { return client.post(`/ai/analysis/templates/${id}/category/`, data) },
     createTemplatePlan(id) { return client.post(`/ai/analysis/templates/${id}/plans/`, {}) },
     resendTemplateNotification(id) { return client.post(`/ai/analysis/template-notifications/${id}/resend/`, {}) },
     approveTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/approve/`, data) },

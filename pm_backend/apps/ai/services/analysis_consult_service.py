@@ -51,7 +51,7 @@ def _approved_templates():
 
 def _system_prompt(templates):
     schema = {view: {**definition, 'fields': BASE_SQL_SCHEMA[view]} for view, definition in ANALYSIS_VIEWS.items()}
-    lines = [f'ID {template.pk}: {template.name}(目的: {template.purpose})' for template in templates] or ['(承認済みのテンプレートはありません)']
+    lines = [f'ID {template.pk}: {template.name}(カテゴリ: {template.get_category_display()}、目的: {template.purpose})' for template in templates] or ['(承認済みのテンプレートはありません)']
     return (
         'あなたは、データ分析の目的を整える相談役。利用者が、分析の目的を適切に書けるように助ける。\n'
         '数値・結果・SQL・Pythonは作らない。DBの値は分からないので、推測で数字を言わない。\n'
@@ -101,6 +101,7 @@ def _recommendations(data, templates):
             break
     return [{
         'id': by_id[pk].pk, 'version': by_id[pk].version, 'name': by_id[pk].name, 'purpose': by_id[pk].purpose,
+        'category': by_id[pk].category, 'category_label': by_id[pk].get_category_display(),
         'date_from': by_id[pk].date_from.isoformat(), 'date_to': by_id[pk].date_to.isoformat(),
     } for pk in picked]
 

@@ -63,7 +63,7 @@ class ReviewBase(TestCase):
         plan = plan or make_plan(user.pk, revision=2)
         plan['proposal'] = {**plan['proposal'], 'title': '訂正した分析', **overrides}
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-            return self.call('ai-analysis-templates', user, data={'plan_id': plan['id'], 'revision': plan['revision'], 'replaces': old.pk})
+            return self.call('ai-analysis-templates', user, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision'], 'replaces': old.pk})
 
 
 class PermissionTests(ReviewBase):
@@ -223,11 +223,11 @@ class CorrectionTests(ReviewBase):
         # 内容が同じ(名称も変えない)なら訂正版にならない
         plan = make_plan(self.admin.pk, revision=2)
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-            same = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'revision': 2, 'replaces': old.pk})
+            same = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2, 'replaces': old.pk})
         self.assertEqual(same.status_code, 409)
         for bad in (True, 0, '1'):
             with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-                response = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'revision': 2, 'replaces': bad})
+                response = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2, 'replaces': bad})
             self.assertEqual(response.status_code, 400, bad)
         self.assertEqual(self.save_correction(self.admin, old, plan=make_plan(self.admin.pk, revision=2)).status_code, 201)
         self.assertEqual(AIAnalysisTemplate.objects.filter(replaces__isnull=False).count(), 1)
@@ -235,7 +235,7 @@ class CorrectionTests(ReviewBase):
     def test_unknown_original_is_404(self):
         plan = make_plan(self.admin.pk, revision=2)
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-            response = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'revision': 2, 'replaces': 999999})
+            response = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2, 'replaces': 999999})
         self.assertEqual(response.status_code, 404)
 
     def test_resending_the_same_correction_returns_the_same_row(self):
@@ -257,7 +257,7 @@ class CorrectionTests(ReviewBase):
         self.assertEqual(AIAnalysisTemplate.objects.count(), 2)
         # 管理者でない利用者の再送は、既存の行があっても権限で拒否する
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-            denied = self.call('ai-analysis-templates', self.creator, data={'plan_id': plan['id'], 'revision': 2, 'replaces': old.pk})
+            denied = self.call('ai-analysis-templates', self.creator, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2, 'replaces': old.pk})
         self.assertIn(denied.status_code, (403, 404))
 
     def test_correction_request_for_a_plan_already_saved_as_a_plain_template_is_refused(self):
@@ -265,9 +265,9 @@ class CorrectionTests(ReviewBase):
         plan = make_plan(self.admin.pk, revision=2)
         plan['proposal'] = {**plan['proposal'], 'title': '訂正した分析'}
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-            plain = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'revision': 2})
+            plain = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2})
             self.assertEqual(plain.status_code, 201)
-            response = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'revision': 2, 'replaces': old.pk})
+            response = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2, 'replaces': old.pk})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(AIAnalysisTemplate.objects.filter(replaces__isnull=False).count(), 0)
 

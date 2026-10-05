@@ -24,7 +24,7 @@
       </section>
       <section v-if="templates.length" class="recommend">
         <p><b>近い承認済みテンプレート（{{ templates.length }}件）</b></p>
-        <p v-for="item in templates" :key="item.id">テンプレート{{ item.id }}（版{{ item.version }}） / {{ item.name }} / 目的: {{ item.purpose }} / 期間: {{ item.date_from }} ～ {{ item.date_to }}
+        <p v-for="item in templates" :key="item.id">テンプレート{{ item.id }}（版{{ item.version }}） / {{ item.name }} / カテゴリ: {{ item.category_label }} / 目的: {{ item.purpose }} / 期間: {{ item.date_from }} ～ {{ item.date_to }}
           <button type="button" :disabled="!usable || !!busy" @click="useTemplate(item)">このテンプレートで分析案を作る</button></p>
       </section>
       <p v-if="!usable" class="note">{{ unusableReason }}</p>

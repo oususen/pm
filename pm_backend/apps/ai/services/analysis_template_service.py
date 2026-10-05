@@ -145,13 +145,21 @@ def _replaced_template(replaces, content_sha256):
     return old
 
 
-def save_template(user, plan_id, revision, replaces=None):
+def validate_category(category):
+    """カテゴリは固定の6つ(入荷・出荷・在庫・生産・品質・その他)。内容のハッシュには含めない(整理のための印)。"""
+    if type(category) is not str or category not in dict(AIAnalysisTemplate.CATEGORY_CHOICES):
+        raise AnalysisError('カテゴリを入荷・出荷・在庫・生産・品質・その他から選んでください。')
+    return category
+
+
+def save_template(user, plan_id, revision, replaces=None, category=None):
     """本人の承認済み分析案から保存する。(テンプレート, 新規作成か)を返す。同じ内容の再送は、既存の行を返す。
 
     replacesを指定すると、却下された版の訂正版(同じ系統の次の版)として保存する(管理者のみ)。
     """
     if type(revision) is not int or revision < 1:
         raise AnalysisError('分析案の版が不正です。')
+    category = validate_category(category)
     plan = AnalysisPlanStore().get(str(plan_id), user.pk)
     if plan['revision'] != revision:
         raise AnalysisError('分析案が別の操作で更新されました。最新の内容を確認してください。', 409)
@@ -190,7 +198,7 @@ def save_template(user, plan_id, revision, replaces=None):
                 family_id = old.family_id
                 version = AIAnalysisTemplate.objects.filter(family_id=family_id).aggregate(top=Max('version'))['top'] + 1
             template = AIAnalysisTemplate.objects.create(
-                family_id=family_id, version=version, approved_by=user, replaces=old, **key, **fields,
+                family_id=family_id, version=version, approved_by=user, replaces=old, category=category, **key, **fields,
             )
     except IntegrityError:
         # 同時の保存要求に負けた場合は、先に成立した行を返す(別内容を作らない。見つからなければ固定文で拒否)
@@ -216,7 +224,7 @@ def serialize_template(template, user, admin, detail):
     visible = content_visible(template, user, admin)
     data = {
         'id': template.pk, 'family_id': str(template.family_id), 'version': template.version,
-        'name': template.name, 'purpose': template.purpose,
+        'name': template.name, 'purpose': template.purpose, 'category': template.category, 'category_label': template.get_category_display(),
         'status': template.status, 'status_label': template.get_status_display(),
         'created_by': _creator(template), 'created_at': template.created_at.isoformat(),
         'content_visible': visible,
@@ -235,6 +243,7 @@ def serialize_template(template, user, admin, detail):
             # 却下理由・確認者は、作成者と管理者だけ(visibleと同じ範囲)に返す。置換先は、承認された訂正版
             replacement = template.corrections.filter(status='approved').order_by('id').first() if template.status == 'superseded' else None
             if review_visible:
+                data['can_change_category'] = True  # 作成者と管理者は、カテゴリを後から変えられる
                 data['notifications'] = serialize_records(template)
                 data.update({
                     'reviewed_by': (template.reviewed_by.get_username() if template.reviewed_by_id else DELETED_USER_LABEL) if template.reviewed_at else None,
@@ -275,3 +284,14 @@ def parse_plan_id(value):
         return str(UUID(value))
     except ValueError:
         raise AnalysisError('分析案のIDが不正です。') from None
+
+
+def change_category(user, template_id, category, admin):
+    """作成者と管理者が、カテゴリを後から変える。内容・ハッシュ・状態・状態の版は変えない(整理のための印)。それ以外には存在も見せない(404)。"""
+    category = validate_category(category)
+    template = AIAnalysisTemplate.objects.select_related('approved_by').filter(pk=template_id).first()
+    if template is None or not (admin or (template.approved_by_id is not None and template.approved_by_id == user.pk)):
+        raise AnalysisError('テンプレートが見つかりません。', 404)
+    AIAnalysisTemplate.objects.filter(pk=template.pk).update(category=category, updated_at=datetime.now())
+    template.refresh_from_db()
+    return template

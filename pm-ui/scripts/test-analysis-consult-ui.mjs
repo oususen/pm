@@ -100,13 +100,13 @@ test('期間だけ・目的だけの文案は、ある方だけを渡す。ど�
 })
 
 test('推薦されたテンプレートを1行ずつ表示し、押すとテンプレートから分析案を作って親へ渡す(AIは使わない)', async () => {
-  const templates = [{ id: 7, version: 2, name: '<b>月別</b>', purpose: '目的7', date_from: '2026-08-01', date_to: '2026-09-30' }, { id: 9, version: 1, name: '製品別', purpose: '目的9', date_from: '2026-01-01', date_to: '2026-01-31' }]
+  const templates = [{ id: 7, version: 2, name: '<b>月別</b>', category_label: '出荷', purpose: '目的7', date_from: '2026-08-01', date_to: '2026-09-30' }, { id: 9, version: 1, name: '製品別', purpose: '目的9', date_from: '2026-01-01', date_to: '2026-01-31' }]
   const f = setup({}, { consult: async () => reply({ templates }) })
   try {
     f.state.input.value = '相談'; await f.state.send()
     const text = (await html(f)).replace(/<!--.*?-->/g, '')
     assert.ok(text.includes('近い承認済みテンプレート（2件）'))
-    assert.ok(text.includes('テンプレート7（版2） / &lt;b&gt;月別&lt;/b&gt; / 目的: 目的7 / 期間: 2026-08-01 ～ 2026-09-30')); assert.equal(text.includes('<b>月別</b>'), false)
+    assert.ok(text.includes('テンプレート7（版2） / &lt;b&gt;月別&lt;/b&gt; / カテゴリ: 出荷 / 目的: 目的7 / 期間: 2026-08-01 ～ 2026-09-30')); assert.equal(text.includes('<b>月別</b>'), false)
     await f.state.useTemplate(templates[0])
     assert.deepEqual(f.calls.filter(c => c[0] === 'createTemplatePlan'), [['createTemplatePlan', 7]])
     assert.deepEqual(f.events, [['plan-created', { id: 'new-plan', template: { id: 7 } }]])

@@ -54,7 +54,7 @@ class ConsultBase(ReviewBase):
 
 class ConsultFlowTests(ConsultBase):
     def test_returns_reply_draft_and_recommendations_from_the_db(self):
-        a = self.approved(name='月別出荷の比較', purpose='月ごとの出荷量を比べる')
+        a = self.approved(name='月別出荷の比較', purpose='月ごとの出荷量を比べる', category='shipment')
         self.reply = ai_reply(reply='期間は8月から9月ですね。', draft_purpose='8月と9月の出荷量を比較する', date_from='2026-08-01', date_to='2026-09-30',
                               template_ids=[a.pk])
         response = self.ask()
@@ -62,7 +62,8 @@ class ConsultFlowTests(ConsultBase):
         data = response.data
         self.assertEqual(data['reply'], '期間は8月から9月ですね。')
         self.assertEqual(data['draft'], {'purpose': '8月と9月の出荷量を比較する', 'date_from': '2026-08-01', 'date_to': '2026-09-30'})
-        self.assertEqual([(t['id'], t['name'], t['purpose']) for t in data['templates']], [(a.pk, '月別出荷の比較', '月ごとの出荷量を比べる')])
+        self.assertEqual([(t['id'], t['name'], t['purpose'], t['category'], t['category_label']) for t in data['templates']],
+                         [(a.pk, '月別出荷の比較', '月ごとの出荷量を比べる', 'shipment', '出荷')])
         self.assertEqual((data['provider'], data['model']), ('qwen', chat_service.MODEL))
 
     def test_only_the_local_qwen_is_called_with_json_mode_the_saved_timeout_and_never_an_external_ai(self):
@@ -79,7 +80,7 @@ class ConsultFlowTests(ConsultBase):
         hidden = {s: self.row(status=s, name=f'非承認{s}') for s in ('pending_admin', 'rejected', 'superseded')}
         self.assertEqual(self.ask().status_code, 200)
         system = self.chat_calls[0][0][0]['content']
-        self.assertIn(f'ID {approved.pk}: 承認済みの名称(目的: 承認済みの目的)', system)
+        self.assertIn(f'ID {approved.pk}: 承認済みの名称(カテゴリ: その他、目的: 承認済みの目的)', system)
         for name in ('非承認pending_admin', '非承認rejected', '非承認superseded'):
             self.assertNotIn(name, system)
         self.assertIn('v_ai_shipment', system)

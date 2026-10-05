@@ -271,10 +271,10 @@ class NoSaveFromTemplatePlanTests(ReuseBase):
         plan['codegen']['code_approved_at'] = datetime.now().isoformat()
         before = AIAnalysisTemplate.objects.count()
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: json.loads(json.dumps(plan))):
-            response = self.call('ai-analysis-templates', self.other, 'post', {'plan_id': plan['id'], 'revision': plan['revision']})
+            response = self.call('ai-analysis-templates', self.other, 'post', {'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision']})
             # 管理者の訂正版としての保存も同じ(内容が同じで意味がない)
             rejected = self.row(status='rejected')
-            correction = self.call('ai-analysis-templates', self.admin, 'post', {'plan_id': plan['id'], 'revision': plan['revision'], 'replaces': rejected.pk})
+            correction = self.call('ai-analysis-templates', self.admin, 'post', {'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision'], 'replaces': rejected.pk})
         self.assertEqual((response.status_code, correction.status_code), (409, 409))
         self.assertNotIn('Traceback', json.dumps(response.data, ensure_ascii=False))
         self.assertEqual(AIAnalysisTemplate.objects.count(), before + 1)  # rejected行を作った1件だけ。保存は増えていない
@@ -282,7 +282,7 @@ class NoSaveFromTemplatePlanTests(ReuseBase):
     def test_plain_plan_is_still_saved(self):
         plan = make_plan(self.creator.pk)
         with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: json.loads(json.dumps(plan))):
-            response = self.call('ai-analysis-templates', self.creator, 'post', {'plan_id': plan['id'], 'revision': plan['revision']})
+            response = self.call('ai-analysis-templates', self.creator, 'post', {'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision']})
         self.assertEqual(response.status_code, 201)
 
 

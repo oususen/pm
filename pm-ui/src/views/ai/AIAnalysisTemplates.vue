@@ -7,12 +7,22 @@
     <p v-if="canEdit && plan?.template" role="status">テンプレートから作成した分析案は、テンプレートとして保存できません（保存済みのコードをそのまま使うため、内容が同じで重複します）。コードを変えた新しい分析を作成したときに、保存できます。</p>
     <template v-else-if="canEdit">
       <p v-if="!savable">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
-      <label><input v-model="accepted" type="checkbox" :disabled="!savable || !!busy">コードを確認し、管理者承認待ちのテンプレートとして保存します（作成者と管理者以外には、名称・目的・状態だけが表示されます）</label>
+      <label>カテゴリ（必須）:
+        <select v-model="category" :disabled="!savable || !!busy" aria-label="保存するテンプレートのカテゴリ">
+          <option value="">選択してください</option>
+          <option v-for="item in CATEGORIES" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select></label>
+      <label><input v-model="accepted" type="checkbox" :disabled="!savable || !!busy">コードを確認し、管理者承認待ちのテンプレートとして保存します（作成者と管理者以外には、名称・目的・状態・カテゴリだけが表示されます）</label>
       <button :disabled="!canSave || !accepted" @click="save">{{ busy === 'save' ? '保存中…' : 'テンプレートとして保存' }}</button>
     </template>
     <p v-else>閲覧のみです。保存にはAI分析の編集権限が必要です。</p>
-    <p v-if="saved" role="status">{{ saved.created ? '保存しました' : '保存済みです（同じ内容は重複して保存しません）' }}: テンプレート{{ saved.id }} / 版{{ saved.version }} / {{ saved.status_label }}</p>
+    <p v-if="saved" role="status">{{ saved.created ? '保存しました' : '保存済みです（同じ内容は重複して保存しません）' }}: テンプレート{{ saved.id }} / 版{{ saved.version }} / {{ saved.status_label }} / カテゴリ: {{ saved.category_label }}</p>
     <h3>保存済みテンプレート</h3>
+    <label>カテゴリの絞り込み:
+      <select v-model="categoryFilter" :disabled="!!busy" aria-label="カテゴリの絞り込み">
+        <option value="">すべて</option>
+        <option v-for="item in CATEGORIES" :key="item.value" :value="item.value">{{ item.label }}</option>
+      </select></label>
     <label v-if="canReview">状態の絞り込み:
       <select v-model="statusFilter" :disabled="!!busy">
         <option value="">すべて</option><option value="pending_admin">管理者承認待ち</option><option value="approved">正式</option>
@@ -21,7 +31,7 @@
     <button :disabled="!!busy" @click="load(1)">一覧を更新</button>
     <p v-if="loaded && !list.results.length">保存済みのテンプレートはありません。</p>
     <article v-for="row in list.results" :key="row.id">
-      <p><strong>テンプレート{{ row.id }}: {{ row.name }}</strong> / 状態: {{ row.status_label }} / 作成者: {{ row.created_by }} / 保存日時: {{ formatDate(row.created_at) }} / 目的: {{ row.purpose }}
+      <p><strong>テンプレート{{ row.id }}: {{ row.name }}</strong> / カテゴリ: {{ row.category_label }} / 状態: {{ row.status_label }} / 作成者: {{ row.created_by }} / 保存日時: {{ formatDate(row.created_at) }} / 目的: {{ row.purpose }}
         <span v-if="!row.content_visible"> / SQL・Python・条件・期間は、作成者と管理者だけが確認できます。</span>
         <button v-else :disabled="!!busy" @click="showDetail(row.id)">{{ detail?.id === row.id ? '詳細を再取得' : '詳細を表示' }}</button>
         <button v-if="canReuse(row)" :disabled="!canStartPlan" @click="startPlan(row)">このテンプレートで分析案を作る</button>
@@ -37,6 +47,11 @@
         <p v-if="detail.rejection_reason">却下理由: {{ detail.rejection_reason }}</p>
         <p v-if="detail.replaces">この版は、テンプレート{{ detail.replaces }}（却下）の訂正版です。承認すると、元の版は置換済みになります。</p>
         <p v-if="detail.replacement_id">置換先: テンプレート{{ detail.replacement_id }}</p>
+        <p v-if="detail.can_change_category && canEdit">カテゴリ: {{ detail.category_label }} →
+          <select v-model="newCategory" :disabled="!!busy" aria-label="変更後のカテゴリ">
+            <option v-for="item in CATEGORIES" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+          <button :disabled="!!busy || newCategory === detail.category" @click="changeCategory">カテゴリを変更</button></p>
         <template v-if="detail.notifications">
           <p>通知（メール・PM通知。宛先のメールアドレス・本文は保存しません）: {{ detail.notifications.length ? '' : 'まだ通知の記録はありません。' }}</p>
           <ul v-if="detail.notifications.length" class="notice-records">
@@ -51,6 +66,7 @@
         </template>
         <template v-if="canReview && detail.status === 'rejected'">
           <p>訂正版: 現在の分析案（コード承認済み）を、この版の訂正版として保存できます（元の版は変わりません）。</p>
+          <p v-if="savable && !category">カテゴリを選んでください（上の保存欄の「カテゴリ（必須）」。却下された版を開くと、元の版のカテゴリが初期値で入ります）。</p>
           <label><input v-model="acceptedCorrection" type="checkbox" :disabled="!savable || !!busy">コードを確認し、訂正版として保存します</label>
           <button :disabled="!canSave || !acceptedCorrection" @click="saveCorrection(detail.id)">この版の訂正版として保存</button>
         </template>
@@ -71,6 +87,12 @@ import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canReview: Boolean, blocked: Boolean, reuseBlocked: Boolean })
 const emit = defineEmits(['plan-created'])
 const busy = ref(''), error = ref(''), saved = ref(null), accepted = ref(false), acceptedCorrection = ref(false), detail = ref(null), reason = ref(''), statusFilter = ref('')
+const CATEGORIES = Object.freeze([
+  { value: 'receipt', label: '入荷' }, { value: 'shipment', label: '出荷' }, { value: 'inventory', label: '在庫' },
+  { value: 'production', label: '生産' }, { value: 'quality', label: '品質' }, { value: 'other', label: 'その他' },
+])
+const category = ref(''), categoryFilter = ref(''), newCategory = ref('')
+let autoCategory = '' // 却下された版を開いたときに、初期値として入れた値(利用者が変えていなければ、次の版を開いたとき入れ替える)
 const REASON_MAX = 500 // 却下理由の最大長(BOSS承認)。超える入力は送らない
 const list = ref({ results: [], count: 0, next: null, previous: null }), page = ref(1), loaded = ref(false)
 const errorNotices = useAnalysisErrorNotices([['template', error]])
@@ -89,6 +111,11 @@ const REUSE_ERRORS = Object.freeze({
   404: 'テンプレートが見つかりません。',
   409: 'このテンプレートは再利用できません（却下・置換済み、内容や検査・ビューの公開定義の不一致）。新しい分析として作成してください。',
 })
+const CATEGORY_ERRORS = Object.freeze({
+  400: 'カテゴリを入荷・出荷・在庫・生産・品質・その他から選んでください。',
+  403: 'カテゴリを変更する権限がありません。',
+  404: 'テンプレートが見つかりません。',
+})
 const REVIEW_ERRORS = Object.freeze({
   400: '入力が正しくありません。却下理由は必須で、500文字以内です。',
   403: 'テンプレートを確認する権限がありません。',
@@ -103,7 +130,7 @@ const RESEND_ERRORS = Object.freeze({
 })
 const hasCode = computed(() => props.plan?.codegen?.status === 'code_approved' && !!props.plan.codegen.executed_code_sha256)
 const savable = computed(() => props.plan?.status === 'data_approved' && hasCode.value && !props.plan?.template)
-const canSave = computed(() => props.canEdit && !props.blocked && !busy.value && savable.value)
+const canSave = computed(() => props.canEdit && !props.blocked && !busy.value && savable.value && !!category.value)
 const saveHint = computed(() => !props.plan ? '分析案なし' : props.plan.status !== 'data_approved' ? 'データ範囲が未承認' : 'コードが未承認')
 // 再利用できるのは、全文を見られる正式・管理者承認待ちの行だけ(サーバーでも状態・権限を確認する)
 const canReuse = row => props.canEdit && row.content_visible && ['approved', 'pending_admin'].includes(row.status)
@@ -115,7 +142,7 @@ const formatDate = value => typeof value === 'string' ? value.replace('T', ' ').
 watch(() => [props.plan?.id, props.plan?.revision], () => { accepted.value = false; acceptedCorrection.value = false; saved.value = null; saveToken++ }, { flush: 'sync' })
 watch(() => props.plan?.id, () => { error.value = '' }, { flush: 'sync' })
 watch(() => props.canEdit, value => { if (!value) { accepted.value = false; acceptedCorrection.value = false } }, { flush: 'sync' })
-watch(statusFilter, () => load(1))
+watch([statusFilter, categoryFilter], () => load(1))
 onBeforeUnmount(() => { disposed = true; epoch++ })
 onMounted(() => load(1))
 
@@ -129,10 +156,10 @@ async function doSave(replaces) {
   busy.value = 'save'; error.value = ''
   let done = false
   try {
-    const body = { plan_id: target.id, revision: target.revision }
+    const body = { plan_id: target.id, revision: target.revision, category: category.value }
     if (replaces !== null) body.replaces = replaces
     const response = await api.aiAnalysis.saveTemplate(body)
-    if (!disposed && current === epoch && token === saveToken) { saved.value = response.data; confirmed.value = false; done = true }
+    if (!disposed && current === epoch && token === saveToken) { saved.value = response.data; confirmed.value = false; category.value = ''; done = true }
   } catch (e) {
     if (!disposed && current === epoch && token === saveToken) error.value = SAVE_ERRORS[e.response?.status] || 'テンプレートを保存できませんでした。保存されたか一覧で確認してください。'
   } finally { if (!disposed && current === epoch) busy.value = '' }
@@ -144,7 +171,10 @@ async function load(target = 1) {
   const current = epoch
   busy.value = 'list'; error.value = ''
   try {
-    const response = await api.aiAnalysis.templates(statusFilter.value ? { page: target, status: statusFilter.value } : { page: target })
+    const params = { page: target }
+    if (statusFilter.value) params.status = statusFilter.value
+    if (categoryFilter.value) params.category = categoryFilter.value
+    const response = await api.aiAnalysis.templates(params)
     if (!disposed && current === epoch) { list.value = response.data; page.value = target; loaded.value = true; detail.value = null }
   } catch { if (!disposed && current === epoch) error.value = 'テンプレートの一覧を取得できませんでした。' }
   finally { if (!disposed && current === epoch) busy.value = '' }
@@ -197,6 +227,18 @@ async function resendNotice(item) {
     if (!disposed && current === epoch) { reason.value = typed; if (failure) error.value = failure }
   }
 }
+async function changeCategory() {
+  if (!props.canEdit || busy.value || !detail.value?.can_change_category || !newCategory.value || newCategory.value === detail.value.category) return
+  const current = epoch, target = detail.value, value = newCategory.value
+  busy.value = 'category'; error.value = ''
+  try {
+    await api.aiAnalysis.changeTemplateCategory(target.id, { category: value })
+  } catch (e) {
+    if (!disposed && current === epoch) error.value = CATEGORY_ERRORS[e.response?.status] || 'カテゴリを変更できませんでした。'
+  } finally { if (!disposed && current === epoch) busy.value = '' }
+  // 成否にかかわらず、最新の一覧・詳細を取り直す
+  if (!disposed && current === epoch) { const failure = error.value; await load(page.value); await showDetail(target.id); if (failure && !disposed && current === epoch) error.value = failure }
+}
 async function startPlan(row) {
   if (!canReuse(row) || !canStartPlan.value) return
   if (props.plan && !window.confirm('現在の分析案を破棄して、このテンプレートから新しい分析案を作ります。よろしいですか？')) return
@@ -215,7 +257,14 @@ async function showDetail(id) {
   busy.value = 'detail'; error.value = ''
   try {
     const response = await api.aiAnalysis.template(id)
-    if (!disposed && current === epoch) { detail.value = response.data.content_visible ? response.data : null; reason.value = '' }
+    if (!disposed && current === epoch) {
+      detail.value = response.data.content_visible ? response.data : null; reason.value = ''
+      newCategory.value = detail.value?.category || ''
+      // 却下された版の訂正版を保存するときの初期値は、元の版のカテゴリ(変えてもよい)。利用者が選んだ値は上書きしない
+      if (detail.value?.status === 'rejected' && (!category.value || category.value === autoCategory)) {
+        category.value = detail.value.category || ''; autoCategory = category.value
+      }
+    }
   } catch { if (!disposed && current === epoch) error.value = 'テンプレートの詳細を取得できませんでした。' }
   finally { if (!disposed && current === epoch) busy.value = '' }
 }

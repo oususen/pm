@@ -249,7 +249,7 @@ class FlowIntegrationTests(NotifyBase):
         with patch.object(notify.AIAnalysisTemplate.objects, 'select_related', wraps=AIAnalysisTemplate.objects.select_related), \
                 patch('ai.services.analysis_template_service.AnalysisPlanStore.get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
             with self.captureOnCommitCallbacks(execute=True):
-                return self.call('ai-analysis-templates', user, data={'plan_id': plan['id'], 'revision': plan['revision']})
+                return self.call('ai-analysis-templates', user, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision']})
 
     def test_save_notifies_admins_once_and_a_resend_does_not_notify_again(self):
         plan = make_plan(self.creator.pk)
@@ -263,7 +263,7 @@ class FlowIntegrationTests(NotifyBase):
         plan = make_plan(self.creator.pk)
         with patch('ai.services.analysis_template_service.AnalysisPlanStore.get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
             with self.captureOnCommitCallbacks(execute=False) as callbacks:
-                self.assertEqual(self.call('ai-analysis-templates', self.creator, data={'plan_id': plan['id'], 'revision': plan['revision']}).status_code, 201)
+                self.assertEqual(self.call('ai-analysis-templates', self.creator, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision']}).status_code, 201)
         self.assertEqual(self.mails, [], 'コミットの前には、送らない')
         self.assertEqual(len(callbacks), 1)
 
@@ -281,7 +281,7 @@ class FlowIntegrationTests(NotifyBase):
         plan = make_plan(self.admin.pk, revision=2)
         plan['proposal'] = {**plan['proposal'], 'title': '訂正した分析'}
         with patch('ai.services.analysis_template_service.AnalysisPlanStore.get', lambda _s, pid, owner: AnalysisPlanStore._decode(json.dumps(plan), owner)):
-            created = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'revision': 2, 'replaces': rejected.pk})
+            created = self.call('ai-analysis-templates', self.admin, data={'plan_id': plan['id'], 'category': 'shipment', 'revision': 2, 'replaces': rejected.pk})
         correction = AIAnalysisTemplate.objects.get(pk=created.data['id'])
         with self.captureOnCommitCallbacks(execute=True):
             self.assertEqual(self.approve(self.admin2, correction).status_code, 200)

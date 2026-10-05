@@ -73,7 +73,7 @@ class TemplateTestBase(TestCase):
 
     def save(self, user, plan, revision=None):
         with self.use_plan(plan), patch.object(cg, '_call_ai') as ai:
-            response = self.call('ai-analysis-templates', user, 'post', {'plan_id': plan['id'], 'revision': plan['revision'] if revision is None else revision})
+            response = self.call('ai-analysis-templates', user, 'post', {'plan_id': plan['id'], 'category': 'shipment', 'revision': plan['revision'] if revision is None else revision})
         ai.assert_not_called()
         return response
 
@@ -160,7 +160,7 @@ class SaveTests(TemplateTestBase):
         self.assertEqual(self.save(self.owner, plan, revision=2).status_code, 409)
         self.assertEqual(self.save(self.other, plan).status_code, 404)
         with patch.object(service.AnalysisPlanStore, 'get', lambda _self, pid, owner: AnalysisPlanStore._decode(None, owner)):
-            response = self.call('ai-analysis-templates', self.owner, 'post', {'plan_id': plan['id'], 'revision': 3})
+            response = self.call('ai-analysis-templates', self.owner, 'post', {'plan_id': plan['id'], 'category': 'shipment', 'revision': 3})
         self.assertEqual(response.status_code, 410)
         self.assertEqual(AIAnalysisTemplate.objects.count(), 0)
 
@@ -174,8 +174,8 @@ class SaveTests(TemplateTestBase):
     def test_request_body_is_strict(self):
         plan = make_plan(self.owner.pk)
         bad_bodies = [
-            {'plan_id': plan['id']}, {'plan_id': plan['id'], 'revision': 3, 'python': 'x'}, {'plan_id': 'not-a-uuid', 'revision': 3},
-            {'plan_id': plan['id'], 'revision': True}, {'plan_id': plan['id'], 'revision': '3'}, {'plan_id': plan['id'], 'revision': 0},
+            {'plan_id': plan['id']}, {'plan_id': plan['id'], 'category': 'shipment', 'revision': 3, 'python': 'x'}, {'plan_id': 'not-a-uuid', 'revision': 3},
+            {'plan_id': plan['id'], 'category': 'shipment', 'revision': True}, {'plan_id': plan['id'], 'category': 'shipment', 'revision': '3'}, {'plan_id': plan['id'], 'category': 'shipment', 'revision': 0},
             {'plan_id': 123, 'revision': 3},
         ]
         for body in bad_bodies:
@@ -186,7 +186,7 @@ class SaveTests(TemplateTestBase):
     def test_view_only_user_cannot_save_and_nothing_is_read_from_redis(self):
         UserPermission.objects.filter(user=self.owner, resource='ai.analysis').update(can_edit=False)
         with patch.object(service.AnalysisPlanStore, 'get') as get:
-            response = self.call('ai-analysis-templates', self.owner, 'post', {'plan_id': str(uuid4()), 'revision': 1})
+            response = self.call('ai-analysis-templates', self.owner, 'post', {'plan_id': str(uuid4()), 'category': 'shipment', 'revision': 1})
         self.assertEqual(response.status_code, 403)
         get.assert_not_called()
 

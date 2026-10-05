@@ -72,7 +72,17 @@ BOSS承認事項: 方向性はA（目的欄の横でAIと相談し、文案を�
 - **変更**: `services/analysis_consult_service.py`（新規）、`views.py`・`urls.py`（`POST /ai/analysis/consult/`。権限一覧テストに追加）、`pm-ui`の`AIAnalysisConsult.vue`（新規）・`AIAnalysis.vue`・`client.js`。DB・`migrate`の変更なし。仕様書§5.3-3。
 - **検証（Claude Code実行）**: バックエンド19件、フロント consult 9件＋codegen接続1件、分析関連のフロントは計133件、`npm run build`成功。別コピーで9種類（承認済みの絞り込み・日付の確認・社外AIの経路・IDの型・10件の上限・例外文の露出・入力形式・表示値のAI由来・日替わり8時）を壊すとテストが失敗することを確認。
 - **未確認**: 実Qwenの返事の質・JSON出力の安定性、実ブラウザ、コンテキスト長（4096）の影響（値の引き上げはBOSS承認が必要）。
-- **残る作業**: evaluatorの評価、段階1-b（カテゴリ）、段階2（変数化）。
+- **残る作業**: 段階2（変数化）。段階1はevaluator評価済み（条件付き・P1なし。Qwenのコンテキスト長はBOSS判断待ち）、実機でQwenの返事と推薦を確認済み（BOSS）。
+
+### 段階1-b テンプレートのカテゴリ（2026-10-05、BOSS承認、Claude Codeが実装・未コミット・評価待ち、開発限定）
+
+BOSS承認事項: 固定の6つ（入荷・出荷・在庫・生産・品質・その他）、既存の行は「その他」、保存時に必須、保存後も作成者と管理者が変更可能、訂正版は元のカテゴリを初期値、同じ内容の再保存ではカテゴリを更新しない。
+
+- **変更**: `models.py`（`category`）、`migrations/0030_aianalysistemplate_category.py`（列の追加だけ。`makemigrations`で生成、`migrate`は未実行）、`analysis_template_service.py`（保存・検証・変更・表示）、`analysis_template_views.py`・`urls.py`（絞り込み・変更API。権限一覧テストに追加）、`analysis_consult_service.py`（推薦・プロンプトにカテゴリ）、`pm-ui`の`AIAnalysisTemplates.vue`・`AIAnalysisConsult.vue`・`client.js`。仕様書§5.3-4。
+- **ワーカー版**: `models.py`を変更したため、適用後は専用ワーカーの再起動が必要（開発）。
+- **本番の準備（BOSS実施）**: `ai/0030`の`migrate`（push後の本番デプロイで自動適用）。既存の行は「その他」になる。
+- **検証（Claude Code実行）**: バックエンドのカテゴリ12件を含む関連173件が成功（既存の保存テストにはカテゴリを追加）、フロント32件（templates）・分析関連は計137件、`npm run build`成功、`makemigrations --check`は変更なし。別コピーで7種類を壊すとテストが失敗することを確認。
+- **未確認**: 実ブラウザ、`ai/0030`の適用。
 
 ### 第3段階3-D テンプレートの再利用（2026-10-05、BOSS承認（A〜Eとも推奨どおり）、Claude Codeが実装・別セッションのレビュー済み（P2・P3の指摘に対応済み。対応後の再レビューは未実施）、開発限定）
 

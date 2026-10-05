@@ -39,6 +39,7 @@ async function setup(propsInit = {}, methodsInit = {}) {
   let mount, unmount
   const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount(); await Promise.resolve()
+  state.category.value = 'shipment' // 保存のテストは、カテゴリを選んだ状態から始める(必須の確認は別のテスト)
   return { state, props, calls, confirms, consent, events, stop: () => { unmount(); scope.stop() } }
 }
 function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
@@ -60,7 +61,7 @@ test('保存は確認チェック後だけ。送るのは分析案IDと版だけ
     f.state.accepted.value = true
     await f.state.save()
     assert.deepEqual(f.calls.map(c => c[0]), ['saveTemplate', 'templates'])
-    assert.deepEqual(f.calls[0][1], { plan_id: 'plan-1', revision: 6 })
+    assert.deepEqual(f.calls[0][1], { plan_id: 'plan-1', revision: 6, category: 'shipment' })
     assert.equal(f.state.accepted.value, false)
     const text = await html(f)
     assert.ok(text.includes('保存しました')); assert.ok(text.includes('テンプレート2 / 版1 / 管理者承認待ち'))
@@ -284,12 +285,13 @@ test('却下された版の訂正版は、確認チェック後に、置き換�
     f.state.acceptedCorrection.value = true
     await f.state.saveCorrection(MouseEventLike()); assert.deepEqual(f.calls, [], 'イベントを置き換え元として送らない')
     await f.state.saveCorrection(1)
-    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, replaces: 1 }])
+    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, category: 'shipment', replaces: 1 }])
     assert.equal(f.state.acceptedCorrection.value, false); assert.equal(f.state.accepted.value, true, '訂正版の保存は通常の確認を消費しない')
     // 通常の保存には、置き換え元を含めない。訂正版の確認は通常の保存にならない
     f.state.acceptedCorrection.value = true; f.state.accepted.value = false; f.calls.length = 0; await f.state.save(); assert.deepEqual(f.calls, [])
+    f.state.category.value = 'shipment' // 保存の後はカテゴリを選び直す
     f.state.accepted.value = true; await f.state.save()
-    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6 }])
+    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, category: 'shipment' }])
   } finally { f.stop(); user.stop() }
 })
 
@@ -465,4 +467,81 @@ test('通知の再送: 編集権限がなければボタンを出さず送らな
     assert.ok(f.state.error.value.includes('再送できません')); assert.equal(f.state.error.value.includes('SECRET'), false)
     assert.equal(f.calls.filter(c => c[0] === 'template').length, 2, '失敗でも記録を取り直す')
   } finally { f.stop(); view.stop() }
+})
+
+test('カテゴリは必須: 選ぶまで保存できず、選んだ値を送る。保存後は選び直しになる(カテゴリ)', async () => {
+  const f = await setup()
+  try {
+    f.state.category.value = ''
+    f.state.accepted.value = true
+    await f.state.save()
+    assert.equal(f.calls.some(c => c[0] === 'saveTemplate'), false, 'カテゴリ未選択では送らない')
+    f.state.category.value = 'quality'
+    await f.state.save()
+    assert.deepEqual(f.calls.find(c => c[0] === 'saveTemplate')[1], { plan_id: 'plan-1', revision: 6, category: 'quality' })
+    assert.equal(f.state.category.value, '', '保存後は、次の保存のために選び直す')
+    const text = await html(f)
+    for (const label of ['カテゴリ（必須）', '入荷', '出荷', '在庫', '生産', '品質', 'その他']) assert.ok(text.includes(label), label)
+  } finally { f.stop() }
+})
+
+test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {
+  const f = await setup({}, { templates: async () => ({ data: page([row(1, { category: 'shipment', category_label: '出荷' })]) }) })
+  try {
+    assert.ok((await html(f)).includes('カテゴリ: 出荷'))
+    assert.deepEqual(f.calls.filter(c => c[0] === 'templates')[0][1], { page: 1 })
+    f.state.categoryFilter.value = 'receipt'
+    await Promise.resolve(); await Promise.resolve()
+    assert.deepEqual(f.calls.filter(c => c[0] === 'templates').pop()[1], { page: 1, category: 'receipt' })
+    assert.ok((await html(f)).includes('カテゴリの絞り込み'))
+  } finally { f.stop() }
+})
+
+test('カテゴリの変更は、作成者・管理者(can_change_category)で編集権限があるときだけ。変更後に一覧と詳細を取り直し、失敗は固定文', async () => {
+  let current = 'shipment'
+  const detailOf = id => ({ data: { ...row(id, { status: 'approved', category: current, category_label: current === 'shipment' ? '出荷' : '品質' }), can_change_category: true, date_from: '2026-01-01', date_to: '2026-01-31', conditions: 'c', procedure: [], sql_steps: [], python_code: PYTHON } })
+  const f = await setup({}, { template: async id => detailOf(id), changeTemplateCategory: async (id, body) => { current = body.category; return { data: {} } } })
+  const view = await setup({ canEdit: false }, { template: async id => detailOf(id) })
+  const other = await setup({}, { template: async id => ({ data: { ...row(id, { status: 'approved' }), date_from: '2026-01-01', date_to: '2026-01-31', conditions: 'c', procedure: [], sql_steps: [], python_code: PYTHON } }) })
+  const bad = await setup({}, { template: async id => detailOf(id), changeTemplateCategory: async () => { const e = new Error('x'); e.response = { status: 403, data: { detail: 'SECRET' } }; throw e } })
+  try {
+    await f.state.showDetail(1); await view.state.showDetail(1); await other.state.showDetail(1); await bad.state.showDetail(1)
+    assert.ok((await html(f)).includes('カテゴリを変更'))
+    assert.equal((await html(view)).includes('カテゴリを変更'), false, '閲覧のみでは出さない')
+    assert.equal((await html(other)).includes('カテゴリを変更'), false, '作成者・管理者以外には出さない')
+    await f.state.changeCategory()
+    assert.equal(f.calls.some(c => c[0] === 'changeTemplateCategory'), false, '同じカテゴリでは送らない')
+    f.state.newCategory.value = 'quality'
+    await f.state.changeCategory()
+    assert.deepEqual(f.calls.filter(c => c[0] === 'changeTemplateCategory'), [['changeTemplateCategory', 1, { category: 'quality' }]])
+    assert.equal(f.state.detail.value.category, 'quality', '変更後に詳細を取り直す')
+    await view.state.changeCategory()
+    assert.equal(view.calls.some(c => c[0] === 'changeTemplateCategory'), false)
+    bad.state.newCategory.value = 'quality'
+    await bad.state.changeCategory()
+    assert.ok(bad.state.error.value.includes('権限がありません')); assert.equal(bad.state.error.value.includes('SECRET'), false)
+  } finally { f.stop(); view.stop(); other.stop(); bad.stop() }
+})
+
+test('却下された版を開くと、訂正版のカテゴリの初期値を、元の版のカテゴリにする(変えてもよい)', async () => {
+  const f = await setup({ canReview: true }, { template: async id => ({ data: { ...row(id, { status: 'rejected', category: 'inventory', category_label: '在庫' }), date_from: '2026-01-01', date_to: '2026-01-31', conditions: 'c', procedure: [], sql_steps: [], python_code: PYTHON } }) })
+  try {
+    f.state.category.value = ''
+    await f.state.showDetail(1)
+    assert.equal(f.state.category.value, 'inventory')
+    f.state.category.value = 'quality'
+    await f.state.showDetail(1)
+    assert.equal(f.state.category.value, 'quality', '選び済みの値は上書きしない')
+    // 初期値として入れた値は、別の却下版を開いたときに入れ替える。利用者が選んだ値は残す
+    const g = await setup({ canReview: true }, { template: async id => ({ data: { ...row(id, { status: 'rejected', category: id === 1 ? 'inventory' : 'receipt', category_label: 'x' }), date_from: '2026-01-01', date_to: '2026-01-31', conditions: 'c', procedure: [], sql_steps: [], python_code: PYTHON } }) })
+    try {
+      g.state.category.value = ''
+      await g.state.showDetail(1); assert.equal(g.state.category.value, 'inventory')
+      await g.state.showDetail(2); assert.equal(g.state.category.value, 'receipt', '自動で入れた値は、次の版の値に入れ替える')
+      g.state.category.value = 'quality'
+      await g.state.showDetail(1); assert.equal(g.state.category.value, 'quality', '利用者が選んだ値は残す')
+      g.state.category.value = ''
+      assert.ok((await html(g)).includes('カテゴリを選んでください'), '未選択のときは、訂正版の保存が無効な理由を出す')
+    } finally { g.stop() }
+  } finally { f.stop() }
 })
