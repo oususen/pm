@@ -12,6 +12,7 @@ from django.db.models import F
 from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import validate_generated
 from ai.services.analysis_plan_store import AnalysisError
+from ai.services.analysis_template_notify_service import schedule_result
 from ai.services.analysis_template_service import _content_sha256
 
 REJECTION_REASON_MAX = 500  # BOSS承認(2026-10-05)。超えた場合は切り詰めず拒否する
@@ -69,6 +70,10 @@ def approve_template(admin, template_id, state_revision):
             )
             if replaced != 1:
                 raise AnalysisError('置き換える却下版の状態が変わったため、承認できません。', 409)
+    # 確定の後に、作成者へ結果を通知する(メール・PM通知。失敗しても承認は取り消さない)。訂正版の承認では、置き換えられた元の版の作成者にも通知する
+    schedule_result(template.pk, 'approved', admin.pk)
+    if template.replaces_id:
+        schedule_result(template.replaces_id, 'superseded', admin.pk, template.pk)
     return AIAnalysisTemplate.objects.select_related('approved_by', 'reviewed_by').get(pk=template.pk)
 
 
@@ -82,4 +87,5 @@ def reject_template(admin, template_id, state_revision, reason):
     template = _target(template_id, state_revision)
     with transaction.atomic():
         _conditional_update(template, 'rejected', reviewed_by=admin, reviewed_at=datetime.now(), rejection_reason=reason)
+    schedule_result(template.pk, 'rejected', admin.pk)
     return AIAnalysisTemplate.objects.select_related('approved_by', 'reviewed_by').get(pk=template.pk)

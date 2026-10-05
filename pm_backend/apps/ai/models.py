@@ -183,3 +183,41 @@ class AIAnalysisTemplate(models.Model):
 
     def __str__(self):
         return f'テンプレート{self.pk}（{self.get_status_display()}）'
+
+
+class AIAnalysisTemplateNotification(models.Model):
+    """テンプレートの通知(メール・PM通知)の記録(第3段階3-C)。
+
+    宛先のメールアドレス・メール本文・送信のエラー文は保存しない(固定の理由コードだけ)。自動の再送はしない。
+    宛先ユーザーは、削除されたらNULLになる。PM通知は、削除されても記録を残す。
+    """
+    KIND_CHOICES = [('submitted', '確認依頼'), ('approved', '承認'), ('rejected', '却下'), ('superseded', '置換')]
+    CHANNEL_CHOICES = [('mail', 'メール'), ('pm', 'PM通知')]
+    STATUS_CHOICES = [('sent', '送信済み'), ('failed', '失敗'), ('skipped', '送れない')]
+
+    template = models.ForeignKey(AIAnalysisTemplate, on_delete=models.PROTECT, related_name='notifications', verbose_name='テンプレート')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, verbose_name='種別')
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, verbose_name='手段')
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='ai_analysis_template_notifications',
+        verbose_name='宛先ユーザー',
+    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, verbose_name='状態')
+    reason = models.CharField(max_length=40, blank=True, default='', verbose_name='固定の理由コード')
+    pm_notification = models.ForeignKey(
+        'notifications.Notification', null=True, blank=True, on_delete=models.SET_NULL, related_name='+', verbose_name='PM通知',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='記録日時')
+
+    class Meta:
+        db_table = 'ai_analysis_template_notification'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['template', 'kind', 'created_at', 'id'], name='ai_tplnt_tpl_kind'),
+            models.Index(fields=['status', 'created_at', 'id'], name='ai_tplnt_status'),
+        ]
+        verbose_name = 'AI分析テンプレートの通知'
+        verbose_name_plural = 'AI分析テンプレートの通知'
+
+    def __str__(self):
+        return f'通知{self.pk}（{self.get_kind_display()}・{self.get_channel_display()}・{self.get_status_display()}）'

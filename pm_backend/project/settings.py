@@ -121,6 +121,9 @@ WSGI_APPLICATION = 'project.wsgi.application'
 AI_ANALYSIS_REDIS_URL = os.getenv('AI_ANALYSIS_REDIS_URL', '').strip()
 # 生成コードの隔離実行launcher(開発限定。例: http://127.0.0.1:8091)。未設定なら分析の実行は無効。本番は設定しない。
 AI_ANALYSIS_LAUNCHER_URL = os.getenv('AI_ANALYSIS_LAUNCHER_URL', '').strip()
+# AI分析テンプレートの通知メール(第3段階3-C)。送信者=SMTP設定を持つ既存ユーザーのユーザー名、リンクの基準URL。未設定ならメールは送らない
+AI_TEMPLATE_NOTIFY_SENDER_USER = os.getenv('AI_TEMPLATE_NOTIFY_SENDER_USER', '').strip()
+PM_PUBLIC_BASE_URL = os.getenv('PM_PUBLIC_BASE_URL', '').strip().rstrip('/')
 
 AI_READER_DB_OPTIONS = {
     'charset': 'utf8mb4',

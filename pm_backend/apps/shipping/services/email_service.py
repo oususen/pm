@@ -261,8 +261,11 @@ class EmailService:
         reply_to: Optional[str] = None,
         content_type: str = 'plain',
         file_attachments: Optional[List[Dict]] = None,
+        timeout: Optional[float] = None,
     ) -> Dict:
-        """メールを送信（content_type='html'でHTML送信可、file_attachmentsは[{'filename','data'(bytes),'maintype','subtype'}]）"""
+        """メールを送信（content_type='html'でHTML送信可、file_attachmentsは[{'filename','data'(bytes),'maintype','subtype'}]）
+
+        timeout: SMTPの接続・応答の待ち秒数。指定しなければ従来どおり(待ち時間を指定しない)。"""
         smtp_config = self.get_smtp_config(user_id)
         if not smtp_config:
             return {
@@ -294,7 +297,8 @@ class EmailService:
             if cc_emails:
                 recipients.extend(cc_emails)
 
-            with smtplib.SMTP(smtp_config['host'], smtp_config['port']) as server:
+            smtp_options = {'timeout': timeout} if timeout is not None else {}
+            with smtplib.SMTP(smtp_config['host'], smtp_config['port'], **smtp_options) as server:
                 server.starttls()
                 server.login(smtp_config['user'], smtp_config['password'])
                 refused_recipients = server.send_message(msg, to_addrs=recipients)

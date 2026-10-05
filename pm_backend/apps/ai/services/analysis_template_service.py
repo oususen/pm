@@ -17,6 +17,7 @@ from rest_framework.exceptions import PermissionDenied
 from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import bundle_from_plan, steps_text, validate_generated
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
+from ai.services.analysis_template_notify_service import schedule_submitted, serialize_records
 from ai.services.chat_service import _has_resource_permission
 
 DELETED_USER_LABEL = '削除済みユーザー'
@@ -197,6 +198,7 @@ def save_template(user, plan_id, revision, replaces=None):
         if existing is None:
             raise AnalysisError('テンプレートを保存できませんでした。時間をおいて再度お試しください。', 409) from None
         return same_request(existing)
+    schedule_submitted(template.pk)  # 状態の確定の後に、別スレッドでシステム管理者へ確認依頼のメールを送る(失敗しても保存は取り消さない)
     return template, True
 
 
@@ -233,6 +235,7 @@ def serialize_template(template, user, admin, detail):
             # 却下理由・確認者は、作成者と管理者だけ(visibleと同じ範囲)に返す。置換先は、承認された訂正版
             replacement = template.corrections.filter(status='approved').order_by('id').first() if template.status == 'superseded' else None
             if review_visible:
+                data['notifications'] = serialize_records(template)
                 data.update({
                     'reviewed_by': (template.reviewed_by.get_username() if template.reviewed_by_id else DELETED_USER_LABEL) if template.reviewed_at else None,
                     'reviewed_at': template.reviewed_at.isoformat() if template.reviewed_at else None,

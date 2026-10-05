@@ -396,3 +396,32 @@ test('左のメインの見出しは、右の段階(①〜⑤)と紛らわしい
     assert.equal(/<h2>\d+\. /.test(text), false, '番号つきの見出しがない')
   } finally { f.stop() }
 })
+
+test('通知の記録は、詳細に、種別・手段・宛先・結果・理由つきで1行ずつ表示する。記録がなければ案内、作成者・管理者以外(notificationsなし)には出さない(3-C)', async () => {
+  const records = [
+    { id: 1, kind_label: '確認依頼', channel_label: 'メール', recipient: 'rv-admin', status_label: '送信済み', reason_label: '', created_at: '2026-10-05T15:00:01' },
+    { id: 2, kind_label: '確認依頼', channel_label: 'メール', recipient: 'rv-admin2', status_label: '送れない', reason_label: 'メールアドレスが未登録です', created_at: '2026-10-05T15:00:02' },
+    { id: 3, kind_label: '承認', channel_label: 'PM通知', recipient: '<b>x</b>', status_label: '送信済み', reason_label: '', created_at: '2026-10-05T15:10:00' },
+  ]
+  const f = await setup({ canReview: true }, { template: async id => ({ data: { ...pending(id), notifications: records } }) })
+  const none = await setup({ canReview: true }, { template: async id => ({ data: { ...pending(id), notifications: [] } }) })
+  const hidden = await setup({ canReview: false }, { template: async id => ({ data: pending(id) }) })
+  try {
+    await f.state.showDetail(1); await none.state.showDetail(1); await hidden.state.showDetail(1)
+    const text = (await html(f)).replace(/<!--.*?-->/g, '') // SSRの条件分岐の目印(コメント)を除いて比べる
+    assert.ok(text.includes('確認依頼 / メール / 宛先: rv-admin / 結果: 送信済み / 記録: 2026-10-05 15:00:01'))
+    assert.ok(text.includes('宛先: rv-admin2 / 結果: 送れない / 理由: メールアドレスが未登録です'))
+    assert.ok(text.includes('承認 / PM通知 / 宛先: &lt;b&gt;x&lt;/b&gt;')); assert.equal(text.includes('<b>x</b>'), false)
+    assert.ok((await html(none)).includes('まだ通知の記録はありません'))
+    assert.equal((await html(hidden)).includes('通知（メール・PM通知'), false)
+  } finally { f.stop(); none.stop(); hidden.stop() }
+})
+
+test('管理者の確認欄に、通知について事実と合わない文言(まだ送りません)を出さない(3-C)', async () => {
+  const f = await setup({ canReview: true }, { template: async id => ({ data: pending(id) }) })
+  try {
+    await f.state.showDetail(1)
+    const text = await html(f)
+    assert.ok(text.includes('管理者の確認:')); assert.equal(text.includes('まだ送りません'), false)
+  } finally { f.stop() }
+})

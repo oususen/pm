@@ -37,8 +37,14 @@
         <p v-if="detail.rejection_reason">却下理由: {{ detail.rejection_reason }}</p>
         <p v-if="detail.replaces">この版は、テンプレート{{ detail.replaces }}（却下）の訂正版です。承認すると、元の版は置換済みになります。</p>
         <p v-if="detail.replacement_id">置換先: テンプレート{{ detail.replacement_id }}</p>
+        <template v-if="detail.notifications">
+          <p>通知（メール・PM通知。宛先のメールアドレス・本文は保存しません）: {{ detail.notifications.length ? '' : 'まだ通知の記録はありません。' }}</p>
+          <ul v-if="detail.notifications.length" class="notice-records">
+            <li v-for="item in detail.notifications" :key="item.id">{{ item.kind_label }} / {{ item.channel_label }} / 宛先: {{ item.recipient || 'なし' }} / 結果: {{ item.status_label }}<template v-if="item.reason_label"> / 理由: {{ item.reason_label }}</template> / 記録: {{ formatDate(item.created_at) }}</li>
+          </ul>
+        </template>
         <template v-if="canReview && detail.status === 'pending_admin'">
-          <p>管理者の確認: 上のSQL・Pythonと手順を確認してから、承認または却下してください（メール・PM通知は、まだ送りません）。</p>
+          <p>管理者の確認: 上のSQL・Pythonと手順を確認してから、承認または却下してください。</p>
           <label>却下理由（却下のときだけ必須・{{ REASON_MAX }}文字以内）: <input v-model="reason" type="text" :maxlength="REASON_MAX" :disabled="!!busy" size="60"></label>
           <button :disabled="!!busy" @click="approve">承認（正式にする）</button>
           <button :disabled="!!busy || !reason.trim()" @click="reject">却下</button>
@@ -194,5 +200,5 @@ async function showDetail(id) {
 
 <style scoped>
 .templates { border-top: 1px solid #ccc; margin-top: 20px; } button { margin: 4px; padding: 8px; } article { margin: 12px 0; padding: 8px; background: #f5f9f8; }
-article p { margin: 2px 0; } pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+article p { margin: 2px 0; } .notice-records { margin: 2px 0 6px; padding-left: 1.4em; font-size: 13px; } pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
 </style>
