@@ -166,6 +166,11 @@
             <input v-model="rebuildForm.endDate" type="date" />
           </div>
           <p class="dialog-note">対象期間のOPEN確定受注を差し戻し後、同じ対象だけ再展開します。</p>
+          <p class="dialog-warning">
+            LT（リードタイム）を変更する場合は、変更前のLTのまま展開戻し → LT変更 → 同じ対象の再展開の順で操作してください。
+            先にLTを変更すると展開済み需要と一致せず、差し戻しできない場合があります。
+            この「戻して再展開」ではLT変更を挟めません。LT変更時は受注管理メニューの「展開メンテ」で戻し・再展開を別々に実行してください。指定期間は受注の納期範囲です。
+          </p>
           <p v-if="rebuildError" class="dialog-error">{{ rebuildError }}</p>
         </div>
         <div class="dialog-actions">
@@ -851,6 +856,7 @@ load();
 }
 .dialog-note { margin: 0; font-size: 12px; color: #475569; }
 .dialog-error { margin: 0; font-size: 12px; color: #b91c1c; }
+.dialog-warning { margin: 0; padding: 8px; font-size: 12px; color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; }
 .floating-x-scroll {
   position: fixed;
   left: 16px;

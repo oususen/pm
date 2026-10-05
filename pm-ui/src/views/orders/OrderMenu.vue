@@ -98,6 +98,10 @@
             <input v-model="maintenanceForm.endDate" type="date" />
           </div>
           <p class="dialog-note">{{ maintenanceNote }}</p>
+          <p v-if="maintenanceMode === 'revert'" class="dialog-warning">
+            LT（リードタイム）を変更する場合は、変更前のLTのまま展開戻し → LT変更 → 同じ対象の再展開の順で操作してください。
+            先にLTを変更すると展開済み需要と一致せず、差し戻しできない場合があります。指定期間は受注の納期範囲です。
+          </p>
           <p v-if="maintenanceError" class="dialog-error">{{ maintenanceError }}</p>
         </div>
         <div class="dialog-actions">
@@ -598,6 +602,15 @@ const submitMaintenance = async () => {
   margin: 0;
   font-size: 12px;
   color: #b91c1c;
+}
+.dialog-warning {
+  margin: 0;
+  padding: 8px;
+  font-size: 12px;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
 }
 
 @media (max-width: 1400px) {
