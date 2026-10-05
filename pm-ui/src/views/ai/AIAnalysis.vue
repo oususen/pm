@@ -32,7 +32,9 @@
             <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
           </div>
         </section>
+      <div id="analysis-execution" class="run-target" :class="{ ready: runReady }">
       <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
+      </div>
       <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive" @plan-created="useTemplatePlan" />
       <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
       </section>
@@ -169,6 +171,20 @@
               </template>
         </div>
       </section>
+      <section v-if="plan" class="stage" :class="[stageState(6), { ready: runReady }]">
+        <button type="button" class="stage-head" :aria-expanded="isOpen(6)" aria-controls="stage-body-6" @click="toggleStage(6)">
+          <span class="stage-no">⑥</span><strong>実行</strong><em>{{ stageLabel(6) }}</em><small v-if="stageSummary(6)" :class="{ 'run-ready-text': runReady }">{{ runReady ? '◀ ' : '' }}{{ stageSummary(6) }}</small>
+        </button>
+        <div v-show="isOpen(6)" id="stage-body-6" class="stage-body">
+          <p v-if="!codeApproved">コード承認の後に、左の「分析の実行・結果」で実行します。</p>
+          <template v-else-if="!plan.execution">
+            <p class="run-here" role="status">コード承認が済みました。<strong>左の「分析の実行・結果」で、「分析を実行」を押してください。</strong></p>
+            <p>実行基盤が使える状態かは、左の「実行基盤の状態を確認」で確認できます。</p>
+            <button type="button" @click="scrollToExecution">実行欄へ移動</button>
+          </template>
+          <p v-else role="status">実行を依頼済みです。{{ executionActive ? '実行中です。' : '' }}状態・結果は、左の「分析の実行・結果」に表示されます。</p>
+        </div>
+      </section>
         <div v-if="plan" class="actions">
           <button :disabled="!!busy" @click="refresh">分析案の状態を再取得</button>
           <button v-if="canEdit" :disabled="!!busy || executionActive" @click="resetPlan">目的・期間を変更して作り直す</button>
@@ -297,6 +313,10 @@ const trialStepLabel = computed(() => {
 })
 
 // 段階の状態(pending=未、current=今、done=済)。⑥実行は、左のメインで扱う(R2で右へ移す)
+// コード承認済み(実行できる状態の前提)。実行基盤の状態は、左の実行欄で確認する
+// 実行できる状態(コード承認済みで、まだ実行を依頼していない)。右の⑥と左の実行欄を強調する
+const runReady = computed(() => stageState(6) === 'current' && !plan.value?.execution)
+const codeApproved = computed(() => plan.value?.status === 'data_approved' && codeState.value?.status === 'code_approved')
 function stageState(n) {
   const p = plan.value
   if (n === 1) return p ? 'done' : 'current'
@@ -305,6 +325,7 @@ function stageState(n) {
   if (n === 3) return p.status === 'awaiting_method' ? 'pending' : (p.status === 'awaiting_data' ? 'current' : 'done')
   if (p.status !== 'data_approved') return 'pending'
   if (n === 4) return hasCode.value ? 'done' : 'current'
+  if (n === 6) return codeApproved.value ? (!p.execution ? 'current' : (executionActive.value ? 'current' : 'done')) : 'pending'
   if (!hasCode.value) return 'pending'
   return codeState.value?.status === 'code_approved' ? 'done' : 'current'
 }
@@ -332,7 +353,11 @@ function stageSummary(n) {
   if (n === 2) return p.method_approved_at ? `手順承認 ${formatDate(p.method_approved_at)}` : ''
   if (n === 3) return p.data_approved_at ? `データ承認 ${formatDate(p.data_approved_at)}` : ''
   if (n === 4) return hasCode.value ? (codeAttention.value ? 'コード生成済み・要確認' : 'コード生成済み') : (codeAttention.value ? 'コード・要確認' : '')
+  if (n === 6) return !codeApproved.value ? '' : (!p.execution ? '左で実行してください' : (executionActive.value ? '実行中' : '実行依頼済み'))
   return codeState.value?.status === 'code_approved' ? `コード承認 ${formatDate(codegen.value?.code_approved_at)}` : ''
+}
+function scrollToExecution() {
+  window.document?.getElementById?.('analysis-execution')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
 watch(() => plan.value?.id, () => { toggledStages.value = {} })
 
@@ -591,6 +616,13 @@ function releaseCodegen() {
 .stage.done .stage-head em { background: #d8ebe6; color: #328476; }
 .stage-head small { display: inline; margin: 0; flex-basis: 100%; color: #81929b; overflow-wrap: anywhere; }
 .stage-no { color: #0e786d; font-weight: 700; }
+.run-here { background: #fff8e6; border-left: 4px solid #d9a21b; padding: 10px 12px; font-size: 15px; }
+.stage.ready { border-color: #d9a21b; box-shadow: 0 0 0 3px #d9a21b44; background: #fffdf5; }
+.stage.ready .stage-head em { background: #d9a21b; color: #fff; }
+.run-ready-text { color: #8a5a00; font-weight: 700; font-size: 13px; }
+.run-target.ready { outline: 3px solid #d9a21b; outline-offset: 6px; border-radius: 6px; animation: run-ready-pulse 1.6s ease-in-out 3; }
+@keyframes run-ready-pulse { 50% { outline-color: #d9a21b33; } }
+@media (prefers-reduced-motion: reduce) { .run-target.ready { animation: none; } }
 .stage-body { padding: 8px 12px 12px; overflow-wrap: anywhere; }
 .plan-head { border: 1px solid #d1dddd; border-radius: 8px; padding: 8px 12px; }
 @media (max-width: 960px) { .analysis-layout { grid-template-columns: minmax(0, 1fr); } .analysis-side { order: -1; border-left: 0; padding-left: 0; } }

@@ -548,7 +548,7 @@ test('右サイドに段階カード(①〜⑤)を置き、今の段階を開き
     assert.deepEqual([4, 5].map(n => f.state.stageState(n)), ['done', 'current'])
     assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [true, true])
     html = await htmlFor(f)
-    assert.equal((html.match(/class="stage[ "]/g) || []).length, 5)
+    assert.equal((html.match(/class="stage[ "]/g) || []).length, 6, '分析案があれば、⑥実行も出る')
     assert.ok(html.includes('SELECT SUM(quantity) FROM v_ai_shipment'))
     // 利用者の開閉が、初期の開閉より優先される。分析案が変われば初期に戻る
     f.state.toggleStage(4)
@@ -640,9 +640,9 @@ test('外枠が古い間は、⑤も開く。畳んだ段階は、画面では�
     f.state.plan.value = approved({ wrapper_outdated: true })
     assert.deepEqual([4, 5].map(n => f.state.isOpen(n)), [true, true])
     assert.equal(closed(await htmlFor(f)), 3)
-    // コード承認の前(⑤が今)は、④⑤が開く。②③は済みで非表示
+    // コード承認の前(⑤が今)は、④⑤が開く。①②③と、まだ未の⑥は非表示
     f.state.plan.value = generated()
-    assert.equal(closed(await htmlFor(f)), 3)
+    assert.equal(closed(await htmlFor(f)), 4)
   } finally { f.stop() }
 })
 
@@ -703,5 +703,47 @@ test('警告で強制的に開いている間の見出しの操作は保存し�
       assert.ok(html.includes(`aria-controls="stage-body-${n}"`) && html.includes(`id="stage-body-${n}"`), String(n))
     }
     assert.ok(html.includes('aria-controls="notes-body"') && html.includes('id="notes-body"'))
+  } finally { f.stop() }
+})
+
+test('⑥実行: 実行は左のまま。コード承認が済んで実行できるようになったら、右に「左で実行してください」を出す(BOSS要望 2026-10-05)', async () => {
+  const f = await setup()
+  try {
+    // 分析案なし: ⑥のカードを出さない
+    f.state.plan.value = null
+    assert.equal((await htmlFor(f)).includes('stage-body-6'), false)
+    // コード承認の前: 未。コード承認の後に左で実行する旨だけ(閉じている)
+    f.state.plan.value = generated()
+    assert.equal(f.state.stageState(6), 'pending'); assert.equal(f.state.isOpen(6), false)
+    let html = await htmlFor(f)
+    assert.ok(html.includes('コード承認の後に、左の「分析の実行・結果」で実行します'))
+    assert.equal(html.includes('分析を実行」を押してください'), false)
+    // コード承認済み・未実行: 今。開いて、「左で実行してください」と案内する
+    const approved = generated(); approved.codegen_state = { ...approved.codegen_state, status: 'code_approved' }
+    approved.codegen = { ...approved.codegen, status: 'code_approved', code_approved_at: '2026-10-05T11:00:00' }
+    f.state.plan.value = approved
+    assert.equal(f.state.stageState(6), 'current'); assert.equal(f.state.isOpen(6), true); assert.equal(f.state.stageLabel(6), '今')
+    assert.equal(f.state.stageSummary(6), '左で実行してください')
+    html = await htmlFor(f)
+    assert.ok(html.includes('左の「分析の実行・結果」で、「分析を実行」を押してください。'))
+    assert.ok(html.includes('実行欄へ移動')); assert.ok(html.includes('id="analysis-execution"'))
+    // 実行できるときは、右の⑥と左の実行欄を強調する(気づきやすく)。それ以外では強調しない
+    assert.equal(f.state.runReady.value, true)
+    assert.ok(html.includes('class="run-target ready"')); assert.ok(html.includes('run-ready-text')); assert.ok(html.includes('◀ 左で実行してください'))
+    assert.ok(/class="stage current ready"|class="stage ready current"|class="stage current ready/.test(html) || html.includes('ready'))
+    f.state.plan.value = generated()
+    assert.equal(f.state.runReady.value, false)
+    html = await htmlFor(f)
+    assert.equal(html.includes('class="run-target ready"'), false); assert.equal(html.includes('run-ready-text'), false)
+    f.state.plan.value = approved
+    // 実行依頼済み: 実行中は今、終了後は済み
+    f.state.plan.value = { ...approved, execution: { job_id: 'job-1' } }
+    f.state.executionActive.value = true
+    assert.equal(f.state.stageState(6), 'current'); assert.equal(f.state.stageSummary(6), '実行中')
+    assert.ok((await htmlFor(f)).includes('実行を依頼済みです。実行中です。'))
+    f.state.executionActive.value = false
+    assert.equal(f.state.stageState(6), 'done'); assert.equal(f.state.stageSummary(6), '実行依頼済み'); assert.equal(f.state.isOpen(6), false)
+    // 実行欄への移動は、画面の部品がなくても、エラーにならない(window.documentがない場合)
+    assert.doesNotThrow(() => f.state.scrollToExecution())
   } finally { f.stop() }
 })
