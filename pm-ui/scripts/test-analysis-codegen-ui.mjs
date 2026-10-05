@@ -508,3 +508,18 @@ test('テンプレート由来の分析案は、AI生成の操作を出さず、
     assert.ok((await htmlFor(f)).includes('コード生成で社外送信する全文を確認'))
   } finally { f.stop() }
 })
+
+test('ヘッダ行に、タイトル・状態のチップ・AIプロバイダ・モデルの選択を並べ、分析目的の入力欄より上に表示する(BOSS要望 2026-10-05)', async () => {
+  const f = await setup()
+  try {
+    f.state.plan.value = null
+    const html = await htmlFor(f)
+    const header = html.slice(html.indexOf('<header class="topbar">'), html.indexOf('</header>'))
+    for (const part of ['AI分析', '分析案・承認', 'local-badge', 'AIプロバイダ', 'モデル']) assert.ok(header.includes(part), part)
+    assert.ok(header.indexOf('AIプロバイダ') < header.indexOf('モデル'), 'AIプロバイダの次にモデル')
+    const purpose = html.indexOf('id="analysis-purpose"'), period = html.indexOf('開始日')
+    assert.ok(purpose > html.indexOf('</header>'), '目的の入力欄は、ヘッダの下')
+    assert.ok(period > purpose, '期間は目的の下')
+    assert.equal(html.split('AIプロバイダ').length - 1, 1, 'AIの選択はヘッダの1か所だけ')
+  } finally { f.stop() }
+})

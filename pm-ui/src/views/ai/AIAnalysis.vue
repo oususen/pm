@@ -1,9 +1,27 @@
 <template>
   <main class="analysis-workspace">
-    <header><h1>AI分析</h1><span>分析案・承認</span></header>
+    <header class="topbar">
+      <div class="brand-mark">✦</div>
+      <div class="brand-title"><strong>AI分析</strong><span>分析案・承認</span></div>
+      <div class="local-badge" :class="{ offline: !selectedProvider?.available }"><i></i> {{ providerBadge }}</div>
+      <label class="provider-select">AIプロバイダ
+        <select v-model="provider" :disabled="!canEdit || !!busy || !!plan || !options" @change="onProviderChange">
+          <option v-for="item in options?.providers || []" :key="item.provider" :value="item.provider" :disabled="!item.available">
+            {{ item.label }}{{ item.available ? '' : '（利用不可）' }}
+          </option>
+        </select>
+      </label>
+      <label class="provider-select">モデル
+        <select v-model="model" :disabled="!canEdit || !!busy || !!plan || !selectedProvider" @change="onModelChange">
+          <option v-for="item in selectedProvider?.models || []" :key="item.id" :value="item.id">{{ item.label }}</option>
+        </select>
+      </label>
+    </header>
     <p class="notice">分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します。テンプレート保存は未対応です。{{ options?.notice || '' }}</p>
     <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認、コード生成・SQL試行・コード承認・状態不明の解除には「AI分析」の編集権限が必要です。</p>
     <AnalysisErrorBanner :notices="errorNotices.notices.value" />
+    <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
+    <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
     <label for="analysis-purpose">分析目的</label>
     <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
     <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
@@ -11,22 +29,6 @@
       <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
       <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
     </div>
-    <div class="period">
-      <label>AI
-        <select v-model="provider" :disabled="!canEdit || !!busy || !!plan || !options" @change="onProviderChange">
-          <option v-for="item in options?.providers || []" :key="item.provider" :value="item.provider" :disabled="!item.available">
-            {{ item.label }}{{ item.available ? '' : '（利用不可）' }}
-          </option>
-        </select>
-      </label>
-      <label>モデル
-        <select v-model="model" :disabled="!canEdit || !!busy || !!plan || !selectedProvider" @change="onModelChange">
-          <option v-for="item in selectedProvider?.models || []" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-      </label>
-    </div>
-    <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
-    <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
     <p>対象: 入荷実績・出荷実績の指定期間の全登録行。追加の絞り条件・資料取込み、生産・仕損・中断・残業は未対応です。</p>
     <template v-if="!plan">
       <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
@@ -172,6 +174,8 @@ const planProviderLabel = computed(() => {
   const label = options.value?.providers.find(item => item.provider === proposal?.provider)?.label || proposal?.provider || ''
   return proposal?.model ? `${label} / ${proposal.model}` : label
 })
+// ヘッダのチップ: 選択中のAIとモデル(利用できない場合は「要確認」)
+const providerBadge = computed(() => selectedProvider.value?.available ? `${selectedProvider.value.label} · ${model.value || '未選択'}` : `${selectedProvider.value?.label || 'AI'} · 要確認`)
 const codegen = computed(() => plan.value?.codegen || null)
 const codeState = computed(() => plan.value?.codegen_state || null)
 const codeExternal = computed(() => !['qwen', 'template'].includes(plan.value?.proposal.provider))
@@ -480,9 +484,17 @@ function releaseCodegen() {
 
 <style scoped>
 .analysis-workspace { padding: 20px; max-width: 980px; margin: auto; color: #334b50; }
-header { display: flex; align-items: center; gap: 12px; }
-h1 { font-size: 22px; margin: 0; }
-header span { background: #fff0d0; color: #805b19; border-radius: 5px; padding: 4px 8px; }
+.topbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 11px; padding: 0 0 12px; margin-bottom: 12px; border-bottom: 1px solid #e6ecef; }
+.brand-mark { width: 30px; height: 30px; border-radius: 9px; background: #0e786d; color: #fff; display: grid; place-items: center; font-size: 16px; }
+.brand-title { display: grid; gap: 1px; }
+.brand-title strong { font-size: 15px; }
+.brand-title span { font-size: 11px; color: #81929b; }
+.local-badge { margin-left: 8px; border: 1px solid #d8ebe6; border-radius: 15px; padding: 5px 10px; color: #328476; font-size: 11px; font-weight: 800; display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.local-badge i { width: 6px; height: 6px; background: #34b984; border-radius: 50%; box-shadow: 0 0 0 3px #34b98420; }
+.local-badge.offline { border-color: #f0e2c5; color: #a37b2f; }
+.local-badge.offline i { background: #dfa746; box-shadow: 0 0 0 3px #dfa74620; }
+.provider-select { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 11px; font-weight: 400; color: #72848d; }
+.provider-select select { border: 1px solid #d8e4e3; border-radius: 6px; background: #fff; color: #34515a; padding: 5px 7px; }
 .notice { background: #edf6f5; border-left: 3px solid #168779; padding: 12px; line-height: 1.7; }
 label { display: block; font-weight: 700; margin-bottom: 8px; }
 textarea { box-sizing: border-box; width: 100%; border: 1px solid #b9cccc; border-radius: 8px; padding: 12px; font: inherit; resize: vertical; }
