@@ -1,4 +1,4 @@
-# 開発専用Memuraiを起動する。サービス登録・ファイアウォール変更は行わない。
+﻿# 開発専用Memuraiを起動する。サービス登録・ファイアウォール変更は行わない。
 param(
     [string]$MemuraiPath = 'C:\Program Files\Memurai\memurai.exe'
 )
