@@ -425,3 +425,44 @@ test('管理者の確認欄に、通知について事実と合わない文言(�
     assert.ok(text.includes('管理者の確認:')); assert.equal(text.includes('まだ送りません'), false)
   } finally { f.stop() }
 })
+
+test('通知の再送: 再送できる行(can_resend)にだけボタンを出し、確認の後に1回だけ送り、記録を取り直す。入力中の却下理由は消さない', async () => {
+  const records = [
+    { id: 11, kind_label: '確認依頼', channel_label: 'メール', recipient: 'rv-admin', status_label: '失敗', reason_label: '送信に失敗、または結果が不明です', created_at: '2026-10-05T15:00:01', can_resend: true },
+    { id: 12, kind_label: '確認依頼', channel_label: 'メール', recipient: 'rv-admin2', status_label: '送信済み', reason_label: '', created_at: '2026-10-05T15:00:02', can_resend: false },
+  ]
+  let current = records
+  const f = await setup({ canReview: true }, { template: async id => ({ data: { ...pending(id), notifications: current } }), resendTemplateNotification: async () => { current = [{ ...records[0], can_resend: false }, { ...records[1] }]; return { data: {} } } })
+  try {
+    await f.state.showDetail(1)
+    f.state.reason.value = '入力中の理由'
+    const text = (await html(f)).replace(/<!--.*?-->/g, '')
+    assert.equal((text.match(/再送（同じ宛先へ1回だけ）/g) || []).length, 1)
+    f.consent.value = false
+    await f.state.resendNotice(records[1]); await f.state.resendNotice(records[0])
+    assert.equal(f.calls.some(c => c[0] === 'resendTemplateNotification'), false, '再送できない行・確認を断った場合は送らない')
+    f.consent.value = true
+    await f.state.resendNotice(records[0])
+    assert.deepEqual(f.calls.filter(c => c[0] === 'resendTemplateNotification'), [['resendTemplateNotification', 11]])
+    assert.equal(f.state.reason.value, '入力中の理由')
+    assert.equal(((await html(f)).match(/再送（同じ宛先へ1回だけ）/g) || []).length, 0, '再送後は、同じ行に再送ボタンを出さない')
+  } finally { f.stop() }
+})
+
+test('通知の再送: 編集権限がなければボタンを出さず送らない。409は固定文を出し、状態を取り直す', async () => {
+  const records = [{ id: 21, kind_label: '承認', channel_label: 'メール', recipient: 'a', status_label: '失敗', reason_label: '', created_at: '2026-10-05T15:00:01', can_resend: true }]
+  const view = await setup({ canEdit: false }, { template: async id => ({ data: { ...pending(id), notifications: records } }) })
+  const f = await setup({}, {
+    template: async id => ({ data: { ...pending(id), notifications: records } }),
+    resendTemplateNotification: async () => { const e = new Error('SECRET'); e.response = { status: 409, data: { detail: 'SECRET' } }; throw e },
+  })
+  try {
+    await view.state.showDetail(1); await f.state.showDetail(1)
+    assert.equal((await html(view)).includes('再送（同じ宛先'), false)
+    await view.state.resendNotice(records[0])
+    assert.equal(view.calls.some(c => c[0] === 'resendTemplateNotification'), false)
+    await f.state.resendNotice(records[0])
+    assert.ok(f.state.error.value.includes('再送できません')); assert.equal(f.state.error.value.includes('SECRET'), false)
+    assert.equal(f.calls.filter(c => c[0] === 'template').length, 2, '失敗でも記録を取り直す')
+  } finally { f.stop(); view.stop() }
+})

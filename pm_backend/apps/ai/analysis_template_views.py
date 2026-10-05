@@ -11,6 +11,7 @@ from ai.analysis_permissions import CanReviewAITemplates, CanUseAIAnalysis
 from ai.models import AIAnalysisTemplate
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_template_reuse_service import create_plan_from_template
+from ai.services.analysis_template_notify_service import resend as resend_notification
 from ai.services.analysis_template_review_service import approve_template, reject_template
 from ai.services.analysis_template_service import (
     get_visible_template, is_template_admin, parse_plan_id, save_template, serialize_template, visible_templates,
@@ -77,6 +78,18 @@ class AIAnalysisTemplateRejectView(APIView):
             raise AnalysisError('state_revisionとreasonだけを指定してください。')
         template = reject_template(request.user, template_id, request.data['state_revision'], request.data['reason'])
         return Response(serialize_template(template, request.user, True, True))
+
+
+class AIAnalysisTemplateNotificationResendView(APIView):
+    """失敗・送れなかったメールの手動の再送(同じ宛先へ1回だけ)。作成者と管理者だけ。"""
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
+
+    def post(self, request, record_id):
+        if not isinstance(request.data, dict) or len(request.data):
+            raise AnalysisError('本文は指定できません。')
+        admin = is_template_admin(request.user)
+        template = resend_notification(request.user, record_id, admin)
+        return Response(serialize_template(template, request.user, admin, True))
 
 
 class AIAnalysisTemplatePlanView(APIView):

@@ -19,6 +19,7 @@ from django.db import close_old_connections, transaction
 
 from accounts.models import UserSmtpConfig
 from ai.models import AIAnalysisTemplate, AIAnalysisTemplateNotification as Record
+from ai.services.analysis_plan_store import AnalysisError
 from ai.services.chat_service import _has_resource_permission
 from notifications.models import Notification
 from shipping.services.email_service import EmailService
@@ -107,15 +108,15 @@ def _sender():
     return sender if config and config.smtp_host else None
 
 
-def _send_mail(template, kind, recipient, subject, body):
-    """1人へ1通。状態と固定の理由コードだけを記録する。"""
+def _deliver(recipient, subject, body):
+    """1人へ1通を送り、(状態, 固定の理由コード)を返す。"""
     if recipient is None or not recipient.is_active:
-        return _record(template, kind, 'mail', recipient, 'skipped', 'recipient_unavailable')
+        return 'skipped', 'recipient_unavailable'
     if not recipient.email:
-        return _record(template, kind, 'mail', recipient, 'skipped', 'no_email')
+        return 'skipped', 'no_email'
     sender = _sender()
     if sender is None:
-        return _record(template, kind, 'mail', recipient, 'skipped', 'sender_not_configured')
+        return 'skipped', 'sender_not_configured'
     try:
         result = EmailService().send_plain_email(
             to_emails=[recipient.email], subject=subject, body=body, user_id=sender.pk, timeout=SMTP_TIMEOUT_SECONDS,
@@ -123,7 +124,13 @@ def _send_mail(template, kind, recipient, subject, body):
         ok = result.get('success') is True  # 戻りのメッセージ(宛先・例外文を含み得る)は使わない
     except Exception:
         ok = False
-    return _record(template, kind, 'mail', recipient, 'sent' if ok else 'failed', '' if ok else 'smtp_error')
+    return ('sent', '') if ok else ('failed', 'smtp_error')
+
+
+def _send_mail(template, kind, recipient, subject, body):
+    """1人へ1通。状態と固定の理由コードだけを記録する。"""
+    status, reason = _deliver(recipient, subject, body)
+    return _record(template, kind, 'mail', recipient, status, reason)
 
 
 def _template_label(template):
@@ -132,6 +139,33 @@ def _template_label(template):
 
 def _username(user):
     return user.get_username() if user else DELETED_USER_LABEL
+
+
+def _submitted_mail(template, link):
+    subject = f'[PM] AI分析テンプレートの確認依頼({_template_label(template)})'
+    body = '\n'.join([
+        'AI分析のテンプレートが、管理者の確認待ちで保存されました。',
+        f'テンプレートID: {template.pk} / 版: {template.version}',
+        f'作成者: {_username(template.approved_by)}',
+        'PMの「AI」→「分析」の「テンプレート」で、内容を確認して承認または却下してください。',
+        link,
+        '※目的・SQL・Pythonなどの内容は、メールに載せていません。',
+        '※このメールは自動送信です。',
+    ])
+    return subject, body
+
+
+def _result_mail(template, kind, reviewer, replacement, link):
+    phrase = RESULT_PHRASE[kind]
+    lines = [f'あなたが保存したAI分析テンプレート({_template_label(template)})が、{phrase}。']
+    if kind == 'approved':
+        lines.append('状態: 正式')
+    elif kind == 'rejected':
+        lines.append('理由は、PMのテンプレートの詳細で確認してください。')
+    elif replacement is not None:
+        lines.append(f'訂正版: {_template_label(replacement)}')
+    lines += [f'確認者: {_username(reviewer)}', '内容はPMの「AI」→「分析」の「テンプレート」で確認できます。', link, '※このメールは自動送信です。']
+    return f'[PM] AI分析テンプレートが{phrase}({_template_label(template)})', '\n'.join(lines)
 
 
 def notify_submitted(template_id):
@@ -146,16 +180,7 @@ def notify_submitted(template_id):
         for admin in admins:
             _record(template, 'submitted', 'mail', admin, 'skipped', 'base_url_not_configured')
         return
-    subject = f'[PM] AI分析テンプレートの確認依頼({_template_label(template)})'
-    body = '\n'.join([
-        'AI分析のテンプレートが、管理者の確認待ちで保存されました。',
-        f'テンプレートID: {template.pk} / 版: {template.version}',
-        f'作成者: {_username(template.approved_by)}',
-        'PMの「AI」→「分析」の「テンプレート」で、内容を確認して承認または却下してください。',
-        link,
-        '※目的・SQL・Pythonなどの内容は、メールに載せていません。',
-        '※このメールは自動送信です。',
-    ])
+    subject, body = _submitted_mail(template, link)
     for admin in admins:
         _send_mail(template, 'submitted', admin, subject, body)
 
@@ -174,15 +199,8 @@ def notify_result(template_id, kind, reviewer_id=None, replacement_id=None):
     if not link:
         _record(template, kind, 'mail', creator, 'skipped', 'base_url_not_configured')
     else:
-        lines = [f'あなたが保存したAI分析テンプレート({_template_label(template)})が、{phrase}。']
-        if kind == 'approved':
-            lines.append('状態: 正式')
-        elif kind == 'rejected':
-            lines.append('理由は、PMのテンプレートの詳細で確認してください。')
-        elif replacement is not None:
-            lines.append(f'訂正版: {_template_label(replacement)}')
-        lines += [f'確認者: {_username(reviewer)}', '内容はPMの「AI」→「分析」の「テンプレート」で確認できます。', link, '※このメールは自動送信です。']
-        _send_mail(template, kind, creator, f'[PM] AI分析テンプレートが{phrase}({_template_label(template)})', '\n'.join(lines))
+        subject, body = _result_mail(template, kind, reviewer, replacement, link)
+        _send_mail(template, kind, creator, subject, body)
     # PM通知(一覧は全員に見え得るため、ユーザー名・名称・理由は載せない)
     if creator is None or not creator.is_active:
         _record(template, kind, 'pm', creator, 'skipped', 'recipient_unavailable')
@@ -206,8 +224,13 @@ def notify_result(template_id, kind, reviewer_id=None, replacement_id=None):
 def serialize_records(template):
     """詳細に出す通知の記録(作成者と管理者だけに返す)。宛先のメールアドレス・本文・エラー文は持たない。"""
     rows = []
-    for record in template.notifications.select_related('recipient').order_by('id'):
+    records = list(template.notifications.select_related('recipient').order_by('id'))
+    counts = {}
+    for record in records:
+        counts[_group_key(record)] = counts.get(_group_key(record), 0) + 1
+    for record in records:
         rows.append({
+            'can_resend': _resendable(template, record, counts[_group_key(record)]),
             'id': record.pk, 'kind': record.kind, 'kind_label': record.get_kind_display(),
             'channel': record.channel, 'channel_label': record.get_channel_display(),
             'status': record.status, 'status_label': record.get_status_display(),
@@ -216,3 +239,56 @@ def serialize_records(template):
             'created_at': record.created_at.isoformat(),
         })
     return rows
+
+
+# --- 手動の再送(BOSS承認 2026-10-05): 失敗・送れないメールを、同じ宛先へ1回だけ、作成者または管理者が明示的に再送する ---
+RESEND_TEMPLATE_STATUS = {'submitted': 'pending_admin', 'approved': 'approved', 'rejected': 'rejected', 'superseded': 'superseded'}
+
+
+def _group_key(record):
+    return (record.kind, record.channel, record.recipient_id)
+
+
+def _resendable(template, record, group_count):
+    """再送できるのは、宛先のいるメールの失敗・送れないで、同じ(種別・宛先)の行がこの1行だけ(再送は1回まで)のとき。
+    テンプレートの状態が、その通知の種別と合っていること(古い通知を今さら送らない)。"""
+    return (record.channel == 'mail' and record.status in ('failed', 'skipped') and record.recipient_id is not None
+            and group_count == 1 and template.status == RESEND_TEMPLATE_STATUS.get(record.kind))
+
+
+def resend(user, record_id, admin):
+    """再送する。元の行は変えず、新しい行を足す。同じ宛先へ、1回だけ。テンプレートの状態は変えない。
+
+    先に新しい行を「失敗(送信に失敗、または結果が不明)」で確定してから送り、送れたら「送信済み」へ更新する
+    (二重の再送を防ぐ。途中で止まっても、結果不明として残る)。元の行を行ロックして、同時の再送を直列にする。
+    """
+    original = Record.objects.select_related('template__approved_by', 'recipient').filter(pk=record_id).first()
+    if original is None or not (admin or (original.template.approved_by_id is not None and original.template.approved_by_id == user.pk)):
+        raise AnalysisError('通知の記録が見つかりません。', 404)
+    with transaction.atomic():
+        locked = Record.objects.select_for_update().select_related('recipient').filter(pk=record_id).first()
+        if locked is None:
+            raise AnalysisError('通知の記録が見つかりません。', 404)
+        template = AIAnalysisTemplate.objects.select_related('approved_by', 'reviewed_by').get(pk=original.template_id)
+        count = Record.objects.filter(template_id=template.pk, kind=locked.kind, channel='mail', recipient_id=locked.recipient_id).count()
+        replacement = template.corrections.filter(status='approved').order_by('id').first() if locked.kind == 'superseded' else None
+        if not _resendable(template, locked, count) or (locked.kind == 'superseded' and replacement is None):
+            raise AnalysisError('この通知は再送できません(送信済み・再送済み・宛先なし、またはテンプレートの状態が変わりました)。', 409)
+        row = _record(template, locked.kind, 'mail', locked.recipient, 'failed', 'smtp_error')
+    kind, recipient, link = locked.kind, locked.recipient, _link()
+    try:
+        if not link:
+            status, reason = 'skipped', 'base_url_not_configured'
+        elif kind == 'submitted':
+            if not _is_admin(recipient):
+                status, reason = 'skipped', 'recipient_unavailable'
+            else:
+                status, reason = _deliver(recipient, *_submitted_mail(template, link))
+        else:
+            reviewer = replacement.reviewed_by if replacement is not None else template.reviewed_by
+            status, reason = _deliver(recipient, *_result_mail(template, kind, reviewer, replacement, link))
+        Record.objects.filter(pk=row.pk).update(status=status, reason=reason)
+    except Exception:
+        logger.exception('AI分析テンプレートの通知の再送に失敗しました')
+        Record.objects.filter(pk=row.pk).update(status='failed', reason='unexpected_error')
+    return template

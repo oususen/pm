@@ -218,6 +218,7 @@ export default {
     template(id) { return client.get(`/ai/analysis/templates/${id}/`) },
     saveTemplate(data) { return client.post('/ai/analysis/templates/', data) },
     createTemplatePlan(id) { return client.post(`/ai/analysis/templates/${id}/plans/`, {}) },
+    resendTemplateNotification(id) { return client.post(`/ai/analysis/template-notifications/${id}/resend/`, {}) },
     approveTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/approve/`, data) },
     rejectTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/reject/`, data) },
     options() { return client.get('/ai/analysis/options/') },

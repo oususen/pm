@@ -40,7 +40,7 @@
         <template v-if="detail.notifications">
           <p>通知（メール・PM通知。宛先のメールアドレス・本文は保存しません）: {{ detail.notifications.length ? '' : 'まだ通知の記録はありません。' }}</p>
           <ul v-if="detail.notifications.length" class="notice-records">
-            <li v-for="item in detail.notifications" :key="item.id">{{ item.kind_label }} / {{ item.channel_label }} / 宛先: {{ item.recipient || 'なし' }} / 結果: {{ item.status_label }}<template v-if="item.reason_label"> / 理由: {{ item.reason_label }}</template> / 記録: {{ formatDate(item.created_at) }}</li>
+            <li v-for="item in detail.notifications" :key="item.id">{{ item.kind_label }} / {{ item.channel_label }} / 宛先: {{ item.recipient || 'なし' }} / 結果: {{ item.status_label }}<template v-if="item.reason_label"> / 理由: {{ item.reason_label }}</template> / 記録: {{ formatDate(item.created_at) }}<button v-if="canEdit && item.can_resend" :disabled="!!busy" @click="resendNotice(item)">再送（同じ宛先へ1回だけ）</button></li>
           </ul>
         </template>
         <template v-if="canReview && detail.status === 'pending_admin'">
@@ -94,6 +94,12 @@ const REVIEW_ERRORS = Object.freeze({
   403: 'テンプレートを確認する権限がありません。',
   404: 'テンプレートが見つかりません。',
   409: 'テンプレートの状態が変わりました。一覧を更新して、最新の内容を確認してください。',
+})
+const RESEND_ERRORS = Object.freeze({
+  400: '再送の指定が正しくありません。',
+  403: '再送する権限がありません。',
+  404: '通知の記録が見つかりません。',
+  409: 'この通知は再送できません（送信済み・再送済み・宛先なし、またはテンプレートの状態が変わりました）。',
 })
 const hasCode = computed(() => props.plan?.codegen?.status === 'code_approved' && !!props.plan.codegen.executed_code_sha256)
 const savable = computed(() => props.plan?.status === 'data_approved' && hasCode.value && !props.plan?.template)
@@ -173,6 +179,23 @@ function reject() {
   if (!window.confirm('このテンプレートを却下します。却下理由は作成者と管理者だけが確認できます。')) return
   const text = reason.value
   return review(target => api.aiAnalysis.rejectTemplate(target.id, { state_revision: target.state_revision, reason: text }), 'テンプレートを却下できませんでした。一覧で状態を確認してください。')
+}
+async function resendNotice(item) {
+  if (!props.canEdit || busy.value || !detail.value || !item?.can_resend) return
+  if (!window.confirm('このメールを、同じ宛先へ再送します。再送は1回だけです。よろしいですか？')) return
+  const current = epoch, target = detail.value
+  busy.value = 'resend'; error.value = ''
+  try {
+    await api.aiAnalysis.resendTemplateNotification(item.id)
+  } catch (e) {
+    if (!disposed && current === epoch) error.value = RESEND_ERRORS[e.response?.status] || '再送できませんでした。'
+  } finally { if (!disposed && current === epoch) busy.value = '' }
+  // 成否にかかわらず、最新の通知の記録を取り直す(再送の結果・他の人の再送を反映する)
+  if (!disposed && current === epoch) {
+    const failure = error.value, typed = reason.value // 取り直しで、失敗の表示と、入力中の却下理由を消さない
+    await showDetail(target.id)
+    if (!disposed && current === epoch) { reason.value = typed; if (failure) error.value = failure }
+  }
 }
 async function startPlan(row) {
   if (!canReuse(row) || !canStartPlan.value) return

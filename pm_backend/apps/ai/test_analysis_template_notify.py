@@ -346,3 +346,141 @@ class RecordVisibilityTests(NotifyBase):
         # 一覧には出さない(詳細だけ)
         listing = self.call('ai-analysis-templates', self.creator, 'get').data['results'][0]
         self.assertNotIn('notifications', listing)
+
+
+class ResendTests(NotifyBase):
+    """失敗・送れなかったメールの手動の再送(同じ宛先へ1回だけ。作成者と管理者)。"""
+
+    def resend(self, user, record):
+        return self.call('ai-analysis-template-notification-resend', user, record_id=record.pk)
+
+    def failed_submitted(self, **overrides):
+        """確認依頼を、メール送信が失敗する状態で一度送り、管理者(admin)宛ての失敗の行を返す。"""
+        template = self.row(**overrides)
+        self.fail_mail = True
+        notify.notify_submitted(template.pk)
+        self.fail_mail = False
+        self.mails.clear()
+        record = self.records(template=template, recipient=self.admin)[0]
+        self.assertEqual((record.status, record.reason), ('failed', 'smtp_error'))
+        return template, record
+
+    def test_resend_sends_the_same_mail_once_and_adds_a_row_without_changing_the_original(self):
+        template, record = self.failed_submitted()
+        response = self.resend(self.creator, record)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.mails), 1)
+        self.assertEqual((self.mails[0]['to_emails'], self.mails[0]['subject'], self.mails[0]['timeout']),
+                         (['admin@example.com'], f'[PM] AI分析テンプレートの確認依頼(ID {template.pk}・版1)', 20))
+        rows = self.records(template=template, recipient=self.admin)
+        self.assertEqual([(r.status, r.reason) for r in rows], [('failed', 'smtp_error'), ('sent', '')])
+        self.assertEqual(rows[0].pk, record.pk)
+        self.assertEqual(self.resend(self.creator, record).status_code, 409)
+        self.assertEqual(self.resend(self.admin, rows[1]).status_code, 409)
+        self.assertEqual(len(self.mails), 1)
+
+    def test_can_resend_flag_only_for_a_single_failed_or_skipped_mail_with_a_recipient(self):
+        template, record = self.failed_submitted()
+        flags = lambda: {(r['recipient'], r['status']): r['can_resend'] for r in self.call('ai-analysis-template', self.creator, 'get', template_id=template.pk).data['notifications']}
+        self.assertEqual(flags(), {('rv-admin', 'failed'): True, ('rv-admin2', 'skipped'): True})
+        self.resend(self.creator, record)
+        after = [(r['status'], r['can_resend']) for r in self.call('ai-analysis-template', self.creator, 'get', template_id=template.pk).data['notifications'] if r['recipient'] == 'rv-admin']
+        self.assertEqual(after, [('failed', False), ('sent', False)])
+
+    def test_only_creator_and_admins_may_resend_and_others_see_nothing(self):
+        _, record = self.failed_submitted()
+        self.assertEqual(self.resend(self.other, record).status_code, 404)
+        self.assertEqual(self.resend(None, record).status_code, 403)
+        self.assertEqual(self.mails, [])
+        self.assertEqual(self.resend(self.admin2, record).status_code, 200)
+        self.assertEqual(len(self.mails), 1)
+
+    def test_without_the_analysis_edit_permission_the_resend_is_refused(self):
+        _, record = self.failed_submitted()
+        UserPermission.objects.filter(user=self.creator, resource='ai.analysis').update(can_edit=False)
+        self.assertEqual(self.resend(self.creator, record).status_code, 403)
+        self.assertEqual(self.mails, [])
+
+    def test_a_sent_row_a_pm_row_and_a_row_without_recipient_cannot_be_resent(self):
+        template = self.row(status='approved')
+        notify.notify_result(template.pk, 'approved', self.admin.pk)
+        mail_row, pm_row = self.records(template=template)
+        self.assertEqual((mail_row.status, pm_row.channel), ('sent', 'pm'))
+        no_recipient = Record.objects.create(template=template, kind='approved', channel='mail', recipient=None, status='failed', reason='unexpected_error')
+        for record in (mail_row, pm_row, no_recipient):
+            with self.subTest(record=record.pk):
+                self.assertEqual(self.resend(self.admin, record).status_code, 409)
+        self.assertEqual(len(self.mails), 1)
+
+    def test_a_notice_for_an_old_state_is_not_resent(self):
+        template, record = self.failed_submitted()
+        self.assertEqual(self.approve(self.admin, template).status_code, 200)
+        self.mails.clear()
+        self.assertEqual(self.resend(self.admin, record).status_code, 409)
+        self.assertEqual(self.mails, [])
+        self.assertEqual(len(self.records(template=template, kind='submitted', recipient=self.admin)), 1)
+
+    def test_result_mail_is_resent_with_the_same_fixed_text_and_reviewer(self):
+        template = self.row(status='rejected', rejection_reason='却下理由の本文ＺＺＺ', reviewed_by=self.admin, reviewed_at=datetime.now())
+        self.fail_mail = True
+        notify.notify_result(template.pk, 'rejected', self.admin.pk)
+        self.fail_mail = False
+        self.mails.clear()
+        record = self.records(template=template, channel='mail')[0]
+        response = self.resend(self.creator, record)
+        self.assertEqual(response.status_code, 200)
+        mail = self.mails[0]
+        self.assertEqual((mail['to_emails'], mail['subject']), (['creator@example.com'], f'[PM] AI分析テンプレートが却下されました(ID {template.pk}・版1)'))
+        self.assertIn('確認者: rv-admin', mail['body'])
+        self.assertNotIn('ＺＺＺ', mail['body'])
+        self.assertEqual(Notification.objects.count(), 1)  # 再送でPM通知は増えない(最初の分だけ)
+        self.assertEqual([r.status for r in self.records(template=template, channel='mail')], ['failed', 'sent'])
+
+    def test_without_the_base_url_the_resend_records_skipped_and_uses_up_the_single_resend(self):
+        template, record = self.failed_submitted()
+        with override_settings(PM_PUBLIC_BASE_URL=''):
+            self.assertEqual(self.resend(self.creator, record).status_code, 200)
+        self.assertEqual(self.mails, [])
+        self.assertEqual([(r.status, r.reason) for r in self.records(template=template, recipient=self.admin)],
+                         [('failed', 'smtp_error'), ('skipped', 'base_url_not_configured')])
+        self.assertEqual(self.resend(self.creator, record).status_code, 409)
+
+    def test_a_recipient_who_is_no_longer_an_admin_is_not_mailed_again(self):
+        template, record = self.failed_submitted()
+        UserPermission.objects.filter(user=self.admin, resource='settings.ai').delete()
+        get_user_model().objects.filter(pk=self.admin.pk).update(is_superuser=False)
+        self.assertEqual(self.resend(self.creator, record).status_code, 200)
+        self.assertEqual(self.mails, [])
+        self.assertEqual(self.records(template=template, recipient=self.admin)[-1].reason, 'recipient_unavailable')
+
+    def test_a_failure_during_the_resend_is_recorded_without_the_exception_text(self):
+        template, record = self.failed_submitted()
+        with patch.object(notify, '_deliver', side_effect=RuntimeError('SECRET-RESEND')):
+            response = self.resend(self.creator, record)
+        self.assertEqual(response.status_code, 200)
+        last = self.records(template=template, recipient=self.admin)[-1]
+        self.assertEqual((last.status, last.reason), ('failed', 'unexpected_error'))
+        self.assertNotIn('SECRET', json.dumps(response.data, ensure_ascii=False))
+        self.assertEqual(self.resend(self.creator, record).status_code, 409)
+
+    def test_a_body_is_refused_and_the_record_stays_hidden_in_the_response(self):
+        _, record = self.failed_submitted()
+        response = self.call('ai-analysis-template-notification-resend', self.creator, data={'to': 'x@example.com'}, record_id=record.pk)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.mails, [])
+        ok = self.resend(self.creator, record)
+        dumped = json.dumps(ok.data, ensure_ascii=False)
+        self.assertNotIn('example.com', dumped); self.assertNotIn('SECRET', dumped)
+
+    def test_a_missing_record_is_404(self):
+        self.assertEqual(self.call('ai-analysis-template-notification-resend', self.admin, record_id=999999).status_code, 404)
+
+    def test_a_supersede_notice_without_an_approved_correction_is_not_resent(self):
+        template = self.row(status='superseded')
+        self.fail_mail = True
+        notify.notify_result(template.pk, 'superseded', self.admin.pk)
+        self.fail_mail = False
+        self.mails.clear()
+        record = self.records(template=template, channel='mail')[0]
+        self.assertEqual(self.resend(self.creator, record).status_code, 409)
+        self.assertEqual(self.mails, [])
