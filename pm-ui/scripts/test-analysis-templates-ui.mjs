@@ -387,3 +387,12 @@ test('再利用: 実行中・権限なし・全文が見えない・却下の行
     } finally { f.stop() }
   }
 })
+
+test('左のメインの見出しは、右の段階(①〜⑤)と紛らわしい番号を付けない(BOSS指摘 2026-10-05)', async () => {
+  const f = await setup()
+  try {
+    const text = await html(f)
+    assert.ok(text.includes('<h2>テンプレート</h2>'))
+    assert.equal(/<h2>\d+\. /.test(text), false, '番号つきの見出しがない')
+  } finally { f.stop() }
+})

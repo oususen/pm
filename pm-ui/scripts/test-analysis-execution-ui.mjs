@@ -402,3 +402,12 @@ test('実行の失敗理由 template_unavailable は固定文で表示する', a
     assert.ok((await html(f)).includes('テンプレートが再利用できない状態になったため、実行しませんでした。'))
   } finally { f.stop() }
 })
+
+test('実行欄の見出しは、右の段階(①〜⑤)と紛らわしい番号を付けない(BOSS指摘 2026-10-05)', async () => {
+  const f = await setup()
+  try {
+    const text = await html(f)
+    assert.ok(text.includes('<h2>分析の実行・結果</h2>'))
+    assert.equal(/<h2>\d+\. /.test(text), false)
+  } finally { f.stop() }
+})

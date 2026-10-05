@@ -1,7 +1,7 @@
 <template>
   <section class="execution">
     <AnalysisErrorBanner v-if="errorNotices.renderBanner" :notices="errorNotices.notices.value" />
-    <h2>4. 分析の実行・結果</h2>
+    <h2>分析の実行・結果</h2>
     <p>{{ availability?.notice || '実行基盤の状態を確認してください。' }}</p>
     <button :disabled="!!busy" @click="checkAvailability">実行基盤の状態を確認</button>
     <template v-if="plan?.template?.status === 'pending_admin'">
