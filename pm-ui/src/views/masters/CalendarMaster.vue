@@ -139,7 +139,7 @@
           </div>
           <div class="form-group">
             <label>カレンダ区分 *</label>
-            <select v-model="formData.calendar_type" required :disabled="!canEdit">
+            <select v-model="formData.calendar_type" required :disabled="!canEdit" @change="applyCalendarTypeDefaults">
               <option value="">選択してください</option>
               <option value="INTERNAL">社内</option>
               <option value="SUPPLIER">仕入れ</option>
@@ -147,6 +147,18 @@
               <option value="CUSTOMER">顧客</option>
               <option value="OTHER">その他</option>
             </select>
+          </div>
+          <div class="form-group assignment-flags">
+            <label>
+              ライン割当
+              <input v-model="formData.is_line_assignable" type="checkbox" :disabled="!canEdit" />
+              可
+            </label>
+            <label>
+              仕入先割当
+              <input v-model="formData.is_supplier_assignable" type="checkbox" :disabled="!canEdit" />
+              可
+            </label>
           </div>
           <div class="form-group">
             <label>説明</label>
@@ -445,6 +457,13 @@ const saveDayNote = async (day, event) => {
   } finally {
     savingNoteDateKey.value = ''
   }
+}
+
+// 新規作成の区分選択時だけ初期値を設定し、編集では保存済みの可否を維持する。
+const applyCalendarTypeDefaults = () => {
+  if (isEdit.value || !canEdit.value) return
+  formData.value.is_line_assignable = formData.value.calendar_type === 'INTERNAL'
+  formData.value.is_supplier_assignable = formData.value.calendar_type === 'SUPPLIER'
 }
 
 const showNewDialog = () => {
@@ -747,6 +766,24 @@ td.out {
   box-sizing: border-box;
 }
 
+.assignment-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.assignment-flags label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.assignment-flags input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;
@@ -787,4 +824,3 @@ td.out {
   }
 }
 </style>
-
