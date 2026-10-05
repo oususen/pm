@@ -47,6 +47,7 @@
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <label for="analysis-purpose">分析目的</label>
       <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
+      <AIAnalysisConsult v-if="canEdit && !plan" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" @apply="applyConsult" @plan-created="useTemplatePlan" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
       <div class="period">
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
@@ -197,6 +198,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '../../api/client'
+import AIAnalysisConsult from './AIAnalysisConsult.vue'
 import AIAnalysisExecution from './AIAnalysisExecution.vue'
 import AIAnalysisTemplates from './AIAnalysisTemplates.vue'
 import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
@@ -398,6 +400,11 @@ const statusLabel = computed(() => ({ awaiting_method: '分析案の承認待ち
 const formatNumber = value => value == null ? '未確認' : Number(value).toLocaleString('ja-JP')
 const formatDate = value => value?.replace('T', ' ').slice(0, 19) || ''
 
+// AIの文案を、目的欄・期間欄へ取り込む(分析案は自動では作らない)
+function applyConsult(draft) {
+  if (draft.purpose) purpose.value = draft.purpose
+  if (draft.date_from && draft.date_to) { dateFrom.value = draft.date_from; dateTo.value = draft.date_to }
+}
 // テンプレートから作成した分析案を、現在の分析案にする(AIは使わない。承認・件数確認・試行・コード承認は、この画面で取り直す)
 function useTemplatePlan(created) {
   if (executionActive.value) return

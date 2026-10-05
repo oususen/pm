@@ -221,6 +221,7 @@ export default {
     resendTemplateNotification(id) { return client.post(`/ai/analysis/template-notifications/${id}/resend/`, {}) },
     approveTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/approve/`, data) },
     rejectTemplate(id, data) { return client.post(`/ai/settings/analysis-templates/${id}/reject/`, data) },
+    consult(data) { return client.post('/ai/analysis/consult/', data) },
     options() { return client.get('/ai/analysis/options/') },
     externalPreview(data) { return client.post('/ai/analysis/external-preview/', data) },
     createPlan(data) { return client.post('/ai/analysis/plans/', data) },

@@ -38,6 +38,7 @@ ENDPOINTS = (
     ('ai-analysis-template', 'get', 'template_id'),
     ('ai-analysis-template-plans', 'post', 'template_id'),
     ('ai-analysis-template-notification-resend', 'post', 'record_id'),
+    ('ai-analysis-consult', 'post', None),
 )
 ROUTES = {route.name: route for route in urls.urlpatterns if str(route.pattern).startswith('ai/analysis/')}
 

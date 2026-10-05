@@ -18,7 +18,7 @@ const template = compileTemplate({ source: parsed.descriptor.template.content, f
 assert.deepEqual(template.errors, [])
 const exposed = 'plan,busy,error,codePreview,codeSendAccepted,codeAccepted,codeStateFresh,codeInFlight,canGenerate,canTrial,canApproveCode,trialPassed,hasCode,prepareCodePreview,generateCode,trialCode,approveCode,releaseCodegen,refresh,resetPlan'
 const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll', 'visible'].includes(name))
-const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisExecution', 'AIAnalysisTemplates', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
+const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisConsult', 'AIAnalysisExecution', 'AIAnalysisTemplates', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   `${parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')}\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code
   .replace(/import \{([^}]+)\} from "vue"/, (_, imports) => `const {${imports.replace(/ as /g, ':')}} = Vue`)
@@ -58,7 +58,7 @@ async function setup(provider = 'openrouter') {
     calls.push([name, ...args]); return methods[name](...args)
   }])) }
   const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, () => props, fn => { mount = fn }, fn => { unmount = fn }, api,
-    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>分析実行の専用画面</section>' }, { template: '<section>テンプレートの専用画面</section>' }, AnalysisErrorBanner, useAnalysisErrorNotices))
+    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>AI相談の専用画面</section>' }, { template: '<section>分析実行の専用画面</section>' }, { template: '<section>テンプレートの専用画面</section>' }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount()
   state.plan.value = dataPlan(provider)
   calls.length = 0
@@ -745,5 +745,26 @@ test('⑥実行: 実行は左のまま。コード承認が済んで実行でき
     assert.equal(f.state.stageState(6), 'done'); assert.equal(f.state.stageSummary(6), '実行依頼済み'); assert.equal(f.state.isOpen(6), false)
     // 実行欄への移動は、画面の部品がなくても、エラーにならない(window.documentがない場合)
     assert.doesNotThrow(() => f.state.scrollToExecution())
+  } finally { f.stop() }
+})
+
+test('AIとの相談の欄は、編集権限があり分析案がないときだけ出す。AIの文案は目的欄・期間欄へ取り込み、分析案は作らない', async () => {
+  const f = await setup()
+  try {
+    assert.equal((await htmlFor(f)).includes('AI相談の専用画面'), false, '分析案があるときは出さない')
+    f.state.plan.value = null
+    assert.equal((await htmlFor(f)).includes('AI相談の専用画面'), true)
+    f.props.canEdit = false
+    assert.equal((await htmlFor(f)).includes('AI相談の専用画面'), false, '閲覧のみのときは出さない')
+    f.props.canEdit = true
+    f.calls.length = 0
+    f.state.applyConsult({ purpose: '8月と9月の出荷を比較する', date_from: '2026-08-01', date_to: '2026-09-30' })
+    assert.deepEqual([f.state.purpose.value, f.state.dateFrom.value, f.state.dateTo.value], ['8月と9月の出荷を比較する', '2026-08-01', '2026-09-30'])
+    f.state.applyConsult({ purpose: null, date_from: null, date_to: null })
+    assert.deepEqual([f.state.purpose.value, f.state.dateFrom.value, f.state.dateTo.value], ['8月と9月の出荷を比較する', '2026-08-01', '2026-09-30'], '空の項目は上書きしない')
+    f.state.applyConsult({ purpose: '目的だけ', date_from: '2026-01-01', date_to: null })
+    assert.deepEqual([f.state.purpose.value, f.state.dateFrom.value, f.state.dateTo.value], ['目的だけ', '2026-08-01', '2026-09-30'], '期間は両方そろったときだけ取り込む')
+    assert.deepEqual(f.calls, [], '取り込んでも、分析案の作成・AIの呼び出しはしない')
+    assert.equal(f.state.plan.value, null)
   } finally { f.stop() }
 })

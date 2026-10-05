@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from ai.views import AIChatView, AIConversationViewSet, AITranscribeView
 from ai.views import AIAnalysisCodegenApproveView, AIAnalysisCodegenPreviewView, AIAnalysisCodegenReleaseView, AIAnalysisCodegenTrialView, AIAnalysisCodegenView
 from ai.views import AIAnalysisCodegenRefreshWrapperView
-from ai.views import AIAnalysisApproveView, AIAnalysisExternalPreviewView, AIAnalysisOptionsView, AIAnalysisPlansView, AIAnalysisPlanView, AIAnalysisPreviewView
+from ai.views import AIAnalysisApproveView, AIAnalysisConsultView, AIAnalysisExternalPreviewView, AIAnalysisOptionsView, AIAnalysisPlansView, AIAnalysisPlanView, AIAnalysisPreviewView
 from ai.config.views import AIAnalysisExecutionPolicyView, AICrossScreenAccessPolicyViewSet, AIDataPolicyView, AIKnowledgeDocumentViewSet, AIKnowledgeSourceViewSet, AIProviderConfigViewSet, AISQLDictionaryView, AIToolPolicyViewSet
 from ai.views_ai_config import AISearchConfigViewSet, AISearchConfigModelsView
 from ai.analysis_template_views import (
@@ -37,6 +37,7 @@ urlpatterns = [
     path('ai/transcribe/', AITranscribeView.as_view(), name='ai-transcribe'),
     path('ai/analysis/options/', AIAnalysisOptionsView.as_view(), name='ai-analysis-options'),
     path('ai/analysis/external-preview/', AIAnalysisExternalPreviewView.as_view(), name='ai-analysis-external-preview'),
+    path('ai/analysis/consult/', AIAnalysisConsultView.as_view(), name='ai-analysis-consult'),
     path('ai/analysis/plans/', AIAnalysisPlansView.as_view(), name='ai-analysis-plans'),
     path('ai/analysis/plans/<uuid:plan_id>/', AIAnalysisPlanView.as_view(), name='ai-analysis-plan'),
     path('ai/analysis/plans/<uuid:plan_id>/approve/', AIAnalysisApproveView.as_view(), name='ai-analysis-approve'),

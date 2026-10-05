@@ -19,6 +19,7 @@ from ai.serializers import AIConversationListSerializer, AIConversationSerialize
 from ai.services.chat_service import AIChatAPIView, _has_resource_permission
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore, public_plan
 from ai.services import analysis_codegen_service as codegen
+from ai.services.analysis_consult_service import consult
 from ai.services.analysis_planning_service import approve_plan, create_plan, external_send_preview, planning_options, preview_plan
 from notifications.transcription import AudioTooLongError, transcribe_audio_file
 
@@ -37,6 +38,14 @@ class AIAnalysisPlansView(APIView):
 
     def post(self, request):
         return Response(_codegen_response(create_plan(request.user.pk, request.data)), status=201)
+
+
+class AIAnalysisConsultView(APIView):
+    """分析の前に、目的を整えるやり取りと、承認済みテンプレートの推薦(ローカルQwenだけ。保存しない)。"""
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
+
+    def post(self, request):
+        return Response(consult(request.data))
 
 
 class AIAnalysisExternalPreviewView(APIView):

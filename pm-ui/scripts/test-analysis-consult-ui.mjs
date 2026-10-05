@@ -1,0 +1,145 @@
+// 分析の前のAIとの相談(目的を整える・テンプレートの推薦)の操作とVue SSR。AI・DB・Dockerへの接続は行わない。
+import { readFileSync } from 'node:fs'
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import * as Vue from 'vue'
+import { renderToString } from '@vue/server-renderer'
+import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+
+const filename = new URL('../src/views/ai/AIAnalysisConsult.vue', import.meta.url)
+const parsed = parse(readFileSync(filename, 'utf8'), { filename: filename.pathname })
+assert.deepEqual(parsed.errors, [])
+const script = compileScript(parsed.descriptor, { id: 'consult-test' })
+const template = compileTemplate({ source: parsed.descriptor.template.content, filename: filename.pathname, id: 'consult-test', compilerOptions: { bindingMetadata: script.bindings } })
+assert.deepEqual(template.errors, [])
+const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'ref', 'api', 'plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo'].includes(n))
+const create = new Function('ref', 'computed', 'onBeforeUnmount', 'defineProps', 'defineEmits', 'api', 'window',
+  parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '') + `\nreturn {${names.join(',')}}`)
+const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
+
+const reply = (extra = {}) => ({ data: { reply: '製品は絞りますか？', draft: { purpose: null, date_from: null, date_to: null }, templates: [], provider: 'qwen', model: 'm', ...extra } })
+function setup(propsInit = {}, methodsInit = {}) {
+  const props = Vue.reactive({ plan: null, canEdit: true, blocked: false, purpose: '', dateFrom: '', dateTo: '', ...propsInit }), calls = [], confirms = [], events = [], consent = { value: true }
+  const methods = { consult: async () => reply(), createTemplatePlan: async id => ({ data: { id: 'new-plan', template: { id } } }), ...methodsInit }
+  const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
+  const scope = Vue.effectScope()
+  let state
+  scope.run(() => { state = create(Vue.ref, Vue.computed, () => {}, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }) })
+  const unmountFn = () => scope.stop()
+  return { state, props, calls, confirms, events, consent, stop: unmountFn }
+}
+const html = f => renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props))
+const sends = f => f.calls.filter(c => c[0] === 'consult')
+
+test('送信すると、やり取り全体をAPIへ送り、AIの返事を履歴に足す。入力欄は空になる', async () => {
+  const f = setup()
+  try {
+    f.state.input.value = '先月の出荷を比べたい'
+    await f.state.send()
+    f.state.input.value = '製品は全部です'
+    await f.state.send()
+    assert.deepEqual(sends(f)[0][1], { messages: [{ role: 'user', content: '先月の出荷を比べたい' }] })
+    assert.deepEqual(sends(f)[1][1].messages.map(m => [m.role, m.content]), [['user', '先月の出荷を比べたい'], ['assistant', '製品は絞りますか？'], ['user', '製品は全部です']])
+    assert.equal(f.state.input.value, '')
+    const text = await html(f)
+    assert.ok(text.includes('あなた:') && text.includes('製品は絞りますか？'))
+  } finally { f.stop() }
+})
+
+test('送れない状態(権限なし・分析案あり・他の操作中・空入力)では送らない', async () => {
+  const cases = [{ canEdit: false }, { plan: { id: 'p' } }, { blocked: true }]
+  for (const init of cases) {
+    const f = setup(init)
+    try { f.state.input.value = '相談'; await f.state.send(); assert.equal(sends(f).length, 0, JSON.stringify(init)) } finally { f.stop() }
+  }
+  const f = setup()
+  try { f.state.input.value = '   '; await f.state.send(); assert.equal(sends(f).length, 0) } finally { f.stop() }
+})
+
+test('失敗したときは、固定文を出し、送った発言を履歴へ入れず入力欄に残す(再送できる)。APIの本文は出さない', async () => {
+  const f = setup({}, { consult: async () => { const e = new Error('SECRET'); e.response = { status: 503, data: { detail: 'SECRET-OLLAMA' } }; throw e } })
+  try {
+    f.state.input.value = '相談'
+    await f.state.send()
+    assert.deepEqual(f.state.messages.value, [])
+    assert.equal(f.state.input.value, '相談')
+    assert.ok(f.state.error.value.includes('ローカルAIを使えません')); assert.equal(f.state.error.value.includes('SECRET'), false)
+    assert.equal(f.state.busy.value, '')
+  } finally { f.stop() }
+})
+
+test('AIの文案は、取り込みを押したときだけ親へ渡す。目的欄・期間欄に内容があれば確認し、断れば渡さない', async () => {
+  const draft = { purpose: '8月と9月の出荷を比較する', date_from: '2026-08-01', date_to: '2026-09-30' }
+  const f = setup({}, { consult: async () => reply({ draft }) })
+  try {
+    f.state.input.value = '相談'; await f.state.send()
+    assert.deepEqual(f.events, [], '文案を受け取っただけでは、親へ渡さない')
+    f.state.apply()
+    assert.deepEqual(f.events, [['apply', { purpose: '8月と9月の出荷を比較する', date_from: '2026-08-01', date_to: '2026-09-30' }]])
+    assert.equal(f.confirms.length, 0, '空の欄には確認なしで入れる')
+    f.props.purpose = '既存の目的'
+    f.consent.value = false
+    f.state.apply()
+    assert.equal(f.confirms.length, 1); assert.equal(f.events.length, 1, '確認を断れば渡さない')
+    f.consent.value = true
+    f.state.apply()
+    assert.equal(f.events.length, 2)
+  } finally { f.stop() }
+})
+
+test('期間だけ・目的だけの文案は、ある方だけを渡す。どちらもなければ取り込みボタンを出さない', async () => {
+  const f = setup({}, { consult: async () => reply({ draft: { purpose: '目的だけ', date_from: null, date_to: null } }) })
+  const none = setup()
+  try {
+    f.state.input.value = '相談'; await f.state.send(); f.state.apply()
+    assert.deepEqual(f.events[0][1], { purpose: '目的だけ', date_from: null, date_to: null })
+    none.state.input.value = '相談'; await none.state.send()
+    assert.equal((await html(none)).includes('取り込む'), false)
+    assert.equal((await html(f)).includes('取り込む'), true)
+  } finally { f.stop(); none.stop() }
+})
+
+test('推薦されたテンプレートを1行ずつ表示し、押すとテンプレートから分析案を作って親へ渡す(AIは使わない)', async () => {
+  const templates = [{ id: 7, version: 2, name: '<b>月別</b>', purpose: '目的7', date_from: '2026-08-01', date_to: '2026-09-30' }, { id: 9, version: 1, name: '製品別', purpose: '目的9', date_from: '2026-01-01', date_to: '2026-01-31' }]
+  const f = setup({}, { consult: async () => reply({ templates }) })
+  try {
+    f.state.input.value = '相談'; await f.state.send()
+    const text = (await html(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('近い承認済みテンプレート（2件）'))
+    assert.ok(text.includes('テンプレート7（版2） / &lt;b&gt;月別&lt;/b&gt; / 目的: 目的7 / 期間: 2026-08-01 ～ 2026-09-30')); assert.equal(text.includes('<b>月別</b>'), false)
+    await f.state.useTemplate(templates[0])
+    assert.deepEqual(f.calls.filter(c => c[0] === 'createTemplatePlan'), [['createTemplatePlan', 7]])
+    assert.deepEqual(f.events, [['plan-created', { id: 'new-plan', template: { id: 7 } }]])
+  } finally { f.stop() }
+})
+
+test('テンプレートの再利用が失敗したときは、固定文を出す(409)', async () => {
+  const f = setup({}, { createTemplatePlan: async () => { const e = new Error('x'); e.response = { status: 409, data: { detail: 'SECRET' } }; throw e } })
+  try {
+    await f.state.useTemplate({ id: 1 })
+    assert.ok(f.state.error.value.includes('再利用できません')); assert.equal(f.state.error.value.includes('SECRET'), false)
+    assert.deepEqual(f.events, [])
+  } finally { f.stop() }
+})
+
+test('やり直すと、履歴・文案・推薦・エラーを消す。送信中は消さない', async () => {
+  const f = setup({}, { consult: async () => reply({ draft: { purpose: '文案', date_from: null, date_to: null }, templates: [{ id: 1, version: 1, name: 'n', purpose: 'p', date_from: '2026-01-01', date_to: '2026-01-31' }] }) })
+  try {
+    f.state.input.value = '相談'; await f.state.send()
+    f.state.busy.value = 'send'; f.state.reset(); assert.equal(f.state.messages.value.length, 2)
+    f.state.busy.value = ''; f.state.reset()
+    assert.deepEqual([f.state.messages.value, f.state.draft.value, f.state.templates.value], [[], null, []])
+  } finally { f.stop() }
+})
+
+test('案内文: 社外へ送らないこと・保存されないこと・数値を知らないことを明記し、分析案がある間は使えない理由を出す', async () => {
+  const f = setup()
+  const planned = setup({ plan: { id: 'p' } })
+  const viewer = setup({ canEdit: false })
+  try {
+    const text = await html(f)
+    for (const part of ['社外へ送りません', '保存されません', 'AIは数値を知らず']) assert.ok(text.includes(part), part)
+    assert.ok((await html(planned)).includes('分析案を作った後は使えません'))
+    assert.ok((await html(viewer)).includes('編集権限が必要です'))
+  } finally { f.stop(); planned.stop(); viewer.stop() }
+})
