@@ -261,6 +261,31 @@ class RunHistoryAndExecuteTests(ReuseBase):
                 submit.assert_not_called()
 
 
+class NoSaveFromTemplatePlanTests(ReuseBase):
+    def test_template_derived_plan_cannot_be_saved_as_a_template_and_creates_no_duplicate(self):
+        template = self.row(status='approved')
+        self.assertEqual(self.create_plan(self.other, template).status_code, 201)
+        plan = {**FakeStore.created[0][0], 'status': 'data_approved', 'owner_id': self.other.pk}
+        plan['codegen'] = {**plan['codegen'], 'status': 'code_approved'}
+        plan['method_approved_at'] = plan['data_approved_at'] = datetime.now().isoformat()
+        plan['codegen']['code_approved_at'] = datetime.now().isoformat()
+        before = AIAnalysisTemplate.objects.count()
+        with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: json.loads(json.dumps(plan))):
+            response = self.call('ai-analysis-templates', self.other, 'post', {'plan_id': plan['id'], 'revision': plan['revision']})
+            # 管理者の訂正版としての保存も同じ(内容が同じで意味がない)
+            rejected = self.row(status='rejected')
+            correction = self.call('ai-analysis-templates', self.admin, 'post', {'plan_id': plan['id'], 'revision': plan['revision'], 'replaces': rejected.pk})
+        self.assertEqual((response.status_code, correction.status_code), (409, 409))
+        self.assertNotIn('Traceback', json.dumps(response.data, ensure_ascii=False))
+        self.assertEqual(AIAnalysisTemplate.objects.count(), before + 1)  # rejected行を作った1件だけ。保存は増えていない
+
+    def test_plain_plan_is_still_saved(self):
+        plan = make_plan(self.creator.pk)
+        with patch.object(service.AnalysisPlanStore, 'get', lambda _s, pid, owner: json.loads(json.dumps(plan))):
+            response = self.call('ai-analysis-templates', self.creator, 'post', {'plan_id': plan['id'], 'revision': plan['revision']})
+        self.assertEqual(response.status_code, 201)
+
+
 class NoRegenerationTests(ReuseBase):
     def test_code_generation_and_its_preview_are_refused_for_template_plans_without_calling_the_ai(self):
         plan = {**make_plan(self.creator.pk), 'template': {'id': 1, 'version': 1}, 'status': 'data_approved'}

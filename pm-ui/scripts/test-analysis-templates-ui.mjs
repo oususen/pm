@@ -148,6 +148,25 @@ test('保存中に分析案が切り替わったら、前の分析案の保存�
   } finally { f.stop() }
 })
 
+test('テンプレートから作成した分析案では、保存の欄を出さず、保存も呼ばない(重複の防止)', async () => {
+  const f = await setup({ plan: plan({ template: { id: 7, version: 1, status: 'approved' } }) })
+  try {
+    f.calls.length = 0
+    assert.equal(f.state.savable.value, false)
+    f.state.accepted.value = true; f.state.acceptedCorrection.value = true
+    await f.state.save(); await f.state.saveCorrection(1)
+    assert.deepEqual(f.calls, [])
+    const text = await html(f)
+    assert.ok(text.includes('テンプレートから作成した分析案は、テンプレートとして保存できません'))
+    assert.equal(text.includes('テンプレートとして保存</button>'), false)
+    assert.equal(text.includes('コードを確認し、管理者承認待ちのテンプレートとして保存します'), false)
+    // 通常の分析案では、従来どおり保存の欄が出る
+    f.props.plan = plan()
+    assert.equal(f.state.savable.value, true)
+    assert.ok((await html(f)).includes('テンプレートとして保存</button>'))
+  } finally { f.stop() }
+})
+
 test('他の利用者のテンプレートは名称・目的・状態だけ。全文は作成者・管理者の行だけ詳細表示できる', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([row(1), row(2, { content_visible: false })]) }) })
   try {

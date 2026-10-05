@@ -4,7 +4,8 @@
     <h2>5. テンプレート</h2>
     <p>保存済みのテンプレートから、新しい分析案を作れます（AIは使いません。手順・データ範囲の承認、SQL試行、コード承認は、毎回行います）。</p>
     <p>承認したコードを、管理者承認待ちのテンプレートとして保存します。保存するのは、名称・目的・手順・条件・承認済みSQL・Python・期間・ハッシュです。実データ・結果・AIへ送った本文は保存しません。</p>
-    <template v-if="canEdit">
+    <p v-if="canEdit && plan?.template" role="status">テンプレートから作成した分析案は、テンプレートとして保存できません（保存済みのコードをそのまま使うため、内容が同じで重複します）。コードを変えた新しい分析を作成したときに、保存できます。</p>
+    <template v-else-if="canEdit">
       <p v-if="!savable">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
       <label><input v-model="accepted" type="checkbox" :disabled="!savable || !!busy">コードを確認し、管理者承認待ちのテンプレートとして保存します（作成者と管理者以外には、名称・目的・状態だけが表示されます）</label>
       <button :disabled="!canSave || !accepted" @click="save">{{ busy === 'save' ? '保存中…' : 'テンプレートとして保存' }}</button>
@@ -89,7 +90,7 @@ const REVIEW_ERRORS = Object.freeze({
   409: 'テンプレートの状態が変わりました。一覧を更新して、最新の内容を確認してください。',
 })
 const hasCode = computed(() => props.plan?.codegen?.status === 'code_approved' && !!props.plan.codegen.executed_code_sha256)
-const savable = computed(() => props.plan?.status === 'data_approved' && hasCode.value)
+const savable = computed(() => props.plan?.status === 'data_approved' && hasCode.value && !props.plan?.template)
 const canSave = computed(() => props.canEdit && !props.blocked && !busy.value && savable.value)
 const saveHint = computed(() => !props.plan ? '分析案なし' : props.plan.status !== 'data_approved' ? 'データ範囲が未承認' : 'コードが未承認')
 // 再利用できるのは、全文を見られる正式・管理者承認待ちの行だけ(サーバーでも状態・権限を確認する)

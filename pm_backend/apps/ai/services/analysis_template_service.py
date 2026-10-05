@@ -154,6 +154,9 @@ def save_template(user, plan_id, revision, replaces=None):
     plan = AnalysisPlanStore().get(str(plan_id), user.pk)
     if plan['revision'] != revision:
         raise AnalysisError('分析案が別の操作で更新されました。最新の内容を確認してください。', 409)
+    if plan.get('template') is not None:
+        # 保存済みのコードをそのまま使う分析案のため、保存すると同じ内容のテンプレートが重複する(元の分析案が違うだけ)。訂正版も同じ
+        raise AnalysisError('テンプレートから作成した分析案は、テンプレートとして保存できません(内容が同じため重複します)。コードを変えた新しい分析を作成してください。', 409)
     fields = _fields_from_plan(plan)
     if replaces is not None:
         _check_correction_request(user, replaces)
