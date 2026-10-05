@@ -158,7 +158,7 @@ footer { margin-top: 48px; color: var(--muted); font-size: .8rem; border-top: 1p
 
 <section id="s2">
   <h2>順番の比較と推奨</h2>
-  <div class="note"><b>前提(確認済み・BOSS指示)</b>: 本番PC入替は2026年11月末ごろ。現行の本番PCはメモリ8GB、ディスク228GB(空き57GB)。Docker Desktop、共通MySQLコンテナ、バックエンド(gunicorn 3)、nginxが動作。分析実行は1件最大2GBで、8GBではMySQLとPGの併走や分析実行に余裕がありません。</div>
+  <div class="note"><b>前提(確認済み・BOSS指示)</b>: 本番PC入替は2026年11月末ごろ。現行の本番PCはメモリ8GB、ディスク228GB(空き57GB)。Docker Desktop、共通MySQLコンテナ、バックエンド(gunicorn 3)、nginxが動作。<b>新PCへ移すのはPMだけ</b>です(BOSS確認 2026-10-04)。syomohin(消耗品管理)はPMの「消耗品」機能へ取込済みで、共通MySQLの <code>inventory_db</code> は移行対象に含めません。旧PC側に共通MySQLや他プロジェクトが残る場合は、旧PCに残ります。分析実行は1件最大2GBで、8GBではMySQLとPGの併走や分析実行に余裕がありません。</div>
   <div class="tablebox"><table>
     <thead><tr><th class="narrow"></th><th>A: 現行PCで先にPG</th><th>B: 新PC入替を先、その後PG <span class="pill ok">推奨</span></th><th>C: 新PC入替と同時にPG</th></tr></thead>
     <tbody>
@@ -258,6 +258,7 @@ footer { margin-top: 48px; color: var(--muted); font-size: .8rem; border-top: 1p
       <tr><td>照合順序(ロケール) <span class="pill new">追加</span></td><td>日本語の並び順と比較規則は、DB作成時に決まり、後から変更しにくい</td><td>DB作成前にBOSSへ確認。並び順を使う画面の出力を比較</td></tr>
       <tr><td>NULLの並び順</td><td>MySQLはNULLが先、PGは後(昇順)</td><td>ORDER BY を使う画面・APIの出力順を比較</td></tr>
       <tr><td>整数の割り算</td><td>PGは切り捨て。在庫計算に影響の可能性</td><td>割り算を含むSQL・ORMの式を洗い出して結果を比較</td></tr>
+      <tr><td>DB側の自動更新 <code>ON UPDATE CURRENT_TIMESTAMP</code> <span class="pill new">追加</span></td><td>PGにはこの句がない(トリガーが必要)。Djangoの <code>auto_now</code> はアプリ側処理なので影響しない</td><td>実DBの列定義で、この句を持つ列を一覧化(下記SQL)。該当列を、SQL・管理コマンドで直接UPDATEしている箇所の有無を確認</td></tr>
       <tr><td>不正な日付(0000-00-00)</td><td>PGは保持できない</td><td>MySQL側の該当行の有無を件数で確認</td></tr>
       <tr><td><code>tinyint(1)</code> → boolean</td><td>型変換</td><td>真偽列の値の分布を比較</td></tr>
       <tr><td>JSON → jsonb</td><td>キーの順序・重複・空白が変わる</td><td>JSONFieldの読み書きと、JSON_VALUE系ビューの結果を比較</td></tr>
@@ -306,6 +307,7 @@ footer { margin-top: 48px; color: var(--muted); font-size: .8rem; border-top: 1p
     <li>3モデルのテーブル名と、DDLの取得元(実DBか、<code>予備資料/</code> のスキーマ定義か)をまず特定する</li>
     <li>取得元を確定できなければ、推測でDDLを作らず、BOSSへ報告する</li>
     <li>案Xなら、取得元から複製側に作成手段を用意する。案YならpgloaderがPG側に作る</li>
+    <li>候補 <span class="pill new">追加</span>: <code>t_scrap_record</code> / <code>t_scrap_record_detail</code> は <code>MASTER_TABLES_DEFINITION.MD</code> に「当面の暫定テーブル」定義がある。ただし管理対象外の3つが何かは未確定で、結び付けは確認後に行う</li>
   </ul>
 </section>
 
@@ -404,7 +406,7 @@ footer { margin-top: 48px; color: var(--muted); font-size: .8rem; border-top: 1p
       <tr><td class="narrow num">1</td><td>コンテナのメモリ使用量</td><td><code>docker stats --no-stream</code> を、業務時間帯に複数回</td><td>§9の積み上げ</td></tr>
       <tr><td class="narrow num">2</td><td>Docker Desktopのメモリ設定</td><td>設定画面、または <code>%UserProfile%\.wslconfig</code></td><td>§9・WSL上限の方針</td></tr>
       <tr><td class="narrow num">3</td><td>MySQLのDB容量</td><td>下のSQL</td><td>停止時間・ディスク</td></tr>
-      <tr><td class="narrow num">4</td><td>共通MySQLを他システムが使っているか</td><td>接続元・DB一覧の確認(下のSQL)。他システム担当への確認</td><td>使っていればMySQL全体は止められない。PG切替の影響範囲</td></tr>
+      <tr><td class="narrow num">4</td><td>共通MySQLを、PM以外で使っているシステムが旧PCに残っていないか</td><td>接続元・DB一覧の確認(下のSQL)。他システム担当への確認。syomohin は取込済み(BOSS確認)のため対象外。kaizen_pp 等が使っているかを確認</td><td>新PCにはPMだけを移すため、PG切替で他システムを巻き込む心配はない。旧PCを「戻し先」として残す期間に影響する</td></tr>
       <tr><td class="narrow num">5</td><td>バックアップの現状</td><td>頻度・保存先・世代・リストア実績</td><td>戻し条件</td></tr>
       <tr><td class="narrow num">6</td><td>モバイル(PWA)・他システム連携</td><td>PWAの接続先、外部連携(CSV取込、API、メール、FCM等)の洗い出し</td><td>切替の影響範囲</td></tr>
       <tr><td class="narrow num">7</td><td>証明書・IP(10.0.1.232)</td><td>有効期限、新PCへの引き継ぎ、IPの付け替え手順</td><td>§8のP5</td></tr>
@@ -433,6 +435,11 @@ GROUP BY user, host, db;
 -- 共通MySQL上のDB一覧とアカウント
 SHOW DATABASES;
 SELECT user, host FROM mysql.user;
+
+-- DB側の自動更新(ON UPDATE CURRENT_TIMESTAMP)を持つ列の一覧
+SELECT table_name, column_name, extra
+FROM information_schema.columns
+WHERE table_schema = 'pm_db' AND extra LIKE '%on update%';
 
 -- 不正な日付(0000-00-00)の有無: 日付列ごとに実行(列・表名は要確認)
 -- SELECT COUNT(*) FROM &lt;表&gt; WHERE &lt;列&gt; = '0000-00-00';</pre></div>
@@ -464,7 +471,7 @@ SELECT user, host FROM mysql.user;
       <tr><td>挙動差(大文字小文字、整数割り算、NULL順、照合順序)</td><td>在庫・進度の数値ずれ</td><td>突合で検出。ずれた箇所を実データで切り分けてから修正</td></tr>
       <tr><td>リハーサルの遅れ</td><td>11月末に間に合わない</td><td>B案ならPC入替に影響しない。PG切替を12月以降に延期</td></tr>
       <tr><td>新PCの納入が遅れる</td><td>入替の遅れ</td><td>旧PCでMySQL継続。PGは新PC後</td></tr>
-      <tr><td>共通MySQLを他システムが使用</td><td>MySQL全体を止められない / PG化の影響</td><td>§10-4で確認。使用していれば、PM専用DBを分離して移行する案を別途提案</td></tr>
+      <tr><td>旧PCの共通MySQLを、PM以外が使用し続ける</td><td>旧PCを完全に止められず、戻し先として残す期間をPMだけでは決められない</td><td>§10-4で確認。新PCにはPMだけを移すため、PG切替への影響はない</td></tr>
       <tr><td>PG切替後の戻し(データ逆変換)</td><td>運用開始後の戻しが困難</td><td>運用開始前に戻す原則。逆変換の手順は別途用意</td></tr>
       <tr><td>8GB機で分析実行</td><td>メモリ不足</td><td>本番の分析実行は新PC+PG後。それまで無効</td></tr>
       <tr><td>本書の数値の多くが未確認</td><td>計画の精度</td><td>§10の実測後に改訂</td></tr>
@@ -478,7 +485,7 @@ SELECT user, host FROM mysql.user;
   <div class="tablebox"><table>
     <thead><tr><th class="narrow">#</th><th>項目</th><th class="narrow">区分</th></tr></thead>
     <tbody>
-      <tr><td class="num">1</td><td><b>順番の決定</b>: A / B(推奨) / C</td><td>方針</td></tr>
+      <tr><td class="num">1</td><td><b>順番の決定</b>: A / B(推奨) / C。<b>B で決定(BOSS 2026-10-04)</b>: 新PC入替(MySQLのまま)を先、PG切替はその後</td><td>方針(決定済み)</td></tr>
       <tr><td class="num">2</td><td>PGバージョン(<code>postgres:16</code> でよいか)</td><td>構成</td></tr>
       <tr><td class="num">3</td><td>複製の置き場所(<code>D:\pm_pg\</code>、リポジトリ外でよいか)</td><td>構成</td></tr>
       <tr><td class="num">4</td><td>ポート(15432 / 18081 / 18501)、名前(<code>pm_pg_rehearsal</code> 系)</td><td>構成</td></tr>
@@ -497,6 +504,9 @@ SELECT user, host FROM mysql.user;
       <tr><td class="num">17</td><td>PostgreSQLの照合順序(日本語の並び順、大文字小文字を区別しない比較の方法) <span class="pill new">追加</span></td><td>構成(DB作成後は変更しにくい)</td></tr>
       <tr><td class="num">18</td><td>PG用ドライバ(psycopg2-binary か psycopg)を <code>requirements</code> に追加すること <span class="pill new">追加</span></td><td>依存ライブラリ</td></tr>
       <tr><td class="num">19</td><td>新PCへの <code>.env</code> 項目とRedisの引き継ぎ方法、PG側のバックアップ方式 <span class="pill new">追加</span></td><td>運用</td></tr>
+      <tr><td class="num">20</td><td>新PCへ移すDBの範囲(<code>pm_db</code> のみでよいか)。共通MySQLの <code>inventory_db</code> などは移さない前提の確認 <span class="pill new">追加</span></td><td>データ範囲</td></tr>
+      <tr><td class="num">21</td><td>新PCのMySQLを、共通MySQL(<code>ts_pm_all_v2</code>、外部ネットワーク <code>ts_pm_network_v2</code>)から分けて、PM専用にするか。切替手順1と <code>docker-compose.yml</code> のネットワーク設定に影響 <span class="pill new">追加</span></td><td>構成</td></tr>
+      <tr><td class="num">22</td><td>旧PC・旧共通MySQLに残る他プロジェクト(kaizen_pp 等)の有無と、旧PCを残す期間への影響 <span class="pill new">追加</span></td><td>運用</td></tr>
     </tbody>
   </table></div>
 </section>
@@ -509,6 +519,8 @@ SELECT user, host FROM mysql.user;
     <li>本番のDB容量、メモリ使用量、他システムの利用有無、バックアップ状況は未確認(§10で確認)</li>
     <li>開発DBの容量は未確認(§10のSQLを開発DBにも流して確認する)</li>
     <li>新PCの納入日・仕様は未確認</li>
+    <li>syomohin の取込済みはBOSSの口頭確認(2026-10-04)。仕様書(<code>消耗品管理_移行計画.md</code>)上は「移行計画」のままで、仕様書側の更新状況は未確認</li>
+    <li>共通MySQLにある <code>pm_db</code> 以外のDB、旧PCに残る他プロジェクト(kaizen_pp 等)の利用状況は未確認(§10-4)</li>
     <li>pgloaderのバージョン、Windows/WSLでの動作は未確認</li>
     <li>psycopg2-binary と psycopg(v3)のどちらを使うかは未決定</li>
     <li>実装計画書(<code>AI分析基盤実装計画.md</code> 等)への反映は、承認後の実装時に行う</li>
