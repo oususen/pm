@@ -33,7 +33,7 @@
           </div>
         </section>
       <div id="analysis-execution" class="run-target" :class="{ ready: runReady }">
-      <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" />
+      <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" @refine="startRefinement" />
       </div>
       <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive" @plan-created="useTemplatePlan" />
       <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
@@ -47,8 +47,10 @@
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <label for="analysis-purpose">分析目的</label>
       <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-      <AIAnalysisConsult v-if="canEdit && !plan" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" @apply="applyConsult" @plan-created="useTemplatePlan" />
+      <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" @apply="applyConsult" @plan-created="useTemplatePlan" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
+      <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。
+        <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
       <div class="period">
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
         <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
@@ -79,6 +81,7 @@
         </button>
         <div v-show="isOpen(2)" id="stage-body-2" class="stage-body">
         <p>目的: {{ plan.proposal.purpose }}</p>
+        <p v-if="plan.refinement">結果の改良: 追加の指示「{{ plan.refinement.instruction }}」（元の実行: {{ plan.refinement.from_run_id ?? '不明' }}）</p>
         <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
         <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
         <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
@@ -421,6 +424,7 @@ function resetPlan() {
   if (executionActive.value) return
   generation += 1
   plan.value = null
+  refinement.value = null
   error.value = ''
   busy.value = ''
   externalPreview.value = null
@@ -429,7 +433,18 @@ function resetPlan() {
   codeStateFresh.value = true
 }
 // 入力・AI選択を変えたら、以前の送信確認は使い回さない。
-watch([purpose, dateFrom, dateTo, provider, model], () => {
+// 結果の改良(BOSS承認 2026-10-06): 追加の指示と、改良の元の実行。分析案を作ると、分析案(plan.refinement)が持つ
+const refinement = ref(null)
+watch(plan, value => { if (value) refinement.value = null }, { flush: 'sync' })
+function startRefinement({ instruction, run_id: runId } = {}) {
+  const proposal = plan.value?.proposal
+  if (!props.canEdit || executionActive.value || !proposal || typeof instruction !== 'string' || !instruction.trim()) return
+  const base = { purpose: proposal.purpose, from: proposal.date_from, to: proposal.date_to }
+  resetPlan() // 古い結果は画面から消える。AIの選択(プロバイダ・モデル)は、そのまま引き継ぐ
+  purpose.value = base.purpose; dateFrom.value = base.from; dateTo.value = base.to
+  refinement.value = { instruction: instruction.trim(), from_run_id: runId ?? null }
+}
+watch([purpose, dateFrom, dateTo, provider, model, refinement], () => {
   externalPreview.value = null
   externalAccepted.value = false
 }, { flush: 'sync' })
@@ -486,7 +501,9 @@ async function perform(action, operation) {
   }
 }
 function planningInput() {
-  return { purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value, provider: provider.value, model: model.value }
+  const input = { purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value, provider: provider.value, model: model.value }
+  if (refinement.value) input.refinement = { instruction: refinement.value.instruction, from_run_id: refinement.value.from_run_id }
+  return input
 }
 async function prepareExternalPreview() {
   if (!canCreate.value || !selectedProvider.value?.external) return

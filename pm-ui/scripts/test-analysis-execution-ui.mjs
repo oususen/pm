@@ -23,7 +23,7 @@ const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} fro
 function plan() { return { id: 'plan', revision: 4, status: 'data_approved', codegen: { status: 'code_approved', executed_code_sha256: 'hash', trial: { status: 'passed', executed_code_sha256: 'hash' } } } }
 function job(status = 'running') { return { id: 'job', executed_code_sha256: 'hash', status, scope: { date_from: '2026-09-01', date_to: '2026-09-30', conditions: '全行', datasets: [{ view: 'v_ai_shipment' }] }, counts: { v_ai_shipment: 3 }, cleanup: { db_connection: 'closed', container: 'closed' } } }
 async function setup() {
-  const props = Vue.reactive({ plan: plan(), canEdit: true, canViewAll: false, blocked: false, visible: true }), calls = [], events = [], confirms = []
+  const props = Vue.reactive({ plan: plan(), canEdit: true, canViewAll: false, blocked: false, visible: true }), calls = [], events = [], confirms = [], consent = { value: true }
   const clock = fakeClock(), doc = fakeDocument()
   const methods = {
     executionOptions: async () => ({ data: { ready: true, enabled: true } }), execute: async () => ({ data: job('pending') }),
@@ -33,11 +33,11 @@ async function setup() {
   const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
   const scope = Vue.effectScope()
   let mount, unmount
-  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return true } }, AnalysisErrorBanner, useAnalysisErrorNotices,
+  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices,
     options => createAnalysisStatusMonitor({ ...options, now: clock.now, later: clock.later, clear: clock.clear })))
   await mount(); calls.length = 0
   state.monitor.mount(doc)
-  return { state, props, calls, events, methods, confirms, clock, doc, unmount, stop: () => { unmount(); scope.stop() } }
+  return { state, props, calls, events, methods, confirms, consent, clock, doc, unmount, stop: () => { unmount(); scope.stop() } }
 }
 function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canViewAll', 'blocked', 'visible'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
 
@@ -409,5 +409,67 @@ test('実行欄の見出しは、右の段階(①〜⑤)と紛らわしい番号
     const text = await html(f)
     assert.ok(text.includes('<h2>分析の実行・結果</h2>'))
     assert.equal(/<h2>\d+\. /.test(text), false)
+  } finally { f.stop() }
+})
+
+test('結果の改良: 成功した結果の下に、編集権限があるときだけ出す。実行中・失敗・閲覧のみでは出さない(結果の改良)', async () => {
+  const f = await setup()
+  try {
+    f.state.job.value = { ...job('success'), run_id: 7, result_expires_at: '2026-10-04T10:11:12', result: { tables: [], charts: [] } }
+    assert.ok((await html(f)).includes('結果を改良する'))
+    assert.ok((await html(f)).includes('追加の指示は、実行履歴に保存されます'))
+    f.props.canEdit = false
+    assert.equal((await html(f)).includes('結果を改良する'), false, '閲覧のみ')
+    f.props.canEdit = true
+    for (const status of ['failed', 'cancelled']) {
+      f.state.job.value = { ...job(status), run_id: 7, result: { tables: [], charts: [] } }
+      assert.equal((await html(f)).includes('結果を改良する'), false, status)
+    }
+  } finally { f.stop() }
+})
+
+test('結果の改良: 追加の指示と元の実行を親へ渡す。空の指示・確認を断った場合は渡さない。渡した後は入力を空にする(結果の改良)', async () => {
+  const f = await setup()
+  try {
+    f.state.job.value = { ...job('success'), run_id: 7, result_expires_at: '2026-10-04T10:11:12', result: { tables: [], charts: [] } }
+    f.state.refine(); assert.deepEqual(f.events.filter(e => e[0] === 'refine'), [], '指示が空')
+    f.state.refineText.value = '   '; f.state.refine(); assert.deepEqual(f.events.filter(e => e[0] === 'refine'), [], '空白だけ')
+    f.state.refineText.value = '品番も付けて'
+    const decline = f.confirms.length
+    await f.state.refine()
+    assert.deepEqual(f.events.filter(e => e[0] === 'refine'), [['refine', { instruction: '品番も付けて', run_id: 7 }]])
+    assert.equal(f.state.refineText.value, '')
+    assert.ok(f.confirms.length > decline); assert.ok(f.confirms.at(-1).includes('この結果は画面から消えます'))
+  } finally { f.stop() }
+})
+
+test('結果の改良: 確認を断れば渡さない。実行中・操作中・コード未確認(blocked)でも渡さない(結果の改良)', async () => {
+  const f = await setup()
+  try {
+    f.state.job.value = { ...job('success'), run_id: 7, result_expires_at: '2026-10-04T10:11:12', result: { tables: [], charts: [] } }
+    f.state.refineText.value = '品番も付けて'
+    f.consent.value = false
+    f.state.refine()
+    assert.deepEqual(f.events.filter(e => e[0] === 'refine'), [])
+    assert.equal(f.state.refineText.value, '品番も付けて', '断ったときは、入力を残す')
+    f.consent.value = true
+    f.props.blocked = true; f.state.refine()
+    f.props.blocked = false; f.state.busy.value = 'x'; f.state.refine(); f.state.busy.value = ''
+    f.state.job.value = { ...job('running'), run_id: 7 }; f.state.refine()
+    assert.deepEqual(f.events.filter(e => e[0] === 'refine'), [])
+  } finally { f.stop() }
+})
+
+test('実行履歴に、追加の指示と改良の元の実行を表示する。通常の実行には出さない(結果の改良)', async () => {
+  const f = await setup()
+  try {
+    f.methods.runs = async () => ({ data: { results: [
+      { id: 9, status_label: '成功', executed_by: 'u', started_at: 'a', finished_at: 'b', detail: '', date_from: '2026-09-01', date_to: '2026-09-30', conditions: '', views: [], refinement_instruction: '<b>品番も付けて</b>', refined_from_run_id: 7 },
+      { id: 7, status_label: '成功', executed_by: 'u', started_at: 'a', finished_at: 'b', detail: '', date_from: '2026-09-01', date_to: '2026-09-30', conditions: '', views: [], refinement_instruction: null, refined_from_run_id: null },
+    ], count: 2, next: null, previous: null } })
+    await f.state.loadHistory(1)
+    const text = (await html(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('追加の指示: &lt;b&gt;品番も付けて&lt;/b&gt; / 改良の元の実行: 7')); assert.equal(text.includes('<b>品番'), false)
+    assert.equal((text.match(/追加の指示:/g) || []).length, 1, '通常の実行には出さない')
   } finally { f.stop() }
 })

@@ -195,6 +195,12 @@ def _template_columns(plan):
     return {'template_id': template.get('id'), 'template_version': template.get('version')}
 
 
+def _refinement_columns(plan):
+    """結果の改良から作った分析案の、追加の指示(原文)と、改良の元の実行。それ以外はNULL。"""
+    refinement = plan.get('refinement') or {}
+    return {'refinement_instruction': refinement.get('instruction'), 'refined_from_run_id': refinement.get('from_run_id')}
+
+
 def start_run(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS):
     """`running`の行を保存する。保存できなければ、HistoryErrorとし、実行しない。
 
@@ -203,7 +209,7 @@ def start_run(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS)
     now = datetime.now()
     try:
         return AIAnalysisRun.objects.create(
-            plan_id=plan['id'], user=user, views=proposal['datasets'], **_template_columns(plan),
+            plan_id=plan['id'], user=user, views=proposal['datasets'], **_template_columns(plan), **_refinement_columns(plan),
             date_from=proposal['date_from'], date_to=proposal['date_to'], conditions=proposal.get('conditions', ''),
             method_approved_at=_parse(plan.get('method_approved_at')), data_approved_at=_parse(plan.get('data_approved_at')),
             approved_counts={d['view']: d['rows'] for d in (plan.get('preview') or {}).get('datasets', [])},
@@ -381,6 +387,7 @@ def serialize_run(run):
     return {
         'id': run.pk, 'plan_id': run.plan_id, 'status': run.status, 'status_label': run.get_status_display(),
         'reason': run.reason, 'detail': run.detail,
+        'refinement_instruction': run.refinement_instruction, 'refined_from_run_id': run.refined_from_run_id,
         'executed_by': run.user.get_username() if run.user_id else DELETED_USER_LABEL,
         'views': run.views, 'date_from': run.date_from.isoformat(), 'date_to': run.date_to.isoformat(), 'conditions': run.conditions,
         'approved_counts': run.approved_counts, 'snapshot_counts': run.snapshot_counts, 'fetched_rows': run.fetched_rows,

@@ -60,6 +60,12 @@
           <div class="scroll"><table><thead><tr><th>横軸</th><th v-for="(series, s) in chart.series" :key="s">{{ series.name }}</th></tr></thead><tbody><tr v-for="(x, i) in chart.x" :key="i"><td>{{ x }}</td><td v-for="(series, s) in chart.series" :key="s">{{ series.values[i] ?? 'NULL' }}</td></tr></tbody></table></div>
         </article>
         <h3 v-if="job.result.report">報告書</h3><pre v-if="job.result.report">{{ job.result.report }}</pre>
+        <section v-if="canEdit" class="refine" aria-label="結果を改良する">
+          <h3>結果を改良する</h3>
+          <p>結果を見て、追加の指示を出せます（例: 「品番も付けて」「上位3件だけ」）。元の目的に追加の指示を足した、新しい分析案を作ります。手順・データ範囲・コードの承認は、もう一度行います。追加の指示は、実行履歴に保存されます。</p>
+          <textarea v-model="refineText" rows="2" :disabled="!!busy" aria-label="追加の指示" placeholder="追加の指示を入力してください。"></textarea>
+          <button :disabled="!canRefine" @click="refine">改良して新しい分析案を作る</button>
+        </section>
       </template>
     </template>
     <h2>実行履歴</h2>
@@ -70,6 +76,7 @@
       <h3>実行{{ run.id }} / {{ run.status_label }} / {{ run.executed_by }}</h3>
       <p>{{ run.started_at }} ～ {{ run.finished_at || '未確定' }} / {{ run.detail }}</p>
       <p>期間: {{ run.date_from }} ～ {{ run.date_to }} / 条件: {{ run.conditions }}</p>
+      <p v-if="run.refinement_instruction">追加の指示: {{ run.refinement_instruction }}<template v-if="run.refined_from_run_id"> / 改良の元の実行: {{ run.refined_from_run_id }}</template></p>
       <p>取得行数（数量合計ではありません）: {{ run.fetched_rows }} / 承認時: {{ run.approved_counts }} / COUNT: {{ run.snapshot_counts }} / 送信: {{ run.sent_rows }} / 投入: {{ run.loaded_rows }}</p>
       <p>後始末: {{ run.cleanup }} / 投入完了: {{ run.loaded_at || '未記録' }}</p>
       <details><summary>利用ビュー・照合・コードのハッシュ・実行設定</summary><pre>{{ { views: run.views, unique_key_check: run.unique_key_check, sql_sha256: run.sql_sha256, python_sha256: run.python_sha256, executed_code_sha256: run.executed_code_sha256, wrapper_version: run.wrapper_version, settings: run.settings } }}</pre></details>
@@ -88,7 +95,7 @@ import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 import { createAnalysisStatusMonitor } from '../../composables/analysisStatusMonitor'
 
 const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canViewAll: Boolean, blocked: Boolean, visible: { type: Boolean, default: true } })
-const emit = defineEmits(['active', 'accepted'])
+const emit = defineEmits(['active', 'accepted', 'refine'])
 const job = ref(null), busy = ref(''), error = ref(''), availability = ref(null)
 const history = ref({ results: [], count: 0, next: null, previous: null }), historyError = ref(''), historyLoaded = ref(false)
 const errorNotices = useAnalysisErrorNotices([['execution', error], ['history', historyError]])
@@ -110,6 +117,15 @@ const completionText = computed(() => {
 })
 const terminal = ['success', 'failed', 'cancelled', 'expired']
 const active = computed(() => uncertain.value || (!job.value && !!props.plan?.execution?.job_id) || (!!job.value && (!terminal.includes(job.value.status) || !cleanupComplete.value)))
+// 結果の改良(BOSS承認 2026-10-06): 成功した結果の下で、追加の指示から、新しい分析案を作る(親が、元の目的・期間・AIの選択を引き継いで準備する)
+const refineText = ref('')
+const canRefine = computed(() => props.canEdit && !busy.value && !props.blocked && !active.value && job.value?.status === 'success' && !!job.value.result && !!refineText.value.trim())
+function refine() {
+  if (!canRefine.value) return
+  if (!window.confirm('新しい分析案を作ると、この結果は画面から消えます（実行履歴には残ります）。手順・データ範囲・コードの承認は、もう一度行います。よろしいですか？')) return
+  emit('refine', { instruction: refineText.value.trim(), run_id: job.value.run_id ?? null })
+  refineText.value = ''
+}
 const cleanupComplete = computed(() => ['db_connection', 'container'].every(k => ['closed', 'not_started'].includes(job.value?.cleanup?.[k])))
 const canExecute = computed(() => props.canEdit && !props.blocked && !busy.value && fresh.value && !active.value && availability.value?.ready && props.plan?.status === 'data_approved' && props.plan?.codegen?.status === 'code_approved' && props.plan.codegen.trial?.status === 'passed' && props.plan.codegen.trial.executed_code_sha256 === props.plan.codegen.executed_code_sha256 && (props.plan.template?.status !== 'pending_admin' || templateConfirmed.value))
 const canCancel = computed(() => props.canEdit && !busy.value && fresh.value && !!job.value && !terminal.includes(job.value.status) && job.value.status !== 'cancel_requested')

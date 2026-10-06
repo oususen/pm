@@ -768,3 +768,55 @@ test('AIとの相談の欄は、編集権限があり分析案がないときだ
     assert.equal(f.state.plan.value, null)
   } finally { f.stop() }
 })
+
+test('結果の改良: 元の目的・期間・AIの選択を引き継いで、古い結果を消し、追加の指示つきで新しい分析案を作る(結果の改良)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = { ...dataPlan('openrouter'), proposal: { ...dataPlan('openrouter').proposal, purpose: '9月の製品別出荷量', date_from: '2026-09-01', date_to: '2026-09-30' } }
+    const chosen = [f.state.provider.value, f.state.model.value]
+    f.state.startRefinement({ instruction: '  品番も付けて  ', run_id: 7 })
+    assert.equal(f.state.plan.value, null, '古い分析案・結果は、画面から消える')
+    assert.deepEqual([f.state.purpose.value, f.state.dateFrom.value, f.state.dateTo.value], ['9月の製品別出荷量', '2026-09-01', '2026-09-30'])
+    assert.deepEqual([f.state.provider.value, f.state.model.value], chosen, 'AIの選択は引き継ぐ')
+    assert.deepEqual(f.state.refinement.value, { instruction: '品番も付けて', from_run_id: 7 })
+    assert.deepEqual(f.state.planningInput().refinement, { instruction: '品番も付けて', from_run_id: 7 })
+    const text = await htmlFor(f)
+    assert.ok(text.includes('追加の指示「品番も付けて」を、上の目的に足して')); assert.ok(text.includes('元の実行: 7')); assert.ok(text.includes('実行履歴に保存されます'))
+    // 改良の準備中は、AI相談(テンプレートからの分析案の作成)を出さない: 追加の指示が、黙って落ちるのを防ぐ
+    assert.equal(text.includes('AI相談の専用画面'), false)
+    f.state.refinement.value = null
+    assert.ok((await htmlFor(f)).includes('AI相談の専用画面'), '指示を外せば、相談欄が戻る')
+  } finally { f.stop() }
+})
+
+test('結果の改良: 社外AIの確認・作成の要求に、追加の指示を付ける。作成後は、分析案が指示を持ち、画面の準備状態は消える(結果の改良)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = { ...dataPlan('openrouter'), proposal: { ...dataPlan('openrouter').proposal, purpose: '9月の製品別出荷量', date_from: '2026-09-01', date_to: '2026-09-30' } }
+    f.state.startRefinement({ instruction: '品番も付けて', run_id: null })
+    assert.deepEqual(f.state.planningInput().refinement, { instruction: '品番も付けて', from_run_id: null })
+    assert.ok((await htmlFor(f)).includes('元の実行: 不明'))
+    f.state.plan.value = { ...dataPlan('openrouter'), refinement: { instruction: '品番も付けて', from_run_id: null } }
+    assert.equal(f.state.refinement.value, null, '分析案を作ると、準備状態は消える')
+    assert.ok((await htmlFor(f)).includes('結果の改良: 追加の指示「品番も付けて」（元の実行: 不明）'))
+  } finally { f.stop() }
+})
+
+test('結果の改良: 追加の指示は外せる。作り直し(resetPlan)でも消える。権限なし・実行中・空の指示では始めない(結果の改良)', async () => {
+  const f = await setup('openrouter')
+  try {
+    const base = () => { f.state.plan.value = { ...dataPlan('openrouter'), proposal: { ...dataPlan('openrouter').proposal, purpose: 'P', date_from: '2026-09-01', date_to: '2026-09-30' } } }
+    base(); f.state.startRefinement({ instruction: 'x', run_id: 1 })
+    f.state.refinement.value = null
+    assert.equal(f.state.planningInput().refinement, undefined, '外すと、要求に付けない')
+    base(); f.state.startRefinement({ instruction: 'x', run_id: 1 }); f.state.resetPlan()
+    assert.equal(f.state.refinement.value, null)
+    base(); f.state.startRefinement({ instruction: '   ', run_id: 1 }); f.state.startRefinement({}); f.state.startRefinement()
+    assert.notEqual(f.state.plan.value, null, '空の指示では、分析案を消さない')
+    f.props.canEdit = false; f.state.startRefinement({ instruction: 'x', run_id: 1 })
+    assert.notEqual(f.state.plan.value, null); f.props.canEdit = true
+    f.state.executionActive.value = true; f.state.startRefinement({ instruction: 'x', run_id: 1 })
+    assert.notEqual(f.state.plan.value, null, '実行中は始めない'); f.state.executionActive.value = false
+    assert.equal(f.state.refinement.value, null)
+  } finally { f.stop() }
+})

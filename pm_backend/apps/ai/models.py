@@ -63,6 +63,11 @@ class AIAnalysisRun(models.Model):
     plan_id = models.CharField(max_length=64, verbose_name='分析案ID')
     template_id = models.PositiveBigIntegerField(null=True, blank=True, verbose_name='テンプレートID')
     template_version = models.PositiveIntegerField(null=True, blank=True, verbose_name='テンプレート版')
+    # 結果の改良(追加の指示から作った分析案)の実行だけに入る。追加の指示は、利用者が入力した原文(置換前)で、実行履歴を見られる人に見える
+    refinement_instruction = models.TextField(null=True, blank=True, verbose_name='結果の改良の追加の指示')
+    refined_from_run = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='refinements', verbose_name='改良の元の実行',
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='ai_analysis_runs', verbose_name='実行者',
     )

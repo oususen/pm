@@ -6,6 +6,7 @@ from django.db import DatabaseError
 from django.utils.crypto import constant_time_compare, salted_hmac
 
 from ai.config.models import AIProviderConfig
+from ai.models import AIAnalysisRun
 from ai.config.service import external_aggregate_transfer_allowed, get_analysis_execution_policy
 from ai.services import analysis_llm, chat_service
 from ai.services.analysis_data_service import ANALYSIS_VIEWS, count_target_rows, validate_datasets, validate_period, with_management_columns
@@ -124,6 +125,7 @@ def _confirmation(owner_id, purpose, date_from, date_to, provider, model, extern
 
 def external_send_preview(owner_id, data):
     purpose, start, end, provider, model = _planning_input(data)
+    purpose, _refinement = _refine(purpose, data.get('refinement'), owner_id)  # 追加の指示も、置換・確認の対象
     if provider == 'qwen':
         raise AnalysisError('ローカルQwenは社外送信の確認対象ではありません。')
     converted = _external_purpose(purpose)
@@ -133,9 +135,29 @@ def external_send_preview(owner_id, data):
     }
 
 
+def _refine(purpose, refinement, owner_id):
+    """結果の改良(BOSS承認 2026-10-06): 元の目的に、追加の指示を足した目的文と、実行履歴に残す内容を返す。
+
+    追加の指示は、目的文に足して、AIへ送る(社外のAIには、コード置換後)。改良の元の実行は、本人の実行だけ(他人の実行は指定できない)。
+    指示の文字数に上限は設けない(BOSS承認)。
+    """
+    if refinement is None:
+        return purpose, None
+    if not isinstance(refinement, dict) or set(refinement) != {'instruction', 'from_run_id'}:
+        raise AnalysisError('結果の改良は、追加の指示(instruction)と元の実行(from_run_id)だけを指定してください。')
+    instruction, from_run_id = refinement['instruction'], refinement['from_run_id']
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise AnalysisError('追加の指示を入力してください。')
+    if from_run_id is not None and (type(from_run_id) is not int or from_run_id < 1
+                                    or not AIAnalysisRun.objects.filter(pk=from_run_id, user_id=owner_id).exists()):
+        raise AnalysisError('改良の元の実行が見つかりません。', 404)
+    instruction = instruction.strip()
+    return f'{purpose}\n追加の指示: {instruction}', {'instruction': instruction, 'from_run_id': from_run_id}
+
+
 def _planning_input(data, allow_confirmation=False):
     required = {'purpose', 'date_from', 'date_to'}
-    allowed = required | {'provider', 'model'}
+    allowed = required | {'provider', 'model', 'refinement'}
     if allow_confirmation:
         allowed.add('external_confirmation')
     if not isinstance(data, dict) or not required <= set(data) <= allowed:
@@ -150,6 +172,7 @@ def _planning_input(data, allow_confirmation=False):
 
 def create_plan(owner_id, data):
     purpose, start, end, provider, model = _planning_input(data, allow_confirmation=True)
+    purpose, refinement = _refine(purpose, data.get('refinement'), owner_id)
     store = AnalysisPlanStore()
     # 保存先がない場合はAI呼出しも行わない。
     store.check_connection()
@@ -195,7 +218,7 @@ def create_plan(owner_id, data):
         # 実コードは日付・数量と重なるため、回答中の数字を名前へ自動復元しない。
         proposal['external_purpose'] = external_purpose
     proposal = {**proposal, 'provider': provider, 'model': model}
-    return store.create(owner_id, proposal, policy.plan_cache_ttl_minutes)
+    return store.create(owner_id, proposal, policy.plan_cache_ttl_minutes, extra={'refinement': refinement} if refinement else None)
 
 
 def get_qwen_analysis_timeout():
