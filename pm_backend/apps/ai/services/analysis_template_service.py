@@ -18,7 +18,7 @@ from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import bundle_from_plan, steps_text, validate_generated
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services.analysis_template_notify_service import schedule_submitted, serialize_records
-from ai.services.analysis_template_params import check_source, concrete_code, resolve_values, validate_definitions
+from ai.services.analysis_template_params import check_source, concrete_code, has_date_literal, resolve_values, validate_definitions
 from ai.services.chat_service import _has_resource_permission
 
 DELETED_USER_LABEL = '削除済みユーザー'
@@ -75,7 +75,7 @@ def _text_list(value):
     return value
 
 
-def _fields_from_plan(plan):
+def _fields_from_plan(plan, check_dates=True):
     """保存対象の列を、承認済みの分析案から組み立てる。保存できない状態・欠けた内容は、固定文で拒否する。"""
     if plan.get('status') != 'data_approved' or not plan.get('method_approved_at') or not plan.get('data_approved_at'):
         raise AnalysisError('手順とデータ範囲の承認後に保存してください。', 409)
@@ -100,6 +100,9 @@ def _fields_from_plan(plan):
         raise AnalysisError('現在の検査に合格しないコードは保存できません。コードを作り直してください。', 409)
     sql_steps, python_code, parameters = bundle.steps, bundle.python, []
     source = codegen.get('template_source')
+    if check_dates and source is None and has_date_literal(bundle.steps, bundle.python):
+        # 変数を使っていないコードに、日付が直接書かれている: 期間を変えて再利用できないため、テンプレートにしない
+        raise AnalysisError('コードに固定の日付が直接書かれているため、テンプレートとして保存できません。期間は変数({{period_from}}・{{period_to}})にして、コードを作り直してください。', 409)
     if source is not None:
         # 変数の形のコード: 定義・使用・直書きを確認し、既定値で置き換えた結果が、承認したコードと一致すること
         try:
@@ -185,7 +188,7 @@ def save_template(user, plan_id, revision, replaces=None, category=None):
     if plan.get('template') is not None:
         # 保存済みのコードをそのまま使う分析案のため、保存すると同じ内容のテンプレートが重複する(元の分析案が違うだけ)。訂正版も同じ
         raise AnalysisError('テンプレートから作成した分析案は、テンプレートとして保存できません(内容が同じため重複します)。コードを変えた新しい分析を作成してください。', 409)
-    fields = _fields_from_plan(plan)
+    fields = _fields_from_plan(plan, check_dates=False)  # 日付の直書きの確認は、既存の行を探した後に行う(再送は、既存の行を返す)
     if replaces is not None:
         _check_correction_request(user, replaces)
     key = {'source_plan_id': str(plan_id), 'source_plan_revision': revision}
@@ -200,6 +203,9 @@ def save_template(user, plan_id, revision, replaces=None, category=None):
     existing = _find_existing(key['source_plan_id'], revision, fields['content_sha256'])
     if existing is not None:
         return same_request(existing)
+    if not fields['parameters'] and has_date_literal(fields['sql_steps'], fields['python_code']):
+        # 変数を使っていないコードに、日付が直接書かれている: 期間を変えて再利用できないため、新しいテンプレートにしない
+        raise AnalysisError('コードに固定の日付が直接書かれているため、テンプレートとして保存できません。期間は変数({{period_from}}・{{period_to}})にして、コードを作り直してください。', 409)
     old = _replaced_template(replaces, fields['content_sha256']) if replaces is not None else None
     try:
         with transaction.atomic():

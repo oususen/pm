@@ -77,6 +77,23 @@ class TemplateTestBase(TestCase):
         ai.assert_not_called()
         return response
 
+    def test_resaving_an_already_saved_plan_with_a_fixed_date_returns_the_existing_row_but_a_new_one_is_refused(self):
+        # 日付の直書きの拒否は、新しく保存するときだけ。以前に保存済みの同じ内容の再送は、既存の行を返す(冪等)
+        dated = [{'name': 'w_daily', 'query': "SELECT shipment_date, SUM(quantity) AS q FROM v_ai_shipment WHERE shipment_date >= '2026-01-01' GROUP BY shipment_date"}]
+        bundle = cg.make_bundle(dated, PYTHON, VIEWS)
+        plan = make_plan(self.owner.pk)
+        plan['codegen'].update(steps=dated, executed_code_sha256=bundle.executed_code_sha256, wrapper_version=bundle.wrapper_version)
+        refused = self.save(self.owner, plan)
+        self.assertEqual(refused.status_code, 409)
+        self.assertIn('固定の日付', str(refused.data['detail']))
+        self.assertEqual(AIAnalysisTemplate.objects.count(), 0)
+        fields = service._fields_from_plan(plan, check_dates=False)  # 以前(この規則の前)に保存された行を再現する
+        saved = AIAnalysisTemplate.objects.create(family_id=uuid4(), version=1, source_plan_id=plan['id'], source_plan_revision=plan['revision'],
+                                                  approved_by=self.owner, status='pending_admin', **fields)
+        again = self.save(self.owner, plan)
+        self.assertEqual((again.status_code, again.data['id'], again.data['created']), (200, saved.pk, False))
+        self.assertEqual(AIAnalysisTemplate.objects.count(), 1)
+
     def make_row(self, user, status='pending_admin', **overrides):
         plan = make_plan(user.pk if user else 0)
         fields = service._fields_from_plan(plan)

@@ -124,6 +124,38 @@ def _texts(steps, python):
     return [str(step.get('query', '')) for step in steps] + [str(step.get('name', '')) for step in steps] + [python]
 
 
+QUOTED_PLACEHOLDER_PATTERN = re.compile(r'''['"]\{\{|\}\}['"]''')
+
+
+def has_date_literal(steps, python):
+    """コード(変数の形でない、実行する形)に、日付(YYYY-MM-DD)が直接書かれているか。"""
+    return any(DATE_LITERAL_PATTERN.search(text) for text in _texts(steps, python))
+
+
+def normalize_definitions(raw, date_from, date_to):
+    """AIが返した変数の一覧(コード生成)を、保存する定義にする。期間(period_from・period_to)の元の値は、AIの値ではなく、分析案の期間にする。
+
+    各項目は name・type・label(品番などは default も)だけ。形式・種類・値の実在は、validate_definitions が確認する。
+    """
+    if not isinstance(raw, list) or not raw:
+        raise AnalysisError('変数の一覧の形式が不正です。')
+    periods = {PERIOD_FROM: date_from, PERIOD_TO: date_to}
+    definitions = []
+    for item in raw:
+        if not isinstance(item, dict) or not {'name', 'type', 'label'} <= set(item) <= DEFINITION_KEYS:
+            raise AnalysisError('変数の定義の形式が不正です。')
+        name = item['name']
+        if type(name) is not str:
+            raise AnalysisError('変数の名前の形式が不正です。')
+        if name in periods:
+            definitions.append({**item, 'default': periods[name]})
+        elif 'default' not in item:
+            raise AnalysisError('変数の元の値(default)がありません。')
+        else:
+            definitions.append(dict(item))
+    return validate_definitions(definitions)
+
+
 def check_source(steps, python, definitions):
     """保存するコード(変数の形)の確認: 使った変数がすべて定義にあり、定義した変数がすべて使われ、元の値・日付が文字のまま残っていない。"""
     texts = _texts(steps, python)
@@ -137,6 +169,9 @@ def check_source(steps, python, definitions):
         raise AnalysisError('コードに、定義されていない変数があります。')
     if names - used:
         raise AnalysisError('定義した変数が、コードで使われていません。')
+    # 置き換えで引用符が付くため、変数の前後に引用符があると、文字列が壊れる
+    if any(QUOTED_PLACEHOLDER_PATTERN.search(text) for text in texts):
+        raise AnalysisError('変数の前後に引用符を付けないでください({{名前}} だけを書くと、値が引用符つきで入ります)。')
     # 変数の置き換えの対象外の文字(変数の形の外)で判定する
     stripped = [PLACEHOLDER_PATTERN.sub('', text) for text in texts]
     # 正しい変数の形を除いた残りに「{{」「}}」があれば、不正な変数の表記(名前の形式違い・空白・波括弧の不一致など)として断る

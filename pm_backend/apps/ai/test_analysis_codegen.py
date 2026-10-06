@@ -783,3 +783,172 @@ class ApiWiringTest(CodegenBase):
             self.assertTrue(reverse(f'ai-analysis-codegen-{name}', kwargs={'plan_id': '12345678-1234-5678-1234-567812345678'}))
         self.assertTrue(reverse('ai-analysis-codegen', kwargs={'plan_id': '12345678-1234-5678-1234-567812345678'}))
 
+
+# ---- 変数つきのコード生成(段階2-B。BOSS承認 2026-10-06) ----
+PARAM_STEPS = [{'name': 'w_daily', 'query': (
+    'SELECT shipment_date, SUM(quantity) AS q FROM v_ai_shipment WHERE customer_code = {{customer_code}} '
+    'AND shipment_date BETWEEN {{period_from}} AND {{period_to}} GROUP BY shipment_date')}]
+PARAM_PYTHON = GOOD_PYTHON + "\nemit_report('顧客 ' + {{customer_code}} + ' ' + {{period_from}})"
+PARAM_DEFS = [
+    {'name': 'customer_code', 'type': 'customer_code', 'label': '顧客コード', 'default': 'C-001'},
+    {'name': 'period_from', 'type': 'date', 'label': '開始日'},
+    {'name': 'period_to', 'type': 'date', 'label': '終了日'},
+]
+
+
+def param_response(steps=PARAM_STEPS, python=PARAM_PYTHON, parameters=PARAM_DEFS):
+    body = {'steps': steps, 'python': python}
+    if parameters is not None:
+        body['parameters'] = parameters
+    return json.dumps(body, ensure_ascii=False)
+
+
+class ParseResponseTest(SimpleTestCase):
+    def test_parameters_are_optional_and_the_old_form_is_unchanged(self):
+        kind, steps, python, parameters = cg.parse_response_full(param_response())
+        self.assertEqual((kind, steps, python, parameters), ('generated', PARAM_STEPS, PARAM_PYTHON, PARAM_DEFS))
+        self.assertEqual(cg.parse_response_full(GOOD_RESPONSE), ('generated', GOOD_STEPS, GOOD_PYTHON, None))
+        self.assertEqual(cg.parse_response(param_response())[:2], ('generated', PARAM_STEPS))  # 従来の関数は、3つ組のまま
+        self.assertEqual(cg.parse_response_full('{"unsupported": "理由"}')[:2], ('unsupported', '理由'))
+
+    def test_a_malformed_parameters_field_is_invalid(self):
+        for parameters in ([], {}, 'x', 5, None):
+            raw = json.dumps({'steps': GOOD_STEPS, 'python': GOOD_PYTHON, 'parameters': parameters}, ensure_ascii=False)
+            self.assertEqual(cg.parse_response_full(raw)[0], 'invalid', parameters)
+        extra = json.dumps({'steps': GOOD_STEPS, 'python': GOOD_PYTHON, 'parameters': PARAM_DEFS, 'extra': 1}, ensure_ascii=False)
+        self.assertEqual(cg.parse_response_full(extra)[0], 'invalid')
+
+    def test_the_instruction_explains_variables_quotes_and_the_return_format(self):
+        for part in ('{{period_from}} と {{period_to}}', '前後に引用符を付けない', '"parameters"', 'product_code、customer_code、ship_to_code',
+                     '日付(2026-08-01 など)・コード(V000000000 など)を、直接書かない', '使った変数は、すべて parameters に書き', '辞書・集合の閉じ括弧を連続させない'):
+            self.assertIn(part, cg.SYSTEM_PROMPT)
+
+
+class ParameterGenerationTest(CodegenBase):
+    def setUp(self):
+        super().setUp()
+        from ai.services import analysis_template_params as params
+        self.params = params
+        patcher = patch.dict(params.TYPES['customer_code'], {'exists': lambda value: value == 'C-001'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def codegen_of(self, response):
+        plan = self.new_plan()
+        self.generate(plan, response)
+        return self.current(plan), self.current(plan)['codegen']
+
+    def test_variables_become_a_concrete_runnable_code_and_the_source_form_is_kept_for_the_template(self):
+        plan, state = self.codegen_of(param_response())
+        self.assertEqual(state['status'], 'generated')
+        query = state['steps'][0]['query']
+        self.assertIn("customer_code = 'C-001' AND shipment_date BETWEEN '2026-01-01' AND '2026-01-31'", query)
+        self.assertNotIn('{{', json.dumps(state['steps']) + state['python'])
+        self.assertIn("emit_report('顧客 ' + 'C-001' + ' ' + '2026-01-01')", state['python'])
+        source = state['template_source']
+        self.assertEqual((source['steps'], source['python']), (PARAM_STEPS, PARAM_PYTHON))
+        self.assertEqual({item['name']: item['default'] for item in source['parameters']},
+                         {'customer_code': 'C-001', 'period_from': '2026-01-01', 'period_to': '2026-01-31'})
+        bundle = cg.make_bundle(state['steps'], state['python'], VIEWS)
+        self.assertEqual((state['executed_code_sha256'], state['sql_sha256']), (bundle.executed_code_sha256, bundle.sql_sha256))
+
+    def test_the_period_values_come_from_the_plan_not_from_the_ai(self):
+        defs = [PARAM_DEFS[0], {**PARAM_DEFS[1], 'default': '2020-05-05'}, {**PARAM_DEFS[2], 'default': '2020-06-06'}]
+        _, state = self.codegen_of(param_response(parameters=defs))
+        defaults = {item['name']: item['default'] for item in state['template_source']['parameters']}
+        self.assertEqual((defaults['period_from'], defaults['period_to']), ('2026-01-01', '2026-01-31'))
+
+    def test_a_response_without_parameters_is_unchanged_and_has_no_template_source(self):
+        _, state = self.codegen_of(GOOD_RESPONSE)
+        self.assertEqual(state['status'], 'generated')
+        self.assertNotIn('template_source', state)
+        self.assertEqual(state['steps'], GOOD_STEPS)
+
+    def test_each_variable_problem_is_a_fixed_reason_and_a_failed_generation_that_still_counts(self):
+        s = lambda query: [{'name': 'w_daily', 'query': query}]
+        base = PARAM_STEPS[0]['query']
+        cases = {
+            'parameters_source_invalid': [
+                param_response(steps=s(base.replace('{{customer_code}}', '{{other}}'))),                       # 定義にない変数
+                param_response(parameters=PARAM_DEFS + [{'name': 'second', 'type': 'customer_code', 'label': '別の顧客', 'default': 'C-001'}]),  # 使われない定義
+                param_response(python=PARAM_PYTHON + "\nx = 'C-001'"),                                         # 元の値が残っている
+                param_response(python=PARAM_PYTHON + "\nd = '2026-03-03'"),                                    # 日付の直書き
+                param_response(steps=s(base.replace('{{customer_code}}', "'{{customer_code}}'"))),             # 引用符つき
+            ],
+            'parameters_invalid': [
+                param_response(parameters=[{**PARAM_DEFS[0], 'type': 'supplier'}, *PARAM_DEFS[1:]]),          # 種類の不正
+                param_response(parameters=[{**PARAM_DEFS[0], 'default': 'C-999'}, *PARAM_DEFS[1:]]),          # 実在しない値
+                param_response(parameters=[{'name': 'customer_code', 'type': 'customer_code', 'label': 'x'}, *PARAM_DEFS[1:]]),  # 元の値がない
+                param_response(parameters=PARAM_DEFS[:2]),                                                      # 期間が組でない
+                param_response(parameters=['x']),                                                               # 項目の形
+                param_response(parameters=[{'name': [], 'type': 'date', 'label': 'x'}]),                        # 名前がリスト(例外にならず、理由コードになる)
+                param_response(parameters=[{'name': {}, 'type': 'date', 'label': 'x'}]),                        # 名前が辞書
+                param_response(parameters=[{'name': 5, 'type': 'date', 'label': 'x'}]),                         # 名前が数値
+                param_response(parameters=[{**PARAM_DEFS[0], 'type': ['product_code']}, *PARAM_DEFS[1:]]),     # 種類がリスト
+                param_response(parameters=[{**PARAM_DEFS[0], 'default': ['C-001']}, *PARAM_DEFS[1:]]),         # 元の値がリスト
+                param_response(parameters=[{**PARAM_DEFS[0], 'label': {}}, *PARAM_DEFS[1:]]),                  # ラベルが辞書
+            ],
+        }
+        for reason, responses in cases.items():
+            for response in responses:
+                with self.subTest(reason=reason, response=response[:60]):
+                    plan = self.new_plan()
+                    self.generate(plan, response)
+                    state = self.current(plan)['codegen']
+                    self.assertEqual(state['status'], 'failed')
+                    self.assertEqual(state['attempts'], 1)
+                    self.assertNotIn('template_source', state)
+                    self.assertEqual(state['reasons'], [reason])
+
+    def test_a_malformed_code_shape_with_parameters_is_a_fixed_reason_and_never_a_stuck_generation(self):
+        for steps in ('x', [5], [{'name': 'w_a'}], [{'name': 'w_a', 'query': 5}]):
+            with self.subTest(steps=str(steps)):
+                plan = self.new_plan()
+                self.generate(plan, param_response(steps=steps))
+                state = self.current(plan)['codegen']
+                self.assertEqual((state['status'], state['inflight'], state['attempts']), ('failed', None, 1))
+                self.assertNotIn('template_source', state)
+
+    def test_an_unavailable_value_source_is_a_fixed_reason_not_a_crash_or_a_stuck_generation(self):
+        def broken(value):
+            raise AnalysisError('顧客コードを確認できません。', 503)
+
+        with patch.dict(self.params.TYPES['customer_code'], {'exists': broken}):
+            plan = self.new_plan()
+            self.generate(plan, param_response())
+        state = self.current(plan)['codegen']
+        self.assertEqual((state['status'], state['reasons'], state['inflight']), ('failed', ['parameters_unavailable'], None))
+
+    def test_the_concrete_code_is_still_checked_by_the_usual_rules(self):
+        plan = self.new_plan()
+        self.generate(plan, param_response(python=PARAM_PYTHON + chr(10) + 'import os'))
+        state = self.current(plan)['codegen']
+        self.assertEqual(state['status'], 'failed')
+        self.assertIn('python:import_not_allowed', state['reasons'])
+        self.assertNotIn('template_source', state)
+
+    def test_the_generated_plan_can_be_saved_as_a_template_in_the_variable_form(self):
+        from ai.services import analysis_template_service as service
+        plan, state = self.codegen_of(param_response())
+        stored = self.store.update(plan['id'], OWNER, plan['revision'], lambda current: current['codegen'].update(
+            status='code_approved', code_approved_at=datetime.now().isoformat()))
+        fields = service._fields_from_plan(stored)
+        self.assertEqual((fields['sql_steps'], fields['python_code']), (PARAM_STEPS, PARAM_PYTHON))
+        self.assertEqual([item['name'] for item in fields['parameters']], ['customer_code', 'period_from', 'period_to'])
+        self.assertEqual(fields['executed_code_sha256'], state['executed_code_sha256'])
+
+    def test_a_plan_without_variables_and_with_a_fixed_date_cannot_be_saved_as_a_template(self):
+        from ai.services import analysis_template_service as service
+        dated = [{'name': 'w_daily', 'query': "SELECT shipment_date, SUM(quantity) AS q FROM v_ai_shipment WHERE shipment_date >= '2026-01-01' GROUP BY shipment_date"}]
+        plan, _ = self.codegen_of(json.dumps({'steps': dated, 'python': GOOD_PYTHON}, ensure_ascii=False))
+        stored = self.store.update(plan['id'], OWNER, plan['revision'], lambda current: current['codegen'].update(
+            status='code_approved', code_approved_at=datetime.now().isoformat()))
+        with self.assertRaises(AnalysisError) as caught:
+            service._fields_from_plan(stored)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn('固定の日付', str(caught.exception.detail))
+        # 日付のないコードは、従来どおり保存できる
+        plain, _ = self.codegen_of(GOOD_RESPONSE)
+        stored = self.store.update(plain['id'], OWNER, plain['revision'], lambda current: current['codegen'].update(
+            status='code_approved', code_approved_at=datetime.now().isoformat()))
+        self.assertEqual(service._fields_from_plan(stored)['parameters'], [])

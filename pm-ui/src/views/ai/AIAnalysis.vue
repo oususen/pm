@@ -148,6 +148,7 @@
               <h4>生成SQL（中間テーブル作成の手順）</h4>
               <p v-if="!codegen.steps.length">SQLの中間テーブル作成なし。</p>
               <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
+              <p v-if="codeVariables.length">変数（使うときに値を変えられます。コードには、下の値が入っています）: <span v-for="(item, index) in codeVariables" :key="item.name">{{ index ? ' / ' : '' }}{{ item.label }}（{{ item.name }}）= {{ item.default }}</span></p>
               <h4>生成Python</h4><pre>{{ codegen.python }}</pre>
               <small>コード全体のSHA-256: {{ codegen.executed_code_sha256 }} / 固定外枠の版: {{ codegen.wrapper_version }}</small>
               <p v-if="codeState?.wrapper_outdated">外枠が更新されています。保存済みSQL・Pythonが新しい検査に合格すれば、AIを呼ばずに更新・再試行・再承認できます。不合格なら再生成が必要です。</p>
@@ -242,6 +243,8 @@ const planProviderLabel = computed(() => {
 const providerBadge = computed(() => selectedProvider.value?.available ? `${selectedProvider.value.label} · ${model.value || '未選択'}` : `${selectedProvider.value?.label || 'AI'} · 要確認`)
 const codegen = computed(() => plan.value?.codegen || null)
 const codeState = computed(() => plan.value?.codegen_state || null)
+// 変数つきのコード(段階2-B): AIが使った変数の一覧(名前・ラベル・元の値)。保存すると、テンプレートが持つ
+const codeVariables = computed(() => Array.isArray(codegen.value?.template_source?.parameters) ? codegen.value.template_source.parameters : [])
 const codeExternal = computed(() => !['qwen', 'template'].includes(plan.value?.proposal.provider))
 const codeInFlight = computed(() => !!codegen.value?.inflight || !!codeState.value?.inflight_state || codeState.value?.status === 'generating')
 const canGenerate = computed(() => props.canEdit && !executionActive.value && !busy.value && codeStateFresh.value && plan.value?.status === 'data_approved' && codeState.value && !codeInFlight.value && codeState.value.attempts < codeState.value.max_attempts)
@@ -258,6 +261,9 @@ const FAILURE_LABELS = Object.freeze({
   ai_request_failed: 'AIとの通信に失敗しました。生成回数は消費されています。',
   response_invalid: 'AIの応答が指定された形式ではありません。',
   ai_unsupported: 'AIが、このデータ範囲では分析コードを作成できないと判定しました。',
+  parameters_invalid: 'AIが返した変数の定義が正しくありません(種類・値・元の値の不足、または、登録されていない品番・顧客コード・納入先コード)。',
+  parameters_source_invalid: 'コードと変数が合っていません(定義にない変数・使われない変数・固定の値の直書き・変数の前後の引用符)。',
+  parameters_unavailable: '変数の値(品番・顧客コード・納入先コード)を確認できませんでした。しばらくしてから、もう一度試してください。',
   inflight_released: '状態不明の生成を利用者の操作で解除しました。生成回数は戻りません。',
   steps_invalid: 'SQL手順の形式が正しくありません。',
   step_name_invalid: '中間テーブル名が規則に合っていません。',

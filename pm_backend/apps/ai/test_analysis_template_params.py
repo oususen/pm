@@ -398,3 +398,30 @@ class ReuseTests(ParamBase):
             response = self.reuse_with(self.other, row, {'product_code': 'P-002'})
         self.assertEqual(response.status_code, 503)
         self.assert_no_plan()
+
+
+class NormalizeAndQuoteTests(ParamBase):
+    def test_a_quote_next_to_a_placeholder_is_refused_because_the_replacement_adds_quotes(self):
+        for text in ("x = '{{product_code}}'", 'x = "{{product_code}}"', "x = '{{product_code}}", "x = {{product_code}}'", 'x = "{{product_code}}'):
+            with self.subTest(text=text), self.assertRaises(AnalysisError):
+                params.check_source(STEPS_P, PYTHON_P + chr(10) + text, DEFS)
+        params.check_source(STEPS_P, PYTHON_P + chr(10) + "x = f({{product_code}}, 'a')", DEFS)  # 離れていれば、よい
+
+    def test_normalize_takes_the_period_from_the_plan_and_requires_a_default_for_codes(self):
+        raw = [{'name': 'product_code', 'type': 'product_code', 'label': '品番', 'default': 'P-001'},
+               {'name': 'period_from', 'type': 'date', 'label': '開始日', 'default': '1999-01-01'},
+               {'name': 'period_to', 'type': 'date', 'label': '終了日'}]
+        out = params.normalize_definitions(raw, '2026-02-01', '2026-02-28')
+        self.assertEqual({item['name']: item['default'] for item in out}, {'product_code': 'P-001', 'period_from': '2026-02-01', 'period_to': '2026-02-28'})
+        bad = [[], 'x', [{'name': 'a'}], [{'name': 'product_code', 'type': 'product_code', 'label': 'x'}],
+               [{'name': 'product_code', 'type': 'product_code', 'label': 'x', 'default': 'P-001', 'extra': 1}],
+               [{'name': 'product_code', 'type': 'product_code', 'label': 'x', 'default': 'P-999'}], raw[:2]]
+        for value in bad:
+            with self.subTest(value=str(value)[:50]), self.assertRaises(AnalysisError):
+                params.normalize_definitions(value, '2026-02-01', '2026-02-28')
+
+    def test_has_date_literal_finds_dates_in_sql_and_python_only_in_the_form_given(self):
+        self.assertTrue(params.has_date_literal([{'name': 'w_a', 'query': "SELECT 1 WHERE d >= '2026-01-01'"}], 'x = 1'))
+        self.assertTrue(params.has_date_literal([{'name': 'w_a', 'query': 'SELECT 1'}], "d = '2026-01-01'"))
+        self.assertFalse(params.has_date_literal([{'name': 'w_a', 'query': 'SELECT 1'}], 'x = 1'))
+        self.assertFalse(params.has_date_literal(STEPS_P, PYTHON_P))  # 変数の形のコードには、日付がない

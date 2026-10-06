@@ -833,3 +833,23 @@ test('分析目的: 見出し(段階カード)と重複するラベルを置か�
     assert.equal(text.includes('生産・仕損・中断・残業は未対応です'), false)
   } finally { f.stop() }
 })
+
+test('変数つきのコード(2-B): 使った変数と、元の値を表示する。変数がなければ出さない。失敗の理由は固定文で出す', async () => {
+  const f = await setup()
+  try {
+    const base = generated()
+    f.state.plan.value = { ...base, codegen: { ...base.codegen, template_source: { steps: [], python: '', parameters: [
+      { name: 'product_code', type: 'product_code', label: '品番', default: 'V053904703' },
+      { name: 'period_from', type: 'date', label: '開始日', default: '2026-09-01' },
+    ] } } }
+    const text = (await htmlFor(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('変数（使うときに値を変えられます。コードには、下の値が入っています）'))
+    assert.ok(text.includes('品番（product_code）= V053904703')); assert.ok(text.includes('開始日（period_from）= 2026-09-01'))
+    f.state.plan.value = base
+    assert.equal((await htmlFor(f)).includes('使うときに値を変えられます'), false, '変数がなければ出さない')
+    for (const [reason, part] of [['parameters_invalid', '変数の定義が正しくありません'], ['parameters_source_invalid', 'コードと変数が合っていません'], ['parameters_unavailable', '変数の値']]) {
+      f.state.plan.value = { ...dataPlan(), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: [reason] } }
+      assert.ok((await htmlFor(f)).includes(part), reason)
+    }
+  } finally { f.stop() }
+})
