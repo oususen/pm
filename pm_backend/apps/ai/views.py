@@ -41,7 +41,7 @@ class AIAnalysisPlansView(APIView):
 
 
 class AIAnalysisConsultView(APIView):
-    """分析の前に、目的を整えるやり取りと、承認済みテンプレートの推薦(ローカルQwenだけ。保存しない)。"""
+    """分析の前に、目的を整えるやり取りと、承認済みテンプレートの推薦(選択したAIに従う。社外のAIへは、コード置換後に送る。保存しない)。"""
     permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request):

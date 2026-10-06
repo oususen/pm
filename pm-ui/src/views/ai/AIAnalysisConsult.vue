@@ -2,13 +2,19 @@
   <section class="consult" aria-label="AIと目的を整える">
     <button type="button" class="consult-head" :aria-expanded="open" aria-controls="consult-body" @click="open = !open">
       <strong>AIと目的を整える</strong><em>{{ open ? '畳む' : '開く' }}</em>
-      <small v-if="!open">目的を書きにくいときに、AIと相談できます（ローカルAIだけ。社外へ送りません）</small>
+      <small v-if="!open">目的を書きにくいときに、AIと相談できます（{{ external ? `社外サービス（${providerLabel}）へ、登録名称をコードへ置換して送ります` : 'ローカルAIだけ。社外へ送りません' }}）</small>
     </button>
     <div v-show="open" id="consult-body" class="consult-body">
-      <p class="note">やり取りはローカルAI（Qwen）で行い、社外へ送りません。やり取りは保存されません（画面を閉じる・分析案を作ると消えます）。AIは数値を知らず、助言と文案だけを出します。</p>
+      <template v-if="external">
+        <p class="warning">やり取りは、上で選んだ社外サービス（{{ providerLabel }}）へ送ります。登録名称（社員・顧客・仕入先など）はコードへ置換して送ります。送るのは、あなたの発言・AIの過去の返事・**承認済みテンプレートの名称と目的**・公開ビューの説明・今日の日付です。未登録の人名・社名は置換されません。DBの明細行・数値は送りません。</p>
+        <label class="ack"><input v-model="externalAck" type="checkbox" :disabled="!usable || !!busy">社外サービス（{{ providerLabel }}）へ、置換後の内容を送ることを了承します</label>
+        <p class="note">送った内容（置換後）は、各発言の下に表示します。やり取りは保存されません（画面を閉じる・分析案を作ると消えます）。AIは数値を知らず、助言と文案だけを出します。</p>
+      </template>
+      <p v-else class="note">やり取りはローカルAI（Qwen）で行い、社外へ送りません。やり取りは保存されません（画面を閉じる・分析案を作ると消えます）。AIは数値を知らず、助言と文案だけを出します。</p>
       <p v-if="!messages.length" class="note">例: 「先月の出荷を製品別に比べたい」のように、分かる範囲で書いてください。AIが、期間や対象を質問します。</p>
       <ul v-if="messages.length" class="log">
-        <li v-for="(item, index) in messages" :key="index" :class="item.role"><b>{{ item.role === 'user' ? 'あなた' : 'AI' }}:</b> {{ item.content }}</li>
+        <li v-for="(item, index) in messages" :key="index" :class="item.role"><b>{{ item.role === 'user' ? 'あなた' : 'AI' }}:</b> {{ item.content }}
+          <small v-if="item.sent" class="sent">社外へ送った内容（置換後）: {{ item.sent }}</small></li>
       </ul>
       <p v-if="error" class="error">{{ error }}</p>
       <div class="send">
@@ -20,6 +26,7 @@
         <p><b>AIの文案</b></p>
         <p v-if="draft.purpose">目的: {{ draft.purpose }}</p>
         <p v-if="draft.date_from">期間: {{ draft.date_from }} ～ {{ draft.date_to }}</p>
+        <p v-if="external" class="note">社外サービスの文案には、登録名称のコード（例: CUST-001）が含まれることがあります。取り込んだ後、実名へ直してください。</p>
         <button type="button" :disabled="!usable || !!busy" @click="apply">目的欄・期間欄に取り込む</button>
       </section>
       <section v-if="templates.length" class="recommend">
@@ -33,29 +40,37 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import api from '../../api/client'
 
-const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, blocked: Boolean, purpose: { type: String, default: '' }, dateFrom: { type: String, default: '' }, dateTo: { type: String, default: '' } })
+const props = defineProps({
+  plan: { type: Object, default: null }, canEdit: Boolean, blocked: Boolean, purpose: { type: String, default: '' }, dateFrom: { type: String, default: '' }, dateTo: { type: String, default: '' },
+  // 上部で選んだAI。社外のAIのときは、置換後の内容を送ることを了承してから送る(選び直したら、了承も取り直す)
+  provider: { type: String, default: 'qwen' }, model: { type: String, default: '' }, external: Boolean, providerLabel: { type: String, default: '' }, providerAvailable: { type: Boolean, default: true },
+})
 const emit = defineEmits(['apply', 'plan-created'])
-const open = ref(false), input = ref(''), busy = ref(''), error = ref('')
+const open = ref(false), input = ref(''), busy = ref(''), error = ref(''), externalAck = ref(false)
 const messages = ref([]), draft = ref(null), templates = ref([])
 let disposed = false, epoch = 0
 // 画面で表示する失敗は固定文だけ。APIの本文は表示しない。
 const CONSULT_ERRORS = Object.freeze({
-  400: '送る内容が正しくありません。',
-  403: 'AIと相談する権限がありません（「AI分析」の編集権限が必要です）。',
+  400: '送る内容、またはAIの選択が正しくありません。上のAIプロバイダ・モデルを確認してください。',
+  422: '発言に、コードへ置換できない名称が含まれます。表現を変えて、もう一度送ってください（社外へは送っていません）。',
+  424: '承認済みテンプレートの名称・目的を、コードへ置換できません。管理者へ、名称の登録の確認を依頼してください（社外へは送っていません）。',
+  403: 'AIと相談する権限がありません。「AI分析」の編集権限、または社外サービスへの送信の許可を確認してください。',
+  409: '社外サービスへ送ることの了承が必要です。',
   502: 'AIの返答を検証できませんでした。もう一度送ってください。',
-  503: 'ローカルAIを使えません。しばらくしてから、もう一度送ってください。',
+  503: 'AIまたはコード置換の処理を使えません。しばらくしてから、もう一度送ってください。（上のAI設定・APIキーも確認してください）',
 })
 const REUSE_ERRORS = Object.freeze({
   403: 'このテンプレートを再利用する権限がありません。',
   404: 'テンプレートが見つかりません。',
   409: 'このテンプレートは再利用できません（却下・置換済み、内容や検査・ビューの公開定義の不一致）。',
 })
-const usable = computed(() => props.canEdit && !props.plan && !props.blocked)
-const unusableReason = computed(() => !props.canEdit ? '「AI分析」の編集権限が必要です。' : props.plan ? '分析案を作った後は使えません。目的を変える場合は「目的・期間を変更して作り直す」を押してください。' : '他の操作の完了後に使えます。')
-const canSend = computed(() => usable.value && !busy.value && !!input.value.trim())
+const usable = computed(() => props.canEdit && !props.plan && !props.blocked && props.providerAvailable)
+const unusableReason = computed(() => !props.canEdit ? '「AI分析」の編集権限が必要です。' : !props.providerAvailable ? '選んだAIは、いま使えません。上のAIプロバイダ・モデルを確認してください（自動では切り替えません）。' : props.plan ? '分析案を作った後は使えません。目的を変える場合は「目的・期間を変更して作り直す」を押してください。' : '他の操作の完了後に使えます。')
+const canSend = computed(() => usable.value && !busy.value && !!input.value.trim() && (!props.external || externalAck.value))
+watch(() => [props.provider, props.model, props.external], () => { externalAck.value = false }, { flush: 'sync' }) // AIを選び直したら、社外へ送る了承を取り直す
 
 onBeforeUnmount(() => { disposed = true; epoch++ })
 
@@ -63,13 +78,21 @@ async function send() {
   if (!canSend.value) return
   const text = input.value.trim(), current = epoch
   const history = [...messages.value, { role: 'user', content: text }]
+  const external = props.external, chosen = [props.provider, props.model, props.external].join('|')
   busy.value = 'send'; error.value = ''
   try {
     // やり取りはサーバーに保存しない。毎回、全体を送る
-    const response = await api.aiAnalysis.consult({ messages: history })
+    const body = { messages: history.map(({ role, content }) => ({ role, content })), provider: props.provider }
+    if (props.model) body.model = props.model
+    if (external) body.external_confirmed = true
+    const response = await api.aiAnalysis.consult(body)
     if (disposed || current !== epoch) return
+    // 送信中にAIを選び直したときは、前のAIの返事を使わない(入力欄は残す。了承は取り直し)
+    if ([props.provider, props.model, props.external].join('|') !== chosen) { error.value = 'AIを切り替えたため、前のAIの返事は使いません。もう一度送ってください。'; return }
     const data = response.data || {}
-    messages.value = [...history, { role: 'assistant', content: String(data.reply ?? '') }]
+    // 社外へ送った内容(置換後)を、送った発言の下に表示する
+    const shown = history.map((item, index) => index === history.length - 1 && data.sent_text ? { ...item, sent: String(data.sent_text) } : item)
+    messages.value = [...shown, { role: 'assistant', content: String(data.reply ?? '') }]
     draft.value = data.draft || null
     templates.value = Array.isArray(data.templates) ? data.templates : []
     input.value = ''
@@ -110,6 +133,9 @@ async function useTemplate(item) {
 .consult-body { padding: 0 8px 6px; }
 .consult-body p { margin: 2px 0; }
 .note { font-size: 12px; color: #566; }
+.warning { color: #7a4b00; background: #fff6e0; padding: 2px 6px; border-radius: 4px; }
+.ack { display: block; margin: 2px 0; }
+.sent { display: block; color: #566; font-size: 12px; }
 .error { color: #b00020; }
 .log { list-style: none; margin: 4px 0; padding: 0; max-height: 220px; overflow-y: auto; }
 .log li { margin: 2px 0; padding: 2px 6px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }

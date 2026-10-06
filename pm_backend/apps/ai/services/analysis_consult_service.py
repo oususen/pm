@@ -1,7 +1,11 @@
 """分析の前の「AIと目的を整える」やり取りと、承認済みテンプレートの推薦(BOSS承認 2026-10-05)。
 
-- AIは**ローカルQwenだけ**。ヘッダのAI選択には従わず、社外のAIへは何も送らない(社外送信の確認・コード置換は不要)
-- AIへ渡すのは、利用者とAIのやり取り・公開ビューの説明・承認済みテンプレートの一覧(ID・名称・目的)・今日の日付だけ。実データ・DBの数値は渡さない
+- AIは、画面上部の「AIプロバイダ・モデル」の選択に従う(BOSS承認 2026-10-06。当初はローカルQwenだけだった)。選んだAIが使えないときは、エラーで終わる
+  (自動でQwenへ切り替えない)。ローカルQwenは、社外へ何も送らない
+- 社外のAI(OpenRouter・DeepSeek)へ送るときは、分析案の作成と同じく、**登録名称をコードへ置換**して送る(利用者の発言・AIの過去の返事・テンプレートの名称と目的)。
+  やり取りの最初に1回、利用者が、社外へ送ることを了承する(external_confirmed。毎回の確認は求めない)。送った内容(置換後)を、各発言の下に表示する。
+  AIの返事のコードは、名前へ復元しない(文案を取り込んだ後は、利用者が実名へ直す)。管理設定(外部送信の許可・APIキー・モデルの許可リスト)は、分析案の作成と同じ確認を使う
+- AIへ渡すのは、利用者とAIのやり取り・公開ビューの説明・承認済みテンプレートの一覧(ID・名称・カテゴリ・目的)・今日の日付だけ。実データ・DBの数値は渡さない
 - やり取りはサーバーに保存しない(画面が持ち、毎回全体を送る)。ログにも内容を残さない。回数の上限は設けない(BOSS承認)
 - AIが返すのは、助言・目的の文案・期間の候補・推薦するテンプレートのIDだけ。日付は形式・範囲を、IDは実在・承認済みをサーバーが確認する。
   確認できないものは捨てる(別の値で代替しない)。テンプレートの名称・目的などの表示値は、AIの文ではなくDBの値を使う
@@ -10,16 +14,20 @@
 import json
 from datetime import datetime, timedelta
 
+from django.db import DatabaseError
+
 from ai.models import AIAnalysisTemplate
-from ai.services import chat_service
+from ai.services import analysis_llm, chat_service
 from ai.services.analysis_data_service import ANALYSIS_VIEWS, validate_period
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
+from ai.services.analysis_redaction import build_analysis_code_redactor
 from ai.services.sql_queries import BASE_SQL_SCHEMA
 
 MAX_RECOMMENDATIONS = 10  # BOSS承認(2026-10-05): 利用者へ推薦するテンプレートは10件まで
 BUSINESS_DAY_START_HOUR = 8  # 日替わり時刻(8:00)
 ROLES = ('user', 'assistant')
+REQUEST_KEYS = {'messages', 'provider', 'model', 'external_confirmed'}
 
 
 def _today():
@@ -49,9 +57,10 @@ def _approved_templates():
     return list(AIAnalysisTemplate.objects.filter(status='approved').order_by('-id'))
 
 
-def _system_prompt(templates):
+def _system_prompt(templates, redact=None):
     schema = {view: {**definition, 'fields': BASE_SQL_SCHEMA[view]} for view, definition in ANALYSIS_VIEWS.items()}
-    lines = [f'ID {template.pk}: {template.name}(カテゴリ: {template.get_category_display()}、目的: {template.purpose})' for template in templates] or ['(承認済みのテンプレートはありません)']
+    text = redact or (lambda value: value)  # 社外へ送るときは、名称・目的の登録名称をコードへ置換する
+    lines = [f'ID {template.pk}: {text(template.name)}(カテゴリ: {template.get_category_display()}、目的: {text(template.purpose)})' for template in templates] or ['(承認済みのテンプレートはありません)']
     return (
         'あなたは、データ分析の目的を整える相談役。利用者が、分析の目的を適切に書けるように助ける。\n'
         '数値・結果・SQL・Pythonは作らない。DBの値は分からないので、推測で数字を言わない。\n'
@@ -106,20 +115,61 @@ def _recommendations(data, templates):
     } for pk in picked]
 
 
-def consult(data):
-    messages = validate_messages(data)
-    provider, model = resolve_planning_provider({'provider': 'qwen'})  # ローカルQwenの有効・設定を確認。無効なら503
-    templates = _approved_templates()
-    timeout = get_qwen_analysis_timeout()
+def _request(data):
+    """要求の形式。messagesのほか、provider・model・external_confirmed(社外へ送ることの了承)だけを受け付ける。"""
+    if not isinstance(data, dict) or 'messages' not in data or set(data) - REQUEST_KEYS:
+        raise AnalysisError('messages(と、provider・model・external_confirmed)だけを指定してください。')
+    messages = validate_messages({'messages': data['messages']})
+    selection = {key: data[key] for key in ('provider', 'model') if key in data}
+    return messages, selection, data.get('external_confirmed')
+
+
+def _redactor():
     try:
-        raw = chat_service._chat(
-            [{'role': 'system', 'content': _system_prompt(templates)}, *messages], provider, json_mode=True,
-            num_predict=chat_service.AGENT_MAX_TOKENS, timeout=timeout,
-        )
+        return build_analysis_code_redactor()
+    except DatabaseError as exc:
+        raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
+
+
+def consult(data):
+    messages, selection, confirmed = _request(data)
+    provider, model = resolve_planning_provider(selection)  # 選んだAIの有効・設定・外部送信の許可・APIキーを確認。使えなければ止まる(代替しない)
+    external = provider != 'qwen'
+    if external and confirmed is not True:
+        raise AnalysisError('社外サービスへ送ることを確認してください。外部AIへは送信していません。', 409)
+    templates = _approved_templates()
+    if external:
+        redactor = _redactor()
+        try:
+            sent = [{'role': item['role'], 'content': redactor.redact_text(item['content'])} for item in messages]
+        except DatabaseError as exc:
+            raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
+        except AnalysisError as exc:
+            # 登録名称が曖昧・未登録の可能性がある発言。名称は応答に出さない(置換できなければ、送らない)
+            raise AnalysisError('発言に、コードへ置換できない名称が含まれます。表現を変えて、もう一度送ってください。外部AIへは送信していません。', 422) from exc
+        try:
+            system = _system_prompt(templates, redactor.redact_text)
+        except DatabaseError as exc:
+            raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
+        except AnalysisError as exc:
+            # 承認済みテンプレートの名称・目的に、置換できない名称がある。1件でもあれば、社外へは送らない(除外して続けない)
+            raise AnalysisError('承認済みテンプレートの名称・目的を、コードへ置換できません。管理者へ、名称の登録の確認を依頼してください。外部AIへは送信していません。', 424) from exc
+    else:
+        sent, system = messages, _system_prompt(templates)
+    request_messages = [{'role': 'system', 'content': system}, *sent]
+    try:
+        if external:
+            raw = analysis_llm.request_external_json(provider, model, request_messages)
+        else:
+            raw = chat_service._chat(
+                request_messages, provider, json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS, timeout=get_qwen_analysis_timeout(),
+            )
     except chat_service.LocalAIError as exc:
-        raise AnalysisError('ローカルAIから返答を得られませんでした。しばらくしてからもう一度送ってください。', 503) from exc
+        raise AnalysisError('AIから返答を得られませんでした。しばらくしてからもう一度送ってください。', 503) from exc
     parsed = _parse(raw)
+    # AIの応答を待つ間に、置換・却下された場合に備え、応答の後の承認済みの一覧で、推薦のIDと表示値を確認し直す
     return {
-        'reply': parsed['reply'].strip(), 'draft': _draft(parsed), 'templates': _recommendations(parsed, templates),
-        'provider': provider, 'model': model,
+        'reply': parsed['reply'].strip(), 'draft': _draft(parsed), 'templates': _recommendations(parsed, _approved_templates()),
+        'provider': provider, 'model': model, 'external': external,
+        'sent_text': sent[-1]['content'] if external else None,  # 社外へ送った、最後の発言(コード置換後)。画面で、各発言の下に表示する
     }

@@ -47,7 +47,7 @@
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <label for="analysis-purpose">分析目的</label>
       <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-      <AIAnalysisConsult v-if="canEdit && !plan" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" @apply="applyConsult" @plan-created="useTemplatePlan" />
+      <AIAnalysisConsult v-if="canEdit && !plan" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" @apply="applyConsult" @plan-created="useTemplatePlan" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
       <div class="period">
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>

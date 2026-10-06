@@ -12,23 +12,23 @@ assert.deepEqual(parsed.errors, [])
 const script = compileScript(parsed.descriptor, { id: 'consult-test' })
 const template = compileTemplate({ source: parsed.descriptor.template.content, filename: filename.pathname, id: 'consult-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
-const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'ref', 'api', 'plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo'].includes(n))
-const create = new Function('ref', 'computed', 'onBeforeUnmount', 'defineProps', 'defineEmits', 'api', 'window',
+const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'ref', 'watch', 'api', 'plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo', 'provider', 'model', 'external', 'providerLabel', 'providerAvailable'].includes(n))
+const create = new Function('ref', 'computed', 'onBeforeUnmount', 'watch', 'defineProps', 'defineEmits', 'api', 'window',
   parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '') + `\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
 
 const reply = (extra = {}) => ({ data: { reply: '製品は絞りますか？', draft: { purpose: null, date_from: null, date_to: null }, templates: [], provider: 'qwen', model: 'm', ...extra } })
 function setup(propsInit = {}, methodsInit = {}) {
-  const props = Vue.reactive({ plan: null, canEdit: true, blocked: false, purpose: '', dateFrom: '', dateTo: '', ...propsInit }), calls = [], confirms = [], events = [], consent = { value: true }
+  const props = Vue.reactive({ plan: null, canEdit: true, blocked: false, purpose: '', dateFrom: '', dateTo: '', provider: 'qwen', model: '', external: false, providerLabel: '', providerAvailable: true, ...propsInit }), calls = [], confirms = [], events = [], consent = { value: true }
   const methods = { consult: async () => reply(), createTemplatePlan: async id => ({ data: { id: 'new-plan', template: { id } } }), ...methodsInit }
   const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
   const scope = Vue.effectScope()
   let state
-  scope.run(() => { state = create(Vue.ref, Vue.computed, () => {}, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }) })
+  scope.run(() => { state = create(Vue.ref, Vue.computed, () => {}, Vue.watch, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }) })
   const unmountFn = () => scope.stop()
   return { state, props, calls, confirms, events, consent, stop: unmountFn }
 }
-const html = f => renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props))
+const html = f => renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo', 'provider', 'model', 'external', 'providerLabel', 'providerAvailable'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props))
 const sends = f => f.calls.filter(c => c[0] === 'consult')
 
 test('送信すると、やり取り全体をAPIへ送り、AIの返事を履歴に足す。入力欄は空になる', async () => {
@@ -38,7 +38,7 @@ test('送信すると、やり取り全体をAPIへ送り、AIの返事を履歴
     await f.state.send()
     f.state.input.value = '製品は全部です'
     await f.state.send()
-    assert.deepEqual(sends(f)[0][1], { messages: [{ role: 'user', content: '先月の出荷を比べたい' }] })
+    assert.deepEqual(sends(f)[0][1], { messages: [{ role: 'user', content: '先月の出荷を比べたい' }], provider: 'qwen' })
     assert.deepEqual(sends(f)[1][1].messages.map(m => [m.role, m.content]), [['user', '先月の出荷を比べたい'], ['assistant', '製品は絞りますか？'], ['user', '製品は全部です']])
     assert.equal(f.state.input.value, '')
     const text = await html(f)
@@ -63,7 +63,7 @@ test('失敗したときは、固定文を出し、送った発言を履歴へ�
     await f.state.send()
     assert.deepEqual(f.state.messages.value, [])
     assert.equal(f.state.input.value, '相談')
-    assert.ok(f.state.error.value.includes('ローカルAIを使えません')); assert.equal(f.state.error.value.includes('SECRET'), false)
+    assert.ok(f.state.error.value.includes('AIまたはコード置換の処理を使えません')); assert.equal(f.state.error.value.includes('SECRET'), false)
     assert.equal(f.state.busy.value, '')
   } finally { f.stop() }
 })
@@ -142,4 +142,114 @@ test('案内文: 社外へ送らないこと・保存されないこと・数値
     assert.ok((await html(planned)).includes('分析案を作った後は使えません'))
     assert.ok((await html(viewer)).includes('編集権限が必要です'))
   } finally { f.stop(); planned.stop(); viewer.stop() }
+})
+
+const EXT = { provider: 'openrouter', model: 'qwen/qwen3.8-27b:free', external: true, providerLabel: 'OpenRouter' }
+
+test('社外のAIを選んでいるときは、了承するまで送れない。了承後は、選んだAI・モデルと了承を付けて送る(社外)', async () => {
+  const f = setup(EXT)
+  try {
+    f.state.input.value = 'ACMEの件'
+    await f.state.send()
+    assert.equal(sends(f).length, 0, '了承前は送らない')
+    f.state.externalAck.value = true
+    await f.state.send()
+    assert.deepEqual(sends(f)[0][1], { messages: [{ role: 'user', content: 'ACMEの件' }], provider: 'openrouter', model: 'qwen/qwen3.8-27b:free', external_confirmed: true })
+  } finally { f.stop() }
+})
+
+test('ローカルQwenのときは、了承なしで送れ、了承の印は付けない(社外の欄も出さない)', async () => {
+  const f = setup({ provider: 'qwen' })
+  try {
+    f.state.input.value = '相談'
+    await f.state.send()
+    assert.deepEqual(sends(f)[0][1], { messages: [{ role: 'user', content: '相談' }], provider: 'qwen' })
+    const text = await html(f)
+    assert.equal(text.includes('了承します'), false); assert.ok(text.includes('社外へ送りません'))
+  } finally { f.stop() }
+})
+
+test('社外のAIを選び直したら、了承を取り直す(AI・モデルが変わったとき)', async () => {
+  const f = setup(EXT)
+  try {
+    f.state.externalAck.value = true
+    f.props.model = 'other/model'
+    assert.equal(f.state.externalAck.value, false)
+    f.state.externalAck.value = true
+    f.props.provider = 'deepseek'
+    assert.equal(f.state.externalAck.value, false)
+    f.state.externalAck.value = true
+    f.props.external = false
+    assert.equal(f.state.externalAck.value, false)
+  } finally { f.stop() }
+})
+
+test('社外へ送った内容(置換後)を、送った発言の下に表示する。履歴をAPIへ送るときは、表示用の項目を含めない(社外)', async () => {
+  const f = setup(EXT, { consult: async () => reply({ sent_text: 'CUST-001の件', external: true }) })
+  try {
+    f.state.externalAck.value = true
+    f.state.input.value = 'ACMEの件'
+    await f.state.send()
+    f.state.input.value = '続き'
+    await f.state.send()
+    const text = (await html(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('社外へ送った内容（置換後）: CUST-001の件'))
+    assert.deepEqual(sends(f)[1][1].messages.map(m => Object.keys(m).sort()), [['content', 'role'], ['content', 'role'], ['content', 'role']], 'sentなどの表示用の項目は送らない')
+  } finally { f.stop() }
+})
+
+test('社外のときは、文案にコードが含まれ得る注意と、置換して送る案内を出す。選んだAIが使えないときは、送れず理由を出す(代替しない)', async () => {
+  const draft = { purpose: 'CUST-001の出荷', date_from: null, date_to: null }
+  const f = setup(EXT, { consult: async () => reply({ draft, sent_text: 'x', external: true }) })
+  const down = setup({ ...EXT, providerAvailable: false })
+  try {
+    f.state.externalAck.value = true; f.state.input.value = '相談'; await f.state.send()
+    const text = await html(f)
+    for (const part of ['登録名称をコードへ置換して送ります', '置換後の内容を送ることを了承します', '実名へ直してください']) assert.ok(text.includes(part), part)
+    down.state.externalAck.value = true; down.state.input.value = '相談'; await down.state.send()
+    assert.equal(sends(down).length, 0)
+    assert.ok((await html(down)).includes('選んだAIは、いま使えません')); assert.ok((await html(down)).includes('自動では切り替えません'))
+  } finally { f.stop(); down.stop() }
+})
+
+test('了承が必要という409は、固定文を出す(社外)', async () => {
+  const f = setup(EXT, { consult: async () => { const e = new Error('x'); e.response = { status: 409, data: { detail: 'SECRET' } }; throw e } })
+  try {
+    f.state.externalAck.value = true; f.state.input.value = '相談'; await f.state.send()
+    assert.ok(f.state.error.value.includes('了承が必要')); assert.equal(f.state.error.value.includes('SECRET'), false)
+    assert.equal(f.state.input.value, '相談')
+  } finally { f.stop() }
+})
+
+test('置換できない発言(422)・テンプレート(424)・AI設定(400)・処理の障害(503)は、固定文を出す。入力は残し、APIの本文は出さない(社外)', async () => {
+  const expectations = { 400: 'AIの選択が正しくありません', 422: '置換できない名称が含まれます', 424: '管理者へ、名称の登録の確認', 503: 'コード置換の処理を使えません' }
+  for (const [status, part] of Object.entries(expectations)) {
+    const f = setup(EXT, { consult: async () => { const e = new Error('x'); e.response = { status: Number(status), data: { detail: 'SECRET-名称' } }; throw e } })
+    try {
+      f.state.externalAck.value = true; f.state.input.value = '相談'; await f.state.send()
+      assert.ok(f.state.error.value.includes(part), `${status}: ${part}`); assert.equal(f.state.error.value.includes('SECRET'), false)
+      assert.equal(f.state.input.value, '相談'); assert.deepEqual(f.state.messages.value, [])
+    } finally { f.stop() }
+  }
+})
+
+test('送信中にAIを選び直したら、前のAIの返事は使わない(履歴に入れず、入力を残す)(社外)', async () => {
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const f = setup(EXT, { consult: async () => { await gate; return reply({ sent_text: 'x', external: true }) } })
+  try {
+    f.state.externalAck.value = true; f.state.input.value = '相談'
+    const sending = f.state.send()
+    f.props.model = 'other/model'
+    release(); await sending
+    assert.deepEqual(f.state.messages.value, [])
+    assert.equal(f.state.input.value, '相談')
+    assert.ok(f.state.error.value.includes('AIを切り替えたため'))
+    assert.equal(f.state.busy.value, '')
+  } finally { f.stop() }
+})
+
+test('社外へ送る内容として、承認済みテンプレートの名称と目的も案内する(社外)', async () => {
+  const f = setup(EXT)
+  try { assert.ok((await html(f)).includes('承認済みテンプレートの名称と目的')) } finally { f.stop() }
 })
