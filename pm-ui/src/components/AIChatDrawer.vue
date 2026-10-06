@@ -408,7 +408,7 @@ watch(provider, (next, prev) => {
 })
 
 // OpenRouterの有料モデルは、利用者が選択したときに確認する。同じ画面の間は1回承認すれば再確認しない。
-const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it'])
+const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507'])
 let paidModelConfirmed = false
 let lastSelection = null
 const rememberSelection = () => { lastSelection = { provider: provider.value, model: model.value } }

@@ -227,7 +227,7 @@ let generation = 0
 let disposed = false
 let lastSelection = { provider: '', model: '' }
 // 有料モデルは、検索AIと同じく選択時に確認し、同じ画面の間は1回の承認で再確認しない。
-const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it'])
+const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507'])
 const paidApproved = new Set()
 const selectedProvider = computed(() => options.value?.providers.find(item => item.provider === provider.value) || null)
 const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value)
