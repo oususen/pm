@@ -748,6 +748,14 @@ async function submitAssignment() {
     alert('作業者・工程/活動・実働時間を入力してください')
     return
   }
+  const parsedStart = parseTimeInput(entryStart.value)
+  if (!parsedStart) {
+    alert('開始時刻を正しく入力してください（分・秒は00～59）')
+    return
+  }
+  // 翌日表記の時刻だけを24時間形式に変換し、シフト日付は維持する。
+  const startParts = parsedStart.split(':')
+  startParts[0] = String(Number(startParts[0]) % 24).padStart(2, '0')
   try {
     const lp = lineProcessMap.value[entryLineProcessId.value]
     const payload = {
@@ -756,7 +764,7 @@ async function submitAssignment() {
       worker: entryWorkerId.value,
       process: lp?.process || null,
       line_process: entryLineProcessId.value,
-      start_time: entryStart.value,
+      start_time: startParts.join(':'),
       work_hours: entryWorkHours.value,
       units: entryUnits.value || 0,
       comment: entryComment.value.trim(),
@@ -840,14 +848,16 @@ function syncStartFromChart() {
 
 function parseTimeInput(raw) {
   const s = String(raw).trim()
-  const colonMatch = s.match(/^(\d{1,2}):(\d{2})$/)
-  if (colonMatch) return `${colonMatch[1].padStart(2, '0')}:${colonMatch[2]}`
-  const num = parseInt(s, 10)
-  if (!isNaN(num) && num >= 0 && num <= 2359) {
-    if (num <= 24) return `${String(num).padStart(2, '0')}:00`
-    const h = Math.floor(num / 100)
-    const m = num % 100
-    if (h <= 24 && m < 60) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  const colonMatch = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
+  if (colonMatch) {
+    if (Number(colonMatch[2]) >= 60 || (colonMatch[3] && Number(colonMatch[3]) >= 60)) return null
+    return `${colonMatch[1].padStart(2, '0')}:${colonMatch[2]}${colonMatch[3] ? ':' + colonMatch[3] : ''}`
+  }
+  if (/^\d{1,4}$/.test(s)) {
+    if (s.length <= 2) return `${s.padStart(2, '0')}:00`
+    const h = s.slice(0, -2)
+    const m = s.slice(-2)
+    if (Number(m) < 60) return `${String(Number(h)).padStart(2, '0')}:${m}`
   }
   return null
 }
