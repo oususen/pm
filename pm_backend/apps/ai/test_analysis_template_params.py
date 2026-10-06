@@ -86,6 +86,16 @@ class SourceCheckTests(ParamBase):
             with self.subTest(label=label), self.assertRaises(AnalysisError):
                 params.check_source(steps, python, definitions)
 
+    def test_malformed_placeholders_are_refused_instead_of_slipping_through(self):
+        for text in ('{{Unknown}}', '{{unknown-name}}', '{{ product_code }}', '{{product_code}', '{product_code}}', '{{}}', '{{1abc}}', '}}x{{'):
+            with self.subTest(text=text):
+                with self.assertRaises(AnalysisError):
+                    params.check_source(STEPS_P, PYTHON_P + "\nx = '" + text + "'", DEFS)
+                with self.assertRaises(AnalysisError):
+                    params.check_source([{'name': 'w_daily', 'query': STEPS_P[0]['query'] + ' -- ' + text}], PYTHON_P, DEFS)
+        with self.assertRaises(AnalysisError):  # 置き換えの後に、波括弧の表記が残ることも許さない
+            params.concrete_code([{'name': 'w_a', 'query': 'SELECT {{Bad}}'}], 'x = 1', {})
+
     def test_definitions_are_validated(self):
         ok = params.validate_definitions(DEFS)
         self.assertEqual([item['name'] for item in ok], ['product_code', 'period_from', 'period_to'])
@@ -243,6 +253,15 @@ class SaveTests(ParamBase):
         }.items():
             with self.subTest(label=label), self.assertRaises(AnalysisError):
                 service._fields_from_plan(param_plan(self.creator.pk, **kwargs))
+
+    def test_period_defaults_must_match_the_approved_analysis_period(self):
+        feb = [DEFS[0], {**DEFS[1], 'default': '2026-02-01'}, {**DEFS[2], 'default': '2026-02-28'}]
+        plan = param_plan(self.creator.pk, definitions=feb)  # 分析案の期間は 2026-01-01～01-31 のまま
+        with self.assertRaises(AnalysisError) as caught:
+            service._fields_from_plan(plan)
+        self.assertEqual(caught.exception.status_code, 409)
+        plan['proposal']['date_from'], plan['proposal']['date_to'] = '2026-02-01', '2026-02-28'
+        self.assertEqual(service._fields_from_plan(plan)['date_from'].isoformat(), '2026-02-01')
 
     def test_an_unreadable_source_is_a_fixed_409(self):
         plan = param_plan(self.creator.pk)

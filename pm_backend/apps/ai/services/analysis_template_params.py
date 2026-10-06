@@ -139,6 +139,9 @@ def check_source(steps, python, definitions):
         raise AnalysisError('定義した変数が、コードで使われていません。')
     # 変数の置き換えの対象外の文字(変数の形の外)で判定する
     stripped = [PLACEHOLDER_PATTERN.sub('', text) for text in texts]
+    # 正しい変数の形を除いた残りに「{{」「}}」があれば、不正な変数の表記(名前の形式違い・空白・波括弧の不一致など)として断る
+    if any('{{' in text or '}}' in text for text in stripped):
+        raise AnalysisError('コードに、変数として読めない {{...}} の表記があります。名前は英小文字・数字・アンダースコアで、{{名前}} の形にしてください。')
     for item in definitions:
         if item['type'] != 'date' and any(item['default'] in text for text in stripped):
             raise AnalysisError('変数の元の値が、コードに文字のまま残っています。変数だけを使ってください。')
@@ -147,7 +150,10 @@ def check_source(steps, python, definitions):
 
 
 def _substitute(text, values):
-    return PLACEHOLDER_PATTERN.sub(lambda match: "'" + values[match.group(1)] + "'", text)
+    result = PLACEHOLDER_PATTERN.sub(lambda match: "'" + values[match.group(1)] + "'", text)
+    if '{{' in result or '}}' in result:
+        raise AnalysisError('置き換えられなかった変数の表記が残っています。コードを作り直してください。', 409)
+    return result
 
 
 def concrete_code(steps, python, values):

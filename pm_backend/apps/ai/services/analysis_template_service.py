@@ -108,6 +108,9 @@ def _fields_from_plan(plan):
             steps_now, python_now = concrete_code(source['steps'], source['python'], resolve_values(parameters, {}))
         except (KeyError, TypeError, AttributeError):
             raise AnalysisError('変数の形のコードを確認できません。コードを作り直してください。', 409) from None
+        defaults = {item['name']: item['default'] for item in parameters}
+        if 'period_from' in defaults and (defaults['period_from'], defaults['period_to']) != (proposal.get('date_from'), proposal.get('date_to')):
+            raise AnalysisError('期間の変数の元の値が、承認した分析期間と一致しません。コードを作り直してください。', 409)
         if steps_now != bundle.steps or python_now != bundle.python:
             raise AnalysisError('変数の形のコードと、承認したコードが一致しません。コードを作り直してください。', 409)
         sql_steps, python_code = source['steps'], source['python']
