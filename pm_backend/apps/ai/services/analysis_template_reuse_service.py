@@ -10,7 +10,8 @@ from ai.services.analysis_codegen_service import make_bundle, validate_generated
 from ai.services.analysis_data_service import validate_datasets
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services.analysis_template_review_service import _stored_hash
-from ai.services.analysis_template_service import get_visible_template, is_template_admin
+from ai.services.analysis_template_params import PERIOD_FROM, PERIOD_TO
+from ai.services.analysis_template_service import concrete_for, get_visible_template, is_template_admin
 
 REUSABLE_STATUSES = ('approved', 'pending_admin')
 
@@ -32,29 +33,41 @@ def can_reuse(template, user, admin):
     return False
 
 
-def _verified_bundle(template):
-    """保存内容を再検証して、現行の外枠でコードを組み立てる。承認時・保存時の内容と一致しなければ拒否する。"""
+def _verified_bundle(template, supplied=None):
+    """保存内容を再検証して、現行の外枠でコードを組み立てる。(コード一式, 変数の値)を返す。
+
+    まず、保存時の値(変数の既定値)で組み立てた、承認済みのコードのハッシュが一致すること(保存内容が壊れていない)を確認する。
+    値が指定されたら、その値で組み立て直したコードを、現行の検査に通す(コード承認は、毎回取り直す)。
+    """
     if _stored_hash(template) != template.content_sha256:
         raise AnalysisError('保存内容のハッシュが一致しないため再利用できません。管理者へ確認してください。', 409)
     views = [dataset['view'] for dataset in template.datasets]
-    if validate_generated(template.sql_steps, template.python_code, views):
+    steps, python, values = concrete_for(template)
+    if validate_generated(steps, python, views):
         raise AnalysisError('現在の検査に合格しないコードは再利用できません。新しい分析として作り直してください。', 409)
-    bundle = make_bundle(template.sql_steps, template.python_code, views)
+    bundle = make_bundle(steps, python, views)
     if bundle.sql_sha256 != template.sql_sha256 or bundle.python_sha256 != template.python_sha256:
         raise AnalysisError('保存されたSQL・Pythonのハッシュが一致しないため再利用できません。', 409)
-    return bundle
+    if not supplied:
+        return bundle, values
+    steps, python, values = concrete_for(template, supplied)
+    if validate_generated(steps, python, views):
+        raise AnalysisError('指定した値で作ったコードが、現在の検査に合格しません。値を見直してください。', 409)
+    return make_bundle(steps, python, views), values
 
 
-def create_plan_from_template(user, template_id):
-    """テンプレートから、本人を所有者とする新しい分析案(手順の承認待ち)を作る。"""
+def create_plan_from_template(user, template_id, supplied=None):
+    """テンプレートから、本人を所有者とする新しい分析案(手順の承認待ち)を作る。変数の値を指定できる(期間も、変数として定義されているときだけ)。"""
+    if supplied is not None and not isinstance(supplied, dict):
+        raise AnalysisError('変数の値の形式が不正です。')  # 0・空文字・空の配列・nullを、「指定なし」として通さない
     admin = is_template_admin(user)
     template = get_visible_template(template_id, user, admin)  # 見えない状態は、存在しないものとして404
     if template.status not in REUSABLE_STATUSES:
         raise AnalysisError('却下または置換済みのテンプレートは再利用できません。', 409)
     if not can_reuse(template, user, admin):
         raise AnalysisError('管理者承認前のテンプレートを再利用できるのは、作成者と管理者だけです。', 403)
-    bundle = _verified_bundle(template)
-    date_from, date_to = template.date_from.isoformat(), template.date_to.isoformat()
+    bundle, values = _verified_bundle(template, supplied)
+    date_from, date_to = values.get(PERIOD_FROM, template.date_from.isoformat()), values.get(PERIOD_TO, template.date_to.isoformat())
     try:
         # 現行のビュー・列の公開定義に合うこと(ビューの削除・列の削除・未公開は拒否)。未承認の列を追加して補わない。
         # 列の型・ビューの計算の変更は検出できない(テンプレートに型を保存していない。後続でBOSSが判断する)
@@ -68,7 +81,7 @@ def create_plan_from_template(user, template_id):
     }
     extra = {
         'template': {'id': template.pk, 'version': template.version, 'family_id': str(template.family_id), 'name': template.name,
-                     'status': template.status, 'content_sha256': template.content_sha256},
+                     'status': template.status, 'content_sha256': template.content_sha256, 'values': values},
         # 保存済みのコードを、現行の外枠で組み立て直して入れる。試行・コード承認は取り直す(AIによる生成は行わない)
         'codegen': {
             'status': 'generated', 'attempts': 0, 'inflight': None, 'history': [], 'steps': bundle.steps, 'python': bundle.python,

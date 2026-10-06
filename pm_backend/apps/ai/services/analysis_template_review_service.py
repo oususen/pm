@@ -13,7 +13,7 @@ from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import validate_generated
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_template_notify_service import schedule_result
-from ai.services.analysis_template_service import _content_sha256
+from ai.services.analysis_template_service import _content_sha256, concrete_for
 
 REJECTION_REASON_MAX = 500  # BOSS承認(2026-10-05)。超えた場合は切り詰めず拒否する
 
@@ -35,7 +35,7 @@ def _stored_hash(template):
         'name': template.name, 'purpose': template.purpose, 'procedure': template.procedure, 'output_spec': template.output_spec,
         'conditions': template.conditions, 'datasets': template.datasets, 'date_from': template.date_from, 'date_to': template.date_to,
         'sql_steps': template.sql_steps, 'python_code': template.python_code, 'wrapper_version': template.wrapper_version,
-        'executed_code_sha256': template.executed_code_sha256,
+        'executed_code_sha256': template.executed_code_sha256, 'parameters': template.parameters,
     })
 
 
@@ -57,7 +57,8 @@ def approve_template(admin, template_id, state_revision):
         raise AnalysisError('保存内容のハッシュが一致しないため承認できません。管理者へ確認してください。', 409)
     # 保存後に検査規則が強化された場合でも、旧コードを正式にしない。外枠の版の古さは承認時には拒否しない(再利用時の更新・確認は3-D)
     try:
-        problems = validate_generated(template.sql_steps, template.python_code, [d['view'] for d in template.datasets])
+        steps, python, _values = concrete_for(template)  # 変数があれば、元の値で置き換えた、実行する形を検査する
+        problems = validate_generated(steps, python, [d['view'] for d in template.datasets])
     except (KeyError, TypeError, AttributeError, ValueError):
         problems = ['unreadable']
     if problems:

@@ -18,6 +18,7 @@ from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import bundle_from_plan, steps_text, validate_generated
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services.analysis_template_notify_service import schedule_submitted, serialize_records
+from ai.services.analysis_template_params import check_source, concrete_code, resolve_values, validate_definitions
 from ai.services.chat_service import _has_resource_permission
 
 DELETED_USER_LABEL = '削除済みユーザー'
@@ -42,6 +43,8 @@ def _content_sha256(fields):
         'sql_steps': fields['sql_steps'], 'python_code': fields['python_code'],
         'wrapper_version': fields['wrapper_version'], 'executed_code_sha256': fields['executed_code_sha256'],
     }
+    if fields.get('parameters'):
+        material['parameters'] = fields['parameters']  # 変数がないテンプレートは、従来どおりのハッシュ(既存の行を変えない)
     return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
 
 
@@ -95,6 +98,19 @@ def _fields_from_plan(plan):
         raise AnalysisError('承認したコードを確認できません。コードを作り直してください。', 409) from None
     if validate_generated(bundle.steps, bundle.python, [d['view'] for d in proposal['datasets']]):
         raise AnalysisError('現在の検査に合格しないコードは保存できません。コードを作り直してください。', 409)
+    sql_steps, python_code, parameters = bundle.steps, bundle.python, []
+    source = codegen.get('template_source')
+    if source is not None:
+        # 変数の形のコード: 定義・使用・直書きを確認し、既定値で置き換えた結果が、承認したコードと一致すること
+        try:
+            parameters = validate_definitions(source['parameters'])
+            check_source(source['steps'], source['python'], parameters)
+            steps_now, python_now = concrete_code(source['steps'], source['python'], resolve_values(parameters, {}))
+        except (KeyError, TypeError, AttributeError):
+            raise AnalysisError('変数の形のコードを確認できません。コードを作り直してください。', 409) from None
+        if steps_now != bundle.steps or python_now != bundle.python:
+            raise AnalysisError('変数の形のコードと、承認したコードが一致しません。コードを作り直してください。', 409)
+        sql_steps, python_code = source['steps'], source['python']
     name = _text(proposal.get('title')).strip()
     if len(name) > AIAnalysisTemplate._meta.get_field('name').max_length:
         raise AnalysisError('名称が長すぎるため保存できません。分析案を作り直してください。', 409)
@@ -103,7 +119,7 @@ def _fields_from_plan(plan):
         'output_spec': _text_list(proposal.get('outputs')), 'conditions': _text(proposal.get('conditions', ''), allow_empty=True),
         'datasets': proposal['datasets'],
         'date_from': _date(proposal.get('date_from')), 'date_to': _date(proposal.get('date_to')),
-        'sql_steps': bundle.steps, 'python_code': bundle.python, 'wrapper_version': bundle.wrapper_version,
+        'sql_steps': sql_steps, 'python_code': python_code, 'parameters': parameters, 'wrapper_version': bundle.wrapper_version,
         'sql_sha256': bundle.sql_sha256, 'python_sha256': bundle.python_sha256,
         'executed_code_sha256': bundle.executed_code_sha256,
         'method_approved_at': _approved_at(plan, 'method_approved_at'),
@@ -216,6 +232,17 @@ def content_visible(template, user, admin):
     return template.status == 'approved' or admin or (template.approved_by_id is not None and template.approved_by_id == user.pk)
 
 
+def concrete_for(template, supplied=None):
+    """保存されたコードを、実行する形(変数を確認済みの値へ置き換えた形)にする。(手順, Python, 値)を返す。変数がなければ、そのまま。"""
+    if not template.parameters:
+        if supplied:
+            raise AnalysisError('このテンプレートには変数がありません。')
+        return template.sql_steps, template.python_code, {}
+    values = resolve_values(template.parameters, supplied or {})
+    steps, python = concrete_code(template.sql_steps, template.python_code, values)
+    return steps, python, values
+
+
 def _creator(template):
     return template.approved_by.get_username() if template.approved_by_id else DELETED_USER_LABEL
 
@@ -238,6 +265,7 @@ def serialize_template(template, user, admin, detail):
             'date_from': template.date_from.isoformat(), 'date_to': template.date_to.isoformat(),
             'wrapper_version': template.wrapper_version, 'executed_code_sha256': template.executed_code_sha256,
             'content_sha256': template.content_sha256,
+            'parameters': template.parameters,
         })
         if detail:
             # 却下理由・確認者は、作成者と管理者だけ(visibleと同じ範囲)に返す。置換先は、承認された訂正版

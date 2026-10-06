@@ -1,0 +1,156 @@
+"""テンプレートの変数(段階2-A、BOSS承認 2026-10-05)。
+
+コードの中の「{{名前}}」を、使うときに、確認した値(引用符つきの文字列)へ置き換える。期間は「period_from」「period_to」(分析案の期間に連動)。
+- 変数の種類は、TYPESの1か所にまとめる(追加は、ここへの追加)。種類: 日付(期間だけ)・品番・顧客コード・納入先コード
+- 値は、形式(英数字・アンダースコア・ハイフンのみ)と、実在(品番=m_product、顧客コード=m_customer、納入先コード=ビューの実際の値)を確認する。
+  形式を絞るため、置き換えた値がSQL・Pythonの文字列を壊すことはない
+- 保存するコードに、変数の元の値(品番など)や日付が文字のまま残っていたら、保存を断る(直書きの禁止)
+- 変数の個数の上限は設けない(BOSS承認)。フォールバックはない(値が確認できなければ、拒否する)
+"""
+import re
+from datetime import date
+
+from django.conf import settings
+from django.db import DatabaseError, connections
+from django.db.utils import ConnectionDoesNotExist
+
+from ai.services.analysis_data_service import validate_period
+from ai.services.analysis_plan_store import AnalysisError
+
+NAME_PATTERN = re.compile(r'[a-z][a-z0-9_]*')
+PLACEHOLDER_PATTERN = re.compile(r'\{\{([a-z][a-z0-9_]*)\}\}')
+CODE_VALUE_PATTERN = re.compile(r'[A-Za-z0-9_-]{1,40}')  # fullmatchで使う(末尾の改行を通さない)
+DATE_LITERAL_PATTERN = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}')
+PERIOD_FROM, PERIOD_TO = 'period_from', 'period_to'
+DEFINITION_KEYS = {'name', 'type', 'label', 'default'}
+
+
+def _exists_product(value):
+    from masters.models import Product
+    try:
+        return Product.objects.filter(product_code=value).exists()
+    except DatabaseError as exc:
+        raise AnalysisError('品番を確認できません。しばらくしてから、もう一度お試しください。', 503) from exc
+
+
+def _exists_customer(value):
+    from masters.models import Customer
+    try:
+        return Customer.objects.filter(customer_code=value).exists()
+    except DatabaseError as exc:
+        raise AnalysisError('顧客コードを確認できません。しばらくしてから、もう一度お試しください。', 503) from exc
+
+
+def _exists_ship_to(value):
+    """納入先コードの正本の表がないため、出荷実績ビューの実際の値で確認する(読み取り専用の分析用接続)。"""
+    # 既存の件数確認(count_target_rows)と同じく、分析用の読み取り専用ユーザーでなければ使わない
+    if settings.DATABASES.get('ai_reader', {}).get('USER') != 'pm_ai_reader':
+        raise AnalysisError('分析用DB接続をpm_ai_readerへ設定してください。', 503)
+    try:
+        with connections['ai_reader'].cursor() as cursor:
+            cursor.execute('SELECT 1 FROM `v_ai_shipment` WHERE `ship_to_code` = %s LIMIT 1', [value])
+            return cursor.fetchone() is not None
+    except (DatabaseError, ConnectionDoesNotExist) as exc:
+        raise AnalysisError('納入先コードを確認できません。分析用DB接続を管理者へ確認してください。', 503) from exc
+
+
+# 種類: 画面の表示名と、値の実在の確認。追加はここへ
+TYPES = {
+    'date': {'label': '日付', 'exists': None},
+    'product_code': {'label': '品番', 'exists': _exists_product},
+    'customer_code': {'label': '顧客コード', 'exists': _exists_customer},
+    'ship_to_code': {'label': '納入先コード', 'exists': _exists_ship_to},
+}
+
+
+def _check_value(type_name, value):
+    """1つの値の形式と実在。日付は、形式の確認だけ(期間は、組で別に確認する)。"""
+    if type_name == 'date':
+        try:
+            if type(value) is not str or date.fromisoformat(value).isoformat() != value:
+                raise ValueError()
+        except ValueError:
+            raise AnalysisError('日付はYYYY-MM-DDで指定してください。') from None
+        return value
+    if type(value) is not str or not CODE_VALUE_PATTERN.fullmatch(value):
+        raise AnalysisError('コードは英数字・アンダースコア・ハイフンだけで指定してください。')
+    if not TYPES[type_name]['exists'](value):
+        raise AnalysisError(f"{TYPES[type_name]['label']}が登録されていません。")
+    return value
+
+
+def validate_definitions(parameters):
+    """変数の定義(保存時)。[{name, type, label, default}]。期間は period_from・period_to を組で、種類は日付。"""
+    if not isinstance(parameters, list):
+        raise AnalysisError('変数の定義の形式が不正です。')
+    seen = set()
+    cleaned = []
+    for item in parameters:
+        if not isinstance(item, dict) or set(item) != DEFINITION_KEYS:
+            raise AnalysisError('変数の定義の形式が不正です。')
+        name, type_name, label = item['name'], item['type'], item['label']
+        if type(name) is not str or not NAME_PATTERN.fullmatch(name) or name in seen:
+            raise AnalysisError('変数の名前が不正、または重複しています(英小文字・数字・アンダースコア)。')
+        seen.add(name)
+        if type(type_name) is not str or type_name not in TYPES:
+            raise AnalysisError('変数の種類が不正です。')
+        if type(label) is not str or not label.strip():
+            raise AnalysisError('変数のラベルを指定してください。')
+        if (name in (PERIOD_FROM, PERIOD_TO)) != (type_name == 'date'):
+            raise AnalysisError('日付の変数は、period_from・period_toだけです。')
+        cleaned.append({'name': name, 'type': type_name, 'label': label.strip(), 'default': item['default']})
+    if (PERIOD_FROM in seen) != (PERIOD_TO in seen):
+        raise AnalysisError('期間の変数は、period_fromとperiod_toを組で指定してください。')
+    resolve_values(cleaned, {})  # 元の値(既定値)の形式・実在の確認
+    return cleaned
+
+
+def resolve_values(definitions, supplied):
+    """変数の値を決める。指定がなければ既定値。未知の名前・不正な値・存在しない値・期間の逆順は拒否する。"""
+    if not isinstance(supplied, dict):
+        raise AnalysisError('変数の値の形式が不正です。')
+    names = {item['name'] for item in definitions}
+    if set(supplied) - names:
+        raise AnalysisError('定義にない変数は指定できません。')
+    values = {}
+    for item in definitions:
+        values[item['name']] = _check_value(item['type'], supplied.get(item['name'], item['default']))
+    if PERIOD_FROM in values:
+        validate_period(values[PERIOD_FROM], values[PERIOD_TO])
+    return values
+
+
+def _texts(steps, python):
+    return [str(step.get('query', '')) for step in steps] + [str(step.get('name', '')) for step in steps] + [python]
+
+
+def check_source(steps, python, definitions):
+    """保存するコード(変数の形)の確認: 使った変数がすべて定義にあり、定義した変数がすべて使われ、元の値・日付が文字のまま残っていない。"""
+    texts = _texts(steps, python)
+    if any(PLACEHOLDER_PATTERN.search(name) for name in [str(step.get('name', '')) for step in steps]):
+        raise AnalysisError('中間テーブル名に変数は使えません。')
+    used = set()
+    for text in texts:
+        used.update(PLACEHOLDER_PATTERN.findall(text))
+    names = {item['name'] for item in definitions}
+    if used - names:
+        raise AnalysisError('コードに、定義されていない変数があります。')
+    if names - used:
+        raise AnalysisError('定義した変数が、コードで使われていません。')
+    # 変数の置き換えの対象外の文字(変数の形の外)で判定する
+    stripped = [PLACEHOLDER_PATTERN.sub('', text) for text in texts]
+    for item in definitions:
+        if item['type'] != 'date' and any(item['default'] in text for text in stripped):
+            raise AnalysisError('変数の元の値が、コードに文字のまま残っています。変数だけを使ってください。')
+    if any(DATE_LITERAL_PATTERN.search(text) for text in stripped):
+        raise AnalysisError('日付がコードに直接書かれています。期間は変数(period_from・period_to)を使ってください。')
+
+
+def _substitute(text, values):
+    return PLACEHOLDER_PATTERN.sub(lambda match: "'" + values[match.group(1)] + "'", text)
+
+
+def concrete_code(steps, python, values):
+    """変数を、確認済みの値(引用符つきの文字列)へ置き換えた、実行する形のコード。元の手順・Pythonは変えない。"""
+    new_steps = [{**step, 'query': _substitute(step['query'], values)} for step in steps]
+    return new_steps, _substitute(python, values)

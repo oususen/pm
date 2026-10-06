@@ -81,7 +81,7 @@ class CreatePlanTests(ReuseBase):
         self.assertEqual((plan['proposal']['title'], plan['proposal']['date_from'], plan['proposal']['date_to']), (template.name, '2026-01-01', '2026-01-31'))
         self.assertEqual(plan['proposal']['materials'], [])
         self.assertEqual(plan['template'], {'id': template.pk, 'version': 1, 'family_id': str(template.family_id), 'name': template.name,
-                                            'status': 'approved', 'content_sha256': template.content_sha256})
+                                            'status': 'approved', 'content_sha256': template.content_sha256, 'values': {}})
         codegen = plan['codegen']
         self.assertEqual((codegen['status'], codegen['attempts'], codegen['trial'], codegen['inflight']), ('generated', 0, None, None))
         self.assertEqual((codegen['steps'], codegen['python'], codegen['executed_code_sha256'], codegen['wrapper_version']),

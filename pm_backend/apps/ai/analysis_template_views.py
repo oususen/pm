@@ -113,7 +113,10 @@ class AIAnalysisTemplatePlanView(APIView):
     permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, template_id):
-        if not isinstance(request.data, dict) or len(request.data):
-            raise AnalysisError('本文は指定できません。')
+        if not isinstance(request.data, dict) or set(request.data) - {'parameters'}:
+            raise AnalysisError('指定できるのは、変数の値(parameters)だけです。')
+        supplied = request.data.get('parameters')
+        if 'parameters' in request.data and not isinstance(supplied, dict):
+            raise AnalysisError('変数の値の形式が不正です。')  # 0・空文字・空の配列・nullを、「指定なし」として通さない
         from ai.views import _codegen_response  # 分析案の応答の形を、既存の分析案APIと同じにする
-        return Response(_codegen_response(create_plan_from_template(request.user, template_id)), status=201)
+        return Response(_codegen_response(create_plan_from_template(request.user, template_id, supplied)), status=201)

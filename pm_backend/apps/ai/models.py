@@ -146,6 +146,8 @@ class AIAnalysisTemplate(models.Model):
     date_to = models.DateField(verbose_name='期間終了')
     sql_steps = models.JSONField(verbose_name='SQLの手順')
     python_code = models.TextField(verbose_name='承認済みPython')
+    # 変数の定義(段階2。[{name, type, label, default}])。空なら変数なし(従来のテンプレート)。コードは「{{名前}}」の形で保存し、使うときに値へ置き換える
+    parameters = models.JSONField(default=list, blank=True, verbose_name='変数の定義')
     wrapper_version = models.CharField(max_length=40, verbose_name='承認時の固定外枠の版')
     sql_sha256 = models.CharField(max_length=64, null=True, blank=True, verbose_name='SQLのハッシュ(SQLの手順がなければNULL)')
     python_sha256 = models.CharField(max_length=64, verbose_name='Pythonのハッシュ')
