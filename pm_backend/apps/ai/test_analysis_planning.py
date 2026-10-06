@@ -167,6 +167,8 @@ class AnalysisPlanningTest(SimpleTestCase):
         self.assertEqual([message['role'] for message in messages], ['system', 'user'])
         self.assertNotIn('t_shipment_actual', messages[0]['content'])
         self.assertNotIn('000196', messages[0]['content'])
+        # 製品別の集計では、fieldsに品番と製品名の両方を含める(BOSS承認 2026-10-06)
+        self.assertIn('fieldsにproduct_codeとproduct_nameの両方を含める', messages[0]['content'])
         self.assertEqual(plan['status'], 'awaiting_method')
 
     def test_invalid_qwen_timeout_stops_before_ai_and_plan_save(self):

@@ -273,6 +273,22 @@ class GuardTreeTest(SimpleTestCase):
 
 
 class PayloadTest(CodegenBase):
+    def test_the_instruction_explains_how_rows_are_read_so_that_models_do_not_use_column_names_on_tuples(self):
+        # 実機で、モデルが load_view の結果を直接forで回し、row['列名']で読んで、実行時に失敗した(2026-10-06)
+        plan = self.new_plan()
+        for external in (False, True):
+            system = cg.build_messages(plan, external=external)[0]['content']
+            for part in ('結果オブジェクトで、それ自体をforで回したり', '各行はタプル', 'for code, name, qty in rows', '中間テーブルは、con.sql(', 'load_viewに渡せるのは承認済みビュー名だけ'):
+                self.assertIn(part, system)
+
+    def test_the_fixed_product_code_rule_is_in_the_code_generation_instruction_for_local_and_external(self):
+        # 製品別の集計は、必ず品番で集計し、品番→製品名→数量の順で出す(BOSS承認 2026-10-06)
+        plan = self.new_plan()
+        for external in (False, True):
+            system = cg.build_messages(plan, external=external)[0]['content']
+            for part in ('品番(product_code)でGROUP BY', '「品番」「製品名」「数量」の順', '製品名だけで集計しない', 'グラフのラベルにも、品番を含める'):
+                self.assertIn(part, system)
+
     def test_external_payload_replaces_names_in_every_free_text_and_excludes_data_counts_and_users(self):
         plan = self.new_plan()
         messages = cg.build_messages(plan, external=True)
