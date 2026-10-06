@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
-from accounts.models import UserPermission, UserSmtpConfig
+from accounts.models import UserPermission, UserProfile, UserSmtpConfig
 from ai.models import AIAnalysisTemplate, AIAnalysisTemplateNotification as Record
 from ai.services import analysis_template_notify_service as notify
 from ai.services.analysis_plan_store import AnalysisPlanStore
@@ -46,6 +46,8 @@ class NotifyBase(ReviewBase):
             user.save()
         self.admin2.email = ''
         self.admin2.save()
+        for user in (self.admin, self.admin2):  # 宛先は、システム管理者のフラグがある人だけ
+            UserProfile.objects.update_or_create(user=user, defaults={'is_system_admin': True})
         self.mails = []
         patcher = patch.object(notify.EmailService, 'send_plain_email', side_effect=self.fake_send)
         patcher.start()
@@ -97,6 +99,33 @@ class SubmittedTests(NotifyBase):
         get_user_model().objects.filter(pk=self.admin.pk).update(is_active=False)
         template = self.row()
         notify.notify_submitted(template.pk)
+        self.assertEqual(self.mails, [])
+
+    def test_a_superuser_without_the_system_admin_flag_is_not_a_recipient(self):
+        # スーパーユーザーは、実効の権限判定では「権限あり」になるが、システム管理者のフラグがなければ、送らない(BOSS指示 2026-10-06)
+        users = get_user_model().objects
+        kitayama = users.create_user(username='kitayama', email='kitayama@example.com', is_superuser=True)
+        UserProfile.objects.update_or_create(user=kitayama, defaults={'is_system_admin': False})
+        self.assertTrue(notify._has_resource_permission(kitayama, 'settings.ai', 'edit'))
+        template = self.row()
+        notify.notify_submitted(template.pk)
+        self.assertEqual({mail['to_emails'][0] for mail in self.mails}, {'admin@example.com'})
+        self.assertNotIn('kitayama', [r.recipient.username for r in self.records(kind='submitted') if r.recipient])
+
+    def test_a_user_without_a_profile_is_not_a_recipient(self):
+        users = get_user_model().objects
+        users.create_user(username='no-profile', email='np@example.com', is_superuser=True)
+        notify.notify_submitted(self.row().pk)
+        self.assertNotIn('np@example.com', [mail['to_emails'][0] for mail in self.mails])
+
+    def test_the_system_admin_flag_alone_is_not_enough_without_the_edit_permission(self):
+        UserPermission.objects.filter(user=self.admin, resource='settings.ai').update(can_edit=False)
+        notify.notify_submitted(self.row().pk)
+        self.assertEqual(self.mails, [])  # admin2は、メール未登録
+
+    def test_a_flagged_admin_loses_the_mail_when_the_flag_is_removed(self):
+        UserProfile.objects.filter(user=self.admin).update(is_system_admin=False)
+        notify.notify_submitted(self.row().pk)
         self.assertEqual(self.mails, [])
 
 
@@ -449,6 +478,13 @@ class ResendTests(NotifyBase):
         template, record = self.failed_submitted()
         UserPermission.objects.filter(user=self.admin, resource='settings.ai').delete()
         get_user_model().objects.filter(pk=self.admin.pk).update(is_superuser=False)
+        self.assertEqual(self.resend(self.creator, record).status_code, 200)
+        self.assertEqual(self.mails, [])
+        self.assertEqual(self.records(template=template, recipient=self.admin)[-1].reason, 'recipient_unavailable')
+
+    def test_a_recipient_whose_system_admin_flag_was_removed_is_not_mailed_again(self):
+        template, record = self.failed_submitted()
+        UserProfile.objects.filter(user=self.admin).update(is_system_admin=False)
         self.assertEqual(self.resend(self.creator, record).status_code, 200)
         self.assertEqual(self.mails, [])
         self.assertEqual(self.records(template=template, recipient=self.admin)[-1].reason, 'recipient_unavailable')

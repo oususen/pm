@@ -1,7 +1,8 @@
 """テンプレートの通知(第3段階3-C): 管理者へのメール(確認依頼)と、作成者へのメール・PM通知(承認・却下・置換)。
 
 BOSS承認(2026-10-05):
-- 確認依頼は、システム管理者(実効のsettings.ai/edit)へ**メールだけ**(PM通知・タスクなし)。作成者のユーザー名と、テンプレートのID・版を載せる
+- 確認依頼は、システム管理者(UserProfile.is_system_admin が付き、かつ実効のsettings.ai/edit)へ**メールだけ**(PM通知・タスクなし)。
+  スーパーユーザーであるだけの人には送らない(BOSS指示 2026-10-06)。作成者のユーザー名と、テンプレートのID・版を載せる
 - 承認・却下・置換は、作成者へ**メールとPM通知**
 - 送信者は、`.env`の AI_TEMPLATE_NOTIFY_SENDER_USER で指定した既存ユーザーのSMTP設定(管理者の既定設定への切替はしない)。リンクは PM_PUBLIC_BASE_URL
   (Origin/Refererは使わない)。どちらかが未設定なら、メールは送らず、理由を記録する
@@ -90,7 +91,11 @@ def _record(template, kind, channel, recipient, status, reason='', pm_notificati
 
 
 def _is_admin(user):
+    """通知の宛先: システム管理者のフラグがあり、実効のsettings.ai/editもある人。スーパーユーザーだけでは対象にしない。"""
     try:
+        profile = getattr(user, 'profile', None)
+        if profile is None or not profile.is_system_admin:
+            return False
         return bool(_has_resource_permission(user, 'settings.ai', 'edit'))
     except Exception:
         return False  # 判定できない人には送らない
@@ -172,7 +177,7 @@ def notify_submitted(template_id):
     """保存されたテンプレートの確認依頼を、システム管理者へメールで送る(PM通知・タスクはなし)。"""
     template = AIAnalysisTemplate.objects.select_related('approved_by').get(pk=template_id)
     link = _link()
-    admins = [user for user in get_user_model().objects.filter(is_active=True).order_by('id') if _is_admin(user)]
+    admins = [user for user in get_user_model().objects.filter(is_active=True).select_related('profile').order_by('id') if _is_admin(user)]
     if not admins:
         _record(template, 'submitted', 'mail', None, 'skipped', 'no_recipient')
         return
