@@ -853,3 +853,57 @@ test('変数つきのコード(2-B): 使った変数と、元の値を表示す�
     }
   } finally { f.stop() }
 })
+
+test('結果の改良の準備中は、テンプレートから分析案を作れない(追加の指示と元の実行の対応が、黙って消えない)(Codexの指摘)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = { ...dataPlan('openrouter'), proposal: { ...dataPlan('openrouter').proposal, purpose: 'P', date_from: '2026-09-01', date_to: '2026-09-30' } }
+    f.state.startRefinement({ instruction: '品番も付けて', run_id: 7 })
+    assert.equal(f.state.plan.value, null)
+    f.state.useTemplatePlan({ ...dataPlan('openrouter'), template: { id: 1 } })
+    assert.equal(f.state.plan.value, null, '改良の準備中は、テンプレートの分析案を受け付けない')
+    assert.deepEqual(f.state.refinement.value, { instruction: '品番も付けて', from_run_id: 7 }, '追加の指示は、残る')
+    assert.ok((await htmlFor(f)).includes('テンプレートから分析案を作れません'))
+    f.state.refinement.value = null
+    f.state.useTemplatePlan({ ...dataPlan('openrouter'), template: { id: 1 } })
+    assert.notEqual(f.state.plan.value, null, '指示を外せば、作れる')
+  } finally { f.stop() }
+})
+
+test('有料モデルの料金確認の文に、選んだモデルの名前を出す(Gemma固定にしない)(Codexの指摘)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.provider.value = 'openrouter'
+    f.state.model.value = 'qwen/qwen3-30b-a3b-instruct-2507'
+    const qwen = f.state.paidKey().message
+    assert.ok(qwen.includes('Qwen3 30B A3B Instruct 2507')); assert.equal(qwen.includes('Gemma'), false)
+    f.state.model.value = 'google/gemma-4-26b-a4b-it'
+    assert.ok(f.state.paidKey().message.includes('Gemma 4 26B A4B'))
+    f.state.model.value = 'qwen/qwen3.8-27b:free'
+    assert.equal(f.state.paidKey(), null, '無料のモデルは、確認しない')
+  } finally { f.stop() }
+})
+
+test('結果の改良の準備中に、検索から新しい分析が来たら、破棄の確認を取る。断れば、追加の指示も目的も残る。承諾すれば、新しい分析へ(Codexの指摘)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = { ...dataPlan('openrouter'), proposal: { ...dataPlan('openrouter').proposal, purpose: '元の目的', date_from: '2026-09-01', date_to: '2026-09-30' } }
+    f.state.startRefinement({ instruction: '品番も付けて', run_id: 7 })
+    const before = f.confirms.length
+    f.consent.value = false
+    f.props.request = { question: '検索からの質問', screenContext: '検索画面' }
+    await Promise.resolve()
+    assert.equal(f.confirms.length, before + 1); assert.ok(f.confirms.at(-1).includes('追加の指示は破棄されます'))
+    assert.deepEqual(f.state.refinement.value, { instruction: '品番も付けて', from_run_id: 7 }, '断れば、追加の指示は残る')
+    assert.equal(f.state.purpose.value, '元の目的')
+    f.consent.value = true
+    f.props.request = { question: '別の質問', screenContext: '検索画面' }
+    await Promise.resolve()
+    assert.equal(f.state.refinement.value, null); assert.equal(f.state.purpose.value, '別の質問')
+    // 準備中でなければ、確認なし
+    const count = f.confirms.length
+    f.props.request = { question: '三つ目', screenContext: '検索画面' }
+    await Promise.resolve()
+    assert.equal(f.confirms.length, count); assert.equal(f.state.purpose.value, '三つ目')
+  } finally { f.stop() }
+})

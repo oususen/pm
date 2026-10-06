@@ -804,6 +804,13 @@ def param_response(steps=PARAM_STEPS, python=PARAM_PYTHON, parameters=PARAM_DEFS
 
 
 class ParseResponseTest(SimpleTestCase):
+    def test_the_python_example_in_the_instruction_is_valid_and_has_no_hard_coded_month(self):
+        # 指示の例が、有効なPythonで、既存の静的検査に通り、月の表示名を直書きしていないこと(Codexの指摘)
+        ast.parse(cg.EXAMPLE_PROGRAM)
+        self.assertEqual(guard.validate_python(cg.EXAMPLE_PROGRAM), [])
+        self.assertNotIn('月', cg.PYTHON_EXAMPLE_TEXT.replace('月などの表示名', ''))
+        self.assertIn(cg.PYTHON_EXAMPLE_TEXT, cg.SYSTEM_PROMPT)
+
     def test_parameters_are_optional_and_the_old_form_is_unchanged(self):
         kind, steps, python, parameters = cg.parse_response_full(param_response())
         self.assertEqual((kind, steps, python, parameters), ('generated', PARAM_STEPS, PARAM_PYTHON, PARAM_DEFS))
@@ -925,6 +932,30 @@ class ParameterGenerationTest(CodegenBase):
         state = self.current(plan)['codegen']
         self.assertEqual(state['status'], 'failed')
         self.assertIn('python:import_not_allowed', state['reasons'])
+        self.assertNotIn('template_source', state)
+
+    def test_placeholders_written_without_declaring_parameters_are_refused_not_executed_as_text(self):
+        # 変数を宣言せずに{{...}}を書くと、未置換の文字列のまま採用されていた(Codexの指摘)
+        cases = [
+            json.dumps({'steps': [{'name': 'w_empty', 'query': "SELECT product_code FROM v_ai_shipment WHERE product_code = '{{customer_code}}'"}],
+                        'python': "emit_report('Customer: {{customer_code}}')"}, ensure_ascii=False),
+            json.dumps({'steps': GOOD_STEPS, 'python': GOOD_PYTHON + "\nemit_report('{{Unknown}}')"}, ensure_ascii=False),
+            json.dumps({'steps': [{'name': 'w_a', 'query': GOOD_STEPS[0]['query'] + ' -- {{ x }}'}], 'python': GOOD_PYTHON}, ensure_ascii=False),
+        ]
+        for response in cases:
+            with self.subTest(response=response[:50]):
+                plan = self.new_plan()
+                self.generate(plan, response)
+                state = self.current(plan)['codegen']
+                self.assertEqual((state['status'], state['reasons'], state['inflight'], state['attempts']), ('failed', ['parameters_source_invalid'], None, 1))
+                self.assertNotIn('steps', state)
+
+    def test_code_without_placeholders_is_unchanged_even_with_nested_braces(self):
+        python = GOOD_PYTHON + "\nd = {'a': {'b': 1}}\nemit_report(str(d))"
+        plan = self.new_plan()
+        self.generate(plan, json.dumps({'steps': GOOD_STEPS, 'python': python}, ensure_ascii=False))
+        state = self.current(plan)['codegen']
+        self.assertEqual(state['status'], 'generated')
         self.assertNotIn('template_source', state)
 
     def test_the_generated_plan_can_be_saved_as_a_template_in_the_variable_form(self):

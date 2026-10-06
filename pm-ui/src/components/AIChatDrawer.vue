@@ -409,6 +409,7 @@ watch(provider, (next, prev) => {
 
 // OpenRouterの有料モデルは、利用者が選択したときに確認する。同じ画面の間は1回承認すれば再確認しない。
 const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507'])
+const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507' })
 let paidModelConfirmed = false
 let lastSelection = null
 const rememberSelection = () => { lastSelection = { provider: provider.value, model: model.value } }
@@ -416,7 +417,7 @@ const onSelectionChange = async () => {
   await nextTick()
   const isPaid = provider.value === 'openrouter' && OPENROUTER_PAID_MODELS.has(model.value)
   if (isPaid && !paidModelConfirmed) {
-    if (window.confirm('このモデル（Gemma 4 26B A4B）は有料です。使いますか？')) {
+    if (window.confirm(`このモデル（${OPENROUTER_PAID_LABELS[model.value] || model.value}）は有料です。使いますか？`)) {
       paidModelConfirmed = true
     } else if (lastSelection) {
       provider.value = lastSelection.provider

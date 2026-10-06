@@ -19,16 +19,28 @@ class AnalysisCodeRedactor:
         if name:
             self.codes.setdefault(name, set()).add(code)
 
-    def redact_text(self, text):
+    def redact_text(self, text, keep=(), collect=None):
+        """登録名称を、コードへ置換する。
+
+        collect: 置換で入れたコードを集める集合。keep: そのまま残す文字列(今回の送信で、置換が入れたコード)。
+        keepは、AIの返事の中のコードを、再置換しないために使う(登録名称とコードが衝突しても、同じ対象のコードが変わらない)。
+        keepにない名称は、返事の中でも、置換する(置換できなければ、拒否する)。
+        """
+        keep = {item for item in keep if item}
+        table = {**self.codes, **{item: {item} for item in keep}} if keep else self.codes  # keepは、同じ文字列へ(衝突した名称より優先)
+
         def replace(match):
-            codes = self.codes[match.group()]
+            codes = table[match.group()]
             if None in codes or len(codes) != 1:
                 raise AnalysisError('目的文の名称に対応するコードが未登録、または同名で特定できません。目的を登録コードで書き直してください。外部AIへは送信していません。')
-            return next(iter(codes))
+            code = next(iter(codes))
+            if collect is not None:
+                collect.add(code)
+            return code
 
         # 一度だけ置換し、生成したコードを別の名称として再置換しない。
-        if self.codes:
-            pattern = '|'.join(re.escape(name) for name in sorted(self.codes, key=len, reverse=True))
+        if table:
+            pattern = '|'.join(re.escape(name) for name in sorted(table, key=len, reverse=True))
             text = re.sub(pattern, replace, text)
         return re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[メールアドレス]', text)
 

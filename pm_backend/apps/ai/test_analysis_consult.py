@@ -211,11 +211,11 @@ class ConsultRealProviderCheckTests(ConsultBase):
 class FakeRedactor:
     """登録名称(ACME・山田)を、コードへ置換する。"""
 
-    def redact_text(self, text):
+    def redact_text(self, text, keep=(), collect=None):
         return text.replace('ACME', 'CUST-001').replace('山田', 'EMP-007')
 
 
-class ConsultExternalTests(ConsultBase):
+class ExternalBase(ConsultBase):
     """社外のAI(選択に従う)へ送るとき: 了承の確認・コード置換・使えないときは代替しない(BOSS承認 2026-10-06)。"""
 
     def setUp(self):
@@ -241,6 +241,8 @@ class ConsultExternalTests(ConsultBase):
         body = {'provider': 'openrouter', 'model': 'm-ext', 'external_confirmed': True, **extra}
         return self.call('ai-analysis-consult', self.creator, data={'messages': messages, **body})
 
+
+class ConsultExternalTests(ExternalBase):
     def test_an_external_ai_needs_the_confirmation_and_nothing_is_sent_without_it(self):
         for value in (None, False, 'true', 1, 'yes'):
             with self.subTest(value=value):
@@ -288,7 +290,7 @@ class ConsultExternalTests(ConsultBase):
         self.assertNotIn('SECRET', json.dumps(response.data, ensure_ascii=False))
 
         class Broken:
-            def redact_text(self, text):
+            def redact_text(self, text, keep=(), collect=None):
                 raise DatabaseError('SECRET-DB')
 
         with patch.object(consult, 'build_analysis_code_redactor', lambda: Broken()):
@@ -324,10 +326,78 @@ class ConsultExternalTests(ConsultBase):
         self.assertEqual((template['id'], template['name'], template['purpose'], template['category_label']), (row.pk, 'ACME向け', '山田の目的', '品質'))
 
 
-class ConsultRedactionFailureTests(ConsultExternalTests):
+class ConsultReplyProtectionTests(ExternalBase):
+    """AIの過去の返事の扱い(Codexの指摘): 今回の送信で置換が入れたコードは、再置換しない。AIが新しく出した登録名称は、置換する・できなければ拒否する。
+
+    実際の置換器(AnalysisCodeRedactor)と、合成の対応表を使う(実DBは使わない)。
+    """
+
+    def setUp(self):
+        super().setUp()
+        from ai.services.analysis_redaction import AnalysisCodeRedactor
+        redactor = AnalysisCodeRedactor()
+        redactor.add('ACME', 'C-001')   # 登録名称 ACME → コード C-001
+        redactor.add('C-001', 'C-002')  # 衝突: 別の登録名称が、コード C-001 と同じ文字列
+        redactor.add('秘密商事', None)    # コード未登録(置換できない)
+        patcher = patch.object(consult, 'build_analysis_code_redactor', lambda: redactor)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def turn(self, assistant_text, user_first='ACMEの出荷'):
+        history = [{'role': 'user', 'content': user_first}, {'role': 'assistant', 'content': assistant_text}, {'role': 'user', 'content': '8月'}]
+        return self.ask_external(history)
+
+    def sent_contents(self):
+        return [m['content'] for m in self.external_calls[-1][2][1:]]
+
+    def test_the_code_we_inserted_stays_the_same_across_turns_even_when_it_collides_with_another_name(self):
+        for _ in range(3):  # 3往復しても、C-001が、C-002へ変わらない
+            self.external_calls.clear()
+            self.assertEqual(self.turn('C-001: どの月ですか？').status_code, 200)
+            self.assertEqual(self.sent_contents(), ['C-001の出荷', 'C-001: どの月ですか？', '8月'])
+
+    def test_a_registered_name_the_ai_introduces_is_replaced_not_protected(self):
+        self.assertEqual(self.turn('ACMEについて確認してください').status_code, 200)
+        self.assertEqual(self.sent_contents()[1], 'C-001について確認してください')
+        self.assertNotIn('ACME', json.dumps(self.external_calls[-1][2], ensure_ascii=False))
+
+    def test_a_name_without_a_code_in_the_ai_reply_is_refused_before_sending(self):
+        response = self.turn('秘密商事の件ですね')
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn('秘密商事', json.dumps(response.data, ensure_ascii=False))
+        self.assertEqual((self.external_calls, self.chat_calls), ([], []))
+
+    def test_without_the_codes_of_this_request_the_reply_is_replaced_as_a_whole(self):
+        # 今回の発言に、置換されるものがない(コードを入れていない)とき、返事の C-001 は、登録名称として置換される
+        self.assertEqual(self.turn('C-001: どの月ですか？', user_first='出荷を比べたい').status_code, 200)
+        self.assertEqual(self.sent_contents(), ['出荷を比べたい', 'C-002: どの月ですか？', '8月'])
+
+    def test_the_templates_codes_are_also_protected_in_the_reply(self):
+        self.approved(name='ACME向けの出荷', purpose='月別')
+        self.assertEqual(self.turn('C-001向けのテンプレートがあります', user_first='出荷を比べたい').status_code, 200)
+        self.assertEqual(self.sent_contents()[1], 'C-001向けのテンプレートがあります')
+
+    def test_the_old_signature_field_is_not_accepted(self):
+        bad = [{'role': 'user', 'content': 'a'}, {'role': 'assistant', 'content': 'b', 'signature': 'x'}, {'role': 'user', 'content': 'c'}]
+        self.assertEqual(self.ask_external(bad).status_code, 400)
+        self.assertEqual(self.external_calls, [])
+
+    def test_the_real_redactor_keeps_the_old_behavior_without_the_new_arguments(self):
+        from ai.services.analysis_redaction import AnalysisCodeRedactor
+        redactor = AnalysisCodeRedactor()
+        redactor.add('ACME', 'C-001'); redactor.add('C-001', 'C-002')
+        self.assertEqual(redactor.redact_text('ACMEとC-001'), 'C-001とC-002')  # 1回の置換の中では、再置換しない
+        collected = set()
+        self.assertEqual(redactor.redact_text('ACME', collect=collected), 'C-001')
+        self.assertEqual(collected, {'C-001'})
+        self.assertEqual(redactor.redact_text('C-001', keep={'C-001'}), 'C-001')
+        self.assertEqual(redactor.redact_text('C-001', keep=set()), 'C-002')
+
+
+class ConsultRedactionFailureTests(ExternalBase):
     def test_a_message_that_cannot_be_replaced_is_a_422_without_the_name_and_nothing_is_sent(self):
         class Ambiguous:
-            def redact_text(self, text):
+            def redact_text(self, text, keep=(), collect=None):
                 raise consult.AnalysisError('名称「秘密の会社」が曖昧です', 400)
 
         with patch.object(consult, 'build_analysis_code_redactor', lambda: Ambiguous()):
@@ -341,7 +411,7 @@ class ConsultRedactionFailureTests(ConsultExternalTests):
         self.approved(name='秘密の会社向け', purpose='目的')
 
         class OnlyTemplatesFail:
-            def redact_text(self, text):
+            def redact_text(self, text, keep=(), collect=None):
                 if '秘密の会社' in text:
                     raise consult.AnalysisError('名称「秘密の会社」が未登録です', 400)
                 return text

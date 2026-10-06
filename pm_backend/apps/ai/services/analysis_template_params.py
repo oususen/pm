@@ -127,6 +127,16 @@ def _texts(steps, python):
 QUOTED_PLACEHOLDER_PATTERN = re.compile(r'''['"]\{\{|\}\}['"]''')
 
 
+LOOSE_PLACEHOLDER_PATTERN = re.compile(r'\{\{[^{}\n]*\}\}')
+
+
+def has_placeholder_like(steps, python):
+    """コードに、変数らしい表記({{...}})が残っているか。変数を宣言(parameters)せずに書かれたものを見つけるため。形の不正な入力でも、例外にしない。"""
+    texts = [step.get('query') for step in steps if isinstance(step, dict)] if isinstance(steps, list) else []
+    texts.append(python)
+    return any(isinstance(text, str) and LOOSE_PLACEHOLDER_PATTERN.search(text) for text in texts)
+
+
 def has_date_literal(steps, python):
     """コード(変数の形でない、実行する形)に、日付(YYYY-MM-DD)が直接書かれているか。"""
     return any(DATE_LITERAL_PATTERN.search(text) for text in _texts(steps, python))

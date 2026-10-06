@@ -56,7 +56,7 @@ let disposed = false, epoch = 0
 // 画面で表示する失敗は固定文だけ。APIの本文は表示しない。
 const CONSULT_ERRORS = Object.freeze({
   400: '送る内容、またはAIの選択が正しくありません。上のAIプロバイダ・モデルを確認してください。',
-  422: '発言に、コードへ置換できない名称が含まれます。表現を変えて、もう一度送ってください（社外へは送っていません）。',
+  422: '発言、またはこれまでのAIの返事に、コードへ置換できない名称が含まれます。表現を変えるか、「やり直す」でやり取りを消して、もう一度送ってください（社外へは送っていません）。',
   424: '承認済みテンプレートの名称・目的を、コードへ置換できません。管理者へ、名称の登録の確認を依頼してください（社外へは送っていません）。',
   403: 'AIと相談する権限がありません。「AI分析」の編集権限、または社外サービスへの送信の許可を確認してください。',
   409: '社外サービスへ送ることの了承が必要です。',
@@ -83,7 +83,7 @@ async function send() {
   busy.value = 'send'; error.value = ''
   try {
     // やり取りはサーバーに保存しない。毎回、全体を送る
-    const body = { messages: history.map(({ role, content }) => ({ role, content })), provider: props.provider }
+    const body = { messages: history.map(({ role, content }) => ({ role, content })), provider: props.provider }  // 表示用の項目(sent)は送らない
     if (props.model) body.model = props.model
     if (external) body.external_confirmed = true
     const response = await api.aiAnalysis.consult(body)

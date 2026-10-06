@@ -35,7 +35,7 @@
       <div id="analysis-execution" class="run-target" :class="{ ready: runReady }">
       <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" @refine="startRefinement" />
       </div>
-      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive" @plan-created="useTemplatePlan" />
+      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive || !!refinement" @plan-created="useTemplatePlan" />
       <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
       </section>
       <aside class="analysis-side" aria-label="分析の進め方">
@@ -48,7 +48,7 @@
       <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
       <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" @apply="applyConsult" @plan-created="useTemplatePlan" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
-      <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。
+      <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。改良の準備中は、テンプレートから分析案を作れません(追加の指示を外すと、作れます)。
         <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
       <div class="period">
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
@@ -230,6 +230,7 @@ let disposed = false
 let lastSelection = { provider: '', model: '' }
 // 有料モデルは、検索AIと同じく選択時に確認し、同じ画面の間は1回の承認で再確認しない。
 const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507'])
+const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507' })
 const paidApproved = new Set()
 const selectedProvider = computed(() => options.value?.providers.find(item => item.provider === provider.value) || null)
 const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value)
@@ -386,7 +387,7 @@ function defaultModelFor(key) {
 function paidKey() {
   if (provider.value === 'deepseek') return { key: 'deepseek', message: 'DeepSeekは有料です。使いますか？' }
   if (provider.value === 'openrouter' && OPENROUTER_PAID_MODELS.has(model.value)) {
-    return { key: model.value, message: 'このモデル（Gemma 4 26B A4B）は有料です。使いますか？' }
+    return { key: model.value, message: `このモデル（${OPENROUTER_PAID_LABELS[model.value] || model.value}）は有料です。使いますか？` }
   }
   return null
 }
@@ -414,7 +415,8 @@ function applyConsult(draft) {
 }
 // テンプレートから作成した分析案を、現在の分析案にする(AIは使わない。承認・件数確認・試行・コード承認は、この画面で取り直す)
 function useTemplatePlan(created) {
-  if (executionActive.value) return
+  // 結果の改良の準備中は、受け付けない(新しい分析案を作ると、追加の指示と元の実行の対応が、消えてしまうため)
+  if (executionActive.value || refinement.value) return
   generation += 1
   error.value = ''
   busy.value = ''
@@ -454,6 +456,8 @@ watch([purpose, dateFrom, dateTo, provider, model, refinement], () => {
 }, { flush: 'sync' })
 watch(() => props.request, (request) => {
   if (!request || executionActive.value) return
+  // 結果の改良の準備中(追加の指示がある)に、検索から新しい分析が来たとき: 破棄の確認を取る。断れば、そのまま(追加の指示も、目的も残る)
+  if (refinement.value && !window.confirm('結果の改良の準備中です。新しい分析を始めると、追加の指示は破棄されます。よろしいですか？')) return
   resetPlan()
   // 検索結果や会話履歴は受け取らず、質問文と起点だけを画面内で引き継ぐ。
   purpose.value = request.question || ''

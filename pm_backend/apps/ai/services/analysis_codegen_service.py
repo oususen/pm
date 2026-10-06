@@ -41,6 +41,19 @@ INFLIGHT_GRACE_SECONDS = 60  # 「生成中」を状態不明と表示するま�
 GUARD_SOURCE = Path(__file__).with_name('analysis_guard_runtime.py').read_text(encoding='utf-8')
 WRAPPER_VERSION = f"1-{hashlib.sha256(GUARD_SOURCE.encode('utf-8')).hexdigest()[:12]}"  # 外枠の内容が変わると、自動で変わる
 
+# 指示に入れる、Pythonの例(全体)。有効なPythonで、承認ビューや月の名前を直書きしない。テストで、構文と検査を確認する
+EXAMPLE_PROGRAM = (
+    'rows = con.sql("SELECT product_code, product_name, SUM(quantity) FROM w_summary GROUP BY 1, 2").fetchall()\n'
+    'labels = [code for code, name, qty in rows]\n'
+    'values = [float(qty) for code, name, qty in rows]\n'
+    'emit_chart("bar", "品番別の出荷数量", labels, [{"name": "数量", "values": values}])\n'
+    'emit_table("品番別の出荷数量", ["品番", "製品名", "数量"], [[code, name, float(qty)] for code, name, qty in rows])'
+)
+PYTHON_EXAMPLE_TEXT = (
+    'Pythonの例(全体。改行も含めて、そのまま有効なコード。w_summaryは、先のstepで作った中間テーブル): \n' + EXAMPLE_PROGRAM + '\n'
+    'x・列名・行は、このようにfetchall()の結果から作る。月などの表示名を、文字列で直接書かない。'
+)
+
 # 固定ルール(BOSS承認 2026-10-06): 製品別の集計は、必ず品番(product_code)で集計し、品番→製品名→数量の順で出す
 PRODUCT_RULE_CODE = (
     '製品別・品番別・製品ごとに集計する場合は、必ず品番(product_code)でGROUP BYし、結果の表には「品番」「製品名」「数量」の順で列を出す'
@@ -73,12 +86,10 @@ SYSTEM_PROMPT = (
     'emit_table(名前, 列名のリスト, 行のリスト) / emit_chart(種類, タイトル, x, [{"name":..,"values":[..]}]) / emit_report(文章)。'
     'emit_chartのxは値のリスト。文字列1つは不可。各系列のvaluesもxと同じ個数のリスト。'
     'emit_tableのcolumnsは文字列のリスト、rowsは行(リスト)のリスト。'
-    '例: emit_chart("bar", "月別", ["8月", "9月"], [{"name":"数量", "values":[aug_qty, sep_qty]}])。'
-    '例: emit_table("集計", ["月", "数量"], [["8月", aug_qty], ["9月", sep_qty]])。'
+    + PYTHON_EXAMPLE_TEXT +
     'con.sql/executeの結果は fetchall() / fetchone() / columns で読む。問い合わせはSELECT/WITH 1つだけで、データは変更できない。'
     'load_view(ビュー名)・con.sql(...)が返すのは結果オブジェクトで、それ自体をforで回したり、row["列名"]のように列名で読んだりしない。'
     '行は .fetchall() で取り、各行はタプル(列の順番で row[0], row[1]。SELECTに書いた列の順)。'
-    '例: rows = con.sql("SELECT product_code, product_name, SUM(quantity) FROM w_summary GROUP BY 1, 2").fetchall(); for code, name, qty in rows: ...。'
     'load_viewに渡せるのは承認済みビュー名だけ。先のstepで作った中間テーブルは、con.sql("SELECT ... FROM w_中間テーブル名").fetchall() で読む。'
     'importできるのは json, math, datetime, decimal, statistics, collections, itertools, re だけ。ファイル・ネットワーク・OS・動的実行・'
     'アンダースコアで始まる属性は使えない。emit_* を少なくとも1回呼ぶ。グラフの種類は bar か line。'
@@ -390,6 +401,9 @@ def generate(owner_id, plan_id, revision, confirmation=None):
             if parameters is not None:
                 steps, python, source, variable_reasons = _apply_parameters(plan['proposal'], steps, python, parameters)
                 reasons += variable_reasons
+            elif template_params.has_placeholder_like(steps, python):
+                # 変数を宣言せずに{{...}}を書いた(未置換の文字列が、そのまま実行される)。生成の失敗にする
+                reasons.append('parameters_source_invalid')
             if not reasons:
                 reasons += validate_generated(steps, python, approved_views)  # 変数があれば、値を入れた、実行する形を検査する
 

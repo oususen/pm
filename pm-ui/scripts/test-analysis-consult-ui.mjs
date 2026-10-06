@@ -267,3 +267,13 @@ test('履歴の発言者は、ログイン中の利用者名で表示する。�
     assert.equal(JSON.stringify(sends(named)[0][1]).includes('王'), false)
   } finally { named.stop(); anonymous.stop() }
 })
+
+test('履歴をAPIへ送るときは、role・contentだけ(表示用の項目sent・返事の追加情報は含めない)。返事に署名があっても、付けない', async () => {
+  const f = setup(EXT, { consult: async () => reply({ reply_signature: 'ignored', sent_text: 'x', external: true }) })
+  try {
+    f.state.externalAck.value = true
+    f.state.input.value = '一回目'; await f.state.send()
+    f.state.input.value = '二回目'; await f.state.send()
+    assert.deepEqual(sends(f)[1][1].messages.map(m => Object.keys(m).sort()), [['content', 'role'], ['content', 'role'], ['content', 'role']])
+  } finally { f.stop() }
+})

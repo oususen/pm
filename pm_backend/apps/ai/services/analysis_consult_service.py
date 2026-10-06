@@ -140,22 +140,36 @@ def consult(data):
     templates = _approved_templates()
     if external:
         redactor = _redactor()
+        produced = set()  # 今回の送信で、置換が入れたコード。AIの返事の中のこのコードは、再置換しない(登録名称と衝突しても、同じ対象のコードが変わらない)
+        redacted = {}
         try:
-            sent = [{'role': item['role'], 'content': redactor.redact_text(item['content'])} for item in messages]
+            for index, item in enumerate(messages):
+                if item['role'] == 'user':
+                    redacted[index] = redactor.redact_text(item['content'], collect=produced)
         except DatabaseError as exc:
             raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
         except AnalysisError as exc:
             # 登録名称が曖昧・未登録の可能性がある発言。名称は応答に出さない(置換できなければ、送らない)
             raise AnalysisError('発言に、コードへ置換できない名称が含まれます。表現を変えて、もう一度送ってください。外部AIへは送信していません。', 422) from exc
         try:
-            system = _system_prompt(templates, redactor.redact_text)
+            system = _system_prompt(templates, lambda text: redactor.redact_text(text, collect=produced))
         except DatabaseError as exc:
             raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
         except AnalysisError as exc:
             # 承認済みテンプレートの名称・目的に、置換できない名称がある。1件でもあれば、社外へは送らない(除外して続けない)
             raise AnalysisError('承認済みテンプレートの名称・目的を、コードへ置換できません。管理者へ、名称の登録の確認を依頼してください。外部AIへは送信していません。', 424) from exc
+        try:
+            for index, item in enumerate(messages):
+                if item['role'] == 'assistant':
+                    # AIの過去の返事: 今回入れたコードは、そのまま。AIが新しく出した登録名称は、置換する(置換できなければ、拒否する)
+                    redacted[index] = redactor.redact_text(item['content'], keep=produced)
+        except DatabaseError as exc:
+            raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
+        except AnalysisError as exc:
+            raise AnalysisError('これまでのAIの返事に、コードへ置換できない名称が含まれます。「やり直す」でやり取りを消して、もう一度送ってください。外部AIへは送信していません。', 422) from exc
+        sent = [{'role': item['role'], 'content': redacted[index]} for index, item in enumerate(messages)]
     else:
-        sent, system = messages, _system_prompt(templates)
+        sent, system = [{'role': item['role'], 'content': item['content']} for item in messages], _system_prompt(templates)
     request_messages = [{'role': 'system', 'content': system}, *sent]
     try:
         if external:
