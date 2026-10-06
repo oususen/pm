@@ -45,9 +45,8 @@
           <span class="stage-no">①</span><strong>分析目的</strong><em>{{ stageLabel(1) }}</em><small v-if="stageSummary(1)">{{ stageSummary(1) }}</small>
         </button>
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
-      <label for="analysis-purpose">分析目的</label>
-      <textarea id="analysis-purpose" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-      <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" @apply="applyConsult" @plan-created="useTemplatePlan" />
+      <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
+      <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" @apply="applyConsult" @plan-created="useTemplatePlan" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
       <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。
         <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
@@ -55,7 +54,6 @@
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
         <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
       </div>
-      <p>対象: 入荷実績・出荷実績の指定期間の全登録行。追加の絞り条件・資料取込み、生産・仕損・中断・残業は未対応です。</p>
       <template v-if="!plan">
         <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
         <section v-if="selectedProvider?.external && externalPreview" class="dataset">
@@ -207,7 +205,7 @@ import AIAnalysisTemplates from './AIAnalysisTemplates.vue'
 import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
 import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 
-const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean, visible: { type: Boolean, default: true } })
+const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean, visible: { type: Boolean, default: true }, userName: { type: String, default: '' } })
 const executionActive = ref(false)
 const purpose = ref('')
 const source = ref('')

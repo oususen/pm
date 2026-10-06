@@ -13,7 +13,7 @@
       <p v-else class="note">やり取りはローカルAI（Qwen）で行い、社外へ送りません。やり取りは保存されません（画面を閉じる・分析案を作ると消えます）。AIは数値を知らず、助言と文案だけを出します。</p>
       <p v-if="!messages.length" class="note">例: 「先月の出荷を製品別に比べたい」のように、分かる範囲で書いてください。AIが、期間や対象を質問します。</p>
       <ul v-if="messages.length" class="log">
-        <li v-for="(item, index) in messages" :key="index" :class="item.role"><b>{{ item.role === 'user' ? 'あなた' : 'AI' }}:</b> {{ item.content }}
+        <li v-for="(item, index) in messages" :key="index" :class="item.role"><b>{{ item.role === 'user' ? (userName || 'あなた') : 'AI' }}:</b> {{ item.content }}
           <small v-if="item.sent" class="sent">社外へ送った内容（置換後）: {{ item.sent }}</small></li>
       </ul>
       <p v-if="error" class="error">{{ error }}</p>
@@ -47,6 +47,7 @@ const props = defineProps({
   plan: { type: Object, default: null }, canEdit: Boolean, blocked: Boolean, purpose: { type: String, default: '' }, dateFrom: { type: String, default: '' }, dateTo: { type: String, default: '' },
   // 上部で選んだAI。社外のAIのときは、置換後の内容を送ることを了承してから送る(選び直したら、了承も取り直す)
   provider: { type: String, default: 'qwen' }, model: { type: String, default: '' }, external: Boolean, providerLabel: { type: String, default: '' }, providerAvailable: { type: Boolean, default: true },
+  userName: { type: String, default: '' }, // 履歴の発言者の表示(ログイン中の利用者名)。なければ「あなた」
 })
 const emit = defineEmits(['apply', 'plan-created'])
 const open = ref(false), input = ref(''), busy = ref(''), error = ref(''), externalAck = ref(false)
@@ -134,7 +135,7 @@ async function useTemplate(item) {
 .consult-body p { margin: 2px 0; }
 .note { font-size: 12px; color: #566; }
 .warning { color: #7a4b00; background: #fff6e0; padding: 2px 6px; border-radius: 4px; }
-.ack { display: block; margin: 2px 0; }
+.ack { display: block; margin: 2px 0; color: #b00020; font-weight: bold; } /* 社外へ送ることの了承は、見落とさないよう赤字 */
 .sent { display: block; color: #566; font-size: 12px; }
 .error { color: #b00020; }
 .log { list-style: none; margin: 4px 0; padding: 0; max-height: 220px; overflow-y: auto; }

@@ -12,14 +12,14 @@ assert.deepEqual(parsed.errors, [])
 const script = compileScript(parsed.descriptor, { id: 'consult-test' })
 const template = compileTemplate({ source: parsed.descriptor.template.content, filename: filename.pathname, id: 'consult-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
-const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'ref', 'watch', 'api', 'plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo', 'provider', 'model', 'external', 'providerLabel', 'providerAvailable'].includes(n))
+const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'ref', 'watch', 'api', 'plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo', 'provider', 'model', 'external', 'providerLabel', 'providerAvailable', 'userName'].includes(n))
 const create = new Function('ref', 'computed', 'onBeforeUnmount', 'watch', 'defineProps', 'defineEmits', 'api', 'window',
   parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '') + `\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
 
 const reply = (extra = {}) => ({ data: { reply: '製品は絞りますか？', draft: { purpose: null, date_from: null, date_to: null }, templates: [], provider: 'qwen', model: 'm', ...extra } })
 function setup(propsInit = {}, methodsInit = {}) {
-  const props = Vue.reactive({ plan: null, canEdit: true, blocked: false, purpose: '', dateFrom: '', dateTo: '', provider: 'qwen', model: '', external: false, providerLabel: '', providerAvailable: true, ...propsInit }), calls = [], confirms = [], events = [], consent = { value: true }
+  const props = Vue.reactive({ plan: null, canEdit: true, blocked: false, purpose: '', dateFrom: '', dateTo: '', provider: 'qwen', model: '', external: false, providerLabel: '', providerAvailable: true, userName: '', ...propsInit }), calls = [], confirms = [], events = [], consent = { value: true }
   const methods = { consult: async () => reply(), createTemplatePlan: async id => ({ data: { id: 'new-plan', template: { id } } }), ...methodsInit }
   const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
   const scope = Vue.effectScope()
@@ -28,7 +28,7 @@ function setup(propsInit = {}, methodsInit = {}) {
   const unmountFn = () => scope.stop()
   return { state, props, calls, confirms, events, consent, stop: unmountFn }
 }
-const html = f => renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo', 'provider', 'model', 'external', 'providerLabel', 'providerAvailable'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props))
+const html = f => renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'blocked', 'purpose', 'dateFrom', 'dateTo', 'provider', 'model', 'external', 'providerLabel', 'providerAvailable', 'userName'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props))
 const sends = f => f.calls.filter(c => c[0] === 'consult')
 
 test('送信すると、やり取り全体をAPIへ送り、AIの返事を履歴に足す。入力欄は空になる', async () => {
@@ -252,4 +252,18 @@ test('送信中にAIを選び直したら、前のAIの返事は使わない(履
 test('社外へ送る内容として、承認済みテンプレートの名称と目的も案内する(社外)', async () => {
   const f = setup(EXT)
   try { assert.ok((await html(f)).includes('承認済みテンプレートの名称と目的')) } finally { f.stop() }
+})
+
+test('履歴の発言者は、ログイン中の利用者名で表示する。名前がなければ「あなた」。AIは「AI」(利用者名)', async () => {
+  const named = setup({ userName: '王 惟楨' })
+  const anonymous = setup()
+  try {
+    for (const f of [named, anonymous]) { f.state.input.value = '8月と9月の入荷を比較して'; await f.state.send() }
+    const text = (await html(named)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('王 惟楨:')); assert.equal(text.includes('あなた:'), false); assert.ok(text.includes('AI:'))
+    const plain = (await html(anonymous)).replace(/<!--.*?-->/g, '')
+    assert.ok(plain.includes('あなた:'))
+    // 名前は表示だけ。AIへ送る内容には含めない
+    assert.equal(JSON.stringify(sends(named)[0][1]).includes('王'), false)
+  } finally { named.stop(); anonymous.stop() }
 })

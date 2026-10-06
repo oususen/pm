@@ -10,7 +10,7 @@
       <ProductionAIDataAnalysis :can-analyze="canAnalyze" @analyze="openAnalysis" />
     </div>
     <div v-if="canAnalyze && visited.analysis" v-show="activeTab === 'analysis'" id="ai-panel-analysis" role="tabpanel" aria-labelledby="ai-tab-analysis">
-      <AIAnalysis :request="analysisRequest" :can-edit="canEditAnalysis" :can-view-all="canViewAllAnalysisRuns" :visible="activeTab === 'analysis'" />
+      <AIAnalysis :request="analysisRequest" :can-edit="canEditAnalysis" :can-view-all="canViewAllAnalysisRuns" :visible="activeTab === 'analysis'" :user-name="analysisUserName" />
     </div>
     <p v-if="!tabs.length">社内AIの閲覧権限がありません。</p>
   </section>
@@ -27,6 +27,11 @@ const canSearch = computed(() => hasPermission(authState.user, 'ai.chat'))
 const canAnalyze = computed(() => hasPermission(authState.user, 'ai.analysis'))
 const canEditAnalysis = computed(() => hasPermission(authState.user, 'ai.analysis', 'edit'))
 const canViewAllAnalysisRuns = computed(() => hasPermission(authState.user, 'settings.ai', 'edit'))
+// AI相談の履歴に出す、ログイン中の利用者名(画面上部と同じ: 姓 名。なければユーザー名)
+const analysisUserName = computed(() => {
+  const user = authState.user
+  return user ? (`${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username || '') : ''
+})
 const tabs = computed(() => [
   ...(canSearch.value ? [{ id: 'search', label: '検索' }] : []),
   ...(canAnalyze.value ? [{ id: 'analysis', label: '分析' }] : []),

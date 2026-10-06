@@ -17,7 +17,7 @@ const template = compileTemplate({ source: parsed.descriptor.template.content, f
   id: 'codegen-ui-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
 const exposed = 'plan,busy,error,codePreview,codeSendAccepted,codeAccepted,codeStateFresh,codeInFlight,canGenerate,canTrial,canApproveCode,trialPassed,hasCode,prepareCodePreview,generateCode,trialCode,approveCode,releaseCodegen,refresh,resetPlan'
-const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll', 'visible'].includes(name))
+const names = Object.keys(script.bindings).filter(name => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'request', 'canEdit', 'canViewAll', 'visible', 'userName'].includes(name))
 const create = new Function('ref', 'computed', 'watch', 'defineProps', 'onMounted', 'onBeforeUnmount', 'api', 'window', 'AIAnalysisConsult', 'AIAnalysisExecution', 'AIAnalysisTemplates', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   `${parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')}\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code
@@ -818,5 +818,18 @@ test('結果の改良: 追加の指示は外せる。作り直し(resetPlan)で�
     f.state.executionActive.value = true; f.state.startRefinement({ instruction: 'x', run_id: 1 })
     assert.notEqual(f.state.plan.value, null, '実行中は始めない'); f.state.executionActive.value = false
     assert.equal(f.state.refinement.value, null)
+  } finally { f.stop() }
+})
+
+test('分析目的: 見出し(段階カード)と重複するラベルを置かず、入力欄に名前だけ付ける。対象範囲の説明文は出さない(BOSS要望 2026-10-06)', async () => {
+  const f = await setup()
+  try {
+    f.state.plan.value = null
+    const text = await htmlFor(f)
+    assert.ok(text.includes('id="analysis-purpose"') && text.includes('aria-label="分析目的"'))
+    assert.equal(text.includes('<label for="analysis-purpose"'), false, '入力欄の上の「分析目的」のラベルは置かない')
+    assert.equal((text.match(/<strong>分析目的<\/strong>/g) || []).length, 1, '「分析目的」の見出しは、段階カードの1つだけ')
+    assert.equal(text.includes('指定期間の全登録行。追加の絞り条件'), false)
+    assert.equal(text.includes('生産・仕損・中断・残業は未対応です'), false)
   } finally { f.stop() }
 })
