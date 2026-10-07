@@ -1606,11 +1606,16 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             )
         }
         # 休日出勤日は需要・LTシフトで休日扱い（受注展開と同じ）
+        holiday_start_date = min(
+            [start_date - timedelta(days=7)]
+            + [target.laser_pattern.processing_start_date for target in targets
+               if target.laser_pattern.processing_start_date is not None]
+        )
         _hw_dates = set(
             CalendarDay.objects.filter(
                 calendar_id=grid_calendar_id,
                 is_holiday_work=True,
-                target_date__range=(start_date - timedelta(days=7), dates[-1] + timedelta(days=14)),
+                target_date__range=(holiday_start_date, dates[-1] + timedelta(days=14)),
             ).values_list('target_date', flat=True)
         ) if grid_calendar_id else set()
 
