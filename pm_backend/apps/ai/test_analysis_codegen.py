@@ -875,12 +875,23 @@ class ParameterGenerationTest(CodegenBase):
         s = lambda query: [{'name': 'w_daily', 'query': query}]
         base = PARAM_STEPS[0]['query']
         cases = {
-            'parameters_source_invalid': [
+            # コードと変数の不一致は、原因ごとの固定の理由コード(画面で、何が悪いかを区別して表示する)
+            'parameters_undeclared': [
                 param_response(steps=s(base.replace('{{customer_code}}', '{{other}}'))),                       # 定義にない変数
+            ],
+            'parameters_unused': [
                 param_response(parameters=PARAM_DEFS + [{'name': 'second', 'type': 'customer_code', 'label': '別の顧客', 'default': 'C-001'}]),  # 使われない定義
+            ],
+            'parameters_literal': [
                 param_response(python=PARAM_PYTHON + "\nx = 'C-001'"),                                         # 元の値が残っている
                 param_response(python=PARAM_PYTHON + "\nd = '2026-03-03'"),                                    # 日付の直書き
+            ],
+            'parameters_quoted': [
                 param_response(steps=s(base.replace('{{customer_code}}', "'{{customer_code}}'"))),             # 引用符つき
+            ],
+            'parameters_source_invalid': [
+                param_response(steps=[{'name': 'w_{{customer_code}}', 'query': base}]),                        # 中間テーブル名に変数
+                param_response(python=PARAM_PYTHON + "\nx = {{ bad name }}"),                                # 読めない {{…}} の表記
             ],
             'parameters_invalid': [
                 param_response(parameters=[{**PARAM_DEFS[0], 'type': 'supplier'}, *PARAM_DEFS[1:]]),          # 種類の不正
@@ -947,7 +958,7 @@ class ParameterGenerationTest(CodegenBase):
                 plan = self.new_plan()
                 self.generate(plan, response)
                 state = self.current(plan)['codegen']
-                self.assertEqual((state['status'], state['reasons'], state['inflight'], state['attempts']), ('failed', ['parameters_source_invalid'], None, 1))
+                self.assertEqual((state['status'], state['reasons'], state['inflight'], state['attempts']), ('failed', ['parameters_undeclared'], None, 1))
                 self.assertNotIn('steps', state)
 
     def test_code_without_placeholders_is_unchanged_even_with_nested_braces(self):

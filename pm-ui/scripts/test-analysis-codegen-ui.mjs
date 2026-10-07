@@ -847,7 +847,8 @@ test('変数つきのコード(2-B): 使った変数と、元の値を表示す�
     assert.ok(text.includes('品番（product_code）= V053904703')); assert.ok(text.includes('開始日（period_from）= 2026-09-01'))
     f.state.plan.value = base
     assert.equal((await htmlFor(f)).includes('使うときに値を変えられます'), false, '変数がなければ出さない')
-    for (const [reason, part] of [['parameters_invalid', '変数の定義が正しくありません'], ['parameters_source_invalid', 'コードと変数が合っていません'], ['parameters_unavailable', '変数の値']]) {
+    for (const [reason, part] of [['parameters_invalid', '変数の定義が正しくありません'], ['parameters_source_invalid', 'コードと変数が合っていません'], ['parameters_undeclared', '変数を宣言していません'], ['parameters_unused', 'コードで使われていません'],
+      ['parameters_quoted', '引用符が付いています'], ['parameters_literal', '直接書かれています'], ['parameters_unavailable', '変数の値']]) {
       f.state.plan.value = { ...dataPlan(), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: [reason] } }
       assert.ok((await htmlFor(f)).includes(part), reason)
     }

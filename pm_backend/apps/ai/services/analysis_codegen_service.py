@@ -329,8 +329,9 @@ def _apply_parameters(proposal, steps, python, parameters):
     """AIが返した変数の一覧を確認し、元の値を入れた、実行する形のコードにする。(steps, python, template_source, 失敗の理由コード)を返す。
 
     失敗は、固定の理由コードにして、生成の失敗として扱う(例外で止めない。「生成中」を残さないため)。
-    parameters_invalid=変数の定義・値の不正、parameters_source_invalid=コードと変数の不一致・固定値の残り・引用符、
-    parameters_unavailable=値の確認元(マスタ・分析用接続)を使えない。
+    parameters_invalid=変数の定義・値の不正、parameters_unavailable=値の確認元(マスタ・分析用接続)を使えない。
+    コードと変数の不一致は、原因ごとの固定の理由コード: parameters_undeclared=定義にない変数(宣言なしの{{…}}を含む)、parameters_unused=使われない定義、
+    parameters_quoted=変数の前後の引用符、parameters_literal=固定の値(元の値・日付)の直書き、parameters_source_invalid=その他(中間テーブル名の変数・読めない{{…}}の表記)。
     """
     try:
         definitions = template_params.normalize_definitions(parameters, proposal['date_from'], proposal['date_to'])
@@ -345,7 +346,7 @@ def _apply_parameters(proposal, steps, python, parameters):
         template_params.check_source(steps, python, definitions)
         concrete_steps, concrete_python = template_params.concrete_code(steps, python, template_params.resolve_values(definitions, {}))
     except AnalysisError as exc:
-        return steps, python, None, ['parameters_unavailable' if exc.status_code == 503 else 'parameters_source_invalid']
+        return steps, python, None, ['parameters_unavailable' if exc.status_code == 503 else getattr(exc, 'reason', 'parameters_source_invalid')]
     except (TypeError, KeyError, ValueError, AttributeError):
         return steps, python, None, ['parameters_source_invalid']
     return concrete_steps, concrete_python, {'steps': steps, 'python': python, 'parameters': definitions}, []
@@ -403,7 +404,7 @@ def generate(owner_id, plan_id, revision, confirmation=None):
                 reasons += variable_reasons
             elif template_params.has_placeholder_like(steps, python):
                 # 変数を宣言せずに{{...}}を書いた(未置換の文字列が、そのまま実行される)。生成の失敗にする
-                reasons.append('parameters_source_invalid')
+                reasons.append('parameters_undeclared')
             if not reasons:
                 reasons += validate_generated(steps, python, approved_views)  # 変数があれば、値を入れた、実行する形を検査する
 

@@ -166,32 +166,40 @@ def normalize_definitions(raw, date_from, date_to):
     return validate_definitions(definitions)
 
 
+class SourceCheckError(AnalysisError):
+    """コードと変数の不一致。画面へ出す固定の理由コード(reason)を持つ(AIの文章は持たない)。"""
+
+    def __init__(self, detail, reason):
+        super().__init__(detail)
+        self.reason = reason
+
+
 def check_source(steps, python, definitions):
     """保存するコード(変数の形)の確認: 使った変数がすべて定義にあり、定義した変数がすべて使われ、元の値・日付が文字のまま残っていない。"""
     texts = _texts(steps, python)
     if any(PLACEHOLDER_PATTERN.search(name) for name in [str(step.get('name', '')) for step in steps]):
-        raise AnalysisError('中間テーブル名に変数は使えません。')
+        raise SourceCheckError('中間テーブル名に変数は使えません。', 'parameters_source_invalid')
     used = set()
     for text in texts:
         used.update(PLACEHOLDER_PATTERN.findall(text))
     names = {item['name'] for item in definitions}
     if used - names:
-        raise AnalysisError('コードに、定義されていない変数があります。')
+        raise SourceCheckError('コードに、定義されていない変数があります。', 'parameters_undeclared')
     if names - used:
-        raise AnalysisError('定義した変数が、コードで使われていません。')
+        raise SourceCheckError('定義した変数が、コードで使われていません。', 'parameters_unused')
     # 置き換えで引用符が付くため、変数の前後に引用符があると、文字列が壊れる
     if any(QUOTED_PLACEHOLDER_PATTERN.search(text) for text in texts):
-        raise AnalysisError('変数の前後に引用符を付けないでください({{名前}} だけを書くと、値が引用符つきで入ります)。')
+        raise SourceCheckError('変数の前後に引用符を付けないでください({{名前}} だけを書くと、値が引用符つきで入ります)。', 'parameters_quoted')
     # 変数の置き換えの対象外の文字(変数の形の外)で判定する
     stripped = [PLACEHOLDER_PATTERN.sub('', text) for text in texts]
     # 正しい変数の形を除いた残りに「{{」「}}」があれば、不正な変数の表記(名前の形式違い・空白・波括弧の不一致など)として断る
     if any('{{' in text or '}}' in text for text in stripped):
-        raise AnalysisError('コードに、変数として読めない {{...}} の表記があります。名前は英小文字・数字・アンダースコアで、{{名前}} の形にしてください。')
+        raise SourceCheckError('コードに、変数として読めない {{...}} の表記があります。名前は英小文字・数字・アンダースコアで、{{名前}} の形にしてください。', 'parameters_source_invalid')
     for item in definitions:
         if item['type'] != 'date' and any(item['default'] in text for text in stripped):
-            raise AnalysisError('変数の元の値が、コードに文字のまま残っています。変数だけを使ってください。')
+            raise SourceCheckError('変数の元の値が、コードに文字のまま残っています。変数だけを使ってください。', 'parameters_literal')
     if any(DATE_LITERAL_PATTERN.search(text) for text in stripped):
-        raise AnalysisError('日付がコードに直接書かれています。期間は変数(period_from・period_to)を使ってください。')
+        raise SourceCheckError('日付がコードに直接書かれています。期間は変数(period_from・period_to)を使ってください。', 'parameters_literal')
 
 
 def _substitute(text, values):
