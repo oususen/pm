@@ -907,3 +907,17 @@ test('結果の改良の準備中に、検索から新しい分析が来たら�
     assert.equal(f.confirms.length, count); assert.equal(f.state.purpose.value, '三つ目')
   } finally { f.stop() }
 })
+
+test('目的の言葉と列の食い違いの警告を②に表示し(本文はエスケープ)、警告がなければ表示しない。承認は妨げない', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    assert.equal((await html()).includes('確認してください: '), false)
+    f.state.plan.value = { ...dataPlan('qwen'), status: 'awaiting_method', warnings: ['目的の「納入場」に対応する列 ship_to_code が、取得する列に含まれていません。', '<img src=x onerror=SECRET>'] }
+    const text = await html()
+    assert.ok(text.includes('⚠ 確認してください: 目的の「納入場」に対応する列 ship_to_code'))
+    assert.equal(text.includes('<img src=x'), false)
+    assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'))
+    assert.ok(text.includes('分析案・手順を承認'))  // 警告があっても承認ボタンは出る
+  } finally { f.stop() }
+})

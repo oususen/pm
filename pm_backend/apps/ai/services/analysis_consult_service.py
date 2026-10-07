@@ -18,7 +18,7 @@ from django.db import DatabaseError
 
 from ai.models import AIAnalysisTemplate
 from ai.services import analysis_llm, chat_service
-from ai.services.analysis_data_service import ANALYSIS_VIEWS, validate_period
+from ai.services.analysis_data_service import ANALYSIS_VIEWS, term_guide_text, validate_period
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
 from ai.services.analysis_redaction import build_analysis_code_redactor
@@ -73,6 +73,7 @@ def _system_prompt(templates, redact=None):
         'JSONだけを返す。形式は {"reply": "利用者への返事(質問・助言)", "draft_purpose": "文案またはnull", '
         '"date_from": "日付またはnull", "date_to": "日付またはnull", "template_ids": [整数]}。\n'
         f'公開ビュー: {json.dumps(schema, ensure_ascii=False)}\n'
+        + term_guide_text(ask_user=True) + '\n'
         '承認済みテンプレート:\n' + '\n'.join(lines)
     )
 

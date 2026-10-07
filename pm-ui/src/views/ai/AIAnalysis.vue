@@ -83,6 +83,7 @@
         <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
         <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
         <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
+        <p v-for="(warning, index) in (plan.warnings || [])" :key="'w' + index" class="warning" role="alert">⚠ 確認してください: {{ warning }}</p>
         <template v-if="plan.template && hasCode">
           <h4>保存済みのSQL・Python（承認前から確認できます。試行・コード承認は、承認後に行います）</h4>
           <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>

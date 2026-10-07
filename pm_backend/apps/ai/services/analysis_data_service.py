@@ -12,13 +12,70 @@ from ai.services.sql_queries import BASE_SQL_SCHEMA
 ANALYSIS_VIEWS = {
     'v_ai_purchase_receipt': {
         'label': '入荷実績', 'date_field': 'arrival_date', 'quantity_field': 'qty',
-        'description': '1行は1回の入荷登録。日別・期間集計は実際の入荷日arrival_dateを使う。',
+        'description': (
+            '1行は1回の入荷登録。日別・期間集計は実際の入荷日arrival_dateを使う。'
+            '列の意味: arrival_date=入荷日(実際に入荷した日)、registered_at=システムの登録日時、qty=入荷数量、product_code=品番、product_name=製品名、'
+            'supplier_id=仕入先(外作先)のID、line_id=ラインのID、product_id=製品のID、'
+            'input_source=登録元(PURCHASE_ACTUAL_INPUT=実績入力、PURCHASE_RECEIVING=検収、PURCHASE_RECEIVING_MOBILE=スマホ検収)。'
+        ),
     },
     'v_ai_shipment': {
         'label': '出荷実績', 'date_field': 'shipment_date', 'quantity_field': 'quantity',
-        'description': '1行は1回の出荷実績登録。日別・期間集計はshipment_dateを使う。',
+        'description': (
+            '1行は1回の出荷実績登録。日別・期間集計はshipment_dateを使う。'
+            '列の意味: shipment_date=出荷日、quantity=出荷数量、product_code=品番、product_name=製品名、product_id=製品のID、'
+            'customer_code=得意先(顧客・客先・出荷先)のコード、ship_to_code=納入場(納入地)のコード。'
+            '納入場・納入地ごとの集計はship_to_codeを使い、顧客・得意先ごとの集計はcustomer_codeを使う(2つは別の列で、混同しない)。'
+            'trip_allocation_id=出荷便割付のID、remark_text=システムが書く便の割付情報(業務メモではない)。'
+        ),
     },
 }
+
+
+# 業務の言葉と列の対応表(BOSS承認 2026-10-07)。(対象ビュー, 言葉, 列)。「納入先」は、顧客を指すことも納入場を指すこともあるため、載せない。
+TERM_COLUMNS = (
+    ('v_ai_shipment', ('納入地', '納入場', '納入場所'), 'ship_to_code'),
+    ('v_ai_shipment', ('顧客', '得意先', '客先', '出荷先'), 'customer_code'),
+    (None, ('品番', '部番'), 'product_code'),
+    (None, ('製品名', '品名'), 'product_name'),
+    ('v_ai_shipment', ('出荷日',), 'shipment_date'),
+    ('v_ai_shipment', ('出荷数量', '出荷数'), 'quantity'),
+    ('v_ai_purchase_receipt', ('入荷日',), 'arrival_date'),
+    ('v_ai_purchase_receipt', ('入荷数量', '入荷数'), 'qty'),
+    ('v_ai_purchase_receipt', ('仕入先', '外作先'), 'supplier_id'),
+)
+SHIP_TO_TERMS, CUSTOMER_TERMS = TERM_COLUMNS[0][1], TERM_COLUMNS[1][1]
+
+
+def term_guide_text(ask_user=False):
+    """AI(分析案・相談)へ渡す、言葉と列の対応表の文面。ask_user=True(相談)は、文脈で決められない「納入先」を、利用者に確認させる。"""
+    items = ' / '.join(f"{'・'.join(terms)}={column}" for _view, terms, column in TERM_COLUMNS)
+    return (
+        f'言葉と列の対応: {items}。'
+        '「納入先」は対応表にない。'
+        + ('文脈から、顧客(customer_code)か納入場(ship_to_code)かが決められないときは、利用者に確認する。' if ask_user
+           else '目的や文脈から、顧客(customer_code)か納入場(ship_to_code)かを判断する。')
+    )
+
+
+def column_warnings(purpose, proposal):
+    """分析案の、目的の言葉と取得する列・手順の食い違いを、警告の文で返す(機械的な検査。AIの出力を直さず、承認前に利用者へ見せる)。"""
+    datasets = proposal['datasets']
+    warnings = []
+    for view, terms, column in TERM_COLUMNS:
+        term = next((item for item in terms if item in purpose), None)
+        if term is None:
+            continue
+        related = [d for d in datasets if column in BASE_SQL_SCHEMA[d['view']] and (view is None or d['view'] == view)]
+        if related and not any(column in d['fields'] for d in related):
+            warnings.append(f'目的の「{term}」に対応する列 {column} が、取得する列に含まれていません。手順が別の列を使っていないか確認してください。')
+    text = ' '.join([*proposal['steps'], *proposal['outputs']])
+    ship_to, customer = any(t in purpose for t in SHIP_TO_TERMS), any(t in purpose for t in CUSTOMER_TERMS)
+    if ship_to and not customer and 'customer_code' in text and 'ship_to_code' not in text:
+        warnings.append('目的は納入場(納入地)ですが、手順・出力に customer_code(得意先・顧客のコード)が使われています。集計の列が違う可能性があります(納入場はship_to_code)。')
+    if customer and not ship_to and 'ship_to_code' in text and 'customer_code' not in text:
+        warnings.append('目的は顧客(得意先)ですが、手順・出力に ship_to_code(納入場のコード)が使われています。集計の列が違う可能性があります(顧客はcustomer_code)。')
+    return warnings
 
 
 # 重複・欠落の確認に必要な管理列。分析用コンテナへ必ず送る(BOSS承認 2026-10-03)。社外AIには、値を送らない。
