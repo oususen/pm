@@ -452,6 +452,8 @@ const supplierRows = (material) =>
     ? suppliers
     : suppliers.filter((supplier) => supplier.code === "MEISEI");
 const entries = ref({});
+// 現在の開始週でDBに保存済みの「材料ID:必要日」。全項目0でも保存対象にして0へ更新するため。
+const savedOrderKeys = ref(new Set());
 const initials = ref({});
 const showOrder = ref(true);
 const saving = ref(false);
@@ -739,6 +741,9 @@ const load = async () => {
   orderStartDate.value = firstApproval?.context?.lock_start_date || defaultOrderStart();
   orderEndDate.value = firstApproval?.context?.lock_end_date || defaultOrderEnd();
   const next = {};
+  savedOrderKeys.value = new Set(
+    (orders.data.items || []).map((item) => `${item.material_id}:${item.required_date}`),
+  );
   const applyOrderItem = (item, target) => {
     const k = `${item.material_id}:${item.required_date}`;
     const value = target[k] || { sato_sheets: 0, meisei_sheets: 0 };
@@ -791,7 +796,11 @@ const buildMaterialOrderItems = (saveDates = props.dates) =>
         sato_sheets: Number(entry(material, required_date).sato_sheets || 0),
         meisei_sheets: Number(entry(material, required_date).meisei_sheets || 0),
       }))
-      .filter((item) => item.required_sheets > 0 || item.sato_lots || item.meisei_lots || item.sato_sheets || item.meisei_sheets),
+      // 保存済みの行は、手数を0に戻した場合も送って0へ更新する。
+      .filter((item) =>
+        item.required_sheets > 0 || item.sato_lots || item.meisei_lots || item.sato_sheets || item.meisei_sheets ||
+        savedOrderKeys.value.has(`${item.material_id}:${item.required_date}`),
+      ),
   );
 const buildInitialItems = () =>
   props.materials.map((material) => ({
