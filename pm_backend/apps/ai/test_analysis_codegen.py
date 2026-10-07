@@ -320,8 +320,8 @@ class PayloadTest(CodegenBase):
         plan = self.new_plan()
         messages = cg.build_messages(plan, external=True)
         text = json.dumps(messages, ensure_ascii=False)
-        self.assertNotIn('ＳＥＣＲＥＴ', text)  # 目的文・題名・手順・出力案のすべてで、置換されている
-        for fragment in ('CODE-目的', 'CODE-題名', 'CODE-手順1', 'CODE-出力'):
+        self.assertNotIn('ＳＥＣＲＥＴ', text)  # 目的文・手順・出力案のすべてで、置換されている(題名は、そもそも送らない)
+        for fragment in ('CODE-目的', 'CODE-手順1', 'CODE-出力'):
             self.assertIn(fragment, text)
         self.assertNotIn('2724', text)  # 承認件数は送らない
         self.assertNotIn('498', text)
@@ -331,6 +331,17 @@ class PayloadTest(CodegenBase):
         columns = {d['view']: [c['name'] for c in d['columns']] for d in payload['datasets']}
         self.assertEqual(columns['v_ai_shipment'], DATASETS[0]['fields'])  # 列名と型だけ(idの値は、そもそも持たない)
         self.assertTrue(all('type' in c for d in payload['datasets'] for c in d['columns']))
+
+    def test_the_title_is_never_sent_to_the_ai(self):
+        # 題名は、画面に表示する名前で、コードを作るのに要らない。小さいモデルが、題名の顧客コードをタイトルへ写して、直書きで失敗したため(BOSS承認 2026-10-07)
+        for external in (False, True):
+            plan = self.new_plan(provider='deepseek' if external else 'qwen', model='m')
+            messages = cg.build_messages(plan, external=external)
+            payload = json.loads(messages[1]['content'])
+            self.assertNotIn('title', payload)
+            self.assertEqual(set(payload), {'purpose', 'steps', 'outputs', 'date_from', 'date_to', 'datasets'})
+            text = json.dumps(messages, ensure_ascii=False)
+            self.assertNotIn('ＳＥＣＲＥＴ題名', text); self.assertNotIn('CODE-題名', text)
 
     def test_local_qwen_payload_is_not_redacted_and_needs_no_confirmation(self):
         plan = self.new_plan(provider='qwen', model='local')
@@ -969,7 +980,9 @@ class ParameterGenerationTest(CodegenBase):
                     self.assertEqual(state['status'], 'failed')
                     self.assertEqual(state['attempts'], 1)
                     self.assertNotIn('template_source', state)
-                    self.assertEqual(state['reasons'], [reason])
+                    # 主な理由のあとに、原因ごとの固定コードが続く(parameters_invalidのとき)。ほかの理由は、従来どおり1つだけ
+                    self.assertEqual(state['reasons'][0], reason)
+                    self.assertEqual(len(state['reasons']), 2 if reason == 'parameters_invalid' else 1)
 
     def test_the_names_of_undeclared_and_unused_variables_are_reported_as_plain_identifiers(self):
         s = lambda query: [{'name': 'w_daily', 'query': query}]

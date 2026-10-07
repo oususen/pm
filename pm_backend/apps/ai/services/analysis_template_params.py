@@ -29,6 +29,16 @@ PERIOD_FROM, PERIOD_TO = 'period_from', 'period_to'
 DEFINITION_KEYS = {'name', 'type', 'label', 'default'}
 
 
+class DefinitionError(AnalysisError):
+    """変数の定義の不備(BOSS承認 2026-10-07)。画面へ出す固定の理由コード(reasons)と、該当する変数の名前(names: 理由→識別子の一覧)を持つ。AIの自由な文章は持たない。"""
+
+    def __init__(self, detail, reason, names=()):
+        super().__init__(detail)
+        self.reasons = [reason]
+        clean = sorted({name for name in names if type(name) is str and NAME_PATTERN.fullmatch(name)})
+        self.names = {reason: clean} if clean else {}
+
+
 def _exists_product(value):
     from masters.models import Product
     try:
@@ -67,49 +77,49 @@ TYPES = {
 }
 
 
-def _check_value(type_name, value):
+def _check_value(type_name, value, name=None):
     """1つの値の形式と実在。日付は、形式の確認だけ(期間は、組で別に確認する)。"""
     if type_name == 'date':
         try:
             if type(value) is not str or date.fromisoformat(value).isoformat() != value:
                 raise ValueError()
         except ValueError:
-            raise AnalysisError('日付はYYYY-MM-DDで指定してください。') from None
+            raise DefinitionError('日付はYYYY-MM-DDで指定してください。', 'parameters_def_date', [name]) from None
         return value
     if type(value) is not str or not CODE_VALUE_PATTERN.fullmatch(value):
-        raise AnalysisError('コードは英数字・アンダースコア・ハイフンだけで指定してください。')
+        raise DefinitionError('コードは英数字・アンダースコア・ハイフンだけで指定してください。', 'parameters_def_value', [name])
     if not TYPES[type_name]['exists'](value):
-        raise AnalysisError(f"{TYPES[type_name]['label']}が登録されていません。")
+        raise DefinitionError(f"{TYPES[type_name]['label']}が登録されていません。", 'parameters_def_unregistered', [name])
     return value
 
 
 def validate_definitions(parameters):
     """変数の定義(保存時)。[{name, type, label, default}]。期間は period_from・period_to を組で、種類は日付。"""
     if not isinstance(parameters, list):
-        raise AnalysisError('変数の定義の形式が不正です。')
+        raise DefinitionError('変数の定義の形式が不正です。', 'parameters_def_format')
     seen = set()
     cleaned = []
     for item in parameters:
         if not isinstance(item, dict) or set(item) != DEFINITION_KEYS:
-            raise AnalysisError('変数の定義の形式が不正です。')
+            raise DefinitionError('変数の定義の形式が不正です。', 'parameters_def_format', [item.get('name') if isinstance(item, dict) else None])
         name, type_name, label = item['name'], item['type'], item['label']
         if type(name) is not str or not NAME_PATTERN.fullmatch(name) or name in seen:
-            raise AnalysisError('変数の名前が不正、または重複しています(英小文字・数字・アンダースコア)。')
+            raise DefinitionError('変数の名前が不正、または重複しています(英小文字・数字・アンダースコア)。', 'parameters_def_name', [name])
         seen.add(name)
         if type(type_name) is not str or type_name not in TYPES:
-            raise AnalysisError('変数の種類が不正です。')
+            raise DefinitionError('変数の種類が不正です。', 'parameters_def_type', [name])
         if type(label) is not str or not label.strip():
-            raise AnalysisError('変数のラベルを指定してください。')
+            raise DefinitionError('変数のラベルを指定してください。', 'parameters_def_label', [name])
         if name in (PERIOD_FROM, PERIOD_TO) and type_name != 'date':
-            raise AnalysisError('period_from・period_toは、種類を日付にしてください。')
+            raise DefinitionError('period_from・period_toは、種類を日付にしてください。', 'parameters_def_type', [name])
         if type_name == 'date' and not DATE_NAME_PATTERN.fullmatch(name):
-            raise AnalysisError('日付の変数の名前は、「名前_from」と「名前_to」の組にしてください。')
+            raise DefinitionError('日付の変数の名前は、「名前_from」と「名前_to」の組にしてください。', 'parameters_def_name', [name])
         cleaned.append({'name': name, 'type': type_name, 'label': label.strip(), 'default': item['default']})
     for item in cleaned:  # 日付の変数は、開始(_from)と終了(_to)を組で
         if item['type'] == 'date':
             base, partner = _date_partner(item['name'])
             if partner not in seen or next(c for c in cleaned if c['name'] == partner)['type'] != 'date':
-                raise AnalysisError('日付の変数は、「名前_from」と「名前_to」を組で指定してください。')
+                raise DefinitionError('日付の変数は、「名前_from」と「名前_to」を組で指定してください。', 'parameters_def_pair', [item['name']])
     resolve_values(cleaned, {})  # 元の値(既定値)の形式・実在の確認
     return cleaned
 
@@ -134,18 +144,27 @@ def resolve_values(definitions, supplied, outer=None):
         raise AnalysisError('定義にない変数は指定できません。')
     values = {}
     for item in definitions:
-        values[item['name']] = _check_value(item['type'], supplied.get(item['name'], item['default']))
+        values[item['name']] = _check_value(item['type'], supplied.get(item['name'], item['default']), item['name'])
     if PERIOD_FROM in values:
-        validate_period(values[PERIOD_FROM], values[PERIOD_TO])
+        _check_order(values[PERIOD_FROM], values[PERIOD_TO], [PERIOD_FROM, PERIOD_TO])
         outer = (values[PERIOD_FROM], values[PERIOD_TO])
     for item in definitions:
         if item['type'] != 'date' or not item['name'].endswith('_from') or item['name'] == PERIOD_FROM:
             continue
-        start, end = values[item['name']], values[_date_partner(item['name'])[1]]
-        validate_period(start, end)  # 開始日が終了日以前
+        partner = _date_partner(item['name'])[1]
+        start, end = values[item['name']], values[partner]
+        _check_order(start, end, [item['name'], partner])  # 開始日が終了日以前
         if outer is not None and not (outer[0] <= start and end <= outer[1]):
-            raise AnalysisError('比べる期間は、全体の期間の中に収めてください。')
+            raise DefinitionError('比べる期間は、全体の期間の中に収めてください。', 'parameters_def_outside', [item['name'], partner])
     return values
+
+
+def _check_order(start, end, names):
+    """開始日が終了日以前であること(形式は、確認済みの値)。"""
+    try:
+        validate_period(start, end)
+    except AnalysisError:
+        raise DefinitionError('開始日は、終了日以前にしてください。', 'parameters_def_order', names) from None
 
 
 def placeholder_names(steps, python):
@@ -184,19 +203,19 @@ def normalize_definitions(raw, date_from, date_to):
     各項目は name・type・label(品番などは default も)だけ。形式・種類・値の実在は、validate_definitions が確認する。
     """
     if not isinstance(raw, list) or not raw:
-        raise AnalysisError('変数の一覧の形式が不正です。')
+        raise DefinitionError('変数の一覧の形式が不正です。', 'parameters_def_format')
     periods = {PERIOD_FROM: date_from, PERIOD_TO: date_to}
     definitions = []
     for item in raw:
         if not isinstance(item, dict) or not {'name', 'type', 'label'} <= set(item) <= DEFINITION_KEYS:
-            raise AnalysisError('変数の定義の形式が不正です。')
+            raise DefinitionError('変数の定義の形式が不正です。', 'parameters_def_format', [item.get('name') if isinstance(item, dict) else None])
         name = item['name']
         if type(name) is not str:
-            raise AnalysisError('変数の名前の形式が不正です。')
+            raise DefinitionError('変数の名前の形式が不正です。', 'parameters_def_name')
         if name in periods:
             definitions.append({**item, 'default': periods[name]})
         elif 'default' not in item:
-            raise AnalysisError('変数の元の値(default)がありません。')
+            raise DefinitionError('変数の元の値(default)がありません。', 'parameters_def_default', [name])
         else:
             definitions.append(dict(item))
     cleaned = validate_definitions(definitions)

@@ -268,6 +268,24 @@ const FAILURE_LABELS = Object.freeze({
   parameters_unused: '宣言した変数が、コードで使われていません。',
   parameters_quoted: '変数の前後に引用符が付いています({{名前}} だけを書くと、値が引用符つきで入ります)。',
   parameters_literal: '固定の値(日付・品番などの元の値)が、コードに直接書かれています。変数を使う必要があります。',
+  parameters_def_format: '変数の定義の形式が正しくありません。',
+  parameters_def_name: '変数の名前が正しくありません(英小文字・数字・アンダースコア。日付は「名前_from」「名前_to」の形)。',
+  parameters_def_type: '変数の種類が正しくありません。',
+  parameters_def_label: '変数のラベルがありません。',
+  parameters_def_default: '変数の元の値(default)がありません。',
+  parameters_def_pair: '日付の変数が、「名前_from」と「名前_to」の組になっていません。',
+  parameters_def_date: '日付の形が正しくありません(YYYY-MM-DD)。',
+  parameters_def_value: '品番・顧客コード・納入先コードの値の形が正しくありません(英数字・アンダースコア・ハイフン)。',
+  parameters_def_unregistered: '登録されていない品番・顧客コード・納入先コードです。',
+  parameters_def_order: '比べる期間の開始日が、終了日より後です。',
+  parameters_def_outside: '比べる期間が、全体の期間の外です。',
+  python_syntax_after_substitution: '変数を値に置き換えたあとで、構文が壊れました(Pythonの文字列の中に変数を書くと、引用符がぶつかります)。',
+  python_syntax_in_source: '変数を置き換える前から、構文に誤りがあります。',
+  python_syntax_string: '構文の種類: 文字列が閉じていません。',
+  python_syntax_bracket: '構文の種類: 括弧が閉じていない、または余分です。',
+  python_syntax_indent: '構文の種類: 字下げ(インデント)が正しくありません。',
+  python_syntax_character: '構文の種類: 使えない文字があります。',
+  python_syntax_other: '構文の種類: 文法の誤りです。',
   parameters_literal_sql: '場所: SQL(中間テーブルの問い合わせ)',
   parameters_literal_python: '場所: Python(グラフ・表のタイトルや文字列を含む)',
   parameters_literal_date: '種類: 日付(YYYY-MM-DD)',
@@ -318,7 +336,12 @@ const variableNames = reason => {
   const names = codegen.value?.reason_names?.[reason]
   return Array.isArray(names) ? names.filter(name => typeof name === 'string' && /^[a-z][a-z0-9_]*$/.test(name)) : []
 }
-const NAMED_REASONS = Object.freeze({ parameters_undeclared: '宣言されていない変数', parameters_unused: '使われていない変数' })
+const NAMED_REASONS = Object.freeze({
+  parameters_undeclared: '宣言されていない変数', parameters_unused: '使われていない変数',
+  parameters_def_format: '該当する変数', parameters_def_name: '該当する変数', parameters_def_type: '該当する変数', parameters_def_label: '該当する変数',
+  parameters_def_default: '該当する変数', parameters_def_pair: '該当する変数', parameters_def_date: '該当する変数', parameters_def_value: '該当する変数',
+  parameters_def_unregistered: '該当する変数', parameters_def_order: '該当する変数', parameters_def_outside: '該当する変数',
+})
 const codeFailureLabels = computed(() => [...new Set((Array.isArray(codegen.value?.reasons) ? codegen.value.reasons : []).map(reason => {
   const names = Object.hasOwn(NAMED_REASONS, reason) ? variableNames(reason) : []
   return names.length ? `${failureLabel(reason)}（${NAMED_REASONS[reason]}: ${names.join('、')}）` : failureLabel(reason)

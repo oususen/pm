@@ -932,6 +932,31 @@ test('宣言されなかった変数・使われない変数の名前を、失�
   } finally { f.stop() }
 })
 
+test('変数の定義・Pythonの構文の失敗を、原因ごとの固定文で表示し、該当する変数の名前を添える(識別子の形だけ)', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    const failed = (reasons, reason_names) => ({ ...dataPlan('qwen'), codegen: { status: 'failed', attempts: 1, reasons, ...(reason_names ? { reason_names } : {}) }, codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null } })
+    const labels = [['parameters_def_name', '変数の名前が正しくありません'], ['parameters_def_type', '変数の種類が正しくありません'], ['parameters_def_label', 'ラベルがありません'],
+      ['parameters_def_default', '元の値(default)がありません'], ['parameters_def_pair', '組になっていません'], ['parameters_def_date', '日付の形が正しくありません'],
+      ['parameters_def_value', '値の形が正しくありません'], ['parameters_def_unregistered', '登録されていない品番'], ['parameters_def_order', '開始日が、終了日より後'],
+      ['parameters_def_outside', '全体の期間の外'], ['parameters_def_format', '定義の形式が正しくありません'],
+      ['python_syntax_after_substitution', '置き換えたあとで、構文が壊れました'], ['python_syntax_in_source', '置き換える前から、構文に誤り'],
+      ['python_syntax_string', '文字列が閉じていません'], ['python_syntax_bracket', '括弧が閉じていない'], ['python_syntax_indent', '字下げ'],
+      ['python_syntax_character', '使えない文字'], ['python_syntax_other', '文法の誤り']]
+    for (const [reason, part] of labels) {
+      f.state.plan.value = failed(['parameters_invalid', reason])
+      assert.ok((await html()).includes(part), reason)
+    }
+    f.state.plan.value = failed(['parameters_invalid', 'parameters_def_outside'], { parameters_def_outside: ['b_from', 'b_to', '<img src=x onerror=SECRET>', 'Upper'] })
+    let text = await html()
+    assert.ok(text.includes('全体の期間の外です。（該当する変数: b_from、b_to）'))
+    assert.equal(text.includes('SECRET'), false); assert.equal(text.includes('Upper'), false)
+    f.state.plan.value = failed(['parameters_invalid', 'parameters_def_type'], { parameters_def_outside: ['b_from'] })
+    assert.equal((await html()).includes('b_from'), false)  // 理由と無関係な名前は、出さない
+  } finally { f.stop() }
+})
+
 test('目的の言葉と列の食い違いの警告を②に表示し(本文はエスケープ)、警告がなければ表示しない。承認は妨げない', async () => {
   const f = await setup('qwen')
   try {

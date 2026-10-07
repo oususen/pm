@@ -4,10 +4,11 @@
       試行実行(実DBなし、空のテーブルでSQLだけ) → 利用者がコードを確認して承認(画面は2-C)。
 
 - 生成物は、Redisの分析案(`plan['codegen']`)の中だけに保持する。DBには保存しない(履歴にはハッシュと件数だけ)。有効期限は分析案と同じで、延長しない。
-- 外部AIへ送る内容は、実データ・id値・承認件数・利用者名を含まない。自由記述(目的文・タイトル・手順・出力案)は、登録名称をコードへ置換する。
+- 外部AIへ送る内容は、実データ・id値・承認件数・利用者名を含まない。自由記述(目的文・手順・出力案。題名は送らない)は、登録名称をコードへ置換する。
 - 送信確認は、利用者・分析案・版・AI・モデル・何回目の生成か・送信内容全体に結び付ける。分析案の版が上がる(生成を始める)と、確認は無効になる。
 - 「生成中」が残っても、自動で再送せず、期限を延長せず、状態不明として表示する。解除は、利用者の明示の操作だけで、生成回数は戻さない。
 """
+import ast
 import hashlib
 import json
 from dataclasses import dataclass
@@ -60,6 +61,24 @@ PRODUCT_RULE_CODE = (
     '(製品名だけで集計しない。同じ名前で品番が違う製品があるため)。グラフのラベルにも、品番を含める。'
 )
 
+# 期間を分けて比べる分析の、返すJSONの例(BOSS承認 2026-10-07。DeepSeek Flashの成功した案の形)。小さいモデルが、変数を宣言して使わない・期間ごとの集計をJOINで取り違える、
+# という失敗をしたため、1つの手順でCASE WHENにより期間にラベルを付けて集計し、次の手順でSUM(CASE WHEN ...)により横に並べる形を見せる。
+# 実際のDuckDBと検査で動くことを確認済み。テスト(test_analysis_multi_period)が、この例を、実際の生成と同じ検査に通す
+PERIOD_EXAMPLE = {
+    "steps": [
+        {"name": "w_period_totals", "query": "SELECT product_code, product_name, CASE WHEN shipment_date BETWEEN {{a_from}} AND {{a_to}} THEN 'a' WHEN shipment_date BETWEEN {{b_from}} AND {{b_to}} THEN 'b' END AS period, SUM(quantity) AS qty FROM v_ai_shipment WHERE shipment_date BETWEEN {{a_from}} AND {{a_to}} OR shipment_date BETWEEN {{b_from}} AND {{b_to}} GROUP BY product_code, product_name, period"},
+        {"name": "w_compare", "query": "SELECT product_code, product_name, SUM(CASE WHEN period = 'a' THEN qty ELSE 0 END) AS a_qty, SUM(CASE WHEN period = 'b' THEN qty ELSE 0 END) AS b_qty FROM w_period_totals GROUP BY product_code, product_name"},
+    ],
+    "python": "rows = con.sql(\"SELECT product_code, product_name, a_qty, b_qty, b_qty - a_qty FROM w_compare ORDER BY ABS(b_qty - a_qty) DESC LIMIT 5\").fetchall()\nlabels = [code + ' ' + name for code, name, a, b, diff in rows]\nvalues = [float(diff) for code, name, a, b, diff in rows]\nemit_chart('bar', '期間の比較（増減量）', labels, [{'name': '増減量', 'values': values}])\nemit_table('期間の比較', ['品番', '製品名', '前の期間', '後の期間', '増減量'], [[code, name, float(a), float(b), float(diff)] for code, name, a, b, diff in rows])",
+    "parameters": [
+        {"name": "a_from", "type": "date", "label": "前の期間の開始日", "default": "2026-08-01"},
+        {"name": "a_to", "type": "date", "label": "前の期間の終了日", "default": "2026-08-31"},
+        {"name": "b_from", "type": "date", "label": "後の期間の開始日", "default": "2026-09-01"},
+        {"name": "b_to", "type": "date", "label": "後の期間の終了日", "default": "2026-09-30"},
+    ],
+}
+
+
 # 変数(BOSS承認 2026-10-06、段階2-B): 期間・品番・顧客コード・納入先コードの固定値は、{{名前}}で書き、使った変数を parameters で返す
 PARAMETER_RULE = (
     'テンプレートとして再利用できるよう、期間・品番・顧客コード・納入先コードの固定の値(日付・コード)は、SQL・Pythonに直接書かず、{{名前}} の形で書く。'
@@ -72,6 +91,10 @@ PARAMETER_RULE = (
     '期間を分けて比べる分析(月ごとの比較・前半と後半・週ごとなど)では、比べる期間ごとに、「名前_from」と「名前_to」の2つの日付の変数(type は date)を作り、それぞれの期間の集計の条件に使う'
     '(例: 8月と9月を比べるなら aug_from・aug_to と sep_from・sep_to を作り、8月の集計に WHERE shipment_date BETWEEN {{aug_from}} AND {{aug_to}}、9月の集計に WHERE shipment_date BETWEEN {{sep_from}} AND {{sep_to}})。'
     '全体の期間 {{period_from}}・{{period_to}} を、比べる2つの期間の両方に、そのまま使わない(同じ期間どうしを比べることになる)。'
+    'Pythonの中には、{{名前}} を書かない。値が必要なときは、SQLの手順の中で {{名前}} を使い、結果の列として取り出して使う'
+    '(Pythonの文字列の中に値が入ると、引用符がぶつかって、構文が壊れる)。'
+    '期間を分けて比べる分析の、返すJSONの例(出荷の場合。default の日付は、この例の値で、実際は、目的・手順から読み取る): ' + json.dumps(PERIOD_EXAMPLE, ensure_ascii=False) + '。この形(1つの手順で、CASE WHEN により期間にラベルを付けて集計し、次の手順で、SUM(CASE WHEN ...) により期間を横に並べる)に従う。'
+    '期間ごとに別の集計を作り、JOIN で結合する形は、条件を取り違えやすいので使わない。宣言した変数は、すべて、最初の集計の条件で使う。'
     '比べる期間の変数は、parameters の default に、目的・手順から読み取った日付(YYYY-MM-DD)を書く。比べる期間は、全体の期間の中に入れ、開始日は終了日以前にする。'
     'type は date(period_from・period_toと、比べる期間の「名前_from」「名前_to」だけ。period_from・period_toの default は不要。比べる期間の default は必要)、product_code、customer_code、ship_to_code のいずれか。名前は英小文字・数字・アンダースコア。'
     '使った変数は、すべて parameters に書き、parameters に書いた変数は、すべてコードで使う。変数を使わないなら、parameters は返さない。'
@@ -84,7 +107,8 @@ SYSTEM_PROMPT = (
     '返すのはJSONのみ。形式は {"steps": [{"name": "w_中間テーブル名", "query": "SELECT または WITH で始まる問い合わせ1つ"}], "python": "Pythonのコード"}。'
     '分析できない・必要なデータが足りない場合は、近似の別分析を作らず {"unsupported": "理由"} を返す。'
     'SQLの規則: 各stepは「中間テーブル名」と「SELECT/WITHの問い合わせ」だけ。INSERT・UPDATE・DELETE・DROP・CREATEは書かない'
-    '(実行側が CREATE TABLE <name> AS <query> を組み立てる)。名前は w_ で始まる英小文字・数字・アンダースコア。'
+    '(実行側が CREATE TABLE <name> AS <query> を組み立てる)。問い合わせは、ただのSELECTで書く。中間テーブルと同じ名前のWITHで、問い合わせ全体を包まない'
+    '(WITH w_x AS (...) SELECT * FROM w_x のような書き方は、不要)。名前は w_ で始まる英小文字・数字・アンダースコア。'
     '参照できるのは承認済みビューと、先のstepで作った中間テーブルだけ。システムテーブル・メタデータ関数・ファイルを読む関数は使えない。'
     'Pythonの規則: 使えるのは con.sql(問い合わせ) / con.execute(問い合わせ) / load_view(ビュー名) と、'
     'emit_table(名前, 列名のリスト, 行のリスト) / emit_chart(種類, タイトル, x, [{"name":..,"values":[..]}]) / emit_report(文章)。'
@@ -200,15 +224,19 @@ def parse_response(raw):
 # ---- 送信内容 ----
 
 def _redacted_free_text(plan, external):
-    """AIが作ったタイトル・手順・出力案と、利用者の目的文。外部AIへは、登録名称をコードへ置換して送る。"""
+    """AIが作った手順・出力案と、利用者の目的文。外部AIへは、登録名称をコードへ置換して送る。
+
+    題名(title)は送らない(BOSS承認 2026-10-07)。画面に表示する名前で、コードを作るのに要らない。小さいモデルが、題名の顧客コードを、グラフ・表のタイトルへ写して、
+    固定の値の直書きで失敗したため。
+    """
     proposal = plan['proposal']
     purpose = proposal.get('external_purpose') if external else proposal['purpose']
-    values = {'purpose': purpose, 'title': proposal['title'], 'steps': list(proposal['steps']), 'outputs': list(proposal['outputs'])}
+    values = {'purpose': purpose, 'steps': list(proposal['steps']), 'outputs': list(proposal['outputs'])}
     if not external:
         return values
     redactor = build_analysis_code_redactor()
     return {
-        'purpose': redactor.redact_text(values['purpose']), 'title': redactor.redact_text(values['title']),
+        'purpose': redactor.redact_text(values['purpose']),
         'steps': [redactor.redact_text(text) for text in values['steps']],
         'outputs': [redactor.redact_text(text) for text in values['outputs']],
     }
@@ -329,6 +357,34 @@ def _finish(store, plan_id, owner_id, attempt_id, apply):
     raise AnalysisError('分析案が頻繁に更新されているため、生成結果を保存できませんでした。', 409)
 
 
+# Pythonの構文の誤りの種類(固定コード)。CPythonのエラー文の先頭で分類する(AIの文字は返さない)
+SYNTAX_KINDS = (
+    (('unterminated string literal', 'unterminated triple-quoted string literal'), 'python_syntax_string'),
+    (('unmatched', 'was never closed', 'closing parenthesis'), 'python_syntax_bracket'),
+    (('unexpected indent', 'expected an indented block', 'unindent does not match'), 'python_syntax_indent'),
+    (('invalid character', 'invalid non-printable character'), 'python_syntax_character'),
+)
+
+
+def _syntax_details(python, source):
+    """Pythonの構文の誤りの、原因ごとの固定コード。変数を使ったコードでは、置き換え前の形から誤りか、置き換えで壊れたか(引用符の衝突など)を区別する。"""
+    codes = []
+    if source is not None:
+        try:
+            ast.parse(template_params.PLACEHOLDER_PATTERN.sub('None', source['python']))
+            codes.append('python_syntax_after_substitution')
+        except (SyntaxError, ValueError, RecursionError, MemoryError):  # 極端な入力(巨大な入れ子など)でも、例外で止めず、「生成中」を残さない
+            codes.append('python_syntax_in_source')
+    try:
+        ast.parse(python)
+    except SyntaxError as exc:
+        message = str(exc.msg or '')
+        codes.append(next((code for prefixes, code in SYNTAX_KINDS if any(message.startswith(p) or p in message for p in prefixes)), 'python_syntax_other'))
+    except (ValueError, RecursionError, MemoryError):
+        codes.append('python_syntax_other')
+    return codes
+
+
 def _apply_parameters(proposal, steps, python, parameters):
     """AIが返した変数の一覧を確認し、元の値を入れた、実行する形のコードにする。(steps, python, template_source, 失敗の理由コード)を返す。
 
@@ -340,7 +396,10 @@ def _apply_parameters(proposal, steps, python, parameters):
     try:
         definitions = template_params.normalize_definitions(parameters, proposal['date_from'], proposal['date_to'])
     except AnalysisError as exc:
-        return steps, python, None, ['parameters_unavailable' if exc.status_code == 503 else 'parameters_invalid'], {}
+        if exc.status_code == 503:
+            return steps, python, None, ['parameters_unavailable'], {}
+        # 主な理由のあとに、原因ごとの固定コードと、該当する変数の名前を続ける(AIの自由な文章は返さない)
+        return steps, python, None, ['parameters_invalid', *getattr(exc, 'reasons', [])], dict(getattr(exc, 'names', {}))
     except (TypeError, KeyError, ValueError, AttributeError):
         # AIが想定外の形(型違い)を返したとき。例外で止めると「生成中」が残るため、固定の理由コードにする(AIの内容は、ログ・応答に出さない)
         return steps, python, None, ['parameters_invalid'], {}
@@ -351,8 +410,12 @@ def _apply_parameters(proposal, steps, python, parameters):
         concrete_steps, concrete_python = template_params.concrete_code(steps, python, template_params.resolve_values(
             definitions, {}, outer=(proposal['date_from'], proposal['date_to'])))
     except AnalysisError as exc:
-        return (steps, python, None, ['parameters_unavailable'], {}) if exc.status_code == 503 else (
-            steps, python, None, list(getattr(exc, 'reasons', ['parameters_source_invalid'])), dict(getattr(exc, 'names', {})))
+        if exc.status_code == 503:
+            return steps, python, None, ['parameters_unavailable'], {}
+        reasons = list(getattr(exc, 'reasons', ['parameters_source_invalid']))
+        if isinstance(exc, template_params.DefinitionError):  # 変数の定義の不備は、最初の確認と同じ形(parameters_invalidのあとに、原因の固定コード)
+            reasons = ['parameters_invalid', *reasons]
+        return steps, python, None, reasons, dict(getattr(exc, 'names', {}))
     except (TypeError, KeyError, ValueError, AttributeError):
         return steps, python, None, ['parameters_source_invalid'], {}
     return concrete_steps, concrete_python, {'steps': steps, 'python': python, 'parameters': definitions}, [], {}
@@ -418,6 +481,8 @@ def generate(owner_id, plan_id, revision, confirmation=None):
                 names = {'parameters_undeclared': undeclared} if undeclared else {}
             if not reasons:
                 reasons += validate_generated(steps, python, approved_views)  # 変数があれば、値を入れた、実行する形を検査する
+                if 'python:syntax_error' in reasons:
+                    reasons += _syntax_details(python, source)
 
     def finish(codegen_state):
         history = codegen_state.get('history', []) + [{'attempt': attempt_no, 'at': datetime.now().isoformat(), 'reasons': reasons, **({'names': names} if names else {})}]

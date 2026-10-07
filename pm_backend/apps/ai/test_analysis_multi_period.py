@@ -181,7 +181,7 @@ class GenerationTests(CodegenBase):
                 plan = self.new_plan()
                 self.generate(plan, period_response(parameters))
                 state = self.current(plan)['codegen']
-                self.assertEqual((state['status'], state['reasons']), ('failed', ['parameters_invalid']))
+                self.assertEqual((state['status'], state['reasons'][0], len(state['reasons'])), ('failed', 'parameters_invalid', 2))
                 self.assertNotIn('template_source', state)
 
     def test_the_instruction_explains_the_compared_periods(self):
@@ -189,6 +189,43 @@ class GenerationTests(CodegenBase):
         for part in ('期間を分けて比べる分析', '「名前_from」と「名前_to」の2つの日付の変数', 'aug_from・aug_to と sep_from・sep_to',
                      '比べる2つの期間の両方に、そのまま使わない', '比べる期間の default は必要', '全体の期間の中に入れ'):
             self.assertIn(part, rule)
+
+
+class ExampleTests(CodegenBase):
+    """指示に入れた、期間を分けて比べる分析の見本(DeepSeekの案の形。BOSS承認 2026-10-07)。見本そのものが、実際の生成と同じ検査に通ること。"""
+
+    def example_response(self, dates=None):
+        example = json.loads(json.dumps(cg.PERIOD_EXAMPLE))
+        dates = dates or {'a_from': '2026-01-01', 'a_to': '2026-01-15', 'b_from': '2026-01-16', 'b_to': '2026-01-31'}  # テストの分析案の期間(1月)の中に収める
+        for item in example['parameters']:
+            item['default'] = dates[item['name']]
+        return json.dumps(example, ensure_ascii=False)
+
+    def test_the_example_passes_the_same_checks_as_a_real_generation(self):
+        plan = self.new_plan()
+        self.generate(plan, self.example_response())
+        state = self.current(plan)['codegen']
+        self.assertEqual((state['status'], state.get('reasons')), ('generated', None))
+        queries = [step['query'] for step in state['steps']]
+        self.assertIn("BETWEEN '2026-01-01' AND '2026-01-15'", queries[0])
+        self.assertIn("BETWEEN '2026-01-16' AND '2026-01-31'", queries[0])  # 1つの手順で、2つの期間を、別々の範囲として使う
+        self.assertEqual([item['name'] for item in state['template_source']['parameters']], ['a_from', 'a_to', 'b_from', 'b_to'])
+
+    def test_every_declared_variable_is_used_and_no_date_is_written_in_the_code(self):
+        example = cg.PERIOD_EXAMPLE
+        code = ' '.join(step['query'] for step in example['steps']) + example['python']
+        for item in example['parameters']:
+            self.assertIn('{{%s}}' % item['name'], code)
+        self.assertFalse(params.DATE_LITERAL_PATTERN.search(code))  # 日付は、parametersのdefaultにだけある
+
+    def test_the_example_is_inside_the_instruction_with_the_two_rules(self):
+        import json as _json
+        rule = cg.PARAMETER_RULE
+        self.assertIn(_json.dumps(cg.PERIOD_EXAMPLE, ensure_ascii=False), rule)
+        for part in ('CASE WHEN により期間にラベルを付けて集計', 'SUM(CASE WHEN ...) により期間を横に並べる', 'JOIN で結合する形は、条件を取り違えやすい',
+                     '宣言した変数は、すべて、最初の集計の条件で使う', 'default の日付は、この例の値で、実際は、目的・手順から読み取る'):
+            self.assertIn(part, rule)
+        self.assertIn('中間テーブルと同じ名前のWITHで、問い合わせ全体を包まない', cg.SYSTEM_PROMPT)
 
 
 def setUpModule():
