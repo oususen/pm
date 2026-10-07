@@ -463,6 +463,36 @@ class GenerationTest(CodegenBase):
             cg.preview(OWNER, plan['id'], plan['revision'])
 
 
+class TemperatureTest(CodegenBase):
+    """分析の温度(AI設定。BOSS承認 2026-10-07)。コード生成は、設定の値でAIを呼び、取得できなければ、回数を数える前に止まる。"""
+
+    def test_the_configured_temperature_is_passed_to_the_ai_call(self):
+        plan = self.new_plan()
+        with patch.object(cg.analysis_llm, 'get_analysis_temperature', return_value=0.0) as get, patch.object(cg, '_call_ai', return_value=GOOD_RESPONSE) as call:
+            cg.generate(OWNER, plan['id'], plan['revision'], self.confirmation_for(plan))
+        get.assert_called_once_with(plan['proposal']['provider'])  # 分析案のプロバイダの設定を読む
+        self.assertEqual(call.call_args.args[3], 0.0)
+
+    def test_an_unavailable_setting_stops_before_counting_and_before_sending(self):
+        plan = self.new_plan()
+        confirmation = self.confirmation_for(plan)
+        with patch.object(cg.analysis_llm, 'get_analysis_temperature', side_effect=AnalysisError('温度を取得できません', 503)), \
+                patch.object(cg, '_call_ai') as call, self.assertRaises(AnalysisError) as caught:
+            cg.generate(OWNER, plan['id'], plan['revision'], confirmation)
+        self.assertEqual(caught.exception.status_code, 503)
+        call.assert_not_called()
+        state = self.current(plan).get('codegen') or {}
+        self.assertEqual((state.get('attempts', 0), state.get('inflight'), state.get('status')), (0, None, None))  # 「生成中」も回数も残らない
+
+    def test_local_qwen_receives_the_temperature_too(self):
+        with patch.object(cg.chat_service, '_chat', return_value='x') as chat, patch.object(cg, 'get_qwen_analysis_timeout', lambda: 90):
+            cg._call_ai('qwen', 'm', [{'role': 'user', 'content': 'a'}], 0.1)
+        self.assertEqual(chat.call_args.kwargs['temperature'], 0.1)
+        with patch.object(cg.analysis_llm, 'request_external_json', return_value='x') as external:
+            cg._call_ai('openrouter', 'm', [{'role': 'user', 'content': 'a'}], 0.2)
+        self.assertEqual(external.call_args.args, ('openrouter', 'm', [{'role': 'user', 'content': 'a'}], 0.2))
+
+
 class InflightTest(CodegenBase):
     def crash_during_generation(self, plan):
         with patch.object(cg, '_call_ai', side_effect=Crash()), self.assertRaises(Crash):
@@ -882,10 +912,6 @@ class ParameterGenerationTest(CodegenBase):
             'parameters_unused': [
                 param_response(parameters=PARAM_DEFS + [{'name': 'second', 'type': 'customer_code', 'label': '別の顧客', 'default': 'C-001'}]),  # 使われない定義
             ],
-            'parameters_literal': [
-                param_response(python=PARAM_PYTHON + "\nx = 'C-001'"),                                         # 元の値が残っている
-                param_response(python=PARAM_PYTHON + "\nd = '2026-03-03'"),                                    # 日付の直書き
-            ],
             'parameters_quoted': [
                 param_response(steps=s(base.replace('{{customer_code}}', "'{{customer_code}}'"))),             # 引用符つき
             ],
@@ -917,6 +943,32 @@ class ParameterGenerationTest(CodegenBase):
                     self.assertEqual(state['attempts'], 1)
                     self.assertNotIn('template_source', state)
                     self.assertEqual(state['reasons'], [reason])
+
+    def test_a_literal_value_reports_where_and_what_with_fixed_codes_only(self):
+        s = lambda query: [{'name': 'w_daily', 'query': query}]
+        base = PARAM_STEPS[0]['query']
+        cases = [
+            # (応答, 期待する理由: 主な理由 → 場所 → 種類)
+            (param_response(python=PARAM_PYTHON + "\nx = 'C-001'"), ['parameters_literal', 'parameters_literal_python', 'parameters_literal_value']),
+            (param_response(python=PARAM_PYTHON + "\nd = '2026-03-03'"), ['parameters_literal', 'parameters_literal_python', 'parameters_literal_date']),
+            (param_response(steps=s(base + " AND product_code = 'C-001'")), ['parameters_literal', 'parameters_literal_sql', 'parameters_literal_value']),
+            (param_response(steps=s(base + " AND shipment_date > '2026-03-03'")), ['parameters_literal', 'parameters_literal_sql', 'parameters_literal_date']),
+            # SQLにもPythonにも、元の値と日付がある: 場所と種類を、すべて出す(重複なし・決まった順)
+            (param_response(steps=s(base + " AND x = 'C-001' AND d > '2026-03-03'"), python=PARAM_PYTHON + "\nx = 'C-001'\nd = '2026-03-03'"),
+             ['parameters_literal', 'parameters_literal_python', 'parameters_literal_sql', 'parameters_literal_date', 'parameters_literal_value']),
+        ]
+        for response, expected in cases:
+            with self.subTest(expected=expected):
+                plan = self.new_plan()
+                self.generate(plan, response)
+                state = self.current(plan)['codegen']
+                self.assertEqual((state['status'], state['reasons']), ('failed', expected))
+                self.assertNotIn('C-001', json.dumps(state['reasons'], ensure_ascii=False))  # 理由に、コードの値・AIの文章は入らない
+
+    def test_the_literal_rule_names_steps_titles_strings_and_comments(self):
+        rule = cg.PARAMETER_RULE
+        for part in ('手順や目的に書かれた値・日付も、そのままコードへ写さない', 'グラフ・表のタイトル、文字列、コメントにも'):
+            self.assertIn(part, rule)
 
     def test_a_malformed_code_shape_with_parameters_is_a_fixed_reason_and_never_a_stuck_generation(self):
         for steps in ('x', [5], [{'name': 'w_a'}], [{'name': 'w_a', 'query': 5}]):
@@ -994,3 +1046,15 @@ class ParameterGenerationTest(CodegenBase):
         stored = self.store.update(plain['id'], OWNER, plain['revision'], lambda current: current['codegen'].update(
             status='code_approved', code_approved_at=datetime.now().isoformat()))
         self.assertEqual(service._fields_from_plan(stored)['parameters'], [])
+
+
+# 分析の温度は、AI設定(DB)から取得する。このモジュールの試験は、DBを使わないため、従来の値(0.3)を返す。温度の取得そのものは、test_analysis_temperature.pyで確認する
+def setUpModule():
+    global _temperature_patch
+    from unittest import mock
+    _temperature_patch = mock.patch('ai.services.analysis_llm.get_analysis_temperature', return_value=0.3)
+    _temperature_patch.start()
+
+
+def tearDownModule():
+    _temperature_patch.stop()

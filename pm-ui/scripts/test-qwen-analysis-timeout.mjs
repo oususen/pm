@@ -12,7 +12,7 @@ assert.deepEqual(compileTemplate({ source: parsed.descriptor.template.content, f
   id: 'qwen-settings-test', compilerOptions: { bindingMetadata: script.bindings } }).errors, [])
 const source = parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '').replace(/\bload\(\)\s*$/, '')
 const create = new Function('ref', 'computed', 'api', 'authState', 'hasPermission', 'setTimeout',
-  `${source}\nreturn {load,providers,saveQwenTimeout,saveProvider,savingQwenTimeout,qwenTimeoutError,qwenTimeoutNotice}`)
+  `${source}\nreturn {load,providers,saveQwenTimeout,saveProvider,savingQwenTimeout,qwenTimeoutError,qwenTimeoutNotice,saveTemperature,temperatureErrors,temperatureNotices}`)
 
 async function setup(canEdit = true, update) {
   const calls = []
@@ -85,4 +85,39 @@ test('保存中の二重送信を防止する', async () => {
   finish({ data: { analysis_plan_timeout_seconds: 180 } })
   await pending
   assert.equal(state.savingQwenTimeout.value, false)
+})
+
+test('分析の温度だけを明示保存する(0〜1。検索・相談の設定は変えない)', async () => {
+  const { state, calls, item } = await setup()
+  item.analysis_temperature = 0
+  await state.saveTemperature(item)
+  assert.deepEqual(calls, [[2, { analysis_temperature: 0 }]])
+  assert.match(state.temperatureNotices.value[2], /次の分析案の作成・コード生成/)
+  item.analysis_temperature = 0.35
+  await state.saveTemperature(item)
+  assert.deepEqual(calls[1], [2, { analysis_temperature: 0.35 }])
+  await state.saveProvider(item)
+  assert.deepEqual(calls[2][1], { is_enabled: true, default_model: item.default_model })  // 温度は、プロバイダ・モデルの保存には混ぜない
+})
+
+test('温度の範囲外・空欄・文字・細かすぎる小数は送信しない', async () => {
+  const { state, calls, item } = await setup()
+  for (const value of [-0.01, 1.01, 2, '', null, '0.3', NaN, 0.123]) {
+    item.analysis_temperature = value
+    await state.saveTemperature(item)
+    assert.match(state.temperatureErrors.value[2], /0〜1/)
+  }
+  assert.equal(calls.length, 0)
+})
+
+test('温度は、閲覧権限だけの場合は保存せず、サーバーの拒否を理由つきで表示する', async () => {
+  const viewer = await setup(false)
+  viewer.item.analysis_temperature = 0
+  await viewer.state.saveTemperature(viewer.item)
+  assert.equal(viewer.calls.length, 0)
+  const rejected = await setup(true, async () => { throw { response: { data: { analysis_temperature: ['0以上1以下の値を入力してください。'] } } } })
+  rejected.item.analysis_temperature = 0.5
+  await rejected.state.saveTemperature(rejected.item)
+  assert.match(rejected.state.temperatureErrors.value[2], /0以上1以下/)
+  assert.equal(rejected.state.temperatureNotices.value[2], '')
 })

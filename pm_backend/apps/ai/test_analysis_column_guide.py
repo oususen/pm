@@ -141,3 +141,15 @@ class PlanIntegrationTests(SimpleTestCase):
         for part in ('納入地・納入場・納入場所=ship_to_code', '顧客・得意先・客先・出荷先=customer_code', '決められないときは、利用者に確認する', 'ship_to_code=納入場(納入地)のコード'):
             self.assertIn(part, prompt)
         self.assertNotIn('納入場(ship_to_code)かを判断する', prompt)  # 判断と確認の指示が並んで、矛盾しない
+
+
+# 分析の温度は、AI設定(DB)から取得する。このモジュールの試験は、DBを使わないため、従来の値(0.3)を返す。温度の取得そのものは、test_analysis_temperature.pyで確認する
+def setUpModule():
+    global _temperature_patch
+    from unittest import mock
+    _temperature_patch = mock.patch('ai.services.analysis_llm.get_analysis_temperature', return_value=0.3)
+    _temperature_patch.start()
+
+
+def tearDownModule():
+    _temperature_patch.stop()

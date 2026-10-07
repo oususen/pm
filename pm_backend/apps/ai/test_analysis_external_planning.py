@@ -287,3 +287,15 @@ class AnalysisCodeRedactorTest(SimpleTestCase):
         for text in ('コード未登録', '未解決作業者'):
             with self.assertRaises(AnalysisError):
                 redactor.redact_text(text)
+
+
+# 分析の温度は、AI設定(DB)から取得する。このモジュールの試験は、DBを使わないため、従来の値(0.3)を返す。温度の取得そのものは、test_analysis_temperature.pyで確認する
+def setUpModule():
+    global _temperature_patch
+    from unittest import mock
+    _temperature_patch = mock.patch('ai.services.analysis_llm.get_analysis_temperature', return_value=0.3)
+    _temperature_patch.start()
+
+
+def tearDownModule():
+    _temperature_patch.stop()

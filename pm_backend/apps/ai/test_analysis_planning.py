@@ -255,3 +255,15 @@ class ManagementColumnPlanningTest(SimpleTestCase):
                           'datasets': [{'view': 'v_ai_shipment', 'fields': ['shipment_date', 'quantity']}]})
         proposal = validate_proposal(raw, '目的', '2026-01-01', '2026-01-31')
         self.assertEqual(proposal['datasets'][0]['fields'][0], 'id')
+
+
+# 分析の温度は、AI設定(DB)から取得する。このモジュールの試験は、DBを使わないため、従来の値(0.3)を返す。温度の取得そのものは、test_analysis_temperature.pyで確認する
+def setUpModule():
+    global _temperature_patch
+    from unittest import mock
+    _temperature_patch = mock.patch('ai.services.analysis_llm.get_analysis_temperature', return_value=0.3)
+    _temperature_patch.start()
+
+
+def tearDownModule():
+    _temperature_patch.stop()

@@ -11,10 +11,11 @@ class AIProviderConfigSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
     models = serializers.SerializerMethodField()
     analysis_plan_timeout_seconds = serializers.IntegerField(min_value=30, max_value=600, required=False)
+    analysis_temperature = serializers.DecimalField(max_digits=3, decimal_places=2, min_value=Decimal('0'), max_value=Decimal('1'), required=False)
 
     class Meta:
         model = AIProviderConfig
-        fields = ('id', 'provider', 'label', 'models', 'default_model', 'is_enabled', 'display_order', 'analysis_plan_timeout_seconds', 'updated_at')
+        fields = ('id', 'provider', 'label', 'models', 'default_model', 'is_enabled', 'display_order', 'analysis_plan_timeout_seconds', 'analysis_temperature', 'updated_at')
         read_only_fields = ('provider', 'label', 'models', 'updated_at')
 
     def get_label(self, obj):

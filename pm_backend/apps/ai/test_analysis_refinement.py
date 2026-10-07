@@ -71,7 +71,7 @@ class RefinementBase(TestCase):
         self.chat_calls.append(messages)
         return json.dumps(PROPOSAL, ensure_ascii=False)
 
-    def fake_external(self, provider, model, messages):
+    def fake_external(self, provider, model, messages, temperature=0.3):
         self.external_calls.append((provider, model, messages))
         return json.dumps(PROPOSAL, ensure_ascii=False)
 
@@ -195,3 +195,15 @@ class RefinementRunHistoryTests(RefinementBase):
         self.assertEqual(list(runs.visible_runs(self.user, False).values_list('pk', flat=True)).count(run.pk), 1)
         self.assertEqual(list(runs.visible_runs(self.other, False).filter(pk=run.pk)), [])
         self.assertEqual(runs.visible_runs(self.other, True).filter(pk=run.pk).count(), 1)  # 管理者の全履歴の表示
+
+
+# 分析の温度は、AI設定(DB)から取得する。このモジュールの試験は、DBを使わないため、従来の値(0.3)を返す。温度の取得そのものは、test_analysis_temperature.pyで確認する
+def setUpModule():
+    global _temperature_patch
+    from unittest import mock
+    _temperature_patch = mock.patch('ai.services.analysis_llm.get_analysis_temperature', return_value=0.3)
+    _temperature_patch.start()
+
+
+def tearDownModule():
+    _temperature_patch.stop()

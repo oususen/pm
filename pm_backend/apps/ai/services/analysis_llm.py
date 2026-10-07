@@ -8,7 +8,11 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from django.db import DatabaseError
+
+from ai.config.models import AIProviderConfig
 from ai.services import chat_service
+from ai.services.analysis_plan_store import AnalysisError
 
 # 既存の分析案作成（チャット補助の_chat既定）と同じ値。外部AIでの所要時間を実測してからBOSSが確定する。
 REQUEST_TIMEOUT_SECONDS = 90
@@ -27,7 +31,18 @@ def _strip_code_fence(text):
     return match.group(1) if match else text
 
 
-def request_external_json(provider, model, messages):
+def get_analysis_temperature(provider):
+    """分析案の作成・コード生成の温度を、AI設定(プロバイダごと)から毎回取得する。取得できない・範囲外のときは、別の値で代替せず停止する。"""
+    try:
+        value = AIProviderConfig.objects.get(provider=provider).analysis_temperature
+    except (DatabaseError, AIProviderConfig.DoesNotExist) as exc:
+        raise AnalysisError('分析の温度を取得できません。AI設定とマイグレーションを確認してください。', 503) from exc
+    if not 0 <= value <= 1:
+        raise AnalysisError('分析の温度が不正です。AI設定で0〜1を保存してください。', 503)
+    return float(value)
+
+
+def request_external_json(provider, model, messages, temperature=0.3):
     """OpenAI互換APIへ分析案の作成を依頼し、JSON文字列を返す。
 
     呼出し側でコード置換・利用者確認済みのメッセージだけを受け取る。応答のコードは名前へ復元しない。
@@ -40,7 +55,7 @@ def request_external_json(provider, model, messages):
         'model': model,
         'stream': False,
         'messages': messages,
-        'temperature': 0.3,
+        'temperature': temperature,
         'max_tokens': chat_service.AGENT_MAX_TOKENS,
     }
     if provider == 'deepseek':

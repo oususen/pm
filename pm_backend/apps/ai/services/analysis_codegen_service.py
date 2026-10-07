@@ -66,7 +66,7 @@ PARAMETER_RULE = (
     '期間は {{period_from}} と {{period_to}} を使う(例: WHERE shipment_date BETWEEN {{period_from}} AND {{period_to}})。'
     '目的に品番・顧客コード・納入先コードが書かれていれば、その値を変数にする(例: WHERE product_code = {{product_code}})。'
     '{{名前}} は、実行時に引用符つきの文字列へ置き換わるため、前後に引用符を付けない({{product_code}} と書く。\'{{product_code}}\' とは書かない)。'
-    '日付(2026-08-01 など)・コード(V000000000 など)を、直接書かない。月の表示名(8月など)も直書きせず、期間から作る(SQLのstrftime、Pythonのdatetime)。'
+    '日付(2026-08-01 など)・コード(V000000000 など)を、直接書かない。分析案の手順や目的に書かれた値・日付も、そのままコードへ写さない。グラフ・表のタイトル、文字列、コメントにも、日付・品番・顧客コード・納入先コードの固定の値を書かない(変数 {{名前}} を使うか、値を含まない固定の文言にする)。月の表示名(8月など)も直書きせず、期間から作る(SQLのstrftime、Pythonのdatetime)。'
     '変数を使ったときは、返すJSONに "parameters" を加える: [{"name": "product_code", "type": "product_code", "label": "品番", "default": "目的に書かれた値"}, '
     '{"name": "period_from", "type": "date", "label": "開始日"}, {"name": "period_to", "type": "date", "label": "終了日"}]。'
     'type は date(period_from・period_toだけ。defaultは不要)、product_code、customer_code、ship_to_code のいずれか。名前は英小文字・数字・アンダースコア。'
@@ -303,11 +303,11 @@ def preview(owner_id, plan_id, revision):
     return result
 
 
-def _call_ai(provider, model, messages):
+def _call_ai(provider, model, messages, temperature):
     if provider == 'qwen':
         return chat_service._chat(messages, 'qwen', json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS,
-                                  timeout=get_qwen_analysis_timeout())
-    return analysis_llm.request_external_json(provider, model, messages)
+                                  timeout=get_qwen_analysis_timeout(), temperature=temperature)
+    return analysis_llm.request_external_json(provider, model, messages, temperature)
 
 
 def _finish(store, plan_id, owner_id, attempt_id, apply):
@@ -346,7 +346,7 @@ def _apply_parameters(proposal, steps, python, parameters):
         template_params.check_source(steps, python, definitions)
         concrete_steps, concrete_python = template_params.concrete_code(steps, python, template_params.resolve_values(definitions, {}))
     except AnalysisError as exc:
-        return steps, python, None, ['parameters_unavailable' if exc.status_code == 503 else getattr(exc, 'reason', 'parameters_source_invalid')]
+        return steps, python, None, ['parameters_unavailable'] if exc.status_code == 503 else list(getattr(exc, 'reasons', ['parameters_source_invalid']))
     except (TypeError, KeyError, ValueError, AttributeError):
         return steps, python, None, ['parameters_source_invalid']
     return concrete_steps, concrete_python, {'steps': steps, 'python': python, 'parameters': definitions}, []
@@ -381,11 +381,13 @@ def generate(owner_id, plan_id, revision, confirmation=None):
             'history': existing.get('history', []),
         }
 
+    # 温度は、AI設定から毎回取得する。取得できなければ、回数を数える前に停止する(「生成中」を残さない)
+    temperature = analysis_llm.get_analysis_temperature(provider)
     # 送信の直前に、回数を数えて「生成中」を保存する(版が上がるため、同じ確認コードの再利用・同時の2件目は、ここで409になる)
     store.update(plan_id, owner_id, revision, start)
     reasons, outcome = [], None
     try:
-        raw = _call_ai(provider, model, messages)
+        raw = _call_ai(provider, model, messages, temperature)
     except chat_service.LocalAIError:
         raw = None
         reasons.append('ai_request_failed')

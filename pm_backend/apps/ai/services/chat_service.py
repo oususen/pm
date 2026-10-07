@@ -318,7 +318,7 @@ def _build_external_data_redactor():
     return redactor
 
 
-def _ollama_chat(messages, json_mode=False, num_predict=180, timeout=90, include_metadata=False):
+def _ollama_chat(messages, json_mode=False, num_predict=180, timeout=90, include_metadata=False, temperature=None):
     body = {
         'model': MODEL,
         'stream': False,
@@ -326,7 +326,7 @@ def _ollama_chat(messages, json_mode=False, num_predict=180, timeout=90, include
         'keep_alive': '10m',
         'messages': messages,
         'options': {
-            'temperature': 0.7, 'top_p': 0.8, 'top_k': 20, 'min_p': 0,
+            'temperature': 0.7 if temperature is None else temperature, 'top_p': 0.8, 'top_k': 20, 'min_p': 0,
             'num_ctx': 4096, 'num_predict': num_predict,
         },
     }
@@ -1369,10 +1369,11 @@ def _deepseek_agent_chat(
         raise LocalAIError(f'{provider_label} APIに接続できません。接続設定を確認してください。') from exc
 
 
-def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, include_metadata=False, model=None, redactor=None):
+def _chat(messages, provider, json_mode=False, num_predict=180, timeout=90, include_metadata=False, model=None, redactor=None, temperature=None):
+    """temperatureは、ローカルQwen(分析案の作成・コード生成)だけに渡す。指定しなければ従来の値。"""
     if provider == 'deepseek':
         return _deepseek_chat(messages, json_mode, num_predict, timeout, include_metadata, model, redactor)
-    return _ollama_chat(messages, json_mode, num_predict, timeout, include_metadata)
+    return _ollama_chat(messages, json_mode, num_predict, timeout, include_metadata, temperature)
 
 
 _QWEN_EXCEL_REQUEST_PATTERN = re.compile(

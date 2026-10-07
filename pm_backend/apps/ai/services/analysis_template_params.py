@@ -169,9 +169,10 @@ def normalize_definitions(raw, date_from, date_to):
 class SourceCheckError(AnalysisError):
     """コードと変数の不一致。画面へ出す固定の理由コード(reason)を持つ(AIの文章は持たない)。"""
 
-    def __init__(self, detail, reason):
+    def __init__(self, detail, reason, extra=()):
         super().__init__(detail)
         self.reason = reason
+        self.reasons = [reason, *extra]  # 主な理由のあとに、場所・種類の固定コードを続ける(直書きのとき)
 
 
 def check_source(steps, python, definitions):
@@ -195,11 +196,20 @@ def check_source(steps, python, definitions):
     # 正しい変数の形を除いた残りに「{{」「}}」があれば、不正な変数の表記(名前の形式違い・空白・波括弧の不一致など)として断る
     if any('{{' in text or '}}' in text for text in stripped):
         raise SourceCheckError('コードに、変数として読めない {{...}} の表記があります。名前は英小文字・数字・アンダースコアで、{{名前}} の形にしてください。', 'parameters_source_invalid')
-    for item in definitions:
-        if item['type'] != 'date' and any(item['default'] in text for text in stripped):
-            raise SourceCheckError('変数の元の値が、コードに文字のまま残っています。変数だけを使ってください。', 'parameters_literal')
-    if any(DATE_LITERAL_PATTERN.search(text) for text in stripped):
-        raise SourceCheckError('日付がコードに直接書かれています。期間は変数(period_from・period_to)を使ってください。', 'parameters_literal')
+    # 固定の値の直書き: 場所(SQL=steps、Python)と種類(変数の元の値・日付)を、すべて集めて、固定のコードで返す(AIの文章は返さない)
+    count = len(steps)
+    kinds, places = set(), set()
+    for index, text in enumerate(stripped):
+        place = 'parameters_literal_sql' if index < count else 'parameters_literal_python' if index == 2 * count else None  # 中間テーブル名(count〜2count-1)は対象外
+        if place is None:
+            continue
+        if any(item['type'] != 'date' and item['default'] in text for item in definitions):
+            kinds.add('parameters_literal_value'); places.add(place)
+        if DATE_LITERAL_PATTERN.search(text):
+            kinds.add('parameters_literal_date'); places.add(place)
+    if kinds:
+        raise SourceCheckError('固定の値(日付・変数の元の値)がコードに直接書かれています。変数だけを使ってください。', 'parameters_literal',
+                               [*sorted(places), *sorted(kinds)])
 
 
 def _substitute(text, values):

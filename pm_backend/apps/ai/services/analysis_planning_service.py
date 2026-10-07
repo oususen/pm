@@ -208,15 +208,17 @@ def create_plan(owner_id, data):
         )},
         {'role': 'user', 'content': json.dumps({'purpose': external_purpose if provider != 'qwen' else purpose, 'date_from': start, 'date_to': end}, ensure_ascii=False)},
     ]
+    # 温度は、AI設定(プロバイダごと)から毎回取得する。取得できなければ、AIを呼ばずに停止する(外部AIへも送信しない)
+    temperature = analysis_llm.get_analysis_temperature(provider)
     try:
         # チャットのツール・履歴・集計結果は使わない。Qwenの分析案だけ保存済み時間を適用する。
         if provider == 'qwen':
             raw = chat_service._chat(
                 messages, 'qwen', json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS,
-                timeout=get_qwen_analysis_timeout(),
+                timeout=get_qwen_analysis_timeout(), temperature=temperature,
             )
         else:
-            raw = analysis_llm.request_external_json(provider, model, messages)
+            raw = analysis_llm.request_external_json(provider, model, messages, temperature)
     except chat_service.LocalAIError as exc:
         raise AnalysisError(str(exc), 503) from exc
     proposal = validate_proposal(raw, purpose.strip(), start, end)

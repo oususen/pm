@@ -35,6 +35,17 @@
             <p v-if="qwenTimeoutError" class="error" role="alert">{{ qwenTimeoutError }}</p>
             <p v-if="qwenTimeoutNotice" class="notice" role="status">{{ qwenTimeoutNotice }}</p>
           </form>
+          <form class="qwen-timeout-form temperature-form" @submit.prevent="saveTemperature(item)">
+            <label :for="`analysis-temperature-${item.id}`">分析の温度（0〜1）</label>
+            <div class="qwen-timeout-controls">
+              <input :id="`analysis-temperature-${item.id}`" v-model.number="item.analysis_temperature" type="number" min="0" max="1" step="0.01" required
+                :disabled="!canEdit || loading || savingTemperature" :aria-invalid="Boolean(temperatureErrors[item.id])" />
+              <button v-if="canEdit" class="reload-button" type="submit" :disabled="loading || savingTemperature">{{ savingTemperature ? '保存中…' : '保存' }}</button>
+            </div>
+            <small>0〜1。0に近いほど、同じ入力への答えのばらつきが小さくなります（0.3が従来の値）。分析案の作成とコード生成だけに適用します（検索AI・相談は変わりません）。保存後の次の作成から適用します。</small>
+            <p v-if="temperatureErrors[item.id]" class="error" role="alert">{{ temperatureErrors[item.id] }}</p>
+            <p v-if="temperatureNotices[item.id]" class="notice" role="status">{{ temperatureNotices[item.id] }}</p>
+          </form>
           <small>認証情報はここには保存せず、サーバーの環境変数で管理します。</small>
         </article>
       </div>
@@ -182,6 +193,9 @@ import { hasPermission } from '@/router'
 
 const providers = ref([])
 const savingQwenTimeout = ref(false)
+const savingTemperature = ref(false)
+const temperatureErrors = ref({})
+const temperatureNotices = ref({})
 const qwenTimeoutError = ref('')
 const qwenTimeoutNotice = ref('')
 const tools = ref([])
@@ -297,6 +311,29 @@ const saveQwenTimeout = async (item) => {
       || response?.detail || '保存できませんでした。入力値を確認して再試行してください。'
   } finally {
     savingQwenTimeout.value = false
+  }
+}
+const saveTemperature = async (item) => {
+  if (!canEdit.value || loading.value || savingTemperature.value) return
+  temperatureErrors.value = { ...temperatureErrors.value, [item.id]: '' }
+  temperatureNotices.value = { ...temperatureNotices.value, [item.id]: '' }
+  const value = item.analysis_temperature
+  // 0〜1の数(小数第2位まで)だけ送る。空欄・範囲外・文字は送らない
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1 || Math.round(value * 100) !== value * 100 && Math.abs(Math.round(value * 100) - value * 100) > 1e-9) {
+    temperatureErrors.value = { ...temperatureErrors.value, [item.id]: '0〜1の数(小数第2位まで)を入力してください。' }
+    return
+  }
+  savingTemperature.value = true
+  try {
+    const { data } = await api.aiSettings.updateProvider(item.id, { analysis_temperature: value })
+    item.analysis_temperature = Number(data.analysis_temperature)
+    temperatureNotices.value = { ...temperatureNotices.value, [item.id]: '保存しました。次の分析案の作成・コード生成から適用します。' }
+  } catch (requestError) {
+    const response = requestError.response?.data
+    temperatureErrors.value = { ...temperatureErrors.value, [item.id]: [response?.analysis_temperature].flat().filter(Boolean).join(' ')
+      || response?.detail || '保存できませんでした。入力値を確認して再試行してください。' }
+  } finally {
+    savingTemperature.value = false
   }
 }
 const saveTool = async (item) => {

@@ -1,4 +1,6 @@
 """社内AIの運用設定モデル。認証情報や業務明細は保存しない。"""
+from decimal import Decimal
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -15,6 +17,11 @@ class AIProviderConfig(models.Model):
     analysis_plan_timeout_seconds = models.PositiveIntegerField(
         default=180, validators=[MinValueValidator(30), MaxValueValidator(600)],
         verbose_name='分析案作成タイムアウト（秒）',
+    )
+    # 分析案の作成・コード生成だけで使用する(検索AI・相談には適用しない)。0に近いほど、同じ入力への答えのばらつきが小さい。既定は従来の値(0.3)
+    analysis_temperature = models.DecimalField(
+        max_digits=3, decimal_places=2, default=Decimal('0.30'), validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('1'))],
+        verbose_name='分析の温度（0〜1）',
     )
     updated_at = models.DateTimeField(auto_now=True)
 
