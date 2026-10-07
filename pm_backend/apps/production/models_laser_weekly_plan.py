@@ -82,6 +82,7 @@ class LaserWeeklyMaterialOrderProgress(models.Model):
     SUPPLIER_MEISEI = 'MEISEI'
     SUPPLIER_CHOICES = [(SUPPLIER_SATO, '佐藤商事'), (SUPPLIER_MEISEI, '名成鋼機')]
 
+    # 最後に保存した画面の週開始日（キーではない）。
     plan_start_date = models.DateField(verbose_name='計画開始日', null=True, blank=True)
     material = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='laser_weekly_order_progresses')
     required_date = models.DateField(verbose_name='必要日', null=True, blank=True)
@@ -98,10 +99,12 @@ class LaserWeeklyMaterialOrderProgress(models.Model):
     class Meta:
         db_table = 't_laser_weekly_material_order_progress'
         constraints = [
+            # 計画行は 1材料・1必要日・1仕入先で1行とする。
+            # 手動追加行は required_date が NULL のため、MySQL ではこの制約で重複扱いにならない。
+            # plan_start_date は「最後に保存した週」の記録としてのみ残し、キーには含めない。
             models.UniqueConstraint(
-                fields=['plan_start_date', 'material', 'required_date', 'supplier'],
-                condition=models.Q(is_manual=False),
-                name='laser_weekly_material_order_progress_unique',
+                fields=['material', 'required_date', 'supplier'],
+                name='laser_weekly_material_order_key_unique',
             ),
             models.UniqueConstraint(
                 fields=['material', 'delivery_date', 'supplier'],

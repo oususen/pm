@@ -128,9 +128,16 @@ class LaserWeeklyMaterialGroupViewSet(viewsets.ModelViewSet):
 
 
 class LaserWeeklyPlanViewSet(viewsets.ViewSet):
-    def _build_locked_plan_starts(self, date_start, date_end):
-        """承認済み注文書のロック期間から (supplier, date) → {plan_start_date} マップを構築する。"""
-        locked = defaultdict(set)
+    def _build_locked_supplier_dates(self, date_start, date_end):
+        """注文書のロック期間から、date_start〜date_end 内のロックされた (supplier, date) の集合を作る。
+
+        - 注文書作成後（created は order_created が True のときだけ）と、確認中・承認済・送信済をロックする。
+        - 納期調整中（material_order_adjustments[supplier].editing）の承認は、
+          調整期間 (adjustment の lock_start_date〜lock_end_date) の日をロックから外す。
+          フロントの isAdjustmentEditingDate と同じく、調整期間の日付がそろっている場合だけ外す。
+        - 判定は承認ごとに行い、どれか1つの承認でロックなら、その (supplier, date) はロックとする。
+        """
+        locked = set()
         approvals = ApprovalRequest.objects.filter(
             route_config__item_key='laser_material_order',
             status__in=['created', 'reviewing', 'approved', 'sent'],
@@ -148,15 +155,33 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             if not (supplier and start and lock_start and lock_end):
                 continue
             try:
-                source_start = datetime.strptime(start, '%Y-%m-%d').date()
+                datetime.strptime(start, '%Y-%m-%d')
                 locked_start = datetime.strptime(lock_start, '%Y-%m-%d').date()
                 locked_end = datetime.strptime(lock_end, '%Y-%m-%d').date()
             except ValueError:
                 continue
+
+            # 納期調整中の期間（この承認ではロックしない日）
+            editing_start = editing_end = None
+            adjustment = (context.get('material_order_adjustments') or {}).get(supplier)
+            if (
+                isinstance(adjustment, dict)
+                and adjustment.get('editing')
+                and adjustment.get('lock_start_date')
+                and adjustment.get('lock_end_date')
+            ):
+                try:
+                    editing_start = datetime.strptime(adjustment['lock_start_date'], '%Y-%m-%d').date()
+                    editing_end = datetime.strptime(adjustment['lock_end_date'], '%Y-%m-%d').date()
+                except (TypeError, ValueError):
+                    editing_start = editing_end = None
+
             cursor = max(locked_start, date_start)
             end = min(locked_end, date_end)
             while cursor <= end:
-                locked[supplier, cursor].add(source_start)
+                is_editing_day = editing_start is not None and editing_start <= cursor <= editing_end
+                if not is_editing_day:
+                    locked.add((supplier, cursor))
                 cursor += timedelta(days=1)
         return locked
 
@@ -394,46 +419,34 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 plan_start_date = datetime.strptime(request.query_params['start_date'], '%Y-%m-%d').date()
             except (KeyError, ValueError):
                 return Response({'detail': 'start_date is required (YYYY-MM-DD)'}, status=status.HTTP_400_BAD_REQUEST)
-            rows = LaserWeeklyMaterialOrderProgress.objects.filter(plan_start_date=plan_start_date, is_manual=False).select_related('material')
             def _serialize_order_row(row):
                 return {
                     'material_id': row.material_id, 'required_date': row.required_date.isoformat(), 'delivery_date': row.delivery_date.isoformat(),
                     'supplier': row.supplier, 'required_sheets': row.required_sheets, 'lot_multiple': row.lot_multiple,
                     'required_lots': row.required_lots, 'order_lots': row.order_lots, 'order_sheets': row.order_sheets,
                 }
-            items = [_serialize_order_row(r) for r in rows]
-            overlapping_items = []
-            locked_items = []
             display_start = request.query_params.get('display_start')
             display_end = request.query_params.get('display_end')
+            ds = de = None
             if display_start and display_end:
                 try:
                     ds = datetime.strptime(display_start, '%Y-%m-%d').date()
                     de = datetime.strptime(display_end, '%Y-%m-%d').date()
                 except ValueError:
                     ds = de = None
-                if ds and de:
-                    overlapping_rows = LaserWeeklyMaterialOrderProgress.objects.filter(
-                        required_date__gte=ds, required_date__lte=de, is_manual=False,
-                    ).exclude(plan_start_date=plan_start_date).select_related('material')
-                    overlapping_items = [_serialize_order_row(r) for r in overlapping_rows]
-
-                    locked_plan_starts = self._build_locked_plan_starts(ds, de)
-                    all_locked_starts = set()
-                    for starts in locked_plan_starts.values():
-                        all_locked_starts.update(starts)
-                    if all_locked_starts:
-                        locked_by_key = {}
-                        locked_rows = LaserWeeklyMaterialOrderProgress.objects.filter(
-                            required_date__gte=ds, required_date__lte=de, is_manual=False,
-                            plan_start_date__in=all_locked_starts,
-                        ).select_related('material').order_by('updated_at', 'id')
-                        for row in locked_rows:
-                            if row.plan_start_date not in locked_plan_starts.get((row.supplier, row.required_date), set()):
-                                continue
-                            locked_by_key[(row.material_id, row.supplier, row.required_date)] = row
-                        locked_items = [_serialize_order_row(row) for row in locked_by_key.values()]
-            return Response({'items': items, 'overlapping_items': overlapping_items, 'locked_items': locked_items})
+            if ds and de:
+                # 発注行は (material, required_date, supplier) で1行。表示期間内の必要日の行をそのまま返す。
+                rows = LaserWeeklyMaterialOrderProgress.objects.filter(
+                    required_date__gte=ds, required_date__lte=de, is_manual=False,
+                ).select_related('material').order_by('required_date', 'material_id', 'supplier')
+            else:
+                # 表示期間の指定がない場合は従来どおり plan_start_date で絞る（扱いはBOSS確認待ち）。
+                rows = LaserWeeklyMaterialOrderProgress.objects.filter(
+                    plan_start_date=plan_start_date, is_manual=False,
+                ).select_related('material')
+            items = [_serialize_order_row(r) for r in rows]
+            # overlapping_items / locked_items は現行フロントとの互換のため空で返す（単位1bで削除予定）。
+            return Response({'items': items, 'overlapping_items': [], 'locked_items': []})
 
         items = request.data.get('items', [])
         try:
@@ -442,7 +455,9 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         except (KeyError, TypeError, ValueError):
             return Response({'detail': '発注進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
         materials = Product.objects.in_bulk(material_ids)
-        saved_count = 0
+
+        # 先に全件を検証し、不正値があれば何も保存しない。
+        parsed_items = []
         for item in items:
             try:
                 material = materials[int(item['material_id'])]
@@ -458,21 +473,87 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             except (KeyError, TypeError, ValueError):
                 return Response({'detail': '発注進度の値が不正です。'}, status=status.HTTP_400_BAD_REQUEST)
             required_lots = int((Decimal(required_sheets) / Decimal(lot_multiple)).to_integral_value(rounding=ROUND_CEILING))
-            if not sato_enabled:
-                LaserWeeklyMaterialOrderProgress.objects.filter(
-                    plan_start_date=plan_start_date, material=material, required_date=required_date,
-                    supplier=LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, is_manual=False,
-                ).delete()
             supplier_data = [(LaserWeeklyMaterialOrderProgress.SUPPLIER_MEISEI, meisei_lots, meisei_sheets)]
             if sato_enabled:
                 supplier_data.append((LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, sato_lots, sato_sheets))
-            for supplier, order_lots, order_sheets_val in supplier_data:
-                LaserWeeklyMaterialOrderProgress.objects.update_or_create(
-                    plan_start_date=plan_start_date, material=material, required_date=required_date, supplier=supplier, is_manual=False,
-                    defaults={'delivery_date': delivery_date, 'required_sheets': required_sheets, 'lot_multiple': lot_multiple, 'required_lots': required_lots, 'order_lots': order_lots, 'order_sheets': order_sheets_val},
-                )
-                saved_count += 1
-        return Response({'saved_count': saved_count})
+            parsed_items.append({
+                'material': material,
+                'required_date': required_date,
+                'delivery_date': delivery_date,
+                'required_sheets': required_sheets,
+                'lot_multiple': lot_multiple,
+                'required_lots': required_lots,
+                'sato_enabled': sato_enabled,
+                'supplier_data': supplier_data,
+            })
+
+        # 保存範囲（送られてきた必要日の最小〜最大）でロックされた (仕入先, 日) を求める。
+        locked_supplier_dates = set()
+        if parsed_items:
+            required_dates = [p['required_date'] for p in parsed_items]
+            locked_supplier_dates = self._build_locked_supplier_dates(min(required_dates), max(required_dates))
+
+        saved_count = 0
+        skipped_locked_count = 0
+        skipped_locked_changes = []
+        with transaction.atomic():
+            for p in parsed_items:
+                material = p['material']
+                required_date = p['required_date']
+                if not p['sato_enabled']:
+                    sato_key = (LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, required_date)
+                    sato_rows = LaserWeeklyMaterialOrderProgress.objects.filter(
+                        material=material, required_date=required_date,
+                        supplier=LaserWeeklyMaterialOrderProgress.SUPPLIER_SATO, is_manual=False,
+                    )
+                    if sato_key in locked_supplier_dates:
+                        # ロックされた日の SATO 行は削除しない。
+                        if sato_rows.exists():
+                            skipped_locked_count += 1
+                    else:
+                        sato_rows.delete()
+                for supplier, order_lots, order_sheets_val in p['supplier_data']:
+                    if (supplier, required_date) in locked_supplier_dates:
+                        # ロックされた (仕入先, 日) は書かない。値が違う場合だけ返す。
+                        skipped_locked_count += 1
+                        existing = LaserWeeklyMaterialOrderProgress.objects.filter(
+                            material=material, required_date=required_date, supplier=supplier, is_manual=False,
+                        ).first()
+                        if existing is None:
+                            is_changed = order_lots != 0 or order_sheets_val != 0
+                        else:
+                            is_changed = existing.order_lots != order_lots or existing.order_sheets != order_sheets_val
+                        if is_changed:
+                            skipped_locked_changes.append({
+                                'material_id': material.id,
+                                'product_code': material.product_code,
+                                'required_date': required_date.isoformat(),
+                                'supplier': supplier,
+                                'sent_order_lots': order_lots,
+                                'sent_order_sheets': order_sheets_val,
+                                'db_order_lots': existing.order_lots if existing else None,
+                                'db_order_sheets': existing.order_sheets if existing else None,
+                            })
+                        continue
+                    # 手数0でも行を作成・更新し、削除はしない。plan_start_date は最後に保存した週として記録する。
+                    LaserWeeklyMaterialOrderProgress.objects.update_or_create(
+                        material=material, required_date=required_date, supplier=supplier, is_manual=False,
+                        defaults={
+                            'plan_start_date': plan_start_date,
+                            'delivery_date': p['delivery_date'],
+                            'required_sheets': p['required_sheets'],
+                            'lot_multiple': p['lot_multiple'],
+                            'required_lots': p['required_lots'],
+                            'order_lots': order_lots,
+                            'order_sheets': order_sheets_val,
+                        },
+                    )
+                    saved_count += 1
+        return Response({
+            'saved_count': saved_count,
+            'skipped_locked_count': skipped_locked_count,
+            'skipped_locked_changes': skipped_locked_changes,
+        })
 
     @action(detail=False, methods=['get', 'post'], url_path='material-receipts', parser_classes=[MultiPartParser, FormParser])
     def material_receipts(self, request):
@@ -486,39 +567,15 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             except (KeyError, ValueError):
                 return Response({'detail': '表示期間を正しく指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
+            # 発注行は (material, required_date, supplier) で1行のため、候補の行をそのまま使う。
             candidates = LaserWeeklyMaterialOrderProgress.objects.filter(
                 delivery_date__range=(start_date, end_date),
-            ).select_related('material').prefetch_related('receipts__received_by').order_by(
-                'material_id', 'supplier', 'required_date', 'plan_start_date', 'updated_at', 'id',
-            )
+            ).select_related('material').prefetch_related('receipts__received_by')
 
-            locked_plan_starts = self._build_locked_plan_starts(start_date, end_date)
+            locked_supplier_dates = self._build_locked_supplier_dates(start_date, end_date)
 
-            selected_orders = {}
-            all_receipts_by_key = defaultdict(list)
-            for order in candidates:
-                if order.is_manual:
-                    key = ('manual', order.id)
-                else:
-                    key = ('planned', order.material_id, order.supplier, order.required_date)
-                    for receipt in order.receipts.all():
-                        all_receipts_by_key[key].append(receipt)
-                current = selected_orders.get(key)
-                locked_starts = locked_plan_starts.get((order.supplier, order.required_date), set())
-                is_locked_order = order.plan_start_date in locked_starts
-                current_is_locked = bool(
-                    current and current.plan_start_date in locked_plan_starts.get(
-                        (current.supplier, current.required_date), set(),
-                    )
-                )
-                if not current or (is_locked_order and not current_is_locked) or (
-                    is_locked_order == current_is_locked
-                    and (order.plan_start_date or order.delivery_date, order.updated_at, order.id)
-                    >= (current.plan_start_date or current.delivery_date, current.updated_at, current.id)
-                ):
-                    selected_orders[key] = order
             orders = sorted(
-                (order for order in selected_orders.values() if order.order_lots > 0 or order.order_sheets > 0),
+                (order for order in candidates if order.order_lots > 0 or order.order_sheets > 0),
                 key=lambda order: (order.delivery_date, order.supplier, order.material.product_code, order.id),
             )
 
@@ -541,11 +598,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
 
             rows = []
             for order in orders:
-                if order.is_manual:
-                    key = ('manual', order.id)
-                else:
-                    key = ('planned', order.material_id, order.supplier, order.required_date)
-                receipts = [_serialize_receipt(r) for r in all_receipts_by_key.get(key, order.receipts.all())]
+                receipts = [_serialize_receipt(r) for r in order.receipts.all()]
                 rows.append({
                     'id': order.id,
                     'delivery_date': order.delivery_date.isoformat(),
@@ -558,7 +611,7 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                     'order_lots': order.order_lots,
                     'order_sheets': order.order_sheets,
                     'is_special_management_material': order.material.is_special_management_material,
-                    'source_status': 'ORDER_LOCKED' if order.plan_start_date in locked_plan_starts.get((order.supplier, order.required_date), set()) else 'PLAN_SAVED',
+                    'source_status': 'ORDER_LOCKED' if (order.supplier, order.required_date) in locked_supplier_dates else 'PLAN_SAVED',
                     'receipts': receipts,
                 })
             return Response({'items': rows})
@@ -858,10 +911,10 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
             return Response({'detail': f'仕入先マスタに発注先コード {supplier_code} を登録してください。'}, status=status.HTTP_400_BAD_REQUEST)
 
         supplier_name = order_supplier.supplier_name
+        # 発注行は (material, required_date, supplier) で1行のため、週開始日では絞らない。
+        # 手動追加行も従来どおり含める。plan_start_date はファイル名にだけ使う。
         orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
             supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
-        ).filter(
-            Q(plan_start_date=plan_start_date, is_manual=False) | Q(is_manual=True),
         ).filter(
             Q(order_lots__gt=0) | Q(order_sheets__gt=0),
         ).select_related('material').order_by('delivery_date', 'material__product_code'))
@@ -1170,10 +1223,10 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
         if 'creator' not in approval_steps and approval.creator_id:
             approval_steps['creator'] = stamp_label(approval.creator, approval.created_at)
 
+        # 発注行は (material, required_date, supplier) で1行のため、週開始日では絞らない。
+        # 手動追加行も従来どおり含める。plan_start_date は承認の検索とファイル名にだけ使う。
         orders = list(LaserWeeklyMaterialOrderProgress.objects.filter(
             supplier=supplier, delivery_date__range=(export_start_date, export_end_date),
-        ).filter(
-            Q(plan_start_date=plan_start_date, is_manual=False) | Q(is_manual=True),
         ).filter(
             Q(order_lots__gt=0) | Q(order_sheets__gt=0),
         ).select_related('material').order_by('delivery_date', 'material__product_code'))
