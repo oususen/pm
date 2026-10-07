@@ -148,10 +148,10 @@
                   <span v-if="result.unit"> / {{ result.unit }}</span>
                 </div>
               </td>
-              <td>{{ result.standard || "-" }}</td>
+              <td class="inspection-description">{{ result.standard || "-" }}</td>
               <td v-if="isQuarterlySection">{{ result.confirmation_method || "-" }}</td>
               <td v-if="isQuarterlySection">{{ result.criteria || "-" }}</td>
-              <td>{{ result.method || "-" }}</td>
+              <td class="inspection-description">{{ result.method || "-" }}</td>
               <td>{{ result.frequency || "-" }}</td>
               <td class="col-value">
                 <template v-if="isNumericRecordType(result.record_type)">
@@ -1369,6 +1369,10 @@ onMounted(async () => {
 }
 .data-table.compact thead th {
   background: #f8fafc;
+}
+.inspection-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .col-no {
   width: 56px;
