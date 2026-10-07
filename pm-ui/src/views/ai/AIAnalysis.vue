@@ -263,7 +263,7 @@ const FAILURE_LABELS = Object.freeze({
   ai_request_failed: 'AIとの通信に失敗しました。生成回数は消費されています。',
   response_invalid: 'AIの応答が指定された形式ではありません。',
   ai_unsupported: 'AIが、このデータ範囲では分析コードを作成できないと判定しました。',
-  parameters_invalid: 'AIが返した変数の定義が正しくありません(種類・値・元の値の不足、または、登録されていない品番・顧客コード・納入先コード)。',
+  parameters_invalid: 'AIが返した変数の定義が正しくありません(種類・値・元の値の不足、日付の組(名前_from・名前_to)の不備、比べる期間が全体の期間の外・開始日が終了日より後、または、登録されていない品番・顧客コード・納入先コード)。',
   parameters_undeclared: '変数を宣言していません(コードに {{名前}} があるのに、変数の一覧にない、または、一覧なしで {{…}} が書かれています)。',
   parameters_unused: '宣言した変数が、コードで使われていません。',
   parameters_quoted: '変数の前後に引用符が付いています({{名前}} だけを書くと、値が引用符つきで入ります)。',
@@ -313,7 +313,16 @@ function failureLabel(reason) {
   return typeof reason === 'string' && Object.hasOwn(FAILURE_LABELS, reason)
     ? FAILURE_LABELS[reason] : '検査に合格しませんでした。分析目的・手順とコードを確認してください。'
 }
-const codeFailureLabels = computed(() => [...new Set((Array.isArray(codegen.value?.reasons) ? codegen.value.reasons : []).map(failureLabel))])
+// 変数名は、サーバーが固定の形(英小文字・数字・アンダースコア)の識別子だけを返す。それ以外の値は表示しない
+const variableNames = reason => {
+  const names = codegen.value?.reason_names?.[reason]
+  return Array.isArray(names) ? names.filter(name => typeof name === 'string' && /^[a-z][a-z0-9_]*$/.test(name)) : []
+}
+const NAMED_REASONS = Object.freeze({ parameters_undeclared: '宣言されていない変数', parameters_unused: '使われていない変数' })
+const codeFailureLabels = computed(() => [...new Set((Array.isArray(codegen.value?.reasons) ? codegen.value.reasons : []).map(reason => {
+  const names = Object.hasOwn(NAMED_REASONS, reason) ? variableNames(reason) : []
+  return names.length ? `${failureLabel(reason)}（${NAMED_REASONS[reason]}: ${names.join('、')}）` : failureLabel(reason)
+}))])
 const trialFailureLabel = computed(() => {
   const trial = codegen.value?.trial
   if (!['failed', 'unverified'].includes(trial?.status)) return ''

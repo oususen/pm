@@ -108,7 +108,8 @@ def _fields_from_plan(plan, check_dates=True):
         try:
             parameters = validate_definitions(source['parameters'])
             check_source(source['steps'], source['python'], parameters)
-            steps_now, python_now = concrete_code(source['steps'], source['python'], resolve_values(parameters, {}))
+            steps_now, python_now = concrete_code(source['steps'], source['python'],
+                                                  resolve_values(parameters, {}, outer=(proposal.get('date_from'), proposal.get('date_to'))))
         except (KeyError, TypeError, AttributeError):
             raise AnalysisError('変数の形のコードを確認できません。コードを作り直してください。', 409) from None
         defaults = {item['name']: item['default'] for item in parameters}
@@ -247,7 +248,7 @@ def concrete_for(template, supplied=None):
         if supplied:
             raise AnalysisError('このテンプレートには変数がありません。')
         return template.sql_steps, template.python_code, {}
-    values = resolve_values(template.parameters, supplied or {})
+    values = resolve_values(template.parameters, supplied or {}, outer=(template.date_from.isoformat(), template.date_to.isoformat()))
     steps, python = concrete_code(template.sql_steps, template.python_code, values)
     return steps, python, values
 

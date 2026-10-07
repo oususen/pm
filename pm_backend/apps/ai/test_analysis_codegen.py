@@ -227,6 +227,33 @@ class GuardTreeTest(SimpleTestCase):
         for kind in ('SHOW_REF', 'COLUMN_DATA', 'DELIM_GET', 'FUTURE_REF'):
             self.assertEqual(self.reason(tree(select_node({'type': kind}))), 'syntax_not_supported', kind)
 
+    # 実際のDuckDB(1.5.6)が出す、小数のリテラル(0.5)・DECIMALへの変換(DECIMAL(10,2))の形
+    DECIMAL_CONSTANT = {'class': 'CONSTANT', 'type': 'VALUE_CONSTANT', 'alias': '', 'query_location': 11,
+                        'value': {'type': {'id': 'DECIMAL', 'type_info': {'type': 'DECIMAL_TYPE_INFO', 'alias': '', 'extension_info': None, 'width': 2, 'scale': 1}},
+                                  'is_null': False, 'value': 5}}
+    DECIMAL_CAST = {'class': 'CAST', 'type': 'OPERATOR_CAST', 'alias': '', 'query_location': 7,
+                    'child': {'class': 'COLUMN_REF', 'type': 'COLUMN_REF', 'alias': '', 'column_names': ['x']},
+                    'cast_type': {'id': 'DECIMAL', 'type_info': {'type': 'DECIMAL_TYPE_INFO', 'alias': '', 'extension_info': None, 'width': 10, 'scale': 2}}, 'try_cast': False}
+
+    def test_decimal_literals_and_decimal_casts_pass(self):
+        # 割合(* 100.0)・0.5を掛ける・DECIMALへの変換が、通る(以前は、DECIMAL_TYPE_INFOで拒否されていた)
+        for expression in (self.DECIMAL_CONSTANT, self.DECIMAL_CAST):
+            guard.validate_tree(tree(select_node(table('v_ai_shipment'), where=expression)), self.ALLOWED)
+
+    def test_other_type_infos_are_still_rejected(self):
+        for kind in ('STRING_TYPE_INFO', 'LIST_TYPE_INFO', 'STRUCT_TYPE_INFO', 'ENUM_TYPE_INFO', 'DECIMAL_TYPE_INFO_X'):
+            expression = {**self.DECIMAL_CONSTANT, 'value': {'type': {'id': 'X', 'type_info': {'type': kind}}, 'is_null': False, 'value': 5}}
+            self.assertEqual(self.reason(tree(select_node(table('v_ai_shipment'), where=expression))), 'syntax_not_supported', kind)
+
+    def test_the_decimal_type_info_does_not_hide_anything_inside_it(self):
+        # 許可した型の情報の中に、許可されない表の参照や未知の構文を入れても、通らない(中の要素も、すべて検査する)
+        hidden_table = {'class': 'CONSTANT', 'type': 'VALUE_CONSTANT',
+                        'value': {'type': {'id': 'DECIMAL', 'type_info': {'type': 'DECIMAL_TYPE_INFO', 'extra': table('secret_table')}}, 'is_null': False, 'value': 5}}
+        self.assertEqual(self.reason(tree(select_node(table('v_ai_shipment'), where=hidden_table))), 'reference_not_allowed')
+        hidden_unknown = {'class': 'CONSTANT', 'type': 'VALUE_CONSTANT',
+                          'value': {'type': {'id': 'DECIMAL', 'type_info': {'type': 'DECIMAL_TYPE_INFO', 'extra': {'type': 'SHOW_REF'}}}, 'is_null': False, 'value': 5}}
+        self.assertEqual(self.reason(tree(select_node(table('v_ai_shipment'), where=hidden_unknown))), 'syntax_not_supported')
+
     def test_unknown_expression_classes_are_rejected(self):
         node = select_node(table('v_ai_shipment'), where={'class': 'PARAMETER', 'type': 'VALUE_PARAMETER'})
         self.assertEqual(self.reason(tree(node)), 'syntax_not_supported')
@@ -943,6 +970,48 @@ class ParameterGenerationTest(CodegenBase):
                     self.assertEqual(state['attempts'], 1)
                     self.assertNotIn('template_source', state)
                     self.assertEqual(state['reasons'], [reason])
+
+    def test_the_names_of_undeclared_and_unused_variables_are_reported_as_plain_identifiers(self):
+        s = lambda query: [{'name': 'w_daily', 'query': query}]
+        base = PARAM_STEPS[0]['query']
+        cases = [
+            (param_response(steps=s(base.replace('{{customer_code}}', '{{other}}'))), {'parameters_undeclared': ['other']}),
+            (param_response(parameters=PARAM_DEFS + [{'name': 'second', 'type': 'customer_code', 'label': '別の顧客', 'default': 'C-001'}]), {'parameters_unused': ['second']}),
+            # 変数の一覧なしで{{…}}を書いた(読める形の名前だけを、昇順・重複なしで出す)
+            (json.dumps({'steps': [{'name': 'w_empty', 'query': "SELECT 1 FROM v_ai_shipment WHERE a = {{ship_to_code}} AND b = {{customer_code}} AND c = {{customer_code}}"}],
+                         'python': "emit_report('x')"}, ensure_ascii=False), {'parameters_undeclared': ['customer_code', 'ship_to_code']}),
+        ]
+        for response, expected in cases:
+            with self.subTest(expected=expected):
+                plan = self.new_plan()
+                self.generate(plan, response)
+                state = self.current(plan)['codegen']
+                self.assertEqual(state['status'], 'failed')
+                self.assertEqual(state['reason_names'], expected)
+                self.assertEqual(state['history'][-1]['names'], expected)
+
+    def test_no_names_are_stored_when_none_can_be_read_or_for_other_reasons(self):
+        # 読めない表記({{ x }}・大文字)だけのとき、変数名は保存しない。直書きなど、変数名と無関係な理由のときも保存しない
+        cases = [
+            json.dumps({'steps': [{'name': 'w_a', 'query': GOOD_STEPS[0]['query'] + ' -- {{ x }}'}], 'python': GOOD_PYTHON}, ensure_ascii=False),
+            json.dumps({'steps': GOOD_STEPS, 'python': GOOD_PYTHON + "\nemit_report('{{Unknown}}')"}, ensure_ascii=False),
+            param_response(python=PARAM_PYTHON + "\nx = 'C-001'"),
+        ]
+        for response in cases:
+            with self.subTest(response=response[:50]):
+                plan = self.new_plan()
+                self.generate(plan, response)
+                state = self.current(plan)['codegen']
+                self.assertEqual(state['status'], 'failed')
+                self.assertNotIn('reason_names', state)
+                self.assertNotIn('names', state['history'][-1])
+
+    def test_a_successful_generation_has_no_names(self):
+        plan = self.new_plan()
+        self.generate(plan, param_response())
+        state = self.current(plan)['codegen']
+        self.assertEqual(state['status'], 'generated')
+        self.assertNotIn('reason_names', state)
 
     def test_a_literal_value_reports_where_and_what_with_fixed_codes_only(self):
         s = lambda query: [{'name': 'w_daily', 'query': query}]

@@ -1,7 +1,10 @@
 """テンプレートの変数(段階2-A、BOSS承認 2026-10-05)。
 
 コードの中の「{{名前}}」を、使うときに、確認した値(引用符つきの文字列)へ置き換える。期間は「period_from」「period_to」(分析案の期間に連動)。
-- 変数の種類は、TYPESの1か所にまとめる(追加は、ここへの追加)。種類: 日付(期間だけ)・品番・顧客コード・納入先コード
+- 変数の種類は、TYPESの1か所にまとめる(追加は、ここへの追加)。種類: 日付(期間)・品番・顧客コード・納入先コード
+- 日付の変数は、「名前_from」と「名前_to」の組(2026-10-07、BOSS承認)。全体の期間は period_from・period_to(値は分析案の期間に固定)。
+  期間を分けて比べる分析(月ごと・前半と後半など)の「比べる期間」は、組を何組でも。値(初期値)は、AIが目的・手順から読み取り、
+  サーバーが、形式・開始日<=終了日・全体の期間の中、を確認する。
 - 値は、形式(英数字・アンダースコア・ハイフンのみ)と、実在(品番=m_product、顧客コード=m_customer、納入先コード=ビューの実際の値)を確認する。
   形式を絞るため、置き換えた値がSQL・Pythonの文字列を壊すことはない
 - 保存するコードに、変数の元の値(品番など)や日付が文字のまま残っていたら、保存を断る(直書きの禁止)
@@ -21,6 +24,7 @@ NAME_PATTERN = re.compile(r'[a-z][a-z0-9_]*')
 PLACEHOLDER_PATTERN = re.compile(r'\{\{([a-z][a-z0-9_]*)\}\}')
 CODE_VALUE_PATTERN = re.compile(r'[A-Za-z0-9_-]{1,40}')  # fullmatchで使う(末尾の改行を通さない)
 DATE_LITERAL_PATTERN = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}')
+DATE_NAME_PATTERN = re.compile(r'[a-z][a-z0-9_]*_(?:from|to)')  # 日付の変数の名前(組: 名前_from と 名前_to)
 PERIOD_FROM, PERIOD_TO = 'period_from', 'period_to'
 DEFINITION_KEYS = {'name', 'type', 'label', 'default'}
 
@@ -96,17 +100,33 @@ def validate_definitions(parameters):
             raise AnalysisError('変数の種類が不正です。')
         if type(label) is not str or not label.strip():
             raise AnalysisError('変数のラベルを指定してください。')
-        if (name in (PERIOD_FROM, PERIOD_TO)) != (type_name == 'date'):
-            raise AnalysisError('日付の変数は、period_from・period_toだけです。')
+        if name in (PERIOD_FROM, PERIOD_TO) and type_name != 'date':
+            raise AnalysisError('period_from・period_toは、種類を日付にしてください。')
+        if type_name == 'date' and not DATE_NAME_PATTERN.fullmatch(name):
+            raise AnalysisError('日付の変数の名前は、「名前_from」と「名前_to」の組にしてください。')
         cleaned.append({'name': name, 'type': type_name, 'label': label.strip(), 'default': item['default']})
-    if (PERIOD_FROM in seen) != (PERIOD_TO in seen):
-        raise AnalysisError('期間の変数は、period_fromとperiod_toを組で指定してください。')
+    for item in cleaned:  # 日付の変数は、開始(_from)と終了(_to)を組で
+        if item['type'] == 'date':
+            base, partner = _date_partner(item['name'])
+            if partner not in seen or next(c for c in cleaned if c['name'] == partner)['type'] != 'date':
+                raise AnalysisError('日付の変数は、「名前_from」と「名前_to」を組で指定してください。')
     resolve_values(cleaned, {})  # 元の値(既定値)の形式・実在の確認
     return cleaned
 
 
-def resolve_values(definitions, supplied):
-    """変数の値を決める。指定がなければ既定値。未知の名前・不正な値・存在しない値・期間の逆順は拒否する。"""
+def _date_partner(name):
+    """日付の変数の名前から、(組の名前, 相手の変数名)を返す。例: aug_from → ('aug', 'aug_to')。"""
+    if name.endswith('_from'):
+        return name[:-5], name[:-5] + '_to'
+    return name[:-3], name[:-3] + '_from'
+
+
+def resolve_values(definitions, supplied, outer=None):
+    """変数の値を決める。指定がなければ既定値。未知の名前・不正な値・存在しない値・期間の逆順は拒否する。
+
+    比べる期間(period_from・period_to以外の日付の組)は、全体の期間の中に収まること。全体の期間は、変数(period_from・period_to)があればその値、
+    なければ outer=(開始日, 終了日)(分析案・テンプレートの期間)。どちらもなければ、中に収まることは、呼出し側で確認する。
+    """
     if not isinstance(supplied, dict):
         raise AnalysisError('変数の値の形式が不正です。')
     names = {item['name'] for item in definitions}
@@ -117,7 +137,23 @@ def resolve_values(definitions, supplied):
         values[item['name']] = _check_value(item['type'], supplied.get(item['name'], item['default']))
     if PERIOD_FROM in values:
         validate_period(values[PERIOD_FROM], values[PERIOD_TO])
+        outer = (values[PERIOD_FROM], values[PERIOD_TO])
+    for item in definitions:
+        if item['type'] != 'date' or not item['name'].endswith('_from') or item['name'] == PERIOD_FROM:
+            continue
+        start, end = values[item['name']], values[_date_partner(item['name'])[1]]
+        validate_period(start, end)  # 開始日が終了日以前
+        if outer is not None and not (outer[0] <= start and end <= outer[1]):
+            raise AnalysisError('比べる期間は、全体の期間の中に収めてください。')
     return values
+
+
+def placeholder_names(steps, python):
+    """コードに書かれた、読める形の{{名前}}の名前(重複なし・昇順)。失敗の画面に出す、変数名の一覧用。"""
+    found = set()
+    for text in _texts(steps, python):
+        found.update(PLACEHOLDER_PATTERN.findall(text))
+    return sorted(found)
 
 
 def _texts(steps, python):
@@ -163,15 +199,18 @@ def normalize_definitions(raw, date_from, date_to):
             raise AnalysisError('変数の元の値(default)がありません。')
         else:
             definitions.append(dict(item))
-    return validate_definitions(definitions)
+    cleaned = validate_definitions(definitions)
+    resolve_values(cleaned, {}, outer=(date_from, date_to))  # 比べる期間が、分析案の期間の中に収まること(AIの日付を、サーバーが確認する)
+    return cleaned
 
 
 class SourceCheckError(AnalysisError):
     """コードと変数の不一致。画面へ出す固定の理由コード(reason)を持つ(AIの文章は持たない)。"""
 
-    def __init__(self, detail, reason, extra=()):
+    def __init__(self, detail, reason, extra=(), names=None):
         super().__init__(detail)
         self.reason = reason
+        self.names = names or {}  # 理由コード→変数の名前(英小文字・数字・アンダースコアだけの識別子)。AIの自由な文章は持たない
         self.reasons = [reason, *extra]  # 主な理由のあとに、場所・種類の固定コードを続ける(直書きのとき)
 
 
@@ -185,9 +224,9 @@ def check_source(steps, python, definitions):
         used.update(PLACEHOLDER_PATTERN.findall(text))
     names = {item['name'] for item in definitions}
     if used - names:
-        raise SourceCheckError('コードに、定義されていない変数があります。', 'parameters_undeclared')
+        raise SourceCheckError('コードに、定義されていない変数があります。', 'parameters_undeclared', names={'parameters_undeclared': sorted(used - names)})
     if names - used:
-        raise SourceCheckError('定義した変数が、コードで使われていません。', 'parameters_unused')
+        raise SourceCheckError('定義した変数が、コードで使われていません。', 'parameters_unused', names={'parameters_unused': sorted(names - used)})
     # 置き換えで引用符が付くため、変数の前後に引用符があると、文字列が壊れる
     if any(QUOTED_PLACEHOLDER_PATTERN.search(text) for text in texts):
         raise SourceCheckError('変数の前後に引用符を付けないでください({{名前}} だけを書くと、値が引用符つきで入ります)。', 'parameters_quoted')

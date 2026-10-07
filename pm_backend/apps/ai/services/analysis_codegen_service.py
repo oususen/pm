@@ -69,7 +69,11 @@ PARAMETER_RULE = (
     '日付(2026-08-01 など)・コード(V000000000 など)を、直接書かない。分析案の手順や目的に書かれた値・日付も、そのままコードへ写さない。グラフ・表のタイトル、文字列、コメントにも、日付・品番・顧客コード・納入先コードの固定の値を書かない(変数 {{名前}} を使うか、値を含まない固定の文言にする)。月の表示名(8月など)も直書きせず、期間から作る(SQLのstrftime、Pythonのdatetime)。'
     '変数を使ったときは、返すJSONに "parameters" を加える: [{"name": "product_code", "type": "product_code", "label": "品番", "default": "目的に書かれた値"}, '
     '{"name": "period_from", "type": "date", "label": "開始日"}, {"name": "period_to", "type": "date", "label": "終了日"}]。'
-    'type は date(period_from・period_toだけ。defaultは不要)、product_code、customer_code、ship_to_code のいずれか。名前は英小文字・数字・アンダースコア。'
+    '期間を分けて比べる分析(月ごとの比較・前半と後半・週ごとなど)では、比べる期間ごとに、「名前_from」と「名前_to」の2つの日付の変数(type は date)を作り、それぞれの期間の集計の条件に使う'
+    '(例: 8月と9月を比べるなら aug_from・aug_to と sep_from・sep_to を作り、8月の集計に WHERE shipment_date BETWEEN {{aug_from}} AND {{aug_to}}、9月の集計に WHERE shipment_date BETWEEN {{sep_from}} AND {{sep_to}})。'
+    '全体の期間 {{period_from}}・{{period_to}} を、比べる2つの期間の両方に、そのまま使わない(同じ期間どうしを比べることになる)。'
+    '比べる期間の変数は、parameters の default に、目的・手順から読み取った日付(YYYY-MM-DD)を書く。比べる期間は、全体の期間の中に入れ、開始日は終了日以前にする。'
+    'type は date(period_from・period_toと、比べる期間の「名前_from」「名前_to」だけ。period_from・period_toの default は不要。比べる期間の default は必要)、product_code、customer_code、ship_to_code のいずれか。名前は英小文字・数字・アンダースコア。'
     '使った変数は、すべて parameters に書き、parameters に書いた変数は、すべてコードで使う。変数を使わないなら、parameters は返さない。'
     'Pythonで、辞書・集合の閉じ括弧を連続させない(} } のように間に空白を入れる。連続した閉じ括弧は、変数の表記と区別できないため、変数を使うコードでは、使えない)。'
 )
@@ -336,20 +340,22 @@ def _apply_parameters(proposal, steps, python, parameters):
     try:
         definitions = template_params.normalize_definitions(parameters, proposal['date_from'], proposal['date_to'])
     except AnalysisError as exc:
-        return steps, python, None, ['parameters_unavailable' if exc.status_code == 503 else 'parameters_invalid']
+        return steps, python, None, ['parameters_unavailable' if exc.status_code == 503 else 'parameters_invalid'], {}
     except (TypeError, KeyError, ValueError, AttributeError):
         # AIが想定外の形(型違い)を返したとき。例外で止めると「生成中」が残るため、固定の理由コードにする(AIの内容は、ログ・応答に出さない)
-        return steps, python, None, ['parameters_invalid']
+        return steps, python, None, ['parameters_invalid'], {}
     if not (isinstance(steps, list) and all(isinstance(step, dict) and isinstance(step.get('query'), str) for step in steps) and isinstance(python, str)):
-        return steps, python, None, []  # 形式の不正は、従来の検査(validate_generated)が、理由コードにする
+        return steps, python, None, [], {}  # 形式の不正は、従来の検査(validate_generated)が、理由コードにする
     try:
         template_params.check_source(steps, python, definitions)
-        concrete_steps, concrete_python = template_params.concrete_code(steps, python, template_params.resolve_values(definitions, {}))
+        concrete_steps, concrete_python = template_params.concrete_code(steps, python, template_params.resolve_values(
+            definitions, {}, outer=(proposal['date_from'], proposal['date_to'])))
     except AnalysisError as exc:
-        return steps, python, None, ['parameters_unavailable'] if exc.status_code == 503 else list(getattr(exc, 'reasons', ['parameters_source_invalid']))
+        return (steps, python, None, ['parameters_unavailable'], {}) if exc.status_code == 503 else (
+            steps, python, None, list(getattr(exc, 'reasons', ['parameters_source_invalid'])), dict(getattr(exc, 'names', {})))
     except (TypeError, KeyError, ValueError, AttributeError):
-        return steps, python, None, ['parameters_source_invalid']
-    return concrete_steps, concrete_python, {'steps': steps, 'python': python, 'parameters': definitions}, []
+        return steps, python, None, ['parameters_source_invalid'], {}
+    return concrete_steps, concrete_python, {'steps': steps, 'python': python, 'parameters': definitions}, [], {}
 
 
 def generate(owner_id, plan_id, revision, confirmation=None):
@@ -393,6 +399,7 @@ def generate(owner_id, plan_id, revision, confirmation=None):
         reasons.append('ai_request_failed')
     approved_views = [d['view'] for d in plan['proposal']['datasets']]
     steps = python = unsupported = source = None
+    names = {}  # 失敗の理由ごとの変数名(固定の形の識別子だけ。画面で、どの変数かを示す)
     if raw is not None:
         kind, steps, python, parameters = parse_response_full(raw)
         if kind == 'invalid':
@@ -402,20 +409,22 @@ def generate(owner_id, plan_id, revision, confirmation=None):
             reasons.append('ai_unsupported')
         else:
             if parameters is not None:
-                steps, python, source, variable_reasons = _apply_parameters(plan['proposal'], steps, python, parameters)
+                steps, python, source, variable_reasons, names = _apply_parameters(plan['proposal'], steps, python, parameters)
                 reasons += variable_reasons
             elif template_params.has_placeholder_like(steps, python):
                 # 変数を宣言せずに{{...}}を書いた(未置換の文字列が、そのまま実行される)。生成の失敗にする
                 reasons.append('parameters_undeclared')
+                undeclared = template_params.placeholder_names(steps, python)
+                names = {'parameters_undeclared': undeclared} if undeclared else {}
             if not reasons:
                 reasons += validate_generated(steps, python, approved_views)  # 変数があれば、値を入れた、実行する形を検査する
 
     def finish(codegen_state):
-        history = codegen_state.get('history', []) + [{'attempt': attempt_no, 'at': datetime.now().isoformat(), 'reasons': reasons}]
+        history = codegen_state.get('history', []) + [{'attempt': attempt_no, 'at': datetime.now().isoformat(), 'reasons': reasons, **({'names': names} if names else {})}]
         base = {'attempts': attempt_no, 'inflight': None, 'history': history}
         if reasons:
             codegen_state.clear()
-            codegen_state.update({**base, 'status': 'failed', 'reasons': reasons, 'unsupported_reason': unsupported})
+            codegen_state.update({**base, 'status': 'failed', 'reasons': reasons, 'unsupported_reason': unsupported, **({'reason_names': names} if names else {})})
             return
         bundle = make_bundle(steps, python, approved_views)
         codegen_state.clear()

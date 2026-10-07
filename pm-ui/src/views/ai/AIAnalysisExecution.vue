@@ -29,7 +29,7 @@
       <p>後始末: DB接続={{ job.cleanup?.db_connection || '未確認' }} / コンテナ={{ job.cleanup?.container || '未確認' }}</p>
       <p v-if="job.status === 'cancelled' && !cleanupComplete">中止後の後始末は未完了／未確認です。中止完了とは扱いません。</p>
       <p>実行時の期間: {{ job.scope?.date_from }} ～ {{ job.scope?.date_to }} / 条件: {{ job.scope?.conditions }}</p>
-      <p v-for="dataset in job.scope?.datasets || []" :key="dataset.view">{{ dataset.view }} / 取得行数: {{ job.counts?.[dataset.view] ?? '未確認' }}行</p>
+      <p v-for="dataset in job.scope?.datasets || []" :key="dataset.view">{{ dataset.view }} / 取得行数: {{ job.counts?.[dataset.view] ?? '未確認' }}行（分析のために取り出した行数。絞り込み前で、結果の行数ではありません）</p>
       <p>行数は数量の合計ではありません。入荷はqty、出荷はquantityの集計結果を数量として確認してください。</p>
       <div :class="{ 'completion-notice': !!completionText, 'completion-success': monitor.notice.value?.status === 'success', 'completion-failed': monitor.notice.value?.status === 'failed', 'completion-attention': !!completionText && !['success', 'failed'].includes(monitor.notice.value?.status), 'completion-pulse': monitor.notice.value?.status === 'success' && !monitor.acknowledged.value }">
         <div class="completion-live" aria-live="polite" aria-atomic="true">
@@ -41,12 +41,14 @@
         <p>結果保持期限: {{ formatDate(job.result_expires_at) }}。結果本文はRedisに一時保持し、履歴には保存しません。</p>
         <article v-for="(table, index) in job.result.tables || []" :key="`table-${index}`">
           <h3>{{ table.name }}</h3>
+          <p v-if="!(table.rows && table.rows.length)" class="empty-result" role="status">該当するデータがありません（0行）。条件に合う行がなかったため、表は空です。</p>
           <div class="scroll"><table><thead><tr><th v-for="(column, i) in table.columns" :key="i">{{ column }}</th></tr></thead>
             <tbody><tr v-for="(row, r) in table.rows" :key="r"><td v-for="(cell, c) in row" :key="c">{{ cell ?? 'NULL' }}</td></tr></tbody></table></div>
         </article>
         <article v-for="({ chart, plot }, index) in plottedCharts" :key="`chart-${index}`">
           <h3>{{ chart.title }}</h3>
           <p v-if="plot.nonNumeric">数値として描画できない値があります。元の値は下の表で確認してください。</p>
+          <p v-if="!chart.x.length" class="empty-result" role="status">グラフにするデータがありません。</p>
           <svg v-if="chart.x.length" viewBox="0 0 640 240" role="img" :aria-label="chart.title">
             <line x1="40" x2="620" :y1="plot.baseline" :y2="plot.baseline" stroke="#667" />
             <text x="0" y="20">{{ plot.max }}</text><text x="0" y="210">{{ plot.min }}</text>
@@ -229,6 +231,7 @@ async function loadHistory(target = 1) {
 
 <style scoped>
 .execution { border-top: 1px solid #ccc; margin-top: 20px; } .template-unapproved { font-weight: bold; color: #7a4b00; background: #fff4d6; padding: 6px; } button { margin: 4px; padding: 8px; } article { margin: 16px 0; padding: 10px; background: #f5f9f8; }
+.empty-result { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 6px 10px; }
 .scroll { overflow: auto; } table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #ccd; padding: 5px; text-align: left; } pre { white-space: pre-wrap; overflow-wrap: anywhere; } svg { width: 100%; max-height: 300px; } [role=alert], .execution-failed { color: #a22; }
 .completion-notice { border: 2px solid currentColor; padding: 10px; margin: 12px 0; }
 .completion-success { color: #126d63; background: #edf6f5; }

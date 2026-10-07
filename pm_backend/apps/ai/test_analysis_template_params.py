@@ -400,6 +400,53 @@ class ReuseTests(ParamBase):
         self.assert_no_plan()
 
 
+HALF_STEPS = [
+    {'name': 'w_first', 'query': 'SELECT 1 FROM v_ai_shipment WHERE shipment_date BETWEEN {{first_from}} AND {{first_to}}'},
+    {'name': 'w_second', 'query': 'SELECT 2 FROM v_ai_shipment WHERE shipment_date BETWEEN {{second_from}} AND {{second_to}}'},
+]
+HALF_DEFS = [
+    {'name': 'first_from', 'type': 'date', 'label': '前半の開始日', 'default': '2026-01-01'},
+    {'name': 'first_to', 'type': 'date', 'label': '前半の終了日', 'default': '2026-01-15'},
+    {'name': 'second_from', 'type': 'date', 'label': '後半の開始日', 'default': '2026-01-16'},
+    {'name': 'second_to', 'type': 'date', 'label': '後半の終了日', 'default': '2026-01-31'},
+]
+
+
+class MultiPeriodReuseTests(ParamBase):
+    """複数の期間の変数(2026-10-07、BOSS承認)の再利用API: 比べる期間を指定でき、テンプレートの期間(1月)の外・逆順は400。"""
+
+    def row(self):
+        return self.param_row(steps=HALF_STEPS, python=PYTHON, definitions=HALF_DEFS)
+
+    def test_compared_periods_can_be_changed_inside_the_template_period(self):
+        row = self.row()
+        body = {'first_from': '2026-01-02', 'first_to': '2026-01-10', 'second_from': '2026-01-11', 'second_to': '2026-01-20'}
+        response = self.reuse_with(self.other, row, body)
+        self.assertEqual(response.status_code, 201)
+        plan, _ = FakeStore.created[0]
+        queries = [step['query'] for step in plan['codegen']['steps']]
+        self.assertIn("BETWEEN '2026-01-02' AND '2026-01-10'", queries[0])
+        self.assertIn("BETWEEN '2026-01-11' AND '2026-01-20'", queries[1])
+        self.assertEqual((plan['proposal']['date_from'], plan['proposal']['date_to']), ('2026-01-01', '2026-01-31'))  # 全体の期間は、テンプレートのまま
+        self.assertEqual(plan['template']['values'], body)
+        self.assertNotIn('{{', json.dumps(plan['codegen']['steps']) + plan['codegen']['python'])
+
+    def test_a_period_outside_the_template_period_or_reversed_is_a_400_and_creates_nothing(self):
+        row = self.row()
+        for body in ({'first_from': '2025-12-31'}, {'second_to': '2026-02-01'}, {'first_from': '2026-01-20'}, {'second_from': '2026-02-01', 'second_to': '2026-02-10'}):
+            with self.subTest(body=body):
+                FakeStore.created.clear()
+                response = self.reuse_with(self.other, row, body)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(FakeStore.created, [])
+
+    def test_the_period_pairs_are_defaults_when_not_given(self):
+        response = self.reuse_with(self.other, self.row())
+        self.assertEqual(response.status_code, 201)
+        plan, _ = FakeStore.created[0]
+        self.assertEqual(plan['template']['values'], {item['name']: item['default'] for item in HALF_DEFS})
+
+
 class NormalizeAndQuoteTests(ParamBase):
     def test_a_quote_next_to_a_placeholder_is_refused_because_the_replacement_adds_quotes(self):
         for text in ("x = '{{product_code}}'", 'x = "{{product_code}}"', "x = '{{product_code}}", "x = {{product_code}}'", 'x = "{{product_code}}'):

@@ -910,6 +910,28 @@ test('結果の改良の準備中に、検索から新しい分析が来たら�
   } finally { f.stop() }
 })
 
+test('宣言されなかった変数・使われない変数の名前を、失敗の理由に添えて表示する。識別子の形以外は表示しない', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    const failed = (reasons, reason_names) => ({ ...dataPlan('qwen'), codegen: { status: 'failed', attempts: 1, reasons, ...(reason_names ? { reason_names } : {}) }, codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null } })
+    f.state.plan.value = failed(['parameters_undeclared'], { parameters_undeclared: ['customer_code', 'ship_to_code', '<img src=x onerror=SECRET>', 'Upper', 5] })
+    let text = await html()
+    assert.ok(text.includes('宣言されていない変数: customer_code、ship_to_code'))
+    assert.equal(text.includes('SECRET'), false); assert.equal(text.includes('Upper'), false)
+    f.state.plan.value = failed(['parameters_unused'], { parameters_unused: ['second'] })
+    assert.ok((await html()).includes('使われていない変数: second'))
+    // 名前がない・形式が違う・別の理由のときは、従来の固定文だけ
+    for (const names of [undefined, { parameters_undeclared: [] }, { parameters_undeclared: 'x' }, { other: ['a'] }]) {
+      f.state.plan.value = failed(['parameters_undeclared'], names)
+      text = await html()
+      assert.ok(text.includes('変数を宣言していません')); assert.equal(text.includes('宣言されていない変数:'), false)
+    }
+    f.state.plan.value = failed(['parameters_quoted'], { parameters_undeclared: ['customer_code'] })
+    assert.equal((await html()).includes('customer_code'), false)  // 理由と無関係の名前は出さない
+  } finally { f.stop() }
+})
+
 test('目的の言葉と列の食い違いの警告を②に表示し(本文はエスケープ)、警告がなければ表示しない。承認は妨げない', async () => {
   const f = await setup('qwen')
   try {

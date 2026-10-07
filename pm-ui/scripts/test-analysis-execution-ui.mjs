@@ -207,6 +207,24 @@ test('成功時だけ結果を表示。表・報告書はエスケープし、�
     for (const status of ['failed', 'cancelled', 'unknown']) { f.state.job.value.status = status; assert.equal((await html(f)).includes('SECRET'), false) }
   } finally { f.stop() }
 })
+test('結果が0行・空のグラフのときは、データがないことを明示する。行があれば表示しない。取得行数は絞り込み前と説明する', async () => {
+  const f = await setup()
+  try {
+    const empty = { tables: [{ name: '品番別', columns: ['品番', '数量'], rows: [] }], charts: [{ kind: 'bar', title: '数量', x: [], series: [{ name: '数量', values: [] }] }], report: null }
+    f.state.job.value = { ...job('success'), result: empty }
+    const text = await html(f)
+    assert.ok(text.includes('該当するデータがありません（0行）'))
+    assert.ok(text.includes('グラフにするデータがありません'))
+    assert.equal(text.includes('<svg'), false)
+    assert.ok(text.includes('取得行数: 3行（分析のために取り出した行数。絞り込み前で、結果の行数ではありません）'))
+    const filled = { tables: [{ name: '品番別', columns: ['品番', '数量'], rows: [['V1', 5]] }], charts: [{ kind: 'bar', title: '数量', x: ['V1'], series: [{ name: '数量', values: [5] }] }], report: null }
+    f.state.job.value = { ...job('success'), result: filled }
+    const text2 = await html(f)
+    assert.equal(text2.includes('該当するデータがありません'), false)
+    assert.equal(text2.includes('グラフにするデータがありません'), false)
+    assert.ok(text2.includes('<svg'))
+  } finally { f.stop() }
+})
 test('棒・折れ線をSVGで表示し、NULLは線をつながず、大きい配列でも上限の引数展開をしない', async () => {
   const f = await setup()
   try {
