@@ -9,11 +9,16 @@
       ><span>後工程計画をLT日数だけ前倒しして算出。TK=1号機、AJ=2号機。</span
       ><button class="btn" @click="showSettings = !showSettings">
         対象設定</button
-      ><button class="btn" @click="openSaveDialog" :disabled="saving">
+      ><button
+        class="btn"
+        :class="{ 'save-blink': dirty && !saving }"
+        @click="openSaveDialog"
+        :disabled="saving"
+      >
         {{ saving ? "保存中..." : "手回数を保存" }}</button
       ><button class="btn" @click="openPrintDialog">印刷</button
       ><button class="btn" @click="openResetDialog">手数リセット</button
-      ><button class="btn primary" @click="confirmLoadPlan">計画・材料再計算</button
+      ><button class="btn primary" @click="confirmLoadPlan">最新需要反映</button
       ><span v-if="message" class="toolbar-message">{{ message }}</span>
     </div>
     <div
@@ -1584,6 +1589,21 @@ button {
   border-radius: 4px;
   padding: 5px 8px;
   cursor: pointer;
+}
+/* 未保存の手回数・期首の入力があるとき、保存ボタンを点滅させる */
+.save-blink {
+  animation: save-blink 1s ease-in-out infinite;
+}
+@keyframes save-blink {
+  0%,
+  100% {
+    background: #fff;
+    border-color: #94a3b8;
+  }
+  50% {
+    background: #fde68a;
+    border-color: #d97706;
+  }
 }
 .primary {
   background: #0f766e;
