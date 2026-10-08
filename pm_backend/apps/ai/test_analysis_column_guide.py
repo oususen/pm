@@ -136,6 +136,13 @@ class PlanIntegrationTests(SimpleTestCase):
             self.assertIn(part, system)
         self.assertNotIn('000196', system)
 
+    def test_the_plan_prompt_forbids_output_items_that_the_view_cannot_make(self):
+        # 実機の試験T2: 出力案に「納入場名」(ビューにない列)を足して、コード生成が「取得できない」と止まった
+        _plan, messages = self.create(proposal(['shipment_date', 'ship_to_code', 'quantity'], steps=['ship_to_codeで集計']))
+        system = messages[0]['content']
+        self.assertIn('出力案に書いてよいのは、提示した公開ビューの列で作れる項目だけ', system)
+        self.assertIn('ビューにない列(例: コードしかない列の名前・住所など)を、出力案や手順に入れない', system)
+
     def test_the_consult_prompt_has_the_term_table_and_asks_about_unclear_words(self):
         prompt = consult._system_prompt([])
         for part in ('納入地・納入場・納入場所=ship_to_code', '顧客・得意先・客先・出荷先=customer_code', '決められないときは、利用者に確認する', 'ship_to_code=納入場(納入地)のコード'):
