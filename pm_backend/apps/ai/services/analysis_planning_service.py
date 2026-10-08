@@ -9,7 +9,7 @@ from ai.config.models import AIProviderConfig
 from ai.models import AIAnalysisRun
 from ai.config.service import external_aggregate_transfer_allowed, get_analysis_execution_policy
 from ai.services import analysis_llm, chat_service
-from ai.services.analysis_data_service import ANALYSIS_VIEWS, column_warnings, count_target_rows, term_guide_text, validate_datasets, validate_period, with_management_columns
+from ai.services.analysis_data_service import ANALYSIS_VIEWS, column_warnings, count_target_rows, period_warnings, term_guide_text, validate_datasets, validate_period, with_management_columns
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services.sql_queries import BASE_SQL_SCHEMA
 from ai.services.analysis_redaction import build_analysis_code_redactor
@@ -234,7 +234,7 @@ def create_plan(owner_id, data):
     proposal = {**proposal, 'provider': provider, 'model': model}
     # 目的の言葉と列の食い違い(機械的な検査)は、警告として分析案へ添える。承認は妨げない(BOSS承認 2026-10-07)
     extra = {'refinement': refinement} if refinement else {}
-    warnings = column_warnings(purpose, proposal)
+    warnings = [*column_warnings(purpose, proposal), *period_warnings(purpose, start, end)]
     if warnings:
         extra['warnings'] = warnings
     return store.create(owner_id, proposal, policy.plan_cache_ttl_minutes, extra=extra or None)

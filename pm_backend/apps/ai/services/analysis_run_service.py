@@ -9,9 +9,11 @@
 - 後始末が`pending`の間は、完了扱いにしない。待機中の処理が終わったときに、`pending`の行だけを最終状態へ更新する。
 - コード本文・結果の中身・取得した明細行・個人情報・AIの応答本文は保存しない(ハッシュと件数と理由だけ)。
 """
+import builtins
 import hashlib
 import logging
 import os
+import re
 import socket
 import threading
 from datetime import datetime, timedelta
@@ -252,6 +254,24 @@ def _loaded_at(diagnostics, fetched_at, now=None):
     return loaded_at
 
 
+# 例外名の許可リスト: 組み込みの例外クラスと、ガードの`GuardError`だけ。自由な名前(データを混ぜた名前など)は、取り出さない(evaluator指摘、BOSS承認 2026-10-08)
+ALLOWED_EXCEPTION_NAMES = frozenset({name for name, value in vars(builtins).items() if isinstance(value, type) and issubclass(value, BaseException)} | {'GuardError'})
+EXCEPTION_LINE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]{0,60})(?::\s*(.*))?$')
+
+
+def child_failure_detail(diagnostics):
+    """子のPythonが異常終了したとき、標準エラーの最終行から、例外の種類名(と、ガードの理由コード)だけを取り出す。
+
+    メッセージの本文・コードの行・値は、実データを含み得るため、取り出さない(固定の形に合う場合だけ。BOSS承認 2026-10-08)。
+    """
+    lines = [line.strip() for line in str(diagnostics.get('stderr') or '').splitlines() if line.strip()]
+    found = EXCEPTION_LINE.match(lines[-1]) if lines else None
+    if not found or found.group(1) not in ALLOWED_EXCEPTION_NAMES:
+        return ''
+    name, code = found.groups()
+    return f'例外: {name}' + (f'({code})' if name == 'GuardError' and code and re.fullmatch(r'[a-z][a-z0-9_]{0,40}', code) else '')
+
+
 def outcome_from_result(result):
     fetch, launcher = result.get('fetch') or {}, result.get('launcher') or {}
     diagnostics = launcher.get('diagnostics') or {}
@@ -260,7 +280,7 @@ def outcome_from_result(result):
     reason = '' if ok else (result.get('reason') or launcher.get('reason') or 'launcher_failed')
     return {
         'status': 'success' if ok else 'failed', 'reason': reason,
-        'detail': '' if ok else reason_text(reason),
+        'detail': '' if ok else (reason_text(reason) + (f" ({child_failure_detail(diagnostics)})" if reason == 'child_exit_nonzero' and child_failure_detail(diagnostics) else ''))[:300],
         'cleanup': {**(fetch.get('cleanup') or {}), 'container': _container_cleanup(launcher)},
         'snapshot_counts': fetch.get('counts'), 'fetched_rows': fetch.get('fetched_rows'), 'sent_rows': fetch.get('sent_rows'),
         'loaded_rows': diagnostics.get('rows_loaded'),

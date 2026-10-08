@@ -910,6 +910,40 @@ test('結果の改良の準備中に、検索から新しい分析が来たら�
   } finally { f.stop() }
 })
 
+test('AIの返事を待つ間(コード生成・分析案の作成)は、生成中のメッセージと経過時間を出し、終われば消える。見出しの要約にも出す', async () => {
+  const { mock } = await import('node:test')
+  mock.timers.enable({ apis: ['setInterval', 'Date'] })
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    assert.equal((await html()).includes('AIが SQL・Python を生成しています'), false)  // 待っていないときは、出さない
+    f.state.busy.value = 'code-generate'; await Vue.nextTick()
+    let text = await html()
+    assert.ok(text.includes('AIが SQL・Python を生成しています。返事を待っています（通常 10〜60秒、最大 90秒）。経過 0秒'))
+    assert.ok(text.includes('生成回数は、すでに数えています'))
+    mock.timers.tick(3000); await Vue.nextTick()
+    text = await html()
+    assert.ok(text.includes('経過 3秒')); assert.ok(text.includes('生成中… 3秒'))  // 本文と、見出しの要約
+    f.state.busy.value = ''; await Vue.nextTick()
+    text = await html()
+    assert.equal(text.includes('AIが SQL・Python を生成しています'), false); assert.equal(text.includes('生成中… '), false)
+    mock.timers.tick(5000); await Vue.nextTick()
+    assert.equal(f.state.elapsedSeconds.value, 0)  // 終わった後は、数えない(タイマーは止まる)
+    // 分析案の作成中(分析案がまだない画面)
+    f.state.plan.value = null; f.state.busy.value = 'create'; await Vue.nextTick()
+    mock.timers.tick(2000); await Vue.nextTick()
+    text = await html()
+    assert.ok(text.includes('AIが分析案を作成しています')); assert.ok(text.includes('経過 2秒'))
+    f.state.busy.value = ''; await Vue.nextTick()
+    assert.equal((await html()).includes('AIが分析案を作成しています'), false)
+    // 他の操作(件数確認など)では、出さない(分析案がある画面で確認する)
+    f.state.plan.value = dataPlan('qwen')
+    f.state.busy.value = 'preview'; await Vue.nextTick()
+    text = await html()
+    assert.ok(text.includes('コード: ')); assert.equal(text.includes('返事を待っています'), false); assert.equal(text.includes('生成中… '), false)
+  } finally { f.stop(); mock.timers.reset() }
+})
+
 test('宣言されなかった変数・使われない変数の名前を、失敗の理由に添えて表示する。識別子の形以外は表示しない', async () => {
   const f = await setup('qwen')
   try {

@@ -421,6 +421,19 @@ test('実行の失敗理由 template_unavailable は固定文で表示する', a
   } finally { f.stop() }
 })
 
+test('子のPythonの異常終了では、サーバーが足した例外の種類名だけを追記し、他の本文は出さない', async () => {
+  const f = await setup()
+  try {
+    f.state.job.value = { ...job('failed'), reason: 'child_exit_nonzero', detail: 'Pythonの実行に失敗しました。 (例外: AttributeError)' }
+    assert.ok((await html(f)).includes('例外: AttributeError'))
+    f.state.job.value = { ...job('failed'), reason: 'child_exit_nonzero', detail: 'x (例外: AttributeError) <img src=x onerror=SECRET>' }
+    const text = await html(f)
+    assert.ok(!text.includes('SECRET') && !text.includes('例外:'))
+    f.state.job.value = { ...job('failed'), reason: 'child_exit_nonzero', detail: 'Pythonの実行に失敗しました。' }
+    assert.ok(!(await html(f)).includes('例外:'))
+  } finally { f.stop() }
+})
+
 test('実行欄の見出しは、右の段階(①〜⑤)と紛らわしい番号を付けない(BOSS指摘 2026-10-05)', async () => {
   const f = await setup()
   try {

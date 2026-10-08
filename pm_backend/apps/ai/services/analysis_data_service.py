@@ -1,4 +1,5 @@
 """公開済みビューだけを対象に、承認画面用の件数を確認する。明細は取得しない。"""
+import re
 from datetime import date, datetime
 
 from django.conf import settings
@@ -75,6 +76,45 @@ def column_warnings(purpose, proposal):
         warnings.append('目的は納入場(納入地)ですが、手順・出力に customer_code(得意先・顧客のコード)が使われています。集計の列が違う可能性があります(納入場はship_to_code)。')
     if customer and not ship_to and 'ship_to_code' in text and 'customer_code' not in text:
         warnings.append('目的は顧客(得意先)ですが、手順・出力に ship_to_code(納入場のコード)が使われています。集計の列が違う可能性があります(顧客はcustomer_code)。')
+    return warnings
+
+
+# 目的文の「N月」(例: 8月・8月〜9月・8月から9月)。「2か月」「12ヶ月」(月の前が、数字でない)は、含めない
+MONTH_RANGE_PATTERN = re.compile(r'(?<![0-9])(1[0-2]|[1-9])月\s*(?:〜|～|~|から|-|ー)\s*(1[0-2]|[1-9])月')
+MONTH_PATTERN = re.compile(r'(?<![0-9])(1[0-2]|[1-9])月')
+
+
+def _mentioned_months(purpose):
+    """目的文に書かれた月(1〜12)の集合。「8月〜9月」は、8月と9月(範囲の途中の月も含む。年をまたぐ範囲は、扱わない)。"""
+    months = set()
+    for start, end in MONTH_RANGE_PATTERN.findall(purpose):
+        if int(start) <= int(end):
+            months.update(range(int(start), int(end) + 1))
+    months.update(int(m) for m in MONTH_PATTERN.findall(purpose))
+    return months
+
+
+def period_warnings(purpose, date_from, date_to):
+    """目的文の月と、期間(画面の開始日・終了日)の食い違いを、警告の文で返す(機械的な検査。AIの出力は直さない。BOSS承認 2026-10-08)。
+
+    目的に月が書かれているとき、期間が、その月より広い(別の月も含む)、または、目的の月が期間に含まれない場合に、警告する。月が書かれていなければ、検査しない。
+    """
+    mentioned = _mentioned_months(purpose)
+    if not mentioned:
+        return []
+    start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    period_months, year, month = set(), start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        period_months.add(month)
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    label = lambda values: '・'.join(f'{m}月' for m in sorted(values))
+    warnings = []
+    extra = period_months - mentioned
+    if extra:
+        warnings.append(f'目的に書かれた月（{label(mentioned)}）より、期間（{date_from}〜{date_to}）が広く、{label(extra)}の分も含まれます。期間の欄を、目的に合わせて直してください。')
+    missing = mentioned - period_months
+    if missing:
+        warnings.append(f'目的に書かれた{label(missing)}が、期間（{date_from}〜{date_to}）に含まれていません。期間の欄を、目的に合わせて直してください。')
     return warnings
 
 

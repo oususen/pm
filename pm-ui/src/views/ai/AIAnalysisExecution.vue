@@ -147,8 +147,10 @@ const FAILURE_LABELS = Object.freeze({
   result_too_large: '結果の容量上限を超えました。',
   template_unavailable: 'テンプレートが再利用できない状態になったため、実行しませんでした。',
 })
+// 子のPythonの異常終了では、サーバーが足した「(例外: 種類名)」だけを追記する(データは含まない)
+const childException = computed(() => job.value?.reason === 'child_exit_nonzero' && typeof job.value.detail === 'string' ? (job.value.detail.match(/\((例外: [A-Za-z0-9_()]+)\)\s*$/)?.[1] || '') : '')
 const jobDetail = computed(() => job.value?.status === 'failed'
-  ? (typeof job.value.reason === 'string' && Object.hasOwn(FAILURE_LABELS, job.value.reason) ? FAILURE_LABELS[job.value.reason] : '失敗しました。詳細は理由コードを参照してください。')
+  ? (typeof job.value.reason === 'string' && Object.hasOwn(FAILURE_LABELS, job.value.reason) ? FAILURE_LABELS[job.value.reason] + (childException.value ? ` (${childException.value})` : '') : '失敗しました。詳細は理由コードを参照してください。')
   : job.value?.detail || '')
 const formatDate = value => typeof value === 'string' ? value.replace('T', ' ').slice(0, 19) : ''
 const colors = ['#168779', '#ad5d17', '#5366b1', '#923f73']

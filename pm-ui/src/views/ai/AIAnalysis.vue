@@ -64,6 +64,7 @@
           <p>この目的文と期間、公開ビューの説明を送信します。確認だけでは社外AIへ送信しません。</p>
           <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">名称ではなく登録コードになっており、未登録の人名・社名・機密を含まないことを確認しました</label>
         </section>
+        <p v-if="busy === 'create'" class="generating" role="status" aria-live="polite">⏳ AIが分析案を作成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。</p>
         <button v-if="!selectedProvider?.external || externalPreview" type="button" :disabled="!canCreate || (selectedProvider?.external && !externalAccepted)" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : selectedProvider?.external ? '確認した内容を社外AIへ送って分析案を作成' : '分析案を作成' }}</button>
       </template>
         </div>
@@ -122,6 +123,7 @@
           <span class="stage-no">④</span><strong>SQL・Python</strong><em>{{ stageLabel(4) }}</em><small v-if="stageSummary(4)">{{ stageSummary(4) }}</small>
         </button>
         <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
+            <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが SQL・Python を生成しています。返事を待っています（通常 10〜60秒、最大 90秒）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
             <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
             <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
             <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
@@ -403,6 +405,7 @@ function stageSummary(n) {
   if (n === 1) return p.proposal.title ? `分析案: ${p.proposal.title}` : ''
   if (n === 2) return p.method_approved_at ? `手順承認 ${formatDate(p.method_approved_at)}` : ''
   if (n === 3) return p.data_approved_at ? `データ承認 ${formatDate(p.data_approved_at)}` : ''
+  if (n === 4 && busy.value === 'code-generate') return `生成中… ${elapsedSeconds.value}秒`
   if (n === 4) return hasCode.value ? (codeAttention.value ? 'コード生成済み・要確認' : 'コード生成済み') : (codeAttention.value ? 'コード・要確認' : '')
   if (n === 6) return !codeApproved.value ? '' : (!p.execution ? '左で実行してください' : (executionActive.value ? '実行中' : '実行依頼済み'))
   return codeState.value?.status === 'code_approved' ? `コード承認 ${formatDate(codegen.value?.code_approved_at)}` : ''
@@ -504,7 +507,21 @@ watch(() => props.request, (request) => {
   purpose.value = request.question || ''
   source.value = request.screenContext || ''
 }, { immediate: true })
-onBeforeUnmount(() => { disposed = true; generation += 1 })
+// 経過時間(秒)。AIの返事を待つ間(分析案の作成・コード生成)だけ、1秒ごとに数える。止まっていないことが分かるようにする(BOSS承認 2026-10-08)
+const elapsedSeconds = ref(0)
+let elapsedTimer = null
+function stopElapsedTimer() {
+  if (elapsedTimer !== null) { clearInterval(elapsedTimer); elapsedTimer = null }
+}
+watch(busy, value => {
+  stopElapsedTimer()
+  elapsedSeconds.value = 0
+  if (value !== 'code-generate' && value !== 'create') return
+  const startedAt = Date.now()
+  elapsedTimer = setInterval(() => { elapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000) }, 1000)
+  elapsedTimer.unref?.()  // Node(試験)では、タイマーが、プロセスの終了を妨げないようにする。ブラウザでは、数値が返るため、何もしない
+})
+onBeforeUnmount(() => { disposed = true; generation += 1; stopElapsedTimer() })
 onMounted(async () => {
   try {
     const response = await api.aiAnalysis.options()
@@ -723,6 +740,7 @@ input { padding: 4px; font: inherit; }
 .dataset { background: #f4f8f8; padding: 1px 8px; overflow-wrap: anywhere; }
 .external-purpose { white-space: pre-wrap; }
 .error { background: #fff0ee; color: #9a362b; padding: 8px; }
+.generating { background: #e8f4fd; border-left: 3px solid #2a7fc1; color: #123c5a; padding: 8px 10px; font-weight: 600; }
 .warning { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 8px 10px; }
 select { padding: 4px; font: inherit; max-width: 100%; }
 button:not(:disabled) { border-color: #168779; color: white; background: #168779; cursor: pointer; }

@@ -371,7 +371,9 @@ def process_job(store, job_id, worker):
             # 中止要求が結果確定より先なら、成功結果を絶対に採用しない。
             if current['cancel_requested'] and outcome['status'] == 'success':
                 outcome.update(status='cancelled', reason='user_cancelled')
-            current.update(outcome, detail=reason_text(outcome['reason']) if outcome['reason'] else '', finished_at=datetime.now().isoformat())
+            # 子のPythonの異常終了だけ、例外の種類名を足した説明(analysis_run_service.child_failure_detail)をそのまま使う
+            detail = outcome.get('detail') if outcome['reason'] == 'child_exit_nonzero' and outcome.get('detail') else (reason_text(outcome['reason']) if outcome['reason'] else '')
+            current.update(outcome, detail=detail, finished_at=datetime.now().isoformat())
             current.pop('snapshot', None)
             current.pop('result', None)
             if current['status'] == 'success':
