@@ -187,7 +187,7 @@ class GenerationTests(CodegenBase):
     def test_the_instruction_explains_the_compared_periods(self):
         rule = cg.PARAMETER_RULE
         for part in ('期間を分けて比べる分析', '「名前_from」と「名前_to」の2つの日付の変数', 'aug_from・aug_to と sep_from・sep_to',
-                     '比べる2つの期間の両方に、そのまま使わない', '比べる期間の default は必要', '全体の期間の中に入れ'):
+                     '比べる2つの期間の両方に、そのまま使わない', '比べる期間・除く期間の default は必要', '全体の期間の中に入れ'):
             self.assertIn(part, rule)
 
 

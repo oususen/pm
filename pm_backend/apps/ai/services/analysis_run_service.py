@@ -256,7 +256,15 @@ def _loaded_at(diagnostics, fetched_at, now=None):
 
 # 例外名の許可リスト: 組み込みの例外クラスと、ガードの`GuardError`だけ。自由な名前(データを混ぜた名前など)は、取り出さない(evaluator指摘、BOSS承認 2026-10-08)
 ALLOWED_EXCEPTION_NAMES = frozenset({name for name, value in vars(builtins).items() if isinstance(value, type) and issubclass(value, BaseException)} | {'GuardError'})
-EXCEPTION_LINE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]{0,60})(?::\s*(.*))?$')
+# GuardErrorの理由コードの許可リスト(analysis_guard_runtime.pyで定義した固定コード。未知のコードは、表示・保存しない。Codex P1)
+GUARD_CODES = frozenset({
+    'chart_series_invalid', 'chart_x_not_list', 'function_not_allowed', 'import_not_allowed', 'python_rejected', 'query_empty',
+    'query_failed', 'query_not_select', 'query_not_single_select', 'query_too_deep', 'query_unparseable', 'reference_not_allowed',
+    'source_modified', 'step_name_invalid', 'steps_invalid', 'syntax_not_supported', 'table_columns_not_list', 'table_function_not_allowed',
+    'table_rows_invalid',
+})
+# コンテナ内では、外枠が`user_code`という名前で動くため、例外名に`user_code.`が付く。この接頭辞だけを外す(任意の修飾名は外さない。Codex P2)
+EXCEPTION_LINE = re.compile(r'^(?:user_code\.)?([A-Za-z_][A-Za-z0-9_]{0,60})(?::\s*(.*))?$')
 
 
 def child_failure_detail(diagnostics):
@@ -269,7 +277,13 @@ def child_failure_detail(diagnostics):
     if not found or found.group(1) not in ALLOWED_EXCEPTION_NAMES:
         return ''
     name, code = found.groups()
-    return f'例外: {name}' + (f'({code})' if name == 'GuardError' and code and re.fullmatch(r'[a-z][a-z0-9_]{0,40}', code) else '')
+    return f'例外: {name}' + (f'({code.strip()})' if name == 'GuardError' and code and code.strip() in GUARD_CODES else '')
+
+
+def failure_detail(reason, launcher):
+    """失敗の説明(データを含まない)。child_exit_nonzeroだけ、例外の種類名を足す。"""
+    extra = child_failure_detail((launcher or {}).get('diagnostics') or {}) if reason == 'child_exit_nonzero' else ''
+    return (reason_text(reason) + (f' ({extra})' if extra else ''))[:300]
 
 
 def outcome_from_result(result):
@@ -280,7 +294,7 @@ def outcome_from_result(result):
     reason = '' if ok else (result.get('reason') or launcher.get('reason') or 'launcher_failed')
     return {
         'status': 'success' if ok else 'failed', 'reason': reason,
-        'detail': '' if ok else (reason_text(reason) + (f" ({child_failure_detail(diagnostics)})" if reason == 'child_exit_nonzero' and child_failure_detail(diagnostics) else ''))[:300],
+        'detail': '' if ok else failure_detail(reason, launcher),
         'cleanup': {**(fetch.get('cleanup') or {}), 'container': _container_cleanup(launcher)},
         'snapshot_counts': fetch.get('counts'), 'fetched_rows': fetch.get('fetched_rows'), 'sent_rows': fetch.get('sent_rows'),
         'loaded_rows': diagnostics.get('rows_loaded'),

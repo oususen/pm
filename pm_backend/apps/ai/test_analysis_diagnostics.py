@@ -132,3 +132,14 @@ def setUpModule():
 
 def tearDownModule():
     _temperature_patch.stop()
+
+
+class ExcludedPeriodRuleTests(SimpleTestCase):
+    def test_the_rule_tells_the_ai_to_make_an_excluded_period_a_variable(self):
+        # 2026-10-08: 追加の指示の「除く期間」の日付が、SQLへ直接書かれて失敗した(BOSS承認 案2)
+        rule = cg.PARAMETER_RULE
+        self.assertIn('期間の一部を除く指示', rule)
+        self.assertIn('NOT BETWEEN {{exclude_from}} AND {{exclude_to}}', rule)
+        self.assertIn('除く期間は、全体の期間の中に入れる', rule)
+        # 片側だけの指定は、AIに補わせない(推測の補完をしない)。利用者へ書き直しを促す警告で扱う
+        self.assertNotIn('片側だけが書かれているとき', rule)

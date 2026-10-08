@@ -16,6 +16,13 @@ class ChildFailureDetailTests(SimpleTestCase):
     def test_guard_code_is_kept_only_in_the_fixed_form(self):
         self.assertEqual(child_failure_detail({'stderr': 'GuardError: chart_x_not_list'}), '例外: GuardError(chart_x_not_list)')
         self.assertEqual(child_failure_detail({'stderr': 'GuardError: V053504641 の行'}), '例外: GuardError')
+        # Codex P1: 形が合っても、固定コードの許可リストにない文字列は、出さない
+        self.assertEqual(child_failure_detail({'stderr': 'GuardError: customer_secret_001'}), '例外: GuardError')
+
+    def test_the_container_prefix_user_code_is_removed_but_other_prefixes_are_not(self):
+        # Codex P2: コンテナ内の外枠は、user_code.GuardError: ... の形で出す
+        self.assertEqual(child_failure_detail({'stderr': 'user_code.GuardError: chart_x_not_list'}), '例外: GuardError(chart_x_not_list)')
+        self.assertEqual(child_failure_detail({'stderr': 'other.V053504641.ValueError: x'}), '')
 
     def test_unreadable_or_empty_stderr_adds_nothing(self):
         for stderr in ('', None, 'killed', 'abc def: x'):

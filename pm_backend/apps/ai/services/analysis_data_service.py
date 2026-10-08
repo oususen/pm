@@ -94,6 +94,22 @@ def _mentioned_months(purpose):
     return months
 
 
+# 期間の一部を除く指示(「7月31日までを除く」「7月24日からを除く」)の、片側だけの書き方。区切り(、。改行)までの文で判定する
+EXCLUDE_UNTIL_PATTERN = re.compile(r'([^、。,.\n]*?)まで(?:を|は|の分を?)?(?:除|除外)')
+EXCLUDE_FROM_PATTERN = re.compile(r'([^、。,.\n]*?)から(?:を|は|の分を?)?(?:除|除外)')
+RANGE_MARK_PATTERN = re.compile(r'から|〜|～|~|-|ー')
+
+
+def exclusion_warnings(purpose):
+    """除く期間の、開始日・終了日の片方だけが書かれているとき、警告の文を返す(機械的な検査。AIには補わせない。BOSS承認 2026-10-08)。"""
+    warnings = []
+    if any(not RANGE_MARK_PATTERN.search(found.group(1)) for found in EXCLUDE_UNTIL_PATTERN.finditer(purpose)):
+        warnings.append('除く期間の開始日が書かれていません。「6月30日から7月31日までを除く」のように、開始日も書いてください。')
+    if any('まで' not in found.group(1) and not RANGE_MARK_PATTERN.search(found.group(1).replace('から', '', 1)) for found in EXCLUDE_FROM_PATTERN.finditer(purpose)):
+        warnings.append('除く期間の終了日が書かれていません。「7月24日から7月31日までを除く」のように、終了日も書いてください。')
+    return warnings
+
+
 def period_warnings(purpose, date_from, date_to):
     """目的文の月と、期間(画面の開始日・終了日)の食い違いを、警告の文で返す(機械的な検査。AIの出力は直さない。BOSS承認 2026-10-08)。
 

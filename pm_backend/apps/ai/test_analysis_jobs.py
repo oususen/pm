@@ -270,6 +270,23 @@ class JobTests(SimpleTestCase):
         self.assertEqual(self.store.get(job['id'], self.user.pk)['cleanup']['container'], 'unconfirmed')
         self.assertEqual(self.store.client.get(self.store.active_key), job['id'])
 
+    def test_child_exception_name_reaches_the_job_and_the_history(self):
+        # Codex P2: ワーカーが組み直す結果に、例外の種類名つきの説明が引き継がれないと、ジョブ・履歴の両方から消える
+        job = self.submit()
+        result = {'status': 'failed', 'reason': 'child_exit_nonzero', 'run_id': 42,
+                  'fetch': {'cleanup': {'db_connection': 'closed'}},
+                  'launcher': {'cleanup': {'ok': True}, 'reason': 'child_exit_nonzero',
+                               'diagnostics': {'stderr': "Traceback\n  File 'x'\nAttributeError: 'str' has no attribute 'strftime' V053504641"}}}
+        def execute(*args, **kwargs):
+            kwargs['on_started'](42)
+            return result
+        self.process(job['id'], execute)
+        done = self.store.get(job['id'], self.user.pk)
+        self.assertEqual(done['reason'], 'child_exit_nonzero')
+        self.assertIn('例外: AttributeError', done['detail'])
+        self.assertNotIn('V053504641', done['detail'])
+        self.assertEqual(self.run.detail, done['detail'])
+
     def test_history_save_failure_never_publishes_result(self):
         job = self.submit()
         model = MagicMock()

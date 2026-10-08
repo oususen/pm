@@ -919,7 +919,11 @@ test('AIの返事を待つ間(コード生成・分析案の作成)は、生成�
     assert.equal((await html()).includes('AIが SQL・Python を生成しています'), false)  // 待っていないときは、出さない
     f.state.busy.value = 'code-generate'; await Vue.nextTick()
     let text = await html()
-    assert.ok(text.includes('AIが SQL・Python を生成しています。返事を待っています（通常 10〜60秒、最大 90秒）。経過 0秒'))
+    // ローカルAI(外部でない)は、AI設定のタイムアウトまで。90秒の固定表示にしない(Codex P2)
+    assert.ok(text.includes('AIが SQL・Python を生成しています。返事を待っています（AI設定のタイムアウトまで）。経過 0秒'))
+    assert.equal(text.includes('最大 90秒'), false)
+    f.state.options.value = { providers: [{ provider: 'qwen', label: 'OpenRouter', external: true, available: true, models: [] }] }; await Vue.nextTick()
+    assert.ok((await html()).includes('（通常 10〜60秒、最大 90秒）。経過 0秒'))  // 外部AIは、従来どおり
     assert.ok(text.includes('生成回数は、すでに数えています'))
     mock.timers.tick(3000); await Vue.nextTick()
     text = await html()
@@ -942,6 +946,23 @@ test('AIの返事を待つ間(コード生成・分析案の作成)は、生成�
     text = await html()
     assert.ok(text.includes('コード: ')); assert.equal(text.includes('返事を待っています'), false); assert.equal(text.includes('生成中… '), false)
   } finally { f.stop(); mock.timers.reset() }
+})
+
+test('経過秒のタイマーは、連続して切り替わっても1本だけで、画面を破棄すると止まる(Codex P3)', async () => {
+  const { mock } = await import('node:test')
+  mock.timers.enable({ apis: ['setInterval', 'Date'] })
+  const live = new Set(), realSet = globalThis.setInterval, realClear = globalThis.clearInterval
+  globalThis.setInterval = (...args) => { const id = realSet(...args); live.add(id); return id }
+  globalThis.clearInterval = id => { live.delete(id); return realClear(id) }
+  const f = await setup('qwen')
+  try {
+    f.state.busy.value = 'create'; await Vue.nextTick()
+    assert.equal(live.size, 1)
+    f.state.busy.value = 'code-generate'; await Vue.nextTick()   // create → code-generate の連続切替でも、二重にならない
+    assert.equal(live.size, 1)
+    f.unmount(); await Vue.nextTick()                              // 生成中に画面を破棄
+    assert.equal(live.size, 0)
+  } finally { globalThis.setInterval = realSet; globalThis.clearInterval = realClear; f.stop(); mock.timers.reset() }
 })
 
 test('宣言されなかった変数・使われない変数の名前を、失敗の理由に添えて表示する。識別子の形以外は表示しない', async () => {
@@ -998,7 +1019,8 @@ test('目的の言葉と列の食い違いの警告を②に表示し(本文は�
     assert.equal((await html()).includes('確認してください: '), false)
     f.state.plan.value = { ...dataPlan('qwen'), status: 'awaiting_method', warnings: ['目的の「納入場」に対応する列 ship_to_code が、取得する列に含まれていません。', '<img src=x onerror=SECRET>'] }
     const text = await html()
-    assert.ok(text.includes('⚠ 確認してください: 目的の「納入場」に対応する列 ship_to_code'))
+    assert.ok(text.includes('>⚠！</span> 確認してください: 目的の「納入場」に対応する列 ship_to_code'))
+    assert.ok(text.includes('class="warning plan-warning"'))  // 赤字の警告の見た目(BOSS指示 2026-10-08)
     assert.equal(text.includes('<img src=x'), false)
     assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'))
     assert.ok(text.includes('分析案・手順を承認'))  // 警告があっても承認ボタンは出る

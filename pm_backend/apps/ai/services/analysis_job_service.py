@@ -32,7 +32,7 @@ from ai.services.analysis_worker_identity import (
     current_code_version, ensure_jst_clock, worker_registration, worker_version_matches,
 )
 from ai.services.analysis_run_service import (
-    HEARTBEAT_SECONDS, STALE_SECONDS, HistoryError, reason_text, record_not_run, run_and_record,
+    HEARTBEAT_SECONDS, STALE_SECONDS, HistoryError, failure_detail, reason_text, record_not_run, run_and_record,
     _container_cleanup,
 )
 
@@ -328,6 +328,8 @@ def process_job(store, job_id, worker):
                 ok = result['status'] == 'ok' and _cleanup_complete(cleanup)
                 outcome = {'status': 'success' if ok else 'failed', 'reason': '' if ok else result.get('reason') or launcher.get('reason') or 'cleanup_pending',
                            'run_id': result['run_id'], 'cleanup': cleanup, 'counts': fetch.get('fetched_rows')}
+                if not ok:  # 子のPython異常終了の、例外の種類名つきの説明を、ジョブ・履歴の確定まで引き渡す(Codex P2)
+                    outcome['detail'] = failure_detail(outcome['reason'], launcher)
     except Exception as exc:
         reason = getattr(exc, 'reason', 'history_failed' if isinstance(exc, HistoryError) else (
             'plan_expired' if isinstance(exc, AnalysisError) and exc.status_code == 410 else 'execution_failed'))

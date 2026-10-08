@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, override_settings
 
-from ai.services.analysis_data_service import _mentioned_months, period_warnings
+from ai.services.analysis_data_service import _mentioned_months, exclusion_warnings, period_warnings
 from ai.services.analysis_plan_store import AnalysisPlanStore, public_plan
 from ai.services.analysis_planning_service import create_plan
 from ai.test_analysis_planning import FakeRedis
@@ -108,3 +108,28 @@ class PlanIntegrationTests(SimpleTestCase):
         self.assertGreaterEqual(len(plan['warnings']), 2)
         self.assertIn('ship_to_code', plan['warnings'][0])        # 列の食い違い
         self.assertIn('期間', plan['warnings'][-1])               # 期間の食い違い
+
+    def test_the_exclusion_warning_is_stored_last_and_does_not_block_the_approval(self):
+        plan = self.create('8月の出荷数量を日ごとに集計して、７月３１日までを除いて', '2026-06-30', '2026-08-31')
+        self.assertIn('開始日が書かれていません', plan['warnings'][-1])
+        self.assertEqual(plan['status'], 'awaiting_method')
+
+
+class ExclusionWarningTests(SimpleTestCase):
+    """除く期間の片側だけの書き方の警告(2026-10-08、BOSS承認 案A。AIには補わせない)。"""
+
+    def test_an_end_only_exclusion_asks_for_the_start(self):
+        found = exclusion_warnings('8月の出荷数量を、日ごとに集計して、推移を折れ線グラフにして　７月３１日までを除いて')  # 実機の入力
+        self.assertEqual(len(found), 1)
+        self.assertIn('開始日が書かれていません', found[0])
+
+    def test_a_start_only_exclusion_asks_for_the_end(self):
+        found = exclusion_warnings('8月の出荷数量を日ごとに集計。7月24日からを除く')
+        self.assertEqual(len(found), 1)
+        self.assertIn('終了日が書かれていません', found[0])
+
+    def test_complete_or_unrelated_texts_are_not_warned(self):
+        for text in ('7月24日から7月31日までを除く', '6/30から7/31まで除外して', '7/24〜7/31を除く', '8月の出荷を日ごとに集計して',
+                     '9月1日から9月30日まで集計して、7月は除く', '8月の出荷。7月24日から7月31日までの分を除いて集計'):
+            with self.subTest(text=text):
+                self.assertEqual(exclusion_warnings(text), [])

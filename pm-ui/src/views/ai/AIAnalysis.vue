@@ -84,7 +84,7 @@
         <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
         <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
         <p>出力案: {{ plan.proposal.outputs.join('、') }}</p>
-        <p v-for="(warning, index) in (plan.warnings || [])" :key="'w' + index" class="warning" role="alert">⚠ 確認してください: {{ warning }}</p>
+        <p v-for="(warning, index) in (plan.warnings || [])" :key="'w' + index" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 確認してください: {{ warning }}</p>
         <template v-if="plan.template && hasCode">
           <h4>保存済みのSQL・Python（承認前から確認できます。試行・コード承認は、承認後に行います）</h4>
           <div v-for="(step, index) in codegen.steps" :key="step.name"><p>手順 {{ index + 1 }} / 中間テーブル: {{ step.name }}</p><pre>{{ step.query }}</pre></div>
@@ -123,7 +123,7 @@
           <span class="stage-no">④</span><strong>SQL・Python</strong><em>{{ stageLabel(4) }}</em><small v-if="stageSummary(4)">{{ stageSummary(4) }}</small>
         </button>
         <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
-            <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが SQL・Python を生成しています。返事を待っています（通常 10〜60秒、最大 90秒）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
+            <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが SQL・Python を生成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
             <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
             <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
             <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
@@ -742,6 +742,11 @@ input { padding: 4px; font: inherit; }
 .error { background: #fff0ee; color: #9a362b; padding: 8px; }
 .generating { background: #e8f4fd; border-left: 3px solid #2a7fc1; color: #123c5a; padding: 8px 10px; font-weight: 600; }
 .warning { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 8px 10px; }
+/* 分析案の警告(目的と期間・列の食い違いなど)は、見落とさないよう、赤字にして、「⚠！」を点滅させる(BOSS指示 2026-10-08)。動きを減らす設定の人には、点滅させない */
+.plan-warning { background: #fdecea; border-left-color: #d32f2f; color: #b3120c; font-weight: 600; }
+.warn-mark { display: inline-block; animation: warn-blink 1s steps(2, start) infinite; }
+@keyframes warn-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .warn-mark { animation: none; } }
 select { padding: 4px; font: inherit; max-width: 100%; }
 button:not(:disabled) { border-color: #168779; color: white; background: #168779; cursor: pointer; }
 small { overflow-wrap: anywhere; }
