@@ -21,6 +21,19 @@
     <p v-else>閲覧のみです。保存にはAI分析の編集権限が必要です。</p>
     <p v-if="saved?.same_name_count > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが、ほかに{{ saved.same_name_count }}件あります。区別しやすい名前に変えることをお勧めします（管理者承認前は、一覧の詳細から名称を変えられます）。</p>
     <p v-if="saved" role="status">{{ saved.created ? '保存しました' : '保存済みです（同じ内容は重複して保存しません）' }}: テンプレート{{ saved.id }} / 版{{ saved.version }} / {{ saved.status_label }} / カテゴリ: {{ saved.category_label }}</p>
+    <section v-if="reuseRow" class="reuse-panel" aria-label="変数の値の入力">
+      <h3>テンプレート{{ reuseRow.id }}「{{ reuseRow.name }}」: 今回使う値</h3>
+      <p>変数の値を、変えられます。変えた値だけがサーバーへ送られ、サーバーが検査します。値を空にすると、不備として拒否されます（保存済みの値には、戻しません）。</p>
+      <p class="reuse-note">目的・手順・出力案の説明は、テンプレートを保存したときのものです。日付・品番などを変えても、説明の文は、自動では書き換わりません。全体の期間を変えても、比べる期間・除く期間は、自動では動きません（必要なら、一緒に直してください）。</p>
+      <p v-for="item in reuseRow.parameters" :key="item.name">
+        <label>{{ item.label }}（{{ item.name }}）:
+          <input v-model="reuseValues[item.name]" :type="item.type === 'date' ? 'date' : 'text'" :maxlength="item.type === 'date' ? 10 : 40" :disabled="!!busy" :aria-label="item.label"></label>
+        <span v-if="reuseValues[item.name] !== item.default">（変更あり。保存済みの値: {{ item.default }}）</span>
+      </p>
+      <p role="status">今回使う値: <span v-for="(item, index) in reuseRow.parameters" :key="item.name">{{ index ? ' / ' : '' }}{{ item.label }} = {{ reuseValues[item.name] === '' ? '（空）' : reuseValues[item.name] }}</span></p>
+      <button :disabled="!canStartPlan" @click="startPlan(reuseRow, changedValues())">この値で分析案を作成</button>
+      <button :disabled="!!busy" @click="closeReuse">取消（現在の分析案はそのまま）</button>
+    </section>
     <h3>保存済みテンプレート</h3>
     <label>カテゴリの絞り込み:
       <select v-model="categoryFilter" :disabled="!!busy" aria-label="カテゴリの絞り込み">
@@ -38,7 +51,7 @@
       <p><strong>テンプレート{{ row.id }}: {{ row.name }}</strong> / カテゴリ: {{ row.category_label }} / 状態: {{ row.status_label }} / 作成者: {{ row.created_by }} / 保存日時: {{ formatDate(row.created_at) }} / 目的: {{ row.purpose }}
         <span v-if="!row.content_visible"> / SQL・Python・条件・期間は、作成者と管理者だけが確認できます。</span>
         <button v-else :disabled="!!busy" @click="showDetail(row.id)">{{ detail?.id === row.id ? '詳細を再取得' : '詳細を表示' }}</button>
-        <button v-if="canReuse(row)" :disabled="!canStartPlan" @click="startPlan(row)">このテンプレートで分析案を作る</button>
+        <button v-if="canReuse(row)" :disabled="!canStartPlan" @click="openReuse(row)">このテンプレートで分析案を作る</button>
         <span v-if="row.status === 'pending_admin' && row.content_visible"> / システム管理者未承認</span></p>
       <div v-if="detail?.id === row.id">
         <p>期間: {{ detail.date_from }} ～ {{ detail.date_to }} / 条件: {{ detail.conditions }}</p>
@@ -100,8 +113,9 @@ const CATEGORIES = Object.freeze([
 ])
 const category = ref(''), categoryFilter = ref(''), newCategory = ref('')
 // テンプレート名(2026-10-08、BOSS承認)。初期値は分析案の題名。同じ名前の警告は、保存を止めない。名称の変更は、管理者承認前だけ(サーバーでも確認する)
+const reuseRow = ref(null), reuseValues = ref({}) // 変数の値の入力(2-C、2026-10-08)。変えた値だけを送る。取消では、現在の分析案を変えない
 const templateName = ref(''), nameEdited = ref(false), duplicateCount = ref(null), newName = ref(''), renameWarning = ref(0)
-let nameToken = 0
+let nameToken = 0, reuseToken = 0 // reuseToken: 再利用の要求ごとの識別番号。分析案の切替・権限の喪失で進め、古い応答を採用しない(Codex P2)
 let autoCategory = '' // 却下された版を開いたときに、初期値として入れた値(利用者が変えていなければ、次の版を開いたとき入れ替える)
 const REASON_MAX = 500 // 却下理由の最大長(BOSS承認)。超える入力は送らない
 const list = ref({ results: [], count: 0, next: null, previous: null }), page = ref(1), loaded = ref(false)
@@ -155,8 +169,8 @@ watch(() => [props.plan?.id, props.plan?.proposal?.title], ([id], [oldId] = []) 
   if (id !== oldId) nameEdited.value = false
   if (!nameEdited.value) { templateName.value = typeof props.plan?.proposal?.title === 'string' ? props.plan.proposal.title : ''; duplicateCount.value = null }
 }, { flush: 'sync', immediate: true })
-watch(() => props.plan?.id, () => { error.value = '' }, { flush: 'sync' })
-watch(() => props.canEdit, value => { if (!value) { accepted.value = false; acceptedCorrection.value = false } }, { flush: 'sync' })
+watch(() => props.plan?.id, () => { error.value = ''; reuseToken++ }, { flush: 'sync' })
+watch(() => props.canEdit, value => { if (!value) { accepted.value = false; acceptedCorrection.value = false; reuseToken++; reuseRow.value = null; reuseValues.value = {} } }, { flush: 'sync' })
 watch([statusFilter, categoryFilter], () => load(1))
 onBeforeUnmount(() => { disposed = true; epoch++ })
 onMounted(() => load(1))
@@ -282,16 +296,48 @@ async function changeCategory() {
   // 成否にかかわらず、最新の一覧・詳細を取り直す
   if (!disposed && current === epoch) { const failure = error.value; await load(page.value); await showDetail(target.id); if (failure && !disposed && current === epoch) error.value = failure }
 }
-async function startPlan(row) {
+const REUSE_REASONS = Object.freeze({
+  parameters_def_date: '日付は、YYYY-MM-DDの形で入力してください。',
+  parameters_def_value: 'コードは、英数字・アンダースコア・ハイフンだけで入力してください。',
+  parameters_def_unregistered: '登録されていない品番・顧客コード・納入先コードです。',
+  parameters_def_order: '開始日は、終了日以前にしてください。',
+  parameters_def_outside: '比べる期間・除く期間は、全体の期間の中に収めてください。全体の期間を変えたときは、これらも一緒に直してください。',
+})
+// 400の理由コードがあれば、項目別の固定文(と、該当する変数のラベル)を出す。理由コードがなければ、ステータスごとの固定文
+function reuseFailure(e, row) {
+  const data = e.response?.data, reason = Array.isArray(data?.reasons) ? data.reasons.find(item => typeof item === 'string' && Object.hasOwn(REUSE_REASONS, item)) : null
+  if (e.response?.status !== 400 || !reason) return REUSE_ERRORS[e.response?.status] || '分析案を作成できませんでした。'
+  const names = Array.isArray(data.names?.[reason]) ? data.names[reason].filter(name => typeof name === 'string' && /^[a-z][a-z0-9_]*$/.test(name)) : []
+  const labels = names.map(name => row.parameters?.find(item => item.name === name)?.label || name)
+  return labels.length ? `${REUSE_REASONS[reason]}（該当: ${labels.join('、')}）` : REUSE_REASONS[reason]
+}
+function openReuse(row) {
+  if (!canReuse(row) || !canStartPlan.value) return
+  if (!Array.isArray(row.parameters) || !row.parameters.length) return startPlan(row) // 変数のないテンプレートは、入力欄なしで、従来どおり作る
+  if (reuseRow.value?.id === row.id) return // 同じテンプレートを押し直しても、入力した値を残す
+  if (reuseRow.value && Object.keys(changedValues()).length && !window.confirm('入力した値を破棄して、別のテンプレートの入力欄を開きます。よろしいですか？')) return
+  reuseRow.value = row; reuseValues.value = Object.fromEntries(row.parameters.map(item => [item.name, item.default]))
+}
+function closeReuse() { if (!busy.value) { reuseRow.value = null; reuseValues.value = {} } }
+// 保存済みの値(default)から変えた値だけを返す。空にした値は、変えた値として送る(サーバーが拒否する。勝手に、保存済みの値へ戻さない)
+function changedValues() {
+  const changed = {}
+  for (const item of reuseRow.value?.parameters || []) { const value = reuseValues.value[item.name]; if (value !== item.default) changed[item.name] = value ?? '' }
+  return changed
+}
+async function startPlan(row, parameters) {
   if (!canReuse(row) || !canStartPlan.value) return
   if (props.plan && !window.confirm('現在の分析案を破棄して、このテンプレートから新しい分析案を作ります。よろしいですか？')) return
-  const current = epoch
+  const current = epoch, token = ++reuseToken, startedPlan = props.plan?.id ?? null
+  // 応答を採用してよいのは、この要求が最新で、開始時と同じ分析案・編集権限のとき(切替後の応答で、新しい分析案・入力を壊さない)
+  const stale = () => disposed || current !== epoch || token !== reuseToken || !props.canEdit || (props.plan?.id ?? null) !== startedPlan
   busy.value = 'reuse'; error.value = ''
   try {
-    const response = await api.aiAnalysis.createTemplatePlan(row.id)
-    if (!disposed && current === epoch) emit('plan-created', response.data)
+    const changed = parameters && Object.keys(parameters).length ? parameters : undefined  // 変えた値がなければ、値を送らない(従来どおり)
+    const response = changed ? await api.aiAnalysis.createTemplatePlan(row.id, changed) : await api.aiAnalysis.createTemplatePlan(row.id)
+    if (!stale()) { emit('plan-created', response.data); reuseRow.value = null; reuseValues.value = {} }  // 作成に成功した後だけ、入力欄を閉じる
   } catch (e) {
-    if (!disposed && current === epoch) error.value = REUSE_ERRORS[e.response?.status] || '分析案を作成できませんでした。'
+    if (!stale()) error.value = reuseFailure(e, row)  // 失敗しても、入力した値と現在の分析案は、そのまま
   } finally { if (!disposed && current === epoch) busy.value = '' }
 }
 async function showDetail(id) {
@@ -317,6 +363,7 @@ async function showDetail(id) {
 <style scoped>
 .templates { border-top: 1px solid #ccc; margin-top: 20px; } button { margin: 4px; padding: 8px; } article { margin: 12px 0; padding: 8px; background: #f5f9f8; }
 article p { margin: 2px 0; } .notice-records { margin: 2px 0 6px; padding-left: 1.4em; font-size: 13px; } pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.reuse-panel { margin: 12px 0; padding: 8px; background: #eef6f4; border: 1px solid #8fb9b0; } .reuse-note { color: #6f5314; }
 .name-warning { background: #fdecea; border-left: 3px solid #d32f2f; color: #b3120c; font-weight: 600; padding: 8px 10px; }
 .warn-mark { display: inline-block; animation: warn-blink 1s steps(2, start) infinite; }
 @keyframes warn-blink { to { visibility: hidden; } }

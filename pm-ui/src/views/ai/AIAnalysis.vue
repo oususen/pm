@@ -72,6 +72,7 @@
         <div v-if="plan" class="plan-head">
         <div class="plan-heading"><h2>{{ plan.proposal.title }}</h2><span>{{ statusLabel }}</span></div>
         <small>分析案ID: {{ plan.id }} / 版: {{ plan.revision }} / 有効期限: {{ formatDate(plan.expires_at) }} / 作成AI: {{ planProviderLabel }}</small>
+        <p v-if="plan.template?.values && Object.keys(plan.template.values).length" role="status">今回使う変数の値: <span v-for="(value, name, index) in plan.template.values" :key="name">{{ index ? ' / ' : '' }}{{ name }} = {{ value }}</span>（下の目的・手順の説明は、テンプレート保存時のものです。日付・コードは、自動では書き換えていません）</p>
         <p v-if="plan.template" class="warning" role="status">テンプレート{{ plan.template.id }}（版{{ plan.template.version }}・{{ plan.template.name }}）から作成した分析案です。{{ plan.template.status === 'pending_admin' ? 'システム管理者未承認のテンプレートです。内容を確認してください。' : '正式なテンプレートです。' }}AIは使いません。保存済みのSQL・Pythonは、現行の外枠に組み直しています。</p>
         </div>
       <section v-if="plan" class="stage" :class="stageState(2)">

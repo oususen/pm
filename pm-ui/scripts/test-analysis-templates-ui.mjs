@@ -568,6 +568,175 @@ test('名称の変更: 管理者承認前(can_rename)だけ入力欄を出し、
   }
 })
 
+const PARAMS = [
+  { name: 'product_code', type: 'product_code', label: '品番', default: 'P-001' },
+  { name: 'period_from', type: 'date', label: '開始日', default: '2026-01-01' },
+  { name: 'period_to', type: 'date', label: '終了日', default: '2026-01-31' },
+]
+const paramRow = (extra = {}) => row(5, { status: 'approved', parameters: PARAMS, ...extra })
+
+test('再利用(2-C): 変数のあるテンプレートは、入力欄を出してから作る。変数のないテンプレートは、従来どおり、すぐ作る', async () => {
+  const f = await setup({ plan: null })
+  try {
+    f.calls.length = 0
+    await f.state.openReuse(row(1, { status: 'approved' }))
+    assert.equal(f.state.reuseRow.value, null)
+    assert.deepEqual(f.calls, [['createTemplatePlan', 1]], '変数がなければ、入力欄なしで作る')
+    f.calls.length = 0
+    f.state.openReuse(paramRow())
+    assert.equal(f.calls.length, 0, '変数があれば、入力欄を出すだけで、まだ作らない')
+    assert.deepEqual({ ...f.state.reuseValues.value }, { product_code: 'P-001', period_from: '2026-01-01', period_to: '2026-01-31' })
+    const text = await html(f)
+    for (const part of ['今回使う値', '品番（product_code）', '開始日（period_from）', '終了日（period_to）', 'type="date"', 'この値で分析案を作成', '取消（現在の分析案はそのまま）',
+      'テンプレートを保存したときのものです', '比べる期間・除く期間は、自動では動きません']) assert.ok(text.includes(part), part)
+  } finally { f.stop() }
+})
+
+test('再利用(2-C): 変えた値だけを送る。変えていなければ値を送らない。空にした値は、空のまま送る(保存済みの値へ戻さない)', async () => {
+  const f = await setup({ plan: null })
+  try {
+    f.state.openReuse(paramRow())
+    assert.deepEqual(f.state.changedValues(), {})
+    f.calls.length = 0
+    await f.state.startPlan(paramRow(), f.state.changedValues())
+    assert.deepEqual(f.calls, [['createTemplatePlan', 5]], '変更なし: 従来どおり値を送らない')
+    f.state.openReuse(paramRow())
+    f.state.reuseValues.value.product_code = 'P-002'; f.state.reuseValues.value.period_to = ''
+    assert.deepEqual(f.state.changedValues(), { product_code: 'P-002', period_to: '' })
+    assert.ok((await html(f)).includes('（変更あり。保存済みの値: P-001）'))
+    f.state.reuseValues.value.product_code = 'P-001'
+    assert.deepEqual(f.state.changedValues(), { period_to: '' }, '保存済みの値へ戻したら、差分に含めない')
+    f.calls.length = 0
+    await f.state.startPlan(paramRow(), f.state.changedValues())
+    assert.deepEqual(f.calls, [['createTemplatePlan', 5, { period_to: '' }]])
+  } finally { f.stop() }
+})
+
+test('再利用(2-C): 取消では何も変えない。作成に成功した後だけ入力欄を閉じ、失敗では入力値と現在の分析案を残す', async () => {
+  const f = await setup({ plan: plan() })
+  try {
+    f.state.openReuse(paramRow())
+    f.state.reuseValues.value.period_from = '2026-01-10'
+    f.state.closeReuse()
+    assert.equal(f.state.reuseRow.value, null); assert.deepEqual(f.events, [], '取消では、分析案を作らず・置き換えない')
+    f.state.openReuse(paramRow())
+    assert.equal(f.state.reuseValues.value.period_from, '2026-01-01', '開き直すと、保存済みの値から')
+    f.state.reuseValues.value.period_from = '2026-01-10'
+    f.consent.value = true
+    await f.state.startPlan(paramRow(), f.state.changedValues())
+    assert.equal(f.events.length, 1); assert.equal(f.events[0][0], 'plan-created')
+    assert.equal(f.state.reuseRow.value, null, '成功したら閉じる')
+  } finally { f.stop() }
+  const g = await setup({ plan: plan() }, { createTemplatePlan: async () => { throw { response: { status: 400, data: { reasons: ['parameters_def_date'], names: { parameters_def_date: ['period_from'] } } } } } })
+  try {
+    g.state.openReuse(paramRow()); g.state.reuseValues.value.period_from = 'abc'
+    g.consent.value = true
+    await g.state.startPlan(paramRow(), g.state.changedValues())
+    assert.deepEqual(g.events, [], '失敗したら、分析案を渡さない')
+    assert.ok(g.state.reuseRow.value, '失敗しても、入力欄は残る'); assert.equal(g.state.reuseValues.value.period_from, 'abc', '入力した値も残る')
+    assert.equal(g.state.busy.value, '')
+  } finally { g.stop() }
+})
+
+test('再利用(2-C): 400は、理由コードごとの固定文と、該当する変数のラベルを出す。未知の理由・名前・本文は出さない', async () => {
+  const fail = (status, data) => async () => { throw { response: { status, data } } }
+  for (const [reason, part] of [['parameters_def_date', 'YYYY-MM-DDの形'], ['parameters_def_value', '英数字・アンダースコア・ハイフン'], ['parameters_def_unregistered', '登録されていない'],
+    ['parameters_def_order', '開始日は、終了日以前'], ['parameters_def_outside', '全体の期間の中に収めてください']]) {
+    const f = await setup({ plan: null }, { createTemplatePlan: fail(400, { detail: 'SECRET-DETAIL', reasons: [reason], names: { [reason]: ['product_code', 'period_from', '<img onerror=SECRET>', 'unknown_x'] } }) })
+    try {
+      await f.state.startPlan(paramRow(), { product_code: 'x' })
+      const text = await html(f)
+      assert.ok(text.includes(part), reason)
+      assert.ok(text.includes('該当: 品番、開始日、unknown_x'), reason)   // ラベルに直す。識別子の形でない名前は出さない
+      assert.equal(text.includes('SECRET'), false, reason)
+    } finally { f.stop() }
+  }
+  for (const [status, data, part] of [[400, { detail: 'SECRET-DETAIL' }, '分析案の作成の指定が正しくありません'], [400, { reasons: ['unknown_reason'], names: {} }, '分析案の作成の指定が正しくありません'],
+    [403, {}, '作成者と管理者だけ'], [404, {}, 'テンプレートが見つかりません'], [409, {}, '再利用できません'], [503, { detail: 'SECRET-DETAIL' }, '分析案を作成できませんでした']]) {
+    const f = await setup({ plan: null }, { createTemplatePlan: fail(status, data) })
+    try {
+      await f.state.startPlan(paramRow(), {})
+      const text = await html(f)
+      assert.ok(text.includes(part), String(status)); assert.equal(text.includes('SECRET'), false)
+    } finally { f.stop() }
+  }
+})
+
+function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
+
+test('再利用(2-C): 応答を待つ間に分析案が切り替わる・編集権限を失うと、古い応答(成功・失敗)を採用せず、新しい入力・分析案を壊さない(Codex P2)', async () => {
+  for (const change of ['plan', 'roundtrip', 'permission']) {
+    for (const outcome of ['success', 'failure']) {
+      const wait = deferred()
+      const f = await setup({ plan: plan() }, { createTemplatePlan: async () => wait.promise })
+      try {
+        f.state.openReuse(paramRow()); f.state.reuseValues.value.product_code = 'P-002'
+        f.consent.value = true
+        const pending = f.state.startPlan(paramRow(), f.state.changedValues())
+        assert.equal(f.state.busy.value, 'reuse')
+        if (change === 'plan') f.props.plan = plan({ id: 'plan-2' })
+        else if (change === 'roundtrip') { f.props.plan = plan({ id: 'plan-2' }); f.props.plan = plan() }  // 別の分析案へ替えて、元へ戻っても、古い要求は採用しない
+        else f.props.canEdit = false
+        await Promise.resolve()
+        if (outcome === 'success') wait.resolve({ data: { id: 'late-plan', template: { id: 5 } } }); else wait.reject({ response: { status: 400, data: { reasons: ['parameters_def_date'] } } })
+        await pending
+        assert.deepEqual(f.events, [], `${change}/${outcome}: 古い応答は、親へ渡さない`)
+        assert.equal(f.state.error.value, '', `${change}/${outcome}: 古い失敗は、表示しない`)
+        assert.equal(f.state.busy.value, '')
+        if (change !== 'permission') { assert.ok(f.state.reuseRow.value, '分析案が替わっても、入力欄は残る'); assert.equal(f.state.reuseValues.value.product_code, 'P-002', '入力値も残る') }
+        else assert.equal(f.state.reuseRow.value, null, '編集権限を失ったら、入力欄を閉じる')
+      } finally { f.stop() }
+    }
+  }
+})
+
+test('再利用(2-C): 二重クリックは1要求だけ。画面を破棄した後の応答は、採用しない', async () => {
+  const wait = deferred()
+  const f = await setup({ plan: null }, { createTemplatePlan: async () => wait.promise })
+  try {
+    f.state.openReuse(paramRow()); f.state.reuseValues.value.product_code = 'P-002'
+    f.calls.length = 0
+    const first = f.state.startPlan(paramRow(), f.state.changedValues()), second = f.state.startPlan(paramRow(), f.state.changedValues())
+    assert.equal(f.calls.filter(c => c[0] === 'createTemplatePlan').length, 1)
+    f.stop(); wait.resolve({ data: { id: 'late' } }); await first; await second
+    assert.deepEqual(f.events, [])
+  } finally { f.stop() }
+})
+
+test('再利用(2-C): 同じテンプレートを押し直しても入力を残す。別のテンプレートへの切替は、変更があるときだけ破棄を確認する(Codex P3)', async () => {
+  const f = await setup({ plan: null })
+  try {
+    f.state.openReuse(paramRow()); f.state.reuseValues.value.product_code = 'P-002'
+    f.confirms.length = 0
+    f.state.openReuse(paramRow())
+    assert.equal(f.state.reuseValues.value.product_code, 'P-002', '同じテンプレートは、入力を残す'); assert.equal(f.confirms.length, 0)
+    const other = row(6, { status: 'approved', parameters: [{ name: 'product_code', type: 'product_code', label: '品番', default: 'P-009' }] })
+    f.consent.value = false
+    f.state.openReuse(other)
+    assert.equal(f.confirms.length, 1); assert.equal(f.state.reuseRow.value.id, 5, '断ったら、今の入力のまま'); assert.equal(f.state.reuseValues.value.product_code, 'P-002')
+    f.consent.value = true
+    f.state.openReuse(other)
+    assert.equal(f.state.reuseRow.value.id, 6); assert.equal(f.state.reuseValues.value.product_code, 'P-009')
+    f.confirms.length = 0
+    f.state.openReuse(paramRow())   // 変更がなければ、確認なしで切り替える
+    assert.equal(f.confirms.length, 0); assert.equal(f.state.reuseRow.value.id, 5)
+  } finally { f.stop() }
+})
+
+test('再利用(2-C): ラベルにHTMLが含まれても、入力欄・エラー文では、テキストとして表示する(エスケープされる)', async () => {
+  const evil = [{ name: 'product_code', type: 'product_code', label: '<img src=x onerror=SECRET>', default: 'P-001' }]
+  const fail = async () => { throw { response: { status: 400, data: { reasons: ['parameters_def_unregistered'], names: { parameters_def_unregistered: ['product_code'] } } } } }
+  const f = await setup({ plan: null }, { createTemplatePlan: fail })
+  try {
+    const target = paramRow({ parameters: evil })
+    f.state.openReuse(target); f.state.reuseValues.value.product_code = 'P-002'
+    await f.state.startPlan(target, f.state.changedValues())
+    const text = await html(f)
+    assert.equal(text.includes('<img src=x onerror=SECRET>'), false, '生のタグを出さない')
+    assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'), 'テキストとして出す')
+  } finally { f.stop() }
+})
+
 test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([row(1, { category: 'shipment', category_label: '出荷' })]) }) })
   try {

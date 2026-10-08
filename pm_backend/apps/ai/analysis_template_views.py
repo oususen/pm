@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from ai.analysis_permissions import CanReviewAITemplates, CanUseAIAnalysis
 from ai.models import AIAnalysisTemplate
 from ai.services.analysis_plan_store import AnalysisError
+from ai.services.analysis_template_params import DefinitionError
 from ai.services.analysis_template_reuse_service import create_plan_from_template
 from ai.services.analysis_template_notify_service import resend as resend_notification
 from ai.services.analysis_template_review_service import approve_template, reject_template
@@ -140,4 +141,9 @@ class AIAnalysisTemplatePlanView(APIView):
         if 'parameters' in request.data and not isinstance(supplied, dict):
             raise AnalysisError('変数の値の形式が不正です。')  # 0・空文字・空の配列・nullを、「指定なし」として通さない
         from ai.views import _codegen_response  # 分析案の応答の形を、既存の分析案APIと同じにする
-        return Response(_codegen_response(create_plan_from_template(request.user, template_id, supplied)), status=201)
+        try:
+            plan = create_plan_from_template(request.user, template_id, supplied)
+        except DefinitionError as exc:
+            # 値の不備: 画面が項目別の固定文を出せるよう、固定の理由コードと変数名(識別子だけ)を返す。値・AIの文章は返さない(2026-10-08、Codex P2)
+            return Response({'detail': str(exc.detail), 'reasons': exc.reasons, 'names': exc.names}, status=exc.status_code)
+        return Response(_codegen_response(plan), status=201)

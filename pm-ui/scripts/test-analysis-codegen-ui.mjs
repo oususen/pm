@@ -962,6 +962,21 @@ test('AIの返事を待つ間(コード生成・分析案の作成)は、生成�
   } finally { f.stop(); mock.timers.reset() }
 })
 
+test('テンプレートから作った分析案に、今回使う変数の値を出し、説明は保存時のものだと断る。値のHTMLはテキストとして出す(2-C)', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    f.state.plan.value = { ...dataPlan('qwen'), template: { id: 5, version: 1, name: 'T', status: 'approved', values: { product_code: 'P-002', period_from: '2026-01-10' } } }
+    let text = (await html()).replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, '')  // タグを除いた表示の文
+    assert.ok(text.includes('今回使う変数の値: product_code = P-002 / period_from = 2026-01-10')); assert.ok(text.includes('テンプレート保存時のものです'))
+    f.state.plan.value = { ...dataPlan('qwen'), template: { id: 5, version: 1, name: 'T', status: 'approved', values: {} } }
+    assert.equal((await html()).includes('今回使う変数の値'), false, '値がなければ出さない')
+    f.state.plan.value = { ...dataPlan('qwen'), template: { id: 5, version: 1, name: 'T', status: 'approved', values: { product_code: '<img src=x onerror=SECRET>' } } }
+    text = await html()
+    assert.equal(text.includes('<img src=x onerror=SECRET>'), false); assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'))
+  } finally { f.stop() }
+})
+
 test('経過秒のタイマーは、連続して切り替わっても1本だけで、画面を破棄すると止まる(Codex P3)', async () => {
   const { mock } = await import('node:test')
   mock.timers.enable({ apis: ['setInterval', 'Date'] })
