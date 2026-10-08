@@ -192,6 +192,23 @@ def has_placeholder_like(steps, python):
     return any(isinstance(text, str) and LOOSE_PLACEHOLDER_PATTERN.search(text) for text in texts)
 
 
+# 目的・手順に書かれた値(品番・顧客コードなど)が、コードの文字列として直接書かれていないかの確認用(2026-10-08、BOSS承認。警告のみ)
+COPY_TOKEN_PATTERN = re.compile(r'[A-Za-z0-9_-]{4,40}')
+STRING_LITERAL_PATTERN = re.compile(r"'([^'\n]*)'|\"([^\"\n]*)\"")
+
+
+def copied_literals(plan_texts, steps, python):
+    """目的・手順・出力案に書かれた値のうち、コード(変数の形のコード)の文字列として直接書かれているものを、昇順で返す。
+
+    対象の値は、数字を1つ以上含む4〜40文字の英数字・_・-(品番・顧客コードの形)で、日付(YYYY-MM-DD)は除く(日付は、別の検査)。
+    変数にすれば、コードには{{名前}}と書かれ、文字列としては現れない。DBは参照しない(機械的な文字列の確認だけ)。
+    """
+    tokens = {token for token in COPY_TOKEN_PATTERN.findall(' '.join(str(text) for text in plan_texts))
+              if any(char.isdigit() for char in token) and not DATE_LITERAL_PATTERN.fullmatch(token)}
+    literals = [first or second for text in _texts(steps, python) for first, second in STRING_LITERAL_PATTERN.findall(text)]
+    return sorted(token for token in tokens if any(token in literal for literal in literals))
+
+
 def has_date_literal(steps, python):
     """コード(変数の形でない、実行する形)に、日付(YYYY-MM-DD)が直接書かれているか。"""
     return any(DATE_LITERAL_PATTERN.search(text) for text in _texts(steps, python))

@@ -6,6 +6,7 @@
     <p>承認したコードを、管理者承認待ちのテンプレートとして保存します。保存するのは、名称・目的・手順・条件・承認済みSQL・Python・期間・ハッシュです。実データ・結果・AIへ送った本文は保存しません。</p>
     <p v-if="canEdit && plan?.template" role="status">テンプレートから作成した分析案は、テンプレートとして保存できません（保存済みのコードをそのまま使うため、内容が同じで重複します）。コードを変えた新しい分析を作成したときに、保存できます。</p>
     <template v-else-if="canEdit">
+      <p v-if="savable && plan?.codegen?.literal_values?.length" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> コードに直接書かれた値があります（{{ plan.codegen.literal_values.join('、') }}）。このテンプレートを再利用しても、これらの値は変えられません（保存はできます）。</p>
       <p v-if="!savable">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
       <label>テンプレート名（必須・300文字以内）:
         <input v-model="templateName" type="text" maxlength="300" size="50" :disabled="!savable || !!busy" aria-label="保存するテンプレートの名前" @input="nameEdited = true; duplicateCount = null" @change="checkName"></label>

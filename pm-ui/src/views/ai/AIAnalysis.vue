@@ -125,6 +125,7 @@
         </button>
         <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
             <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが SQL・Python を生成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
+            <p v-if="codegen?.literal_values?.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 目的・手順に書かれた値が、変数にされず、コードに直接書かれています: {{ codegen.literal_values.join('、') }}。この分析だけなら、そのまま実行できます。テンプレートとして保存しても、再利用で、これらの値を変えられません。変えたいときは、再生成してください。</p>
             <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
             <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
             <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>

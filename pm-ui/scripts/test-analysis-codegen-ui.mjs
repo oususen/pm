@@ -977,6 +977,23 @@ test('テンプレートから作った分析案に、今回使う変数の値�
   } finally { f.stop() }
 })
 
+test('コードに直接書かれた値(literal_values)があるときは、④に警告を出す。なければ出さない。値はテキストとして出す(2026-10-08)', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    const base = generated()
+    f.state.plan.value = { ...base, codegen: { ...base.codegen, literal_values: ['V053504641', 'V053143615'] } }
+    let text = (await html()).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('コードに直接書かれています: V053143615、V053504641'.replace('V053143615、V053504641', 'V053504641、V053143615')))
+    assert.ok(text.includes('再利用で、これらの値を変えられません')); assert.ok(text.includes('class="warning plan-warning"'))
+    f.state.plan.value = base
+    assert.equal((await html()).includes('コードに直接書かれています'), false, '直接書かれた値がなければ、出さない')
+    f.state.plan.value = { ...base, codegen: { ...base.codegen, literal_values: ['<img src=x onerror=SECRET>'] } }
+    text = await html()
+    assert.equal(text.includes('<img src=x onerror=SECRET>'), false); assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'))
+  } finally { f.stop() }
+})
+
 test('経過秒のタイマーは、連続して切り替わっても1本だけで、画面を破棄すると止まる(Codex P3)', async () => {
   const { mock } = await import('node:test')
   mock.timers.enable({ apis: ['setInterval', 'Date'] })

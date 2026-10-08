@@ -737,6 +737,20 @@ test('再利用(2-C): ラベルにHTMLが含まれても、入力欄・エラー
   } finally { f.stop() }
 })
 
+test('テンプレート保存の欄にも、コードに直接書かれた値の警告を出す(保存は止めない)', async () => {
+  const withLiterals = plan({ codegen: { ...plan().codegen, literal_values: ['V053504641'] } })
+  const f = await setup({ plan: withLiterals })
+  try {
+    const text = await html(f)
+    assert.ok(text.includes('コードに直接書かれた値があります（V053504641）')); assert.ok(text.includes('これらの値は変えられません（保存はできます）'))
+    f.state.accepted.value = true
+    await f.state.save()
+    assert.equal(f.calls.some(c => c[0] === 'saveTemplate'), true, '警告があっても保存できる')
+  } finally { f.stop() }
+  const g = await setup({ plan: plan() })
+  try { assert.equal((await html(g)).includes('コードに直接書かれた値があります'), false) } finally { g.stop() }
+})
+
 test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([row(1, { category: 'shipment', category_label: '出荷' })]) }) })
   try {
