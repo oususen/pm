@@ -242,7 +242,14 @@ AI_DB_ACCESS = [
 
 
 class LocalAIError(Exception):
-    """選択したAIモデルと通信できない、または応答形式が不正。"""
+    """選択したAIモデルと通信できない、または応答形式が不正。
+
+    codeは、外部APIの失敗の分類(ai_timeout・ai_auth・ai_http・ai_connect・ai_empty)。分類しない失敗は空(2026-10-08、BOSS承認)。
+    """
+
+    def __init__(self, *args, code=''):
+        super().__init__(*args)
+        self.code = code
 
 
 class ExternalDataRedactor:

@@ -50,7 +50,7 @@ def request_external_json(provider, model, messages, temperature=0.3):
     agent = external_provider(provider)
     label = agent['label']
     if not agent['api_key']:
-        raise chat_service.LocalAIError(f'{label} APIキーが未設定です。サーバーの環境変数を設定してください。')
+        raise chat_service.LocalAIError(f'{label} APIキーが未設定です。サーバーの環境変数を設定してください。', code='ai_auth')
     body = {
         'model': model,
         'stream': False,
@@ -77,17 +77,17 @@ def request_external_json(provider, model, messages, temperature=0.3):
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode('utf-8'))
     except TimeoutError as exc:
-        raise chat_service.LocalAIError(f'{label} APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。') from exc
+        raise chat_service.LocalAIError(f'{label} APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。', code='ai_timeout') from exc
     except HTTPError as exc:
         if exc.code in {401, 403}:
-            raise chat_service.LocalAIError(f'{label} APIキーを確認してください。') from exc
-        raise chat_service.LocalAIError(f'{label} APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。') from exc
+            raise chat_service.LocalAIError(f'{label} APIキーを確認してください。', code='ai_auth') from exc
+        raise chat_service.LocalAIError(f'{label} APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。', code='ai_http') from exc
     except (URLError, OSError, ValueError) as exc:
-        raise chat_service.LocalAIError(f'{label} APIに接続できません。接続設定を確認してください。') from exc
+        raise chat_service.LocalAIError(f'{label} APIに接続できません。接続設定を確認してください。', code='ai_connect') from exc
     choice = (payload.get('choices') or [{}])[0]
     answer = ((choice.get('message') or {}).get('content') or '').strip()
     if not answer:
-        raise chat_service.LocalAIError(f'{label} APIから空の応答が返りました。時間をおいて再度お試しください。')
+        raise chat_service.LocalAIError(f'{label} APIから空の応答が返りました。時間をおいて再度お試しください。', code='ai_empty')
     if choice.get('finish_reason') == 'length':
         raise chat_service.LocalAIError('分析案が生成上限で中断しました。目的を短くするか、別のモデルでお試しください。')
     return _strip_code_fence(answer)

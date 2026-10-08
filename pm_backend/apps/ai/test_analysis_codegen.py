@@ -487,6 +487,33 @@ class GenerationTest(CodegenBase):
             result = cg.generate(OWNER, plan['id'], plan['revision'], self.confirmation_for(plan))
         self.assertEqual((result['codegen']['status'], result['codegen']['attempts'], result['codegen']['reasons']), ('failed', 1, ['ai_request_failed']))
 
+    def test_external_ai_failures_are_classified_into_fixed_codes(self):
+        # 2026-10-08、BOSS承認: 通信失敗の理由を、固定の分類コードへ分ける。本文・キー・URLは残さない
+        cases = (('ai_timeout', 'ai_timeout'), ('ai_auth', 'ai_auth'), ('ai_http', 'ai_http'), ('ai_connect', 'ai_connect'),
+                 ('ai_empty', 'ai_empty'), ('', 'ai_request_failed'), ('SECRET-KEY-sk-123', 'ai_request_failed'))
+        for code, expected in cases:
+            with self.subTest(code=code):
+                plan = self.new_plan()
+                with patch.object(cg, '_call_ai', side_effect=cg.chat_service.LocalAIError('本文 SECRET-URL', code=code)):
+                    result = cg.generate(OWNER, plan['id'], plan['revision'], self.confirmation_for(plan))
+                self.assertEqual(result['codegen']['reasons'], [expected])
+                self.assertNotIn('SECRET', json.dumps(result['codegen'], ensure_ascii=False))
+
+    def test_external_request_errors_carry_the_classification(self):
+        from urllib.error import HTTPError, URLError
+        from ai.services import analysis_llm
+        agent = {'label': 'X', 'api_key': 'k', 'base_url': 'http://x.invalid'}
+        for error, expected in ((TimeoutError(), 'ai_timeout'), (HTTPError('http://x', 401, 'u', {}, None), 'ai_auth'),
+                                (HTTPError('http://x', 429, 'l', {}, None), 'ai_http'), (URLError('down'), 'ai_connect')):
+            with self.subTest(expected=expected), patch.object(analysis_llm, 'external_provider', return_value=agent),                     patch.object(analysis_llm, 'urlopen', side_effect=error):
+                with self.assertRaises(cg.chat_service.LocalAIError) as caught:
+                    analysis_llm.request_external_json('openrouter', 'm', [{'role': 'user', 'content': 'x'}])
+                self.assertEqual(caught.exception.code, expected)
+        with patch.object(analysis_llm, 'external_provider', return_value={**agent, 'api_key': ''}):
+            with self.assertRaises(cg.chat_service.LocalAIError) as caught:
+                analysis_llm.request_external_json('openrouter', 'm', [])
+            self.assertEqual(caught.exception.code, 'ai_auth')
+
     def test_no_code_is_stored_when_validation_fails(self):
         plan = self.new_plan()
         result, _ = self.generate(plan, json.dumps({'steps': [], 'python': 'import os\nemit_report("x")'}))

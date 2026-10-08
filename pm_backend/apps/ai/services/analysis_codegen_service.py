@@ -36,6 +36,7 @@ MAX_SQL_BYTES = 24 * 1024  # 中間テーブルの手順(SQL全体)
 MAX_PYTHON_BYTES = 24 * 1024
 MAX_CODE_BYTES = 64 * 1024  # 固定外枠を加えた、コンテナへ送るコード全体(runnerの上限)
 MAX_STEPS = 50
+AI_FAILURE_CODES = ('ai_timeout', 'ai_auth', 'ai_http', 'ai_connect', 'ai_empty')
 MAX_GENERATIONS = 4  # 初回1回+再生成3回。失敗(形式・検査・通信)も数える
 INFLIGHT_GRACE_SECONDS = 60  # 「生成中」を状態不明と表示するまでの、AIの呼出し期限への加算
 
@@ -459,9 +460,10 @@ def generate(owner_id, plan_id, revision, confirmation=None):
     reasons, outcome = [], None
     try:
         raw = _call_ai(provider, model, messages, temperature)
-    except chat_service.LocalAIError:
+    except chat_service.LocalAIError as exc:
         raw = None
-        reasons.append('ai_request_failed')
+        # 外部APIの失敗は、固定の分類コードで残す(本文・キー・URLは残さない)。分類のない失敗は、従来の理由のまま
+        reasons.append(exc.code if exc.code in AI_FAILURE_CODES else 'ai_request_failed')
     approved_views = [d['view'] for d in plan['proposal']['datasets']]
     steps = python = unsupported = source = None
     names = {}  # 失敗の理由ごとの変数名(固定の形の識別子だけ。画面で、どの変数かを示す)

@@ -856,6 +856,20 @@ test('変数つきのコード(2-B): 使った変数と、元の値を表示す�
   } finally { f.stop() }
 })
 
+test('AIとの通信失敗は、固定の分類コードごとに、原因と次の操作を表示する(2026-10-08)', async () => {
+  const f = await setup('openrouter')
+  try {
+    for (const [reason, part] of [['ai_timeout', '制限時間内に返事がありませんでした'], ['ai_auth', 'APIキーが未設定、または正しくありません'],
+      ['ai_http', '残高・利用制限など'], ['ai_connect', '接続できませんでした'], ['ai_empty', '空の返事が返りました'], ['ai_request_failed', 'AIとの通信に失敗しました']]) {
+      f.state.plan.value = { ...dataPlan('openrouter'), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: [reason] } }
+      const text = await htmlFor(f)
+      assert.ok(text.includes(part), reason); assert.ok(text.includes('生成回数は消費されています'), reason)
+    }
+    f.state.plan.value = { ...dataPlan('openrouter'), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: ['ai_secret_unknown'] } }
+    assert.equal((await htmlFor(f)).includes('ai_secret_unknown'), false)  // 未知の理由コードの本文は出さない
+  } finally { f.stop() }
+})
+
 test('結果の改良の準備中は、テンプレートから分析案を作れない(追加の指示と元の実行の対応が、黙って消えない)(Codexの指摘)', async () => {
   const f = await setup('openrouter')
   try {

@@ -160,3 +160,15 @@ def setUpModule():
 
 def tearDownModule():
     _temperature_patch.stop()
+
+
+class ColumnWarningNextActionTests(SimpleTestCase):
+    def test_every_column_warning_tells_the_next_action(self):
+        # BOSS指示 2026-10-08: 列の食い違いの警告にも、次の操作を付ける
+        proposal = {'datasets': [{'view': 'v_ai_shipment', 'fields': ['shipment_date', 'quantity']}],
+                    'steps': ['customer_codeで集計'], 'outputs': ['納入場の合計']}
+        found = column_warnings('納入場ごとの出荷数量', proposal)
+        self.assertTrue(found)
+        for text in found:
+            self.assertIn('次の操作: 手順を読み、列が合っていれば、そのまま承認します。', text)
+            self.assertIn('「目的・期間を変更して作り直す」を押し', text)

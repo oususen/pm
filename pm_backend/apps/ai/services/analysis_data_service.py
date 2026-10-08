@@ -59,6 +59,9 @@ def term_guide_text(ask_user=False):
     )
 
 
+COLUMN_NEXT_ACTION = '次の操作: 手順を読み、列が合っていれば、そのまま承認します。違っていれば、画面右下の「目的・期間を変更して作り直す」を押し、目的を書き直して、分析案を作り直してください。'
+
+
 def column_warnings(purpose, proposal):
     """分析案の、目的の言葉と取得する列・手順の食い違いを、警告の文で返す(機械的な検査。AIの出力を直さず、承認前に利用者へ見せる)。"""
     datasets = proposal['datasets']
@@ -76,7 +79,8 @@ def column_warnings(purpose, proposal):
         warnings.append('目的は納入場(納入地)ですが、手順・出力に customer_code(得意先・顧客のコード)が使われています。集計の列が違う可能性があります(納入場はship_to_code)。')
     if customer and not ship_to and 'ship_to_code' in text and 'customer_code' not in text:
         warnings.append('目的は顧客(得意先)ですが、手順・出力に ship_to_code(納入場のコード)が使われています。集計の列が違う可能性があります(顧客はcustomer_code)。')
-    return warnings
+    # 次の操作を、文の最後に付ける(BOSS指示 2026-10-08)
+    return [warning + COLUMN_NEXT_ACTION for warning in warnings]
 
 
 # 目的文の「N月」(例: 8月・8月〜9月・8月から9月)。「2か月」「12ヶ月」(月の前が、数字でない)は、含めない
