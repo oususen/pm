@@ -133,3 +133,11 @@ class ExclusionWarningTests(SimpleTestCase):
                      '9月1日から9月30日まで集計して、7月は除く', '8月の出荷。7月24日から7月31日までの分を除いて集計'):
             with self.subTest(text=text):
                 self.assertEqual(exclusion_warnings(text), [])
+
+    def test_every_warning_tells_the_next_action(self):
+        # BOSS指示 2026-10-08: 警告の文に、次の操作(「目的・期間を変更して作り直す」)を含める
+        for found in (exclusion_warnings('７月３１日までを除いて'), exclusion_warnings('7月24日からを除く'),
+                      period_warnings('8月の出荷数量', '2026-07-31', '2026-09-30'), period_warnings('8月と9月の出荷', '2026-09-01', '2026-09-30')):
+            for text in found:
+                with self.subTest(text=text):
+                    self.assertIn('次の操作: 画面右下の「目的・期間を変更して作り直す」を押し', text)

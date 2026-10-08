@@ -104,9 +104,9 @@ def exclusion_warnings(purpose):
     """除く期間の、開始日・終了日の片方だけが書かれているとき、警告の文を返す(機械的な検査。AIには補わせない。BOSS承認 2026-10-08)。"""
     warnings = []
     if any(not RANGE_MARK_PATTERN.search(found.group(1)) for found in EXCLUDE_UNTIL_PATTERN.finditer(purpose)):
-        warnings.append('除く期間の開始日が書かれていません。「6月30日から7月31日までを除く」のように、開始日も書いてください。')
+        warnings.append('除く期間の開始日が書かれていません。「6月30日から7月31日までを除く」のように、開始日も書いてください。次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、目的を書き直して、分析案を作り直してください。')
     if any('まで' not in found.group(1) and not RANGE_MARK_PATTERN.search(found.group(1).replace('から', '', 1)) for found in EXCLUDE_FROM_PATTERN.finditer(purpose)):
-        warnings.append('除く期間の終了日が書かれていません。「7月24日から7月31日までを除く」のように、終了日も書いてください。')
+        warnings.append('除く期間の終了日が書かれていません。「7月24日から7月31日までを除く」のように、終了日も書いてください。次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、目的を書き直して、分析案を作り直してください。')
     return warnings
 
 
@@ -127,10 +127,10 @@ def period_warnings(purpose, date_from, date_to):
     warnings = []
     extra = period_months - mentioned
     if extra:
-        warnings.append(f'目的に書かれた月（{label(mentioned)}）より、期間（{date_from}〜{date_to}）が広く、{label(extra)}の分も含まれます。期間の欄を、目的に合わせて直してください。')
+        warnings.append(f'目的に書かれた月（{label(mentioned)}）より、期間（{date_from}〜{date_to}）が広く、{label(extra)}の分も含まれます。期間の欄を、目的に合わせて直してください。次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、期間を直して、分析案を作り直してください。')
     missing = mentioned - period_months
     if missing:
-        warnings.append(f'目的に書かれた{label(missing)}が、期間（{date_from}〜{date_to}）に含まれていません。期間の欄を、目的に合わせて直してください。')
+        warnings.append(f'目的に書かれた{label(missing)}が、期間（{date_from}〜{date_to}）に含まれていません。期間の欄を、目的に合わせて直してください。次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、期間を直して、分析案を作り直してください。')
     return warnings
 
 
