@@ -14,7 +14,8 @@ from ai.services.analysis_template_reuse_service import create_plan_from_templat
 from ai.services.analysis_template_notify_service import resend as resend_notification
 from ai.services.analysis_template_review_service import approve_template, reject_template
 from ai.services.analysis_template_service import (
-    change_category, get_visible_template, is_template_admin, parse_plan_id, save_template, serialize_template, validate_category,
+    change_category, get_visible_template, is_template_admin, parse_plan_id, rename_template, same_name_count, save_template, serialize_template,
+    validate_category, validate_template_name,
     visible_templates,
 )
 
@@ -38,6 +39,9 @@ class AIAnalysisTemplatesView(APIView):
             if status not in dict(AIAnalysisTemplate.STATUS_CHOICES):
                 raise AnalysisError('状態の指定が不正です。')
             queryset = queryset.filter(status=status)
+        name = request.query_params.get('name')
+        if name is not None:
+            queryset = queryset.filter(name=validate_template_name(name))  # 名称の完全一致(重複の確認用)。見える範囲は変えない
         category = request.query_params.get('category')
         if category is not None:
             queryset = queryset.filter(category=validate_category(category))  # 見える範囲は変えない
@@ -47,13 +51,17 @@ class AIAnalysisTemplatesView(APIView):
 
     def post(self, request):
         keys = set(request.data) if isinstance(request.data, dict) else set()
-        if keys not in ({'plan_id', 'revision', 'category'}, {'plan_id', 'revision', 'category', 'replaces'}):
-            raise AnalysisError('plan_id・revision・category(訂正版はreplacesも)だけを指定してください。')
+        required = {'plan_id', 'revision', 'category'}
+        if not required <= keys or not keys <= required | {'replaces', 'name'}:
+            raise AnalysisError('plan_id・revision・category(訂正版はreplaces、名称はnameも)だけを指定してください。')
+        admin = is_template_admin(request.user)
         template, created = save_template(
             request.user, parse_plan_id(request.data['plan_id']), request.data['revision'], request.data.get('replaces'), request.data['category'],
+            validate_template_name(request.data['name']) if 'name' in request.data else None,  # 指定があれば、先に検査する(nullは不可)
         )
-        data = serialize_template(template, request.user, is_template_admin(request.user), True)
-        return Response({**data, 'created': created}, status=201 if created else 200)
+        data = serialize_template(template, request.user, admin, True)
+        return Response({**data, 'created': created, 'same_name_count': same_name_count(request.user, admin, template.name, template.pk)},
+                        status=201 if created else 200)
 
 
 class AIAnalysisTemplateView(APIView):
@@ -74,6 +82,19 @@ class AIAnalysisTemplateCategoryView(APIView):
         admin = is_template_admin(request.user)
         template = change_category(request.user, template_id, request.data['category'], admin)
         return Response(serialize_template(template, request.user, admin, True))
+
+
+class AIAnalysisTemplateNameView(APIView):
+    """名称の変更(作成者と管理者。管理者承認前だけ)。ハッシュは計算し直し、状態の版を進める。"""
+    permission_classes = [IsAuthenticated, CanUseAIAnalysis]
+
+    def post(self, request, template_id):
+        if not isinstance(request.data, dict) or set(request.data) != {'name'}:
+            raise AnalysisError('nameだけを指定してください。')
+        admin = is_template_admin(request.user)
+        template = rename_template(request.user, template_id, request.data['name'], admin)
+        data = serialize_template(template, request.user, admin, True)
+        return Response({**data, 'same_name_count': same_name_count(request.user, admin, template.name, template.pk)})
 
 
 class AIAnalysisTemplateApproveView(APIView):

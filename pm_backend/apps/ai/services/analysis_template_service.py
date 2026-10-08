@@ -11,7 +11,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Q
+from django.db.models import F, Max, Q
 from rest_framework.exceptions import PermissionDenied
 
 from ai.models import AIAnalysisTemplate
@@ -75,7 +75,19 @@ def _text_list(value):
     return value
 
 
-def _fields_from_plan(plan, check_dates=True):
+def validate_template_name(name):
+    """テンプレートの名称(利用者が入力する)。空・文字列以外・制御文字・列の上限(300文字)超は不可。前後の空白は除く(BOSS承認 2026-10-08)。"""
+    if type(name) is not str:
+        raise AnalysisError('テンプレート名を文字列で入力してください。')
+    name = name.strip()
+    if not name or any(ord(char) < 32 or ord(char) == 127 for char in name):
+        raise AnalysisError('テンプレート名を入力してください(改行・制御文字は使えません)。')
+    if len(name) > AIAnalysisTemplate._meta.get_field('name').max_length:
+        raise AnalysisError('テンプレート名が長すぎます(300文字以内)。')
+    return name
+
+
+def _fields_from_plan(plan, check_dates=True, name=None):
     """保存対象の列を、承認済みの分析案から組み立てる。保存できない状態・欠けた内容は、固定文で拒否する。"""
     if plan.get('status') != 'data_approved' or not plan.get('method_approved_at') or not plan.get('data_approved_at'):
         raise AnalysisError('手順とデータ範囲の承認後に保存してください。', 409)
@@ -118,7 +130,7 @@ def _fields_from_plan(plan, check_dates=True):
         if steps_now != bundle.steps or python_now != bundle.python:
             raise AnalysisError('変数の形のコードと、承認したコードが一致しません。コードを作り直してください。', 409)
         sql_steps, python_code = source['steps'], source['python']
-    name = _text(proposal.get('title')).strip()
+    name = validate_template_name(name) if name is not None else _text(proposal.get('title')).strip()  # 名称の指定がなければ、分析案の題名(従来どおり)
     if len(name) > AIAnalysisTemplate._meta.get_field('name').max_length:
         raise AnalysisError('名称が長すぎるため保存できません。分析案を作り直してください。', 409)
     fields = {
@@ -175,7 +187,7 @@ def validate_category(category):
     return category
 
 
-def save_template(user, plan_id, revision, replaces=None, category=None):
+def save_template(user, plan_id, revision, replaces=None, category=None, name=None):
     """本人の承認済み分析案から保存する。(テンプレート, 新規作成か)を返す。同じ内容の再送は、既存の行を返す。
 
     replacesを指定すると、却下された版の訂正版(同じ系統の次の版)として保存する(管理者のみ)。
@@ -189,7 +201,7 @@ def save_template(user, plan_id, revision, replaces=None, category=None):
     if plan.get('template') is not None:
         # 保存済みのコードをそのまま使う分析案のため、保存すると同じ内容のテンプレートが重複する(元の分析案が違うだけ)。訂正版も同じ
         raise AnalysisError('テンプレートから作成した分析案は、テンプレートとして保存できません(内容が同じため重複します)。コードを変えた新しい分析を作成してください。', 409)
-    fields = _fields_from_plan(plan, check_dates=False)  # 日付の直書きの確認は、既存の行を探した後に行う(再送は、既存の行を返す)
+    fields = _fields_from_plan(plan, check_dates=False, name=name)  # 日付の直書きの確認は、既存の行を探した後に行う(再送は、既存の行を返す)
     if replaces is not None:
         _check_correction_request(user, replaces)
     key = {'source_plan_id': str(plan_id), 'source_plan_revision': revision}
@@ -282,6 +294,7 @@ def serialize_template(template, user, admin, detail):
             replacement = template.corrections.filter(status='approved').order_by('id').first() if template.status == 'superseded' else None
             if review_visible:
                 data['can_change_category'] = True  # 作成者と管理者は、カテゴリを後から変えられる
+                data['can_rename'] = template.status == 'pending_admin'  # 名称は、管理者承認前だけ変えられる
                 data['notifications'] = serialize_records(template)
                 data.update({
                     'reviewed_by': (template.reviewed_by.get_username() if template.reviewed_by_id else DELETED_USER_LABEL) if template.reviewed_at else None,
@@ -322,6 +335,37 @@ def parse_plan_id(value):
         return str(UUID(value))
     except ValueError:
         raise AnalysisError('分析案のIDが不正です。') from None
+
+
+def same_name_count(user, admin, name, exclude_id=None):
+    """同じ名称のテンプレートの件数。利用者が見える範囲だけを数える(見えないテンプレートの名前の存在を、漏らさない)。"""
+    rows = visible_templates(user, admin).filter(name=validate_template_name(name))
+    return (rows.exclude(pk=exclude_id) if exclude_id is not None else rows).count()
+
+
+def rename_template(user, template_id, name, admin):
+    """作成者と管理者が、管理者承認前(pending_admin)のテンプレートの名称を変える。名称は承認対象のハッシュに入るため、ハッシュを計算し直す。
+
+    状態の版(state_revision)を進める(管理者が古い内容を見たまま承認する、という事故を、409で防ぐ)。承認後・却下・置換済みは変えられない(409)。
+    """
+    name = validate_template_name(name)
+    with transaction.atomic():
+        template = AIAnalysisTemplate.objects.select_for_update().filter(pk=template_id).first()
+        if template is None or not (admin or (template.approved_by_id is not None and template.approved_by_id == user.pk)):
+            raise AnalysisError('テンプレートが見つかりません。', 404)
+        if template.status != 'pending_admin':
+            raise AnalysisError('名称を変えられるのは、管理者承認前のテンプレートだけです。', 409)
+        template.name = name
+        new_hash = _content_sha256({
+            'name': template.name, 'purpose': template.purpose, 'procedure': template.procedure, 'output_spec': template.output_spec,
+            'conditions': template.conditions, 'datasets': template.datasets, 'date_from': template.date_from, 'date_to': template.date_to,
+            'sql_steps': template.sql_steps, 'python_code': template.python_code, 'wrapper_version': template.wrapper_version,
+            'executed_code_sha256': template.executed_code_sha256, 'parameters': template.parameters,
+        })
+        AIAnalysisTemplate.objects.filter(pk=template.pk).update(
+            name=name, content_sha256=new_hash, state_revision=F('state_revision') + 1, updated_at=datetime.now())
+    template.refresh_from_db()
+    return template
 
 
 def change_category(user, template_id, category, admin):

@@ -7,6 +7,9 @@
     <p v-if="canEdit && plan?.template" role="status">テンプレートから作成した分析案は、テンプレートとして保存できません（保存済みのコードをそのまま使うため、内容が同じで重複します）。コードを変えた新しい分析を作成したときに、保存できます。</p>
     <template v-else-if="canEdit">
       <p v-if="!savable">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
+      <label>テンプレート名（必須・300文字以内）:
+        <input v-model="templateName" type="text" maxlength="300" size="50" :disabled="!savable || !!busy" aria-label="保存するテンプレートの名前" @input="nameEdited = true; duplicateCount = null" @change="checkName"></label>
+      <p v-if="duplicateCount > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが{{ duplicateCount }}件あります。区別しやすい名前に変えることをお勧めします（そのまま保存もできます）。</p>
       <label>カテゴリ（必須）:
         <select v-model="category" :disabled="!savable || !!busy" aria-label="保存するテンプレートのカテゴリ">
           <option value="">選択してください</option>
@@ -16,6 +19,7 @@
       <button :disabled="!canSave || !accepted" @click="save">{{ busy === 'save' ? '保存中…' : 'テンプレートとして保存' }}</button>
     </template>
     <p v-else>閲覧のみです。保存にはAI分析の編集権限が必要です。</p>
+    <p v-if="saved?.same_name_count > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが、ほかに{{ saved.same_name_count }}件あります。区別しやすい名前に変えることをお勧めします（管理者承認前は、一覧の詳細から名称を変えられます）。</p>
     <p v-if="saved" role="status">{{ saved.created ? '保存しました' : '保存済みです（同じ内容は重複して保存しません）' }}: テンプレート{{ saved.id }} / 版{{ saved.version }} / {{ saved.status_label }} / カテゴリ: {{ saved.category_label }}</p>
     <h3>保存済みテンプレート</h3>
     <label>カテゴリの絞り込み:
@@ -47,6 +51,9 @@
         <p v-if="detail.rejection_reason">却下理由: {{ detail.rejection_reason }}</p>
         <p v-if="detail.replaces">この版は、テンプレート{{ detail.replaces }}（却下）の訂正版です。承認すると、元の版は置換済みになります。</p>
         <p v-if="detail.replacement_id">置換先: テンプレート{{ detail.replacement_id }}</p>
+        <p v-if="detail.can_rename && canEdit">名称: <input v-model="newName" type="text" maxlength="300" size="50" :disabled="!!busy" aria-label="変更後のテンプレート名">
+          <button :disabled="!!busy || !newName.trim() || newName.trim() === detail.name" @click="renameTemplate">名称を変更（管理者承認前だけ）</button></p>
+        <p v-if="renameWarning > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが、ほかに{{ renameWarning }}件あります。</p>
         <p v-if="detail.can_change_category && canEdit">カテゴリ: {{ detail.category_label }} →
           <select v-model="newCategory" :disabled="!!busy" aria-label="変更後のカテゴリ">
             <option v-for="item in CATEGORIES" :key="item.value" :value="item.value">{{ item.label }}</option>
@@ -92,6 +99,9 @@ const CATEGORIES = Object.freeze([
   { value: 'production', label: '生産' }, { value: 'quality', label: '品質' }, { value: 'other', label: 'その他' },
 ])
 const category = ref(''), categoryFilter = ref(''), newCategory = ref('')
+// テンプレート名(2026-10-08、BOSS承認)。初期値は分析案の題名。同じ名前の警告は、保存を止めない。名称の変更は、管理者承認前だけ(サーバーでも確認する)
+const templateName = ref(''), nameEdited = ref(false), duplicateCount = ref(null), newName = ref(''), renameWarning = ref(0)
+let nameToken = 0
 let autoCategory = '' // 却下された版を開いたときに、初期値として入れた値(利用者が変えていなければ、次の版を開いたとき入れ替える)
 const REASON_MAX = 500 // 却下理由の最大長(BOSS承認)。超える入力は送らない
 const list = ref({ results: [], count: 0, next: null, previous: null }), page = ref(1), loaded = ref(false)
@@ -130,7 +140,7 @@ const RESEND_ERRORS = Object.freeze({
 })
 const hasCode = computed(() => props.plan?.codegen?.status === 'code_approved' && !!props.plan.codegen.executed_code_sha256)
 const savable = computed(() => props.plan?.status === 'data_approved' && hasCode.value && !props.plan?.template)
-const canSave = computed(() => props.canEdit && !props.blocked && !busy.value && savable.value && !!category.value)
+const canSave = computed(() => props.canEdit && !props.blocked && !busy.value && savable.value && !!category.value && !!templateName.value.trim())
 const saveHint = computed(() => !props.plan ? '分析案なし' : props.plan.status !== 'data_approved' ? 'データ範囲が未承認' : 'コードが未承認')
 // 再利用できるのは、全文を見られる正式・管理者承認待ちの行だけ(サーバーでも状態・権限を確認する)
 const canReuse = row => props.canEdit && row.content_visible && ['approved', 'pending_admin'].includes(row.status)
@@ -140,6 +150,11 @@ const formatDate = value => typeof value === 'string' ? value.replace('T', ' ').
 // 分析案・版が変われば、保存の確認を取り直す。保存結果と詳細は、別の分析案へ持ち越さない。
 // 分析案または版が変わったら、確認・保存結果・未完了の保存の応答を取り直す(古い応答を新しい分析案の下に表示しない)
 watch(() => [props.plan?.id, props.plan?.revision], () => { accepted.value = false; acceptedCorrection.value = false; saved.value = null; saveToken++ }, { flush: 'sync' })
+// 分析案が替わったら、名前の初期値を、その分析案の題名にする(利用者が書き換えた名前は、同じ分析案の間だけ残す)
+watch(() => [props.plan?.id, props.plan?.proposal?.title], ([id], [oldId] = []) => {
+  if (id !== oldId) nameEdited.value = false
+  if (!nameEdited.value) { templateName.value = typeof props.plan?.proposal?.title === 'string' ? props.plan.proposal.title : ''; duplicateCount.value = null }
+}, { flush: 'sync', immediate: true })
 watch(() => props.plan?.id, () => { error.value = '' }, { flush: 'sync' })
 watch(() => props.canEdit, value => { if (!value) { accepted.value = false; acceptedCorrection.value = false } }, { flush: 'sync' })
 watch([statusFilter, categoryFilter], () => load(1))
@@ -156,7 +171,7 @@ async function doSave(replaces) {
   busy.value = 'save'; error.value = ''
   let done = false
   try {
-    const body = { plan_id: target.id, revision: target.revision, category: category.value }
+    const body = { plan_id: target.id, revision: target.revision, category: category.value, name: templateName.value.trim() }
     if (replaces !== null) body.replaces = replaces
     const response = await api.aiAnalysis.saveTemplate(body)
     if (!disposed && current === epoch && token === saveToken) { saved.value = response.data; confirmed.value = false; category.value = ''; done = true }
@@ -165,6 +180,34 @@ async function doSave(replaces) {
   } finally { if (!disposed && current === epoch) busy.value = '' }
   // 保存は成立している可能性があるため、分析案が切り替わっても一覧は取り直す
   if (!disposed && current === epoch && (done || token !== saveToken)) return load(1)
+}
+async function checkName() {
+  const name = templateName.value.trim(), token = ++nameToken
+  if (!name) { duplicateCount.value = null; return }
+  try {
+    const response = await api.aiAnalysis.templates({ name })
+    if (!disposed && token === nameToken) duplicateCount.value = Number.isInteger(response.data?.count) ? response.data.count : null
+  } catch { if (!disposed && token === nameToken) duplicateCount.value = null }  // 確認できなくても、保存は止めない(警告が出ないだけ)
+}
+const NAME_ERRORS = Object.freeze({
+  400: 'テンプレート名を入力してください(300文字以内。改行は使えません)。',
+  403: '名称を変更する権限がありません。',
+  404: 'テンプレートが見つかりません。',
+  409: '名称を変えられるのは、管理者承認前のテンプレートだけです。状態が変わった可能性があります。一覧を更新してください。',
+})
+async function renameTemplate() {
+  if (!props.canEdit || busy.value || !detail.value?.can_rename || !newName.value.trim() || newName.value.trim() === detail.value.name) return
+  const current = epoch, target = detail.value, value = newName.value.trim()
+  busy.value = 'rename'; error.value = ''; renameWarning.value = 0
+  let count = 0
+  try {
+    const response = await api.aiAnalysis.renameTemplate(target.id, { name: value })
+    count = Number.isInteger(response.data?.same_name_count) ? response.data.same_name_count : 0
+  } catch (e) {
+    if (!disposed && current === epoch) error.value = NAME_ERRORS[e.response?.status] || '名称を変更できませんでした。'
+  } finally { if (!disposed && current === epoch) busy.value = '' }
+  // 成否にかかわらず、最新の一覧・詳細を取り直す(状態の版が進むため、承認などの操作も最新の内容になる)
+  if (!disposed && current === epoch) { const failure = error.value; await load(page.value); await showDetail(target.id); if (!disposed && current === epoch) { if (failure) error.value = failure; else renameWarning.value = count } }
 }
 async function load(target = 1) {
   if (busy.value) return
@@ -260,6 +303,7 @@ async function showDetail(id) {
     if (!disposed && current === epoch) {
       detail.value = response.data.content_visible ? response.data : null; reason.value = ''
       newCategory.value = detail.value?.category || ''
+      newName.value = detail.value?.name || ''; renameWarning.value = 0
       // 却下された版の訂正版を保存するときの初期値は、元の版のカテゴリ(変えてもよい)。利用者が選んだ値は上書きしない
       if (detail.value?.status === 'rejected' && (!category.value || category.value === autoCategory)) {
         category.value = detail.value.category || ''; autoCategory = category.value
@@ -273,4 +317,8 @@ async function showDetail(id) {
 <style scoped>
 .templates { border-top: 1px solid #ccc; margin-top: 20px; } button { margin: 4px; padding: 8px; } article { margin: 12px 0; padding: 8px; background: #f5f9f8; }
 article p { margin: 2px 0; } .notice-records { margin: 2px 0 6px; padding-left: 1.4em; font-size: 13px; } pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.name-warning { background: #fdecea; border-left: 3px solid #d32f2f; color: #b3120c; font-weight: 600; padding: 8px 10px; }
+.warn-mark { display: inline-block; animation: warn-blink 1s steps(2, start) infinite; }
+@keyframes warn-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .warn-mark { animation: none; } }
 </style>

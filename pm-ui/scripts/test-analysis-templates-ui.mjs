@@ -20,7 +20,7 @@ const create = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUn
 const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
 
 const PYTHON = "emit_table('日別', ['日'], [['1']])"
-function plan(extra = {}) { return { id: 'plan-1', revision: 6, status: 'data_approved', codegen: { status: 'code_approved', executed_code_sha256: 'hash', python: PYTHON, steps: [] }, ...extra } }
+function plan(extra = {}) { return { id: 'plan-1', revision: 6, status: 'data_approved', proposal: { title: '日別出荷の分析' }, codegen: { status: 'code_approved', executed_code_sha256: 'hash', python: PYTHON, steps: [] }, ...extra } }
 function row(id, extra = {}) { return { id, name: `分析${id}`, purpose: `目的${id}`, status: 'pending_admin', status_label: '管理者承認待ち', created_by: 'tester', created_at: '2026-10-04T10:20:30', content_visible: true, ...extra } }
 const page = results => ({ results, count: results.length, next: null, previous: null })
 async function setup(propsInit = {}, methodsInit = {}) {
@@ -61,7 +61,7 @@ test('保存は確認チェック後だけ。送るのは分析案IDと版だけ
     f.state.accepted.value = true
     await f.state.save()
     assert.deepEqual(f.calls.map(c => c[0]), ['saveTemplate', 'templates'])
-    assert.deepEqual(f.calls[0][1], { plan_id: 'plan-1', revision: 6, category: 'shipment' })
+    assert.deepEqual(f.calls[0][1], { plan_id: 'plan-1', revision: 6, category: 'shipment', name: '日別出荷の分析' })
     assert.equal(f.state.accepted.value, false)
     const text = await html(f)
     assert.ok(text.includes('保存しました')); assert.ok(text.includes('テンプレート2 / 版1 / 管理者承認待ち'))
@@ -285,13 +285,13 @@ test('却下された版の訂正版は、確認チェック後に、置き換�
     f.state.acceptedCorrection.value = true
     await f.state.saveCorrection(MouseEventLike()); assert.deepEqual(f.calls, [], 'イベントを置き換え元として送らない')
     await f.state.saveCorrection(1)
-    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, category: 'shipment', replaces: 1 }])
+    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, category: 'shipment', name: '日別出荷の分析', replaces: 1 }])
     assert.equal(f.state.acceptedCorrection.value, false); assert.equal(f.state.accepted.value, true, '訂正版の保存は通常の確認を消費しない')
     // 通常の保存には、置き換え元を含めない。訂正版の確認は通常の保存にならない
     f.state.acceptedCorrection.value = true; f.state.accepted.value = false; f.calls.length = 0; await f.state.save(); assert.deepEqual(f.calls, [])
     f.state.category.value = 'shipment' // 保存の後はカテゴリを選び直す
     f.state.accepted.value = true; await f.state.save()
-    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, category: 'shipment' }])
+    assert.deepEqual(f.calls[0].slice(1), [{ plan_id: 'plan-1', revision: 6, category: 'shipment', name: '日別出荷の分析' }])
   } finally { f.stop(); user.stop() }
 })
 
@@ -478,11 +478,94 @@ test('カテゴリは必須: 選ぶまで保存できず、選んだ値を送る
     assert.equal(f.calls.some(c => c[0] === 'saveTemplate'), false, 'カテゴリ未選択では送らない')
     f.state.category.value = 'quality'
     await f.state.save()
-    assert.deepEqual(f.calls.find(c => c[0] === 'saveTemplate')[1], { plan_id: 'plan-1', revision: 6, category: 'quality' })
+    assert.deepEqual(f.calls.find(c => c[0] === 'saveTemplate')[1], { plan_id: 'plan-1', revision: 6, category: 'quality', name: '日別出荷の分析' })
     assert.equal(f.state.category.value, '', '保存後は、次の保存のために選び直す')
     const text = await html(f)
     for (const label of ['カテゴリ（必須）', '入荷', '出荷', '在庫', '生産', '品質', 'その他']) assert.ok(text.includes(label), label)
   } finally { f.stop() }
+})
+
+test('テンプレート名: 初期値は分析案の題名。書き換えた名前(前後の空白は除く)を送り、空では保存できない(2026-10-08)', async () => {
+  const f = await setup()
+  try {
+    assert.equal(f.state.templateName.value, '日別出荷の分析')
+    const text = await html(f)
+    assert.ok(text.includes('テンプレート名（必須・300文字以内）')); assert.ok(text.includes('maxlength="300"'))
+    f.state.accepted.value = true
+    f.state.templateName.value = '   '
+    await f.state.save()
+    assert.equal(f.calls.some(c => c[0] === 'saveTemplate'), false, '空の名前では送らない')
+    f.state.templateName.value = '  8月の日別出荷  '; f.state.nameEdited.value = true
+    await f.state.save()
+    assert.equal(f.calls.find(c => c[0] === 'saveTemplate')[1].name, '8月の日別出荷')
+    // 同じ分析案の間は、書き換えた名前を残す。別の分析案になったら、その題名へ戻す
+    f.state.templateName.value = '書き換え'; f.state.nameEdited.value = true
+    f.props.plan = plan({ id: 'plan-2', proposal: { title: '別の題名' } }); await Promise.resolve()
+    assert.equal(f.state.templateName.value, '別の題名')
+  } finally { f.stop() }
+})
+
+test('同じ名前の警告: 名前を確定したとき、一覧(見える範囲)の完全一致を確認し、件数を出す。確認できなくても保存は止めない', async () => {
+  const f = await setup({}, { templates: async params => ({ data: params?.name ? { ...page([row(7), row(8)]), count: 2 } : page([row(1)]) }) })
+  try {
+    f.state.templateName.value = '重複する名前'; f.state.nameEdited.value = true
+    await f.state.checkName()
+    assert.deepEqual(f.calls.filter(c => c[0] === 'templates').at(-1)[1], { name: '重複する名前' })
+    assert.equal(f.state.duplicateCount.value, 2)
+    let text = await html(f)
+    assert.ok(text.includes('同じ名前のテンプレートが2件あります')); assert.ok(text.includes('そのまま保存もできます')); assert.ok(text.includes('class="name-warning"'))
+    f.state.accepted.value = true
+    await f.state.save()
+    assert.equal(f.calls.some(c => c[0] === 'saveTemplate'), true, '警告があっても保存できる')
+  } finally { f.stop() }
+  const g = await setup({}, { templates: async params => { if (params?.name) throw new Error('boom'); return { data: page([row(1)]) } } })
+  try {
+    g.state.templateName.value = '確認できない'; g.state.nameEdited.value = true
+    await g.state.checkName()
+    assert.equal(g.state.duplicateCount.value, null)
+    assert.equal((await html(g)).includes('同じ名前のテンプレートが'), false)
+  } finally { g.stop() }
+})
+
+test('保存の応答の same_name_count が1以上なら、保存後にも警告を出す', async () => {
+  const f = await setup({}, { saveTemplate: async () => ({ data: { ...row(2), version: 1, created: true, same_name_count: 3 } }) })
+  try {
+    f.state.accepted.value = true
+    await f.state.save()
+    assert.ok((await html(f)).includes('同じ名前のテンプレートが、ほかに3件あります'))
+  } finally { f.stop() }
+})
+
+test('名称の変更: 管理者承認前(can_rename)だけ入力欄を出し、変更後に一覧・詳細を取り直す。失敗は固定文だけ', async () => {
+  const detailOf = (id, extra = {}) => ({ data: { ...row(id), date_from: '2026-01-01', date_to: '2026-01-31', conditions: '全行', procedure: ['集計'], sql_steps: [{ name: 'w_a', query: 'SELECT 1' }], python_code: PYTHON, can_change_category: true, ...extra } })
+  const f = await setup({}, { template: async id => detailOf(id, { can_rename: true }), renameTemplate: async () => ({ data: { same_name_count: 1 } }) })
+  try {
+    await f.state.showDetail(1)
+    let text = await html(f)
+    assert.ok(text.includes('名称を変更（管理者承認前だけ）')); assert.equal(f.state.newName.value, '分析1')
+    await f.state.renameTemplate()
+    assert.equal(f.calls.some(c => c[0] === 'renameTemplate'), false, '名前が変わっていなければ送らない')
+    f.state.newName.value = '  新しい名前  '
+    await f.state.renameTemplate()
+    assert.deepEqual(f.calls.find(c => c[0] === 'renameTemplate').slice(1), [1, { name: '新しい名前' }])
+    assert.equal(f.calls.filter(c => c[0] === 'template').length >= 2, true, '変更後に詳細を取り直す')
+    assert.equal(f.state.renameWarning.value, 1)
+    assert.ok((await html(f)).includes('同じ名前のテンプレートが、ほかに1件あります'))
+  } finally { f.stop() }
+  const g = await setup({}, { template: async id => detailOf(id, { can_rename: false }) })
+  try {
+    await g.state.showDetail(1)
+    assert.equal((await html(g)).includes('名称を変更（管理者承認前だけ）'), false, '承認後は出さない')
+  } finally { g.stop() }
+  for (const [status, part] of [[400, 'テンプレート名を入力してください'], [403, '名称を変更する権限がありません'], [404, 'テンプレートが見つかりません'], [409, '管理者承認前のテンプレートだけです'], [500, '名称を変更できませんでした']]) {
+    const h = await setup({}, { template: async id => detailOf(id, { can_rename: true }), renameTemplate: async () => { throw { response: { status, data: { detail: 'SECRET-INTERNAL' } } } } })
+    try {
+      await h.state.showDetail(1); h.state.newName.value = '別の名前'
+      await h.state.renameTemplate()
+      const text = await html(h)
+      assert.ok(text.includes(part), String(status)); assert.equal(text.includes('SECRET-INTERNAL'), false)
+    } finally { h.stop() }
+  }
 })
 
 test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {
