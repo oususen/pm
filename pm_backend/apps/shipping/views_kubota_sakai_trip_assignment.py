@@ -2059,6 +2059,7 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         start_date = _parse_date(request.data.get('start_date'))
         end_date = _parse_date(request.data.get('end_date'))
         reset_existing_assignments = bool(request.data.get('reset_existing_assignments'))
+        prioritize_product_display_order = request.data.get('prioritize_product_display_order') is True
         if not start_date:
             return Response({'detail': 'start_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if not end_date:
@@ -2098,6 +2099,13 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
         calendar_map = _build_calendar_day_map(calendar)
 
         product_codes = {item.product_code for item in preview_due_adjustments}
+        # 表示順優先時のみ、保存済みの品番＋納入地の設定を一括取得する。
+        product_display_orders = {}
+        if prioritize_product_display_order:
+            product_display_orders = {
+                (item.product_code, item.ship_to_code or ''): item.display_order
+                for item in KubotaSakaiTripDisplaySetting.objects.filter(product_code__in=product_codes)
+            }
         products = {
             product.product_code: product
             for product in Product.objects.select_related('used_container').filter(product_code__in=product_codes)
@@ -2237,12 +2245,16 @@ class KubotaSakaiTripAutoAssignViewNew(APIView):
                     capacity = Decimal('1')
                 total_qty = _to_decimal(due_adjustment.delivery_qty)
                 container_count = (total_qty / capacity).to_integral_value(rounding=ROUND_CEILING) if total_qty > 0 else Decimal('0')
-                return (
+                existing_sort_key = (
                     candidate_count if candidate_count > 0 else 999,
                     -int(container_count),
                     -_to_int_qty(total_qty),
                     int(due_adjustment_id),
                 )
+                if not prioritize_product_display_order:
+                    return existing_sort_key
+                row_key = (due_adjustment.product_code, due_adjustment.ship_to_code or '')
+                return (product_display_orders.get(row_key, 99999), *row_key, *existing_sort_key)
 
             return sorted(due_ids, key=sort_key)
 

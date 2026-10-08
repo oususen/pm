@@ -99,6 +99,10 @@
           <input v-model="autoAssignResetExisting" type="checkbox" />
           <span>期間内の既存割付をリセットしてから振分</span>
         </label>
+        <label class="modal-check">
+          <input v-model="autoAssignPrioritizeProductDisplayOrder" type="checkbox" />
+          <span>製品表示順を優先</span>
+        </label>
         <div class="modal-actions">
           <button class="btn" :disabled="autoAssigning" @click="closeAutoAssignDialog">閉じる</button>
           <button class="btn auto-assign-btn" :disabled="autoAssigning" @click="autoAssignTrips">
@@ -984,6 +988,7 @@ const autoAssignCalendarId = ref(null)
 const autoAssignStartDate = ref('')
 const autoAssignEndDate = ref('')
 const autoAssignResetExisting = ref(false)
+const autoAssignPrioritizeProductDisplayOrder = ref(false)
 const showSaveConfirmDialog = ref(false)
 const saveValidationState = ref({
   missingTruckCount: 0,
@@ -2746,6 +2751,7 @@ const openAutoAssignDialog = async () => {
     autoAssignStartDate.value = addBusinessDaysByCalendar(todayDate, 4)
     autoAssignEndDate.value = dateKeys.value.at(-1) || autoAssignStartDate.value
     autoAssignResetExisting.value = false
+    autoAssignPrioritizeProductDisplayOrder.value = false
     showAutoAssignDialog.value = true
   } catch (error) {
     alert('カレンダー情報の取得に失敗しました。')
@@ -2828,6 +2834,7 @@ const autoAssignTrips = async () => {
       thresholdDate,
       endDate,
       autoAssignResetExisting.value,
+      autoAssignPrioritizeProductDisplayOrder.value,
     )
     const resultRowsByDate = res.data?.rows_by_date || {}
     Object.entries(resultRowsByDate).forEach(([dateKey, rows]) => {

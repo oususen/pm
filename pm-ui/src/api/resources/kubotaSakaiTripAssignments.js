@@ -18,11 +18,12 @@ export const createKubotaSakaiTripAssignmentsAPI = (client) => ({
       preview_rows_by_date: previewRowsByDate,
     })
   },
-  autoAssign(startDate, endDate, resetExistingAssignments = false) {
+  autoAssign(startDate, endDate, resetExistingAssignments = false, prioritizeProductDisplayOrder = false) {
     return client.post('/kubota-sakai-trip-assignments/auto-assign/', {
       start_date: startDate,
       end_date: endDate,
       reset_existing_assignments: Boolean(resetExistingAssignments),
+      prioritize_product_display_order: Boolean(prioritizeProductDisplayOrder),
     })
   },
   loadDetail(targetDate) {
