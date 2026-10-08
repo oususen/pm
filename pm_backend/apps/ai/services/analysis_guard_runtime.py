@@ -20,6 +20,10 @@ import re
 import types
 
 ALLOWED_IMPORTS = ('json', 'math', 'datetime', 'decimal', 'statistics', 'collections', 'itertools', 're')
+# 実行時だけ許可する、内部依存のモジュール(2026-10-08、BOSS承認)。日付の`strftime`・`format(d, '%Y-%m')`・`timetuple()`が、内部で`time`をimportするため。
+# 静的検査(validate_python)は、ALLOWED_IMPORTSだけを見る。生成コードの直接の`import time`・`from time import sleep`は、静的検査で拒否される。
+# 「C内部のimportだけを許可する」ものではない(restricted_importは、呼出元を区別しない)。実行時間の上限は、引き続き必要。`_strptime`は許可しない(strptimeは使えない)。
+RUNTIME_INTERNAL_IMPORTS = ('time',)
 TABLE_FUNCTIONS = ('range', 'generate_series', 'unnest')  # FROMで使える関数。メタデータ・外部ファイルの関数は含めない
 STEP_NAME = re.compile(r'^w_[a-z0-9_]{1,40}$')
 INTERMEDIATE_PREFIX = 'w_'
@@ -265,7 +269,7 @@ def _safe_builtins():
     safe = {name: value for name, value in vars(builtins).items() if name not in FORBIDDEN_NAMES}
 
     def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if level or name not in ALLOWED_IMPORTS:  # 許可したモジュールの最上位だけ。`json.decoder`のような下位モジュールは使えない
+        if level or (name not in ALLOWED_IMPORTS and name not in RUNTIME_INTERNAL_IMPORTS):  # 許可したモジュールの最上位だけ。`json.decoder`のような下位モジュールは使えない
             raise GuardError('import_not_allowed', name[:50])
         return _public_module(name)
 

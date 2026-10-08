@@ -154,7 +154,7 @@
               <p v-if="codeVariables.length">変数（使うときに値を変えられます。コードには、下の値が入っています）: <span v-for="(item, index) in codeVariables" :key="item.name">{{ index ? ' / ' : '' }}{{ item.label }}（{{ item.name }}）= {{ item.default }}</span></p>
               <h4>生成Python</h4><pre>{{ codegen.python }}</pre>
               <small>コード全体のSHA-256: {{ codegen.executed_code_sha256 }} / 固定外枠の版: {{ codegen.wrapper_version }}</small>
-              <p v-if="codeState?.wrapper_outdated">外枠が更新されています。保存済みSQL・Pythonが新しい検査に合格すれば、AIを呼ばずに更新・再試行・再承認できます。不合格なら再生成が必要です。</p>
+              <p v-if="codeState?.wrapper_outdated" class="wrapper-notice" role="alert">⚠ 保存済みコードの外枠が古くなっています。下のボタンで更新してください。AIは呼ばず、生成回数も消費しません。更新後、試行とコード承認をやり直します。保存済みSQL・Pythonが新しい検査に合格しない場合は、再生成が必要です。</p>
               <button v-if="codeState?.wrapper_outdated" :disabled="!canRefreshWrapper" @click="refreshWrapper">保存済みコードの外枠を更新（AI生成回数は消費しません）</button>
               </template>
         </div>
@@ -748,6 +748,7 @@ input { padding: 4px; font: inherit; }
 .generating { background: #e8f4fd; border-left: 3px solid #2a7fc1; color: #123c5a; padding: 8px 10px; font-weight: 600; }
 .warning { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 8px 10px; }
 /* 分析案の警告(目的と期間・列の食い違いなど)は、見落とさないよう、赤字にして、「⚠！」を点滅させる(BOSS指示 2026-10-08)。動きを減らす設定の人には、点滅させない */
+.wrapper-notice { color: #b3120c; font-weight: 600; }  /* 外枠の更新は、操作が必要な案内。赤字・太字(点滅はしない。BOSS承認 2026-10-08) */
 .plan-warning { background: #fdecea; border-left-color: #d32f2f; color: #b3120c; font-weight: 600; }
 .warn-mark { display: inline-block; animation: warn-blink 1s steps(2, start) infinite; }
 @keyframes warn-blink { to { visibility: hidden; } }

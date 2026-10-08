@@ -143,3 +143,19 @@ class ExcludedPeriodRuleTests(SimpleTestCase):
         self.assertIn('除く期間は、全体の期間の中に入れる', rule)
         # 片側だけの指定は、AIに補わせない(推測の補完をしない)。利用者へ書き直しを促す警告で扱う
         self.assertNotIn('片側だけが書かれているとき', rule)
+
+
+class CompareViewsRuleTests(SimpleTestCase):
+    def test_the_prompt_tells_the_ai_not_to_join_two_views_but_to_stack_them(self):
+        # 実機: 入荷と出荷をFULL OUTER JOINし、出荷だけの行の月がNoneになり month.strftime で失敗した(2026-10-08)
+        self.assertIn('JOIN で結合しない', cg.SYSTEM_PROMPT)
+        self.assertIn('UNION ALL で縦に積み', cg.SYSTEM_PROMPT)
+        self.assertIn('値が空の可能性がある列に、メソッドを呼ばない', cg.SYSTEM_PROMPT)
+
+    def test_the_example_stacks_with_union_all_and_uses_the_overall_period_variables(self):
+        queries = ' '.join(step['query'] for step in cg.COMPARE_VIEWS_EXAMPLE)
+        self.assertNotIn(' JOIN ', queries)
+        self.assertIn('UNION ALL', queries)
+        self.assertEqual(queries.count('{{period_from}}'), 2)  # 2つのビューの両方の条件に使う
+        self.assertEqual(queries.count('{{period_to}}'), 2)
+        self.assertNotRegex(queries, r'\d{4}-\d{2}-\d{2}')            # 日付を直書きしない

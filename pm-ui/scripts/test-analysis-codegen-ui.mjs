@@ -597,7 +597,7 @@ test('コードの警告がある間は、コード承認済みでも④を畳�
     assert.equal(f.state.isOpen(4), true); f.state.toggleStage(4); assert.equal(f.state.isOpen(4), true)
     assert.ok(f.state.stageSummary(4).includes('要確認'))
     const html = await htmlFor(f)
-    assert.ok(html.includes('外枠が更新されています')); assert.ok(html.includes('保存済みコードの外枠を更新'))
+    assert.ok(html.includes('⚠ 保存済みコードの外枠が古くなっています。下のボタンで更新してください。')); assert.ok(html.includes('class="wrapper-notice"')); assert.ok(html.includes('保存済みコードの外枠を更新'))
     assert.ok(html.includes('stage-head') && html.includes('コード生成済み・要確認'))
     // 最新状態を確認できない
     f.state.plan.value = approved(); f.state.codeStateFresh.value = false

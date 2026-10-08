@@ -105,6 +105,9 @@ class StaticChecksTest(SimpleTestCase):
         cases = {
             'import os\nemit_report("x")': 'import_not_allowed',
             'from subprocess import run\nemit_report("x")': 'import_not_allowed',
+            'import time\nemit_report("x")': 'import_not_allowed',            # 実行時の内部依存として許可しても、直接のimportは静的検査で拒否
+            'from time import sleep\nemit_report("x")': 'import_not_allowed',
+            'import _strptime\nemit_report("x")': 'import_not_allowed',
             'import json, socket\nemit_report("x")': 'import_not_allowed',
             'open("f")\nemit_report("x")': 'forbidden_name',
             'eval("1")\nemit_report("x")': 'forbidden_name',
