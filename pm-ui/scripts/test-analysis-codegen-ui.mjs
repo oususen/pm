@@ -36,7 +36,7 @@ function generated(provider = 'openrouter') {
     codegen: { status: 'generated', attempts: 1, inflight: null, steps: [{ name: 'w_total', query: 'SELECT SUM(quantity) FROM v_ai_shipment' }],
       python: 'emit_report("<script>alert(1)</script>")', executed_code_sha256: 'hash-code', wrapper_version: 'test-wrapper', trial: null } }
 }
-async function setup(provider = 'openrouter') {
+async function setup(provider = 'openrouter', templatesComponent = { template: '<section>テンプレートの専用画面</section>' }) {
   const scope = Vue.effectScope(), calls = [], confirms = [], consent = { value: true }
   const props = Vue.reactive({ canEdit: true, request: null })
   const responses = { getPlan: dataPlan(provider), generateCode: generated(provider) }
@@ -58,7 +58,7 @@ async function setup(provider = 'openrouter') {
     calls.push([name, ...args]); return methods[name](...args)
   }])) }
   const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, () => props, fn => { mount = fn }, fn => { unmount = fn }, api,
-    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>AI相談の専用画面</section>' }, { template: '<section>分析実行の専用画面</section>' }, { template: '<section>テンプレートの専用画面</section>' }, AnalysisErrorBanner, useAnalysisErrorNotices))
+    { confirm: text => { confirms.push(text); return consent.value } }, { template: '<section>AI相談の専用画面</section>' }, { template: '<section>分析実行の専用画面</section>' }, templatesComponent, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount()
   state.plan.value = dataPlan(provider)
   calls.length = 0
@@ -664,9 +664,15 @@ test('2つの注意文(利用範囲の案内・社外サービスへの送信の
       assert.ok(html.includes(part), part)
     }
     assert.equal(html.includes('テンプレート保存は未対応です'), false, '事実と合わない一文は削除(BOSS指示 2026-10-05)')
-    // 開いている間は表示、畳むと非表示(v-show)になり、見出しに外部送信の要点を出す
-    assert.equal(f.state.notesOpen.value, true)
-    assert.ok(/class="notes-body"(?! style)/.test(html))
+    // 初期状態は畳み、見出しに外部送信の要点を出す。開いた後も再び畳める。
+    assert.equal(f.state.notesOpen.value, false)
+    assert.ok(/class="notes-body" style="display:none;?"/.test(html), '初期状態は非表示')
+    assert.match(html, /aria-expanded="false" aria-controls="notes-body"/)
+    assert.ok(html.includes('社外サービス（OpenRouter）へ、分析目的・期間・公開ビューの説明を送ります'))
+    f.state.notesOpen.value = true
+    html = await htmlFor(f)
+    assert.ok(/class="notes-body"(?! style)/.test(html), '開くと表示')
+    assert.match(html, /aria-expanded="true" aria-controls="notes-body"/)
     f.state.notesOpen.value = false
     html = await htmlFor(f)
     assert.ok(/class="notes-body" style="display:none;?"/.test(html), '畳むと非表示')
@@ -1192,5 +1198,76 @@ test('目的の言葉と列の食い違いの警告を②に表示し(本文は�
     assert.equal(text.includes('<img src=x'), false)
     assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'))
     assert.ok(text.includes('分析案・手順を承認'))  // 警告があっても承認ボタンは出る
+  } finally { f.stop() }
+})
+
+
+function templatesHtml(f) {
+  return renderToString(Vue.createSSRApp({ props: ['canEdit', 'canViewAll', 'visible', 'request', 'userName'], setup: () => f.state, render }, f.props))
+}
+
+test('テンプレート管理は初期閉・開閉とaria属性を表示し、タブの表示切替で状態を保持する', async () => {
+  const f = await setup()
+  try {
+    let text = await templatesHtml(f)
+    assert.equal(f.state.templatesOpen.value, false)
+    assert.match(text, /aria-expanded="false" aria-controls="templates-body"/)
+    assert.ok(text.includes('▶ テンプレート管理'))
+    assert.match(text, /id="templates-body"[^>]*style="display:none;/)
+    assert.ok(source.includes('@click="templatesOpen = !templatesOpen"'))
+    f.state.templatesOpen.value = true; text = await templatesHtml(f)
+    assert.ok(text.includes('▼ テンプレート管理'))
+    assert.match(text, /aria-expanded="true" aria-controls="templates-body"/)
+    f.props.visible = false; await Vue.nextTick(); f.props.visible = true; await Vue.nextTick()
+    assert.equal(f.state.templatesOpen.value, true)
+    f.state.templatesOpen.value = false; text = await templatesHtml(f)
+    assert.ok(text.includes('▶ テンプレート管理'))
+  } finally { f.stop() }
+})
+
+test('保存可能の偽→真だけ自動展開。手動で閉じた後・同じ承認状態では開き直さず保存できますを表示', async () => {
+  const f = await setup()
+  try {
+    const approved = () => ({ ...generated(), codegen: { ...generated().codegen, status: 'code_approved' } })
+    f.state.plan.value = approved(); assert.equal(f.state.templatesOpen.value, true)
+    f.state.templatesOpen.value = false
+    assert.ok((await templatesHtml(f)).includes('保存できます'))
+    f.state.plan.value = { ...approved(), revision: 10 }; assert.equal(f.state.templatesOpen.value, false)
+    f.props.visible = false; f.props.visible = true; assert.equal(f.state.templatesOpen.value, false)
+    for (const invalid of [ { ...approved(), status: 'awaiting_data' }, { ...approved(), template: { id: 1 } }, { ...approved(), codegen: { ...approved().codegen, executed_code_sha256: '' } }, generated() ]) {
+      f.state.plan.value = invalid; assert.equal(f.state.templateSavable.value, false)
+      assert.equal((await templatesHtml(f)).includes('保存できます'), false)
+      assert.equal(f.state.templatesOpen.value, false)
+      f.state.plan.value = approved(); assert.equal(f.state.templatesOpen.value, true)
+      f.state.templatesOpen.value = false
+    }
+  } finally { f.stop() }
+})
+
+test('閉じた管理見出しの件数は管理者だけ。0件も表示し、取得失敗のnull・開いたときは非表示', async () => {
+  const f = await setup()
+  try {
+    f.state.pendingTemplateCount.value = 9
+    f.props.canViewAll = false; assert.equal((await templatesHtml(f)).includes('承認待ち 9 件'), false)
+    f.props.canViewAll = true; assert.ok((await templatesHtml(f)).includes('承認待ち 9 件'))
+    f.state.pendingTemplateCount.value = 0; assert.ok((await templatesHtml(f)).includes('承認待ち 0 件'))
+    f.state.pendingTemplateCount.value = null; assert.equal((await templatesHtml(f)).includes('承認待ち '), false)
+    f.state.pendingTemplateCount.value = 9; f.state.templatesOpen.value = true
+    assert.equal((await templatesHtml(f)).includes('承認待ち 9 件'), false)
+    assert.ok(source.includes('@pending-count="pendingTemplateCount = $event"'))
+  } finally { f.stop() }
+})
+
+
+test('テンプレート子の件数emitが実際の親見出しに接続され、失敗のnullで消える', async () => {
+  let notify
+  const child = { emits: ['pending-count'], setup(_props, { emit }) { notify = count => emit('pending-count', count); return () => Vue.h('section', 'テンプレートの模擬部品') } }
+  const f = await setup('openrouter', child)
+  try {
+    f.props.canViewAll = true
+    await templatesHtml(f); notify(12)
+    assert.equal(f.state.pendingTemplateCount.value, 12)
+    assert.ok((await templatesHtml(f)).includes('承認待ち 12 件'))
+    notify(null); assert.equal((await templatesHtml(f)).includes('承認待ち 12 件'), false)
   } finally { f.stop() }
 })

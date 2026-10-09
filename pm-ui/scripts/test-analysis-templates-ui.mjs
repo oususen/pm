@@ -24,7 +24,7 @@ function plan(extra = {}) { return { id: 'plan-1', revision: 6, status: 'data_ap
 function row(id, extra = {}) { return { id, name: `分析${id}`, purpose: `目的${id}`, status: 'pending_admin', status_label: '管理者承認待ち', created_by: 'tester', created_at: '2026-10-04T10:20:30', content_visible: true, ...extra } }
 const page = results => ({ results, count: results.length, next: null, previous: null })
 async function setup(propsInit = {}, methodsInit = {}) {
-  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, reuseBlocked: false, referenceBlocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }, events = []
+  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, reuseBlocked: false, referenceBlocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }, events = [], pendingEvents = [], pendingCalls = []
   const methods = {
     templates: async () => ({ data: page([row(1)]) }),
     saveTemplate: async () => ({ data: { ...row(2), version: 1, created: true } }),
@@ -34,13 +34,13 @@ async function setup(propsInit = {}, methodsInit = {}) {
     template: async id => ({ data: { ...row(id), date_from: '2026-01-01', date_to: '2026-01-31', conditions: '全行', procedure: ['集計', '表'], sql_steps: [{ name: 'w_a', query: 'SELECT 1' }], python_code: PYTHON, executed_code_sha256: 'hash', wrapper_version: 'w1' } }),
     ...methodsInit,
   }
-  const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { calls.push([name, ...args]); return methods[name](...args) }])) }
+  const api = { aiAnalysis: Object.fromEntries(Object.keys(methods).map(name => [name, async (...args) => { (name === 'templates' && args[0]?.status === 'pending_admin' && !('page' in args[0]) ? pendingCalls : calls).push([name, ...args]); return methods[name](...args) }])) }
   const scope = Vue.effectScope()
   let mount, unmount
-  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, () => (...args) => events.push(args), api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices))
+  const state = scope.run(() => create(Vue.ref, Vue.computed, Vue.watch, fn => { mount = fn }, fn => { unmount = fn }, () => props, () => (...args) => (args[0] === 'pending-count' ? pendingEvents : events).push(args), api, { confirm: text => { confirms.push(text); return consent.value } }, AnalysisErrorBanner, useAnalysisErrorNotices))
   await mount(); await Promise.resolve()
   state.category.value = 'shipment' // 保存のテストは、カテゴリを選んだ状態から始める(必須の確認は別のテスト)
-  return { state, props, calls, confirms, consent, events, stop: () => { unmount(); scope.stop() } }
+  return { state, props, calls, confirms, consent, events, pendingEvents, pendingCalls, stop: () => { unmount(); scope.stop() } }
 }
 function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked', 'referenceBlocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
 
@@ -49,6 +49,17 @@ test('表示時に一覧を取得し、保存済みがなければ空の案内�
   try {
     assert.deepEqual(f.calls.map(c => c[0]), ['templates'])
     assert.ok((await html(f)).includes('保存済みのテンプレートはありません'))
+  } finally { f.stop() }
+})
+
+test('保存欄の上の説明に公開範囲を省略せず表示し、確認チェックは短い文言を維持する', async () => {
+  const f = await setup()
+  try {
+    const text = await html(f)
+    const explanation = '保存したテンプレートは、作成者と管理者以外には、名称・目的・状態・カテゴリだけが表示されます。'
+    assert.ok(text.includes(explanation))
+    assert.ok(text.indexOf(explanation) < text.indexOf('class="save-panel"'), '保存欄の上の段落に表示する')
+    assert.ok(text.includes('コード確認済み・管理者承認待ちとして保存する'))
   } finally { f.stop() }
 })
 
@@ -173,15 +184,12 @@ test('他の利用者のテンプレートは名称・目的・状態だけ。�
   try {
     const text = await html(f)
     assert.ok(text.includes('分析1')); assert.ok(text.includes('分析2'))
-    assert.equal((text.match(/詳細を表示/g) || []).length, 1)
+    assert.equal((text.match(/詳細<\/button>/g) || []).length, 1)
     assert.equal((text.match(/作成者と管理者だけが確認できます/g) || []).length, 1)
-    // 1件につき段落は1つ(UIは1行にまとめる)。ラベル(状態・作成者・保存日時・目的)は省略しない
-    assert.equal((text.match(/<article>/g) || []).length, 2)
-    const articles = text.split('<article>').slice(1)
-    for (const article of articles) {
-      assert.equal((article.split('</article>')[0].match(/<p>/g) || []).length, 1)
-      for (const label of ['状態: ', '作成者: ', '保存日時: ', '目的: ']) assert.ok(article.includes(label), label)
-    }
+    // 1件を表の1行で表示し、列見出しが項目名を担う。
+    const body = text.split('<tbody>')[1].split('</tbody>')[0]
+    assert.equal((body.match(/<tr /g) || []).length, 2)
+    for (const label of ['状態', '作成者', '保存日時', '目的']) assert.ok(text.includes(`>${label}</th>`), label)
     assert.equal(text.includes('emit_table'), false)
     await f.state.showDetail(1)
     const shown = await html(f)
@@ -350,10 +358,10 @@ test('再利用: 全文を見られる正式・管理者承認待ちの行だけ
     row(4, { content_visible: false }), row(5, { status: 'superseded', status_label: '置換済み' })]) }) })
   try {
     const text = await html(f)
-    assert.equal((text.match(/このテンプレートで分析案を作る/g) || []).length, 2, '正式と管理者承認待ち(全文を見られる行)だけ')
+    assert.equal((text.match(/分析案を作る/g) || []).length, 2, '正式と管理者承認待ち(全文を見られる行)だけ')
     assert.equal((text.match(/システム管理者未承認/g) || []).length, 1)
     f.props.canEdit = false
-    assert.equal((await html(f)).includes('このテンプレートで分析案を作る</button>'), false, '閲覧のみでは出さない')
+    assert.equal((await html(f)).includes('分析案を作る</button>'), false, '閲覧のみでは出さない')
   } finally { f.stop() }
 })
 
@@ -394,7 +402,7 @@ test('左のメインの見出しは、右の段階(①〜⑤)と紛らわしい
   const f = await setup()
   try {
     const text = await html(f)
-    assert.ok(text.includes('<h2>テンプレート</h2>'))
+    assert.ok(text.includes('<h3>保存済みテンプレート</h3>'))
     assert.equal(/<h2>\d+\. /.test(text), false, '番号つきの見出しがない')
   } finally { f.stop() }
 })
@@ -755,8 +763,8 @@ test('テンプレートを参考に分析する(段階C): ボタンは、再利
   const f = await setup({ plan: null }, { templates: async () => ({ data: page([row(1, { status: 'approved' }), row(2, { status: 'rejected' })]) }) })
   try {
     const text = await html(f)
-    assert.equal(text.split('このテンプレートを参考に分析する').length - 1, 1, '再利用できる行(承認済み)にだけ出る。却下の行には出ない')
-    assert.ok(text.includes('このテンプレートで分析案を作る'), '既存の再利用のボタンは残る')
+    assert.equal(text.split('参考に分析する').length - 1, 1, '再利用できる行(承認済み)にだけ出る。却下の行には出ない')
+    assert.ok(text.includes('分析案を作る'), '既存の再利用のボタンは残る')
     f.calls.length = 0
     f.state.selectReference(row(1, { status: 'approved', version: 3, purpose: '本文は渡さない', procedure: ['手順'] }))
     assert.deepEqual(f.calls, [], 'AIも、APIも、呼ばない')
@@ -768,7 +776,7 @@ test('テンプレートを参考に分析する(段階C): ボタンは、再利
   try {
     g.state.selectReference(row(1, { status: 'approved' }))
     assert.deepEqual(g.events, [], '編集権限がなければ、渡さない')
-    assert.equal((await html(g)).includes('このテンプレートを参考に分析する'), false, '閲覧のみでは、ボタンを出さない')
+    assert.equal((await html(g)).includes('参考に分析する'), false, '閲覧のみでは、ボタンを出さない')
   } finally { g.stop() }
   const h = await setup({ plan: null, blocked: true }, { templates: async () => ({ data: page([row(1, { status: 'approved' })]) }) })
   try {
@@ -782,15 +790,15 @@ test('テンプレートを参考に分析する: 分析の実行中(referenceBl
   try {
     f.state.selectReference(row(1, { status: 'approved' }))
     assert.deepEqual(f.events, [])
-    assert.match(await html(f), /<button[^>]*disabled[^>]*>このテンプレートを参考に分析する/, '参考のボタンは、押せない(disabled)')
-    assert.doesNotMatch(await html(f), /<button[^>]*disabled[^>]*>このテンプレートで分析案を作る/, '再利用のボタンの扱いは、変えない')
+    assert.match(await html(f), /<button[^>]*disabled[^>]*>参考に分析する/, '参考のボタンは、押せない(disabled)')
+    assert.doesNotMatch(await html(f), /<button[^>]*disabled[^>]*>分析案を作る/, '再利用のボタンの扱いは、変えない')
   } finally { f.stop() }
 })
 
 test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([row(1, { category: 'shipment', category_label: '出荷' })]) }) })
   try {
-    assert.ok((await html(f)).includes('カテゴリ: 出荷'))
+    assert.ok((await html(f)).includes('<td>出荷</td>'))
     assert.deepEqual(f.calls.filter(c => c[0] === 'templates')[0][1], { page: 1 })
     f.state.categoryFilter.value = 'receipt'
     await Promise.resolve(); await Promise.resolve()
@@ -846,4 +854,82 @@ test('却下された版を開くと、訂正版のカテゴリの初期値を�
       assert.ok((await html(g)).includes('カテゴリを選んでください'), '未選択のときは、訂正版の保存が無効な理由を出す')
     } finally { g.stop() }
   } finally { f.stop() }
+})
+
+
+test('表の8列の順・1行表示・全文title・日時・詳細の位置・選択行', async () => {
+  const f = await setup({}, { templates: async () => ({ data: page([row(1, { name: '長い名前', purpose: '全文の目的' })]) }) })
+  try {
+    let text = await html(f)
+    assert.deepEqual([...text.matchAll(/<th scope="col">([^<]+)<\/th>/g)].map(m => m[1]), ['ID', 'テンプレート名', 'カテゴリ', '状態', '作成者', '保存日時', '目的', '操作'])
+    assert.match(text, /class="cell-ellipsis template-name" title="長い名前"/)
+    assert.match(text, /class="cell-ellipsis template-purpose" title="全文の目的"/)
+    assert.ok(text.includes('2026-10-04 10:20:30'))
+    await f.state.showDetail(1); text = await html(f)
+    assert.ok(text.indexOf('class="detail-panel"') > text.indexOf('</table>'))
+    assert.match(text, /class="pending-row selected-row"/)
+    assert.ok(text.includes('目的: 目的1'))
+    assert.match(parsed.descriptor.styles[0].content, /\.cell-ellipsis[^}]*text-overflow: ellipsis/)
+    assert.match(parsed.descriptor.styles[0].content, /\.table-scroll[^}]*overflow-x: auto/)
+  } finally { f.stop() }
+})
+
+test('状態は4種の色クラスと文字を表示し、管理者承認待ちの行と未承認注意を残す', async () => {
+  const states = [['approved', '正式'], ['pending_admin', '管理者承認待ち'], ['rejected', '却下'], ['superseded', '置換済み']]
+  const f = await setup({}, { templates: async () => ({ data: page(states.map(([status, status_label], i) => row(i + 1, { status, status_label }))) }) })
+  try {
+    const text = await html(f)
+    for (const [status, label] of states) assert.ok(text.includes(`class="status-badge status-${status}">${label}</span>`))
+    assert.equal((text.match(/class="pending-row"/g) || []).length, 1)
+    assert.equal((text.match(/システム管理者未承認/g) || []).length, 1)
+    for (const [status] of states) assert.ok(parsed.descriptor.styles[0].content.includes(`.status-${status} { background:`))
+  } finally { f.stop() }
+})
+
+test('承認待ち件数は管理者だけAPIのcountを使い、絞り込み・ページの件数と混ぜない', async () => {
+  const methods = { templates: async params => ({ data: params.status === 'pending_admin' && !('page' in params) ? { ...page([]), count: 67 } : page([row(1)]) }) }
+  const f = await setup({ canReview: true }, methods), g = await setup({ canReview: false }, methods)
+  try {
+    assert.deepEqual(f.pendingCalls, [['templates', { status: 'pending_admin' }]])
+    assert.deepEqual(f.pendingEvents.at(-1), ['pending-count', 67])
+    assert.equal(f.state.list.value.count, 1)
+    assert.deepEqual(g.pendingCalls, []); assert.deepEqual(g.pendingEvents, [])
+    f.state.categoryFilter.value = 'receipt'; await Vue.nextTick(); await Promise.resolve(); await Promise.resolve()
+    assert.equal(f.pendingCalls.length, 2)
+    assert.deepEqual(f.pendingCalls[1][1], { status: 'pending_admin' })
+  } finally { f.stop(); g.stop() }
+})
+
+test('件数取得の失敗はnullを通知するだけでエラーを出さず、承認・却下・一覧更新後に取り直す', async () => {
+  let fail = false
+  const f = await setup({ canReview: true }, { templates: async params => {
+    if (params.status === 'pending_admin' && !('page' in params)) { if (fail) throw new Error('SECRET'); return { data: { ...page([]), count: 7 } } }
+    return { data: page([row(1)]) }
+  } })
+  try {
+    await f.state.showDetail(1); await f.state.approve()
+    assert.equal(f.pendingCalls.length, 2)
+    await f.state.showDetail(1); f.state.reason.value = '確認'; await f.state.reject()
+    assert.equal(f.pendingCalls.length, 3)
+    fail = true; await f.state.load(1)
+    assert.deepEqual(f.pendingEvents.at(-1), ['pending-count', null]); assert.equal(f.state.error.value, '')
+  } finally { f.stop() }
+})
+
+test('件数の古い応答・権限喪失後・破棄後の応答は採用しない', async () => {
+  for (const change of ['newer', 'permission', 'dispose']) {
+    const first = deferred(), second = deferred()
+    let index = 0
+    const f = await setup({ canReview: false }, { templates: async params => params.status === 'pending_admin' && !('page' in params) ? (++index === 1 ? first.promise : second.promise) : { data: page([]) } })
+    try {
+      f.props.canReview = true
+      if (change === 'newer') { const next = f.state.refreshPendingCount(); second.resolve({ data: { count: 8 } }); await next }
+      if (change === 'permission') f.props.canReview = false
+      if (change === 'dispose') f.stop()
+      first.resolve({ data: { count: 99 } }); await Promise.resolve(); await Promise.resolve()
+      assert.equal(f.pendingEvents.some(e => e[1] === 99), false, change)
+      if (change === 'newer') assert.deepEqual(f.pendingEvents.at(-1), ['pending-count', 8])
+      if (change === 'permission') assert.deepEqual(f.pendingEvents.at(-1), ['pending-count', null])
+    } finally { f.stop() }
+  }
 })

@@ -35,7 +35,16 @@
       <div id="analysis-execution" class="run-target" :class="{ ready: runReady }">
       <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" @refine="startRefinement" />
       </div>
-      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive || !!refinement" :reference-blocked="executionActive" @plan-created="useTemplatePlan" @reference-selected="startReference" />
+      <section class="template-management" aria-label="テンプレート管理">
+        <button type="button" class="templates-head" :aria-expanded="templatesOpen" aria-controls="templates-body" @click="templatesOpen = !templatesOpen">
+          <strong>{{ templatesOpen ? '▼' : '▶' }} テンプレート管理</strong>
+          <span v-if="!templatesOpen && canViewAll && pendingTemplateCount !== null">承認待ち {{ pendingTemplateCount }} 件</span>
+          <span v-if="!templatesOpen && templateSavable">保存できます</span>
+        </button>
+        <div v-show="templatesOpen" id="templates-body" class="templates-body">
+      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive || !!refinement" :reference-blocked="executionActive" @plan-created="useTemplatePlan" @reference-selected="startReference" @pending-count="pendingTemplateCount = $event" />
+        </div>
+      </section>
       <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
       </section>
       <aside class="analysis-side" aria-label="分析の進め方">
@@ -413,7 +422,11 @@ const STAGE_LABELS = { pending: '未', current: '今', done: '済' }
 const stageLabel = n => STAGE_LABELS[stageState(n)]
 // 今の段階を開く。コードの確認のため、試行・コード承認の間は、SQL・Python(④)も開いておく。利用者が開閉した段階は、その操作を優先する
 // 左のメインの「ご利用上の注意」(利用者が畳める。外部AIへの送信の注意は、畳んだときも見出しに要点を出す)
-const notesOpen = ref(true)
+const notesOpen = ref(false)
+const templatesOpen = ref(false), pendingTemplateCount = ref(null)
+// 保存欄と同じ条件。偽から真へ変わった瞬間だけ開き、手動で閉じた状態は保持する。
+const templateSavable = computed(() => plan.value?.status === 'data_approved' && plan.value?.codegen?.status === 'code_approved' && !!plan.value.codegen.executed_code_sha256 && !plan.value?.template)
+watch(templateSavable, (value, previous) => { if (value && !previous) templatesOpen.value = true }, { flush: 'sync' })
 const toggledStages = ref({})
 // コードの警告(外枠が古い・最新状態を確認できない・生成中/状態不明・生成失敗)がある間は、④を畳まない(警告・更新ボタンを隠さない)
 const codeAttention = computed(() => plan.value?.status === 'data_approved' && (!!codeState.value?.wrapper_outdated || !codeStateFresh.value || codeInFlight.value || codeState.value?.status === 'failed'))
@@ -733,6 +746,9 @@ function releaseCodegen() {
 .analysis-workspace { padding: 20px; max-width: 1600px; margin: auto; color: #334b50; }
 .analysis-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 440px); gap: 18px; align-items: start; }
 .analysis-main { min-width: 0; }
+.template-management { min-width: 0; border: 1px solid #d6dede; margin: 8px 0; }
+.templates-head { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; text-align: left; padding: 6px 8px; }
+.templates-body { min-width: 0; padding: 6px 8px; }
 .notes { border: 1px solid #d1dddd; border-radius: 8px; margin-bottom: 12px; overflow: hidden; background: #fff; }
 .notes-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 0; }
 .notes-head:not(:disabled) { background: #f4f8f8; color: #334b50; border-color: transparent; }
