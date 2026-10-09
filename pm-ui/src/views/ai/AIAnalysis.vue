@@ -55,7 +55,7 @@
         </button>
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-      <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" @apply="applyConsult" @plan-created="useTemplatePlan" />
+      <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" @apply="applyConsult" @plan-created="useTemplatePlan" @reference-selected="startReference" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
       <section v-if="referenceTemplate && !plan" id="reference-note" class="refine-note reference-note" role="status">
         <p>参考にするテンプレート: テンプレート{{ referenceTemplate.id }}「{{ referenceTemplate.name }}」（版{{ referenceTemplate.version }}）。このテンプレートの目的・手順・出力案・データ範囲を、AIが参考にして、今回の目的に合わせた新しい分析案とコードを作ります。承認は引き継がず、手順・データ範囲・コード・試行・コード承認を、取り直します。</p>

@@ -277,3 +277,40 @@ test('履歴をAPIへ送るときは、role・contentだけ(表示用の項目se
     assert.deepEqual(sends(f)[1][1].messages.map(m => Object.keys(m).sort()), [['content', 'role'], ['content', 'role'], ['content', 'role']])
   } finally { f.stop() }
 })
+
+test('推薦されたテンプレートを参考に分析する: 識別だけを分析の画面へ渡し、AIもAPIも呼ばない。再利用のボタンは残る(2026-10-09)', async () => {
+  const templates = [{ id: 7, version: 2, name: '<b>月別</b>', category_label: '出荷', purpose: '目的7', date_from: '2026-08-01', date_to: '2026-09-30', python_code: '渡さない' }]
+  const f = setup({}, { consult: async () => reply({ templates }) })
+  try {
+    f.state.input.value = '月別の出荷'
+    await f.state.send()
+    const text = await html(f)
+    assert.ok(text.includes('このテンプレートを参考に分析する')); assert.ok(text.includes('このテンプレートで分析案を作る'))
+    assert.equal(text.includes('<b>月別</b>'), false, 'HTMLは解釈しない')
+    f.calls.length = 0
+    f.state.selectReference(templates[0])
+    assert.deepEqual(f.calls, [], 'AIもAPIも呼ばない')
+    assert.deepEqual(f.events.at(-1), ['reference-selected', { id: 7, version: 2, name: '<b>月別</b>', status: 'approved' }], '識別だけを渡す(目的・コードは渡さない)')
+  } finally { f.stop() }
+})
+
+test('テンプレートを参考に分析する(相談画面): 編集権限がない・操作中・不正な指定では、渡さない', async () => {
+  const templates = [{ id: 7, version: 2, name: 'n', category_label: '出荷', purpose: 'p', date_from: '2026-08-01', date_to: '2026-09-30' }]
+  for (const [label, propsInit, item] of [['権限なし', { canEdit: false }, templates[0]], ['操作中', { blocked: true }, templates[0]], ['不正', {}, { id: '7' }], ['空', {}, null]]) {
+    const f = setup(propsInit)
+    try {
+      f.state.selectReference(item)
+      assert.deepEqual(f.events, [], label)
+    } finally { f.stop() }
+  }
+})
+
+test('参考のボタンは、idが整数でない推薦では、無効になる(関数の拒否条件と一致。Codex P3)', async () => {
+  const f = setup({}, { consult: async () => reply({ templates: [{ id: '7', version: 1, name: 'n', category_label: '出荷', purpose: 'p', date_from: '2026-08-01', date_to: '2026-09-30' }] }) })
+  try {
+    f.state.input.value = '出荷'
+    await f.state.send()
+    assert.match(await html(f), /<button[^>]*disabled[^>]*>このテンプレートを参考に分析する/)
+  } finally { f.stop() }
+})
+

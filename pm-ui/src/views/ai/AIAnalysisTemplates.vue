@@ -1,12 +1,16 @@
 <template>
   <section class="templates">
     <AnalysisErrorBanner v-if="errorNotices.renderBanner" :notices="errorNotices.notices.value" />
-    <p>保存済みのテンプレートから、新しい分析案を作れます（AIは使いません。手順・データ範囲の承認、SQL試行、コード承認は、毎回行います）。</p>
-    <p>承認したコードを、管理者承認待ちのテンプレートとして保存します。保存するのは、名称・目的・手順・条件・承認済みSQL・Python・期間・ハッシュです。実データ・結果・AIへ送った本文は保存しません。保存したテンプレートは、作成者と管理者以外には、名称・目的・状態・カテゴリだけが表示されます。</p>
+    <ul class="templates-note">
+      <li>保存済みのテンプレートから、新しい分析案を作れます（AIは使いません。承認・試行は、毎回行います）。</li>
+      <li>保存するのは、名称・目的・手順・条件・承認済みSQL・Python・期間・ハッシュだけです（実データ・結果・AIへ送った本文は保存しません）。</li>
+      <li>保存すると、管理者承認待ちになります。</li>
+      <li>保存したテンプレートは、作成者と管理者以外には、名称・目的・状態・カテゴリだけが表示されます。</li>
+    </ul>
     <p v-if="canEdit && plan?.template" role="status">テンプレートから作成した分析案は、テンプレートとして保存できません（保存済みのコードをそのまま使うため、内容が同じで重複します）。コードを変えた新しい分析を作成したときに、保存できます。</p>
     <div v-else-if="canEdit" class="save-panel">
       <p v-if="savable && plan?.codegen?.literal_values?.length" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> コードに直接書かれた値があります（{{ plan.codegen.literal_values.join('、') }}）。このテンプレートを再利用しても、これらの値は変えられません（保存はできます）。</p>
-      <p v-if="!savable">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
+      <p v-if="!savable" class="templates-note">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
       <label>テンプレート名（必須・300文字以内）:
         <input v-model="templateName" type="text" maxlength="300" size="50" :disabled="!savable || !!busy" aria-label="保存するテンプレートの名前" @input="nameEdited = true; duplicateCount = null" @change="checkName"></label>
       <p v-if="duplicateCount > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが{{ duplicateCount }}件あります。区別しやすい名前に変えることをお勧めします（そのまま保存もできます）。</p>
@@ -399,6 +403,8 @@ async function showDetail(id) {
 <style scoped>
 .templates { min-width: 0; } button { margin: 2px; padding: 4px 6px; }
 .templates p { margin: 4px 0; }
+.templates ul.templates-note { padding-left: 1.4em; }
+.templates .templates-note { font-size: 12px; color: #55696d; margin: 2px 0; line-height: 1.5; }  /* 説明文は、小さい文字で、行間を詰める(表を上に出す)。文の内容は、変えない */
 .save-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .save-panel > p { flex-basis: 100%; }
 .save-panel input[type="text"] { width: 20em; max-width: 100%; box-sizing: border-box; }

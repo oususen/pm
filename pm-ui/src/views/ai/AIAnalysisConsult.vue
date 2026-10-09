@@ -32,7 +32,8 @@
       <section v-if="templates.length" class="recommend">
         <p><b>近い承認済みテンプレート（{{ templates.length }}件）</b></p>
         <p v-for="item in templates" :key="item.id">テンプレート{{ item.id }}（版{{ item.version }}） / {{ item.name }} / カテゴリ: {{ item.category_label }} / 目的: {{ item.purpose }} / 期間: {{ item.date_from }} ～ {{ item.date_to }}
-          <button type="button" :disabled="!usable || !!busy" @click="useTemplate(item)">このテンプレートで分析案を作る</button></p>
+          <button type="button" :disabled="!usable || !!busy" @click="useTemplate(item)">このテンプレートで分析案を作る</button>
+          <button type="button" :disabled="!canEdit || blocked || !!busy || !Number.isInteger(item.id)" @click="selectReference(item)">このテンプレートを参考に分析する</button></p>
       </section>
       <p v-if="!usable" class="note">{{ unusableReason }}</p>
     </div>
@@ -49,7 +50,7 @@ const props = defineProps({
   provider: { type: String, default: 'qwen' }, model: { type: String, default: '' }, external: Boolean, providerLabel: { type: String, default: '' }, providerAvailable: { type: Boolean, default: true },
   userName: { type: String, default: '' }, // 履歴の発言者の表示(ログイン中の利用者名)。なければ「あなた」
 })
-const emit = defineEmits(['apply', 'plan-created'])
+const emit = defineEmits(['apply', 'plan-created', 'reference-selected'])
 const open = ref(false), input = ref(''), busy = ref(''), error = ref(''), externalAck = ref(false)
 const messages = ref([]), draft = ref(null), templates = ref([])
 let disposed = false, epoch = 0
@@ -112,6 +113,12 @@ function apply() {
   const overwrite = (d.purpose && props.purpose.trim()) || (d.date_from && (props.dateFrom || props.dateTo))
   if (overwrite && !window.confirm('目的欄・期間欄の内容を、AIの文案で上書きします。よろしいですか？')) return
   emit('apply', { purpose: d.purpose || null, date_from: d.date_from && d.date_to ? d.date_from : null, date_to: d.date_from && d.date_to ? d.date_to : null })
+}
+// テンプレートを参考に分析する(2026-10-09、BOSS承認の範囲): 推薦された承認済みテンプレートの識別だけを、分析の画面へ渡す。AIも、APIも、ここでは呼ばない。
+// 目的・期間の入力と、社外送信前の確認(参考の全文を含む)は、分析の画面で行う。相談のAIへ、参考を渡すことは、しない(未承認)
+function selectReference(item) {
+  if (!props.canEdit || props.blocked || busy.value || !item || !Number.isInteger(item.id)) return
+  emit('reference-selected', { id: item.id, version: item.version, name: item.name, status: 'approved' })  // 推薦されるのは、承認済みのテンプレートだけ
 }
 async function useTemplate(item) {
   if (!usable.value || busy.value) return

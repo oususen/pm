@@ -1122,6 +1122,11 @@ test('テンプレートを参考にした分析案を「作り直す」と、�
   } finally { f.stop() }
 })
 
+test('参考のテンプレートの選択は、テンプレート管理と、相談画面の両方から、同じ startReference につながる(2026-10-09)', () => {
+  const wired = template.code.match(/onReferenceSelected\s*:\s*[^,}]*startReference/g) || []
+  assert.equal(wired.length, 2, '部品(テンプレート管理・相談)の両方が、startReference に接続されている')
+})
+
 test('経過秒のタイマーは、連続して切り替わっても1本だけで、画面を破棄すると止まる(Codex P3)', async () => {
   const { mock } = await import('node:test')
   mock.timers.enable({ apis: ['setInterval', 'Date'] })
