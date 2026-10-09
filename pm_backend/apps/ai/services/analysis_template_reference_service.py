@@ -10,6 +10,7 @@ from django.db import DatabaseError
 
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_redaction import build_analysis_code_redactor
+from ai.services.analysis_template_params import PLACEHOLDER_PATTERN
 from ai.services.analysis_template_reuse_service import REUSABLE_STATUSES, can_reuse
 from ai.services.analysis_template_review_service import _stored_hash
 from ai.services.analysis_template_service import get_visible_template, is_template_admin
@@ -41,6 +42,79 @@ def plan_payload(template):
         'datasets': [{'view': item['view'], 'fields': list(item['fields'])} for item in template.datasets],
         'date_from': template.date_from.isoformat(), 'date_to': template.date_to.isoformat(),
     }
+
+
+def code_payload(template):
+    """コード生成でAIへ渡す参考の内容(置換前)。分析案の作成の内容に、変数の形のSQL・Python・変数の定義を足す。
+
+    保存されているSQL・Pythonは、変数の形(`{{名前}}`)のまま。置換済みの実行用コードは使わない。
+    """
+    return {
+        **plan_payload(template),
+        'sql_steps': [{'name': step['name'], 'query': step['query']} for step in template.sql_steps],
+        'python_code': template.python_code,
+        'parameters': [{'name': item['name'], 'type': item['type'], 'label': item['label'], 'default': item['default']} for item in (template.parameters or [])],
+    }
+
+
+class _IdentifierMismatch(Exception):
+    """識別子(変数名・手順名)が置換で変わる、または、置換後のコードと変数の定義が一致しない(固定の文で停止するための内部の印)。"""
+
+
+def redact_code_payload(payload):
+    """コード生成で外部AIへ送る前に、登録名称をコードへ置換する(分析案の作成の内容に加え、SQL・Python・変数のラベル・既定値)。置換できなければ、停止して送らない。
+
+    識別子(変数名・手順名)は、置換しない。登録名称と衝突して、置換で変わるなら、コード本文だけが置換されて、変数の定義と食い違うため、停止する。
+    置換の後に、コードの{{名前}}が、変数の定義と一致していることも確認する(別のレビューの指摘 P2)。
+    """
+    converted = redact_payload(payload)
+    try:
+        redact = build_analysis_code_redactor().redact_text
+        for identifier in [item['name'] for item in payload['parameters']] + [step['name'] for step in payload['sql_steps']]:
+            if redact(identifier) != identifier:
+                raise _IdentifierMismatch()
+        result = {
+            **converted,
+            'sql_steps': [{'name': step['name'], 'query': redact(step['query'])} for step in payload['sql_steps']],
+            'python_code': redact(payload['python_code']),
+            'parameters': [{**item, 'label': redact(item['label']), 'default': redact(item['default']) if isinstance(item['default'], str) else item['default']}
+                           for item in payload['parameters']],
+        }
+        used = set()
+        for text in [step['query'] for step in result['sql_steps']] + [result['python_code']]:
+            used.update(PLACEHOLDER_PATTERN.findall(text))
+        if used != {item['name'] for item in payload['parameters']}:
+            raise _IdentifierMismatch()
+        return result
+    except _IdentifierMismatch:
+        raise AnalysisError('参考にするテンプレートの変数名・手順名が、登録名称と衝突しているため、置換の後に、コードと変数の定義が一致しません。'
+                            '別のテンプレートを選ぶか、参考なしで作成してください。外部AIへは送信していません。', 409) from None
+    except AnalysisError as exc:
+        raise AnalysisError('参考にするテンプレートのコードに、置換できない名称(登録コードが未登録、または同名で特定できない名称)が含まれています。'
+                            '別のテンプレートを選ぶか、参考なしで作成してください。外部AIへは送信していません。', 409) from exc
+    except DatabaseError as exc:
+        raise AnalysisError('コード置換に必要な識別子を取得できませんでした。外部AIへは送信していません。', 503) from exc
+
+
+def verify_plan_reference(owner_id, plan):
+    """分析案に残した参考が、いまも使えること(権限・状態・保存内容)と、分析案の作成のときと同じ版・内容であることを、毎回確認して、テンプレートを返す。
+
+    参考のない分析案は、Noneを返す。却下・置換・権限喪失・内容の変更(名称の変更を含む)は、停止する。参考なしでは続けない。
+    """
+    recorded = plan.get('template_reference')
+    if recorded is None:
+        return None
+    template = load_reference(owner_id, recorded['id'])
+    if template.version != recorded['version'] or template.content_sha256 != recorded['content_sha256']:
+        raise AnalysisError('参考にしたテンプレートが変更されました。分析案を作り直してください。外部AIへは送信していません。', 409)
+    return template
+
+
+def literal_texts(template):
+    """コードに直接書かれていないかを確かめる値の元(参考の目的・手順・出力案・変数の既定値)。"""
+    texts = [template.purpose, *template.procedure, *template.output_spec]
+    texts += [item['default'] for item in (template.parameters or []) if isinstance(item.get('default'), str)]
+    return texts
 
 
 def redact_payload(payload):
