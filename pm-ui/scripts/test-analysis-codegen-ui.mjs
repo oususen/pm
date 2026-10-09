@@ -994,6 +994,114 @@ test('コードに直接書かれた値(literal_values)があるときは、④�
   } finally { f.stop() }
 })
 
+const REFERENCE = { id: 5, version: 1, name: '日別出荷の分析', status: 'approved' }
+
+test('テンプレートを参考に分析する(段階C): 参考を選ぶと、目的の入力の近くに表示し、要求に、参考のIDだけを付ける。外せる(2026-10-09)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.options.value = { providers: [{ provider: 'openrouter', label: 'OpenRouter', external: true, available: true, models: [{ id: 'm1', label: 'M1' }] }] }; await Vue.nextTick()
+    f.state.plan.value = null
+    f.state.startReference({ ...REFERENCE, extra: '渡さない' })
+    assert.deepEqual({ ...f.state.referenceTemplate.value }, REFERENCE, '識別だけを持つ(本文・余分な項目は、持たない)')
+    assert.equal(f.state.planningInput().reference_template_id, 5)
+    const text = (await htmlFor(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('参考にするテンプレート: テンプレート5「日別出荷の分析」（版1）')); assert.ok(text.includes('承認は引き継がず'))
+    assert.ok(text.includes('参考のテンプレートの品番・顧客コード・日付などは、参考の値です。今回の値は、目的の欄に、はっきり書いてください'))  // 参考の値を、今回の値と取り違えない(BOSS指摘)
+    assert.ok(text.replace(/<[^>]+>/g, '').includes('次の操作: 上の欄に、今回の目的を入力し、期間を選んで、「社外送信する目的文を確認」を押してください'))  // 次の行動を示す(BOSS指示)
+    assert.equal(text.includes('管理者承認前のテンプレートを参考にしています'), false, '承認済みなら、承認前の注意は出さない')
+    f.state.referenceTemplate.value = null
+    assert.equal(f.state.planningInput().reference_template_id, undefined, '外すと、要求に付けない')
+    assert.equal((await htmlFor(f)).includes('参考にするテンプレート:'), false)
+  } finally { f.stop() }
+})
+
+test('テンプレートを参考に分析する: 管理者承認前のテンプレートには、画面に明記する。不正な指定・権限なし・実行中は始めない', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = null
+    f.state.startReference({ ...REFERENCE, status: 'pending_admin' })
+    assert.ok((await htmlFor(f)).includes('管理者承認前のテンプレートを参考にしています'))
+    f.state.referenceTemplate.value = null
+    for (const bad of [null, undefined, {}, { id: '5' }, { id: 1.5 }]) f.state.startReference(bad)
+    assert.equal(f.state.referenceTemplate.value, null, '不正な指定では、始めない')
+    f.props.canEdit = false; f.state.startReference(REFERENCE)
+    assert.equal(f.state.referenceTemplate.value, null, '編集権限がなければ、始めない')
+  } finally { f.stop() }
+})
+
+test('テンプレートを参考に分析する: ローカルQwenでは作成できない(サーバーも409)。社外のAIなら作成できる', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = null
+    f.state.purpose.value = '納入先別に集計'; f.state.dateFrom.value = '2026-09-01'; f.state.dateTo.value = '2026-09-30'
+    f.state.options.value = { providers: [{ provider: 'qwen', label: 'ローカルQwen', external: false, available: true, models: [{ id: 'q1', label: 'Q1' }] }] }
+    f.state.provider.value = 'qwen'; f.state.model.value = 'q1'; await Vue.nextTick()
+    assert.equal(!!f.state.canCreate.value, true, '参考がなければ、ローカルQwenでも作成できる')
+    f.state.startReference(REFERENCE)
+    assert.equal(!!f.state.canCreate.value, false, '参考があると、ローカルQwenでは、作成できない')
+    assert.ok((await htmlFor(f)).includes('ローカルQwenでは、テンプレートを参考にできません'))
+    f.state.options.value = { providers: [{ provider: 'openrouter', label: 'OpenRouter', external: true, available: true, models: [{ id: 'm1', label: 'M1' }] }] }
+    f.state.provider.value = 'openrouter'; f.state.model.value = 'm1'; await Vue.nextTick()
+    assert.equal(!!f.state.canCreate.value, true, '社外のAIなら、作成できる')
+  } finally { f.stop() }
+})
+
+test('テンプレートを参考に分析する: 社外送信前の確認に、置換後の参考の全文を出す(HTMLはテキストとして出す)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.options.value = { providers: [{ provider: 'openrouter', label: 'OpenRouter', external: true, available: true, models: [{ id: 'm1', label: 'M1' }] }] }
+    f.state.plan.value = null
+    f.state.externalPreview.value = { model: 'm1', date_from: '2026-09-01', date_to: '2026-09-30', purpose: '今回の目的', confirmation: 'c',
+      reference: { id: 5, version: 1, name: 'N', status: 'approved', content_sha256: 'h', content: { name: 'CODE-N', purpose: 'CODE-会社の出荷', steps: ['日別に集計', '<img src=x onerror=SECRET>'], outputs: ['日付、数量'], conditions: '期間内全行',
+        datasets: [{ view: 'v_ai_shipment', fields: ['id', 'shipment_date'] }], date_from: '2026-01-01', date_to: '2026-01-31' } } }
+    await Vue.nextTick()
+    const raw = (await htmlFor(f))
+    const text = raw.replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('参考のテンプレート（置換後）: テンプレート5「CODE-N」（版1）')); assert.ok(text.includes('目的: CODE-会社の出荷'))
+    assert.ok(text.includes('日別に集計')); assert.ok(text.includes('出力案: 日付、数量')); assert.ok(text.includes('データ範囲: v_ai_shipment（id、shipment_date）'))
+    assert.ok(text.includes('コード（SQL・Python）は、コード生成の送信前に、全文を確認します'))
+    assert.ok(text.includes('上の品番・日付などは、参考のテンプレートの値です。今回の値は、上の「送信する目的文」の値です'))
+    assert.ok(text.includes('公開ビューの説明、上の参考のテンプレートの内容を送信します'))  // 参考も送ることを、注意書きに明記する
+    assert.equal(raw.includes('<img src=x onerror=SECRET>'), false); assert.ok(raw.includes('&lt;img src=x onerror=SECRET&gt;'))
+    f.state.externalPreview.value = { model: 'm1', date_from: '2026-09-01', date_to: '2026-09-30', purpose: '今回の目的', confirmation: 'c' }
+    assert.equal((await htmlFor(f)).includes('参考のテンプレート（置換後）'), false, '参考がなければ、出さない')
+    const plain = (await htmlFor(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(plain.includes('公開ビューの説明を送信します')); assert.equal(plain.includes('参考のテンプレートの内容を送信します'), false)
+  } finally { f.stop() }
+})
+
+test('テンプレートを参考に分析する: 改良との併用ができる。作成後は、分析案が参考を持ち、準備状態は消える。作り直しでも消える', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = { ...dataPlan('openrouter'), proposal: { ...dataPlan('openrouter').proposal, purpose: '9月の製品別出荷量', date_from: '2026-09-01', date_to: '2026-09-30' } }
+    f.state.startRefinement({ instruction: '品番も付けて', run_id: 7 })      // 分析案を消して、追加の指示だけが残る
+    f.state.startReference(REFERENCE)                                          // 分析案がなければ、追加の指示を残して、参考を足す
+    assert.deepEqual({ ...f.state.planningInput().refinement }, { instruction: '品番も付けて', from_run_id: 7 })
+    assert.equal(f.state.planningInput().reference_template_id, 5)
+    f.state.plan.value = { ...dataPlan('openrouter'), refinement: { instruction: '品番も付けて', from_run_id: 7 }, template_reference: { ...REFERENCE, content_sha256: 'h' } }
+    assert.equal(f.state.referenceTemplate.value, null, '分析案を作ると、準備状態は消える')
+    assert.equal(f.state.refinement.value, null)
+    const text = (await htmlFor(f)).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('参考にしたテンプレート: テンプレート5「日別出荷の分析」（版1）')); assert.ok(text.includes('取り直しています'))
+    f.state.plan.value = null; f.state.startReference(REFERENCE); f.state.resetPlan()
+    assert.equal(f.state.referenceTemplate.value, null, '作り直しで、参考も消える')
+  } finally { f.stop() }
+})
+
+test('テンプレートを参考に分析する: 現在の分析案があるときは、破棄の確認を取る。断れば、何も変えない。分析案の参考が承認前なら明記する', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.consent.value = false
+    f.state.startReference(REFERENCE)
+    assert.equal(f.confirms.length, 1); assert.notEqual(f.state.plan.value, null, '断れば、分析案を消さない'); assert.equal(f.state.referenceTemplate.value, null)
+    f.consent.value = true
+    f.state.startReference(REFERENCE)
+    assert.equal(f.state.plan.value, null, '承諾すれば、古い分析案は消える'); assert.deepEqual({ ...f.state.referenceTemplate.value }, REFERENCE)
+    f.state.plan.value = { ...dataPlan('openrouter'), template_reference: { ...REFERENCE, status: 'pending_admin', content_sha256: 'h' } }
+    assert.ok((await htmlFor(f)).includes('管理者承認前のテンプレートを参考にしています（まだ、システム管理者に確認されていません）'))
+  } finally { f.stop() }
+})
+
 test('経過秒のタイマーは、連続して切り替わっても1本だけで、画面を破棄すると止まる(Codex P3)', async () => {
   const { mock } = await import('node:test')
   mock.timers.enable({ apis: ['setInterval', 'Date'] })

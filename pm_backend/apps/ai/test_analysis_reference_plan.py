@@ -307,3 +307,36 @@ class CoverageTests(RefBase):
         self.create(self.other, self.data(row))
         sent = json.loads(self.messages[0][1]['content'])['reference_template']['steps']
         self.assertEqual(sent, ['品番V053504641の090-1234-5678を確認する', '顧客000196を集計する'])
+
+
+class StaleValueTests(RefBase):
+    """参考のテンプレートの値(品番・日付)が、今回の目的にないのに、分析案へ入ったときの警告(2026-10-09、BOSS指摘)。"""
+
+    def run_plan(self, steps, reference_purpose='品番V053504641の出荷', purpose='品番V053904703の日別出荷', outputs=None):
+        row = self.edited_row(purpose=reference_purpose, procedure=['product_code が V053504641 の行に絞る'], output_spec=['日付、V053504641の数量'])
+        raw = json.dumps({'title': 't', 'steps': steps, 'outputs': outputs or ['日付、数量'],
+                          'datasets': [{'view': 'v_ai_shipment', 'fields': ['shipment_date', 'quantity']}]})
+        with patch('ai.services.analysis_llm.request_external_json', return_value=raw):
+            return self.create(self.other, self.data(row, purpose=purpose))
+
+    def test_a_reference_value_that_is_not_in_the_current_purpose_is_warned(self):
+        plan = self.run_plan(['product_code が V053504641 の行に絞る'])
+        warnings = [w for w in plan.get('warnings', []) if '参考のテンプレートにある値' in w]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('V053504641', warnings[0])
+        self.assertIn('次の操作: 画面右下の「目的・期間を変更して作り直す」を押し', warnings[0])
+        self.assertEqual(plan['status'], 'awaiting_method')            # 警告だけで、承認は妨げない
+
+    def test_no_warning_when_the_plan_uses_only_the_current_values(self):
+        plan = self.run_plan(['product_code が V053904703 の行に絞る'], outputs=['日付、V053904703の数量'])
+        self.assertFalse([w for w in plan.get('warnings', []) if '参考のテンプレートにある値' in w])
+
+    def test_no_warning_when_the_value_is_also_in_the_current_purpose(self):
+        plan = self.run_plan(['product_code が V053504641 の行に絞る'], purpose='品番V053504641の日別出荷')
+        self.assertFalse([w for w in plan.get('warnings', []) if '参考のテンプレートにある値' in w])
+
+    def test_the_rules_say_reference_values_are_not_the_current_values(self):
+        from ai.services import analysis_codegen_service as cg
+        for rule in (planning.REFERENCE_RULE_PLAN, cg.REFERENCE_RULE_CODE):
+            self.assertIn('参考に書かれた具体的な値(品番・顧客コード・納入先コード・日付)は、参考の値で、今回の値ではない', rule)
+

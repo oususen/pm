@@ -10,6 +10,7 @@ from django.db import DatabaseError
 
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_redaction import build_analysis_code_redactor
+from ai.services import analysis_template_params as template_params
 from ai.services.analysis_template_params import PLACEHOLDER_PATTERN
 from ai.services.analysis_template_reuse_service import REUSABLE_STATUSES, can_reuse
 from ai.services.analysis_template_review_service import _stored_hash
@@ -108,6 +109,23 @@ def verify_plan_reference(owner_id, plan):
     if template.version != recorded['version'] or template.content_sha256 != recorded['content_sha256']:
         raise AnalysisError('参考にしたテンプレートが変更されました。分析案を作り直してください。外部AIへは送信していません。', 409)
     return template
+
+
+def stale_value_warnings(template, current_texts, proposal_texts):
+    """参考のテンプレートにある値(品番・顧客コードなどの数字を含む値と、日付)が、今回の目的・期間にないのに、AIが作った分析案の手順・出力案に入っていれば、警告の文を返す。
+
+    機械的な文字列の確認だけ(DBは見ない)。警告だけで、承認は妨げない(2026-10-09、BOSS指摘: 参考の品番が、今回の分析案へ入る恐れ)。
+    """
+    pattern = template_params.COPY_TOKEN_PATTERN
+    def values(texts):
+        return {token for token in pattern.findall(' '.join(str(text) for text in texts))
+                if any(char.isdigit() for char in token)}
+    reference = values([template.purpose, *template.procedure, *template.output_spec, template.conditions])
+    stale = sorted(token for token in reference - values(current_texts) if any(token in str(text) for text in proposal_texts))
+    if not stale:
+        return []
+    return [f"参考のテンプレートにある値（{'、'.join(stale)}）が、分析案の手順・出力案に入っています。今回の目的の値でない場合は、"
+            '次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、目的に、今回の値をはっきり書いて、分析案を作り直してください。']
 
 
 def literal_texts(template):

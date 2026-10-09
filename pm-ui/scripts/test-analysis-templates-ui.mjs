@@ -751,6 +751,32 @@ test('テンプレート保存の欄にも、コードに直接書かれた値�
   try { assert.equal((await html(g)).includes('コードに直接書かれた値があります'), false) } finally { g.stop() }
 })
 
+test('テンプレートを参考に分析する(段階C): ボタンは、再利用できる行にだけ出る。押すと、識別だけを親へ渡し、AIは呼ばない。再利用とは別の操作', async () => {
+  const f = await setup({ plan: null }, { templates: async () => ({ data: page([row(1, { status: 'approved' }), row(2, { status: 'rejected' })]) }) })
+  try {
+    const text = await html(f)
+    assert.equal(text.split('このテンプレートを参考に分析する').length - 1, 1, '再利用できる行(承認済み)にだけ出る。却下の行には出ない')
+    assert.ok(text.includes('このテンプレートで分析案を作る'), '既存の再利用のボタンは残る')
+    f.calls.length = 0
+    f.state.selectReference(row(1, { status: 'approved', version: 3, purpose: '本文は渡さない', procedure: ['手順'] }))
+    assert.deepEqual(f.calls, [], 'AIも、APIも、呼ばない')
+    assert.deepEqual(f.events.at(-1), ['reference-selected', { id: 1, version: 3, name: '分析1', status: 'approved' }], '識別だけを渡す(本文は渡さない)')
+    f.state.selectReference(row(2, { status: 'rejected' }))
+    assert.equal(f.events.length, 1, '却下の行では、渡さない')
+  } finally { f.stop() }
+  const g = await setup({ plan: null, canEdit: false }, { templates: async () => ({ data: page([row(1, { status: 'approved' })]) }) })
+  try {
+    g.state.selectReference(row(1, { status: 'approved' }))
+    assert.deepEqual(g.events, [], '編集権限がなければ、渡さない')
+    assert.equal((await html(g)).includes('このテンプレートを参考に分析する'), false, '閲覧のみでは、ボタンを出さない')
+  } finally { g.stop() }
+  const h = await setup({ plan: null, blocked: true }, { templates: async () => ({ data: page([row(1, { status: 'approved' })]) }) })
+  try {
+    h.state.selectReference(row(1, { status: 'approved' }))
+    assert.deepEqual(h.events, [], '操作中(blocked)は、渡さない')
+  } finally { h.stop() }
+})
+
 test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([row(1, { category: 'shipment', category_label: '出荷' })]) }) })
   try {

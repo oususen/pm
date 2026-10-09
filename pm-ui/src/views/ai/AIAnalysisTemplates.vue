@@ -53,6 +53,7 @@
         <span v-if="!row.content_visible"> / SQL・Python・条件・期間は、作成者と管理者だけが確認できます。</span>
         <button v-else :disabled="!!busy" @click="showDetail(row.id)">{{ detail?.id === row.id ? '詳細を再取得' : '詳細を表示' }}</button>
         <button v-if="canReuse(row)" :disabled="!canStartPlan" @click="openReuse(row)">このテンプレートで分析案を作る</button>
+        <button v-if="canReuse(row)" :disabled="!canStartReference" @click="selectReference(row)">このテンプレートを参考に分析する</button>
         <span v-if="row.status === 'pending_admin' && row.content_visible"> / システム管理者未承認</span></p>
       <div v-if="detail?.id === row.id">
         <p>期間: {{ detail.date_from }} ～ {{ detail.date_to }} / 条件: {{ detail.conditions }}</p>
@@ -106,7 +107,7 @@ import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
 import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 
 const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canReview: Boolean, blocked: Boolean, reuseBlocked: Boolean })
-const emit = defineEmits(['plan-created'])
+const emit = defineEmits(['plan-created', 'reference-selected'])
 const busy = ref(''), error = ref(''), saved = ref(null), accepted = ref(false), acceptedCorrection = ref(false), detail = ref(null), reason = ref(''), statusFilter = ref('')
 const CATEGORIES = Object.freeze([
   { value: 'receipt', label: '入荷' }, { value: 'shipment', label: '出荷' }, { value: 'inventory', label: '在庫' },
@@ -311,6 +312,13 @@ function reuseFailure(e, row) {
   const names = Array.isArray(data.names?.[reason]) ? data.names[reason].filter(name => typeof name === 'string' && /^[a-z][a-z0-9_]*$/.test(name)) : []
   const labels = names.map(name => row.parameters?.find(item => item.name === name)?.label || name)
   return labels.length ? `${REUSE_REASONS[reason]}（該当: ${labels.join('、')}）` : REUSE_REASONS[reason]
+}
+// テンプレートを参考にした生成(2026-10-09、BOSS承認 段階C): 参考にするテンプレートを、親(分析の画面)へ渡す。AIは、ここでは呼ばない。
+// 目的・期間の入力と、社外送信前の確認(参考の全文を含む)は、親の画面で行う。再利用(保存済みコードをそのまま使う)とは別の操作
+const canStartReference = computed(() => props.canEdit && !props.blocked && !busy.value)
+function selectReference(row) {
+  if (!canReuse(row) || !canStartReference.value) return
+  emit('reference-selected', { id: row.id, version: row.version, name: row.name, status: row.status })
 }
 function openReuse(row) {
   if (!canReuse(row) || !canStartPlan.value) return

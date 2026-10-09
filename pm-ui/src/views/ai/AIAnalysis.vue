@@ -35,7 +35,7 @@
       <div id="analysis-execution" class="run-target" :class="{ ready: runReady }">
       <AIAnalysisExecution :plan="plan" :can-edit="canEdit" :can-view-all="canViewAll" :visible="visible" :blocked="!!busy || !codeStateFresh" @active="executionActive = $event" @accepted="refresh" @refine="startRefinement" />
       </div>
-      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive || !!refinement" @plan-created="useTemplatePlan" />
+      <AIAnalysisTemplates :plan="plan" :can-edit="canEdit" :can-review="canViewAll" :blocked="!!busy || !codeStateFresh" :reuse-blocked="executionActive || !!refinement" @plan-created="useTemplatePlan" @reference-selected="startReference" />
       <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
       </section>
       <aside class="analysis-side" aria-label="分析の進め方">
@@ -48,6 +48,13 @@
       <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
       <AIAnalysisConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" @apply="applyConsult" @plan-created="useTemplatePlan" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
+      <section v-if="referenceTemplate && !plan" class="refine-note reference-note" role="status">
+        <p>参考にするテンプレート: テンプレート{{ referenceTemplate.id }}「{{ referenceTemplate.name }}」（版{{ referenceTemplate.version }}）。このテンプレートの目的・手順・出力案・データ範囲を、AIが参考にして、今回の目的に合わせた新しい分析案とコードを作ります。承認は引き継がず、手順・データ範囲・コード・試行・コード承認を、取り直します。</p>
+        <p class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 参考のテンプレートの品番・顧客コード・日付などは、参考の値です。今回の値は、目的の欄に、はっきり書いてください（書かれていない値は、AIが、参考の値を使う恐れがあります）。</p>
+        <p class="next-action"><strong>次の操作:</strong> 上の欄に、今回の目的を入力し、期間を選んで、「社外送信する目的文を確認」を押してください（社外のAIを選んでいる場合。参考のテンプレートの内容も、置換後の全文を、確認できます）。</p>
+        <p v-if="referenceTemplate.status === 'pending_admin'" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 管理者承認前のテンプレートを参考にしています（まだ、システム管理者に確認されていません。作成者と管理者だけが使えます）。</p>
+        <p v-if="selectedProvider && !selectedProvider.external" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> ローカルQwenでは、テンプレートを参考にできません。社外のAIを選ぶか、参考を外してください。</p>
+        <button type="button" :disabled="!!busy" @click="referenceTemplate = null">参考を外す</button></section>
       <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。改良の準備中は、テンプレートから分析案を作れません(追加の指示を外すと、作れます)。
         <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
       <div class="period">
@@ -61,7 +68,17 @@
           <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
           <p>期間: {{ externalPreview.date_from }} ～ {{ externalPreview.date_to }}</p>
           <p class="external-purpose">送信する目的文: {{ externalPreview.purpose }}</p>
-          <p>この目的文と期間、公開ビューの説明を送信します。確認だけでは社外AIへ送信しません。</p>
+          <div v-if="externalPreview.reference" class="external-reference">
+            <p>参考のテンプレート（置換後）: テンプレート{{ externalPreview.reference.id }}「{{ externalPreview.reference.content.name }}」（版{{ externalPreview.reference.version }}）</p>
+            <p>目的: {{ externalPreview.reference.content.purpose }}</p>
+            <ol><li v-for="(step, index) in externalPreview.reference.content.steps" :key="'rs' + index">{{ step }}</li></ol>
+            <p>出力案: {{ externalPreview.reference.content.outputs.join('、') }}</p>
+            <p v-if="externalPreview.reference.content.conditions">条件: {{ externalPreview.reference.content.conditions }}</p>
+            <p>データ範囲: {{ externalPreview.reference.content.datasets.map(item => item.view + '（' + item.fields.join('、') + '）').join(' / ') }}</p>
+            <p class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 上の品番・日付などは、参考のテンプレートの値です。今回の値は、上の「送信する目的文」の値です。</p>
+            <p>コード（SQL・Python）は、コード生成の送信前に、全文を確認します。</p>
+          </div>
+          <p>この目的文と期間、公開ビューの説明{{ externalPreview.reference ? '、上の参考のテンプレートの内容' : '' }}を送信します。確認だけでは社外AIへ送信しません。</p>
           <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">名称ではなく登録コードになっており、未登録の人名・社名・機密を含まないことを確認しました</label>
         </section>
         <p v-if="busy === 'create'" class="generating" role="status" aria-live="polite">⏳ AIが分析案を作成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。</p>
@@ -81,6 +98,8 @@
         </button>
         <div v-show="isOpen(2)" id="stage-body-2" class="stage-body">
         <p>目的: {{ plan.proposal.purpose }}</p>
+        <p v-if="plan.template_reference" role="status">参考にしたテンプレート: テンプレート{{ plan.template_reference.id }}「{{ plan.template_reference.name }}」（版{{ plan.template_reference.version }}）。目的・手順・データ範囲は、今回の分析案として、取り直しています。</p>
+        <p v-if="plan.template_reference?.status === 'pending_admin'" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 管理者承認前のテンプレートを参考にしています（まだ、システム管理者に確認されていません）。</p>
         <p v-if="plan.refinement">結果の改良: 追加の指示「{{ plan.refinement.instruction }}」（元の実行: {{ plan.refinement.from_run_id ?? '不明' }}）</p>
         <p v-if="plan.proposal.external_purpose">社外送信した目的文: {{ plan.proposal.external_purpose }}</p>
         <ol><li v-for="(step, index) in plan.proposal.steps" :key="index">{{ step }}</li></ol>
@@ -238,7 +257,8 @@ const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3
 const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507', 'qwen/qwen3-14b': 'Qwen3 14B' })
 const paidApproved = new Set()
 const selectedProvider = computed(() => options.value?.providers.find(item => item.provider === provider.value) || null)
-const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value)
+const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value
+  && !(referenceTemplate.value && !selectedProvider.value?.external))  // ローカルQwenでは、参考を使えない(サーバーも409。参考なしで続けない)
 const planProviderLabel = computed(() => {
   const proposal = plan.value?.proposal
   if (proposal?.provider === 'template') return 'テンプレート（AI未使用）'
@@ -482,6 +502,7 @@ function resetPlan() {
   generation += 1
   plan.value = null
   refinement.value = null
+  referenceTemplate.value = null
   error.value = ''
   busy.value = ''
   externalPreview.value = null
@@ -492,7 +513,17 @@ function resetPlan() {
 // 入力・AI選択を変えたら、以前の送信確認は使い回さない。
 // 結果の改良(BOSS承認 2026-10-06): 追加の指示と、改良の元の実行。分析案を作ると、分析案(plan.refinement)が持つ
 const refinement = ref(null)
-watch(plan, value => { if (value) refinement.value = null }, { flush: 'sync' })
+// テンプレートを参考にした生成(2026-10-09、BOSS承認 段階C): 参考にするテンプレートの識別だけを持つ。分析案を作ると、分析案(plan.template_reference)が持つ。改良との併用は可
+const referenceTemplate = ref(null)
+watch(plan, value => { if (value) { refinement.value = null; referenceTemplate.value = null } }, { flush: 'sync' })
+function startReference(template) {
+  if (!props.canEdit || executionActive.value || !template || !Number.isInteger(template.id)) return
+  if (plan.value && !window.confirm('現在の分析案を破棄して、このテンプレートを参考に、新しい分析を始めます。よろしいですか？')) return
+  const keepRefinement = !plan.value ? refinement.value : null  // 分析案がなければ、準備中の追加の指示は残す(併用)
+  if (plan.value) resetPlan()
+  refinement.value = keepRefinement
+  referenceTemplate.value = { id: template.id, version: template.version, name: template.name, status: template.status }
+}
 function startRefinement({ instruction, run_id: runId } = {}) {
   const proposal = plan.value?.proposal
   if (!props.canEdit || executionActive.value || !proposal || typeof instruction !== 'string' || !instruction.trim()) return
@@ -501,7 +532,7 @@ function startRefinement({ instruction, run_id: runId } = {}) {
   purpose.value = base.purpose; dateFrom.value = base.from; dateTo.value = base.to
   refinement.value = { instruction: instruction.trim(), from_run_id: runId ?? null }
 }
-watch([purpose, dateFrom, dateTo, provider, model, refinement], () => {
+watch([purpose, dateFrom, dateTo, provider, model, refinement, referenceTemplate], () => {
   externalPreview.value = null
   externalAccepted.value = false
 }, { flush: 'sync' })
@@ -576,6 +607,7 @@ async function perform(action, operation) {
 function planningInput() {
   const input = { purpose: purpose.value.trim(), date_from: dateFrom.value, date_to: dateTo.value, provider: provider.value, model: model.value }
   if (refinement.value) input.refinement = { instruction: refinement.value.instruction, from_run_id: refinement.value.from_run_id }
+  if (referenceTemplate.value) input.reference_template_id = referenceTemplate.value.id
   return input
 }
 async function prepareExternalPreview() {
@@ -750,6 +782,8 @@ input { padding: 4px; font: inherit; }
 .generating { background: #e8f4fd; border-left: 3px solid #2a7fc1; color: #123c5a; padding: 8px 10px; font-weight: 600; }
 .warning { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 8px 10px; }
 /* 分析案の警告(目的と期間・列の食い違いなど)は、見落とさないよう、赤字にして、「⚠！」を点滅させる(BOSS指示 2026-10-08)。動きを減らす設定の人には、点滅させない */
+.reference-note { background: #eef6f4; border-left: 3px solid #168779; padding: 8px 10px; margin: 8px 0; }
+.reference-note .next-action { font-weight: 600; }
 .wrapper-notice { color: #b3120c; font-weight: 600; }  /* 外枠の更新は、操作が必要な案内。赤字・太字(点滅はしない。BOSS承認 2026-10-08) */
 .plan-warning { background: #fdecea; border-left-color: #d32f2f; color: #b3120c; font-weight: 600; }
 .warn-mark { display: inline-block; animation: warn-blink 1s steps(2, start) infinite; }
