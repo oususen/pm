@@ -7,6 +7,7 @@ AI・launcherは呼ばない。実データ・結果・AIへ送った本文は�
 """
 import hashlib
 import json
+import unicodedata
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -80,7 +81,8 @@ def validate_template_name(name):
     if type(name) is not str:
         raise AnalysisError('テンプレート名を文字列で入力してください。')
     name = name.strip()
-    if not name or any(ord(char) < 32 or ord(char) == 127 for char in name):
+    # 制御文字は、C0(0〜31)・DEL・C1(U+0080〜U+009F)を含む、Unicodeの制御文字(Cc)すべてと、行・段落の区切り(U+2028・U+2029)(Codex P3)
+    if not name or any(unicodedata.category(char) == 'Cc' or char in '\u2028\u2029' for char in name):
         raise AnalysisError('テンプレート名を入力してください(改行・制御文字は使えません)。')
     if len(name) > AIAnalysisTemplate._meta.get_field('name').max_length:
         raise AnalysisError('テンプレート名が長すぎます(300文字以内)。')

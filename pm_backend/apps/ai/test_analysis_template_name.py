@@ -25,7 +25,7 @@ class SaveNameTests(CategoryBase):
 
     def test_invalid_names_are_rejected_and_nothing_is_saved(self):
         before = AIAnalysisTemplate.objects.count()
-        for name in ('', '   ', 5, None, ['a'], 'a\nb', 'a\x00b', 'あ' * 301):
+        for name in ('', '   ', 5, None, ['a'], 'a\nb', 'a\x00b', 'a\x85b', 'a\u2028b', 'a\u2029b', 'a\x9fb', 'あ' * 301):  # C1制御文字(U+0085など)と、行・段落の区切りも拒否(Codex P3)
             with self.subTest(name=name):
                 body = {'category': 'shipment', 'name': name}
                 self.assertEqual(self.save(self.creator, **body).status_code, 400)

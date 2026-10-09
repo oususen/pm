@@ -82,7 +82,13 @@ def request_external_json(provider, model, messages, temperature=0.3):
         if exc.code in {401, 403}:
             raise chat_service.LocalAIError(f'{label} APIキーを確認してください。', code='ai_auth') from exc
         raise chat_service.LocalAIError(f'{label} APIの呼び出しに失敗しました。残高・利用制限・接続状態を確認してください。', code='ai_http') from exc
-    except (URLError, OSError, ValueError) as exc:
+    # HTTPErrorは、URLErrorの下位の型のため、上の except HTTPError を先に置く(この順序を変えない)
+    except URLError as exc:
+        # 接続時のタイムアウトは、標準ライブラリがURLError(原因=TimeoutError)で包んで投げる。接続の失敗(ai_connect)と区別して、ai_timeoutにする(Codex P2)
+        if isinstance(exc.reason, TimeoutError):
+            raise chat_service.LocalAIError(f'{label} APIから制限時間内に回答を受信できませんでした。接続状態を確認してください。', code='ai_timeout') from exc
+        raise chat_service.LocalAIError(f'{label} APIに接続できません。接続設定を確認してください。', code='ai_connect') from exc
+    except (OSError, ValueError) as exc:
         raise chat_service.LocalAIError(f'{label} APIに接続できません。接続設定を確認してください。', code='ai_connect') from exc
     choice = (payload.get('choices') or [{}])[0]
     answer = ((choice.get('message') or {}).get('content') or '').strip()

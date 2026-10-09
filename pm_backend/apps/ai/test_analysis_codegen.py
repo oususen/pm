@@ -517,6 +517,21 @@ class GenerationTest(CodegenBase):
                 analysis_llm.request_external_json('openrouter', 'm', [])
             self.assertEqual(caught.exception.code, 'ai_auth')
 
+    def test_a_connection_timeout_wrapped_in_urlerror_is_classified_as_a_timeout(self):
+        # Codex P2: 接続時のタイムアウトは、標準ライブラリが URLError(原因=TimeoutError) で包んで投げる。接続の失敗(ai_connect)ではなく、ai_timeout。
+        # HTTPError は URLError の下位の型のため、認証・APIエラーの分類(ai_auth・ai_http)が、これに飲まれないことも確認する
+        from urllib.error import HTTPError, URLError
+        from ai.services import analysis_llm
+        agent = {'label': 'X', 'api_key': 'k', 'base_url': 'http://x.invalid'}
+        cases = ((URLError(TimeoutError('timed out')), 'ai_timeout'), (URLError('down'), 'ai_connect'), (URLError(OSError('refused')), 'ai_connect'),
+                 (HTTPError('http://x', 401, 'u', {}, None), 'ai_auth'), (HTTPError('http://x', 429, 'l', {}, None), 'ai_http'), (TimeoutError(), 'ai_timeout'))
+        for error, expected in cases:
+            with self.subTest(error=repr(error)), patch.object(analysis_llm, 'external_provider', return_value=agent), \
+                    patch.object(analysis_llm, 'urlopen', side_effect=error):
+                with self.assertRaises(cg.chat_service.LocalAIError) as caught:
+                    analysis_llm.request_external_json('openrouter', 'm', [{'role': 'user', 'content': 'x'}])
+                self.assertEqual(caught.exception.code, expected)
+
     def test_no_code_is_stored_when_validation_fails(self):
         plan = self.new_plan()
         result, _ = self.generate(plan, json.dumps({'steps': [], 'python': 'import os\nemit_report("x")'}))
