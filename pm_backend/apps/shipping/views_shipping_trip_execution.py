@@ -7,11 +7,12 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from masters.models import Calendar, KubotaSakaiTruck, Product
+from masters.models import KubotaSakaiTruck, Product
 from orders.core.models import ShippingTrip, ShippingTripAllocation, ShippingTripNotice
 from orders.utils.calendar_utils import WorkingDayCalculator
 from shipping.models import ShipmentActual, ShipmentActualHistory, ShipmentActualSplit, ShippingTripAllocationSplit, ShipToLeadTimeColorExclusion, ShipToLeadTime
 from shipping.services.shipping_progress import get_progress_horizon_days
+from shipping.views_kubota_sakai_trip_assignment import _resolve_kubota_line_calendar
 
 SPLIT_TOKEN = '|PD='
 REMARK_MAX_LEN = 200
@@ -616,7 +617,7 @@ class ShippingTripExecutionView(APIView):
             return Response({'detail': 'departure_date は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
 
         business_type = (request.query_params.get('business_type') or '').strip()
-        calendar = Calendar.objects.first()
+        calendar = _resolve_kubota_line_calendar()
         calc = WorkingDayCalculator(calendar)
         truck_offset_map = _collect_truck_offset_map()
         max_offset = max(truck_offset_map.values(), default=0)
@@ -942,7 +943,7 @@ class ShippingTripExecutionView(APIView):
         }
         ship_to_style_map = {}
         trip_notice_map = _trip_notice_map(trips)
-        calc = WorkingDayCalculator(Calendar.objects.first())
+        calc = WorkingDayCalculator(_resolve_kubota_line_calendar())
         truck_offset_map = _collect_truck_offset_map()
         merged_payload = _merge_trip_payloads([
             _build_trip_payload(
@@ -974,7 +975,7 @@ class ShippingTripProgressView(APIView):
 
         business_type = (request.query_params.get('business_type') or '').strip()
         status_filter = (request.query_params.get('status') or '').strip().upper()
-        calendar = Calendar.objects.first()
+        calendar = _resolve_kubota_line_calendar()
         calc = WorkingDayCalculator(calendar)
         truck_offset_map = _collect_truck_offset_map()
         max_offset = max(truck_offset_map.values(), default=0)
