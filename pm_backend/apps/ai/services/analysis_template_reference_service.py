@@ -121,7 +121,8 @@ def stale_value_warnings(template, current_texts, proposal_texts):
         return {token for token in pattern.findall(' '.join(str(text) for text in texts))
                 if any(char.isdigit() for char in token)}
     reference = values([template.purpose, *template.procedure, *template.output_spec, template.conditions])
-    stale = sorted(token for token in reference - values(current_texts) if any(token in str(text) for text in proposal_texts))
+    # トークン単位で、完全に一致するものだけを数える(部分一致にすると、参考の「2026」が、今回の「2026-09-01」に当たる誤検知になる。evaluator P2)
+    stale = sorted((reference - values(current_texts)) & values(proposal_texts))
     if not stale:
         return []
     return [f"参考のテンプレートにある値（{'、'.join(stale)}）が、分析案の手順・出力案に入っています。今回の目的の値でない場合は、"

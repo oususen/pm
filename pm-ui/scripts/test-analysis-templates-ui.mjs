@@ -14,7 +14,7 @@ assert.deepEqual(parsed.errors, [])
 const script = compileScript(parsed.descriptor, { id: 'templates-test' })
 const template = compileTemplate({ source: parsed.descriptor.template.content, filename: filename.pathname, id: 'templates-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
-const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked'].includes(n))
+const names = Object.keys(script.bindings).filter(n => !['computed', 'onBeforeUnmount', 'onMounted', 'ref', 'watch', 'api', 'plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked', 'referenceBlocked'].includes(n))
 const create = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'defineProps', 'defineEmits', 'api', 'window', 'AnalysisErrorBanner', 'useAnalysisErrorNotices',
   parsed.descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '') + `\nreturn {${names.join(',')}}`)
 const render = new Function('Vue', template.code.replace(/import \{([^}]+)\} from "vue"/, (_, s) => `const {${s.replace(/ as /g, ':')}} = Vue`).replace('export function render', 'function render') + '\nreturn render')(Vue)
@@ -24,7 +24,7 @@ function plan(extra = {}) { return { id: 'plan-1', revision: 6, status: 'data_ap
 function row(id, extra = {}) { return { id, name: `分析${id}`, purpose: `目的${id}`, status: 'pending_admin', status_label: '管理者承認待ち', created_by: 'tester', created_at: '2026-10-04T10:20:30', content_visible: true, ...extra } }
 const page = results => ({ results, count: results.length, next: null, previous: null })
 async function setup(propsInit = {}, methodsInit = {}) {
-  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, reuseBlocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }, events = []
+  const props = Vue.reactive({ plan: plan(), canEdit: true, canReview: false, blocked: false, reuseBlocked: false, referenceBlocked: false, ...propsInit }), calls = [], confirms = [], consent = { value: true }, events = []
   const methods = {
     templates: async () => ({ data: page([row(1)]) }),
     saveTemplate: async () => ({ data: { ...row(2), version: 1, created: true } }),
@@ -42,7 +42,7 @@ async function setup(propsInit = {}, methodsInit = {}) {
   state.category.value = 'shipment' // 保存のテストは、カテゴリを選んだ状態から始める(必須の確認は別のテスト)
   return { state, props, calls, confirms, consent, events, stop: () => { unmount(); scope.stop() } }
 }
-function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
+function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canReview', 'blocked', 'reuseBlocked', 'referenceBlocked'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
 
 test('表示時に一覧を取得し、保存済みがなければ空の案内を出す', async () => {
   const f = await setup({}, { templates: async () => ({ data: page([]) }) })
@@ -775,6 +775,16 @@ test('テンプレートを参考に分析する(段階C): ボタンは、再利
     h.state.selectReference(row(1, { status: 'approved' }))
     assert.deepEqual(h.events, [], '操作中(blocked)は、渡さない')
   } finally { h.stop() }
+})
+
+test('テンプレートを参考に分析する: 分析の実行中(referenceBlocked)は、押せず、渡さない(evaluator P3)', async () => {
+  const f = await setup({ plan: null, referenceBlocked: true }, { templates: async () => ({ data: page([row(1, { status: 'approved' })]) }) })
+  try {
+    f.state.selectReference(row(1, { status: 'approved' }))
+    assert.deepEqual(f.events, [])
+    assert.match(await html(f), /<button[^>]*disabled[^>]*>このテンプレートを参考に分析する/, '参考のボタンは、押せない(disabled)')
+    assert.doesNotMatch(await html(f), /<button[^>]*disabled[^>]*>このテンプレートで分析案を作る/, '再利用のボタンの扱いは、変えない')
+  } finally { f.stop() }
 })
 
 test('一覧にカテゴリを表示し、絞り込みは選んだカテゴリを送る(すべてのときは送らない)', async () => {

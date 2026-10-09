@@ -106,7 +106,7 @@ import api from '../../api/client'
 import AnalysisErrorBanner from '../../components/AnalysisErrorBanner.vue'
 import { useAnalysisErrorNotices } from '../../composables/analysisErrorNotices'
 
-const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canReview: Boolean, blocked: Boolean, reuseBlocked: Boolean })
+const props = defineProps({ plan: { type: Object, default: null }, canEdit: Boolean, canReview: Boolean, blocked: Boolean, reuseBlocked: Boolean, referenceBlocked: Boolean })
 const emit = defineEmits(['plan-created', 'reference-selected'])
 const busy = ref(''), error = ref(''), saved = ref(null), accepted = ref(false), acceptedCorrection = ref(false), detail = ref(null), reason = ref(''), statusFilter = ref('')
 const CATEGORIES = Object.freeze([
@@ -315,7 +315,7 @@ function reuseFailure(e, row) {
 }
 // テンプレートを参考にした生成(2026-10-09、BOSS承認 段階C): 参考にするテンプレートを、親(分析の画面)へ渡す。AIは、ここでは呼ばない。
 // 目的・期間の入力と、社外送信前の確認(参考の全文を含む)は、親の画面で行う。再利用(保存済みコードをそのまま使う)とは別の操作
-const canStartReference = computed(() => props.canEdit && !props.blocked && !busy.value)
+const canStartReference = computed(() => props.canEdit && !props.blocked && !props.referenceBlocked && !busy.value)  // 実行中は、押せない(親が黙って無視しない)
 function selectReference(row) {
   if (!canReuse(row) || !canStartReference.value) return
   emit('reference-selected', { id: row.id, version: row.version, name: row.name, status: row.status })

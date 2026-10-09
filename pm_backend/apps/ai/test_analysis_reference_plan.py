@@ -340,3 +340,13 @@ class StaleValueTests(RefBase):
         for rule in (planning.REFERENCE_RULE_PLAN, cg.REFERENCE_RULE_CODE):
             self.assertIn('参考に書かれた具体的な値(品番・顧客コード・納入先コード・日付)は、参考の値で、今回の値ではない', rule)
 
+    def test_a_year_only_value_is_not_a_false_positive(self):
+        # evaluator P2: 参考の「2026」が、今回の手順の「2026-09-01」に、部分一致して、誤って警告された。トークン単位の一致だけを数える
+        plan = self.run_plan(['shipment_date が 2026-09-01 以上 2026-09-30 以下の行を取得する'], reference_purpose='2026年1月の出荷', purpose='9月の出荷')
+        self.assertFalse([w for w in plan.get('warnings', []) if '参考のテンプレートにある値' in w])
+
+    def test_a_prefix_of_a_reference_value_is_not_a_false_positive(self):
+        # 参考の値の前方一致(V0535)が、今回の別の値(V053904703)に当たらない
+        plan = self.run_plan(['product_code が V053904703 の行に絞る'], reference_purpose='品番V0535の出荷', purpose='品番V053904703の日別出荷', outputs=['日付、V053904703の数量'])
+        self.assertFalse([w for w in plan.get('warnings', []) if '参考のテンプレートにある値' in w])
+

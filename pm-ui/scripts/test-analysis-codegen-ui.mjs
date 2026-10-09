@@ -1102,6 +1102,20 @@ test('テンプレートを参考に分析する: 現在の分析案があると
   } finally { f.stop() }
 })
 
+test('テンプレートを参考にした分析案を「作り直す」と、同じテンプレートを参考にしたまま、目的・期間の入力へ戻る。参考のない分析案は、従来どおり(evaluator P3)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.plan.value = { ...dataPlan('openrouter'), template_reference: { ...REFERENCE, status: 'pending_admin', content_sha256: 'h' } }
+    f.state.restartPlan()
+    assert.equal(f.state.plan.value, null)
+    assert.deepEqual({ ...f.state.referenceTemplate.value }, { ...REFERENCE, status: 'pending_admin' }, '参考は、そのまま残る')
+    assert.equal(f.state.planningInput().reference_template_id, 5)
+    f.state.plan.value = dataPlan('openrouter')
+    f.state.restartPlan()
+    assert.equal(f.state.referenceTemplate.value, null, '参考のない分析案は、参考を持たない')
+  } finally { f.stop() }
+})
+
 test('経過秒のタイマーは、連続して切り替わっても1本だけで、画面を破棄すると止まる(Codex P3)', async () => {
   const { mock } = await import('node:test')
   mock.timers.enable({ apis: ['setInterval', 'Date'] })
