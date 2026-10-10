@@ -276,7 +276,7 @@
 
 | テーブル | 公開する列 | 非公開と決めた列 | 未決定（＝非公開扱い） |
 |---|---|---|---|
-| `m_product`（36列すべて判断済み） | 32列（`created_at`・`updated_at`を含む） | `image_url`、`product_name_halfwidth`、`is_phantom`、`self_lt_days` | なし |
+| `m_product`（36列すべて判断済み） | 30列（2026-10-10: BOSSが判断画面で作成日・更新日を非公開にしていたため、32列から30列に修正。0034で32列を作成し開発DBに適用済み、0037で30列に修正） | `image_url`、`product_name_halfwidth`、`is_phantom`、`self_lt_days`、`created_at`、`updated_at` | なし |
 | `m_process` | 9列（`is_outsource`は、BOSS変更 2026-10-10で非公開） | `is_outsource` | `created_at`、`updated_at` |
 | `m_line` | 6列（`id`、`line_code`、`line_name`、`calendar_id`、`line_type`、`is_active`） | `lead_time_days`、`use_direct_process`（BOSS変更 2026-10-10） | `created_at`、`updated_at` |
 | `m_supplier` | 5列（`id`、`supplier_code`、`supplier_name`、`supplier_type`、`calendar_id`） | なし | `contact_person`、`phone_number`、`order_email` |

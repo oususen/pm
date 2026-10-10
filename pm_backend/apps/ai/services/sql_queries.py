@@ -41,14 +41,14 @@ BASE_SQL_SCHEMA = {
         'id', 'shipment_date', 'product_code', 'product_id', 'product_name',
         'customer_code', 'ship_to_code', 'quantity', 'trip_allocation_id', 'remark_text',
     ),
-    # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days は非公開)
+    # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
         'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
         'stock_location', 'processing_area', 'line_id', 'process_id', 'next_process_id', 'management_unit',
         'is_final_product', 'is_line_final_product', 'is_virtual_set', 'order_lot_min', 'order_lot_multiple',
         'is_special_management_material', 'specific_gravity', 'size_length', 'size_width', 'size_thickness',
         'transfer_destination', 'model_name', 'identification_code', 'product_group_id', 'used_container_id',
-        'capacity', 'is_active', 'created_at', 'updated_at',
+        'capacity', 'is_active',
     ),
     # 工程マスタのビュー(AI用ビュー作成計画 §13。is_outsource・created_at・updated_at は非公開)
     'v_ai_process': (

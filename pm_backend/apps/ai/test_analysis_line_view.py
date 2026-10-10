@@ -19,7 +19,8 @@ PERIOD = ('2026-09-01', '2026-09-30')
 PUBLISHED = ('id', 'line_code', 'line_name', 'calendar_id', 'line_type', 'is_active')
 HIDDEN = ('lead_time_days', 'use_direct_process', 'created_at', 'updated_at')
 # v_ai_line 追加前の、既存4ビューのAIへ渡す定義(fields付き)のJSONのSHA-256。1文字でも変わると不一致になる
-EXISTING_DEFINITION_SHA256 = '456d2f4643a58ce79e767813194252070dbfae873d3961f0e8057ac9c9ce3aa1'
+# (2026-10-10 v_ai_product を32列から30列へ修正したため、値を更新)
+EXISTING_DEFINITION_SHA256 = '12dd177030beb76568354de6fe0b35a96a4de4fc974f22dc7a178a05f005bd1a'
 
 
 class LineViewDefinitionTest(SimpleTestCase):

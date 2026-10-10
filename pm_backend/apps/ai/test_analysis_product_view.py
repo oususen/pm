@@ -33,7 +33,36 @@ class ProductViewDefinitionTest(SimpleTestCase):
 
     def test_column_types_match_published_columns_exactly(self):
         self.assertEqual(set(service.ANALYSIS_COLUMN_TYPES[PRODUCT]), set(BASE_SQL_SCHEMA[PRODUCT]))
-        self.assertEqual(len(BASE_SQL_SCHEMA[PRODUCT]), 32)
+        self.assertEqual(len(BASE_SQL_SCHEMA[PRODUCT]), 30)
+
+    def test_hidden_columns_are_not_in_view_dictionary_or_description(self):
+        # 非公開6列(BOSS判断。作成日・更新日は2026-10-10に非公開へ修正)が、辞書・列型・説明に入らない
+        from ai.services.sql_queries import TABLE_NOTES
+        hidden = ('image_url', 'product_name_halfwidth', 'is_phantom', 'self_lt_days', 'created_at', 'updated_at')
+        description = ANALYSIS_VIEWS[PRODUCT]['description']
+        for name in hidden:
+            self.assertNotIn(name, BASE_SQL_SCHEMA[PRODUCT])
+            self.assertNotIn(name, service.ANALYSIS_COLUMN_TYPES[PRODUCT])
+            self.assertNotIn(name, description)
+            self.assertNotIn(name, TABLE_NOTES[PRODUCT])
+
+    def test_migration_0037_is_standard_sql_with_30_published_columns(self):
+        from pathlib import Path
+        source = (Path(__file__).parent / 'migrations' / '0037_ai_product_view_remove_dates.py').read_text(encoding='utf-8')
+        sql = source.split('CREATE_VIEW = """')[1].split('"""')[0]
+        self.assertIn('FROM m_product', sql)
+        for banned in ('`', 'DEFINER', 'SQL SECURITY', 'WHERE', 'JOIN', 'pm_db'):
+            self.assertNotIn(banned, sql)
+        self.assertEqual(sql.count(' AS'), 1)  # 列の別名なし(ビュー名の AS だけ)
+        body = sql.split('SELECT')[1].split('FROM')[0]
+        columns = [line.strip().rstrip(',') for line in body.strip().splitlines()]
+        self.assertEqual(tuple(columns), BASE_SQL_SCHEMA[PRODUCT])
+        for hidden in ('image_url', 'product_name_halfwidth', 'is_phantom', 'self_lt_days', 'created_at', 'updated_at'):
+            self.assertNotIn(hidden, sql)
+        # ロールバック用の32列(0034と同じ)には、作成日・更新日が入る
+        restore = source.split('RESTORE_VIEW_32 = """')[1].split('"""')[0]
+        self.assertIn('created_at', restore)
+        self.assertIn('updated_at', restore)
 
     def test_description_has_required_notes_and_no_personal_text(self):
         text = ANALYSIS_VIEWS[PRODUCT]['description']

@@ -258,11 +258,11 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 
 | ビュー | 列 | 有効条件 | AI利用 |
 |---|---|---|---|
-| `v_ai_product`（`ai/0034`で作成） | `id`, `product_code`, `product_name`, `category`, `unit`, `unit_price`, `standard_lt_days`, `stock_location`, `processing_area`, `line_id`, `process_id`, `next_process_id`, `management_unit`, `is_final_product`, `is_line_final_product`, `is_virtual_set`, `order_lot_min`, `order_lot_multiple`, `is_special_management_material`, `specific_gravity`, `size_length`, `size_width`, `size_thickness`, `transfer_destination`, `model_name`, `identification_code`, `product_group_id`, `used_container_id`, `capacity`, `is_active`, `created_at`, `updated_at`（32列） | `m_product` 全行（絞り込みなし・結合なし。2,850行のうち有効2,808・無効42）。非公開（ビューに含めない）: `image_url`, `product_name_halfwidth`, `is_phantom`, `self_lt_days` | 読み取り専用SQLで、品番の分類・寸法・発注条件の確認、実績ビューの `product_id` / `product_code` から品名・分類を引く |
+| `v_ai_product`（`ai/0034`で作成） | `id`, `product_code`, `product_name`, `category`, `unit`, `unit_price`, `standard_lt_days`, `stock_location`, `processing_area`, `line_id`, `process_id`, `next_process_id`, `management_unit`, `is_final_product`, `is_line_final_product`, `is_virtual_set`, `order_lot_min`, `order_lot_multiple`, `is_special_management_material`, `specific_gravity`, `size_length`, `size_width`, `size_thickness`, `transfer_destination`, `model_name`, `identification_code`, `product_group_id`, `used_container_id`, `capacity`, `is_active`（30列。2026-10-10: 0034で32列を作成し開発DBに適用済み、0037で30列に修正） | `m_product` 全行（絞り込みなし・結合なし。2,850行のうち有効2,808・無効42）。非公開（ビューに含めない）: `image_url`, `product_name_halfwidth`, `is_phantom`, `self_lt_days`, `created_at`, `updated_at` | 読み取り専用SQLで、品番の分類・寸法・発注条件の確認、実績ビューの `product_id` / `product_code` から品名・分類を引く |
 
 - 個人情報の列は含まない。`unit_price`（金額）はBOSS判断で公開。
 - 空（NULL）がある列: `unit_price` 2,386行、`line_id` 1,833行、`process_id` 2,003行、`category` 16行。`category` の6種（ASSEMBLY・OUTSOURCED・SINGLE・PURCHASED・UNKNOWN・MATERIAL）と `management_unit`（DAY・MINUTE・空）の業務上の意味は未確認。
-- `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（32列）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
+- `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（30列。当初32列、2026-10-10に修正）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
 - 権限の付与は手動SQL（計画書 §9.3）。
 
 ### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）

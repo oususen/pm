@@ -44,7 +44,7 @@ ANALYSIS_VIEWS = {
             'transfer_destination=移動先、is_virtual_set=仮想セット品番(連産品)、is_active=有効(1)か無効(0)か、'
             'size_length・size_width・size_thickness=項目名が縦(mm)・横(mm)・厚さ(mm)、management_unit=項目名が管理区分(値はDAY・MINUTE・空)。'
             '上記以外の列(unit・standard_lt_days・stock_location・processing_area・next_process_id・is_final_product・is_line_final_product・'
-            'is_special_management_material・specific_gravity・model_name・identification_code・product_group_id・used_container_id・capacity・created_at・updated_at)の業務上の意味は未確認。'
+            'is_special_management_material・specific_gravity・model_name・identification_code・product_group_id・used_container_id・capacity)の業務上の意味は未確認。'
             'size_*・management_unitも、項目名以外の業務上の定義は未確認。'
         ),
     },

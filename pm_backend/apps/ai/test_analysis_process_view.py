@@ -18,8 +18,9 @@ EXISTING_VIEWS = ('v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_product')
 PERIOD = ('2026-09-01', '2026-09-30')
 PUBLISHED = ('id', 'process_code', 'process_name', 'line_id', 'management_unit', 'operating_rate',
              'equipment_count', 'two_person_only', 'is_active')
-# v_ai_process 追加前の、既存3ビューのAIへ渡す定義(fields付き)のJSONのSHA-256。1文字でも変わると不一致になる
-EXISTING_DEFINITION_SHA256 = '3a00fcaaa672512c63a1523fa416049ecd62034dd36de360ba6444b5820f7f80'
+# 既存3ビューのAIへ渡す定義(fields付き)のJSONのSHA-256。1文字でも変わると不一致になる
+# (2026-10-10 v_ai_product を32列から30列へ修正したため、値を更新。出荷・入荷の2ビューは test_analysis_product_view.py でも別に固定)
+EXISTING_DEFINITION_SHA256 = '4d111066d0c283fc4a5ef5d6f4ca772d57d063f7d240fdf39529b97d1ddeb284'
 
 
 class ProcessViewDefinitionTest(SimpleTestCase):

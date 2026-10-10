@@ -105,7 +105,7 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
    - ビューを新規に作る・変更するたびに、同じ手順を行う。手順SQLは、ビューごとに、各ビューの節（例 §9.3）へ書く。
    - 確認：`information_schema.VIEWS` の `DEFINER` が `pm_ai_view_owner@localhost` であること、`pm_ai_reader` の接続でビューが読めること、非公開列が読めないこと。
    - 理由：公開列だけに権限を絞る設計を効かせるため。定義者が存在しないとエラー1449でビューが読めなくなるため、`root` のように環境で変わるユーザーを使わない。
-   - 実施状況：`v_ai_product` は開発DBで実施済み（2026-10-10。定義者 `pm_ai_view_owner@localhost`、公開32列の列権限、`pm_ai_reader` の接続で件数2,850・有効2,808、`image_url` は読めないことを確認）。本番は未実施（BOSSが実行）。
+   - 実施状況：`v_ai_product` は開発DBで実施済み（2026-10-10。定義者 `pm_ai_view_owner@localhost`、公開32列の列権限（その後、2026-10-10 BOSS判断で30列へ修正。0037・§9.3参照）、`pm_ai_reader` の接続で件数2,850・有効2,808、`image_url` は読めないことを確認）。本番は未実施（BOSSが実行）。
    - PostgreSQLへ移行した後は、定義者の考え方を「所有者を専用ロールにする」に読み替える（§9.3参照）。
 
 ### 4.1-1 仕様書で確認できた品番の列の意味（2026-10-10 調査）
@@ -248,10 +248,10 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
 | 元テーブル | `m_product` の1つだけ。結合なし（行数2,850） |
 | 対象行 | 全行（絞り込みなし）。有効2,808・無効42。無効品番は`is_active`で、AIが絞る |
 | 数値定義 | なし（マスタ）。件数は行数。`product_code`は2,850行で重複なし・空なし |
-| 公開フィールド（32列） | `id`、`product_code`、`product_name`、`category`、`unit`、`unit_price`、`standard_lt_days`、`stock_location`、`processing_area`、`line_id`、`process_id`、`next_process_id`、`management_unit`、`is_final_product`、`is_line_final_product`、`is_virtual_set`、`order_lot_min`、`order_lot_multiple`、`is_special_management_material`、`specific_gravity`、`size_length`、`size_width`、`size_thickness`、`transfer_destination`、`model_name`、`identification_code`、`product_group_id`、`used_container_id`、`capacity`、`is_active`、`created_at`、`updated_at` |
-| 非公開フィールド | `image_url`、`product_name_halfwidth`、`is_phantom`、`self_lt_days`（BOSS判断） |
+| 公開フィールド（30列。2026-10-10 BOSS判断で`created_at`・`updated_at`を非公開に修正） | `id`、`product_code`、`product_name`、`category`、`unit`、`unit_price`、`standard_lt_days`、`stock_location`、`processing_area`、`line_id`、`process_id`、`next_process_id`、`management_unit`、`is_final_product`、`is_line_final_product`、`is_virtual_set`、`order_lot_min`、`order_lot_multiple`、`is_special_management_material`、`specific_gravity`、`size_length`、`size_width`、`size_thickness`、`transfer_destination`、`model_name`、`identification_code`、`product_group_id`、`used_container_id`、`capacity`、`is_active` |
+| 非公開フィールド | `image_url`、`product_name_halfwidth`、`is_phantom`、`self_lt_days`、`created_at`、`updated_at`（BOSS判断。`created_at`・`updated_at`は2026-10-10に追加。BOSSが判断画面で非公開にしていたが、32列で実装・コミットしていたため、0037で修正） |
 | 個人情報 | なし（個人名・連絡先・認証情報の列を含まない）。社内AIの列名検査（`SENSITIVE_IDENTIFIER`）に当たる列名もない |
-| 検証方法 | ①ビューの行数＝`m_product`の行数（2,850）②`product_code`の一意性③`is_active`の件数（有効2,808・無効42）④`pm_ai_reader`でビューが読め、`m_product`の直接参照が拒否される⑤非公開の4列がビューにない |
+| 検証方法 | ①ビューの行数＝`m_product`の行数（2,850）②`product_code`の一意性③`is_active`の件数（有効2,808・無効42）④`pm_ai_reader`でビューが読め、`m_product`の直接参照が拒否される⑤非公開の6列がビューにない |
 
 ### 9.1 未確認・注意
 - `unit_price`は2,386行がNULL（単価の入っている品番は464行）。`line_id`は1,833行、`process_id`は2,003行がNULL。AIの説明文に「空の品番がある」と書く。
@@ -260,8 +260,8 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
 - `unit_price`は金額情報。BOSS判断で公開としたため、公開する。
 
 ### 9.2 あわせて変更するもの（案）
-1. マイグレーション：`CREATE OR REPLACE VIEW v_ai_product AS SELECT <32列> FROM m_product`。ロールバックは`DROP VIEW IF EXISTS v_ai_product`。
-2. ビューの定義者`pm_ai_view_owner`の権限：`m_product`の列単位の`SELECT`を、32列へ広げる（現在は`id`・`product_code`・`product_name`の3列だけ。既存の`v_ai_shipment`が使用中）。本番では、権限付与のSQLをBOSSが実行する。
+1. マイグレーション：`CREATE OR REPLACE VIEW v_ai_product AS SELECT <32列> FROM m_product`（0034。のち0037で30列へ修正）。ロールバックは`DROP VIEW IF EXISTS v_ai_product`。
+2. ビューの定義者`pm_ai_view_owner`の権限：`m_product`の列単位の`SELECT`を、32列へ広げる（のち30列へ修正。§9.3）（現在は`id`・`product_code`・`product_name`の3列だけ。既存の`v_ai_shipment`が使用中）。本番では、権限付与のSQLをBOSSが実行する。
 3. `pm_ai_reader`へ`v_ai_product`の`SELECT`だけを付与する。
 4. AI用DB辞書（`sql_queries.py`）・`ANALYSIS_VIEWS`の説明・`ANALYSIS_COLUMN_TYPES`（開発DBの`SHOW COLUMNS`に合わせる）・`SCREEN_SQL_TABLES`・仕様書・運用規約を更新する。
 5. 既存の`v_ai_shipment`（`m_product`を結合している）は、今回は変更しない。
@@ -270,25 +270,26 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
 
 **実装済み（コード・文書）**
 - `pm_backend/apps/ai/migrations/0034_ai_product_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_product`（32列・別名なし・WHEREなし・結合なし）、ロールバックは`DROP VIEW IF EXISTS v_ai_product`。依存は`ai 0033`と`masters 0085`。`makemigrations --dry-run`は「No changes detected」。
-- `sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_product`（32列）、`TABLE_NOTES`に説明を追加（`ai_home`は`BASE_SQL_SCHEMA`の全キーを引くため自動で対象に入る）。
+- `sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_product`（当初32列。2026-10-10に30列へ修正）、`TABLE_NOTES`に説明を追加（`ai_home`は`BASE_SQL_SCHEMA`の全キーを引くため自動で対象に入る）。
 - `AI運用規約・AI用DB辞書.md`に§6.5-4を追加。
 
 **実施していないこと（BOSS実行）**
 - 実装時点（2026-10-10）は、`migrate`・ビュー作成・権限付与（GRANT）が未実行だった。**その後、開発DBで実施済み**（BOSS指示。`migrate ai 0034`でビュー作成、列権限の付与、定義者を`pm_ai_view_owner@localhost`へ付け替え。§4.1の9番・§12参照）。本番は未実施。
 - 開発で確認済み（読み取りのみ）：マイグレーションのSELECT文は`m_product`に対して実行でき、2,850行・32列を返す。
+- **2026-10-10 修正（BOSS承認）**：BOSSが判断画面で`created_at`・`updated_at`を非公開にしていたため、公開列を32列から30列に修正する。`0034_ai_product_view.py`は開発DBに適用済みのため書き換えず（32列の歴史的なSQLのまま）、新規マイグレーション`0037_ai_product_view_remove_dates.py`（`CREATE OR REPLACE VIEW v_ai_product AS SELECT <30列> FROM m_product`。ロールバックは0034の32列の定義へ戻す。依存は`ai 0036`・`masters 0085`で0034と同じ）で30列にする。実データ（開発DB、`pm_ai_reader`接続の読み取りのみ）：`m_product`から30列を読み、全2,850行×30列が`ANALYSIS_COLUMN_TYPES`の型で`_cell`を通る（エラー0）。**開発DBは、0037の`migrate`と手順SQLの実行（2026-10-10、BOSS承認のうえ、私が実行）で、30列に直した**（確認：30列で`created_at`・`updated_at`を含まない、`pm_ai_reader`で件数2,850・有効2,808、定義者`pm_ai_view_owner@localhost`、`pm_ai_view_owner`の`m_product`列権限は30列、`v_ai_shipment`は542件で影響なし）。本番は未反映。
 
 **権限の付与方式の調査結果**：既存ビューの権限はマイグレーションに含まれず、手動SQL（`output/prod_view_definer_setup.sql`、開発は手動作成）で付与されている。そのため今回も手動SQLとする。
 - 注意：マイグレーションで作ったビューの定義者は、マイグレーションを実行したDBユーザー（`root`等）になる。`v_ai_shipment`は別途`DEFINER = pm_ai_view_owner`で作り直した経緯がある。`v_ai_product`も、ビュー作成後に下の手順2で定義者を付け替える必要がある。
 
 **実行手順SQL（開発・本番とも。実行はBOSS。本番は事前にバックアップ）**
 ```sql
--- 1. 定義者の権限を32列へ広げる（実行はrootなど管理者で）
+-- 1. 定義者の権限を広げる（実行はrootなど管理者で）。2026-10-10 修正：30列（作成日・更新日は含めない）
 GRANT SELECT (`id`, `product_code`, `product_name`, `category`, `unit`, `unit_price`, `standard_lt_days`,
   `stock_location`, `processing_area`, `line_id`, `process_id`, `next_process_id`, `management_unit`,
   `is_final_product`, `is_line_final_product`, `is_virtual_set`, `order_lot_min`, `order_lot_multiple`,
   `is_special_management_material`, `specific_gravity`, `size_length`, `size_width`, `size_thickness`,
   `transfer_destination`, `model_name`, `identification_code`, `product_group_id`, `used_container_id`,
-  `capacity`, `is_active`, `created_at`, `updated_at`)
+  `capacity`, `is_active`)
   ON `pm_db`.`m_product` TO 'pm_ai_view_owner'@'localhost';
 -- 2. マイグレーション適用後（開発: python manage.py migrate / 本番: docker exec ... migrate）、定義者を付け替える
 -- （DBの選択に依存しないよう、ビューと元テーブルは pm_db で修飾する）
@@ -297,8 +298,12 @@ CREATE OR REPLACE DEFINER = `pm_ai_view_owner`@`localhost` SQL SECURITY DEFINER 
   processing_area, line_id, process_id, next_process_id, management_unit, is_final_product,
   is_line_final_product, is_virtual_set, order_lot_min, order_lot_multiple, is_special_management_material,
   specific_gravity, size_length, size_width, size_thickness, transfer_destination, model_name,
-  identification_code, product_group_id, used_container_id, capacity, is_active, created_at, updated_at
+  identification_code, product_group_id, used_container_id, capacity, is_active
   FROM `pm_db`.`m_product`;
+-- 2-2. 【開発DBは32列で作成済みのため追加。2026-10-10】0037のmigrateと上の2の後に、定義者の作成日・更新日の列権限を取り消す
+--      （順序注意：ビューが30列になる前に取り消すと、32列のビューが読めなくなる。本番は初回から30列のため、1のGRANTに2列を含めなければ本手順は不要）
+--      v_ai_shipment は m_product の id・product_code・product_name だけを使うため、この取り消しの影響を受けない
+REVOKE SELECT (`created_at`, `updated_at`) ON `pm_db`.`m_product` FROM 'pm_ai_view_owner'@'localhost';
 -- 3. 読み取りユーザーへビューのSELECTのみ付与
 --    開発DBの pm_ai_reader は localhost と 10.0.1.36 の2ホストあり、どちらも pm_db 全体への SELECT を持つため、開発では本手順は実質不要
 --    （開発では「元テーブルの直接参照が拒否される」確認も成立しない）。本番は SHOW GRANTS FOR で、ホストと権限を確認してから付与する
@@ -309,7 +314,7 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 ```
 
 **PostgreSQL移行を考慮した構成（BOSS指示 2026-10-10。将来 MySQL→PostgreSQL へ変更し、AI検索もDBへ直接アクセスしない予定）**
-- マイグレーション `0034` の `CREATE OR REPLACE VIEW v_ai_product AS SELECT <32列> FROM m_product` と `DROP VIEW IF EXISTS v_ai_product` は、バッククォート・`DEFINER`・`SQL SECURITY`・DBの修飾を使わない標準SQLで、MySQLでもPostgreSQLでもそのまま通る書き方にした。**PostgreSQLでの実行は未確認**（開発環境にPostgreSQLがない）。
+- マイグレーション `0034`（32列。のち `0037` で30列に修正）の `CREATE OR REPLACE VIEW v_ai_product AS SELECT <列> FROM m_product` と `DROP VIEW IF EXISTS v_ai_product` は、バッククォート・`DEFINER`・`SQL SECURITY`・DBの修飾を使わない標準SQLで、MySQLでもPostgreSQLでもそのまま通る書き方にした。**PostgreSQLでの実行は未確認**（開発環境にPostgreSQLがない）。
 - 定義者・権限は、DBごとに書き方が違うため、マイグレーションに含めず、別の手順SQLにしている。上の手順SQLはMySQL用。PostgreSQLへ移行するときは、次のように書き直す（未実行・未検証。移行時に確認する）。
   - 定義者：PostgreSQLの標準では、ビューの所有者の権限で元テーブルを読む（`security_invoker`を付けない場合）。所有者は専用ロール（例 `pm_ai_view_owner`）にする。`DEFINER`句はない。
   - 列単位の権限：`GRANT SELECT (列, …) ON m_product TO pm_ai_view_owner;`（PostgreSQLも列単位に対応）。
@@ -318,7 +323,7 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 - PostgreSQLでは、MySQLの`tinyint(1)`が`boolean`になる。`ANALYSIS_COLUMN_TYPES`の型の対応（真偽→BIGINT の0/1）は、移行時に見直す。
 
 **未実装（要確認・BOSS判断待ち）**（2026-10-10 更新: サイクルA・B・Cで解消。§12参照）
-- `ANALYSIS_VIEWS`／`ANALYSIS_COLUMN_TYPES`：**サイクルCで登録済み**（`date_field=None`＝全行取得、32列の型は開発DBの`SHOW COLUMNS`に合わせた。サイクルA=列型の拡張、サイクルB=date_fieldの任意化）。evaluator未検証。
+- `ANALYSIS_VIEWS`／`ANALYSIS_COLUMN_TYPES`：**サイクルCで登録済み**（`date_field=None`＝全行取得、32列の型は開発DBの`SHOW COLUMNS`に合わせた。2026-10-10に32列から30列へ修正。サイクルA=列型の拡張、サイクルB=date_fieldの任意化）。evaluator未検証。
 - `SCREEN_SQL_TABLES`：計画書に許可する画面の指定がないため追加していない（`ai_home`は自動で対象）。マスタ画面（`masters`）・生産・出荷等への許可はBOSS判断（**今も未実装**）。`TERM_COLUMNS`も未変更。
 - 列型：開発DBでビュー作成後に`SHOW COLUMNS FROM v_ai_product`を取得し、サイクルCで`ANALYSIS_COLUMN_TYPES`へ反映した（§12）。
 
@@ -370,7 +375,7 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 
 **実装内容**
 - `analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_product`（label=品番マスタ、`date_field=None`、`quantity_field=None`、description）を追加。descriptionは§4.1-1で確認した意味だけを書き、定義のない列は「業務上の意味は未確認」と明記（`unit_price`・`line_id`・`process_id`の空、1行=1品番、`is_active`で絞る、実績ビューのproduct_idとidが結べることを含む）。新設`ai_view_definition(view)`は値が`None`のキーを出さない（日付ありの2ビューは従来と同じ内容）。`count_target_rows`の応答の各ビューに`period_applied`（日付ありtrue・日付なしfalse）を追加（応答の追加のみ）。
-- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に`v_ai_product`の32列を追加（開発DBの`SHOW COLUMNS`を再取得して照合し、承認済みの対応と食い違いなし）。取得行数上限超過のメッセージを「条件を絞ってください(日付のあるビューは期間も絞れます)」へ（上限値は変更なし）。
+- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に`v_ai_product`の32列を追加（2026-10-10に30列へ修正）（開発DBの`SHOW COLUMNS`を再取得して照合し、承認済みの対応と食い違いなし）。取得行数上限超過のメッセージを「条件を絞ってください(日付のあるビューは期間も絞れます)」へ（上限値は変更なし）。
 - `analysis_planning_service.py`／`analysis_consult_service.py`：AIへ渡す定義を`ai_view_definition`経由に変更。分析案の指示の3か所と承認画面の「条件」（`_conditions_text`。日付ありだけなら従来と同じ文）を日付なしビューに対応（変更前後の全文は`AI分析基盤仕様書.md` §4.7-8に記載）。上限超過の承認時メッセージも同じ趣旨に変更。
 - `analysis_codegen_service.py`：日付なしビューを含むときだけ、指示の末尾に`DATELESS_VIEW_RULE`を加える（日付ありだけの指示は1文字も変えない）。`analysis_guard_runtime.py`（WRAPPER_VERSION）は変更なし。
 - `AIAnalysis.vue`：件数確認後、`period_applied=false`のビューの行に「期間: 適用しない（全行）」を表示。上限超過のメッセージを「条件（日付のあるビューは期間も）を絞って」へ。
@@ -379,7 +384,7 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 
 **検証結果**（開発。読み取りのみ・テスト用DBなし）
 - 個別実行：`ai.test_analysis_product_view` 11件OK、`ai.test_analysis_dateless_view` 10件OK、`ai.test_analysis_execution` 41件OK（skipped=2は実launcher用）、`ai.test_analysis_planning` 16件OK、`ai.test_analysis_column_guide` 20件OK、`ai.test_analysis_codegen` 74件OK（skipped=2）、`ai.test_analysis_jobs` 25件OK、`ai.test_analysis_multi_period` 20件OK、`ai.test_analysis_period_warning` 16件OK、`ai.test_analysis_worker_version` 12件OK。フロント`pm-ui/scripts/test-analysis-*.mjs` 7本OK（codegen 67・consult 23・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。
-- 開発DBの実データ（`pm_ai_reader`接続）：`count_target_rows`相当2,850（`period_applied=false`）、`_count`2,850、`_pages`の全ページ合計2,850（5,000行・1,000行の両方）。全2,850行×32列で`_cell`が`unsupported_value`を出さない（エラー0件）。NULLは保たれる（`unit_price`2,386・`specific_gravity`1,709・`line_id`1,833・`process_id`2,003・`created_at`0）。`unit_price`=Decimal('42.00')→'42.00'、`specific_gravity`=Decimal('7.8500')→'7.8500'、`created_at`→'2025-12-05 04:16:35.000000'。
+- 開発DBの実データ（`pm_ai_reader`接続）：`count_target_rows`相当2,850（`period_applied=false`）、`_count`2,850、`_pages`の全ページ合計2,850（5,000行・1,000行の両方）。全2,850行×32列（2026-10-10に30列へ修正。`created_at`は非公開）で`_cell`が`unsupported_value`を出さない（エラー0件）。NULLは保たれる（`unit_price`2,386・`specific_gravity`1,709・`line_id`1,833・`process_id`2,003・`created_at`0）。`unit_price`=Decimal('42.00')→'42.00'、`specific_gravity`=Decimal('7.8500')→'7.8500'、`created_at`→'2025-12-05 04:16:35.000000'。
 
 **未完了**
 - evaluatorによる検証：未実施。実機（AIを使う）の再試験：**未実施**。DuckDBコンテナ内での取り込み確認（A6）：未実施。テスト用DBを要する`ai.test_analysis_*`（consult等）：未実行。

@@ -62,7 +62,7 @@ ANALYSIS_COLUMN_TYPES = {
         'specific_gravity': 'DECIMAL(18,4)', 'size_length': 'DECIMAL(18,2)', 'size_width': 'DECIMAL(18,2)',
         'size_thickness': 'DECIMAL(18,3)', 'transfer_destination': 'VARCHAR', 'model_name': 'VARCHAR',
         'identification_code': 'VARCHAR', 'product_group_id': 'BIGINT', 'used_container_id': 'BIGINT',
-        'capacity': 'BIGINT', 'is_active': 'BIGINT', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
+        'capacity': 'BIGINT', 'is_active': 'BIGINT',
     },
     # 工程マスタ(m_processのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_processと照合する)
     'v_ai_process': {
