@@ -538,6 +538,7 @@ def generate(owner_id, plan_id, revision, confirmation=None):
     approved_views = [d['view'] for d in plan['proposal']['datasets']]
     steps = python = unsupported = source = None
     literal_values = []
+    normalized = []  # マスタの表記へ直した変数([{name, from, to}]。画面の警告用)
     names = {}  # 失敗の理由ごとの変数名(固定の形の識別子だけ。画面で、どの変数かを示す)
     if raw is not None:
         kind, steps, python, parameters = parse_response_full(raw)
@@ -566,6 +567,8 @@ def generate(owner_id, plan_id, revision, confirmation=None):
                     [proposal.get('purpose', ''), *proposal.get('steps', []), *proposal.get('outputs', []), *reference_texts],
                     source['steps'] if source is not None else steps, source['python'] if source is not None else python)
                 literal_values = copied
+                if source is not None:
+                    normalized = template_params.normalized_values(parameters, source['parameters'])
 
     def finish(codegen_state):
         history = codegen_state.get('history', []) + [{'attempt': attempt_no, 'at': datetime.now().isoformat(), 'reasons': reasons, **({'names': names} if names else {})}]
@@ -583,6 +586,8 @@ def generate(owner_id, plan_id, revision, confirmation=None):
         })
         if literal_values:
             codegen_state['literal_values'] = literal_values  # 画面の警告用(コードに直接書かれた値。再利用で変えられない)
+        if normalized:
+            codegen_state['normalized_values'] = normalized  # 画面の警告用(AIの値を、マスタの表記へ直した変数。固定の形 name・from・to)
         if source is not None:
             # 変数の形のコードと定義。steps・pythonは、元の値で置き換えた、実行する形(試行・承認・実行は、これを使う)。保存(テンプレート)は、こちらを使う
             codegen_state['template_source'] = source

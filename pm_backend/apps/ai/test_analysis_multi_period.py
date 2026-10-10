@@ -59,7 +59,7 @@ class DefinitionTests(SimpleTestCase):
         # 名前が_toで終わる、日付でない変数(ship_toなど)は、そのまま使える
         defs = [{'name': 'ship_to', 'type': 'product_code', 'label': 'x', 'default': 'P-001'}]
         from unittest.mock import patch
-        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: True}):
+        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: value}):
             self.assertEqual(len(params.validate_definitions(defs)), 1)
 
 

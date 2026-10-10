@@ -5,7 +5,9 @@
 - 日付の変数は、「名前_from」と「名前_to」の組(2026-10-07、BOSS承認)。全体の期間は period_from・period_to(値は分析案の期間に固定)。
   期間を分けて比べる分析(月ごと・前半と後半など)の「比べる期間」は、組を何組でも。値(初期値)は、AIが目的・手順から読み取り、
   サーバーが、形式・開始日<=終了日・全体の期間の中、を確認する。
-- 値は、形式(英数字・アンダースコア・ハイフンのみ)と、実在(品番=m_product、顧客コード=m_customer、納入先コード=ビューの実際の値)を確認する。
+- 値は、形式(英数字・アンダースコア・ハイフンのみ)と、実在(品番=v_ai_product、顧客コード=m_customer、納入先コード=v_ai_shipmentの実際の値)を確認する。
+  実在した値は、マスタ・ビューに保存されている正規の表記へ直す(小文字の品番 → 大文字、など。DuckDBは大文字小文字を区別するため)。
+  大文字小文字だけが違う値が複数あって決められないときは拒否する(parameters_def_ambiguous)
   形式を絞るため、置き換えた値がSQL・Pythonの文字列を壊すことはない
 - 保存するコードに、変数の元の値(品番など)や日付が文字のまま残っていたら、保存を断る(直書きの禁止)
 - 変数の個数の上限は設けない(BOSS承認)。フォールバックはない(値が確認できなければ、拒否する)
@@ -39,36 +41,49 @@ class DefinitionError(AnalysisError):
         self.names = {reason: clean} if clean else {}
 
 
-def _exists_product(value):
-    from masters.models import Product
-    try:
-        return Product.objects.filter(product_code=value).exists()
-    except DatabaseError as exc:
-        raise AnalysisError('品番を確認できません。しばらくしてから、もう一度お試しください。', 503) from exc
+class _Ambiguous(Exception):
+    """大文字小文字だけが違う値が複数ある(どれが正規か決められない)。_check_value が、変数の名前をつけて拒否に変える。"""
 
 
-def _exists_customer(value):
-    from masters.models import Customer
-    try:
-        return Customer.objects.filter(customer_code=value).exists()
-    except DatabaseError as exc:
-        raise AnalysisError('顧客コードを確認できません。しばらくしてから、もう一度お試しください。', 503) from exc
+def _canonical_in_view(view, column, value, label):
+    """公開ビューの実際の値のうち、value と(大文字小文字を区別せず)一致する正規の表記を返す。なければ None、2種類以上あれば _Ambiguous。
 
-
-def _exists_ship_to(value):
-    """納入先コードの正本の表がないため、出荷実績ビューの実際の値で確認する(読み取り専用の分析用接続)。"""
+    DISTINCT は、MySQLの照合順序(ci)だと大文字小文字違いを1つに潰すため、CAST(... AS BINARY) で区別して取得する。ビュー・列の名前は固定(利用者の入力ではない)。
+    """
     # 既存の件数確認(count_target_rows)と同じく、分析用の読み取り専用ユーザーでなければ使わない
     if settings.DATABASES.get('ai_reader', {}).get('USER') != 'pm_ai_reader':
         raise AnalysisError('分析用DB接続をpm_ai_readerへ設定してください。', 503)
     try:
         with connections['ai_reader'].cursor() as cursor:
-            cursor.execute('SELECT 1 FROM `v_ai_shipment` WHERE `ship_to_code` = %s LIMIT 1', [value])
-            return cursor.fetchone() is not None
+            cursor.execute(f'SELECT DISTINCT CAST(`{column}` AS BINARY) FROM `{view}` WHERE `{column}` = %s', [value])
+            found = {bytes(row[0]).decode('utf-8') if isinstance(row[0], (bytes, bytearray)) else row[0] for row in cursor.fetchall()}
     except (DatabaseError, ConnectionDoesNotExist) as exc:
-        raise AnalysisError('納入先コードを確認できません。分析用DB接続を管理者へ確認してください。', 503) from exc
+        raise AnalysisError(f'{label}を確認できません。分析用DB接続を管理者へ確認してください。', 503) from exc
+    if len(found) > 1:
+        raise _Ambiguous()
+    return next(iter(found), None)
 
 
-# 種類: 画面の表示名と、値の実在の確認。追加はここへ
+def _exists_product(value):
+    """品番マスタの公開ビュー(v_ai_product)にある、正規の表記を返す。なければ None。"""
+    return _canonical_in_view('v_ai_product', 'product_code', value, '品番')
+
+
+def _exists_customer(value):
+    """顧客マスタ(m_customer)に保存されている、正規の表記を返す。なければ None(顧客マスタのビューは未作成)。"""
+    from masters.models import Customer
+    try:
+        return Customer.objects.filter(customer_code=value).values_list('customer_code', flat=True).first()
+    except DatabaseError as exc:
+        raise AnalysisError('顧客コードを確認できません。しばらくしてから、もう一度お試しください。', 503) from exc
+
+
+def _exists_ship_to(value):
+    """納入先コードの正本の表がないため、出荷実績ビューの実際の値で確認し、正規の表記を返す(読み取り専用の分析用接続)。"""
+    return _canonical_in_view('v_ai_shipment', 'ship_to_code', value, '納入先コード')
+
+
+# 種類: 画面の表示名と、値の実在の確認(正規の表記、なければ None を返す)。追加はここへ
 TYPES = {
     'date': {'label': '日付', 'exists': None},
     'product_code': {'label': '品番', 'exists': _exists_product},
@@ -78,7 +93,7 @@ TYPES = {
 
 
 def _check_value(type_name, value, name=None):
-    """1つの値の形式と実在。日付は、形式の確認だけ(期間は、組で別に確認する)。"""
+    """1つの値の形式と実在。日付は、形式の確認だけ(期間は、組で別に確認する)。コード系は、マスタ・ビューの正規の表記を返す。"""
     if type_name == 'date':
         try:
             if type(value) is not str or date.fromisoformat(value).isoformat() != value:
@@ -88,9 +103,15 @@ def _check_value(type_name, value, name=None):
         return value
     if type(value) is not str or not CODE_VALUE_PATTERN.fullmatch(value):
         raise DefinitionError('コードは英数字・アンダースコア・ハイフンだけで指定してください。', 'parameters_def_value', [name])
-    if not TYPES[type_name]['exists'](value):
+    try:
+        canonical = TYPES[type_name]['exists'](value)
+    except _Ambiguous:
+        raise DefinitionError(f"{TYPES[type_name]['label']}に、大文字小文字だけが違う値が複数あり、決められません。", 'parameters_def_ambiguous', [name]) from None
+    if not canonical:
         raise DefinitionError(f"{TYPES[type_name]['label']}が登録されていません。", 'parameters_def_unregistered', [name])
-    return value
+    if type(canonical) is not str or not CODE_VALUE_PATTERN.fullmatch(canonical):  # 置き換えで文字列を壊し得る表記は使わない
+        raise DefinitionError('コードは英数字・アンダースコア・ハイフンだけで指定してください。', 'parameters_def_value', [name])
+    return canonical
 
 
 def validate_definitions(parameters):
@@ -120,7 +141,9 @@ def validate_definitions(parameters):
             base, partner = _date_partner(item['name'])
             if partner not in seen or next(c for c in cleaned if c['name'] == partner)['type'] != 'date':
                 raise DefinitionError('日付の変数は、「名前_from」と「名前_to」を組で指定してください。', 'parameters_def_pair', [item['name']])
-    resolve_values(cleaned, {})  # 元の値(既定値)の形式・実在の確認
+    # 元の値(既定値)の形式・実在の確認。コード系は、正規の表記を保存する定義の default にする(直書き検査・ハッシュを揃えるため)
+    for item, value in zip(cleaned, resolve_values(cleaned, {}).values()):
+        item['default'] = value
     return cleaned
 
 
@@ -240,6 +263,20 @@ def normalize_definitions(raw, date_from, date_to):
     return cleaned
 
 
+def normalized_values(raw, definitions):
+    """AIが返した変数の元の値(default)と、保存する定義の default(正規の表記)を名前で比べ、異なった項目を [{name, from, to}] で返す(画面の警告用)。
+
+    コード系(日付以外)だけ。from は形式(CODE_VALUE_PATTERN)に合う文字列だけで、AIの自由な文章は入れない。例外は出さない。
+    """
+    given = {item.get('name'): item.get('default') for item in raw if isinstance(item, dict)} if isinstance(raw, list) else {}
+    result = []
+    for item in definitions:
+        before = given.get(item['name'])
+        if item['type'] != 'date' and type(before) is str and CODE_VALUE_PATTERN.fullmatch(before) and before != item['default']:
+            result.append({'name': item['name'], 'from': before, 'to': item['default']})
+    return sorted(result, key=lambda entry: entry['name'])
+
+
 class SourceCheckError(AnalysisError):
     """コードと変数の不一致。画面へ出す固定の理由コード(reason)を持つ(AIの文章は持たない)。"""
 
@@ -278,7 +315,8 @@ def check_source(steps, python, definitions):
         place = 'parameters_literal_sql' if index < count else 'parameters_literal_python' if index == 2 * count else None  # 中間テーブル名(count〜2count-1)は対象外
         if place is None:
             continue
-        if any(item['type'] != 'date' and item['default'] in text for item in definitions):
+        # コード系は大文字小文字を区別せず比較する(小文字で直書きされても見逃さない)
+        if any(item['type'] != 'date' and item['default'].lower() in text.lower() for item in definitions):
             kinds.add('parameters_literal_value'); places.add(place)
         if DATE_LITERAL_PATTERN.search(text):
             kinds.add('parameters_literal_date'); places.add(place)

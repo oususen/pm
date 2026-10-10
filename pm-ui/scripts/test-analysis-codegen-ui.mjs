@@ -855,7 +855,8 @@ test('変数つきのコード(2-B): 使った変数と、元の値を表示す�
     assert.equal((await htmlFor(f)).includes('使うときに値を変えられます'), false, '変数がなければ出さない')
     for (const [reason, part] of [['parameters_invalid', '変数の定義が正しくありません'], ['parameters_source_invalid', 'コードと変数が合っていません'], ['parameters_undeclared', '変数を宣言していません'], ['parameters_unused', 'コードで使われていません'],
       ['parameters_quoted', '引用符が付いています'], ['parameters_literal', '直接書かれています'], ['parameters_literal_sql', '場所: SQL'], ['parameters_literal_python', '場所: Python'],
-      ['parameters_literal_date', '種類: 日付'], ['parameters_literal_value', '種類: 変数の元の値'], ['parameters_unavailable', '変数の値']]) {
+      ['parameters_literal_date', '種類: 日付'], ['parameters_literal_value', '種類: 変数の元の値'], ['parameters_unavailable', '変数の値'],
+      ['parameters_def_ambiguous', '大文字小文字だけが違う値が複数あり']]) {
       f.state.plan.value = { ...dataPlan(), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: [reason] } }
       assert.ok((await htmlFor(f)).includes(part), reason)
     }
@@ -997,6 +998,22 @@ test('コードに直接書かれた値(literal_values)があるときは、④�
     f.state.plan.value = { ...base, codegen: { ...base.codegen, literal_values: ['<img src=x onerror=SECRET>'] } }
     text = await html()
     assert.equal(text.includes('<img src=x onerror=SECRET>'), false); assert.ok(text.includes('&lt;img src=x onerror=SECRET&gt;'))
+  } finally { f.stop() }
+})
+
+test('マスタの表記へ直した変数(normalized_values)があるときは、④に警告を出す。なければ出さない。形の合わないものは出さない(2026-10-10)', async () => {
+  const f = await setup('qwen')
+  try {
+    const html = () => renderToString(Vue.createSSRApp({ setup: () => Object.fromEntries(Object.entries(f.state).map(([key, value]) => [key, Vue.unref(value)])), render }))
+    const base = generated()
+    f.state.plan.value = { ...base, codegen: { ...base.codegen, normalized_values: [{ name: 'product_code', from: 'v053904703', to: 'V053904703' }] } }
+    let text = (await html()).replace(/<!--.*?-->/g, '')
+    assert.ok(text.includes('変数 product_code: v053904703 を、マスタの表記 V053904703 に直しました。')); assert.ok(text.includes('class="warning plan-warning"')); assert.ok(text.includes('warn-mark'))
+    f.state.plan.value = base
+    assert.equal((await html()).includes('マスタの表記'), false, '直した変数がなければ、出さない')
+    f.state.plan.value = { ...base, codegen: { ...base.codegen, normalized_values: [{ name: 'product_code', from: '<img src=x onerror=SECRET>', to: 'V1' }, { name: 'Bad', from: 'a', to: 'b' }, 'x', null] } }
+    text = await html()
+    assert.equal(text.includes('SECRET'), false, '形式に合わない値は、表示しない'); assert.equal(text.includes('マスタの表記'), false)
   } finally { f.stop() }
 })
 

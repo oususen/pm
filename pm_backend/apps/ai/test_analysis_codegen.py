@@ -949,7 +949,7 @@ class ParameterGenerationTest(CodegenBase):
         super().setUp()
         from ai.services import analysis_template_params as params
         self.params = params
-        patcher = patch.dict(params.TYPES['customer_code'], {'exists': lambda value: value == 'C-001'})
+        patcher = patch.dict(params.TYPES['customer_code'], {'exists': lambda value: value if value == 'C-001' else None})
         patcher.start()
         self.addCleanup(patcher.stop)
 

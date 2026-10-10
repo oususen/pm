@@ -155,6 +155,7 @@
         <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
             <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが SQL・Python を生成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
             <p v-if="codegen?.literal_values?.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 目的・手順に書かれた値が、変数にされず、コードに直接書かれています: {{ codegen.literal_values.join('、') }}。この分析だけなら、そのまま実行できます。テンプレートとして保存しても、再利用で、これらの値を変えられません。変えたいときは、再生成してください。</p>
+            <p v-if="normalizedValues.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> <template v-for="(item, index) in normalizedValues" :key="item.name"><template v-if="index">　</template>変数 {{ item.name }}: {{ item.from }} を、マスタの表記 {{ item.to }} に直しました。</template></p>
             <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
             <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
             <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
@@ -278,6 +279,10 @@ const planProviderLabel = computed(() => {
 // ヘッダのチップ: 選択中のAIとモデル(利用できない場合は「要確認」)
 const providerBadge = computed(() => selectedProvider.value?.available ? `${selectedProvider.value.label} · ${model.value || '未選択'}` : `${selectedProvider.value?.label || 'AI'} · 要確認`)
 const codegen = computed(() => plan.value?.codegen || null)
+// マスタの表記へ直した変数。サーバーが固定の形(name・from・to)だけを返す。形が合わないものは表示しない
+const CODE_TEXT = /^[A-Za-z0-9_-]{1,40}$/
+const normalizedValues = computed(() => (Array.isArray(codegen.value?.normalized_values) ? codegen.value.normalized_values : [])
+  .filter(item => item && /^[a-z][a-z0-9_]*$/.test(item.name) && typeof item.from === 'string' && CODE_TEXT.test(item.from) && typeof item.to === 'string' && CODE_TEXT.test(item.to)))
 const codeState = computed(() => plan.value?.codegen_state || null)
 // 変数つきのコード(段階2-B): AIが使った変数の一覧(名前・ラベル・元の値)。保存すると、テンプレートが持つ
 const codeVariables = computed(() => Array.isArray(codegen.value?.template_source?.parameters) ? codegen.value.template_source.parameters : [])
@@ -316,6 +321,7 @@ const FAILURE_LABELS = Object.freeze({
   parameters_def_date: '日付の形が正しくありません(YYYY-MM-DD)。',
   parameters_def_value: '品番・顧客コード・納入先コードの値の形が正しくありません(英数字・アンダースコア・ハイフン)。',
   parameters_def_unregistered: '登録されていない品番・顧客コード・納入先コードです。',
+  parameters_def_ambiguous: '大文字小文字だけが違う値が複数あり、どれが正しい表記か決められません。',
   parameters_def_order: '比べる期間の開始日が、終了日より後です。',
   parameters_def_outside: '比べる期間が、全体の期間の外です。',
   python_syntax_after_substitution: '変数を値に置き換えたあとで、構文が壊れました(Pythonの文字列の中に変数を書くと、引用符がぶつかります)。',
@@ -379,7 +385,7 @@ const NAMED_REASONS = Object.freeze({
   parameters_undeclared: '宣言されていない変数', parameters_unused: '使われていない変数',
   parameters_def_format: '該当する変数', parameters_def_name: '該当する変数', parameters_def_type: '該当する変数', parameters_def_label: '該当する変数',
   parameters_def_default: '該当する変数', parameters_def_pair: '該当する変数', parameters_def_date: '該当する変数', parameters_def_value: '該当する変数',
-  parameters_def_unregistered: '該当する変数', parameters_def_order: '該当する変数', parameters_def_outside: '該当する変数',
+  parameters_def_unregistered: '該当する変数', parameters_def_ambiguous: '該当する変数', parameters_def_order: '該当する変数', parameters_def_outside: '該当する変数',
 })
 const codeFailureLabels = computed(() => [...new Set((Array.isArray(codegen.value?.reasons) ? codegen.value.reasons : []).map(reason => {
   const names = Object.hasOwn(NAMED_REASONS, reason) ? variableNames(reason) : []

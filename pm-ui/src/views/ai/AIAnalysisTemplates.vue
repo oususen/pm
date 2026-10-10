@@ -333,6 +333,7 @@ const REUSE_REASONS = Object.freeze({
   parameters_def_date: '日付は、YYYY-MM-DDの形で入力してください。',
   parameters_def_value: 'コードは、英数字・アンダースコア・ハイフンだけで入力してください。',
   parameters_def_unregistered: '登録されていない品番・顧客コード・納入先コードです。',
+  parameters_def_ambiguous: '大文字小文字だけが違う値が複数あり、どれが正しい表記か決められません。',
   parameters_def_order: '開始日は、終了日以前にしてください。',
   parameters_def_outside: '比べる期間・除く期間は、全体の期間の中に収めてください。全体の期間を変えたときは、これらも一緒に直してください。',
 })

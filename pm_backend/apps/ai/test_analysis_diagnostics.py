@@ -24,7 +24,7 @@ def altered(index, **changes):
 class DiagnosticBase(CodegenBase):
     def setUp(self):
         super().setUp()
-        patcher = patch.dict(params.TYPES['customer_code'], {'exists': lambda value: value == 'C-001'})
+        patcher = patch.dict(params.TYPES['customer_code'], {'exists': lambda value: value if value == 'C-001' else None})
         patcher.start()
         self.addCleanup(patcher.stop)
 

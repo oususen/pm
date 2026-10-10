@@ -71,7 +71,7 @@ class MultiCodeExampleTests(SimpleTestCase):
         self.assertIn('品番の文字列は、Pythonに直接書かない', cg.SYSTEM_PROMPT)
         example = cg.MULTI_CODE_EXAMPLE
         self.assertEqual([item['name'] for item in example['parameters']], ['product_code_1', 'product_code_2', 'period_from', 'period_to'])
-        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: True}):
+        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: value}):
             definitions = params.validate_definitions(self.DEFS)
             params.check_source(example['steps'], example['python'], definitions)  # 宣言と使用が一致し、固定の値の直書きがない
         self.assertEqual(copied_literals(['品番P-001とP-002の比較', '2026-08-01から2026-09-30'], example['steps'], example['python']), [])

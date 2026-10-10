@@ -5,6 +5,7 @@
 """
 import hashlib
 import json
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
@@ -28,6 +29,33 @@ DEFS = [
 ]
 PRODUCTS = {'P-001', 'P-002'}
 
+@contextmanager
+def fake_reader(rows):
+    """分析用接続(ai_reader)を差し替える。cursor.fetchall() は rows を返し、実行したSQLと引数を executed に残す。"""
+    class Cursor:
+        executed = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, args):
+            Cursor.executed.append((sql, args))
+
+        def fetchall(self):
+            return rows
+
+    class Connections:
+        def __getitem__(self, name):
+            assert name == 'ai_reader'
+            return type('C', (), {'cursor': staticmethod(lambda: Cursor())})()
+
+    with patch.object(params, 'connections', Connections()), patch.dict(params.settings.DATABASES, {'ai_reader': {'USER': 'pm_ai_reader'}}):
+        yield Cursor
+
+
 
 def param_plan(owner_id, steps=STEPS_P, python=PYTHON_P, definitions=DEFS, source=True):
     """変数の形のコード(template_source)を持つ、コード承認済みの分析案。コードは、既定値で置き換えた形で承認済み。"""
@@ -47,7 +75,7 @@ def param_plan(owner_id, steps=STEPS_P, python=PYTHON_P, definitions=DEFS, sourc
 class ParamBase(ReuseBase):
     def setUp(self):
         super().setUp()
-        patcher = patch.dict(params.TYPES['product_code'], {'exists': lambda value: value in PRODUCTS})
+        patcher = patch.dict(params.TYPES['product_code'], {'exists': lambda value: value if value in PRODUCTS else None})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -127,7 +155,7 @@ class SourceCheckTests(ParamBase):
 
     def test_the_format_check_works_even_when_the_existence_check_accepts_anything(self):
         # 実在の確認が通る値でも、形式が不正なら(SQL・Pythonの文字列を壊し得る文字は)拒否する
-        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: True}):
+        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: value}):
             for value in ("P-001'; DROP TABLE x; --", 'P 001', 'P"001', 'P\\001', 'P-001\n', 'あ', 'x' * 41, '', '{{product_code}}'):
                 with self.subTest(value=value), self.assertRaises(AnalysisError):
                     params.resolve_values(DEFS, {'product_code': value})
@@ -135,32 +163,40 @@ class SourceCheckTests(ParamBase):
 
     def test_ship_to_codes_are_checked_against_the_analysis_connection(self):
         definition = [{'name': 'ship_to', 'type': 'ship_to_code', 'label': '納入先', 'default': 'ZGHC'}]
-        with patch.dict(params.TYPES['ship_to_code'], {'exists': lambda value: value == 'ZGHC'}):
+        with patch.dict(params.TYPES['ship_to_code'], {'exists': lambda value: value if value == 'ZGHC' else None}):
             self.assertEqual(params.resolve_values(definition, {})['ship_to'], 'ZGHC')
             with self.assertRaises(AnalysisError):
                 params.resolve_values(definition, {'ship_to': 'XXXX'})
 
     def test_the_real_checkers_use_the_masters(self):
-        from masters.models import Customer, Product
-        Product.objects.create(product_code='REAL-P1', product_name='実在の製品')
+        from masters.models import Customer
         Customer.objects.create(customer_code='REAL-C1', customer_name='実在の得意先')
-        self.assertTrue(params._exists_product('REAL-P1'))
-        self.assertTrue(params._exists_customer('REAL-C1'))
-        self.assertFalse(params._exists_product('NOPE-1'))
-        self.assertFalse(params._exists_customer('NOPE-2'))
-        self.assertFalse(params._exists_product('REAL-C1'))  # 製品と得意先を取り違えない
-        self.assertFalse(params._exists_customer('REAL-P1'))
-        # 実際の確認関数を通した、値の確認
-        definitions = [{'name': 'p', 'type': 'product_code', 'label': '品番', 'default': 'REAL-P1'}]
-        with patch.dict(params.TYPES['product_code'], {'exists': params._exists_product}):
+        self.assertEqual(params._exists_customer('REAL-C1'), 'REAL-C1')
+        self.assertIsNone(params._exists_customer('NOPE-2'))
+        self.assertIsNone(params._exists_customer('REAL-P1'))
+        # 品番は公開ビュー(v_ai_product)、納入先コードは v_ai_shipment を、分析用接続で確認する(SQLiteにビューがないため、接続を差し替える)
+        with fake_reader([('REAL-P1',)]) as cursor:
+            self.assertEqual(params._exists_product('real-p1'), 'REAL-P1')
+            self.assertIn('`v_ai_product`', cursor.executed[-1][0]); self.assertEqual(cursor.executed[-1][1], ['real-p1'])
+        definitions = [{'name': 'p', 'type': 'product_code', 'label': '品番', 'default': 'real-p1'}]
+        with fake_reader([('REAL-P1',)]), patch.dict(params.TYPES['product_code'], {'exists': params._exists_product}):
             self.assertEqual(params.resolve_values(definitions, {})['p'], 'REAL-P1')
+        with fake_reader([]), patch.dict(params.TYPES['product_code'], {'exists': params._exists_product}):
             with self.assertRaises(AnalysisError):
                 params.resolve_values(definitions, {'p': 'NOPE-1'})
 
     def test_a_master_failure_is_a_fixed_503_for_products_and_customers(self):
         from django.db import DatabaseError
-        for name, label in (('_exists_product', '品番'), ('_exists_customer', '顧客コード')):
-            with self.subTest(name=name), patch('django.db.models.query.QuerySet.exists', side_effect=DatabaseError('SECRET-DB')):
+        with patch('django.db.models.query.QuerySet.first', side_effect=DatabaseError('SECRET-DB')):
+            with self.assertRaises(AnalysisError) as caught:
+                params._exists_customer('X-1')
+            self.assertEqual(caught.exception.status_code, 503)
+            self.assertIn('顧客コード', str(caught.exception.detail)); self.assertNotIn('SECRET', str(caught.exception.detail))
+        for name, label in (('_exists_product', '品番'), ('_exists_ship_to', '納入先コード')):
+            class Broken:
+                def __getitem__(self, key):
+                    raise DatabaseError('SECRET-DB')
+            with self.subTest(name=name), patch.object(params, 'connections', Broken()), patch.dict(params.settings.DATABASES, {'ai_reader': {'USER': 'pm_ai_reader'}}):
                 with self.assertRaises(AnalysisError) as caught:
                     getattr(params, name)('X-1')
                 self.assertEqual(caught.exception.status_code, 503)
@@ -170,32 +206,11 @@ class SourceCheckTests(ParamBase):
         from django.db import DatabaseError
         from django.db.utils import ConnectionDoesNotExist
 
-        class Cursor:
-            executed = []
-            row = (1,)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def execute(self, sql, args):
-                Cursor.executed.append((sql, args))
-
-            def fetchone(self):
-                return Cursor.row
-
-        class Connections:
-            def __getitem__(self, name):
-                assert name == 'ai_reader'
-                return type('C', (), {'cursor': staticmethod(lambda: Cursor())})()
-
-        with patch.object(params, 'connections', Connections()), patch.dict(params.settings.DATABASES, {'ai_reader': {'USER': 'pm_ai_reader'}}):
-            self.assertTrue(params._exists_ship_to("ZG'HC"))
-            self.assertEqual(Cursor.executed[-1], ('SELECT 1 FROM `v_ai_shipment` WHERE `ship_to_code` = %s LIMIT 1', ["ZG'HC"]))  # 値は、束縛パラメータ
-            Cursor.row = None
-            self.assertFalse(params._exists_ship_to('NONE'))
+        with fake_reader([("ZG'HC",)]) as cursor:
+            self.assertEqual(params._exists_ship_to("ZG'HC"), "ZG'HC")
+            self.assertEqual(cursor.executed[-1], ('SELECT DISTINCT CAST(`ship_to_code` AS BINARY) FROM `v_ai_shipment` WHERE `ship_to_code` = %s', ["ZG'HC"]))  # 値は、束縛パラメータ
+        with fake_reader([]):
+            self.assertIsNone(params._exists_ship_to('NONE'))
         with patch.dict(params.settings.DATABASES, {'ai_reader': {'USER': 'someone_else'}}), self.assertRaises(AnalysisError) as caught:
             params._exists_ship_to('ZGHC')
         self.assertEqual(caught.exception.status_code, 503)
@@ -203,8 +218,7 @@ class SourceCheckTests(ParamBase):
             class Broken:
                 def __getitem__(self, name):
                     raise error
-            with self.subTest(error=type(error).__name__), patch.object(params, 'connections', Broken()), \
-                    patch.dict(params.settings.DATABASES, {'ai_reader': {'USER': 'pm_ai_reader'}}), self.assertRaises(AnalysisError) as caught:
+            with self.subTest(error=type(error).__name__), patch.object(params, 'connections', Broken()),                     patch.dict(params.settings.DATABASES, {'ai_reader': {'USER': 'pm_ai_reader'}}), self.assertRaises(AnalysisError) as caught:
                 params._exists_ship_to('ZGHC')
             self.assertEqual(caught.exception.status_code, 503); self.assertNotIn('SECRET', str(caught.exception.detail))
 
@@ -291,7 +305,7 @@ class ApproveTests(ParamBase):
 
     def test_a_default_that_is_no_longer_registered_stops_the_approval_without_changing_the_state(self):
         row = self.param_row(status='pending_admin')
-        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: False}):
+        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: None}):
             response = self.approve(self.admin, row)
         self.assertEqual(response.status_code, 400)
         row.refresh_from_db()
