@@ -59,6 +59,8 @@ BASE_SQL_SCHEMA = {
     'v_ai_line': ('id', 'line_code', 'line_name', 'calendar_id', 'line_type', 'is_active'),
     # 仕入先マスタのビュー(AI用ビュー作成計画 §17。contact_person・phone_number・order_email は個人名・連絡先のため非公開)
     'v_ai_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type', 'calendar_id'),
+    # 得意先マスタのビュー(AI用ビュー作成計画 §21。created_at・updated_at は非公開)
+    'v_ai_customer': ('id', 'customer_code', 'customer_name', 'short_name', 'calendar_id', 'is_active'),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -116,6 +118,13 @@ TABLE_NOTES = {
         'calendar_id は仕入先専用カレンダー(稼働カレンダの calendar_id と結べる。空の仕入先が多い)。'
         'id は仕入先のID(入荷実績ビュー v_ai_purchase_receipt の supplier_id と結べる)。'
         '購買ライン(v_ai_line の line_type=PURCHASE)とは、仕入先の supplier_code とラインの line_code を同じ文字列で結ぶ(1対1)。'
+    ),
+    'v_ai_customer': (
+        '得意先マスタ(m_customer)のビュー。1行=1得意先(全行。無効な得意先も含むため、有効な得意先だけを見るときは is_active=1 で絞る)。'
+        'customer_code は得意先コード(先頭ゼロを含む文字列。数字として扱わない。出荷実績ビュー v_ai_shipment の customer_code と同じ文字列で結べる)、'
+        'customer_name は得意先名(会社名)、short_name は略称。'
+        'calendar_id は得意先のカレンダ(稼働カレンダの calendar_id と結べる)。'
+        'is_active は有効(1)・無効(0)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

@@ -23,6 +23,7 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_process': 'm_process',
     'v_ai_line': 'm_line',
     'v_ai_supplier': 'm_supplier',
+    'v_ai_customer': 'm_customer',
 }
 
 # 結合を含み、定義がマイグレーション(0012〜0014)にあるビュー。再作成しない。--check で定義者などを表示するだけ。

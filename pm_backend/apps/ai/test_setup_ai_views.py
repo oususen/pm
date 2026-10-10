@@ -24,6 +24,7 @@ LATEST_MIGRATION = {
     'v_ai_process': '0035_ai_process_view.py',
     'v_ai_line': '0036_ai_line_view.py',
     'v_ai_supplier': '0038_ai_supplier_view.py',
+    'v_ai_customer': '0039_ai_customer_view.py',
 }
 
 
@@ -287,7 +288,8 @@ class SetupAiViewsTests(SimpleTestCase):
         kinds = [s.split()[0] for s in cursor.executed]
         self.assertEqual(kinds, ['GRANT', 'CREATE'])
         self.assertTrue(all('`m_line`' in s for s in cursor.executed))
-        for other in ('m_product', 'm_process', 'm_supplier', 'v_ai_product', 'v_ai_process', 'v_ai_supplier'):
+        for other in ('m_product', 'm_process', 'm_supplier', 'm_customer',
+                      'v_ai_product', 'v_ai_process', 'v_ai_supplier', 'v_ai_customer'):
             self.assertFalse(any(other in s for s in cursor.executed))
 
     def test_apply_order_all_statements(self):

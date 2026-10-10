@@ -652,7 +652,7 @@ SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 - `analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_supplier`（label=仕入先マスタ、`date_field=None`、`quantity_field=None`、説明は§17.3の範囲のみ。`contact_person`・`phone_number`・`order_email`は書かない）。
 - `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に5列（§17.2）。
 - 試験：`apps/ai/test_analysis_supplier_view.py` 新規（10件）。既存の試験の更新は不要（既存ビューの出力は変わらず、既存の固定ハッシュはすべて同じ値のまま合格）。
-- 仕様書：`AI分析基盤仕様書.md`（公開ビュー一覧・型の対応）、`AI運用規約・AI用DB辞書.md`（§6.5-7を追加。既存の「品番・顧客コード・納入先コードの表記」は§6.5-8へ繰り下げ。他の文書・コードに§6.5-7・§6.5-8への参照はなかった）。
+- 仕様書：`AI分析基盤仕様書.md`（公開ビュー一覧・型の対応）、`AI運用規約・AI用DB辞書.md`（§6.5-7を追加。既存の「品番・顧客コード・納入先コードの表記」は§6.5-8へ繰り下げ（その時点の番号。得意先マスタ（§22）の追加で、さらに§6.5-9へ繰り下げた）。他の文書・コードに§6.5-7・§6.5-8への参照はなかった）。
 - 既存ビュー5つ（出荷・入荷・品番・工程・ライン）の定義（説明・列）のJSONのSHA-256（新規試験の固定値）：`aaed5cd71d844171d20fc26e92ab5a257bec3b4929b7c54e88781206a4abe454`。v_ai_supplier の追加前後で同一（追加は、既存エントリを変えない追記のみ）。既存4ビューの値は`12dd1770…`、既存3ビューの値は`4d111066…`で、既存の試験の固定値と一致した。
 
 **検証結果**（開発。読み取りのみ・テスト用DBなし）
@@ -688,7 +688,7 @@ SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 **目的**：§4.1の9番の手順（列権限の付与・定義者の付け替え）を、管理者が `migrate` の後に1回実行する管理コマンドにまとめる。MySQL固有の処理はこのコマンドに閉じ込める（マイグレーションは標準SQLのまま）。
 
 **実装内容**（`pm_backend/apps/ai/management/commands/setup_ai_views.py`）
-- 対象：定数 `SIMPLE_MASTER_VIEWS`（`v_ai_product`→`m_product`、`v_ai_process`→`m_process`、`v_ai_line`→`m_line`、`v_ai_supplier`→`m_supplier`）。列は `BASE_SQL_SCHEMA[ビュー名]`（列の単一の情報源）。新しい単純なマスタビューは、この定数に1行足す。
+- 対象：定数 `SIMPLE_MASTER_VIEWS`（`v_ai_product`→`m_product`、`v_ai_process`→`m_process`、`v_ai_line`→`m_line`、`v_ai_supplier`→`m_supplier`、`v_ai_customer`→`m_customer`（§22で追加））。列は `BASE_SQL_SCHEMA[ビュー名]`（列の単一の情報源）。新しい単純なマスタビューは、この定数に1行足す。
 - `v_ai_shipment`・`v_ai_purchase_receipt` は再作成しない（定義はマイグレーション0012〜0014）。`--check` で定義者を表示するだけ。
 - 1ビューごとに ①`GRANT SELECT (列) ON 元テーブル TO owner`（足りない列だけ）②`CREATE OR REPLACE DEFINER = owner SQL SECURITY DEFINER VIEW`（定義者・SECURITY_TYPE・列が期待と違うときだけ）。全ビューの後に ③owner の元テーブル列権限のうち、同じ元テーブルを使う全ビューの公開列の和集合（`OTHER_VIEW_COLUMNS`：`m_product` の `id`・`product_code`・`product_name` ＝ v_ai_shipment 用、を含む）にない列を `REVOKE`。現在の権限は `information_schema.COLUMN_PRIVILEGES` から読み、差分だけを実行（冪等）。
 - MySQL以外では「何もしない」と表示して終了（エラーにしない）。識別子はバッククォートで囲み、バッククォートを含む名前は拒否。ユーザー名・ホスト名は `re.fullmatch(r'[A-Za-z0-9_.%-]+')` で検査（末尾の改行も拒否）。
@@ -714,3 +714,77 @@ python manage.py setup_ai_views --check         # 読み取りのみの確認
 
 **未完了**：evaluatorによる検証。開発DBでの `--apply`（BOSS承認のもとで実行）。本番での実行。
 **反映状況**：開発DBで、`--apply`を実機で実行済み（2026-10-10。仕入先ビューの定義者・権限を整えた。要対応0件。もう一度実行すると「実行するSQLはありません」で冪等）。本番未反映。
+
+## 21. 得意先マスタのビュー `v_ai_customer` の作成前確認（2026-10-10。BOSS承認済み。実装は§22）
+
+公開する列は、[AIマスタビュー確認明細](AIマスタビュー確認明細.md) §5 のBOSS判断のとおり（判断画面 decisions の `m_customer` を、草案の前に読み直した）。§4.1 の設計原則に従う。
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、得意先をコード・名前・略称・カレンダで、分析・説明できるようにする。出荷実績ビュー（`v_ai_shipment`）の`customer_code`から、得意先の名前を引く |
+| 元テーブル | `m_customer` の1つだけ。結合なし（行数3） |
+| 対象行 | 全行（絞り込みなし）。有効3 |
+| 数値定義 | なし（マスタ）。件数は行数。`customer_code`は3行で重複なし |
+| 公開フィールド（6列） | `id`、`customer_code`、`customer_name`、`short_name`、`calendar_id`、`is_active` |
+| 非公開フィールド | `created_at`、`updated_at`（BOSS判断が未決定のため、非公開として扱う） |
+| 個人情報 | なし（会社名・略称・コード）。得意先コードは個人情報ではない（運用規約 §6.5-3）。外部AIへ送る目的文の、名称→コード置換は、従来どおり（運用規約 §4.1-3） |
+| 検証方法 | ①ビューの行数＝`m_customer`の行数（3）②`customer_code`の一意性③`pm_ai_reader`でビューが読め、非公開の2列が読めない④定義者が`pm_ai_view_owner@localhost`（`setup_ai_views --check`が要対応0件）⑤全行×6列が列型の検査（`_cell`）を通る⑥出荷実績ビューの`customer_code`が、すべて得意先ビューにある |
+
+### 21.1 実データ（開発DB）
+- 3行（`000018` リーデン、`000001` ティエラ、`000196` クボタ。いずれも有効）。`customer_code`は、すべて先頭がゼロで、**文字列のまま扱う**。`calendar_id`が空の得意先は0。略称は全行にある。
+- 出荷実績（`t_shipment_actual`）の542行は、すべて`000196`。得意先マスタにない出荷実績の行は0件。
+
+### 21.2 列型の対応（`m_customer`のSHOW COLUMNSからの導出。ビュー作成後に再確認する）
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id`、`calendar_id` | bigint | `BIGINT` |
+| `customer_code`、`customer_name`、`short_name` | varchar | `VARCHAR` |
+| `is_active` | tinyint(1) | `BIGINT`（0/1） |
+
+### 21.3 列の意味（仕様書で確認できた範囲。推測は書かない）
+| 列 | 意味 | 出典 |
+|---|---|---|
+| `customer_code` | 得意先コード（先頭ゼロを含む文字列）。出荷実績ビューの`customer_code`と同じ文字列で結べる | 受注管理仕様書.md:51-62、開発DBの実データ |
+| `customer_name`・`short_name` | 得意先名（会社名）・略称 | 項目名 |
+| `calendar_id` | 得意先のカレンダ（稼働カレンダの`calendar_id`と結べる） | モデルの項目名 |
+| `is_active` | 有効（1）・無効（0） | 項目名 |
+| 説明文には、**具体的な得意先コード・名称を書かない**（値は、データで確認する。クボタの`000196`などの、特定の得意先を、説明に固定しない） | | 計画書 §4.1の考え方、既存の試験（説明に「000196」「クボタ」を入れない） |
+
+### 21.4 あわせて変更するもの（実施内容は§22）
+1. マイグレーション `0039`：`CREATE OR REPLACE VIEW v_ai_customer AS SELECT <6列> FROM m_customer`（標準SQLのみ）。ロールバックは`DROP VIEW IF EXISTS v_ai_customer`。
+2. `setup_ai_views` の `SIMPLE_MASTER_VIEWS` に `v_ai_customer`→`m_customer` を1行追加する（権限付与・定義者の付け替えは、コマンドで行う）。
+3. `ANALYSIS_VIEWS`・`ANALYSIS_COLUMN_TYPES`・`BASE_SQL_SCHEMA`・`TABLE_NOTES`・仕様書を更新する。既存ビューの列・説明は変えない。`SCREEN_SQL_TABLES`・`TERM_COLUMNS`・AIへの指示文は変更しない。元テーブル`m_customer`の許可（受注画面）は、置き換えず、ビューの追加だけにする。
+
+### 21.5 BOSSに決めてほしいこと
+- ~~公開列の6列でよいか~~ → **決定済み（承認 2026-10-10）**：6列（BOSS判断の転記どおり）。
+- ~~元テーブル`m_customer`の許可は、今回は置き換えず、ビューの追加だけにしてよいか~~ → **決定済み（承認）**：置き換えず、ビューの追加だけにする。
+- ~~説明文に、具体的な得意先コード・名称を書かない方針でよいか~~ → **決定済み（承認）**：書かない。
+
+## 22. v_ai_customer 実装（2026-10-10。BOSS承認済み: §21の公開6列、元テーブルの許可は置き換えずビューの追加のみ、説明に具体的な得意先コード・名称を書かない。実装済み・evaluator未検証）
+
+**実装内容**
+- `pm_backend/apps/ai/migrations/0039_ai_customer_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_customer`（6列・別名なし・WHEREなし・結合なし・標準SQLのみ）、ロールバックは`DROP VIEW IF EXISTS v_ai_customer`。依存は`ai 0038`と`masters 0001_initial`（`m_customer`の6列は、すべて`CreateModel Customer`で作成されており、後続のmastersマイグレーションでの追加・変更はない）。`makemigrations --dry-run`は「No changes detected」。
+- `sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_customer`（6列）、`TABLE_NOTES`に説明を追加。既存の`m_customer`エントリと`SCREEN_SQL_TABLES`は変更していない。
+- `analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_customer`（label=得意先マスタ、`date_field=None`、`quantity_field=None`、説明は§21.3の範囲のみ。具体的な得意先コード・名称、`created_at`・`updated_at`は書かない）。
+- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に6列（§21.2。`is_active`はtinyint(1)→BIGINT）。
+- `setup_ai_views.py`：`SIMPLE_MASTER_VIEWS`に`v_ai_customer`→`m_customer`を1行追加（これ以外の変更なし）。単純なマスタビューは5つになった。
+- 試験：`apps/ai/test_analysis_customer_view.py` 新規（12件）。`test_setup_ai_views.py`は、`LATEST_MIGRATION`に`v_ai_customer`→`0039_ai_customer_view.py`を追加（マイグレーションの列とBASE_SQL_SCHEMAの一致検査の対象に入る）、`--views`絞り込みの試験の「対象外の語」に`m_customer`・`v_ai_customer`を追加（検査を強める方向）。検査を弱めた箇所はない。
+- 既存ビュー6つ（出荷・入荷・品番・工程・ライン・仕入先）の定義（説明・列）のJSONのSHA-256（新規試験の固定値）：`8ca47c57f9e27a60ed1822ffca227599e41056c0774c8934ba814faaaa7d2de1`。v_ai_customer の追加前（`git stash`で`services`を変更前に戻して計算）と追加後で同一。仕入先ビューの試験の既存5ビューの値（`aaed5cd7…`）は変わらず合格。
+- 仕様書：`AI分析基盤仕様書.md`（公開ビュー一覧・型の対応）、`AI運用規約・AI用DB辞書.md`（§6.5-8を追加。既存の「品番・顧客コード・納入先コードの表記」は§6.5-9へ繰り下げ。他の文書・コードに§6.5-8への参照はなかった。§6.5-4の対象ビューの一覧にも追記）。
+
+**検証結果**（開発。読み取りのみ・テスト用DBなし）
+- `ai.test_analysis_customer_view`・`test_setup_ai_views`・`test_analysis_supplier_view`・`line_view`・`process_view`・`product_view`・`dateless_view`・`execution`・`planning`・`column_guide`・`codegen`・`jobs`・`multi_period`・`period_warning`・`worker_version`の1コマンド実行で304件OK（skipped=4）。フロント`pm-ui/scripts/test-analysis-*.mjs` 7本OK（codegen 68・consult 23・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。
+- 開発DBの実データ（`AI_DB_ALIAS`接続）：`m_customer`は3行・`customer_code`は3種類（重複なし）。SHOW COLUMNS：bigint・varchar(20)・varchar(100)・varchar(40)・bigint・tinyint(1)（§21.2の対応と一致）。全3行×6列（18セル）が`_cell`を通る（エラー0件）。出荷実績ビュー`v_ai_shipment`は542行で、`customer_code`が`m_customer`にない行は0件。
+- `setup_ai_views`（dry-run）：`v_ai_customer`について GRANT（`m_customer`の6列を`pm_ai_view_owner`へ）と CREATE（定義者付け替え）の2文を表示。`--check`：要対応3件（ビュー`v_ai_customer`なし・owner の`m_customer`列権限が6列とも不足・`ai_reader`接続で`v_ai_customer`が読めない）。いずれもビュー未作成による想定内。他の4つのマスタビュー・出荷・入荷は問題なし。`--apply`は実行していない。
+
+**`setup_ai_views --apply` が実行するSQL（記録。`<db>`は接続先のDB名。MySQL固有のため、マイグレーションではなくコマンドが実行する）**
+```sql
+GRANT SELECT (`id`, `customer_code`, `customer_name`, `short_name`, `calendar_id`, `is_active`) ON `<db>`.`m_customer` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_customer` AS SELECT `id`, `customer_code`, `customer_name`, `short_name`, `calendar_id`, `is_active` FROM `<db>`.`m_customer`;
+```
+
+**未完了**
+- 開発DBでの`migrate ai 0039`と`setup_ai_views --apply`（BOSS承認のもとで実行）、ビュー作成後の`SHOW COLUMNS FROM v_ai_customer`と`ANALYSIS_COLUMN_TYPES`の照合。
+- evaluatorによる検証。実機（AIを使う）の再試験。テスト用DBを要する`ai.test_analysis_*`は未実行。
+
+**反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10。`migrate ai 0039`、`setup_ai_views --apply`。BOSS承認のうえ、私が実行）。確認結果：`SHOW COLUMNS FROM v_ai_customer`は6列で、型は`ANALYSIS_COLUMN_TYPES`の対応（bigint・varchar・tinyint(1)）と一致。`pm_ai_reader`の接続で、3件・コード3種類・有効3。`created_at`・`updated_at`は読めない（列がない）。全3行×6列が列型の検査を通る（エラー0）。出荷ビューの得意先コードで、得意先ビューにない行は0件。`setup_ai_views --check`は要対応0件。7つの`v_ai_`ビューの定義者は、すべて`pm_ai_view_owner@localhost`。本番未反映。

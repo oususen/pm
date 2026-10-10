@@ -88,6 +88,18 @@ ANALYSIS_VIEWS = {
             '購買ライン(v_ai_lineのline_type=PURCHASE)とは、仕入先のsupplier_codeとラインのline_codeを同じ文字列で結ぶ(1対1)。'
         ),
     },
+    # 得意先マスタ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §21)。
+    'v_ai_customer': {
+        'label': '得意先マスタ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1得意先(得意先マスタ)。日付の列がなく、期間では絞らず全行が対象。無効な得意先も含むため、有効な得意先だけを見るときはis_active=1で絞る。'
+            '列の意味: id=得意先のID、'
+            'customer_code=得意先コード(先頭ゼロを含む文字列。数字として扱わない。出荷実績ビューv_ai_shipmentのcustomer_codeと同じ文字列で結べる)、'
+            'customer_name=得意先名(会社名)、short_name=略称、'
+            'calendar_id=得意先のカレンダ(稼働カレンダのcalendar_idと結べる)、'
+            'is_active=有効(1)か無効(0)か。'
+        ),
+    },
 }
 
 

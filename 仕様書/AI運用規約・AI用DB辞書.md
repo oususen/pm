@@ -264,7 +264,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 空（NULL）がある列: `unit_price` 2,386行、`line_id` 1,833行、`process_id` 2,003行、`category` 16行。`category` の6種（ASSEMBLY・OUTSOURCED・SINGLE・PURCHASED・UNKNOWN・MATERIAL）と `management_unit`（DAY・MINUTE・空）の業務上の意味は未確認。
 - `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（30列。当初32列、2026-10-10に修正）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
 - 権限の付与は手動SQL（計画書 §9.3）。
-- 定義者の付け替え・列権限の付与は、管理コマンド `python manage.py setup_ai_views`（既定は表示のみ。`--apply` で実行、管理者で実行。`--check` で確認）でも行える。対象は単純なマスタビュー4つ（`v_ai_product`・`v_ai_process`・`v_ai_line`・`v_ai_supplier`）。手順SQLは、コマンドが実行するSQLの記録として残す（計画書 §20）。ビューの作り直しは定義者・SECURITY_TYPE・列順の違いだけで判断し、ビュー本体（WHERE・別名・列式）の違いは検出しない。`--check` は元テーブルへの表全体のSELECTも要対応にする（DB全体・グローバルの権限は検出しない）。`--reader-host` を指定したときだけ、`pm_ai_reader` へビューのSELECTを付与する。`v_ai_supplier` は仕入先ビューのコミットと同時に反映する。
+- 定義者の付け替え・列権限の付与は、管理コマンド `python manage.py setup_ai_views`（既定は表示のみ。`--apply` で実行、管理者で実行。`--check` で確認）でも行える。対象は単純なマスタビュー5つ（`v_ai_product`・`v_ai_process`・`v_ai_line`・`v_ai_supplier`・`v_ai_customer`）。手順SQLは、コマンドが実行するSQLの記録として残す（計画書 §20）。ビューの作り直しは定義者・SECURITY_TYPE・列順の違いだけで判断し、ビュー本体（WHERE・別名・列式）の違いは検出しない。`--check` は元テーブルへの表全体のSELECTも要対応にする（DB全体・グローバルの権限は検出しない）。`--reader-host` を指定したときだけ、`pm_ai_reader` へビューのSELECTを付与する。`v_ai_supplier` は仕入先ビューのコミットと同時に反映する。
 
 ### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
 
@@ -300,7 +300,19 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 列の意味は計画書 §17.3 の範囲だけ。`ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（5列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_supplier` の許可・`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は置き換えず、ビューの追加のみ。
 - 権限の付与・定義者の付け替えは手動SQL（計画書 §19.1。`pm_ai_view_owner` へ `m_supplier` の5列の列単位 `SELECT`）。未実施（BOSSが実行）。
 
-### 6.5-8 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
+### 6.5-8 得意先マスタ（`v_ai_customer`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_customer`（`ai/0039`で作成） | `id`, `customer_code`, `customer_name`, `short_name`, `calendar_id`, `is_active`（6列） | `m_customer` 全行（絞り込みなし・結合なし。3行。無効な得意先も含むため、有効だけを見るときは `is_active=1` で絞る）。非公開（ビューに含めない）: `created_at`, `updated_at` | 読み取り専用SQLで、得意先のコード・名前・略称・カレンダの確認、出荷実績ビュー `v_ai_shipment` の `customer_code` から得意先を引く |
+
+- 個人情報の列は含まない（会社名・略称・コード）。`customer_code` は先頭ゼロを含む文字列で、数字として扱わない。`v_ai_shipment` の `customer_code` と同じ文字列で結べる。
+- `calendar_id` は得意先のカレンダ（稼働カレンダの `calendar_id` と結べる）。`is_active` は有効(1)・無効(0)。
+- 説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES`）には、具体的な得意先コード・得意先の名称を書かない（BOSS承認。値はデータで確認する）。
+- 列の意味は計画書 §21.3 の範囲だけ。`ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（6列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_customer` の許可・`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は置き換えず、ビューの追加のみ。
+- 権限の付与・定義者の付け替えは `setup_ai_views` コマンドで行う（計画書 §20・§22。`pm_ai_view_owner` へ `m_customer` の6列の列単位 `SELECT`）。未実施（BOSS承認のもとで実行）。
+
+### 6.5-9 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
 
 - DuckDB（分析の実行）は大文字小文字を区別するが、MySQL（`utf8mb4_unicode_ci`）は区別しない。そのため、AI分析の変数（品番・顧客コード・納入先コード）の値は、**マスタ・公開ビューに保存されている正規の表記**に直してからコードに入れる。`upper()` は使わない（マスタに小文字の品番 `giji` が実在する）。
 - 確認元（公開ビューが正）: 品番=`v_ai_product`、納入先コード=`v_ai_shipment` の実際の値（ともに読み取り専用の分析用接続）、顧客コード=`m_customer`（顧客マスタのビューは未作成。作成後は公開ビューへ切り替える）。マスタ・ビューにない値、および大文字小文字だけが違う値が複数あって決められない納入先コードは、拒否する（代わりの値は使わない）。
