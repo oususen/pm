@@ -789,14 +789,14 @@ CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER 
 
 **反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10。`migrate ai 0039`、`setup_ai_views --apply`。BOSS承認のうえ、私が実行）。確認結果：`SHOW COLUMNS FROM v_ai_customer`は6列で、型は`ANALYSIS_COLUMN_TYPES`の対応（bigint・varchar・tinyint(1)）と一致。`pm_ai_reader`の接続で、3件・コード3種類・有効3。`created_at`・`updated_at`は読めない（列がない）。全3行×6列が列型の検査を通る（エラー0）。出荷ビューの得意先コードで、得意先ビューにない行は0件。`setup_ai_views --check`は要対応0件。7つの`v_ai_`ビューの定義者は、すべて`pm_ai_view_owner@localhost`。本番未反映。
 
-## 23. 相談の検証失敗の理由コード（2026-10-10。BOSS承認 案A・E・F・G。実装済み。案E・Fはevaluator条件付き合格、案Gはevaluator未検証）
+## 23. 相談の検証失敗の理由コード（2026-10-10。BOSS承認 案A・E・F・G。実装済み。案E・F・Gはevaluator条件付き合格。コミット済み 2b798827・本番未反映）
 
 **背景**：相談（AIと目的を整える）で、OpenRouterのGemma 4 26B A4Bだけが「AIの返答を検証できませんでした。」（HTTP 502）になる。返答の中身は保存・ログ出力しない設計のため、原因を**固定の理由コードだけ**で特定できるようにする。コードブロックを許す変更（案B）は今回しない。
 
 **実装内容**
-- `analysis_consult_service.py`：`_parse`が、失敗時に固定の理由コードを付ける。優先順位は上から、`empty`（空・空白だけ）→`code_fence`（前後の空白を除いた先頭が```）→JSONとして読めない場合は4コードのいずれか（`json_text_before`：先頭が`{`でも`[`でもない／`json_text_after`：先頭が`{`で`raw_decode`が成功し後ろに空白以外が残る（案Fで廃止）／`json_truncated`：先頭が`{`で`exc.pos`が入力長以上、または閉じない文字列（`Unterminated string`）で終わる／`json_syntax`：それ以外。先頭が`[`で読めない場合を含む。例外の連鎖は付けない）→`json_not_object`→`reply_missing`（`reply`が文字列でない・空）。受け入れる返答の範囲は案Eの時点では変えていない（案Fで変更。下記）。
+- `analysis_consult_service.py`：`_parse`が、失敗時に固定の理由コードを付ける。（案Eの時点の記述。現行は案Gの9コード）優先順位は上から、`empty`（空・空白だけ）→`code_fence`（前後の空白を除いた先頭が```）→JSONとして読めない場合は4コードのいずれか（`json_text_before`：先頭が`{`でも`[`でもない／`json_text_after`：先頭が`{`で`raw_decode`が成功し後ろに空白以外が残る（案Fで廃止）／`json_truncated`：先頭が`{`で`exc.pos`が入力長以上、または閉じない文字列（`Unterminated string`）で終わる／`json_syntax`：それ以外。先頭が`[`で読めない場合を含む。例外の連鎖は付けない）→`json_not_object`→`reply_missing`（`reply`が文字列でない・空）。受け入れる返答の範囲は案Eの時点では変えていない（案Fで変更。下記）。
 - **経緯（2026-10-10）**：Gemmaの実機で`json_invalid`と確認した。そこでBOSS承認（案E）により、`json_invalid`を廃止して上記の4コードに分けた（計8コード）。「前後の文章を許す」変更（案F）は、この時点ではしていない（その後、案Fで実施）。エラー位置の数値は判定にだけ使い、外へ出さない。
-- **案F（BOSS承認 2026-10-10。受け入れる範囲の変更。相談のみ。前置き・後ろの余分な文字を読み捨てる）**：Gemmaが`json_text_before`を2回続けて返したため。`empty`→`code_fence`の判定は変えない（コードブロックは拒否のまま。案Bは不採用）。その後、先頭が`[`でなく`{`を含むときは、**最初の`{`から**`raw_decode`で完全なオブジェクトとして読めた場合だけ、そのオブジェクトを使う（前後の文字は読み捨て。先頭が`{`のときの後ろの余分な文字も同じ）。使う条件は従来と同じ（`reply`が空でない文字列）。拒否のまま：最初の`{`から読めない（前置きに`{a}`など→`json_text_before`）、読めたが`reply`がない・空（`reply_missing`）、`{`がない（`json_text_before`。ただしJSONとして読める配列・文字列・数値は`json_not_object`）、先頭が`[`（従来どおり）。最初の`{`以外の`{`からは再試行しない。読み捨てた部分の中身・長さ・位置は、エラー・ログ・画面・返り値に出さない（読み捨てがあったことも出さない）。影響は`_parse`（相談）だけ。
+- **案F（案Fの時点の記述。`json_text_before`は案Gで廃止）（BOSS承認 2026-10-10。受け入れる範囲の変更。相談のみ。前置き・後ろの余分な文字を読み捨てる）**：Gemmaが`json_text_before`を2回続けて返したため。`empty`→`code_fence`の判定は変えない（コードブロックは拒否のまま。案Bは不採用）。その後、先頭が`[`でなく`{`を含むときは、**最初の`{`から**`raw_decode`で完全なオブジェクトとして読めた場合だけ、そのオブジェクトを使う（前後の文字は読み捨て。先頭が`{`のときの後ろの余分な文字も同じ）。使う条件は従来と同じ（`reply`が空でない文字列）。拒否のまま：最初の`{`から読めない（前置きに`{a}`など→`json_text_before`）、読めたが`reply`がない・空（`reply_missing`）、`{`がない（`json_text_before`。ただしJSONとして読める配列・文字列・数値は`json_not_object`）、先頭が`[`（従来どおり）。最初の`{`以外の`{`からは再試行しない。読み捨てた部分の中身・長さ・位置は、エラー・ログ・画面・返り値に出さない（読み捨てがあったことも出さない）。影響は`_parse`（相談）だけ。
 - **案G（BOSS承認 2026-10-10。原因の確定のための理由コードの細分化。受け入れる範囲は案Fのまま）**：案F後も、Gemmaが`json_text_before`で失敗した（2026-10-10）。そこで`json_text_before`を廃止し、次の3コードに分けた。(1) `json_no_object`：`{`を全く含まず、先頭が`[`でもない（JSONで返していない）。(2) `json_prefix_truncated`：先頭が`{`でなく`{`を含み、最初の`{`からの`raw_decode`が失敗し、その失敗が入力の終わり（`exc.pos >= len(text)`、または`Unterminated string`。`json_truncated`と同じ判定）。(3) `json_prefix_brace`：先頭が`{`でなく`{`を含み、最初の`{`から読めず、入力の終わりではない（前置きの中の`{`から読めない疑い、または文法の誤り）。先頭が`{`のときの`json_truncated`・`json_syntax`、先頭が`[`のときの`json_not_object`・`json_syntax`、`reply_missing`、`empty`、`code_fence`は不変。最終は9コード（empty・code_fence・json_no_object・json_prefix_brace・json_prefix_truncated・json_truncated・json_syntax・json_not_object・reply_missing）。`json_text_before`は現行の記述から消し、試験で廃止を固定。画面の固定の説明は、`json_no_object`「AIの返答に、JSONがありませんでした」、`json_prefix_brace`「AIの返答の前の文字に `{` があり、JSONとして取り出せませんでした」、`json_prefix_truncated`「AIの返答の前に文字があり、JSONが途中で終わっていました」。位置・長さ・返答の中身は外へ出さない。
 - **`json_text_after`の判断（実装で判断）**：先頭が`{`でオブジェクトが読めれば後ろは読み捨てるため、`json_text_after`が出る場面はなくなった。そこで**廃止**し、コード・画面（`PARSE_REASONS`は案F時点で7コード、案Gで9コード）・試験（廃止の固定）・仕様書を整合させた。
 - **不確実な点**（案Eの時点。BOSSから未回答のため、要確認のまま）：`{"reply": "abc`のような閉じない文字列は、`JSONDecodeError.pos`が文字列の開始位置（入力長未満）になるため、指定の`exc.pos >= len(text)`だけでは`json_syntax`になってしまう。そこで`Unterminated string`も`json_truncated`に含めた（BOSS指示の例`{"reply": "abc`を`json_truncated`にするため。要確認）。
@@ -815,7 +815,11 @@ CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER 
 
 **検証結果（案G後、generator実行）**：`ai.test_analysis_consult_reason`（7件）・`dateless_view`・`planning`・`column_guide`・`codegen`・`setup_ai_views`・`customer_view`の7モジュールの1コマンド実行で155件OK（skipped=2）。フロント`test-analysis-*.mjs` 7本OK（consult 24、fail 0）。evaluatorの再検証は未実施。
 
-**未完了**：案G後のGemmaでの実機確認（`json_no_object`・`json_prefix_brace`・`json_prefix_truncated`のどれが出るか）。`Unterminated string`を`json_truncated`に含めたことのBOSS確認。evaluatorによる検証。テスト用DBを要する`test_analysis_consult.py`は未実行。
+**検証結果（案G後、evaluator。2026-10-10）**：条件付き合格（指摘は仕様書の記述のみ。本節の追記で対応）。DBなしの8モジュールで196件OK（skipped=4）、フロント7本fail 0。実装を壊す変異7種（`json_no_object`判定の除去、prefix_truncated／prefix_braceの入れ替え、`Unterminated string`の除去、`{`を含む判定の除去、先頭`{`のjson_truncatedの置換、`from None`の除去、長さの混入）は、すべて試験が検出した。内容（`SECRET-12345`）が出る経路はなし。留意：`exc.msg`の`Unterminated string`はPythonの実装文言に依存（開発Python 3.13.5で確認、本番のバージョンは未確認）。前置きの文法の誤りでも、閉じない`"`があれば`json_prefix_truncated`になる。
+
+**実機の結果（2026-10-10。BOSSの実機）**：OpenRouterのGemma 4 26B A4Bで、案Gの理由コードは`json_no_object`と確定した。Gemmaは、JSONで返していない（`{`が全くない）。案Fは、Gemmaには効かなかった。Qwen・DeepSeekは相談で成功。**Gemmaは相談では使わない方向（BOSS判断待ち）**。案Fを残すか外すかもBOSS判断待ち（実装担当の推奨：残す）。
+
+**未完了**：Gemmaを相談で使わないかのBOSS判断。`Unterminated string`を`json_truncated`に含めたことのBOSS確認（要確認のまま）。本番での確認。テスト用DBを要する`test_analysis_consult.py`は未実行。
 
 **反映状況**：コード変更のみ。コミット・本番未反映。
 
@@ -869,6 +873,10 @@ GRANT SELECT ON `<db>`.`v_ai_calendar_day` TO 'pm_ai_reader'@'<readerのホス�
 
 **検証結果**（generator実行。DBなし・読み取りのみ）：`ai.test_analysis_calendar_day_view`・`customer_view`・`line_view`・`supplier_view`・`process_view`・`product_view`・`dateless_view`・`setup_ai_views`・`planning`・`column_guide`・`codegen`・`execution` の1コマンド実行で247件OK（skipped=4）。フロント `test-analysis-*.mjs` 7本OK（codegen 68・consult 24・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。既存6ビューの定義JSONのSHA-256は `8ca47c57…`（得意先ビュー実装時と同じ）のまま。evaluatorの検証は未実施。
 
-**未完了**：開発DBへの `migrate ai 0040` と、上の手順SQLの実行（**未実施**）。ビュー作成後の `SHOW COLUMNS FROM v_ai_calendar_day` と `ANALYSIS_COLUMN_TYPES` の照合、実データでの検証（行数＝`m_calendar_day`、全行×12列が列型の検査を通ること）。evaluatorによる検証。
+**検証結果（evaluator。2026-10-10）**：条件付き合格（不具合なし）。DBなしの12モジュール247件OK（skipped=4）、フロント7本fail 0、変異10通りすべて検出。開発DBの読み取りで、`m_calendar_day`＝8,479行、`m_calendar`をLEFT JOINしても8,479行（増えない）、`m_calendar`にない`calendar_id`の行は0件。
 
-**反映状況**：コード変更のみ。**開発DBへの `migrate` / `--apply` は未実施**。コミット・本番未反映。
+**開発DBでの実施（BOSS承認「はい」。2026-10-10）**：`migrate ai 0040` と、上の手順SQL（`m_calendar_day`の9列・`m_calendar`の4列のGRANT、`CREATE OR REPLACE DEFINER = pm_ai_view_owner@localhost SQL SECURITY DEFINER VIEW`）を実行した。`information_schema.VIEWS`で定義者`pm_ai_view_owner@localhost`・`DEFINER`を確認。`setup_ai_views --check` は要対応0件（`ai_reader`接続で`v_ai_calendar_day`が読める）。`ai_reader`接続で、件数8,479、`SHOW COLUMNS`の12列の型が`ANALYSIS_COLUMN_TYPES`と整合（bigint→BIGINT、varchar→VARCHAR、date→DATE、tinyint(1)→BIGINT、int→BIGINT）、非公開列`created_at`は読めないことを確認。「全行×12列が列型の検査を通ること」は、分析の実行経路ではまだ試していない。
+
+**未完了**：実機（AIを使う）での再試験。分析の実行経路での全行×12列の型検査。結合ビューのGRANT・定義者の付け替えを`setup_ai_views`で自動化するか（BOSS判断待ち）。
+
+**反映状況**：コミット済み（0259a4c4）。**開発DBへ反映済み**（`migrate ai 0040`＋手順SQLの手動実行。`setup_ai_views --apply`は使っていない＝結合ビューは対象外）。本番未反映。
