@@ -386,13 +386,13 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 
 **反映状況**：開発DBのビュー`v_ai_product`は作成済み（定義者`pm_ai_view_owner`）。コードは未コミット。本番未反映（ビュー作成・権限付与・migrate・push・ビルドなし）。
 
-## 13. 工程マスタのビュー `v_ai_process` の作成前確認（案。2026-10-10。BOSSの承認待ち）
+## 13. 工程マスタのビュー `v_ai_process` の作成前確認（2026-10-10。BOSS承認済み。公開9列。実装は§14）
 
 公開する列は、[AIマスタビュー確認明細](AIマスタビュー確認明細.md) §2 のBOSS判断のとおり。§4.1 の設計原則（1テーブル1ビュー・標準SQL・定義者は `pm_ai_view_owner`・列の説明は仕様書で確認）に従う。
 
 | 確認項目 | 内容 |
 |---|---|
-| 業務目的 | AIが、工程をコード・名前・ライン・外注か・管理単位・稼働率・設備台数で、分析・説明できるようにする。実績ビュー（工程実績・仕損・中断など）の工程IDから、工程の名前や属性を引く |
+| 業務目的 | AIが、工程をコード・名前・ライン・管理単位・稼働率・設備台数で、分析・説明できるようにする。実績ビュー（工程実績・仕損・中断など）の工程IDから、工程の名前や属性を引く |
 | 元テーブル | `m_process` の1つだけ。結合なし（行数46） |
 | 対象行 | 全行（絞り込みなし）。有効45・無効1。無効の工程は`is_active`で、AIが絞る |
 | 数値定義 | なし（マスタ）。件数は行数。`process_code`は46行で重複なし・空なし。**`process_name`は46行中45種類で、同じ名前の工程がある**（「レーザ1」が`0801`と`801`の2つ。`801`は削除予定でBOSS確認済み。時期は未定。AIの説明文には、工程の特定にはコードを使う、とだけ書き、重複の注意は書かない） |
@@ -442,7 +442,7 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 - 仕様書：`AI分析基盤仕様書.md`（公開ビュー一覧・型の対応）、`AI運用規約・AI用DB辞書.md`（§6.5-5を追加。既存の「品番・顧客コード・納入先コードの表記」は§6.5-6へ番号を繰り下げ）。
 
 **検証結果**（開発。読み取りのみ・テスト用DBなし）
-- 新規`ai.test_analysis_process_view` 9件を含め、`ai.test_analysis_process_view`・`product_view`・`dateless_view`・`execution`・`planning`・`column_guide`・`codegen`・`jobs`・`multi_period`・`period_warning`・`worker_version`の1コマンド実行で254件OK（skipped=4は既存の実launcher用等）。フロント`pm-ui/scripts/test-analysis-*.mjs` 7本OK（codegen 68・consult 23・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。
+- 新規`ai.test_analysis_process_view` 9件を含め、`ai.test_analysis_process_view`・`product_view`・`dateless_view`・`execution`・`planning`・`column_guide`・`codegen`・`jobs`・`multi_period`・`period_warning`・`worker_version`の1コマンド実行で254件OK（再検証の時点では、別セッションが追加した試験を含めて265件OK。skipped=4は既存の実launcher用等）。フロント`pm-ui/scripts/test-analysis-*.mjs` 7本OK（codegen 68・consult 23・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。
 - 開発DBの実データ（`pm_ai_reader`接続、`SELECT <9列> FROM m_process`）：46行・有効45・`process_code`の重複なし。全46行×9列が`_cell`を通る（エラー0件）。`m_process`のSHOW COLUMNS（bigint・varchar・tinyint(1)・int unsigned・decimal(5,2)）は§13.1の対応と一致。
 
 **未完了**

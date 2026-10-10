@@ -265,7 +265,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（32列）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
 - 権限の付与は手動SQL（計画書 §9.3）。
 
-### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用は未実施。本番も未反映）
+### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
 
 | ビュー | 列 | 有効条件 | AI利用 |
 |---|---|---|---|
@@ -274,7 +274,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 個人情報の列は含まない。`process_code` は先頭ゼロを含む文字列（例 `0801`）で、工程の特定に使う。
 - 列の意味は仕様書で確認できた範囲だけ書く（計画書 §13.2）。`operating_rate`（稼働率(%)）・`two_person_only`（2人1設備専用）は項目名のみで、業務上の定義は未確認。
 - `ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（9列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_process` の許可（`BASE_SQL_SCHEMA['m_process']`・`SCREEN_SQL_TABLES`）は置き換えず、ビューの追加のみ。`TERM_COLUMNS` は未変更。
-- 権限の付与・定義者の付け替えは手動SQL（計画書 §9.3 に倣う。`pm_ai_view_owner` へ `m_process` の9列の列単位 `SELECT`）。開発DBでは未実施。
+- 権限の付与・定義者の付け替えは手動SQL（計画書 §9.3 に倣う。`pm_ai_view_owner` へ `m_process` の9列の列単位 `SELECT`）。開発DBでは実施済み（2026-10-10。BOSS承認。本番は未実施）。
 
 ### 6.5-6 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
 

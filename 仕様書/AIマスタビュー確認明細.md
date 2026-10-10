@@ -64,7 +64,7 @@
 | process_code | 文字20 | 工程コード | 公開 | |
 | process_name | 文字50 | 工程名 | 公開 | |
 | line_id | 外部キー・NULL可 | ライン | 公開 | |
-| is_outsource | 真偽 | 外注工程 | 非公開（BOSS変更 2026-10-10。ほとんどが0のため。外作工程は process_code の G で見分けられる） | |
+| is_outsource | 真偽 | 外注工程 | 非公開（BOSS変更 2026-10-10。ほとんどが0のため） | |
 | management_unit | 文字10 | 管理単位 | 公開 | |
 | operating_rate | 小数 | 稼働率(%) | 公開 | |
 | equipment_count | 整数 | 設備台数 | 公開 | |
