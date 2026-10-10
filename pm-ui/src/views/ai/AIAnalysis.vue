@@ -67,15 +67,17 @@
       <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。改良の準備中は、テンプレートから分析案を作れません(追加の指示を外すと、作れます)。
         <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
       <div class="period">
-        <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
-        <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan"></label>
+        <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan || noPeriod"></label>
+        <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan || noPeriod"></label>
+        <button type="button" :disabled="!canEdit || !!busy || !!plan" :aria-pressed="noPeriod" @click="toggleNoPeriod">{{ noPeriod ? '期間なし（解除する）' : '期間なし' }}</button>
+        <small v-if="noPeriod">期間なし: 日付のないビュー（マスタなど）専用です。期間は今日（{{ dateFrom }}）の1日に固定されます。日付のあるビューは今日の分だけになります。</small>
       </div>
       <template v-if="!plan">
         <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
         <section v-if="selectedProvider?.external && externalPreview" class="dataset">
           <h2>社外送信前の確認</h2>
           <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
-          <p>期間: {{ externalPreview.date_from }} ～ {{ externalPreview.date_to }}</p>
+          <p>期間: {{ noPeriod ? '期間なし（日付のないビュー用。今日 ' + externalPreview.date_from + ' の1日に固定）' : externalPreview.date_from + ' ～ ' + externalPreview.date_to }}</p>
           <p class="external-purpose">送信する目的文: {{ externalPreview.purpose }}</p>
           <div v-if="externalPreview.reference" class="external-reference">
             <p>参考のテンプレート（置換後）: テンプレート{{ externalPreview.reference.id }}「{{ externalPreview.reference.content.name }}」（版{{ externalPreview.reference.version }}）</p>
@@ -133,6 +135,7 @@
             <p>ビュー: {{ dataset.view }} / 必要フィールド: {{ dataset.fields.join('、') }}</p>
             <p v-if="plan.preview">対象行数: {{ formatNumber(plan.preview.datasets.find(item => item.view === dataset.view)?.rows) }}行</p>
             <p v-if="plan.preview && plan.preview.datasets.find(item => item.view === dataset.view)?.period_applied === false">期間: 適用しない（全行）</p>
+            <p v-if="noPeriod && plan.preview && plan.preview.datasets.find(item => item.view === dataset.view)?.period_applied === true" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 「期間なし」を選びましたが、このビューは日付があり、今日（{{ plan.proposal.date_from }}）の1日だけに絞られます。全期間ではありません。「目的・期間を変更して作り直す」で期間を指定してください。</p>
           </div>
           <small>id: 重複・欠落の確認用に、分析用コンテナへ必ず送ります。社外AIには送りません。</small>
           <p>追加資料: なし（資料の取込みは未実装）</p>
@@ -247,6 +250,18 @@ const purpose = ref('')
 const source = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
+// 期間なし(日付のないビュー用、BOSS承認 2026-10-10 案1): 期間は今日(日替わり8時)の1日に固定し、日付ありのビューが選ばれたら分析案で警告する
+const noPeriod = ref(false)
+function businessDateString() {
+  const now = new Date()
+  if (now.getHours() < 8) now.setDate(now.getDate() - 1)  // 日替わりは8:00
+  const pad = value => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`  // toISOString()はUTCへずれるため使わない
+}
+function toggleNoPeriod() {
+  noPeriod.value = !noPeriod.value
+  if (noPeriod.value) { dateFrom.value = businessDateString(); dateTo.value = dateFrom.value } else { dateFrom.value = ''; dateTo.value = '' }
+}
 const options = ref(null)
 const provider = ref('')
 const model = ref('')
@@ -502,7 +517,7 @@ const formatDate = value => value?.replace('T', ' ').slice(0, 19) || ''
 // AIの文案を、目的欄・期間欄へ取り込む(分析案は自動では作らない)
 function applyConsult(draft) {
   if (draft.purpose) purpose.value = draft.purpose
-  if (draft.date_from && draft.date_to) { dateFrom.value = draft.date_from; dateTo.value = draft.date_to }
+  if (draft.date_from && draft.date_to) { noPeriod.value = false; dateFrom.value = draft.date_from; dateTo.value = draft.date_to }
 }
 // テンプレートから作成した分析案を、現在の分析案にする(AIは使わない。承認・件数確認・試行・コード承認は、この画面で取り直す)
 function useTemplatePlan(created) {
@@ -557,6 +572,7 @@ function startRefinement({ instruction, run_id: runId } = {}) {
   if (!props.canEdit || executionActive.value || !proposal || typeof instruction !== 'string' || !instruction.trim()) return
   const base = { purpose: proposal.purpose, from: proposal.date_from, to: proposal.date_to }
   resetPlan() // 古い結果は画面から消える。AIの選択(プロバイダ・モデル)は、そのまま引き継ぐ
+  noPeriod.value = false
   purpose.value = base.purpose; dateFrom.value = base.from; dateTo.value = base.to
   refinement.value = { instruction: instruction.trim(), from_run_id: runId ?? null }
 }
