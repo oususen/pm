@@ -26,13 +26,20 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_customer': 'm_customer',
 }
 
-# 結合を含み、定義がマイグレーション(0012〜0014)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
-EXISTING_JOIN_VIEWS = ('v_ai_shipment', 'v_ai_purchase_receipt')
+# 結合を含み、定義がマイグレーション(0012〜0014・0040)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
+EXISTING_JOIN_VIEWS = ('v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day')
 
 # 単純なマスタビュー以外のビューが、同じ元テーブルから使う列。owner のこの列権限は REVOKE しない。
 # v_ai_shipment が m_product の id・product_code・product_name を使う(t_shipment_actual の列は対象外)。
+# v_ai_calendar_day(m_calendar_day に m_calendar を LEFT JOIN。マイグレーション0040)が、
+# m_calendar_day の9列と m_calendar の4列を使う。
 OTHER_VIEW_COLUMNS = {
     'm_product': {'id', 'product_code', 'product_name'},
+    'm_calendar_day': {
+        'id', 'calendar_id', 'target_date', 'is_working_day', 'is_delivery_day', 'is_order_day',
+        'is_holiday_work', 'work_minutes', 'work_pattern_id',
+    },
+    'm_calendar': {'id', 'calendar_code', 'calendar_name', 'calendar_type'},
 }
 
 READER_USER = 'pm_ai_reader'

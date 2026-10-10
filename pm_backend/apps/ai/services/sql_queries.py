@@ -61,6 +61,11 @@ BASE_SQL_SCHEMA = {
     'v_ai_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type', 'calendar_id'),
     # 得意先マスタのビュー(AI用ビュー作成計画 §21。created_at・updated_at は非公開)
     'v_ai_customer': ('id', 'customer_code', 'customer_name', 'short_name', 'calendar_id', 'is_active'),
+    # 稼働カレンダのビュー(AI用ビュー作成計画 §24。m_calendar_day に m_calendar を LEFT JOIN。note・created_at・updated_at と、m_calendar の他の列は非公開)
+    'v_ai_calendar_day': (
+        'id', 'calendar_id', 'calendar_code', 'calendar_name', 'calendar_type', 'target_date',
+        'is_working_day', 'is_delivery_day', 'is_order_day', 'is_holiday_work', 'work_minutes', 'work_pattern_id',
+    ),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -125,6 +130,15 @@ TABLE_NOTES = {
         'customer_name は得意先名(会社名)、short_name は略称。'
         'calendar_id は得意先のカレンダ(稼働カレンダの calendar_id と結べる)。'
         'is_active は有効(1)・無効(0)。'
+    ),
+    'v_ai_calendar_day': (
+        '稼働カレンダ(m_calendar_day にカレンダマスタ m_calendar の属性を付けたビュー)。1行=1つのカレンダの1日。日別・期間の集計は target_date を使う。'
+        'calendar_id はカレンダのID(ラインビュー v_ai_line・仕入先ビュー v_ai_supplier・得意先ビュー v_ai_customer の calendar_id と結べる)、'
+        'calendar_code はカレンダコード、calendar_name はカレンダ名。'
+        'calendar_type は INTERNAL=社内、SUPPLIER=仕入れ、COMPANY=会社、CUSTOMER=顧客、OTHER=その他(各区分の業務上の意味は未確認)。'
+        'is_working_day は稼働日(1)か否(0)か。is_delivery_day は納入日、is_order_day は発注日、is_holiday_work は休日出勤で、いずれも 1 か 0。'
+        'work_minutes は稼働分(分。空の行がありうる)、work_pattern_id は勤務パターンのID(空の行がありうる)。'
+        'is_delivery_day・is_order_day・is_holiday_work・work_pattern_id の業務上の意味は未確認(項目名のみ)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

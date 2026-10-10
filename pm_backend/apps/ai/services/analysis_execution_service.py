@@ -85,6 +85,13 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'customer_code': 'VARCHAR', 'customer_name': 'VARCHAR', 'short_name': 'VARCHAR',
         'calendar_id': 'BIGINT', 'is_active': 'BIGINT',
     },
+    # 稼働カレンダ(m_calendar_day・m_calendarのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_calendar_dayと照合する)
+    # bool列(tinyint(1))はBIGINT(0/1)、work_minutes(int)はBIGINT、target_date(date)はDATE
+    'v_ai_calendar_day': {
+        'id': 'BIGINT', 'calendar_id': 'BIGINT', 'calendar_code': 'VARCHAR', 'calendar_name': 'VARCHAR',
+        'calendar_type': 'VARCHAR', 'target_date': 'DATE', 'is_working_day': 'BIGINT', 'is_delivery_day': 'BIGINT',
+        'is_order_day': 'BIGINT', 'is_holiday_work': 'BIGINT', 'work_minutes': 'BIGINT', 'work_pattern_id': 'BIGINT',
+    },
 }
 
 

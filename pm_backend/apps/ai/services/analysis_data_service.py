@@ -100,6 +100,21 @@ ANALYSIS_VIEWS = {
             'is_active=有効(1)か無効(0)か。'
         ),
     },
+    # 稼働カレンダ(カレンダの日ごと)。日付の列target_dateがあるため、date_field='target_date'(期間で絞る)。数量の列はないため、quantity_field=None(AI用ビュー作成計画 §24)。
+    'v_ai_calendar_day': {
+        'label': '稼働カレンダ', 'date_field': 'target_date', 'quantity_field': None,
+        'description': (
+            '1行は1つのカレンダの1日(カレンダ日)。日別・期間の集計は日付target_dateを使い、指定した期間の行だけが対象。'
+            'カレンダのコード・名称・区分は、カレンダマスタから付けた属性(行数は変わらない)。'
+            '列の意味: id=カレンダ日のID、calendar_id=カレンダのID(ラインビューv_ai_line・仕入先ビューv_ai_supplier・得意先ビューv_ai_customerのcalendar_idと結べる)、'
+            'calendar_code=カレンダコード、calendar_name=カレンダ名、'
+            'calendar_type=カレンダの区分(INTERNAL=社内、SUPPLIER=仕入れ、COMPANY=会社、CUSTOMER=顧客、OTHER=その他。各区分の業務上の意味は未確認)、'
+            'target_date=対象日、is_working_day=稼働日か(1=稼働日、0=稼働日ではない)、is_delivery_day=納入日か(1か0)、'
+            'is_order_day=発注日か(1か0)、is_holiday_work=休日出勤か(1か0)、work_minutes=稼働分(分。空の行がありうる)、'
+            'work_pattern_id=勤務パターンのID(空の行がありうる)。'
+            'is_delivery_day・is_order_day・is_holiday_work・work_pattern_idの業務上の意味は未確認(項目名のみ)。'
+        ),
+    },
 }
 
 

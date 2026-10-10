@@ -818,3 +818,57 @@ CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER 
 **未完了**：案G後のGemmaでの実機確認（`json_no_object`・`json_prefix_brace`・`json_prefix_truncated`のどれが出るか）。`Unterminated string`を`json_truncated`に含めたことのBOSS確認。evaluatorによる検証。テスト用DBを要する`test_analysis_consult.py`は未実行。
 
 **反映状況**：コード変更のみ。コミット・本番未反映。
+
+## 24. 稼働カレンダのビュー `v_ai_calendar_day` の実装記録（2026-10-10。BOSS承認済み。実装済み・evaluator未検証）
+
+**承認内容**：公開12列、`m_calendar_day` を主とした `m_calendar` の LEFT JOIN、非公開列、元テーブル `m_calendar_day` の許可（4列）は置き換えずビューの追加のみ、説明に具体的なカレンダコード・名称・件数を書かない。
+
+**元と結合**：`m_calendar_day`（別名 `d`）を主とし、`LEFT JOIN m_calendar c ON c.id = d.calendar_id`。結合の理由は**マスタ属性（カレンダのコード・名称・区分）の付与のみ**。結合先は `m_calendar` の主キー（`id`）のため、1対1で行数は `m_calendar_day` と変わらない。WHEREなし（ビューとしては全行）。標準SQLのみ（バッククォート・DEFINER・SQL SECURITY・DB修飾なし）。
+
+**公開列（12列。この順）**
+| # | 列 | 元 | ANALYSIS_COLUMN_TYPES |
+|---|---|---|---|
+| 1 | `id` | `d.id` | BIGINT |
+| 2 | `calendar_id` | `d.calendar_id` | BIGINT |
+| 3 | `calendar_code` | `c.calendar_code` | VARCHAR |
+| 4 | `calendar_name` | `c.calendar_name` | VARCHAR |
+| 5 | `calendar_type` | `c.calendar_type` | VARCHAR |
+| 6 | `target_date` | `d.target_date` | DATE |
+| 7 | `is_working_day` | `d.is_working_day`（真偽値） | BIGINT（0/1） |
+| 8 | `is_delivery_day` | `d.is_delivery_day`（真偽値） | BIGINT（0/1） |
+| 9 | `is_order_day` | `d.is_order_day`（真偽値） | BIGINT（0/1） |
+| 10 | `is_holiday_work` | `d.is_holiday_work`（真偽値） | BIGINT（0/1） |
+| 11 | `work_minutes` | `d.work_minutes`（稼働分。分。空を許す） | BIGINT |
+| 12 | `work_pattern_id` | `d.work_pattern_id`（勤務パターンのID。空を許す） | BIGINT |
+
+型は、モデル（`masters/models.py`）とマイグレーションから導出（`BigAutoField`・外部キー→bigint、`BooleanField`→tinyint(1)→BIGINT、`IntegerField`→int→BIGINT、`DateField`→DATE、`CharField`→VARCHAR）。ビュー作成後に `SHOW COLUMNS FROM v_ai_calendar_day` と照合する（未実施）。
+
+**非公開（ビューに含めない）**：`m_calendar_day` の `note`・`created_at`・`updated_at`。`m_calendar` の上記3列（`calendar_code`・`calendar_name`・`calendar_type`）以外の列。
+
+**未決定扱いの `m_calendar` の列**：`is_line_assignable`（ライン割当可）・`is_supplier_assignable`（仕入先割当可）・`description`（説明）・`created_by`・`updated_by`・`created_at`・`updated_at`。公開するかBOSS判断が未決定のため、非公開。カレンダマスタ単独のビュー `v_ai_calendar` は後回し（今回は作らない）。
+
+**列の意味（確認できた範囲だけ。推測は書かない）**：稼働日・納入日・発注日・休日出勤は真偽値（モデルの項目名）。`work_minutes` は稼働分（分）。`calendar_type` の選択肢はモデルのラベル（INTERNAL=社内、SUPPLIER=仕入れ、COMPANY=会社、CUSTOMER=顧客、OTHER=その他）。`calendar_id` は line／supplier／customer ビューの `calendar_id` と結べる。各区分、および納入日・発注日・休日出勤・勤務パターンの業務上の意味は「未確認」と説明に書いた。説明に具体的なカレンダコード・名称・件数・期間は書いていない。
+
+**実装内容**
+- `pm_backend/apps/ai/migrations/0040_ai_calendar_day_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_calendar_day`、逆は `DROP VIEW IF EXISTS v_ai_calendar_day`。依存は `ai 0039_ai_customer_view` と `masters 0086_add_is_order_day_to_calendar_day`（元の列の追加：`calendar_type`=0057、`work_pattern_id`=0016、`is_holiday_work`=0074、`is_delivery_day`=0075、`is_order_day`=0086）。`makemigrations` は不要（RunSQLのみ）。
+- `sql_queries.py`：`BASE_SQL_SCHEMA` に `v_ai_calendar_day`（12列）、`TABLE_NOTES` に説明を追加。既存の `m_calendar_day`（4列）と `SCREEN_SQL_TABLES` は変更していない。
+- `analysis_data_service.py`：`ANALYSIS_VIEWS` に `v_ai_calendar_day`（label=稼働カレンダ、`date_field='target_date'`、`quantity_field=None`）。
+- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES` に12列。
+- `setup_ai_views.py`：`EXISTING_JOIN_VIEWS` に `v_ai_calendar_day` を追加（`v_ai_shipment` と同様の結合ビュー扱い＝再作成せず `--check` で定義者を表示）。`OTHER_VIEW_COLUMNS` に `m_calendar_day`（9列）・`m_calendar`（4列）を追加。**このコマンドは、結合ビューの GRANT・定義者の付け替えを実行しない**（下記の手順SQLを手動で実行）。
+- 試験：`apps/ai/test_analysis_calendar_day_view.py` 新規。`test_setup_ai_views.py` に結合ビュー扱いの試験を1件追加。
+
+**既存の customer／line との違い（期間指定の挙動）**：`date_field='target_date'`（日付あり）のため、**期間で絞って取得する**（`WHERE target_date >= 開始 AND target_date <= 終了`）。`fields` に `target_date` を含める必要がある（検証でエラーになる）。日付なしの customer・line・supplier・product・process は期間で絞らず全行。承認画面の件数は `period_applied=true`。
+
+**手順SQL（`pm_ai_view_owner` への列権限と定義者の付け替え。MySQL固有のため、マイグレーションではなく手動。実行はBOSS。`<db>`は接続先のDB名。管理者で実行）**
+```sql
+GRANT SELECT (`id`, `calendar_id`, `target_date`, `is_working_day`, `is_delivery_day`, `is_order_day`, `is_holiday_work`, `work_minutes`, `work_pattern_id`) ON `<db>`.`m_calendar_day` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`id`, `calendar_code`, `calendar_name`, `calendar_type`) ON `<db>`.`m_calendar` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_calendar_day` AS SELECT d.`id`, d.`calendar_id`, c.`calendar_code`, c.`calendar_name`, c.`calendar_type`, d.`target_date`, d.`is_working_day`, d.`is_delivery_day`, d.`is_order_day`, d.`is_holiday_work`, d.`work_minutes`, d.`work_pattern_id` FROM `<db>`.`m_calendar_day` d LEFT JOIN `<db>`.`m_calendar` c ON c.`id` = d.`calendar_id`;
+GRANT SELECT ON `<db>`.`v_ai_calendar_day` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+```
+
+**検証結果**（generator実行。DBなし・読み取りのみ）：`ai.test_analysis_calendar_day_view`・`customer_view`・`line_view`・`supplier_view`・`process_view`・`product_view`・`dateless_view`・`setup_ai_views`・`planning`・`column_guide`・`codegen`・`execution` の1コマンド実行で247件OK（skipped=4）。フロント `test-analysis-*.mjs` 7本OK（codegen 68・consult 24・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。既存6ビューの定義JSONのSHA-256は `8ca47c57…`（得意先ビュー実装時と同じ）のまま。evaluatorの検証は未実施。
+
+**未完了**：開発DBへの `migrate ai 0040` と、上の手順SQLの実行（**未実施**）。ビュー作成後の `SHOW COLUMNS FROM v_ai_calendar_day` と `ANALYSIS_COLUMN_TYPES` の照合、実データでの検証（行数＝`m_calendar_day`、全行×12列が列型の検査を通ること）。evaluatorによる検証。
+
+**反映状況**：コード変更のみ。**開発DBへの `migrate` / `--apply` は未実施**。コミット・本番未反映。

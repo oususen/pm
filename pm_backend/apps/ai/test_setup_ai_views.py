@@ -241,6 +241,30 @@ class SetupAiViewsTests(SimpleTestCase):
         run(cursor, '--apply', '--views', *cmd.EXISTING_JOIN_VIEWS)
         self.assertEqual(cursor.executed, [])
 
+    def test_calendar_day_view_is_join_view_checked_but_not_recreated(self):
+        # v_ai_calendar_day は v_ai_shipment と同様の結合ビュー: 再作成・GRANT・REVOKEの対象にせず、--check で定義者を表示する
+        view = 'v_ai_calendar_day'
+        self.assertIn(view, cmd.EXISTING_JOIN_VIEWS)
+        self.assertNotIn(view, cmd.SIMPLE_MASTER_VIEWS)
+        privileges, views = initial_state()
+        views[view] = ('root@localhost', 'DEFINER', ('id',))
+        cursor = FakeCursor(privileges, views)
+        run(cursor, '--apply', '--views', view)
+        self.assertEqual(cursor.executed, [])
+        cursor = FakeCursor(privileges, views)
+        output = run(cursor, '--check', '--views', view)
+        self.assertIn(f'{view}: 定義者=root@localhost', output)
+        self.assertIn('[要対応: 期待は', output)
+        self.assertEqual(cursor.executed, [])
+        # 全体の --apply でも、このビューに触れるSQLは出ない
+        cursor = FakeCursor(*initial_state())
+        cursor.views[view] = ('root@localhost', 'DEFINER', ('id',))
+        run(cursor, '--apply')
+        self.assertFalse(any(view in s or 'm_calendar' in s for s in cursor.executed))
+        # 結合ビューが使う元テーブルの列は、wanted_columns に含まれる(単純なマスタビューが同じ表を使う場合に REVOKE されない)
+        self.assertEqual(len(cmd.wanted_columns('m_calendar_day')), 9)
+        self.assertEqual(cmd.wanted_columns('m_calendar'), {'id', 'calendar_code', 'calendar_name', 'calendar_type'})
+
     def test_other_view_columns_are_not_revoked(self):
         # v_ai_product から product_code を外しても、v_ai_shipment が使うため REVOKE しない
         reduced = tuple(c for c in BASE_SQL_SCHEMA['v_ai_product'] if c != 'product_code')

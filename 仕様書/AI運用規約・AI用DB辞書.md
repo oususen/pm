@@ -318,6 +318,19 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 確認元（公開ビューが正）: 品番=`v_ai_product`、納入先コード=`v_ai_shipment` の実際の値（ともに読み取り専用の分析用接続）、顧客コード=`m_customer`（顧客マスタのビューは未作成。作成後は公開ビューへ切り替える）。マスタ・ビューにない値、および大文字小文字だけが違う値が複数あって決められない納入先コードは、拒否する（代わりの値は使わない）。
 - 先頭ゼロ・全角半角の違いは対象外。詳細は `AI分析基盤仕様書.md` 5.3-5c。
 
+### 6.5-10 稼働カレンダ（`v_ai_calendar_day`。2026-10-10 実装。開発DBへの `migrate`・`setup_ai_views --apply` は未実施。本番は未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_calendar_day`（`ai/0040`で作成） | `id`, `calendar_id`, `calendar_code`, `calendar_name`, `calendar_type`, `target_date`, `is_working_day`, `is_delivery_day`, `is_order_day`, `is_holiday_work`, `work_minutes`, `work_pattern_id`（12列） | `m_calendar_day` 全行（WHEREなし）に `m_calendar` を `LEFT JOIN m_calendar c ON c.id = d.calendar_id`（結合先の主キー。行数は変わらない。マスタ属性の付与のみ）。ただしAI分析では日付列 `target_date` で期間を絞る。非公開（ビューに含めない）: `m_calendar_day` の `note`・`created_at`・`updated_at`、`m_calendar` の上記3列（コード・名称・区分）以外の列 | 読み取り専用SQLで、カレンダごとの日別の稼働日・納入日・発注日・休日出勤・稼働分の確認。`calendar_id` で `v_ai_line`・`v_ai_supplier`・`v_ai_customer` と結べる |
+
+- 個人情報の列は含まない。`is_working_day`・`is_delivery_day`・`is_order_day`・`is_holiday_work` は真偽値（1/0）、`work_minutes` は稼働分（分）。
+- `calendar_type` の値（モデルのラベル）: `INTERNAL`=社内、`SUPPLIER`=仕入れ、`COMPANY`=会社、`CUSTOMER`=顧客、`OTHER`=その他。各区分の業務上の意味、`is_delivery_day`・`is_order_day`・`is_holiday_work`・`work_pattern_id` の業務上の意味は未確認（項目名のみ）。
+- 説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES`）には、具体的なカレンダコード・名称・件数・期間を書かない。
+- `ANALYSIS_VIEWS`（`date_field=target_date`＝期間で絞る。日付なしのマスタビューと違う点）・`ANALYSIS_COLUMN_TYPES`（12列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_calendar_day` の許可（4列。`BASE_SQL_SCHEMA['m_calendar_day']`・`SCREEN_SQL_TABLES`）は置き換えず、ビューの追加のみ。`TERM_COLUMNS` は未変更。
+- 未決定: `m_calendar` の他の列（`is_line_assignable`・`is_supplier_assignable`・`description`・`created_by`・`updated_by`・`created_at`・`updated_at`）は、公開するかBOSS判断が未決定のため非公開。カレンダマスタ単独のビュー `v_ai_calendar` は後回し。
+- 権限の付与・定義者の付け替えは、`setup_ai_views` では行わない（結合ビューは `v_ai_shipment` と同様に再作成しない。`--check` で定義者を表示するだけ）。手順SQLは計画書 §24。未実施（BOSS承認のもとで実行）。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |
