@@ -264,6 +264,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 空（NULL）がある列: `unit_price` 2,386行、`line_id` 1,833行、`process_id` 2,003行、`category` 16行。`category` の6種（ASSEMBLY・OUTSOURCED・SINGLE・PURCHASED・UNKNOWN・MATERIAL）と `management_unit`（DAY・MINUTE・空）の業務上の意味は未確認。
 - `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（30列。当初32列、2026-10-10に修正）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
 - 権限の付与は手動SQL（計画書 §9.3）。
+- 定義者の付け替え・列権限の付与は、管理コマンド `python manage.py setup_ai_views`（既定は表示のみ。`--apply` で実行、管理者で実行。`--check` で確認）でも行える。対象は単純なマスタビュー4つ（`v_ai_product`・`v_ai_process`・`v_ai_line`・`v_ai_supplier`）。手順SQLは、コマンドが実行するSQLの記録として残す（計画書 §20）。ビューの作り直しは定義者・SECURITY_TYPE・列順の違いだけで判断し、ビュー本体（WHERE・別名・列式）の違いは検出しない。`--check` は元テーブルへの表全体のSELECTも要対応にする（DB全体・グローバルの権限は検出しない）。`--reader-host` を指定したときだけ、`pm_ai_reader` へビューのSELECTを付与する。`v_ai_supplier` は仕入先ビューのコミットと同時に反映する。
 
 ### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
 

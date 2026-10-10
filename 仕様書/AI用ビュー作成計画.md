@@ -105,6 +105,7 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
    - ビューを新規に作る・変更するたびに、同じ手順を行う。手順SQLは、ビューごとに、各ビューの節（例 §9.3）へ書く。
    - 確認：`information_schema.VIEWS` の `DEFINER` が `pm_ai_view_owner@localhost` であること、`pm_ai_reader` の接続でビューが読めること、非公開列が読めないこと。
    - 理由：公開列だけに権限を絞る設計を効かせるため。定義者が存在しないとエラー1449でビューが読めなくなるため、`root` のように環境で変わるユーザーを使わない。
+   - 手順は、`python manage.py setup_ai_views --apply`（管理者で実行）で行える。手順SQL（§9.3・§14.1・§16.1・§19.1）は、コマンドが実行するSQLの記録として残す（§20）。
    - 実施状況：`v_ai_product` は開発DBで実施済み（2026-10-10。定義者 `pm_ai_view_owner@localhost`、公開32列の列権限（その後、2026-10-10 BOSS判断で30列へ修正。0037・§9.3参照）、`pm_ai_reader` の接続で件数2,850・有効2,808、`image_url` は読めないことを確認）。本番は未実施（BOSSが実行）。
    - PostgreSQLへ移行した後は、定義者の考え方を「所有者を専用ロールにする」に読み替える（§9.3参照）。
 
@@ -572,7 +573,6 @@ SELECT COUNT(*), SUM(is_active), COUNT(DISTINCT line_code) FROM `pm_db`.`v_ai_li
 SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 ```
 
-## 18. 日付なしビューの指示文の見直し（2026-10-10。BOSS承認済み。Codex第2回レビュー指摘1への対応。実装済み・evaluator未検証）
 ## 17. 仕入先マスタのビュー `v_ai_supplier` の作成前確認（2026-10-10。BOSS承認済み。実装は§19。§8を置き換える）
 
 公開する列は、[AIマスタビュー確認明細](AIマスタビュー確認明細.md) §4 のBOSS判断のとおり。§4.1 の設計原則（1テーブル1ビュー・標準SQL・定義者は `pm_ai_view_owner`・列の説明は仕様書で確認）に従う。§8（2026-10-08）の草案は、「入荷ビューに仕入先の列を足さず、AIにビュー同士を結合させる」という方針で書かれており、今回の原則（結合は、マスタの属性を付けるときだけ可。実績同士は不可）と矛盾しない範囲で引き継ぐ。
@@ -627,6 +627,7 @@ SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 - **ルーティング工程**：ラインの種別は、社内4,707、購買2,970、外作1。`supplier_id`を持つのは534行。
 - **AIへの説明**：`v_ai_line`と`v_ai_supplier`の説明に、「購買ラインの`line_code`＝仕入先の`supplier_code`（同じ文字列で結べる。先頭ゼロを含む）」を書く。
 
+## 18. 日付なしビューの指示文の見直し（2026-10-10。BOSS承認済み。Codex第2回レビュー指摘1への対応。実装済み・evaluator未検証）
 
 **背景**：日付なしビュー（`v_ai_product`・`v_ai_process`・`v_ai_line`）に対し、AIが`created_at BETWEEN {{period_from}} AND {{period_to}}`のような日付の絞り込みを付けても、生成物の検査では拒否できない。BOSS判断：日付なしビューの日付の列で絞る分析は正しい分析であり、検査は追加しない。代わりに指示文を、日付の列で絞る分析を禁止しない形に直し、「必ず`parameters_unused`で拒否される」という説明を訂正する。
 
@@ -682,3 +683,34 @@ SHOW COLUMNS FROM `pm_db`.`v_ai_supplier`;  -- 5列（bigint・varchar・varchar
 SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 ```
 
+## 20. 管理コマンド setup_ai_views（2026-10-10。BOSS承認: 案B。実装済み・evaluator未検証）
+
+**目的**：§4.1の9番の手順（列権限の付与・定義者の付け替え）を、管理者が `migrate` の後に1回実行する管理コマンドにまとめる。MySQL固有の処理はこのコマンドに閉じ込める（マイグレーションは標準SQLのまま）。
+
+**実装内容**（`pm_backend/apps/ai/management/commands/setup_ai_views.py`）
+- 対象：定数 `SIMPLE_MASTER_VIEWS`（`v_ai_product`→`m_product`、`v_ai_process`→`m_process`、`v_ai_line`→`m_line`、`v_ai_supplier`→`m_supplier`）。列は `BASE_SQL_SCHEMA[ビュー名]`（列の単一の情報源）。新しい単純なマスタビューは、この定数に1行足す。
+- `v_ai_shipment`・`v_ai_purchase_receipt` は再作成しない（定義はマイグレーション0012〜0014）。`--check` で定義者を表示するだけ。
+- 1ビューごとに ①`GRANT SELECT (列) ON 元テーブル TO owner`（足りない列だけ）②`CREATE OR REPLACE DEFINER = owner SQL SECURITY DEFINER VIEW`（定義者・SECURITY_TYPE・列が期待と違うときだけ）。全ビューの後に ③owner の元テーブル列権限のうち、同じ元テーブルを使う全ビューの公開列の和集合（`OTHER_VIEW_COLUMNS`：`m_product` の `id`・`product_code`・`product_name` ＝ v_ai_shipment 用、を含む）にない列を `REVOKE`。現在の権限は `information_schema.COLUMN_PRIVILEGES` から読み、差分だけを実行（冪等）。
+- MySQL以外では「何もしない」と表示して終了（エラーにしない）。識別子はバッククォートで囲み、バッククォートを含む名前は拒否。ユーザー名・ホスト名は `re.fullmatch(r'[A-Za-z0-9_.%-]+')` で検査（末尾の改行も拒否）。
+- 権限不足などで失敗したときは、失敗したSQLと実行済みのSQLを表示し、「管理者（rootなど）で実行する」ことを示して非0で終了。
+- ビューの作り直し（CREATE）は、定義者・SECURITY_TYPE・列順のどれかが期待と違うときだけ実行する。**ビュー本体（WHERE・別名・列式・元テーブル）の違いは検出しない**（現在の4ビューは全行・結合なし・別名なしのため、実害は小さい。将来、本文の比較を足す余地がある）。
+- `--check` は、owner が元テーブルに**表全体のSELECT**を持つ場合も「要対応」にする（承認内容になかった追加。表示だけで、自動では直さない。列権限がないので REVOKE も出ない）。DB全体（`SCHEMA_PRIVILEGES`）・グローバル（`USER_PRIVILEGES`）の権限は、検出しない設計。
+- `--reader-host`：指定したときだけ、`pm_ai_reader` へ各ビューの `GRANT SELECT` を実行する。指定しなければ実行せず、表示だけ（開発のreaderはDB全体のSELECTを持ち、本番のホスト部は未確認のため）。
+- ユーザー名・ホスト名は `re.fullmatch` で検査するため、末尾の改行も拒否する。
+- 本節が参照する仕入先ビュー（`v_ai_supplier`・§19.1・マイグレーション0038）は、仕入先ビューのコミットと同時に反映する（先にコミットし、そのあとにこのコマンドをコミットする案B。BOSS承認 2026-10-10）。
+
+**使い方**（`pm_backend` で、管理者のDB接続で実行）
+```
+python manage.py setup_ai_views                 # 既定: 実行予定のSQLを表示するだけ
+python manage.py setup_ai_views --apply         # 実行（その後に自動で --check）
+python manage.py setup_ai_views --check         # 読み取りのみの確認
+```
+オプション：`--owner`（既定 `pm_ai_view_owner`）、`--owner-host`（既定 `localhost`）、`--views`（対象を絞る）、`--reader-host`（指定したときだけ `pm_ai_reader` へビューのSELECTを付与。既定では実行しない。本番のホスト部は `SHOW GRANTS` で確認してから指定）。
+`--check` は、定義者・SECURITY_TYPE・列（`information_schema.COLUMNS`の順序つき列名。BASE_SQL_SCHEMAと比較）・owner の列権限（公開列の和集合と一致）・`ai_reader` 接続での読み取り（`SELECT 1 FROM ビュー LIMIT 1`）を表示し、期待と違えば「要対応」と表示する。
+
+**検証結果**
+- 試験：`ai.test_setup_ai_views`（偽の接続・カーソル。DBを作らない）。生成SQLと BASE_SQL_SCHEMA・各マイグレーションの列の一致、dry-run、`--apply` の順序、不正名の拒否、MySQL以外、冪等、join系ビューの非再作成、実装を壊すと失敗すること（`OTHER_VIEW_COLUMNS` の保護・`fullmatch`・表全体のSELECTの検出・定義者／SECURITY_TYPEの比較。evaluatorが確認）、表全体のSELECTの `--check`、CREATE要否の個別条件、`--views` での絞り込み、GRANT・CREATE・REVOKE の失敗時の表示。
+- 開発DB（読み取りのみ）：dry-run と `--check` を実行（2026-10-10）。`--apply` は未実行。`v_ai_supplier` の定義者が `root@localhost` で、`m_supplier` の列権限が未付与のため、dry-run は GRANT と CREATE の2文を表示した。他の3ビューは揃っている。
+
+**未完了**：evaluatorによる検証。開発DBでの `--apply`（BOSS承認のもとで実行）。本番での実行。
+**反映状況**：開発DBで、`--apply`を実機で実行済み（2026-10-10。仕入先ビューの定義者・権限を整えた。要対応0件。もう一度実行すると「実行するSQLはありません」で冪等）。本番未反映。
