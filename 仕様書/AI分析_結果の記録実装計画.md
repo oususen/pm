@@ -222,6 +222,146 @@ BOSSの目的は、**AIがだんだん賢くなること**。現状のシステ�
 | 段階 | 状態 |
 |---|---|
 | 計画 | 作成済み(2026-10-09)。Codexの意見を反映(第12節)。BOSSの承認待ち |
-| 0〜4 | 未着手 |
+| 0 | **素案作成済み(2026-10-10、planner。第14節)**。レビュー(Codex・evaluator)とBOSS判断(14-9)の待ち |
+| 1〜4 | 未着手 |
 
 開発・本番の反映状況: 未実装のため、いずれも未反映。
+
+## 14. 段階0: イベントの定義表(素案。2026-10-10、planner調査。実データ未確認・BOSS未承認)
+
+パスは `pm_backend/apps/ai/services/` 以下。行番号は調査時点。
+
+### 14-1. 共通の語彙と列
+
+- result: `success`/`failure`(率の分子・分母)、`excluded`(基盤・状態・利用者操作。分母に入れず件数併記)、`unknown`(状態不明の観測)、`event`(出来事の発生。合否ではない)。
+- 共通列(案): `source`(`ai`/`template`)、`provider`/`model`/`prompt_version`/`attempt_no`、`reference_template_id`/`version`、`is_refinement`。
+- **`source`が必要な理由**: テンプレート再利用の分析案(`provider='template'`、`analysis_template_reuse_service.py` :80)でも、試行・コード承認・実行が走る。分けないとモデル別の率が汚れる。許可リストに `template` を入れる。
+- `reference_used`/`refined` は stage にせず列にする(`plan['template_reference']`、`plan['refinement']` の有無で決まるため。改良は「続けて直したい」であり採用ではない)。
+
+### 14-2. stage ごとの定義
+
+| stage | AIを呼んだとみなす点/開始 | 記録点 | success / failure / excluded | 理由コードの出所 |
+|---|---|---|---|---|
+| plan | `analysis_planning_service.py` :263 の try 直前に `ai_called=True` | 成功は `store.create` の戻り(:289)直後。失敗は :272-274 を受ける外側1か所 | success=作成まで到達 / failure=`LocalAIError.code`(`ai_timeout`等5種+`ai_request_failed`)、`proposal_invalid`(新設) / excluded=`ai_called`がFalseの拒否 | `chat_service.py` :244-252。:273 は `str(exc)` で code を捨てるため記録側で `exc.code` を読む。`unsupported`と形式不正は区別できない(:122) |
+| codegen | `analysis_codegen_service.py` :522 の `store.update(start)` 成功時 | `_finish`(:582)が戻った後に1回。再試行ループ内では記録しない | success=reasons空で generated / failure=reasons非空 / excluded=`late_response_discarded`(新設、409) / unknown=`inflight_released` | `AI_FAILURE_CODES`、`response_invalid`、`ai_unsupported`(**理由文は記録禁止**)、`parameters_*`、`GuardError.code`、`python_empty`等、`python:`+code(合成。完全一致の集合で持つ) |
+| codegen_started(任意) | inflight保存直後 | 同左 | 開始のみ。落ちた試行の把握用 | メリット=未完了率が計算できる/デメリット=1試行2行、リンクキーが無く近似 |
+| trial | 事前拒否(:620,:625)は記録しない | `store.update(apply)` 成功後(:660) | success=passed / failure=failed(コードは `GuardError.code` のみ。`message`・`step`は記録禁止) / excluded=`unverified`、`trial_discarded`(新設) | `unverified`の理由は launcher 由来。`killed_by_signal_{n}` は可変コード(正規化が要る)。launcher.py・job_main.py の全reason網羅は**未完了** |
+| code_approval | 拒否は記録しない | `store.update(apply)` 成功後(:682) | `event`のみ | なし。「承認しなかった」は欠測。保存率は「放棄を含む転換率」 |
+| run | 14-3 | `process_job` の `finish` が戻った直後(`analysis_job_service.py` :399)。`finish` 内には書かない(WatchErrorで再実行されるため) | 14-3 | 14-3 |
+| template_saved | `created=True` の経路のみ | `save_template` の `transaction.atomic()` を抜けた直後。既存返却(:220,:248)は記録しない | `event` | `category`(固定6種)、`is_correction`。保存は実行成功を条件にしない |
+| template_approved/rejected | 拒否・409は記録しない | `approve_template`/`reject_template` の atomic を抜けた後 | `event` | `rejection_reason`(自由文)・`approved_by`は記録禁止。却下は個人評価に転用されやすいので保持を短く |
+| template_reused | `create_plan_from_template` | 成功は `store.create` の戻り直後 | success=分析案を作成(**実行の成功ではない**) / failure=テンプレート起因(`stored_hash_mismatch`等、固定値) / excluded=利用者起因(権限・変数値不正) | 再利用の成功率は `run`(`source='template'`)で測る |
+
+記録に混ぜないもの(全stage共通): 目的文、`title`、警告文、`names`、`unsupported`の理由文、`literal_values`、SQL/Python本文、ハッシュ類、各種ID、`worker`、`counts`、`detail`、`rejection_reason`、テンプレート名。
+
+### 14-3. 実行(run)の最終確定点
+
+**最終**とするのは `store.update(job_id, finish, ...)` の戻り値 `completed` の `status`/`reason`(`analysis_job_service.py` :399)。`run_and_record` の終了時点ではない。
+
+| # | 経路 | 最終 status/reason | 記録する result |
+|---|---|---|---|
+| 1 | 正常成功 | success | success |
+| 2 | 成功だが後始末未完了 | failed/`cleanup_pending` | excluded(基盤) |
+| 3 | 中止要求が確定より先 | cancelled/`user_cancelled` | excluded |
+| 4 | 結果サイズ超過 | failed/`result_too_large` | failure |
+| 5・6 | 実行失敗・実行中の例外 | `REASON_TEXT`内コード等 | 14-3b の分類表 |
+| 7 | `run_and_record` 内の想定外例外 | Runは `unexpected_error` で確定後、`process_job` が `execution_failed` で上書き | excluded |
+| 8・9・10 | 開始前の中止/期限切れ/テンプレート使用不可 | `user_cancelled`/`plan_expired`/`template_unavailable` | excluded |
+| 11・12 | `HistoryError`(開始行/確定の保存失敗) | `history_failed` | excluded(Run行が無くても記録) |
+| 13 | `finish` 内のRun確定失敗 | running のまま | **記録されない**(後で14・16の観測に頼る) |
+| 14・16 | 状態不明(`heartbeat_lost`)/復旧コマンド | unknown | `run_unknown`(率の分母に入れない) |
+| 15 | ワーカー消失の検出 | failed/`worker_unknown` | excluded |
+| 17〜19 | API応答だけのunknown/後始末の再照合/受付拒否 | 変わらない | 記録しない |
+
+**14-3b. failure と excluded の分類(案。BOSSレビュー)**: failure=コードの出来を示すもの(`child_exit_nonzero`/`result_invalid`/`result_too_large`/`timeout`/`oom_killed`/`column_type_unknown`/`unsupported_value`等)。excluded=基盤・状態・操作(`launcher_*`/`busy`/`cleanup_pending`/`history_failed`/`plan_expired`/`user_cancelled`/`worker_unknown`/`template_unavailable`/`execution_failed`/`unexpected_error`等)。**要判断**: `approved_count_changed`/`fetch_rows_exceeded`/`fetch_count_mismatch`/`refetch_mismatch`/`duplicate_key` はデータ・環境依存でどちらとも言い切れない。固定の `reason→class` 表で持つ。
+
+**状態不明の後に確定した場合**(案A、推奨): `run_unknown` は分母に入れず観測件数として別集計。最終 `run` に `was_unknown`(真偽。`finish` 内の更新前statusから取得)を持たせ、率には含める。未解決の状態不明=`run_unknown`件数−`was_unknown=True`の最終`run`件数。案B(最初の観測だけ採用)は実装が単純だが、後から成功しても unknown のままになる。
+
+**モデルへの帰属**: `run` に生成時の `provider`/`model`/`prompt_version`/`attempt_no` を載せるには、分析案(Redis)に `plan['outcome_meta']`(固定コードと数値のみ。実行の `snapshot` に残る位置)を新設する必要がある(**保存項目の追加。BOSS承認事項**)。メタの無い分析案(導入前に作成済み)は記録しない(「不明」を足すフォールバックはしない)。
+
+### 14-4. 重複キーと主キー
+
+`event_key` は確定点で `uuid4()` を1回だけ生成(元IDを使わない。案A、推奨)。再試行ループの内側では生成しない。同じ事象を2度記録し得る経路(`mark_unknown_stale` :108-121)は、条件付き `update` が1を返したときだけ記録する呼び出し位置の設計で解消する(一意制約は同一呼び出し内のリトライ防止にしか効かない)。主キーも乱数(自動採番は同日内の発生順を漏らす)。
+
+### 14-5. 「採用」の定義
+
+保存・管理者承認・コード承認・実行成功・再利用・改良は、いずれも「結果の採用」ではない(別イベント)。結果の採否を直接示す既存操作は**ない**。案X(推奨): 実行成功の結果に「役に立った/役に立たなかった/使わない」の3択を新設(UI+API。回答率・社会的望ましさの偏りに注意)。案Y: 保存・再利用・承認を代理指標とする(追加実装なし、意味は別)。X は新規の画面操作なので段階2に含めず別計画とする。
+
+### 14-6. 分母と集計
+
+- 分母に入れない: 送信前に拒否された要求(`_planning_input`検証、`resolve_planning_provider`拒否、確認コード不一致、`_reference_for`のQwen拒否、codegen :488-507 の各拒否、権限なし=ビュー層で弾かれる)。**記録もしない**(推奨)。
+- 分母に入れる: plan は :263 以降、codegen は :522 以降。
+- 生成後にプロセスが落ちた場合は inflight が残り、完了イベントが無い。解除時のみ `inflight_released`。率は「観測できた完了試行の率」と呼ぶ。
+
+| 指標 | 分子 | 分母 |
+|---|---|---|
+| 生成の合格率 | codegen success | codegen success+failure(`source='ai'`) |
+| SQL試行の合格率 | trial success | trial success+failure(`source`で分ける) |
+| 実行の成功率 | run success | run success+failure(excludedの件数・理由を併記) |
+| 保存率(転換率) | template_saved 件数 | code_approval 件数 |
+| 再利用の成功率 | run(`source='template'`) success | 同 success+failure |
+| 参考生成の成功率 | codegen(参考あり) success | 同。参考なしと並べる |
+| モデル別・失敗の理由別 | 上記を provider/model/prompt_version で分割 / 理由コード別件数 | 順位と断定しない(運用規約4.4-12) |
+
+出してよい軸: stage・result・reasons(単独)・provider・model・prompt_version・wrapper_version・source・category・attempt_no・参考有無・is_refinement・期間(**月単位**)。条件つき(N以上、作成者評価になりうる): template_id/version別、reference_template_id別。**出さない**: 時間帯別・曜日別・日別×モデル・2軸を超える交差・連続期間の差分・秒/分の時刻・挿入順。少数セルは率だけでなく件数も隠すことを検討する。
+
+### 14-7. prompt_version
+
+- 分析案: system は固定リテラル(:248-253,:255)+`PRODUCT_RULE_PLAN`+`WORK_ORDER_PLAN`+`OUTPUT_RULE_PLAN`+`term_guide_text()`+(参考ありのみ)`REFERENCE_RULE_PLAN`+公開スキーマ。ハッシュは固定部分、`reference_rule_version` と `schema_version` は別に持つ。目的文・期間・参考の中身・追加の指示・モデル・温度はuserメッセージ側なので除く。
+- コード生成: `SYSTEM_PROMPT`(:153-175)の `sha256[:12]`。参考ありは `REFERENCE_RULE_CODE`(:146)を別版にする。
+- 評価条件の分離: 指示の版/外枠の版(`WRAPPER_VERSION`)/検査の版(`validate_generated`の上限は外枠の版に入らない→`check_version`を持つか)/生成設定(温度、`max_tokens`、タイムアウト)。生成時の版を後の段階で付け直さない(`outcome_meta`に固定)。
+- 既存動作を壊さない切り出し: ①現行の `create_plan` が送る messages を参考あり・なしの2ケースで捕捉する特性化テストを先に書く ②固定リテラルを1文字も変えずに定数へ移す ③切り出し後も一致を確認 ④部品一覧からversionを計算 ⑤「部品から組み立てたsystem」と「実際に送るsystem」の一致テストを足す。
+
+### 14-8. 保持と匿名化の限界
+
+保持(日数は案。BOSS承認): 詳細イベント A=90日/B=180日/C=365日、月次集計は無期限(軸は2軸まで、N未満は「その他」に統合)。バックアップが詳細より長く残る問題、削除の管理コマンド、日時は `recorded_on`(日付のみ)を推奨。
+
+個人が推測されるシナリオと対策:
+
+| # | シナリオ | 対策 |
+|---|---|---|
+| 1 | テンプレート別の成功率から作成者が分かり、作成者の評価になる | N以上のみ。長期集計に載せない。作成者別集計を規約で禁止 |
+| 2 | 日付・状態・理由の組み合わせがRun履歴の1行に一致する | 日単位の粒度、`run`に`attempt_no`を載せない案、詳細は短期保持 |
+| 3 | 少数利用(その日1人だけが使ったモデル・参考生成) | モデル×日の交差を禁止、N未満非表示、月次集計 |
+| 4 | 管理者の却下・承認の日付とテンプレート状態の突き合わせ | 却下に`category`を載せない/短期保持、個人評価の使用を禁止 |
+| 5 | 自動採番idが発生順を漏らす | 主キーを乱数に |
+| 6 | 月次集計を2回出し、1件の増減から1人の行動が分かる | 固定の期間・軸、N未満の統合 |
+| 7 | アプリのログ(run_id・時刻)との突き合わせ | ログに本文・IDを出さない方針の維持 |
+
+### 14-9. BOSSへの確認事項(推奨つき)
+
+| # | 事項 | 推奨 |
+|---|---|---|
+| 1 | 少数集計を隠す件数 N(閾値の新設) | 5。実データの件数確認後に決める |
+| 2 | 詳細イベントの保持日数(上限の新設) | 90日か180日 |
+| 3 | 月次長期集計の保持 | 無期限、2軸まで |
+| 4 | 理由コード列長(上限の新設) | 80(Run.reasonと同じ)。超えるコードは許可リストに入れない |
+| 5 | 未知のreasonを`unknown_reason`にする(フォールバックに当たりうる) | `other`に丸めず1種類のみ。provider/model/statusも同規則 |
+| 6 | 記録失敗を吸収して本処理を続ける | try/exceptで固定コードのみログ。本処理は止めない |
+| 7 | 分析案のメタが無い実行は記録しない | 記録しない。件数をログに残す |
+| 8 | `plan['outcome_meta']` を Redis の分析案に追加 | 追加(snapshotに残る位置) |
+| 9 | `trial_count` を分析案に追加 | 初回合格率が不要なら見送り |
+| 10 | `codegen_started` を持つか | codegen のみ持つ |
+| 11 | `reference_used`/`refined` は列にする | 列にする |
+| 12 | 実行のreason→class分類表(14-3b) | 案に沿ってレビュー |
+| 13 | 送信前拒否を記録するか | 記録しない |
+| 14 | 結果の採用の新設(14-5 案X) | 段階2に含めず別計画 |
+| 15 | `check_version` を持つか | 持つ(`WRAPPER_VERSION`との関係を整理後) |
+| 16 | `event_key`・主キーを乱数に | 乱数 |
+| 17 | `plan`で`unsupported`と形式不正を区別するか | 区別しない(現状どおり) |
+| 18 | テンプレート別集計の出し方 | N以上のみ、作成者別は禁止 |
+
+### 14-10. 不確実な点
+
+1. 実データ未確認。`SELECT status, reason, COUNT(*) FROM ai_analysis_run GROUP BY status, reason;` で分布と件数を確認する(Nの妥当性もこれで判断)。
+2. launcher.py・job_main.py の reason 全集合が未確認(`killed_by_signal_{n}` は可変コード)。
+3. `SourceCheckError` の `extra` の全呼び出し元の網羅が未確認。
+4. ローカルQwenの `LocalAIError.code` が空の場合 `ai_request_failed` に化ける(codegen :529)。`ai_auth` は送信前(APIキー未設定)と送信後(401/403)の両方で出るため、送信の有無を区別できない。
+5. `on_commit` は DB の atomic を使う経路(`save_template`/`approve_template`/`reject_template`/`process_job`のfinish)でのみ意味がある。Redis中心の経路(plan・codegen・trial)は「本処理が戻った後」が確定点。
+6. `process_job` の `finish` でDB更新が失敗すると記録が残らず、後続の観測(`mark_unknown_stale`/復旧)に頼る。
+7. `mark_unknown_stale` は読み取り経路(`visible_runs` :413)からも呼ばれ、GETが記録を引き起こす。副作用の位置として許容するか要確認。
+8. 既存テストが `reasons` 許可リストと実コードの同期をどこまで見ているか未確認。
+
+### 14-11. 段階1の前に確定すること(レビュー観点)
+
+stage/resultの語彙(`event`の分離、`run_unknown`・`codegen_started`の採否)/実行の最終確定点と経路7・`was_unknown`の扱い/理由コード許可リストの網羅(合成・可変コードの扱い、`reason→class`表)/`outcome_meta`の可否とメタ無し実行の非記録/`source`列とテンプレート再利用の率の分離/prompt_versionの対象と切り出し方法/乱数の`event_key`・主キー/保持日数・N・月次軸/テンプレート別集計の出口制限/「結果の採用」を段階2の範囲外にすること。
