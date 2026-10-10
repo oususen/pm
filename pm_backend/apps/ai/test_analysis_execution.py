@@ -183,6 +183,48 @@ class StopBeforeAnythingIsSentTest(ExecutionBase):
                 service._cell(value, column_type)
             self.assertEqual(caught.exception.reason, 'unsupported_value')
 
+    def test_decimal_general_form_keeps_digits_and_never_rounds(self):
+        # A1・A2: 桁を変えない文字列で出力し、小数桁の超過は丸めずに拒否する
+        self.assertEqual(service._cell(Decimal('7.8500'), 'DECIMAL(18,4)'), '7.8500')
+        self.assertEqual(service._cell(Decimal('130.00'), 'DECIMAL(18,2)'), '130.00')
+        self.assertEqual(service._cell(Decimal('12.500'), 'DECIMAL(18,3)'), '12.500')  # 既存形は従来どおり
+        self.assertEqual(service._cell(Decimal('-0.001'), 'DECIMAL(18,3)'), '-0.001')
+        self.assertEqual(service._cell(Decimal('0'), 'DECIMAL(1,0)'), '0')
+        for value, column_type in [
+            (Decimal('7.85555'), 'DECIMAL(18,4)'), (Decimal('130.005'), 'DECIMAL(18,2)'),
+            (Decimal('12345.67'), 'DECIMAL(5,2)'),  # 整数部の桁あふれ(p-s=3桁まで)
+            (Decimal('1.0005'), 'DECIMAL(18,3)'), (Decimal('NaN'), 'DECIMAL(18,3)'),
+            (Decimal('Infinity'), 'DECIMAL(18,3)'), (Decimal('-Infinity'), 'DECIMAL(18,3)'),
+            (Decimal('1E+3'), 'DECIMAL(3,0)'), (7, 'DECIMAL(18,2)'), (1.5, 'DECIMAL(18,2)'),
+        ]:
+            with self.assertRaises(service.ExecutionStopped, msg=f'{value!r} {column_type}') as caught:
+                service._cell(value, column_type)
+            self.assertEqual(caught.exception.reason, 'unsupported_value')
+        self.assertEqual(service._cell(Decimal('123.45'), 'DECIMAL(5,2)'), '123.45')  # 境界(整数部3桁・小数2桁)
+        self.assertEqual(service._cell(Decimal('1E+2'), 'DECIMAL(3,0)'), '100')
+
+    def test_decimal_type_name_is_parsed_strictly(self):
+        for ok in ['DECIMAL(18,3)', 'DECIMAL(1,0)', 'DECIMAL(38,38)', 'DECIMAL(38,0)', 'DECIMAL(10,10)']:
+            self.assertIsNotNone(service.parse_decimal_type(ok), ok)
+        for bad in ['DECIMAL(39,2)', 'DECIMAL(18,19)', 'DECIMAL(0,0)', 'DECIMAL(100,2)', 'DECIMAL(18,2); DROP',
+                    'decimal(18,3)', 'DECIMAL( 18,3)', 'DECIMAL(18, 3)', 'DECIMAL(18,3)\n', 'DECIMAL(18)', 'DECIMAL', 'DECIMAL(-1,0)']:
+            self.assertIsNone(service.parse_decimal_type(bad), bad)
+            with self.assertRaises(service.ExecutionStopped):
+                service._cell(Decimal('1'), bad)
+
+    def test_decimal_type_name_refuses_leading_zero(self):
+        # 先頭ゼロの数字は拒否(0単独、または先頭が1〜9の1〜2桁だけ許可)
+        for ok in ['DECIMAL(18,3)', 'DECIMAL(10,0)', 'DECIMAL(5,0)', 'DECIMAL(38,2)', 'DECIMAL(3,3)']:
+            self.assertIsNotNone(service.parse_decimal_type(ok), ok)
+        for bad in ['DECIMAL(18,03)', 'DECIMAL(01,00)', 'DECIMAL(018,03)', 'DECIMAL(00,0)', 'DECIMAL(5,00)']:
+            self.assertIsNone(service.parse_decimal_type(bad), bad)
+
+    def test_bigint_accepts_int_only(self):
+        # A3: boolは拒否、intは受け付ける
+        self.assertEqual(service._cell(5, 'BIGINT'), '5')
+        with self.assertRaises(service.ExecutionStopped):
+            service._cell(False, 'BIGINT')
+
     def test_disabled_and_non_loopback_launcher_are_refused(self):
         for url, reason in [('', 'launcher_disabled'), ('http://10.0.1.232:8091', 'launcher_not_allowed'),
                             ('https://127.0.0.1:8091', 'launcher_not_allowed')]:

@@ -25,7 +25,25 @@ MAX_LOG_BYTES = 64 * 1024
 
 CHART_KINDS = {'bar', 'line'}
 NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
-COLUMN_TYPES = {'BIGINT', 'INTEGER', 'DOUBLE', 'DECIMAL(18,3)', 'VARCHAR', 'DATE', 'TIMESTAMP', 'BOOLEAN'}
+COLUMN_TYPES = {'BIGINT', 'INTEGER', 'DOUBLE', 'VARCHAR', 'DATE', 'TIMESTAMP', 'BOOLEAN'}
+# p・sは「0単独」または「先頭が1〜9の1〜2桁」のみ(先頭ゼロの数字は拒否。型名はそのままCREATE TABLEへ入るため)
+DECIMAL_TYPE_PATTERN = re.compile(r'DECIMAL\((0|[1-9][0-9]?),(0|[1-9][0-9]?)\)', re.ASCII)
+
+
+def is_allowed_column_type(column_type):
+    """許可する列型か。固定の型名は完全一致、DECIMALは厳密な正規表現で、精度p 1〜38(DuckDBの仕様上の上限)・小数桁s 0〜p。
+
+    型名はそのままCREATE TABLEへ入るため、文字列以外・前後の余分な文字・小文字・空白入りは、すべて拒否する(fullmatch)。
+    """
+    if not isinstance(column_type, str):
+        return False
+    if column_type in COLUMN_TYPES:
+        return True
+    match = DECIMAL_TYPE_PATTERN.fullmatch(column_type)
+    if match is None:
+        return False
+    precision, scale = int(match.group(1)), int(match.group(2))
+    return 1 <= precision <= 38 and 0 <= scale <= precision
 NULL_MARK = '\\N'
 OOM_EVENTS = '/sys/fs/cgroup/memory.events'
 CHUNK_PATH = '/tmp/chunk.csv'  # 投入中の1チャンクだけを置く一時ファイル(投入後に削除する)
@@ -101,7 +119,7 @@ def validate_header(header):
         if not NAME_PATTERN.match(str(view.get('name', ''))) or type(view.get('expected_rows')) is not int:
             raise JobFailed('header_invalid', 'ビュー定義が不正です。')
         for column in view.get('columns') or []:
-            if not NAME_PATTERN.match(str(column.get('name', ''))) or column.get('type') not in COLUMN_TYPES:
+            if not NAME_PATTERN.match(str(column.get('name', ''))) or not is_allowed_column_type(column.get('type')):
                 raise JobFailed('header_invalid', '列定義が不正です。')
         key = view.get('unique_key')
         if key is not None and key not in [c['name'] for c in view['columns']]:

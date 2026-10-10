@@ -34,7 +34,9 @@ class DescriptionTests(SimpleTestCase):
         joined = ''.join(view['description'] for view in ANALYSIS_VIEWS.values())
         self.assertNotIn('000196', joined)      # 実データの注記は渡さない
         self.assertNotIn('クボタ', joined)
-        self.assertNotIn('process_id', joined)  # 意味が確認できていない列は書かない
+        # 意味が確認できていない列は書かない(出荷・入荷)。品番マスタは、サイクルCで「空の品番がある」と書くことを承認済み(意味は未確認と明記)
+        self.assertNotIn('process_id', ANALYSIS_VIEWS[SHIPMENT]['description'] + ANALYSIS_VIEWS['v_ai_purchase_receipt']['description'])
+        self.assertIn('process_id=工程のID(空の品番がある)', ANALYSIS_VIEWS['v_ai_product']['description'])
 
     def test_term_guide_follows_the_boss_table(self):
         guide = term_guide_text()

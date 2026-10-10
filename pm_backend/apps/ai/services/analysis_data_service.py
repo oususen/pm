@@ -30,7 +30,33 @@ ANALYSIS_VIEWS = {
             'trip_allocation_id=出荷便割付のID、remark_text=システムが書く便の割付情報(業務メモではない)。'
         ),
     },
+    # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。
+    # 列の意味は、仕様書で確認できたものだけを書く(AI用ビュー作成計画 §4.1-1)。
+    'v_ai_product': {
+        'label': '品番マスタ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1品番(品番マスタ)。日付の列がなく、期間では絞らず全行が対象。無効な品番も含むため、有効な品番だけを見るときはis_active=1で絞る。'
+            '実績ビューのproduct_idは、このビューのidと結べる(出荷・入荷の実績ビューは、品番コードproduct_codeでも結べる)。'
+            '列の意味: id=品番のID、product_code=品番コード(一意)、product_name=製品名、'
+            'category=品番の区分(値はASSEMBLY・OUTSOURCED・SINGLE・PURCHASED・UNKNOWN・MATERIALと空。各値の業務上の意味は未確認)、'
+            'unit_price=単価(空の品番が多い)、line_id=ラインのID(空の品番がある)、process_id=工程のID(空の品番がある)、'
+            'order_lot_multiple=発注倍数、order_lot_min=最小発注数(発注量は、不足数を発注倍数の倍数に切り上げ、最小発注数未満なら最小発注数にする)、'
+            'transfer_destination=移動先、is_virtual_set=仮想セット品番(連産品)、is_active=有効(1)か無効(0)か、'
+            'size_length・size_width・size_thickness=項目名が縦(mm)・横(mm)・厚さ(mm)、management_unit=項目名が管理区分(値はDAY・MINUTE・空)。'
+            '上記以外の列(unit・standard_lt_days・stock_location・processing_area・next_process_id・is_final_product・is_line_final_product・'
+            'is_special_management_material・specific_gravity・model_name・identification_code・product_group_id・used_container_id・capacity・created_at・updated_at)の業務上の意味は未確認。'
+            'size_*・management_unitも、項目名以外の業務上の定義は未確認。'
+        ),
+    },
 }
+
+
+def ai_view_definition(view):
+    """AI(分析案・相談・コード生成)へ渡すビューの定義。値がNoneのキー(date_field・quantity_field)は出さない。
+
+    日付ありのビューは、従来と同じ内容(キーの順序も同じ)になる。
+    """
+    return {key: value for key, value in ANALYSIS_VIEWS[view].items() if value is not None}
 
 
 # 業務の言葉と列の対応表(BOSS承認 2026-10-07)。(対象ビュー, 言葉, 列)。「納入先」は、顧客を指すことも納入場を指すこともあるため、載せない。
@@ -175,9 +201,27 @@ def validate_datasets(datasets, date_from, date_to):
                 or any(not isinstance(field, str) or field not in BASE_SQL_SCHEMA[view] for field in fields)
                 or len(set(fields)) != len(fields)):
             raise AnalysisError('未公開または重複したフィールドは分析できません。')
-        if ANALYSIS_VIEWS[view]['date_field'] not in fields:
+        date_field = ANALYSIS_VIEWS[view]['date_field']  # 必須キー(日付なしのビューは、明示的にNoneと宣言する。.get()で補わない)
+        if date_field is not None and date_field not in fields:
             raise AnalysisError('対象期間の根拠となる日付フィールドが必要です。')
     return datasets
+
+
+def build_where(view, date_from, date_to, last_id=None):
+    """COUNT・取得で共通に使うWHERE句と束縛パラメータを返す。(句, パラメータ)
+
+    日付ありのビューは、期間で絞る(従来と同じ文字列・パラメータ)。日付なしのビュー(date_field=None)は、期間では絞らない。
+    last_id を渡すと、idを基準にしたページ送りの条件を加える。条件が無ければ、WHERE自体を付けない。
+    """
+    date_field = ANALYSIS_VIEWS[view]['date_field']
+    conditions, params = [], []
+    if date_field is not None:
+        conditions.append(f'`{date_field}` >= %s AND `{date_field}` <= %s')
+        params += [date_from, date_to]
+    if last_id is not None:
+        conditions.append('`id` > %s')
+        params.append(last_id)
+    return (' WHERE ' + ' AND '.join(conditions) if conditions else ''), params
 
 
 def count_target_rows(proposal):
@@ -190,12 +234,10 @@ def count_target_rows(proposal):
         with connections['ai_reader'].cursor() as cursor:
             for dataset in datasets:
                 view = dataset['view']
-                date_field = ANALYSIS_VIEWS[view]['date_field']
-                cursor.execute(
-                    f'SELECT COUNT(*) FROM `{view}` WHERE `{date_field}` >= %s AND `{date_field}` <= %s',
-                    [proposal['date_from'], proposal['date_to']],
-                )
-                counts.append({'view': view, 'rows': cursor.fetchone()[0]})
+                where, params = build_where(view, proposal['date_from'], proposal['date_to'])
+                cursor.execute(f'SELECT COUNT(*) FROM `{view}`{where}', params)
+                # period_applied: 期間で絞った件数か(日付ありはtrue、日付なし=全行はfalse)。画面の表示用
+                counts.append({'view': view, 'rows': cursor.fetchone()[0], 'period_applied': ANALYSIS_VIEWS[view]['date_field'] is not None})
     except DatabaseError as exc:
         raise AnalysisError('対象件数を確認できません。分析用DB接続・ビュー定義者・SELECT権限を管理者へ確認してください。', 503) from exc
     return {'datasets': counts, 'total_rows': sum(item['rows'] for item in counts), 'counted_at': datetime.now().isoformat()}

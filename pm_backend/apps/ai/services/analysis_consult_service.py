@@ -18,7 +18,7 @@ from django.db import DatabaseError
 
 from ai.models import AIAnalysisTemplate
 from ai.services import analysis_llm, chat_service
-from ai.services.analysis_data_service import ANALYSIS_VIEWS, term_guide_text, validate_period
+from ai.services.analysis_data_service import ANALYSIS_VIEWS, ai_view_definition, term_guide_text, validate_period
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
 from ai.services.analysis_redaction import build_analysis_code_redactor
@@ -58,7 +58,7 @@ def _approved_templates():
 
 
 def _system_prompt(templates, redact=None):
-    schema = {view: {**definition, 'fields': BASE_SQL_SCHEMA[view]} for view, definition in ANALYSIS_VIEWS.items()}
+    schema = {view: {**ai_view_definition(view), 'fields': BASE_SQL_SCHEMA[view]} for view in ANALYSIS_VIEWS}
     text = redact or (lambda value: value)  # 社外へ送るときは、名称・目的の登録名称をコードへ置換する
     lines = [f'ID {template.pk}: {text(template.name)}(カテゴリ: {template.get_category_display()}、目的: {text(template.purpose)})' for template in templates] or ['(承認済みのテンプレートはありません)']
     return (

@@ -41,6 +41,15 @@ BASE_SQL_SCHEMA = {
         'id', 'shipment_date', 'product_code', 'product_id', 'product_name',
         'customer_code', 'ship_to_code', 'quantity', 'trip_allocation_id', 'remark_text',
     ),
+    # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days は非公開)
+    'v_ai_product': (
+        'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
+        'stock_location', 'processing_area', 'line_id', 'process_id', 'next_process_id', 'management_unit',
+        'is_final_product', 'is_line_final_product', 'is_virtual_set', 'order_lot_min', 'order_lot_multiple',
+        'is_special_management_material', 'specific_gravity', 'size_length', 'size_width', 'size_thickness',
+        'transfer_destination', 'model_name', 'identification_code', 'product_group_id', 'used_container_id',
+        'capacity', 'is_active', 'created_at', 'updated_at',
+    ),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -62,6 +71,15 @@ TABLE_NOTES = {
         '日別・期間の集計は shipment_date を使う。customer_code は得意先コード、ship_to_code は納入場コード。'
         'trip_allocation_id は出荷便割付のID(なければNULL)、remark_text はシステムが書く便の割付情報(例: [TRIP_ACTUAL]54:576|PD=2026-07-22:42)で業務メモではない。'
         '現在はクボタ(得意先コード000196)向けの出荷だけが登録されている。'
+    ),
+    'v_ai_product': (
+        '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'
+        'product_code は品番コード(一意)、product_name は製品名。実績ビューの product_id は、このビューの id と結べる。'
+        'category は品番の区分(値: ASSEMBLY・OUTSOURCED・SINGLE・PURCHASED・UNKNOWN・MATERIAL と空。各値の業務上の意味は未確認)。'
+        'unit_price は単価で、空(NULL)の品番が多い。line_id・process_id も空の品番がある(line_id は m_line.id、process_id は m_process.id)。'
+        'management_unit は項目名が管理区分で、値は DAY・MINUTE・空(業務上の意味は未確認)。'
+        '発注量は、不足数を order_lot_multiple(発注倍数)の倍数に切り上げ、order_lot_min(最小発注数)未満なら最小発注数にする(自動発注提案仕様書)。'
+        'size_length・size_width・size_thickness は項目名が縦(mm)・横(mm)・厚さ(mm)(業務上の定義は未確認)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

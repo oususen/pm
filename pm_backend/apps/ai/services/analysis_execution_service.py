@@ -15,6 +15,7 @@ import hashlib
 import http.client
 import json
 import math
+import re
 import socket
 import struct
 import threading
@@ -26,7 +27,7 @@ from urllib.parse import urlsplit
 import mysql.connector
 from django.conf import settings
 
-from ai.services.analysis_data_service import ANALYSIS_VIEWS, MANAGEMENT_COLUMN, validate_datasets
+from ai.services.analysis_data_service import ANALYSIS_VIEWS, MANAGEMENT_COLUMN, build_where, validate_datasets
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.sql_queries import BASE_SQL_SCHEMA
 
@@ -50,6 +51,18 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'shipment_date': 'DATE', 'product_code': 'VARCHAR', 'product_id': 'BIGINT',
         'product_name': 'VARCHAR', 'customer_code': 'VARCHAR', 'ship_to_code': 'VARCHAR',
         'quantity': 'DECIMAL(18,3)', 'trip_allocation_id': 'BIGINT', 'remark_text': 'VARCHAR',
+    },
+    # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
+    'v_ai_product': {
+        'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'category': 'VARCHAR', 'unit': 'VARCHAR',
+        'unit_price': 'DECIMAL(18,2)', 'standard_lt_days': 'BIGINT', 'stock_location': 'VARCHAR', 'processing_area': 'VARCHAR',
+        'line_id': 'BIGINT', 'process_id': 'BIGINT', 'next_process_id': 'BIGINT', 'management_unit': 'VARCHAR',
+        'is_final_product': 'BIGINT', 'is_line_final_product': 'BIGINT', 'is_virtual_set': 'BIGINT',
+        'order_lot_min': 'BIGINT', 'order_lot_multiple': 'BIGINT', 'is_special_management_material': 'BIGINT',
+        'specific_gravity': 'DECIMAL(18,4)', 'size_length': 'DECIMAL(18,2)', 'size_width': 'DECIMAL(18,2)',
+        'size_thickness': 'DECIMAL(18,3)', 'transfer_destination': 'VARCHAR', 'model_name': 'VARCHAR',
+        'identification_code': 'VARCHAR', 'product_group_id': 'BIGINT', 'used_container_id': 'BIGINT',
+        'capacity': 'BIGINT', 'is_active': 'BIGINT', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
     },
 }
 
@@ -254,6 +267,35 @@ def _close_snapshot(connection, abandoned, on_done=None, failed=lambda: False):
     return close()
 
 
+# p・sは「0単独」または「先頭が1〜9の1〜2桁」のみ(先頭ゼロの数字は拒否。型名はそのままCREATE TABLEへ入るため)
+DECIMAL_TYPE_PATTERN = re.compile(r'DECIMAL\((0|[1-9][0-9]?),(0|[1-9][0-9]?)\)', re.ASCII)
+
+
+def parse_decimal_type(column_type):
+    """'DECIMAL(p,s)'を(p, s)へ解釈する。形式外・範囲外はNone。
+
+    精度pは1〜38(DuckDBのDECIMALの仕様上の上限)、小数桁sは0〜p。
+    """
+    match = DECIMAL_TYPE_PATTERN.fullmatch(column_type)
+    if match is None:
+        return None
+    precision, scale = int(match.group(1)), int(match.group(2))
+    if not 1 <= precision <= 38 or not 0 <= scale <= precision:
+        return None
+    return precision, scale
+
+
+def _decimal_cell(value, column_type, precision, scale):
+    """Decimalを、桁を変えない文字列へ変換する。丸めない。NaN・無限大、小数桁・整数部の桁の超過は拒否する。"""
+    if value.is_finite():
+        exponent = value.as_tuple().exponent
+        value_scale = max(0, -exponent)
+        integer_digits = 0 if value == 0 else max(0, value.adjusted() + 1)
+        if value_scale <= scale and integer_digits <= precision - scale:
+            return format(value, 'f')
+    raise ExecutionStopped('unsupported_value', f'{column_type}の列に、桁数が合わない値(Decimal)があります。', 422)
+
+
 def _cell(value, column_type):
     """値を、DuckDBへ投入するCSVの文字列へ変換する。型が宣言と合わない値・NULL記号と同じ文字列は、受け付けない。"""
     if value is None:
@@ -265,8 +307,9 @@ def _cell(value, column_type):
         return value.isoformat()
     if column_type == 'TIMESTAMP' and kind is datetime:
         return value.isoformat(sep=' ', timespec='microseconds')
-    if column_type == 'DECIMAL(18,3)' and kind is Decimal:
-        return format(value, 'f')
+    parsed = parse_decimal_type(column_type)
+    if parsed is not None and kind is Decimal:
+        return _decimal_cell(value, column_type, *parsed)
     if column_type == 'VARCHAR' and kind is str and value != NULL_MARK:
         return value
     raise ExecutionStopped('unsupported_value', f'{column_type}の列に、投入できない値({kind.__name__})があります。', 422)
@@ -290,15 +333,11 @@ def _data_frame(index, rows, types):
 
 def _pages(cursor, deadline, view, fields, date_from, date_to, chunk_rows):
     """一意キー(id)の順に、キーを基準にしてページ送りで取得する。キーが単調増加でなければ失敗にする。"""
-    date_field = ANALYSIS_VIEWS[view]['date_field']
     columns = ', '.join(f'`{field}`' for field in fields)
-    base = f'SELECT `id`, {columns} FROM `{view}` WHERE `{date_field}` >= %s AND `{date_field}` <= %s'
     last = None
     while True:
-        if last is None:
-            sql, params = f'{base} ORDER BY `id` LIMIT %s', [date_from, date_to, chunk_rows]
-        else:
-            sql, params = f'{base} AND `id` > %s ORDER BY `id` LIMIT %s', [date_from, date_to, last, chunk_rows]
+        where, params = build_where(view, date_from, date_to, last)  # 日付なしのビューは、期間を使わず、idだけでページ送りする
+        sql, params = f'SELECT `id`, {columns} FROM `{view}`{where} ORDER BY `id` LIMIT %s', [*params, chunk_rows]
         rows = _execute(cursor, deadline, sql, params)
         if not rows:
             return
@@ -312,8 +351,8 @@ def _pages(cursor, deadline, view, fields, date_from, date_to, chunk_rows):
 
 
 def _count(cursor, deadline, view, date_from, date_to):
-    date_field = ANALYSIS_VIEWS[view]['date_field']
-    rows = _execute(cursor, deadline, f'SELECT COUNT(*) FROM `{view}` WHERE `{date_field}` >= %s AND `{date_field}` <= %s', [date_from, date_to])
+    where, params = build_where(view, date_from, date_to)
+    rows = _execute(cursor, deadline, f'SELECT COUNT(*) FROM `{view}`{where}', params)
     return rows[0][0]
 
 
@@ -458,7 +497,7 @@ def _execute_approved_analysis(proposal, approved_counts, code, policy, deadline
         if changed:
             raise ExecutionStopped('approved_count_changed', f'承認時から件数が変わりました。再度、件数確認と承認が必要です: {changed}', 409)
         if sum(counts.values()) > policy.max_fetch_rows:
-            raise ExecutionStopped('fetch_rows_exceeded', f'対象が上限({policy.max_fetch_rows}行)を超えました。期間・条件を絞ってください。', 413)
+            raise ExecutionStopped('fetch_rows_exceeded', f'対象が上限({policy.max_fetch_rows}行)を超えました。条件を絞ってください(日付のあるビューは期間も絞れます)。', 413)
         # 2. 1回目の取得: 件数・一意キー・総バイト数・チャンクごとのSHA-256を計算し、行は破棄する
         header = _header_frame(code, datasets, counts, policy)
         digests, loaded, body_length = [], {d['view']: 0 for d in datasets}, len(header) + 5

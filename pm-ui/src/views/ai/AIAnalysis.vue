@@ -132,13 +132,14 @@
           <div v-for="dataset in plan.proposal.datasets" :key="dataset.view" class="dataset">
             <p>ビュー: {{ dataset.view }} / 必要フィールド: {{ dataset.fields.join('、') }}</p>
             <p v-if="plan.preview">対象行数: {{ formatNumber(plan.preview.datasets.find(item => item.view === dataset.view)?.rows) }}行</p>
+            <p v-if="plan.preview && plan.preview.datasets.find(item => item.view === dataset.view)?.period_applied === false">期間: 適用しない（全行）</p>
           </div>
           <small>id: 重複・欠落の確認用に、分析用コンテナへ必ず送ります。社外AIには送りません。</small>
           <p>追加資料: なし（資料の取込みは未実装）</p>
           <template v-if="plan.preview">
             <p>対象行数の合計: {{ formatNumber(plan.preview.total_rows) }}行 / 取得行数の上限: {{ formatNumber(plan.preview.max_fetch_rows) }}行</p>
             <small>件数確認日時: {{ formatDate(plan.preview.counted_at) }}。数量の合計ではありません。実行時には最新スナップショットで再確認が必要です。</small>
-            <p v-if="plan.preview.over_limit" class="error">対象が上限を超えました。一部だけを採用せず、期間を絞って分析案を作り直してください。</p>
+            <p v-if="plan.preview.over_limit" class="error">対象が上限を超えました。一部だけを採用せず、条件（日付のあるビューは期間も）を絞って分析案を作り直してください。</p>
           </template>
           <div v-if="plan.status === 'awaiting_data'" class="actions">
             <button :disabled="!canEdit || !!busy" @click="preview">{{ busy === 'preview' ? '件数を確認中…' : '対象件数を確認' }}</button>
