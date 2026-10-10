@@ -50,6 +50,11 @@ BASE_SQL_SCHEMA = {
         'transfer_destination', 'model_name', 'identification_code', 'product_group_id', 'used_container_id',
         'capacity', 'is_active', 'created_at', 'updated_at',
     ),
+    # 工程マスタのビュー(AI用ビュー作成計画 §13。is_outsource・created_at・updated_at は非公開)
+    'v_ai_process': (
+        'id', 'process_code', 'process_name', 'line_id', 'management_unit', 'operating_rate',
+        'equipment_count', 'two_person_only', 'is_active',
+    ),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -80,6 +85,15 @@ TABLE_NOTES = {
         'management_unit は項目名が管理区分で、値は DAY・MINUTE・空(業務上の意味は未確認)。'
         '発注量は、不足数を order_lot_multiple(発注倍数)の倍数に切り上げ、order_lot_min(最小発注数)未満なら最小発注数にする(自動発注提案仕様書)。'
         'size_length・size_width・size_thickness は項目名が縦(mm)・横(mm)・厚さ(mm)(業務上の定義は未確認)。'
+    ),
+    'v_ai_process': (
+        '工程マスタ(m_process)のビュー。1行=1工程(全行。無効な工程も含むため、有効な工程だけを見るときは is_active=1 で絞る)。'
+        'process_code は工程の特定に使うコード(先頭ゼロを含む文字列。例 0801。数字として扱わない)。工程の特定にはコードを使う。'
+        'process_code の G と PURCHASE は実際の工程ではなく、BOM・ルーティングを作るときに、外作(G)・購買(PURCHASE)を示すための工程。'
+        'line_id は工程の所属ライン(m_line.id と結べる)。'
+        'management_unit は DAY=日単位管理、MINUTE=分単位管理。'
+        'equipment_count は設備台数(工程負荷は、工程負荷時間を設備台数で按分する)。'
+        'operating_rate は項目名が稼働率(%)、two_person_only は項目名が2人1設備専用(どちらも業務上の定義は未確認)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

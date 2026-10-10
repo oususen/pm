@@ -48,6 +48,19 @@ ANALYSIS_VIEWS = {
             'size_*・management_unitも、項目名以外の業務上の定義は未確認。'
         ),
     },
+    # 工程マスタ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §13)。
+    'v_ai_process': {
+        'label': '工程マスタ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1工程(工程マスタ)。日付の列がなく、期間では絞らず全行が対象。無効な工程も含むため、有効な工程だけを見るときはis_active=1で絞る。'
+            '工程の特定にはprocess_code(工程コード)を使う。'
+            '列の意味: id=工程のID、process_code=工程コード(先頭ゼロを含む文字列。例0801。数字として扱わない。GとPURCHASEは実際の工程ではなく、BOM・ルーティングを作るときに、外作(G)・購買(PURCHASE)を示すための工程)、'
+            'process_name=工程名、line_id=工程の所属ラインのID(m_lineのidと結べる)、'
+            'management_unit=管理単位(DAY=日単位管理、MINUTE=分単位管理)、'
+            'equipment_count=設備台数(工程負荷は工程負荷時間を設備台数で按分する)、is_active=有効(1)か無効(0)か、'
+            'operating_rate=項目名が稼働率(%)、two_person_only=項目名が2人1設備専用(operating_rate・two_person_onlyは業務上の定義は未確認)。'
+        ),
+    },
 }
 
 

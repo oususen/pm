@@ -64,6 +64,12 @@ ANALYSIS_COLUMN_TYPES = {
         'identification_code': 'VARCHAR', 'product_group_id': 'BIGINT', 'used_container_id': 'BIGINT',
         'capacity': 'BIGINT', 'is_active': 'BIGINT', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
     },
+    # 工程マスタ(m_processのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_processと照合する)
+    'v_ai_process': {
+        'id': 'BIGINT', 'process_code': 'VARCHAR', 'process_name': 'VARCHAR', 'line_id': 'BIGINT',
+        'management_unit': 'VARCHAR', 'operating_rate': 'DECIMAL(18,2)', 'equipment_count': 'BIGINT',
+        'two_person_only': 'BIGINT', 'is_active': 'BIGINT',
+    },
 }
 
 

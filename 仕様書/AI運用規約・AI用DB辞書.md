@@ -265,6 +265,23 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（32列）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
 - 権限の付与は手動SQL（計画書 §9.3）。
 
+### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用は未実施。本番も未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_process`（`ai/0035`で作成） | `id`, `process_code`, `process_name`, `line_id`, `management_unit`, `operating_rate`, `equipment_count`, `two_person_only`, `is_active`（9列） | `m_process` 全行（絞り込みなし・結合なし。46行のうち有効45・無効1）。非公開（ビューに含めない）: `is_outsource`, `created_at`, `updated_at` | 読み取り専用SQLで、工程のコード・名前・所属ライン・管理単位・設備台数の確認、実績ビューの工程IDから工程を引く |
+
+- 個人情報の列は含まない。`process_code` は先頭ゼロを含む文字列（例 `0801`）で、工程の特定に使う。
+- 列の意味は仕様書で確認できた範囲だけ書く（計画書 §13.2）。`operating_rate`（稼働率(%)）・`two_person_only`（2人1設備専用）は項目名のみで、業務上の定義は未確認。
+- `ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（9列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_process` の許可（`BASE_SQL_SCHEMA['m_process']`・`SCREEN_SQL_TABLES`）は置き換えず、ビューの追加のみ。`TERM_COLUMNS` は未変更。
+- 権限の付与・定義者の付け替えは手動SQL（計画書 §9.3 に倣う。`pm_ai_view_owner` へ `m_process` の9列の列単位 `SELECT`）。開発DBでは未実施。
+
+### 6.5-6 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
+
+- DuckDB（分析の実行）は大文字小文字を区別するが、MySQL（`utf8mb4_unicode_ci`）は区別しない。そのため、AI分析の変数（品番・顧客コード・納入先コード）の値は、**マスタ・公開ビューに保存されている正規の表記**に直してからコードに入れる。`upper()` は使わない（マスタに小文字の品番 `giji` が実在する）。
+- 確認元（公開ビューが正）: 品番=`v_ai_product`、納入先コード=`v_ai_shipment` の実際の値（ともに読み取り専用の分析用接続）、顧客コード=`m_customer`（顧客マスタのビューは未作成。作成後は公開ビューへ切り替える）。マスタ・ビューにない値、および大文字小文字だけが違う値が複数あって決められない納入先コードは、拒否する（代わりの値は使わない）。
+- 先頭ゼロ・全角半角の違いは対象外。詳細は `AI分析基盤仕様書.md` 5.3-5c。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |
