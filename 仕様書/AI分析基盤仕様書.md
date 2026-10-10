@@ -645,6 +645,7 @@ runnerはジョブ受領時に設定値を受け取り、実行時間・メモ�
 - **保存する定義**: `validate_definitions` が、各変数の `default` を正規の表記にして返す（直書き検査・`content_sha256` を揃えるため）。既存の大文字の default は変わらない（既存テンプレート id=2 の `content_sha256`・`sql_sha256`・`executed_code_sha256` が変わらないことを開発DBで確認）。新規の default は、マスタの表記になる。**保存時（`_fields_from_plan`）には正規化を足さない**（承認コードとの一致確認が壊れるため。正規化前の小文字の default で承認されたコードは、保存時に409で拒否される）。再利用で利用者が入力した値も `_check_value` を通り、正規の表記になる（`plan.template.values` も正規の表記）。
 - **直書きの検査**（`check_source`）: コード系の変数（種類が日付以外）の `default` が、大文字小文字を区別せずコード（SQL・Python）に残っていたら拒否する（`parameters_literal`）。
 - **画面の警告**: コード生成で、AIが返した `parameters` の default と、保存される定義の default を名前で比べ、異なったコード系の変数を、固定の形 `[{name, from, to}]`（`from`・`to` は形式 `[A-Za-z0-9_-]{1,40}` の文字列だけ。AIの自由な文章は入れない）で `codegen.normalized_values` に保存する。画面（`AIAnalysis.vue` ④）は「変数 〇〇: v053904703 を、マスタの表記 V053904703 に直しました。」を警告として出す。進行中の分析案（Redis）は変更しない（再生成で反映）。
+- **保存時**: `analysis_template_service._fields_from_plan` に専用の正規化は足していないが、`validate_definitions` 経由で、保存時にも共通の検証（正規の表記への変換）が走る。組み立てたコードが承認コードと異なれば 409 で拒否する（承認したコードを、黙って変えて保存する経路はない）。
 - **対象外**: 先頭ゼロ・全角半角の違い。
 - **検証**: `test_analysis_code_canonicalization.py` 13件ほか。開発DBで、小文字 `v053904703` の変数が置換後のコードで `'V053904703'` になること、`giji` が `giji` のままであること、`zghc` が `ZGHC` になることを読み取りで確認（コード生成のAI呼び出しはしていない）。本番は未反映・未確認。
 
