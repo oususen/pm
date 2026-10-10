@@ -66,6 +66,15 @@ BASE_SQL_SCHEMA = {
         'id', 'calendar_id', 'calendar_code', 'calendar_name', 'calendar_type', 'target_date',
         'is_working_day', 'is_delivery_day', 'is_order_day', 'is_holiday_work', 'work_minutes', 'work_pattern_id',
     ),
+    # BOM明細のビュー(AI用ビュー作成計画 §25。m_bom_item に m_bom・m_product・m_process・m_line・m_supplier を LEFT JOIN。
+    # remark・created_at・updated_at と、結合先のコード・名称以外の列は非公開)
+    'v_ai_bom_item': (
+        'id', 'bom_id', 'parent_product_id', 'parent_product_code', 'parent_product_name',
+        'bom_version', 'bom_valid_from', 'bom_valid_to', 'bom_is_active', 'bom_is_coproduct',
+        'child_product_id', 'child_product_code', 'child_product_name', 'quantity', 'loss_rate', 'sourcing_type',
+        'supplier_id', 'supplier_code', 'supplier_name', 'process_id', 'process_code', 'process_name',
+        'line_id', 'line_code', 'line_name', 'time_unit', 'lead_time_days', 'duration_min', 'is_coproduct_driver',
+    ),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -139,6 +148,25 @@ TABLE_NOTES = {
         'is_working_day は稼働日(1)か否(0)か。is_delivery_day は納入日、is_order_day は発注日、is_holiday_work は休日出勤で、いずれも 1 か 0。'
         'work_minutes は稼働分(分。空の行がありうる)、work_pattern_id は勤務パターンのID(空の行がありうる)。'
         'is_delivery_day・is_order_day・is_holiday_work・work_pattern_id の業務上の意味は未確認(項目名のみ)。'
+    ),
+    'v_ai_bom_item': (
+        'BOM明細(m_bom_item にBOMヘッダ m_bom と、品番・工程・ライン・仕入先のコード・名称を付けたビュー)。1行=BOM明細1行(全行。日付の列はなく、期間では絞らない)。'
+        '明細が1行もないBOMはこのビューに出ないので、このビューでBOMの件数(bom_idの種類数)を数えると、実際より少ない。'
+        'bom_id はBOMヘッダのID。parent_product_id は親品番のID、child_product_id は子品番のIDで、どちらも品番マスタビュー v_ai_product の id と結べる'
+        '(コードと名称は parent_product_code・parent_product_name、child_product_code・child_product_name)。'
+        'bom_version は版(v1・v2・v_auto_… の3種類。v_auto_… は自動で作ったBOM)。数字の大小で最新を決めない。最新のBOMは、版ではなく有効開始日 bom_valid_from で決める。'
+        'bom_valid_to は有効終了日(空は期限なし)、bom_is_active は有効(1)か無効(0)か。'
+        'bom_is_coproduct は連産品BOM(1つの工程で複数の製品が同時に生産されるBOM。親品番は仮想セット品番)で、1か0。'
+        'is_coproduct_driver は連産品代表品(連産親品番から代表の子品番を決めるときに使う)で、1か0。'
+        'quantity は親品番1個あたりの子品番の数量(員数)。行をまたいで合計しても業務上の意味はない。'
+        'loss_rate はロス率(比率で、%ではない)。空でないとき、数量に (1+ロス率) を掛ける。'
+        'sourcing_type は調達区分で、MAKE=自社製造、BUY=購買、SUBCON=外注。BUY(購買)は仕入先があり、SUBCON(外注)は仕入先が必ずある。'
+        'supplier_id は仕入先マスタビュー v_ai_supplier の id、process_id は工程マスタビュー v_ai_process の id、'
+        'line_id はラインマスタビュー v_ai_line の id と結べる(supplier_id・process_id・line_id は空の行がありうる)。'
+        'process_code の G は外作、PURCHASE は購買を示すための工程で、実際の工程ではない。'
+        'time_unit は時間単位(DAY=日、MINUTE=分)。どちらの行も、リードタイム lead_time_days(日)と加工時間(サイクル時間)duration_min(分)の両方を持つ(duration_min は空の行がありうる)。'
+        'lead_time_days が0の行はありうる(0は有効な値)。lead_time_days は親→子の需要日をずらすときに使う。'
+        'BUY・SUBCON の明細での工程・ラインの業務上の意味、およびサイクル時間の入力ルールは未確認。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
