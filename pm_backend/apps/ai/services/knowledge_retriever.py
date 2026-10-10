@@ -60,12 +60,12 @@ def _paths_for_categories(categories, document_ids=None):
     if 'manual' in categories and MANUAL_ROOT.exists():
         paths.extend((path, path.relative_to(PROJECT_ROOT).as_posix()) for path in MANUAL_ROOT.rglob('*.md') if path.name.lower() != 'readme.md')
     if 'pm_structure' in categories:
-        for name in ('PMアプリ構造辞書.md', '社内AIチャット仕様書.md'):
+        for name in ('PMアプリ構造辞書.md', 'AIチャット仕様書.md'):
             path = SPEC_ROOT / name
             if path.exists():
                 paths.append((path, path.relative_to(PROJECT_ROOT).as_posix()))
     if 'security' in categories:
-        path = SPEC_ROOT / '社内AI運用規約・AI用DB辞書.md'
+        path = SPEC_ROOT / 'AI運用規約・AI用DB辞書.md'
         if path.exists():
             paths.append((path, path.relative_to(PROJECT_ROOT).as_posix()))
     if 'procedure' in categories:
