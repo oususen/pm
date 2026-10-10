@@ -92,6 +92,18 @@ ANALYSIS_COLUMN_TYPES = {
         'calendar_type': 'VARCHAR', 'target_date': 'DATE', 'is_working_day': 'BIGINT', 'is_delivery_day': 'BIGINT',
         'is_order_day': 'BIGINT', 'is_holiday_work': 'BIGINT', 'work_minutes': 'BIGINT', 'work_pattern_id': 'BIGINT',
     },
+    # BOM明細(m_bom_item・m_bom等のモデル・マイグレーションから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_bom_itemと照合する)
+    # bool列(tinyint(1))はBIGINT(0/1)、int・外部キー(bigint)はBIGINT、decimal(p,s)はDECIMAL(18,s)、dateはDATE
+    'v_ai_bom_item': {
+        'id': 'BIGINT', 'bom_id': 'BIGINT', 'parent_product_id': 'BIGINT', 'parent_product_code': 'VARCHAR',
+        'parent_product_name': 'VARCHAR', 'bom_version': 'VARCHAR', 'bom_valid_from': 'DATE', 'bom_valid_to': 'DATE',
+        'bom_is_active': 'BIGINT', 'bom_is_coproduct': 'BIGINT', 'child_product_id': 'BIGINT',
+        'child_product_code': 'VARCHAR', 'child_product_name': 'VARCHAR', 'quantity': 'DECIMAL(18,3)',
+        'loss_rate': 'DECIMAL(18,3)', 'sourcing_type': 'VARCHAR', 'supplier_id': 'BIGINT', 'supplier_code': 'VARCHAR',
+        'supplier_name': 'VARCHAR', 'process_id': 'BIGINT', 'process_code': 'VARCHAR', 'process_name': 'VARCHAR',
+        'line_id': 'BIGINT', 'line_code': 'VARCHAR', 'line_name': 'VARCHAR', 'time_unit': 'VARCHAR',
+        'lead_time_days': 'BIGINT', 'duration_min': 'BIGINT', 'is_coproduct_driver': 'BIGINT',
+    },
 }
 
 

@@ -115,6 +115,34 @@ ANALYSIS_VIEWS = {
             'is_delivery_day・is_order_day・is_holiday_work・work_pattern_idの業務上の意味は未確認(項目名のみ)。'
         ),
     },
+    # BOM明細。日付の列(bom_valid_from・bom_valid_toはBOMの有効期間で実績の日付ではない)・数量の列(quantityは行をまたいで合計しても意味がない)がないため、
+    # date_field=None・quantity_field=None(AI用ビュー作成計画 §25)。
+    'v_ai_bom_item': {
+        'label': 'BOM明細', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行はBOM明細1行(BOM明細にBOMヘッダと、品番・工程・ライン・仕入先のコード・名称を付けたビュー)。日付の列がなく、期間では絞らず全行が対象。'
+            '明細が1行もないBOMはこのビューに出ないため、このビューでBOMの件数(bom_idの種類数)を数えると、実際より少ない。'
+            '最新のBOMは、版ではなく有効開始日bom_valid_fromで決める。'
+            '列の意味: id=BOM明細のID、bom_id=BOMヘッダのID、'
+            'parent_product_id・child_product_id=親品番・子品番のID(品番マスタビューv_ai_productのidと結べる)、'
+            'parent_product_code・parent_product_name=親品番のコード・名称、child_product_code・child_product_name=子品番のコード・名称、'
+            'bom_version=BOMの版(v1・v2・v_auto_…の3種類。v_auto_…は自動で作ったBOM。数字の大小で最新を決めない)、'
+            'bom_valid_from=有効開始日、bom_valid_to=有効終了日(空は期限なし)、bom_is_active=有効(1)か無効(0)か、'
+            'bom_is_coproduct=連産品BOMか(1か0。1つの工程で複数の製品が同時に生産されるBOM。親品番は仮想セット品番)、'
+            'is_coproduct_driver=連産品代表品か(1か0。連産親品番から代表の子品番を決めるときに使う)、'
+            'quantity=親品番1個あたりの子品番の数量(員数。行をまたいで合計しても業務上の意味はない)、'
+            'loss_rate=ロス率(比率で%ではない。空でないとき、数量に(1+ロス率)を掛ける)、'
+            'sourcing_type=調達区分(MAKE=自社製造、BUY=購買、SUBCON=外注。BUYは仕入先があり、SUBCONは仕入先が必ずある)、'
+            'supplier_id・supplier_code・supplier_name=仕入先のID・コード・名称(supplier_idは仕入先マスタビューv_ai_supplierのidと結べる。空の行がありうる)、'
+            'process_id・process_code・process_name=工程のID・コード・名称(process_idは工程マスタビューv_ai_processのidと結べる。空の行がありうる。'
+            'process_codeのGは外作、PURCHASEは購買を示すための工程で、実際の工程ではない)、'
+            'line_id・line_code・line_name=ラインのID・コード・名称(line_idはラインマスタビューv_ai_lineのidと結べる。空の行がありうる)、'
+            'time_unit=時間単位(DAY=日、MINUTE=分。どちらの行も、リードタイムlead_time_daysと加工時間duration_minの両方を持つ)、'
+            'lead_time_days=リードタイム(日。親→子の需要日をずらすときに使う。0の行はありうる。0は有効な値)、'
+            'duration_min=加工時間(サイクル時間。分。空の行がありうる)。'
+            'BUY・SUBCONの明細での工程・ラインの業務上の意味、およびサイクル時間の入力ルールは未確認。'
+        ),
+    },
 }
 
 

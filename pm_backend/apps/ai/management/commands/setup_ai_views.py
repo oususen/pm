@@ -26,8 +26,8 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_customer': 'm_customer',
 }
 
-# 結合を含み、定義がマイグレーション(0012〜0014・0040)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
-EXISTING_JOIN_VIEWS = ('v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day')
+# 結合を含み、定義がマイグレーション(0012〜0014・0040・0041)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
+EXISTING_JOIN_VIEWS = ('v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day', 'v_ai_bom_item')
 
 # 単純なマスタビュー以外のビューが、同じ元テーブルから使う列。owner のこの列権限は REVOKE しない。
 # v_ai_shipment が m_product の id・product_code・product_name を使う(t_shipment_actual の列は対象外)。
@@ -40,6 +40,14 @@ OTHER_VIEW_COLUMNS = {
         'is_holiday_work', 'work_minutes', 'work_pattern_id',
     },
     'm_calendar': {'id', 'calendar_code', 'calendar_name', 'calendar_type'},
+    # v_ai_bom_item(m_bom_item に m_bom などを LEFT JOIN。マイグレーション0041)が、
+    # m_bom の7列と m_bom_item の13列(remark・created_at・updated_at 以外)を使う。
+    # 品番・工程・ライン・仕入先の列は、既存の単純なマスタビューが同じ列を使う。
+    'm_bom': {'id', 'parent_product_id', 'version', 'valid_from', 'valid_to', 'is_active', 'is_coproduct'},
+    'm_bom_item': {
+        'id', 'bom_id', 'child_product_id', 'quantity', 'loss_rate', 'sourcing_type', 'supplier_id',
+        'process_id', 'line_id', 'time_unit', 'lead_time_days', 'duration_min', 'is_coproduct_driver',
+    },
 }
 
 READER_USER = 'pm_ai_reader'

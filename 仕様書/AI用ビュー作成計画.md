@@ -880,3 +880,159 @@ GRANT SELECT ON `<db>`.`v_ai_calendar_day` TO 'pm_ai_reader'@'<readerのホス�
 **未完了**：実機（AIを使う）での再試験。分析の実行経路での全行×12列の型検査。結合ビューのGRANT・定義者の付け替えを`setup_ai_views`で自動化するか（BOSS判断待ち）。
 
 **反映状況**：コミット済み（0259a4c4）。**開発DBへ反映済み**（`migrate ai 0040`＋手順SQLの手動実行。`setup_ai_views --apply`は使っていない＝結合ビューは対象外）。本番未反映。
+
+## 25. BOM明細のビュー `v_ai_bom_item` の作成前確認（2026-10-10。BOSS承認済み: 公開29列、`bom_`の接頭辞、元テーブル`m_bom`・`m_bom_item`の許可は置き換えずビューの追加のみ。実装はgeneratorが実施）
+
+公開する列は、判断画面 decisions の `m_bom`・`m_bom_item` を、草案の前に読み直して決めた（`m_bom` は7列すべて公開、`m_bom_item` は `remark` のみ非公開）。
+
+### 25.1 BOSSの決定事項（この草案の前提）
+| 決定 | 内容 |
+|---|---|
+| ①明細を主にしてヘッダを結合 | `m_bom_item` を主テーブルにし、`m_bom` を `LEFT JOIN`。§3（41行目）の「ヘッダと明細は別ビュー」と §4.1-2「結合してよいのはマスタの属性を付けるときだけ」の**例外**とする（BOSS承認 2026-10-10）。ヘッダは `bom_id` の主キー結合のため、行数は明細と変わらない。承認後に、41行目と §4.1-2 へこの例外を追記する |
+| 品番・工程・ライン・仕入先も結合 | 親品番・子品番（`m_product`）、`m_process`、`m_line`、`m_supplier` のコードと名称を `LEFT JOIN` で付ける（BOSS指示 2026-10-10） |
+| ヘッダ単独のビューは作らない | `v_ai_bom` は作らない。明細が1行もないBOM9件はビューに出ない。9件の中身は「とりあえず作らない」＝保留（BOSS指示 2026-10-10） |
+| 結合ビューの手順は手動（案A） | `setup_ai_views` の自動化はしない。GRANT・定義者の付け替えは、§25.6 の手順SQLをBOSSが実行する |
+
+### 25.2 確認項目
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、BOM（親品番に対する子品番・員数・調達区分・工程・ライン・仕入先・リードタイム）を、コードと名称で分析・説明できるようにする |
+| 元テーブル | 主：`m_bom_item`（別名 `i`）。`LEFT JOIN m_bom b ON b.id = i.bom_id`、`LEFT JOIN m_product pp ON pp.id = b.parent_product_id`、`LEFT JOIN m_product cp ON cp.id = i.child_product_id`、`LEFT JOIN m_process pr ON pr.id = i.process_id`、`LEFT JOIN m_line l ON l.id = i.line_id`、`LEFT JOIN m_supplier s ON s.id = i.supplier_id`。結合先はすべて主キー（`id`）のため、行数は `m_bom_item` と同じ（BOSSが実行したSQLの結果：明細3,428行。開発DBの結果） |
+| 対象行 | 全行（WHEREなし）。ヘッダのない明細は残る（LEFT JOIN）。**明細のないBOM9件（ヘッダ1,323件中）は、ビューに出ない**。このため、このビューでBOMの件数を数えると、実際より9件少ない（説明に書く） |
+| 数値定義 | `quantity`は、親1個あたりの子の数量（受注展開仕様書 Step2）。1行=BOM明細1行。`quantity`を行をまたいで合計しても業務上の意味はない（`quantity_field=None`） |
+| 日付の列 | `bom_valid_from`・`bom_valid_to`はBOMの有効期間であり、実績の日付ではない。`date_field=None`（期間では絞らず、全行を対象にする。既存のマスタビューと同じ） |
+| 個人情報 | なし（コード・名称・数量）。仕入先の担当者名・電話・メールは結合しない（`v_ai_supplier`と同じ公開列だけ） |
+
+### 25.3 公開列（29列。この順）
+| # | 列 | 元 | ANALYSIS_COLUMN_TYPES |
+|---|---|---|---|
+| 1 | `id` | `i.id` | BIGINT |
+| 2 | `bom_id` | `i.bom_id` | BIGINT |
+| 3 | `parent_product_id` | `b.parent_product_id` | BIGINT |
+| 4 | `parent_product_code` | `pp.product_code` | VARCHAR |
+| 5 | `parent_product_name` | `pp.product_name` | VARCHAR |
+| 6 | `bom_version` | `b.version` | VARCHAR |
+| 7 | `bom_valid_from` | `b.valid_from` | DATE |
+| 8 | `bom_valid_to` | `b.valid_to`（空を許す） | DATE |
+| 9 | `bom_is_active` | `b.is_active`（真偽値） | BIGINT（0/1） |
+| 10 | `bom_is_coproduct` | `b.is_coproduct`（真偽値） | BIGINT（0/1） |
+| 11 | `child_product_id` | `i.child_product_id` | BIGINT |
+| 12 | `child_product_code` | `cp.product_code` | VARCHAR |
+| 13 | `child_product_name` | `cp.product_name` | VARCHAR |
+| 14 | `quantity` | `i.quantity`（decimal(12,3)） | DECIMAL(18,3) |
+| 15 | `loss_rate` | `i.loss_rate`（decimal(5,3)。空を許す） | DECIMAL(18,3) |
+| 16 | `sourcing_type` | `i.sourcing_type` | VARCHAR |
+| 17 | `supplier_id` | `i.supplier_id`（空を許す） | BIGINT |
+| 18 | `supplier_code` | `s.supplier_code` | VARCHAR |
+| 19 | `supplier_name` | `s.supplier_name` | VARCHAR |
+| 20 | `process_id` | `i.process_id`（空を許す） | BIGINT |
+| 21 | `process_code` | `pr.process_code` | VARCHAR |
+| 22 | `process_name` | `pr.process_name` | VARCHAR |
+| 23 | `line_id` | `i.line_id`（空を許す） | BIGINT |
+| 24 | `line_code` | `l.line_code` | VARCHAR |
+| 25 | `line_name` | `l.line_name` | VARCHAR |
+| 26 | `time_unit` | `i.time_unit` | VARCHAR |
+| 27 | `lead_time_days` | `i.lead_time_days` | BIGINT |
+| 28 | `duration_min` | `i.duration_min`（空を許す） | BIGINT |
+| 29 | `is_coproduct_driver` | `i.is_coproduct_driver`（真偽値） | BIGINT（0/1） |
+
+ヘッダ由来の列には `bom_` を付けた（`is_active`などが明細の列と紛らわしいため。列名はBOSSが変更してよい）。型は、モデル（`masters/models.py:384-445`）から導出した（`BigAutoField`・外部キー→bigint、`DecimalField(p,s)`→`DECIMAL(18,s)`、`BooleanField`→BIGINT、`IntegerField`→BIGINT、`DateField`→DATE、`CharField`→VARCHAR）。ビュー作成後に `SHOW COLUMNS FROM v_ai_bom_item` と照合する（未実施）。
+
+**非公開（ビューに含めない）**：`m_bom_item.remark`（備考。BOSS判断で非公開）、`created_at`・`updated_at`（判断が未決定のため非公開）。`m_bom.created_at`・`updated_at`（同）。結合先の品番・工程・ライン・仕入先は、コード・名称以外の列を持ち込まない（仕入先の担当者・電話・メールを含む）。
+
+### 25.4 列の意味（仕様書とコードで確認できた範囲。推測は書かない）
+| 列 | 意味 | 出典 |
+|---|---|---|
+| `bom_version`・`bom_valid_from`・`bom_valid_to`・`bom_is_active` | 版・有効開始日・有効終了日・有効。計画日が`valid_from`以降かつ`valid_to`以前（空は期限なし）のBOMを使い、複数あれば`valid_from`が新しいものを優先する | `gantt_planning.py:565-568,595-598,769-770`、モデルの項目名 |
+| `bom_version` | 版。値は`v1`・`v2`・`v_auto_日付_番号`（自動で作られた版）の3種類（BOSSが実行したSQLの結果）。最新のBOMは、版ではなく**有効開始日**で決める（有効開始日を優先。BOSS指示 2026-10-10）。計画でBOMを選ぶコードも、有効開始日の新しい順 | BOSS指示、`gantt_planning.py:568,598` |
+| `bom_is_coproduct` | 連産品BOM。1つの工程で複数の製品が同時に生産されるBOM（親製品は仮想セット品番）。受注展開のBOM倍率計算・在庫計算から除外される | モデルの説明文、受注展開仕様書.md:213,530 |
+| `is_coproduct_driver` | 連産品代表品。連産親品番から代表の子品番を決めるときに使う | `gantt_planning.py:582,609,780` |
+| `quantity` | 親1個あたりの子の数量（員数） | 受注展開仕様書.md Step2（部品B=2個の例） |
+| `loss_rate` | ロス率。空でないとき、数量に (1+ロス率) を掛ける（比率。%ではない） | `gantt_planning.py:750-751` |
+| `sourcing_type` | 調達区分：MAKE=自社製造、BUY=購買、SUBCON=外注。BUY・SUBCONで仕入先が決まっている明細が購買の対象。MAKEの明細がルーティング草案の対象 | モデルのラベル、`scheduling_logic_v3.md:229,413` |
+| `supplier_id`・`process_id`・`line_id` | 明細の仕入先・工程・ライン（空の明細がある）。それぞれ`v_ai_supplier`・`v_ai_process`・`v_ai_line`の`id`と結べる | モデル、各ビュー |
+| `process_code` | `G`は外作、`PURCHASE`は購買を示すための工程（実際の工程ではない） | §13、BOSS指示 |
+| `time_unit`・`duration_min` | 時間単位（DAY=日、MINUTE=分）と所要時間（分）。`duration_min`は加工時間（サイクル時間）で、`lead_time_days`が1以上の行にも入りうる | モデルのラベル、`scheduling_logic_v3.md:414`、BOSS回答（2026-10-10）、リードタイム仕様書.md:38 |
+| `lead_time_days` | リードタイム（日）。親→子の需要日シフトに使う。ルーティング工程とラインのリードタイムが無いときの最後の候補 | リードタイム仕様書.md:15,33 |
+| `child_product_id`・`parent_product_id` | 子・親の品番ID。`v_ai_product`の`id`と結べる | モデル、§9 |
+
+**実データ（BOSSが実行したSQLの結果。2026-10-10。開発DB。明細3,428行）**
+| 調達区分 | 時間単位 | 行数 | 工程あり | ラインあり | 仕入先あり | `lead_time_days`が1以上 | `duration_min`が1以上 |
+|---|---|---|---|---|---|---|---|
+| MAKE | DAY | 553 | 553 | 553 | 0 | 553 | 0 |
+| MAKE | MINUTE | 1,355 | 1,355 | 1,355 | 0 | 401 | 1,355 |
+| BUY | DAY | 684 | 12 | 12 | 684 | 684 | 0 |
+| SUBCON | DAY | 681 | 681 | 573 | 681 | 681 | 1 |
+| SUBCON | MINUTE | 155 | 155 | 155 | 155 | 154 | 155 |
+
+版の値は、`v1`＝1,317件、`v_auto_20260313_2`＝4件、`v2`＝2件（計1,323件）。
+
+**実データから言えること（現時点の状態。BOSSの回答「現在のデータはよくない。後で直す」（2026-10-10）のため、説明文には書かない。説明文は、BOSSの回答の業務ルールだけを書き、ビューは入っている値をそのまま見せる）**：MAKEは、工程・ラインが必ずあり、仕入先はない。BUYは、仕入先が必ずあり、工程・ラインがあるのは684行中12行だけ。SUBCONは、工程と仕入先が必ずあり、ラインは836行中728行にある（時間単位がMINUTEの155行はすべてあり、DAYの681行中573行）。時間単位がDAYの行は、`lead_time_days`を使い（DAYの1,918行はすべて1以上）、`duration_min`はほぼ空または0（1行だけ1以上）。MINUTEの行は、`duration_min`が必ず1以上。`lead_time_days`は、MAKEのMINUTEで401/1,355行、SUBCONのMINUTEで154/155行が1以上。`lead_time_days`が0の行は、ありえる（BOSS回答。リードタイム仕様書でも0は有効値）。
+
+**BOSSの回答（2026-10-10。実データの疑問点への回答）**
+- BUY（購買）は、仕入先だけでよい。工程・ラインがある12行は、本来は不要（BOSS回答の理解。要確認）。
+- SUBCON（外注）は、仕入先が必ずある（BOSS回答。実データも836行すべてに仕入先がある）。工程・ラインについては、BOSSの回答はまだない（実データは、工程が836行すべて、ラインが728行にある）。
+- 時間単位がDAYの行も、MINUTEの行も、リードタイム（`lead_time_days`）と加工時間（サイクル時間。`duration_min`）の両方を持つ、として扱う（BOSS回答 2026-10-10）。リードタイム仕様書.md:38 も、`duration_min`をサイクルタイム専用とし、LT日数のシフトには使わないとしている。
+- **ただし実データでは**、DAYの行（1,918行）は`duration_min`が入っていない行がほとんど（1以上は1行だけ。0と空の区別は未確認）。MINUTEの行（1,510行）は`duration_min`が全行1以上で、`lead_time_days`が1以上なのは一部（MAKE 401/1,355行、SUBCON 154/155行）。説明には、BOSSの回答（両方を持つ）と、実データの状態（DAYの行は加工時間が入っていないことが多い）を、分けて書く。
+- 版`v_auto_…`（4件）は、自動作成したBOM。
+
+**未確認（説明に「業務上の意味は未確認」と書く）**：上のBOSS回答のうち「要確認」とした2点の解釈。明細のないBOM9件の中身は、BOSS指示（2026-10-10）で「とりあえず作らない」＝保留とし、調べない。説明文には、具体的な品番コード・名称・件数を書かない。
+
+### 25.5 実装内容（承認後。generatorが行う）
+1. `pm_backend/apps/ai/migrations/0041_ai_bom_item_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_bom_item AS SELECT …`（標準SQLのみ。バッククォート・DEFINER・SQL SECURITY・DB修飾なし）。ロールバックは`DROP VIEW IF EXISTS v_ai_bom_item`。依存は`ai 0040_ai_calendar_day_view`と、元の列が揃う`masters`の最新マイグレーション（`is_coproduct_driver`＝0029、`is_coproduct`＝0013。generatorが現行の最新を確認する）。`makemigrations`は不要。
+2. `sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_bom_item`（29列）、`TABLE_NOTES`に説明を追加。
+3. `analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_bom_item`（label=BOM明細、`date_field=None`、`quantity_field=None`、説明は§25.4の確認済みの範囲だけ。明細のないBOMが出ないことを含む）。
+4. `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に29列。
+5. `setup_ai_views.py`：`EXISTING_JOIN_VIEWS`に`v_ai_bom_item`を追加（再作成せず`--check`で定義者を表示）。`OTHER_VIEW_COLUMNS`に`m_bom`（`id`・`parent_product_id`・`version`・`valid_from`・`valid_to`・`is_active`・`is_coproduct`の7列）と`m_bom_item`（`remark`・`created_at`・`updated_at`以外の13列）を追加する。品番・工程・ライン・仕入先の列は、既存の単純ビューが同じ列を使う。**コマンドの動作（GRANT・定義者の付け替え）は変えない**（案A）。
+6. 試験：`apps/ai/test_analysis_bom_item_view.py`新規（`test_analysis_calendar_day_view.py`と同じ形式。DBなし）。既存ビューの定義のSHA-256を更新する。
+7. 変更しないもの：既存の元テーブル`m_bom`・`m_bom_item`の許可（`SCREEN_SQL_TABLES`）、既存ビューの列・説明、`setup_ai_views`の動作。
+
+### 25.6 手順SQL（`pm_ai_view_owner`への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>`は接続先のDB名。管理者で実行）
+```sql
+GRANT SELECT (`id`, `parent_product_id`, `version`, `valid_from`, `valid_to`, `is_active`, `is_coproduct`) ON `<db>`.`m_bom` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`id`, `bom_id`, `child_product_id`, `quantity`, `loss_rate`, `sourcing_type`, `supplier_id`, `process_id`, `line_id`, `time_unit`, `lead_time_days`, `duration_min`, `is_coproduct_driver`) ON `<db>`.`m_bom_item` TO 'pm_ai_view_owner'@'localhost';
+-- m_product・m_process・m_line・m_supplier のコード・名称の列は、setup_ai_views --apply で付与済みの場合は不要(未付与なら先に実行)
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_bom_item` AS
+SELECT i.`id`, i.`bom_id`, b.`parent_product_id`, pp.`product_code` AS `parent_product_code`, pp.`product_name` AS `parent_product_name`,
+       b.`version` AS `bom_version`, b.`valid_from` AS `bom_valid_from`, b.`valid_to` AS `bom_valid_to`, b.`is_active` AS `bom_is_active`, b.`is_coproduct` AS `bom_is_coproduct`,
+       i.`child_product_id`, cp.`product_code` AS `child_product_code`, cp.`product_name` AS `child_product_name`,
+       i.`quantity`, i.`loss_rate`, i.`sourcing_type`,
+       i.`supplier_id`, s.`supplier_code`, s.`supplier_name`,
+       i.`process_id`, pr.`process_code`, pr.`process_name`,
+       i.`line_id`, l.`line_code`, l.`line_name`,
+       i.`time_unit`, i.`lead_time_days`, i.`duration_min`, i.`is_coproduct_driver`
+FROM `<db>`.`m_bom_item` i
+LEFT JOIN `<db>`.`m_bom` b ON b.`id` = i.`bom_id`
+LEFT JOIN `<db>`.`m_product` pp ON pp.`id` = b.`parent_product_id`
+LEFT JOIN `<db>`.`m_product` cp ON cp.`id` = i.`child_product_id`
+LEFT JOIN `<db>`.`m_process` pr ON pr.`id` = i.`process_id`
+LEFT JOIN `<db>`.`m_line` l ON l.`id` = i.`line_id`
+LEFT JOIN `<db>`.`m_supplier` s ON s.`id` = i.`supplier_id`;
+GRANT SELECT ON `<db>`.`v_ai_bom_item` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+```
+手順SQLのビュー定義は、マイグレーション0041のSELECT（標準SQL）と、列・結合・別名が同じであること（検証項目8）。
+
+### 25.7 検証項目（合否が機械的に判定できるもの）
+1. ビューの行数＝`m_bom_item`の行数（BOSSが実行したSQLでは3,428）。
+2. `COUNT(DISTINCT bom_id)`＝ヘッダ件数−明細のないBOM件数（1,323−9＝1,314）。
+3. `m_bom_item`の`bom_id`がヘッダにない行が0件（BOSSの確認SQL 3）。ある場合は、その行は`bom_*`の列が空になることを説明に書く。
+4. 品番・工程・ライン・仕入先の結合で、コードが空になる行の件数が、元のIDがあるのにマスタにない行の件数（BOSSの確認SQL 4）と一致する。
+5. `pm_ai_reader`の接続でビューが読め、非公開列（`remark`・`created_at`・`updated_at`）は読めない。
+6. 定義者が`pm_ai_view_owner@localhost`・`DEFINER`（`setup_ai_views --check`の要対応が0件）。
+7. 全行×29列が列型の検査を通る（分析の実行経路で確認）。
+8. マイグレーションのSELECTと§25.6の手順SQLのSELECTが、列・結合・別名で同じ。
+9. 既存ビュー（8本）の定義・列・説明が変わっていない（定義のSHA-256）。
+10. 説明文に、具体的な品番コード・名称・件数がない。「未確認」の項目が§25.4と一致する。
+
+### 25.8 BOSS判断の記録
+- ~~公開列の29列でよいか~~ → **決定済み（承認 2026-10-10）**：29列。
+- ~~ヘッダ由来の列に`bom_`を付ける案でよいか~~ → **決定済み（承認）**：付ける。
+- ~~元テーブル`m_bom`・`m_bom_item`の許可は、置き換えず、ビューの追加だけにしてよいか~~ → **決定済み（承認）**：置き換えず、ビューの追加だけにする。
+- 確認SQLの結果は、開発DBのもの（BOSS回答 2026-10-10）。
+- 現在のデータはよくなく、BOSSが後で直す（説明文には実データの件数・傾向を書かない。§25.4）。
+- 明細のないBOM9件の中身は、保留（とりあえず作らない。調べない）。
+
+**未確認のまま実装に進む項目**：確認SQL 3（明細の`bom_id`がヘッダにない行の件数）・4（品番・工程・ライン・仕入先がマスタにない行の件数）の結果は、まだない。実装後の検証（§25.7 の3・4）で、開発DBの読み取りにより確認する。
+
+### 25.9 反映状況
+BOSS承認済み。**コード実装済み（generator。evaluator未検証）**：`0041_ai_bom_item_view.py`・`sql_queries.py`・`analysis_data_service.py`・`analysis_execution_service.py`・`setup_ai_views.py`（`EXISTING_JOIN_VIEWS`・`OTHER_VIEW_COLUMNS`のみ）・`test_analysis_bom_item_view.py`（新規）・`test_setup_ai_views.py`（1件追加）。既存7ビューの定義のSHA-256は変わらず（`db31acbf…`のまま）。DBなしの試験は実行済み（`ai.test_analysis_bom_item_view`ほか10モジュール132件OK）。**開発DBは未変更**（`migrate ai 0041`・§25.6の手順SQLは未実行＝BOSSが実行）。§25.7の検証項目（DB上の確認）は未実施。41行目・§4.1-2への例外の追記は未実施。本番未反映。
