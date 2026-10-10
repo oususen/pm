@@ -75,6 +75,19 @@ ANALYSIS_VIEWS = {
             'is_active=有効(1)か無効(0)か。工程はm_processのline_id(v_ai_processのline_id)でラインに結べる。'
         ),
     },
+    # 仕入先マスタ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §17)。
+    'v_ai_supplier': {
+        'label': '仕入先マスタ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1仕入先(仕入先マスタ)。日付の列がなく、期間では絞らず全行が対象。is_activeの列はなく、全仕入先が対象。'
+            '列の意味: id=仕入先のID(入荷実績ビューv_ai_purchase_receiptのsupplier_idと結べる)、'
+            'supplier_code=仕入先コード(先頭ゼロを含む文字列。例000044。英字で始まるものG00001もある。数字として扱わない)、'
+            'supplier_name=仕入先名(会社名)、'
+            'supplier_type=仕入先の区分(purchase=購入、outsource=外作、both=両方。購入先・外作先を分けるときに使う)、'
+            'calendar_id=仕入先専用カレンダー(稼働カレンダのcalendar_idと結べる。空の仕入先が多い)。'
+            '購買ライン(v_ai_lineのline_type=PURCHASE)とは、仕入先のsupplier_codeとラインのline_codeを同じ文字列で結ぶ(1対1)。'
+        ),
+    },
 }
 
 

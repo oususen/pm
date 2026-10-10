@@ -75,6 +75,11 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'line_code': 'VARCHAR', 'line_name': 'VARCHAR', 'calendar_id': 'BIGINT',
         'line_type': 'VARCHAR', 'is_active': 'BIGINT',
     },
+    # 仕入先マスタ(m_supplierのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_supplierと照合する)
+    'v_ai_supplier': {
+        'id': 'BIGINT', 'supplier_code': 'VARCHAR', 'supplier_name': 'VARCHAR', 'supplier_type': 'VARCHAR',
+        'calendar_id': 'BIGINT',
+    },
 }
 
 

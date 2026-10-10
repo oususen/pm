@@ -57,6 +57,8 @@ BASE_SQL_SCHEMA = {
     ),
     # ラインマスタのビュー(AI用ビュー作成計画 §15。lead_time_days・use_direct_process・created_at・updated_at は非公開)
     'v_ai_line': ('id', 'line_code', 'line_name', 'calendar_id', 'line_type', 'is_active'),
+    # 仕入先マスタのビュー(AI用ビュー作成計画 §17。contact_person・phone_number・order_email は個人名・連絡先のため非公開)
+    'v_ai_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type', 'calendar_id'),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -106,6 +108,14 @@ TABLE_NOTES = {
         'OUTSOURCE=外作ライン(現在は使っていない。削除予定)、OTHER=クボタ納期調整(意味の文章は未確認)。'
         'calendar_id はラインの勤務カレンダ(稼働カレンダの calendar_id と結べる。空のラインがある)。'
         'is_active は有効(1)・無効(0)。工程は m_process の line_id(v_ai_process の line_id)でラインに結べる。'
+    ),
+    'v_ai_supplier': (
+        '仕入先マスタ(m_supplier)のビュー。1行=1仕入先(全行。is_active の列はない)。'
+        'supplier_code は仕入先コード(先頭ゼロを含む文字列。例 000044。英字で始まるもの G00001 もある。数字として扱わない)、supplier_name は仕入先名(会社名)。'
+        'supplier_type は purchase=購入、outsource=外作、both=両方(購入先・外作先を分けるときに使う)。'
+        'calendar_id は仕入先専用カレンダー(稼働カレンダの calendar_id と結べる。空の仕入先が多い)。'
+        'id は仕入先のID(入荷実績ビュー v_ai_purchase_receipt の supplier_id と結べる)。'
+        '購買ライン(v_ai_line の line_type=PURCHASE)とは、仕入先の supplier_code とラインの line_code を同じ文字列で結ぶ(1対1)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

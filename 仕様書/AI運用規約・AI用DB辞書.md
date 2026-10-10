@@ -287,7 +287,19 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 列の意味は計画書 §15.3・§15.5 の範囲だけ。`ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（6列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_line` の許可・`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は置き換えず、ビューの追加のみ。
 - 権限の付与・定義者の付け替えは手動SQL（計画書 §9.3 に倣う。`pm_ai_view_owner` へ `m_line` の6列の列単位 `SELECT`）。未実施（BOSSが実行）。
 
-### 6.5-7 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
+### 6.5-7 仕入先マスタ（`v_ai_supplier`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_supplier`（`ai/0038`で作成） | `id`, `supplier_code`, `supplier_name`, `supplier_type`, `calendar_id`（5列） | `m_supplier` 全行（絞り込みなし・結合なし。29行。`is_active` の列はない）。非公開（ビューに含めない）: `contact_person`（担当者名）, `phone_number`（電話番号）, `order_email`（メールアドレス）。個人名・連絡先のため | 読み取り専用SQLで、仕入先のコード・名前・区分・専用カレンダーの確認、入荷実績ビュー `v_ai_purchase_receipt` の `supplier_id` から仕入先を引く |
+
+- 仕入先名は会社名（個人名ではない）。`supplier_code` は先頭ゼロを含む文字列（例 `000044`。英字で始まるもの `G00001` もある）で、数字として扱わない。
+- `supplier_type` の値: `purchase`=購入、`outsource`=外作、`both`=両方（購入先・外作先を分けるときに使う）。`calendar_id` は仕入先専用カレンダー（稼働カレンダの `calendar_id` と結べる。空の仕入先が多い）。
+- 購買ライン（`v_ai_line` の `line_type='PURCHASE'`）とは、仕入先の `supplier_code` とラインの `line_code` を同じ文字列で結ぶ（1対1。外部キーではない）。
+- 列の意味は計画書 §17.3 の範囲だけ。`ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（5列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_supplier` の許可・`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は置き換えず、ビューの追加のみ。
+- 権限の付与・定義者の付け替えは手動SQL（計画書 §19.1。`pm_ai_view_owner` へ `m_supplier` の5列の列単位 `SELECT`）。未実施（BOSSが実行）。
+
+### 6.5-8 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
 
 - DuckDB（分析の実行）は大文字小文字を区別するが、MySQL（`utf8mb4_unicode_ci`）は区別しない。そのため、AI分析の変数（品番・顧客コード・納入先コード）の値は、**マスタ・公開ビューに保存されている正規の表記**に直してからコードに入れる。`upper()` は使わない（マスタに小文字の品番 `giji` が実在する）。
 - 確認元（公開ビューが正）: 品番=`v_ai_product`、納入先コード=`v_ai_shipment` の実際の値（ともに読み取り専用の分析用接続）、顧客コード=`m_customer`（顧客マスタのビューは未作成。作成後は公開ビューへ切り替える）。マスタ・ビューにない値、および大文字小文字だけが違う値が複数あって決められない納入先コードは、拒否する（代わりの値は使わない）。

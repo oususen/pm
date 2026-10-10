@@ -188,7 +188,7 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
 - 開発・本番で、AI用ビューの実行可否と`pm_ai_reader`の権限を確認済みである。
 - AI分析画面は、承認済みの`v_ai_...`ビューだけを使用できる。
 
-## 8. 仕入先マスタのビュー `v_ai_supplier` の作成前確認（案。2026-10-08。BOSSの承認待ち）
+## 8. 仕入先マスタのビュー `v_ai_supplier` の作成前確認（案。2026-10-08。**§17に置き換える**。以下は別セッションの古い草案で、設計原則§4.1と食い違う点がある）
 
 実機の安定性の評価（試験T8「9月の入荷を仕入先ごとに集計して」）で、結果の表が「仕入先ID」（`supplier_id`＝`m_supplier.id`。データベースの内部の番号）だけになった。現場が分かるのは、仕入先名か、せめて仕入先コード。入荷実績ビューには、仕入先の列が`supplier_id`しかなく、仕入先マスタのビューも、まだない。§3 優先3「マスタ・将来領域」の、仕入先を、分析画面で必要になったため、追加する。
 
@@ -573,6 +573,60 @@ SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 ```
 
 ## 18. 日付なしビューの指示文の見直し（2026-10-10。BOSS承認済み。Codex第2回レビュー指摘1への対応。実装済み・evaluator未検証）
+## 17. 仕入先マスタのビュー `v_ai_supplier` の作成前確認（2026-10-10。BOSS承認済み。実装は§19。§8を置き換える）
+
+公開する列は、[AIマスタビュー確認明細](AIマスタビュー確認明細.md) §4 のBOSS判断のとおり。§4.1 の設計原則（1テーブル1ビュー・標準SQL・定義者は `pm_ai_view_owner`・列の説明は仕様書で確認）に従う。§8（2026-10-08）の草案は、「入荷ビューに仕入先の列を足さず、AIにビュー同士を結合させる」という方針で書かれており、今回の原則（結合は、マスタの属性を付けるときだけ可。実績同士は不可）と矛盾しない範囲で引き継ぐ。
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、仕入先をコード・名前・区分・カレンダで、分析・説明できるようにする。入荷実績ビュー（`v_ai_purchase_receipt`）の`supplier_id`から、仕入先のコード・名前を引く（仕入先ごとの入荷の集計の表示に、内部のIDを出さない） |
+| 元テーブル | `m_supplier` の1つだけ。結合なし（行数29） |
+| 対象行 | 全行（絞り込みなし）。`is_active`の列はない |
+| 数値定義 | なし（マスタ）。件数は行数。`supplier_code`は29行で重複なし。`supplier_name`も29種類 |
+| 公開フィールド（5列） | `id`、`supplier_code`、`supplier_name`、`supplier_type`、`calendar_id` |
+| 非公開フィールド | `contact_person`（担当者名）、`phone_number`（電話番号）、`order_email`（送信メールアドレス）。個人名・連絡先のため |
+| 個人情報 | 仕入先名は会社名（個人名ではない）。個人名・電話・メールの3列は、ビューに含めない。外部AIへ送る目的文の、名称→コード置換は、従来どおり（運用規約 §4.1-3） |
+| 検証方法 | ①ビューの行数＝`m_supplier`の行数（29）②`supplier_code`の一意性③区分の件数（購入17・外作9・両方3）④`pm_ai_reader`でビューが読め、非公開の3列が読めない⑤定義者が`pm_ai_view_owner@localhost`⑥全行×5列が列型の検査（`_cell`）を通る⑦入荷実績ビューの仕入先別の集計（9月: 仕入先16=20,259・仕入先8=11,270。§8の記録）を、コード・名前つきで照合 |
+
+### 17.1 実データ（開発DB）
+- 29行。区分は、購入（`purchase`）17、外作（`outsource`）9、両方（`both`）3。
+- `calendar_id`が空の仕入先が28（仕入先専用カレンダがあるのは1つ）。
+- `supplier_code`は、先頭がゼロのものが27、英字で始まるものが2（例 `G00001`）。最大6桁。**文字列のまま扱う。**
+- 購買ライン（`line_type='PURCHASE'`）29の`line_code`が、すべて仕入先コードと一致する（ラインビュー §15.6）。
+
+### 17.2 列型の対応（`m_supplier`のSHOW COLUMNSからの導出。ビュー作成後に再確認する）
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id`、`calendar_id` | bigint | `BIGINT` |
+| `supplier_code`、`supplier_name`、`supplier_type` | varchar | `VARCHAR` |
+
+### 17.3 列の意味（仕様書で確認できた範囲。推測は書かない）
+| 列 | 意味 | 出典 |
+|---|---|---|
+| `supplier_type` | 値は `purchase`=購入、`outsource`=外作、`both`=両方。購入先・外作先を分けるときに使う（購買ラインの種別と同じ、BOSS説明） | モデルの選択肢（`models.py`）、BOSS説明（ライン§15.5） |
+| `supplier_code` | 仕入先コード。購買ラインの`line_code`と同じ。先頭ゼロを含む文字列 | 仕入れ先カレンダ仕様書.md:18、仕入れ検収仕様書.md:76 |
+| `supplier_name` | 仕入先名（会社名） | 項目名 |
+| `calendar_id` | 仕入先専用カレンダー（稼働カレンダの`calendar_id`と結べる。空の仕入先が多い） | モデルの項目名、自動発注提案仕様書.md:39、AIマスタビュー確認明細.md（BOSS判断） |
+
+### 17.4 あわせて変更するもの（実施内容は§19）
+1. マイグレーション `0038`：`CREATE OR REPLACE VIEW v_ai_supplier AS SELECT <5列> FROM m_supplier`（標準SQLのみ）。ロールバックは`DROP VIEW IF EXISTS v_ai_supplier`。
+2. `migrate`の直後に、`pm_ai_view_owner`へ`m_supplier`の5列の列単位`SELECT`を付与し（現在、`m_supplier`への列権限はない）、定義者を`pm_ai_view_owner@localhost`へ付け替える（§4.1の9番）。
+3. `ANALYSIS_VIEWS`・`ANALYSIS_COLUMN_TYPES`・`BASE_SQL_SCHEMA`・`TABLE_NOTES`・仕様書を更新する。`v_ai_purchase_receipt`の列は変えない（既存ビューの定義を変えると、保存済みテンプレートが再利用できなくなる）。
+4. `SCREEN_SQL_TABLES`・`TERM_COLUMNS`・AIへの指示文は変更しない。元テーブル`m_supplier`の許可（購買画面）は、置き換えず、ビューの追加だけにする。
+
+### 17.5 BOSSに決めてほしいこと
+- ~~公開列の5列でよいか~~ → **決定済み（承認 2026-10-10）**：5列（BOSS判断の転記どおり）。
+- ~~元テーブル`m_supplier`の許可~~ → **決定済み（承認）**：置き換えず、ビューの追加だけにする。
+- ~~§8の古い草案を、この§17に置き換えてよいか~~ → **決定済み（承認）**：§17に置き換える。
+
+### 17.6 仕入先とラインの関係（BOSS指摘への調査。2026-10-10。開発DB・読み取りのみ）
+- **仕入先と購買ラインは、1対1。つなぐ列は、ラインの`line_code`と仕入先の`supplier_code`（文字列の一致）。** 外部キー（ID）では結ばれていない。購買ライン（`line_type='PURCHASE'`）29と、仕入先29が、すべて、コードで一致する（仕入れ先カレンダ仕様書.md:18、仕入れ検収仕様書.md:76）。
+- **LineBacklog（`line_backlog`）**：`line_id`は`m_line`のID。仕入先の列はない。購買ラインの行は148,445行（28ライン）で、すべて、`line_code`が仕入先コードと一致する。社内ライン（`PROD`）は350,870行（25ライン）。→ 仕入先を知るには、`line_id`→ラインの`line_code`→仕入先の`supplier_code`。
+- **工程実績（`t_process_realtime_record`）**：`line_id`の**列はない**。仕入実績（`record_type='PURCHASE'`）は、`event_data`（JSON）の中に`line_id`と`supplier_id`を持つ。2,872行すべてが`supplier_id`を持ち、2,831行が`line_id`を持つ。この2,831行は、`line_id`が購買ラインで、そのラインの`line_code`が、`supplier_id`の仕入先コードと一致する（2,831行すべて）。`line_id`を持たない41行は、工程コードが`PURCHASE`（購入）の行。工程コードが`G`（外作）の行は、2,831行。→ 入荷実績ビュー（`v_ai_purchase_receipt`）は、`supplier_id`と`line_id`の両方を、列として持つ。
+- **工程マスタの`line_id`**：`G`・`PURCHASE`の工程は、ラインを持たない（`m_process.line_id`は空）。仕入先の区別は、工程ではなく、ラインで行う（仕入実績record_type分離仕様書.md:25）。
+- **ルーティング工程**：ラインの種別は、社内4,707、購買2,970、外作1。`supplier_id`を持つのは534行。
+- **AIへの説明**：`v_ai_line`と`v_ai_supplier`の説明に、「購買ラインの`line_code`＝仕入先の`supplier_code`（同じ文字列で結べる。先頭ゼロを含む）」を書く。
+
 
 **背景**：日付なしビュー（`v_ai_product`・`v_ai_process`・`v_ai_line`）に対し、AIが`created_at BETWEEN {{period_from}} AND {{period_to}}`のような日付の絞り込みを付けても、生成物の検査では拒否できない。BOSS判断：日付なしビューの日付の列で絞る分析は正しい分析であり、検査は追加しない。代わりに指示文を、日付の列で絞る分析を禁止しない形に直し、「必ず`parameters_unused`で拒否される」という説明を訂正する。
 
@@ -588,3 +642,43 @@ SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
 **未完了**：evaluatorによる検証、実機のAI再試験（日付なしビューの日付の列で絞る目的・絞らない目的の両方）。
 
 **反映状況**：コード変更のみ。コミット・本番未反映。
+
+## 19. v_ai_supplier 実装（2026-10-10。BOSS承認済み: §17の公開5列、元テーブルの許可は置き換えずビューの追加のみ。実装済み・evaluator未検証）
+
+**実装内容**
+- `pm_backend/apps/ai/migrations/0038_ai_supplier_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_supplier`（5列・別名なし・WHEREなし・結合なし・標準SQLのみ）、ロールバックは`DROP VIEW IF EXISTS v_ai_supplier`。依存は`ai 0037`と`masters 0059`（`supplier_type`の追加。`calendar_id`は0032、他の3列は0001）。`makemigrations --dry-run`は「No changes detected」。
+- `sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_supplier`（5列）、`TABLE_NOTES`に説明を追加。既存の`m_supplier`エントリと`SCREEN_SQL_TABLES`は変更していない。
+- `analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_supplier`（label=仕入先マスタ、`date_field=None`、`quantity_field=None`、説明は§17.3の範囲のみ。`contact_person`・`phone_number`・`order_email`は書かない）。
+- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に5列（§17.2）。
+- 試験：`apps/ai/test_analysis_supplier_view.py` 新規（10件）。既存の試験の更新は不要（既存ビューの出力は変わらず、既存の固定ハッシュはすべて同じ値のまま合格）。
+- 仕様書：`AI分析基盤仕様書.md`（公開ビュー一覧・型の対応）、`AI運用規約・AI用DB辞書.md`（§6.5-7を追加。既存の「品番・顧客コード・納入先コードの表記」は§6.5-8へ繰り下げ。他の文書・コードに§6.5-7・§6.5-8への参照はなかった）。
+- 既存ビュー5つ（出荷・入荷・品番・工程・ライン）の定義（説明・列）のJSONのSHA-256（新規試験の固定値）：`aaed5cd71d844171d20fc26e92ab5a257bec3b4929b7c54e88781206a4abe454`。v_ai_supplier の追加前後で同一（追加は、既存エントリを変えない追記のみ）。既存4ビューの値は`12dd1770…`、既存3ビューの値は`4d111066…`で、既存の試験の固定値と一致した。
+
+**検証結果**（開発。読み取りのみ・テスト用DBなし）
+- 新規`ai.test_analysis_supplier_view` 10件を含め、`ai.test_analysis_supplier_view`・`line_view`・`process_view`・`product_view`・`dateless_view`・`execution`・`planning`・`column_guide`・`codegen`・`jobs`・`multi_period`・`period_warning`・`worker_version`の1コマンド実行で275件OK（skipped=4）。フロント`pm-ui/scripts/test-analysis-*.mjs` 7本OK（codegen 68・consult 23・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。
+- 開発DBの実データ（`AI_DB_ALIAS`接続、`SELECT <5列> FROM m_supplier`）：29行・`supplier_code`の重複なし（29種類）・区分は購入17・外作9・両方3・`calendar_id`が空28。全29行×5列が`_cell`を通る（エラー0件）。`m_supplier`のSHOW COLUMNS（bigint・varchar(20/100/20)・bigint）は§17.2の対応と一致。入荷実績ビューの`supplier_id`は2,872行すべて値があり、`m_supplier.id`に存在しない行は0件。
+
+**未完了**
+- 実装時点は、開発DBにビュー`v_ai_supplier`が未作成だった。**その後、開発DBで実施済み**（BOSS承認 2026-10-10）：`migrate ai 0038`（21:06に適用済み。実行者は記録上不明）、`setup_ai_views --apply`（定義者を`pm_ai_view_owner@localhost`へ付け替え、`m_supplier`の5列の列権限を付与。コマンドの最初の実機実行）。確認結果：`SHOW COLUMNS FROM v_ai_supplier`は5列で、型は`ANALYSIS_COLUMN_TYPES`の対応（bigint・varchar）と一致。`pm_ai_reader`の接続で、29件・コード29種類・区分は購入17・外作9・両方3。`contact_person`・`phone_number`・`order_email`は読めない（列がない）。全29行×5列が列型の検査を通る（エラー0）。入荷ビューの仕入先IDで、仕入先ビューにない行は0件。購買ライン29が、仕入先コードですべて結合できる。6つの`v_ai_`ビューの定義者は、すべて`pm_ai_view_owner@localhost`。`setup_ai_views --check`は要対応0件。
+- evaluatorによる検証：未実施。実機（AIを使う）の再試験：未実施。テスト用DBを要する`ai.test_analysis_*`：未実行。
+
+**反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10）。本番未反映。本番は、`migrate 0038`のあとに、`setup_ai_views --apply`（管理者で実行）で、権限付与と定義者の付け替えをBOSSが実行する（§20）。
+
+### 19.1 本番・開発の手順SQL（v_ai_supplier。実行はBOSS。本番は事前にバックアップ）
+```sql
+-- 1. 定義者の権限を5列へ広げる（rootなど管理者で。現在、m_supplierへの列権限はない。担当者名・電話番号・メールアドレスの列は付与しない）
+GRANT SELECT (`id`, `supplier_code`, `supplier_name`, `supplier_type`, `calendar_id`)
+  ON `pm_db`.`m_supplier` TO 'pm_ai_view_owner'@'localhost';
+-- 2. マイグレーション適用後（migrate ai 0038）、定義者を付け替える
+CREATE OR REPLACE DEFINER = `pm_ai_view_owner`@`localhost` SQL SECURITY DEFINER VIEW `pm_db`.`v_ai_supplier` AS
+  SELECT `id`, `supplier_code`, `supplier_name`, `supplier_type`, `calendar_id`
+  FROM `pm_db`.`m_supplier`;
+-- 3. 読み取りユーザーへビューのSELECTのみ付与（開発のpm_ai_readerはDB全体のSELECTを持つため、実質不要。本番はSHOW GRANTSで確認してから）
+GRANT SELECT ON `pm_db`.`v_ai_supplier` TO 'pm_ai_reader'@'<本番のpm_ai_readerのホスト部。SHOW GRANTS FOR で確認>';
+-- 4. 確認
+SELECT TABLE_NAME, DEFINER, SECURITY_TYPE FROM information_schema.VIEWS WHERE TABLE_SCHEMA = 'pm_db' AND TABLE_NAME = 'v_ai_supplier';
+SELECT COUNT(*), COUNT(DISTINCT supplier_code), SUM(supplier_type='purchase'), SUM(supplier_type='outsource'), SUM(supplier_type='both') FROM `pm_db`.`v_ai_supplier`;  -- 開発の期待値: 29, 29, 17, 9, 3
+SHOW COLUMNS FROM `pm_db`.`v_ai_supplier`;  -- 5列（bigint・varchar・varchar・varchar・bigint）
+SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
+```
+
