@@ -70,6 +70,7 @@ ANALYSIS_VIEWS = {
             'calendar_id=ラインの勤務カレンダ(稼働カレンダのcalendar_idと結べる。空のラインがある)、'
             'line_type=ラインの種別(PROD=社内ライン。社内だけに絞るときに使う。'
             'PURCHASE=仕入先の購買ライン。外作先・購入先のライン、社内ライン以外で、line_codeが仕入先コード、line_nameが仕入先の会社名。'
+            '仕入先マスタとは、line_codeと仕入先のsupplier_codeを同じ文字列で結ぶ。'
             'OUTSOURCE=外作ライン。現在は使っていない・削除予定。OTHER=クボタ納期調整。意味の文章は未確認)、'
             'is_active=有効(1)か無効(0)か。工程はm_processのline_id(v_ai_processのline_id)でラインに結べる。'
         ),
