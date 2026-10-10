@@ -64,6 +64,24 @@ const CONSULT_ERRORS = Object.freeze({
   502: 'AIの返答を検証できませんでした。もう一度送ってください。',
   503: 'AIまたはコード置換の処理を使えません。しばらくしてから、もう一度送ってください。（上のAI設定・APIキーも確認してください）',
 })
+// 502(AIの返答を検証できない)のときだけ付ける、固定の理由の説明。応答のreasonがこの9つのときだけ使う（json_text_afterは読み捨てにより、json_text_beforeは前の3コードに分けたため廃止）
+const PARSE_REASONS = Object.freeze({
+  empty: '（理由: AIの返答が空でした）',
+  code_fence: '（理由: AIの返答がコードブロックで囲まれていました）',
+  json_no_object: '（理由: AIの返答に、JSONがありませんでした）',
+  json_prefix_brace: '（理由: AIの返答の前の文字に `{` があり、JSONとして取り出せませんでした）',
+  json_prefix_truncated: '（理由: AIの返答の前に文字があり、JSONが途中で終わっていました）',
+  json_truncated: '（理由: AIの返答が途中で終わっていました）',
+  json_syntax: '（理由: AIの返答のJSONに、文法の誤りがありました）',
+  json_not_object: '（理由: 返答の形が違いました）',
+  reply_missing: '（理由: 返答に本文がありませんでした）',
+})
+function consultErrorText(e) {
+  const status = e.response?.status
+  const base = CONSULT_ERRORS[status] || 'AIへ送信できませんでした。'
+  const reason = e.response?.data?.reason
+  return status === 502 && typeof reason === 'string' && Object.hasOwn(PARSE_REASONS, reason) ? base + PARSE_REASONS[reason] : base
+}
 const REUSE_ERRORS = Object.freeze({
   403: 'このテンプレートを再利用する権限がありません。',
   404: 'テンプレートが見つかりません。',
@@ -100,7 +118,7 @@ async function send() {
     input.value = ''
   } catch (e) {
     // 失敗したときは、送った発言を履歴へ入れず、入力欄に残す(そのまま再送できる)
-    if (!disposed && current === epoch) error.value = CONSULT_ERRORS[e.response?.status] || 'AIへ送信できませんでした。'
+    if (!disposed && current === epoch) error.value = consultErrorText(e)
   } finally { if (!disposed && current === epoch) busy.value = '' }
 }
 function reset() {

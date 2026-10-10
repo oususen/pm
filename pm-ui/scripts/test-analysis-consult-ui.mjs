@@ -314,3 +314,27 @@ test('参考のボタンは、idが整数でない推薦では、無効になる
   } finally { f.stop() }
 })
 
+
+test('502のとき、応答のreasonが固定の9つのどれかなら、理由の説明を付ける。それ以外・なしは従来の文のまま。APIの本文は出さない', async () => {
+  const base = 'AIの返答を検証できませんでした。もう一度送ってください。'
+  const expected = {
+    empty: '（理由: AIの返答が空でした）',
+    code_fence: '（理由: AIの返答がコードブロックで囲まれていました）',
+    json_no_object: '（理由: AIの返答に、JSONがありませんでした）',
+    json_prefix_brace: '（理由: AIの返答の前の文字に `{` があり、JSONとして取り出せませんでした）',
+    json_prefix_truncated: '（理由: AIの返答の前に文字があり、JSONが途中で終わっていました）',
+    json_truncated: '（理由: AIの返答が途中で終わっていました）',
+    json_syntax: '（理由: AIの返答のJSONに、文法の誤りがありました）',
+    json_not_object: '（理由: 返答の形が違いました）',
+    reply_missing: '（理由: 返答に本文がありませんでした）',
+  }
+  const run = async (status, data) => {
+    const f = setup({}, { consult: async () => { const e = new Error('SECRET'); e.response = { status, data }; throw e } })
+    try { f.state.input.value = '相談'; await f.state.send(); assert.equal(f.state.input.value, '相談'); return f.state.error.value } finally { f.stop() }
+  }
+  for (const [reason, text] of Object.entries(expected)) assert.equal(await run(502, { detail: 'SECRET', reason }), base + text, reason)
+  for (const data of [{ detail: 'SECRET' }, { detail: 'SECRET', reason: 'unknown' }, { detail: 'SECRET', reason: 'toString' }, { detail: 'SECRET', reason: 5 }, { detail: 'SECRET', reason: 'json_invalid' }, { detail: 'SECRET', reason: 'json_text_after' }, { detail: 'SECRET', reason: 'json_text_before' }, { detail: 'SECRET', reason: null }, undefined])
+    assert.equal(await run(502, data), base, JSON.stringify(data))
+  const other = await run(503, { detail: 'SECRET', reason: 'json_syntax' })
+  assert.equal(Object.keys(expected).length, 9); assert.equal(other.includes('理由'), false); assert.equal(other.includes('SECRET'), false)
+})

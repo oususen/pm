@@ -78,13 +78,51 @@ def _system_prompt(templates, redact=None):
     )
 
 
+PARSE_FAILURE_TEXT = 'AIの返答を検証できませんでした。もう一度送ってください。'
+
+
+def _parse_failure(reason):
+    """検証失敗のエラー。理由は固定コード(empty/code_fence/json_no_object/json_prefix_brace/json_prefix_truncated/json_truncated/json_syntax/json_not_object/reply_missing)だけで、
+    返答の中身・一部・長さ・エラー位置の数値は含めない(判定にだけ使い、外へ出さない)。"""
+    return AnalysisError(PARSE_FAILURE_TEXT, 502, reason=reason)
+
+
+def _object_failure_reason(text, start, exc):
+    """最初の { から、オブジェクトとして読めなかった原因を、固定コードで返す。位置は判定にだけ使い、外へ出さない。"""
+    # 入力の終わりで読めなくなった、または閉じない文字列で終わった(途中で切れている疑い)
+    at_end = exc.pos >= len(text) or exc.msg.startswith('Unterminated string')
+    if start > 0:
+        # 先頭が { でない(案G)。前置きのあとでJSONが途中で終わっている疑い / 前置きの中の { から読めない疑い、または文法の誤り
+        return 'json_prefix_truncated' if at_end else 'json_prefix_brace'
+    return 'json_truncated' if at_end else 'json_syntax'
+
+
 def _parse(raw):
+    """相談の返答の検査。コードブロックで囲まれた返答は拒否する。
+    先頭が [ でなく { を含むときは、最初の { から完全なオブジェクトとして読めた場合だけ、前後の余分な文字を読み捨てて使う
+    (BOSS承認 案F 2026-10-10。相談だけ)。最初の { 以外の { からは再試行しない。
+    json_text_after は、読み捨てにより出なくなったため廃止した(先頭が { でオブジェクトが読めれば、後ろの文字は読み捨てる)。
+    json_text_before は、案G(BOSS承認 2026-10-10)で json_no_object / json_prefix_brace / json_prefix_truncated の3コードに分けて廃止した。"""
+    text = raw.strip() if isinstance(raw, str) else ''
+    if not text:
+        raise _parse_failure('empty')
+    if text.startswith('```'):
+        raise _parse_failure('code_fence')
+    start = text.find('{') if text[0] != '[' else -1
+    if start < 0:
+        # オブジェクトの候補がない: JSONとして読めるが配列・文字列などなら json_not_object。読めなければ、先頭が [ なら文法の誤り、それ以外は前置きだけ
+        try:
+            json.loads(text)
+        except json.JSONDecodeError:
+            raise _parse_failure('json_syntax' if text[0] == '[' else 'json_no_object') from None  # 例外の連鎖は付けない(返答の一部が混ざる経路を作らない)
+        raise _parse_failure('json_not_object')
     try:
-        data = json.loads(raw)
-        if not isinstance(data, dict) or not isinstance(data.get('reply'), str) or not data['reply'].strip():
-            raise ValueError()
-    except (ValueError, TypeError) as exc:
-        raise AnalysisError('AIの返答を検証できませんでした。もう一度送ってください。', 502) from exc
+        data, _ = json.JSONDecoder().raw_decode(text, start)  # 後ろの余分な文字は読み捨てる(位置・長さは外へ出さない)
+    except json.JSONDecodeError as exc:
+        reason = _object_failure_reason(text, start, exc)
+        raise _parse_failure(reason) from None
+    if not isinstance(data.get('reply'), str) or not data['reply'].strip():
+        raise _parse_failure('reply_missing')
     return data
 
 

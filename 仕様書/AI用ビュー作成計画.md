@@ -788,3 +788,33 @@ CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER 
 - evaluatorによる検証。実機（AIを使う）の再試験。テスト用DBを要する`ai.test_analysis_*`は未実行。
 
 **反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10。`migrate ai 0039`、`setup_ai_views --apply`。BOSS承認のうえ、私が実行）。確認結果：`SHOW COLUMNS FROM v_ai_customer`は6列で、型は`ANALYSIS_COLUMN_TYPES`の対応（bigint・varchar・tinyint(1)）と一致。`pm_ai_reader`の接続で、3件・コード3種類・有効3。`created_at`・`updated_at`は読めない（列がない）。全3行×6列が列型の検査を通る（エラー0）。出荷ビューの得意先コードで、得意先ビューにない行は0件。`setup_ai_views --check`は要対応0件。7つの`v_ai_`ビューの定義者は、すべて`pm_ai_view_owner@localhost`。本番未反映。
+
+## 23. 相談の検証失敗の理由コード（2026-10-10。BOSS承認 案A・E・F・G。実装済み。案E・Fはevaluator条件付き合格、案Gはevaluator未検証）
+
+**背景**：相談（AIと目的を整える）で、OpenRouterのGemma 4 26B A4Bだけが「AIの返答を検証できませんでした。」（HTTP 502）になる。返答の中身は保存・ログ出力しない設計のため、原因を**固定の理由コードだけ**で特定できるようにする。コードブロックを許す変更（案B）は今回しない。
+
+**実装内容**
+- `analysis_consult_service.py`：`_parse`が、失敗時に固定の理由コードを付ける。優先順位は上から、`empty`（空・空白だけ）→`code_fence`（前後の空白を除いた先頭が```）→JSONとして読めない場合は4コードのいずれか（`json_text_before`：先頭が`{`でも`[`でもない／`json_text_after`：先頭が`{`で`raw_decode`が成功し後ろに空白以外が残る（案Fで廃止）／`json_truncated`：先頭が`{`で`exc.pos`が入力長以上、または閉じない文字列（`Unterminated string`）で終わる／`json_syntax`：それ以外。先頭が`[`で読めない場合を含む。例外の連鎖は付けない）→`json_not_object`→`reply_missing`（`reply`が文字列でない・空）。受け入れる返答の範囲は案Eの時点では変えていない（案Fで変更。下記）。
+- **経緯（2026-10-10）**：Gemmaの実機で`json_invalid`と確認した。そこでBOSS承認（案E）により、`json_invalid`を廃止して上記の4コードに分けた（計8コード）。「前後の文章を許す」変更（案F）は、この時点ではしていない（その後、案Fで実施）。エラー位置の数値は判定にだけ使い、外へ出さない。
+- **案F（BOSS承認 2026-10-10。受け入れる範囲の変更。相談のみ。前置き・後ろの余分な文字を読み捨てる）**：Gemmaが`json_text_before`を2回続けて返したため。`empty`→`code_fence`の判定は変えない（コードブロックは拒否のまま。案Bは不採用）。その後、先頭が`[`でなく`{`を含むときは、**最初の`{`から**`raw_decode`で完全なオブジェクトとして読めた場合だけ、そのオブジェクトを使う（前後の文字は読み捨て。先頭が`{`のときの後ろの余分な文字も同じ）。使う条件は従来と同じ（`reply`が空でない文字列）。拒否のまま：最初の`{`から読めない（前置きに`{a}`など→`json_text_before`）、読めたが`reply`がない・空（`reply_missing`）、`{`がない（`json_text_before`。ただしJSONとして読める配列・文字列・数値は`json_not_object`）、先頭が`[`（従来どおり）。最初の`{`以外の`{`からは再試行しない。読み捨てた部分の中身・長さ・位置は、エラー・ログ・画面・返り値に出さない（読み捨てがあったことも出さない）。影響は`_parse`（相談）だけ。
+- **案G（BOSS承認 2026-10-10。原因の確定のための理由コードの細分化。受け入れる範囲は案Fのまま）**：案F後も、Gemmaが`json_text_before`で失敗した（2026-10-10）。そこで`json_text_before`を廃止し、次の3コードに分けた。(1) `json_no_object`：`{`を全く含まず、先頭が`[`でもない（JSONで返していない）。(2) `json_prefix_truncated`：先頭が`{`でなく`{`を含み、最初の`{`からの`raw_decode`が失敗し、その失敗が入力の終わり（`exc.pos >= len(text)`、または`Unterminated string`。`json_truncated`と同じ判定）。(3) `json_prefix_brace`：先頭が`{`でなく`{`を含み、最初の`{`から読めず、入力の終わりではない（前置きの中の`{`から読めない疑い、または文法の誤り）。先頭が`{`のときの`json_truncated`・`json_syntax`、先頭が`[`のときの`json_not_object`・`json_syntax`、`reply_missing`、`empty`、`code_fence`は不変。最終は9コード（empty・code_fence・json_no_object・json_prefix_brace・json_prefix_truncated・json_truncated・json_syntax・json_not_object・reply_missing）。`json_text_before`は現行の記述から消し、試験で廃止を固定。画面の固定の説明は、`json_no_object`「AIの返答に、JSONがありませんでした」、`json_prefix_brace`「AIの返答の前の文字に `{` があり、JSONとして取り出せませんでした」、`json_prefix_truncated`「AIの返答の前に文字があり、JSONが途中で終わっていました」。位置・長さ・返答の中身は外へ出さない。
+- **`json_text_after`の判断（実装で判断）**：先頭が`{`でオブジェクトが読めれば後ろは読み捨てるため、`json_text_after`が出る場面はなくなった。そこで**廃止**し、コード・画面（`PARSE_REASONS`は案F時点で7コード、案Gで9コード）・試験（廃止の固定）・仕様書を整合させた。
+- **不確実な点**（案Eの時点。BOSSから未回答のため、要確認のまま）：`{"reply": "abc`のような閉じない文字列は、`JSONDecodeError.pos`が文字列の開始位置（入力長未満）になるため、指定の`exc.pos >= len(text)`だけでは`json_syntax`になってしまう。そこで`Unterminated string`も`json_truncated`に含めた（BOSS指示の例`{"reply": "abc`を`json_truncated`にするため。要確認）。
+- `analysis_plan_store.py`：`AnalysisError`に省略可能な`reason`引数を追加。指定時だけ`detail`を`{detail, reason}`にし、属性`reason`を設定する（`ExecutionStopped`などの既存の`reason`を上書きしないよう、指定時だけ設定）。既存のキー・文言・ステータスは不変。
+- `AIAnalysisConsult.vue`：502で`reason`が9つ（案G後。案Eは8つ、案Fは7つ）のどれかのときだけ、固定の説明を後ろに付ける（`Object.hasOwn`で限定。`json_invalid`・`json_text_after`・`json_text_before`は対象外）。
+- 試験：`apps/ai/test_analysis_consult_reason.py`新規（SimpleTestCase、DBなし）。`test-analysis-consult-ui.mjs`に1件追加。
+- 仕様書：`AI分析基盤仕様書.md`の5.3-3に追記。
+
+**検証結果**（開発。DBなし）：`ai.test_analysis_consult_reason`ほか7モジュールの1コマンド実行で154件OK（skipped=2）。検証担当（evaluator）が、別の8モジュール（`ai.test_analysis_consult_reason`・`dateless_view`・`planning`・`column_guide`・`codegen`・`setup_ai_views`・`customer_view`・`execution`）で実行し、195件OK（skipped=4）。件数が違うのは、モジュールの組み合わせが違うため。フロント`test-analysis-*.mjs` 7本OK（consult 24を含む、fail 0）。途中、`AnalysisError`が無条件に`self.reason`を設定していて`ExecutionStopped`の`reason`を上書きし、既存の5件が失敗した。指定時だけ設定する形に直して解消。
+
+**検証結果（案E後、generator実行）**：`ai.test_analysis_consult_reason`（6件）ほか7モジュールの1コマンド実行で155件OK（skipped=2）。フロント`test-analysis-*.mjs` 7本OK（consult 24、fail 0）。evaluatorの再検証は未実施。
+
+**検証結果（案F後、generator実行）**：`ai.test_analysis_consult_reason`（7件）・`dateless_view`・`planning`・`column_guide`・`codegen`・`setup_ai_views`・`customer_view`の7モジュールの1コマンド実行で155件OK（skipped=2）。フロント`test-analysis-*.mjs` 7本OK（consult 24、fail 0）。なお上の件数は組み合わせごとに違う（generator=7モジュール、evaluator=`execution`を含む8モジュール）。evaluatorの再検証は未実施。
+
+**案Fの既知のリスク（evaluator指摘。BOSS判断で、そのまま）**：(1) 前置きの中に、別の完全なJSONオブジェクト（`{"reply": "偽"}` など）があると、最初のオブジェクトを採用する（仕様どおり。返事は助言として表示されるだけで、実行されない。目的の文案・期間・テンプレートのIDは、サーバーが検証してから使う。緩和策は、複数のオブジェクトが読めるときに拒否することで、Gemmaの失敗が増える）。(2) 先頭が`[`でなく、配列の中にオブジェクトがある返答（`前置き [{"reply":"x"}]`）は、最初の`{`から取り出して受け入れる。(3) `前置き {"reply":"x"`（前置きあり・途中切れ）は、`json_truncated`にならない（最初の`{`から読めないため）。案Fでは`json_text_before`だったが、**案Gで`json_prefix_truncated`になる**（更新）。
+
+**検証結果（案G後、generator実行）**：`ai.test_analysis_consult_reason`（7件）・`dateless_view`・`planning`・`column_guide`・`codegen`・`setup_ai_views`・`customer_view`の7モジュールの1コマンド実行で155件OK（skipped=2）。フロント`test-analysis-*.mjs` 7本OK（consult 24、fail 0）。evaluatorの再検証は未実施。
+
+**未完了**：案G後のGemmaでの実機確認（`json_no_object`・`json_prefix_brace`・`json_prefix_truncated`のどれが出るか）。`Unterminated string`を`json_truncated`に含めたことのBOSS確認。evaluatorによる検証。テスト用DBを要する`test_analysis_consult.py`は未実行。
+
+**反映状況**：コード変更のみ。コミット・本番未反映。

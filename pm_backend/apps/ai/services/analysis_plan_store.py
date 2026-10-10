@@ -11,8 +11,12 @@ from rest_framework.exceptions import APIException
 
 
 class AnalysisError(APIException):
-    def __init__(self, detail, status=400):
+    def __init__(self, detail, status=400, reason=None):
         self.status_code = status
+        if reason is not None:
+            # 固定の理由コード(省略可)。指定したときだけ、属性と応答の reason を足す(サブクラスのreasonを上書きしない)
+            self.reason = reason
+            detail = {'detail': detail, 'reason': reason}  # 既存の detail キーは変えない
         super().__init__(detail)
 
 
