@@ -33,7 +33,8 @@ class DescriptionTests(SimpleTestCase):
     def test_no_real_data_note_and_no_unconfirmed_meaning(self):
         joined = ''.join(view['description'] for view in ANALYSIS_VIEWS.values())
         self.assertNotIn('000196', joined)      # 実データの注記は渡さない
-        self.assertNotIn('クボタ', joined)
+        # ラインマスタの line_type の値の名称「OTHER=クボタ納期調整」だけは、BOSS承認(2026-10-10。AI用ビュー作成計画 §15)により許可する。これ以外のクボタは従来どおり不可
+        self.assertNotIn('クボタ', joined.replace('OTHER=クボタ納期調整', ''))
         # 意味が確認できていない列は書かない(出荷・入荷)。品番マスタは、サイクルCで「空の品番がある」と書くことを承認済み(意味は未確認と明記)
         self.assertNotIn('process_id', ANALYSIS_VIEWS[SHIPMENT]['description'] + ANALYSIS_VIEWS['v_ai_purchase_receipt']['description'])
         self.assertIn('process_id=工程のID(空の品番がある)', ANALYSIS_VIEWS['v_ai_product']['description'])

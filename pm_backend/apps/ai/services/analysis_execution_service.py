@@ -70,6 +70,11 @@ ANALYSIS_COLUMN_TYPES = {
         'management_unit': 'VARCHAR', 'operating_rate': 'DECIMAL(18,2)', 'equipment_count': 'BIGINT',
         'two_person_only': 'BIGINT', 'is_active': 'BIGINT',
     },
+    # ラインマスタ(m_lineのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_lineと照合する)
+    'v_ai_line': {
+        'id': 'BIGINT', 'line_code': 'VARCHAR', 'line_name': 'VARCHAR', 'calendar_id': 'BIGINT',
+        'line_type': 'VARCHAR', 'is_active': 'BIGINT',
+    },
 }
 
 

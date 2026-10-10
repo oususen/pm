@@ -55,6 +55,8 @@ BASE_SQL_SCHEMA = {
         'id', 'process_code', 'process_name', 'line_id', 'management_unit', 'operating_rate',
         'equipment_count', 'two_person_only', 'is_active',
     ),
+    # ラインマスタのビュー(AI用ビュー作成計画 §15。lead_time_days・use_direct_process・created_at・updated_at は非公開)
+    'v_ai_line': ('id', 'line_code', 'line_name', 'calendar_id', 'line_type', 'is_active'),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -94,6 +96,15 @@ TABLE_NOTES = {
         'management_unit は DAY=日単位管理、MINUTE=分単位管理。'
         'equipment_count は設備台数(工程負荷は、工程負荷時間を設備台数で按分する)。'
         'operating_rate は項目名が稼働率(%)、two_person_only は項目名が2人1設備専用(どちらも業務上の定義は未確認)。'
+    ),
+    'v_ai_line': (
+        'ラインマスタ(m_line)のビュー。1行=1ライン(全行。無効なラインも含むため、有効なラインだけを見るときは is_active=1 で絞る)。'
+        'line_code はラインのコード(先頭ゼロを含む文字列。例 000044。数字として扱わない)。'
+        'line_type は PROD=社内ライン(社内だけに絞るときに使う)、'
+        'PURCHASE=仕入先の購買ライン(外作先・購入先のライン。社内ライン以外。line_code が仕入先コード、line_name が仕入先の会社名)、'
+        'OUTSOURCE=外作ライン(現在は使っていない。削除予定)、OTHER=クボタ納期調整(意味の文章は未確認)。'
+        'calendar_id はラインの勤務カレンダ(稼働カレンダの calendar_id と結べる。空のラインがある)。'
+        'is_active は有効(1)・無効(0)。工程は m_process の line_id(v_ai_process の line_id)でラインに結べる。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

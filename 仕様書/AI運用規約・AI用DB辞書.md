@@ -276,7 +276,18 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（9列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_process` の許可（`BASE_SQL_SCHEMA['m_process']`・`SCREEN_SQL_TABLES`）は置き換えず、ビューの追加のみ。`TERM_COLUMNS` は未変更。
 - 権限の付与・定義者の付け替えは手動SQL（計画書 §9.3 に倣う。`pm_ai_view_owner` へ `m_process` の9列の列単位 `SELECT`）。開発DBでは実施済み（2026-10-10。BOSS承認。本番は未実施）。
 
-### 6.5-6 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
+### 6.5-6 ラインマスタ（`v_ai_line`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_line`（`ai/0036`で作成） | `id`, `line_code`, `line_name`, `calendar_id`, `line_type`, `is_active`（6列） | `m_line` 全行（絞り込みなし・結合なし。57行のうち有効56・無効1）。非公開（ビューに含めない）: `lead_time_days`, `use_direct_process`, `created_at`, `updated_at` | 読み取り専用SQLで、ラインのコード・名前・種別・勤務カレンダの確認、実績・工程・品番ビューの `line_id` からラインを引く |
+
+- 個人情報の列は含まない。購買ライン（`line_type='PURCHASE'`）の `line_name` は仕入先の会社名、`line_code` は仕入先コード（会社名は個人情報ではない）。`line_code` は先頭ゼロを含む文字列（例 `000044`）で、数字として扱わない。
+- `line_type` の値: `PROD`=社内ライン、`PURCHASE`=仕入先の購買ライン（外作先・購入先。社内ライン以外）、`OUTSOURCE`=外作ライン（現在は使っていない・削除予定）、`OTHER`=クボタ納期調整（意味の文章は未確認）。`calendar_id` は勤務カレンダ（稼働カレンダの `calendar_id` と結べる。空のラインがある）。`is_active` は有効(1)・無効(0)とだけ書く（購買ラインの扱いはER図と実データが食い違うため書かない）。工程は `v_ai_process` の `line_id` でラインに結べる。
+- 列の意味は計画書 §15.3・§15.5 の範囲だけ。`ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（6列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_line` の許可・`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は置き換えず、ビューの追加のみ。
+- 権限の付与・定義者の付け替えは手動SQL（計画書 §9.3 に倣う。`pm_ai_view_owner` へ `m_line` の6列の列単位 `SELECT`）。未実施（BOSSが実行）。
+
+### 6.5-7 品番・顧客コード・納入先コードの表記（AI分析の変数。2026-10-10）
 
 - DuckDB（分析の実行）は大文字小文字を区別するが、MySQL（`utf8mb4_unicode_ci`）は区別しない。そのため、AI分析の変数（品番・顧客コード・納入先コード）の値は、**マスタ・公開ビューに保存されている正規の表記**に直してからコードに入れる。`upper()` は使わない（マスタに小文字の品番 `giji` が実在する）。
 - 確認元（公開ビューが正）: 品番=`v_ai_product`、納入先コード=`v_ai_shipment` の実際の値（ともに読み取り専用の分析用接続）、顧客コード=`m_customer`（顧客マスタのビューは未作成。作成後は公開ビューへ切り替える）。マスタ・ビューにない値、および大文字小文字だけが違う値が複数あって決められない納入先コードは、拒否する（代わりの値は使わない）。

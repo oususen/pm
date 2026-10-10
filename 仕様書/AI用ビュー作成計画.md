@@ -36,6 +36,7 @@ PM本体テーブルをAIへ直接公開せず、業務上の意味・数値定�
 | ルーティング（ヘッダ） | `m_routing` | 同上（BOSS指示 2026-10-10） |
 | ルーティング工程 | `m_routing_step` | 同上 |
 | ルーティング工程の材料 | `m_routing_step_material` | 同上（BOSS指示 2026-10-10。作成する） |
+| ラインの所属グループ（ライン×グループの対応） | `accounts_unit_line_mapping` | 同上（BOSS指示 2026-10-10。ライン編集画面の「所属グループ」。`m_line`には列がないため、別のビューにする。全フィールドの一覧を作成し、BOSSが公開列を決める） |
 
 BOM・ルーティングは、ヘッダと明細が別テーブルのため、1テーブル1ビューの原則に従い、別々のビューにする。ヘッダと明細の結合は、AIがビュー同士で行う（結合キーは各ビューの説明に書く）。
 
@@ -450,3 +451,82 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 - evaluatorによる検証：未実施。実機（AIを使う）の再試験：未実施。テスト用DBを要する`ai.test_analysis_*`：未実行。
 
 **反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10）。コミット・本番未反映。本番は、`migrate 0035`のあとに、権限付与と定義者の付け替えをBOSSが実行する（§4.1の9番）。
+
+## 15. ラインマスタのビュー `v_ai_line` の作成前確認（2026-10-10。BOSS承認済み。公開6列。実装は§16）
+
+公開する列は、[AIマスタビュー確認明細](AIマスタビュー確認明細.md) §3 のBOSS判断のとおり。§4.1 の設計原則（1テーブル1ビュー・標準SQL・定義者は `pm_ai_view_owner`・列の説明は仕様書で確認）に従う。
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、ラインをコード・名前・種別・カレンダで、分析・説明できるようにする。実績・計画・工程・BOMなどのビューのライン（`line_id`）から、ラインの名前や種別を引く |
+| 元テーブル | `m_line` の1つだけ。結合なし（行数57） |
+| 対象行 | 全行（絞り込みなし）。有効56・無効1。購買ライン（`PURCHASE`）を含む。無効のラインは`is_active`で、AIが絞る |
+| 数値定義 | なし（マスタ）。件数は行数。`line_code`は57行で重複なし・空なし。`line_name`も57行で重複なし |
+| 公開フィールド（6列） | `id`、`line_code`、`line_name`、`calendar_id`、`line_type`、`is_active` |
+| 非公開フィールド | `lead_time_days`（BOSS判断 2026-10-10。現在は使っていないため）、`use_direct_process`（同。現在は実質使っていないため）、`created_at`、`updated_at`（BOSS判断が未決定のため、非公開として扱う） |
+| 個人情報 | なし。ただし、購買ラインの`line_name`は**仕入先の会社名**（例: エトー株式会社）で、`line_code`は仕入先コード。AIは、仕入先名を、コードの置き換えなしで読める（仕入先名は会社名で個人情報ではない。外部AIへ送る目的文の置換は従来どおり） |
+| 検証方法 | ①ビューの行数＝`m_line`の行数（57）②`line_code`の一意性③`is_active`の件数（有効56・無効1）④`pm_ai_reader`でビューが読め、非公開の4列が読めない⑤定義者が`pm_ai_view_owner@localhost`⑥全行×6列が列型の検査（`_cell`）を通る |
+
+### 15.1 実データ（開発DB）
+- ライン種別（`line_type`）：`PROD`（社内ライン）26（有効26）、`PURCHASE`（購買ライン）29（有効29）、`OUTSOURCE`（外作）1（有効0）、`OTHER`1（有効1）。
+- `calendar_id`が空のラインが38。`lead_time_days`は空なし（0〜2）。`use_direct_process`が真のラインは1（板金スポットライン）。
+- `line_code`は、先頭がゼロのものが27（購買ラインの仕入先コード。例 `000044`）、英字で始まるものが30。**文字列のまま扱う。**
+
+### 15.2 列型の対応（`m_line`のSHOW COLUMNSからの導出。ビュー作成後に再確認する）
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id`、`calendar_id` | bigint | `BIGINT` |
+| `line_code`、`line_name`、`line_type` | varchar | `VARCHAR` |
+| `is_active` | tinyint(1) | `BIGINT`（0/1） |
+
+### 15.3 列の意味（仕様書で確認できた範囲。推測は書かない）
+| 列 | 仕様書にある意味 | 出典 |
+|---|---|---|
+| `line_type` | 値は `PROD`・`PURCHASE`・`OUTSOURCE`・`OTHER`。意味は、§15.5のBOSSの説明のとおり（`PROD`は社内ライン、`PURCHASE`は外作先・購入先の購買ライン、`OUTSOURCE`は外作ライン（使っていない・削除予定）、`OTHER`はクボタ納期調整） | BOSS説明、ER_diagram_v3.md:23、単独計画仕様書.md:24、仕入れ検収仕様書.md:76、仕入れ先カレンダ仕様書.md:18 |
+| `line_code` | 購買ラインでは仕入先コード | 仕入れ先カレンダ仕様書.md:18、仕入れ検収仕様書.md:76 |
+| `calendar_id` | ラインの勤務カレンダ（購買ラインでは、仕入先のカレンダの割当先）。`m_calendar_day`の`calendar_id`と結べる | モデルの項目名、仕入れ先カレンダ仕様書.md:28 |
+| `is_active` | 有効（1）／無効（0）。**ER図は「購買ラインは意図的に0」と書くが、開発DBでは購買ライン29がすべて1。仕様書と実データが食い違う（下記）** | ER_diagram_v3.md:9-11、DB実データ |
+| `lead_time_days`、`use_direct_process`（非公開） | 項目名のみ（リードタイム(日)、工程直接展開）。BOSS判断で非公開にした。意味と使われ方は§15.5 | 確認明細 §3 |
+
+### 15.4 BOSSに決めてほしいこと
+- ~~公開列の8列でよいか~~ → **決定済み（2026-10-10）**：6列（`lead_time_days`・`use_direct_process`は、BOSS判断で非公開）。
+- ~~`is_active`の説明~~ → **決定済み（承認）**：ER図は購買ラインを「意図的に`is_active=0`」とするが、開発DBでは購買ライン29がすべて有効（1）。AIの説明文には、「`is_active`は有効(1)・無効(0)」とだけ書き、購買ラインの扱いは書かない案でよいか。
+- ~~元テーブル`m_line`の許可~~ → **決定済み（承認）**：置き換えず、ビューの追加だけにする（工程のときと同じ）。
+- ~~`lead_time_days`・`use_direct_process`の意味~~ → **決定済み**：BOSSの説明とコード調査を§15.5に記録。2列とも非公開。
+
+### 15.5 列の意味の追記（BOSS説明・コード調査。2026-10-10）
+| 列 | 意味 | 出典 |
+|---|---|---|
+| `line_type` | **BOSSの説明（2026-10-10）**：`PROD`=社内ライン（社内だけに絞るときに使う）。`PURCHASE`=仕入先の購買ライン（外作先・購入先のライン。社内ライン以外のライン。コード=仕入先コード、名前=仕入先の会社名）。`OUTSOURCE`=外作ライン（ID14 `GAISAKU`。**現在は使っていない。削除予定**）。`OTHER`=クボタ納期調整（ID103 `KBT_DUE_ADJ`。意味の文章は未確認）。コードの調査：`OUTSOURCE`は、購買ラインの品を外作ライン・外作工程へ切り替える／戻す管理コマンドがあり、受注展開・バックログ・生産実績の整合チェックで`PROD`と並んで対象 | BOSS説明、`convert_purchase_to_gaisaku.py`・`revert_gaisaku_line_to_supplier.py`、生産実績整合チェック仕様書.md:18 |
+| `lead_time_days` | リードタイム(日)。**最初は使ったが、後では使わなくなった（BOSS）**。主なリードタイムはルーティング工程側。コードには、工程側が空のときの代替などの参照が残る（`lead_time_utils.py`、`bom_service.py:87-92`、`inventory_calculator.py:404`）。値は、0日が50ライン、1日が6、2日が1 | BOSS説明、コード調査 |
+| `use_direct_process` | 自動計画の展開で、ルーティングを使わず、指定の工程に直接書き込む（スポット系ライン向け）。BOMの員数の掛け算も行わない。真なのは、ID10「板金スポットライン」の1つだけ。**BOSSは、板金スポットラインのExcel導入（計画入力画面のスポット→Excel→forup取込）に使う、と推測。コード調査では、Excel取込の処理に、このフラグの参照は見つからなかった（参照は、自動計画の生成コマンドだけ）** | モデルの説明文、`generate_production_plan.py:435`、`auto_plan_expansion.py:28` |
+
+**BOSS判断（2026-10-10。判断画面で変更）**：`lead_time_days`（現在使っていない）と`use_direct_process`（自動計画の展開用。板金スポットラインの自動計画は無効で、実質使っていない）は、**非公開**にした。公開は6列。`use_direct_process`の使用箇所は、リポジトリ全体の検索で、自動計画の生成コマンド（`generate_production_plan.py:435`）の1か所だけ。板金スポットラインの自動計画の設定（ID10）は無効で、最後の実行は2026-03-01。
+
+### 15.6 BOSS指摘への調査結果（2026-10-10。ライン編集画面）
+- **`line_type='PURCHASE'`**：仕入先の購買ライン。外作先と購入先を絞るときに使う（BOSS）。開発DBでは、購買ライン29の`line_code`が、すべて仕入先コードと一致し、仕入先29（`purchase`＝購入先17、`outsource`＝外作先9、`both`＝両方3）と同数。
+- **所属グループ**：`m_line`に列はない。別テーブル `accounts_unit_line_mapping`（`unit_id`＝グループ、`line_id`、`sort_order`、`is_default`、作成・更新日時）に持つ。グループは`accounts_department`の`level='unit'`の行（フロア・タンク・第一工場・第二工場・板金・調達・出荷の6つ）。28行、21ライン。**36ラインは、グループ未割当**。割当があるのは、すべて`PROD`のライン。→ 1テーブル1ビューの原則に従い、**別のビュー（案：`v_ai_unit_line`）にする**。
+- **このラインを使用する工程**：画面は、ルーティングではなく**工程マスタの`line_id`**から集計している（`LineMaster.vue:210`）。`v_ai_process`の`line_id`で、AIも同じ関係を引ける。工程を持つラインは27。ルーティング工程が使うラインは53（別のビュー）。
+
+## 16. v_ai_line 実装（2026-10-10。BOSS承認済み: §15の公開6列、元テーブルの許可は置き換えずビューの追加のみ。実装済み・evaluator未検証）
+
+**実装内容**
+- `pm_backend/apps/ai/migrations/0036_ai_line_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_line`（6列・別名なし・WHEREなし・結合なし・標準SQLのみ）、ロールバックは`DROP VIEW IF EXISTS v_ai_line`。依存は`ai 0035`と`masters 0023`（`line_type`の追加。`calendar_id`は0015、他の4列は0001）。`makemigrations --dry-run`は「No changes detected」。
+- `sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_line`（6列）、`TABLE_NOTES`に説明を追加（`ai_home`などは自動で対象）。既存の`m_line`エントリと`SCREEN_SQL_TABLES`は変更していない。
+- `analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_line`（label=ラインマスタ、`date_field=None`、`quantity_field=None`、説明は§15.3・§15.5の範囲のみ。`lead_time_days`・`use_direct_process`・`created_at`・`updated_at`と、購買ラインの`is_active`の扱いは書かない）。
+- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に6列（§15.2）。
+- 試験：`apps/ai/test_analysis_line_view.py` 新規。既存の`test_analysis_column_guide.py`の1検査を更新（下記）。
+- 仕様書：`AI分析基盤仕様書.md`（公開ビュー一覧・型の対応）、`AI運用規約・AI用DB辞書.md`（§6.5-6を追加。既存の「品番・顧客コード・納入先コードの表記」は§6.5-7へ繰り下げ。他の文書・コードに§6.5-6への参照はなかった）。
+
+**既存試験の更新（承認範囲の反映。検査は弱めていない）**
+- `test_analysis_column_guide.py` の `test_no_real_data_note_and_no_unconfirmed_meaning`：全ビューの説明に「クボタ」が入らないことの検査が、`line_type`の値の名称「OTHER=クボタ納期調整」（BOSS承認）で失敗したため、この語句だけを除いた文字列で「クボタ」の不在を検査するように変更。これ以外の「クボタ」は従来どおり不可。
+
+**検証結果**（開発。読み取りのみ・テスト用DBなし）
+- 新規`ai.test_analysis_line_view` 9件を含め、`ai.test_analysis_line_view`・`process_view`・`product_view`・`dateless_view`・`execution`・`planning`・`column_guide`・`codegen`・`jobs`・`multi_period`・`period_warning`・`worker_version`の1コマンド実行で263件OK（skipped=4）。フロント`pm-ui/scripts/test-analysis-*.mjs` 7本OK（codegen 68・consult 23・error-banner 6・execution 35・external-confirmation 4・status-monitor 13・templates 53、fail 0）。
+- 開発DBの実データ（`AI_DB_ALIAS`接続、`SELECT <6列> FROM m_line`）：57行・有効56・`line_code`の重複なし・`calendar_id`が空38。全57行×6列が`_cell`を通る（エラー0件）。`m_line`のSHOW COLUMNS（bigint・varchar(20/50/20)・tinyint(1)）は§15.2の対応と一致。
+
+**未完了**
+- 実装時点は、開発DBにビュー`v_ai_line`が未作成だった。**その後、開発DBで実施済み**（BOSS承認 2026-10-10）：`migrate ai 0036`でビュー作成、`pm_ai_view_owner`へ`m_line`の6列の列権限を付与、定義者を`pm_ai_view_owner@localhost`へ付け替え（§4.1の9番）。確認結果：`SHOW COLUMNS FROM v_ai_line`は6列で、型は`ANALYSIS_COLUMN_TYPES`の対応（bigint・varchar・tinyint(1)）と一致。`pm_ai_reader`の接続で、件数57・有効56・`line_code`の種類57。`lead_time_days`・`use_direct_process`・`created_at`・`updated_at`は読めない（列がない）。全57行×6列が列型の検査を通る（エラー0）。5つの`v_ai_`ビューの定義者は、すべて`pm_ai_view_owner@localhost`。
+- evaluatorによる検証：未実施。実機（AIを使う）の再試験：未実施。テスト用DBを要する`ai.test_analysis_*`：未実行。
+
+**反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10）。本番未反映。本番は、`migrate 0036`のあとに、権限付与と定義者の付け替えをBOSSが実行する（§4.1の9番）。

@@ -42,6 +42,7 @@ AIが業務データを参照する入口は`v_ai_...`ビューに限定する�
 | `v_ai_shipment` | 出荷実績をAI用の列構成で参照する |
 | `v_ai_product` | 品番マスタ(`m_product`)をAI用の列構成(32列)で参照する。**日付なし**(`date_field=None`・`quantity_field=None`)のため、期間で絞らず**全行**(2,850行。有効2,808・無効42)を取得する。2026-10-10登録(サイクルC。開発DBのビュー作成済み、本番未反映) |
 | `v_ai_process` | 工程マスタ(`m_process`)をAI用の列構成(9列)で参照する。**日付なし**(`date_field=None`・`quantity_field=None`)のため、期間で絞らず**全行**(46行。有効45・無効1)を取得する。2026-10-10登録(開発DBにビュー作成済み・定義者`pm_ai_view_owner`へ付け替え済み。本番未反映) |
+| `v_ai_line` | ラインマスタ(`m_line`)をAI用の列構成(6列)で参照する。**日付なし**(`date_field=None`・`quantity_field=None`)のため、期間で絞らず**全行**(57行。有効56・無効1)を取得する。2026-10-10登録(コード追加のみ。開発DBにビュー未作成・本番未反映) |
 
 生産実績、確定仕損、残業などの追加ビューは、対象データの定義を別計画で確定後に追加する。
 
@@ -264,6 +265,7 @@ Python実行用に、`analysis-runner`サービスをDocker Composeへ追加す�
 8. **列型**: 公開ビューの列型（開発DBの`SHOW COLUMNS`）に合わせた対応表を持つ。公開列と一致しない場合は実行しない。
    - **`v_ai_product`の列型の対応（2026-10-10、サイクルC）**: bigint→BIGINT、varchar→VARCHAR、int・int unsigned→BIGINT、tinyint(1)→BIGINT(0/1)、decimal(12,2)→DECIMAL(18,2)(`unit_price`)、decimal(8,4)→DECIMAL(18,4)(`specific_gravity`)、decimal(10,2)→DECIMAL(18,2)(`size_length`・`size_width`)、decimal(10,3)→DECIMAL(18,3)(`size_thickness`)、datetime→TIMESTAMP(`created_at`・`updated_at`)。`BASE_SQL_SCHEMA`の32列と完全に一致する。PostgreSQL移行時は、tinyint(1)がbooleanになるため見直す。
    - **`v_ai_process`の列型の対応（2026-10-10）**: `m_process`のSHOW COLUMNSから導出。bigint→BIGINT(`id`・`line_id`)、varchar→VARCHAR(`process_code`・`process_name`・`management_unit`)、tinyint(1)→BIGINT(`two_person_only`・`is_active`)、int unsigned→BIGINT(`equipment_count`)、decimal(5,2)→DECIMAL(18,2)(`operating_rate`)。`BASE_SQL_SCHEMA`の9列と完全に一致する。**ビュー作成後の`SHOW COLUMNS FROM v_ai_process`との照合は、開発DBで実施済みで一致した(2026-10-10。元の記述: 照合が必要(未実施)**。
+   - **`v_ai_line`の列型の対応（2026-10-10）**: `m_line`のSHOW COLUMNSから導出。bigint→BIGINT(`id`・`calendar_id`)、varchar→VARCHAR(`line_code`・`line_name`・`line_type`)、tinyint(1)→BIGINT(`is_active`)。`BASE_SQL_SCHEMA`の6列と完全に一致する。ビュー作成後の`SHOW COLUMNS FROM v_ai_line`との照合は、開発DBで実施済みで一致した(2026-10-10)。開発DBにビュー未作成)**。
    - **AIへ渡すビューの定義(2026-10-10、サイクルC)**: 分析案・相談へ渡す定義(`ai_view_definition`)は、値が`None`のキー(`date_field`・`quantity_field`)を出さない。日付ありの2ビューは従来と同じ内容。
    - **AIへの指示の変更(2026-10-10、サイクルC。BOSS承認)**: 分析案の作成の指示を、日付なしのビューも扱えるように変えた。「提示された入荷・出荷の公開ビューのみ」→「提示された公開ビューのみ」、「対象は指定期間の全登録行のみ」→「対象は、日付のあるビューは指定期間の全登録行のみ、日付のないビュー(date_fieldの無いビュー)は期間で絞らない全行のみ」、「各ビューの日付列をfieldsに必ず含める」→「日付のあるビューは、その日付列(date_field)をfieldsに必ず含める」。承認画面の「条件」は、日付ありだけなら従来の「指定期間の全登録行（追加の絞り条件なし）」、日付なしだけなら「全行（期間で絞らない。追加の絞り条件なし）」、混在なら両方を併記する。コード生成の指示は、日付なしビューを含むときだけ、「期間で絞らず全行を使う。period_from・period_toは日付のあるビューの条件にだけ使う」を末尾に加える(日付ありだけの指示は変えない)。
    - **画面の表示(サイクルC)**: 件数確認(`count_target_rows`)の応答の各ビューに`period_applied`(日付ありtrue・日付なしfalse)を追加した(応答の追加のみ)。画面③は、`period_applied=false`のビューの行に「期間: 適用しない（全行）」を表示する(件数確認の後)。上限超過のメッセージは、「条件を絞ってください(日付のあるビューは期間も絞れます)」に変えた(上限値は変更なし)。

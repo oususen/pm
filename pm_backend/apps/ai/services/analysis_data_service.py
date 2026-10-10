@@ -61,6 +61,19 @@ ANALYSIS_VIEWS = {
             'operating_rate=項目名が稼働率(%)、two_person_only=項目名が2人1設備専用(operating_rate・two_person_onlyは業務上の定義は未確認)。'
         ),
     },
+    # ラインマスタ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §15)。
+    'v_ai_line': {
+        'label': 'ラインマスタ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1ライン(ラインマスタ)。日付の列がなく、期間では絞らず全行が対象。無効なラインも含むため、有効なラインだけを見るときはis_active=1で絞る。'
+            '列の意味: id=ラインのID、line_code=ラインコード(先頭ゼロを含む文字列。例000044。数字として扱わない)、line_name=ライン名、'
+            'calendar_id=ラインの勤務カレンダ(稼働カレンダのcalendar_idと結べる。空のラインがある)、'
+            'line_type=ラインの種別(PROD=社内ライン。社内だけに絞るときに使う。'
+            'PURCHASE=仕入先の購買ライン。外作先・購入先のライン、社内ライン以外で、line_codeが仕入先コード、line_nameが仕入先の会社名。'
+            'OUTSOURCE=外作ライン。現在は使っていない・削除予定。OTHER=クボタ納期調整。意味の文章は未確認)、'
+            'is_active=有効(1)か無効(0)か。工程はm_processのline_id(v_ai_processのline_id)でラインに結べる。'
+        ),
+    },
 }
 
 

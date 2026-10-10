@@ -81,10 +81,10 @@
 | line_code | 文字20 | ラインコード | 公開 | |
 | line_name | 文字50 | ライン名 | 公開 | |
 | calendar_id | 外部キー・NULL可 | 勤務カレンダ | 公開 | |
-| lead_time_days | 整数・NULL可 | リードタイム（日） | 公開 | |
+| lead_time_days | 整数・NULL可 | リードタイム（日） | 非公開（BOSS変更 2026-10-10。現在は使っていないため） | |
 | line_type | 文字20 | ライン種別 | 公開 | |
 | is_active | 真偽 | 有効 | 公開 | |
-| use_direct_process | 真偽 | 工程直接展開 | 公開 | |
+| use_direct_process | 真偽 | 工程直接展開 | 非公開（BOSS変更 2026-10-10。自動計画の展開用で、実質使っていないため） | |
 | created_at | 日時 | 作成日時 | 非公開 | |
 | updated_at | 日時 | 更新日時 | 非公開 | |
 
@@ -278,7 +278,7 @@
 |---|---|---|---|
 | `m_product`（36列すべて判断済み） | 32列（`created_at`・`updated_at`を含む） | `image_url`、`product_name_halfwidth`、`is_phantom`、`self_lt_days` | なし |
 | `m_process` | 9列（`is_outsource`は、BOSS変更 2026-10-10で非公開） | `is_outsource` | `created_at`、`updated_at` |
-| `m_line` | 8列 | なし | `created_at`、`updated_at` |
+| `m_line` | 6列（`id`、`line_code`、`line_name`、`calendar_id`、`line_type`、`is_active`） | `lead_time_days`、`use_direct_process`（BOSS変更 2026-10-10） | `created_at`、`updated_at` |
 | `m_supplier` | 5列（`id`、`supplier_code`、`supplier_name`、`supplier_type`、`calendar_id`） | なし | `contact_person`、`phone_number`、`order_email` |
 | `m_customer` | 6列 | なし | `created_at`、`updated_at` |
 | `m_calendar_day` | 9列 | なし | `note`、`created_at`、`updated_at` |
