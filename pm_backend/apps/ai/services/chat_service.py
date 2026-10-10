@@ -1699,8 +1699,7 @@ def _quick_overtime_response(question, history):
         return {
             'answer': (
                 'できます。氏名と対象月を指定すると、指定した一人の提出済み残業申請を承認段階別に集計します。\n'
-                '例: 「王 崇栓の2026年8月の残業を教えて」\n'
-                '個人間の比較・順位付けは行いません。'
+                '例: 「王 崇栓の2026年8月の残業を教えて」'
             ),
             'intent': 'individual_overtime_help',
             'source': '残業申請の個人集計機能',

@@ -102,7 +102,7 @@
         <div class="side-divider"></div>
         <div class="side-heading">できること</div>
         <ul class="capabilities"><li><span>✓</span>期間・工程・グループを指定して質問</li><li><span>✓</span>集計結果をチャートで表示</li><li><span>✓</span>幹部会向け報告書を下書き</li></ul>
-        <div class="safety-note"><span>♧</span><p><strong>安全なデータ利用</strong><br>DBは読み取り専用で集計します。個人の評価・順位付けには使いません。作成した文書はこの画面から端末へダウンロードされ、サーバーには保存されません。</p></div>
+        <div class="safety-note"><span>♧</span><p><strong>安全なデータ利用</strong><br>DBは読み取り専用で集計します。作成した文書はこの画面から端末へダウンロードされ、サーバーには保存されません。</p></div>
         <section v-if="canManageKnowledge" class="knowledge-library">
           <div class="side-divider"></div>
           <div class="side-heading">RAG資料庫</div>
