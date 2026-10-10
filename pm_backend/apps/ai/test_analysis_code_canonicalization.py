@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from ai.models import AIAnalysisTemplate
 from ai.services import analysis_template_params as params
 from ai.services import analysis_template_service as service
 from ai.services.analysis_plan_store import AnalysisError
@@ -89,6 +90,164 @@ class CanonicalizeTests(TestCase):
                 params.check_source(steps, PYTHON_P + f"\nx = '{literal}'", defs)
             self.assertEqual(caught.exception.reason, 'parameters_literal')
             self.assertIn('parameters_literal_value', caught.exception.reasons)
+
+
+class LiteralCheckTests(TestCase):
+    """直書き検査は、SQL・Pythonの文字列リテラルだけが対象(識別子・コメントは除外)。大文字小文字は区別しない(Codexレビュー指摘1)。"""
+    SQL = ('SELECT shipment_date, SUM(quantity) AS {alias} FROM v_ai_shipment WHERE product_code = {{{{product_code}}}} '
+           'AND shipment_date BETWEEN {{{{period_from}}}} AND {{{{period_to}}}} {tail}')
+
+    def defs(self, default):
+        return [{**PRODUCT_DEF, 'default': default}, {**DEFS[1]}, {**DEFS[2]}]
+
+    def steps(self, alias='q', tail=''):
+        return [{'name': 'w_a', 'query': self.SQL.format(alias=alias, tail=tail)}]
+
+    def test_literal_check_ignores_identifiers_and_comments(self):
+        defs = self.defs('giji')
+        steps = self.steps(alias='GIJI', tail='-- giji\n/* GIJI */ GROUP BY shipment_date')
+        params.check_source(steps, PYTHON_P, defs)
+        params.check_source(self.steps(alias='"giji" ', tail='GROUP BY `GIJI`'), PYTHON_P, defs)   # 引用符つきの識別子
+        params.check_source(STEPS_P, PYTHON_P + "\n# giji\ngiji_value = 1\n", defs)                   # Python: 識別子・コメント
+
+    def test_literal_check_still_catches_lowercase_literal(self):
+        defs = self.defs('V053904703')
+        for tail in ("AND x = 'v053904703'", "AND x = 'ab''v053904703'", "AND x = 'a' || 'V053904703'"):
+            with self.subTest(tail=tail), self.assertRaises(params.SourceCheckError) as caught:
+                params.check_source(self.steps(tail=tail), PYTHON_P, defs)
+            self.assertEqual(caught.exception.reasons, ['parameters_literal', 'parameters_literal_sql', 'parameters_literal_value'])
+        # コメントの後ろの文字列リテラルも検出し、文字列の中の -- はコメントとみなさない
+        with self.assertRaises(params.SourceCheckError):
+            params.check_source(self.steps(tail="-- note\nAND x = 'v053904703 -- y'"), PYTHON_P, defs)
+
+    def test_literal_check_python_literals(self):
+        defs = self.defs('V053904703')
+        for code in ("x = 'v053904703'", "x = f'{1} V053904703'", 'x = "a v053904703 b"', "x = '''v053904703'''"):
+            with self.subTest(code=code), self.assertRaises(params.SourceCheckError) as caught:
+                params.check_source(STEPS_P, PYTHON_P + '\n' + code, defs)
+            self.assertEqual(caught.exception.reasons, ['parameters_literal', 'parameters_literal_python', 'parameters_literal_value'])
+        params.check_source(STEPS_P, PYTHON_P + "\nv053904703 = 1  # V053904703", defs)
+
+    def test_literal_check_python_literal_next_to_placeholder(self):
+        # {{名前}} は文字列のダミーに置き換えて読むため、変数と並べた直書き(置換後は文字列の連結)も拒否する
+        defs = self.defs('V053904703')
+        for code in ('x = {{product_code}} "v053904703"', 'x = "v053904703" {{product_code}}'):
+            with self.subTest(code=code), self.assertRaises(params.SourceCheckError) as caught:
+                params.check_source(STEPS_P, PYTHON_P + '\n' + code, defs)
+            self.assertEqual(caught.exception.reasons, ['parameters_literal', 'parameters_literal_python', 'parameters_literal_value'])
+
+    def test_literal_check_short_default_does_not_match_placeholder_dummy(self):
+        # 変数だけの式と、三重引用符の中の変数で、短い default(none/on/ne)がダミーに誤一致しない。
+        # (ダミーの中身を守るテスト。ダミーを 'None' のような文字列に戻すと失敗する)
+        # 注意: default が p・h・ph のような極端に短い値は、ダミー '?PH ?' に部分一致して拒否される(品番マスタに該当する値はない。仕様書 5.3-5c)
+        for default in ('none', 'on', 'ne'):
+            with self.subTest(default=default):
+                params.check_source(STEPS_P, PYTHON_P + "\nz = {{product_code}}", self.defs(default))
+                params.check_source(STEPS_P, PYTHON_P + "\nz = '''a {{product_code}} b'''", self.defs(default))
+        # 抽出内容を固定する(抽出が空になって空振りしていないことの確認)
+        self.assertEqual(params._python_string_literals("x = {{product_code}}"), [params.PLACEHOLDER_DUMMY])
+        self.assertEqual(params._python_string_literals("x = '''a {{product_code}} b'''"), ["a '%s' b" % params.PLACEHOLDER_DUMMY])  # 実行時の置換と同じく、値は引用符つきで入る
+
+    def test_literal_check_placeholder_inside_plain_string_is_left_to_later_check(self):
+        # 引用符に隣接しない通常の文字列(f-stringを含む)の中の {{名前}} は、ダミー置換後に構文エラーとなり、ここでは何も抽出しない
+        # (拒否は、続く validate_generated=置き換え後の実行する形の検査が行う。仕様書 5.3-5c)
+        self.assertEqual(params._python_string_literals("x = 'abc {{product_code}} def'"), [])
+        self.assertEqual(params._python_string_literals("y = f'{1} {{product_code}} g'"), [])
+
+    def test_literal_check_syntax_error_python_does_not_raise_here(self):
+        # 構文が読めないPythonは、ここでは何も返さず(例外にもしない)、続く validate_generated が拒否する
+        params.check_source(STEPS_P, PYTHON_P + "\nx = (", self.defs('V053904703'))
+        self.assertEqual(params._python_string_literals("x = ('"), [])
+
+
+def _view_candidates(rows, view_type, value):
+    with fake_reader([(row,) for row in rows]), patch.dict(params.TYPES[view_type], {'exists': {
+            'product_code': params._exists_product, 'ship_to_code': params._exists_ship_to}[view_type]}):
+        return params._check_value(view_type, value, 'v')
+
+
+class FullwidthCandidateTests(TestCase):
+    """全角半角の違いは対象外。ASCIIの大文字小文字の違いだけで候補を絞ってから、曖昧判定する(Codexレビュー指摘2)。"""
+    TYPES = ('product_code', 'ship_to_code')   # v_ai_product / v_ai_shipment
+
+    def test_ship_to_fullwidth_variant_is_not_ambiguous(self):
+        for type_name in self.TYPES:
+            with self.subTest(type_name=type_name):
+                self.assertEqual(_view_candidates(['X1', 'Ｘ１'], type_name, 'x1'), 'X1')
+                self.assertEqual(_view_candidates(['Ｘ１', 'X1'], type_name, 'X1'), 'X1')
+
+    def test_ambiguous_ascii_case_variants_still_rejected(self):
+        for type_name in self.TYPES:
+            with self.subTest(type_name=type_name), self.assertRaises(params.DefinitionError) as caught:
+                _view_candidates(['X1', 'x1', 'Ｘ１'], type_name, 'X1')
+            self.assertEqual(caught.exception.reasons, ['parameters_def_ambiguous'])
+
+    def test_fullwidth_only_candidates_are_unregistered(self):
+        for type_name in self.TYPES:
+            with self.subTest(type_name=type_name), self.assertRaises(params.DefinitionError) as caught:
+                _view_candidates(['Ｘ１'], type_name, 'x1')
+            self.assertEqual(caught.exception.reasons, ['parameters_def_unregistered'])
+
+    def test_canonical_lookup_returns_none_when_nothing_matches(self):
+        with fake_reader([('Ｘ１',)]):
+            self.assertIsNone(params._canonical_in_view('v_ai_shipment', 'ship_to_code', 'x1', '納入先コード'))
+        with fake_reader([(b'X1',)]):   # CAST(... AS BINARY) のbytesも扱う
+            self.assertEqual(params._canonical_in_view('v_ai_shipment', 'ship_to_code', 'x1', '納入先コード'), 'X1')
+
+
+class StaleDefaultTests(ParamBase):
+    """小文字のdefaultで保存された旧テンプレートは、現在のマスタ表記では保存済みハッシュと一致しない(Codexレビュー指摘3)。"""
+    NORMALIZED = '保存時の表記と現在のマスタ表記が異なります。新しい分析として作り直し、試行・承認してください。'
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch.dict(params.TYPES['product_code'], {'exists': master_of('P-001', 'P-002')})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def stale_row(self, status):
+        lower = [{**DEFS[0], 'default': 'p-001'}, *DEFS[1:]]
+        with patch.dict(params.TYPES['product_code'], {'exists': lambda value: value}):   # 正規化の導入前の保存を再現する(小文字のまま保存)
+            return self.param_row(status=status, definitions=lower)
+
+    def test_approve_rejects_template_with_stale_lowercase_default(self):
+        row = self.stale_row('pending_admin')
+        response = self.approve(self.admin, row)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(self.NORMALIZED, str(response.data))
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.state_revision), ('pending_admin', 1))
+
+    def test_reuse_stale_default_shows_normalization_message(self):
+        row = self.stale_row('approved')
+        for supplied in (None, {'product_code': 'P-001'}):   # 正しい値を再入力しても、入力の処理より前に拒否される
+            with self.subTest(supplied=supplied):
+                response = self.reuse_with(self.other, row, supplied)
+                self.assertEqual(response.status_code, 409)
+                self.assertIn(self.NORMALIZED, str(response.data))
+        self.assert_no_plan()
+
+    def test_reuse_hash_mismatch_other_cause_keeps_original_message(self):
+        row = self.param_row()
+        AIAnalysisTemplate.objects.filter(pk=row.pk).update(sql_sha256='0' * 64)   # 表記とは無関係なハッシュの不一致
+        response = self.reuse_with(self.other, row)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('保存されたSQL・Pythonのハッシュが一致しないため再利用できません。', str(response.data))
+        self.assertNotIn(self.NORMALIZED, str(response.data))
+
+    def test_approve_hash_mismatch_other_cause_keeps_original_message(self):
+        row = self.param_row(status='pending_admin')
+        AIAnalysisTemplate.objects.filter(pk=row.pk).update(python_sha256='0' * 64)
+        response = self.approve(self.admin, row)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('保存されたSQL・Pythonのハッシュが一致しないため承認できません。', str(response.data))
+        self.assertNotIn(self.NORMALIZED, str(response.data))
+
+    def test_approve_passes_for_uppercase_default_template(self):
+        row = self.param_row(status='pending_admin')   # 開発DBの id=2 相当(大文字default)
+        self.assertEqual(self.approve(self.admin, row).status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.status, 'approved')
 
 
 class ReuseAndSaveTests(ParamBase):

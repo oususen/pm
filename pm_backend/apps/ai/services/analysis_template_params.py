@@ -9,9 +9,11 @@
   実在した値は、マスタ・ビューに保存されている正規の表記へ直す(小文字の品番 → 大文字、など。DuckDBは大文字小文字を区別するため)。
   大文字小文字だけが違う値が複数あって決められないときは拒否する(parameters_def_ambiguous)
   形式を絞るため、置き換えた値がSQL・Pythonの文字列を壊すことはない
-- 保存するコードに、変数の元の値(品番など)や日付が文字のまま残っていたら、保存を断る(直書きの禁止)
+- 保存するコードに、変数の元の値(品番など)や日付が文字のまま残っていたら、保存を断る(直書きの禁止)。
+  元の値の検査は、SQL・Pythonの文字列リテラルだけが対象(識別子・コメントは除く。大文字小文字は区別しない)。日付はコード全体を検査する
 - 変数の個数の上限は設けない(BOSS承認)。フォールバックはない(値が確認できなければ、拒否する)
 """
+import ast
 import re
 from datetime import date
 
@@ -25,6 +27,7 @@ from ai.services.analysis_plan_store import AnalysisError
 NAME_PATTERN = re.compile(r'[a-z][a-z0-9_]*')
 PLACEHOLDER_PATTERN = re.compile(r'\{\{([a-z][a-z0-9_]*)\}\}')
 CODE_VALUE_PATTERN = re.compile(r'[A-Za-z0-9_-]{1,40}')  # fullmatchで使う(末尾の改行を通さない)
+PLACEHOLDER_DUMMY = '?PH ?'  # 直書き検査でコードを読むときの {{名前}} の代わり。空白と?を含み、CODE_VALUE_PATTERNの値と一致しない
 DATE_LITERAL_PATTERN = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}')
 DATE_NAME_PATTERN = re.compile(r'[a-z][a-z0-9_]*_(?:from|to)')  # 日付の変数の名前(組: 名前_from と 名前_to)
 PERIOD_FROM, PERIOD_TO = 'period_from', 'period_to'
@@ -59,6 +62,9 @@ def _canonical_in_view(view, column, value, label):
             found = {bytes(row[0]).decode('utf-8') if isinstance(row[0], (bytes, bytearray)) else row[0] for row in cursor.fetchall()}
     except (DatabaseError, ConnectionDoesNotExist) as exc:
         raise AnalysisError(f'{label}を確認できません。分析用DB接続を管理者へ確認してください。', 503) from exc
+    # 照合順序(ci)は全角半角も同じとみなして候補に返すため、入力値と「ASCIIの大文字小文字の違いだけ」で一致する候補に絞る(全角半角は対象外)。
+    # 入力値は形式検査(CODE_VALUE_PATTERN)済みでASCII。マスタに全角の値しかなければ、候補は0件(未登録)
+    found = {code for code in found if type(code) is str and code.isascii() and code.lower() == value.lower()}
     if len(found) > 1:
         raise _Ambiguous()
     return next(iter(found), None)
@@ -287,6 +293,57 @@ class SourceCheckError(AnalysisError):
         self.reasons = [reason, *extra]  # 主な理由のあとに、場所・種類の固定コードを続ける(直書きのとき)
 
 
+def _sql_string_literals(text):
+    """SQLの文字列リテラル(シングルクォート。'' はエスケープ)の中身の一覧。コメント(-- 行、/* */)・ダブルクォート・バッククォートの識別子は除く。閉じていない引用符は、末尾までを中身とみなす。"""
+    literals = []
+    i, n = 0, len(text)
+    while i < n:
+        char = text[i]
+        if text.startswith('--', i):
+            end = text.find('\n', i)
+            i = n if end < 0 else end + 1
+        elif text.startswith('/*', i):
+            end = text.find('*/', i + 2)
+            i = n if end < 0 else end + 2
+        elif char in '"`':  # 識別子
+            end = i + 1
+            while end < n:
+                if text[end] == char:
+                    if text.startswith(char, end + 1):
+                        end += 2
+                        continue
+                    break
+                end += 1
+            i = end + 1
+        elif char == "'":
+            buffer, end = [], i + 1
+            while end < n:
+                if text[end] == "'":
+                    if text.startswith("'", end + 1):
+                        buffer.append("'")
+                        end += 2
+                        continue
+                    break
+                buffer.append(text[end])
+                end += 1
+            literals.append(''.join(buffer))
+            i = end + 1
+        else:
+            i += 1
+    return literals
+
+
+def _python_string_literals(text):
+    """Pythonの文字列定数(f-stringの文字列部分を含む)の一覧。コメント・識別子は含まない。{{名前}} は、実行時の置き換え(_substitute)と同じく引用符つきの文字列のダミーに置き換えて読む。
+    ダミーは空白と記号(?)を含むため、変数の値(英数字・アンダースコア・ハイフンだけ)とは一致しない。
+    置き換えても構文が読めないコードは、ここでは何も返さない(例外にもしない)。その構文の不正の検査は、続く validate_generated(置き換え後の実行する形の検査)に任される。"""
+    try:
+        tree = ast.parse(PLACEHOLDER_PATTERN.sub(lambda match: "'" + PLACEHOLDER_DUMMY + "'", text))
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+    return [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
 def check_source(steps, python, definitions):
     """保存するコード(変数の形)の確認: 使った変数がすべて定義にあり、定義した変数がすべて使われ、元の値・日付が文字のまま残っていない。"""
     texts = _texts(steps, python)
@@ -315,8 +372,9 @@ def check_source(steps, python, definitions):
         place = 'parameters_literal_sql' if index < count else 'parameters_literal_python' if index == 2 * count else None  # 中間テーブル名(count〜2count-1)は対象外
         if place is None:
             continue
-        # コード系は大文字小文字を区別せず比較する(小文字で直書きされても見逃さない)
-        if any(item['type'] != 'date' and item['default'].lower() in text.lower() for item in definitions):
+        # コード系は、SQL・Pythonの「文字列リテラル」だけを、大文字小文字を区別せず比較する(識別子・コメントは対象外。小文字で直書きされても見逃さない)
+        literals = _python_string_literals(texts[index]) if place == 'parameters_literal_python' else _sql_string_literals(stripped[index])
+        if any(item['type'] != 'date' and item['default'].lower() in literal.lower() for item in definitions for literal in literals):
             kinds.add('parameters_literal_value'); places.add(place)
         if DATE_LITERAL_PATTERN.search(text):
             kinds.add('parameters_literal_date'); places.add(place)

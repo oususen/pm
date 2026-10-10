@@ -104,7 +104,7 @@ class SourceCheckTests(ParamBase):
         bad = {
             'undefined placeholder': (s('SELECT {{other}}'), PYTHON_P, DEFS),
             'unused definition': (s(STEPS_P[0]['query'].replace('product_code = {{product_code}} AND ', '')), PYTHON, DEFS),
-            'default left in the code': (s(STEPS_P[0]['query'] + " -- P-001"), PYTHON_P, DEFS),
+            'default left in the code': (s(STEPS_P[0]['query'] + " AND note = 'P-001'"), PYTHON_P, DEFS),   # 直書き検査は文字列リテラルだけ(コメント・識別子は対象外)
             'default left in python': (STEPS_P, PYTHON_P + "\nx = 'P-001'", DEFS),
             'date literal in sql': (s(STEPS_P[0]['query'].replace('{{period_to}}', "'2026-01-31'")), PYTHON_P, DEFS[:2]),
             'date literal in python': (STEPS_P, PYTHON_P + "\nd = '2026-03-01'", DEFS),

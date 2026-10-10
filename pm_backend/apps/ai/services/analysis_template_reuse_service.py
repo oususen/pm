@@ -9,7 +9,7 @@ from ai.models import AIAnalysisTemplate
 from ai.services.analysis_codegen_service import make_bundle, validate_generated
 from ai.services.analysis_data_service import validate_datasets
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
-from ai.services.analysis_template_review_service import _stored_hash
+from ai.services.analysis_template_review_service import _stored_hash, hash_mismatch_error
 from ai.services.analysis_template_params import PERIOD_FROM, PERIOD_TO
 from ai.services.analysis_template_service import concrete_for, get_visible_template, is_template_admin
 
@@ -47,7 +47,7 @@ def _verified_bundle(template, supplied=None):
         raise AnalysisError('現在の検査に合格しないコードは再利用できません。新しい分析として作り直してください。', 409)
     bundle = make_bundle(steps, python, views)
     if bundle.sql_sha256 != template.sql_sha256 or bundle.python_sha256 != template.python_sha256:
-        raise AnalysisError('保存されたSQL・Pythonのハッシュが一致しないため再利用できません。', 409)
+        raise hash_mismatch_error(template, '保存されたSQL・Pythonのハッシュが一致しないため再利用できません。')
     if not supplied:
         return bundle, values
     steps, python, values = concrete_for(template, supplied)

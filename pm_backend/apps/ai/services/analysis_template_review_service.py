@@ -10,9 +10,10 @@ from django.db import transaction
 from django.db.models import F
 
 from ai.models import AIAnalysisTemplate
-from ai.services.analysis_codegen_service import validate_generated
+from ai.services.analysis_codegen_service import make_bundle, validate_generated
 from ai.services.analysis_plan_store import AnalysisError
 from ai.services.analysis_template_notify_service import schedule_result
+from ai.services.analysis_template_params import _check_value
 from ai.services.analysis_template_service import _content_sha256, concrete_for
 
 REJECTION_REASON_MAX = 500  # BOSS承認(2026-10-05)。超えた場合は切り詰めず拒否する
@@ -39,6 +40,28 @@ def _stored_hash(template):
     })
 
 
+NORMALIZED_MESSAGE = '保存時の表記と現在のマスタ表記が異なります。新しい分析として作り直し、試行・承認してください。'
+
+
+def _normalization_changed(template):
+    """保存済みの変数の default(コード系)を、現在のマスタの表記へ直すと、保存された default と異なるか。異なれば、ハッシュ不一致の原因は表記の正規化。
+
+    DBの読み取りと既存の _check_value の再利用だけ。確認できない(登録なし・曖昧・形式不正など)場合は、原因を確認できたとは扱わない。
+    """
+    for item in template.parameters or []:
+        try:
+            if item['type'] != 'date' and _check_value(item['type'], item['default'], item['name']) != item['default']:
+                return True
+        except (AnalysisError, KeyError, TypeError):
+            continue
+    return False
+
+
+def hash_mismatch_error(template, message):
+    """保存済みのSQL・Pythonのハッシュ不一致の409。原因が表記の正規化と確認できたときだけ専用の文言にし、それ以外は渡された文言のまま。"""
+    return AnalysisError(NORMALIZED_MESSAGE if _normalization_changed(template) else message, 409)
+
+
 def _conditional_update(template, new_status, **extra):
     """期待する状態・版のときだけ更新する。1行でなければ競合として拒否する(呼び出し元のトランザクションを巻き戻す)。"""
     now = datetime.now()
@@ -57,12 +80,17 @@ def approve_template(admin, template_id, state_revision):
         raise AnalysisError('保存内容のハッシュが一致しないため承認できません。管理者へ確認してください。', 409)
     # 保存後に検査規則が強化された場合でも、旧コードを正式にしない。外枠の版の古さは承認時には拒否しない(再利用時の更新・確認は3-D)
     try:
+        views = [d['view'] for d in template.datasets]
         steps, python, _values = concrete_for(template)  # 変数があれば、元の値で置き換えた、実行する形を検査する
-        problems = validate_generated(steps, python, [d['view'] for d in template.datasets])
+        problems = validate_generated(steps, python, views)
     except (KeyError, TypeError, AttributeError, ValueError):
         problems = ['unreadable']
     if problems:
         raise AnalysisError('現在の検査に合格しないコードは承認できません。却下して、コードを作り直してください。', 409)
+    # 再利用と同じ照合: 保存済みの default で組み立て直したコードが、保存済みのSQL・Pythonのハッシュと一致すること(一致しないものを正式にして、再利用できない状態にしない)
+    bundle = make_bundle(steps, python, views)
+    if bundle.sql_sha256 != template.sql_sha256 or bundle.python_sha256 != template.python_sha256:
+        raise hash_mismatch_error(template, '保存されたSQL・Pythonのハッシュが一致しないため承認できません。却下して、コードを作り直してください。')
     with transaction.atomic():
         now = _conditional_update(template, 'approved', reviewed_by=admin, reviewed_at=datetime.now())
         if template.replaces_id:
