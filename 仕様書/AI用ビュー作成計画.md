@@ -457,6 +457,25 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 
 **反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10）。コミット・本番未反映。本番は、`migrate 0035`のあとに、権限付与と定義者の付け替えをBOSSが実行する（§4.1の9番）。
 
+### 14.1 本番・開発の手順SQL（v_ai_process。実行はBOSS。本番は事前にバックアップ。Codexレビュー指摘への対応。2026-10-10）
+```sql
+-- 1. 定義者の権限を9列へ広げる（rootなど管理者で）
+GRANT SELECT (`id`, `process_code`, `process_name`, `line_id`, `management_unit`, `operating_rate`,
+  `equipment_count`, `two_person_only`, `is_active`)
+  ON `pm_db`.`m_process` TO 'pm_ai_view_owner'@'localhost';
+-- 2. マイグレーション適用後（開発: python manage.py migrate / 本番: docker exec ... migrate）、定義者を付け替える
+CREATE OR REPLACE DEFINER = `pm_ai_view_owner`@`localhost` SQL SECURITY DEFINER VIEW `pm_db`.`v_ai_process` AS
+  SELECT `id`, `process_code`, `process_name`, `line_id`, `management_unit`, `operating_rate`,
+  `equipment_count`, `two_person_only`, `is_active`
+  FROM `pm_db`.`m_process`;
+-- 3. 読み取りユーザーへビューのSELECTのみ付与（開発のpm_ai_readerはDB全体のSELECTを持つため、実質不要。本番はSHOW GRANTSで確認してから）
+GRANT SELECT ON `pm_db`.`v_ai_process` TO 'pm_ai_reader'@'<本番のpm_ai_readerのホスト部。SHOW GRANTS FOR で確認>';
+-- 4. 確認
+SELECT TABLE_NAME, DEFINER, SECURITY_TYPE FROM information_schema.VIEWS WHERE TABLE_SCHEMA = 'pm_db' AND TABLE_NAME = 'v_ai_process';
+SELECT COUNT(*), SUM(is_active), COUNT(DISTINCT process_code) FROM `pm_db`.`v_ai_process`;  -- 開発の期待値: 46, 45, 46
+SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
+```
+
 ## 15. ラインマスタのビュー `v_ai_line` の作成前確認（2026-10-10。BOSS承認済み。公開6列。実装は§16）
 
 公開する列は、[AIマスタビュー確認明細](AIマスタビュー確認明細.md) §3 のBOSS判断のとおり。§4.1 の設計原則（1テーブル1ビュー・標準SQL・定義者は `pm_ai_view_owner`・列の説明は仕様書で確認）に従う。
@@ -535,3 +554,37 @@ SELECT COUNT(*), SUM(is_active) FROM `pm_db`.`v_ai_product`;  -- 期待値: 2850
 - evaluatorによる検証：未実施。実機（AIを使う）の再試験：未実施。テスト用DBを要する`ai.test_analysis_*`：未実行。
 
 **反映状況**：開発DBにビュー作成済み・定義者付け替え済み（2026-10-10）。本番未反映。本番は、`migrate 0036`のあとに、権限付与と定義者の付け替えをBOSSが実行する（§4.1の9番）。
+
+### 16.1 本番・開発の手順SQL（v_ai_line。実行はBOSS。本番は事前にバックアップ。Codexレビュー指摘への対応。2026-10-10）
+```sql
+-- 1. 定義者の権限を6列へ広げる（rootなど管理者で）
+GRANT SELECT (`id`, `line_code`, `line_name`, `calendar_id`, `line_type`, `is_active`)
+  ON `pm_db`.`m_line` TO 'pm_ai_view_owner'@'localhost';
+-- 2. マイグレーション適用後、定義者を付け替える
+CREATE OR REPLACE DEFINER = `pm_ai_view_owner`@`localhost` SQL SECURITY DEFINER VIEW `pm_db`.`v_ai_line` AS
+  SELECT `id`, `line_code`, `line_name`, `calendar_id`, `line_type`, `is_active`
+  FROM `pm_db`.`m_line`;
+-- 3. 読み取りユーザーへビューのSELECTのみ付与（開発のpm_ai_readerはDB全体のSELECTを持つため、実質不要。本番はSHOW GRANTSで確認してから）
+GRANT SELECT ON `pm_db`.`v_ai_line` TO 'pm_ai_reader'@'<本番のpm_ai_readerのホスト部。SHOW GRANTS FOR で確認>';
+-- 4. 確認
+SELECT TABLE_NAME, DEFINER, SECURITY_TYPE FROM information_schema.VIEWS WHERE TABLE_SCHEMA = 'pm_db' AND TABLE_NAME = 'v_ai_line';
+SELECT COUNT(*), SUM(is_active), COUNT(DISTINCT line_code) FROM `pm_db`.`v_ai_line`;  -- 開発の期待値: 57, 56, 57
+SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
+```
+
+## 18. 日付なしビューの指示文の見直し（2026-10-10。BOSS承認済み。Codex第2回レビュー指摘1への対応。実装済み・evaluator未検証）
+
+**背景**：日付なしビュー（`v_ai_product`・`v_ai_process`・`v_ai_line`）に対し、AIが`created_at BETWEEN {{period_from}} AND {{period_to}}`のような日付の絞り込みを付けても、生成物の検査では拒否できない。BOSS判断：日付なしビューの日付の列で絞る分析は正しい分析であり、検査は追加しない。代わりに指示文を、日付の列で絞る分析を禁止しない形に直し、「必ず`parameters_unused`で拒否される」という説明を訂正する。
+
+**実装内容**
+- `pm_backend/apps/ai/services/analysis_codegen_service.py`：`DATELESS_VIEW_RULE`のみ書き換え（`SYSTEM_PROMPT`本体は変更なし。日付ありだけのsystemは変更前と同一）。
+  - 変更前：「日付の列を持たない承認ビュー(datasetsのdescriptionに「期間では絞らず全行が対象」とあるビュー)は、期間で絞らず全行を使う(そのビューに期間の条件や日付の条件を付けない)。期間の変数 period_from・period_to は、日付のあるビューの条件にだけ使う。」
+  - 変更後：「日付の列を持たない承認ビュー(datasetsのdescriptionに「期間では絞らず全行が対象」とあるビュー)は、システムの期間では絞られず、全行が取り込まれる。分析の中で、目的に応じて、そのビューの日付の列(descriptionに列があるもの)で絞るのは構わない。システムの期間の変数 period_from・period_to は、日付のあるビューの期間条件に使う。目的が日付での絞り込みを求めていない場合は、日付の条件を付けない。」
+- 検査（`validate_generated`・`_apply_parameters`）、`analysis_guard_runtime.py`、既存ビューの登録は変更なし。上限値・フォールバックの新設なし。
+- 仕様書：`AI分析基盤仕様書.md`（§4.7-8の指示文の記録、日付なしビューの日付の列での絞り込みを追記）、`Codexレビュー依頼_AI用ビュー.md`（指摘1の対応欄と確認項目7を更新）。
+
+**検証結果**（DBを作らない試験のみ）：`ai.test_analysis_*`の12モジュールを1コマンドで263件OK（skipped=4。その後、品番の30列化と別セッションの追加を含めて265件OK）。`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0。既存の試験の更新は不要（`test_analysis_product_view.py`は定数参照で比較しており、日付あり単独のsystemがSYSTEM_PROMPTと一致する検査もそのまま合格）。
+
+**未完了**：evaluatorによる検証、実機のAI再試験（日付なしビューの日付の列で絞る目的・絞らない目的の両方）。
+
+**反映状況**：コード変更のみ。コミット・本番未反映。
