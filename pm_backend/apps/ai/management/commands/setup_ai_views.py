@@ -26,10 +26,11 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_customer': 'm_customer',
 }
 
-# 結合を含み、定義がマイグレーション(0012〜0014・0040〜0043)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
+# 結合を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
 EXISTING_JOIN_VIEWS = (
     'v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day', 'v_ai_bom_item',
     'v_ai_routing_step', 'v_ai_routing_step_material',
+    'v_ai_user', 'v_ai_department',
 )
 
 # 単純なマスタビュー以外のビューが、同じ元テーブルから使う列。owner のこの列権限は REVOKE しない。
@@ -65,6 +66,15 @@ OTHER_VIEW_COLUMNS = {
         'start_offset_min', 'step_no', 'supplier_id', 'time_unit',
     },
     'm_routing_step_material': {'id', 'routing_step_id', 'component_id', 'quantity', 'consume_timing'},
+    # v_ai_user(auth_user に accounts_userprofile と accounts_department を LEFT JOIN。マイグレーション0045)が、
+    # auth_user の6列(password・last_login・is_superuser・email・date_joined 以外)、accounts_userprofile の11列(created_at・updated_at 以外)を使う。
+    # v_ai_department(accounts_department の自己 LEFT JOIN。マイグレーション0046)が、accounts_department の5列を使う。
+    'auth_user': {'id', 'username', 'first_name', 'last_name', 'is_active', 'is_staff'},
+    'accounts_userprofile': {
+        'user_id', 'employee_code', 'employment_type', 'role', 'is_system_admin', 'joined_on',
+        'department_id', 'division_id', 'group_id', 'team_id', 'unit_id',
+    },
+    'accounts_department': {'id', 'name', 'level', 'display_id', 'parent_id'},
 }
 
 READER_USER = 'pm_ai_reader'

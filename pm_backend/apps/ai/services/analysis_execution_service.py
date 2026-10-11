@@ -128,6 +128,20 @@ ANALYSIS_COLUMN_TYPES = {
         'step_parent_product_code': 'VARCHAR', 'component_id': 'BIGINT', 'component_code': 'VARCHAR',
         'component_name': 'VARCHAR', 'quantity': 'DECIMAL(18,3)', 'consume_timing': 'VARCHAR',
     },
+    # ユーザー(auth_user・accounts_userprofile・accounts_departmentのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_userと照合する)
+    # int・bigintはBIGINT、tinyint(1)はBIGINT(0/1)、varcharはVARCHAR、dateはDATE
+    'v_ai_user': {
+        'id': 'BIGINT', 'login_id': 'VARCHAR', 'first_name': 'VARCHAR', 'last_name': 'VARCHAR', 'is_active': 'BIGINT',
+        'is_staff': 'BIGINT', 'employee_code': 'VARCHAR', 'employment_type': 'VARCHAR', 'role': 'VARCHAR',
+        'is_system_admin': 'BIGINT', 'joined_on': 'DATE', 'department_id': 'BIGINT', 'department_name': 'VARCHAR',
+        'division_id': 'BIGINT', 'division_name': 'VARCHAR', 'group_id': 'BIGINT', 'group_name': 'VARCHAR',
+        'team_id': 'BIGINT', 'team_name': 'VARCHAR', 'unit_id': 'BIGINT', 'unit_name': 'VARCHAR',
+    },
+    # 部署(accounts_departmentのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_departmentと照合する)
+    'v_ai_department': {
+        'id': 'BIGINT', 'name': 'VARCHAR', 'level': 'VARCHAR', 'display_id': 'BIGINT', 'parent_id': 'BIGINT',
+        'parent_name': 'VARCHAR',
+    },
 }
 
 

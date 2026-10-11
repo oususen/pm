@@ -94,6 +94,15 @@ BASE_SQL_SCHEMA = {
         'step_output_product_id', 'step_output_product_code', 'step_output_product_name', 'step_parent_product_code',
         'component_id', 'component_code', 'component_name', 'quantity', 'consume_timing',
     ),
+    # ユーザーのビュー(AI用ビュー作成計画 §27。auth_user に accounts_userprofile と accounts_department(5つの所属の名称)を LEFT JOIN。
+    # WHERE は admin アカウントの除外のみ。password・last_login・is_superuser・email・date_joined と、プロフィールの created_at・updated_at は非公開)
+    'v_ai_user': (
+        'id', 'login_id', 'first_name', 'last_name', 'is_active', 'is_staff', 'employee_code', 'employment_type',
+        'role', 'is_system_admin', 'joined_on', 'department_id', 'department_name', 'division_id', 'division_name',
+        'group_id', 'group_name', 'team_id', 'team_name', 'unit_id', 'unit_name',
+    ),
+    # 部署のビュー(AI用ビュー作成計画 §27。accounts_department に親の部署の名称を自己 LEFT JOIN。WHEREなし)
+    'v_ai_department': ('id', 'name', 'level', 'display_id', 'parent_id', 'parent_name'),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -217,6 +226,29 @@ TABLE_NOTES = {
         '材料のない工程を探すには、v_ai_routing_step の id が、このビューの routing_step_id にない行を探す。'
         'routing_step_id は工程のID(v_ai_routing_step の id と結べる)、routing_* はルーティングとその品番、step_* は工程の列(step_parent_product_code は工程の remark 列を公開したもの。材料自身の remark は公開しない)。'
     ),
+    'v_ai_user': (
+        'ユーザー(ログインアカウント auth_user に、プロフィールと所属の部署名を付けたビュー)。1行=1ユーザー(全行。日付の列はなく、期間では絞らない)。admin アカウントは含まれない。'
+        'login_id はログインID、last_name・first_name は姓・名、employee_code は社員コード、joined_on は入社日。'
+        'is_active は有効(1)か無効(0)か。is_staff は Django のユーザーの区分(1か0)。is_system_admin はシステム管理者(1か0)。'
+        'role の値(モデルのラベル): manager=事業部長・課長、chief=係長、supervisor=班長、leader=リーダー、office_staff=事務員、staff=一般。'
+        'employment_type の値(モデルのラベル): regular=正準社員(モデルの表記のまま)、dispatch=人材派遣、intern=実習生、skilled=特定技能実習生、contract=嘱託社員、part=パート。'
+        'プロフィールの5つの所属(ID と名称): department_id・department_name=部署、division_id・division_name=事業部・課、group_id・group_name=係、team_id・team_name=班、unit_id・unit_name=グループ。'
+        'どれも v_ai_department の id と結べる(空の行がありうる)。'
+        '役割は所属する組織の階層に対応する(コード: accounts の permission_scope・approval_views・role_utils): manager=事業部・課(division_id)、chief=係(group_id)、supervisor=班(team_id)、leader=グループ(unit_id)。'
+        '役割が管理する部署は、その部署と配下の部署(v_ai_department の parent_id をたどった子孫)。'
+        '管理する部署の集め方は役割ごとに異なる(コード上、リーダーの管理部署は、リーダーが担当するグループの割り当て(このビューには含まれない)から集められ、このビューの unit_id(所属)とは別である)。'
+        '役割の序列(role_utils の ROLE_RANK): staff・office_staff=0 < leader=1 < supervisor=2 < chief=3 < manager=4。'
+        '注意: コードには、班長(supervisor)が複数の班を担当する supervisor_teams、リーダー(leader)が複数のグループを担当する leader_units という追加の担当割当(別テーブル)がある。'
+        'これらはこのビューに含まれないため、team_id・unit_id は「その人の所属」であり、「担当するすべての班・グループ」ではない。'
+        'is_staff・is_system_admin・employment_type の権限との関係など、各区分の業務上の意味は未確認(項目名とモデルのラベルのみ)。'
+    ),
+    'v_ai_department': (
+        '部署(組織の階層。accounts_department に親の部署の名称を付けたビュー)。1行=1部署(全行。日付の列はなく、期間では絞らない)。'
+        'name は部署名、level の値(モデルのラベル): division=事業部・課、group=係、team=班、unit=グループ。display_id は表示順。'
+        'parent_id は親の部署の ID(親の部署名は parent_name。親が空の部署は、親を持たない部署)。'
+        'ある部署の配下の部署は、その部署から parent_id をたどった子孫(コード: accounts の permission_scope)。'
+        '注意: 班長が複数の班を担当する supervisor_teams、リーダーが複数のグループを担当する leader_units は別テーブルで、ビューに含まれない。'
+    ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
         '生産数は operator_action が END(終了) と PAUSE(中断) の qty 合計(作業区間ごとの加工数で重複しない)。'
@@ -246,8 +278,12 @@ PERSONAL_SQL_COLUMNS = {
     't_order_line': ('customer_order_no', 'remark'),
 }
 
+# AIホームのチャットSQLに見せないビュー。氏名・社員コード・ログインIDを持つため、個人情報の権限で絞られないチャットでは使わせない
+# (分析画面では ai.analysis の権限で使える。BOSS承認 2026-10-11 案A)。
+AI_HOME_EXCLUDED_TABLES = frozenset({'v_ai_user'})
+
 SCREEN_SQL_TABLES = {
-    'ai_home': frozenset(set(BASE_SQL_SCHEMA) | set(PERSONAL_SQL_COLUMNS)),
+    'ai_home': frozenset((set(BASE_SQL_SCHEMA) - AI_HOME_EXCLUDED_TABLES) | set(PERSONAL_SQL_COLUMNS)),
     'orders': frozenset({'m_customer', 'm_product', 'm_routing', 't_order', 't_order_line'}),
     'production': frozenset({'m_product', 'm_line', 'm_process', 'm_calendar_day', 't_process_realtime_record', 't_laser_actual', 't_laser_actual_detail', 'brake_line_record'}),
     'quality': frozenset({'m_product', 'm_line', 'm_process', 't_scrap_record'}),

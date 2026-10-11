@@ -191,6 +191,42 @@ ANALYSIS_VIEWS = {
             'quantity=材料の数量、consume_timing=消費タイミング(START=工程開始、END=工程完了)。'
         ),
     },
+    # ユーザー(ログインアカウント)。入社日joined_onは実績の日付ではなく期間の根拠にしないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §27)。
+    'v_ai_user': {
+        'label': 'ユーザー', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1ユーザー(ログインアカウント。ユーザーにプロフィールと所属の部署名を付けたビュー)。日付の列がなく、期間では絞らず全行が対象。adminアカウントは含まれない。'
+            'プロフィールがないユーザーは、プロフィール由来の列が空になる。'
+            '列の意味: id=ユーザーのID、login_id=ログインID、last_name・first_name=姓・名、is_active=有効(1)か無効(0)か、'
+            'is_staff=Djangoのユーザーの区分(1か0)、employee_code=社員コード、'
+            'role=役割(モデルのラベル: manager=事業部長・課長、chief=係長、supervisor=班長、leader=リーダー、office_staff=事務員、staff=一般)、'
+            'employment_type=雇用形態(モデルのラベル: regular=正準社員(モデルの表記のまま)、dispatch=人材派遣、intern=実習生、skilled=特定技能実習生、contract=嘱託社員、part=パート)、'
+            'is_system_admin=システム管理者か(1か0)、joined_on=入社日、'
+            'プロフィールの5つの所属のIDと名称: department_id・department_name=部署、division_id・division_name=事業部・課、group_id・group_name=係、'
+            'team_id・team_name=班、unit_id・unit_name=グループ(いずれも部署ビューv_ai_departmentのidと結べる。空の行がありうる)。'
+            '役割は所属する組織の階層に対応する(コード: accountsのpermission_scope・approval_views・role_utils): '
+            'manager=事業部・課(division_id)、chief=係(group_id)、supervisor=班(team_id)、leader=グループ(unit_id)。'
+            '役割が管理する部署は、その部署と配下の部署(v_ai_departmentのparent_idをたどった子孫)。'
+            '管理する部署の集め方は役割ごとに異なる(コード上、リーダーの管理部署は、リーダーが担当するグループの割り当て(このビューには含まれない)から集められ、このビューのunit_id(所属)とは別である)。'
+            '役割の序列(role_utilsのROLE_RANK): staff・office_staff=0 < leader=1 < supervisor=2 < chief=3 < manager=4。'
+            '注意: コードには、班長(supervisor)が複数の班を担当するsupervisor_teams、リーダー(leader)が複数のグループを担当するleader_unitsという追加の担当割当(別テーブル)がある。'
+            'これらはこのビューに含まれないため、team_id・unit_idは「その人の所属」であり、「担当するすべての班・グループ」ではない。'
+            'is_staff・is_system_admin・employment_typeの権限との関係など、各区分の業務上の意味は未確認(項目名とモデルのラベルのみ)。'
+        ),
+    },
+    # 部署(組織の階層)。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §27)。
+    'v_ai_department': {
+        'label': '部署', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1部署(組織の階層。部署に親の部署の名称を付けたビュー)。日付の列がなく、期間では絞らず全行が対象。'
+            '列の意味: id=部署のID、name=部署名、level=階層(モデルのラベル: division=事業部・課、group=係、team=班、unit=グループ)、display_id=表示順、'
+            'parent_id=親の部署のID(parent_name=親の部署名。親が空の部署は、親を持たない部署)。'
+            'ユーザービューv_ai_userのdepartment_id・division_id・group_id・team_id・unit_idは、このビューのidと結べる。'
+            'ユーザーの役割は所属する組織の階層に対応する: manager=事業部・課(division_id)、chief=係(group_id)、supervisor=班(team_id)、leader=グループ(unit_id)。'
+            '役割が管理する部署は、その部署と配下の部署(parent_idをたどった子孫。コード: accountsのpermission_scope)。'
+            '注意: 班長が複数の班を担当するsupervisor_teams、リーダーが複数のグループを担当するleader_unitsは別テーブルで、ビューに含まれない。'
+        ),
+    },
 }
 
 

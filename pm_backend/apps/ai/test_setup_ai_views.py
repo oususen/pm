@@ -317,6 +317,34 @@ class SetupAiViewsTests(SimpleTestCase):
         for column in ('remark', 'created_at', 'updated_at'):
             self.assertNotIn(column, cmd.wanted_columns('m_routing_step_material'))
 
+    def test_user_and_department_views_are_join_views_checked_but_not_recreated(self):
+        # v_ai_user・v_ai_department は結合ビュー: 再作成・GRANT・REVOKEの対象にせず、--check で定義者を表示する(案A)
+        for view in ('v_ai_user', 'v_ai_department'):
+            self.assertIn(view, cmd.EXISTING_JOIN_VIEWS)
+            self.assertNotIn(view, cmd.SIMPLE_MASTER_VIEWS)
+            privileges, views = initial_state()
+            views[view] = ('root@localhost', 'DEFINER', ('id',))
+            cursor = FakeCursor(privileges, views)
+            run(cursor, '--apply', '--views', view)
+            self.assertEqual(cursor.executed, [])
+            cursor = FakeCursor(privileges, views)
+            output = run(cursor, '--check', '--views', view)
+            self.assertIn(f'{view}: 定義者=root@localhost', output)
+            self.assertIn('[要対応: 期待は', output)
+            self.assertEqual(cursor.executed, [])
+            # 全体の --apply でも、このビューと元テーブル auth_user・accounts_* に触れるSQLは出ない
+            cursor = FakeCursor(*initial_state())
+            cursor.views[view] = ('root@localhost', 'DEFINER', ('id',))
+            run(cursor, '--apply')
+            self.assertFalse(any(view in s or 'auth_user' in s or 'accounts_' in s for s in cursor.executed))
+        self.assertEqual(len(cmd.wanted_columns('auth_user')), 6)
+        self.assertEqual(len(cmd.wanted_columns('accounts_userprofile')), 11)
+        self.assertEqual(len(cmd.wanted_columns('accounts_department')), 5)
+        for column in ('password', 'last_login', 'is_superuser', 'email', 'date_joined'):
+            self.assertNotIn(column, cmd.wanted_columns('auth_user'))
+        for column in ('created_at', 'updated_at'):
+            self.assertNotIn(column, cmd.wanted_columns('accounts_userprofile'))
+
     def test_other_view_columns_are_not_revoked(self):
         # v_ai_product から product_code を外しても、v_ai_shipment が使うため REVOKE しない
         reduced = tuple(c for c in BASE_SQL_SCHEMA['v_ai_product'] if c != 'product_code')
