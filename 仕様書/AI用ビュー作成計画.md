@@ -1159,7 +1159,7 @@ GRANT SELECT ON `<db>`.`v_ai_routing_step_material` TO 'pm_ai_reader'@'<reader�
 
 **反映状況（2026-10-11 更新）**：BOSS承認済み。コード実装済み（generator）。evaluator（2026-10-11）条件付き（指摘は §26.8 のとおり）→修正済み。**開発DB: `migrate ai 0042`・`0043` は適用済み、手順SQL（§26.7）はBOSS承認「はい」で実行済み**（定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件、`ai_reader` 接続で2ビューが読める）。**本番未反映**。未確認: `pm_ai_reader` の列権限、DuckDB投入、修正後の再検証。コミット: 未（BOSSの指示待ち）。
 
-## 27. ユーザー・部署のビュー `v_ai_user`・`v_ai_department` の実装記録（2026-10-11。BOSS承認済み。実装済み・evaluator未検証。開発DB: migrate・手順SQLとも未実施）
+## 27. ユーザー・部署のビュー `v_ai_user`・`v_ai_department` の実装記録（2026-10-11。BOSS承認済み。実装済み。evaluator条件付き合格（指摘は修正済み）。開発DBへ反映済み（migrate ai 0045/0046＋手順SQL）。本番未反映）
 
 ### 27.1 BOSSの回答（2026-10-11）
 - 結合OK。プロフィール（`accounts_userprofile`）の結合キーは主キーの `user_id`（`p.user_id = u.id`）。部署のビューは組織の階層を表すため必要。ユーザーのビューには5つの所属（部署・事業部・係・班・グループ）の名称すべてを付ける。
@@ -1188,7 +1188,7 @@ GRANT SELECT ON `<db>`.`v_ai_routing_step_material` TO 'pm_ai_reader'@'<reader�
 - 注意（BOSS判断の対象）: `SCREEN_SQL_TABLES['ai_home']` は `BASE_SQL_SCHEMA` の全ビューを含む。そのため `v_ai_user`（氏名・社員コード・ログインIDを含む）は、そのままではAIホームの読み取り専用SQLで、個人情報の権限を持たない利用者にも見える設計になる。これはBOSS判断（下の「決定」）により、`v_ai_user` をチャットの対象から外して対処した（`v_ai_user` 以外のビューは変更していない）。
 - **決定（BOSS承認 案A。2026-10-11）**: `v_ai_user` は、AIホームのチャットSQLの対象から外した。`sql_queries.py` に `AI_HOME_EXCLUDED_TABLES = frozenset({'v_ai_user'})` を追加し、`SCREEN_SQL_TABLES['ai_home']` から差し引く（分析画面では `ai.analysis` の権限で使える。チャットの権限 `ai.chat` と分析の権限 `ai.analysis` は独立）。試験 `test_analysis_user_view.py` が、どの画面の対象にも含まれないことを固定する。**未コミット・開発DBへの影響なし（コードのみ）**。`v_ai_customer`（顧客名・略称）は、独立検証（2026-10-11）で、AIホームのチャットSQLに見えていることを確認した。**BOSS判断（2026-10-11）: 案B＝このまま見せる（チャットから外さない）**。
 
-### 27.5 手順SQL（`pm_ai_view_owner` への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>` は接続先のDB名。管理者で実行。`migrate ai 0045`・`0046` の後。未実施）
+### 27.5 手順SQL（`pm_ai_view_owner` への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>` は接続先のDB名。管理者で実行。`migrate ai 0045`・`0046` の後。開発DBで実施済み 2026-10-11）
 ```sql
 GRANT SELECT (`id`, `username`, `first_name`, `last_name`, `is_active`, `is_staff`) ON `<db>`.`auth_user` TO 'pm_ai_view_owner'@'localhost';
 GRANT SELECT (`user_id`, `employee_code`, `employment_type`, `role`, `is_system_admin`, `joined_on`, `department_id`, `division_id`, `group_id`, `team_id`, `unit_id`) ON `<db>`.`accounts_userprofile` TO 'pm_ai_view_owner'@'localhost';
@@ -1218,7 +1218,9 @@ GRANT SELECT ON `<db>`.`v_ai_department` TO 'pm_ai_reader'@'<readerのホスト�
 ### 27.6 実装記録（2026-10-11。generator。evaluator未検証）
 **変更ファイル**: 新規 `pm_backend/apps/ai/migrations/0045_ai_user_view.py`・`0046_ai_department_view.py`。`services/analysis_data_service.py`（`ANALYSIS_VIEWS` に2ビュー。label=ユーザー／部署）、`services/analysis_execution_service.py`（`ANALYSIS_COLUMN_TYPES`: int・bigint・tinyint(1)→BIGINT、varchar→VARCHAR、date→DATE）、`services/sql_queries.py`（`BASE_SQL_SCHEMA`・`TABLE_NOTES`。元テーブルの許可は未変更。`SCREEN_SQL_TABLES['ai_home']` から `AI_HOME_EXCLUDED_TABLES`（`v_ai_user`）を差し引く変更あり。他画面・`TERM_COLUMNS` は未変更）、`management/commands/setup_ai_views.py`（`EXISTING_JOIN_VIEWS` に2ビュー、`OTHER_VIEW_COLUMNS` に `auth_user` 6列・`accounts_userprofile` 11列・`accounts_department` 5列。コマンドの動作は未変更）。試験: 新規 `test_analysis_user_view.py`・`test_analysis_department_view.py`、`test_setup_ai_views.py` に1件追加。仕様書: 本節、`AI運用規約・AI用DB辞書.md` 6.5-13、`AI分析基盤仕様書.md`。
 **generatorが実行した範囲（DB不要の試験のみ）**: 12モジュール（user・department・routing_step・routing_step_material・bom_item・calendar_day・dateless・setup_ai_views・planning・column_guide・codegen・execution）272件、失敗0・skipped=4（初回の2件の失敗は試験の書き方の誤りで修正。再実行で OK）。`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0。`makemigrations --dry-run`＝No changes detected。既存7ビューの定義のSHA-256は `db31acbf…` のまま。開発DBの読み取り: マイグレーションの SELECT をサブクエリで実行し、行数 ユーザー＝`auth_user` の件数−admin 除外分（開発DBで98件中1件を除外）、部署＝`accounts_department` の全行（行数一致）、列数 21・6 を確認（ビューは作っていない）。
-**未確認・未実施**: 判断ページ（decisions）との照合（読み取りの手段がなく、BOSS提示の列リストとの一致のみ確認）、`migrate ai 0045`・`0046`、手順SQL（§27.5）、`SHOW COLUMNS` との列型照合、DuckDBへの実投入、本番反映、evaluator検証。コミット: 未（BOSSの指示待ち）。
+**開発DBでの実施（2026-10-11）**: `migrate ai 0045`・`0046` をBOSSが実行（ai.0045_ai_user_view OK・ai.0046_ai_department_view OK）。手順SQL（§27.5。GRANT 3文＋CREATE OR REPLACE DEFINER 2文）を実行し、定義者 `pm_ai_view_owner@localhost`・DEFINER を `information_schema.VIEWS` で確認。`setup_ai_views --check` は要対応0件。`ai_reader` 接続で、`v_ai_user` 97件（元98件から admin を除く）・`v_ai_department` 39件が読め、`SHOW COLUMNS` の列名・順序が `ANALYSIS_COLUMN_TYPES` と一致（21列・6列）。`password`・`email`・`username`（v_ai_user）・`created_at`（v_ai_department）はビュー経由で読めない。`login_id` に `admin` はいない。
+
+**未確認・未実施**: 判断ページ（decisions）との照合（検証担当の環境では読めなかった。呼び出し元の確認では列の一致を確認済み）、DuckDBへの実投入、本番反映、修正後の再検証（evaluator）。コミット: e644aae6（ユーザー・部署の実装）。
 
 ### 27.7 検証項目（反映後にevaluatorが読み取りで確認）
 1. `v_ai_user` の行数＝`auth_user` の行数−`username='admin'` の行数。`v_ai_department` の行数＝`accounts_department` の行数。
@@ -1228,7 +1230,7 @@ GRANT SELECT ON `<db>`.`v_ai_department` TO 'pm_ai_reader'@'<readerのホスト�
 5. マイグレーションのSELECTと§27.5の手順SQLが、列・結合・別名・WHEREで同じ。
 6. `v_ai_user` がチャット（AIホーム）のSQLで拒否されること、分析では使えること（`ai.analysis` の権限）。`v_ai_department` はチャットで使え、チャットのSQL辞書（`TABLE_NOTES`）の文面に `v_ai_user` の名前が出ないこと。
 
-**反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0045`・`0046`、手順SQL（§27.5）とも未実施。本番未反映**。
+**反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0045`・`0046`、手順SQL（§27.5）とも実施済み。本番未反映**。
 
 ### 27.8 今後の候補・保留
 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。

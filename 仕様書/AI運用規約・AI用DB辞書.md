@@ -356,7 +356,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_COLUMN_TYPES`（33列・20列。datetime は TIMESTAMP、`quantity` は DECIMAL(18,3)、真偽値は BIGINT）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_routing`・`m_routing_step`・`m_routing_step_material` の許可・画面SQL（`BASE_SQL_SCHEMA['m_routing']` の3列等）は置き換えず、ビューの追加のみ。
 - 権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §26.7。開発DBはBOSS承認で実行済み（2026-10-11）。本番は未実施（BOSSが実行）。
 
-### 6.5-13 ユーザー・部署（`v_ai_user`・`v_ai_department`。2026-10-11 実装。開発DBへ `migrate ai 0045`・`0046`＋手順SQL §27.5 は未実施・本番未反映）
+### 6.5-13 ユーザー・部署（`v_ai_user`・`v_ai_department`。2026-10-11 実装。開発DBへ反映済み（`migrate ai 0045`・`0046`＋手順SQL §27.5）・本番未反映）
 
 | ビュー | 列 | 有効条件 | AI利用 |
 |---|---|---|---|
