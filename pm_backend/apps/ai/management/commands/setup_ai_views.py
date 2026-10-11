@@ -26,8 +26,11 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_customer': 'm_customer',
 }
 
-# 結合を含み、定義がマイグレーション(0012〜0014・0040・0041)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
-EXISTING_JOIN_VIEWS = ('v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day', 'v_ai_bom_item')
+# 結合を含み、定義がマイグレーション(0012〜0014・0040〜0043)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
+EXISTING_JOIN_VIEWS = (
+    'v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day', 'v_ai_bom_item',
+    'v_ai_routing_step', 'v_ai_routing_step_material',
+)
 
 # 単純なマスタビュー以外のビューが、同じ元テーブルから使う列。owner のこの列権限は REVOKE しない。
 # v_ai_shipment が m_product の id・product_code・product_name を使う(t_shipment_actual の列は対象外)。
@@ -48,6 +51,20 @@ OTHER_VIEW_COLUMNS = {
         'id', 'bom_id', 'child_product_id', 'quantity', 'loss_rate', 'sourcing_type', 'supplier_id',
         'process_id', 'line_id', 'time_unit', 'lead_time_days', 'duration_min', 'is_coproduct_driver',
     },
+    # v_ai_routing_step(m_routing_step に m_routing などを LEFT JOIN。マイグレーション0042)が、
+    # m_routing の7列と m_routing_step の17列(step_type・created_at・updated_at 以外)を使う。
+    # v_ai_routing_step_material(m_routing_step_material に m_routing_step などを LEFT JOIN。マイグレーション0043)が、
+    # m_routing_step_material の5列(remark・created_at・updated_at 以外)を使う。
+    # 品番・工程・ライン・仕入先の列は、既存の単純なマスタビューが同じ列を使う。
+    'm_routing': {
+        'id', 'product_id', 'routing_code', 'is_default', 'is_active', 'valid_from_datetime', 'valid_to_datetime',
+    },
+    'm_routing_step': {
+        'duration_min', 'hierarchy_depth', 'hierarchy_path', 'id', 'lead_time_days', 'line_id', 'output_product_id',
+        'parallel_count', 'parallel_group', 'process_id', 'remark', 'routing_id', 'source_bom_item_id',
+        'start_offset_min', 'step_no', 'supplier_id', 'time_unit',
+    },
+    'm_routing_step_material': {'id', 'routing_step_id', 'component_id', 'quantity', 'consume_timing'},
 }
 
 READER_USER = 'pm_ai_reader'

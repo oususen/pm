@@ -341,6 +341,21 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_COLUMN_TYPES`（29列。`DECIMAL(18,3)` は `quantity`・`loss_rate`、`sourcing_type` は VARCHAR、真偽値は BIGINT）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_bom`・`m_bom_item` の許可・画面SQLは置き換えず、ビューの追加のみ。
 - 権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §25.6。開発DBでは実施済み（2026-10-11。定義者 `pm_ai_view_owner@localhost` を確認）。本番は未実施（BOSSが実行）。
 
+### 6.5-12 ルーティング工程・工程の材料（`v_ai_routing_step`・`v_ai_routing_step_material`。2026-10-11 実装。開発DBへ反映済み（`migrate ai 0042`・`0043`＋手順SQL §26.7 の手動実行）・本番未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_routing_step`（`ai/0042`で作成） | 33列: `id`・`routing_id`・`routing_code`・`routing_product_id`・`routing_product_code`・`routing_product_name`・`routing_is_default`・`routing_is_active`・`routing_valid_from_datetime`・`routing_valid_to_datetime`・`step_no`・`parallel_group`・`parallel_count`・`hierarchy_depth`・`hierarchy_path`・`process_id`・`process_code`・`process_name`・`line_id`・`line_code`・`line_name`・`supplier_id`・`supplier_code`・`supplier_name`・`output_product_id`・`output_product_code`・`output_product_name`・`parent_product_code`（工程の `remark` の別名）・`source_bom_item_id`・`time_unit`・`lead_time_days`・`start_offset_min`・`duration_min` | `m_routing_step` 全行（WHEREなし）を主とし、`m_routing`・`m_product`（ルーティングの品番・加工後品）・`m_process`・`m_line`・`m_supplier` を主キーで `LEFT JOIN`（マスタ属性の付与のみ。行数は変わらない）。日付列を持たないため期間では絞らない（`date_field=None`） | 読み取り専用SQLで、工程の数・工程の時間の集計、ルーティングごとの工程の確認。非公開（ビューに含めない）: `m_routing_step` の `step_type`・`created_at`・`updated_at`、`m_routing` の `description`・`created_at`・`updated_at` |
+| `v_ai_routing_step_material`（`ai/0043`で作成） | 20列: `id`・`routing_step_id`・`routing_id`・`routing_code`・`routing_product_id`・`routing_product_code`・`routing_product_name`・`step_no`・`step_process_id`・`step_process_code`・`step_process_name`・`step_output_product_id`・`step_output_product_code`・`step_output_product_name`・`step_parent_product_code`（工程の `remark` の別名）・`component_id`・`component_code`・`component_name`・`quantity`・`consume_timing` | `m_routing_step_material` 全行（WHEREなし）を主とし、`m_routing_step`・`m_routing`・`m_product`（ルーティングの品番・加工後品・部品）・`m_process` を主キーで `LEFT JOIN`（行数は変わらない）。`date_field=None` | 読み取り専用SQLで、工程が消費する材料（部品）と、使用個数の確認。非公開: `m_routing_step_material` の `remark`・`created_at`・`updated_at`、工程の `step_type`・`created_at`・`updated_at` 等 |
+
+- 個人情報の列は含まない。説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES`）には、実データの件数・値・具体的なコードを書かない。
+- **使用個数（画面の項目）は、材料ビューの `quantity` から次の探し方で求められる値の一つで、画面の使用個数と同じとは限らない**。ビューだけで求める方法（親品コードによる探し方）: 同じルーティング（`routing_id`）の中で、加工後品のコード（工程ビューの `output_product_code`）が、この工程の `parent_product_code` と等しい工程（親の工程。複数ありうる）の材料のうち、`component_id` が、この工程の `output_product_id` と等しい行の `quantity`（親の工程が複数、または同じ部品の行が複数あるときは合計が必要）。親の工程が見つからない、または該当する材料がない場合は、この方法では求められない。画面（`RoutingMaster.vue` の `usageQuantity`）は、階層パス（`hierarchy_path`）で見つけた親の工程の材料の合計を先に使い、求められないときに親品コードによる探し方、それでも求められないときにBOM明細の数量を使うため、値が異なる場合がある。
+- **材料のビューは材料の行ごと**のため、工程の列（`step_no` など）が材料の数だけ繰り返される。工程の数や時間を材料のビューで合計しない（二重に数える）。工程の数・時間は `v_ai_routing_step` で集計する。材料のない工程は材料のビューに行がない（その工程には登録された材料がない。業務上の意味は未確認）。探すには、工程ビューの `id` が、材料ビューの `routing_step_id` にない行を探す。
+- `parent_product_code` は品番コードの文字列で `v_ai_product.product_code` と結べるが、品番マスタにない値があり得る（BOSS承認 2026-10-11: そのまま出す。データはBOSSが後で調査・修正する）。
+- 業務上の意味が未確認（項目名のみ）: `parallel_group`・`parallel_count`・`hierarchy_depth`・`hierarchy_path`・`source_bom_item_id`・`start_offset_min`・`time_unit`・`lead_time_days`・`duration_min`。`time_unit` は DAY=日、MINUTE=分、`consume_timing` は START=工程開始、END=工程完了（いずれもモデルのラベル）。`step_type` は非公開で意味は未確認。
+- `ANALYSIS_COLUMN_TYPES`（33列・20列。datetime は TIMESTAMP、`quantity` は DECIMAL(18,3)、真偽値は BIGINT）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_routing`・`m_routing_step`・`m_routing_step_material` の許可・画面SQL（`BASE_SQL_SCHEMA['m_routing']` の3列等）は置き換えず、ビューの追加のみ。
+- 権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §26.7。開発DBはBOSS承認で実行済み（2026-10-11）。本番は未実施（BOSSが実行）。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |

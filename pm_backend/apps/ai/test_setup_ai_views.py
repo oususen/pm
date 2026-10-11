@@ -288,6 +288,35 @@ class SetupAiViewsTests(SimpleTestCase):
         self.assertEqual(len(cmd.wanted_columns('m_bom')), 7)
         self.assertEqual(len(cmd.wanted_columns('m_bom_item')), 13)
 
+    def test_routing_step_views_are_join_views_checked_but_not_recreated(self):
+        # v_ai_routing_step・v_ai_routing_step_material は結合ビュー: 再作成・GRANT・REVOKEの対象にせず、--check で定義者を表示する(案A)
+        for view in ('v_ai_routing_step', 'v_ai_routing_step_material'):
+            self.assertIn(view, cmd.EXISTING_JOIN_VIEWS)
+            self.assertNotIn(view, cmd.SIMPLE_MASTER_VIEWS)
+            privileges, views = initial_state()
+            views[view] = ('root@localhost', 'DEFINER', ('id',))
+            cursor = FakeCursor(privileges, views)
+            run(cursor, '--apply', '--views', view)
+            self.assertEqual(cursor.executed, [])
+            cursor = FakeCursor(privileges, views)
+            output = run(cursor, '--check', '--views', view)
+            self.assertIn(f'{view}: 定義者=root@localhost', output)
+            self.assertIn('[要対応: 期待は', output)
+            self.assertEqual(cursor.executed, [])
+            # 全体の --apply でも、このビューと元テーブル m_routing* に触れるSQLは出ない
+            cursor = FakeCursor(*initial_state())
+            cursor.views[view] = ('root@localhost', 'DEFINER', ('id',))
+            run(cursor, '--apply')
+            self.assertFalse(any(view in s or 'm_routing' in s for s in cursor.executed))
+        self.assertEqual(len(cmd.wanted_columns('m_routing')), 7)
+        self.assertEqual(len(cmd.wanted_columns('m_routing_step')), 17)
+        self.assertEqual(len(cmd.wanted_columns('m_routing_step_material')), 5)
+        for column in ('step_type', 'created_at', 'updated_at', 'description'):
+            self.assertNotIn(column, cmd.wanted_columns('m_routing_step'))
+            self.assertNotIn(column, cmd.wanted_columns('m_routing'))
+        for column in ('remark', 'created_at', 'updated_at'):
+            self.assertNotIn(column, cmd.wanted_columns('m_routing_step_material'))
+
     def test_other_view_columns_are_not_revoked(self):
         # v_ai_product から product_code を外しても、v_ai_shipment が使うため REVOKE しない
         reduced = tuple(c for c in BASE_SQL_SCHEMA['v_ai_product'] if c != 'product_code')

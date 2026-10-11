@@ -75,6 +75,25 @@ BASE_SQL_SCHEMA = {
         'supplier_id', 'supplier_code', 'supplier_name', 'process_id', 'process_code', 'process_name',
         'line_id', 'line_code', 'line_name', 'time_unit', 'lead_time_days', 'duration_min', 'is_coproduct_driver',
     ),
+    # ルーティング工程のビュー(AI用ビュー作成計画 §26。m_routing_step に m_routing・m_product・m_process・m_line・m_supplier を LEFT JOIN。
+    # step_type・created_at・updated_at、m_routing の description・created_at・updated_at と、結合先のコード・名称以外の列は非公開)
+    'v_ai_routing_step': (
+        'id', 'routing_id', 'routing_code', 'routing_product_id', 'routing_product_code', 'routing_product_name',
+        'routing_is_default', 'routing_is_active', 'routing_valid_from_datetime', 'routing_valid_to_datetime',
+        'step_no', 'parallel_group', 'parallel_count', 'hierarchy_depth', 'hierarchy_path',
+        'process_id', 'process_code', 'process_name', 'line_id', 'line_code', 'line_name',
+        'supplier_id', 'supplier_code', 'supplier_name', 'output_product_id', 'output_product_code',
+        'output_product_name', 'parent_product_code', 'source_bom_item_id', 'time_unit', 'lead_time_days',
+        'start_offset_min', 'duration_min',
+    ),
+    # 工程別部品消費のビュー(AI用ビュー作成計画 §26。m_routing_step_material に m_routing_step・m_routing・m_product・m_process を LEFT JOIN。
+    # 材料の remark・created_at・updated_at と、工程の step_type・created_at・updated_at 等は非公開)
+    'v_ai_routing_step_material': (
+        'id', 'routing_step_id', 'routing_id', 'routing_code', 'routing_product_id', 'routing_product_code',
+        'routing_product_name', 'step_no', 'step_process_id', 'step_process_code', 'step_process_name',
+        'step_output_product_id', 'step_output_product_code', 'step_output_product_name', 'step_parent_product_code',
+        'component_id', 'component_code', 'component_name', 'quantity', 'consume_timing',
+    ),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -167,6 +186,36 @@ TABLE_NOTES = {
         'time_unit は時間単位(DAY=日、MINUTE=分)。どちらの行も、リードタイム lead_time_days(日)と加工時間(サイクル時間)duration_min(分)の両方を持つ(duration_min は空の行がありうる)。'
         'lead_time_days が0の行はありうる(0は有効な値)。lead_time_days は親→子の需要日をずらすときに使う。'
         'BUY・SUBCON の明細での工程・ラインの業務上の意味は未確認。'
+    ),
+    'v_ai_routing_step': (
+        'ルーティング工程(m_routing_step にルーティングヘッダ m_routing と、品番・工程・ライン・外作先のコード・名称を付けたビュー)。1行=1工程(全行。日付の列はなく、期間では絞らない)。'
+        '工程の数・工程の時間は、このビューで集計する。工程の材料は別のビュー v_ai_routing_step_material にある。'
+        '材料のない工程は材料のビューに行がないので、材料のない工程を探すには、このビューの id が、v_ai_routing_step_material の routing_step_id にない行を探す。'
+        'routing_id はルーティングのID。routing_* はルーティング(ヘッダ)とその品番(routing_product_id は品番マスタビュー v_ai_product の id と結べる)。'
+        'routing_is_default は既定か(1か0)、routing_is_active は有効(1)か無効(0)か、routing_valid_from_datetime・routing_valid_to_datetime は有効開始日時・有効終了日時(空の行がありうる)。'
+        'step_no は工程番号。process_id・line_id・supplier_id は空の行がありうる(それぞれ v_ai_process・v_ai_line・v_ai_supplier の id と結べる。supplier_* は外作先)。'
+        'output_product_* は工程の加工後品(output_product_id は v_ai_product の id と結べる。空の行がありうる)。'
+        'parent_product_code は工程の親品の品番コード(文字列。工程の remark 列をこの名前で公開している)で、v_ai_product.product_code と結べるが、品番マスタにない値があり得る。'
+        'time_unit は時間単位(DAY=日、MINUTE=分)、lead_time_days はリードタイム(日)、start_offset_min は開始オフセット(分)、duration_min は所要時間(分)。'
+        'parallel_group は並列グループ、parallel_count は並列数、hierarchy_depth は工程階層深さ、hierarchy_path は工程階層パス、source_bom_item_id は元BOM明細のID。'
+        'parallel_group・parallel_count・hierarchy_depth・hierarchy_path・source_bom_item_id・time_unit・lead_time_days・start_offset_min・duration_min の業務上の意味は未確認(項目名のみ)。'
+    ),
+    'v_ai_routing_step_material': (
+        '工程別部品消費(m_routing_step_material に、工程・ルーティング・品番・工程のコード・名称を付けたビュー)。1行=1工程の1材料(全行。日付の列はなく、期間では絞らない)。'
+        'component_id・component_code・component_name は消費する部品の品番(component_id は品番マスタビュー v_ai_product の id と結べる)。'
+        'consume_timing は消費タイミングで、START=工程開始、END=工程完了。quantity は材料の数量。'
+        '画面の項目「使用個数」は、このビューの quantity から次の探し方で求められる値の一つで、画面の使用個数と同じとは限らない。'
+        'このビューだけで求める方法(親品コードによる探し方): 同じルーティング(routing_id)の中で、加工後品のコード(工程ビュー v_ai_routing_step の output_product_code)が、'
+        'この工程の parent_product_code(このビューでは step_parent_product_code)と等しい工程(親の工程。複数ありうる)の材料のうち、component_id が、この工程の output_product_id'
+        '(このビューでは step_output_product_id)と等しい行の quantity。親の工程が複数、または同じ部品の行が複数あるときは、合計が必要。'
+        '親の工程が見つからない、または該当する材料がない場合は、この方法では求められない。'
+        '画面は、階層パス(hierarchy_path)で見つけた親の工程の材料の合計を先に使い、求められないときに親品コードによる探し方、それでも求められないときにBOM明細の数量を使う。'
+        'そのため、画面の使用個数と値が異なる場合がある。'
+        '注意: このビューは材料の行ごとなので、工程の列(step_no など)が材料の数だけ繰り返される。工程の数や時間を、このビューで合計しない(二重に数える)。'
+        '工程の数・工程の時間は、工程ビュー v_ai_routing_step で集計する。'
+        '材料のない工程は、このビューに行がない(その工程には登録された材料がない。業務上の意味は未確認)。'
+        '材料のない工程を探すには、v_ai_routing_step の id が、このビューの routing_step_id にない行を探す。'
+        'routing_step_id は工程のID(v_ai_routing_step の id と結べる)、routing_* はルーティングとその品番、step_* は工程の列(step_parent_product_code は工程の remark 列を公開したもの。材料自身の remark は公開しない)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'

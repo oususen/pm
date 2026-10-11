@@ -104,6 +104,30 @@ ANALYSIS_COLUMN_TYPES = {
         'line_id': 'BIGINT', 'line_code': 'VARCHAR', 'line_name': 'VARCHAR', 'time_unit': 'VARCHAR',
         'lead_time_days': 'BIGINT', 'duration_min': 'BIGINT', 'is_coproduct_driver': 'BIGINT',
     },
+    # ルーティング工程(m_routing_step・m_routingなどのモデル・マイグレーションから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_routing_stepと照合する)
+    # bool列(tinyint(1))はBIGINT(0/1)、int・外部キー(bigint)はBIGINT、datetimeはTIMESTAMP
+    'v_ai_routing_step': {
+        'id': 'BIGINT', 'routing_id': 'BIGINT', 'routing_code': 'VARCHAR', 'routing_product_id': 'BIGINT',
+        'routing_product_code': 'VARCHAR', 'routing_product_name': 'VARCHAR', 'routing_is_default': 'BIGINT',
+        'routing_is_active': 'BIGINT', 'routing_valid_from_datetime': 'TIMESTAMP', 'routing_valid_to_datetime': 'TIMESTAMP',
+        'step_no': 'BIGINT', 'parallel_group': 'BIGINT', 'parallel_count': 'BIGINT', 'hierarchy_depth': 'BIGINT',
+        'hierarchy_path': 'VARCHAR', 'process_id': 'BIGINT', 'process_code': 'VARCHAR', 'process_name': 'VARCHAR',
+        'line_id': 'BIGINT', 'line_code': 'VARCHAR', 'line_name': 'VARCHAR', 'supplier_id': 'BIGINT',
+        'supplier_code': 'VARCHAR', 'supplier_name': 'VARCHAR', 'output_product_id': 'BIGINT',
+        'output_product_code': 'VARCHAR', 'output_product_name': 'VARCHAR', 'parent_product_code': 'VARCHAR',
+        'source_bom_item_id': 'BIGINT', 'time_unit': 'VARCHAR', 'lead_time_days': 'BIGINT',
+        'start_offset_min': 'BIGINT', 'duration_min': 'BIGINT',
+    },
+    # 工程別部品消費(m_routing_step_materialなどのモデル・マイグレーションから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_routing_step_materialと照合する)
+    # decimal(12,3)はDECIMAL(18,3)、int・外部キー(bigint)はBIGINT
+    'v_ai_routing_step_material': {
+        'id': 'BIGINT', 'routing_step_id': 'BIGINT', 'routing_id': 'BIGINT', 'routing_code': 'VARCHAR',
+        'routing_product_id': 'BIGINT', 'routing_product_code': 'VARCHAR', 'routing_product_name': 'VARCHAR',
+        'step_no': 'BIGINT', 'step_process_id': 'BIGINT', 'step_process_code': 'VARCHAR', 'step_process_name': 'VARCHAR',
+        'step_output_product_id': 'BIGINT', 'step_output_product_code': 'VARCHAR', 'step_output_product_name': 'VARCHAR',
+        'step_parent_product_code': 'VARCHAR', 'component_id': 'BIGINT', 'component_code': 'VARCHAR',
+        'component_name': 'VARCHAR', 'quantity': 'DECIMAL(18,3)', 'consume_timing': 'VARCHAR',
+    },
 }
 
 

@@ -143,6 +143,54 @@ ANALYSIS_VIEWS = {
             'BUY・SUBCONの明細での工程・ラインの業務上の意味は未確認。'
         ),
     },
+    # ルーティング工程。日付の列(routing_valid_*_datetimeはルーティングの有効期間で実績の日付ではない)・数量の列がないため、
+    # date_field=None・quantity_field=None(AI用ビュー作成計画 §26)。
+    'v_ai_routing_step': {
+        'label': 'ルーティング工程', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1工程(ルーティング工程にルーティングヘッダと、品番・工程・ライン・外作先のコード・名称を付けたビュー)。日付の列がなく、期間では絞らず全行が対象。'
+            '工程の数・工程の時間は、このビューで集計する。工程の材料は、別のビューv_ai_routing_step_materialにある。'
+            '材料のない工程は材料のビューに行がないため、材料のない工程を探すには、このビューのidが、材料のビューのrouting_step_idにない行を探す。'
+            '列の意味: id=ルーティング工程のID、routing_id=ルーティングのID、routing_code=ルーティングコード、'
+            'routing_product_id・routing_product_code・routing_product_name=ルーティングの品番のID・コード・名称(routing_product_idは品番マスタビューv_ai_productのidと結べる)、'
+            'routing_is_default=ルーティングが既定か(1か0)、routing_is_active=ルーティングが有効(1)か無効(0)か、'
+            'routing_valid_from_datetime・routing_valid_to_datetime=ルーティングの有効開始日時・有効終了日時(空の行がありうる)、'
+            'step_no=工程番号、'
+            'process_id・process_code・process_name=工程のID・コード・名称(process_idは工程マスタビューv_ai_processのidと結べる。空の行がありうる)、'
+            'line_id・line_code・line_name=ラインのID・コード・名称(line_idはラインマスタビューv_ai_lineのidと結べる。空の行がありうる)、'
+            'supplier_id・supplier_code・supplier_name=外作先(仕入先)のID・コード・名称(supplier_idは仕入先マスタビューv_ai_supplierのidと結べる。空の行がありうる)、'
+            'output_product_id・output_product_code・output_product_name=工程の加工後品のID・コード・名称(output_product_idは品番マスタビューv_ai_productのidと結べる。空の行がありうる)、'
+            'parent_product_code=工程の親品の品番コード(文字列。工程のremark列をこの名前で公開している。v_ai_productのproduct_codeと結べるが、品番マスタにない値があり得る)、'
+            'time_unit=時間単位(DAY=日、MINUTE=分)、lead_time_days=リードタイム(日)、start_offset_min=開始オフセット(分。空の行がありうる)、duration_min=所要時間(分。空の行がありうる)。'
+            'parallel_group=並列グループ、parallel_count=並列数、hierarchy_depth=工程階層深さ、hierarchy_path=工程階層パス、source_bom_item_id=元BOM明細のID(空の行がありうる)。'
+            'parallel_group・parallel_count・hierarchy_depth・hierarchy_path・source_bom_item_id・time_unit・lead_time_days・start_offset_min・duration_minの業務上の意味は未確認(項目名のみ)。'
+        ),
+    },
+    # 工程別部品消費(ルーティング工程の材料)。日付・数量として扱う列がないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §26)。
+    'v_ai_routing_step_material': {
+        'label': 'ルーティング工程の材料', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1工程の1材料(工程別部品消費に、工程・ルーティング・品番・工程のコード・名称を付けたビュー)。日付の列がなく、期間では絞らず全行が対象。'
+            '画面の項目「使用個数」は、このビューのquantityから次の探し方で求められる値の一つで、画面の使用個数と同じとは限らない。'
+            'このビューだけで求める方法(親品コードによる探し方): 同じルーティング(routing_id)の中で、加工後品のコード(工程ビューv_ai_routing_stepのoutput_product_code)が、'
+            'この工程のparent_product_code(このビューではstep_parent_product_code)と等しい工程(親の工程。複数ありうる)の材料のうち、component_idが、この工程のoutput_product_id'
+            '(このビューではstep_output_product_id)と等しい行のquantity。親の工程が複数、または同じ部品の行が複数あるときは、合計が必要。'
+            '親の工程が見つからない、または該当する材料がない場合は、この方法では求められない。'
+            '画面は、階層パス(hierarchy_path)で見つけた親の工程の材料の合計を先に使い、求められないときに親品コードによる探し方、それでも求められないときにBOM明細の数量を使う。'
+            'そのため、画面の使用個数と値が異なる場合がある。'
+            '注意: このビューは材料の行ごとなので、工程の列(step_noなど)が材料の数だけ繰り返される。工程の数や時間を、このビューで合計しない(二重に数える)。'
+            '工程の数・工程の時間は、工程ビューv_ai_routing_stepで集計する。'
+            '材料のない工程は、このビューに行がない(その工程には登録された材料がない。業務上の意味は未確認)。'
+            '材料のない工程を探すには、工程ビューv_ai_routing_stepのidが、このビューのrouting_step_idにない行を探す。'
+            '列の意味: id=工程別部品消費のID、routing_step_id=ルーティング工程のID(工程ビューのidと結べる)、routing_id=ルーティングのID、routing_code=ルーティングコード、'
+            'routing_product_id・routing_product_code・routing_product_name=ルーティングの品番のID・コード・名称(routing_product_idは品番マスタビューv_ai_productのidと結べる)、'
+            'step_no=工程番号、step_process_id・step_process_code・step_process_name=工程のID・コード・名称(step_process_idは工程マスタビューv_ai_processのidと結べる。空の行がありうる)、'
+            'step_output_product_id・step_output_product_code・step_output_product_name=工程の加工後品のID・コード・名称(空の行がありうる)、'
+            'step_parent_product_code=工程の親品の品番コード(文字列。工程のremark列をこの名前で公開している。材料自身のremarkは公開しない。品番マスタにない値があり得る)、'
+            'component_id・component_code・component_name=消費する部品の品番のID・コード・名称(component_idは品番マスタビューv_ai_productのidと結べる)、'
+            'quantity=材料の数量、consume_timing=消費タイミング(START=工程開始、END=工程完了)。'
+        ),
+    },
 }
 
 

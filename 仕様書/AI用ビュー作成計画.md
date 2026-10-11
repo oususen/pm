@@ -1037,3 +1037,124 @@ GRANT SELECT ON `<db>`.`v_ai_bom_item` TO 'pm_ai_reader'@'<readerのホスト部
 
 ### 25.9 反映状況
 **【現状（2026-10-11 更新）】コミット済み（69cc76e8・82f2d261・a006e417。main 4facef1c に取り込み・push 済み）。開発DBへ反映済み**：`migrate ai 0041` と §25.6 の手順SQL（GRANT 2文＋CREATE OR REPLACE。定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件）。**evaluator（独立検証）：条件付き（コード・開発DBは合格、条件は仕様書の更新漏れのみ→本更新で対応）**。DBなしの13モジュール263件OK（skipped=4）、フロント7本fail 0、変異38通り中36通りを検出（検出できなかったのは日本語の固有名詞と漢数字の件数で、正規表現による試験の限界）。開発DB（読み取りのみ）：行数3,428＝`m_bom_item`、`COUNT(DISTINCT bom_id)`＝1,314、`bom_id`のヘッダ欠損0、結合先の欠損0、`ai_reader`で全3,428行×29列が実行経路の型検査（`_cell`）を通る、`remark`・`created_at`・`updated_at`はビューで読めない。**未確認**：判断ページ本体との照合（ローカルの確認明細との一致まで）、DuckDBへの実投入、本番の`pm_ai_reader`の権限（開発の`pm_ai_reader`はDB全体のSELECTを持つため、基底テーブルの`remark`等は開発では読める）、本番反映。既存ビューの定義JSONのSHA-256（`db31acbf…`）は7ビュー（`v_ai_calendar_day`を含む。§25.7の「8本」は本ビューを足した数）。**BOSS判断待ち**：説明文に残る`v_auto_…`の版の値の記載と、`process_code`のG・PURCHASEの具体コードを残すか（出典はBOSS回答。現状は残す）。以下は実装時点（2026-10-11）の記録：BOSS承認済み。**evaluator（2026-10-11）：条件付き→修正後の再検証（1回め）で合格（DBなしで確認できる項目8・9・10と観点2〜8）。DBが必要な項目1〜7は未確認**。初回の指摘（説明文に版の値・種類数がある／未確認の範囲のずれ／試験が甘い）は、BOSS承認「削る案」で修正済み。説明文には実データの件数・傾向・版の値を書かない。試験は、DBなしの環境差し替え（sqlite）で、新規・関連49件OK。`codegen`・`execution`などの115件の失敗は、`ai_reader`設定がない環境要因で、変更前のコードでも名前まで同一（新ビューが原因の失敗なし。本来の設定では未実行）。**コード実装済み（generator）**：`0041_ai_bom_item_view.py`・`sql_queries.py`・`analysis_data_service.py`・`analysis_execution_service.py`・`setup_ai_views.py`（`EXISTING_JOIN_VIEWS`・`OTHER_VIEW_COLUMNS`のみ）・`test_analysis_bom_item_view.py`（新規）・`test_setup_ai_views.py`（1件追加）。既存7ビューの定義のSHA-256は変わらず（`db31acbf…`のまま）。DBなしの試験は実行済み（`ai.test_analysis_bom_item_view`ほか10モジュール132件OK）。**開発DBは未変更**（`migrate ai 0041`・§25.6の手順SQLは未実行＝BOSSが実行）。§25.7の検証項目（DB上の確認）は未実施。41行目・§4.1-2への例外の追記は実施済み（BOSS承認 2026-10-11。未コミット）。`lead_time_days`の説明の1文（親→子の需要日をずらすときに使う）と、§25.4の版の実データは、BOSS判断で残す（2026-10-11）。開発DBへの反映（`migrate ai 0041`と手順SQL）は、BOSSが実行する段階（2026-10-11 手順を提示）。本番未反映。
+
+## 26. ルーティングのビュー `v_ai_routing_step`・`v_ai_routing_step_material` の作成前確認（2026-10-11。BOSS承認済み。実装済み・evaluator(2026-10-11)条件付き→指摘修正済み。開発DB反映済み・本番未反映。実装記録は§26.8）
+
+公開する列は、判断画面 decisions の `m_routing`・`m_routing_step`・`m_routing_step_material` を、草案の前に読み直して決めた（2026-10-11 時点で、判断ページに `step_type`・`created_at`・`updated_at` の記載はない＝非公開として扱う）。
+
+### 26.1 BOSSの回答（2026-10-11）
+- 結合できるか → 1つのビューにまとめると、1工程に複数の材料があるため行が増える（材料の行6,421件・最大123件/工程。材料のない工程5,011件）。**2つのビューに分け、各ビューは「結合先の主キーでのLEFT JOIN」だけにする**（工程7,678行・材料6,421行）。
+- 工程のビューは、加工後品（id・コード・名称）と親品（コード）が分かればよい。**親品のidは出さない**（AIは `parent_product_code` を `v_ai_product.product_code` と結べる。BOSS承認「hai」）。
+- 使用個数は、工程の列ではなく、**親の工程の材料の数量から求める値の一つ**（画面 `RoutingMaster.vue` の `usageQuantity`。ただし**画面の使用個数と同じとは限らない**。§26.4）。材料のビューの `quantity` として持たせ、説明文で補う（案2a）。材料のビューも今回作る（案3a）。
+- ヘッダ単独の `v_ai_routing`（`m_routing`、540行）は、**調べてから決める**（今回は作らない）。
+- `step_type`（`m_routing_step`、開発DBの実値は `FLOW` 7,678行・`PARALLEL_POOL` 0行。モデルになく仕様書にも説明なし）は、**業務上の意味は未確認・非公開**。
+- 材料のない工程の業務上の意味は**未確認**（購買・レーザ1・外作の工程に多い。442ルーティングは材料なし、98は混在）。
+
+### 26.2 `v_ai_routing_step`（工程。33列。`m_routing_step` を主とし、すべて主キーのLEFT JOIN。行数＝工程数）
+`id`, `routing_id`, `routing_code`, `routing_product_id`, `routing_product_code`, `routing_product_name`, `routing_is_default`, `routing_is_active`, `routing_valid_from_datetime`, `routing_valid_to_datetime`, `step_no`, `parallel_group`, `parallel_count`, `hierarchy_depth`, `hierarchy_path`, `process_id`, `process_code`, `process_name`, `line_id`, `line_code`, `line_name`, `supplier_id`, `supplier_code`, `supplier_name`, `output_product_id`, `output_product_code`, `output_product_name`, `parent_product_code`（`m_routing_step.remark` の別名）, `source_bom_item_id`, `time_unit`, `lead_time_days`, `start_offset_min`, `duration_min`。
+- 結合: `m_routing`（`routing_id`）、`m_product`（ルーティングの品番 `routing_product_*`・加工後品 `output_product_*`）、`m_process`、`m_line`、`m_supplier`。
+- 非公開: `m_routing_step` の `step_type`・`created_at`・`updated_at`、`m_routing` の `description`・`created_at`・`updated_at`。
+- 日付列なし（`date_field=None`＝全行）。
+
+### 26.3 `v_ai_routing_step_material`（工程別部品消費。20列。`m_routing_step_material` を主とし、すべて主キーのLEFT JOIN。行数＝材料の行数）
+`id`, `routing_step_id`, `routing_id`, `routing_code`, `routing_product_id`, `routing_product_code`, `routing_product_name`, `step_no`, `step_process_id`, `step_process_code`, `step_process_name`, `step_output_product_id`, `step_output_product_code`, `step_output_product_name`, `step_parent_product_code`（工程の `remark`）, `component_id`, `component_code`, `component_name`, `quantity`, `consume_timing`。
+- 結合: `m_routing_step`→`m_routing`→`m_product`（ルーティングの品番）、`m_process`、`m_product`（加工後品・部品）。
+- 非公開: `m_routing_step_material` の `remark`・`created_at`・`updated_at`。判断ページの公開列は5列（`id`・`routing_step_id`・`component_id`・`quantity`・`consume_timing`）。
+- 日付列なし（全行）。
+
+### 26.4 説明文に書くこと（確認できた事実のみ）
+- `component_id` は消費する部品の品番ID（`m_product.id`）。`consume_timing` は START=工程開始、END=工程完了（モデルのラベル。開発DBの実値は START のみ。件数・値は説明に固定しない）。
+- 使用個数（画面の項目）は、材料のビューの `quantity` から次の探し方で求められる値の一つで、**画面の使用個数と同じとは限らない**（BOSS承認 案A、2026-10-11）。ビューだけで求める方法（親品コードによる探し方）: 同じルーティング（`routing_id`）の中で、加工後品のコード（`output_product_code`）が、この工程の `parent_product_code` と等しい工程（親の工程。複数ありうる）の材料のうち、`component_id` が、この工程の `output_product_id` と等しい行の `quantity`（親の工程が複数、または同じ部品の行が複数あるときは合計が必要）。親の工程が見つからない、または該当する材料がない場合は、この方法では求められない。
+- 画面は、階層パス（`hierarchy_path`）で見つけた親の工程の材料の合計を先に使い、求められないときに親品コードによる探し方、それでも求められないときにBOM明細の数量を使う（根拠: `RoutingMaster.vue` の `usageQuantity`、`masters/serializers.py:669-705`、`masters/admin.py:191-240`）。そのため、画面の使用個数と値が異なる場合がある。説明文には実データの件数・値・具体コードを書かない。
+- 工程の数・工程の時間は `v_ai_routing_step` で集計する。材料のビューは材料の行ごとなので、工程の列（`step_no` など）が材料の数だけ繰り返される。**工程の数や時間を材料のビューで合計しない**（二重に数える）。
+- 材料のない工程は、材料のビューに行がない（「その工程には登録された材料がない」）。調べるには、工程のビューの `id` が、材料のビューの `routing_step_id` にない行を探す。業務上の意味は未確認。
+- `parent_product_code` は品番コードの文字列で、`v_ai_product.product_code` と結べる。ただし、品番マスタにない値が存在しうる（開発DBでは33工程。件数は説明に固定しない）。
+- `step_type` は非公開（業務上の意味は未確認）。
+
+### 26.5 基本ルールとの関係
+- 結合はすべて、結合先の主キーでの LEFT JOIN（マスタ属性の付与のみ。行数不変）で、§4.1-2 の例外は不要。工程と材料は別々のビューにし、1対多の結合はしない。
+- マイグレーション（標準SQL。`0042`・`0043`）、元テーブル `m_routing`・`m_routing_step`・`m_routing_step_material` の許可（置き換えず、ビューの追加のみ）、手順SQL（結合ビューのため手動。案A）は、実装済み（§26.8）。
+
+### 26.6 BOSSに確認する点
+1. 上の2ビュー・列でよいか。
+2. 工程の `parent_product_code` に、品番マスタにない値（開発DBで33工程）があっても、そのまま出してよいか（空にはしない）。
+3. 元テーブルの許可を、置き換えず、ビューの追加だけにしてよいか。
+
+**BOSSの承認（2026-10-11）**：1＝はい（2ビュー・33列/20列）。2＝親品がマスタにない値は、そのまま出す（データはBOSSが後で調査・修正する。一覧は `output/routing_step_parent_not_in_product.csv`・`output/routing_step_parent_no_match_in_routing.csv`）。3＝はい（元テーブルの許可は置き換えず、ビューの追加のみ）。
+
+### 26.7 手順SQL（`pm_ai_view_owner`への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>`は接続先のDB名。管理者で実行。`migrate ai 0042`・`0043` の後）
+```sql
+GRANT SELECT (`id`, `product_id`, `routing_code`, `is_default`, `is_active`, `valid_from_datetime`, `valid_to_datetime`) ON `<db>`.`m_routing` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`duration_min`, `hierarchy_depth`, `hierarchy_path`, `id`, `lead_time_days`, `line_id`, `output_product_id`, `parallel_count`, `parallel_group`, `process_id`, `remark`, `routing_id`, `source_bom_item_id`, `start_offset_min`, `step_no`, `supplier_id`, `time_unit`) ON `<db>`.`m_routing_step` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`id`, `routing_step_id`, `component_id`, `quantity`, `consume_timing`) ON `<db>`.`m_routing_step_material` TO 'pm_ai_view_owner'@'localhost';
+-- m_product・m_process・m_line・m_supplier の id・コード・名称の列は、setup_ai_views --apply で付与済みの場合は不要(未付与なら先に実行)
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_routing_step` AS
+SELECT s.`id`, s.`routing_id`, r.`routing_code`, r.`product_id` AS `routing_product_id`, rp.`product_code` AS `routing_product_code`, rp.`product_name` AS `routing_product_name`,
+       r.`is_default` AS `routing_is_default`, r.`is_active` AS `routing_is_active`, r.`valid_from_datetime` AS `routing_valid_from_datetime`, r.`valid_to_datetime` AS `routing_valid_to_datetime`,
+       s.`step_no`, s.`parallel_group`, s.`parallel_count`, s.`hierarchy_depth`, s.`hierarchy_path`,
+       s.`process_id`, pr.`process_code`, pr.`process_name`,
+       s.`line_id`, l.`line_code`, l.`line_name`,
+       s.`supplier_id`, sp.`supplier_code`, sp.`supplier_name`,
+       s.`output_product_id`, op.`product_code` AS `output_product_code`, op.`product_name` AS `output_product_name`,
+       s.`remark` AS `parent_product_code`, s.`source_bom_item_id`,
+       s.`time_unit`, s.`lead_time_days`, s.`start_offset_min`, s.`duration_min`
+FROM `<db>`.`m_routing_step` s
+LEFT JOIN `<db>`.`m_routing` r ON r.`id` = s.`routing_id`
+LEFT JOIN `<db>`.`m_product` rp ON rp.`id` = r.`product_id`
+LEFT JOIN `<db>`.`m_process` pr ON pr.`id` = s.`process_id`
+LEFT JOIN `<db>`.`m_line` l ON l.`id` = s.`line_id`
+LEFT JOIN `<db>`.`m_supplier` sp ON sp.`id` = s.`supplier_id`
+LEFT JOIN `<db>`.`m_product` op ON op.`id` = s.`output_product_id`;
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_routing_step_material` AS
+SELECT m.`id`, m.`routing_step_id`, s.`routing_id`, r.`routing_code`, r.`product_id` AS `routing_product_id`, rp.`product_code` AS `routing_product_code`, rp.`product_name` AS `routing_product_name`,
+       s.`step_no`, s.`process_id` AS `step_process_id`, pr.`process_code` AS `step_process_code`, pr.`process_name` AS `step_process_name`,
+       s.`output_product_id` AS `step_output_product_id`, op.`product_code` AS `step_output_product_code`, op.`product_name` AS `step_output_product_name`,
+       s.`remark` AS `step_parent_product_code`,
+       m.`component_id`, cp.`product_code` AS `component_code`, cp.`product_name` AS `component_name`, m.`quantity`, m.`consume_timing`
+FROM `<db>`.`m_routing_step_material` m
+LEFT JOIN `<db>`.`m_routing_step` s ON s.`id` = m.`routing_step_id`
+LEFT JOIN `<db>`.`m_routing` r ON r.`id` = s.`routing_id`
+LEFT JOIN `<db>`.`m_product` rp ON rp.`id` = r.`product_id`
+LEFT JOIN `<db>`.`m_process` pr ON pr.`id` = s.`process_id`
+LEFT JOIN `<db>`.`m_product` op ON op.`id` = s.`output_product_id`
+LEFT JOIN `<db>`.`m_product` cp ON cp.`id` = m.`component_id`;
+GRANT SELECT ON `<db>`.`v_ai_routing_step` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+GRANT SELECT ON `<db>`.`v_ai_routing_step_material` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 同上
+```
+手順SQLのビュー定義は、マイグレーション0042・0043のSELECT（標準SQL）と、列・結合・別名が同じであること。
+
+### 26.8 実装記録（2026-10-11。generator。evaluator条件付き→指摘修正済み）
+**変更ファイル**
+- 新規 `pm_backend/apps/ai/migrations/0042_ai_routing_step_view.py`（`v_ai_routing_step`。標準SQL、`CREATE OR REPLACE VIEW`、逆は `DROP VIEW IF EXISTS`。依存は `ai 0041_ai_bom_item_view` と `masters 0086_add_is_order_day_to_calendar_day`＝列が揃う最新）。
+- 新規 `pm_backend/apps/ai/migrations/0043_ai_routing_step_material_view.py`（`v_ai_routing_step_material`。依存は `ai 0042`・`masters 0086`）。
+- `pm_backend/apps/ai/services/analysis_data_service.py`（`ANALYSIS_VIEWS` に2ビュー。label=ルーティング工程／ルーティング工程の材料、`date_field=None`・`quantity_field=None`、説明文）。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`（`ANALYSIS_COLUMN_TYPES` に33列・20列）。
+- `pm_backend/apps/ai/services/sql_queries.py`（`BASE_SQL_SCHEMA` に2ビュー、`TABLE_NOTES` に2ビュー）。`m_routing` の既存3列・`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更。
+- `pm_backend/apps/ai/management/commands/setup_ai_views.py`（`EXISTING_JOIN_VIEWS` に2ビュー、`OTHER_VIEW_COLUMNS` に `m_routing` 7列・`m_routing_step` 17列・`m_routing_step_material` 5列。コマンドの動作は未変更）。
+- 試験: 新規 `test_analysis_routing_step_view.py`・`test_analysis_routing_step_material_view.py`、`test_setup_ai_views.py` に1件追加。
+- 仕様書: 本節、`AI運用規約・AI用DB辞書.md` 6.5-12、`AI分析基盤仕様書.md`（ビュー一覧・列型の対応）。
+
+**検証結果（generatorが実行した範囲。DB不要の試験のみ）**: `ai.test_analysis_routing_step_view`・`..._material_view`・`bom_item`・`calendar_day`・`customer`・`line`・`supplier`・`process`・`product`・`dateless`・`setup_ai_views`・`planning`・`column_guide`・`codegen`・`execution` の15モジュール、295件OK（skipped=4。SimpleTestCase系であることを確認。テスト用DBは作っていない）。`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0。`makemigrations --dry-run`＝No changes detected。既存7ビューの定義のSHA-256は `db31acbf…` のまま。
+
+**evaluator（2026-10-11）の判定: 条件付き**。コード・型・行数・既存定義は合格。指摘は4点: ①開発DBに `migrate ai 0042`・`0043` が適用済み（2026-10-11 12:55:56。実行者不明）で、手順SQL（§26.7）は未実施だった。②使用個数の説明が、画面の探し方の一部のみだった。③試験が実データの混入（件数・具体コード・remarkの公開への反転など）を一部検出できなかった。④仕様書に未反映の記述があった。
+
+**指摘への対応（generator。2026-10-11）**
+- ①: 手順SQL（§26.7）をBOSS承認「はい」で実行済み（2026-10-11。GRANT 3文、`CREATE OR REPLACE DEFINER` 2文。定義者 `pm_ai_view_owner@localhost`・DEFINER を `information_schema` で確認。`setup_ai_views --check` の要対応0件、`ai_reader` 接続で2ビューが読める）。
+- ②: 使用個数の説明を、「画面の使用個数と同じとは限らない」「ビューだけで求める方法（親品コードによる探し方）」「画面は階層パス→親品コード→BOM明細の順」と限定（`analysis_data_service.py` の `ANALYSIS_VIEWS`、`sql_queries.py` の `TABLE_NOTES`、本節 §26.1・§26.4、DB辞書 6.5-12、基盤仕様書）。SQL・列・マイグレーションは変えていない。
+- ③: 2つのビューの試験の説明文チェックを強化（2桁以上の数字、件数の形、大文字の語は ID・DAY・MINUTE・START・END・BOM のみ許可、PURCHASE・OUTSOURCE・レーザ・FLOW・PARALLEL_POOL の禁止、材料のビューは「材料自身の remark は公開しない」の存在と「公開する」の禁止、「画面の使用個数と同じとは限らない」の存在）。説明文を書き換えた変異（33工程の追加、PURCHASE・G・レーザ1の追加、remark の公開への反転、「同じとは限らない」の削除）を、メモリ上の差し替えで流し、すべて失敗することを確認した。
+- ④: 本節・DB辞書（6.5-12）・基盤仕様書（ビュー一覧・列型の対応）を現状に更新。
+
+**検証結果（evaluatorの記録）**: DBなし295件OK（skipped=4）、フロント7本 fail 0、変異65通り、行数 工程7,678・材料6,421、全行型検査エラー0。`parent_product_code` がマスタにない値が33工程でそのまま出る。使用個数の内訳（説明文の方法）: 説明文どおりに計算できる6,364、画面と値が異なる30、階層パスのみ36、親の工程が複数167、親が見つからない38、親は見つかるが該当材料なし1,276。判断ページ（decisions）との照合は、検証環境では読めなかったが、呼び出し元（ArtifactData）の確認で、`m_routing` 7列・`m_routing_step` 17列・`m_routing_step_material` 5列の公開列が `OTHER_VIEW_COLUMNS` と一致した。`SHOW COLUMNS` との列型の照合は一致（2026-10-11）。
+
+**未確認・未実施**: `pm_ai_reader` の列権限（開発の reader は DB 全体の SELECT を持つため確認不可）。DuckDBへの実投入。本番反映。修正後の再検証（evaluator）。
+
+### 26.9 検証項目（DB上。反映後にevaluatorが読み取りで確認）
+1. `v_ai_routing_step` の行数＝`m_routing_step` の行数（BOSS確認では7,678）。`v_ai_routing_step_material` の行数＝`m_routing_step_material` の行数（同6,421）。
+2. 結合先の欠損（`routing_id` からの `m_routing`、`product_id` からの `m_product` など）の行数が、元のIDがあるのにマスタにない行の数と一致する。
+3. `parent_product_code` が `v_ai_product.product_code` にない工程が、そのまま出ている（空にしていない。BOSS確認では33工程）。
+4. `pm_ai_reader` の接続でビューが読め、非公開列（`step_type`・材料の `remark` など）は読めない。
+5. 定義者が `pm_ai_view_owner@localhost`・DEFINER（`setup_ai_views --check` の要対応が0件）。
+6. 全行×列が列型の検査を通る。`SHOW COLUMNS` が `ANALYSIS_COLUMN_TYPES` と一致する。
+7. マイグレーションのSELECTと§26.7の手順SQLのSELECTが、列・結合・別名で同じ。
+
+**反映状況（2026-10-11 更新）**：BOSS承認済み。コード実装済み（generator）。evaluator（2026-10-11）条件付き（指摘は §26.8 のとおり）→修正済み。**開発DB: `migrate ai 0042`・`0043` は適用済み、手順SQL（§26.7）はBOSS承認「はい」で実行済み**（定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件、`ai_reader` 接続で2ビューが読める）。**本番未反映**。未確認: `pm_ai_reader` の列権限、DuckDB投入、修正後の再検証。コミット: 未（BOSSの指示待ち）。
