@@ -1234,3 +1234,58 @@ GRANT SELECT ON `<db>`.`v_ai_department` TO 'pm_ai_reader'@'<readerのホスト�
 
 ### 27.8 今後の候補・保留
 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。
+
+## 28. グループとラインの紐付のビュー `v_ai_unit_line` の実装記録（2026-10-11。BOSS承認済み。実装済み・evaluator未検証。開発DBへの `migrate ai 0048`・手順SQLは未実施。本番未反映）
+
+### 28.1 BOSSの回答（2026-10-11）
+- 判断ページ（decisions）に `accounts_unit_line_mapping` の記載がなかったため、提案した公開列5列（`id`・`unit_id`・`line_id`・`sort_order`・`is_default`）を承認。
+- 結合で付ける名前（`accounts_department.name`→`unit_name`、`m_line.line_code`・`line_name`）を承認。これらは既存の `v_ai_department`（`name`）・`v_ai_line`（`line_code`・`line_name`）の公開列に含まれる。
+- 説明は確認できた範囲のみ書く（未確認は「未確認」）。実データの件数・値・具体的なグループ名・ライン名は書かない。
+- チャット（AIホーム）のSQLには見せてよい（個人情報を含まない）。`AI_HOME_EXCLUDED_TABLES` には入れない。
+
+### 28.2 `v_ai_unit_line`（8列。`accounts_unit_line_mapping` を主とし、すべて主キーのLEFT JOIN。マイグレーション 0048）
+`id`, `unit_id`, `unit_name`（`accounts_department.name`）, `line_id`, `line_code`, `line_name`（`m_line`）, `sort_order`, `is_default`。
+- 結合: `accounts_department u ON u.id = m.unit_id`、`m_line l ON l.id = m.line_id`（いずれも相手の主キー。行数は `accounts_unit_line_mapping` と同じ）。WHEREなし（全行）。`date_field=None`・`quantity_field=None`（label=グループのライン）。
+- 非公開（ビューに含めない）: `created_at`・`updated_at`。
+- 列型（開発DBの `SHOW COLUMNS` から導出）: bigint→BIGINT（`id`・`unit_id`・`line_id`）、varchar→VARCHAR（`unit_name`・`line_code`・`line_name`）、int→BIGINT（`sort_order`）、tinyint(1)→BIGINT（`is_default`）。ビュー作成後の `SHOW COLUMNS` との照合は未実施。
+- 依存: `ai 0047_aianalysisrun_purpose`（下の「マイグレーション番号」を参照）。
+
+### 28.3 説明文に書いた事実（コードで確認。推測は書かない）
+- 1行＝1つの「グループとラインの紐付」。グループは部署の階層 `unit` のグループ（モデル `UnitLineMapping.unit` は `limit_choices_to={'level': 'unit'}`）。`unit_id` は `v_ai_department.id`、`line_id` は `v_ai_line.id` と結べる。モデルのラベル: `sort_order`＝表示順、`is_default`＝初期ライン。
+- ユーザー（プロフィール）の所属グループ（`v_ai_user.unit_id`）に対応する紐付が、そのユーザーが使うラインの一覧として、`is_default` の降順、`sort_order` の昇順、`id` の順に返される（根拠: `pm_backend/apps/accounts/serializers.py` の `get_unit_lines`。管理画面のAPIは `api_views.py` の `UnitLineMappingViewSet`）。
+- 同じグループ・同じラインの組は一意（`unique_together`）。同じラインを複数のグループが、1つのグループが複数のラインを紐付けられる（モデル上、多対多の紐付）。
+- **未確認**: `is_default` の運用、画面でのラインの絞り込みなど業務上の意味（説明文にも「未確認」と書いた）。
+- チャットの辞書（`TABLE_NOTES`）の文面には `v_ai_user` の名前を出さない（「プロフィールの `unit_id`」と書く。`v_ai_user` はチャットから除外されているため）。分析側の説明（`ANALYSIS_VIEWS`）は `v_ai_user` と結べることを書く。
+
+### 28.4 マイグレーション番号
+指示は `0047_ai_unit_line_view.py`（依存 `ai 0046`）だったが、別の作業が `0047_aianalysisrun_purpose.py`（依存 `ai 0046`・未コミット）を追加済みだったため、同じ 0046 から2本に分岐すると migrate が「Conflicting migrations」で止まる。そこで `0048_ai_unit_line_view.py` とし、依存を `('ai', '0047_aianalysisrun_purpose')` にした。`makemigrations --dry-run` は No changes detected。**BOSS確認事項**: `0047_aianalysisrun_purpose` が先にコミット・適用されること（または番号の付け替え）。
+
+### 28.5 手順SQL（`pm_ai_view_owner` への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>` は接続先のDB名。管理者で実行。`migrate ai 0048` の後）
+```sql
+GRANT SELECT (`id`, `unit_id`, `line_id`, `sort_order`, `is_default`) ON `<db>`.`accounts_unit_line_mapping` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_unit_line` AS
+SELECT m.`id`, m.`unit_id`, u.`name` AS `unit_name`, m.`line_id`, l.`line_code`, l.`line_name`, m.`sort_order`, m.`is_default`
+FROM `<db>`.`accounts_unit_line_mapping` m
+LEFT JOIN `<db>`.`accounts_department` u ON u.`id` = m.`unit_id`
+LEFT JOIN `<db>`.`m_line` l ON l.`id` = m.`line_id`;
+GRANT SELECT ON `<db>`.`v_ai_unit_line` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+```
+- `accounts_department` の `name`（§27.5 の GRANT に含む）、`m_line` の `line_code`・`line_name`（`v_ai_line` の公開列。`setup_ai_views --apply` で付与済み）は既存の付与で足りる。`m_line` の GRANT は不要。念のため、実行前に次で確認する（管理者）: `SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';` に `accounts_department` の `name`、`m_line` の `line_code`・`line_name` の列権限があること。足りなければ次を追加する。
+```sql
+GRANT SELECT (`name`) ON `<db>`.`accounts_department` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`id`, `line_code`, `line_name`) ON `<db>`.`m_line` TO 'pm_ai_view_owner'@'localhost';
+```
+- 手順SQLのビュー定義は、マイグレーション0048のSELECT（標準SQL）と、列・結合・別名・WHEREが同じであること。
+
+### 28.6 実装記録（2026-10-11。generator。evaluator未検証）
+**変更ファイル**: 新規 `pm_backend/apps/ai/migrations/0048_ai_unit_line_view.py`。`services/analysis_data_service.py`（`ANALYSIS_VIEWS` に1ビュー）、`services/analysis_execution_service.py`（`ANALYSIS_COLUMN_TYPES`）、`services/sql_queries.py`（`BASE_SQL_SCHEMA`・`TABLE_NOTES`。元テーブルの許可・画面SQLは置き換えず、`AI_HOME_EXCLUDED_TABLES` は未変更）、`management/commands/setup_ai_views.py`（`EXISTING_JOIN_VIEWS` に追加、`OTHER_VIEW_COLUMNS` に `accounts_unit_line_mapping` の5列。コマンドの動作は未変更）。試験: 新規 `test_analysis_unit_line_view.py`、`test_setup_ai_views.py` を更新。仕様書: 本節、`AI運用規約・AI用DB辞書.md` 6.5-14、`AI分析基盤仕様書.md`（ビュー一覧・列型の対応）。
+**generatorが実行した範囲**: DB不要の試験 9モジュール 172件（unit_line・user・department・routing_step・dateless・setup_ai_views・planning・column_guide・execution）。失敗1件は `ai.test_analysis_execution.TimingTest.test_transfer_time_excludes_launcher_execution_and_response_wait`（転送時間 1.088秒 < 1.0秒 の時間依存の試験）で、今回の変更とは無関係（単独で再実行して OK）。`pm-ui/scripts/test-analysis-*.mjs` 7本 exit 0。既存7ビューの定義のSHA-256は `db31acbf…` のまま。開発DBの読み取り: マイグレーションのSELECTをサブクエリで実行し、行数＝`accounts_unit_line_mapping` の行数（一致）、結合先の欠け（`unit_name`・`line_code` がNULL）0件、列名・順序が公開8列と一致を確認（ビューは作っていない。`information_schema.VIEWS` に `v_ai_unit_line` はない）。
+
+### 28.7 検証項目（反映後にevaluatorが読み取りで確認）
+1. `v_ai_unit_line` の行数＝`accounts_unit_line_mapping` の行数。`SHOW COLUMNS` が `ANALYSIS_COLUMN_TYPES`（8列）と一致する。`created_at`・`updated_at` が読めない。
+2. 定義者が `pm_ai_view_owner@localhost`・DEFINER（`setup_ai_views --check` の要対応が0件）。`pm_ai_reader` の接続で読める。
+3. マイグレーション0048のSELECTと §28.5 の手順SQLが、列・結合・別名・WHEREで同じ。
+4. チャット（AIホーム）のSQLと辞書にこのビューが出ること、`TABLE_NOTES` に `v_ai_user` の名前が出ないこと。
+5. 説明文に件数・グループ名・ライン名が入っていないこと。
+
+**反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0048`・手順SQL（§28.5）とも未実施。本番未反映**。コミット: 未（BOSSの指示待ち）。

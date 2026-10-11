@@ -227,6 +227,21 @@ ANALYSIS_VIEWS = {
             '注意: 班長が複数の班を担当するsupervisor_teams、リーダーが複数のグループを担当するleader_unitsは別テーブルで、ビューに含まれない。'
         ),
     },
+    # グループとラインの紐付。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §28)。
+    'v_ai_unit_line': {
+        'label': 'グループのライン', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1つの「グループとラインの紐付」(グループは部署の階層unitのグループ。紐付にグループ名・ラインのコードと名称を付けたビュー)。'
+            '日付の列がなく、期間では絞らず全行が対象。'
+            '列の意味: id=紐付のID、unit_id=グループのID(部署ビューv_ai_departmentのidと結べる。unit_name=グループ名)、'
+            'line_id=ラインのID(ラインビューv_ai_lineのidと結べる。line_code=ラインコード、line_name=ライン名)、'
+            'sort_order=表示順、is_default=初期ライン(1か0。モデルのラベル)。'
+            'コード上、ユーザーの所属グループ(ユーザービューv_ai_userのunit_id)に対応する紐付が、そのユーザーが使うラインの一覧として、'
+            'is_defaultの降順、sort_orderの昇順、idの順に並べて返される(コード: accountsのserializersのget_unit_lines)。'
+            '同じグループ・同じラインの組は一意(unique_together)。同じラインを複数のグループが紐付けることがあり、1つのグループに複数のラインを紐付けることもできる(多対多の紐付)。'
+            'is_defaultの運用や、画面でのラインの絞り込みなど、業務上の意味は未確認(項目名とモデルのラベルのみ)。'
+        ),
+    },
 }
 
 

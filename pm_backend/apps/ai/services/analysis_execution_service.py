@@ -142,6 +142,11 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'name': 'VARCHAR', 'level': 'VARCHAR', 'display_id': 'BIGINT', 'parent_id': 'BIGINT',
         'parent_name': 'VARCHAR',
     },
+    # グループのライン(accounts_unit_line_mapping・accounts_department・m_lineのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_unit_lineと照合する)
+    'v_ai_unit_line': {
+        'id': 'BIGINT', 'unit_id': 'BIGINT', 'unit_name': 'VARCHAR', 'line_id': 'BIGINT', 'line_code': 'VARCHAR',
+        'line_name': 'VARCHAR', 'sort_order': 'BIGINT', 'is_default': 'BIGINT',
+    },
 }
 
 

@@ -370,6 +370,17 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_COLUMN_TYPES`（21列・6列。int・bigint・tinyint(1)→BIGINT、varchar→VARCHAR、date→DATE）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `auth_user`・`accounts_userprofile`・`accounts_department` の許可は置き換えず、ビューの追加のみ。画面SQLは、チャット（AIホーム）の対象から `v_ai_user` だけを除外する（`sql_queries.py` の `AI_HOME_EXCLUDED_TABLES`。氏名・社員コード・ログインIDを含むため、`ai.chat` の権限だけでは見せない。分析では `ai.analysis` の権限で使える。BOSS承認 案A 2026-10-11）。他の画面・`v_ai_department` は変更なし（チャットの説明文 `TABLE_NOTES['v_ai_department']` にも `v_ai_user` の名前を出さない）。権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー）。手順SQLは計画書 §27.5。
 - 今後の候補・保留: 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。
 
+### 6.5-14 グループのライン（`v_ai_unit_line`。2026-10-11 実装。開発DB・本番とも未反映（`migrate ai 0048`＋手順SQL §28.5 は未実施））
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_unit_line`（`ai/0048`で作成） | 8列: `id`・`unit_id`・`unit_name`（`accounts_department.name`）・`line_id`・`line_code`・`line_name`（`m_line`）・`sort_order`・`is_default` | `accounts_unit_line_mapping` 全行（WHEREなし）。`accounts_department`（`u.id = m.unit_id`）と `m_line`（`l.id = m.line_id`）を主キーで `LEFT JOIN`。`date_field=None` | グループとラインの紐付の確認。`unit_id` は `v_ai_department.id`（グループ）、`line_id` は `v_ai_line.id` と結べる。非公開（ビューに含めない）: `created_at`・`updated_at` |
+
+- 公開列（元テーブルの5列 `id`・`unit_id`・`line_id`・`sort_order`・`is_default`）と、結合で付ける名前（`unit_name`・`line_code`・`line_name`）はBOSS承認（2026-10-11）。判断ページ（decisions）に `accounts_unit_line_mapping` の記載はない。個人情報を含まないため、チャット（AIホーム）のSQLにも見える（`AI_HOME_EXCLUDED_TABLES` に入れない）。
+- 確認できた事実（説明文）: 1行＝1つの紐付。モデルのラベル: `sort_order`＝表示順、`is_default`＝初期ライン。ユーザーの所属グループ（`v_ai_user.unit_id`）に対応する紐付が、そのユーザーが使うラインの一覧として `is_default` 降順→`sort_order` 昇順→`id` の順に返される（`accounts/serializers.py` の `get_unit_lines`）。同じグループ・同じラインの組は一意（`unique_together`）。同じラインを複数のグループが紐付けることがある（多対多）。**未確認**: `is_default` の運用、画面でのラインの絞り込みなど業務上の意味。
+- `ANALYSIS_COLUMN_TYPES`（8列。bigint・int・tinyint(1)→BIGINT、varchar→VARCHAR）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブルの許可は置き換えず、ビューの追加のみ。権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §28.5。
+- マイグレーション番号は、別作業の `0047_aianalysisrun_purpose` の後に並べるため `0048`（計画書 §28.4）。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |

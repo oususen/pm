@@ -103,6 +103,8 @@ BASE_SQL_SCHEMA = {
     ),
     # 部署のビュー(AI用ビュー作成計画 §27。accounts_department に親の部署の名称を自己 LEFT JOIN。WHEREなし)
     'v_ai_department': ('id', 'name', 'level', 'display_id', 'parent_id', 'parent_name'),
+    # グループとラインの紐付のビュー(AI用ビュー作成計画 §28。accounts_unit_line_mapping に accounts_department・m_line を主キーで LEFT JOIN。WHEREなし)
+    'v_ai_unit_line': ('id', 'unit_id', 'unit_name', 'line_id', 'line_code', 'line_name', 'sort_order', 'is_default'),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -248,6 +250,16 @@ TABLE_NOTES = {
         'parent_id は親の部署の ID(親の部署名は parent_name。親が空の部署は、親を持たない部署)。'
         'ある部署の配下の部署は、その部署から parent_id をたどった子孫(コード: accounts の permission_scope)。'
         '注意: 班長が複数の班を担当する supervisor_teams、リーダーが複数のグループを担当する leader_units は別テーブルで、ビューに含まれない。'
+    ),
+    'v_ai_unit_line': (
+        'グループとラインの紐付(accounts_unit_line_mapping にグループ名・ラインのコードと名称を付けたビュー)。1行=1つの紐付(全行。日付の列はなく、期間では絞らない)。'
+        'unit_id はグループ(部署の階層 unit)の ID で v_ai_department の id と結べる(unit_name はグループ名)。'
+        'line_id はラインの ID で v_ai_line の id と結べる(line_code はラインコード、line_name はライン名)。'
+        'sort_order は表示順、is_default は初期ライン(1か0。モデルのラベル)。'
+        'コード上、ユーザーの所属グループ(プロフィールの unit_id)に対応する紐付が、そのユーザーが使うラインの一覧として、'
+        'is_default の降順、sort_order の昇順、id の順に並べて返される(コード: accounts の serializers の get_unit_lines)。'
+        '同じグループ・同じラインの組は一意(unique_together)。同じラインを複数のグループが紐付けることがあり、1つのグループに複数のラインを紐付けることもできる(多対多の紐付)。'
+        'is_default の運用や、画面でのラインの絞り込みなど、業務上の意味は未確認(項目名とモデルのラベルのみ)。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
