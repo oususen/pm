@@ -339,6 +339,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 
 - 個人情報の列は含まない。説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES`）には、実データの件数・傾向を書かない。業務上の意味が確認できない範囲（調達区分の BUY・SUBCON と工程・ラインの関係など）は「未確認」と明記。
 - `ANALYSIS_COLUMN_TYPES`（29列。`DECIMAL(18,3)` は `quantity`・`loss_rate`、`sourcing_type` は VARCHAR、真偽値は BIGINT）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_bom`・`m_bom_item` の許可・画面SQLは置き換えず、ビューの追加のみ。
+- 連産品（1つの工程で複数の製品が同時に生産されるもの。親は仮想セット品番、`bom_is_coproduct`、代表品は `is_coproduct_driver`）の定義と、工程ビュー `v_ai_routing_step` の `source_bom_item_id` がこのビューの `id` と結べる旨を説明文に追記（2026-10-11。計画書 §30。コードのみ・DB変更なし）。
 - 権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §25.6。開発DBでは実施済み（2026-10-11。定義者 `pm_ai_view_owner@localhost` を確認）。本番は未実施（BOSSが実行）。
 
 ### 6.5-12 ルーティング工程・工程の材料（`v_ai_routing_step`・`v_ai_routing_step_material`。2026-10-11 実装。開発DBへ反映済み（`migrate ai 0042`・`0043`＋手順SQL §26.7 の手動実行）・本番未反映）
@@ -350,6 +351,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 
 - 個人情報の列は含まない。説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES`）には、実データの件数・値・具体的なコードを書かない。
 - **使用個数（画面の項目）は、材料ビューの `quantity` から次の探し方で求められる値の一つで、画面の使用個数と同じとは限らない**。ビューだけで求める方法（親品コードによる探し方）: 同じルーティング（`routing_id`）の中で、加工後品のコード（工程ビューの `output_product_code`）が、この工程の `parent_product_code` と等しい工程（親の工程。複数ありうる）の材料のうち、`component_id` が、この工程の `output_product_id` と等しい行の `quantity`（親の工程が複数、または同じ部品の行が複数あるときは合計が必要）。親の工程が見つからない、または該当する材料がない場合は、この方法では求められない。画面（`RoutingMaster.vue` の `usageQuantity`）は、階層パス（`hierarchy_path`）で見つけた親の工程の材料の合計を先に使い、求められないときに親品コードによる探し方、それでも求められないときにBOM明細の数量を使うため、値が異なる場合がある。
+- **工程と連産品の判定（2026-10-11 追記。計画書 §30）**: 工程ビューの `source_bom_item_id`（工程の元になったBOM明細のID。空は元が不明）を `v_ai_bom_item.id` と結ぶ。`bom_is_coproduct=1` かつ `is_coproduct_driver=0` ＝連産品の代表でない子に由来する工程、`bom_is_coproduct=1` かつ `is_coproduct_driver=1` ＝連産品の代表に由来する工程、`bom_is_coproduct=0` ＝通常の工程。判定できない（不明）のは `source_bom_item_id` が空の工程だけ。説明文は工程・BOM明細・材料の3ビューに記載（実データの件数・具体コードは書かない）。
 - **材料のビューは材料の行ごと**のため、工程の列（`step_no` など）が材料の数だけ繰り返される。工程の数や時間を材料のビューで合計しない（二重に数える）。工程の数・時間は `v_ai_routing_step` で集計する。材料のない工程は材料のビューに行がない（その工程には登録された材料がない。業務上の意味は未確認）。探すには、工程ビューの `id` が、材料ビューの `routing_step_id` にない行を探す。
 - `parent_product_code` は品番コードの文字列で `v_ai_product.product_code` と結べるが、品番マスタにない値があり得る（BOSS承認 2026-10-11: そのまま出す。データはBOSSが後で調査・修正する）。
 - 業務上の意味が未確認（項目名のみ）: `parallel_group`・`parallel_count`・`hierarchy_depth`・`hierarchy_path`・`source_bom_item_id`・`start_offset_min`・`time_unit`・`lead_time_days`・`duration_min`。`time_unit` は DAY=日、MINUTE=分、`consume_timing` は START=工程開始、END=工程完了（いずれもモデルのラベル）。`step_type` は非公開で意味は未確認。

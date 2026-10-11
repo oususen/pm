@@ -142,6 +142,32 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
             check_no_fixed_values(self, text)  # 件数・具体コードを書かない
             # 意味が未確認の項目は、項目名だけを書く(意味の推測を書かない)
             self.assertIn('業務上の意味は未確認(項目名のみ)', text)
+            # source_bom_item_id は意味が確認できたため、未確認の項目名の並びに入れない
+            self.assertNotIn('hierarchy_path・source_bom_item_id', text)
+            self.assertIsNotNone(re.search(r'hierarchy_path・time_unit・lead_time_days', text))
+
+    def test_description_has_bom_item_link_and_coproduct_rule(self):
+        # 工程と BOM 明細の結びつき方と連産品の判定規則(AI用ビュー作成計画 §30)。説明文以外にAIへ渡る情報はないため、文面で固定する
+        for text in (ANALYSIS_VIEWS[VIEW]['description'], TABLE_NOTES[VIEW]):
+            plain = text.replace(' ', '')  # 説明文とSQL辞書の書き方の違い(空白)を吸収して同じ文言で検査する
+            for part in (
+                    # 結びつき: 元のBOM明細のIDで v_ai_bom_item の id と結ぶ。空は結べない
+                    'source_bom_item_idは工程の元になったBOM明細のID' if 'source_bom_item_idは' in plain
+                    else 'source_bom_item_id=工程の元になったBOM明細のID',
+                    'v_ai_bom_itemのidと結べる', '元のBOM明細が不明',
+                    # 連産品の定義・代表品の定義・代表でない子の定義
+                    '連産品とは、1つの工程で複数の製品が同時に生産されるもの', '仮想セット品番', 'bom_is_coproduct',
+                    '連産品BOMの子のうち1つが代表品', 'is_coproduct_driver=1', '計画展開の起点',
+                    '代表品の所要時間(duration_min)が連産品のサイクルタイム',
+                    '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの',
+                    # 判定規則(3通りと不明)
+                    'bom_is_coproduct=1かつis_coproduct_driver=0なら、連産品の代表でない子に由来する工程',
+                    'bom_is_coproduct=1かつis_coproduct_driver=1なら、連産品の代表に由来する工程',
+                    'bom_is_coproduct=0なら、通常の工程(連産品の子ではない)',
+                    # 不明は元のBOM明細が空のときだけ
+                    '判定できない(不明)のは、source_bom_item_idが空の工程だけ',
+                    'bom_is_coproduct=0の工程を不明にしない(通常の工程と判定する)'):
+                self.assertIn(part, plain)
 
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_routing の許可と列は、ビューの追加後も変わらない(m_routing_step・m_routing_step_material は元から許可なし)

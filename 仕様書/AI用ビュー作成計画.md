@@ -1348,3 +1348,33 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 3. マイグレーションのSELECTと §29.5 の手順SQLが、列・結合・別名・WHEREで同じ。
 4. チャット（AIホーム）のSQLと辞書に2ビューが出ないこと、分析（`ANALYSIS_VIEWS`）では使えること。
 5. 説明文に件数・氏名・部署名・社員コードが入っていないこと。
+
+## 30. 説明文の改善: 工程とBOM明細の結びつきと連産品の判定規則（2026-10-11。BOSS承認「はい」。コードのみ・DB変更なし。evaluator未検証）
+
+対象: `v_ai_routing_step`・`v_ai_routing_step_material`・`v_ai_bom_item` の説明文（`analysis_data_service.py` の `ANALYSIS_VIEWS`、`sql_queries.py` の `TABLE_NOTES`）。ビューのSQL・列・マイグレーションは変えていない。
+
+### 30.1 原因
+分析AIが「連産品の代表でない子の工程を除外して、所要時間を一覧にする」分析で、179工程すべてを unknown にした。AIに渡る情報は説明文だけ（AIは仕様書を読まない）で、(1) 工程とBOM明細の結びつけ方、(2) 連産品・代表品の判定規則、が書かれていなかった。
+
+### 30.2 追記した事実と出典（実データの件数・具体コードは説明文に書かない）
+1. 結びつき: `v_ai_routing_step.source_bom_item_id` は、工程の元になったBOM明細のIDで、`v_ai_bom_item.id` と結べる。空の工程は元のBOM明細が不明（結べない）。出典: `masters/models.py` の `RoutingStep.source_bom_item`（ForeignKey(BOMItem)、verbose_name「元BOM明細」）。`v_ai_routing_step_material` は `routing_step_id` で工程ビューの `id` と結べる（既存の記述。工程の元BOM明細・連産品の判定は工程ビューの列で行う旨を追記）。
+2. 連産品: 1つの工程で複数の製品が同時に生産されるもの。BOMでは親が仮想セット品番（`m_product.is_virtual_set`。在庫を持たない）、子が実際に同時にできる複数の品番。BOMヘッダに連産品BOMのフラグ（`bom_is_coproduct`。親が仮想セット品番のときは自動で1）。通常のBOMとは逆方向の関係（仮想セット品番から子へ展開）のため、在庫の出庫計算・受注展開では除外される。出典: `masters/models.py` `BOM.is_coproduct` の help_text、`MASTER_TABLES_DEFINITION.MD` 9章、在庫計算仕様書、受注展開仕様書、`masters/serializers.py`。
+3. 代表品: 連産品BOMの子のうち1つに指定する（`is_coproduct_driver`）。計画展開の起点で、代表品の所要時間（`duration_min`）が連産品のサイクルタイムとして使われる。「代表でない子」＝連産品BOMの子で、代表品に指定されていないもの。出典: `MASTER_TABLES_DEFINITION.MD` 9章、単独計画仕様書「サイクルタイム解決」。
+
+### 30.3 判定の考え方（BOSS承認）
+工程の `source_bom_item_id` で `v_ai_bom_item` の `id` と結ぶ。
+- `bom_is_coproduct=1` かつ `is_coproduct_driver=0` ＝連産品の代表でない子に由来する工程。
+- `bom_is_coproduct=1` かつ `is_coproduct_driver=1` ＝連産品の代表に由来する工程。
+- `bom_is_coproduct=0` ＝通常の工程（連産品の子ではない）。
+- 判定できない（不明）のは、`source_bom_item_id` が空の工程だけ。元のBOM明細があって `bom_is_coproduct=0` の工程を不明にしない。
+
+### 30.4 実データでの確認（呼び出し元が確認済み。件数は説明文には書かない）
+品番 YD40006245 の工程179件のうち、`source_bom_item_id` がある178件を `v_ai_bom_item` の `id` と結ぶと、全て `bom_is_coproduct=0` で、連産品の子ではないと判定できる。空は1件だけ。generator は DB を確認していない。
+
+### 30.5 変更内容
+- `analysis_data_service.py` / `sql_queries.py`: 工程ビューの `source_bom_item_id` の説明を確定（「未確認」の列挙から除外）し、連産品・代表品・判定規則を追記。BOM明細ビューの `bom_is_coproduct`・`is_coproduct_driver` の説明を詳しくし、工程ビューとの結びつきを追記。材料ビューに「工程の元BOM明細・連産品の判定は `routing_step_id` で工程ビューと結んで行う」を追記。
+- 試験: `test_analysis_routing_step_view.py`（新規 `test_description_has_bom_item_link_and_coproduct_rule`、未確認の列挙から `source_bom_item_id` が外れたことの検査）、`test_analysis_routing_step_material_view.py`・`test_analysis_bom_item_view.py`（新しい記述の固定検査）。`check_no_fixed_values`（2桁以上の数字・具体コード・許可外の大文字語の禁止）は変更していない。
+- 仕様書: 本節、`AI運用規約・AI用DB辞書.md` 6.5-11・6.5-12、`AI分析基盤仕様書.md` のビュー一覧（2行）。
+
+### 30.6 反映状況
+コードのみ・DB変更なし（説明文は定義ファイルにあるため、バックエンド再起動で反映）。evaluator未検証。generator が実行した範囲: 対象8モジュールの試験（SimpleTestCase系、156件OK・skipped=2）、`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0。分析での再確認はBOSSが行う。コミット: 未。

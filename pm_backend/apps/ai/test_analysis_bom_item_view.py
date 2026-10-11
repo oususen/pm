@@ -118,6 +118,19 @@ class BomItemViewDefinitionTest(SimpleTestCase):
             for version_fact in ('v1', 'v2', '3種類', 'v_auto_20'):
                 self.assertNotIn(version_fact, text)
 
+    def test_description_has_coproduct_definition_and_routing_step_link(self):
+        # 連産品・代表品の定義と、工程ビューとの結びつき(AI用ビュー作成計画 §30)。説明文以外にAIへ渡る情報はないため、文面で固定する
+        for text in (ANALYSIS_VIEWS[BOM_ITEM]['description'], TABLE_NOTES[BOM_ITEM]):
+            plain = text.replace(' ', '')  # 説明文とSQL辞書の書き方の違い(空白)を吸収する
+            for part in (
+                    '1つの工程で複数の製品が同時に生産されるもの', '仮想セット品番', '在庫を持たず', '親が仮想セット品番のときは自動で1',
+                    '在庫の出庫計算・受注展開では除外される',
+                    '連産品BOMの子のうち1つに指定する代表品', '計画展開の起点',
+                    '代表品の所要時間duration_minが連産品のサイクルタイムとして使われる',
+                    '連産品の代表でない子は、bom_is_coproduct=1でis_coproduct_driver=0の明細',
+                    'v_ai_routing_stepのsource_bom_item_idは、工程の元になったBOM明細のIDで、このビューのidと結べる'):
+                self.assertIn(part, plain)
+
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_bom・m_bom_item の許可と列は、ビューの追加後も変わらない
         self.assertEqual(BASE_SQL_SCHEMA['m_bom'], (

@@ -128,8 +128,10 @@ ANALYSIS_VIEWS = {
             'parent_product_code・parent_product_name=親品番のコード・名称、child_product_code・child_product_name=子品番のコード・名称、'
             'bom_version=BOMの版(版の数字の大小で最新を決めない。v_auto_…で始まる版は自動で作ったBOM)、'
             'bom_valid_from=有効開始日、bom_valid_to=有効終了日(空は期限なし)、bom_is_active=有効(1)か無効(0)か、'
-            'bom_is_coproduct=連産品BOMか(1か0。1つの工程で複数の製品が同時に生産されるBOM。親品番は仮想セット品番)、'
-            'is_coproduct_driver=連産品代表品か(1か0。連産親品番から代表の子品番を決めるときに使う)、'
+            'bom_is_coproduct=連産品BOMか(1か0。連産品は、1つの工程で複数の製品が同時に生産されるもの。親品番は仮想セット品番で在庫を持たず、子が実際に同時にできる複数の品番。親が仮想セット品番のときは自動で1。'
+            '通常のBOMとは逆方向の関係のため、在庫の出庫計算・受注展開では除外される)、'
+            'is_coproduct_driver=連産品代表品か(1か0。連産品BOMの子のうち1つに指定する代表品。計画展開の起点で、代表品の所要時間duration_minが連産品のサイクルタイムとして使われる。'
+            '連産品の代表でない子は、bom_is_coproduct=1でis_coproduct_driver=0の明細)、'
             'quantity=親品番1個あたりの子品番の数量(員数。行をまたいで合計しても業務上の意味はない)、'
             'loss_rate=ロス率(比率で%ではない。空でないとき、数量に(1+ロス率)を掛ける)、'
             'sourcing_type=調達区分(MAKE=自社製造、BUY=購買、SUBCON=外注。BUYは仕入先があり、SUBCONは仕入先が必ずある)、'
@@ -141,6 +143,8 @@ ANALYSIS_VIEWS = {
             'lead_time_days=リードタイム(日。親→子の需要日をずらすときに使う。0の行はありうる。0は有効な値)、'
             'duration_min=加工時間(サイクル時間。分。空の行がありうる)。'
             'BUY・SUBCONの明細での工程・ラインの業務上の意味は未確認。'
+            'ルーティング工程ビューv_ai_routing_stepのsource_bom_item_idは、工程の元になったBOM明細のIDで、このビューのidと結べる'
+            '(工程が連産品の代表でない子に由来するかは、このビューのbom_is_coproductとis_coproduct_driverで判定する。判定の詳細は工程ビューの説明にある)。'
         ),
     },
     # ルーティング工程。日付の列(routing_valid_*_datetimeはルーティングの有効期間で実績の日付ではない)・数量の列がないため、
@@ -162,8 +166,17 @@ ANALYSIS_VIEWS = {
             'output_product_id・output_product_code・output_product_name=工程の加工後品のID・コード・名称(output_product_idは品番マスタビューv_ai_productのidと結べる。空の行がありうる)、'
             'parent_product_code=工程の親品の品番コード(文字列。工程のremark列をこの名前で公開している。v_ai_productのproduct_codeと結べるが、品番マスタにない値があり得る)、'
             'time_unit=時間単位(DAY=日、MINUTE=分)、lead_time_days=リードタイム(日)、start_offset_min=開始オフセット(分。空の行がありうる)、duration_min=所要時間(分。空の行がありうる)。'
-            'parallel_group=並列グループ、parallel_count=並列数、hierarchy_depth=工程階層深さ、hierarchy_path=工程階層パス、source_bom_item_id=元BOM明細のID(空の行がありうる)。'
-            'parallel_group・parallel_count・hierarchy_depth・hierarchy_path・source_bom_item_id・time_unit・lead_time_days・start_offset_min・duration_minの業務上の意味は未確認(項目名のみ)。'
+            'parallel_group=並列グループ、parallel_count=並列数、hierarchy_depth=工程階層深さ、hierarchy_path=工程階層パス、'
+            'source_bom_item_id=工程の元になったBOM明細のID(BOM明細ビューv_ai_bom_itemのidと結べる。空の行は、元のBOM明細が不明で結べない)。'
+            'parallel_group・parallel_count・hierarchy_depth・hierarchy_path・time_unit・lead_time_days・start_offset_min・duration_minの業務上の意味は未確認(項目名のみ)。'
+            '連産品とは、1つの工程で複数の製品が同時に生産されるもの。BOMでは、親が仮想セット品番(在庫を持たない)、子が実際に同時にできる複数の品番で、'
+            'BOMのヘッダに連産品BOMのフラグ(v_ai_bom_itemのbom_is_coproduct)がある。'
+            '連産品BOMの子のうち1つが代表品(v_ai_bom_itemのis_coproduct_driver=1)で、計画展開の起点となり、代表品の所要時間(duration_min)が連産品のサイクルタイムとして使われる。'
+            '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの。'
+            '工程が連産品の代表でない子に由来するかの判定: 工程のsource_bom_item_idでv_ai_bom_itemのidと結び、'
+            'bom_is_coproduct=1かつis_coproduct_driver=0なら、連産品の代表でない子に由来する工程。bom_is_coproduct=1かつis_coproduct_driver=1なら、連産品の代表に由来する工程。'
+            'bom_is_coproduct=0なら、通常の工程(連産品の子ではない)。'
+            '判定できない(不明)のは、source_bom_item_idが空の工程だけ。元のBOM明細があってbom_is_coproduct=0の工程を不明にしない(通常の工程と判定する)。'
         ),
     },
     # 工程別部品消費(ルーティング工程の材料)。日付・数量として扱う列がないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §26)。
@@ -182,6 +195,7 @@ ANALYSIS_VIEWS = {
             '工程の数・工程の時間は、工程ビューv_ai_routing_stepで集計する。'
             '材料のない工程は、このビューに行がない(その工程には登録された材料がない。業務上の意味は未確認)。'
             '材料のない工程を探すには、工程ビューv_ai_routing_stepのidが、このビューのrouting_step_idにない行を探す。'
+            '工程の元のBOM明細(source_bom_item_id)や連産品の判定は、routing_step_idで工程ビューv_ai_routing_stepのidと結んで、工程ビューの列で行う(このビューにはない)。'
             '列の意味: id=工程別部品消費のID、routing_step_id=ルーティング工程のID(工程ビューのidと結べる)、routing_id=ルーティングのID、routing_code=ルーティングコード、'
             'routing_product_id・routing_product_code・routing_product_name=ルーティングの品番のID・コード・名称(routing_product_idは品番マスタビューv_ai_productのidと結べる)、'
             'step_no=工程番号、step_process_id・step_process_code・step_process_name=工程のID・コード・名称(step_process_idは工程マスタビューv_ai_processのidと結べる。空の行がありうる)、'

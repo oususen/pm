@@ -128,7 +128,12 @@ class RoutingStepMaterialViewDefinitionTest(SimpleTestCase):
                     # 材料のない工程
                     '材料のない工程は、このビューに行がない', '登録された材料がない', '業務上の意味は未確認',
                     'routing_step_id にない行を探す' if text is TABLE_NOTES[VIEW] else 'routing_step_idにない行を探す',
-                    'v_ai_product'):
+                    'v_ai_product',
+                    # 工程の元のBOM明細・連産品の判定は、routing_step_id で工程ビューと結んで工程ビューの列で行う(AI用ビュー作成計画 §30)
+                    '工程の元のBOM明細(source_bom_item_id)や連産品の判定は、',
+                    'routing_step_idで工程ビューv_ai_routing_stepのidと結んで、工程ビューの列で行う(このビューにはない)'
+                    if text is ANALYSIS_VIEWS[VIEW]['description']
+                    else 'routing_step_id で v_ai_routing_step の id と結んで、工程ビューの列で行う(このビューにはない)'):
                 self.assertIn(part, text)
             # 材料自身の remark と、工程の非公開列は説明に書かない(step_parent_product_code の元として工程の remark を述べる)
             for hidden in ('step_type', 'created_at', 'updated_at', 'description', 'contact_person', 'phone_number',

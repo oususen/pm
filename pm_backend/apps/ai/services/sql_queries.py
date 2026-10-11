@@ -189,8 +189,10 @@ TABLE_NOTES = {
         '(コードと名称は parent_product_code・parent_product_name、child_product_code・child_product_name)。'
         'bom_version は版。版の数字の大小で最新を決めない。v_auto_… で始まる版は自動で作ったBOM。最新のBOMは、版ではなく有効開始日 bom_valid_from で決める。'
         'bom_valid_to は有効終了日(空は期限なし)、bom_is_active は有効(1)か無効(0)か。'
-        'bom_is_coproduct は連産品BOM(1つの工程で複数の製品が同時に生産されるBOM。親品番は仮想セット品番)で、1か0。'
-        'is_coproduct_driver は連産品代表品(連産親品番から代表の子品番を決めるときに使う)で、1か0。'
+        'bom_is_coproduct は連産品BOMか(1か0)。連産品は、1つの工程で複数の製品が同時に生産されるもの。親品番は仮想セット品番で在庫を持たず、子が実際に同時にできる複数の品番。親が仮想セット品番のときは自動で1。'
+        '通常のBOMとは逆方向の関係のため、在庫の出庫計算・受注展開では除外される。'
+        'is_coproduct_driver は連産品代表品か(1か0)。連産品BOMの子のうち1つに指定する代表品で、計画展開の起点。代表品の所要時間 duration_min が連産品のサイクルタイムとして使われる。'
+        '連産品の代表でない子は、bom_is_coproduct=1 で is_coproduct_driver=0 の明細。'
         'quantity は親品番1個あたりの子品番の数量(員数)。行をまたいで合計しても業務上の意味はない。'
         'loss_rate はロス率(比率で、%ではない)。空でないとき、数量に (1+ロス率) を掛ける。'
         'sourcing_type は調達区分で、MAKE=自社製造、BUY=購買、SUBCON=外注。BUY(購買)は仕入先があり、SUBCON(外注)は仕入先が必ずある。'
@@ -200,6 +202,8 @@ TABLE_NOTES = {
         'time_unit は時間単位(DAY=日、MINUTE=分)。どちらの行も、リードタイム lead_time_days(日)と加工時間(サイクル時間)duration_min(分)の両方を持つ(duration_min は空の行がありうる)。'
         'lead_time_days が0の行はありうる(0は有効な値)。lead_time_days は親→子の需要日をずらすときに使う。'
         'BUY・SUBCON の明細での工程・ラインの業務上の意味は未確認。'
+        'ルーティング工程ビュー v_ai_routing_step の source_bom_item_id は、工程の元になったBOM明細のIDで、このビューの id と結べる'
+        '(工程が連産品の代表でない子に由来するかは、このビューの bom_is_coproduct と is_coproduct_driver で判定する。判定の詳細は v_ai_routing_step の説明にある)。'
     ),
     'v_ai_routing_step': (
         'ルーティング工程(m_routing_step にルーティングヘッダ m_routing と、品番・工程・ライン・外作先のコード・名称を付けたビュー)。1行=1工程(全行。日付の列はなく、期間では絞らない)。'
@@ -211,8 +215,17 @@ TABLE_NOTES = {
         'output_product_* は工程の加工後品(output_product_id は v_ai_product の id と結べる。空の行がありうる)。'
         'parent_product_code は工程の親品の品番コード(文字列。工程の remark 列をこの名前で公開している)で、v_ai_product.product_code と結べるが、品番マスタにない値があり得る。'
         'time_unit は時間単位(DAY=日、MINUTE=分)、lead_time_days はリードタイム(日)、start_offset_min は開始オフセット(分)、duration_min は所要時間(分)。'
-        'parallel_group は並列グループ、parallel_count は並列数、hierarchy_depth は工程階層深さ、hierarchy_path は工程階層パス、source_bom_item_id は元BOM明細のID。'
-        'parallel_group・parallel_count・hierarchy_depth・hierarchy_path・source_bom_item_id・time_unit・lead_time_days・start_offset_min・duration_min の業務上の意味は未確認(項目名のみ)。'
+        'parallel_group は並列グループ、parallel_count は並列数、hierarchy_depth は工程階層深さ、hierarchy_path は工程階層パス。'
+        'source_bom_item_id は工程の元になったBOM明細のIDで、BOM明細ビュー v_ai_bom_item の id と結べる(空の工程は、元のBOM明細が不明で結べない)。'
+        'parallel_group・parallel_count・hierarchy_depth・hierarchy_path・time_unit・lead_time_days・start_offset_min・duration_min の業務上の意味は未確認(項目名のみ)。'
+        '連産品とは、1つの工程で複数の製品が同時に生産されるもの。BOMでは、親が仮想セット品番(在庫を持たない)、子が実際に同時にできる複数の品番で、'
+        'BOMのヘッダに連産品BOMのフラグ(v_ai_bom_item の bom_is_coproduct)がある。'
+        '連産品BOMの子のうち1つが代表品(v_ai_bom_item の is_coproduct_driver=1)で、計画展開の起点となり、代表品の所要時間(duration_min)が連産品のサイクルタイムとして使われる。'
+        '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの。'
+        '工程が連産品の代表でない子に由来するかの判定: 工程の source_bom_item_id で v_ai_bom_item の id と結び、'
+        'bom_is_coproduct=1 かつ is_coproduct_driver=0 なら、連産品の代表でない子に由来する工程。bom_is_coproduct=1 かつ is_coproduct_driver=1 なら、連産品の代表に由来する工程。'
+        'bom_is_coproduct=0 なら、通常の工程(連産品の子ではない)。'
+        '判定できない(不明)のは、source_bom_item_id が空の工程だけ。元のBOM明細があって bom_is_coproduct=0 の工程を不明にしない(通常の工程と判定する)。'
     ),
     'v_ai_routing_step_material': (
         '工程別部品消費(m_routing_step_material に、工程・ルーティング・品番・工程のコード・名称を付けたビュー)。1行=1工程の1材料(全行。日付の列はなく、期間では絞らない)。'
@@ -229,6 +242,7 @@ TABLE_NOTES = {
         '工程の数・工程の時間は、工程ビュー v_ai_routing_step で集計する。'
         '材料のない工程は、このビューに行がない(その工程には登録された材料がない。業務上の意味は未確認)。'
         '材料のない工程を探すには、v_ai_routing_step の id が、このビューの routing_step_id にない行を探す。'
+        '工程の元のBOM明細(source_bom_item_id)や連産品の判定は、routing_step_id で v_ai_routing_step の id と結んで、工程ビューの列で行う(このビューにはない)。'
         'routing_step_id は工程のID(v_ai_routing_step の id と結べる)、routing_* はルーティングとその品番、step_* は工程の列(step_parent_product_code は工程の remark 列を公開したもの。材料自身の remark は公開しない)。'
     ),
     'v_ai_user': (
