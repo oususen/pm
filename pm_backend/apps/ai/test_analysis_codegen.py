@@ -72,6 +72,7 @@ class CodegenBase(SimpleTestCase):
             patch.object(cg, 'get_qwen_analysis_timeout', lambda: 90),
             patch.object(cg, 'get_analysis_execution_policy', lambda: POLICY),
             patch.object(cg, 'resolve_planning_provider', lambda data: (data['provider'], data['model'])),
+            patch.object(cg, '_validate_generated_sql', return_value=[]),  # 既存ケースはAI応答処理を検証。隔離SQL検査は専用ケースで確認
         ]
         for item in patches:
             item.start()

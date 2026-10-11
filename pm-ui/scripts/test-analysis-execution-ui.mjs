@@ -41,6 +41,57 @@ async function setup() {
 }
 function html(f) { return renderToString(Vue.createSSRApp({ props: ['plan', 'canEdit', 'canViewAll', 'blocked', 'visible'], setup: () => Object.fromEntries(Object.entries(f.state).map(([k, v]) => [k, Vue.unref(v)])), render }, f.props)) }
 
+test('実行履歴全体は初期状態で閉じる。目的原文はエスケープしNULLは未記録', async () => {
+  const f = await setup()
+  try {
+    f.state.history.value.results = [{ id: 1, purpose: '<img src=x onerror=SECRET>', views: [] }, { id: 2, purpose: null, views: [] }]
+    const text = await html(f)
+    assert.ok(text.includes('<details class="run-history"><summary>実行履歴</summary>'))
+    assert.ok(text.includes('分析目的: &lt;img src=x onerror=SECRET&gt;'))
+    assert.ok(text.includes('分析目的: 未記録'))
+    assert.equal(text.includes('<img'), false)
+    assert.equal(text.includes('<details class="run-history" open'), false)
+  } finally { f.stop() }
+})
+
+test('履歴の開閉で取得済み履歴・ページ・管理者選択を失わず、再取得でも開閉状態を維持', async () => {
+  const f = await setup()
+  const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null, open: false, addEventListener() {}, removeEventListener() {} })
+  const renderer = Vue.createRenderer({
+    createElement: type => node(type), createText: text => node('#text', text), createComment: text => node('#comment', text),
+    setText: (n, text) => { n.text = text }, setElementText: (n, text) => { n.text = text; n.children = [] },
+    parentNode: n => n.parent, nextSibling: n => n.parent?.children[n.parent.children.indexOf(n) + 1] || null,
+    patchProp: (n, key, old, value) => { n.props[key] = value; if (key === 'open') n.open = value != null },
+    insert(n, parent, anchor = null) {
+      if (n.parent) n.parent.children.splice(n.parent.children.indexOf(n), 1)
+      n.parent = parent
+      const index = anchor ? parent.children.indexOf(anchor) : -1
+      if (index < 0) parent.children.push(n); else parent.children.splice(index, 0, n)
+    },
+    remove(n) { if (n.parent) n.parent.children.splice(n.parent.children.indexOf(n), 1); n.parent = null },
+  })
+  const root = node('root')
+  const app = renderer.createApp({ setup: () => f.state, render, props: ['plan', 'canEdit', 'canViewAll', 'blocked', 'visible'] }, f.props)
+  const find = n => n.type === 'details' && n.props.class === 'run-history' ? n : n.children.map(find).find(Boolean)
+  try {
+    f.props.canViewAll = true; f.state.includeAll.value = true
+    f.methods.runs = async () => ({ data: { results: [{ id: 3, purpose: '親品確認', views: [] }], count: 3, next: null, previous: 'prev' } })
+    app.mount(root)
+    const history = find(root)
+    assert.equal(history.open, false)
+    history.open = true // ブラウザの標準detailsが行う開閉を表す。
+    await f.state.loadHistory(2); await Vue.nextTick()
+    assert.equal(find(root), history); assert.equal(history.open, true)
+    history.open = false
+    await Vue.nextTick()
+    assert.equal(f.state.page.value, 2); assert.equal(f.state.includeAll.value, true)
+    assert.equal(f.state.history.value.results[0].purpose, '親品確認')
+    assert.deepEqual(f.calls.at(-1), ['runs', { page: 2, include_all: 'true' }])
+    await f.state.loadHistory(2); await Vue.nextTick()
+    assert.equal(find(root), history); assert.equal(history.open, false)
+  } finally { app.unmount(); f.stop() }
+})
+
 test('実行・履歴のエラーは同じ帯で個別に閉じる。本文をエスケープし次の各操作で消える', async () => {
   const f = await setup()
   try {

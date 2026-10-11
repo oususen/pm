@@ -30,7 +30,7 @@ BUNDLE = SimpleNamespace(sql_sha256=runs.sha256_of(SQL), python_sha256=runs.sha2
 
 
 def make_plan(counts):
-    proposal = {**PROPOSAL, 'conditions': '指定期間の全登録行（追加の絞り条件なし）'}
+    proposal = {**PROPOSAL, 'purpose': '入荷と出荷を確認する', 'conditions': '指定期間の全登録行（追加の絞り条件なし）'}
     return {
         'id': 'plan-1', 'status': 'data_approved', 'proposal': proposal,
         'method_approved_at': '2026-10-04T09:00:00', 'data_approved_at': '2026-10-04T09:01:00',

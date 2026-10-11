@@ -144,7 +144,8 @@ class PlanIntegrationTests(SimpleTestCase):
         _plan, messages = self.create(proposal(['shipment_date', 'ship_to_code', 'quantity'], steps=['ship_to_codeで集計']))
         system = messages[0]['content']
         self.assertIn('出力案に書いてよいのは、提示した公開ビューの列で作れる項目だけ', system)
-        self.assertIn('ビューにない列(例: コードしかない列の名前・住所など)を、出力案や手順に入れない', system)
+        self.assertIn('未公開の名前・住所などの情報や、説明で未確認の業務意味は推測しない', system)
+        self.assertIn('公開列から計算・照合して作れる集計・差分・一致状態などの派生項目は含めてよい', system)
 
     def test_the_consult_prompt_has_the_term_table_and_asks_about_unclear_words(self):
         prompt = consult._system_prompt([])

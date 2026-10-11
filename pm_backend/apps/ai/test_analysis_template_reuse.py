@@ -238,8 +238,11 @@ class RunHistoryAndExecuteTests(ReuseBase):
         plan['preview'] = {'datasets': [{'view': 'v_ai_shipment', 'rows': 3}], 'total_rows': 3}
         run = runs.start_run(self.creator, plan, bundle, policy)
         self.assertEqual((run.template_id, run.template_version), (42, 3))
+        self.assertEqual(run.purpose, plan['proposal']['purpose'])
         skipped = runs.record_not_run(self.creator, plan, 'failed', 'template_unavailable', policy)
         self.assertEqual((skipped.template_id, skipped.template_version, skipped.reason), (42, 3, 'template_unavailable'))
+        skipped.refresh_from_db()
+        self.assertEqual(runs.serialize_run(skipped)['purpose'], plan['proposal']['purpose'])
         self.assertEqual(skipped.detail, 'テンプレートが再利用できない状態になったため、実行しませんでした。')
         plain = runs.start_run(self.creator, make_plan(self.creator.pk), bundle, policy)
         self.assertEqual((plain.template_id, plain.template_version), (None, None))

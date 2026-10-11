@@ -167,7 +167,8 @@
             <p v-if="plan.template">テンプレートから作成した分析案では、AIによるコード生成は行いません。現行の外枠でSQLを試行し、コードを承認してから実行します（コードを変えるときは、新しい分析として作成してください）。</p>
             <template v-if="!codeInFlight && !plan.template">
               <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未登録の名称・機密は自動判別できません。</p>
-              <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">コード生成で社外送信する全文を確認</button>
+              <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">{{ codePreview ? '送信文再生成' : 'コード生成で社外送信する全文を確認' }}</button>
+              <button v-if="codeExternal && codePreview" :disabled="!!busy" @click="closeCodePreview">閉じる</button>
               <section v-if="codeExternal && codePreview" class="dataset">
                 <h4>コード生成の社外送信前確認（まだ送信していません）</h4>
                 <p>送信先: {{ codePreview.provider }} / モデル: {{ codePreview.model }} / 生成: {{ codePreview.attempt }}回目</p>
@@ -320,6 +321,10 @@ const FAILURE_LABELS = Object.freeze({
   ai_http: 'AIのAPIがエラーを返しました(残高・利用制限など)。管理者へ、AIの契約・残高の確認を依頼してください。生成回数は消費されています。',
   ai_connect: 'AIのAPIに接続できませんでした。ネットワークを確認し、時間をおいて、再生成してください。生成回数は消費されています。',
   ai_empty: 'AIから空の返事が返りました。時間をおいて、再生成してください。生成回数は消費されています。',
+  sql_validation_failed: '生成SQLが承認列・中間テーブルの検査に合格しませんでした。必要列が承認範囲にあるか、分析案とコードを確認してください。生成回数は消費されています。',
+  sql_validation_busy: 'SQL検査の実行基盤が使用中です。終了後に再生成してください。生成回数は消費されています。',
+  sql_validation_unavailable: 'SQL検査の実行基盤を利用できません。管理者へ確認を依頼してください。生成回数は消費されています。',
+  sql_validation_report_invalid: 'SQL検査の応答を確認できませんでした。管理者へ実行基盤の確認を依頼してください。生成回数は消費されています。',
   response_invalid: 'AIの応答が指定された形式ではありません。',
   ai_unsupported: 'AIが、このデータ範囲では分析コードを作成できないと判定しました。',
   parameters_invalid: 'AIが返した変数の定義が正しくありません(種類・値・元の値の不足、日付の組(名前_from・名前_to)の不備、比べる期間が全体の期間の外・開始日が終了日より後、または、登録されていない品番・顧客コード・納入先コード)。',
@@ -481,6 +486,11 @@ function clearCodeConfirmations() {
   codePreview.value = null
   codeSendAccepted.value = false
   codeAccepted.value = false
+}
+function closeCodePreview() {
+  if (busy.value) return
+  codePreview.value = null
+  codeSendAccepted.value = false
 }
 // 版・コード・状態が変われば、送信確認もコード確認も取り直す。
 watch(plan, clearCodeConfirmations, { flush: 'sync', deep: true })

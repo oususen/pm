@@ -1,6 +1,6 @@
 """分析用のSQL・Pythonの生成(第2段階2-B)。AI分析基盤仕様書§4.8。
 
-流れ: データ範囲の承認後 → (外部AIは)送信内容の確認 → AIが「中間テーブルの手順」と「Python」を返す → 形式・静的検査 →
+流れ: データ範囲の承認後 → (外部AIは)送信内容の確認 → AIが「中間テーブルの手順」と「Python」を返す → 形式・静的検査・空テーブルSQL検査 →
       試行実行(実DBなし、空のテーブルでSQLだけ) → 利用者がコードを確認して承認(画面は2-C)。
 
 - 生成物は、Redisの分析案(`plan['codegen']`)の中だけに保持する。DBには保存しない(履歴にはハッシュと件数だけ)。有効期限は分析案と同じで、延長しない。
@@ -155,10 +155,13 @@ SYSTEM_PROMPT = (
     '利用できるテーブルは、user側のdatasetsにある承認済みビューだけ(列名と型も、そこに示した列だけ)。'
     '返すのはJSONのみ。形式は {"steps": [{"name": "w_中間テーブル名", "query": "SELECT または WITH で始まる問い合わせ1つ"}], "python": "Pythonのコード"}。'
     '分析できない・必要なデータが足りない場合は、近似の別分析を作らず {"unsupported": "理由"} を返す。'
+    '目的・手順・出力案が求める区別・照合方向・対象範囲・全行保持・複数一致の扱いをSQLから最終表示まで反映する。'
+    '承認済み列から作れる派生判定は出力に含めてよいが、説明で未確認の業務意味は推測しない。'
     'SQLの規則: 各stepは「中間テーブル名」と「SELECT/WITHの問い合わせ」だけ。INSERT・UPDATE・DELETE・DROP・CREATEは書かない'
     '(実行側が CREATE TABLE <name> AS <query> を組み立てる)。問い合わせは、ただのSELECTで書く。中間テーブルと同じ名前のWITHで、問い合わせ全体を包まない'
     '(WITH w_x AS (...) SELECT * FROM w_x のような書き方は、不要)。名前は w_ で始まる英小文字・数字・アンダースコア。'
     '参照できるのは承認済みビューと、先のstepで作った中間テーブルだけ。システムテーブル・メタデータ関数・ファイルを読む関数は使えない。'
+    '返す前に、CTE・中間テーブルごとにSELECTで投影した列名を照合する。後続では投影後の列名だけを参照し、ASで改名した元の列名や投影していない列を使わない。'
     'Pythonの規則: 使えるのは con.sql(問い合わせ) / con.execute(問い合わせ) / load_view(ビュー名) と、'
     'emit_table(名前, 列名のリスト, 行のリスト) / emit_chart(種類, タイトル, x, [{"name":..,"values":[..]}]) / emit_report(文章)。'
     'emit_chartのxは値のリスト。文字列1つは不可。各系列のvaluesもxと同じ個数のリスト。'
@@ -167,6 +170,7 @@ SYSTEM_PROMPT = (
     'con.sql/executeの結果は fetchall() / fetchone() / columns で読む。問い合わせはSELECT/WITH 1つだけで、データは変更できない。'
     'load_view(ビュー名)・con.sql(...)が返すのは結果オブジェクトで、それ自体をforで回したり、row["列名"]のように列名で読んだりしない。'
     '行は .fetchall() で取り、各行はタプル(列の順番で row[0], row[1]。SELECTに書いた列の順)。'
+    '最終SELECTの列順・Pythonで取り出す位置・emit_tableの見出しと行の順を照合し、要求した判定項目も表示する。'
     'load_viewに渡せるのは承認済みビュー名だけ。先のstepで作った中間テーブルは、con.sql("SELECT ... FROM w_中間テーブル名").fetchall() で読む。'
     'importできるのは json, math, datetime, decimal, statistics, collections, itertools, re だけ。ファイル・ネットワーク・OS・動的実行・'
     'アンダースコアで始まる属性は使えない。emit_* を少なくとも1回呼ぶ。グラフの種類は bar か line。'
@@ -373,8 +377,11 @@ def describe_codegen(plan, now=None):
     inflight = codegen.get('inflight')
     state = None
     if inflight:
-        elapsed = ((now or datetime.now()) - datetime.fromisoformat(inflight['started_at'])).total_seconds()
-        state = 'unknown' if elapsed > inflight_limit_seconds(plan['proposal']['provider']) else 'running'
+        validating = inflight.get('phase') == 'sql_validation'
+        started = inflight.get('phase_started_at') if validating else inflight['started_at']
+        elapsed = ((now or datetime.now()) - datetime.fromisoformat(started)).total_seconds()
+        limit = inflight['phase_seconds'] if validating else inflight_limit_seconds(plan['proposal']['provider'])
+        state = 'unknown' if elapsed > limit else 'running'
     return {
         'status': codegen.get('status', 'none'), 'attempts': codegen.get('attempts', 0), 'max_attempts': MAX_GENERATIONS,
         'wrapper_outdated': bool(codegen.get('wrapper_version') and codegen['wrapper_version'] != WRAPPER_VERSION),
@@ -563,6 +570,22 @@ def generate(owner_id, plan_id, revision, confirmation=None):
                 if 'python:syntax_error' in reasons:
                     reasons += _syntax_details(python, source)
             if not reasons:
+                # 承認列だけの空テーブルで全SQL手順を実行する。AIへ再送せず、手動試行・承認も代行しない。
+                try:
+                    policy = get_analysis_execution_policy()
+                except Exception:
+                    reasons.append('sql_validation_unavailable')
+                else:
+                    def validating(current):
+                        current['inflight'].update(phase='sql_validation', phase_started_at=datetime.now().isoformat(),
+                                                   phase_seconds=_trial_wait_seconds(policy))
+                    _finish(store, plan_id, owner_id, attempt_id, validating)  # 解除・期限切れなら、送信前に停止
+                    try:
+                        reasons += _validate_generated_sql(make_bundle(steps, python, approved_views), plan['proposal']['datasets'], policy)
+                    except Exception:
+                        # 通常の基盤例外も固定理由で終了する。エラー本文・SQLは保存しない。
+                        reasons.append('sql_validation_unavailable')
+            if not reasons:
                 # 目的・手順に書かれた品番などが、変数にされず、コードに直接書かれていないか(警告のみ。再利用で値を変えられない)
                 proposal = plan['proposal']
                 copied = template_params.copied_literals(
@@ -628,35 +651,44 @@ def refresh_wrapper(owner_id, plan_id, revision):
     return store.update(plan_id, owner_id, revision, apply)
 
 
-def run_trial(owner_id, plan_id, revision):
-    store = AnalysisPlanStore()
-    plan = _plan_for_codegen(store, plan_id, owner_id, revision)
-    codegen = _codegen(plan)
-    if codegen.get('status') not in ('generated',) or codegen.get('inflight'):
-        raise AnalysisError('試行できるコードがありません。コードを作成してください。', 409)
-    datasets = plan['proposal']['datasets']
+def _trial_wait_seconds(policy):
+    """既存試行の応答待ち期限。生成中の状態表示でも同じ値を使う。"""
+    return DEADLINES['transfer'] + LAUNCHER_STAGE_SECONDS + policy.max_execution_seconds
+
+
+def _generation_validation_reason(trial):
+    """生成時の診断は固定分類だけ。launcher・DuckDBの本文は保存しない。"""
+    if trial.get('status') == 'failed':
+        return 'sql_validation_failed'
+    if trial.get('reason') == 'busy':
+        return 'sql_validation_busy'
+    if trial.get('reason') == 'trial_report_invalid':
+        return 'sql_validation_report_invalid'
+    return 'sql_validation_unavailable'
+
+
+def _trial_sql(bundle, datasets, policy):
+    """実DBを読まず、承認列・型だけの空テーブルでSQL手順を順次検査する。"""
     approved_views = [d['view'] for d in datasets]
-    bundle = make_bundle(codegen['steps'], codegen['python'], approved_views)
-    if bundle.executed_code_sha256 != codegen['executed_code_sha256']:
-        raise AnalysisError('保存されたコードの内容が一致しません。コードを作り直してください。', 409)
     trial = {'status': 'unverified', 'at': None, 'executed_code_sha256': bundle.executed_code_sha256, 'reason': '', 'step': None, 'message': ''}
     try:
         host, port = launcher_endpoint()
-        policy = get_analysis_execution_policy()
         header = _header_frame(compose_code(bundle.steps, bundle.python, approved_views, 'trial'), datasets,
                                {view: 0 for view in approved_views}, policy)
         end = _frame(b'E', b'')
         status, launcher = _transmit(host, port, len(header) + len(end), iter([header, end]), Deadline(DEADLINES['transfer'], 'stage_deadline_transfer'),
-                                     DEADLINES['transfer'] + LAUNCHER_STAGE_SECONDS + policy.max_execution_seconds)
+                                     _trial_wait_seconds(policy))
     except ExecutionStopped as exc:
         trial['reason'] = exc.reason
     else:
-        if launcher.get('status') == 'ok':
+        if isinstance(launcher, dict) and launcher.get('status') == 'ok':
             try:
                 report = json.loads(launcher['result']['report'])
             except (KeyError, TypeError, ValueError):
                 report = {}
-            if report.get('trial') == 'passed':
+            if not isinstance(report, dict):
+                report = {}
+            if report.get('trial') == 'passed' and report.get('steps') == len(bundle.steps):
                 trial['status'] = 'passed'
             elif report.get('trial') == 'failed':
                 trial.update(status='failed', reason=str(report.get('reason', ''))[:80], step=report.get('step'),
@@ -664,8 +696,27 @@ def run_trial(owner_id, plan_id, revision):
             else:
                 trial['reason'] = 'trial_report_invalid'
         else:
-            trial['reason'] = str(launcher.get('reason') or 'launcher_failed')[:80]  # 使用中・利用不可は、検証済みとしない
+            trial['reason'] = str(launcher.get('reason') or 'launcher_failed')[:80] if isinstance(launcher, dict) else 'trial_report_invalid'
     trial['at'] = datetime.now().isoformat()
+    return trial
+
+
+def _validate_generated_sql(bundle, datasets, policy):
+    trial = _trial_sql(bundle, datasets, policy)
+    return [] if trial['status'] == 'passed' else [_generation_validation_reason(trial)]
+
+
+def run_trial(owner_id, plan_id, revision):
+    store = AnalysisPlanStore()
+    plan = _plan_for_codegen(store, plan_id, owner_id, revision)
+    codegen = _codegen(plan)
+    if codegen.get('status') not in ('generated',) or codegen.get('inflight'):
+        raise AnalysisError('試行できるコードがありません。コードを作成してください。', 409)
+    datasets = plan['proposal']['datasets']
+    bundle = make_bundle(codegen['steps'], codegen['python'], [d['view'] for d in datasets])
+    if bundle.executed_code_sha256 != codegen['executed_code_sha256']:
+        raise AnalysisError('保存されたコードの内容が一致しません。コードを作り直してください。', 409)
+    trial = _trial_sql(bundle, datasets, get_analysis_execution_policy())
 
     def apply(current):
         if (current.get('codegen') or {}).get('executed_code_sha256') != bundle.executed_code_sha256:

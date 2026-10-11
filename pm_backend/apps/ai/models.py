@@ -52,7 +52,8 @@ class AIConversation(models.Model):
 class AIAnalysisRun(models.Model):
     """分析の実行履歴(AI分析基盤仕様書§5.5)。成功・失敗・中止・期限切れ・状態不明のすべてを1行ずつ残す。
 
-    コード本文・結果の中身・取得した明細行・個人情報・AIの応答本文は保存しない(ハッシュと件数と理由だけ)。
+    コード本文・結果の中身・取得した明細行・利用者の個人情報・AIの応答本文は保存しない。
+    分析目的と追加の指示は、利用者が入力した原文を履歴として保存する。
     保存期間は未確定のため、削除しない。実行者は、ユーザーが削除されたらNULLになる(表示は「削除済みユーザー」)。
     """
     STATUS_CHOICES = [
@@ -61,6 +62,7 @@ class AIAnalysisRun(models.Model):
     ]
 
     plan_id = models.CharField(max_length=64, verbose_name='分析案ID')
+    purpose = models.TextField(null=True, blank=True, verbose_name='分析目的')
     template_id = models.PositiveBigIntegerField(null=True, blank=True, verbose_name='テンプレートID')
     template_version = models.PositiveIntegerField(null=True, blank=True, verbose_name='テンプレート版')
     # 結果の改良(追加の指示から作った分析案)の実行だけに入る。追加の指示は、利用者が入力した原文(置換前)で、実行履歴を見られる人に見える

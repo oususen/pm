@@ -172,10 +172,12 @@ class RefinementRunHistoryTests(RefinementBase):
         return runs.start_run(self.user, plan, BUNDLE, POLICY)
 
     def test_a_refined_runs_history_keeps_the_instruction_and_the_source_run(self):
-        run = self.start({'refinement': {'instruction': 'ACME向けに品番も付けて', 'from_run_id': self.source.pk}})
+        plan = planning.create_plan(self.user.pk, {**PAYLOAD, 'refinement': self.refinement('ACME向けに品番も付けて')})
+        run = self.start({'proposal': plan['proposal'], 'refinement': plan['refinement']})
         run.refresh_from_db()
         self.assertEqual((run.refinement_instruction, run.refined_from_run_id), ('ACME向けに品番も付けて', self.source.pk))
         data = runs.serialize_run(run)
+        self.assertEqual(data['purpose'], PAYLOAD['purpose'] + '\n追加の指示: ACME向けに品番も付けて')
         self.assertEqual((data['refinement_instruction'], data['refined_from_run_id']), ('ACME向けに品番も付けて', self.source.pk))
 
     def test_a_normal_run_has_no_instruction_and_no_source(self):

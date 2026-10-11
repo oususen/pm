@@ -70,12 +70,14 @@
         </section>
       </template>
     </template>
-    <h2>実行履歴</h2>
+    <details class="run-history">
+    <summary>実行履歴</summary>
     <label v-if="canViewAll"><input v-model="includeAll" type="checkbox" :disabled="!!busy" @change="loadHistory(1)">全利用者の履歴（管理者表示）</label>
     <button :disabled="!!busy" @click="loadHistory(1)">履歴を取得</button>
     <p>履歴にはコード・結果・明細の本文はありません。保持期限後の結果は再表示できません。</p>
     <article v-for="run in history.results" :key="run.id">
       <h3>実行{{ run.id }} / {{ run.status_label }} / {{ run.executed_by }}</h3>
+      <p>分析目的: {{ run.purpose ?? '未記録' }}</p>
       <p>{{ run.started_at }} ～ {{ run.finished_at || '未確定' }} / {{ run.detail }}</p>
       <p>期間: {{ run.date_from }} ～ {{ run.date_to }} / 条件: {{ run.conditions }}</p>
       <p v-if="run.refinement_instruction">追加の指示: {{ run.refinement_instruction }}<template v-if="run.refined_from_run_id"> / 改良の元の実行: {{ run.refined_from_run_id }}</template></p>
@@ -86,6 +88,7 @@
     <p v-if="historyLoaded">{{ history.count }}件 / {{ page }}ページ</p>
     <button :disabled="!!busy || !history.previous" @click="loadHistory(page - 1)">前のページ</button>
     <button :disabled="!!busy || !history.next" @click="loadHistory(page + 1)">次のページ</button>
+    </details>
   </section>
 </template>
 
@@ -234,6 +237,7 @@ async function loadHistory(target = 1) {
 <style scoped>
 .execution { border-top: 1px solid #ccc; margin-top: 20px; } .template-unapproved { font-weight: bold; color: #7a4b00; background: #fff4d6; padding: 6px; } button { margin: 4px; padding: 8px; } article { margin: 16px 0; padding: 10px; background: #f5f9f8; }
 .empty-result { background: #fff8e6; border-left: 3px solid #d9a21b; color: #6f5314; padding: 6px 10px; }
+.run-history > summary { cursor: pointer; font-size: 1.5em; font-weight: bold; margin: 16px 0; }
 .scroll { overflow: auto; } table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #ccd; padding: 5px; text-align: left; } pre { white-space: pre-wrap; overflow-wrap: anywhere; } svg { width: 100%; max-height: 300px; } [role=alert], .execution-failed { color: #a22; }
 .completion-notice { border: 2px solid currentColor; padding: 10px; margin: 12px 0; }
 .completion-success { color: #126d63; background: #edf6f5; }

@@ -66,6 +66,44 @@ async function setup(provider = 'openrouter', templatesComponent = { template: '
 }
 const mutationCalls = fixture => fixture.calls.filter(call => call[0] !== 'getPlan')
 
+test('送信文は閉じた状態で既存ラベル、開くと再生成と右の閉じる。閉じた後は再確認が必要', async () => {
+  const f = await setup()
+  try {
+    let html = await htmlFor(f)
+    assert.ok(html.includes('コード生成で社外送信する全文を確認'))
+    assert.equal(html.includes('送信文再生成'), false)
+    assert.equal(html.includes('>閉じる</button>'), false)
+    await f.state.prepareCodePreview()
+    html = await htmlFor(f)
+    assert.match(html, /送信文再生成<\/button>\s*<button[^>]*>閉じる<\/button>/)
+    assert.ok(html.includes('検査規則全文'))
+    f.state.codeSendAccepted.value = true
+    f.state.codeAccepted.value = true
+    f.state.busy.value = 'code-preview'
+    assert.match(await htmlFor(f), /<button disabled[^>]*>閉じる<\/button>/)
+    f.state.closeCodePreview()
+    assert.ok(f.state.codePreview.value)
+    f.state.busy.value = ''
+    f.state.closeCodePreview()
+    assert.equal(f.state.codePreview.value, null)
+    assert.equal(f.state.codeSendAccepted.value, false)
+    assert.equal(f.state.codeAccepted.value, true)
+    html = await htmlFor(f)
+    assert.ok(html.includes('コード生成で社外送信する全文を確認'))
+    assert.equal(html.includes('検査規則全文'), false)
+    await f.state.generateCode()
+    assert.deepEqual(f.calls.map(call => call[0]), ['codegenPreview'])
+    await f.state.prepareCodePreview()
+    assert.equal(f.state.codeSendAccepted.value, false)
+    assert.ok(f.state.codePreview.value)
+    f.state.codeSendAccepted.value = true
+    await f.state.prepareCodePreview()
+    assert.equal(f.state.codeSendAccepted.value, false)
+    assert.deepEqual(f.calls.map(call => call[0]), ['codegenPreview', 'codegenPreview', 'codegenPreview'])
+    assert.equal(f.state.plan.value.codegen_state.attempts, 0)
+  } finally { f.stop() }
+})
+
 test('分析エラーは帯・見出し・閉じるボタンを表示し、本文をエスケープ。閉じる／次の操作で消える', async () => {
   const f = await setup('qwen')
   try {
@@ -867,7 +905,9 @@ test('AIとの通信失敗は、固定の分類コードごとに、原因と次
   const f = await setup('openrouter')
   try {
     for (const [reason, part] of [['ai_timeout', '制限時間内に返事がありませんでした'], ['ai_auth', 'APIキーが未設定、または正しくありません'],
-      ['ai_http', '残高・利用制限など'], ['ai_connect', '接続できませんでした'], ['ai_empty', '空の返事が返りました'], ['ai_request_failed', 'AIとの通信に失敗しました']]) {
+      ['ai_http', '残高・利用制限など'], ['ai_connect', '接続できませんでした'], ['ai_empty', '空の返事が返りました'], ['ai_request_failed', 'AIとの通信に失敗しました'],
+      ['sql_validation_failed', '承認列・中間テーブルの検査に合格しませんでした'], ['sql_validation_busy', '実行基盤が使用中です'],
+      ['sql_validation_unavailable', '実行基盤を利用できません'], ['sql_validation_report_invalid', 'SQL検査の応答を確認できませんでした']]) {
       f.state.plan.value = { ...dataPlan('openrouter'), codegen_state: { status: 'failed', attempts: 1, max_attempts: 4, inflight_state: null }, codegen: { reasons: [reason] } }
       const text = await htmlFor(f)
       assert.ok(text.includes(part), reason); assert.ok(text.includes('生成回数は消費されています'), reason)

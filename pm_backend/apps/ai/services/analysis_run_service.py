@@ -7,7 +7,8 @@
 - 終了時は、元の実行結果(状態・理由・後始末)を確定して保存する。確定できなければ、結果を返さずに、元の結果を含むエラーにする。
   「必ず保存できる」とは保証しない。
 - 後始末が`pending`の間は、完了扱いにしない。待機中の処理が終わったときに、`pending`の行だけを最終状態へ更新する。
-- コード本文・結果の中身・取得した明細行・個人情報・AIの応答本文は保存しない(ハッシュと件数と理由だけ)。
+- コード本文・結果の中身・取得した明細行・利用者の個人情報・AIの応答本文は保存しない。
+- 分析目的と追加の指示は、利用者が入力した原文を履歴として保存する。
 """
 import builtins
 import hashlib
@@ -211,7 +212,7 @@ def start_run(user, plan, bundle, policy, deadlines=None, chunk_rows=CHUNK_ROWS)
     now = datetime.now()
     try:
         return AIAnalysisRun.objects.create(
-            plan_id=plan['id'], user=user, views=proposal['datasets'], **_template_columns(plan), **_refinement_columns(plan),
+            plan_id=plan['id'], purpose=proposal['purpose'], user=user, views=proposal['datasets'], **_template_columns(plan), **_refinement_columns(plan),
             date_from=proposal['date_from'], date_to=proposal['date_to'], conditions=proposal.get('conditions', ''),
             method_approved_at=_parse(plan.get('method_approved_at')), data_approved_at=_parse(plan.get('data_approved_at')),
             approved_counts={d['view']: d['rows'] for d in (plan.get('preview') or {}).get('datasets', [])},
@@ -394,7 +395,7 @@ def record_not_run(user, plan, status, reason, policy):
     now = datetime.now()
     try:
         return AIAnalysisRun.objects.create(
-            plan_id=plan['id'], user=user, views=proposal['datasets'], date_from=proposal['date_from'], date_to=proposal['date_to'],
+            plan_id=plan['id'], purpose=proposal['purpose'], user=user, views=proposal['datasets'], date_from=proposal['date_from'], date_to=proposal['date_to'],
             **_template_columns(plan),
             conditions=proposal.get('conditions', ''), method_approved_at=_parse(plan.get('method_approved_at')),
             data_approved_at=_parse(plan.get('data_approved_at')),
@@ -420,7 +421,7 @@ def visible_runs(user, include_all):
 def serialize_run(run):
     return {
         'id': run.pk, 'plan_id': run.plan_id, 'status': run.status, 'status_label': run.get_status_display(),
-        'reason': run.reason, 'detail': run.detail,
+        'reason': run.reason, 'detail': run.detail, 'purpose': run.purpose,
         'refinement_instruction': run.refinement_instruction, 'refined_from_run_id': run.refined_from_run_id,
         'executed_by': run.user.get_username() if run.user_id else DELETED_USER_LABEL,
         'views': run.views, 'date_from': run.date_from.isoformat(), 'date_to': run.date_to.isoformat(), 'conditions': run.conditions,

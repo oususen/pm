@@ -34,7 +34,7 @@ class RefCodegenBase(ReviewBase):
         self.redis = FakeRedis()
         self.calls = []
         owner = self
-        policy = SimpleNamespace(plan_cache_ttl_minutes=60, max_fetch_rows=100000)
+        policy = SimpleNamespace(plan_cache_ttl_minutes=60, max_fetch_rows=100000, max_execution_seconds=60)
 
         def fake_call(provider, model, messages, temperature):
             owner.calls.append(messages)
@@ -52,6 +52,9 @@ class RefCodegenBase(ReviewBase):
             patcher = patch(target, **kwargs)
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = patch('ai.services.analysis_codegen_service._validate_generated_sql', return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def template(self, **overrides):
         """変数の形のコードを持つ、承認済みのテンプレート(ハッシュは、内容から計算し直す)。"""
