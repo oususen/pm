@@ -97,7 +97,8 @@ class BomItemViewDefinitionTest(SimpleTestCase):
     def test_description_has_required_notes_and_no_hidden_or_fixed_values(self):
         for text in (ANALYSIS_VIEWS[BOM_ITEM]['description'], TABLE_NOTES[BOM_ITEM]):
             for part in (
-                    'BOM明細1行', '明細が1行もないBOM', '実際より少ない', 'bom_valid_from', 'v_auto_', '数字の大小',
+                    'BOM明細1行', '明細が1行もないBOM', '実際より少ない', 'bom_valid_from', '有効開始日',
+                    '版の数字の大小で最新を決めない', '自動で作ったBOM',
                     'BUY', 'SUBCON', '仕入先が必ずある',
                     'MAKE=自社製造', 'lead_time_days', '0の行はありうる', 'duration_min', 'サイクル時間', 'DAY', 'MINUTE',
                     '合計しても業務上の意味はない', '(1+ロス率)', 'v_ai_product', 'v_ai_supplier', 'v_ai_process', 'v_ai_line',
@@ -107,8 +108,15 @@ class BomItemViewDefinitionTest(SimpleTestCase):
             for hidden in ('remark', 'created_at', 'updated_at', 'contact_person', 'phone_number', 'order_email',
                            '3,428', '3428', '1,323', '1323', '1,314', '1314'):
                 self.assertNotIn(hidden, text)
+            self.assertIsNotNone(re.search(r'比率で、?%ではない', text))  # ロス率は比率で、%ではない
             self.assertIsNone(re.search(r'[0-9]{3,}', text))  # 件数などの3桁以上の数字を書かない
-            self.assertNotIn('v_auto_20', text)  # 具体的な版の値は書かない
+            # 件数を表す形(N件・N種類・N行)を書かない。「1行=」など定義の文言の「1行」だけは許す(2以上、または0の行数は不可)
+            self.assertIsNone(re.search(r'[0-9]+(?:件|種類)|(?<![0-9])(?:[02-9]|[0-9]{2,})行', text))
+            # 実データ由来の版の値・種類数は書かない(意味の説明の v_auto_… で始まる版は可)
+            self.assertIn('BUY・SUBCONの明細での工程・ラインの業務上の意味は未確認' if 'BUY・SUBCONの' in text else 'BUY・SUBCON の明細での工程・ラインの業務上の意味は未確認', text)
+            self.assertNotIn('入力ルール', text)  # 未確認は工程・ラインの意味だけ(計画書 §25.4)
+            for version_fact in ('v1', 'v2', '3種類', 'v_auto_20'):
+                self.assertNotIn(version_fact, text)
 
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_bom・m_bom_item の許可と列は、ビューの追加後も変わらない
