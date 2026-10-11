@@ -367,7 +367,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `role` の値（モデルのラベル）: `manager`=事業部長・課長、`chief`=係長、`supervisor`=班長、`leader`=リーダー、`office_staff`=事務員、`staff`=一般。`employment_type` の値（モデルのラベル）: `regular`=正準社員（モデルの表記のまま）、`dispatch`=人材派遣、`intern`=実習生、`skilled`=特定技能実習生、`contract`=嘱託社員、`part`=パート。`level` の値: `division`=事業部・課（BOSS指定。モデルのラベルは「事業部」）、`group`=係、`team`=班、`unit`=グループ。値の業務上の意味はモデルのラベルのみ（権限仕様書にも定義なし）。`is_staff`・`is_system_admin`・`employment_type` の権限との関係は未確認。
 - **役割と組織の階層（コードで確認。BOSS追加指示）**: 役割は所属する組織の階層に対応する。`manager`=事業部・課（`division_id`）、`chief`=係（`group_id`）、`supervisor`=班（`team_id`）、`leader`=グループ（`unit_id`）。管理する部署は、その部署と配下の部署（`accounts_department.parent_id` をたどった子孫）。根拠: `pm_backend/apps/accounts/permission_scope.py`（`collect_managed_department_ids`）、`approval_views.py:66-73`、`role_utils.py`。役割の序列（`role_utils.py` の `ROLE_RANK`）: `staff`・`office_staff`=0 < `leader`=1 < `supervisor`=2 < `chief`=3 < `manager`=4。
 - 追加の担当割当（`supervisor_teams`・`leader_units`）はビューに含まない。`team_id`・`unit_id` は「その人の所属」であり「担当するすべての班・グループ」ではない。管理する部署の集め方は役割ごとに異なる（コード上、リーダーの管理部署は、リーダーが担当するグループの割り当て（ビューに含まれない）から集められ、`unit_id`（所属）とは別。根拠: `permission_scope.py:15-16`、`approval_views.py:66-67`、`role_utils.py`）。
-- `ANALYSIS_COLUMN_TYPES`（21列・6列。int・bigint・tinyint(1)→BIGINT、varchar→VARCHAR、date→DATE）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `auth_user`・`accounts_userprofile`・`accounts_department` の許可は置き換えず、ビューの追加のみ。画面SQLは、チャット（AIホーム）の対象から `v_ai_user` だけを除外する（`sql_queries.py` の `AI_HOME_EXCLUDED_TABLES`。氏名・社員コード・ログインIDを含むため、`ai.chat` の権限だけでは見せない。分析では `ai.analysis` の権限で使える。BOSS承認 案A 2026-10-11）。他の画面・`v_ai_department` は変更なし（チャットの説明文 `TABLE_NOTES['v_ai_department']` にも `v_ai_user` の名前を出さない）。権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー）。手順SQLは計画書 §27.5。
+- `ANALYSIS_COLUMN_TYPES`（21列・6列。int・bigint・tinyint(1)→BIGINT、varchar→VARCHAR、date→DATE）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `auth_user`・`accounts_userprofile`・`accounts_department` の許可は置き換えず、ビューの追加のみ。画面SQLは、チャット（AIホーム）の対象から `v_ai_user` のほか、氏名・社員コードを含む `v_ai_supervisor_team`・`v_ai_leader_unit`（6.5-15）も除外する（`sql_queries.py` の `AI_HOME_EXCLUDED_TABLES`。氏名・社員コード・ログインIDを含むため、`ai.chat` の権限だけでは見せない。分析では `ai.analysis` の権限で使える。BOSS承認 案A 2026-10-11）。他の画面・`v_ai_department` は変更なし（チャットの説明文 `TABLE_NOTES['v_ai_department']` にも `v_ai_user` の名前を出さない）。権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー）。手順SQLは計画書 §27.5。
 - 今後の候補・保留: 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。→ 2026-10-11 に 6.5-15（計画書 §29）で別ビューとして実装した。
 
 ### 6.5-14 グループのライン（`v_ai_unit_line`。2026-10-11 実装。開発DBへ反映済み（`migrate ai 0048`＋手順SQL §28.5）・本番未反映）
@@ -381,7 +381,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_COLUMN_TYPES`（8列。bigint・int・tinyint(1)→BIGINT、varchar→VARCHAR）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブルの許可は置き換えず、ビューの追加のみ。権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §28.5。
 - マイグレーション番号は、別作業の `0047_aianalysisrun_purpose` の後に並べるため `0048`（計画書 §28.4）。
 
-### 6.5-15 班長の担当班・リーダーの担当グループ（`v_ai_supervisor_team`・`v_ai_leader_unit`。2026-10-11 実装。開発DBへ `migrate ai 0049`・`0050`・手順SQL（§29.5）は未実施）
+### 6.5-15 班長の担当班・リーダーの担当グループ（`v_ai_supervisor_team`・`v_ai_leader_unit`。2026-10-11 実装。開発DBへ反映済み（`migrate ai 0049`・`0050`＋手順SQL §29.5）・本番未反映）
 
 | ビュー | 列 | 有効条件 | AI利用 |
 |---|---|---|---|

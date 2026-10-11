@@ -1291,7 +1291,7 @@ GRANT SELECT (`id`, `line_code`, `line_name`) ON `<db>`.`m_line` TO 'pm_ai_view_
 
 **反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0048`（BOSSが適用）・手順SQL（§28.5。GRANT 1文＋CREATE OR REPLACE DEFINER 1文）とも実施済み（2026-10-11）。定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件、`ai_reader` 接続で28件・列名と順序が `ANALYSIS_COLUMN_TYPES` と一致（8列）・結合先欠損0件・ビュー経由では `created_at` は読めない（開発の `pm_ai_reader` は DB 全体の SELECT を持つため、元テーブルは物理的に読める。本番の権限設計は別途確認）。本番未反映**。コミット: 2ae99342。独立検証（evaluator。2026-10-11）: 合格。DBなしの試験270件OK・変異試験で検出、開発DB（読み取り）で28行・欠損0・重複0・全行の型検査エラー0・グループは全て level=unit・多対多が実データでも成立。軽微: 日本語の具体名の混入は機械で検出できない。
 
-## 29. 班長の担当班・リーダーの担当グループのビュー `v_ai_supervisor_team`・`v_ai_leader_unit` の実装記録（2026-10-11。BOSS承認済み。コード実装済み。evaluator未検証。開発DBへの `migrate ai 0049`・`0050`・手順SQL（§29.5）は未実施。本番未反映）
+## 29. 班長の担当班・リーダーの担当グループのビュー `v_ai_supervisor_team`・`v_ai_leader_unit` の実装記録（2026-10-11。BOSS承認済み。コード実装済み。evaluator条件付き合格（指摘は本更新で対応）。開発DBへ反映済み（`migrate ai 0049`・`0050`＋手順SQL §29.5）。本番未反映）
 
 ### 29.1 BOSSの回答（2026-10-11）
 - 「このビューは大事ではない。適当に作って」＝公開列は最小構成（呼び出し元が決定）。その後、「氏名や社員コードを付けてもいい」で、ユーザーの識別情報（ログインID・姓・名・社員コード）を主キーLEFT JOINで追加。さらに「1a」で、この案（A）を再度選んだ。
@@ -1304,10 +1304,10 @@ GRANT SELECT (`id`, `line_code`, `line_name`) ON `<db>`.`m_line` TO 'pm_ai_view_
 | `v_ai_leader_unit`（0050。依存 0049） | `accounts_userprofile_leader_units` m | 上と同じ。ただし `m.department_id AS unit_id`, `d.name AS unit_name` |
 - 結合: `auth_user a ON a.id = m.userprofile_id`、`accounts_userprofile p ON p.user_id = m.userprofile_id`、`accounts_department d ON d.id = m.department_id`（いずれも相手の主キー。行数は中間テーブルと同じ）。`date_field=None`・`quantity_field=None`（label=班長の担当班／リーダーの担当グループ）。
 - 非公開（ビューに含めない）: `auth_user` の `password`・`email` 等、`accounts_userprofile` の `employee_code` 以外の列。中間テーブルに他の列はない。
-- 列型（開発DBの `SHOW COLUMNS` から導出）: 中間テーブル id=bigint・userprofile_id=int・department_id=bigint→BIGINT、`auth_user` の username・first_name・last_name=varchar(150)、`employee_code`=varchar(32)、`name`=varchar→VARCHAR。ビュー作成後の `SHOW COLUMNS` との照合は未実施。
+- 列型（開発DBの `SHOW COLUMNS` から導出）: 中間テーブル id=bigint・userprofile_id=int・department_id=bigint→BIGINT、`auth_user` の username・first_name・last_name=varchar(150)、`employee_code`=varchar(32)、`name`=varchar→VARCHAR。ビュー作成後の列名・順序・型の照合は、開発DBで実施済みで一致した（2026-10-11）。
 - admin アカウントの除外はしない（中間テーブルの行は、担当者が admin でも含みうる。`v_ai_user` は admin を除くため、結合できない行がありうる）。開発DBの読み取りでは、admin の行・auth_user／プロフィール／部署に結べない行はどちらのビューも0件だった（件数そのものは説明文に書かない）。
 
-### 29.3 チャット（AIホーム）への出し方（BOSS確認事項）
+### 29.3 チャット（AIホーム）への出し方（呼び出し元の判断。BOSSは「氏名・社員コードを付けてもよい」と承認。`v_ai_user` をチャットから外す案Aと同じ方針）
 氏名・社員コード・ログインIDを含むため、`AI_HOME_EXCLUDED_TABLES` に2ビューを追加し、チャットのSQLと辞書に出さない（`v_ai_user` と同じ方針。BOSS承認 案A）。分析では `ai.analysis` の権限で使える。「個人情報の権限で絞られないチャットでは、氏名等を持つビューを出さない」判断に合わせた。これは氏名等を付ける案を選んだ場合の必須条件である。
 
 ### 29.4 説明文に書いた事実（コードで確認。推測は書かない）
@@ -1340,7 +1340,7 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 
 ### 29.6 実装記録（2026-10-11。generator。evaluator未検証）
 **変更ファイル**: 新規 `pm_backend/apps/ai/migrations/0049_ai_supervisor_team_view.py`・`0050_ai_leader_unit_view.py`。`services/analysis_data_service.py`（`ANALYSIS_VIEWS` に2ビュー）、`services/analysis_execution_service.py`（`ANALYSIS_COLUMN_TYPES`）、`services/sql_queries.py`（`BASE_SQL_SCHEMA`・`TABLE_NOTES`・`AI_HOME_EXCLUDED_TABLES` に2ビューを追加）、`management/commands/setup_ai_views.py`（`EXISTING_JOIN_VIEWS` に追加、`OTHER_VIEW_COLUMNS` に中間テーブル各3列。コマンドの動作は未変更）。試験: 新規 `test_analysis_supervisor_team_view.py`・`test_analysis_leader_unit_view.py`、`test_setup_ai_views.py` を更新。仕様書: 本節、§27.8、`AI運用規約・AI用DB辞書.md` 6.5-15、`AI分析基盤仕様書.md`（ビュー一覧・列型の対応）。
-**反映状況（2026-10-11）**：コード実装済み。evaluator未検証。開発DBへの `migrate ai 0049`・`0050`、手順SQL（§29.5）は**未実施**。本番未反映。
+**反映状況（2026-10-11）**：コミット済み（315d4849）。**開発DB: `migrate ai 0049`・`0050`（BOSSが適用）・手順SQL（§29.5。GRANT 2文＋CREATE OR REPLACE DEFINER 2文）とも実施済み**。定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件。**evaluator（2026-10-11）: 条件付き合格**（コード・開発DBは合格、条件は仕様書の記述が古いこと→本更新で対応）。DBなしの試験300件OK、変異約55通りを検出（日本語の氏名の混入だけ機械では検出できない）、画面の試験7本OK。開発DB（読み取り）: 班長5行・リーダー9行＝中間テーブルと同じ、全行×8列の型検査エラー0、結合先欠損0、admin の行0、`v_ai_user` に無い user_id 0、team_id は全て level=team・unit_id は全て level=unit、割り当てを持つユーザーの role は班長ビューが全て supervisor・リーダービューが全て leader（参考: role=leader のユーザーの一部は割り当てなし）。チャットSQLで2ビューが拒否されることを実呼び出しで確認。本番未反映。
 
 ### 29.7 検証項目（反映後にevaluatorが読み取りで確認）
 1. 各ビューの行数＝中間テーブルの行数。`SHOW COLUMNS` が `ANALYSIS_COLUMN_TYPES`（8列）と一致する。`password`・`email` が読めない。
