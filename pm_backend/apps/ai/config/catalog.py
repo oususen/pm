@@ -20,6 +20,7 @@ PROVIDER_CATALOG = {
             ('google/gemma-4-26b-a4b-it', 'Gemma 4 26B A4B（OpenRouter・有料/要クレジット）'),
             ('qwen/qwen3-30b-a3b-instruct-2507', 'Qwen3 30B A3B Instruct 2507（OpenRouter・有料/要クレジット。ローカルGPU候補の評価用）'),
             ('qwen/qwen3-14b', 'Qwen3 14B（OpenRouter・有料/要クレジット。ローカルGPU候補の評価用）'),
+            ('deepseek/deepseek-v4.1-flash', 'DeepSeek V4.1 Flash（OpenRouter・有料/要クレジット）'),
         ),
     },
 }

@@ -198,6 +198,13 @@ class ExternalPlanningTest(SimpleTestCase):
         self.assertFalse(blocked['openrouter']['available'])
         self.assertTrue(analysis_llm.REQUEST_TIMEOUT_SECONDS == 90)
 
+    def test_catalog_and_chat_service_share_openrouter_models_including_deepseek_v41_flash(self):
+        from ai.config.catalog import PROVIDER_CATALOG
+        catalog = dict(PROVIDER_CATALOG['openrouter']['models'])
+        self.assertEqual(catalog, dict(chat_service.OPENROUTER_MODELS))
+        self.assertEqual(catalog['deepseek/deepseek-v4.1-flash'], 'DeepSeek V4.1 Flash（OpenRouter・有料/要クレジット）')
+        self.assertIn('qwen/qwen3-14b', catalog)  # 既存モデルの回帰なし
+
     def test_preview_never_calls_ai_or_saves_a_plan(self):
         with patch('ai.services.analysis_llm.urlopen') as urlopen:
             preview = planning.external_send_preview(3, {**PAYLOAD, 'provider': 'deepseek'})

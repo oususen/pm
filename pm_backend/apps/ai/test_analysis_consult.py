@@ -459,6 +459,14 @@ class ConsultRealExternalSelectionTests(ConsultBase):
         self.assertEqual(self.external_calls, [('openrouter', 'google/gemma-4-26b-a4b-it')])
         self.assertEqual(self.chat_calls, [])
 
+    def test_deepseek_v41_flash_on_openrouter_can_be_selected(self):
+        self.allowed()
+        self.assertEqual(self.ask_real(model='deepseek/deepseek-v4.1-flash').status_code, 200)
+        self.assertEqual(self.external_calls, [('openrouter', 'deepseek/deepseek-v4.1-flash')])
+        # DeepSeek自身のAPIのモデルとは別物であり、OpenRouterの一覧に混ざらない
+        self.assertNotIn('deepseek-flash', chat_service.OPENROUTER_MODELS)
+        self.assertEqual(self.ask_real(model='deepseek/deepseek-v4.1-flashx').status_code, 400)
+
     def test_each_missing_setting_stops_the_send_without_falling_back(self):
         from ai.config.models import AIProviderConfig
         self.allowed(transfer=False)

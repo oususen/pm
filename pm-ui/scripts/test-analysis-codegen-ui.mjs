@@ -942,6 +942,9 @@ test('有料モデルの料金確認の文に、選んだモデルの名前を�
     assert.ok(qwen.includes('Qwen3 30B A3B Instruct 2507')); assert.equal(qwen.includes('Gemma'), false)
     f.state.model.value = 'google/gemma-4-26b-a4b-it'
     assert.ok(f.state.paidKey().message.includes('Gemma 4 26B A4B'))
+    f.state.model.value = 'deepseek/deepseek-v4.1-flash'
+    const flash = f.state.paidKey()
+    assert.ok(flash.message.includes('DeepSeek V4.1 Flash') && flash.message.includes('有料です')); assert.equal(flash.key, 'deepseek/deepseek-v4.1-flash')
     f.state.model.value = 'qwen/qwen3.8-27b:free'
     assert.equal(f.state.paidKey(), null, '無料のモデルは、確認しない')
   } finally { f.stop() }
