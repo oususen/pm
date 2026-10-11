@@ -105,6 +105,9 @@ BASE_SQL_SCHEMA = {
     'v_ai_department': ('id', 'name', 'level', 'display_id', 'parent_id', 'parent_name'),
     # グループとラインの紐付のビュー(AI用ビュー作成計画 §28。accounts_unit_line_mapping に accounts_department・m_line を主キーで LEFT JOIN。WHEREなし)
     'v_ai_unit_line': ('id', 'unit_id', 'unit_name', 'line_id', 'line_code', 'line_name', 'sort_order', 'is_default'),
+    # 班長の担当班・リーダーの担当グループのビュー(AI用ビュー作成計画 §29。中間テーブルに auth_user・accounts_userprofile・accounts_department を主キーで LEFT JOIN。WHEREなし)
+    'v_ai_supervisor_team': ('id', 'user_id', 'login_id', 'last_name', 'first_name', 'employee_code', 'team_id', 'team_name'),
+    'v_ai_leader_unit': ('id', 'user_id', 'login_id', 'last_name', 'first_name', 'employee_code', 'unit_id', 'unit_name'),
 }
 
 # LLMへ列と一緒に渡すテーブルの業務上の意味。実データで確認した定義だけを書く。
@@ -261,6 +264,27 @@ TABLE_NOTES = {
         '同じグループ・同じラインの組は一意(unique_together)。同じラインを複数のグループが紐付けることがあり、1つのグループに複数のラインを紐付けることもできる(多対多の紐付)。'
         'is_default の運用や、画面でのラインの絞り込みなど、業務上の意味は未確認(項目名とモデルのラベルのみ)。'
     ),
+    'v_ai_supervisor_team': (
+        '班長の担当班(accounts_userprofile_supervisor_teams。モデルのラベル「班長担当班」)に、ユーザーの識別情報と班名を付けたビュー。'
+        '1行=「班長(role=supervisor)が追加で担当する班」の割り当て1つ(全行。日付の列はなく、期間では絞らない)。'
+        '1ユーザーが複数の行を持ちうる(多対多)。'
+        'user_id はユーザーの ID(v_ai_user の id と結べる)。login_id・last_name・first_name・employee_code はユーザー(v_ai_user と同じ値)のログインID・姓・名・社員コード。'
+        'v_ai_user は admin アカウントを除くため、結合できない行がありうる(このビューは admin の行も含みうる)。'
+        'team_id は担当する班(部署の階層 team)の ID で v_ai_department の id と結べる(team_name は班名)。'
+        'このビューの team_id は、v_ai_user の team_id(その人の所属の班)とは別で、追加の担当の割り当て。'
+        'コード上、班長の管理部署は、所属の班(team_id)とこの担当班を合わせて、その配下を含めて集められる(コード: accounts の permission_scope の collect_managed_department_ids)。'
+        '追加担当の業務上の意味、承認ルートとの関係など、業務上の運用は未確認。'
+    ),
+    'v_ai_leader_unit': (
+        'リーダーの担当グループ(accounts_userprofile_leader_units。モデルのラベル「リーダー担当グループ」)に、ユーザーの識別情報とグループ名を付けたビュー。'
+        '1行=「リーダー(role=leader)が担当するグループ」の割り当て1つ(全行。日付の列はなく、期間では絞らない)。'
+        '1ユーザーが複数の行を持ちうる(多対多)。'
+        'user_id はユーザーの ID(v_ai_user の id と結べる)。login_id・last_name・first_name・employee_code はユーザー(v_ai_user と同じ値)のログインID・姓・名・社員コード。'
+        'v_ai_user は admin アカウントを除くため、結合できない行がありうる(このビューは admin の行も含みうる)。'
+        'unit_id は担当するグループ(部署の階層 unit)の ID で v_ai_department の id と結べる(unit_name はグループ名)。'
+        'コード上、リーダーの管理部署は、この担当グループ(v_ai_user の unit_id ではない)から集められる(コード: accounts の permission_scope)。'
+        '業務上の運用は未確認。'
+    ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
         '生産数は operator_action が END(終了) と PAUSE(中断) の qty 合計(作業区間ごとの加工数で重複しない)。'
@@ -292,7 +316,8 @@ PERSONAL_SQL_COLUMNS = {
 
 # AIホームのチャットSQLに見せないビュー。氏名・社員コード・ログインIDを持つため、個人情報の権限で絞られないチャットでは使わせない
 # (分析画面では ai.analysis の権限で使える。BOSS承認 2026-10-11 案A)。
-AI_HOME_EXCLUDED_TABLES = frozenset({'v_ai_user'})
+# v_ai_supervisor_team・v_ai_leader_unit も氏名・社員コード・ログインIDを持つため同様に除外する(AI用ビュー作成計画 §29。BOSS承認 2026-10-11)。
+AI_HOME_EXCLUDED_TABLES = frozenset({'v_ai_user', 'v_ai_supervisor_team', 'v_ai_leader_unit'})
 
 SCREEN_SQL_TABLES = {
     'ai_home': frozenset((set(BASE_SQL_SCHEMA) - AI_HOME_EXCLUDED_TABLES) | set(PERSONAL_SQL_COLUMNS)),

@@ -1234,6 +1234,7 @@ GRANT SELECT ON `<db>`.`v_ai_department` TO 'pm_ai_reader'@'<readerのホスト�
 
 ### 27.8 今後の候補・保留
 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。
+**更新（2026-10-11）**: 上の保留は、§29 で実装した（別ビュー `v_ai_supervisor_team`・`v_ai_leader_unit`。公開列はBOSS承認）。
 
 ## 28. グループとラインの紐付のビュー `v_ai_unit_line` の実装記録（2026-10-11。BOSS承認済み。実装済み。evaluator合格（2026-10-11）。開発DBへ反映済み（`migrate ai 0048`＋手順SQL）。本番未反映）
 
@@ -1289,3 +1290,61 @@ GRANT SELECT (`id`, `line_code`, `line_name`) ON `<db>`.`m_line` TO 'pm_ai_view_
 5. 説明文に件数・グループ名・ライン名が入っていないこと。
 
 **反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0048`（BOSSが適用）・手順SQL（§28.5。GRANT 1文＋CREATE OR REPLACE DEFINER 1文）とも実施済み（2026-10-11）。定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件、`ai_reader` 接続で28件・列名と順序が `ANALYSIS_COLUMN_TYPES` と一致（8列）・結合先欠損0件・ビュー経由では `created_at` は読めない（開発の `pm_ai_reader` は DB 全体の SELECT を持つため、元テーブルは物理的に読める。本番の権限設計は別途確認）。本番未反映**。コミット: 2ae99342。独立検証（evaluator。2026-10-11）: 合格。DBなしの試験270件OK・変異試験で検出、開発DB（読み取り）で28行・欠損0・重複0・全行の型検査エラー0・グループは全て level=unit・多対多が実データでも成立。軽微: 日本語の具体名の混入は機械で検出できない。
+
+## 29. 班長の担当班・リーダーの担当グループのビュー `v_ai_supervisor_team`・`v_ai_leader_unit` の実装記録（2026-10-11。BOSS承認済み。コード実装済み。evaluator未検証。開発DBへの `migrate ai 0049`・`0050`・手順SQL（§29.5）は未実施。本番未反映）
+
+### 29.1 BOSSの回答（2026-10-11）
+- 「このビューは大事ではない。適当に作って」＝公開列は最小構成（呼び出し元が決定）。その後、「氏名や社員コードを付けてもいい」で、ユーザーの識別情報（ログインID・姓・名・社員コード）を主キーLEFT JOINで追加。さらに「1a」で、この案（A）を再度選んだ。
+- 説明は確認できた範囲のみ書く（未確認は「未確認」）。実データの件数・値・氏名・部署名は書かない。
+
+### 29.2 列（各8列。中間テーブルを主とし、すべて主キーのLEFT JOIN。WHEREなし）
+| ビュー（マイグレーション） | 元テーブル | 列（この順） |
+|---|---|---|
+| `v_ai_supervisor_team`（0049。依存 `ai 0048`） | `accounts_userprofile_supervisor_teams` m | `m.id`, `m.userprofile_id AS user_id`, `a.username AS login_id`, `a.last_name`, `a.first_name`, `p.employee_code`, `m.department_id AS team_id`, `d.name AS team_name` |
+| `v_ai_leader_unit`（0050。依存 0049） | `accounts_userprofile_leader_units` m | 上と同じ。ただし `m.department_id AS unit_id`, `d.name AS unit_name` |
+- 結合: `auth_user a ON a.id = m.userprofile_id`、`accounts_userprofile p ON p.user_id = m.userprofile_id`、`accounts_department d ON d.id = m.department_id`（いずれも相手の主キー。行数は中間テーブルと同じ）。`date_field=None`・`quantity_field=None`（label=班長の担当班／リーダーの担当グループ）。
+- 非公開（ビューに含めない）: `auth_user` の `password`・`email` 等、`accounts_userprofile` の `employee_code` 以外の列。中間テーブルに他の列はない。
+- 列型（開発DBの `SHOW COLUMNS` から導出）: 中間テーブル id=bigint・userprofile_id=int・department_id=bigint→BIGINT、`auth_user` の username・first_name・last_name=varchar(150)、`employee_code`=varchar(32)、`name`=varchar→VARCHAR。ビュー作成後の `SHOW COLUMNS` との照合は未実施。
+- admin アカウントの除外はしない（中間テーブルの行は、担当者が admin でも含みうる。`v_ai_user` は admin を除くため、結合できない行がありうる）。開発DBの読み取りでは、admin の行・auth_user／プロフィール／部署に結べない行はどちらのビューも0件だった（件数そのものは説明文に書かない）。
+
+### 29.3 チャット（AIホーム）への出し方（BOSS確認事項）
+氏名・社員コード・ログインIDを含むため、`AI_HOME_EXCLUDED_TABLES` に2ビューを追加し、チャットのSQLと辞書に出さない（`v_ai_user` と同じ方針。BOSS承認 案A）。分析では `ai.analysis` の権限で使える。「個人情報の権限で絞られないチャットでは、氏名等を持つビューを出さない」判断に合わせた。これは氏名等を付ける案を選んだ場合の必須条件である。
+
+### 29.4 説明文に書いた事実（コードで確認。推測は書かない）
+- `v_ai_supervisor_team`: 1行＝「班長（role=supervisor）が追加で担当する班」の割り当て1つ（モデルのラベル「班長担当班」。`UserProfile.supervisor_teams`・`limit_choices_to` level=team）。`team_id` は `v_ai_user.team_id`（所属）とは別。コード上、班長の管理部署は所属の班と担当班を合わせて配下を含めて集められる（`accounts/permission_scope.py` の `collect_managed_department_ids`）。
+- `v_ai_leader_unit`: 1行＝「リーダー（role=leader）が担当するグループ」の割り当て1つ（モデルのラベル「リーダー担当グループ」。`UserProfile.leader_units`・level=unit）。コード上、リーダーの管理部署は担当グループ（`unit_id`）から集められる（所属の `v_ai_user.unit_id` ではない）。
+- 両ビュー: `user_id` は `v_ai_user.id`、`team_id`／`unit_id` は `v_ai_department.id` と結べる。`login_id`・氏名・社員コードは `v_ai_user` と同じ値。1ユーザーが複数の行を持ちうる（多対多）。
+- **未確認**: 業務上の運用（追加担当の意味、承認ルートとの関係）。
+
+### 29.5 手順SQL（`pm_ai_view_owner` への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>` は接続先のDB名。管理者で実行。`migrate ai 0049`・`0050` の後）
+```sql
+GRANT SELECT (`id`, `userprofile_id`, `department_id`) ON `<db>`.`accounts_userprofile_supervisor_teams` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`id`, `userprofile_id`, `department_id`) ON `<db>`.`accounts_userprofile_leader_units` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_supervisor_team` AS
+SELECT m.`id`, m.`userprofile_id` AS `user_id`, a.`username` AS `login_id`, a.`last_name`, a.`first_name`, p.`employee_code`, m.`department_id` AS `team_id`, d.`name` AS `team_name`
+FROM `<db>`.`accounts_userprofile_supervisor_teams` m
+LEFT JOIN `<db>`.`auth_user` a ON a.`id` = m.`userprofile_id`
+LEFT JOIN `<db>`.`accounts_userprofile` p ON p.`user_id` = m.`userprofile_id`
+LEFT JOIN `<db>`.`accounts_department` d ON d.`id` = m.`department_id`;
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_leader_unit` AS
+SELECT m.`id`, m.`userprofile_id` AS `user_id`, a.`username` AS `login_id`, a.`last_name`, a.`first_name`, p.`employee_code`, m.`department_id` AS `unit_id`, d.`name` AS `unit_name`
+FROM `<db>`.`accounts_userprofile_leader_units` m
+LEFT JOIN `<db>`.`auth_user` a ON a.`id` = m.`userprofile_id`
+LEFT JOIN `<db>`.`accounts_userprofile` p ON p.`user_id` = m.`userprofile_id`
+LEFT JOIN `<db>`.`accounts_department` d ON d.`id` = m.`department_id`;
+GRANT SELECT ON `<db>`.`v_ai_supervisor_team` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 同上
+```
+- `auth_user`（`id`・`username`・`first_name`・`last_name`）、`accounts_userprofile`（`user_id`・`employee_code`）、`accounts_department`（`id`・`name`）は、§27.5 の GRANT（`v_ai_user`・`v_ai_department` 用）に含まれるため、追加は不要。念のため実行前に `SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';` で、これらの列権限があることを確認する。
+- 手順SQLのビュー定義は、マイグレーション0049・0050のSELECT（標準SQL）と、列・結合・別名・WHEREが同じであること。
+
+### 29.6 実装記録（2026-10-11。generator。evaluator未検証）
+**変更ファイル**: 新規 `pm_backend/apps/ai/migrations/0049_ai_supervisor_team_view.py`・`0050_ai_leader_unit_view.py`。`services/analysis_data_service.py`（`ANALYSIS_VIEWS` に2ビュー）、`services/analysis_execution_service.py`（`ANALYSIS_COLUMN_TYPES`）、`services/sql_queries.py`（`BASE_SQL_SCHEMA`・`TABLE_NOTES`・`AI_HOME_EXCLUDED_TABLES` に2ビューを追加）、`management/commands/setup_ai_views.py`（`EXISTING_JOIN_VIEWS` に追加、`OTHER_VIEW_COLUMNS` に中間テーブル各3列。コマンドの動作は未変更）。試験: 新規 `test_analysis_supervisor_team_view.py`・`test_analysis_leader_unit_view.py`、`test_setup_ai_views.py` を更新。仕様書: 本節、§27.8、`AI運用規約・AI用DB辞書.md` 6.5-15、`AI分析基盤仕様書.md`（ビュー一覧・列型の対応）。
+**反映状況（2026-10-11）**：コード実装済み。evaluator未検証。開発DBへの `migrate ai 0049`・`0050`、手順SQL（§29.5）は**未実施**。本番未反映。
+
+### 29.7 検証項目（反映後にevaluatorが読み取りで確認）
+1. 各ビューの行数＝中間テーブルの行数。`SHOW COLUMNS` が `ANALYSIS_COLUMN_TYPES`（8列）と一致する。`password`・`email` が読めない。
+2. 定義者が `pm_ai_view_owner@localhost`・DEFINER（`setup_ai_views --check` の要対応が0件）。
+3. マイグレーションのSELECTと §29.5 の手順SQLが、列・結合・別名・WHEREで同じ。
+4. チャット（AIホーム）のSQLと辞書に2ビューが出ないこと、分析（`ANALYSIS_VIEWS`）では使えること。
+5. 説明文に件数・氏名・部署名・社員コードが入っていないこと。

@@ -147,6 +147,17 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'unit_id': 'BIGINT', 'unit_name': 'VARCHAR', 'line_id': 'BIGINT', 'line_code': 'VARCHAR',
         'line_name': 'VARCHAR', 'sort_order': 'BIGINT', 'is_default': 'BIGINT',
     },
+    # 班長の担当班(accounts_userprofile_supervisor_teams・auth_user・accounts_userprofile・accounts_departmentのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_supervisor_teamと照合する)
+    # int・bigintはBIGINT、varcharはVARCHAR
+    'v_ai_supervisor_team': {
+        'id': 'BIGINT', 'user_id': 'BIGINT', 'login_id': 'VARCHAR', 'last_name': 'VARCHAR', 'first_name': 'VARCHAR',
+        'employee_code': 'VARCHAR', 'team_id': 'BIGINT', 'team_name': 'VARCHAR',
+    },
+    # リーダーの担当グループ(accounts_userprofile_leader_units・auth_user・accounts_userprofile・accounts_departmentのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_leader_unitと照合する)
+    'v_ai_leader_unit': {
+        'id': 'BIGINT', 'user_id': 'BIGINT', 'login_id': 'VARCHAR', 'last_name': 'VARCHAR', 'first_name': 'VARCHAR',
+        'employee_code': 'VARCHAR', 'unit_id': 'BIGINT', 'unit_name': 'VARCHAR',
+    },
 }
 
 

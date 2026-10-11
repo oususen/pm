@@ -26,11 +26,12 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_customer': 'm_customer',
 }
 
-# 結合を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046・0048)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
+# 結合を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046・0048〜0050)にあるビュー。再作成しない。--check で定義者などを表示するだけ。
 EXISTING_JOIN_VIEWS = (
     'v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day', 'v_ai_bom_item',
     'v_ai_routing_step', 'v_ai_routing_step_material',
     'v_ai_user', 'v_ai_department', 'v_ai_unit_line',
+    'v_ai_supervisor_team', 'v_ai_leader_unit',
 )
 
 # 単純なマスタビュー以外のビューが、同じ元テーブルから使う列。owner のこの列権限は REVOKE しない。
@@ -79,6 +80,11 @@ OTHER_VIEW_COLUMNS = {
     # accounts_unit_line_mapping の5列(created_at・updated_at 以外)を使う。部署の name、m_line の line_code・line_name は、
     # 既存のビュー(v_ai_department・v_ai_line)が同じ列を使う。
     'accounts_unit_line_mapping': {'id', 'unit_id', 'line_id', 'sort_order', 'is_default'},
+    # v_ai_supervisor_team・v_ai_leader_unit(中間テーブルに auth_user・accounts_userprofile・accounts_department を LEFT JOIN。マイグレーション0049・0050)が、
+    # 中間テーブルの3列を使う。auth_user の id・username・first_name・last_name、accounts_userprofile の user_id・employee_code、
+    # 部署の id・name は、v_ai_user・v_ai_department が同じ列を使う(上で公開済み)。
+    'accounts_userprofile_supervisor_teams': {'id', 'userprofile_id', 'department_id'},
+    'accounts_userprofile_leader_units': {'id', 'userprofile_id', 'department_id'},
 }
 
 READER_USER = 'pm_ai_reader'

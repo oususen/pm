@@ -242,6 +242,35 @@ ANALYSIS_VIEWS = {
             'is_defaultの運用や、画面でのラインの絞り込みなど、業務上の意味は未確認(項目名とモデルのラベルのみ)。'
         ),
     },
+    # 班長の担当班。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §29)。
+    'v_ai_supervisor_team': {
+        'label': '班長の担当班', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は「班長(role=supervisor)が追加で担当する班」の割り当て1つ(モデルのラベル「班長担当班」。ユーザーの識別情報と班名を付けたビュー)。'
+            '日付の列がなく、期間では絞らず全行が対象。1ユーザーが複数の行を持ちうる(多対多)。'
+            '列の意味: id=割り当てのID、user_id=ユーザーのID(ユーザービューv_ai_userのidと結べる)、'
+            'login_id・last_name・first_name・employee_code=そのユーザーのログインID・姓・名・社員コード(v_ai_userと同じ値)、'
+            'team_id=担当する班(部署の階層team)のID(部署ビューv_ai_departmentのidと結べる。team_name=班名)。'
+            'v_ai_userはadminアカウントを除くため、v_ai_userと結べない行がありうる(このビューはadminの行も含みうる)。'
+            'このビューのteam_idは、v_ai_userのteam_id(その人の所属の班)とは別で、追加の担当の割り当て。'
+            'コード上、班長の管理部署は、所属の班(team_id)とこの担当班を合わせて、その配下を含めて集められる(コード: accountsのpermission_scopeのcollect_managed_department_ids)。'
+            '追加担当の業務上の意味、承認ルートとの関係など、業務上の運用は未確認。'
+        ),
+    },
+    # リーダーの担当グループ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §29)。
+    'v_ai_leader_unit': {
+        'label': 'リーダーの担当グループ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は「リーダー(role=leader)が担当するグループ」の割り当て1つ(モデルのラベル「リーダー担当グループ」。ユーザーの識別情報とグループ名を付けたビュー)。'
+            '日付の列がなく、期間では絞らず全行が対象。1ユーザーが複数の行を持ちうる(多対多)。'
+            '列の意味: id=割り当てのID、user_id=ユーザーのID(ユーザービューv_ai_userのidと結べる)、'
+            'login_id・last_name・first_name・employee_code=そのユーザーのログインID・姓・名・社員コード(v_ai_userと同じ値)、'
+            'unit_id=担当するグループ(部署の階層unit)のID(部署ビューv_ai_departmentのidと結べる。unit_name=グループ名)。'
+            'v_ai_userはadminアカウントを除くため、v_ai_userと結べない行がありうる(このビューはadminの行も含みうる)。'
+            'コード上、リーダーの管理部署は、この担当グループ(v_ai_userのunit_idではない)から集められる(コード: accountsのpermission_scope)。'
+            '業務上の運用は未確認。'
+        ),
+    },
 }
 
 

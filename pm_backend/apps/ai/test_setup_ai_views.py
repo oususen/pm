@@ -319,7 +319,7 @@ class SetupAiViewsTests(SimpleTestCase):
 
     def test_user_and_department_views_are_join_views_checked_but_not_recreated(self):
         # v_ai_user・v_ai_department は結合ビュー: 再作成・GRANT・REVOKEの対象にせず、--check で定義者を表示する(案A)
-        for view in ('v_ai_user', 'v_ai_department', 'v_ai_unit_line'):
+        for view in ('v_ai_user', 'v_ai_department', 'v_ai_unit_line', 'v_ai_supervisor_team', 'v_ai_leader_unit'):
             self.assertIn(view, cmd.EXISTING_JOIN_VIEWS)
             self.assertNotIn(view, cmd.SIMPLE_MASTER_VIEWS)
             privileges, views = initial_state()
@@ -351,6 +351,9 @@ class SetupAiViewsTests(SimpleTestCase):
             self.assertNotIn(column, cmd.wanted_columns('accounts_unit_line_mapping'))
         self.assertIn('name', cmd.wanted_columns('accounts_department'))
         self.assertTrue({'line_code', 'line_name'} <= cmd.wanted_columns('m_line'))
+        # v_ai_supervisor_team・v_ai_leader_unit の中間テーブル(各3列)。auth_user・プロフィールの追加の列は不要(v_ai_user が公開済み)
+        for table in ('accounts_userprofile_supervisor_teams', 'accounts_userprofile_leader_units'):
+            self.assertEqual(cmd.wanted_columns(table), {'id', 'userprofile_id', 'department_id'})
 
     def test_other_view_columns_are_not_revoked(self):
         # v_ai_product から product_code を外しても、v_ai_shipment が使うため REVOKE しない
