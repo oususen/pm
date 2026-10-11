@@ -1235,7 +1235,7 @@ GRANT SELECT ON `<db>`.`v_ai_department` TO 'pm_ai_reader'@'<readerのホスト�
 ### 27.8 今後の候補・保留
 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。
 
-## 28. グループとラインの紐付のビュー `v_ai_unit_line` の実装記録（2026-10-11。BOSS承認済み。実装済み・evaluator未検証。開発DBへの `migrate ai 0048`・手順SQLは未実施。本番未反映）
+## 28. グループとラインの紐付のビュー `v_ai_unit_line` の実装記録（2026-10-11。BOSS承認済み。実装済み。evaluator合格（2026-10-11）。開発DBへ反映済み（`migrate ai 0048`＋手順SQL）。本番未反映）
 
 ### 28.1 BOSSの回答（2026-10-11）
 - 判断ページ（decisions）に `accounts_unit_line_mapping` の記載がなかったため、提案した公開列5列（`id`・`unit_id`・`line_id`・`sort_order`・`is_default`）を承認。
@@ -1247,7 +1247,7 @@ GRANT SELECT ON `<db>`.`v_ai_department` TO 'pm_ai_reader'@'<readerのホスト�
 `id`, `unit_id`, `unit_name`（`accounts_department.name`）, `line_id`, `line_code`, `line_name`（`m_line`）, `sort_order`, `is_default`。
 - 結合: `accounts_department u ON u.id = m.unit_id`、`m_line l ON l.id = m.line_id`（いずれも相手の主キー。行数は `accounts_unit_line_mapping` と同じ）。WHEREなし（全行）。`date_field=None`・`quantity_field=None`（label=グループのライン）。
 - 非公開（ビューに含めない）: `created_at`・`updated_at`。
-- 列型（開発DBの `SHOW COLUMNS` から導出）: bigint→BIGINT（`id`・`unit_id`・`line_id`）、varchar→VARCHAR（`unit_name`・`line_code`・`line_name`）、int→BIGINT（`sort_order`）、tinyint(1)→BIGINT（`is_default`）。ビュー作成後の `SHOW COLUMNS` との照合は未実施。
+- 列型（開発DBの `SHOW COLUMNS` から導出）: bigint→BIGINT（`id`・`unit_id`・`line_id`）、varchar→VARCHAR（`unit_name`・`line_code`・`line_name`）、int→BIGINT（`sort_order`）、tinyint(1)→BIGINT（`is_default`）。ビュー作成後の `SHOW COLUMNS` との照合は、開発DBで実施済みで一致した（2026-10-11）。
 - 依存: `ai 0047_aianalysisrun_purpose`（下の「マイグレーション番号」を参照）。
 
 ### 28.3 説明文に書いた事実（コードで確認。推測は書かない）
@@ -1288,4 +1288,4 @@ GRANT SELECT (`id`, `line_code`, `line_name`) ON `<db>`.`m_line` TO 'pm_ai_view_
 4. チャット（AIホーム）のSQLと辞書にこのビューが出ること、`TABLE_NOTES` に `v_ai_user` の名前が出ないこと。
 5. 説明文に件数・グループ名・ライン名が入っていないこと。
 
-**反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0048`・手順SQL（§28.5）とも未実施。本番未反映**。コミット: 未（BOSSの指示待ち）。
+**反映状況（2026-10-11）**：BOSS承認済み。コード実装済み（generator）。evaluator未検証。**開発DB: `migrate ai 0048`（BOSSが適用）・手順SQL（§28.5。GRANT 1文＋CREATE OR REPLACE DEFINER 1文）とも実施済み（2026-10-11）。定義者 `pm_ai_view_owner@localhost`・DEFINER、`setup_ai_views --check` 要対応0件、`ai_reader` 接続で28件・列名と順序が `ANALYSIS_COLUMN_TYPES` と一致（8列）・結合先欠損0件・ビュー経由では `created_at` は読めない（開発の `pm_ai_reader` は DB 全体の SELECT を持つため、元テーブルは物理的に読める。本番の権限設計は別途確認）。本番未反映**。コミット: 2ae99342。独立検証（evaluator。2026-10-11）: 合格。DBなしの試験270件OK・変異試験で検出、開発DB（読み取り）で28行・欠損0・重複0・全行の型検査エラー0・グループは全て level=unit・多対多が実データでも成立。軽微: 日本語の具体名の混入は機械で検出できない。

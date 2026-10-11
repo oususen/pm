@@ -370,7 +370,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_COLUMN_TYPES`（21列・6列。int・bigint・tinyint(1)→BIGINT、varchar→VARCHAR、date→DATE）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `auth_user`・`accounts_userprofile`・`accounts_department` の許可は置き換えず、ビューの追加のみ。画面SQLは、チャット（AIホーム）の対象から `v_ai_user` だけを除外する（`sql_queries.py` の `AI_HOME_EXCLUDED_TABLES`。氏名・社員コード・ログインIDを含むため、`ai.chat` の権限だけでは見せない。分析では `ai.analysis` の権限で使える。BOSS承認 案A 2026-10-11）。他の画面・`v_ai_department` は変更なし（チャットの説明文 `TABLE_NOTES['v_ai_department']` にも `v_ai_user` の名前を出さない）。権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー）。手順SQLは計画書 §27.5。
 - 今後の候補・保留: 班長（supervisor）が複数の班を担当する割り当て（accounts_userprofile_supervisor_teams。モデル UserProfile.supervisor_teams）と、リーダー（leader）が複数のグループを担当する割り当て（accounts_userprofile_leader_units。UserProfile.leader_units）は、今回の v_ai_user には含めない。担当の割り当てもビューにしたい場合は、別のビューとして作る。その場合、判断ページ（decisions）で、これらのテーブルの公開列をBOSSが決める（未決定のため、現在は非公開として扱う）。
 
-### 6.5-14 グループのライン（`v_ai_unit_line`。2026-10-11 実装。開発DB・本番とも未反映（`migrate ai 0048`＋手順SQL §28.5 は未実施））
+### 6.5-14 グループのライン（`v_ai_unit_line`。2026-10-11 実装。開発DBへ反映済み（`migrate ai 0048`＋手順SQL §28.5）・本番未反映）
 
 | ビュー | 列 | 有効条件 | AI利用 |
 |---|---|---|---|
