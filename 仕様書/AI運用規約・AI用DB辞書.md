@@ -331,6 +331,16 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 未決定: `m_calendar` の他の列（`is_line_assignable`・`is_supplier_assignable`・`description`・`created_by`・`updated_by`・`created_at`・`updated_at`）は、公開するかBOSS判断が未決定のため非公開。カレンダマスタ単独のビュー `v_ai_calendar` は後回し。
 - 権限の付与・定義者の付け替えは、`setup_ai_views` では行わない（結合ビューは `v_ai_shipment` と同様に再作成しない。`--check` で定義者を表示するだけ）。手順SQLは計画書 §24。開発DBでは実施済み（2026-10-10。BOSS承認。定義者 `pm_ai_view_owner@localhost` を確認）。本番は未実施（BOSSが実行）。
 
+### 6.5-11 BOM明細（`v_ai_bom_item`。2026-10-10 実装。開発DBへ反映済み（`migrate ai 0041`＋手順SQLの手動実行）。本番は未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_bom_item`（`ai/0041`で作成） | 29列: 明細 `id`・`bom_id`、ヘッダ由来 `parent_product_id`・`parent_product_code`・`parent_product_name`・`bom_version`・`bom_valid_from`・`bom_valid_to`・`bom_is_active`・`bom_is_coproduct`、`child_product_id`・`child_product_code`・`child_product_name`、`quantity`・`loss_rate`・`sourcing_type`、`supplier_id`・`supplier_code`・`supplier_name`、`process_id`・`process_code`・`process_name`、`line_id`・`line_code`・`line_name`、`time_unit`・`lead_time_days`・`duration_min`・`is_coproduct_driver` | `m_bom_item` 全行（WHEREなし）を主とし、`m_bom`・`m_product`（親・子）・`m_process`・`m_line`・`m_supplier` を主キーで `LEFT JOIN`（マスタ属性の付与のみ。行数は変わらない）。日付列を持たないため期間では絞らない（`date_field=None`） | 読み取り専用SQLで、親品番ごとの構成（子品番・員数・ロス率・調達区分・工程・ライン・仕入先）の確認。非公開（ビューに含めない）: `m_bom_item` の `remark`、`created_at`・`updated_at`（判断が未決定のため非公開）、`m_bom` の公開7列以外 |
+
+- 個人情報の列は含まない。説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES`）には、実データの件数・傾向を書かない。業務上の意味が確認できない範囲（調達区分の BUY・SUBCON と工程・ラインの関係など）は「未確認」と明記。
+- `ANALYSIS_COLUMN_TYPES`（29列。`DECIMAL(18,3)` は `quantity`・`loss_rate`、`sourcing_type` は VARCHAR、真偽値は BIGINT）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `m_bom`・`m_bom_item` の許可・画面SQLは置き換えず、ビューの追加のみ。
+- 権限の付与・定義者の付け替えは `setup_ai_views` では行わない（結合ビュー。`--check` で定義者を表示するだけ）。手順SQLは計画書 §25.6。開発DBでは実施済み（2026-10-11。定義者 `pm_ai_view_owner@localhost` を確認）。本番は未実施（BOSSが実行）。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |
