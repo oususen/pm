@@ -154,7 +154,7 @@ TABLE_NOTES = {
         '明細が1行もないBOMはこのビューに出ないので、このビューでBOMの件数(bom_idの種類数)を数えると、実際より少ない。'
         'bom_id はBOMヘッダのID。parent_product_id は親品番のID、child_product_id は子品番のIDで、どちらも品番マスタビュー v_ai_product の id と結べる'
         '(コードと名称は parent_product_code・parent_product_name、child_product_code・child_product_name)。'
-        'bom_version は版(v1・v2・v_auto_… の3種類。v_auto_… は自動で作ったBOM)。数字の大小で最新を決めない。最新のBOMは、版ではなく有効開始日 bom_valid_from で決める。'
+        'bom_version は版。版の数字の大小で最新を決めない。v_auto_… で始まる版は自動で作ったBOM。最新のBOMは、版ではなく有効開始日 bom_valid_from で決める。'
         'bom_valid_to は有効終了日(空は期限なし)、bom_is_active は有効(1)か無効(0)か。'
         'bom_is_coproduct は連産品BOM(1つの工程で複数の製品が同時に生産されるBOM。親品番は仮想セット品番)で、1か0。'
         'is_coproduct_driver は連産品代表品(連産親品番から代表の子品番を決めるときに使う)で、1か0。'
@@ -166,7 +166,7 @@ TABLE_NOTES = {
         'process_code の G は外作、PURCHASE は購買を示すための工程で、実際の工程ではない。'
         'time_unit は時間単位(DAY=日、MINUTE=分)。どちらの行も、リードタイム lead_time_days(日)と加工時間(サイクル時間)duration_min(分)の両方を持つ(duration_min は空の行がありうる)。'
         'lead_time_days が0の行はありうる(0は有効な値)。lead_time_days は親→子の需要日をずらすときに使う。'
-        'BUY・SUBCON の明細での工程・ラインの業務上の意味、およびサイクル時間の入力ルールは未確認。'
+        'BUY・SUBCON の明細での工程・ラインの業務上の意味は未確認。'
     ),
     'brake_line_record': (
         'ブレーキ・スポットの作業記録。1行=1操作(operator_action)。'
