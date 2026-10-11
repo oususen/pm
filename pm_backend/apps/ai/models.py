@@ -133,7 +133,7 @@ class AIAnalysisTemplate(models.Model):
     ]
 
     CATEGORY_CHOICES = [
-        ('receipt', '入荷'), ('shipment', '出荷'), ('inventory', '在庫'), ('production', '生産'), ('quality', '品質'), ('other', 'その他'),
+        ('receipt', '入荷'), ('shipment', '出荷'), ('inventory', '在庫'), ('production', '生産'), ('quality', '品質'), ('master', 'マスタ'), ('other', 'その他'),
     ]
 
     family_id = models.UUIDField(verbose_name='系統ID')

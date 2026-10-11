@@ -294,7 +294,7 @@ Codexレビュー(2026-10-10)の指摘で、cの実装に残る課題がある(�
 | trial | 事前拒否(:620,:625)は記録しない | `store.update(apply)` 成功後(:660) | success=passed / failure=failed(コードは `GuardError.code` のみ。`message`・`step`は記録禁止) / excluded=`unverified`、`trial_discarded`(新設) | `unverified`の理由は launcher 応答由来の任意文字列(`launcher.py` :270 の既定 `job_failed` など)で、完全には固定と言えない。許可リストは**完全一致のみ**(`[:80]` 切り捨て後の前方一致で誤判定しない)。`killed_by_signal_{n}`(`job_main.py` :339)は主に run 経路の可変コード(trial ではPythonを実行しない)。launcher.py・job_main.py の全reason網羅は**未完了** |
 | code_approval | 拒否は記録しない | `store.update(apply)` 成功後(:682) | `event`のみ | なし。「承認しなかった」は欠測。保存は率にせず、承認件数と新規保存件数を別々に表示(#33) |
 | run | 14-3 | `process_job` の `finish` が戻った直後(`analysis_job_service.py` :399)。`finish` 内には書かない(WatchErrorで再実行されるため) | 14-3 | 14-3 |
-| template_saved | `created=True` の経路のみ | `save_template` の `transaction.atomic()` を抜けた直後。既存返却(:220,:248)は記録しない | `event` | `category`(固定6種)、`is_correction`。保存は実行成功を条件にしない |
+| template_saved | `created=True` の経路のみ | `save_template` の `transaction.atomic()` を抜けた直後。既存返却(:220,:248)は記録しない | `event` | `category`(固定7種)、`is_correction`。保存は実行成功を条件にしない |
 | template_approved/rejected | 拒否・409は記録しない | `approve_template`/`reject_template` の atomic を抜けた後 | `event` | `rejection_reason`(自由文)・`approved_by`は記録禁止。却下は個人評価に転用されやすいので保持を短く |
 | template_reused | `create_plan_from_template` | 成功は `store.create` の戻り直後 | success=分析案を作成(**実行の成功ではない**) / failure=テンプレート起因(`stored_hash_mismatch`等、固定値) / excluded=利用者起因(権限・変数値不正) | 再利用の成功率は `run`(`source='template'`)で測る |
 

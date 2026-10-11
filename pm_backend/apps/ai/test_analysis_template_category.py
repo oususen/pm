@@ -1,6 +1,6 @@
-"""テンプレートのカテゴリ(入荷・出荷・在庫・生産・品質・その他。BOSS承認 2026-10-05)を、実ユーザー・実効権限・一時SQLiteで検証する。
+"""テンプレートのカテゴリ(入荷・出荷・在庫・生産・品質・マスタ・その他。BOSS承認 2026-10-05、マスタ追加 2026-10-11)を、実ユーザー・実効権限・一時SQLiteで検証する。
 
-保存時の必須・固定の6つ、既存の行の初期値、一覧の絞り込み、作成者と管理者による後からの変更(内容・状態は変えない)、AI相談の推薦への表示。
+保存時の必須・固定の7つ、既存の行の初期値、一覧の絞り込み、作成者と管理者による後からの変更(内容・状態は変えない)、AI相談の推薦への表示。
 """
 import json
 from unittest.mock import patch
@@ -12,7 +12,7 @@ from ai.services.analysis_plan_store import AnalysisPlanStore
 from ai.test_analysis_template_review import ReviewBase
 from ai.test_analysis_templates import make_plan
 
-CATEGORIES = {'receipt': '入荷', 'shipment': '出荷', 'inventory': '在庫', 'production': '生産', 'quality': '品質', 'other': 'その他'}
+CATEGORIES = {'receipt': '入荷', 'shipment': '出荷', 'inventory': '在庫', 'production': '生産', 'quality': '品質', 'master': 'マスタ', 'other': 'その他'}
 
 
 class CategoryBase(ReviewBase):
@@ -27,7 +27,8 @@ class CategoryBase(ReviewBase):
 
 
 class SaveCategoryTests(CategoryBase):
-    def test_all_six_fixed_categories_can_be_saved_and_are_shown_with_a_label(self):
+    def test_all_seven_fixed_categories_can_be_saved_and_are_shown_with_a_label(self):
+        self.assertEqual([key for key, _ in AIAnalysisTemplate.CATEGORY_CHOICES], list(CATEGORIES))  # 並び順も固定(品質とその他の間がマスタ)
         for key, label in CATEGORIES.items():
             with self.subTest(category=key):
                 response = self.save(self.creator, make_plan(self.creator.pk), category=key)
@@ -35,9 +36,9 @@ class SaveCategoryTests(CategoryBase):
                 self.assertEqual((response.data['category'], response.data['category_label']), (key, label))
                 self.assertEqual(AIAnalysisTemplate.objects.get(pk=response.data['id']).category, key)
 
-    def test_category_is_required_and_only_the_fixed_six_are_accepted(self):
+    def test_category_is_required_and_only_the_fixed_seven_are_accepted(self):
         before = AIAnalysisTemplate.objects.count()
-        for body in ({}, {'category': 'shippment'}, {'category': ''}, {'category': None}, {'category': 5}, {'category': ['shipment']}, {'category': '出荷'}):
+        for body in ({}, {'category': 'masters'}, {'category': 'Master'}, {'category': 'マスタ'},{'category': 'shippment'}, {'category': ''}, {'category': None}, {'category': 5}, {'category': ['shipment']}, {'category': '出荷'}):
             with self.subTest(body=body):
                 self.assertEqual(self.save(self.creator, **body).status_code, 400)
         self.assertEqual(AIAnalysisTemplate.objects.count(), before)
@@ -76,6 +77,12 @@ class ListAndDetailTests(CategoryBase):
         detail = self.call('ai-analysis-template', self.other, 'get', template_id=ship.pk).data
         self.assertEqual((detail['category'], detail['category_label']), ('shipment', '出荷'))
 
+    def test_the_master_category_can_be_filtered(self):
+        master = self.row(status='approved', category='master')
+        self.row(status='approved', category='other')
+        filtered = self.call('ai-analysis-templates', self.other, 'get', {'category': 'master'}).data['results']
+        self.assertEqual([(r['id'], r['category_label']) for r in filtered], [(master.pk, 'マスタ')])
+
     def test_an_invalid_filter_is_refused_and_the_filter_never_widens_visibility(self):
         self.row(status='rejected', category='quality')
         self.assertEqual(self.call('ai-analysis-templates', self.other, 'get', {'category': 'x'}).status_code, 400)
@@ -103,6 +110,13 @@ class ChangeCategoryTests(CategoryBase):
                 after = AIAnalysisTemplate.objects.values('content_sha256', 'status', 'state_revision', 'name', 'python_code', 'category').get(pk=row.pk)
                 self.assertEqual({k: after[k] for k in before}, before)
                 self.assertEqual(after['category'], 'quality')
+
+    def test_it_can_be_changed_to_master(self):
+        row = self.row(status='approved')
+        response = self.change(self.creator, row, 'master')
+        self.assertEqual((response.status_code, response.data['category'], response.data['category_label']), (200, 'master', 'マスタ'))
+        row.refresh_from_db()
+        self.assertEqual(row.category, 'master')
 
     def test_it_can_be_changed_in_every_state(self):
         for status in ('pending_admin', 'approved', 'rejected', 'superseded'):

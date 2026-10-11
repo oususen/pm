@@ -183,9 +183,9 @@ def _replaced_template(replaces, content_sha256):
 
 
 def validate_category(category):
-    """カテゴリは固定の6つ(入荷・出荷・在庫・生産・品質・その他)。内容のハッシュには含めない(整理のための印)。"""
+    """カテゴリは固定の7つ(入荷・出荷・在庫・生産・品質・マスタ・その他)。内容のハッシュには含めない(整理のための印)。"""
     if type(category) is not str or category not in dict(AIAnalysisTemplate.CATEGORY_CHOICES):
-        raise AnalysisError('カテゴリを入荷・出荷・在庫・生産・品質・その他から選んでください。')
+        raise AnalysisError('カテゴリを入荷・出荷・在庫・生産・品質・マスタ・その他から選んでください。')
     return category
 
 

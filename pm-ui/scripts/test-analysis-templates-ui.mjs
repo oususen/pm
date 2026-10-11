@@ -489,7 +489,7 @@ test('カテゴリは必須: 選ぶまで保存できず、選んだ値を送る
     assert.deepEqual(f.calls.find(c => c[0] === 'saveTemplate')[1], { plan_id: 'plan-1', revision: 6, category: 'quality', name: '日別出荷の分析' })
     assert.equal(f.state.category.value, '', '保存後は、次の保存のために選び直す')
     const text = await html(f)
-    for (const label of ['カテゴリ（必須）', '入荷', '出荷', '在庫', '生産', '品質', 'その他']) assert.ok(text.includes(label), label)
+    for (const label of ['カテゴリ（必須）', '入荷', '出荷', '在庫', '生産', '品質', 'マスタ', 'その他']) assert.ok(text.includes(label), label)
   } finally { f.stop() }
 })
 

@@ -129,7 +129,7 @@ const emit = defineEmits(['plan-created', 'reference-selected', 'pending-count']
 const busy = ref(''), error = ref(''), saved = ref(null), accepted = ref(false), acceptedCorrection = ref(false), detail = ref(null), reason = ref(''), statusFilter = ref('')
 const CATEGORIES = Object.freeze([
   { value: 'receipt', label: '入荷' }, { value: 'shipment', label: '出荷' }, { value: 'inventory', label: '在庫' },
-  { value: 'production', label: '生産' }, { value: 'quality', label: '品質' }, { value: 'other', label: 'その他' },
+  { value: 'production', label: '生産' }, { value: 'quality', label: '品質' }, { value: 'master', label: 'マスタ' }, { value: 'other', label: 'その他' },
 ])
 const category = ref(''), categoryFilter = ref(''), newCategory = ref('')
 // テンプレート名(2026-10-08、BOSS承認)。初期値は分析案の題名。同じ名前の警告は、保存を止めない。名称の変更は、管理者承認前だけ(サーバーでも確認する)
@@ -156,7 +156,7 @@ const REUSE_ERRORS = Object.freeze({
   409: 'このテンプレートは再利用できません（却下・置換済み、内容や検査・ビューの公開定義の不一致）。新しい分析として作成してください。',
 })
 const CATEGORY_ERRORS = Object.freeze({
-  400: 'カテゴリを入荷・出荷・在庫・生産・品質・その他から選んでください。',
+  400: 'カテゴリを入荷・出荷・在庫・生産・品質・マスタ・その他から選んでください。',
   403: 'カテゴリを変更する権限がありません。',
   404: 'テンプレートが見つかりません。',
 })
