@@ -1399,3 +1399,11 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 ### 30.6 反映状況
 コードのみ・DB変更なし（説明文は定義ファイルにあるため、バックエンド再起動で反映）。evaluator未検証。generator が実行した範囲（訂正後）: 対象8モジュールの試験（SimpleTestCase系、156件OK・skipped=2）、`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0、変異試験17件（メモリ上の差し替え。すべて検出）、開発DBの読み取りでの新しい規則の確認（§30.4）。分析での再確認（unknown が減るか）はBOSSが行う。コミット: 訂正分は未。
 2026-10-12 追加訂正（§30.4-2）: 説明文2か所と試験（`test_description_has_bom_item_link_and_coproduct_rule`）、本仕様書、DB辞書6.5-12、基盤仕様書のビュー一覧を訂正。外部結合の1文を追加。コードのみ・DB変更なし。evaluator検証済み（2026-10-12。条件付き→本更新で対応）。再検証は未。コミット未。
+
+## 30.7 本番DBの反映状況（2026-10-12。BOSSが本番のAdminerで確認・実行）
+- 本番 `pm_db` に、AI用ビュー16個（`v_ai_*`）が、存在する（migrate ai 0050 まで適用済み）。
+- 確認時点（付け替え前）：`v_ai_shipment`・`v_ai_purchase_receipt` の定義者は `pm_ai_view_owner@localhost`、残り14個は `root@%`（migrate を実行したユーザーのまま）だった。
+- 本番のユーザー：`pm_ai_reader@172.18.%`（Dockerのネットワーク）、`pm_ai_view_owner@localhost`。
+- 実行（BOSS）：`output/prod_ai_views_definer.sql`（`setup_ai_views.py`・登録・マイグレーションから自動生成。列権限の付与、単純なマスタビュー5つと結合ビュー9つの定義者付き再作成、`pm_ai_reader` へのビューの SELECT の付与、確認SQL）。
+- **実行後の確認（2026-10-12）**：16個すべての定義者が `pm_ai_view_owner@localhost`・DEFINER。`pm_ai_view_owner` の権限は、公開列の列単位 SELECT だけ（表全体の SELECT なし。`v_ai_shipment` 用の `t_shipment_actual` 8列と、`v_ai_purchase_receipt` 用の `t_process_realtime_record` 9列を含む）。
+- **既知の差異（今回は変更しない）**：本番の `pm_ai_reader@172.18.%` は、`pm_db.*` 全体の SELECT を持つ（開発と同じ）。ビューだけの権限ではない。理由：チャットの読み取り専用SQL（`SCREEN_SQL_TABLES`）が、ビューではなく元テーブル（`m_product`・`t_order` など）を、読み取り専用接続で直接読むため。`pm_db.*` の SELECT を取り消すと、チャットのSQLが使えなくなる。ビューだけにするには、チャットを、ビュー経由に切り替える必要がある（「将来はAIもDBを直接読まない」方針と同時に判断）。本番では分析の実行は無効（`pm_ai_reader` を使う経路はチャットのSQLだけ）。
