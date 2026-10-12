@@ -332,11 +332,17 @@ class CommandTests(SimpleTestCase):
     def run_import(self, tmp, existing_t=(), existing_r=(), users=None, **opts):
         out = StringIO()
         saves = []
+        self.auto_states = []
         users = {'alice': 1, 'bob': 2} if users is None else users
         opts.setdefault('i_am_on_dev', True)
         t_mgr, r_mgr = fake_manager(ids=existing_t), fake_manager(ids=existing_r)
 
         def fake_save(self_, *a, **kw):
+            # 保存の時点で auto_now / auto_now_add が止まっていること(日時を元のまま戻すため)
+            # (履歴モデルには created_at / updated_at がないため、テンプレートだけ記録する)
+            if type(self_) is AIAnalysisTemplate:
+                meta = type(self_)._meta
+                self.auto_states.append((meta.get_field('created_at').auto_now_add, meta.get_field('updated_at').auto_now))
             saves.append((type(self_).__name__, self_.pk, kw))
         with patch.object(AIAnalysisTemplate, 'objects', t_mgr), patch.object(AIAnalysisRun, 'objects', r_mgr), \
                 patch.object(AIAnalysisTemplate, 'save', fake_save), patch.object(AIAnalysisRun, 'save', fake_save), \
@@ -356,6 +362,10 @@ class CommandTests(SimpleTestCase):
                          [('AIAnalysisTemplate', 4), ('AIAnalysisRun', 6), ('AIAnalysisRun', 8)])
         self.assertTrue(all(kw == {'force_insert': True} for *_x, kw in saves))
         self.tx.atomic.assert_called_once()
+        self.assertEqual(self.auto_states, [(False, False)])  # 保存中は auto_now 系が止まっている
+        # 保存後は元に戻っている
+        self.assertTrue(AIAnalysisTemplate._meta.get_field('created_at').auto_now_add)
+        self.assertTrue(AIAnalysisTemplate._meta.get_field('updated_at').auto_now)
         self.assertIn('復元した 1 件', out)
         self.assertIn('スキップ: 0 件', out)
 

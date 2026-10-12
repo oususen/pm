@@ -63,13 +63,15 @@
 
 ## 5. 手順
 
-1. **インポート前**: `scripts\ai_backup_before_import.ps1`(`export_ai_analysis_data`を実行し、件数と書き出し先を表示)。件数を確認する。
-2. **本番ダンプのインポート**(`scripts\restore_pm_db.ps1`など、従来どおり)。
-3. **インポート後**: `scripts\ai_restore_after_import.ps1`。次を順に実行し、失敗したらその場で止まる。
+1. **インポート前**: `scriptsi_backup_before_import.bat`(英語だけの短い呼び出しで`ai_backup_before_import.ps1`を実行し、`export_ai_analysis_data`で書き出して件数と書き出し先を表示)。件数を確認する。
+2. **本番ダンプのインポート**(`scriptsestore_pm_db.ps1`など、従来どおり)。
+3. **インポート後**: `scriptsi_restore_after_import.bat`(`ai_restore_after_import.ps1`を呼ぶ)。次を順に実行し、失敗したらその場で止まる。
    1. `python manage.py migrate`
    2. `python manage.py setup_ai_views --apply`
    3. `python manage.py import_ai_analysis_data --i-am-on-dev`
    4. `python manage.py setup_ai_views --check`
+
+`ai_restore_after_import.ps1`には`-DryRun`(確認のみ。復元できる件数・スキップ件数を表示して書き込まない)と`-Interactive`(確認→Y/Nの質問→復元)がある。日本語のメッセージとY/Nの質問はPowerShell側に置く。BATは英語だけの短い呼び出しにしてある(初版はBAT内の日本語がコマンドプロンプトで文字化けし、`choice`の質問が壊れて復元がやめになったため、2026-10-12に修正)。
 
 `migrate`は、テーブル・ビューを作り直すため、インポート後は必ず先に行う(`import_ai_analysis_data`は、テーブルがなければ失敗する)。
 
@@ -102,9 +104,25 @@
 
 ## 9. 実装記録・検証結果・未確認
 
-- 実装(2026-10-12): 上記3ファイル、手順スクリプト2本(`scripts\ai_backup_before_import.ps1`・`scripts\ai_restore_after_import.ps1`)、試験`pm_backend/apps/ai/test_analysis_backup.py`(37件、DBを使わない)。
-- 検証(実装者の確認。完了の判定はevaluatorが行う): 新しい試験37件、既存の`ai.test_setup_ai_views`・`ai.test_analysis_planning`・`ai.test_analysis_execution`が成功。`makemigrations --dry-run`で差分なし。開発DBに対する`export_ai_analysis_data`の実行(読み取りのみ。scratchpadへ書き出し)と、`import_ai_analysis_data --dry-run`(DBは読み取りのみ。既存行ありの中止と、`--force-merge`で全件が`id_conflict`になることを確認)。変異試験11種と、スキーマ不一致でも続行する変異2種(ログインIDをユーザーIDに変える、代わりのユーザーで埋める、既存行チェックを外す、IDを復元しない、親を先に入れる順序を外す、スキーマ不一致を無視、dry-runでも書く、ID衝突チェックを外す、`auto_now`を止めない、`--i-am-on-dev`不要、ユーザーをIDのまま出す。続行の変異は2種ともスキーマ不一致の試験が失敗)がすべて試験の失敗で検出された。
-- 未確認: **実機での往復(ダンプのインポート→復元)はBOSSが行う**。MySQLへの実際のINSERT(元のIDの明示指定、`auto_now`系の日時の保持、外部キー制約)は、DBへ書き込む試験をしていないため未確認。PowerShellスクリプトは構文の検査のみで、実行していない。
+- 実装(2026-10-12): 上記3ファイル、手順スクリプト(`scriptsi_backup_before_import.bat`・`.ps1`、`scriptsi_restore_after_import.bat`・`.ps1`)、試験`pm_backend/apps/ai/test_analysis_backup.py`(37件、DBを使わない)。
+- 検証(実装者の確認): 新しい試験37件、既存の`ai.test_setup_ai_views`・`ai.test_analysis_planning`・`ai.test_analysis_execution`が成功(計115件、2件は既存のskip)。`makemigrations --dry-run`で差分なし。開発DBに対する`export_ai_analysis_data`の実行(読み取りのみ。scratchpadへ書き出し)と、`import_ai_analysis_data --dry-run`(既存行ありの中止と、`--force-merge`で全件が`id_conflict`になることを確認)。
+- 変異試験(実装者): 11種(ログインIDをユーザーIDに変える、代わりのユーザーで埋める、既存行チェックを外す、IDを復元しない、親を先に入れる順序を外す、スキーマ不一致を無視、dry-runでも書く、ID衝突チェックを外す、`auto_now`を止めない、`--i-am-on-dev`不要、ユーザーをIDのまま出す)と、スキーマ不一致でも続行する変異2種が、すべて試験の失敗で検出された。
+- 独立検証(evaluator、2026-10-12): **条件付き合格**(重大な不具合なし)。独立の変異試験は22種で、21種を検出し、1種(コマンドが`suspended_auto_now`を呼ばない変異)は未検出だった。指摘と対応:
+  1. 試験の穴(上記の未検出1種): 保存の時点で`created_at.auto_now_add`・`updated_at.auto_now`が止まっていることを検証する試験を追加した。`suspended_auto_now`を呼ばない変異と、復元を忘れる変異は、どちらも試験が失敗する(実装者が確認)。
+  2. 本書の変異試験の数の記載: 上記のとおり直した。
+  3. 本番誤実行の防止は`DEBUG=False`の検出のみ(スクリプトが`--i-am-on-dev`を自動で付けるため、フラグは防止にならない)。**既知の制限**として残す。
+  4. MySQLの照合順序が大文字小文字を区別しない場合、一意制約の判定がPython側と食い違い得る。その場合は`IntegrityError`で全体がロールバックされる(安全側)。
+  
+  上記を反映した再検証(evaluator)は未実施で、評価未了のまま。
+- **実機の往復(2026-10-12、BOSSが実施)**:
+  1. 書き出し(11:55、テンプレート2件・実行履歴48件)。
+  2. 本番ダンプを開発DBへインポート(テンプレート・実行履歴は0件になった)。
+  3. `ai_restore_after_import.bat`: migrate=適用なし、`setup_ai_views --apply`=実行するSQLなし、`--check`=要対応0件、`import --dry-run`=復元できる テンプレート2件・実行履歴48件・スキップ0件。
+  4. 復元(Y)。
+  5. 確認(読み取り): テンプレート2件(最大ID2)、実行履歴48件(最大ID50)。次の自動採番はテンプレート3・実行履歴51(最大ID+1)。作成・更新の日時はマイクロ秒まで元のまま。テンプレートの状態(approved・pending_admin)は元のまま。実行履歴のユーザー結びつきは48件で欠けなし。改良元(`refined_from_run`)を指す履歴3件が復元された。
+  
+  これにより、MySQLへの実際のINSERT(元のID指定後の自動採番、日時の保持、外部キー)は実機で確認済み。
+- 未確認: `--force-merge`と`user_not_found`スキップの実機での動作(試験は偽物のクエリでの確認のみ)。
 - 反映状況: コードのみ。DB変更なし(マイグレーションなし)。実行はBOSS。
 
 - 2026-10-12(BOSS承認): `--ignore-schema-mismatch`と、ファイルにない項目を既定値・NULLで埋める処理を削除した。スキーマの版が違えば必ず中止する。`--allow-empty`は残す。
