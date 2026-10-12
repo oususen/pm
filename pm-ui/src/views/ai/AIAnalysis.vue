@@ -280,8 +280,8 @@ let generation = 0
 let disposed = false
 let lastSelection = { provider: '', model: '' }
 // 有料モデルは、検索AIと同じく選択時に確認し、同じ画面の間は1回の承認で再確認しない。
-const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507', 'qwen/qwen3-14b', 'deepseek/deepseek-v4.1-flash'])
-const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507', 'qwen/qwen3-14b': 'Qwen3 14B', 'deepseek/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash' })
+const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507', 'qwen/qwen3-14b', 'qwen/qwen3-coder-30b-a3b-instruct', 'deepseek/deepseek-v4.1-flash'])
+const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507', 'qwen/qwen3-14b': 'Qwen3 14B', 'qwen/qwen3-coder-30b-a3b-instruct': 'Qwen3 Coder 30B A3B Instruct', 'deepseek/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash' })
 const paidApproved = new Set()
 const selectedProvider = computed(() => options.value?.providers.find(item => item.provider === provider.value) || null)
 const canCreate = computed(() => props.canEdit && !busy.value && selectedProvider.value?.available && model.value && purpose.value.trim() && dateFrom.value && dateTo.value && dateFrom.value <= dateTo.value

@@ -408,8 +408,8 @@ watch(provider, (next, prev) => {
 })
 
 // OpenRouterの有料モデルは、利用者が選択したときに確認する。同じ画面の間は1回承認すれば再確認しない。
-const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507', 'qwen/qwen3-14b', 'deepseek/deepseek-v4.1-flash'])
-const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507', 'qwen/qwen3-14b': 'Qwen3 14B', 'deepseek/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash' })
+const OPENROUTER_PAID_MODELS = new Set(['google/gemma-4-26b-a4b-it', 'qwen/qwen3-30b-a3b-instruct-2507', 'qwen/qwen3-14b', 'qwen/qwen3-coder-30b-a3b-instruct', 'deepseek/deepseek-v4.1-flash'])
+const OPENROUTER_PAID_LABELS = Object.freeze({ 'google/gemma-4-26b-a4b-it': 'Gemma 4 26B A4B', 'qwen/qwen3-30b-a3b-instruct-2507': 'Qwen3 30B A3B Instruct 2507', 'qwen/qwen3-14b': 'Qwen3 14B', 'qwen/qwen3-coder-30b-a3b-instruct': 'Qwen3 Coder 30B A3B Instruct', 'deepseek/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash' })
 let paidModelConfirmed = false
 let lastSelection = null
 const rememberSelection = () => { lastSelection = { provider: provider.value, model: model.value } }
