@@ -312,6 +312,7 @@ Python実行用に、`analysis-runner`サービスをDocker Composeへ追加す�
 - **画面**: `/settings/ai`の各プロバイダのカードに「分析の温度（0〜1）」と保存ボタン（`settings.ai`の編集権限のみ）。画面の範囲外・小数第3位以降・空欄・文字は送信しない。
 - **適用先**: **分析案の作成とコード生成だけ**（外部AIは`analysis_llm.request_external_json`、ローカルQwenは`chat_service._chat`の`temperature`）。**検索AIのチャット・相談には適用しない**（従来の値）。設定は**毎回DBから読む**（再起動不要）。
 - **取得できないとき**: 別の値で代替せず、**分析案の作成は、AIを呼ぶ前に、コード生成は、回数を数えて「生成中」を保存する前に、503で止める**（外部AIへは送信しない）。範囲外の保存値も同じ。
+- **外部AIの呼び出し(JSON指定)**: `analysis_llm.request_external_json`は、DeepSeekのAPIには`response_format: json_object`を送る。OpenRouterでは対応しないモデルが拒否するため**原則送らず**、プロンプトでJSONを指示する。ただしJSON指定が必要と確認した`deepseek/deepseek-v4.1-flash`(指示だけでは普通の文章で返し、相談が`json_no_object`で2回失敗)だけ、固定定数`OPENROUTER_JSON_MODE_MODELS`により`response_format: json_object`を送る。再試行・代替は設けず、拒否(400)や非JSONは従来どおりエラー。**実機でこのモデルに送って通るかの確認は未了**。
 - **注意**: 0にしても、AIが正しく答える能力は上がらない（ばらつきがなくなるだけ。間違う入力は、毎回同じ間違いになる）。評価の際に、同じ入力で比較しやすくする目的。
 
 #### Python・データ取得の実行設定

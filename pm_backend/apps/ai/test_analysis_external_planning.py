@@ -105,6 +105,31 @@ class ExternalPlanningTest(SimpleTestCase):
         self.assertEqual(body['reasoning'], {'enabled': False})
         self.assertEqual(plan['proposal']['provider'], 'openrouter')
 
+    def sent_body(self, provider, model):
+        with patch('ai.services.analysis_llm.urlopen', return_value=fake_response('{}')) as urlopen:
+            analysis_llm.request_external_json(provider, model, [{'role': 'user', 'content': 'x'}], 0.3)
+        return json.loads(urlopen.call_args.args[0].data.decode('utf-8'))
+
+    def test_openrouter_json_mode_only_for_listed_model(self):
+        body = self.sent_body('openrouter', 'deepseek/deepseek-v4.1-flash')
+        self.assertEqual(body['response_format'], {'type': 'json_object'})
+        self.assertEqual(body['reasoning'], {'enabled': False})
+        self.assertEqual(body['provider'], {'allow_fallbacks': True})
+        for model in ('qwen/qwen3-14b', 'google/gemma-4-26b-a4b-it', 'qwen/qwen3.8-27b:free'):
+            with self.subTest(model=model):
+                self.assertNotIn('response_format', self.sent_body('openrouter', model))
+
+    def test_deepseek_api_keeps_json_mode_and_thinking_disabled(self):
+        body = self.sent_body('deepseek', 'deepseek-v4-pro')
+        self.assertEqual(body['response_format'], {'type': 'json_object'})
+        self.assertEqual(body['thinking'], {'type': 'disabled'})
+
+    def test_json_mode_models_exist_in_openrouter_catalog(self):
+        from ai.config.catalog import PROVIDER_CATALOG
+        catalog_ids = {model_id for model_id, _ in PROVIDER_CATALOG['openrouter']['models']}
+        self.assertTrue(analysis_llm.OPENROUTER_JSON_MODE_MODELS)  # 空集合は部分集合になってしまうため、空でないことも確認する
+        self.assertTrue(analysis_llm.OPENROUTER_JSON_MODE_MODELS <= catalog_ids)
+
     def test_json_wrapped_in_a_code_block_is_accepted_but_still_validated(self):
         wrapped = '```json\n' + json.dumps(PROPOSAL, ensure_ascii=False) + '\n```'
         with patch('ai.services.analysis_llm.urlopen', return_value=fake_response(wrapped)):

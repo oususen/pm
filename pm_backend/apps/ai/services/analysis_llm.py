@@ -17,6 +17,11 @@ from ai.services.analysis_plan_store import AnalysisError
 # 既存の分析案作成（チャット補助の_chat既定）と同じ値。外部AIでの所要時間を実測してからBOSSが確定する。
 REQUEST_TIMEOUT_SECONDS = 90
 
+# OpenRouterでresponse_format(json_object)を送ってよいモデルID。
+# deepseek/deepseek-v4.1-flashは、プロンプトで「JSONだけを返す」と指示しても普通の文章で返し、相談が2回連続で失敗した(実機で確認)。
+# OpenRouterのモデル説明にresponse_formatを受け付けるとある。送って通るかの実機確認は未了。他のモデルには追加しない。
+OPENROUTER_JSON_MODE_MODELS = frozenset({'deepseek/deepseek-v4.1-flash'})
+
 _CODE_FENCE_PATTERN = re.compile(r'^\s*```(?:json)?\s*(.*?)\s*```\s*$', re.DOTALL | re.IGNORECASE)
 
 
@@ -64,7 +69,10 @@ def request_external_json(provider, model, messages, temperature=0.3):
         body['thinking'] = {'type': 'disabled'}
     elif provider == 'openrouter':
         # 無料枠が混雑する場合は他の提供元へ振り分ける（検索AIと同じ設定）。
-        # response_formatは、対応しないモデルが拒否するため送らず、プロンプトでJSONを指示する。
+        # response_formatは、対応しないモデルが拒否するため既定では送らず、プロンプトでJSONを指示する。
+        # OPENROUTER_JSON_MODE_MODELSのモデルだけは、指示だけではJSONで返さないため送る。
+        if model in OPENROUTER_JSON_MODE_MODELS:
+            body['response_format'] = {'type': 'json_object'}
         body['provider'] = {'allow_fallbacks': True}
         body['reasoning'] = {'enabled': False}
     request = Request(
