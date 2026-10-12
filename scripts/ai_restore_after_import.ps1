@@ -5,7 +5,8 @@
 # 4. setup_ai_views --check(ビュー・権限の確認)
 # どれかが失敗したら、その場で止まる。手順は 仕様書\AI分析_開発DB再取り込み手順.md。
 param(
-    [string]$InputDir
+    [string]$InputDir,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +37,16 @@ Push-Location $backend
 try {
     Invoke-Step '1/4 migrate' @('manage.py', 'migrate')
     Invoke-Step '2/4 setup_ai_views --apply' @('manage.py', 'setup_ai_views', '--apply')
+
+    if ($DryRun) {
+        # 確認だけ: 書き込まずに、復元できる件数・スキップする件数を表示して止まる。
+        $dryArguments = @('manage.py', 'import_ai_analysis_data', '--dry-run')
+        if ($InputDir) { $dryArguments += @('--input-dir', $InputDir) }
+        Invoke-Step '3/4 import_ai_analysis_data --dry-run(書き込まない。復元できる件数・スキップの件数の確認)' $dryArguments
+        Write-Host ''
+        Write-Host '○ 確認だけが完了しました(復元はしていません)。件数とスキップの理由を確認してください。' -ForegroundColor Green
+        exit 0
+    }
 
     $importArguments = @('manage.py', 'import_ai_analysis_data', '--i-am-on-dev')
     if ($InputDir) { $importArguments += @('--input-dir', $InputDir) }
