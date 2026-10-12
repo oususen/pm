@@ -192,7 +192,7 @@ TABLE_NOTES = {
         'bom_is_coproduct は連産品BOMか(1か0)。連産品は、1つの工程で複数の製品が同時に生産されるもの。親品番は仮想セット品番で在庫を持たず、子が実際に同時にできる複数の品番。親が仮想セット品番のときは自動で1。'
         '通常のBOMとは逆方向の関係のため、在庫の出庫計算・受注展開では除外される。'
         'is_coproduct_driver は連産品代表品か(1か0)。連産品BOMの子のうち1つに指定する代表品で、計画展開の起点。代表品の所要時間 duration_min が連産品のサイクルタイムとして使われる。'
-        '連産品の代表でない子は、bom_is_coproduct=1 で is_coproduct_driver=0 の明細。'
+        '連産品の代表でない子は、その品番が連産品BOM(bom_is_coproduct=1)の明細にだけ子として登録され、その明細がすべて is_coproduct_driver=0 のもの。'
         'quantity は親品番1個あたりの子品番の数量(員数)。行をまたいで合計しても業務上の意味はない。'
         'loss_rate はロス率(比率で、%ではない)。空でないとき、数量に (1+ロス率) を掛ける。'
         'sourcing_type は調達区分で、MAKE=自社製造、BUY=購買、SUBCON=外注。BUY(購買)は仕入先があり、SUBCON(外注)は仕入先が必ずある。'
@@ -202,8 +202,9 @@ TABLE_NOTES = {
         'time_unit は時間単位(DAY=日、MINUTE=分)。どちらの行も、リードタイム lead_time_days(日)と加工時間(サイクル時間)duration_min(分)の両方を持つ(duration_min は空の行がありうる)。'
         'lead_time_days が0の行はありうる(0は有効な値)。lead_time_days は親→子の需要日をずらすときに使う。'
         'BUY・SUBCON の明細での工程・ラインの業務上の意味は未確認。'
-        'ルーティング工程ビュー v_ai_routing_step の source_bom_item_id は、工程の元になったBOM明細のIDで、このビューの id と結べる'
-        '(工程が連産品の代表でない子に由来するかは、このビューの bom_is_coproduct と is_coproduct_driver で判定する。判定の詳細は v_ai_routing_step の説明にある)。'
+        'ルーティング工程ビュー v_ai_routing_step の source_bom_item_id は、工程の元になったBOM明細のIDで、このビューの id と結べるが、連産品の判定には使わない。'
+        '工程が連産品に関わるかは、工程の加工後品 output_product_code が、このビューの bom_is_coproduct=1 の明細の child_product_code に含まれるかで判定する(判定の詳細は工程ビューの説明にある)。'
+        '同じ子品番が複数の明細に現れうるので、工程に結ぶときは、先に bom_is_coproduct=1 の明細を child_product_code でグループ化し、is_coproduct_driver の最大値に集約する(明細の行ごとに結ぶと、工程の行が重複して増える)。'
     ),
     'v_ai_routing_step': (
         'ルーティング工程(m_routing_step にルーティングヘッダ m_routing と、品番・工程・ライン・外作先のコード・名称を付けたビュー)。1行=1工程(全行。日付の列はなく、期間では絞らない)。'
@@ -221,11 +222,15 @@ TABLE_NOTES = {
         '連産品とは、1つの工程で複数の製品が同時に生産されるもの。BOMでは、親が仮想セット品番(在庫を持たない)、子が実際に同時にできる複数の品番で、'
         'BOMのヘッダに連産品BOMのフラグ(v_ai_bom_item の bom_is_coproduct)がある。'
         '連産品BOMの子のうち1つが代表品(v_ai_bom_item の is_coproduct_driver=1)で、計画展開の起点となり、代表品の所要時間(duration_min)が連産品のサイクルタイムとして使われる。'
-        '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの。'
-        '工程が連産品の代表でない子に由来するかの判定: 工程の source_bom_item_id で v_ai_bom_item の id と結び、'
-        'bom_is_coproduct=1 かつ is_coproduct_driver=0 なら、連産品の代表でない子に由来する工程。bom_is_coproduct=1 かつ is_coproduct_driver=1 なら、連産品の代表に由来する工程。'
-        'bom_is_coproduct=0 なら、通常の工程(連産品の子ではない)。'
-        '判定できない(不明)のは、source_bom_item_id が空の工程だけ。元のBOM明細があって bom_is_coproduct=0 の工程を不明にしない(通常の工程と判定する)。'
+        '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの(その品番の連産品BOMの明細がすべて is_coproduct_driver=0)。'
+        '元のBOM明細(source_bom_item_id)は、連産品の判定には使わない。ルーティング画面の代表部品の表示は、元のBOM明細があるときはその明細の代表品フラグを見るため、ここでの判定(工程の加工後品で見る)と異なる場合がある。'
+        '工程が連産品に関わるかの判定: 工程の加工後品(output_product_code)で行う。v_ai_bom_item の bom_is_coproduct=1 の明細の child_product_code に、工程の output_product_code が含まれるかで見る。'
+        'その品番が、bom_is_coproduct=1 の明細のどれかで is_coproduct_driver=1 なら、連産品の代表の工程。同じ品番が代表としても代表でない子としても登録されているときも、代表として扱う。'
+        'bom_is_coproduct=1 の明細にだけ(すべて is_coproduct_driver=0)子として登録されているなら、連産品の代表でない子の工程。'
+        'bom_is_coproduct=1 の明細の子として登録されていなければ、通常の工程(連産品の子ではない)。'
+        '判定できない(不明)のは、加工後品(output_product_code)が空の工程だけ。加工後品があって連産品の子として登録されていない工程を不明にしない(通常の工程と判定する)。'
+        '結ぶときの注意: v_ai_bom_item は同じ子品番が複数の明細に現れうるので、先に、bom_is_coproduct=1 の明細を child_product_code でグループ化し、is_coproduct_driver の最大値に集約してから、工程の output_product_code と結ぶ(明細の行ごとに結ぶと、工程の行が重複して増える)。'
+        '連産品BOMの集約結果へは、工程を残すため外部結合で結ぶ(内部結合にすると、連産品でない通常の工程が消える)。'
     ),
     'v_ai_routing_step_material': (
         '工程別部品消費(m_routing_step_material に、工程・ルーティング・品番・工程のコード・名称を付けたビュー)。1行=1工程の1材料(全行。日付の列はなく、期間では絞らない)。'
@@ -242,7 +247,7 @@ TABLE_NOTES = {
         '工程の数・工程の時間は、工程ビュー v_ai_routing_step で集計する。'
         '材料のない工程は、このビューに行がない(その工程には登録された材料がない。業務上の意味は未確認)。'
         '材料のない工程を探すには、v_ai_routing_step の id が、このビューの routing_step_id にない行を探す。'
-        '工程の元のBOM明細(source_bom_item_id)や連産品の判定は、routing_step_id で v_ai_routing_step の id と結んで、工程ビューの列で行う(このビューにはない)。'
+        '連産品の判定は、routing_step_id で工程ビュー v_ai_routing_step の id と結んで、工程ビューの加工後品 output_product_code とBOM明細ビュー v_ai_bom_item で行う(このビューにはない)。'
         'routing_step_id は工程のID(v_ai_routing_step の id と結べる)、routing_* はルーティングとその品番、step_* は工程の列(step_parent_product_code は工程の remark 列を公開したもの。材料自身の remark は公開しない)。'
     ),
     'v_ai_user': (

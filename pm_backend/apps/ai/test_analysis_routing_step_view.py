@@ -159,15 +159,32 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
                     '連産品とは、1つの工程で複数の製品が同時に生産されるもの', '仮想セット品番', 'bom_is_coproduct',
                     '連産品BOMの子のうち1つが代表品', 'is_coproduct_driver=1', '計画展開の起点',
                     '代表品の所要時間(duration_min)が連産品のサイクルタイム',
-                    '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの',
-                    # 判定規則(3通りと不明)
-                    'bom_is_coproduct=1かつis_coproduct_driver=0なら、連産品の代表でない子に由来する工程',
-                    'bom_is_coproduct=1かつis_coproduct_driver=1なら、連産品の代表に由来する工程',
-                    'bom_is_coproduct=0なら、通常の工程(連産品の子ではない)',
-                    # 不明は元のBOM明細が空のときだけ
-                    '判定できない(不明)のは、source_bom_item_idが空の工程だけ',
-                    'bom_is_coproduct=0の工程を不明にしない(通常の工程と判定する)'):
+                    '連産品の代表でない子とは、連産品BOMの子で、代表品に指定されていないもの(その品番の連産品BOMの明細がすべてis_coproduct_driver=0)',
+                    # 元のBOM明細は判定に使わない。画面の代表部品の表示と異なる場合があることを固定する
+                    '元のBOM明細(source_bom_item_id)は、連産品の判定には使わない',
+                    'ルーティング画面の代表部品の表示は、元のBOM明細があるときはその明細の代表品フラグを見るため、ここでの判定(工程の加工後品で見る)と異なる場合がある',
+                    # 判定規則: 工程の加工後品(output_product_code)が bom_is_coproduct=1 の明細の child_product_code に含まれるか
+                    '工程の加工後品(output_product_code)で行う',
+                    'bom_is_coproduct=1の明細のchild_product_codeに、工程のoutput_product_codeが含まれるかで見る',
+                    'bom_is_coproduct=1の明細のどれかでis_coproduct_driver=1なら、連産品の代表の工程',
+                    # 同じ品番が代表・代表でない子の両方に登録されているときは代表
+                    '同じ品番が代表としても代表でない子としても登録されているときも、代表として扱う',
+                    'bom_is_coproduct=1の明細にだけ(すべてis_coproduct_driver=0)子として登録されているなら、連産品の代表でない子の工程',
+                    'bom_is_coproduct=1の明細の子として登録されていなければ、通常の工程(連産品の子ではない)',
+                    # 不明は加工後品が空のときだけ
+                    '判定できない(不明)のは、加工後品(output_product_code)が空の工程だけ',
+                    '加工後品があって連産品の子として登録されていない工程を不明にしない(通常の工程と判定する)',
+                    # 結ぶ前に集約する(工程の行が増えない)
+                    '先に、bom_is_coproduct=1の明細をchild_product_codeでグループ化し、is_coproduct_driverの最大値に集約してから、工程のoutput_product_codeと結ぶ',
+                    '明細の行ごとに結ぶと、工程の行が重複して増える',
+                    # 工程を残すには外部結合が必要(内部結合だと通常の工程が消える)
+                    '連産品BOMの集約結果へは、工程を残すため外部結合で結ぶ(内部結合にすると、連産品でない通常の工程が消える)'):
                 self.assertIn(part, plain)
+            # 元のBOM明細ベースの判定規則・不明の定義は残さない
+            for old in ('工程のsource_bom_item_idでv_ai_bom_itemのidと結び', '連産品の代表でない子に由来する工程',
+                        'source_bom_item_idが空の工程だけ', '元のBOM明細があってbom_is_coproduct=0',
+                        'システム本体も、元のBOM明細があるとき', '代表として扱う(システム本体と同じ)'):
+                self.assertNotIn(old, plain)
 
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_routing の許可と列は、ビューの追加後も変わらない(m_routing_step・m_routing_step_material は元から許可なし)

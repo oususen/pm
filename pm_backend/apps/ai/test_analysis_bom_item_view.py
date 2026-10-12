@@ -127,9 +127,16 @@ class BomItemViewDefinitionTest(SimpleTestCase):
                     '在庫の出庫計算・受注展開では除外される',
                     '連産品BOMの子のうち1つに指定する代表品', '計画展開の起点',
                     '代表品の所要時間duration_minが連産品のサイクルタイムとして使われる',
-                    '連産品の代表でない子は、bom_is_coproduct=1でis_coproduct_driver=0の明細',
-                    'v_ai_routing_stepのsource_bom_item_idは、工程の元になったBOM明細のIDで、このビューのidと結べる'):
+                    '連産品の代表でない子は、その品番が連産品BOM(bom_is_coproduct=1)の明細にだけ子として登録され、その明細がすべてis_coproduct_driver=0のもの',
+                    'v_ai_routing_stepのsource_bom_item_idは、工程の元になったBOM明細のIDで、このビューのidと結べるが、連産品の判定には使わない',
+                    # 判定は工程の加工後品が child_product_code に含まれるかで行う。結ぶ前に集約する
+                    '工程の加工後品output_product_codeが、このビューのbom_is_coproduct=1の明細のchild_product_codeに含まれるかで判定する',
+                    '先にbom_is_coproduct=1の明細をchild_product_codeでグループ化し、is_coproduct_driverの最大値に集約する',
+                    '明細の行ごとに結ぶと、工程の行が重複して増える'):
                 self.assertIn(part, plain)
+            # 元のBOM明細ベースの判定(bom_is_coproduct=1でis_coproduct_driver=0の明細を元のBOM明細に持つ工程)は書かない
+            self.assertNotIn('工程が連産品の代表でない子に由来するか', plain)
+            self.assertNotIn('bom_is_coproduct=1でis_coproduct_driver=0の明細', plain)
 
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_bom・m_bom_item の許可と列は、ビューの追加後も変わらない

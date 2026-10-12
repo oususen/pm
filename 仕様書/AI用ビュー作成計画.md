@@ -1349,7 +1349,7 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 4. チャット（AIホーム）のSQLと辞書に2ビューが出ないこと、分析（`ANALYSIS_VIEWS`）では使えること。
 5. 説明文に件数・氏名・部署名・社員コードが入っていないこと。
 
-## 30. 説明文の改善: 工程とBOM明細の結びつきと連産品の判定規則（2026-10-11。BOSS承認「はい」。コードのみ・DB変更なし。evaluator未検証）
+## 30. 説明文の改善: 工程とBOM明細の結びつきと連産品の判定規則（2026-10-11。BOSS承認「はい」。判定規則は加工後品ベースに訂正済み（BOSS承認「はい」×3）。コードのみ・DB変更なし。evaluator未検証）
 
 対象: `v_ai_routing_step`・`v_ai_routing_step_material`・`v_ai_bom_item` の説明文（`analysis_data_service.py` の `ANALYSIS_VIEWS`、`sql_queries.py` の `TABLE_NOTES`）。ビューのSQL・列・マイグレーションは変えていない。
 
@@ -1361,20 +1361,41 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 2. 連産品: 1つの工程で複数の製品が同時に生産されるもの。BOMでは親が仮想セット品番（`m_product.is_virtual_set`。在庫を持たない）、子が実際に同時にできる複数の品番。BOMヘッダに連産品BOMのフラグ（`bom_is_coproduct`。親が仮想セット品番のときは自動で1）。通常のBOMとは逆方向の関係（仮想セット品番から子へ展開）のため、在庫の出庫計算・受注展開では除外される。出典: `masters/models.py` `BOM.is_coproduct` の help_text、`MASTER_TABLES_DEFINITION.MD` 9章、在庫計算仕様書、受注展開仕様書、`masters/serializers.py`。
 3. 代表品: 連産品BOMの子のうち1つに指定する（`is_coproduct_driver`）。計画展開の起点で、代表品の所要時間（`duration_min`）が連産品のサイクルタイムとして使われる。「代表でない子」＝連産品BOMの子で、代表品に指定されていないもの。出典: `MASTER_TABLES_DEFINITION.MD` 9章、単独計画仕様書「サイクルタイム解決」。
 
-### 30.3 判定の考え方（BOSS承認）
-工程の `source_bom_item_id` で `v_ai_bom_item` の `id` と結ぶ。
-- `bom_is_coproduct=1` かつ `is_coproduct_driver=0` ＝連産品の代表でない子に由来する工程。
-- `bom_is_coproduct=1` かつ `is_coproduct_driver=1` ＝連産品の代表に由来する工程。
-- `bom_is_coproduct=0` ＝通常の工程（連産品の子ではない）。
-- 判定できない（不明）のは、`source_bom_item_id` が空の工程だけ。元のBOM明細があって `bom_is_coproduct=0` の工程を不明にしない。
+### 30.3 判定の考え方（BOSS承認 2026-10-11「はい」。加工後品ベース。初版の「元のBOM明細ベース」を訂正）
+工程が連産品に関わるかは、**工程の加工後品（`v_ai_routing_step.output_product_code`）**で判定する。`v_ai_bom_item` の `bom_is_coproduct=1` の明細の `child_product_code` に、工程の `output_product_code` が含まれるかで見る。システム本体（ルーティング画面）の代表部品の表示は、元のBOM明細がない工程についてだけこの規則と同じである（`masters/serializers.py` の `RoutingStepSerializer.get_representative_part`、`masters/views.py` の `_get_coproduct_driver_child_ids`・`_build_representative_child_ids`: 元のBOM明細があればその `is_coproduct_driver` だけを見て加工後品では判定しない。なければ、工程の `output_product_id` が「連産品BOM（`bom__is_coproduct=True`）で `is_coproduct_driver=True` の明細の `child_product_id` の集合」に含まれるかで見る）。食い違いは §30.4。
+- その品番が、`bom_is_coproduct=1` の明細のどれかで `is_coproduct_driver=1` ＝連産品の代表の工程（残す）。同じ品番が代表としても代表でない子としても登録されている場合も、代表として扱う（BOSS承認）。
+- `bom_is_coproduct=1` の明細にだけ（すべて `is_coproduct_driver=0`）子として登録されている ＝連産品の代表でない子の工程（除外の対象）。
+- `bom_is_coproduct=1` の明細の子として登録されていない ＝通常の工程。
+- 判定できない（不明）のは、加工後品（`output_product_code`）が空の工程だけ。加工後品があって連産品の子として登録されていない工程を不明にしない。
+- 結ぶときの注意: `v_ai_bom_item` は同じ子品番が複数の明細に現れうるので、先に `bom_is_coproduct=1` の明細を `child_product_code` で集約（`GROUP BY child_product_code`、`MAX(is_coproduct_driver)`）してから工程に結ぶ。明細の行ごとに結ぶと工程の行が重複して増える。
+- `source_bom_item_id`（元のBOM明細）は、連産品の判定には使わない。説明文には、事実として「ルーティング画面の代表部品の表示は、元のBOM明細があるときはその明細の代表品フラグを見るため、ここでの判定（工程の加工後品で見る）と異なる場合がある」とだけ書く（実データの件数は書かない。2026-10-12に訂正。旧文言「システム本体も…連産品の子の工程は加工後品で判定する」は誤り）。
+- 工程を残すには、集約結果へ外部結合で結ぶ。内部結合にすると連産品でない通常の工程が消える旨を、説明文に1文足した（2026-10-12）。
+- 説明文では `GROUP BY`・`MAX` の大文字語を避け、「`child_product_code` でグループ化し、`is_coproduct_driver` の最大値に集約する」と書く（`check_no_fixed_values` の許可語を増やさないため）。
 
-### 30.4 実データでの確認（呼び出し元が確認済み。件数は説明文には書かない）
-品番 YD40006245 の工程179件のうち、`source_bom_item_id` がある178件を `v_ai_bom_item` の `id` と結ぶと、全て `bom_is_coproduct=0` で、連産品の子ではないと判定できる。空は1件だけ。generator は DB を確認していない。
+### 30.4 実データでの確認と、初版の規則が成り立たなかった経緯（開発DB。件数は説明文には書かない）
+初版（コミット bc412a7e）の規則「工程の元のBOM明細（`source_bom_item_id` で `v_ai_bom_item.id` と結ぶ）が `bom_is_coproduct=1` かつ `is_coproduct_driver=0` なら、連産品の代表でない子に由来する工程」は、独立検証（evaluator）と呼び出し元の確認で、実データで一度も成り立たないことが分かった。
+- 連産品BOMの明細を元のBOM明細として持つ工程: 0件。`source_bom_item_id` がある6073工程は、すべて通常のBOMの明細を指す。
+- 初版の §30.4（品番 YD40006245 の `source_bom_item_id` がある178件はすべて `bom_is_coproduct=0` なので「通常の工程と判定できる」）の結論は誤り。これらは通常のBOMの明細を指しているだけで、連産品の子かどうかは加工後品で見る必要がある。
+- 加工後品が連産品BOMの子として登録されている工程: 807件（代表として登録されている品番のもの164、代表でない子のみのもの643）。
+- 品番 YD40006245: 179工程中27工程（代表5・代表でない子22）。
+- 同じ品番が代表としても代表でない子としても登録されているものが2品番（BOSS承認「代表として扱う」）。
+- 新しい規則での再確認（generator、開発DB・ai_reader・SELECTのみ、2026-10-11）: 全工程7678件 = 通常6871 + 代表164 + 代表でない子643 + 不明0（加工後品が空の工程は0件）。YD40006245（`routing_product_code`）は 179 = 通常152 + 代表5 + 代表でない子22 + 不明0。`bom_is_coproduct=1` の明細を `child_product_code` ごとに `MAX(is_coproduct_driver)` へ集約して結んだ結果の合計が工程の行数（179、全体7678）と一致し、結合で行は増えない。
+
+#### 30.4-2 ルーティング画面（システム本体）との食い違い（独立検証の指摘。開発DB。2026-10-12）
+- 元のBOM明細がない1605工程: 説明文の規則と画面は一致（代表12・代表でない子45・通常1548）。
+- 元のBOM明細がある6073工程: 画面は元のBOM明細の `is_coproduct_driver` だけを見る。その明細は全件 `is_coproduct_driver=0` のため、画面は全件「代表でない」と表示する。
+- 説明文の規則（加工後品で判定）との食い違い: 152工程（品番77・ルーティング41）。説明文の規則では代表、画面では代表でない。YD40006245 の代表5工程はこの152工程に含まれる（元のBOM明細があり、その明細は driver=0。加工後品は代表として登録）。
+- 逆の食い違い（画面で代表、説明文の規則で代表でない）: 0件。
+- 同じ品番が代表としても代表でない子としても登録されているもの2品番（3工程。3工程とも元のBOM明細あり）: 説明文の規則では代表として扱う。「システム本体と同じ」は、元のBOM明細がない工程についてだけ正しい。
+- BOSS判断（2026-10-12「直して」）: 説明文の規則（加工後品ベース）を維持する。BOSSの目的（連産品は代表品のみ表示）に合い、BOSSが確認した5工程と一致するため。画面の代表部品の表示の食い違いは別件で、今回は手を付けない（元のBOM明細の代表品フラグが実データで常に0のため、画面の不具合の可能性がある）。
+- 説明文の訂正: 「システム本体も…加工後品で判定する」を、「画面の代表部品の表示は元のBOM明細の代表品フラグを見るため、ここでの判定と異なる場合がある」に直した。
 
 ### 30.5 変更内容
-- `analysis_data_service.py` / `sql_queries.py`: 工程ビューの `source_bom_item_id` の説明を確定（「未確認」の列挙から除外）し、連産品・代表品・判定規則を追記。BOM明細ビューの `bom_is_coproduct`・`is_coproduct_driver` の説明を詳しくし、工程ビューとの結びつきを追記。材料ビューに「工程の元BOM明細・連産品の判定は `routing_step_id` で工程ビューと結んで行う」を追記。
-- 試験: `test_analysis_routing_step_view.py`（新規 `test_description_has_bom_item_link_and_coproduct_rule`、未確認の列挙から `source_bom_item_id` が外れたことの検査）、`test_analysis_routing_step_material_view.py`・`test_analysis_bom_item_view.py`（新しい記述の固定検査）。`check_no_fixed_values`（2桁以上の数字・具体コード・許可外の大文字語の禁止）は変更していない。
+- `analysis_data_service.py` / `sql_queries.py`: 工程ビューの `source_bom_item_id` の説明を確定（「未確認」の列挙から除外）し、連産品・代表品・判定規則を追記。BOM明細ビューの `bom_is_coproduct`・`is_coproduct_driver` の説明を詳しくし、工程ビューとの結びつきを追記。材料ビューに連産品の判定の結び方を追記。
+- 訂正（コミット bc412a7e の後）: 判定規則を元のBOM明細ベースから加工後品ベースに改め（§30.3）、`source_bom_item_id` は判定に使わない旨、集約の注意（`child_product_code` でグループ化し `is_coproduct_driver` の最大値）、不明は加工後品が空の工程だけ、を説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES` の同内容2か所）に反映。材料ビューは「`routing_step_id` で工程ビューと結び、工程ビューの `output_product_code` と `v_ai_bom_item` で判定」に直した。
+- 試験: `test_analysis_routing_step_view.py`（`test_description_has_bom_item_link_and_coproduct_rule` を加工後ベースの規則の固定検査に書き換え。元のBOM明細ベースの文言が残らないことの検査を含む。未確認の列挙から `source_bom_item_id` が外れたことの検査）、`test_analysis_routing_step_material_view.py`・`test_analysis_bom_item_view.py`（新しい記述の固定検査）。`check_no_fixed_values`（2桁以上の数字・具体コード・許可外の大文字語の禁止）は変更していない。
 - 仕様書: 本節、`AI運用規約・AI用DB辞書.md` 6.5-11・6.5-12、`AI分析基盤仕様書.md` のビュー一覧（2行）。
 
 ### 30.6 反映状況
-コードのみ・DB変更なし（説明文は定義ファイルにあるため、バックエンド再起動で反映）。evaluator未検証。generator が実行した範囲: 対象8モジュールの試験（SimpleTestCase系、156件OK・skipped=2）、`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0。分析での再確認はBOSSが行う。コミット: 未。
+コードのみ・DB変更なし（説明文は定義ファイルにあるため、バックエンド再起動で反映）。evaluator未検証。generator が実行した範囲（訂正後）: 対象8モジュールの試験（SimpleTestCase系、156件OK・skipped=2）、`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0、変異試験17件（メモリ上の差し替え。すべて検出）、開発DBの読み取りでの新しい規則の確認（§30.4）。分析での再確認（unknown が減るか）はBOSSが行う。コミット: 訂正分は未。
+2026-10-12 追加訂正（§30.4-2）: 説明文2か所と試験（`test_description_has_bom_item_link_and_coproduct_rule`）、本仕様書、DB辞書6.5-12、基盤仕様書のビュー一覧を訂正。外部結合の1文を追加。コードのみ・DB変更なし。evaluator検証済み（2026-10-12。条件付き→本更新で対応）。再検証は未。コミット未。
