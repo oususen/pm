@@ -74,7 +74,10 @@ pm-ui/certs/pm-ui.key
 pm-ui/.env.local
 pm_backend/firebase-service-account.json
 pm_backend/firebase-service-account-*.json
-# output/       
+# output/
+
+# AI分析のテンプレート・実行履歴の書き出し(ユーザー名・分析目的を含むためコミットしない)
+output/ai_backup/
 
 # Image files
 *.png
