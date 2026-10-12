@@ -488,6 +488,10 @@ class RoutingStep(models.Model):
     line = models.ForeignKey(Line, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='ライン')
     supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='外作先')
     output_product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='加工後品目')
+    parent_product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='parent_routing_steps', verbose_name='親製品',
+    )
     source_bom_item = models.ForeignKey(
         BOMItem,
         on_delete=models.SET_NULL,
@@ -514,6 +518,14 @@ class RoutingStep(models.Model):
         verbose_name_plural = 'ルーティング工程'
         unique_together = [['routing', 'step_no', 'parallel_group']]
         ordering = ['routing', 'step_no', 'parallel_group']
+
+    def clean(self):
+        super().clean()
+        from masters.services.routing_parent_validation import validate_routing_parent
+        validate_routing_parent(
+            self.parent_product_id, self.output_product_id, self.routing_id,
+            self.hierarchy_path, self.pk,
+        )
 
     def __str__(self):
         product_code = ''

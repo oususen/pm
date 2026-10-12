@@ -214,7 +214,7 @@ TABLE_NOTES = {
         'routing_is_default は既定か(1か0)、routing_is_active は有効(1)か無効(0)か、routing_valid_from_datetime・routing_valid_to_datetime は有効開始日時・有効終了日時(空の行がありうる)。'
         'step_no は工程番号。process_id・line_id・supplier_id は空の行がありうる(それぞれ v_ai_process・v_ai_line・v_ai_supplier の id と結べる。supplier_* は外作先)。'
         'output_product_* は工程の加工後品(output_product_id は v_ai_product の id と結べる。空の行がありうる)。'
-        'parent_product_code は工程の親品の品番コード(文字列。工程の remark 列をこの名前で公開している)で、v_ai_product.product_code と結べるが、品番マスタにない値があり得る。'
+        'parent_product_code は工程の親品の品番コード(親品IDで品番マスタを参照して取得する現在のコード。親品未指定は空)で、v_ai_product.product_code と結べる。'
         'time_unit は時間単位(DAY=日、MINUTE=分)、lead_time_days はリードタイム(日)、start_offset_min は開始オフセット(分)、duration_min は所要時間(分)。'
         'parallel_group は並列グループ、parallel_count は並列数、hierarchy_depth は工程階層深さ、hierarchy_path は工程階層パス。'
         'source_bom_item_id は工程の元になったBOM明細のIDで、BOM明細ビュー v_ai_bom_item の id と結べる(空の工程は、元のBOM明細が不明で結べない)。'
@@ -248,7 +248,7 @@ TABLE_NOTES = {
         '材料のない工程は、このビューに行がない(その工程には登録された材料がない。業務上の意味は未確認)。'
         '材料のない工程を探すには、v_ai_routing_step の id が、このビューの routing_step_id にない行を探す。'
         '連産品の判定は、routing_step_id で工程ビュー v_ai_routing_step の id と結んで、工程ビューの加工後品 output_product_code とBOM明細ビュー v_ai_bom_item で行う(このビューにはない)。'
-        'routing_step_id は工程のID(v_ai_routing_step の id と結べる)、routing_* はルーティングとその品番、step_* は工程の列(step_parent_product_code は工程の remark 列を公開したもの。材料自身の remark は公開しない)。'
+        'routing_step_id は工程のID(v_ai_routing_step の id と結べる)、routing_* はルーティングとその品番、step_* は工程の列(step_parent_product_code は工程の親品IDから取得する現在のコード。親品未指定は空。材料自身の remark は公開しない)。'
     ),
     'v_ai_user': (
         'ユーザー(ログインアカウント auth_user に、プロフィールと所属の部署名を付けたビュー)。1行=1ユーザー(全行。日付の列はなく、期間では絞らない)。admin アカウントは含まれない。'

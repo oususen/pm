@@ -110,13 +110,14 @@ class Command(BaseCommand):
                   rs.duration_min,
                   rs.parallel_count,
                   rs.parallel_group,
-                  rs.remark
+                  parent.product_code AS parent_product_code
                 FROM m_routing_step rs
                 JOIN m_routing r ON rs.routing_id = r.id
                 JOIN m_product pp ON r.product_id = pp.id
                 JOIN m_process pr ON rs.process_id = pr.id
                 LEFT JOIN m_line l ON rs.line_id = l.id
                 LEFT JOIN m_product op ON rs.output_product_id = op.id
+                LEFT JOIN m_product parent ON rs.parent_product_id = parent.id
                 ORDER BY pp.product_code, r.routing_code, rs.step_no, rs.parallel_group
                 """
             ),

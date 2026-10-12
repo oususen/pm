@@ -203,11 +203,11 @@ def _find_parent_step_ids(step):
         if parent_ids:
             return parent_ids
 
-    if step.remark:
+    if step.parent_product_id:
         parent_ids = list(
             RoutingStep.objects.filter(
                 routing_id=step.routing_id,
-                output_product__product_code=step.remark,
+                output_product_id=step.parent_product_id,
             ).values_list('id', flat=True)
         )
         if parent_ids:
@@ -229,9 +229,9 @@ def _resolve_usage_quantity(step):
         if total is not None:
             return total
 
-    if step.remark:
+    if step.parent_product_id:
         bom_qty = BOMItem.objects.filter(
-            bom__parent_product__product_code=step.remark,
+            bom__parent_product_id=step.parent_product_id,
             child_product_id=step.output_product_id,
         ).order_by('-bom__valid_from', '-bom_id').values_list('quantity', flat=True).first()
         if bom_qty is not None:
@@ -289,8 +289,6 @@ class RoutingStepInlineForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if 'remark' in self.fields:
-            self.fields['remark'].label = '親製品'
         if self.instance and self.instance.pk:
             usage_initial = _resolve_usage_quantity(self.instance)
             if usage_initial is not None:
@@ -343,11 +341,11 @@ class RoutingStepInline(admin.TabularInline):
     formset = RoutingStepInlineFormSet
     extra = 1
     readonly_fields = ['hierarchy_indicator']
-    autocomplete_fields = ['output_product']
+    autocomplete_fields = ['output_product', 'parent_product']
     fields = [
         'hierarchy_indicator', 'step_no', 'parallel_group', 'process', 'line',
         'supplier', 'output_product', 'time_unit', 'lead_time_days', 'duration_min',
-        'usage_quantity', 'remark'
+        'usage_quantity', 'parent_product'
     ]
 
     def get_queryset(self, request):
@@ -376,8 +374,8 @@ class RoutingStepAdmin(admin.ModelAdmin):
     list_display = ['routing_label', 'step_no', 'parallel_group', 'hierarchy_path', 'process', 'line', 'supplier', 'output_product', 'time_unit', 'lead_time_days', 'duration_min']
     list_filter = ['process', 'line', 'supplier', 'time_unit']
     search_fields = ['routing__routing_code', 'routing__product__product_code', 'process__process_code', 'line__line_code']
-    autocomplete_fields = ['output_product']
-    readonly_fields = ['parallel_group', 'hierarchy_path']
+    autocomplete_fields = ['output_product', 'parent_product']
+    readonly_fields = ['parallel_group', 'hierarchy_path', 'remark']
     inlines = [RoutingStepMaterialInline]
 
     def routing_label(self, obj):
@@ -521,7 +519,7 @@ class RoutingAdmin(admin.ModelAdmin):
                     step.time_unit,
                     step.lead_time_days,
                     step.duration_min or '',
-                    step.remark or '',
+                    step.parent_product.product_code if step.parent_product_id else '',
                 ])
 
         response = HttpResponse(

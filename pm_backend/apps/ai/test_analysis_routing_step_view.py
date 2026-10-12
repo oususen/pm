@@ -129,7 +129,7 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
             for part in (
                     '1行は1工程' if text is ANALYSIS_VIEWS[VIEW]['description'] else '1行=1工程',
                     'routing_', 'output_product_', '加工後品', 'parent_product_code', '親品の品番コード',
-                    'v_ai_product', '品番マスタにない値があり得る', 'v_ai_process', 'v_ai_line', 'v_ai_supplier',
+                    'v_ai_product', '現在のコード', 'v_ai_process', 'v_ai_line', 'v_ai_supplier',
                     'parallel_group', 'parallel_count', 'hierarchy_', 'source_bom_item_id', 'start_offset_min',
                     'time_unit', 'DAY=日', 'MINUTE=分', 'lead_time_days', 'duration_min', '未確認',
                     '工程の数', 'v_ai_routing_step_material', 'routing_step_id', '材料のない工程'):
@@ -219,7 +219,7 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
             'id', 'product_id', 'routing_code', 'is_default', 'is_active', 'valid_from_datetime', 'valid_to_datetime'})
         self.assertEqual(cmd.OTHER_VIEW_COLUMNS['m_routing_step'], {
             'duration_min', 'hierarchy_depth', 'hierarchy_path', 'id', 'lead_time_days', 'line_id',
-            'output_product_id', 'parallel_count', 'parallel_group', 'process_id', 'remark', 'routing_id',
+            'output_product_id', 'parallel_count', 'parallel_group', 'process_id', 'parent_product_id', 'routing_id',
             'source_bom_item_id', 'start_offset_min', 'step_no', 'supplier_id', 'time_unit'})
         self.assertEqual(len(cmd.wanted_columns('m_routing')), 7)
         self.assertEqual(len(cmd.wanted_columns('m_routing_step')), 17)
@@ -241,7 +241,7 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
     def test_published_columns_equal_source_columns(self):
         # m_routing_step の17列(結合キー以外はそのまま・remark は別名)と m_routing の列が、そのまま/結合して公開列に出る
         step, routing = cmd.OTHER_VIEW_COLUMNS['m_routing_step'], cmd.OTHER_VIEW_COLUMNS['m_routing']
-        self.assertEqual({s.split('.')[1] for s in SOURCES if s.startswith('s.')}, step)
+        self.assertEqual({s.split('.')[1] for s in SOURCES if s.startswith('s.')} - {'remark'}, step - {'parent_product_id'})
         self.assertEqual({s.split('.')[1] for s in SOURCES if s.startswith('r.')}, routing - {'id'})
 
     def test_migration_is_standard_left_join_without_hidden_columns(self):
@@ -287,7 +287,7 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
     def test_migration_dependency_exists_and_covers_source_columns(self):
         masters = Path(__file__).parent.parent / 'masters' / 'migrations'
         self.assertTrue((masters / '0086_add_is_order_day_to_calendar_day.py').exists())
-        self.assertEqual(sorted(p.name for p in masters.glob('00*.py'))[-1], '0086_add_is_order_day_to_calendar_day.py')
+        self.assertTrue((masters / '0087_routingstep_parent_product.py').exists())
         self.assertTrue((Path(__file__).parent / 'migrations' / '0041_ai_bom_item_view.py').exists())
         for name, column in (
                 ('0043_routingstep_source_bom_item.py', 'source_bom_item'), ('0047_routingstep_supplier.py', 'supplier'),

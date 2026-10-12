@@ -824,3 +824,7 @@ Qwen3 14B・Gemma 4 26Bの失敗の原因が、画面から分からなかった
 - テンプレートはPM本体DBで永続管理し、一時DuckDBへ保存しない。
 - テンプレートの却下理由、置換関係、通知結果を追跡できる。
 - 外部AIへ自動送信する情報は、ビュー定義、公開フィールド、分析目的、集計結果に限る。明細行を送信する場合は、運用規約に従う伏字化と利用者承認を必須とする。
+
+
+### 2026-10-12 親品ID化の準備（開発／本番DB未反映）
+`ai/0051` は `v_ai_routing_step.parent_product_code` と `v_ai_routing_step_material.step_parent_product_code` の取得元を `m_routing_step.parent_product_id` → `m_product.id` のLEFT JOINに変更する。親品未指定はNULL。品番変更後は現在のマスタコードを返し、旧 `remark` を代替参照しない。公開33列／20列の名称・順序、全行公開、元テーブル行数を維持する。ownerの元列SELECTは `remark` から `parent_product_id` に変更する。旧migrationの定義は履歴として維持する。全件データ移行後の定義者付き再作成SQLは `scripts/routing_parent_ai_views_definer.sql.txt`。権限付与／取り消しはBOSS承認後に行う。詳細は `ルーティング親品ID化実装計画.md`。

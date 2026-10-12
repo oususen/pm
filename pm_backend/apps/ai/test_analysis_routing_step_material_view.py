@@ -182,7 +182,7 @@ class RoutingStepMaterialViewDefinitionTest(SimpleTestCase):
         material = cmd.OTHER_VIEW_COLUMNS['m_routing_step_material']
         self.assertEqual({s.split('.')[1] for s in SOURCES if s.startswith('m.')}, material)
         step, routing = cmd.OTHER_VIEW_COLUMNS['m_routing_step'], cmd.OTHER_VIEW_COLUMNS['m_routing']
-        self.assertTrue({s.split('.')[1] for s in SOURCES if s.startswith('s.')} <= step)
+        self.assertTrue({s.split('.')[1] for s in SOURCES if s.startswith('s.')} - {'remark'} <= step)
         self.assertTrue({s.split('.')[1] for s in SOURCES if s.startswith('r.')} <= routing)
 
     def test_migration_is_standard_left_join_without_hidden_columns(self):
@@ -230,7 +230,7 @@ class RoutingStepMaterialViewDefinitionTest(SimpleTestCase):
     def test_migration_dependency_exists_and_covers_source_columns(self):
         masters = Path(__file__).parent.parent / 'masters' / 'migrations'
         self.assertTrue((Path(__file__).parent / 'migrations' / '0042_ai_routing_step_view.py').exists())
-        self.assertEqual(sorted(p.name for p in masters.glob('00*.py'))[-1], '0086_add_is_order_day_to_calendar_day.py')
+        self.assertTrue((masters / '0087_routingstep_parent_product.py').exists())
         text = (masters / '0008_routingstepmaterial.py').read_text(encoding='utf-8')
         for column in ('routing_step', 'component', 'quantity', 'consume_timing'):
             self.assertIn(f"'{column}'", text)

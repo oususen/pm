@@ -43,7 +43,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 ### 5) BOM明細との紐付け
 - 自動生成される `RoutingStep` には、生成元の `BOMItem` を `source_bom_item_id` として保存する。
 - BOM↔Routingの同期時は `source_bom_item_id` を最優先キーとして解決する。
-- `remark`（親製品コード）は表示・補助用途として維持する。
+- 親製品は `parent_product_id`（品番マスタFK）で保存する。`remark` は旧値の復旧用に物理保持するが、表示・同期・計算に使わない。
 
 ## ORDERDEMAND展開での利用
 - 受注展開は `step_no` 昇順 -> `parallel_group` 昇順で処理される。
@@ -55,7 +55,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - `time_unit='DAY'` の場合は `lead_time_days >= 0` を許可する。
 - リードタイムの遡りは稼働日(カレンダ)を考慮して算出する。
 - 一次情報はBOMItemとし、RoutingStepはBOMから生成される派生データとして扱う。
-- BOM↔Routing同期の紐付けはFK（`source_bom_item_id`）優先に段階移行し、`remark` は表示情報として維持する（詳細: `仕様書/LT同期改善チケット.md`）。
+- BOM↔Routing同期の紐付けはFK（`source_bom_item_id`）優先に段階移行し、親品は `parent_product_id` を正規参照とし、`remark` は復旧用旧値のみ保持する（詳細: `仕様書/LT同期改善チケット.md`）。
 - BOM明細削除時は、削除前に影響候補の `RoutingStep` 一覧を表示する。
 - 一覧のうち `source_bom_item_id = 対象BOMItem.id` の工程は **自動削除対象** とし、利用者がチェックを入れた場合のみ `BOMItem` 削除と同時に削除する。
 - 一覧のうち `source_bom_item_id` で一致しない **推定一致** の工程は **手動確認対象** とし、自動削除しない。
@@ -126,7 +126,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 ### 工程一覧（右ペイン）
 - ソート順は `step_no` 昇順（同値時は `parallel_group` 昇順）。
 - ヘッダ行はスクロール時に固定表示する。
-- 旧「備考」列は「親製品」表示に変更し、値は `m_routing_step.remark`（親製品コード）を表示する。
+- 旧「備考」列は「親製品」表示に変更し、値は `m_routing_step.parent_product_id` から取得した現在の品番コードを表示する。
 - `hierarchy_path`（階層）と `parallel_group`（並列G）は表示専用（編集不可）とする。
 - `使用個数` は整数で編集可能とする。
 - 右ペイン上部で `既定 / 有効 / 有効開始日時 / 有効終了日時` を編集・保存できる。
@@ -144,7 +144,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
   - `時間単位(time_unit)`（`DAY`/`MINUTE`）
   - `LT(日)`（`DAY`時必須, 0以上整数）
   - `所要時間(分)`（`MINUTE`時必須, 1以上整数）
-  - `親製品(remark)`（任意）
+  - `親製品(parent_product)`（任意、品番マスタID）
 - 保存は `POST /api/routing-steps/` で行い、成功時は工程一覧を再読込する。
 
 ### ルーティング工程追加時の購買ルール（2026-08-24追加）
@@ -192,7 +192,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
   - ルーティングヘッダの作成 / 更新 / 削除
   - ルーティング工程の作成 / 更新 / 削除
 - ヘッダ更新の記録対象は `routing_code / description / is_default / is_active / valid_from_datetime / valid_to_datetime`。
-- 工程更新の記録対象は `step_no / hierarchy_path / parallel_group / process / line / supplier / output_product / time_unit / lead_time_days / duration_min / remark`。
+- 工程更新の記録対象は `step_no / hierarchy_path / parallel_group / process / line / supplier / output_product / time_unit / lead_time_days / duration_min / parent_product_id / parent_product_code`。
 - 履歴はバックエンドで自動保存し、画面保存時にフロント側で個別登録処理は行わない。
 - 取得APIは `GET /api/routings/{routing_id}/history/` とする。
 - 保存先テーブルは `t_routing_change_history` とする。
@@ -201,7 +201,7 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - APIレスポンスで `routing-steps` の各行に `usage_quantity` を含める。
 - 算出優先順位:
   1. `hierarchy_path` から直上親工程を特定し、親工程の `m_routing_step_material` で `component=当該step.output_product` の数量合計
-  2. `remark`（親製品コード）で親工程を特定し、同条件で数量合計
+  2. `parent_product_id` と親工程の `output_product_id` で親工程を特定し、同条件で数量合計
   3. 最上位等で親工程が無い場合は、親製品BOM（`m_bom_item`）の `quantity` で補完
 
 ## BOM階層図の表示とExcel出力
@@ -300,3 +300,13 @@ BOMからルーティングを自動生成する際のルールをまとめる�
 - ルーティングヘッダ / ルーティング工程の作成・更新・削除時に、`t_routing_change_history` へ変更履歴を自動保存するようにした。
 - `/masters/routing` に `変更履歴` ボタンを追加し、選択中ルーティングの履歴をモーダルで確認できるようにした。
 - `GET /api/routings/{routing_id}/history/` を追加し、記録日時・操作・対象・変更者・変更内容を返すようにした。
+
+
+## 親品IDへの切替（2026-10-12、コード準備・DB未反映）
+- `RoutingStep.parent_product` は品番マスタへのNULL可・`PROTECT` FK。親品任意と親品＝加工後品の中間工程を維持する。
+- POST/PATCHは `parent_product` に品番マスタIDまたはNULLを送る。応答の `parent_product_code` / `parent_product_name` は読取専用で現在のマスタ値を返す。旧 `remark` 入力は400で拒否する。
+- 非自己親で実在する直上工程がある場合、親品IDとその加工後品IDの不一致は保存不可。最上位・final・親工程欠落の既存例外へ新しい推定補完は追加しない。
+- 自動生成・再帰追加は親品IDを保存。品番コード変更は表示と参照へ自動反映し、参照中の品番削除は拒否する（APIは400）。廃止は無効化で扱う。
+- 使用個数、BOM同期、管理画面、受注展開の中間工程再配置は既存の優先順位を維持してID比較する。旧remarkへの代替参照は追加しない。
+- 新方式は既存親品の全件移行後に切り替える。schema `masters/0087`、全件照合コマンド、AIビュー `ai/0051` の手順と試験・保留事項は `ルーティング親品ID化実装計画.md` を参照。
+- BOSS指示により親品ID化だけ先行する。既存BOM明細を複数版の工程が参照し、編集/追加が複数ルーティングへ同期される問題は今回解消しない。BOM新版の保護と更新対象版の選択は単位2として保留し、無条件に現在BOMを過去ルーティングへ新たに同期する処理は追加しない。

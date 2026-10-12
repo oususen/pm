@@ -794,7 +794,7 @@ class OrderExpansionService:
             children_map.setdefault(parent_path, []).append(path)
 
         # 中間工程の階層補正: 非final・加工後品目=ルーティング製品・hierarchy_path未設定
-        # の工程を仮想パスでツリーに組み込み、remark(親製品コード)で子部品を再配置
+        # の工程を仮想パスでツリーに組み込み、parent_product_id(親製品ID)で子部品を再配置
         _orphan_vpath_map = {}
         _existing_step_ids = {s.id for s in path_step_map.values()}
         _orphan_int_steps = [
@@ -817,17 +817,17 @@ class OrderExpansionService:
             _output_to_path = {}
             for _p, _s in path_step_map.items():
                 if _s.output_product_id and _s.output_product:
-                    _output_to_path[_s.output_product.product_code] = _p
+                    _output_to_path[_s.output_product_id] = _p
             for _rp in list(children_map.get(None, [])):
                 if _rp.startswith('_oi_'):
                     continue
                 _rs = path_step_map.get(_rp)
                 if not _rs:
                     continue
-                _remark = (_rs.remark or '').strip()
-                if not _remark:
+                _parent_id = _rs.parent_product_id
+                if not _parent_id:
                     continue
-                _parent_path = _output_to_path.get(_remark)
+                _parent_path = _output_to_path.get(_parent_id)
                 if _parent_path and _parent_path != _rp:
                     children_map[None].remove(_rp)
                     children_map.setdefault(_parent_path, []).append(_rp)

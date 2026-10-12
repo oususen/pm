@@ -165,7 +165,7 @@ ANALYSIS_VIEWS = {
             'line_id・line_code・line_name=ラインのID・コード・名称(line_idはラインマスタビューv_ai_lineのidと結べる。空の行がありうる)、'
             'supplier_id・supplier_code・supplier_name=外作先(仕入先)のID・コード・名称(supplier_idは仕入先マスタビューv_ai_supplierのidと結べる。空の行がありうる)、'
             'output_product_id・output_product_code・output_product_name=工程の加工後品のID・コード・名称(output_product_idは品番マスタビューv_ai_productのidと結べる。空の行がありうる)、'
-            'parent_product_code=工程の親品の品番コード(文字列。工程のremark列をこの名前で公開している。v_ai_productのproduct_codeと結べるが、品番マスタにない値があり得る)、'
+            'parent_product_code=工程の親品の品番コード(親品IDで品番マスタを参照して取得する現在のコード。親品未指定は空。v_ai_productのproduct_codeと結べる)、'
             'time_unit=時間単位(DAY=日、MINUTE=分)、lead_time_days=リードタイム(日)、start_offset_min=開始オフセット(分。空の行がありうる)、duration_min=所要時間(分。空の行がありうる)。'
             'parallel_group=並列グループ、parallel_count=並列数、hierarchy_depth=工程階層深さ、hierarchy_path=工程階層パス、'
             'source_bom_item_id=工程の元になったBOM明細のID(BOM明細ビューv_ai_bom_itemのidと結べる。空の行は、元のBOM明細が不明で結べない)。'
@@ -205,7 +205,7 @@ ANALYSIS_VIEWS = {
             'routing_product_id・routing_product_code・routing_product_name=ルーティングの品番のID・コード・名称(routing_product_idは品番マスタビューv_ai_productのidと結べる)、'
             'step_no=工程番号、step_process_id・step_process_code・step_process_name=工程のID・コード・名称(step_process_idは工程マスタビューv_ai_processのidと結べる。空の行がありうる)、'
             'step_output_product_id・step_output_product_code・step_output_product_name=工程の加工後品のID・コード・名称(空の行がありうる)、'
-            'step_parent_product_code=工程の親品の品番コード(文字列。工程のremark列をこの名前で公開している。材料自身のremarkは公開しない。品番マスタにない値があり得る)、'
+            'step_parent_product_code=工程の親品の品番コード(親品IDで品番マスタを参照して取得する現在のコード。親品未指定は空。材料自身のremarkは公開しない)、'
             'component_id・component_code・component_name=消費する部品の品番のID・コード・名称(component_idは品番マスタビューv_ai_productのidと結べる)、'
             'quantity=材料の数量、consume_timing=消費タイミング(START=工程開始、END=工程完了)。'
         ),

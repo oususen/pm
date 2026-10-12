@@ -1,0 +1,77 @@
+-- 未実行。全件親品ID移行後にBOSS承認で実行する。本番アカウント/DBは直前に確認する。
+GRANT SELECT (`parent_product_id`) ON `m_routing_step` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW v_ai_routing_step AS
+SELECT
+    s.id,
+    s.routing_id,
+    r.routing_code,
+    r.product_id AS routing_product_id,
+    rp.product_code AS routing_product_code,
+    rp.product_name AS routing_product_name,
+    r.is_default AS routing_is_default,
+    r.is_active AS routing_is_active,
+    r.valid_from_datetime AS routing_valid_from_datetime,
+    r.valid_to_datetime AS routing_valid_to_datetime,
+    s.step_no,
+    s.parallel_group,
+    s.parallel_count,
+    s.hierarchy_depth,
+    s.hierarchy_path,
+    s.process_id,
+    pr.process_code,
+    pr.process_name,
+    s.line_id,
+    l.line_code,
+    l.line_name,
+    s.supplier_id,
+    sp.supplier_code,
+    sp.supplier_name,
+    s.output_product_id,
+    op.product_code AS output_product_code,
+    op.product_name AS output_product_name,
+    pp.product_code AS parent_product_code,
+    s.source_bom_item_id,
+    s.time_unit,
+    s.lead_time_days,
+    s.start_offset_min,
+    s.duration_min
+FROM m_routing_step s
+LEFT JOIN m_routing r ON r.id = s.routing_id
+LEFT JOIN m_product rp ON rp.id = r.product_id
+LEFT JOIN m_process pr ON pr.id = s.process_id
+LEFT JOIN m_line l ON l.id = s.line_id
+LEFT JOIN m_supplier sp ON sp.id = s.supplier_id
+LEFT JOIN m_product op ON op.id = s.output_product_id
+LEFT JOIN m_product pp ON pp.id = s.parent_product_id;
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW v_ai_routing_step_material AS
+SELECT
+    m.id,
+    m.routing_step_id,
+    s.routing_id,
+    r.routing_code,
+    r.product_id AS routing_product_id,
+    rp.product_code AS routing_product_code,
+    rp.product_name AS routing_product_name,
+    s.step_no,
+    s.process_id AS step_process_id,
+    pr.process_code AS step_process_code,
+    pr.process_name AS step_process_name,
+    s.output_product_id AS step_output_product_id,
+    op.product_code AS step_output_product_code,
+    op.product_name AS step_output_product_name,
+    pp.product_code AS step_parent_product_code,
+    m.component_id,
+    cp.product_code AS component_code,
+    cp.product_name AS component_name,
+    m.quantity,
+    m.consume_timing
+FROM m_routing_step_material m
+LEFT JOIN m_routing_step s ON s.id = m.routing_step_id
+LEFT JOIN m_routing r ON r.id = s.routing_id
+LEFT JOIN m_product rp ON rp.id = r.product_id
+LEFT JOIN m_process pr ON pr.id = s.process_id
+LEFT JOIN m_product op ON op.id = s.output_product_id
+LEFT JOIN m_product cp ON cp.id = m.component_id
+LEFT JOIN m_product pp ON pp.id = s.parent_product_id;
+-- 他ビューがremarkを参照していないことを確認後、旧列のSELECTを取り消す。
+REVOKE SELECT (`remark`) ON `m_routing_step` FROM 'pm_ai_view_owner'@'localhost';

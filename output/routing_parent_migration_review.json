@@ -1,0 +1,807 @@
+{
+  "checked_at_local": "2026-10-12T13:46:24",
+  "database": "pm_db",
+  "read_only": true,
+  "counts": {
+    "total_steps": 7612,
+    "registered_parent_codes": 7576,
+    "unregistered_parent_codes": 36,
+    "original_scope": 33,
+    "additional_scope": 3
+  },
+  "registered_parent_vs_source_conflicts": [],
+  "registered_parent_vs_actual_hierarchy_parent_conflicts": [],
+  "prior_24_report": "抽出条件の誤り。ドットなしの最上位・final・空パスを空階層の工程へ誤結合していた。実際の直上親を持つ工程に限定して再確認した。",
+  "mapping_candidates": [
+    {
+      "step_id": 1147,
+      "routing_id": 63,
+      "output_product_id": 690,
+      "current_parent_code": "YD40006267",
+      "current_parent_id": null,
+      "hierarchy_path": "24.1.2.10.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1172,
+      "hierarchy_parent_product_id": 689,
+      "hierarchy_parent_code": "YD40006267G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 619,
+          "bom_id": 115
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1148,
+      "routing_id": 63,
+      "output_product_id": 307,
+      "current_parent_code": "YD40006267",
+      "current_parent_id": null,
+      "hierarchy_path": "24.1.2.10.2",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1172,
+      "hierarchy_parent_product_id": 689,
+      "hierarchy_parent_code": "YD40006267G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 620,
+          "bom_id": 115
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1182,
+      "routing_id": 63,
+      "output_product_id": 672,
+      "current_parent_code": "YD40005598S",
+      "current_parent_id": null,
+      "hierarchy_path": "24.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1206,
+      "hierarchy_parent_product_id": 688,
+      "hierarchy_parent_code": "YD60008491S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 597,
+          "bom_id": 111
+        }
+      ],
+      "scope": "additional_review"
+    },
+    {
+      "step_id": 1212,
+      "routing_id": 64,
+      "output_product_id": 307,
+      "current_parent_code": "YD40006267",
+      "current_parent_id": null,
+      "hierarchy_path": "22.1.2.10.2",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1238,
+      "hierarchy_parent_product_id": 689,
+      "hierarchy_parent_code": "YD40006267G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 620,
+          "bom_id": 115
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1248,
+      "routing_id": 64,
+      "output_product_id": 672,
+      "current_parent_code": "YD40005598S",
+      "current_parent_id": null,
+      "hierarchy_path": "22.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1270,
+      "hierarchy_parent_product_id": 3316,
+      "hierarchy_parent_code": "YD60009848S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 3658,
+          "bom_id": 912
+        }
+      ],
+      "scope": "additional_review"
+    },
+    {
+      "step_id": 1279,
+      "routing_id": 65,
+      "output_product_id": 307,
+      "current_parent_code": "YD40006267",
+      "current_parent_id": null,
+      "hierarchy_path": "23.1.2.10.2",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1305,
+      "hierarchy_parent_product_id": 689,
+      "hierarchy_parent_code": "YD40006267G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 620,
+          "bom_id": 115
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1315,
+      "routing_id": 65,
+      "output_product_id": 672,
+      "current_parent_code": "YD40005598S",
+      "current_parent_id": null,
+      "hierarchy_path": "23.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1338,
+      "hierarchy_parent_product_id": 3317,
+      "hierarchy_parent_code": "YD60014764S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 3657,
+          "bom_id": 911
+        }
+      ],
+      "scope": "additional_review"
+    },
+    {
+      "step_id": 1379,
+      "routing_id": 66,
+      "output_product_id": 696,
+      "current_parent_code": "YD40006531S",
+      "current_parent_id": null,
+      "hierarchy_path": "20.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1399,
+      "hierarchy_parent_product_id": 723,
+      "hierarchy_parent_code": "YD60011305S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 710,
+          "bom_id": 125
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1449,
+      "routing_id": 67,
+      "output_product_id": 730,
+      "current_parent_code": "YD40005551S",
+      "current_parent_id": null,
+      "hierarchy_path": "25.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1474,
+      "hierarchy_parent_product_id": 3318,
+      "hierarchy_parent_code": "YD60009874S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 3659,
+          "bom_id": 913
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1622,
+      "routing_id": 69,
+      "output_product_id": 730,
+      "current_parent_code": "YD40005551S",
+      "current_parent_id": null,
+      "hierarchy_path": "24.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1623,
+      "hierarchy_parent_product_id": 767,
+      "hierarchy_parent_code": "YD60009783S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 794,
+          "bom_id": 146
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 1769,
+      "routing_id": 71,
+      "output_product_id": 779,
+      "current_parent_code": "YD40005997S",
+      "current_parent_id": null,
+      "hierarchy_path": "23.1",
+      "source_bom_item_id": null,
+      "source_parent_id": null,
+      "hierarchy_parent_step_id": 1770,
+      "hierarchy_parent_product_id": 789,
+      "hierarchy_parent_code": "YD60010942S",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 908,
+          "bom_id": 165
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 8433,
+      "routing_id": 119,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 8434,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 8631,
+      "routing_id": 120,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.4.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 8632,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 8674,
+      "routing_id": 121,
+      "output_product_id": 1933,
+      "current_parent_code": "YD40006849-00S",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.1.1.2.2.1.1",
+      "source_bom_item_id": 2318,
+      "source_parent_id": 1931,
+      "hierarchy_parent_step_id": 8675,
+      "hierarchy_parent_product_id": 1931,
+      "hierarchy_parent_code": "YD40006849-00SG",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2318,
+          "bom_id": 363
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 8830,
+      "routing_id": 121,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 8831,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9002,
+      "routing_id": 122,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.2.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 9003,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9192,
+      "routing_id": 123,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.4.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 9193,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9374,
+      "routing_id": 124,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 9375,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9544,
+      "routing_id": 125,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 9545,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9584,
+      "routing_id": 126,
+      "output_product_id": 1933,
+      "current_parent_code": "YD40006849-00S",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.1.1.2.2.1.1",
+      "source_bom_item_id": 2318,
+      "source_parent_id": 1931,
+      "hierarchy_parent_step_id": 9585,
+      "hierarchy_parent_product_id": 1931,
+      "hierarchy_parent_code": "YD40006849-00SG",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2318,
+          "bom_id": 363
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9763,
+      "routing_id": 126,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.4.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 9764,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9804,
+      "routing_id": 127,
+      "output_product_id": 1933,
+      "current_parent_code": "YD40006849-00S",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.1.1.2.2.1.1",
+      "source_bom_item_id": 2318,
+      "source_parent_id": 1931,
+      "hierarchy_parent_step_id": 9805,
+      "hierarchy_parent_product_id": 1931,
+      "hierarchy_parent_code": "YD40006849-00SG",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2318,
+          "bom_id": 363
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 9963,
+      "routing_id": 127,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 9964,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 10214,
+      "routing_id": 129,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839B",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 10215,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 10917,
+      "routing_id": 230,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 10918,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 11087,
+      "routing_id": 231,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 11088,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 11285,
+      "routing_id": 232,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.4.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 11286,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 11479,
+      "routing_id": 233,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.4.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 11480,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 11678,
+      "routing_id": 234,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 11679,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 11850,
+      "routing_id": 235,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.2.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 11851,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 12028,
+      "routing_id": 236,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 12029,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 12198,
+      "routing_id": 237,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 12199,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 12396,
+      "routing_id": 238,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 12397,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 12617,
+      "routing_id": 239,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.4.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 12618,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 12791,
+      "routing_id": 240,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 12792,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    },
+    {
+      "step_id": 15173,
+      "routing_id": 655,
+      "output_product_id": 837,
+      "current_parent_code": "YD00000839BG",
+      "current_parent_id": null,
+      "hierarchy_path": "1.1.2.4.5.1.2.7.1",
+      "source_bom_item_id": 2091,
+      "source_parent_id": 1765,
+      "hierarchy_parent_step_id": 15174,
+      "hierarchy_parent_product_id": 1765,
+      "hierarchy_parent_code": "YD00000839G",
+      "material_match_count": 1,
+      "matching_bom_items": [
+        {
+          "id": 2091,
+          "bom_id": 275
+        }
+      ],
+      "scope": "original_33"
+    }
+  ],
+  "known_root_exception": {
+    "step_id": 16629,
+    "parent_code": "YD40001049-00B",
+    "reason": "階層パス10だが、同一ルーティングの加工後品YD40001049-00BおよびBOM1551の明細5083と一致。既存親品を保持し、階層は変更しない。"
+  },
+  "migration_policy": "登録済み親品はIDへ変換。未登録36工程は承認済み候補対応表を実行直前に再照合する。元BOMの親子・実在階層親・補正候補の材料/BOMが不一致なら全件更新停止。旧remark保持。DB更新・migrationは未実施。",
+  "missing_hierarchy_parent_exceptions": [
+    {
+      "step_id": 13525,
+      "routing_id": 382,
+      "parent_code": "7046930-04S",
+      "parent_product_id": 1525,
+      "source_bom_item_id": 3759,
+      "source_bom_id": 1001,
+      "classification": "品番マスタ・元BOM・現在BOMが一致するため既存親品ID1525を保持する。直上親工程が存在せず親工程材料は未確認。階層修正・工程追加は今回の移行対象外。"
+    },
+    {
+      "step_id": 17314,
+      "routing_id": 382,
+      "parent_code": "7046930-04S",
+      "parent_product_id": 1525,
+      "source_bom_item_id": 5381,
+      "source_bom_id": 1001,
+      "classification": "品番マスタ・元BOM・現在BOMが一致するため既存親品ID1525を保持する。直上親工程が存在せず親工程材料は未確認。階層修正・工程追加は今回の移行対象外。"
+    }
+  ],
+  "checks_not_executed": [
+    "修正SQLの実行・DB更新",
+    "スキーマmigration",
+    "画面・API・AIビューの実装と動作検証",
+    "本番DB照合・本番反映"
+  ],
+  "mapping_approval": "元33工程に追加3工程を含める方針はBOSS承認済み（2026-10-12）。36工程の候補を移行コマンド準備の対象とする。",
+  "approved_implementation_scope": "親品ID化だけ先行。BOM新版の保護と更新対象版選択はBOSS指示で保留。DB更新とmigration実行はまだ行わない。"
+}

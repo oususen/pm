@@ -6,6 +6,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from django.http import HttpResponse
@@ -103,7 +104,8 @@ ROUTING_STEP_HISTORY_FIELD_LABELS = {
     'time_unit': '時間単位',
     'lead_time_days': 'LT(日)',
     'duration_min': '所要時間(分)',
-    'remark': '親製品',
+    'parent_product_id': '親製品ID',
+    'parent_product_code': '親製品',
 }
 
 
@@ -153,7 +155,8 @@ def build_routing_step_snapshot(step):
         'time_unit': str(getattr(step, 'time_unit', '') or ''),
         'lead_time_days': getattr(step, 'lead_time_days', None),
         'duration_min': getattr(step, 'duration_min', None),
-        'remark': str(getattr(step, 'remark', '') or ''),
+        'parent_product_id': step.parent_product_id,
+        'parent_product_code': str(getattr(step.parent_product, 'product_code', '') or ''),
     }
 
 
@@ -406,6 +409,12 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     ordering_fields = ['product_code', 'created_at']
     ordering = ['product_code']
 
+    def perform_destroy(self, instance):
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise serializers.ValidationError({'detail': '親製品として参照中など、関連データがある品番は削除できません。廃止する場合は無効化してください。'})
+
     @action(detail=False, methods=['get'], url_path='export-preview')
     def export_preview(self, request):
         mode = str(request.query_params.get('mode') or 'provide').strip().lower()
@@ -527,11 +536,11 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             steps = list(getattr(routing, 'steps', []).all())
             if not steps:
                 continue
-            step_by_output_code = {}
+            step_by_output_id = {}
             for candidate_step in steps:
-                output_code = str(getattr(getattr(candidate_step, 'output_product', None), 'product_code', '') or '').strip()
-                if output_code and output_code not in step_by_output_code:
-                    step_by_output_code[output_code] = candidate_step
+                output_code = candidate_step.output_product_id
+                if output_code and output_code not in step_by_output_id:
+                    step_by_output_id[output_code] = candidate_step
 
             for idx, step in enumerate(steps):
                 if line_id and str(step.line_id or '') != line_id:
@@ -540,8 +549,8 @@ class ProductViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                     continue
                 if supplier_code and resolve_step_supplier_code(step) != supplier_code:
                     continue
-                parent_code = str(getattr(step, 'remark', '') or '').strip()
-                parent_step = step_by_output_code.get(parent_code)
+                parent_id = step.parent_product_id
+                parent_step = step_by_output_id.get(parent_id)
                 if mode == 'use':
                     processed_product = getattr(step, 'output_product', None)
                     if not processed_product:
@@ -4222,7 +4231,6 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             path_str = ".".join(str(p) for p in path) if path else "1"
             step_no = (max_depth - len(path) + 1) * 1000
             parallel_group = idx  # 通し番号で一意性を保証
-            parent_product_code = parent_product.product_code if parent_product else ''
 
             # BUY品・SUBCON品(仕入先あり)は仕入先ラインを自動設定
             if item.sourcing_type == 'BUY' and item.supplier_id:
@@ -4232,7 +4240,6 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step_time_unit = 'DAY'
                 step_lead_time_days = item.lead_time_days or 1
                 step_duration_min = None
-                step_remark = parent_product_code
             elif item.sourcing_type == 'SUBCON' and item.supplier_id:
                 # 外作品: 購買と同様に仕入先ラインを使い、工程は外作工程(G)
                 gaisaku_line, gaisaku_process = self._get_supplier_gaisaku_line_and_process(item.supplier)
@@ -4241,7 +4248,6 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 step_time_unit = 'DAY'
                 step_lead_time_days = item.lead_time_days or 1
                 step_duration_min = None
-                step_remark = parent_product_code
             else:
                 step_process = item.process
                 step_line = item.line
@@ -4250,7 +4256,6 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 # ライン最終品では両方同時に必要になるため、time_unit で片方を0/Noneに落とさず両方コピーする
                 step_lead_time_days = int(item.lead_time_days or 0)
                 step_duration_min = item.duration_min
-                step_remark = parent_product_code
 
             step = RoutingStep.objects.create(
                 routing=routing,
@@ -4265,13 +4270,12 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 time_unit=step_time_unit,
                 lead_time_days=step_lead_time_days,
                 duration_min=step_duration_min,
-                remark=step_remark
+                parent_product=parent_product
             )
             created_steps.append((item, step))
 
         # Append final step if provided
         if final_process:
-            final_parent_product_code = bom.parent_product.product_code if bom.parent_product_id else ''
             max_step_no = max([s.step_no for _, s in created_steps], default=0)
             RoutingStep.objects.create(
                 routing=routing,
@@ -4284,7 +4288,7 @@ class BOMViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 time_unit=final_time_unit,
                 lead_time_days=int(final_lead_time_days or 0),
                 duration_min=int(final_duration_min) if final_time_unit == 'MINUTE' else None,
-                remark=final_parent_product_code
+                parent_product=bom.parent_product
             )
 
         # 自動で工程別部品を付与（対象ステップの商品に紐づく子BOMの明細を消費部品とする）
@@ -4538,13 +4542,13 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         if bom is None or not bom_item.child_product_id:
             return RoutingStep.objects.none()
         parent_product = getattr(bom, 'parent_product', None)
-        parent_code = getattr(parent_product, 'product_code', None)
-        if not parent_code:
+        parent_id = getattr(parent_product, 'id', None)
+        if not parent_id:
             return RoutingStep.objects.none()
 
-        # BOMから自動生成されたRoutingStepは remark に親製品コードを保持している
+        # 親品の正規参照IDで既存の推定照合を行う
         base_qs = RoutingStep.objects.filter(
-            remark=parent_code,
+            parent_product_id=parent_id,
             output_product_id=bom_item.child_product_id,
             routing__is_active=True,
         )
@@ -4772,7 +4776,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         return f"{parent_path}.{max_idx + 1}"
 
     def _create_steps_recursive(self, bom_item, parent_step, routing,
-                                parent_product_code, visited_bom_ids, collector):
+                                parent_product_id, visited_bom_ids, collector):
         new_step_no = int(parent_step.step_no * 0.9)
         if new_step_no <= 0:
             raise ValueError(
@@ -4803,7 +4807,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             time_unit=time_unit,
             lead_time_days=lt_days,
             duration_min=dur_min,
-            remark=parent_product_code,
+            parent_product_id=parent_product_id,
         )
         collector.append((bom_item, new_step))
 
@@ -4813,10 +4817,10 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             child_items = BOMItem.objects.filter(bom=child_bom).select_related(
                 'child_product', 'process', 'line', 'supplier',
             ).order_by('id')
-            child_product_code = bom_item.child_product.product_code
+            child_product_id = bom_item.child_product_id
             for ci in child_items:
                 self._create_steps_recursive(
-                    ci, new_step, routing, child_product_code, next_visited, collector,
+                    ci, new_step, routing, child_product_id, next_visited, collector,
                 )
 
     def _add_bom_item_to_routings(self, bom_item: BOMItem):
@@ -4838,7 +4842,7 @@ class BOMItemViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
             self._create_steps_recursive(
                 bom_item, parent_step, routing,
-                parent_product.product_code, set(), collector,
+                parent_product.id, set(), collector,
             )
 
             if collector:
@@ -5063,6 +5067,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
         'line',
         'supplier',
         'output_product',
+        'parent_product',
         'source_bom_item',
     ).all()
     serializer_class = RoutingStepSerializer
@@ -5120,12 +5125,12 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if src and getattr(src, 'bom_id', None):
                 return src.bom
 
-        parent_code = str(getattr(step, 'remark', '') or '').strip()
-        if not parent_code:
+        parent_id = step.parent_product_id
+        if not parent_id:
             return None
 
         base_qs = BOM.objects.filter(
-            parent_product__product_code=parent_code,
+            parent_product_id=parent_id,
             is_active=True,
         )
         if not base_qs.exists():
@@ -5256,11 +5261,11 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 ).values_list('id', flat=True)
             )
 
-        if not parent_step_ids and step.remark:
+        if not parent_step_ids and step.parent_product_id:
             parent_step_ids = list(
                 RoutingStep.objects.filter(
                     routing_id=step.routing_id,
-                    output_product__product_code=step.remark,
+                    output_product_id=step.parent_product_id,
                 ).values_list('id', flat=True)
             )
 
@@ -5301,11 +5306,11 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
                 ).values_list('id', flat=True)
             )
 
-        if not parent_step_ids and step.remark:
+        if not parent_step_ids and step.parent_product_id:
             parent_step_ids = list(
                 RoutingStep.objects.filter(
                     routing_id=step.routing_id,
-                    output_product__product_code=step.remark,
+                    output_product_id=step.parent_product_id,
                 ).values_list('id', flat=True)
             )
 
@@ -5339,7 +5344,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
     def _sync_step_bom_linkage(self, step: RoutingStep, usage_quantity: Decimal = None):
         old_bom_item_id = getattr(step, 'source_bom_item_id', None)
 
-        if not step.output_product_id or not step.remark:
+        if not step.output_product_id or not step.parent_product_id:
             if old_bom_item_id:
                 step.source_bom_item = None
                 step.save(update_fields=['source_bom_item', 'updated_at'])
@@ -5461,16 +5466,17 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             if changed_fields:
                 step.save(update_fields=changed_fields + ['updated_at'])
 
+    @transaction.atomic
     def perform_update(self, serializer):
         before_step = RoutingStep.objects.select_related(
-            'routing', 'process', 'line', 'supplier', 'output_product',
+            'routing', 'process', 'line', 'supplier', 'output_product', 'parent_product',
         ).get(pk=serializer.instance.pk)
         before_data = build_routing_step_snapshot(before_step)
         usage_quantity = self._parse_usage_quantity_from_request()
         sync_fields = [key for key in ('lead_time_days', 'duration_min') if key in serializer.validated_data]
         step = serializer.save()
         self._normalize_final_step_flags(step.routing_id)
-        if any(key in serializer.validated_data for key in ('output_product', 'remark')):
+        if any(key in serializer.validated_data for key in ('output_product', 'parent_product')):
             self._sync_step_bom_linkage(step, usage_quantity)
         if sync_fields:
             self._sync_step_fields_to_bom(step, sync_fields)
@@ -5478,7 +5484,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             self._sync_step_usage_quantity(step, usage_quantity)
         step.refresh_from_db()
         step = RoutingStep.objects.select_related(
-            'routing', 'process', 'line', 'supplier', 'output_product',
+            'routing', 'process', 'line', 'supplier', 'output_product', 'parent_product',
         ).get(pk=step.pk)
         after_data = build_routing_step_snapshot(step)
         create_routing_history(
@@ -5497,13 +5503,14 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
             ),
         )
 
+    @transaction.atomic
     def perform_create(self, serializer):
         usage_quantity = self._parse_usage_quantity_from_request()
         step = serializer.save()
         self._normalize_final_step_flags(step.routing_id)
 
-        # BOMItem自動作成/更新: 親製品(remark)と加工後品目(output_product)が指定されている場合
-        if step.output_product_id and step.remark:
+        # BOMItem自動作成/更新: 親製品(parent_product)と加工後品目(output_product)が指定されている場合
+        if step.output_product_id and step.parent_product_id:
             self._sync_step_bom_linkage(step, usage_quantity)
         else:
             # BOM自動作成が不要な場合は既存のLT/所要時間同期のみ
@@ -5513,7 +5520,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
         step.refresh_from_db()
         step = RoutingStep.objects.select_related(
-            'routing', 'process', 'line', 'supplier', 'output_product',
+            'routing', 'process', 'line', 'supplier', 'output_product', 'parent_product',
         ).get(pk=step.pk)
         after_data = build_routing_step_snapshot(step)
         create_routing_history(
@@ -5528,7 +5535,7 @@ class RoutingStepViewSet(MastersPermissionMixin, viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         step = RoutingStep.objects.select_related(
-            'routing', 'process', 'line', 'supplier', 'output_product',
+            'routing', 'process', 'line', 'supplier', 'output_product', 'parent_product',
         ).get(pk=instance.pk)
         before_data = build_routing_step_snapshot(step)
         create_routing_history(

@@ -63,7 +63,7 @@ OTHER_VIEW_COLUMNS = {
     },
     'm_routing_step': {
         'duration_min', 'hierarchy_depth', 'hierarchy_path', 'id', 'lead_time_days', 'line_id', 'output_product_id',
-        'parallel_count', 'parallel_group', 'process_id', 'remark', 'routing_id', 'source_bom_item_id',
+        'parallel_count', 'parallel_group', 'process_id', 'parent_product_id', 'routing_id', 'source_bom_item_id',
         'start_offset_min', 'step_no', 'supplier_id', 'time_unit',
     },
     'm_routing_step_material': {'id', 'routing_step_id', 'component_id', 'quantity', 'consume_timing'},

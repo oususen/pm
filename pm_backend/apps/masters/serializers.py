@@ -542,6 +542,8 @@ class BOMSerializer(serializers.ModelSerializer):
 
 
 class RoutingStepSerializer(serializers.ModelSerializer):
+    parent_product_code = serializers.CharField(source='parent_product.product_code', read_only=True, default=None)
+    parent_product_name = serializers.CharField(source='parent_product.product_name', read_only=True, default=None)
     process_name = serializers.CharField(source='process.process_name', read_only=True, default='')
     line_name = serializers.CharField(source='line.line_name', read_only=True)
     output_product_code = serializers.CharField(source='output_product.product_code', read_only=True)
@@ -560,8 +562,14 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoutingStep
         fields = '__all__'
+        read_only_fields = ['remark']
 
     _HIERARCHY_PATH_RE = re.compile(r'^[0-9]+(\.[0-9]+)*$')
+
+    def to_internal_value(self, data):
+        if 'remark' in data:
+            raise serializers.ValidationError({'remark': '親製品はparent_productに品番マスタIDを指定してください。remarkは旧値保存専用です。'})
+        return super().to_internal_value(data)
 
     def _validate_hierarchy_path(self, attrs):
         hp = attrs.get('hierarchy_path')
@@ -599,6 +607,21 @@ class RoutingStepSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         self._validate_hierarchy_path(attrs)
+
+        # 親未指定・自己親の中間工程は既存仕様として許可する。
+        parent = attrs.get('parent_product', getattr(self.instance, 'parent_product', None))
+        output = attrs.get('output_product', getattr(self.instance, 'output_product', None))
+        routing = attrs.get('routing', getattr(self.instance, 'routing', None))
+        path = attrs.get('hierarchy_path', getattr(self.instance, 'hierarchy_path', '')) or ''
+        from django.core.exceptions import ValidationError as ModelValidationError
+        from masters.services.routing_parent_validation import validate_routing_parent
+        try:
+            validate_routing_parent(
+                parent.pk if parent else None, output.pk if output else None,
+                routing.pk if routing else None, path, self.instance.pk if self.instance else None,
+            )
+        except ModelValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict)
 
         sourcing_type = attrs.get('sourcing_type', getattr(self.instance, 'sourcing_type', 'MAKE'))
         line = attrs.get('line', getattr(self.instance, 'line', None))
@@ -683,10 +706,10 @@ class RoutingStepSerializer(serializers.ModelSerializer):
             if total is not None:
                 return total
 
-        if obj.remark:
+        if obj.parent_product_id:
             parent_ids = RoutingStep.objects.filter(
                 routing_id=obj.routing_id,
-                output_product__product_code=obj.remark,
+                output_product_id=obj.parent_product_id,
             ).values_list('id', flat=True)
             total = RoutingStepMaterial.objects.filter(
                 routing_step_id__in=parent_ids,
@@ -696,7 +719,7 @@ class RoutingStepSerializer(serializers.ModelSerializer):
                 return total
 
             bom_qty = BOMItem.objects.filter(
-                bom__parent_product__product_code=obj.remark,
+                bom__parent_product_id=obj.parent_product_id,
                 child_product_id=obj.output_product_id,
             ).order_by('-bom__valid_from', '-bom_id').values_list('quantity', flat=True).first()
             if bom_qty is not None:

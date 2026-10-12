@@ -1407,3 +1407,11 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 - 実行（BOSS）：`output/prod_ai_views_definer.sql`（`setup_ai_views.py`・登録・マイグレーションから自動生成。列権限の付与、単純なマスタビュー5つと結合ビュー9つの定義者付き再作成、`pm_ai_reader` へのビューの SELECT の付与、確認SQL）。
 - **実行後の確認（2026-10-12）**：16個すべての定義者が `pm_ai_view_owner@localhost`・DEFINER。`pm_ai_view_owner` の権限は、公開列の列単位 SELECT だけ（表全体の SELECT なし。`v_ai_shipment` 用の `t_shipment_actual` 8列と、`v_ai_purchase_receipt` 用の `t_process_realtime_record` 9列を含む）。
 - **既知の差異（今回は変更しない）**：本番の `pm_ai_reader@172.18.%` は、`pm_db.*` 全体の SELECT を持つ（開発と同じ）。ビューだけの権限ではない。理由：チャットの読み取り専用SQL（`SCREEN_SQL_TABLES`）が、ビューではなく元テーブル（`m_product`・`t_order` など）を、読み取り専用接続で直接読むため。`pm_db.*` の SELECT を取り消すと、チャットのSQLが使えなくなる。ビューだけにするには、チャットを、ビュー経由に切り替える必要がある（「将来はAIもDBを直接読まない」方針と同時に判断）。本番では分析の実行は無効（`pm_ai_reader` を使う経路はチャットのSQLだけ）。
+
+
+## 31. ルーティング親品ID化（2026-10-12、BOSS承認済み／DB未反映）
+- 親品の取得元を文字列から `m_routing_step.parent_product_id` に変更。`ai/0051` は既存0042/0043を変更せず、新しいFK経由で品番マスタの現在コードを返す。
+- `v_ai_routing_step` は33列、`v_ai_routing_step_material` は20列を維持。列名／順序を変更せず、親品未指定はNULL。PK LEFT JOINで行数を維持し、旧remarkフォールバックなし。
+- `setup_ai_views.OTHER_VIEW_COLUMNS` の工程列SELECTを `remark` → `parent_product_id` へ置換。専用SQL `scripts/routing_parent_ai_views_definer.sql.txt` はownerへの新列SELECT、2ビューのDEFINER再作成、未使用旧remark列SELECTの取り消しをまとめる。他ビューから旧列への参照がないことと本番アカウントは直前確認する。
+- 通常移行でownerはmigrate実行者に戻るため、既存全ビュー用setupの実行だけでは2結合ビューのDEFINERが戻らない。全件親品移行 → ai/0051 → 専用SQLで2ビューの定義者を戻す。詳細は `ルーティング親品ID化実装計画.md`。
+- generator実行試験: SQLiteメモリ上で新旧公開列名/順序、行数、コード改名の伝播を確認。新親品／AI既存定義／受注中間工程試験48件OK。MySQLの実DDL／本番権限、実DB移行は未確認・未実行。独立evaluator判定待ち。

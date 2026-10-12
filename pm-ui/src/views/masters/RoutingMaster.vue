@@ -255,7 +255,7 @@
                 placeholder="品番で検索"
                 :disabled="creatingStep || loadingProducts"
                 @focus="remarkProductDropOpen = true"
-                @input="remarkProductDropOpen = true"
+                @input="remarkProductDropOpen = true; newStepDraft.parent_product = ''"
                 @blur="remarkProductDropOpen = false"
               />
               <ul v-if="remarkProductDropOpen && filteredRemarkProducts.length" class="autocomplete-list">
@@ -755,7 +755,7 @@ const newStepDraft = ref({
   lead_time_days: 0,
   duration_min: '',
   usage_quantity: '',
-  remark: '',
+  parent_product: '',
 })
 
 const outputProductSearch = ref('')
@@ -787,17 +787,15 @@ const filteredRemarkProducts = computed(() => {
   }).slice(0, 30)
 })
 const selectRemarkProduct = (product) => {
-  newStepDraft.value.remark = product.product_code
+  newStepDraft.value.parent_product = product.id
   remarkProductSearch.value = `${product.product_code} - ${product.product_name}`
   remarkProductDropOpen.value = false
 }
 
 const isSameParentChild = computed(() => {
   const outputId = newStepDraft.value.output_product
-  const remarkCode = String(newStepDraft.value.remark || '').trim()
-  if (!outputId || !remarkCode) return false
-  const p = sortedProducts.value.find(item => item.id === Number(outputId))
-  return p && p.product_code === remarkCode
+  const parentId = newStepDraft.value.parent_product
+  return Boolean(outputId && parentId && Number(outputId) === Number(parentId))
 })
 
 // 在庫移行機能
@@ -970,7 +968,7 @@ const isCreateStepDisabled = computed(() => {
   if (!newStepDraft.value.process && newStepDraft.value.sourcing_type !== 'BUY') return true
   if (!String(newStepDraft.value.hierarchy_path || '').trim()) return true
   if (!newStepDraft.value.output_product) return true
-  if (!String(newStepDraft.value.remark || '').trim()) return true
+  if (remarkProductSearch.value.trim() && !newStepDraft.value.parent_product) return true
   const stepNo = Number(newStepDraft.value.step_no)
   const parallelGroup = Number(newStepDraft.value.parallel_group)
   if (!Number.isInteger(stepNo) || stepNo <= 0) return true
@@ -1057,8 +1055,8 @@ const usageQuantity = (step) => {
     }
   }
 
-  if (step.remark) {
-    const fallbackParent = steps.value.find((item) => item.output_product_code === step.remark)
+  if (step.parent_product) {
+    const fallbackParent = steps.value.find((item) => item.output_product === step.parent_product)
     if (fallbackParent) {
       const parentMaterials = materialsByStepId.value[fallbackParent.id] || []
       const material = parentMaterials.find((item) => item.component === step.output_product)
@@ -1122,7 +1120,7 @@ const resetOutputProductDrafts = (stepList) => {
 const resetParentProductDrafts = (stepList) => {
   const draftMap = {}
   stepList.forEach((step) => {
-    draftMap[step.id] = step.remark || ''
+    draftMap[step.id] = step.parent_product_code || ''
   })
   parentProductDraftByStepId.value = draftMap
 }
@@ -1203,9 +1201,9 @@ const isHierarchyPathDirty = (step) => {
 
 const isParentProductDirty = (step) => {
   const draftProduct = findProductByInput(parentProductDraftByStepId.value[step.id])
-  const draftCode = draftProduct?.product_code || extractProductCode(parentProductDraftByStepId.value[step.id])
-  const currentCode = String(step?.remark || '').trim()
-  return String(draftCode || '') !== currentCode
+  const input = String(parentProductDraftByStepId.value[step.id] || '').trim()
+  if (!input) return Boolean(step?.parent_product)
+  return !draftProduct || Number(draftProduct.id) !== Number(step?.parent_product)
 }
 
 const saveLeadTime = async (step) => {
@@ -1340,7 +1338,7 @@ const saveParentProduct = async (step) => {
   if (!isParentProductDirty(step)) return
 
   const product = findProductByInput(parentProductDraftByStepId.value[step.id])
-  if (!product) {
+  if (!product && String(parentProductDraftByStepId.value[step.id] || '').trim()) {
     alert('親製品は既存の品番コードで入力してください。')
     return
   }
@@ -1348,7 +1346,7 @@ const saveParentProduct = async (step) => {
   savingParentProductStepId.value = step.id
   errorMessage.value = ''
   try {
-    await api.routings.patchRoutingStep(step.id, { remark: product.product_code })
+    await api.routings.patchRoutingStep(step.id, { parent_product: product?.id || null })
     await fetchStepsAndMaterials(selectedRoutingId.value)
   } catch (error) {
     console.error('親製品更新エラー:', error)
@@ -1703,7 +1701,7 @@ const resetCreateStepDraft = () => {
     lead_time_days: 0,
     duration_min: '',
     usage_quantity: '',
-    remark: '',
+    parent_product: '',
   }
   outputProductSearch.value = ''
   outputProductDropOpen.value = false
@@ -1753,7 +1751,7 @@ const createStep = async () => {
       duration_min: newStepDraft.value.time_unit === 'MINUTE' ? Number(newStepDraft.value.duration_min) : null,
       sourcing_type: newStepDraft.value.sourcing_type || 'MAKE',
       usage_quantity: newStepDraft.value.usage_quantity !== '' && newStepDraft.value.usage_quantity != null ? Number(newStepDraft.value.usage_quantity) : null,
-      remark: String(newStepDraft.value.remark || '').trim() || null,
+      parent_product: newStepDraft.value.parent_product ? Number(newStepDraft.value.parent_product) : null,
     }
     payload.hierarchy_path = hierarchyPath
     await api.routings.createRoutingStep(payload)

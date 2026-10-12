@@ -123,7 +123,7 @@ AND NOT EXISTS (
             lines.append("")
 
             # ルーティング工程
-            for step in routing.steps.select_related('process', 'line', 'output_product').all():
+            for step in routing.steps.select_related('process', 'line', 'output_product', 'parent_product').all():
                 process_code = step.process.process_code
                 line_code = step.line.line_code if step.line else None
                 output_code = step.output_product.product_code if step.output_product else None
@@ -131,13 +131,16 @@ AND NOT EXISTS (
                 line_subq = f"(SELECT id FROM m_line WHERE line_code = {self.escape_sql(line_code)})" if line_code else "NULL"
                 output_subq = f"(SELECT id FROM m_product WHERE product_code = {self.escape_sql(output_code)})" if output_code else "NULL"
 
-                sql = f"""INSERT INTO m_routing_step (routing_id, step_no, process_id, line_id, output_product_id, hierarchy_path, hierarchy_depth, time_unit, lead_time_days, start_offset_min, duration_min, parallel_count, parallel_group, remark, created_at, updated_at)
+                parent_code = step.parent_product.product_code if step.parent_product_id else None
+                parent_subq = f"(SELECT id FROM m_product WHERE product_code = {self.escape_sql(parent_code)})" if parent_code else "NULL"
+
+                sql = f"""INSERT INTO m_routing_step (routing_id, step_no, process_id, line_id, output_product_id, parent_product_id, hierarchy_path, hierarchy_depth, time_unit, lead_time_days, start_offset_min, duration_min, parallel_count, parallel_group, remark, created_at, updated_at)
 SELECT
     (SELECT r.id FROM m_routing r JOIN m_product pp ON r.product_id = pp.id
      WHERE pp.product_code = {self.escape_sql(product_code)} AND r.routing_code = {self.escape_sql(routing.routing_code)}),
     {self.escape_sql(step.step_no)},
     (SELECT id FROM m_process WHERE process_code = {self.escape_sql(process_code)}),
-    {line_subq}, {output_subq},
+    {line_subq}, {output_subq}, {parent_subq},
     {self.escape_sql(step.hierarchy_path)}, {self.escape_sql(step.hierarchy_depth)}, {self.escape_sql(step.time_unit)},
     {self.escape_sql(step.lead_time_days)}, {self.escape_sql(step.start_offset_min)}, {self.escape_sql(step.duration_min)},
     {self.escape_sql(step.parallel_count)}, {self.escape_sql(step.parallel_group)}, {self.escape_sql(step.remark)}, NOW(), NOW()
