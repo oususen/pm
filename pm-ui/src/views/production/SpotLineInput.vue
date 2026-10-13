@@ -1027,6 +1027,10 @@ function onYesterdayToggle() {
 // ──────────────────────────────
 async function save() {
   if (!canSave.value || saving.value) return
+  if ((scrapQty.value ?? 0) > 0 && !scrapReason.value) {
+    showToast(t('scrapInput.reasonRequired'), 'error')
+    return
+  }
   const item = selectedItem.value
   const targetWorkDate = String(workDateStr.value || '').trim()
   if (targetWorkDate !== planDateStr.value) {
