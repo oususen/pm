@@ -968,7 +968,7 @@ const isCreateStepDisabled = computed(() => {
   if (!newStepDraft.value.process && newStepDraft.value.sourcing_type !== 'BUY') return true
   if (!String(newStepDraft.value.hierarchy_path || '').trim()) return true
   if (!newStepDraft.value.output_product) return true
-  if (remarkProductSearch.value.trim() && !newStepDraft.value.parent_product) return true
+  if (!newStepDraft.value.parent_product) return true
   const stepNo = Number(newStepDraft.value.step_no)
   const parallelGroup = Number(newStepDraft.value.parallel_group)
   if (!Number.isInteger(stepNo) || stepNo <= 0) return true
@@ -1338,7 +1338,7 @@ const saveParentProduct = async (step) => {
   if (!isParentProductDirty(step)) return
 
   const product = findProductByInput(parentProductDraftByStepId.value[step.id])
-  if (!product && String(parentProductDraftByStepId.value[step.id] || '').trim()) {
+  if (!product) {
     alert('親製品は既存の品番コードで入力してください。')
     return
   }
@@ -1346,7 +1346,7 @@ const saveParentProduct = async (step) => {
   savingParentProductStepId.value = step.id
   errorMessage.value = ''
   try {
-    await api.routings.patchRoutingStep(step.id, { parent_product: product?.id || null })
+    await api.routings.patchRoutingStep(step.id, { parent_product: product.id })
     await fetchStepsAndMaterials(selectedRoutingId.value)
   } catch (error) {
     console.error('親製品更新エラー:', error)

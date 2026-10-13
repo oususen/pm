@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -521,6 +522,13 @@ class RoutingStep(models.Model):
 
     def clean(self):
         super().clean()
+        # 管理画面の編集で設定済み親品だけを解除させない。元からNULLの行は維持する。
+        if self.pk and self.parent_product_id is None:
+            saved_parent_id = type(self).objects.using(self._state.db).filter(
+                pk=self.pk,
+            ).values_list('parent_product_id', flat=True).first()
+            if saved_parent_id is not None:
+                raise ValidationError({'parent_product': '設定済みの親製品は空にできません。別の親製品を選択してください。'})
         from masters.services.routing_parent_validation import validate_routing_parent
         validate_routing_parent(
             self.parent_product_id, self.output_product_id, self.routing_id,

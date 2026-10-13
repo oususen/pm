@@ -606,6 +606,10 @@ class RoutingStepSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        # 登録済みの親品解除によるBOM連携の削除を、保存前に防ぐ。
+        if (self.instance is not None and self.instance.parent_product_id is not None
+                and 'parent_product' in attrs and attrs['parent_product'] is None):
+            raise serializers.ValidationError({'parent_product': '登録済みの親製品は空にできません。変更する場合は品番マスタから選択してください。'})
         self._validate_hierarchy_path(attrs)
 
         # 親未指定・自己親の中間工程は既存仕様として許可する。

@@ -13,7 +13,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from masters.models import BOM, BOMItem, Process, Product, Routing, RoutingStep, RoutingStepMaterial
+from masters.models import BOM, BOMItem, Process, Product, Routing, RoutingChangeHistory, RoutingStep, RoutingStepMaterial
 from masters.serializers import RoutingStepSerializer
 from masters.views import BOMViewSet, ProductViewSet, RoutingStepViewSet
 
@@ -56,7 +56,7 @@ class RoutingParentProductTest(TestCase):
     def request(self, view, method, data=None, pk=None):
         req = getattr(self.factory, method)('/', data or {}, format='json')
         force_authenticate(req, user=self.user)
-        action = {'post': 'create', 'patch': 'partial_update', 'delete': 'destroy'}[method]
+        action = {'post': 'create', 'patch': 'partial_update', 'put': 'update', 'delete': 'destroy'}[method]
         return view.as_view({method: action})(req, **({'pk': pk} if pk else {}))
 
     def test_code_rename_reflects_api_and_usage_without_rewriting_legacy(self):
@@ -96,15 +96,57 @@ class RoutingParentProductTest(TestCase):
         self.assertIsNone(self.step.source_bom_item_id)
         self.assertFalse(BOMItem.objects.filter(bom__parent_product=self.child, child_product=self.child).exists())
 
-    def test_parent_optional_create_and_clear(self):
+    def test_api_parent_optional_create_and_originally_null_update(self):
         data = {'routing': self.routing.id, 'step_no': 8, 'parallel_group': 1, 'process': self.process.id, 'hierarchy_path': '8', 'output_product': self.child.id, 'parent_product': None}
         response = self.request(RoutingStepViewSet, 'post', data)
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(response.data['parent_product'])
-        response = self.request(RoutingStepViewSet, 'patch', {'parent_product': None}, self.step.id)
+        created_id = response.data['id']
+        response = self.request(RoutingStepViewSet, 'patch', {'parent_product': None, 'duration_min': 5}, created_id)
+        self.assertEqual(response.status_code, 200, response.data)
+        created = RoutingStep.objects.get(pk=created_id)
+        self.assertIsNone(created.parent_product_id)
+        self.assertEqual(created.duration_min, 5)
+
+    def test_clearing_existing_parent_patch_or_put_preserves_bom_material_source_and_history(self):
+        self.step.source_bom_item = self.item
+        self.step.save(update_fields=['source_bom_item'])
+        def snapshot():
+            return {model.__name__: list(model.objects.order_by('pk').values())
+                    for model in (RoutingStep, BOM, BOMItem, RoutingStepMaterial, RoutingChangeHistory)}
+        before = snapshot()
+        for method, payload in (
+            ('patch', {'parent_product': None, 'lead_time_days': 9, 'usage_quantity': 4}),
+            ('put', {'routing': self.routing.id, 'step_no': self.step.step_no, 'parallel_group': 1,
+                     'hierarchy_path': self.step.hierarchy_path, 'process': self.process.id,
+                     'output_product': self.child.id, 'parent_product': None, 'time_unit': 'DAY',
+                     'lead_time_days': 9, 'usage_quantity': 4}),
+        ):
+            with self.subTest(method=method):
+                response = self.request(RoutingStepViewSet, method, payload, self.step.id)
+                self.assertEqual(response.status_code, 400, response.data)
+                self.assertIn('parent_product', response.data)
+                self.assertEqual(snapshot(), before)
+
+    def test_omitted_parent_patch_preserves_existing_parent_and_allows_other_update(self):
+        response = self.request(RoutingStepViewSet, 'patch', {'duration_min': 5}, self.step.id)
         self.assertEqual(response.status_code, 200, response.data)
         self.step.refresh_from_db()
-        self.assertIsNone(self.step.parent_product_id)
+        self.assertEqual(self.step.parent_product_id, self.parent.id)
+        self.assertEqual(self.step.duration_min, 5)
+
+    def test_parent_and_hierarchy_can_change_together_when_new_actual_parent_matches(self):
+        new_parent = Product.objects.create(product_code='NEW-PARENT', product_name='新親品')
+        new_bom = BOM.objects.create(parent_product=new_parent, version='v1', valid_from='2026-01-01')
+        new_item = BOMItem.objects.create(bom=new_bom, child_product=self.child, quantity=3, process=self.process)
+        RoutingStep.objects.create(routing=self.routing, step_no=6, process=self.process,
+                                   output_product=new_parent, parent_product=new_parent, hierarchy_path='8')
+        response = self.request(RoutingStepViewSet, 'patch', {'parent_product': new_parent.id, 'hierarchy_path': '8.1'}, self.step.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.step.refresh_from_db()
+        self.assertEqual(self.step.parent_product_id, new_parent.id)
+        self.assertEqual(self.step.hierarchy_path, '8.1')
+        self.assertEqual(self.step.source_bom_item_id, new_item.id)
 
     def test_manual_create_stores_id_and_links_bom_with_usage(self):
         response = self.request(RoutingStepViewSet, 'post', {
@@ -251,7 +293,7 @@ class RoutingParentProductTest(TestCase):
         request.user = self.user
         standalone = RoutingStepAdmin(RoutingStep, admin.site)
         for kind in ('inline', 'standalone'):
-            for parent_id, valid in ((self.other.id, False), (self.parent.id, True), (self.child.id, True), (None, True)):
+            for parent_id, valid in ((self.other.id, False), (self.parent.id, True), (self.child.id, True), (None, False)):
                 with self.subTest(kind=kind, parent_id=parent_id):
                     instance = RoutingStep.objects.get(pk=self.step.id)
                     data = model_to_dict(instance)
@@ -269,6 +311,77 @@ class RoutingParentProductTest(TestCase):
             form_class = RoutingStepInlineForm if kind == 'inline' else standalone.get_form(request, obj=instance)
             form = form_class(data=data, instance=instance)
             self.assertTrue(form.is_valid(), form.errors)
+
+    def test_admin_parent_clear_rejected_without_writes_and_valid_parent_change_saved(self):
+        from django.contrib import admin
+        from django.forms.models import model_to_dict
+        from masters.admin import RoutingStepAdmin, RoutingStepInlineForm
+        request = self.factory.get('/')
+        request.user = self.user
+        standalone = RoutingStepAdmin(RoutingStep, admin.site)
+        self.step.source_bom_item = self.item
+        self.step.save(update_fields=['source_bom_item'])
+
+        def snapshot():
+            return {model.__name__: list(model.objects.order_by('pk').values())
+                    for model in (RoutingStep, BOM, BOMItem, RoutingStepMaterial, RoutingChangeHistory)}
+
+        for kind in ('inline', 'standalone'):
+            with self.subTest(kind=kind):
+                # 直上親に制約されない最上位工程で、他の有効親品への変更を実保存する。
+                RoutingStep.objects.filter(pk=self.step.id).update(parent_product=self.parent, hierarchy_path='8')
+                instance = RoutingStep.objects.get(pk=self.step.id)
+                form_class = RoutingStepInlineForm if kind == 'inline' else standalone.get_form(request, obj=instance)
+                before = snapshot()
+                data = model_to_dict(instance)
+                data['parent_product'] = ''
+                form = form_class(data=data, instance=instance)
+                self.assertFalse(form.is_valid())
+                self.assertIn('parent_product', form.errors)
+                self.assertEqual(snapshot(), before)
+
+                instance = RoutingStep.objects.get(pk=self.step.id)
+                data = model_to_dict(instance)
+                data['parent_product'] = self.other.id
+                form = form_class(data=data, instance=instance)
+                self.assertTrue(form.is_valid(), form.errors)
+                form.save()
+                instance.refresh_from_db()
+                self.assertEqual(instance.parent_product_id, self.other.id)
+                self.assertEqual(instance.source_bom_item_id, self.item.id)
+                self.assertTrue(BOMItem.objects.filter(pk=self.item.id).exists())
+
+    def test_admin_originally_null_parent_other_edit_and_new_null_parent_remain_allowed(self):
+        from django.contrib import admin
+        from django.forms.models import model_to_dict
+        from masters.admin import RoutingStepAdmin, RoutingStepInlineForm
+        request = self.factory.get('/')
+        request.user = self.user
+        standalone = RoutingStepAdmin(RoutingStep, admin.site)
+        for kind in ('inline', 'standalone'):
+            with self.subTest(kind=kind):
+                RoutingStep.objects.filter(pk=self.step.id).update(parent_product=None)
+                instance = RoutingStep.objects.get(pk=self.step.id)
+                form_class = RoutingStepInlineForm if kind == 'inline' else standalone.get_form(request, obj=instance)
+                data = model_to_dict(instance)
+                data.update(parent_product='', duration_min=9)
+                form = form_class(data=data, instance=instance)
+                self.assertTrue(form.is_valid(), form.errors)
+                form.save()
+                instance.refresh_from_db()
+                self.assertIsNone(instance.parent_product_id)
+                self.assertEqual(instance.duration_min, 9)
+
+                new_instance = RoutingStep(routing=self.routing, step_no=20 if kind == 'inline' else 21,
+                                           process=self.process, output_product=self.child, hierarchy_path='9')
+                data = model_to_dict(new_instance)
+                data['parent_product'] = ''
+                new_form_class = RoutingStepInlineForm if kind == 'inline' else standalone.get_form(request)
+                form = new_form_class(data=data, instance=new_instance)
+                self.assertTrue(form.is_valid(), form.errors)
+                created = form.save()
+                created.refresh_from_db()
+                self.assertIsNone(created.parent_product_id)
 
     def test_data_migration_failure_rolls_back_all_writes(self):
         RoutingStep.objects.update(parent_product=None, remark='PARENT')
