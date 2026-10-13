@@ -2,7 +2,7 @@
 
 - AIは、画面上部の「AIプロバイダ・モデル」の選択に従う(BOSS承認 2026-10-06。当初はローカルQwenだけだった)。選んだAIが使えないときは、エラーで終わる
   (自動でQwenへ切り替えない)。ローカルQwenは、社外へ何も送らない
-- 社外のAI(OpenRouter・DeepSeek)へ送るときは、分析案の作成と同じく、**登録名称をコードへ置換**して送る(利用者の発言・AIの過去の返事・テンプレートの名称と目的)。
+- 社外のAI(OpenRouter・DeepSeek・Claude)へ送るときは、分析案の作成と同じく、**登録名称をコードへ置換**して送る(利用者の発言・AIの過去の返事・テンプレートの名称と目的)。
   やり取りの最初に1回、利用者が、社外へ送ることを了承する(external_confirmed。毎回の確認は求めない)。送った内容(置換後)を、各発言の下に表示する。
   AIの返事のコードは、名前へ復元しない(文案を取り込んだ後は、利用者が実名へ直す)。管理設定(外部送信の許可・APIキー・モデルの許可リスト)は、分析案の作成と同じ確認を使う
 - AIへ渡すのは、利用者とAIのやり取り・公開ビューの説明・承認済みテンプレートの一覧(ID・名称・カテゴリ・目的)・今日の日付だけ。実データ・DBの数値は渡さない
@@ -20,7 +20,7 @@ from ai.models import AIAnalysisTemplate
 from ai.services import analysis_llm, chat_service
 from ai.services.analysis_data_service import ANALYSIS_VIEWS, ai_view_definition, term_guide_text, validate_period
 from ai.services.analysis_plan_store import AnalysisError
-from ai.services.analysis_planning_service import ANTHROPIC_CONSULT_CODEGEN_BLOCKED, get_qwen_analysis_timeout, resolve_planning_provider
+from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
 from ai.services.analysis_redaction import build_analysis_code_redactor
 from ai.services.sql_queries import BASE_SQL_SCHEMA
 
@@ -28,6 +28,22 @@ MAX_RECOMMENDATIONS = 10  # BOSS承認(2026-10-05): 利用者へ推薦するテ�
 BUSINESS_DAY_START_HOUR = 8  # 日替わり時刻(8:00)
 ROLES = ('user', 'assistant')
 REQUEST_KEYS = {'messages', 'provider', 'model', 'external_confirmed'}
+
+# Claude(Anthropic)の構造化出力(output_config.format の json_schema)。相談の返答 {reply, draft_purpose, date_from, date_to, template_ids}。
+# 全キー必須。draft_purpose・date_from・date_to は文字列かnull。minimum/maxLength/pattern/format は入れない(日付・IDの確認は従来どおりサーバー側)
+_STRING_OR_NULL = {'anyOf': [{'type': 'string'}, {'type': 'null'}]}
+ANTHROPIC_CONSULT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'reply': {'type': 'string'},
+        'draft_purpose': _STRING_OR_NULL,
+        'date_from': _STRING_OR_NULL,
+        'date_to': _STRING_OR_NULL,
+        'template_ids': {'type': 'array', 'items': {'type': 'integer'}},
+    },
+    'required': ['reply', 'draft_purpose', 'date_from', 'date_to', 'template_ids'],
+    'additionalProperties': False,
+}
 
 
 def _today():
@@ -172,9 +188,6 @@ def _redactor():
 
 def consult(data):
     messages, selection, confirmed = _request(data)
-    if selection.get('provider') == 'anthropic':
-        # 暫定ガード(単位2まで): Claudeは相談で使えない。外部AIは呼ばない
-        raise AnalysisError(ANTHROPIC_CONSULT_CODEGEN_BLOCKED, 400)
     provider, model = resolve_planning_provider(selection)  # 選んだAIの有効・設定・外部送信の許可・APIキーを確認。使えなければ止まる(代替しない)
     external = provider != 'qwen'
     if external and confirmed is not True:
@@ -214,7 +227,10 @@ def consult(data):
         sent, system = [{'role': item['role'], 'content': item['content']} for item in messages], _system_prompt(templates)
     request_messages = [{'role': 'system', 'content': system}, *sent]
     try:
-        if external:
+        if provider == 'anthropic':
+            # Claudeは構造化出力でJSONを得る(温度は送らない)。スキーマが通らない場合も、プロンプトだけには落とさず停止する
+            raw = analysis_llm.request_external_json(provider, model, request_messages, json_schema=ANTHROPIC_CONSULT_SCHEMA)
+        elif external:
             raw = analysis_llm.request_external_json(provider, model, request_messages)
         else:
             raw = chat_service._chat(

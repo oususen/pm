@@ -1,6 +1,7 @@
 """Anthropic Claude直接接続(単位1: 基盤と分析案の作成)の検証。外部APIは呼ばない(urlopenを模擬)。APIキーはテスト専用のダミー値。"""
 import importlib
 import json
+from datetime import date
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -15,7 +16,7 @@ from accounts.models import UserPermission
 from ai.config.catalog import PROVIDER_CATALOG
 from ai.config.models import AIProviderConfig
 from ai.config.serializers import AIProviderConfigSerializer
-from ai.services import analysis_llm, analysis_planning_service as planning, anthropic_client, chat_service
+from ai.services import analysis_consult_service as consult_service, analysis_llm, analysis_planning_service as planning, anthropic_client, chat_service
 from ai.services.analysis_plan_store import AnalysisError
 from ai.test_analysis_planning import FakeRedis
 
@@ -362,18 +363,152 @@ class PlanCreationTests(SimpleTestCase):
         urlopen.assert_not_called()
 
 
-class ConsultCodegenGuardTests(SimpleTestCase):
-    def test_consult_rejects_anthropic_with_400_and_calls_no_ai(self):
-        from ai.services import analysis_consult_service as consult
-        with patch('ai.services.anthropic_client.urlopen') as claude, patch('ai.services.analysis_llm.urlopen') as other, \
-                patch.object(analysis_llm, 'request_external_json') as external, patch.object(consult, 'resolve_planning_provider') as resolve:
-            with self.assertRaises(AnalysisError) as caught:
-                consult.consult({'messages': [{'role': 'user', 'content': '出荷を見たい'}], 'provider': 'anthropic', 'external_confirmed': True})
-        self.assertEqual(caught.exception.status_code, 400)
-        self.assertEqual(str(caught.exception.detail), 'Claude は、相談・コード生成ではまだ使えません。')
-        for mock in (claude, other, external, resolve):
-            mock.assert_not_called()
+class FakeConsultRedactor:
+    """登録名称(ACME・山田)をコードへ置換する(相談の置換部分だけの代用)。"""
 
+    def redact_text(self, text, keep=(), collect=None):
+        return text.replace('ACME', 'CUST-001').replace('山田', 'EMP-007')
+
+
+def fake_template(pk=7):
+    return SimpleNamespace(pk=pk, version=1, name='ACME向けの出荷', purpose='山田さんの担当の出荷を比べる', category='shipment',
+                           get_category_display=lambda: '出荷', date_from=date(2026, 8, 1), date_to=date(2026, 8, 31))
+
+
+CONSULT_MESSAGES = [{'role': 'user', 'content': 'ACMEの出荷を比べたい'}, {'role': 'assistant', 'content': 'ACMEは何月ですか？'}, {'role': 'user', 'content': '山田が8月です'}]
+CONSULT_DATA = {'messages': CONSULT_MESSAGES, 'provider': 'anthropic', 'model': 'claude-haiku-5-5', 'external_confirmed': True}
+
+
+def consult_reply(**overrides):
+    body = {'reply': '期間は8月ですね。', 'draft_purpose': None, 'date_from': None, 'date_to': None, 'template_ids': []}
+    body.update(overrides)
+    return json.dumps(body, ensure_ascii=False)
+
+
+class ConsultAnthropicTests(SimpleTestCase):
+    """相談でClaudeを使う(単位2-a)。外部APIは呼ばない(urlopenを模擬)。DBは使わない(承認済みテンプレート・置換を差し替える)。"""
+
+    def setUp(self):
+        self.templates = [fake_template()]
+        for target, kwargs in [
+            ('ai.services.analysis_consult_service._approved_templates', {'side_effect': lambda: self.templates}),
+            ('ai.services.analysis_consult_service.build_analysis_code_redactor', {'side_effect': lambda: FakeConsultRedactor()}),
+            ('ai.services.analysis_consult_service.resolve_planning_provider', {'side_effect': lambda data: (data['provider'], data['model'])}),
+        ]:
+            patcher = patch(target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.dict(chat_service.EXTERNAL_AGENT_PROVIDERS['anthropic'], {'api_key': DUMMY_KEY})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_anthropic(self, reply, data=None):
+        with patch('ai.services.anthropic_client.urlopen', return_value=claude_response(reply)) as urlopen:
+            result = consult_service.consult(data or CONSULT_DATA)
+        return result, urlopen
+
+    def test_anthropic_reaches_the_api_once_without_the_fixed_400(self):
+        result, urlopen = self.run_anthropic(consult_reply())
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual((result['provider'], result['model'], result['external']), ('anthropic', 'claude-haiku-5-5', True))
+        self.assertEqual(result['reply'], '期間は8月ですね。')
+
+    def test_the_sent_body_uses_structured_output_and_has_no_forbidden_parameters(self):
+        _, urlopen = self.run_anthropic(consult_reply())
+        body = json.loads(urlopen.call_args.args[0].data.decode('utf-8'))
+        self.assertEqual(body['output_config']['format']['type'], 'json_schema')
+        self.assertEqual(body['output_config']['format']['schema'], consult_service.ANTHROPIC_CONSULT_SCHEMA)
+        self.assertEqual(body['thinking'], {'type': 'disabled'})
+        for key in ('temperature', 'top_p', 'top_k', 'stream'):
+            self.assertNotIn(key, body)
+        self.assertEqual([m['role'] for m in body['messages']], ['user', 'assistant', 'user'])  # 末尾はuser(プレフィルなし)
+        self.assertIsInstance(body['system'], str)
+        self.assertIn('データ分析の目的を整える相談役', body['system'])
+
+    def test_the_schema_has_the_five_required_keys_without_value_constraints(self):
+        schema = consult_service.ANTHROPIC_CONSULT_SCHEMA
+        keys = {'reply', 'draft_purpose', 'date_from', 'date_to', 'template_ids'}
+        self.assertEqual((set(schema['properties']), set(schema['required']), schema['additionalProperties']), (keys, keys, False))
+        self.assertEqual(schema['properties']['reply'], {'type': 'string'})
+        self.assertEqual(schema['properties']['template_ids'], {'type': 'array', 'items': {'type': 'integer'}})
+        for key in ('draft_purpose', 'date_from', 'date_to'):
+            self.assertEqual(schema['properties'][key], {'anyOf': [{'type': 'string'}, {'type': 'null'}]})
+        text = json.dumps(schema)
+        for word in ('minimum', 'maximum', 'maxLength', 'minLength', 'pattern', 'format'):
+            self.assertNotIn(word, text)
+
+    def test_the_result_equals_the_openai_compatible_result_for_the_same_content(self):
+        cases = [
+            consult_reply(),
+            consult_reply(draft_purpose='8月の出荷量を比較する', date_from='2026-08-01', date_to='2026-08-31', template_ids=[7]),
+            consult_reply(template_ids=[999999]),
+            consult_reply(template_ids=[]),
+        ]
+        for reply in cases:
+            with self.subTest(reply=reply):
+                claude, _ = self.run_anthropic(reply)
+                with patch.object(analysis_llm, 'request_external_json', return_value=reply):
+                    other = consult_service.consult({**CONSULT_DATA, 'provider': 'openrouter', 'model': 'm'})
+                for key in ('reply', 'draft', 'templates', 'external', 'sent_text'):
+                    self.assertEqual(claude[key], other[key])
+
+    def test_an_unconfirmed_request_is_409_and_sends_nothing(self):
+        for value in (None, False, 'true', 1):
+            with self.subTest(value=value), patch('ai.services.anthropic_client.urlopen') as urlopen:
+                data = {key: item for key, item in CONSULT_DATA.items() if key != 'external_confirmed'}
+                if value is not None:
+                    data['external_confirmed'] = value
+                with self.assertRaises(AnalysisError) as caught:
+                    consult_service.consult(data)
+                self.assertEqual(caught.exception.status_code, 409)
+                urlopen.assert_not_called()
+
+    def test_registered_names_are_not_in_the_sent_body(self):
+        result, urlopen = self.run_anthropic(consult_reply())
+        sent = json.dumps(json.loads(urlopen.call_args.args[0].data.decode('utf-8')), ensure_ascii=False)
+        for name in ('ACME', '山田'):
+            self.assertNotIn(name, sent)
+        self.assertIn('CUST-001', sent)
+        self.assertEqual(result['sent_text'], 'EMP-007が8月です')
+
+    def test_max_tokens_and_refusal_are_a_fixed_503_without_the_text(self):
+        for reason in ('max_tokens', 'refusal'):
+            with self.subTest(reason=reason), patch('ai.services.anthropic_client.urlopen', return_value=claude_response('{"reply": "SECRET-AI"}', stop_reason=reason)):
+                with self.assertRaises(AnalysisError) as caught:
+                    consult_service.consult(CONSULT_DATA)
+                self.assertEqual(caught.exception.status_code, 503)
+                self.assertEqual(str(caught.exception.detail), 'AIから返答を得られませんでした。しばらくしてからもう一度送ってください。')
+
+    def test_disabled_missing_key_or_transfer_off_stop_at_the_existing_check(self):
+        config = MagicMock(first=lambda: SimpleNamespace(is_enabled=True, default_model='claude-haiku-5-5'))
+        disabled = MagicMock(first=lambda: SimpleNamespace(is_enabled=False, default_model='claude-haiku-5-5'))
+        cases = [(disabled, True, DUMMY_KEY, 400), (config, False, DUMMY_KEY, 403), (config, True, '', 503)]
+        # 他のテストで差し替えている resolve_planning_provider を、本物に戻して確認する
+        real = planning.resolve_planning_provider
+        for configs, transfer, key, status in cases:
+            with self.subTest(status=status), patch('ai.services.analysis_consult_service.resolve_planning_provider', real), \
+                    patch('ai.services.analysis_planning_service.AIProviderConfig.objects.filter', return_value=configs), \
+                    patch('ai.services.analysis_planning_service.external_aggregate_transfer_allowed', return_value=transfer), \
+                    patch.dict(chat_service.EXTERNAL_AGENT_PROVIDERS['anthropic'], {'api_key': key}), \
+                    patch('ai.services.anthropic_client.urlopen') as urlopen:
+                with self.assertRaises(AnalysisError) as caught:
+                    consult_service.consult(CONSULT_DATA)
+                self.assertEqual(caught.exception.status_code, status)
+                urlopen.assert_not_called()
+
+    def test_other_external_providers_are_called_with_the_old_arguments_and_never_reach_the_anthropic_client(self):
+        for provider, model in (('deepseek', 'deepseek-v4-pro'), ('openrouter', 'qwen/qwen3-14b')):
+            with self.subTest(provider=provider), patch.object(analysis_llm, 'request_external_json', return_value=consult_reply()) as external, \
+                    patch('ai.services.anthropic_client.urlopen') as claude:
+                consult_service.consult({**CONSULT_DATA, 'provider': provider, 'model': model})
+                self.assertEqual(external.call_count, 1)
+                self.assertEqual(len(external.call_args.args), 3)
+                self.assertEqual(external.call_args.args[:2], (provider, model))
+                self.assertEqual(external.call_args.kwargs, {})  # json_schemaなど、引数は増やさない
+                claude.assert_not_called()
+
+
+class ConsultCodegenGuardTests(SimpleTestCase):
     def test_codegen_rejects_a_plan_made_with_anthropic_with_400_and_calls_no_ai(self):
         from ai.services import analysis_codegen_service as codegen
         plan = {'proposal': {'provider': 'anthropic', 'model': 'claude-haiku-5-5'}}
