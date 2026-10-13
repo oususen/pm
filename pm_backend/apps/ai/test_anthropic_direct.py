@@ -336,6 +336,25 @@ class PlanCreationTests(SimpleTestCase):
                 self.assertNotIn(DUMMY_KEY, str(caught.exception.detail))
         self.assertEqual(self.redis.values, {})
 
+    def test_confirmation_code_of_another_provider_is_rejected(self):
+        # openrouter用に作った確認コードは、Anthropicとして使えない(確認コードにプロバイダが含まれる)
+        valid = planning.external_send_preview(3, {**PAYLOAD, 'provider': 'anthropic', 'model': 'claude-haiku-5-5'})
+        other = planning._confirmation(3, PAYLOAD['purpose'], valid['date_from'], valid['date_to'], 'openrouter', 'claude-haiku-5-5', valid['purpose'])
+        self.assertNotEqual(other, valid['confirmation'])
+        with patch('ai.services.anthropic_client.urlopen') as urlopen, self.assertRaises(AnalysisError) as caught:
+            planning.create_plan(3, {**PAYLOAD, 'provider': 'anthropic', 'model': 'claude-haiku-5-5', 'external_confirmation': other})
+        self.assertEqual(caught.exception.status_code, 409)
+        urlopen.assert_not_called()
+        self.assertEqual(self.redis.values, {})
+
+    def test_global_external_transfer_off_is_rejected_before_sending(self):
+        with patch('ai.services.analysis_planning_service.external_aggregate_transfer_allowed', return_value=False), \
+                patch('ai.services.anthropic_client.urlopen') as urlopen, self.assertRaises(AnalysisError) as caught:
+            planning.create_plan(3, {**PAYLOAD, 'provider': 'anthropic', 'model': 'claude-haiku-5-5', 'external_confirmation': 'x'})
+        self.assertEqual(caught.exception.status_code, 403)
+        urlopen.assert_not_called()
+        self.assertEqual(self.redis.values, {})
+
     def test_unconfirmed_request_never_sends(self):
         with patch('ai.services.anthropic_client.urlopen') as urlopen, self.assertRaises(AnalysisError) as caught:
             planning.create_plan(3, {**PAYLOAD, 'provider': 'anthropic', 'external_confirmation': 'fake'})
@@ -408,6 +427,18 @@ class PermissionAndChatGuardTests(TestCase):
         response = self.chat_post()
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data['detail'], 'Claude は、社内AIチャットではまだ使えません。')
+
+    def test_superuser_passes_the_permission_check_without_explicit_permissions(self):
+        # 既存の_has_resource_permissionは、スーパーユーザーを無条件に許可する。その挙動のとおり、権限行が無くても403にならず、固定文の400になる
+        self.user.is_superuser = True
+        self.user.save()
+        response = self.chat_post()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'Claude は、社内AIチャットではまだ使えません。')
+        from ai.analysis_permissions import CanUseAIAnalysis
+        for method in ('GET', 'POST'):
+            request = SimpleNamespace(user=self.user, method=method)
+            self.assertTrue(CanUseAIAnalysis().has_permission(request, None))
 
     def test_chat_post_without_chat_permission_is_403_before_everything(self):
         self.grant('ai.analysis', edit=True)

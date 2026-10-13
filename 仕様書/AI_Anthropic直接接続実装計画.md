@@ -50,9 +50,10 @@
 
 ## 5. 検証結果(generatorの実行結果。完了の判定はEvaluator)
 
-- `ai.test_anthropic_direct`: 37件OK(外部は呼ばない。urlopen模擬、ダミーキー)。
-- ai全体・フロント・ビルド・マイグレーション確認の結果は、完了報告に記載。
+- `ai.test_anthropic_direct`: 40件OK(2026-10-13、`project.analysis_test_settings`、Redis 127.0.0.1:6379。外部は呼ばない。urlopen模擬、ダミーキー)。37件に、次の3件を追加: 他プロバイダ(openrouter)の確認コードの拒否(409)/全体許可OFFの拒否(403)/スーパーユーザーの扱い(既存の`_has_resource_permission`どおり権限行なしで通過し、チャットは固定文の400)。
+- 0053は適用済みのため変更しない(`update_or_create`のまま。BOSS判断 2026-10-13。M1は取り下げ)。ai全体・フロント・ビルドの再実行は**未実施**(今回の変更はテストと計画書のみ)。
 - 実機(実際のAnthropic API)での確認は**未実施**。
+- Evaluatorによる検証は**未実施**(完了の判定ではない)。
 
 ## 6. 未確認・未完了事項
 
@@ -69,7 +70,20 @@
 
 | 項目 | 開発 | 本番 |
 |---|---|---|
-| コード | 作業ツリーに変更あり(未コミット) | 未反映 |
-| マイグレーション0052・0053 | 未適用(`migrate`はBOSS実行) | 未適用 |
+| コード | コミット済み(0a8be476)。テスト追加は未コミット | 未反映(push前) |
+| マイグレーション0052・0053 | 適用済み(BOSS実行。0053は変更前の`update_or_create`版で適用。再適用は不要) | 未適用(push後、自動適用) |
 | `ANTHROPIC_API_KEY` | 未設定 | 未設定(`docker-compose.yml`の中継は追加済み) |
 | AI設定の有効化 | 無効のまま | 無効のまま |
+
+### 本番反映手順
+
+1. **事前確認(本番DB。反映前)**: 本番に`anthropic`の行が既にないかを確認する。0053は`update_or_create`のため、既存の行があると値を上書きし`is_enabled`も0に戻る。行があれば反映前にBOSSへ報告する(通常は存在しない)。
+   ```sql
+   SELECT id, provider, default_model, is_enabled, display_order FROM ai_provider_config WHERE provider = 'anthropic';
+   SELECT app, name FROM django_migrations WHERE app = 'ai' AND name LIKE '005%';  -- 0052・0053の適用有無
+   ```
+2. **push**: pushで本番に0052・0053が自動適用される。0053は`is_enabled=0`の`anthropic`行(`display_order=4`、`default_model='claude-haiku-5-5'`)を作る。既存の`anthropic`行があれば上書きされる(上記1で事前確認)。
+3. **APIキー**: 本番の`.env`に`ANTHROPIC_API_KEY`を設定し、バックエンドを再起動する(`docker-compose restart pm-backend`)。キーはBOSSが設定する。
+4. **コンソールの確認(BOSS確認待ち)**: Anthropicコンソールで、Data retention、API入力の学習利用、データの所在地、`claude-haiku-5-5`の利用可否、クレジット残高を確認する。
+5. **有効化**: 上記の確認後、AI設定で`anthropic`を有効にする。有効化前は、画面の選択肢でも「無効」と出て使えない。
+6. **実機確認**: 有効化後、分析案の作成を1回実行し、ルートの`anyOf`が通るか、プリペイド残高0のときのHTTPステータスなど「6. 未確認」の項目を記録する。
