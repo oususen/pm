@@ -72,7 +72,7 @@ test('目的・期間・AI・モデルの変更で送信確認を失効させる
 })
 
 test('初期選択が有料でも送信前に確認し、拒否なら送信しない', async () => {
-  for (const [provider, model] of [['deepseek', 'deepseek-v4-pro'], ['openrouter', 'google/gemma-4-26b-a4b-it']]) {
+  for (const [provider, model] of [['deepseek', 'deepseek-v4-pro'], ['openrouter', 'google/gemma-4-26b-a4b-it'], ['anthropic', 'claude-haiku-5-5']]) {
     const fixture = await setup(provider, model, false)
     try {
       await fixture.state.prepareExternalPreview()

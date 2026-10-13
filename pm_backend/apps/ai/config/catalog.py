@@ -24,6 +24,12 @@ PROVIDER_CATALOG = {
             ('google/gemma-4-26b-a4b-it:free', 'Gemma 4 26B A4B（OpenRouter・無料枠）'),
         ),
     },
+    'anthropic': {
+        'label': 'Anthropic Claude',
+        'models': (
+            ('claude-haiku-5-5', 'Claude Haiku 5.5（Anthropic・有料/要クレジット）'),
+        ),
+    },
 }
 
 SCREEN_CATALOG = {

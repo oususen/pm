@@ -64,7 +64,17 @@ OPENROUTER_MODELS = {
     'qwen/qwen3.8-27b:free': 'Qwen3.8 27B（OpenRouter・無料枠）',
     'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B A4B（OpenRouter・無料枠）',
 }
+# Anthropic Claudeへの直接接続(OpenRouter経由ではない。Messages API)。単位1では分析案の作成だけで使う。
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+ANTHROPIC_MODEL = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-5-5')
+ANTHROPIC_BASE_URL = os.environ.get('ANTHROPIC_BASE_URL', 'https://api.anthropic.com').rstrip('/')
+ANTHROPIC_MODELS = {
+    'claude-haiku-5-5': 'Claude Haiku 5.5（Anthropic・有料/要クレジット）',
+}
+# プロバイダごとに必要な権限(チャットの暫定ガード用。単位3で本実装するまで、anthropicはチャットで使えない)
+PROVIDER_REQUIRED_PERMISSION = {'anthropic': 'ai.analysis'}
 # 外部AI(DeepSeek互換のOpenAI形式API)。エージェント方式のツール呼び出しはこれらすべてで共通ロジックを使う。
+# anthropicはOpenAI形式ではなく、エージェント方式のツール呼び出し(_deepseek_agent_chat)には使えない。
 EXTERNAL_AGENT_PROVIDERS = {
     'deepseek': {
         'base_url': DEEPSEEK_BASE_URL, 'api_key': DEEPSEEK_API_KEY,
@@ -73,6 +83,10 @@ EXTERNAL_AGENT_PROVIDERS = {
     'openrouter': {
         'base_url': OPENROUTER_BASE_URL, 'api_key': OPENROUTER_API_KEY,
         'models': OPENROUTER_MODELS, 'default_model': OPENROUTER_MODEL, 'label': 'OpenRouter',
+    },
+    'anthropic': {
+        'base_url': ANTHROPIC_BASE_URL, 'api_key': ANTHROPIC_API_KEY,
+        'models': ANTHROPIC_MODELS, 'default_model': ANTHROPIC_MODEL, 'label': 'Anthropic Claude',
     },
 }
 MAX_RANGE_DAYS = 93
@@ -2058,6 +2072,9 @@ class AIChatAPIView(APIView):
             config = provider_configs.get(provider_key)
             if not config:
                 continue
+            if provider_key in PROVIDER_REQUIRED_PERMISSION:
+                # 暫定: 権限が必要なプロバイダ(Claude)は、チャットの一覧に常に出さない。権限に応じた表示は単位3で本実装する
+                continue
             providers[provider_key] = {
                 'connected': bool(agent_provider['api_key']),
                 'model_ready': bool(agent_provider['api_key']),
@@ -2091,6 +2108,17 @@ class AIChatAPIView(APIView):
         provider = str(request.data.get('provider') or 'openrouter').strip().lower()
         if provider not in {'qwen', *EXTERNAL_AGENT_PROVIDERS}:
             return Response({'detail': 'AIモデルの指定が不正です。'}, status=400)
+        required_permission = PROVIDER_REQUIRED_PERMISSION.get(provider)
+        if required_permission:
+            # 権限判定は、暫定ガードとは別に行う(分析の入口と同じ edit 水準)。判定できない場合も拒否する
+            try:
+                permitted = _has_resource_permission(request.user, required_permission, 'edit')
+            except Exception:
+                permitted = False
+            if not permitted:
+                return Response({'detail': 'このAIを利用する権限がありません。'}, status=403)
+            # 暫定ガード(単位3まで): Claudeはチャットのツール呼び出しに未対応のため、外部AIを呼ばずに止める
+            return Response({'detail': 'Claude は、社内AIチャットではまだ使えません。'}, status=400)
         provider_config = AIProviderConfig.objects.get(provider=provider)
         if not provider_config.is_enabled:
             return Response({'detail': 'このAIプロバイダは管理設定で無効になっています。'}, status=400)

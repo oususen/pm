@@ -502,6 +502,7 @@ function defaultModelFor(key) {
 }
 function paidKey() {
   if (provider.value === 'deepseek') return { key: 'deepseek', message: 'DeepSeekは有料です。使いますか？' }
+  if (provider.value === 'anthropic') return { key: 'anthropic', message: 'Claude（Anthropic）は有料です。クレジットを消費します。使いますか？' }
   if (provider.value === 'openrouter' && OPENROUTER_PAID_MODELS.has(model.value)) {
     return { key: model.value, message: `このモデル（${OPENROUTER_PAID_LABELS[model.value] || model.value}）は有料です。使いますか？` }
   }

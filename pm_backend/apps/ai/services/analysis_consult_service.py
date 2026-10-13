@@ -20,7 +20,7 @@ from ai.models import AIAnalysisTemplate
 from ai.services import analysis_llm, chat_service
 from ai.services.analysis_data_service import ANALYSIS_VIEWS, ai_view_definition, term_guide_text, validate_period
 from ai.services.analysis_plan_store import AnalysisError
-from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
+from ai.services.analysis_planning_service import ANTHROPIC_CONSULT_CODEGEN_BLOCKED, get_qwen_analysis_timeout, resolve_planning_provider
 from ai.services.analysis_redaction import build_analysis_code_redactor
 from ai.services.sql_queries import BASE_SQL_SCHEMA
 
@@ -172,6 +172,9 @@ def _redactor():
 
 def consult(data):
     messages, selection, confirmed = _request(data)
+    if selection.get('provider') == 'anthropic':
+        # 暫定ガード(単位2まで): Claudeは相談で使えない。外部AIは呼ばない
+        raise AnalysisError(ANTHROPIC_CONSULT_CODEGEN_BLOCKED, 400)
     provider, model = resolve_planning_provider(selection)  # 選んだAIの有効・設定・外部送信の許可・APIキーを確認。使えなければ止まる(代替しない)
     external = provider != 'qwen'
     if external and confirmed is not True:

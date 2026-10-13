@@ -35,7 +35,8 @@
             <p v-if="qwenTimeoutError" class="error" role="alert">{{ qwenTimeoutError }}</p>
             <p v-if="qwenTimeoutNotice" class="notice" role="status">{{ qwenTimeoutNotice }}</p>
           </form>
-          <form class="qwen-timeout-form temperature-form" @submit.prevent="saveTemperature(item)">
+          <!-- Claude(Anthropic)は温度を指定できない(Haiku 5.5は1以外で400)ため、温度フォームを出さない -->
+          <form v-if="item.provider !== 'anthropic'" class="qwen-timeout-form temperature-form" @submit.prevent="saveTemperature(item)">
             <label :for="`analysis-temperature-${item.id}`">分析の温度（0〜1）</label>
             <div class="qwen-timeout-controls">
               <input :id="`analysis-temperature-${item.id}`" v-model.number="item.analysis_temperature" type="number" min="0" max="1" step="0.01" required

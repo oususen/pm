@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from django.db import DatabaseError
 
 from ai.config.models import AIProviderConfig
-from ai.services import chat_service
+from ai.services import anthropic_client, chat_service
 from ai.services.analysis_plan_store import AnalysisError
 
 # 既存の分析案作成（チャット補助の_chat既定）と同じ値。外部AIでの所要時間を実測してからBOSSが確定する。
@@ -47,11 +47,14 @@ def get_analysis_temperature(provider):
     return float(value)
 
 
-def request_external_json(provider, model, messages, temperature=0.3):
+def request_external_json(provider, model, messages, temperature=0.3, json_schema=None):
     """OpenAI互換APIへ分析案の作成を依頼し、JSON文字列を返す。
 
     呼出し側でコード置換・利用者確認済みのメッセージだけを受け取る。応答のコードは名前へ復元しない。
+    anthropicだけは別形式のAPIのため anthropic_client へ渡す(温度は送らない。json_schemaが必須)。json_schemaは他のプロバイダでは使わない。
     """
+    if provider == 'anthropic':
+        return anthropic_client.request_json(provider, model, messages, json_schema, timeout=REQUEST_TIMEOUT_SECONDS)
     agent = external_provider(provider)
     label = agent['label']
     if not agent['api_key']:

@@ -16,7 +16,42 @@ from ai.services.analysis_redaction import build_analysis_code_redactor
 
 # 検索AIの初期選択と同じ。選べない場合は、画面側で選べる先頭のプロバイダへ切り替える。
 DEFAULT_PROVIDER = 'openrouter'
-PLANNING_PROVIDERS = ('qwen', 'deepseek', 'openrouter')
+PLANNING_PROVIDERS = ('qwen', 'deepseek', 'openrouter', 'anthropic')
+# Claudeを、分析案の作成以外(相談・コード生成)で使おうとしたときの拒否文。単位2で対応するまでの暫定ガード(外部AIは呼ばない)
+ANTHROPIC_CONSULT_CODEGEN_BLOCKED = 'Claude は、相談・コード生成ではまだ使えません。'
+
+# Claude(Anthropic)の構造化出力(output_config.format の json_schema)。分析案 {title, steps, outputs, datasets[{view, fields}]} か、{unsupported} のどちらか。
+# 注意: ルートの anyOf が構造化出力で通るかは、公式docsで未確認(2026-10-13)。実機で確認する。
+# 400で通らなかった場合は、プロンプトだけに落とさず、停止してBOSSへ報告する(フォールバックしない)。
+ANTHROPIC_PLAN_SCHEMA = {
+    'anyOf': [
+        {
+            'type': 'object',
+            'properties': {
+                'title': {'type': 'string'},
+                'steps': {'type': 'array', 'items': {'type': 'string'}},
+                'outputs': {'type': 'array', 'items': {'type': 'string'}},
+                'datasets': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {'view': {'type': 'string'}, 'fields': {'type': 'array', 'items': {'type': 'string'}}},
+                        'required': ['view', 'fields'],
+                        'additionalProperties': False,
+                    },
+                },
+            },
+            'required': ['title', 'steps', 'outputs', 'datasets'],
+            'additionalProperties': False,
+        },
+        {
+            'type': 'object',
+            'properties': {'unsupported': {'type': 'string'}},
+            'required': ['unsupported'],
+            'additionalProperties': False,
+        },
+    ],
+}
 PLANNING_NOTICE = (
     '分析案の作成では、選択したAIへ分析目的（登録済みの名称は社員・顧客・仕入先コードへ置換）・期間・公開ビューの説明だけを送ります。社外送信前に目的文を確認してください。'
     'DBの明細行・件数は送りません。ローカルQwenは社外へ送信しません。'
@@ -280,6 +315,9 @@ def create_plan(owner_id, data):
                 messages, 'qwen', json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS,
                 timeout=get_qwen_analysis_timeout(), temperature=temperature,
             )
+        elif provider == 'anthropic':
+            # Claudeは温度を送れない(temperatureはbodyに入れない)。JSONは構造化出力で得る
+            raw = analysis_llm.request_external_json(provider, model, messages, temperature, json_schema=ANTHROPIC_PLAN_SCHEMA)
         else:
             raw = analysis_llm.request_external_json(provider, model, messages, temperature)
     except chat_service.LocalAIError as exc:

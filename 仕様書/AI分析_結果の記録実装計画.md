@@ -64,7 +64,7 @@ BOSSの目的は、**AIがだんだん賢くなること**。現状のシステ�
 | stage | plan(分析案の作成)/codegen/trial/code_approval/run/template_saved/template_reused/refined/reference_used | 固定コード |
 | result | 成功・失敗・その他 | 固定コード |
 | reasons | 失敗の型の集計(固定コードのリスト) | **許可リストで検証して保存** |
-| provider / model | モデル別の比較 | AI設定の許可リスト内の名称 |
+| provider / model | モデル別の比較 | AI設定の許可リスト内の名称（providerは`qwen`/`deepseek`/`openrouter`/`anthropic`/`template`、`anthropic`のmodelは`claude-haiku-5-5`。2026-10-13、Anthropic直接接続の単位1で追加。許可リストを持つ実装は、この値を加えること） |
 | prompt_version | 指示文を変えた前後の比較(指示文のSHA-256の先頭12桁。**新規の定義**) | ハッシュ |
 | wrapper_version | 外枠の版 | ハッシュ |
 | attempt_no | 何回目で成功したか | 数値 |

@@ -40,6 +40,12 @@ class AIProviderConfigSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('この設定はローカルQwenの分析案作成専用です。')
         return value
 
+    def validate_analysis_temperature(self, value):
+        provider = self.instance.provider if self.instance else self.initial_data.get('provider')
+        if provider == 'anthropic':
+            raise serializers.ValidationError('Claude(Anthropic)は温度を指定できません。分析の温度は使われません。')
+        return value
+
 
 class AIToolPolicySerializer(serializers.ModelSerializer):
     screen_label = serializers.SerializerMethodField()

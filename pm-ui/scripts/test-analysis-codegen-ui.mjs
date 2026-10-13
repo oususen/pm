@@ -950,6 +950,17 @@ test('有料モデルの料金確認の文に、選んだモデルの名前を�
   } finally { f.stop() }
 })
 
+test('Claude(Anthropic)はプロバイダ単位で有料確認を出す(モデルを問わない)', async () => {
+  const f = await setup('openrouter')
+  try {
+    f.state.provider.value = 'anthropic'
+    f.state.model.value = 'claude-haiku-5-5'
+    const paid = f.state.paidKey()
+    assert.equal(paid.key, 'anthropic')
+    assert.equal(paid.message, 'Claude（Anthropic）は有料です。クレジットを消費します。使いますか？')
+  } finally { f.stop() }
+})
+
 test('結果の改良の準備中に、検索から新しい分析が来たら、破棄の確認を取る。断れば、追加の指示も目的も残る。承諾すれば、新しい分析へ(Codexの指摘)', async () => {
   const f = await setup('openrouter')
   try {

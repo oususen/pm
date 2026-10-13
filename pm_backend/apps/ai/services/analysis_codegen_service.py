@@ -28,7 +28,7 @@ from ai.services.analysis_execution_service import (
 from ai.services.analysis_guard_runtime import GuardError, validate_python, validate_steps
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services import analysis_template_params as template_params
-from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
+from ai.services.analysis_planning_service import ANTHROPIC_CONSULT_CODEGEN_BLOCKED, get_qwen_analysis_timeout, resolve_planning_provider
 from ai.services.analysis_redaction import build_analysis_code_redactor
 
 # 開発用の暫定値(BOSS承認 2026-10-04。実測後に確定する)
@@ -357,6 +357,9 @@ def _plan_for_codegen(store, plan_id, owner_id, revision):
 def _provider_for(plan):
     """分析案のAIが、いまも使えること(管理設定の有効・モデル許可・外部送信の全体許可・APIキー)を、送信の前に再確認する。"""
     provider, model = plan['proposal']['provider'], plan['proposal']['model']
+    if provider == 'anthropic':
+        # 暫定ガード(単位2まで): Claudeで作った分析案でも、コード生成は使えない。外部AIは呼ばない
+        raise AnalysisError(ANTHROPIC_CONSULT_CODEGEN_BLOCKED, 400)
     if resolve_planning_provider({'provider': provider, 'model': model}) != (provider, model):
         raise AnalysisError('分析案のAI・モデルが現在の管理設定と一致しません。分析案を作り直してください。', 409)
     return provider, model

@@ -281,7 +281,7 @@ const loadProviderSettings = async () => {
   try {
     const { data } = await api.aiChat.status({ screen_context: aiDrawerSourcePath.value })
     screenInfo.value = data.screen || null
-    const providerLabels = { deepseek: 'DeepSeek', qwen: 'Qwen', openrouter: 'OpenRouter' }
+    const providerLabels = { deepseek: 'DeepSeek', qwen: 'Qwen', openrouter: 'OpenRouter', anthropic: 'Anthropic Claude' }
     const nextProviders = Object.entries(data.providers || {})
       .filter(([, item]) => item.is_enabled !== false)
       .map(([value, item]) => ({ value, label: providerLabels[value] || value, item }))

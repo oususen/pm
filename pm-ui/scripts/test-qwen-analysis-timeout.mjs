@@ -121,3 +121,9 @@ test('温度は、閲覧権限だけの場合は保存せず、サーバーの�
   assert.match(rejected.state.temperatureErrors.value[2], /0以上1以下/)
   assert.equal(rejected.state.temperatureNotices.value[2], '')
 })
+
+test('Claude(anthropic)のカードでは、温度フォームを出さない(温度を指定できないため)。他のプロバイダは従来どおり出す', () => {
+  const template = parsed.descriptor.template.content
+  assert.match(template, /<form v-if="item\.provider !== 'anthropic'" class="qwen-timeout-form temperature-form"/)
+  assert.doesNotMatch(template, /<form class="qwen-timeout-form temperature-form"/)
+})
