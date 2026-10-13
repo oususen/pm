@@ -1,0 +1,31 @@
+{
+  "database": "pm_db",
+  "hostname": "27cbe67a474e",
+  "before_definer": "root@%",
+  "security_type": "DEFINER",
+  "normalized_select_source_verified_against_adminer": {
+    "STEP_VIEW": "\nCREATE OR REPLACE VIEW v_ai_routing_step AS\nSELECT\n    s.id,\n    s.routing_id,\n    r.routing_code,\n    r.product_id AS routing_product_id,\n    rp.product_code AS routing_product_code,\n    rp.product_name AS routing_product_name,\n    r.is_default AS routing_is_default,\n    r.is_active AS routing_is_active,\n    r.valid_from_datetime AS routing_valid_from_datetime,\n    r.valid_to_datetime AS routing_valid_to_datetime,\n    s.step_no,\n    s.parallel_group,\n    s.parallel_count,\n    s.hierarchy_depth,\n    s.hierarchy_path,\n    s.process_id,\n    pr.process_code,\n    pr.process_name,\n    s.line_id,\n    l.line_code,\n    l.line_name,\n    s.supplier_id,\n    sp.supplier_code,\n    sp.supplier_name,\n    s.output_product_id,\n    op.product_code AS output_product_code,\n    op.product_name AS output_product_name,\n    pp.product_code AS parent_product_code,\n    s.source_bom_item_id,\n    s.time_unit,\n    s.lead_time_days,\n    s.start_offset_min,\n    s.duration_min\nFROM m_routing_step s\nLEFT JOIN m_routing r ON r.id = s.routing_id\nLEFT JOIN m_product rp ON rp.id = r.product_id\nLEFT JOIN m_process pr ON pr.id = s.process_id\nLEFT JOIN m_line l ON l.id = s.line_id\nLEFT JOIN m_supplier sp ON sp.id = s.supplier_id\nLEFT JOIN m_product op ON op.id = s.output_product_id\nLEFT JOIN m_product pp ON pp.id = s.parent_product_id\n",
+    "MATERIAL_VIEW": "\nCREATE OR REPLACE VIEW v_ai_routing_step_material AS\nSELECT\n    m.id,\n    m.routing_step_id,\n    s.routing_id,\n    r.routing_code,\n    r.product_id AS routing_product_id,\n    rp.product_code AS routing_product_code,\n    rp.product_name AS routing_product_name,\n    s.step_no,\n    s.process_id AS step_process_id,\n    pr.process_code AS step_process_code,\n    pr.process_name AS step_process_name,\n    s.output_product_id AS step_output_product_id,\n    op.product_code AS step_output_product_code,\n    op.product_name AS step_output_product_name,\n    pp.product_code AS step_parent_product_code,\n    m.component_id,\n    cp.product_code AS component_code,\n    cp.product_name AS component_name,\n    m.quantity,\n    m.consume_timing\nFROM m_routing_step_material m\nLEFT JOIN m_routing_step s ON s.id = m.routing_step_id\nLEFT JOIN m_routing r ON r.id = s.routing_id\nLEFT JOIN m_product rp ON rp.id = r.product_id\nLEFT JOIN m_process pr ON pr.id = s.process_id\nLEFT JOIN m_product op ON op.id = s.output_product_id\nLEFT JOIN m_product cp ON cp.id = m.component_id\nLEFT JOIN m_product pp ON pp.id = s.parent_product_id\n"
+  },
+  "owner": "pm_ai_view_owner@localhost",
+  "before_step_select_columns": [
+    "step_no",
+    "time_unit",
+    "start_offset_min",
+    "source_bom_item_id",
+    "routing_id",
+    "process_id",
+    "hierarchy_depth",
+    "supplier_id",
+    "hierarchy_path",
+    "lead_time_days",
+    "remark",
+    "line_id",
+    "output_product_id",
+    "parallel_count",
+    "duration_min",
+    "id",
+    "parallel_group"
+  ],
+  "other_views_using_step_remark": []
+}

@@ -1,0 +1,59 @@
+本番ルーティング親品ID移行：準備時点の手順と適用後の注意（2026-10-13追記）
+
+現在の状況
+本番ではBOSSがDockerの通常migrationと専用コマンドを実行済み。2026-10-12の本番読取結果ではmasters0087/ai0051適用、親品ID設定7,612件、NULL/参照切れ0件、承認36の全文脈一致を確認した。下記はSQL準備時点の履歴であり、現在のDBへ01/01b/02/03/04/06を実行しない。データ再applyも不要。Adminer routineは使用せずDjangoコマンドで移行したため、updated_atは全件2026-10-12 20:36:11へ変わった。元日時の復元は未実施。
+AI owner権限切替はBOSSの「今回はデータ移行の確認までにする」により保留。05は今は実行しない。正規原本はscripts/routing_parent_ai_views_definer.sql.txtであり、旧output/prod_ai_views_definer.sqlはremark参照に戻るため再実行禁止。
+
+対応表の環境制約
+承認JSONは開発DBの読取snapshot由来で、工程ID/ルーティングID/加工後品IDも対象照合に使う。本番では全36のID・業務コード・階層の一致を直接確認した。別ID体系のDBへ流用しない。別環境は業務キーから新対応表を確認・承認する。保存する新親品IDはその環境のProductからコードで解決する。
+
+承認済みUI/API最小修正（本番未反映）
+画面追加は親品ID選択必須、既存親品欄の空保存を拒否する。APIも設定済み親品への明示null更新を保存前に400拒否し、BOMリンク解除/削除へ進ませない。API新規作成の任意親品、元NULLの既存工程、親品省略PATCHは維持する。FKのNULL可、新規NULL工程と元からNULLの既存工程の編集、BOM同期全体は変更しない。BOSSの追加承認により単独管理画面とルーティング内の工程編集でも、設定済みの非NULL親品のクリアは拒否し、別の有効親品への変更は既存階層整合条件のもとで許可する。管理画面の新規工程を親品必須にはしない。階層移動で直上親が変わる場合はhierarchy_pathとparent_productを同じPATCHで変更する。旧remarkのSQL輸出は移行前復旧値として維持する。修正は新migration/データ移行不要。試験・独立評価・配備状況は仕様書/ルーティング親品ID化実装計画.mdを参照。
+
+以下はSQL案作成時点の記録
+
+対象はMySQL8.0.44のpm_db、既存masters0086/ai0050。開発移行と独立評価の結果を踏まえた本番用SQL案。ファイル作成は移行実施ではない。Git・アプリコードの変更、本番DB接続、DDL、更新はgeneratorでは行っていない。
+
+実行前の必須確認
+1. rootが対象ホスト/DBを確認する。本番と開発は同じDB名のため、DB名だけでは接続先を区別できない。
+2. 実際の保守停止と、新アプリ/API/UI/スケジューラを切り替える操作手段を確保する。BOSSの許可だけを停止済みと扱わない。運用中は実行不可。
+3. Adminerのダウンロードで必要表のバックアップを取得し、保存ファイルの存在、サイズ、取得対象を確認する。エクスポート操作や通知だけを成功と扱わない。永久backup表を追加するSQLは含めない。
+4. production_parent_readonly_context_check_compact.sql.txtを実行して全件照合error_count=0を確認する。schema/新列なし、signed BIGINT Product ID、6表InnoDB、migration履歴、ownerアカウント/権限も確認する。
+5. evaluatorのSQL評価を受ける。特にMySQL8のcursor FOR UPDATE、CREATE TEMPORARY TABLE AS WITH、routine内SET TRANSACTION、handler、DELIMITERを実構文として未確認。ローカル静的比較はMySQL実行検証の代わりではない。
+
+分割ファイルと順序（すべてD:/pm/output/配下）
+01 production_parent_01_schema.sql.txt
+   nullable signed BIGINT親品FK・index・制約を1 ALTERで追加する。MySQL DDLはimplicit commit。新列/同名index/FKが既にある場合は再実行しない。routineのrollbackでschema追加は戻らない。
+01b production_parent_01b_record_schema_history.sql.txt
+   schemaのsigned/null/index/FK実体と前migrationを条件にDjango masters0087の履歴を追加する。inserted_history_rows=0なら、既記録なのか条件不一致なのかを履歴/実体で確認し、押し通さない。データ移行を完了とする履歴ではない。
+02 production_parent_02_create_routine_adminer.sql.txt
+   CREATE PROCEDURE全体を1サーバSQL文として送るAdminer用。DELIMITERはSQLサーバ命令ではない。Adminerの分割処理がroutineに対応しない場合は分割して送らず、対応する操作手段を確保する。
+   production_parent_02_create_routine_mysql.sql.txtはmysqlクライアントのDELIMITER対応版。いずれか片方だけ使う。同名routine存在時はCREATEが失敗する。既存routineを勝手に削除/置換しない。
+03 production_parent_03_call_routine.sql.txt
+   新規autocommitセッション、開いたトランザクションなし、保守停止・バックアップ成功・新コード配備手段の確認後だけCALLする。
+   6表をProduct→Routing→Step→Material→BOM→BOMItemのid順でcursor FOR UPDATEする。REPEATABLE READを次トランザクションに指定し、通常の全表id走査のgap保護を使うが、保守停止を代替しない。
+   承認36の存在、旧親値old/proposed、routing/output/階層/identityコードの完全一致、親コード解決、元BOM親子、実在直上親、材料、BOMペアをロック後に再照合する。親未指定/自己親/最上位/final/既存親欠落例外を維持し、新しい推定補完はしない。
+   正式表の更新対象はm_routing_step.parent_product_idのみ。updated_at=updated_atでON UPDATE変更を抑え、remarkは保存する。期待定義済み件数と更新件数、新FK全件、元remark/元updated_at、工程数の一致後にCOMMITする。
+   COMMITTED結果と36候補を保存する。SQLエラー時はEXIT HANDLERがROLLBACK/RESIGNALする。結果通信やCOMMIT後の出力・一時表削除で失敗した場合は既にcommit済みの可能性があるため、再CALLせずread-only確認する。親品IDが1件でも存在する再applyは拒否する。
+   codex_parent_approved_20261012 / codex_parent_expected_20261012 はセッション一時表であり永久表・バックアップではない。成功/SQL失敗時に削除する。
+04 production_parent_04_drop_routine.sql.txt
+   routine結果を保存し独立照合後、今回のroutineだけを削除する。DROPはデータ移行の取り消しではない。
+05 production_parent_05_owner_views.sql.txt
+   ownerへ新parent_product_id列SELECTを付与し、新FK経由の2ビューを正しいDEFINERで作成する。既存33/20列の名称/順序/全行公開を維持する。旧remark列SELECTの取り消し前に他ビューが参照しないことと実アカウントを確認する。
+   ai0051の通常RunSQLと同じ2ビュー定義にDEFINER/SQL SECURITYを付与した原本の副本。旧0042/0043の履歴は書き換えない。OWNER DDLはデータroutineのトランザクション外で行う。
+06 production_parent_06_record_ai_history.sql.txt
+   2ビューのFK取得元・owner・33/20公開列の順序/名称・行数を確認後、ai0051の履歴だけ追加する。WHEREは主な実体条件を確認するが、既存column順序/名称の独立確認も必須。inserted_history_rows=0は既記録/条件不一致を確認する。
+07 production_parent_07_postcheck.sql.txt
+   read-onlyでschema/履歴、FK孤児、2ビュー定義/公開列、元表行数、工程と材料の両方のFK現在コードとAIコードを確認する。承認36を対応表と独立照合し、全件の新FKを旧コード解決/承認補正と照合する。移行前backupと照合し、remark/updated_atを含む対象外列が変わっていないことを独立確認する。
+   本番実owner/readerアカウントを確認し、SHOW GRANTSの列/ビュー権限を照合する。既知の本番ownerはpm_ai_view_owner@localhost、readerはpm_ai_reader@172.18.%だが、実在確認を省略しない。readerの既存PM元表SELECT（チャット用）をこの作業で取り消さない。実reader接続でも2ビューのSELECTと行数/列を確認する。
+08 新アプリ/API/UI/スケジューラを切り替え、既存客户端がremark入力を送らないことと画面/API動作を確認してから保守停止を解除する。schema/データだけを先に適用して旧アプリを稼働させない。
+
+問題発生時
+データroutine失敗時はrollback結果を読取確認し、未知値をNULLで補完したりガードを削除しない。DDLの成功/失敗や履歴未記録を別に確認する。切替後の現在状態を旧アプリへ戻す場合は、現在FKコードを旧remarkへ戻すか移行前backupへ戻すかをroot/BOSSが判断する。逆変換/復元SQLは今回含めない。再適用・履歴の盲目的追記・本番運用の再開を自動で行わない。
+
+未確認
+本番実保守停止、配備操作の接続手段、Adminerバックアップ保存成功、MySQL実DDL/routine構文、実移行とowner権限、ブラウザ動作。既存受注全体の回帰未合格はHEAD版でも同じ結果で、今回改善したと扱わない。
+
+Adminerインポート用副本
+output/production_parent_adminer/に段階別の.sql副本を保存する。各副本は原本と本文一致を比較し、選択しやすい名前にする。実行済みファイルではない。手順01から順番に1段階ずつ結果を確認し、全部をまとめてインポートしない。
+02_create_routine.sqlはmysqlクライアント用DELIMITER版の副本。AdminerのDELIMITER parser対応は未確認である。サーバへDELIMITER命令をそのまま送ってはいけない。非対応なら02のAdminer原本のCREATE文全体を、SQLコマンドで1文として扱える方法を確認し、分割送信や押し通しを行わない。CREATE/CALL/DROPを同一インポートにまとめない。

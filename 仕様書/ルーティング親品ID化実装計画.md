@@ -207,3 +207,4 @@ BOSSの整理指示により、output直下の移行関連txt13本を output/ル
 BOSSの追加指示により、整理ディレクトリを output/ルーティング親品ID移行/ に変更。開発・本番のJSON5本をresults、開発移行前バックアップSQLをbackups、未使用Adminer副本ディレクトリとZIPをarchive_sql_do_not_runへ集約した。移動した全ファイルのSHA256一致を確認し、README.txtを更新。前段の未移動記載はこの追加整理前の状態を示す。業務コード・DB・正式scripts・他のoutput資料は変更していない。
 
 2026-10-13、BOSS指示により `output/ルーティング親品ID移行/archive_sql_do_not_run/`（未使用の移行SQL案7本、Adminer副本、配布ZIP）を削除した。results・backups・checks・documents・pending_ai_owner は残している。上記の archive_sql_do_not_run への言及は削除前の記録で、現存しない。業務コード・DB・scripts は変更していない。
+2026-10-13、BOSS指示により開発DBの移行前バックアップSQL（`output/ルーティング親品ID移行/backups/`）を削除した。上記の backups への言及は削除前の記録で、現存しない。

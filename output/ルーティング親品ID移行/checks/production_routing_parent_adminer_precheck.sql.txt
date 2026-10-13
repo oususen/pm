@@ -1,0 +1,32 @@
+-- 本番Adminer用・事前確認のみ。データ更新やDDLは行わない。
+-- 本番の対象データベースを選択して実行し、結果を保存する。
+SELECT DATABASE() AS selected_database, @@hostname AS server_hostname,
+       @@port AS server_port, VERSION() AS mysql_version,
+       CURRENT_USER() AS authenticated_account;
+
+SELECT app, name, applied
+FROM django_migrations
+WHERE (app = 'masters' AND name LIKE '0087%')
+   OR (app = 'ai' AND name LIKE '0051%')
+ORDER BY app, name;
+
+SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'm_routing_step'
+  AND COLUMN_NAME IN ('id', 'remark', 'parent_product_id', 'hierarchy_path', 'source_bom_item_id')
+ORDER BY ORDINAL_POSITION;
+
+SELECT COUNT(*) AS routing_step_count,
+       SUM(remark IS NULL OR TRIM(remark) = '') AS legacy_parent_empty_count
+FROM m_routing_step;
+
+SELECT TABLE_NAME, ENGINE
+FROM information_schema.TABLES
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME IN ('m_routing_step', 'm_product', 'm_routing', 'm_bom', 'm_bom_item', 'm_routing_step_material');
+
+SELECT TABLE_NAME, DEFINER, SECURITY_TYPE
+FROM information_schema.VIEWS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND (TABLE_NAME LIKE '%routing%' OR VIEW_DEFINITION LIKE '%m_routing_step%');

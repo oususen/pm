@@ -1,0 +1,140 @@
+-- MySQL8、本番親FK導入前の読取照合。対象DBをpm_dbに選択。SELECTのみ。
+-- 全工程集約だけ。error_count=0を合格候補とする。新工程FK列参照/更新/DDLなし。
+-- remarkはPythonstrip相当（Unicode空白＋U+001C〜001F）、他code/階層はBINARY完全一致。
+-- 承認36mappingは_ascii内容を_utf8mb4リテラルで保持し先頭空白を除去しない。
+-- 運用中の事前確認であり、適用直前の保守停止/ロック後再照合の代わりではない。
+WITH approved(step_id,routing_id,output_product_id,current_parent_code,hierarchy_path,hierarchy_parent_code,output_product_code,routing_product_code,routing_code) AS (
+SELECT 1147,63,690,_utf8mb4'YD40006267',_utf8mb4'24.1.2.10.1',_utf8mb4'YD40006267G',_utf8mb4'YD40006267-00',_utf8mb4'YD60008491',_utf8mb4'YD60008491'
+UNION ALL SELECT 1148,63,307,_utf8mb4'YD40006267',_utf8mb4'24.1.2.10.2',_utf8mb4'YD40006267G',_utf8mb4'M650010',_utf8mb4'YD60008491',_utf8mb4'YD60008491'
+UNION ALL SELECT 1182,63,672,_utf8mb4'YD40005598S',_utf8mb4'24.1',_utf8mb4'YD60008491S',_utf8mb4'YD40005598',_utf8mb4'YD60008491',_utf8mb4'YD60008491'
+UNION ALL SELECT 1212,64,307,_utf8mb4'YD40006267',_utf8mb4'22.1.2.10.2',_utf8mb4'YD40006267G',_utf8mb4'M650010',_utf8mb4'YD60009848',_utf8mb4'YD60009848'
+UNION ALL SELECT 1248,64,672,_utf8mb4'YD40005598S',_utf8mb4'22.1',_utf8mb4'YD60009848S',_utf8mb4'YD40005598',_utf8mb4'YD60009848',_utf8mb4'YD60009848'
+UNION ALL SELECT 1279,65,307,_utf8mb4'YD40006267',_utf8mb4'23.1.2.10.2',_utf8mb4'YD40006267G',_utf8mb4'M650010',_utf8mb4'YD60014764',_utf8mb4'YD60014764'
+UNION ALL SELECT 1315,65,672,_utf8mb4'YD40005598S',_utf8mb4'23.1',_utf8mb4'YD60014764S',_utf8mb4'YD40005598',_utf8mb4'YD60014764',_utf8mb4'YD60014764'
+UNION ALL SELECT 1379,66,696,_utf8mb4'YD40006531S',_utf8mb4'20.1',_utf8mb4'YD60011305S',_utf8mb4'YD40006531',_utf8mb4'YD60011305',_utf8mb4'YD60011305'
+UNION ALL SELECT 1449,67,730,_utf8mb4'YD40005551S',_utf8mb4'25.1',_utf8mb4'YD60009874S',_utf8mb4'YD40005551',_utf8mb4'YD60009874',_utf8mb4'YD60009874'
+UNION ALL SELECT 1622,69,730,_utf8mb4'YD40005551S',_utf8mb4'24.1',_utf8mb4'YD60009783S',_utf8mb4'YD40005551',_utf8mb4'YD60009783',_utf8mb4'YD60009783'
+UNION ALL SELECT 1769,71,779,_utf8mb4'YD40005997S',_utf8mb4'23.1',_utf8mb4'YD60010942S',_utf8mb4'YD40005997',_utf8mb4'YD60010942',_utf8mb4'YD60010942'
+UNION ALL SELECT 8433,119,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40006630',_utf8mb4'YD40006630'
+UNION ALL SELECT 8631,120,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.4.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40006237',_utf8mb4' YD40006237'
+UNION ALL SELECT 8674,121,1933,_utf8mb4'YD40006849-00S',_utf8mb4'1.1.2.4.1.1.2.2.1.1',_utf8mb4'YD40006849-00SG',_utf8mb4'YD40006849-02G',_utf8mb4'YD40006842',_utf8mb4'YD40006842'
+UNION ALL SELECT 8830,121,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40006842',_utf8mb4'YD40006842'
+UNION ALL SELECT 9002,122,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.2.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40007003',_utf8mb4'YD40007003'
+UNION ALL SELECT 9192,123,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.4.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40006618',_utf8mb4'YD40006618'
+UNION ALL SELECT 9374,124,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40007243',_utf8mb4'YD40007243'
+UNION ALL SELECT 9544,125,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40007372',_utf8mb4'YD40007372'
+UNION ALL SELECT 9584,126,1933,_utf8mb4'YD40006849-00S',_utf8mb4'1.1.2.4.1.1.2.2.1.1',_utf8mb4'YD40006849-00SG',_utf8mb4'YD40006849-02G',_utf8mb4'YD40007688',_utf8mb4'YD40007688'
+UNION ALL SELECT 9763,126,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.4.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40007688',_utf8mb4'YD40007688'
+UNION ALL SELECT 9804,127,1933,_utf8mb4'YD40006849-00S',_utf8mb4'1.1.2.4.1.1.2.2.1.1',_utf8mb4'YD40006849-00SG',_utf8mb4'YD40006849-02G',_utf8mb4'YD40007722',_utf8mb4'YD40007722'
+UNION ALL SELECT 9963,127,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40007722',_utf8mb4'YD40007722'
+UNION ALL SELECT 10214,129,837,_utf8mb4'YD00000839B',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40006245',_utf8mb4'YD40006245'
+UNION ALL SELECT 10917,230,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008720',_utf8mb4' YD40008720'
+UNION ALL SELECT 11087,231,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008750',_utf8mb4'YD40008750'
+UNION ALL SELECT 11285,232,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.4.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008670',_utf8mb4'YD40008670'
+UNION ALL SELECT 11479,233,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.4.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008650',_utf8mb4'YD40008650'
+UNION ALL SELECT 11678,234,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008730',_utf8mb4'YD40008730'
+UNION ALL SELECT 11850,235,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.2.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008760',_utf8mb4'YD40008760'
+UNION ALL SELECT 12028,236,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008780',_utf8mb4'YD40008780'
+UNION ALL SELECT 12198,237,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008790',_utf8mb4'YD40008790'
+UNION ALL SELECT 12396,238,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008800',_utf8mb4'YD40008800'
+UNION ALL SELECT 12617,239,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.4.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40008770',_utf8mb4'YD40008770'
+UNION ALL SELECT 12791,240,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'5012775',_utf8mb4'5012775'
+UNION ALL SELECT 15173,655,837,_utf8mb4'YD00000839BG',_utf8mb4'1.1.2.4.5.1.2.7.1',_utf8mb4'YD00000839G',_utf8mb4'YD00000839',_utf8mb4'YD40004626',_utf8mb4'YD40004626'
+), legacy AS (
+SELECT s.*, REGEXP_REPLACE(COALESCE(s.remark, ''), '^[[:space:]\\x{001C}-\\x{001F}]+|[[:space:]\\x{001C}-\\x{001F}]+$', '') AS legacy_parent_code,
+CASE WHEN LOCATE('.', s.hierarchy_path) > 0
+THEN LEFT(s.hierarchy_path, CHAR_LENGTH(s.hierarchy_path) - CHAR_LENGTH(SUBSTRING_INDEX(s.hierarchy_path, '.', -1)) - 1)
+ELSE NULL END AS actual_parent_path
+FROM m_routing_step s
+), resolved AS (
+SELECT s.*, a.step_id AS approved_step_id, a.hierarchy_parent_code AS proposed_code,
+op.id AS registered_legacy_parent_id, np.id AS proposed_parent_id,
+COALESCE(op.id, CASE WHEN BINARY s.legacy_parent_code <> BINARY ''
+AND BINARY s.legacy_parent_code = BINARY a.current_parent_code THEN np.id ELSE NULL END) AS resolved_parent_id
+FROM legacy s
+LEFT JOIN approved a ON a.step_id = s.id
+LEFT JOIN m_product op ON BINARY op.product_code = BINARY s.legacy_parent_code
+LEFT JOIN m_product np ON BINARY np.product_code = BINARY a.hierarchy_parent_code
+), approval_context AS (
+SELECT a.*, s.id AS actual_step_id, s.legacy_parent_code,
+s.resolved_parent_id, s.proposed_parent_id,
+COALESCE(s.id IS NOT NULL
+AND s.routing_id = a.routing_id
+AND s.output_product_id = a.output_product_id
+AND BINARY s.hierarchy_path = BINARY a.hierarchy_path
+AND (BINARY s.legacy_parent_code = BINARY a.current_parent_code
+OR BINARY s.legacy_parent_code = BINARY a.hierarchy_parent_code)
+AND BINARY output.product_code = BINARY a.output_product_code
+AND BINARY routing_product.product_code = BINARY a.routing_product_code
+AND BINARY r.routing_code = BINARY a.routing_code, 0) AS context_ok
+FROM approved a
+LEFT JOIN resolved s ON s.id = a.step_id
+LEFT JOIN m_routing r ON r.id = s.routing_id
+LEFT JOIN m_product output ON output.id = s.output_product_id
+LEFT JOIN m_product routing_product ON routing_product.id = r.product_id
+), errors AS (
+SELECT step_id, 'approved_missing_or_context_changed' AS error_code
+FROM approval_context WHERE context_ok = 0
+UNION ALL
+SELECT step_id, 'approved_parent_code_unresolved_or_different'
+FROM approval_context
+WHERE actual_step_id IS NOT NULL
+AND (proposed_parent_id IS NULL OR NOT (resolved_parent_id <=> proposed_parent_id))
+UNION ALL
+SELECT s.id, 'unregistered_parent_not_approved'
+FROM resolved s
+WHERE BINARY s.legacy_parent_code <> BINARY '' AND s.registered_legacy_parent_id IS NULL
+AND (s.approved_step_id IS NULL OR NOT (BINARY s.legacy_parent_code <=> BINARY s.proposed_code)
+AND NOT EXISTS (SELECT 1 FROM approved a WHERE a.step_id = s.id AND BINARY a.current_parent_code = BINARY s.legacy_parent_code))
+UNION ALL
+SELECT s.id, 'nonempty_parent_unresolved'
+FROM resolved s WHERE BINARY s.legacy_parent_code <> BINARY '' AND s.resolved_parent_id IS NULL
+UNION ALL
+SELECT s.id, 'source_bom_parent_or_child_mismatch'
+FROM resolved s
+JOIN m_bom_item bi ON bi.id = s.source_bom_item_id
+LEFT JOIN m_bom b ON b.id = bi.bom_id
+WHERE s.resolved_parent_id IS NOT NULL
+AND (NOT (b.parent_product_id <=> s.resolved_parent_id) OR NOT (bi.child_product_id <=> s.output_product_id))
+UNION ALL
+SELECT s.id, 'actual_hierarchy_parent_mismatch'
+FROM resolved s
+WHERE s.resolved_parent_id IS NOT NULL
+AND NOT (s.output_product_id <=> s.resolved_parent_id)
+AND EXISTS (SELECT 1 FROM m_routing_step ps
+WHERE ps.routing_id = s.routing_id AND BINARY ps.hierarchy_path = BINARY s.actual_parent_path)
+AND NOT EXISTS (SELECT 1 FROM m_routing_step ps
+WHERE ps.routing_id = s.routing_id AND BINARY ps.hierarchy_path = BINARY s.actual_parent_path
+AND ps.output_product_id = s.resolved_parent_id)
+UNION ALL
+SELECT s.id, 'approved_parent_material_missing'
+FROM resolved s
+WHERE s.approved_step_id IS NOT NULL AND s.resolved_parent_id IS NOT NULL
+AND NOT EXISTS (SELECT 1 FROM m_routing_step ps JOIN m_routing_step_material mat ON mat.routing_step_id = ps.id
+WHERE ps.routing_id = s.routing_id AND BINARY ps.hierarchy_path = BINARY s.actual_parent_path
+AND ps.output_product_id = s.resolved_parent_id AND mat.component_id = s.output_product_id)
+UNION ALL
+SELECT s.id, 'approved_bom_parent_child_missing'
+FROM resolved s
+WHERE s.approved_step_id IS NOT NULL AND s.resolved_parent_id IS NOT NULL
+AND NOT EXISTS (SELECT 1 FROM m_bom_item bi JOIN m_bom b ON b.id = bi.bom_id
+WHERE b.parent_product_id = s.resolved_parent_id AND bi.child_product_id = s.output_product_id)
+)
+SELECT DATABASE() AS actual_database,
+(SELECT COUNT(*) FROM legacy) AS total_steps,
+(SELECT COUNT(*) FROM approved) AS approved_count,
+(SELECT COUNT(*) FROM approval_context WHERE actual_step_id IS NOT NULL) AS approved_present_count,
+(SELECT COUNT(*) FROM resolved WHERE resolved_parent_id IS NOT NULL) AS resolved_parent_count,
+(SELECT COUNT(*) FROM resolved WHERE BINARY legacy_parent_code = BINARY '' AND resolved_parent_id IS NULL) AS originally_optional_parent_count,
+COUNT(*) AS error_count, COUNT(DISTINCT step_id) AS error_step_count,
+COALESCE(SUM(error_code = 'approved_missing_or_context_changed'), 0) AS approved_context_errors,
+COALESCE(SUM(error_code = 'approved_parent_code_unresolved_or_different'), 0) AS approved_parent_resolution_errors,
+COALESCE(SUM(error_code = 'unregistered_parent_not_approved'), 0) AS unapproved_parent_errors,
+COALESCE(SUM(error_code = 'nonempty_parent_unresolved'), 0) AS unresolved_parent_errors,
+COALESCE(SUM(error_code = 'source_bom_parent_or_child_mismatch'), 0) AS source_bom_errors,
+COALESCE(SUM(error_code = 'actual_hierarchy_parent_mismatch'), 0) AS hierarchy_parent_errors,
+COALESCE(SUM(error_code = 'approved_parent_material_missing'), 0) AS approved_material_errors,
+COALESCE(SUM(error_code = 'approved_bom_parent_child_missing'), 0) AS approved_bom_errors
+FROM errors;
+
+

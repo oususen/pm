@@ -1,0 +1,22 @@
+{
+  "environment": "development",
+  "host": "localhost",
+  "database": "pm_db",
+  "routing_steps": 7612,
+  "parent_product_set": 7612,
+  "null_or_orphan": 0,
+  "approved_corrections": 36,
+  "legacy_remark_preserved": true,
+  "ai_step_rows": 7612,
+  "ai_material_rows": 6380,
+  "independent_evaluation": "pass for development migration and AI views",
+  "backup": "dev_routing_step_before_parent_id_20261012_164956.sql",
+  "backup_sha256": "d0a47b42d94552f0efd111695d7c274026fd4a5b29dea087fc220aefabc0c7c3",
+  "owner_backup": "dev_parent_view_owner_before_20261012_165727.json",
+  "apply_count": 1,
+  "apply_committed": true,
+  "post_apply_log_save_failed": true,
+  "server_health_http": 200,
+  "production": "not started; connection settings pending",
+  "code_commit": "4dbe2ad5b7cac1258e847974d3de8cbe58f5ae60"
+}

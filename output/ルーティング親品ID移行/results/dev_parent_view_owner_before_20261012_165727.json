@@ -1,0 +1,83 @@
+{
+  "checked_at_local": "2026-10-12T16:57:27",
+  "database": "pm_db",
+  "views": {
+    "v_ai_routing_step": {
+      "View": "v_ai_routing_step",
+      "Create View": "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v_ai_routing_step` AS select `s`.`id` AS `id`,`s`.`routing_id` AS `routing_id`,`r`.`routing_code` AS `routing_code`,`r`.`product_id` AS `routing_product_id`,`rp`.`product_code` AS `routing_product_code`,`rp`.`product_name` AS `routing_product_name`,`r`.`is_default` AS `routing_is_default`,`r`.`is_active` AS `routing_is_active`,`r`.`valid_from_datetime` AS `routing_valid_from_datetime`,`r`.`valid_to_datetime` AS `routing_valid_to_datetime`,`s`.`step_no` AS `step_no`,`s`.`parallel_group` AS `parallel_group`,`s`.`parallel_count` AS `parallel_count`,`s`.`hierarchy_depth` AS `hierarchy_depth`,`s`.`hierarchy_path` AS `hierarchy_path`,`s`.`process_id` AS `process_id`,`pr`.`process_code` AS `process_code`,`pr`.`process_name` AS `process_name`,`s`.`line_id` AS `line_id`,`l`.`line_code` AS `line_code`,`l`.`line_name` AS `line_name`,`s`.`supplier_id` AS `supplier_id`,`sp`.`supplier_code` AS `supplier_code`,`sp`.`supplier_name` AS `supplier_name`,`s`.`output_product_id` AS `output_product_id`,`op`.`product_code` AS `output_product_code`,`op`.`product_name` AS `output_product_name`,`pp`.`product_code` AS `parent_product_code`,`s`.`source_bom_item_id` AS `source_bom_item_id`,`s`.`time_unit` AS `time_unit`,`s`.`lead_time_days` AS `lead_time_days`,`s`.`start_offset_min` AS `start_offset_min`,`s`.`duration_min` AS `duration_min` from (((((((`m_routing_step` `s` left join `m_routing` `r` on((`r`.`id` = `s`.`routing_id`))) left join `m_product` `rp` on((`rp`.`id` = `r`.`product_id`))) left join `m_process` `pr` on((`pr`.`id` = `s`.`process_id`))) left join `m_line` `l` on((`l`.`id` = `s`.`line_id`))) left join `m_supplier` `sp` on((`sp`.`id` = `s`.`supplier_id`))) left join `m_product` `op` on((`op`.`id` = `s`.`output_product_id`))) left join `m_product` `pp` on((`pp`.`id` = `s`.`parent_product_id`)))",
+      "character_set_client": "utf8mb4",
+      "collation_connection": "utf8mb4_0900_ai_ci"
+    },
+    "v_ai_routing_step_material": {
+      "View": "v_ai_routing_step_material",
+      "Create View": "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v_ai_routing_step_material` AS select `m`.`id` AS `id`,`m`.`routing_step_id` AS `routing_step_id`,`s`.`routing_id` AS `routing_id`,`r`.`routing_code` AS `routing_code`,`r`.`product_id` AS `routing_product_id`,`rp`.`product_code` AS `routing_product_code`,`rp`.`product_name` AS `routing_product_name`,`s`.`step_no` AS `step_no`,`s`.`process_id` AS `step_process_id`,`pr`.`process_code` AS `step_process_code`,`pr`.`process_name` AS `step_process_name`,`s`.`output_product_id` AS `step_output_product_id`,`op`.`product_code` AS `step_output_product_code`,`op`.`product_name` AS `step_output_product_name`,`pp`.`product_code` AS `step_parent_product_code`,`m`.`component_id` AS `component_id`,`cp`.`product_code` AS `component_code`,`cp`.`product_name` AS `component_name`,`m`.`quantity` AS `quantity`,`m`.`consume_timing` AS `consume_timing` from (((((((`m_routing_step_material` `m` left join `m_routing_step` `s` on((`s`.`id` = `m`.`routing_step_id`))) left join `m_routing` `r` on((`r`.`id` = `s`.`routing_id`))) left join `m_product` `rp` on((`rp`.`id` = `r`.`product_id`))) left join `m_process` `pr` on((`pr`.`id` = `s`.`process_id`))) left join `m_product` `op` on((`op`.`id` = `s`.`output_product_id`))) left join `m_product` `cp` on((`cp`.`id` = `m`.`component_id`))) left join `m_product` `pp` on((`pp`.`id` = `s`.`parent_product_id`)))",
+      "character_set_client": "utf8mb4",
+      "collation_connection": "utf8mb4_0900_ai_ci"
+    }
+  },
+  "owner_grants": [
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT USAGE ON *.* TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`display_id`, `id`, `level`, `name`, `parent_id`) ON `pm_db`.`accounts_department` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`id`, `is_default`, `line_id`, `sort_order`, `unit_id`) ON `pm_db`.`accounts_unit_line_mapping` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`department_id`, `id`, `userprofile_id`) ON `pm_db`.`accounts_userprofile_leader_units` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`department_id`, `id`, `userprofile_id`) ON `pm_db`.`accounts_userprofile_supervisor_teams` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`department_id`, `division_id`, `employee_code`, `employment_type`, `group_id`, `is_system_admin`, `joined_on`, `role`, `team_id`, `unit_id`, `user_id`) ON `pm_db`.`accounts_userprofile` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`first_name`, `id`, `is_active`, `is_staff`, `last_name`, `username`) ON `pm_db`.`auth_user` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`bom_id`, `child_product_id`, `duration_min`, `id`, `is_coproduct_driver`, `lead_time_days`, `line_id`, `loss_rate`, `process_id`, `quantity`, `sourcing_type`, `supplier_id`, `time_unit`) ON `pm_db`.`m_bom_item` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`id`, `is_active`, `is_coproduct`, `parent_product_id`, `valid_from`, `valid_to`, `version`) ON `pm_db`.`m_bom` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`calendar_id`, `id`, `is_delivery_day`, `is_holiday_work`, `is_order_day`, `is_working_day`, `target_date`, `work_minutes`, `work_pattern_id`) ON `pm_db`.`m_calendar_day` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`calendar_code`, `calendar_name`, `calendar_type`, `id`) ON `pm_db`.`m_calendar` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`calendar_id`, `customer_code`, `customer_name`, `id`, `is_active`, `short_name`) ON `pm_db`.`m_customer` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`calendar_id`, `id`, `is_active`, `line_code`, `line_name`, `line_type`) ON `pm_db`.`m_line` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`equipment_count`, `id`, `is_active`, `line_id`, `management_unit`, `operating_rate`, `process_code`, `process_name`, `two_person_only`) ON `pm_db`.`m_process` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`capacity`, `category`, `id`, `identification_code`, `is_active`, `is_final_product`, `is_line_final_product`, `is_special_management_material`, `is_virtual_set`, `line_id`, `management_unit`, `model_name`, `next_process_id`, `order_lot_min`, `order_lot_multiple`, `process_id`, `processing_area`, `product_code`, `product_group_id`, `product_name`, `size_length`, `size_thickness`, `size_width`, `specific_gravity`, `standard_lt_days`, `stock_location`, `transfer_destination`, `unit`, `unit_price`, `used_container_id`) ON `pm_db`.`m_product` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`component_id`, `consume_timing`, `id`, `quantity`, `routing_step_id`) ON `pm_db`.`m_routing_step_material` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`duration_min`, `hierarchy_depth`, `hierarchy_path`, `id`, `lead_time_days`, `line_id`, `output_product_id`, `parallel_count`, `parallel_group`, `process_id`, `remark`, `routing_id`, `source_bom_item_id`, `start_offset_min`, `step_no`, `supplier_id`, `time_unit`) ON `pm_db`.`m_routing_step` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`id`, `is_active`, `is_default`, `product_id`, `routing_code`, `valid_from_datetime`, `valid_to_datetime`) ON `pm_db`.`m_routing` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`calendar_id`, `id`, `supplier_code`, `supplier_name`, `supplier_type`) ON `pm_db`.`m_supplier` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`event_data`, `id`, `process_id`, `product_code`, `product_id`, `product_name`, `qty`, `record_type`, `timestamp`) ON `pm_db`.`t_process_realtime_record` TO `pm_ai_view_owner`@`localhost`"
+    },
+    {
+      "Grants for pm_ai_view_owner@localhost": "GRANT SELECT (`customer_code`, `id`, `product_code`, `quantity`, `remark`, `ship_to_code`, `shipment_date`, `shipping_trip_allocation_id`) ON `pm_db`.`t_shipment_actual` TO `pm_ai_view_owner`@`localhost`"
+    }
+  ]
+}

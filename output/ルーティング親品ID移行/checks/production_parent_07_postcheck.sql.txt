@@ -1,0 +1,39 @@
+-- 未実行。SELECTだけ。schema/移行/AI実体と履歴の結果をroot/evaluatorが確認する。
+SELECT DATABASE() AS actual_database, @@hostname AS server_hostname, VERSION() AS server_version;
+SELECT COUNT(*) AS total_steps,
+       SUM(s.parent_product_id IS NOT NULL) AS populated_parent_count,
+       SUM(s.parent_product_id IS NULL) AS null_parent_count,
+       SUM(s.parent_product_id IS NOT NULL AND p.id IS NULL) AS orphan_parent_count
+FROM pm_db.m_routing_step s LEFT JOIN pm_db.m_product p ON p.id = s.parent_product_id;
+SELECT table_name, column_name, column_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'pm_db' AND table_name = 'm_routing_step' AND column_name = 'parent_product_id';
+SELECT table_name, definer, security_type, view_definition
+FROM information_schema.views
+WHERE table_schema = 'pm_db' AND table_name IN ('v_ai_routing_step', 'v_ai_routing_step_material');
+SELECT table_name, ordinal_position, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'pm_db' AND table_name IN ('v_ai_routing_step', 'v_ai_routing_step_material')
+ORDER BY table_name, ordinal_position;
+SELECT (SELECT COUNT(*) FROM pm_db.m_routing_step) AS base_step_count,
+       (SELECT COUNT(*) FROM pm_db.v_ai_routing_step) AS ai_step_count,
+       (SELECT COUNT(*) FROM pm_db.m_routing_step_material) AS base_material_count,
+       (SELECT COUNT(*) FROM pm_db.v_ai_routing_step_material) AS ai_material_count;
+SELECT s.id, p.product_code AS current_parent_code, v.parent_product_code AS ai_parent_code
+FROM pm_db.m_routing_step s
+LEFT JOIN pm_db.m_product p ON p.id = s.parent_product_id
+LEFT JOIN pm_db.v_ai_routing_step v ON v.id = s.id
+WHERE NOT (BINARY p.product_code <=> BINARY v.parent_product_code);
+SELECT m.id, p.product_code AS current_step_parent_code, v.step_parent_product_code AS ai_step_parent_code
+FROM pm_db.m_routing_step_material m
+LEFT JOIN pm_db.m_routing_step s ON s.id = m.routing_step_id
+LEFT JOIN pm_db.m_product p ON p.id = s.parent_product_id
+LEFT JOIN pm_db.v_ai_routing_step_material v ON v.id = m.id
+WHERE NOT (BINARY p.product_code <=> BINARY v.step_parent_product_code);
+SELECT app, name, applied FROM pm_db.django_migrations
+WHERE (app = 'masters' AND name = '0087_routingstep_parent_product')
+   OR (app = 'ai' AND name = '0051_routing_parent_product_views')
+ORDER BY app;
+-- 本番実アカウントが下記と一致することを先に確認する。異なる場合はrootが対象を確認する。
+SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
+SHOW GRANTS FOR 'pm_ai_reader'@'172.18.%';
