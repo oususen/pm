@@ -1,9 +1,13 @@
 from django.conf import settings
 from django.db import models
 
-from masters.models import Equipment, Product
+from masters.models import Equipment, Line, Process, Product
 
 from .models_laser_pattern import LaserPattern
+
+# レーザー実績を登録できる設備のライン/工程（マスタの line_code / process_code）
+LASER_LINE_CODE = 'L0801'
+LASER_PROCESS_CODE = '0801'
 
 
 class LaserActual(models.Model):
@@ -29,6 +33,23 @@ class LaserActual(models.Model):
         on_delete=models.PROTECT,
         related_name='laser_actuals',
         verbose_name='設備',
+    )
+    # 保存時にサーバーが L0801 / 0801 のマスタ行から決める値（クライアントからは受け取らない）
+    line = models.ForeignKey(
+        Line,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='laser_actuals',
+        verbose_name='ライン',
+    )
+    process = models.ForeignKey(
+        Process,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='laser_actuals',
+        verbose_name='工程',
     )
     pattern = models.ForeignKey(
         LaserPattern,

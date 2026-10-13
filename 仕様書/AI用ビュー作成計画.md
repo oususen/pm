@@ -59,7 +59,7 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
 | 候補ビュー | 対象 | 作成方針 |
 |---|---|---|
 | `v_ai_process_production_actual` | `t_process_realtime_record`の工程生産実績 | `record_type='PRODUCTION'`だけを対象にし、仕入実績を含めない |
-| `v_ai_laser_production_actual` | レーザー実績 | レーザー画面と同じく、終了済み構成部品明細だけを対象にする |
+| `v_ai_laser_production_actual` | レーザー実績 | レーザー画面と同じく、終了済み構成部品明細だけを対象にする。`t_laser_actual` に `line_id` / `process_id`（保存時に L0801 / 0801 のマスタ行IDを設定。補完完了までは NULL あり）を追加したため、ビューから直接出せる（公開可否はBOSS決定。本変更ではビューを変更していない） |
 | `v_ai_brake_production_actual` | ブレーキ・スポット実績 | `END`・`PAUSE`の数量だけを生産数として扱う |
 | `v_ai_scrap_confirmed` | 確定仕損 | `event_type='SCRAP'`かつ確定・一部使用可の正味数量だけを対象にする |
 | `v_ai_interruption` | 中断・強制終了 | `PAUSE`・`TEMP_END`の件数と理由を対象にする |

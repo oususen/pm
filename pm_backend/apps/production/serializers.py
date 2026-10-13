@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models import F, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import serializers
-from masters.models import RoutingStep
+from masters.models import Line, Process, RoutingStep
 from masters.services.routing_service import build_effective_routing_q
 
 from .models import LineDemand
@@ -32,7 +32,7 @@ from .models_production_actual_reconcile import (
 from .models_laser_processing_freq import LaserProcessingFreqPattern
 from .models_laser_pattern import LaserPattern, LaserPatternComponent, LaserPatternFinishedProduct
 from .models_laser_weekly_plan import LaserMaterialOrderEmailConfig, LaserWeeklyPlanTarget, LaserWeeklyMaterialGroup
-from .models_laser_actual import LaserActual, LaserActualDetail
+from .models_laser_actual import LASER_LINE_CODE, LASER_PROCESS_CODE, LaserActual, LaserActualDetail
 from .models_laser_kadojiseki import LaserShiftRecord
 from .models_process_realtime import ProcessRealtimeRecord
 from .models_production import ProcessActual, ProductionOrder, StockAllocation
@@ -622,6 +622,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
             'equipment_name',
             'equipment_process_code',
             'equipment_process_id',
+            'line',
+            'process',
             'pattern',
             'pattern_no',
             'material',
@@ -644,6 +646,8 @@ class LaserActualSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id',
+            'line',
+            'process',
             'pattern_no',
             'equipment_code',
             'equipment_name',
@@ -701,6 +705,30 @@ class LaserActualSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'pattern': '選択パターンに構成部品が登録されていません。'})
         if bool(getattr(pattern, 'is_budget_target', False)) and not pattern.finished_items.exists():
             raise serializers.ValidationError({'pattern': '材料予算用パターンには完成品情報が必要です。'})
+
+        # 設備のライン/工程が L0801 / 0801 のマスタ行と一致することを検証し、保存値を決める
+        equipment = attrs.get('equipment') or getattr(self.instance, 'equipment', None)
+        laser_line = Line.objects.filter(line_code=LASER_LINE_CODE).first()
+        laser_process = Process.objects.filter(process_code=LASER_PROCESS_CODE).first()
+        if laser_line is None or laser_process is None:
+            raise serializers.ValidationError({
+                'equipment': (
+                    f'ラインマスタ({LASER_LINE_CODE})または工程マスタ({LASER_PROCESS_CODE})が登録されていないため、'
+                    'レーザー実績を登録できません。'
+                )
+            })
+        if (
+            equipment is None
+            or equipment.line_id != laser_line.id
+            or equipment.process_id != laser_process.id
+        ):
+            raise serializers.ValidationError({
+                'equipment': (
+                    f'レーザー実績は、ライン{LASER_LINE_CODE}・工程{LASER_PROCESS_CODE}の設備でのみ登録できます。'
+                )
+            })
+        attrs['line'] = laser_line
+        attrs['process'] = laser_process
 
         action = str(
             attrs.get('operator_action')

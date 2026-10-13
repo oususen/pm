@@ -1,11 +1,14 @@
 from datetime import date
+from io import StringIO
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
 from masters.models import Equipment, Line, Process, Product, Routing, RoutingStep
-from production.models_laser_actual import LaserActual
+from production.models_laser_actual import LASER_LINE_CODE, LASER_PROCESS_CODE, LaserActual
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.models_laser_pattern import (
     LaserPattern,
@@ -38,11 +41,20 @@ class LaserActualBacklogSyncTest(TestCase):
             process_name='ナット',
             line=self.nut_line,
         )
+        # 設備はレーザー実績を登録できる L0801 / 0801 に紐づける。
+        # LineBacklog の反映先はルーティング由来(L-LASER-T)のままで、設備や新列とは独立。
+        self.laser_line, _ = Line.objects.get_or_create(
+            line_code=LASER_LINE_CODE, defaults={'line_name': 'レーザ'},
+        )
+        self.laser_process, _ = Process.objects.get_or_create(
+            process_code=LASER_PROCESS_CODE,
+            defaults={'process_name': 'レーザ加工', 'line': self.laser_line},
+        )
         self.equipment = Equipment.objects.create(
             equipment_code='EQ-LASER-T',
             equipment_name='レーザ設備試験',
-            line=self.nut_line,
-            process=self.nut_process,
+            line=self.laser_line,
+            process=self.laser_process,
         )
         self.material = Product.objects.create(
             product_code='MAT-LASER-T',
@@ -122,6 +134,13 @@ class LaserActualBacklogSyncTest(TestCase):
             process=self.nut_process,
             product=self.component,
             sequence_no=0,
+        ).exists())
+        # 設備のライン/工程(L0801/0801)にも LineBacklog は作られない(ルーティング由来のみ)
+        self.assertFalse(LineBacklog.objects.filter(
+            plan_date=date(2026, 3, 14),
+            line=self.laser_line,
+            process=self.laser_process,
+            product=self.component,
         ).exists())
 
     def test_update_replaces_backlog_qty_with_delta(self):
@@ -206,3 +225,152 @@ class LaserActualBacklogSyncTest(TestCase):
         self.assertEqual(history.reason, 'レーザー数量訂正')
         self.assertEqual(history.before_data['production_qty'], 6.0)
         self.assertEqual(history.after_data['production_qty'], 8.0)
+
+    # ---- line / process の保存時決定と設備検証 ----
+
+    def _payload(self, **extra):
+        data = {
+            'work_date': date(2026, 3, 14),
+            'equipment': self.equipment.id,
+            'pattern': self.pattern.id,
+            'shot_count': 2,
+            'operator_action': 'END',
+            'operator_action_reason': '',
+            'component_scraps': [],
+            'remarks': '',
+        }
+        data.update(extra)
+        return data
+
+    def _assert_rejected(self, serializer):
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('equipment', serializer.errors)
+        self.assertIn('L0801', str(serializer.errors['equipment']))
+
+    def test_create_sets_line_and_process(self):
+        actual = self._create_actual()
+        self.assertEqual(actual.line_id, self.laser_line.id)
+        self.assertEqual(actual.process_id, self.laser_process.id)
+
+    def test_rejects_equipment_with_other_line(self):
+        self.equipment.line = self.nut_line
+        self.equipment.save()
+        self._assert_rejected(LaserActualSerializer(data=self._payload()))
+        self.assertEqual(LaserActual.objects.count(), 0)
+        self.assertEqual(LineBacklog.objects.count(), 0)
+
+    def test_rejects_equipment_with_null_line(self):
+        self.equipment.line = None
+        self.equipment.save()
+        self._assert_rejected(LaserActualSerializer(data=self._payload()))
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_rejects_equipment_with_other_or_null_process(self):
+        self.equipment.process = self.nut_process
+        self.equipment.save()
+        self._assert_rejected(LaserActualSerializer(data=self._payload()))
+        self.equipment.process = None
+        self.equipment.save()
+        self._assert_rejected(LaserActualSerializer(data=self._payload()))
+        self.assertEqual(LaserActual.objects.count(), 0)
+        self.assertEqual(LineBacklog.objects.count(), 0)
+
+    def test_client_line_process_are_ignored(self):
+        serializer = LaserActualSerializer(data=self._payload(
+            line=self.nut_line.id, process=self.nut_process.id,
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        self.assertEqual(actual.line_id, self.laser_line.id)
+        self.assertEqual(actual.process_id, self.laser_process.id)
+
+    def test_update_rejects_equipment_outside_laser_line(self):
+        actual = self._create_actual()
+        other = Equipment.objects.create(
+            equipment_code='EQ-NUT-T', equipment_name='ナット設備',
+            line=self.nut_line, process=self.nut_process,
+        )
+        self._assert_rejected(LaserActualSerializer(actual, data=self._payload(equipment=other.id)))
+        actual.refresh_from_db()
+        self.assertEqual(actual.equipment_id, self.equipment.id)
+
+    def test_update_keeps_line_process(self):
+        actual = self._create_actual()
+        serializer = LaserActualSerializer(actual, data=self._payload(shot_count=3))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        self.assertEqual(actual.line_id, self.laser_line.id)
+        self.assertEqual(actual.process_id, self.laser_process.id)
+
+    def test_missing_master_row_gives_explicit_error(self):
+        # コードで引けない状態にする(L0801 のラインマスタが無い)
+        self.laser_line.line_code = 'L0801-X'
+        self.laser_line.save()
+        serializer = LaserActualSerializer(data=self._payload())
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('マスタ', str(serializer.errors['equipment']))
+
+    def test_saved_values_do_not_follow_equipment_master_change(self):
+        actual = self._create_actual()
+        self.equipment.line = self.nut_line
+        self.equipment.process = self.nut_process
+        self.equipment.save()
+        actual.refresh_from_db()
+        self.assertEqual(actual.line_id, self.laser_line.id)
+        self.assertEqual(actual.process_id, self.laser_process.id)
+
+    # ---- 補完コマンド backfill_laser_actual_line_process ----
+
+    def _make_null_actual(self, equipment):
+        return LaserActual.objects.create(
+            work_date=date(2026, 3, 14), equipment=equipment, pattern=self.pattern,
+            shot_count=1, pattern_no='PT-LASER-T',
+        )
+
+    def _run_backfill(self, *args):
+        out = StringIO()
+        call_command('backfill_laser_actual_line_process', *args, stdout=out)
+        return out.getvalue()
+
+    def test_backfill_default_does_not_update(self):
+        self._make_null_actual(self.equipment)
+        output = self._run_backfill()
+        self.assertEqual(LaserActual.objects.filter(line_id__isnull=True).count(), 1)
+        self.assertIn('対象件数=1 候補件数=1 不一致件数=0 更新件数=0 未補完件数=1', output)
+
+    def test_backfill_apply_updates_and_second_run_is_noop(self):
+        actual = self._make_null_actual(self.equipment)
+        output = self._run_backfill('--apply')
+        self.assertIn('更新件数=1 未補完件数=0', output)
+        actual.refresh_from_db()
+        self.assertEqual(actual.line_id, self.laser_line.id)
+        self.assertEqual(actual.process_id, self.laser_process.id)
+        self.assertIn(
+            '対象件数=0 候補件数=0 不一致件数=0 更新件数=0 未補完件数=0',
+            self._run_backfill('--apply'),
+        )
+
+    def test_backfill_mismatched_equipment_is_listed_and_not_updated(self):
+        other = Equipment.objects.create(
+            equipment_code='EQ-NUT-T', equipment_name='ナット設備',
+            line=self.nut_line, process=self.nut_process,
+        )
+        actual = self._make_null_actual(other)
+        output = self._run_backfill('--apply')
+        self.assertIn(f'不一致: id={actual.pk}', output)
+        self.assertIn('対象件数=1 候補件数=0 不一致件数=1 更新件数=0 未補完件数=1', output)
+        actual.refresh_from_db()
+        self.assertIsNone(actual.line_id)
+
+    def test_backfill_value_is_looked_up_by_code(self):
+        actual = self._make_null_actual(self.equipment)
+        self._run_backfill('--apply')
+        actual.refresh_from_db()
+        self.assertEqual(actual.line.line_code, LASER_LINE_CODE)
+        self.assertEqual(actual.process.process_code, LASER_PROCESS_CODE)
+
+    def test_backfill_missing_master_row_is_error(self):
+        self.laser_line.line_code = 'L0801-X'
+        self.laser_line.save()
+        with self.assertRaises(CommandError):
+            self._run_backfill()

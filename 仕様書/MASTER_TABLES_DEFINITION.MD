@@ -85,7 +85,7 @@
 - `t_laser_pattern`
 - `t_laser_pattern_component`
 - `t_laser_pattern_finished`
-- `t_laser_actual`
+- `t_laser_actual`（`line_id` / `process_id` 追加: 保存時に L0801 / 0801 のマスタ行IDを設定。移行期間中は NULL 許可）
 - `t_laser_actual_detail`
 - `t_laser_shift_record`
 - `brake_line_record`
