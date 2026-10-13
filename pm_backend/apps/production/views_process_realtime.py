@@ -136,7 +136,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         return queryset.order_by('-timestamp')
 
     def create(self, request, *args, **kwargs):
-        serializer = ProcessRealtimeCreateSerializer(data=request.data)
+        serializer = ProcessRealtimeCreateSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         record = serializer.save()
         response_data = ProcessRealtimeRecordSerializer(record).data

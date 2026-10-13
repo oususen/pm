@@ -4,7 +4,7 @@
       <h2>{{ pageTitle }} <DataSourceDialog :title="pageTitle" :sources="dsSources" /></h2>
       <div class="header-info">
         <span class="date">{{ currentDate }}</span>
-        <div class="header-actions">
+        <div v-if="!isScrapOnlyPage" class="header-actions">
           <button class="btn-inspection-nav btn-checksheet-nav" @click="openIntegratedChecksheetOperation">チェックシート実施</button>
           <button class="btn-inspection-nav" @click="openEquipmentInspection">設備点検</button>
         </div>
@@ -121,7 +121,7 @@
       v-if="record.record_type === 'PRODUCTION' || (record.record_type === 'SCRAP' && currentProductList.length)"
       class="planned-buttons"
     >
-      <div class="planned-header">
+      <div v-if="!isScrapOnlyPage" class="planned-header">
         <div v-if="currentProductList.length" class="planned-nav">
           <button
             type="button"
@@ -168,7 +168,7 @@
           <div class="card-body">
             <div class="card-code">{{ p.product_code || t('processInput.unsetProductCode') }}</div>
             <div class="card-name">{{ p.product_name || '' }}</div>
-            <div class="card-plan" v-if="p.plan_qty != null">
+            <div class="card-plan" v-if="!isScrapOnlyPage && p.plan_qty != null">
               {{ t('processInput.planLabel', { qty: formatNumber(p.plan_qty) }) }}
             </div>
           </div>
@@ -210,10 +210,10 @@
       </div>
     </div>
 
-    <div v-if="selectedProcessId && currentProcessingLabel" class="section current-processing-banner">
+    <div v-if="!isScrapOnlyPage && selectedProcessId && currentProcessingLabel" class="section current-processing-banner">
       {{ currentProcessingLabel }}
     </div>
-    <div v-if="selectedProcessId && pauseNoticeLabel" class="section current-processing-banner pause-notice-banner">
+    <div v-if="!isScrapOnlyPage && selectedProcessId && pauseNoticeLabel" class="section current-processing-banner pause-notice-banner">
       {{ pauseNoticeLabel }}
     </div>
 
@@ -243,7 +243,7 @@
                 :value="p.product"
               >
                 {{ p.product_code }} - {{ p.product_name || '' }}
-                {{ getPlanQtyParenLabel(p) }}
+                <template v-if="!isScrapOnlyPage">{{ getPlanQtyParenLabel(p) }}</template>
               </option>
             </select>
           </div>
@@ -263,7 +263,7 @@
             </select>
           </div>
           <div v-if="manualProductsLoading" class="hint">{{ t('processInput.loadingProductList') }}</div>
-          <div v-if="!currentProductList.length" class="hint">
+          <div v-if="!isScrapOnlyPage && !currentProductList.length" class="hint">
             {{ t('processInput.noPlanHint') }}
           </div>
         </template>
@@ -485,7 +485,34 @@
         />
       </div>
 
-      <div class="section inline-row row-label-input">
+      <template v-if="isScrapRecord">
+        <div class="section inline-row row-label-input">
+          <label for="scrap-operator" class="label-required inline-label label-side">{{ t('processInput.operator') }}</label>
+          <input
+            id="scrap-operator"
+            :value="authState.user ? `${scrapUserName(authState.user)} (${authState.user.username})` : ''"
+            class="input-normal flex-input"
+            readonly
+          />
+        </div>
+        <div v-for="person in scrapPersonFields" :key="person.key" class="section inline-row row-label-input">
+          <label :for="`scrap-${person.key}`" class="inline-label label-side" :class="{ 'label-required': person.key === 'reporter' }">{{ person.label }}</label>
+          <select
+            :id="`scrap-${person.key}`"
+            v-model="scrapPersonIds[person.key]"
+            class="input-normal flex-input"
+            :disabled="scrapUsersLoading || !scrapUsersLoaded"
+          >
+            <option value="">{{ t('processInput.selectUser') }}</option>
+            <option v-for="user in scrapUsers" :key="user.id" :value="user.id">
+              {{ scrapUserName(user) }} ({{ user.username }})
+            </option>
+          </select>
+        </div>
+        <div v-if="scrapUsersLoading" class="hint">{{ t('processInput.loadingUsers') }}</div>
+        <div v-if="scrapUsersError" class="hint form-error">{{ t('processInput.usersLoadFailed') }}</div>
+      </template>
+      <div v-else class="section inline-row row-label-input">
         <label class="label-required inline-label label-side">{{ t('processInput.operator') }}</label>
         <input
           type="text"
@@ -1068,6 +1095,46 @@ const resolveDefaultOperator = () => {
 }
 
 const defaultOperatorName = ref(resolveDefaultOperator())
+
+const scrapUsers = ref([])
+const scrapUsersLoading = ref(false)
+const scrapUsersLoaded = ref(false)
+const scrapUsersError = ref(false)
+const scrapPersonIds = ref({ cause_person: '', reporter: '' })
+const scrapPersonFields = computed(() => [
+  { key: 'cause_person', label: t('processInput.causePerson') },
+  { key: 'reporter', label: t('processInput.reporter') },
+])
+const scrapUserName = (user) => `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username
+const selectedScrapUsers = computed(() => Object.fromEntries(
+  scrapPersonFields.value.map(({ key }) => [key, scrapUsers.value.find((user) => user.id === scrapPersonIds.value[key])])
+))
+const resetScrapPersons = () => {
+  const userId = authState.user?.id ?? ''
+  scrapPersonIds.value = { cause_person: '', reporter: userId }
+}
+const loadScrapUsers = async () => {
+  if (scrapUsersLoaded.value || scrapUsersLoading.value) return
+  scrapUsersLoading.value = true
+  scrapUsersError.value = false
+  try {
+    // page_size=0 は正式な全件取得。所属・有効状態で絞り込まない。
+    const response = await api.accounts.getUsers({ page_size: 0 })
+    if (!Array.isArray(response.data)) throw new Error('ユーザー一覧の応答形式が不正です')
+    scrapUsers.value = response.data
+    scrapUsersLoaded.value = true
+  } catch (error) {
+    console.error('仕損記録用ユーザー一覧取得エラー:', error)
+    scrapUsers.value = []
+    scrapUsersError.value = true
+  } finally {
+    scrapUsersLoading.value = false
+  }
+}
+watch(() => authState.user?.id, resetScrapPersons, { immediate: true })
+watch(isScrapRecord, (isScrap) => {
+  if (isScrap) loadScrapUsers()
+}, { immediate: true })
 
 watch(
   () => authState.user,
@@ -2251,7 +2318,7 @@ const hasRequiredProductionFields = ({ requireQty = true } = {}) => {
       return false
     }
   }
-  if (!hasFilledText(record.value.operator_name)) return false
+  if (!isScrapRecord.value && !hasFilledText(record.value.operator_name)) return false
   return true
 }
 
@@ -2273,6 +2340,10 @@ const canSubmit = computed(() => {
   }
 
   if (record.value.record_type === 'SCRAP') {
+    if (!scrapUsersLoaded.value || scrapUsersLoading.value || scrapUsersError.value) return false
+    if (!authState.user?.id || !authState.user.username) return false
+    if (!selectedScrapUsers.value.reporter) return false
+    if (scrapPersonIds.value.cause_person !== '' && !selectedScrapUsers.value.cause_person) return false
     if (!hasRequiredProductionFields()) return false
     if (!record.value.reason) return false
     const detailText = (record.value.reason_detail || '').trim()
@@ -2292,6 +2363,7 @@ const canSubmit = computed(() => {
 })
 
 const resetForm = () => {
+  resetScrapPersons()
   record.value = {
     record_type: '',
     product_id: '',
@@ -2508,6 +2580,10 @@ const submitRecord = async () => {
       }
 
       if (record.value.record_type === 'SCRAP' && record.value.reason) {
+        const operator = authState.user
+        data.operator_name = scrapUserName(operator)
+        data.cause_login_id = scrapPersonIds.value.cause_person === '' ? null : selectedScrapUsers.value.cause_person.username
+        data.reporter_login_id = selectedScrapUsers.value.reporter.username
         const currentProduct =
           scrapProducts.value.find((p) => String(p.product) === String(record.value.product_id)) ||
           manualProducts.value.find((p) => String(p.id) === String(record.value.product_id))
@@ -2851,7 +2927,7 @@ const mergeMissingFloorMapProducts = async (lineId, processId, items) => {
 const applyTimeSlotFilter = () => {
   const slots = timeSlots.value || []
   let index = activeSlotIndex.value
-  if (slots.length === 0 || !filterCurrentTime.value) {
+  if (isScrapOnlyPage.value || slots.length === 0 || !filterCurrentTime.value) {
     const mergedAll = mergeProductionProductsByProduct(allPlanProducts.value)
     productionProducts.value = ensureStartedProductsVisible(mergedAll)
     scrapProducts.value = [...allScrapProducts.value]
@@ -4030,11 +4106,11 @@ onMounted(async () => {
     selectedProcessId.value = String(queryProcessId)
     onProcessChange()
   }
-  if (route.query.operator_name !== undefined) {
+  if (!isScrapRecord.value && !isScrapOnlyPage.value && route.query.operator_name !== undefined) {
     const name = String(route.query.operator_name || '')
     defaultOperatorName.value = name
     record.value.operator_name = name
-  } else if (route.query.clear_operator === '1') {
+  } else if (!isScrapRecord.value && !isScrapOnlyPage.value && route.query.clear_operator === '1') {
     defaultOperatorName.value = ''
     record.value.operator_name = ''
   }

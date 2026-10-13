@@ -23,6 +23,136 @@ from production.services.process_realtime_routing_service import (
     is_valid_output_process,
 )
 from production.views_process_realtime import ProcessRealtimeRecordViewSet
+from django.contrib.auth import get_user_model
+from rest_framework.test import force_authenticate
+from quality.models_scrap import ScrapRecord
+from production.services.process_realtime_scrap_service import process_scrap_disposition
+
+
+class ScrapLoginIdTest(TestCase):
+    """仕損の担当者列と既存イベント情報の分離を検証する。"""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = get_user_model().objects.create_user(username='000175', last_name='記入', first_name='太郎')
+        self.reporter = get_user_model().objects.create_user(username='000176')
+        self.cause = get_user_model().objects.create_user(username='000177')
+        self.process = Process.objects.create(process_code='LOGIN-SCRAP', process_name='仕損列検証')
+        self.product = Product.objects.create(product_code='LOGIN-SCRAP', product_name='仕損列検証品')
+
+    def post_scrap(self, **overrides):
+        payload = {
+            'process_id': self.process.id, 'product_id': self.product.id,
+            'record_type': 'SCRAP', 'qty': 1, 'operator_name': '記入 太郎',
+            'reporter_login_id': self.reporter.username, 'cause_login_id': None,
+            'operator_login_id': '偽装',
+            'event_data': {'reason': 'RUST', 'operator': {'login_id': '偽装'},
+                           'cause_person': None, 'reporter': {'login_id': '偽装'},
+                           'is_production_recorded': False},
+        }
+        payload.update(overrides)
+        request = self.factory.post('/api/process-realtime-records/', payload, format='json')
+        force_authenticate(request, user=self.user)
+        with patch('production.serializers_process_realtime.build_scrap_multiplier_details', return_value=[]), \
+             patch('production.serializers_process_realtime.build_scrap_multiplier_map', return_value={}), \
+             patch('production.serializers_process_realtime.update_scrap_to_backlog'):
+            return ProcessRealtimeRecordViewSet.as_view({'post': 'create'})(request)
+
+    def test_general_scrap_columns_and_response(self):
+        response = self.post_scrap(cause_login_id=self.cause.username)
+        self.assertEqual(response.status_code, 201)
+        scrap = ScrapRecord.objects.get(process_record_id=response.data['id'])
+        self.assertEqual(scrap.operator_login_id, self.user.username)
+        self.assertEqual(scrap.cause_login_id, self.cause.username)
+        self.assertEqual(scrap.reporter_login_id, self.reporter.username)
+        self.assertEqual(response.data['scrap_operator_login_id'], self.user.username)
+        self.assertEqual(response.data['scrap_cause_login_id'], self.cause.username)
+        self.assertEqual(response.data['scrap_reporter_login_id'], self.reporter.username)
+        self.assertEqual(response.data['event_data'], {'reason': 'RUST', 'is_production_recorded': False})
+
+    def test_empty_cause_is_null(self):
+        for cause in (None, ''):
+            with self.subTest(cause=cause):
+                response = self.post_scrap(cause_login_id=cause)
+                self.assertEqual(response.status_code, 201)
+                self.assertIsNone(response.data['scrap_cause_login_id'])
+
+    def test_column_save_keeps_scrap_backlog_and_stock_effects(self):
+        from production.models_production import StockAllocation
+        from production.serializers_process_realtime import ProcessRealtimeCreateSerializer
+        line = Line.objects.create(line_code='LOGIN-SCRAP', line_name='列保存在庫検証')
+        self.process.line = line
+        self.process.save(update_fields=['line'])
+        stock = StockAllocation.objects.create(product=self.product, location='DEFAULT', current_stock=10, min_stock_qty=0)
+        serializer = ProcessRealtimeCreateSerializer(data={
+            'process_id': self.process.id, 'product_id': self.product.id,
+            'record_type': 'SCRAP', 'qty': 2,
+            'reporter_login_id': self.reporter.username,
+            'event_data': {'reason': 'RUST', 'relation_type': 'OUTPUT_PRODUCT', 'is_production_recorded': False},
+        }, context={'request': SimpleNamespace(user=self.user)})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        record = serializer.save()
+        stock.refresh_from_db()
+        self.assertEqual(stock.current_stock, Decimal('8'))
+        backlog = LineBacklog.objects.get(line=line, process=self.process, product=self.product, sequence_no=0)
+        self.assertEqual(backlog.scrap_qty, 2)
+        self.assertEqual(backlog.actual_qty, 0)
+        self.assertEqual(backlog.scrap_adjust_qty, 0)
+        self.assertEqual(record.scrap_detail.operator_login_id, self.user.username)
+
+    def test_invalid_users_or_missing_reporter_are_rejected_before_save(self):
+        for overrides in ({'reporter_login_id': None}, {'reporter_login_id': ''},
+                          {'reporter_login_id': 'unknown'}, {'cause_login_id': 'unknown'},
+                          {'scrap_input_source': 'OTHER'}):
+            with self.subTest(overrides=overrides):
+                response = self.post_scrap(**overrides)
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(ScrapRecord.objects.exists())
+        # 未指定も400。Noneと区別してserializer入力から削除する。
+        from production.serializers_process_realtime import ProcessRealtimeCreateSerializer
+        serializer = ProcessRealtimeCreateSerializer(data={
+            'process_id': self.process.id, 'product_id': self.product.id, 'record_type': 'SCRAP',
+        }, context={'request': SimpleNamespace(user=self.user)})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('reporter_login_id', serializer.errors)
+
+    def test_brake_and_spot_ignore_client_people(self):
+        for source in ('BRAKE', 'SPOT'):
+            with self.subTest(source=source):
+                response = self.post_scrap(scrap_input_source=source, cause_login_id={'invalid': True}, reporter_login_id='unknown')
+                self.assertEqual(response.status_code, 201)
+                for key in ('scrap_operator_login_id', 'scrap_cause_login_id', 'scrap_reporter_login_id'):
+                    self.assertEqual(response.data[key], self.user.username)
+
+    def test_return_records_actor_only(self):
+        response = self.post_scrap()
+        record = ProcessRealtimeRecord.objects.get(pk=response.data['id'])
+        with patch('production.services.process_realtime_scrap_service._build_return_details'), \
+             patch('production.services.process_realtime_scrap_service._restore_parent_backlog'), \
+             patch('production.services.process_realtime_scrap_service._restore_child_adjustments'):
+            process_scrap_disposition(record, 'RETURN', qty_input=1, decided_by=self.user.username)
+        returned = ScrapRecord.objects.get(event_type='RETURN')
+        self.assertEqual(returned.operator_login_id, self.user.username)
+        self.assertIsNone(returned.cause_login_id)
+        self.assertIsNone(returned.reporter_login_id)
+
+    def test_anonymous_scrap_and_return_are_rejected(self):
+        from django.contrib.auth.models import AnonymousUser
+        from production.serializers_process_realtime import ProcessRealtimeCreateSerializer
+        from production.services.process_realtime_scrap_service import ScrapServiceError
+        serializer = ProcessRealtimeCreateSerializer(data={
+            'process_id': self.process.id, 'product_id': self.product.id,
+            'record_type': 'SCRAP', 'reporter_login_id': self.reporter.username,
+        }, context={'request': SimpleNamespace(user=AnonymousUser())})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('operator_login_id', serializer.errors)
+        response = self.post_scrap()
+        record = ProcessRealtimeRecord.objects.get(pk=response.data['id'])
+        with self.assertRaises(ScrapServiceError) as error:
+            process_scrap_disposition(record, 'RETURN', qty_input=1)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertFalse(ScrapRecord.objects.filter(event_type='RETURN').exists())
+
 
 
 class ProcessRealtimeSessionRecalcTest(TestCase):

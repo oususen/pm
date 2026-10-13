@@ -6,6 +6,7 @@ from datetime import timedelta, time
 
 from rest_framework import serializers
 from django.db import transaction
+from django.contrib.auth import get_user_model
 from django.db.models import F
 from django.utils import timezone
 from masters.models import Process, Product, BOM, Supplier, Routing, RoutingStep
@@ -1063,6 +1064,9 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     scrap_is_production_recorded = serializers.SerializerMethodField()
     scrap_decided_at = serializers.SerializerMethodField()
     scrap_decided_by = serializers.SerializerMethodField()
+    scrap_operator_login_id = serializers.SerializerMethodField()
+    scrap_cause_login_id = serializers.SerializerMethodField()
+    scrap_reporter_login_id = serializers.SerializerMethodField()
 
     class Meta:
         model = ProcessRealtimeRecord
@@ -1093,6 +1097,9 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'scrap_is_production_recorded',
             'scrap_decided_at',
             'scrap_decided_by',
+            'scrap_operator_login_id',
+            'scrap_cause_login_id',
+            'scrap_reporter_login_id',
         ]
         read_only_fields = ['id', 'timestamp']
 
@@ -1130,6 +1137,15 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     def get_scrap_decided_by(self, obj):
         sd = getattr(obj, 'scrap_detail', None)
         return sd.decided_by if sd else None
+
+    def get_scrap_operator_login_id(self, obj):
+        return getattr(getattr(obj, 'scrap_detail', None), 'operator_login_id', None)
+
+    def get_scrap_cause_login_id(self, obj):
+        return getattr(getattr(obj, 'scrap_detail', None), 'cause_login_id', None)
+
+    def get_scrap_reporter_login_id(self, obj):
+        return getattr(getattr(obj, 'scrap_detail', None), 'reporter_login_id', None)
 
 
 class ProcessWorkSessionSerializer(serializers.ModelSerializer):
@@ -1297,8 +1313,37 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
     remarks = serializers.CharField(required=False, allow_blank=True)
     event_data = serializers.JSONField(required=False, allow_null=True)
     work_date = serializers.DateField(required=False, allow_null=True)
+    cause_login_id = serializers.CharField(max_length=150, required=False, allow_null=True, allow_blank=True, write_only=True)
+    reporter_login_id = serializers.CharField(max_length=150, required=False, allow_null=True, allow_blank=True, write_only=True)
+    scrap_input_source = serializers.ChoiceField(choices=('BRAKE', 'SPOT'), required=False, write_only=True)
+
+    def to_internal_value(self, data):
+        # 作業者自身の仕損画面ではクライアントの三者指定を使用しない。
+        if data.get('record_type') == 'SCRAP' and data.get('scrap_input_source') in ('BRAKE', 'SPOT'):
+            data = data.copy()
+            data.pop('cause_login_id', None)
+            data.pop('reporter_login_id', None)
+        return super().to_internal_value(data)
 
     def validate(self, attrs):
+        if attrs.get('record_type') == 'SCRAP':
+            user = getattr(self.context.get('request'), 'user', None)
+            if not user or not user.is_authenticated or not user.username:
+                raise serializers.ValidationError({'operator_login_id': '仕損登録にはログインが必要です。'})
+            if attrs.get('scrap_input_source') in ('BRAKE', 'SPOT'):
+                attrs['cause_login_id'] = user.username
+                attrs['reporter_login_id'] = user.username
+            else:
+                if not attrs.get('reporter_login_id'):
+                    raise serializers.ValidationError({'reporter_login_id': '報告者の指定が必要です。'})
+                attrs['cause_login_id'] = attrs.get('cause_login_id') or None
+                for field in ('cause_login_id', 'reporter_login_id'):
+                    login_id = attrs.get(field)
+                    if login_id and not get_user_model().objects.filter(username=login_id).exists():
+                        raise serializers.ValidationError({field: '指定されたユーザーが存在しません。'})
+            if isinstance(attrs.get('event_data'), dict):
+                attrs['event_data'] = {key: value for key, value in attrs['event_data'].items()
+                                       if key not in ('operator', 'cause_person', 'reporter')}
         if attrs.get('record_type') in ['PRODUCTION', 'PURCHASE', 'SCRAP']:
             has_product_id = bool(attrs.get('product_id'))
             has_product_code = bool((attrs.get('product_code') or '').strip())
@@ -1339,6 +1384,12 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
+        cause_login_id = validated_data.pop('cause_login_id', None)
+        reporter_login_id = validated_data.pop('reporter_login_id', None)
+        validated_data.pop('scrap_input_source', None)
+        operator_login_id = None
+        if validated_data.get('record_type') == 'SCRAP':
+            operator_login_id = self.context['request'].user.username
         process_id = validated_data.pop('process_id')
         try:
             process = Process.objects.get(id=process_id)
@@ -1582,6 +1633,9 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                         operator_name=validated_data.get('operator_name', ''),
                         remarks=validated_data.get('remarks', ''),
                         process_record=parent_record,
+                        operator_login_id=operator_login_id,
+                        cause_login_id=cause_login_id,
+                        reporter_login_id=reporter_login_id,
                         disposition_status=disposition_status,
                         decided_at=decided_at,
                         decided_by=decided_by,

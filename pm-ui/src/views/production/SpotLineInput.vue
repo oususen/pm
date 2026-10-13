@@ -1153,6 +1153,7 @@ async function saveScrap(item) {
     await api.processRealtime.create({
       process_id: item.process_id,
       record_type: 'SCRAP',
+      scrap_input_source: 'SPOT',
       qty: scrapQty.value,
       operator_name: operator.value,
       ...(item.product_id ? { product_id: item.product_id } : { product_code: item.product_code }),

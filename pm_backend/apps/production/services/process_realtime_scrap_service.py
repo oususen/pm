@@ -366,6 +366,9 @@ def _process_scrap_return(record, sd, qty_input, decided_by):
         reason_detail=sd.reason_detail or '',
         batch_no=sd.batch_no or '',
         operator_name=sd.operator_name or '',
+        operator_login_id=decided_by,
+        cause_login_id=None,
+        reporter_login_id=None,
         remarks=sd.remarks or '',
         return_for=sd,
         disposition_status='APPROVED',
@@ -403,6 +406,8 @@ def process_scrap_disposition(record, action, qty_input=None, decided_by=None):
     normalized_action = str(action or '').strip().upper()
     if normalized_action not in ('RETURN', 'CONFIRM_SCRAP'):
         raise ScrapServiceError('action is required (RETURN or CONFIRM_SCRAP)', status_code=400)
+    if normalized_action == 'RETURN' and not decided_by:
+        raise ScrapServiceError('仕損戻しにはログインが必要です。', status_code=400)
 
     with transaction.atomic():
         if normalized_action == 'RETURN':

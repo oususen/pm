@@ -491,7 +491,10 @@ WHERE rs.time_unit='DAY';
 | reason | VARCHAR(100) NULL | 理由/区分（サビ, 変形/キズ, ビードずれ, ブローホール, 溶接穴あき, アンダーカット, 精度不良, 欠品/誤組, 素材/仕掛不良, その他） |
 | reason_detail | VARCHAR(200) NULL | 理由詳細（「その他」選択時に必須） |
 | batch_no | VARCHAR(100) NULL | ロット番号 |
-| operator_name | VARCHAR(50) | 記入者（UIで必須。ログインユーザー名を初期セット） |
+| operator_name | VARCHAR(50) | 記入者（仕損記録UIではログイン者固定、変更不可） |
+| operator_login_id | VARCHAR(150) NULL | 記入者のauth_user.username（サーバーのログイン者固定、RETURNは戻した人） |
+| cause_login_id | VARCHAR(150) NULL | 起因者のauth_user.username（任意、未選択はNULL） |
+| reporter_login_id | VARCHAR(150) NULL | 報告者のauth_user.username（一般/専用画面では必須） |
 | remarks | TEXT NULL | 備考 |
 | process_record_id | BIGINT NULL | 工程実時間記録（1:1） |
 | is_replenished | TINYINT(1)| 補充完了 |
@@ -499,6 +502,7 @@ WHERE rs.time_unit='DAY';
 | replenished_by | VARCHAR(50) NULL | 補充完了者 |
 
 - 取得元: 工程リアルタイム記録 API の `record_type='SCRAP'` 送信時に同時書き込み。`event_data.reason/reason_detail` を反映。
+- 三者の専用列はusernameのみ保存し姓名を保存しない。ブレーキ/スポットの明示識別子 `scrap_input_source=BRAKE/SPOT` では三列ともログイン者。RETURNの起因者/報告者はNULL。既存NULLは許容し、既存JSONの一括削除は行わない。
 - 暫定運用: 将来的にライン/工程 backlog 集計へ統合予定。現行はシンプル記録用途で先行稼働。
 - インデックス: `(process_id, recorded_at)`, `(line_id, recorded_at)`, `product_code`。
 
@@ -638,6 +642,8 @@ WHERE rs.time_unit='DAY';
 | last_update | DATETIME | 最終更新時刻 |
 
 ## 17.5 工程実時間記録 `t_process_realtime_record`
+仕損担当者は `t_scrap_record` の専用三列に保存する。新規 `event_data` には三者のJSONを保存せず、理由等の従来情報を維持する。旧JSONは変更しない。表示用 `operator_name` は従来どおり。
+
 | カラム | 型 | 説明 |
 |---|---|---|
 | id | BIGINT PK | |

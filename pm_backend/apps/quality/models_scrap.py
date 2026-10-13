@@ -84,6 +84,9 @@ class ScrapRecord(models.Model):
     reason_detail = models.CharField(max_length=200, null=True, blank=True, verbose_name='理由詳細')
     batch_no = models.CharField(max_length=100, null=True, blank=True, verbose_name='ロット番号')
     operator_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='作業者名')
+    operator_login_id = models.CharField(max_length=150, null=True, blank=True, verbose_name='記入者ログインID')
+    cause_login_id = models.CharField(max_length=150, null=True, blank=True, verbose_name='起因者ログインID')
+    reporter_login_id = models.CharField(max_length=150, null=True, blank=True, verbose_name='報告者ログインID')
     remarks = models.TextField(null=True, blank=True, verbose_name='備考')
     process_record = models.OneToOneField(
         ProcessRealtimeRecord,
