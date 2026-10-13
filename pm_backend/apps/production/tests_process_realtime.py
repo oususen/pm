@@ -609,7 +609,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             child_product_ids={component.id},
         )
 
-    @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
+    @patch('production.views_process_realtime.recalculate_inventory_after_session_change')
     @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
     def test_create_manual_session_triggers_recalculation(self, _mock_plan_date, mock_recalculate):
         self.create_output_routing()
@@ -645,7 +645,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         mock_recalculate.assert_called_once()
         self.assertEqual(mock_recalculate.call_args[0][0].id, session.id)
 
-    @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
+    @patch('production.views_process_realtime.recalculate_inventory_after_session_change')
     @patch('production.views_process_realtime.resolve_workday_date_for_process', return_value=date(2026, 3, 5))
     def test_create_manual_session_creates_coproduct_child_records(self, _mock_plan_date, mock_recalculate):
         parent = Product.objects.create(
@@ -763,7 +763,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             {self.product.id, parent.id, child.id},
         )
 
-    @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
+    @patch('production.views_process_realtime.recalculate_inventory_after_session_change')
     def test_session_detail_update_creates_history(self, mock_recalculate):
         started_at = self.make_dt(2026, 3, 5, 9)
         ended_at = self.make_dt(2026, 3, 5, 10)
@@ -804,7 +804,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertEqual(int(history.after_data['production_qty']), 7)
         mock_recalculate.assert_called_once()
 
-    @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
+    @patch('production.views_process_realtime.recalculate_inventory_after_session_change')
     def test_session_detail_update_syncs_coproduct_child_record_qty(self, mock_recalculate):
         parent = Product.objects.create(
             product_code='STYD-UPD',
@@ -885,7 +885,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertEqual(records.get(product=child).qty, Decimal('12'))
         mock_recalculate.assert_called_once()
 
-    @patch('production.services.process_realtime_backlog_service.recalculate_inventory_after_session_change')
+    @patch('production.views_process_realtime.recalculate_inventory_after_session_change')
     def test_session_detail_delete_triggers_recalculation(self, mock_recalculate):
         started_at = self.make_dt(2026, 3, 5, 9)
         ended_at = self.make_dt(2026, 3, 5, 10)
