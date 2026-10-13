@@ -37,6 +37,13 @@ class UserAdmin(BaseUserAdmin):
     list_display = ('username', 'email', 'first_name', 'last_name', 'get_department', 'is_staff', 'is_active')
     list_select_related = ('profile',)
 
+    def get_readonly_fields(self, request, obj=None):
+        # 編集時はユーザー名を変更不可にする（追加時は入力可）
+        readonly = tuple(super().get_readonly_fields(request, obj))
+        if obj is not None:
+            return readonly + ('username',)
+        return readonly
+
     def get_department(self, obj):
         return obj.profile.department if hasattr(obj, 'profile') else '-'
     get_department.short_description = '部署'

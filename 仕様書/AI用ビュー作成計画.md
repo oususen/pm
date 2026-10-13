@@ -66,7 +66,7 @@ BOM・ルーティングは、ヘッダと明細が別テーブルのため、1�
 
 生産実績は、工程実績・レーザー実績・ブレーキ実績を無条件に`UNION`または合計しない。質問・工程ごとに正規データソースを選び、同じ事実を二重計上しない。
 
-仕損担当者は `t_scrap_record.operator_login_id` / `cause_login_id` / `reporter_login_id`（username、NULL可）を将来の仕損ビューで公開する計画。三者JSONや姓名を分析元にしない。本単位では列追加・保存までで、AIビュー作成・公開は行わない。
+仕損担当者は `t_scrap_record.operator_login_id` / `cause_login_id` / `reporter_login_id`（username、NULL可）を将来の仕損ビューで公開する計画。三者JSONや姓名を分析元にしない。`username` は作成後に変更できない（API・管理画面で拒否。`仕様書/ユーザー名変更禁止実装計画.md`）ため、ログインIDで過去の記録とユーザーを結合できる前提とする。本単位では列追加・保存までで、AIビュー作成・公開は行わない。
 
 ### 優先2：残業
 

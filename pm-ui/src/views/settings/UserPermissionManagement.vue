@@ -128,7 +128,8 @@
           <form v-else class="form-grid" @submit.prevent="saveUser">
             <div class="form-row">
               <label>ユーザー名</label>
-              <input v-model="form.username" type="text" required />
+              <input v-model="form.username" type="text" required :readonly="!isCreating" />
+              <small v-if="!isCreating" class="field-note">作成後は変更できません</small>
             </div>
             <div class="form-row">
               <label>メールアドレス</label>
@@ -1448,6 +1449,16 @@ watch(filterTeamId, () => {
 
 .permission-source-empty {
   color: #888;
+}
+
+.form-row .field-note {
+  color: #888;
+  font-size: 11px;
+}
+
+.form-row input[readonly] {
+  background: #f2f2f2;
+  color: #666;
 }
 
 .form-row label {

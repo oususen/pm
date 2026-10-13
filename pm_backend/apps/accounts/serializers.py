@@ -237,6 +237,9 @@ class UserSerializer(serializers.ModelSerializer):
         }
 
     def validate_username(self, value):
+        # 作成後のユーザー名変更は禁止（完全一致で比較。同じ値の再送は通す）
+        if self.instance and value != self.instance.username:
+            raise serializers.ValidationError('ユーザー名は作成後に変更できません。')
         # Check uniqueness excluding current instance
         qs = User.objects.filter(username=value)
         if self.instance:
