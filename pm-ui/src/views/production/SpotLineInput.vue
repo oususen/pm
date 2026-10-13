@@ -260,7 +260,8 @@
             </div>
 
             <div class="action-bar">
-              <button class="btn-save" :disabled="!canSave || saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
+              <div v-if="scrapReasonMissing" class="scrap-reason-required">{{ t('scrapInput.reasonRequired') }}</div>
+              <button v-else class="btn-save" :disabled="!canSave || saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
               <button class="btn-cancel" @click="cancel">キャンセル</button>
             </div>
             <div v-if="equipmentConflictError" class="equipment-conflict-error">{{ equipmentConflictError }}</div>
@@ -597,6 +598,8 @@ const qtyInputRef = ref(null)
 const photoInputRef = ref(null)
 const scrapQty = ref(null)
 const scrapReason = ref('')
+// 仕損数を入力したのに理由が未選択（保存ボタンの位置に警告を出し、保存できなくする）
+const scrapReasonMissing = computed(() => (scrapQty.value ?? 0) > 0 && !scrapReason.value)
 const photoPreviewUrl = ref('')
 const photoUploading = ref(false)
 const canCapturePhoto = computed(() => !!selectedItem.value?.product_id && !photoUploading.value)
@@ -1027,10 +1030,7 @@ function onYesterdayToggle() {
 // ──────────────────────────────
 async function save() {
   if (!canSave.value || saving.value) return
-  if ((scrapQty.value ?? 0) > 0 && !scrapReason.value) {
-    showToast(t('scrapInput.reasonRequired'), 'error')
-    return
-  }
+  if (scrapReasonMissing.value) return
   const item = selectedItem.value
   const targetWorkDate = String(workDateStr.value || '').trim()
   if (targetWorkDate !== planDateStr.value) {
@@ -1805,6 +1805,18 @@ function showToast(message, type = 'success') {
   font-weight: 700;
 }
 .btn-save:disabled { opacity: 0.4; cursor: default; }
+.scrap-reason-required {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  background: #fff0f0;
+  border: 2px solid #e53935;
+  border-radius: 8px;
+  color: #c62828;
+  font-size: 15px;
+  font-weight: 600;
+}
 .btn-cancel {
   height: 44px;
   padding: 0 16px;
