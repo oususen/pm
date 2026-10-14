@@ -10,7 +10,11 @@ from orders.utils.calendar_utils import get_business_today
 from production.models_line_backlog import LineBacklog
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.inventory.lead_time_utils import resolve_lead_days_for_step
-from production.serializers_process_realtime import _build_session_meta, expand_coproduct_children_production
+from production.serializers_process_realtime import (
+    _build_session_meta,
+    expand_coproduct_children_production,
+    resolve_session_worker,
+)
 
 
 BACKLOG_DEFAULTS = {
@@ -158,6 +162,9 @@ def rebuild_session_production_records(session_obj):
     if session_meta:
         event_data['session'] = session_meta
 
+    # 作業者は一覧表示と同じ出どころの組（名前, login_id）。記録をDBから取り直した値を使う
+    worker_name, worker_login_id = resolve_session_worker(session_obj, refresh=True)
+
     parent_record = ProcessRealtimeRecord.objects.create(
         process=session_obj.process,
         product=session_obj.product,
@@ -167,8 +174,8 @@ def rebuild_session_production_records(session_obj):
         qty=qty_decimal,
         equipment_state=None,
         event_data=event_data,
-        operator_name=session_obj.operator_name or '',
-        operator_login_id=session_obj.operator_login_id,
+        operator_name=worker_name,
+        operator_login_id=worker_login_id,
     )
 
     expand_coproduct_children_production(
@@ -176,8 +183,8 @@ def rebuild_session_production_records(session_obj):
         product=session_obj.product,
         parent_qty=qty_decimal,
         plan_date=session_obj.plan_date,
-        operator_name=session_obj.operator_name or '',
-        operator_login_id=session_obj.operator_login_id,
+        operator_name=worker_name,
+        operator_login_id=worker_login_id,
         parent_record_id=parent_record.id,
         base_event_data=event_data,
         session=session_obj,

@@ -23,6 +23,9 @@ from .serializers_process_realtime import (
     resolve_workday_date_for_process,
     _next_session_no,
     check_plan_overrun,
+    WorkerLookupError,
+    build_worker_display_name,
+    resolve_active_worker,
 )
 from .services.process_realtime_backlog_service import (
     adjust_backlog_actual_for_session,
@@ -440,6 +443,15 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
 
         return Response(result_rows)
 
+    WORKER_REQUIRED_MESSAGE = '作業者が指定されていません。画面が古い場合は、アプリを閉じて開き直してください。'
+    WORKER_STALE_CLIENT_MESSAGE = '画面が古いため作業者を保存できません。アプリを閉じて開き直してください。'
+
+    @staticmethod
+    def _worker_error_message(exc):
+        if exc.reason == WorkerLookupError.FORMAT:
+            return '作業者（operator_user_id）の形式が不正です。'
+        return '指定された作業者が存在しないか、無効なユーザーです。'
+
     def _create_manual_session(self, request):
         """
         後入力セッションを新規作成する。
@@ -453,7 +465,6 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         started_at_raw = payload.get('started_at')
         ended_at_raw = payload.get('ended_at')
         production_qty_raw = payload.get('production_qty')
-        operator_name = str(payload.get('operator_name') or '').strip()
 
         if not process_id:
             return Response({'detail': 'process_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -465,6 +476,17 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'started_at は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
         if not ended_at_raw:
             return Response({'detail': 'ended_at は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 作業者は operator_user_id（auth_user.id）で必須指定。operator_name のみ（旧画面）は受け付けず、名前から推測もしない。
+        # 検証はトランザクション前（400のときどのテーブルにも書かない）。
+        if 'operator_user_id' not in payload:
+            return Response({'detail': self.WORKER_REQUIRED_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            worker = resolve_active_worker(payload.get('operator_user_id'))
+        except WorkerLookupError as exc:
+            return Response({'detail': self._worker_error_message(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # operator_name はクライアント値を無視し、サーバーが「姓 名」を作る
+        operator_name = build_worker_display_name(worker)
 
         try:
             production_qty = Decimal(str(production_qty_raw or 0))
@@ -524,6 +546,7 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
                 duration_seconds=duration_seconds,
                 production_qty=production_qty,
                 operator_name=operator_name,
+                operator_login_id=worker.username,
             )
             changed_by = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
             create_session_change_history(
@@ -666,10 +689,16 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
         old_defect = int(session.defect_qty or 0)
         defect_delta = defect_qty - old_defect
 
-        if 'operator_name' in payload:
-            operator_name = str(payload.get('operator_name') or '').strip()
-        else:
-            operator_name = None
+        # 作業者の変更は operator_user_id（auth_user.id）だけで受け付ける。
+        # operator_name のみ（旧画面。空文字を含む）は保存せず400。送られていなければ作業者は変更しない。
+        new_worker = None
+        if 'operator_user_id' in payload:
+            try:
+                new_worker = resolve_active_worker(payload.get('operator_user_id'))
+            except WorkerLookupError as exc:
+                return Response({'detail': self._worker_error_message(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        elif 'operator_name' in payload:
+            return Response({'detail': self.WORKER_STALE_CLIENT_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
 
         update_fields = [
             'started_at', 'ended_at', 'production_qty', 'defect_qty',
@@ -687,13 +716,18 @@ class ProcessRealtimeRecordViewSet(viewsets.ModelViewSet):
             session.production_qty = production_qty
             session.defect_qty = defect_qty
 
-            if operator_name is not None:
-                session.operator_name = operator_name
-                update_fields.append('operator_name')
+            if new_worker is not None:
+                # セッション・start/end記録の名前とlogin_idを同時に更新（PRODUCTION行・連産子行は後続のrebuildが同じ組で作り直す）
+                worker_name = build_worker_display_name(new_worker)
+                session.operator_name = worker_name
+                session.operator_login_id = new_worker.username
+                update_fields += ['operator_name', 'operator_login_id']
                 if session.start_record_id:
-                    ProcessRealtimeRecord.objects.filter(id=session.start_record_id).update(operator_name=operator_name)
+                    ProcessRealtimeRecord.objects.filter(id=session.start_record_id).update(
+                        operator_name=worker_name, operator_login_id=new_worker.username)
                 if session.end_record_id:
-                    ProcessRealtimeRecord.objects.filter(id=session.end_record_id).update(operator_name=operator_name)
+                    ProcessRealtimeRecord.objects.filter(id=session.end_record_id).update(
+                        operator_name=worker_name, operator_login_id=new_worker.username)
             session.status = 'CLOSED' if ended_at else 'OPEN'
             if started_at and ended_at and ended_at >= started_at:
                 session.duration_seconds = int((ended_at - started_at).total_seconds())

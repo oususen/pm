@@ -1,6 +1,7 @@
 from django.utils import timezone
 
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
+from production.serializers_process_realtime import resolve_session_worker
 
 
 def _to_local_naive(dt):
@@ -21,6 +22,8 @@ def _format_history_datetime(dt):
 def serialize_session_snapshot(session_obj):
     if not session_obj:
         return {}
+    # 作業者は一覧と同じ出どころの組。更新直後でも古い値にならないよう記録を取り直す
+    worker_name, worker_login_id = resolve_session_worker(session_obj, refresh=True)
     return {
         'product_code': session_obj.product_code or '',
         'product_name': session_obj.product_name or '',
@@ -28,7 +31,8 @@ def serialize_session_snapshot(session_obj):
         'ended_at': _format_history_datetime(session_obj.ended_at),
         'production_qty': int(session_obj.production_qty or 0),
         'defect_qty': int(session_obj.defect_qty or 0),
-        'operator_name': session_obj.operator_name or '',
+        'operator_name': worker_name,
+        'operator_login_id': worker_login_id or '',
         'plan_date': str(session_obj.plan_date) if session_obj.plan_date else '',
     }
 
@@ -51,6 +55,8 @@ def build_history_summary(operation_type, before_data, after_data):
             parts.append(f"作業日: {after_data['plan_date']}")
         if after_data.get('operator_name'):
             parts.append(f"作業者: {after_data['operator_name']}")
+        if after_data.get('operator_login_id'):
+            parts.append(f"ログインID: {after_data['operator_login_id']}")
         if after_data.get('started_at'):
             parts.append(f"開始時刻: {after_data['started_at']}")
         if after_data.get('ended_at'):
@@ -70,6 +76,8 @@ def build_history_summary(operation_type, before_data, after_data):
             parts.append(f"作業日: {before_data['plan_date']}")
         if before_data.get('operator_name'):
             parts.append(f"作業者: {before_data['operator_name']}")
+        if before_data.get('operator_login_id'):
+            parts.append(f"ログインID: {before_data['operator_login_id']}")
         if before_data.get('started_at'):
             parts.append(f"開始時刻: {before_data['started_at']}")
         if before_data.get('ended_at'):
@@ -88,6 +96,7 @@ def build_history_summary(operation_type, before_data, after_data):
         'production_qty': '実績数量',
         'defect_qty': '仕損',
         'operator_name': '作業者',
+        'operator_login_id': 'ログインID',
     }
     parts = []
     for key, label in labels.items():

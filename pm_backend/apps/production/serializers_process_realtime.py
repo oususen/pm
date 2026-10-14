@@ -696,17 +696,77 @@ def resolve_record_login_id(record_type, event_data, login_user):
     is_two_person = flag is True or (isinstance(flag, str) and flag.strip().lower() in ('1', 'true'))
     if not is_two_person:
         return login_user.username
-    raw_id = event_data.get('operator_user_id')
+    try:
+        worker = resolve_active_worker(event_data.get('operator_user_id'))
+    except WorkerLookupError as exc:
+        if exc.reason == WorkerLookupError.FORMAT:
+            raise serializers.ValidationError({'event_data': '2人1設備の記録には作業者のユーザーID（operator_user_id）が必要です。'})
+        raise serializers.ValidationError({'event_data': '2人1設備の作業者（operator_user_id）が存在しないか無効です。'})
+    return worker.username
+
+
+class WorkerLookupError(Exception):
+    """作業者ID（auth_user.id）の検証失敗。reason で形式不正／存在しない・無効を区別する。"""
+    FORMAT = 'format'
+    INVALID = 'invalid'
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def resolve_active_worker(raw_id):
+    """作業者の auth_user.id（整数または数字文字列）から有効なユーザーを返す。
+
+    単位2（2人1設備）と単位3（実績変更画面の作業者指定）の共通検証。
+    - 整数でない・空・真偽値 → WorkerLookupError(FORMAT)
+    - 存在しない・is_active=False・username が空 → WorkerLookupError(INVALID)
+    ログイン者や名前からの推測による代替はしない。
+    """
     try:
         if isinstance(raw_id, bool):
             raise ValueError
         user_id = int(str(raw_id).strip()) if isinstance(raw_id, str) else int(raw_id)
     except (TypeError, ValueError):
-        raise serializers.ValidationError({'event_data': '2人1設備の記録には作業者のユーザーID（operator_user_id）が必要です。'})
+        raise WorkerLookupError(WorkerLookupError.FORMAT)
     worker = get_user_model().objects.filter(pk=user_id, is_active=True).first()
     if worker is None or not worker.username:
-        raise serializers.ValidationError({'event_data': '2人1設備の作業者（operator_user_id）が存在しないか無効です。'})
-    return worker.username
+        raise WorkerLookupError(WorkerLookupError.INVALID)
+    return worker
+
+
+def build_worker_display_name(user):
+    """作業者の表示名。画面の label と同じ規則: (姓 + ' ' + 名) を trim、空なら username。"""
+    full = f"{user.last_name or ''} {user.first_name or ''}".strip()
+    return full or user.username
+
+
+def resolve_session_worker(session, refresh=False):
+    """セッションの作業者を (名前, login_id) の組で返す。
+
+    出どころの優先順は 終了記録 → 開始記録 → セッション。最初に名前が空でない出どころの
+    名前と login_id を組で採用する（混ぜない。login_id が NULL でも推測で埋めない）。
+    どの出どころにも名前が無いときは、セッション自身の組（名前は空）を返す。
+    refresh=True のときは記録をIDからDBへ取り直す（更新直後のキャッシュ古値を避ける）。
+    """
+    if not session:
+        return '', None
+    sources = []
+    for record_id_attr, record_attr in (('end_record_id', 'end_record'), ('start_record_id', 'start_record')):
+        if not getattr(session, record_id_attr, None):
+            continue
+        if refresh:
+            record = ProcessRealtimeRecord.objects.filter(id=getattr(session, record_id_attr)).first()
+        else:
+            record = getattr(session, record_attr, None)
+        if record:
+            sources.append((record.operator_name, record.operator_login_id))
+    sources.append((session.operator_name, session.operator_login_id))
+    for name, login_id in sources:
+        text = (name or '').strip()
+        if text:
+            return text, login_id
+    return '', session.operator_login_id
 
 SESSION_ACTIONS = {'START', 'PAUSE', 'RESUME', 'END', 'TEMP_END', 'CANCEL'}
 SESSION_ACTIVE_STATUSES = ['OPEN']
@@ -767,6 +827,7 @@ def _create_session(
     session_type=SESSION_TYPE_WORK,
     start_action='',
     operator_name='',
+    operator_login_id=None,
 ):
     product_code = product.product_code if product else ''
     product_name = product.product_name if product else ''
@@ -783,6 +844,7 @@ def _create_session(
         start_action=str(start_action or '').upper(),
         start_record=start_record,
         operator_name=operator_name or '',
+        operator_login_id=operator_login_id or None,
     )
 
 
@@ -888,6 +950,8 @@ def apply_operator_action_session(process, product, action, action_record, plan_
         return True
 
     session_operator_name = current_operator_name if two_person_same_equipment else ''
+    # セッションの作業者ログインID: 新規セッションを作った操作の記録の値（END/PAUSEで閉じるだけの既存セッションは変えない）
+    session_login_id = getattr(action_record, 'operator_login_id', None)
 
     def create_work(start_action):
         return _create_session(
@@ -899,6 +963,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             session_type=SESSION_TYPE_WORK,
             start_action=start_action,
             operator_name=session_operator_name,
+            operator_login_id=session_login_id,
         )
 
     def create_pause(start_action):
@@ -911,6 +976,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
             session_type=SESSION_TYPE_PAUSE,
             start_action=start_action,
             operator_name=session_operator_name,
+            operator_login_id=session_login_id,
         )
 
     if action_key == 'START':
@@ -990,6 +1056,7 @@ def apply_operator_action_session(process, product, action, action_record, plan_
                     session_type=SESSION_TYPE_WORK,
                     start_action='TEMP_END',
                     operator_name=session_operator_name,
+                    operator_login_id=session_login_id,
                 )
                 _close_session(
                     session=session,
@@ -1211,6 +1278,7 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
     process_code = serializers.CharField(source='process.process_code', read_only=True)
     process_name = serializers.CharField(source='process.process_name', read_only=True)
     operator_name = serializers.SerializerMethodField()
+    operator_login_id = serializers.SerializerMethodField()
     pause_reason = serializers.SerializerMethodField()
     equipments = serializers.SerializerMethodField()
 
@@ -1231,16 +1299,12 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
         return ''
 
     def get_operator_name(self, obj):
-        end_record = getattr(obj, 'end_record', None)
-        end_name = (getattr(end_record, 'operator_name', '') or '').strip() if end_record else ''
-        if end_name:
-            return end_name
-        start_record = getattr(obj, 'start_record', None)
-        start_name = (getattr(start_record, 'operator_name', '') or '').strip() if start_record else ''
-        if start_name:
-            return start_name
-        # 手動後入力セッション（start_record/end_record なし）はモデルフィールドから返す
-        return (getattr(obj, 'operator_name', '') or '').strip()
+        # 終了記録→開始記録→セッションの順で、名前が空でない最初の出どころの名前（手動後入力はセッション値）
+        return resolve_session_worker(obj)[0]
+
+    def get_operator_login_id(self, obj):
+        # 名前と同じ出どころの login_id（組で採用。NULLのまま返し、推測で埋めない）
+        return resolve_session_worker(obj)[1]
 
     def get_pause_reason(self, obj):
         session_type = str(getattr(obj, 'session_type', '') or '').upper()
@@ -1285,6 +1349,7 @@ class ProcessWorkSessionSerializer(serializers.ModelSerializer):
             'product_code',
             'product_name',
             'operator_name',
+            'operator_login_id',
             'plan_date',
             'session_no',
             'session_type',

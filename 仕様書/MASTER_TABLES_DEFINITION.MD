@@ -661,7 +661,7 @@ WHERE rs.time_unit='DAY';
 | operator_login_id | VARCHAR(150) NULL（索引あり） | 作業者のログインID（`auth_user.username`）。`PRODUCTION`・`OPERATOR_ACTION`・`EQUIPMENT_STATE` はサーバーがログイン者を保存（クライアント値は無視、未認証は400）。END/PAUSE で作る `PRODUCTION` 行と連産子行は親と同じ値。2人1設備（`event_data.two_person_same_equipment` が真）のときは、`event_data.operator_user_id`（`auth_user.id`）のユーザーの username（無い・存在しない・無効は400。通常入力では `operator_user_id` を無視）。`SCRAP`・`PURCHASE` は NULL（仕損は `t_scrap_record` 側に保存）。既存行は NULL（補完は `工程実績作業者列化実装計画.md` の補完コマンド） |
 | remarks | TEXT NULL | 備考 |
 
-`t_process_work_session` にも `operator_login_id`（VARCHAR(150) NULL）を追加した。値の設定は `工程実績作業者列化実装計画.md` の単位3で実装する（単位1では列の追加のみで、現状は NULL）。
+`t_process_work_session` にも `operator_login_id`（VARCHAR(150) NULL）を追加した。値の決め方は `工程実績作業者列化実装計画.md` の単位3a のとおり。通常 START / RESUME / PAUSE などでセッションを作るときは、その操作の記録の `operator_login_id`（ログイン者。2人1設備は `operator_user_id` の username）。END / PAUSE で既存セッションを閉じるときは変更しない。手動追加・実績変更画面での作業者変更は、画面が送る `operator_user_id`（`auth_user.id`）の username。一覧APIの `operator_name` / `operator_login_id` は「終了記録→開始記録→セッション」のうち名前が空でない最初の出どころの組。既存行の補完は単位4。
 
 ---
 

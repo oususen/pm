@@ -432,6 +432,10 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             product_code='TEST-RT',
             product_name='実績再計算品',
         )
+        # 手動追加・作業者変更で指定する作業者（auth_user）
+        self.worker = get_user_model().objects.create_user(
+            username='000555', last_name='訂正', first_name='花子',
+        )
 
     def make_dt(self, year, month, day, hour, minute=0):
         value = datetime(year, month, day, hour, minute)
@@ -883,6 +887,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
                 'started_at': '2026-03-05T09:00:00',
                 'ended_at': '2026-03-05T10:00:00',
                 'production_qty': 5,
+                'operator_user_id': self.worker.id,
                 'change_reason': '登録漏れ補完',
             },
             format='json',
@@ -943,6 +948,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
                 'started_at': '2026-03-05T09:00:00',
                 'ended_at': '2026-03-05T10:00:00',
                 'production_qty': 5,
+                'operator_user_id': self.worker.id,
                 'change_reason': '連産補完',
             },
             format='json',
@@ -1329,3 +1335,317 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
         self.assertIn('開始されていないため終了できません', str(response.data))
         self.assertEqual(ProcessRealtimeRecord.objects.count(), 0)
         self.assertEqual(ProcessWorkSession.objects.count(), 0)
+
+
+class ProcessRealtimeSessionWorkerTest(TestCase):
+    """単位3a: セッションの作業者（operator_login_id）と実績変更API（手動POST／PATCH）を検証する。"""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        User = get_user_model()
+        self.user_a = User.objects.create_user(username='000175', last_name='記入', first_name='太郎')
+        self.user_b = User.objects.create_user(username='000999', last_name='終了', first_name='次郎')
+        self.user_c = User.objects.create_user(username='000555', last_name='訂正', first_name='花子')
+        self.line = Line.objects.create(line_code='SW-L', line_name='作業者検証ライン')
+        self.process = Process.objects.create(process_code='SW-P', process_name='作業者検証工程', line=self.line)
+        self.product = Product.objects.create(product_code='SW-PROD', product_name='作業者検証品')
+        self.parent = Product.objects.create(product_code='SW-SET', product_name='連産親', is_virtual_set=True)
+        self.child = Product.objects.create(product_code='SW-CHILD', product_name='連産子')
+        bom = BOM.objects.create(
+            parent_product=self.parent, version='v1', valid_from=date(2026, 1, 1),
+            is_active=True, is_coproduct=True,
+        )
+        BOMItem.objects.create(bom=bom, child_product=self.child, quantity=Decimal('2'),
+                               process=self.process, line=self.line)
+        for product, code in ((self.product, 'R-SW1'), (self.parent, 'R-SW2')):
+            routing = Routing.objects.create(product=product, routing_code=code, is_default=True, is_active=True)
+            RoutingStep.objects.create(
+                routing=routing, step_no=10, process=self.process, line=self.line, output_product=product,
+            )
+        # 在庫・進度の再計算は別テストで検証済みのため呼び出しだけ止める（LineBacklog.actual_qty の反映は実行する）
+        patcher = patch('production.views_process_realtime.recalculate_inventory_after_session_change')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plan_patcher = patch('production.views_process_realtime.resolve_workday_date_for_process',
+                             return_value=date(2026, 3, 5))
+        plan_patcher.start()
+        self.addCleanup(plan_patcher.stop)
+
+    # ---- 呼び出し補助 ----
+    def act(self, user, action, product=None, qty=0, operator_name=None, event_extra=None):
+        product = product or self.product
+        event_data = {'action': action}
+        event_data.update(event_extra or {})
+        if operator_name is None:
+            operator_name = f'{user.last_name} {user.first_name}'
+        payload = {
+            'process_id': self.process.id, 'product_id': product.id, 'record_type': 'OPERATOR_ACTION',
+            'qty': qty, 'operator_name': operator_name, 'event_data': event_data,
+        }
+        if action == 'END':
+            payload['production_qty'] = qty
+        request = self.factory.post('/api/process-realtime-records/', payload, format='json')
+        force_authenticate(request, user=user)
+        with patch('production.serializers_process_realtime.resolve_workday_date_for_process',
+                   return_value=date(2026, 3, 5)):
+            response = ProcessRealtimeRecordViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, getattr(response, 'data', None))
+        return response
+
+    def manual_post(self, **extra):
+        payload = {
+            'process_id': self.process.id, 'product_code': self.product.product_code,
+            'started_at': '2026-03-05T09:00:00', 'ended_at': '2026-03-05T10:00:00',
+            'production_qty': 5, 'change_reason': '登録漏れ補完',
+        }
+        payload.update(extra)
+        request = self.factory.post('/api/process-realtime/sessions/', payload, format='json')
+        return ProcessRealtimeRecordViewSet.as_view({'post': 'sessions'})(request)
+
+    def patch(self, session, **payload):
+        payload.setdefault('change_reason', '作業者訂正')
+        request = self.factory.patch(f'/api/process-realtime/sessions/{session.id}/', payload, format='json')
+        return ProcessRealtimeRecordViewSet.as_view({'patch': 'session_detail'})(request, session_id=session.id)
+
+    def list_rows(self, **params):
+        request = self.factory.get('/api/process-realtime/sessions/', params)
+        response = ProcessRealtimeRecordViewSet.as_view({'get': 'sessions'})(request)
+        self.assertEqual(response.status_code, 200)
+        return response.data
+
+    def production_rows(self, session):
+        return ProcessRealtimeRecord.objects.filter(
+            record_type='PRODUCTION', event_data__work_session_id=session.id,
+        )
+
+    def db_counts(self):
+        return (
+            ProcessWorkSession.objects.count(),
+            ProcessRealtimeRecord.objects.count(),
+            LineBacklog.objects.count(),
+            ProcessWorkSessionChangeHistory.objects.count(),
+        )
+
+    def actual_qty(self, product):
+        backlog = LineBacklog.objects.filter(
+            line=self.line, process=self.process, product=product, plan_date=date(2026, 3, 5), sequence_no=0,
+        ).first()
+        return backlog.actual_qty if backlog else None
+
+    def make_normal_closed_session(self, product=None, qty=5):
+        self.act(self.user_a, 'START', product=product)
+        self.act(self.user_a, 'END', product=product, qty=qty)
+        return ProcessWorkSession.objects.latest('id')
+
+    # ---- 1〜3: 通常入力のセッション作成 ----
+    def test_normal_start_stores_login_user_on_session_and_keeps_name_empty(self):
+        self.act(self.user_a, 'START')
+        session = ProcessWorkSession.objects.get()
+        self.assertEqual(session.operator_login_id, '000175')
+        self.assertEqual(session.operator_name, '')
+
+    def test_two_person_start_uses_worker_username(self):
+        self.act(self.user_a, 'START', operator_name='B Worker',
+                 event_extra={'two_person_same_equipment': True, 'operator_user_id': str(self.user_b.id)})
+        session = ProcessWorkSession.objects.get()
+        self.assertEqual(session.operator_login_id, '000999')
+        self.assertEqual(session.operator_name, 'b worker')
+
+    def test_start_by_a_and_end_by_b_keeps_start_login_and_lists_end_pair(self):
+        self.act(self.user_a, 'START')
+        self.act(self.user_b, 'END', qty=4)
+        session = ProcessWorkSession.objects.get()
+        self.assertEqual(session.operator_login_id, '000175')
+        end_production = self.production_rows(session).get()
+        self.assertEqual(end_production.operator_login_id, '000999')
+        row = self.list_rows()[0]
+        self.assertEqual(row['operator_name'], '終了 次郎')
+        self.assertEqual(row['operator_login_id'], '000999')
+
+    def test_pair_is_not_mixed_when_end_login_id_is_null(self):
+        self.act(self.user_a, 'START')
+        self.act(self.user_b, 'END', qty=4)
+        session = ProcessWorkSession.objects.get()
+        ProcessRealtimeRecord.objects.filter(id=session.end_record_id).update(operator_login_id=None)
+        row = self.list_rows()[0]
+        self.assertEqual(row['operator_name'], '終了 次郎')
+        self.assertIsNone(row['operator_login_id'])  # START の login_id で埋めない
+
+    def test_pause_resume_sessions_take_login_of_their_action_record(self):
+        self.act(self.user_a, 'START')
+        self.act(self.user_b, 'PAUSE', qty=2)
+        self.act(self.user_c, 'RESUME')
+        by_type = {(s.session_type, s.start_action): s for s in ProcessWorkSession.objects.all()}
+        self.assertEqual(by_type[('WORK', 'START')].operator_login_id, '000175')
+        self.assertEqual(by_type[('PAUSE', 'PAUSE')].operator_login_id, '000999')
+        self.assertEqual(by_type[('WORK', 'RESUME')].operator_login_id, '000555')
+
+    # ---- 4・5: 手動 POST ----
+    def test_manual_post_with_operator_user_id_sets_pair_everywhere(self):
+        response = self.manual_post(product_code=self.parent.product_code, operator_user_id=self.user_c.id,
+                                    operator_name='無視される名前')
+        self.assertEqual(response.status_code, 201, response.data)
+        session = ProcessWorkSession.objects.get()
+        self.assertEqual(session.operator_login_id, '000555')
+        self.assertEqual(session.operator_name, '訂正 花子')
+        rows = self.production_rows(session)
+        self.assertEqual(rows.count(), 2)  # 親 + 連産子
+        self.assertEqual({(r.operator_name, r.operator_login_id) for r in rows}, {('訂正 花子', '000555')})
+        self.assertEqual(response.data['operator_name'], '訂正 花子')
+        self.assertEqual(response.data['operator_login_id'], '000555')
+        history = ProcessWorkSessionChangeHistory.objects.get(session_record_id=session.id)
+        self.assertEqual(history.after_data['operator_login_id'], '000555')
+
+    def test_manual_post_name_uses_username_when_full_name_is_empty(self):
+        nameless = get_user_model().objects.create_user(username='000777')
+        response = self.manual_post(operator_user_id=str(nameless.id))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(ProcessWorkSession.objects.get().operator_name, '000777')
+
+    def test_manual_post_invalid_worker_is_400_and_creates_nothing(self):
+        inactive = get_user_model().objects.create_user(username='000888', is_active=False)
+        cases = {
+            'missing': ({}, '作業者が指定されていません'),
+            'name_only': ({'operator_name': '記入 太郎'}, '作業者が指定されていません'),
+            'not_exist': ({'operator_user_id': 99999999}, '存在しないか、無効'),
+            'inactive': ({'operator_user_id': inactive.id}, '存在しないか、無効'),
+            'not_number': ({'operator_user_id': 'abc'}, '形式が不正'),
+            'empty': ({'operator_user_id': ''}, '形式が不正'),
+            'bool': ({'operator_user_id': True}, '形式が不正'),
+        }
+        before = self.db_counts()
+        for name, (extra, message) in cases.items():
+            with self.subTest(case=name):
+                response = self.manual_post(**extra)
+                self.assertEqual(response.status_code, 400, getattr(response, 'data', None))
+                self.assertIn(message, response.data['detail'])
+                self.assertEqual(self.db_counts(), before)
+
+    # ---- 6: 数量だけの PATCH ----
+    def test_quantity_only_patch_keeps_session_worker_and_names_rebuilt_rows(self):
+        session = self.make_normal_closed_session(product=self.parent, qty=5)
+        self.assertEqual(session.operator_name, '')
+        session_before = (session.operator_name, session.operator_login_id)
+        response = self.patch(session, production_qty=7)
+        self.assertEqual(response.status_code, 200, response.data)
+        session.refresh_from_db()
+        self.assertEqual((session.operator_name, session.operator_login_id), session_before)
+        rows = self.production_rows(session)
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual({(r.operator_name, r.operator_login_id) for r in rows}, {('記入 太郎', '000175')})
+        row = [r for r in self.list_rows(coproduct_mode='parent_only') if r['id'] == session.id][0]
+        self.assertEqual((row['operator_name'], row['operator_login_id']), ('記入 太郎', '000175'))
+        self.assertEqual(response.data['operator_name'], '記入 太郎')
+
+    # ---- 7: 作業者変更 ----
+    def test_patch_operator_user_id_updates_all_four_places(self):
+        session = self.make_normal_closed_session(product=self.parent, qty=5)
+        response = self.patch(session, operator_user_id=self.user_c.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        session.refresh_from_db()
+        self.assertEqual((session.operator_name, session.operator_login_id), ('訂正 花子', '000555'))
+        for record_id in (session.start_record_id, session.end_record_id):
+            record = ProcessRealtimeRecord.objects.get(id=record_id)
+            self.assertEqual((record.operator_name, record.operator_login_id), ('訂正 花子', '000555'))
+        rows = self.production_rows(session)
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual({(r.operator_name, r.operator_login_id) for r in rows}, {('訂正 花子', '000555')})
+        self.assertEqual(response.data['operator_login_id'], '000555')
+        self.assertEqual(response.data['operator_name'], '訂正 花子')
+
+    def test_patch_operator_user_id_on_open_session(self):
+        self.act(self.user_a, 'START')
+        session = ProcessWorkSession.objects.get()
+        self.assertEqual(session.status, 'OPEN')
+        response = self.patch(session, operator_user_id=str(self.user_b.id))
+        self.assertEqual(response.status_code, 200, response.data)
+        session.refresh_from_db()
+        self.assertEqual(session.status, 'OPEN')
+        self.assertEqual((session.operator_name, session.operator_login_id), ('終了 次郎', '000999'))
+        start = ProcessRealtimeRecord.objects.get(id=session.start_record_id)
+        self.assertEqual((start.operator_name, start.operator_login_id), ('終了 次郎', '000999'))
+
+    # ---- 8: 400 のとき DB 不変 ----
+    def snapshot_state(self, session):
+        session.refresh_from_db()
+        records = list(ProcessRealtimeRecord.objects.order_by('id').values_list(
+            'id', 'operator_name', 'operator_login_id', 'qty'))
+        return (session.operator_name, session.operator_login_id, session.production_qty, records, self.db_counts())
+
+    def test_patch_invalid_worker_is_400_and_db_unchanged(self):
+        inactive = get_user_model().objects.create_user(username='000888', is_active=False)
+        session = self.make_normal_closed_session()
+        state = self.snapshot_state(session)
+        cases = {
+            'name_only': {'operator_name': '記入 太郎'},
+            'name_empty': {'operator_name': ''},
+            'id_empty': {'operator_user_id': ''},
+            'id_null': {'operator_user_id': None},
+            'id_not_number': {'operator_user_id': 'abc'},
+            'id_not_exist': {'operator_user_id': 99999999},
+            'id_inactive': {'operator_user_id': inactive.id},
+            'id_with_qty': {'operator_user_id': 'abc', 'production_qty': 99},
+        }
+        for name, extra in cases.items():
+            with self.subTest(case=name):
+                response = self.patch(session, **extra)
+                self.assertEqual(response.status_code, 400, getattr(response, 'data', None))
+                self.assertEqual(self.snapshot_state(session), state)
+        self.assertIn('画面が古い', self.patch(session, operator_name='x').data['detail'])
+
+    def test_operator_name_is_ignored_when_operator_user_id_is_given(self):
+        session = self.make_normal_closed_session()
+        response = self.patch(session, operator_user_id=self.user_c.id, operator_name='別の名前')
+        self.assertEqual(response.status_code, 200, response.data)
+        session.refresh_from_db()
+        self.assertEqual(session.operator_name, '訂正 花子')
+
+    def test_old_screen_quantity_only_patch_is_200(self):
+        # 旧画面は作業者を変えたときだけ operator_name を送る。数量だけなら送らないので従来どおり通る
+        session = self.make_normal_closed_session()
+        response = self.patch(session, production_qty=6, defect_qty=0)
+        self.assertEqual(response.status_code, 200, response.data)
+
+    # ---- 9: 数量不変 ----
+    def test_worker_change_does_not_touch_backlog_but_quantity_change_does(self):
+        response = self.manual_post(operator_user_id=self.user_a.id)
+        self.assertEqual(response.status_code, 201, response.data)
+        session = ProcessWorkSession.objects.get()
+        self.assertEqual(self.actual_qty(self.product), 5)
+        response = self.patch(session, operator_user_id=self.user_c.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.actual_qty(self.product), 5)
+        response = self.patch(session, production_qty=8)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.actual_qty(self.product), 8)
+        response = self.patch(session, production_qty=8, operator_user_id=self.user_b.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.actual_qty(self.product), 8)
+
+    # ---- 10: read_only ----
+    def test_operator_login_id_in_payload_is_ignored(self):
+        session = self.make_normal_closed_session()
+        response = self.patch(session, operator_login_id='偽装', production_qty=6)
+        self.assertEqual(response.status_code, 200, response.data)
+        session.refresh_from_db()
+        self.assertEqual(session.operator_login_id, '000175')
+        self.assertIn('operator_login_id', self.list_rows()[0])
+
+    # ---- 11: 変更履歴 ----
+    def test_history_records_login_id_only_change_and_before_name(self):
+        same_name = get_user_model().objects.create_user(username='000176', last_name='記入', first_name='太郎')
+        session = self.make_normal_closed_session()
+        response = self.patch(session, operator_user_id=same_name.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        history = ProcessWorkSessionChangeHistory.objects.get(session_record_id=session.id, operation_type='UPDATE')
+        self.assertEqual(history.before_data['operator_name'], '記入 太郎')  # セッション自体の名前は空でも解決値
+        self.assertEqual(history.before_data['operator_login_id'], '000175')
+        self.assertEqual(history.after_data['operator_login_id'], '000176')
+        self.assertIn('ログインID: 000175 → 000176', history.change_summary)
+        self.assertNotIn('作業者:', history.change_summary)  # 名前は同じなので login_id だけの変更
+
+    def test_history_not_created_when_nothing_changed(self):
+        session = self.make_normal_closed_session()
+        response = self.patch(session, production_qty=session.production_qty)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(ProcessWorkSessionChangeHistory.objects.filter(session_record_id=session.id).exists())
