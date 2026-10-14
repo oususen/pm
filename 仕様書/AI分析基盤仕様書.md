@@ -171,6 +171,8 @@ AI生成Pythonは、`load_view()`でDjangoが取得済みのビュー・スナ�
 
 ### 4.5 分析案の一時保持
 
+**分析案の検証失敗の固定診断（2026-10-14）**: 分析案作成APIは検証失敗をHTTP 502で返し、既存の`detail`に固定の日本語説明、`reason`に固定コードを返す。JSON不正(`proposal_json_invalid`)、必須／余分な項目(`proposal_keys_invalid`)、分析案名(`proposal_title_invalid`)、手順(`proposal_steps_invalid`)、出力案(`proposal_outputs_invalid`)、AIの分析不可判断(`proposal_unsupported`)を区別する。データ指定は、ビュー未指定(`datasets_missing`)、指定形式(`dataset_invalid`)、未公開／重複ビュー(`view_unknown`／`view_duplicate`)、列指定形式(`fields_invalid`)、未公開／重複列(`field_unknown`／`field_duplicate`)、期間根拠の日付列不足(`date_field_missing`)を区別する。呼出し元の期間不正は`proposal_period_invalid`で停止する。AIの分析不可理由の自由文、未知のビュー・列名、応答本文は診断・例外原因・ログに出さず、失敗した分析案も保存しない。追加のAI呼出し、自動再送、応答本文の新保存、DB変更、保持期間・上限・フォールバックの変更はない。共通`validate_datasets`はキーワード専用の`include_reason=True`を分析案検証だけで使い、承認・件数確認・取得など既存呼出しの400と説明文字列を維持する。正常な分析案と管理列idの追加処理は維持する。
+
 テンプレートとして保存する前の分析案・承認内容は、PM本体DBへ保存しない。複数のgunicornワーカーで承認APIと実行APIが分かれても継続できるよう、`pm_internal`内だけに公開するRedisコンテナへ分析案ID単位で保存する。Redisは外部ポート・永続ボリュームを持たず、分析案の永続保存先にはしない。
 
 キャッシュの有効期限は§4.7の設定値による。期限切れの分析案は実行できない。利用者・分析目的・承認済みビュー・フィールド・条件を照合してから実行する。

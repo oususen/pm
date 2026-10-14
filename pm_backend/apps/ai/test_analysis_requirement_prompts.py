@@ -28,7 +28,10 @@ class RequirementPromptTest(SimpleTestCase):
             result = planning.create_plan(1, {})
         system = call.call_args.args[0][0]['content']
         for text in ('派生項目は含めてよい', '未確認の業務意味は推測しない', '全行保持・複数一致',
-                     '表示で区別する状態には判定項目', '派生項目名はfieldsに入れない'):
+                     '表示で区別する状態には判定項目', '派生項目名はfieldsに入れない',
+                     '元行と一致相手の全組を明細行として保持', '元側と相手側を区別',
+                     '各側の識別ID(公開列にある場合)', '要求された列を具体的に列挙',
+                     '照合件数の集計で要求明細を置き換えない'):
             self.assertIn(text, system)
         self.assertEqual(result['outputs'], proposal['outputs'])
         self.assertEqual(result['datasets'][0]['fields'], ['id', 'routing_id', 'output_product_code', 'parent_product_code'])
@@ -43,7 +46,11 @@ class RequirementPromptTest(SimpleTestCase):
             messages = codegen.build_messages(plan, external=True)
         system = messages[0]['content']
         for text in ('最終表示まで反映', '投影後の列名だけ', 'ASで改名した元の列名',
-                     '最終SELECTの列順', 'emit_tableの見出しと行の順', '未確認の業務意味は推測しない'):
+                     '最終SELECTの列順', 'emit_tableの見出しと行の順', '未確認の業務意味は推測しない',
+                     '識別ID(承認列にある場合)', '中間SQLから最終結果表まで保持',
+                     '元の行と一致相手の全組を別行で表示',
+                     '要求した明細をGROUP BY・COUNT・DISTINCT・代表1件の抽出で置き換えない',
+                     '集計も求められた場合は、明細とは別の表で表示'):
             self.assertIn(text, system)
         payload = json.loads(messages[1]['content'])
         self.assertEqual(set(payload), {'purpose', 'steps', 'outputs', 'date_from', 'date_to', 'datasets'})

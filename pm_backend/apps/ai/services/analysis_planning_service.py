@@ -73,6 +73,8 @@ OUTPUT_RULE_PLAN = (
     '出力案に書いてよいのは、提示した公開ビューの列で作れる項目だけ。公開列から計算・照合して作れる集計・差分・一致状態などの派生項目は含めてよい。'
     '未公開の名前・住所などの情報や、説明で未確認の業務意味は推測しない。'
     '目的が求める区別・照合方向・対象範囲・全行保持・複数一致の扱いを手順と出力案に反映し、表示で区別する状態には判定項目を設ける。'
+    '元の行と照合相手を並べ、一致をすべて表示する目的では、手順に元行と一致相手の全組を明細行として保持すると記す。'
+    '出力案には元側と相手側を区別し、各側の識別ID(公開列にある場合)と要求された列を具体的に列挙する。照合件数の集計で要求明細を置き換えない。'
     '必要な元の公開列をfieldsに含め、派生項目名はfieldsに入れない。'
 )
 
@@ -153,20 +155,43 @@ def resolve_planning_provider(data):
 
 
 def validate_proposal(raw, purpose, date_from, date_to):
+    # 診断は固定文だけ。AIの自由文・未知の列名・応答本文を保存、表示、ログへ渡さない。
+    def reject(detail, reason):
+        raise AnalysisError('AIの分析案を検証できませんでした。' + detail, 502, reason=reason) from None
+
     try:
         proposal = json.loads(raw)
-        if not isinstance(proposal, dict) or set(proposal) != {'title', 'steps', 'outputs', 'datasets'}:
-            raise ValueError()
-        if not isinstance(proposal['title'], str) or not proposal['title'].strip():
-            raise ValueError()
-        for key in ('steps', 'outputs'):
-            if not isinstance(proposal[key], list) or not proposal[key] or any(
-                not isinstance(value, str) or not value.strip() for value in proposal[key]
-            ):
-                raise ValueError()
-        validate_datasets(proposal['datasets'], date_from, date_to)
-    except (ValueError, TypeError, KeyError, AnalysisError) as exc:
-        raise AnalysisError('AIの分析案を検証できませんでした。未公開データや追加条件・資料が必要な目的は、現在対応していません。目的を見直してください。', 502) from exc
+    except (ValueError, TypeError):
+        reject('AIの応答がJSON形式ではありません。', 'proposal_json_invalid')
+    if isinstance(proposal, dict) and set(proposal) == {'unsupported'}:
+        reject('AIがこの目的を分析できないと判断しました。', 'proposal_unsupported')
+    if not isinstance(proposal, dict) or set(proposal) != {'title', 'steps', 'outputs', 'datasets'}:
+        reject('AIの応答の必須項目が欠落、または余分な項目があります。', 'proposal_keys_invalid')
+    if not isinstance(proposal['title'], str) or not proposal['title'].strip():
+        reject('分析案名が空欄、または形式が不正です。', 'proposal_title_invalid')
+    for key, label in (('steps', '手順'), ('outputs', '出力案')):
+        if not isinstance(proposal[key], list) or not proposal[key] or any(
+            not isinstance(value, str) or not value.strip() for value in proposal[key]
+        ):
+            reject(label + 'が空欄、または形式が不正です。', f'proposal_{key}_invalid')
+    try:
+        validate_datasets(proposal['datasets'], date_from, date_to, include_reason=True)
+    except AnalysisError as exc:
+        reason = getattr(exc, 'reason', None)
+        details = {
+            'datasets_missing': '利用ビューが指定されていません。',
+            'dataset_invalid': '利用ビュー・フィールドの指定形式が不正です。',
+            'view_unknown': '未公開のビューが指定されています。',
+            'view_duplicate': '利用ビューが重複しています。',
+            'fields_invalid': '利用フィールドが空欄、または形式が不正です。',
+            'field_unknown': '未公開のフィールドが指定されています。',
+            'field_duplicate': '利用フィールドが重複しています。',
+            'date_field_missing': '対象期間の根拠となる日付フィールドが不足しています。',
+        }
+        if reason not in details:
+            # 呼出し側で検証済みの期間など、AI応答以外のエラーは従来の502で停止する。
+            reject('対象期間の指定が不正です。', 'proposal_period_invalid')
+        reject(details[reason], reason)
     # 管理列(id)は、検証後にサーバーが加える。データ範囲の承認に含まれ、別の確認操作は設けない。
     proposal = {**proposal, 'datasets': with_management_columns(proposal['datasets'])}
     return {**proposal, 'purpose': purpose, 'date_from': date_from, 'date_to': date_to, 'materials': [], 'conditions': _conditions_text(proposal['datasets'])}
@@ -295,6 +320,9 @@ def create_plan(owner_id, data):
             '利用できるのは提示された公開ビューのみ。元テーブル、結合先の参照、個人別残業、追加資料は利用不可。'
             '対象は、日付のあるビューは指定期間の全登録行のみ、日付のないビュー(date_fieldの無いビュー)は期間で絞らない全行のみ。追加の絞り条件が必要、または目的が未公開データを必要とする場合は'
             ' {"unsupported": "理由"} を返し、近似の別分析を作らない。'
+            'userのdate_from・date_toは分析案APIの共通項目であり、すべてのビューに必須の絞り込み条件ではない。'
+            'date_fieldの無いビューには、この共通期間を適用せず全行を使う。共通期間が送られていることだけを理由に、日付のないビューの分析をunsupportedにしない。'
+            '目的文が、日付列のないビューを期間で絞ることを明示的に要求する場合は、期間を無視して別の分析にせずunsupportedを返す。'
             'JSONのみを返す。形式は {"title": "分析案名", "steps": ["手順"], "outputs": ["出力案"],'
             ' "datasets": [{"view": "公開ビュー名", "fields": ["公開フィールド"]}]}。'
             '日付のあるビューは、その日付列(date_field)をfieldsに必ず含める。' + PRODUCT_RULE_PLAN + WORK_ORDER_PLAN + OUTPUT_RULE_PLAN + term_guide_text() +

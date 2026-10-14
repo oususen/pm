@@ -426,26 +426,34 @@ def validate_period(date_from, date_to):
     return date_from, date_to
 
 
-def validate_datasets(datasets, date_from, date_to):
+def validate_datasets(datasets, date_from, date_to, *, include_reason=False):
+    # 分析案の生成だけで固定診断を付ける。他の承認・取得APIの応答形式は維持する。
+    def reject(detail, reason):
+        raise AnalysisError(detail, reason=reason if include_reason else None)
+
     validate_period(date_from, date_to)
     if not isinstance(datasets, list) or not datasets:
-        raise AnalysisError('利用ビューが指定されていません。')
+        reject('利用ビューが指定されていません。', 'datasets_missing')
     seen = set()
     for dataset in datasets:
         if not isinstance(dataset, dict) or set(dataset) != {'view', 'fields'}:
-            raise AnalysisError('利用ビュー・フィールドの指定が不正です。')
+            reject('利用ビュー・フィールドの指定が不正です。', 'dataset_invalid')
         view = dataset['view']
-        if not isinstance(view, str) or view not in ANALYSIS_VIEWS or view in seen:
-            raise AnalysisError('未公開または重複したビューは分析できません。')
+        if not isinstance(view, str) or view not in ANALYSIS_VIEWS:
+            reject('未公開または重複したビューは分析できません。', 'view_unknown')
+        if view in seen:
+            reject('未公開または重複したビューは分析できません。', 'view_duplicate')
         seen.add(view)
         fields = dataset['fields']
-        if (not isinstance(fields, list) or not fields
-                or any(not isinstance(field, str) or field not in BASE_SQL_SCHEMA[view] for field in fields)
-                or len(set(fields)) != len(fields)):
-            raise AnalysisError('未公開または重複したフィールドは分析できません。')
+        if not isinstance(fields, list) or not fields:
+            reject('未公開または重複したフィールドは分析できません。', 'fields_invalid')
+        if any(not isinstance(field, str) or field not in BASE_SQL_SCHEMA[view] for field in fields):
+            reject('未公開または重複したフィールドは分析できません。', 'field_unknown')
+        if len(set(fields)) != len(fields):
+            reject('未公開または重複したフィールドは分析できません。', 'field_duplicate')
         date_field = ANALYSIS_VIEWS[view]['date_field']  # 必須キー(日付なしのビューは、明示的にNoneと宣言する。.get()で補わない)
         if date_field is not None and date_field not in fields:
-            raise AnalysisError('対象期間の根拠となる日付フィールドが必要です。')
+            reject('対象期間の根拠となる日付フィールドが必要です。', 'date_field_missing')
     return datasets
 
 
