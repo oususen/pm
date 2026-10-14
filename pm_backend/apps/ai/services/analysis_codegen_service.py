@@ -28,7 +28,7 @@ from ai.services.analysis_execution_service import (
 from ai.services.analysis_guard_runtime import GuardError, validate_python, validate_steps
 from ai.services.analysis_plan_store import AnalysisError, AnalysisPlanStore
 from ai.services import analysis_template_params as template_params
-from ai.services.analysis_planning_service import ANTHROPIC_CONSULT_CODEGEN_BLOCKED, get_qwen_analysis_timeout, resolve_planning_provider
+from ai.services.analysis_planning_service import get_qwen_analysis_timeout, resolve_planning_provider
 from ai.services.analysis_redaction import build_analysis_code_redactor
 
 # 開発用の暫定値(BOSS承認 2026-10-04。実測後に確定する)
@@ -39,6 +39,28 @@ MAX_STEPS = 50
 AI_FAILURE_CODES = ('ai_timeout', 'ai_auth', 'ai_http', 'ai_connect', 'ai_empty')
 MAX_GENERATIONS = 4  # 初回1回+再生成3回。失敗(形式・検査・通信)も数える
 INFLIGHT_GRACE_SECONDS = 60  # 「生成中」を状態不明と表示するまでの、AIの呼出し期限への加算
+
+
+def _schema_object(properties):
+    """Claudeの構造化出力用。各分岐はキーを固定し、業務上の検査は既存処理に任せる。"""
+    return {'type': 'object', 'properties': properties, 'required': list(properties), 'additionalProperties': False}
+
+
+# 既存の応答形式3種類を保持する。defaultは省略でき、変数なしではparameters自体を返さない。
+# 2026-10-14、同じスキーマを実機へ1回送り、ルートanyOfが受け付けられることを確認した。
+_SCHEMA_STRING = {'type': 'string'}
+_SCHEMA_PARAMETER = {'name': _SCHEMA_STRING, 'type': _SCHEMA_STRING, 'label': _SCHEMA_STRING}
+_SCHEMA_CODE = {
+    'steps': {'type': 'array', 'items': _schema_object({'name': _SCHEMA_STRING, 'query': _SCHEMA_STRING})},
+    'python': _SCHEMA_STRING,
+}
+ANTHROPIC_CODEGEN_SCHEMA = {'anyOf': [
+    _schema_object(_SCHEMA_CODE),
+    _schema_object({**_SCHEMA_CODE, 'parameters': {'type': 'array', 'items': {'anyOf': [
+        _schema_object(_SCHEMA_PARAMETER), _schema_object({**_SCHEMA_PARAMETER, 'default': _SCHEMA_STRING}),
+    ]}}}),
+    _schema_object({'unsupported': _SCHEMA_STRING}),
+]}
 
 GUARD_SOURCE = Path(__file__).with_name('analysis_guard_runtime.py').read_text(encoding='utf-8')
 WRAPPER_VERSION = f"1-{hashlib.sha256(GUARD_SOURCE.encode('utf-8')).hexdigest()[:12]}"  # 外枠の内容が変わると、自動で変わる
@@ -357,9 +379,6 @@ def _plan_for_codegen(store, plan_id, owner_id, revision):
 def _provider_for(plan):
     """分析案のAIが、いまも使えること(管理設定の有効・モデル許可・外部送信の全体許可・APIキー)を、送信の前に再確認する。"""
     provider, model = plan['proposal']['provider'], plan['proposal']['model']
-    if provider == 'anthropic':
-        # 暫定ガード(単位2まで): Claudeで作った分析案でも、コード生成は使えない。外部AIは呼ばない
-        raise AnalysisError(ANTHROPIC_CONSULT_CODEGEN_BLOCKED, 400)
     if resolve_planning_provider({'provider': provider, 'model': model}) != (provider, model):
         raise AnalysisError('分析案のAI・モデルが現在の管理設定と一致しません。分析案を作り直してください。', 409)
     return provider, model
@@ -420,6 +439,8 @@ def _call_ai(provider, model, messages, temperature):
     if provider == 'qwen':
         return chat_service._chat(messages, 'qwen', json_mode=True, num_predict=chat_service.AGENT_MAX_TOKENS,
                                   timeout=get_qwen_analysis_timeout(), temperature=temperature)
+    if provider == 'anthropic':
+        return analysis_llm.request_external_json(provider, model, messages, temperature, json_schema=ANTHROPIC_CODEGEN_SCHEMA)
     return analysis_llm.request_external_json(provider, model, messages, temperature)
 
 

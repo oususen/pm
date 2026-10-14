@@ -509,16 +509,14 @@ class ConsultAnthropicTests(SimpleTestCase):
 
 
 class ConsultCodegenGuardTests(SimpleTestCase):
-    def test_codegen_rejects_a_plan_made_with_anthropic_with_400_and_calls_no_ai(self):
+    def test_codegen_rechecks_the_existing_provider_rules_for_anthropic_without_calling_ai(self):
         from ai.services import analysis_codegen_service as codegen
         plan = {'proposal': {'provider': 'anthropic', 'model': 'claude-haiku-5-5'}}
         with patch('ai.services.anthropic_client.urlopen') as claude, patch('ai.services.analysis_llm.urlopen') as other, \
-                patch.object(codegen, 'resolve_planning_provider') as resolve:
-            with self.assertRaises(AnalysisError) as caught:
-                codegen._provider_for(plan)
-        self.assertEqual(caught.exception.status_code, 400)
-        self.assertIn('コード生成', str(caught.exception.detail))
-        for mock in (claude, other, resolve):
+                patch.object(codegen, 'resolve_planning_provider', return_value=('anthropic', 'claude-haiku-5-5')) as resolve:
+            self.assertEqual(codegen._provider_for(plan), ('anthropic', 'claude-haiku-5-5'))
+        resolve.assert_called_once_with(plan['proposal'])
+        for mock in (claude, other):
             mock.assert_not_called()
 
     def test_other_providers_still_reach_the_existing_check_in_codegen(self):

@@ -17,8 +17,6 @@ from ai.services.analysis_redaction import build_analysis_code_redactor
 # 検索AIの初期選択と同じ。選べない場合は、画面側で選べる先頭のプロバイダへ切り替える。
 DEFAULT_PROVIDER = 'openrouter'
 PLANNING_PROVIDERS = ('qwen', 'deepseek', 'openrouter', 'anthropic')
-# Claudeを、分析案の作成以外(相談・コード生成)で使おうとしたときの拒否文。単位2で対応するまでの暫定ガード(外部AIは呼ばない)
-ANTHROPIC_CONSULT_CODEGEN_BLOCKED = 'Claude は、相談・コード生成ではまだ使えません。'
 
 # Claude(Anthropic)の構造化出力(output_config.format の json_schema)。分析案 {title, steps, outputs, datasets[{view, fields}]} か、{unsupported} のどちらか。
 # 注意: ルートの anyOf が構造化出力で通るかは、公式docsで未確認(2026-10-13)。実機で確認する。
