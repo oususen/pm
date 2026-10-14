@@ -829,3 +829,9 @@ Qwen3 14B・Gemma 4 26Bの失敗の原因が、画面から分からなかった
 
 ### 2026-10-12 親品ID化の準備（開発／本番DB未反映）
 `ai/0051` は `v_ai_routing_step.parent_product_code` と `v_ai_routing_step_material.step_parent_product_code` の取得元を `m_routing_step.parent_product_id` → `m_product.id` のLEFT JOINに変更する。親品未指定はNULL。品番変更後は現在のマスタコードを返し、旧 `remark` を代替参照しない。公開33列／20列の名称・順序、全行公開、元テーブル行数を維持する。ownerの元列SELECTは `remark` から `parent_product_id` に変更する。旧migrationの定義は履歴として維持する。全件データ移行後の定義者付き再作成SQLは `scripts/routing_parent_ai_views_definer.sql.txt`。権限付与／取り消しはBOSS承認後に行う。詳細は `ルーティング親品ID化実装計画.md`。
+
+### 2026-10-14 AIルーティングビューの定義者修復
+
+BOSS承認により開発2ビューのDEFINERを既存 `pm_ai_view_owner@localhost` へ修復した。開発ではSELECT本文・公開列・文字セット・参照権限を保持し、主担当が実AI readerの件数取得を確認した。過去の親品移行・本番owner保留は当時の記録として保持する。本番用修復SQLは `scripts/repair_routing_ai_view_definers.sql.txt`。親品ID移行とai0051適用済みのDBを対象に、新親品ID列SELECTと2ビューのDEFINER再設定だけを行う。旧remark SELECT取消・reader権限追加・データ再移行は行わない。独立評価は開発修復・本番SQL提供範囲で合格（権限不変の独立前後比較は未確認、主担当の比較結果のみ）。本番実行・本番reader接続・ブラウザ操作は未確認。詳細・検証記録は `ルーティング親品ID化実装計画.md` の同日節を参照する。
+
+同日のBOSS提供本番実行結果で、両DEFINERの専用ownerへの変更、親品ID列SELECT追加、元／ビュー件数一致と公開列順を確認した。本番SQL実行済みの報告証拠として記録する。エージェントからの本番DB直接確認、本番アプリai_reader経路、ブラウザ操作は未確認。

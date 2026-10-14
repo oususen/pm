@@ -1,0 +1,115 @@
+-- ルーティングAIビューの定義者修復用。本番はBOSSが実行する。
+-- ai/0051・masters/0087適用済み、親品ID移行済み、既存ownerと必要列SELECT権限の存在を確認する。
+-- 事前確認の結果が想定どおりの場合だけ変更へ進む。DDLは暗黙COMMITを伴う。
+-- 業務データ再移行・reader権限追加・owner作成・旧remark権限取消は行わない。
+USE `pm_db`;
+
+-- 1. 事前確認（読取専用）
+SELECT DATABASE() AS target_database, @@hostname AS database_host;
+SELECT app, name, applied FROM django_migrations
+WHERE (app = 'ai' AND name = '0051_routing_parent_product_views')
+   OR (app = 'masters' AND name = '0087_routingstep_parent_product');
+SELECT User, Host, account_locked FROM mysql.user
+WHERE User = 'pm_ai_view_owner' AND Host = 'localhost';
+SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
+SELECT TABLE_NAME, DEFINER, SECURITY_TYPE FROM information_schema.VIEWS
+WHERE TABLE_SCHEMA = 'pm_db'
+  AND TABLE_NAME IN ('v_ai_routing_step', 'v_ai_routing_step_material');
+SELECT COUNT(*) AS source_step_count FROM m_routing_step;
+SELECT COUNT(*) AS source_material_count FROM m_routing_step_material;
+
+-- 2. 変更（管理者接続で実行）
+GRANT SELECT (`parent_product_id`) ON `pm_db`.`m_routing_step` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW v_ai_routing_step AS
+SELECT
+    s.id,
+    s.routing_id,
+    r.routing_code,
+    r.product_id AS routing_product_id,
+    rp.product_code AS routing_product_code,
+    rp.product_name AS routing_product_name,
+    r.is_default AS routing_is_default,
+    r.is_active AS routing_is_active,
+    r.valid_from_datetime AS routing_valid_from_datetime,
+    r.valid_to_datetime AS routing_valid_to_datetime,
+    s.step_no,
+    s.parallel_group,
+    s.parallel_count,
+    s.hierarchy_depth,
+    s.hierarchy_path,
+    s.process_id,
+    pr.process_code,
+    pr.process_name,
+    s.line_id,
+    l.line_code,
+    l.line_name,
+    s.supplier_id,
+    sp.supplier_code,
+    sp.supplier_name,
+    s.output_product_id,
+    op.product_code AS output_product_code,
+    op.product_name AS output_product_name,
+    pp.product_code AS parent_product_code,
+    s.source_bom_item_id,
+    s.time_unit,
+    s.lead_time_days,
+    s.start_offset_min,
+    s.duration_min
+FROM m_routing_step s
+LEFT JOIN m_routing r ON r.id = s.routing_id
+LEFT JOIN m_product rp ON rp.id = r.product_id
+LEFT JOIN m_process pr ON pr.id = s.process_id
+LEFT JOIN m_line l ON l.id = s.line_id
+LEFT JOIN m_supplier sp ON sp.id = s.supplier_id
+LEFT JOIN m_product op ON op.id = s.output_product_id
+LEFT JOIN m_product pp ON pp.id = s.parent_product_id;
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW v_ai_routing_step_material AS
+SELECT
+    m.id,
+    m.routing_step_id,
+    s.routing_id,
+    r.routing_code,
+    r.product_id AS routing_product_id,
+    rp.product_code AS routing_product_code,
+    rp.product_name AS routing_product_name,
+    s.step_no,
+    s.process_id AS step_process_id,
+    pr.process_code AS step_process_code,
+    pr.process_name AS step_process_name,
+    s.output_product_id AS step_output_product_id,
+    op.product_code AS step_output_product_code,
+    op.product_name AS step_output_product_name,
+    pp.product_code AS step_parent_product_code,
+    m.component_id,
+    cp.product_code AS component_code,
+    cp.product_name AS component_name,
+    m.quantity,
+    m.consume_timing
+FROM m_routing_step_material m
+LEFT JOIN m_routing_step s ON s.id = m.routing_step_id
+LEFT JOIN m_routing r ON r.id = s.routing_id
+LEFT JOIN m_product rp ON rp.id = r.product_id
+LEFT JOIN m_process pr ON pr.id = s.process_id
+LEFT JOIN m_product op ON op.id = s.output_product_id
+LEFT JOIN m_product cp ON cp.id = m.component_id
+LEFT JOIN m_product pp ON pp.id = s.parent_product_id;
+
+-- 3. 変更後の確認
+SELECT TABLE_NAME, DEFINER, SECURITY_TYPE FROM information_schema.VIEWS
+WHERE TABLE_SCHEMA = 'pm_db'
+  AND TABLE_NAME IN ('v_ai_routing_step', 'v_ai_routing_step_material');
+SELECT 'v_ai_routing_step' AS view_name,
+       (SELECT COUNT(*) FROM m_routing_step) AS source_count,
+       (SELECT COUNT(*) FROM v_ai_routing_step) AS view_count
+UNION ALL
+SELECT 'v_ai_routing_step_material',
+       (SELECT COUNT(*) FROM m_routing_step_material),
+       (SELECT COUNT(*) FROM v_ai_routing_step_material);
+SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = 'pm_db'
+  AND TABLE_NAME IN ('v_ai_routing_step', 'v_ai_routing_step_material')
+ORDER BY TABLE_NAME, ORDINAL_POSITION;
+SHOW GRANTS FOR 'pm_ai_view_owner'@'localhost';
+-- 実際のai_reader接続でも次の2文を実行して参照成功を確認する。
+SELECT COUNT(*) AS routing_step_count FROM v_ai_routing_step;
+SELECT COUNT(*) AS routing_step_material_count FROM v_ai_routing_step_material;

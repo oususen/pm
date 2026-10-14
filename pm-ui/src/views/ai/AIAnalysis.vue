@@ -51,7 +51,7 @@
         <h2 class="side-title">分析の進め方</h2>
       <section class="stage" :class="stageState(1)">
         <button type="button" class="stage-head" :aria-expanded="isOpen(1)" aria-controls="stage-body-1" @click="toggleStage(1)">
-          <span class="stage-no">①</span><strong>分析目的</strong><em>{{ stageLabel(1) }}</em><small v-if="stageSummary(1)">{{ stageSummary(1) }}</small>
+          <span class="stage-no">①</span><strong>分析目的</strong><span class="stage-resources">{{ stageResources(1) }}</span><em>{{ stageLabel(1) }}</em><small v-if="stageSummary(1)">{{ stageSummary(1) }}</small>
         </button>
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="3" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
@@ -105,7 +105,7 @@
         </div>
       <section v-if="plan" class="stage" :class="stageState(2)">
         <button type="button" class="stage-head" :aria-expanded="isOpen(2)" aria-controls="stage-body-2" @click="toggleStage(2)">
-          <span class="stage-no">②</span><strong>目的・手順</strong><em>{{ stageLabel(2) }}</em><small v-if="stageSummary(2)">{{ stageSummary(2) }}</small>
+          <span class="stage-no">②</span><strong>目的・手順</strong><span class="stage-resources">{{ stageResources(2) }}</span><em>{{ stageLabel(2) }}</em><small v-if="stageSummary(2)">{{ stageSummary(2) }}</small>
         </button>
         <div v-show="isOpen(2)" id="stage-body-2" class="stage-body">
         <p>目的: {{ plan.proposal.purpose }}</p>
@@ -127,7 +127,7 @@
       </section>
       <section v-if="plan && plan.status !== 'awaiting_method'" class="stage" :class="stageState(3)">
         <button type="button" class="stage-head" :aria-expanded="isOpen(3)" aria-controls="stage-body-3" @click="toggleStage(3)">
-          <span class="stage-no">③</span><strong>必要なデータ範囲</strong><em>{{ stageLabel(3) }}</em><small v-if="stageSummary(3)">{{ stageSummary(3) }}</small>
+          <span class="stage-no">③</span><strong>必要なデータ範囲</strong><span class="stage-resources">{{ stageResources(3) }}</span><em>{{ stageLabel(3) }}</em><small v-if="stageSummary(3)">{{ stageSummary(3) }}</small>
         </button>
         <div v-show="isOpen(3)" id="stage-body-3" class="stage-body">
           <p>期間: {{ plan.proposal.date_from }} ～ {{ plan.proposal.date_to }} / 条件: {{ plan.proposal.conditions }}</p>
@@ -153,7 +153,7 @@
       </section>
       <section v-if="plan && plan.status === 'data_approved'" class="stage" :class="stageState(4)">
         <button type="button" class="stage-head" :aria-expanded="isOpen(4)" aria-controls="stage-body-4" @click="toggleStage(4)">
-          <span class="stage-no">④</span><strong>SQL・Python</strong><em>{{ stageLabel(4) }}</em><small v-if="stageSummary(4)">{{ stageSummary(4) }}</small>
+          <span class="stage-no">④</span><strong>SQL・Python</strong><span class="stage-resources">{{ stageResources(4) }}</span><em>{{ stageLabel(4) }}</em><small v-if="stageSummary(4)">{{ stageSummary(4) }}</small>
         </button>
         <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
             <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが SQL・Python を生成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
@@ -197,7 +197,7 @@
       </section>
       <section v-if="plan && plan.status === 'data_approved' && hasCode" class="stage" :class="stageState(5)">
         <button type="button" class="stage-head" :aria-expanded="isOpen(5)" aria-controls="stage-body-5" @click="toggleStage(5)">
-          <span class="stage-no">⑤</span><strong>試行・コード承認</strong><em>{{ stageLabel(5) }}</em><small v-if="stageSummary(5)">{{ stageSummary(5) }}</small>
+          <span class="stage-no">⑤</span><strong>試行・コード承認</strong><span class="stage-resources">{{ stageResources(5) }}</span><em>{{ stageLabel(5) }}</em><small v-if="stageSummary(5)">{{ stageSummary(5) }}</small>
         </button>
         <div v-show="isOpen(5)" id="stage-body-5" class="stage-body">
               <template v-if="hasCode">
@@ -215,7 +215,7 @@
       </section>
       <section v-if="plan" class="stage" :class="[stageState(6), { ready: runReady }]">
         <button type="button" class="stage-head" :aria-expanded="isOpen(6)" aria-controls="stage-body-6" @click="toggleStage(6)">
-          <span class="stage-no">⑥</span><strong>実行</strong><em>{{ stageLabel(6) }}</em><small v-if="stageSummary(6)" :class="{ 'run-ready-text': runReady }">{{ runReady ? '◀ ' : '' }}{{ stageSummary(6) }}</small>
+          <span class="stage-no">⑥</span><strong>実行</strong><span class="stage-resources">{{ stageResources(6) }}</span><em>{{ stageLabel(6) }}</em><small v-if="stageSummary(6)" :class="{ 'run-ready-text': runReady }">{{ runReady ? '◀ ' : '' }}{{ stageSummary(6) }}</small>
         </button>
         <div v-show="isOpen(6)" id="stage-body-6" class="stage-body">
           <p v-if="!codeApproved">コード承認の後に、左の「分析の実行・結果」で実行します。</p>
@@ -433,6 +433,16 @@ const trialStepLabel = computed(() => {
 // 実行できる状態(コード承認済みで、まだ実行を依頼していない)。右の⑥と左の実行欄を強調する
 const runReady = computed(() => stageState(6) === 'current' && !plan.value?.execution)
 const codeApproved = computed(() => plan.value?.status === 'data_approved' && codeState.value?.status === 'code_approved')
+// 作成済みの案では、その案のAIを表示する。テンプレート再利用ではAIを呼ばない。
+function stageResources(n) {
+  if (n === 1 || n === 4) {
+    const source = plan.value ? plan.value.proposal.provider : provider.value
+    if (plan.value?.template || source === 'template') return '社内サーバー'
+    const ai = source === 'qwen' ? 'ローカルLLM' : '社外AI'
+    return n === 4 ? `${ai}＋社内サーバー` : ai
+  }
+  return { 2: '社内サーバー', 3: '社内サーバー＋社内DB', 5: '社内サーバー＋DuckDB', 6: '社内サーバー＋社内DB＋DuckDB・Python' }[n]
+}
 function stageState(n) {
   const p = plan.value
   if (n === 1) return p ? 'done' : 'current'
@@ -798,6 +808,7 @@ function releaseCodegen() {
 .stage-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 0; }
 .stage-head:not(:disabled) { background: #f4f8f8; color: #334b50; border-color: transparent; }
 .stage-head strong { font-size: 14px; }
+.stage-resources { font-size: 10px; font-weight: 400; color: #657b80; overflow-wrap: anywhere; }
 .stage-head em { font-style: normal; font-size: 11px; border-radius: 10px; padding: 1px 8px; background: #e6ecef; color: #647777; }
 .stage.current .stage-head em { background: #168779; color: #fff; }
 .stage.done .stage-head em { background: #d8ebe6; color: #328476; }

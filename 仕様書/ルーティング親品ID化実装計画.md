@@ -207,4 +207,15 @@ BOSSの整理指示により、output直下の移行関連txt13本を output/ル
 BOSSの追加指示により、整理ディレクトリを output/ルーティング親品ID移行/ に変更。開発・本番のJSON5本をresults、開発移行前バックアップSQLをbackups、未使用Adminer副本ディレクトリとZIPをarchive_sql_do_not_runへ集約した。移動した全ファイルのSHA256一致を確認し、README.txtを更新。前段の未移動記載はこの追加整理前の状態を示す。業務コード・DB・正式scripts・他のoutput資料は変更していない。
 
 2026-10-13、BOSS指示により `output/ルーティング親品ID移行/archive_sql_do_not_run/`（未使用の移行SQL案7本、Adminer副本、配布ZIP）を削除した。results・backups・checks・documents・pending_ai_owner は残している。上記の archive_sql_do_not_run への言及は削除前の記録で、現存しない。業務コード・DB・scripts は変更していない。
+
+## 2026-10-14 AIビュー定義者修復（今回の承認範囲）
+
+BOSSが開発2ビューの定義者修復を承認し、本番用SQLの提供を指示した。以前の本番owner切替保留は当時の記録として保持する。今回は開発DBで実行し、本番ではSQLを準備する範囲で、本番DBへの実行は行わない。
+
+- 主担当の開発DB確認・実行結果: 現在の両SHOW CREATE VIEWを退避し、SELECT本文、ALGORITHM、文字セット・照合順序、公開列と順序を保持したままDEFINERだけを `pm_ai_view_owner@localhost` へ変更。owner/readerのSHOW GRANTSは前後不変で、開発では追加GRANTなし。
+- 主担当の実DB確認: AI readerで工程7,612件・材料6,380件、公開33列／20列の全列参照に成功し、元テーブル件数と一致。画面と同じ件数確認経路で工程7,612件・品番2,849件・合計10,461件の確認に成功。ここに記した件数は主担当のDB一次確認結果であり、generatorによる独立DB確認ではない。
+- 本番提供用 `scripts/repair_routing_ai_view_definers.sql.txt`を準備。`pm_db`、ai0051/masters0087適用済み、親品ID移行済み、既存ownerと必要参照列権限の存在を事前確認する。親品ID列のSELECT付与と、0051と同じSELECT本文による2ビューのDEFINER再設定だけを行う。前後DEFINER・元テーブルとビュー件数・公開列確認を含む。
+- 既存 `scripts/routing_parent_ai_views_definer.sql.txt` は旧remark SELECT取消を含む初期切替手順として保持する。今回の修復SQLはREVOKE、reader権限追加、業務データ再移行、migration履歴変更、owner作成を含まない。旧全ビューSQLも再実行しない。
+- 独立評価は今回の開発修復・本番SQL提供範囲で合格。修復前退避と実DBの照合でDEFINER以外の定義・文字セット・照合順序・列順不変、元テーブル／ビュー／reader件数一致、全公開列参照、画面の件数確認成功を確認した。本番SQLのSELECT本文は正式原本と完全一致し、変更範囲も合格。権限不変の独立前後比較は修復前GRANT退避がないため未確認で、主担当の比較結果と区別する。
+- 開発は反映済み。本番SQLの準備時点では未実行だったが、同日にBOSSから本番インポート実行結果を受領した。貼付結果で対象pm_db、masters0087／ai0051適用済み、ownerロック、2ビューの専用定義者への変更、工程7,612件・材料6,380件の元／ビュー一致、公開33列／20列の列順を確認。owner権限の前後差分はparent_product_idのSELECT追加だけで、remark権限は維持されている。これはBOSS提供の実行結果の照合であり、エージェントによる本番DB独立接続確認ではない。最終COUNTの接続ユーザーが結果にないため、本番アプリのai_reader経路とブラウザ再操作は未確認。コミット・pushは今回未実施。
 2026-10-13、BOSS指示により開発DBの移行前バックアップSQL（`output/ルーティング親品ID移行/backups/`）を削除した。上記の backups への言及は削除前の記録で、現存しない。
