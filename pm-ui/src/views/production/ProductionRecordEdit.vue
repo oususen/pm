@@ -77,10 +77,10 @@
           <input v-model.number="newProductionQty" type="number" min="0" step="1" class="qty-input" />
         </div>
         <div class="add-form-row">
-          <label>作業者</label>
-          <select v-model="newOperatorName">
+          <label>作業者 <span class="required">*</span></label>
+          <select v-model="newOperatorUserId">
             <option value="">-- 選択 --</option>
-            <option v-for="u in users" :key="u.id" :value="u.label">{{ u.label }}</option>
+            <option v-for="u in users" :key="u.id" :value="String(u.id)">{{ u.label }}</option>
           </select>
         </div>
         <div class="add-form-row">
@@ -218,7 +218,16 @@
             </td>
             <td>
               <select
-                v-if="row.record_source === 'PROCESS' || row.record_source === 'BRAKE'"
+                v-if="row.record_source === 'PROCESS'"
+                v-model="edits[row.row_key].operator_user_id"
+                class="operator-select operator-select-process"
+                :disabled="!canEdit"
+              >
+                <option value="">現状: {{ row.operator_name || '未設定' }}（変更しない）</option>
+                <option v-for="u in users" :key="u.id" :value="String(u.id)">{{ u.label }}</option>
+              </select>
+              <select
+                v-else-if="row.record_source === 'BRAKE'"
                 v-model="edits[row.row_key].operator_name"
                 class="operator-select"
                 :disabled="!canEdit"
@@ -386,7 +395,7 @@ const newProductCode = ref('')
 const newStartedAt = ref('')
 const newEndedAt = ref('')
 const newProductionQty = ref(0)
-const newOperatorName = ref('')
+const newOperatorUserId = ref('')
 const newChangeReason = ref('')
 
 // 品番オートコンプリート（工程のラインで絞り込み）
@@ -577,7 +586,7 @@ const loadMasters = async () => {
     processes.value = processRes.data?.results || processRes.data || []
     const rawUsers = userRes.data?.results || userRes.data || []
     users.value = rawUsers
-      .map((u) => ({ id: u.id, label: ((u.last_name || '') + ' ' + (u.first_name || '')).trim() || u.username }))
+      .map((u) => ({ id: u.id, username: u.username, label: ((u.last_name || '') + ' ' + (u.first_name || '')).trim() || u.username }))
       .filter((u) => u.label)
       .sort((a, b) => a.label.localeCompare(b.label, 'ja'))
   } catch (e) {
@@ -595,6 +604,7 @@ const buildEditMap = (rows) => {
       defect_qty: Number(row.defect_qty || 0),
       product_code: row.product_code || '',
       operator_name: row.operator_name || '',
+      operator_user_id: '',
     }
   })
   edits.value = map
@@ -775,8 +785,12 @@ const saveRow = async (row) => {
       if (edit.product_code && edit.product_code !== (row.product_code || '')) {
         payload.product_code = edit.product_code.trim()
       }
-      if (edit.operator_name !== (row.operator_name || '')) {
-        payload.operator_name = edit.operator_name
+      // 作業者は「変更する」と選び、かつ現状の作業者（ログインID）と違うときだけ operator_user_id を送る
+      if (edit.operator_user_id !== '') {
+        const selectedUser = users.value.find((u) => String(u.id) === String(edit.operator_user_id))
+        if (selectedUser && selectedUser.username !== row.operator_login_id) {
+          payload.operator_user_id = Number(edit.operator_user_id)
+        }
       }
     }
     if (String(row?.record_source || '').toUpperCase() === 'LASER') {
@@ -886,6 +900,7 @@ const addSession = async () => {
   if (!newProductCode.value.trim()) { addError.value = '品番を入力してください。'; return }
   if (!newStartedAt.value) { addError.value = '開始日時を入力してください。'; return }
   if (!newEndedAt.value) { addError.value = '終了日時を入力してください。'; return }
+  if (!newOperatorUserId.value) { addError.value = '作業者を選択してください。'; return }
   if (!newChangeReason.value.trim()) { addError.value = '追加理由を入力してください。'; return }
   if (newProductionQty.value < 0) { addError.value = '実績数量は0以上で入力してください。'; return }
   if (!window.confirm('後入力セッションを登録し、LineBacklog.actual_qty に加算します。よろしいですか？')) return
@@ -898,7 +913,7 @@ const addSession = async () => {
       started_at: newStartedAt.value,
       ended_at: newEndedAt.value,
       production_qty: newProductionQty.value,
-      operator_name: newOperatorName.value,
+      operator_user_id: Number(newOperatorUserId.value),
       change_reason: newChangeReason.value.trim(),
     })
     // フォームリセット
@@ -907,7 +922,7 @@ const addSession = async () => {
     newStartedAt.value = ''
     newEndedAt.value = ''
     newProductionQty.value = 0
-    newOperatorName.value = ''
+    newOperatorUserId.value = ''
     newChangeReason.value = ''
     lineProducts.value = []
     showAddForm.value = false
@@ -1108,6 +1123,10 @@ onMounted(async () => {
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   font-size: 13px;
+}
+/* 「現状: 〇〇（変更しない）」が読める幅 */
+.operator-select-process {
+  width: 220px;
 }
 .product-code-input {
   width: 180px;
