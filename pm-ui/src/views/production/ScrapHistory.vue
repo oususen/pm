@@ -55,6 +55,7 @@
       </div>
     </div>
 
+    <p class="price-note">{{ priceNote }}</p>
     <div v-if="loading" class="loading">読込中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
     <div v-else class="table-wrap">
@@ -66,6 +67,8 @@
             <th>品番</th>
             <th>品名</th>
             <th class="num">仕損数</th>
+            <th class="num">単価</th>
+            <th class="num">金額</th>
             <th>判定</th>
             <th class="num">戻し数量</th>
             <th>発見時点</th>
@@ -87,6 +90,8 @@
             <td>{{ rec.product_code || '-' }}</td>
             <td>{{ rec.product_name || '' }}</td>
             <td class="num">{{ formatNumber(rec.qty) }}</td>
+            <td class="num">{{ formatPrice(rec.scrap_unit_price) }}</td>
+            <td class="num">{{ formatPrice(rec.scrap_amount) }}</td>
             <td>{{ dispositionLabel(rec.scrap_disposition_status) }}</td>
             <td class="num">{{ formatNumber(rec.scrap_return_qty) }}</td>
             <td>{{ productionRecordedLabel(rec) }}</td>
@@ -98,7 +103,7 @@
             </td>
           </tr>
           <tr v-if="!filteredRecords.length">
-            <td colspan="12" class="no-data">データがありません</td>
+            <td colspan="14" class="no-data">データがありません</td>
           </tr>
         </tbody>
       </table>
@@ -234,6 +239,8 @@ import { authState } from '@/auth'
 import api from '@/api/client'
 import DataSourceDialog from '@/components/DataSourceDialog.vue'
 
+const priceNote = '単価は出力時点の製品マスタ単価です。金額は単価×仕損数で算出しています。マスタ単価を変更すると、過去の履歴の表示金額も変わります。'
+
 const dsSources = [
   { op: '取得', table: 't_process_realtime_record', desc: '仕損記録の一覧取得（record_type=SCRAP）' },
   { op: '取得', table: 't_scrap_record / t_scrap_record_detail', desc: '仕損明細の展開表示（品目別の補充状態）' },
@@ -349,6 +356,7 @@ const formatNumber = (n) => {
   if (Number.isNaN(num)) return ''
   return num.toLocaleString()
 }
+const formatPrice = (value) => value ?? ''
 
 const toNumber = (n) => {
   const num = Number(n)
@@ -376,6 +384,8 @@ const exportExcel = () => {
     '品番',
     '品名',
     '仕損数',
+    '単価',
+    '金額',
     '判定',
     '戻し数量',
     '発見時点',
@@ -390,6 +400,8 @@ const exportExcel = () => {
     rec.product_code || '',
     rec.product_name || '',
     formatNumber(rec.qty),
+    formatPrice(rec.scrap_unit_price),
+    formatPrice(rec.scrap_amount),
     dispositionLabel(rec.scrap_disposition_status),
     formatNumber(rec.scrap_return_qty),
     productionRecordedLabel(rec),
@@ -403,7 +415,7 @@ const exportExcel = () => {
     const escaped = text.replace(/"/g, '""')
     return `"${escaped}"`
   }
-  const csvLines = [headers.map(escapeCsv).join(','), ...rows.map((r) => r.map(escapeCsv).join(','))]
+  const csvLines = [escapeCsv(priceNote), headers.map(escapeCsv).join(','), ...rows.map((r) => r.map(escapeCsv).join(','))]
   const bom = '\ufeff'
   const csvContent = `${bom}${csvLines.join('\r\n')}`
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -590,6 +602,11 @@ onMounted(() => {
   margin: 0;
   color: #64748b;
   font-size: 13px;
+}
+.price-note {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
 }
 .filters {
   display: flex;

@@ -1,7 +1,7 @@
 """
 工程実時間記録用のSerializer
 """
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta, time
 
 from rest_framework import serializers
@@ -1067,6 +1067,8 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
     scrap_operator_login_id = serializers.SerializerMethodField()
     scrap_cause_login_id = serializers.SerializerMethodField()
     scrap_reporter_login_id = serializers.SerializerMethodField()
+    scrap_unit_price = serializers.SerializerMethodField()
+    scrap_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = ProcessRealtimeRecord
@@ -1100,11 +1102,27 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'scrap_operator_login_id',
             'scrap_cause_login_id',
             'scrap_reporter_login_id',
+            'scrap_unit_price',
+            'scrap_amount',
         ]
         read_only_fields = ['id', 'timestamp']
 
     def get_scrap_record_id(self, obj):
         return getattr(getattr(obj, 'scrap_detail', None), 'id', None)
+
+    def get_scrap_unit_price(self, obj):
+        if obj.record_type != 'SCRAP' or obj.product is None:
+            return None
+        unit_price = obj.product.unit_price
+        return format(unit_price, '.2f') if unit_price is not None else None
+
+    def get_scrap_amount(self, obj):
+        unit_price = self.get_scrap_unit_price(obj)
+        if unit_price is None:
+            return None
+        # 戻し数量は控除せず、記録した仕損数量に現在のマスタ単価を掛ける。
+        amount = (Decimal(unit_price) * obj.qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return format(amount, '.2f')
 
     def get_scrap_is_replenished(self, obj):
         sd = getattr(obj, 'scrap_detail', None)
