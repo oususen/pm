@@ -662,7 +662,7 @@ const entry = (material, day) =>
   entries.value[key(material, day)] ||
   (entries.value[key(material, day)] = {
     sato_lots: 0,
-    meisei_lots: Math.ceil(demand(material, day)),
+    meisei_lots: isDateLocked(day, "MEISEI") ? 0 : Math.ceil(demand(material, day)),
     sato_sheets: 0,
     meisei_sheets: 0,
   });
@@ -683,7 +683,7 @@ const manual = (material, day, supplier) => {
     supplier === "SATO" ? "sato_lots" : "meisei_lots"
   ];
   return supplier === "MEISEI" && value === undefined
-    ? Math.ceil(automatic(material, day, supplier))
+    ? (isDateLocked(day, supplier) ? 0 : Math.ceil(automatic(material, day, supplier)))
     : Number(value || 0);
 };
 const progress = (material, day, supplier) => {
@@ -764,7 +764,8 @@ const load = async () => {
     props.dates.forEach((day) => {
       const value = next[key(material, day)] || { sato_lots: 0, sato_sheets: 0, meisei_sheets: 0 };
       if (value.meisei_lots === undefined)
-        value.meisei_lots = Math.ceil(
+        // ロック中の未保存手数は0とし、計画変更による自動設定を止める。
+        value.meisei_lots = isDateLocked(day, "MEISEI") ? 0 : Math.ceil(
           Math.max(demand(material, day) - Number(value.sato_lots || 0), 0),
         );
       next[key(material, day)] = value;
