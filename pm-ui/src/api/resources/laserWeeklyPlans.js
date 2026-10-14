@@ -41,6 +41,9 @@ export const createLaserWeeklyPlansAPI = (client) => ({
   getMaterialOrderApproval(startDate, displayStart = '', displayEnd = '') {
     return client.get('/laser-weekly-plans/material-order-approval/', { params: { start_date: startDate, display_start: displayStart, display_end: displayEnd } })
   },
+  getMaterialOrderAdjustmentPdfs(supplier) {
+    return client.get('/laser-weekly-plans/material-order-adjustment-pdfs/', { params: { supplier } })
+  },
   getMaterialOrderEmailConfigs() {
     return client.get('/laser-material-order-email-configs/')
   },

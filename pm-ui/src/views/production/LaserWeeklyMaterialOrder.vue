@@ -82,6 +82,13 @@
           ><button class="btn common-btn" @click="openEmailConfig">
             メール設定</button>
         </div>
+        <div class="action-group common-group">
+          <span class="action-group-title">調整後</span>
+          <button class="btn common-btn" @click="openAdjustmentPdfDialog('SATO')">
+            佐藤商事納期変更PDFを開く</button
+          ><button class="btn common-btn" @click="openAdjustmentPdfDialog('MEISEI')">
+            名成鋼機納期変更PDFを開く</button>
+        </div>
         <div v-if="hasSystemActions" class="action-group system-group">
           <span class="action-group-title">システム管理者</span>
           <button class="btn system-btn" @click="resetApproval" :disabled="approvalBusy">
@@ -119,6 +126,30 @@
             ><button class="btn" @click="downloadDialog = false">
               キャンセル
             </button>
+          </div>
+        </section>
+      </div>
+      <div v-if="adjustmentPdfDialog" class="download-modal" @click.self="closeAdjustmentPdfDialog">
+        <section class="download-dialog adjustment-pdf-dialog">
+          <h3>{{ supplierName(adjustmentPdfSupplier) }}納期変更PDF</h3>
+          <p>表示週以外も含む、注文書期間ごとの最新保存PDFです。</p>
+          <p v-if="adjustmentPdfLoading">保存済みPDFを取得中です。</p>
+          <p v-else-if="adjustmentPdfError">{{ adjustmentPdfError }}</p>
+          <p v-else-if="!adjustmentPdfOptions.length">保存済みの納期変更PDFはありません。</p>
+          <template v-else>
+            <label class="adjustment-pdf-row">注文書期間:
+              <select v-model="adjustmentPdfSelection">
+                <option value="" disabled>期間を選択してください</option>
+                <option v-for="file in adjustmentPdfOptions" :key="file.approval_id" :value="file.approval_id">
+                  {{ file.start_date }} ～ {{ file.end_date }}
+                </option>
+              </select>
+            </label>
+            <p v-if="selectedAdjustmentPdf">保存日時: {{ selectedAdjustmentPdf.saved_at }}</p>
+          </template>
+          <div class="dialog-actions">
+            <button class="btn common-btn" :disabled="!selectedAdjustmentPdf || adjustmentPdfLoading || !!adjustmentPdfError" @click="openAdjustmentPdf">開く</button>
+            <button class="btn" @click="closeAdjustmentPdfDialog">閉じる</button>
           </div>
         </section>
       </div>
@@ -653,6 +684,50 @@ const downloadSupplier = ref("");
 const downloadFormat = ref("pdf");
 const downloadStartDate = ref("");
 const downloadEndDate = ref("");
+const adjustmentPdfDialog = ref(false);
+const adjustmentPdfSupplier = ref("MEISEI");
+const adjustmentPdfOptions = ref([]);
+const adjustmentPdfSelection = ref("");
+const adjustmentPdfLoading = ref(false);
+const adjustmentPdfError = ref("");
+let adjustmentPdfRequest = 0;
+const selectedAdjustmentPdf = computed(() =>
+  adjustmentPdfOptions.value.find((file) => file.approval_id === adjustmentPdfSelection.value),
+);
+const resetAdjustmentPdf = () => {
+  adjustmentPdfOptions.value = [];
+  adjustmentPdfSelection.value = "";
+  adjustmentPdfLoading.value = false;
+  adjustmentPdfError.value = "";
+};
+const closeAdjustmentPdfDialog = () => {
+  adjustmentPdfRequest += 1;
+  adjustmentPdfDialog.value = false;
+  resetAdjustmentPdf();
+};
+const openAdjustmentPdfDialog = async (supplier) => {
+  const request = ++adjustmentPdfRequest;
+  resetAdjustmentPdf();
+  adjustmentPdfSupplier.value = supplier;
+  adjustmentPdfDialog.value = true;
+  adjustmentPdfLoading.value = true;
+  try {
+    const response = await api.laserWeeklyPlans.getMaterialOrderAdjustmentPdfs(supplier);
+    // 仕入先切替・閉じる・再表示の後に届いた応答は反映しない。
+    if (request !== adjustmentPdfRequest) return;
+    adjustmentPdfOptions.value = response.data.items;
+  } catch (error) {
+    if (request !== adjustmentPdfRequest) return;
+    adjustmentPdfError.value = "保存済みPDFの取得に失敗しました。閉じて再度開いてください。";
+  } finally {
+    if (request === adjustmentPdfRequest) adjustmentPdfLoading.value = false;
+  }
+};
+const openAdjustmentPdf = () => {
+  const file = selectedAdjustmentPdf.value;
+  if (!file || adjustmentPdfLoading.value || adjustmentPdfError.value) return;
+  window.open(file.url, "_blank", "noopener");
+};
 const adjustmentDialog = ref(false);
 const adjustmentSupplier = ref("MEISEI");
 const adjustmentStartDate = ref("");
@@ -1354,6 +1429,22 @@ watch(() => [props.startDate, props.materials], load, {
   display: grid;
   gap: 3px;
   font-size: 12px;
+}
+.adjustment-pdf-dialog {
+  width: min(460px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  gap: 8px;
+  font-size: 12px;
+}
+.adjustment-pdf-dialog p {
+  margin: 0;
+}
+.adjustment-pdf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .dialog-actions {
   display: flex;

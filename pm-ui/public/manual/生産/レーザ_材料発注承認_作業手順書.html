@@ -413,11 +413,13 @@
     <li>数量を修正します。</li>
     <li><span class="mock-btn creator-btn">佐藤商事納期調整保存</span> / <span class="mock-btn creator-btn">名成鋼機納期調整保存</span> を押します。</li>
     <li>変更が保存され、「納期変更」PDFが別ファイルとして生成されます。</li>
+    <li>「調整後」ブロックの <span class="mock-btn common-btn">佐藤商事納期変更PDFを開く</span> / <span class="mock-btn common-btn">名成鋼機納期変更PDFを開く</span> を押します。</li>
+    <li>表示週以外も含む保存済みPDFの <strong>注文書期間</strong> を選択します。表示された保存日時を確認し、<strong>開く</strong> を押して別タブで表示します。期間は自動選択されません。読込中・取得失敗・未選択では開くを押せません。取得失敗時は閉じて再度開いてください。保存済みPDFがない場合は「保存済みの納期変更PDFはありません」と表示されます。</li>
   </ol>
 
   <div class="callout info">
     <span class="icon">ℹ️</span>
-    <div>納期調整は承認フローを経由しません。調整後のPDFは「納期変更_」プレフィックス付きの別ファイルとして保存され、元の承認済みPDFはそのまま残ります。</div>
+    <div>納期調整は承認フローを経由しません。調整後のPDFは「納期変更_」プレフィックス付きの別ファイルとして保存され、元の承認済みPDFはそのまま残ります。「注文書開く」は元の注文書を確認する操作です。納期変更PDFの期間選択は過去期間も含み、同じ注文書期間では最新保存分だけを表示します。同期間の変更履歴は選べません。保存先のファイルが欠落している場合は開けません。</div>
   </div>
 
   <div class="callout warn">
@@ -441,6 +443,7 @@
     <tr><td><span class="mock-btn approver-btn">承認者</span></td><td>青系</td><td>係長（承認・送信）※送信は承認済みなら全担当者可</td></tr>
     <tr><td><span class="mock-btn reject-btn">却下</span></td><td>赤系</td><td>班長・係長（却下）</td></tr>
     <tr><td><span class="mock-btn common-btn">共通</span></td><td>紫系</td><td>全員（注文書PDF表示・Excel出力・メール設定）</td></tr>
+    <tr><td><span class="mock-btn common-btn">調整後</span></td><td>紫系</td><td>全員（保存済み納期変更PDFの期間選択・表示）</td></tr>
   </table>
 
   <h4 class="sub">注文書PDFの承認印欄</h4>

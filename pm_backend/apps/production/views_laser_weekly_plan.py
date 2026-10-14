@@ -185,6 +185,45 @@ class LaserWeeklyPlanViewSet(viewsets.ViewSet):
                 cursor += timedelta(days=1)
         return locked
 
+    @action(detail=False, methods=['get'], url_path='material-order-adjustment-pdfs')
+    def material_order_adjustment_pdfs(self, request):
+        """表示週に限定せず、注文書期間ごとの最新保存済み納期変更PDFを取得する。"""
+        supplier = request.query_params.get('supplier')
+        if supplier not in MATERIAL_ORDER_SUPPLIER_CODES:
+            return Response({'detail': 'supplier is required (MEISEI or SATO)'}, status=status.HTTP_400_BAD_REQUEST)
+        approvals = ApprovalRequest.objects.filter(
+            route_config__item_key='laser_material_order', context__supplier=supplier,
+        )
+        by_period = {}
+        for approval in approvals:
+            context = approval.context
+            if not isinstance(context, dict) or context.get('supplier') != supplier:
+                continue
+            files = context.get('material_order_adjustment_pdf_files')
+            file = files.get(supplier) if isinstance(files, dict) else None
+            if not isinstance(file, dict) or not isinstance(file.get('url'), str) or not file['url']:
+                continue
+            start, end = context.get('lock_start_date'), context.get('lock_end_date')
+            try:
+                start_date = datetime.strptime(start, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end, '%Y-%m-%d').date()
+                saved_at = file.get('saved_at')
+                saved_datetime = datetime.fromisoformat(saved_at)
+            except (TypeError, ValueError):
+                continue
+            if end_date < start_date or saved_datetime.tzinfo is not None:
+                continue
+            period = (start, end)
+            candidate = {
+                'approval_id': approval.id, 'start_date': start, 'end_date': end,
+                'saved_at': saved_at, 'url': file['url'],
+            }
+            # 同期間のファイルは上書き保存されるため、最新のmetadataだけを表示する。
+            rank = (saved_datetime, approval.id)
+            if period not in by_period or rank > by_period[period][0]:
+                by_period[period] = (rank, candidate)
+        return Response({'items': [by_period[period][1] for period in sorted(by_period, reverse=True)]})
+
     @action(detail=False, methods=['get', 'post'], url_path='material-order-approval')
     def material_order_approval(self, request):
         """材料発注の承認申請を仕入先別に取得または作成する。"""
