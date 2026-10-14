@@ -168,6 +168,7 @@ def rebuild_session_production_records(session_obj):
         equipment_state=None,
         event_data=event_data,
         operator_name=session_obj.operator_name or '',
+        operator_login_id=session_obj.operator_login_id,
     )
 
     expand_coproduct_children_production(
@@ -176,6 +177,7 @@ def rebuild_session_production_records(session_obj):
         parent_qty=qty_decimal,
         plan_date=session_obj.plan_date,
         operator_name=session_obj.operator_name or '',
+        operator_login_id=session_obj.operator_login_id,
         parent_record_id=parent_record.id,
         base_event_data=event_data,
         session=session_obj,

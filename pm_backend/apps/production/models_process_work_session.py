@@ -59,6 +59,8 @@ class ProcessWorkSession(models.Model):
         verbose_name='仕損数量',
     )
     operator_name = models.CharField(max_length=100, blank=True, default='', verbose_name='作業者名')
+    # 作業者のログインID(auth_user.username)。値の設定は単位3で実装
+    operator_login_id = models.CharField(max_length=150, null=True, blank=True, verbose_name='作業者ログインID')
 
     start_record = models.ForeignKey(
         ProcessRealtimeRecord,

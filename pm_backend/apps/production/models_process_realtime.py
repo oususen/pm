@@ -71,6 +71,10 @@ class ProcessRealtimeRecord(models.Model):
 
     batch_no = models.CharField(max_length=100, null=True, blank=True, verbose_name='ロット番号')
     operator_name = models.CharField(max_length=50, null=True, blank=True, verbose_name='作業者名')
+    # 作業者のログインID(auth_user.username)。サーバーがログイン者から設定する。SCRAP/PURCHASE等はNULL
+    operator_login_id = models.CharField(
+        max_length=150, null=True, blank=True, db_index=True, verbose_name='作業者ログインID'
+    )
     remarks = models.TextField(null=True, blank=True, verbose_name='備考')
 
     class Meta:

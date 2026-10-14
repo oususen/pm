@@ -2445,7 +2445,7 @@ const submitRecord = async () => {
       if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {
         data.qty = record.value.qty; data.batch_no = record.value.batch_no; data.operator_name = record.value.operator_name
       } else if (record.value.record_type === 'EQUIPMENT_STATE') {
-        data.equipment_state = record.value.equipment_state; data.qty = 0
+        data.equipment_state = record.value.equipment_state; data.qty = 0; data.operator_name = record.value.operator_name
       }
       if (record.value.record_type === 'SCRAP' && record.value.reason) {
         const currentProduct =
@@ -3364,7 +3364,7 @@ watch(() => scrapRelationFilter.value, (val) => {
 watch(() => record.value.record_type, (type) => {
   if (!type) return
   if (type !== 'PRODUCTION') selectedOperatorAction.value = ''
-  if (type === 'EQUIPMENT_STATE') { record.value.counter_qty = null; record.value.qty = null; record.value.batch_no = ''; record.value.operator_name = ''; record.value.reason_detail = ''; record.value.reason = '' }
+  if (type === 'EQUIPMENT_STATE') { record.value.counter_qty = null; record.value.qty = null; record.value.batch_no = ''; record.value.operator_name = defaultOperatorName.value || ''; record.value.reason_detail = ''; record.value.reason = '' }
   else if (type === 'SCRAP') { if (!(record.value.operator_name || '').trim()) record.value.operator_name = defaultOperatorName.value || ''; ensureScrapDefaults() }
   else { record.value.reason_detail = ''; record.value.reason = ''; record.value.disposition_status = ''; if (!(record.value.operator_name || '').trim()) record.value.operator_name = defaultOperatorName.value || '' }
   if (!record.value.product_id && defaultProductId.value) {

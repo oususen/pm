@@ -1,5 +1,6 @@
 """仕入実績（record_type='PURCHASE'）と生産実績の区別を検証する。"""
 from datetime import date
+from types import SimpleNamespace
 
 from django.test import TestCase
 
@@ -19,7 +20,7 @@ class PurchaseRecordTypeValidationTest(TestCase):
             'record_type': record_type,
             'qty': 5,
             'event_data': event_data,
-        })
+        }, context={'request': SimpleNamespace(user=SimpleNamespace(is_authenticated=True, username='000175'))})
         self.assertFalse(serializer.is_valid())
         return serializer.errors
 

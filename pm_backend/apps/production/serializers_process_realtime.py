@@ -597,6 +597,7 @@ def expand_coproduct_children_production(
     session_issues=None,
     skip_backlog=False,
     record_type='PRODUCTION',
+    operator_login_id=None,
 ):
     """
     連産品（仮想セット品番）の親実績から子製品実績を展開する。
@@ -634,6 +635,7 @@ def expand_coproduct_children_production(
             event_data=child_event_data,
             batch_no=batch_no,
             operator_name=operator_name,
+            operator_login_id=operator_login_id,
             remarks=remarks,
         )
         if session:
@@ -669,6 +671,9 @@ def resolve_workday_date_for_process(process, dt):
     except Exception:
         return dt.date()
 
+
+# 作業者ログインID（ログイン者のusername）を保存し、未認証を400にする record_type
+LOGIN_ID_RECORD_TYPES = ('PRODUCTION', 'OPERATOR_ACTION', 'EQUIPMENT_STATE')
 
 SESSION_ACTIONS = {'START', 'PAUSE', 'RESUME', 'END', 'TEMP_END', 'CANCEL'}
 SESSION_ACTIVE_STATUSES = ['OPEN']
@@ -1089,6 +1094,7 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'event_data',
             'batch_no',
             'operator_name',
+            'operator_login_id',
             'remarks',
             'scrap_record_id',
             'scrap_is_replenished',
@@ -1105,7 +1111,7 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'scrap_unit_price',
             'scrap_amount',
         ]
-        read_only_fields = ['id', 'timestamp']
+        read_only_fields = ['id', 'timestamp', 'operator_login_id']
 
     def get_scrap_record_id(self, obj):
         return getattr(getattr(obj, 'scrap_detail', None), 'id', None)
@@ -1344,6 +1350,10 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
     def validate(self, attrs):
+        if attrs.get('record_type') in LOGIN_ID_RECORD_TYPES:
+            login_user = getattr(self.context.get('request'), 'user', None)
+            if not login_user or not login_user.is_authenticated or not login_user.username:
+                raise serializers.ValidationError({'operator_login_id': '工程実績の登録にはログインが必要です。'})
         if attrs.get('record_type') == 'SCRAP':
             user = getattr(self.context.get('request'), 'user', None)
             if not user or not user.is_authenticated or not user.username:
@@ -1408,6 +1418,10 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         operator_login_id = None
         if validated_data.get('record_type') == 'SCRAP':
             operator_login_id = self.context['request'].user.username
+        # 親行(PRODUCTION/OPERATOR_ACTION/EQUIPMENT_STATE)の作業者ログインID。常にログイン者（クライアント値は使わない）
+        record_login_id = None
+        if validated_data.get('record_type') in LOGIN_ID_RECORD_TYPES:
+            record_login_id = self.context['request'].user.username
         process_id = validated_data.pop('process_id')
         try:
             process = Process.objects.get(id=process_id)
@@ -1504,6 +1518,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                 product=product,
                 product_code=product_code,
                 product_name=product_name,
+                operator_login_id=record_login_id,
                 **validated_data
             )
 
@@ -1570,6 +1585,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     event_data=production_event_data,
                     batch_no=validated_data.get('batch_no', ''),
                     operator_name=validated_data.get('operator_name', ''),
+                    operator_login_id=record_login_id,
                     remarks=validated_data.get('remarks', ''),
                 )
                 if production_session:
@@ -1583,6 +1599,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     plan_date=plan_date,
                     batch_no=validated_data.get('batch_no', ''),
                     operator_name=validated_data.get('operator_name', ''),
+                    operator_login_id=record_login_id,
                     remarks=validated_data.get('remarks', ''),
                     parent_record_id=production_record.id,
                     base_event_data=production_event_data,
@@ -1614,6 +1631,7 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     plan_date=plan_date,
                     batch_no=validated_data.get('batch_no', ''),
                     operator_name=validated_data.get('operator_name', ''),
+                    operator_login_id=record_login_id,
                     remarks=validated_data.get('remarks', ''),
                     parent_record_id=parent_record.id,
                     base_event_data=child_base_event_data,

@@ -155,6 +155,155 @@ class ScrapLoginIdTest(TestCase):
 
 
 
+class ProcessRealtimeOperatorLoginIdTest(TestCase):
+    """一般の工程実績の作業者ログインID列（operator_login_id）を検証する。"""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = get_user_model().objects.create_user(username='000175', last_name='記入', first_name='太郎')
+        self.line = Line.objects.create(line_code='LID-L', line_name='ログインID検証ライン')
+        self.process = Process.objects.create(process_code='LID-P', process_name='ログインID検証工程', line=self.line)
+        self.product = Product.objects.create(product_code='LID-PROD', product_name='ログインID検証品')
+        routing = Routing.objects.create(product=self.product, routing_code='R-LID', is_default=True, is_active=True)
+        RoutingStep.objects.create(
+            routing=routing, step_no=10, process=self.process, line=self.line, output_product=self.product,
+        )
+        # 連産親（子へ展開される）
+        self.parent = Product.objects.create(product_code='LID-SET', product_name='連産親', is_virtual_set=True)
+        self.child = Product.objects.create(product_code='LID-CHILD', product_name='連産子')
+        bom = BOM.objects.create(
+            parent_product=self.parent, version='v1', valid_from=date(2026, 1, 1),
+            is_active=True, is_coproduct=True,
+        )
+        BOMItem.objects.create(bom=bom, child_product=self.child, quantity=Decimal('1'))
+
+    def post(self, payload, user='default'):
+        request = self.factory.post('/api/process-realtime-records/', payload, format='json')
+        if user == 'default':
+            user = self.user
+        if user is not None:
+            force_authenticate(request, user=user)
+        with patch(
+            'production.serializers_process_realtime.resolve_workday_date_for_process',
+            return_value=date(2026, 3, 5),
+        ):
+            return ProcessRealtimeRecordViewSet.as_view({'post': 'create'})(request)
+
+    def base(self, record_type, **extra):
+        payload = {
+            'process_id': self.process.id, 'product_id': self.product.id,
+            'record_type': record_type, 'qty': 3, 'operator_name': '記入 太郎',
+        }
+        payload.update(extra)
+        return payload
+
+    def test_parent_rows_store_login_user_and_ignore_client_values(self):
+        cases = [
+            self.base('PRODUCTION'),
+            self.base('OPERATOR_ACTION', qty=0, event_data={'action': 'START'}),
+            {'process_id': self.process.id, 'record_type': 'EQUIPMENT_STATE', 'equipment_state': 'RUNNING',
+             'qty': 0, 'operator_name': '記入 太郎'},
+        ]
+        for payload in cases:
+            with self.subTest(record_type=payload['record_type']):
+                payload = dict(payload)
+                payload['operator_login_id'] = '偽装'
+                payload['event_data'] = dict(payload.get('event_data') or {},
+                                             operator_login_id='偽装', operator_user_id='偽装')
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data['operator_login_id'], '000175')
+                record = ProcessRealtimeRecord.objects.get(pk=response.data['id'])
+                self.assertEqual(record.operator_login_id, '000175')
+                self.assertEqual(record.operator_name, '記入 太郎')
+
+    def test_equipment_state_without_operator_name_still_uses_login_user(self):
+        response = self.post({'process_id': self.process.id, 'record_type': 'EQUIPMENT_STATE',
+                              'equipment_state': 'RUNNING', 'qty': 0})
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['operator_login_id'], '000175')
+
+    def test_pause_and_end_production_rows_and_coproduct_children_share_login_id(self):
+        for action in ('PAUSE', 'END'):
+            with self.subTest(action=action):
+                ProcessRealtimeRecord.objects.all().delete()
+                ProcessWorkSession.objects.all().delete()
+                start = self.post(self.base('OPERATOR_ACTION', product_id=self.parent.id, qty=0,
+                                            event_data={'action': 'START'}))
+                self.assertEqual(start.status_code, 201, start.data)
+                payload = self.base('OPERATOR_ACTION', product_id=self.parent.id, qty=4,
+                                    event_data={'action': action})
+                if action == 'END':
+                    payload['production_qty'] = 4
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 201, response.data)
+                production = ProcessRealtimeRecord.objects.filter(record_type='PRODUCTION')
+                self.assertEqual(production.count(), 2)  # 親 + 連産子
+                self.assertEqual({r.product_code for r in production}, {'LID-SET', 'LID-CHILD'})
+                self.assertEqual({r.operator_login_id for r in production}, {'000175'})
+
+    def test_production_coproduct_child_shares_login_id(self):
+        response = self.post(self.base('PRODUCTION', product_id=self.parent.id))
+        self.assertEqual(response.status_code, 201, response.data)
+        rows = ProcessRealtimeRecord.objects.filter(record_type='PRODUCTION')
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual({r.operator_login_id for r in rows}, {'000175'})
+
+    def test_scrap_row_is_null(self):
+        with patch('production.serializers_process_realtime.build_scrap_multiplier_details', return_value=[]), \
+             patch('production.serializers_process_realtime.build_scrap_multiplier_map', return_value={}), \
+             patch('production.serializers_process_realtime.update_scrap_to_backlog'):
+            response = self.post(self.base('SCRAP', reporter_login_id=self.user.username,
+                                           event_data={'reason': 'RUST', 'is_production_recorded': False}))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(response.data['operator_login_id'])
+        self.assertEqual(ScrapRecord.objects.get(process_record_id=response.data['id']).operator_login_id, '000175')
+
+    def test_purchase_works_without_request_context_and_is_null(self):
+        from production.serializers_process_realtime import ProcessRealtimeCreateSerializer
+        from production.models_process_realtime import PURCHASE_ACTUAL_SOURCES
+        purchase_process = Process.objects.create(process_code='LID-PUR', process_name='仕入検証工程', line=self.line)
+        serializer = ProcessRealtimeCreateSerializer(data={
+            'process_id': purchase_process.id, 'product_id': self.product.id, 'record_type': 'PURCHASE',
+            'qty': 2, 'work_date': date(2026, 3, 5),
+            'event_data': {'source': PURCHASE_ACTUAL_SOURCES[0], 'line_id': self.line.id},
+        })
+        with patch('production.serializers_process_realtime.is_valid_output_process', return_value=True):
+            self.assertTrue(serializer.is_valid(), serializer.errors)
+            record = serializer.save()
+        self.assertEqual(record.record_type, 'PURCHASE')
+        self.assertIsNone(record.operator_login_id)
+
+    def test_anonymous_requests_are_rejected_for_login_id_record_types(self):
+        for payload in (self.base('PRODUCTION'),
+                        self.base('OPERATOR_ACTION', qty=0, event_data={'action': 'START'}),
+                        {'process_id': self.process.id, 'record_type': 'EQUIPMENT_STATE',
+                         'equipment_state': 'RUNNING', 'qty': 0}):
+            with self.subTest(record_type=payload['record_type']):
+                response = self.post(payload, user=None)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('operator_login_id', response.data)
+        self.assertFalse(ProcessRealtimeRecord.objects.exists())
+
+    def test_patch_cannot_rewrite_operator_login_id(self):
+        response = self.post(self.base('PRODUCTION'))
+        record_id = response.data['id']
+        request = self.factory.patch(f'/api/process-realtime-records/{record_id}/',
+                                     {'operator_login_id': '偽装', 'remarks': '更新'}, format='json')
+        force_authenticate(request, user=self.user)
+        ProcessRealtimeRecordViewSet.as_view({'patch': 'partial_update'})(request, pk=record_id)
+        record = ProcessRealtimeRecord.objects.get(pk=record_id)
+        self.assertEqual(record.operator_login_id, '000175')
+
+    def test_backlog_effect_is_unchanged_by_login_id_column(self):
+        response = self.post(self.base('PRODUCTION', qty=5))
+        self.assertEqual(response.status_code, 201, response.data)
+        backlog = LineBacklog.objects.get(line=self.line, process=self.process, product=self.product,
+                                          sequence_no=0)
+        self.assertEqual(backlog.actual_qty, 5)
+        self.assertEqual(backlog.scrap_qty, 0)
+
+
 class ProcessRealtimeSessionRecalcTest(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -1060,6 +1209,7 @@ class ProcessRealtimeSessionRecalcTest(TestCase):
             },
             format='json',
         )
+        force_authenticate(request, user=get_user_model().objects.create_user(username='000901'))
 
         response = view(request)
 
