@@ -2417,6 +2417,9 @@ const submitRecord = async () => {
       const targetEndIso = toIsoDateTimeOrNull(selectedPlanTarget.end) || toIsoDateTimeOrNull(activeSlot?.end)
       data.event_data = {
         action: effectiveOperatorAction.value,
+        // 2人1設備の記録は two_person_same_equipment と operator_user_id（auth_user.id。A治具=ログイン者、B治具=B作業者）を送る。
+        // サーバーはこの id から username を引いて operator_login_id に保存する（serializers_process_realtime.py）。
+        // 送り方を変えるときはサーバー側（とテスト・仕様書）も直すこと。
         two_person_same_equipment: isTwoPersonSameEquipmentMode.value ? true : undefined,
         operator_user_id: route.query.operator_user_id ? String(route.query.operator_user_id) : undefined,
         plan_target: {
@@ -2440,6 +2443,9 @@ const submitRecord = async () => {
         else if (submittedOperatorAction === 'TEMP_END') data.event_data.temp_end_reason = reasonText
       }
     } else {
+      // 注: この数量入力フォーム（生産記録・設備状態・仕損）は2人1設備の印と operator_user_id を送らない。
+      // そのため B治具で使っても operator_login_id はログイン者になる（B治具ではこの入力を使わない運用。工程実績作業者列化実装計画.md 単位2）。
+      // B治具で使うようになったら、上の OPERATOR_ACTION と同様に印と operator_user_id を送ること（サーバーは対応済み）。
       if (record.value.product_id) data.product_id = record.value.product_id
       else if ((record.value.product_code || '').trim()) data.product_code = record.value.product_code.trim()
       if (record.value.record_type === 'PRODUCTION' || record.value.record_type === 'SCRAP') {

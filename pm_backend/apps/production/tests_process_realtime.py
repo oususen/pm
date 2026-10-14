@@ -249,6 +249,118 @@ class ProcessRealtimeOperatorLoginIdTest(TestCase):
         self.assertEqual(rows.count(), 2)
         self.assertEqual({r.operator_login_id for r in rows}, {'000175'})
 
+    # ---- 2人1設備（B治具）: 印 + operator_user_id(auth_user.id) から username を引く約束 ----
+    def two_person(self, worker, **kw):
+        data = {'two_person_same_equipment': True, 'operator_user_id': str(worker.id)}
+        data.update(kw)
+        return data
+
+    def make_worker(self, username='000999', **extra):
+        return get_user_model().objects.create_user(username=username, **extra)
+
+    def test_two_person_b_jig_uses_worker_username_and_a_jig_uses_login_user(self):
+        admin = get_user_model().objects.create_user(username='admin', is_staff=True)
+        worker = self.make_worker('000175x', last_name='王')
+        for jig, target, expected in (('A', admin, 'admin'), ('B', worker, '000175x')):
+            with self.subTest(jig=jig):
+                response = self.post(self.base('PRODUCTION', event_data=self.two_person(target)), user=admin)
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data['operator_login_id'], expected)
+                record = ProcessRealtimeRecord.objects.get(pk=response.data['id'])
+                self.assertEqual(record.operator_login_id, expected)
+                # event_data の operator_user_id は消さずに保存
+                self.assertEqual(record.event_data['operator_user_id'], str(target.id))
+
+    def test_two_person_all_parent_record_types_and_int_id(self):
+        worker = self.make_worker()
+        cases = [
+            self.base('PRODUCTION', event_data=self.two_person(worker)),
+            self.base('OPERATOR_ACTION', qty=0, event_data=self.two_person(worker, action='START')),
+            {'process_id': self.process.id, 'record_type': 'EQUIPMENT_STATE', 'equipment_state': 'RUNNING',
+             'qty': 0, 'event_data': self.two_person(worker)},
+            self.base('PRODUCTION', event_data={'two_person_same_equipment': True, 'operator_user_id': worker.id}),
+        ]
+        for payload in cases:
+            with self.subTest(record_type=payload['record_type']):
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data['operator_login_id'], '000999')
+
+    def test_two_person_b_jig_pause_end_and_coproduct_rows_share_worker(self):
+        worker = self.make_worker()
+        for action in ('PAUSE', 'END'):
+            with self.subTest(action=action):
+                ProcessRealtimeRecord.objects.all().delete()
+                ProcessWorkSession.objects.all().delete()
+                start = self.post(self.base('OPERATOR_ACTION', product_id=self.parent.id, qty=0,
+                                            event_data=self.two_person(worker, action='START')))
+                self.assertEqual(start.status_code, 201, start.data)
+                payload = self.base('OPERATOR_ACTION', product_id=self.parent.id, qty=4,
+                                    event_data=self.two_person(worker, action=action))
+                if action == 'END':
+                    payload['production_qty'] = 4
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data['operator_login_id'], '000999')
+                production = ProcessRealtimeRecord.objects.filter(record_type='PRODUCTION')
+                self.assertEqual(production.count(), 2)  # 親 + 連産子
+                self.assertEqual({r.operator_login_id for r in production}, {'000999'})
+
+    def test_two_person_coproduct_child_shares_worker_on_production(self):
+        worker = self.make_worker()
+        response = self.post(self.base('PRODUCTION', product_id=self.parent.id, event_data=self.two_person(worker)))
+        self.assertEqual(response.status_code, 201, response.data)
+        rows = ProcessRealtimeRecord.objects.filter(record_type='PRODUCTION')
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual({r.operator_login_id for r in rows}, {'000999'})
+
+    def test_two_person_invalid_user_id_is_400_and_creates_nothing(self):
+        inactive = self.make_worker('000888', is_active=False)
+        bad_values = {
+            'missing': {'two_person_same_equipment': True},
+            'empty': {'two_person_same_equipment': True, 'operator_user_id': ''},
+            'not_number': {'two_person_same_equipment': True, 'operator_user_id': 'abc'},
+            'not_exist': {'two_person_same_equipment': True, 'operator_user_id': '99999999'},
+            'inactive': {'two_person_same_equipment': True, 'operator_user_id': str(inactive.id)},
+        }
+        backlog_before = LineBacklog.objects.count()
+        for name, event_data in bad_values.items():
+            for payload in (
+                self.base('PRODUCTION', product_id=self.parent.id, event_data=event_data),
+                self.base('OPERATOR_ACTION', qty=0, event_data=dict(event_data, action='START')),
+                {'process_id': self.process.id, 'record_type': 'EQUIPMENT_STATE', 'equipment_state': 'RUNNING',
+                 'qty': 0, 'event_data': event_data},
+            ):
+                with self.subTest(case=name, record_type=payload['record_type']):
+                    response = self.post(payload)
+                    self.assertEqual(response.status_code, 400, getattr(response, 'data', None))
+                    self.assertIn('event_data', response.data)
+        self.assertEqual(ProcessRealtimeRecord.objects.count(), 0)
+        self.assertEqual(ProcessWorkSession.objects.count(), 0)
+        self.assertEqual(LineBacklog.objects.count(), backlog_before)
+
+    def test_without_flag_operator_user_id_is_ignored(self):
+        other = self.make_worker()
+        for flag in (None, False):
+            with self.subTest(flag=flag):
+                event_data = {'operator_user_id': str(other.id)}
+                if flag is not None:
+                    event_data['two_person_same_equipment'] = flag
+                response = self.post(self.base('PRODUCTION', event_data=event_data))
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data['operator_login_id'], '000175')
+
+    def test_scrap_ignores_two_person_flag_and_stays_null(self):
+        other = self.make_worker()
+        with patch('production.serializers_process_realtime.build_scrap_multiplier_details', return_value=[]), \
+             patch('production.serializers_process_realtime.build_scrap_multiplier_map', return_value={}), \
+             patch('production.serializers_process_realtime.update_scrap_to_backlog'):
+            response = self.post(self.base('SCRAP', reporter_login_id=self.user.username,
+                                           event_data=dict(self.two_person(other), reason='RUST',
+                                                           is_production_recorded=False)))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(response.data['operator_login_id'])
+
     def test_scrap_row_is_null(self):
         with patch('production.serializers_process_realtime.build_scrap_multiplier_details', return_value=[]), \
              patch('production.serializers_process_realtime.build_scrap_multiplier_map', return_value={}), \

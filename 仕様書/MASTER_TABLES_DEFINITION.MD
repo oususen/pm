@@ -658,7 +658,7 @@ WHERE rs.time_unit='DAY';
 | event_data | JSON NULL | 付帯情報 |
 | batch_no | VARCHAR(100) NULL | ロット番号 |
 | operator_name | VARCHAR(50) NULL | 作業者名（表示用） |
-| operator_login_id | VARCHAR(150) NULL（索引あり） | 作業者のログインID（`auth_user.username`）。`PRODUCTION`・`OPERATOR_ACTION`・`EQUIPMENT_STATE` はサーバーがログイン者を保存（クライアント値は無視、未認証は400）。END/PAUSE で作る `PRODUCTION` 行と連産子行は親と同じ値。`SCRAP`・`PURCHASE` は NULL（仕損は `t_scrap_record` 側に保存）。既存行は NULL（補完は `工程実績作業者列化実装計画.md` の補完コマンド） |
+| operator_login_id | VARCHAR(150) NULL（索引あり） | 作業者のログインID（`auth_user.username`）。`PRODUCTION`・`OPERATOR_ACTION`・`EQUIPMENT_STATE` はサーバーがログイン者を保存（クライアント値は無視、未認証は400）。END/PAUSE で作る `PRODUCTION` 行と連産子行は親と同じ値。2人1設備（`event_data.two_person_same_equipment` が真）のときは、`event_data.operator_user_id`（`auth_user.id`）のユーザーの username（無い・存在しない・無効は400。通常入力では `operator_user_id` を無視）。`SCRAP`・`PURCHASE` は NULL（仕損は `t_scrap_record` 側に保存）。既存行は NULL（補完は `工程実績作業者列化実装計画.md` の補完コマンド） |
 | remarks | TEXT NULL | 備考 |
 
 `t_process_work_session` にも `operator_login_id`（VARCHAR(150) NULL）を追加した。値の設定は `工程実績作業者列化実装計画.md` の単位3で実装する（単位1では列の追加のみで、現状は NULL）。

@@ -221,6 +221,8 @@ const primaryWorkerName = computed(() => {
   return `${user.last_name || ''} ${user.first_name || ''}`.trim() || user.username
 })
 
+// B作業者の auth_user.id を見つける。サーバーは operator_user_id（auth_user.id）から username を引いて operator_login_id に保存する。
+// ユーザー一覧を軽くしたり1人だけ問い合わせる形に直しても、送る operator_user_id（auth_user.id）は変えないこと。
 const resolveSecondaryWorker = () => {
   const input = String(secondaryWorkerInput.value || '').trim().toLowerCase()
   if (!input) {
@@ -238,6 +240,8 @@ const frameBasePath = '/production/desktop-process-input'
 const primarySupportModeParam = computed(() => (isSupportMode.value ? 'on' : 'off'))
 const secondarySupportModeParam = computed(() => (isSecondarySupportMode.value ? 'on' : 'off'))
 
+// 子画面へ operator_user_id（auth_user.id。A治具=ログイン者、B治具=B作業者）を渡す。サーバーが operator_login_id の保存に使う。
+// 送る id の意味を変えるときは serializers_process_realtime.py も直すこと。
 const primaryFrameSrc = computed(() => {
   if (!primaryProcessId.value) return ''
   const primaryUserId = authState.user?.id ? String(authState.user.id) : ''

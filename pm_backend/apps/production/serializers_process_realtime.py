@@ -675,6 +675,39 @@ def resolve_workday_date_for_process(process, dt):
 # 作業者ログインID（ログイン者のusername）を保存し、未認証を400にする record_type
 LOGIN_ID_RECORD_TYPES = ('PRODUCTION', 'OPERATOR_ACTION', 'EQUIPMENT_STATE')
 
+
+def resolve_record_login_id(record_type, event_data, login_user):
+    """親行(PRODUCTION/OPERATOR_ACTION/EQUIPMENT_STATE)の operator_login_id を決める。
+
+    サーバーの約束（2人1設備）:
+    - 2人1設備の記録は、印 event_data.two_person_same_equipment（真）と
+      作業者の auth_user.id（event_data.operator_user_id）を送る。
+      サーバーはその id で auth_user を引き、その username を保存する。
+      画面が id をどう見つけるか（ユーザー一覧から探す／1人だけ問い合わせる等）には依存しない。
+    - 印が真でない通常入力では operator_user_id は無視し、常にログイン者の username。
+    - 印が真で id が無い・整数でない・存在しない・無効ユーザーのときは400。ログイン者への代替はしない。
+    - この約束を変える場合は、サーバーと画面（TwoPersonOneEquipmentInput.vue /
+      DesktopProcessInput.vue）の両方、テスト、仕様書を直すこと。
+    """
+    if record_type not in LOGIN_ID_RECORD_TYPES:
+        return None
+    event_data = event_data if isinstance(event_data, dict) else {}
+    flag = event_data.get('two_person_same_equipment')
+    is_two_person = flag is True or (isinstance(flag, str) and flag.strip().lower() in ('1', 'true'))
+    if not is_two_person:
+        return login_user.username
+    raw_id = event_data.get('operator_user_id')
+    try:
+        if isinstance(raw_id, bool):
+            raise ValueError
+        user_id = int(str(raw_id).strip()) if isinstance(raw_id, str) else int(raw_id)
+    except (TypeError, ValueError):
+        raise serializers.ValidationError({'event_data': '2人1設備の記録には作業者のユーザーID（operator_user_id）が必要です。'})
+    worker = get_user_model().objects.filter(pk=user_id, is_active=True).first()
+    if worker is None or not worker.username:
+        raise serializers.ValidationError({'event_data': '2人1設備の作業者（operator_user_id）が存在しないか無効です。'})
+    return worker.username
+
 SESSION_ACTIONS = {'START', 'PAUSE', 'RESUME', 'END', 'TEMP_END', 'CANCEL'}
 SESSION_ACTIVE_STATUSES = ['OPEN']
 SESSION_TYPE_WORK = 'WORK'
@@ -1354,6 +1387,10 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
             login_user = getattr(self.context.get('request'), 'user', None)
             if not login_user or not login_user.is_authenticated or not login_user.username:
                 raise serializers.ValidationError({'operator_login_id': '工程実績の登録にはログインが必要です。'})
+            # 作成前に検証する（400のとき他の行を作らない）
+            attrs['_record_login_id'] = resolve_record_login_id(
+                attrs.get('record_type'), attrs.get('event_data'), login_user,
+            )
         if attrs.get('record_type') == 'SCRAP':
             user = getattr(self.context.get('request'), 'user', None)
             if not user or not user.is_authenticated or not user.username:
@@ -1418,10 +1455,8 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
         operator_login_id = None
         if validated_data.get('record_type') == 'SCRAP':
             operator_login_id = self.context['request'].user.username
-        # 親行(PRODUCTION/OPERATOR_ACTION/EQUIPMENT_STATE)の作業者ログインID。常にログイン者（クライアント値は使わない）
-        record_login_id = None
-        if validated_data.get('record_type') in LOGIN_ID_RECORD_TYPES:
-            record_login_id = self.context['request'].user.username
+        # 親行(PRODUCTION/OPERATOR_ACTION/EQUIPMENT_STATE)の作業者ログインID（validateで決定済み。2人1設備はresolve_record_login_id参照）
+        record_login_id = validated_data.pop('_record_login_id', None)
         process_id = validated_data.pop('process_id')
         try:
             process = Process.objects.get(id=process_id)
