@@ -142,7 +142,8 @@
 
         <div class="section-title" style="margin-top:12px">作業者</div>
         <div class="operator-area">
-          <input type="text" v-model="record.operator_name" class="operator-input" placeholder="作業者名を入力" />
+          <!-- 表示専用（ログイン者。2人1設備の子画面では親画面から渡された作業者） -->
+          <input type="text" v-model="record.operator_name" class="operator-input" readonly tabindex="-1" placeholder="作業者未設定" />
         </div>
 
         <template v-if="isScrapRecord">
@@ -3573,6 +3574,7 @@ onMounted(async () => {
   width: 100%; height: 32px; padding: 0 8px; border: 1px solid #ccc;
   border-radius: 4px; font-size: 13px; box-sizing: border-box;
 }
+.operator-input[readonly] { background: #f1f3f5; color: #333; cursor: default; }
 .scrap-filter-controls { display: flex; flex-direction: column; gap: 6px; }
 .scrap-filter-select, .scrap-filter-input {
   width: 100%; height: 30px; padding: 0 6px; border: 1px solid #ccc;
