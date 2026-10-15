@@ -1416,4 +1416,69 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 - `v_ai_routing_step` は33列、`v_ai_routing_step_material` は20列を維持。列名／順序を変更せず、親品未指定はNULL。PK LEFT JOINで行数を維持し、旧remarkフォールバックなし。
 - `setup_ai_views.OTHER_VIEW_COLUMNS` の工程列SELECTを `remark` → `parent_product_id` へ置換。専用SQL `scripts/routing_parent_ai_views_definer.sql.txt` はownerへの新列SELECT、2ビューのDEFINER再作成、未使用旧remark列SELECTの取り消しをまとめる。他ビューから旧列への参照がないことと本番アカウントは直前確認する。
 - 通常移行でownerはmigrate実行者に戻るため、既存全ビュー用setupの実行だけでは2結合ビューのDEFINERが戻らない。全件親品移行 → ai/0051 → 専用SQLで2ビューの定義者を戻す。詳細は `ルーティング親品ID化実装計画.md`。
+
+## 32. 設備マスタのビュー `v_ai_equipment` の作成前確認・実装記録（2026-10-15。BOSS承認済み。実装済み・evaluator未検証）
+
+### 32.1 作成前確認
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、設備をコード・名前・所属ライン・所属工程で、分析・説明できるようにする |
+| 元テーブル | `m_equipment`（設備マスタ）の1つだけ。結合なし（全17行。開発DBで確認） |
+| 対象行 | 全行（WHEREなし）。`is_active=1`が有効 |
+| 数値定義 | なし（マスタ）。件数は行数 |
+| 公開フィールド（6列） | `id`、`equipment_code`、`equipment_name`、`is_active`、`line_id`、`process_id` |
+| 非公開フィールド | `display_order`、`notes`、`created_at`、`updated_at` |
+| 個人情報 | なし（設備コード・設備名・ID） |
+
+#### 32.1.1 列型の対応（`SHOW COLUMNS FROM m_equipment`。開発DBで実測。ビュー作成後に再確認する）
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id` | bigint | `BIGINT` |
+| `equipment_code` | varchar(30) | `VARCHAR` |
+| `equipment_name` | varchar(100) | `VARCHAR` |
+| `is_active` | tinyint(1) | `BIGINT`（他の真偽値列と同じ表記規則。0/1） |
+| `line_id` | bigint（NULL可） | `BIGINT` |
+| `process_id` | bigint（NULL可） | `BIGINT` |
+
+#### 32.1.2 NULL process_id の実データ確認
+- 開発DBで `process_id IS NULL` は3行（全17行中）。該当は `YB-006`・`YB-009`・`YB-010`（いずれも `line_id=9`、`is_active=1`）。
+- `m_line.id=9`（ブレーキライン）には `m_process` が2件（`process_code=4010`・`4040`）あり、この3設備は両工程で共用されるため `process_id` が単一に決まらずNULLと判断した（1工程に絞れない設備があることの説明として、`ANALYSIS_VIEWS['v_ai_equipment']['description']` に記載）。
+- 説明文には、工程名・ラインの具体名（得意先名を含む語）は書かない。既存の固定試験（`test_analysis_column_guide.test_no_real_data_note_and_no_unconfirmed_meaning`）が、全ビューのdescriptionを連結して特定の得意先名の語（「クボタ」。`v_ai_line`のOTHER区分の1箇所だけ例外）を禁止しているため、process_codeの数字（`4010`・`4040`）だけで説明し、工程名の文字列は書かない。
+
+### 32.2 実装内容
+
+- `pm_backend/apps/ai/migrations/0054_ai_equipment_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_equipment AS SELECT <6列> FROM m_equipment`（標準SQLのみ・別名なし・WHEREなし・結合なし）。ロールバックは `DROP VIEW IF EXISTS v_ai_equipment`。依存は `ai 0053_add_anthropic_provider` と `masters 0035_equipment_process`（`m_equipment` の6列は、`masters 0034_equipment`〜`0035_equipment_process` で揃っており、現時点の最新 `masters 0087` まで `m_equipment` への変更はない）。`makemigrations --dry-run --check` は「No changes detected」（ai・masters限定）。
+- `sql_queries.py`：`BASE_SQL_SCHEMA` に `v_ai_equipment`（6列）を `v_ai_line` の直後に追加。
+- `analysis_data_service.py`：`ANALYSIS_VIEWS` に `v_ai_equipment`（label=設備マスタ、`date_field=None`、`quantity_field=None`）を `v_ai_line` の直後に追加。
+- `analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES` に `v_ai_equipment`（6列。§32.1.1）を `v_ai_line` の直後に追加。
+- `setup_ai_views.py`：`SIMPLE_MASTER_VIEWS` に `v_ai_equipment`→`m_equipment` を1行追加（これ以外の変更なし）。単純なマスタビューは6つになった。
+- 試験：`apps/ai/test_analysis_equipment_view.py` 新規（11件）。`test_setup_ai_views.py` は `LATEST_MIGRATION` に `v_ai_equipment`→`0054_ai_equipment_view.py` を追加、`--views` 絞り込みの試験の「対象外の語」に `m_equipment`・`v_ai_equipment` を追加（検査を強める方向。検査を弱めた箇所はない）。
+- 既存7ビュー（出荷・入荷・品番・工程・ライン・仕入先・得意先）の定義（説明・列）のJSONのSHA-256（新規試験の固定値）：`db31acbfe065946a26dc439a40b4076ca41530869749bedf1f92e06600a410ed`（v_ai_equipment の追加前後で同一になることを確認）。
+
+#### 32.2.1 承認済み計画からの逸脱（evaluatorへの確認依頼）
+1. **`TABLE_NOTES`（`sql_queries.py`）への追加は見送った**：承認された実装計画の本文（項目2）には `BASE_SQL_SCHEMA` への追加だけが明記され、`TABLE_NOTES` への追加は含まれていなかった。一方、既存の全ての `v_ai_*` ビューは `BASE_SQL_SCHEMA` と `TABLE_NOTES` の両方にエントリを持つ（LLMへの自由SQL生成の説明に使われる）。計画にない変更を無断で行わないため、本実装では `TABLE_NOTES['v_ai_equipment']` を追加せず、新規試験 `test_analysis_equipment_view.py` も `TABLE_NOTES` を検証しない形にした。自由SQL生成機能では、このビューの説明が渡らない状態になる。追加要否はBOSSの確認が必要。→ **2026-10-15、BOSS承認により解消（§32.5参照）**。
+2. **説明文の文言を承認済み計画の文言から変更した**：承認済み計画は「4010ブレーキティエラ・4040ブレーキクボタ」という工程名（得意先名を含む）を説明文に書く案だったが、§32.1.2のとおり既存の固定試験（得意先名「クボタ」の使用禁止。`v_ai_line`のOTHER区分の1箇所だけ例外）に抵触するため、`process_code=4010・4040`という工程コードの数字だけに書き換えた。業務上の意味（process_idがNULLになる理由）は変えていない。
+
+### 32.3 検証結果（開発。読み取りのみ。テスト用DBは未整備のため、SimpleTestCase系のみ実行）
+- `ai.test_analysis_equipment_view`（11件）単独でOK。
+- `ai.test_analysis_equipment_view`・`test_setup_ai_views`・`test_analysis_routing_step_view`・`test_analysis_routing_step_material_view`・`test_analysis_bom_item_view`・`test_analysis_leader_unit_view`・`test_analysis_supervisor_team_view`・`test_analysis_unit_line_view`・`test_analysis_user_view`・`test_analysis_department_view`・`test_analysis_column_guide`・`test_analysis_calendar_day_view`・`test_analysis_customer_view`・`test_analysis_supplier_view`・`test_analysis_line_view`・`test_analysis_process_view`・`test_analysis_product_view`・`test_analysis_dateless_view`・`test_analysis_execution` の1コマンド実行で297件中295件OK（skipped=2）。残り2件の失敗（`test_analysis_bom_item_view.test_migration_dependency_exists_and_covers_source_columns`・`test_analysis_user_view.test_migration_dependency_exists`）は、masters・accountsアプリの最新マイグレーションのファイル名が、試験の固定値（`0086`・`0072`）より進んでいる（実際は`0087`・`0073`）ことによるもので、本実装（設備ビュー）とは無関係の既存の食い違い（本件着手前から存在）。
+- `python manage.py makemigrations ai masters --dry-run --check`：「No changes detected in apps 'masters', 'ai'」。
+- `CREATE VIEW` の実行（`migrate`・`setup_ai_views --apply`）は、禁止事項のため実行していない。開発DBへのビュー反映・`pm_ai_reader`での読み取り確認・`SHOW COLUMNS FROM v_ai_equipment`での列型の再確認は、未実施（evaluatorまたはBOSSの確認が必要）。
+
+### 32.4 反映状況
+- コードのみ・マイグレーションファイルの新規作成のみ（`migrate`は未実行）。開発DB・本番DBともに `v_ai_equipment` ビューは未作成。
+- 評価：evaluator未検証（条件付き合格。指摘事項「`TABLE_NOTES`欠落」はBOSS承認を得て§32.5で解消）。
+- コミット：未（BOSSの指示後に実施）。
 - generator実行試験: SQLiteメモリ上で新旧公開列名/順序、行数、コード改名の伝播を確認。新親品／AI既存定義／受注中間工程試験48件OK。MySQLの実DDL／本番権限、実DB移行は未確認・未実行。独立evaluator判定待ち。
+
+### 32.5 追加修正: `TABLE_NOTES` への追加（2026-10-15。BOSS承認済み。§32.2.1-1の解消）
+
+前回のevaluatorが「`TABLE_NOTES`欠落」を条件付き合格の指摘事項として挙げ、BOSSが追加を承認したため、以下だけを実装した（他ファイルの変更なし）。
+
+- `pm_backend/apps/ai/services/sql_queries.py`：`TABLE_NOTES` 辞書に `v_ai_equipment` を `v_ai_line` の直後に追加（6行）。文言は §32.1.2 の得意先名禁止規則を踏まえ、`process_code 4010・4040` という番号表記のみを使用（工程名・得意先名の固有文字列は書かない）。`ANALYSIS_VIEWS['v_ai_equipment']['description']`・`BASE_SQL_SCHEMA`・`ANALYSIS_COLUMN_TYPES`・`SIMPLE_MASTER_VIEWS`・マイグレーション本体は変更していない。
+- `pm_backend/apps/ai/test_analysis_equipment_view.py`：冒頭の注記を更新（TABLE_NOTES追加済みである旨）。他の単純マスタビュー試験（`test_analysis_line_view.py`等）と同様、`TABLE_NOTES[EQUIPMENT]` が存在し空でないこと・必要な文言を含むこと・得意先名「クボタ」を含まないことを検証する試験 `test_table_notes_entry_exists_and_is_not_empty` を1件追加。加えて、`schema_text('ai_home')` の出力に `v_ai_equipment` の節と `TABLE_NOTES` の本文が実際に含まれることを検証する試験 `test_table_notes_entry_is_included_in_ai_home_schema_text` を1件追加（`ai_home`画面の自由SQL生成プロンプトに渡ることの確認）。
+- 検証結果：`python manage.py test ai.test_analysis_column_guide ai.test_analysis_equipment_view ai.test_setup_ai_views`（開発DB、SimpleTestCaseのみ）→ 54件OK（既存の得意先名禁止チェックを含む固定試験が全て通過）。
+- `schema_text()`／`AI_HOME_EXCLUDED_TABLES`の確認：`AI_HOME_EXCLUDED_TABLES`に`v_ai_equipment`は含まれず、`SCREEN_SQL_TABLES['ai_home']`は`BASE_SQL_SCHEMA`の全キー（`v_ai_equipment`を含む）から除外集合を引いた集合のため、`v_ai_equipment`は対象に入る。`schema_text('ai_home')`は`allowed_tables_for_screen`で取得した対象テーブルごとに`TABLE_NOTES.get(table)`があれば本文を付加するため、`v_ai_equipment`のTABLE_NOTESは実際に`ai_home`画面の自由SQL生成プロンプトに含まれる（新規試験で機械的に確認済み）。
+- 反映状況：コードのみ・DB変更なし（`migrate`・`setup_ai_views --apply`は未実行、禁止事項のため実施していない）。コミット・push・本番反映は未（BOSSの指示後）。
+- 省略した点：`ANALYSIS_VIEWS`・`BASE_SQL_SCHEMA`・`ANALYSIS_COLUMN_TYPES`・`SIMPLE_MASTER_VIEWS`・マイグレーション本体・コミット・migrateは、今回の指示どおり変更していない。

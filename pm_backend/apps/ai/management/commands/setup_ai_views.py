@@ -24,6 +24,7 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_line': 'm_line',
     'v_ai_supplier': 'm_supplier',
     'v_ai_customer': 'm_customer',
+    'v_ai_equipment': 'm_equipment',
 }
 
 # 結合を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046・0048〜0050)にあるビュー。再作成しない。--check で定義者などを表示するだけ。

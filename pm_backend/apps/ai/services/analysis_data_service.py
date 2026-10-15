@@ -75,6 +75,18 @@ ANALYSIS_VIEWS = {
             'is_active=有効(1)か無効(0)か。工程はm_processのline_id(v_ai_processのline_id)でラインに結べる。'
         ),
     },
+    # 設備マスタ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §32)。
+    'v_ai_equipment': {
+        'label': '設備マスタ', 'date_field': None, 'quantity_field': None,
+        'description': (
+            '1行は1設備(設備マスタ)。日付の列がなく、期間では絞らず全行が対象。無効な設備も含むため、有効な設備だけを見るときはis_active=1で絞る。'
+            '列の意味: id=設備のID、equipment_code=設備コード(一意)、equipment_name=設備名、'
+            'line_id=設備の所属ラインのID(ラインマスタビューv_ai_lineのidと結べる)、'
+            'process_id=設備の所属工程のID(工程マスタビューv_ai_processのidと結べる)。'
+            'ブレーキライン(line_id=9)のブレーキプレス3台(YB-006/009/010)は、同一ラインの複数工程(process_code=4010・4040)で共用されるため、process_idが単一に決まらずNULL。'
+            'is_active=有効(1)か無効(0)か。'
+        ),
+    },
     # 仕入先マスタ。日付・数量の列を持たないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §17)。
     'v_ai_supplier': {
         'label': '仕入先マスタ', 'date_field': None, 'quantity_field': None,

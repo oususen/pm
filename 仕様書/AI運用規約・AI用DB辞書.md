@@ -267,7 +267,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 空（NULL）がある列: `unit_price` 2,386行、`line_id` 1,833行、`process_id` 2,003行、`category` 16行。`category` の6種（ASSEMBLY・OUTSOURCED・SINGLE・PURCHASED・UNKNOWN・MATERIAL）と `management_unit`（DAY・MINUTE・空）の業務上の意味は未確認。
 - `ANALYSIS_VIEWS`（AI分析画面。`date_field=None`＝期間で絞らず全行）・`ANALYSIS_COLUMN_TYPES`（30列。当初32列、2026-10-10に修正）に登録済み（2026-10-10、サイクルC。計画書 §12 参照。`SCREEN_SQL_TABLES`・`TERM_COLUMNS` は未変更）。
 - 権限の付与は手動SQL（計画書 §9.3）。
-- 定義者の付け替え・列権限の付与は、管理コマンド `python manage.py setup_ai_views`（既定は表示のみ。`--apply` で実行、管理者で実行。`--check` で確認）でも行える。対象は単純なマスタビュー5つ（`v_ai_product`・`v_ai_process`・`v_ai_line`・`v_ai_supplier`・`v_ai_customer`）。手順SQLは、コマンドが実行するSQLの記録として残す（計画書 §20）。ビューの作り直しは定義者・SECURITY_TYPE・列順の違いだけで判断し、ビュー本体（WHERE・別名・列式）の違いは検出しない。`--check` は元テーブルへの表全体のSELECTも要対応にする（DB全体・グローバルの権限は検出しない）。`--reader-host` を指定したときだけ、`pm_ai_reader` へビューのSELECTを付与する。`v_ai_supplier` は仕入先ビューのコミットと同時に反映する。
+- 定義者の付け替え・列権限の付与は、管理コマンド `python manage.py setup_ai_views`（既定は表示のみ。`--apply` で実行、管理者で実行。`--check` で確認）でも行える。対象は単純なマスタビュー6つ（`v_ai_product`・`v_ai_process`・`v_ai_line`・`v_ai_equipment`・`v_ai_supplier`・`v_ai_customer`）。手順SQLは、コマンドが実行するSQLの記録として残す（計画書 §20）。ビューの作り直しは定義者・SECURITY_TYPE・列順の違いだけで判断し、ビュー本体（WHERE・別名・列式）の違いは検出しない。`--check` は元テーブルへの表全体のSELECTも要対応にする（DB全体・グローバルの権限は検出しない）。`--reader-host` を指定したときだけ、`pm_ai_reader` へビューのSELECTを付与する。`v_ai_supplier` は仕入先ビューのコミットと同時に反映する。
 
 ### 6.5-5 工程マスタ（`v_ai_process`。2026-10-10 実装。開発DBへの適用・定義者の付け替えは実施済み。本番は未反映）
 
@@ -398,6 +398,18 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - admin アカウントの除外はしない（`v_ai_user` は admin を除くため、`v_ai_user` と結べない行がありうる）。
 - 確認できた事実（説明文）: 1行＝担当の割り当て1つ（モデルのラベル「班長担当班」`supervisor_teams`・`limit_choices_to` level=team、「リーダー担当グループ」`leader_units`・level=unit）。1ユーザーが複数の行を持ちうる（多対多）。`v_ai_supervisor_team.team_id` は `v_ai_user.team_id`（所属）とは別。コード上、班長の管理部署は所属の班とこの担当班を合わせて配下を含めて集められ、リーダーの管理部署は担当グループ（`unit_id`＝所属ではない）から集められる（`accounts/permission_scope.py` の `collect_managed_department_ids`）。**未確認**: 業務上の運用（追加担当の意味、承認ルートとの関係）。
 - `ANALYSIS_COLUMN_TYPES`（各8列。bigint・int→BIGINT、varchar→VARCHAR）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブルの許可は置き換えず、ビューの追加のみ。`setup_ai_views` は `EXISTING_JOIN_VIEWS` に2ビューを追加（`--check` で定義者を表示するだけ）、`OTHER_VIEW_COLUMNS` に中間テーブル各3列を追加した（コマンドの動作は未変更）。手順SQLは計画書 §29.5。
+
+### 6.5-16 設備マスタ（`v_ai_equipment`。2026-10-15 実装。コードのみ・開発DBにビュー未作成・本番未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_equipment`（`ai/0054`で作成） | `id`, `equipment_code`, `equipment_name`, `is_active`, `line_id`, `process_id`（6列） | `m_equipment` 全行（絞り込みなし・結合なし。17行）。非公開（ビューに含めない）: `display_order`, `notes`, `created_at`, `updated_at` | 読み取り専用SQLで、設備のコード・名前・所属ライン・所属工程の確認。`line_id` は `v_ai_line.id`、`process_id` は `v_ai_process.id` と結べる |
+
+- 個人情報の列は含まない。`line_id`・`process_id` はNULLの行がある（空の設備がある）。
+- ブレーキライン（`line_id=9`）のブレーキプレス3台（`YB-006`・`YB-009`・`YB-010`）は、同一ラインの複数工程（`process_code=4010`・`4040`）で共用されるため `process_id` が単一に決まらずNULL（開発DBの実データで確認。計画書 §32.1.2）。`is_active` は有効(1)・無効(0)。
+- 列の意味は計画書 §32.1 の範囲だけ。`ANALYSIS_VIEWS`（`date_field=None`＝全行）・`ANALYSIS_COLUMN_TYPES`（6列）・`BASE_SQL_SCHEMA` に登録済み。元テーブル `m_equipment` は、どの画面にも元から直接の許可を持たない（置き換えの対象がない）。
+- **`TABLE_NOTES`（`sql_queries.py`。自由SQL生成向けの説明）への追加は、承認済み実装計画の範囲外として見送った**（計画書 §32.2.1）。追加要否はBOSSの確認が必要。
+- 権限の付与・定義者の付け替えは `setup_ai_views`（`SIMPLE_MASTER_VIEWS` に `v_ai_equipment`→`m_equipment` を追加済み）。未実施（BOSSが実行）。
 
 ### 6.6 受注（ルーティング未設定の注文品）
 
