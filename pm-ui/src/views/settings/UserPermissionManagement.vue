@@ -430,6 +430,7 @@ const permissionResources = [
   { value: 'purchase.actual_input', label: '仕入: 仕入れ実績入力' },
   { value: 'purchase.actual_edit', label: '仕入: 納入実績編集' },
   { value: 'purchase.actual_inquiry', label: '仕入: 納入実績照会' },
+  { value: 'purchase.actual_inquiry_mapping', label: '仕入: 納入実績照会マッピング設定' },
   { value: 'purchase.supplier_calendar', label: '仕入: 仕入れ先カレンダ' },
   { value: 'purchase.supplier_order_pattern', label: '仕入: 納入パターン設定' },
   { value: 'purchase.delivery_schedule', label: '仕入: 納入予定' },

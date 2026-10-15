@@ -228,6 +228,7 @@ class UserPermission(models.Model):
         ('purchase.actual_input', '仕入: 仕入れ実績入力'),
         ('purchase.actual_edit', '仕入: 納入実績編集'),
         ('purchase.actual_inquiry', '仕入: 納入実績照会'),
+        ('purchase.actual_inquiry_mapping', '仕入: 納入実績照会マッピング設定'),
         ('purchase.supplier_calendar', '仕入: 仕入れ先カレンダ'),
         ('purchase.supplier_order_pattern', '仕入: 納入パターン設定'),
         ('purchase.delivery_schedule', '仕入: 納入予定'),

@@ -4,7 +4,7 @@
 
     <div class="tab-bar">
       <button class="tab-item" :class="{ active: activeTab === 'inquiry' }" @click="activeTab = 'inquiry'">照会</button>
-      <button class="tab-item" :class="{ active: activeTab === 'mapping' }" @click="activeTab = 'mapping'">マッピング設定</button>
+      <button v-if="canViewMapping" class="tab-item" :class="{ active: activeTab === 'mapping' }" @click="activeTab = 'mapping'">マッピング設定</button>
     </div>
 
     <!-- ====== 照会タブ ====== -->
@@ -61,7 +61,7 @@
     </div>
 
     <!-- ====== マッピング設定タブ ====== -->
-    <div v-show="activeTab === 'mapping'" class="settings-panel">
+    <div v-show="canViewMapping && activeTab === 'mapping'" class="settings-panel">
       <h3 class="settings-title">マッピング設定</h3>
       <div class="settings-note">
         <strong>注意ポイント</strong>
@@ -88,9 +88,9 @@
       <div v-else-if="mappingError" class="settings-error">{{ mappingError }}</div>
 
       <div class="settings-actions">
-        <button class="btn" :disabled="!mappingSupplier || mappingLoading" @click="saveMappings">保存</button>
+        <button v-if="canEditMapping" class="btn" :disabled="!mappingSupplier || mappingLoading" @click="saveMappings">保存</button>
         <button class="btn btn-secondary" :disabled="!mappingSupplier || mappingLoading" @click="downloadMappingTemplate">テンプレ出力</button>
-        <label class="btn btn-secondary" :class="{ disabled: !mappingSupplier || mappingLoading }">
+        <label v-if="canEditMapping" class="btn btn-secondary" :class="{ disabled: !mappingSupplier || mappingLoading }">
           Excelから導入
           <input ref="importFileRef" type="file" accept=".xlsx,.xls" style="display:none" @change="onImportExcel" />
         </label>
@@ -115,23 +115,23 @@
               <td>{{ item.appProductCode }}</td>
               <td>{{ item.productName }}</td>
               <td>
-                <select v-model="item.itemType" class="map-select">
+                <select v-model="item.itemType" class="map-select" :disabled="!canEditMapping">
                   <option value="">-- 未設定 --</option>
                   <option value="G">G（外作）</option>
                   <option value="K">K（購入）</option>
                 </select>
               </td>
               <td>
-                <input v-model="item.coreProductCode" type="text" class="map-input" placeholder="基幹品番" />
+                <input v-model="item.coreProductCode" type="text" class="map-input" placeholder="基幹品番" :disabled="!canEditMapping" />
               </td>
               <td>
-                <input v-model="item.supplierCode" type="text" class="map-input" placeholder="例: 000095" />
+                <input v-model="item.supplierCode" type="text" class="map-input" placeholder="例: 000095" :disabled="!canEditMapping" />
               </td>
               <td>
-                <input v-model.number="item.tabsAfterHinban" type="number" class="map-input map-input-narrow" min="1" max="10" />
+                <input v-model.number="item.tabsAfterHinban" type="number" class="map-input map-input-narrow" min="1" max="10" :disabled="!canEditMapping" />
               </td>
               <td>
-                <button class="btn btn-secondary btn-sm" @click="copyCode(item)">コピー</button>
+                <button v-if="canEditMapping" class="btn btn-secondary btn-sm" @click="copyCode(item)">コピー</button>
               </td>
             </tr>
             <tr v-if="!mappingRows.length">
@@ -147,9 +147,11 @@
 
 <script setup>
 import { formatISODate } from '@/utils/dateUtil'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import api from '@/api/client'
+import { authState } from '@/auth'
+import { hasPermission } from '@/router'
 import { exportPurchaseKikanExcel } from '@/utils/purchaseActualKikanExport'
 
 const activeTab = ref('inquiry')
@@ -168,6 +170,12 @@ const mappingLoading = ref(false)
 const mappingError = ref('')
 const mappingRows = ref([])
 const mappingSaveMsg = ref('')
+const canViewMapping = computed(() => hasPermission(authState.user, 'purchase.actual_inquiry_mapping', 'view'))
+const canEditMapping = computed(() => hasPermission(authState.user, 'purchase.actual_inquiry_mapping', 'edit'))
+
+watch(canViewMapping, (allowed) => {
+  if (!allowed && activeTab.value === 'mapping') activeTab.value = 'inquiry'
+})
 
 const formatDate = (value) => String(value || '').replace(/-/g, '/')
 const formatNum = (value) => Number(value || 0).toLocaleString()
@@ -251,6 +259,7 @@ const onExportKikan = async () => {
 
 // ====== マッピング設定 ======
 const onMappingSupplierChange = async () => {
+  if (!canViewMapping.value) return
   if (!mappingSupplier.value) {
     mappingRows.value = []
     return
@@ -292,6 +301,7 @@ const onMappingSupplierChange = async () => {
 }
 
 const copyCode = (item) => {
+  if (!canEditMapping.value) return
   item.coreProductCode = item.appProductCode
 }
 
@@ -299,6 +309,7 @@ const copyCode = (item) => {
 const MAPPING_HEADERS = ['アプリ品番', '品名', '品目区分(G/K)', '基幹品番', '仕入先コード', '品番後Tabキー回数']
 
 const downloadMappingTemplate = () => {
+  if (!canViewMapping.value) return
   const rows = mappingRows.value.map((item) => [
     item.appProductCode,
     item.productName,
@@ -328,10 +339,18 @@ const downloadMappingTemplate = () => {
 const importFileRef = ref(null)
 
 const onImportExcel = (event) => {
+  if (!canEditMapping.value) {
+    if (importFileRef.value) importFileRef.value.value = ''
+    return
+  }
   const file = event.target.files?.[0]
   if (!file) return
   const reader = new FileReader()
   reader.onload = (e) => {
+    if (!canEditMapping.value) {
+      if (importFileRef.value) importFileRef.value.value = ''
+      return
+    }
     try {
       const wb = XLSX.read(e.target.result, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
@@ -391,6 +410,7 @@ const onImportExcel = (event) => {
 }
 
 const saveMappings = async () => {
+  if (!canEditMapping.value) return
   if (!mappingSupplier.value) return
   mappingSaveMsg.value = ''
   try {
