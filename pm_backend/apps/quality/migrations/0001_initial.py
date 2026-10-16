@@ -12,6 +12,9 @@ class Migration(migrations.Migration):
     dependencies = [
         ('masters', '0028_contact'),
         ('production', '0004_add_production_plan_lock_setting_and_change_log'),
+        # t_scrap_record / t_scrap_record_detail の実テーブルは orders アプリのマイグレーションで作成される。
+        # 依存を明示しないと新規DB構築時にこのあとの RunSQL（0002〜0004）がテーブル不在で失敗する。
+        ('orders', '0024_scraprecorddetail'),
     ]
 
     operations = [
