@@ -211,6 +211,7 @@ class UserPermission(models.Model):
         ('production.plan_input', '生産: 生産計画入力'),
         ('production.inventory', '生産: 在庫/残量一覧'),
         ('production.progress', '生産: 進度のみ'),
+        ('production.progress_monitor', '生産: 進度監視'),
         ('production.scrap_history', '生産: 仕損履歴'),
         ('production.line_calendars', '生産: ライン勤務カレンダ'),
         ('production.morning_meeting', '生産: 朝礼'),

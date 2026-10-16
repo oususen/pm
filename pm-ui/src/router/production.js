@@ -74,7 +74,7 @@ const production = [
     path: "/production/progress-monitor",
     name: "ProductionProgressMonitor",
     component: () => import("@/views/production/ProductionProgressMonitor.vue"),
-    meta: { pageTitle: "進度監視", manualPath: "生産/進度監視.md", resource: "production.progress" },
+    meta: { pageTitle: "進度監視", manualPath: "生産/進度監視.md", resource: "production.progress_monitor" },
   },
   {
     path: "/production/plan-input",

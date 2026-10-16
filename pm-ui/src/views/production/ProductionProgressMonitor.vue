@@ -152,7 +152,7 @@ function localDateString(value) {
 }
 function initialMonthStart() { const value = new Date(); value.setDate(1); return localDateString(value) }
 
-const canEdit = computed(() => hasPermission(authState.user, 'production.progress', 'edit'))
+const canEdit = computed(() => hasPermission(authState.user, 'production.progress_monitor', 'edit'))
 const selectedLines = computed(() => linesByUnit.value[String(selectedUnitId.value)] || [])
 
 function formatDay(value) { const [, month, day] = String(value).split('-'); return `${Number(month)}/${Number(day)}` }

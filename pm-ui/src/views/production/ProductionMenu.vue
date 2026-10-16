@@ -273,7 +273,7 @@ const tiles = computed(() => {
       description: "グループ別に登録製品の進度を確認",
       category: "inventory",
       required: "view",
-      resource: "production.progress",
+      resource: "production.progress_monitor",
     },
     {
       to: "/production/line-calendars",
