@@ -1,8 +1,9 @@
 from datetime import date
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework import status
-from rest_framework.test import APIRequestFactory
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from masters.models import Calendar, Equipment, Line, Process, Product
 from production.models_brake_line_record import BrakeLineRecord
@@ -22,6 +23,9 @@ from production.views_spot_line import SpotLineRecordView
 class BrakeLineSequenceNoRuleTest(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
+        self.user = get_user_model().objects.create_user(
+            username='000175', last_name='記入', first_name='太郎'
+        )
         self.plan_date = date(2026, 3, 26)
         self.laser_date = date(2026, 3, 25)
 
@@ -66,6 +70,12 @@ class BrakeLineSequenceNoRuleTest(TestCase):
             tab_key=ProductionRecordInquirySetting.TAB_BRAKE,
             target_line_codes=[self.brake_line.line_code],
         )
+
+    def _post(self, path, data, **kwargs):
+        """記録者（ログイン済みユーザー）として POST する。"""
+        request = self.factory.post(path, data, **kwargs)
+        force_authenticate(request, user=self.user)
+        return request
 
     def test_plan_view_reads_actual_qty_from_seq0(self):
         LineBacklog.objects.create(
@@ -117,7 +127,7 @@ class BrakeLineSequenceNoRuleTest(TestCase):
         )
 
         view = BrakeLineRecordView.as_view()
-        request = self.factory.post(
+        request = self._post(
             '/api/production/brake-line-record/',
             {
                 'line_id': self.brake_line.id,
@@ -205,6 +215,9 @@ class BrakeLineSequenceNoRuleTest(TestCase):
 class BrakeSpotDualWriteTest(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
+        self.user = get_user_model().objects.create_user(
+            username='000175', last_name='記入', first_name='太郎'
+        )
         self.plan_date = date(2026, 3, 26)
 
         self.calendar = Calendar.objects.create(
@@ -263,9 +276,15 @@ class BrakeSpotDualWriteTest(TestCase):
             target_line_codes=[self.spot_line.line_code],
         )
 
+    def _post(self, path, data, **kwargs):
+        """記録者（ログイン済みユーザー）として POST する。"""
+        request = self.factory.post(path, data, **kwargs)
+        force_authenticate(request, user=self.user)
+        return request
+
     def test_brake_record_post_also_writes_process_tables(self):
         view = BrakeLineRecordView.as_view()
-        request = self.factory.post(
+        request = self._post(
             '/api/production/brake-line-record/',
             {
                 'line_id': self.brake_line.id,
@@ -331,7 +350,7 @@ class BrakeSpotDualWriteTest(TestCase):
             qty=0,
         )
 
-        request = self.factory.post(
+        request = self._post(
             '/api/production/brake-line-record/',
             {
                 'line_id': self.brake_line.id,
@@ -360,7 +379,7 @@ class BrakeSpotDualWriteTest(TestCase):
 
     def test_spot_record_skip_qty_update_secondary_equipment_does_not_create_duplicate_session(self):
         # 1台目（セッション同期あり）
-        first_request = self.factory.post(
+        first_request = self._post(
             '/api/production/spot-line-record/',
             {
                 'line_id': self.spot_line.id,
@@ -380,7 +399,7 @@ class BrakeSpotDualWriteTest(TestCase):
         self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
 
         # 2台目（セッション同期なし、生ログは保存）
-        second_request = self.factory.post(
+        second_request = self._post(
             '/api/production/spot-line-record/',
             {
                 'line_id': self.spot_line.id,
@@ -453,7 +472,7 @@ class BrakeSpotDualWriteTest(TestCase):
             qty=0,
         )
 
-        request = self.factory.post(
+        request = self._post(
             '/api/production/spot-line-record/',
             {
                 'line_id': self.spot_line.id,
@@ -495,8 +514,8 @@ class BrakeSpotDualWriteTest(TestCase):
         }
         view = BrakeLineRecordView.as_view()
 
-        first_response = view(self.factory.post('/api/production/brake-line-record/', payload, format='json'))
-        second_response = view(self.factory.post('/api/production/brake-line-record/', payload, format='json'))
+        first_response = view(self._post('/api/production/brake-line-record/', payload, format='json'))
+        second_response = view(self._post('/api/production/brake-line-record/', payload, format='json'))
 
         self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(second_response.status_code, status.HTTP_409_CONFLICT)
@@ -530,8 +549,8 @@ class BrakeSpotDualWriteTest(TestCase):
         }
         view = SpotLineRecordView.as_view()
 
-        first_response = view(self.factory.post('/api/production/spot-line-record/', payload, format='json'))
-        second_response = view(self.factory.post('/api/production/spot-line-record/', payload, format='json'))
+        first_response = view(self._post('/api/production/spot-line-record/', payload, format='json'))
+        second_response = view(self._post('/api/production/spot-line-record/', payload, format='json'))
 
         self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(second_response.status_code, status.HTTP_409_CONFLICT)
@@ -549,3 +568,138 @@ class BrakeSpotDualWriteTest(TestCase):
             sequence_no=0,
         )
         self.assertEqual(backlog.actual_qty, 6)
+
+
+class BrakeSpotOperatorLoginIdTest(TestCase):
+    """ブレーキ・スポットの作業者は request.user からサーバーが決める（単位A）。"""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.plan_date = date(2026, 3, 26)
+        self.user = get_user_model().objects.create_user(
+            username='000175', last_name='記入', first_name='太郎'
+        )
+        self.calendar = Calendar.objects.create(calendar_code='daiso', calendar_name='ダイソー')
+        self.brake_line = Line.objects.create(
+            line_code='L-BRAKE-OPE', line_name='ブレーキ作業者ライン', calendar=self.calendar,
+        )
+        self.spot_line = Line.objects.create(
+            line_code='L-SPOT-OPE', line_name='スポット作業者ライン', calendar=self.calendar,
+        )
+        self.brake_process = Process.objects.create(
+            process_code='P-BRAKE-OPE', process_name='ブレーキ工程', line=self.brake_line,
+        )
+        self.spot_process = Process.objects.create(
+            process_code='P-SPOT-OPE', process_name='スポット工程', line=self.spot_line,
+        )
+        self.product = Product.objects.create(product_code='TEST-OPE', product_name='作業者テスト品')
+
+    def _payload(self, kind, **extra):
+        line = self.brake_line if kind == 'brake' else self.spot_line
+        process = self.brake_process if kind == 'brake' else self.spot_process
+        payload = {
+            'line_id': line.id,
+            'process_id': process.id,
+            'product_id': self.product.id,
+            'product_code': self.product.product_code,
+            'plan_date': self.plan_date.isoformat(),
+            'operator_action': BrakeLineRecord.OPERATOR_ACTION_END,
+            'qty': 4,
+            'sequence_no': 1,
+        }
+        payload.update(extra)
+        return payload
+
+    def _call(self, kind, payload, user=None):
+        if kind == 'brake':
+            path, view = '/api/production/brake-line-record/', BrakeLineRecordView.as_view()
+        else:
+            path, view = '/api/production/spot-line-record/', SpotLineRecordView.as_view()
+        request = self.factory.post(path, payload, format='json')
+        if user is not None:
+            force_authenticate(request, user=user)
+        return view(request)
+
+    def test_unauthenticated_post_is_400_and_creates_nothing(self):
+        for kind in ('brake', 'spot'):
+            with self.subTest(kind=kind):
+                response = self._call(kind, self._payload(kind))
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data['detail'], 'ブレーキ・スポットの記録にはログインが必要です。')
+                self.assertEqual(
+                    response.data['operator_login_id'], ['ブレーキ・スポットの記録にはログインが必要です。']
+                )
+                self.assertEqual(BrakeLineRecord.objects.count(), 0)
+                self.assertEqual(LineBacklog.objects.count(), 0)
+
+    def test_authenticated_post_uses_request_user(self):
+        for kind in ('brake', 'spot'):
+            with self.subTest(kind=kind):
+                BrakeLineRecord.objects.all().delete()
+                LineBacklog.objects.all().delete()
+                response = self._call(kind, self._payload(kind), user=self.user)
+                self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+                record = BrakeLineRecord.objects.get(id=response.data['id'])
+                self.assertEqual(record.operator, '記入 太郎')
+                self.assertEqual(record.operator_login_id, '000175')
+                self.assertEqual(record.operator_user_id, self.user.id)
+                self.assertEqual(response.data['operator'], '記入 太郎')
+
+    def test_response_includes_operator_login_id(self):
+        for kind in ('brake', 'spot'):
+            with self.subTest(kind=kind):
+                BrakeLineRecord.objects.all().delete()
+                response = self._call(kind, self._payload(kind), user=self.user)
+                self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+                self.assertEqual(response.data['operator_login_id'], '000175')
+
+    def test_client_sent_operator_is_ignored(self):
+        for kind in ('brake', 'spot'):
+            with self.subTest(kind=kind):
+                BrakeLineRecord.objects.all().delete()
+                payload = self._payload(kind, operator='偽名', operator_login_id='999999')
+                response = self._call(kind, payload, user=self.user)
+                self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+                record = BrakeLineRecord.objects.get(id=response.data['id'])
+                self.assertEqual(record.operator, '記入 太郎')
+                self.assertEqual(record.operator_login_id, '000175')
+
+    def test_empty_name_user_falls_back_to_username(self):
+        nameless = get_user_model().objects.create_user(username='000200')
+        for kind in ('brake', 'spot'):
+            with self.subTest(kind=kind):
+                BrakeLineRecord.objects.all().delete()
+                response = self._call(kind, self._payload(kind), user=nameless)
+                self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+                record = BrakeLineRecord.objects.get(id=response.data['id'])
+                self.assertEqual(record.operator, '000200')
+                self.assertEqual(record.operator_login_id, '000200')
+
+    def test_empty_username_user_is_400(self):
+        # DB に保存せず、username が空のユーザーオブジェクトで認証する
+        empty_user = get_user_model()(username='', last_name='空', first_name='ユーザー')
+        for kind in ('brake', 'spot'):
+            with self.subTest(kind=kind):
+                response = self._call(kind, self._payload(kind), user=empty_user)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data['detail'], 'ブレーキ・スポットの記録にはログインが必要です。')
+                self.assertEqual(BrakeLineRecord.objects.count(), 0)
+                self.assertEqual(LineBacklog.objects.count(), 0)
+
+    def test_end_adds_actual_qty_to_seq0(self):
+        for kind, line, process in (
+            ('brake', self.brake_line, self.brake_process),
+            ('spot', self.spot_line, self.spot_process),
+        ):
+            with self.subTest(kind=kind):
+                response = self._call(kind, self._payload(kind), user=self.user)
+                self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+                backlog = LineBacklog.objects.get(
+                    plan_date=self.plan_date,
+                    line=line,
+                    process=process,
+                    product=self.product,
+                    sequence_no=0,
+                )
+                self.assertEqual(backlog.actual_qty, 4)
+                self.assertEqual(response.data['backlog']['actual_qty'], 4)

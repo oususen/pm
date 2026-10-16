@@ -40,6 +40,13 @@ class BrakeLineRecord(models.Model):
         related_name='brake_line_records',
         verbose_name='作業者ユーザー',
     )
+    operator_login_id = models.CharField(
+        max_length=150,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='作業者ログインID',
+    )
     operator_action        = models.CharField(max_length=20, choices=OPERATOR_ACTION_CHOICES, verbose_name='アクション')
     operator_action_reason = models.CharField(max_length=200, blank=True, default='', verbose_name='理由')
     qty         = models.IntegerField(default=0, verbose_name='加工数（END時）')
