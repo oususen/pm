@@ -143,6 +143,8 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
             'scrap': 0,
             'stock': 0,
             'planned_stock': 0,
+            'order_qty': 0,
+            'order_qty_actual': 0,
         })
         plan_map = defaultdict(int)
         demand_map = defaultdict(lambda: {'forecast': 0, 'firm': 0})
@@ -173,6 +175,8 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
                     cell['scrap'] += backlog.scrap_qty or 0
                     cell['stock'] += backlog.stock_qty or 0
                     cell['planned_stock'] += backlog.planned_stock_qty or 0
+                    cell['order_qty'] += backlog.order_qty or 0
+                    cell['order_qty_actual'] += backlog.order_qty_actual or 0
 
             demands = LineDemand.objects.select_related('process').filter(
                 plan_date__range=(start_date, end_date),
@@ -218,9 +222,16 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
                         demand = demand_map.get((target.line_id, target.product_id, None, current_date))
                     if base is None and plan is None and demand is None:
                         continue
+                    if target.monitor_type == ProgressMonitorTarget.MONITOR_TYPE_INVENTORY:
+                        # 在庫監視の計需・実需は後工程の計画・実績を集計したorder_qty/order_qty_actualを使う
+                        forecast_value = base['order_qty'] if base is not None else 0
+                        firm_value = base['order_qty_actual'] if base is not None else 0
+                    else:
+                        forecast_value = demand['forecast'] if demand is not None else 0
+                        firm_value = demand['firm'] if demand is not None else 0
                     cells[current_date.isoformat()] = {
-                        'forecast': demand['forecast'] if demand is not None else 0,
-                        'firm': demand['firm'] if demand is not None else 0,
+                        'forecast': forecast_value,
+                        'firm': firm_value,
                         'plan': plan or 0,
                         'actual': base['actual'] if base is not None else 0,
                         'adjust': base['adjust'] if base is not None else 0,

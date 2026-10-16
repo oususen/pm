@@ -166,12 +166,15 @@
           <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">★
             <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">4</span>
           </span>
-          <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">更新</span>
-          <span class="mock-btn teal" style="font-size:11px;padding:3px 8px;position:relative;">監視対象追加
+          <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">詳細表示
             <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">5</span>
           </span>
-          <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">対象管理
+          <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">更新</span>
+          <span class="mock-btn teal" style="font-size:11px;padding:3px 8px;position:relative;">監視対象追加
             <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">6</span>
+          </span>
+          <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">対象管理
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">7</span>
           </span>
         </span>
       </div>
@@ -180,21 +183,18 @@
           <table>
             <thead>
               <tr><th class="label-col" style="position:relative;">項目
-                <span class="om-anno" style="position:absolute;top:-10px;left:-10px;">7</span>
+                <span class="om-anno" style="position:absolute;top:-10px;left:-10px;">8</span>
               </th><th>10/16</th><th>10/17</th><th>10/18</th><th>10/19</th></tr>
             </thead>
             <tbody>
-              <tr><td class="label-col">内示</td><td>100</td><td>100</td><td>120</td><td>100</td></tr>
-              <tr><td class="label-col">確定</td><td>80</td><td>90</td><td>100</td><td>90</td></tr>
-              <tr><td class="label-col">計画</td><td>100</td><td>100</td><td>120</td><td>100</td></tr>
-              <tr><td class="label-col">実績</td><td>95</td><td>88</td><td></td><td></td></tr>
-              <tr><td class="label-col">調整</td><td>0</td><td>0</td><td></td><td></td></tr>
               <tr><td class="label-col">計進</td><td>95</td><td>88</td><td>100</td><td>90</td></tr>
               <tr><td class="label-col">進度</td><td style="color:var(--danger);font-weight:700;">-5</td><td style="color:var(--danger);font-weight:700;">-2</td><td></td><td></td></tr>
+              <tr><td class="label-col">計庫</td><td>40</td><td>40</td><td>38</td><td>38</td></tr>
+              <tr><td class="label-col">在庫</td><td>35</td><td>33</td><td>33</td><td>33</td></tr>
             </tbody>
           </table>
         </div>
-        <div style="font-size:11px;color:var(--ink2);">↑ 進度監視カードの例（1カード＝1製品・1ライン・1工程）。在庫監視カードでは項目行が「計需・実需・計画・実績・調整・仕損・在庫・計庫・進度」に変わります。</div>
+        <div style="font-size:11px;color:var(--ink2);">↑ 簡易表示（初期値）の例。「詳細表示」ボタンを押すと、監視モード別の項目（進度監視: 内示・確定・計画・実績・調整／在庫監視: 計需・実需・計画・実績・調整・仕損）がこの4項目の上に追加表示されます。</div>
       </div>
     </div>
 
@@ -203,9 +203,10 @@
       <li><span class="anno-num">2</span><span><strong>開始日</strong> — 表示開始日。初期値は当月1日</span></li>
       <li><span class="anno-num">3</span><span><strong>期間</strong> — 30日・60日・90日・120日から選ぶ</span></li>
       <li><span class="anno-num">4</span><span><strong>★（お気に入り保存）</strong> — 選択中のグループをお気に入りとして保存</span></li>
-      <li><span class="anno-num">5</span><span><strong>監視対象追加</strong> — 監視モード・ライン・製品を指定して新しいカードを登録（編集権限が必要）</span></li>
-      <li><span class="anno-num">6</span><span><strong>対象管理</strong> — 登録済み監視対象の一覧表示、編集・無効化・再有効化（編集権限が必要）</span></li>
-      <li><span class="anno-num">7</span><span><strong>項目行</strong> — 監視モードによって表示される項目が切り替わる</span></li>
+      <li><span class="anno-num">5</span><span><strong>詳細表示／簡易表示</strong> — カードの表示項目数を切り替える（初期値は簡易表示）</span></li>
+      <li><span class="anno-num">6</span><span><strong>監視対象追加</strong> — 監視モード・ライン・製品を指定して新しいカードを登録（編集権限が必要）</span></li>
+      <li><span class="anno-num">7</span><span><strong>対象管理</strong> — 登録済み監視対象の一覧表示、編集・無効化・再有効化（編集権限が必要）</span></li>
+      <li><span class="anno-num">8</span><span><strong>項目行</strong> — 表示切替と監視モードによって表示される項目が変わる</span></li>
     </ul>
 
     <div class="callout info">
@@ -228,7 +229,7 @@
     </div>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>画面の閲覧には<strong>production.progress</strong>の閲覧権限が必要です。監視対象の追加・編集・無効化・再有効化には同リソースの編集権限が必要です。</span>
+      <span>画面の閲覧には<strong>production.progress_monitor</strong>の閲覧権限が必要です。監視対象の追加・編集・無効化・再有効化には同リソースの編集権限が必要です（進捗管理・進度のみ画面の権限とは独立しています）。</span>
     </div>
   </div>
 
@@ -340,21 +341,25 @@
   <div class="step">
     <div class="step-header">
       <div class="step-num">7</div>
-      <div class="step-title">カードの見方（進度監視／在庫監視）</div>
+      <div class="step-title">カードの見方（表示切替・進度監視／在庫監視）</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
-      監視モードによって、カードの項目行が切り替わります。
+      ヘッダの「詳細表示」／「簡易表示」ボタンで、カードの項目行の数を切り替えられます。
     </div>
     <table class="info-table" style="margin-bottom:8px;">
-      <tr><th>進度監視</th><td>内示・確定・計画・実績・調整・計進・進度</td></tr>
-      <tr><th>在庫監視</th><td>計需・実需・計画・実績・調整・仕損・在庫・計庫・進度</td></tr>
+      <tr><th>簡易表示（初期値）</th><td>監視モードを問わず「計進・進度・計庫・在庫」の4項目のみ</td></tr>
+      <tr><th>詳細表示・進度監視</th><td>内示・確定・計画・実績・調整 ＋ 計進・進度・計庫・在庫</td></tr>
+      <tr><th>詳細表示・在庫監視</th><td>計需・実需・計画・実績・調整・仕損 ＋ 計進・進度・計庫・在庫</td></tr>
     </table>
     <div class="step-desc" style="margin-bottom:8px;">
-      在庫監視の「計需・実需」は、進度監視の「内示・確定」と<strong>同じ値</strong>です（呼び方だけが異なります）。「仕損・在庫・計庫」は、実績・調整・進度と同じデータから追加で表示している項目です。
+      「計進・進度・計庫・在庫」はモードを問わず常に同じ取得元（<code>LineBacklog</code>の実績・調整・在庫関連データ）から表示されます。「仕損」は在庫監視のみの追加項目です。
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      在庫監視の「計需・実需」は、<strong>後工程（次の工程・次のライン）の計画数量・実績数量を集計した値</strong>です。最終ラインでは後工程がないため、受注数量（確定・内示相当）がそのまま反映されます。進度監視の「内示・確定」（<code>LineDemand</code>）とは取得元が異なるため、同じ製品・ラインでも値が一致しない場合があります。
     </div>
     <div class="callout warn">
       <span class="icon">&#9888;</span>
-      <span>在庫監視の「計需・実需」は、「在庫/残量一覧」画面の同名項目とは算出方法が異なります。両画面の数値を単純比較しないでください。</span>
+      <span>在庫監視の「計需・実需」は、「在庫/残量一覧」画面の同名項目とも算出方法が異なります（需要行判定などの特別なロジックは使わず、期間内の数量をそのまま合算します）。3画面の数値を単純比較しないでください。</span>
     </div>
     <div class="callout info">
       <span class="icon">&#9432;</span>
@@ -368,8 +373,8 @@
     <ul>
       <li><strong>参照専用:</strong> この画面から在庫・進度の再計算や、実績・調整値の入力はできません</li>
       <li><strong>一意制約:</strong> 同一の製品・ラインは、進度監視・在庫監視のどちらか一方でしか登録できません</li>
-      <li><strong>権限:</strong> production.progress の閲覧権限がないと画面を開けません。編集権限がないと監視対象の追加・編集・無効化・再有効化はできません</li>
-      <li><strong>データの出どころ:</strong> 内示・確定（計需・実需）は LineDemand、計画・実績・調整・計進・進度・仕損・在庫・計庫は LineBacklog から取得しています</li>
+      <li><strong>権限:</strong> production.progress_monitor の閲覧権限がないと画面を開けません。編集権限がないと監視対象の追加・編集・無効化・再有効化はできません（進捗管理・進度のみ画面とは別の権限です）</li>
+      <li><strong>データの出どころ:</strong> 進度監視の内示・確定は LineDemand。在庫監視の計需・実需は LineBacklog の order_qty／order_qty_actual（後工程の計画・実績を集計した値）。計画・実績・調整・計進・進度・仕損・在庫・計庫はすべて LineBacklog から取得しています</li>
     </ul>
   </div>
 

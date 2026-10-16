@@ -25,6 +25,7 @@
         </select>
         <input v-model.trim="favoriteName" type="text" placeholder="お気に入り名" />
         <button class="favorite" type="button" title="お気に入り保存" @click="saveFavorite">★</button>
+        <button type="button" @click="viewMode = viewMode === 'compact' ? 'full' : 'compact'">{{ viewMode === 'compact' ? '詳細表示' : '簡易表示' }}</button>
         <button type="button" :disabled="loading || !selectedUnitId" @click="loadSnapshot">更新</button>
         <button v-if="canEdit" type="button" :disabled="!selectedUnitId" @click="openAdd">監視対象追加</button>
         <button v-if="canEdit" type="button" :disabled="!snapshot" @click="showManagement = !showManagement">対象管理</button>
@@ -125,23 +126,32 @@ const editingId = ref(null)
 const showManagement = ref(false)
 let searchTimer = null
 
-const rowDefinitionsByType = {
+// 計進・進度・計庫・在庫はモードを問わず常に表示する共通項目
+const COMMON_ROWS = [
+  { key: 'planned_progress', label: '計進', showZero: true },
+  { key: 'progress', label: '進度', showZero: true },
+  { key: 'planned_stock', label: '計庫', showZero: true },
+  { key: 'stock', label: '在庫', showZero: true },
+]
+const EXTRA_ROWS_BY_TYPE = {
   progress: [
     { key: 'forecast', label: '内示' }, { key: 'firm', label: '確定' },
     { key: 'plan', label: '計画' }, { key: 'actual', label: '実績' },
-    { key: 'adjust', label: '調整' }, { key: 'planned_progress', label: '計進', showZero: true },
-    { key: 'progress', label: '進度', showZero: true },
+    { key: 'adjust', label: '調整' },
   ],
   inventory: [
     { key: 'forecast', label: '計需' }, { key: 'firm', label: '実需' },
     { key: 'plan', label: '計画' }, { key: 'actual', label: '実績' },
     { key: 'adjust', label: '調整' }, { key: 'scrap', label: '仕損' },
-    { key: 'stock', label: '在庫', showZero: true }, { key: 'planned_stock', label: '計庫', showZero: true },
-    { key: 'progress', label: '進度', showZero: true },
   ],
 }
 const monitorTypeLabels = { progress: '進度', inventory: '在庫' }
-function rowDefinitionsFor(row) { return rowDefinitionsByType[row.monitor_type] || rowDefinitionsByType.progress }
+const viewMode = ref('compact') // 'compact': 共通4項目のみ / 'full': モード別項目も表示
+function rowDefinitionsFor(row) {
+  const extraRows = EXTRA_ROWS_BY_TYPE[row.monitor_type] || EXTRA_ROWS_BY_TYPE.progress
+  if (viewMode.value === 'full') return [...extraRows, ...COMMON_ROWS]
+  return COMMON_ROWS
+}
 const form = reactive({ monitor_type: 'progress', product: '', line: '', display_order: 0, memo: '', is_active: true })
 
 function localDateString(value) {

@@ -174,7 +174,10 @@ class ProgressMonitorApiTest(APITestCase):
         target = self.create_target(monitor_type=ProgressMonitorTarget.MONITOR_TYPE_INVENTORY)
         self.create_backlog(
             self.process1, 0, scrap_qty=4, stock_qty=-6, planned_stock_qty=8,
+            order_qty=15, order_qty_actual=9,
         )
+        # LineDemandがあっても在庫監視の計需・実需には使わないことを確認する
+        self.create_demand(self.process1, 'A', forecast_qty=999, firm_qty=888)
 
         response = self.snapshot()
 
@@ -185,8 +188,21 @@ class ProgressMonitorApiTest(APITestCase):
         self.assertEqual(cell['scrap'], 4)
         self.assertEqual(cell['stock'], -6)
         self.assertEqual(cell['planned_stock'], 8)
+        self.assertEqual(cell['forecast'], 15)
+        self.assertEqual(cell['firm'], 9)
         target_entry = next(item for item in response.data['targets'] if item['target_id'] == target.id)
         self.assertEqual(target_entry['monitor_type'], 'inventory')
+
+    def test_snapshot_progress_mode_still_uses_line_demand_for_forecast_firm(self):
+        self.create_target()
+        self.create_backlog(self.process1, 0, order_qty=777, order_qty_actual=666)
+        self.create_demand(self.process1, 'A', forecast_qty=5, firm_qty=2)
+
+        response = self.snapshot()
+
+        cell = response.data['rows'][0]['cells']['2026-10-16']
+        self.assertEqual(cell['forecast'], 5)
+        self.assertEqual(cell['firm'], 2)
 
     def test_snapshot_rejects_unassigned_unit_and_invalid_horizon(self):
         outside = self.client.get(reverse('progress-monitor-target-snapshot'), {
