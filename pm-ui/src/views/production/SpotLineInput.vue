@@ -241,10 +241,22 @@
                 {{ selectedAction === 'TEMP_END' ? '強制終了理由' : '中断理由' }}
                 <span class="required-mark">*</span>
               </label>
-              <select v-model="actionReason" class="reason-select">
+              <select v-model="actionReasonCode" class="reason-select" @change="onReasonCodeChange">
                 <option value="">理由を選択</option>
-                <option v-for="r in reasonOptions" :key="r" :value="r">{{ r }}</option>
+                <option v-for="r in reasonOptions" :key="r.code" :value="r.code">{{ t('interruptionReason.' + r.code) }}</option>
               </select>
+              <div v-if="isOtherReasonSelected" class="remarks-area">
+                <label class="qty-label">
+                  {{ t('brakeInput.remarksLabel') }}
+                  <span class="required-mark">*</span>
+                </label>
+                <textarea
+                  v-model="actionRemarks"
+                  class="remarks-textarea"
+                  rows="2"
+                  :placeholder="t('brakeInput.remarksPlaceholder')"
+                ></textarea>
+              </div>
             </div>
 
             <div class="work-date-area">
@@ -261,7 +273,8 @@
             </div>
 
             <div class="action-bar">
-              <div v-if="scrapReasonMissing" class="scrap-reason-required">{{ t('scrapInput.reasonRequired') }}</div>
+              <div v-if="remarksMissing" class="scrap-reason-required">{{ t('brakeInput.remarksRequired') }}</div>
+              <div v-else-if="scrapReasonMissing" class="scrap-reason-required">{{ t('scrapInput.reasonRequired') }}</div>
               <button v-else class="btn-save" :disabled="!canSave || saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
               <button class="btn-cancel" @click="cancel">キャンセル</button>
             </div>
@@ -412,8 +425,9 @@ function resolveApiErrorMessage(error, fallback) {
   return data.detail || fallback
 }
 
-const PAUSE_REASONS = ['設備トラブル', '治具トラブル', '品質トラブル', '材料待ち', '段取り', 'リーダー待ち', '3S活動', '改善活動', '品番間違い', 'その他']
-const TEMP_END_REASONS = ['設備なし', '治具なし', '品番切替', '材料不足', 'その他']
+// 「その他」コード（中断理由マスタのcode一致判定。display_name文字列一致ではない）
+const OTHER_REASON_CODES = ['2997', '2998', '3997', '3998']
+const isOtherReasonCode = (code) => OTHER_REASON_CODES.includes(String(code || ''))
 
 // ──────────────────────────────
 // 日付ユーティリティ（8時区切り）
@@ -473,7 +487,10 @@ const equipments = ref([])
 const selectedEquipmentIds = ref([])
 
 const selectedAction = ref('')
-const actionReason = ref('')
+const actionReason = ref('')         // 中断/強制終了の理由（表示ラベル文字列。従来のoperator_action_reason用）
+const actionReasonCode = ref('')     // 中断/強制終了の理由コード（m_interruption_reason.code）
+const actionRemarks = ref('')        // 中断/強制終了の自由記述（「その他」選択時は必須）
+const reasonMasterOptions = ref([])  // 中断理由マスタ取得結果（PAUSE/TEMP_END両方, line_category='2'）
 const workStateMap = ref({})
 const workOperatorMap = ref({})
 const currentProcessingByEquipment = ref({})
@@ -550,7 +567,24 @@ const operatorActionOptions = computed(() => {
 
 const requiresQty    = computed(() => selectedAction.value === 'END' || selectedAction.value === 'PAUSE')
 const requiresReason = computed(() => selectedAction.value === 'PAUSE' || selectedAction.value === 'TEMP_END')
-const reasonOptions  = computed(() => selectedAction.value === 'TEMP_END' ? TEMP_END_REASONS : PAUSE_REASONS)
+const reasonOptions  = computed(() => {
+  const op = selectedAction.value === 'TEMP_END' ? 'TEMP_END' : 'PAUSE'
+  return reasonMasterOptions.value.filter((r) => r.operation === op)
+})
+// 選択中の理由コードが「その他」かどうか（remarks必須判定に使用）
+const isOtherReasonSelected = computed(() => isOtherReasonCode(actionReasonCode.value))
+
+async function fetchReasonMasterOptions() {
+  try {
+    const res = await api.interruptionReasons.getInterruptionReasons({
+      is_active: true,
+      line_category: '2',
+    })
+    reasonMasterOptions.value = res.data || []
+  } catch {
+    reasonMasterOptions.value = []
+  }
+}
 
 const currentProcessingMessages = computed(() =>
   Object.entries(currentProcessingByEquipment.value || {})
@@ -618,7 +652,11 @@ watch(
   () => selectedAction.value,
   (action) => {
     const key = String(action || '').toUpperCase()
-    if (!(key === 'PAUSE' || key === 'TEMP_END')) actionReason.value = ''
+    if (!(key === 'PAUSE' || key === 'TEMP_END')) {
+      actionReason.value = ''
+      actionReasonCode.value = ''
+      actionRemarks.value = ''
+    }
     if (key !== 'END') inputQty.value = null
   }
 )
@@ -627,6 +665,8 @@ watch(
 watch(selectedItem, async (item) => {
   inputQty.value = null
   actionReason.value = ''
+  actionReasonCode.value = ''
+  actionRemarks.value = ''
   scrapQty.value = null
   scrapReason.value = ''
   photoPreviewUrl.value = ''
@@ -797,6 +837,8 @@ async function loadPlan() {
   currentPage.value = 1
   selectedAction.value = ''
   actionReason.value = ''
+  actionReasonCode.value = ''
+  actionRemarks.value = ''
   try {
     const res = await api.spotLineActuals.getPlan(planDateStr.value)
     const data = res.data
@@ -807,7 +849,7 @@ async function loadPlan() {
       selectedProcessId.value = processes.value[0].id
     }
     if (selectedProcessId.value) {
-      await Promise.all([fetchEquipments(), fetchWorkStates()])
+      await Promise.all([fetchEquipments(), fetchWorkStates(), fetchReasonMasterOptions()])
     } else {
       workStateMap.value = {}
       currentProcessingByEquipment.value = {}
@@ -889,12 +931,15 @@ const isDone = (item) => {
 }
 const isSelected = (item) => selectedItem.value && itemKey(item) === itemKey(selectedItem.value)
 const itemKey = (item) => `${item.line_id}-${item.process_id}-${item.product_id || `code:${item.product_code || ''}`}`
+// 「その他」理由選択時、自由記述が未入力なら保存不可
+const remarksMissing = computed(() => isOtherReasonSelected.value && !String(actionRemarks.value || '').trim())
 const canSave = computed(() => {
   if (!selectedItem.value || selectedEquipmentIds.value.length === 0 || !selectedAction.value) return false
   if (!String(workDateStr.value || '').trim()) return false
   if (selectedAction.value === 'END' && !(inputQty.value > 0)) return false
   if (selectedAction.value === 'PAUSE' && !(inputQty.value >= 0)) return false
-  if (requiresReason.value && !actionReason.value) return false
+  if (requiresReason.value && !actionReasonCode.value) return false
+  if (remarksMissing.value) return false
   return true
 })
 const saving = ref(false)
@@ -916,7 +961,23 @@ function selectItem(item) {
 function selectAction(action) {
   selectedAction.value = action
   actionReason.value = ''
+  actionReasonCode.value = ''
+  actionRemarks.value = ''
   if (action === 'END') nextTick(() => qtyInputRef.value?.focus())
+}
+
+// 理由コード選択時: 表示ラベル文字列（actionReason）を同期させる。
+// 既存のoperator_action_reason送信がそのまま動くよう、i18nキー解決後の文字列をセットする
+function onReasonCodeChange() {
+  const code = String(actionReasonCode.value || '')
+  if (!code) {
+    actionReason.value = ''
+    return
+  }
+  actionReason.value = t('interruptionReason.' + code)
+  if (!isOtherReasonCode(code)) {
+    actionRemarks.value = ''
+  }
 }
 
 async function onProcessChange() {
@@ -925,8 +986,10 @@ async function onProcessChange() {
   selectedEquipmentIds.value = []
   selectedAction.value = ''
   actionReason.value = ''
+  actionReasonCode.value = ''
+  actionRemarks.value = ''
   if (selectedProcessId.value) {
-    await Promise.all([fetchEquipments(), fetchWorkStates()])
+    await Promise.all([fetchEquipments(), fetchWorkStates(), fetchReasonMasterOptions()])
   } else {
     workStateMap.value = {}
     currentProcessingByEquipment.value = {}
@@ -1032,6 +1095,7 @@ function onYesterdayToggle() {
 async function save() {
   if (!canSave.value || saving.value) return
   if (scrapReasonMissing.value) return
+  if (remarksMissing.value) return
   const item = selectedItem.value
   const targetWorkDate = String(workDateStr.value || '').trim()
   if (targetWorkDate !== planDateStr.value) {
@@ -1067,6 +1131,8 @@ async function save() {
         plan_date:             targetWorkDate,
         operator_action:       selectedAction.value,
         operator_action_reason: actionReason.value,
+        interruption_reason_code: actionReasonCode.value,
+        remarks:               actionRemarks.value,
         qty:                   (requiresQty.value && isFirst) ? inputQty.value : 0,
         // 2台目以降はqty検証・actual_qty加算をスキップ（二重カウント防止）
         skip_qty_update:       !isFirst,
@@ -1109,6 +1175,8 @@ async function save() {
     }
     inputQty.value = null
     actionReason.value = ''
+    actionReasonCode.value = ''
+    actionRemarks.value = ''
     scrapQty.value = null
     scrapReason.value = ''
     if (data.operator_action === 'END' || data.operator_action === 'TEMP_END') {
@@ -1792,6 +1860,18 @@ function showToast(message, type = 'success') {
   border: 1px solid #ccc;
   border-radius: 6px;
   font-size: 13px;
+}
+.remarks-area { margin-top: 4px; }
+.remarks-textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  box-sizing: border-box;
+  margin-top: 4px;
+  resize: vertical;
 }
 .action-bar { display: flex; gap: 8px; }
 .btn-save {
