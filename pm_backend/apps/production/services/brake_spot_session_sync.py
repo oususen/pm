@@ -13,6 +13,7 @@ from production.serializers_process_realtime import (
 from masters.models import Process, Product
 
 BRAKE_SPOT_LOGIN_REQUIRED_MESSAGE = 'ブレーキ・スポットの記録にはログインが必要です。'
+BRAKE_SPOT_REASON_CODE_REQUIRED_MESSAGE = '中断・強制終了には理由コードの選択が必要です。'
 
 
 def resolve_brake_spot_operator(request):
@@ -28,6 +29,25 @@ def resolve_brake_spot_operator(request):
     if not username:
         return None
     return build_worker_display_name(user), user.username, user
+
+
+def validate_interruption_reason_code(operator_action, reason_code):
+    """
+    PAUSE/TEMP_END のときだけ理由コードを検証する。
+    有効なら True、無効なら False を返す（呼び出し側で400にする）。
+    START/END/RESUME等では常に True（検証不要）。
+    """
+    if operator_action not in ('PAUSE', 'TEMP_END'):
+        return True
+    if not reason_code:
+        return False
+    from masters.models import InterruptionReason
+    return InterruptionReason.objects.filter(
+        code=reason_code,
+        line_category='2',
+        operation=operator_action,
+        is_active=True,
+    ).exists()
 
 
 ACTIVE_BRAKE_SPOT_ACTIONS = {

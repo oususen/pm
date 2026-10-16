@@ -26,9 +26,11 @@ from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
 from production.services.brake_spot_session_sync import (
     BRAKE_SPOT_LOGIN_REQUIRED_MESSAGE,
+    BRAKE_SPOT_REASON_CODE_REQUIRED_MESSAGE,
     find_equipment_active_product_conflict,
     lock_and_reject_duplicate_operator_action,
     resolve_brake_spot_operator,
+    validate_interruption_reason_code,
 )
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.serializers_process_realtime import check_plan_overrun
@@ -906,6 +908,8 @@ class BrakeLineRecordView(APIView):
         plan_date_str  = request.data.get('plan_date')
         operator_action        = str(request.data.get('operator_action', '')).upper()
         operator_action_reason = request.data.get('operator_action_reason', '')
+        reason_code    = request.data.get('interruption_reason_code', '')
+        remarks        = request.data.get('remarks', '') or ''
         qty_raw        = request.data.get('qty', 0)
         record_sequence_no = int(request.data.get('sequence_no', 1))
 
@@ -967,6 +971,15 @@ class BrakeLineRecordView(APIView):
             if operator_action == BrakeLineRecord.OPERATOR_ACTION_PAUSE and qty < 0:
                 return Response({'detail': 'qty は0以上で入力してください'}, status=400)
 
+        if not validate_interruption_reason_code(operator_action, reason_code):
+            return Response(
+                {
+                    'detail': BRAKE_SPOT_REASON_CODE_REQUIRED_MESSAGE,
+                    'interruption_reason_code': [BRAKE_SPOT_REASON_CODE_REQUIRED_MESSAGE],
+                },
+                status=400,
+            )
+
         duplicate_record = lock_and_reject_duplicate_operator_action(
             line_id=line_id,
             process_id=process_id,
@@ -994,6 +1007,10 @@ class BrakeLineRecordView(APIView):
             operator_user=operator_user,
             operator_action=operator_action,
             operator_action_reason=operator_action_reason,
+            interruption_reason_code=reason_code if operator_action in (
+                BrakeLineRecord.OPERATOR_ACTION_PAUSE, BrakeLineRecord.OPERATOR_ACTION_TEMP_END
+            ) else '',
+            remarks=remarks,
             qty=qty,
             sequence_no=record_sequence_no,
         )
@@ -1043,6 +1060,8 @@ class BrakeLineRecordView(APIView):
             'equipment_name':  rec.equipment.equipment_name if rec.equipment else '',
             'product_code':    rec.product_code or '',
             'qty':             rec.qty,
+            'interruption_reason_code': rec.interruption_reason_code,
+            'remarks':         rec.remarks or '',
             'recorded_at':     rec.recorded_at.isoformat(),
             'backlog':         backlog_data,
         }

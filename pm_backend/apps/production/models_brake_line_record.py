@@ -49,6 +49,8 @@ class BrakeLineRecord(models.Model):
     )
     operator_action        = models.CharField(max_length=20, choices=OPERATOR_ACTION_CHOICES, verbose_name='アクション')
     operator_action_reason = models.CharField(max_length=200, blank=True, default='', verbose_name='理由')
+    interruption_reason_code = models.CharField(max_length=4, blank=True, default='', verbose_name='中断理由コード')
+    remarks     = models.TextField(null=True, blank=True, verbose_name='備考')
     qty         = models.IntegerField(default=0, verbose_name='加工数（END時）')
     sequence_no = models.IntegerField(default=1, verbose_name='シーケンスNo')
     recorded_at = models.DateTimeField(auto_now_add=True, verbose_name='記録日時')
