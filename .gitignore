@@ -24,6 +24,7 @@ pm_backend/logs/
 pm_backend/ocr_data/
 .env
 .env.local
+.env.pg_rehearsal
 *.db
 vapid_private.pem
 
