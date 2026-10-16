@@ -13,7 +13,7 @@ class ProgressMonitorTargetSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProgressMonitorTarget
         fields = [
-            'id', 'product', 'product_code', 'product_name',
+            'id', 'monitor_type', 'product', 'product_code', 'product_name',
             'line', 'line_code', 'line_name', 'display_order', 'memo',
             'is_active', 'registered_by', 'registered_by_name',
             'created_at', 'updated_at',

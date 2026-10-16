@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>進度監視 作業手順書</title>
+<style>
+  :root {
+    --bg: #f6f7fa; --card: #ffffff; --ink: #1a2233; --ink2: #4b5a72;
+    --accent: #1565c0; --accent-light: #e3effa;
+    --danger: #c62828; --danger-light: #fce4e4;
+    --success: #2e7d32; --success-light: #e6f4ea;
+    --warn: #e65100; --warn-light: #fff3e0;
+    --border: #d4dae4; --grid-head: #eaf0f7; --grid-line: #cfd8e3;
+    --shadow: 0 2px 12px rgba(20,40,80,.08);
+    --step-color: #00796b; --radius: 10px; --prod-border: #00897b;
+    --col-bg: #f8f9fc;
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+    --accent: #5ca0e8; --accent-light: #1c3050;
+    --danger: #ef5350; --danger-light: #3a1a1a;
+    --success: #66bb6a; --success-light: #1a3020;
+    --warn: #ff9800; --warn-light: #2e2010;
+    --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+    --shadow: 0 2px 16px rgba(0,0,0,.3);
+    --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --card: #1c2230; --ink: #e2e6ee; --ink2: #8b99b0;
+      --accent: #5ca0e8; --accent-light: #1c3050;
+      --danger: #ef5350; --danger-light: #3a1a1a;
+      --success: #66bb6a; --success-light: #1a3020;
+      --warn: #ff9800; --warn-light: #2e2010;
+      --border: #2e3648; --grid-head: #222c3c; --grid-line: #2a3446;
+      --shadow: 0 2px 16px rgba(0,0,0,.3);
+      --step-color: #4db6ac; --prod-border: #4db6ac; --col-bg: #1a2030;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Yu Gothic Medium','Hiragino Kaku Gothic ProN','Meiryo',sans-serif; background:var(--bg); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .page { max-width:960px; margin:0 auto; padding:40px 24px 80px; }
+
+  .cover { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:48px 40px 40px; margin-bottom:36px; border-left:5px solid var(--prod-border); }
+  .cover h1 { font-size:28px; font-weight:800; color:var(--ink); margin-bottom:6px; text-wrap:balance; }
+  .cover .subtitle { font-size:15px; color:var(--ink2); margin-bottom:20px; }
+  .cover .path { display:inline-flex; align-items:center; gap:6px; background:var(--accent-light); color:var(--accent); font-size:13px; font-weight:600; padding:5px 14px; border-radius:6px; }
+  .cover .path .arrow { opacity:.5; }
+
+  .step { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px 28px; margin-bottom:24px; }
+  .step-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .step-num { width:38px; height:38px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800; flex-shrink:0; }
+  .step-title { font-size:20px; font-weight:700; }
+  .step-desc { font-size:14px; color:var(--ink2); margin-bottom:16px; line-height:1.7; }
+  h4.sub { font-size:15px; font-weight:700; margin:18px 0 10px; color:var(--ink); }
+
+  .toc { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:28px; }
+  .toc h2 { font-size:15px; font-weight:700; margin-bottom:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; }
+  .toc-list { list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+  .toc-list li { font-size:14px; display:flex; align-items:center; gap:8px; }
+  .toc-list .tn { width:26px; height:26px; border-radius:50%; background:var(--step-color); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+  .note { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px 32px; margin-bottom:24px; border-left:4px solid var(--warn); }
+  .note h2 { font-size:16px; font-weight:700; margin-bottom:8px; color:var(--warn); }
+  .note ul { margin:0; padding-left:18px; font-size:14px; color:var(--ink2); }
+  .note li { margin-bottom:4px; }
+
+  .callout { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:10px 14px; border-radius:6px; font-size:13px; line-height:1.6; }
+  .callout.info { background:var(--accent-light); color:var(--accent); }
+  .callout.warn { background:var(--warn-light); color:var(--warn); }
+  .callout.danger { background:var(--danger-light); color:var(--danger); }
+  .callout.ok { background:var(--success-light); color:var(--success); }
+  .callout .icon { font-size:18px; flex-shrink:0; line-height:1.4; }
+
+  .mock-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; background:var(--card); color:var(--ink); cursor:default; white-space:nowrap; }
+  .mock-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .mock-btn.teal { background:var(--step-color); border-color:var(--step-color); color:#fff; }
+  .f-select { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+  .f-input { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:3px 6px; font-size:12px; color:var(--ink); }
+
+  .info-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+  .info-table th, .info-table td { border:1px solid var(--grid-line); padding:6px 10px; text-align:left; }
+  .info-table th { background:var(--grid-head); font-weight:700; color:var(--ink2); white-space:nowrap; width:170px; }
+  .info-table td { background:var(--card); color:var(--ink); }
+
+  .mock-grid { border:1px solid var(--grid-line); border-radius:6px; overflow-x:auto; margin:12px 0; font-size:11px; }
+  .mock-grid table { width:100%; border-collapse:collapse; }
+  .mock-grid th, .mock-grid td { border:1px solid var(--grid-line); padding:5px 8px; text-align:center; white-space:nowrap; }
+  .mock-grid th { background:var(--grid-head); font-weight:700; color:var(--ink2); font-size:10px; }
+  .mock-grid td { background:var(--card); color:var(--ink); }
+  .mock-grid .label-col { text-align:left; font-weight:700; background:var(--grid-head); }
+
+  .anno-num { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--danger); color:var(--danger); font-size:13px; font-weight:800; flex-shrink:0; line-height:1; font-style:normal; }
+  :root[data-theme="dark"] .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .anno-num { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+  .anno-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+  .anno-list li { display:flex; align-items:flex-start; gap:10px; font-size:14px; line-height:1.6; }
+  .anno-list li strong { color:var(--ink); }
+  .anno-list li span { color:var(--ink2); }
+  .om-anno { position:absolute; font-size:11px; font-weight:800; color:var(--danger); background:#fff; border:2px solid var(--danger); border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; line-height:1; z-index:5; font-style:normal; }
+  :root[data-theme="dark"] .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .om-anno { background:var(--card); border-color:#ef5350; color:#ef5350; } }
+
+  .screen-overview { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px 32px; margin-bottom:28px; }
+  .screen-overview h2 { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:10px; }
+  .screen-overview h2 .badge { background:var(--step-color); color:#fff; font-size:11px; font-weight:700; padding:2px 10px; border-radius:4px; }
+
+  .mock-toolbar { background:var(--grid-head); border:1px solid var(--grid-line); border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px; color:var(--ink2); }
+
+  @media (max-width:600px) {
+    .page { padding:20px 12px 60px; }
+    .cover, .step, .screen-overview { padding:24px 18px 20px; }
+    .toc-list { grid-template-columns:1fr; }
+    .cover h1 { font-size:22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== COVER ===== -->
+  <div class="cover">
+    <h1>進度監視 作業手順書</h1>
+    <div class="subtitle">担当グループに所属するラインの登録製品について、進度または在庫を工程別カードで日次確認する画面。</div>
+    <div class="path">
+      生産 <span class="arrow">&#9656;</span> 進度監視
+    </div>
+  </div>
+
+  <!-- ===== TOC ===== -->
+  <div class="toc">
+    <h2>目次</h2>
+    <ul class="toc-list">
+      <li><span class="tn">1</span>画面を開く</li>
+      <li><span class="tn">2</span>画面の見方</li>
+      <li><span class="tn">3</span>グループ・期間を選んで表示する</li>
+      <li><span class="tn">4</span>お気に入りを使う</li>
+      <li><span class="tn">5</span>監視対象を追加する</li>
+      <li><span class="tn">6</span>監視対象を編集・無効化する</li>
+      <li><span class="tn">7</span>カードの見方（進度監視／在庫監視）</li>
+    </ul>
+  </div>
+
+  <!-- ===== 画面概要 ===== -->
+  <div class="screen-overview">
+    <h2>画面の構成 <span class="badge">最初に読む</span></h2>
+    <div class="step-desc">
+      上部でグループ・開始日・期間を選び、「更新」を押すと、そのグループに所属するラインに登録済みの監視対象が<strong>工程ごとのカード</strong>として並びます。カードごとに<strong>監視モード</strong>（進度／在庫）が設定されており、1画面の中に進度監視カードと在庫監視カードが混在して表示されます。
+    </div>
+
+    <!-- 画面モック -->
+    <div style="position:relative;">
+      <div class="mock-toolbar" style="border-radius:6px 6px 0 0;justify-content:space-between;">
+        <span style="font-size:14px;font-weight:700;color:var(--ink);">進度監視</span>
+        <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span class="f-select" style="position:relative;">グループ ▾
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">1</span>
+          </span>
+          <span class="f-input" style="position:relative;">2026-10-01
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">2</span>
+          </span>
+          <span class="f-select" style="position:relative;">30日 ▾
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">3</span>
+          </span>
+          <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">★
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">4</span>
+          </span>
+          <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">更新</span>
+          <span class="mock-btn teal" style="font-size:11px;padding:3px 8px;position:relative;">監視対象追加
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">5</span>
+          </span>
+          <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">対象管理
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">6</span>
+          </span>
+        </span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--grid-line);border-top:none;padding:12px 14px;position:relative;">
+        <div class="mock-grid" style="margin:0 0 10px;">
+          <table>
+            <thead>
+              <tr><th class="label-col" style="position:relative;">項目
+                <span class="om-anno" style="position:absolute;top:-10px;left:-10px;">7</span>
+              </th><th>10/16</th><th>10/17</th><th>10/18</th><th>10/19</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="label-col">内示</td><td>100</td><td>100</td><td>120</td><td>100</td></tr>
+              <tr><td class="label-col">確定</td><td>80</td><td>90</td><td>100</td><td>90</td></tr>
+              <tr><td class="label-col">計画</td><td>100</td><td>100</td><td>120</td><td>100</td></tr>
+              <tr><td class="label-col">実績</td><td>95</td><td>88</td><td></td><td></td></tr>
+              <tr><td class="label-col">調整</td><td>0</td><td>0</td><td></td><td></td></tr>
+              <tr><td class="label-col">計進</td><td>95</td><td>88</td><td>100</td><td>90</td></tr>
+              <tr><td class="label-col">進度</td><td style="color:var(--danger);font-weight:700;">-5</td><td style="color:var(--danger);font-weight:700;">-2</td><td></td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size:11px;color:var(--ink2);">↑ 進度監視カードの例（1カード＝1製品・1ライン・1工程）。在庫監視カードでは項目行が「計需・実需・計画・実績・調整・仕損・在庫・計庫・進度」に変わります。</div>
+      </div>
+    </div>
+
+    <ul class="anno-list" style="margin-top:16px;">
+      <li><span class="anno-num">1</span><span><strong>グループ</strong> — 自分が所属／担当するグループから選ぶ（superuserは全グループ）</span></li>
+      <li><span class="anno-num">2</span><span><strong>開始日</strong> — 表示開始日。初期値は当月1日</span></li>
+      <li><span class="anno-num">3</span><span><strong>期間</strong> — 30日・60日・90日・120日から選ぶ</span></li>
+      <li><span class="anno-num">4</span><span><strong>★（お気に入り保存）</strong> — 選択中のグループをお気に入りとして保存</span></li>
+      <li><span class="anno-num">5</span><span><strong>監視対象追加</strong> — 監視モード・ライン・製品を指定して新しいカードを登録（編集権限が必要）</span></li>
+      <li><span class="anno-num">6</span><span><strong>対象管理</strong> — 登録済み監視対象の一覧表示、編集・無効化・再有効化（編集権限が必要）</span></li>
+      <li><span class="anno-num">7</span><span><strong>項目行</strong> — 監視モードによって表示される項目が切り替わる</span></li>
+    </ul>
+
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>この画面は参照専用です。再計算・削除の操作はありません。表示される数値は、既存の進度計算・在庫計算（<code>LineBacklog</code> / <code>LineDemand</code>）の結果をそのまま表示しています。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">画面を開く</div>
+    </div>
+    <div class="step-desc">
+      上部ナビゲーションの<strong>「生産」</strong>メニューから<strong>「進度監視」</strong>をクリックします。
+    </div>
+    <div class="step-desc" style="margin-bottom:0;">
+      画面を開いた時点では、グループを選ぶまでカードは表示されません。所属グループが1つだけの場合は自動で選択されます。
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>画面の閲覧には<strong>production.progress</strong>の閲覧権限が必要です。監視対象の追加・編集・無効化・再有効化には同リソースの編集権限が必要です。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">画面の見方</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      カードは<strong>製品・ライン・工程</strong>の組み合わせごとに1枚表示されます。同じ製品・ラインでも工程が複数あれば、カードも複数枚に分かれます。
+    </div>
+    <table class="info-table">
+      <tr><th>モード</th><td>そのカードの監視モード（進度 または 在庫）</td></tr>
+      <tr><th>ライン・工程</th><td>ラインコード・ライン名、工程コード・工程名。工程データが無い場合は「データなし」</td></tr>
+      <tr><th>品番・品名</th><td>監視対象の製品</td></tr>
+      <tr><th>メモ</th><td>登録時に入力したメモ</td></tr>
+      <tr><th>項目行×日付列</th><td>監視モードに応じた数量項目を、選択した期間の日付ごとに表示</td></tr>
+    </table>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>期間内にデータが無い日・無い監視対象も空カード・空欄として表示されます。欠落ではなく「その日の対象データが無い」ことを表します。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">グループ・期間を選んで表示する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      上部の3項目を選び、<strong>「更新」</strong>を押すとカードが再読み込みされます。
+    </div>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr><th>グループ</th><td>自分が所属するグループと、班長として担当するグループが選択肢に表示されます</td></tr>
+      <tr><th>開始日</th><td>表示を開始する日付。初期値は当月1日</td></tr>
+      <tr><th>期間</th><td>30日・60日・90日・120日から選択</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>グループに所属するラインは、ラインマスタの「所属グループ」設定から取得されます。表示したいラインが出ない場合は、ラインマスタの所属グループ設定を確認してください。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">お気に入りを使う</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      よく見るグループは、お気に入りとして保存しておくと次回すぐ呼び出せます。
+    </div>
+    <table class="info-table" style="margin-bottom:4px;">
+      <tr><th>保存</th><td>グループを選び、「お気に入り名」を入力して「★」を押す</td></tr>
+      <tr><th>呼び出し</th><td>「お気に入り選択」でお気に入り名を選ぶと、グループが自動で選ばれ、カードが再読み込みされる</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>お気に入りに保存されるのは<strong>グループだけ</strong>です。ラインの所属が変わっても、次に開いたときの最新の所属で自動的に反映されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 5 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">監視対象を追加する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      編集権限がある場合、<strong>「監視対象追加」</strong>から新しいカードを登録できます。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>監視モード</th><td>「進度」または「在庫」を選ぶ</td></tr>
+      <tr><th>ライン</th><td>選択中のグループに所属するラインから選ぶ</td></tr>
+      <tr><th>製品検索・製品</th><td>品番または品名の一部を入力して候補を絞り込み、製品を選ぶ</td></tr>
+      <tr><th>表示順</th><td>カードの並び順。小さい値ほど先に表示される</td></tr>
+      <tr><th>メモ</th><td>最大500文字の自由記述</td></tr>
+      <tr><th>有効</th><td>チェックを外すと登録はされるが、カードには表示されない</td></tr>
+    </table>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>同じ製品・ラインの組み合わせは<strong>1件まで</strong>です。監視モードを問わず、進度監視・在庫監視のどちらか一方でしか登録できません。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 6 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div class="step-title">監視対象を編集・無効化する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      <strong>「対象管理」</strong>を開くと、登録済みの監視対象が一覧表示されます（無効化済みのものも含む）。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>編集</th><td>一覧の「編集」から、監視モード・ライン・表示順・メモ・有効／無効を変更できる（製品は変更不可）</td></tr>
+      <tr><th>無効化</th><td>編集画面の「無効化」ボタンで、カード表示から外す（データは削除されない）</td></tr>
+      <tr><th>再有効化</th><td>無効化済みの行は「再有効化・編集」から再び有効にできる</td></tr>
+    </table>
+    <div class="callout ok">
+      <span class="icon">&#10003;</span>
+      <span>監視対象は個人ではなく<strong>グループで共有</strong>されます。担当グループに紐づくラインであれば、誰が登録した監視対象でも編集・無効化できます。</span>
+    </div>
+  </div>
+
+  <!-- ===== STEP 7 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div class="step-title">カードの見方（進度監視／在庫監視）</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      監視モードによって、カードの項目行が切り替わります。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>進度監視</th><td>内示・確定・計画・実績・調整・計進・進度</td></tr>
+      <tr><th>在庫監視</th><td>計需・実需・計画・実績・調整・仕損・在庫・計庫・進度</td></tr>
+    </table>
+    <div class="step-desc" style="margin-bottom:8px;">
+      在庫監視の「計需・実需」は、進度監視の「内示・確定」と<strong>同じ値</strong>です（呼び方だけが異なります）。「仕損・在庫・計庫」は、実績・調整・進度と同じデータから追加で表示している項目です。
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>在庫監視の「計需・実需」は、「在庫/残量一覧」画面の同名項目とは算出方法が異なります。両画面の数値を単純比較しないでください。</span>
+    </div>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>セルの色: 調整のマイナスは赤字、計進・進度・在庫・計庫のマイナスは強調した赤字で表示されます。</span>
+    </div>
+  </div>
+
+  <!-- ===== 注意事項 ===== -->
+  <div class="note">
+    <h2>&#9888; 注意事項</h2>
+    <ul>
+      <li><strong>参照専用:</strong> この画面から在庫・進度の再計算や、実績・調整値の入力はできません</li>
+      <li><strong>一意制約:</strong> 同一の製品・ラインは、進度監視・在庫監視のどちらか一方でしか登録できません</li>
+      <li><strong>権限:</strong> production.progress の閲覧権限がないと画面を開けません。編集権限がないと監視対象の追加・編集・無効化・再有効化はできません</li>
+      <li><strong>データの出どころ:</strong> 内示・確定（計需・実需）は LineDemand、計画・実績・調整・計進・進度・仕損・在庫・計庫は LineBacklog から取得しています</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

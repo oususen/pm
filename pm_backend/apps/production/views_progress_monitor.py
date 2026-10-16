@@ -140,6 +140,9 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
             'adjust': 0,
             'planned_progress': 0,
             'progress': 0,
+            'scrap': 0,
+            'stock': 0,
+            'planned_stock': 0,
         })
         plan_map = defaultdict(int)
         demand_map = defaultdict(lambda: {'forecast': 0, 'firm': 0})
@@ -167,6 +170,9 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
                     cell['adjust'] += backlog.adjust_qty or 0
                     cell['planned_progress'] += backlog.planned_progress_qty or 0
                     cell['progress'] += backlog.progress_qty or 0
+                    cell['scrap'] += backlog.scrap_qty or 0
+                    cell['stock'] += backlog.stock_qty or 0
+                    cell['planned_stock'] += backlog.planned_stock_qty or 0
 
             demands = LineDemand.objects.select_related('process').filter(
                 plan_date__range=(start_date, end_date),
@@ -220,9 +226,13 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
                         'adjust': base['adjust'] if base is not None else 0,
                         'planned_progress': base['planned_progress'] if base is not None else 0,
                         'progress': base['progress'] if base is not None else 0,
+                        'scrap': base['scrap'] if base is not None else 0,
+                        'stock': base['stock'] if base is not None else 0,
+                        'planned_stock': base['planned_stock'] if base is not None else 0,
                     }
                 rows.append({
                     'target_id': target.id,
+                    'monitor_type': target.monitor_type,
                     'display_order': target.display_order,
                     'memo': target.memo,
                     'is_active': target.is_active,
@@ -257,6 +267,7 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
             'targets': [
                 {
                     'target_id': target.id,
+                    'monitor_type': target.monitor_type,
                     'display_order': target.display_order,
                     'memo': target.memo,
                     'is_active': target.is_active,

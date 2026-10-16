@@ -7,6 +7,19 @@ from masters.models import Line, Product
 class ProgressMonitorTarget(models.Model):
     """進度監視画面に表示する製品とラインの組み合わせ。"""
 
+    MONITOR_TYPE_PROGRESS = 'progress'
+    MONITOR_TYPE_INVENTORY = 'inventory'
+    MONITOR_TYPE_CHOICES = [
+        (MONITOR_TYPE_PROGRESS, '進度'),
+        (MONITOR_TYPE_INVENTORY, '在庫'),
+    ]
+
+    monitor_type = models.CharField(
+        max_length=20,
+        choices=MONITOR_TYPE_CHOICES,
+        default=MONITOR_TYPE_PROGRESS,
+        verbose_name='監視モード',
+    )
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,

@@ -38,14 +38,15 @@
       <div v-if="canEdit && showManagement" class="management-panel">
         <h3>監視対象管理</h3>
         <table class="management-table">
-          <thead><tr><th>ライン</th><th>品番</th><th>品名</th><th>表示順</th><th>メモ</th><th>状態</th><th>操作</th></tr></thead>
+          <thead><tr><th>モード</th><th>ライン</th><th>品番</th><th>品名</th><th>表示順</th><th>メモ</th><th>状態</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="target in snapshot.targets" :key="target.target_id" :class="{ inactive: !target.is_active }">
+              <td>{{ monitorTypeLabels[target.monitor_type] || '進度' }}</td>
               <td>{{ target.line_code }} {{ target.line_name }}</td><td>{{ target.product_code }}</td><td>{{ target.product_name }}</td>
               <td class="number">{{ target.display_order }}</td><td>{{ target.memo }}</td><td>{{ target.is_active ? '有効' : '無効' }}</td>
               <td><button type="button" @click="openEdit(target)">{{ target.is_active ? '編集' : '再有効化・編集' }}</button></td>
             </tr>
-            <tr v-if="!snapshot.targets?.length"><td colspan="7" class="empty">登録済みの監視対象がありません。</td></tr>
+            <tr v-if="!snapshot.targets?.length"><td colspan="8" class="empty">登録済みの監視対象がありません。</td></tr>
           </tbody>
         </table>
       </div>
@@ -54,6 +55,7 @@
         <div class="card-list">
         <div v-for="row in snapshot.rows" :key="`${row.target_id}-${row.process_id ?? 'none'}`" class="progress-card">
           <div class="info-block">
+            <div class="info-row"><span class="info-label">モード</span><span>{{ monitorTypeLabels[row.monitor_type] || '進度' }}</span></div>
             <div class="info-row"><span class="info-label">ライン</span><span>{{ formatLine(row) }}</span></div>
             <div class="info-row"><span class="info-label">工程</span><span>{{ formatProcess(row) }}</span></div>
             <div class="info-row"><span class="info-label">品番</span><span>{{ row.product_code }}</span></div>
@@ -64,7 +66,7 @@
             <table class="matrix-table">
               <thead><tr><th class="label-col">項目</th><th v-for="day in snapshot.dates" :key="day">{{ formatDay(day) }}</th></tr></thead>
               <tbody>
-                <tr v-for="definition in rowDefinitions" :key="definition.key">
+                <tr v-for="definition in rowDefinitionsFor(row)" :key="definition.key">
                   <th class="label-col">{{ definition.label }}</th>
                   <td v-for="day in snapshot.dates" :key="`${definition.key}-${day}`" class="number" :class="cellClass(row, day, definition.key)">
                     {{ displayCell(row, day, definition) }}
@@ -82,6 +84,7 @@
     <div v-if="editorOpen" class="modal-backdrop" @click.self="closeEditor">
       <form class="modal" @submit.prevent="saveTarget">
         <h3>{{ editingId ? '監視対象編集' : '監視対象追加' }}</h3>
+        <label>監視モード<select v-model="form.monitor_type" required><option value="progress">進度</option><option value="inventory">在庫</option></select></label>
         <label>ライン<select v-model="form.line" required><option value="">選択してください</option><option v-for="line in selectedLines" :key="line.id" :value="String(line.id)">{{ line.line_code }} {{ line.line_name }}</option></select></label>
         <label>製品検索<input v-model.trim="productSearch" type="text" placeholder="品番・品名" @input="searchProducts" /></label>
         <label>製品<select v-model="form.product" required :disabled="Boolean(editingId)"><option value="">選択してください</option><option v-for="product in products" :key="product.id" :value="String(product.id)">{{ product.product_code }} {{ product.product_name }}</option></select></label>
@@ -122,13 +125,24 @@ const editingId = ref(null)
 const showManagement = ref(false)
 let searchTimer = null
 
-const rowDefinitions = [
-  { key: 'forecast', label: '内示' }, { key: 'firm', label: '確定' },
-  { key: 'plan', label: '計画' }, { key: 'actual', label: '実績' },
-  { key: 'adjust', label: '調整' }, { key: 'planned_progress', label: '計進', showZero: true },
-  { key: 'progress', label: '進度', showZero: true },
-]
-const form = reactive({ product: '', line: '', display_order: 0, memo: '', is_active: true })
+const rowDefinitionsByType = {
+  progress: [
+    { key: 'forecast', label: '内示' }, { key: 'firm', label: '確定' },
+    { key: 'plan', label: '計画' }, { key: 'actual', label: '実績' },
+    { key: 'adjust', label: '調整' }, { key: 'planned_progress', label: '計進', showZero: true },
+    { key: 'progress', label: '進度', showZero: true },
+  ],
+  inventory: [
+    { key: 'forecast', label: '計需' }, { key: 'firm', label: '実需' },
+    { key: 'plan', label: '計画' }, { key: 'actual', label: '実績' },
+    { key: 'adjust', label: '調整' }, { key: 'scrap', label: '仕損' },
+    { key: 'stock', label: '在庫', showZero: true }, { key: 'planned_stock', label: '計庫', showZero: true },
+    { key: 'progress', label: '進度', showZero: true },
+  ],
+}
+const monitorTypeLabels = { progress: '進度', inventory: '在庫' }
+function rowDefinitionsFor(row) { return rowDefinitionsByType[row.monitor_type] || rowDefinitionsByType.progress }
+const form = reactive({ monitor_type: 'progress', product: '', line: '', display_order: 0, memo: '', is_active: true })
 
 function localDateString(value) {
   const year = value.getFullYear()
@@ -154,7 +168,7 @@ function displayCell(row, day, definition) {
 function cellClass(row, day, key) {
   const value = Number(row.cells?.[day]?.[key] ?? 0)
   if (key === 'adjust' && value < 0) return 'negative'
-  if ((key === 'planned_progress' || key === 'progress') && value < 0) return 'negative-strong'
+  if (['planned_progress', 'progress', 'stock', 'planned_stock'].includes(key) && value < 0) return 'negative-strong'
   return ''
 }
 
@@ -200,13 +214,13 @@ async function saveFavorite() {
 async function fetchProducts() { const response = await api.progressMonitor.getProductCandidates({ search: productSearch.value }); products.value = response.data || [] }
 function searchProducts() { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(fetchProducts, 250) }
 function resetForm() {
-  Object.assign(form, { product: '', line: selectedLines.value[0] ? String(selectedLines.value[0].id) : '', display_order: 0, memo: '', is_active: true })
+  Object.assign(form, { monitor_type: 'progress', product: '', line: selectedLines.value[0] ? String(selectedLines.value[0].id) : '', display_order: 0, memo: '', is_active: true })
   editingId.value = null; editorError.value = ''; productSearch.value = ''
 }
 async function openAdd() { resetForm(); await fetchProducts(); editorOpen.value = true }
 function openEdit(target) {
   editingId.value = target.target_id
-  Object.assign(form, { product: String(target.product_id), line: String(target.line_id), display_order: target.display_order, memo: target.memo || '', is_active: target.is_active })
+  Object.assign(form, { monitor_type: target.monitor_type || 'progress', product: String(target.product_id), line: String(target.line_id), display_order: target.display_order, memo: target.memo || '', is_active: target.is_active })
   productSearch.value = target.product_code
   products.value = [{ id: target.product_id, product_code: target.product_code, product_name: target.product_name }]
   editorError.value = ''; editorOpen.value = true
@@ -215,7 +229,7 @@ function closeEditor() { editorOpen.value = false }
 async function saveTarget() {
   if (!canEdit.value) return
   saving.value = true; editorError.value = ''
-  const payload = { product: Number(form.product), line: Number(form.line), display_order: Number(form.display_order || 0), memo: form.memo || '', is_active: Boolean(form.is_active) }
+  const payload = { monitor_type: form.monitor_type, product: Number(form.product), line: Number(form.line), display_order: Number(form.display_order || 0), memo: form.memo || '', is_active: Boolean(form.is_active) }
   try {
     if (editingId.value) await api.progressMonitor.updateTarget(editingId.value, payload)
     else await api.progressMonitor.createTarget(payload)

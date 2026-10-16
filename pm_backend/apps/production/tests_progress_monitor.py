@@ -162,6 +162,32 @@ class ProgressMonitorApiTest(APITestCase):
         self.assertEqual(response.data['rows'], [])
         self.assertEqual([item['target_id'] for item in response.data['targets']], [inactive.id])
 
+    def test_create_defaults_monitor_type_to_progress(self):
+        response = self.client.post(reverse('progress-monitor-target-list'), {
+            'product': self.product.id, 'line': self.line.id,
+            'display_order': 0, 'memo': '', 'is_active': True,
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['monitor_type'], 'progress')
+
+    def test_snapshot_includes_monitor_type_and_inventory_fields(self):
+        target = self.create_target(monitor_type=ProgressMonitorTarget.MONITOR_TYPE_INVENTORY)
+        self.create_backlog(
+            self.process1, 0, scrap_qty=4, stock_qty=-6, planned_stock_qty=8,
+        )
+
+        response = self.snapshot()
+
+        row = response.data['rows'][0]
+        self.assertEqual(row['target_id'], target.id)
+        self.assertEqual(row['monitor_type'], 'inventory')
+        cell = row['cells']['2026-10-16']
+        self.assertEqual(cell['scrap'], 4)
+        self.assertEqual(cell['stock'], -6)
+        self.assertEqual(cell['planned_stock'], 8)
+        target_entry = next(item for item in response.data['targets'] if item['target_id'] == target.id)
+        self.assertEqual(target_entry['monitor_type'], 'inventory')
+
     def test_snapshot_rejects_unassigned_unit_and_invalid_horizon(self):
         outside = self.client.get(reverse('progress-monitor-target-snapshot'), {
             'unit_id': self.other_unit.id, 'start_date': '2026-10-01', 'horizon': 30,
