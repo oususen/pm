@@ -561,6 +561,7 @@ const departmentTemplatePermissions = ref([])
     { value: 'masters.work_pattern', label: 'マスタ: 勤務パターン' },
     { value: 'masters.contact', label: 'マスタ: 連絡先マスタ' },
     { value: 'masters.kubota_sakai_truck', label: 'マスタ: クボタ堺便マスタ' },
+    { value: 'masters.interruption_reason', label: 'マスタ: 中断理由マスタ' },
     { value: 'settings', label: '設定' },
   { value: 'settings.profile', label: '設定: プロフィール編集' },
   { value: 'settings.users', label: '設定: ユーザー管理' },

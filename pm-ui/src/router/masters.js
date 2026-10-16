@@ -125,6 +125,12 @@ const masters = [
     component: () => import("@/views/masters/SourcingBulkChange.vue"),
     meta: { pageTitle: "加工先一括変更", resource: "masters.sourcing_bulk_change" },
   },
+  {
+    path: "/masters/interruption-reason",
+    name: "InterruptionReasonMaster",
+    component: () => import("@/views/masters/InterruptionReasonMaster.vue"),
+    meta: { pageTitle: "中断理由マスタ", resource: "masters.interruption_reason" },
+  },
 ];
 
 export default masters;

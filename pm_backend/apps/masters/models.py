@@ -1102,3 +1102,52 @@ class ManualDocument(models.Model):
 
     def __str__(self):
         return self.doc_key
+
+
+class InterruptionReason(models.Model):
+    """中断理由マスタ（ブレーキ・板金スポット等の中断・強制終了理由コード）"""
+
+    LINE_CATEGORY_CHOICES = [
+        ('1', 'レーザー（予約）'),
+        ('2', 'ブレーキ・板金スポット'),
+        ('3', 'その他の一般の工程'),
+    ]
+    CATEGORY_CHOICES = [
+        ('1', '設備'),
+        ('2', '治具'),
+        ('3', '品質'),
+        ('4', '活動'),
+        ('9', 'その他'),
+    ]
+    OPERATION_PAUSE = 'PAUSE'
+    OPERATION_TEMP_END = 'TEMP_END'
+    OPERATION_CHOICES = [
+        (OPERATION_PAUSE, '中断'),
+        (OPERATION_TEMP_END, '強制終了'),
+    ]  # production/models_brake_line_record.py の BrakeLineRecord.OPERATOR_ACTION_CHOICES と同じ値にすること
+
+    id = models.BigAutoField(primary_key=True)
+    code = models.CharField(max_length=4, unique=True, verbose_name='コード')
+    line_category = models.CharField(max_length=1, choices=LINE_CATEGORY_CHOICES, verbose_name='ライン種別')
+    category = models.CharField(max_length=1, choices=CATEGORY_CHOICES, verbose_name='類別')
+    display_name = models.CharField(max_length=100, verbose_name='表示名')
+    operation = models.CharField(max_length=20, choices=OPERATION_CHOICES, verbose_name='操作')
+    display_order = models.IntegerField(default=0, verbose_name='表示順')
+    is_active = models.BooleanField(default=True, verbose_name='有効')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='作成日時')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新日時')
+
+    class Meta:
+        db_table = 'm_interruption_reason'
+        verbose_name = '中断理由'
+        verbose_name_plural = '中断理由'
+        ordering = ['line_category', 'display_order', 'code']
+        constraints = [
+            models.CheckConstraint(condition=models.Q(code__regex=r'^[0-9]{4}$'), name='mir_code_format_valid'),
+            models.CheckConstraint(condition=models.Q(line_category__in=['1', '2', '3']), name='mir_line_category_valid'),
+            models.CheckConstraint(condition=models.Q(category__in=['1', '2', '3', '4', '9']), name='mir_category_valid'),
+            models.CheckConstraint(condition=models.Q(operation__in=['PAUSE', 'TEMP_END']), name='mir_operation_valid'),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.display_name}"

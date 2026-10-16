@@ -8,7 +8,7 @@ from .models import (
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceHistory, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
-    ProductStockLocation, LineCycleTime,
+    ProductStockLocation, LineCycleTime, InterruptionReason,
 )
 
 def build_media_absolute_url(request, raw_url):
@@ -900,3 +900,38 @@ class LineCycleTimeSerializer(serializers.ModelSerializer):
     class Meta:
         model = LineCycleTime
         fields = '__all__'
+
+
+class InterruptionReasonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InterruptionReason
+        fields = '__all__'
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        code = attrs.get('code', getattr(self.instance, 'code', None))
+        if code:
+            # line_category/categoryはコードの1・2桁目から強制導出する（クライアント送信値は無視）
+            attrs['line_category'] = code[0]
+            attrs['category'] = code[1]
+        return attrs
+
+    def validate_code(self, value):
+        if self.instance and value != self.instance.code:
+            raise serializers.ValidationError('コードは作成後に変更できません。')
+        return value
+
+    def validate_line_category(self, value):
+        if self.instance and value != self.instance.line_category:
+            raise serializers.ValidationError('ライン種別は作成後に変更できません。')
+        return value
+
+    def validate_category(self, value):
+        if self.instance and value != self.instance.category:
+            raise serializers.ValidationError('類別は作成後に変更できません。')
+        return value
+
+    def validate_operation(self, value):
+        if self.instance and value != self.instance.operation:
+            raise serializers.ValidationError('操作は作成後に変更できません。')
+        return value

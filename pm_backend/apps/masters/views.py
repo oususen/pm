@@ -28,7 +28,7 @@ from .models import (
     BOM, BOMItem, Routing, RoutingStep, RoutingChangeHistory, RoutingStepMaterial, ProductGroup, ContainerCapacity,
     ContainerCapacityImage, ProductContainer, Equipment, Contact,
     KubotaSakaiTruck, SupplierTruck, MobileDevice, MobileDeviceHistory, MobileDeviceInventory, ManualDocument, ProductCodeMapping,
-    ProductStockLocation, LineCycleTime,
+    ProductStockLocation, LineCycleTime, InterruptionReason,
 )
 from .serializers import (
     ProductSerializer, CustomerSerializer, ProcessSerializer, LineSerializer,
@@ -36,8 +36,9 @@ from .serializers import (
     BOMSerializer, BOMListSerializer, BOMItemSerializer, RoutingSerializer, RoutingListSerializer, RoutingStepSerializer,
     RoutingChangeHistorySerializer, RoutingStepMaterialSerializer, ProductGroupSerializer, ContainerCapacitySerializer, EquipmentSerializer, ContactSerializer,
     KubotaSakaiTruckSerializer, SupplierTruckSerializer, MobileDeviceSerializer, MobileDeviceHistorySerializer, MobileDeviceInventorySerializer, ProductCodeMappingSerializer,
-    LineCycleTimeSerializer,
+    LineCycleTimeSerializer, InterruptionReasonSerializer,
 )
+from .permissions import InterruptionReasonPermission
 from .services.routing_service import (
     build_effective_routing_q,
     build_effective_routing_range_q,
@@ -6256,3 +6257,17 @@ class SourcingBulkChangeView(MastersPermissionMixin, viewsets.ViewSet):
             'bom_updated': bom_updated,
             'routing_step_updated': step_updated,
         })
+
+
+class InterruptionReasonViewSet(viewsets.ModelViewSet):
+    """中断理由マスタ: 読み取りは認証済みなら誰でも可、更新系はcan_editが必要（DELETE未提供、無効化のみ）"""
+    queryset = InterruptionReason.objects.all()
+    serializer_class = InterruptionReasonSerializer
+    pagination_class = None
+    permission_classes = [IsAuthenticated, InterruptionReasonPermission]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'line_category', 'category', 'operation']
+    search_fields = ['code', 'display_name']
+    ordering_fields = ['line_category', 'display_order', 'code']
+    ordering = ['line_category', 'display_order', 'code']
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
