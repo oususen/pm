@@ -155,7 +155,7 @@ const CATEGORY_CHOICES = [
   { value: '2', label: '2: 治具' },
   { value: '3', label: '3: 品質' },
   { value: '4', label: '4: 活動' },
-  { value: '9', label: '9: その他' },
+  { value: '9', label: '9: 一般' },
 ]
 const OPERATION_CHOICES = [
   { value: 'PAUSE', label: '中断' },

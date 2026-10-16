@@ -1117,7 +1117,7 @@ class InterruptionReason(models.Model):
         ('2', '治具'),
         ('3', '品質'),
         ('4', '活動'),
-        ('9', 'その他'),
+        ('9', '一般'),
     ]
     OPERATION_PAUSE = 'PAUSE'
     OPERATION_TEMP_END = 'TEMP_END'
