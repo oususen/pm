@@ -57,6 +57,8 @@ BASE_SQL_SCHEMA = {
     ),
     # ラインマスタのビュー(AI用ビュー作成計画 §15。lead_time_days・use_direct_process・created_at・updated_at は非公開)
     'v_ai_line': ('id', 'line_code', 'line_name', 'calendar_id', 'line_type', 'is_active'),
+    # 設備マスタのビュー(AI用ビュー作成計画 §32。display_order・notes・created_at・updated_at は非公開)
+    'v_ai_equipment': ('id', 'equipment_code', 'equipment_name', 'is_active', 'line_id', 'process_id'),
     # 仕入先マスタのビュー(AI用ビュー作成計画 §17。contact_person・phone_number・order_email は個人名・連絡先のため非公開)
     'v_ai_supplier': ('id', 'supplier_code', 'supplier_name', 'supplier_type', 'calendar_id'),
     # 得意先マスタのビュー(AI用ビュー作成計画 §21。created_at・updated_at は非公開)
@@ -157,6 +159,13 @@ TABLE_NOTES = {
         'OUTSOURCE=外作ライン(現在は使っていない。削除予定)、OTHER=クボタ納期調整(意味の文章は未確認)。'
         'calendar_id はラインの勤務カレンダ(稼働カレンダの calendar_id と結べる。空のラインがある)。'
         'is_active は有効(1)・無効(0)。工程は m_process の line_id(v_ai_process の line_id)でラインに結べる。'
+    ),
+    'v_ai_equipment': (
+        '設備マスタ(m_equipment)のビュー。1行=1設備(全行。無効な設備も含むため、有効な設備だけを見るときは is_active=1 で絞る)。'
+        'equipment_code は設備コード(一意)、equipment_name は設備名。'
+        'line_id は設備の所属ライン(v_ai_line の id と結べる)、process_id は設備の所属工程(v_ai_process の id と結べる)。'
+        'line_id=9(ブレーキライン)の設備3台(YB-006・YB-009・YB-010)は、同じラインの複数工程(process_code 4010・4040)で共用するため process_id が空(NULL)。'
+        'is_active は有効(1)・無効(0)。'
     ),
     'v_ai_supplier': (
         '仕入先マスタ(m_supplier)のビュー。1行=1仕入先(全行。is_active の列はない)。'

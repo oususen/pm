@@ -75,6 +75,11 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'line_code': 'VARCHAR', 'line_name': 'VARCHAR', 'calendar_id': 'BIGINT',
         'line_type': 'VARCHAR', 'is_active': 'BIGINT',
     },
+    # 設備マスタ(m_equipmentのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_equipmentと照合する)
+    'v_ai_equipment': {
+        'id': 'BIGINT', 'equipment_code': 'VARCHAR', 'equipment_name': 'VARCHAR',
+        'is_active': 'BIGINT', 'line_id': 'BIGINT', 'process_id': 'BIGINT',
+    },
     # 仕入先マスタ(m_supplierのSHOW COLUMNSから導出。ビュー作成後にSHOW COLUMNS FROM v_ai_supplierと照合する)
     'v_ai_supplier': {
         'id': 'BIGINT', 'supplier_code': 'VARCHAR', 'supplier_name': 'VARCHAR', 'supplier_type': 'VARCHAR',
