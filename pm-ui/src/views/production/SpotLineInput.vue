@@ -55,7 +55,8 @@
 
         <div class="section-title" style="margin-top:12px">作業者</div>
         <div class="operator-area">
-          <input type="text" v-model="operator" class="operator-input" placeholder="作業者名を入力" />
+          <!-- 表示専用（ログイン者） -->
+          <input type="text" v-model="operator" class="operator-input" readonly tabindex="-1" placeholder="作業者未設定" />
         </div>
 
         <div class="section-title" style="margin-top:12px">印刷設定</div>
@@ -1064,7 +1065,6 @@ async function save() {
         product_code:          item.product_code,
         equipment_id:          eqId,
         plan_date:             targetWorkDate,
-        operator:              operator.value,
         operator_action:       selectedAction.value,
         operator_action_reason: actionReason.value,
         qty:                   (requiresQty.value && isFirst) ? inputQty.value : 0,
@@ -1514,6 +1514,7 @@ function showToast(message, type = 'success') {
   box-sizing: border-box;
   margin-bottom: 4px;
 }
+.operator-input[readonly] { background: #f1f3f5; color: #333; cursor: default; }
 .print-setting-area { display: flex; flex-direction: column; gap: 6px; }
 .print-setting-hint {
   font-size: 11px;

@@ -62,7 +62,9 @@
             type="text"
             v-model="operator"
             class="operator-input"
-            :placeholder="t('brakeInput.operatorPlaceholder')"
+            readonly
+            tabindex="-1"
+            :placeholder="t('brakeInput.operatorUnset')"
           />
         </div>
 
@@ -1256,7 +1258,6 @@ async function save() {
       product_code:          item.product_code,
       equipment_id:          selectedEquipmentId.value,
       plan_date:             targetWorkDate,
-      operator:              operator.value,
       operator_action:       selectedAction.value,
       operator_action_reason: actionReason.value,
       qty:                   requiresQty.value ? inputQty.value : 0,
@@ -1814,6 +1815,7 @@ function showToast(message, type = 'success') {
   font-size: 13px;
   box-sizing: border-box;
 }
+.operator-input[readonly] { background: #f1f3f5; color: #333; cursor: default; }
 .print-setting-area {
   padding: 4px 12px 8px;
   display: flex;

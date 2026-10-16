@@ -20,8 +20,10 @@ from production.models_brake_line_record import BrakeLineRecord
 from production.models_line_backlog import LineBacklog
 from production.models_record_inquiry_setting import ProductionRecordInquirySetting
 from production.services.brake_spot_session_sync import (
+    BRAKE_SPOT_LOGIN_REQUIRED_MESSAGE,
     find_equipment_active_product_conflict,
     lock_and_reject_duplicate_operator_action,
+    resolve_brake_spot_operator,
 )
 from production.serializers_process_realtime import check_plan_overrun
 
@@ -396,13 +398,24 @@ class SpotLineRecordView(APIView):
 
     @transaction.atomic
     def post(self, request):
+        # 作業者は request.user からサーバーが決める（画面送信の operator は使わない）。他の検証より先に行う
+        resolved_operator = resolve_brake_spot_operator(request)
+        if resolved_operator is None:
+            return Response(
+                {
+                    'detail': BRAKE_SPOT_LOGIN_REQUIRED_MESSAGE,
+                    'operator_login_id': [BRAKE_SPOT_LOGIN_REQUIRED_MESSAGE],
+                },
+                status=400,
+            )
+        operator_name, operator_login_id, operator_user = resolved_operator
+
         line_id        = request.data.get('line_id')
         process_id     = request.data.get('process_id')
         product_id     = request.data.get('product_id')
         product_code   = request.data.get('product_code', '')
         equipment_id   = request.data.get('equipment_id')
         plan_date_str  = request.data.get('plan_date')
-        operator       = request.data.get('operator', '')
         operator_action        = str(request.data.get('operator_action', '')).upper()
         operator_action_reason = request.data.get('operator_action_reason', '')
         qty_raw        = request.data.get('qty', 0)
@@ -486,8 +499,9 @@ class SpotLineRecordView(APIView):
             product_id=product_id or None,
             product_code=product_code,
             equipment_id=equipment_id or None,
-            operator=operator,
-            operator_user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
+            operator=operator_name,
+            operator_login_id=operator_login_id,
+            operator_user=operator_user,
             operator_action=operator_action,
             operator_action_reason=operator_action_reason,
             qty=qty,
@@ -531,6 +545,7 @@ class SpotLineRecordView(APIView):
         response_data = {
             'id':              rec.id,
             'operator':        rec.operator,
+            'operator_login_id': rec.operator_login_id,
             'operator_action': rec.operator_action,
             'equipment':       rec.equipment_id,
             'equipment_code':  rec.equipment.equipment_code if rec.equipment else '',

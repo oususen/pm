@@ -8,8 +8,26 @@ from production.serializers_process_realtime import (
     SESSION_ACTIONS,
     _sync_record_session_meta,
     apply_operator_action_session,
+    build_worker_display_name,
 )
 from masters.models import Process, Product
+
+BRAKE_SPOT_LOGIN_REQUIRED_MESSAGE = 'ブレーキ・スポットの記録にはログインが必要です。'
+
+
+def resolve_brake_spot_operator(request):
+    """
+    ブレーキ・スポットの作業者を request.user から決める。
+    未ログイン、または username が空なら None。
+    それ以外は (名前, ログインID, ユーザー) の組を返す。
+    """
+    user = getattr(request, 'user', None)
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return None
+    username = str(getattr(user, 'username', '') or '').strip()
+    if not username:
+        return None
+    return build_worker_display_name(user), user.username, user
 
 
 ACTIVE_BRAKE_SPOT_ACTIONS = {
