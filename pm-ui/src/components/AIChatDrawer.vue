@@ -278,6 +278,7 @@ const uploadAttachment = async () => {
 }
 
 const loadProviderSettings = async () => {
+  if (!hasPermission(authState.user, 'ai.chat', 'view')) return
   try {
     const { data } = await api.aiChat.status({ screen_context: aiDrawerSourcePath.value })
     screenInfo.value = data.screen || null
