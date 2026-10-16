@@ -266,6 +266,16 @@ const tiles = computed(() => {
       resource: "production.progress",
     },
     {
+      to: "/production/progress-monitor",
+      label: "進度監視",
+      icon: "★",
+      iconLabel: "監視",
+      description: "グループ別に登録製品の進度を確認",
+      category: "inventory",
+      required: "view",
+      resource: "production.progress",
+    },
+    {
       to: "/production/line-calendars",
       label: t("productionMenu.tiles.lineCalendars"),
       icon: "⏱",

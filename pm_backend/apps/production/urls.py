@@ -100,6 +100,7 @@ from production.views_actual_cycle_time import (
     FinishedProductCycleTimeListView,
     FinishedProductCycleTimeLatestForLineView,
 )
+from production.views_progress_monitor import ProgressMonitorTargetViewSet
 
 router = DefaultRouter()
 router.register(r'line-demands', LineDemandViewSet, basename='linedemand')
@@ -122,6 +123,7 @@ router.register(r'gantt-display-product-maps', GanttDisplayProductMapViewSet, ba
 router.register(r'line-product-display-orders', LineProductDisplayOrderViewSet, basename='lineproductdisplayorder')
 router.register(r'morning-meetings', MorningMeetingViewSet, basename='morningmeeting')
 router.register(r'daily-process-targets', DailyProcessTargetViewSet, basename='daily-process-target')
+router.register(r'progress-monitor-targets', ProgressMonitorTargetViewSet, basename='progress-monitor-target')
 
 # Execution endpoints
 router.register(r'stock-allocations', StockAllocationViewSet, basename='stockallocation')

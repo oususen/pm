@@ -39,6 +39,7 @@ from .models_stocktake_record import StocktakeRecord
 from .models_singleproc_finished_entry import SingleProcFinishedEntry
 from .models_morning_meeting import MorningMeeting, MorningMeetingParticipant, MorningMeetingAttachment
 from .models_production_lock import ProductionLock
+from .models_progress_monitor import ProgressMonitorTarget
 
 
 class LineDemand(models.Model):

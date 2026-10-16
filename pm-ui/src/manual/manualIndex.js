@@ -118,6 +118,7 @@ export const manualSections = [
       { title: "仕損履歴", path: "生産/仕損履歴.md" },
       { title: "進捗管理", path: "生産/進捗管理.md" },
       { title: "進捗のみ", path: "生産/進捗のみ.md" },
+      { title: "進度監視", path: "生産/進度監視.md" },
       { title: "安全在庫一覧", path: "生産/安全在庫一覧.md" },
       { title: "生産実績照会", path: "生産/生産実績照会.md" },
       { title: "実進度求め", path: "在庫/実進度求め.md" },
