@@ -429,6 +429,22 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - **未解決の確認事項**：権限の付与SQL（計画書 §33.4。`operator_name` を含む5列）は未実行（BOSSが実行）。
 - 権限の付与・定義者の付け替えは、計画書 §33.4 の手順SQL（未実行。BOSSが実行）。
 
+### 6.5-18 レーザー 生産実績（`v_ai_laser_production_actual`。2026-10-17 実装・開発DBへ`ai/0056`適用済み・本番未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_laser_production_actual`（`ai/0056`で作成） | 31列: `id`・`actual_id`・`operator_user_id`（`created_by_id`の別名）・`equipment_id`・`equipment_code`・`equipment_name`・`line_id`・`process_id`・`pattern_id`・`pattern_no`・`material_id`・`material_code`・`material_name`・`product_id`・`product_code`・`product_name`・`work_date`・`shot_count`・`process_time_per_shot`・`total_process_time`・`operator_action`・`operator_action_reason`・`units_per_shot`・`total_qty`・`scrap_qty`・`scrap_reason`・`end_operator_user_id`（`updated_by_id`の別名）・`created_at_h`・`updated_at_h`・`created_at`・`updated_at` | `t_laser_actual_detail` に `t_laser_actual` を結合（`actual_id`）。`operator_action IN ('END','PAUSE')` かつ `detail_type='COMPONENT'` の行だけ。非公開（ビューに含めない）: `detail_type`, `display_order`, ヘッダの `remarks` | 読み取り専用SQL・分析（`ai.analysis`）で、レーザーの生産実績を作業日単位で分析・説明できるようにする |
+
+- `work_date`=作業日、`total_qty`=構成部品換算数量（生産数に相当）。`operator_action` はこのビューでは `END`・`PAUSE` のみ（終了済み・中断済みの構成部品明細だけが対象）。
+- `operator_user_id` はこの記録を登録した作業者（`created_by_id` の別名。`auth_user.id` へのFK）。`end_operator_user_id` はヘッダの最終更新者（`updated_by_id` の別名。実データ上は `operator_user_id` と一致するケースが大半だが、将来の訂正操作で異なる場合がある）。いずれもIDだけを公開し、氏名は公開しない。
+- **`line_id`・`process_id` は2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL（欠損ではなく仕様。保存機能がなかった期間）**。開発DBの実データで、2026-10-13は45件中45件がNULL、2026-10-14は10件中0件がNULLと、2026-10-14を境にNULLがゼロになることを確認済み（計画書 §34.1.1）。
+- `material_id`・`material_code`・`material_name` は使用材料（`v_ai_product` と結合可能）、`product_id`・`product_code`・`product_name` は構成部品（明細の対象製品。`v_ai_product` と結合可能）。
+- `created_at_h`・`updated_at_h` はヘッダ（レーザー実績登録）の作成・更新日時、`created_at`・`updated_at`（無印）は明細（構成部品行）自体の作成・更新日時。
+- `ANALYSIS_VIEWS`（`date_field='work_date'`・`quantity_field='total_qty'`）・`ANALYSIS_COLUMN_TYPES`（31列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `t_laser_actual`・`t_laser_actual_detail` は、`production` 画面の読み取り専用SQLに元から直接の許可があり、変更していない。
+- `setup_ai_views` は `EXISTING_JOIN_VIEWS` に追加（`v_ai_process_production_actual` 等と同様、結合・WHERE句ありの扱い。`--check` で定義者等を表示するだけ、再作成しない）。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS` は変更していない（`t_laser_actual`・`t_laser_actual_detail` は他の公開ビューと列を共有しないため）。
+- 開発DBで`ai/0056`適用済み。ビューは31列で、`pm_ai_reader`による12,195件が独立JOINの12,195件と一致し、対象外の`operator_action`は0件。専用テスト15件と、専用＋関連4モジュール66件が成功し、`makemigrations --dry-run --check`は「No changes detected」、`git diff --check`も成功した。evaluator第1回はコード・SQLに不合格なし、文書の状態不一致により条件付き。
+- **未解決の確認事項**：開発DBのDEFINERは`root@localhost`で、`pm_ai_view_owner`が元2テーブルに持つ列権限は0件。計画書 §34.4 のowner権限付与・DEFINER付け替え手順は未実施（BOSSが実行）。付け替え後の`pm_ai_reader`再確認、本番反映、commit・pushも未実施。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |

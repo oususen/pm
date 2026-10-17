@@ -1609,3 +1609,146 @@ GRANT SELECT ON `<db>`.`v_ai_process_production_actual` TO 'pm_ai_reader'@'<read
 - 評価：初回実装はevaluator条件付き合格（実機検証で`event_data`の分析実行失敗を確認）。2026-10-17の本修正（公開列変更）は、まだevaluator未検証。
 - コミット：未（BOSSの指示後に実施）。
 - 未確認・未実施：`pm_ai_reader`の列権限・読み取り確認、`operator_name`を含む分析実行の実機確認、本番反映、evaluatorによる独立検証（2回目の修正分）。
+
+## 34. レーザー 生産実績のビュー `v_ai_laser_production_actual` の作成前確認・実装記録（2026-10-17。BOSS承認済み。コード実装・開発DBへの`ai/0056`適用済み・evaluator第1回条件付き）
+
+### 34.1 作成前確認
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、レーザーの生産実績(構成部品・使用材料・数量・作業日・設備・作業者アクションなど)を分析・説明できるようにする |
+| 元テーブル | `t_laser_actual`（レーザー実績ヘッダ）に`t_laser_actual_detail`（構成部品明細）を結合。`actual_id`で結合 |
+| 対象行 | `WHERE a.operator_action IN ('END', 'PAUSE') AND d.detail_type = 'COMPONENT'`（終了・中断の確定済み行、かつ構成部品の明細行だけ） |
+| 数値定義 | `total_qty`=構成部品換算数量（生産数に相当）。`work_date`=作業日（実列、計算列ではない） |
+| 公開フィールド（31列。BOSS判断で確定） | `id`、`actual_id`、`operator_user_id`（`created_by_id`の別名）、`equipment_id`、`equipment_code`、`equipment_name`、`line_id`、`process_id`、`pattern_id`、`pattern_no`、`material_id`、`material_code`、`material_name`、`product_id`、`product_code`、`product_name`、`work_date`、`shot_count`、`process_time_per_shot`、`total_process_time`、`operator_action`、`operator_action_reason`、`units_per_shot`、`total_qty`、`scrap_qty`、`scrap_reason`、`end_operator_user_id`（`updated_by_id`の別名）、`created_at_h`、`updated_at_h`（ヘッダの作成・更新日時）、`created_at`、`updated_at`（無印。明細の作成・更新日時） |
+| 非公開フィールド | `detail_type`（常に`COMPONENT`固定。WHEREの絞り込みにだけ使い、出力列には含めない）、`display_order`（画面の並び順）、ヘッダの`remarks`（開発DB確認済み：全件空。`t_laser_actual`4,997件中4,997件が空文字） |
+| 個人情報 | `operator_user_id`・`end_operator_user_id`は`auth_user.id`へのFK（氏名そのものではない）。既存の`v_ai_process_production_actual`の`operator_login_id`と同様、本ビューはIDだけを公開し、氏名は公開しない |
+
+#### 34.1.1 `line_id`・`process_id`がNULLになる期間の確認（開発DB実データ）
+
+- `t_laser_actual`の`line_id`・`process_id`は、`production/migrations/0118_laser_actual_line_process.py`（2026-10-13作成）でライン・工程の保存機能を追加した列。
+- generatorが開発DBで実データを確認：`work_date`の範囲は2026-03-16〜2026-10-15（実績全4,997件）で、`line_id IS NULL`の行は4,986件（ほぼ全件）。日別に絞って確認すると、2026-10-12は40件中40件がNULL、2026-10-13は45件中45件がNULL、**2026-10-14は10件中0件がNULL、2026-10-15は1件中0件がNULL**。2026-10-14を境に、NULLがゼロになることを確認した（BOSS確認済みの事実と一致）。
+- そのため、本ビューの`line_id`・`process_id`が2026-10-14より前の行でNULLなのは、欠損ではなく、保存機能がなかった期間の仕様であることをTABLE_NOTESに明記する。
+
+### 34.2 実装内容
+
+- 新規 `pm_backend/apps/ai/migrations/0056_ai_laser_production_actual_view.py`。`CREATE OR REPLACE VIEW v_ai_laser_production_actual AS SELECT <31列> FROM t_laser_actual_detail d JOIN t_laser_actual a ON a.id = d.actual_id WHERE a.operator_action IN ('END', 'PAUSE') AND d.detail_type = 'COMPONENT'`（標準SQLのみ・バッククォート/DEFINER/SQL SECURITY/DB修飾なし。JOIN自体は許可）。ロールバックは`DROP VIEW IF EXISTS v_ai_laser_production_actual`。依存は`ai 0055_ai_process_production_actual_view`と`production 0118_laser_actual_line_process`（`line_id`・`process_id`列の追加マイグレーション）。
+- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_laser_production_actual`（31列。マイグレーションのSELECT順と同じ）を`v_ai_process_production_actual`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§34.1の内容、`line_id`・`process_id`が2026-10-14より前はNULLになる旨、`operator_user_id`・`end_operator_user_id`がそれぞれ`created_by_id`・`updated_by_id`の別名である旨、`material_*`は使用材料・`product_*`は構成部品である旨、`created_at_h`/`updated_at_h`がヘッダ・`created_at`/`updated_at`(無印)が明細自体の日時である旨を明記）。
+- `pm_backend/apps/ai/services/analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_laser_production_actual`（label=レーザー生産実績、`date_field='work_date'`、`quantity_field='total_qty'`、説明文）を`v_ai_process_production_actual`の直後に追加。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に31列の型を追加（§34.1.2の型対応）を`v_ai_process_production_actual`の直後に追加。
+- `pm_backend/apps/ai/management/commands/setup_ai_views.py`：`EXISTING_JOIN_VIEWS`に`v_ai_laser_production_actual`を追加（既存の`v_ai_process_production_actual`等と同じ「結合・WHERE句あり」の扱い。再作成しない。`--check`で定義者等を表示するだけ）。近くのコメントの対象マイグレーション番号の一覧に`0056`を追記。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS`は変更していない（`t_laser_actual`・`t_laser_actual_detail`は他の公開ビューと列を共有しないため。§33の`v_ai_process_production_actual`と同じ扱い）。
+- 試験：`apps/ai/test_analysis_laser_production_actual_view.py`新規（15件。既存の`v_ai_process_production_actual`と同様にSimpleTestCaseで列・型・公開列・非公開列・マイグレーションSQL・`setup_ai_views`登録を検証するテストに加え、開発DBの実テーブルへ直接読み取りだけを行う件数照合テストを追加）。`ai/0056`適用後、件数照合を含む15件すべてが成功した。
+- 仕様書：本節、`AI運用規約・AI用DB辞書.md`に新規節（§6.5-18）を追加。
+
+#### 34.1.2 列型の対応（`SHOW COLUMNS FROM t_laser_actual`・`SHOW COLUMNS FROM t_laser_actual_detail`。開発DBで実測）
+
+| 列 | 元テーブル・MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id` | `t_laser_actual_detail.id`、bigint | `BIGINT` |
+| `actual_id` | `t_laser_actual_detail.actual_id`、bigint | `BIGINT` |
+| `operator_user_id` | `t_laser_actual.created_by_id`、int、NULL可 | `BIGINT` |
+| `equipment_id` | `t_laser_actual.equipment_id`、bigint | `BIGINT` |
+| `equipment_code` | `t_laser_actual.equipment_code`、varchar(50) | `VARCHAR` |
+| `equipment_name` | `t_laser_actual.equipment_name`、varchar(100) | `VARCHAR` |
+| `line_id` | `t_laser_actual.line_id`、bigint、NULL可 | `BIGINT` |
+| `process_id` | `t_laser_actual.process_id`、bigint、NULL可 | `BIGINT` |
+| `pattern_id` | `t_laser_actual.pattern_id`、bigint | `BIGINT` |
+| `pattern_no` | `t_laser_actual.pattern_no`、varchar(50) | `VARCHAR` |
+| `material_id` | `t_laser_actual.material_id`、bigint、NULL可 | `BIGINT` |
+| `material_code` | `t_laser_actual.material_code`、varchar(50) | `VARCHAR` |
+| `material_name` | `t_laser_actual.material_name`、varchar(100) | `VARCHAR` |
+| `product_id` | `t_laser_actual_detail.product_id`、bigint、NULL可 | `BIGINT` |
+| `product_code` | `t_laser_actual_detail.product_code`、varchar(50) | `VARCHAR` |
+| `product_name` | `t_laser_actual_detail.product_name`、varchar(100) | `VARCHAR` |
+| `work_date` | `t_laser_actual.work_date`、date | `DATE` |
+| `shot_count` | `t_laser_actual.shot_count`、int unsigned | `BIGINT` |
+| `process_time_per_shot` | `t_laser_actual.process_time_per_shot`、decimal(10,1) | `DECIMAL(18,1)` |
+| `total_process_time` | `t_laser_actual.total_process_time`、decimal(12,1) | `DECIMAL(18,1)` |
+| `operator_action` | `t_laser_actual.operator_action`、varchar(20) | `VARCHAR` |
+| `operator_action_reason` | `t_laser_actual.operator_action_reason`、varchar(200) | `VARCHAR` |
+| `units_per_shot` | `t_laser_actual_detail.units_per_shot`、decimal(14,3) | `DECIMAL(18,3)` |
+| `total_qty` | `t_laser_actual_detail.total_qty`、decimal(14,3) | `DECIMAL(18,3)` |
+| `scrap_qty` | `t_laser_actual_detail.scrap_qty`、decimal(14,3) | `DECIMAL(18,3)` |
+| `scrap_reason` | `t_laser_actual_detail.scrap_reason`、varchar(200) | `VARCHAR` |
+| `end_operator_user_id` | `t_laser_actual.updated_by_id`、int、NULL可 | `BIGINT` |
+| `created_at_h` | `t_laser_actual.created_at`、datetime(6) | `TIMESTAMP` |
+| `updated_at_h` | `t_laser_actual.updated_at`、datetime(6) | `TIMESTAMP` |
+| `created_at` | `t_laser_actual_detail.created_at`、datetime(6) | `TIMESTAMP` |
+| `updated_at` | `t_laser_actual_detail.updated_at`、datetime(6) | `TIMESTAMP` |
+
+参考（非公開。`ANALYSIS_COLUMN_TYPES`に含めない）：`t_laser_actual_detail.detail_type`はvarchar(20)でWHEREの絞り込みにだけ使う。`t_laser_actual_detail.display_order`はint unsigned、`t_laser_actual.remarks`はlongtextで、いずれもSELECT・WHEREのどちらでも使わない。
+
+### 34.3 承認済み計画からの逸脱・不確実な点（evaluatorへの確認依頼）
+
+1. **検証項目Aは開発DBで確認済み**。`ai/0056`適用後、`v_ai_laser_production_actual`が31列であること、`pm_ai_reader`で読んだ12,195件が独立JOINの12,195件と一致すること、対象外アクションの行が0件であることを確認した。件数照合テストもスキップせず成功した。
+2. **手順SQL（§34.4）は、既存の前例（§33.4等）と同様、`pm_ai_view_owner`への列権限付与・DEFINER付け替えのSQLを用意したが、実行していない**。開発DBで`information_schema.COLUMN_PRIVILEGES`を確認した結果、`pm_ai_view_owner`は`t_laser_actual`・`t_laser_actual_detail`のどの列にもSELECT権限を持っていない(0件)。そのため、§34.4のGRANTは、両テーブルの非公開列(`remarks`・`display_order`)以外の全列が対象になる。
+3. **検証項目Kの`makemigrations --dry-run --check`は「No changes detected」、`git diff --check`は成功を確認した**。開発DBには`ai/0056`を適用済み。
+
+### 34.4 手順SQL（`pm_ai_view_owner`への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>`は接続先のDB名。管理者で実行。`migrate ai 0056`の後）
+
+開発DB確認済み（`information_schema.COLUMN_PRIVILEGES`、2026-10-17）：`pm_ai_view_owner`は`t_laser_actual`・`t_laser_actual_detail`のどの列にもSELECT権限を持っていない（0件）。そのため、非公開列（`t_laser_actual.remarks`・`t_laser_actual_detail.display_order`）以外の全列をGRANTする。
+
+```sql
+GRANT SELECT (`id`, `work_date`, `shot_count`, `pattern_no`, `equipment_code`, `equipment_name`, `material_code`, `material_name`, `process_time_per_shot`, `total_process_time`, `created_at`, `updated_at`, `created_by_id`, `equipment_id`, `material_id`, `pattern_id`, `updated_by_id`, `operator_action`, `operator_action_reason`, `line_id`, `process_id`) ON `<db>`.`t_laser_actual` TO 'pm_ai_view_owner'@'localhost';
+GRANT SELECT (`id`, `detail_type`, `product_code`, `product_name`, `units_per_shot`, `total_qty`, `created_at`, `updated_at`, `actual_id`, `product_id`, `scrap_qty`, `scrap_reason`) ON `<db>`.`t_laser_actual_detail` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_laser_production_actual` AS
+SELECT
+    `d`.`id`,
+    `d`.`actual_id`,
+    `a`.`created_by_id` AS `operator_user_id`,
+    `a`.`equipment_id`,
+    `a`.`equipment_code`,
+    `a`.`equipment_name`,
+    `a`.`line_id`,
+    `a`.`process_id`,
+    `a`.`pattern_id`,
+    `a`.`pattern_no`,
+    `a`.`material_id`,
+    `a`.`material_code`,
+    `a`.`material_name`,
+    `d`.`product_id`,
+    `d`.`product_code`,
+    `d`.`product_name`,
+    `a`.`work_date`,
+    `a`.`shot_count`,
+    `a`.`process_time_per_shot`,
+    `a`.`total_process_time`,
+    `a`.`operator_action`,
+    `a`.`operator_action_reason`,
+    `d`.`units_per_shot`,
+    `d`.`total_qty`,
+    `d`.`scrap_qty`,
+    `d`.`scrap_reason`,
+    `a`.`updated_by_id` AS `end_operator_user_id`,
+    `a`.`created_at` AS `created_at_h`,
+    `a`.`updated_at` AS `updated_at_h`,
+    `d`.`created_at`,
+    `d`.`updated_at`
+FROM `<db>`.`t_laser_actual_detail` `d`
+JOIN `<db>`.`t_laser_actual` `a` ON `a`.`id` = `d`.`actual_id`
+WHERE `a`.`operator_action` IN ('END', 'PAUSE') AND `d`.`detail_type` = 'COMPONENT';
+GRANT SELECT ON `<db>`.`v_ai_laser_production_actual` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+```
+
+手順SQLのビュー定義は、マイグレーション0056のSELECT（標準SQL）と、列・結合・別名・WHEREが同じであること。
+
+**手順SQLは未実行**（ビュー自体は`ai/0056`で作成済みだが、本節のGRANTと`CREATE OR REPLACE DEFINER`による付け替えは実行していない。実行はBOSS）。
+
+### 34.5 検証結果（generator・evaluatorが実行。開発）
+
+- 開発DBの実データ確認（`SHOW COLUMNS`）：`t_laser_actual`22列・`t_laser_actual_detail`13列。型は§34.1.2の表のとおり実測し、計画の推測値と完全に一致した。
+- `line_id`・`process_id`のNULL実態（§34.1.1）：`work_date`が2026-10-12は40件中40件NULL、2026-10-13は45件中45件NULL、2026-10-14は10件中0件NULL、2026-10-15は1件中0件NULL。2026-10-14を境にNULLがゼロになることを確認。
+- 独立計算の期待件数（開発DB、`t_laser_actual_detail` JOIN `t_laser_actual` WHERE `operator_action IN ('END','PAUSE')` AND `detail_type='COMPONENT'`）：**12,195件**。
+- 開発DBの`django_migrations`で`ai/0056`適用済み。`v_ai_laser_production_actual`は31列で、`pm_ai_reader`による件数12,195件が独立JOINの12,195件と一致し、対象外の`operator_action`は0件。
+- `python manage.py test ai.test_analysis_laser_production_actual_view`：**15件成功**。専用モジュールと関連4モジュールの一括実行：**66件成功**。
+- `python manage.py makemigrations --dry-run --check`：「No changes detected」。
+- `git diff --check`：成功。
+- evaluator第1回は、コード・SQLに不合格なし、文書の状態不一致により条件付き。本節とAI用DB辞書の状態を実測結果へ更新した。
+- 開発DBのビューの`DEFINER`は`root@localhost`。`pm_ai_view_owner`が元2テーブルに持つ列権限は0件のため、§34.4のowner権限付与・DEFINER付け替え手順は未実施で要対応。
+
+### 34.6 反映状況
+
+- コードを実装し、開発DBへ`ai/0056`を適用済み。`v_ai_laser_production_actual`の作成、31列、`pm_ai_reader`での件数照合まで確認済み。手順SQL（§34.4）は未実行で、定義者は`root@localhost`のまま。
+- 評価：evaluator第1回はコード・SQLに不合格なし、文書の状態不一致により条件付き。本修正で実測状態へ更新し、再評価待ち。
+- コミット：未（BOSSの指示後に実施）。
+- 未確認・未実施：手順SQL（§34.4）による`pm_ai_view_owner`への元2テーブルの列権限付与とDEFINER付け替え、付け替え後の`pm_ai_reader`再確認、本番反映、commit・push、evaluator再評価。

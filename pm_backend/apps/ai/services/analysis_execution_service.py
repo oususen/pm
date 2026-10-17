@@ -60,6 +60,19 @@ ANALYSIS_COLUMN_TYPES = {
         'qty': 'DECIMAL(18,3)', 'record_type': 'VARCHAR', 'timestamp': 'TIMESTAMP', 'equipment_state': 'VARCHAR',
         'interruption_reason_code': 'VARCHAR', 'remarks': 'VARCHAR',
     },
+    # レーザーの生産実績(t_laser_actual・t_laser_actual_detailのSHOW COLUMNSから導出。bigintはBIGINT、int・int unsignedはBIGINT、
+    # varcharはVARCHAR、date はDATE、datetime(6)はTIMESTAMP、decimal(p,s)はDECIMAL(18,s))
+    'v_ai_laser_production_actual': {
+        'id': 'BIGINT', 'actual_id': 'BIGINT', 'operator_user_id': 'BIGINT', 'equipment_id': 'BIGINT',
+        'equipment_code': 'VARCHAR', 'equipment_name': 'VARCHAR', 'line_id': 'BIGINT', 'process_id': 'BIGINT',
+        'pattern_id': 'BIGINT', 'pattern_no': 'VARCHAR', 'material_id': 'BIGINT', 'material_code': 'VARCHAR',
+        'material_name': 'VARCHAR', 'product_id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR',
+        'work_date': 'DATE', 'shot_count': 'BIGINT', 'process_time_per_shot': 'DECIMAL(18,1)',
+        'total_process_time': 'DECIMAL(18,1)', 'operator_action': 'VARCHAR', 'operator_action_reason': 'VARCHAR',
+        'units_per_shot': 'DECIMAL(18,3)', 'total_qty': 'DECIMAL(18,3)', 'scrap_qty': 'DECIMAL(18,3)',
+        'scrap_reason': 'VARCHAR', 'end_operator_user_id': 'BIGINT', 'created_at_h': 'TIMESTAMP',
+        'updated_at_h': 'TIMESTAMP', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
+    },
     # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
     'v_ai_product': {
         'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'category': 'VARCHAR', 'unit': 'VARCHAR',

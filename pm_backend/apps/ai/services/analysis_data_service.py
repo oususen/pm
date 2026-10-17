@@ -43,6 +43,20 @@ ANALYSIS_VIEWS = {
             'interruption_reason_code=中断理由コード(このビューの行では常に空文字。PAUSE・TEMP_END専用の列のため)。'
         ),
     },
+    # レーザーの生産実績。日別・期間集計はwork_date(作業日)を使う。生産数に相当するのはtotal_qty(構成部品換算数量)(AI用ビュー作成計画 §34)。
+    'v_ai_laser_production_actual': {
+        'label': 'レーザー生産実績', 'date_field': 'work_date', 'quantity_field': 'total_qty',
+        'description': (
+            '1行はレーザー実績登録1回の構成部品明細1行(operator_actionがEND・PAUSEの行だけ。構成部品以外の明細(集計行など)は対象外)。'
+            '日別・期間集計はwork_date(作業日)を使う。生産数に相当するのはtotal_qty(構成部品換算数量)。'
+            '列の意味: operator_action=作業者アクション(このビューではEND・PAUSEのみ)、'
+            'operator_user_id=この記録を登録した作業者(auth_user.idへのFK)、'
+            'end_operator_user_id=ヘッダの最終更新者(実データ上はoperator_user_idと一致するケースが大半だが、将来の訂正操作で異なる場合がある)、'
+            'material_id・material_code・material_name=使用材料、product_id・product_code・product_name=構成部品(明細の対象製品)、'
+            'line_id・process_id=2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様)、'
+            'created_at_h・updated_at_h=ヘッダ(レーザー実績登録)の作成・更新日時、created_at・updated_at(無印)=明細(構成部品行)自体の作成・更新日時。'
+        ),
+    },
     # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。
     # 列の意味は、仕様書で確認できたものだけを書く(AI用ビュー作成計画 §4.1-1)。
     'v_ai_product': {

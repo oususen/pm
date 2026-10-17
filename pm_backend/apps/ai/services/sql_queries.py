@@ -49,6 +49,16 @@ BASE_SQL_SCHEMA = {
         'id', 'business_day', 'operator_login_id', 'operator_name', 'process_id', 'product_code', 'product_id',
         'product_name', 'qty', 'record_type', 'timestamp', 'equipment_state', 'interruption_reason_code', 'remarks',
     ),
+    # レーザーの生産実績のビュー(AI用ビュー作成計画 §34。t_laser_actual_detail に t_laser_actual を結合。
+    # operator_action IN ('END','PAUSE') かつ detail_type='COMPONENT' の行だけ。非公開: detail_type・display_order・ヘッダの remarks。
+    # 列順はマイグレーションのSELECT順と同じ。operator_user_id=created_by_idの別名、end_operator_user_id=updated_by_idの別名)
+    'v_ai_laser_production_actual': (
+        'id', 'actual_id', 'operator_user_id', 'equipment_id', 'equipment_code', 'equipment_name', 'line_id',
+        'process_id', 'pattern_id', 'pattern_no', 'material_id', 'material_code', 'material_name', 'product_id',
+        'product_code', 'product_name', 'work_date', 'shot_count', 'process_time_per_shot', 'total_process_time',
+        'operator_action', 'operator_action_reason', 'units_per_shot', 'total_qty', 'scrap_qty', 'scrap_reason',
+        'end_operator_user_id', 'created_at_h', 'updated_at_h', 'created_at', 'updated_at',
+    ),
     # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
         'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
@@ -152,6 +162,18 @@ TABLE_NOTES = {
         'interruption_reason_code は中断理由コードの列だが、PAUSE・TEMP_END(作業者アクション)の行専用の値のため、このビュー(PRODUCTIONの行だけ)では常に空文字になる(業務上の意味はなく、分析に使わない)。'
         'equipment_state は設備状態(このビューの行では、登録時点の値がそのまま入る)。'
         'remarks は備考(自由記述。元テーブルの生の列と同じ値で、業務上の記載内容は未確認)。'
+    ),
+    'v_ai_laser_production_actual': (
+        'レーザーの生産実績(t_laser_actual_detail に t_laser_actual を結合したビュー)。1行=レーザー実績登録1回の構成部品明細1行'
+        '(operator_action が END(終了)・PAUSE(中断)の行だけ。START・RESUME等の作業者アクションや、構成部品以外の明細(集計行など)はこのビューに出ない)。'
+        '日別・期間の集計は work_date(作業日)を使う。生産数に相当するのは total_qty(構成部品換算数量)。'
+        'operator_action はEND・PAUSEのみ(このビューは終了済み・中断済みの構成部品明細だけが対象)。'
+        'operator_user_id はこの記録を登録した作業者(created_by_id の別名。auth_user.id へのFK)。'
+        'end_operator_user_id はヘッダの最終更新者(updated_by_id の別名。実データ上は operator_user_id と一致するケースが大半だが、将来の訂正操作で異なる場合がある)。'
+        'material_id・material_code・material_name は使用材料(品番マスタビュー v_ai_product と結合可能)、'
+        'product_id・product_code・product_name は構成部品(明細の対象製品。v_ai_product と結合可能)。'
+        'line_id・process_id は2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様。保存機能がなかった期間)。'
+        'created_at_h・updated_at_h はヘッダ(レーザー実績登録)の作成・更新日時、created_at・updated_at(無印)は明細(構成部品行)自体の作成・更新日時。'
     ),
     'v_ai_product': (
         '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'
