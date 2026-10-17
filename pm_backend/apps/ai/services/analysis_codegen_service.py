@@ -73,6 +73,19 @@ EXAMPLE_PROGRAM = (
     'emit_chart("bar", "品番別の出荷数量", labels, [{"name": "数量", "values": values}])\n'
     'emit_table("品番別の出荷数量", ["品番", "製品名", "数量"], [[code, name, float(qty)] for code, name, qty in rows])'
 )
+
+# 返却形式の最初の例。期間を使う通常の分析では、SQLの変数とparametersを必ず一緒に返す形を最初に示す。
+CODEGEN_RESPONSE_EXAMPLE = {
+    'steps': [{
+        'name': 'w_period',
+        'query': 'SELECT * FROM 承認済みビュー名 WHERE 日付列 BETWEEN {{period_from}} AND {{period_to}}',
+    }],
+    'python': "emit_report('分析結果')",
+    'parameters': [
+        {'name': 'period_from', 'type': 'date', 'label': '開始日'},
+        {'name': 'period_to', 'type': 'date', 'label': '終了日'},
+    ],
+}
 PYTHON_EXAMPLE_TEXT = (
     'Pythonの例(全体。改行も含めて、そのまま有効なコード。w_summaryは、先のstepで作った中間テーブル): \n' + EXAMPLE_PROGRAM + '\n'
     'x・列名・行は、このようにfetchall()の結果から作る。月などの表示名を、文字列で直接書かない。'
@@ -175,7 +188,9 @@ REFERENCE_RULE_CODE = (
 SYSTEM_PROMPT = (
     'あなたは、DuckDB上で動く分析用のSQLとPythonだけを作る。実データは見えない。数値・結果・実行済みの説明を作らない。'
     '利用できるテーブルは、user側のdatasetsにある承認済みビューだけ(列名と型も、そこに示した列だけ)。'
-    '返すのはJSONのみ。形式は {"steps": [{"name": "w_中間テーブル名", "query": "SELECT または WITH で始まる問い合わせ1つ"}], "python": "Pythonのコード"}。'
+    '返すのはJSONのみ。期間の変数を使う場合の完全な形式は ' + json.dumps(CODEGEN_RESPONSE_EXAMPLE, ensure_ascii=False) + '。'
+    'この形式例の「承認済みビュー名」と「日付列」は、user側のdatasetsにある実際の名前へ置き換える。'
+    '変数を一切使わない場合だけ、parametersを省略できる。'
     '分析できない・必要なデータが足りない場合は、近似の別分析を作らず {"unsupported": "理由"} を返す。'
     '目的・手順・出力案が求める区別・照合方向・対象範囲・全行保持・複数一致の扱いをSQLから最終表示まで反映する。'
     '一覧・明細・照合相手を並べる要求では、元の行と相手の識別ID(承認列にある場合)・要求した列を、中間SQLから最終結果表まで保持する。'

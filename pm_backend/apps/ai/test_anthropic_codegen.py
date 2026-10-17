@@ -41,6 +41,8 @@ class AnthropicCodegenTests(CodegenBase):
         self.assertIsNone(state.get('approved_at'))
         body = json.loads(api.call_args.args[0].data)
         self.assertEqual(body['output_config']['format']['schema'], cg.ANTHROPIC_CODEGEN_SCHEMA)
+        self.assertIn(json.dumps(cg.CODEGEN_RESPONSE_EXAMPLE, ensure_ascii=False), body['system'])
+        self.assertIn('変数を一切使わない場合だけ、parametersを省略できる', body['system'])
         self.assertEqual(body['thinking'], {'type': 'disabled'})
         self.assertEqual(body['max_tokens'], chat_service.AGENT_MAX_TOKENS)
         for key in ('temperature', 'top_p', 'top_k'):

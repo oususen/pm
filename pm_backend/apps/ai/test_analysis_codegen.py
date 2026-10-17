@@ -304,6 +304,20 @@ class GuardTreeTest(SimpleTestCase):
 
 
 class PayloadTest(CodegenBase):
+    def test_deepseek_and_anthropic_receive_the_complete_parameterized_return_format(self):
+        expected = json.dumps(cg.CODEGEN_RESPONSE_EXAMPLE, ensure_ascii=False)
+        for provider in ('deepseek', 'anthropic'):
+            with self.subTest(provider=provider):
+                plan = {'proposal': {
+                    'purpose': '目的', 'external_purpose': '目的', 'steps': ['手順'], 'outputs': ['出力'],
+                    'date_from': '2026-01-01', 'date_to': '2026-01-31', 'datasets': DATASETS,
+                    'provider': provider, 'model': 'model',
+                }}
+                system = cg.build_messages(plan, external=True)[0]['content']
+                self.assertIn(expected, system)
+                self.assertIn('変数を一切使わない場合だけ、parametersを省略できる', system)
+                self.assertIn('BETWEEN {{period_from}} AND {{period_to}}', system)
+
     def test_the_instruction_explains_how_rows_are_read_so_that_models_do_not_use_column_names_on_tuples(self):
         # 実機で、モデルが load_view の結果を直接forで回し、row['列名']で読んで、実行時に失敗した(2026-10-06)
         plan = self.new_plan()
@@ -941,7 +955,8 @@ class ParseResponseTest(SimpleTestCase):
 
     def test_the_instruction_explains_variables_quotes_and_the_return_format(self):
         for part in ('{{period_from}} と {{period_to}}', '前後に引用符を付けない', '"parameters"', 'product_code、customer_code、ship_to_code',
-                     '日付(2026-08-01 など)・コード(V000000000 など)を、直接書かない', '使った変数は、すべて parameters に書き', '辞書・集合の閉じ括弧を連続させない'):
+                     '日付(2026-08-01 など)・コード(V000000000 など)を、直接書かない', '使った変数は、すべて parameters に書き',
+                     '変数を一切使わない場合だけ、parametersを省略できる', '辞書・集合の閉じ括弧を連続させない'):
             self.assertIn(part, cg.SYSTEM_PROMPT)
 
 
