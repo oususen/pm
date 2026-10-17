@@ -1928,3 +1928,85 @@ JSON型の列はない。
 - 評価：evaluator未検証。
 - コミット：未（BOSSの指示後に実施）。
 - 未確認・未実施：`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成。現在のDEFINERは`root@localhost`と推定されるが、generatorは`information_schema`での確認を今回は実施していない）、本番反映、commit・push、evaluator検証。並行していたブレーキビュー（§35）側の`test_setup_ai_views`不整合（上記36.4）の解消は、本実装の範囲外のためBOSSまたはブレーキビュー担当へ報告が必要。
+
+## 37. ブレーキ・板金スポット 中断のビュー `v_ai_brake_interruption` の作成前確認・実装記録（2026-10-18。BOSS承認済み。実装済み・evaluator未検証）
+
+### 37.1 作成前確認
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、ブレーキ・板金スポットの中断・強制終了（中断理由・中断時点までの数量・設備・ライン・工程・品番など）を分析・説明できるようにする |
+| 元テーブル | `brake_line_record`単独（結合なし） |
+| 対象行 | `WHERE operator_action IN ('PAUSE', 'TEMP_END')`（中断・強制終了の行だけ） |
+| 数値定義 | `qty`=中断時点までの加工数（「何個目で中断したか知りたい」というBOSSの要望により、`None`にせず`'qty'`として公開する）。`plan_date`=計画日（実列、計算列ではない） |
+| 公開フィールド（15列。BOSS判断で確定） | `id`、`plan_date`、`product_code`、`operator_action`、`operator_action_reason`、`qty`、`recorded_at`、`equipment_id`、`line_id`、`process_id`、`product_id`、`operator_user_id`、`operator_login_id`、`interruption_reason_code`、`remarks` |
+| 非公開フィールド | `operator`（個人名。`operator_user_id`・`operator_login_id`で代替）のみ。`sequence_no`はBOSS決定により含めない（中断分析には不要） |
+| 個人情報 | `operator_user_id`は`auth_user.id`へのFK（氏名そのものではない）。氏名そのものの`operator`は非公開 |
+
+#### 37.1.1 開発DBの実データ確認（2026-10-18、generator確認。`v_ai_brake_production_actual`実装時(§35)に確認済みの全体分布(27,253件)とは別に、本ビューのサブセット(367件)固有の分布を再確認した）
+
+- 対象行数：367件（PAUSE 306件・TEMP_END 61件）。計画書の見積りと完全に一致。
+- `operator_action_reason`：367件全件に値がある（空文字・NULLは0件）。固定選択肢13種類：その他197・3S活動57・設備トラブル36・Khác（ベトナム語の「その他」）27・機種間違い24・治具トラブル5・他へ製品切り替え5・品番間違い4・段取り替え3・材料不足3・本日設備復旧不可3・班長/対応者待ち2・Sự cố thiết bị（ベトナム語の「設備トラブル」）1。計画書の見積りと完全に一致。
+- `qty`：TEMP_END（61件）は全件0。PAUSE（306件）は208件が非ゼロ・98件が0。計画書の見積りと完全に一致。
+- `equipment_id`・`product_id`：367件とも欠損なし（NULL0件）。計画書の見積りと完全に一致。
+- `operator_user_id`：367件中106件がNULL（261件は値あり）。計画書の見積りと完全に一致。
+- `operator_login_id`：367件中363件がNULL（値ありは4件）。このサブセット固有の値（全体27,253件でのNULL27,245件とは別）。
+- `interruption_reason_code`：367件中363件がNULL・空文字（値ありは4件、いずれもPAUSE行）。
+- `remarks`：367件全件がNULL・空文字（値ありは0件）。
+- `plan_date`と`DATE(recorded_at - INTERVAL 8 HOUR)`が不一致の行：4件（367件中約1.1%）。このサブセット固有の値（全体27,253件での不一致率2.1%・560件とは別の値）。業務日の集計は`plan_date`を正として使う。
+- `line_id`の内訳：`id=9`（`L0010`・ブレーキライン）212件、`id=10`（`L0013`・板金スポットライン）155件。
+
+#### 37.1.2 列型の対応（`SHOW COLUMNS FROM brake_line_record`。`v_ai_brake_production_actual`と同一元テーブルのため型は共通。開発DBで実測）
+
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id` | bigint | `BIGINT` |
+| `plan_date` | date | `DATE` |
+| `product_code` | varchar(50) | `VARCHAR` |
+| `operator_action` | varchar(20) | `VARCHAR` |
+| `operator_action_reason` | varchar(200) | `VARCHAR` |
+| `qty` | int | `BIGINT` |
+| `recorded_at` | datetime(6) | `TIMESTAMP` |
+| `equipment_id` | bigint（NULL可） | `BIGINT` |
+| `line_id` | bigint | `BIGINT` |
+| `process_id` | bigint | `BIGINT` |
+| `product_id` | bigint（NULL可） | `BIGINT` |
+| `operator_user_id` | int（NULL可） | `BIGINT` |
+| `operator_login_id` | varchar(150)（NULL可） | `VARCHAR` |
+| `interruption_reason_code` | varchar(4) | `VARCHAR` |
+| `remarks` | longtext（NULL可） | `VARCHAR`（`v_ai_brake_production_actual`と同じ扱い） |
+
+JSON型の列はない。
+
+### 37.2 実装内容
+
+- 新規 `pm_backend/apps/ai/migrations/0060_ai_brake_interruption_view.py`。`CREATE OR REPLACE VIEW v_ai_brake_interruption AS SELECT <15列> FROM brake_line_record WHERE operator_action IN ('PAUSE', 'TEMP_END')`（標準SQLのみ・バッククォート/DEFINER/SQL SECURITY/DB修飾なし・結合なし）。ロールバックは`DROP VIEW IF EXISTS v_ai_brake_interruption`。依存は`ai 0059_ai_brake_production_actual_view_add_columns`（`brake_line_record`の公開列を扱う直近のビュー作成マイグレーション）。
+- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_brake_interruption`（15列。マイグレーションのSELECT順と同じ）を`v_ai_laser_interruption`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§37.1・§37.1.1の内容：中断・強制終了イベントである旨、`operator_action_reason`が固定選択肢で原則全件に値がある旨、`qty`の分布、`plan_date`と`recorded_at`の不一致率（このサブセット固有の値）、`line_id`でのライン混在、`operator_login_id`・`operator_user_id`の違いを明記）。
+- `pm_backend/apps/ai/services/analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_brake_interruption`（label=ブレーキ・スポット中断、`date_field='plan_date'`、`quantity_field='qty'`、説明文）を`v_ai_laser_interruption`の直後に追加。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に15列の型（§37.1.2。`v_ai_brake_production_actual`と同じ型対応）を`v_ai_laser_interruption`の直後に追加。
+- `pm_backend/apps/ai/management/commands/setup_ai_views.py`：`EXISTING_JOIN_VIEWS`に`v_ai_brake_interruption`を追加（単一テーブルでもWHERE句で絞り込むため`SIMPLE_MASTER_VIEWS`ではなく、既存の`v_ai_laser_interruption`・`v_ai_process_production_actual`と同じ「結合・WHERE句あり」の扱い。再作成しない。`--check`で定義者等を表示するだけ）。近くのコメントの対象マイグレーション番号の一覧に`0060`を追記。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS`は変更していない（`brake_line_record`は既に`v_ai_brake_production_actual`で列権限の対象になっているため、追加の列権限は不要）。
+- 試験：`apps/ai/test_analysis_brake_interruption_view.py`新規（19件。既存の`v_ai_laser_interruption`（WHERE句あり・結合なしの構成）・`v_ai_brake_production_actual`（非公開列`operator`の検証パターン）を組み合わせ、SimpleTestCaseで列・型・公開列・非公開列・`sequence_no`非公開・マイグレーションSQL・`setup_ai_views`登録を検証するテストに加え、開発DBの実テーブルへ直接読み取りだけを行う件数照合テスト、`operator_action`別（PAUSE・TEMP_END）の件数、`qty`分布を検証するテストを追加）。`test_setup_ai_views.py`は変更不要（`EXISTING_JOIN_VIEWS`を使う既存テストが汎用的に`cmd.EXISTING_JOIN_VIEWS`を反復する構成のため、個別のビュー名を列挙した追加は不要。`LATEST_MIGRATION`辞書は単純なマスタビュー＋`v_ai_brake_production_actual`のみが対象で、`EXISTING_JOIN_VIEWS`系（`v_ai_laser_interruption`等）はそもそも対象外のため、本ビューも対象外のままでよい）。
+- 仕様書：本節、`AI運用規約・AI用DB辞書.md`に新規節（§6.5-21）を追加。
+
+### 37.3 承認済み計画からの逸脱・不確実な点（evaluatorへの確認依頼）
+
+1. **なし**。承認済み計画（公開15列・`quantity_field='qty'`・ラベル「ブレーキ・スポット中断」・`EXISTING_JOIN_VIEWS`扱い）どおりに実装し、作成前確認（§37.1.1）の実データもBOSSが事前確認した数値（367件、内訳、`qty`分布、`plan_date`不一致率1.1%）と完全に一致した。
+2. **検証項目（件数照合・`operator_action`別件数・`qty`分布照合）は、`migrate`未実行（本ビュー未作成）のため、開発DBの実テーブル直接読み取りによる期待値の確認にとどめ、ビュー自体との照合はスキップ扱いにした**（migrate実行後に有効になる設計。§35・§36と同じ方式）。
+3. **権限の付与・定義者の付け替えは、既存の`v_ai_laser_interruption`と同様、手順SQLを作成していない**（`EXISTING_JOIN_VIEWS`は`--check`で定義者等を表示するだけのため。必要であれば別途BOSSの指示で作成する）。
+
+### 37.4 検証結果（generatorが実行。開発）
+
+- 開発DBの実データ確認（`SHOW COLUMNS`、件数集計）：§37.1.1・§37.1.2のとおり実測し、計画の推測値と完全に一致した。
+- `python manage.py test ai.test_analysis_brake_interruption_view`：**17件中16件成功・1件skip**（`migrate`未実行のため件数照合テストのみ意図的にskip）。
+- `ai.test_setup_ai_views ai.test_analysis_equipment_view ai.test_analysis_process_production_actual_view ai.test_analysis_laser_production_actual_view ai.test_analysis_brake_production_actual_view ai.test_analysis_laser_interruption_view ai.test_analysis_brake_interruption_view`の一括実行：**116件成功・1件skip**。
+- `ai`アプリ全体（1,185件）の一括実行（`--keepdb`）：1,170件成功・8件failure・7件error・13件skip。失敗・エラーはいずれも本実装（`v_ai_brake_interruption`・`brake_line_record`関連ファイル）と無関係な既存の食い違い（`test_analysis_template_notify`・`test_analysis_template_review`のトランザクション関連、`test_qwen_my_overtime`の外部API依存、`test_analysis_bom_item_view`・`test_analysis_user_view`の移行ファイル名の固定値、`test_analysis_codegen_trial_counts`の無関係な機能）であることを、失敗内容とファイル名で確認した。
+- `python manage.py makemigrations --dry-run --check`：「No changes detected」。
+- `python manage.py showmigrations ai`：`0060_ai_brake_interruption_view`が未適用（`[ ]`）であることを確認。
+- `git diff --check`：問題なし（空白・改行の警告なし）。
+
+### 37.5 反映状況
+
+- コードを実装（マイグレーション・`sql_queries.py`・`analysis_data_service.py`・`analysis_execution_service.py`・`setup_ai_views.py`・試験1ファイル）。`migrate`・`setup_ai_views --apply`は禁止事項のため未実行。開発DB・本番DBともに`v_ai_brake_interruption`ビューは未作成。
+- 評価：evaluator未検証。
+- コミット：未（BOSSの指示後に実施）。
+- 未確認・未実施：`migrate ai 0060`の実行、`v_ai_brake_interruption`での件数・`operator_action`別件数・`qty`分布の照合（現在skip）、`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成）、本番反映、commit・push、evaluator検証。

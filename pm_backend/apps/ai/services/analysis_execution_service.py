@@ -91,6 +91,15 @@ ANALYSIS_COLUMN_TYPES = {
         'operator_action': 'VARCHAR', 'operator_action_reason': 'VARCHAR', 'operator_user_id': 'BIGINT',
         'created_at': 'TIMESTAMP',
     },
+    # ブレーキ・板金スポットの中断(brake_line_recordのSHOW COLUMNSから導出。v_ai_brake_production_actualと同じ型対応。
+    # 2026-10-18 generator確認。JSON型の列はない)
+    'v_ai_brake_interruption': {
+        'id': 'BIGINT', 'plan_date': 'DATE', 'product_code': 'VARCHAR', 'operator_action': 'VARCHAR',
+        'operator_action_reason': 'VARCHAR', 'qty': 'BIGINT', 'recorded_at': 'TIMESTAMP',
+        'equipment_id': 'BIGINT', 'line_id': 'BIGINT', 'process_id': 'BIGINT', 'product_id': 'BIGINT',
+        'operator_user_id': 'BIGINT', 'operator_login_id': 'VARCHAR', 'interruption_reason_code': 'VARCHAR',
+        'remarks': 'VARCHAR',
+    },
     # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
     'v_ai_product': {
         'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'category': 'VARCHAR', 'unit': 'VARCHAR',

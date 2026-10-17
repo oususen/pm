@@ -75,6 +75,14 @@ BASE_SQL_SCHEMA = {
         'pattern_no', 'material_id', 'material_code', 'material_name', 'operator_action',
         'operator_action_reason', 'operator_user_id', 'created_at',
     ),
+    # ブレーキ・板金スポットの中断のビュー(AI用ビュー作成計画 次セクション。brake_line_record単独(結合なし)。
+    # operator_action IN ('PAUSE','TEMP_END')の行だけを公開。非公開: operator(個人名)のみ。
+    # sequence_noは含めない(BOSS決定、中断分析には不要)。列順はマイグレーションのSELECT順と同じ)
+    'v_ai_brake_interruption': (
+        'id', 'plan_date', 'product_code', 'operator_action', 'operator_action_reason', 'qty',
+        'recorded_at', 'equipment_id', 'line_id', 'process_id', 'product_id', 'operator_user_id',
+        'operator_login_id', 'interruption_reason_code', 'remarks',
+    ),
     # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
         'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
@@ -221,6 +229,27 @@ TABLE_NOTES = {
         '開発DB確認(2026-10-17): 現在の対象16件は全件work_dateが2026-10-14より前(2026-05-25〜2026-10-09)のため、現時点では16件全件がline_id・process_idともにNULL。'
         '将来2026-10-14以降のPAUSE・TEMP_ENDが発生すれば値が入る。material_id・equipment_id・operator_user_id(created_by_id)は、対象16件全件で値あり(NULL0件)。'
         'created_at はこのビューでは衝突する列がないため接尾辞なし(無印)で、このヘッダ行自体の作成日時。'
+    ),
+    'v_ai_brake_interruption': (
+        'ブレーキ・板金スポットの中断・強制終了(brake_line_record)のビュー。1行=1操作イベント'
+        '(operator_action が PAUSE(中断)・TEMP_END(強制終了)の行だけ。結合なし)。'
+        '開発DB確認(2026-10-18、generator確認): 367件(PAUSE 306件・TEMP_END 61件)。'
+        'operator_action_reason はこのビューでは原則全件に値がある(367件全件。PAUSE・TEMP_END行専用の固定選択肢で、自由記述ではない。'
+        '値の例: その他197・3S活動57・設備トラブル36・Khác(ベトナム語の「その他」)27・機種間違い24・治具トラブル5・他へ製品切り替え5・'
+        '品番間違い4・段取り替え3・材料不足3・本日設備復旧不可3・班長/対応者待ち2・Sự cố thiết bị(ベトナム語の「設備トラブル」)1)。'
+        'qty は中断時点までの加工数で、TEMP_END(61件)は全件0、PAUSE(306件)は208件が非ゼロ・98件が0'
+        '(「何個目で中断したか」を見たいときに使う。生産数の正式な集計には v_ai_brake_production_actual を使う)。'
+        'plan_date は実列(計画日)であり計算列ではない。recorded_atから単純に8時間引いた日付とは、'
+        'このサブセット(367件)では4件(約1.1%)が不一致(v_ai_brake_production_actualの全件(27,253件)での不一致率2.1%とは別の値)。'
+        '業務日の集計はplan_dateを正として使う。'
+        'line_id でブレーキ(id=9、L0010、212件)と板金スポット(id=10、L0013、155件)が混在する。区別するときは line_id(または v_ai_line の line_code)で絞る。'
+        'equipment_id は v_ai_equipment の id、line_id は v_ai_line の id、process_id は v_ai_process の id、product_id は v_ai_product の id と結べる'
+        '(このビューでは equipment_id・product_id とも欠損なし)。'
+        'operator_user_id はこの記録の作業者(auth_user.idへのFK。氏名そのものではない。このビューでは367件中106件がNULL)。'
+        'operator_login_id は作業者のログインID(開発DB確認: このビューでは367件中363件がNULLでほぼ未運用)。'
+        'interruption_reason_code は中断理由コード(開発DB確認: このビューでは367件中363件がNULL(空)でほぼ未運用)。'
+        'remarks は備考(開発DB確認: このビューでは367件全件が空でほぼ未運用)。'
+        'operator_login_id・interruption_reason_code・remarks はいずれも、今後のデータ蓄積を見込んで公開する(v_ai_brake_production_actualと同じ扱い)。'
     ),
     'v_ai_product': (
         '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'

@@ -88,6 +88,24 @@ ANALYSIS_VIEWS = {
             'created_at=このヘッダ行自体の作成日時。'
         ),
     },
+    # ブレーキ・板金スポットの中断。brake_line_record単独(結合なし)。日別・期間集計はplan_date(実列)を使う。
+    # quantity_field='qty'(中断時点までの数量も分析対象にするというBOSSの要望)。
+    'v_ai_brake_interruption': {
+        'label': 'ブレーキ・スポット中断', 'date_field': 'plan_date', 'quantity_field': 'qty',
+        'description': (
+            '1行は1操作イベント(brake_line_recordのoperator_actionがPAUSE(中断)・TEMP_END(強制終了)の行だけ。結合なし)。'
+            '日別・期間集計はplan_date(実列の計画日)を使う。'
+            '列の意味: operator_action=作業者アクション(このビューではPAUSE・TEMP_ENDのみ)、'
+            'operator_action_reason=固定選択肢(自由記述ではない。PAUSE・TEMP_END行は原則全件に値がある)、'
+            'qty=中断時点までの加工数(TEMP_ENDは常に0、PAUSEは値がある場合とない場合がある)、'
+            'line_id=ラインのID(9=ブレーキライン L0010、10=板金スポットライン L0013が混在。区別するときはline_idで絞る)、'
+            'recorded_at=システムの記録日時、equipment_id・process_id・product_id=それぞれ設備・工程・製品のID、'
+            'operator_user_id=この記録の作業者(auth_user.idへのFK)、'
+            'operator_login_id=作業者のログインID(ほぼ未運用だが今後のデータ蓄積を見込んで公開)、'
+            'interruption_reason_code=中断理由コード(ほぼ未運用だが今後のデータ蓄積を見込んで公開)、'
+            'remarks=備考(ほぼ未運用だが今後のデータ蓄積を見込んで公開)。'
+        ),
+    },
     # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。
     # 列の意味は、仕様書で確認できたものだけを書く(AI用ビュー作成計画 §4.1-1)。
     'v_ai_product': {
