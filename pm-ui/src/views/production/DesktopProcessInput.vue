@@ -825,8 +825,6 @@ const startedStateOperatorActions = new Set(['START', 'RESUME'])
 const startedOperatorActions = ['END', 'PAUSE']
 const pausedOperatorActions = ['RESUME', 'TEMP_END']
 
-const PAUSE_REASON_EQUIPMENT_TROUBLE = '設備トラブル'
-
 const equipmentStates = computed(() => [
   { value: 'RUNNING', label: t('processInput.equipmentState.running') },
   { value: 'IDLE', label: t('processInput.equipmentState.idle') },
@@ -2296,8 +2294,6 @@ const prepareEquipmentStateForm = () => {
   selectedOperatorAction.value = ''
 }
 
-const isEquipmentTroubleReason = (value) => String(value || '').trim() === PAUSE_REASON_EQUIPMENT_TROUBLE
-
 // ──────────────────────────────
 // 連産品
 // ──────────────────────────────
@@ -2437,7 +2433,14 @@ const submitRecord = async () => {
         if (isOtherReasonSelected.value) reasonText = (record.value.remarks || '').trim()
         data.event_data.operator_action_reason = reasonText
         data.interruption_reason_code = record.value.interruption_reason_code
-        if (submittedOperatorAction === 'PAUSE') { data.event_data.pause_reason = reasonText; moveToEquipmentState = isEquipmentTroubleReason(reasonText) }
+        if (submittedOperatorAction === 'PAUSE') {
+          data.event_data.pause_reason = reasonText
+          // 設備トラブル判定: 理由マスタのcategory='1'（設備）で判定（翻訳文字列比較は廃止）
+          const submittedReasonMaster = reasonMasterOptions.value.find(
+            (r) => String(r.code) === String(record.value.interruption_reason_code)
+          )
+          moveToEquipmentState = submittedReasonMaster?.category === '1'
+        }
         else if (submittedOperatorAction === 'TEMP_END') data.event_data.temp_end_reason = reasonText
       }
     } else {

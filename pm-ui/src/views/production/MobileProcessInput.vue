@@ -961,8 +961,6 @@ const OPERATOR_ACTION_LABEL_KEYS = {
   CANCEL: 'processInput.operatorAction.cancel',
 }
 
-const PAUSE_REASON_EQUIPMENT_TROUBLE = '設備トラブル'
-
 const equipmentStates = computed(() => [
   { value: 'RUNNING', label: t('processInput.equipmentState.running') },
   { value: 'IDLE', label: t('processInput.equipmentState.idle') },
@@ -2359,10 +2357,6 @@ const prepareEquipmentStateForm = () => {
   selectedOperatorAction.value = ''
 }
 
-const isEquipmentTroubleReason = (value) => {
-  return String(value || '').trim() === PAUSE_REASON_EQUIPMENT_TROUBLE
-}
-
 const onProcessChange = () => {
   const proc = processes.value.find((p) => String(p.id) === String(selectedProcessId.value))
   if (proc?.line) {
@@ -2511,7 +2505,11 @@ const submitRecord = async () => {
         data.interruption_reason_code = record.value.interruption_reason_code
         if (submittedOperatorAction === 'PAUSE') {
           data.event_data.pause_reason = reasonText
-          moveToEquipmentState = isEquipmentTroubleReason(reasonText)
+          // 設備トラブル判定: 理由マスタのcategory='1'（設備）で判定（翻訳文字列比較は廃止）
+          const submittedReasonMaster = reasonMasterOptions.value.find(
+            (r) => String(r.code) === String(record.value.interruption_reason_code)
+          )
+          moveToEquipmentState = submittedReasonMaster?.category === '1'
         } else if (submittedOperatorAction === 'TEMP_END') {
           data.event_data.temp_end_reason = reasonText
         }
