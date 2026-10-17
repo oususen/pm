@@ -3,6 +3,7 @@ import json
 import os
 import re
 import unicodedata
+from collections import Counter
 from difflib import SequenceMatcher
 from calendar import monthrange
 from datetime import date
@@ -912,7 +913,7 @@ def _agent_business_data(arguments, confirmed_product_codes, screen_context):
         if intent == 'interruption':
             facts = _interruption_facts(start, end)
             data = {
-                'status': 'ok', 'source': 'ブレーキライン作業記録（中断・強制終了）',
+                'status': 'ok', 'source': 'ブレーキ・スポット／一般工程（中断・強制終了）',
                 'period': {'start_date': start.isoformat(), 'end_date': end.isoformat()},
                 'interruption_count': facts['total'], 'by_reason': facts['items'],
             }
@@ -1921,22 +1922,58 @@ def _production_facts(start, end, operator_name='', product_code=''):
 
 
 def _interruption_facts(start, end):
-    queryset = BrakeLineRecord.objects.using(AI_DB_ALIAS).filter(
+    brake_queryset = BrakeLineRecord.objects.using(AI_DB_ALIAS).filter(
         plan_date__gte=start,
         plan_date__lte=end,
         operator_action__in=['PAUSE', 'TEMP_END'],
     )
-    rows = list(
-        queryset.values('operator_action_reason', 'operator_action')
-        .annotate(records=Count('id')).order_by('-records')[:8]
-    )
+    counts = Counter()
+    for row in brake_queryset.values('operator_action_reason', 'operator_action').annotate(records=Count('id')):
+        reason = row['operator_action_reason'] or '理由未登録'
+        counts[(reason, row['operator_action'])] += row['records']
+
+    process_event_data = ProcessRealtimeRecord.objects.using(AI_DB_ALIAS).filter(
+        timestamp__date__gte=start,
+        timestamp__date__lte=end,
+        record_type='OPERATOR_ACTION',
+    ).values_list('event_data', flat=True)
+    process_total = 0
+    for event_data in process_event_data:
+        if not isinstance(event_data, dict):
+            continue
+        action = event_data.get('action')
+        if action not in {'PAUSE', 'TEMP_END'}:
+            continue
+        process_total += 1
+        reason_keys = (
+            ('pause_reason', 'operator_action_reason')
+            if action == 'PAUSE'
+            else ('temp_end_reason', 'operator_action_reason')
+        )
+        reason = next(
+            (
+                str(event_data[key]).strip()
+                for key in reason_keys
+                if event_data.get(key) is not None and str(event_data[key]).strip()
+            ),
+            '理由未登録',
+        )
+        counts[(reason, action)] += 1
+
+    rows = sorted(
+        (
+            {'reason': reason, 'action': action, 'records': records}
+            for (reason, action), records in counts.items()
+        ),
+        key=lambda row: (-row['records'], row['reason'], row['action']),
+    )[:8]
     return {
-        'total': queryset.count(),
-        'labels': [row['operator_action_reason'] or '理由未登録' for row in rows],
+        'total': brake_queryset.count() + process_total,
+        'labels': [row['reason'] for row in rows],
         'values': [row['records'] for row in rows],
         'items': [
-            {'reason': row['operator_action_reason'] or '理由未登録',
-             'action': '強制終了' if row['operator_action'] == 'TEMP_END' else '中断',
+            {'reason': row['reason'],
+             'action': '強制終了' if row['action'] == 'TEMP_END' else '中断',
              'records': row['records']} for row in rows
         ],
     }
@@ -2006,7 +2043,7 @@ def _build_facts(plan):
         return source, scrap, {'確定仕損数量': scrap['total'], '記録件数': scrap['records'], '理由別': scrap['items']}
     if intent == 'interruption':
         interruptions = _interruption_facts(start, end)
-        return 'ブレーキライン作業記録（中断・強制終了）', interruptions, {'中断・強制終了件数': interruptions['total'], '理由別': interruptions['items']}
+        return 'ブレーキ・スポット／一般工程（中断・強制終了）', interruptions, {'中断・強制終了件数': interruptions['total'], '理由別': interruptions['items']}
     if intent == 'overtime':
         overtime = _overtime_facts(start, end, plan['group_name'])
         chart = {'labels': overtime['labels'], 'values': overtime['values']}

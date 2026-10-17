@@ -40,7 +40,7 @@
 | production | ProcessRealtimeRecord、LaserActualDetail、BrakeLineRecord | 日別生産数・工程別生産数。品番指定時は画面別の正規実績を二重計上せずに使用する。ProcessRealtimeRecord のうち仕入の入荷実績（`event_data.source` が `PURCHASE_*`）は除外する |
 | operator | ProcessRealtimeRecord | 指定作業者の日別生産数 |
 | scrap | ScrapRecord | 確定仕損の理由別数量 |
-| interruption | BrakeLineRecord | 中断・強制終了の理由別件数 |
+| interruption | BrakeLineRecord、ProcessRealtimeRecord | 中断・強制終了の理由別件数。ProcessRealtimeRecord は record_type が OPERATOR_ACTION かつ event_data.action が PAUSE/TEMP_END の一般工程分を合算する |
 | overtime | OvertimeApplication | グループ別残業申請時間（承認段階別） |
 | individual_overtime | OvertimeApplication | 個人の残業申請時間（承認段階別） |
 | report | 上記複合 | 生産・仕損・中断の期間集計＋報告書生成 |
