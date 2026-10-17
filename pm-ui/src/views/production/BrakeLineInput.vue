@@ -1407,7 +1407,17 @@ async function save() {
     // 設備トラブルで中断した場合は設備状態入力画面へ遷移
     if (wasEquipmentTroublePause) {
       await nextTick()
-      router.push({ path: '/production/mobile-process-input', query: { process_id: item.process_id } })
+      router.push({
+        path: '/production/mobile-process-input',
+        query: {
+          process_id: item.process_id,
+          record_type: 'EQUIPMENT_STATE',
+          line_id: item.line_id,
+          operator_name: operator.value,
+          equipment_id: selectedEquipmentId.value,
+          product_code: item.product_code,
+        },
+      })
       return
     }
 
