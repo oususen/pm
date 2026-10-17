@@ -73,6 +73,14 @@ ANALYSIS_COLUMN_TYPES = {
         'scrap_reason': 'VARCHAR', 'end_operator_user_id': 'BIGINT', 'created_at_h': 'TIMESTAMP',
         'updated_at_h': 'TIMESTAMP', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
     },
+    # ブレーキ・板金スポットの生産実績(brake_line_recordのSHOW COLUMNSから導出。bigintはBIGINT、dateはDATE、
+    # varcharはVARCHAR、intはBIGINT、datetime(6)はTIMESTAMP)
+    'v_ai_brake_production_actual': {
+        'id': 'BIGINT', 'plan_date': 'DATE', 'product_code': 'VARCHAR', 'operator_action': 'VARCHAR',
+        'operator_action_reason': 'VARCHAR', 'qty': 'BIGINT', 'sequence_no': 'BIGINT', 'recorded_at': 'TIMESTAMP',
+        'equipment_id': 'BIGINT', 'line_id': 'BIGINT', 'process_id': 'BIGINT', 'product_id': 'BIGINT',
+        'operator_user_id': 'BIGINT',
+    },
     # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
     'v_ai_product': {
         'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'category': 'VARCHAR', 'unit': 'VARCHAR',

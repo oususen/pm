@@ -26,6 +26,7 @@ LATEST_MIGRATION = {
     'v_ai_supplier': '0038_ai_supplier_view.py',
     'v_ai_customer': '0039_ai_customer_view.py',
     'v_ai_equipment': '0054_ai_equipment_view.py',
+    'v_ai_brake_production_actual': '0057_ai_brake_production_actual_view.py',
 }
 
 

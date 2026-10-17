@@ -57,6 +57,20 @@ ANALYSIS_VIEWS = {
             'created_at_h・updated_at_h=ヘッダ(レーザー実績登録)の作成・更新日時、created_at・updated_at(無印)=明細(構成部品行)自体の作成・更新日時。'
         ),
     },
+    # ブレーキ・板金スポットの生産実績。日別・期間集計はplan_date(実列)を使う。quantity_field='qty'(END・PAUSE以外は0。AI用ビュー作成計画 §35)。
+    'v_ai_brake_production_actual': {
+        'label': 'ブレーキ・スポット生産実績', 'date_field': 'plan_date', 'quantity_field': 'qty',
+        'description': (
+            '1行は1操作イベント(brake_line_recordの全行。結合なし・WHEREなし)。日別・期間集計はplan_date(実列の計画日)を使う。'
+            '列の意味: operator_action=作業者アクション(START・END・PAUSE・TEMP_END・RESUME)、'
+            'qty=生産数量(END・PAUSE以外は常に0。生産数の合計はEND+PAUSEのqty合計を使う)、'
+            'line_id=ラインのID(9=ブレーキライン L0010、10=板金スポットライン L0013が混在。区別するときはline_idで絞る)、'
+            'operator_action_reason=PAUSE・TEMP_END行専用の固定選択肢(START・END・RESUME行は常に空文字)、'
+            'sequence_no=0は過去の一時的事象で業務的意味なし、1は通常の計画行、2以上は同一品番・同日の複数計画行の順番、'
+            'recorded_at=システムの記録日時、equipment_id・process_id・product_id=それぞれ設備・工程・製品のID、'
+            'operator_user_id=この記録の作業者(auth_user.idへのFK)。'
+        ),
+    },
     # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。
     # 列の意味は、仕様書で確認できたものだけを書く(AI用ビュー作成計画 §4.1-1)。
     'v_ai_product': {

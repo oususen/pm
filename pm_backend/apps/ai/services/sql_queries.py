@@ -59,6 +59,13 @@ BASE_SQL_SCHEMA = {
         'operator_action', 'operator_action_reason', 'units_per_shot', 'total_qty', 'scrap_qty', 'scrap_reason',
         'end_operator_user_id', 'created_at_h', 'updated_at_h', 'created_at', 'updated_at',
     ),
+    # ブレーキ・板金スポットの生産実績のビュー(AI用ビュー作成計画 §35。brake_line_recordを結合なし・全行(WHEREなし)で公開。
+    # 非公開: operator(個人名)、operator_login_id・interruption_reason_code・remarks(2026-10-16追加の新列でほぼ空)。
+    # 列順はマイグレーションのSELECT順と同じ)
+    'v_ai_brake_production_actual': (
+        'id', 'plan_date', 'product_code', 'operator_action', 'operator_action_reason', 'qty', 'sequence_no',
+        'recorded_at', 'equipment_id', 'line_id', 'process_id', 'product_id', 'operator_user_id',
+    ),
     # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
         'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
@@ -174,6 +181,19 @@ TABLE_NOTES = {
         'product_id・product_code・product_name は構成部品(明細の対象製品。v_ai_product と結合可能)。'
         'line_id・process_id は2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様。保存機能がなかった期間)。'
         'created_at_h・updated_at_h はヘッダ(レーザー実績登録)の作成・更新日時、created_at・updated_at(無印)は明細(構成部品行)自体の作成・更新日時。'
+    ),
+    'v_ai_brake_production_actual': (
+        'ブレーキ・板金スポットの生産実績(brake_line_record)のビュー。1行=1操作イベント(全行。結合なし・WHEREなし)。'
+        'operator_action はSTART(開始)・END(終了)・PAUSE(中断)・TEMP_END(強制終了)・RESUME(再開)。'
+        'line_id でブレーキ(id=9、L0010、14,031件)と板金スポット(id=10、L0013、13,222件)が混在する。区別するときは line_id(または v_ai_line の line_code)で絞る。'
+        'operator_action_reason はPAUSE・TEMP_END行専用の固定選択肢(自由記述ではない。値の例: その他・3S活動・設備トラブル・機種間違い等)で、START・END・RESUME行では常に空文字。'
+        'qty は生産数で、END・PAUSE以外(START・RESUME・TEMP_END)は常に0。生産数の合計は、END+PAUSEの行のqty合計を使う(作業区間ごとの加工数で重複しない)。'
+        'plan_date は実列(計画日)であり計算列ではない。recorded_atから単純に8時間引いた日付とは完全には一致しない'
+        '(開発DB確認: 27,253件中560件(2.1%)で不一致。算出ロジックの正規仕様は未確認)。業務日の集計はplan_dateを正として使う。'
+        'sequence_no の意味: 値0(開発DB418件。2026-03-17〜26の9日間に集中。現在のコードに生成経路なし)は過去の一時的事象で業務的意味はない。'
+        '値1(約98%、26,791件)は通常の計画行に対応する。値2以上(44件。2026-03〜09月に分散して継続発生)は、同一品番・同日に複数の計画行(LineBacklog)がある場合の順番を表す。'
+        'equipment_id は v_ai_equipment の id、line_id は v_ai_line の id、process_id は v_ai_process の id、product_id は v_ai_product の id と結べる。'
+        'operator_user_id はこの記録の作業者(auth_user.idへのFK。氏名そのものではない)。'
     ),
     'v_ai_product': (
         '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'

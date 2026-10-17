@@ -25,6 +25,7 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_supplier': 'm_supplier',
     'v_ai_customer': 'm_customer',
     'v_ai_equipment': 'm_equipment',
+    'v_ai_brake_production_actual': 'brake_line_record',
 }
 
 # 結合またはWHERE句を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046・0048〜0050・0055・0056)にあるビュー。

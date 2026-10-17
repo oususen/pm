@@ -436,6 +436,7 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 | `v_ai_laser_production_actual`（`ai/0056`で作成） | 31列: `id`・`actual_id`・`operator_user_id`（`created_by_id`の別名）・`equipment_id`・`equipment_code`・`equipment_name`・`line_id`・`process_id`・`pattern_id`・`pattern_no`・`material_id`・`material_code`・`material_name`・`product_id`・`product_code`・`product_name`・`work_date`・`shot_count`・`process_time_per_shot`・`total_process_time`・`operator_action`・`operator_action_reason`・`units_per_shot`・`total_qty`・`scrap_qty`・`scrap_reason`・`end_operator_user_id`（`updated_by_id`の別名）・`created_at_h`・`updated_at_h`・`created_at`・`updated_at` | `t_laser_actual_detail` に `t_laser_actual` を結合（`actual_id`）。`operator_action IN ('END','PAUSE')` かつ `detail_type='COMPONENT'` の行だけ。非公開（ビューに含めない）: `detail_type`, `display_order`, ヘッダの `remarks` | 読み取り専用SQL・分析（`ai.analysis`）で、レーザーの生産実績を作業日単位で分析・説明できるようにする |
 
 - `work_date`=作業日、`total_qty`=構成部品換算数量（生産数に相当）。`operator_action` はこのビューでは `END`・`PAUSE` のみ（終了済み・中断済みの構成部品明細だけが対象）。
+- 非公開のヘッダ`remarks`は、開発DB確認済み：全件空（`t_laser_actual`4,997件中4,997件が空文字）。
 - `operator_user_id` はこの記録を登録した作業者（`created_by_id` の別名。`auth_user.id` へのFK）。`end_operator_user_id` はヘッダの最終更新者（`updated_by_id` の別名。実データ上は `operator_user_id` と一致するケースが大半だが、将来の訂正操作で異なる場合がある）。いずれもIDだけを公開し、氏名は公開しない。
 - **`line_id`・`process_id` は2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL（欠損ではなく仕様。保存機能がなかった期間）**。開発DBの実データで、2026-10-13は45件中45件がNULL、2026-10-14は10件中0件がNULLと、2026-10-14を境にNULLがゼロになることを確認済み（計画書 §34.1.1）。
 - `material_id`・`material_code`・`material_name` は使用材料（`v_ai_product` と結合可能）、`product_id`・`product_code`・`product_name` は構成部品（明細の対象製品。`v_ai_product` と結合可能）。
@@ -443,7 +444,25 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - `ANALYSIS_VIEWS`（`date_field='work_date'`・`quantity_field='total_qty'`）・`ANALYSIS_COLUMN_TYPES`（31列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `t_laser_actual`・`t_laser_actual_detail` は、`production` 画面の読み取り専用SQLに元から直接の許可があり、変更していない。
 - `setup_ai_views` は `EXISTING_JOIN_VIEWS` に追加（`v_ai_process_production_actual` 等と同様、結合・WHERE句ありの扱い。`--check` で定義者等を表示するだけ、再作成しない）。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS` は変更していない（`t_laser_actual`・`t_laser_actual_detail` は他の公開ビューと列を共有しないため）。
 - 開発DBで`ai/0056`適用済み。ビューは31列で、`pm_ai_reader`による12,195件が独立JOINの12,195件と一致し、対象外の`operator_action`は0件。専用テスト15件と、専用＋関連4モジュール66件が成功し、`makemigrations --dry-run --check`は「No changes detected」、`git diff --check`も成功した。evaluator第1回はコード・SQLに不合格なし、文書の状態不一致により条件付き。
-- **未解決の確認事項**：開発DBのDEFINERは`root@localhost`で、`pm_ai_view_owner`が元2テーブルに持つ列権限は0件。計画書 §34.4 のowner権限付与・DEFINER付け替え手順は未実施（BOSSが実行）。付け替え後の`pm_ai_reader`再確認、本番反映、commit・pushも未実施。
+- **未解決の確認事項**：開発DBのDEFINERは`root@localhost`で、`pm_ai_view_owner`が元2テーブルに持つ列権限は0件。計画書 §34.4 のowner権限付与・DEFINER付け替え手順は未実施（BOSSが実行）。付け替え後の`pm_ai_reader`再確認、本番反映は未実施。コミットは`d30ab253`で実施済み。
+
+### 6.5-19 ブレーキ・スポット 生産実績（`v_ai_brake_production_actual`。2026-10-17 実装。コードのみ・開発DBにビュー未作成・本番未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_brake_production_actual`（`ai/0057`で作成） | 13列: `id`・`plan_date`・`product_code`・`operator_action`・`operator_action_reason`・`qty`・`sequence_no`・`recorded_at`・`equipment_id`・`line_id`・`process_id`・`product_id`・`operator_user_id` | `brake_line_record` 全行（絞り込みなし・結合なし。27,253行） | 読み取り専用SQL・分析（`ai.analysis`）で、ブレーキ・板金スポットの生産実績を計画日単位で分析・説明できるようにする |
+
+- 非公開（ビューに含めない）：`operator`（個人名。`operator_user_id`で代替）、`operator_login_id`・`interruption_reason_code`・`remarks`（いずれも2026-10-16追加の新列で、実データがほぼ空のため今回は非公開。開発DB確認：`operator_login_id`はNULLが27,245/27,253件、`interruption_reason_code`は空文字でないのが4/367件、`remarks`はNULLが27,246/27,253件）。
+- `line_id`でブレーキ（`id=9`、`L0010`、14,031件）と板金スポット（`id=10`、`L0013`、13,222件）が混在する。区別するときは`line_id`（または`v_ai_line`の`line_code`）で絞る。
+- `operator_action`はSTART・END・PAUSE・TEMP_END・RESUME。`operator_action_reason`はPAUSE・TEMP_END行専用の固定選択肢（自由記述ではない）で、START・END・RESUME行は常に空文字。
+- `qty`はEND・PAUSE以外（START・RESUME・TEMP_END）は常に0。生産数の合計はEND＋PAUSEのqty合計を使う。
+- `plan_date`は実列（計画日）で計算列ではない。`recorded_at`から単純に8時間引いた日付とは、開発DBで27,253件中560件（2.1%）が不一致（算出ロジックの正規仕様は未確認）。業務日の集計は`plan_date`を正として使う。
+- `sequence_no`の意味：値0（開発DB418件。2026-03-17〜26の9日間に集中。現在のコードに生成経路なし）は過去の一時的事象で業務的意味はない。値1（約98%、26,791件）は通常の計画行に対応する。値2以上（44件。2026-03〜09月に分散して継続発生）は、同一品番・同日に複数の計画行（`LineBacklog`）がある場合の順番を表す。
+- `equipment_id`は`v_ai_equipment.id`、`line_id`は`v_ai_line.id`、`process_id`は`v_ai_process.id`、`product_id`は`v_ai_product.id`と結べる。`operator_user_id`は`auth_user.id`へのFK（氏名は非公開）。
+- `ANALYSIS_VIEWS`（`date_field='plan_date'`・`quantity_field='qty'`）・`ANALYSIS_COLUMN_TYPES`（13列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES`に登録済み。元テーブル`brake_line_record`は、チャットSQL（`ai_home`・`production`画面）向けの既存の9列・個人情報`operator`列の許可とは別経路のため、変更していない。
+- `setup_ai_views`は`SIMPLE_MASTER_VIEWS`に`v_ai_brake_production_actual`→`brake_line_record`を追加（既存の`v_ai_equipment`等と同じ扱い。単純なマスタビューは7つになった）。権限の付与・定義者の付け替えは、`setup_ai_views --apply`で行う想定（未実行。BOSSが実行）。
+- 専用テスト17件（うち1件は`migrate`未実行のためskip）。`makemigrations --dry-run --check`は「No changes detected」。`showmigrations ai`で`0057`が未適用であることを確認。
+- **未解決の確認事項**：`migrate ai 0057`・`setup_ai_views --apply`は未実行（禁止事項のためgeneratorは実施していない。BOSSが実行）。実行後の`pm_ai_reader`での件数照合、本番反映、commit・pushも未実施。
 
 ### 6.6 受注（ルーティング未設定の注文品）
 
