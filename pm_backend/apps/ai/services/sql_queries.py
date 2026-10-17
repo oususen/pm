@@ -41,6 +41,14 @@ BASE_SQL_SCHEMA = {
         'id', 'shipment_date', 'product_code', 'product_id', 'product_name',
         'customer_code', 'ship_to_code', 'quantity', 'trip_allocation_id', 'remark_text',
     ),
+    # 一般工程の生産実績のビュー(AI用ビュー作成計画 §33。t_process_realtime_recordのrecord_type='PRODUCTION'行だけ。
+    # batch_no・event_data は非公開。business_dayは新規の計算列(8時区切りの業務日)。列順はマイグレーションのSELECT順と同じ。
+    # 2026-10-17 BOSS判断でoperator_nameを公開列に変更(個人名)、event_dataを非公開に変更
+    # (event_dataはJSON型で分析実行の値変換が未対応のため常に失敗する)
+    'v_ai_process_production_actual': (
+        'id', 'business_day', 'operator_login_id', 'operator_name', 'process_id', 'product_code', 'product_id',
+        'product_name', 'qty', 'record_type', 'timestamp', 'equipment_state', 'interruption_reason_code', 'remarks',
+    ),
     # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
         'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
@@ -131,6 +139,19 @@ TABLE_NOTES = {
         '日別・期間の集計は shipment_date を使う。customer_code は得意先コード、ship_to_code は納入場コード。'
         'trip_allocation_id は出荷便割付のID(なければNULL)、remark_text はシステムが書く便の割付情報(例: [TRIP_ACTUAL]54:576|PD=2026-07-22:42)で業務メモではない。'
         '現在はクボタ(得意先コード000196)向けの出荷だけが登録されている。'
+    ),
+    'v_ai_process_production_actual': (
+        '一般工程の生産実績(t_process_realtime_record)のビュー。1行=1回の生産実績登録(record_type=PRODUCTIONの行だけ。'
+        '仕入実績(PURCHASE)・仕損(SCRAP)・設備状態変更(EQUIPMENT_STATE)・作業者アクション(OPERATOR_ACTION)はこのビューに出ない)。'
+        '生産数は qty、記録時刻は timestamp(システムの記録日時)。'
+        '日別・期間の集計は business_day(新規の計算列。timestampから8時間引いた日付。日替わり時刻8時の区切りで、'
+        'Python側の業務日判定(resolve_workday_date_for_process)と全件一致を確認済み。本番運用で稼働開始時刻が8時以外のラインは存在しないことをBOSSが確認済み)を使う。'
+        'process_id は工程マスタビュー v_ai_process の id、product_id は品番マスタビュー v_ai_product の id と結べる。'
+        'operator_login_id は作業者のログインID(auth_user.username と結べる。SCRAP・PURCHASE等の行はNULLだが、このビュー(PRODUCTION)の行は入っている)。'
+        'operator_name は作業者名(このビュー(PRODUCTION)の行の登録時点の値がそのまま入る)。'
+        'interruption_reason_code は中断理由コードの列だが、PAUSE・TEMP_END(作業者アクション)の行専用の値のため、このビュー(PRODUCTIONの行だけ)では常に空文字になる(業務上の意味はなく、分析に使わない)。'
+        'equipment_state は設備状態(このビューの行では、登録時点の値がそのまま入る)。'
+        'remarks は備考(自由記述。元テーブルの生の列と同じ値で、業務上の記載内容は未確認)。'
     ),
     'v_ai_product': (
         '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'

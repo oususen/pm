@@ -30,6 +30,19 @@ ANALYSIS_VIEWS = {
             'trip_allocation_id=出荷便割付のID、remark_text=システムが書く便の割付情報(業務メモではない)。'
         ),
     },
+    # 一般工程の生産実績。業務日の計算列business_dayがあるため、date_field='business_day'(期間で絞る)。quantity_field='qty'(AI用ビュー作成計画 §33)。
+    'v_ai_process_production_actual': {
+        'label': '一般工程生産実績', 'date_field': 'business_day', 'quantity_field': 'qty',
+        'description': (
+            '1行は1回の生産実績登録(t_process_realtime_recordのrecord_type=PRODUCTIONの行だけ。仕入実績・仕損・設備状態変更・作業者アクションは対象外)。'
+            '日別・期間集計はbusiness_day(8時区切りの業務日計算列。timestampから8時間引いた日付)を使う。'
+            '列の意味: qty=生産数量、timestamp=記録時刻(システムの記録日時)、product_code=品番、product_name=製品名、'
+            'process_id=工程のID、product_id=製品のID、'
+            'operator_login_id=作業者のログインID、operator_name=作業者名、'
+            'equipment_state=登録時点の設備状態、remarks=備考(自由記述。記載内容は未確認)、'
+            'interruption_reason_code=中断理由コード(このビューの行では常に空文字。PAUSE・TEMP_END専用の列のため)。'
+        ),
+    },
     # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。
     # 列の意味は、仕様書で確認できたものだけを書く(AI用ビュー作成計画 §4.1-1)。
     'v_ai_product': {

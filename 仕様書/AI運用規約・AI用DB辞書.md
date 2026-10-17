@@ -411,6 +411,24 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - **`TABLE_NOTES`（`sql_queries.py`。自由SQL生成向けの説明）への追加は、承認済み実装計画の範囲外として見送った**（計画書 §32.2.1）。追加要否はBOSSの確認が必要。
 - 権限の付与・定義者の付け替えは `setup_ai_views`（`SIMPLE_MASTER_VIEWS` に `v_ai_equipment`→`m_equipment` を追加済み）。未実施（BOSSが実行）。
 
+### 6.5-17 一般工程 生産実績（`v_ai_process_production_actual`。2026-10-17 実装・同日BOSSが公開列構成を変更。コードのみ・開発DBにビュー未作成・本番未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_process_production_actual`（`ai/0055`で作成） | 14列: `id`・`business_day`（計算列）・`operator_login_id`・`operator_name`・`process_id`・`product_code`・`product_id`・`product_name`・`qty`・`record_type`・`timestamp`・`equipment_state`・`interruption_reason_code`・`remarks` | `t_process_realtime_record` の `record_type='PRODUCTION'` 行だけ（結合なし）。非公開（ビューに含めない）: `batch_no`, `event_data` | 読み取り専用SQL・分析（`ai.analysis`）で、一般工程の生産実績を業務日（8時区切り）で分析・説明できるようにする |
+
+- `business_day` は新規の計算列（`DATE(timestamp - INTERVAL 8 HOUR)`）。8時区切りの業務日。Python側の `resolve_workday_date_for_process()`（`production/serializers_process_realtime.py`）と、開発DBの全PRODUCTION行（15,731件）で一致を確認済み（不一致0件。計画書 §33.1.1）。この一致は、本番運用で稼働開始時刻が8時以外のラインが存在しないことをBOSSが確認済みであることに基づく。
+- `interruption_reason_code` は、この列を持つ元テーブルの仕様上、`PAUSE`・`TEMP_END`（作業者アクション）の行専用の値のため、このビュー（`PRODUCTION`の行だけ）では**常に空文字**になる（分析に使わない）。
+- `operator_login_id` は作業者のログインID（`auth_user.username` と結べる。`v_ai_user` と同じ結合キー）。
+- `operator_name` は作業者名（個人名）。**2026-10-17にBOSS判断で公開列へ変更**（従来は非公開）。元テーブル `t_process_realtime_record` の `operator_name` は、チャットSQL（`PERSONAL_SQL_COLUMNS`・`SENSITIVE_IDENTIFIER`）では個人情報の権限がないと参照できない扱いのままで変更していない。本ビューの分析実行（`ai.analysis`）は、チャットSQLとは別の経路で、既存の `v_ai_user`（姓・名）・`v_ai_customer`（得意先名）と同様に、氏名等を個人情報の権限で別途絞っていない（既存の前例どおり）。
+- `event_data` は**2026-10-17にBOSS判断で非公開に変更**（従来は公開）。理由：JSON型の列で、分析実行の値変換処理（`analysis_execution_service._cell()`）がJSON型に対応する分岐を持たないため、`event_data` を選ぶ分析実行が必ず失敗することを、evaluatorが開発DBへ実際にビューを作成して実機検証した結果、確認したため。
+- `process_id` は `v_ai_process.id`、`product_id` は `v_ai_product.id` と結べる。
+- `ANALYSIS_VIEWS`（`date_field='business_day'`・`quantity_field='qty'`）・`ANALYSIS_COLUMN_TYPES`（14列）・`BASE_SQL_SCHEMA`・`TABLE_NOTES` に登録済み。元テーブル `t_process_realtime_record` は、`production` 画面の読み取り専用SQLに元から直接の許可があり、変更していない。
+- `setup_ai_views` は `EXISTING_JOIN_VIEWS` に追加（`v_ai_purchase_receipt` と同様、結合なし・WHERE句ありの扱い。`--check` で定義者等を表示するだけ、再作成しない）。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS` は変更していない（判断の理由は計画書 §33.3-3・4）。
+- **解消した確認事項**：`event_data` の型 `JSON` が分析実行の値変換処理に対応せず実行が失敗する課題（計画書 §33.3-1）は、`event_data` を非公開化したことで解消した（コード側の `_cell()` 拡張は行っていない。将来 `event_data` の分析ニーズが生じた場合は改めて計画が必要）。
+- **未解決の確認事項**：権限の付与SQL（計画書 §33.4。`operator_name` を含む5列）は未実行（BOSSが実行）。
+- 権限の付与・定義者の付け替えは、計画書 §33.4 の手順SQL（未実行。BOSSが実行）。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |

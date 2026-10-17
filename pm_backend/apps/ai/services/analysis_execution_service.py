@@ -52,6 +52,14 @@ ANALYSIS_COLUMN_TYPES = {
         'product_name': 'VARCHAR', 'customer_code': 'VARCHAR', 'ship_to_code': 'VARCHAR',
         'quantity': 'DECIMAL(18,3)', 'trip_allocation_id': 'BIGINT', 'remark_text': 'VARCHAR',
     },
+    # 一般工程の生産実績(t_process_realtime_recordのSHOW COLUMNSから導出。bigintはBIGINT、decimal(10,3)はDECIMAL(18,3)、
+    # datetime(6)はTIMESTAMP、varchar・longtextはVARCHAR、business_dayは計算列でDATE)
+    'v_ai_process_production_actual': {
+        'id': 'BIGINT', 'business_day': 'DATE', 'operator_login_id': 'VARCHAR', 'operator_name': 'VARCHAR',
+        'process_id': 'BIGINT', 'product_code': 'VARCHAR', 'product_id': 'BIGINT', 'product_name': 'VARCHAR',
+        'qty': 'DECIMAL(18,3)', 'record_type': 'VARCHAR', 'timestamp': 'TIMESTAMP', 'equipment_state': 'VARCHAR',
+        'interruption_reason_code': 'VARCHAR', 'remarks': 'VARCHAR',
+    },
     # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
     'v_ai_product': {
         'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'category': 'VARCHAR', 'unit': 'VARCHAR',

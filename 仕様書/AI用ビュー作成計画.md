@@ -1482,3 +1482,130 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 - `schema_text()`／`AI_HOME_EXCLUDED_TABLES`の確認：`AI_HOME_EXCLUDED_TABLES`に`v_ai_equipment`は含まれず、`SCREEN_SQL_TABLES['ai_home']`は`BASE_SQL_SCHEMA`の全キー（`v_ai_equipment`を含む）から除外集合を引いた集合のため、`v_ai_equipment`は対象に入る。`schema_text('ai_home')`は`allowed_tables_for_screen`で取得した対象テーブルごとに`TABLE_NOTES.get(table)`があれば本文を付加するため、`v_ai_equipment`のTABLE_NOTESは実際に`ai_home`画面の自由SQL生成プロンプトに含まれる（新規試験で機械的に確認済み）。
 - 反映状況：コードのみ・DB変更なし（`migrate`・`setup_ai_views --apply`は未実行、禁止事項のため実施していない）。コミット・push・本番反映は未（BOSSの指示後）。
 - 省略した点：`ANALYSIS_VIEWS`・`BASE_SQL_SCHEMA`・`ANALYSIS_COLUMN_TYPES`・`SIMPLE_MASTER_VIEWS`・マイグレーション本体・コミット・migrateは、今回の指示どおり変更していない。
+
+## 33. 一般工程 生産実績のビュー `v_ai_process_production_actual` の作成前確認・実装記録（2026-10-17。BOSS承認済み。実装済み・evaluator未検証）
+
+### 33.0 追記（2026-10-17。BOSSが公開列構成を変更。本節は2回目の実装）
+
+evaluatorの条件付き合格後、BOSSが公開列構成を次のとおり変更した（generatorが実装）。
+
+- **`operator_name`を公開列に追加**（従来は非公開）。
+- **`event_data`を公開列から除外**（非公開に変更）。理由：`analysis_execution_service.py`の`_cell()`関数がJSON型のCSV変換に対応しておらず、このビューで`event_data`を分析実行すると100%失敗することが、evaluatorの実機検証（開発DBへの実際のビュー作成を含む）で確認されたため（§33.3-1で元々懸念として記録していた点が、実機検証で実際に再現した）。
+
+以降の本節の内容は、この変更後の最終状態（公開14列）に更新している。変更前の記録（公開列に`event_data`、非公開に`operator_name`としていた版）は、Gitの差分履歴で確認できる。
+
+### 33.1 作成前確認
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、一般工程の生産実績(品番・数量・記録時刻・設備状態など)を、業務日(8時区切り)で分析・説明できるようにする |
+| 元テーブル | `t_process_realtime_record`（工程実時間記録）。`record_type='PRODUCTION'`の行だけ |
+| 対象行 | `WHERE record_type = 'PRODUCTION'` |
+| 数値定義 | `qty`=生産数量。`business_day`(計算列。`DATE(timestamp - INTERVAL 8 HOUR)`、8時区切りの業務日) |
+| 公開フィールド（14列。元テーブル16列中。BOSS判断で確定。2026-10-17にBOSSが変更） | `id`、`business_day`(新規の計算列)、`operator_login_id`、`operator_name`、`process_id`、`product_code`、`product_id`、`product_name`、`qty`、`record_type`、`timestamp`、`equipment_state`、`interruption_reason_code`、`remarks` |
+| 非公開フィールド | `batch_no`、`event_data` |
+| 個人情報 | `operator_login_id`はログインID(`auth_user.username`)で、既存の`v_ai_user`と同じ扱い(個人名そのものではない)。`operator_name`は作業者名(個人名)で、2026-10-17にBOSS判断で公開に変更した。元テーブル`t_process_realtime_record`の`operator_name`は、チャットSQL（`sql_queries.py`の`PERSONAL_SQL_COLUMNS`・`SENSITIVE_IDENTIFIER`）では個人情報の権限がないと参照できない扱いのままで、これは変更していない（本ビューの分析実行パス(`ANALYSIS_VIEWS`)は、チャットSQLのパス(`SCREEN_SQL_TABLES`・`_validate_sql`)とは別の仕組みで、既存の`v_ai_user`(姓・名)・`v_ai_customer`(得意先名)と同様に、分析実行では氏名等を個人情報の権限で別途絞っていない前例に合わせた。矛盾ではなく既存の前例どおり）。`remarks`は自由記述で、業務上の記載内容は未確認(非公開の`batch_no`とは異なり、BOSS判断で公開) |
+
+#### 33.1.1 `business_day`の計算ロジックの確認（開発DB実データ、全件）
+
+- 8時区切りの業務日判定の正規ロジックは、Python側の`production/serializers_process_realtime.py`の`resolve_workday_date_for_process(process, dt)`（`dt.time() < 8:00`なら前日、以降はラインの勤務カレンダのセグメントで夜勤跨ぎを判定し、通常は当日）。
+- ビューの計算列は、このロジックを単純化した`DATE(timestamp - INTERVAL 8 HOUR)`（8時間引いた日付）。
+- generatorが、Django ORM経由で開発DBの`t_process_realtime_record`の`record_type='PRODUCTION'`行を全件読み、`DATE(timestamp - INTERVAL 8 HOUR)`のPython再現値と`resolve_workday_date_for_process()`の返り値を1件ごとに比較した。結果：**全15,731件で一致（不一致0件）**。
+- この一致は、本番運用で稼働開始時刻が8時以外のラインが存在しないことをBOSSが確認済みであることに基づく（勤務カレンダのセグメント判定が、8時起点の単純な日付境界と食い違う状況が、現在の運用データには存在しない）。将来、8時以外に稼働を開始するラインができた場合は、この一致が崩れる可能性があるため、再確認が必要。
+
+### 33.2 実装内容
+
+- 新規 `pm_backend/apps/ai/migrations/0055_ai_process_production_actual_view.py`。`CREATE OR REPLACE VIEW v_ai_process_production_actual AS SELECT <14列> FROM t_process_realtime_record WHERE record_type = 'PRODUCTION'`（標準SQLのみ・バッククォート/DEFINER/SQL SECURITY/DB修飾なし）。ロールバックは`DROP VIEW IF EXISTS v_ai_process_production_actual`。依存は`ai 0054_ai_equipment_view`と`production 0124_processrealtimerecord_interruption_reason_code`（`interruption_reason_code`列の追加マイグレーション。`operator_login_id`列は、その前の`production 0119_process_realtime_operator_login_id`で追加済みで、0124への依存に含まれる）。
+- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_process_production_actual`（14列。マイグレーションのSELECT順と同じ）を`v_ai_shipment`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§33.1の内容、`interruption_reason_code`が常に空文字になる旨、`operator_login_id`が`auth_user.username`と結べる旨、`process_id`・`product_id`がそれぞれ`v_ai_process`・`v_ai_product`の`id`と結べる旨、`operator_name`が作業者名である旨を明記。2026-10-17の変更で、`event_data`がJSON列である旨の記述は削除した）。
+- `pm_backend/apps/ai/services/analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_process_production_actual`（label=一般工程生産実績、`date_field='business_day'`、`quantity_field='qty'`、説明文）を`v_ai_shipment`の直後に追加。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に14列の型を追加（§33.1.2の型対応）を`v_ai_shipment`の直後に追加。
+- `pm_backend/apps/ai/management/commands/setup_ai_views.py`：`EXISTING_JOIN_VIEWS`に`v_ai_process_production_actual`を追加（`v_ai_purchase_receipt`と同じ「結合なし・WHERE句あり」の扱い。再作成しない。`--check`で定義者等を表示するだけ）。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS`は変更していない（§33.3の判断参照）。
+- 試験：`apps/ai/test_analysis_process_production_actual_view.py`新規（2026-10-17の変更後は20件。既存の`v_ai_purchase_receipt`・`v_ai_shipment`と同様、SimpleTestCaseのみ（開発DBへは接続しない）。公開列の変更に合わせて`PUBLISHED`・`HIDDEN`・`ANALYSIS_COLUMN_TYPES`の期待値を更新し、`operator_name`が公開列であること・`event_data`が非公開であることを検証する新規テストを1件追加）。
+- 仕様書：本節、`AI運用規約・AI用DB辞書.md`に新規節を追加。
+
+#### 33.1.2 列型の対応（`SHOW COLUMNS FROM t_process_realtime_record`。開発DBで実測。2026-10-17に`operator_name`を追加・`event_data`を削除）
+
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id` | bigint | `BIGINT` |
+| `business_day` | (計算列。実列はない) | `DATE` |
+| `operator_login_id` | varchar(150)、NULL可 | `VARCHAR` |
+| `operator_name` | varchar(50)、NULL可 | `VARCHAR` |
+| `process_id` | bigint | `BIGINT` |
+| `product_code` | varchar(50)、NULL可 | `VARCHAR` |
+| `product_id` | bigint、NULL可 | `BIGINT` |
+| `product_name` | varchar(100)、NULL可 | `VARCHAR` |
+| `qty` | decimal(10,3) | `DECIMAL(18,3)` |
+| `record_type` | varchar(20) | `VARCHAR` |
+| `timestamp` | datetime(6) | `TIMESTAMP` |
+| `equipment_state` | varchar(20)、NULL可 | `VARCHAR` |
+| `interruption_reason_code` | varchar(4) | `VARCHAR` |
+| `remarks` | longtext、NULL可 | `VARCHAR` |
+
+参考（非公開に変更。2026-10-17以降は`ANALYSIS_COLUMN_TYPES`に含めない）：`event_data`は json、NULL可。公開していた当時は`ANALYSIS_COLUMN_TYPES`で`JSON`としていたが、§33.3-1の課題（`_cell()`がJSON型の変換に未対応で分析実行が失敗する）がevaluatorの実機検証で実際に再現したため、BOSS判断で非公開に変更した。
+
+### 33.3 承認済み計画からの逸脱・不確実な点（evaluatorへの確認依頼）
+
+1. **`event_data`の型`JSON`は、このAI分析パイプラインで前例がない**。`ANALYSIS_COLUMN_TYPES`に`JSON`型を持つ列は、本ビューが最初（既存の16ビューにJSON列はない）。さらに、実行時に値をDuckDB投入用CSVへ変換する`analysis_execution_service._cell()`には、`BIGINT`・`DATE`・`TIMESTAMP`・`DECIMAL(p,s)`・`VARCHAR`の分岐しかなく、`JSON`型の分岐がない。そのため、現状のコードのまま分析実行で`event_data`列を選択すると、`_cell()`が`ExecutionStopped('unsupported_value', ...)`で失敗する（計画書の指示どおり`ANALYSIS_COLUMN_TYPES`へ`JSON`を追加したのみで、`_cell()`の拡張は計画の範囲外のため実装していない）。**BOSSへの確認が必要**：`_cell()`へ`JSON`分岐を追加する別サイクルが必要か、それまで`event_data`を実運用で選択させない運用上の注意が必要か。
+   - **追記（2026-10-17。対応済み）**：evaluatorが開発DBへ実際にビューを作成して実機検証した結果、`event_data`列を選択した分析実行は**100%失敗**することが確認された。BOSSが、この課題への対応として`event_data`を公開列から除外（非公開に変更）することを決定した。代わりに`operator_name`を公開列に追加した（§33.0）。これにより、本課題はコード上の対応（`_cell()`拡張）ではなく、公開範囲の変更で解消した。将来、`event_data`の分析ニーズが生じた場合は、`_cell()`へJSON分岐を追加する別サイクルを改めて計画すること。
+2. **手順SQL（§33.4）の不足列は、計画の例示（`equipment_state`・`event_data`・`remarks`・`interruption_reason_code`等）と一部異なる**。開発DBで`information_schema.COLUMN_PRIVILEGES`を実確認した結果、`pm_ai_view_owner`は`t_process_realtime_record`の9列（`id`・`event_data`・`process_id`・`product_code`・`product_id`・`product_name`・`qty`・`record_type`・`timestamp`。既存`v_ai_purchase_receipt`用）のSELECTを既に持っており、`event_data`は不足していない。実際に不足しているのは`equipment_state`・`interruption_reason_code`・`operator_login_id`・`remarks`の4列（計画の例示に`operator_login_id`はなかった）。DB実データの確認結果を優先し、手順SQL（§33.4）はこの4列のGRANTにした。
+   - **追記（2026-10-17）**：公開列変更（§33.0）に伴い、`operator_name`のGRANTが新たに必要になった。開発DBで再確認した結果、`pm_ai_view_owner`は`operator_name`のSELECTを持っていない（他の列への付与経緯も含め不足は変わらず）。`event_data`は、本ビューでは不要になったが、既存の付与（`v_ai_purchase_receipt`用、本ビューとは無関係に以前から付与されていたもの）はそのまま残っており、本変更でREVOKEは行っていない（計画の範囲外）。手順SQL（§33.4）の不足列を、`equipment_state`・`interruption_reason_code`・`operator_login_id`・`operator_name`・`remarks`の5列に更新した。
+3. **`setup_ai_views.py`の`SIMPLE_MASTER_VIEWS`は使わない**（計画どおり。WHERE句付きのため）。これに伴い、`test_setup_ai_views.py`の`LATEST_MIGRATION`辞書は更新していない。`LATEST_MIGRATION`は`SIMPLE_MASTER_VIEWS`のビュー専用の対応表（`test_migration_columns_match_command`が、エイリアス・計算式のない素の列名リストを前提に、`FROM`先が`cmd.SIMPLE_MASTER_VIEWS[view]`と一致することを検査する）で、本ビューはWHERE句・計算列（`DATE(timestamp - INTERVAL 8 HOUR) AS business_day`）を持つため、この対応表に追加すると検査が成立しない（`cmd.SIMPLE_MASTER_VIEWS[view]`で`KeyError`になるか、列名の不一致で失敗する）。本ビューを`EXISTING_JOIN_VIEWS`へ追加したことで、既存の汎用試験`test_does_not_recreate_join_views`（`cmd.EXISTING_JOIN_VIEWS`を走査する）が自動的に本ビューも対象にする。**BOSSへの確認が必要**：計画書の「7. `test_setup_ai_views.py`の`LATEST_MIGRATION`更新」は、本ビューの性質（WHERE句付き）と矛盾するため、実装せずこの逸脱として報告する。
+4. **`setup_ai_views.py`の`OTHER_VIEW_COLUMNS`に`t_process_realtime_record`を追加していない**。`v_ai_bom_item`・`v_ai_routing_step`等（§26〜30）の前例では、結合ビューの元テーブル（`FROM`の主テーブルを含む）をすべて`OTHER_VIEW_COLUMNS`に記録しているが、`v_ai_purchase_receipt`・`v_ai_shipment`（§2。本ビューと同じく`t_process_realtime_record`・`t_shipment_actual`が主テーブル）は、`OTHER_VIEW_COLUMNS`に記録されていない（コマンドのコメント「`t_shipment_actual`の列は対象外」のとおり）。`OTHER_VIEW_COLUMNS`は、`SIMPLE_MASTER_VIEWS`のソーステーブル（`m_product`等）を再作成する際に、結合ビューが必要とする列を誤ってREVOKEしないための一覧だが、`t_process_realtime_record`は`SIMPLE_MASTER_VIEWS`のソーステーブルではないため、追加しても`build_plan`・`run_check`の動作には影響しない（ドキュメント目的のみ）。本実装は、直接の前例である`v_ai_purchase_receipt`と同じ扱い（追加しない）を選んだ。**BOSSの判断が必要**：後発の結合ビュー群の慣習（主テーブルも記録する）に合わせるなら追加する。
+
+### 33.4 手順SQL（`pm_ai_view_owner`への列権限と定義者の付け替え。MySQL固有のため手動。実行はBOSS。`<db>`は接続先のDB名。管理者で実行。`migrate ai 0055`の後）
+
+開発DB再確認済み（`information_schema.COLUMN_PRIVILEGES`、2026-10-17。§33.0の公開列変更後）：`pm_ai_view_owner`は`t_process_realtime_record`の`id`・`event_data`・`process_id`・`product_code`・`product_id`・`product_name`・`qty`・`record_type`・`timestamp`の9列のSELECTを既に持つ（既存`v_ai_purchase_receipt`用）。不足は`equipment_state`・`interruption_reason_code`・`operator_login_id`・`operator_name`・`remarks`の5列（`operator_name`は今回の公開列変更で新たに不足した列。`event_data`は本ビューでは不要になったが、既存の付与はそのまま残す。REVOKEは計画の範囲外のため行わない）。
+
+```sql
+GRANT SELECT (`equipment_state`, `interruption_reason_code`, `operator_login_id`, `operator_name`, `remarks`) ON `<db>`.`t_process_realtime_record` TO 'pm_ai_view_owner'@'localhost';
+CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW `<db>`.`v_ai_process_production_actual` AS
+SELECT
+    `id`,
+    DATE(`timestamp` - INTERVAL 8 HOUR) AS `business_day`,
+    `operator_login_id`,
+    `operator_name`,
+    `process_id`,
+    `product_code`,
+    `product_id`,
+    `product_name`,
+    `qty`,
+    `record_type`,
+    `timestamp`,
+    `equipment_state`,
+    `interruption_reason_code`,
+    `remarks`
+FROM `<db>`.`t_process_realtime_record`
+WHERE `record_type` = 'PRODUCTION';
+GRANT SELECT ON `<db>`.`v_ai_process_production_actual` TO 'pm_ai_reader'@'<readerのホスト部>';  -- 開発のreaderがDB全体のSELECTを持つ場合は不要
+```
+
+手順SQLのビュー定義は、マイグレーション0055のSELECT（標準SQL）と、列・式・順序が同じであること（バッククォート・`<db>`の修飾は手動SQLだけに付ける）。
+
+**未実行**（本節の作成時点では、GRANT・CREATE・DEFINER付け替えのいずれも実行していない。計画の禁止事項により実行は行わない。実行はBOSS）。
+
+### 33.5 検証結果（generatorが実行。開発。読み取りのみ）
+
+#### 33.5.1 初回実装（公開列にevent_data・非公開にoperator_name）時点
+
+- `python manage.py test ai.test_analysis_process_production_actual_view --keepdb`：16件OK（追加直後の単独実行）。
+- `python manage.py test ai.test_analysis_process_production_actual_view ai.test_setup_ai_views ai.test_analysis_execution ai.test_analysis_column_guide ai.test_analysis_equipment_view ai.test_analysis_calendar_day_view ai.test_analysis_bom_item_view ai.test_analysis_routing_step_view ai.test_analysis_routing_step_material_view ai.test_analysis_user_view ai.test_analysis_department_view ai.test_analysis_supplier_view ai.test_analysis_customer_view ai.test_analysis_line_view ai.test_analysis_process_view ai.test_analysis_product_view ai.test_analysis_dateless_view ai.test_analysis_supervisor_team_view ai.test_analysis_leader_unit_view ai.test_analysis_unit_line_view --keepdb`：315件中313件OK（skipped=2）。残り2件の失敗（`test_analysis_bom_item_view.test_migration_dependency_exists_and_covers_source_columns`・`test_analysis_user_view.test_migration_dependency_exists`）は、masters・accountsアプリの最新マイグレーションのファイル名が試験の固定値よりさらに進んでいること（`0092`・`0075`、§32.3時点では`0087`・`0073`）が原因で、本実装（本ビュー）とは無関係の既存の食い違い（本件着手前から存在、進行中）。
+- `python manage.py makemigrations --dry-run --check`：「No changes detected」。
+- `business_day`の全件突き合わせ（§33.1.1。Django ORM、開発DB）：**全15,731件中、一致15,731件・不一致0件**。
+- `CREATE VIEW`の実行（`migrate`・`setup_ai_views --apply`・§33.4の手順SQL）は、禁止事項のため実行していない。開発DBへのビュー反映・`pm_ai_reader`での読み取り確認・`SHOW COLUMNS FROM v_ai_process_production_actual`での列型の再確認・`event_data`列を含む分析実行（§33.3-1の`_cell()`未対応の影響範囲の実機確認）は、未実施（evaluatorまたはBOSSの確認が必要）。
+
+#### 33.5.2 2回目の修正（2026-10-17。公開列をoperator_name追加・event_data除外に変更）時点
+
+- `python manage.py makemigrations --dry-run --check`：「No changes detected」（モデル変更を伴わないビューSQLの変更のため、新規マイグレーションは発生しない）。
+- `python manage.py test ai.test_analysis_process_production_actual_view --keepdb`：**17件OK**（単独実行。新規追加した`test_operator_name_is_published_and_event_data_is_hidden`を含む）。
+- 上記と同じ20ビュー分の関連試験一括実行（`ai.test_analysis_process_production_actual_view ai.test_setup_ai_views ai.test_analysis_execution ...`、`--keepdb`）：**316件中314件OK（skipped=2）**。失敗2件は初回実装時と同じ既存の食い違い（`test_analysis_bom_item_view.test_migration_dependency_exists_and_covers_source_columns`・`test_analysis_user_view.test_migration_dependency_exists`。masters・accountsの最新マイグレーションファイル名のズレ）で、本変更とは無関係。
+- `operator_name`列の型（開発DB実データ確認。`SHOW COLUMNS FROM t_process_realtime_record WHERE Field='operator_name'`）：**varchar(50)、NULL可**。`ANALYSIS_COLUMN_TYPES`は既存の`VARCHAR`表記に合わせた。
+- `pm_ai_view_owner`の列権限（開発DB実データ確認。`information_schema.COLUMN_PRIVILEGES`）：`operator_name`へのSELECTは**まだ付与されていない**（§33.4の手順SQLを更新。未実行・BOSSが実行）。`event_data`へのSELECTは既存のまま残っている（本ビュー用ではなく元から付与されていたもの。REVOKEは行っていない）。
+- `CREATE VIEW`の実行（`migrate`・`setup_ai_views --apply`・§33.4の手順SQL）は、本変更でも禁止事項のため実行していない。開発DBへのビュー反映・`pm_ai_reader`での読み取り確認・`operator_name`を含む分析実行の実機確認は、未実施（evaluatorまたはBOSSの確認が必要）。
+
+### 33.6 反映状況
+
+- コードのみ・マイグレーションファイル（既存の`0055`を書き換え。新規マイグレーション番号は追加していない）。開発DB・本番DBともに`v_ai_process_production_actual`ビューは未作成（`migrate`未実行）。手順SQL（§33.4）も未実行。
+- 評価：初回実装はevaluator条件付き合格（実機検証で`event_data`の分析実行失敗を確認）。2026-10-17の本修正（公開列変更）は、まだevaluator未検証。
+- コミット：未（BOSSの指示後に実施）。
+- 未確認・未実施：`pm_ai_reader`の列権限・読み取り確認、`operator_name`を含む分析実行の実機確認、本番反映、evaluatorによる独立検証（2回目の修正分）。
