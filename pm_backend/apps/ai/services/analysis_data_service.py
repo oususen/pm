@@ -68,7 +68,24 @@ ANALYSIS_VIEWS = {
             'operator_action_reason=PAUSE・TEMP_END行専用の固定選択肢(START・END・RESUME行は常に空文字)、'
             'sequence_no=0は過去の一時的事象で業務的意味なし、1は通常の計画行、2以上は同一品番・同日の複数計画行の順番、'
             'recorded_at=システムの記録日時、equipment_id・process_id・product_id=それぞれ設備・工程・製品のID、'
-            'operator_user_id=この記録の作業者(auth_user.idへのFK)。'
+            'operator_user_id=この記録の作業者(auth_user.idへのFK)、'
+            'operator_login_id=作業者のログインID(ほぼ未運用だが今後のデータ蓄積を見込んで公開)、'
+            'interruption_reason_code=中断理由コード(PAUSE・TEMP_END行のみ使用。ほぼ未運用だが今後のデータ蓄積を見込んで公開)、'
+            'remarks=備考(ほぼ未運用だが今後のデータ蓄積を見込んで公開)。'
+        ),
+    },
+    # レーザーの中断。t_laser_actual単独(結合なし)。quantity_field=None(数量の列がないため)。
+    'v_ai_laser_interruption': {
+        'label': 'レーザー中断', 'date_field': 'work_date', 'quantity_field': None,
+        'description': (
+            '1行はレーザー実績登録1回のヘッダ(operator_actionがPAUSE(中断)・TEMP_END(強制終了)の行だけ。'
+            't_laser_actual_detail(構成部品明細)へは結合しない。結合すると中断1件が明細行数分重複するため)。'
+            '日別・期間集計はwork_date(作業日)を使う。'
+            '列の意味: operator_action=作業者アクション(このビューではPAUSE・TEMP_ENDのみ)、'
+            'operator_user_id=この記録を登録した作業者(auth_user.idへのFK)、'
+            'pattern_no=加工パターン番号、material_id・material_code・material_name=使用材料、'
+            'line_id・process_id=2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様)、'
+            'created_at=このヘッダ行自体の作成日時。'
         ),
     },
     # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。

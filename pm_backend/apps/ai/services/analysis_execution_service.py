@@ -79,7 +79,17 @@ ANALYSIS_COLUMN_TYPES = {
         'id': 'BIGINT', 'plan_date': 'DATE', 'product_code': 'VARCHAR', 'operator_action': 'VARCHAR',
         'operator_action_reason': 'VARCHAR', 'qty': 'BIGINT', 'sequence_no': 'BIGINT', 'recorded_at': 'TIMESTAMP',
         'equipment_id': 'BIGINT', 'line_id': 'BIGINT', 'process_id': 'BIGINT', 'product_id': 'BIGINT',
-        'operator_user_id': 'BIGINT',
+        'operator_user_id': 'BIGINT', 'operator_login_id': 'VARCHAR', 'interruption_reason_code': 'VARCHAR',
+        'remarks': 'VARCHAR',
+    },
+    # レーザーの中断(t_laser_actualのSHOW COLUMNSから導出。bigintはBIGINT、intはBIGINT、
+    # varcharはVARCHAR、dateはDATE、datetime(6)はTIMESTAMP)
+    'v_ai_laser_interruption': {
+        'id': 'BIGINT', 'work_date': 'DATE', 'equipment_id': 'BIGINT', 'equipment_code': 'VARCHAR',
+        'equipment_name': 'VARCHAR', 'line_id': 'BIGINT', 'process_id': 'BIGINT', 'pattern_no': 'VARCHAR',
+        'material_id': 'BIGINT', 'material_code': 'VARCHAR', 'material_name': 'VARCHAR',
+        'operator_action': 'VARCHAR', 'operator_action_reason': 'VARCHAR', 'operator_user_id': 'BIGINT',
+        'created_at': 'TIMESTAMP',
     },
     # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
     'v_ai_product': {

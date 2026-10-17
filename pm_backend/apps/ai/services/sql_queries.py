@@ -60,11 +60,20 @@ BASE_SQL_SCHEMA = {
         'end_operator_user_id', 'created_at_h', 'updated_at_h', 'created_at', 'updated_at',
     ),
     # ブレーキ・板金スポットの生産実績のビュー(AI用ビュー作成計画 §35。brake_line_recordを結合なし・全行(WHEREなし)で公開。
-    # 非公開: operator(個人名)、operator_login_id・interruption_reason_code・remarks(2026-10-16追加の新列でほぼ空)。
+    # 非公開: operator(個人名)のみ。2026-10-17、BOSS判断によりoperator_login_id・interruption_reason_code・remarksを追加公開。
     # 列順はマイグレーションのSELECT順と同じ)
     'v_ai_brake_production_actual': (
         'id', 'plan_date', 'product_code', 'operator_action', 'operator_action_reason', 'qty', 'sequence_no',
         'recorded_at', 'equipment_id', 'line_id', 'process_id', 'product_id', 'operator_user_id',
+        'operator_login_id', 'interruption_reason_code', 'remarks',
+    ),
+    # レーザーの中断のビュー(AI用ビュー作成計画 §36。t_laser_actual単独(結合なし)。
+    # operator_action IN ('PAUSE','TEMP_END')の行だけを公開。t_laser_actual_detailへは結合しない
+    # (結合すると中断1件が明細行数分重複するため)。列順はマイグレーションのSELECT順と同じ)
+    'v_ai_laser_interruption': (
+        'id', 'work_date', 'equipment_id', 'equipment_code', 'equipment_name', 'line_id', 'process_id',
+        'pattern_no', 'material_id', 'material_code', 'material_name', 'operator_action',
+        'operator_action_reason', 'operator_user_id', 'created_at',
     ),
     # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
@@ -194,6 +203,24 @@ TABLE_NOTES = {
         '値1(約98%、26,791件)は通常の計画行に対応する。値2以上(44件。2026-03〜09月に分散して継続発生)は、同一品番・同日に複数の計画行(LineBacklog)がある場合の順番を表す。'
         'equipment_id は v_ai_equipment の id、line_id は v_ai_line の id、process_id は v_ai_process の id、product_id は v_ai_product の id と結べる。'
         'operator_user_id はこの記録の作業者(auth_user.idへのFK。氏名そのものではない)。'
+        '2026-10-17、BOSS判断によりoperator_login_id・interruption_reason_code・remarksの3列を追加公開(以下、開発DB確認済みの件数)。'
+        'operator_login_id は作業者のログインID(開発DB27,253件中27,245件がNULLでほぼ未運用だが、今後の作業者分析のため公開)。'
+        'interruption_reason_code は中断理由コード(PAUSE・TEMP_END行367件中4件のみ値ありでほぼ未運用だが、今後のデータ蓄積を見込んで公開)。'
+        'remarks は備考(開発DB全件が空でほぼ未運用だが、今後のデータ蓄積を見込んで公開)。'
+    ),
+    'v_ai_laser_interruption': (
+        'レーザーの中断(t_laser_actual単独。結合なし)のビュー。1行=レーザー実績登録1回のヘッダ(operator_actionがPAUSE(中断)・'
+        'TEMP_END(強制終了)の行だけ。START・END・RESUME等の作業者アクションはこのビューに出ない。開発DB確認: PAUSE16件・TEMP_END0件、合計16件)。'
+        't_laser_actual_detail(構成部品明細)へは結合しない。結合すると中断1件が明細の行数分重複するため、BOSSが結合なし設計を決定した'
+        '(生産数量を見たいときは v_ai_laser_production_actual を使う。このビューは中断そのものの発生状況の分析用)。'
+        '日別・期間の集計は work_date(作業日)を使う。operator_action はPAUSE・TEMP_ENDのみ。'
+        'operator_user_id はこの記録を登録した作業者(created_by_id の別名。auth_user.id へのFK。v_ai_laser_production_actual と同じ付け替え理由)。'
+        'pattern_no は加工パターン番号、material_id・material_code・material_name は使用材料(品番マスタビュー v_ai_product と結合可能。'
+        '中断時のパターン・作業者・材料がわかるようにというBOSSの要望で追加)。'
+        'line_id・process_id は2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様。保存機能がなかった期間)。'
+        '開発DB確認(2026-10-17): 現在の対象16件は全件work_dateが2026-10-14より前(2026-05-25〜2026-10-09)のため、現時点では16件全件がline_id・process_idともにNULL。'
+        '将来2026-10-14以降のPAUSE・TEMP_ENDが発生すれば値が入る。material_id・equipment_id・operator_user_id(created_by_id)は、対象16件全件で値あり(NULL0件)。'
+        'created_at はこのビューでは衝突する列がないため接尾辞なし(無印)で、このヘッダ行自体の作成日時。'
     ),
     'v_ai_product': (
         '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'
