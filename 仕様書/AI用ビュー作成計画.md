@@ -1753,7 +1753,7 @@ GRANT SELECT ON `<db>`.`v_ai_laser_production_actual` TO 'pm_ai_reader'@'<reader
 - コミット：`d30ab253`で実施済み（AI用ビュー: レーザー生産実績を分析対象に追加）。pushは未実施。
 - 未確認・未実施：手順SQL（§34.4）による`pm_ai_view_owner`への元2テーブルの列権限付与とDEFINER付け替え、付け替え後の`pm_ai_reader`再確認、本番反映、push、evaluator再評価。
 
-## 35. ブレーキ・スポット 生産実績のビュー `v_ai_brake_production_actual` の作成前確認・実装記録（2026-10-17。BOSS承認済み。実装済み・evaluator未検証）
+## 35. ブレーキ・スポット 生産実績のビュー `v_ai_brake_production_actual` の作成前確認・実装記録（2026-10-17。BOSS承認済み。実装済み・evaluator未検証。2026-10-17、BOSS判断により`operator_login_id`・`interruption_reason_code`・`remarks`の3列を追加公開。§35.6参照）
 
 ### 35.1 作成前確認
 
@@ -1763,8 +1763,8 @@ GRANT SELECT ON `<db>`.`v_ai_laser_production_actual` TO 'pm_ai_reader'@'<reader
 | 元テーブル | `brake_line_record`（ブレーキライン作業記録）の1つだけ。結合なし（全27,253行。開発DBで確認） |
 | 対象行 | 全行（WHEREなし） |
 | 数値定義 | `qty`=加工数（`operator_action`がEND・PAUSEの行だけ非ゼロ。START・RESUME・TEMP_ENDは常に0）。`plan_date`=計画日（実列。計算列ではない） |
-| 公開フィールド（13列。BOSS判断で確定） | `id`、`plan_date`、`product_code`、`operator_action`、`operator_action_reason`、`qty`、`sequence_no`、`recorded_at`、`equipment_id`、`line_id`、`process_id`、`product_id`、`operator_user_id` |
-| 非公開フィールド | `operator`（個人名。`operator_user_id`で代替）、`operator_login_id`・`interruption_reason_code`・`remarks`（いずれも2026-10-16追加の新列で、実データがほぼ空のため今回は非公開） |
+| 公開フィールド（当初13列。BOSS判断で確定。2026-10-17、BOSS判断により3列追加し16列。§35.6参照） | `id`、`plan_date`、`product_code`、`operator_action`、`operator_action_reason`、`qty`、`sequence_no`、`recorded_at`、`equipment_id`、`line_id`、`process_id`、`product_id`、`operator_user_id`、`operator_login_id`、`interruption_reason_code`、`remarks` |
+| 非公開フィールド | `operator`（個人名。`operator_user_id`で代替）のみ |
 | 個人情報 | `operator_user_id`は`auth_user.id`へのFK（氏名そのものではない）。氏名そのものの`operator`は非公開 |
 
 #### 35.1.1 列型の対応（`SHOW COLUMNS FROM brake_line_record`。開発DBで実測）
@@ -1784,8 +1784,11 @@ GRANT SELECT ON `<db>`.`v_ai_laser_production_actual` TO 'pm_ai_reader'@'<reader
 | `process_id` | bigint | `BIGINT` |
 | `product_id` | bigint（NULL可） | `BIGINT` |
 | `operator_user_id` | int（NULL可） | `BIGINT` |
+| `operator_login_id` | varchar(150)（NULL可） | `VARCHAR` |
+| `interruption_reason_code` | varchar(4) | `VARCHAR` |
+| `remarks` | longtext（NULL可） | `VARCHAR`（§35.6のとおり、`v_ai_process_production_actual`の同種列と同じ扱いでVARCHARとした） |
 
-非公開3列（参考。`ANALYSIS_COLUMN_TYPES`に含めない）：`operator_login_id`はvarchar(150)・NULL可、`interruption_reason_code`はvarchar(4)、`remarks`はlongtext・NULL可。JSON型の列はない。
+JSON型の列はない。
 
 #### 35.1.2 実データ確認（開発DB、2026-10-17、generator確認）
 
@@ -1801,10 +1804,10 @@ GRANT SELECT ON `<db>`.`v_ai_laser_production_actual` TO 'pm_ai_reader'@'<reader
 
 ### 35.2 実装内容
 
-- `pm_backend/apps/ai/migrations/0057_ai_brake_production_actual_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_brake_production_actual AS SELECT <13列> FROM brake_line_record`（標準SQLのみ・別名なし・WHEREなし・結合なし）。ロールバックは`DROP VIEW IF EXISTS v_ai_brake_production_actual`。依存は`ai 0056_ai_laser_production_actual_view`と`production 0121_brakelinerecord_interruption_reason_code_and_more`（`brake_line_record`の列が最後に変わったマイグレーション。実機確認済み：0122〜0124は他モデル（`ProgressMonitorTarget`・`ProcessRealtimeRecord`）の変更で、`BrakeLineRecord`には無関係）。
-- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_brake_production_actual`（13列。マイグレーションのSELECT順と同じ）を`v_ai_laser_production_actual`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§35.1.2の実データに基づく内容：`line_id`の区別・`operator_action_reason`が固定選択肢である旨・`qty`の集計方法・`plan_date`と`recorded_at`の不一致率・`sequence_no`の意味）。
+- `pm_backend/apps/ai/migrations/0057_ai_brake_production_actual_view.py` 新規。`CREATE OR REPLACE VIEW v_ai_brake_production_actual AS SELECT <13列(2026-10-17に16列へ変更。§35.6参照)> FROM brake_line_record`（標準SQLのみ・別名なし・WHEREなし・結合なし）。ロールバックは`DROP VIEW IF EXISTS v_ai_brake_production_actual`。依存は`ai 0056_ai_laser_production_actual_view`と`production 0121_brakelinerecord_interruption_reason_code_and_more`（`brake_line_record`の列が最後に変わったマイグレーション。実機確認済み：0122〜0124は他モデル（`ProgressMonitorTarget`・`ProcessRealtimeRecord`）の変更で、`BrakeLineRecord`には無関係）。
+- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_brake_production_actual`（当初13列。2026-10-17に16列へ変更。§35.6参照。マイグレーションのSELECT順と同じ）を`v_ai_laser_production_actual`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§35.1.2の実データに基づく内容：`line_id`の区別・`operator_action_reason`が固定選択肢である旨・`qty`の集計方法・`plan_date`と`recorded_at`の不一致率・`sequence_no`の意味）。
 - `pm_backend/apps/ai/services/analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_brake_production_actual`（label=ブレーキ・スポット生産実績、`date_field='plan_date'`、`quantity_field='qty'`、説明文）を`v_ai_laser_production_actual`の直後に追加。
-- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に13列の型（§35.1.1）を`v_ai_laser_production_actual`の直後に追加。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に当初13列の型（§35.1.1。2026-10-17に16列へ変更。§35.6参照）を`v_ai_laser_production_actual`の直後に追加。
 - `pm_backend/apps/ai/management/commands/setup_ai_views.py`：`SIMPLE_MASTER_VIEWS`に`v_ai_brake_production_actual`→`brake_line_record`を1行追加（結合・WHEREなしの単純なマスタビューのため。既存の`v_ai_equipment`等と同じ扱い）。単純なマスタビューは7つになった。元テーブル`brake_line_record`は、チャットSQL（`ai_home`・`production`画面）向けの`BASE_SQL_SCHEMA`・`PERSONAL_SQL_COLUMNS`・`SCREEN_SQL_TABLES`に既存のエントリ（9列・個人情報`operator`列を含む）を持つが、これは本ビューとは別経路（直接のSQL実行）のため変更していない。
 - 試験：`apps/ai/test_analysis_brake_production_actual_view.py`新規（17件。既存の`v_ai_equipment`・`v_ai_laser_production_actual`と同様にSimpleTestCaseで列・型・公開列・非公開列・マイグレーションSQL・`setup_ai_views`登録を検証するテストに加え、開発DBの実テーブルへ直接読み取りだけを行う件数照合テスト、`sequence_no`=0/1/2以上それぞれの件数を検証するテストを追加）。`test_setup_ai_views.py`は`LATEST_MIGRATION`に`v_ai_brake_production_actual`→`0057_ai_brake_production_actual_view.py`を追加。
 - 仕様書：本節、`AI運用規約・AI用DB辞書.md`に新規節（§6.5-19）を追加。
@@ -1832,3 +1835,96 @@ GRANT SELECT ON `<db>`.`v_ai_laser_production_actual` TO 'pm_ai_reader'@'<reader
 - 評価：evaluator未検証。
 - コミット：未（BOSSの指示後に実施）。
 - 未確認・未実施：`migrate ai 0057`の実行、`v_ai_reader`での件数照合（`test_analysis_brake_production_actual_view.BrakeProductionActualDBCountMatchTest.test_view_count_matches_source_table_count`が現在skip）、`setup_ai_views`による権限付与・定義者の付け替え、本番反映、commit・push、evaluator検証。
+
+### 35.6 2026-10-17 BOSS判断による追加公開（`operator_login_id`・`interruption_reason_code`・`remarks`を非公開→公開）
+
+- BOSSが当初非公開としていた3列（`operator_login_id`・`interruption_reason_code`・`remarks`）を公開に変更すると決定した。
+- **事実誤認の訂正（2026-10-18、evaluator指摘により判明）**: 当初、`0057_ai_brake_production_actual_view.py`のSELECT文を直接書き換える対応を行ったが、実際には**0057は既に開発DBへ`migrate`適用済み**（適用日時2026-10-17 21:19:25。コミット`1498f72a`で13列版として確定済み）だった。Djangoは適用済みマイグレーションのSQL内容を変更しても再実行しないため、ファイルを直接書き換えても開発DBのビュー定義（13列のまま）には反映されず、新3列を参照するクエリが`Unknown column`エラーになる不整合が発生していた。
+- **対応**: `0057_ai_brake_production_actual_view.py`を元の13列版（コミット`1498f72a`の内容）に復元し、新規マイグレーション`0059_ai_brake_production_actual_view_add_columns.py`を追加して、そちらで16列版の`CREATE OR REPLACE VIEW`を再発行する方式に変更した。依存は`ai 0057`・`ai 0058`（レーザー中断ビュー、他セッション作成・2026-10-18時点で未コミット）。`python manage.py makemigrations --dry-run --check`で「No changes detected」を確認済み。開発DBへの`migrate`再実行はBOSSが行う。
+- 公開列は13列→16列（列順は§35.1の表のとおり。末尾に3列を追加）。非公開は`operator`（個人名）のみになった。
+- `remarks`の実際のDB型は`SHOW COLUMNS FROM brake_line_record`で`longtext`（NULL可）と確認した（`varchar`ではない）。`ANALYSIS_COLUMN_TYPES`では、既存の`v_ai_process_production_actual`の同種列（`remarks`）と同じ扱いで`VARCHAR`とした（longtext・varcharいずれも`ANALYSIS_COLUMN_TYPES`では`VARCHAR`で統一する既存方針に合わせた）。
+- 開発DB実データ再確認（2026-10-17）：全27,253件。`operator_login_id`はNULLが27,245件（値ありは8件、§35.1.2と同じ）。`interruption_reason_code`は値ありが4件（PAUSE・TEMP_END合計367件中。§35.1.2と同じ）。`remarks`は値ありが0件（空文字含め全件NULLまたは空、実質未運用）。3列とも「現状ほぼ未運用だが今後のデータ蓄積を見込んで公開」という趣旨をコード中のコメント・`TABLE_NOTES`・`ANALYSIS_VIEWS`の説明文に記載した。
+- 変更ファイル：`pm_backend/apps/ai/migrations/0057_ai_brake_production_actual_view.py`（SELECT句・コメント）、`pm_backend/apps/ai/services/sql_queries.py`（`BASE_SQL_SCHEMA`・`TABLE_NOTES`・コメント）、`pm_backend/apps/ai/services/analysis_data_service.py`（`ANALYSIS_VIEWS`の説明文）、`pm_backend/apps/ai/services/analysis_execution_service.py`（`ANALYSIS_COLUMN_TYPES`）、`pm_backend/apps/ai/test_analysis_brake_production_actual_view.py`（`PUBLISHED`・`HIDDEN`・列数・型辞書・説明文アサーションを16列公開の前提に更新）。`setup_ai_views.py`は`wanted_columns()`が`BASE_SQL_SCHEMA`から動的に算出するため変更不要（確認済み）。
+- 検証結果：`python manage.py test ai.test_analysis_brake_production_actual_view` 15件成功（3列公開に合わせてテストの列数・型辞書・HIDDENタプルを更新したため、総件数は17件→15件に変化。`test_validate_datasets_requires_plan_date_and_rejects_hidden_columns`が非公開列でループする対象が`operator`の1件のみになったため）。`python manage.py makemigrations --dry-run --check`は「No changes detected」（本変更はSQLのみでモデル変更を伴わないため）。
+- 反映状況：コードのみ変更。`migrate`・`setup_ai_views --apply`・コミット・pushは未実施（禁止事項のため）。開発DB・本番DBともに`v_ai_brake_production_actual`ビューは未作成のまま。evaluator未検証。
+
+## 36. レーザー 中断のビュー `v_ai_laser_interruption` の作成前確認・実装記録（2026-10-17。BOSS承認済み。実装済み・evaluator未検証）
+
+### 36.1 作成前確認
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、レーザーの中断（中断発生時のライン・工程・パターン・使用材料・作業者アクションなど）を分析・説明できるようにする |
+| 元テーブル | `t_laser_actual`単独（結合なし）。`t_laser_actual_detail`へは結合しない（結合すると中断1件が明細の行数分重複するため、BOSSが結合なし設計を決定済み） |
+| 対象行 | `WHERE operator_action IN ('PAUSE', 'TEMP_END')`（中断・強制終了の行だけ） |
+| 数値定義 | 数量の列はなし（`quantity_field=None`）。`work_date`=作業日（実列、計算列ではない） |
+| 公開フィールド（15列。BOSS判断で確定） | `id`、`work_date`、`equipment_id`、`equipment_code`、`equipment_name`、`line_id`、`process_id`、`pattern_no`、`material_id`、`material_code`、`material_name`、`operator_action`、`operator_action_reason`、`operator_user_id`（`created_by_id`の別名）、`created_at` |
+| 非公開フィールド | `t_laser_actual_detail`側の列（`detail_product_code`・`detail_total_qty`相当の情報）は、結合しない設計のため構造的に出現しない（非公開列を個別に定める必要はない） |
+| 個人情報 | `operator_user_id`は`auth_user.id`へのFK（氏名そのものではない）。既存の`v_ai_laser_production_actual`と同様、本ビューはIDだけを公開し、氏名は公開しない |
+
+#### 36.1.1 開発DBの実データ確認（2026-10-17、generator確認）
+
+- `operator_action`の内訳（ヘッダ単位、重複なし）：PAUSE 16件、TEMP_END 0件、合計16件。
+- `work_date`の範囲：2026-05-25〜2026-10-09（全16件が2026-10-14より前）。
+- `line_id`・`process_id`がNOT NULLの行：0件（16件全件がNULL）。2026-10-14にライン・工程の保存機能を追加した（`production/migrations/0118_laser_actual_line_process.py`）ため、それより前の実績行はNULLになる仕様（`v_ai_laser_production_actual`・計画書 §34.1.1と同じ事実）。本ビューの対象16件は全件がこの保存機能追加前の実績のため、現時点では全件NULLになる。将来2026-10-14以降のPAUSE・TEMP_ENDが発生すれば値が入る。
+- `material_id`がNULLの行：0件（16件全件で値あり）。
+- `equipment_id`がNULLの行：0件（16件全件で値あり）。
+- `created_by_id`（`operator_user_id`）がNULLの行：0件（16件全件で値あり）。
+
+#### 36.1.2 列型の対応（`SHOW COLUMNS FROM t_laser_actual`。開発DBで実測）
+
+| 列 | 元テーブル・MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id` | `bigint` | `BIGINT` |
+| `work_date` | `date` | `DATE` |
+| `equipment_id` | `bigint` | `BIGINT` |
+| `equipment_code` | `varchar(50)` | `VARCHAR` |
+| `equipment_name` | `varchar(100)` | `VARCHAR` |
+| `line_id` | `bigint`、NULL可 | `BIGINT` |
+| `process_id` | `bigint`、NULL可 | `BIGINT` |
+| `pattern_no` | `varchar(50)` | `VARCHAR` |
+| `material_id` | `bigint`、NULL可 | `BIGINT` |
+| `material_code` | `varchar(50)` | `VARCHAR` |
+| `material_name` | `varchar(100)` | `VARCHAR` |
+| `operator_action` | `varchar(20)` | `VARCHAR` |
+| `operator_action_reason` | `varchar(200)` | `VARCHAR` |
+| `operator_user_id` | `created_by_id`、`int`、NULL可 | `BIGINT` |
+| `created_at` | `datetime(6)` | `TIMESTAMP` |
+
+参考（本ビューでは参照しない。`t_laser_actual_detail`の列。結合しないため構造的に出現しない）：`detail_product_code`・`detail_total_qty`相当の情報（構成部品・生産数量）は、本ビューには出ない。生産数量を見たいときは`v_ai_laser_production_actual`（§34）を使う。
+
+### 36.2 実装内容
+
+- 新規 `pm_backend/apps/ai/migrations/0058_ai_laser_interruption_view.py`。`CREATE OR REPLACE VIEW v_ai_laser_interruption AS SELECT <15列> FROM t_laser_actual WHERE operator_action IN ('PAUSE', 'TEMP_END')`（標準SQLのみ・バッククォート/DEFINER/SQL SECURITY/DB修飾なし・結合なし）。ロールバックは`DROP VIEW IF EXISTS v_ai_laser_interruption`。依存は`ai 0057_ai_brake_production_actual_view`と`production 0118_laser_actual_line_process`（`line_id`・`process_id`列の追加マイグレーション。`v_ai_laser_production_actual`と同じ依存）。
+- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_laser_interruption`（15列。マイグレーションのSELECT順と同じ）を`v_ai_brake_production_actual`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§36.1・§36.1.1の内容。結合なし設計の理由、`line_id`・`process_id`が2026-10-14より前はNULLになる旨、現在の対象16件全件がNULLである旨、`operator_user_id`が`created_by_id`の別名である旨を明記）。
+- `pm_backend/apps/ai/services/analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_laser_interruption`（label=レーザー中断、`date_field='work_date'`、`quantity_field=None`、説明文）を`v_ai_brake_production_actual`の直後に追加。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に15列の型（§36.1.2）を`v_ai_brake_production_actual`の直後に追加。
+- `pm_backend/apps/ai/management/commands/setup_ai_views.py`：`EXISTING_JOIN_VIEWS`に`v_ai_laser_interruption`を追加（単一テーブルでもWHERE句で絞り込むため`SIMPLE_MASTER_VIEWS`ではなく、既存の`v_ai_laser_production_actual`等と同じ「結合・WHERE句あり」の扱い。再作成しない。`--check`で定義者等を表示するだけ）。近くのコメントの対象マイグレーション番号の一覧に`0058`を追記。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS`は変更していない（`t_laser_actual`は他の公開ビューと列を共有しないため）。
+- 試験：`apps/ai/test_analysis_laser_interruption_view.py`新規（16件。既存の`v_ai_laser_production_actual`・`v_ai_brake_production_actual`と同様にSimpleTestCaseで列・型・公開列・マイグレーションSQL・`setup_ai_views`登録を検証するテストに加え、開発DBの実テーブルへ直接読み取りだけを行う件数照合テスト、`operator_action`別（PAUSE・TEMP_END）の件数を検証するテストを追加）。
+- 仕様書：本節、`AI運用規約・AI用DB辞書.md`に新規節（§6.5-20）を追加。
+
+### 36.3 承認済み計画からの逸脱・不確実な点（evaluatorへの確認依頼）
+
+1. **承認済み計画の時点で想定していたマイグレーション番号は0058だったが、並行実装（§35のブレーキビュー）が先に0057を使ったため、実際の番号もちょうど0058のままで一致した**（確認した上での一致。ズレはなかった）。
+2. **検証項目（件数照合・operator_action別の件数照合）は、`migrate`未実行（本ビュー未作成）のため、開発DBの実テーブル直接読み取りによる期待値の確認にとどめ、ビュー自体との照合はスキップ扱いにした**（migrate実行後に有効になる設計。§34・§35と同じ方式）。
+3. **権限の付与・定義者の付け替えは、既存の`v_ai_laser_production_actual`と同様、手動の手順SQLが必要な想定だが、本節では手順SQLを作成していない**（`EXISTING_JOIN_VIEWS`は`--check`で定義者等を表示するだけのため。必要であれば別途BOSSの指示で作成する）。
+4. **検証項目の`makemigrations --dry-run --check`は「No changes detected」を確認した**。
+5. **generatorの実装完了後、本セッション中に`ai/0058`が開発DBへ適用された（`showmigrations ai`で`[X]`に変化、`v_ai_laser_interruption`ビューが実在することを確認）**。generator自身は`migrate`を実行していない（禁止事項のため）。BOSSまたは他の作業（並行していたブレーキビューの作業）の中で適用されたと見られるが、実行者・実行コマンドはgeneratorからは確認できない。結果として、件数照合テストが実際のビューに対して実行され、スキップされずに成功した（§36.4）。
+
+### 36.4 検証結果（generatorが実行。開発）
+
+- 開発DBの実データ確認（`SHOW COLUMNS`、件数集計）：§36.1.1・§36.1.2のとおり実測し、承認済み計画の推測値（PAUSE16件・TEMP_END0件、line_id・process_id全件NULL、material_id・equipment_id・operator_user_id全件値あり）と完全に一致した。
+- `python manage.py test ai.test_analysis_laser_interruption_view`：当初（migrate未適用時点）は**16件中15件成功・1件skip**。その後`ai/0058`が開発DBへ適用されたため再実行し、**16件全件成功（skipなし）**。件数照合テスト（`LaserInterruptionDBCountMatchTest.test_view_count_matches_independent_count`）が実際に`SELECT COUNT(*) FROM v_ai_laser_interruption`を実行し、独立計算の16件と一致することを確認した。
+- `ai.test_setup_ai_views ai.test_analysis_laser_production_actual_view ai.test_analysis_brake_production_actual_view ai.test_analysis_laser_interruption_view`の一括実行（migrate未適用時点）：67件成功（skip1件）。
+- `ai`アプリ全体（1,166件）の一括実行（migrate未適用時点）：1,150件成功・8件failure・7件error・13件skip（新規追加16件を含む）。失敗・エラーの内容は§35.4で確認済みの既存の無関係な食い違い（`test_analysis_user_view`・`test_analysis_bom_item_view`の移行ファイル名の固定値、`test_analysis_template_notify`・`test_analysis_template_review`のトランザクション関連、`test_qwen_my_overtime`の外部API依存、`test_analysis_codegen_trial_counts`の無関係な機能）と同一であることをテスト名で確認した（本実装による新規の失敗・エラーはない）。
+- 別途、`ai/0058`適用後に`ai.test_setup_ai_views`を単独再実行したところ、ブレーキビュー側の並行作業（`0059_ai_brake_production_actual_view_add_columns`マイグレーション追加と`BASE_SQL_SCHEMA['v_ai_brake_production_actual']`の列追加が、`test_setup_ai_views.LATEST_MIGRATION`の対応付け未更新と食い違ったため）で`test_migration_columns_match_command`が1件失敗した。これはブレーキビューの並行作業に起因し、本実装（レーザー中断）の変更範囲外のため、generatorでは修正していない。
+- `python manage.py makemigrations --dry-run --check`：「No changes detected」（ブレーキビューの並行作業によるマイグレーション追加後も再確認し、同じ結果）。
+- `python manage.py showmigrations ai`：実装直後は`0058_ai_laser_interruption_view`が未適用（`[ ]`）だったが、その後`[X]`（適用済み）に変化したことを確認した（§36.3-5）。
+
+### 36.5 反映状況
+
+- コードを実装（マイグレーション・`sql_queries.py`・`analysis_data_service.py`・`analysis_execution_service.py`・`setup_ai_views.py`・試験1ファイル）。generator自身は`migrate`・`setup_ai_views --apply`を実行していない（禁止事項のため）。
+- **開発DBの状態（2026-10-18確認）**：`ai/0058`は適用済み（`showmigrations`で`[X]`）。`v_ai_laser_interruption`ビューが実在し、15列・16行（`SHOW COLUMNS`・`SELECT COUNT(*)`で確認）。本番DBは未反映。
+- 評価：evaluator未検証。
+- コミット：未（BOSSの指示後に実施）。
+- 未確認・未実施：`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成。現在のDEFINERは`root@localhost`と推定されるが、generatorは`information_schema`での確認を今回は実施していない）、本番反映、commit・push、evaluator検証。並行していたブレーキビュー（§35）側の`test_setup_ai_views`不整合（上記36.4）の解消は、本実装の範囲外のためBOSSまたはブレーキビュー担当へ報告が必要。

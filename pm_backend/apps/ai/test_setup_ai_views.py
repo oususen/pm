@@ -26,7 +26,8 @@ LATEST_MIGRATION = {
     'v_ai_supplier': '0038_ai_supplier_view.py',
     'v_ai_customer': '0039_ai_customer_view.py',
     'v_ai_equipment': '0054_ai_equipment_view.py',
-    'v_ai_brake_production_actual': '0057_ai_brake_production_actual_view.py',
+    # 0057(13列)適用済みのため、16列への拡張は0059で追加(2026-10-18、不整合修正。AI用ビュー作成計画 §35.6)
+    'v_ai_brake_production_actual': '0059_ai_brake_production_actual_view_add_columns.py',
 }
 
 

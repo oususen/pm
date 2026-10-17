@@ -3,8 +3,14 @@
 偽のDB接続・定義の検査だけを使う試験(SimpleTestCase)と、開発DBへ読み取りだけを行う件数照合試験(DBCountMatchTest)を分ける。
 本ビューは`brake_line_record`を結合なし・WHEREなしで公開する単純なマスタビュー(SIMPLE_MASTER_VIEWS)のため、
 v_ai_equipmentの試験(test_analysis_equipment_view.py)と同じ構成にする。
-件数照合は、`migrate`未実行(本ビュー未作成)の間は、元テーブルの直接件数だけを計算し、
-ビュー自体へのSELECTは `information_schema.VIEWS` でビューの存在を確認してから行う(存在しなければ明示してスキップする)。
+
+ビュー本体は2つのマイグレーションに分かれている:
+- 0057_ai_brake_production_actual_view.py: 開発DB適用済み(13列版、変更不可)
+- 0059_ai_brake_production_actual_view_add_columns.py: 16列への拡張(未適用。BOSSのmigrate待ち)
+現在の公開列定義(PUBLISHED、16列)に対する検査は0059の内容を基準にする。
+
+件数照合は、ビューが存在しない場合は元テーブルの直接件数だけを計算してスキップする。
+列数照合(16列)は、0059が未適用の間は実列が13列のままなのでスキップする。
 """
 import re
 from pathlib import Path
@@ -19,14 +25,16 @@ from ai.services.sql_queries import BASE_SQL_SCHEMA, TABLE_NOTES
 
 VIEW = 'v_ai_brake_production_actual'
 PERIOD = ('2026-09-01', '2026-09-30')
-# BOSSが決定した公開13列。順序はマイグレーションのSELECT順と同じ(AI用ビュー作成計画 §35)。
+# BOSSが決定した公開16列。順序はマイグレーションのSELECT順と同じ(AI用ビュー作成計画 §35。
+# 2026-10-17、BOSS判断によりoperator_login_id・interruption_reason_code・remarksの3列を追加公開)。
 PUBLISHED = (
     'id', 'plan_date', 'product_code', 'operator_action', 'operator_action_reason', 'qty', 'sequence_no',
     'recorded_at', 'equipment_id', 'line_id', 'process_id', 'product_id', 'operator_user_id',
+    'operator_login_id', 'interruption_reason_code', 'remarks',
 )
-# 非公開(ビューに含めない): operator(個人名)、operator_login_id・interruption_reason_code・remarks(2026-10-16追加の新列でほぼ空)
-HIDDEN = ('operator', 'operator_login_id', 'interruption_reason_code', 'remarks')
-MIGRATION = Path(__file__).parent / 'migrations' / '0057_ai_brake_production_actual_view.py'
+# 非公開(ビューに含めない): operator(個人名)のみ
+HIDDEN = ('operator',)
+MIGRATION = Path(__file__).parent / 'migrations' / '0059_ai_brake_production_actual_view_add_columns.py'
 
 
 def migration_sql():
@@ -48,13 +56,14 @@ class BrakeProductionActualViewDefinitionTest(SimpleTestCase):
 
     def test_column_types_match_published_columns_exactly(self):
         self.assertEqual(BASE_SQL_SCHEMA[VIEW], PUBLISHED)
-        self.assertEqual(len(PUBLISHED), 13)
+        self.assertEqual(len(PUBLISHED), 16)
         self.assertEqual(set(service.ANALYSIS_COLUMN_TYPES[VIEW]), set(BASE_SQL_SCHEMA[VIEW]))
         self.assertEqual(service.ANALYSIS_COLUMN_TYPES[VIEW], {
             'id': 'BIGINT', 'plan_date': 'DATE', 'product_code': 'VARCHAR', 'operator_action': 'VARCHAR',
             'operator_action_reason': 'VARCHAR', 'qty': 'BIGINT', 'sequence_no': 'BIGINT', 'recorded_at': 'TIMESTAMP',
             'equipment_id': 'BIGINT', 'line_id': 'BIGINT', 'process_id': 'BIGINT', 'product_id': 'BIGINT',
-            'operator_user_id': 'BIGINT',
+            'operator_user_id': 'BIGINT', 'operator_login_id': 'VARCHAR', 'interruption_reason_code': 'VARCHAR',
+            'remarks': 'VARCHAR',
         })
         # JSON型の列が混入していないこと(分析実行の値変換が未対応のため実行が失敗する再発防止)
         self.assertNotIn('JSON', service.ANALYSIS_COLUMN_TYPES[VIEW].values())
@@ -98,7 +107,7 @@ class BrakeProductionActualViewDefinitionTest(SimpleTestCase):
         for text in (ANALYSIS_VIEWS[VIEW]['description'], TABLE_NOTES[VIEW]):
             for part in (
                     'operator_action', 'qty', 'line_id', 'operator_action_reason', 'sequence_no',
-                    'operator_user_id'):
+                    'operator_user_id', 'operator_login_id', 'interruption_reason_code', 'remarks'):
                 self.assertIn(part, text)
             for hidden in HIDDEN:
                 # operatorは公開列名(operator_action等)の接頭辞と重なるため単語境界つきの正規表現で判定する
@@ -134,17 +143,29 @@ class BrakeProductionActualViewDefinitionTest(SimpleTestCase):
             # operatorは公開列名(operator_action等)の接頭辞と重なるため単語境界つきの正規表現で判定する
             self.assertNotRegex(sql, rf'\b{hidden}\b')
         source = MIGRATION.read_text(encoding='utf-8')
-        self.assertIn("DROP_VIEW = 'DROP VIEW IF EXISTS v_ai_brake_production_actual'", source)
+        # 0059はロールバックで0057が作成した13列版に戻す(DROPではなくCREATE OR REPLACE VIEW)
+        self.assertIn('REVERT_VIEW = """', source)
+        self.assertIn('operator_user_id\nFROM brake_line_record', source)
 
     def test_migration_columns_match_base_sql_schema_order(self):
         columns = migration_columns()
         self.assertEqual(tuple(columns), PUBLISHED)
-        self.assertEqual(len(columns), 13)
+        self.assertEqual(len(columns), 16)
 
     def test_migration_dependencies(self):
         source = MIGRATION.read_text(encoding='utf-8')
-        self.assertIn("('ai', '0056_ai_laser_production_actual_view')", source)
-        self.assertIn("('production', '0121_brakelinerecord_interruption_reason_code_and_more')", source)
+        self.assertIn("('ai', '0057_ai_brake_production_actual_view')", source)
+        self.assertIn("('ai', '0058_ai_laser_interruption_view')", source)
+
+    def test_0057_is_reverted_to_original_13_column_definition(self):
+        # 0057は既にDB適用済みのため、適用済み内容(13列)のまま変更しないこと(2026-10-18、不整合修正)
+        original = Path(__file__).parent / 'migrations' / '0057_ai_brake_production_actual_view.py'
+        source = original.read_text(encoding='utf-8')
+        body = re.search(r'SELECT(.*)FROM', source, re.S).group(1)
+        columns = [c.strip() for c in body.split(',') if c.strip()]
+        self.assertEqual(len(columns), 13)
+        for extra in ('operator_login_id', 'interruption_reason_code', 'remarks'):
+            self.assertNotIn(extra, columns)
         self.assertIn("DROP_VIEW = 'DROP VIEW IF EXISTS v_ai_brake_production_actual'", source)
 
     def test_migration_dependency_migration_exists_and_adds_hidden_columns(self):
@@ -166,8 +187,9 @@ class BrakeProductionActualViewDefinitionTest(SimpleTestCase):
 class BrakeProductionActualDBCountMatchTest(SimpleTestCase):
     """開発DBの実データで、ビューの件数と元テーブルの件数が一致することを確認する(検証項目A)。
 
-    本ビューは`migrate`未実行(generator実装時点)のため、`v_ai_brake_production_actual`が存在しない間は、
-    期待値だけを計算してスキップする(BOSSの指示でmigrate実行後に本試験が有効になる)。
+    2026-10-18時点、開発DBには0057(13列版)が適用済みで、0059(16列への拡張)は未適用。
+    件数自体は列数に関係なく一致するはずなので、0059未適用でも検証できる。
+    ビュー自体が無い場合(本番等)は期待値だけを計算してスキップする。
     """
     def test_view_count_matches_source_table_count(self):
         connection = service.open_snapshot_connection(service.Deadline(30, 'stage_deadline_fetch'), read_timeout=30)
@@ -182,13 +204,28 @@ class BrakeProductionActualDBCountMatchTest(SimpleTestCase):
             if not view_exists:
                 self.skipTest(
                     f'v_ai_brake_production_actual は未作成(migrate未実行)のため件数照合をスキップ。'
-                    f'brake_line_recordの件数={expected}(generator確認時点)。migrate実行後に本試験で照合する。')
+                    f'brake_line_recordの件数={expected}。migrate実行後に本試験で照合する。')
             cursor.execute(f'SELECT COUNT(*) FROM `{VIEW}`')
             actual = cursor.fetchone()[0]
             cursor.close()
         finally:
             connection.close()
         self.assertEqual(actual, expected)
+
+    def test_view_has_16_columns_after_0059_migrate(self):
+        connection = service.open_snapshot_connection(service.Deadline(30, 'stage_deadline_fetch'), read_timeout=30)
+        try:
+            cursor = connection.cursor()
+            cursor.execute(f'SHOW COLUMNS FROM `{VIEW}`')
+            actual_columns = tuple(row[0] for row in cursor.fetchall())
+            cursor.close()
+        finally:
+            connection.close()
+        if actual_columns == PUBLISHED:
+            return
+        self.skipTest(
+            f'0059未適用のため、v_ai_brake_production_actual はまだ13列のまま(実列={actual_columns})。'
+            f'migrate実行後に本試験で16列への更新を確認する。')
 
     def test_sequence_no_buckets_match_db(self):
         """sequence_no=0/1/2以上それぞれの実データ件数を検証する(計画書 §35で指示された検証)。"""
