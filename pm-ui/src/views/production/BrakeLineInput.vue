@@ -1299,6 +1299,10 @@ async function save() {
   }
   saving.value = true
   try {
+    // 送信するコードに対応するマスタ行をこの時点で確定させる（保存後のresetで参照できなくなるため）
+    const submittedReasonMaster = reasonMasterOptions.value.find(
+      (r) => String(r.code) === String(actionReasonCode.value)
+    )
     const res = await api.brakeLineActuals.saveRecord({
       line_id:               item.line_id,
       process_id:            item.process_id,
@@ -1361,9 +1365,10 @@ async function save() {
       await saveScrap(item)
     }
 
+    // 設備トラブル判定: 理由マスタのcategory='1'（設備）で判定（翻訳文字列比較は廃止）
     const wasEquipmentTroublePause = (
       data.operator_action === 'PAUSE' &&
-      actionReason.value === t('brakeInput.pauseReason.equipmentTrouble')
+      submittedReasonMaster?.category === '1'
     )
 
     inputQty.value = null
