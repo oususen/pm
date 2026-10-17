@@ -414,22 +414,22 @@
         <label class="label-required">{{ t(operatorActionReasonLabelKey) }}</label>
         <select
           v-if="isPauseReasonDropdown"
-          v-model="record.operator_action_reason"
+          v-model="record.interruption_reason_code"
           class="input-large"
         >
           <option value="">{{ t('processInput.pauseReasonSelectPlaceholder') }}</option>
-          <option v-for="reason in pauseReasons" :key="reason.value" :value="reason.value">
-            {{ reason.label }}
+          <option v-for="reason in pauseReasonOptions" :key="reason.code" :value="reason.code">
+            {{ t('interruptionReason.' + reason.code) }}
           </option>
         </select>
         <select
           v-else-if="isTempEndReasonDropdown"
-          v-model="record.operator_action_reason"
+          v-model="record.interruption_reason_code"
           class="input-large"
         >
           <option value="">{{ t('processInput.tempEndReasonSelectPlaceholder') }}</option>
-          <option v-for="reason in tempEndReasons" :key="reason.value" :value="reason.value">
-            {{ reason.label }}
+          <option v-for="reason in tempEndReasonOptions" :key="reason.code" :value="reason.code">
+            {{ t('interruptionReason.' + reason.code) }}
           </option>
         </select>
         <input
@@ -523,7 +523,7 @@
       </div>
 
       <div class="section">
-        <label :class="{ 'label-required': requiresTempEndOtherRemarks }">
+        <label :class="{ 'label-required': requiresOtherReasonRemarks }">
           {{ t('processInput.remarks') }}
         </label>
         <textarea
@@ -532,7 +532,10 @@
           :placeholder="t('processInput.remarksPlaceholder')"
           class="textarea-normal"
         ></textarea>
-        <div v-if="requiresTempEndOtherRemarks" class="hint">
+        <div v-if="requiresOtherReasonRemarks && isPauseReasonDropdown" class="hint">
+          {{ t('processInput.pauseRemarksRequiredHint') }}
+        </div>
+        <div v-else-if="requiresOtherReasonRemarks" class="hint">
           {{ t('processInput.tempEndRemarksRequiredHint') }}
         </div>
       </div>
@@ -572,6 +575,7 @@
 
     <div v-if="record.record_type" class="action-section action-sticky">
       <button
+        v-if="!requiresOtherReasonRemarks || hasFilledText(record.remarks)"
         @click="submitRecord"
         :disabled="!canSubmit || submitting"
         class="btn-submit"
@@ -684,6 +688,7 @@ const selectedCoproductChildren = ref([])
 const selectedCoproductParentCode = ref('')
 const selectedCoproductNoticeLoading = ref(false)
 const isPlannedProductsLoading = ref(false)
+const reasonMasterOptions = ref([])
 const bomTreeCache = new Map()
 const relatedProductsCacheByProcess = new Map()
 let selectedCoproductNoticeRequestSeq = 0
@@ -702,6 +707,7 @@ const record = ref({
   counter_qty: null,
   qty: null,
   operator_action_reason: '',
+  interruption_reason_code: '',
   operator_action_reason_detail: '',
   reason: '',
   reason_detail: '',
@@ -941,19 +947,10 @@ const isPauseReasonDropdown = computed(
 const isTempEndReasonDropdown = computed(
   () => String(effectiveOperatorAction.value || '').toUpperCase() === 'TEMP_END'
 )
-const isTempEndReasonOtherSelected = computed(() => {
-  const val = String(record.value.operator_action_reason || '').trim()
-  if (!val) return false
-  const otherLabel = t('processInput.tempEndReasonOption.other')
-  if (val === 'その他' || val === 'OTHER' || val === otherLabel) return true
-  const matched = tempEndReasons.value.find((r) => String(r.value || '').trim() === val)
-  return !!matched && String(matched.label || '').trim() === String(otherLabel || '').trim()
-})
-
-const requiresTempEndOtherRemarks = computed(() => {
-  if (!isTempEndReasonOtherSelected.value) return false
-  return String(effectiveOperatorAction.value || '').toUpperCase() === 'TEMP_END'
-})
+const isOtherReasonSelected = computed(() => isOtherReasonCode(record.value.interruption_reason_code))
+const requiresOtherReasonRemarks = computed(() =>
+  requiresOperatorActionReason.value && isOtherReasonSelected.value
+)
 
 const OPERATOR_ACTION_LABEL_KEYS = {
   START: 'processInput.operatorAction.start',
@@ -975,71 +972,23 @@ const equipmentStates = computed(() => [
   { value: 'STOPPED', label: t('processInput.equipmentState.stopped') },
 ])
 
-const pauseReasons = computed(() => [
-  {
-    value: '設備トラブル',
-    label: t('processInput.pauseReasonOption.equipmentTrouble'),
-  },
-  {
-    value: '治具トラブル',
-    label: t('processInput.pauseReasonOption.jigTrouble'),
-  },
-  {
-    value: '品質トラブル',
-    label: t('processInput.pauseReasonOption.qualityTrouble'),
-  },
-  {
-    value: 'ティーチング',
-    label: t('processInput.pauseReasonOption.teaching'),
-  },
-  {
-    value: 'ワイヤ交換',
-    label: t('processInput.pauseReasonOption.wireChange'),
-  },
-  {
-    value: '部品ショート',
-    label: t('processInput.pauseReasonOption.partsShortage'),
-  },
-  {
-    value: '班長/対応者待ち',
-    label: t('processInput.pauseReasonOption.leaderWait'),
-  },
-  {
-    value: '工程指導',
-    label: t('processInput.pauseReasonOption.processGuidance'),
-  },
-  {
-    value: '３ｓ活動',
-    label: t('processInput.pauseReasonOption.activity3s'),
-  },
-  {
-    value: '改善活動',
-    label: t('processInput.pauseReasonOption.improvement'),
-  },
-  {
-    value: 'その他',
-    label: t('processInput.pauseReasonOption.other'),
-  },
-])
+const pauseReasonOptions = computed(() => reasonMasterOptions.value.filter((reason) => reason.operation === 'PAUSE'))
+const tempEndReasonOptions = computed(() => reasonMasterOptions.value.filter((reason) => reason.operation === 'TEMP_END'))
+const OTHER_REASON_CODES = ['3997', '3998']
+const isOtherReasonCode = (code) => OTHER_REASON_CODES.includes(String(code || ''))
 
-const tempEndReasons = computed(() => [
-  {
-    value: '本日設備復旧不可',
-    label: t('processInput.tempEndReasonOption.equipmentUnrecoverableToday'),
-  },
-  {
-    value: '本日治具使用不可',
-    label: t('processInput.tempEndReasonOption.jigUnavailableToday'),
-  },
-  {
-    value: '他へ製品切り替え',
-    label: t('processInput.tempEndReasonOption.switchProduct'),
-  },
-  {
-    value: 'その他',
-    label: t('processInput.tempEndReasonOption.other'),
-  },
-])
+const fetchReasonMasterOptions = async () => {
+  try {
+    const response = await api.interruptionReasons.getInterruptionReasons({
+      is_active: true,
+      line_category: '3',
+    })
+    reasonMasterOptions.value = response.data || []
+  } catch (error) {
+    console.error('中断理由マスタ取得エラー:', error)
+    reasonMasterOptions.value = []
+  }
+}
 
 const quickQtyPresets = ref([])
 
@@ -2328,14 +2277,14 @@ const canSubmit = computed(() => {
   if (isOperatorActionMode.value) {
     if (!findSelectedPlanTarget()) return false
     if (requiresOperatorActionReason.value && !hasFilledText(record.value.operator_action_reason)) return false
-    if (requiresTempEndOtherRemarks.value && !hasFilledText(record.value.remarks)) return false
+    if (requiresOtherReasonRemarks.value && !hasFilledText(record.value.remarks)) return false
     return hasRequiredProductionFields({ requireQty: shouldShowQtyInput.value })
   }
 
   if (record.value.record_type === 'PRODUCTION') {
     if (!hasEffectiveOperatorAction()) return false
     if (requiresOperatorActionReason.value && !hasFilledText(record.value.operator_action_reason)) return false
-    if (requiresTempEndOtherRemarks.value && !hasFilledText(record.value.remarks)) return false
+    if (requiresOtherReasonRemarks.value && !hasFilledText(record.value.remarks)) return false
     return hasRequiredProductionFields({ requireQty: shouldShowQtyInput.value })
   }
 
@@ -2371,6 +2320,7 @@ const resetForm = () => {
     counter_qty: null,
     qty: null,
     operator_action_reason: '',
+    interruption_reason_code: '',
     operator_action_reason_detail: '',
     reason: '',
     reason_detail: '',
@@ -2398,6 +2348,7 @@ const prepareEquipmentStateForm = () => {
   record.value.qty = null
   record.value.batch_no = ''
   record.value.operator_action_reason = ''
+  record.value.interruption_reason_code = ''
   record.value.operator_action_reason_detail = ''
   record.value.reason = ''
   record.value.reason_detail = ''
@@ -2437,6 +2388,7 @@ const onProcessChange = () => {
   loadPlannedProducts()
   loadStartedProductIds()
   loadRecentRecords()
+  fetchReasonMasterOptions()
 }
 
 const onLineChange = () => {
@@ -2552,10 +2504,11 @@ const submitRecord = async () => {
       }
       if (requiresOperatorActionReason.value) {
         let reasonText = (record.value.operator_action_reason || '').trim()
-        if (submittedOperatorAction === 'TEMP_END' && isTempEndReasonOtherSelected.value) {
+        if (isOtherReasonSelected.value) {
           reasonText = (record.value.remarks || '').trim()
         }
         data.event_data.operator_action_reason = reasonText
+        data.interruption_reason_code = record.value.interruption_reason_code
         if (submittedOperatorAction === 'PAUSE') {
           data.event_data.pause_reason = reasonText
           moveToEquipmentState = isEquipmentTroubleReason(reasonText)
@@ -3696,6 +3649,7 @@ const selectPlannedProduct = (p) => {
     if (record.value.record_type === 'PRODUCTION') {
       record.value.qty = null
       record.value.operator_action_reason = ''
+      record.value.interruption_reason_code = ''
       selectedOperatorAction.value = ''
     }
     return
@@ -3742,6 +3696,7 @@ watch(
   () => effectiveOperatorAction.value,
   (action) => {
     const actionKey = String(action || '').toUpperCase()
+    record.value.interruption_reason_code = ''
     if (!['PAUSE', 'TEMP_END'].includes(actionKey)) {
       record.value.operator_action_reason = ''
       record.value.operator_action_reason_detail = ''
@@ -3753,11 +3708,12 @@ watch(
 )
 
 watch(
-  () => record.value.operator_action_reason,
-  (val) => {
-    if (val !== 'その他') {
-      record.value.operator_action_reason_detail = ''
-    }
+  () => record.value.interruption_reason_code,
+  (code) => {
+    // 保存・設備トラブル判定用の理由テキストはUI言語に依存させず、マスタのdisplay_name(日本語)を使う
+    const matched = code ? reasonMasterOptions.value.find((reason) => reason.code === code) : null
+    record.value.operator_action_reason = matched ? matched.display_name : ''
+    if (!isOtherReasonCode(code)) record.value.operator_action_reason_detail = ''
   }
 )
 
@@ -4105,6 +4061,10 @@ onMounted(async () => {
   if (queryProcessId) {
     selectedProcessId.value = String(queryProcessId)
     onProcessChange()
+  }
+  const queryRecordType = route.query.record_type
+  if (queryRecordType && availableRecordTypes.value.some((type) => type.value === String(queryRecordType))) {
+    record.value.record_type = String(queryRecordType)
   }
   if (!isScrapRecord.value && !isScrapOnlyPage.value && route.query.operator_name !== undefined) {
     const name = String(route.query.operator_name || '')

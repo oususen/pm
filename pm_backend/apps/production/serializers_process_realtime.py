@@ -9,7 +9,7 @@ from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.db.models import F
 from django.utils import timezone
-from masters.models import Process, Product, BOM, Supplier, Routing, RoutingStep
+from masters.models import Process, Product, BOM, Supplier, Routing, RoutingStep, InterruptionReason
 from masters.services.routing_service import build_effective_routing_q, resolve_effective_routing
 from .services.process_realtime_routing_service import (
     build_invalid_product_process_message,
@@ -27,6 +27,23 @@ from .models_process_work_session_change_history import ProcessWorkSessionChange
 from .models_line_backlog import LineBacklog
 from .models_production import StockAllocation
 from quality.models_scrap import ScrapRecord, ScrapRecordDetail
+
+
+GENERAL_PROCESS_REASON_CODE_REQUIRED_MESSAGE = '中断・強制終了には理由コードの選択が必要です。'
+
+
+def validate_general_process_interruption_reason_code(operator_action, reason_code):
+    """一般工程の中断・強制終了理由コードが操作と一致する有効なコードか検証する。"""
+    if operator_action not in ('PAUSE', 'TEMP_END'):
+        return True
+    if not reason_code:
+        return False
+    return InterruptionReason.objects.filter(
+        code=reason_code,
+        line_category='3',
+        operation=operator_action,
+        is_active=True,
+    ).exists()
 
 
 def _resolve_product_process_line(product, fallback_process):
@@ -1196,6 +1213,7 @@ class ProcessRealtimeRecordSerializer(serializers.ModelSerializer):
             'operator_name',
             'operator_login_id',
             'remarks',
+            'interruption_reason_code',
             'scrap_record_id',
             'scrap_is_replenished',
             'scrap_replenished_at',
@@ -1433,6 +1451,9 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
     batch_no = serializers.CharField(max_length=100, required=False, allow_blank=True)
     operator_name = serializers.CharField(max_length=50, required=False, allow_blank=True)
     remarks = serializers.CharField(required=False, allow_blank=True)
+    interruption_reason_code = serializers.CharField(
+        max_length=4, required=False, allow_blank=True, allow_null=True
+    )
     event_data = serializers.JSONField(required=False, allow_null=True)
     work_date = serializers.DateField(required=False, allow_null=True)
     cause_login_id = serializers.CharField(max_length=150, required=False, allow_null=True, allow_blank=True, write_only=True)
@@ -1511,6 +1532,17 @@ class ProcessRealtimeCreateSerializer(serializers.Serializer):
                     raise serializers.ValidationError({'production_qty': '終了時の数量は0以上で入力してください。'})
                 if production_qty == 0 and not remarks_text:
                     raise serializers.ValidationError({'production_qty': '終了時に数量0を入力する場合は備考の入力が必要です。'})
+            reason_code = attrs.get('interruption_reason_code') or ''
+            if action in ('PAUSE', 'TEMP_END'):
+                if not validate_general_process_interruption_reason_code(action, reason_code):
+                    raise serializers.ValidationError({
+                        'interruption_reason_code': GENERAL_PROCESS_REASON_CODE_REQUIRED_MESSAGE,
+                    })
+                attrs['interruption_reason_code'] = reason_code
+            else:
+                attrs['interruption_reason_code'] = ''
+        else:
+            attrs['interruption_reason_code'] = ''
         return attrs
 
     def create(self, validated_data):

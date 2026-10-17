@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
-from masters.models import Line, Process, Product, BOM, BOMItem, Routing, RoutingStep
+from masters.models import Line, Process, Product, BOM, BOMItem, Routing, RoutingStep, InterruptionReason
 from production.models_line_backlog import LineBacklog
 from production.models_process_realtime import ProcessRealtimeRecord
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
@@ -27,6 +27,123 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import force_authenticate
 from quality.models_scrap import ScrapRecord
 from production.services.process_realtime_scrap_service import process_scrap_disposition
+
+
+class GeneralProcessInterruptionReasonTest(TestCase):
+    """一般工程の中断理由コードの検証・保存・正規化を確認する。"""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = get_user_model().objects.create_user(username='reason-user')
+        self.line = Line.objects.create(line_code='REASON-L', line_name='中断理由検証ライン')
+        self.process = Process.objects.create(
+            process_code='REASON-P', process_name='中断理由検証工程', line=self.line,
+        )
+        self.product = Product.objects.create(product_code='REASON-01', product_name='中断理由検証品')
+        routing = Routing.objects.create(
+            product=self.product, routing_code='R-REASON', is_default=True, is_active=True,
+        )
+        RoutingStep.objects.create(
+            routing=routing, step_no=10, process=self.process, line=self.line,
+            output_product=self.product,
+        )
+        InterruptionReason.objects.update_or_create(
+            code='3997',
+            defaults={
+                'line_category': '3', 'category': '9', 'display_name': 'その他',
+                'operation': 'PAUSE', 'display_order': 9997, 'is_active': True,
+            },
+        )
+        InterruptionReason.objects.update_or_create(
+            code='3998',
+            defaults={
+                'line_category': '3', 'category': '9', 'display_name': 'その他',
+                'operation': 'TEMP_END', 'display_order': 9998, 'is_active': True,
+            },
+        )
+
+    def payload(self, action, **overrides):
+        data = {
+            'process_id': self.process.id,
+            'product_id': self.product.id,
+            'record_type': 'OPERATOR_ACTION',
+            'qty': 0,
+            'event_data': {'action': action},
+        }
+        data.update(overrides)
+        return data
+
+    def serializer(self, action, **overrides):
+        from production.serializers_process_realtime import ProcessRealtimeCreateSerializer
+        return ProcessRealtimeCreateSerializer(
+            data=self.payload(action, **overrides),
+            context={'request': SimpleNamespace(user=self.user)},
+        )
+
+    def post(self, action, **overrides):
+        request = self.factory.post(
+            '/api/process-realtime-records/', self.payload(action, **overrides), format='json',
+        )
+        force_authenticate(request, user=self.user)
+        with patch(
+            'production.serializers_process_realtime.resolve_workday_date_for_process',
+            return_value=date(2026, 10, 17),
+        ):
+            return ProcessRealtimeRecordViewSet.as_view({'post': 'create'})(request)
+
+    def test_pause_and_temp_end_require_matching_active_general_reason(self):
+        cases = [
+            ('PAUSE', {}),
+            ('PAUSE', {'interruption_reason_code': None}),
+            ('PAUSE', {'interruption_reason_code': '3998'}),
+            ('TEMP_END', {'interruption_reason_code': '3997'}),
+            ('TEMP_END', {'interruption_reason_code': '9999'}),
+        ]
+        for action, overrides in cases:
+            with self.subTest(action=action, overrides=overrides):
+                before = (ProcessRealtimeRecord.objects.count(), LineBacklog.objects.count())
+                response = self.post(action, **overrides)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn('interruption_reason_code', response.data)
+                self.assertEqual(
+                    (ProcessRealtimeRecord.objects.count(), LineBacklog.objects.count()), before,
+                )
+
+    def test_valid_pause_code_is_saved_only_on_operator_action_parent(self):
+        self.assertEqual(self.post('START').status_code, status.HTTP_201_CREATED)
+        response = self.post('PAUSE', interruption_reason_code='3997')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        parent = ProcessRealtimeRecord.objects.get(pk=response.data['id'])
+        child = ProcessRealtimeRecord.objects.get(
+            record_type='PRODUCTION', event_data__operator_action_record_id=parent.id,
+        )
+        self.assertEqual(response.data['interruption_reason_code'], '3997')
+        self.assertEqual(parent.interruption_reason_code, '3997')
+        self.assertEqual(child.interruption_reason_code, '')
+
+    def test_non_target_actions_and_record_types_normalize_reason_to_blank(self):
+        for action in ('START', 'RESUME', 'END', 'CANCEL'):
+            with self.subTest(action=action):
+                overrides = {'interruption_reason_code': '3997'}
+                if action == 'END':
+                    overrides['production_qty'] = 1
+                serializer = self.serializer(action, **overrides)
+                self.assertTrue(serializer.is_valid(), serializer.errors)
+                self.assertEqual(serializer.validated_data['interruption_reason_code'], '')
+
+        from production.serializers_process_realtime import ProcessRealtimeCreateSerializer
+        serializer = ProcessRealtimeCreateSerializer(
+            data={
+                'process_id': self.process.id,
+                'product_id': self.product.id,
+                'record_type': 'PRODUCTION',
+                'qty': 1,
+                'interruption_reason_code': None,
+            },
+            context={'request': SimpleNamespace(user=self.user)},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['interruption_reason_code'], '')
 
 
 class ScrapLoginIdTest(TestCase):
@@ -168,6 +285,10 @@ class ProcessRealtimeOperatorLoginIdTest(TestCase):
         RoutingStep.objects.create(
             routing=routing, step_no=10, process=self.process, line=self.line, output_product=self.product,
         )
+        self.reason_pause = InterruptionReason.objects.create(
+            code='9101', line_category='3', category='1', display_name='テスト用設備トラブル',
+            operation='PAUSE', display_order=10, is_active=True,
+        )
         # 連産親（子へ展開される）
         self.parent = Product.objects.create(product_code='LID-SET', product_name='連産親', is_virtual_set=True)
         self.child = Product.objects.create(product_code='LID-CHILD', product_name='連産子')
@@ -233,6 +354,8 @@ class ProcessRealtimeOperatorLoginIdTest(TestCase):
                 self.assertEqual(start.status_code, 201, start.data)
                 payload = self.base('OPERATOR_ACTION', product_id=self.parent.id, qty=4,
                                     event_data={'action': action})
+                if action == 'PAUSE':
+                    payload['interruption_reason_code'] = self.reason_pause.code
                 if action == 'END':
                     payload['production_qty'] = 4
                 response = self.post(payload)
@@ -297,6 +420,8 @@ class ProcessRealtimeOperatorLoginIdTest(TestCase):
                 self.assertEqual(start.status_code, 201, start.data)
                 payload = self.base('OPERATOR_ACTION', product_id=self.parent.id, qty=4,
                                     event_data=self.two_person(worker, action=action))
+                if action == 'PAUSE':
+                    payload['interruption_reason_code'] = self.reason_pause.code
                 if action == 'END':
                     payload['production_qty'] = 4
                 response = self.post(payload)
@@ -1362,6 +1487,10 @@ class ProcessRealtimeSessionWorkerTest(TestCase):
             RoutingStep.objects.create(
                 routing=routing, step_no=10, process=self.process, line=self.line, output_product=product,
             )
+        self.reason_pause = InterruptionReason.objects.create(
+            code='9101', line_category='3', category='1', display_name='テスト用設備トラブル',
+            operation='PAUSE', display_order=10, is_active=True,
+        )
         # 在庫・進度の再計算は別テストで検証済みのため呼び出しだけ止める（LineBacklog.actual_qty の反映は実行する）
         patcher = patch('production.views_process_realtime.recalculate_inventory_after_session_change')
         patcher.start()
@@ -1372,7 +1501,7 @@ class ProcessRealtimeSessionWorkerTest(TestCase):
         self.addCleanup(plan_patcher.stop)
 
     # ---- 呼び出し補助 ----
-    def act(self, user, action, product=None, qty=0, operator_name=None, event_extra=None):
+    def act(self, user, action, product=None, qty=0, operator_name=None, event_extra=None, reason_code=None):
         product = product or self.product
         event_data = {'action': action}
         event_data.update(event_extra or {})
@@ -1382,6 +1511,8 @@ class ProcessRealtimeSessionWorkerTest(TestCase):
             'process_id': self.process.id, 'product_id': product.id, 'record_type': 'OPERATOR_ACTION',
             'qty': qty, 'operator_name': operator_name, 'event_data': event_data,
         }
+        if reason_code is not None:
+            payload['interruption_reason_code'] = reason_code
         if action == 'END':
             payload['production_qty'] = qty
         request = self.factory.post('/api/process-realtime-records/', payload, format='json')
@@ -1473,7 +1604,7 @@ class ProcessRealtimeSessionWorkerTest(TestCase):
 
     def test_pause_resume_sessions_take_login_of_their_action_record(self):
         self.act(self.user_a, 'START')
-        self.act(self.user_b, 'PAUSE', qty=2)
+        self.act(self.user_b, 'PAUSE', qty=2, reason_code=self.reason_pause.code)
         self.act(self.user_c, 'RESUME')
         by_type = {(s.session_type, s.start_action): s for s in ProcessWorkSession.objects.all()}
         self.assertEqual(by_type[('WORK', 'START')].operator_login_id, '000175')

@@ -76,6 +76,9 @@ class ProcessRealtimeRecord(models.Model):
         max_length=150, null=True, blank=True, db_index=True, verbose_name='作業者ログインID'
     )
     remarks = models.TextField(null=True, blank=True, verbose_name='備考')
+    interruption_reason_code = models.CharField(
+        max_length=4, blank=True, default='', verbose_name='中断理由コード'
+    )
 
     class Meta:
         db_table = 't_process_realtime_record'
