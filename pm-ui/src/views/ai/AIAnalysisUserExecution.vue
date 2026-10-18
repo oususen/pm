@@ -145,7 +145,7 @@ const refineText = ref('')
 const canRefine = computed(() => props.canEdit && !busy.value && !props.blocked && !active.value && job.value?.status === 'success' && !!job.value.result && !!refineText.value.trim())
 function refine() {
   if (!canRefine.value) return
-  if (!window.confirm('新しい分析案を作ると、この結果は画面から消えます（実行履歴には残ります）。手順・データ範囲・コードの承認は、もう一度行います。よろしいですか？')) return
+  if (!window.confirm('新しい分析案を作ると、この結果はいったん画面から消えます（失敗した場合・やめた場合は「元の結果に戻る」で戻れます。実行履歴にも残ります）。手順・データ範囲・コードの承認は、もう一度行います。よろしいですか？')) return
   emit('refine', { instruction: refineText.value.trim(), run_id: job.value.run_id ?? null })
   refineText.value = ''
 }
