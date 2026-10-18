@@ -104,7 +104,7 @@
         </button>
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="5" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-      <AIAnalysisUserConsult v-if="canEdit && !plan && !refinement" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" @apply="applyConsult" @plan-created="useTemplatePlan" @reference-selected="startReference" @recommendations="recommendedTemplates = $event" />
+      <AIAnalysisUserConsult v-if="canEdit && !plan" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" :refinement-instruction="refinement?.instruction || ''" @apply="applyConsult" @plan-created="useTemplatePlan" @reference-selected="startReference" @recommendations="recommendedTemplates = $event" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
       <section v-if="referenceTemplate && !plan" id="reference-note" class="refine-note reference-note" role="status">
         <p>参考にするテンプレート: テンプレート{{ referenceTemplate.id }}「{{ referenceTemplate.name }}」（版{{ referenceTemplate.version }}）。このテンプレートの目的・手順・出力案・データ範囲を、AIが参考にして、今回の目的に合わせた新しい分析案とコードを作ります。承認は引き継がず、手順・データ範囲・コード・試行・コード承認を、取り直します。</p>
@@ -113,7 +113,7 @@
         <p v-if="referenceTemplate.status === 'pending_admin'" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 管理者承認前のテンプレートを参考にしています（まだ、システム管理者に確認されていません。作成者と管理者だけが使えます）。</p>
         <p v-if="selectedProvider && !selectedProvider.external" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> ローカルQwenでは、テンプレートを参考にできません。社外のAIを選ぶか、参考を外してください。</p>
         <button type="button" :disabled="!!busy" @click="referenceTemplate = null">参考を外す</button></section>
-      <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。改良の準備中は、テンプレートから分析案を作れません(追加の指示を外すと、作れます)。
+      <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。改良の準備中は、テンプレートから分析案を作れません(追加の指示を外すと、作れます)。下の「AIと目的を整える」で、追加の指示をAIと相談しながら整えることもできます（整えた文案を取り込むと、この追加の指示は外れます）。
         <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
       <p v-if="previousPlan && !plan" class="refine-note" role="status">改良前の結果（分析案ID: {{ previousPlan.id }}「{{ previousPlan.proposal.title }}」）が残っています。改良に失敗した、またはやめる場合は、元の結果に戻れます。
         <button type="button" :disabled="!!busy" @click="restorePreviousPlan">元の結果に戻る</button></p>
@@ -650,6 +650,9 @@ const formatDate = value => value?.replace('T', ' ').slice(0, 19) || ''
 function applyConsult(draft) {
   if (draft.purpose) purpose.value = draft.purpose
   if (draft.date_from && draft.date_to) { noPeriod.value = false; dateFrom.value = draft.date_from; dateTo.value = draft.date_to }
+  // 改良の準備中に相談で目的を整えた場合: AIの文案に追加の指示の内容を含めて取り込んだとみなし、
+  // 改良(追加の指示・元の実行の紐付け)は外す。残すと、サーバー側でこの文案へさらに追加の指示を足してしまう(二重になる)
+  if (draft.purpose && refinement.value) refinement.value = null
 }
 // テンプレートから作成した分析案を、現在の分析案にする(AIは使わない。承認・件数確認・試行・コード承認は、この画面で取り直す)
 function useTemplatePlan(created) {

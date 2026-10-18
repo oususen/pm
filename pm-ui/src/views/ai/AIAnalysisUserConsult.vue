@@ -51,7 +51,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '../../api/client'
 
 const props = defineProps({
@@ -59,11 +59,19 @@ const props = defineProps({
   // 上部で選んだAI。社外のAIのときは、置換後の内容を送ることを了承してから送る(選び直したら、了承も取り直す)
   provider: { type: String, default: 'qwen' }, model: { type: String, default: '' }, external: Boolean, providerLabel: { type: String, default: '' }, providerAvailable: { type: Boolean, default: true },
   userName: { type: String, default: '' }, // 履歴の発言者の表示(ログイン中の利用者名)。なければ「あなた」
+  // 結果の改良(BOSS承認 2026-10-19): 改良の準備中に表示するときだけ渡す、元の目的に足したい追加の指示。入力欄へ仕込むだけで、自動送信はしない
+  refinementInstruction: { type: String, default: '' },
 })
 const emit = defineEmits(['apply', 'plan-created', 'reference-selected', 'recommendations'])
 const open = ref(false), input = ref(''), busy = ref(''), error = ref(''), externalAck = ref(false)
 const messages = ref([]), draft = ref(null), templates = ref([])
 let disposed = false, epoch = 0
+// 改良の準備中は、最初から開いて、元の目的・追加の指示を入力欄へ仕込む(利用者はそのまま送るか、書き直してから送る)
+onMounted(() => {
+  if (!props.refinementInstruction) return
+  open.value = true
+  input.value = `元の目的: ${props.purpose}\n追加の指示: ${props.refinementInstruction}`
+})
 // 画面で表示する失敗は固定文だけ。APIの本文は表示しない。
 const CONSULT_ERRORS = Object.freeze({
   400: '送る内容、またはAIの選択が正しくありません。上のAIプロバイダ・モデルを確認してください。',
