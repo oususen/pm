@@ -209,7 +209,7 @@
                   <label><input v-model="codeSendAccepted" type="checkbox" :disabled="!canEdit || !!busy">分析目的に、社外へ送ってはいけない人名・社名・機密情報が残っていないことを確認しました</label>
                   <small class="next-hint">チェックすると、下のボタンで分析処理を作成できます。</small>
                 </section>
-                <button v-if="!codeExternal || codePreview" class="create-code-btn" :class="{ ready: canGenerate && (!codeExternal || codeSendAccepted) }" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode"><template v-if="busy === 'code-generate'">分析処理を作成中…</template><template v-else-if="codeExternal">{{ codeSendAccepted ? '▶ ' : '' }}確認した内容を社外AIへ送って分析処理を作成</template><template v-else>ローカルQwenで分析処理を作成</template></button>
+                <button v-if="!codeExternal || codePreview" class="next-action-btn" :class="{ ready: canGenerate && (!codeExternal || codeSendAccepted) }" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode"><template v-if="busy === 'code-generate'">分析処理を作成中…</template><template v-else-if="codeExternal">{{ codeSendAccepted ? '▶ ' : '' }}確認した内容を社外AIへ送って分析処理を作成</template><template v-else>ローカルQwenで分析処理を作成</template></button>
               </template>
               <p v-if="codeState && codeState.attempts >= codeState.max_attempts">AI生成回数の上限に達しました。試行のやり直しは生成回数に含みません。再生成が必要なら分析案を作り直してください。</p>
             </template>
@@ -243,7 +243,8 @@
               <button v-if="codeState?.status === 'generated'" :disabled="!canTrial" @click="trialCode">{{ busy === 'code-trial' ? '安全確認中…' : '実行前の安全確認を行う' }}</button>
               <template v-if="codeState?.status === 'generated'">
                 <label><input v-model="codeAccepted" type="checkbox" :disabled="!canEdit || !!busy || !trialPassed">上の目的・手順・出力案を確認し、この分析処理の実行を承認します（実行はまだ行いません）</label>
-                <button :disabled="!canApproveCode || !codeAccepted" @click="approveCode">分析処理を承認</button>
+                <small v-if="trialPassed" class="next-hint">チェックすると、下のボタンで分析処理を承認できます。</small>
+                <button class="next-action-btn" :class="{ ready: canApproveCode && codeAccepted }" :disabled="!canApproveCode || !codeAccepted" @click="approveCode">{{ canApproveCode && codeAccepted ? '▶ ' : '' }}分析処理を承認</button>
               </template>
               <p v-if="codeState?.status === 'code_approved'" role="status">コード承認日時: {{ formatDate(codegen.code_approved_at) }}。{{ plan.execution ? 'コード承認済みです。実行状態・結果は実行欄で確認してください。' : 'コード承認済み・分析未実行です。' }}</p>
               </template>
@@ -952,8 +953,8 @@ function releaseCodegen() {
 @keyframes run-ready-pulse { 50% { outline-color: #d9a21b33; } }
 @media (prefers-reduced-motion: reduce) { .run-target.ready { animation: none; } }
 .next-hint { display: block; color: #8a5a00; font-weight: 600; margin: 4px 0 0; }
-.create-code-btn.ready { outline: 3px solid #d9a21b; outline-offset: 3px; font-weight: 700; animation: run-ready-pulse 1.6s ease-in-out 3; }
-@media (prefers-reduced-motion: reduce) { .create-code-btn.ready { animation: none; } }
+.next-action-btn.ready { outline: 3px solid #d9a21b; outline-offset: 3px; font-weight: 700; animation: run-ready-pulse 1.6s ease-in-out 3; }
+@media (prefers-reduced-motion: reduce) { .next-action-btn.ready { animation: none; } }
 .stage-body { padding: 8px 12px 12px; overflow-wrap: anywhere; }
 .plan-head { border: 1px solid #d1dddd; border-radius: 8px; padding: 8px 12px; }
 @media (max-width: 960px) { .analysis-layout { grid-template-columns: minmax(0, 1fr); } .analysis-main { order: 2; position: static; max-height: none; overflow: visible; padding-left: 0; } .analysis-divider { display: none; } .analysis-side { order: 1; border-right: 0; padding-right: 0; } }

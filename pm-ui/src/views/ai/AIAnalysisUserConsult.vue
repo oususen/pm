@@ -6,8 +6,16 @@
     </button>
     <div v-show="open" id="consult-body" class="consult-body">
       <template v-if="external">
-        <p class="warning">やり取りは、上で選んだ社外サービス（{{ providerLabel }}）へ送ります。登録名称（社員・顧客・仕入先など）はコードへ置換して送ります。送るのは、あなたの発言・AIの過去の返事・**承認済みテンプレートの名称と目的**・公開ビューの説明・今日の日付です。未登録の人名・社名は置換されません。DBの明細行・数値は送りません。</p>
-        <label class="ack"><input v-model="externalAck" type="checkbox" :disabled="!usable || !!busy">社外サービス（{{ providerLabel }}）へ、置換後の内容を送ることを了承します</label>
+        <div class="warning">
+          <p>やり取りは、上で選んだ社外サービス（{{ providerLabel }}）へ送ります。</p>
+          <ul>
+            <li>登録名称（社員・顧客・仕入先など）はコードへ置換して送ります。</li>
+            <li>送るもの: あなたの発言・AIの過去の返事・<strong>承認済みテンプレートの名称と目的</strong>・公開ビューの説明・今日の日付</li>
+            <li>未登録の人名・社名は置換されません。</li>
+            <li>DBの明細行・数値は送りません。</li>
+          </ul>
+        </div>
+        <label class="ack"><input v-model="externalAck" type="checkbox" :disabled="!usable || !!busy">発言に、社外へ送ってはいけない未登録の人名・社名・機密情報が残っていないことを確認し、社外サービス（{{ providerLabel }}）へ送ることを了承します</label>
         <p class="note">一般使用者向け画面では、置換後の送信文は表示しません。やり取りは保存されません（画面を閉じる・分析案を作ると消えます）。AIは数値を知らず、助言と文案だけを出します。</p>
       </template>
       <p v-else class="note">やり取りはローカルAI（Qwen）で行い、社外へ送りません。やり取りは保存されません（画面を閉じる・分析案を作ると消えます）。AIは数値を知らず、助言と文案だけを出します。</p>
@@ -160,7 +168,10 @@ async function useTemplate(item) {
 .consult-body { padding: 0 8px 6px; }
 .consult-body p { margin: 2px 0; }
 .note { font-size: 12px; color: #566; }
-.warning { color: #7a4b00; background: #fff6e0; padding: 2px 6px; border-radius: 4px; }
+.warning { color: #7a4b00; background: #fff6e0; padding: 6px 10px; border-radius: 4px; }
+.warning p { margin: 2px 0; }
+.warning ul { margin: 4px 0 2px; padding-left: 1.4em; }
+.warning li { margin: 2px 0; }
 .ack { display: block; margin: 2px 0; color: #b00020; font-weight: bold; } /* 社外へ送ることの了承は、見落とさないよう赤字 */
 .error { color: #b00020; }
 .log { list-style: none; margin: 8px 0; padding: 8px; min-height: 280px; max-height: 52vh; overflow-y: auto; background: #eef5f3; border-radius: 8px; }
