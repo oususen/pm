@@ -2096,3 +2096,14 @@ JSON型の列はない（`t_process_realtime_record.event_data`はJSON型だが�
 - 評価：evaluator未検証。
 - コミット：未（BOSSの指示後に実施）。
 - 未確認・未実施：`migrate ai 0061`の実行、`v_ai_process_interruption`での件数・`end_action`別件数・`interruption_reason`優先順位の照合（現在skip）、`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成）、本番反映、commit・push、evaluator検証。
+
+## 39〜42. 計画・在庫・進度系（セクション予約。2026-10-18、計画・在庫・進度ビュー統括セッションが予約）
+
+カテゴリ統括は「計画・在庫・進度ビュー統括セッション」（引継ぎ文: `仕様書/AIビュー作成_計画在庫進度系セッション引継ぎ.md`）。対象4テーブルのうち、BOSSの指示（2026-10-18）により`LineBacklog`は個別セッションへ委譲した（引継ぎ文: `仕様書/AIビュー作成_LineBacklogビューセッション引継ぎ.md`）。残り3テーブルは統括セッションが着手順をBOSSと相談の上、個別セッション化または自ら実装する。セクション番号の重複を避けるため、テーブルごとに見出しのみ以下に予約する（実装内容はまだ無い。各セッションが実装の都度該当節に追記する）。
+
+- **§39 `LineBacklog`**（`line_backlog`）— LineBacklogビューセッションが担当
+- **§40 `LineDemand`**（`t_line_demand`）— 未着手
+- **§41 `LinePlan`**（`line_plan`）— 未着手
+- **§42 `LineBacklogAdjustment`**（`production_line_backlog_adjustment`）— 未着手
+
+着手前に必ず`ls pm_backend/apps/ai/migrations/`で最新マイグレーション番号を再確認すること（本予約時点では`0061`が最新、次は`0062`から。並行作業がある場合は番号がずれている可能性がある）。
