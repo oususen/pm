@@ -36,6 +36,26 @@ def _strip_code_fence(text):
     return match.group(1) if match else text
 
 
+def extract_single_json_object(text):
+    """説明文に含まれる単一のトップレベルJSON objectだけを、安全に取り出す。
+
+    最初の開始波括弧からJSONDecoderで1回だけ読み、前後に別のJSON構造を示す括弧があれば拒否する。
+    途中からの再探索は行わないため、複数object・配列ラップ・未完objectを別の候補で救済しない。
+    """
+    if not isinstance(text, str):
+        raise ValueError('JSON文字列ではありません。')
+    start = text.find('{')
+    if start < 0 or any(char in text[:start] for char in '{}[]'):
+        raise ValueError('単一のJSON objectがありません。')
+    try:
+        value, end = json.JSONDecoder().raw_decode(text, start)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('JSON objectを読み取れません。') from exc
+    if not isinstance(value, dict) or any(char in text[end:] for char in '{}[]'):
+        raise ValueError('単一のJSON objectではありません。')
+    return text[start:end]
+
+
 def get_analysis_temperature(provider):
     """分析案の作成・コード生成の温度を、AI設定(プロバイダごと)から毎回取得する。取得できない・範囲外のときは、別の値で代替せず停止する。"""
     try:

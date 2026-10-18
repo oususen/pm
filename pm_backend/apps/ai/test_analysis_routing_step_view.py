@@ -186,6 +186,40 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
                         'システム本体も、元のBOM明細があるとき', '代表として扱う(システム本体と同じ)'):
                 self.assertNotIn(old, plain)
 
+    def test_description_limits_destination_candidates_to_hierarchy_ancestors(self):
+        # 対象品番と工程が一致する起点から、同じルーティングの祖先系列と最終工程だけを候補にする
+        for text in (ANALYSIS_VIEWS[VIEW]['description'], TABLE_NOTES[VIEW]):
+            plain = text.replace(' ', '')
+            for part in (
+                    '対象品番だけでルーティングを選ばない',
+                    'output_product_codeが対象品番と一致し、対象品番を作った工程も一致する工程を起点にする',
+                    '通常はprocess_idで工程を合わせる', '実績ビューに工程の固定規則がある場合', '固定工程コード', 'process_codeを合わせる',
+                    'routing_is_active=1', 'routing_is_default=1',
+                    'routing_valid_from_datetimeが新しいもの', 'routing_idが大きいものの順で優先する',
+                    '基準が日付だけならその日の午前8時を基準日時にする',
+                    'bom_is_active=1', '最新はbom_valid_fromで決める',
+                    '同じrouting_idの中で',
+                    '起点のhierarchy_pathを末尾からドット区切りで1階層ずつ削って得る祖先パス',
+                    'hierarchy_path=finalの工程だけ', '別の枝の工程を混ぜない',
+                    'step_noは工程順の補助確認にだけ使い、大小だけで行き先を決めない',
+                    '起点のhierarchy_pathが空', '起点工程がない', '有効なルーティングがない',
+                    'parent_product_codeを全件候補として総当たりせず、行き先未確定として残す',
+                    'BOM親は祖先パスまたはfinalの工程に対応するものだけを採用し',
+                    'bom_is_coproduct=1のparent_product_codeは連産品の仮想親なので除外する'):
+                self.assertIn(part, plain)
+            self.assertNotIn('起点よりstep_noが大きい工程とそのoutput_product_codeだけ', plain)
+
+    def test_laser_description_uses_fixed_process_code_when_historical_process_is_null(self):
+        # 保存機能追加前のレーザー実績は process_id=NULL でも工程不明にせず、固定工程コードで起点を探す
+        for text in (
+                ANALYSIS_VIEWS['v_ai_laser_production_actual']['description'],
+                TABLE_NOTES['v_ai_laser_production_actual']):
+            plain = text.replace(' ', '')
+            for part in (
+                    '2026-10-14より前のprocess_idがNULLでも工程不明と扱わない',
+                    '固定工程コード0801', 'v_ai_routing_step', 'process_code=0801に合わせる'):
+                self.assertIn(part, plain)
+
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_routing の許可と列は、ビューの追加後も変わらない(m_routing_step・m_routing_step_material は元から許可なし)
         self.assertEqual(BASE_SQL_SCHEMA['m_routing'], ('id', 'product_id', 'is_active'))
@@ -209,7 +243,12 @@ class RoutingStepViewDefinitionTest(SimpleTestCase):
         self.assertEqual(build_where(VIEW, *PERIOD, last_id=5), (' WHERE `id` > %s', [5]))
 
     def test_consult_prompt_has_view(self):
-        self.assertIn(VIEW, consult._system_prompt([]))
+        prompt = consult._system_prompt([])
+        self.assertIn(VIEW, prompt)
+        # 相談AIへ送る公開ビュー定義にも、階層基準とレーザーの固定工程例外が入る
+        self.assertIn('行き先未確定', prompt)
+        self.assertIn('別の枝の工程を混ぜない', prompt)
+        self.assertIn('固定工程コード0801', prompt)
 
     def test_setup_command_treats_view_as_join_view(self):
         self.assertIn(VIEW, cmd.EXISTING_JOIN_VIEWS)

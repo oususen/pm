@@ -1395,12 +1395,15 @@ GRANT SELECT ON `<db>`.`v_ai_leader_unit` TO 'pm_ai_reader'@'<readerのホスト
 ### 30.5 変更内容
 - `analysis_data_service.py` / `sql_queries.py`: 工程ビューの `source_bom_item_id` の説明を確定（「未確認」の列挙から除外）し、連産品・代表品・判定規則を追記。BOM明細ビューの `bom_is_coproduct`・`is_coproduct_driver` の説明を詳しくし、工程ビューとの結びつきを追記。材料ビューに連産品の判定の結び方を追記。
 - 訂正（コミット bc412a7e の後）: 判定規則を元のBOM明細ベースから加工後品ベースに改め（§30.3）、`source_bom_item_id` は判定に使わない旨、集約の注意（`child_product_code` でグループ化し `is_coproduct_driver` の最大値）、不明は加工後品が空の工程だけ、を説明文（`ANALYSIS_VIEWS`・`TABLE_NOTES` の同内容2か所）に反映。材料ビューは「`routing_step_id` で工程ビューと結び、工程ビューの `output_product_code` と `v_ai_bom_item` で判定」に直した。
+- 追記（2026-10-18、BOSS承認。evaluator指摘で訂正）: 対象品番の行き先候補は、品番だけでルーティングを選ばず、`output_product_code` と対象品番を作った工程がともに一致する工程を起点とする。通常は `process_id` で工程を合わせる。基準日時点で有効なルーティングを選び、同じ品番で複数ある場合は既定、有効開始日時の新しい順、IDの大きい順で優先する。日付だけならその日の08:00を基準日時にする。同じ `routing_id` の中で、起点の `hierarchy_path` を末尾からドット区切りで1階層ずつ削って得る祖先パスと `hierarchy_path='final'` の工程だけを上位・最終候補にする。別枝を混ぜず、`step_no` は工程順の補助確認にだけ使う。BOMは基準日時点で有効なものから祖先系列の工程に対応する親だけを採用し、連産品仮想親を除外する。起点パスが空、起点なし、有効ルーティングなしの場合はBOM親を総当たりせず「行き先未確定」とする。この規則を `v_ai_routing_step`・`v_ai_bom_item` の `ANALYSIS_VIEWS` と `TABLE_NOTES` に同じ意味で追記した。ビュー列・ビューSQL・DB・マイグレーションは変更していない。
 - 試験: `test_analysis_routing_step_view.py`（`test_description_has_bom_item_link_and_coproduct_rule` を加工後ベースの規則の固定検査に書き換え。元のBOM明細ベースの文言が残らないことの検査を含む。未確認の列挙から `source_bom_item_id` が外れたことの検査）、`test_analysis_routing_step_material_view.py`・`test_analysis_bom_item_view.py`（新しい記述の固定検査）。`check_no_fixed_values`（2桁以上の数字・具体コード・許可外の大文字語の禁止）は変更していない。
+- 2026-10-18の回帰試験: `test_analysis_bom_item_view.py`・`test_analysis_routing_step_view.py` に、対象品番と対象工程の一致、有効時点、同一 `routing_id`、`hierarchy_path` の祖先系列と `final`、別枝除外、`step_no` は補助だけ、判定不能時の「行き先未確定」、BOM親総当たり禁止、連産品仮想親除外を `ANALYSIS_VIEWS`・`TABLE_NOTES` の双方で固定する検査を追加した。レーザー生産実績は、2026-10-14より前の `process_id=NULL` を工程不明とせず、固定工程コード `0801` を `v_ai_routing_step.process_code` に合わせる説明も固定した。
 - 仕様書: 本節、`AI運用規約・AI用DB辞書.md` 6.5-11・6.5-12、`AI分析基盤仕様書.md` のビュー一覧（2行）。
 
 ### 30.6 反映状況
 コードのみ・DB変更なし（説明文は定義ファイルにあるため、バックエンド再起動で反映）。evaluator未検証。generator が実行した範囲（訂正後）: 対象8モジュールの試験（SimpleTestCase系、156件OK・skipped=2）、`pm-ui/scripts/test-analysis-*.mjs` 7本 fail 0、変異試験17件（メモリ上の差し替え。すべて検出）、開発DBの読み取りでの新しい規則の確認（§30.4）。分析での再確認（unknown が減るか）はBOSSが行う。コミット: 訂正分は未。
 2026-10-12 追加訂正（§30.4-2）: 説明文2か所と試験（`test_description_has_bom_item_link_and_coproduct_rule`）、本仕様書、DB辞書6.5-12、基盤仕様書のビュー一覧を訂正。外部結合の1文を追加。コードのみ・DB変更なし。evaluator検証済み（2026-10-12。条件付き→本更新で対応）。再検証は未。コミット未。
+2026-10-18 行き先候補の規則追記: 初版の工程番号中心の規則は、別枝を混ぜるためevaluator不合格。`hierarchy_path` の祖先系列と `final` に訂正し、レーザーの固定工程コード例外と「行き先未確定」を追加した。訂正後は、ルーティング工程・材料・レーザー生産実績の3モジュール49件、行き先規則と全ビュー説明の対象21件が成功し、相談AIへ送る公開ビュー定義に新しい規則が含まれることも確認した。3モジュール56件の一括実行は、今回と無関係な既存のマイグレーション末尾名固定（期待`0086`、現在`0092`）1件だけ失敗した。`git diff --check`は成功。ローカルの説明文・試験・仕様書のみ更新。DB変更・マイグレーション・commit・push・開発／本番反映は行っていない。実AIでの分析案・コード生成と実データによる行き先候補の照合は未確認。
 
 ## 30.7 本番DBの反映状況（2026-10-12。BOSSが本番のAdminerで確認・実行）
 - 本番 `pm_db` に、AI用ビュー16個（`v_ai_*`）が、存在する（migrate ai 0050 まで適用済み）。

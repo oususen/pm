@@ -54,6 +54,7 @@ ANALYSIS_VIEWS = {
             'end_operator_user_id=ヘッダの最終更新者(実データ上はoperator_user_idと一致するケースが大半だが、将来の訂正操作で異なる場合がある)、'
             'material_id・material_code・material_name=使用材料、product_id・product_code・product_name=構成部品(明細の対象製品)、'
             'line_id・process_id=2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様)、'
+            'このビューはレーザー工程の実績なので、2026-10-14より前のprocess_idがNULLでも工程不明と扱わない。ルーティングの起点工程は固定工程コード0801として、v_ai_routing_stepのprocess_code=0801に合わせる。'
             'created_at_h・updated_at_h=ヘッダ(レーザー実績登録)の作成・更新日時、created_at・updated_at(無印)=明細(構成部品行)自体の作成・更新日時。'
         ),
     },
@@ -234,6 +235,10 @@ ANALYSIS_VIEWS = {
             'ルーティング工程ビューv_ai_routing_stepのsource_bom_item_idは、工程の元になったBOM明細のIDで、このビューのidと結べるが、連産品の判定には使わない。'
             '工程が連産品に関わるかは、工程の加工後品output_product_codeが、このビューのbom_is_coproduct=1の明細のchild_product_codeに含まれるかで判定する(判定の詳細は工程ビューの説明にある)。'
             '同じ子品番が複数の明細に現れうるので、工程に結ぶときは、先にbom_is_coproduct=1の明細をchild_product_codeでグループ化し、is_coproduct_driverの最大値に集約する(明細の行ごとに結ぶと、工程の行が重複して増える)。'
+            '対象品番の行き先候補を調べるときは、対象品番だけでルーティングを選ばない。output_product_codeが対象品番と一致し、対象品番を作った工程も一致する工程を起点にする。通常はprocess_idで工程を合わせるが、実績ビューに工程の固定規則がある場合は、そのビューの説明にある固定工程コードでprocess_codeを合わせる。'
+            '基準日時点でrouting_is_active=1かつルーティングの有効期間内のものを対象とする。同じ品番で複数あるときはrouting_is_default=1、routing_valid_from_datetimeが新しいもの、routing_idが大きいものの順で優先する。基準が日付だけならその日の午前8時を基準日時にする。BOMもbom_is_active=1かつ基準日時点の有効期間内とし、最新はbom_valid_fromで決める。'
+            '同じrouting_idの中で、起点のhierarchy_pathを末尾からドット区切りで1階層ずつ削って得る祖先パスの工程と、hierarchy_path=finalの工程だけを、上位・最終の工程と加工後品(行き先候補)にする。別の枝の工程を混ぜない。step_noは工程順の補助確認にだけ使い、大小だけで行き先を決めない。'
+            '起点のhierarchy_pathが空、起点工程がない、または基準日時点で有効なルーティングがないときは、BOMのparent_product_codeを全件候補として総当たりせず、行き先未確定として残す。BOM親は祖先パスまたはfinalの工程に対応するものだけを採用し、bom_is_coproduct=1のparent_product_codeは連産品の仮想親なので除外する。'
         ),
     },
     # ルーティング工程。日付の列(routing_valid_*_datetimeはルーティングの有効期間で実績の日付ではない)・数量の列がないため、
@@ -270,6 +275,10 @@ ANALYSIS_VIEWS = {
             '判定できない(不明)のは、加工後品(output_product_code)が空の工程だけ。加工後品があって連産品の子として登録されていない工程を不明にしない(通常の工程と判定する)。'
             '結ぶときの注意: v_ai_bom_itemは同じ子品番が複数の明細に現れうるので、先に、bom_is_coproduct=1の明細をchild_product_codeでグループ化し、is_coproduct_driverの最大値に集約してから、工程のoutput_product_codeと結ぶ(明細の行ごとに結ぶと、工程の行が重複して増える)。'
             '連産品BOMの集約結果へは、工程を残すため外部結合で結ぶ(内部結合にすると、連産品でない通常の工程が消える)。'
+            '対象品番の行き先候補を調べるときは、対象品番だけでルーティングを選ばない。output_product_codeが対象品番と一致し、対象品番を作った工程も一致する工程を起点にする。通常はprocess_idで工程を合わせるが、実績ビューに工程の固定規則がある場合は、そのビューの説明にある固定工程コードでprocess_codeを合わせる。'
+            '基準日時点でrouting_is_active=1かつルーティングの有効期間内のものを対象とする。同じ品番で複数あるときはrouting_is_default=1、routing_valid_from_datetimeが新しいもの、routing_idが大きいものの順で優先する。基準が日付だけならその日の午前8時を基準日時にする。BOMもbom_is_active=1かつ基準日時点の有効期間内とし、最新はbom_valid_fromで決める。'
+            '同じrouting_idの中で、起点のhierarchy_pathを末尾からドット区切りで1階層ずつ削って得る祖先パスの工程と、hierarchy_path=finalの工程だけを、上位・最終の工程と加工後品(行き先候補)にする。別の枝の工程を混ぜない。step_noは工程順の補助確認にだけ使い、大小だけで行き先を決めない。'
+            '起点のhierarchy_pathが空、起点工程がない、または基準日時点で有効なルーティングがないときは、BOMのparent_product_codeを全件候補として総当たりせず、行き先未確定として残す。BOM親は祖先パスまたはfinalの工程に対応するものだけを採用し、bom_is_coproduct=1のparent_product_codeは連産品の仮想親なので除外する。'
         ),
     },
     # 工程別部品消費(ルーティング工程の材料)。日付・数量として扱う列がないため、date_field=None・quantity_field=None(AI用ビュー作成計画 §26)。

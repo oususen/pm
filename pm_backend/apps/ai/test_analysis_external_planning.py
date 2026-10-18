@@ -138,6 +138,40 @@ class ExternalPlanningTest(SimpleTestCase):
         with patch('ai.services.analysis_llm.urlopen', return_value=fake_response(invalid)):
             self.assert_error(502, lambda: self.create(provider='deepseek'))
 
+    def test_deepseek_accepts_one_json_object_surrounded_by_plain_explanation(self):
+        encoded = json.dumps(PROPOSAL, ensure_ascii=False)
+        for raw in (encoded, '分析案は次のとおりです。\n' + encoded, encoded + '\n以上です。', '前置き\n' + encoded + '\n後書き'):
+            with self.subTest(raw=raw[:20]), patch('ai.services.analysis_llm.urlopen', return_value=fake_response(raw)):
+                plan = self.create(provider='deepseek')
+                self.assertEqual(plan['proposal']['datasets'], PROPOSAL['datasets'])
+
+    def test_deepseek_rejects_ambiguous_or_incomplete_json_in_explanation(self):
+        encoded = json.dumps(PROPOSAL, ensure_ascii=False)
+        cases = [
+            encoded + '\n' + encoded,                         # 複数object
+            '説明\n{"title": "途中',                        # 未完object
+            '[' + encoded + ']',                              # 配列ラップ
+            encoded + '}',                                    # 余分な閉じ波括弧
+            '説明 {not-json}\n' + encoded,                    # 最初の波括弧から読めない場合は再探索しない
+        ]
+        for raw in cases:
+            with self.subTest(raw=raw[:30]), patch('ai.services.analysis_llm.urlopen', return_value=fake_response(raw)):
+                error = self.assert_error(502, lambda: self.create(provider='deepseek'))
+                self.assertEqual(error.reason, 'proposal_json_invalid')
+
+    def test_explanation_around_json_is_not_accepted_for_other_providers(self):
+        raw = '分析案です。\n' + json.dumps(PROPOSAL, ensure_ascii=False) + '\n以上です。'
+        with patch('ai.services.analysis_llm.urlopen', return_value=fake_response(raw)):
+            error = self.assert_error(502, lambda: self.create(provider='openrouter', model='qwen/qwen3.8-27b:free'))
+        self.assertEqual(error.reason, 'proposal_json_invalid')
+
+    def test_single_json_object_extractor_keeps_nested_content_and_rejects_structural_suffixes(self):
+        encoded = json.dumps(PROPOSAL, ensure_ascii=False)
+        self.assertEqual(analysis_llm.extract_single_json_object('前\n' + encoded + '\n後'), encoded)
+        for raw in (None, '', '説明だけ', encoded + '[]', '[' + encoded + ']', '{"x": 1'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                analysis_llm.extract_single_json_object(raw)
+
     def test_selection_is_limited_to_allowed_providers_models_and_settings(self):
         for extra, status in [
             ({'provider': 'unknown'}, 400),

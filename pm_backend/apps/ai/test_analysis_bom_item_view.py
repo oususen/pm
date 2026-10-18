@@ -138,6 +138,28 @@ class BomItemViewDefinitionTest(SimpleTestCase):
             self.assertNotIn('工程が連産品の代表でない子に由来するか', plain)
             self.assertNotIn('bom_is_coproduct=1でis_coproduct_driver=0の明細', plain)
 
+    def test_description_limits_destination_candidates_to_hierarchy_ancestors(self):
+        # 行き先候補は対象工程の祖先系列と最終工程に限定し、別枝やBOM親の総当たりを禁止する
+        for text in (ANALYSIS_VIEWS[BOM_ITEM]['description'], TABLE_NOTES[BOM_ITEM]):
+            plain = text.replace(' ', '')
+            for part in (
+                    '対象品番だけでルーティングを選ばない',
+                    'output_product_codeが対象品番と一致し、対象品番を作った工程も一致する工程を起点にする',
+                    '通常はprocess_idで工程を合わせる', '実績ビューに工程の固定規則がある場合', '固定工程コード', 'process_codeを合わせる',
+                    'routing_is_active=1', 'routing_is_default=1',
+                    'routing_valid_from_datetimeが新しいもの', 'routing_idが大きいものの順で優先する',
+                    '基準が日付だけならその日の午前8時を基準日時にする',
+                    'bom_is_active=1', '最新はbom_valid_fromで決める',
+                    '起点のhierarchy_pathを末尾からドット区切りで1階層ずつ削って得る祖先パス',
+                    'hierarchy_path=finalの工程だけ', '別の枝の工程を混ぜない',
+                    'step_noは工程順の補助確認にだけ使い、大小だけで行き先を決めない',
+                    '起点のhierarchy_pathが空', '起点工程がない', '有効なルーティングがない',
+                    'parent_product_codeを全件候補として総当たりせず、行き先未確定として残す',
+                    'BOM親は祖先パスまたはfinalの工程に対応するものだけを採用し',
+                    'bom_is_coproduct=1のparent_product_codeは連産品の仮想親なので除外する'):
+                self.assertIn(part, plain)
+            self.assertNotIn('起点よりstep_noが大きい工程とそのoutput_product_codeだけ', plain)
+
     def test_origin_table_permissions_are_not_replaced(self):
         # 元テーブル m_bom・m_bom_item の許可と列は、ビューの追加後も変わらない
         self.assertEqual(BASE_SQL_SCHEMA['m_bom'], (

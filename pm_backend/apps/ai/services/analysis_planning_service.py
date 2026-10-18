@@ -348,6 +348,12 @@ def create_plan(owner_id, data):
             raw = analysis_llm.request_external_json(provider, model, messages, temperature)
     except chat_service.LocalAIError as exc:
         raise AnalysisError(str(exc), 503) from exc
+    if provider == 'deepseek':
+        # DeepSeekがJSONの前後に説明を書く場合だけ、曖昧さのない単一objectを取り出す。他プロバイダの受理範囲は変えない。
+        try:
+            raw = analysis_llm.extract_single_json_object(raw)
+        except (TypeError, ValueError):
+            raw = None  # 既存のvalidate_proposalで固定理由 proposal_json_invalid として拒否する
     proposal = validate_proposal(raw, purpose.strip(), start, end)
     if external_purpose is not None:
         # 実コードは日付・数量と重なるため、回答中の数字を名前へ自動復元しない。
