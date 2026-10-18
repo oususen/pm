@@ -115,6 +115,8 @@
         <button type="button" :disabled="!!busy" @click="referenceTemplate = null">参考を外す</button></section>
       <p v-if="refinement && !plan" class="refine-note" role="status">結果の改良: 追加の指示「{{ refinement.instruction }}」を、上の目的に足して、新しい分析案を作ります（元の実行: {{ refinement.from_run_id ?? '不明' }}）。追加の指示は、実行履歴に保存されます。改良の準備中は、テンプレートから分析案を作れません(追加の指示を外すと、作れます)。
         <button type="button" :disabled="!!busy" @click="refinement = null">追加の指示を外す</button></p>
+      <p v-if="previousPlan && !plan" class="refine-note" role="status">改良前の結果（分析案ID: {{ previousPlan.id }}「{{ previousPlan.proposal.title }}」）が残っています。改良に失敗した、またはやめる場合は、元の結果に戻れます。
+        <button type="button" :disabled="!!busy" @click="restorePreviousPlan">元の結果に戻る</button></p>
       <div class="period">
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan || noPeriod"></label>
         <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan || noPeriod"></label>
@@ -693,6 +695,7 @@ function resetPlan() {
   plan.value = null
   refinement.value = null
   referenceTemplate.value = null
+  previousPlan.value = null
   error.value = ''
   busy.value = ''
   externalPreview.value = null
@@ -705,7 +708,9 @@ function resetPlan() {
 const refinement = ref(null)
 // テンプレートを参考にした生成(2026-10-09、BOSS承認 段階C): 参考にするテンプレートの識別だけを持つ。分析案を作ると、分析案(plan.template_reference)が持つ。改良との併用は可
 const referenceTemplate = ref(null)
-watch(plan, value => { if (value) { refinement.value = null; referenceTemplate.value = null } }, { flush: 'sync' })
+// 改良開始時に退避する、改良前の成功したplan(BOSS承認 2026-10-19)。改良が失敗・中止しても、元の結果へ戻れるようにする。新しい分析案ができたら不要になる
+const previousPlan = ref(null)
+watch(plan, value => { if (value) { refinement.value = null; referenceTemplate.value = null; previousPlan.value = null } }, { flush: 'sync' })
 function startReference(template) {
   if (!props.canEdit || executionActive.value || !template || !Number.isInteger(template.id)) return
   if (plan.value && !window.confirm('現在の分析案を破棄して、このテンプレートを参考に、新しい分析を始めます。よろしいですか？')) return
@@ -720,10 +725,19 @@ function startRefinement({ instruction, run_id: runId } = {}) {
   const proposal = plan.value?.proposal
   if (!props.canEdit || executionActive.value || !proposal || typeof instruction !== 'string' || !instruction.trim()) return
   const base = { purpose: proposal.purpose, from: proposal.date_from, to: proposal.date_to }
+  const succeeded = plan.value // 改良前の成功した結果。resetPlanで画面から消えても、戻れるよう退避する
   resetPlan() // 古い結果は画面から消える。AIの選択(プロバイダ・モデル)は、そのまま引き継ぐ
+  previousPlan.value = succeeded
   noPeriod.value = false
   purpose.value = base.purpose; dateFrom.value = base.from; dateTo.value = base.to
   refinement.value = { instruction: instruction.trim(), from_run_id: runId ?? null }
+}
+// 改良前の結果に戻る(BOSS承認 2026-10-19): 改良が失敗した、または改良をやめたときに使う。previousPlanはwatch(plan)で自動的にnullへ戻る
+function restorePreviousPlan() {
+  if (!previousPlan.value || busy.value) return
+  plan.value = previousPlan.value
+  error.value = ''
+  codeStateFresh.value = true
 }
 watch([purpose, dateFrom, dateTo, provider, model, refinement, referenceTemplate], () => {
   externalPreview.value = null
