@@ -56,7 +56,7 @@ _SCHEMA_CODE = {
 }
 ANTHROPIC_CODEGEN_SCHEMA = {'anyOf': [
     _schema_object(_SCHEMA_CODE),
-    _schema_object({**_SCHEMA_CODE, 'parameters': {'type': 'array', 'items': {'anyOf': [
+    _schema_object({**_SCHEMA_CODE, 'parameters': {'type': 'array', 'minItems': 1, 'items': {'anyOf': [
         _schema_object(_SCHEMA_PARAMETER), _schema_object({**_SCHEMA_PARAMETER, 'default': _SCHEMA_STRING}),
     ]}}}),
     _schema_object({'unsupported': _SCHEMA_STRING}),

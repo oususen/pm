@@ -41,6 +41,9 @@ class AnthropicCodegenTests(CodegenBase):
         self.assertIsNone(state.get('approved_at'))
         body = json.loads(api.call_args.args[0].data)
         self.assertEqual(body['output_config']['format']['schema'], cg.ANTHROPIC_CODEGEN_SCHEMA)
+        parameters_schema = body['output_config']['format']['schema']['anyOf'][1]['properties']['parameters']
+        # 受信側は空のparametersを形式不正にするため、Claudeへ渡すschemaでも空配列を生成させない
+        self.assertEqual(parameters_schema['minItems'], 1)
         self.assertIn(json.dumps(cg.CODEGEN_RESPONSE_EXAMPLE, ensure_ascii=False), body['system'])
         self.assertIn('変数を一切使わない場合だけ、parametersを省略できる', body['system'])
         self.assertEqual(body['thinking'], {'type': 'disabled'})
