@@ -107,6 +107,25 @@ ANALYSIS_VIEWS = {
             'remarks=備考(ほぼ未運用だが今後のデータ蓄積を見込んで公開)。'
         ),
     },
+    # 一般工程の中断・強制終了。t_process_work_session単独に、end_record_idでt_process_realtime_recordをLEFT JOIN。
+    # 日別・期間集計はplan_date(実列)を使う。quantity_field=None(数量の列が公開列に無いため)。
+    'v_ai_process_interruption': {
+        'label': '一般工程中断', 'date_field': 'plan_date', 'quantity_field': None,
+        'description': (
+            '1行は1作業セッション(t_process_work_sessionのend_actionがPAUSE(中断)・TEMP_END(強制終了)の行だけ)。'
+            '日別・期間集計はplan_date(実列の計画日)を使う。'
+            'session_typeとend_actionは別の意味の列(end_action=PAUSEの行はsession_type=WORK、'
+            'end_action=TEMP_ENDの行はsession_type=PAUSE。混同しないこと)。'
+            '列の意味: interruption_reason=新規の計算列(t_process_work_session自体には中断理由の列が無いため、'
+            'end_record_idでt_process_realtime_recordをLEFT JOINし、interruption_reason_code(コード値。例:3101)を優先、'
+            '空ならevent_data(JSON)のpause_reason→temp_end_reason→operator_action_reasonの順で、'
+            '空でない最初の自由記述テキスト(例:設備トラブル)を使う。値の形式はコード値と日本語の自由記述が混在する)、'
+            'product_code・product_name=このセッションの対象製品、process_id=工程のID、product_id=製品のID、'
+            'operator_name=作業者名(個人名)、operator_login_id=作業者のログインID、'
+            'started_at・ended_at=このセッションの開始・終了時刻、duration_seconds=継続秒数、'
+            'session_no=同一日・同一工程内のセッション連番。'
+        ),
+    },
     # 品番マスタ。日付の列を持たないため、date_field=None(期間で絞らず全行を取得する)。数量の列もないため、quantity_field=None。
     # 列の意味は、仕様書で確認できたものだけを書く(AI用ビュー作成計画 §4.1-1)。
     'v_ai_product': {

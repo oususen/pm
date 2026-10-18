@@ -2013,3 +2013,86 @@ JSON型の列はない。
 - 評価：evaluator未検証。
 - コミット：未（BOSSの指示後に実施）。
 - 未確認・未実施：`migrate ai 0060`の実行、`v_ai_brake_interruption`での件数・`operator_action`別件数・`qty`分布の照合（現在skip）、`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成）、本番反映、commit・push、evaluator検証。
+
+## 38. 一般工程 中断・強制終了のビュー `v_ai_process_interruption` の作成前確認・実装記録（2026-10-18。BOSS承認済み。実装済み・evaluator未検証）
+
+### 38.1 作成前確認
+
+| 確認項目 | 内容 |
+|---|---|
+| 業務目的 | AIが、一般工程の中断・強制終了（中断理由・作業者・製品・工程・継続時間など）を分析・説明できるようにする |
+| 元テーブル | `t_process_work_session`に、`end_record_id`で`t_process_realtime_record`をLEFT JOIN |
+| 対象行 | `WHERE s.end_action IN ('PAUSE', 'TEMP_END')`（中断・強制終了の行だけ） |
+| 数値定義 | 数量に相当する公開列が無いため`quantity_field=None`。`plan_date`=計画日（実列、計算列ではない） |
+| 公開フィールド（16列。全22列中。BOSS判断で確定） | `id`、`product_code`、`product_name`、`plan_date`、`session_no`、`session_type`、`start_action`、`end_action`、`started_at`、`ended_at`、`duration_seconds`、`process_id`、`product_id`、`operator_name`、`operator_login_id`、`interruption_reason`（新規の計算列） |
+| 非公開フィールド（6列） | `status`、`production_qty`、`issue_count`、`issue_flags`、`defect_qty`、`equipment_via_session`（`t_process_work_session_equipment`との結合案。カバレッジが低くBOSS判断で非公開） |
+| 個人情報 | `operator_name`は個人名（開発DB確認：120件中119件が空文字、1件のみ実名）。公開はBOSS決定どおり |
+| 新規の計算列 | `interruption_reason`：`t_process_work_session`自体には中断理由の列が無いため、`end_record_id`で`t_process_realtime_record`にLEFT JOINし、`interruption_reason_code`（コード値）を優先、空なら`event_data`(JSON)の`pause_reason`→`temp_end_reason`→`operator_action_reason`（自由記述）の順で使う。BOSS承認済みの暫定措置（過去データの`interruption_reason_code`補完が完了すれば、JSON抽出のフォールバックは将来不要になる見込み） |
+
+#### 38.1.1 開発DBの実データ確認（2026-10-18、generator確認。開発DBへ素のSELECT文で試験実行した結果）
+
+- 対象行数：120件（`end_action='PAUSE'` 97件・`end_action='TEMP_END'` 23件）。計画段階の見積り（PAUSE97・TEMP_END23、合計120件程度）と完全に一致。
+- `session_type`と`end_action`の対応：`end_action='PAUSE'`の行は全件(97件)`session_type='WORK'`、`end_action='TEMP_END'`の行は全件(23件)`session_type='PAUSE'`。不一致は0件(両方向とも)。計画の記載どおり。
+- `interruption_reason`の内訳（COALESCEの各段で初めて値が取れた件数）：`interruption_reason_code`由来5件、`event_data.pause_reason`由来85件、`event_data.temp_end_reason`由来22件、`event_data.operator_action_reason`由来0件、どちらも取れずNULL8件（`end_record_id`に対応する実時間記録が無い行＝`t_process_realtime_record`に該当idが存在しない）。コード・JSON合計の非NULLは112件（120件中約93.3%）。計画段階の見積り（コード5件程度、JSON抽出112件程度・約93%）と完全に一致。
+- `interruption_reason_code`に値がある5件はいずれも`r.interruption_reason_code='3101'`で、同じ5件の`event_data.pause_reason`も`'設備トラブル'`（`operator_action_reason`も同じ値）だった（コード優先のCOALESCEにより、この5件は`interruption_reason='3101'`になる。コード値と自由記述の日本語テキストが同じ事象を指しているケース）。
+- `operator_name`：120件中119件が空文字、1件のみ実名（`王 崇栓`）が入る。個人名であることを確認済み。
+- `equipment_via_session`（`t_process_work_session_equipment`への結合案）のカバレッジ：対象120件のうち、少なくとも1件の設備が紐づくセッションは8件（6.7%）のみ。計画段階の見積り（カバレッジ6.7%）と完全に一致。本ビューでは非公開のため実装しない。
+
+#### 38.1.2 列型の対応（`SHOW COLUMNS FROM t_process_work_session`・`SHOW COLUMNS FROM t_process_realtime_record`を開発DBで実測。`interruption_reason`は、検証目的で一時的にビューを作成し`SHOW COLUMNS`で型を確認した後、そのビューを即座に削除した）
+
+| 列 | MySQL型 | `ANALYSIS_COLUMN_TYPES` |
+|---|---|---|
+| `id` | bigint | `BIGINT` |
+| `product_code` | varchar(50) | `VARCHAR` |
+| `product_name` | varchar(100) | `VARCHAR` |
+| `plan_date` | date | `DATE` |
+| `session_no` | int | `BIGINT` |
+| `session_type` | varchar(10) | `VARCHAR` |
+| `start_action` | varchar(20) | `VARCHAR` |
+| `end_action` | varchar(20) | `VARCHAR` |
+| `started_at` | datetime(6) | `TIMESTAMP` |
+| `ended_at` | datetime(6)（NULL可） | `TIMESTAMP` |
+| `duration_seconds` | int | `BIGINT` |
+| `process_id` | bigint | `BIGINT` |
+| `product_id` | bigint（NULL可） | `BIGINT` |
+| `operator_name` | varchar(100) | `VARCHAR` |
+| `operator_login_id` | varchar(150)（NULL可） | `VARCHAR` |
+| `interruption_reason`（計算列） | longtext（NULL可。`COALESCE`+`JSON_UNQUOTE`の結果） | `VARCHAR`（既存の`varchar・longtextはVARCHAR`の変換規則に合わせる） |
+
+JSON型の列はない（`t_process_realtime_record.event_data`はJSON型だが、`JSON_UNQUOTE`でテキスト化した結果だけを公開するため、公開列自体はJSON型にならない）。
+
+### 38.2 実装内容
+
+- 新規 `pm_backend/apps/ai/migrations/0061_ai_process_interruption_view.py`。`CREATE OR REPLACE VIEW v_ai_process_interruption AS SELECT <16列> FROM t_process_work_session s LEFT JOIN t_process_realtime_record r ON r.id = s.end_record_id WHERE s.end_action IN ('PAUSE', 'TEMP_END')`（標準SQLのみ・バッククォート/DEFINER/SQL SECURITY/DB修飾なし。ただし`JSON_UNQUOTE`・`JSON_EXTRACT`はMySQL固有のため、コメントに「PostgreSQL移行時は`->>`構文等への書き換えが必要」と明記）。ロールバックは`DROP VIEW IF EXISTS v_ai_process_interruption`。依存は`ai 0060_ai_brake_interruption_view`（直前の`ai`アプリのマイグレーション。実際に`pm_backend/apps/ai/migrations/`を確認して採番した）。
+- `pm_backend/apps/ai/services/sql_queries.py`：`BASE_SQL_SCHEMA`に`v_ai_process_interruption`（16列。マイグレーションのSELECT順と同じ）を`v_ai_brake_interruption`の直後に追加。`TABLE_NOTES`にも同じ位置に追加（§38.1・§38.1.1の内容：`session_type`と`end_action`の対応関係、`interruption_reason`の設計意図・優先順位・値の形式が混在する旨・開発DB内訳、`operator_name`が個人名である旨を明記）。
+- `pm_backend/apps/ai/services/analysis_data_service.py`：`ANALYSIS_VIEWS`に`v_ai_process_interruption`（label=一般工程中断、`date_field='plan_date'`、`quantity_field=None`、説明文）を`v_ai_brake_interruption`の直後に追加。
+- `pm_backend/apps/ai/services/analysis_execution_service.py`：`ANALYSIS_COLUMN_TYPES`に16列の型（§38.1.2）を`v_ai_brake_interruption`の直後に追加。
+- `pm_backend/apps/ai/management/commands/setup_ai_views.py`：`EXISTING_JOIN_VIEWS`に`v_ai_process_interruption`を追加（LEFT JOIN・WHERE句があるため、既存の`v_ai_brake_interruption`・`v_ai_laser_interruption`と同じ「結合・WHERE句あり」の扱い。`SIMPLE_MASTER_VIEWS`ではない。`--check`で定義者等を表示するだけ、再作成しない）。近くのコメントの対象マイグレーション番号の一覧に`0061`を追記。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS`は変更していない。
+- 試験：`apps/ai/test_analysis_process_interruption_view.py`新規（18件。既存の`v_ai_brake_interruption`・`v_ai_laser_interruption`の構成を踏襲し、SimpleTestCaseで列・型・公開列・非公開6列・マイグレーションSQL・LEFT JOIN・COALESCEの優先順位・`setup_ai_views`登録を検証するテストに加え、開発DBの実テーブルへ直接読み取りだけを行う件数照合テスト、`end_action`別件数と`session_type`との対応関係、`interruption_reason`の優先順位ごとの内訳、`operator_name`の分布を検証するテストを追加）。`test_setup_ai_views.py`は変更不要（既存の`cmd.EXISTING_JOIN_VIEWS`を汎用的に反復するテスト構成のため、個別のビュー名を列挙した追加は不要）。
+- 仕様書：本節、`AI運用規約・AI用DB辞書.md`に新規節（§6.5-22）を追加。
+
+### 38.3 承認済み計画からの逸脱・不確実な点（evaluatorへの確認依頼）
+
+1. **なし**。承認済み計画（公開16列・非公開6列・`interruption_reason`の優先順位ロジック・`quantity_field=None`・ラベル「一般工程中断」・`EXISTING_JOIN_VIEWS`扱い）どおりに実装し、作成前確認（§38.1.1）の実データもBOSSが事前確認した数値（120件、内訳、`interruption_reason`の各段の件数、`operator_name`の分布、`equipment_via_session`のカバレッジ6.7%）と完全に一致した。
+2. **検証項目（件数照合・`end_action`別件数・`interruption_reason`の優先順位照合）は、`migrate`未実行（本ビュー未作成）のため、開発DBの実テーブル直接読み取りによる期待値の確認にとどめ、ビュー自体との照合はスキップ扱いにした**（migrate実行後に有効になる設計。§35〜§37と同じ方式）。
+3. **権限の付与・定義者の付け替えは、既存の`v_ai_brake_interruption`・`v_ai_laser_interruption`と同様、手順SQLを作成していない**（`EXISTING_JOIN_VIEWS`は`--check`で定義者等を表示するだけのため。必要であれば別途BOSSの指示で作成する）。
+4. **`interruption_reason_code`に値がある5件は、同じ5件で`event_data`の`pause_reason`・`operator_action_reason`にも同じ値（`'設備トラブル'`に対応するコード`'3101'`）が入っていた**ことを確認した（§38.1.1）。これはCOALESCEの優先順位の動作に影響しない（コードが優先されるのは計画どおり）が、両データソースが同じ事象を記録しているケースがあるという事実として報告する。
+
+### 38.4 検証結果（generatorが実行。開発）
+
+- 開発DBの実データ確認（`SHOW COLUMNS`、素のSELECT文での件数集計）：§38.1.1・§38.1.2のとおり実測し、計画の推測値と完全に一致した。
+- `python manage.py test ai.test_analysis_process_interruption_view`：**18件中17件成功・1件skip**（`migrate`未実行のため件数照合テストのみ意図的にskip）。
+- `ai.test_setup_ai_views ai.test_analysis_equipment_view ai.test_analysis_process_production_actual_view ai.test_analysis_laser_production_actual_view ai.test_analysis_brake_production_actual_view ai.test_analysis_laser_interruption_view ai.test_analysis_brake_interruption_view ai.test_analysis_process_interruption_view`の一括実行：**134件成功・1件skip**。
+- `ai.test_analysis_brake_interruption_view ai.test_analysis_laser_interruption_view ai.test_analysis_process_production_actual_view`の一括実行：**50件成功**（既存ビューへの回帰がないことを確認）。
+- `ai.test_analysis_bom_item_view ai.test_analysis_routing_step_view ai.test_analysis_external_planning`の一括実行：59件中58件成功・1件failure。失敗は`test_analysis_bom_item_view.py`の`masters`アプリ最新マイグレーションファイル名のハードコード値による既存の無関係な食い違い（並行作業で`masters`のマイグレーションが進んだため。本実装による新規の失敗ではないことをテスト名・差分内容で確認）。
+- `python manage.py makemigrations --dry-run --check`：「No changes detected」。
+- `python manage.py showmigrations ai`：`0060_ai_brake_interruption_view`は適用済み（`[X]`）、`0061_ai_process_interruption_view`は未適用（`[ ]`）であることを確認。
+- `git diff --check`：問題なし（空白・改行の警告なし）。
+- `ai`アプリ全体の一括実行は、`manage.py test ai --keepdb`が開発環境のテストDB（`test_pm_db`）の既知の構築ギャップ（メモリ`project_test_pm_db_migration_gap`参照）により、対話的な確認プロンプトで停止・ハングしたため、今回は完走させず、上記の対象を絞った一括実行（134件・50件・59件）で代替した。この停止はgeneratorの変更が原因ではなく、環境側の既知の問題である。
+
+### 38.5 反映状況
+
+- コードを実装（マイグレーション・`sql_queries.py`・`analysis_data_service.py`・`analysis_execution_service.py`・`setup_ai_views.py`・試験1ファイル）。`migrate`・`setup_ai_views --apply`は禁止事項のため未実行。開発DB・本番DBともに`v_ai_process_interruption`ビューは未作成。
+- 評価：evaluator未検証。
+- コミット：未（BOSSの指示後に実施）。
+- 未確認・未実施：`migrate ai 0061`の実行、`v_ai_process_interruption`での件数・`end_action`別件数・`interruption_reason`優先順位の照合（現在skip）、`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成）、本番反映、commit・push、evaluator検証。

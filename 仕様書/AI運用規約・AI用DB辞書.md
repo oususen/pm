@@ -502,6 +502,24 @@ AI分析の結果（成功・失敗・失敗の理由コード・採用）を記
 - 専用テスト17件（うち1件は`migrate`未実行のため件数照合をskip）。`makemigrations --dry-run --check`は「No changes detected」。`showmigrations ai`で`0060`が未適用であることを確認。
 - **未解決の確認事項**：`migrate ai 0060`・`setup_ai_views --apply`は未実行（禁止事項のためgeneratorは実施していない。BOSSが実行）。実行後の`pm_ai_reader`での件数・分布照合、本番反映、commit・pushも未実施。
 
+### 6.5-22 一般工程 中断・強制終了（`v_ai_process_interruption`。2026-10-18 実装。コードのみ・開発DBにビュー未作成・本番未反映）
+
+| ビュー | 列 | 有効条件 | AI利用 |
+|---|---|---|---|
+| `v_ai_process_interruption`（`ai/0061`で作成） | 16列: `id`・`product_code`・`product_name`・`plan_date`・`session_no`・`session_type`・`start_action`・`end_action`・`started_at`・`ended_at`・`duration_seconds`・`process_id`・`product_id`・`operator_name`・`operator_login_id`・`interruption_reason`（新規の計算列） | `t_process_work_session`に`end_record_id`で`t_process_realtime_record`をLEFT JOIN。`end_action IN ('PAUSE','TEMP_END')`の行だけ（開発DB確認: PAUSE97件・TEMP_END23件、合計120件） | 読み取り専用SQL・分析（`ai.analysis`）で、一般工程の中断・強制終了（理由・作業者・製品・工程・継続時間など）を分析・説明できるようにする |
+
+- 非公開（ビューに含めない）6列：`status`・`production_qty`・`issue_count`・`issue_flags`・`defect_qty`・`equipment_via_session`（`t_process_work_session_equipment`との結合案。開発DB確認：対象120件中8件(6.7%)しか設備が紐づかずカバレッジが低いため、BOSS判断により非公開。設備の詳細分析は別途検討）。
+- `session_type`と`end_action`は別の意味の列で混同しないこと。開発DB確認：`end_action='PAUSE'`の行は全件`session_type='WORK'`（97件。作業中にPAUSEボタンで中断）、`end_action='TEMP_END'`の行は全件`session_type='PAUSE'`（23件。中断中にTEMP_ENDボタンで強制終了）。
+- `interruption_reason`は新規の計算列（`t_process_work_session`自体には中断理由の列が無い）。`end_record_id`で`t_process_realtime_record`をLEFT JOINし、`interruption_reason_code`（コード値。例:`3101`）が空でなければそれを使い、空なら`event_data`(JSON)の`pause_reason`→`temp_end_reason`→`operator_action_reason`の順で、空でない最初の自由記述テキスト（例:設備トラブル）を使う。BOSS承認済みの暫定措置（過去データの`interruption_reason_code`補完が進めば、JSON抽出への依存は将来減る見込み）。値の形式はコード値と日本語の自由記述が混在することに注意。
+  - 開発DB確認（2026-10-18、generator確認）：120件中、`interruption_reason_code`由来5件、`event_data.pause_reason`由来85件、`event_data.temp_end_reason`由来22件、`event_data.operator_action_reason`由来0件、どちらも取れずNULL8件（`end_record_id`に対応する実時間記録が無い行）。コード・JSON合計の非NULLは112件（約93%）。計画段階の見積り（コード5件程度、JSON抽出112件程度・約93%）と完全に一致。
+- `operator_name`は作業者名（個人名）。開発DB確認：120件中119件が空文字、1件のみ実名が入る。
+- `plan_date`は実列（計画日）。日別・期間の集計はこれを使う。`process_id`は`v_ai_process.id`、`product_id`は`v_ai_product.id`と結べる。`started_at`・`ended_at`はこのセッションの開始・終了時刻、`duration_seconds`は継続秒数、`session_no`は同一日・同一工程内のセッション連番。
+- `ANALYSIS_VIEWS`（`date_field='plan_date'`・`quantity_field=None`。数量に相当する公開列が無いため）・`ANALYSIS_COLUMN_TYPES`（16列。`interruption_reason`はJSON_UNQUOTE経由の`longtext`だが、既存の`remarks`等と同じ扱いで`VARCHAR`）・`BASE_SQL_SCHEMA`・`TABLE_NOTES`に登録済み。JSON型の列はない。
+- `setup_ai_views`は`EXISTING_JOIN_VIEWS`に追加（`v_ai_brake_interruption`・`v_ai_laser_interruption`等と同様、LEFT JOIN・WHERE句ありの扱い。`SIMPLE_MASTER_VIEWS`ではない。`--check`で定義者等を表示するだけ、再作成しない）。近くのコメントの対象マイグレーション番号の一覧に`0061`を追記。`SIMPLE_MASTER_VIEWS`・`OTHER_VIEW_COLUMNS`は変更していない（元テーブルの列権限は`setup_ai_views --apply`実行時にBOSSが個別判断）。
+- 専用テスト18件（うち1件は`migrate`未実行のため件数照合をskip）。`makemigrations --dry-run --check`は「No changes detected」。`showmigrations ai`で`0061`が未適用であることを確認。
+- MySQL固有の`JSON_UNQUOTE`・`JSON_EXTRACT`を使用。将来のPostgreSQL移行時は`->>`構文等への書き換えが必要（マイグレーションのコメントに明記済み）。
+- **未解決の確認事項**：`migrate ai 0061`・`setup_ai_views --apply`は未実行（禁止事項のためgeneratorは実施していない。BOSSが実行）。実行後の`pm_ai_reader`での件数・内訳照合、本番反映、commit・pushも未実施。
+
 ### 6.6 受注（ルーティング未設定の注文品）
 
 | モデル（テーブル） | フィールド名 | 有効条件 | AI利用 |

@@ -83,6 +83,16 @@ BASE_SQL_SCHEMA = {
         'recorded_at', 'equipment_id', 'line_id', 'process_id', 'product_id', 'operator_user_id',
         'operator_login_id', 'interruption_reason_code', 'remarks',
     ),
+    # 一般工程の中断・強制終了のビュー(AI用ビュー作成計画 次セクション。t_process_work_session単独に、
+    # end_record_idでt_process_realtime_recordをLEFT JOIN。end_action IN ('PAUSE','TEMP_END')の行だけを公開。
+    # interruption_reasonは新規の計算列(interruption_reason_code優先、空ならevent_data(JSON)から抽出)。
+    # 非公開: status・production_qty・issue_count・issue_flags・defect_qty・equipment_via_session(カバレッジ低のため非公開)。
+    # 列順はマイグレーションのSELECT順と同じ)
+    'v_ai_process_interruption': (
+        'id', 'product_code', 'product_name', 'plan_date', 'session_no', 'session_type', 'start_action',
+        'end_action', 'started_at', 'ended_at', 'duration_seconds', 'process_id', 'product_id',
+        'operator_name', 'operator_login_id', 'interruption_reason',
+    ),
     # 品番マスタのビュー(AI用ビュー作成計画 §9。image_url・product_name_halfwidth・is_phantom・self_lt_days・created_at・updated_at は非公開)
     'v_ai_product': (
         'id', 'product_code', 'product_name', 'category', 'unit', 'unit_price', 'standard_lt_days',
@@ -251,6 +261,29 @@ TABLE_NOTES = {
         'interruption_reason_code は中断理由コード(開発DB確認: このビューでは367件中363件がNULL(空)でほぼ未運用)。'
         'remarks は備考(開発DB確認: このビューでは367件全件が空でほぼ未運用)。'
         'operator_login_id・interruption_reason_code・remarks はいずれも、今後のデータ蓄積を見込んで公開する(v_ai_brake_production_actualと同じ扱い)。'
+    ),
+    'v_ai_process_interruption': (
+        '一般工程の中断・強制終了(t_process_work_session)のビュー。1行=1作業セッション'
+        '(end_action が PAUSE(中断)・TEMP_END(強制終了)の行だけ)。'
+        '開発DB確認(2026-10-18、generator確認): 120件(end_action=PAUSE 97件・TEMP_END 23件)。'
+        'session_type と end_action は別の意味の列で混同しないこと。end_action=PAUSE の行は session_type=WORK'
+        '(作業中にPAUSEボタンで中断。120件中97件)、end_action=TEMP_END の行は session_type=PAUSE'
+        '(中断中にTEMP_ENDボタンで強制終了。120件中23件)。START・RESUME・END等の他のアクションはこのビューに出ない。'
+        '日別・期間の集計は plan_date(計画日の実列)を使う。'
+        'interruption_reason は新規の計算列(t_process_work_session自体には中断理由の列が無い)。'
+        'end_record_id で t_process_realtime_record を LEFT JOIN し、interruption_reason_code(中断理由コード。例: 3101)が'
+        '空でなければそれを使い、空なら event_data(JSON)の pause_reason→temp_end_reason→operator_action_reason の順で、'
+        '空でない最初の自由記述テキスト(例: 設備トラブル)を使う(BOSS承認済みの暫定措置。'
+        '過去データの interruption_reason_code 補完が進めば、JSON抽出への依存は将来減る見込み)。'
+        '値の形式はコード値(文字列)と日本語の自由記述が混在することに注意。'
+        '開発DB確認(2026-10-18): 120件中、interruption_reason_code由来が5件、event_data由来(pause_reason)が85件、'
+        'event_data由来(temp_end_reason)が22件、event_data由来(operator_action_reason)が0件、'
+        'どちらも取れずNULLが8件(end_record_idに対応する実時間記録が無い行)。コード・JSON合計の非NULLは112件(約93%)。'
+        'product_code・product_name は実列(このセッションの対象製品)、process_id は v_ai_process の id、'
+        'product_id は v_ai_product の id と結べる。'
+        'operator_name は作業者名(個人名。開発DB確認: 120件中119件が空文字、1件のみ実名が入る)。'
+        'operator_login_id は作業者のログインID。started_at・ended_at はこのセッションの開始・終了時刻、'
+        'duration_seconds は継続秒数、session_no は同一日・同一工程内のセッション連番。'
     ),
     'v_ai_product': (
         '品番マスタ(m_product)のビュー。1行=1品番(全行。無効な品番も含むため、有効な品番だけを見るときは is_active=1 で絞る)。'

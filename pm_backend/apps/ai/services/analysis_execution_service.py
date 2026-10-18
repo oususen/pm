@@ -100,6 +100,16 @@ ANALYSIS_COLUMN_TYPES = {
         'operator_user_id': 'BIGINT', 'operator_login_id': 'VARCHAR', 'interruption_reason_code': 'VARCHAR',
         'remarks': 'VARCHAR',
     },
+    # 一般工程の中断(t_process_work_session・t_process_realtime_recordのSHOW COLUMNSから導出。
+    # 2026-10-18 generator確認。interruption_reasonは計算列で、開発DBで一時的にビューを作りSHOW COLUMNSを確認した結果はlongtext
+    # (varchar・longtextはVARCHARの既存変換規則に合わせる)。JSON型の列はない)
+    'v_ai_process_interruption': {
+        'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'plan_date': 'DATE',
+        'session_no': 'BIGINT', 'session_type': 'VARCHAR', 'start_action': 'VARCHAR', 'end_action': 'VARCHAR',
+        'started_at': 'TIMESTAMP', 'ended_at': 'TIMESTAMP', 'duration_seconds': 'BIGINT', 'process_id': 'BIGINT',
+        'product_id': 'BIGINT', 'operator_name': 'VARCHAR', 'operator_login_id': 'VARCHAR',
+        'interruption_reason': 'VARCHAR',
+    },
     # 品番マスタ(開発DBのSHOW COLUMNS FROM v_ai_productに合わせる。int・int unsigned・tinyint(1)はBIGINT、decimal(p,s)はDECIMAL(18,s)、datetimeはTIMESTAMP)
     'v_ai_product': {
         'id': 'BIGINT', 'product_code': 'VARCHAR', 'product_name': 'VARCHAR', 'category': 'VARCHAR', 'unit': 'VARCHAR',

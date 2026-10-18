@@ -28,7 +28,7 @@ SIMPLE_MASTER_VIEWS = {
     'v_ai_brake_production_actual': 'brake_line_record',
 }
 
-# 結合またはWHERE句を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046・0048〜0050・0055・0056・0058・0060)にあるビュー。
+# 結合またはWHERE句を含み、定義がマイグレーション(0012〜0014・0040〜0043・0045・0046・0048〜0050・0055・0056・0058・0060・0061)にあるビュー。
 # 再作成しない。--check で定義者などを表示するだけ(権限付与・定義者の付け替えは手動SQL)。
 EXISTING_JOIN_VIEWS = (
     'v_ai_shipment', 'v_ai_purchase_receipt', 'v_ai_calendar_day', 'v_ai_bom_item',
@@ -39,6 +39,7 @@ EXISTING_JOIN_VIEWS = (
     'v_ai_laser_production_actual',
     'v_ai_laser_interruption',
     'v_ai_brake_interruption',
+    'v_ai_process_interruption',
 )
 
 # 単純なマスタビュー以外のビューが、同じ元テーブルから使う列。owner のこの列権限は REVOKE しない。
