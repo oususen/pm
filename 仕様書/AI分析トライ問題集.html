@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI分析トライ問題集</title>
+  <style>
+    :root {
+      --ink: #17323a;
+      --muted: #60767d;
+      --paper: #fffdf5;
+      --surface: #ffffff;
+      --line: #d9e3df;
+      --primary: #087f72;
+      --primary-dark: #05645b;
+      --accent: #f2b84b;
+      --easy: #e6f6ef;
+      --middle: #fff3cf;
+      --hard: #fce6dc;
+      --check: #eef3ff;
+      --danger: #a83c2e;
+      --shadow: 0 14px 34px rgba(31, 68, 71, .09);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0 0, rgba(8, 127, 114, .10), transparent 32rem),
+        linear-gradient(180deg, #fffbea 0, var(--paper) 24rem, #f7faf8 100%);
+      font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      line-height: 1.72;
+    }
+
+    button, input, select { font: inherit; }
+    .wrap { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+
+    header { padding: 56px 0 30px; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      color: var(--primary-dark);
+      font-size: .84rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 30px; height: 3px; border-radius: 4px; background: var(--accent); }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 4rem); line-height: 1.08; letter-spacing: -.04em; }
+    .lead { max-width: 780px; margin: 18px 0 0; color: var(--muted); font-size: 1.04rem; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+    .meta span { padding: 6px 11px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.72); font-size: .82rem; }
+
+    .guide {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 18px;
+      margin: 22px 0 28px;
+    }
+    .panel { padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); }
+    .panel h2 { margin: 0 0 10px; font-size: 1.08rem; }
+    .steps { margin: 0; padding-left: 1.25rem; }
+    .steps li + li { margin-top: 5px; }
+    .score-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .score-grid div { padding: 9px 10px; border-radius: 10px; background: #f4f7f6; font-size: .86rem; }
+    .score-grid strong { color: var(--primary-dark); }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: 1fr 180px 200px auto;
+      gap: 10px;
+      padding: 12px;
+      margin-bottom: 25px;
+      border: 1px solid rgba(8,127,114,.18);
+      border-radius: 15px;
+      background: rgba(255,253,245,.94);
+      box-shadow: 0 8px 26px rgba(31,68,71,.09);
+      backdrop-filter: blur(10px);
+    }
+    .toolbar input, .toolbar select {
+      min-width: 0;
+      padding: 10px 12px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: white;
+    }
+    .toolbar button, .copy-btn {
+      padding: 9px 13px;
+      border: 0;
+      border-radius: 10px;
+      color: white;
+      background: var(--primary);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .toolbar button:hover, .copy-btn:hover { background: var(--primary-dark); }
+
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin: 38px 0 15px; }
+    .section-head h2 { margin: 0; font-size: clamp(1.35rem, 3vw, 2rem); }
+    .section-head p { margin: 0; color: var(--muted); font-size: .9rem; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--primary); }
+    .card.easy::before { background: #3a9d76; }
+    .card.middle::before { background: #d69720; }
+    .card.hard::before { background: #d56347; }
+    .card.check::before { background: #526bb3; }
+    .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .number { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .08em; }
+    .card h3 { margin: 3px 0 8px; font-size: 1.16rem; line-height: 1.4; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 15px; }
+    .tag { padding: 4px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; background: #edf3f1; }
+    .tag.easy { background: var(--easy); color: #237152; }
+    .tag.middle { background: var(--middle); color: #815600; }
+    .tag.hard { background: var(--hard); color: #934129; }
+    .tag.check { background: var(--check); color: #425897; }
+    .prompt {
+      margin: 0;
+      padding: 14px 15px;
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      background: #fffaf0;
+      white-space: pre-wrap;
+      font-size: .94rem;
+    }
+    .copy-row { display: flex; justify-content: flex-end; margin-top: 9px; }
+    .copy-btn { padding: 6px 10px; font-size: .78rem; }
+    details { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 12px; }
+    summary { cursor: pointer; color: var(--primary-dark); font-weight: 800; }
+    .detail-grid { display: grid; gap: 11px; margin-top: 11px; }
+    .detail-block strong { display: block; margin-bottom: 2px; font-size: .82rem; color: var(--muted); }
+    .detail-block p, .detail-block ul { margin: 0; font-size: .88rem; }
+    .detail-block ul { padding-left: 1.2rem; }
+    code { padding: 1px 5px; border-radius: 5px; color: #24595a; background: #eff5f3; font-family: Consolas, monospace; font-size: .9em; }
+
+    .view-table { width: 100%; border-collapse: collapse; margin: 14px 0 54px; background: white; box-shadow: var(--shadow); }
+    .view-table th, .view-table td { padding: 10px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; font-size: .84rem; }
+    .view-table th { color: white; background: var(--primary-dark); }
+    .note { padding: 14px 16px; margin: 18px 0; border-radius: 10px; color: #714219; background: #fff0d5; }
+    .empty { display: none; padding: 36px; text-align: center; color: var(--muted); }
+    footer { padding: 30px 0 50px; color: var(--muted); font-size: .82rem; }
+
+    @media (max-width: 820px) {
+      .guide, .cards { grid-template-columns: 1fr; }
+      .toolbar { position: static; grid-template-columns: 1fr 1fr; }
+      .toolbar input { grid-column: 1 / -1; }
+    }
+    @media print {
+      body { background: white; }
+      .toolbar, .copy-btn { display: none !important; }
+      .wrap { width: 100%; }
+      .guide { grid-template-columns: 1fr 1fr; }
+      .cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .card, .panel, .view-table { box-shadow: none; break-inside: avoid; }
+      details { display: block; }
+      details > * { display: block; }
+      summary { list-style: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap">
+    <div class="eyebrow">AI Analysis Practice</div>
+    <h1>AI分析<br>トライ問題集</h1>
+    <p class="lead">一般利用者がAI分析画面へそのまま入力し、分析案・データ範囲・生成コード・結果の妥当性を段階的に確認するための問題集です。</p>
+    <div class="meta">
+      <span>作成日 2026-10-18</span>
+      <span>全20問</span>
+      <span>基礎・応用・高度・見極め</span>
+      <span>公開AI用ビュー準拠</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="guide">
+      <div class="panel">
+        <h2>使い方</h2>
+        <ol class="steps">
+          <li>問題の「AIへ入力する文」をコピーし、AI分析画面へ貼り付けます。</li>
+          <li>AIが選んだ目的・期間・ビュー・フィールドを、確認ポイントと照合します。</li>
+          <li>実行前に、重複、日付列、数量列、除外条件を確認します。</li>
+          <li>結果は合計だけでなく、対象行数・除外件数・未確定件数も確認します。</li>
+        </ol>
+      </div>
+      <div class="panel">
+        <h2>1問10点の採点例</h2>
+        <div class="score-grid">
+          <div><strong>2点</strong> 目的の理解</div>
+          <div><strong>2点</strong> ビュー選択</div>
+          <div><strong>2点</strong> 集計・結合</div>
+          <div><strong>2点</strong> 重複・除外</div>
+          <div><strong>2点</strong> 結果の説明</div>
+          <div><strong>合格</strong> 8点以上</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="note"><strong>期間の既定:</strong> 日付指定のある問題は2026年9月を使用します。日付のないマスタ・BOM・ルーティングビューは、分析期間で絞らず全行から基準日時点の有効データを選びます。<br><strong>実行前確認:</strong> AI用ビューの反映状況は開発・本番で異なります。対象ビューが未反映の場合は、分析の誤りとせず環境の準備状態として記録してください。</div>
+
+    <section class="toolbar" aria-label="問題の絞り込み">
+      <input id="search" type="search" placeholder="品番、出荷、中断、BOMなどで検索">
+      <select id="level">
+        <option value="all">すべての難易度</option>
+        <option value="easy">基礎</option>
+        <option value="middle">応用</option>
+        <option value="hard">高度</option>
+        <option value="check">見極め</option>
+      </select>
+      <select id="category">
+        <option value="all">すべての分野</option>
+        <option value="production">生産</option>
+        <option value="shipment">出荷・顧客</option>
+        <option value="purchase">仕入</option>
+        <option value="interruption">中断</option>
+        <option value="master">マスタ・カレンダ</option>
+        <option value="routing">BOM・ルーティング</option>
+      </select>
+      <button type="button" id="reset">絞り込み解除</button>
+    </section>
+
+    <section class="problem-section" data-section="easy">
+      <div class="section-head"><div><h2>基礎問題</h2><p>1つか2つのビューで、集計の基本を確認します。</p></div><span>6問</span></div>
+      <div class="cards">
+        <article class="card easy" data-level="easy" data-category="production">
+          <div class="card-top"><div><div class="number">QUESTION 01</div><h3>一般工程の工程別生産数</h3></div><span class="tag easy">基礎</span></div>
+          <div class="tags"><span class="tag">一般工程</span><span class="tag">工程別</span><span class="tag">日別変動</span></div>
+          <p class="prompt">2026年9月の一般工程の生産実績について、工程別の生産数合計を多い順に示してください。日別生産数の標準偏差と最大・最小の差も計算し、変動が大きい工程上位5件の日別推移を示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_process_production_actual</code>、<code>v_ai_process</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><ul><li><code>business_day</code>を2026-09-01～09-30で絞る</li><li><code>process_id</code>で工程名を付与する</li><li>生産数は<code>qty</code>を集計する</li></ul></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p><code>timestamp</code>の日付で集計し、8時区切りの業務日とずれる。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card easy" data-level="easy" data-category="shipment">
+          <div class="card-top"><div><div class="number">QUESTION 02</div><h3>得意先別の出荷数量</h3></div><span class="tag easy">基礎</span></div>
+          <div class="tags"><span class="tag">出荷</span><span class="tag">得意先</span><span class="tag">品番</span></div>
+          <p class="prompt">2026年9月の出荷実績を得意先別・品番別に集計し、出荷数量が多い組み合わせ上位20件を示してください。得意先名も表示し、顧客コードは文字列として扱ってください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_shipment</code>、<code>v_ai_customer</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p><code>shipment_date</code>、<code>quantity</code>を使い、<code>customer_code</code>で顧客名を結ぶ。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>先頭ゼロを持つ顧客コードを数値へ変換する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card easy" data-level="easy" data-category="purchase">
+          <div class="card-top"><div><div class="number">QUESTION 03</div><h3>仕入先別の入荷実績</h3></div><span class="tag easy">基礎</span></div>
+          <div class="tags"><span class="tag">仕入</span><span class="tag">仕入先</span><span class="tag">曜日</span></div>
+          <p class="prompt">2026年9月の入荷実績を仕入先別・品番別に集計してください。入荷数量上位10件と、曜日別の入荷数量の偏りを示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_purchase_receipt</code>、<code>v_ai_supplier</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p><code>arrival_date</code>で期間を絞り、<code>supplier_id</code>で仕入先名を付ける。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p><code>registered_at</code>を入荷日として使う。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card easy" data-level="easy" data-category="production">
+          <div class="card-top"><div><div class="number">QUESTION 04</div><h3>レーザー品番別の生産と仕損</h3></div><span class="tag easy">基礎</span></div>
+          <div class="tags"><span class="tag">レーザー</span><span class="tag">仕損</span><span class="tag">品番</span></div>
+          <p class="prompt">2026年9月のレーザー生産実績を品番別に集計し、良品数量、仕損数量、仕損率を示してください。良品数量が多い上位10品番と、仕損率が高い上位10品番を分けて表示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_laser_production_actual</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p><code>work_date</code>で絞り、良品は<code>total_qty</code>、仕損は<code>scrap_qty</code>を合計する。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p><code>total_qty</code>から仕損をもう一度引いて良品を過少計上する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card easy" data-level="easy" data-category="interruption">
+          <div class="card-top"><div><div class="number">QUESTION 05</div><h3>レーザー中断の発生状況</h3></div><span class="tag easy">基礎</span></div>
+          <div class="tags"><span class="tag">レーザー</span><span class="tag">中断</span><span class="tag">設備</span></div>
+          <p class="prompt">2026年9月のレーザー工程の中断件数を、設備別・パターン番号別・中断理由別に集計してください。中断が集中した日と設備を示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_laser_interruption</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>1行1中断の中断ビューを使い、件数は行数または<code>id</code>件数で数える。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>生産明細ビューを使い、1中断を構成部品数だけ重複計上する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card easy" data-level="easy" data-category="master">
+          <div class="card-top"><div><div class="number">QUESTION 06</div><h3>稼働日あたりの生産数</h3></div><span class="tag easy">基礎</span></div>
+          <div class="tags"><span class="tag">カレンダ</span><span class="tag">ライン</span><span class="tag">生産性</span></div>
+          <p class="prompt">2026年9月の一般工程について、ラインの稼働カレンダを使い、工程別の稼働日数と稼働日1日あたり生産数を比較してください。非稼働日に実績がある場合は別に示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_process_production_actual</code>、<code>v_ai_process</code>、<code>v_ai_line</code>、<code>v_ai_calendar_day</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>工程→ライン→カレンダをIDで結び、<code>is_working_day</code>を使う。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>土日を一律に非稼働日とみなす。</p></div>
+          </div></details>
+        </article>
+      </div>
+    </section>
+
+    <section class="problem-section" data-section="middle">
+      <div class="section-head"><div><h2>応用問題</h2><p>複数ビューの結合と、重複しない集計を確認します。</p></div><span>6問</span></div>
+      <div class="cards">
+        <article class="card middle" data-level="middle" data-category="production">
+          <div class="card-top"><div><div class="number">QUESTION 07</div><h3>ブレーキと板金スポットの比較</h3></div><span class="tag middle">応用</span></div>
+          <div class="tags"><span class="tag">ブレーキ</span><span class="tag">スポット</span><span class="tag">ライン</span></div>
+          <p class="prompt">2026年9月のブレーキ・板金スポット生産実績をライン別・品番別に集計してください。両ラインを混ぜず、日別生産数の変動が大きい品番上位10件をラインごとに示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_brake_production_actual</code>、<code>v_ai_line</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p><code>plan_date</code>で絞り、<code>line_id</code>でブレーキと板金スポットを分ける。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>ビュー名だけで全行をブレーキ工程として集計する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card middle" data-level="middle" data-category="interruption">
+          <div class="card-top"><div><div class="number">QUESTION 08</div><h3>ブレーキ中断の集中分析</h3></div><span class="tag middle">応用</span></div>
+          <div class="tags"><span class="tag">中断</span><span class="tag">理由</span><span class="tag">日別</span></div>
+          <p class="prompt">2026年9月のブレーキ工程の中断・強制終了を、日別・品番別・理由別に集計してください。中断時点数量の合計も参考値として示し、中断件数と生産数量を混同しないでください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_brake_interruption</code>、<code>v_ai_line</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>ブレーキ対象ラインだけを選び、件数と<code>qty</code>を別指標として出す。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p><code>qty</code>を中断回数として合計する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card middle" data-level="middle" data-category="interruption">
+          <div class="card-top"><div><div class="number">QUESTION 09</div><h3>一般工程の中断時間</h3></div><span class="tag middle">応用</span></div>
+          <div class="tags"><span class="tag">一般工程</span><span class="tag">中断時間</span><span class="tag">理由</span></div>
+          <p class="prompt">2026年9月の一般工程の中断・強制終了について、工程別の件数と継続時間を集計してください。理由別上位10件と、理由が取得できない件数も示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_process_interruption</code>、<code>v_ai_process</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p><code>plan_date</code>、<code>duration_seconds</code>、<code>interruption_reason</code>を使う。ビューの適用状況も確認する。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>生産実績ビューだけから中断時間を推定する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card middle" data-level="middle" data-category="shipment">
+          <div class="card-top"><div><div class="number">QUESTION 10</div><h3>生産と出荷の数量差</h3></div><span class="tag middle">応用</span></div>
+          <div class="tags"><span class="tag">生産</span><span class="tag">出荷</span><span class="tag">差異</span></div>
+          <p class="prompt">2026年9月について、一般工程で生産された品番ごとの生産数量と、同じ品番の出荷数量を比較してください。差が大きい品番上位20件を示し、この差を在庫増減と断定しないでください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_process_production_actual</code>、<code>v_ai_shipment</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>各ビューを品番単位へ先に集約してから結合し、生産のみ・出荷のみも残す。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>明細同士を直接結合して数量を掛け合わせる。差を在庫と断定する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card middle" data-level="middle" data-category="routing">
+          <div class="card-top"><div><div class="number">QUESTION 11</div><h3>工程別の材料使用量</h3></div><span class="tag middle">応用</span></div>
+          <div class="tags"><span class="tag">ルーティング</span><span class="tag">材料</span><span class="tag">二重計上</span></div>
+          <p class="prompt">2026-09-30時点で有効な既定ルーティングについて、工程別に使用する材料品番と使用個数を一覧にしてください。材料行によって工程が重複して見える点を考慮し、工程数は別に正しく数えてください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_routing_step</code>、<code>v_ai_routing_step_material</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>工程数は工程ビュー、材料使用個数は材料ビューで集計する。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>材料ビューの行数を工程数として数える。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card middle" data-level="middle" data-category="master">
+          <div class="card-top"><div><div class="number">QUESTION 12</div><h3>設備と工程マスタの整合</h3></div><span class="tag middle">応用</span></div>
+          <div class="tags"><span class="tag">設備</span><span class="tag">工程</span><span class="tag">ライン</span></div>
+          <p class="prompt">有効な設備をライン別・工程別に一覧化し、設備の所属ラインと工程マスタ側の所属ラインが一致しない組み合わせを抽出してください。設備数と工程のequipment_countも比較してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_equipment</code>、<code>v_ai_process</code>、<code>v_ai_line</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>IDで結び、登録設備の件数とマスタ設定値を別指標として比較する。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>名称の部分一致でラインや工程を結ぶ。</p></div>
+          </div></details>
+        </article>
+      </div>
+    </section>
+
+    <section class="problem-section" data-section="hard">
+      <div class="section-head"><div><h2>高度問題</h2><p>BOM・ルーティングを使う逆展開と、業務規則を確認します。</p></div><span>5問</span></div>
+      <div class="cards">
+        <article class="card hard" data-level="hard" data-category="routing shipment production">
+          <div class="card-top"><div><div class="number">QUESTION 13</div><h3>レーザー生産数量を顧客別に集計</h3></div><span class="tag hard">高度</span></div>
+          <div class="tags"><span class="tag">逆展開</span><span class="tag">レーザー</span><span class="tag">顧客</span></div>
+          <p class="prompt">2026年9月のレーザー生産品について、2026-09-30時点で有効なBOMとルーティングを使い、加工品から最終品番まで親方向へたどってください。最終品番の出荷実績から得意先を特定し、レーザーの生産数量を得意先別に集計してください。出荷数量は集計値に使わないでください。連産品の仮想親は除外し、行き先未確定も別に示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details open><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_laser_production_actual</code>、<code>v_ai_routing_step</code>、<code>v_ai_bom_item</code>、<code>v_ai_shipment</code>、<code>v_ai_customer</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><ul><li>2026-10-14より前のレーザー実績は固定工程コード<code>0801</code>を起点にする</li><li>同一ルーティングの<code>hierarchy_path</code>祖先系列と<code>final</code>だけをたどる</li><li>顧客の特定に出荷実績を使うが、数量はレーザーの<code>total_qty</code>を使う</li><li>同一最終品に複数顧客がある場合の配分方法を勝手に決めない</li></ul></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p><code>step_no</code>が大きい全工程を候補にして別枝を混ぜる。出荷数量を結果として合計する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card hard" data-level="hard" data-category="routing production">
+          <div class="card-top"><div><div class="number">QUESTION 14</div><h3>連産品を除いた工程別・品番別実績</h3></div><span class="tag hard">高度</span></div>
+          <div class="tags"><span class="tag">連産品</span><span class="tag">代表品</span><span class="tag">工程別</span></div>
+          <p class="prompt">2026年9月の一般工程生産実績を工程別・品番別に集計してください。連産品は代表品だけを残し、代表品以外の子品番は統計から除外してください。同じ品番が代表品と非代表品の両方で登録されている場合は代表品として扱い、除外した行数と数量も示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_process_production_actual</code>、<code>v_ai_process</code>、<code>v_ai_bom_item</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p><code>bom_is_coproduct=1</code>を子品番単位にまとめ、<code>is_coproduct_driver</code>の最大値で代表判定する。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>BOM明細へ直接結合して生産実績を重複させる。連産品を全品除外する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card hard" data-level="hard" data-category="routing">
+          <div class="card-top"><div><div class="number">QUESTION 15</div><h3>同一部品を使う複数完成品の枝分け</h3></div><span class="tag hard">高度</span></div>
+          <div class="tags"><span class="tag">工程一致</span><span class="tag">別枝除外</span><span class="tag">BOM</span></div>
+          <p class="prompt">同じ部品Xを完成品Aと完成品Bの両方が使用し、Aではレーザー工程、Bではプレス工程でXを作る場合を想定してください。レーザー実績のXから有効な行き先候補だけを抽出し、候補にした理由と除外した理由を一覧にしてください。実データでは該当する同様のケースを探してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_laser_production_actual</code>、<code>v_ai_routing_step</code>、<code>v_ai_bom_item</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>品番だけでなく生産工程も一致する起点を選び、同じ<code>routing_id</code>の祖先枝に限定する。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>Xを使う全BOM親を候補にして完成品Bまで含める。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card hard" data-level="hard" data-category="routing">
+          <div class="card-top"><div><div class="number">QUESTION 16</div><h3>BOM改版前後の構成差</h3></div><span class="tag hard">高度</span></div>
+          <div class="tags"><span class="tag">BOM改版</span><span class="tag">有効期間</span><span class="tag">差分</span></div>
+          <p class="prompt">BOMの改版がある親品番を対象に、2026-09-01時点と2026-09-30時点で有効なBOM構成を比較してください。追加・削除・員数変更・工程変更・調達区分変更を区分して示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_bom_item</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>各基準日で有効なBOMのうち<code>bom_valid_from</code>が新しい版を選ぶ。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>版文字列の大小で最新版を決める。分析期間でマスタ行自体を除外する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card hard" data-level="hard" data-category="production purchase shipment">
+          <div class="card-top"><div><div class="number">QUESTION 17</div><h3>品番別の入荷・生産・出荷フロー</h3></div><span class="tag hard">高度</span></div>
+          <div class="tags"><span class="tag">横断</span><span class="tag">数量差</span><span class="tag">未一致</span></div>
+          <p class="prompt">2026年9月の入荷・一般工程生産・出荷を品番別に横断し、それぞれの数量を並べてください。各データが存在する品番、存在しない品番を区別し、数量差の大きい品番を示してください。工程間の仕掛や在庫を取得していないため、差の原因は断定しないでください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details><summary>確認ポイント</summary><div class="detail-grid">
+            <div class="detail-block"><strong>想定ビュー</strong><p><code>v_ai_purchase_receipt</code>、<code>v_ai_process_production_actual</code>、<code>v_ai_shipment</code>、<code>v_ai_product</code></p></div>
+            <div class="detail-block"><strong>正しい判定</strong><p>3種類を品番別に先に集約し、外部結合相当で欠けた品番も残す。</p></div>
+            <div class="detail-block"><strong>よくある誤り</strong><p>3明細を直接結合して数量を増幅する。単位や意味の違いを無視する。</p></div>
+          </div></details>
+        </article>
+      </div>
+    </section>
+
+    <section class="problem-section" data-section="check">
+      <div class="section-head"><div><h2>見極め問題</h2><p>不足データや曖昧な条件を、AIが正しく指摘できるか確認します。</p></div><span>3問</span></div>
+      <div class="cards">
+        <article class="card check" data-level="check" data-category="production interruption">
+          <div class="card-top"><div><div class="number">QUESTION 18</div><h3>一般工程の仕損率を求める</h3></div><span class="tag check">見極め</span></div>
+          <div class="tags"><span class="tag">不足データ</span><span class="tag">仕損</span><span class="tag">回答制御</span></div>
+          <p class="prompt">2026年9月の一般工程について、工程別・品番別の良品数と仕損数を集計し、仕損率上位10件を示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details open><summary>期待するAIの対応</summary><div class="detail-grid">
+            <div class="detail-block"><strong>正しい対応</strong><p>一般工程の公開生産実績ビューには仕損数量がないため、良品・仕損・仕損率を完全には計算できないと説明する。取得可能な生産数量だけの代替案を提示する。</p></div>
+            <div class="detail-block"><strong>不合格例</strong><p><code>interruption_reason_code</code>や中断件数を仕損として扱う。値を0と仮定する。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card check" data-level="check" data-category="production interruption">
+          <div class="card-top"><div><div class="number">QUESTION 19</div><h3>生産実績だけで中断時間を出す</h3></div><span class="tag check">見極め</span></div>
+          <div class="tags"><span class="tag">ビュー選択</span><span class="tag">中断</span><span class="tag">重複</span></div>
+          <p class="prompt">一般工程・レーザー・ブレーキの生産実績ビューだけを使い、2026年9月の中断時間を工程別に比較してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details open><summary>期待するAIの対応</summary><div class="detail-grid">
+            <div class="detail-block"><strong>正しい対応</strong><p>生産実績ビューだけでは正確な中断時間を比較できないと指摘し、各中断ビューの使用を提案する。レーザー・ブレーキの中断ビューには継続時間がない場合、件数比較へ目的を修正する確認を行う。</p></div>
+            <div class="detail-block"><strong>不合格例</strong><p>生産記録間の時刻差を中断時間とみなす。</p></div>
+          </div></details>
+        </article>
+
+        <article class="card check" data-level="check" data-category="shipment master">
+          <div class="card-top"><div><div class="number">QUESTION 20</div><h3>数量差を在庫として断定する</h3></div><span class="tag check">見極め</span></div>
+          <div class="tags"><span class="tag">因果関係</span><span class="tag">在庫</span><span class="tag">限界説明</span></div>
+          <p class="prompt">2026年9月の生産数量から出荷数量を引き、9月末の正確な在庫数量として品番別に表示してください。</p>
+          <div class="copy-row"><button class="copy-btn">入力文をコピー</button></div>
+          <details open><summary>期待するAIの対応</summary><div class="detail-grid">
+            <div class="detail-block"><strong>正しい対応</strong><p>期首在庫、工程間移動、廃棄、調整などがなく、正確な在庫は計算できないと説明する。「期間内の生産－出荷」という参考差分なら表示可能と提案する。</p></div>
+            <div class="detail-block"><strong>不合格例</strong><p>参考差分を「9月末在庫」と断定する。</p></div>
+          </div></details>
+        </article>
+      </div>
+    </section>
+
+    <div class="empty" id="empty">条件に一致する問題がありません。</div>
+
+    <section>
+      <div class="section-head"><div><h2>主なビュー早見表</h2><p>問題を確認するときの最小限の対応表です。</p></div></div>
+      <table class="view-table">
+        <thead><tr><th>分野</th><th>ビュー</th><th>日付</th><th>主な数量・用途</th></tr></thead>
+        <tbody>
+          <tr><td>一般工程</td><td><code>v_ai_process_production_actual</code></td><td><code>business_day</code></td><td><code>qty</code>、8時区切りの生産実績</td></tr>
+          <tr><td>レーザー</td><td><code>v_ai_laser_production_actual</code></td><td><code>work_date</code></td><td><code>total_qty</code>、<code>scrap_qty</code></td></tr>
+          <tr><td>ブレーキ・スポット</td><td><code>v_ai_brake_production_actual</code></td><td><code>plan_date</code></td><td><code>qty</code>、ラインで区別</td></tr>
+          <tr><td>出荷</td><td><code>v_ai_shipment</code></td><td><code>shipment_date</code></td><td><code>quantity</code>、顧客・納入先</td></tr>
+          <tr><td>仕入</td><td><code>v_ai_purchase_receipt</code></td><td><code>arrival_date</code></td><td><code>qty</code>、仕入先</td></tr>
+          <tr><td>中断</td><td><code>v_ai_*_interruption</code></td><td>工程種別ごと</td><td>1行1中断を基本に件数集計</td></tr>
+          <tr><td>BOM</td><td><code>v_ai_bom_item</code></td><td>期間絞りなし</td><td>親子、員数、連産品、有効期間</td></tr>
+          <tr><td>ルーティング</td><td><code>v_ai_routing_step</code></td><td>期間絞りなし</td><td>工程、加工後品、階層パス</td></tr>
+          <tr><td>工程材料</td><td><code>v_ai_routing_step_material</code></td><td>期間絞りなし</td><td>工程ごとの材料と使用個数</td></tr>
+          <tr><td>稼働日</td><td><code>v_ai_calendar_day</code></td><td><code>target_date</code></td><td>稼働日、納入日、稼働分</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer class="wrap">AI分析画面の公開ビューや業務規則が変更された場合は、問題の想定ビューと確認ポイントも更新してください。</footer>
+
+  <script>
+    const search = document.getElementById('search');
+    const level = document.getElementById('level');
+    const category = document.getElementById('category');
+    const cards = [...document.querySelectorAll('.card')];
+    const empty = document.getElementById('empty');
+
+    function filterCards() {
+      const word = search.value.trim().toLowerCase();
+      let visible = 0;
+      cards.forEach(card => {
+        const matchWord = !word || card.textContent.toLowerCase().includes(word);
+        const matchLevel = level.value === 'all' || card.dataset.level === level.value;
+        const categories = card.dataset.category.split(' ');
+        const matchCategory = category.value === 'all' || categories.includes(category.value);
+        const show = matchWord && matchLevel && matchCategory;
+        card.hidden = !show;
+        if (show) visible += 1;
+      });
+      document.querySelectorAll('.problem-section').forEach(section => {
+        section.hidden = ![...section.querySelectorAll('.card')].some(card => !card.hidden);
+      });
+      empty.style.display = visible ? 'none' : 'block';
+    }
+
+    [search, level, category].forEach(control => control.addEventListener('input', filterCards));
+    document.getElementById('reset').addEventListener('click', () => {
+      search.value = '';
+      level.value = 'all';
+      category.value = 'all';
+      filterCards();
+    });
+
+    document.querySelectorAll('.copy-btn').forEach(button => {
+      button.addEventListener('click', async () => {
+        const text = button.closest('.card').querySelector('.prompt').textContent.trim();
+        try {
+          await navigator.clipboard.writeText(text);
+          const original = button.textContent;
+          button.textContent = 'コピーしました';
+          setTimeout(() => button.textContent = original, 1300);
+        } catch {
+          button.textContent = 'コピーできませんでした';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
