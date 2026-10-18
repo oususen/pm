@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
@@ -68,6 +68,12 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in ('retrieve', 'create', 'update', 'partial_update'):
             return UserDetailSerializer
         return UserSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'ユーザーは削除できません。「有効」のチェックを外して無効化してください。'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     @action(detail=False, methods=['get', 'patch'], permission_classes=[])
     def me(self, request):

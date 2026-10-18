@@ -37,6 +37,10 @@ class UserAdmin(BaseUserAdmin):
     list_display = ('username', 'email', 'first_name', 'last_name', 'get_department', 'is_staff', 'is_active')
     list_select_related = ('profile',)
 
+    def has_delete_permission(self, request, obj=None):
+        # 過去実績との紐付けを保つため、退職者は削除せず無効化する。
+        return False
+
     def get_readonly_fields(self, request, obj=None):
         # 編集時はユーザー名を変更不可にする（追加時は入力可）
         readonly = tuple(super().get_readonly_fields(request, obj))
