@@ -239,8 +239,10 @@ const goBack = () => {
   window.history.back()
 }
 
+const canUseAdminAI = computed(() => hasPermission(authState.user, 'settings.ai', 'edit'))
+
 const mainTabs = computed(() => [
-  { id: 'ai', label: 'AI', link: '/ai/chat', anyResources: ['ai.chat', 'ai.analysis'] },
+  { id: 'ai', label: 'AI', link: canUseAdminAI.value ? '/ai/chat' : '/ai/analysis', anyResources: canUseAdminAI.value ? ['settings.ai'] : ['ai.chat'] },
   { id: 'ocr', label: 'OCR', link: '/ocr', resource: 'ocr', explicitPermission: true },
   { id: 'orders', label: t('nav.tabs.orders'), link: '/orders/menu', resource: 'orders' },
   { id: 'production', label: t('nav.tabs.production'), link: '/production/menu', resource: 'production' },

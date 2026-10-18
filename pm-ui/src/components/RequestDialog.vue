@@ -53,7 +53,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
-import { requestDialogOpen, closeRequestDialog } from '@/composables/requestDialog'
+import { requestDialogInitialValues, requestDialogOpen, closeRequestDialog } from '@/composables/requestDialog'
 import { openManual } from '@/composables/manualLink'
 
 const MANUAL_PATH = '共通/リクエスト.md'
@@ -176,6 +176,10 @@ const submit = async () => {
 
 watch(requestDialogOpen, (open) => {
   if (open) {
+    requestType.value = Object.hasOwn(typeOptions, requestDialogInitialValues.value.requestType)
+      ? requestDialogInitialValues.value.requestType : 'request'
+    subject.value = requestDialogInitialValues.value.subject
+    body.value = requestDialogInitialValues.value.body
     errorMessage.value = ''
     successMessage.value = ''
   }

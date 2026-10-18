@@ -12,6 +12,9 @@
     <div v-if="canAnalyze && visited.analysis" v-show="activeTab === 'analysis'" id="ai-panel-analysis" role="tabpanel" aria-labelledby="ai-tab-analysis">
       <AIAnalysis :request="analysisRequest" :can-edit="canEditAnalysis" :can-view-all="canViewAllAnalysisRuns" :visible="activeTab === 'analysis'" :user-name="analysisUserName" />
     </div>
+    <div v-if="canUseGeneralAnalysis && visited.generalAnalysis" v-show="activeTab === 'generalAnalysis'" id="ai-panel-generalAnalysis" role="tabpanel" aria-labelledby="ai-tab-generalAnalysis">
+      <AIAnalysisUser :can-edit="canEditAnalysis" :can-view-all="false" :visible="activeTab === 'generalAnalysis'" :user-name="analysisUserName" />
+    </div>
     <p v-if="!tabs.length">社内AIの閲覧権限がありません。</p>
   </section>
 </template>
@@ -22,9 +25,11 @@ import { authState } from '@/auth'
 import { hasPermission } from '@/router'
 import ProductionAIDataAnalysis from '@/views/production/ProductionAIDataAnalysis.vue'
 import AIAnalysis from './AIAnalysis.vue'
+import AIAnalysisUser from './AIAnalysisUser.vue'
 
 const canSearch = computed(() => hasPermission(authState.user, 'ai.chat'))
 const canAnalyze = computed(() => hasPermission(authState.user, 'ai.analysis'))
+const canUseGeneralAnalysis = computed(() => hasPermission(authState.user, 'ai.chat'))
 const canEditAnalysis = computed(() => hasPermission(authState.user, 'ai.analysis', 'edit'))
 const canViewAllAnalysisRuns = computed(() => hasPermission(authState.user, 'settings.ai', 'edit'))
 // AI相談の履歴に出す、ログイン中の利用者名(画面上部と同じ: 姓 名。なければユーザー名)
@@ -35,9 +40,10 @@ const analysisUserName = computed(() => {
 const tabs = computed(() => [
   ...(canSearch.value ? [{ id: 'search', label: '検索' }] : []),
   ...(canAnalyze.value ? [{ id: 'analysis', label: '分析' }] : []),
+  ...(canUseGeneralAnalysis.value ? [{ id: 'generalAnalysis', label: '分析（一般）' }] : []),
 ])
 const activeTab = ref('')
-const visited = reactive({ search: false, analysis: false })
+const visited = reactive({ search: false, analysis: false, generalAnalysis: false })
 const analysisRequest = ref(null)
 
 function activate(id) {
@@ -52,6 +58,7 @@ watch(tabs, (available) => {
 watch(() => authState.user?.id, () => {
   visited.search = false
   visited.analysis = false
+  visited.generalAnalysis = false
   analysisRequest.value = null
   activeTab.value = ''
   activate(tabs.value[0]?.id)
