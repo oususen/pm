@@ -16,10 +16,18 @@
         <li v-for="(item, index) in messages" :key="index" :class="item.role"><b>{{ item.role === 'user' ? (userName || 'あなた') : 'AI' }}:</b> {{ item.content }}</li>
       </ul>
       <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="busy === 'send'" class="status" role="status" aria-live="polite">AIが考えています…</p>
       <div class="send">
         <textarea v-model="input" rows="6" :disabled="!usable || !!busy" placeholder="AIへの相談を入力してください。" aria-label="AIへの相談"></textarea>
-        <button type="button" :disabled="!canSend" @click="send">{{ busy === 'send' ? 'AIが考えています…' : '送信' }}</button>
-        <button type="button" :disabled="!!busy || !messages.length" @click="reset">やり直す</button>
+        <div class="send-actions">
+          <button type="button" class="icon-btn reset-btn" :disabled="!!busy || !messages.length" @click="reset" aria-label="やり直す" title="やり直す">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M4 9a8 8 0 1 1 1.64 7.5M4 9V4m0 5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="icon-btn send-btn" :disabled="!canSend" @click="send" :aria-label="busy === 'send' ? 'AIが考えています' : '送信'" :title="busy === 'send' ? 'AIが考えています…' : '送信'">
+            <span v-if="busy === 'send'" class="spinner" aria-hidden="true"></span>
+            <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
       </div>
       <section v-if="draft && (draft.purpose || draft.date_from)" class="draft">
         <p><b>AIの文案</b></p>
@@ -159,8 +167,17 @@ async function useTemplate(item) {
 .log li { margin: 8px 0; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .log li.user { background: #e3f1ee; }
 .log li.assistant { background: #fff; border: 1px solid #dfe8e5; }
-.send { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; }
-.send textarea { flex: 1 1 260px; min-width: 0; }
+.status { font-size: 12px; color: #566; margin: 2px 0; }
+.send { position: relative; border: 1px solid #c9d8d4; border-radius: 20px; background: #fff; padding: 10px 56px 44px 12px; }
+.send textarea { width: 100%; border: 0; outline: 0; resize: vertical; padding: 0; font: inherit; background: transparent; }
+.send-actions { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
+.icon-btn { width: 32px; height: 32px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.icon-btn:disabled { opacity: .4; cursor: default; }
+.reset-btn { background: #eef2f1; color: #456; }
+.send-btn { background: #087b6e; color: #fff; }
+.send-btn:disabled { background: #a9c7c2; }
+.spinner { width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, .5); border-top-color: #fff; border-radius: 50%; animation: consult-spin .8s linear infinite; }
+@keyframes consult-spin { to { transform: rotate(360deg); } }
 .draft, .recommend { margin: 4px 0; padding: 4px 8px; border: 1px solid #bcd; border-radius: 4px; background: #fff; }
 .draft p, .recommend p { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

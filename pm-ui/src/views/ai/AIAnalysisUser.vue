@@ -26,7 +26,7 @@
       <button type="button" @click="askBoss(codeState?.status === 'failed' ? '分析処理の作成' : trialFailureLabel ? '実行前の安全確認' : '分析案の作成', error || trialFailureLabel)">BOSSに質問する</button>
     </section>
     <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
-    <div class="analysis-layout">
+    <div ref="analysisLayout" class="analysis-layout" :class="{ resizing: isResizing }" :style="{ '--left-pane-percent': `${leftPanePercent}%` }">
       <section class="analysis-main" aria-label="成果物・実行結果・テンプレート">
         <section class="notes" aria-label="ご利用上の注意">
           <button type="button" class="notes-head" :aria-expanded="notesOpen" aria-controls="notes-body" @click="notesOpen = !notesOpen">
@@ -79,6 +79,23 @@
       </section>
       <small>タブ切替時は入力・承認状態を保持します。再読込・画面離脱・利用者切替で画面内の状態は消えます。未保存の分析案は設定された期限でRedisから消え、承認しても期限は延長しません。</small>
       </section>
+      <div
+        ref="analysisDivider"
+        class="analysis-divider"
+        role="separator"
+        aria-label="相談欄と成果物欄の幅を変更"
+        aria-orientation="vertical"
+        aria-valuemin="35"
+        aria-valuemax="75"
+        :aria-valuenow="Math.round(leftPanePercent)"
+        tabindex="0"
+        @keydown="resizeWithKeyboard"
+        @pointerdown="startResize"
+        @pointermove="resizeWithPointer"
+        @pointerup="stopResize"
+        @pointercancel="stopResize"
+        @lostpointercapture="stopResize"
+      ><span aria-hidden="true"></span></div>
       <aside class="analysis-side" aria-label="AIとの相談と分析の進め方">
         <h2 class="side-title">AIと相談して分析を進める</h2>
       <section class="stage" :class="stageState(1)">
@@ -262,6 +279,60 @@ import { openRequestDialog } from '../../composables/requestDialog'
 
 const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean, visible: { type: Boolean, default: true }, userName: { type: String, default: '' } })
 const executionActive = ref(false)
+const analysisLayout = ref(null)
+const analysisDivider = ref(null)
+const leftPanePercent = ref(66.7)
+const isResizing = ref(false)
+const LEFT_PANE_MIN = 35
+const LEFT_PANE_MAX = 75
+const KEYBOARD_RESIZE_STEP = 2
+let resizePointerId = null
+let previousBodyUserSelect = ''
+let previousBodyCursor = ''
+
+function clampLeftPanePercent(value) {
+  return Math.min(LEFT_PANE_MAX, Math.max(LEFT_PANE_MIN, value))
+}
+function updateLeftPaneFromPointer(event) {
+  const bounds = analysisLayout.value?.getBoundingClientRect()
+  if (!bounds?.width) return
+  leftPanePercent.value = clampLeftPanePercent(((event.clientX - bounds.left) / bounds.width) * 100)
+}
+function startResize(event) {
+  if (event.button !== 0 || typeof window === 'undefined' || window.matchMedia('(max-width: 960px)').matches) return
+  resizePointerId = event.pointerId
+  isResizing.value = true
+  analysisDivider.value?.setPointerCapture?.(event.pointerId)
+  if (document.body) {
+    previousBodyUserSelect = document.body.style.userSelect
+    previousBodyCursor = document.body.style.cursor
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }
+  updateLeftPaneFromPointer(event)
+  event.preventDefault()
+}
+function resizeWithPointer(event) {
+  if (!isResizing.value || event.pointerId !== resizePointerId) return
+  updateLeftPaneFromPointer(event)
+}
+function stopResize(event) {
+  if (!isResizing.value && resizePointerId === null) return
+  if (resizePointerId !== null && event?.pointerId !== undefined && event.pointerId !== resizePointerId) return
+  const pointerId = resizePointerId
+  resizePointerId = null
+  isResizing.value = false
+  if (pointerId !== null && analysisDivider.value?.hasPointerCapture?.(pointerId)) analysisDivider.value.releasePointerCapture(pointerId)
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.style.userSelect = previousBodyUserSelect
+    document.body.style.cursor = previousBodyCursor
+  }
+}
+function resizeWithKeyboard(event) {
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+  leftPanePercent.value = clampLeftPanePercent(leftPanePercent.value + (event.key === 'ArrowRight' ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP))
+  event.preventDefault()
+}
 const purpose = ref('')
 const source = ref('')
 const dateFrom = ref('')
@@ -668,7 +739,7 @@ watch(busy, value => {
   elapsedTimer = setInterval(() => { elapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000) }, 1000)
   elapsedTimer.unref?.()  // Node(試験)では、タイマーが、プロセスの終了を妨げないようにする。ブラウザでは、数値が返るため、何もしない
 })
-onBeforeUnmount(() => { disposed = true; generation += 1; stopElapsedTimer() })
+onBeforeUnmount(() => { disposed = true; generation += 1; stopElapsedTimer(); stopResize() })
 onMounted(async () => {
   try {
     const response = await api.aiAnalysis.options()
@@ -832,8 +903,11 @@ function releaseCodegen() {
 
 <style scoped>
 .analysis-workspace { padding: 20px; max-width: 1600px; margin: auto; color: #334b50; }
-.analysis-layout { display: grid; grid-template-columns: minmax(520px, 1.7fr) minmax(340px, .85fr); gap: 18px; align-items: start; }
-.analysis-main { min-width: 0; order: 2; position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; }
+.analysis-layout { --left-pane-percent: 66.7%; display: grid; grid-template-columns: minmax(0, calc(var(--left-pane-percent) - 6px)) 12px minmax(0, calc(100% - var(--left-pane-percent) - 6px)); gap: 0; align-items: start; }
+.analysis-main { min-width: 0; order: 3; position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; padding-left: 12px; }
+.analysis-divider { order: 2; align-self: stretch; min-height: 180px; display: flex; justify-content: center; cursor: col-resize; touch-action: none; outline: none; }
+.analysis-divider span { width: 4px; border-radius: 4px; background: #cbd8d7; transition: background-color .15s, box-shadow .15s; }
+.analysis-divider:hover span, .analysis-divider:focus-visible span, .analysis-layout.resizing .analysis-divider span { background: #168779; box-shadow: 0 0 0 3px #16877922; }
 .template-management { min-width: 0; border: 1px solid #d6dede; margin: 8px 0; }
 .templates-head { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; text-align: left; padding: 6px 8px; }
 .templates-body { min-width: 0; padding: 6px 8px; }
@@ -867,7 +941,7 @@ function releaseCodegen() {
 @media (prefers-reduced-motion: reduce) { .run-target.ready { animation: none; } }
 .stage-body { padding: 8px 12px 12px; overflow-wrap: anywhere; }
 .plan-head { border: 1px solid #d1dddd; border-radius: 8px; padding: 8px 12px; }
-@media (max-width: 960px) { .analysis-layout { grid-template-columns: minmax(0, 1fr); } .analysis-main { order: 2; position: static; max-height: none; overflow: visible; } .analysis-side { order: 1; border-right: 0; padding-right: 0; } }
+@media (max-width: 960px) { .analysis-layout { grid-template-columns: minmax(0, 1fr); } .analysis-main { order: 2; position: static; max-height: none; overflow: visible; padding-left: 0; } .analysis-divider { display: none; } .analysis-side { order: 1; border-right: 0; padding-right: 0; } }
 .topbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 11px; padding: 0 0 12px; margin-bottom: 12px; border-bottom: 1px solid #e6ecef; }
 .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: #0e786d; color: #fff; display: grid; place-items: center; font-size: 16px; }
 .brand-title { display: grid; gap: 1px; }
