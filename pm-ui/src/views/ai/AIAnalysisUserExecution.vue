@@ -2,9 +2,9 @@
   <section class="execution">
     <AnalysisErrorBanner v-if="errorNotices.renderBanner" :notices="errorNotices.notices.value" />
     <section v-if="error" class="boss-help" role="alert">
-      <strong>うまくいかないときはBOSSに聞けます。</strong>
+      <strong>うまくいかないときはシステム管理者へ相談できます。</strong>
       <p>現在の目的と失敗した段階を入力した状態で、問い合わせ画面を開きます。送信前に内容を編集できます。</p>
-      <button type="button" @click="askBoss('分析の実行', error)">BOSSに質問する</button>
+      <button type="button" @click="askBoss('分析の実行', error)">システム管理者へ質問する</button>
     </section>
     <h2>分析の実行・結果</h2>
     <p>{{ availability?.notice || '実行基盤の状態を確認してください。' }}</p>
@@ -30,9 +30,9 @@
       <p v-if="job.status === 'cancel_requested'">中止を要求しました。停止・削除の完了はまだ確認していません。</p>
       <p v-if="job.status === 'unknown'">状態不明です。自動再実行はしません。管理者が実行基盤・履歴・後始末を確認してください。</p>
       <section v-if="job.status === 'failed'" class="boss-help" role="alert">
-        <strong>うまくいかないときはBOSSに聞けます。</strong>
+        <strong>うまくいかないときはシステム管理者へ相談できます。</strong>
         <p>現在の目的と失敗した段階を入力した状態で、問い合わせ画面を開きます。送信前に内容を編集できます。</p>
-        <button type="button" @click="askBoss('分析の実行', jobDetail || statusLabel)">BOSSに質問する</button>
+        <button type="button" @click="askBoss('分析の実行', jobDetail || statusLabel)">システム管理者へ質問する</button>
       </section>
       <p>後始末: DB接続={{ job.cleanup?.db_connection || '未確認' }} / コンテナ={{ job.cleanup?.container || '未確認' }}</p>
       <p v-if="job.status === 'cancelled' && !cleanupComplete">中止後の後始末は未完了／未確認です。中止完了とは扱いません。</p>

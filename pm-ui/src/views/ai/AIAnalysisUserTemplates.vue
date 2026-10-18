@@ -11,16 +11,22 @@
     <div v-else-if="canEdit" class="save-panel">
       <p v-if="savable && plan?.codegen?.literal_values?.length" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> コードに直接書かれた値があります（{{ plan.codegen.literal_values.join('、') }}）。このテンプレートを再利用しても、これらの値は変えられません（保存はできます）。</p>
       <p v-if="!savable" class="templates-note">保存には、手順・データ範囲・コードの承認が必要です（現在: {{ saveHint }}）。</p>
-      <label>テンプレート名（必須・300文字以内）:
-        <input v-model="templateName" type="text" maxlength="300" size="50" :disabled="!savable || !!busy" aria-label="保存するテンプレートの名前" @input="nameEdited = true; duplicateCount = null" @change="checkName"></label>
+      <div class="save-row save-name-row">
+        <label>テンプレート名（必須・300文字以内）:
+          <input v-model="templateName" type="text" maxlength="300" size="50" :disabled="!savable || !!busy" aria-label="保存するテンプレートの名前" @input="nameEdited = true; duplicateCount = null" @change="checkName"></label>
+      </div>
       <p v-if="duplicateCount > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが{{ duplicateCount }}件あります。区別しやすい名前に変えることをお勧めします（そのまま保存もできます）。</p>
-      <label>カテゴリ（必須）:
-        <select v-model="category" :disabled="!savable || !!busy" aria-label="保存するテンプレートのカテゴリ">
-          <option value="">選択してください</option>
-          <option v-for="item in CATEGORIES" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select></label>
-      <label><input v-model="accepted" type="checkbox" :disabled="!savable || !!busy">分析内容を確認し、管理者承認待ちとして保存する</label>
-      <button :disabled="!canSave || !accepted" @click="save">{{ busy === 'save' ? '保存中…' : 'テンプレートとして保存' }}</button>
+      <div class="save-row save-options-row">
+        <label>カテゴリ（必須）:
+          <select v-model="category" :disabled="!savable || !!busy" aria-label="保存するテンプレートのカテゴリ">
+            <option value="">選択してください</option>
+            <option v-for="item in CATEGORIES" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select></label>
+        <label><input v-model="accepted" type="checkbox" :disabled="!savable || !!busy">分析内容を確認し、管理者承認待ちとして保存する</label>
+      </div>
+      <div class="save-row save-action-row">
+        <button :disabled="!canSave || !accepted" @click="save">{{ busy === 'save' ? '保存中…' : 'テンプレートとして保存' }}</button>
+      </div>
     </div>
     <p v-else>閲覧のみです。保存にはAI分析の編集権限が必要です。</p>
     <p v-if="saved?.same_name_count > 0" class="name-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 同じ名前のテンプレートが、ほかに{{ saved.same_name_count }}件あります。区別しやすい名前に変えることをお勧めします（管理者承認前は、一覧の詳細から名称を変えられます）。</p>
@@ -403,9 +409,10 @@ async function showDetail(id) {
 .templates p { margin: 4px 0; }
 .templates ul.templates-note { padding-left: 1.4em; }
 .templates .templates-note { font-size: 12px; color: #55696d; margin: 2px 0; line-height: 1.5; }  /* 説明文は、小さい文字で、行間を詰める(表を上に出す)。文の内容は、変えない */
-.save-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.save-panel > p { flex-basis: 100%; }
-.save-panel input[type="text"] { width: 20em; max-width: 100%; box-sizing: border-box; }
+.save-panel { display: block; }
+.save-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 4px 0; }
+.save-name-row label { display: flex; align-items: center; flex: 1 1 auto; gap: 4px; }
+.save-name-row input[type="text"] { flex: 1 1 auto; width: auto; min-width: 0; box-sizing: border-box; }
 .save-panel label { min-width: 0; }
 .table-scroll { width: 100%; overflow-x: auto; margin-top: 6px; }
 .template-table { width: 100%; border-collapse: collapse; font-size: 13px; }

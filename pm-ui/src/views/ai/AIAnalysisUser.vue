@@ -16,14 +16,14 @@
           <option v-for="item in selectedProvider?.models || []" :key="item.id" :value="item.id">{{ item.label }}</option>
         </select>
       </label>
-      <button type="button" class="boss-question" @click="askBoss('分析の相談')">BOSSに質問する</button>
+      <button type="button" class="boss-question" @click="askBoss('分析の相談')">システム管理者へ質問する</button>
     </header>
     <p v-if="!canEdit">閲覧のみの権限です。分析案の作成・承認、コード生成・SQL試行・コード承認・状態不明の解除には「AI分析」の編集権限が必要です。</p>
     <AnalysisErrorBanner :notices="errorNotices.notices.value" />
     <section v-if="error || codeState?.status === 'failed' || trialFailureLabel" class="boss-help" role="alert">
-      <strong>うまくいかないときはBOSSに聞けます。</strong>
+      <strong>うまくいかないときはシステム管理者へ相談できます。</strong>
       <p>現在の目的と失敗した段階を入力した状態で、問い合わせ画面を開きます。送信前に内容を編集できます。</p>
-      <button type="button" @click="askBoss(codeState?.status === 'failed' ? '分析処理の作成' : trialFailureLabel ? '実行前の安全確認' : '分析案の作成', error || trialFailureLabel)">BOSSに質問する</button>
+      <button type="button" @click="askBoss(codeState?.status === 'failed' ? '分析処理の作成' : trialFailureLabel ? '実行前の安全確認' : '分析案の作成', error || trialFailureLabel)">システム管理者へ質問する</button>
     </section>
     <p v-if="selectedProvider && !selectedProvider.available" class="error">{{ selectedProvider.label }}は利用できません: {{ selectedProvider.reason }}</p>
     <div ref="analysisLayout" class="analysis-layout" :class="{ resizing: isResizing }" :style="{ '--left-pane-percent': `${leftPanePercent}%` }">
@@ -35,7 +35,7 @@
           </button>
           <div v-show="notesOpen" id="notes-body" class="notes-body">
             <p class="notice">分析案・データ範囲の承認、コード生成・試行・承認、開発限定の実行・中止・結果・履歴表示に対応します。{{ options?.notice || '' }}</p>
-            <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未登録の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
+            <p v-if="selectedProvider?.external" class="warning">社外サービス（{{ selectedProvider.label }}）へ、名称を登録コードに置換した分析目的・期間・公開ビューの説明を送ります。DBの明細行・件数は送りません。未伏字の人名・社名は自動判別できません。送信前の目的文を確認し、名称や機密が残っていれば書き直してください。</p>
           </div>
         </section>
       <details v-if="plan" class="artifact-card" open>
@@ -122,12 +122,12 @@
         <small v-if="noPeriod">期間なし: 日付のないビュー（マスタなど）専用です。期間は今日（{{ dateFrom }}）の1日に固定されます。日付のあるビューは今日の分だけになります。</small>
       </div>
       <template v-if="!plan">
-        <button v-if="selectedProvider?.external" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
+        <button v-if="selectedProvider?.external && !externalPreview" type="button" :disabled="!canCreate" @click="prepareExternalPreview">{{ busy === 'external-preview' ? '目的文を確認中…' : '社外送信する目的文を確認' }}</button>
         <section v-if="selectedProvider?.external && externalPreview" class="dataset">
           <h2>社外サービス利用の確認</h2>
           <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
           <p>分析目的・期間・公開ビューの説明を、名称を登録コードへ置換して送ります。DBの明細行・件数は送りません。一般使用者向け画面では送信文そのものは表示しません。</p>
-          <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">未登録の人名・社名・機密が目的欄に含まれていないことを確認しました</label>
+          <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">目的欄に、社外へ送ってはいけない人名・社名・機密情報が残っていないことを確認しました</label>
         </section>
         <p v-if="busy === 'create'" class="generating" role="status" aria-live="polite">⏳ AIが分析案を作成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。</p>
         <button v-if="!selectedProvider?.external || externalPreview" type="button" :disabled="!canCreate || (selectedProvider?.external && !externalAccepted)" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : selectedProvider?.external ? '確認した内容を社外AIへ送って分析案を作成' : '分析案を作成' }}</button>
@@ -174,7 +174,7 @@
             <p v-if="plan.preview.over_limit" class="error">対象が上限を超えました。一部だけを採用せず、条件（日付のあるビューは期間も）を絞って分析案を作り直してください。</p>
           </template>
           <div v-if="plan.status === 'awaiting_data'" class="actions">
-            <button :disabled="!canEdit || !!busy" @click="preview">{{ busy === 'preview' ? '件数を確認中…' : '対象件数を確認' }}</button>
+            <button v-if="!plan.preview" :disabled="!canEdit || !!busy" @click="preview">{{ busy === 'preview' ? '件数を確認中…' : '対象件数を確認' }}</button>
             <button :disabled="!canEdit || !!busy || !plan.preview || plan.preview.over_limit" @click="approve('data')">データ範囲を承認</button>
           </div>
           <p v-if="plan.data_approved_at" role="status">データ承認日時: {{ formatDate(plan.data_approved_at) }}。{{ plan.execution ? '実行依頼済みです。実行状態・結果は実行欄で確認してください。' : '承認は完了しましたが、分析はまだ実行していません。' }}</p>
@@ -189,23 +189,28 @@
             <p v-if="codegen?.literal_values?.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 目的・手順に書かれた値が、変数にされず、コードに直接書かれています: {{ codegen.literal_values.join('、') }}。この分析だけなら、そのまま実行できます。テンプレートとして保存しても、再利用で、これらの値を変えられません。変えたいときは、再生成してください。</p>
             <p v-if="normalizedValues.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> <template v-for="(item, index) in normalizedValues" :key="item.name"><template v-if="index">　</template>変数 {{ item.name }}: {{ item.from }} を、マスタの表記 {{ item.to }} に直しました。</template></p>
             <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
-            <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「分析案の状態を再取得」を行ってください。</p>
+            <p v-if="!codeStateFresh" class="warning">最新状態を確認できないため操作を止めています。「最新状態を確認する」を押してください。</p>
             <p>失敗した生成も回数に含みます。再生成すると現在のコード・試行・コード承認は置き換わります。</p>
-            <p v-if="codeInFlight" class="warning">{{ codeState?.inflight_state === 'unknown' ? '生成が中断した可能性があります（状態不明）。停止したとは断定できません。' : 'コードを生成中です。' }} 自動再送・有効期限の延長はしません。「分析案の状態を再取得」で最新状態を確認してください。</p>
+            <p v-if="codeInFlight" class="warning">{{ codeState?.inflight_state === 'unknown' ? '生成が中断した可能性があります（状態不明）。停止したとは断定できません。' : 'コードを生成中です。' }} 自動再送・有効期限の延長はしません。「最新状態を確認する」で最新状態を確認してください。</p>
             <button v-if="codeState?.inflight_state === 'unknown'" :disabled="!canReleaseCodegen" @click="releaseCodegen">状態不明の生成を解除（回数は戻りません）</button>
             <p v-if="plan.template">テンプレートから作成した分析案では、AIによるコード生成は行いません。現行の外枠でSQLを試行し、コードを承認してから実行します（コードを変えるときは、新しい分析として作成してください）。</p>
             <template v-if="!codeInFlight && !plan.template">
-              <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未登録の名称・機密は自動判別できません。</p>
-              <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">{{ codePreview ? '社外送信の確認を更新' : '社外サービス利用を確認' }}</button>
-              <button v-if="codeExternal && codePreview" :disabled="!!busy" @click="closeCodePreview">閉じる</button>
-              <section v-if="codeExternal && codePreview" class="dataset">
-                <h4>分析処理作成の社外送信前確認（まだ送信していません）</h4>
-                <p>送信先: {{ codePreview.provider }} / モデル: {{ codePreview.model }} / 生成: {{ codePreview.attempt }}回目</p>
-                <p>送らないもの: {{ codePreview.not_sent.join('、') }}</p>
-                <p>分析案・公開ビューの説明を送ります。一般使用者向け画面では送信文そのものは表示しません。</p>
-                <label><input v-model="codeSendAccepted" type="checkbox" :disabled="!canEdit || !!busy">未登録の人名・社名・機密が分析目的に含まれていないことを確認しました</label>
-              </section>
-              <button v-if="!codeExternal || codePreview" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode">{{ busy === 'code-generate' ? '分析処理を作成中…' : codeExternal ? '確認した内容を社外AIへ送って分析処理を作成' : 'ローカルQwenで分析処理を作成' }}</button>
+              <button v-if="hasCode && !codeRebuildOpen" :disabled="!canGenerate" @click="codeRebuildOpen = true">分析処理を作り直す</button>
+              <template v-if="!hasCode || codeRebuildOpen">
+                <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未伏字の名称・機密は自動判別できません。</p>
+                <button v-if="hasCode" :disabled="!!busy" @click="cancelCodeRebuild">作り直しをやめる</button>
+                <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">{{ codePreview ? '最新の内容でもう一度確認する' : '社外サービスに送る内容を確認する' }}</button>
+                <button v-if="codeExternal && codePreview" :disabled="!!busy" @click="closeCodePreview">確認を閉じる（まだ送信していません）</button>
+                <section v-if="codeExternal && codePreview" class="dataset">
+                  <h4>分析処理作成の社外送信前確認（まだ送信していません）</h4>
+                  <p>送信先: {{ codePreview.provider }} / モデル: {{ codePreview.model }} / 生成: {{ codePreview.attempt }}回目</p>
+                  <p>送らないもの: {{ codePreview.not_sent.join('、') }}</p>
+                  <p>分析案・公開ビューの説明を送ります。一般使用者向け画面では送信文そのものは表示しません。</p>
+                  <label><input v-model="codeSendAccepted" type="checkbox" :disabled="!canEdit || !!busy">分析目的に、社外へ送ってはいけない人名・社名・機密情報が残っていないことを確認しました</label>
+                  <small class="next-hint">チェックすると、下のボタンで分析処理を作成できます。</small>
+                </section>
+                <button v-if="!codeExternal || codePreview" class="create-code-btn" :class="{ ready: canGenerate && (!codeExternal || codeSendAccepted) }" :disabled="!canGenerate || (codeExternal && !codeSendAccepted)" @click="generateCode"><template v-if="busy === 'code-generate'">分析処理を作成中…</template><template v-else-if="codeExternal">{{ codeSendAccepted ? '▶ ' : '' }}確認した内容を社外AIへ送って分析処理を作成</template><template v-else>ローカルQwenで分析処理を作成</template></button>
+              </template>
               <p v-if="codeState && codeState.attempts >= codeState.max_attempts">AI生成回数の上限に達しました。試行のやり直しは生成回数に含みません。再生成が必要なら分析案を作り直してください。</p>
             </template>
             <p v-if="codeState?.status === 'failed'" class="error">コード生成に失敗したか、状態不明の生成を解除しました。採用できるコードはありません。再生成には新しい送信確認が必要です。</p>
@@ -259,7 +264,7 @@
         </div>
       </section>
         <div v-if="plan" class="actions">
-          <button :disabled="!!busy" @click="refresh">分析案の状態を再取得</button>
+          <button v-if="!codeStateFresh || codeInFlight" :disabled="!!busy" @click="refresh">最新状態を確認する</button>
           <button v-if="canEdit" :disabled="!!busy || executionActive" @click="restartPlan">目的・期間を変更して作り直す</button>
         </div>
       </aside>
@@ -299,7 +304,7 @@ function updateLeftPaneFromPointer(event) {
   leftPanePercent.value = clampLeftPanePercent(((event.clientX - bounds.left) / bounds.width) * 100)
 }
 function startResize(event) {
-  if (event.button !== 0 || typeof window === 'undefined' || window.matchMedia('(max-width: 960px)').matches) return
+  if (isResizing.value || event.button !== 0 || typeof window === 'undefined' || window.matchMedia('(max-width: 960px)').matches) return
   resizePointerId = event.pointerId
   isResizing.value = true
   analysisDivider.value?.setPointerCapture?.(event.pointerId)
@@ -362,6 +367,7 @@ const externalAccepted = ref(false)
 const codePreview = ref(null)
 const codeSendAccepted = ref(false)
 const codeAccepted = ref(false)
+const codeRebuildOpen = ref(false)
 const codeStateFresh = ref(true)
 let generation = 0
 let disposed = false
@@ -598,9 +604,15 @@ function closeCodePreview() {
   codePreview.value = null
   codeSendAccepted.value = false
 }
+function cancelCodeRebuild() {
+  if (busy.value) return
+  codeRebuildOpen.value = false
+  codePreview.value = null
+  codeSendAccepted.value = false
+}
 // 版・コード・状態が変われば、送信確認もコード確認も取り直す。
-watch(plan, clearCodeConfirmations, { flush: 'sync', deep: true })
-watch(() => props.canEdit, value => { if (!value) clearCodeConfirmations() }, { flush: 'sync' })
+watch(plan, () => { clearCodeConfirmations(); codeRebuildOpen.value = false }, { flush: 'sync', deep: true })
+watch(() => props.canEdit, value => { if (!value) { clearCodeConfirmations(); codeRebuildOpen.value = false } }, { flush: 'sync' })
 
 function defaultModelFor(key) {
   const current = options.value?.providers.find(item => item.provider === key)
@@ -902,7 +914,7 @@ function releaseCodegen() {
 </script>
 
 <style scoped>
-.analysis-workspace { padding: 20px; max-width: 1600px; margin: auto; color: #334b50; }
+.analysis-workspace { width: 100%; box-sizing: border-box; padding: 20px; margin: 0; color: #334b50; }
 .analysis-layout { --left-pane-percent: 66.7%; display: grid; grid-template-columns: minmax(0, calc(var(--left-pane-percent) - 6px)) 12px minmax(0, calc(100% - var(--left-pane-percent) - 6px)); gap: 0; align-items: start; }
 .analysis-main { min-width: 0; order: 3; position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; padding-left: 12px; }
 .analysis-divider { order: 2; align-self: stretch; min-height: 180px; display: flex; justify-content: center; cursor: col-resize; touch-action: none; outline: none; }
@@ -939,6 +951,9 @@ function releaseCodegen() {
 .run-target.ready { outline: 3px solid #d9a21b; outline-offset: 6px; border-radius: 6px; animation: run-ready-pulse 1.6s ease-in-out 3; }
 @keyframes run-ready-pulse { 50% { outline-color: #d9a21b33; } }
 @media (prefers-reduced-motion: reduce) { .run-target.ready { animation: none; } }
+.next-hint { display: block; color: #8a5a00; font-weight: 600; margin: 4px 0 0; }
+.create-code-btn.ready { outline: 3px solid #d9a21b; outline-offset: 3px; font-weight: 700; animation: run-ready-pulse 1.6s ease-in-out 3; }
+@media (prefers-reduced-motion: reduce) { .create-code-btn.ready { animation: none; } }
 .stage-body { padding: 8px 12px 12px; overflow-wrap: anywhere; }
 .plan-head { border: 1px solid #d1dddd; border-radius: 8px; padding: 8px 12px; }
 @media (max-width: 960px) { .analysis-layout { grid-template-columns: minmax(0, 1fr); } .analysis-main { order: 2; position: static; max-height: none; overflow: visible; padding-left: 0; } .analysis-divider { display: none; } .analysis-side { order: 1; border-right: 0; padding-right: 0; } }
