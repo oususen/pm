@@ -28,7 +28,7 @@
       <div class="send">
         <textarea v-model="input" rows="6" :disabled="!usable || !!busy" placeholder="AIへの相談を入力してください。" aria-label="AIへの相談"></textarea>
         <div class="send-actions">
-          <button type="button" class="icon-btn reset-btn" :disabled="!!busy || !messages.length" @click="reset" aria-label="やり直す" title="やり直す">
+          <button type="button" class="icon-btn clear-input-btn" :disabled="!usable || !!busy || !input.length" @click="input = ''" aria-label="現在の入力をクリア" title="現在の入力をクリア">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M4 9a8 8 0 1 1 1.64 7.5M4 9V4m0 5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <button type="button" class="icon-btn send-btn" :disabled="!canSend" @click="send" :aria-label="busy === 'send' ? 'AIが考えています' : '送信'" :title="busy === 'send' ? 'AIが考えています…' : '送信'">
@@ -75,7 +75,7 @@ onMounted(() => {
 // 画面で表示する失敗は固定文だけ。APIの本文は表示しない。
 const CONSULT_ERRORS = Object.freeze({
   400: '送る内容、またはAIの選択が正しくありません。上のAIプロバイダ・モデルを確認してください。',
-  422: '発言、またはこれまでのAIの返事に、コードへ置換できない名称が含まれます。表現を変えるか、「やり直す」でやり取りを消して、もう一度送ってください（社外へは送っていません）。',
+  422: '発言、またはこれまでのAIの返事に、コードへ置換できない名称が含まれます。表現を変えるか、「会話をすべてリセット」でやり取りを消して、もう一度送ってください（社外へは送っていません）。',
   424: '承認済みテンプレートの名称・目的を、コードへ置換できません。管理者へ、名称の登録の確認を依頼してください（社外へは送っていません）。',
   403: 'AIと相談する権限がありません。「AI分析」の編集権限、または社外サービスへの送信の許可を確認してください。',
   409: '社外サービスへ送ることの了承が必要です。',
@@ -142,6 +142,9 @@ function reset() {
   if (busy.value) return
   messages.value = []; draft.value = null; templates.value = []; emit('recommendations', []); error.value = ''; input.value = ''
 }
+// 期間欄の隣から、既存の会話リセットを呼び出す。
+const canReset = computed(() => !busy.value && messages.value.length > 0)
+defineExpose({ reset, canReset })
 function apply() {
   const d = draft.value
   if (!usable.value || busy.value || !d || !(d.purpose || (d.date_from && d.date_to))) return
@@ -192,7 +195,7 @@ async function useTemplate(item) {
 .send-actions { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
 .icon-btn { width: 32px; height: 32px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; padding: 0; }
 .icon-btn:disabled { opacity: .4; cursor: default; }
-.reset-btn { background: #eef2f1; color: #456; }
+.clear-input-btn { background: #eef2f1; color: #456; }
 .send-btn { background: #087b6e; color: #fff; }
 .send-btn:disabled { background: #a9c7c2; }
 .spinner { width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, .5); border-top-color: #fff; border-radius: 50%; animation: consult-spin .8s linear infinite; }

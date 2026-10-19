@@ -104,7 +104,7 @@
         </button>
         <div v-show="isOpen(1)" id="stage-body-1" class="stage-body">
       <textarea id="analysis-purpose" aria-label="分析目的" v-model="purpose" rows="5" :readonly="!canEdit || !!busy || !!plan" placeholder="何を調べ、どの判断に使いたいかを入力してください。"></textarea>
-      <AIAnalysisUserConsult v-if="canEdit && !plan" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" :refinement-instruction="refinement?.instruction || ''" @apply="applyConsult" @plan-created="useTemplatePlan" @reference-selected="startReference" @recommendations="recommendedTemplates = $event" />
+      <AIAnalysisUserConsult v-if="canEdit && !plan" ref="consultRef" :plan="plan" :can-edit="canEdit" :blocked="!!busy" :purpose="purpose" :date-from="dateFrom" :date-to="dateTo" :provider="provider" :model="model" :external="!!selectedProvider?.external" :provider-label="selectedProvider?.label || ''" :provider-available="!!selectedProvider?.available" :user-name="userName" :refinement-instruction="refinement?.instruction || ''" @apply="applyConsult" @plan-created="useTemplatePlan" @reference-selected="startReference" @recommendations="recommendedTemplates = $event" />
       <p v-if="source" class="source">起点画面: {{ source }}（会話履歴・検索結果は引き継ぎません）</p>
       <section v-if="referenceTemplate && !plan" id="reference-note" class="refine-note reference-note" role="status">
         <p>参考にするテンプレート: テンプレート{{ referenceTemplate.id }}「{{ referenceTemplate.name }}」（版{{ referenceTemplate.version }}）。このテンプレートの目的・手順・出力案・データ範囲を、AIが参考にして、今回の目的に合わせた新しい分析案とコードを作ります。承認は引き継がず、手順・データ範囲・コード・試行・コード承認を、取り直します。</p>
@@ -121,6 +121,7 @@
         <label>開始日 <input v-model="dateFrom" type="date" :disabled="!canEdit || !!busy || !!plan || noPeriod"></label>
         <label>終了日 <input v-model="dateTo" type="date" :disabled="!canEdit || !!busy || !!plan || noPeriod"></label>
         <button type="button" :disabled="!canEdit || !!busy || !!plan" :aria-pressed="noPeriod" @click="toggleNoPeriod">{{ noPeriod ? '期間なし（解除する）' : '期間なし' }}</button>
+        <button v-if="canEdit && !plan" type="button" :disabled="!!busy || !consultRef?.canReset" @click="consultRef?.reset()">会話をすべてリセット</button>
         <small v-if="noPeriod">期間なし: 日付のないビュー（マスタなど）専用です。期間は今日（{{ dateFrom }}）の1日に固定されます。日付のあるビューは今日の分だけになります。</small>
       </div>
       <template v-if="!plan">
@@ -287,6 +288,7 @@ import { openRequestDialog } from '../../composables/requestDialog'
 
 const props = defineProps({ request: { type: Object, default: null }, canEdit: { type: Boolean, default: false }, canViewAll: Boolean, visible: { type: Boolean, default: true }, userName: { type: String, default: '' } })
 const executionActive = ref(false)
+const consultRef = ref(null)
 const analysisLayout = ref(null)
 const analysisDivider = ref(null)
 const leftPanePercent = ref(66.7)
