@@ -223,7 +223,14 @@ MySQLから検証用に複製
 
 この対策はLineBacklog/LineDemand/LinePlanの生成・更新ロジックには触れず、migrationの「テーブル作成方法」のみを変更する想定。ただしmigrationを伴う変更のため、CLAUDE.mdの規約上evaluatorによる検証を省略しない。
 
-**2026-10-16 BOSS判断**: 対策の方向性(上記1〜4)は承認。ただし実施場所(新規gitブランチ／`D:\pm_pg\`複製のいずれで修正するか、§3-2 S3)は**いったん保留**。ファイル修正は、実施場所が確定し、改めてBOSSから着手指示が出てから行う。
+**2026-10-16 BOSS判断**: 対策の方向性(上記1〜4)は承認。実施場所は`D:\pm_pg\`(2026-10-20作成、`D:/pm`からの`git clone`)に決定。
+
+**2026-10-20 実施済み(generator実装・evaluator検証、合格)**: `D:\pm_pg`限定で以下を実施。`D:\pm`(本体)は無変更。
+
+- production: LineStatus/StockAllocation/ProductionOrder、LineBacklog/LineDemand/LineGanttPlan、LineRealtimeRecord/ProcessRealtimeRecord/ProcessActualの9モデルのCreateModelを`SeparateDatabaseAndState(database_operations=[])`化。加えて、StockAllocation/ProductionOrderへの付随AddIndex×6・AlterUniqueTogether×1(計7件)も、ordersの元CreateModelとインデックス名まで完全一致する重複のため同様にstate-only化。LinePlanは対象外のため無変更
+- shipping: ShipmentActual/ShipmentActualHistory/DeliveryProgressの3モデルのCreateModelと、付随AddIndex×5(計)を同様にstate-only化。ShipToLeadTime(対象外)は内容無変更、ブロック構成の都合で位置のみ移動
+- evaluatorによる独立検証(16項目)**合格**。`manage.py check`・`makemigrations --check --dry-run`は問題なし、内容はAST/diffで変更前と完全一致確認済み、計画外ファイル・`D:\pm`本体への影響なしも確認済み
+- **未確認のまま残る項目**: 実際に空DBへ`migrate`を適用して完走するかの実機検証(`migrate`実行はBOSS承認事項のため、生成・検証いずれの段階でも意図的に未実施)。次の段階として、空PG(`pm-pg-rehearsal`等)への`migrate`再試験をBOSS承認のうえ実施することを推奨
 
 ### 3-2. 方針
 
@@ -595,7 +602,7 @@ SELECT user, host FROM mysql.user;
 |---|---|---|
 | 1 | **順番の決定**: A / B(推奨) / C | 方針 |
 | 2 | 初回は `postgres:16` 使用済み。本番採用イメージ・digestと更新方針の確定 | 構成 |
-| 3 | 複製の置き場所(`D:\pm_pg\`、リポジトリ外でよいか) | 構成 |
+| 3 | ~~複製の置き場所~~ | ~~構成~~ | **2026-10-20 実施済み**: `D:\pm_pg\`を`git clone`で作成(`origin`は`D:/pm`、作成時点のmainブランチ`793da150`と同一)。重複テーブル対策(production 9件・shipping 3件のmigration修正)はこちら側で実施する |
 | 4 | アプリ用ポート(18081 / 18501)、Compose化、PC2の構成。PC3のPG用15432・コンテナ等は§2-2の名前で作成済み | 構成 |
 | 5 | MySQL側にSELECT専用ユーザーを新規作成し、終了後に削除してよいか | MySQLの権限変更 |
 | 6 | 初回S1後の再試験、追加DB作成、途中DBの削除・再作成等の対象と手順 | 実行（初回S1は実施済み） |
