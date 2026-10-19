@@ -70,6 +70,12 @@ class LaserActual(models.Model):
         default='',
         verbose_name='作業時刻理由',
     )
+    interruption_reason_code = models.CharField(
+        max_length=4,
+        blank=True,
+        default='',
+        verbose_name='中断理由コード',
+    )
     remarks = models.TextField(blank=True, default='', verbose_name='備考')
 
     # スナップショット（登録時点の値を保持）
