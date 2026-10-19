@@ -91,6 +91,26 @@ class ProgressMonitorApiTest(APITestCase):
         )
         self.assertNotIn(self.unit.id, {item['id'] for item in response.data['units']})
 
+    def test_options_excludes_non_superuser_manager_and_chief(self):
+        division = Department.objects.create(name='テスト事業部', level='division', display_id=0)
+        group = Department.objects.create(name='テスト係', level='group', display_id=0, parent=division)
+        team = Department.objects.create(name='テスト班2', level='team', display_id=0, parent=group)
+        hierarchy_unit = Department.objects.create(name='階層配下グループ', level='unit', display_id=9, parent=team)
+        hierarchy_line = Line.objects.create(line_code='LTEST5', line_name='階層配下ライン')
+        UnitLineMapping.objects.create(unit=hierarchy_unit, line=hierarchy_line)
+
+        for role in ('manager', 'chief'):
+            self.user.profile.role = role
+            self.user.profile.unit = None
+            self.user.profile.division = division
+            self.user.profile.group = group
+            self.user.profile.team = team
+            self.user.profile.save()
+
+            response = self.client.get(reverse('progress-monitor-target-options'))
+
+            self.assertEqual(response.data['units'], [], f'role={role} でグループが見えてしまう')
+
     def test_create_rejects_line_outside_allowed_units(self):
         response = self.client.post(reverse('progress-monitor-target-list'), {
             'product': self.product.id, 'line': self.other_line.id,

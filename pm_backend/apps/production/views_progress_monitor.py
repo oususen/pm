@@ -2,7 +2,6 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from accounts.models import Department, UnitLineMapping
-from accounts.permission_scope import collect_effective_department_ids
 from django.db.models import Q
 from masters.models import Product
 from rest_framework import status, viewsets
@@ -27,7 +26,20 @@ def _allowed_units(user):
     except Exception:
         return queryset.none()
 
-    unit_ids = set(collect_effective_department_ids(profile))
+    unit_ids = set(profile.leader_units.values_list('id', flat=True))
+    if profile.unit_id:
+        unit_ids.add(profile.unit_id)
+    if profile.role == 'supervisor':
+        # 班長は自分が統括する班（supervisor_teams、本人所属のteamを含む）の配下グループを担当する。
+        # manager/chief等のdivision/group配下まで遡ると担当外グループまで見えてしまうため、
+        # supervisorロールのteam配下（unitの親は必ずteam）に限定する。
+        team_ids = set(profile.supervisor_teams.values_list('id', flat=True))
+        if profile.team_id:
+            team_ids.add(profile.team_id)
+        if team_ids:
+            unit_ids.update(
+                Department.objects.filter(level='unit', parent_id__in=team_ids).values_list('id', flat=True)
+            )
     return queryset.filter(id__in=unit_ids).order_by('display_id', 'name', 'id')
 
 
