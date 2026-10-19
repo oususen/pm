@@ -1,1 +1,0 @@
-"""Legacy proposals tables integration."""

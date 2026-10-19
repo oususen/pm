@@ -72,7 +72,6 @@ INSTALLED_APPS = [
     'quality',
     'shipping',
     'accounts',
-    'proposals',
     'notifications',
     'overtime',
     'system_settings',

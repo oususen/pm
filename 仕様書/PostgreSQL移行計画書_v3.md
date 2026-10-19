@@ -141,7 +141,7 @@ MySQLから検証用に複製
 
 ### 2-5. 突合の方法
 
-1. **件数**: 全テーブルの `COUNT(*)` をMySQLとPGで比較する(管理対象外3テーブルを含む)
+1. **件数**: 全テーブルの `COUNT(*)` をMySQLとPGで比較する(旧・管理対象外3テーブルはproposalsアプリ削除により2026-10-20付で対象外になった。§3-3参照)
 2. **代表値の抜き取り**: 主要テーブル(LineBacklog / LineDemand / LinePlan / Order / OrderLine / 在庫・進度関連)で、日付・数量・ステータスの列の合計、最小・最大、NULL件数を比較する。抜き取り行は、主キー指定で全列を比較する
 3. **計算結果の一致**: 同一入力で、在庫・計画在庫・進度の再計算結果をMySQL版とPG版で比較する。差分が出たら、**まずDBの実データで原因を切り分ける**(CLAUDE.mdの不整合調査手順に従い、生成ロジックは最後)
 4. **挙動差の個別確認**(下表)
@@ -170,7 +170,7 @@ MySQLから検証用に複製
 | FOR UPDATE | 1箇所 | 1箇所(一致)。`apps/orders/management/commands/normalize_kubota_ship_to_codes.py:139` |
 | ON DUPLICATE KEY / GROUP_CONCAT / IFNULL / DATE_FORMAT / REPLACE INTO | 見つからなかった | 実コード上は0件で一致(grepでIFNULL/DATE_FORMATがヒットするのは `pm_backend/ocr_data/` 配下のサードパーティ(venv)文字列のみで、自作コードではない) |
 
-- `managed=False` のモデルは**3つ**(件数は一致)。いずれも `apps/proposals/models.py` の `Department`・`Employee`・`EmployeePermission`(社員DB参照用)で、orders→production/quality/shipping移管対象とは無関係。マイグレーションで作られないテーブルがある点(以前、テストDB作成時に `t_scrap_record` が無くて失敗した)は、この3モデルとは別件の履歴として扱う
+- `managed=False` のモデルは調査時点で**3つ**(件数は一致)。いずれも `apps/proposals/models.py` の `Department`・`Employee`・`EmployeePermission`(社員DB参照用)で、orders→production/quality/shipping移管対象とは無関係だった。**2026-10-20、BOSS判断によりproposalsアプリ自体を削除したため、この3モデルは無くなった**(§3-3参照)。マイグレーションで作られないテーブルがある点(以前、テストDB作成時に `t_scrap_record` が無くて失敗した)は、この3モデルとは別件の履歴として扱う
 - S4(生SQL対応)の作業量は、上表の実測値(RunSQL 29、cursor.execute 32)を前提に見積もり直す必要がある
 
 #### 2026-10-16 空PGへの初回migrate試験結果
@@ -296,11 +296,16 @@ PC3：開発PostgreSQL（比較先）
 
 本番がPGへ切り替わった後は、本番PGから開発PGへバックアップを復元する運用に切り替える。旧MySQL開発系への逆変換は通常運用には含めず、保持期間終了まで比較資料として保管する。
 
-### 3-3. 管理対象外テーブル3つ
+### 3-3. 管理対象外テーブル3つ(2026-10-20 解消・対応不要)
 
-- 3モデルのテーブル名と、DDLの取得元(実DBか、`予備資料/` のスキーマ定義か)を、**まず特定する**
-- 取得元を確定できなければ、推測でDDLを作らず、BOSSへ報告する
-- 案Xなら、DDLの取得元から複製側に作成手段を用意する。案Yなら、pgloaderが作る
+旧`apps/proposals`(改善提案、kaizen_pp由来のDepartment/Employee/EmployeePermissionを`managed=False`で参照)のアプリ自体をBOSS判断により削除した(`pm_backend/apps/proposals/`ディレクトリ削除、`settings.py`の`INSTALLED_APPS`から除去)。
+
+- 調査の結果、このアプリにはmigrationsフォルダが無く、フロントエンドのUIも無く、他アプリからの参照も無い未使用のスキャフォールドだったことを確認
+- 取込元とされた`pm_backend/data/proposals_dump.sql`はリポジトリに存在せず、DDLの取得元は外部の`kaizen_pp`システムと推測されたが確定できなかった
+- 開発DB(`pm_db`)・本番DBとも`proposals_department`等の実テーブルは存在しないことを確認済み(情報スキーマで0件、本番はBOSSがAdminerで確認)。DROP対象のテーブルも無い
+- `python manage.py check`・`makemigrations --check --dry-run`で問題なしを確認
+
+この削除により、**空DBへの全migration適用でこの3テーブルを気にする必要はなくなった**。方式Qの棚卸し対象からも除外してよい。
 
 ### 3-4. AI分析層のPG対応(対応一覧は memory `project_ai_analysis_state` を正とする)
 
@@ -547,7 +552,7 @@ SELECT user, host FROM mysql.user;
 | リスク | 影響 | 対応・代案 |
 |---|---|---|
 | migrateが通らない（初回確認済み） | 空DBを現行履歴だけでは構築できない | 案Y／方式Qを次の候補として検証。自動的に解決すると扱わず、採用・実行はBOSS承認 |
-| 管理対象外テーブルのDDL取得元が不明 | PGに作れない | 実DBから取得。確定できなければBOSSへ報告 |
+| ~~管理対象外テーブルのDDL取得元が不明~~ | ~~PGに作れない~~ | **解消(2026-10-20)**: 該当のproposalsアプリをBOSS判断で削除したため対応不要になった(§3-3) |
 | 挙動差(大文字小文字、整数割り算、NULL順) | 在庫・進度の数値ずれ | 突合で検出。ずれた箇所を実データで切り分けてから修正 |
 | リハーサルの遅れ | PG切替日を確定できない | **B案ならPC入替に影響しない**。MySQL本番を継続し、PG切替を延期 |
 | 新PCの納入が遅れる | 入替の遅れ | 旧PCでMySQL継続。PG開発試験はPC3で継続可能。PC2の最終リハーサル・本番切替は受入後 |
