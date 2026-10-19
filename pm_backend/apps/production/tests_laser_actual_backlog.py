@@ -7,7 +7,7 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIRequestFactory
 
-from masters.models import Equipment, Line, Process, Product, Routing, RoutingStep
+from masters.models import Equipment, InterruptionReason, Line, Process, Product, Routing, RoutingStep
 from production.models_laser_actual import LASER_LINE_CODE, LASER_PROCESS_CODE, LaserActual
 from production.models_process_work_session_change_history import ProcessWorkSessionChangeHistory
 from production.models_laser_pattern import (
@@ -98,10 +98,27 @@ class LaserActualBacklogSyncTest(TestCase):
             line=self.line,
             output_product=self.component,
         )
+        # 中断理由マスタ(line_category='1'=レーザー)。
+        # マスタ用データ移行での初期投入とは独立して、テストが必要とする行を明示的に用意する
+        InterruptionReason.objects.get_or_create(
+            code='1101',
+            defaults={
+                'line_category': '1', 'category': '1', 'display_name': '設備トラブル',
+                'operation': 'PAUSE', 'is_active': True,
+            },
+        )
+        InterruptionReason.objects.get_or_create(
+            code='1102',
+            defaults={
+                'line_category': '1', 'category': '1', 'display_name': '本日設備復旧不可',
+                'operation': 'TEMP_END', 'is_active': True,
+            },
+        )
 
     def _create_actual(self, shot_count=2, action='END', component_scraps=None):
         action_upper = str(action or '').upper()
         reason = '設備トラブル' if action_upper in {'PAUSE', 'TEMP_END'} else ''
+        reason_code = {'PAUSE': '1101', 'TEMP_END': '1102'}.get(action_upper, '')
         serializer = LaserActualSerializer(data={
             'work_date': date(2026, 3, 14),
             'equipment': self.equipment.id,
@@ -109,6 +126,7 @@ class LaserActualBacklogSyncTest(TestCase):
             'shot_count': shot_count,
             'operator_action': action_upper,
             'operator_action_reason': reason,
+            'interruption_reason_code': reason_code,
             'component_scraps': component_scraps or [],
             'remarks': '',
         })
@@ -154,6 +172,7 @@ class LaserActualBacklogSyncTest(TestCase):
                 'shot_count': 5,
                 'operator_action': 'PAUSE',
                 'operator_action_reason': '設備トラブル',
+                'interruption_reason_code': '1101',
                 'remarks': '',
             },
         )
@@ -374,3 +393,91 @@ class LaserActualBacklogSyncTest(TestCase):
         self.laser_line.save()
         with self.assertRaises(CommandError):
             self._run_backfill()
+
+    # ---- 中断理由コード(interruption_reason_code)の検証(単位C-7) ----
+
+    def test_pause_without_reason_code_is_rejected(self):
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='設備トラブル', interruption_reason_code='',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('interruption_reason_code', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_pause_with_invalid_reason_code_is_rejected(self):
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='設備トラブル', interruption_reason_code='9999',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('interruption_reason_code', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_pause_with_wrong_line_category_reason_code_is_rejected(self):
+        # '2101' はブレーキ・板金スポット(line_category='2')用のコード
+        InterruptionReason.objects.create(
+            code='2101', line_category='2', category='1', display_name='設備トラブル',
+            operation='PAUSE', is_active=True,
+        )
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='設備トラブル', interruption_reason_code='2101',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('interruption_reason_code', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_pause_with_temp_end_only_reason_code_is_rejected(self):
+        # '1102' は TEMP_END専用コード(PAUSEでは使えない)
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='本日設備復旧不可', interruption_reason_code='1102',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('interruption_reason_code', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_pause_with_inactive_reason_code_is_rejected(self):
+        InterruptionReason.objects.filter(code='1101').update(is_active=False)
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='設備トラブル', interruption_reason_code='1101',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('interruption_reason_code', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_temp_end_with_valid_reason_code_is_accepted_and_saved(self):
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='TEMP_END', operator_action_reason='本日設備復旧不可', interruption_reason_code='1102',
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        actual.refresh_from_db()
+        self.assertEqual(actual.interruption_reason_code, '1102')
+
+    def test_start_end_resume_skip_reason_code_validation(self):
+        # START/END/RESUMEでは理由コード未送信でも検証をスキップする
+        actual = self._create_actual(shot_count=2, action='END')
+        self.assertEqual(actual.interruption_reason_code, '')
+
+        serializer = LaserActualSerializer(actual, data=self._payload(
+            operator_action='END', operator_action_reason='', interruption_reason_code='',
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        self.assertEqual(actual.interruption_reason_code, '')
+
+    def test_non_pause_action_clears_reason_code(self):
+        # PAUSE/TEMP_END以外でコードが送られてきてもクリアされる(保存されない)
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='END', operator_action_reason='', interruption_reason_code='1101',
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        self.assertEqual(actual.interruption_reason_code, '')
+
+    def test_operator_action_reason_required_check_unchanged(self):
+        # 既存の operator_action_reason 必須チェックが変更されていないことの確認
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='', interruption_reason_code='1101',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('operator_action_reason', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)

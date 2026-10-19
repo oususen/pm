@@ -106,12 +106,21 @@
 
         <div v-if="requiresActionReason" class="field">
           <label class="required">{{ form.operator_action === 'TEMP_END' ? '強制終了理由' : '中断理由' }}</label>
-          <select v-model="form.operator_action_reason">
+          <select v-model="form.interruption_reason_code">
             <option value="">-- 選択 --</option>
-            <option v-for="reason in operatorActionReasonOptions" :key="reason" :value="reason">
-              {{ reason }}
+            <option v-for="reason in operatorActionReasonOptions" :key="reason.code" :value="reason.code">
+              {{ reason.display_name }}
             </option>
           </select>
+        </div>
+
+        <div v-if="requiresOtherReasonRemarks" class="field">
+          <label class="required">理由詳細（その他）</label>
+          <textarea
+            v-model="form.remarks"
+            rows="2"
+            placeholder="「その他」を選択した理由を入力してください"
+          ></textarea>
         </div>
 
         <div v-if="requiresShotCount" class="field">
@@ -827,27 +836,12 @@ const startedOperatorActions = ['END', 'PAUSE']
 const pausedOperatorActions = ['RESUME', 'TEMP_END']
 const tempEndedOperatorActions = ['RESUME']
 
-const pauseReasonOptions = [
-  '設備トラブル',
-  '治具トラブル',
-  '品質トラブル',
-  'ティーチング',
-  'ワイヤ交換',
-  '部品ショート',
-  '班長/対応者待ち',
-  '工程指導',
-  '3S活動',
-  '改善活動',
-  'パターン違い',
-  'その他',
-]
+// 中断理由マスタ（m_interruption_reason, line_category='1'）取得結果。PAUSE/TEMP_END両方を保持し、画面側でoperationで絞り込む
+const reasonMasterOptions = ref([])
 
-const tempEndReasonOptions = [
-  '本日設備復旧不可',
-  '本日治具使用不可',
-  '他へ製品切り替え',
-  'その他',
-]
+// 「その他」コード（中断理由マスタのcode一致判定。display_name文字列一致ではない）
+const OTHER_REASON_CODES = ['1997', '1998']
+const isOtherReasonCode = (code) => OTHER_REASON_CODES.includes(String(code || ''))
 
 const scrapReasonOptions = [
   { value: '未切断', label: '1 未切断' },
@@ -868,6 +862,7 @@ const createEmptyForm = () => ({
   pattern: '',
   operator_action: '',
   operator_action_reason: '',
+  interruption_reason_code: '',
   shot_count: null,
   remarks: '',
 })
@@ -1637,9 +1632,14 @@ const requiresActionReason = computed(() => {
 
 const operatorActionReasonOptions = computed(() => {
   const action = String(form.value.operator_action || '').toUpperCase()
-  if (action === 'TEMP_END') return tempEndReasonOptions
-  return pauseReasonOptions
+  const op = action === 'TEMP_END' ? 'TEMP_END' : 'PAUSE'
+  return (Array.isArray(reasonMasterOptions.value) ? reasonMasterOptions.value : [])
+    .filter((reason) => reason.operation === op)
 })
+
+// 選択中の理由コードが「その他」かどうか（remarks必須判定に使用）
+const isOtherReasonSelected = computed(() => isOtherReasonCode(form.value.interruption_reason_code))
+const requiresOtherReasonRemarks = computed(() => requiresActionReason.value && isOtherReasonSelected.value)
 
 const effectiveShotCount = computed(() => {
   const shots = Number(form.value.shot_count)
@@ -1797,7 +1797,9 @@ const canSave = computed(() => {
   if (!form.value.pattern) return false
   if (!form.value.operator_action) return false
   if (!operatorActionOptions.value.some((item) => item.value === form.value.operator_action)) return false
+  if (requiresActionReason.value && !String(form.value.interruption_reason_code || '').trim()) return false
   if (requiresActionReason.value && !String(form.value.operator_action_reason || '').trim()) return false
+  if (requiresOtherReasonRemarks.value && !String(form.value.remarks || '').trim()) return false
   if (!isValidShotCount.value) return false
   if (hasInvalidComponentScrap.value) return false
   return true
@@ -1844,6 +1846,19 @@ const loadPatterns = async () => {
   } catch (error) {
     patterns.value = []
     setListMessage(extractErrorMessage(error, 'パターン一覧の取得に失敗しました。'), 'error')
+  }
+}
+
+const loadInterruptionReasons = async () => {
+  try {
+    const res = await api.interruptionReasons.getInterruptionReasons({
+      is_active: true,
+      line_category: '1',
+    })
+    reasonMasterOptions.value = normalizeList(res.data)
+  } catch (error) {
+    reasonMasterOptions.value = []
+    setListMessage(extractErrorMessage(error, '中断理由マスタの取得に失敗しました。'), 'error')
   }
 }
 
@@ -1976,6 +1991,7 @@ const saveActual = async () => {
     pattern: Number(form.value.pattern),
     operator_action: String(form.value.operator_action || 'END').toUpperCase(),
     operator_action_reason: String(form.value.operator_action_reason || '').trim(),
+    interruption_reason_code: String(form.value.interruption_reason_code || '').trim(),
     shot_count: Number(form.value.shot_count),
     component_scraps: componentRows.value
       .map((row) => ({
@@ -2024,6 +2040,8 @@ watch(
     if (!patternId) {
       form.value.operator_action = ''
       form.value.operator_action_reason = ''
+      form.value.interruption_reason_code = ''
+      form.value.remarks = ''
       form.value.shot_count = null
       return
     }
@@ -2081,12 +2099,32 @@ watch(
     const key = String(action || '').toUpperCase()
     if (!(key === 'PAUSE' || key === 'TEMP_END')) {
       form.value.operator_action_reason = ''
+      form.value.interruption_reason_code = ''
+      form.value.remarks = ''
     }
     if (!(key === 'END' || key === 'PAUSE')) {
       form.value.shot_count = null
     }
   },
   { immediate: true }
+)
+
+// 中断理由コード選択時: 表示ラベル文字列（form.operator_action_reason）を同期させる。
+// 既存のoperator_action_reason送信を壊さないよう、マスタのdisplay_nameをそのままセットする
+watch(
+  () => form.value.interruption_reason_code,
+  (code) => {
+    const reason = String(code || '')
+    if (!reason) {
+      form.value.operator_action_reason = ''
+      return
+    }
+    const matched = operatorActionReasonOptions.value.find((item) => String(item.code) === reason)
+    form.value.operator_action_reason = matched ? matched.display_name : ''
+    if (!isOtherReasonCode(reason)) {
+      form.value.remarks = ''
+    }
+  }
 )
 
 watch(activeTab, async (tab) => {
@@ -2097,7 +2135,7 @@ onMounted(async () => {
   clearMessages()
   materialWeekStart.value = startOfWeek()
   const processingStatePromise = loadCurrentProcessingState()
-  await Promise.all([loadEquipments(), loadPatterns()])
+  await Promise.all([loadEquipments(), loadPatterns(), loadInterruptionReasons()])
   await Promise.all([loadActuals(), loadKadoRecords()])
   await processingStatePromise
 })

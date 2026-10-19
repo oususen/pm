@@ -634,6 +634,7 @@ class LaserActualSerializer(serializers.ModelSerializer):
             'total_process_time',
             'operator_action',
             'operator_action_reason',
+            'interruption_reason_code',
             'remarks',
             'component_scraps',
             'created_by',
@@ -767,6 +768,28 @@ class LaserActualSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'operator_action_reason': '中断/強制終了時は理由を入力してください。'})
         if action not in reason_required_actions:
             attrs['operator_action_reason'] = ''
+
+        # 中断理由コード（中断理由マスタ、line_category='1'）の検証
+        # PAUSE/TEMP_END時のみ検証し、それ以外はコードをクリアする
+        reason_code = str(
+            attrs.get('interruption_reason_code')
+            if 'interruption_reason_code' in attrs
+            else getattr(self.instance, 'interruption_reason_code', '')
+        ).strip()
+        if action in reason_required_actions:
+            if not reason_code:
+                raise serializers.ValidationError({'interruption_reason_code': '中断/強制終了時は理由コードを選択してください。'})
+            from masters.models import InterruptionReason
+            if not InterruptionReason.objects.filter(
+                code=reason_code,
+                line_category='1',
+                operation=action,
+                is_active=True,
+            ).exists():
+                raise serializers.ValidationError({'interruption_reason_code': '選択された理由コードが不正です。'})
+            attrs['interruption_reason_code'] = reason_code
+        else:
+            attrs['interruption_reason_code'] = ''
 
         component_scrap_map = self._normalize_component_scrap_map(
             pattern=pattern,
