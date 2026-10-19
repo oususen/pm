@@ -27,6 +27,7 @@
         <button class="favorite" type="button" title="お気に入り保存" @click="saveFavorite">★</button>
         <button type="button" @click="viewMode = viewMode === 'compact' ? 'full' : 'compact'">{{ viewMode === 'compact' ? '詳細表示' : '簡易表示' }}</button>
         <button type="button" :disabled="loading || !selectedUnitIds.length" @click="loadSnapshot">更新</button>
+        <button v-if="canEdit" type="button" :disabled="loading || recalculating || !snapshot?.rows?.length" @click="recalculateVisibleProducts">表示品番だけ再計算</button>
         <button v-if="canEdit" type="button" :disabled="!selectedUnitIds.length" @click="openAdd">監視対象追加</button>
         <button v-if="canEdit" type="button" :disabled="!snapshot" @click="showManagement = !showManagement">対象管理</button>
       </div>
@@ -124,6 +125,7 @@ const snapshot = ref(null)
 const products = ref([])
 const productSearch = ref('')
 const loading = ref(false)
+const recalculating = ref(false)
 const saving = ref(false)
 const error = ref('')
 const editorError = ref('')
@@ -211,6 +213,61 @@ async function loadSnapshot() {
     snapshot.value = response.data
   } catch (e) { error.value = e?.response?.data?.detail || e?.message || '進度の取得に失敗しました。' }
   finally { loading.value = false }
+}
+function getDisplayedLineTargets() {
+  const map = new Map()
+  for (const row of snapshot.value?.rows || []) {
+    if (!row.line_id || !row.product_id) continue
+    if (!map.has(row.line_id)) {
+      map.set(row.line_id, { line_id: row.line_id, product_ids: new Set(), product_codes: new Set() })
+    }
+    const entry = map.get(row.line_id)
+    entry.product_ids.add(row.product_id)
+    if (row.product_code) entry.product_codes.add(row.product_code)
+  }
+  return Array.from(map.values()).map((entry) => ({
+    line_id: entry.line_id,
+    product_ids: Array.from(entry.product_ids).sort((a, b) => a - b),
+    product_codes: Array.from(entry.product_codes).sort(),
+  }))
+}
+function buildVisibleProductConfirmMessage(targets) {
+  const allCodes = targets.flatMap((target) => target.product_codes)
+  const preview = allCodes.slice(0, 10).join(', ')
+  const suffix = allCodes.length > 10 ? ` ほか${allCodes.length - 10}件` : ''
+  return `表示中の${allCodes.length}件を再計算しますか？\n${preview}${suffix}`
+}
+async function recalculateVisibleProducts() {
+  if (!canEdit.value) return
+  const targets = getDisplayedLineTargets()
+  if (!targets.length) { window.alert('再計算対象の品番がありません。'); return }
+  if (!window.confirm(buildVisibleProductConfirmMessage(targets))) return
+  recalculating.value = true
+  error.value = ''
+  try {
+    const start = snapshot.value.start_date
+    const end = snapshot.value.end_date
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.pickupForProducts({ line_id: target.line_id, start_date: start, end_date: end, product_ids: target.product_ids })
+      )
+    )
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.recalculateScrapForProducts({ line_id: target.line_id, start_date: start, end_date: end, product_ids: target.product_ids })
+      )
+    )
+    await Promise.all(
+      targets.map((target) =>
+        api.lineBacklogs.recalculateInventoryForProducts({ line_id: target.line_id, start_date: start, end_date: end, product_ids: target.product_ids })
+      )
+    )
+    await loadSnapshot()
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || '表示品番の再計算に失敗しました。'
+  } finally {
+    recalculating.value = false
+  }
 }
 function applyFavorite() {
   const favorite = favorites.value.find((item) => String(item.id) === selectedFavoriteId.value)

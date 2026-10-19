@@ -139,6 +139,7 @@
       <li><span class="tn">5</span>監視対象を追加する</li>
       <li><span class="tn">6</span>監視対象を編集・無効化する</li>
       <li><span class="tn">7</span>カードの見方（進度監視／在庫監視）</li>
+      <li><span class="tn">8</span>表示品番だけ再計算する</li>
     </ul>
   </div>
 
@@ -170,6 +171,9 @@
             <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">5</span>
           </span>
           <span class="mock-btn primary" style="font-size:11px;padding:3px 8px;">更新</span>
+          <span class="mock-btn" style="font-size:11px;padding:3px 8px;position:relative;">表示品番だけ再計算
+            <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">9</span>
+          </span>
           <span class="mock-btn teal" style="font-size:11px;padding:3px 8px;position:relative;">監視対象追加
             <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">6</span>
           </span>
@@ -207,11 +211,12 @@
       <li><span class="anno-num">6</span><span><strong>監視対象追加</strong> — 監視モード・ライン・製品を指定して新しいカードを登録（編集権限が必要）</span></li>
       <li><span class="anno-num">7</span><span><strong>対象管理</strong> — 登録済み監視対象の一覧表示、編集・無効化・再有効化（編集権限が必要）</span></li>
       <li><span class="anno-num">8</span><span><strong>項目行</strong> — 表示切替と監視モードによって表示される項目が変わる</span></li>
+      <li><span class="anno-num">9</span><span><strong>表示品番だけ再計算</strong> — 画面に表示中の品番だけを対象に進度・在庫を再計算する（編集権限が必要。詳細はSTEP8）</span></li>
     </ul>
 
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>この画面は参照専用です。再計算・削除の操作はありません。表示される数値は、既存の進度計算・在庫計算（<code>LineBacklog</code> / <code>LineDemand</code>）の結果をそのまま表示しています。</span>
+      <span>カードの数値は直接編集・削除できません。編集権限がある場合は「表示品番だけ再計算」ボタンで、表示中の品番に限定して進度・在庫を再計算できます（詳細はSTEP8）。</span>
     </div>
   </div>
 
@@ -372,11 +377,35 @@
     </div>
   </div>
 
+  <!-- ===== STEP 8 ===== -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">8</div>
+      <div class="step-title">表示品番だけ再計算する</div>
+    </div>
+    <div class="step-desc" style="margin-bottom:8px;">
+      編集権限がある場合、<strong>「表示品番だけ再計算」</strong>ボタンで、いま画面に表示されている品番だけを対象に進度・在庫を再計算できます（2026-10-20追加）。
+    </div>
+    <table class="info-table" style="margin-bottom:8px;">
+      <tr><th>対象</th><td>現在表示中のカード（ライン×品番の組み合わせ）のみ。他の品番・他のラインには影響しません</td></tr>
+      <tr><th>再計算される項目</th><td>計需・実需（需要再計算）、仕損集計、在庫・計画在庫・進度・計画進度（在庫・進度再計算）</td></tr>
+      <tr><th>手順</th><td>ボタンを押す → 対象品番一覧の確認ダイアログで「OK」 → 完了後に自動で画面が更新される</td></tr>
+    </table>
+    <div class="callout info">
+      <span class="icon">&#9432;</span>
+      <span>「在庫/残量一覧」画面の「表示品番だけ再計算」と同じ処理（需要再計算→仕損集計→在庫・進度再計算の3段階）を使っています。計算結果はこの画面だけでなく、同じ品番を表示する他の画面（在庫/残量一覧・進捗管理など）にも反映されます。</span>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>対象品番が多い場合、処理に時間がかかることがあります。完了まで画面を閉じずにお待ちください。</span>
+    </div>
+  </div>
+
   <!-- ===== 注意事項 ===== -->
   <div class="note">
     <h2>&#9888; 注意事項</h2>
     <ul>
-      <li><strong>参照専用:</strong> この画面から在庫・進度の再計算や、実績・調整値の入力はできません</li>
+      <li><strong>カードは直接編集不可:</strong> カードの数値を直接編集することはできません。編集権限がある場合は「表示品番だけ再計算」で表示中の品番に限定して進度・在庫を再計算できます</li>
       <li><strong>一意制約:</strong> 同一の製品・ラインは、進度監視・在庫監視のどちらか一方でしか登録できません</li>
       <li><strong>権限:</strong> production.progress_monitor の閲覧権限がないと画面を開けません。編集権限がないと監視対象の追加・編集・無効化・再有効化はできません（進捗管理・進度のみ画面とは別の権限です）</li>
       <li><strong>データの出どころ:</strong> 進度監視の内示・確定は LineDemand。在庫監視の計需・実需は LineBacklog の order_qty／order_qty_actual（後工程の計画・実績を集計した値）。計画・実績・調整・計進・進度・仕損・在庫・計庫はすべて LineBacklog から取得しています</li>
