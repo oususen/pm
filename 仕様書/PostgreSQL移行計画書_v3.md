@@ -230,7 +230,12 @@ MySQLから検証用に複製
 - production: LineStatus/StockAllocation/ProductionOrder、LineBacklog/LineDemand/LineGanttPlan、LineRealtimeRecord/ProcessRealtimeRecord/ProcessActualの9モデルのCreateModelを`SeparateDatabaseAndState(database_operations=[])`化。加えて、StockAllocation/ProductionOrderへの付随AddIndex×6・AlterUniqueTogether×1(計7件)も、ordersの元CreateModelとインデックス名まで完全一致する重複のため同様にstate-only化。LinePlanは対象外のため無変更
 - shipping: ShipmentActual/ShipmentActualHistory/DeliveryProgressの3モデルのCreateModelと、付随AddIndex×5(計)を同様にstate-only化。ShipToLeadTime(対象外)は内容無変更、ブロック構成の都合で位置のみ移動
 - evaluatorによる独立検証(16項目)**合格**。`manage.py check`・`makemigrations --check --dry-run`は問題なし、内容はAST/diffで変更前と完全一致確認済み、計画外ファイル・`D:\pm`本体への影響なしも確認済み
-- **未確認のまま残る項目**: 実際に空DBへ`migrate`を適用して完走するかの実機検証(`migrate`実行はBOSS承認事項のため、生成・検証いずれの段階でも意図的に未実施)。次の段階として、空PG(`pm-pg-rehearsal`等)への`migrate`再試験をBOSS承認のうえ実施することを推奨
+- **2026-10-20 実機検証(完了)**: BOSS承認のもと、`pm-pg-rehearsal`を空DBへ作り直し、`migrate`を実機実行した。
+  1. 1回目: `production.0003_add_progress_qty`で`line_backlog`テーブルが無いエラー。原因は`production/migrations/0001_initial.py`が`orders`アプリへの依存を一切持っていなかったため、Djangoが実行順序を「productionが先」にしてしまったこと。`shipping`側は既に`orders.0055`への依存があり問題なし
+  2. 対策: `production/migrations/0001_initial.py`の`dependencies`に`('orders', '0020_line_gantt_plan')`を追加(generator実装・evaluator検証合格)。空DBを作り直して再実行
+  3. 2回目: `production.0009_linebacklog_sequence_default_zero`で`line_backlog.adjust_qty`列が無いエラー。原因は`orders`アプリが0020より後の`orders/migrations/0028・0029`でも`line_backlog`へ実際に列追加(`actual_shipment_qty`・`adjust_qty`・`scrap_qty`・`plan_id`)していたため。依存先を0020→`orders.0029_linebacklog_plan_id`へ修正(generator実装・evaluator検証合格、0030以降に該当テーブルへの実DB操作が無いことも独立確認済み)
+  4. 3回目: 空DBを作り直して再実行した結果、**production・masters・notifications・quality.0001_initialまで全て正常に適用され、重複テーブル問題(t_line_demand等12件)は解消を実機で確認できた**。今回新たに止まったのは`quality.0002_add_is_production_recorded`の`TINYINT(1)`(MySQL固有型)エラーで、これは`仕様書/PostgreSQL移行_方式Q棚卸し.md`§4で**既に「要対応」として把握済みの7件のうちの1つ**であり、今回の重複テーブル対策とは別スコープの問題
+- **結論**: 重複テーブル作成問題(§2-1の12件)は、3回の実機`migrate`試験を経て解消を確認した。次に進む場合はRunSQL側のMySQL固有構文7件の書き換え(§3-4・方式Q棚卸し§4)が課題になる
 
 ### 3-2. 方針
 
