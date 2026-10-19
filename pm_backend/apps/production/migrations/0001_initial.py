@@ -5,6 +5,23 @@
 # 既に作成済み(実テーブル)。このマイグレーションは DB を変更せず、
 # Django の migration state を production アプリに移管するのみ。
 # LinePlan は production アプリで新規に作成されたモデルのため、通常の CreateModel のまま。
+#
+# orders アプリへの依存を追加: state-only化した9モデルの実テーブルは orders 側の
+# マイグレーションで作成・更新される。orders への依存が無いと、空DBへの適用順序
+# によっては production アプリの後続マイグレーションが、まだ実テーブル/実列が
+# 作られていない状態でアクセスしようとして失敗する。
+#
+# 当初は 0020_line_gantt_plan までの依存で十分と考えていたが、実機migrateテストで
+# orders/0028・0029(line_backlog への actual_shipment_qty / adjust_qty / scrap_qty /
+# plan_id の実列追加)が 0020 より後に実行されており、production.0009 が
+# 「列が存在しない」エラーで失敗することが判明した。そのため、orders 側で
+# 対象9テーブル(line_backlog / t_line_demand / t_stock_allocation /
+# t_production_order / t_line_status / t_line_realtime_record /
+# t_process_realtime_record / t_line_gantt_plan / t_process_actual)へ実際にDB操作
+# (AddField/AlterField/RenameIndex等)を行う最後のマイグレーションである
+# 0029_linebacklog_plan_id まで依存先を延ばした。0021〜0069の全orders
+# マイグレーションを対象9テーブル名・モデル名で検索し、0029より後に該当する
+# 実DB操作が無いことを確認済み。
 
 import django.db.models.deletion
 from django.db import migrations, models
@@ -16,6 +33,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('masters', '0026_rename_container_capacity_table'),
+        ('orders', '0029_linebacklog_plan_id'),
     ]
 
     operations = [
