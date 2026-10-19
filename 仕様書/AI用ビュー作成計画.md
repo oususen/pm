@@ -2107,9 +2107,10 @@ BOSSが本番で`migrate`を実行し、`ai/0054`〜`0061`が全て適用済み�
 - `v_ai_process_interruption`：`t_process_work_session`へ新規GRANT（公開15列＋結合に使う`end_record_id`の16列）。`t_process_realtime_record`側（`interruption_reason_code`・`event_data`）は既存の付与で足りるため追加GRANTなし。CREATE OR REPLACE DEFINERを実行。
 - `v_ai_laser_production_actual`：§34.4の手順SQL（GRANT 2文＋CREATE）をそのまま実行。
 - `v_ai_laser_interruption`：`t_laser_actual`の列権限は`v_ai_laser_production_actual`（§34.4）で付与済みの列に包含されるため追加GRANT不要。CREATE OR REPLACE DEFINERのみ実行。
-- 全7ビューとも`pm_ai_reader`へ`GRANT SELECT ON <view> TO 'pm_ai_reader'@'172.18.%'`を実行（**本番の`pm_ai_reader`はビュー単位の個別GRANT方式であり、開発DBのような「DB全体SELECT」ではないことが判明**。既存16ビューも同様にビュー単位でGRANTされていることを確認済み）。
-- 検証：`information_schema.VIEWS`で全23ビュー（既存16＋今回7）が`DEFINER=pm_ai_view_owner@localhost`・`SECURITY_TYPE=DEFINER`であることを確認。`pm_ai_reader`権限での実読み取り確認はせず、`root`接続で各ビューの件数確認のみ実施（`v_ai_equipment`17・`v_ai_brake_production_actual`27,896・`v_ai_brake_interruption`368・`v_ai_process_production_actual`16,140・`v_ai_process_interruption`120・`v_ai_laser_production_actual`12,469・`v_ai_laser_interruption`17）。いずれもエラーなく取得できた。
-- 未確認：`pm_ai_reader`接続での実読み取り確認（今回は`root`での件数確認のみ）、AI分析実行経路（`ANALYSIS_COLUMN_TYPES`等）での実機動作確認、`setup_ai_views --check`コマンドでの機械的な整合確認。
+- 全7ビューとも`pm_ai_reader`へ`GRANT SELECT ON <view> TO 'pm_ai_reader'@'172.18.%'`を実行した。
+- **訂正（2026-10-20、`SHOW GRANTS FOR 'pm_ai_reader'@'172.18.%'`で確認）**：本記録は当初「本番の`pm_ai_reader`はビュー単位の個別GRANT方式で、DB全体SELECTではない」と記載していたが誤りだった。実際には`GRANT SELECT ON pm_db.* TO 'pm_ai_reader'@'172.18.%'`（DB全体SELECT）が既に付与されており、開発DBと同じ状態（`memory/project_prod_ai_views_applied.md`に記録済みの既知の差異）だった。今回追加した7件の個別GRANTは、DB全体SELECTに包含されるため実質的に冗長（害はない）。この既知の課題（AI実行ユーザーが公開ビュー以外もDB全体読める）は本番にも存在することを確認した。
+- 検証：`information_schema.VIEWS`で全23ビュー（既存16＋今回7）が`DEFINER=pm_ai_view_owner@localhost`・`SECURITY_TYPE=DEFINER`であることを確認。`root`接続で各ビューの件数確認を実施（`v_ai_equipment`17・`v_ai_brake_production_actual`27,896・`v_ai_brake_interruption`368・`v_ai_process_production_actual`16,140・`v_ai_process_interruption`120・`v_ai_laser_production_actual`12,469・`v_ai_laser_interruption`17）。いずれもエラーなく取得できた。`pm_ai_reader`はDB全体SELECTを持つため、個別の読み取り確認（ログイン）は行わずとも接続性に問題はないと判断する。
+- 未確認：AI分析実行経路（`ANALYSIS_COLUMN_TYPES`等）での実機動作確認、`setup_ai_views --check`コマンドでの機械的な整合確認。
 - コミット・push・開発DBへの`setup_ai_views --apply`実行は、本記録の対象外（本番優先で直接SQL実行する方式を採用）。
 
 ## 39〜42. 計画・在庫・進度系（セクション予約。2026-10-18、計画・在庫・進度ビュー統括セッションが予約）
