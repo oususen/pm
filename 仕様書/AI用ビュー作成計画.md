@@ -2097,6 +2097,21 @@ JSON型の列はない（`t_process_realtime_record.event_data`はJSON型だが�
 - コミット：未（BOSSの指示後に実施）。
 - 未確認・未実施：`migrate ai 0061`の実行、`v_ai_process_interruption`での件数・`end_action`別件数・`interruption_reason`優先順位の照合（現在skip）、`setup_ai_views`による権限付与・定義者の付け替え（手順SQLも未作成）、本番反映、commit・push、evaluator検証。
 
+## 38.9 実績系7ビュー（§32〜§38・レーザー2本含む）の本番反映完了記録（2026-10-20）
+
+BOSSが本番で`migrate`を実行し、`ai/0054`〜`0061`が全て適用済み（`django_migrations`で確認）であることが判明した。これを受け、残っていた権限付与・定義者の付け替え（`setup_ai_views --apply`相当）を、Claude提示のSQLをBOSSがAdminerで実行する形で完了した（レーザー2ビューは別セッション担当分だが、BOSSの指示により本セッションでまとめて実施）。
+
+- `v_ai_equipment`・`v_ai_brake_production_actual`：`SIMPLE_MASTER_VIEWS`方式。GRANT（元テーブルの公開列）→`CREATE OR REPLACE DEFINER = 'pm_ai_view_owner'@'localhost' SQL SECURITY DEFINER VIEW`の順で実行。
+- `v_ai_brake_interruption`：`brake_line_record`の列権限は`v_ai_brake_production_actual`で付与済みの列に包含されるため追加GRANT不要。CREATE OR REPLACE DEFINERのみ実行。
+- `v_ai_process_production_actual`：§33.4の手順SQL（GRANT 5列＋CREATE）をそのまま実行。
+- `v_ai_process_interruption`：`t_process_work_session`へ新規GRANT（公開15列＋結合に使う`end_record_id`の16列）。`t_process_realtime_record`側（`interruption_reason_code`・`event_data`）は既存の付与で足りるため追加GRANTなし。CREATE OR REPLACE DEFINERを実行。
+- `v_ai_laser_production_actual`：§34.4の手順SQL（GRANT 2文＋CREATE）をそのまま実行。
+- `v_ai_laser_interruption`：`t_laser_actual`の列権限は`v_ai_laser_production_actual`（§34.4）で付与済みの列に包含されるため追加GRANT不要。CREATE OR REPLACE DEFINERのみ実行。
+- 全7ビューとも`pm_ai_reader`へ`GRANT SELECT ON <view> TO 'pm_ai_reader'@'172.18.%'`を実行（**本番の`pm_ai_reader`はビュー単位の個別GRANT方式であり、開発DBのような「DB全体SELECT」ではないことが判明**。既存16ビューも同様にビュー単位でGRANTされていることを確認済み）。
+- 検証：`information_schema.VIEWS`で全23ビュー（既存16＋今回7）が`DEFINER=pm_ai_view_owner@localhost`・`SECURITY_TYPE=DEFINER`であることを確認。`pm_ai_reader`権限での実読み取り確認はせず、`root`接続で各ビューの件数確認のみ実施（`v_ai_equipment`17・`v_ai_brake_production_actual`27,896・`v_ai_brake_interruption`368・`v_ai_process_production_actual`16,140・`v_ai_process_interruption`120・`v_ai_laser_production_actual`12,469・`v_ai_laser_interruption`17）。いずれもエラーなく取得できた。
+- 未確認：`pm_ai_reader`接続での実読み取り確認（今回は`root`での件数確認のみ）、AI分析実行経路（`ANALYSIS_COLUMN_TYPES`等）での実機動作確認、`setup_ai_views --check`コマンドでの機械的な整合確認。
+- コミット・push・開発DBへの`setup_ai_views --apply`実行は、本記録の対象外（本番優先で直接SQL実行する方式を採用）。
+
 ## 39〜42. 計画・在庫・進度系（セクション予約。2026-10-18、計画・在庫・進度ビュー統括セッションが予約）
 
 カテゴリ統括は「計画・在庫・進度ビュー統括セッション」（引継ぎ文: `仕様書/AIビュー作成_計画在庫進度系セッション引継ぎ.md`）。対象4テーブルのうち、BOSSの指示（2026-10-18）により`LineBacklog`は個別セッションへ委譲した（引継ぎ文: `仕様書/AIビュー作成_LineBacklogビューセッション引継ぎ.md`）。残り3テーブルは統括セッションが着手順をBOSSと相談の上、個別セッション化または自ら実装する。セクション番号の重複を避けるため、テーブルごとに見出しのみ以下に予約する（実装内容はまだ無い。各セッションが実装の都度該当節に追記する）。
