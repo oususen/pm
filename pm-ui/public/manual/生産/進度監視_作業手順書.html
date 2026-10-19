@@ -154,7 +154,7 @@
       <div class="mock-toolbar" style="border-radius:6px 6px 0 0;justify-content:space-between;">
         <span style="font-size:14px;font-weight:700;color:var(--ink);">進度監視</span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-          <span class="f-select" style="position:relative;">グループ ▾
+          <span class="f-select" style="position:relative;">☑ブレード ☐フロア ☐タンク（複数可）
             <span class="om-anno" style="position:absolute;top:-10px;right:-10px;">1</span>
           </span>
           <span class="f-input" style="position:relative;">2026-10-01
@@ -199,10 +199,10 @@
     </div>
 
     <ul class="anno-list" style="margin-top:16px;">
-      <li><span class="anno-num">1</span><span><strong>グループ</strong> — 自分が所属／担当するグループから選ぶ（superuserは全グループ）</span></li>
+      <li><span class="anno-num">1</span><span><strong>グループ</strong> — チェックボックスで複数選択可。自分が所属／担当するグループから選ぶ（superuserは全グループ）</span></li>
       <li><span class="anno-num">2</span><span><strong>開始日</strong> — 表示開始日。初期値は当月1日</span></li>
       <li><span class="anno-num">3</span><span><strong>期間</strong> — 30日・60日・90日・120日から選ぶ</span></li>
-      <li><span class="anno-num">4</span><span><strong>★（お気に入り保存）</strong> — 選択中のグループをお気に入りとして保存</span></li>
+      <li><span class="anno-num">4</span><span><strong>★（お気に入り保存）</strong> — 選択中のグループ一覧をお気に入りとして保存</span></li>
       <li><span class="anno-num">5</span><span><strong>詳細表示／簡易表示</strong> — カードの表示項目数を切り替える（初期値は簡易表示）</span></li>
       <li><span class="anno-num">6</span><span><strong>監視対象追加</strong> — 監視モード・ライン・製品を指定して新しいカードを登録（編集権限が必要）</span></li>
       <li><span class="anno-num">7</span><span><strong>対象管理</strong> — 登録済み監視対象の一覧表示、編集・無効化・再有効化（編集権限が必要）</span></li>
@@ -265,13 +265,17 @@
       上部の3項目を選び、<strong>「更新」</strong>を押すとカードが再読み込みされます。
     </div>
     <table class="info-table" style="margin-bottom:4px;">
-      <tr><th>グループ</th><td>自分が所属するグループと、班長として担当するグループが選択肢に表示されます</td></tr>
+      <tr><th>グループ</th><td>チェックボックスで複数選択できます。自分が所属するグループ、リーダーとして担当するグループ、班長として統括する班の配下グループが選択肢に表示されます。選択した全グループの監視対象がまとめて1画面に表示されます</td></tr>
       <tr><th>開始日</th><td>表示を開始する日付。初期値は当月1日</td></tr>
       <tr><th>期間</th><td>30日・60日・90日・120日から選択</td></tr>
     </table>
     <div class="callout info">
       <span class="icon">&#9432;</span>
       <span>グループに所属するラインは、ラインマスタの「所属グループ」設定から取得されます。表示したいラインが出ない場合は、ラインマスタの所属グループ設定を確認してください。</span>
+    </div>
+    <div class="callout warn">
+      <span class="icon">&#9888;</span>
+      <span>事業部長・課長・係長（manager／chief）は、この画面の対象外です。配下グループがあっても選択肢には表示されません。</span>
     </div>
   </div>
 
@@ -282,15 +286,15 @@
       <div class="step-title">お気に入りを使う</div>
     </div>
     <div class="step-desc" style="margin-bottom:8px;">
-      よく見るグループは、お気に入りとして保存しておくと次回すぐ呼び出せます。
+      よく見るグループの組み合わせは、お気に入りとして保存しておくと次回すぐ呼び出せます。複数グループをまとめて1件のお気に入りとして保存できます。
     </div>
     <table class="info-table" style="margin-bottom:4px;">
-      <tr><th>保存</th><td>グループを選び、「お気に入り名」を入力して「★」を押す</td></tr>
-      <tr><th>呼び出し</th><td>「お気に入り選択」でお気に入り名を選ぶと、グループが自動で選ばれ、カードが再読み込みされる</td></tr>
+      <tr><th>保存</th><td>グループを選び（複数可）、「お気に入り名」を入力して「★」を押す</td></tr>
+      <tr><th>呼び出し</th><td>「お気に入り選択」でお気に入り名を選ぶと、保存した全グループが自動で選ばれ、カードが再読み込みされる</td></tr>
     </table>
     <div class="callout info">
       <span class="icon">&#9432;</span>
-      <span>お気に入りに保存されるのは<strong>グループだけ</strong>です。ラインの所属が変わっても、次に開いたときの最新の所属で自動的に反映されます。</span>
+      <span>お気に入りに保存されるのは<strong>選択中のグループ一覧だけ</strong>です。開始日・期間は保存されません。ラインの所属が変わっても、次に開いたときの最新の所属で自動的に反映されます。</span>
     </div>
   </div>
 
@@ -305,7 +309,8 @@
     </div>
     <table class="info-table" style="margin-bottom:8px;">
       <tr><th>監視モード</th><td>「進度」または「在庫」を選ぶ</td></tr>
-      <tr><th>ライン</th><td>選択中のグループに所属するラインから選ぶ</td></tr>
+      <tr><th>対象グループ</th><td>複数グループを選択中のとき、どのグループを対象に登録するか選ぶ（1グループしか選んでいなければ自動選択）</td></tr>
+      <tr><th>ライン</th><td>「対象グループ」で選んだグループに所属するラインから選ぶ</td></tr>
       <tr><th>製品検索・製品</th><td>品番または品名の一部を入力して候補を絞り込み、製品を選ぶ</td></tr>
       <tr><th>表示順</th><td>カードの並び順。小さい値ほど先に表示される</td></tr>
       <tr><th>メモ</th><td>最大500文字の自由記述</td></tr>
