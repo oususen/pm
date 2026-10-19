@@ -249,7 +249,9 @@ S1初回は**開発PC**の既存コードで実施済み。以降のコード修
 
 次の候補は、現在のMySQLの実スキーマ・データ・`django_migrations` を整合した同一時点で取得し、PGへ変換する方式Qとする。採用・実行は未確定であり、承認後に検証する。初回試験の途中DBに追加投入せず、別の検証DBへ移行する。途中DBの削除・再作成が必要な場合は対象を明示して別途確認する。
 
-方式Qの実行前に、対象テーブル一覧、型・既定値・制約の変換表、ビューの移植DDL、migrationごとの実オブジェクト／履歴対応表、シーケンス調整、投入・突合・再実行の具体的な手順を作成する。現時点では未作成であり、本節の方針だけを本番実行手順として使用しない。
+方式Qの実行前に、対象テーブル一覧、型・既定値・制約の変換表、ビューの移植DDL、migrationごとの実オブジェクト／履歴対応表、シーケンス調整、投入・突合・再実行の具体的な手順を作成する。
+
+**2026-10-20 棚卸し完了**: 対象テーブル一覧(全238モデル・226ユニークdb_table)、db_table重複問題の確定一覧(12件)、型・制約の変換表、RunSQL/ビュー移植ワークリスト(38件)を`仕様書/PostgreSQL移行_方式Q棚卸し.md`にまとめた。投入・突合・再実行の具体的な手順(実行手順書)はまだ未作成であり、本節の方針だけを本番実行手順として使用しない。
 
 1. コピー元MySQLの実テーブル、型、主キー・外部キー、一意制約、索引、ビュー、管理対象外テーブル、migration適用履歴を棚卸しする。
 2. 対応するGitコミットとデータ取得日時を固定し、スキーマ・データ・履歴をPGへ移す。MySQL専用SQL、ビュー、DBロール等は個別にPG対応する。
@@ -320,6 +322,13 @@ PC3：開発PostgreSQL（比較先）
 | ai_reader の ENGINE(`settings.py`)、`AI_DB_*` 環境変数 | PG用に作り直し |
 | migrations 0012〜0014 の JSON_VALUE ビュー | `->>` 等で書き直し(jsonb対応) |
 | ビュー定義者 `pm_ai_view_owner` | ビュー所有者+GRANTで作り直し |
+
+**2026-10-20追記(調査済み)**: `pm_ai_view_owner`の実体は`pm_backend/apps/ai/management/commands/setup_ai_views.py`で確認した。
+
+- このコマンド自体が**MySQL専用**で、`connection.vendor != 'mysql'`の場合は「PostgreSQL版は、移行時に作る。何もしない」と自ら何もしない設計になっている(setup_ai_views.py:292-294)。つまりPG移行時はこのコマンド自体のPG版書き直しが必要
+- 対象は2系統: ①「単純なマスタビュー」7件(v_ai_product等、`SIMPLE_MASTER_VIEWS`)はこのコマンドが`CREATE OR REPLACE DEFINER = pm_ai_view_owner ... SQL SECURITY DEFINER VIEW`を自動生成・適用する。②「結合・WHERE句を含むビュー」17件(migrations 0012-0014・0040-0043・0045・0046・0048-0050・0055・0056・0058・0060・0061で定義、`EXISTING_JOIN_VIEWS`)は、このコマンドは`--check`での確認のみ行い、定義者の付け替えは**手動SQL**(例: `scripts/repair_routing_ai_view_definers.sql.txt`)をBOSSが本番Adminerで実行する運用
+- PGにはMySQLの`DEFINER`/`SQL SECURITY DEFINER`に相当する「ビュー定義者」概念が無く、PGでは**ビューの所有者(OWNER)がデフォルトでその実行権限を持つ**設計のため、GRANT/REVOKEの組み方自体を作り直す必要がある(単純な構文の置換では済まない)
+- 読者側アカウント`pm_ai_reader`(コード内`READER_USER`定数で確認)もPG用に作り直しが必要
 
 AI分析の**本番実行は、PC入替+PG移行+AI層移植の後**に有効化する(それまで無効)。
 
