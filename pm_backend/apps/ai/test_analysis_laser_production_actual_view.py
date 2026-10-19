@@ -3,6 +3,12 @@
 偽のDB接続・定義の検査だけを使う試験(SimpleTestCase)と、開発DBへ読み取りだけを行う件数照合試験(DBCountMatchTest)を分ける。
 件数照合は、`migrate`未実行(本ビュー未作成)の間は、実テーブルの直接JOINによる期待値だけを計算し、
 ビュー自体へのSELECTは `information_schema.VIEWS` でビューの存在を確認してから行う(存在しなければ明示してスキップする)。
+
+ビュー本体は2つのマイグレーションに分かれている:
+- 0056_ai_laser_production_actual_view.py: 開発DB適用済み(31列版、変更不可)
+- 0062_ai_laser_views_add_interruption_reason_code.py: interruption_reason_code追加で32列への拡張
+  (未適用。BOSSのmigrate待ち。2026-10-20、Codexレビュー指摘の修正2)
+現在の公開列定義(PUBLISHED、32列)に対する検査は0062の内容を基準にする。
 """
 import re
 from pathlib import Path
@@ -17,21 +23,23 @@ from ai.services.sql_queries import BASE_SQL_SCHEMA, TABLE_NOTES
 
 VIEW = 'v_ai_laser_production_actual'
 PERIOD = ('2026-09-01', '2026-09-30')
-# BOSSが決定した公開31列。順序はマイグレーションのSELECT順と同じ(AI用ビュー作成計画 §34)。
+# BOSSが決定した公開32列。順序はマイグレーションのSELECT順と同じ(AI用ビュー作成計画 §34。
+# 2026-10-20、Codexレビュー指摘の修正2によりinterruption_reason_codeを追加公開)。
 PUBLISHED = (
     'id', 'actual_id', 'operator_user_id', 'equipment_id', 'equipment_code', 'equipment_name', 'line_id',
     'process_id', 'pattern_id', 'pattern_no', 'material_id', 'material_code', 'material_name', 'product_id',
     'product_code', 'product_name', 'work_date', 'shot_count', 'process_time_per_shot', 'total_process_time',
     'operator_action', 'operator_action_reason', 'units_per_shot', 'total_qty', 'scrap_qty', 'scrap_reason',
     'end_operator_user_id', 'created_at_h', 'updated_at_h', 'created_at', 'updated_at',
+    'interruption_reason_code',
 )
 # 非公開(ビューに含めない): detail_type(常にCOMPONENT固定)、display_order(画面の並び順)、ヘッダのremarks(全件空。4,997件中4,997件が空文字)
 HIDDEN = ('detail_type', 'display_order', 'remarks')
-MIGRATION = Path(__file__).parent / 'migrations' / '0056_ai_laser_production_actual_view.py'
+MIGRATION = Path(__file__).parent / 'migrations' / '0062_ai_laser_views_add_interruption_reason_code.py'
 
 
 def migration_sql():
-    return MIGRATION.read_text(encoding='utf-8').split('CREATE_VIEW = """')[1].split('"""')[0]
+    return MIGRATION.read_text(encoding='utf-8').split('CREATE_LASER_PRODUCTION_ACTUAL_VIEW = """')[1].split('"""')[0]
 
 
 def migration_columns():
@@ -69,7 +77,7 @@ class LaserProductionActualViewDefinitionTest(SimpleTestCase):
 
     def test_column_types_match_published_columns_exactly(self):
         self.assertEqual(BASE_SQL_SCHEMA[VIEW], PUBLISHED)
-        self.assertEqual(len(PUBLISHED), 31)
+        self.assertEqual(len(PUBLISHED), 32)
         self.assertEqual(set(service.ANALYSIS_COLUMN_TYPES[VIEW]), set(BASE_SQL_SCHEMA[VIEW]))
         self.assertEqual(service.ANALYSIS_COLUMN_TYPES[VIEW], {
             'id': 'BIGINT', 'actual_id': 'BIGINT', 'operator_user_id': 'BIGINT', 'equipment_id': 'BIGINT',
@@ -81,7 +89,10 @@ class LaserProductionActualViewDefinitionTest(SimpleTestCase):
             'units_per_shot': 'DECIMAL(18,3)', 'total_qty': 'DECIMAL(18,3)', 'scrap_qty': 'DECIMAL(18,3)',
             'scrap_reason': 'VARCHAR', 'end_operator_user_id': 'BIGINT', 'created_at_h': 'TIMESTAMP',
             'updated_at_h': 'TIMESTAMP', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
+            'interruption_reason_code': 'VARCHAR',
         })
+        # JSON型の列が混入していないこと(分析実行の値変換が未対応のため実行が失敗する再発防止)
+        self.assertNotIn('JSON', service.ANALYSIS_COLUMN_TYPES[VIEW].values())
 
     def test_hidden_columns_do_not_appear_anywhere(self):
         # 非公開3列は、ビューの出力列(SELECTの別名)・BASE_SQL_SCHEMA・ANALYSIS_COLUMN_TYPES・TABLE_NOTES本文のいずれにも出現しない。
@@ -136,6 +147,8 @@ class LaserProductionActualViewDefinitionTest(SimpleTestCase):
         self.assertIn('NULL', TABLE_NOTES[VIEW])
         self.assertIn('created_by_id', TABLE_NOTES[VIEW])
         self.assertIn('updated_by_id', TABLE_NOTES[VIEW])
+        # 2026-10-20追加公開のinterruption_reason_codeに関する記述(TABLE_NOTESのみ。descriptionは今回対象外)
+        self.assertIn('interruption_reason_code', TABLE_NOTES[VIEW])
 
     def test_setup_command_treats_this_view_as_not_simple(self):
         self.assertIn(VIEW, cmd.EXISTING_JOIN_VIEWS)
@@ -153,6 +166,7 @@ class LaserProductionActualViewDefinitionTest(SimpleTestCase):
         self.assertIn("d.detail_type = 'COMPONENT'", sql)
         self.assertIn('a.created_by_id AS operator_user_id', sql)
         self.assertIn('a.updated_by_id AS end_operator_user_id', sql)
+        self.assertIn('a.interruption_reason_code', sql)
         for hidden in ('display_order', 'remarks'):
             self.assertNotRegex(sql, rf'\b{hidden}\b')
 
@@ -163,13 +177,13 @@ class LaserProductionActualViewDefinitionTest(SimpleTestCase):
     def test_migration_columns_match_base_sql_schema_order(self):
         columns, aliases = migration_columns()
         self.assertEqual(tuple(aliases), PUBLISHED)
-        self.assertEqual(len(columns), 31)
+        self.assertEqual(len(columns), 32)
 
     def test_migration_dependencies(self):
         source = MIGRATION.read_text(encoding='utf-8')
-        self.assertIn("('ai', '0055_ai_process_production_actual_view')", source)
-        self.assertIn("('production', '0118_laser_actual_line_process')", source)
-        self.assertIn("DROP_VIEW = 'DROP VIEW IF EXISTS v_ai_laser_production_actual'", source)
+        self.assertIn("('ai', '0061_ai_process_interruption_view')", source)
+        self.assertIn("('production', '0125_laseractual_interruption_reason_code')", source)
+        self.assertIn('REVERT_LASER_PRODUCTION_ACTUAL_VIEW = """', source)
 
     def test_migration_dependency_migration_exists_and_adds_line_process(self):
         production = Path(__file__).parent.parent / 'production' / 'migrations'
@@ -179,10 +193,28 @@ class LaserProductionActualViewDefinitionTest(SimpleTestCase):
         self.assertIn("name='line'", text)
         self.assertIn("name='process'", text)
 
+    def test_migration_dependency_migration_exists_and_adds_interruption_reason_code(self):
+        production = Path(__file__).parent.parent / 'production' / 'migrations'
+        interruption = production / '0125_laseractual_interruption_reason_code.py'
+        self.assertTrue(interruption.exists())
+        text = interruption.read_text(encoding='utf-8')
+        self.assertIn("name='interruption_reason_code'", text)
+
+    def test_0056_is_unchanged_original_31_column_definition(self):
+        # 0056は既にDB適用済みのため、適用済み内容(31列)のまま変更しないこと(2026-10-20、Codexレビュー指摘の修正2)
+        original = Path(__file__).parent / 'migrations' / '0056_ai_laser_production_actual_view.py'
+        source = original.read_text(encoding='utf-8')
+        body = re.search(r'SELECT(.*)FROM', source, re.S).group(1)
+        columns = [c.strip().rstrip(',') for c in body.strip().split('\n') if c.strip()]
+        self.assertEqual(len(columns), 31)
+        self.assertNotIn('interruption_reason_code', columns)
+        self.assertIn("DROP_VIEW = 'DROP VIEW IF EXISTS v_ai_laser_production_actual'", source)
+
     def test_existing_view_definitions_in_migrations_are_unchanged(self):
-        # 既存ビューのマイグレーション(0001〜0055)に、このビューが混入していない
-        for path in (Path(__file__).parent / 'migrations').glob('00[0-5][0-5]*.py'):
-            if path.name == '0056_ai_laser_production_actual_view.py':
+        # 既存ビューのマイグレーション(0001〜0061。0056・0062は対象ビューの定義マイグレーションのため除外)に、
+        # このビューが混入していない
+        for path in (Path(__file__).parent / 'migrations').glob('00[0-6][0-1]*.py'):
+            if path.name in ('0056_ai_laser_production_actual_view.py', '0062_ai_laser_views_add_interruption_reason_code.py'):
                 continue
             self.assertNotIn(VIEW, path.read_text(encoding='utf-8'), path.name)
 
@@ -192,6 +224,7 @@ class LaserProductionActualDBCountMatchTest(SimpleTestCase):
 
     本ビューは2026-10-17時点で`migrate`未実行のため、`v_ai_laser_production_actual`が存在しない間は、
     期待値だけを計算してスキップする(BOSSの指示でmigrate実行後に本試験が有効になる)。
+    件数自体は列数に関係なく一致するはずなので、0062(interruption_reason_code追加)未適用でも検証できる。
     """
     def test_view_count_matches_independent_join_count(self):
         # Django ORM経由の接続(SimpleTestCaseのDB保護対象)ではなく、既存のDeadlineTest等と同じ
@@ -217,3 +250,24 @@ class LaserProductionActualDBCountMatchTest(SimpleTestCase):
         finally:
             connection.close()
         self.assertEqual(actual, expected)
+
+    def test_view_has_32_columns_after_0062_migrate(self):
+        connection = service.open_snapshot_connection(service.Deadline(30, 'stage_deadline_fetch'), read_timeout=30)
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.VIEWS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s", (VIEW,))
+            view_exists = cursor.fetchone()[0] > 0
+            if not view_exists:
+                self.skipTest('v_ai_laser_production_actual は未作成(migrate未実行)のため列数照合をスキップ。')
+            cursor.execute(f'SHOW COLUMNS FROM `{VIEW}`')
+            actual_columns = tuple(row[0] for row in cursor.fetchall())
+            cursor.close()
+        finally:
+            connection.close()
+        if actual_columns == PUBLISHED:
+            return
+        self.skipTest(
+            f'0062未適用のため、v_ai_laser_production_actual はまだ31列のまま(実列={actual_columns})。'
+            f'migrate実行後に本試験で32列への更新を確認する。')

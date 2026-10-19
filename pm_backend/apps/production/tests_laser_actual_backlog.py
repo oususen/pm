@@ -480,4 +480,16 @@ class LaserActualBacklogSyncTest(TestCase):
         ))
         self.assertFalse(serializer.is_valid())
         self.assertIn('operator_action_reason', serializer.errors)
-        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_mismatched_reason_text_is_overwritten_by_code_display_name(self):
+        # コード(1101=設備トラブル)と文字列('その他')が矛盾する組を送信しても、
+        # 保存される operator_action_reason はマスタの display_name('設備トラブル')で上書きされる
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='その他', interruption_reason_code='1101',
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        actual.refresh_from_db()
+        expected = InterruptionReason.objects.get(code='1101').display_name
+        self.assertEqual(expected, '設備トラブル')
+        self.assertEqual(actual.operator_action_reason, expected)

@@ -780,14 +780,18 @@ class LaserActualSerializer(serializers.ModelSerializer):
             if not reason_code:
                 raise serializers.ValidationError({'interruption_reason_code': '中断/強制終了時は理由コードを選択してください。'})
             from masters.models import InterruptionReason
-            if not InterruptionReason.objects.filter(
+            reason_obj = InterruptionReason.objects.filter(
                 code=reason_code,
                 line_category='1',
                 operation=action,
                 is_active=True,
-            ).exists():
+            ).first()
+            if reason_obj is None:
                 raise serializers.ValidationError({'interruption_reason_code': '選択された理由コードが不正です。'})
             attrs['interruption_reason_code'] = reason_code
+            # コードと文字列の不整合防止: 保存する operator_action_reason は
+            # クライアント送信値ではなく、理由コードが指すマスタの表示名で必ず上書きする
+            attrs['operator_action_reason'] = reason_obj.display_name
         else:
             attrs['interruption_reason_code'] = ''
 

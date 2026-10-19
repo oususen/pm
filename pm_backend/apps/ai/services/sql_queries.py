@@ -51,13 +51,15 @@ BASE_SQL_SCHEMA = {
     ),
     # レーザーの生産実績のビュー(AI用ビュー作成計画 §34。t_laser_actual_detail に t_laser_actual を結合。
     # operator_action IN ('END','PAUSE') かつ detail_type='COMPONENT' の行だけ。非公開: detail_type・display_order・ヘッダの remarks。
-    # 列順はマイグレーションのSELECT順と同じ。operator_user_id=created_by_idの別名、end_operator_user_id=updated_by_idの別名)
+    # 列順はマイグレーションのSELECT順と同じ。operator_user_id=created_by_idの別名、end_operator_user_id=updated_by_idの別名。
+    # 2026-10-20、単位C-7でinterruption_reason_codeを追加公開(マイグレーション0062))
     'v_ai_laser_production_actual': (
         'id', 'actual_id', 'operator_user_id', 'equipment_id', 'equipment_code', 'equipment_name', 'line_id',
         'process_id', 'pattern_id', 'pattern_no', 'material_id', 'material_code', 'material_name', 'product_id',
         'product_code', 'product_name', 'work_date', 'shot_count', 'process_time_per_shot', 'total_process_time',
         'operator_action', 'operator_action_reason', 'units_per_shot', 'total_qty', 'scrap_qty', 'scrap_reason',
         'end_operator_user_id', 'created_at_h', 'updated_at_h', 'created_at', 'updated_at',
+        'interruption_reason_code',
     ),
     # ブレーキ・板金スポットの生産実績のビュー(AI用ビュー作成計画 §35。brake_line_recordを結合なし・全行(WHEREなし)で公開。
     # 非公開: operator(個人名)のみ。2026-10-17、BOSS判断によりoperator_login_id・interruption_reason_code・remarksを追加公開。
@@ -69,11 +71,13 @@ BASE_SQL_SCHEMA = {
     ),
     # レーザーの中断のビュー(AI用ビュー作成計画 §36。t_laser_actual単独(結合なし)。
     # operator_action IN ('PAUSE','TEMP_END')の行だけを公開。t_laser_actual_detailへは結合しない
-    # (結合すると中断1件が明細行数分重複するため)。列順はマイグレーションのSELECT順と同じ)
+    # (結合すると中断1件が明細行数分重複するため)。列順はマイグレーションのSELECT順と同じ。
+    # 2026-10-20、単位C-7でinterruption_reason_codeを追加公開(マイグレーション0062))
     'v_ai_laser_interruption': (
         'id', 'work_date', 'equipment_id', 'equipment_code', 'equipment_name', 'line_id', 'process_id',
         'pattern_no', 'material_id', 'material_code', 'material_name', 'operator_action',
         'operator_action_reason', 'operator_user_id', 'created_at',
+        'interruption_reason_code',
     ),
     # ブレーキ・板金スポットの中断のビュー(AI用ビュー作成計画 次セクション。brake_line_record単独(結合なし)。
     # operator_action IN ('PAUSE','TEMP_END')の行だけを公開。非公開: operator(個人名)のみ。
@@ -209,6 +213,9 @@ TABLE_NOTES = {
         'line_id・process_id は2026-10-14にライン・工程の保存機能を追加したため、それより前の実績行はNULL(欠損ではなく仕様。保存機能がなかった期間)。'
         'このビューはレーザー工程の実績なので、2026-10-14より前の process_id がNULLでも工程不明と扱わない。ルーティングの起点工程は固定工程コード 0801 として、v_ai_routing_step の process_code=0801 に合わせる。'
         'created_at_h・updated_at_h はヘッダ(レーザー実績登録)の作成・更新日時、created_at・updated_at(無印)は明細(構成部品行)自体の作成・更新日時。'
+        '2026-10-20、Codexレビュー指摘(修正2)によりinterruption_reason_codeを追加公開。'
+        'interruption_reason_code は中断理由コード(単位C-6で追加された列で、開発DB確認時点では公開列として追加したばかりのため、'
+        '値が入っている行は限定的。対象12,195件中値ありは0件。今後のデータ蓄積を見込んで公開)。'
     ),
     'v_ai_brake_production_actual': (
         'ブレーキ・板金スポットの生産実績(brake_line_record)のビュー。1行=1操作イベント(全行。結合なし・WHEREなし)。'
@@ -240,6 +247,9 @@ TABLE_NOTES = {
         '開発DB確認(2026-10-17): 現在の対象16件は全件work_dateが2026-10-14より前(2026-05-25〜2026-10-09)のため、現時点では16件全件がline_id・process_idともにNULL。'
         '将来2026-10-14以降のPAUSE・TEMP_ENDが発生すれば値が入る。material_id・equipment_id・operator_user_id(created_by_id)は、対象16件全件で値あり(NULL0件)。'
         'created_at はこのビューでは衝突する列がないため接尾辞なし(無印)で、このヘッダ行自体の作成日時。'
+        '2026-10-20、Codexレビュー指摘(修正2)によりinterruption_reason_codeを追加公開。'
+        'interruption_reason_code は中断理由コード(単位C-6で追加された列で、開発DB確認時点では公開列として追加したばかりのため、'
+        '値が入っている行は限定的。対象16件中値ありは0件。今後のデータ蓄積を見込んで公開)。'
     ),
     'v_ai_brake_interruption': (
         'ブレーキ・板金スポットの中断・強制終了(brake_line_record)のビュー。1行=1操作イベント'

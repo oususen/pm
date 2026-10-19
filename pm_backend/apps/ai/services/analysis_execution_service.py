@@ -72,6 +72,7 @@ ANALYSIS_COLUMN_TYPES = {
         'units_per_shot': 'DECIMAL(18,3)', 'total_qty': 'DECIMAL(18,3)', 'scrap_qty': 'DECIMAL(18,3)',
         'scrap_reason': 'VARCHAR', 'end_operator_user_id': 'BIGINT', 'created_at_h': 'TIMESTAMP',
         'updated_at_h': 'TIMESTAMP', 'created_at': 'TIMESTAMP', 'updated_at': 'TIMESTAMP',
+        'interruption_reason_code': 'VARCHAR',
     },
     # ブレーキ・板金スポットの生産実績(brake_line_recordのSHOW COLUMNSから導出。bigintはBIGINT、dateはDATE、
     # varcharはVARCHAR、intはBIGINT、datetime(6)はTIMESTAMP)
@@ -89,7 +90,7 @@ ANALYSIS_COLUMN_TYPES = {
         'equipment_name': 'VARCHAR', 'line_id': 'BIGINT', 'process_id': 'BIGINT', 'pattern_no': 'VARCHAR',
         'material_id': 'BIGINT', 'material_code': 'VARCHAR', 'material_name': 'VARCHAR',
         'operator_action': 'VARCHAR', 'operator_action_reason': 'VARCHAR', 'operator_user_id': 'BIGINT',
-        'created_at': 'TIMESTAMP',
+        'created_at': 'TIMESTAMP', 'interruption_reason_code': 'VARCHAR',
     },
     # ブレーキ・板金スポットの中断(brake_line_recordのSHOW COLUMNSから導出。v_ai_brake_production_actualと同じ型対応。
     # 2026-10-18 generator確認。JSON型の列はない)
