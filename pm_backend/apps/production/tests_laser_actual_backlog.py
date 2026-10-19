@@ -493,3 +493,45 @@ class LaserActualBacklogSyncTest(TestCase):
         expected = InterruptionReason.objects.get(code='1101').display_name
         self.assertEqual(expected, '設備トラブル')
         self.assertEqual(actual.operator_action_reason, expected)
+
+    def test_other_reason_code_without_remarks_is_rejected(self):
+        # 「その他」(1997=PAUSE)選択時、remarksが空ならサーバー側でも拒否する(API直叩き対策)
+        InterruptionReason.objects.get_or_create(
+            code='1997',
+            defaults={
+                'line_category': '1', 'category': '9', 'display_name': 'その他',
+                'operation': 'PAUSE', 'is_active': True,
+            },
+        )
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='その他', interruption_reason_code='1997', remarks='',
+        ))
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('remarks', serializer.errors)
+        self.assertEqual(LaserActual.objects.count(), 0)
+
+    def test_other_reason_code_with_remarks_is_accepted(self):
+        InterruptionReason.objects.get_or_create(
+            code='1997',
+            defaults={
+                'line_category': '1', 'category': '9', 'display_name': 'その他',
+                'operation': 'PAUSE', 'is_active': True,
+            },
+        )
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='その他', interruption_reason_code='1997',
+            remarks='パターン切替待ち',
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        actual = serializer.save()
+        actual.refresh_from_db()
+        self.assertEqual(actual.interruption_reason_code, '1997')
+        self.assertEqual(actual.remarks, 'パターン切替待ち')
+
+    def test_non_other_reason_code_does_not_require_remarks(self):
+        # 「その他」以外(1101)はremarksが空でも保存できる(既存動作を変えない)
+        serializer = LaserActualSerializer(data=self._payload(
+            operator_action='PAUSE', operator_action_reason='設備トラブル', interruption_reason_code='1101',
+            remarks='',
+        ))
+        self.assertTrue(serializer.is_valid(), serializer.errors)

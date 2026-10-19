@@ -792,6 +792,16 @@ class LaserActualSerializer(serializers.ModelSerializer):
             # コードと文字列の不整合防止: 保存する operator_action_reason は
             # クライアント送信値ではなく、理由コードが指すマスタの表示名で必ず上書きする
             attrs['operator_action_reason'] = reason_obj.display_name
+            # 「その他」(1997=PAUSE・1998=TEMP_END)選択時は remarks を必須にする
+            # (画面側のガードと同じ要件をサーバー側でも強制する。API直叩き対策)
+            if reason_code in ('1997', '1998'):
+                remarks_value = str(
+                    attrs.get('remarks')
+                    if 'remarks' in attrs
+                    else getattr(self.instance, 'remarks', '')
+                ).strip()
+                if not remarks_value:
+                    raise serializers.ValidationError({'remarks': '「その他」を選択した場合は理由詳細を入力してください。'})
         else:
             attrs['interruption_reason_code'] = ''
 
