@@ -2,8 +2,9 @@ export const createProgressMonitorAPI = (client) => ({
   getOptions() {
     return client.get('/progress-monitor-targets/options/')
   },
-  getSnapshot(params) {
-    return client.get('/progress-monitor-targets/snapshot/', { params })
+  getSnapshot({ unit_ids, ...params }) {
+    const unitIdParam = Array.isArray(unit_ids) ? unit_ids.join(',') : unit_ids
+    return client.get('/progress-monitor-targets/snapshot/', { params: { ...params, unit_id: unitIdParam } })
   },
   getTargets(params = {}) {
     return client.get('/progress-monitor-targets/', { params })

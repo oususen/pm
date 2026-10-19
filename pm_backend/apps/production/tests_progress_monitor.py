@@ -73,6 +73,24 @@ class ProgressMonitorApiTest(APITestCase):
         )
         self.assertNotIn(self.other_unit.id, {item['id'] for item in response.data['units']})
 
+    def test_options_returns_units_under_supervisor_teams(self):
+        team = Department.objects.create(name='テスト班', level='team', display_id=0)
+        supervised_unit = Department.objects.create(name='班長配下グループ', level='unit', display_id=9, parent=team)
+        supervised_line = Line.objects.create(line_code='LTEST4', line_name='班長配下ライン')
+        UnitLineMapping.objects.create(unit=supervised_unit, line=supervised_line)
+        self.user.profile.role = 'supervisor'
+        self.user.profile.unit = None
+        self.user.profile.save()
+        self.user.profile.supervisor_teams.add(team)
+
+        response = self.client.get(reverse('progress-monitor-target-options'))
+
+        self.assertEqual(
+            {item['id'] for item in response.data['units']},
+            {supervised_unit.id},
+        )
+        self.assertNotIn(self.unit.id, {item['id'] for item in response.data['units']})
+
     def test_create_rejects_line_outside_allowed_units(self):
         response = self.client.post(reverse('progress-monitor-target-list'), {
             'product': self.product.id, 'line': self.other_line.id,
@@ -203,6 +221,29 @@ class ProgressMonitorApiTest(APITestCase):
         cell = response.data['rows'][0]['cells']['2026-10-16']
         self.assertEqual(cell['forecast'], 5)
         self.assertEqual(cell['firm'], 2)
+
+    def test_snapshot_accepts_multiple_units_and_combines_lines(self):
+        self.user.profile.leader_units.add(self.other_unit)
+        target = self.create_target()
+        other_target = ProgressMonitorTarget.objects.create(
+            product=self.product, line=self.other_line, registered_by=self.user,
+        )
+
+        response = self.snapshot(unit_id=[self.unit.id, self.other_unit.id])
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {item['id'] for item in response.data['units']},
+            {self.unit.id, self.other_unit.id},
+        )
+        self.assertEqual(
+            {item['id'] for item in response.data['lines']},
+            {self.line.id, self.other_line.id},
+        )
+        self.assertEqual(
+            {item['target_id'] for item in response.data['targets']},
+            {target.id, other_target.id},
+        )
 
     def test_snapshot_rejects_unassigned_unit_and_invalid_horizon(self):
         outside = self.client.get(reverse('progress-monitor-target-snapshot'), {

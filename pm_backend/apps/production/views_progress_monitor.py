@@ -2,6 +2,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from accounts.models import Department, UnitLineMapping
+from accounts.permission_scope import collect_effective_department_ids
 from django.db.models import Q
 from masters.models import Product
 from rest_framework import status, viewsets
@@ -26,9 +27,7 @@ def _allowed_units(user):
     except Exception:
         return queryset.none()
 
-    unit_ids = set(profile.leader_units.values_list('id', flat=True))
-    if profile.unit_id:
-        unit_ids.add(profile.unit_id)
+    unit_ids = set(collect_effective_department_ids(profile))
     return queryset.filter(id__in=unit_ids).order_by('display_id', 'name', 'id')
 
 
@@ -104,11 +103,21 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='snapshot')
     def snapshot(self, request):
+        raw_unit_ids = [
+            part.strip()
+            for value in request.query_params.getlist('unit_id')
+            for part in str(value).split(',')
+            if part.strip()
+        ]
         try:
-            unit_id = int(request.query_params.get('unit_id', ''))
+            unit_ids = [int(value) for value in raw_unit_ids]
         except (TypeError, ValueError):
+            return Response({'detail': 'unit_id は数値で指定してください。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not unit_ids:
             return Response({'detail': 'unit_id は必須です。'}, status=status.HTTP_400_BAD_REQUEST)
-        if not _allowed_units(request.user).filter(id=unit_id).exists():
+        unit_ids = sorted(set(unit_ids))
+        allowed_units = _allowed_units(request.user).filter(id__in=unit_ids)
+        if allowed_units.count() != len(unit_ids):
             return Response({'detail': '選択したグループは対象外です。'}, status=status.HTTP_400_BAD_REQUEST)
 
         raw_start_date = request.query_params.get('start_date')
@@ -126,8 +135,8 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
         end_date = start_date + timedelta(days=horizon - 1)
 
         mappings = list(UnitLineMapping.objects.select_related('line').filter(
-            unit_id=unit_id,
-        ).order_by('-is_default', 'sort_order', 'line__line_code', 'id'))
+            unit_id__in=unit_ids,
+        ).order_by('unit_id', '-is_default', 'sort_order', 'line__line_code', 'id'))
         line_ids = [mapping.line_id for mapping in mappings]
         all_targets = list(ProgressMonitorTarget.objects.select_related('product', 'line').filter(
             line_id__in=line_ids,
@@ -259,11 +268,12 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
                     'cells': cells,
                 })
 
+        units_by_id = {unit.id: unit for unit in allowed_units}
         return Response({
-            'unit': {
-                'id': unit_id,
-                'name': _allowed_units(request.user).get(id=unit_id).name,
-            },
+            'units': [
+                {'id': unit_id, 'name': units_by_id[unit_id].name}
+                for unit_id in unit_ids
+            ],
             'start_date': start_date,
             'end_date': end_date,
             'horizon': horizon,
@@ -272,7 +282,12 @@ class ProgressMonitorTargetViewSet(viewsets.ModelViewSet):
                 for day_offset in range(horizon)
             ],
             'lines': [
-                {'id': mapping.line_id, 'line_code': mapping.line.line_code, 'line_name': mapping.line.line_name}
+                {
+                    'id': mapping.line_id,
+                    'line_code': mapping.line.line_code,
+                    'line_name': mapping.line.line_name,
+                    'unit_id': mapping.unit_id,
+                }
                 for mapping in mappings
             ],
             'targets': [
