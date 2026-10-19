@@ -130,7 +130,8 @@
           <h2>社外サービス利用の確認</h2>
           <p>送信先: {{ selectedProvider.label }} / モデル: {{ externalPreview.model }}</p>
           <p>分析目的・期間・公開ビューの説明を、名称を登録コードへ置換して送ります。DBの明細行・件数は送りません。一般使用者向け画面では送信文そのものは表示しません。</p>
-          <label><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">目的欄に、社外へ送ってはいけない人名・社名・機密情報が残っていないことを確認しました</label>
+          <p v-if="!externalAccepted" class="confirmation-guide" role="status">下の確認欄にチェックを入れると、分析案を作成できます。</p>
+          <label class="external-confirmation" :class="{ 'needs-check': !externalAccepted }"><input v-model="externalAccepted" type="checkbox" :disabled="!!busy || !canEdit">目的欄に、社外へ送ってはいけない人名・社名・機密情報が残っていないことを確認しました</label>
         </section>
         <p v-if="busy === 'create'" class="generating" role="status" aria-live="polite">⏳ AIが分析案を作成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。</p>
         <button v-if="!selectedProvider?.external || externalPreview" type="button" :disabled="!canCreate || (selectedProvider?.external && !externalAccepted)" @click="createPlan">{{ busy === 'create' ? '分析案を作成中…' : selectedProvider?.external ? '確認した内容を社外AIへ送って分析案を作成' : '分析案を作成' }}</button>
@@ -1009,6 +1010,9 @@ small { display: block; margin-top: 12px; color: #657b80; }
 input { padding: 4px; font: inherit; }
 .plan-head h2 { font-size: 16px; margin: 0; }
 .dataset { background: #f4f8f8; padding: 1px 8px; overflow-wrap: anywhere; }
+.confirmation-guide { color: #934500; font-weight: bold; }
+.external-confirmation { display: block; padding: 6px 8px; border: 1px solid transparent; border-radius: 4px; }
+.external-confirmation.needs-check { background: #fff4d6; border-color: #c98b28; }
 .external-purpose { white-space: pre-wrap; }
 .error { background: #fff0ee; color: #9a362b; padding: 8px; }
 .generating { background: #e8f4fd; border-left: 3px solid #2a7fc1; color: #123c5a; padding: 8px 10px; font-weight: 600; }
