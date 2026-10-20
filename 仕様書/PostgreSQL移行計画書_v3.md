@@ -63,6 +63,8 @@ v2のPHASE 5(DB関数化)・5b(PostGIS)・7(統合)は、本書の範囲外。PG
 
 A は、新PCの納入が大幅に遅れ、かつMySQL側に性能・安定性の緊急問題が出た場合のみ再検討する。
 
+**2026-10-20 BOSS再確認**: 「新PCにPM(MySQLのまま)を構築→その後PM_PG(PostgreSQL版)を構築」という順番(B案)を改めて確認した。開発PCでのpgloader接続検証(§2-4補足)で判明した知見: 開発PCはMySQLがWindows上で直接稼働し、pgloaderはWSL2のDocker内で動くため「Windows⇔WSL2」の境界を越える必要があり接続できなかった。一方、新PCではMySQLも既にDocker化されている(CLAUDE.md記載の「共通MySQLコンテナ」)ため、PG移行時はMySQL・PostgreSQL・pgloaderを全て同じDocker環境(WSL2 Docker Engine)内で動かせ、この境界問題が発生しない可能性が高い。そのため、方式P/Qの本番での実現性は、新PCのDocker化されたMySQL環境で改めて検証する。
+
 ---
 
 ## 2. リハーサル環境の設計(開発PCまたは新PC)
@@ -166,6 +168,20 @@ MySQLから検証用に複製
 
 コピー元のMySQLは、**新規作成するSELECT専用ユーザー**で読む。作業終了後にそのユーザーを削除する(MySQL側の権限変更にあたるため、**BOSS承認事項**)。
 
+**2026-10-20 開発PCでのpgloader実接続試験(未解決のまま一旦中断)**:
+- BOSS承認のもと、WSL2(Ubuntu-24.04)へpgloaderのDockerイメージ(`dimitri/pgloader`)を導入し、MySQL側に移行専用ユーザー(`pm_pgloader_migrator`、`mysql_native_password`)を作成した(認証方式の回避策は機能した)
+- しかし、WSL2のDockerコンテナからWindows側で稼働するMySQL(3306番)へ接続できず、`host.docker.internal`(Dockerブリッジ経由)・WSL2のデフォルトゲートウェイ(`172.31.240.1`)・開発PCのLAN IP(`10.0.1.36`)のいずれでも到達不可だった
+- 原因調査の過程で、このセッション(Claude Code)のサンドボックス隔離用と見られるWindowsファイアウォールルール`codex_sandbox_offline_block_outbound`(全アウトバウンド通信をブロック、ローカル設定でグループポリシー管理外)を発見し、BOSSが無効化したが、それでも接続できなかった。Windowsファイアウォールの他のBlockルール・プロファイル既定動作は確認したが該当なし。**根本原因は未特定のまま**
+- **2026-10-20 BOSS判断**: この接続問題は開発PC特有の構成(MySQLがWindows上で直接稼働、pgloaderはWSL2のDocker内)が原因であり、本番では同じ問題が起きない可能性が高いと判断し、深追いを中断。新PCへの移設順序(B案: 先にPM+MySQLをDocker化して移設→その後PM_PGを構築)を進める中で、本番のDocker化されたMySQL環境で改めてpgloaderの実現性を検証する方針とした(上記「2026-10-20 BOSS再確認」参照)
+- 開発PCでのデータ投入は、pgloaderの代わりに方式R(`dumpdata`/`loaddata`)で進めている(別途記録)
+
+**2026-10-20 新PCでの方式Q再検証案(BOSS提案)**: `D:\pm\pm_db_backup.sql`(本番MySQLの`mysqldump`形式バックアップ、2.8GB、2026-10-20 00:48時点)の存在を確認した。新PC側でPM+MySQLのDocker化構築が完了した後、以下の手順でpgloaderの実現性を改めて検証する案とした。
+
+1. `pm_db_backup.sql`を新PCのDocker化MySQLコンテナへインポート(`mysql`コマンド、標準SQLインポートのため高速)
+2. 同じDocker/WSL2環境内のpgloaderから、そのMySQLコンテナへ接続(方式Q)
+3. MySQL・PostgreSQL・pgloaderが全て同じLinux側のDockerネットワーク内で完結するため、開発PCで発生した「Windows⇔WSL2」の境界問題が起きない見込み
+
+未実施・未検証。新PC側のPM+MySQL構築完了後に着手する。
 ### 2-5. 突合の方法
 
 1. **件数**: 全テーブルの `COUNT(*)` をMySQLとPGで比較する(旧・管理対象外3テーブルはproposalsアプリ削除により2026-10-20付で対象外になった。§3-3参照)
@@ -275,6 +291,20 @@ MySQLから検証用に複製
 **2026-10-20 最終結果**: `pm-pg-rehearsal`(空PG)へ`python manage.py migrate`を実行し、**全18アプリの全migrationがエラーなく完走した**(exit code 0)。再実行で「No migrations to apply」を確認し、完全な適用を確認済み。evaluatorもpm-pg-rehearsal実機DBへの直接SQL検証で裏付け済み。
 
 これにより、**方式Qの前提となる「空DBからの構築可能性」の技術的な障害は解消した**。残る作業は、実際のデータ移行(方式Qの投入・突合手順)、本番データでのruntime値の妥当性検証(例: JSON内のsupplier_id等が本当に数値キャスト可能か)、生SQL修正の`D:\pm`本体への反映方法の決定など。
+
+### 2026-10-20 さらに続き: 重複テーブル対策を`D:\pm`本体へ反映(コミット`040f5d2e`)
+
+新PC(PC2)側での作業中、「新PCがGitHubからcloneした`D:\pm`には重複テーブル対策が未反映のため、空DBから`docker compose up`(migrate含む)した場合に同じ重複エラーが再発する」というBOSSの指摘を受け、重複テーブル対策(production 9件+付随7件、shipping 3件+付随5件のSeparateDatabaseAndState化、`orders.0029`への依存追加)を`D:\pm`本体へ反映した。
+
+**安全性の確認**:
+- この修正は「既に適用済みのmigration履歴を持つDB」には一切影響しない(Djangoは適用済みmigrationの内容変更を再実行しないため)。影響するのは空DBから全migrationを構築する場合のみ
+- 反映前に、`D:\pm`の該当ファイルが基準コミット(`793da150`、`D:\pm_pg`の分岐元)から改行コード以外の差分が無いことを確認
+- `orders`アプリに他セッションが追加した新しいmigration(0056〜0069)が、重複対象テーブルに触れていないことを確認(競合なし)
+- 反映後、`python manage.py check`・`makemigrations --check --dry-run`を現行MySQL接続で実行し問題なしを確認
+
+**新PCでの運用上の注意(重要)**: この反映前の状態では、新PCのMySQLが**空の状態で**`docker compose up`(自動migrate)を実行すると、重複テーブルエラーで止まる。**MySQLへデータ(本番バックアップ等)を復元してから`migrate`を実行する順序を守れば、既存の適用履歴により問題は起きない**(今回の反映後は、空DBでも問題が起きなくなった)。
+
+`D:\pm_pg`側(production/shippingのmigrationファイル)は今回変更していない(反映はコピーのみ、修正の起点は引き続き`D:\pm_pg`)。
 
 ### 3-2. 方針
 
@@ -481,7 +511,7 @@ PC入替後に新PCで入力したデータは旧PCへ自動反映されない�
 | 1 | コンテナのメモリ使用量 | `docker stats --no-stream` を、業務時間帯の複数回で取得 | §5の積み上げ |
 | 2 | Docker Desktopのメモリ設定 | Docker Desktop の設定画面、または `%UserProfile%\.wslconfig` | §5・WSL上限の方針 |
 | 3 | MySQLのDB容量 | 下記SQL | 停止時間・ディスク |
-| 4 | 共通MySQLを他システムが使っているか | MySQL上の接続元・DB一覧の確認(下記SQL)。他システム側の担当への確認 | **使っていればMySQLを止められない/PG切替の影響範囲** |
+| 4 | 共通MySQLを他システムが使っているか | MySQL上の接続元・DB一覧の確認(下記SQL)。他システム側の担当への確認 | **使っていればMySQLを止められない/PG切替の影響範囲**。**2026-10-20 BOSS確認**: 現行本番のMySQLはPM以外のアプリ(kaizen_pp等)とも共有しているが、**新PC(PC2)へ移すのはPMだけ**。共通MySQL・kaizen_pp等は旧PCに残す(memory `project_postgresql_migration` 2026-10-04決定と一致)。新PCのMySQLはPM専用の新規構築でよく、他システム分のデータ移行は不要。将来的にPM_PG(PostgreSQL版)とは共有してもよい方針 |
 | 5 | バックアップの現状 | 頻度・保存先・世代・リストア実績の有無 | §4の戻し条件 |
 | 6 | モバイル(PWA)・他システム連携 | PWAの接続先、外部連携(CSV取込、API、メール、FCM等)の洗い出し | 切替の影響範囲 |
 | 7 | 証明書・IP(10.0.1.232)の扱い | 証明書の有効期限、新PCへの引き継ぎ方法、IPの付け替え手順 | §4-1。**2026-10-20判明**: 入替までは新PCに別の固定IPを設定し、入替時に本番IP(10.0.1.232)を引き継ぐ方針。入替時期は別途相談(福島さんへの依頼文より) |
