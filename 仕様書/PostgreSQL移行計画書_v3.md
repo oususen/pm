@@ -768,5 +768,5 @@ SELECT user, host FROM mysql.user;
 ### 2026-10-20 追記: 新PCでの当夜切替計画の作成（計画のみ・未実施）
 
 - BOSS決定: 新PC（IPは10.0.1.139のまま）で、2026-10-21 02:00〜04:00にPGへ切替。旧PC・旧MySQLは保持。pgloader指定の方針A（json→jsonb）・B（デフォルト`[]`付け直し）・C-1（最初からpublicスキーマ）を承認。2:00まではテスト用PG（`pm_pg_q_test`）でリハーサルと突合
-- 作成物: `仕様書/PostgreSQL切替当夜計画_20261021.md`（手順・go/no-go・戻し方）、`scripts/pg_cutover/`（確認用SQL5本）
+- 作成物: `仕様書/PostgreSQL切替当夜計画_20261021.md`（手順・go/no-go・戻し方）、`scripts/pg_cutover/`（確認用SQL5本。`.gitignore`が`*.sql`を除外するため拡張子は`.sql.txt`）
 - 検証状況: **未実行・未検証**（作成したクラウドセッションは新PCに接続できない）。SQLの実行確認、pgloader指定、ビュー（pgloader対象外）の扱い、`pm_pg`コードの所在は未確認として当夜計画に記載

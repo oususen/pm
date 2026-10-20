@@ -1,0 +1,10 @@
+-- MySQLで実行。出力された1行（長いSQL）をコピーして、もう一度MySQLで実行すると全テーブルの正確な件数が得られる。
+-- information_schema.TABLES.TABLE_ROWS は概算なので使わない。
+SET SESSION group_concat_max_len = 10000000;
+SELECT CONCAT(
+  GROUP_CONCAT(
+    CONCAT('SELECT ''', table_name, ''' AS table_name, COUNT(*) AS cnt FROM `', table_name, '`')
+    ORDER BY table_name SEPARATOR ' UNION ALL '
+  ), ' ORDER BY table_name;') AS generated_sql
+FROM information_schema.tables
+WHERE table_schema = 'pm_db' AND table_type = 'BASE TABLE';

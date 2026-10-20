@@ -1,0 +1,44 @@
+-- PGのみを変更する後処理。リハーサルで検証してから本番で使うこと。
+-- 実行前に必ず 04 の結果を記録する。1トランザクションで実行し、結果を確認してから COMMIT する。
+-- 前提: pgloader がテーブルをスキーマ pm_db に作成した場合（計画書 2026-10-21 記録）。
+-- pgloader 側の指定（ALTER SCHEMA / SET SCHEMA / CAST type json to jsonb）で最初から public・jsonb に
+-- できた場合は、該当ブロックは何もしない（対象0件）ので実行しても害はない。
+
+BEGIN;
+
+-- A) テーブルを pm_db → public へ移動（所有シーケンスも一緒に移る）
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'pm_db' LOOP
+    EXECUTE format('ALTER TABLE pm_db.%I SET SCHEMA public', r.tablename);
+  END LOOP;
+END $$;
+
+-- B) json → jsonb（56列・31テーブルの想定。件数は実行後に 04 の2)で確認）
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT table_schema, table_name, column_name FROM information_schema.columns
+           WHERE table_schema = 'public' AND data_type = 'json' LOOP
+    EXECUTE format('ALTER TABLE %I.%I ALTER COLUMN %I TYPE jsonb USING %I::jsonb',
+                   r.table_schema, r.table_name, r.column_name, r.column_name);
+  END LOOP;
+END $$;
+
+-- C) デフォルト値の付け直し（pgloader の `type json to json drop default` で落ちた4列）
+--    値は計画書の記載（'[]'）。実行前に MySQL 側 information_schema.columns.column_default で元の値を確認すること。
+ALTER TABLE ai_analysis_template ALTER COLUMN parameters SET DEFAULT '[]'::jsonb;
+ALTER TABLE notifications ALTER COLUMN target_positions SET DEFAULT '[]'::jsonb;
+ALTER TABLE quality_equipment_inspection_template ALTER COLUMN measurement_months SET DEFAULT '[]'::jsonb;
+ALTER TABLE quality_equipment_inspection_template ALTER COLUMN measurement_weekdays SET DEFAULT '[]'::jsonb;
+
+-- D) pm_db スキーマが空になったことを確認してから削除（空でなければ DROP は失敗する＝RESTRICT）
+DROP SCHEMA IF EXISTS pm_db RESTRICT;
+
+-- 結果確認（04 を実行して期待値と照合してから COMMIT / ROLLBACK を選ぶ）
+-- COMMIT;
+-- ROLLBACK;
+
+-- シーケンス調整が必要な場合（04の4)で差があったテーブルだけ。テーブル・列名は実在を確認して指定する）
+-- SELECT setval(pg_get_serial_sequence('public.<table>', 'id'), (SELECT COALESCE(MAX(id), 1) FROM public.<table>));

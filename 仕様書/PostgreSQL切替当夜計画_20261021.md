@@ -21,7 +21,7 @@
 
 | 役割 | 担当 |
 |---|---|
-| 計画・SQL作成（本書、`scripts/pg_cutover/`） | クラウドセッション（作成済み） |
+| 計画・SQL作成（本書、`scripts/pg_cutover/*.sql.txt`。`.gitignore`が`*.sql`を除外するため拡張子は`.sql.txt`） | クラウドセッション（作成済み） |
 | 新PCでの実行（pgloader、SQL、アプリ起動） | PCセッション。破壊的・本番影響の操作はBOSSの承認を得てから |
 | 完了判定 | evaluator（独立検証）。実行担当の自己判定で「完了」としない（CLAUDE.md） |
 | 戻す判断 | BOSS |

@@ -1,0 +1,46 @@
+-- MySQL・PGの両方で同じSQLを実行し、結果を比較する（標準SQLのみ）。
+-- 列名は models_line_backlog.py / models_line_plan.py / production/models.py(LineDemand) で確認済み。
+
+-- LineBacklog
+SELECT 'line_backlog' AS t, COUNT(*) AS n,
+  MIN(plan_date) AS min_date, MAX(plan_date) AS max_date,
+  SUM(demand_qty_plan) AS s_demand_qty_plan, SUM(order_qty) AS s_order_qty,
+  SUM(order_qty_actual) AS s_order_qty_actual, SUM(plan_qty) AS s_plan_qty,
+  SUM(actual_qty) AS s_actual_qty, SUM(stock_qty) AS s_stock_qty,
+  SUM(planned_stock_qty) AS s_planned_stock_qty, SUM(adjust_qty) AS s_adjust_qty,
+  SUM(scrap_adjust_qty) AS s_scrap_adjust_qty, SUM(scrap_qty) AS s_scrap_qty,
+  SUM(actual_shipment_qty) AS s_actual_shipment_qty, SUM(progress_qty) AS s_progress_qty,
+  SUM(planned_progress_qty) AS s_planned_progress_qty,
+  SUM(CASE WHEN sequence_no = 0 THEN 1 ELSE 0 END) AS n_seq0,
+  SUM(CASE WHEN plan_id IS NULL THEN 1 ELSE 0 END) AS n_plan_id_null,
+  SUM(CASE WHEN is_stocktake_fix THEN 1 ELSE 0 END) AS n_stocktake_fix
+FROM line_backlog;
+
+-- LineBacklog の sequence_no=0（需要専用行）の plan_qty は 0 でなければならない（仕様書/LineBacklog_sequence_no仕様.md）
+-- 期待値: 両DBとも同じ値（移行で変わってはいけない）
+SELECT COUNT(*) AS n_seq0_plan_qty_nonzero FROM line_backlog WHERE sequence_no = 0 AND plan_qty <> 0;
+
+-- LineDemand
+SELECT 't_line_demand' AS t, COUNT(*) AS n,
+  MIN(plan_date) AS min_date, MAX(plan_date) AS max_date,
+  SUM(forecast_qty) AS s_forecast_qty, SUM(firm_qty) AS s_firm_qty,
+  SUM(plan_qty) AS s_plan_qty, SUM(actual_qty) AS s_actual_qty,
+  SUM(plan_progress) AS s_plan_progress, SUM(actual_progress) AS s_actual_progress,
+  SUM(CASE WHEN is_shifted THEN 1 ELSE 0 END) AS n_shifted
+FROM t_line_demand;
+
+-- LinePlan
+SELECT 'line_plan' AS t, COUNT(*) AS n,
+  MIN(plan_date) AS min_date, MAX(plan_date) AS max_date,
+  SUM(plan_qty) AS s_plan_qty,
+  SUM(CASE WHEN sequence_no IS NULL THEN 1 ELSE 0 END) AS n_seq_null,
+  SUM(CASE WHEN plan_id IS NULL THEN 1 ELSE 0 END) AS n_plan_id_null
+FROM line_plan;
+
+-- 製品・ライン（コードの大文字小文字重複。PGは区別、MySQLは区別しない照合が多い）
+-- 期待値: 0（0でなければ、隠れ重複があり切替前に要判断）
+SELECT 'm_product' AS t, COUNT(*) AS n_case_dup FROM (
+  SELECT LOWER(product_code) AS k FROM m_product GROUP BY LOWER(product_code) HAVING COUNT(*) > 1) d;
+
+-- migration履歴
+SELECT COUNT(*) AS n_migrations FROM django_migrations;

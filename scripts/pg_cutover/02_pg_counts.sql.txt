@@ -1,0 +1,9 @@
+-- PGで実行。public スキーマの全テーブルの正確な件数（query_to_xml で1文）。
+-- 05 の public 移動後に実行すること。移動前は table_schema を 'pm_db' に読み替える。
+SELECT table_name,
+       (xpath('/row/cnt/text()',
+              query_to_xml(format('SELECT COUNT(*) AS cnt FROM %I.%I', table_schema, table_name),
+                           false, true, '')))[1]::text::bigint AS cnt
+FROM information_schema.tables
+WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+ORDER BY table_name;

@@ -1,0 +1,43 @@
+-- PGで実行（読み取り専用）。
+
+-- 1) テーブルが public にあること。pm_db スキーマに残っていれば 05 を実行する
+SELECT table_schema, COUNT(*) AS n_tables
+FROM information_schema.tables WHERE table_type = 'BASE TABLE'
+  AND table_schema NOT IN ('pg_catalog', 'information_schema')
+GROUP BY table_schema;
+-- 期待値: public 286（主キーなしの2表を含む）。他スキーマ 0
+
+-- 2) json 型の列が残っていないこと（Django は jsonb を期待）
+SELECT table_schema, table_name, column_name, data_type, column_default
+FROM information_schema.columns
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND data_type = 'json';
+-- 期待値: 0行（移行直後は56列・31テーブル）
+
+-- 3) デフォルト付け直し対象の4列
+SELECT table_name, column_name, data_type, column_default
+FROM information_schema.columns
+WHERE table_schema = 'public' AND (table_name, column_name) IN (
+  ('ai_analysis_template', 'parameters'),
+  ('notifications', 'target_positions'),
+  ('quality_equipment_inspection_template', 'measurement_months'),
+  ('quality_equipment_inspection_template', 'measurement_weekdays'));
+-- 期待値: data_type=jsonb、column_default が MySQL 元の値と一致（計画書では '[]'。MySQL側の元値で再確認すること）
+
+-- 4) シーケンス: 各テーブルの最大ID以上に現在値が進んでいること（追加登録での重複防止）
+SELECT s.schemaname, s.sequencename, s.last_value
+FROM pg_sequences s WHERE s.schemaname = 'public' ORDER BY s.sequencename;
+-- 目視で上位テーブルの max(id) と比較する。差がある場合は setval で合わせる（05 末尾の手順参照）
+
+-- 5) ビュー: pgloader はビューを移行しない。MySQL側のビュー数と比較する
+SELECT table_schema, COUNT(*) AS n_views FROM information_schema.views
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema') GROUP BY table_schema;
+-- MySQL側: SELECT COUNT(*) FROM information_schema.views WHERE table_schema = 'pm_db';
+-- 期待値: 両者一致。不一致ならビュー再作成が必要（計画書の未解決事項）
+
+-- 6) 無効な制約・索引
+SELECT conname, conrelid::regclass FROM pg_constraint WHERE NOT convalidated;
+SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid OR NOT indisready;
+-- 期待値: 両方 0行
+
+-- 7) タイムゾーン（接続時の設定。USE_TZ=False のため Asia/Tokyo を明示する必要がある）
+SHOW timezone;
