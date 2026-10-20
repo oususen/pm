@@ -1,0 +1,48 @@
+# D:\pm_pg 本格用PG開発環境のDocker Compose設定。
+# D:\pm本体のdocker-compose.yml(MySQL本番相当)とは別物。構造確認が目的で、まずはバックエンド・フロントエンドのみ。
+# 接続先DBは pm-pg-dev コンテナ(別途 docker run で作成済み、ネットワーク pm-pg-dev-net)。
+version: '3.8'
+
+services:
+  pm-backend:
+    build:
+      context: ./pm_backend
+      dockerfile: Dockerfile
+    container_name: pm_backend_pg_dev
+    restart: unless-stopped
+    environment:
+      - DB_HOST=pm-pg-dev
+      - DB_PORT=5432
+      - DB_NAME=pm_pg_dev
+      - DB_USER=pm_pg_admin
+      - DB_PASSWORD=${PM_PG_DEV_DB_PASSWORD}
+      - DEBUG=True
+      - SECRET_KEY=${PM_PG_DEV_SECRET_KEY}
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+    ports:
+      - "127.0.0.1:18081:8081"
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn project.wsgi:application --bind 0.0.0.0:8081 --workers 2 --timeout 600"
+    networks:
+      - pm-pg-dev-net
+
+  pm-frontend:
+    build:
+      context: ./pm-ui
+      dockerfile: Dockerfile
+    container_name: pm_frontend_pg_dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18501:8501"
+    volumes:
+      - ./pm-ui/certs:/etc/nginx/ssl:ro
+    depends_on:
+      - pm-backend
+    networks:
+      - pm-pg-dev-net
+
+networks:
+  pm-pg-dev-net:
+    external: true

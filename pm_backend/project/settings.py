@@ -145,15 +145,16 @@ else:
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('DB_NAME', 'pm_db'),
-        'USER': os.getenv('DB_USER', 'root'),
+        # PostgreSQL移行検証用(D:\pm_pg限定)。MySQLとの両対応フォールバックは作らない。
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME', 'pm_pg_dev'),
+        'USER': os.getenv('DB_USER', 'pm_pg_admin'),
         'PASSWORD': os.getenv('DB_PASSWORD', ''),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '3306'),
+        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
+        'PORT': os.getenv('DB_PORT', '25432'),
         'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES', time_zone='+09:00'",
+            # USE_TZ=False(naive datetime)運用のため、セッション側でJSTを明示する。
+            'options': '-c timezone=Asia/Tokyo',
             'connect_timeout': 10,
         },
         'CONN_HEALTH_CHECKS': True,
