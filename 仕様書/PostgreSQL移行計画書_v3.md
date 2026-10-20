@@ -116,6 +116,24 @@ MySQLから検証用に複製
 
 現時点で存在する検証用コンテナはPG DBの `pm-pg-rehearsal` であり、PMアプリ用の `pm_pg` コンテナは未作成。初回試験は既存リポジトリのコードを一時Python環境から実行しており、アプリ複製・恒久的なPG設定は未作成。次の開発試験はWindows側アプリからPGへ接続する構成でも可能だが、PC2の最終リハーサル前にはアプリもDocker化した本番相当構成を検証する。現在のDBはmigrate途中の試験状態で、本番データは未投入。
 
+### 2-2-1. 本格用PG開発環境 `pm-pg-dev`(2026-10-20作成、BOSS承認)
+
+重複テーブル対策・RunSQL修正により空PGへの全migration完走を確認したことを受け、`D:\pm_pg`を「本格的なPG開発環境」として立ち上げる作業を開始した。検証用の`pm-pg-rehearsal`(使い捨て、何度も作り直す前提)とは別に、永続利用を想定した構成を用意する。
+
+| 項目 | 内容 |
+|---|---|
+| コンテナ名 | `pm-pg-dev`(`postgres:16`、作成・起動済み) |
+| ネットワーク | `pm-pg-dev-net`(専用、`pm-pg-rehearsal-net`とは別) |
+| ボリューム | `pm-pg-dev-data`(名前付き、永続) |
+| ポート | `127.0.0.1:25432:5432`(LAN非公開。`pm-pg-rehearsal`の15432とは別番号) |
+| DB・ロール | DB `pm_pg_dev`、ロール `pm_pg_admin`(新規ランダムパスワード、`pm-pg-rehearsal`とは別の値) |
+| `D:\pm_pg\pm_backend\.env` | 新規作成(git管理対象外)。`DB_HOST=127.0.0.1`・`DB_PORT=25432`・`DB_NAME=pm_pg_dev`・`DB_USER=pm_pg_admin` |
+| `D:\pm_pg`の`settings.py` | **PostgreSQL専用に直接書き換え**(MySQLとの両対応フォールバックは作らない、BOSS承認済み方針)。`D:\pm`本体は変更しない |
+| データ | **空のまま**(2026-10-20 BOSS判断。まずアプリ構成・起動確認が目的。実データ投入はpgloader問題の解決後に判断) |
+| アプリ(バックエンド/フロントエンド) | **2026-10-20 構築・起動成功**。`D:\pm_pg\docker-compose.pg-dev.yml`(新規)でバックエンド(`pm_backend_pg_dev`)・フロントエンド(`pm_frontend_pg_dev`)をビルド・起動。`127.0.0.1:18081`(バックエンド)・`127.0.0.1:18501`(フロントエンド、HTTPS、LAN非公開)。`settings.py`はPostgreSQL専用に書き換え済み(generator実装・evaluator検証合格)、`requirements.txt`に`psycopg[binary]==3.3.6`追加 |
+
+**起動確認結果(2026-10-20)**: フロントエンド`https://127.0.0.1:18501` → HTTP 200(Vue SPA正常表示)。バックエンドAPI(未ログイン)→ 403(正しい拒否応答、500エラーなし)。バックエンドログにエラー・スタックトレースなし。空のPostgreSQLに対してアプリ全体(フロントエンド・バックエンド・DB)が正常に連携動作することを確認した。データは空のまま(スキーマのみ)。
+
 ### 2-3. 起動前の安全チェック
 
 - Windows側アプリからは `DB_HOST=127.0.0.1`・`DB_PORT=15432`、同一Dockerネットワーク内のアプリからは `DB_HOST=pm-pg-rehearsal`・`DB_PORT=5432` を使う。DB名・ユーザー・ENGINEを含め検証PGを指していることを確認する
