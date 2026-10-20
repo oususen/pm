@@ -234,6 +234,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://10.0.1.194:8501",  # IP address
     "http://10.0.1.232:8501",  # Production IP address
     "https://10.0.1.232:8501",  # Production HTTPS
+    "https://10.0.1.139:18501",  # 新PC(PC2) PG版アプリ
+    "https://localhost:18501",  # 新PC(PC2) PG版アプリ(PC内確認用)
     "https://localhost:8501",
     "http://192.168.0.18",
     "http://192.168.0.11",
@@ -276,6 +278,8 @@ CSRF_TRUSTED_ORIGINS = [
     "https://10.0.1.194:8501",
     "http://10.0.1.232:8501",  # Production IP address
     "https://10.0.1.232:8501",
+    "https://10.0.1.139:18501",  # 新PC(PC2) PG版アプリ
+    "https://localhost:18501",  # 新PC(PC2) PG版アプリ(PC内確認用)
     "http://192.168.0.18",
     "http://192.168.0.9",
     "http://192.168.0.9:8501",

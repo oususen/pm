@@ -1,0 +1,46 @@
+# 新本番PC(PC2)専用: PG版PMアプリ(バックエンド・フロントエンド)。
+# DBは検証用PGコンテナ pm-pg-q-test(ネットワーク pm-pg-q-test-net、スキーマ pm_db、search_pathはDB側で設定済み)。
+# 起動: docker compose -f docker-compose.pc2-pg.yml --env-file .env.pg_rehearsal up -d --build
+# スケジューラは含めない(二重実行・通知防止)。migrateは起動コマンドに含めない。
+services:
+  pm-backend:
+    build:
+      context: ./pm_backend
+      dockerfile: Dockerfile
+    container_name: pm_backend_pg_pc2
+    restart: "no"
+    environment:
+      - DB_HOST=pm-pg-q-test
+      - DB_PORT=5432
+      - DB_NAME=pm_pg_q_test
+      - DB_USER=pm_pg_admin
+      - DB_PASSWORD=${PM_PG_DB_PASSWORD}
+      - DEBUG=False
+      - SECRET_KEY=${PM_PG_SECRET_KEY}
+      - ALLOWED_HOSTS=localhost,127.0.0.1,10.0.1.139
+    ports:
+      - "18081:8081"
+    command: >
+      sh -c "python manage.py collectstatic --noinput &&
+             gunicorn project.wsgi:application --bind 0.0.0.0:8081 --workers 2 --timeout 600"
+    networks:
+      - pm-pg-q-test-net
+
+  pm-frontend:
+    build:
+      context: ./pm-ui
+      dockerfile: Dockerfile
+    container_name: pm_frontend_pg_pc2
+    restart: "no"
+    ports:
+      - "18501:8501"
+    volumes:
+      - ./pm-ui/certs:/etc/nginx/ssl:ro
+    depends_on:
+      - pm-backend
+    networks:
+      - pm-pg-q-test-net
+
+networks:
+  pm-pg-q-test-net:
+    external: true
