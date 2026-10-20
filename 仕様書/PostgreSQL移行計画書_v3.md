@@ -685,12 +685,14 @@ SELECT user, host FROM mysql.user;
 - `pm_backend/project/settings.py`: `CORS_ALLOWED_ORIGINS`・`CSRF_TRUSTED_ORIGINS`へ新PCの暫定IP 10.0.1.139:8501(http/https)を追加(未コミット)。
 - `docker-compose.pc2.yml`新規作成: PM専用`mysql:8.0`(ボリューム`pm_mysql_data`)を追加。旧本番で自動適用されないよう`override`名を避け、`-f`で明示指定する。
 - 旧PCから`vapid_private.pem`・`firebase-service-account.json`を`pm_backend/`へ配置(gitignore対象)。
-- WSL2導入(BOSS実施、再起動待ち)。
+- WSL2・Ubuntu(ユーザー`daiso`)・Docker Engine 29.9.1・Compose v5.6.0を導入(2026-10-21、BOSS実施)。`%UserProfile%\.wslconfig`に`networkingMode=mirrored`を追加(BOSS承認)。
+- `docker network create ts_pm_network_v2`、ビルド、`docker compose -f docker-compose.yml -f docker-compose.pc2.yml up -d`を実施(2026-10-21)。`pm-scheduler`が`pm-pm-backend`イメージをビルド前にpullして失敗するため、先に`build pm-backend pm-frontend`を実行してから`up -d`した。
+- 起動時のmigrateが空の`pm_db`へ581件適用され、`showmigrations`の未適用は0件。コンテナ(mysql・pm_backend_prod・pm_frontend_prod・pm-analysis-redis-1・pm_scheduler_prod)が稼働。
 
 **未完了**
-- 再起動、Ubuntu・Docker Engineの導入、`docker network create ts_pm_network_v2`、`docker compose -f docker-compose.yml -f docker-compose.pc2.yml up -d --build`(起動時に`migrate`が自動実行される)、localhostでの動作確認、HTTPS証明書の再生成、経管の通信許可回答の確認。
+- ブラウザでの画面確認(ログイン等。空DBのためユーザー未作成)、他PCからの接続確認、HTTPS証明書の再生成、経管の通信許可回答の確認、`.env`のWEB_PUSH_VAPID_*等の未設定項目、スケジューラの稼働ジョブの確認。
 
-**検証・反映状況**: ビルド・起動・動作確認は**未実施(未検証)**。コミット・push未実施。本番IP切替は未実施。
+**検証・反映状況**: 起動確認はlocalhostの`https://localhost:8501`(HTTP 200)・`http://localhost:8081/api/`(HTTP 200)のみ。**機能の動作確認は未実施(未検証)**。`pm_scheduler_prod`はmigrate完了前に再起動を繰り返し、完了後に起動した。evaluatorの検証は未実施。コミット・push未実施(本追記は未コミット)。本番IP切替は未実施。
 
 ### 今後の確認・承認対象
 
