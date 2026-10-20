@@ -302,7 +302,7 @@ MySQLから検証用に複製
 - `orders`アプリに他セッションが追加した新しいmigration(0056〜0069)が、重複対象テーブルに触れていないことを確認(競合なし)
 - 反映後、`python manage.py check`・`makemigrations --check --dry-run`を現行MySQL接続で実行し問題なしを確認
 
-**新PCでの運用上の注意(重要)**: この反映前の状態では、新PCのMySQLが**空の状態で**`docker compose up`(自動migrate)を実行すると、重複テーブルエラーで止まる。**MySQLへデータ(本番バックアップ等)を復元してから`migrate`を実行する順序を守れば、既存の適用履歴により問題は起きない**(今回の反映後は、空DBでも問題が起きなくなった)。
+**新PCでの運用上の注意(重要)**: この反映前の状態では、新PCのMySQLが**空の状態で**`docker compose up`(自動migrate)を実行すると、重複テーブルエラーで止まる。**MySQLへデータ(本番バックアップ等)を投入してから`migrate`を実行する順序を守れば、既存の適用履歴により問題は起きない**(今回の反映後は、空DBでも問題が起きなくなった)。
 
 `D:\pm_pg`側(production/shippingのmigrationファイル)は今回変更していない(反映はコピーのみ、修正の起点は引き続き`D:\pm_pg`)。
 
@@ -372,12 +372,12 @@ PC3：開発PostgreSQL（比較先）
 ```
 
 1. 本番データを取り込む前に、開発側で必要な試験データ・設定を退避し、取り込み範囲を確定する。これは既存の開発取り込み運用として扱い、PG変換処理自体はコピー元MySQLを読み取りのみで使用する。
-2. バックアップ識別子・取得日時・元のコード版・migration履歴を記録する。データだけの取り込みか全DB復元かによって履歴の扱いが異なるため、既存方法を確認してから方式Qの入力にする。
-3. 復元した本番のメール送信先、通知設定、定期処理、自動発注、外部API接続、共有フォルダ設定が開発で実行されないよう、起動前に検証用設定を適用する。DB内の設定も確認対象とする。
+2. バックアップ識別子・取得日時・元のコード版・migration履歴を記録する。データだけの取り込みか全DB投入かによって履歴の扱いが異なるため、既存方法を確認してから方式Qの入力にする。
+3. 投入した本番のメール送信先、通知設定、定期処理、自動発注、外部API接続、共有フォルダ設定が開発で実行されないよう、起動前に検証用設定を適用する。DB内の設定も確認対象とする。
 4. MySQLとPGを**同じ取得時点のデータ**で比較する。開発MySQLを更新してもPGは自動同期されない。新しい本番データを取り込んだ場合は、PGも対応するデータへ更新してから再比較する。
 5. 検証結果には取得時点を明記する。古い開発コピーの合格を、最新本番データの移行合格とは扱わない。
 
-本番がPGへ切り替わった後は、本番PGから開発PGへバックアップを復元する運用に切り替える。旧MySQL開発系への逆変換は通常運用には含めず、保持期間終了まで比較資料として保管する。
+本番がPGへ切り替わった後は、本番PGから開発PGへバックアップを投入する運用に切り替える。旧MySQL開発系への逆変換は通常運用には含めず、保持期間終了まで比較資料として保管する。
 
 ### 3-3. 管理対象外テーブル3つ(2026-10-20 解消・対応不要)
 
@@ -424,9 +424,9 @@ launcher(8091)は現状開発限定のポートであり、本番docker-compose.
 ### 4-1. PC入替(B案のステップ1、MySQLのまま)
 
 1. 新PCにWSL2 + Docker Engineを構築(旧PCは稼働継続)
-2. 本番のダンプを取得し、新PCのMySQLへ復元。件数突合。新PC側は検証用接続先・保存先を適用し、メール・通知・定期処理・外部更新を起動前に停止する（DB内設定も対象）
+2. 本番のダンプを取得し、新PCのMySQLへ投入。件数突合。新PC側は検証用接続先・保存先を適用し、メール・通知・定期処理・外部更新を起動前に停止する（DB内設定も対象）
 3. 新PCでアプリを検証用IPで起動し、主要機能、IP(10.0.1.232)・証明書(`pm-ui/certs/pm-prod.crt`)の引継ぎ方法を確認(§6)。旧PCと本番IPを同時に使用しない
-4. 切替: 旧PCのPMへの入力・定期処理・外部取込など全書き込み元を停止 → 最終整合バックアップを取得 → 新PCの検証データを最終データで置き換え → 突合。具体的な取得・復元コマンドと所要時間はリハーサルで確定する。未設計の「差分反映」で代用しない
+4. 切替: 旧PCのPMへの入力・定期処理・外部取込など全書き込み元を停止 → 最終整合バックアップを取得 → 新PCの検証データを最終データで置き換え → 突合。具体的な取得・投入コマンドと所要時間はリハーサルで確定する。未設計の「差分反映」で代用しない
 5. 旧PCのPMを停止した状態でIPを新PCへ移し、業務入力再開前に動作確認・切替可否を判断する。必要な本番連携・定期処理は新PC側だけで再開する。共通MySQL／他システムがある場合、旧PC全体を停止できるかは§6で確認する
 6. **旧PC・旧MySQLを復旧用に保持する**。新PCで入力開始後は旧PCのデータが古くなるため、単純に旧PCを起動して戻してはならない(§4-3)。保持期間は§4-4
 
@@ -436,7 +436,7 @@ v2のPHASE 6を基に、次の順で行う。
 
 | 手順 | 内容 |
 |---|---|
-| 0 | 事前: バックアップの取得・復元手順をリハーサルで検証。コード版、設定、media等の復旧対象も記録する。この事前バックアップを最終データとは扱わない |
+| 0 | 事前: バックアップの取得・投入手順をリハーサルで検証。コード版、設定、media等の復旧対象も記録する。この事前バックアップを最終データとは扱わない |
 | 1 | 利用停止を通知し、PMへの入力・定期処理・外部取込など全書き込み元を停止。PM対象データが更新されないことを確認して最終整合バックアップを取得する。共有MySQL全体の停止／読み取り専用化は他システムへの影響確認なしに行わない |
 | 2 | リハーサルで合格・承認された方式に従って、手順1の確定データをPGへ移行(§2-4)。現時点でPは初回試験失敗、Qは未検証であり、本番実行不可 |
 | 3 | 件数・代表値・計算結果の突合(§2-5) |
@@ -689,7 +689,7 @@ SELECT user, host FROM mysql.user;
 - `docker network create ts_pm_network_v2`、ビルド、`docker compose -f docker-compose.yml -f docker-compose.pc2.yml up -d`を実施(2026-10-21)。`pm-scheduler`が`pm-pm-backend`イメージをビルド前にpullして失敗するため、先に`build pm-backend pm-frontend`を実行してから`up -d`した。
 - 起動時のmigrateが空の`pm_db`へ581件適用され、`showmigrations`の未適用は0件。コンテナ(mysql・pm_backend_prod・pm_frontend_prod・pm-analysis-redis-1・pm_scheduler_prod)が稼働。
 
-- 2026-10-21 旧本番の`pm_db`ダンプ(取得2026-10-20 23:43、約2.6GB、`C:\PST\dump\pm_db_backup.sql`、Git対象外)を、新PCのPM専用MySQLの`pm_db`へ復元(DROP/CREATE後に投入、約5分)。復元中は`pm_scheduler_prod`・`pm_backend_prod`を停止し、**復元後も停止のまま**(二重実行防止。再開はBOSS判断)。復元後のテーブル数286(ダンプのCREATE TABLE数と一致)、`django_migrations`は587件。`showmigrations`(migrate未実行)の未適用は0件、適用済み表示は581件で、テーブルの587件との差6件は、DBにあってコードに無い履歴(accounts.0002_department_employee、accounts.0016_userprofile_leader_units_and_more、accounts.0023_add_record_inquiry_permission_resource、production.0031_productionrecordinquirysetting、quality.0002_add_is_production_recorded、shipping.0002_add_ship_to_lead_time)で、コードにあってDBに無い履歴は0件(過去に削除・改名されたmigrationの記録と見られるが、経緯は未確認)。復元後、`pm_backend_prod`のみ起動(スケジューラは停止のまま)。
+- 2026-10-21 旧本番の`pm_db`ダンプ(取得2026-10-20 23:43、約2.6GB、`C:\PST\dump\pm_db_backup.sql`、Git対象外)を、新PCのPM専用MySQLの`pm_db`へ投入(DROP/CREATE後に投入、約5分)。投入中は`pm_scheduler_prod`・`pm_backend_prod`を停止し、**投入後も停止のまま**(二重実行防止。再開はBOSS判断)。投入後のテーブル数286(ダンプのCREATE TABLE数と一致)、`django_migrations`は587件。`showmigrations`(migrate未実行)の未適用は0件、適用済み表示は581件で、テーブルの587件との差6件は、DBにあってコードに無い履歴(accounts.0002_department_employee、accounts.0016_userprofile_leader_units_and_more、accounts.0023_add_record_inquiry_permission_resource、production.0031_productionrecordinquirysetting、quality.0002_add_is_production_recorded、shipping.0002_add_ship_to_lead_time)で、コードにあってDBに無い履歴は0件(過去に削除・改名されたmigrationの記録と見られるが、経緯は未確認)。投入後、`pm_backend_prod`のみ起動(スケジューラは停止のまま)。
 
 - 2026-10-21 pgloader接続試験(方式Q、新PC)。①稼働中のPM用MySQL(8.0.46)に作った`mysql_native_password`の読み取り専用ユーザーでは、pgloader 3.6.7が`MYSQL-UNSUPPORTED-AUTHENTICATION`で接続失敗(サーバー既定が`caching_sha2_password`のため、認証切替に未対応と見られる。原因の確定は未実施)。この試験用ユーザー・ネットワーク接続は撤去済み。②サーバー既定を`mysql_native_password`にした使い捨てMySQL(`pm-mysql-q-test`、同ダンプを投入、286テーブル)に対しては接続成功し、`system_settings`1表25行をPostgreSQL16(`pm-pg-q-test`)へコピー。行数はMySQL(稼働中・使い捨て)とPGで25件一致。列値の内容照合は未実施。pgloaderの既定変換で`updated_at`が`timestamp with time zone`になった(本プロジェクトはUSE_TZ=Falseのため、本番移行時は型変換指定が必要)。全テーブル移行・性能・外部キー等は未検証。稼働中MySQLの設定は変更していない。
 - 2026-10-21 全テーブル(286)の移行試験(使い捨てMySQL→検証用PG、datetime→timestampのCAST指定あり)は**未達**。(a) MySQL 8の式デフォルト(`ai_analysis_template.parameters`のJSON列)をpgloaderが誤変換しCREATE TABLEが失敗→`type json to json drop default`で回避(デフォルト値が外れる点は本番移行時に要判断)。(b) `dimitri/pgloader:latest`(2022年版)はヒープ上限1GB固定で、`--dynamic-space-size`は非対応。メモリ節約設定でも`t_order_line`(約290万行)のCOPY開始直後にMySQL・PG双方の接続が消えて停止(ヒープ不足の疑い。原因の確定は未実施)。(c) Debian bookwormのpgloaderパッケージ(ヒープ指定可)は、MySQL 8.0へ接続時に`76 fell through ECASE expression`で失敗(未対応の文字セットIDと見られる)。いずれもデータの値の照合まで至っていない。次の候補: pgloaderをソースからDYNSIZE指定でビルドする/大テーブルを除外して他テーブルのみ試験する/Django dumpdata・loaddata等の別方式。
@@ -705,7 +705,7 @@ SELECT user, host FROM mysql.user;
 - 移行前COUNT実測: BASE TABLE 286表、合計10,236,508行（`~/pgq/evidence-8g/mysql-counts-before.tsv`）。VIEWは実テーブル集合に含めない。ビルド対象pgloaderはv3.6.9、コミット`3e06d1b9e1f2eba0d14fe49cb65e8eb570fc27d5`、qmyndは`42664f5fd15a2f308c958c1062edebec30125308`。移行・照合結果は別途記録する。
 - 途中経過: `make DYNSIZE=8192 pgloader`のログと異なり、生成物の実ヒープ値は1GiBだった（`runtime-dynsize.txt`）。同じcoreを`sbcl --dynamic-space-size 8192 --core ... --end-runtime-options`で起動し、実値8,589,934,592 bytesを確認（`runtime-dynsize-explicit.txt`）。1GiBの試行r2も全表コピー集計10,236,508行・pgloader表示3分4.017秒まで到達したが、これを8GiB検証や値照合完了とは扱わない（コンテナ実経過は約130秒で、集計時間と区別）。実8GiBの起動経路で再試験する。元の2022年版での停止原因は未確定。
 - 実ヒープ8GiBの試行r3: 起動冒頭ログで8,589,934,592 bytesを確認。移行コンテナはExitCode=0、OOMKilled=false。全286表集合一致、10,236,508行についてMySQL移行前後・PGの表別件数がすべて一致。日時574列の移行先実型相違0、未VALID制約0（postcheck）。pgloader表示のTotal import timeは2分57.393秒、コンテナ実経過は120.8秒。ログのERROR/FATALは0、WARNINGは識別子63バイトへの切詰め309件（警告なしとは扱わない）。
-- JSON既定値の実差分: `type json to json drop default`により`[]`が外れた列は`ai_analysis_template.parameters`、`notifications.target_positions`、`quality_equipment_inspection_template.measurement_months`・`measurement_weekdays`の4列（`json-defaults-removed.json`）。検証時の回避策であり、本番採用時には復元方針の判断が必要。
+- JSON既定値の実差分: `type json to json drop default`により`[]`が外れた列は`ai_analysis_template.parameters`、`notifications.target_positions`、`quality_equipment_inspection_template.measurement_months`・`measurement_weekdays`の4列（`json-defaults-removed.json`）。検証時の回避策であり、本番採用時にはデフォルト値を戻す方針の判断が必要。
 - 制約・索引: 主キー284件、一意インデックス182件、外部キー537件（計1,003件）は列順・参照先・ON UPDATE/DELETEを含め相違0。一意性はPGの`pg_constraint`だけでなく`pg_index`の有効な一意インデックスで確認した。全インデックスは双方1,042件、PGのinvalid/not readyは0。
 - 全行照合: 比較プロセスexit=0、286表の処理記録（284表照合・主キーなし2表はskip）。主キー付き10,236,165行の欠落・余分キー0、日時573列・32,714,792セル（NULL含む）の値相違0。日時列を持つ行は10,232,081行。`m_contacts`の25行・50日時セルもMySQL(+09:00)とPGで一致し、実値を`m_contacts-row-values.json`へ保存。主キーなし2表の343行は件数のみ一致、値は未確認。
 - ゼロ日付: 主キー付き227表・日付日時554列（TIME19列を除く）をMySQLの原値`CAST AS CHAR`で全行確認し、ゼロ年/月/日セル0、比較時のzero→NULL変換0。主キーなし2表はBOSS指示により値の調査対象に含めない。
