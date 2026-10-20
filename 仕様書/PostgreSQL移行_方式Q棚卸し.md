@@ -447,14 +447,17 @@ production/0001_initial.pyは2026-01-12生成、shipping/0001_initial.pyは2026-
 ## 6. 対応方針(提案、未承認)
 
 1. **db_table重複(12件)**: **2026-10-20 実施・検証済み**。`D:\pm_pg`で、quality/aiと同じ`SeparateDatabaseAndState`パターンでproduction 9件・shipping 3件を包んだ(generator実装・evaluator検証合格)。さらに実機`migrate`試験で、`production/migrations/0001_initial.py`に`orders`アプリへの依存が無かったため実行順序が崩れる問題が判明し、`dependencies`に`('orders', '0029_linebacklog_plan_id')`を追加して解消(詳細は`仕様書/PostgreSQL移行計画書_v3.md`§3-2参照)。空PG(`pm-pg-rehearsal`)への`migrate`で、production・masters・notifications・quality.0001_initialまで正常適用を実機確認済み
-2. **AIビュー4件の書き換え**: `->>`演算子・`::`キャスト・`INTERVAL '8 hours'`形式への書き換え。対象ビューのSQL本体のみの変更で、呼び出し元のAPIには影響しない想定(要検証、未着手)
+2. **AIビュー4件の書き換え**: **2026-10-20 実施・検証済み**。`ai.0012`・`0013`(JSON_VALUE...RETURNING→`->>`+キャスト)、`ai.0055`(DATE(...-INTERVAL 8 HOUR)→`(...-INTERVAL '8 hours')::date`)、`ai.0061`(JSON_UNQUOTE(JSON_EXTRACT(...))→`->>`)。いずれもgenerator実装・evaluator検証合格、実機PGでのSQL実行確認済み
 3. **動的SQL(analysis_data_service.py)**: バッククォート→二重引用符。PG接続時に分岐が必要(フォールバック実装の制限に注意、CLAUDE.md規約により事前同意が必要、未着手)
-4. **TINYINT(1)・DROP FOREIGN KEY(3件)**: ALTER TABLE文の書き換え。**2026-10-20 実機確認**: `quality.0002_add_is_production_recorded`の`TINYINT(1)`が実際にPGで`type "tinyint" does not exist`エラーになることを確認した(未着手、次の対応候補)
+4. **TINYINT(1)・DROP FOREIGN KEY(3件)**: **2026-10-20 実施・検証済み**。`quality.0002`・`0003`(TINYINT(1)→BOOLEAN、UPDATE文の1/0→TRUE/FALSE)、`quality.0004`(reverse_sqlのDROP FOREIGN KEY→DROP CONSTRAINT)。generator実装・evaluator検証合格、実機PGで確認済み
 5. **PG接続のセッションtimezone設定**: 新規の接続設定追加(DATABASES['OPTIONS']等、未着手)
 6. **シーケンス調整**: データ投入後、`setval()`で全テーブルのシーケンスをMySQLのAUTO_INCREMENT値に合わせる手順をQ実行手順書に明記(未着手)
 7. **db_table未指定8モデル**: 実DBでの命名を事前確認(未着手)
+8. **(新規発見・2026-10-20対応済み)ビュー列の削除・型変更**: PostgreSQLの`CREATE OR REPLACE VIEW`は既存ビューの列削除・並び替え・型変更を許可しない(末尾への列追加のみ可)という制約があり、当初の7件リストには無かった問題。`ai.0037`(created_at/updated_at列削除)・`ai.0051`(parent_product_code列の型がvarchar(200)→varchar(30)に変化)が該当し、`DROP VIEW IF EXISTS` + `CREATE VIEW`方式に分割して解消。同パターンの`ai.0059`・`ai.0062`(列追加のみ)は問題なしと確認済み。generator実装・evaluator検証合格、実機PGで確認済み
 
-1以外はいずれも**実施はBOSS承認後**。本書は調査結果の整理のみ。
+**2026-10-20 最終結果**: 上記1・2・4・8の対応により、`pm-pg-rehearsal`(空PG)への`python manage.py migrate`が**全18アプリ完走**(エラーなし、再実行で「No migrations to apply」を確認)。残るのは3(動的SQL)・5(timezone設定)・6(シーケンス調整)・7(db_table未指定8モデルの確認)で、これらはデータ移行・本番運用段階で必要になる対応(方式Qの実データ投入時に改めて検証)。
+
+1・2・4・8以外はいずれも**実施はBOSS承認後**。本書は調査結果の整理のみ。
 
 ---
 
@@ -473,3 +476,17 @@ production/0001_initial.pyは2026-01-12生成、shipping/0001_initial.pyは2026-
   2. 結合・WHERE句を含むビュー17件(migrations 0012-0014・0040-0043・0045・0046・0048-0050・0055・0056・0058・0060・0061)→コマンドは`--check`での確認のみ。定義者の付け替えは手動SQL(`scripts/repair_routing_ai_view_definers.sql.txt`等)をBOSSが本番Adminerで実行
 - 読者アカウント名は`pm_ai_reader`(コード内`READER_USER`定数)
 - **PG移行での注意点**: PGにはMySQLの`DEFINER`/`SQL SECURITY DEFINER`に相当する概念が無く、PGはビューの**所有者(OWNER)**がデフォルトで実行権限を持つ設計。単純な構文置換では済まず、GRANT/REVOKEの設計自体をPG用に作り直す必要がある(§3-4にも追記済み)
+
+### 実データでのJSON値キャスト妥当性検証(2026-10-20、開発MySQL DBで確認)
+
+`ai.0012`・`0013`(`->>`演算子+`::bigint`/`::date`キャストへ書き換え済み)について、開発DBの`t_process_realtime_record`(`record_type IN ('PRODUCTION','PURCHASE')`、計19,328件: PRODUCTION 16,141件・PURCHASE 3,187件)で、実際にキャスト対象の値が不正でないかを確認した。
+
+| 項目 | キャスト先 | 不正な値の件数 |
+|---|---|---|
+| `event_data.supplier_id` | `::bigint` | 0件 |
+| `event_data.line_id` | `::bigint` | 0件 |
+| `event_data.arrival_date` | `::date` | 0件 |
+
+全件キャスト可能で問題なし。今回の修正は実データでも安全に動作する見込み。`ai.0061`(`pause_reason`等)は`->>`のみでキャスト(`::型`)を行わないため、この種のリスクは無い。
+
+なお副産物として、`record_type='PRODUCTION'`の`event_data.source`値は現在`OPERATOR_ACTION_END`等が中心で、`PURCHASE_ACTUAL_INPUT`等の仕入関連値は(0013の仕様変更通り)`record_type='PURCHASE'`側に移っていることも確認した。

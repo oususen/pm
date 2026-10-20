@@ -129,13 +129,22 @@ MySQLから検証用に複製
 
 | 方式 | 内容 | 長所 | 短所 |
 |---|---|---|---|
-| **P: スキーマ=Django migrate、データ=pgloader(data only)** | スキーマはDjangoがPGに作り、pgloaderでデータだけ流す | Djangoのスキーマと一致する | migrateが通らない恐れ(§3) |
-| **Q: pgloader等でスキーマ込み** | MySQLからスキーマ・データ・対応するmigration履歴を移行 | 過去migrationの全再実行を回避できる。管理対象外テーブルも移行対象に含める | 型・制約・履歴の整合確認が必要。ビュー等は別途移植。履歴コピーや `--fake` だけでは整合性を保証できない |
+| **P: スキーマ=Django migrate、データ=pgloader(data only)** | スキーマはDjangoがPGに作り、pgloaderでデータだけ流す | Djangoのスキーマと一致する | ~~migrateが通らない恐れ~~ **2026-10-20解消(下記参照)**。pgloaderの認証問題(下記)は残る |
+| **Q: pgloader等でスキーマ込み** | MySQLからスキーマ・データ・対応するmigration履歴を移行 | 過去migrationの全再実行を回避できる。管理対象外テーブルも移行対象に含める | 型・制約・履歴の整合確認が必要。ビュー等は別途移植。履歴コピーや `--fake` だけでは整合性を保証できない。pgloaderへの依存度がPより高い |
 | R: `dumpdata`/`loaddata` | アプリ層で移行 | スキーマ作成はDjango | 遅い。巨大テーブルに不向き。型の扱いに注意 |
 
 **選択手順**: まず P の前提(migrate)を空のPGで試験(§3-1)し、結果で決める。pgloaderがWindowsで動かない場合は、WSL2内またはDockerイメージで実行する。方式の切替(P→Q→R)は、そのつどBOSSに報告して承認を得る。
 
-初回試験でPの前提が成立しないことを確認したため、次の検証候補はQとする。具体的な移行対象・型変換・履歴の扱いを確定し、検証結果をもって採否を判断する（§3-2-2）。
+初回試験(2026-10-16)でPの前提が成立しないことを確認したため、Qを次の検証候補として進めた。
+
+**2026-10-20 方針re-評価**: §3-2のS3・S4(重複テーブル対策・RunSQL修正)により、`D:\pm_pg`で**空PGへのDjango migrateが完全に完走することを実機確認した**。これによりPの前提条件(「migrateが通らない恐れ」)は解消された。方式Pが再び有力な選択肢になったため、Q前提で進めてきた棚卸し作業(`仕様書/PostgreSQL移行_方式Q棚卸し.md`)の成果を活かしつつ、P/Qどちらを採用するかは改めてBOSS判断が必要。
+
+**2026-10-20 BOSS判断**: P/Qの決定は**保留**。追加の検証結果を見てから決める。次に何を検証するか(例: pgloaderの実接続試験、pgloaderでのdata-onlyコピー試験等)は未指定、別途指示を待つ。
+
+**pgloaderの既知リスク(P・Qいずれでも共通、2026-10-20確認)**:
+- 開発MySQL(8.0.43)の認証プラグインは`root`・`pm_ai_reader`とも`caching_sha2_password`であることを実機確認した。pgloaderはこの認証方式への対応が不十分な場合があり、接続エラー(`UNSUPPORTED-AUTHENTICATION`等)が起きる可能性がある
+- 回避策(案、実施はBOSS承認後): 移行専用ユーザーを`mysql_native_password`で作成する(§2-4で既に合意済みの「新規作成するSELECT専用ユーザー」の認証方式として指定する形で対応可能)。MySQL側のグローバル設定変更(`default_authentication_plugin`)は影響範囲が広いため非推奨
+- JSON→JSONBの精度劣化(大きな整数・高精度小数で値が変わる可能性)も一般的なpgloaderの既知リスクとして認識。方式Q棚卸し文書で確認したJSON項目(supplier_id・line_id・arrival_date)は実データで全件小さな整数・日付形式のみで該当しないことを確認済みだが、他のJSON項目を移行対象に含める場合は同様の確認が必要
 
 コピー元のMySQLは、**新規作成するSELECT専用ユーザー**で読む。作業終了後にそのユーザーを削除する(MySQL側の権限変更にあたるため、**BOSS承認事項**)。
 
@@ -235,7 +244,19 @@ MySQLから検証用に複製
   2. 対策: `production/migrations/0001_initial.py`の`dependencies`に`('orders', '0020_line_gantt_plan')`を追加(generator実装・evaluator検証合格)。空DBを作り直して再実行
   3. 2回目: `production.0009_linebacklog_sequence_default_zero`で`line_backlog.adjust_qty`列が無いエラー。原因は`orders`アプリが0020より後の`orders/migrations/0028・0029`でも`line_backlog`へ実際に列追加(`actual_shipment_qty`・`adjust_qty`・`scrap_qty`・`plan_id`)していたため。依存先を0020→`orders.0029_linebacklog_plan_id`へ修正(generator実装・evaluator検証合格、0030以降に該当テーブルへの実DB操作が無いことも独立確認済み)
   4. 3回目: 空DBを作り直して再実行した結果、**production・masters・notifications・quality.0001_initialまで全て正常に適用され、重複テーブル問題(t_line_demand等12件)は解消を実機で確認できた**。今回新たに止まったのは`quality.0002_add_is_production_recorded`の`TINYINT(1)`(MySQL固有型)エラーで、これは`仕様書/PostgreSQL移行_方式Q棚卸し.md`§4で**既に「要対応」として把握済みの7件のうちの1つ**であり、今回の重複テーブル対策とは別スコープの問題
-- **結論**: 重複テーブル作成問題(§2-1の12件)は、3回の実機`migrate`試験を経て解消を確認した。次に進む場合はRunSQL側のMySQL固有構文7件の書き換え(§3-4・方式Q棚卸し§4)が課題になる
+- **結論(中間)**: 重複テーブル作成問題(§2-1の12件)は、3回の実機`migrate`試験を経て解消を確認した
+
+### 2026-10-20 続き: RunSQL側のMySQL固有構文を修正し、空PGへの全migration完走を達成
+
+重複テーブル対策の後、実機`migrate`で以下を順に発見・修正した(いずれもgenerator実装・evaluator検証合格、`D:\pm_pg`限定)。
+
+1. `quality.0002`・`0003`(TINYINT(1)→BOOLEAN)、`quality.0004`(reverse_sqlのDROP FOREIGN KEY→DROP CONSTRAINT)
+2. `ai.0012`・`0013`(JSON_VALUE...RETURNING→`->>`演算子+キャスト)、`ai.0055`(DATE(... - INTERVAL 8 HOUR)→`(... - INTERVAL '8 hours')::date`)、`ai.0061`(JSON_UNQUOTE(JSON_EXTRACT(...))→`->>`演算子)
+3. **新たに発見した問題**: PostgreSQLの`CREATE OR REPLACE VIEW`は既存ビューの列の削除・並び替え・型変更を許可しない(末尾への列追加のみ可)。`ai.0037`(created_at/updated_at列を削除する再定義)と`ai.0051`(parent_product_code列の型がvarchar(200)→varchar(30)に変わる再定義)がこの制約に抵触していたため、`DROP VIEW IF EXISTS` + `CREATE VIEW`方式に分割して修正。同様パターンの`ai.0059`・`ai.0062`は末尾追加のみで問題なしと確認済み
+
+**2026-10-20 最終結果**: `pm-pg-rehearsal`(空PG)へ`python manage.py migrate`を実行し、**全18アプリの全migrationがエラーなく完走した**(exit code 0)。再実行で「No migrations to apply」を確認し、完全な適用を確認済み。evaluatorもpm-pg-rehearsal実機DBへの直接SQL検証で裏付け済み。
+
+これにより、**方式Qの前提となる「空DBからの構築可能性」の技術的な障害は解消した**。残る作業は、実際のデータ移行(方式Qの投入・突合手順)、本番データでのruntime値の妥当性検証(例: JSON内のsupplier_id等が本当に数値キャスト可能か)、生SQL修正の`D:\pm`本体への反映方法の決定など。
 
 ### 3-2. 方針
 
