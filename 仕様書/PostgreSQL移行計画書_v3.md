@@ -691,6 +691,27 @@ SELECT user, host FROM mysql.user;
 
 - 2026-10-21 旧本番の`pm_db`ダンプ(取得2026-10-20 23:43、約2.6GB、`C:\PST\dump\pm_db_backup.sql`、Git対象外)を、新PCのPM専用MySQLの`pm_db`へ復元(DROP/CREATE後に投入、約5分)。復元中は`pm_scheduler_prod`・`pm_backend_prod`を停止し、**復元後も停止のまま**(二重実行防止。再開はBOSS判断)。復元後のテーブル数286(ダンプのCREATE TABLE数と一致)、`django_migrations`は587件。`showmigrations`(migrate未実行)の未適用は0件、適用済み表示は581件で、テーブルの587件との差6件は、DBにあってコードに無い履歴(accounts.0002_department_employee、accounts.0016_userprofile_leader_units_and_more、accounts.0023_add_record_inquiry_permission_resource、production.0031_productionrecordinquirysetting、quality.0002_add_is_production_recorded、shipping.0002_add_ship_to_lead_time)で、コードにあってDBに無い履歴は0件(過去に削除・改名されたmigrationの記録と見られるが、経緯は未確認)。復元後、`pm_backend_prod`のみ起動(スケジューラは停止のまま)。
 
+- 2026-10-21 pgloader接続試験(方式Q、新PC)。①稼働中のPM用MySQL(8.0.46)に作った`mysql_native_password`の読み取り専用ユーザーでは、pgloader 3.6.7が`MYSQL-UNSUPPORTED-AUTHENTICATION`で接続失敗(サーバー既定が`caching_sha2_password`のため、認証切替に未対応と見られる。原因の確定は未実施)。この試験用ユーザー・ネットワーク接続は撤去済み。②サーバー既定を`mysql_native_password`にした使い捨てMySQL(`pm-mysql-q-test`、同ダンプを投入、286テーブル)に対しては接続成功し、`system_settings`1表25行をPostgreSQL16(`pm-pg-q-test`)へコピー。行数はMySQL(稼働中・使い捨て)とPGで25件一致。列値の内容照合は未実施。pgloaderの既定変換で`updated_at`が`timestamp with time zone`になった(本プロジェクトはUSE_TZ=Falseのため、本番移行時は型変換指定が必要)。全テーブル移行・性能・外部キー等は未検証。稼働中MySQLの設定は変更していない。
+- 2026-10-21 全テーブル(286)の移行試験(使い捨てMySQL→検証用PG、datetime→timestampのCAST指定あり)は**未達**。(a) MySQL 8の式デフォルト(`ai_analysis_template.parameters`のJSON列)をpgloaderが誤変換しCREATE TABLEが失敗→`type json to json drop default`で回避(デフォルト値が外れる点は本番移行時に要判断)。(b) `dimitri/pgloader:latest`(2022年版)はヒープ上限1GB固定で、`--dynamic-space-size`は非対応。メモリ節約設定でも`t_order_line`(約290万行)のCOPY開始直後にMySQL・PG双方の接続が消えて停止(ヒープ不足の疑い。原因の確定は未実施)。(c) Debian bookwormのpgloaderパッケージ(ヒープ指定可)は、MySQL 8.0へ接続時に`76 fell through ECASE expression`で失敗(未対応の文字セットIDと見られる)。いずれもデータの値の照合まで至っていない。次の候補: pgloaderをソースからDYNSIZE指定でビルドする/大テーブルを除外して他テーブルのみ試験する/Django dumpdata・loaddata等の別方式。
+
+### 2026-10-21 pgloaderソースビルド再試験（検証実施済み・独立評価合格）
+
+- BOSS承認: pgloader v3.6.9とqmyndのコミットを固定した専用Dockerイメージを作成し、`make clones`後の`make DYNSIZE=8192 pgloader`でヒープ8GiBを指定する。`save`経路はDYNSIZEを保存処理へ渡さないため使用しない。
+- 入出力: 読み取り元は使い捨て`pm-mysql-q-test/pm_db`のSELECT専用ユーザー、書き込み先は検証専用`pm-pg-q-test/pm_pg_q_test`のみ。前回試験の対象テーブルを再作成する。稼働中`mysql`および本番用コンテナへの読み取り・変更は禁止。
+- ファイル: WSLの`~/pgq/`配下に派生設定、ビルド情報、終了コード、マスク済みログ、照合結果を保存する。既存設定と認証ファイルを保全し、秘密情報を出力しない。
+- 検証: 全実テーブルの集合・件数・キー集合、全日時列の型と主キー単位の全行値（NULL・小数秒を含む）を照合する。元TIMESTAMPの有無と接続タイムゾーンを確認する。ゼロ日付→NULLとJSON既定値削除は差分として記録し、無条件に完全一致とは扱わない。主キーなし等の未確定事項はBOSSへ報告する。
+- 既存の並列・バッチ設定を維持し、取得件数・タイムアウトの上限は追加していない。本試験は使い捨てMySQL→検証PGのみで、本番切替・アプリのPG対応・本番反映を意味しない。
+- 事前の実DB確認: 主キーなしは`bk_purchase_arrival_date_20261007`（41行、`backed_up_at`がdatetime）と`z_tmp_laser_pattern_import`（302行、日時列なし）の2表。BOSS指示により、この2表は件数のみ確認し、値照合は未確認とする（`backed_up_at`の日時一致も未確認）。全列の値と重複数による代替比較は行わない。MySQL TIMESTAMPは`m_contacts.created_at`・`updated_at`の2列で、移行・比較用接続のセッションtime_zoneを現行PMに合わせて`+09:00`とする。証跡は`~/pgq/evidence-8g/table-types-and-no-pk.tsv`。
+- 移行前COUNT実測: BASE TABLE 286表、合計10,236,508行（`~/pgq/evidence-8g/mysql-counts-before.tsv`）。VIEWは実テーブル集合に含めない。ビルド対象pgloaderはv3.6.9、コミット`3e06d1b9e1f2eba0d14fe49cb65e8eb570fc27d5`、qmyndは`42664f5fd15a2f308c958c1062edebec30125308`。移行・照合結果は別途記録する。
+- 途中経過: `make DYNSIZE=8192 pgloader`のログと異なり、生成物の実ヒープ値は1GiBだった（`runtime-dynsize.txt`）。同じcoreを`sbcl --dynamic-space-size 8192 --core ... --end-runtime-options`で起動し、実値8,589,934,592 bytesを確認（`runtime-dynsize-explicit.txt`）。1GiBの試行r2も全表コピー集計10,236,508行・pgloader表示3分4.017秒まで到達したが、これを8GiB検証や値照合完了とは扱わない（コンテナ実経過は約130秒で、集計時間と区別）。実8GiBの起動経路で再試験する。元の2022年版での停止原因は未確定。
+- 実ヒープ8GiBの試行r3: 起動冒頭ログで8,589,934,592 bytesを確認。移行コンテナはExitCode=0、OOMKilled=false。全286表集合一致、10,236,508行についてMySQL移行前後・PGの表別件数がすべて一致。日時574列の移行先実型相違0、未VALID制約0（postcheck）。pgloader表示のTotal import timeは2分57.393秒、コンテナ実経過は120.8秒。ログのERROR/FATALは0、WARNINGは識別子63バイトへの切詰め309件（警告なしとは扱わない）。
+- JSON既定値の実差分: `type json to json drop default`により`[]`が外れた列は`ai_analysis_template.parameters`、`notifications.target_positions`、`quality_equipment_inspection_template.measurement_months`・`measurement_weekdays`の4列（`json-defaults-removed.json`）。検証時の回避策であり、本番採用時には復元方針の判断が必要。
+- 制約・索引: 主キー284件、一意インデックス182件、外部キー537件（計1,003件）は列順・参照先・ON UPDATE/DELETEを含め相違0。一意性はPGの`pg_constraint`だけでなく`pg_index`の有効な一意インデックスで確認した。全インデックスは双方1,042件、PGのinvalid/not readyは0。
+- 全行照合: 比較プロセスexit=0、286表の処理記録（284表照合・主キーなし2表はskip）。主キー付き10,236,165行の欠落・余分キー0、日時573列・32,714,792セル（NULL含む）の値相違0。日時列を持つ行は10,232,081行。`m_contacts`の25行・50日時セルもMySQL(+09:00)とPGで一致し、実値を`m_contacts-row-values.json`へ保存。主キーなし2表の343行は件数のみ一致、値は未確認。
+- ゼロ日付: 主キー付き227表・日付日時554列（TIME19列を除く）をMySQLの原値`CAST AS CHAR`で全行確認し、ゼロ年/月/日セル0、比較時のzero→NULL変換0。主キーなし2表はBOSS指示により値の調査対象に含めない。
+- 証跡: WSL `~/pgq/evidence-8g/`の`final-data-summary.json`、`keyed-results.json`、`keyed-summary.json`、`keyed-comparison-exit.txt`、`postcheck-summary.json`、`constraint-comparison.json`、`raw-zero-date-counts.json`、`scripts-sha256.txt`等。検証集計時刻は2026-10-21 03:43:02 JST。コミット・push・本番反映は未実施。
+- evaluator最終判定: **合格（方式Qの検証限定・BOSS承認の未確認2表を除く）**。全表移行、承認範囲の日時全行照合、ゼロ日付、型・制約、接続先限定・既存設定維持・秘密保護、文書を独立確認。主キーなし2表の値・全非日時列の値・アプリのPG動作・本番移行は未確認／評価対象外。JSON4列の既定値削除があるため全スキーマ完全一致とは判断しない。実用起動ではSBCLの`--dynamic-space-size 8192 --core /opt/pgloader/build/bin/pgloader --end-runtime-options`指定を使用する。
+
 **未完了**
 - ブラウザでの画面確認(ログイン等。空DBのためユーザー未作成)、他PCからの接続確認、HTTPS証明書の再生成、経管の通信許可回答の確認、`.env`のWEB_PUSH_VAPID_*等の未設定項目、スケジューラの稼働ジョブの確認。
 
