@@ -711,9 +711,14 @@ SELECT user, host FROM mysql.user;
 - ゼロ日付: 主キー付き227表・日付日時554列（TIME19列を除く）をMySQLの原値`CAST AS CHAR`で全行確認し、ゼロ年/月/日セル0、比較時のzero→NULL変換0。主キーなし2表はBOSS指示により値の調査対象に含めない。
 - 証跡: WSL `~/pgq/evidence-8g/`の`final-data-summary.json`、`keyed-results.json`、`keyed-summary.json`、`keyed-comparison-exit.txt`、`postcheck-summary.json`、`constraint-comparison.json`、`raw-zero-date-counts.json`、`scripts-sha256.txt`等。検証集計時刻は2026-10-21 03:43:02 JST。コミット・push・本番反映は未実施。
 - evaluator最終判定: **合格（方式Qの検証限定・BOSS承認の未確認2表を除く）**。全表移行、承認範囲の日時全行照合、ゼロ日付、型・制約、接続先限定・既存設定維持・秘密保護、文書を独立確認。主キーなし2表の値・全非日時列の値・アプリのPG動作・本番移行は未確認／評価対象外。JSON4列の既定値削除があるため全スキーマ完全一致とは判断しない。実用起動ではSBCLの`--dynamic-space-size 8192 --core /opt/pgloader/build/bin/pgloader --end-runtime-options`指定を使用する。
+- **PG側のスキーマ名(要判断、2026-10-21記録)**: pgloaderはMySQLのDB名`pm_db`をそのままPGのスキーマ名にしたため、286表は`public`ではなくスキーマ`pm_db`にある(検証用`pm_pg_q_test`)。Adminerでは左上のスキーマを`pm_db`に切り替えないとテーブルが見えない。Djangoは既定で`public`を参照するため、`pm_pg`アプリをこのDBにつなぐ前に次のいずれかを決める必要がある: (A)移行時にpgloaderの指定でテーブルを`public`へ作る(`pm_pg`が`public`前提のため素直、お勧め)、(B)Django接続設定の`search_path`を`pm_db`にする。どちらも**未実施・未検証**。
+- **新PCのAdminer(2026-10-21、BOSS承認)**: コンテナ`pm-adminer`(`adminer:5.4.1`、デザイン`pepa-linha`は旧本番の見た目に近いと推測して指定、旧本番の実設定は未確認)を`0.0.0.0:8082`で起動(経管申請済みの8082を使用、LAN全体に暫定公開)。`pm_pm_internal`(MySQL `mysql`用)と`pm-pg-q-test-net`(PG `pm-pg-q-test`用)に接続。ログインは既存の管理者アカウント(MySQL `root`、PG `pm_pg_admin`)で、読み取り専用ユーザーは未作成。LAN内からの公開は暫定で、旧本番の実データを含む`pm_db`が閲覧・変更可能な状態のため、期間を短くする。コミット対象のファイルは無い(`docker run`で作成)。
+- ファイアウォール(BOSS実施): Windows・Hyper-Vとも受信TCP 8501・8081・8082・9443を`10.0.0.0/16`から許可。別PC(10.0.1.67)から`https://10.0.1.139:8501`へ到達した記録をnginxログで確認(ただし新PC自身から自IPへの接続は届かず、自己宛て試験は判断材料にならない)。9443のPortainerは`127.0.0.1`のみ待ち受けのため外部から見えない。
+- WSL常駐: Ubuntuが接続なしで停止するとコンテナも止まるため、`.wslconfig`に`vmIdleTimeout=-1`を追加し、非表示のWSL待機プロセスを手動起動した(PC再起動で消える。タスクスケジューラ`PM-WSL-Start`の登録はBOSS作業として未実施)。
+- フロントエンドのnginxはバックエンドのIPを起動時に固定するため、バックエンド再作成・再起動後は`pm_frontend_prod`も再起動が必要(今回、再起動前は`/api/`が502でログイン失敗した)。恒久対策は未実施。
 
 **未完了**
-- ブラウザでの画面確認(ログイン等。空DBのためユーザー未作成)、他PCからの接続確認、HTTPS証明書の再生成、経管の通信許可回答の確認、`.env`のWEB_PUSH_VAPID_*等の未設定項目、スケジューラの稼働ジョブの確認。
+- 旧本番ユーザーでのPMログイン確認(旧本番ダンプの投入によりユーザーは入っている。`admin`の存在は確認、実ログインは未確認)、他PCからの画面操作の確認、HTTPS証明書の再生成、経管の通信許可回答の確認、`.env`のWEB_PUSH_VAPID_*等の未設定項目、スケジューラの稼働ジョブの確認(スケジューラは停止中)。
 
 **検証・反映状況**: 起動確認はlocalhostの`https://localhost:8501`(HTTP 200)・`http://localhost:8081/api/`(HTTP 200)のみ。**機能の動作確認は未実施(未検証)**。`pm_scheduler_prod`はmigrate完了前に再起動を繰り返し、完了後に起動した。evaluatorの検証は未実施。コミット・push未実施(本追記は未コミット)。本番IP切替は未実施。
 
