@@ -367,7 +367,8 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
 
         # 今回の同期結果に存在しない期間内レコードの整理。
         # FORECAST は行を残し、需要数のみ0にする（delivery_qty は保持）。
-        # FIRM は未入力(納入数=0)の行のみ削除する。
+        # FIRM は未入力(納入数=0)なら削除し、入力済みなら計画行として残すが、
+        # 旧納期の需要を二重計上しないよう需要数と元受注参照を消す。
         for ekey, existing_row in list(existing_map.items()):
             if ekey in processed_keys:
                 continue
@@ -384,6 +385,16 @@ def sync_kubota_sakai_due_adjustments_from_orders(start_date, end_date):
                     updated_count += 1
                 continue
             if existing_row.order_type == 'FIRM' and existing_row.delivery_qty != Decimal('0'):
+                changed = False
+                if existing_row.demand_qty != Decimal('0'):
+                    existing_row.demand_qty = Decimal('0')
+                    changed = True
+                if existing_row.order_line_id is not None:
+                    existing_row.order_line_id = None
+                    changed = True
+                if changed:
+                    existing_row.save(update_fields=['demand_qty', 'order_line'])
+                    updated_count += 1
                 continue
             existing_row.delete()
             deleted_count += 1

@@ -17,6 +17,7 @@ from orders.core.services.kubota_sakai_kakutei_import import KubotaSakaiKakuteiI
 from shipping.views_kubota_sakai_due_adjustment import (
     KubotaSakaiDueAdjustmentViewSet,
     _link_forward_plans_for_group,
+    sync_kubota_sakai_due_adjustments_from_orders,
 )
 
 
@@ -201,6 +202,72 @@ class KubotaSakaiDueAdjustmentImportTests(TestCase):
         fixed_future_row.refresh_from_db()
         self.assertIsNone(fixed_future_row.source_order_no)
         self.assertEqual(fixed_future_row.order_type, 'FORECAST')
+
+    def test_sync_clears_old_firm_demand_but_keeps_planned_delivery(self):
+        old_due_date = date(2026, 10, 26)
+        new_due_date = date(2026, 10, 22)
+        source_order_no = '4512370554'
+
+        old_order = Order.objects.create(
+            customer=self.customer,
+            order_no='FM-OLD',
+            order_type='FIRM',
+            status='SUPERSEDED',
+        )
+        old_line = OrderLine.objects.create(
+            order=old_order,
+            line_no=1,
+            product=self.product,
+            product_code=self.product.product_code,
+            customer_order_no=source_order_no,
+            quantity=Decimal('63'),
+            due_date=old_due_date,
+            ship_to_code='ZGHC',
+        )
+        old_adjustment = KubotaSakaiDueAdjustment.objects.create(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no=source_order_no,
+            order_type='FIRM',
+            due_date=old_due_date,
+            demand_qty=Decimal('63'),
+            delivery_qty=Decimal('63'),
+            remaining_qty=Decimal('0'),
+            order_line=old_line,
+        )
+
+        current_order = Order.objects.create(
+            customer=self.customer,
+            order_no='FM-CURRENT',
+            order_type='FIRM',
+            status='OPEN',
+        )
+        current_line = OrderLine.objects.create(
+            order=current_order,
+            line_no=1,
+            product=self.product,
+            product_code=self.product.product_code,
+            customer_order_no=source_order_no,
+            quantity=Decimal('66'),
+            due_date=new_due_date,
+            ship_to_code='ZGHC',
+        )
+
+        sync_kubota_sakai_due_adjustments_from_orders(new_due_date, old_due_date)
+
+        old_adjustment.refresh_from_db()
+        self.assertEqual(old_adjustment.demand_qty, Decimal('0'))
+        self.assertEqual(old_adjustment.delivery_qty, Decimal('63'))
+        self.assertIsNone(old_adjustment.order_line_id)
+
+        current_adjustment = KubotaSakaiDueAdjustment.objects.get(
+            product_code=self.product.product_code,
+            ship_to_code='ZGHC',
+            source_order_no=source_order_no,
+            due_date=new_due_date,
+        )
+        self.assertEqual(current_adjustment.demand_qty, Decimal('66'))
+        self.assertEqual(current_adjustment.order_line_id, current_line.id)
 
 
 class KubotaSakaiKakuteiImportServiceTests(TestCase):
