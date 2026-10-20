@@ -716,6 +716,12 @@ SELECT user, host FROM mysql.user;
 - ファイアウォール(BOSS実施): Windows・Hyper-Vとも受信TCP 8501・8081・8082・9443を`10.0.0.0/16`から許可。別PC(10.0.1.67)から`https://10.0.1.139:8501`へ到達した記録をnginxログで確認(ただし新PC自身から自IPへの接続は届かず、自己宛て試験は判断材料にならない)。9443のPortainerは`127.0.0.1`のみ待ち受けのため外部から見えない。
 - WSL常駐: Ubuntuが接続なしで停止するとコンテナも止まるため、`.wslconfig`に`vmIdleTimeout=-1`を追加し、非表示のWSL待機プロセスを手動起動した(PC再起動で消える。タスクスケジューラ`PM-WSL-Start`の登録はBOSS作業として未実施)。
 - フロントエンドのnginxはバックエンドのIPを起動時に固定するため、バックエンド再作成・再起動後は`pm_frontend_prod`も再起動が必要(今回、再起動前は`/api/`が502でログイン失敗した)。恒久対策は未実施。
+- **PG版アプリ(`pm_pg`)の新PC起動と、JSON列の型不一致の発見(2026-10-21、BOSS承認)**:
+  - 起動: `C:\PST\pm_pg`(`pm_pg`ブランチ)を`docker-compose.pc2-pg.yml`(新規、`pm_pg`側)でビルド・起動。DBは検証用`pm-pg-q-test`(`pm_pg_q_test`)、バックエンド`18081`・フロントエンド`18501`(HTTPS)、`DEBUG=False`、スケジューラ無し、`migrate`は起動コマンドに含めない(`showmigrations`で未適用0件・適用済み581件を確認)。`pm_pg`の`settings.py`のCORS・CSRFへ`https://10.0.1.139:18501`と`https://localhost:18501`を追加(未コミット)。秘密情報は`.env.pg_rehearsal`(Git対象外)。PGの`search_path`はpgloaderが`public, pm_db`に設定済みで、コード変更なしで`pm_db`スキーマのテーブルを参照できた。`admin`でログインでき、104ユーザーを読めた(他PCから`https://10.0.1.139:18501`で確認)。
+  - **発見した問題**: pgloaderはMySQLのJSON列をPGの`json`型で作成した(56列)。DjangoはPGのJSONFieldを`jsonb`として扱うため、psycopg3が`json`型を先にPythonオブジェクトへ変換し、Djangoが再度`json.loads`して`TypeError: the JSON object must be str, bytes or bytearray, not list`になる。「スポットライン実績入力」の工程一覧が空になった原因もこれ(`production_record_inquiry_setting.target_line_codes`の読み取りで失敗)。JSON列を読む画面・APIは全般に影響し得る。MySQL側と設定値自体は同一だった。
+  - **検証用PGでの対処**: 56列(31テーブル)を`ALTER TABLE ... ALTER COLUMN ... TYPE jsonb USING 列::jsonb`で1トランザクション変換。変換前後で31テーブルの行数一致、56列の値チェックサム(jsonb正規化テキストのmd5)一致。変換後、同APIが200(ライン5・工程5・品番58件)。記録はWSL `~/pgq/jsonb-fix/`。
+  - **本番移行の手順への反映(要対応)**: pgloaderの指定に`CAST type json to jsonb`を追加する。既存の`type json to json drop default`(4列のデフォルト`[]`削除)との関係は未検証で、`jsonb`変換後のデフォルト値の扱い(`'[]'::jsonb`を付け直す方針)と併せて要判断。
+  - **未検証**: スポットライン以外の画面・APIでの全般的な動作、JSON以外の型不一致(他の型の差異)の有無、`jsonb`変換後に他の画面で別のエラーが出ないか。以前の全行照合(日時)の結果は`json`型の時点のもので、`jsonb`変換後の再照合は上記チェックサム以外は未実施。
 
 **未完了**
 - 旧本番ユーザーでのPMログイン確認(旧本番ダンプの投入によりユーザーは入っている。`admin`の存在は確認、実ログインは未確認)、他PCからの画面操作の確認、HTTPS証明書の再生成、経管の通信許可回答の確認、`.env`のWEB_PUSH_VAPID_*等の未設定項目、スケジューラの稼働ジョブの確認(スケジューラは停止中)。
