@@ -670,6 +670,28 @@ SELECT user, host FROM mysql.user;
 - 本計画書への実績・問題・対応方針の記載と現状との差異修正。アプリPG化・データ移行・本番反映は含まない。
 - 2026-10-20: 新PC(PC2)本体・GPU(RTX 3080)の入荷。経管(福島さん)へ初期設定(Windows Pro化・Office・基幹システム・セキュリティソフト)と通信許可(TCP 8501・8081・8082・11434)を依頼(回答待ち)。IPは入替までの暫定固定IP→入替時に10.0.1.232を引き継ぐ方針を確認
 
+### 新PC(PC2)へのPM(MySQL版)構築の進捗（2026-10-20記録、構築中・未検証）
+
+方針(B案): PM+MySQLを現行通り新PCへ構築。PostgreSQL切替は別工程。
+
+**決定事項(BOSS承認済み)**
+- 新PCへ移すのはPMのみ。MySQLはPM専用に新規構築する(共通MySQL・kaizen_pp等は旧PCに残す。将来PM_PGとの共有は可)。
+- Docker Engine(WSL2)方式。初期データは空DB(旧本番ダンプの投入は行わない)。`migrate`の実行は可。
+- HTTPS証明書(旧IP 10.0.1.232用)の新IP再生成は後回し。経管の回答待ちでも作業は進める。
+- 一般利用者への公開・本番IPの切替・旧本番への書き込みは行わない。
+
+**実施済み(ファイル準備のみ)**
+- `.env`作成(gitignore対象。SECRET_KEY生成済み、ALLOWED_HOSTSに10.0.1.139追加。`DB_PASSWORD`はBOSSが直接記入)。
+- `pm_backend/project/settings.py`: `CORS_ALLOWED_ORIGINS`・`CSRF_TRUSTED_ORIGINS`へ新PCの暫定IP 10.0.1.139:8501(http/https)を追加(未コミット)。
+- `docker-compose.pc2.yml`新規作成: PM専用`mysql:8.0`(ボリューム`pm_mysql_data`)を追加。旧本番で自動適用されないよう`override`名を避け、`-f`で明示指定する。
+- 旧PCから`vapid_private.pem`・`firebase-service-account.json`を`pm_backend/`へ配置(gitignore対象)。
+- WSL2導入(BOSS実施、再起動待ち)。
+
+**未完了**
+- 再起動、Ubuntu・Docker Engineの導入、`docker network create ts_pm_network_v2`、`docker compose -f docker-compose.yml -f docker-compose.pc2.yml up -d --build`(起動時に`migrate`が自動実行される)、localhostでの動作確認、HTTPS証明書の再生成、経管の通信許可回答の確認。
+
+**検証・反映状況**: ビルド・起動・動作確認は**未実施(未検証)**。コミット・push未実施。本番IP切替は未実施。
+
 ### 今後の確認・承認対象
 
 | # | 項目 | 区分 |
