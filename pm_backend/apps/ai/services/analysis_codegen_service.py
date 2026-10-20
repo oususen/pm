@@ -211,6 +211,7 @@ SYSTEM_PROMPT = (
     'load_view(ビュー名)・con.sql(...)が返すのは結果オブジェクトで、それ自体をforで回したり、row["列名"]のように列名で読んだりしない。'
     '行は .fetchall() で取り、各行はタプル(列の順番で row[0], row[1]。SELECTに書いた列の順)。'
     '最終SELECTの列順・Pythonで取り出す位置・emit_tableの見出しと行の順を照合し、要求した判定項目も表示する。'
+    'fetchall()の各行をforや内包表記で複数の変数へ展開するときは、取得するSELECTの列数・列順と受け取る変数の個数・順序を必ず一致させる。使わない列も含めて照合し、余分な変数を足さない。'
     'load_viewに渡せるのは承認済みビュー名だけ。先のstepで作った中間テーブルは、con.sql("SELECT ... FROM w_中間テーブル名").fetchall() で読む。'
     'importできるのは json, math, datetime, decimal, statistics, collections, itertools, re だけ。ファイル・ネットワーク・OS・動的実行・'
     'アンダースコアで始まる属性は使えない。emit_* を少なくとも1回呼ぶ。グラフの種類は bar か line。'
@@ -374,9 +375,53 @@ def payload_hash(messages):
     return sha256_text(json.dumps(messages, ensure_ascii=False))
 
 
-def _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, digest):
-    value = json.dumps([owner_id, plan_id, revision, provider, model, attempt_no, digest], ensure_ascii=False)
+def _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, digest, auto_repair=False):
+    value = json.dumps([owner_id, plan_id, revision, provider, model, attempt_no, digest, *(['python_unpack_repair_v1'] if auto_repair else [])], ensure_ascii=False)
     return salted_hmac('ai.analysis.codegen-send', value, algorithm='sha256').hexdigest()
+
+
+REPAIR_SCOPE = 'python_unpack_repair_v1'
+REPAIR_REASON = 'python_unpack_mismatch'
+REPAIR_RULE = ('機械検査でSQL取得列数とPythonの受取個数の不一致が確定した。userのrepair_candidateを修正し、'
+               '目的・承認データ範囲・変数の意味を変えず、取得列数と受取個数を一致させる。通常と同じJSON形式だけを返す。')
+
+
+def _repair_digest(candidate):
+    return sha256_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True))
+
+
+def _repair_token(plan):
+    state = _codegen(plan)
+    candidate, authorization = state.get('_repair_candidate'), state.get('_repair_authorization')
+    if (state.get('status') != 'failed' or state.get('reasons') != [REPAIR_REASON]
+            or not candidate or not authorization or state.get('inflight') or state['attempts'] >= MAX_GENERATIONS
+            or authorization.get('scope') != REPAIR_SCOPE
+            or authorization.get('candidate_sha256') != _repair_digest(candidate)
+            or authorization.get('origin_attempt') != state['attempts']
+            or authorization.get('provider') != plan['proposal']['provider']
+            or authorization.get('model') != plan['proposal']['model']):
+        return None
+    return _confirmation(plan['owner_id'], plan['id'], plan['revision'], authorization['provider'],
+                         authorization['model'], state['attempts'] + 1, _repair_digest(candidate), True)
+
+
+def _repair_messages(plan, external):
+    # 元の値を入れたコードではなく、変数未代入の候補を送る。再置換とplaceholder整合検査は送信ごとに行う。
+    candidate = _codegen(plan)['_repair_candidate']
+    payload = {'name': '', 'purpose': '', 'steps': [], 'outputs': [], 'conditions': '',
+               'sql_steps': candidate['steps'], 'python_code': candidate['python'], 'parameters': candidate['parameters']}
+    if external:
+        from ai.services import analysis_template_reference_service as reference_service
+        payload = reference_service.redact_code_payload(payload)
+    if payload['parameters'] or template_params.has_placeholder_like(payload['sql_steps'], payload['python_code']):
+        template_params.check_source(payload['sql_steps'], payload['python_code'], payload['parameters'])
+    messages = build_messages(plan, external)
+    messages[0]['content'] += REPAIR_RULE
+    content = json.loads(messages[1]['content'])
+    content['repair_candidate'] = {'sql_steps': payload['sql_steps'], 'python_code': payload['python_code'],
+                                   'parameters': payload['parameters'], 'reason': REPAIR_REASON}
+    messages[1]['content'] = json.dumps(content, ensure_ascii=False)
+    return messages
 
 
 def _reject_template_plan(plan):
@@ -423,6 +468,7 @@ def describe_codegen(plan, now=None):
         limit = inflight['phase_seconds'] if validating else inflight_limit_seconds(plan['proposal']['provider'])
         state = 'unknown' if elapsed > limit else 'running'
     return {
+        'repair_token': _repair_token(plan),
         'status': codegen.get('status', 'none'), 'attempts': codegen.get('attempts', 0), 'max_attempts': MAX_GENERATIONS,
         'wrapper_outdated': bool(codegen.get('wrapper_version') and codegen['wrapper_version'] != WRAPPER_VERSION),
         'inflight_state': state,
@@ -431,8 +477,10 @@ def describe_codegen(plan, now=None):
     }
 
 
-def preview(owner_id, plan_id, revision):
+def preview(owner_id, plan_id, revision, auto_repair=False):
     """送る文面と、(外部AIの場合の)確認コードを返す。まだ送信しない。"""
+    if type(auto_repair) is not bool:
+        raise AnalysisError('自動修正の指定が不正です。')
     store = AnalysisPlanStore()
     plan = _plan_for_codegen(store, plan_id, owner_id, revision)
     _reject_template_plan(plan)
@@ -443,13 +491,14 @@ def preview(owner_id, plan_id, revision):
     attempt_no = codegen['attempts'] + 1
     result = {
         'provider': provider, 'model': model, 'external': external, 'attempt': attempt_no, 'max_attempts': MAX_GENERATIONS,
-        'messages': messages, 'confirmation_required': external,
+        'messages': messages, 'confirmation_required': external, 'auto_repair': auto_repair,
+        'repair_scope': REPAIR_SCOPE if auto_repair else None,
         'not_sent': ['実データ・明細行', 'idの値', '承認件数', '利用者名', '実行履歴'],
     }
     if plan.get('template_reference') is not None:
         result['reference'] = plan['template_reference']  # 参考にしたテンプレートの識別(画面の表示用。本文は、messagesに含まれる)
     if external:
-        result['confirmation'] = _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, payload_hash(messages))
+        result['confirmation'] = _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, payload_hash(messages), auto_repair)
     return result
 
 
@@ -541,7 +590,9 @@ def _apply_parameters(proposal, steps, python, parameters):
     return concrete_steps, concrete_python, {'steps': steps, 'python': python, 'parameters': definitions}, [], {}
 
 
-def generate(owner_id, plan_id, revision, confirmation=None):
+def generate(owner_id, plan_id, revision, confirmation=None, auto_repair=False, repair_token=None):
+    if type(auto_repair) is not bool or (repair_token is not None and not isinstance(repair_token, str)):
+        raise AnalysisError('自動修正の指定が不正です。')
     store = AnalysisPlanStore()
     store.check_connection()
     plan = _plan_for_codegen(store, plan_id, owner_id, revision)
@@ -553,15 +604,21 @@ def generate(owner_id, plan_id, revision, confirmation=None):
         raise AnalysisError(f'この分析案の生成回数の上限({MAX_GENERATIONS}回)に達しました。分析案を作り直してください。', 409)
     provider, model = _provider_for(plan)  # 外部送信の許可が取り消されていれば、ここで止まる
     external = provider != 'qwen'
-    messages = build_messages(plan, external)  # 置換に失敗した場合は、ここで止まり、外部AIへは送信しない
+    if repair_token is not None:
+        expected_repair = _repair_token(plan)
+        if not auto_repair or not expected_repair or not constant_time_compare(repair_token, expected_repair):
+            raise AnalysisError('自動修正の認可・候補・版が一致しません。外部AIへは送信していません。', 409)
+        messages = _repair_messages(plan, external)
+    else:
+        messages = build_messages(plan, external)  # 置換に失敗した場合は、ここで止まり、外部AIへは送信しない
     # 参考の値(直書きの警告用)は、AIを呼ぶ前に取り出す。応答の後には、例外が出る処理を置かない(「生成中」を残さない。evaluator指摘 P2-1)
     reference_texts = []
     if plan.get('template_reference') is not None:
         from ai.services import analysis_template_reference_service as reference_service  # 循環importを避ける
         reference_texts = reference_service.literal_texts(reference_service.verify_plan_reference(owner_id, plan))
     attempt_no = codegen['attempts'] + 1
-    if external:
-        expected = _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, payload_hash(messages))
+    if external and repair_token is None:
+        expected = _confirmation(owner_id, plan_id, revision, provider, model, attempt_no, payload_hash(messages), auto_repair)
         if not isinstance(confirmation, str) or not constant_time_compare(confirmation, expected):
             raise AnalysisError('送信する内容を確認してください。内容・版・生成回数が変わった場合は、確認を取り直してください。外部AIへは送信していません。', 409)
     attempt_id = str(uuid4())
@@ -643,6 +700,12 @@ def generate(owner_id, plan_id, revision, confirmation=None):
         if reasons:
             codegen_state.clear()
             codegen_state.update({**base, 'status': 'failed', 'reasons': reasons, 'unsupported_reason': unsupported, **({'reason_names': names} if names else {})})
+            if auto_repair and reasons == [REPAIR_REASON] and attempt_no < MAX_GENERATIONS:
+                codegen_state['_repair_candidate'] = source if source is not None else {'steps': steps, 'python': python, 'parameters': []}
+                codegen_state['_repair_authorization'] = {
+                    'scope': REPAIR_SCOPE, 'provider': provider, 'model': model, 'origin_attempt': attempt_no,
+                    'candidate_sha256': _repair_digest(codegen_state['_repair_candidate']),
+                }
             return
         bundle = make_bundle(steps, python, approved_views)
         codegen_state.clear()
@@ -701,6 +764,8 @@ def _trial_wait_seconds(policy):
 def _generation_validation_reason(trial):
     """生成時の診断は固定分類だけ。launcher・DuckDBの本文は保存しない。"""
     if trial.get('status') == 'failed':
+        if trial.get('reason') == 'python_unpack_mismatch':
+            return 'python_unpack_mismatch'
         return 'sql_validation_failed'
     if trial.get('reason') == 'busy':
         return 'sql_validation_busy'
@@ -735,6 +800,8 @@ def _trial_sql(bundle, datasets, policy):
             elif report.get('trial') == 'failed':
                 trial.update(status='failed', reason=str(report.get('reason', ''))[:80], step=report.get('step'),
                              message=str(report.get('message', ''))[:300])
+                if trial['reason'] == 'python_unpack_mismatch':
+                    trial.update(step=None, message='取得列数とPythonの行を受け取る変数の個数が一致しません。')
             else:
                 trial['reason'] = 'trial_report_invalid'
         else:
@@ -804,5 +871,7 @@ def release_inflight(owner_id, plan_id, revision):
         codegen['history'] = codegen.get('history', []) + [
             {'attempt': codegen['attempts'], 'at': datetime.now().isoformat(), 'reasons': ['inflight_released']}]
         codegen.update({'status': 'failed', 'inflight': None, 'reasons': ['inflight_released']})
+        codegen.pop('_repair_candidate', None)
+        codegen.pop('_repair_authorization', None)
 
     return store.update(plan_id, owner_id, revision, apply)

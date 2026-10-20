@@ -97,8 +97,9 @@ class AIAnalysisCodegenPreviewView(APIView):
     permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
-        _only(request.data, {'revision'}, '対象の版のみを指定してください。')
-        return Response(codegen.preview(request.user.pk, str(plan_id), request.data['revision']))
+        if not isinstance(request.data, dict) or not {'revision'} <= set(request.data) <= {'revision', 'auto_repair'}:
+            raise AnalysisError('対象の版と自動修正の指定のみを指定してください。')
+        return Response(codegen.preview(request.user.pk, str(plan_id), request.data['revision'], request.data.get('auto_repair', False)))
 
 
 class AIAnalysisCodegenView(APIView):
@@ -106,9 +107,10 @@ class AIAnalysisCodegenView(APIView):
     permission_classes = [IsAuthenticated, CanUseAIAnalysis]
 
     def post(self, request, plan_id):
-        if not isinstance(request.data, dict) or not {'revision'} <= set(request.data) <= {'revision', 'confirmation'}:
-            raise AnalysisError('対象の版と、(外部AIの場合は)確認コードのみを指定してください。')
-        plan = codegen.generate(request.user.pk, str(plan_id), request.data['revision'], request.data.get('confirmation'))
+        if not isinstance(request.data, dict) or not {'revision'} <= set(request.data) <= {'revision', 'confirmation', 'auto_repair', 'repair_token'}:
+            raise AnalysisError('対象の版・送信確認・自動修正の指定のみを指定してください。')
+        plan = codegen.generate(request.user.pk, str(plan_id), request.data['revision'], request.data.get('confirmation'),
+                                request.data.get('auto_repair', False), request.data.get('repair_token'))
         return Response(_codegen_response(plan))
 
 

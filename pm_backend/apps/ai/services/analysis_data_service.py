@@ -482,18 +482,22 @@ def _mentioned_months(purpose):
     return months
 
 
-# 期間の一部を除く指示(「7月31日までを除く」「7月24日からを除く」)の、片側だけの書き方。区切り(、。改行)までの文で判定する
-EXCLUDE_UNTIL_PATTERN = re.compile(r'([^、。,.\n]*?)まで(?:を|は|の分を?)?(?:除|除外)')
-EXCLUDE_FROM_PATTERN = re.compile(r'([^、。,.\n]*?)から(?:を|は|の分を?)?(?:除|除外)')
-RANGE_MARK_PATTERN = re.compile(r'から|〜|～|~|-|ー')
+# 除外直前の「日付から／まで」だけを検査する。「集計から除外」や同じ節の無関係な日付は期間指定ではない。
+EXCLUSION_DATE = r'(?:\d{4}\s*-\s*\d{1,2}\s*-\s*\d{1,2}|(?:\d{4}\s*/\s*)?\d{1,2}\s*/\s*\d{1,2}|(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*日)'
+EXCLUSION_PERIOD_PATTERN = re.compile(
+    rf'(?<![\d/\-])(?:(?P<start>{EXCLUSION_DATE})\s*(?:から|〜|～|~|-|ー)\s*)?'
+    rf'{EXCLUSION_DATE}\s*(?P<boundary>まで|から)\s*(?:を|は|の分を?)?\s*(?:除|除外)'
+)
 
 
 def exclusion_warnings(purpose):
     """除く期間の、開始日・終了日の片方だけが書かれているとき、警告の文を返す(機械的な検査。AIには補わせない。BOSS承認 2026-10-08)。"""
     warnings = []
-    if any(not RANGE_MARK_PATTERN.search(found.group(1)) for found in EXCLUDE_UNTIL_PATTERN.finditer(purpose)):
+    # 日付内のハイフンは範囲区切りに数えず、直接つながる両端の日付があるときだけ完全な期間とする。
+    missing = {found.group('boundary') for found in EXCLUSION_PERIOD_PATTERN.finditer(purpose) if found.group('start') is None}
+    if 'まで' in missing:
         warnings.append('除く期間の開始日が書かれていません。「6月30日から7月31日までを除く」のように、開始日も書いてください。次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、目的を書き直して、分析案を作り直してください。')
-    if any('まで' not in found.group(1) and not RANGE_MARK_PATTERN.search(found.group(1).replace('から', '', 1)) for found in EXCLUDE_FROM_PATTERN.finditer(purpose)):
+    if 'から' in missing:
         warnings.append('除く期間の終了日が書かれていません。「7月24日から7月31日までを除く」のように、終了日も書いてください。次の操作: 画面右下の「目的・期間を変更して作り直す」を押し、目的を書き直して、分析案を作り直してください。')
     return warnings
 

@@ -755,6 +755,16 @@ class TrialAndApprovalTest(CodegenBase):
         with self.assertRaises(AnalysisError):
             cg.approve_code(OWNER, updated['id'], updated['revision'], updated['codegen']['executed_code_sha256'])
 
+    def test_unpack_mismatch_has_fixed_diagnostic_and_cannot_be_approved(self):
+        plan = self.generated_plan()
+        self.trial_report({'trial': 'failed', 'reason': 'python_unpack_mismatch', 'step': 'SECRET', 'message': 'SECRET SELECT x'})
+        updated, trial = cg.run_trial(OWNER, plan['id'], plan['revision'])
+        self.assertEqual((trial['status'], trial['reason'], trial['step']), ('failed', 'python_unpack_mismatch', None))
+        self.assertNotIn('SECRET', json.dumps(trial))
+        self.assertNotIn('SELECT', trial['message'])
+        with self.assertRaises(AnalysisError):
+            cg.approve_code(OWNER, updated['id'], updated['revision'], updated['codegen']['executed_code_sha256'])
+
     def test_unavailable_launcher_is_unverified_and_no_history_is_written(self):
         plan = self.generated_plan()
         with override_settings(AI_ANALYSIS_LAUNCHER_URL=''):

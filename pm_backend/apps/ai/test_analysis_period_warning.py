@@ -134,6 +134,51 @@ class ExclusionWarningTests(SimpleTestCase):
             with self.subTest(text=text):
                 self.assertEqual(exclusion_warnings(text), [])
 
+    def test_non_date_exclusions_with_unrelated_dates_are_not_warned(self):
+        for text in (
+            '連産品BOMの代表品以外の製品と、品番がSTで始まる製品は集計から除外する。',
+            '代表品以外を対象から除外する', '仕掛まで除外する',
+            '2026年9月1日から9月30日の実績を集計し代表品以外を集計から除外する',
+            '2026-09-01の実績で品番STを対象から除外する',
+            '9/30の実績の対象から除外する', '７月３１日の製品を集計から除外する',
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(exclusion_warnings(text), [])
+
+    def test_one_sided_exclusions_recognize_each_date_format(self):
+        for value in ('7月24日', '2026年7月24日', '７月２４日', '２０２６年７月２４日',
+                      '2026-07-24', '２０２６-０７-２４', '7/24', '2026/7/24', '２０２６/７/２４'):
+            for boundary, missing in (('から', '終了日'), ('まで', '開始日')):
+                with self.subTest(value=value, boundary=boundary):
+                    found = exclusion_warnings(f'{value}{boundary}を除外する')
+                    self.assertEqual(len(found), 1)
+                    self.assertIn(f'{missing}が書かれていません', found[0])
+
+    def test_only_directly_connected_dates_form_a_complete_range(self):
+        for start, end in (('7月24日', '7月31日'), ('2026年7月24日', '2026年7月31日'),
+                           ('７月２４日', '７月３１日'), ('2026-07-24', '2026-07-31'),
+                           ('２０２６-０７-２４', '２０２６-０７-３１'), ('7/24', '7/31'),
+                           ('2026/7/24', '2026/7/31')):
+            for separator in ('から', '〜', '～', '~', '-', 'ー'):
+                with self.subTest(start=start, separator=separator):
+                    self.assertEqual(exclusion_warnings(f'{start}{separator}{end}までを除外する'), [])
+        # 同じ節にある別用途の期間で、除外期間の片側不足を隠さない。
+        for text, missing in (
+            ('9月1日から9月30日の実績について7月24日からを除く', '終了日'),
+            ('2026-09-01から2026-09-30の実績について2026-07-31まで除外する', '開始日'),
+            ('7/24の数量と7/31までを除外する', '開始日'),
+        ):
+            with self.subTest(text=text):
+                found = exclusion_warnings(text)
+                self.assertEqual(len(found), 1)
+                self.assertIn(f'{missing}が書かれていません', found[0])
+
+    def test_multiple_exclusions_warn_once_for_each_missing_boundary(self):
+        found = exclusion_warnings('2026-07-24からを除く。2026-07-31までを除く。7/25から除く')
+        self.assertEqual(len(found), 2)
+        self.assertIn('開始日が書かれていません', found[0])
+        self.assertIn('終了日が書かれていません', found[1])
+
     def test_every_warning_tells_the_next_action(self):
         # BOSS指示 2026-10-08: 警告の文に、次の操作(「目的・期間を変更して作り直す」)を含める
         for found in (exclusion_warnings('７月３１日までを除いて'), exclusion_warnings('7月24日からを除く'),

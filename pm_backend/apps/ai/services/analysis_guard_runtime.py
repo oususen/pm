@@ -333,6 +333,135 @@ def _checked_outputs(table, chart):
     return emit_table, emit_chart
 
 
+def validate_python_unpack(source, raw, allowed):
+    """空DBで列をbindし、確実な行幅と展開個数の不一致だけを検出する。Pythonは実行しない。
+
+    追跡するのは直列の単一代入・別名と、定数SQLのfetchallだけ。分岐・再代入・可変操作・
+    未知の呼出しで確定できなくなった値は追跡を捨てる。未検出は実行成功の保証ではない。
+    """
+    env = {}
+    assigned = set()
+    safe_calls = frozenset((*OUTPUT_FUNCTIONS, 'str', 'float', 'int', 'bool', 'len', 'range',
+                            'sorted', 'set', 'list', 'tuple', 'dict', 'min', 'max', 'sum', 'abs', 'round'))
+
+    def names(target):
+        result = {n.id for n in ast.walk(target) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+        for node in ast.walk(target):
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                result.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                result.update(alias.asname or alias.name.split('.')[0] for alias in node.names)
+            elif isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                result.update(n.id for n in ast.walk(node.value) if isinstance(n, ast.Name))
+        return result
+
+    def check(target, value):
+        if (value is not None and isinstance(target, (ast.Tuple, ast.List))
+                and all(isinstance(n, ast.Name) for n in target.elts) and len(target.elts) != value[1]):
+            raise GuardError('python_unpack_mismatch', '取得列数とPythonの行を受け取る変数の個数が一致しません。')
+
+    def forget(scope, affected):
+        tokens = {scope[name][0] for name in affected if name in scope}
+        for name in list(scope):
+            if name in affected or scope[name][0] in tokens:
+                scope.pop(name, None)
+
+    def invalidate(node, scope, shadow=frozenset()):
+        """未解析の制御フローは実行せず、変更・外部への受渡しがあり得る値だけを忘れる。"""
+        forget(scope, names(node))
+        for part in ast.walk(node):
+            if isinstance(part, ast.Call):
+                if isinstance(part.func, ast.Name):
+                    if part.func.id not in safe_calls or part.func.id in assigned or part.func.id in shadow:
+                        scope.clear()
+                        assigned.add('con')
+                elif isinstance(part.func, ast.Attribute):
+                    affected = {n.id for n in ast.walk(part) if isinstance(n, ast.Name)}
+                    if part.func.attr in ('sql', 'execute', 'fetchall') and affected == {'con'} and 'con' not in shadow:
+                        continue  # 実行時にも既存の読み取りガードを通る接続呼出し
+                    forget(scope, affected)
+                    if 'con' in affected:
+                        assigned.add('con')
+
+    def expression(node, scope, shadow=frozenset()):
+        if node is None:
+            return None
+        if isinstance(node, ast.Name):
+            return scope.get(node.id)
+        if isinstance(node, (ast.Lambda, ast.GeneratorExp, ast.IfExp, ast.BoolOp)):
+            invalidate(node, scope, shadow)
+            return None  # 関数・遅延評価・分岐の実行時期は追跡しない
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+            local = dict(scope)
+            local_shadow = shadow
+            for generator in node.generators:
+                value = expression(generator.iter, local, local_shadow)
+                check(generator.target, value)
+                local_shadow = local_shadow | names(generator.target)
+                for name in names(generator.target):
+                    local.pop(name, None)
+                for condition in generator.ifs:
+                    expression(condition, local, local_shadow)
+            for part in ([node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]):
+                expression(part, local, local_shadow)
+            # 内包表記の束縛は外側へ漏れない。可変操作で失われた追跡だけを外側へ反映する。
+            for name, value in list(scope.items()):
+                if name not in local and name not in {n for g in node.generators for n in names(g.target)}:
+                    forget(scope, {name})
+            return None
+        if isinstance(node, ast.Call):
+            # 接続・結果を別名へ渡す形やパラメータつきの問い合わせは対象外。
+            fetch = node.func
+            query = fetch.value if isinstance(fetch, ast.Attribute) and fetch.attr == 'fetchall' else None
+            if (not node.args and not node.keywords and isinstance(query, ast.Call)
+                    and isinstance(query.func, ast.Attribute) and query.func.attr in ('sql', 'execute')
+                    and isinstance(query.func.value, ast.Name) and query.func.value.id == 'con'
+                    and 'con' not in assigned and 'con' not in shadow and len(query.args) == 1 and not query.keywords
+                    and isinstance(query.args[0], ast.Constant) and isinstance(query.args[0].value, str)):
+                sql = query.args[0].value
+                try:
+                    check_query(raw, sql, allowed)
+                    # columnsはDuckDBのbind結果。fetch/executeで問い合わせ本体を実行しない。
+                    return (object(), len(raw.sql(sql).columns))
+                except Exception:
+                    return None  # 列幅が不明なSQLには新たな拒否条件を設けない
+            for part in [*node.args, *(k.value for k in node.keywords)]:
+                expression(part, scope, shadow)
+            invalidate(node, scope, shadow)
+            return None
+        if isinstance(node, ast.NamedExpr):
+            invalidate(node, scope, shadow)
+            return None
+        for child in ast.iter_child_nodes(node):
+            expression(child, scope, shadow)
+        return None
+
+    for statement in ast.parse(source).body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
+            target = statement.targets[0].id
+            value = expression(statement.value, env)
+            if target in assigned:
+                # 別名側に古い値が残る場合も含め、再代入後は診断しない。
+                forget(env, {target})
+                value = None
+            assigned.add(target)
+            env.pop(target, None)
+            if value is not None:
+                env[target] = value
+        elif isinstance(statement, ast.Expr):
+            expression(statement.value, env)
+        elif isinstance(statement, ast.For):
+            # ループ中の再代入・可変操作・関数定義は追わない。入口の展開だけは確認できる。
+            value = expression(statement.iter, env)
+            check(statement.target, value)
+            invalidate(statement, env)
+            assigned.update(names(statement))
+        else:
+            # 分岐・関数スコープ・複合代入等の制御フローを推測しない。
+            invalidate(statement, env)
+            assigned.update(names(statement))
+
+
 def _main():
     namespace = globals()
     raw = namespace['con']
@@ -346,6 +475,8 @@ def _main():
         if problems:
             raise GuardError('python_rejected', ','.join(problems))
         allowed = _run_steps(raw, steps, approved)
+        if trial:
+            validate_python_unpack(source, raw, allowed)
         if _fingerprint(raw, approved) != before:
             raise GuardError('source_modified')
     except GuardError as exc:
@@ -354,7 +485,7 @@ def _main():
         namespace['emit_report'](json.dumps({'trial': 'failed', 'step': getattr(exc, 'step', None), 'reason': exc.code,
                                               'message': exc.detail}, ensure_ascii=False))
         return
-    if trial:  # 試行は、空のテーブルでのSQLの確認だけ。Pythonは実行しない
+    if trial:  # 空テーブルのSQL確認と、Pythonの取得列数・展開個数の静的照合。Pythonは実行しない
         namespace['emit_report'](json.dumps({'trial': 'passed', 'steps': len(steps)}))
         return
     guarded = _GuardedConnection(raw, allowed)

@@ -62,6 +62,8 @@ class GenerationColumnsTest(CodegenBase):
 
     def test_failures_do_not_save_code_or_raw_diagnostics_and_clear_inflight(self):
         cases = [
+            ({'status': 'ok', 'result': {'report': json.dumps({'trial': 'failed', 'reason': 'python_unpack_mismatch',
+              'message': 'SECRET SQL SELECT m.id', 'step': 'w_secret'})}}, 'python_unpack_mismatch'),
             ({'status': 'ok', 'result': {'report': json.dumps({'trial': 'failed', 'reason': 'query_failed',
               'message': 'SECRET SQL SELECT m.id', 'step': 'w_secret'})}}, 'sql_validation_failed'),
             ({'status': 'refused', 'reason': 'busy'}, 'sql_validation_busy'),

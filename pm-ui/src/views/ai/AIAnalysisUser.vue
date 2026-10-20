@@ -190,6 +190,9 @@
         </button>
         <div v-show="isOpen(4)" id="stage-body-4" class="stage-body">
             <p v-if="busy === 'code-generate'" class="generating" role="status" aria-live="polite">⏳ AIが分析処理を作成しています。返事を待っています（{{ selectedProvider?.external ? '通常 10〜60秒、最大 90秒' : 'AI設定のタイムアウトまで' }}）。経過 {{ elapsedSeconds }}秒。この画面を閉じずに、お待ちください。生成回数は、すでに数えています。</p>
+            <button v-if="autoRepair && ['code-generate', 'code-repair'].includes(busy)" type="button" @click="repairEpoch += 1">これ以降の自動修正を止める（送信済みの処理は続きます）</button>
+            <p v-if="busy === 'code-repair'" role="status">検査で不整合を検出したため、同じAIへ修正を依頼しています。修正版も再検査します。</p>
+            <p v-if="codeState?.status === 'failed' && !busy" role="alert">分析処理の検査を通過できませんでした。システム管理者へ質問できます。コードを確認する必要はありません。</p>
             <p v-if="codegen?.literal_values?.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> 目的・手順に書かれた値が、変数にされず、コードに直接書かれています: {{ codegen.literal_values.join('、') }}。この分析だけなら、そのまま実行できます。テンプレートとして保存しても、再利用で、これらの値を変えられません。変えたいときは、再生成してください。</p>
             <p v-if="normalizedValues.length" class="warning plan-warning" role="alert"><span class="warn-mark" aria-hidden="true">⚠！</span> <template v-for="(item, index) in normalizedValues" :key="item.name"><template v-if="index">　</template>変数 {{ item.name }}: {{ item.from }} を、マスタの表記 {{ item.to }} に直しました。</template></p>
             <p role="status">コード: {{ codeStatusLabel }} / AI生成回数: {{ codeState?.attempts ?? '未確認' }} / 上限: {{ codeState?.max_attempts ?? '未確認' }}</p>
@@ -203,7 +206,9 @@
               <template v-if="!hasCode || codeRebuildOpen">
                 <p v-if="codeExternal" class="warning">作成AIは {{ planProviderLabel }} です。コード生成は、分析案作成とは別の社外送信です。再生成のたびに全文を確認してください。未伏字の名称・機密は自動判別できません。</p>
                 <button v-if="hasCode" :disabled="!!busy" @click="cancelCodeRebuild">作り直しをやめる</button>
-                <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">{{ codePreview ? '最新の内容でもう一度確認する' : '社外サービスに送る内容を確認する' }}</button>
+                <label><input v-model="autoRepair" type="checkbox" :disabled="!!busy" @change="clearCodeConfirmations" />機械検査の不一致を同じAIで自動修正する（追加料金あり）</label>
+              <p v-if="autoRepair" role="note">取得列数と受取個数の不一致が確定した場合、生成コードと固定の検査理由を同じAI・モデルへ送ります。修正も合計4回の生成枠と料金に含まれます。DBの実データ・結果は送りません。解決できない場合はシステム管理者へ相談してください。</p>
+              <button v-if="codeExternal" :disabled="!canGenerate" @click="prepareCodePreview">{{ codePreview ? '最新の内容でもう一度確認する' : '社外サービスに送る内容を確認する' }}</button>
                 <button v-if="codeExternal && codePreview" :disabled="!!busy" @click="closeCodePreview">確認を閉じる（まだ送信していません）</button>
                 <section v-if="codeExternal && codePreview" class="dataset">
                   <h4>分析処理作成の社外送信前確認（まだ送信していません）</h4>
@@ -243,7 +248,7 @@
               </section>
               <p role="status">SQL試行: {{ trialStatusLabel }}{{ codegen.trial?.at ? ` / 確認日時: ${formatDate(codegen.trial.at)}` : '' }}</p>
               <p v-if="trialFailureLabel" class="error">{{ trialStepLabel ? `${trialStepLabel}: ` : '' }}{{ trialFailureLabel }}</p>
-              <p>実行前の安全確認は実データを使わずに行います。実データでの成功や分析の正しさは保証しません。</p>
+              <p>実行前の安全確認は実データを使わず、処理の不整合をシステム側で検査します。コードの確認は不要です。検査で確認できる範囲には限りがあり、実データでの成功や分析の正しさは保証しません。</p>
               <button v-if="codeState?.status === 'generated'" :disabled="!canTrial" @click="trialCode">{{ busy === 'code-trial' ? '安全確認中…' : '実行前の安全確認を行う' }}</button>
               <template v-if="codeState?.status === 'generated'">
                 <label><input v-model="codeAccepted" type="checkbox" :disabled="!canEdit || !!busy || !trialPassed">上の目的・手順・出力案を確認し、この分析処理の実行を承認します（実行はまだ行いません）</label>
@@ -371,6 +376,10 @@ const errorNotices = useAnalysisErrorNotices([['analysis', error]], true)
 const externalPreview = ref(null)
 const externalAccepted = ref(false)
 const codePreview = ref(null)
+const autoRepair = ref(false)
+let repairEpoch = 0
+watch(() => props.visible, value => { if (!value) repairEpoch += 1 }, { flush: 'sync' })
+watch(() => props.canEdit, value => { if (!value) repairEpoch += 1 }, { flush: 'sync' })
 const codeSendAccepted = ref(false)
 const codeAccepted = ref(false)
 const codeRebuildOpen = ref(false)
@@ -423,6 +432,7 @@ const codeStatusLabel = computed(() => ({ none: '未生成', generating: '生成
 const trialStatusLabel = computed(() => ({ passed: '合格', failed: '不合格', unverified: '未検証（実行基盤の状態を確認して試行をやり直してください）' })[codegen.value?.trial?.status] || '未実施')
 // 理由コードだけを固定文へ変換する。AI・DuckDBの説明文や未知の理由の本文は表示しない。
 const FAILURE_LABELS = Object.freeze({
+  python_unpack_mismatch: '分析処理の不整合をシステムが検出しました。コードの確認は不要です。「分析処理を作り直す」を試し、解決しない場合はシステム管理者へ質問してください。',
   ai_request_failed: 'AIとの通信に失敗しました。生成回数は消費されています。',
   ai_timeout: 'AIから制限時間内に返事がありませんでした(最大90秒)。時間をおいて、再生成してください。生成回数は消費されています。',
   ai_auth: 'AIのAPIキーが未設定、または正しくありません。管理者へ、AI設定の確認を依頼してください。生成回数は消費されています。',
@@ -872,7 +882,7 @@ async function prepareCodePreview() {
   busy.value = 'code-preview'
   error.value = ''
   try {
-    const response = await api.aiAnalysis.codegenPreview(target.id, { revision: target.revision })
+    const response = await api.aiAnalysis.codegenPreview(target.id, { revision: target.revision, ...(autoRepair.value ? { auto_repair: true } : {}) })
     if (!disposed && props.canEdit && current === generation && plan.value?.id === target.id && plan.value?.revision === target.revision) {
       codePreview.value = { ...response.data, planId: target.id, revision: target.revision }
     }
@@ -895,18 +905,34 @@ async function prepareCodePreview() {
     if (!disposed && current === generation) busy.value = ''
   }
 }
-function generateCode() {
+async function generateCode() {
   if (!canGenerate.value) return
   const target = { id: plan.value.id, revision: plan.value.revision }
-  const data = { revision: target.revision }
+  const allowedRepair = autoRepair.value
+  const startedRepairEpoch = repairEpoch
+  const data = { revision: target.revision, ...(allowedRepair ? { auto_repair: true } : {}) }
   if (codeExternal.value) {
-    if (!codeSendAccepted.value || !codePreview.value?.confirmation || codePreview.value.planId !== target.id || codePreview.value.revision !== target.revision) return
+    if (!codeSendAccepted.value || !codePreview.value?.confirmation || !!codePreview.value.auto_repair !== allowedRepair || codePreview.value.planId !== target.id || codePreview.value.revision !== target.revision) return
     data.confirmation = codePreview.value.confirmation
   }
-  // 通信失敗でも使い回さず、再生成には必ず新しい送信確認が必要。
   clearCodeConfirmations()
-  return perform('code-generate', () => api.aiAnalysis.generateCode(target.id, data))
+  const cycle = generation + 1
+  // 画面を開いて同意した操作の間だけ連鎖する。通信失敗・離脱後は再送せず、各要求が1送信分を消費する。
+  return perform('code-generate', async () => {
+    let response = await api.aiAnalysis.generateCode(target.id, data)
+    while (allowedRepair && response.data.codegen_state?.repair_token) {
+      if (disposed || !props.visible || repairEpoch !== startedRepairEpoch || !props.canEdit || generation !== cycle || plan.value?.id !== target.id) return response
+      plan.value = response.data
+      busy.value = 'code-repair'
+      const state = response.data
+      response = await api.aiAnalysis.generateCode(target.id, {
+        revision: state.revision, auto_repair: true, repair_token: state.codegen_state.repair_token,
+      })
+    }
+    return response
+  })
 }
+
 function refreshWrapper() {
   if (!canRefreshWrapper.value || !window.confirm('外枠を更新し、現在の試行とコード承認を破棄しますか？ AIは呼びません。再試行・再承認が必要です。')) return
   const target = { id: plan.value.id, revision: plan.value.revision }

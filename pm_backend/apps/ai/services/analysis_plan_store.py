@@ -96,4 +96,7 @@ class AnalysisPlanStore:
 
 def public_plan(plan):
     """利用者IDは画面に不要なため返却しない。"""
-    return {key: value for key, value in plan.items() if key != 'owner_id'}
+    public = {key: value for key, value in plan.items() if key != 'owner_id'}
+    if isinstance(public.get('codegen'), dict):
+        public['codegen'] = {key: value for key, value in public['codegen'].items() if not key.startswith('_repair_')}
+    return public

@@ -36,7 +36,7 @@ class TrialGenerationCountTests(SimpleTestCase):
             plan.update(current)
             return copy.deepcopy(current)
 
-        reports = [({'status': 'ok', 'result': {'report': json.dumps({'trial': 'passed'})}}, 'passed'),
+        reports = [({'status': 'ok', 'result': {'report': json.dumps({'trial': 'passed', 'steps': len(GOOD_STEPS)})}}, 'passed'),
                    ({'status': 'ok', 'result': {'report': json.dumps({'trial': 'failed', 'reason': 'query_failed'})}}, 'failed'),
                    ({'status': 'error', 'reason': 'busy'}, 'unverified')]
         with patch.object(cg, 'AnalysisPlanStore') as store, patch.object(cg, '_call_ai') as ai, \
