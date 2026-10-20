@@ -6,8 +6,11 @@ from django.db import migrations
 # 非公開(ビューに含めない): image_url, product_name_halfwidth, is_phantom, self_lt_days, created_at, updated_at
 # 将来のPostgreSQL移行を考え、MySQL固有の記法(バッククォート・DEFINER・SQL SECURITY・DBの修飾)を使わない標準SQLだけで書く。
 # (定義者・権限の付与は、DBごとに異なるため、マイグレーションに含めず、別の手順SQLで行う。AI用ビュー作成計画 §9.3)
+# PostgreSQLの CREATE OR REPLACE VIEW は列の削除・並び替えができない(末尾への追加のみ可能)ため、
+# 列を削除するこのマイグレーションは DROP VIEW + CREATE VIEW に分割する。
 CREATE_VIEW = """
-CREATE OR REPLACE VIEW v_ai_product AS
+DROP VIEW IF EXISTS v_ai_product;
+CREATE VIEW v_ai_product AS
 SELECT
     id,
     product_code,

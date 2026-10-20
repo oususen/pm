@@ -8,13 +8,13 @@ from django.db import migrations
 # business_dayは新規の計算列。8時区切りの業務日(timestampから-8時間した日付)。
 # Python側のresolve_workday_date_for_process()と、開発DB全PRODUCTION行(15,731件)で一致確認済み。
 # 将来のPostgreSQL移行を考え、MySQL固有の記法(バッククォート・DEFINER・SQL SECURITY・DBの修飾)を
-# 使わない標準SQLだけで書く。INTERVAL構文はMySQL/PostgreSQL共通だが、数値リテラルの書式は
-# PostgreSQL移行時に要確認。
+# 使わない標準SQLだけで書く。PostgreSQL向けにDATE()関数を::dateキャストへ、
+# INTERVAL 8 HOURの数値リテラル形式を文字列形式 INTERVAL '8 hours' へ書き換え済み。
 CREATE_VIEW = """
 CREATE OR REPLACE VIEW v_ai_process_production_actual AS
 SELECT
     id,
-    DATE(timestamp - INTERVAL 8 HOUR) AS business_day,
+    (timestamp - INTERVAL '8 hours')::date AS business_day,
     operator_login_id,
     operator_name,
     process_id,

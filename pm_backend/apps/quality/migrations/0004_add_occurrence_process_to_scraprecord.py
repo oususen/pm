@@ -14,6 +14,6 @@ class Migration(migrations.Migration):
         ),
         migrations.RunSQL(
             sql="ALTER TABLE t_scrap_record ADD CONSTRAINT fk_scrap_occurrence_process FOREIGN KEY (occurrence_process_id) REFERENCES m_process(id) ON DELETE SET NULL",
-            reverse_sql="ALTER TABLE t_scrap_record DROP FOREIGN KEY fk_scrap_occurrence_process",
+            reverse_sql="ALTER TABLE t_scrap_record DROP CONSTRAINT fk_scrap_occurrence_process",
         ),
     ]

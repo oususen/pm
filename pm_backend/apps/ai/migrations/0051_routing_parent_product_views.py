@@ -2,8 +2,13 @@ from django.db import migrations
 
 
 # 公開列・順序を維持し、親品コードの取得元だけ正規FK参照へ変更する。
+# parent_product_code / step_parent_product_code の取得元を s.remark(varchar(200))から
+# pp.product_code(varchar(30))へ変更しており、列名・順序は同じでも型(varcharの長さ)が変わる。
+# PostgreSQLの CREATE OR REPLACE VIEW は既存列の型(typmod含む)変更もできないため、
+# DROP VIEW + CREATE VIEW に分割する。
 STEP_VIEW = """
-CREATE OR REPLACE VIEW v_ai_routing_step AS
+DROP VIEW IF EXISTS v_ai_routing_step;
+CREATE VIEW v_ai_routing_step AS
 SELECT
     s.id,
     s.routing_id,
@@ -49,7 +54,8 @@ LEFT JOIN m_product pp ON pp.id = s.parent_product_id
 """
 
 MATERIAL_VIEW = """
-CREATE OR REPLACE VIEW v_ai_routing_step_material AS
+DROP VIEW IF EXISTS v_ai_routing_step_material;
+CREATE VIEW v_ai_routing_step_material AS
 SELECT
     m.id,
     m.routing_step_id,

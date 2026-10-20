@@ -11,12 +11,12 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            sql="ALTER TABLE t_scrap_record_detail ADD COLUMN is_backlog_processed TINYINT(1) NOT NULL DEFAULT 0;",
+            sql="ALTER TABLE t_scrap_record_detail ADD COLUMN is_backlog_processed BOOLEAN NOT NULL DEFAULT FALSE;",
             reverse_sql="ALTER TABLE t_scrap_record_detail DROP COLUMN is_backlog_processed;",
         ),
         # 既存データを処理済みとしてマーク
         migrations.RunSQL(
-            sql="UPDATE t_scrap_record_detail SET is_backlog_processed = 1;",
-            reverse_sql="UPDATE t_scrap_record_detail SET is_backlog_processed = 0;",
+            sql="UPDATE t_scrap_record_detail SET is_backlog_processed = TRUE;",
+            reverse_sql="UPDATE t_scrap_record_detail SET is_backlog_processed = FALSE;",
         ),
     ]

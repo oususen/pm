@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            sql="ALTER TABLE t_scrap_record ADD COLUMN is_production_recorded TINYINT(1) NOT NULL DEFAULT 0;",
+            sql="ALTER TABLE t_scrap_record ADD COLUMN is_production_recorded BOOLEAN NOT NULL DEFAULT FALSE;",
             reverse_sql="ALTER TABLE t_scrap_record DROP COLUMN is_production_recorded;",
         ),
     ]

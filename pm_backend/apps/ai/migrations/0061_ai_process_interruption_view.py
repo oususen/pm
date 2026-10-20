@@ -12,7 +12,7 @@ from django.db import migrations
 # equipment_via_session(t_process_work_session_equipmentとの結合案。開発DB確認: 対象120件中8件(6.7%)しか
 # 設備が紐づいておらずカバレッジが低いため、BOSS判断により非公開。設備の詳細分析は別途検討)。
 # 将来のPostgreSQL移行を考え、バッククォート・DEFINER・SQL SECURITY・DB修飾は使わない。
-# ただしJSON_UNQUOTE/JSON_EXTRACTはMySQL固有のため、PostgreSQL移行時は->>構文等への書き換えが必要。
+# PostgreSQL の ->> 演算子を使用(event_dataはJSONField)。
 CREATE_VIEW = """
 CREATE OR REPLACE VIEW v_ai_process_interruption AS
 SELECT
@@ -33,9 +33,9 @@ SELECT
     s.operator_login_id,
     COALESCE(
         NULLIF(r.interruption_reason_code, ''),
-        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(r.event_data, '$.pause_reason')), ''),
-        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(r.event_data, '$.temp_end_reason')), ''),
-        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(r.event_data, '$.operator_action_reason')), '')
+        NULLIF(r.event_data->>'pause_reason', ''),
+        NULLIF(r.event_data->>'temp_end_reason', ''),
+        NULLIF(r.event_data->>'operator_action_reason', '')
     ) AS interruption_reason
 FROM t_process_work_session s
 LEFT JOIN t_process_realtime_record r ON r.id = s.end_record_id
