@@ -689,6 +689,8 @@ SELECT user, host FROM mysql.user;
 - `docker network create ts_pm_network_v2`、ビルド、`docker compose -f docker-compose.yml -f docker-compose.pc2.yml up -d`を実施(2026-10-21)。`pm-scheduler`が`pm-pm-backend`イメージをビルド前にpullして失敗するため、先に`build pm-backend pm-frontend`を実行してから`up -d`した。
 - 起動時のmigrateが空の`pm_db`へ581件適用され、`showmigrations`の未適用は0件。コンテナ(mysql・pm_backend_prod・pm_frontend_prod・pm-analysis-redis-1・pm_scheduler_prod)が稼働。
 
+- 2026-10-21 旧本番の`pm_db`ダンプ(取得2026-10-20 23:43、約2.6GB、`C:\PST\dump\pm_db_backup.sql`、Git対象外)を、新PCのPM専用MySQLの`pm_db`へ復元(DROP/CREATE後に投入、約5分)。復元中は`pm_scheduler_prod`・`pm_backend_prod`を停止し、**復元後も停止のまま**(二重実行防止。再開はBOSS判断)。復元後のテーブル数286(ダンプのCREATE TABLE数と一致)、`django_migrations`は587件。`showmigrations`(migrate未実行)の未適用は0件、適用済み表示は581件で、テーブルの587件との差6件は、DBにあってコードに無い履歴(accounts.0002_department_employee、accounts.0016_userprofile_leader_units_and_more、accounts.0023_add_record_inquiry_permission_resource、production.0031_productionrecordinquirysetting、quality.0002_add_is_production_recorded、shipping.0002_add_ship_to_lead_time)で、コードにあってDBに無い履歴は0件(過去に削除・改名されたmigrationの記録と見られるが、経緯は未確認)。復元後、`pm_backend_prod`のみ起動(スケジューラは停止のまま)。
+
 **未完了**
 - ブラウザでの画面確認(ログイン等。空DBのためユーザー未作成)、他PCからの接続確認、HTTPS証明書の再生成、経管の通信許可回答の確認、`.env`のWEB_PUSH_VAPID_*等の未設定項目、スケジューラの稼働ジョブの確認。
 
