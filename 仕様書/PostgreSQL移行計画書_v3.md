@@ -736,6 +736,15 @@ SELECT user, host FROM mysql.user;
 
 **検証・反映状況**: 起動確認はlocalhostの`https://localhost:8501`(HTTP 200)・`http://localhost:8081/api/`(HTTP 200)のみ。**機能の動作確認は未実施(未検証)**。`pm_scheduler_prod`はmigrate完了前に再起動を繰り返し、完了後に起動した。evaluatorの検証は未実施。コミット・push未実施(本追記は未コミット)。本番IP切替は未実施。
 
+### 2026-10-22 PC2のHTTPS証明書対応
+
+- BOSS依頼により、MySQL版PM（8501）の専用サーバー証明書を作成・適用した。対象は `10.0.1.139`・`127.0.0.1`・`localhost`、証明書名は `PM PC2`、有効期限は2027-10-22。
+- 証明書と秘密鍵はWSL Ubuntuの `/home/daiso/.local/share/pm-pc2-tls/20261022054912/` に保存し、秘密鍵は所有者のみ読み取り可能にした。既存のリポジトリ内の証明書・秘密鍵は変更していない。
+- `docker-compose.pc2.yml` で `pm-frontend` の `/etc/nginx/ssl` を上記ディレクトリへ読み取り専用で接続した。同じイメージでフロントエンドだけを再作成し、nginx設定検査は成功。DB・バックエンドは再起動していない。
+- Windowsの現在のユーザーの「信頼されたルート証明機関」に公開証明書を登録。証明書検証を省略せず `https://10.0.1.139:8501/login?next=/` と `https://localhost:8501/` のHTTP 200を確認した。既に対応済みのPortainer（9443）も証明書検証ありでHTTP 200を確認。
+- PC2の稼働環境へ反映済み。ブラウザの警告表示の解消、ログイン後の機能操作、別PCの信頼登録・接続は未確認。BOSS指示によりCompose設定と本記録をコミット対象とする。pushは未実施。
+- 続くBOSS依頼により、PG版（18501）も同じ証明書へ切替済み。`C:\PST\pm_pg\docker-compose.pc2-pg.yml` を更新し、PGフロントエンドのみ再作成。証明書検証ありでIP・localhost両方のHTTP 200を確認。詳細はPG側の同名計画書の2026-10-22記録を参照。
+
 ### 今後の確認・承認対象
 
 | # | 項目 | 区分 |

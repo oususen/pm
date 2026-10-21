@@ -20,5 +20,10 @@ services:
     depends_on:
       - mysql
 
+  # 新PC用の証明書はWSL内に保存し、秘密鍵をリポジトリに置かない。
+  pm-frontend:
+    volumes:
+      - /home/daiso/.local/share/pm-pc2-tls/20261022054912:/etc/nginx/ssl:ro
+
 volumes:
   pm_mysql_data:
