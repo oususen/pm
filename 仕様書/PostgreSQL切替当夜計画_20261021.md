@@ -118,6 +118,15 @@
 | 23:2x | R8 PG版アプリ(`pm_pg`、DB=`pm_pg_rh1`、一時実行)で`showmigrations` | 未適用0件・適用済み581件(`migrate`は未実行)。`django_migrations`は587件 | — | 587と581の差6件はMySQL版と同じ(DBのみにある旧履歴) |
 | 23:2x | R9 アプリからの読み取り(DB=`pm_pg_rh1`) | ユーザー104人、`admin`あり。スポットライン工程一覧APIが200(ライン5・工程5・品番58件) | — | **jsonb変換が前提**(pgloaderで達成済み) |
 
+**切替スクリプトの試験(2026-10-22 01:02〜01:10、BOSS承認)**: `pm_pg`リポジトリ(新リポジトリ`oususen/pm_pg`)の`scripts/pg_cutover/run_cutover_pc2.sh`を、旧本番の新ダンプ`pm_db_backup_20261022_004451.sql`(2026-10-22 00:48取得、約2.8GB、末尾に`Dump completed`)で、新DB`pm_pg_rh2`に対して通しで実行。結果は**PASS(所要453秒)**: 使い捨てMySQLへのダンプ投入316秒、pgloader(ソースビルド版、ヒープ8GiB)3分56秒、後処理・検証約3秒。286表・**10,294,085行**の件数が全表一致、`public`286表・`pm_db`スキーマ残り0・json型0・timestamptz0・`django_migrations`587。`pm_pg_rh2`はアプリ未接続の状態で、`03`の集計42項目すべて一致(不一致0)、シーケンス276本は遅れ0、無効な制約・索引0、索引数1,042(MySQLと同数)。稼働中の`mysql`・既存PG DB(`pm_pg_q_test`・`pm_pg_rh1`)には書き込んでいない。日時の全行比較(`pm_pg_rh2`)は実行中。未確認: 主キーなし2表の値、全非日時列の全行比較、他PCからの接続、利用者向けURL・ポート・証明書、旧PCへの戻し方の確認。
+
+**追加検証(2026-10-22 0:50頃、`pm_pg_rh1`に対する読み取り検証。証跡: WSL `~/pgq/evidence-rh1/`)**
+- 日時の全行比較(Codexのツールを`pm_pg_rh1`・スキーマ`public`用に写して実行、主キーあり284表): 不一致は計20件で、**すべてPG版アプリ(`pm_pg`、DB=`pm_pg_rh1`)の使用で説明がつく**: `auth_user.last_login`1件(2026-10-22 00:15のログイン)、`django_session`にPG側のみ1件、`brake_line_record`にPG側のみ2件(id 28245・28246、2026-10-22 00:15:36・00:15:52、BOSSがブレーキ画面で実績入力を試した)・`t_process_realtime_record`にPG側のみ1件(id 32117、2026-10-22 00:16:02、`record_type=EQUIPMENT_STATE`・`equipment_state=BREAKDOWN`・process_id=11・`operator_login_id=admin`。**PRODUCTION種別の行ではなく、ブレーキの生産実績は`t_process_realtime_record`に保存されていない**。`BrakeLineInput.vue`は設備トラブルで中断すると設備状態入力画面(`/production/mobile-process-input`、record_type=EQUIPMENT_STATE)へ遷移する実装で、その画面からの登録。BOSSが設備トラブルを記録したことを確認済み=想定どおりの動作)、`notifications`4・`notifications_target_users`7・`notification_reads`4件がPG側で削除済み(アプリの動作。同じ削除は手を付けていない`pm_pg_q_test`にも出ている)。zero→NULLは0件。上記以外の日時セルは全行一致。
+- 集計(`03`): `line_backlog`の13項目の合計(件数533,203、demand_qty_plan・order_qty・order_qty_actual・plan_qty・actual_qty・stock_qty・planned_stock_qty・adjust_qty・scrap_adjust_qty・scrap_qty・actual_shipment_qty・progress_qty・planned_progress_qty)は、**MySQLと手を付けていない`pm_pg_q_test`で全て一致**。`pm_pg_rh1`では7項目が不一致(366行・PGの統計で23,971回のUPDATE)だが、これはBOSSの実績入力に伴う在庫・実績の再計算の結果で、移行の誤りではない(`pm_pg_q_test`はUPDATE 0件)。`t_line_demand`・`line_plan`・`m_product`の集計と大文字小文字重複0・`sequence_no=0`の`plan_qty`≠0が0件・`django_migrations`587は一致。
+- シーケンス276本: 最大IDより遅れているものは0(空テーブル61)。無効な制約0・無効な索引0・索引数1,042(MySQLと同数)。ビューはPG 0件(MySQL 23件はAI用`v_ai_*`のみ、業務コードは不使用)。
+- **運用上の教訓**: 検証(件数・集計・日時比較)は、**PG版アプリを接続する前に実施する**。アプリを接続して実績入力などを行うとデータが書き換わり、移行の検証と区別できなくなる。`pm_pg_rh1`はアプリで書き込み済みのため、以降の移行検証の基準には使わない(使い捨て)。
+- 未実施: 主キーなし2表の値の照合、全非日時列の値の全行比較(今回は`line_backlog`のみ詳細比較)。
+
 **未実施・未確認(リハーサルの範囲外)**: `03`の集計比較(合計・最小・最大・NULL件数)、日時全行比較(Codexの検証では`json`型時点・`pm_pg_q_test`で実施済みだが今回の`pm_pg_rh1`では未実施)、主キーなし2表の値、画面でのF2〜F9の確認、シーケンスのずれ確認、ビュー23件(`v_ai_*`、AI分析用で業務画面は不使用のためPGには作らない方針で未作成)、他PCからの接続(ESET・経管の件が未解決)、最終データ(最新ダンプ)での再実施、HTTPS証明書、利用者が使うURL/ポート(PG版`18501`は経管申請の対象外)。コミット・push・本番反映は未実施。
 
 ## 10. 未決定（BOSSの判断待ち）
