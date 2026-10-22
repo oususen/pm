@@ -1,0 +1,16 @@
+# 旧本番PC用: 切替後、8501の画面側(pm_frontend_prod)を止めて、この案内ページに差し替える。
+# 起動(リポジトリ直下で): docker stop pm_frontend_prod && docker compose -f notice/docker-compose.notice.yml up -d
+# 戻す: docker compose -f notice/docker-compose.notice.yml down && docker start pm_frontend_prod
+# 旧本番のコード・DBは変更しない。pm_frontend_prod は削除せず停止するだけ。
+services:
+  pm-notice:
+    image: nginx:alpine
+    container_name: pm_notice_prod
+    restart: always
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./notice.html:/usr/share/nginx/html/notice.html:ro
+      - ../pm-ui/certs:/etc/nginx/ssl:ro
+      - ../pm-ui/public/downloads:/usr/share/nginx/html/downloads:ro

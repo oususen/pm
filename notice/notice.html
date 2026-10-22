@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM 移転のお知らせ</title>
+<style>
+  :root {
+    --bg: #f4f7f5; --card: #ffffff; --text: #1f2933; --sub: #5b6770; --line: #d9e2dc;
+    --accent: #2e9e6b; --accent-d: #23805a; --warn-bg: #fff4e5; --warn-line: #f0b36a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121815; --card: #1b2420; --text: #e6ede9; --sub: #a3b0a9; --line: #2f3d36;
+            --accent: #3fbf86; --accent-d: #2e9e6b; --warn-bg: #3a2c17; --warn-line: #a8742f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-line); }
+  .addr { display: block; text-align: center; font-size: 22px; font-weight: 700; word-break: break-all;
+          background: var(--accent); color: #fff; text-decoration: none; padding: 14px 12px; border-radius: 10px; margin: 8px 0; }
+  .addr:hover { background: var(--accent-d); }
+  .btn { display: inline-block; background: var(--accent); color: #fff; text-decoration: none;
+         padding: 9px 16px; border-radius: 8px; font-weight: 600; margin: 4px 8px 4px 0; }
+  .btn:hover { background: var(--accent-d); }
+  .sub { color: var(--sub); font-size: 13px; }
+  ol { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  .head { color: var(--sub); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">DAISO 管理システム(PM)</div>
+  <h1>PMは新しいアドレスに移転しました</h1>
+  <div class="card warn">こちらのアドレス(10.0.1.232)では、ログインできません。下の新しいアドレスをご利用ください。</div>
+
+  <div class="card">
+    <h2>① 新しいアドレス</h2>
+    <a class="addr" href="https://10.0.1.139:8501">https://10.0.1.139:8501</a>
+    <div class="sub">ログイン用のユーザー名・パスワードは、これまでと同じです。ブックマーク(お気に入り)は、新しいアドレスに変更してください。</div>
+  </div>
+
+  <div class="card">
+    <h2>② 「保護されていない通信」の警告を消す(パソコン)</h2>
+    <div class="sub">新しいアドレスを開いたときに警告が出る場合、証明書を一度インストールすると、出なくなります(任意)。</div>
+    <p><a class="btn" href="/downloads/pm-pc2.crt">証明書をダウンロード</a></p>
+    <ol>
+      <li>ダウンロードした「pm-pc2.crt」をダブルクリックします。</li>
+      <li>「証明書のインストール」を押し、「現在のユーザー」を選んで「次へ」を押します。</li>
+      <li>「証明書をすべて次のストアに配置する」を選び、「参照」から<b>「信頼されたルート証明機関」</b>を選びます。</li>
+      <li>「次へ」→「完了」を押し、確認の画面で「はい」を押します。</li>
+      <li>ブラウザ(Chrome・Edge)をすべて閉じて、開き直します。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>③ スマホアプリ(Android)を入れ直す</h2>
+    <div class="sub">これまでのアプリ(「オーシャン」)は、古いアドレスに接続するため、<b>新しいアプリ「WANBASE」に入れ替えが必要</b>です。</div>
+    <p><a class="btn" href="/downloads/app-debug.apk">アプリ(APK)をダウンロード</a></p>
+    <ol>
+      <li><b>これまでのアプリ「オーシャン」をアンインストール</b>します(長押し → アンインストール)。新旧で署名が違うため、上書きできません。</li>
+      <li>スマホの<b>Chrome</b>でこのページを開き、「アプリ(APK)をダウンロード」を押します。(アプリの中のこの画面では、ダウンロードできない場合があります)</li>
+      <li>ダウンロード後、通知またはファイル管理から「app-debug.apk」を開きます。</li>
+      <li>初回のみ「この提供元を許可」をオンにして、インストールします。</li>
+      <li>ホーム画面の「WANBASE」を起動し、ユーザー名とパスワードでログインします。通知の許可が出たら「許可」を押します。</li>
+    </ol>
+    <div class="sub">アプリには証明書が組み込み済みのため、スマホに証明書を入れる必要はありません。</div>
+  </div>
+
+  <div class="card sub">ご不明な点は、システム担当までご連絡ください。</div>
+</div>
+</body>
+</html>

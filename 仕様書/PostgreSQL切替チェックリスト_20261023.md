@@ -42,6 +42,7 @@
 | 03:00 | 切替後の確認(§3)。API・画面 | BOSS+PC | §3の合格基準 |
 | 03:30 | **go/no-go 判断**(BOSS)。不合格は §4 の戻し | BOSS | — |
 | 03:45 | 合格: 利用者へ案内(URLは従来と同じ `https://10.0.1.139:8501`、ログイン)。**PG版スケジューラを起動**(BOSSの指示で): `PM_PG_DB_NAME=pm_pg_prod_20261023 docker compose -f docker-compose.pc2-pg.yml --env-file .env.pg_rehearsal --profile scheduler up -d --build pm-scheduler`。起動後、最初の実行を見守る(`docker logs -f pm_scheduler_pg_pc2`) | BOSS+PC | スケジューラがエラーなしで最初のジョブを実行。メール送信がある場合は、宛先と件数をBOSSが確認 |
+| 03:50 | **旧本番の画面を案内ページに差し替える**(BOSS、旧PC)。手順: `C:\PST\pm\notice\手順書.md`。事前に、新アプリ(WANBASE)のAPKと証明書(`notice/配置ファイル/`)を旧PCの `pm-ui/public/downloads/` に置いておく。差し替え後、別PCで `https://10.0.1.232:8501/` に案内ページが出て、ログインできないこと、証明書・APKをダウンロードできることを確認 | BOSS | 案内ページが出る。ログイン不可。ダウンロード可。戻す手順(手順書)を確認済み |
 | 検証後 | 切替の検証が済んだら、BOSS承認のうえ、PG版の3つのコンテナ(バックエンド・画面側・スケジューラ)の `restart` を `unless-stopped` に変更し、PC再起動後に自動で戻ることを確認する | PC | 再起動後に3つが起動 |
 
 ## 3. 切替後の確認(合否が機械的に判定できるもの)
