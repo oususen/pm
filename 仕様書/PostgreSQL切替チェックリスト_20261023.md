@@ -18,10 +18,10 @@
 
 | # | 項目 | 担当 | 確認方法 | 状態 |
 |---|---|---|---|---|
-| A1 | pm_pg の未push分をpushする(`1691d7f9` 品番重複判定。`c448900f` WANBASEは別件で、同じpushに入る) | BOSS | `git log origin/main..HEAD` が空 | 未 |
-| A2 | pm の未push分をpushする(試験計画の記録、チェックリスト) | BOSS | 同上 | 未 |
+| A1 | (任意) pm_pg の未push分をpushする。新PCはこのPCのファイルから直接コンテナを作るため、切替には不要。バックアップ・他PCへの共有が目的 | BOSS | `git log origin/main..HEAD` が空 | 任意 |
+| A2 | (任意) pm の未push分をpushする(同上) | BOSS | 同上 | 任意 |
 | A3 | 旧本番で、全角「Ｇ」で終わる品番2件(`4342692Ｇ`、`YD00000881Ｇ`)を半角「G」に直す | BOSS | 旧本番DBで `SELECT product_code FROM m_product WHERE product_code REGEXP '[^ -~]'`(非ASCIIの品番が0件) | 未 |
-| A4 | 新PCのPG版コンテナを最新コードで作り直せる状態にする(新PCで `git pull`、PCセッション) | PC | `git log -1` が `1691d7f9` 以降 | 未 |
+| A4 | 新PCのコードが最新(`1691d7f9` 以降、`b0f160dc`)であること。pullは不要(このPCで直接コミット済み) | PC | `git log -1` | 確認のみ |
 | A5 | 新PCのディスク空き(ダンプ約2.8GB + 使い捨てMySQL + 新PG DB 約2.2GB) | PC | `df -h`(WSL内)と `docker system df` | 未 |
 | A6 | WSLとDockerが起動していること(再起動したらスケジュールタスク `PM-WSL-Start` で戻る) | PC | `docker ps`、`pm-pg-q-test` `pm-mysql-q-test` が動く | 未 |
 | A7 | 切替スクリプトで使う3つのパスワードファイルがある(`~/pgq/pg.pw`、`mig.pw`、`tmysql.pw`) | PC | `ls ~/pgq/*.pw`(中身は表示しない) | 未 |
