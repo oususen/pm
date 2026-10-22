@@ -187,5 +187,12 @@
 - 結果: 全18手順の応答が両版で**完全一致**(IDと日時を除く)。件数の増減も同じ(`t_kubota_sakai_due_adjustment`+1、`t_kubota_sakai_due_shared_note`+1、`t_shipping_trip`+1、`production_plan_change_log`+1、`notifications`+2・`notifications_target_users`+12)。納期調整387行・共通連絡メモ30行は列ごとに**不一致0**。
 - 限界: 強制認証のため権限判定は未確認。メール送信・通知メール、便のPDF(`pickup-detail-pdf`)、便連絡(`trip-notice`)、進度調整(`delivery-progress-adjust`)は未実施。`t_shipping_trip_allocation_split`などの便割付の保存先テーブルの中身は、応答の一致で代替(列ごとの比較は未実施)。evaluatorの独立検証は未実施。
 
+### 8-13. スケジューラ試験と受注展開の並びの再修正(2026-10-23、BOSS承認)
+- **スケジューラ試験**(試験専用環境、外部通信遮断): `run_scheduler` が登録する有効な8ジョブ(発注メール07:00、納品リスト送信19:00×2、クボタ堺納期調整同期07:45、在庫再計算08:01、手直しアラート09:00、受注展開18:08、計画→実績コピー19:50)を、MySQL版・PG版で1回ずつ実行。**全ジョブ例外なしで完走**。ジョブ登録は両版で一致。在庫再計算後の`line_backlog`(537,892行)・クボタ堺納期調整(815行)は列ごとに不一致0。在庫再計算の所要時間は MySQL版 561秒、PG版 1,279秒(PGは移行直後で統計情報がないため遅いと見られる。`ANALYZE`の追加は未承認・未実施)。発注メール・納品リストは「納入日ではありません」でスキップされ、送信は発生せず。
+- **差を発見**: 受注展開ジョブで、製品`9761676`の26行が、MySQL版は工程1598、PG版は1615を選ぶ(同じルーティング69、step_no=2000、parallel_group=241110と2414で同順位)。再現確認済み。原因: MySQLは索引(routing, step_no, parallel_group)の順に返すが、先の修正(`step_no, id`)は並列グループの順と一致しない場合があった。
+- **修正**: `order_expansion.py:142-144` の並びを `.order_by('step_no', 'parallel_group', 'id')` に(1語追加)。
+- **検証**: 試験環境で、今日(2026-10-22)以降の需要98,261行を全削除して`run_order_expansion()`で全再展開。MySQL版・PG版とも91,418行、キー・`routing_step_id`・数量・リードタイムの全9列が**不一致0**(行順・sha256も同一)。evaluator判定=**条件付き(コードは合格)**: `parallel_group`はNULL不可(7,705行中NULL 0)、差分は1行のみ、禁止事項(モデル・マイグレーション・通常計算ファイル)に変更なし。未確認: 修正前のPG版との差分行数、他サービスで`step_no, id`のみの並びが残る箇所(`process_realtime_backlog_service.py:493`、`purchase/views.py:682`、`masters/services/bom_service.py`ほか。`stocktake_initializer.py`は変更禁止のため対象外)の業務影響、テストの実行結果。
+- 反映状況: 試験環境のコンテナのみ。コミット・本番反映は未実施(2026-10-23 時点)。
+
 ### 8-6. 未実施(次の作業)
 W1〜W9は一巡した。残りは、強制認証で確認できない権限判定、ファイル系(写真・PDF)、メール送信、evaluatorの独立検証、実画面での確認。
