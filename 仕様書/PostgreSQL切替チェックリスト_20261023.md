@@ -100,3 +100,9 @@
 | 時刻 | 項目 | 結果 | 備考 |
 |---|---|---|---|
 | | | | |
+| 03:05頃 | 旧本番のスケジューラ停止(BOSS)、最終ダンプ取得 `pm_db_backup_20261023_030448.sql`(2.84GB、03:07完了、全角Ｇの品番2件は修正済み) | 完了 | |
+| 03:17〜03:25 | 切替スクリプト実行(新DB `pm_pg_prod_20261023`) | **PASS(483秒)**。286表・10,350,085行 全表一致、ENUM型0・json型0・timestamptz 0、django_migrations 587、ANALYZE 3秒 | 事前の通し試験(`pm_pg_rh5`)もPASS(453秒) |
+| 03:26 | 新DBの検証(アプリ接続前) | `line_backlog` 13項目の合計・件数(538,458行)がMySQLと一致。`t_line_demand`・`line_plan`・`m_product`・`t_order_line` 等の件数一致。`sequence_no=0`の`plan_qty≠0` 0件。シーケンス276本の遅れ0 | |
+| 03:28 | PG版アプリを新DBへ接続(バックエンド・画面側を最新コードで作り直し、`.env.pg_rehearsal`のDB名を恒久的に新DBへ) | 完了。showmigrations 未適用0、migrate未実行 | この新DBは今後ずっと使う本番DB(BOSS) |
+| 03:45〜03:48 | BOSSがブレーキ実績入力を試行 → 新DBに試験データ(`brake_line_record` 28696・28697、`line_backlog` 670051 の実績0→3)が入った → BOSSが画面の「実績変更」から削除 | 削除をDBで確認(記録2行消滅、実績0に戻る、他の行の更新なし)。履歴 `t_process_work_session_change_history` ID 73(DELETE)が1件残る(画面の標準動作) | Luck Jingle画像ファイルの保存先は未確認 |
+| 03:51 | **PG版スケジューラ起動**(BOSS「go」) | 8ジョブ登録、接続先DB=`pm_pg_prod_20261023`。今朝07:00に発注メール(取引先000387)が送信される予定 | 旧本番のスケジューラ停止はBOSSが確認済み |
