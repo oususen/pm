@@ -144,19 +144,38 @@ docker restart pm_frontend_pg_pc2
 4. できたAPK(`android\app\build\outputs\apk\debug\app-debug.apk`)を `pm-ui/public/downloads/` に置く
 5. **新旧で署名が違うと、上書きインストールできない**(利用者は、旧アプリをアンインストールしてから入れる)
 
-## 6. バックアップと復元
+## 6. バックアップと復元(本番)
 
-- **バックアップ(設定予定)**: 毎日07:45、Windowsのタスクスケジューラ → WSLのスクリプト → `pg_dump -Fc`、保存先 `D:\database_backup_pg\`、14日分(BOSS決定待ちの項目あり)
-- **注意(2026-10-23 確認)**: WSLから D: ドライブが**見えていない**(`/mnt/d` が無い。D: は外付けHDD `HD-NRLD-A`、3.7TB)。D: に書くには、次のどちらかが必要(未設定):
-  1. WSLで D: をマウントする: `sudo mount -t drvfs D: /mnt/d`(再起動のたびに必要。常用するなら `/etc/fstab` に `D: /mnt/d drvfs defaults 0 0` を追加)
-  2. `pg_dump` は C: 側(`/mnt/c/PST/backup/`)に保存し、Windowsのタスクで D: へコピー(`robocopy`)する(**こちらを推奨**。D: が外れていても、C: にダンプが残る)
-  - D: が接続されていないときの失敗に気付けるよう、タスクの結果(最終実行日時・終了コード)を、定期的に確認する
-- **手動で取る**(更新の直前):
-  ```
-  docker exec pm-pg-q-test pg_dump -U pm_pg_admin -Fc pm_pg_prod_20261023 > /mnt/d/database_backup_pg/pm_pg_manual_$(date +%Y%m%d_%H%M%S).dump
-  ls -la /mnt/d/database_backup_pg/ | tail -3
-  ```
-- **復元**(別名のDBに戻して、中身を確認してから使う): `docker exec -i pm-pg-q-test createdb -U pm_pg_admin pm_pg_restore_test` のあと `docker exec -i pm-pg-q-test pg_restore -U pm_pg_admin -d pm_pg_restore_test < <ダンプ>`。本番DBへの上書き復元は、BOSSの承認と、入力の停止が必要
+### 6-1. バックアップ(旧本番のダンプと同じ形)
+
+- **形式**: 普通のSQLファイル `pm_pg_backup_日付_時刻.sql`(旧本番の `pm_db_backup_*.sql` と同じ置き場 `D:\database_backup`。ファイル名の `pm_pg_` で区別)。約2.2GB、取得は約5分
+- **スクリプト**: `C:\PST\pm_pg\scriptsackup\pg_backup.ps1`。WSL内のDockerで `pg_dump` を動かし、出力をWindowsのcmdが**直接 D: へ書く**(WSLにD:が無くても動く。C:に一時ファイルを置かない)。途中のファイルは `.part`。**pg_dumpの終了コード・サイズ・末尾の完了行を確認できたときだけ** `.sql` に改名する。30日より古い `pm_pg_backup_*.sql` を削除する(MySQLのダンプには触れない)。記録: `D:\database_backup\pm_pg_backup.log`
+- **手動で取る**(更新の直前など): `powershell -ExecutionPolicy Bypass -File C:\PST\pm_pg\scriptsackup\pg_backup.ps1`
+- **毎日の実行**: Windowsのタスクスケジューラに登録する(毎日07:45、BOSS決定): `powershell -ExecutionPolicy Bypass -File C:\PST\pm_pg\scriptsackupegister_pg_backup_task.ps1`。登録後の確認: `Get-ScheduledTaskInfo -TaskName PM-PG-Backup`(`LastTaskResult` が 0)と、翌朝の `D:\database_backup` のファイル・ログ
+  - 実行ユーザーは、既存の `PM-WSL-Start` と同じ(ログオン中のユーザー)。**ログオフ中は動かない**
+  - D: の外付けHDDが外れていると、ログに「保存先がありません」と出て失敗する。ログ・タスクの結果を、ときどき見る
+- **復旧点(どこまで戻るか)**: 最後のバックアップの時点。毎日1回なので、最大で約1日分の入力が失われる。重要な更新の前は、手動で取る
+
+### 6-2. 本番の復旧(ダンプから戻す)
+
+**試験済み**(2026-10-23、別名のDBに復元して、本番DBと全表の件数・集計・全行ハッシュ・構造が一致。復元約70秒)。**本番DBを上書きしない**(新しいDB名で復元し、合格したら、接続先を切り替える。元のDBは、調査用に残す)。
+
+1. 入力停止の通知。バックエンドとスケジューラを止める: `docker stop pm_scheduler_pg_pc2 pm_backend_pg_pc2`
+2. 復元先DBを、**新しい名前**で作る(例: `pm_pg_prod_20261101`): `docker exec pm-pg-q-test psql -U pm_pg_admin -d postgres -c "CREATE DATABASE pm_pg_prod_20261101;"`
+3. ダンプを流し込む(Windowsのコマンドプロンプトで。D:から直接。約70秒): 
+   `wsl -d Ubuntu -u daiso -- docker exec -i pm-pg-q-test psql -U pm_pg_admin -d pm_pg_prod_20261101 -v ON_ERROR_STOP=1 -q < D:\database_backup\pm_pg_backup_日付_時刻.sql`
+   (エラーなしで戻ること。途中で止まったら、新DBを `DROP DATABASE` して、ダンプを選び直す)
+4. 統計情報: `docker exec pm-pg-q-test psql -U pm_pg_admin -d pm_pg_prod_20261101 -c "ANALYZE;"`
+5. 検証(合格するまで、切り替えない): 全表の件数が、ダンプ元の記録と一致する(286表)。`line_backlog` などの主要な集計、`SELECT count(*) FROM django_migrations`(587以上)
+6. 接続先を切り替える: `/mnt/c/PST/pm_pg/.env.pg_rehearsal` の `PM_PG_DB_NAME=` の行を、新しいDB名に書き換える(他の行は触らない・表示しない)。`$DC --profile scheduler up -d --no-build pm-backend pm-scheduler` のあと、`docker restart pm_frontend_pg_pc2`
+7. §2-5の確認(`showmigrations` 未適用0、画面、主要API)。記録を残す
+8. 元のDB(壊れた側)は、原因調査が済むまで消さない
+
+**注意**: バックアップは `--no-owner --no-privileges` のため、所有者・権限の情報を含まない。いまは、DBユーザー `pm_pg_admin` だけを使う構成なので、問題ない(ユーザーを増やす場合は、権限の付与を別途行う)
+
+### 6-3. 開発PCで使う
+
+同じダンプを、開発PCで使える。`開発PC_PG版セットアップ手順.md`(DBだけDocker、バックエンド・フロント・スケジューラはDockerなし)。復元スクリプトは `scriptsackupestore_pg_dev.ps1`(開発用DBでは、本番のメール設定を自動で無効化する)
 
 ## 7. 日常の確認コマンド
 
@@ -185,5 +204,6 @@ docker exec pm-pg-q-test psql -U pm_pg_admin -d pm_pg_prod_20261023 -c "select c
 
 - `PostgreSQL切替チェックリスト_20261023.md`(切替当夜の記録)
 - `PG版書込系試験計画.md`(試験の記録、見つかった差と修正)
+- `開発PC_PG版セットアップ手順.md`(開発PC: DBだけDocker、他は直接)
 - `notice/手順書.md`(旧本番の案内ページ)
 - `Androidアプリ配布仕様.md`(pm_pg)
