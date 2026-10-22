@@ -180,5 +180,12 @@
 - 結果: 29手順の応答(状態コード・本文、IDと日時を除く)が両版で**完全一致**。件数の増減も同じ(`quality_equipment_inspection_record`+2、`..._result`+30、`..._confirmation`+2、`quality_integrated_checksheet_batch`+1、`..._unit`+2、`quality_integrated_cs_check`+116)。中身は`completed_at`・`confirmed_at`・`leader_confirmed_at`・`supervisor_confirmed_at`(実行時刻)のみの差。
 - 限界: 強制認証のため、リーダ・班長の権限判定(班長確認の403など)は未確認。NG通知(リーダへの通知)は対象者が見つからず通知が増えなかったため、通知内容は未確認。写真・添付ファイルの保存、PDF出力、手直しアラート、`release_hold`・`save_sketch`は未実施。evaluatorの独立検証は未実施。
 
+### 8-12. W5(クボタ堺の納期調整・便割付) — 結果: **一致**(2026-10-22)
+- 条件: 試験専用環境で、MySQL版・PG版に同じ手順(18手順)を実行。強制認証(admin)。取込は入力ファイル不要(受注の明細から納期調整を作る処理と、納期調整の保存結果を読み取る処理)。メール送信(`send_email`)は呼んでいない。
+- 納期調整: 取込(2026-10-23から30日、受注明細281行、作成・更新0)→グリッド→保存(計画ロック日2026-10-28より後の3行、数量+1)→ロック日以前の行を変更理由なしで保存(スキップ=更新0)→変更理由ありで保存(1件更新、変更ログ1件)→rows不正(400)→連絡メモ保存→先行計画紐付け(対象なし)→グリッド(保存後)。
+- 便割付(2026-10-29): グリッド→取込(読み取り)→自動振分(11件)→自動振分の結果を保存(11行、割付13件)→一部の明細だけ送信(400、「全明細が送信されていない」)→グリッド(保存後)→積載詳細。
+- 結果: 全18手順の応答が両版で**完全一致**(IDと日時を除く)。件数の増減も同じ(`t_kubota_sakai_due_adjustment`+1、`t_kubota_sakai_due_shared_note`+1、`t_shipping_trip`+1、`production_plan_change_log`+1、`notifications`+2・`notifications_target_users`+12)。納期調整387行・共通連絡メモ30行は列ごとに**不一致0**。
+- 限界: 強制認証のため権限判定は未確認。メール送信・通知メール、便のPDF(`pickup-detail-pdf`)、便連絡(`trip-notice`)、進度調整(`delivery-progress-adjust`)は未実施。`t_shipping_trip_allocation_split`などの便割付の保存先テーブルの中身は、応答の一致で代替(列ごとの比較は未実施)。evaluatorの独立検証は未実施。
+
 ### 8-6. 未実施(次の作業)
-W5(クボタ堺の納期調整・便割付)。取込用の入力ファイルが必要。
+W1〜W9は一巡した。残りは、強制認証で確認できない権限判定、ファイル系(写真・PDF)、メール送信、evaluatorの独立検証、実画面での確認。
