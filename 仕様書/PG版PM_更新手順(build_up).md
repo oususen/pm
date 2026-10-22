@@ -150,8 +150,9 @@ docker restart pm_frontend_pg_pc2
 
 - **形式**: 普通のSQLファイル `pm_pg_backup_日付_時刻.sql`(旧本番の `pm_db_backup_*.sql` と同じ置き場 `D:\database_backup`。ファイル名の `pm_pg_` で区別)。約2.2GB、取得は約5分
 - **スクリプト**: `C:\PST\pm_pg\scriptsackup\pg_backup.ps1`。WSL内のDockerで `pg_dump` を動かし、出力をWindowsのcmdが**直接 D: へ書く**(WSLにD:が無くても動く。C:に一時ファイルを置かない)。途中のファイルは `.part`。**pg_dumpの終了コード・サイズ・末尾の完了行を確認できたときだけ** `.sql` に改名する。30日より古い `pm_pg_backup_*.sql` を削除する(MySQLのダンプには触れない)。記録: `D:\database_backup\pm_pg_backup.log`
-- **手動で取る**(更新の直前など): `powershell -ExecutionPolicy Bypass -File C:\PST\pm_pg\scriptsackup\pg_backup.ps1`
-- **毎日の実行**: Windowsのタスクスケジューラに登録する(毎日07:45、BOSS決定): `powershell -ExecutionPolicy Bypass -File C:\PST\pm_pg\scriptsackupegister_pg_backup_task.ps1`。登録後の確認: `Get-ScheduledTaskInfo -TaskName PM-PG-Backup`(`LastTaskResult` が 0)と、翌朝の `D:\database_backup` のファイル・ログ
+- **手動で取る**(更新の直前など): **`C:\PST\pm_pg\scriptsackup\PGダンプ取得.bat` をダブルクリック**(約5〜7分。終わるまで窓を閉じない。成功・失敗が窓に出る)。中身は `powershell -ExecutionPolicy Bypass -File C:\PST\pm_pg\scriptsackup\pg_backup.ps1` と同じ
+- **毎日の実行**: Windowsのタスクスケジューラに登録する(毎日07:45、BOSS決定): `powershell -ExecutionPolicy Bypass -File C:\PST\pm_pg\scriptsackup
+egister_pg_backup_task.ps1`。登録後の確認: `Get-ScheduledTaskInfo -TaskName PM-PG-Backup`(`LastTaskResult` が 0)と、翌朝の `D:\database_backup` のファイル・ログ
   - 実行ユーザーは、既存の `PM-WSL-Start` と同じ(ログオン中のユーザー)。**ログオフ中は動かない**
   - D: の外付けHDDが外れていると、ログに「保存先がありません」と出て失敗する。ログ・タスクの結果を、ときどき見る
 - **復旧点(どこまで戻るか)**: 最後のバックアップの時点。毎日1回なので、最大で約1日分の入力が失われる。重要な更新の前は、手動で取る
@@ -175,7 +176,8 @@ docker restart pm_frontend_pg_pc2
 
 ### 6-3. 開発PCで使う
 
-同じダンプを、開発PCで使える。`開発PC_PG版セットアップ手順.md`(DBだけDocker、バックエンド・フロント・スケジューラはDockerなし)。復元スクリプトは `scriptsackupestore_pg_dev.ps1`(開発用DBでは、本番のメール設定を自動で無効化する)
+同じダンプを、開発PCで使える。`開発PC_PG版セットアップ手順.md`(DBだけDocker、バックエンド・フロント・スケジューラはDockerなし)。復元スクリプトは `scriptsackup
+estore_pg_dev.ps1`(開発用DBでは、本番のメール設定を自動で無効化する)
 
 ## 7. 日常の確認コマンド
 
